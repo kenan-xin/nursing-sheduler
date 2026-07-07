@@ -95,10 +95,10 @@ expansion; `expression` grammar; `pattern` matching; export rendering behavior.
 | `apiVersion` | `str` | **Yes** | — | Frontend emits the literal `alpha` (`web-frontend/src/utils/keywords.ts:35 API_VERSION = 'alpha'`). `models.py:306` |
 | `description` | `str \| None` | No | `None` | Frontend always emits (empty string `''` when unset). `models.py:307` |
 | `dates` | `DateContainer` | **Yes** | — | §3.2. `models.py:308` |
-| `country` | `str \| None` | No | `None` | Ordered *after* `dates` in the model, but the frontend does **not** emit it (not in `SchedulingState`, `schedulingState.ts:24-32`). `models.py:309` |
+| `country` | `str \| None` | No | `None` | **Runtime restriction**: at schedule time `ctx.country` must be `None` or `"SG"`, else `ValueError(f"Country {ctx.country} is not supported yet")` (`scheduler.py:108-110`). The frontend does **not** emit `country` (not in `SchedulingState`, `schedulingState.ts:24-32`) — omitted YAML or `country: null` is the only safe form. A rebuild that lets a user select a country must restrict the selector to `SG` (or omit entirely); any other value will pass Pydantic loading but cause the optimize job to fail with `FAILED` and the country error. `models.py:309` |
 | `people` | `PeopleContainer` | **Yes** | — | §3.2. `models.py:310` |
 | `shiftTypes` | `ShiftTypesContainer` | **Yes** | — | §3.2. `models.py:311` |
-| `preferences` | `list[<union of 6 preference models>]` | **Yes** | — | §3.3; must include `at most one shift per day` (§5). `models.py:312-319` |
+| `preferences` | `list[<union of 7 preference models>]` | **Yes** | — | §3.3; must include `at most one shift per day` (§5). `models.py:340-348` |
 | `export` | `ExportConfig` | No | `ExportConfig()` (empty) | §3.5. `models.py:320` |
 
 ### 3.2 Containers, items, and groups
@@ -171,7 +171,7 @@ expansion; `expression` grammar; `pattern` matching; export rendering behavior.
 | `description` | `str \| None` | No | `None` | |
 | `members` | `list[int \| str]` | **Yes** | — | shift-type IDs or other group IDs |
 
-### 3.3 `preferences` — the 6 preference field-schemas
+### 3.3 `preferences` — the 7 preference field-schemas
 
 All preference models set `extra="forbid"`. The `type` field is a
 constrained/`Literal` string that both defaults to and is pattern-locked to the
@@ -262,7 +262,7 @@ canonical value (so the discriminated union resolves). Canonical `type` strings
 |-----|------|----------|---------|-------|
 | `type` | pattern `^shift type covering$` | fixed | `"shift type covering"` | |
 | `description` | `str \| None` | No | `None` | |
-| `date` | `(int \| str \| datetime.date) \| list[int \| str \| datetime.date] \| None` | No | `None` | `None` and empty list both mean all dates |
+| `date` | `(int \| str \| datetime.date) \| list[int \| str \| datetime.date] \| None` | No | `None` | **Current backend treats missing/`None`/`[]` as no dates / no-op** (the covering handler iterates an empty list and emits zero covering constraints; CON-SEM-07). To target "all dates" the frontend must emit `date: [ALL]` or an explicit list of date ids. |
 | `preceptors` | `list[int \| str \| list[int \| str]]` | **Yes** | — | list, supports nesting; see §6 conformance note |
 | `preceptees` | `list[int \| str \| list[int \| str]]` | **Yes** | — | list, supports nesting; see §6 conformance note |
 | `shiftTypes` | `list[str \| list[str]]` | **Yes** | — | list, supports nesting; see §6 conformance note |
@@ -463,8 +463,8 @@ appVersion: <build>            # appended LAST by emitter (yamlGenerator.ts:110-
   `members` (`list[int \| str]`, REQUIRED) (`models.py:72-76`).
 
 - **CON-YAML-14** — `preferences` REQUIRED, a list whose items each match one of
-  the six preference models by discriminating `type`
-  (`models.py:312-319`). At least one `at most one shift per day` MUST be present
+  the seven preference models by discriminating `type`
+  (`models.py:340-348`). At least one `at most one shift per day` MUST be present
   (§5).
 
 - **CON-YAML-15** — Each preference `type` is pattern/`Literal`-locked to its
@@ -542,7 +542,7 @@ produce data that never triggers these):
 | V17 | Date group id format | `id` matches `^\d{1,2}$`, `^\d{2}-\d{2}$`, or `^\d{4}-\d{2}-\d{2}$` | `Date group ID {id!r} must not be in the format of YYYY-MM-DD, MM-DD, or D` (`:394-398`) |
 | V18 | Float weight | any `weight` float other than `±inf` | `Float weights can only be positive infinity or negative infinity.` (`models.py:41`, via `validate_weight`) |
 | V19 | Unknown key | any key not declared on a model | Pydantic `extra="forbid"` error (all models) |
-| V20 | `shift type covering` empty selectors | `preceptors` / `preceptees` / `shiftTypes` expand to no resolvable person/date/shift-type indices | `Preceptors list must contain at least one valid person or group.` / `Preceptees list must contain at least one valid person or group.` / `Shift types list must contain at least one valid shift type.` (`preference_types.py:670-675`). Cross-reference C3 §CON-SEM-07. |
+| V20 | `shift type covering` empty `preceptors` / `preceptees` / `shiftTypes` after successful parsing (e.g. `[]` or nested arrays that flatten to `[]`) | The three empty-selector errors below. Note: missing/`None`/`[]` covering `date` is **not** an empty-selector error — it produces zero covering constraints (no-op; see C3 CON-SEM-07 and V20-caveat). Unknown IDs (e.g. `preceptors: ['NonExistent']`) raise `Unknown person ID: NonExistent` / `Unknown shift type ID: NonExistent` from `utils.py:95-110` (not V20). | `Preceptors list must contain at least one valid person or group.` / `Preceptees list must contain at least one valid person or group.` / `Shift types list must contain at least one valid shift type.` (`preference_types.py:670-675`). Cross-reference C3 §CON-SEM-07. |
 
 **Reserved-ID reference** (`core/nurse_scheduling/constants.py`):
 

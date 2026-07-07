@@ -138,7 +138,15 @@ Type Coverings Editor).
 - **FR-PR-05 — Keyboard submit/cancel while form open.** While the form is
   visible, a global key handler is active: `Enter` (except during IME
   composition) triggers Save; `Escape` triggers Cancel. Both call
-  `preventDefault`. (requirements:402-419; successions:190-207; counts:269-286; affinities:197-214)
+  `preventDefault`.
+  The **first four** editors (Requirements, Successions, Counts,
+  Affinities) save on `Enter` regardless of whether `Shift`/`Alt`/
+  `Ctrl`/`Meta` is held. The **covering** editor additionally gates on
+  no modifier — `Enter` with `Shift`/`Alt`/`Ctrl`/`Meta` does **not**
+  save (`page.tsx:199`). Both use the `isImeCompositionKeyEvent` guard
+  (`isComposing` or `keyCode === 229`) to skip IME composition.
+  (requirements:402-419; successions:190-207; counts:269-286;
+  affinities:197-214; coverings:192-212; spec 11 FR-CV-22.)
 
 - **FR-PR-06 — Unsaved-edit tab-switch guard.** While the form is visible, a
   tab-switch warning is armed (`useTabSwitchWarning(isFormVisible)`) so the user
@@ -209,12 +217,13 @@ Type Coverings Editor).
 
 - **FR-PR-15 — Weight display on cards.** Card weight is rendered via
   `getWeightWithPositivePrefix`: positive finite weights get a leading `+`,
-  numbers are locale-formatted with thousands separators, `Infinity`/`-Infinity`
-  render as `Infinity`/`-Infinity`, a non-numeric (string) weight renders
-  `Error`, and a `null` weight renders `Error (dev)`.
-  (numberParsing.ts:89-98; requirements:891; successions:653; counts:681; affinities:532)
+  numbers are locale-formatted with thousands separators, `Infinity`
+  renders as `+∞`, `-Infinity` renders as `-∞`, a non-numeric (string)
+  weight renders `Error`, and a `null` weight renders `Error (dev)`.
+  (numberParsing.ts:89-98; requirements:891; successions:653; counts:681;
+  affinities:532; coverings:533)
 
-### FR-PR — Weight input (shared `WeightInput`; used by all four)
+### FR-PR — Weight input (shared `WeightInput`; used by all five)
 
 - **FR-PR-16 — Weight text parsing.** The weight field is a text input parsed by
   `parseWeightValue` on each change: case-insensitive `infinity`/`inf`/`∞` →
@@ -416,17 +425,25 @@ any weight-sign or non-positive constraint.
   form. (coverings:430-455, 160)
 
 - **FR-PR-84 — Dates multi-select (optional, exposed in the UI but not
-  persisted — current product bug).** `Dates (leave empty for all dates)`
-  is a multi-select over date items + groups. Empty = applies to all
-  dates. The schema is `date?: string[]` (the field is **optional**).
-  **The current editor does not include `date` in `buildPrefFromForm`
-  regardless of whether the user picked dates** — the form tracks the
-  selection across toggles and re-uses it for the next edit, but the
-  Save/Update path silently drops the field (coverings:155-162). A
-  rebuilder implementing the documented intent should add
-  `...(formData.date.length > 0 ? { date: formData.date } : {})` to
-  `buildPrefFromForm`. (coverings:312-348; see wave-3 follow-up entry
-  in `decision-logs/02-shift-type-covering-preference/index.md`.)
+  persisted — current product bug, AND the current backend treats
+  empty/missing as no dates anyway).** `Dates (leave empty for all
+  dates)` is a multi-select over date items + groups. The label is
+  misleading: under current strict parity, **empty/missing `date` does
+  NOT mean "all dates"** — it produces **zero covering constraints**
+  (see C3 CON-SEM-07). The schema is `date?: string[]` (the field is
+  **optional**).    **The current editor does not include `date` in
+   `buildPrefFromForm` regardless of whether the user picked dates** —
+   the selection is tracked only while the current form draft remains
+   open; Add/Update drops it, and `resetForm` clears it; a later edit
+   only restores `rule.date` if the existing stored/imported rule
+   already has one
+   (`page.tsx:86-94, 122-129, 180-181`).
+   (coverings:155-162.) **Under strict parity, do not implement the
+   "fix `buildPrefFromForm` to include `date`" path**; the future-fix
+   snippet (`...(formData.date.length > 0 ? { date: formData.date } : {})`)
+   is described as a non-parity follow-up in
+   `decision-logs/02-shift-type-covering-preference/index.md`.
+   (coverings:312-348.)
 
 - **FR-PR-85 — Hard-reified save shape.** The save shape is the only place where
   the editor wraps the user's flat `CheckboxList` selections in a single
@@ -690,10 +707,17 @@ error is also suppressed while coefficient errors exist).
   fails weight validation. `parseInt` fallback means e.g. `10abc` parses to `10`.
   (numberParsing.ts:31-59)
 
-- **EDGE-PR-10 — Coefficient clamp vs validation.** Sub-input typing clamps values
-  `< 1` up to `1` live (`Math.max(1, …)`), but a non-integer or otherwise invalid
-  non-blank value still fails validation with the per-id integer message; blank
-  is always allowed and dropped. (CountShiftTypeCoefficientFields:74-84; countShiftTypeCoefficients.ts:116-124)
+- **EDGE-PR-10 — Coefficient clamp vs validation.** Sub-input typing parses
+  with `Number.parseInt(value, 10)` and clamps `< 1` up to `1` live
+  (`Math.max(1, …)`), so decimal numeric strings such as `1.5`, `2.9`,
+  or `0.5` are silently truncated/rounded to `1`/`2`/`1` before
+  validation. The per-id integer validation message
+  `Coefficient for <shiftTypeId> must be an integer of at least 1`
+  fires only for values that remain invalid **after** the parse/clamp
+  (e.g. raw strings from `NaN` parsing such as `abc`). Blank input
+  is always allowed and dropped.
+  (CountShiftTypeCoefficientFields:74-84;
+  countShiftTypeCoefficients.ts:116-124)
 
 - **EDGE-PR-11 — Group coefficient eligibility is all-or-nothing.** A shift-type
   group appears as a coefficient input only when it is non-empty and *every*
@@ -731,20 +755,30 @@ error is also suppressed while coefficient errors exist).
   does **not** include `date` regardless of the user's selection
   (coverings:155-162). So the editor's date selector currently exists
   in the UI but has no effect on the persisted object — a user picking
-  Dates in the editor loses the selection on Add/Update. This matches
-  the type (`date?: string[]`) and the C3 contract where omitted/null
-  = all dates, but it does **not** match the documented "leave empty
-  for all dates" intent of the field's UI hint. A rebuilder implementing
-  the documented intent should add
-  `...(formData.date.length > 0 ? { date: formData.date } : {})` to
-  `buildPrefFromForm`. See FR-CV-07/12, EDGE-CV-02 in spec 11.
+   Dates in the editor loses the selection on Add/Update. **Under the
+   current C3 backend, omitted/null/empty covering `date` is a
+   no-op** (zero covering constraints), not "all dates" — see spec 11
+   FR-CV-12 and C3 CON-SEM-07. So even if the editor were fixed to
+   persist selected dates, the current backend would still treat an
+   empty selection as no constraints. To target "all dates" the
+   frontend must emit `date: [ALL]` explicitly. **Under strict parity,
+   do not implement the "fix `buildPrefFromForm` to include `date`" path**;
+   the future-fix snippet is described as a non-parity follow-up in
+   `decision-logs/02-shift-type-covering-preference/index.md`. See
+   FR-CV-07/12, EDGE-CV-02 in spec 11.
 
-- **EDGE-PR-18 — Covering cascade drops emptied rules.** Renaming or deleting
-  a referenced person / shift type filters the nested reference trees; if
-  any of `preceptors`, `preceptees`, or `shiftTypes` collapses to empty,
-  the entire rule is dropped. Empty `date` alone is **not** enough to drop
-  a rule. (schedulingReferenceUpdates.ts — see spec 06 for the full
-  cascade rule.)
+- **EDGE-PR-18 — Covering cascade drops emptied rules (delete only;
+  rename never drops).** **Deleting** a referenced person / shift
+  type filters the nested reference trees via `filterReferenceIds`;
+  if any of `preceptors`, `preceptees`, or `shiftTypes` collapses to
+  empty, the entire covering rule is dropped in the second-pass
+  required-field check. **Renaming** a referenced person / shift type
+  recursively rewrites matching IDs via `mapReferenceIdTree` /
+  `renameReferenceIds` and **never** drops covering rules — even
+  when no match is found in a field, the field is left intact. Empty
+  `date` alone is **not** enough to drop a rule. (schedulingReferenceUpdates.ts
+  rename at `:163-193`, delete at `:298-325`, drop at `:352-356`;
+  see spec 06 for the full cascade rule.)
 
 - **EDGE-PR-19 — Covering card `(all)` rendering.** The card helper
   `summarizeIds` flattens a nested tree and joins ids with `, `; an empty
@@ -839,9 +873,11 @@ UI-agnostic; each is observable regardless of presentation.
 - **AC-PR-14 (Coefficients)** A coefficient input appears per eligible shift type
   only; blank inputs are dropped on save and the coefficient array is attached
   only when at least one value remains; a non-blank value below 1 is clamped to 1
-  live but a non-integer value is rejected with `Coefficient for <id> must be an
-  integer of at least 1`; overlapping sources are rejected with the verbatim
-  overlap message.
+  live and decimal numeric strings are truncated to their integer prefix
+  via `Number.parseInt` (so `1.5` → `1`, `2.9` → `2`); values that remain
+  invalid after the parse/clamp (e.g. raw `NaN` strings) are rejected
+  with `Coefficient for <id> must be an integer of at least 1`;
+  overlapping sources are rejected with the verbatim overlap message.
 
 - **AC-PR-15** With an open draft, invoking Duplicate/Delete/Reorder discards the
   draft before applying the operation.

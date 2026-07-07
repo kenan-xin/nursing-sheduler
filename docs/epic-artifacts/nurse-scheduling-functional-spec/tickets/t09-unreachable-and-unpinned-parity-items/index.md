@@ -1,7 +1,7 @@
 ---
 kind: ticket
-title: "Fix unreachable conditions and unpinned parity claims (specs 02, 05, 08, 09, 10)"
-status: 0
+title: "Fix unreachable conditions and unpinned parity claims (specs 02, 05, 08, 09, 10) — partial; R10 + R12 reopened in iter 3"
+status: 1
 ---
 
 # Fix unreachable conditions and unpinned parity claims

@@ -83,8 +83,7 @@ Create an optimization job. (serve.py:454-486)
   - `yaml_content` — optional string form field, "YAML content as a string" (serve.py:459).
   - `prettify` — optional bool form field, "Enable prettier output formatting" (serve.py:460).
   - `timeout` — optional int form field (seconds), "Max execution time in seconds" (serve.py:461).
-  - `solver` — string form field, default `"ortools/cp-sat"`,
-    "Solver selector (e.g., ortools/cp-sat, pulp/cbc, pulp/cuopt)" (serve.py:462).
+  - **No `solver` field.** The current FastAPI signature declares only the four form fields above; there is no `solver` selection on the HTTP surface. The backend always uses OR-Tools CP-SAT (see Contract C4 CON-EXE-01). A rebuilt frontend must not send a `solver` field.
 - **Input rules (`_read_optimization_input`, serve.py:177-198):**
   - `file` XOR `yaml_content`: exactly one required.
     - Neither provided → `400` `"Either 'file' or 'yaml_content' must be provided"` (serve.py:182).
@@ -162,14 +161,12 @@ Cancel a job. (serve.py:514-517)
 - **Behavior (`_request_optimize_job_stop(job_id, finish_now=False)`, jobs.py:338-387):**
   - If `QUEUED`: finished immediately as `CANCELLED` with
     `error = "Optimization cancelled."` (jobs.py:343,369-371); emits terminal `complete` event.
-  - If `RUNNING` and solver supports stop (`ortools/cp-sat` only, jobs.py:114-115):
-    sets `cancel_requested=True`, status → `CANCELLING` (jobs.py:373-374); emits `status` event.
+  - If `RUNNING`: sets `cancel_requested=True`, status → `CANCELLING` (jobs.py:373-374); emits `status` event. The current OR-Tools backend supports cooperative stop (see Contract C4 CON-EXE-03).
 - **Response 200:** job-response object.
 - **Status codes:** `200`; `404` `"Optimization job not found"` (jobs.py:349);
   `409` if already terminal — detail
-  `{ "message": "Optimization job has already finished.", "status": "<status>" }` (jobs.py:350-357);
-  `409` if running and solver unsupported — detail
-  `{ "message": "This solver does not support cancelling or finishing early.", "solver": "<solver>", "status": "<status>" }` (jobs.py:358-366).
+  `{ "message": "Optimization job has already finished.", "status": "<status>" }` (jobs.py:350-357`).
+- **No "unsupported-solver" 409.** The current backend only uses OR-Tools CP-SAT, which supports cooperative stop; a request to cancel a running job always succeeds (or 409s as already-finished, never as solver-unsupported).
 
 ### CON-API-08 — `POST /optimize/{job_id}/finish-now`
 
@@ -182,9 +179,8 @@ Stop early and keep the best solution found so far. (serve.py:520-526)
   `event_data["finishNowRequested"] = True`, and publishes a `status` event (serve.py:523-525).
 - **Response 200:** job-response object.
 - **Status codes:** `200`; `404` `"Optimization job not found"`;
-  `409` already-finished (same detail as CON-API-07);
-  `409` solver-unsupported (same detail as CON-API-07). Note: solver-support gate
-  applies whenever `status != QUEUED` (jobs.py:358).
+  `409` already-finished (same detail as CON-API-07).
+- **No "unsupported-solver" 409** — same rationale as CON-API-07.
 
 ### CON-API-09 — `GET /optimize/{job_id}/xlsx`
 
@@ -236,7 +232,6 @@ Returned by `_optimize_job_response` (jobs.py:459-481) from CON-API-03, -04, -07
   "status": "queued|running|cancelling|optimal|feasible|infeasible|cancelled|failed",
   "queuePosition": 1,
   "inputName": "<original or synthesized filename>",
-  "solver": "ortools/cp-sat",
   "prettify": true,
   "timeout": 300,
   "score": 0,
@@ -255,6 +250,8 @@ Returned by `_optimize_job_response` (jobs.py:459-481) from CON-API-03, -04, -07
 }
 ```
 
+> **No `solver` field.** The current `OptimizeJob` dataclass (`jobs.py:53-68`) and `_optimize_job_response()` (`:442-460`) do not include a `solver` key. The job always uses OR-Tools CP-SAT (Contract C4 CON-EXE-01). A rebuilt frontend must not read `response.solver`.
+
 Field notes (jobs.py:459-481):
 
 - `jobId` — `job.id`.
@@ -263,7 +260,6 @@ Field notes (jobs.py:459-481):
   when not queued/terminal (`_refresh_queue_positions`, jobs.py:144-159; cleared
   to `None` when finished, jobs.py:316).
 - `inputName` — `job.input_name`.
-- `solver` — `job.solver`.
 - `prettify` — nullable bool (as submitted; `null` if omitted).
 - `timeout` — normalized integer seconds.
 - `score` — nullable integer; `null` until solver reports a best score.
@@ -348,9 +344,15 @@ Terminal set (`_is_terminal_job_status`, jobs.py:104-111): `OPTIMAL`, `FEASIBLE`
 
 ### Cancel vs. finish-now
 
-- **Solver-stop support:** only `solver == "ortools/cp-sat"` supports mid-run
-  stop (`_solver_supports_job_stop`, jobs.py:114-115). For other solvers, cancel/finish-now
-  on a non-`QUEUED` job is rejected `409` (jobs.py:358-366). Queued jobs can always be cancelled.
+- **Cancel / finish-now are always supported for the current backend.**
+  The only backend is OR-Tools CP-SAT (Contract C4 CON-EXE-01), so the
+  historical `_solver_supports_job_stop` branch in `jobs.py:114-115` and
+  the unsupported-solver `409` in `jobs.py:358-366` are dead code. Cancel
+  and finish-now succeed for non-terminal non-`QUEUED` jobs (subject to
+  `should_stop` propagation, see C4 CON-EXE-03). The only `409`s
+  remaining for cancel/finish-now are "already terminal" (`jobs.py:350-357`)
+  and the live-job 409 retained at `serve.py:516-518`. Queued jobs can
+  always be cancelled.
 - **cancel** on running solver → `CANCELLING`; the running solver polls
   `should_stop()` → `_is_job_stop_requested` (`cancel_requested or finish_now_requested`, jobs.py:333-335, serve.py:292-295) and finalizes as `CANCELLED`.
 - **finish-now** sets `finish_now_requested` and lets the solver return its best
@@ -417,8 +419,10 @@ Startup guard: `OPTIMIZE_CLIENT_LIVENESS_CHECK_SECONDS` must not exceed
    only cross-origin-readable headers).
 4. **Submission contract:** send `multipart/form-data`; provide exactly one of
    `file` / `yaml_content`; keep payload under 2 MiB; `timeout` in `[1, 3600]`;
-   choose a `solver` (default `ortools/cp-sat` if omitted). Only `ortools/cp-sat`
-   supports cancel/finish-now once running.
+   **do not send a `solver` field** (the backend always uses OR-Tools CP-SAT
+   regardless of any value the frontend might send; see C4 CON-EXE-01).
+   Cancel / finish-now are supported for the current backend
+   (no "unsupported-solver" `409` branch).
 5. **Async flow:** `POST /optimize` returns `202` + job object; then either open the
    SSE stream (CON-API-05) or poll (CON-API-04). Treat `complete`/`error` SSE events
    as terminal and close the stream. XLSX is available (CON-API-09) once

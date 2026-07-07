@@ -1,7 +1,7 @@
 ---
 kind: ticket
 title: "Document optimize-payload vs save/load export-block asymmetry"
-status: 0
+status: 2
 ---
 
 # Document optimize-payload vs save/load export-block asymmetry

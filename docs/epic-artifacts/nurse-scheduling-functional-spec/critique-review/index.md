@@ -6,11 +6,35 @@ title: "Critique — Functional Spec Set (pre-design pressure test)"
 # Critique — Functional Spec Set (pre-design pressure test)
 
 Adversarial cold-reader critique of the full [Functional Requirements story](../index.md)
-(10 domain specs, 5 contracts, behavior catalog), run by four fresh agents that
-verified every claim against the actual source. Findings are ordered by how
-expensive they are if wrong, mapped to the three downstream purposes:
-**(a)** design a new UI without a capability gap, **(b)** rebuild to parity,
-**(c)** seed a parity test suite.
+(11 domain specs as of the wave-3/wave-4 review, 5 contracts, behavior catalog),
+run by fresh agents that verified every claim against the actual source.
+Findings are ordered by how expensive they are if wrong, mapped to the three
+downstream purposes: **(a)** design a new UI without a capability gap,
+**(b)** rebuild to parity, **(c)** seed a parity test suite.
+
+> **Supersession note:** this critique predates the wave-3 (covering
+> preference, 13-tab navigation, sort-order, covering cascade) and
+> wave-4 (comprehensive spec review) updates. The post-wave-3 state
+> of the spec set has addressed several CRITICAL items from this
+> critique (the export-asymmetry is now FR-OE-43a, the
+> `at most one shift per day` UI disposition is documented in
+> spec 01 FR-DM-19, etc.). The wave-3 review surfaced new findings
+> (covering date-save bug, covering weight semantics drift, covering
+> `OFF` UI gap, `Apply` button dead branch, history-order, etc.) that
+> are tracked in
+> `decision-logs/02-shift-type-covering-preference/index.md`. The
+> wave-4 comprehensive review surfaced further findings (PuLP/CBC/cuOpt
+> solver removal, `country` SG-only restriction, covering aggregate
+> semantics, etc.) that have been folded into Contracts C1/C2/C4 and
+> the relevant domain specs. **The F1 "app-shell spec gap" claim
+> from this critique is NOT closed** — spec 11 is the Shift Type
+> Coverings editor (a card-list preference page), not the Home /
+> app-shell. The Home / New Schedule / Continue / custom "Confirm
+> Reset" modal / footer / forced light mode / excluded shell/ops
+> features still have no owning spec artifact; T01 in `tickets/`
+> remains the open follow-up. **Do not use this critique as the
+> live source of truth** — read the current spec set and the
+> decision logs directly.
 
 ## Verdict
 

@@ -260,13 +260,39 @@ does not define them.
   intact (groups not anonymized here). Every reference to a person ID is remapped
   consistently across people/groups members, all preference types
   (requirement `qualifiedPeople`; request/successions/count `person`; affinity
-  `people1`/`people2` reference trees), and export `formatting[].people` /
-  `extraRows[].countPeople`. With `removeDescriptions`, every `description` field
-  is recursively removed from the payload (`anonymizeSchedulingState.ts:43-149`).
+  `people1`/`people2` reference trees; **shift type covering
+  `preceptors` / `preceptees`** — `anonymizeSchedulingState.ts:76-82`),
+  and export `formatting[].people` / `extraRows[].countPeople`. **Note
+  on covering `shiftTypes`**: the current implementation also passes
+  `shiftTypes` through the same people-anonymization map (via
+  `mapReferenceIdTree`), so a shift-type id that collides with an
+  anonymized people/group id would be rewritten. In practice shift-type
+  ids do not collide with people/group ids (the namespaces are
+  separate), so this is normally a no-op. With `removeDescriptions`, every
+  `description` field is recursively removed from the payload
+  (`anonymizeSchedulingState.ts:43-149`).
 - **FR-OE-43 (Multipart body)** — The request body is `FormData` with:
-  `yaml_content` = YAML generated from the (anonymized or raw) state;
+  `yaml_content` = YAML generated from the (anonymized or raw) state
+  **with `export: effectiveExportData` always set** (see FR-OE-43a);
   `prettify` = `String(prettifyArg)` (appended only when not null/undefined);
   `timeout` = `String(timeoutArg)` (`page.tsx:825-833`).
+  The current backend signature declares only these fields and **no
+  `solver` field** (see Contract C2 CON-API-03). The frontend does not
+  send or read a solver selection.
+
+- **FR-OE-43a (Optimize payload always includes `export`).** The optimize
+  payload builder assembles `filteredState` with
+  `export: effectiveExportData` unconditionally
+  (`page.tsx:507-516`), where
+  `effectiveExportData = state.export ?? generateExportLayoutConfig(...)`
+  (`useSchedulingData.ts:975-976`). This is asymmetric with the
+  Save/Load download (which includes `export` only when `state.export`
+  is truthy — see spec 08 FR-SL-01/02): the optimize payload therefore
+  always carries a frontend-generated default export layout even when
+  the user has not authored one. A rebuilder that mirrors spec 08's
+  `...(exportData ? { export: exportData } : {})` for optimize will
+  lose the default layout and change the backend's prettified xlsx
+  output.
 - **FR-OE-44 (Create request)** — `POST <normalized runEndpoint>/optimize` with
   the multipart body. A non-OK response throws
   `Server error (<status>): <detail>` (`page.tsx:835-842`). The created job's
@@ -619,12 +645,18 @@ does not define them.
 
 - **Contract C2 — HTTP Serve API** (`../contracts/index.md`, prefix CON-API):
   authoritative source for `GET /health` (health payload shape), `POST /optimize`
-  (multipart `yaml_content`/`prettify`/`timeout`, job response with `links`),
-  the SSE event stream (`status`/`progress`/`phase`/`complete`/`error`), job
-  status polling (`links.status`), heartbeat (`links.heartbeat`), cancel /
-  finish-now, `DELETE /optimize/<jobId>`, xlsx retrieval (`links.xlsx`, including
-  `Content-Disposition`), status codes, queue semantics, and terminal statuses.
-  This domain must conform to C2 exactly.
+  (multipart `yaml_content`/`prettify`/`timeout` — **no `solver` field**;
+  see C2 CON-API-03), the job-response object shape
+  (`jobId`/`status`/`queuePosition`/`inputName`/`prettify`/`timeout`/`score`/
+  `solverStatus`/`error`/`cancelRequested`/`finishNowRequested`/
+  `clientHeartbeatExpired`/`xlsxReady`/`links` — **no `solver` key**; see
+  C2 Job-Response Object), the SSE event stream
+  (`status`/`progress`/`phase`/`complete`/`error`), job status polling
+  (`links.status`), heartbeat (`links.heartbeat`), cancel / finish-now
+  (no "unsupported-solver" 409 — only the current single backend
+  exists), `DELETE /optimize/<jobId>`, xlsx retrieval (`links.xlsx`,
+  including `Content-Disposition`), status codes, queue semantics, and
+  terminal statuses. This domain must conform to C2 exactly.
 - **Contract C1 — YAML Scenario Schema** and **08 — Save/Load & YAML**: the
   `yaml_content` body is produced by the shared YAML generator over the filtered
   (and optionally anonymized) scheduling state.

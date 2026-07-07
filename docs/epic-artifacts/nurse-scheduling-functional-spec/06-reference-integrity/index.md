@@ -62,12 +62,25 @@ tuple IDs, and export layout ID arrays all store bare strings. Renames therefore
 stored copy. There is no indirection that would let a reference survive an ID
 change automatically.
 
-**FR-RI-02 — A reference field may be a recursive `ReferenceIdTree`.**
-A reference field is `string | ReferenceIdTree[]` — a leaf string or an
-arbitrarily nested array of such trees (`referenceIds.ts:20`). Nested arrays
-arise from advanced backend syntax preserved on import
-(`hasNestedReferenceIds`, `referenceIds.ts:22-24`;
-`useSchedulingData.ts:835-840`). The rename and filter primitives recurse over
+ **FR-RI-02 — Cascade helpers accept recursive `ReferenceIdTree`,
+but the normal frontend preference interfaces and the backend covering
+model are not recursive.**
+A reference field's **cascade representation** is
+`string | ReferenceIdTree[]` — a leaf string or an arbitrarily nested
+array of such trees (`referenceIds.ts:20`). The cascade helpers
+`mapReferenceIdTree` / `filterReferenceIdTree` recurse over this
+structure to preserve advanced imported shapes. The normal frontend
+preference interfaces are mostly flat arrays
+(`web-frontend/src/types/scheduling.ts:171-236`); the covering
+`preceptors` / `preceptees` / `shiftTypes` fields are typed as one
+nested level deep (`(string | string[])[]`); the backend covering model
+mirrors that one-level depth (`core/nurse_scheduling/models.py:319-323`).
+The covering editor's helpers (`flattenIds` at
+`page.tsx:543-553`, `summarizeIds` at `:555-557`) flatten only one
+level. Nested arrays arise only from advanced backend syntax preserved
+on import (`hasNestedReferenceIds`, `referenceIds.ts:22-24`;
+`useSchedulingData.ts:835-840`) and the cascade handlers preserve them
+through the rename/filter. The rename and filter primitives recurse over
 this structure:
 - `mapReferenceIdTree(value, mapId)` recursively maps each leaf string
   (`referenceIds.ts:26-33`).
@@ -291,9 +304,12 @@ they silently rewrite/prune references.
   edited `dataType`.** A `cell` formatting rule carries `people`, `dates`, and
   `shiftTypes`; deleting a shift type empties `shiftTypes` and the rule is
   dropped even though `people`/`dates` were the arrays touched by other data
-  types (`schedulingReferenceUpdates.ts:324-329`). Likewise an extra column is
-  dropped if either `countDates` or `countShiftTypes` empties, and an extra row
-  if either `countPeople` or `countShiftTypes` empties (`:346`, `:357`).
+  types (`applyExportLayoutForIdDeletion` in
+  `schedulingReferenceUpdates.ts:367-436`, formatting drop at
+  `:398-405`, extraColumns drop at `:406-422`, extraRows drop at
+  `:423-433`). Likewise an extra column is dropped if either
+  `countDates` or `countShiftTypes` empties, and an extra row if either
+  `countPeople` or `countShiftTypes` empties.
 - **Coefficient lists follow shift types only.** Coefficient tuple IDs are
   renamed/filtered exclusively when `dataType === SHIFT_TYPES`; renaming or
   deleting a person or date never disturbs coefficient tuples (FR-RI-06,

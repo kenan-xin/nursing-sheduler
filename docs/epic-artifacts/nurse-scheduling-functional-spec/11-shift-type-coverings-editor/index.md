@@ -88,10 +88,21 @@ and the persistence / undo-redo layer (`useSchedulingData` — see spec 07).
   ```
   The nested `(string | string[])[]` form follows the existing
   shift-affinity convention: a top-level element is one equation; an inner
-  array is the OR-alternative group of ids (or nested groups). The schema
-  permits both flat and nested forms (`ReferenceIdTree`); the editor
-  always writes the canonical nested form on save and re-flattens on
-  edit-load.
+  array is the OR-alternative group of ids. The schema permits both flat
+  and nested forms at this level (`ReferenceIdTree`), but **the current
+  editor and its helpers are only one level deep**: `flattenIds`
+  (`page.tsx:543-553`) does not recurse, and `buildPrefFromForm` writes
+  exactly one outer element wrapping the flat `CheckboxList` selections.
+  The backend `ShiftTypeCoveringPreference` type is also only one nested
+  level deep (`models.py:319-323`). Deeper-than-one-level imported
+  shapes (e.g. `preceptors: [[['P1', 'P2']]]`) are **not editor-safe**:
+  edit-load via `flattenIds` would only see the top level, and saving
+  would replace the deeper tree with the editor's one-element wrap. The
+  cascade helpers (`schedulingReferenceUpdates.ts:20,163-193,298-325`)
+  are recursive and would correctly rename/delete inside deeper trees,
+  but the page UI would silently rewrite them. Treat deeper imported
+  shapes as out of UI parity — the cascade keeps them semantically
+  correct, but the editor does not preserve them.
 
 - **FR-CV-05 — Form state shape (transient).** While the form is open,
   `formData` (`page.tsx:37-44, 65-72`) holds the in-progress rule in flat
@@ -176,20 +187,29 @@ and the persistence / undo-redo layer (`useSchedulingData` — see spec 07).
   `e.g., Lil must always be paired with Anna on Day shift`. Stored as-is
   (may be empty). (`page.tsx:296-308`)
 
-- **FR-CV-12 — Dates (optional, exposed in the UI but not persisted).**
+- **FR-CV-12 — Dates (optional, exposed in the UI but not persisted; the
+  label "leave empty for all dates" is misleading under current parity).**
   `Dates (leave empty for all dates)` is a multi-select `CheckboxList`
   of date items + groups. The error key is `date`. No `errors.date` is
-  ever set in the current implementation; an empty date set is allowed
-  (the preference would then apply to all dates per the C3 contract).
-  The list falls back to a guidance message when no dates are set up:
-  `No dates available. Please set up dates in the Dates tab first.`
+  ever set in the current implementation; an empty date set is
+  allowed. The list falls back to a guidance message when no dates are
+  set up: `No dates available. Please set up dates in the Dates tab first.`
   (linking to `/dates`). (`page.tsx:312-348`)
-  **Important caveat**: the user's selection is **not** saved on
-  Add/Update (see FR-CV-07) — a rebuilder must add `date` to
-  `buildPrefFromForm` (e.g.
-  `...(formData.date.length > 0 ? { date: formData.date } : {})`) to
-  implement the documented intent. The form currently still tracks
-  the selection across toggles and re-uses it for the next edit.
+  **Strict-parity caveat (current product bug)**: the user's
+  selection is **not** saved on Add/Update under current code
+  (see FR-CV-07). The selection is tracked only while the current
+  form draft remains open; Add/Update drops it, and `resetForm`
+  clears it; a later edit only restores `rule.date` if the existing
+  stored/imported rule already has one. The future-fix path
+  (`buildPrefFromForm` adding `date` when non-empty) is described in
+  decision log 02 as a separate non-parity follow-up — **do not
+  implement it under strict parity**, since the spec is documenting
+  current code.
+  **Important caveat (backend semantics)**: even when `date` is
+  present, the **current backend** treats `date: []` (or absent) as
+  **no dates / no constraints** rather than "all dates" — see
+  CON-SEM-07 `date` semantics. To target "all dates" the YAML must
+  emit `date: [ALL]` explicitly.
 
 - **FR-CV-13 — Preceptors (required, multi-select).** `Preceptors (must
   cover) *` is a multi-select `CheckboxList` of people items + groups.
@@ -306,9 +326,11 @@ Fields marked `*` are required.
 | weight | invalid (string / NaN) | `Weight must be a valid number, Infinity, or -Infinity` |
 | date | selection empty | (no error — date is optional) |
 
-A non-empty weight that is `+Infinity`, `-Infinity`, or a finite number
-passes; a string that fails `parseWeightValue` (e.g. `10abc` parses to
-`10` and is accepted) or that resolves to `NaN` is invalid.
+A non-empty weight that is `+Infinity`, `-Infinity`, or a finite
+number passes; values like `10abc` are accepted (parsed as `10` by
+`parseInt`); values that resolve to a string after parsing (e.g.
+`abc`) or to `NaN` are invalid. See FR-CV-16 and the weight-input
+parser caveat in spec 09 FR-EX-05 for the full algorithm.
 
 ---
 
@@ -361,12 +383,9 @@ anonymization map. (`anonymizeSchedulingState.ts:25, 76-83`)
   imported (since the editor itself never saves `date`). On Save /
   Update, `buildPrefFromForm` does **not** include `date` regardless of
   the user's selection (`page.tsx:155-162`), so a user who picks
-  specific Dates in the editor loses that selection on Add/Update. A
-  rebuilder implementing the documented intent should add
-  `...(formData.date.length > 0 ? { date: formData.date } : {})` to
-  `buildPrefFromForm` and add a page test that saving with a selected
-  date persists `date`. The cascade for the optional `date` field is
-  already implemented and tested against hand-built state
+  specific Dates in the editor loses that selection on Add/Update.
+  The cascade for the optional `date` field is already implemented
+  and tested against hand-built state
   (`schedulingReferenceUpdates.test.ts:362-444`). See the wave-3
   follow-up entry in
   `decision-logs/02-shift-type-covering-preference/index.md`.
@@ -410,11 +429,17 @@ anonymization map. (`anonymizeSchedulingState.ts:25, 76-83`)
   - includes `shift type covering` in the type order at the trailing
     position (after `shift affinity`, spec 01 FR-DM-20).
 
-- **EDGE-CV-09 — Reference cascade may drop rules silently.** Renaming
-  or deleting a referenced person / shift type rewrites the rule; if
-  any required reference field (`preceptors`/`preceptees`/`shiftTypes`)
-  collapses to empty, the rule is dropped from `preferences` without
-  user notification. (Spec 06 FR-RI-11.)
+- **EDGE-CV-09 — Reference cascade: deleting may drop rules silently;
+  renaming never drops.** **Deleting** a referenced person / shift
+  type rewrites the rule and, if any required reference field
+  (`preceptors`/`preceptees`/`shiftTypes`) collapses to empty, the
+  rule is dropped from `preferences` without user notification.
+  **Renaming** a referenced person / shift type only rewrites the
+  matching IDs (via `mapReferenceIdTree`); it does not prune the
+  reference fields and never drops covering rules — even when no
+  match is found in a field, the field is left intact.
+  (Spec 06 FR-RI-10/11; `schedulingReferenceUpdates.ts:163-193` rename,
+  `:298-356` delete.)
 
 - **EDGE-CV-10 — The page itself does not call `useEffect`-style
   save/restore of the scroll position itself.** Save/restore is
@@ -451,10 +476,10 @@ silently drops the selected date — see FR-CV-07, FR-CV-12, EDGE-CV-02).
 The form closes and the new rule appears in the
 `Current Shift Type Coverings` list with the three `Preceptors:` /
 `Preceptees:` / `Shift Types:` rows, **no `Dates:` row** (since the
-saved object has no `date`), and `Weight: +1`. A rebuilder implementing
-the documented intent should add `date` to the saved object and
-include the `Dates:` row in the card display when `rule.date` is
-present.
+saved object has no `date`), and `Weight: +1`. **Under strict parity,
+do not implement the "fix `buildPrefFromForm` to include `date`"
+path**; the future-fix path is a non-parity follow-up described in
+`decision-logs/02-shift-type-covering-preference/index.md`.
 
 **AC-CV-03 — Empty selectors are rejected with the verbatim messages.**
 GIVEN the form is open with no preceptors, preceptees, or shift types
@@ -536,12 +561,13 @@ GIVEN a rule with `preceptors: [['P1']]`, `preceptees: [['P2']]`,
 `shiftTypes: [['D']]`, and the **Anonymize schedule data** toggle
 enabled,
 WHEN the YAML is generated and downloaded from Save/Load,
-THEN the YAML `preferences[*]` entry has `preceptors: [[<anonP1>]]` and
+ THEN the YAML `preferences[*]` entry has `preceptors: [[<anonP1>]]` and
 `preceptees: [[<anonP2>]]` (each field's nested shape preserved
 independently), the `shiftTypes` field's shift-type IDs are not
 rewritten (the people-only anonymization map does not touch shift-type
 references unless they collide with anonymized people/group IDs), and
-`descriptions` are removed when `removeDescriptions` is on.
+all `description` fields are removed when `removeDescriptions` is on
+(the spec field is named `description`, not `descriptions`).
 (`anonymizeSchedulingState.ts:76-82` maps `preceptors`, `preceptees`,
 and `shiftTypes` independently via `mapReferenceIdTree`; the
 anonymization map is built from people items/groups

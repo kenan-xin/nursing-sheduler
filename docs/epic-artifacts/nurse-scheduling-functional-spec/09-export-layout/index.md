@@ -71,6 +71,17 @@ optional base style fields `description`, `backgroundColor`, `bottomBorderColor`
 form lists them in this exact order: `people header`, `row`, `date header`,
 `column`, `history header`, `history`, `cell` (`page.tsx:1266-1272`).
 
+**FR-EX-02a — Description key presence rule (current behavior).** For
+**style rules** (`formatting` entries), the `description` key is
+**omitted** when blank — the form strips an empty description before
+saving (`page.tsx:542-548`). For **count rules** (`extraColumns` /
+`extraRows` entries), the `description` key is **always present**, even
+when blank — the form writes `description: ''` (e.g. `page.tsx:611-675`,
+`:700-746`); the generated default layout also emits
+`description: ''` (`schedulingExportConfig.ts:90-103`, `:112-126`,
+`:137-151`, `:225-247`). A rebuilder that omits blank `description`
+for count rules will diverge from current strict-parity output.
+
 **FR-EX-03 — Per-type target fields.** Each formatting type carries specific
 targets (`scheduling.ts:60-82`, mirrored by the form helpers `page.tsx:119-125`):
 
@@ -117,7 +128,27 @@ all under `when.preference`:
 - `weightRange?: [number, number]` — an inclusive `[min, max]` numeric pair
   (`scheduling.ts:41`), entered as "Minimum Weight (inclusive)" (placeholder
   `-Infinity`) and "Maximum Weight (inclusive)" (placeholder `Infinity`)
-  (`page.tsx:1074-1095`).
+  (`page.tsx:1074-1095`). **Parser caveat**: the two range inputs share
+  the same `parseWeightValue` helper used elsewhere
+  (`utils/numberParsing.ts:23-60`). The full algorithm:
+  - Try infinity aliases: `infinity`/`inf`/`∞` (case-insensitive) →
+    `Infinity`; `-infinity`/`-inf`/`-∞` → `-Infinity`.
+  - Try full-string suffix regex `^([+-]?\d+(?:\.\d+)?)([kmbt])$`; on match,
+    multiply the numeric prefix by the multiplier (`k`×1e3, `m`×1e6,
+    `b`×1e9, `t`×1e12). The multiplied result must be an **integer** or
+    the input is invalid. Examples: `2.5k` → `2500` valid; `1.5k7` → `1`
+    valid (regex mismatch, falls through to `parseInt`); `2.5e3` → `2` valid
+    (regex mismatch, falls through); a non-numeric string such as `abc` is
+    invalid (regex mismatch, `parseInt` returns `NaN`).
+  - Otherwise `parseInt(inputValue)` — accepts leading integer prefixes
+    and truncates at the first non-digit / decimal point. Examples:
+    `1.5` → `1`; `2.7k` → `2` (suffix doesn't match the suffix regex;
+    falls through; parsed as integer `2`); `10abc` → `10`; `abc` →
+    `NaN` (raw string, invalid).
+  - The built export stores a `[number, number]` tuple of whatever the
+    parser produced, so the YAML `weightRange` may contain truncated
+    integers and infinities — a rebuilder should mirror the parser
+    quirk to maintain YAML byte-equality.
 
 **FR-EX-06 — `when` presence rule.** On save, the `when` object is emitted only
 when at least one condition input is set: `hasCondition = requestShape.length > 0
@@ -184,7 +215,9 @@ inside `updateExportFormatting`/`ExtraColumns`/`ExtraRows` and the duplicate hel
 (`useSchedulingData.ts:714,724,734,748,756,764`).
 
 **FR-EX-13 — Default generated formatting rules.** `generateExportLayoutConfig`
-(`schedulingExportConfig.ts:131-255`) produces `formatting` in this exact order:
+(`schedulingExportConfig.ts:131-255`) produces `formatting` in this exact order.
+**Each generated rule includes a `description` key, even when empty** (per
+FR-EX-02a for generated defaults):
 
 1. `cell` — description `"Show requested shift request target"`,
    `appendText: " [{shiftType}]"`, `people: [ALL]`, `dates: [ALL]`,
@@ -197,16 +230,17 @@ inside `updateExportFormatting`/`ExtraColumns`/`ExtraRows` and the duplicate hel
    `shiftTypes: [ALL, OFF]`, `when.preference = { types: ['shift request'],
    requestShape: ['person-item-to-date-item'], satisfied: false, weightRange:
    [-Infinity, Infinity] }` (`schedulingExportConfig.ts:174-193`).
-3. `history header` — `backgroundColor: '#fefce8'`
+3. `history header` — description `""`, `backgroundColor: '#fefce8'`
    (`schedulingExportConfig.ts:194-198`).
-4. `history` — `people: [ALL]`, `backgroundColor: '#fefce8'`
+4. `history` — description `""`, `people: [ALL]`, `backgroundColor: '#fefce8'`
    (`schedulingExportConfig.ts:199-204`).
-5. `column` — `dates: [SATURDAY, SUNDAY]`, `backgroundColor: '#dbeafe'`
-   (`schedulingExportConfig.ts:205-210`).
-6. `column` — `dates: [SATURDAY]`, `rightBorderColor: '#9ca3af'`
-   (`schedulingExportConfig.ts:211-216`).
-7. (only when a `FREEDAY` date group exists) `column` — `dates: [FREEDAY]`,
-   `backgroundColor: '#dcfce7'` (`schedulingExportConfig.ts:217-222`).
+5. `column` — description `""`, `dates: [SATURDAY, SUNDAY]`,
+   `backgroundColor: '#dbeafe'` (`schedulingExportConfig.ts:205-210`).
+6. `column` — description `""`, `dates: [SATURDAY]`,
+   `rightBorderColor: '#9ca3af'` (`schedulingExportConfig.ts:211-216`).
+7. (only when a `FREEDAY` date group exists) `column` — description `""`,
+   `dates: [FREEDAY]`, `backgroundColor: '#dcfce7'`
+   (`schedulingExportConfig.ts:217-222`).
 
 `ALL`, `OFF`, `WEEKDAY`, `WEEKEND`, `SATURDAY`, `SUNDAY` are reserved keyword ids
 (`keywords.ts:23-33`); `WORKDAY`/`FREEDAY` are the workday/freeday group ids
@@ -486,11 +520,16 @@ without persisting (`page.tsx:537-540,663-666,735-738`).
 - **AC-EX-08.** Given an extra column with a blank header, or zero count shift
   types, or zero count dates, when saving, then the respective verbatim required
   message is shown and nothing is persisted.
-- **AC-EX-09.** Given an extra column coefficient set to `0`, `2.5`, or a
-  non-number, when saving, then "Coefficient for {id} must be an integer of at least
-  1" is shown for that shift type; given two coefficient sources that overlap on an
-  expanded shift type, then "Shift type coefficients overlap: {id1}, {id2} include
-  {expandedId}" is shown.
+- **AC-EX-09.** Given an extra column coefficient entered as a
+  non-number (e.g. `abc`), when saving, then
+  `Coefficient for {id} must be an integer of at least 1` is shown for
+  that shift type. Given `0` or `2.5`, when saving, the value is
+  silently clamped to `1` or truncated to `2` respectively
+  (`Number.parseInt` + `Math.max(1, …)`) — no validation error fires
+  for these inputs. Given two coefficient sources that overlap on an
+  expanded shift type, then
+  `Shift type coefficients overlap: {id1}, {id2} include {expandedId}` is
+  shown.
 - **AC-EX-10.** Given a valid extra column with all coefficients blank, when saved,
   then the persisted rule omits `countShiftTypeCoefficients` entirely.
 - **AC-EX-11.** Given an extra row, when saved, then the persisted rule contains

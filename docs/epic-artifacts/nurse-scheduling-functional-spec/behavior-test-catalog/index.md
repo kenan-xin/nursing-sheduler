@@ -43,9 +43,12 @@ Feature-area tags reference the domain spec sections (`nurse-scheduling-function
   (11 page suites `src/app/**/page.test.tsx` (~203 cases), 22 component suites
   `src/components/*.test.tsx`, utils `src/utils/*.test.ts`, hooks `src/hooks/*.test.ts`)
 - Python golden harness: `core/tests/schedule_test_helper.py`,
-  `core/tests/export_test_helper.py`, solver entrypoints
-  `core/tests/test_schedule_{ortools_cp_sat,pulp_cbc,pulp_cuopt}.py`,
-  `core/tests/test_export_xlsx_{ortools_cp_sat,pulp_cbc}.py`
+  `core/tests/export_test_helper.py`, solver entrypoint
+  `core/tests/test_schedule_ortools_cp_sat.py`,
+  `core/tests/test_export_xlsx_ortools_cp_sat.py` (single-backend
+  OR-Tools only — PuLP/CBC/cuOpt solver modules and their test
+  counterparts have been removed from the source tree; do not list them
+  as current).
 - Data-driven fixtures: `core/tests/testcases/{basics,artificial,real}/`
   (`*.yaml` -> `*.csv` / `*.xlsx` / `*.prettify.xlsx` goldens; `*_error.txt` substrings)
 - Python targeted tests: `core/tests/test_serve.py`, `test_cli.py`,
@@ -217,12 +220,21 @@ handlers / dispatch entry live in `core/nurse_scheduling/models.py:304-323`,
 `web-frontend/src/app/shift-type-coverings/page.tsx`.
 
 - **CC-B1** A covering rule has three required selectors (`preceptors`,
-  `preceptees`, `shiftTypes`) plus an optional `date` (default / `None` =
-  all dates) and an optional `weight` (default `1`; ±∞ accepted by the
-  parser). The frontend stores the three selectors as
-  `(string | string[])[]` (nested allowed) and the form flattens selections
-  into a single-level array on emit. (`page.tsx:155-162`,
-  `types/scheduling.ts:229-237`, `models.py:304-323`)
+  `preceptees`, `shiftTypes`) plus an optional `date` and an optional
+  `weight` (default `1`; ±∞ accepted by the parser). **Important
+  current-parity caveat**: `date` is documented in the source code
+  comment as `None = ALL` (`models.py:319`) but the **current handler
+  does not implement that** — `parse_dates(None)` / `parse_dates([])`
+  returns an empty iterable (`utils.py:26-29, 69-92`) and the
+  constraint loop iterates `for d in ds` (`preference_types.py:677`),
+  so `date: None` / `date: []` / omitted `date` produces **zero covering
+  constraints** rather than "all dates". To target all dates the
+  YAML must emit `date: [ALL]` (or an explicit list of date ids). The
+  frontend editor also never persists `date` on Save/Update
+  (`page.tsx:155-162`). The frontend stores the three required
+  selectors as `(string | string[])[]` (nested allowed) and the form
+  flattens selections into a single-level array on emit
+  (`types/scheduling.ts:229-237`, `models.py:304-323`).
 - **CC-B2** Form validation rejects empty selectors with three verbatim
   messages: `At least one preceptor must be selected`,
   `At least one preceptee must be selected`,
@@ -269,13 +281,21 @@ handlers / dispatch entry live in `core/nurse_scheduling/models.py:304-323`,
   contract), preserving any nested-group structure. People IDs in those
   fields are mapped; descriptions are removed when `removeDescriptions` is
   on. (`anonymizeSchedulingState.ts:76-83`)
-- **CC-B7** The model rejects `preceptors` / `preceptees` / `shiftTypes`
-  that are not lists, with three verbatim messages:
+- **CC-B7** The **Pydantic model** rejects `preceptors` /
+  `preceptees` / `shiftTypes` that are not lists at the YAML/model
+  level with Pydantic's standard list-type error
+  (`Input should be a valid list`); the **handler**
+  (`preference_types.py:636-641, 670-675`) additionally rejects
+  empty resolved selectors with three messages (CC-B2 cross-reference).
+  The verbatim handler messages
   `Preceptors must be a list, but got {type}`,
   `Preceptees must be a list, but got {type}`,
-  `Shift types must be a list, but got {type}`. The handler additionally
-  rejects empty resolved selectors with three messages (CC-B2
-  cross-reference). (`preference_types.py:636-641, 670-675`)
+  `Shift types must be a list, but got {type}` are reachable when
+  constructing a `ShiftTypeCoveringPreference` programmatically
+  (not from YAML) with a non-list value, and on empty resolved
+  selectors. A parity test asserting these exact messages against
+  a YAML upload with `preceptors: P1` (scalar) will fail at the
+  Pydantic layer with a different error.
 - **CC-B8** `weight` is accepted but **not used by the handler** — the
   constraint is hard-reified via the implication
   `any_preceptee <= at_least_one_preceptor`
@@ -326,9 +346,14 @@ handlers / dispatch entry live in `core/nurse_scheduling/models.py:304-323`,
 - **ST-B3** History mutators support `replaceLatestHistoryEntry` to keep one-step undo
   semantics for compound edits (mixed add+update collapse to one boundary).
   (`useSchedulingData.test.ts`)
-- **ST-B4** A cross-tab storage change (including localStorage cleared elsewhere) shows a
-  banner; the reload action reloads provider state; unrelated keys/storage areas are
-  ignored; hydrated state survives consumer remount. (`useSchedulingData.test.ts`)
+- **ST-B4** **[OUT OF PRODUCT SCOPE — excluded per the brief.]** A
+  cross-tab storage change (including localStorage cleared elsewhere)
+  shows a banner; the reload action reloads provider state; unrelated
+  keys/storage areas are ignored; hydrated state survives consumer
+  remount. (`useSchedulingData.test.ts`) — listed here for
+  completeness because the current e2e tests cover it, but a rebuilt
+  frontend is not required to reproduce this behavior. The same
+  applies to the `ExternalStorageChangeBanner` itself.
 - **ST-B5** `null` qualifiedPeople loaded from storage normalizes to "all people".
   (`useSchedulingData.test.ts`)
 - **ST-B6** A tab-switch warning stays active until all active editing hooks/providers
@@ -497,8 +522,8 @@ UI-agnostically in the new frontend (port the intent, re-wire to new modules).
 
 | Current test (source) | Classification | Notes / behaviors covered |
 |---|---|---|
-| `core/tests/schedule_test_helper.py` + `test_schedule_{ortools_cp_sat,pulp_cbc,pulp_cuopt}.py` | **port-directly** | Data-driven YAML->CSV golden harness; expected-error `.txt` substrings; uniqueness assertion. CON-SEM-B1, CON-YAML-B2, DM/PR/DC error cases. |
-| `core/tests/export_test_helper.py` + `test_export_xlsx_{ortools_cp_sat,pulp_cbc}.py` | **port-directly** | YAML->XLSX / prettify.xlsx fully-styled golden harness. CON-YAML-B2, EX-B3. |
+| `core/tests/schedule_test_helper.py` + `test_schedule_ortools_cp_sat.py` | **port-directly** | Data-driven YAML->CSV golden harness; expected-error `.txt` substrings; uniqueness assertion. CON-SEM-B1, CON-YAML-B2, DM/PR/DC error cases. The PuLP/CBC/cuOpt counterparts in the historical catalog do not exist in the current source tree and must not be re-authored. |
+| `core/tests/export_test_helper.py` + `test_export_xlsx_ortools_cp_sat.py` | **port-directly** | YAML->XLSX / prettify.xlsx fully-styled golden harness. CON-YAML-B2, EX-B3. |
 | `core/tests/testcases/{basics,artificial}/` fixtures | **port-directly** | The golden corpus itself; unchanged inputs/goldens. |
 | `core/tests/testcases/real/` + `tests/real/*` | **port-directly** | Real-world smoke (opt-in, non-`test_`-prefixed). |
 | `core/tests/test_models_validation.py` | **port-directly** | DM validation catalog. |
@@ -587,8 +612,17 @@ re-implement them against whatever new UI exists. (No selectors/DOM assumed.)
 - Succession pattern reorder is preserved in the saved rule. (`shift-type-successions-drag-reorder`)
 - Preference editor persists mixed manual/infinity values through reopen. (`shift-preference-editor`)
 - Preference duplicate actions insert copied cards per page and dismiss open drafts. (`duplicate-actions`)
-- **Shift type coverings** — form validation rejects empty `preceptors`/`preceptees`/`shiftTypes`
-  and invalid weights; duplicate/drag-reorder/delete mirror the other card pages. (`shift-type-coverings/page.test.tsx`)
+- **Shift type coverings** — **partial coverage gap**: the current
+  `shift-type-coverings/page.test.tsx` has only three cases (open
+  form, single weight label, render existing rules). It does **not**
+  test empty-selector validation, invalid-weight save blocking, the
+  save-shape wrap, the nested-tree edit-flatten round-trip, the
+  selected-date persistence/drop, duplicate, drag-reorder, or delete.
+  The behaviors the spec asserts (FR-CV-01..22) are **observable from
+  source** but not guaranteed by the current page-test suite. A
+  parity-suite rebuild must author tests for these specific cases
+  before treating them as locked. (See `decision-logs/02-shift-type-covering-preference/index.md`
+  for the wave-3 review note.)
 
 ### Reference Integrity Flows
 - Rename people/groups/shift-types updates downstream references across pages and in YAML.
@@ -661,8 +695,10 @@ re-implement them against whatever new UI exists. (No selectors/DOM assumed.)
   runs surface the full failing set.
 - **Solver-dependent determinism:** the uniqueness assertion (re-solve with
   `avoid_solution`, equal score = failure) assumes deterministic solver output per fixture.
-  cuOpt tests exist (`test_schedule_pulp_cuopt.py`) but no cuOpt XLSX-export golden test is
-  present (only ortools + pulp_cbc export goldens) — a minor asymmetry.
+  The current source tree contains only the OR-Tools CP-SAT solver test entrypoint
+  (`test_schedule_ortools_cp_sat.py`); the prior PuLP/CBC/cuOpt counterparts are no
+  longer in the tree. There is no cuOpt XLSX-export golden test (only the OR-Tools
+  golden) — re-author the test set against the single OR-Tools entrypoint.
 - **Infeasible cases** (`*_infeasible.yaml`) have `.yaml` but no `.csv`/`.xlsx` golden;
   the schedule harness compares status text and the XLSX harness skips (no table). Keep
   this branch.
@@ -694,8 +730,8 @@ re-implement them against whatever new UI exists. (No selectors/DOM assumed.)
 - Rebuild brief: `nurse-scheduling-rebuild-brief/index.md`
 - Python golden harness: `core/tests/schedule_test_helper.py`,
   `core/tests/export_test_helper.py`
-- Solver entrypoints: `core/tests/test_schedule_{ortools_cp_sat,pulp_cbc,pulp_cuopt}.py`,
-  `core/tests/test_export_xlsx_{ortools_cp_sat,pulp_cbc}.py`
+- Solver entrypoints: `core/tests/test_schedule_ortools_cp_sat.py`,
+  `core/tests/test_export_xlsx_ortools_cp_sat.py` (single-backend only)
 - Targeted Python tests: `core/tests/test_{serve,cli,preference_validation,
   models_validation,scheduler,utils,export_formatting,anonymize_scheduling_data}.py`,
   `core/tests/solver_test_utils.py`

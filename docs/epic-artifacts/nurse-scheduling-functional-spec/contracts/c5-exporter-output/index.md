@@ -162,13 +162,58 @@ Column index for a date `d` = `n_leading_cols + n_history_cols + d` (`exporter.p
 
 ---
 
-## Backend Anonymization (restore dependency)
+## Backend Anonymization (Sentry-only — not used by /optimize or the xlsx path)
 
-`anonymize_scheduling_data.py` anonymizes person identifiers in uploaded YAML before it is processed; the frontend later restores original IDs in the exported XLSX.
+`anonymize_scheduling_data.py` is **only used in the current code as a
+Sentry attachment sanitizer** when an optimize exception is captured
+(`core/nurse_scheduling/sentry.py:69-95`). The HTTP `/optimize`
+endpoint does **not** call it: `core/nurse_scheduling/serve.py:292-298`
+passes the parsed YAML directly to `scheduler.schedule(...)`. The
+anonymized-XLSX-restore roundtrip is **frontend-side only**:
+`web-frontend/src/utils/anonymizeSchedulingState.ts:102-157` produces
+an anonymized `YAML` payload for `POST /optimize`, and
+`web-frontend/src/utils/restorePeopleIdsInXlsx.ts:34-48` substitutes
+original IDs in the downloaded XLSX. A rebuilt frontend that does not
+anonymize before upload will send real person IDs to `/optimize` and
+the exported XLSX will already contain those real IDs (no restore is
+possible because the XLSX was never anonymized in the first place).
 
-**[CON-OUT-40] Anonymization mapping.** `_anonymize_yaml_content` (`anonymize_scheduling_data.py:64-103`) removes all `description` fields (`_remove_description_fields`, lines 51-61), then maps each `people.items[*].id` to `f"P{next_index}"` starting at `next_index = 1`, skipping any anonymized id that collides with a retained group id (`anonymize_scheduling_data.py:80-93`). References under keys `{"person", "qualifiedPeople", "people1", "people2", "people", "countPeople"}` are rewritten via the id map (`_PEOPLE_REFERENCE_KEYS`, line 27; `_anonymize_people_references`, lines 36-48). Group `members` lists are also remapped (lines 99-101). On any exception the original content is returned unchanged (`anonymize_scheduling_data.py:113-118`). Output is dumped with `ruamel.yaml` `YAML(typ="safe")` (lines 106-110).
+**[CON-OUT-40] Backend anonymizer surface (Sentry-only).** The
+`anonymize_scheduling_data_in_yaml` function
+(`anonymize_scheduling_data.py:113-118`) is the only entry point and
+is currently called from `sentry.py` only. Its mapping
+(`_anonymize_yaml_content`, `:64-103`): removes all `description`
+fields (`_remove_description_fields`, lines 51-61), then maps each
+`people.items[*].id` to `f"P{next_index}"` starting at `next_index = 1`,
+skipping any anonymized id that collides with a retained group id
+(`:80-93`). References under keys
+`{"person", "qualifiedPeople", "people1", "people2", "people",
+"countPeople"}` are rewritten via the id map (`_PEOPLE_REFERENCE_KEYS`,
+line 27; `_anonymize_people_references`, lines 36-48). Group
+`members` lists are also remapped (lines 99-101). On any exception
+the original content is returned unchanged (`:113-118`). Output is
+dumped with `ruamel.yaml` `YAML(typ="safe")` (lines 106-110).
+**Note on `shift type covering`**: the backend anonymizer's
+`_PEOPLE_REFERENCE_KEYS` (`anonymize_scheduling_data.py:27`) does
+**not** include `preceptors` or `preceptees`, so a Sentry attachment
+that contains a covering preference will leave those fields in plain
+text. The frontend-side anonymizer does cover them.
 
-**[CON-OUT-41] Restore dependency (frontend).** The exported schedule places person IDs in column A (the single leading column, CON-OUT-03), on rows `3 .. 3 + count` in 1-based Excel terms (rows begin after the two frozen header rows). The frontend `restorePeopleIdsInXlsx` MUST read the anonymized person IDs from column A rows `3 .. 3 + count` and substitute the original (pre-anonymization) IDs there. This is why person id occupies exactly column 0 / Excel column A and why person rows start at Excel row 3 (DataFrame index 2 = `n_leading_rows`). Any layout change to CON-OUT-01/CON-OUT-03 breaks restore.
+**[CON-OUT-41] Restore dependency (frontend, half-open Excel rows).**
+The exported schedule places person IDs in column A (the single
+leading column, CON-OUT-03), on Excel rows `3` through `2 + peopleCount`
+inclusive — i.e. the half-open interval `[3, 3 + peopleCount)` in
+1-based Excel terms (rows begin after the two frozen header rows;
+`exporter.py:470-473, 522-523`). The frontend
+`restorePeopleIdsInXlsx` (`web-frontend/src/utils/restorePeopleIdsInXlsx.ts:34-36`)
+MUST read the anonymized person IDs from those rows and substitute the
+original (pre-anonymization) IDs there. This is why person id occupies
+exactly column 0 / Excel column A and why person rows start at Excel
+row 3 (DataFrame index 2 = `n_leading_rows`). The `Score` and `Status`
+summary rows follow immediately after the last person row
+(`exporter.py:599-604`); a half-open range of `[3, 3 + peopleCount)`
+avoids reading those. Any layout change to CON-OUT-01/CON-OUT-03
+breaks restore.
 
 ---
 

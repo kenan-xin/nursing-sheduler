@@ -28,9 +28,17 @@ The user has redirected the rebuild to a Singapore, English-only locale.
   one `reason` string — the official English name (e.g. `New Year's Day`,
   `Labour Day`, `National Day`). No bilingual/Chinese names are emitted. The
   source column for `reason` is removed; no second-language column is added.
-- **Supported import range.** Kept at `2023-01-01` to `2026-12-31` (matches the
-  window the Taiwan spec used, leaving the supported-range label
-  `2023-01-01 to 2026-12-31` unchanged).
+- **Supported import range.** Originally kept at `2023-01-01` to
+  `2026-12-31` (matching the window the Taiwan spec used). **Superseded
+  by a later change**: the supported range is now **data-driven** —
+  derived from the min/max dates of the loaded `data.gov.sg` dataset
+  via `getSupportedRange(entries)` and the
+  `getSingaporeHolidaySupportLabel(entries)` formatter
+  (`singaporeHolidays.ts:141-160`); the displayed label updates
+  automatically as the dataset grows. There is no longer a hardcoded
+  `2023-01-01`–`2026-12-31` constant in the codebase; see spec 02
+  FR-DC-29. The legacy `2023-01-01 to 2026-12-31` example is preserved
+  here as a historical note only.
 - **Labor Day spelling.** Singapore's official spelling is `Labour Day`
   (British English). Validation message and examples updated accordingly.
 

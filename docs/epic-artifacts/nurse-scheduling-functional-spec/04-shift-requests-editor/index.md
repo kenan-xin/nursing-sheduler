@@ -29,10 +29,16 @@ non-binding reference. Source of truth:
 `web-frontend/src/utils/numberParsing.ts`.
 
 Underlying data type: `ShiftRequestPreference` = `{ type: SHIFT_REQUEST, person: string[],
-date: string[], shiftType: string[], weight: number }`. Every preference in this editor
-has a single-element `person` and single-element `shiftType`; `date` may hold multiple
-individual date IDs (compacted, see FR-SR-24) but each preference references exactly one
-date-group or a set of individual dates — never a mix.
+date: string[], shiftType: string[], weight: number }`. **Editor-created and
+modal-edited** shift requests have single-element `person` and
+single-element `shiftType`. **Imported YAML** may also carry backend-
+compatible `shift request` preferences with `person.length > 1` or
+`shiftType.length > 1`; the importer preserves them with an "advanced
+backend reference syntax" warning and the matrix/editor reads only
+index `0` (`useSchedulingData.ts:909-915`, `shift-requests/page.tsx:877-880`).
+`date` may hold multiple individual date IDs (compacted, see FR-SR-24) but
+each preference references exactly one date-group or a set of individual
+dates — never a mix.
 
 ## Functional Requirements
 
@@ -67,12 +73,17 @@ date-group or a set of individual dates — never a mix.
   the longest history row (for appending a newer entry).
 - **FR-SR-06** — History columns are labeled/titled `H-{historyColumnsCount - index}` for
   rendered index `0..count-1` (page.tsx:1317,1320). Thus the leftmost history column is
-  the oldest slot (highest H-number) and the rightmost (`H-1`) is the most recent, sitting
-  adjacent to the date columns.
+  the highest H-number and the rightmost (`H-1`) is adjacent to the date columns.
 - **FR-SR-07** — For a person with a shorter history, cells align to the **right**: the
   value at rendered `columnIndex` is `''` when `columnIndex < offset`, else
   `history[columnIndex - offset]`, where `offset = historyColumnsCount - history.length`
-  (`getHistoryValue`, page.tsx:1244). `history[0]` is the oldest entry.
+  (`getHistoryValue`, page.tsx:1244). **Note: `history[0]` is the **newest** entry
+  (the most recent prior assignment), not the oldest.** `addPersonHistory` prepends
+  new entries with `[shiftTypeId, ...person.history!]` (`useSchedulingData.ts:606`),
+  so the array is in newest-first order. The UI labels the **highest H-number** under
+  `history[0]` (newest) and the **lowest H-number** under the trailing entry
+  (oldest); see `page.tsx:1816-1834`. The summary list (FR-SR-40) iterates
+  `person.history` left-to-right, which is also newest-to-oldest.
 - **FR-SR-08** — Only history cells with `index >= offset - 1` are clickable/interactive
   (`isClickable`, page.tsx:1819): the actual history entries plus exactly one empty
   padding cell to their left. Cells further left render blank and inert.
@@ -128,8 +139,14 @@ date-group or a set of individual dates — never a mix.
   closes it. On save (page.tsx:1266): if `historyIndex < offset` and a non-empty type is
   chosen, append a new history entry (`addPersonHistory`); if a non-empty type at a real
   position, update that position (`updatePersonHistory` with type); if `-- Clear --` at a
-  real position, clear that position (`updatePersonHistory` with no type). Selecting
-  `-- Clear --` at a padding position does nothing.
+  real position, **truncate history through that position** — the
+  implementation calls `updatePersonHistory(personId, position, undefined)` which
+  sets `newHistory = person.history!.slice(position + 1)`
+  (`useSchedulingData.ts:636-639`). The selected entry and every **newer**
+  entry in the newest-first array are dropped, and only older entries
+  after the cleared position remain. (This matches the "drag to
+  clear" semantic at FR-SR-33.) Selecting `-- Clear --` at a padding
+  position does nothing.
 - **FR-SR-20** — The "Current People History" summary's Edit button opens the History
   Editor targeting `historyColumnsCount - person.history.length` (the leftmost real
   history slot) (page.tsx:2020).
@@ -248,7 +265,10 @@ date-group or a set of individual dates — never a mix.
   each row exactly 3 columns (`name, shift type, repetition count`); person IDs must be
   valid, unique, and complete; a non-empty shift type must exist in **`shiftTypeData.items`
   only**; an empty shift type is allowed and yields repetition 0 (clears that person's
-  history); the repetition count must be a non-negative integer. On success, each person's
+  history). The repetition count is parsed with `parseInt(repetitionStr)`
+  (`page.tsx:584-604`): only NaN and negative parsed values are rejected. This means
+  decimal or partially-numeric input such as `2.5` or `2abc` is **truncated to `2`**
+  rather than rejected, and `10` parses correctly. On success, each person's
   history is set to `repetitionCount` copies of the shift type and bulk-applied via
   `reorderItems` (page.tsx:614-651). Messages verbatim in the Validation table.
 
@@ -274,8 +294,11 @@ date-group or a set of individual dates — never a mix.
   when positive) and a neutral/wants/avoid caption (page.tsx:1912-1971). Empty state: `"No
   shift requests defined yet. Click on any cell in the matrix above to add preferences."`
 - **FR-SR-40** — **"Current People History"** lists each person with a non-empty history,
-  showing entries as `H-{position}` where `position = history.length - index` (H-1 = most
-  recent) (page.tsx:1973-2033). Empty state (shown when every person's history is empty):
+  showing entries as `H-{position}` where `position = person.history.length - index`.
+  Since `history[0]` is the newest entry (newest-first storage per FR-SR-07), this
+  renders `history[0]` as the **highest H-number** (matching the matrix header
+  `H-{historyColumnsCount - index}`) and the last/oldest entry as `H-1`
+  (`page.tsx:2002-2009`). Empty state (shown when every person's history is empty):
   `"No history entries defined yet. Click on any history cell in the matrix above to add
   entries."`
 
@@ -400,8 +423,13 @@ All messages below are verbatim. Placeholders in `{...}` are interpolated at run
   present, the matrix renders; if any is missing, exactly one guidance notice appears per
   the FR-SR-02 priority (dates → people → shift types) with the correct target link.
 - **AC-SR-02** — The matrix row order is people groups then individual people; the column
-  order is the People label column, then history columns (oldest H-{n} leftmost, H-1
-  rightmost), then date groups followed by individual dates.
+  order is the People label column, then history columns (H-{n} leftmost, H-1
+  rightmost — i.e. the highest H-number is on the left and the lowest on the right),
+  then date groups followed by individual dates. The `history[]` array is
+  in newest-first order (per FR-SR-07): `history[0]` is the **newest** entry and
+  renders under the highest H-number occupied by that person (e.g. `H-{history.length}`
+  for a person with a full history); the trailing `H-1` column holds the
+  **oldest** entry.
 - **AC-SR-03** — The history column count equals the longest person history length plus 1,
   and a person shorter than that renders right-aligned entries with blank left padding and
   exactly one interactive empty slot to the left of their entries.
@@ -416,13 +444,19 @@ All messages below are verbatim. Placeholders in `{...}` are interpolated at run
   mode those direct-open actions do not fire.
 - **AC-SR-07** — The history editor offers `-- Clear --` plus one option per shift-type
   **item**; choosing a type at a padding slot appends, at a real slot updates, and
-  `-- Clear --` at a real slot clears; `-- Clear --` at a padding slot is a no-op.
+  `-- Clear --` at a real slot **truncates history through that position** (the
+  selected entry and every newer entry in the newest-first array are dropped,
+  matching `updatePersonHistory` with no type);
+  `-- Clear --` at a padding slot is a no-op.
 - **AC-SR-08** — The Shift Preference Editor initializes from the cell's current
   preferences, treats weight 0 as removal, blocks Save on any invalid weight (modal stays
   open, no change persisted), and on valid Save fully replaces the cell's preferences.
 - **AC-SR-09** — Quick Add shows exactly one of the four status variants matching
-  (no-types / invalid-weight / zero-weight / valid) and never applies edits when the
-  weight is invalid.
+  (no-types / invalid-weight / zero-weight / valid). Edits are blocked only when the
+  weight is invalid **and** at least one shift type is selected (the apply-remove path);
+  when **no** shift types are selected (clear mode), an invalid weight input does **not**
+  block the clear gesture (the page calls `applyPreferenceCellEdit` directly without weight
+  validation — see `page.tsx:381-390, 1158-1169`).
 - **AC-SR-10** — In Quick Add, a drag applies each visited cell at most once; applying
   selected shift types merges with existing cell preferences (weight 0 removes), and
   selecting no shift types clears the whole cell; history-clear drags apply on mouse-up.
@@ -434,9 +468,11 @@ All messages below are verbatim. Placeholders in `{...}` are interpolated at run
   message verbatim; a valid file applies all cells at the current add-form weight and
   reports the processed count.
 - **AC-SR-13** — Uploading a people-history CSV enforces N rows × 3 columns, valid unique
-  complete person IDs, item-only shift types, and non-negative integer repetition counts,
+  complete person IDs, item-only shift types, and a non-negative parsed repetition count,
   emitting each listed message verbatim; a valid file rebuilds each person's history as N
-  copies of the shift type (empty type clears).
+  copies of the shift type (empty type clears). **Repetition counts are parsed with
+  `parseInt` — `2.5` and `2abc` are accepted and truncated to `2`; only NaN and negative
+  values are rejected.**
 - **AC-SR-14** — Each of the six Clear buttons prompts with its exact confirmation string
   and, when confirmed, removes precisely the targeted category (all history / all requests
   / the four person-scope × date-scope combinations); declining leaves data unchanged.
@@ -447,8 +483,10 @@ All messages below are verbatim. Placeholders in `{...}` are interpolated at run
   `k/m/b/t` suffixes (integer products only), rejects other non-numeric strings, and
   display labels abbreviate large values and render `±∞` for infinities.
 - **AC-SR-17** — The read-only summaries list current requests (Person, comma-joined dates,
-  Shift Type, signed Weight) and per-person histories (H-1 newest), each with its exact
-  empty-state string when nothing is defined.
+  Shift Type, signed Weight) and per-person histories (the `history[]` array is
+  in newest-first order per FR-SR-07, so `history[0]` is the newest and renders
+  as `H-{person.history.length}`; the trailing entry renders as `H-1` and is
+  the oldest), each with its exact empty-state string when nothing is defined.
 
 ## Cross-References
 

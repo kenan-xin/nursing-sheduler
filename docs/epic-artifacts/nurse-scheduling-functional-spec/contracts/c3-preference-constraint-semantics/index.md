@@ -28,12 +28,19 @@ conventions, error text shown to users).
 Scope covers:
 - The decision-variable model and the OFF/at-most-one invariant.
 - WEIGHT semantics through `add_objective`.
-- The **seven** preference types (six soft + one hard `shift type covering`),
+- The **seven** preference types and their hard/soft classification —
+  structural (no-op handler, enforced by the offs/shifts invariant) for
+  `at most one shift per day`; hard staffing bounds with optional soft
+  preferred-shortfall objective for `shift type requirement`; soft
+  weighted objectives with `±Infinity` → hard for `shift request` /
+  `shift type successions` / `shift count` / `shift affinity`; hard
+  reified (weight ignored) for `shift type covering`,
   their parameters/defaults, and the exact constraint/objective each builds.
 - Group / keyword / date resolution rules.
 - The full validation error catalog with exact messages.
 
-Out of scope: solver backend internals (OR-Tools CP-SAT, PuLP/CBC, PuLP/cuOpt),
+Out of scope: solver backend internals (current source: OR-Tools CP-SAT
+only — historical PuLP/CBC/cuOpt backends have been removed; see C4),
 export formatting, and the transport/serve layer. Helper primitives such as
 `create_bool_var_with_constraint`, `create_bool_and_var`,
 `should_use_bool_and_var`, `add_abs_equality`, `add_squared_equality`, and
@@ -103,9 +110,10 @@ The dispatch map `PREFERENCE_TYPES_TO_FUNC`
 (`core/nurse_scheduling/preference_types.py:622-629`) binds each `type` string
 to its handler. Handlers run in scenario order (`scheduler.py:273-278`).
 
-Type string constants (`models.py:29-34`):
+Type string constants (`models.py:29-35`):
 `"at most one shift per day"`, `"shift type requirement"`, `"shift request"`,
-`"shift type successions"`, `"shift count"`, `"shift affinity"`.
+`"shift type successions"`, `"shift count"`, `"shift affinity"`,
+`"shift type covering"`.
 
 **List-vs-nested-list convention (global rule).** Across the multi-selector
 preference types, a **top-level list element = one separate equation/term**,
@@ -368,11 +376,26 @@ The current Python core does **not** branch on `country` beyond this preconditio
 ### CON-SEM-07 — `shift type covering`
 
 - **Model:** `ShiftTypeCoveringPreference` (`models.py:304-323`). Params:
-  `date: (int|str|date) | list[...] | None` (default `None` = all dates),
+  `date: (int|str|date) | list[...] | None` (default `None`),
   `preceptors: list[int|str | list[int|str]]`,
   `preceptees: list[int|str | list[int|str]]`,
   `shiftTypes: list[str | list[str]]`,
   `weight: int|float = 1`.
+
+  **`date` semantics — important caveat:** the model field is `Optional`
+  with default `None`, but the **handler** (`preference_types.py:635`)
+  calls `utils.parse_dates(preference.date, ...)`, and
+  `parse_dates` (`:69-92`) returns an empty iterable when given `[]` or
+  `None`. The handler then iterates `ds` to build cross-product terms,
+  so a covering preference with `date: []` (or with no `date` key and
+  the model defaulting to `None`) emits **zero cross-product terms and
+  zero constraints** — i.e. the rule is a no-op for the solver. In
+  particular, "omit `date`" does **not** mean "apply to all dates" the
+  way `null` is treated for shift count / shift requirement
+  (`models.py:254-260`); the current backend interprets an empty/missing
+  `date` as **no dates**. For a "all dates" covering rule, the frontend
+  must explicitly emit `date: [ALL]` (or expand to every concrete date
+  id).
 - **Handler:** `shift_type_covering` (`preference_types.py:622-732`).
   Dispatch entry in `PREFERENCE_TYPES_TO_FUNC` at `preference_types.py:742`
   (`models.SHIFT_TYPE_COVERING: shift_type_covering`). "Hard constraint."
@@ -399,27 +422,55 @@ The current Python core does **not** branch on `country` beyond this preconditio
   - `any_preceptee = create_bool_var_with_constraint(sum(preceptee_vars) >= 1, (0, len(preceptee_vars)))`
   - `at_least_one_preceptor = create_bool_var_with_constraint(sum(preceptor_vars) >= 1, (0, len(preceptor_vars)))`
   - **Hard constraint:** `any_preceptee <= at_least_one_preceptor` (`:721`).
-    This encodes the implication
-    `preceptee on (d, s) ⇒ preceptor on (d, s)`
-    as a Boolean OR over each `(preceptor_group, preceptee_group, shift_type_group)`
-    combination. Equivalently
-    `(sum(preceptors shifts) >= 1)  OR  (sum(preceptees shifts) < 1)`.
+    This encodes
+    `(sum(preceptors shifts) >= 1)  OR  (sum(preceptees shifts) < 1)`
+    over the full cartesian product of the cross-product terms. **Note
+    on aggregate semantics:** the `preceptor_vars` and `preceptee_vars`
+    are built by iterating `for s in shift_type_group for p in person_group`,
+    so the "shift" half of the index covers **every shift in
+    `shift_type_group`**, not the same `s` in both halves. In other
+    words, a covering rule with `shiftTypes: [[D, E]]` is satisfied
+    whenever a preceptor works **either** D or E to cover a preceptee
+    working D or E; it does **not** require the same shift on both
+    sides. For strict per-shift coverage semantics, the frontend must
+    emit independent top-level elements (e.g. `shiftTypes: [D, E]`,
+    which expands to the two terms `[[D]]` and `[[E]]`).
 - **`weight` is accepted but not used.** The handler always emits a hard
   constraint. Passing `weight: float('inf')` or `weight: -1` produces
   identical hard-constraint behavior. The model keeps the field for
   schema uniformity with the other preference types.
-- **OFF handling:** none. `OFF` is **not** a valid `shiftTypes` element for
-  this preference (unlike `shift affinity`). The model does not special-case
-  `OFF_sid` in the reified variables — `OFF` referenced in `shiftTypes`
-  would resolve to `OFF_sid = -1` and is not a valid `shifts[(d, s, p)]`
-  index, so a covering rule including `OFF` would error at solve time. In
-  practice, the frontend only emits real shift-type ids here.
-- **Cross-product semantics:** because the constraint is built per
-  `(preceptor_group, preceptee_group, shift_type_group)` tuple, a covering
-  rule fires if **any** listed preceptor-group has a member working that
-  shift that day — equivalent to the `shift affinity` design's
-  "at least one member" formulation (CON-SEM-06). The cross-product
-  expansion is identical.
+- **OFF handling:** none. The model and handler do **not** special-case
+  `OFF_sid = -1` in the reified variables, and the
+  `preceptor_vars` / `preceptee_vars` list-comprehensions reference
+  `shifts[(d, s, p)]` which has no `s = -1` key. A covering rule
+  referencing `OFF` will therefore **error at solve time** (the
+  generated constraint references an undefined `shifts` key).
+  However, the **current frontend covering editor does not filter
+  `OFF`** out of the shift-type selector
+  (`web-frontend/src/app/shift-type-coverings/page.tsx:440-450`),
+  unlike the requirement editor which excludes `OFF`. The frontend
+  thus allows the user to author an `OFF`-bearing covering rule that
+  the backend will reject. **Note**: in practice the auto-generated
+  `OFF` item is appended to `shiftTypes.items`
+  (`schedulingGeneratedData.ts:131-134`), so `OFF` appears as a
+  selectable option in the covering shift-type multi-select. A rebuild
+  that wants to close this gap should exclude `OFF` from the covering
+  shift-type selector (matching the requirement editor's filter) or
+  document the current `OFF`-emits-error behavior as a known product
+  bug. The backend `OFF`-handling is unchanged either way.
+- **Cross-product semantics:** the handler builds the constraint per
+  `(preceptor_group, preceptee_group, shift_type_group)` tuple
+  (`:677-686`). **Each top-level `preceptors` element is a separate
+  required selector** (conjunctive over preceptor groups), each
+  top-level `preceptees` element is a separate antecedent, and each
+  top-level `shiftTypes` element is one equation's shift group
+  (aggregate over its inner list, per the aggregate-semantics note
+  above). A covering rule with `preceptors: [[A], [B]]` therefore
+  requires **both** group A to be present AND group B to be present
+  whenever a preceptee works (it is not "any group"). To express
+  alternatives, put them in a single nested selector or a single
+  people group, e.g. `preceptors: [[A, B]]`. The cross-product
+  expansion reifies one Boolean OR implication per tuple.
 - **Hard/soft:** hard; **non-negotiable**. The solver cannot leave a
   preceptee working without a preceptor present. There is no soft variant.
 - **Reporting:** each reified bool is appended to `ctx.reports`
@@ -556,7 +607,15 @@ exists.
 | E49 | `Date '{date}' is out of the range of start date and end date.` | utils.py:89 | Resolved date outside `[start, end]` | asserted in `test_scheduler.py:76` (`out of the range of start date and end date`) |
 | E50 | `Unsupported API version: {apiVersion}` (NotImplementedError) | scheduler.py:78 | `apiVersion != "alpha"` | asserted `test_scheduler.py:46` |
 | E51 | `Country {country} is not supported yet` | scheduler.py:110 | `country` not None/`"SG"` | asserted `test_scheduler.py:53` |
-| E52 | `Unsupported solver configuration: backend={backend!r}, engine={engine!r}` | scheduler.py:156 | Unknown solver string | asserted `test_scheduler.py:60` |
+| E52 | **(REMOVED from current backend.)** Historical message
+  `Unsupported solver configuration: backend={backend!r}, engine={engine!r}`
+  is no longer raised by the current code — the `schedule()` function
+  unconditionally instantiates `ORToolsSolver` and no solver-string
+  dispatch exists (`scheduler.py:136-139`). The PuLP/CBC/cuOpt
+  solver modules that previously could produce this string have been
+  removed from the source tree. The row is preserved here as a
+  migration marker; do not implement it in a rebuilt frontend or
+  test. | — | — | — |
 | E53 | `Invalid value: {value}` | scheduler.py:188 | `avoid_solution` value not 0/1 | asserted `test_scheduler.py:68` |
 | E54 | `No solution found! Status: {status}` | scheduler.py:333 | Solver returns non-OPTIMAL/FEASIBLE/INFEASIBLE/MODEL_INVALID | asserted `test_scheduler.py:638` |
 

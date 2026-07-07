@@ -91,12 +91,19 @@ Serialization uses `indent: 2, lineWidth: 120, noRefs: true`
 and `noCompatMode: true (yamlGenerator.ts:56, 77). Output is .trim()-ed and`
 a single trailing newline `'\n' is appended (yamlGenerator.ts:115).`
 
-**FR-SL-06 — Byte-stable / idempotent output.**
-Because key order is fixed (FR-SL-01/02), leaf-array flow style is deterministic,
-and `loadFromYaml re-normalizes preference/export ordering`
-(`normalizePreferencesOrder, normalizeExportConfigOrder,`
-`useSchedulingData.ts:960-961), serializing → loading → re-serializing the same`
-scenario MUST produce byte-identical YAML.
+**FR-SL-06 — Byte-stable / idempotent output (UI-emitted YAML only).**
+Because key order is fixed (FR-SL-01/02), leaf-array flow style is
+deterministic, and `loadFromYaml` re-normalizes preference/export ordering
+(`normalizePreferencesOrder, normalizeExportConfigOrder`,
+`useSchedulingData.ts:960-961`), serializing → loading → re-serializing
+**the same YAML previously produced by this UI at the current
+appVersion** MUST produce byte-identical YAML. This does **not** hold
+for hand-authored or backend-shaped YAML — `loadFromYaml` normalizes
+scalar references to arrays (FR-SL-23/24/27/28), injects explicit
+`date: [ALL]` defaults for omitted requirement/succession `date`
+fields (FR-SL-27), and warns on advanced/nested reference syntax; the
+first round-trip mutates shape. See the edge note on
+byte-stability (after FR-SL-37).
 
 ### Download
 
@@ -335,38 +342,53 @@ On a thrown error:
 `alert( `Unable to randomize shift requests: ${error instanceof Error ? error.message : 'Unknown error'}` )`
 (`page.tsx:119-121).`
 
-**FR-SL-36 — Anonymize transform (shared).**
-`anonymizeSchedulingState / anonymizeSchedulingStateWithMapping`
-(`anonymizeSchedulingState.ts:93-156):`
+ **FR-SL-36 — Anonymize transform (shared).**
+ `anonymizeSchedulingState / anonymizeSchedulingStateWithMapping`
+ (`anonymizeSchedulingState.ts:93-156):**
 
-- Builds sequential replacement IDs: people **items → ****`P1, P2, …, people`**
-**groups → ****`G1, G2, … (`**`buildIdMap, :43-59), each incrementing and`
-**skipping any id already in ****`usedIds so anonymized IDs never collide with`**
-retained (non-anonymized) IDs (`:97-111).`
-- Rewrites `people.items[].id; people.groups[].id and .members; and every`
-preference by type (`anonymizePreference, :61-76): requirement →`
-`qualifiedPeople; request/successions/count → person; affinity → people1`
-/ `people2 mapped through mapReferenceIdTree (nested-tree aware).`
-- Rewrites `export.formatting[].people (rules that have people) and`
-`export.extraRows[].countPeople when state.export exists (:127-140).`
-- Optional `removeDescriptions strips every description field recursively`
-(`removeDescriptionFields, :78-91). This option is `**not set by the**
-Save/Load panel (descriptions are preserved); the panel copy states
-`"Free-text descriptions are not changed." (page.tsx:322-323).`
+- Builds sequential replacement IDs: people items → `P1, P2, …`, people
+  groups → `G1, G2, …` (`buildIdMap, :43-59`), each incrementing and
+  skipping any id already in `usedIds` so anonymized IDs never collide
+  with retained (non-anonymized) IDs (`:97-111`).
+- Rewrites `people.items[].id; people.groups[].id and .members; and every
+  preference by type (`anonymizePreference, :61-76): requirement →
+  qualifiedPeople; request/successions/count → person; affinity → people1
+  / people2; **shift type covering → preceptors / preceptees / shiftTypes
+  (`:76-83`)** — all mapped through `mapReferenceIdTree` (nested-tree
+  aware). **Note**: covering `.shiftTypes` is also passed through the
+  people-only anonymization map, so a shift-type id that collides with a
+  people/group ID would be rewritten. (Incidental parity quirk: in
+  practice shift-type ids do not collide with people/group ids because
+  the two namespaces are separate, so the rewrite is a no-op for normal
+  schedules.)
+- Rewrites `export.formatting[].people (rules that have people) and
+  `export.extraRows[].countPeople` when `state.export` exists (`:127-140`).
+- Optional `removeDescriptions` strips every `description` field
+  recursively (`removeDescriptionFields, :78-91`). This option is **not
+  set by the Save/Load panel** (descriptions are preserved); the panel
+  copy states `"Free-text descriptions are not changed."`
+  (`page.tsx:322-323`).
 
 **FR-SL-37 — Scatter shift requests (developer-only) preserves category counts & runs.**
-`randomizeConcreteDateShiftRequests (randomizeShiftRequests.ts:167-215) scatters`
-only single-person, single-shift-type `SHIFT_REQUEST preferences whose person`
-is a concrete people item and whose `dates are all concrete date items; group/`
-keyword requests (e.g. `ALL, WORKDAY, teams) are left as written. Each person`
-is scattered independently, moving consecutive requested-date **runs as blocks**
-into destination slots with identical WORKDAY/FREEDAY (or WEEKDAY/WEEKEND)
-category counts, so preferred WORKDAY/FREEDAY totals and consecutive-run lengths
-are preserved (panel copy: `page.tsx:362-364). It throws`
-`"Cannot scatter shift requests with multiple people or multiple shift types."`
-(`:181-183), `Date "${item.id}" must belong to exactly one of ${firstCategoryId} or ${secondCategoryId}."` (:66), or`
+`randomizeConcreteDateShiftRequests` (`randomizeShiftRequests.ts:167-215`)
+scatters only single-person, single-shift-type `SHIFT_REQUEST` preferences
+whose person is a concrete people item and whose dates are all concrete
+date items; group/keyword requests (e.g. `ALL`, `WORKDAY`, `teams`) are
+left as written. Each person is scattered independently, moving
+consecutive requested-date **runs as blocks** into destination slots with
+identical WORKDAY/FREEDAY (or WEEKDAY/WEEKEND) category counts, so
+preferred WORKDAY/FREEDAY totals and consecutive-run lengths are
+preserved (panel copy: `page.tsx:362-364`). **Guard order**:
+scatter first **rejects any `SHIFT_REQUEST` whose `person.length !==
+1` or `shiftType.length !== 1`** with
+`"Cannot scatter shift requests with multiple people or multiple shift
+types."` (`randomizeShiftRequests.ts:180-183`) — this throw fires
+before concrete-item filtering and aborts the entire anonymized
+download regardless of whether the offending request is movable.
+Then it throws `Date "${item.id}" must belong to exactly one of
+${firstCategoryId} or ${secondCategoryId}.` (`:66`), or
 `"Unable to scatter shift requests without overlapping consecutive runs."`
-(`:147-149) — all surfaced via FR-SL-35's alert.`
+(`:147-149`) — all surfaced via FR-SL-35's alert.
 
 **FR-SL-38 — Missing preferred-group warning for scatter.**
 `getMissingPreferredScatterDateGroups(dateData.groups)`
@@ -395,7 +417,7 @@ All strings verbatim. `${...} are runtime substitutions.`
 | V2 | Drop event with no file | `alert` | `No file was dropped.` | `UploadButton.tsx:93` |
 | V3 | Uploaded file has empty content | `alert` | `No content found in the uploaded file.` | `page.tsx:203` |
 | V4 | Upload YAML parses OK | `alert` | `YAML file loaded successfully!` | `page.tsx:223` |
-| V5 | Upload YAML parse/normalize throws | `alert` | `Error loading YAML file: ${error.message |  |
+| V5 | Upload YAML parse/normalize throws | `alert` | `Error loading YAML file: ${error instanceof Error ? error.message : 'Invalid YAML format'}` |
 | V6 | Edit-YAML Save parse/normalize throws | inline error | `${error.message} or Invalid YAML format` | `page.tsx:194, 414-420` |
 | V7 | Version missing on load/save | `confirm (prefix)` | `The loaded file does not contain app version information. It may have been created with an older version of the application. Current app version: ${CURRENT_APP_VERSION}` | `page.tsx:158` |
 | V8 | Version ends with `-dirty` | `confirm (prefix)` | `Dirty app version detected.\\n\\nFile app version: ${fileVersion}\\nCurrent app version: ${CURRENT_APP_VERSION}\\n\\nThis YAML was created by a development build with uncommitted changes. It may not match a reproducible application version. If nothing breaks, you can continue.` | `page.tsx:162` |
@@ -409,7 +431,7 @@ All strings verbatim. `${...} are runtime substitutions.`
 | V16 | Scatter: multi-person/multi-shift-type request | `throw (→ V19)` | `Cannot scatter shift requests with multiple people or multiple shift types.` | `randomizeShiftRequests.ts:182` |
 | V17 | Scatter: date not in exactly one category | `throw (→ V19)` | `Date "${item.id}" must belong to exactly one of ${firstCategoryId} or ${secondCategoryId}.` | `randomizeShiftRequests.ts:66` |
 | V18 | Scatter: no non-overlapping placement | `throw (→ V19)` | `Unable to scatter shift requests without overlapping consecutive runs.` | `randomizeShiftRequests.ts:148` |
-| V19 | Anonymized download error wrapper | `alert` | `Unable to randomize shift requests: ${error.message |  |
+| V19 | Anonymized download error wrapper | `alert` | `Unable to randomize shift requests: ${error instanceof Error ? error.message : 'Unknown error'}` |
 | V20 | Scatter groups missing (panel) | inline text | `Warning: ${missing.join(' and ')} ${missing.length === 1 ? 'group is' : 'groups are'} missing. Scattering will fall back to WEEKDAY and WEEKEND groups.` | `page.tsx:366-369` |
 
 ## Edge Cases & Quirks
@@ -463,9 +485,15 @@ pick so choosing the identical file fires `onChange again (FR-SL-11).`
 - **AC-SL-01 — Given a scenario, when the current-state YAML is generated, then**
 top-level keys appear in order `apiVersion, description, dates, people, shiftTypes, preferences, [export], appVersion, with appVersion last and`
 `export present iff the scenario has an export config.`
-- **AC-SL-02 — Given a scenario whose **`appVersion equals the current app`
-version, when it is serialized then loaded then re-serialized, then the output
-is byte-identical (including the single trailing newline).
+- **AC-SL-02 — Given a scenario whose YAML was produced by this UI at
+the current `appVersion` and matches the current web-emit shape (no
+scalar references, no nested reference trees, no omitted
+requirement/succession `date`), when it is serialized then loaded
+then re-serialized, then the output is byte-identical (including the
+single trailing newline). Hand-authored or backend-shaped YAML does
+**not** round-trip byte-identical: scalar references become arrays,
+nested reference trees are warned on, and missing requirement/succession
+`date` defaults to `[ALL]`.
 - **AC-SL-03 — Given a field that is an array of only primitives, when**
 serialized, then it renders in flow style `[a, b]; given an array containing a`
 nested array, then it renders in block style.

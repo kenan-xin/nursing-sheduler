@@ -385,8 +385,12 @@ Pages call it with their open-editor flag, e.g.
 There is **no** `beforeunload` handler anywhere; closing/reloading the browser
 tab or hard-navigating away is never intercepted (grep for `beforeunload`
 returns no matches). The unsaved-edit guard covers only in-app tab switches
-through `navigateToTab`. Because persistence is immediate (FR-ST-08), the latest
-edits are already saved regardless.
+through `navigateToTab`. Persistence is immediate (FR-ST-08) for **store
+mutations** only — local form drafts (e.g. typed-but-not-saved fields in
+the shift-type-covering or shift-counts add/edit form, which live in
+React component state, not the global store) are **not** persisted and
+are lost on reload/close. Only already-committed scheduling state
+survives hard navigation; an open add/edit form does not.
 
 ### Scroll save / restore
 
@@ -567,8 +571,11 @@ outside its provider (`unsavedEditingState.ts:62-69`).
 - **AC-ST-24** Given a scroll position was saved before opening an editor, when the
   editor closes (cancel or save), then the window scrolls instantly back to the
   saved offset after the next paint, and the saved slot is cleared.
-- **AC-ST-25** Given the browser tab is closed or reloaded with an editor open, then
-  no unsaved-edit prompt appears and the most recent edits remain persisted.
+- **AC-ST-25** Given the browser tab is closed or reloaded with an editor
+  open, then no unsaved-edit prompt appears; the most recent **committed**
+  store mutations remain persisted, but the open local form draft is
+  lost on reload (form drafts are component-local state, not store state;
+  see FR-ST-34).
 
 ---
 
