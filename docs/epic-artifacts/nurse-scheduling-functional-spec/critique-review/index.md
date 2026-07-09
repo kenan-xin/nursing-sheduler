@@ -1,6 +1,6 @@
 ---
-kind: review
 title: "Critique — Functional Spec Set (pre-design pressure test)"
+kind: review
 ---
 
 # Critique — Functional Spec Set (pre-design pressure test)
