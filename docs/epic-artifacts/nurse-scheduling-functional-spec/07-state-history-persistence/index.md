@@ -1,7 +1,6 @@
 ---
-kind: spec
 title: "State, History, Persistence & Global Interaction"
-prefix: ST
+kind: spec
 ---
 
 # State, History, Persistence & Global Interaction
@@ -14,587 +13,579 @@ store, its undo/redo history, immediate persistence to browser local storage,
 the unsaved-edit guard that gates tab switches, the fixed 13-tab navigation with
 its keyboard shortcuts, and the scroll save/restore utility. It is written to
 achieve strict behavioral parity with the existing implementation and is
-UI-agnostic: it describes *what* the store, history, persistence, and global
+UI-agnostic: it describes *what the store, history, persistence, and global*
 input handlers must do, not the specific widget markup.
 
-Everything the user edits lives in one store shape (`SchedulingState`) wrapped in
-a history container (`HistoryState`). Every mutation immediately (1) recomputes
+Everything the user edits lives in one store shape (`SchedulingState) wrapped in`
+a history container (`HistoryState). Every mutation immediately (1) recomputes`
 auto-generated data, (2) appends a history entry, and (3) writes the entire
 history to local storage. Undo/redo simply move an index within that stored
 history. Global keyboard handlers provide undo/redo and tab navigation.
 
 Sources of truth:
-`web-frontend/src/hooks/schedulingState.ts`,
-`web-frontend/src/hooks/schedulingStorage.ts`,
-`web-frontend/src/hooks/schedulingHistory.ts`,
-`web-frontend/src/hooks/schedulingConstants.ts`,
-`web-frontend/src/hooks/useSchedulingData.ts`,
-`web-frontend/src/hooks/schedulingGeneratedData.ts`,
-`web-frontend/src/utils/unsavedEditingState.ts`,
-`web-frontend/src/utils/scrolling.ts`,
-`web-frontend/src/utils/keyboardEvents.ts`,
-`web-frontend/src/components/Navigation.tsx`,
-`web-frontend/src/app/layout.tsx`,
-`web-frontend/src/constants/modes.ts`.
+`web-frontend/src/hooks/schedulingState.ts,`
+`web-frontend/src/hooks/schedulingStorage.ts,`
+`web-frontend/src/hooks/schedulingHistory.ts,`
+`web-frontend/src/hooks/schedulingConstants.ts,`
+`web-frontend/src/hooks/useSchedulingData.ts,`
+`web-frontend/src/hooks/schedulingGeneratedData.ts,`
+`web-frontend/src/utils/unsavedEditingState.ts,`
+`web-frontend/src/utils/scrolling.ts,`
+`web-frontend/src/utils/keyboardEvents.ts,`
+`web-frontend/src/components/Navigation.tsx,`
+`web-frontend/src/app/layout.tsx,`
+`web-frontend/src/constants/modes.ts.`
 
 ### Out of scope (explicit exclusions)
 
-The following global-layout features are intentionally **excluded** from this
+The following global-layout features are intentionally **excluded from this**
 artifact and are covered elsewhere; they are mentioned here only so their
 absence is deliberate, not an omission:
 
-- **Cross-tab-sync storage banner** — the `storage` event listener,
-  `hasExternalStorageChange` flag, `reloadFromStorage`/`dismissExternalStorageChange`,
-  and `ExternalStorageChangeBanner` (`useSchedulingData.ts:56`, `:69-78`, `:975-983`,
-  `:1040-1078`, `:1122-1127`).
-- **GitHub version-check banner** — `VersionWarningBanner` (`layout.tsx:25`, `:77`).
-- **Build-origin / app-version selector** — `AppVersionText`, `CURRENT_APP_VERSION`
-  (`layout.tsx:24`, `:28`, `:92-97`).
-- **Google Analytics** — the `gtag` `<Script>` tags (`layout.tsx:61-74`).
-- **Sentry** — `setLatestSchedulingStateForSentry` (`useSchedulingData.ts:27`, `:59-61`).
-- **YAML import warnings banner** — `yamlImportWarnings`, `YamlImportWarningsBanner`
-  (covered by the Save/Load artifact).
-
----
+- **Cross-tab-sync storage banner — the **`storage event listener,`
+`hasExternalStorageChange flag, reloadFromStorage/dismissExternalStorageChange,`
+and `ExternalStorageChangeBanner (useSchedulingData.ts:56, :69-78, :975-983,`
+`:1040-1078, :1122-1127).`
+- **GitHub version-check banner — **`VersionWarningBanner (layout.tsx:25, :77).`
+- **Build-origin / app-version selector — **`AppVersionText, CURRENT_APP_VERSION`
+(`layout.tsx:24, :28, :92-97).`
+- **Google Analytics — the **`gtag <Script> tags (layout.tsx:61-74).`
+- **Sentry — **`setLatestSchedulingStateForSentry (useSchedulingData.ts:27, :59-61).`
+- **YAML import warnings banner — **`yamlImportWarnings, YamlImportWarningsBanner`
+(covered by the Save/Load artifact).
 
 ## Functional Requirements
 
 ### Single store shape
 
-**FR-ST-01 — Single `SchedulingState` store shape.**
+**FR-ST-01 — Single ****`SchedulingState`**** store shape.**
 The entire editable model is one object with exactly these fields
-(`schedulingState.ts:24-32`):
-`apiVersion: string | number`, `description: string`,
-`dates: { range: DateRange, items: Item[], groups: Group[] }`,
-`people: { items: Item[], groups: Group[] }`,
-`shiftTypes: { items: Item[], groups: Group[] }`,
-`preferences: Preference[]`, and optional `export?: ExportConfig`.
+(`schedulingState.ts:24-32):`
+`apiVersion: string | number, description: string,`
+`dates: { range: DateRange, items: Item[], groups: Group[] },`
+`people: { items: Item[], groups: Group[] },`
+`shiftTypes: { items: Item[], groups: Group[] },`
+`preferences: Preference[], and optional export?: ExportConfig.`
 All page-level reads are projections of this single object
-(`useSchedulingData.ts:996-1003`: `apiVersionData`, `descriptionData`,
-`dateData`, `peopleData`, `shiftTypeData`, `preferences`, `exportData`).
+(`useSchedulingData.ts:996-1003: apiVersionData, descriptionData,`
+`dateData, peopleData, shiftTypeData, preferences, exportData).`
 
 **FR-ST-02 — History container shape.**
-The store is held inside a `HistoryState` with three fields
-(`schedulingHistory.ts:25-29`): `state: SchedulingState` (the currently
-displayed state), `history: SchedulingState[]` (the ordered list of past/future
-snapshots), and `currentHistoryIndex: number` (the index within `history` that
-`state` corresponds to). `historyState` is the sole `useState` value backing the
-data provider (`useSchedulingData.ts:55`).
+The store is held inside a `HistoryState with three fields`
+(`schedulingHistory.ts:25-29): state: SchedulingState (the currently`
+displayed state), `history: SchedulingState[] (the ordered list of past/future`
+snapshots), and `currentHistoryIndex: number (the index within history that`
+`state corresponds to). historyState is the sole useState value backing the`
+data provider (`useSchedulingData.ts:55).`
 
 **FR-ST-03 — Default state.**
 On first load (no persisted data) the store is initialized from
-`createDefaultState()` wrapped by `addAutoGeneratedToState()`
-(`schedulingHistory.ts:35-42`), producing: `apiVersion` = `'alpha'`
-(the `API_VERSION` keyword, `keywords.ts:35`), empty `description`, an empty
-date range with two seed date groups `WORKDAY` ("Workdays") and `FREEDAY`
-("Freedays") (`schedulingState.ts:76-90`), 10 seed people `Person 1..Person 10`
+`createDefaultState() wrapped by addAutoGeneratedToState()`
+(`schedulingHistory.ts:35-42), producing: apiVersion = 'alpha'`
+(the `API_VERSION keyword, keywords.ts:35), empty description, an empty`
+date range with three seed date groups `WORKDAY ("Workdays"), NON-WORKDAY`
+("Non-Work Days"), and `PH ("Public Holidays") — all with empty members`
+`(`schedulingState.ts:76-90; see decision log 04-ph-default-group), 10 seed`
+people Person 1..Person 10`
 with 5 seed people-groups, 9 seed shift-type items and 4 seed shift-type groups
-(`schedulingState.ts:34-71`), and a single default preference
-`{ type: AT_MOST_ONE_SHIFT_PER_DAY }` (`schedulingState.ts:97-102`).
-The default `HistoryState` is `{ state: defaultState, history: [defaultState],
-currentHistoryIndex: 0 }` (`schedulingHistory.ts:37-41`).
+(`schedulingState.ts:34-71), and a single default preference`
+`{ type: AT_MOST_ONE_SHIFT_PER_DAY } (schedulingState.ts:97-102).`
+The default `HistoryState is { state: defaultState, history: [defaultState], currentHistoryIndex: 0 } (schedulingHistory.ts:37-41).`
 
 **FR-ST-04 — Auto-generated data is derived, never authored.**
 On every mutation the updater's result is passed through
-`addAutoGeneratedToState()` before it is stored as `state`
-(`useSchedulingData.ts:86`). Auto-generated date items are computed from the
-date range and auto-generated items/groups (flagged `isAutoGenerated: true`) are
-appended for dates, people, and shift types (`schedulingGeneratedData.ts:118-137`).
-`normalizeStateForFrontend()` additionally re-normalizes preference and export
-ordering when hydrating from storage (`schedulingGeneratedData.ts:139-146`).
+`addAutoGeneratedToState() before it is stored as state`
+(`useSchedulingData.ts:86). Auto-generated date items are computed from the`
+date range and auto-generated items/groups (flagged `isAutoGenerated: true) are`
+appended for dates, people, and shift types (`schedulingGeneratedData.ts:118-137).`
+`normalizeStateForFrontend() additionally re-normalizes preference and export`
+ordering when hydrating from storage (`schedulingGeneratedData.ts:139-146).`
 
 ### Persistence — key and payload
 
 **FR-ST-05 — Local-storage key.**
 Persisted data is written under the key `nurse-scheduling-data`
-(`STORAGE_KEY`, `schedulingConstants.ts:20`). The effective key is resolved by
-`getStorageKey()`: if a Playwright worker namespace is present on `window` under
-`__PLAYWRIGHT_WORKER_NAMESPACE__` it becomes `nurse-scheduling-data__<namespace>`;
-otherwise it is exactly `nurse-scheduling-data` (`schedulingStorage.ts:137-142`).
-On the server (`typeof window === 'undefined'`) it returns the bare
-`STORAGE_KEY`.
+(`STORAGE_KEY, schedulingConstants.ts:20). The effective key is resolved by`
+`getStorageKey(): if a Playwright worker namespace is present on window under`
+`__PLAYWRIGHT_WORKER_NAMESPACE__ it becomes nurse-scheduling-data__<namespace>;`
+otherwise it is exactly `nurse-scheduling-data (schedulingStorage.ts:137-142).`
+On the server (`typeof window === 'undefined') it returns the bare`
+`STORAGE_KEY.`
 
 **FR-ST-06 — What is persisted.**
-`saveStateToStorage()` serializes the full history container
-(`schedulingStorage.ts:98-135`) with these transformations:
-- Both the current `state` and every entry of `history` are passed through
-  `filterAutoGeneratedState()` so auto-generated items and groups are stripped
-  (`schedulingStorage.ts:105`, `:115`; filter at
-  `schedulingGeneratedData.ts:98-116`).
-- `dates.range.startDate` / `dates.range.endDate` are stored as date-only
-  strings via `toISOString().split('T')[0]` (i.e. `YYYY-MM-DD`), or `undefined`
-  when unset (`schedulingStorage.ts:108-111`, `:118-122`).
-- `dates.items` is set to `undefined` for both the current state and every
-  history entry — **computed date items are never stored**
-  (`schedulingStorage.ts:112`, `:123`).
-- `currentHistoryIndex` is stored verbatim (`schedulingStorage.ts:126`).
-- The whole payload is passed through `replaceInfinityValues()` before
-  `JSON.stringify` (`schedulingStorage.ts:130-131`).
+`saveStateToStorage() serializes the full history container`
+(`schedulingStorage.ts:98-135) with these transformations:`
+
+- Both the current `state and every entry of history are passed through`
+`filterAutoGeneratedState() so auto-generated items and groups are stripped`
+(`schedulingStorage.ts:105, :115; filter at`
+`schedulingGeneratedData.ts:98-116).`
+- `dates.range.startDate / dates.range.endDate are stored as date-only`
+strings via `toISOString().split('T')[0] (i.e. YYYY-MM-DD), or undefined`
+when unset (`schedulingStorage.ts:108-111, :118-122).`
+- `dates.items is set to undefined for both the current state and every`
+history entry — **computed date items are never stored**
+(`schedulingStorage.ts:112, :123).`
+- `currentHistoryIndex is stored verbatim (schedulingStorage.ts:126).`
+- The whole payload is passed through `replaceInfinityValues() before`
+`JSON.stringify (schedulingStorage.ts:130-131).`
 
 **FR-ST-07 — Infinity encoding round-trip.**
-Because `JSON.stringify` turns `Infinity`/`-Infinity` into `null`, values are
+Because `JSON.stringify turns Infinity/-Infinity into null, values are`
 substituted on save and restored on load
-(`schedulingConstants.ts:23-27`, `schedulingStorage.ts:24-68`):
-`Infinity` <-> the string `'__INFINITY__'` (`INFINITY_PLACEHOLDER`), and
-`-Infinity` <-> `'__NEGATIVE_INFINITY__'` (`NEGATIVE_INFINITY_PLACEHOLDER`).
-`replaceInfinityValues`/`restoreInfinityValues` recurse through arrays and plain
+(`schedulingConstants.ts:23-27, schedulingStorage.ts:24-68):`
+`Infinity <-> the string '__INFINITY__' (INFINITY_PLACEHOLDER), and`
+`-Infinity <-> '__NEGATIVE_INFINITY__' (NEGATIVE_INFINITY_PLACEHOLDER).`
+`replaceInfinityValues/restoreInfinityValues recurse through arrays and plain`
 objects, leaving all other values untouched.
 
 **FR-ST-08 — Immediate autosave on every mutation (no debounce).**
 Every state transition writes to local storage synchronously within the same
 state-setter callback; there is no debounce, throttle, or batching timer:
-- `updateState()` calls `saveStateToStorage(newHistoryState)` immediately
-  (`useSchedulingData.ts:85-90`).
-- Undo/redo via `moveHistoryIndex()` saves immediately (`useSchedulingData.ts:113`).
-- `createNewState()` (New Schedule) saves immediately (`useSchedulingData.ts:219-223`).
-- `loadFromYaml()` saves immediately (`useSchedulingData.ts:965-969`).
+
+- `updateState() calls saveStateToStorage(newHistoryState) immediately`
+(`useSchedulingData.ts:85-90).`
+- Undo/redo via `moveHistoryIndex() saves immediately (useSchedulingData.ts:113).`
+- `createNewState() (New Schedule) saves immediately (useSchedulingData.ts:219-223).`
+- `loadFromYaml() saves immediately (useSchedulingData.ts:965-969).`
 
 ### Persistence — load / hydration
 
 **FR-ST-09 — Hydration timing.**
-The initial `useState` value is the default history state (`useSchedulingData.ts:55`),
-and persisted data is loaded via `loadStateFromStorage()` inside a
-layout effect that runs before the browser paints when `window` exists
-(`useIsomorphicLayoutEffect`, `useSchedulingData.ts:48`, `:65-67`), so the
+The initial `useState value is the default history state (useSchedulingData.ts:55),`
+and persisted data is loaded via `loadStateFromStorage() inside a`
+layout effect that runs before the browser paints when `window exists`
+(`useIsomorphicLayoutEffect, useSchedulingData.ts:48, :65-67), so the`
 default schedule is not briefly shown when persisted data exists.
 
 **FR-ST-10 — Load procedure and index clamp.**
-`loadStateFromStorage()` (`schedulingStorage.ts:70-96`):
-- Returns the default history state when `window` is undefined or when no value
-  is stored under the resolved key.
-- Parses the JSON, then applies `restoreInfinityValues()` to the whole object.
-- Rehydrates `dates.range.startDate`/`endDate` on both every history entry and
-  the current state, converting stored strings back to `Date` objects (or
-  `undefined`) (`schedulingStorage.ts:80-83`).
-- Runs the current state through `normalizeStateForFrontend()` and maps every
-  history entry through `normalizeStateForFrontend()` (re-adds auto-generated
-  data and re-normalizes ordering) (`schedulingStorage.ts:85`, `:89`).
+`loadStateFromStorage() (schedulingStorage.ts:70-96):`
+
+- Returns the default history state when `window is undefined or when no value`
+is stored under the resolved key.
+- Parses the JSON, then applies `restoreInfinityValues() to the whole object.`
+- Rehydrates `dates.range.startDate/endDate on both every history entry and`
+the current state, converting stored strings back to `Date objects (or`
+`undefined) (schedulingStorage.ts:80-83).`
+- Runs the current state through `normalizeStateForFrontend() and maps every`
+history entry through `normalizeStateForFrontend() (re-adds auto-generated`
+data and re-normalizes ordering) (`schedulingStorage.ts:85, :89).`
 - Clamps the restored index to
-  `Math.max(0, Math.min(currentHistoryIndex || 0, history.length - 1))`
-  (`schedulingStorage.ts:90`), guaranteeing a valid in-range index even if the
-  stored index is out of range, negative, missing, or falsy.
+`Math.max(0, Math.min(currentHistoryIndex || 0, history.length - 1))`
+(`schedulingStorage.ts:90), guaranteeing a valid in-range index even if the`
+stored index is out of range, negative, missing, or falsy.
 
 **FR-ST-11 — Fallback to default on any load error.**
 Any exception during load (e.g. malformed JSON) is caught, logged with
-`console.error('Failed to load data from localStorage:', error)`, and
-`createDefaultHistoryState()` is returned (`schedulingStorage.ts:92-95`).
+`console.error('Failed to load data from localStorage:', error), and`
+`createDefaultHistoryState() is returned (schedulingStorage.ts:92-95).`
 Likewise a save failure is caught and logged with
-`console.error('Failed to save data to localStorage:', error)` without throwing
-(`schedulingStorage.ts:132-134`).
+`console.error('Failed to save data to localStorage:', error) without throwing`
+(`schedulingStorage.ts:132-134).`
 
 **FR-ST-12 — No versioning or migration.**
-`apiVersion` is round-tripped through the store, persistence, and YAML import
-(`schedulingState.ts:25`, `:92`; `useSchedulingData.ts:787`, `:996`) but is
-**never inspected, compared, or used to trigger any migration** on load. There
+`apiVersion is round-tripped through the store, persistence, and YAML import`
+(`schedulingState.ts:25, :92; useSchedulingData.ts:787, :996) but is`
+**never inspected, compared, or used to trigger any migration on load. There**
 is no schema-version gate: stored data of any shape is fed directly into
-`normalizeStateForFrontend()` and the index clamp, and only a thrown parse/shape
+`normalizeStateForFrontend() and the index clamp, and only a thrown parse/shape`
 error triggers the default-state fallback (FR-ST-11).
 
 ### Undo / redo history
 
 **FR-ST-13 — Append to history with redo-tail truncation.**
-`addToHistory()` (`schedulingHistory.ts:44-69`) first truncates any redo tail by
-slicing `history` to `[0, currentHistoryIndex + 1]`, then appends the new state
+`addToHistory() (schedulingHistory.ts:44-69) first truncates any redo tail by`
+slicing `history to [0, currentHistoryIndex + 1], then appends the new state`
 (or replaces the last entry — see FR-ST-15). This means: making a new edit after
 undoing discards all previously-undone (future) states.
 
-**FR-ST-14 — Bounded history size (`MAX_HISTORY_SIZE = 50`).**
-When the resulting history exceeds `MAX_HISTORY_SIZE` (50), it is trimmed to the
-most recent 50 entries via `slice(-MAX_HISTORY_SIZE)`; `currentHistoryIndex` is
-set to `limitedHistory.length - 1` (`schedulingHistory.ts:23`, `:57-67`). The new
-`state` is always the just-added `newState`.
+**FR-ST-14 — Bounded history size (****`MAX_HISTORY_SIZE = 50`****).**
+When the resulting history exceeds `MAX_HISTORY_SIZE (50), it is trimmed to the`
+most recent 50 entries via `slice(-MAX_HISTORY_SIZE); currentHistoryIndex is`
+set to `limitedHistory.length - 1 (schedulingHistory.ts:23, :57-67). The new`
+`state is always the just-added newState.`
 
-**FR-ST-15 — Continuous-edit coalescing (`replaceLatestHistoryEntry`).**
-When a mutation passes `{ replaceLatestHistoryEntry: true }` and the trimmed
-history is non-empty, the new state **replaces** the last history entry instead
-of appending (`schedulingHistory.ts:52-55`). This coalesces a continuous gesture
+**FR-ST-15 — Continuous-edit coalescing (****`replaceLatestHistoryEntry`****).**
+When a mutation passes `{ replaceLatestHistoryEntry: true } and the trimmed`
+history is non-empty, the new state **replaces the last history entry instead**
+of appending (`schedulingHistory.ts:52-55). This coalesces a continuous gesture`
 (e.g. a drag across many cells, or a paint sequence in shift-requests) into a
 single undo step. Consumers set the flag only on the second and subsequent
 events of one gesture, keeping the first event as the undo boundary
-(e.g. shift-requests drag: `replaceLatestHistoryEntry` starts `false` then flips
-to `true`, `useSchedulingData.ts:207-213`; drag logic in
-`app/shift-requests/page.tsx:1083`, `:1158-1238`). Mixing add/update history
+(e.g. shift-requests drag: `replaceLatestHistoryEntry starts false then flips`
+to `true, useSchedulingData.ts:207-213; drag logic in`
+`app/shift-requests/page.tsx:1083, :1158-1238). Mixing add/update history`
 mutators within one gesture still yields one-step undo semantics
-(covered by `useSchedulingData.test.ts:852-923`).
+(covered by `useSchedulingData.test.ts:852-923).`
 
 **FR-ST-16 — One history boundary per action.**
 Each discrete user action produces exactly one new history entry (one undo
-step). Ordinary edits go through `updateState()` -> `addToHistory()`
-(`useSchedulingData.ts:81-91`); item/group add/duplicate/update/delete/reorder,
+step). Ordinary edits go through `updateState() -> addToHistory()`
+(`useSchedulingData.ts:81-91); item/group add/duplicate/update/delete/reorder,`
 preference edits, export-config edits, and date-range edits all funnel through
-`updateState`/`updateData` (a single `addToHistory` each).
+`updateState/updateData (a single addToHistory each).`
 
 **FR-ST-17 — Whole-YAML load is one boundary.**
-`loadFromYaml()` builds one `newState` and calls `addToHistory()` once
-(`useSchedulingData.ts:965-969`), so importing a YAML file is a single undoable
+`loadFromYaml() builds one newState and calls addToHistory() once`
+(`useSchedulingData.ts:965-969), so importing a YAML file is a single undoable`
 step layered onto existing history (it does not clear history).
 
 **FR-ST-18 — New Schedule reset is one boundary.**
-`createNewState()` builds the default state and calls `addToHistory()` once
-(`useSchedulingData.ts:216-224`), so resetting to a new schedule is a single
+`createNewState() builds the default state and calls addToHistory() once`
+(`useSchedulingData.ts:216-224), so resetting to a new schedule is a single`
 undoable step layered onto existing history; the prior state remains reachable
 via undo.
 
 **FR-ST-19 — Undo / redo semantics.**
-`undo()` = `moveHistoryIndex(-1)`, `redo()` = `moveHistoryIndex(1)`
-(`useSchedulingData.ts:118-125`). `moveHistoryIndex(delta)`
-(`useSchedulingData.ts:94-116`) computes `targetIndex = currentHistoryIndex + delta`
-and **no-ops** (returns previous history state unchanged) if the target is
-`< 0`, `>= history.length`, or equal to the current index. Otherwise it takes the
-target history entry, re-applies `addAutoGeneratedToState()` to it, sets it as
-the displayed `state`, updates `currentHistoryIndex`, and immediately persists.
+`undo() = moveHistoryIndex(-1), redo() = moveHistoryIndex(1)`
+(`useSchedulingData.ts:118-125). moveHistoryIndex(delta)`
+(`useSchedulingData.ts:94-116) computes targetIndex = currentHistoryIndex + delta`
+and **no-ops (returns previous history state unchanged) if the target is**
+`< 0, >= history.length, or equal to the current index. Otherwise it takes the`
+target history entry, re-applies `addAutoGeneratedToState() to it, sets it as`
+the displayed `state, updates currentHistoryIndex, and immediately persists.`
 Undo/redo therefore only navigate the existing history array; they never mutate
 the underlying snapshots.
 
 ### Global keyboard shortcuts — undo / redo
 
 **FR-ST-20 — Ctrl/Cmd+Z = undo, Ctrl/Cmd+Y = redo.**
-A `keydown` listener on `document` (`useSchedulingData.ts:129-158`) triggers
-`undo()` on `z` and `redo()` on `y` when Ctrl (`event.ctrlKey`) or Cmd
-(`event.metaKey`) is held. Matching handlers call `event.preventDefault()`.
+A `keydown listener on document (useSchedulingData.ts:129-158) triggers`
+`undo() on z and redo() on y when Ctrl (event.ctrlKey) or Cmd`
+(`event.metaKey) is held. Matching handlers call event.preventDefault().`
 
 **FR-ST-21 — Modifier gating for undo/redo.**
 The handler returns early (does nothing) unless exactly Ctrl/Cmd is held: if
-`event.altKey` or `event.shiftKey` is also pressed, the shortcut is ignored
-(`useSchedulingData.ts:132-134`). (Consequently there is no Ctrl+Shift+Z redo;
+`event.altKey or event.shiftKey is also pressed, the shortcut is ignored`
+(`useSchedulingData.ts:132-134). (Consequently there is no Ctrl+Shift+Z redo;`
 redo is only Ctrl/Cmd+Y.)
 
 **FR-ST-22 — Undo/redo are NOT suppressed while typing.**
-The undo/redo listener does **not** check the focused element; Ctrl/Cmd+Z and
-Ctrl/Cmd+Y fire even while focus is inside an `INPUT`, `TEXTAREA`, `SELECT`, or
-contenteditable element (`useSchedulingData.ts:129-158` performs no
+The undo/redo listener does **not check the focused element; Ctrl/Cmd+Z and**
+Ctrl/Cmd+Y fire even while focus is inside an `INPUT, TEXTAREA, SELECT, or`
+contenteditable element (`useSchedulingData.ts:129-158 performs no`
 active-element check). This is deliberately different from the navigation
 shortcuts (FR-ST-25).
 
 **FR-ST-23 — Undo/redo listener lifecycle.**
-The undo/redo `useEffect` has no dependency array, so the listener is
+The undo/redo `useEffect has no dependency array, so the listener is`
 re-registered on every render (add on run, remove on cleanup)
-(`useSchedulingData.ts:129`, `:151-157`), always closing over the latest
-`undo`/`redo`.
+(`useSchedulingData.ts:129, :151-157), always closing over the latest`
+`undo/redo.`
 
 ### Global keyboard shortcuts — navigation & scroll
 
 **FR-ST-24 — Navigation key handlers.**
-A `keydown` listener on `document` in `Navigation` (`Navigation.tsx:71-137`)
+A `keydown listener on document in Navigation (Navigation.tsx:71-137)`
 handles:
-- Digit keys `0`-`9`: jump to the tab at that index via `navigateToTab(parseInt(key))`,
-  guarded by `if (index < TABS.length)` (`Navigation.tsx:88-105`). Because there
-  are 13 tabs (indices 0-12) but only digit keys 0-9 exist, **tabs 10, 11, and
-  12 have no number shortcut**; they are reachable only by click or by
-  ArrowLeft/Right. In particular, with the new `8b. Shift Type Coverings` tab
-  inserted at index 9, pressing `9` now jumps to that new tab (previously
-  `9. Export Layout`); Export Layout at index 10 is now unreachable by digit
-  and must be reached by click or arrow.
-- `ArrowLeft`: previous tab (`navigatePrevious`) (`Navigation.tsx:107-110`).
-- `ArrowRight`: next tab (`navigateNext`) (`Navigation.tsx:112-115`).
-- `ArrowUp`: scroll up one viewport height —
-  `window.scrollBy({ top: -window.innerHeight, behavior: 'smooth' })`
-  (`Navigation.tsx:117-123`).
-- `ArrowDown`: scroll down one viewport height —
-  `window.scrollBy({ top: window.innerHeight, behavior: 'smooth' })`
-  (`Navigation.tsx:125-131`).
-All handled cases call `event.preventDefault()`.
+
+- Digit keys `0-9: jump to the tab at that index via navigateToTab(parseInt(key)),`
+guarded by `if (index < TABS.length) (Navigation.tsx:88-105). Because there`
+are 13 tabs (indices 0-12) but only digit keys 0-9 exist, **tabs 10, 11, and**
+**12 have no number shortcut; they are reachable only by click or by**
+ArrowLeft/Right. In particular, with the new `8b. Shift Type Coverings tab`
+inserted at index 9, pressing `9 now jumps to that new tab (previously`
+`9. Export Layout); Export Layout at index 10 is now unreachable by digit`
+and must be reached by click or arrow.
+- `ArrowLeft: previous tab (navigatePrevious) (Navigation.tsx:107-110).`
+- `ArrowRight: next tab (navigateNext) (Navigation.tsx:112-115).`
+- `ArrowUp: scroll up one viewport height —`
+`window.scrollBy({ top: -window.innerHeight, behavior: 'smooth' })`
+(`Navigation.tsx:117-123).`
+- `ArrowDown: scroll down one viewport height —`
+`window.scrollBy({ top: window.innerHeight, behavior: 'smooth' })`
+(`Navigation.tsx:125-131).`
+All handled cases call `event.preventDefault().`
 
 **FR-ST-25 — Navigation shortcuts suppressed while focus is in a field.**
-Before dispatching, the handler reads `document.activeElement`; if its `tagName`
-is `INPUT`, `TEXTAREA`, or `SELECT`, or its `contenteditable` attribute equals
-`'true'`, the handler returns immediately and **none** of the navigation/scroll
-shortcuts fire (`Navigation.tsx:74-82`).
+Before dispatching, the handler reads `document.activeElement; if its tagName`
+is `INPUT, TEXTAREA, or SELECT, or its contenteditable attribute equals`
+`'true', the handler returns immediately and `**none of the navigation/scroll**
+shortcuts fire (`Navigation.tsx:74-82).`
 
 **FR-ST-26 — Digit keys ignored with any modifier.**
-For digit keys `0`-`9`, if any of Ctrl/Alt/Shift/Meta is held
-(`hasModifier = event.ctrlKey || event.altKey || event.shiftKey || event.metaKey`),
-the case returns without navigating (`Navigation.tsx:84-85`, `:98`). Arrow keys
+For digit keys `0-9, if any of Ctrl/Alt/Shift/Meta is held`
+(`hasModifier = event.ctrlKey || event.altKey || event.shiftKey || event.metaKey),`
+the case returns without navigating (`Navigation.tsx:84-85, :98). Arrow keys`
 are not modifier-gated in this handler.
 
 **FR-ST-27 — Navigation listener lifecycle.**
-The navigation `useEffect` depends on `[navigateNext, navigatePrevious,
-navigateToTab]` and adds/removes the `document` `keydown` listener accordingly
-(`Navigation.tsx:135-137`).
+The navigation `useEffect depends on [navigateNext, navigatePrevious, navigateToTab] and adds/removes the document keydown listener accordingly`
+(`Navigation.tsx:135-137).`
 
 ### Navigation structure
 
 **FR-ST-28 — Fixed 13-tab set, order, and routes.**
 Navigation exposes exactly 13 tabs in this fixed order with these labels and
-routes (`Navigation.tsx:27-41`):
-`0. Home` → `/`; `1. Dates` → `/dates`; `2. People` → `/people`;
-`3. Shift Types` → `/shift-types`;
-`4. Shift Type Requirements` → `/shift-type-requirements`;
-`5. Shift Requests` → `/shift-requests`;
-`6. Shift Type Successions` → `/shift-type-successions`;
-`7. Shift Counts` → `/shift-counts`;
-`8. Shift Affinities` → `/shift-affinities`;
-`8b. Shift Type Coverings` → `/shift-type-coverings`;
-`9. Export Layout` → `/export-layout`;
-`10. Save and Load` → `/save-and-load`;
-`11. Optimize and Export` → `/optimize-and-export`.
+routes (`Navigation.tsx:27-41):`
+`0. Home → /; 1. Dates → /dates; 2. People → /people;`
+`3. Shift Types → /shift-types;`
+`4. Shift Type Requirements → /shift-type-requirements;`
+`5. Shift Requests → /shift-requests;`
+`6. Shift Type Successions → /shift-type-successions;`
+`7. Shift Counts → /shift-counts;`
+`8. Shift Affinities → /shift-affinities;`
+`8b. Shift Type Coverings → /shift-type-coverings;`
+`9. Export Layout → /export-layout;`
+`10. Save and Load → /save-and-load;`
+`11. Optimize and Export → /optimize-and-export.`
 
-The insertion of `8b. Shift Type Coverings` (a 7th preference editor — see spec
-05 and the dedicated spec 11) at array index 9 means the previously-numbered
-`9. Export Layout` and following tabs shift up by one position in the array
-(their **array indices** become 10, 11, 12) while their **display numbers**
-remain `9.`, `10.`, `11.` — the displayed number is part of the label string,
+The insertion of `8b. Shift Type Coverings (a 6th preference-authoring tab`
+and 7th preference variant in the data model — see spec 05 and the dedicated
+spec 11) at array index 9 means the previously-numbered
+`9. Export Layout and following tabs shift up by one position in the array`
+(their **array indices become 10, 11, 12) while their display numbers**
+remain `9., 10., 11. — the displayed number is part of the label string,`
 not derived from the index. The current tab index is
-`TABS.findIndex(tab => tab.path === pathname)` (`Navigation.tsx:46`).
+`TABS.findIndex(tab => tab.path === pathname) (Navigation.tsx:46).`
 
-Consequence for the digit-key shortcuts (FR-ST-24): number `9` now jumps to
+Consequence for the digit-key shortcuts (FR-ST-24): number `9 now jumps to`
 the new covering tab, not Export Layout. Export Layout is at array index 10
 and reachable only via click or arrow keys.
 
-**FR-ST-29 — `navigateToTab` guard and prefetch.**
-`navigateToTab(index)` no-ops if `index < 0`, `index >= TABS.length`, or
-`index === currentTabIndex` (`Navigation.tsx:48-49`); otherwise it calls
-`router.push(TABS[index].path)` (`Navigation.tsx:57`) — after the unsaved-edit
+**FR-ST-29 — ****`navigateToTab`**** guard and prefetch.**
+`navigateToTab(index) no-ops if index < 0, index >= TABS.length, or`
+`index === currentTabIndex (Navigation.tsx:48-49); otherwise it calls`
+`router.push(TABS[index].path) (Navigation.tsx:57) — after the unsaved-edit`
 confirm (FR-ST-31). All non-current tab paths are prefetched via
-`router.prefetch?.(tab.path)` on mount/tab change (`Navigation.tsx:63-69`).
+`router.prefetch?.(tab.path) on mount/tab change (Navigation.tsx:63-69).`
 
 **FR-ST-30 — Prev/Next affordances hidden at the ends.**
-A previous-tab affordance is present only when `currentTabIndex > 0`, and a
+A previous-tab affordance is present only when `currentTabIndex > 0, and a`
 next-tab affordance only when `currentTabIndex < TABS.length - 1`
-(`Navigation.tsx:162`, `:175`). At the first tab there is no "previous"; at the
+(`Navigation.tsx:162, :175). At the first tab there is no "previous"; at the`
 last tab there is no "next". (Titles reference the arrow keys:
-`"Previous tab (←)"`, `"Next tab (→)"`.)
+`"Previous tab (←)", "Next tab (→)".)`
 
 ### Unsaved-edit / tab-switch guard
 
 **FR-ST-31 — Tab-switch confirm when an editor is open.**
-Before navigating, `navigateToTab` checks `hasTabSwitchWarningActive()`; when
+Before navigating, `navigateToTab checks hasTabSwitchWarningActive(); when`
 true it calls `confirm('You have unsaved edits. Leave this page without saving?')`
-and aborts the navigation if the user does not confirm (`Navigation.tsx:53-56`).
-The confirm string is exactly `You have unsaved edits. Leave this page without saving?`.
+and aborts the navigation if the user does not confirm (`Navigation.tsx:53-56).`
+The confirm string is exactly `You have unsaved edits. Leave this page without saving?.`
 This gate applies to every navigation path routed through `navigateToTab`
 (digit keys, arrow keys, and tab clicks).
 
 **FR-ST-32 — Ref-counted warning registration.**
 Warning state is a ref-counted counter provided app-wide by
-`UnsavedEditingStateProvider` (`unsavedEditingState.ts:40-60`):
-`setTabSwitchWarningActive()` increments, `clearTabSwitchWarningActive()`
-decrements clamped at 0 (`Math.max(0, count - 1)`), and
-`hasTabSwitchWarningActive()` returns `count > 0`. The counter design ensures
+`UnsavedEditingStateProvider (unsavedEditingState.ts:40-60):`
+`setTabSwitchWarningActive() increments, clearTabSwitchWarningActive()`
+decrements clamped at 0 (`Math.max(0, count - 1)), and`
+`hasTabSwitchWarningActive() returns count > 0. The counter design ensures`
 overlapping registrations cannot prematurely clear each other.
 
-**FR-ST-33 — `useTabSwitchWarning(isActive)` lifecycle.**
-`useTabSwitchWarning(isActive)` (`unsavedEditingState.ts:71-86`) registers the
-warning (increment) only while `isActive` is truthy, and returns a cleanup that
-decrements on deactivation/unmount; when `isActive` is falsy it does nothing.
+**FR-ST-33 — ****`useTabSwitchWarning(isActive)`**** lifecycle.**
+`useTabSwitchWarning(isActive) (unsavedEditingState.ts:71-86) registers the`
+warning (increment) only while `isActive is truthy, and returns a cleanup that`
+decrements on deactivation/unmount; when `isActive is falsy it does nothing.`
 Pages call it with their open-editor flag, e.g.
-`useTabSwitchWarning(isFormVisible)` (`shift-type-requirements/page.tsx:219`) or
-`useTabSwitchWarning(mode === Mode.DATE_RANGE_EDITING)` (`dates/page.tsx:89`).
+`useTabSwitchWarning(isFormVisible) (shift-type-requirements/page.tsx:219) or`
+`useTabSwitchWarning(mode === Mode.DATE_RANGE_EDITING) (dates/page.tsx:89).`
 
-**FR-ST-34 — No `beforeunload` guard.**
-There is **no** `beforeunload` handler anywhere; closing/reloading the browser
+**FR-ST-34 — No ****`beforeunload`**** guard.**
+There is **no **`beforeunload handler anywhere; closing/reloading the browser`
 tab or hard-navigating away is never intercepted (grep for `beforeunload`
 returns no matches). The unsaved-edit guard covers only in-app tab switches
-through `navigateToTab`. Persistence is immediate (FR-ST-08) for **store
-mutations** only — local form drafts (e.g. typed-but-not-saved fields in
+through `navigateToTab. Persistence is immediate (FR-ST-08) for `**store**
+**mutations only — local form drafts (e.g. typed-but-not-saved fields in**
 the shift-type-covering or shift-counts add/edit form, which live in
-React component state, not the global store) are **not** persisted and
+React component state, not the global store) are **not persisted and**
 are lost on reload/close. Only already-committed scheduling state
 survives hard navigation; an open add/edit form does not.
 
 ### Scroll save / restore
 
 **FR-ST-35 — Save current scroll position.**
-`saveScrollPosition()` stores `window.scrollY` in a module-level variable
-(`scrolling.ts:24`, `:30-32`). Pages call it when opening an edit form (e.g.
-`shift-type-requirements/page.tsx:276`).
+`saveScrollPosition() stores window.scrollY in a module-level variable`
+(`scrolling.ts:24, :30-32). Pages call it when opening an edit form (e.g.`
+`shift-type-requirements/page.tsx:276).`
 
 **FR-ST-36 — Restore scroll position after DOM update.**
-`restoreScrollPosition()` (`scrolling.ts:41-52`): if a position was saved, it
+`restoreScrollPosition() (scrolling.ts:41-52): if a position was saved, it`
 clears the saved value, then defers the scroll to the next paint via
-`requestAnimationFrame` and calls
-`window.scrollTo({ top: scrollTo, behavior: 'instant' })` — instant, not smooth.
-Deferring via rAF (rather than `setTimeout(0)`) avoids flicker after React hides
+`requestAnimationFrame and calls`
+`window.scrollTo({ top: scrollTo, behavior: 'instant' }) — instant, not smooth.`
+Deferring via rAF (rather than `setTimeout(0)) avoids flicker after React hides`
 the form. If no position was saved it logs
-`console.error(\`savedScrollPosition is null. ${ERROR_SHOULD_NOT_HAPPEN}.\`)`
+`console.error(\savedScrollPosition is null. ${ERROR_SHOULD_NOT_HAPPEN}.)```
 and does nothing.
 
 **FR-ST-37 — Single shared scroll slot.**
-There is exactly one module-level `savedScrollPosition` slot (`scrolling.ts:24`);
+There is exactly one module-level `savedScrollPosition slot (scrolling.ts:24);`
 a restore consumes and nulls it, so save/restore must be paired 1:1. Pages call
-`restoreScrollPosition()` on both cancel and save close paths
-(e.g. `shift-type-requirements/page.tsx:286`, `:393`).
+`restoreScrollPosition() on both cancel and save close paths`
+(e.g. `shift-type-requirements/page.tsx:286, :393).`
 
 ### App composition
 
 **FR-ST-38 — Provider nesting.**
-The root layout wraps the app as `UnsavedEditingStateProvider` >
-`SchedulingDataProvider` > (`VersionWarningBanner`, `Navigation`, `main`
-children, footer) (`layout.tsx:75-104`). `useSchedulingData()` throws
-`'useSchedulingData must be used within SchedulingDataProvider'` outside its
-provider (`useSchedulingData.ts:1138-1144`); `useUnsavedEditingState()` throws
+The root layout wraps the app as `UnsavedEditingStateProvider >`
+`SchedulingDataProvider > (VersionWarningBanner, Navigation, main`
+children, footer) (`layout.tsx:75-104). useSchedulingData() throws`
+`'useSchedulingData must be used within SchedulingDataProvider' outside its`
+provider (`useSchedulingData.ts:1138-1144); useUnsavedEditingState() throws`
 `'useUnsavedEditingState must be used within UnsavedEditingStateProvider'`
-outside its provider (`unsavedEditingState.ts:62-69`).
-
----
+outside its provider (`unsavedEditingState.ts:62-69).`
 
 ## Validation Rules & Messages
 
 | ID | Trigger / condition | Behavior & exact message |
-|----|--------------------|--------------------------|
-| VR-ST-01 | Any navigation via `navigateToTab` while `hasTabSwitchWarningActive()` is true | Native confirm dialog with exact text `You have unsaved edits. Leave this page without saving?`; navigation proceeds only if confirmed (`Navigation.tsx:53`). |
-| VR-ST-02 | Load from local storage throws (e.g. malformed JSON) | Logs `Failed to load data from localStorage:` with the error; returns default history state (`schedulingStorage.ts:92-95`). |
-| VR-ST-03 | Save to local storage throws (e.g. quota exceeded) | Logs `Failed to save data to localStorage:` with the error; does not throw (`schedulingStorage.ts:132-134`). |
-| VR-ST-04 | `restoreScrollPosition()` called with no saved position | Logs `savedScrollPosition is null. <ERROR_SHOULD_NOT_HAPPEN>.` and performs no scroll (`scrolling.ts:49-51`). |
-| VR-ST-05 | Stored `currentHistoryIndex` out of range / missing / falsy | Clamped to `[0, history.length - 1]` via `Math.max(0, Math.min(index || 0, length - 1))`; no error surfaced (`schedulingStorage.ts:90`). |
-| VR-ST-06 | Undo/redo target index out of range or equal to current | `moveHistoryIndex` no-ops and returns the previous history state unchanged (`useSchedulingData.ts:99-101`). |
-| VR-ST-07 | `useSchedulingData()` used outside `SchedulingDataProvider` | Throws `useSchedulingData must be used within SchedulingDataProvider` (`useSchedulingData.ts:1141`). |
-| VR-ST-08 | `useUnsavedEditingState()` used outside `UnsavedEditingStateProvider` | Throws `useUnsavedEditingState must be used within UnsavedEditingStateProvider` (`unsavedEditingState.ts:65`). |
-
----
+| --- | --- | --- |
+| VR-ST-01 | Any navigation via `navigateToTab while hasTabSwitchWarningActive() is true` | Native confirm dialog with exact text `You have unsaved edits. Leave this page without saving?; navigation proceeds only if confirmed (Navigation.tsx:53).` |
+| VR-ST-02 | Load from local storage throws (e.g. malformed JSON) | Logs `Failed to load data from localStorage: with the error; returns default history state (schedulingStorage.ts:92-95).` |
+| VR-ST-03 | Save to local storage throws (e.g. quota exceeded) | Logs `Failed to save data to localStorage: with the error; does not throw (schedulingStorage.ts:132-134).` |
+| VR-ST-04 | `restoreScrollPosition() called with no saved position` | Logs `savedScrollPosition is null. <ERROR_SHOULD_NOT_HAPPEN>. and performs no scroll (scrolling.ts:49-51).` |
+| VR-ST-05 | Stored `currentHistoryIndex out of range / missing / falsy` | Clamped to `[0, history.length - 1] via Math.max(0, Math.min(index`` |
+| VR-ST-06 | Undo/redo target index out of range or equal to current | `moveHistoryIndex no-ops and returns the previous history state unchanged (useSchedulingData.ts:99-101).` |
+| VR-ST-07 | `useSchedulingData() used outside SchedulingDataProvider` | Throws `useSchedulingData must be used within SchedulingDataProvider (useSchedulingData.ts:1141).` |
+| VR-ST-08 | `useUnsavedEditingState() used outside UnsavedEditingStateProvider` | Throws `useUnsavedEditingState must be used within UnsavedEditingStateProvider (unsavedEditingState.ts:65).` |
 
 ## Edge Cases & Quirks
 
-- **Immediate autosave, no debounce.** High-frequency gestures (drag paint) write
-  to local storage on every event. Coalescing happens only in the *history*
-  dimension (FR-ST-15), not in the *persistence* dimension — each event still
-  triggers a full `saveStateToStorage`. (`useSchedulingData.ts:85-90`.)
-- **Date items never persisted.** `dates.items` is forced to `undefined` on save
-  and recomputed from the stored range on load; only the range (as `YYYY-MM-DD`
-  strings) and non-auto-generated date groups survive a round trip
-  (`schedulingStorage.ts:108-124`, FR-ST-06/FR-ST-10).
+- **Immediate autosave, no debounce. High-frequency gestures (drag paint) write**
+to local storage on every event. Coalescing happens only in the *history*
+dimension (FR-ST-15), not in the *persistence dimension — each event still*
+triggers a full `saveStateToStorage. (useSchedulingData.ts:85-90.)`
+- **Date items never persisted. **`dates.items is forced to undefined on save`
+and recomputed from the stored range on load; only the range (as `YYYY-MM-DD`
+strings) and non-auto-generated date groups survive a round trip
+(`schedulingStorage.ts:108-124, FR-ST-06/FR-ST-10).`
 - **Auto-generated data excluded from storage but re-added on load.**
-  `filterAutoGeneratedState` strips it on save; `normalizeStateForFrontend`
-  (via `addAutoGeneratedToState`) re-derives it on load, so persisted payloads are
-  smaller and never contain stale derived data (`schedulingGeneratedData.ts:98-146`).
-- **Infinity survives JSON only via placeholders.** Without the placeholder
-  substitution, `JSON.stringify(Infinity)` yields `null`; a value literally equal
-  to the strings `'__INFINITY__'` / `'__NEGATIVE_INFINITY__'` in user data would be
-  reinterpreted as `±Infinity` on load (FR-ST-07).
-- **`apiVersion` is inert.** It is stored, loaded, and defaulted to `'alpha'`, but
-  never checked — there is no migration path and stale/foreign versions are not
-  rejected (FR-ST-12).
-- **Undo/redo fire while typing; navigation shortcuts do not.** Ctrl/Cmd+Z / +Y
-  work inside inputs (FR-ST-22); digit/arrow navigation and viewport scroll are
-  suppressed whenever focus is in a form field (FR-ST-25). This asymmetry is
-  intentional.
-- **No Ctrl+Shift+Z redo.** Redo is only Ctrl/Cmd+Y; adding Shift disables both
-  shortcuts entirely (FR-ST-21).
-- **Tabs 10, 11, and 12 have no digit shortcut.** Only keys 0-9 exist for
-  13 tabs (`Navigation.tsx:27-41`); Export Layout (array index 10),
-  Save-and-Load (11), and Optimize-and-Export (12) are reachable by
-  click or ArrowLeft/Right only. After the wave-3 insertion of
-  `8b. Shift Type Coverings` at array index 9, pressing `9` jumps to
-  the covering tab (not Export Layout as in the 12-tab layout). The
-  displayed numbers in tab labels are part of the label string and do
-  not change with index shifts (FR-ST-24/FR-ST-28).
-- **Only in-app switches are guarded.** No `beforeunload`; reloading or closing
-  the tab bypasses the confirm entirely, but immediate autosave means no data is
-  lost anyway (FR-ST-34).
-- **Ref-counted guard tolerates overlap.** Even though pages currently open one
-  editor at a time, the counter prevents one editor's cleanup from clearing
-  another's active warning (FR-ST-32).
-- **New Schedule and YAML load do not clear history.** Both append a single new
-  history entry, so the pre-reset / pre-import state is still reachable via undo
-  (FR-ST-17/FR-ST-18).
-- **rAF + `behavior: 'instant'` for scroll restore.** Deliberately not
-  `setTimeout(0)` (flicker) and deliberately not `'smooth'` (visible jump)
-  (`scrolling.ts:38-48`, FR-ST-36).
-- **History cap discards oldest entries.** Beyond 50 entries the oldest snapshots
-  are dropped via `slice(-50)`, so very old states become unreachable by undo
-  (FR-ST-14).
-
----
+`filterAutoGeneratedState strips it on save; normalizeStateForFrontend`
+(via `addAutoGeneratedToState) re-derives it on load, so persisted payloads are`
+smaller and never contain stale derived data (`schedulingGeneratedData.ts:98-146).`
+- **Infinity survives JSON only via placeholders. Without the placeholder**
+substitution, `JSON.stringify(Infinity) yields null; a value literally equal`
+to the strings `'__INFINITY__' / '__NEGATIVE_INFINITY__' in user data would be`
+reinterpreted as `±Infinity on load (FR-ST-07).`
+- **`apiVersion** is inert. It is stored, loaded, and defaulted to **`**`'alpha', but`
+never checked — there is no migration path and stale/foreign versions are not
+rejected (FR-ST-12).
+- **Undo/redo fire while typing; navigation shortcuts do not. Ctrl/Cmd+Z / +Y**
+work inside inputs (FR-ST-22); digit/arrow navigation and viewport scroll are
+suppressed whenever focus is in a form field (FR-ST-25). This asymmetry is
+intentional.
+- **No Ctrl+Shift+Z redo. Redo is only Ctrl/Cmd+Y; adding Shift disables both**
+shortcuts entirely (FR-ST-21).
+- **Tabs 10, 11, and 12 have no digit shortcut. Only keys 0-9 exist for**
+13 tabs (`Navigation.tsx:27-41); Export Layout (array index 10),`
+Save-and-Load (11), and Optimize-and-Export (12) are reachable by
+click or ArrowLeft/Right only. After the wave-3 insertion of
+`8b. Shift Type Coverings at array index 9, pressing 9 jumps to`
+the covering tab (not Export Layout as in the 12-tab layout). The
+displayed numbers in tab labels are part of the label string and do
+not change with index shifts (FR-ST-24/FR-ST-28).
+- **Only in-app switches are guarded. No **`beforeunload; reloading or closing`
+the tab bypasses the confirm entirely, but immediate autosave means no data is
+lost anyway (FR-ST-34).
+- **Ref-counted guard tolerates overlap. Even though pages currently open one**
+editor at a time, the counter prevents one editor's cleanup from clearing
+another's active warning (FR-ST-32).
+- **New Schedule and YAML load do not clear history. Both append a single new**
+history entry, so the pre-reset / pre-import state is still reachable via undo
+(FR-ST-17/FR-ST-18).
+- **rAF + ****`behavior: 'instant'`**** for scroll restore. Deliberately not**
+`setTimeout(0) (flicker) and deliberately not 'smooth' (visible jump)`
+(`scrolling.ts:38-48, FR-ST-36).`
+- **History cap discards oldest entries. Beyond 50 entries the oldest snapshots**
+are dropped via `slice(-50), so very old states become unreachable by undo`
+(FR-ST-14).
 
 ## Acceptance Criteria
 
-- **AC-ST-01** Given no persisted data, when the app loads, then the store equals
-  the default schedule (10 people, seed shift types/groups, WORKDAY/FREEDAY date
-  groups, one `AT_MOST_ONE_SHIFT_PER_DAY` preference, `apiVersion = 'alpha'`) with
-  `history` length 1 and `currentHistoryIndex` 0.
-- **AC-ST-02** Given a persisted schedule, when the app reloads, then the restored
-  state, full history, and clamped `currentHistoryIndex` are all recovered, and
-  the default schedule is never briefly displayed before hydration.
-- **AC-ST-03** Given any single edit, when it is applied, then exactly one new
-  history entry is created and the entire history container is written to local
-  storage under key `nurse-scheduling-data` synchronously (no debounce delay).
-- **AC-ST-04** Given a value of `Infinity` (or `-Infinity`) anywhere in the state,
-  when it is saved and reloaded, then it round-trips back to `Infinity`
-  (respectively `-Infinity`).
-- **AC-ST-05** Given a state with a date range, when it is saved, then the stored
-  payload contains the range as `YYYY-MM-DD` strings, contains no computed date
-  items, and contains no auto-generated items/groups; on reload the date items and
-  auto-generated data are regenerated.
-- **AC-ST-06** Given corrupt/unparseable persisted data, when the app loads, then
-  it logs the load-failure message and falls back to the default schedule without
-  crashing.
-- **AC-ST-07** Given persisted data whose `currentHistoryIndex` is out of range,
-  when the app loads, then the index is clamped into `[0, history.length - 1]`.
-- **AC-ST-08** Given a stored `apiVersion` differing from the current one, when the
-  app loads, then no migration or rejection occurs and the data loads normally.
-- **AC-ST-09** Given a continuous gesture emitting many mutations with
-  `replaceLatestHistoryEntry: true` after the first, when the gesture completes,
-  then a single undo reverts the entire gesture.
-- **AC-ST-10** Given a sequence of more than 50 edits, when further edits occur,
-  then history retains only the most recent 50 states and `currentHistoryIndex`
-  points at the newest.
-- **AC-ST-11** Given the user has undone one or more steps, when a new edit is made,
-  then the previously-undone (redo) states are discarded.
-- **AC-ST-12** Given undo is invoked at the oldest state (or redo at the newest),
-  when the shortcut fires, then the store and stored payload are unchanged.
-- **AC-ST-13** Given focus is not in a form field, when Ctrl/Cmd+Z is pressed, then
-  the last change is undone; when Ctrl/Cmd+Y is pressed, then the last undone
-  change is redone.
-- **AC-ST-14** Given focus is inside a text input, when Ctrl/Cmd+Z or Ctrl/Cmd+Y is
-  pressed, then undo/redo still fires (not suppressed).
-- **AC-ST-15** Given Ctrl/Cmd+Z with Alt or Shift additionally held, when pressed,
-  then no undo/redo occurs.
-- **AC-ST-16** Given focus is not in a form field, when a digit key `0`-`9` is
-  pressed without modifiers, then navigation switches to the tab of that index (if
-  it exists); pressing it with any modifier does nothing.
-- **AC-ST-17** Given exactly 13 tabs (including `8b. Shift Type
-  Coverings` at array index 9), when the user presses digit keys, then
-  tabs at array index 10 (`9. Export Layout`), 11 (`10. Save and
-  Load`), and 12 (`11. Optimize and Export`) are never reached by any
-  digit key (no key maps to them); only the click and ArrowLeft/Right
-  affordances can reach them. Pressing `9` jumps to the covering tab
-  (array index 9, displayed as `8b. Shift Type Coverings`), not to
-  Export Layout.
-- **AC-ST-18** Given focus is not in a form field, when ArrowLeft/ArrowRight is
-  pressed, then the previous/next tab is selected (bounded at the ends), and when
-  ArrowUp/ArrowDown is pressed, then the page scrolls up/down by one viewport
-  height smoothly.
-- **AC-ST-19** Given focus is inside an INPUT/TEXTAREA/SELECT/contenteditable
-  element, when any navigation or scroll key is pressed, then no navigation or
-  scroll occurs.
-- **AC-ST-20** Given an editor is open (its `useTabSwitchWarning` is active), when
-  the user attempts to switch tabs (by key or click), then a confirm dialog with
-  the exact unsaved-edits message appears and navigation is aborted unless
-  confirmed.
-- **AC-ST-21** Given no editor is open, when the user switches tabs, then no confirm
-  dialog appears.
-- **AC-ST-22** Given two editors register the warning, when one closes, then the
-  warning remains active until the second also closes (ref-count > 0).
-- **AC-ST-23** Given the user is on the first tab, when rendered, then no
-  previous-tab affordance exists; given the last tab, then no next-tab affordance
-  exists.
-- **AC-ST-24** Given a scroll position was saved before opening an editor, when the
-  editor closes (cancel or save), then the window scrolls instantly back to the
-  saved offset after the next paint, and the saved slot is cleared.
-- **AC-ST-25** Given the browser tab is closed or reloaded with an editor
-  open, then no unsaved-edit prompt appears; the most recent **committed**
-  store mutations remain persisted, but the open local form draft is
-  lost on reload (form drafts are component-local state, not store state;
-  see FR-ST-34).
-
----
+- **AC-ST-01 Given no persisted data, when the app loads, then the store equals**
+the default schedule (10 people, seed shift types/groups, WORKDAY/NON-WORKDAY/PH date
+groups, one `AT_MOST_ONE_SHIFT_PER_DAY preference, apiVersion = 'alpha') with`
+`history length 1 and currentHistoryIndex 0.`
+- **AC-ST-02 Given a persisted schedule, when the app reloads, then the restored**
+state, full history, and clamped `currentHistoryIndex are all recovered, and`
+the default schedule is never briefly displayed before hydration.
+- **AC-ST-03 Given any single edit, when it is applied, then exactly one new**
+history entry is created and the entire history container is written to local
+storage under key `nurse-scheduling-data synchronously (no debounce delay).`
+- **AC-ST-04 Given a value of **`Infinity (or -Infinity) anywhere in the state,`
+when it is saved and reloaded, then it round-trips back to `Infinity`
+(respectively `-Infinity).`
+- **AC-ST-05 Given a state with a date range, when it is saved, then the stored**
+payload contains the range as `YYYY-MM-DD strings, contains no computed date`
+items, and contains no auto-generated items/groups; on reload the date items and
+auto-generated data are regenerated.
+- **AC-ST-06 Given corrupt/unparseable persisted data, when the app loads, then**
+it logs the load-failure message and falls back to the default schedule without
+crashing.
+- **AC-ST-07 Given persisted data whose **`currentHistoryIndex is out of range,`
+when the app loads, then the index is clamped into `[0, history.length - 1].`
+- **AC-ST-08 Given a stored **`apiVersion differing from the current one, when the`
+app loads, then no migration or rejection occurs and the data loads normally.
+- **AC-ST-09 Given a continuous gesture emitting many mutations with**
+`replaceLatestHistoryEntry: true after the first, when the gesture completes,`
+then a single undo reverts the entire gesture.
+- **AC-ST-10 Given a sequence of more than 50 edits, when further edits occur,**
+then history retains only the most recent 50 states and `currentHistoryIndex`
+points at the newest.
+- **AC-ST-11 Given the user has undone one or more steps, when a new edit is made,**
+then the previously-undone (redo) states are discarded.
+- **AC-ST-12 Given undo is invoked at the oldest state (or redo at the newest),**
+when the shortcut fires, then the store and stored payload are unchanged.
+- **AC-ST-13 Given focus is not in a form field, when Ctrl/Cmd+Z is pressed, then**
+the last change is undone; when Ctrl/Cmd+Y is pressed, then the last undone
+change is redone.
+- **AC-ST-14 Given focus is inside a text input, when Ctrl/Cmd+Z or Ctrl/Cmd+Y is**
+pressed, then undo/redo still fires (not suppressed).
+- **AC-ST-15 Given Ctrl/Cmd+Z with Alt or Shift additionally held, when pressed,**
+then no undo/redo occurs.
+- **AC-ST-16 Given focus is not in a form field, when a digit key **`0-9 is`
+pressed without modifiers, then navigation switches to the tab of that index (if
+it exists); pressing it with any modifier does nothing.
+- **AC-ST-17 Given exactly 13 tabs (including **`8b. Shift Type Coverings at array index 9), when the user presses digit keys, then`
+tabs at array index 10 (`9. Export Layout), 11 (10. Save and Load), and 12 (11. Optimize and Export) are never reached by any`
+digit key (no key maps to them); only the click and ArrowLeft/Right
+affordances can reach them. Pressing `9 jumps to the covering tab`
+(array index 9, displayed as `8b. Shift Type Coverings), not to`
+Export Layout.
+- **AC-ST-18 Given focus is not in a form field, when ArrowLeft/ArrowRight is**
+pressed, then the previous/next tab is selected (bounded at the ends), and when
+ArrowUp/ArrowDown is pressed, then the page scrolls up/down by one viewport
+height smoothly.
+- **AC-ST-19 Given focus is inside an INPUT/TEXTAREA/SELECT/contenteditable**
+element, when any navigation or scroll key is pressed, then no navigation or
+scroll occurs.
+- **AC-ST-20 Given an editor is open (its **`useTabSwitchWarning is active), when`
+the user attempts to switch tabs (by key or click), then a confirm dialog with
+the exact unsaved-edits message appears and navigation is aborted unless
+confirmed.
+- **AC-ST-21 Given no editor is open, when the user switches tabs, then no confirm**
+dialog appears.
+- **AC-ST-22 Given two editors register the warning, when one closes, then the**
+warning remains active until the second also closes (ref-count > 0).
+- **AC-ST-23 Given the user is on the first tab, when rendered, then no**
+previous-tab affordance exists; given the last tab, then no next-tab affordance
+exists.
+- **AC-ST-24 Given a scroll position was saved before opening an editor, when the**
+editor closes (cancel or save), then the window scrolls instantly back to the
+saved offset after the next paint, and the saved slot is cleared.
+- **AC-ST-25 Given the browser tab is closed or reloaded with an editor**
+open, then no unsaved-edit prompt appears; the most recent **committed**
+store mutations remain persisted, but the open local form draft is
+lost on reload (form drafts are component-local state, not store state;
+see FR-ST-34).
 
 ## Cross-References
 
-- **Auto-generated data derivation** (`schedulingGeneratedData.ts`) — item/group
-  generation and filtering rules referenced by FR-ST-04/FR-ST-06/FR-ST-10 are
-  specified in the Dates/People/Shift-Types domain artifacts.
-- **Save/Load & YAML import** — `loadFromYaml()` / `createNewState()` history
-  boundaries (FR-ST-17/FR-ST-18) and the YAML import-warnings banner are detailed
-  in the Save-and-Load artifact.
-- **Per-page editor modes** (`constants/modes.ts`: `Mode.NORMAL/ADDING/EDITING/
-  INLINE_EDITING/DATE_RANGE_EDITING`) — drive `useTabSwitchWarning` activation
-  (FR-ST-33) and scroll save/restore pairing (FR-ST-35/FR-ST-36); see the
-  per-domain editor artifacts.
-- **Excluded global-layout features** (cross-tab sync banner, version-check
-  banner, build-origin selector, Google Analytics, Sentry) — see the App Shell /
-  Layout artifact; explicitly out of scope here (see Out of scope).
-- **Preference / export ordering normalization** (`schedulingPreferenceOrdering`,
-  `schedulingExportConfig`) — invoked during hydration
-  (`normalizeStateForFrontend`, FR-ST-10); specified in the Preferences and Export
-  artifacts.
+- **Auto-generated data derivation (**`schedulingGeneratedData.ts) — item/group`
+generation and filtering rules referenced by FR-ST-04/FR-ST-06/FR-ST-10 are
+specified in the Dates/People/Shift-Types domain artifacts.
+- **Save/Load & YAML import — **`loadFromYaml() / createNewState() history`
+boundaries (FR-ST-17/FR-ST-18) and the YAML import-warnings banner are detailed
+in the Save-and-Load artifact.
+- **Per-page editor modes (**`constants/modes.ts: Mode.NORMAL/ADDING/EDITING/ INLINE_EDITING/DATE_RANGE_EDITING) — drive useTabSwitchWarning activation`
+(FR-ST-33) and scroll save/restore pairing (FR-ST-35/FR-ST-36); see the
+per-domain editor artifacts.
+- **Excluded global-layout features (cross-tab sync banner, version-check**
+banner, build-origin selector, Google Analytics, Sentry) — see the App Shell /
+Layout artifact; explicitly out of scope here (see Out of scope).
+- **Preference / export ordering normalization (**`schedulingPreferenceOrdering,`
+`schedulingExportConfig) — invoked during hydration`
+(`normalizeStateForFrontend, FR-ST-10); specified in the Preferences and Export`
+artifacts.
