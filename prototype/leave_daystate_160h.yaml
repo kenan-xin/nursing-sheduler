@@ -1,0 +1,152 @@
+# Option C version of hours_via_coefficients.yaml: paid leave is now the
+# first-class reserved LEAVE day-state (not an ordinary LV shift type).
+#
+# What changed vs the original prototype:
+#   * No `LV` shift type item. Leave is the reserved `LEAVE` day-state.
+#   * Leave is pinned with a `shift request` targeting `LEAVE` (a hard pin).
+#   * The "no unplanned leave for nurses 1-4" guard is GONE: the engine now
+#     forces leave to 0 wherever it is not pinned, so the solver cannot invent
+#     leave to game the hour total. (INV1, structural.)
+#   * `LEAVE` is listed in the 160h shift-count with coefficient 16 (=8h),
+#     exactly like a worked shift type. The shift-count formula is unchanged.
+#   * `LEAVE` gives no coverage (INV2) and is always honored (INV3), both
+#     structural rather than by scenario convention.
+apiVersion: alpha
+description: 160h contract with first-class LEAVE day-state (Feb 2026)
+dates:
+  range:
+    startDate: 2026-02-01
+    endDate: 2026-02-28
+people:
+  items:
+    - id: 0
+      description: Nurse 0 (paid leave Feb 10-11)
+    - id: 1
+      description: Nurse 1
+    - id: 2
+      description: Nurse 2
+    - id: 3
+      description: Nurse 3
+    - id: 4
+      description: Nurse 4
+shiftTypes:
+  items:
+    - id: LD
+      description: Long day 0800-2030 (12.5h)
+      durationMinutes: 750
+    - id: AM1
+      description: AM 0800-1500 (7h)
+      durationMinutes: 420
+    - id: AM2
+      description: AM 0800-1600 (8h)
+      durationMinutes: 480
+    - id: AM3
+      description: AM 0800-1700 (9h)
+      durationMinutes: 540
+    - id: PM1
+      description: PM 1200-2100 (9h)
+      durationMinutes: 540
+    - id: PM2
+      description: PM 1300-2100 (8h)
+      durationMinutes: 480
+    - id: PM3
+      description: PM 1400-2100 (7h)
+      durationMinutes: 420
+  groups:
+    - id: AM
+      description: Any morning variant
+      members: [AM1, AM2, AM3]
+    - id: PM
+      description: Any afternoon/evening variant
+      members: [PM1, PM2, PM3]
+preferences:
+  - type: at most one shift per day
+
+  # --- Coverage: 1 long day + 1 AM + 1 PM staffed every date. LEAVE/OFF give none. ---
+  - type: shift type requirement
+    description: One nurse on the long day every date
+    shiftType: LD
+    requiredNumPeople: 1
+  - type: shift type requirement
+    description: One nurse on any AM variant every date
+    shiftType: AM
+    requiredNumPeople: 1
+  - type: shift type requirement
+    description: One nurse on any PM variant every date
+    shiftType: PM
+    requiredNumPeople: 1
+
+  # --- Paid leave is an INPUT: pin it exactly with LEAVE requests (hard). ---
+  - type: shift request
+    description: Nurse 0 paid leave Feb 10
+    person: 0
+    date: 10
+    shiftType: LEAVE
+    weight: .inf
+  - type: shift request
+    description: Nurse 0 paid leave Feb 11
+    person: 0
+    date: 11
+    shiftType: LEAVE
+    weight: .inf
+
+  # --- At least 2 weekly rest days (OFF) per nurse, per week ---
+  - type: shift count
+    description: Week 1 >= 2 rest days (OFF only, no hours)
+    person: ALL
+    countDates: 2026-02-01~2026-02-07
+    countShiftTypes: OFF
+    expression: 'x >= T'
+    target: 2
+    weight: .inf
+  - type: shift count
+    description: Week 2 >= 2 rest days
+    person: ALL
+    countDates: 2026-02-08~2026-02-14
+    countShiftTypes: OFF
+    expression: 'x >= T'
+    target: 2
+    weight: .inf
+  - type: shift count
+    description: Week 3 >= 2 rest days
+    person: ALL
+    countDates: 2026-02-15~2026-02-21
+    countShiftTypes: OFF
+    expression: 'x >= T'
+    target: 2
+    weight: .inf
+  - type: shift count
+    description: Week 4 >= 2 rest days
+    person: ALL
+    countDates: 2026-02-22~2026-02-28
+    countShiftTypes: OFF
+    expression: 'x >= T'
+    target: 2
+    weight: .inf
+
+  # --- HARD monthly contract: worked hours + paid-leave credit = EXACTLY 160h ---
+  # 160h = 320 half-hour units. LEAVE counts 8h (16); OFF is not listed (0).
+  - type: shift count
+    description: Worked hours + paid leave must equal exactly 160h this month
+    person: ALL
+    countDates: ALL
+    countShiftTypes: [LD, AM1, AM2, AM3, PM1, PM2, PM3, LEAVE]
+    countShiftTypeCoefficients:
+      - [LD, 25]
+      - [AM1, 14]
+      - [AM2, 16]
+      - [AM3, 18]
+      - [PM1, 18]
+      - [PM2, 16]
+      - [PM3, 14]
+      - [LEAVE, 16]
+    expression: 'x = T'
+    target: 320
+    weight: .inf
+    # Arms the frontend uncredited-leave guard: this count is a monthly-hours
+    # contract, coefficients are in half-hour units, and `policy: exact` binds
+    # the `x = T` / scalar-target / .inf encoding above. Authoring-only metadata;
+    # the solver accepts-and-ignores it, so the solve is unchanged.
+    hoursContract:
+      unit: half-hour
+      policy: exact

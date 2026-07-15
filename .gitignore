@@ -4,3 +4,15 @@
 *.db
 .beads-credential-key
 .beads/proxieddb/
+
+# Python caches (vendored backend — core/)
+__pycache__/
+*.py[cod]
+.venv/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Docker local runtime env (copy from docker/.env.example)
+docker/.env

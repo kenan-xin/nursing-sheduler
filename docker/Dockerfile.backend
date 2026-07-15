@@ -1,0 +1,31 @@
+# Backend image — built from local vendored source (core/), no git dependency.
+# Build context = repo root so `COPY VERSION` and `COPY core/...` resolve.
+# APP_VERSION is fed by the build wrapper (no literal default); see tech-plan §2.
+#
+# Lean production runtime: ships ONLY the app package (nurse_scheduling/), never
+# core/tests/ or the vendored caches. The app runs from source via uvicorn
+# (no `pip install .`), and serve.py reads its version from APP_VERSION → /app/VERSION
+# (not pyproject/metadata), so no test tree or project metadata is needed at runtime.
+# The authoritative pytest+ruff gate runs on host/CI (tech-plan §6 item 1).
+FROM python:3.12-slim
+
+ARG APP_VERSION
+ENV APP_VERSION=${APP_VERSION}
+
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY VERSION /app/VERSION
+
+WORKDIR /app/core
+COPY core/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+# Selective copy: the app package only — NOT core/tests/ or vendored caches.
+COPY core/nurse_scheduling/ ./nurse_scheduling/
+
+RUN useradd -m -u 1000 user && chown -R user:user /app
+USER user
+
+EXPOSE 8000
+CMD ["uvicorn", "nurse_scheduling.serve:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--no-access-log"]
