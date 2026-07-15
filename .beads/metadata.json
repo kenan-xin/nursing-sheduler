@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "nursing_sheduler",
+  "project_id": "ca2a31ae-211d-4975-8d64-f5b597a87fd7"
+}
