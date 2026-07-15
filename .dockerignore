@@ -1,0 +1,17 @@
+# Build context is the repo root (docker/compose.yml sets context: ..), shared by
+# both Dockerfile.web and Dockerfile.backend. Keep the context lean and prevent
+# host artifacts (esp. web/node_modules) from clobbering image-installed deps.
+
+.git
+**/__pycache__
+**/*.pyc
+
+# web/ host artifacts — deps are reinstalled in-image from the lockfile.
+web/node_modules
+web/.next
+web/coverage
+web/playwright-report
+web/test-results
+web/.playwright
+web/e2e
+**/*.log

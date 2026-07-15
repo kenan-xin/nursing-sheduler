@@ -1,0 +1,70 @@
+# Deploy topology: Cloudflare (named tunnel) -> web (Next server) -> backend.
+# Only `web` is published to the host; `backend` is internal-only. Build context
+# is the repo root (..) so both Dockerfiles can COPY the vendored `core/`, the
+# root `VERSION`, and `web/`.
+#
+# APP_VERSION MUST be provided (exported by `make build`, which reads + validates
+# the root VERSION once). It is intentionally NOT defaulted — a silent
+# `v0.0.0-dev` would make the version-equality gate meaningless.
+
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.backend
+      args:
+        APP_VERSION: ${APP_VERSION:?APP_VERSION is not set — build via `make build`}
+    # No `ports:` — the backend is reachable only inside the compose network,
+    # exclusively via the web BFF (DL11 D1).
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+
+  web:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.web
+      args:
+        APP_VERSION: ${APP_VERSION:?APP_VERSION is not set — build via `make build`}
+    # The only host-published service.
+    ports:
+      - "3000:3000"
+    environment:
+      # Server-side base URL for the BFF; the browser never sees this.
+      BACKEND_API_URL: http://backend:8000
+      # Trusted public scheme+host that drives the cookie `Secure` rule (consumed
+      # by the cookie-handling BFF routes in T06 — passed through here). This is a
+      # RUNTIME-only value, so it is not required to parse for `build`; `make up`
+      # validates it is non-empty before starting.
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-}
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:3000/api/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    # Named tunnel. The public-hostname origin MUST target http://web:3000 (set in
+    # the Cloudflare dashboard / tunnel config, NOT here) — see the runbook. A
+    # token-only run does not itself prove the origin was changed.
+    #
+    # The token is a RUNTIME-only credential passed via the documented TUNNEL_TOKEN
+    # container env (not a `${...:?}` command arg), so `build` never requires it.
+    # `make up` validates it is non-empty before starting.
+    # https://developers.cloudflare.com/tunnel/advanced/run-parameters/
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      - web
+    restart: unless-stopped

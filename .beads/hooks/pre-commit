@@ -31,3 +31,26 @@ if command -v bd >/dev/null 2>&1; then
   if [ $_bd_exit -ne 0 ]; then exit $_bd_exit; fi
 fi
 # --- END BEADS INTEGRATION v1.1.0 ---
+
+# --- BEGIN LEFTHOOK (nurse-scheduler web toolchain) ---
+# Runs oxlint + oxfmt on staged web/ files (see repo-root lefthook.yml).
+# Appended after the beads-managed section above so both hooks run; beads only
+# rewrites content between its own markers, leaving this block intact.
+#
+# Fail CLOSED: if web/ code is staged but lefthook is missing (e.g. before
+# `pnpm install`), block the commit rather than skipping frontend checks. Skip
+# silently only when no matching frontend file is staged.
+_lh_staged_web=$(git diff --cached --name-only --diff-filter=ACMR 2>/dev/null \
+  | grep -E '^web/.*\.(js|jsx|ts|tsx|mjs|cjs|mts|cts|css)$' || true)
+if [ -n "$_lh_staged_web" ]; then
+  if [ -x web/node_modules/.bin/lefthook ]; then
+    web/node_modules/.bin/lefthook run pre-commit
+    _lh_exit=$?
+    if [ "$_lh_exit" -ne 0 ]; then exit "$_lh_exit"; fi
+  else
+    echo >&2 "ERROR: staged web/ code but lefthook is not installed — frontend pre-commit checks cannot run."
+    echo >&2 "       Run: cd web && pnpm install   (installs oxlint/oxfmt + lefthook)"
+    exit 1
+  fi
+fi
+# --- END LEFTHOOK ---

@@ -1,0 +1,9 @@
+# pnpm build-script policy. pnpm 11 replaced onlyBuiltDependencies /
+# ignoredBuiltDependencies with the `allowBuilds` map (see pnpm.io/settings).
+# `false` = do NOT run the package's install scripts and do NOT error:
+#   sharp    — ships prebuilt binaries via platform packages; no build step needed.
+#   lefthook — git-hook installer; binary ships via platform packages and the
+#              image has no hooks to install.
+allowBuilds:
+  sharp: false
+  lefthook: false

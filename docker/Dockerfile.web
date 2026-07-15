@@ -1,0 +1,49 @@
+# Web image — Next.js 16 standalone output. Build context = repo root so that
+# `COPY web/ ...` resolves (compose sets context: ..).
+#
+# APP_VERSION is fed by the build wrapper (`make build`); it is mapped to
+# NEXT_PUBLIC_APP_VERSION *before* `pnpm build`, because a NEXT_PUBLIC_* value is
+# compiled into the client bundle — a runtime env var cannot change an
+# already-built bundle. See tech-plan §2 and DL11 D2.
+
+FROM node:24-alpine AS base
+ENV PNPM_HOME=/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+RUN corepack enable
+
+# deps — install node_modules from a frozen lockfile. The `allowBuilds` policy in
+# pnpm-workspace.yaml skips the lefthook/sharp install scripts cleanly, so no
+# build-script approval prompt or ERR_PNPM_IGNORED_BUILDS gate blocks the install.
+FROM base AS deps
+WORKDIR /app
+COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile
+
+# builder — stamp the version and compile the standalone bundle.
+# CI=true keeps pnpm's pre-script deps-status check non-interactive (it must never
+# try to purge/reinstall node_modules here). The root .dockerignore keeps the host
+# node_modules out of the context so the copied deps stay in sync with the lockfile.
+FROM base AS builder
+WORKDIR /app
+ENV CI=true
+COPY --from=deps /app/node_modules ./node_modules
+COPY web/ ./
+ARG APP_VERSION
+ENV NEXT_PUBLIC_APP_VERSION=${APP_VERSION}
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN pnpm build
+
+# runner — minimal standalone runtime, non-root (the node image ships `node`
+# uid 1000).
+FROM node:24-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
+COPY --from=builder --chown=node:node /app/.next/standalone ./
+COPY --from=builder --chown=node:node /app/.next/static ./.next/static
+COPY --from=builder --chown=node:node /app/public ./public
+USER node
+EXPOSE 3000
+CMD ["node", "server.js"]
