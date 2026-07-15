@@ -1,1 +1,0 @@
-'OFF' is not allowed in shift type requirement preferences.

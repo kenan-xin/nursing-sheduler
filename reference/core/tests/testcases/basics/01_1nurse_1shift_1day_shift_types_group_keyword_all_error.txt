@@ -1,1 +1,0 @@
-Value error, Shift type group ID 'ALL' cannot be one of the reserved values

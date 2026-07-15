@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div class="ns-fade">
+  <div style="margin-bottom:var(--space-5);">
+    <div style="font:600 var(--m-sm) var(--font-ui);letter-spacing:.03em;color:var(--brandink);text-transform:uppercase;margin-bottom:8px;">OUTPUT · OPTIMIZE &amp; EXPORT</div>
+    <h1 style="font:800 var(--t-display) var(--font-display);letter-spacing:-.02em;margin:0 0 8px;line-height:1.05;">Optimize &amp; Export</h1>
+    <p style="margin:0;color:var(--ink2);max-width:66ch;">Send the scenario to the solver, watch the incumbent score improve in real time, and download the finished roster as a formatted spreadsheet.</p>
+  </div>
+
+  <!-- backend status bar -->
+  <div style="background:var(--surface);border:1px solid var(--line);padding:12px 16px;margin-bottom:var(--space-4);display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+    <span style="display:inline-flex;align-items:center;gap:7px;font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--success);background:var(--successtint);padding:5px 9px;text-transform:uppercase;"><i class="fa-solid fa-circle" style="font-size:7px;"></i> Backend online</span>
+    <span style="font:500 var(--t-sm) var(--font-mono);color:var(--ink3);">{{ versionLine }}</span>
+    <div style="flex:1;"></div>
+    <sc-if value="{{ versionMismatch }}" hint-placeholder-val="{{ true }}">
+      <span style="display:inline-flex;align-items:center;gap:7px;font-size:var(--t-sm);color:var(--warn);background:var(--warntint);padding:5px 10px;"><i class="fa-solid fa-triangle-exclamation"></i> {{ mismatchNote }}</span>
+    </sc-if>
+  </div>
+
+  <div class="ns-grid2" style="align-items:start;">
+    <!-- run settings -->
+    <div style="background:var(--surface);border:1px solid var(--line);">
+      <div style="padding:16px 18px;border-bottom:1px solid var(--line2);"><div style="font:800 var(--t-cardhead) var(--font-display);letter-spacing:-.02em;">Run settings</div></div>
+      <div style="padding:18px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;border:1px solid var(--line2);margin-bottom:16px;">
+          <div style="padding:12px 14px;border-right:1px solid var(--line2);"><div style="font:800 var(--t-title) var(--font-display);">{{ people }}</div><div style="font:600 var(--m-xs) var(--font-ui);color:var(--ink3);text-transform:uppercase;margin-top:3px;">NURSES</div></div>
+          <div style="padding:12px 14px;"><div style="font:800 var(--t-title) var(--font-display);">{{ days }}</div><div style="font:600 var(--m-xs) var(--font-ui);color:var(--ink3);text-transform:uppercase;margin-top:3px;">DAYS</div></div>
+          <div style="padding:12px 14px;border-right:1px solid var(--line2);border-top:1px solid var(--line2);"><div style="font:800 var(--t-title) var(--font-display);">{{ shiftTypes }}</div><div style="font:600 var(--m-xs) var(--font-ui);color:var(--ink3);text-transform:uppercase;margin-top:3px;">SHIFTS</div></div>
+          <div style="padding:12px 14px;border-top:1px solid var(--line2);"><div style="font:800 var(--t-title) var(--font-display);">{{ rulesOn }}</div><div style="font:600 var(--m-xs) var(--font-ui);color:var(--ink3);text-transform:uppercase;margin-top:3px;">RULES ON</div></div>
+        </div>
+        <label style="display:block;margin-bottom:16px;">
+          <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;margin-bottom:7px;">SOLVER TIMEOUT</div>
+          <div style="display:flex;align-items:center;gap:8px;"><input type="number" min="1" max="3600" value="{{ solverTime }}" onInput="{{ onSolverTime }}" disabled="{{ running }}" style="width:120px;height:40px;padding:0 12px;border:1px solid var(--line);background:var(--surface);"><span style="font:600 var(--m-sm) var(--font-mono);color:var(--ink3);">SEC</span></div>
+          <sc-if value="{{ timeoutError }}" hint-placeholder-val="{{ false }}"><div style="color:var(--error);font-size:var(--t-sm);margin-top:6px;">{{ timeoutErrorText }}</div></sc-if>
+        </label>
+        <div style="display:flex;flex-direction:column;gap:13px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;"><div><div style="font-weight:600;font-size:var(--t-sm);">Anonymise schedule data</div><div style="font-size:var(--t-sm);color:var(--ink3);">Replace people IDs &amp; strip descriptions before sending.</div></div><button role="switch" aria-checked="{{ anonOn }}" onClick="{{ toggleAnon }}" style="{{ anonTrack }}"><span style="{{ anonKnob }}"></span></button></div>
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;"><div><div style="font-weight:600;font-size:var(--t-sm);">Prettify XLSX</div><div style="font-size:var(--t-sm);color:var(--ink3);">Apply colour formatting to the workbook.</div></div><button role="switch" aria-checked="{{ prettyOn }}" onClick="{{ togglePretty }}" style="{{ prettyTrack }}"><span style="{{ prettyKnob }}"></span></button></div>
+        </div>
+        <div style="margin-top:18px;padding-top:16px;border-top:1px dashed var(--line2);">
+          <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;margin-bottom:8px;">DEMO OUTCOME <span style="color:var(--faint);">· prototype only</span></div>
+          <div role="tablist" style="display:inline-flex;border:1px solid var(--line);">
+            <button onClick="{{ setOptimal }}" style="{{ optimalStyle }}">Optimal</button>
+            <button onClick="{{ setFeasibleOut }}" style="{{ feasibleStyle }}">Feasible</button>
+            <button onClick="{{ setInfeasibleOut }}" style="{{ infeasibleStyle }}">Infeasible</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- result / action panel -->
+    <div style="background:var(--surface);border:1px solid var(--line);min-height:300px;display:flex;flex-direction:column;">
+      <sc-if value="{{ isIdle }}" hint-placeholder-val="{{ true }}">
+        <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:44px 26px;">
+          <div style="width:56px;height:56px;border:1.5px dashed var(--line);display:flex;align-items:center;justify-content:center;color:var(--ink3);font-size:22px;margin-bottom:18px;"><i class="fa-solid fa-wand-magic-sparkles"></i></div>
+          <div style="font:800 var(--t-title) var(--font-display);margin-bottom:6px;">Ready to optimise</div>
+          <p style="margin:0 0 22px;color:var(--ink2);font-size:var(--t-sm);max-width:40ch;">The solver searches for the highest-scoring roster that satisfies every hard rule, within the timeout.</p>
+          <button onClick="{{ run }}" style="height:46px;padding:0 24px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-body) var(--font-ui);display:inline-flex;align-items:center;gap:9px;" style-hover="filter:brightness(.94)"><i class="fa-solid fa-play"></i> Optimize roster</button>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ running }}" hint-placeholder-val="{{ false }}">
+        <div style="padding:22px 22px 24px;flex:1;display:flex;flex-direction:column;">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+            <div style="width:16px;height:16px;border:2.5px solid var(--line2);border-top-color:var(--brand);border-radius:50%;animation:ns-spin .8s linear infinite;flex:none;"></div>
+            <div style="font:600 var(--m-sm) var(--font-ui);letter-spacing:.03em;color:var(--brandink);text-transform:uppercase;">{{ runStatusText }}</div>
+          </div>
+          <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;margin-bottom:4px;">LIVE INCUMBENT SCORE</div>
+          <div style="font:800 var(--t-display) var(--font-display);letter-spacing:-.02em;line-height:1;">{{ scoreDisplay }}</div>
+          <div style="font-size:var(--t-sm);color:var(--ink3);margin-top:4px;">Higher scores are better.</div>
+          <div style="margin-top:12px;font-size:var(--t-sm);color:var(--ink2);">{{ runDetail }}</div>
+          <div style="margin-top:auto;padding-top:20px;display:flex;flex-wrap:wrap;gap:10px;">
+            <button onClick="{{ finishNow }}" disabled="{{ finishDisabled }}" style="{{ finishStyle }}"><i class="fa-solid fa-flag-checkered"></i> Get results now</button>
+            <button onClick="{{ cancel }}" disabled="{{ cancelling }}" style="height:42px;padding:0 18px;background:transparent;border:1px solid var(--line);font:600 var(--t-body) var(--font-ui);" style-hover="background:var(--panel)">{{ cancelLabel }}</button>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isDone }}" hint-placeholder-val="{{ false }}">
+        <div style="padding:22px 22px 24px;flex:1;display:flex;flex-direction:column;">
+          <div style="font:600 var(--m-sm) var(--font-ui);letter-spacing:.03em;text-transform:uppercase;margin-bottom:10px;color:{{ termColor }};">● {{ termLabel }}</div>
+          <div style="font:800 var(--t-cardhead) var(--font-display);letter-spacing:-.02em;margin-bottom:8px;">{{ termTitle }}</div>
+
+          <sc-if value="{{ termOk }}" hint-placeholder-val="{{ true }}">
+            <p style="margin:0 0 16px;color:var(--ink2);font-size:var(--t-sm);">Every hard rule is satisfied. Download the workbook or open the roster to fine-tune it by hand.</p>
+            <div style="display:flex;gap:0;border:1px solid var(--line2);margin-bottom:20px;">
+              <div style="flex:1;padding:12px 14px;border-right:1px solid var(--line2);"><div style="font:800 var(--t-title) var(--font-display);color:{{ termColor }};">{{ termLabel }}</div><div style="font:600 var(--m-xs) var(--font-ui);color:var(--ink3);text-transform:uppercase;margin-top:3px;">SOLVER STATUS</div></div>
+              <div style="flex:1;padding:12px 14px;border-right:1px solid var(--line2);"><div style="font:800 var(--t-title) var(--font-display);">{{ scoreDisplay }}</div><div style="font:600 var(--m-xs) var(--font-ui);color:var(--ink3);text-transform:uppercase;margin-top:3px;">FINAL SCORE</div></div>
+              <div style="flex:1;padding:12px 14px;"><div style="font:800 var(--t-title) var(--font-display);">{{ elapsedDisplay }}</div><div style="font:600 var(--m-xs) var(--font-ui);color:var(--ink3);text-transform:uppercase;margin-top:3px;">ELAPSED</div></div>
+            </div>
+            <div style="margin-top:auto;display:flex;flex-wrap:wrap;gap:10px;">
+              <button onClick="{{ download }}" style="height:44px;padding:0 20px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-body) var(--font-ui);display:inline-flex;align-items:center;gap:9px;" style-hover="filter:brightness(.94)"><i class="fa-solid fa-file-excel"></i> Download roster (.xlsx)</button>
+              <button onClick="{{ toSchedule }}" style="height:44px;padding:0 18px;background:transparent;border:1px solid var(--line);font:600 var(--t-body) var(--font-ui);display:inline-flex;align-items:center;gap:9px;" style-hover="background:var(--panel)"><i class="fa-solid fa-calendar-check"></i> Open &amp; adjust roster</button>
+              <sc-if value="{{ saved }}" hint-placeholder-val="{{ false }}">
+                <button onClick="{{ download }}" style="height:44px;padding:0 16px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:8px;" style-hover="background:var(--panel)"><i class="fa-solid fa-rotate-right"></i> Download again</button>
+              </sc-if>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ termInfeasible }}" hint-placeholder-val="{{ false }}">
+            <p style="margin:0 0 14px;color:var(--ink2);font-size:var(--t-sm);">The solver proved no roster satisfies every hard rule. The tightest conflicts:</p>
+            <div style="border:1px solid var(--line2);margin-bottom:18px;">
+              <sc-for list="{{ reasons }}" as="rn" hint-placeholder-count="3">
+                <div style="display:flex;gap:10px;padding:11px 13px;border-top:1px solid var(--line2);align-items:flex-start;">
+                  <span style="color:var(--error);font-weight:800;line-height:1.3;">!</span>
+                  <span style="font-size:var(--t-sm);color:var(--ink);">{{ rn }}</span>
+                </div>
+              </sc-for>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px;">
+              <button onClick="{{ toRules }}" style="height:44px;padding:0 20px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-body) var(--font-ui);display:inline-flex;align-items:center;gap:9px;" style-hover="filter:brightness(.94)"><i class="fa-solid fa-sliders"></i> Adjust rules</button>
+              <button onClick="{{ run }}" style="height:44px;padding:0 18px;background:transparent;border:1px solid var(--line);font:600 var(--t-body) var(--font-ui);display:inline-flex;align-items:center;gap:9px;" style-hover="background:var(--panel)"><i class="fa-solid fa-rotate-right"></i> Try again</button>
+            </div>
+            <div style="margin-top:auto;border:1px dashed var(--line);background:var(--panel);padding:13px 14px;display:flex;gap:11px;align-items:flex-start;">
+              <div style="width:32px;height:32px;background:var(--surface);border:1px solid var(--line2);display:flex;align-items:center;justify-content:center;color:var(--ink3);flex:none;"><i class="fa-solid fa-robot"></i></div>
+              <div style="flex:1;min-width:0;">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;"><span style="font-weight:700;font-size:var(--t-sm);">AI fix assistant</span><span style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--brandink);background:var(--brandtint);padding:2px 7px;text-transform:uppercase;">Planned</span></div>
+                <div style="font-size:var(--t-sm);color:var(--ink2);line-height:1.45;">A future assistant will read the conflict and propose targeted fixes to apply in one click. Designed after the core flow ships.</div>
+              </div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ termCancelled }}" hint-placeholder-val="{{ false }}">
+            <p style="margin:0 0 18px;color:var(--ink2);font-size:var(--t-sm);">The run was cancelled before a result was finalised. Any in-progress work was discarded.</p>
+            <div style="margin-top:auto;">
+              <button onClick="{{ run }}" style="height:44px;padding:0 20px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-body) var(--font-ui);display:inline-flex;align-items:center;gap:9px;" style-hover="filter:brightness(.94)"><i class="fa-solid fa-play"></i> Optimize again</button>
+            </div>
+          </sc-if>
+        </div>
+      </sc-if>
+    </div>
+  </div>
+
+  <!-- progress chart + event log -->
+  <sc-if value="{{ started }}" hint-placeholder-val="{{ false }}">
+    <div class="ns-grid2" style="align-items:start;margin-top:var(--space-4);">
+      <!-- chart -->
+      <div style="background:var(--surface);border:1px solid var(--line);">
+        <div style="padding:14px 16px;border-bottom:1px solid var(--line2);">
+          <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+            <div>
+              <div style="font:800 var(--t-cardhead) var(--font-display);letter-spacing:-.02em;">Incumbent Progress</div>
+              <div style="font-size:var(--t-sm);color:var(--ink3);margin-top:2px;">Higher scores are better. Hover a point to inspect a solution.</div>
+            </div>
+            <button onClick="{{ toggleComments }}" style="height:30px;padding:0 12px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);color:var(--ink2);" style-hover="background:var(--panel)">{{ commentsToggleLabel }}</button>
+          </div>
+          <div role="tablist" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;">
+            <sc-for list="{{ presets }}" as="p" hint-placeholder-count="5">
+              <button onClick="{{ p.onClick }}" style="{{ p.style }}">{{ p.label }}</button>
+            </sc-for>
+          </div>
+        </div>
+        <div style="padding:14px 16px;">
+          <sc-if value="{{ chartReady }}" hint-placeholder-val="{{ false }}">
+            <svg viewBox="0 0 620 220" width="100%" style="display:block;overflow:visible;font-family:var(--font-mono);">
+              <line x1="46" y1="14" x2="46" y2="180" stroke="var(--line2)"></line>
+              <line x1="46" y1="180" x2="606" y2="180" stroke="var(--line2)"></line>
+              <line x1="46" y1="97" x2="606" y2="97" stroke="var(--line2)" stroke-dasharray="3 4"></line>
+              <text x="42" y="18" text-anchor="end" fill="var(--ink3)" font-size="11">{{ yMaxLabel }}</text>
+              <text x="42" y="184" text-anchor="end" fill="var(--ink3)" font-size="11">{{ yMinLabel }}</text>
+              <text x="46" y="200" text-anchor="start" fill="var(--ink3)" font-size="11">0s</text>
+              <text x="606" y="200" text-anchor="end" fill="var(--ink3)" font-size="11">{{ xMaxLabel }}</text>
+              <sc-if value="{{ showComments }}" hint-placeholder-val="{{ true }}">
+                <polyline points="{{ commentsPoints }}" fill="none" stroke="var(--warn)" stroke-width="1.5" stroke-dasharray="4 3" opacity=".8"></polyline>
+              </sc-if>
+              <polyline points="{{ scorePoints }}" fill="none" stroke="var(--brand)" stroke-width="2"></polyline>
+              <circle cx="{{ latestCx }}" cy="{{ latestCy }}" r="4" fill="var(--brand)"></circle>
+            </svg>
+            <div style="display:flex;gap:16px;margin-top:10px;font-size:var(--t-sm);color:var(--ink3);">
+              <span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:14px;height:3px;background:var(--brand);display:inline-block;"></span> Score</span>
+              <sc-if value="{{ showComments }}" hint-placeholder-val="{{ true }}"><span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:14px;height:0;border-top:2px dashed var(--warn);display:inline-block;"></span> Comments</span></sc-if>
+              <div style="flex:1;"></div>
+              <sc-if value="{{ dotsHidden }}" hint-placeholder-val="{{ false }}"><span>Points hidden · hover to inspect</span></sc-if>
+            </div>
+          </sc-if>
+          <sc-if value="{{ chartWaiting }}" hint-placeholder-val="{{ true }}">
+            <div style="height:180px;display:flex;align-items:center;justify-content:center;color:var(--ink3);font-size:var(--t-sm);text-align:center;">Waiting for the first feasible solution…</div>
+          </sc-if>
+        </div>
+      </div>
+
+      <!-- event log -->
+      <div style="background:var(--surface);border:1px solid var(--line);display:flex;flex-direction:column;">
+        <div style="padding:14px 16px;border-bottom:1px solid var(--line2);display:flex;align-items:center;justify-content:space-between;">
+          <div style="font:800 var(--t-cardhead) var(--font-display);letter-spacing:-.02em;">Event log</div>
+          <span style="font:600 var(--m-xs) var(--font-ui);color:var(--ink3);text-transform:uppercase;">{{ logCount }}</span>
+        </div>
+        <div style="flex:1;overflow-y:auto;max-height:300px;padding:8px 0;">
+          <sc-for list="{{ log }}" as="e" hint-placeholder-count="4">
+            <div style="display:flex;gap:10px;padding:8px 16px;align-items:flex-start;border-top:1px solid var(--line2);">
+              <span style="{{ e.badge }}">{{ e.type }}</span>
+              <div style="flex:1;min-width:0;">
+                <div style="font-size:var(--t-sm);color:var(--ink);line-height:1.4;">{{ e.text }}</div>
+                <div style="font:500 var(--m-xs) var(--font-mono);color:var(--faint);margin-top:2px;">{{ e.at }}</div>
+              </div>
+            </div>
+          </sc-for>
+          <sc-if value="{{ logEmpty }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:24px 16px;text-align:center;color:var(--ink3);font-size:var(--t-sm);">{{ logEmptyText }}</div>
+          </sc-if>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1200,&quot;height&quot;:820}}">
+class Component extends DCLogic {
+  state={
+    solverTime:300, anon:true, pretty:true,
+    phase:'idle', status:null, outcome:'optimal',
+    points:[], log:[], idx:0, elapsed:0, score:null,
+    cancelling:false, finishRequested:false, saved:false,
+    range:'full', showComments:true, timeoutError:false,
+  };
+
+  // scripted incumbent trajectory (prototype simulation of an SSE stream)
+  SEQ=[
+    {t:0.4, s:-842, c:0},{t:1.1, s:-536, c:0},{t:2.0, s:-361, c:3},{t:3.3, s:-262, c:3},
+    {t:4.7, s:-198, c:7},{t:6.2, s:-154, c:9},{t:7.9, s:-133, c:11},{t:9.8, s:-124, c:12},
+    {t:12.1, s:-120, c:13},{t:14.4, s:-118, c:14},
+  ];
+  REASONS=[
+    'Night shift · Sat 14 Feb needs 3 nurses — only 2 are available after approved leave.',
+    'Night shift · Sun 15 Feb needs 3 nurses — only 2 are available.',
+    'Kevin Ong and Grace Wong are both on approved leave across the CNY weekend.',
+  ];
+
+  componentWillUnmount(){ if(this._t) clearInterval(this._t); }
+  _now(){ return new Date().toLocaleTimeString('en-GB',{hour12:false}); }
+  _addLog(type,text){ this.setState(s=>({log:[...s.log,{type,text,at:this._now()}]})); }
+
+  run=()=>{
+    const t=parseInt(this.state.solverTime,10);
+    if(!Number.isInteger(t)||t<1){ this.setState({timeoutError:true}); return; }
+    if(this._t) clearInterval(this._t);
+    this.setState({phase:'running', status:'running', points:[], log:[], idx:0, elapsed:0, score:null, cancelling:false, finishRequested:false, saved:false, range:'full', timeoutError:false},()=>{
+      this._addLog('status','Job accepted · queued at position 1');
+      setTimeout(()=>this._addLog('phase','Building constraint model'),260);
+      setTimeout(()=>this._addLog('status','Solving started'),520);
+    });
+    if(this.state.outcome==='infeasible'){
+      this._t=setTimeout(()=>{
+        this._addLog('phase','Search space exhausted');
+        this._addLog('error','No feasible assignment exists');
+        this.setState({phase:'done', status:'infeasible'});
+        if(this._t){ clearTimeout(this._t); this._t=null; }
+      },2200);
+      return;
+    }
+    this._t=setInterval(()=>{
+      this.setState(s=>{
+        if(s.idx>=this.SEQ.length){ return {}; }
+        const p=this.SEQ[s.idx];
+        const points=[...s.points,p];
+        return {points, idx:s.idx+1, score:p.s, elapsed:p.t};
+      },()=>{
+        const s=this.state;
+        if(s.idx>0 && s.idx<=this.SEQ.length){ const p=this.SEQ[s.idx-1]; this._addLog('progress',`Solution #${s.idx} · score ${this._fmt(p.s)} · ${p.c} comments`); }
+        if(s.idx>=this.SEQ.length){ this._finishRun(this.state.outcome==='feasible'?'feasible':'optimal'); }
+      });
+    },700);
+  };
+  _finishRun=(status)=>{
+    if(this._t){ clearInterval(this._t); this._t=null; }
+    this._addLog('complete',`Optimization ${status} · final score ${this._fmt(this.state.score)}`);
+    this.setState({phase:'done', status});
+  };
+  cancel=()=>{
+    if(this.state.cancelling) return;
+    this.setState({cancelling:true});
+    this._addLog('status','Cancellation requested');
+    setTimeout(()=>{ if(this._t){ clearInterval(this._t); this._t=null; } this._addLog('status','Job cancelled'); this.setState({phase:'done', status:'cancelled', cancelling:false}); },700);
+  };
+  finishNow=()=>{
+    if(this.state.finishRequested) return;
+    this.setState({finishRequested:true});
+    this._addLog('status','Current results requested');
+    setTimeout(()=>this._finishRun('feasible'),650);
+  };
+  download=()=>{ this.setState({saved:true}); const n=this.props.vals&&this.props.vals.notify; if(n) n('Prototype — the .xlsx export is wired up at implementation.'); };
+  toggleComments=()=>this.setState(s=>({showComments:!s.showComments}));
+  setRange=(r)=>this.setState({range:r});
+  _fmt(n){ if(n==null) return 'N/A'; return new Intl.NumberFormat('en-US',{maximumFractionDigits:2}).format(n); }
+
+  _visible(){
+    const pts=this.state.points; if(!pts.length) return [];
+    const r=this.state.range; const maxT=pts[pts.length-1].t;
+    if(r==='l10') return pts.slice(-10);
+    if(r==='l50') return pts.slice(-50);
+    if(r==='min1') return pts.filter(p=>p.t>=maxT-60);
+    if(r==='min10') return pts.filter(p=>p.t>=maxT-600);
+    return pts;
+  }
+
+  renderVals(){
+    const v=this.props.vals||{};
+    const s=this.state;
+    const go=v.go||(()=>{});
+    const running=s.phase==='running';
+    const isDone=s.phase==='done';
+    const st=s.status;
+    const termOk=(st==='optimal'||st==='feasible');
+    const termInfeasible=(st==='infeasible');
+    const termCancelled=(st==='cancelled');
+    const termLabelMap={optimal:'OPTIMAL',feasible:'FEASIBLE',infeasible:'INFEASIBLE',cancelled:'CANCELLED',failed:'FAILED'};
+    const termColor=(termOk?'var(--success)':termCancelled?'var(--warn)':'var(--error)');
+    const termTitle=(st==='optimal'?'Optimal roster found':st==='feasible'?'A feasible roster was found':st==='infeasible'?"This roster can't be built":st==='cancelled'?'Run cancelled':'Run finished');
+
+    // run status / detail text
+    const runStatusText = s.score==null ? 'Solving · waiting for first solution' : 'Solving · improving';
+    const runDetail = s.score==null
+      ? 'Waiting for first feasible solution…'
+      : `Solution #${s.points.length} · ${this._fmt(s.elapsed)}s elapsed · ${(s.points[s.points.length-1]||{}).c} comments`;
+
+    // segmented demo-outcome styles
+    const seg=(on)=>`height:32px;padding:0 14px;background:${on?'var(--ink)':'transparent'};color:${on?'var(--on-ink)':'var(--ink2)'};border:none;font:${on?'700':'500'} var(--t-sm) var(--font-ui);${on?'':'border-left:1px solid var(--line);'}`;
+    const segFirst=(on)=>`height:32px;padding:0 14px;background:${on?'var(--ink)':'transparent'};color:${on?'var(--on-ink)':'var(--ink2)'};border:none;font:${on?'700':'500'} var(--t-sm) var(--font-ui);`;
+
+    // chart
+    const vis=this._visible();
+    const chartReady=vis.length>=2;
+    const chartWaiting=s.phase!=='idle' && !chartReady && !isDone;
+    let scorePoints='',commentsPoints='',latestCx=0,latestCy=0,yMaxLabel='',yMinLabel='',xMaxLabel='';
+    if(chartReady){
+      const padL=46,padR=14,padT=14,padB=40, W=620,H=220;
+      const innerW=W-padL-padR, innerH=H-padT-padB;
+      const xs=vis.map(p=>p.t), ss=vis.map(p=>p.s), cs=vis.map(p=>p.c);
+      const x0=Math.min(...xs), x1=Math.max(...xs);
+      let y0=Math.min(...ss), y1=Math.max(...ss); if(y0===y1){y0-=1;y1+=1;}
+      const cMax=Math.max(1,...cs);
+      const X=(t)=> padL + (x1===x0?0:(t-x0)/(x1-x0))*innerW;
+      const Y=(val)=> padT + (1-(val-y0)/(y1-y0))*innerH;
+      const YC=(c)=> padT + (1-c/cMax)*innerH;
+      // step-after score line
+      const sp=[];
+      vis.forEach((p,i)=>{ sp.push(`${X(p.t).toFixed(1)},${Y(p.s).toFixed(1)}`); if(i<vis.length-1) sp.push(`${X(vis[i+1].t).toFixed(1)},${Y(p.s).toFixed(1)}`); });
+      scorePoints=sp.join(' ');
+      commentsPoints=vis.map(p=>`${X(p.t).toFixed(1)},${YC(p.c).toFixed(1)}`).join(' ');
+      const last=vis[vis.length-1];
+      latestCx=X(last.t).toFixed(1); latestCy=Y(last.s).toFixed(1);
+      yMaxLabel=this._fmt(y1); yMinLabel=this._fmt(y0); xMaxLabel=this._fmt(x1)+'s';
+    }
+    const presetDefs=[['full','Full'],['min1','Last 1 min'],['min10','Last 10 min'],['l10','Last 10'],['l50','Last 50']];
+    const presets=presetDefs.map(([key,label])=>{ const on=s.range===key; return {label, onClick:()=>this.setRange(key),
+      style:`height:28px;padding:0 11px;background:${on?'var(--brand)':'var(--surface)'};color:${on?'var(--onbrand)':'var(--ink2)'};border:1px solid ${on?'var(--brand)':'var(--line)'};font:600 var(--t-sm) var(--font-ui);`}; });
+
+    // event log
+    const badgeColor={complete:['var(--success)','var(--successtint)'],error:['var(--error)','var(--errortint)'],progress:['var(--brand)','var(--brandtint)'],phase:['var(--warn)','var(--warntint)'],status:['var(--ink3)','var(--panel)']};
+    const log=s.log.map(e=>{ const [fg,bg]=badgeColor[e.type]||['var(--ink3)','var(--panel)'];
+      return {...e, badge:`font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:${fg};background:${bg};padding:3px 7px;text-transform:uppercase;flex:none;min-width:66px;text-align:center;`}; });
+
+    return {
+      people:v.people, days:v.days, shiftTypes:v.shiftTypes, rulesOn:v.rulesOn,
+      versionLine:'API alpha · Frontend v1.4.0 · Backend v1.4.0',
+      versionMismatch:false, mismatchNote:'Frontend and backend versions do not match. If nothing breaks, you can continue.',
+
+      isIdle:s.phase==='idle', running, isDone, started:s.phase!=='idle',
+      run:this.run, cancel:this.cancel, finishNow:this.finishNow, download:this.download,
+      toSchedule:()=>go('schedule'), toRules:()=>go('rules'),
+
+      scoreDisplay:s.score==null?'No incumbent yet':this._fmt(s.score),
+      elapsedDisplay:this._fmt(s.elapsed)+'s',
+      runStatusText, runDetail,
+      cancelling:s.cancelling, cancelLabel:s.cancelling?'Cancelling…':'Cancel',
+      finishDisabled:s.finishRequested||s.cancelling,
+      finishStyle:`height:42px;padding:0 18px;background:var(--surface);border:1px solid var(--line);font:700 var(--t-body) var(--font-ui);display:inline-flex;align-items:center;gap:8px;${(s.finishRequested||s.cancelling)?'opacity:.5;cursor:not-allowed;':''}`,
+
+      termLabel:termLabelMap[st]||'', termColor, termTitle,
+      termOk, termInfeasible, termCancelled, saved:s.saved,
+      reasons:this.REASONS,
+
+      // chart
+      chartReady, chartWaiting, scorePoints, commentsPoints,
+      latestCx, latestCy, yMaxLabel, yMinLabel, xMaxLabel,
+      showComments:s.showComments, toggleComments:this.toggleComments,
+      commentsToggleLabel:s.showComments?'Hide comments':'Show comments',
+      dotsHidden:vis.length>30, presets,
+
+      // log
+      log, logCount:s.log.length+' events', logEmpty:s.log.length===0,
+      logEmptyText:running?'Waiting for optimization events…':'No optimization events yet.',
+
+      // run settings
+      solverTime:s.solverTime,
+      onSolverTime:(e)=>{ const raw=e.target.value; const n=parseInt(raw,10); this.setState({solverTime:raw===''?'':(Number.isNaN(n)?raw:n), timeoutError:false}); },
+      timeoutError:s.timeoutError, timeoutErrorText:'Solver timeout must be a valid positive integer.',
+      anonOn:s.anon, prettyOn:s.pretty,
+      toggleAnon:()=>this.setState(x=>({anon:!x.anon})), togglePretty:()=>this.setState(x=>({pretty:!x.pretty})),
+      anonTrack:`position:relative;width:38px;height:22px;border-radius:11px;border:none;flex:none;background:${s.anon?'var(--brand)':'var(--line)'};transition:background var(--dur-fast) var(--ease);`,
+      anonKnob:`position:absolute;top:2px;left:2px;width:18px;height:18px;background:#fff;border-radius:11px;transform:translateX(${s.anon?'16px':'0'});transition:transform var(--dur-fast) var(--ease);`,
+      prettyTrack:`position:relative;width:38px;height:22px;border-radius:11px;border:none;flex:none;background:${s.pretty?'var(--brand)':'var(--line)'};transition:background var(--dur-fast) var(--ease);`,
+      prettyKnob:`position:absolute;top:2px;left:2px;width:18px;height:18px;background:#fff;border-radius:11px;transform:translateX(${s.pretty?'16px':'0'});transition:transform var(--dur-fast) var(--ease);`,
+
+      setOptimal:()=>this.setState({outcome:'optimal'}), setFeasibleOut:()=>this.setState({outcome:'feasible'}), setInfeasibleOut:()=>this.setState({outcome:'infeasible'}),
+      optimalStyle:segFirst(s.outcome==='optimal'), feasibleStyle:seg(s.outcome==='feasible'), infeasibleStyle:seg(s.outcome==='infeasible'),
+      running,
+    };
+  }
+}
+</script>
+</body>
+</html>

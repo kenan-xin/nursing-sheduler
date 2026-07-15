@@ -1,0 +1,1071 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div class="ns-fade">
+  <div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:var(--space-4);margin-bottom:var(--space-5);">
+    <div style="flex:1;min-width:240px;">
+      <div style="font:600 var(--m-sm) var(--font-ui);letter-spacing:.03em;color:var(--brandink);text-transform:uppercase;margin-bottom:8px;">{{ eyebrow }}</div>
+      <h1 style="font:800 var(--t-display) var(--font-display);letter-spacing:-.02em;margin:0 0 8px;line-height:1.05;">{{ title }}</h1>
+      <p style="margin:0;color:var(--ink2);max-width:64ch;">{{ subtitle }}</p>
+    </div>
+    <sc-if value="{{ showTwoAdd }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button onClick="{{ addContract }}" style="height:44px;padding:0 18px;background:var(--surface);color:var(--brandink);border:1px solid var(--brand);font:700 var(--t-body) var(--font-ui);display:inline-flex;align-items:center;gap:9px;white-space:nowrap;" style-hover="background:var(--brandtint)"><i class="fa-solid fa-file-contract"></i> Add Contracted Hours</button>
+        <button onClick="{{ addNew }}" style="{{ addBtnStyle }}" style-hover="filter:brightness(.94)"><i class="fa-solid {{ addIcon }}"></i> {{ addBtnLabel }}</button>
+      </div>
+    </sc-if>
+    <sc-if value="{{ showOneAdd }}" hint-placeholder-val="{{ true }}">
+      <button onClick="{{ addNew }}" style="{{ addBtnStyle }}" style-hover="filter:brightness(.94)"><i class="fa-solid {{ addIcon }}"></i> {{ addBtnLabel }}</button>
+    </sc-if>
+  </div>
+
+  <div style="display:flex;align-items:flex-start;gap:9px;border:1px solid var(--line);background:var(--panel);padding:11px 14px;margin-bottom:var(--space-4);">
+    <i class="fa-solid fa-circle-info" style="color:var(--ink3);margin-top:2px;"></i>
+    <div style="font-size:var(--t-sm);color:var(--ink2);">These are the exact constraints behind the plain-English <b>Rules</b>. Editing here gives you full control; the guided Rules screen is the friendly view of the same data.</div>
+  </div>
+
+  <!-- coverage warnings (requirements only) -->
+  <sc-if value="{{ showCoverage }}" hint-placeholder-val="{{ false }}">
+    <div style="border:1px solid var(--warn);background:var(--warntint);padding:13px 16px;margin-bottom:var(--space-4);">
+      <div style="display:flex;align-items:center;gap:8px;font:700 var(--t-body) var(--font-ui);color:var(--warn);margin-bottom:6px;"><i class="fa-solid fa-triangle-exclamation"></i> Requirement coverage warnings</div>
+      <div style="font-size:var(--t-sm);color:var(--ink2);margin-bottom:8px;">{{ coverageMsg }}</div>
+      <ul style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:3px;">
+        <sc-for list="{{ coverageItems }}" as="ci" hint-placeholder-count="3"><li style="font:600 var(--m-sm) var(--font-mono);color:var(--warn);">{{ ci }}</li></sc-for>
+      </ul>
+    </div>
+  </sc-if>
+
+  <!-- add / edit form -->
+  <sc-if value="{{ showForm }}" hint-placeholder-val="{{ false }}">
+    <div style="background:var(--surface);border:1px solid var(--brand);margin-bottom:var(--space-5);">
+      <div style="padding:14px 18px;border-bottom:1px solid var(--line2);background:var(--brandtint);">
+        <div style="font:800 var(--t-cardhead) var(--font-display);letter-spacing:-.02em;color:var(--brandink);">{{ formHeading }}</div>
+      </div>
+      <div class="ns-formbody" style="max-width:940px;">
+        <label style="display:block;margin-bottom:18px;">
+          <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;margin-bottom:7px;">DESCRIPTION</div>
+          <input value="{{ draftDesc }}" onInput="{{ onDesc }}" placeholder="Short label for this rule" style="width:100%;height:40px;padding:0 12px;border:1px solid var(--line);background:var(--surface);">
+        </label>
+        <sc-if value="{{ isContractForm }}" hint-placeholder-val="{{ false }}">
+          <div style="background:var(--panel);border:1px solid var(--line2);padding:15px 16px;margin-bottom:16px;">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:9px;flex-wrap:wrap;">
+              <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.05em;color:var(--ink3);text-transform:uppercase;flex:1;">IN PLAIN ENGLISH</div>
+              <button onClick="{{ onRefreshShifts }}" style="height:30px;padding:0 12px;background:var(--surface);border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:7px;" style-hover="background:var(--brandtint)"><i class="fa-solid fa-rotate" style="font-size:10px;"></i> Refresh from Shift Types</button>
+            </div>
+            <p style="margin:0;font:600 var(--t-body) var(--font-ui);line-height:1.5;color:var(--ink);">{{ contractSentence }}</p>
+          </div>
+          <sc-if value="{{ hasRefresh }}" hint-placeholder-val="{{ false }}">
+            <div style="border:1px solid var(--brand);background:var(--brandtint);padding:13px 15px;margin-bottom:16px;">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:9px;"><i class="fa-solid fa-rotate" style="color:var(--brandink);font-size:12px;"></i><span style="font:700 var(--t-body) var(--font-ui);color:var(--brandink);">Shift Types changed — review before applying</span></div>
+              <div style="display:flex;gap:16px;flex-wrap:wrap;font:600 var(--m-sm) var(--font-mono);margin-bottom:11px;">
+                <span style="color:var(--success);">+ {{ refreshAdded }} added</span>
+                <span style="color:var(--error);">− {{ refreshRemoved }} removed</span>
+                <span style="color:var(--warn);">✎ {{ refreshChanged }} changed</span>
+                <span style="color:var(--ink3);">{{ refreshUnchanged }} unchanged</span>
+              </div>
+              <div style="display:flex;gap:8px;">
+                <button onClick="{{ onApplyRefresh }}" style="height:32px;padding:0 14px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-sm) var(--font-ui);">Apply update</button>
+                <button onClick="{{ onCancelRefresh }}" style="height:32px;padding:0 14px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);color:var(--ink);">Cancel preview</button>
+              </div>
+            </div>
+          </sc-if>
+        </sc-if>
+        <div class="ns-formgrid">
+          <sc-for list="{{ draftFields }}" as="f" hint-placeholder-count="4">
+            <div style="{{ f.cellStyle }}">
+              <sc-if value="{{ f.showLabel }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:8px;">
+                <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;white-space:nowrap;">{{ f.k }}</div>
+                <sc-if value="{{ f.hint }}" hint-placeholder-val="{{ false }}"><div style="font-size:var(--t-sm);color:var(--ink3);">{{ f.hint }}</div></sc-if>
+              </div>
+              </sc-if>
+
+              <sc-if value="{{ f.isText }}" hint-placeholder-val="{{ true }}">
+                <input value="{{ f.v }}" onInput="{{ f.onInput }}" placeholder="{{ f.ph }}" style="width:100%;height:40px;padding:0 12px;border:1px solid var(--line);background:var(--surface);">
+              </sc-if>
+
+              <sc-if value="{{ f.isPolicy }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex;flex-direction:column;gap:16px;">
+                  <div>
+                    <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;margin-bottom:8px;">POLICY</div>
+                    <div style="display:flex;border:1px solid var(--line);max-width:320px;">
+                      <button onClick="{{ f.onExact }}" style="{{ f.exactStyle }}">Exact</button>
+                      <button onClick="{{ f.onRange }}" style="{{ f.rangeStyle }}">Allowed range</button>
+                    </div>
+                    <div style="display:flex;align-items:flex-start;gap:7px;margin-top:8px;font-size:var(--t-sm);color:var(--ink3);line-height:1.45;"><i class="fa-solid fa-lock" style="margin-top:2px;font-size:10px;"></i><span>Hard requirement — the solver must satisfy it. Weight is fixed at +∞.</span></div>
+                  </div>
+                  <sc-if value="{{ f.policyExact }}" hint-placeholder-val="{{ true }}">
+                    <div>
+                      <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px;"><div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;">TARGET HOURS PER NURSE</div><div style="font:800 var(--t-title) var(--font-display);color:var(--brandink);">{{ f.exactHours }}h</div></div>
+                      <div style="position:relative;height:22px;margin:0 10px;">
+                        <div style="position:absolute;top:9px;left:0;right:0;height:4px;background:var(--line2);"></div>
+                        <div style="position:absolute;top:9px;left:0;width:{{ f.exactPct }}%;height:4px;background:var(--brand);"></div>
+                        <div style="position:absolute;top:2px;left:{{ f.exactPct }}%;width:18px;height:18px;transform:translateX(-50%);background:var(--surface);border:2px solid var(--brand);"></div>
+                      </div>
+                      <div style="display:flex;align-items:center;gap:8px;margin-top:12px;"><input type="number" min="0" step="1" value="{{ f.targetHalf }}" onInput="{{ f.onTargetHalf }}" style="width:96px;height:36px;padding:0 10px;border:1px solid var(--line);background:var(--surface);font:700 var(--t-body) var(--font-mono);"><span style="font:500 var(--m-xs) var(--font-mono);color:var(--ink3);">half-hours · 30-min steps</span></div>
+                    </div>
+                  </sc-if>
+                  <sc-if value="{{ f.policyRange }}" hint-placeholder-val="{{ false }}">
+                    <div>
+                      <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px;"><div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;">HOURS PER NURSE</div><div style="font:800 var(--t-title) var(--font-display);color:var(--brandink);">{{ f.minHours }}h – {{ f.maxHours }}h</div></div>
+                      <div style="position:relative;height:22px;margin:0 10px;">
+                        <div style="position:absolute;top:9px;left:0;right:0;height:4px;background:var(--line2);"></div>
+                        <div style="position:absolute;top:9px;left:{{ f.rangeLeftPct }}%;width:{{ f.rangeWidthPct }}%;height:4px;background:var(--brand);"></div>
+                        <div style="position:absolute;top:2px;left:{{ f.rangeLeftPct }}%;width:18px;height:18px;transform:translateX(-50%);background:var(--surface);border:2px solid var(--brand);"></div>
+                        <div style="position:absolute;top:2px;left:{{ f.rangeRightPct }}%;width:18px;height:18px;transform:translateX(-50%);background:var(--surface);border:2px solid var(--brand);"></div>
+                      </div>
+                      <div style="display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap;">
+                        <input type="number" min="0" step="1" value="{{ f.minHalf }}" onInput="{{ f.onMin }}" style="width:90px;height:36px;padding:0 10px;border:1px solid var(--line);background:var(--surface);font:700 var(--t-body) var(--font-mono);text-align:center;">
+                        <span style="color:var(--ink3);font-weight:700;">–</span>
+                        <input type="number" min="0" step="1" value="{{ f.maxHalf }}" onInput="{{ f.onMax }}" style="width:90px;height:36px;padding:0 10px;border:1px solid var(--line);background:var(--surface);font:700 var(--t-body) var(--font-mono);text-align:center;">
+                        <span style="font:500 var(--m-xs) var(--font-mono);color:var(--ink3);">half-hours stored · 30-min steps</span>
+                      </div>
+                    </div>
+                  </sc-if>
+                  <sc-if value="{{ f.policyErr }}" hint-placeholder-val="{{ false }}"><div style="color:var(--error);font-size:var(--t-sm);font-weight:600;"><i class="fa-solid fa-circle-exclamation" style="margin-right:5px;"></i>{{ f.policyErr }}</div></sc-if>
+                </div>
+              </sc-if>
+
+              <sc-if value="{{ f.isExpr }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex;flex-direction:column;gap:13px;">
+                  <div style="display:flex;align-items:flex-start;gap:8px;font-size:var(--t-sm);color:var(--ink2);line-height:1.5;border:1px solid var(--line2);background:var(--panel);padding:10px 12px;">
+                    <i class="fa-solid fa-circle-info" style="margin-top:2px;color:var(--brandink);flex:none;"></i>
+                    <span><b style="font-family:var(--font-mono);">x</b> is this person's count — the selected shift types over the selected dates, each weighted by its coefficient. Pick how <b style="font-family:var(--font-mono);">x</b> should relate to your target <b style="font-family:var(--font-mono);">T</b>.</span>
+                  </div>
+                  <div style="display:flex;flex-direction:column;gap:8px;">
+                    <sc-for list="{{ f.exprOptions }}" as="op" hint-placeholder-count="6">
+                      <button onClick="{{ op.onPick }}" style="{{ op.style }}">
+                        <span style="{{ op.badgeStyle }}">{{ op.glyph }}</span>
+                        <span style="display:flex;flex-direction:column;gap:2px;min-width:0;">
+                          <span style="font:700 var(--t-body) var(--font-ui);color:var(--ink);">{{ op.title }}</span>
+                          <span style="font-size:var(--t-sm);color:var(--ink3);line-height:1.4;">{{ op.help }}</span>
+                        </span>
+                        <sc-if value="{{ op.selected }}" hint-placeholder-val="{{ false }}"><i class="fa-solid fa-circle-check" style="color:var(--brand);font-size:16px;flex:none;margin-left:auto;"></i></sc-if>
+                      </button>
+                    </sc-for>
+                  </div>
+                  <div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:16px;padding-top:2px;">
+                    <div style="display:flex;flex-direction:column;gap:7px;">
+                      <span style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;">TARGET VALUE (T)</span>
+                      <input type="number" min="0" step="1" value="{{ f.targetVal }}" onInput="{{ f.onTarget }}" placeholder="e.g. 320" style="width:132px;height:40px;padding:0 12px;border:1px solid var(--line);background:var(--surface);font-weight:700;font-family:var(--font-mono);">
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:7px;">
+                      <span style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;">READS AS</span>
+                      <span style="font:700 var(--t-body) var(--font-mono);color:var(--brandink);background:var(--brandtint);border:1px solid var(--brand);padding:9px 14px;white-space:nowrap;">{{ f.exprPreview }}</span>
+                    </div>
+                    <div style="font-size:var(--t-sm);color:var(--ink3);line-height:1.45;flex:1;min-width:200px;max-width:42ch;">{{ f.targetNote }}</div>
+                  </div>
+                </div>
+              </sc-if>
+
+              <sc-if value="{{ f.isPattern }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex;flex-direction:column;gap:14px;">
+                  <sc-if value="{{ f.hasPattern }}" hint-placeholder-val="{{ false }}">
+                    <div style="border:1px solid var(--brand);background:var(--brandtint);padding:12px 14px;">
+                      <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--brandink);text-transform:uppercase;margin-bottom:9px;">PATTERN ORDER</div>
+                      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;">
+                        <sc-for list="{{ f.patternTags }}" as="pt" hint-placeholder-count="2">
+                          <span style="display:inline-flex;align-items:center;gap:6px;background:var(--surface);border:1px solid var(--line);padding:4px 6px 4px 10px;">
+                            <i class="fa-solid {{ pt.icon }}" style="font-size:9px;color:var(--ink3);"></i>
+                            <span style="font:700 var(--m-sm) var(--font-mono);color:var(--ink);">{{ pt.label }}</span>
+                            <button onClick="{{ pt.onLeft }}" aria-label="Move earlier" style="background:none;border:none;padding:0 2px;color:var(--ink3);cursor:pointer;" style-hover="color:var(--ink)"><i class="fa-solid fa-chevron-left" style="font-size:9px;"></i></button>
+                            <button onClick="{{ pt.onRight }}" aria-label="Move later" style="background:none;border:none;padding:0 2px;color:var(--ink3);cursor:pointer;" style-hover="color:var(--ink)"><i class="fa-solid fa-chevron-right" style="font-size:9px;"></i></button>
+                            <button onClick="{{ pt.onRemove }}" aria-label="Remove" style="background:none;border:none;padding:0 2px;color:var(--ink3);cursor:pointer;" style-hover="color:var(--error)"><i class="fa-solid fa-xmark" style="font-size:11px;"></i></button>
+                          </span>
+                          <sc-if value="{{ pt.canRight }}" hint-placeholder-val="{{ true }}"><i class="fa-solid fa-arrow-right-long" style="font-size:11px;color:var(--brandink);"></i></sc-if>
+                        </sc-for>
+                      </div>
+                    </div>
+                  </sc-if>
+                  <sc-if value="{{ f.patternEmpty }}" hint-placeholder-val="{{ true }}">
+                    <div style="font-size:var(--t-sm);color:var(--ink3);font-style:italic;">No shift types added yet — click below to build the sequence (e.g. Night → Morning). Minimum 2, duplicates allowed.</div>
+                  </sc-if>
+                  <div>
+                    <sc-if value="{{ f.hasPatternGroups }}" hint-placeholder-val="{{ false }}">
+                      <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;margin-bottom:7px;">SHIFT GROUPS</div>
+                      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;">
+                        <sc-for list="{{ f.patternGroups }}" as="op" hint-placeholder-count="3">
+                          <button onClick="{{ op.onAdd }}" style="display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 12px;background:var(--surface);border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);color:var(--ink);cursor:pointer;" style-hover="background:var(--brandtint);border-color:var(--brand)"><i class="fa-solid fa-layer-group" style="font-size:9px;color:var(--ink3);"></i> {{ op.label }} <i class="fa-solid fa-plus" style="font-size:8px;color:var(--brandink);"></i></button>
+                        </sc-for>
+                      </div>
+                    </sc-if>
+                    <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;margin-bottom:7px;">SHIFT TYPES</div>
+                    <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                      <sc-for list="{{ f.patternItems }}" as="op" hint-placeholder-count="5">
+                        <button onClick="{{ op.onAdd }}" style="display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 12px;background:var(--surface);border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);color:var(--ink);cursor:pointer;" style-hover="background:var(--brandtint);border-color:var(--brand)"><i class="fa-solid {{ op.icon }}" style="font-size:9px;color:var(--ink3);"></i> {{ op.label }} <i class="fa-solid fa-plus" style="font-size:8px;color:var(--brandink);"></i></button>
+                      </sc-for>
+                    </div>
+                  </div>
+                </div>
+              </sc-if>
+
+              <sc-if value="{{ f.isNumber }}" hint-placeholder-val="{{ false }}">
+                <input type="number" min="0" value="{{ f.v }}" onInput="{{ f.onInput }}" placeholder="{{ f.ph }}" style="width:120px;height:40px;padding:0 12px;border:1px solid var(--line);background:var(--surface);font-weight:700;">
+              </sc-if>
+
+              <sc-if value="{{ f.isNumberPref }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;">
+                  <input type="number" min="1" value="{{ f.v }}" onInput="{{ f.onInput }}" placeholder="{{ f.ph }}" style="width:120px;height:40px;padding:0 12px;border:1px solid var(--line);background:var(--surface);font-weight:700;flex:none;">
+                  <div style="font-size:var(--t-sm);color:var(--ink3);line-height:1.45;flex:1;min-width:200px;max-width:44ch;">{{ f.prefNote }}</div>
+                </div>
+              </sc-if>
+
+              <sc-if value="{{ f.isChips }}" hint-placeholder-val="{{ false }}">
+                <div class="ns-panes2">
+                  <!-- AVAILABLE pane -->
+                  <div style="border:1px solid var(--line);background:var(--surface);display:flex;flex-direction:column;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 11px;border-bottom:1px solid var(--line2);background:var(--panel);">
+                      <span style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;">AVAILABLE</span>
+                      <span style="font:600 var(--m-xs) var(--font-mono);color:var(--ink3);">{{ f.availCount }}</span>
+                    </div>
+                    <div style="position:relative;padding:9px 10px;">
+                      <i class="fa-solid fa-magnifying-glass" style="position:absolute;left:21px;top:50%;transform:translateY(-50%);font-size:11px;color:var(--ink3);"></i>
+                      <input value="{{ f.fieldQ }}" onInput="{{ f.onFieldSearch }}" placeholder="{{ f.searchPh }}" style="width:100%;height:34px;padding:0 32px;border:1px solid var(--line);background:var(--surface);font-size:var(--t-sm);box-sizing:border-box;">
+                      <sc-if value="{{ f.hasFieldQ }}" hint-placeholder-val="{{ false }}">
+                        <button onClick="{{ f.onClearFieldSearch }}" aria-label="Clear search" style="position:absolute;right:19px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--ink3);padding:0;display:inline-flex;cursor:pointer;" style-hover="color:var(--ink)"><i class="fa-solid fa-xmark" style="font-size:12px;"></i></button>
+                      </sc-if>
+                    </div>
+                    <div style="height:228px;overflow-y:auto;overflow-x:hidden;padding:0 6px 6px;border-top:1px solid var(--line2);">
+                      <sc-if value="{{ f.everyoneActive }}" hint-placeholder-val="{{ false }}">
+                        <div style="display:flex;align-items:flex-start;gap:8px;padding:11px 8px 6px;font-size:var(--t-sm);color:var(--ink3);line-height:1.45;"><i class="fa-solid fa-circle-info" style="margin-top:2px;color:var(--brandink);flex:none;"></i><span><b style="color:var(--ink2);">Everyone is included.</b> Pick a group or names below to restrict to a specific subset instead.</span></div>
+                      </sc-if>
+                      <sc-if value="{{ f.hasOptGroups }}" hint-placeholder-val="{{ false }}">
+                        <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;padding:8px 6px 5px;position:sticky;top:0;background:var(--surface);">GROUPS</div>
+                        <sc-for list="{{ f.optGroups }}" as="op" hint-placeholder-count="2">
+                          <button onClick="{{ op.onAdd }}" style="width:100%;text-align:left;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 8px;border:none;background:transparent;font:500 var(--t-sm) var(--font-ui);color:var(--ink);cursor:pointer;" style-hover="background:var(--panel)"><span style="display:inline-flex;align-items:center;gap:8px;min-width:0;"><i class="fa-solid fa-layer-group" style="font-size:10px;color:var(--ink3);flex:none;"></i><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ op.label }}</span></span><i class="fa-solid fa-arrow-right" style="font-size:10px;color:var(--ink3);flex:none;"></i></button>
+                        </sc-for>
+                      </sc-if>
+                      <sc-if value="{{ f.hasOptItems }}" hint-placeholder-val="{{ true }}">
+                        <sc-if value="{{ f.hasOptGroups }}" hint-placeholder-val="{{ false }}"><div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;padding:9px 6px 5px;position:sticky;top:0;background:var(--surface);">{{ f.itemLabel }}</div></sc-if>
+                        <sc-for list="{{ f.optItems }}" as="op" hint-placeholder-count="6">
+                          <button onClick="{{ op.onAdd }}" style="width:100%;text-align:left;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 8px;border:none;background:transparent;font:500 var(--t-sm) var(--font-ui);color:var(--ink);cursor:pointer;" style-hover="background:var(--panel)"><span style="display:inline-flex;align-items:center;gap:8px;min-width:0;"><i class="fa-solid {{ op.icon }}" style="font-size:10px;color:var(--ink3);flex:none;"></i><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ op.label }}</span></span><i class="fa-solid fa-arrow-right" style="font-size:10px;color:var(--ink3);flex:none;"></i></button>
+                        </sc-for>
+                      </sc-if>
+                      <sc-if value="{{ f.noOpts }}" hint-placeholder-val="{{ false }}">
+                        <div style="padding:18px 8px;text-align:center;font-size:var(--t-sm);color:var(--faint);font-style:italic;">{{ f.optEmptyMsg }}</div>
+                      </sc-if>
+                    </div>
+                    <sc-if value="{{ f.canAddAll }}" hint-placeholder-val="{{ false }}">
+                      <button onClick="{{ f.onAddAll }}" style="border:none;border-top:1px solid var(--line2);background:transparent;padding:9px 11px;text-align:left;display:flex;align-items:center;gap:7px;font:600 var(--t-sm) var(--font-ui);color:var(--brandink);cursor:pointer;" style-hover="background:var(--panel)"><i class="fa-solid fa-angles-right" style="font-size:10px;"></i> {{ f.addAllLabel }}</button>
+                    </sc-if>
+                  </div>
+                  <!-- SELECTED pane -->
+                  <div style="border:1px solid var(--brand);background:var(--surface);display:flex;flex-direction:column;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 11px;border-bottom:1px solid var(--line2);background:var(--brandtint);">
+                      <span style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--brandink);text-transform:uppercase;">SELECTED</span>
+                      <span style="font:600 var(--m-xs) var(--font-mono);color:var(--brandink);">{{ f.selCount }}</span>
+                    </div>
+                    <sc-if value="{{ f.showSelSearch }}" hint-placeholder-val="{{ false }}">
+                      <div style="position:relative;padding:9px 10px;border-bottom:1px solid var(--line2);">
+                        <i class="fa-solid fa-magnifying-glass" style="position:absolute;left:21px;top:50%;transform:translateY(-50%);font-size:11px;color:var(--ink3);"></i>
+                        <input value="{{ f.selQ }}" onInput="{{ f.onSelSearch }}" placeholder="Filter selected" style="width:100%;height:34px;padding:0 32px;border:1px solid var(--line);background:var(--surface);font-size:var(--t-sm);box-sizing:border-box;">
+                        <sc-if value="{{ f.hasSelQ }}" hint-placeholder-val="{{ false }}">
+                          <button onClick="{{ f.onClearSelSearch }}" aria-label="Clear filter" style="position:absolute;right:19px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--ink3);padding:0;display:inline-flex;cursor:pointer;" style-hover="color:var(--ink)"><i class="fa-solid fa-xmark" style="font-size:12px;"></i></button>
+                        </sc-if>
+                      </div>
+                    </sc-if>
+                    <div style="height:228px;overflow-y:auto;overflow-x:hidden;padding:6px;">
+                      <sc-if value="{{ f.everyoneActive }}" hint-placeholder-val="{{ false }}">
+                        <sc-for list="{{ f.selAllTokens }}" as="tk" hint-placeholder-count="1">
+                          <button onClick="{{ tk.onRemove }}" title="Remove" style="width:100%;text-align:left;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 8px;border:none;background:transparent;font:500 var(--t-sm) var(--font-ui);color:var(--ink);cursor:pointer;" style-hover="background:var(--panel)"><span style="display:inline-flex;align-items:center;gap:8px;min-width:0;"><i class="fa-solid {{ tk.icon }}" style="{{ tk.iconStyle }}"></i><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ tk.label }}</span></span><i class="fa-solid fa-xmark" style="font-size:12px;color:var(--ink3);flex:none;"></i></button>
+                        </sc-for>
+                      </sc-if>
+                      <sc-if value="{{ f.hasSelGroups }}" hint-placeholder-val="{{ false }}">
+                        <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;padding:8px 6px 5px;position:sticky;top:0;background:var(--surface);">GROUPS</div>
+                        <sc-for list="{{ f.selGroupTokens }}" as="tk" hint-placeholder-count="1">
+                          <button onClick="{{ tk.onRemove }}" title="Remove" style="width:100%;text-align:left;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 8px;border:none;background:transparent;font:500 var(--t-sm) var(--font-ui);color:var(--ink);cursor:pointer;" style-hover="background:var(--panel)"><span style="display:inline-flex;align-items:center;gap:8px;min-width:0;"><i class="fa-solid {{ tk.icon }}" style="{{ tk.iconStyle }}"></i><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ tk.label }}</span></span><i class="fa-solid fa-xmark" style="font-size:12px;color:var(--ink3);flex:none;"></i></button>
+                        </sc-for>
+                      </sc-if>
+                      <sc-if value="{{ f.hasSelItems }}" hint-placeholder-val="{{ true }}">
+                        <sc-if value="{{ f.hasSelGroups }}" hint-placeholder-val="{{ false }}"><div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;padding:9px 6px 5px;position:sticky;top:0;background:var(--surface);">{{ f.itemLabel }}</div></sc-if>
+                        <sc-for list="{{ f.selItemTokens }}" as="tk" hint-placeholder-count="2">
+                          <button onClick="{{ tk.onRemove }}" title="Remove" style="width:100%;text-align:left;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 8px;border:none;background:transparent;font:500 var(--t-sm) var(--font-ui);color:var(--ink);cursor:pointer;" style-hover="background:var(--panel)"><span style="display:inline-flex;align-items:center;gap:8px;min-width:0;"><i class="fa-solid {{ tk.icon }}" style="{{ tk.iconStyle }}"></i><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ tk.label }}</span></span><i class="fa-solid fa-xmark" style="font-size:12px;color:var(--ink3);flex:none;"></i></button>
+                        </sc-for>
+                      </sc-if>
+                      <sc-if value="{{ f.selEmpty }}" hint-placeholder-val="{{ true }}">
+                        <div style="padding:18px 8px;text-align:center;font-size:var(--t-sm);color:var(--faint);font-style:italic;">{{ f.selEmptyMsg }}</div>
+                      </sc-if>
+                    </div>
+                    <sc-if value="{{ f.canClear }}" hint-placeholder-val="{{ false }}">
+                      <button onClick="{{ f.onClearField }}" style="border:none;border-top:1px solid var(--line2);background:transparent;padding:9px 11px;text-align:left;display:flex;align-items:center;gap:7px;font:600 var(--t-sm) var(--font-ui);color:var(--ink3);cursor:pointer;" style-hover="background:var(--panel)"><i class="fa-solid fa-angles-left" style="font-size:10px;"></i> Clear all</button>
+                    </sc-if>
+                  </div>
+                </div>
+              </sc-if>
+
+              <sc-if value="{{ f.isCountCoef }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex;flex-direction:column;gap:12px;">
+                  <div style="display:flex;flex-direction:column;gap:14px;">
+                    <sc-if value="{{ f.hasGroupChips }}" hint-placeholder-val="{{ false }}">
+                      <div style="display:flex;flex-direction:column;gap:8px;">
+                        <span style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;">GROUPS</span>
+                        <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                          <sc-for list="{{ f.groupChips }}" as="ch" hint-placeholder-count="3">
+                            <button onClick="{{ ch.onToggle }}" style="{{ ch.style }}"><i class="fa-solid fa-layer-group" style="font-size:9px;opacity:.7;"></i> {{ ch.label }}</button>
+                          </sc-for>
+                        </div>
+                      </div>
+                    </sc-if>
+                    <div style="display:flex;flex-direction:column;gap:8px;">
+                      <span style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;">SHIFT TYPES</span>
+                      <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                        <sc-for list="{{ f.itemChips }}" as="ch" hint-placeholder-count="6">
+                          <button onClick="{{ ch.onToggle }}" style="{{ ch.style }}">{{ ch.label }}</button>
+                        </sc-for>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style="border:1px solid var(--line2);background:var(--panel);padding:13px 14px;">
+                    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:11px;">
+                      <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;">{{ f.coefHeading }}</div>
+                      <div style="flex:1;"></div>
+                    </div>
+                    <sc-if value="{{ f.collapsible }}" hint-placeholder-val="{{ false }}">
+                      <button onClick="{{ f.onToggleCollapse }}" style="{{ f.coverageStripStyle }}">
+                        <i class="fa-solid {{ f.coverageIcon }}" style="font-size:12px;"></i>
+                        <span style="flex:1;text-align:left;font:600 var(--t-sm) var(--font-ui);">{{ f.coverageText }}</span>
+                        <i class="fa-solid {{ f.collapseChevron }}" style="font-size:11px;"></i>
+                      </button>
+                    </sc-if>
+                    <sc-if value="{{ f.noEligible }}" hint-placeholder-val="{{ true }}">
+                      <div style="font-size:var(--t-sm);color:var(--ink3);font-style:italic;">{{ f.coefEmpty }}</div>
+                    </sc-if>
+                    <sc-if value="{{ f.showCoefRows }}" hint-placeholder-val="{{ false }}">
+                      <div style="display:flex;flex-direction:column;gap:8px;">
+                        <sc-for list="{{ f.coefRows }}" as="cr" hint-placeholder-count="3">
+                          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                            <span style="{{ cr.tagStyle }}">{{ cr.label }}</span>
+                            <input type="number" min="1" step="1" value="{{ cr.val }}" onInput="{{ cr.onInput }}" placeholder="—" style="width:88px;height:34px;padding:0 10px;border:1px solid var(--line);background:var(--surface);font-weight:700;font-family:var(--font-mono);">
+                            <span style="font:500 var(--m-xs) var(--font-mono);color:var(--ink3);">{{ cr.hint }}</span>
+                          </div>
+                        </sc-for>
+                      </div>
+                    </sc-if>
+                    <div style="margin-top:11px;font-size:var(--t-sm);color:var(--ink3);display:flex;align-items:flex-start;gap:7px;"><i class="fa-solid fa-circle-info" style="margin-top:2px;"></i><span>{{ f.unitNote }}</span></div>
+                  </div>
+                </div>
+              </sc-if>
+
+              <sc-if value="{{ f.isDates }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex;flex-direction:column;gap:13px;">
+                  <div style="display:flex;flex-direction:column;gap:7px;">
+                    <span style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;">AUTO-DERIVED</span>
+                    <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                      <sc-for list="{{ f.autoChips }}" as="ch" hint-placeholder-count="3">
+                        <button onClick="{{ ch.onToggle }}" style="{{ ch.style }}"><i class="fa-solid fa-calendar-day" style="font-size:9px;opacity:.7;"></i> {{ ch.label }}</button>
+                      </sc-for>
+                    </div>
+                  </div>
+                  <sc-if value="{{ f.hasDateGroups }}" hint-placeholder-val="{{ false }}">
+                    <div style="display:flex;flex-direction:column;gap:7px;">
+                      <span style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;">DATE GROUPS</span>
+                      <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                        <sc-for list="{{ f.dateGroupChips }}" as="ch" hint-placeholder-count="2">
+                          <button onClick="{{ ch.onToggle }}" style="{{ ch.style }}"><i class="fa-solid fa-layer-group" style="font-size:9px;opacity:.7;"></i> {{ ch.label }}</button>
+                        </sc-for>
+                      </div>
+                    </div>
+                  </sc-if>
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <span style="font-size:var(--t-sm);color:var(--ink3);white-space:nowrap;">or specific dates</span>
+                    <input value="{{ f.customVal }}" onInput="{{ f.onCustom }}" placeholder="e.g. 1, 5–8, 14" style="flex:1;max-width:220px;height:36px;padding:0 10px;border:1px solid var(--line);background:var(--surface);font-family:var(--font-mono);font-size:var(--t-sm);">
+                  </div>
+                </div>
+              </sc-if>
+              <sc-if value="{{ f.error }}" hint-placeholder-val="{{ false }}"><div style="color:var(--error);font-size:var(--t-sm);margin-top:8px;font-weight:600;"><i class="fa-solid fa-circle-exclamation" style="margin-right:5px;"></i>{{ f.error }}</div></sc-if>
+            </div>
+          </sc-for>
+        </div>
+        <sc-if value="{{ isContractForm }}" hint-placeholder-val="{{ false }}">
+          <sc-if value="{{ leaveGuardShow }}" hint-placeholder-val="{{ false }}">
+            <div style="border:1px solid var(--warn);background:var(--warntint);padding:12px 14px;margin-top:16px;display:flex;gap:10px;align-items:flex-start;">
+              <i class="fa-solid fa-triangle-exclamation" style="color:var(--warn);margin-top:2px;"></i>
+              <div style="flex:1;">
+                <div style="font:700 var(--t-body) var(--font-ui);color:var(--warn);margin-bottom:3px;">Leave isn’t credited</div>
+                <div style="font-size:var(--t-sm);color:var(--ink2);line-height:1.45;margin-bottom:4px;">{{ leaveGuardText }}</div>
+                <div style="font:600 var(--m-xs) var(--font-mono);color:var(--ink3);margin-bottom:9px;">{{ leaveGuardNames }}</div>
+                <button onClick="{{ onAddLeave }}" style="height:30px;padding:0 12px;background:var(--warn);color:#fff;border:none;font:700 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:7px;"><i class="fa-solid fa-plus" style="font-size:10px;"></i> Credit Leave ({{ leaveCreditHalf }} half-hours)</button>
+              </div>
+            </div>
+          </sc-if>
+          <div style="border:1px solid var(--line2);margin-top:16px;">
+            <button onClick="{{ onToggleSolver }}" style="width:100%;text-align:left;padding:11px 14px;background:var(--panel);border:none;display:flex;align-items:center;gap:9px;cursor:pointer;">
+              <i class="fa-solid {{ solverChevron }}" style="font-size:11px;color:var(--ink3);"></i>
+              <span style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.05em;color:var(--ink2);text-transform:uppercase;flex:1;">SOLVER DETAILS &amp; OVERRIDES</span>
+              <span style="font:600 var(--m-xs) var(--font-mono);color:var(--ink3);">{{ solverExpr }} · +∞</span>
+            </button>
+            <sc-if value="{{ solverOpen }}" hint-placeholder-val="{{ false }}">
+              <div style="padding:15px 14px;display:flex;flex-direction:column;gap:14px;border-top:1px solid var(--line2);">
+                <div style="display:flex;gap:16px;flex-wrap:wrap;">
+                  <div>
+                    <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.05em;color:var(--ink3);text-transform:uppercase;margin-bottom:6px;">EXPRESSION</div>
+                    <div style="display:inline-flex;align-items:center;gap:8px;font:700 var(--t-body) var(--font-mono);color:var(--ink2);background:var(--panel);border:1px solid var(--line2);padding:8px 12px;"><i class="fa-solid fa-lock" style="font-size:10px;color:var(--ink3);"></i> {{ solverExpr }}</div>
+                  </div>
+                  <div>
+                    <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.05em;color:var(--ink3);text-transform:uppercase;margin-bottom:6px;">WEIGHT</div>
+                    <div style="display:inline-flex;align-items:center;gap:8px;font:700 var(--t-body) var(--font-mono);color:var(--ink2);background:var(--panel);border:1px solid var(--line2);padding:8px 12px;"><i class="fa-solid fa-lock" style="font-size:10px;color:var(--ink3);"></i> +∞</div>
+                  </div>
+                </div>
+                <div style="font-size:var(--t-sm);color:var(--ink3);line-height:1.45;">Expression &amp; weight are locked while this is a contract. <button onClick="{{ onConvertGeneric }}" style="background:none;border:none;padding:0;color:var(--brandink);font:600 var(--t-sm) var(--font-ui);cursor:pointer;text-decoration:underline;">Convert to a generic shift count</button> to edit them freely.</div>
+              </div>
+            </sc-if>
+          </div>
+        </sc-if>
+        <sc-if value="{{ showWeight }}" hint-placeholder-val="{{ false }}">
+          <div style="margin-top:16px;max-width:340px;">
+            <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;margin-bottom:7px;">WEIGHT (PRIORITY)</div>
+            <div style="display:flex;gap:8px;">
+              <input value="{{ draftWeight }}" onInput="{{ onWeight }}" placeholder="e.g. −50, +∞" style="flex:1;height:40px;padding:0 12px;border:1px solid var(--line);background:var(--surface);font-family:var(--font-mono);">
+              <button onClick="{{ setPlusInf }}" style="height:40px;padding:0 12px;background:transparent;border:1px solid var(--line);font:600 var(--m-sm) var(--font-mono);" style-hover="background:var(--panel)">+∞</button>
+              <button onClick="{{ setMinusInf }}" style="height:40px;padding:0 12px;background:transparent;border:1px solid var(--line);font:600 var(--m-sm) var(--font-mono);" style-hover="background:var(--panel)">−∞</button>
+            </div>
+            <div style="font-size:var(--t-sm);color:var(--ink3);margin-top:6px;">{{ weightHelp }}</div>
+            <sc-if value="{{ weightError }}" hint-placeholder-val="{{ false }}"><div style="color:var(--error);font-size:var(--t-sm);margin-top:6px;font-weight:600;"><i class="fa-solid fa-circle-exclamation" style="margin-right:5px;"></i>{{ weightErrorText }}</div></sc-if>
+          </div>
+        </sc-if>
+        <sc-if value="{{ showWeightNote }}" hint-placeholder-val="{{ false }}">
+          <div style="margin-top:16px;max-width:420px;">
+            <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;margin-bottom:7px;">WEIGHT (PRIORITY)</div>
+            <div style="font-style:italic;color:var(--ink3);font-size:var(--t-sm);">Weight is not needed when the preferred number of people equals the required number.</div>
+          </div>
+        </sc-if>
+        <sc-if value="{{ showHardNote }}" hint-placeholder-val="{{ false }}">
+          <div style="margin-top:16px;max-width:520px;border:1px solid var(--line);background:var(--panel);padding:12px 14px;display:flex;gap:10px;align-items:flex-start;">
+            <i class="fa-solid fa-lock" style="color:var(--ink3);margin-top:2px;"></i>
+            <div style="font-size:var(--t-sm);color:var(--ink2);">This covering is <b>always enforced as a hard rule</b> — whenever a preceptee works a covered shift, a preceptor must too. The solver ignores weight for coverings, so there is no soft/hard dial here.</div>
+          </div>
+        </sc-if>
+      </div>
+      <div style="padding:14px 18px;border-top:1px solid var(--line2);display:flex;justify-content:flex-end;gap:10px;">
+        <button onClick="{{ onCancel }}" style="height:40px;padding:0 18px;background:transparent;border:1px solid var(--line);font:600 var(--t-body) var(--font-ui);" style-hover="background:var(--panel)">Cancel</button>
+        <button onClick="{{ onSave }}" style="height:40px;padding:0 20px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-body) var(--font-ui);display:inline-flex;align-items:center;gap:8px;" style-hover="filter:brightness(.94)"><i class="fa-solid fa-check"></i> {{ submitLabel }}</button>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ hasNote }}" hint-placeholder-val="{{ false }}">
+    <div style="{{ noteStyle }}"><span style="font-weight:800;">{{ noteMark }}</span><span style="font-size:var(--t-sm);">{{ noteText }}</span></div>
+  </sc-if>
+
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+    <span style="font:600 var(--m-sm) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;">{{ listTitle }}</span>
+    <span style="font:600 var(--m-xs) var(--font-mono);color:var(--ink3);">{{ countLabel }}</span>
+  </div>
+
+  <sc-if value="{{ isEmpty }}" hint-placeholder-val="{{ false }}">
+    <div style="border:1.5px dashed var(--line);padding:48px 40px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:14px;">
+      <div style="width:54px;height:54px;border:1.5px dashed var(--line);display:flex;align-items:center;justify-content:center;font-size:24px;color:var(--faint);line-height:1;">∅</div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;">
+        <div style="font:700 var(--t-title) var(--font-display);color:var(--ink2);">{{ empty }}</div>
+        <div style="font-size:var(--t-sm);color:var(--ink3);max-width:44ch;">{{ emptyBody }}</div>
+      </div>
+      <button onClick="{{ addNew }}" style="height:40px;padding:0 18px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-body) var(--font-ui);display:inline-flex;align-items:center;gap:9px;margin-top:2px;white-space:nowrap;" style-hover="filter:brightness(.94)"><i class="fa-solid fa-plus"></i> {{ addBtnLabel }}</button>
+    </div>
+  </sc-if>
+
+  <div style="display:flex;flex-direction:column;gap:12px;">
+    <sc-for list="{{ cards }}" as="c" hint-placeholder-count="3">
+      <div style="{{ c.cardStyle }}">
+        <div style="display:flex;align-items:center;gap:13px;margin-bottom:16px;">
+          <div style="width:32px;height:32px;background:var(--panel);border:1px solid var(--line2);display:flex;align-items:center;justify-content:center;color:var(--ink2);font:600 var(--m-md) var(--font-mono);flex:none;">{{ c.num }}</div>
+          <div style="flex:1;min-width:0;">
+            <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap;">
+              <span style="font:800 var(--t-title) var(--font-display);letter-spacing:-.01em;line-height:1.15;">{{ c.desc }}</span>
+              <sc-if value="{{ c.isContract }}" hint-placeholder-val="{{ false }}">
+                <span style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--brandink);background:var(--brandtint);padding:3px 7px;text-transform:uppercase;">◆ CONTRACTED HOURS</span>
+              </sc-if>
+              <sc-if value="{{ c.disabled }}" hint-placeholder-val="{{ false }}">
+                <span title="Turned off from the guided Rules screen" style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);background:var(--panel);border:1px solid var(--line2);padding:3px 7px;text-transform:uppercase;">Disabled</span>
+              </sc-if>
+              <sc-if value="{{ c.hardBadge }}" hint-placeholder-val="{{ false }}">
+                <span title="Coverings are always enforced — weight is ignored by the solver" style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--error);background:var(--errortint);padding:3px 7px;text-transform:uppercase;">● Always enforced</span>
+              </sc-if>
+            </div>
+          </div>
+          <sc-if value="{{ c.hasWeight }}" hint-placeholder-val="{{ false }}">
+            <span style="{{ c.weightStyle }}">WEIGHT {{ c.weight }}</span>
+          </sc-if>
+        </div>
+        <div style="{{ c.fieldGridStyle }}">
+          <sc-for list="{{ c.fields }}" as="f" hint-placeholder-count="4">
+            <div style="{{ f.style }}">
+              <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;margin-bottom:7px;">{{ f.k }}</div>
+              <div style="font:700 var(--t-body) var(--font-ui);letter-spacing:-.005em;line-height:1.25;">{{ f.v }}</div>
+            </div>
+          </sc-for>
+        </div>
+        <sc-if value="{{ c.hasCoef }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:10px;">
+            <span style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;">{{ c.coefLabel }}</span>
+            <sc-for list="{{ c.coefChips }}" as="cc" hint-placeholder-count="3">
+              <span style="{{ cc.style }}">{{ cc.text }}</span>
+            </sc-for>
+          </div>
+        </sc-if>
+        <div style="display:flex;gap:6px;margin-top:14px;">
+          <button onClick="{{ c.onToggleDisabled }}" style="height:32px;padding:0 12px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:7px;" style-hover="background:var(--panel)"><i class="fa-solid fa-power-off" style="font-size:10px;"></i> {{ c.disabledLabel }}</button>
+          <button onClick="{{ c.onEdit }}" style="height:32px;padding:0 12px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:7px;" style-hover="background:var(--panel)"><i class="fa-solid fa-pen" style="font-size:10px;"></i> Edit</button>
+          <button onClick="{{ c.onDup }}" style="height:32px;padding:0 12px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:7px;" style-hover="background:var(--panel)"><i class="fa-solid fa-copy" style="font-size:10px;"></i> Duplicate</button>
+          <button onClick="{{ c.onDelete }}" style="height:32px;padding:0 12px;background:transparent;border:1px solid var(--line);color:var(--error);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:7px;" style-hover="background:var(--errortint)"><i class="fa-solid fa-trash" style="font-size:10px;"></i> Delete</button>
+        </div>
+      </div>
+    </sc-for>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1120,&quot;height&quot;:820}}">
+class Component extends DCLogic {
+  TEMPLATES={
+    requirements:{entity:'requirement', hasWeight:'req', defWeight:'−50', fields:['Shift type','Required','Preferred','Qualified','Dates'], ph:{'Shift type':'e.g. N','Required':'e.g. 3','Preferred':'= Required','Qualified':'e.g. Seniors','Dates':'e.g. ALL'},
+      types:{'Shift type':'req-coef','Required':'number','Preferred':'number-pref','Qualified':'people','Dates':'dates'}, hints:{'Preferred':'optional'}},
+    successions:{entity:'succession', hasWeight:true, defWeight:'−∞', fields:['People','Pattern','Dates'], ph:{'People':'e.g. ALL','Pattern':'e.g. N → AM','Dates':'e.g. ALL'},
+      types:{'People':'people','Pattern':'pattern','Dates':'dates'}, hints:{'Pattern':'click shift types to build an ordered sequence'}},
+    counts:{entity:'shift count', hasWeight:true, defWeight:'−∞', fields:['People','Count shift types','Dates','Expression'], ph:{'People':'e.g. ALL','Count shift types':'e.g. AM, PM, N, LEAVE','Dates':'e.g. ALL','Expression':'e.g. x = 320'},
+      types:{'People':'people','Count shift types':'count-coef','Dates':'dates','Expression':'expr'}, hints:{'Expression':'how the count should relate to your target'}},
+    affinities:{entity:'affinity', hasWeight:true, defWeight:'+∞', fields:['People 1','People 2','Shift types','Dates'], ph:{'People 1':'e.g. Chloe Ng','People 2':'e.g. Aisha Rahman','Shift types':'e.g. Working','Dates':'e.g. ALL'},
+      types:{'People 1':'people','People 2':'people','Shift types':'shifts','Dates':'dates'}},
+    coverings:{entity:'covering', hasWeight:true, defWeight:'1', fields:['Preceptors','Preceptees','Shift types','Dates'], ph:{'Preceptors':'e.g. Aisha Rahman','Preceptees':'e.g. Chloe Ng','Shift types':'e.g. Working','Dates':'e.g. (all)'},
+      types:{'Preceptors':'people','Preceptees':'people','Shift types':'shifts','Dates':'dates'},
+      hints:{'Preceptors':'who must supervise','Preceptees':'who must be covered'}},
+  };
+  splitVals(v){ return (v||'').split(',').map(x=>x.trim()).filter(Boolean); }
+  // Shift-count expressions (spec FR-PR-52 / C3): the six SUPPORTED_EXPRESSIONS, each with a plain-English helper.
+  EXPR_OPS=[
+    {id:'sq', glyph:'|x − T|²', title:'Close to target', help:'Penalizes how far the count lands from T — the bigger the gap, the bigger the penalty. Pulls x toward T from both sides. Needs a negative or −∞ weight.'},
+    {id:'ge', glyph:'x ≥ T', title:'At least T', help:'The count must be at least the target.'},
+    {id:'le', glyph:'x ≤ T', title:'At most T', help:'The count must be no more than the target.'},
+    {id:'gt', glyph:'x > T', title:'More than T', help:'The count must be strictly greater than the target.'},
+    {id:'lt', glyph:'x < T', title:'Fewer than T', help:'The count must be strictly fewer than the target.'},
+    {id:'eq', glyph:'x = T', title:'Exactly T', help:'The count must equal the target exactly.'},
+  ];
+  _parseExpr(v){
+    const s=String(v==null?'':v);
+    let opId='ge';
+    if(/\|.*\|\s*(²|\^2)/.test(s)) opId='sq';
+    else if(/≥|>=/.test(s)) opId='ge';
+    else if(/≤|<=/.test(s)) opId='le';
+    else if(/>/.test(s)) opId='gt';
+    else if(/</.test(s)) opId='lt';
+    else if(/=/.test(s)) opId='eq';
+    const m=s.match(/-?\d+/);
+    return {opId, target:(m?m[0]:'')};
+  }
+  _buildExpr(opId,target){
+    const t=(target===''||target==null)?'T':target;
+    if(opId==='sq') return '|x − '+t+'|²';
+    const g={ge:'≥',le:'≤',gt:'>',lt:'<',eq:'='}[opId]||'≥';
+    return 'x '+g+' '+t;
+  }
+  toggleInVal(cur, label, single){
+    const arr=this.splitVals(cur);
+    if(single){ return arr.length===1 && arr[0]===label ? '' : label; }
+    const i=arr.indexOf(label);
+    if(i>=0) arr.splice(i,1); else arr.push(label);
+    return arr.join(', ');
+  }
+  fieldVal(draft,k){ if(!draft) return ''; const f=(draft.fields||[]).find(x=>x.k===k); return f?f.v:''; }
+  // eligible coefficient-bearing ids: worked shift items in the selection (groups expanded) + LEAVE; OFF/ALL excluded
+  eligibleCoefTypes(sel){
+    const ed=this.props.editor||{};
+    const worked=ed.workedShifts||[];
+    const gm=ed.shiftGroupMap||{};
+    const set=new Set();
+    (sel||[]).forEach(t=>{
+      if(t==='LEAVE') set.add('LEAVE');
+      else if(worked.includes(t)) set.add(t);
+      else if(gm[t]) gm[t].forEach(m=>{ if(worked.includes(m)) set.add(m); });
+    });
+    return [...worked,'LEAVE'].filter(x=>set.has(x));
+  }
+  minutesFor(id){
+    const ed=this.props.editor||{};
+    if(id==='LEAVE') return ed.creditMinutes||480;
+    return (ed.durations||{})[id];
+  }
+  coefFieldSel(draft){
+    if(!draft) return [];
+    const cf=(draft.fields||[]).find(f=>f.k==='Count shift types'||f.k==='Shift type');
+    return this.splitVals(cf?cf.v:'');
+  }
+  state={ mode:'list', editIndex:-1, draft:null, fieldQ:{}, errors:{} };
+  _wnorm(s){ return String(s==null?'':s).replace(/−/g,'-').trim().toLowerCase(); }
+  _isInfWeight(s){ const t=this._wnorm(s); return ['∞','+∞','inf','+inf','infinity','+infinity','-∞','-inf','-infinity'].includes(t); }
+  _wValid(s){ if(this._isInfWeight(s)) return true; const t=this._wnorm(s); return t!=='' && /^-?\d+$/.test(t); }
+  _wNum(s){ const t=this._wnorm(s); if(['∞','+∞','inf','+inf','infinity','+infinity'].includes(t)) return Infinity; if(['-∞','-inf','-infinity'].includes(t)) return -Infinity; return parseInt(t,10); }
+  validate(kind,d){
+    const e={}; const val=(k)=>this.fieldVal(d,k); const empty=(k)=>this.splitVals(val(k)).length===0;
+    const coefErr=()=>{ const bad=Object.entries(d.coef||{}).filter(([id,v])=>v!=='' && v!=null && !(/^\d+$/.test(String(v)) && Number(v)>=1)); return bad.length?('Coefficient for '+(bad[0][0]==='LEAVE'?'Leave':bad[0][0])+' must be an integer of at least 1'):null; };
+    if(kind==='requirements'){
+      if(empty('Shift type')) e['Shift type']='At least one shift type must be selected';
+      const rq=val('Required'); if(rq==='' || Number.isNaN(Number(rq))) e['Required']='Required number of people must be a valid number'; else if(Number(rq)<0) e['Required']='Required number of people must be at least 0';
+      const pf=val('Preferred'); if(pf!=='' && pf!=null){ if(Number.isNaN(Number(pf))) e['Preferred']='Preferred number of people must be a valid number'; else if(Number(pf)<1) e['Preferred']='Preferred number of people must be at least 1'; else if(!Number.isNaN(Number(rq)) && Number(pf)<Number(rq)) e['Preferred']='Preferred number of people must be greater than required number of people'; }
+      if(empty('Qualified')) e['Qualified']='At least one person must be selected';
+      if(empty('Dates')) e['Dates']='At least one date must be selected';
+      const ce=coefErr(); if(ce && !e['Shift type']) e['Shift type']=ce;
+      const diff=pf!=='' && pf!=null && !Number.isNaN(Number(pf)) && Number(pf)!==Number(rq);
+      if(diff){ if(!this._wValid(d.weight)) e.weight='Weight must be a valid number, Infinity, or -Infinity'; else if(this._wNum(d.weight)>0) e.weight='Weight must be 0 or less (including -Infinity)'; }
+    } else if(kind==='successions'){
+      if(empty('People')) e['People']='At least one person must be selected';
+      if(this.splitVals(val('Pattern')).length<2) e['Pattern']='At least 2 shift types must be selected for a succession pattern';
+      if(empty('Dates')) e['Dates']='At least one date must be selected';
+      if(!this._wValid(d.weight)) e.weight='Weight must be a valid number, Infinity, or -Infinity';
+    } else if(kind==='counts'){
+      if(empty('People')) e['People']='At least one person must be selected';
+      if(empty('Dates')) e['Dates']='At least one date must be selected';
+      if(empty('Count shift types')) e['Count shift types']='At least one shift type must be selected';
+      const parsed=this._parseExpr(val('Expression'));
+      const isSq=(parsed.opId==='sq');
+      if(parsed.target===''||parsed.target==null) e['Expression']='Set a target value for the expression';
+      else if(!/^\d+$/.test(String(parsed.target))) e['Expression']='Target must be a non-negative integer';
+      const ce=coefErr(); if(ce && !e['Count shift types']) e['Count shift types']=ce;
+      if(!this._wValid(d.weight)) e.weight='Weight must be a valid number, Infinity, or -Infinity'; else if(isSq && this._wNum(d.weight)>0) e.weight='Weight must be non-positive for shift count with "|x - T|^2"';
+    } else if(kind==='affinities'){
+      if(empty('Dates')) e['Dates']='At least one date must be selected';
+      if(empty('People 1')) e['People 1']='At least one person must be selected for People 1';
+      if(empty('People 2')) e['People 2']='At least one person must be selected for People 2';
+      if(empty('Shift types')) e['Shift types']='At least one shift type must be selected';
+      if(!this._wValid(d.weight)) e.weight='Weight must be a valid number, Infinity, or -Infinity';
+    } else if(kind==='coverings'){
+      if(empty('Preceptors')) e['Preceptors']='At least one preceptor must be selected';
+      if(empty('Preceptees')) e['Preceptees']='At least one preceptee must be selected';
+      if(empty('Shift types')) e['Shift types']='At least one shift type must be selected';
+    }
+    return e;
+  }
+  tmpl(){ return this.TEMPLATES[this.props.kind||'requirements']; }
+  setFieldQ=(key,val)=> this.setState(s=>({fieldQ:{...(s.fieldQ||{}),[key]:val}}));
+  addNew=()=>{ const t=this.tmpl(); this.setState({mode:'add', editIndex:-1, draft:{desc:'', weight:t.hasWeight?t.defWeight:null, coef:{}, manualCoef:{}, fields:t.fields.map(k=>({k,v:''}))}, fieldQ:{}, errors:{}}); window.scrollTo({top:0,behavior:'instant'}); };
+  // ---- Contracted Hours (guided) — spec 12 (FR-CH-20..34) ----
+  _defaultHoursFrom=()=>{ const ed=this.props.editor||{}; const worked=ed.workedShifts||[]; return [...worked,'LEAVE'].join(', '); };
+  addContract=()=>{ this.setState({mode:'add', editIndex:-1, draft:{isContract:true, policy:'range', minHalf:'300', maxHalf:'340', targetHalf:'320', showSolver:false, showCoef:false, refresh:null, desc:'', weight:'+∞', coef:{}, manualCoef:{}, fields:[{k:'Expression',v:'300 ≤ x ≤ 340'},{k:'People',v:'ALL'},{k:'Count shift types',v:this._defaultHoursFrom()},{k:'Dates',v:'ALL'}]}, fieldQ:{}, errors:{}}); window.scrollTo({top:0,behavior:'instant'}); };
+  _parsePolicy=(card)=>{ if(card && card.policy){ return {policy:card.policy, minHalf:card.minHalf||'', maxHalf:card.maxHalf||'', targetHalf:card.targetHalf||''}; } const ex=((card&&card.fields)||[]).find(f=>f.k==='Expression'); const s=ex?String(ex.v||''):''; const nums=(s.match(/\d+/g)||[]); if(/≤|<=/.test(s)&&nums.length>=2) return {policy:'range', minHalf:nums[0], maxHalf:nums[1], targetHalf:nums[0]}; return {policy:'exact', minHalf:'', maxHalf:'', targetHalf:nums[0]||''}; };
+  setPolicy=(p)=> this.setState(s=>({draft:{...s.draft, policy:p}}));
+  setPolicyVal=(k,v)=> this.setState(s=>{ const errors={...(s.errors||{})}; delete errors['Expression']; return {draft:{...s.draft,[k]:v}, errors}; });
+  toggleCoef=()=> this.setState(s=>({draft:{...s.draft, showCoef:!s.draft.showCoef}}));
+  toggleSolver=()=> this.setState(s=>({draft:{...s.draft, showSolver:!s.draft.showSolver}}));
+  convertToGeneric=()=> this.setState(s=>({draft:{...s.draft, isContract:false, weight:s.draft.weight||'−∞'}}));
+  addLeaveCredit=()=> this.setState(s=>{ const d=s.draft; const idx=d.fields.findIndex(f=>f.k==='Count shift types'); const cur=d.fields[idx].v; const has=this.splitVals(cur).includes('LEAVE'); const fields=d.fields.map((f,ix)=>ix===idx?{...f,v:(has?cur:(cur&&cur.trim()?cur+', LEAVE':'LEAVE'))}:f); const coef={...(d.coef||{}),LEAVE:Math.round(((this.props.editor||{}).creditMinutes||480)/30)}; const manual={...(d.manualCoef||{}),LEAVE:true}; return {draft:{...d, fields, coef, manualCoef:manual}}; });
+  refreshFromShifts=()=> this.setState(s=>{ const d=s.draft; const ed2=this.props.editor||{}; const worked=ed2.workedShifts||[]; const sel=this.coefFieldSel(d); const curEligible=this.eligibleCoefTypes(sel); const added=[],removed=[],changed=[],unchanged=[]; worked.forEach(id=>{ const m=(ed2.durations||{})[id]; const dv=(m!=null)?Math.max(1,Math.round(m/30)):null; const inCur=curEligible.includes(id); const curV=(d.coef&&d.coef[id]!=null&&d.coef[id]!=='')?Number(d.coef[id]):null; if(!inCur) added.push({id,to:dv}); else if(dv!=null&&curV!=null&&dv!==curV) changed.push({id,from:curV,to:dv}); else unchanged.push({id}); }); curEligible.forEach(id=>{ if(id!=='LEAVE'&&!worked.includes(id)) removed.push({id}); }); return {draft:{...d, refresh:{added,removed,changed,unchanged}}}; });
+  applyRefresh=()=> this.setState(s=>{ const d=s.draft; const ed2=this.props.editor||{}; const worked=ed2.workedShifts||[]; const idx=d.fields.findIndex(f=>f.k==='Count shift types'); const sel=this.coefFieldSel(d); const hadLeave=sel.includes('LEAVE'); const newSel=[...worked, ...(hadLeave?['LEAVE']:[])]; const fields=d.fields.map((f,ix)=>ix===idx?{...f,v:newSel.join(', ')}:f); const coef={}; const manual={...(d.manualCoef||{})}; newSel.forEach(id=>{ if(id==='LEAVE'){ coef.LEAVE=(d.coef&&d.coef.LEAVE)||Math.round((ed2.creditMinutes||480)/30); manual.LEAVE=true; } else { coef[id]=''; delete manual[id]; } }); return {draft:{...d, fields, coef, manualCoef:manual, refresh:null}}; });
+  cancelRefresh=()=> this.setState(s=>({draft:{...s.draft, refresh:null}}));
+  saveContract=()=>{ const ed=this.props.editor||{}; const d=this.state.draft; const errs={}; const sel=this.coefFieldSel(d); const eligible=this.eligibleCoefTypes(sel); if(!this.splitVals(this.fieldVal(d,'People')).length) errs['People']='Select at least one nurse or group'; if(!this.splitVals(this.fieldVal(d,'Dates')).length) errs['Dates']='Select at least one date'; if(!eligible.length) errs['Count shift types']='Select at least one worked shift type'; const pol=d.policy||'range'; const iv=v=>/^\d+$/.test(String(v)); if(pol==='exact'){ if(!iv(d.targetHalf)) errs['Expression']='Enter a target in half-hours'; } else { if(!iv(d.minHalf)||!iv(d.maxHalf)) errs['Expression']='Enter min and max in half-hours'; else if(Number(d.minHalf)>Number(d.maxHalf)) errs['Expression']='Minimum must be ≤ maximum'; } const coef={}; const cov=[]; eligible.forEach(id=>{ const manualHas=!!(d.manualCoef&&d.manualCoef[id])&&d.coef&&d.coef[id]!==''&&d.coef[id]!=null; const m=this.minutesFor(id); const v=manualHas?d.coef[id]:((m!=null)?String(Math.max(1,Math.round(m/30))):''); if(v===''||!/^\d+$/.test(String(v))||Number(v)<1) cov.push(id); else coef[id]=Number(v); }); if(cov.length && !errs['Count shift types']) errs['Count shift types']='Set a coefficient for: '+cov.map(x=>x==='LEAVE'?'Leave':x).join(', '); if(Object.keys(errs).length){ this.setState({errors:errs}); return; } const expr=(pol==='exact')?('x = '+d.targetHalf):(d.minHalf+' ≤ x ≤ '+d.maxHalf); const fields=d.fields.map(f=> f.k==='Expression'?{...f,v:expr}:{...f,v:(f.v||'').trim()}); /* F2 — SERIALIZATION BOUNDARY (decide at implementation): this card holds UI-only fields that must NOT go to the backend verbatim. `tag:'contracted_hours'` maps to the shipped `hoursContract:{unit:'half-hour',policy}` marker; `policy/minHalf/maxHalf/targetHalf` are guided-draft conveniences — backend gets only expression/target(+bounds)/weight/countShiftTypeCoefficients. `unit:'half'` is an internal draft flag, not a backend field. Confirm the YAML generator drops these. */ const card={desc:(d.desc||'').trim()||'Contracted hours', weight:'+∞', unit:'half', tag:'contracted_hours', policy:pol, minHalf:d.minHalf, maxHalf:d.maxHalf, targetHalf:d.targetHalf, coef, fields}; if(this.state.mode==='add') (ed.add||(()=>{}))('counts',card); else (ed.update||(()=>{}))('counts',this.state.editIndex,card); this.setState({mode:'list', draft:null, errors:{}}); };
+  editRow=(i,card)=>{
+    const div=30; // guided contract coefficients are always half-hour units; generic counts have no unit
+    const manual={};
+    // Flag a loaded coefficient as manual only when it differs from its duration/credit-derived
+    // value — seeded/duration-matching values re-derive on a unit toggle or auto-fill, while a
+    // hand-tuned value is preserved (FR-CH-33/FR-PR-79). Requirement coefficients have no
+    // duration source, so they are always treated as manual.
+    Object.keys(card.coef||{}).forEach(k=>{
+      const m=this.minutesFor(k);
+      const derived=(m!=null)?String(Math.max(1,Math.round(m/div))):null;
+      if(derived===null || String(card.coef[k])!==derived) manual[k]=true;
+    });
+    const isC=(this.props.kind==='counts' && card.tag==='contracted_hours');
+    const pol=this._parsePolicy(card);
+    let fld=card.fields.map(f=>({...f}));
+    if(isC){ const order=['Expression','People','Count shift types','Dates']; fld=order.map(k=>fld.find(f=>f.k===k)||{k,v:''}); }
+    this.setState({mode:'edit', editIndex:i, draft:{isContract:isC, policy:pol.policy, minHalf:pol.minHalf, maxHalf:pol.maxHalf, targetHalf:pol.targetHalf, showSolver:false, showCoef:false, refresh:null, desc:card.desc, weight:card.weight, coef:{...(card.coef||{})}, manualCoef:manual, fields:fld}, fieldQ:{}, errors:{}});
+    window.scrollTo({top:0,behavior:'instant'});
+  };
+  cancel=()=> this.setState({mode:'list', draft:null, fieldQ:{}});
+  setDesc=(v)=> this.setState(s=>({draft:{...s.draft, desc:v}}));
+  setFieldVal=(i,v)=> this.setState(s=>{
+    let fields=s.draft.fields.map((f,ix)=>ix===i?{...f,v}:f);
+    // FR-PR-22: if the new Required equals the current Preferred, reset Preferred to blank.
+    if(fields[i].k==='Required'){
+      fields=fields.map(f=>(f.k==='Preferred' && f.v!=='' && Number(f.v)===Number(v))?{...f,v:''}:f);
+    }
+    const errors={...(s.errors||{})}; delete errors[s.draft.fields[i].k];
+    return {draft:{...s.draft, fields}, errors};
+  });
+  setWeight=(v)=> this.setState(s=>{ const errors={...(s.errors||{})}; delete errors.weight; return {draft:{...s.draft, weight:v}, errors}; });
+  // shift-type toggle for a coefficient field: updates selection AND re-syncs coefficient pairs
+  setCoefType=(i,label,single)=> this.setState(s=>{
+    const fields=s.draft.fields.map((f,ix)=>ix===i?{...f,v:this.toggleInVal(f.v,label,single)}:f);
+    const sel=this.splitVals(fields[i].v);
+    const eligible=this.eligibleCoefTypes(sel);
+    const coef={...(s.draft.coef||{})}; const manual={...(s.draft.manualCoef||{})};
+    Object.keys(coef).forEach(k=>{ if(!eligible.includes(k)){ delete coef[k]; delete manual[k]; } });
+    eligible.forEach(k=>{ if(!(k in coef)) coef[k]=''; });
+    const errors={...(s.errors||{})}; delete errors[fields[i].k];
+    return {draft:{...s.draft, fields, coef, manualCoef:manual}, errors};
+  });
+  setCoef=(id,val)=> this.setState(s=>{ const errors={...(s.errors||{})}; delete errors['Count shift types']; delete errors['Shift type']; return {draft:{...s.draft, coef:{...s.draft.coef,[id]:val}, manualCoef:{...(s.draft.manualCoef||{}),[id]:true}}, errors}; });
+  save=()=>{
+    const ed=this.props.editor||{}; const kind=this.props.kind;
+    const d=this.state.draft; if(!d) return;
+    if(d.isContract){ return this.saveContract(); }
+    const errs=this.validate(kind,d);
+    if(Object.keys(errs).length){ this.setState({errors:errs}); return; }
+    const card={desc:(d.desc||'').trim()||'Untitled '+this.tmpl().entity, weight:d.weight, fields:d.fields.map(f=>({...f, v:f.v.trim()}))};
+    if(kind==='counts'){
+      const entries=Object.entries(d.coef||{}).filter(([k,val])=>val!=='' && val!=null);
+      if(entries.length){ card.coef=Object.fromEntries(entries); }
+      // C1 FIX (spec 12 / FR-CH-33): a generic Shift Count does NOT persist a `unit` field.
+      // The backend shift-count schema has no unit concept; coefficients are plain integers.
+      // Only guided Contracted Hours carries hoursContract {unit:'half-hour', policy} (saveContract).
+    }
+    if(kind==='requirements'){
+      // Shift-type coefficients (staffing multipliers — no unit, no auto-fill)
+      const entries=Object.entries(d.coef||{}).filter(([k,val])=>val!=='' && val!=null);
+      if(entries.length){ card.coef=Object.fromEntries(entries); }
+      // FR-PR-24/25: weight only meaningful when preferred differs from required.
+      const req=Number(this.fieldVal(d,'Required'));
+      const prefRaw=this.fieldVal(d,'Preferred');
+      const diff = prefRaw!=='' && prefRaw!=null && !Number.isNaN(Number(prefRaw)) && Number(prefRaw)!==req;
+      if(!diff){
+        card.weight=null;
+        card.fields=card.fields.map(f=>f.k==='Preferred'?{...f,v:''}:f); // normalize preferred to unset
+      }
+    }
+    if(this.state.mode==='add') (ed.add||(()=>{}))(kind,card); else (ed.update||(()=>{}))(kind,this.state.editIndex,card);
+    this.setState({mode:'list', draft:null, errors:{}});
+  };
+  renderVals(){
+    const kind=this.props.kind||'requirements';
+    const ed=this.props.editor||{};
+    const meta=(ed.data||{})[kind]||{};
+    const list=((ed.cards||{})[kind])||[];
+    const t=this.tmpl();
+    const listTitles={requirements:'Current requirements',successions:'Current successions',counts:'Current shift counts',affinities:'Current affinities',coverings:'Current shift type coverings'};
+    const weightStyle=(w)=>{
+      let c='color:var(--ink2);background:var(--panel);';
+      if(w && w.indexOf('+')===0) c='color:var(--success);background:var(--successtint);';
+      else if(w==='−∞') c='color:var(--error);background:var(--errortint);';
+      else if(w && w.indexOf('−')===0) c='color:var(--warn);background:var(--warntint);';
+      return `font:600 var(--m-xs) var(--font-mono);letter-spacing:.05em;padding:4px 9px;white-space:nowrap;${c}`;
+    };
+    const coefChipStyle=(leaf)=>`font:600 var(--m-xs) var(--font-mono);padding:3px 9px;border:1px solid ${leaf?'var(--brand)':'var(--line2)'};background:${leaf?'var(--brandtint)':'var(--surface)'};color:${leaf?'var(--brandink)':'var(--ink)'};`;
+    const cards=list.map((c,i)=>{
+      let flds=c.fields;
+      if(kind==='requirements') flds=flds.filter(f=>!(f.k==='Preferred' && (!f.v || f.v==='')));
+      return {
+        ...c, num:i+1, hasWeight:(kind==='coverings'?false:c.weight!=null), hardBadge:(kind==='coverings'), weightStyle:weightStyle(c.weight),
+        isContract:(kind==='counts' && c.tag==='contracted_hours'),
+        disabled:!!c.disabled, disabledLabel:(c.disabled?'Enable':'Disable'),
+        onToggleDisabled:()=>(ed.setDisabled||(()=>{}))(kind,i,!c.disabled),
+        cardStyle:`background:var(--surface);border:1px solid ${(kind==='counts'&&c.tag==='contracted_hours')?'var(--brand)':'var(--line)'};${(kind==='counts'&&c.tag==='contracted_hours')?'border-left:3px solid var(--brand);':''}padding:20px;${c.disabled?'opacity:.55;':''}`,
+        fieldGridStyle:`display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:1px;background:var(--line2);border:1px solid var(--line2);`,
+        fields:flds.map((f,fi)=>({...f, style:`background:var(--surface);padding:13px 15px;`})),
+        hasCoef:!!c.coef,
+        coefLabel:(kind==='requirements'?'Coefficients · staffing multiplier':'Coefficients'),
+        coefChips:c.coef?Object.entries(c.coef).map(([k,val])=>({text:(k==='LEAVE'?'Leave':k)+' · '+val, style:coefChipStyle(k==='LEAVE')})):[],
+        onEdit:()=>this.editRow(i,c),
+        onDup:()=>(ed.add||(()=>{}))(kind,{desc:(c.desc||'')+' copy', weight:c.weight, coef:c.coef?{...c.coef}:undefined, tag:c.tag, fields:c.fields.map(f=>({...f}))}),
+        onDelete:()=>(ed.del||(()=>{}))(kind,i),
+      };
+    });
+    const draft=this.state.draft;
+    const types=t.types||{};
+    const hints=t.hints||{};
+    const peo=ed.peopleOptions||{groups:[],people:[]};
+    const sho=ed.shiftOptions||{groups:[],shifts:[]};
+    const worked=ed.workedShifts || (sho.shifts||[]).filter(x=>x!=='OFF'&&x!=='LEAVE');
+    const gm=ed.shiftGroupMap||{};
+    const isCoverageKind=(kind==='requirements'||kind==='coverings');
+    const dateAuto=ed.dateAutoGroups||ed.dateScopes||['ALL','WEEKDAY','WEEKEND'];
+    const dateUserGroups=ed.dateGroups||[];
+    const chipStyle=(on)=>`height:30px;padding:0 11px;border:1px solid ${on?'var(--brand)':'var(--line)'};background:${on?'var(--brand)':'var(--surface)'};color:${on?'var(--onbrand)':'var(--ink)'};font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:6px;white-space:nowrap;cursor:pointer;`;
+    const grpChipStyle=(on)=>`height:30px;padding:0 11px;border:1px solid ${on?'var(--brand)':'var(--line2)'};background:${on?'var(--brand)':'var(--panel)'};color:${on?'var(--onbrand)':'var(--ink2)'};font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:6px;white-space:nowrap;cursor:pointer;`;
+    const leaveChipStyle=(on)=>`height:30px;padding:0 11px;border:1px solid var(--brand);background:${on?'var(--brand)':'var(--brandtint)'};color:${on?'var(--onbrand)':'var(--brandink)'};font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:6px;white-space:nowrap;cursor:pointer;`;
+    // shared coefficient sub-editor builder (counts = hours w/ auto-fill+unit; requirements = staffing multiplier)
+    const buildCoef=(base,i,f,opts)=>{
+      base.isCountCoef=true; base.cellStyle='display:block;grid-column:1 / -1;';
+      const sel=this.splitVals(f.v);
+      const groups=(sho.groups||[]).filter(g=> opts.mode==='req' ? !( (gm[g]||[]).includes('OFF') ) : true );
+      const items=opts.mode==='req' ? worked : [...worked,'OFF','LEAVE'];
+      base.hasGroupChips=groups.length>0;
+      base.groupChips=groups.map(g=>{const on=sel.includes(g);return {label:g,on,style:grpChipStyle(on),onToggle:()=>this.setCoefType(i,g,opts.single)};});
+      base.itemChips=items.map(it=>{const on=sel.includes(it);const leaf=(it==='LEAVE');return {label:leaf?'Leave':it,on,style:leaf?leaveChipStyle(on):chipStyle(on),onToggle:()=>this.setCoefType(i,it,opts.single)};});
+      const eligible=this.eligibleCoefTypes(sel);
+      base.coefRows=eligible.map(id=>{
+        const m=this.minutesFor(id); const leaf=(id==='LEAVE');
+        const val=(draft&&draft.coef&&draft.coef[id]!=null)?draft.coef[id]:'';
+        const hasVal=(val!==''&&val!=null);
+        return {id, label:leaf?'Leave':id, isLeave:leaf, val,
+          tagStyle:`font:600 var(--m-sm) var(--font-mono);padding:5px 11px;border:1px solid ${leaf?'var(--brand)':'var(--line2)'};background:${leaf?'var(--brandtint)':'var(--surface)'};color:${leaf?'var(--brandink)':'var(--ink)'};min-width:66px;text-align:center;`,
+          onInput:(e)=>this.setCoef(id,e.target.value),
+          hint: '' };
+      });
+      base.noEligible=eligible.length===0; base.hasEligible=eligible.length>0;
+      base.collapsible=false; base.collapsed=false; base.showCoefRows=base.hasEligible;
+      // C1 FIX (spec 12 / FR-CH-33): the ½-hours/Hours unit toggle and duration auto-fill are
+      // hours-specific ergonomics reserved for guided Contracted Hours. A generic Shift Count keeps
+      // plain integer coefficients with no unit toggle and no auto-fill.
+      if(opts.mode==='req'){
+        base.coefHeading='SHIFT TYPE COEFFICIENTS';
+        base.coefEmpty='Coefficients are not needed when no shift type is selected.';
+        base.unitNote='How much one assignment counts toward the required headcount. Default is 1 (one person = one unit of coverage). Raise it when a single assignment is worth more than one — e.g. a senior on D_sup with a coefficient of 2 counts as two toward the staffing minimum because they can supervise, so one senior satisfies a requirement of 2. This is a coverage-value weight per person, not hours (no auto-fill).';
+      } else {
+        base.coefHeading='COUNT COEFFICIENTS';
+        base.coefEmpty='Coefficients are not needed when no count shift type is selected. Add worked shifts and/or Leave above.';
+        base.unitNote='Each selected shift type counts toward x by its coefficient (a positive integer, default 1). x is the weighted sum over the selected people, shift types and dates; compare it to your target with the expression above. For an hours-based monthly target, use Add Contracted Hours instead.';
+      }
+      if(draft&&draft.isContract&&opts.mode!=='req'){
+        base.coefHeading='DERIVED COEFFICIENTS · HALF-HOURS';
+        const credH=((this.props.editor||{}).creditMinutes||480)/60;
+        base.unitNote='Each worked shift contributes its working time ÷ 30 min. A paid-leave day credits '+credH+'h. Values are editable; a shift type with no working time must be set by hand.';
+        let att=0;
+        base.coefRows=eligible.map(id=>{
+          const m=this.minutesFor(id); const leaf=(id==='LEAVE');
+          const manualHas=!!(draft.manualCoef&&draft.manualCoef[id])&&draft.coef&&draft.coef[id]!==''&&draft.coef[id]!=null;
+          const derived=(m!=null)?String(Math.max(1,Math.round(m/30))):'';
+          const shown=manualHas?draft.coef[id]:derived;
+          const need=(!manualHas&&m==null);
+          if(need) att++;
+          const hrs=(m!=null)?(m/60):null;
+          return {id, label:leaf?'Leave':id, isLeave:leaf, val:shown, needsAttention:need,
+            tagStyle:'font:600 var(--m-sm) var(--font-mono);padding:5px 11px;border:1px solid '+(need?'var(--warn)':(leaf?'var(--brand)':'var(--line2)'))+';background:'+(need?'var(--warntint)':(leaf?'var(--brandtint)':'var(--surface)'))+';color:'+(need?'var(--warn)':(leaf?'var(--brandink)':'var(--ink)'))+';min-width:66px;text-align:center;',
+            onInput:(e)=>this.setCoef(id,e.target.value),
+            hint: need ? 'no working time — set manually' : (leaf? (credH+'h credit · editable') : (hrs+'h × 2 · from working time'))};
+        });
+        base.attentionCount=att;
+        base.coverageOk=(att===0);
+        base.coverageText=(att===0)?('All '+eligible.length+' selected type'+(eligible.length===1?'':'s')+' have a coefficient'):(att+' shift type'+(att===1?'':'s')+' need a coefficient');
+        base.collapsible=(eligible.length>0);
+        base.collapsed=(!draft.showCoef && att===0);
+        base.showCoefRows=base.hasEligible&&!base.collapsed;
+        base.onToggleCollapse=this.toggleCoef;
+        base.coverageIcon=base.coverageOk?'fa-circle-check':'fa-triangle-exclamation';
+        base.collapseChevron=base.collapsed?'fa-chevron-down':'fa-chevron-up';
+        base.coverageStripStyle='width:100%;display:flex;align-items:center;gap:10px;padding:10px 12px;margin-bottom:'+(base.collapsed?'0':'12px')+';border:1px solid '+(base.coverageOk?'var(--success)':'var(--warn)')+';background:'+(base.coverageOk?'var(--successtint)':'var(--warntint)')+';color:'+(base.coverageOk?'var(--success)':'var(--warn)')+';cursor:pointer;';
+      }
+      return base;
+    };
+    const draftFields=(draft?draft.fields:[]).map((f,i)=>{
+      const type=types[f.k]||'text';
+      const base={...f, ph:t.ph[f.k]||'', hint:hints[f.k]||'', error:(this.state.errors||{})[f.k], onInput:(e)=>this.setFieldVal(i,e.target.value),
+        isText:false,isNumber:false,isNumberPref:false,isChips:false,isDates:false,isCountCoef:false,isPattern:false,isPolicy:false,showLabel:true,hasGroupChips:false,
+        cellStyle:'display:block;'};
+      if(type==='number'){ base.isNumber=true; return base; }
+      if(type==='number-pref'){
+        base.isNumberPref=true;
+        const req=this.fieldVal(draft,'Required');
+        base.v=(f.v!=='' && f.v!=null)?f.v:req; // FR-PR-23 fallback display
+        base.prefNote='Defaults to Required if left empty. Set higher to make extra staffing a soft goal (a weight then applies).';
+        return base;
+      }
+      if(type==='count-coef') return buildCoef(base,i,f,{mode:'count',single:false});
+      if(type==='req-coef') return buildCoef(base,i,f,{mode:'req',single:true});
+      if(type==='expr' && draft && draft.isContract){
+        base.isPolicy=true; base.cellStyle='display:block;grid-column:1 / -1;'; base.showLabel=false; base.hint='';
+        const pol=draft.policy||'range';
+        base.policyExact=(pol==='exact'); base.policyRange=(pol==='range');
+        const segS=(on)=>`flex:1;text-align:center;padding:9px;font:${on?'700':'600'} var(--t-body) var(--font-ui);color:${on?'var(--onbrand)':'var(--ink2)'};background:${on?'var(--brand)':'var(--surface)'};border:none;cursor:pointer;`;
+        base.exactStyle=segS(pol==='exact'); base.rangeStyle=segS(pol==='range')+'border-left:1px solid var(--line);';
+        base.onExact=()=>this.setPolicy('exact'); base.onRange=()=>this.setPolicy('range');
+        const mn=draft.minHalf||'', mx=draft.maxHalf||'', tg=draft.targetHalf||'';
+        base.minHalf=mn; base.maxHalf=mx; base.targetHalf=tg;
+        base.onMin=(e)=>this.setPolicyVal('minHalf',e.target.value); base.onMax=(e)=>this.setPolicyVal('maxHalf',e.target.value); base.onTargetHalf=(e)=>this.setPolicyVal('targetHalf',e.target.value);
+        const hh=v=>(v===''||v==null||isNaN(Number(v)))?'—':(Number(v)/2);
+        base.exactHours=hh(tg); base.minHours=hh(mn); base.maxHours=hh(mx);
+        const cap=500; const pct=v=>Math.max(0,Math.min(100,(Number(v||0)/cap)*100));
+        base.exactPct=pct(tg); base.rangeLeftPct=pct(mn); base.rangeRightPct=pct(mx); base.rangeWidthPct=Math.max(0,pct(mx)-pct(mn));
+        base.policyErr=(this.state.errors||{})['Expression'];
+        return base;
+      }
+      if(type==='expr'){
+        base.isExpr=true; base.cellStyle='display:block;grid-column:1 / -1;';
+        const parsed=this._parseExpr(f.v);
+        base.exprOptions=this.EXPR_OPS.map(o=>{
+          const sel=(o.id===parsed.opId);
+          return {id:o.id, glyph:o.glyph, title:o.title, help:o.help, selected:sel,
+            style:`display:flex;align-items:center;gap:13px;width:100%;text-align:left;padding:11px 13px;border:1px solid ${sel?'var(--brand)':'var(--line)'};background:${sel?'var(--brandtint)':'var(--surface)'};cursor:pointer;`,
+            badgeStyle:`font:700 var(--m-md) var(--font-mono);white-space:nowrap;padding:7px 12px;min-width:74px;text-align:center;border:1px solid ${sel?'var(--brand)':'var(--line2)'};background:${sel?'var(--surface)':'var(--panel)'};color:${sel?'var(--brandink)':'var(--ink2)'};flex:none;`,
+            onPick:()=>this.setFieldVal(i,this._buildExpr(o.id,parsed.target))};
+        });
+        base.targetVal=parsed.target;
+        base.onTarget=(e)=>this.setFieldVal(i,this._buildExpr(parsed.opId,e.target.value));
+        base.exprPreview=this._buildExpr(parsed.opId,parsed.target);
+        base.targetNote=(parsed.opId==='sq'
+          ? 'T is the ideal count. |x − T|² pushes x toward T from both sides — pair it with a negative or −∞ weight (a positive weight is rejected).'
+          : 'T is a whole number in the same unit as the coefficients — e.g. a 160h contract in half-hour units is 320.');
+        return base;
+      }
+      if(type==='pattern'){
+        base.isPattern=true; base.cellStyle='display:block;grid-column:1 / -1;';
+        const seq=this.splitVals(f.v); // ordered, duplicates allowed
+        const dispOf=x=>(x==='LEAVE'?'Leave':x);
+        const iconOf=x=>(sho.groups.includes(x)?'fa-layer-group':(x==='ALL'?'fa-asterisk':(x==='OFF'||x==='LEAVE'?'fa-mug-hot':'fa-clock')));
+        const append=(id)=>this.setFieldVal(i,(f.v&&f.v.trim())?f.v+', '+id:id);
+        base.patternGroups=(sho.groups||[]).map(g=>({label:g, icon:'fa-layer-group', onAdd:()=>append(g)}));
+        base.hasPatternGroups=(sho.groups||[]).length>0;
+        const optItems=[...worked,'OFF','LEAVE','ALL'];
+        base.patternItems=optItems.map(it=>({label:dispOf(it), icon:iconOf(it), onAdd:()=>append(it)}));
+        base.patternTags=seq.map((id,pos)=>({label:dispOf(id), icon:iconOf(id), isLast:pos===seq.length-1,
+          canLeft:pos>0, canRight:pos<seq.length-1,
+          onRemove:()=>{ const na=seq.slice(); na.splice(pos,1); this.setFieldVal(i,na.join(', ')); },
+          onLeft:()=>{ if(pos<=0) return; const na=seq.slice(); const t=na[pos-1]; na[pos-1]=na[pos]; na[pos]=t; this.setFieldVal(i,na.join(', ')); },
+          onRight:()=>{ if(pos>=seq.length-1) return; const na=seq.slice(); const t=na[pos+1]; na[pos+1]=na[pos]; na[pos]=t; this.setFieldVal(i,na.join(', ')); } }));
+        base.hasPattern=seq.length>0;
+        base.patternEmpty=seq.length===0;
+        return base;
+      }
+      if(type==='people'||type==='shifts'||type==='shift-single'){
+        base.isChips=true; base.cellStyle='display:block;grid-column:1 / -1;';
+        const single=(type==='shift-single');
+        const sel=this.splitVals(f.v);
+        const groups=(type==='people')?peo.groups:( (type==='shifts')?sho.groups:[]);
+        let items=(type==='people')?peo.people:( isCoverageKind ? worked : (sho.shifts||[]) );
+        const isPeople=(type==='people');
+        const dispOf=x=>(x==='LEAVE'?'Leave':x);
+        const isAll=false;
+        const addOne=(label)=>this.setFieldVal(i, isAll?this.toggleInVal('',label,single):this.toggleInVal(f.v,label,single));
+        const itemIcon=isPeople?'fa-user':'fa-clock';
+        base.single=single;
+        base.everyoneActive=false;
+        base.itemLabel=isPeople?'NURSES':'SHIFT TYPES';
+        base.searchPh=isPeople?'Search nurses & groups':'Search shift types';
+        const knownSet=new Set([...groups,...items]);
+        // ---- SELECTED pane (right) — user's saved order; unknown typed values still show ----
+        const rawSelQ=(this.state.fieldQ||{})[f.k+'::sel']||''; const selQ=rawSelQ.trim().toLowerCase();
+        const tkIconStyle=(g,a)=>`font-size:10px;flex:none;color:${(g||a)?'var(--brandink)':'var(--ink3)'};`;
+        const allTokens=sel.map(v=>{const g=groups.includes(v);const a=false;return {label:dispOf(v), isGroup:g, isAll:a, isUnknown:!knownSet.has(v),
+          icon:(a?'fa-users':(g?'fa-layer-group':itemIcon)), iconStyle:tkIconStyle(g,a),
+          onRemove:()=>this.setFieldVal(i,this.toggleInVal(f.v,v,single))};});
+        const shownTokens=allTokens.filter(tk=>!selQ||tk.label.toLowerCase().includes(selQ));
+        base.selAllTokens=shownTokens.filter(tk=>tk.isAll);
+        base.selGroupTokens=shownTokens.filter(tk=>tk.isGroup);
+        base.selItemTokens=shownTokens.filter(tk=>!tk.isGroup&&!tk.isAll);
+        base.hasSelGroups=base.selGroupTokens.length>0;
+        base.hasSelItems=base.selItemTokens.length>0;
+        base.selCount=isAll?'ALL':sel.length;
+        base.hasSelShown=shownTokens.length>0;
+        base.selEmpty=shownTokens.length===0;
+        base.selEmptyMsg = sel.length===0
+          ? (single?'None selected — pick one on the left':(isPeople?'No one selected — pick nurses or a group on the left':'Nothing selected — pick from the left'))
+          : ('Nothing matches “'+rawSelQ+'”');
+        base.showSelSearch=sel.length>8;
+        base.selQ=rawSelQ; base.hasSelQ=!!selQ;
+        base.onSelSearch=(e)=>this.setFieldQ(f.k+'::sel',e.target.value);
+        base.onClearSelSearch=()=>this.setFieldQ(f.k+'::sel','');
+        // ---- AVAILABLE pane (left) — options not yet selected, searchable ----
+        const rawQ=(this.state.fieldQ||{})[f.k]||''; const q=rawQ.trim().toLowerCase();
+        base.fieldQ=rawQ; base.hasFieldQ=!!q;
+        base.onFieldSearch=(e)=>this.setFieldQ(f.k,e.target.value);
+        base.onClearFieldSearch=()=>this.setFieldQ(f.k,'');
+        const mq=x=>!q||dispOf(x).toLowerCase().includes(q);
+        const availGroups=groups.filter(g=>!sel.includes(g)&&mq(g));
+        const availItems=items.filter(it=>!sel.includes(it)&&mq(it));
+        base.availCount=availGroups.length+availItems.length;
+        base.hasOptGroups=availGroups.length>0;
+        base.optGroups=availGroups.map(g=>({label:g,onAdd:()=>addOne(g)}));
+        base.hasOptItems=availItems.length>0;
+        base.optItems=availItems.map(it=>({label:dispOf(it),icon:itemIcon,onAdd:()=>addOne(it)}));
+        base.noOpts=availGroups.length===0&&availItems.length===0;
+        base.optEmptyMsg=q?('Nothing matches “'+rawQ+'”'):'Everything is selected.';
+        // ---- Bulk actions (multi-select only) ----
+        const filteredAvail=[...availGroups,...availItems];
+        base.canAddAll=!single&&filteredAvail.length>0;
+        base.addAllLabel=q?('Add all '+filteredAvail.length+' matching'):('Add all '+filteredAvail.length);
+        base.onAddAll=()=>{ let v=isAll?'':f.v; filteredAvail.forEach(x=>{ v=this.toggleInVal(v,x,single); }); this.setFieldVal(i,v); };
+        base.canClear=sel.length>0;
+        base.onClearField=()=>this.setFieldVal(i,'');
+        return base;
+      }
+      if(type==='dates'){
+        base.isDates=true; base.cellStyle='display:block;grid-column:1 / -1;';
+        const norm=(f.v||'').trim().toUpperCase();
+        const allDateOpts=[...dateAuto,...dateUserGroups];
+        const isScope=allDateOpts.map(s=>s.toUpperCase()).includes(norm) || norm==='(ALL)';
+        const mkDateChip=(sc)=>{const on=(norm===sc.toUpperCase())||(sc==='ALL'&&norm==='(ALL)');return {label:sc,on,style:chipStyle(on),onToggle:()=>this.setFieldVal(i,sc)};};
+        base.autoChips=dateAuto.map(mkDateChip);
+        base.dateGroupChips=dateUserGroups.map(mkDateChip);
+        base.hasDateGroups=dateUserGroups.length>0;
+        base.customVal=isScope?'':(f.v||'');
+        base.onCustom=(e)=>this.setFieldVal(i,e.target.value);
+        return base;
+      }
+      base.isText=true; return base;
+    });
+    // Weight visibility (FR-PR-24): requirements show weight only when preferred differs from required.
+    let showWeight = t.hasWeight===true; let showWeightNote=false;
+    if(kind==='requirements'){
+      const req=Number(this.fieldVal(draft,'Required'));
+      const prefRaw=this.fieldVal(draft,'Preferred');
+      const diff = draft && prefRaw!=='' && prefRaw!=null && !Number.isNaN(Number(prefRaw)) && Number(prefRaw)!==req;
+      showWeight=!!diff; showWeightNote=!diff;
+    }
+    let showHardNote=false;
+    if(kind==='coverings'){ showWeight=false; showWeightNote=false; showHardNote=true; }
+    if(draft && draft.isContract){ showWeight=false; showWeightNote=false; showHardNote=false; }
+    const _errs=this.state.errors||{};
+    // Coverage warnings (FR-PR-28): worked shift types with no requirement across all dates.
+    let showCoverage=false, coverageMsg='', coverageItems=[];
+    if(kind==='requirements'){
+      const covered=new Set();
+      list.forEach(c=>{ const sf=(c.fields||[]).find(f=>f.k==='Shift type'); this.splitVals(sf?sf.v:'').forEach(id=>{
+        if(worked.includes(id)) covered.add(id);
+        else if(gm[id]) gm[id].forEach(m=>{ if(worked.includes(m)) covered.add(m); });
+      });});
+      const uncovered=worked.filter(w=>!covered.has(w));
+      const totalDates=ed.totalDates||28;
+      if(uncovered.length){
+        showCoverage=true;
+        coverageMsg=`Undefined staffing requirements: ${uncovered.length*totalDates} date/shift type pairs have no requirement, so the solver may assign an arbitrary number of people.`;
+        coverageItems=uncovered.map(id=>id+': ALL');
+      }
+    }
+    const note=meta.note;
+    // ---- Contracted-hours guided form (spec 12) ----
+    let isContractForm=false, contractSentence='', solverExpr='', solverOpen=false, solverChevron='fa-chevron-right';
+    let leaveGuardShow=false, leaveGuardText='', leaveGuardNames='', leaveCreditHalf=Math.round((ed.creditMinutes||480)/30);
+    let hasRefresh=false, refreshAdded=0, refreshRemoved=0, refreshChanged=0, refreshUnchanged=0;
+    if(this.state.mode!=='list' && draft && draft.isContract){
+      isContractForm=true;
+      const pol=draft.policy||'range';
+      const hrs=v=>(v===''||v==null||isNaN(Number(v)))?'—':(Number(v)/2);
+      const datesLabel=(this.fieldVal(draft,'Dates')||'ALL');
+      const credH=((ed.creditMinutes||480)/60);
+      const rangeTxt=(pol==='exact')?('exactly '+hrs(draft.targetHalf)+'h'):('between '+hrs(draft.minHalf)+'h and '+hrs(draft.maxHalf)+'h');
+      contractSentence='Every nurse works '+rangeTxt+' across '+datesLabel+'. A paid-leave day credits '+credH+'h toward that total; a rest day (OFF) counts 0.';
+      solverExpr=(pol==='exact')?('x = '+(draft.targetHalf||'—')):((draft.minHalf||'—')+' ≤ x ≤ '+(draft.maxHalf||'—'));
+      solverOpen=!!draft.showSolver; solverChevron=solverOpen?'fa-chevron-down':'fa-chevron-right';
+      const selc=this.coefFieldSel(draft);
+      const pinned=(ed.leavePinned||[]);
+      if(!selc.includes('LEAVE') && pinned.length){ leaveGuardShow=true; leaveGuardNames=pinned.slice(0,4).join(' · ')+(pinned.length>4?(' +'+(pinned.length-4)+' more'):''); leaveGuardText='Leave isn’t credited for '+pinned.length+' nurse'+(pinned.length===1?'':'s')+' pinned on paid leave — they’d owe the full target on top of their leave.'; }
+      const rf=draft.refresh;
+      if(rf){ hasRefresh=true; refreshAdded=(rf.added||[]).length; refreshRemoved=(rf.removed||[]).length; refreshChanged=(rf.changed||[]).length; refreshUnchanged=(rf.unchanged||[]).length; }
+    }
+    return {
+      eyebrow:meta.eyebrow, title:meta.title, subtitle:meta.subtitle, empty:meta.empty,
+      addBtnLabel:meta.addLabel||'Add', addIcon: this.state.mode==='list'?'fa-plus':'fa-xmark',
+      addBtnStyle: this.state.mode==='list'
+        ? 'height:44px;padding:0 18px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-body) var(--font-ui);display:inline-flex;align-items:center;gap:9px;white-space:nowrap;'
+        : 'height:44px;padding:0 18px;background:transparent;color:var(--ink);border:1px solid var(--line);font:700 var(--t-body) var(--font-ui);display:inline-flex;align-items:center;gap:9px;white-space:nowrap;',
+      addNew: this.state.mode==='list'? this.addNew : this.cancel,
+      listTitle:listTitles[kind], countLabel:list.length+(list.length===1?' RULE':' RULES'),
+      isEmpty:list.length===0 && this.state.mode==='list', emptyBody:'Add your first '+t.entity+' to define this constraint.', cards,
+      showForm:this.state.mode!=='list',
+      formHeading:(draft&&draft.isContract)?((this.state.mode==='add'?'Add ':'Edit ')+'Contracted Hours'):((this.state.mode==='add'?'Add new ':'Edit ')+t.entity),
+      submitLabel:(draft&&draft.isContract)?(this.state.mode==='add'?'Add contract':'Update contract'):(this.state.mode==='add'?'Add':'Update'),
+      draftDesc:draft?draft.desc:'', onDesc:(e)=>this.setDesc(e.target.value),
+      draftFields, showWeight, showWeightNote, showHardNote, weightError:!!_errs.weight, weightErrorText:_errs.weight||'', draftWeight:draft?draft.weight:'',
+      weightHelp:(kind==='requirements'
+        ? 'Penalty applied when the preferred number of nurses isn’t met (−1 is the default; the more negative, the higher the penalty). −∞ makes it a hard requirement.'
+        : 'Positive encourages · negative discourages · ±∞ makes it a hard rule.'),
+      onWeight:(e)=>this.setWeight(e.target.value), setPlusInf:()=>this.setWeight('+∞'), setMinusInf:()=>this.setWeight('−∞'),
+      onSave:this.save, onCancel:this.cancel,
+      isContractForm, contractSentence, solverExpr, solverOpen, solverChevron,
+      leaveGuardShow, leaveGuardText, leaveGuardNames, leaveCreditHalf,
+      hasRefresh, refreshAdded, refreshRemoved, refreshChanged, refreshUnchanged,
+      onRefreshShifts:this.refreshFromShifts, onApplyRefresh:this.applyRefresh, onCancelRefresh:this.cancelRefresh,
+      onAddLeave:this.addLeaveCredit, onToggleSolver:this.toggleSolver, onConvertGeneric:this.convertToGeneric,
+      showTwoAdd:(kind==='counts' && this.state.mode==='list'), showOneAdd:!(kind==='counts' && this.state.mode==='list'), addContract:this.addContract,
+      showCoverage, coverageMsg, coverageItems,
+      hasNote:!!note && this.state.mode==='list' && !showCoverage, noteText:note&&note.text, noteMark:note&&note.tone==='success'?'✓':'!',
+      noteStyle: note?`display:flex;align-items:center;gap:10px;border:1px solid ${note.tone==='success'?'var(--success)':'var(--warn)'};background:${note.tone==='success'?'var(--successtint)':'var(--warntint)'};color:${note.tone==='success'?'var(--success)':'var(--warn)'};padding:11px 14px;margin-bottom:var(--space-4);`:'',
+    };
+  }
+}
+</script>
+</body>
+</html>

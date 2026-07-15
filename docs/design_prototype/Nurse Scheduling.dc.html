@@ -1,0 +1,1455 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@500;600;700;800;900&family=Hanken+Grotesk:wght@400;500;600;700&family=Spline+Sans+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+<style>
+:root{
+  --font-display:"Figtree",system-ui,sans-serif;
+  --font-ui:"Hanken Grotesk",system-ui,sans-serif;
+  --font-mono:"Spline Sans Mono",ui-monospace,monospace;
+  --ink:#14161b;--ink2:#4a515c;--ink3:#8b929c;--faint:#aab0ba;--on-ink:#fff;
+  --bg:#fbfcfd;--surface:#fff;--panel:#f2f4f7;--panel-alt:#f1f3f6;
+  --line:#c8cdd5;--line2:#e2e5ea;--rule:#14161b;
+  --sidebar:#fff;--chrome:#14161b;
+  --brand:#2360c4;--brandink:#2360c4;--brandtint:#eef4fc;--onbrand:#fff;
+  --success:#1f9a5c;--successtint:#eafaf1;--warn:#b07d10;--warntint:#fbf3df;--error:#d94032;--errortint:#fbeae8;
+  --sp:1;--dens:1;
+  --space-1:calc(4px*var(--sp));--space-2:calc(8px*var(--sp));--space-3:calc(12px*var(--sp));--space-4:calc(16px*var(--sp));--space-5:calc(20px*var(--sp));--space-6:calc(24px*var(--sp));--space-8:calc(32px*var(--sp));--space-12:calc(48px*var(--sp));
+  --ease:cubic-bezier(.4,0,.2,1);--dur-fast:.15s;--dur-base:.22s;
+  --shadow-toast:0 8px 26px rgba(20,30,50,.16);--shadow-dialog:0 12px 34px rgba(20,30,50,.18);--shadow-side:-16px 0 40px rgba(20,30,50,.18);
+  --base-h:26px;--base-b:15.5px;--base-l:12px;
+  --fs-xl:calc(var(--base-h)*var(--dens));--fs-card:calc(var(--base-h)*.78*var(--dens));--fs-lg:calc(var(--base-h)*.60*var(--dens));--fs-md:calc(var(--base-b)*var(--dens));--fs-sm:calc(var(--base-b)*.92*var(--dens));
+  --fs-lbl:calc(var(--base-l)*var(--dens));--fs-lblmd:calc(var(--base-l)*1.13*var(--dens));--fs-lbllg:calc(var(--base-l)*1.27*var(--dens));
+  --t-display:var(--fs-xl);--t-h2:var(--fs-xl);--t-cardhead:var(--fs-card);--t-h3:var(--fs-lg);--t-title:var(--fs-lg);
+  --t-body:var(--fs-md);--t-sm:var(--fs-sm);--t-xs:var(--fs-sm);
+  --m-xs:var(--fs-lbl);--m-sm:var(--fs-lbl);--m-md:var(--fs-lblmd);--m-lg:var(--fs-lbllg);
+  --sidebar-w:280px;
+}
+.ns-root[data-theme="dark"]{
+  --ink:#eef1f4;--ink2:#9aa3b0;--ink3:#6b7585;--faint:#5c6675;--on-ink:#0f1319;
+  --bg:#13171e;--surface:#181d25;--panel:#1d242e;--panel-alt:#1d242e;
+  --line:#313a46;--line2:#262e38;--rule:#3a4454;--sidebar:#13171e;--chrome:#0f1319;
+  --brand:#2360c4;--brandink:#7fb2f0;--brandtint:#1c2738;--onbrand:#fff;
+  --success:#5fcf94;--successtint:#16271d;--warn:#d6a743;--warntint:#2a2310;--error:#e06a5e;--errortint:#2a1714;
+}
+@media(min-width:480px){:root{--base-h:27px;--base-b:15.5px;}}
+@media(min-width:768px){:root{--base-h:29px;--base-b:16px;--base-l:12.5px;}}
+@media(min-width:1024px){:root{--base-h:31px;--base-b:16.5px;--base-l:13px;}}
+@media(min-width:1280px){:root{--base-h:32px;--base-b:17px;--base-l:13px;}}
+@media(min-width:1440px){:root{--base-h:34px;--base-b:17px;--base-l:13.5px;}}
+@media(min-width:1920px){:root{--base-h:38px;--base-b:18px;--base-l:14px;}}
+*{box-sizing:border-box;}
+.ns-root{font-family:var(--font-ui);color:var(--ink);background:var(--bg);min-height:100dvh;font-size:var(--t-body);line-height:1.5;-webkit-font-smoothing:antialiased;}
+.ns-root *::-webkit-scrollbar{width:10px;height:10px;}
+.ns-root *::-webkit-scrollbar-thumb{background:var(--line);border:2px solid var(--bg);}
+.ns-root *::-webkit-scrollbar-track{background:transparent;}
+:where(.ns-root input,.ns-root select,.ns-root textarea):focus-visible{outline:2px solid var(--brand);outline-offset:-1px;}
+.ns-root button{font-family:inherit;cursor:pointer;}
+.ns-root input,.ns-root select,.ns-root textarea{font-family:inherit;font-size:var(--t-body);color:var(--ink);}
+@keyframes ns-fade{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:none;}}
+@keyframes ns-scrim{from{opacity:0;}to{opacity:1;}}
+@keyframes ns-slide{from{transform:translateX(100%);}to{transform:none;}}
+@keyframes ns-spin{to{transform:rotate(360deg);}}
+@keyframes ns-shimmer{0%,100%{opacity:.45;}50%{opacity:.9;}}
+@keyframes ns-toast{from{opacity:0;transform:translate(-50%,14px);}to{opacity:1;transform:translate(-50%,0);}}
+.ns-shell{display:flex;min-height:100dvh;}
+.ns-side{display:none;}
+.ns-main{flex:1;min-width:0;}
+.ns-hamb{display:inline-flex;}
+@media(min-width:920px){
+  .ns-side{display:flex;position:sticky;top:0;height:100dvh;}
+  .ns-hamb{display:none;}
+  .ns-drawer-scrim{display:none!important;}
+}
+.ns-fade{animation:ns-fade var(--dur-base) var(--ease);}
+.dg-preview{display:block;}
+.ns-hide-sm{display:none;}
+@media(min-width:768px){.ns-hide-sm{display:table-cell;}}
+.ns-grid2{display:grid;grid-template-columns:1fr;gap:var(--space-4);}
+@media(min-width:900px){.ns-grid2{grid-template-columns:1fr 1fr;}}
+.ns-grid3{display:grid;grid-template-columns:1fr;gap:var(--space-4);}
+@media(min-width:640px){.ns-grid3{grid-template-columns:1fr 1fr;}}
+@media(min-width:1100px){.ns-grid3{grid-template-columns:1fr 1fr 1fr;}}
+.ns-wizgrid{display:grid;grid-template-columns:1fr;gap:var(--space-3);}
+@media(min-width:760px){.ns-wizgrid{grid-template-columns:1fr 1fr;}}
+@media(min-width:1200px){.ns-wizgrid{grid-template-columns:1fr 1fr 1fr;}}
+/* transfer list (available / controls / members) — stacks on phones */
+.ns-xfer{display:grid;grid-template-columns:1fr;gap:12px;align-items:stretch;}
+.ns-xfer-mid{display:flex;flex-direction:row;justify-content:center;gap:8px;}
+@media(min-width:620px){.ns-xfer{grid-template-columns:1fr auto 1fr;}.ns-xfer-mid{flex-direction:column;}}
+/* two-column form / picker panes — single column on phones */
+.ns-formgrid{display:grid;grid-template-columns:1fr;gap:20px 24px;align-items:start;}
+@media(min-width:720px){.ns-formgrid{grid-template-columns:1fr 1fr;}}
+.ns-panes2{display:grid;grid-template-columns:1fr;gap:12px;align-items:start;}
+@media(min-width:600px){.ns-panes2{grid-template-columns:1fr 1fr;}}
+/* responsive padding for wide form bodies */
+.ns-formbody{padding:18px;}
+@media(min-width:720px){.ns-formbody{padding:26px 28px;}}
+@media(prefers-reduced-motion:reduce){.ns-root *{animation-duration:.01ms!important;transition-duration:.01ms!important;}}
+</style>
+</helmet>
+
+<div class="ns-root" data-theme="{{ theme }}" style="{{ rootStyle }}">
+<div class="ns-shell">
+
+  <sc-if value="{{ navOpen }}" hint-placeholder-val="{{ false }}">
+    <div class="ns-drawer-scrim" onClick="{{ closeNav }}" style="position:fixed;inset:0;background:rgba(8,10,14,.5);z-index:40;animation:ns-scrim var(--dur-fast) var(--ease);"></div>
+  </sc-if>
+
+  <aside class="ns-side" style="width:var(--sidebar-w);flex-direction:column;background:var(--sidebar);border-right:1px solid var(--line);z-index:50;">
+    <dc-import name="SideNav" nav="{{ nav }}" mode="{{ mode }}" theme="{{ theme }}" set-mode="{{ setMode }}" toggle-theme="{{ toggleTheme }}" hint-size="100%,100%"></dc-import>
+  </aside>
+
+  <!-- mobile drawer -->
+  <sc-if value="{{ navOpen }}" hint-placeholder-val="{{ false }}">
+    <aside style="position:fixed;top:0;left:0;height:100dvh;width:250px;max-width:84vw;background:var(--sidebar);border-right:1px solid var(--line);z-index:50;display:flex;flex-direction:column;animation:ns-slide var(--dur-base) var(--ease);">
+      <dc-import name="SideNav" nav="{{ nav }}" mode="{{ mode }}" theme="{{ theme }}" set-mode="{{ setMode }}" toggle-theme="{{ toggleTheme }}" hint-size="100%,100%"></dc-import>
+    </aside>
+  </sc-if>
+
+  <main class="ns-main">
+    <!-- top bar -->
+    <header style="position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:var(--space-3);height:56px;padding:0 var(--space-5);background:var(--surface);border-bottom:1px solid var(--line);">
+      <button class="ns-hamb" onClick="{{ openNav }}" aria-label="Open menu" style="width:40px;height:40px;align-items:center;justify-content:center;background:transparent;border:1px solid var(--line);color:var(--ink);font-size:16px;">
+        <i class="fa-solid fa-bars"></i>
+      </button>
+      <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+        <div style="width:26px;height:26px;background:var(--chrome);color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;flex:none;"><i class="fa-solid fa-diagram-project"></i></div>
+        <div style="font:600 var(--m-sm) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ crumb }}</div>
+      </div>
+      <div style="flex:1;"></div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;" class="ns-hide-sm">WARD 7B · GENERAL MEDICINE</span>
+        <button onClick="{{ toggleTheme }}" aria-label="Toggle theme" style="width:40px;height:40px;display:inline-flex;align-items:center;justify-content:center;background:transparent;border:1px solid var(--line);color:var(--ink);"><i class="{{ themeIcon }}"></i></button>
+      </div>
+    </header>
+
+    <div style="padding:var(--space-6) var(--space-5) 72px;">
+    <div style="max-width:1240px;margin:0 auto;">
+
+      <sc-if value="{{ isHome }}" hint-placeholder-val="{{ true }}">
+        <dc-import name="ScreenHome" vals="{{ homeVals }}" hint-size="100%,600px"></dc-import>
+      </sc-if>
+      <sc-if value="{{ isDates }}" hint-placeholder-val="{{ false }}">
+        <dc-import name="ScreenDates" vals="{{ datesVals }}" hint-size="100%,600px"></dc-import>
+      </sc-if>
+      <sc-if value="{{ isStaff }}" hint-placeholder-val="{{ false }}">
+        <dc-import name="ScreenStaff" vals="{{ staffVals }}" hint-size="100%,600px"></dc-import>
+      </sc-if>
+      <sc-if value="{{ isShifts }}" hint-placeholder-val="{{ false }}">
+        <dc-import name="ScreenShifts" vals="{{ shiftsVals }}" hint-size="100%,600px"></dc-import>
+      </sc-if>
+      <sc-if value="{{ isRules }}" hint-placeholder-val="{{ false }}">
+        <dc-import name="ScreenRules" vals="{{ rulesVals }}" hint-size="100%,600px"></dc-import>
+      </sc-if>
+      <sc-if value="{{ isRequests }}" hint-placeholder-val="{{ false }}">
+        <dc-import name="ScreenRequests" vals="{{ requestsVals }}" hint-size="100%,600px"></dc-import>
+      </sc-if>
+      <sc-if value="{{ isGenerate }}" hint-placeholder-val="{{ false }}">
+        <dc-import name="ScreenGenerate" vals="{{ generateVals }}" hint-size="100%,600px"></dc-import>
+      </sc-if>
+      <sc-if value="{{ isSchedule }}" hint-placeholder-val="{{ false }}">
+        <dc-import name="ScreenSchedule" vals="{{ scheduleVals }}" hint-size="100%,600px"></dc-import>
+      </sc-if>
+      <sc-if value="{{ isAppendix }}" hint-placeholder-val="{{ false }}">
+        <dc-import name="ScreenAppendixAI" vals="{{ appendixVals }}" hint-size="100%,600px"></dc-import>
+      </sc-if>
+      <sc-if value="{{ isRequirements }}" hint-placeholder-val="{{ false }}">
+        <dc-import name="ScreenCards" kind="requirements" editor="{{ cardEditor }}" hint-size="100%,600px"></dc-import>
+      </sc-if>
+      <sc-if value="{{ isSuccessions }}" hint-placeholder-val="{{ false }}">
+        <dc-import name="ScreenCards" kind="successions" editor="{{ cardEditor }}" hint-size="100%,600px"></dc-import>
+      </sc-if>
+      <sc-if value="{{ isCounts }}" hint-placeholder-val="{{ false }}">
+        <dc-import name="ScreenCards" kind="counts" editor="{{ cardEditor }}" hint-size="100%,600px"></dc-import>
+      </sc-if>
+      <sc-if value="{{ isAffinities }}" hint-placeholder-val="{{ false }}">
+        <dc-import name="ScreenCards" kind="affinities" editor="{{ cardEditor }}" hint-size="100%,600px"></dc-import>
+      </sc-if>
+      <sc-if value="{{ isCoverings }}" hint-placeholder-val="{{ false }}">
+        <dc-import name="ScreenCards" kind="coverings" editor="{{ cardEditor }}" hint-size="100%,600px"></dc-import>
+      </sc-if>
+      <sc-if value="{{ isExport }}" hint-placeholder-val="{{ false }}">
+        <dc-import name="ScreenExport" vals="{{ exportVals }}" hint-size="100%,600px"></dc-import>
+      </sc-if>
+      <sc-if value="{{ isSaveload }}" hint-placeholder-val="{{ false }}">
+        <dc-import name="ScreenSaveLoad" go="{{ setScreen }}" on-new="{{ newSchedule }}" hint-size="100%,600px"></dc-import>
+      </sc-if>
+
+    </div>
+    </div>
+  </main>
+
+  <sc-if value="{{ toastShown }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ dismissToast }}" role="status" style="position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:80;display:flex;align-items:center;gap:11px;background:var(--ink);color:var(--on-ink);border-left:3px solid var(--success);padding:13px 18px 13px 15px;box-shadow:var(--shadow-side);animation:ns-toast var(--dur-base) var(--ease);cursor:pointer;max-width:92vw;">
+      <span style="font-family:var(--font-ui);font-weight:800;font-size:15px;line-height:1;color:var(--on-ink);flex:none;">✓</span>
+      <span style="font:600 var(--t-sm) var(--font-ui);">{{ toast }}</span>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ confirmShown }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ cancelConfirm }}" style="position:fixed;inset:0;background:rgba(8,10,14,.5);z-index:90;display:flex;align-items:center;justify-content:center;padding:20px;animation:ns-scrim var(--dur-fast) var(--ease);">
+      <div onClick="{{ stopProp }}" style="background:var(--surface);border:1px solid var(--line);max-width:460px;width:100%;box-shadow:var(--shadow-dialog);">
+        <div style="padding:18px 20px;border-bottom:1px solid var(--line2);display:flex;align-items:center;gap:12px;">
+          <div style="width:34px;height:34px;background:var(--errortint);color:var(--error);display:flex;align-items:center;justify-content:center;flex:none;"><i class="fa-solid fa-triangle-exclamation"></i></div>
+          <div style="font:800 var(--t-cardhead) var(--font-display);letter-spacing:-.01em;">{{ confirmTitle }}</div>
+        </div>
+        <div style="padding:18px 20px;">
+          <sc-if value="{{ confirmHasLines }}" hint-placeholder-val="{{ true }}">
+            <div style="font-size:var(--t-sm);color:var(--ink2);margin-bottom:11px;">This is used elsewhere. Deleting it will also update:</div>
+            <ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;">
+              <sc-for list="{{ confirmLines }}" as="ln" hint-placeholder-count="2"><li style="font-size:var(--t-sm);color:var(--ink);">{{ ln }}</li></sc-for>
+            </ul>
+          </sc-if>
+          <sc-if value="{{ confirmNoLines }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:var(--t-sm);color:var(--ink2);">This isn’t referenced by any rule. It will simply be removed.</div>
+          </sc-if>
+        </div>
+        <div style="padding:14px 20px;border-top:1px solid var(--line2);display:flex;justify-content:flex-end;gap:10px;">
+          <button onClick="{{ cancelConfirm }}" style="height:40px;padding:0 16px;background:transparent;border:1px solid var(--line);font:600 var(--t-body) var(--font-ui);" style-hover="background:var(--panel)">Cancel</button>
+          <button onClick="{{ confirmDeleteNow }}" style="height:40px;padding:0 18px;background:var(--error);color:#fff;border:none;font:700 var(--t-body) var(--font-ui);display:inline-flex;align-items:center;gap:8px;" style-hover="filter:brightness(.94)"><i class="fa-solid fa-trash" style="font-size:12px;"></i> Delete &amp; update rules</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1280,&quot;height&quot;:860},&quot;density&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;Spacious&quot;,&quot;Comfortable&quot;,&quot;Compact&quot;],&quot;default&quot;:&quot;Comfortable&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Feel&quot;},&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;options&quot;:[&quot;#2360c4&quot;,&quot;#0e7490&quot;,&quot;#b0357a&quot;,&quot;#3f4a63&quot;],&quot;default&quot;:&quot;#2360c4&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Feel&quot;},&quot;appearance&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;Light&quot;,&quot;Dark&quot;],&quot;default&quot;:&quot;Light&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Feel&quot;}}">
+class Component extends DCLogic {
+  state = {
+    theme:'light', mode:'guided', navOpen:false,
+    screen:'home', wizardStep:1,
+    staff:null, editStaff:null, staffDraft:null,
+    staffGroups:null, editGroup:null, groupDraft:null,
+    shifts:null, editShift:null, shiftDraft:null,
+    shiftGroups:null, editSGroup:null, sgroupDraft:null,
+    exportSecs:null, editExport:null, exportDraft:'',
+    reqData:null, reqKind:'leave', reqShift:'AM',
+    rangeStart:'2026-02-01', rangeEnd:'2026-02-28', calMonth:'2026-02', importHolidays:true,
+    dateGroups:null, editDGroup:null, dgroupDraft:null,
+    rules:null, // seeded in constructor
+    rulesAdmin:false, guidedShortcuts:[],
+    // optimize
+    runState:'idle', progress:0, // idle|running|infeasible|feasible
+    // llm
+    aiOpen:false, chat:null, aiThinking:false, appliedFixes:[],
+    llmProvider:'anthropic', llmModel:'claude-sonnet-4-5', llmKey:'', llmTested:false,
+    // schedule / manual adjust
+    schedule:null, selectedCell:null, undoStack:[], scheduleView:'grid', scheduleLoading:false,
+    toast:null, confirmDelete:null,
+  };
+  constructor(props){
+    super(props);
+    if(props && props.appearance==='Dark') this.state.theme='dark';
+    this.state.rules = this.RULES.map(r=>({...r}));
+    this.state.chat = [
+      {who:'ai', text:"I looked at your ward. The roster can't be built yet because Chinese New Year weekend (Sat 14 – Sun 15 Feb) needs 3 night nurses, but only 2 are available once approved leave and the \u201cnight \u2192 rest\u201d rule are applied. Here are three ways to make it work \u2014 apply any, or ask me anything."},
+    ];
+    this._cardUid=1; this._shortcutSeq=1;
+    // F2 — SERIALIZATION BOUNDARY (decide at implementation): several fields on entities/cards
+    // below are UI-only and must be stripped/resolved before the scenario YAML is generated for
+    // Save/Copy/download or POST /optimize:
+    //   • `_k` (staff/groups/shifts) and `uid` (cards) — client React keys, never serialize.
+    //   • card `disabled` — a guided-Rules on/off toggle with no backend field. Decide: does a
+    //     disabled rule get OMITTED from the payload, or is the toggle a pure UI convenience?
+    //   • card `unit` / `tag` / `applied` — UI markers (see the contract SERIALIZATION note in
+    //     ScreenCards.saveContract). `tag:'contracted_hours'` → backend `hoursContract`.
+    //   • `guidedShortcuts` — a UI projection layer over real records; not a backend concept.
+    this.state.cardsByKind = {};
+    ['requirements','successions','counts','affinities','coverings'].forEach(k=>{
+      this.state.cardsByKind[k] = (this.CARD_DATA[k].cards||[]).map(c=>({uid:'cu'+(this._cardUid++), desc:c.desc, weight:c.weight, applied:c.applied, coef:c.coef, unit:c.unit, tag:c.tag, disabled:c.disabled, fields:c.fields.map(f=>({...f}))}));
+    });
+    this.state.staff=this.PEOPLE.map((p,i)=>({...p,_k:'p'+i})); this._staffSeq=this.PEOPLE.length;
+    // seed import-created editable date groups (WORKDAY/NON-WORKDAY/PH) with date-key membership across the whole range
+    (()=>{
+      const rd=this.rangeDates();
+      const work=rd.filter(x=>!x.weekend && !x.holiday).map(x=>x.key);
+      const nonwork=rd.filter(x=>x.weekend || x.holiday).map(x=>x.key);
+      const ph=rd.filter(x=>x.holiday).map(x=>x.key);
+      this.state.dateGroups=[{_k:'dg0',id:'WORKDAY',members:work},{_k:'dg1',id:'NON-WORKDAY',members:nonwork},{_k:'dg2',id:'PH',members:ph}];
+      this._dgroupSeq=3;
+    })();
+    this.state.staffGroups=this.PEOPLE_GROUPS.map((g,i)=>({_k:'g'+i, id:g.id, members:[...g.members]})); this._groupSeq=this.PEOPLE_GROUPS.length;
+    this.state.shifts=this.SHIFTTYPES.map((sh,i)=>({...sh,_k:'sh'+i})); this._shiftSeq=this.SHIFTTYPES.length;
+    this.state.shiftGroups=this.SHIFT_GROUPS.map((g,i)=>({_k:'sg'+i, id:g.id, members:[...g.members]})); this._sgroupSeq=this.SHIFT_GROUPS.length;
+    this.state.reqData=JSON.parse(JSON.stringify(this.REQUESTS));
+    this.state.exportSecs=this.EXPORT_SECS.map((sec,si)=>({...sec, rows:sec.rows.map((r,ri)=>({...r,_k:'ex'+si+'_'+ri}))})); this._exSeq=1000;
+    this.state.schedule=this._buildRoster(this.state);
+  }
+  cardAdd = (kind,card)=> this.setState(s=>({cardsByKind:{...s.cardsByKind,[kind]:[...s.cardsByKind[kind], {...card, uid:card.uid||('cu'+(this._cardUid++))}]}}));
+  cardUpdate = (kind,i,card)=> this.setState(s=>({cardsByKind:{...s.cardsByKind,[kind]:s.cardsByKind[kind].map((c,ix)=>ix===i?card:c)}}));
+  cardDelete = (kind,i)=> this.setState(s=>({cardsByKind:{...s.cardsByKind,[kind]:s.cardsByKind[kind].filter((_,ix)=>ix!==i)}}));
+  cardSetDisabled = (kind,i,val)=> this.setState(s=>({cardsByKind:{...s.cardsByKind,[kind]:s.cardsByKind[kind].map((c,ix)=>ix===i?{...c,disabled:val}:c)}}));
+
+  // ---- static-ish mock data ----
+  SG_HOLIDAYS = {
+    '2026-01-01':"New Year's Day", '2026-02-17':'Chinese New Year', '2026-02-18':'Chinese New Year',
+    '2026-04-03':'Good Friday', '2026-05-01':'Labour Day', '2026-05-31':'Vesak Day',
+    '2026-08-09':'National Day', '2026-12-25':'Christmas Day',
+  };
+  NAV = [
+    {key:'home', label:'Home', icon:'fa-house', group:'g0'},
+    {key:'dates', label:'Dates', icon:'fa-calendar-days', num:'1', group:'setup'},
+    {key:'staff', label:'Staff', icon:'fa-user-nurse', num:'2', group:'setup'},
+    {key:'shifts', label:'Shifts', icon:'fa-layer-group', num:'3', group:'setup'},
+    {key:'rules', label:'Rules', icon:'fa-list-check', num:'4', group:'setup'},
+    {key:'requests', label:'Requests & Leave', icon:'fa-table-cells', num:'5', group:'setup'},
+    {key:'requirements', label:'Staffing Requirements', icon:'fa-clipboard-list', group:'con'},
+    {key:'successions', label:'Shift Successions', icon:'fa-arrow-right-long', group:'con'},
+    {key:'counts', label:'Shift Counts', icon:'fa-calculator', group:'con'},
+    {key:'affinities', label:'Affinities', icon:'fa-people-arrows', group:'con'},
+    {key:'coverings', label:'Shift Type Coverings', icon:'fa-user-shield', group:'con'},
+    {key:'export', label:'Export Layout', icon:'fa-table-columns', group:'out'},
+    {key:'generate', label:'Optimize & Export', icon:'fa-wand-magic-sparkles', group:'out'},
+    {key:'schedule', label:'Roster', icon:'fa-calendar-check', group:'out'},
+    {key:'saveload', label:'Save & Load', icon:'fa-floppy-disk', group:'sys'},
+    {key:'appendix', label:'AI Assistant', icon:'fa-robot', group:'appendix'},
+  ];
+  WIZARD = [
+    {step:1, key:'dates', label:'Set the Dates', icon:'fa-calendar-days', desc:'Pick the roster month and mark public holidays.', summary:'Feb 2026 · 28 days', status:'done'},
+    {step:2, key:'staff', label:'Add Your Staff', icon:'fa-user-nurse', desc:'List nurses, mark their seniority, and organise staff groups.', summary:'12 nurses · 5 seniors', status:'done'},
+    {step:3, key:'shifts', label:'Define the Shifts', icon:'fa-layer-group', desc:'Set up your daily shifts — day, evening, night.', summary:'4 shifts · AM / PM / N / LD', status:'done'},
+    {step:4, key:'rules', label:'Choose the Rules', icon:'fa-list-check', desc:'Turn on plain-English staffing rules for the ward.', summary:'Rest, staffing, skill mix & hours', status:'done'},
+    {step:5, key:'requests', label:'Requests & Leave', icon:'fa-table-cells', desc:'Pin paid leave, request off-days, and set shift preferences.', summary:'23 requests entered', status:'current'},
+    {step:6, key:'generate', label:'Generate the Roster', icon:'fa-wand-magic-sparkles', desc:'Build a fair roster that respects every rule.', summary:'Ready when steps are done', status:'todo'},
+  ];
+
+  PEOPLE = [
+    {id:'Aisha Rahman', role:'Senior', tag:'Preceptor', preceptorOf:['Chloe Ng']},
+    {id:'Priya Nair', role:'Senior', tag:'Preceptor', preceptorOf:['Daniel Teo']},
+    {id:'Mei Ling Tan', role:'Senior'},
+    {id:'Kevin Ong', role:'Senior'},
+    {id:'Rohan Das', role:'Senior'},
+    {id:'Siti Nurhaliza', role:'Junior'},
+    {id:'John Lim', role:'Junior'},
+    {id:'Ravi Kumar', role:'Junior'},
+    {id:'Grace Wong', role:'Junior'},
+    {id:'Nurul Huda', role:'Junior'},
+    {id:'Chloe Ng', role:'Preceptee', preceptor:'Aisha Rahman'},
+    {id:'Daniel Teo', role:'Preceptee', preceptor:'Priya Nair'},
+  ];
+  PEOPLE_GROUPS = [
+    {id:'Seniors', members:['Aisha Rahman','Priya Nair','Mei Ling Tan','Kevin Ong','Rohan Das']},
+    {id:'Juniors', members:['Siti Nurhaliza','John Lim','Ravi Kumar','Grace Wong','Nurul Huda']},
+    {id:'Preceptees', members:['Chloe Ng','Daniel Teo']},
+    {id:'Team A', members:['Aisha Rahman','Mei Ling Tan','Siti Nurhaliza','John Lim','Chloe Ng']},
+  ];
+  SHIFTTYPES = [
+    {id:'AM', name:'Morning', time:'07:00 – 15:00', need:4, icon:'fa-sun', auto:false, durationMinutes:480},
+    {id:'PM', name:'Evening', time:'14:00 – 22:00', need:3, icon:'fa-cloud-sun', auto:false, durationMinutes:480},
+    {id:'N', name:'Night', time:'20:00 – 08:30', need:3, icon:'fa-moon', auto:false, durationMinutes:750},
+    {id:'LD', name:'Long day', time:'08:00 – 20:30', need:2, icon:'fa-sun-plant-wilt', auto:false, durationMinutes:750},
+    {id:'OFF', name:'Off / rest day', time:'—', need:0, icon:'fa-mug-hot', auto:true, reserved:true},
+    {id:'LEAVE', name:'Paid leave', time:'credits 8h', need:0, icon:'fa-umbrella-beach', auto:true, reserved:true, credit:480},
+  ];
+  SHIFT_GROUPS = [
+    {id:'Working', members:['AM','PM','N']},
+    {id:'Day', members:['AM','PM']},
+    {id:'Night', members:['N']},
+  ];
+  RULES = [
+    {id:'rest_after_night', cat:'Rest & recovery', title:'Night shift must be followed by rest', desc:'A nurse who works a night is not scheduled the next morning or evening.', on:true, cfg:'N → OFF', maps:'Shift type succession'},
+    {id:'min_rest_week', cat:'Rest & recovery', title:'At least 2 rest days every week', desc:'Guarantees weekly recovery time for each nurse.', on:true, cfg:'≥ 2 / week', maps:'Shift count', params:[{key:'rest',label:'Rest days per week',type:'number',value:2,unit:'/ week',min:0,max:7}], cfgTpl:'≥ {rest} / week'},
+    {id:'avoid_nights', cat:'Rest & recovery', title:'Avoid too many nights for one nurse', desc:'Spreads night shifts so no one carries an unfair load.', on:false, cfg:'≤ 8 / month', maps:'Shift count', params:[{key:'cap',label:'Max nights per month',type:'number',value:8,unit:'/ month',min:0,max:31}], cfgTpl:'≤ {cap} / month'},
+    {id:'min_per_shift', cat:'Staffing levels', title:'Each shift must have enough nurses', desc:'Sets the minimum headcount required to run each shift safely.', on:true, cfg:'AM 4 · PM 3 · N 3', maps:'Shift type requirement', reqBound:true, adjustNote:'These minimums are the shift type requirements — the same values shown on the Shifts screen and under Staffing requirements. Editing here updates that one shared rule.'},
+    {id:'one_per_day', cat:'Staffing levels', title:'A nurse works at most one shift per day', desc:'Prevents double-booking on the same calendar day.', on:true, cfg:'Built in', maps:'At most one / day', locked:true},
+    {id:'preceptee_day', cat:'Skill mix', title:'Preceptees work day shifts only', desc:'Students are limited to day shifts (office hours) — never evenings, nights, or long days.', on:true, cfg:'Day shifts only', maps:'Shift count'},
+    {id:'preceptee_pair', cat:'Skill mix', title:'Preceptees covered by their preceptor', desc:'Whenever a student works a shift, one of their preceptors must be on the same shift.', on:true, cfg:'Same shift', maps:'Shift type covering'},
+    {id:'fair_weekend', cat:'Fairness', title:'Share weekend shifts fairly', desc:'Distributes weekend and holiday duty evenly across the team.', on:false, cfg:'Even spread', maps:'Shift count'},
+    {id:'fair_load', cat:'Fairness', title:'Keep total shifts close to the average', desc:'Balances the overall number of shifts each nurse works.', on:false, cfg:'± 2 shifts', maps:'Shift count'},
+    {id:'contracted_hours', cat:'Contracted hours', title:'Meet each nurse’s monthly contracted hours', desc:'Worked shift lengths plus 8h for every paid-leave day must reach the monthly target; rest days count as 0h.', on:true, cfg:'160h / month', maps:'Shift count', params:[{key:'hours',label:'Monthly contracted hours',type:'number',value:160,unit:'h / month',min:0,max:400}], cfgTpl:'{hours}h / month'},
+  ];
+  AIFIXES = [
+    {id:'f1', icon:'fa-users-slash', title:'Lower night staffing on CNY weekend', detail:'Reduce required night nurses from 3 to 2 on Sat 14 & Sun 15 Feb only. Keeps the rest of the month at 3.', impact:'Resolves the shortage · affects 2 nights', tone:'brand'},
+    {id:'f2', icon:'fa-calendar-plus', title:'Allow one 6th consecutive day',  detail:'Raise "max days in a row" from 5 to 6 for the CNY week for senior nurses, so one senior can cover the gap.', impact:'Frees 1 senior · Rohan Das eligible', tone:'brand'},
+    {id:'f3', icon:'fa-user-check', title:'Ask a flexible nurse to cover', detail:'Grace Wong requested Sat 14 off but marked it "flexible". Convert to a soft preference so she can be scheduled if needed.', impact:'Adds 1 available nurse · soft penalty', tone:'warn'},
+  ];
+  DAYS = Array.from({length:28}, (_,i)=>{
+    const d=i+1; const key=`2026-02-${String(d).padStart(2,'0')}`;
+    const dow=new Date(key+'T00:00:00Z').getUTCDay();
+    return {d, key, dow, weekend:(dow===0||dow===6), holiday:!!this.SG_HOLIDAYS[key], label:['Su','Mo','Tu','We','Th','Fr','Sa'][dow]};
+  });
+
+  REQUESTS = {
+    'Grace Wong':{11:{kind:'leave'},12:{kind:'off'},13:{kind:'off'}},
+    'John Lim':{3:{kind:'want',shift:'AM'},4:{kind:'want',shift:'AM'}},
+    'Siti Nurhaliza':{8:{kind:'want',shift:'PM'}},
+    'Mei Ling Tan':{18:{kind:'avoid',shift:'N'},19:{kind:'avoid',shift:'N'},21:{kind:'leave'}},
+    'Kevin Ong':{15:{kind:'leave'},16:{kind:'leave'}},
+    'Ravi Kumar':{5:{kind:'want',shift:'N'}},
+    'Nurul Huda':{21:{kind:'avoid',shift:'AM'}},
+    'Chloe Ng':{1:{kind:'leave'}},
+    'Aisha Rahman':{24:{kind:'want',shift:'AM'}},
+    'Daniel Teo':{13:{kind:'leave'}},
+    'Priya Nair':{10:{kind:'leave'}},
+    'Rohan Das':{7:{kind:'leave'},26:{kind:'avoid',shift:'AM'}},
+  };
+  CARD_DATA = {
+    requirements:{
+      eyebrow:'CONSTRAINT · REQUIREMENTS', title:'Staffing Requirements', addLabel:'Add requirement',
+      subtitle:'How many nurses each shift needs, and who is qualified. This is the precise form of the "enough nurses" and "skill mix" rules.',
+      empty:'No requirements defined yet.',
+      cards:[
+        {desc:'Morning cover', weight:'−30', fields:[{k:'Shift type',v:'AM'},{k:'Required',v:'4'},{k:'Preferred',v:'5'},{k:'Qualified',v:'ALL'},{k:'Dates',v:'ALL'}]},
+        {desc:'Evening cover', weight:null, fields:[{k:'Shift type',v:'PM'},{k:'Required',v:'3'},{k:'Preferred',v:''},{k:'Qualified',v:'ALL'},{k:'Dates',v:'ALL'}]},
+        {desc:'Night cover with a senior', weight:null, fields:[{k:'Shift type',v:'N'},{k:'Required',v:'3'},{k:'Preferred',v:''},{k:'Qualified',v:'Seniors'},{k:'Dates',v:'ALL'}]},
+        {desc:'Long day cover', weight:null, fields:[{k:'Shift type',v:'LD'},{k:'Required',v:'2'},{k:'Preferred',v:''},{k:'Qualified',v:'ALL'},{k:'Dates',v:'ALL'}]},
+        {desc:'Reduced night cover · CNY weekend', weight:null, applied:true, fields:[{k:'Shift type',v:'N'},{k:'Required',v:'2'},{k:'Preferred',v:''},{k:'Qualified',v:'Seniors'},{k:'Dates',v:'14, 15'}]},
+      ],
+    },
+    successions:{
+      eyebrow:'CONSTRAINT · SUCCESSIONS', title:'Shift Successions', addLabel:'Add succession',
+      subtitle:'Sequences of shifts to encourage or forbid across consecutive days. Negative infinity forbids the pattern outright.',
+      empty:'No successions defined yet.',
+      cards:[
+        {desc:'No morning after a night', weight:'−∞', tag:'rest_after_night', fields:[{k:'People',v:'ALL'},{k:'Pattern',v:'N → AM'},{k:'Dates',v:'ALL'}]},
+        {desc:'No evening after a night', weight:'−∞', tag:'rest_after_night', fields:[{k:'People',v:'ALL'},{k:'Pattern',v:'N → PM'},{k:'Dates',v:'ALL'}]},
+        {desc:'Discourage evening → morning', weight:'−50', fields:[{k:'People',v:'ALL'},{k:'Pattern',v:'PM → AM'},{k:'Dates',v:'ALL'}]},
+      ],
+    },
+    counts:{
+      eyebrow:'CONSTRAINT · SHIFT COUNTS', title:'Shift Counts', addLabel:'Add shift count',
+      subtitle:'Targets for how many of a shift type each person works over a set of dates — including a monthly contracted-hours target, where each worked shift and paid-leave day contributes its coefficient. Positive weight encourages, negative discourages.',
+      empty:'No shift counts defined yet.',
+      note:{tone:'success', text:'The 160h contract counts every worked shift at its real length plus 8h per paid-leave day; weekly rest (OFF) is left out of the count, so it adds 0h.'},
+      cards:[
+        {desc:'Monthly contracted hours — exactly 160h', weight:'+∞', unit:'half', tag:'contracted_hours', policy:'exact', targetHalf:'320', minHalf:'300', maxHalf:'340', coef:{AM:16,PM:16,N:25,LD:25,LEAVE:16}, fields:[{k:'People',v:'ALL'},{k:'Count shift types',v:'AM, PM, N, LD, LEAVE'},{k:'Dates',v:'ALL'},{k:'Expression',v:'x = 320'}]},
+        {desc:'At least 2 rest days each week', weight:'−∞', tag:'min_rest_week', fields:[{k:'People',v:'ALL'},{k:'Count shift types',v:'OFF'},{k:'Dates',v:'Each week'},{k:'Expression',v:'x ≥ 2'}]},
+        {desc:'Keep nights fair per nurse', weight:'−20', tag:'avoid_nights', fields:[{k:'People',v:'ALL'},{k:'Count shift types',v:'N'},{k:'Dates',v:'ALL'},{k:'Expression',v:'x ≤ 8'}]},
+        {desc:'Balance total shifts across the team', weight:'−5', tag:'fair_load', fields:[{k:'People',v:'ALL'},{k:'Count shift types',v:'Working'},{k:'Dates',v:'ALL'},{k:'Expression',v:'|x − 20|²'}]},
+        {desc:'Share weekend & holiday shifts fairly', weight:'−10', tag:'fair_weekend', fields:[{k:'People',v:'ALL'},{k:'Count shift types',v:'Working'},{k:'Dates',v:'WEEKEND'},{k:'Expression',v:'|x − 2|²'}]},
+        {desc:'Preceptees work day shifts only', weight:'−∞', tag:'preceptee_day', fields:[{k:'People',v:'Preceptees'},{k:'Count shift types',v:'PM, N, LD'},{k:'Dates',v:'ALL'},{k:'Expression',v:'x = 0'}]},
+      ],
+    },
+    affinities:{
+      eyebrow:'CONSTRAINT · AFFINITIES', title:'Shift Affinities', addLabel:'Add affinity',
+      subtitle:'Encourage or discourage groups of people working the same shift together. For enforced preceptor supervision, use Shift type coverings instead.',
+      empty:'No affinities defined yet.',
+      cards:[
+        {desc:'Keep Team A together on weekends', weight:'+30', fields:[{k:'People 1',v:'Team A'},{k:'People 2',v:'Team A'},{k:'Shift types',v:'Working'},{k:'Dates',v:'WEEKEND'}]},
+      ],
+    },
+    coverings:{
+      eyebrow:'CONSTRAINT · SHIFT TYPE COVERINGS', title:'Shift Type Coverings', addLabel:'Add shift type covering',
+      subtitle:'A separate hard constraint: whenever a preceptee works a chosen shift type, at least one of their preceptors must be on the same shift. Distinct from affinities, which only encourage people to work together.',
+      empty:'No covering rules yet.',
+      note:{tone:'success', text:'Every student has a covering rule tying them to a preceptor — enforced as a hard supervision requirement.'},
+      cards:[
+        {desc:'Chloe must be covered by her preceptor', weight:'1', tag:'preceptee_pair', fields:[{k:'Preceptors',v:'Aisha Rahman'},{k:'Preceptees',v:'Chloe Ng'},{k:'Shift types',v:'Working'},{k:'Dates',v:'(all)'}]},
+        {desc:'Daniel must be covered by his preceptor', weight:'1', tag:'preceptee_pair', fields:[{k:'Preceptors',v:'Priya Nair'},{k:'Preceptees',v:'Daniel Teo'},{k:'Shift types',v:'Working'},{k:'Dates',v:'(all)'}]},
+      ],
+    },
+  };
+  EXPORT_SECS=[
+    {key:'style', title:'Style Rules', icon:'fa-fill-drip', rows:[
+      {tag:'cell', label:'Show requested shift target', meta:'append " [{shift}]" · people ALL · dates ALL'},
+      {tag:'cell', label:'Mark unmet requests', meta:'append " [X]"', swatch:'#c00000'},
+      {tag:'cell', label:'Render leave days as “Leave”', meta:'day-state LEAVE · distinct from a blank / OFF cell', swatch:'#ede9fe'},
+      {tag:'history header', label:'History header band', swatch:'#fefce8'},
+      {tag:'column', label:'Shade weekends', meta:'dates SAT, SUN', swatch:'#dbeafe'},
+      {tag:'column', label:'Shade non-work days', meta:'dates NON-WORKDAY', swatch:'#dcfce7'},
+    ]},
+    {key:'cols', title:'Extra Columns', icon:'fa-table-columns', rows:[
+      {tag:'count', label:'OFF (Total)', meta:'count OFF over ALL dates'},
+      {tag:'count', label:'OFF (Weekend)', meta:'count OFF over WEEKEND'},
+      {tag:'count', label:'Leave (Total)', meta:'count LEAVE over ALL dates'},
+      {tag:'count', label:'N Count', meta:'count N over ALL dates'},
+    ]},
+    {key:'rows', title:'Extra Rows', icon:'fa-table-cells-row-lock', rows:[
+      {tag:'count', label:'AM Count', meta:'count AM over ALL people'},
+      {tag:'count', label:'PM Count', meta:'count PM over ALL people'},
+      {tag:'count', label:'N Count', meta:'count N over ALL people'},
+    ]},
+  ];
+  // Live roster generation from editable state (staff, worked shift types + their requirement needs,
+  // the date range, and leave/off requests). Greedy but plausible: honors leave pins, avoids a shift
+  // after a night, keeps preceptees on day shifts / weekdays, and rotates for a fair spread.
+  rosterDays(){
+    const L=['Su','Mo','Tu','We','Th','Fr','Sa'];
+    return this.rangeDates().map(x=>{ const dow=new Date(x.key+'T00:00:00Z').getUTCDay(); return {d:x.d, key:x.key, weekend:x.weekend, holiday:!!x.holiday, dow, label:L[dow]}; });
+  }
+  _buildRoster(state){
+    const people=(state.staff||[]).map(p=>({id:p.id, role:p.role}));
+    const days=this.rosterDays();
+    const worked=(state.shifts||[]).filter(sh=>!sh.auto);
+    const reqs=(state.cardsByKind&&state.cardsByKind.requirements)||[];
+    const needs={}; worked.forEach(sh=>{ const n=this._shiftNeed(reqs,sh.id); needs[sh.id]=(n!=null?n:(sh.need!=null?sh.need:0)); });
+    const dayShiftId=(worked.find(s=>s.id==='AM')||worked[0]||{}).id;
+    const nightId=(worked.find(s=>s.id==='N'||/night/i.test(s.name||''))||{}).id;
+    const reqData=state.reqData||{};
+    const order=people.map(p=>p.id);
+    const sched={}; people.forEach(p=>{ sched[p.id]=days.map(()=>'OFF'); });
+    days.forEach((day,di)=>{
+      const assigned=new Set();
+      people.forEach(p=>{ const r=(reqData[p.id]||{})[di+1]; if(r&&r.kind==='leave'){ sched[p.id][di]='LV'; assigned.add(p.id); } });
+      worked.forEach((sh,si)=>{
+        const need=needs[sh.id]||0; let filled=0;
+        const rot=order.length?((di*2+si)%order.length):0;
+        for(let k=0;k<order.length && filled<need;k++){
+          const pid=order[(rot+k)%order.length];
+          if(assigned.has(pid)) continue;
+          const person=people.find(p=>p.id===pid);
+          if(person.role==='Preceptee' && sh.id!==dayShiftId) continue;
+          if(person.role==='Preceptee' && day.weekend) continue;
+          if(nightId && (sh.id==='AM'||sh.id==='PM') && di>0 && sched[pid][di-1]===nightId) continue;
+          const r=(reqData[pid]||{})[di+1]; if(r&&r.kind==='off') continue;
+          sched[pid][di]=sh.id; assigned.add(pid); filled++;
+        }
+      });
+    });
+    return sched;
+  }
+  buildSchedule(){
+    // 12-slot rotation guarantees AM4 / PM3 / N3 / OFF2 each day, and never N->AM/PM.
+    const P=['AM','AM','AM','AM','PM','PM','PM','N','N','N','OFF','OFF'];
+    const sched={};
+    this.PEOPLE.forEach((p,pi)=>{
+      sched[p.id]=this.DAYS.map((day,di)=>{
+        let s=P[(pi+di)%12];
+        if(p.role==='Preceptee'){ s=(day.weekend? 'OFF' : (s==='OFF'?'OFF':'AM')); } // students: weekday days only
+        return s;
+      });
+    });
+    // Inject pinned paid leave (LEAVE): intended leave is always honored (INV3). Coverage is
+    // backfilled from a resting nurse so the ward stays staffed (INV2) and the demo roster stays clean.
+    Object.entries(this.REQUESTS).forEach(([person,pr])=>{
+      Object.entries(pr).forEach(([dn,r])=>{
+        if(!r || r.kind!=='leave') return;
+        const di=Number(dn)-1; const arr=sched[person]; if(!arr||di<0||di>=arr.length) return;
+        const prev=arr[di];
+        if(prev!=='OFF' && prev!=='LV'){
+          const bf=this.PEOPLE.find(q=> q.id!==person && sched[q.id] && sched[q.id][di]==='OFF'
+            && (q.role!=='Preceptee' || prev==='AM')
+            && !(prev==='N' && di+1<arr.length && (sched[q.id][di+1]==='AM'||sched[q.id][di+1]==='PM')));
+          if(!bf) return; // can't preserve coverage — leave this pin off the demo roster
+          sched[bf.id][di]=prev;
+        }
+        arr[di]='LV';
+      });
+    });
+    return sched;
+  }
+
+  // ---- handlers ----
+  setScreen = (k)=> {
+    this.setState({screen:k, navOpen:false});
+    // Brief skeleton while the roster surface "loads" its grid.
+    if(k==='schedule'){
+      this.setState({scheduleLoading:true});
+      if(this._schedT) clearTimeout(this._schedT);
+      this._schedT=setTimeout(()=>this.setState({scheduleLoading:false}), 780);
+    }
+  };
+  openNav = ()=> this.setState({navOpen:true});
+  closeNav = ()=> this.setState({navOpen:false});
+  componentDidUpdate(prevProps){
+    if(prevProps && prevProps.appearance!==this.props.appearance){
+      this.setState({theme: this.props.appearance==='Dark'?'dark':'light'});
+    }
+  }
+  toggleTheme = ()=> this.setState(s=>({theme:s.theme==='light'?'dark':'light'}));
+  setMode = (m)=> this.setState(s=>{
+    const advOnly=['requirements','successions','counts','affinities','coverings','export'];
+    const screen=(m==='guided' && advOnly.includes(s.screen)) ? 'home' : s.screen;
+    return {mode:m, screen};
+  });
+  openAdvanced = (screen)=>{ this.setMode('advanced'); this.setScreen(screen||'requirements'); this.showToast('Opened in Advanced mode — switch back anytime with the Guided toggle.'); };
+  setField = (k,v)=> this.setState({[k]:v});
+
+  // ---- date group handlers (calendar day-number membership) ----
+  dgroupAdd=()=>this.setState(s=>{const _k='dg'+(this._dgroupSeq++);return{dateGroups:[...s.dateGroups,{_k,id:'New group',members:[],_new:true}],editDGroup:_k,dgroupDraft:{id:'New group',members:[]}};});
+  dgroupEdit=(k)=>this.setState(s=>{const g=s.dateGroups.find(x=>x._k===k);return{editDGroup:k,dgroupDraft:g?{id:g.id,members:[...g.members]}:null};});
+  dgroupCancel=()=>this.setState(s=>{const cur=s.dateGroups.find(x=>x._k===s.editDGroup);if(cur&&cur._new)return{dateGroups:s.dateGroups.filter(x=>x._k!==s.editDGroup),editDGroup:null,dgroupDraft:null};return{editDGroup:null,dgroupDraft:null};});
+  dgroupDraftName=(v)=>this.setState(s=>({dgroupDraft:{...s.dgroupDraft,id:v}}));
+  dgroupToggleDay=(key)=>this.setState(s=>{if(!s.dgroupDraft)return{};const m=s.dgroupDraft.members;const members=m.includes(key)?m.filter(x=>x!==key):[...m,key].sort();return{dgroupDraft:{...s.dgroupDraft,members}};});
+  dgroupSetDays=(keys)=>this.setState(s=>{if(!s.dgroupDraft)return{};return{dgroupDraft:{...s.dgroupDraft,members:[...keys].sort()}};});
+
+  // ---- calendar month navigation ----
+  shiftCalMonth=(delta)=>this.setState(s=>{
+    const [y,mo]=s.calMonth.split('-').map(Number);
+    const d=new Date(Date.UTC(y,mo-1+delta,1));
+    return {calMonth:`${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}`};
+  });
+  gotoCalMonth=(ym)=>this.setState({calMonth:ym});
+
+  // ---- toast ----
+  showToast=(msg)=>{
+    this.setState({toast:msg});
+    if(this._toastT) clearTimeout(this._toastT);
+    this._toastT=setTimeout(()=>this.setState({toast:null}), 3600);
+  };
+  dismissToast=()=>{ if(this._toastT) clearTimeout(this._toastT); this.setState({toast:null}); };
+
+  // ---- New Schedule reset ----
+  newSchedule=()=>{
+    if(!window.confirm('Start a new schedule? This clears the current ward setup. This cannot be undone.')) return;
+    const start='2026-07-01', end='2026-07-31';
+    const rd=this.rangeDates(start,end);
+    const work=rd.filter(x=>!x.weekend && !x.holiday).map(x=>x.key);
+    const free=rd.filter(x=>x.weekend || x.holiday).map(x=>x.key);
+    const ph=rd.filter(x=>x.holiday).map(x=>x.key);
+    this._staffSeq=0; this._groupSeq=0; this._shiftSeq=this.SHIFTTYPES.length;
+    this._sgroupSeq=this.SHIFT_GROUPS.length; this._dgroupSeq=3; this._exSeq=1000;
+    this.setState({
+      screen:'home',
+      rangeStart:start, rangeEnd:end, calMonth:'2026-07', importHolidays:true,
+      staff:[], editStaff:null, staffDraft:null,
+      staffGroups:[], editGroup:null, groupDraft:null,
+      shifts:this.SHIFTTYPES.map((sh,i)=>({...sh,_k:'sh'+i})), editShift:null, shiftDraft:null,
+      shiftGroups:this.SHIFT_GROUPS.map((g,i)=>({_k:'sg'+i, id:g.id, members:[...g.members]})), editSGroup:null, sgroupDraft:null,
+      dateGroups:[{_k:'dg0',id:'WORKDAY',members:work},{_k:'dg1',id:'NON-WORKDAY',members:free},{_k:'dg2',id:'PH',members:ph}], editDGroup:null, dgroupDraft:null,
+      rules:this.RULES.map(r=>({...r})), rulesAdmin:false, guidedShortcuts:[],
+      reqData:{}, reqKind:'leave', reqShift:'AM',
+      cardsByKind:{requirements:[],successions:[],counts:[],affinities:[],coverings:[]},
+      exportSecs:this.EXPORT_SECS.map((sec,si)=>({...sec, rows:sec.rows.map((r,ri)=>({...r,_k:'ex'+si+'_'+ri}))})), editExport:null, exportDraft:'',
+      runState:'idle', progress:0, appliedFixes:[], aiOpen:false, aiThinking:false,
+      selectedCell:null, undoStack:[], scheduleView:'grid', scheduleLoading:false, confirmDelete:null,
+    });
+    this.showToast('New schedule started — ward setup cleared.');
+  };
+  dgroupSave=()=>this.setState(s=>{
+    if(!s.dgroupDraft)return{editDGroup:null};
+    const g=s.dateGroups.find(x=>x._k===s.editDGroup);
+    const newId=(s.dgroupDraft.id||'').trim()||(g?g.id:'');
+    const changed=g&&newId&&newId!==g.id;
+    let cardsByKind=s.cardsByKind;
+    if(changed) cardsByKind=this._mapLabelInCards(cardsByKind||{}, this.DATE_SPEC, g.id, newId);
+    return {dateGroups:s.dateGroups.map(x=>x._k===s.editDGroup?{...x,_new:false,id:newId,members:s.dgroupDraft.members}:x), cardsByKind, editDGroup:null,dgroupDraft:null};
+  });
+  dgroupDelete=(k)=>this.setState(s=>{
+    const g=s.dateGroups.find(x=>x._k===k); if(!g) return {};
+    const cards=this._countLabelInCards(s.cardsByKind||{}, this.DATE_SPEC, g.id);
+    const lines=[]; if(cards) lines.push(this._plur(cards,'rule')+' reference this date group (removed from them)');
+    return {confirmDelete:{kind:'dateGroup', k, label:g.id, title:'Delete date group “'+g.id+'”?', lines}};
+  });
+  toggleRule=(id)=>{
+    const sc=(this.state.guidedShortcuts||[]).find(x=>x._k===id);
+    if(sc){ if(this._findCardByUid(this.state.cardsByKind,sc.kind,sc.uid)) this.setState(s=>({cardsByKind:{...s.cardsByKind,[sc.kind]:s.cardsByKind[sc.kind].map(c=>c.uid===sc.uid?{...c,disabled:!c.disabled}:c)}})); return; }
+    const bind=this.RULE_BIND[id]; if(bind){ this.toggleRecordRule(bind.kind,bind.tag); return; }
+    if(this.BUILTIN_RULES[id]) return;
+    this.setState(s=>({rules:s.rules.map(r=>r.id===id&&!r.locked?{...r,on:!r.on}:r)}));
+  };
+  setRulesAdmin = (b)=> this.setState({rulesAdmin:b});
+  ruleAdd = (rule)=> this.setState(s=>({rules:[...s.rules, {...rule, id:'r'+Date.now(), configurable:true}]}));
+  ruleUpdate = (id,rule)=> this.setState(s=>({rules:s.rules.map(r=>r.id===id?{...r,...rule}:r)}));
+  ruleDelete = (id)=> this.setState(s=>({rules:s.rules.filter(r=>r.id!==id)}));
+  ruleSetParam = (id,key,val)=> this.setState(s=>{
+    const rule=s.rules.find(r=>r.id===id);
+    // reqBound rules (min_per_shift) project the baseline shift-type requirements.
+    if(rule && rule.reqBound && String(key).indexOf('req_')===0){
+      const shiftId=String(key).slice(4);
+      const n=(val===''?NaN:Number(val));
+      return {cardsByKind:{...s.cardsByKind, requirements:this._writeBaselineReq(s.cardsByKind.requirements||[], shiftId, n)}};
+    }
+    // record-bound numeric rules write into their constraint record's expression.
+    const bind=this.RULE_BIND[id];
+    if(bind && key==='recexpr'){
+      const n=(val===''?0:Number(val));
+      return {cardsByKind:{...s.cardsByKind,[bind.kind]:(s.cardsByKind[bind.kind]||[]).map(c=>c.tag===bind.tag?{...c,fields:c.fields.map(f=>f.k==='Expression'?{...f,v:this._exprSetNum(f.v,n)}:f)}:c)}};
+    }
+    // user shortcut field edit → write straight into the bound record's field
+    const scut=(s.guidedShortcuts||[]).find(x=>x._k===id);
+    if(scut && String(key).indexOf('fld::')===0){
+      const fk=String(key).slice(5); const expr=(fk==='Expression');
+      return {cardsByKind:{...s.cardsByKind,[scut.kind]:(s.cardsByKind[scut.kind]||[]).map(c=> c.uid!==scut.uid ? c : {...c, fields:c.fields.map(f=> f.k!==fk?f : (expr?{...f,v:this._exprSetNum(f.v,(val===''?0:Number(val)))}:{...f,v:String(val)}))})}};
+    }
+    return {rules:s.rules.map(r=>{
+      if(r.id!==id) return r;
+      const params=(r.params||[]).map(p=>{
+        if(p.key!==key) return p;
+        let value=val;
+        if(p.type!=='select'){ value=(val===''?'':Number(val)); if(value===''||Number.isNaN(value)) value=(val===''?'':p.value); }
+        return {...p, value};
+      });
+      return {...r, params};
+    })};
+  });
+
+  // ---- staff handlers ----
+  staffDelete=(k)=>this.setState(s=>{
+    const p=s.staff.find(x=>x._k===k); if(!p) return {};
+    const cards=this._countLabelInCards(s.cardsByKind||{}, this.PEOPLE_SPEC, p.id);
+    const groups=(s.staffGroups||[]).filter(g=>(g.members||[]).includes(p.id));
+    const reqs=(s.reqData&&s.reqData[p.id])?Object.keys(s.reqData[p.id]).length:0;
+    const links=(s.staff||[]).filter(x=>x.preceptor===p.id||(x.preceptorOf||[]).includes(p.id)).length;
+    const lines=[];
+    if(cards) lines.push(this._plur(cards,'rule')+' reference this nurse (removed from them)');
+    if(groups.length) lines.push(this._plur(groups.length,'staff group')+' ('+groups.map(g=>g.id).join(', ')+')');
+    if(reqs) lines.push(this._plur(reqs,'request')+' on the Requests screen');
+    if(links) lines.push(this._plur(links,'preceptor link')+' cleared');
+    return {confirmDelete:{kind:'staff', k, label:p.id, title:'Delete nurse “'+p.id+'”?', lines}};
+  });
+  staffDuplicate=(k)=>this.setState(s=>{const i=s.staff.findIndex(p=>p._k===k);if(i<0)return{};const src=s.staff[i];const copy={...src,id:src.id+' (copy)',preceptorOf:undefined,preceptor:undefined,_k:'p'+(this._staffSeq++)};const staff=[...s.staff];staff.splice(i+1,0,copy);return{staff};});
+  _reorderArr(arr,fromK,toK){ const from=arr.findIndex(x=>x._k===fromK); if(from<0) return arr; const copy=[...arr]; const [m]=copy.splice(from,1); const to=copy.findIndex(x=>x._k===toK); if(to<0) copy.push(m); else copy.splice(to,0,m); return copy; }
+  staffReorder=(fromK,toK)=>this.setState(s=>({staff:this._reorderArr(s.staff,fromK,toK)}));
+  shiftReorder=(fromK,toK)=>this.setState(s=>({shifts:this._reorderArr(s.shifts,fromK,toK)}));
+  staffGroupReorder=(fromK,toK)=>this.setState(s=>({staffGroups:this._reorderArr(s.staffGroups,fromK,toK)}));
+  shiftGroupReorder=(fromK,toK)=>this.setState(s=>({shiftGroups:this._reorderArr(s.shiftGroups,fromK,toK)}));
+  staffEdit=(k)=>this.setState(s=>{const p=s.staff.find(x=>x._k===k);return{editStaff:k,staffDraft:p?{id:p.id,role:p.role}:{id:'',role:'Junior'}};});
+  staffCancel=()=>this.setState(s=>{const cur=s.staff.find(x=>x._k===s.editStaff);if(cur&&cur._new)return{staff:s.staff.filter(x=>x._k!==s.editStaff),editStaff:null,staffDraft:null};return{editStaff:null,staffDraft:null};});
+  staffDraftSet=(field,val)=>this.setState(s=>({staffDraft:{...s.staffDraft,[field]:val}}));
+  // Toggle a nurse's membership in a staff group directly from the staff table.
+  staffToggleGroup=(personId,groupId)=>this.setState(s=>({staffGroups:(s.staffGroups||[]).map(g=> g.id===groupId ? {...g, members: (g.members||[]).includes(personId) ? g.members.filter(m=>m!==personId) : [...(g.members||[]), personId]} : g)}));
+  // SINGLE SOURCE OF TRUTH for people groups: the auto "ALL" group (every nurse, not editable)
+  // followed by the user's editable staff groups. Every screen that lists people groups reads this.
+  peopleGroupsAll(s){ const st=s||this.state; const ids=(st.staff||[]).map(p=>p.id); return [{id:'ALL', members:ids, auto:true}, ...((st.staffGroups||[]).map(g=>({id:g.id, members:[...(g.members||[])], _k:g._k, auto:false})))]; }
+  staffSave=()=>this.setState(s=>{
+    if(!s.staffDraft)return{editStaff:null};
+    const p=s.staff.find(x=>x._k===s.editStaff);
+    const newId=(s.staffDraft.id||'').trim()||'Unnamed';
+    const changed=p && newId!==p.id && !s.staff.some(x=>x._k!==s.editStaff && x.id===newId);
+    let staff=s.staff.map(x=>x._k===s.editStaff?{...x,_new:false,id:newId,role:s.staffDraft.role}:x);
+    let cardsByKind=s.cardsByKind, staffGroups=s.staffGroups, reqData=s.reqData;
+    if(changed){
+      cardsByKind=this._mapLabelInCards(s.cardsByKind||{}, this.PEOPLE_SPEC, p.id, newId);
+      staffGroups=(s.staffGroups||[]).map(g=>({...g, members:(g.members||[]).map(m=>m===p.id?newId:m)}));
+      if(s.reqData&&s.reqData[p.id]){ reqData={...s.reqData}; reqData[newId]=reqData[p.id]; delete reqData[p.id]; }
+      staff=staff.map(x=>({...x, preceptor:(x.preceptor===p.id?newId:x.preceptor), preceptorOf:(x.preceptorOf?x.preceptorOf.map(n=>n===p.id?newId:n):x.preceptorOf)}));
+    }
+    return {staff, cardsByKind, staffGroups, reqData, editStaff:null, staffDraft:null};
+  });
+  staffAdd=()=>this.setState(s=>{const _k='p'+(this._staffSeq++);return{staff:[...s.staff,{id:'New nurse',role:'Junior',_new:true,_k}],editStaff:_k,staffDraft:{id:'New nurse',role:'Junior'}};});
+
+  // ---- staff group handlers ----
+  groupAdd=()=>this.setState(s=>{const _k='g'+(this._groupSeq++);return{staffGroups:[...s.staffGroups,{_k,id:'New group',members:[],_new:true}],editGroup:_k,groupDraft:{id:'New group',members:[]}};});
+  groupEdit=(k)=>this.setState(s=>{const g=s.staffGroups.find(x=>x._k===k);return{editGroup:k,groupDraft:g?{id:g.id,members:[...g.members]}:null};});
+  groupCancel=()=>this.setState(s=>{const cur=s.staffGroups.find(x=>x._k===s.editGroup);if(cur&&cur._new)return{staffGroups:s.staffGroups.filter(x=>x._k!==s.editGroup),editGroup:null,groupDraft:null};return{editGroup:null,groupDraft:null};});
+  groupDraftName=(v)=>this.setState(s=>({groupDraft:{...s.groupDraft,id:v}}));
+  groupToggleMember=(name)=>this.setState(s=>{const m=s.groupDraft.members;const members=m.includes(name)?m.filter(x=>x!==name):[...m,name];return{groupDraft:{...s.groupDraft,members}};});
+  groupSave=()=>this.setState(s=>{
+    if(!s.groupDraft)return{editGroup:null};
+    const g=s.staffGroups.find(x=>x._k===s.editGroup);
+    const newId=(s.groupDraft.id||'').trim()||(g?g.id:'');
+    const changed=g&&newId&&newId!==g.id;
+    let cardsByKind=s.cardsByKind;
+    if(changed) cardsByKind=this._mapLabelInCards(cardsByKind||{}, this.PEOPLE_SPEC, g.id, newId);
+    return {staffGroups:s.staffGroups.map(x=>x._k===s.editGroup?{...x,_new:false,id:newId,members:s.groupDraft.members}:x), cardsByKind, editGroup:null,groupDraft:null};
+  });
+  groupDelete=(k)=>this.setState(s=>{
+    const g=s.staffGroups.find(x=>x._k===k); if(!g) return {};
+    const cards=this._countLabelInCards(s.cardsByKind||{}, this.PEOPLE_SPEC, g.id);
+    const lines=[]; if(cards) lines.push(this._plur(cards,'rule')+' reference this group (removed from them)');
+    return {confirmDelete:{kind:'staffGroup', k, label:g.id, title:'Delete staff group “'+g.id+'”?', lines}};
+  });
+
+  // ---- shift handlers ----
+  // Clock time (start–end) is the on-the-floor span shown on the roster ONLY. It is NOT the paid
+  // length: unpaid breaks make the span longer than working hours, so durationMinutes (the value
+  // that auto-fills contracted-hours coefficients) is entered explicitly, never derived from here.
+  // _durFromRange stays only to show the clock-span hint. Overnight (end ≤ start) rolls +24h.
+  _parseRange(str){const m=String(str||'').match(/(\d{1,2}:\d{2})\s*[–-]\s*(\d{1,2}:\d{2})/);if(!m)return{start:'',end:''};const pad=t=>{const[h,mm]=t.split(':');return String(h).padStart(2,'0')+':'+mm;};return{start:pad(m[1]),end:pad(m[2])};}
+  _durFromRange(start,end){const ok=t=>/^\d{1,2}:\d{2}$/.test(t||'');if(!ok(start)||!ok(end))return null;const tm=t=>{const[h,m]=t.split(':').map(Number);return h*60+m;};let d=tm(end)-tm(start);if(d<=0)d+=1440;return d;}
+  // ---- shift-type requirement binding ----
+  // A shift type's "minimum nurses" is NOT a separate field: it is the Required value of that
+  // shift's BASELINE staffing requirement (a requirement card scoped to this one shift type over
+  // ALL dates). cardsByKind.requirements is the single source of truth; the Shifts card and the
+  // advanced Staffing requirements editor are two views of the same object.
+  _reqFieldVal(card,key){ const f=(card.fields||[]).find(x=>x.k===key); return f?f.v:''; }
+  _reqShiftTypes(card){ return this._reqFieldVal(card,'Shift type').split(',').map(x=>x.trim()).filter(Boolean); }
+  _isAllDates(v){ const n=String(v||'').trim().toUpperCase(); return n===''||n==='ALL'||n==='(ALL)'; }
+  _baselineReqIdx(reqs, shiftId){
+    let idx=-1;
+    (reqs||[]).forEach((c,i)=>{ if(idx>=0) return; const st=this._reqShiftTypes(c);
+      if(st.length===1 && st[0]===shiftId && this._isAllDates(this._reqFieldVal(c,'Dates'))) idx=i; });
+    return idx;
+  }
+  _shiftNeed(reqs, shiftId){ const i=this._baselineReqIdx(reqs,shiftId); if(i<0) return null; const n=Number(this._reqFieldVal(reqs[i],'Required')); return Number.isNaN(n)?null:n; }
+  _baselineReqPreferred(reqs, shiftId){ const i=this._baselineReqIdx(reqs,shiftId); if(i<0) return null; const raw=this._reqFieldVal(reqs[i],'Preferred'); if(raw===''||raw==null) return null; const n=Number(raw); return Number.isNaN(n)?null:n; }
+  _extraReqCount(reqs, shiftId){ const base=this._baselineReqIdx(reqs,shiftId); let n=0; (reqs||[]).forEach((c,i)=>{ if(i===base) return; if(this._reqShiftTypes(c).includes(shiftId)) n++; }); return n; }
+  _baselineReqQualified(reqs, shiftId){ const i=this._baselineReqIdx(reqs,shiftId); return i<0?'ALL':(this._reqFieldVal(reqs[i],'Qualified')||'ALL'); }
+  _writeBaselineReq(reqs, shiftId, need, preferred){
+    // `preferred` optional: undefined = leave Preferred untouched; '' or null = clear; else set.
+    const setPref = preferred!==undefined;
+    const prefStr = (preferred===''||preferred==null)?'':String(preferred);
+    const idx=this._baselineReqIdx(reqs, shiftId);
+    if(idx>=0) return reqs.map((c,i)=> i===idx ? {...c, fields:c.fields.map(f=>{
+      if(f.k==='Required') return {...f,v:(Number.isNaN(need)?f.v:String(need))};
+      if(f.k==='Preferred' && setPref) return {...f,v:prefStr};
+      return f;
+    })} : c);
+    const card={desc:shiftId+' cover', weight:null, fields:[{k:'Shift type',v:shiftId},{k:'Required',v:(Number.isNaN(need)?'0':String(need))},{k:'Preferred',v:(setPref?prefStr:'')},{k:'Qualified',v:'ALL'},{k:'Dates',v:'ALL'}]};
+    return [...reqs, card];
+  }
+  // ---- referential integrity for shift-type codes ----
+  // A shift code (AM, N…) is the stable identifier every store references by string. These helpers
+  // scan every reference, and cascade a delete (remove/strip) or a rename (rewrite in place) so the
+  // code can be changed or removed without leaving dangling references anywhere.
+  _splitList(v){ return String(v||'').split(',').map(x=>x.trim()).filter(Boolean); }
+  _patternTokens(v){ return String(v||'').split(/[^A-Za-z0-9_]+/).map(x=>x.trim()).filter(Boolean); }
+  _shiftRefs(s, id){
+    const cb=s.cardsByKind||{};
+    const inList=(card,key)=>this._splitList(this._reqFieldVal(card,key)).includes(id);
+    const filt=(kind,key)=>(cb[kind]||[]).map((c,i)=>({c,i})).filter(({c})=>inList(c,key)||(c.coef&&(id in c.coef)));
+    const requirements=filt('requirements','Shift type');
+    const counts=filt('counts','Count shift types');
+    const affinities=(cb.affinities||[]).map((c,i)=>({c,i})).filter(({c})=>inList(c,'Shift types'));
+    const coverings=(cb.coverings||[]).map((c,i)=>({c,i})).filter(({c})=>inList(c,'Shift types'));
+    const successions=(cb.successions||[]).map((c,i)=>({c,i})).filter(({c})=>this._patternTokens(this._reqFieldVal(c,'Pattern')).includes(id));
+    const groups=(s.shiftGroups||[]).filter(g=>(g.members||[]).includes(id));
+    let scheduleCount=0; Object.values(s.schedule||{}).forEach(arr=>(arr||[]).forEach(v=>{if(v===id)scheduleCount++;}));
+    let requests=0; Object.values(s.reqData||{}).forEach(pr=>Object.values(pr||{}).forEach(r=>{if(r&&r.shift===id)requests++;}));
+    return {requirements,counts,affinities,coverings,successions,groups,scheduleCount,requests};
+  }
+  _shiftImpactLines(refs){
+    const L=[]; const plur=(n,w)=>n+' '+w+(n>1?'s':'');
+    if(refs.requirements.length) L.push(plur(refs.requirements.length,'staffing requirement')+' (references removed; empty ones deleted)');
+    if(refs.successions.length) L.push(plur(refs.successions.length,'shift succession')+' (deleted \u2014 pattern no longer valid)');
+    if(refs.counts.length) L.push(plur(refs.counts.length,'shift count')+' (references removed)');
+    if(refs.affinities.length) L.push(plur(refs.affinities.length,'affinity rule'));
+    if(refs.coverings.length) L.push(plur(refs.coverings.length,'shift type covering'));
+    if(refs.groups.length) L.push(plur(refs.groups.length,'shift group')+' ('+refs.groups.map(g=>g.id).join(', ')+')');
+    if(refs.requests) L.push(plur(refs.requests,'shift request')+' on the Requests screen');
+    if(refs.scheduleCount) L.push(plur(refs.scheduleCount,'assigned cell')+' on the built roster (reset to Off)');
+    return L;
+  }
+  _removeShiftFromCards(cb, id){
+    const strip=(card,key)=>{const arr=this._splitList(this._reqFieldVal(card,key)).filter(x=>x!==id);return {...card, fields:card.fields.map(f=>f.k===key?{...f,v:arr.join(', ')}:f)};};
+    const dropCoef=(card)=>{ if(!card.coef||!(id in card.coef)) return card; const coef={...card.coef}; delete coef[id]; return {...card, coef:(Object.keys(coef).length?coef:undefined)}; };
+    return {...cb,
+      requirements:(cb.requirements||[]).map(c=>dropCoef(strip(c,'Shift type'))).filter(c=>this._splitList(this._reqFieldVal(c,'Shift type')).length>0),
+      counts:(cb.counts||[]).map(c=>dropCoef(strip(c,'Count shift types'))).filter(c=>this._splitList(this._reqFieldVal(c,'Count shift types')).length>0),
+      affinities:(cb.affinities||[]).map(c=>strip(c,'Shift types')),
+      coverings:(cb.coverings||[]).map(c=>strip(c,'Shift types')),
+      successions:(cb.successions||[]).filter(c=>!this._patternTokens(this._reqFieldVal(c,'Pattern')).includes(id)),
+    };
+  }
+  _renameShiftInCards(cb, oldId, newId){
+    const ren=(card,key)=>{const arr=this._splitList(this._reqFieldVal(card,key)).map(x=>x===oldId?newId:x);return {...card, fields:card.fields.map(f=>f.k===key?{...f,v:arr.join(', ')}:f)};};
+    const renCoef=(card)=>{ if(!card.coef||!(oldId in card.coef)) return card; const coef={}; Object.entries(card.coef).forEach(([k,v])=>{coef[k===oldId?newId:k]=v;}); return {...card, coef}; };
+    const renPat=(card)=>{const re=new RegExp('(^|[^A-Za-z0-9_])'+oldId+'(?![A-Za-z0-9_])','g'); const nv=this._reqFieldVal(card,'Pattern').replace(re,(m,p1)=>p1+newId); return {...card, fields:card.fields.map(f=>f.k==='Pattern'?{...f,v:nv}:f)};};
+    return {...cb,
+      requirements:(cb.requirements||[]).map(c=>renCoef(ren(c,'Shift type'))),
+      counts:(cb.counts||[]).map(c=>renCoef(ren(c,'Count shift types'))),
+      affinities:(cb.affinities||[]).map(c=>ren(c,'Shift types')),
+      coverings:(cb.coverings||[]).map(c=>ren(c,'Shift types')),
+      successions:(cb.successions||[]).map(renPat),
+    };
+  }
+  requestDeleteShift=(k)=>this.setState(s=>{
+    const sh=s.shifts.find(x=>x._k===k); if(!sh||sh.auto) return {};
+    return {confirmDelete:{kind:'shift', k, id:sh.id, label:sh.id, title:'Delete shift “'+sh.id+'”?', lines:this._shiftImpactLines(this._shiftRefs(s, sh.id))}};
+  });
+  cancelConfirm=()=>this.setState({confirmDelete:null});
+  // ---- generic label cascade (people, groups, date-scopes referenced by name in card fields) ----
+  PEOPLE_SPEC={requirements:['Qualified'], counts:['People'], successions:['People'], affinities:['People 1','People 2'], coverings:['Preceptors','Preceptees']};
+  SHIFTGROUP_SPEC={requirements:['Shift type'], counts:['Count shift types'], affinities:['Shift types'], coverings:['Shift types']};
+  DATE_SPEC={requirements:['Dates'], counts:['Dates'], successions:['Dates'], affinities:['Dates'], coverings:['Dates']};
+  _mapLabelInCards(cb, spec, oldLabel, newLabel){ // newLabel===null → remove the token
+    const out={...cb};
+    Object.entries(spec).forEach(([kind,keys])=>{
+      out[kind]=(cb[kind]||[]).map(card=>{
+        let c=card;
+        keys.forEach(key=>{
+          const arr=this._splitList(this._reqFieldVal(c,key)); if(!arr.length) return;
+          const na=(newLabel===null)?arr.filter(x=>x!==oldLabel):arr.map(x=>x===oldLabel?newLabel:x);
+          if(na.join(', ')!==arr.join(', ')) c={...c, fields:c.fields.map(f=>f.k===key?{...f,v:na.join(', ')}:f)};
+        });
+        return c;
+      });
+    });
+    return out;
+  }
+  _countLabelInCards(cb, spec, label){
+    let n=0;
+    Object.entries(spec).forEach(([kind,keys])=>{ (cb[kind]||[]).forEach(card=>{ if(keys.some(key=>this._splitList(this._reqFieldVal(card,key)).includes(label))) n++; }); });
+    return n;
+  }
+  _plur(n,w){ return n+' '+w+(n>1?'s':''); }
+  // Unified confirm dispatcher — every delete routes through the impact-preview modal.
+  confirmDeleteNow=()=>{
+    const cd=this.state.confirmDelete; if(!cd){ return; }
+    const map={shift:this._doDeleteShift, staff:this._doDeleteStaff, staffGroup:this._doDeleteStaffGroup, shiftGroup:this._doDeleteShiftGroup, dateGroup:this._doDeleteDateGroup};
+    const fn=map[cd.kind]; if(fn) fn(cd); else this.setState({confirmDelete:null});
+  };
+  _doDeleteShift=(cd)=>{ const id=cd.id; this.setState(s=>{
+      const shifts=s.shifts.filter(x=>x._k!==cd.k);
+      const cardsByKind=this._removeShiftFromCards(s.cardsByKind||{}, id);
+      const shiftGroups=(s.shiftGroups||[]).map(g=>({...g, members:(g.members||[]).filter(m=>m!==id)}));
+      const schedule={}; Object.entries(s.schedule||{}).forEach(([p,arr])=>{schedule[p]=(arr||[]).map(v=>v===id?'OFF':v);});
+      const reqData={}; Object.entries(s.reqData||{}).forEach(([p,pr])=>{const np={};Object.entries(pr||{}).forEach(([d,r])=>{if(!(r&&r.shift===id))np[d]=r;});reqData[p]=np;});
+      const firstWorked=shifts.find(x=>!x.auto);
+      const reqShift=(s.reqShift===id)?(firstWorked?firstWorked.id:''):s.reqShift;
+      return {shifts, cardsByKind, shiftGroups, schedule, reqData, reqShift, editShift:(s.editShift===cd.k?null:s.editShift), shiftDraft:(s.editShift===cd.k?null:s.shiftDraft), confirmDelete:null};
+    }, ()=>this.showToast('Deleted shift \u201c'+id+'\u201d and updated every rule that used it.')); };
+  _doDeleteStaff=(cd)=>{ const name=cd.label; this.setState(s=>{
+      const staff=s.staff.filter(x=>x._k!==cd.k).map(x=>({...x, preceptor:(x.preceptor===name?undefined:x.preceptor), preceptorOf:(x.preceptorOf?x.preceptorOf.filter(n=>n!==name):x.preceptorOf)}));
+      const cardsByKind=this._mapLabelInCards(s.cardsByKind||{}, this.PEOPLE_SPEC, name, null);
+      const staffGroups=(s.staffGroups||[]).map(g=>({...g, members:(g.members||[]).filter(m=>m!==name)}));
+      const reqData={...s.reqData}; delete reqData[name];
+      return {staff, cardsByKind, staffGroups, reqData, editStaff:(s.editStaff===cd.k?null:s.editStaff), staffDraft:(s.editStaff===cd.k?null:s.staffDraft), confirmDelete:null};
+    }, ()=>this.showToast('Deleted nurse \u201c'+name+'\u201d and cleaned up references.')); };
+  _doDeleteStaffGroup=(cd)=>{ const name=cd.label; this.setState(s=>{
+      const staffGroups=s.staffGroups.filter(g=>g._k!==cd.k);
+      const cardsByKind=this._mapLabelInCards(s.cardsByKind||{}, this.PEOPLE_SPEC, name, null);
+      return {staffGroups, cardsByKind, editGroup:(s.editGroup===cd.k?null:s.editGroup), groupDraft:(s.editGroup===cd.k?null:s.groupDraft), confirmDelete:null};
+    }, ()=>this.showToast('Deleted staff group \u201c'+name+'\u201d and removed it from rules.')); };
+  _doDeleteShiftGroup=(cd)=>{ const name=cd.label; this.setState(s=>{
+      const shiftGroups=s.shiftGroups.filter(g=>g._k!==cd.k);
+      const cardsByKind=this._mapLabelInCards(s.cardsByKind||{}, this.SHIFTGROUP_SPEC, name, null);
+      return {shiftGroups, cardsByKind, editSGroup:(s.editSGroup===cd.k?null:s.editSGroup), sgroupDraft:(s.editSGroup===cd.k?null:s.sgroupDraft), confirmDelete:null};
+    }, ()=>this.showToast('Deleted shift group \u201c'+name+'\u201d and removed it from rules.')); };
+  _doDeleteDateGroup=(cd)=>{ const name=cd.label; this.setState(s=>{
+      const dateGroups=s.dateGroups.filter(g=>g._k!==cd.k);
+      const cardsByKind=this._mapLabelInCards(s.cardsByKind||{}, this.DATE_SPEC, name, null);
+      return {dateGroups, cardsByKind, editDGroup:(s.editDGroup===cd.k?null:s.editDGroup), dgroupDraft:(s.editDGroup===cd.k?null:s.dgroupDraft), confirmDelete:null};
+    }, ()=>this.showToast('Deleted date group \u201c'+name+'\u201d and removed it from rules.')); };
+  _clockSpanMin=(start,end)=>{ const okT=t=>/^\d{1,2}:\d{2}$/.test(t||''); if(!okT(start)||!okT(end))return null; const tm=t=>{const[h,m]=t.split(':').map(Number);return h*60+m;}; let d=tm(end)-tm(start); if(d<=0)d+=1440; return d; };
+  shiftEdit=(k)=>this.setState(s=>{const sh=s.shifts.find(x=>x._k===k);if(!sh)return{editShift:k,shiftDraft:null};const tr=this._parseRange(sh.time);const rn=this._shiftNeed(s.cardsByKind.requirements, sh.id);const rp=this._baselineReqPreferred(s.cardsByKind.requirements, sh.id);const span=this._clockSpanMin(tr.start,tr.end);const restMin=(span!=null&&sh.durationMinutes!=null)?Math.max(0,span-sh.durationMinutes):0;return{editShift:k,shiftDraft:{code:sh.id,name:sh.name,startTime:tr.start,endTime:tr.end,need:(rn!=null?rn:sh.need),pref:(rp!=null?rp:''),restHours:Math.floor(restMin/60),restMins:restMin%60}};});
+  shiftCancel=()=>this.setState(s=>{
+    const cur=s.shifts.find(x=>x._k===s.editShift);
+    // A cancelled "Add shift type" discards the not-yet-saved card entirely.
+    if(cur&&cur._new) return {shifts:s.shifts.filter(x=>x._k!==s.editShift), editShift:null, shiftDraft:null};
+    return {editShift:null, shiftDraft:null};
+  });
+  shiftDraftSet=(f,val)=>this.setState(s=>({shiftDraft:{...s.shiftDraft,[f]:val}}));
+  shiftSave=()=>this.setState(s=>{
+    if(!s.shiftDraft)return{editShift:null};
+    const d=s.shiftDraft;const need=Number(d.need);
+    // Working hours are auto-derived: paid hours = clock span − rest time (unpaid breaks the user
+    // entered in h + m). This derived value is the only thing that feeds contracted-hours shift counts.
+    const span=this._clockSpanMin(d.startTime,d.endTime);
+    const restMin=Math.max(0,(Number(d.restHours)||0)*60+(Number(d.restMins)||0));
+    const dur=(span!=null)?Math.max(0,span-restMin):null;
+    const timeStr=(d.startTime&&d.endTime)?(d.startTime+' – '+d.endTime):null;
+    const cur=s.shifts.find(x=>x._k===s.editShift);
+    // Free rename: a changed, non-colliding code cascades to every reference before anything else.
+    const wantId=(d.code||'').trim();
+    const codeChanged = cur && wantId && wantId!==cur.id && !s.shifts.some(x=>x.id===wantId);
+    const newId = codeChanged ? wantId : (cur?cur.id:null);
+    const prefRaw=(d.pref==null||d.pref==='')?'':Number(d.pref);
+    const prefWrite=(prefRaw===''?'':(isFinite(prefRaw)&&prefRaw>=0?prefRaw:''));
+    const shifts=s.shifts.map(x=>x._k===s.editShift?{...x,_new:false,id:(newId||x.id),name:(d.name||'').trim()||x.name,time:timeStr||x.time,durationMinutes:(dur!=null?dur:x.durationMinutes)}:x);
+    let cardsByKind=s.cardsByKind, shiftGroups=s.shiftGroups, schedule=s.schedule, reqData=s.reqData, reqShift=s.reqShift;
+    if(codeChanged){
+      cardsByKind=this._renameShiftInCards(cardsByKind||{}, cur.id, newId);
+      shiftGroups=(s.shiftGroups||[]).map(g=>({...g, members:(g.members||[]).map(m=>m===cur.id?newId:m)}));
+      const sc={}; Object.entries(s.schedule||{}).forEach(([p,arr])=>{sc[p]=(arr||[]).map(v=>v===cur.id?newId:v);}); schedule=sc;
+      const rd={}; Object.entries(s.reqData||{}).forEach(([p,pr])=>{const np={};Object.entries(pr||{}).forEach(([dd,r])=>{np[dd]=(r&&r.shift===cur.id)?{...r,shift:newId}:r;});rd[p]=np;}); reqData=rd;
+      if(reqShift===cur.id) reqShift=newId;
+    }
+    if(cur && !cur.auto){ cardsByKind={...cardsByKind, requirements:this._writeBaselineReq(cardsByKind.requirements||[], (newId||cur.id), need, prefWrite)}; }
+    return {shifts, cardsByKind, shiftGroups, schedule, reqData, reqShift, editShift:null, shiftDraft:null};
+  });
+  shiftAdd=()=>this.setState(s=>{const _k='sh'+(this._shiftSeq++);const sh={id:'S'+(this._shiftSeq),name:'New shift',time:'08:00 – 16:00',need:1,icon:'fa-clock',auto:false,durationMinutes:480,_new:true,_k};return{shifts:[...s.shifts,sh],editShift:_k,shiftDraft:{name:sh.name,startTime:'08:00',endTime:'16:00',need:sh.need,pref:'',restHours:0,restMins:0}};});
+
+  // ---- shift group handlers ----
+  sgroupAdd=()=>this.setState(s=>{const _k='sg'+(this._sgroupSeq++);return{shiftGroups:[...s.shiftGroups,{_k,id:'New group',members:[],_new:true}],editSGroup:_k,sgroupDraft:{id:'New group',members:[]}};});
+  sgroupEdit=(k)=>this.setState(s=>{const g=s.shiftGroups.find(x=>x._k===k);return{editSGroup:k,sgroupDraft:g?{id:g.id,members:[...g.members]}:null};});
+  sgroupCancel=()=>this.setState(s=>{const cur=s.shiftGroups.find(x=>x._k===s.editSGroup);if(cur&&cur._new)return{shiftGroups:s.shiftGroups.filter(x=>x._k!==s.editSGroup),editSGroup:null,sgroupDraft:null};return{editSGroup:null,sgroupDraft:null};});
+  sgroupDraftName=(v)=>this.setState(s=>({sgroupDraft:{...s.sgroupDraft,id:v}}));
+  sgroupToggleMember=(name)=>this.setState(s=>{const m=s.sgroupDraft.members;const members=m.includes(name)?m.filter(x=>x!==name):[...m,name];return{sgroupDraft:{...s.sgroupDraft,members}};});
+  sgroupSave=()=>this.setState(s=>{
+    if(!s.sgroupDraft)return{editSGroup:null};
+    const g=s.shiftGroups.find(x=>x._k===s.editSGroup);
+    const newId=(s.sgroupDraft.id||'').trim()||(g?g.id:'');
+    const changed=g&&newId&&newId!==g.id;
+    let cardsByKind=s.cardsByKind;
+    if(changed) cardsByKind=this._mapLabelInCards(cardsByKind||{}, this.SHIFTGROUP_SPEC, g.id, newId);
+    return {shiftGroups:s.shiftGroups.map(x=>x._k===s.editSGroup?{...x,_new:false,id:newId,members:s.sgroupDraft.members}:x), cardsByKind, editSGroup:null,sgroupDraft:null};
+  });
+  sgroupDelete=(k)=>this.setState(s=>{
+    const g=s.shiftGroups.find(x=>x._k===k); if(!g) return {};
+    const cards=this._countLabelInCards(s.cardsByKind||{}, this.SHIFTGROUP_SPEC, g.id);
+    const lines=[]; if(cards) lines.push(this._plur(cards,'rule')+' reference this group (removed from them)');
+    return {confirmDelete:{kind:'shiftGroup', k, label:g.id, title:'Delete shift group “'+g.id+'”?', lines}};
+  });
+
+  // ---- export layout handlers ----
+  exportDelete=(k)=>this.setState(s=>({exportSecs:s.exportSecs.map(sec=>({...sec,rows:sec.rows.filter(r=>r._k!==k)})),editExport:s.editExport===k?null:s.editExport}));
+  exportEdit=(k)=>this.setState(s=>{let cur='';s.exportSecs.forEach(sec=>sec.rows.forEach(r=>{if(r._k===k)cur=r.label;}));return{editExport:k,exportDraft:cur};});
+  exportCancel=()=>this.setState({editExport:null,exportDraft:''});
+  exportDraftSet=(val)=>this.setState({exportDraft:val});
+  exportSave=()=>this.setState(s=>({exportSecs:s.exportSecs.map(sec=>({...sec,rows:sec.rows.map(r=>r._k===s.editExport?{...r,label:(s.exportDraft||'').trim()||r.label}:r)})),editExport:null,exportDraft:''}));
+  exportAdd=()=>this.setState(s=>{const _k='ex'+(this._exSeq++);const row={tag:'cell',label:'New style rule',meta:'custom',_k};const exportSecs=s.exportSecs.map((sec,i)=>i===0?{...sec,rows:[...sec.rows,row]}:sec);return{exportSecs,editExport:_k,exportDraft:row.label};});
+
+  // ---- requests handlers ----
+  reqSetKind=(k)=>this.setState({reqKind:k});
+  reqSetShift=(sh)=>this.setState({reqShift:sh});
+  reqCell=(person,dayNum)=>this.setState(s=>{
+    const cur=(s.reqData[person]||{})[dayNum];
+    const noShift=(s.reqKind==='leave'||s.reqKind==='off');
+    let next=noShift?{kind:s.reqKind}:{kind:s.reqKind,shift:s.reqShift};
+    const same=cur&&cur.kind===next.kind&&(noShift||cur.shift===next.shift);
+    const pr={...(s.reqData[person]||{})}; if(same) delete pr[dayNum]; else pr[dayNum]=next;
+    return {reqData:{...s.reqData,[person]:pr}};
+  });
+  reqSetCells=(cells,op)=>this.setState(s=>{
+    const noShift=(s.reqKind==='leave'||s.reqKind==='off');
+    let next=noShift?{kind:s.reqKind}:{kind:s.reqKind,shift:s.reqShift};
+    const data={...s.reqData};
+    (cells||[]).forEach(({person,dayNum})=>{
+      const pr={...(data[person]||{})};
+      if(op==='clear') delete pr[dayNum]; else pr[dayNum]={...next};
+      data[person]=pr;
+    });
+    return {reqData:data};
+  });
+
+  runOptimize = ()=>{
+    if(this._runTimer) return;
+    this.setState({runState:'running', progress:0, aiOpen:false});
+    this._runTimer=setInterval(()=>{
+      this.setState(s=>{
+        const p=Math.min(100, s.progress + (7+Math.random()*11));
+        if(p>=100){ clearInterval(this._runTimer); this._runTimer=null;
+          return {progress:100, runState: s.appliedFixes.length>0?'feasible':'infeasible', schedule:this._buildRoster(s)};
+        }
+        return {progress:p};
+      });
+    },200);
+  };
+  resetRun = ()=> this.setState({runState:'idle', progress:0});
+  openAi = ()=> this.setState({aiOpen:true});
+  closeAi = ()=> this.setState({aiOpen:false});
+  applyFix = (id)=> this.setState(s=>{
+    if(s.appliedFixes.includes(id)) return {};
+    const fix=this.AIFIXES.find(f=>f.id===id);
+    const first=s.appliedFixes.length===0;
+    const chat=[...s.chat,
+      {who:'user', text:'Apply this fix — '+fix.title},
+      {who:'ai', applied:true, text:`Applied \u201c${fix.title}\u201d.`+(first?' Close this and run the roster again — the night-coverage bottleneck should clear.':' You can run again whenever you\u2019re ready.')}];
+    return {appliedFixes:[...s.appliedFixes, id], chat};
+  });
+  sendChat = (text)=>{
+    if(!text||!text.trim()) return;
+    const reply="Based on your current rules, the tightest constraint is night coverage on the CNY weekend. Lowering the night minimum to 2 for just those two dates is the smallest change and keeps every other rule intact \u2014 I\u2019d start there. The other two options keep staffing at 3 but bend a rest or preference rule slightly.";
+    // Show the user turn immediately, then a thinking skeleton while the reply "streams" in.
+    this.setState(s=>({chat:[...s.chat,{who:'user',text:text.trim()}], aiThinking:true}));
+    if(this._chatT) clearTimeout(this._chatT);
+    this._chatT=setTimeout(()=>{
+      this.setState(s=>({chat:[...s.chat,{who:'ai',text:reply}], aiThinking:false}));
+    }, 1150);
+  };
+  setLlm = (k,v)=> this.setState({[k]:v, llmTested:false});
+  testLlm = ()=>{ this.setState({llmTested:'testing'}); setTimeout(()=>this.setState({llmTested:'ok'}),900); };
+
+  // manual adjust
+  selectCell = (person,di)=> this.setState(s=>({selectedCell: (s.selectedCell&&s.selectedCell.person===person&&s.selectedCell.di===di)?null:{person,di}}));
+  setCell = (person,di,shift)=> this.setState(s=>{
+    const prev=s.schedule[person][di];
+    if(prev===shift) return {selectedCell:null};
+    const schedule={...s.schedule, [person]:s.schedule[person].map((v,i)=>i===di?shift:v)};
+    return {schedule, selectedCell:null, undoStack:[...s.undoStack,{person,di,prev}]};
+  });
+  undo = ()=> this.setState(s=>{
+    if(!s.undoStack.length) return {};
+    const last=s.undoStack[s.undoStack.length-1];
+    const schedule={...s.schedule,[last.person]:s.schedule[last.person].map((v,i)=>i===last.di?last.prev:v)};
+    return {schedule, undoStack:s.undoStack.slice(0,-1), selectedCell:null};
+  });
+  dragStart = (person,di)=>{ this._drag={person,di}; };
+  dropOn = (person,di)=> this.setState(s=>{
+    if(!this._drag) return {};
+    const from=this._drag; this._drag=null;
+    if(from.person===person && from.di===di) return {};
+    const shift=s.schedule[from.person][from.di];
+    if(shift==='OFF') return {};
+    const prevTarget=s.schedule[person][di];
+    const schedule={...s.schedule,
+      [from.person]:s.schedule[from.person].map((v,i)=>i===from.di?prevTarget:v),
+      [person]:s.schedule[person].map((v,i)=>i===di?shift:v)};
+    return {schedule, undoStack:[...s.undoStack,{swap:true, a:from, b:{person,di}, av:shift, bv:prevTarget}]};
+  });
+  setScheduleView = (v)=> this.setState({scheduleView:v});
+
+  computeWarnings(schedule, people, days, needs, nightId, dayShiftId){
+    const w=[]; people=people||[]; days=days||[]; needs=needs||{}; schedule=schedule||{};
+    days.forEach((day,di)=>{
+      Object.keys(needs).forEach(sid=>{ let c=0; people.forEach(p=>{ if((schedule[p.id]||[])[di]===sid) c++; }); if(c<needs[sid]) w.push({sev:'error', text:`${sid} on ${day.label} ${day.d} is short: ${c} of ${needs[sid]} nurses.`}); });
+    });
+    people.forEach(p=>{ const arr=schedule[p.id]||[]; arr.forEach((sh,di)=>{
+      if(nightId && sh===nightId && di<arr.length-1 && (arr[di+1]==='AM'||arr[di+1]==='PM')) w.push({sev:'warn', text:`${p.id}: night on day ${di+1} isn’t followed by a rest day.`});
+      if(p.role==='Preceptee' && dayShiftId && sh!=='OFF' && sh!=='LV' && sh!==dayShiftId) w.push({sev:'warn', text:`${p.id} (student) is on ${sh} on day ${di+1} — should be day only.`});
+    }); });
+    return w.slice(0,10);
+  }
+
+  monthLabel(m){
+    const [y,mo]=m.split('-').map(Number);
+    return new Date(Date.UTC(y,mo-1,1)).toLocaleDateString('en-GB',{month:'long',year:'numeric',timeZone:'UTC'});
+  }
+  durationDays(){
+    const a=new Date(this.state.rangeStart+'T00:00:00Z'), b=new Date(this.state.rangeEnd+'T00:00:00Z');
+    return Math.round((b-a)/86400000)+1;
+  }
+  rangeDates(startStr, endStr){
+    const out=[];
+    const a=new Date((startStr||this.state.rangeStart)+'T00:00:00Z');
+    const b=new Date((endStr||this.state.rangeEnd)+'T00:00:00Z');
+    if(isNaN(a)||isNaN(b)||a>b) return out;
+    for(let t=new Date(a); t<=b; t.setUTCDate(t.getUTCDate()+1)){
+      const y=t.getUTCFullYear(), mo=t.getUTCMonth()+1, d=t.getUTCDate();
+      const key=`${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      const dow=t.getUTCDay();
+      out.push({key, d, ym:`${y}-${String(mo).padStart(2,'0')}`, weekend:(dow===0||dow===6), holiday:this.SG_HOLIDAYS[key]||null});
+    }
+    return out;
+  }
+  rangeMonths(){
+    const dates=this.rangeDates();
+    const byYm={};
+    dates.forEach(x=>{ (byYm[x.ym]=byYm[x.ym]||new Set()).add(x.d); });
+    return Object.keys(byYm).sort().map(ym=>{
+      const [y,mo]=ym.split('-').map(Number);
+      const first=new Date(Date.UTC(y,mo-1,1));
+      const lead=(first.getUTCDay()+6)%7; // weeks start Monday
+      const dim=new Date(Date.UTC(y,mo,0)).getUTCDate();
+      const inSet=byYm[ym];
+      const cells=[];
+      for(let i=lead;i>0;i--) cells.push(this._adjCell(new Date(Date.UTC(y,mo-1,1-i))));
+      for(let d=1;d<=dim;d++){
+        const key=`${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+        const dow=new Date(key+'T00:00:00Z').getUTCDay();
+        cells.push({d,key,weekend:(dow===0||dow===6),holiday:this.SG_HOLIDAYS[key]||null,inRange:inSet.has(d)});
+      }
+      for(let nd=1; cells.length%7!==0; nd++) cells.push(this._adjCell(new Date(Date.UTC(y,mo-1,dim+nd))));
+      const weeks=[]; for(let i=0;i<cells.length;i+=7) weeks.push(cells.slice(i,i+7));
+      return {ym, label:this.monthLabel(ym), weeks};
+    });
+  }
+  // Build an out-of-month (adjacent) calendar cell from a Date, shown muted for week alignment.
+  _adjCell(t){
+    const y=t.getUTCFullYear(), mo=t.getUTCMonth()+1, d=t.getUTCDate();
+    const key=`${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const dow=t.getUTCDay();
+    return {d, key, weekend:(dow===0||dow===6), holiday:null, adjacent:true, inRange:false};
+  }
+  computeCalendar(){
+    const [y,mo]=this.state.calMonth.split('-').map(Number);
+    const first=new Date(Date.UTC(y,mo-1,1));
+    const lead=(first.getUTCDay()+6)%7; // weeks start Monday
+    const dim=new Date(Date.UTC(y,mo,0)).getUTCDate();
+    const cells=[];
+    for(let i=lead;i>0;i--) cells.push(this._adjCell(new Date(Date.UTC(y,mo-1,1-i))));
+    for(let d=1;d<=dim;d++){
+      const key=`${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      const dow=new Date(key+'T00:00:00Z').getUTCDay();
+      cells.push({d, key, weekend:(dow===0||dow===6), holiday:this.SG_HOLIDAYS[key]||null,
+        inRange:(key>=this.state.rangeStart && key<=this.state.rangeEnd)});
+    }
+    for(let nd=1; cells.length%7!==0; nd++) cells.push(this._adjCell(new Date(Date.UTC(y,mo-1,dim+nd))));
+    const weeks=[]; for(let i=0;i<cells.length;i+=7) weeks.push(cells.slice(i,i+7));
+    return weeks;
+  }
+  holidaysInMonth(){
+    return Object.entries(this.SG_HOLIDAYS).filter(([k])=>k.startsWith(this.state.calMonth))
+      .map(([k,name])=>({key:k, name, day:new Date(k+'T00:00:00Z').toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short',timeZone:'UTC'})}));
+  }
+  // Holidays across the whole roster period (range may span more than one month).
+  holidaysInRange(){
+    const rs=this.state.rangeStart, re=this.state.rangeEnd;
+    return Object.entries(this.SG_HOLIDAYS).filter(([k])=>k>=rs && k<=re)
+      .sort((a,b)=>a[0]<b[0]?-1:1)
+      .map(([k,name])=>({key:k, name, day:new Date(k+'T00:00:00Z').toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short',timeZone:'UTC'})}));
+  }
+  // Label for the roster span — one month ("February 2026") or a span ("Feb – Mar 2026").
+  rangeSpanLabel(){
+    const rs=(this.state.rangeStart||'').slice(0,7), re=(this.state.rangeEnd||'').slice(0,7);
+    if(!rs||!re) return this.monthLabel(this.state.calMonth);
+    if(rs===re) return this.monthLabel(rs);
+    const [ys,ms]=rs.split('-').map(Number), [ye,me]=re.split('-').map(Number);
+    const sd=new Date(Date.UTC(ys,ms-1,1)), ed=new Date(Date.UTC(ye,me-1,1));
+    const sm=sd.toLocaleDateString('en-GB',{month:'short',timeZone:'UTC'});
+    const em=ed.toLocaleDateString('en-GB',{month:'short',timeZone:'UTC'});
+    return ys===ye ? `${sm} – ${em} ${ye}` : `${sm} ${ys} – ${em} ${ye}`;
+  }
+
+  renderVals(){
+    const s=this.state;
+    const mk=(n)=>({...n, active:n.key===s.screen, onClick:()=>this.setScreen(n.key)});
+    const byKey=(k)=>this.NAV.find(n=>n.key===k);
+    const advanced=s.mode==='advanced';
+    const nav=[
+      {title:'', items:[byKey('home')].map(mk)},
+      {title:'SET UP', items:['dates','staff','shifts','rules','requests'].map(k=>mk(byKey(k)))},
+    ];
+    if(advanced){
+      nav.push({title:'CONSTRAINTS', items:['requirements','successions','counts','affinities','coverings'].map(k=>mk(byKey(k)))});
+      nav.push({title:'OUTPUT', items:['export','generate','schedule'].map(k=>mk(byKey(k)))});
+    } else {
+      nav.push({title:'OUTPUT', items:['generate','schedule'].map(k=>mk(byKey(k)))});
+    }
+    nav.push({title:'SYSTEM', items:['saveload'].map(k=>mk(byKey(k)))});
+    nav.push({title:'APPENDIX · OPTIONAL', items:['appendix'].map(k=>mk(byKey(k)))});
+    const crumbMap={home:'Home',dates:'Step 1 · Dates',staff:'Step 2 · Staff',shifts:'Step 3 · Shifts',rules:'Step 4 · Rules',requests:'Step 5 · Requests & Leave',requirements:'Staffing Requirements',successions:'Shift Successions',counts:'Shift Counts',affinities:'Affinities',coverings:'Shift Type Coverings',export:'Export Layout',generate:'Optimize & Export',schedule:'Roster',saveload:'Save & Load',appendix:'Appendix · AI Assistant (optional)'};
+    const _dens=this.props.density||'Comfortable';
+    let _sp=1,_dn=1;
+    if(_dens==='Compact'){_sp=.8;_dn=.9;} else if(_dens==='Spacious'){_sp=1.16;_dn=1.07;}
+    const _accent=this.props.accent||'#2360c4';
+    const _dark=s.theme==='dark';
+    const _brandink=_dark?`color-mix(in srgb, ${_accent} 60%, #ffffff)`:_accent;
+    const _brandtint=_dark?`color-mix(in srgb, ${_accent} 26%, #13171e)`:`color-mix(in srgb, ${_accent} 9%, #ffffff)`;
+    const _rootStyle=`--sp:${_sp};--dens:${_dn};--brand:${_accent};--brandink:${_brandink};--brandtint:${_brandtint};--onbrand:#ffffff;`;
+    const _reqs=s.cardsByKind.requirements||[];
+    const _shiftsForScreen=s.shifts.map(sh=>{
+      if(sh.auto) return {...sh};
+      const rn=this._shiftNeed(_reqs, sh.id);
+      return {...sh, need:(rn!=null?rn:(sh.need!=null?sh.need:0)), reqPreferred:this._baselineReqPreferred(_reqs, sh.id), reqExtra:this._extraReqCount(_reqs, sh.id), reqQualified:this._baselineReqQualified(_reqs, sh.id)};
+    });
+    const _cb=s.cardsByKind||{};
+    const _advCounts={requirements:(_cb.requirements||[]).length, successions:(_cb.successions||[]).length, counts:(_cb.counts||[]).length, affinities:(_cb.affinities||[]).length, coverings:(_cb.coverings||[]).length};
+    const _derived=[...this.deriveRules(s.rules, s.cardsByKind, s.shifts, _reqs), ...this.deriveShortcutRules(s.guidedShortcuts, s.cardsByKind)];
+    const _recordCatalog={};
+    ['requirements','successions','counts','affinities','coverings'].forEach(k=>{ _recordCatalog[k]=(s.cardsByKind[k]||[]).map(c=>({uid:c.uid, kind:k, desc:c.desc, weight:c.weight, disabled:c.disabled, fields:(c.fields||[]).map(f=>({k:f.k, v:f.v, quick:this._fieldNumeric(f.k)}))})); });
+    const _workedShifts=s.shifts.filter(sh=>!sh.auto);
+    const _rosterDays=this.rosterDays();
+    const _needsMap={}; _workedShifts.forEach(sh=>{ const n=this._shiftNeed(_reqs,sh.id); _needsMap[sh.id]=(n!=null?n:(sh.need!=null?sh.need:0)); });
+    const _dayShiftId=(_workedShifts.find(x=>x.id==='AM')||_workedShifts[0]||{}).id;
+    const _nightId=(_workedShifts.find(x=>x.id==='N'||/night/i.test(x.name||''))||{}).id;
+    // Per-code colour derived from shift START TIME (3A). Curated warm→cool ramp, assigned to
+    // worked shifts ordered by start so mornings read warm / nights dark, but every code stays
+    // unique. Single source of truth for the roster grid, coverage and day views.
+    const _startOf=(sh)=>{ const r=this._parseRange(sh.time); if(!r.start) return 99; const [h,m]=r.start.split(':').map(Number); return h+((m||0)/60); };
+    const _CODEPAL=[
+      {fill:'#fbeed6',ink:'#8a5e0c',bar:'#e0a638'},{fill:'#f7f0d9',ink:'#8a6a12',bar:'#c2a02f'},
+      {fill:'#eaf1dd',ink:'#5a6f22',bar:'#8ba53f'},{fill:'#dcefec',ink:'#1c6b62',bar:'#3a9488'},
+      {fill:'#e6eefb',ink:'#245bb0',bar:'#4d84d8'},{fill:'#ebe4f6',ink:'#5b3b9c',bar:'#8763c9'},
+      {fill:'#f9e6ec',ink:'#a23255',bar:'#cc5378'},{fill:'#232a36',ink:'#e4eaf5',bar:'#39445a',dark:true},
+    ];
+    const _shiftColors={}; [..._workedShifts].sort((a,b)=>_startOf(a)-_startOf(b)).forEach((sh,i)=>{ _shiftColors[sh.id]=_CODEPAL[i%_CODEPAL.length]; });
+    const _shiftMetaMap={}; s.shifts.forEach(sh=>{ _shiftMetaMap[sh.id]={name:sh.name, dur:(sh.durationMinutes!=null?sh.durationMinutes:(sh.credit||0)), time:sh.time, start:_startOf(sh)}; });
+    const _monthTitle=this.monthLabel((s.rangeStart||'2026-02').slice(0,7));
+    const _seniors=s.staff.filter(p=>p.role==='Senior').length;
+    const _rulesOn=_derived.filter(r=>r.on).length;
+    const _homeStats=[
+      {value:String(s.staff.length),label:'NURSES'},
+      {value:String(_seniors),label:'SENIORS'},
+      {value:String(_workedShifts.length),label:'SHIFT TYPES'},
+      {value:String(this.durationDays()),label:'ROSTER DAYS'},
+      {value:String(_rulesOn),label:'RULES ON'},
+    ];
+    const _wizard=this.WIZARD.map(w=>{
+      let summary=w.summary;
+      if(w.key==='dates') summary=this.monthLabel(s.calMonth)+' · '+this.durationDays()+' days';
+      else if(w.key==='staff') summary=s.staff.length+' nurses · '+_seniors+' seniors';
+      else if(w.key==='shifts') summary=_workedShifts.length+' shifts · '+_workedShifts.map(sh=>sh.id).join(' / ');
+      else if(w.key==='rules') summary=_rulesOn+' of '+_derived.length+' rules on';
+      else if(w.key==='requests') summary=this.countRequests(s.reqData)+' requests entered';
+      return {...w, summary};
+    });
+    return {
+      theme:s.theme, rootStyle:_rootStyle, mode:s.mode, navOpen:s.navOpen, nav,
+      setMode:this.setMode, toggleTheme:this.toggleTheme, openNav:this.openNav, closeNav:this.closeNav,
+      themeIcon: s.theme==='light'?'fa-solid fa-moon':'fa-solid fa-sun',
+      crumb: crumbMap[s.screen]||'Home',
+      isHome: s.screen==='home',
+      isDates: s.screen==='dates',
+      isStaff: s.screen==='staff',
+      isShifts: s.screen==='shifts',
+      isRules: s.screen==='rules',
+      isRequests: s.screen==='requests',
+      isGenerate: s.screen==='generate',
+      isSchedule: s.screen==='schedule',
+      isAppendix: s.screen==='appendix',
+      isRequirements: s.screen==='requirements',
+      isSuccessions: s.screen==='successions',
+      isCounts: s.screen==='counts',
+      isAffinities: s.screen==='affinities',
+      isCoverings: s.screen==='coverings',
+      isExport: s.screen==='export',
+      isSaveload: s.screen==='saveload',
+      cardEditor:{ go:this.setScreen, data:this.CARD_DATA, cards:s.cardsByKind, add:this.cardAdd, update:this.cardUpdate, del:this.cardDelete, setDisabled:this.cardSetDisabled,
+        peopleOptions:{ groups:this.peopleGroupsAll(s).map(g=>g.id), people:s.staff.map(p=>p.id) },
+        shiftOptions:{ groups:s.shiftGroups.map(g=>g.id), shifts:s.shifts.map(sh=>sh.id) },
+        workedShifts:s.shifts.filter(sh=>!sh.auto).map(sh=>sh.id),
+        shiftGroupMap:Object.fromEntries(s.shiftGroups.map(g=>[g.id,[...g.members]])),
+        durations:Object.fromEntries(s.shifts.filter(sh=>sh.durationMinutes).map(sh=>[sh.id,sh.durationMinutes])),
+        creditMinutes:480, leaveId:'LEAVE', totalDates:this.rangeDates().length||28,
+        leavePinned:Object.entries(s.reqData||{}).filter(([pid,pr])=>Object.values(pr||{}).some(r=>r&&r.kind==='leave')).map(([pid])=>pid),
+        dateAutoGroups:['ALL','WEEKDAY','WEEKEND','SUNDAY','MONDAY','TUESDAY','WEDNESDAY','THURSDAY','FRIDAY','SATURDAY'],
+        dateGroups:s.dateGroups.map(g=>g.id) },
+      setScreen:this.setScreen,
+      newSchedule:this.newSchedule,
+      toast:s.toast, toastShown:!!s.toast, dismissToast:this.dismissToast,
+      confirmShown:!!s.confirmDelete,
+      confirmTitle: s.confirmDelete?s.confirmDelete.title:'',
+      confirmLines: s.confirmDelete?s.confirmDelete.lines:[],
+      confirmHasLines: !!(s.confirmDelete && s.confirmDelete.lines.length),
+      confirmNoLines: !!(s.confirmDelete && !s.confirmDelete.lines.length),
+      cancelConfirm:this.cancelConfirm, confirmDeleteNow:this.confirmDeleteNow, stopProp:(e)=>e.stopPropagation(),
+      homeVals:{ mode:s.mode, setMode:this.setMode, wizard:_wizard, go:this.setScreen, stats:_homeStats },
+      datesVals:{
+        monthLabel:this.rangeSpanLabel(), rangeStart:s.rangeStart, rangeEnd:s.rangeEnd,
+        duration:this.durationDays(), weeks:this.computeCalendar(), holidays:this.holidaysInRange(),
+        importHolidays:s.importHolidays, setField:this.setField, go:this.setScreen,
+        prevMonth:()=>this.shiftCalMonth(-1), nextMonth:()=>this.shiftCalMonth(1),
+        jumpStart:()=>this.gotoCalMonth((s.rangeStart||'').slice(0,7)),
+        gotoMonth:this.gotoCalMonth,
+        startMonth:(s.rangeStart||'').slice(0,7), endMonth:(s.rangeEnd||'').slice(0,7), calMonth:s.calMonth,
+        rangeMonths:this.rangeMonths(),
+        weekendKeys:this.rangeDates().filter(x=>x.weekend).map(x=>x.key),
+        weekdayKeys:this.rangeDates().filter(x=>!x.weekend).map(x=>x.key),
+        groups:s.dateGroups, editGroup:s.editDGroup, groupDraft:s.dgroupDraft,
+        groupAdd:this.dgroupAdd, groupEdit:this.dgroupEdit, groupCancel:this.dgroupCancel,
+        groupDraftName:this.dgroupDraftName, groupToggleDay:this.dgroupToggleDay, groupSetDays:this.dgroupSetDays, groupSave:this.dgroupSave, groupDelete:this.dgroupDelete,
+      },
+      staffVals:{ people:s.staff, groups:s.staffGroups, autoGroups:this.peopleGroupsAll(s).filter(g=>g.auto).map(g=>({id:g.id, count:g.members.length+(g.members.length===1?' nurse':' nurses')})), editK:s.editStaff, draft:s.staffDraft, reorder:this.staffReorder, groupReorder:this.staffGroupReorder,
+        del:this.staffDelete, dup:this.staffDuplicate, edit:this.staffEdit, cancel:this.staffCancel, save:this.staffSave, draftSet:this.staffDraftSet, toggleGroup:this.staffToggleGroup, add:this.staffAdd, go:this.setScreen, notify:this.showToast,
+        editGroup:s.editGroup, groupDraft:s.groupDraft, groupAdd:this.groupAdd, groupEdit:this.groupEdit, groupCancel:this.groupCancel, groupDraftName:this.groupDraftName, groupToggleMember:this.groupToggleMember, groupSave:this.groupSave, groupDelete:this.groupDelete },
+      shiftsVals:{ shifts:_shiftsForScreen, groups:s.shiftGroups, editK:s.editShift, draft:s.shiftDraft, reorder:this.shiftReorder, groupReorder:this.shiftGroupReorder,
+        del:this.requestDeleteShift, edit:this.shiftEdit, cancel:this.shiftCancel, save:this.shiftSave, draftSet:this.shiftDraftSet, add:this.shiftAdd, go:this.setScreen, openReq:()=>this.openAdvanced('requirements'),
+        allShifts:s.shifts.filter(sh=>!sh.auto).map(sh=>sh.id),
+        editGroup:s.editSGroup, groupDraft:s.sgroupDraft, groupAdd:this.sgroupAdd, groupEdit:this.sgroupEdit, groupCancel:this.sgroupCancel, groupDraftName:this.sgroupDraftName, groupToggleMember:this.sgroupToggleMember, groupSave:this.sgroupSave, groupDelete:this.sgroupDelete },
+      exportVals:{ sections:s.exportSecs, editK:s.editExport, draft:s.exportDraft,
+        countShiftOptions:[...(s.shifts||[]).filter(sh=>!sh.auto).map(sh=>sh.id),'OFF','LEAVE'],
+        del:this.exportDelete, edit:this.exportEdit, cancel:this.exportCancel, save:this.exportSave, draftSet:this.exportDraftSet, add:this.exportAdd },
+      rulesVals:{ cats:this.groupRules(_derived), toggle:this.toggleRule, onCount:_derived.filter(r=>r.on).length, total:_derived.length, go:this.setScreen, mode:s.mode,
+        advCounts:_advCounts, openAdvanced:this.openAdvanced, setParam:this.ruleSetParam,
+        admin:s.rulesAdmin, setAdmin:this.setRulesAdmin, kindLabels:this.KIND_LABEL, recordCatalog:_recordCatalog,
+        categoryOptions:this.CAT_ORDER.map(c=>({name:c, icon:this.CAT_ICONS[c]||'fa-sliders'})),
+        addShortcut:this.shortcutAdd, updateShortcut:this.shortcutUpdate, deleteShortcut:this.shortcutDelete },
+      requestsVals:{ people:s.staff, peopleGroups:this.peopleGroupsAll(s).map(g=>({id:g.id, members:[...g.members]})), days:this.DAYS, requests:s.reqData, kind:s.reqKind, shift:s.reqShift,
+        shiftTypes:(s.shifts||[]).filter(sh=>!sh.reserved&&!sh.auto).map(sh=>({id:sh.id,name:sh.name})),
+        shiftGroups:(s.shiftGroups||[]).map(g=>({id:g.id,name:'Group · '+((g.members||[]).join(', ')||'empty')})),
+        dateGroups:(s.dateGroups||[]).map(g=>({id:g.id, count:(g.members||[]).length})),
+        setKind:this.reqSetKind, setShift:this.reqSetShift, cell:this.reqCell, setCells:this.reqSetCells, reqCount:this.countRequests(s.reqData), go:this.setScreen, notify:this.showToast },
+      generateVals:{
+        runState:s.runState, progress:Math.round(s.progress), aiOpen:s.aiOpen, chat:s.chat, aiThinking:s.aiThinking,
+        fixes:this.AIFIXES, appliedFixes:s.appliedFixes,
+        apply:this.applyFix, openAi:this.openAi, closeAi:this.closeAi, run:this.runOptimize, reset:this.resetRun, send:this.sendChat,
+        go:this.setScreen, rulesOn:_rulesOn, provider:s.llmProvider, model:s.llmModel,
+        timeout:300, people:s.staff.length, days:this.DAYS.length, shiftTypes:_workedShifts.length, notify:this.showToast,
+      },
+      scheduleVals:{
+        people:s.staff, days:_rosterDays, schedule:s.schedule,
+        warnings:this.computeWarnings(s.schedule, s.staff, _rosterDays, _needsMap, _nightId, _dayShiftId), selectedCell:s.selectedCell,
+        select:this.selectCell, setCell:this.setCell, undo:this.undo, undoCount:s.undoStack.length,
+        view:s.scheduleView, setView:this.setScheduleView, dragStart:this.dragStart, dropOn:this.dropOn, go:this.setScreen,
+        loading:s.scheduleLoading, shiftMeta:_shiftMetaMap, shiftColors:_shiftColors, workedIds:_workedShifts.map(x=>x.id), needs:_needsMap, nightId:_nightId, dayShiftId:_dayShiftId, monthTitle:_monthTitle, creditMinutes:480, contractTarget:160,
+        // FABRICATED for the mockup (see feasibility note in ScreenSchedule): the exported XLSX
+        // carries the solver Score + Status and per-day count rows (rows 6/7 + count rows in the
+        // real export). Surfaced here so the summary bands have something to render. A real build
+        // reads these from the completed job (score/solverStatus) + the exporter's count rows.
+        solverStatus: s.runState==='feasible' ? 'FEASIBLE' : (s.runState==='infeasible' ? 'INFEASIBLE' : 'OPTIMAL'),
+        score: s.runState==='infeasible' ? null : (s.appliedFixes.length>0 ? 1840 : 2010),
+      },
+      appendixVals:{
+        provider:s.llmProvider, model:s.llmModel, apiKey:s.llmKey, tested:s.llmTested,
+        setLlm:this.setLlm, test:this.testLlm,
+        fixes:this.AIFIXES, appliedFixes:s.appliedFixes, apply:this.applyFix,
+        chat:s.chat, aiThinking:s.aiThinking, send:this.sendChat, notify:this.showToast,
+      },
+    };
+  }
+  deriveCfg(r){
+    if(r.params && r.params.length && r.cfgTpl){
+      let out=r.cfgTpl;
+      r.params.forEach(p=>{ out=out.split('{'+p.key+'}').join(p.value); });
+      return out;
+    }
+    return r.cfg;
+  }
+  // Binding of a guided rule to real advanced constraint records (by tag). Rules share a single
+  // source of truth with the Advanced "Constraints" library: every guided rule below is a pinned,
+  // friendly projection of one or more constraint records. There is no separate "global policy"
+  // source — a rule is either a constraint projection or a built-in structural rule.
+  RULE_BIND={
+    rest_after_night:{kind:'successions', tag:'rest_after_night', badge:'patterns', maps:'Shift type succession'},
+    min_rest_week:{kind:'counts', tag:'min_rest_week', badge:'expr', op:'≥', unit:'/ week', adjLabel:'Rest days per week', maps:'Shift count'},
+    avoid_nights:{kind:'counts', tag:'avoid_nights', badge:'expr', op:'≤', unit:'/ month', adjLabel:'Max nights per month', maps:'Shift count'},
+    contracted_hours:{kind:'counts', tag:'contracted_hours', badge:'hours', maps:'Shift count'},
+    preceptee_pair:{kind:'coverings', tag:'preceptee_pair', badge:'text', text:'Same shift', maps:'Shift type covering'},
+    preceptee_day:{kind:'counts', tag:'preceptee_day', badge:'text', text:'Day shifts only', maps:'Shift count'},
+    fair_weekend:{kind:'counts', tag:'fair_weekend', badge:'text', text:'Even spread', maps:'Shift count'},
+    fair_load:{kind:'counts', tag:'fair_load', badge:'text', text:'Even spread', maps:'Shift count'},
+  };
+  BUILTIN_RULES={one_per_day:1};
+  _exprNum(e){ const m=String(e||'').match(/-?\d+(\.\d+)?/); return m?Number(m[0]):null; }
+  _exprSetNum(e,n){ return String(e||'').replace(/-?\d+(\.\d+)?/, String(n)); }
+  toggleRecordRule=(kind,tag)=>this.setState(s=>{ const recs=(s.cardsByKind[kind]||[]).filter(c=>c.tag===tag); if(!recs.length) return {}; const willDisable=recs.some(c=>!c.disabled); return {cardsByKind:{...s.cardsByKind,[kind]:(s.cardsByKind[kind]||[]).map(c=>c.tag===tag?{...c,disabled:willDisable}:c)}}; });
+  setRuleRecordValue=(kind,tag,n)=>this.setState(s=>({cardsByKind:{...s.cardsByKind,[kind]:(s.cardsByKind[kind]||[]).map(c=>c.tag===tag?{...c,fields:c.fields.map(f=>f.k==='Expression'?{...f,v:this._exprSetNum(f.v,n)}:f)}:c)}}));
+  // Build display-ready guided rules: reqBound + record-bound rules are live projections of the
+  // constraint records; the rest are "built-in" structural rows. No rule stands alone as a policy.
+  deriveRules(rules, cb, shifts, reqs){
+    const worked=(shifts||[]).filter(sh=>!sh.auto);
+    const fv=(c,k)=>this._reqFieldVal(c,k);
+    return (rules||[]).map(r=>{
+      if(r.reqBound){
+        const params=worked.map(sh=>{ const v=this._shiftNeed(reqs,sh.id); return {key:'req_'+sh.id, label:sh.name+' ('+sh.id+') minimum', type:'number', value:(v!=null?v:0), unit:'nurses', min:0, max:20}; });
+        const cfg=worked.map(sh=>{ const v=this._shiftNeed(reqs,sh.id); return sh.id+' '+(v!=null?v:0); }).join(' · ');
+        const advExtras=[];
+        worked.forEach(sh=>{ const ex=this._extraReqCount(reqs,sh.id); const q=this._baselineReqQualified(reqs,sh.id);
+          if(q && String(q).toUpperCase()!=='ALL') advExtras.push(sh.id+' — qualified: '+q);
+          if(ex>0) advExtras.push(sh.id+' — '+ex+' date-specific variant'+(ex>1?'s':'')); });
+        // Echo any shift-type coefficient (staffing multiplier) set in the advanced editor so it's
+        // visible from the guided flow. Default 1 means "one assignment = one unit of coverage".
+        const _seenCoef=new Set();
+        (reqs||[]).forEach(c=>{ if(!c.coef) return; Object.entries(c.coef).forEach(([sid,val])=>{ const n=Number(val); if(!Number.isNaN(n) && n>1 && !_seenCoef.has(sid)){ _seenCoef.add(sid); advExtras.push((sid==='LEAVE'?'Leave':sid)+' — counts as '+n+' toward the headcount (coefficient)'); } }); });
+        return {...r, params, cfg, cfgTpl:null, source:'record', linkLabel:r.maps, advScreen:'requirements', advExtras};
+      }
+      const bind=this.RULE_BIND[r.id];
+      if(bind){
+        const recs=(cb[bind.kind]||[]).filter(c=>c.tag===bind.tag);
+        const configured=recs.length>0;
+        const on=configured && !recs.every(c=>c.disabled);
+        let cfg=r.cfg, params=[];
+        if(!configured){ cfg='Not set up'; }
+        else if(bind.badge==='patterns'){ cfg=recs.map(c=>fv(c,'Pattern')).filter(Boolean).join(' · ')||r.cfg; }
+        else if(bind.badge==='expr'){ const n=this._exprNum(fv(recs[0],'Expression')); cfg=bind.op+' '+(n!=null?n:'?')+' '+bind.unit; if(n!=null) params=[{key:'recexpr',label:bind.adjLabel,type:'number',value:n,unit:bind.unit,min:0,max:99}]; }
+        else if(bind.badge==='hours'){ const c=recs[0]; const n=this._exprNum(fv(c,'Expression')); const hrs=(c.unit==='hour')?n:(n!=null?n/2:null); cfg=(hrs!=null?hrs:'?')+'h / month'; }
+        else if(bind.badge==='text'){ cfg=bind.text; }
+        const srcNames=recs.map(c=>c.desc).filter(Boolean);
+        const linkLabel=(bind.maps||r.maps)+(srcNames.length?(' · '+(srcNames.length===1?srcNames[0]:srcNames.length+' records')):'');
+        return {...r, on, locked:!configured, cfg, cfgTpl:null, params, source:'record', linkLabel, advScreen:bind.kind, configured, toggleTitle:'Turns the underlying constraint on/off — also affects Advanced'};
+      }
+      if(this.BUILTIN_RULES[r.id]) return {...r, on:true, locked:true, source:'builtin', params:[]};
+      // No standalone "global policy" rules remain — anything unbound is treated as a constraint
+      // record still awaiting setup in Advanced, never an engine-wide policy of its own.
+      return {...r, source:'record', configured:false, on:false, locked:true, params:[]};
+    });
+  }
+  KIND_LABEL={requirements:'Shift type requirement', successions:'Shift type succession', counts:'Shift count', affinities:'Shift affinity', coverings:'Shift type covering'};
+  _findCardByUid(cb, kind, uid){ return (cb[kind]||[]).find(c=>c.uid===uid); }
+  _fieldNumeric(fk){ return fk==='Required'||fk==='Preferred'||fk==='Expression'; }
+  _fieldDisplay(rec, fk){ const f=(rec.fields||[]).find(x=>x.k===fk); const val=f?f.v:''; if(fk==='Expression'){ const n=this._exprNum(val); return (n!=null?n:val); } return val; }
+  // User-authored guided shortcuts: each is bound to a real constraint record (by uid) and exposes
+  // a chosen subset of that record's fields as quick-edit Adjust controls. Still a true projection.
+  deriveShortcutRules(shortcuts, cb){
+    return (shortcuts||[]).map(sc=>{
+      const rec=this._findCardByUid(cb, sc.kind, sc.uid);
+      const configured=!!rec;
+      const on=configured && !rec.disabled;
+      const flds=sc.fields||[];
+      let cfg='Source constraint removed', params=[];
+      if(configured){
+        const parts=flds.map(fk=>fk+' '+this._fieldDisplay(rec,fk));
+        cfg=parts.length?parts.join(' · '):(rec.desc||'Shortcut');
+        params=flds.map(fk=>({key:'fld::'+fk, label:fk, type:(this._fieldNumeric(fk)?'number':'text'), value:this._fieldDisplay(rec,fk), unit:'', min:0, max:9999}));
+      }
+      return {id:sc._k, cat:sc.cat||'Custom shortcuts', title:(configured?(rec.desc||sc.title||'Shortcut'):(sc.title||'Shortcut')), desc:sc.desc||'', maps:this.KIND_LABEL[sc.kind]||'', linkLabel:this.KIND_LABEL[sc.kind]||'', source:'record', configured, on, locked:!configured, cfg, cfgTpl:null, params, advScreen:sc.kind, isUserShortcut:true, scKind:sc.kind, scUid:sc.uid, scFields:flds, toggleTitle:'Turns the underlying constraint on/off — also affects Advanced'};
+    });
+  }
+  _setRecordDesc(cb, kind, uid, desc){ return {...cb,[kind]:(cb[kind]||[]).map(c=>c.uid===uid?{...c,desc:desc}:c)}; }
+  shortcutAdd=(sc)=>{
+    if((this.state.guidedShortcuts||[]).some(x=>x.uid===sc.uid)){ this.showToast('That constraint is already pinned to Rules.'); return; }
+    this.setState(s=>{ const cardsByKind=(sc.title?this._setRecordDesc(s.cardsByKind, sc.kind, sc.uid, sc.title):s.cardsByKind); return {guidedShortcuts:[...s.guidedShortcuts, {...sc, _k:'gs'+(this._shortcutSeq++)}], cardsByKind}; });
+  };
+  shortcutUpdate=(k,sc)=>this.setState(s=>{ const cardsByKind=(sc.title?this._setRecordDesc(s.cardsByKind, sc.kind, sc.uid, sc.title):s.cardsByKind); return {guidedShortcuts:s.guidedShortcuts.map(x=>x._k===k?{...x,...sc}:x), cardsByKind}; });
+  shortcutDelete=(k)=>this.setState(s=>({guidedShortcuts:s.guidedShortcuts.filter(x=>x._k!==k)}));
+  CAT_ORDER=['Rest & recovery','Staffing levels','Skill mix','Fairness','Contracted hours','Preferences','Custom shortcuts'];
+  CAT_ICONS={'Rest & recovery':'fa-bed','Staffing levels':'fa-users','Skill mix':'fa-user-graduate','Fairness':'fa-scale-balanced','Contracted hours':'fa-business-time','Preferences':'fa-heart','Custom shortcuts':'fa-thumbtack'};
+  groupRules(rules){
+    const order=this.CAT_ORDER;
+    const icons=this.CAT_ICONS;
+    const cats=[...order];
+    rules.forEach(r=>{ if(r.cat && !cats.includes(r.cat)) cats.push(r.cat); });
+    return cats.map(cat=>({cat, icon:icons[cat]||'fa-sliders', items:rules.filter(r=>r.cat===cat).map(r=>({...r, cfg:this.deriveCfg(r)}))})).filter(g=>g.items.length>0);
+  }
+  RULE_CATS = ['Rest & recovery','Staffing levels','Skill mix','Fairness','Contracted hours','Preferences'];
+  countRequests(data){ let n=0; Object.values(data||{}).forEach(pr=>{ n+=Object.keys(pr).length; }); return n; }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div class="ns-fade">
+  <div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:var(--space-4);margin-bottom:var(--space-4);">
+    <div style="flex:1;min-width:240px;">
+      <div style="font:600 var(--m-sm) var(--font-ui);letter-spacing:.03em;color:var(--brandink);text-transform:uppercase;margin-bottom:8px;">STEP 5 · REQUESTS &amp; LEAVE</div>
+      <h1 style="font:800 var(--t-display) var(--font-display);letter-spacing:-.02em;margin:0 0 8px;line-height:1.05;">Requests &amp; Leave</h1>
+      <p style="margin:0;color:var(--ink2);max-width:66ch;">Pin approved <b>paid leave</b>, set off-days, and enter shift preferences. Use <b>Quick paint</b> to drag presets across cells, or <b>Edit</b> to open a cell and set a precise weight per shift.</p>
+    </div>
+    <button onClick="{{ toGenerate }}" style="height:44px;padding:0 20px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-body) var(--font-ui);display:inline-flex;align-items:center;gap:9px;" style-hover="filter:brightness(.94)">Continue <i class="fa-solid fa-arrow-right" style="font-size:12px;"></i></button>
+  </div>
+
+  <sc-if value="{{ flash }}" hint-placeholder-val="{{ false }}">
+    <div style="background:var(--successtint);border:1px solid var(--success);padding:10px 13px;margin-bottom:var(--space-3);display:flex;align-items:center;gap:9px;font-size:var(--t-sm);color:var(--ink);"><i class="fa-solid fa-circle-check" style="color:var(--success);"></i> {{ flash }}</div>
+  </sc-if>
+
+  <!-- toolbar -->
+  <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:var(--space-3);">
+    <div role="tablist" style="display:inline-flex;border:1px solid var(--line);">
+      <button onClick="{{ setNormal }}" style="{{ normalTabStyle }}"><i class="fa-solid fa-arrow-pointer" style="margin-right:6px;font-size:11px;"></i>Edit cells</button>
+      <button onClick="{{ setQuick }}" style="{{ quickTabStyle }}"><i class="fa-solid fa-brush" style="margin-right:6px;font-size:11px;"></i>Quick paint</button>
+    </div>
+
+    <sc-if value="{{ quickMode }}" hint-placeholder-val="{{ false }}">
+      <div style="font-size:var(--t-sm);color:var(--ink3);display:inline-flex;align-items:center;gap:8px;"><i class="fa-solid fa-brush" style="color:var(--ink3);"></i> Configure your preset below, then drag across the grid.</div>
+    </sc-if>
+
+    <button onClick="{{ openPrefsCsv }}" style="height:40px;padding:0 14px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:8px;" style-hover="background:var(--panel)"><i class="fa-solid fa-file-arrow-up"></i> Requests CSV</button>
+    <button onClick="{{ openHistCsv }}" style="height:40px;padding:0 14px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:8px;" style-hover="background:var(--panel)"><i class="fa-solid fa-clock-rotate-left"></i> History CSV</button>
+    <button onClick="{{ toggleClear }}" style="height:40px;padding:0 14px;background:transparent;border:1px solid var(--line);color:var(--error);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:8px;" style-hover="background:var(--errortint)"><i class="fa-solid fa-eraser"></i> Clear data</button>
+  </div>
+
+  <!-- quick paint panel -->
+  <sc-if value="{{ quickMode }}" hint-placeholder-val="{{ false }}">
+    <div style="border:1px solid var(--line);background:var(--surface);padding:16px 18px;margin-bottom:var(--space-3);">
+      <div style="font:800 var(--t-cardhead) var(--font-display);letter-spacing:-.02em;">Add shift preference</div>
+      <div style="font-size:var(--t-sm);color:var(--ink3);margin-top:2px;margin-bottom:14px;">Pick one or more targets and a weight, then drag across grid cells to apply. Select nothing to clear cells instead.</div>
+      <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;margin-bottom:8px;">Shift types <span style="color:var(--ink3);font-weight:500;text-transform:none;letter-spacing:0;">— select multiple to set each</span></div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;">
+        <sc-for list="{{ paintChips }}" as="c" hint-placeholder-count="7">
+          <button onClick="{{ c.onClick }}" title="{{ c.title }}" style="{{ c.style }}"><span style="{{ c.boxStyle }}">{{ c.check }}</span>{{ c.label }}</button>
+        </sc-for>
+      </div>
+      <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;margin-bottom:8px;">Weight <span style="color:var(--ink3);font-weight:500;text-transform:none;letter-spacing:0;">(priority)</span></div>
+      <div style="display:flex;align-items:center;gap:8px;max-width:440px;">
+        <input value="{{ qWeight }}" onInput="{{ onQWeight }}" placeholder="0" style="flex:1;height:38px;padding:0 12px;border:1px solid var(--line);background:var(--surface);font:600 var(--t-body) var(--font-mono);">
+        <button onClick="{{ onWeightPosInf }}" style="height:38px;padding:0 14px;border:1px solid var(--success);background:var(--successtint);color:var(--success);font:700 var(--t-sm) var(--font-mono);flex:none;" style-hover="filter:brightness(.97)">+∞</button>
+        <button onClick="{{ onWeightNegInf }}" style="height:38px;padding:0 14px;border:1px solid var(--warn);background:var(--warntint);color:var(--warn);font:700 var(--t-sm) var(--font-mono);flex:none;" style-hover="filter:brightness(.97)">−∞</button>
+      </div>
+      <div style="font-size:var(--t-sm);margin-top:14px;padding:8px 12px;{{ quickStatusStyle }}"><i class="fa-solid fa-brush" style="margin-right:6px;"></i>{{ quickStatus }}</div>
+    </div>
+  </sc-if>
+  <sc-if value="{{ clearOpen }}" hint-placeholder-val="{{ false }}">
+    <div style="border:1px solid var(--line);background:var(--surface);padding:14px 16px;margin-bottom:var(--space-3);">
+      <div style="font:700 var(--t-sm) var(--font-ui);margin-bottom:10px;">Clear data <span style="color:var(--ink3);font-weight:500;">— each asks to confirm first</span></div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;">
+        <sc-for list="{{ clearBtns }}" as="cb" hint-placeholder-count="6">
+          <button onClick="{{ cb.onClick }}" style="height:34px;padding:0 12px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);color:var(--ink2);" style-hover="background:var(--panel)">{{ cb.label }}</button>
+        </sc-for>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- legend + leave note -->
+  <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin-bottom:var(--space-3);">
+    <span style="display:inline-flex;align-items:center;gap:6px;font:500 var(--t-sm) var(--font-ui);color:var(--ink2);"><span style="width:12px;height:12px;background:var(--brandtint);border:1px solid var(--brand);"></span>Paid leave (pin)</span>
+    <span style="display:inline-flex;align-items:center;gap:6px;font:500 var(--t-sm) var(--font-ui);color:var(--ink2);"><span style="width:12px;height:12px;background:var(--errortint);border:1px solid var(--error);"></span>Off</span>
+    <span style="display:inline-flex;align-items:center;gap:6px;font:500 var(--t-sm) var(--font-ui);color:var(--ink2);"><span style="width:12px;height:12px;background:var(--successtint);border:1px solid var(--success);"></span>Prefers (+)</span>
+    <span style="display:inline-flex;align-items:center;gap:6px;font:500 var(--t-sm) var(--font-ui);color:var(--ink2);"><span style="width:12px;height:12px;background:var(--warntint);border:1px solid var(--warn);"></span>Avoid (−)</span>
+    <span style="display:inline-flex;align-items:center;gap:6px;font:500 var(--t-sm) var(--font-ui);color:var(--ink2);"><span style="width:12px;height:12px;background:var(--warntint);border:1px solid var(--warn);"></span>H-n · recent history</span>
+    <span style="display:inline-flex;align-items:center;gap:6px;font:500 var(--t-sm) var(--font-ui);color:var(--ink2);"><span style="width:12px;height:12px;background:var(--brandtint);border:1px solid var(--brand);"></span>Date-group column</span>
+  </div>
+  <div style="display:flex;align-items:flex-start;gap:9px;border:1px solid var(--line);background:var(--panel);padding:10px 13px;margin-bottom:var(--space-3);">
+    <i class="fa-solid fa-layer-group" style="color:var(--brandink);margin-top:2px;font-size:12px;"></i>
+    <div style="font-size:var(--t-sm);color:var(--ink2);"><b>Shortcut rows &amp; columns.</b> The top <b style="color:var(--brandink);">people-group</b> rows (tagged <span style="font-family:var(--font-mono);">GROUP</span>) set one preference for every nurse in the group at once — synced from your Staff groups. Likewise the tinted <b style="color:var(--brandink);">date-group</b> columns (ALL, WEEKDAY, WEEKEND, and your own groups) apply to every date in the group. The <b>H-n</b> columns capture each nurse's <b>recent history</b> — the shifts worked in the days just before the roster starts — which the rest &amp; succession rules read; click a slot (or the <span style="font-family:var(--font-mono);">+</span>) to edit it. Group rows have no history.</div>
+  </div>
+  <div style="display:flex;align-items:flex-start;gap:9px;border:1px solid var(--line);background:var(--brandtint);padding:10px 13px;margin-bottom:var(--space-4);">
+    <i class="fa-solid fa-thumbtack" style="color:var(--brandink);margin-top:2px;font-size:12px;"></i>
+    <div style="font-size:var(--t-sm);color:var(--ink2);"><b style="color:var(--brandink);">Paid leave is a hard pin.</b> A pinned <span style="font-family:var(--font-mono);font-weight:700;">Leave</span> day is always honored, credits 8h toward the contracted-hours total, and never fills a shift's coverage. Weight is ignored for leave — it is a pin, not a weighted request.</div>
+  </div>
+
+  <!-- matrix -->
+  <div style="border:1px solid var(--line);overflow:auto;background:var(--surface);max-height:68vh;">
+    <table style="border-collapse:collapse;min-width:max-content;">
+      <thead>
+        <tr>
+          <th style="position:sticky;left:0;top:0;z-index:4;background:var(--panel);border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:8px 12px;text-align:left;font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;min-width:150px;">Nurse</th>
+          <sc-for list="{{ histCols }}" as="h" hint-placeholder-count="2">
+            <th title="{{ h.title }}" style="position:sticky;top:0;z-index:1;padding:6px 4px;min-width:34px;text-align:center;border-bottom:1px solid var(--line);border-right:1px solid var(--line2);background:var(--warntint);"><div style="font:600 var(--m-xs) var(--font-mono);color:var(--ink2);">{{ h.label }}</div></th>
+          </sc-for>
+          <sc-for list="{{ dgHead }}" as="g" hint-placeholder-count="3">
+            <th title="{{ g.title }}" style="{{ g.headStyle }}"><div style="display:flex;flex-direction:column;align-items:center;gap:2px;"><i class="fa-solid {{ g.icon }}" style="font-size:11px;color:var(--brandink);"></i><div style="font:700 var(--m-xs) var(--font-ui);letter-spacing:.02em;color:var(--brandink);white-space:nowrap;">{{ g.id }}</div><div style="font:600 9px var(--font-mono);color:var(--ink3);white-space:nowrap;">{{ g.count }}</div></div></th>
+          </sc-for>
+          <sc-for list="{{ days }}" as="d" hint-placeholder-count="14">
+            <th style="{{ d.headStyle }}"><div style="font:600 var(--m-md) var(--font-mono);line-height:1;color:{{ d.numColor }};">{{ d.d }}</div><div style="font:600 var(--m-xs) var(--font-mono);color:var(--ink3);margin-top:2px;">{{ d.label }}</div><sc-if value="{{ d.holiday }}" hint-placeholder-val="{{ false }}"><span style="display:block;width:5px;height:5px;background:var(--warn);margin:3px auto 0;"></span></sc-if></th>
+          </sc-for>
+        </tr>
+      </thead>
+      <tbody>
+        <sc-for list="{{ rows }}" as="r" hint-placeholder-count="12">
+          <tr>
+            <td title="{{ r.memberTitle }}" style="position:sticky;left:0;z-index:2;background:var(--surface);border-right:1px solid var(--line);border-bottom:1px solid var(--line2);padding:6px 12px;">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <span style="{{ r.idStyle }}">{{ r.id }}</span>
+                <span style="{{ r.roleStyle }}">{{ r.role }}</span>
+              </div>
+            </td>
+            <sc-for list="{{ r.hist }}" as="hc" hint-placeholder-count="2">
+              <td style="{{ hc.style }}" title="{{ hc.title }}" onClick="{{ hc.onClick }}"><span style="{{ hc.markStyle }}">{{ hc.mark }}</span></td>
+            </sc-for>
+            <sc-for list="{{ r.groupCells }}" as="gc" hint-placeholder-count="3">
+              <td style="{{ gc.style }}" title="{{ gc.title }}" onClick="{{ gc.onClick }}" onMouseDown="{{ gc.onDown }}" onMouseEnter="{{ gc.onEnter }}"><span style="{{ gc.markStyle }}">{{ gc.mark }}</span></td>
+            </sc-for>
+            <sc-for list="{{ r.cells }}" as="c" hint-placeholder-count="14">
+              <td style="{{ c.style }}" title="{{ c.title }}" onClick="{{ c.onClick }}" onMouseDown="{{ c.onDown }}" onMouseEnter="{{ c.onEnter }}"><span style="{{ c.markStyle }}">{{ c.mark }}</span></td>
+            </sc-for>
+          </tr>
+        </sc-for>
+      </tbody>
+    </table>
+  </div>
+  <div style="margin-top:12px;font-size:var(--t-sm);color:var(--ink3);display:flex;align-items:center;gap:8px;"><i class="fa-solid fa-circle-info"></i> {{ reqCount }} requests · {{ modeHint }}</div>
+
+  <!-- current shift requests (FR-SR-39) — derived from the matrix above -->
+  <div style="margin-top:var(--space-5);background:var(--surface);border:1px solid var(--line);">
+    <div style="padding:14px 18px;border-bottom:1px solid var(--line2);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+      <div style="font:800 var(--t-cardhead) var(--font-display);letter-spacing:-.02em;">Current shift requests</div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div style="position:relative;display:inline-flex;align-items:center;">
+          <i class="fa-solid fa-magnifying-glass" style="position:absolute;left:10px;font-size:11px;color:var(--ink3);pointer-events:none;"></i>
+          <input value="{{ crQuery }}" onInput="{{ onCrQuery }}" placeholder="Search person, date, shift…" style="height:34px;width:230px;max-width:52vw;padding:0 28px 0 28px;border:1px solid var(--line);background:var(--surface);font:500 var(--t-sm) var(--font-ui);">
+          <sc-if value="{{ crHasQuery }}" hint-placeholder-val="{{ false }}"><button onClick="{{ clearCrQuery }}" aria-label="Clear search" style="position:absolute;right:6px;width:20px;height:20px;background:transparent;border:none;color:var(--ink3);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;"><i class="fa-solid fa-xmark" style="font-size:11px;"></i></button></sc-if>
+        </div>
+        <div style="font:600 var(--m-sm) var(--font-mono);color:var(--ink3);">{{ crCount }}</div>
+      </div>
+    </div>
+    <sc-if value="{{ crEmpty }}" hint-placeholder-val="{{ true }}">
+      <div style="padding:22px 18px;font-size:var(--t-sm);color:var(--ink3);text-align:center;">No shift requests defined yet. Click on any cell in the matrix above to add preferences.</div>
+    </sc-if>
+    <sc-if value="{{ crNoMatch }}" hint-placeholder-val="{{ false }}">
+      <div style="padding:22px 18px;font-size:var(--t-sm);color:var(--ink3);text-align:center;">No requests match “{{ crQuery }}”.</div>
+    </sc-if>
+    <sc-if value="{{ crHasItems }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div style="display:grid;grid-template-columns:minmax(120px,1.4fr) minmax(90px,1fr) 64px 76px minmax(90px,1fr);gap:10px;padding:8px 12px;border-bottom:1px solid var(--line);background:var(--panel);font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;">
+          <span>Person</span><span>Date</span><span style="text-align:center;">Shift</span><span style="text-align:center;">Weight</span><span>Intent</span>
+        </div>
+        <div style="max-height:340px;overflow:auto;">
+          <sc-for list="{{ crList }}" as="e" hint-placeholder-count="6">
+            <div style="{{ e.rowStyle }}">
+              <span style="display:inline-flex;align-items:center;gap:6px;overflow:hidden;"><i class="fa-solid fa-user-group" style="font-size:9px;{{ e.personIconStyle }}"></i><span style="font:600 var(--t-sm) var(--font-ui);color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ e.person }}</span></span>
+              <span style="{{ e.dateStyle }}"><i class="fa-solid fa-layer-group" style="font-size:9px;{{ e.groupIconStyle }}"></i>{{ e.date }}</span>
+              <span style="{{ e.shiftStyle }}">{{ e.shift }}</span>
+              <span style="{{ e.weightStyle }}">{{ e.weight }}</span>
+              <span style="display:inline-flex;align-items:center;gap:7px;"><span style="{{ e.dotStyle }}"></span><span style="{{ e.capStyle }}">{{ e.caption }}</span></span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </sc-if>
+  </div>
+
+  <!-- current people history (FR-SR-40) — derived from the H-n columns above -->
+  <div style="margin-top:var(--space-4);background:var(--surface);border:1px solid var(--line);">
+    <div style="padding:14px 18px;border-bottom:1px solid var(--line2);display:flex;align-items:baseline;justify-content:space-between;gap:10px;">
+      <div style="font:800 var(--t-cardhead) var(--font-display);letter-spacing:-.02em;">Current people history</div>
+      <div style="font:600 var(--m-sm) var(--font-mono);color:var(--ink3);">{{ chCount }}</div>
+    </div>
+    <sc-if value="{{ chEmpty }}" hint-placeholder-val="{{ true }}">
+      <div style="padding:22px 18px;font-size:var(--t-sm);color:var(--ink3);text-align:center;">No history entries defined yet. Click on any history cell in the matrix above to add entries.</div>
+    </sc-if>
+    <sc-if value="{{ chHasItems }}" hint-placeholder-val="{{ false }}">
+      <div style="max-height:300px;overflow:auto;">
+        <sc-for list="{{ chList }}" as="ph" hint-placeholder-count="4">
+          <div style="display:grid;grid-template-columns:minmax(120px,1fr) 3fr;gap:12px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line2);">
+            <span style="font:600 var(--t-sm) var(--font-ui);color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ ph.person }}</span>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;">
+              <sc-for list="{{ ph.entries }}" as="en" hint-placeholder-count="3">
+                <span style="{{ en.chipStyle }}"><span style="{{ en.hnStyle }}">{{ en.hn }}</span><span style="{{ en.valStyle }}">{{ en.label }}</span></span>
+              </sc-for>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+    </sc-if>
+  </div>
+
+  <!-- preference editor modal -->
+  <sc-if value="{{ prefOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closePref }}" style="position:fixed;inset:0;background:rgba(8,10,14,.5);z-index:60;animation:ns-scrim var(--dur-fast) var(--ease);"></div>
+    <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:61;width:440px;max-width:92vw;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow-dialog);animation:ns-fade var(--dur-base) var(--ease);">
+      <div style="padding:16px 18px;border-bottom:1px solid var(--line2);">
+        <div style="font:800 var(--t-cardhead) var(--font-display);letter-spacing:-.02em;">Cell preference</div>
+        <div style="font-size:var(--t-sm);color:var(--ink3);margin-top:2px;">{{ prefWho }}</div>
+      </div>
+      <div style="padding:18px;">
+        <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;margin-bottom:8px;">DAY STATE</div>
+        <div role="tablist" style="display:flex;border:1px solid var(--line);margin-bottom:16px;">
+          <button onClick="{{ setAvail }}" style="{{ availStyle }}">Available</button>
+          <button onClick="{{ setLeave }}" style="{{ leaveStyle }}">Paid leave</button>
+          <button onClick="{{ setOff }}" style="{{ offStyle }}">Requests off</button>
+        </div>
+        <sc-if value="{{ showWeights }}" hint-placeholder-val="{{ true }}">
+          <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;margin-bottom:4px;">Set weights per shift type &amp; group</div>
+          <div style="font-size:var(--t-sm);color:var(--ink3);margin-bottom:12px;">Positive prefers, negative avoids, 0 means no preference. Use ∞ / -∞ for a hard pin.</div>
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <sc-for list="{{ weightRows }}" as="wr" hint-placeholder-count="4">
+              <div>
+                <div style="{{ wr.sepStyle }}"><span>{{ wr.sepLabel }}</span><span style="width:108px;text-align:center;color:var(--ink2);">{{ wr.sepRight }}</span></div>
+                <div style="display:flex;align-items:center;gap:10px;">
+                  <div style="min-width:44px;font:700 var(--t-sm) var(--font-mono);white-space:nowrap;">{{ wr.id }}</div>
+                  <div style="flex:1;min-width:0;font-size:var(--t-sm);color:var(--ink3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ wr.name }}</div>
+                  <input value="{{ wr.value }}" onInput="{{ wr.onInput }}" placeholder="0" style="width:64px;height:34px;padding:0 8px;border:1px solid var(--line);background:var(--surface);font-size:var(--t-sm);text-align:center;flex:none;">
+                  <div style="width:34px;font-size:var(--t-sm);font-weight:600;color:{{ wr.tagColor }};flex:none;">{{ wr.tag }}</div>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+        <sc-if value="{{ showLeaveNote }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:var(--t-sm);color:var(--ink2);background:var(--brandtint);border:1px solid var(--brand);padding:10px 12px;">Pinned as paid leave — always honored, credits 8h, no coverage. Weight is not applicable.</div>
+        </sc-if>
+        <sc-if value="{{ showOffNote }}" hint-placeholder-val="{{ false }}">
+          <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;margin-bottom:4px;">OFF WEIGHT</div>
+          <div style="font-size:var(--t-sm);color:var(--ink3);margin-bottom:10px;">A soft preference for a rest day off — the nurse's weekend equivalent (usually ~2 per week). Positive prefers OFF, negative avoids it, 0 means no preference. Use ∞ for a hard pin.</div>
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+            <div style="width:44px;font:700 var(--t-sm) var(--font-mono);">OFF</div>
+            <div style="flex:1;font-size:var(--t-sm);color:var(--ink3);">Requests off</div>
+            <input value="{{ offWeight }}" onInput="{{ onOffWeight }}" placeholder="0" style="width:64px;height:34px;padding:0 8px;border:1px solid var(--line);background:var(--surface);font-size:var(--t-sm);text-align:center;">
+            <div style="width:34px;font-size:var(--t-sm);font-weight:600;color:{{ offTagColor }};">{{ offTag }}</div>
+          </div>
+          <div style="font-size:var(--t-sm);color:var(--ink2);background:var(--errortint);border:1px solid var(--error);padding:10px 12px;">Requests a rest day off — the nurse's weekend equivalent. Leave weight blank for a plain OFF request.</div>
+        </sc-if>
+      </div>
+      <div style="padding:14px 18px;border-top:1px solid var(--line2);display:flex;justify-content:space-between;gap:10px;">
+        <button onClick="{{ clearCell }}" style="height:40px;padding:0 14px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);color:var(--ink2);" style-hover="background:var(--panel)">Clear cell</button>
+        <div style="display:flex;gap:10px;">
+          <button onClick="{{ closePref }}" style="height:40px;padding:0 14px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);" style-hover="background:var(--panel)">Cancel</button>
+          <button onClick="{{ savePref }}" style="height:40px;padding:0 18px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-sm) var(--font-ui);" style-hover="filter:brightness(.94)">Save</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- history editor modal -->
+  <sc-if value="{{ histOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeHist }}" style="position:fixed;inset:0;background:rgba(8,10,14,.5);z-index:60;animation:ns-scrim var(--dur-fast) var(--ease);"></div>
+    <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:61;width:380px;max-width:92vw;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow-dialog);animation:ns-fade var(--dur-base) var(--ease);">
+      <div style="padding:16px 18px;border-bottom:1px solid var(--line2);">
+        <div style="font:800 var(--t-cardhead) var(--font-display);letter-spacing:-.02em;">Edit history</div>
+        <div style="font-size:var(--t-sm);color:var(--ink3);margin-top:2px;">{{ histWho }}</div>
+      </div>
+      <div style="padding:18px;">
+        <div style="font-size:var(--t-sm);color:var(--ink3);margin-bottom:10px;">Set the shift worked on this pre-period day. History may include OFF and Leave.</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;">
+          <sc-for list="{{ histOpts }}" as="ho" hint-placeholder-count="7">
+            <button onClick="{{ ho.onClick }}" style="{{ ho.style }}">{{ ho.label }}</button>
+          </sc-for>
+        </div>
+      </div>
+      <div style="padding:14px 18px;border-top:1px solid var(--line2);display:flex;justify-content:flex-end;">
+        <button onClick="{{ closeHist }}" style="height:40px;padding:0 16px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);" style-hover="background:var(--panel)">Done</button>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- csv modal -->
+  <sc-if value="{{ csvOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeCsv }}" style="position:fixed;inset:0;background:rgba(8,10,14,.5);z-index:60;animation:ns-scrim var(--dur-fast) var(--ease);"></div>
+    <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:61;width:460px;max-width:92vw;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow-dialog);animation:ns-fade var(--dur-base) var(--ease);">
+      <div style="padding:16px 18px;border-bottom:1px solid var(--line2);display:flex;align-items:center;justify-content:space-between;">
+        <div style="font:800 var(--t-cardhead) var(--font-display);letter-spacing:-.02em;">{{ csvTitle }}</div>
+        <button onClick="{{ closeCsv }}" aria-label="Close" style="width:32px;height:32px;background:transparent;border:1px solid var(--line);color:var(--ink2);" style-hover="background:var(--panel)"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div style="padding:18px;">
+        <div style="font-size:var(--t-sm);color:var(--ink2);margin-bottom:10px;">{{ csvDesc }}</div>
+        <pre style="margin:0 0 14px;background:var(--bg);border:1px solid var(--line2);padding:10px 12px;font:500 var(--t-sm) var(--font-mono);color:var(--ink2);overflow:auto;">{{ csvExample }}</pre>
+        <label style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;border:1.5px dashed var(--line);background:var(--panel);padding:22px;text-align:center;cursor:pointer;" style-hover="border-color:var(--brand)">
+          <i class="fa-solid fa-file-arrow-up" style="font-size:22px;color:var(--ink3);"></i>
+          <div style="font-weight:600;font-size:var(--t-sm);">Choose a .csv / .txt file</div>
+          <input type="file" accept=".csv,.txt" onChange="{{ onCsvFile }}" style="display:none;">
+        </label>
+        <button onClick="{{ loadCsvSample }}" style="margin-top:12px;width:100%;height:38px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;justify-content:center;gap:8px;" style-hover="background:var(--panel)"><i class="fa-solid fa-flask"></i> Load sample data (demo)</button>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- clear confirm -->
+  <sc-if value="{{ confirmOpen }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed;inset:0;background:rgba(8,10,14,.5);z-index:62;animation:ns-scrim var(--dur-fast) var(--ease);"></div>
+    <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:63;width:420px;max-width:92vw;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow-dialog);animation:ns-fade var(--dur-base) var(--ease);">
+      <div style="padding:18px 20px;border-bottom:1px solid var(--line2);display:flex;align-items:center;gap:12px;">
+        <div style="width:34px;height:34px;background:var(--errortint);color:var(--error);display:flex;align-items:center;justify-content:center;flex:none;"><i class="fa-solid fa-triangle-exclamation"></i></div>
+        <div style="font:800 var(--t-cardhead) var(--font-display);letter-spacing:-.01em;">Confirm</div>
+      </div>
+      <div style="padding:18px 20px;font-size:var(--t-sm);color:var(--ink2);line-height:1.6;">{{ confirmText }}</div>
+      <div style="padding:14px 20px;border-top:1px solid var(--line2);display:flex;justify-content:flex-end;gap:10px;">
+        <button onClick="{{ confirmCancel }}" style="height:40px;padding:0 16px;background:transparent;border:1px solid var(--line);font:600 var(--t-body) var(--font-ui);" style-hover="background:var(--panel)">Cancel</button>
+        <button onClick="{{ confirmYes }}" style="height:40px;padding:0 18px;background:var(--error);color:#fff;border:none;font:700 var(--t-body) var(--font-ui);" style-hover="filter:brightness(.94)">Clear</button>
+      </div>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1220,&quot;height&quot;:760}}">
+class Component extends DCLogic {
+  _worked(){ const v=this.props.vals||{}; const t=v.shiftTypes; return (Array.isArray(t)&&t.length)?t:[{id:'AM',name:'Morning'},{id:'PM',name:'Evening'},{id:'N',name:'Night'},{id:'LD',name:'Long day'}]; }
+  _prefTargets(){ const v=this.props.vals||{}; const groups=Array.isArray(v.shiftGroups)?v.shiftGroups:[]; return [...this._worked(), ...groups]; }
+  state={
+    mode:'normal', qTypes:[], qWeight:'0',
+    req:null, hist:null,
+    drag:null,
+    prefOpen:false, prefCell:null, draft:null,
+    histOpen:false, histCell:null,
+    csvOpen:null, clearOpen:false,
+    confirmOpen:false, confirmText:'', confirmFn:null,
+    crQuery:'',
+    flash:'', seeded:false,
+  };
+
+  _seed(){
+    if(this.state.seeded) return;
+    const v=this.props.vals||{};
+    const src=v.requests||{};
+    const req={};
+    Object.keys(src).forEach(pid=>{ req[pid]={}; Object.keys(src[pid]).forEach(dn=>{
+      const r=src[pid][dn];
+      if(!r) return;
+      if(r.kind==='leave') req[pid][dn]={state:'leave'};
+      else if(r.kind==='off') req[pid][dn]={state:'off'};
+      else if(r.kind==='want') req[pid][dn]={state:'prefs',prefs:[{shift:r.shift,weight:5}]};
+      else if(r.kind==='avoid') req[pid][dn]={state:'prefs',prefs:[{shift:r.shift,weight:-5}]};
+    }); });
+    const hist={'Kevin Ong':['OFF','LEAVE'],'Aisha Rahman':['AM'],'Nurul Huda':['N','OFF','N']};
+    this.state.req=req; this.state.hist=hist; this.state.seeded=true;
+  }
+  componentWillMount(){ this._seed(); }
+  componentDidMount(){
+    this._seed(); if(!this.state.req){ this.setState({req:{},hist:{}}); }
+    this._onUp=()=>{ const d=this.state.drag; if(!d) return; const cells=this._cellsIn(d); if(cells.length) this._paintCells(cells, d.op); this.setState({drag:null}); };
+    window.addEventListener('mouseup', this._onUp);
+    this.forceUpdate();
+  }
+  componentWillUnmount(){ if(this._onUp) window.removeEventListener('mouseup', this._onUp); if(this._ft) clearTimeout(this._ft); }
+
+  _flash(m){ this.setState({flash:m}); if(this._ft) clearTimeout(this._ft); this._ft=setTimeout(()=>this.setState({flash:''}),3400); }
+  _people(){ return (this.props.vals&&this.props.vals.people)||[]; }
+  _peopleGroups(){ return (this.props.vals&&this.props.vals.peopleGroups)||[]; }
+  // FR-SR-03 / AC-SR-02: rows are people groups first, then individual people.
+  _entries(){ const groups=this._peopleGroups().map(g=>({id:g.id, isGroup:true, members:g.members||[]}));
+    const people=this._people().map((p,i)=>({id:p.id, isGroup:false, role:p.role, personIndex:i+1}));
+    return [...groups, ...people]; }
+  _days(){ return (this.props.vals&&this.props.vals.days)||[]; }
+
+  parseW(str){ const t=String(str==null?'':str).trim().toLowerCase(); if(t==='∞'||t==='inf'||t==='infinity'||t==='+∞') return Infinity; if(t==='-∞'||t==='-inf'||t==='-infinity') return -Infinity; if(t==='') return 0; const n=parseInt(t,10); return Number.isNaN(n)?null:n; }
+  fmtW(w){ if(w===Infinity) return '+∞'; if(w===-Infinity) return '−∞'; if(w>0) return '+'+w; return ''+w; }
+
+  // ---- date-group columns (target many dates at once) ----
+  _dateGroupCols(){ const days=this._days();
+    const wk=days.filter(d=>!d.weekend&&!d.holiday).length, we=days.filter(d=>d.weekend||d.holiday).length;
+    const auto=[
+      {id:'ALL', desc:'Every date in the period', count:days.length, icon:'fa-calendar'},
+      {id:'WEEKDAY', desc:'Mon–Fri working days', count:wk, icon:'fa-briefcase'},
+      {id:'WEEKEND', desc:'Saturdays, Sundays & holidays', count:we, icon:'fa-mug-hot'},
+    ];
+    const custom=(this.props.vals&&Array.isArray(this.props.vals.dateGroups))?this.props.vals.dateGroups.filter(g=>g.id!=='ALL'&&g.id!=='WEEKDAY'&&g.id!=='WEEKEND').map(g=>({id:g.id, desc:'Custom date group', count:g.count, icon:'fa-layer-group'})):[];
+    return [...auto, ...custom]; }
+  _allCols(){ const g=this._dateGroupCols().map(x=>({type:'group', colId:'g:'+x.id, meta:x})); const days=this._days().map((d,i)=>({type:'day', colId:i+1, meta:d, di:i})); return [...g, ...days]; }
+  _colLabel(colId){ if(typeof colId==='string'&&colId.indexOf('g:')===0) return colId.slice(2)+' · date group'; return 'Feb '+colId; }
+
+  // ---- paint (quick) ----
+  _paintTargets(){ const groups=(this.props.vals&&Array.isArray(this.props.vals.shiftGroups))?this.props.vals.shiftGroups:[];
+    return [ ...this._worked().map(w=>({id:w.id,name:w.name})),
+      {id:'OFF',name:'Off / rest day'}, {id:'LEAVE',name:'Paid leave (pin)'},
+      ...groups.map(g=>({id:g.id,name:g.name||g.id})),
+      {id:'ALL',name:'All worked shifts'} ]; }
+  toggleType=(id)=>this.setState(s=>{ const t=(s.qTypes||[]).slice(); const i=t.indexOf(id); if(i>=0) t.splice(i,1); else t.push(id); return {qTypes:t}; });
+  _cellsIn(d){ const r0=Math.min(d.r0,d.r1),r1=Math.max(d.r0,d.r1),c0=Math.min(d.c0,d.c1),c1=Math.max(d.c0,d.c1); const out=[]; const ents=this._entries(); const cols=this._allCols();
+    for(let r=r0;r<=r1;r++){ const p=ents[r]; if(!p) continue; for(let c=c0;c<=c1;c++){ const col=cols[c]; if(col) out.push({person:p.id,colId:col.colId}); } } return out; }
+  _computeCell(existing){ const s=this.state; const types=s.qTypes||[]; if(!types.length) return null;
+    const w=this.parseW(s.qWeight);
+    if(types.includes('LEAVE')) return {state:'leave'};
+    if(types.length===1 && types[0]==='OFF') return (w!=null&&w!==0)?{state:'off',weight:w}:{state:'off'};
+    const ids=types.filter(t=>t!=='OFF'&&t!=='LEAVE');
+    let prefs=(existing&&existing.state==='prefs')?existing.prefs.map(p=>({...p})):[];
+    ids.forEach(id=>{ const i=prefs.findIndex(p=>p.shift===id);
+      if(w===0){ if(i>=0) prefs.splice(i,1); }
+      else { if(i>=0) prefs[i].weight=w; else prefs.push({shift:id,weight:w}); } });
+    return prefs.length?{state:'prefs',prefs}:null; }
+  _paintCells(cells, op){ const s=this.state; const types=s.qTypes||[];
+    if(op!=='clear' && types.length && !types.includes('LEAVE')){ const w=this.parseW(s.qWeight); if(w==null) return; }
+    this.setState(st=>{ const req=this._clone(st.req);
+      cells.forEach(({person,colId})=>{ req[person]=req[person]||{};
+        if(op==='clear'||!types.length){ delete req[person][colId]; return; }
+        const nc=this._computeCell(req[person][colId]);
+        if(nc===null) delete req[person][colId]; else req[person][colId]=nc; });
+      return {req}; }); }
+  _clone(o){ return JSON.parse(JSON.stringify(o||{})); }
+
+  // ---- normal-mode preference editor ----
+  openPref=(person,col)=>{ const cell=((this.state.req||{})[person]||{})[col];
+    const weights={}; this._prefTargets().forEach(w=>weights[w.id]='');
+    let ds='avail', offWeight=''; if(cell&&cell.state==='leave') ds='leave'; else if(cell&&cell.state==='off'){ ds='off'; if(cell.weight!=null) offWeight=(cell.weight===Infinity?'∞':cell.weight===-Infinity?'-∞':String(cell.weight)); } else if(cell&&cell.state==='prefs') (cell.prefs||[]).forEach(p=>{ weights[p.shift]=(p.weight===Infinity?'∞':p.weight===-Infinity?'-∞':String(p.weight)); });
+    this.setState({prefOpen:true, prefCell:{person,col}, draft:{dayState:ds, weights, offWeight}}); };
+  closePref=()=>this.setState({prefOpen:false, prefCell:null, draft:null});
+  setDayState=(ds)=>this.setState(s=>({draft:{...s.draft, dayState:ds}}));
+  setWeight=(id,val)=>this.setState(s=>({draft:{...s.draft, weights:{...s.draft.weights,[id]:val}}}));
+  setOffWeight=(val)=>this.setState(s=>({draft:{...s.draft, offWeight:val}}));
+  clearCell=()=>{ const c=this.state.prefCell; if(!c) return; this.setState(s=>{ const req=this._clone(s.req); if(req[c.person]) delete req[c.person][c.col]; return {req, prefOpen:false, prefCell:null, draft:null}; }); };
+  savePref=()=>{ const c=this.state.prefCell, d=this.state.draft; if(!c||!d) return; this.setState(s=>{ const req=this._clone(s.req); req[c.person]=req[c.person]||{};
+    if(d.dayState==='leave') req[c.person][c.col]={state:'leave'};
+    else if(d.dayState==='off'){ const ow=this.parseW(d.offWeight); req[c.person][c.col]=(ow!=null&&ow!==0)?{state:'off',weight:ow}:{state:'off'}; }
+    else { const prefs=[]; this._prefTargets().forEach(w=>{ const pw=this.parseW(d.weights[w.id]); if(pw!=null && pw!==0) prefs.push({shift:w.id,weight:pw}); }); if(prefs.length) req[c.person][c.col]={state:'prefs',prefs}; else delete req[c.person][c.col]; }
+    return {req, prefOpen:false, prefCell:null, draft:null}; }); };
+
+  // ---- history editor ----
+  openHist=(person,index)=>this.setState({histOpen:true, histCell:{person,index}});
+  closeHist=()=>this.setState({histOpen:false, histCell:null});
+  clearPersonHist=()=>{ const c=this.state.histCell; if(!c) return; const had=((this.state.hist||{})[c.person]||[]).length>0; this.setState(s=>{ const hist=this._clone(s.hist); delete hist[c.person]; return {hist, histOpen:false, histCell:null}; }); if(had) this._flash('Cleared history for '+c.person+'.'); };
+  setHistVal=(val)=>{ const c=this.state.histCell; if(!c) return; this.setState(s=>{ const hist=this._clone(s.hist); const arr=(hist[c.person]||[]).slice();
+    if(val===''){ hist[c.person]=arr.slice(0,c.index); } else { if(c.index>=arr.length){ arr.push(val); } else { arr[c.index]=val; } hist[c.person]=arr; }
+    return {hist}; }); };
+
+  // ---- csv ----
+  openPrefsCsv=()=>this.setState({csvOpen:'prefs'});
+  openHistCsv=()=>this.setState({csvOpen:'history'});
+  closeCsv=()=>this.setState({csvOpen:null});
+  loadCsvSample=()=>{ const t=this.state.csvOpen; this.setState({csvOpen:null}); this._flash(t==='history'?'Loaded people history from CSV.':'Loaded shift requests from CSV.'); };
+  onCsvFile=()=>{ const t=this.state.csvOpen; this.setState({csvOpen:null}); this._flash(t==='history'?'Loaded people history from CSV.':'Loaded shift requests from CSV.'); };
+
+  // ---- clear ----
+  toggleClear=()=>this.setState(s=>({clearOpen:!s.clearOpen}));
+  _ask=(text,fn)=>this.setState({confirmOpen:true, confirmText:text, confirmFn:fn});
+  confirmCancel=()=>this.setState({confirmOpen:false, confirmText:'', confirmFn:null});
+  confirmYes=()=>{ const fn=this.state.confirmFn; this.setState({confirmOpen:false, confirmText:'', confirmFn:null}); if(fn) fn(); };
+
+  renderVals(){
+    const v=this.props.vals||{};
+    const s=this.state;
+    const req=s.req||{}; const hist=s.hist||{};
+    const days=this._days(); const people=this._people(); const entries=this._entries();
+    const quick=s.mode==='quick';
+    const HOLIDAY_BG='repeating-linear-gradient(135deg,var(--warntint) 0 3px,var(--surface) 3px 9px)';
+
+    // history columns
+    let maxH=0; people.forEach(p=>{ const h=(hist[p.id]||[]).length; if(h>maxH) maxH=h; });
+    const histN=maxH+1;
+    const histCols=[]; for(let i=0;i<histN;i++){ const n=histN-i; histCols.push({label:'H-'+n, title:'History slot H-'+n+' — what this nurse worked '+n+' day'+(n===1?'':'s')+' before the roster starts (H-1 is the day right before). Feeds rest & succession rules.'}); }
+
+    // count
+    let count=0; Object.keys(req).forEach(pid=>{ count+=Object.keys(req[pid]).length; });
+
+    // Current Shift Requests summary (FR-SR-39) — derived from the matrix
+    const colsForList=this._allCols();
+    const fmtColLabel=(colId)=>{ if(typeof colId==='string'&&colId.indexOf('g:')===0) return {label:colId.slice(2), isGroup:true}; const day=days[colId-1]; return {label: day?('Feb '+day.d):('#'+colId), isGroup:false}; };
+    const currentRequests=[];
+    entries.forEach(p=>{ const pr=req[p.id]||{};
+      colsForList.forEach(col=>{ const cell=pr[col.colId]; if(!cell) return; const cl=fmtColLabel(col.colId);
+        const base={person:p.id, personIsGroup:!!p.isGroup, date:cl.label, isGroup:cl.isGroup};
+        if(cell.state==='leave'){ currentRequests.push({...base, shift:'LEAVE', weight:'pinned', wColor:'var(--brandink)', caption:'paid leave · hard pin', capColor:'var(--brandink)', dot:'var(--brand)'}); }
+        else if(cell.state==='off'){ const w=cell.weight; const has=(w!=null); currentRequests.push({...base, shift:'OFF', weight:has?this.fmtW(w):'—', wColor:(w>0?'var(--success)':w<0?'var(--warn)':'var(--ink3)'), caption:(w>0?'wants off':w<0?'avoids off':'requests off'), capColor:(w>0?'var(--success)':w<0?'var(--warn)':'var(--ink2)'), dot:'var(--error)'}); }
+        else if(cell.state==='prefs'){ (cell.prefs||[]).forEach(pf=>{ const w=pf.weight; currentRequests.push({...base, shift:pf.shift, weight:this.fmtW(w), wColor:(w>0?'var(--success)':'var(--warn)'), caption:(w>0?'wants':'avoids'), capColor:(w>0?'var(--success)':'var(--warn)'), dot:(w>0?'var(--success)':'var(--warn)')}); }); }
+      });
+    });
+    const crListAll=currentRequests.map((e,i)=>({...e,
+      rowStyle:`display:grid;grid-template-columns:minmax(120px,1.4fr) minmax(90px,1fr) 64px 76px minmax(90px,1fr);gap:10px;align-items:center;padding:9px 12px;border-bottom:1px solid var(--line2);background:${i%2?'var(--panel)':'var(--surface)'};`,
+      dateStyle:`display:inline-flex;align-items:center;gap:6px;font:600 var(--t-sm) var(--font-ui);${e.isGroup?'color:var(--brandink);':'color:var(--ink);'}`,
+      groupTag:e.isGroup?'group':'', shiftStyle:`font:700 var(--m-xs) var(--font-mono);color:var(--ink2);`,
+      weightStyle:`font:700 var(--t-sm) var(--font-mono);color:${e.wColor};text-align:center;`,
+      capStyle:`font:600 var(--m-xs) var(--font-ui);letter-spacing:.02em;text-transform:uppercase;color:${e.capColor};`,
+      dotStyle:`width:8px;height:8px;border-radius:50%;background:${e.dot};flex:none;`,
+      groupIconStyle:e.isGroup?'':'display:none;', personIconStyle:e.personIsGroup?'color:var(--brandink);':'display:none;' }));
+    const crQuery=s.crQuery||''; const q=crQuery.trim().toLowerCase();
+    const crList=(q?crListAll.filter(e=>(e.person+' '+e.date+' '+e.shift+' '+e.weight+' '+e.caption).toLowerCase().includes(q)):crListAll)
+      .map((e,i)=>({...e, rowStyle:`display:grid;grid-template-columns:minmax(120px,1.4fr) minmax(90px,1fr) 64px 76px minmax(90px,1fr);gap:10px;align-items:center;padding:9px 12px;border-bottom:1px solid var(--line2);background:${i%2?'var(--panel)':'var(--surface)'};`}));
+    const crEmpty=crListAll.length===0; const crNoMatch=crListAll.length>0 && crList.length===0; const crHasItems=crList.length>0;
+
+    // Current People History summary (FR-SR-40) — each nurse with non-empty history, entries as H-n
+    const chList=[];
+    people.forEach(p=>{ const harr=hist[p.id]||[]; if(!harr.length) return;
+      const entries=harr.map((val,j)=>{ const n=harr.length-j; const lv=val==='LEAVE', off=val==='OFF';
+        return { hn:'H-'+n, label: lv?'Lv':off?'Off':val,
+          chipStyle:`display:inline-flex;align-items:baseline;gap:5px;border:1px solid ${lv?'var(--brand)':off?'var(--error)':'var(--line)'};background:${lv?'var(--brandtint)':off?'var(--errortint)':'var(--panel)'};padding:2px 8px;`,
+          hnStyle:'font:600 9px var(--font-mono);color:var(--ink3);',
+          valStyle:`font:700 var(--m-xs) var(--font-mono);color:${lv?'var(--brandink)':off?'var(--error)':'var(--ink)'};` }; });
+      chList.push({ person:p.id, entries }); });
+    const chEmpty=chList.length===0; const chHasItems=chList.length>0;
+
+
+    const daysV=days.map(d=>({ d:d.d, label:d.label, holiday:!!d.holiday, numColor:d.holiday?'var(--warn)':'var(--ink)',
+      headStyle:`position:sticky;top:0;z-index:1;padding:6px 4px;min-width:34px;text-align:center;border-bottom:1px solid var(--line);border-right:1px solid var(--line2);background:${d.holiday?HOLIDAY_BG:(d.weekend?'var(--panel)':'var(--surface)')};` }));
+
+    const roleShort={Senior:'S',Junior:'J',Preceptee:'P'};
+    const drag=s.drag;
+    const inSel=(ri,ci)=>{ if(!drag) return false; const r0=Math.min(drag.r0,drag.r1),r1=Math.max(drag.r0,drag.r1),c0=Math.min(drag.c0,drag.c1),c1=Math.max(drag.c0,drag.c1); return ri>=r0&&ri<=r1&&ci>=c0&&ci<=c1; };
+
+    const cellDisplay=(cell)=>{ // returns {bg,mark,mc,title}
+      if(!cell) return {bg:null,mark:'',mc:'color:var(--faint);',title:''};
+      if(cell.state==='leave') return {bg:'var(--brandtint)',mark:'Lv',mc:'font:700 var(--m-xs) var(--font-mono);color:var(--brandink);',title:'Paid leave — pinned (credits 8h, no coverage)'};
+      if(cell.state==='off') return {bg:'var(--errortint)',mark:'Off',mc:'font:700 var(--m-xs) var(--font-mono);color:var(--error);',title:'Requests off (rest day)'};
+      const prefs=cell.prefs||[]; if(!prefs.length) return {bg:null,mark:'',mc:'',title:''};
+      const top=prefs.slice().sort((a,b)=>Math.abs(b.weight)-Math.abs(a.weight))[0];
+      const allPos=prefs.every(p=>p.weight>0), allNeg=prefs.every(p=>p.weight<0);
+      const bg=allPos?'var(--successtint)':allNeg?'var(--warntint)':'var(--panel)';
+      const col=allPos?'var(--success)':allNeg?'var(--warn)':'var(--ink2)';
+      const extra=prefs.length>1?('+'+(prefs.length-1)):'';
+      const mc=`font:700 var(--m-xs) var(--font-mono);color:${col};${allNeg?'text-decoration:line-through;':''}`;
+      return {bg, mark:top.shift+(extra?('·'+extra):''), mc, title:prefs.map(p=>p.shift+' ('+this.fmtW(p.weight)+')').join(', ')};
+    };
+
+    // unified columns: date-group band, then individual days
+    const dgDefs=this._dateGroupCols();
+    const cols=this._allCols();
+    const G=dgDefs.length;
+    const dgHead=dgDefs.map((g,gi)=>({ id:g.id, icon:g.icon, count:g.count+(g.count===1?' day':' days'), title:g.desc+' — set one preference that applies to every date in this group',
+      headStyle:`position:sticky;top:0;z-index:1;padding:7px 9px;min-width:74px;text-align:center;border-bottom:1px solid var(--line);border-right:${gi===G-1?'2px':'1px'} solid var(--line);background:var(--brandtint);` }));
+
+    const mkCell=(p,ri,col,ci)=>{
+      const cell=(req[p.id]||{})[col.colId]; const disp=cellDisplay(cell);
+      const isGroup=col.type==='group'; const day=isGroup?null:col.meta; const lastG=isGroup&&ci===G-1;
+      const base=isGroup?'var(--panel)':(day.holiday?HOLIDAY_BG:(day.weekend?'var(--panel)':'var(--surface)'));
+      const bg=disp.bg||base;
+      const selected=inSel(ri,ci);
+      const onDown= quick ? (e)=>{ if(e&&e.preventDefault) e.preventDefault(); this.setState({drag:{r0:ri,c0:ci,r1:ri,c1:ci,op:((this.state.qTypes||[]).length===0)?'clear':'set'}}); } : (()=>{});
+      const onEnter= quick ? ()=>{ this.setState(st=> st.drag ? {drag:{...st.drag,r1:ri,c1:ci}} : null ); } : (()=>{});
+      const onClick= !quick ? ()=>this.openPref(p.id,col.colId) : (()=>{});
+      return { mark:disp.mark, markStyle:disp.mc, title:disp.title||(isGroup?('Set a shift preference across all '+col.meta.id+' dates'):(quick?'Drag to paint':'Click to edit')),
+        onDown, onEnter, onClick,
+        style:`${isGroup?'min-width:74px;':'width:34px;min-width:34px;'}height:34px;text-align:center;border-right:${lastG?'2px':'1px'} solid ${isGroup?'var(--line)':'var(--line2)'};border-bottom:1px solid var(--line2);background:${bg};cursor:pointer;user-select:none;-webkit-user-select:none;${selected?'box-shadow:inset 0 0 0 2px var(--brand);z-index:1;position:relative;':''}` };
+    };
+
+    const rows=entries.map((p,ri)=>{
+      const isGrp=p.isGroup;
+      const histCells=[];
+      if(isGrp){
+        // FR-SR-09: people-group rows have no history — em-dash placeholder, inert.
+        for(let i=0;i<histN;i++){ histCells.push({ mark:'—', markStyle:'font:600 var(--m-xs) var(--font-mono);color:var(--faint);',
+          title:'People groups have no history', onClick:(()=>{}),
+          style:'width:34px;min-width:34px;height:34px;text-align:center;border-right:1px solid var(--line2);border-bottom:1px solid var(--line2);background:var(--panel);' }); }
+      } else {
+        const harr=hist[p.id]||[];
+        const offset=histN-harr.length;
+        for(let i=0;i<histN;i++){
+          const real=i>=offset; const val=real?harr[i-offset]:'';
+          const clickable=i>=offset-1;
+          const showPlus=!val && clickable && !quick;
+          const label = val==='LEAVE'?'Lv':val==='OFF'?'Off':(val||(showPlus?'+':''));
+          histCells.push({ mark:label, markStyle:`font:600 var(--m-xs) var(--font-mono);color:${val==='LEAVE'?'var(--brandink)':val==='OFF'?'var(--error)':showPlus?'var(--faint)':'var(--ink2)'};`,
+            title: showPlus?'Add what this nurse worked before the roster starts':(clickable?'Edit this history entry':''),
+            onClick: (!quick && clickable) ? ()=>this.openHist(p.id,i-offset<0?harr.length:i-offset) : (()=>{}),
+            style:`width:34px;min-width:34px;height:34px;text-align:center;border-right:1px solid var(--line2);border-bottom:1px solid var(--line2);background:${real?'var(--warntint)':'var(--surface)'};${(!quick&&clickable)?'cursor:pointer;':''}` });
+        }
+      }
+      const allRowCells=cols.map((col,ci)=>mkCell(p,ri,col,ci));
+      const roleBadge=isGrp?'GROUP':(roleShort[p.role]||'');
+      const roleStyle=isGrp
+        ? 'font:700 9px var(--font-mono);letter-spacing:.04em;color:var(--brandink);border:1px solid var(--brand);background:var(--brandtint);padding:1px 5px;'
+        : 'font:600 9px var(--font-mono);color:var(--ink3);border:1px solid var(--line2);padding:1px 4px;';
+      return {id:p.id, isGroup:isGrp, memberTitle:isGrp?('Group of '+(p.members||[]).length+': '+((p.members||[]).join(', ')||'empty')):'', idStyle:`font-weight:${isGrp?'700':'600'};font-size:var(--t-sm);white-space:nowrap;`, role:roleBadge, roleStyle, hist:histCells, groupCells:allRowCells.slice(0,G), cells:allRowCells.slice(G)};
+    });
+
+    // quick status + paint chips
+    const qTypes=s.qTypes||[]; const qW=this.parseW(s.qWeight); const qNames=qTypes.join(', ');
+    const qs = !qTypes.length ? 'Drag over cells to clear existing requests. Empty cells will not change.'
+      : (!qTypes.includes('LEAVE') && qW==null) ? 'Enter a valid weight before dragging over cells to apply preferences.'
+      : qTypes.includes('LEAVE') ? 'Drag over cells to pin paid leave. Weight is ignored — leave is a hard pin.'
+      : qW===0 ? ('Drag over cells to remove '+qNames+'. Empty cells without it will not change.')
+      : ('Drag over cells to apply '+qNames+' with weight '+this.fmtW(qW)+'.');
+    const paintChips=this._paintTargets().map(t=>{ const on=qTypes.includes(t.id);
+      return {id:t.id, label:t.id, title:t.name, check:on?'✓':'', onClick:()=>this.toggleType(t.id),
+        style:`display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 12px;border:1px solid ${on?'var(--brand)':'var(--line)'};background:${on?'var(--brandtint)':'var(--surface)'};color:${on?'var(--brandink)':'var(--ink)'};font:600 var(--t-sm) var(--font-ui);`,
+        boxStyle:`width:15px;height:15px;flex:none;border:1.5px solid ${on?'var(--brand)':'var(--line)'};background:${on?'var(--brand)':'transparent'};color:var(--onbrand);display:inline-flex;align-items:center;justify-content:center;font-size:10px;line-height:1;`}; });
+    const qStatusStyle = !qTypes.length ? 'color:var(--ink2);background:var(--panel);border:1px solid var(--line2);'
+      : (!qTypes.includes('LEAVE') && qW==null) ? 'color:var(--error);background:var(--errortint);border:1px solid var(--error);'
+      : 'color:var(--ink2);background:var(--panel);border:1px solid var(--line2);';
+
+    // pref editor derived
+    const draft=s.draft||{dayState:'avail',weights:{}};
+    const targets=this._prefTargets(); const firstGroupId=(this.props.vals&&Array.isArray(this.props.vals.shiftGroups)&&this.props.vals.shiftGroups[0])?this.props.vals.shiftGroups[0].id:null;
+    const groupIds=new Set((this.props.vals&&Array.isArray(this.props.vals.shiftGroups)?this.props.vals.shiftGroups:[]).map(g=>g.id));
+    const weightRows=targets.map((w,i)=>{ const raw=draft.weights?draft.weights[w.id]:''; const pw=this.parseW(raw); const tag=(raw===''||pw===0||pw==null)?'':this.fmtW(pw);
+      const isFirstType=(i===0); const isFirstGroup=(w.id===firstGroupId); const sepShow=isFirstType||isFirstGroup;
+      return {id:w.id, name:w.name, value:raw, onInput:(e)=>this.setWeight(w.id,e.target.value), tag, tagColor:(pw>0?'var(--success)':pw<0?'var(--warn)':'var(--ink3)'),
+        sepLabel:isFirstType?'SHIFT TYPES':isFirstGroup?'SHIFT GROUPS':'', sepRight:isFirstType?'WEIGHT':'',
+        sepStyle:sepShow?`display:flex;align-items:baseline;justify-content:space-between;gap:8px;font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;${isFirstGroup?'border-top:1px solid var(--line2);padding-top:10px;':''}margin-bottom:6px;`:'display:none;'}; });
+    const offRaw=draft.offWeight||''; const offPW=this.parseW(offRaw); const offTag=(offRaw===''||offPW===0||offPW==null)?'':this.fmtW(offPW);
+    const prefWho=s.prefCell?`${s.prefCell.person} · ${this._colLabel(s.prefCell.col)}`:'';
+    const segT=(on)=>`flex:1;height:36px;background:${on?'var(--ink)':'transparent'};color:${on?'var(--on-ink)':'var(--ink2)'};border:none;font:${on?'700':'500'} var(--t-sm) var(--font-ui);border-right:1px solid var(--line);`;
+    const segTLast=(on)=>`flex:1;height:36px;background:${on?'var(--ink)':'transparent'};color:${on?'var(--on-ink)':'var(--ink2)'};border:none;font:${on?'700':'500'} var(--t-sm) var(--font-ui);`;
+
+    // history opts — worked items (synced) + reserved OFF/LEAVE (per FR-SR-19: items only, no groups)
+    const histOptDefs=[['','Clear'], ...this._worked().map(w=>[w.id,w.id]), ['OFF','Off'],['LEAVE','Leave']];
+    const histOpts=histOptDefs.map(([val,label])=>({label, onClick:()=>this.setHistVal(val),
+      style:`height:34px;padding:0 13px;background:${val==='LEAVE'?'var(--brandtint)':'var(--surface)'};border:1px solid ${val==='LEAVE'?'var(--brand)':'var(--line)'};color:${val==='LEAVE'?'var(--brandink)':val===''?'var(--error)':'var(--ink)'};font:600 var(--t-sm) var(--font-ui);`}));
+    const histWho=s.histCell?`${s.histCell.person}`:'';
+
+    // clear buttons
+    const clearAllReq=()=>{ this.setState({req:{}}); this._flash('All shift requests cleared.'); };
+    const clearAllHist=()=>{ this.setState({hist:{}}); this._flash('All people history cleared.'); };
+    const clearBtns=[
+      {label:'All people history', onClick:()=>this._ask('Are you sure you want to clear all people history?', clearAllHist)},
+      {label:'All requests', onClick:()=>this._ask('Are you sure you want to clear ALL shift requests?', clearAllReq)},
+      {label:'Person → individual dates', onClick:()=>this._ask('Are you sure you want to clear all requests between individual people and individual dates?', clearAllReq)},
+      {label:'Group → individual dates', onClick:()=>this._ask('Are you sure you want to clear all requests between people groups and individual dates?', ()=>this._flash('No group-scoped requests to clear.'))},
+      {label:'Person → date groups', onClick:()=>this._ask('Are you sure you want to clear all requests between individual people and date groups?', ()=>this._flash('No date-group requests to clear.'))},
+      {label:'Group → date groups', onClick:()=>this._ask('Are you sure you want to clear all requests between people groups and date groups?', ()=>this._flash('No group-to-group requests to clear.'))},
+    ];
+
+    return {
+      flash:s.flash,
+      quickMode:quick,
+      setNormal:()=>this.setState({mode:'normal'}), setQuick:()=>this.setState({mode:'quick'}),
+      normalTabStyle:`height:34px;padding:0 14px;background:${!quick?'var(--ink)':'transparent'};color:${!quick?'var(--on-ink)':'var(--ink2)'};border:none;font:${!quick?'700':'500'} var(--t-sm) var(--font-ui);border-right:1px solid var(--line);display:inline-flex;align-items:center;`,
+      quickTabStyle:`height:34px;padding:0 14px;background:${quick?'var(--ink)':'transparent'};color:${quick?'var(--on-ink)':'var(--ink2)'};border:none;font:${quick?'700':'500'} var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;`,
+      qWeight:s.qWeight, paintChips,
+      onQWeight:(e)=>this.setState({qWeight:e.target.value}),
+      onWeightPosInf:()=>this.setState({qWeight:'∞'}), onWeightNegInf:()=>this.setState({qWeight:'-∞'}),
+      quickStatus:qs, quickStatusStyle:qStatusStyle,
+
+      histCols, dgHead, days:daysV, rows, reqCount:count,
+      crList, crEmpty, crHasItems, crCount:crList.length,
+      crQuery:s.crQuery, crHasQuery:!!(s.crQuery&&s.crQuery.length), crNoMatch,
+      onCrQuery:(e)=>this.setState({crQuery:e.target.value}), clearCrQuery:()=>this.setState({crQuery:''}),
+      chList, chEmpty, chHasItems, chCount:chList.length,
+      modeHint: quick ? 'drag to paint the selected preset across day or group cells' : 'click any cell to set a preference — a single day, or a whole date group',
+
+      openPrefsCsv:this.openPrefsCsv, openHistCsv:this.openHistCsv,
+      toggleClear:this.toggleClear, clearOpen:s.clearOpen, clearBtns,
+
+      toGenerate:()=>(v.go||(()=>{}))('generate'),
+
+      // pref modal
+      prefOpen:s.prefOpen, prefWho, closePref:this.closePref, savePref:this.savePref, clearCell:this.clearCell,
+      setAvail:()=>this.setDayState('avail'), setLeave:()=>this.setDayState('leave'), setOff:()=>this.setDayState('off'),
+      availStyle:segT(draft.dayState==='avail'), leaveStyle:segT(draft.dayState==='leave'), offStyle:segTLast(draft.dayState==='off'),
+      showWeights:draft.dayState==='avail', showLeaveNote:draft.dayState==='leave', showOffNote:draft.dayState==='off',
+      weightRows,
+      offWeight:offRaw, onOffWeight:(e)=>this.setOffWeight(e.target.value), offTag, offTagColor:(offPW>0?'var(--success)':offPW<0?'var(--warn)':'var(--ink3)'),
+
+      // history modal
+      histOpen:s.histOpen, histWho, closeHist:this.closeHist, histOpts,
+      clearAllHistBtn:()=>this._ask('Clear recent-history for all nurses? This cannot be undone.', ()=>{ this.setState({hist:{}}); this._flash('All people history cleared.'); }),
+
+      // csv modal
+      csvOpen:!!s.csvOpen, closeCsv:this.closeCsv, onCsvFile:this.onCsvFile, loadCsvSample:this.loadCsvSample,
+      csvTitle:s.csvOpen==='history'?'Upload people history':'Upload shift requests',
+      csvDesc:s.csvOpen==='history'?'One row per person: name, shift type, repetition count. An empty shift clears that person\u2019s history.':'A people × (dates + 1) matrix. First column is the person ID; each following cell is a shift type for that date (blank = no request).',
+      csvExample:s.csvOpen==='history'?'Aisha Rahman, AM, 1\nKevin Ong, LEAVE, 1\nChloe Ng, , 0':'Aisha Rahman, AM, , PM, ...\nKevin Ong, , LEAVE, , ...',
+
+      // clear confirm
+      confirmOpen:s.confirmOpen, confirmText:s.confirmText, confirmCancel:this.confirmCancel, confirmYes:this.confirmYes,
+    };
+  }
+}
+</script>
+</body>
+</html>

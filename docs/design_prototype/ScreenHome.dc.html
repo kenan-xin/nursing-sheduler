@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div class="ns-fade">
+  <!-- header -->
+  <div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:var(--space-4);margin-bottom:var(--space-6);">
+    <div style="flex:1;min-width:240px;">
+      <div style="font:600 var(--m-sm) var(--font-ui);letter-spacing:.03em;color:var(--brandink);text-transform:uppercase;margin-bottom:8px;">● WARD SCHEDULING</div>
+      <h1 style="font:800 var(--t-display) var(--font-display);letter-spacing:-.02em;margin:0 0 8px;line-height:1.05;">Build the February Roster</h1>
+      <p style="margin:0;color:var(--ink2);font-size:var(--t-body);max-width:56ch;">Follow the steps to set up your ward, then generate a fair roster that respects every rule. You can jump to any step at any time.</p>
+    </div>
+    <button onClick="{{ toGenerate }}" style="height:44px;padding:0 20px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-body) var(--font-ui);display:inline-flex;align-items:center;gap:9px;" style-hover="filter:brightness(.94)">
+      <i class="fa-solid fa-wand-magic-sparkles"></i> Generate roster
+    </button>
+  </div>
+
+  <!-- stat strip -->
+  <div style="display:flex;flex-wrap:wrap;gap:0;border:1px solid var(--line);background:var(--surface);margin-bottom:var(--space-6);">
+    <sc-for list="{{ stats }}" as="st" hint-placeholder-count="5">
+      <div style="{{ st.style }}">
+        <div style="font:800 var(--t-cardhead) var(--font-display);letter-spacing:-.02em;line-height:1;">{{ st.value }}</div>
+        <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;margin-top:6px;">{{ st.label }}</div>
+      </div>
+    </sc-for>
+  </div>
+
+  <sc-if value="{{ isGuided }}" hint-placeholder-val="{{ true }}">
+    <!-- progress -->
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:var(--space-4);">
+      <div style="font:600 var(--m-sm) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;">{{ progressLabel }}</div>
+      <div style="flex:1;height:4px;background:var(--line2);position:relative;">
+        <div style="position:absolute;inset:0 auto 0 0;width:{{ progressPct }};background:var(--brand);"></div>
+      </div>
+    </div>
+
+    <div class="ns-wizgrid">
+      <sc-for list="{{ cards }}" as="c" hint-placeholder-count="6">
+        <div style="{{ c.cardStyle }}">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+            <div style="display:flex;align-items:center;gap:10px;">
+              <div style="{{ c.tileStyle }}">{{ c.step }}</div>
+              <div style="width:34px;height:34px;background:var(--panel);border:1px solid var(--line2);display:flex;align-items:center;justify-content:center;color:var(--ink2);font-size:14px;"><i class="fa-solid {{ c.icon }}"></i></div>
+            </div>
+            <span style="{{ c.badgeStyle }}">{{ c.badgeLabel }}</span>
+          </div>
+          <div style="font:800 var(--t-title) var(--font-display);letter-spacing:-.01em;margin-bottom:6px;">{{ c.label }}</div>
+          <p style="margin:0 0 14px;color:var(--ink2);font-size:var(--t-sm);line-height:1.45;min-height:2.7em;">{{ c.desc }}</p>
+          <div style="display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);padding:4px 9px;margin-bottom:16px;font:500 var(--t-sm) var(--font-ui);color:var(--ink2);background:var(--surface);">
+            <i class="fa-solid {{ c.icon }}" style="font-size:11px;color:var(--ink3);"></i>{{ c.summary }}
+          </div>
+          <div>
+            <button onClick="{{ c.onClick }}" style="{{ c.btnStyle }}" style-hover="{{ c.btnHover }}">{{ c.btnLabel }} <i class="fa-solid fa-arrow-right" style="font-size:11px;"></i></button>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ isAdvanced }}" hint-placeholder-val="{{ false }}">
+    <div style="border:1px solid var(--line);background:var(--warntint);padding:12px 14px;margin-bottom:var(--space-5);display:flex;gap:10px;align-items:flex-start;">
+      <span style="color:var(--warn);font-weight:800;">!</span>
+      <div style="font-size:var(--t-sm);color:var(--ink2);">Advanced mode exposes every editor directly, matching the full data model. Jump to any area below.</div>
+    </div>
+    <div class="ns-grid3">
+      <sc-for list="{{ advCards }}" as="a" hint-placeholder-count="8">
+        <button onClick="{{ a.onClick }}" style="text-align:left;display:flex;align-items:flex-start;gap:12px;padding:16px;background:var(--surface);border:1px solid var(--line);" style-hover="border-color:var(--brand)">
+          <div style="width:36px;height:36px;background:var(--panel);border:1px solid var(--line2);display:flex;align-items:center;justify-content:center;color:var(--ink2);font-size:15px;flex:none;"><i class="fa-solid {{ a.icon }}"></i></div>
+          <div>
+            <div style="font-weight:700;font-size:var(--t-body);margin-bottom:3px;">{{ a.label }}</div>
+            <div style="font-size:var(--t-sm);color:var(--ink3);">{{ a.desc }}</div>
+          </div>
+        </button>
+      </sc-for>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1200,&quot;height&quot;:720}}">
+class Component extends DCLogic {
+  renderVals(){
+    const v=this.props.vals||{};
+    const wizard=v.wizard||[];
+    const go=v.go||(()=>{});
+    const done=wizard.filter(w=>w.status==='done').length;
+    const total=wizard.length;
+    const badge=(status)=>{
+      if(status==='done') return {label:'✓ DONE', style:'font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--success);background:var(--successtint);padding:4px 8px;text-transform:uppercase;'};
+      if(status==='current') return {label:'● CURRENT', style:'font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--brandink);background:var(--brandtint);padding:4px 8px;text-transform:uppercase;'};
+      return {label:'TO DO', style:'font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);background:var(--panel);padding:4px 8px;text-transform:uppercase;'};
+    };
+    const cards=wizard.map(w=>{
+      const b=badge(w.status);
+      const current=w.status==='current';
+      const btnStyle = current
+        ? 'height:38px;padding:0 16px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:8px;'
+        : 'height:38px;padding:0 16px;background:transparent;color:var(--ink);border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:8px;';
+      return {
+        ...w, badgeLabel:b.label, badgeStyle:b.style,
+        cardStyle:`background:var(--surface);border:1px solid ${current?'var(--brand)':'var(--line)'};padding:18px;display:flex;flex-direction:column;`,
+        tileStyle:`width:34px;height:34px;background:var(--ink);color:var(--on-ink);display:flex;align-items:center;justify-content:center;font:700 var(--m-md) var(--font-mono);`,
+        onClick:()=>go(w.key),
+        btnStyle, btnHover: current?'filter:brightness(.94)':'background:var(--panel)',
+        btnLabel: w.status==='done'?'Review':(current?'Continue':'Set up'),
+      };
+    });
+    const sv=(i,last)=>`flex:1;min-width:120px;padding:16px 18px;border-left:${i===0?'none':'1px solid var(--line2)'};`;
+    const stats=(v.stats||[]).map((s,i)=>({...s, style:sv(i)}));
+    const advCards=[
+      {key:'dates',icon:'fa-calendar-days',label:'Dates',desc:'Range, holidays, date groups'},
+      {key:'staff',icon:'fa-user-nurse',label:'Staff',desc:'Nurses, seniority, staff groups'},
+      {key:'shifts',icon:'fa-layer-group',label:'Shift Types',desc:'Shifts and shift groups'},
+      {key:'rules',icon:'fa-list-check',label:'Rules',desc:'Plain-English constraint library'},
+      {key:'requests',icon:'fa-table-cells',label:'Requests & Leave',desc:'Person × date preference matrix'},
+      {key:'requirements',icon:'fa-clipboard-list',label:'Requirements',desc:'Min nurses & skill mix per shift'},
+      {key:'successions',icon:'fa-arrow-right-long',label:'Successions',desc:'Forbid / encourage shift sequences'},
+      {key:'counts',icon:'fa-calculator',label:'Shift Counts',desc:'Rest days, night caps, balance'},
+      {key:'affinities',icon:'fa-people-arrows',label:'Affinities',desc:'Keep people together or apart'},
+      {key:'coverings',icon:'fa-user-shield',label:'Shift Type Coverings',desc:'Preceptor supervision constraint'},
+      {key:'export',icon:'fa-table-columns',label:'Export Layout',desc:'Spreadsheet colours & summaries'},
+      {key:'generate',icon:'fa-wand-magic-sparkles',label:'Generate',desc:'Run the optimiser & export'},
+      {key:'schedule',icon:'fa-calendar-check',label:'Roster',desc:'View & manually adjust results'},
+      {key:'saveload',icon:'fa-floppy-disk',label:'Save & Load',desc:'Download, upload, anonymise'},
+    ].map(a=>({...a, onClick:()=>go(a.key)}));
+    return {
+      isGuided:(v.mode||'guided')==='guided', isAdvanced:(v.mode||'guided')==='advanced',
+      toGenerate:()=>go('generate'),
+      stats, cards, advCards,
+      progressLabel:`${done} OF ${total} STEPS READY`,
+      progressPct: Math.round(done/total*100)+'%',
+    };
+  }
+}
+</script>
+</body>
+</html>

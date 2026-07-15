@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div class="ns-fade">
+  <div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:var(--space-4);margin-bottom:var(--space-6);">
+    <div style="flex:1;min-width:240px;">
+      <div style="font:600 var(--m-sm) var(--font-ui);letter-spacing:.03em;color:var(--brandink);text-transform:uppercase;margin-bottom:8px;">STEP 1 · DATES</div>
+      <h1 style="font:800 var(--t-display) var(--font-display);letter-spacing:-.02em;margin:0 0 8px;line-height:1.05;">Schedule Dates</h1>
+      <p style="margin:0;color:var(--ink2);max-width:56ch;">Choose the month you are rostering. Days are generated automatically, and public holidays are marked for you.</p>
+    </div>
+    <button onClick="{{ toStaff }}" style="height:44px;padding:0 20px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-body) var(--font-ui);display:inline-flex;align-items:center;gap:9px;" style-hover="filter:brightness(.94)">Continue to staff <i class="fa-solid fa-arrow-right" style="font-size:12px;"></i></button>
+  </div>
+
+  <div class="ns-grid2" style="align-items:start;">
+    <!-- range + holidays -->
+    <div style="background:var(--surface);border:1px solid var(--line);">
+      <div style="padding:16px 18px;border-bottom:1px solid var(--line2);">
+        <div style="font:800 var(--t-cardhead) var(--font-display);letter-spacing:-.02em;">Roster period</div>
+      </div>
+      <div style="padding:18px;">
+        <div style="display:flex;gap:14px;flex-wrap:wrap;">
+          <label style="flex:1;min-width:140px;">
+            <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;margin-bottom:7px;">START DATE</div>
+            <input type="date" value="{{ rangeStart }}" onChange="{{ onStart }}" style="width:100%;height:40px;padding:0 12px;background:var(--surface);border:1px solid var(--line);border-radius:0;">
+          </label>
+          <label style="flex:1;min-width:140px;">
+            <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;margin-bottom:7px;">END DATE</div>
+            <input type="date" value="{{ rangeEnd }}" onChange="{{ onEnd }}" style="width:100%;height:40px;padding:0 12px;background:var(--surface);border:1px solid var(--line);border-radius:0;">
+          </label>
+        </div>
+        <div style="margin-top:16px;display:flex;align-items:center;gap:10px;border-top:2px solid var(--rule);padding-top:14px;">
+          <span style="font:600 var(--m-sm) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;">DURATION</span>
+          <span style="font:800 var(--t-title) var(--font-display);">{{ duration }} days</span>
+          <span style="color:var(--ink3);font-size:var(--t-sm);">· {{ monthLabel }}</span>
+        </div>
+
+        <div style="margin-top:14px;border:1px solid var(--line2);background:var(--panel);padding:12px 14px;">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap;">
+            <i class="fa-solid fa-hashtag" style="color:var(--ink3);font-size:11px;"></i>
+            <span style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;">Date IDs</span>
+            <span style="font:700 var(--m-xs) var(--font-mono);color:var(--brandink);background:var(--brandtint);padding:2px 7px;">{{ idFormat }}</span>
+          </div>
+          <div style="font:600 var(--m-sm) var(--font-mono);color:var(--ink);margin-bottom:4px;">{{ idExample }}</div>
+          <div style="font-size:var(--t-sm);color:var(--ink3);">{{ idNote }} These IDs are what rules, groups, and the YAML reference.</div>
+        </div>
+
+        <div style="margin-top:18px;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
+          <div>
+            <div style="font-weight:700;font-size:var(--t-body);">Import Singapore public holidays</div>
+            <div style="color:var(--ink2);font-size:var(--t-sm);margin-top:3px;max-width:38ch;">Marks gazetted holidays as non-work days so the roster staffs them like weekends.</div>
+          </div>
+          <button role="switch" aria-checked="{{ importHolidays }}" onClick="{{ toggleImport }}" style="{{ switchTrack }}" style-hover="filter:brightness(.97)">
+            <span style="{{ switchKnob }}"></span>
+          </button>
+        </div>
+
+        <sc-if value="{{ importHolidays }}" hint-placeholder-val="{{ true }}">
+          <div style="margin-top:16px;border:1px solid var(--line2);">
+            <div style="padding:9px 12px;background:var(--panel);font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;display:flex;justify-content:space-between;">
+              <span>{{ monthLabelUpper }} HOLIDAYS</span><span>{{ holidayCount }}</span>
+            </div>
+            <sc-for list="{{ holidays }}" as="h" hint-placeholder-count="2">
+              <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-top:1px solid var(--line2);">
+                <span style="width:8px;height:8px;background:var(--warn);flex:none;"></span>
+                <span style="font:600 var(--m-sm) var(--font-mono);color:var(--ink2);min-width:96px;">{{ h.day }}</span>
+                <span style="font-size:var(--t-sm);">{{ h.name }}</span>
+                <span style="flex:1;"></span>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+      </div>
+    </div>
+
+    <!-- calendar -->
+    <div style="background:var(--surface);border:1px solid var(--line);">
+      <div style="padding:16px 18px;border-bottom:1px solid var(--line2);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+        <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+          <i class="fa-solid fa-calendar" style="color:var(--ink3);font-size:13px;"></i>
+          <div style="font:800 var(--t-cardhead) var(--font-display);letter-spacing:-.02em;">{{ monthLabel }}</div>
+        </div>
+        <div style="display:flex;gap:14px;flex-wrap:wrap;">
+          <span style="display:inline-flex;align-items:center;gap:6px;font:500 var(--t-sm) var(--font-ui);color:var(--ink2);"><span style="width:10px;height:10px;background:var(--brandtint);border:1px solid var(--brand);"></span>In roster</span>
+          <span style="display:inline-flex;align-items:center;gap:6px;font:500 var(--t-sm) var(--font-ui);color:var(--ink2);"><span style="width:10px;height:10px;background:var(--brand);"></span>Start / end</span>
+          <span style="display:inline-flex;align-items:center;gap:6px;font:500 var(--t-sm) var(--font-ui);color:var(--ink2);"><span style="width:10px;height:10px;background:var(--warn);"></span>Holiday</span>
+        </div>
+      </div>
+      <div style="padding:14px;display:flex;flex-direction:column;gap:16px;">
+        <sc-for list="{{ refMonths }}" as="rm" hint-placeholder-count="1">
+          <div>
+            <sc-if value="{{ rm.showLabel }}" hint-placeholder-val="{{ false }}">
+              <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.04em;color:var(--ink2);text-transform:uppercase;margin-bottom:8px;">{{ rm.label }}</div>
+            </sc-if>
+            <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:6px;">
+              <sc-for list="{{ dow }}" as="d" hint-placeholder-count="7">
+                <div style="text-align:center;font:600 var(--m-xs) var(--font-mono);letter-spacing:.06em;color:var(--ink3);padding:4px 0;">{{ d }}</div>
+              </sc-for>
+            </div>
+            <sc-for list="{{ rm.weeks }}" as="wk" hint-placeholder-count="5">
+              <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:4px;">
+                <sc-for list="{{ wk }}" as="cell" hint-placeholder-count="7">
+                  <sc-if value="{{ cell.empty }}" hint-placeholder-val="{{ false }}"><div aria-hidden="true"></div></sc-if>
+                  <sc-if value="{{ cell.show }}" hint-placeholder-val="{{ true }}">
+                    <div style="{{ cell.style }}" title="{{ cell.title }}">
+                      <span style="{{ cell.numStyle }}">{{ cell.d }}</span>
+                      <sc-if value="{{ cell.endpoint }}" hint-placeholder-val="{{ false }}">
+                        <span style="position:absolute;bottom:3px;left:0;right:0;text-align:center;font:700 7px var(--font-mono);letter-spacing:.08em;color:var(--onbrand);opacity:.85;">{{ cell.endLabel }}</span>
+                      </sc-if>
+                      <sc-if value="{{ cell.holiday }}" hint-placeholder-val="{{ false }}">
+                        <span style="position:absolute;top:4px;right:4px;width:6px;height:6px;background:var(--warn);"></span>
+                      </sc-if>
+                    </div>
+                  </sc-if>
+                </sc-for>
+              </div>
+            </sc-for>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </div>
+
+  <!-- date groups -->
+  <div style="background:var(--surface);border:1px solid var(--line);margin-top:var(--space-4);">
+    <div style="padding:16px 18px;border-bottom:1px solid var(--line2);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+      <div>
+        <div style="font:800 var(--t-cardhead) var(--font-display);letter-spacing:-.02em;">Date groups</div>
+        <div style="color:var(--ink2);font-size:var(--t-sm);margin-top:2px;">Named sets of days you can target in rules — e.g. "staff weekends with fewer nurses".</div>
+      </div>
+      <button onClick="{{ onGroupAdd }}" style="height:34px;padding:0 13px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:7px;flex:none;" style-hover="background:var(--panel)"><i class="fa-solid fa-plus" style="font-size:11px;"></i> Group</button>
+    </div>
+    <div style="padding:18px;display:flex;flex-direction:column;gap:12px;">
+      <sc-if value="{{ previewOpen }}" hint-placeholder-val="{{ false }}">
+        <div class="dg-preview" style="position:sticky;top:60px;z-index:6;background:var(--surface);border:1px solid var(--brand);box-shadow:0 4px 14px rgba(8,10,14,.1);">
+          <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--line2);flex-wrap:wrap;">
+            <span style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;">SELECTED</span>
+            <sc-for list="{{ selChips }}" as="c" hint-placeholder-count="2">
+              <span style="display:inline-flex;align-items:center;gap:6px;background:var(--brand);color:var(--onbrand);padding:2px 4px 2px 8px;font:600 var(--m-xs) var(--font-mono);letter-spacing:.02em;">
+                {{ c.name }}
+                <button onClick="{{ c.onRemove }}" aria-label="Remove" style="width:15px;height:15px;display:inline-flex;align-items:center;justify-content:center;background:rgba(255,255,255,.22);border:none;color:var(--onbrand);padding:0;cursor:pointer;" style-hover="background:rgba(255,255,255,.4)"><i class="fa-solid fa-xmark" style="font-size:9px;"></i></button>
+              </span>
+            </sc-for>
+            <span style="flex:1;min-width:8px;"></span>
+            <span style="font:600 var(--m-xs) var(--font-mono);color:var(--ink3);white-space:nowrap;">{{ previewDayCount }}</span>
+            <button onClick="{{ onClearHi }}" aria-label="Clear all" title="Clear all" style="width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;background:transparent;border:1px solid var(--line);color:var(--ink2);flex:none;" style-hover="background:var(--panel)"><i class="fa-solid fa-xmark" style="font-size:11px;"></i></button>
+            <button onClick="{{ onClosePreview }}" aria-label="Hide" title="Hide" style="width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;background:transparent;border:1px solid var(--line);color:var(--ink2);flex:none;" style-hover="background:var(--panel)"><i class="fa-solid fa-chevron-up" style="font-size:11px;"></i></button>
+          </div>
+          <div style="display:flex;gap:5px;padding:8px 10px;overflow-x:auto;">
+            <sc-for list="{{ previewDays }}" as="d" hint-placeholder-count="6">
+              <span style="flex:none;border:1px solid var(--brand);background:var(--brandtint);color:var(--brandink);padding:3px 8px;font:600 var(--m-xs) var(--font-mono);white-space:nowrap;">{{ d }}</span>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+      <sc-for list="{{ groups }}" as="g" hint-placeholder-count="2">
+        <div style="{{ g.wrapStyle }}">
+          <sc-if value="{{ g.editing }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;flex-direction:column;gap:14px;">
+              <label style="display:block;max-width:320px;">
+                <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;margin-bottom:6px;">GROUP NAME</div>
+                <input value="{{ draftName }}" onInput="{{ onGroupName }}" placeholder="e.g. Weekends" style="width:100%;height:36px;padding:0 10px;border:1px solid var(--brand);background:var(--surface);font-weight:600;">
+              </label>
+              <div>
+                <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:9px;">
+                  <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;">PICK DAYS</div>
+                  <span style="font:600 var(--m-xs) var(--font-mono);color:var(--ink3);">{{ draftDayCount }} SELECTED</span>
+                  <span style="flex:1;"></span>
+                  <button onClick="{{ onPickWeekends }}" style="background:none;border:none;padding:0;font:600 var(--t-sm) var(--font-ui);color:var(--brandink);cursor:pointer;">Weekends</button>
+                  <button onClick="{{ onPickWeekdays }}" style="background:none;border:none;padding:0;font:600 var(--t-sm) var(--font-ui);color:var(--brandink);cursor:pointer;">Weekdays</button>
+                  <button onClick="{{ onPickClear }}" style="background:none;border:none;padding:0;font:600 var(--t-sm) var(--font-ui);color:var(--ink3);cursor:pointer;">Clear</button>
+                </div>
+                <div style="border:1px solid var(--line2);background:var(--surface);padding:10px;max-width:440px;display:flex;flex-direction:column;gap:12px;">
+                  <sc-for list="{{ pickMonths }}" as="pm" hint-placeholder-count="1">
+                    <div>
+                      <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;margin-bottom:7px;">{{ pm.label }}</div>
+                      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-bottom:5px;">
+                        <sc-for list="{{ dow }}" as="d" hint-placeholder-count="7">
+                          <div style="text-align:center;font:600 9px var(--font-mono);letter-spacing:.04em;color:var(--ink3);">{{ d }}</div>
+                        </sc-for>
+                      </div>
+                      <sc-for list="{{ pm.weeks }}" as="wk" hint-placeholder-count="5">
+                        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-bottom:3px;">
+                          <sc-for list="{{ wk }}" as="c" hint-placeholder-count="7">
+                            <sc-if value="{{ c.blank }}" hint-placeholder-val="{{ false }}"><div aria-hidden="true"></div></sc-if>
+                            <sc-if value="{{ c.disabled }}" hint-placeholder-val="{{ false }}"><div style="{{ c.style }}">{{ c.d }}</div></sc-if>
+                            <sc-if value="{{ c.pick }}" hint-placeholder-val="{{ true }}"><button onClick="{{ c.onClick }}" title="{{ c.title }}" style="{{ c.style }}">{{ c.d }}</button></sc-if>
+                          </sc-for>
+                        </div>
+                      </sc-for>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+              <div style="display:flex;gap:6px;">
+                <button onClick="{{ onGroupSave }}" style="height:34px;padding:0 14px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:7px;" style-hover="filter:brightness(.94)"><i class="fa-solid fa-check" style="font-size:11px;"></i> Save</button>
+                <button onClick="{{ onGroupCancel }}" style="height:34px;padding:0 14px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);" style-hover="background:var(--panel)">Cancel</button>
+                <div style="flex:1;"></div>
+                <button onClick="{{ g.onDelete }}" style="height:34px;padding:0 12px;background:transparent;border:1px solid var(--line);color:var(--error);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:7px;" style-hover="background:var(--errortint)"><i class="fa-solid fa-trash" style="font-size:10px;"></i> Delete</button>
+              </div>
+            </div>
+          </sc-if>
+          <sc-if value="{{ g.notEditing }}" hint-placeholder-val="{{ true }}">
+            <div style="display:flex;align-items:flex-start;gap:12px;">
+              <div style="flex:1;min-width:0;">
+                <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:8px;">
+                  <span style="font:600 var(--m-lg) var(--font-mono);letter-spacing:.02em;">{{ g.id }}</span>
+                  <sc-if value="{{ g.hasDesc }}" hint-placeholder-val="{{ false }}">
+                    <dc-import name="InfoTip" term="{{ g.id }}" text="{{ g.desc }}" hint-size="16px,16px"></dc-import>
+                  </sc-if>
+                  <span style="font-size:var(--t-sm);color:var(--ink3);">{{ g.count }}</span>
+                </div>
+                <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                  <sc-if value="{{ g.empty }}" hint-placeholder-val="{{ false }}"><span style="color:var(--faint);font-size:var(--t-sm);">No days</span></sc-if>
+                  <sc-for list="{{ g.dayChips }}" as="d" hint-placeholder-count="5">
+                    <span style="border:1px solid var(--line);background:var(--panel);padding:2px 8px;font:600 var(--m-xs) var(--font-mono);border-radius:2px;">{{ d }}</span>
+                  </sc-for>
+                </div>
+              </div>
+              <div style="display:flex;gap:4px;flex:none;">
+                <button onClick="{{ g.onHighlight }}" aria-label="Preview days" title="Preview this group's days" style="{{ g.showBtnStyle }}"><i class="fa-solid fa-calendar-day" style="font-size:11px;"></i></button>
+                <button onClick="{{ g.onEdit }}" aria-label="Edit group" style="width:30px;height:30px;background:transparent;border:1px solid var(--line);color:var(--ink2);" style-hover="background:var(--panel)"><i class="fa-solid fa-pen" style="font-size:11px;"></i></button>
+                <button onClick="{{ g.onDelete }}" aria-label="Delete group" style="width:30px;height:30px;background:transparent;border:1px solid var(--line);color:var(--error);" style-hover="background:var(--errortint)"><i class="fa-solid fa-trash" style="font-size:11px;"></i></button>
+              </div>
+            </div>
+          </sc-if>
+        </div>
+      </sc-for>
+      <!-- auto-derived groups (read-only) -->
+      <div style="border-top:1px solid var(--line2);padding-top:14px;">
+        <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;margin-bottom:8px;">AUTO-DERIVED · TAP TO PREVIEW ITS DAYS (SELECT SEVERAL)</div>
+        <div style="display:flex;flex-wrap:wrap;gap:10px;">
+          <sc-for list="{{ autoGroups }}" as="g" hint-placeholder-count="4">
+            <button onClick="{{ g.onHighlight }}" style="{{ g.chipStyle }}" style-hover="filter:brightness(.97)">
+              <i class="fa-solid fa-calendar-day" style="{{ g.iconStyle }}"></i>
+              <span style="{{ g.idStyle }}">{{ g.id }}</span>
+              <span style="{{ g.cntStyle }}">{{ g.count }}</span>
+            </button>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1200,&quot;height&quot;:820}}">
+class Component extends DCLogic {
+  state = { sel:[], previewClosed:false };
+  renderVals(){
+    const v=this.props.vals||{};
+    const setField=v.setField||(()=>{});
+    const go=v.go||(()=>{});
+    const imp=!!v.importHolidays;
+    const editK=v.editGroup;
+    const dgdraft=v.groupDraft||null;
+    const draftMembers=(dgdraft&&dgdraft.members)||[];
+    const editing=!!editK;
+    const toggleDay=v.groupToggleDay||(()=>{});
+    const setDays=v.groupSetDays||(()=>{});
+    const gotoMonth=v.gotoMonth||(()=>{});
+    const calMonth=v.calMonth||'';
+
+    // ---- highlight-on-calendar: select one or more groups; their days show on the reference calendar ----
+    const sel=this.state.sel||[];  // [{label, name, keys}]
+    const selLabels=new Set(sel.map(e=>e.label));
+    const hiSet=new Set(); sel.forEach(e=>e.keys.forEach(k=>hiSet.add(k)));
+    const toggleSel=(label,name,keys)=>{
+      const cur=this.state.sel||[];
+      if(cur.some(e=>e.label===label)){ this.setState({sel:cur.filter(e=>e.label!==label)}); return; }
+      const arr=[...(keys||[])].sort();
+      const next=[...cur,{label,name,keys:arr}];
+      this.setState({sel:next, previewClosed:false});
+    };
+    const removeSel=(label)=>this.setState(s=>({sel:(s.sel||[]).filter(e=>e.label!==label)}));
+    const clearHi=()=>this.setState({sel:[]});
+    const hiVisible=[...hiSet].filter(k=>k.slice(0,7)===calMonth).length;
+    const hiElsewhere=hiSet.size-hiVisible;
+    const selChips=sel.map(e=>({name:e.name, onRemove:()=>removeSel(e.label)}));
+
+    // compact preview — the exact dates of the selected groups, as a scrollable chip row (mobile-friendly)
+    const multiMonth=new Set([...hiSet].map(k=>k.slice(0,7))).size>1;
+    const previewDays=[...hiSet].sort().map(k=>{
+      try{ return new Date(k+'T00:00:00Z').toLocaleDateString('en-GB', Object.assign({weekday:'short',day:'numeric',timeZone:'UTC'}, multiMonth?{month:'short'}:{})); }
+      catch(e){ return k; }
+    });
+
+    // top calendar — reference ONLY for the roster period (range / weekend / holiday). Not linked to date-group selection.
+    const HOLIDAY_BG='repeating-linear-gradient(135deg,var(--warntint) 0 3px,var(--surface) 3px 9px)';
+    const weeks=(v.weeks||[]).map(wk=>wk.map(cell=>{
+      if(!cell) return {empty:true, show:false};
+      if(cell.adjacent){
+        return {
+          empty:false, show:true, d:cell.d, holiday:false, title:'',
+          style:`position:relative;aspect-ratio:1/1;min-height:38px;display:flex;align-items:center;justify-content:center;background:var(--surface);border:1px solid var(--line2);`,
+          numStyle:`font:500 var(--m-md) var(--font-mono);color:var(--faint);`,
+        };
+      }
+      let bg='var(--surface)', bd='var(--line2)';
+      if(cell.weekend){bg='var(--panel)';}
+      if(cell.holiday){bg=HOLIDAY_BG;}
+      if(cell.inRange){bd='var(--line)';}
+      return {
+        empty:false, show:true, d:cell.d, holiday:!!cell.holiday, title:cell.holiday||'',
+        style:`position:relative;aspect-ratio:1/1;min-height:38px;display:flex;align-items:center;justify-content:center;background:${bg};border:1px solid ${bd};`,
+        numStyle:`font:600 var(--m-md) var(--font-mono);color:${cell.holiday?'var(--warn)':(cell.weekend?'var(--ink2)':'var(--ink)')};`,
+      };
+    }));
+    // top reference calendar — one grid per month the roster spans (auto-syncs to start/end date).
+    // Out-of-range days within a month, plus week-alignment overflow, render muted.
+    const refMonthsSrc=v.rangeMonths||[];
+    const _rsKey=v.rangeStart||'', _reKey=v.rangeEnd||'';
+    const refMonths=refMonthsSrc.map(m=>({
+      label:m.label, showLabel:refMonthsSrc.length>1,
+      weeks:m.weeks.map(wk=>wk.map(cell=>{
+        if(!cell) return {empty:true, show:false};
+        if(cell.adjacent || !cell.inRange){
+          return {
+            empty:false, show:true, d:cell.d, holiday:false, title:'', endpoint:false, endLabel:'',
+            style:`position:relative;aspect-ratio:1/1;min-height:38px;display:flex;align-items:center;justify-content:center;background:var(--surface);border:1px solid var(--line2);`,
+            numStyle:`font:500 var(--m-md) var(--font-mono);color:var(--faint);`,
+          };
+        }
+        const isStart=cell.key===_rsKey, isEnd=cell.key===_reKey, isEnd2=isStart||isEnd;
+        if(isEnd2){
+          return {
+            empty:false, show:true, d:cell.d, holiday:false,
+            title:(isStart?'Start of roster':'End of roster')+(cell.holiday?' · '+cell.holiday:''),
+            endpoint:true, endLabel:isStart?'START':'END',
+            style:`position:relative;aspect-ratio:1/1;min-height:38px;display:flex;align-items:center;justify-content:center;background:var(--brand);border:1px solid var(--brand);`,
+            numStyle:`font:800 var(--m-md) var(--font-mono);color:var(--onbrand);`,
+          };
+        }
+        // in-range day: brand-tinted band; weekend/holiday still legible on top
+        let bg='var(--brandtint)';
+        if(cell.weekend){bg='color-mix(in srgb, var(--brand) 15%, var(--panel))';}
+        if(cell.holiday){bg=HOLIDAY_BG;}
+        return {
+          empty:false, show:true, d:cell.d, holiday:!!cell.holiday, title:cell.holiday||'', endpoint:false, endLabel:'',
+          style:`position:relative;aspect-ratio:1/1;min-height:38px;display:flex;align-items:center;justify-content:center;background:${bg};border:1px solid var(--brand);`,
+          numStyle:`font:700 var(--m-md) var(--font-mono);color:${cell.holiday?'var(--warn)':'var(--brandink)'};`,
+        };
+      })),
+    }));
+    const memberSet=new Set(draftMembers);
+    const pickMonths=(v.rangeMonths||[]).map(m=>({
+      label:m.label,
+      weeks:m.weeks.map(wk=>wk.map(cell=>{
+        if(!cell) return {blank:true, pick:false, disabled:false};
+        if(!cell.inRange){
+          return {blank:false, pick:false, disabled:true, d:cell.d,
+            style:'aspect-ratio:1/1;min-height:30px;display:flex;align-items:center;justify-content:center;border:1px solid transparent;color:var(--faint);font:500 var(--m-sm) var(--font-mono);opacity:.4;'};
+        }
+        const sel=memberSet.has(cell.key);
+        const bg=sel?'var(--brand)':(cell.holiday?HOLIDAY_BG:(cell.weekend?'var(--panel)':'var(--surface)'));
+        const col=sel?'var(--onbrand)':(cell.holiday?'var(--warn)':'var(--ink)');
+        return {blank:false, pick:true, disabled:false, d:cell.d,
+          title:(cell.holiday?cell.holiday+' · ':'')+(sel?'Remove':'Add'),
+          onClick:()=>toggleDay(cell.key),
+          style:`aspect-ratio:1/1;min-height:30px;display:flex;align-items:center;justify-content:center;border:1px solid ${sel?'var(--brand)':'var(--line2)'};background:${bg};color:${col};font:600 var(--m-sm) var(--font-mono);cursor:pointer;padding:0;`};
+      })),
+    }));
+    const fmtKey=(k)=>{ try{ return new Date(k+'T00:00:00Z').toLocaleDateString('en-GB',{weekday:'short',day:'numeric',timeZone:'UTC'}); }catch(e){ return k; } };
+    const totalDays=v.duration||0;
+    const GROUP_DESC={
+      'WORKDAY':'Working days — Mondays to Fridays, excluding public holidays. Normal staffing rules apply here.',
+      'NON-WORKDAY':'Non-work days — weekends plus public holidays. Usually lighter coverage than workdays.',
+      'PH':'Public holidays only — the gazetted holidays imported for the period (a subset of non-work days).'
+    };
+    const groups=(v.groups||[]).map(g=>{
+      const isEd=g._k===editK;
+      const isHi=selLabels.has('grp:'+g._k);
+      const chips=g.members.slice(0,12).map(fmtKey);
+      if(g.members.length>12) chips.push('+'+(g.members.length-12));
+      const desc=GROUP_DESC[(g.id||'').toUpperCase()]||'';
+      return {...g, editing:isEd, notEditing:!isEd, desc, hasDesc:!!desc,
+        count:g.members.length+(g.members.length===1?' day':' days'),
+        empty:g.members.length===0, draftEmpty:draftMembers.length===0,
+        dayChips:chips, hi:isHi,
+        wrapStyle:`border:1px solid ${isEd?'var(--brand)':(isHi?'var(--brand)':'var(--line2)')};background:${isEd||isHi?'var(--brandtint)':'var(--panel)'};padding:14px 16px;`,
+        showBtnStyle:`width:30px;height:30px;background:${isHi?'var(--brand)':'transparent'};border:1px solid ${isHi?'var(--brand)':'var(--line)'};color:${isHi?'var(--onbrand)':'var(--ink2)'};`,
+        onHighlight:()=>toggleSel('grp:'+g._k, g.id, g.members),
+        onEdit:()=>(v.groupEdit||(()=>{}))(g._k), onDelete:()=>(v.groupDelete||(()=>{}))(g._k)};
+    });
+    const editingName=(()=>{const g=(v.groups||[]).find(x=>x._k===editK);return (dgdraft&&dgdraft.id)||(g&&g.id)||'';})();
+    const wkKeys=v.weekendKeys||[];
+    const wdKeys=v.weekdayKeys||[];
+    const allKeys=[...wdKeys,...wkKeys];
+    const dowOf=(k)=>{ try{ return new Date(k+'T00:00:00Z').getUTCDay(); }catch(e){ return -1; } };
+    const dLabel=(n)=>n+(n===1?' day':' days');
+    const keysByDow=(n)=>allKeys.filter(k=>dowOf(k)===n);
+    const byDow=(n)=>keysByDow(n).length;
+    const autoDefs=[
+      {id:'ALL', keys:allKeys},
+      {id:'WEEKDAY', keys:wdKeys},
+      {id:'WEEKEND', keys:wkKeys},
+      {id:'SUNDAY', keys:keysByDow(0)},
+      {id:'MONDAY', keys:keysByDow(1)},
+      {id:'TUESDAY', keys:keysByDow(2)},
+      {id:'WEDNESDAY', keys:keysByDow(3)},
+      {id:'THURSDAY', keys:keysByDow(4)},
+      {id:'FRIDAY', keys:keysByDow(5)},
+      {id:'SATURDAY', keys:keysByDow(6)},
+    ];
+    const autoGroups=autoDefs.map(a=>{
+      const isHi=selLabels.has('auto:'+a.id);
+      return {id:a.id, count:dLabel(a.keys.length), hi:isHi,
+        chipStyle:`display:inline-flex;align-items:center;gap:9px;border:1px solid ${isHi?'var(--brand)':'var(--line2)'};background:${isHi?'var(--brand)':'var(--panel)'};padding:8px 12px;cursor:pointer;`,
+        idStyle:`font:600 var(--m-sm) var(--font-mono);letter-spacing:.02em;color:${isHi?'var(--onbrand)':'var(--ink2)'};`,
+        cntStyle:`font-size:var(--t-sm);color:${isHi?'var(--onbrand)':'var(--ink3)'};opacity:${isHi?'.85':'1'};`,
+        iconStyle:`font-size:10px;color:${isHi?'var(--onbrand)':'var(--ink3)'};`,
+        onHighlight:()=>toggleSel('auto:'+a.id, a.id, a.keys)};
+    });
+    const _rs=v.rangeStart||'', _re=v.rangeEnd||'';
+    let idFormat='DD (2-digit day)', idExample='01, … 28', idNote='All dates fall in one month.';
+    if(_rs && _re && _rs.length>=10 && _re.length>=10){
+      const sameYear=_rs.slice(0,4)===_re.slice(0,4);
+      const sameMonth=sameYear && _rs.slice(5,7)===_re.slice(5,7);
+      const fmt=(ds)=> sameMonth?ds.slice(8,10):(sameYear?ds.slice(5):ds);
+      idExample=fmt(_rs)+', … '+fmt(_re);
+      if(sameMonth){ idFormat='DD (2-digit day)'; idNote='Dates stay within one month, so each ID is the day of month.'; }
+      else if(sameYear){ idFormat='MM-DD'; idNote='The range spans months in one year, so IDs include the month.'; }
+      else { idFormat='YYYY-MM-DD'; idNote='The range crosses a year boundary, so IDs are the full ISO date.'; }
+    }
+    return {
+      idFormat, idExample, idNote,
+      monthLabel:v.monthLabel, monthLabelUpper:(v.monthLabel||'').toUpperCase(),
+      rangeStart:v.rangeStart, rangeEnd:v.rangeEnd, duration:v.duration,
+      holidays:v.holidays||[], holidayCount:(v.holidays||[]).length+' MARKED',
+      importHolidays:imp,
+      dow:['MON','TUE','WED','THU','FRI','SAT','SUN'], weeks, refMonths,
+      hiActive:sel.length>0, selChips,
+      previewOpen:sel.length>0 && !this.state.previewClosed,
+      previewHidden:sel.length>0 && this.state.previewClosed,
+      onClosePreview:()=>this.setState({previewClosed:true}),
+      onOpenPreview:()=>this.setState({previewClosed:false}),
+      hiVisibleLabel:hiVisible+(hiVisible===1?' day':' days')+' in view',
+      hiElsewhere:hiElsewhere>0, hiElsewhereLabel:'+'+hiElsewhere+' in other months',
+      onClearHi:clearHi,
+      previewDays, previewDayCount:hiSet.size+(hiSet.size===1?' day':' days'),
+      pickMonths,
+      groups, autoGroups,
+      editingGroup:editing, editingGroupName:editingName,
+      draftDays:draftMembers.map(fmtKey), draftDayCount:draftMembers.length,
+      draftName:(dgdraft&&dgdraft.id)||'',
+      onGroupAdd:v.groupAdd||(()=>{}), onGroupName:(e)=>(v.groupDraftName||(()=>{}))(e.target.value),
+      onGroupSave:v.groupSave||(()=>{}), onGroupCancel:v.groupCancel||(()=>{}),
+      onPickWeekends:()=>setDays(v.weekendKeys||[]), onPickWeekdays:()=>setDays(v.weekdayKeys||[]), onPickClear:()=>setDays([]),
+      onPrevMonth:v.prevMonth||(()=>{}), onNextMonth:v.nextMonth||(()=>{}), onJumpStart:v.jumpStart||(()=>{}),
+      offRange: !!(v.calMonth && v.startMonth && v.endMonth && (v.calMonth < v.startMonth || v.calMonth > v.endMonth)),
+      onStart:(e)=>setField('rangeStart', e.target.value),
+      onEnd:(e)=>setField('rangeEnd', e.target.value),
+      toggleImport:()=>setField('importHolidays', !imp),
+      toStaff:()=>go('staff'),
+      switchTrack:`position:relative;width:38px;height:22px;border-radius:11px;border:none;flex:none;background:${imp?'var(--brand)':'var(--line)'};transition:background var(--dur-fast) var(--ease);`,
+      switchKnob:`position:absolute;top:2px;left:2px;width:18px;height:18px;background:#fff;border-radius:11px;transform:translateX(${imp?'16px':'0'});transition:transform var(--dur-fast) var(--ease);`,
+    };
+  }
+}
+</script>
+</body>
+</html>

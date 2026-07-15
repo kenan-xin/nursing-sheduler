@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div style="display:flex;flex-direction:column;height:100%;overflow:hidden;">
+  <div style="padding:18px 16px 14px;border-bottom:1px solid var(--line2);">
+    <div style="display:flex;align-items:center;gap:10px;">
+      <div style="width:30px;height:30px;background:var(--chrome);color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;flex:none;"><i class="fa-solid fa-diagram-project"></i></div>
+      <div style="min-width:0;">
+        <div style="font:800 var(--t-title) var(--font-display);letter-spacing:-.02em;line-height:1;">Rota</div>
+        <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;margin-top:3px;">NURSE SCHEDULING</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="padding:14px 16px 10px;">
+    <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;margin-bottom:7px;">MODE</div>
+    <div role="tablist" style="display:flex;border:1px solid var(--line);">
+      <button role="tab" onClick="{{ modeGuided }}" style="{{ guidedStyle }}" aria-pressed="{{ isGuided }}">Guided</button>
+      <button role="tab" onClick="{{ modeAdvanced }}" style="{{ advancedStyle }}" aria-pressed="{{ isAdvanced }}">Advanced</button>
+    </div>
+  </div>
+
+  <nav style="flex:1;overflow-y:auto;padding:6px 12px 10px;">
+    <sc-for list="{{ groups }}" as="grp" hint-placeholder-count="3">
+      <div style="margin-top:10px;">
+        <sc-if value="{{ grp.title }}" hint-placeholder-val="{{ false }}">
+          <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;padding:6px 8px 6px;">{{ grp.title }}</div>
+        </sc-if>
+        <sc-for list="{{ grp.items }}" as="it" hint-placeholder-count="4">
+          <button onClick="{{ it.onClick }}" style="{{ it.style }}" style-hover="background:var(--panel)">
+            <span style="width:20px;text-align:center;font-size:15px;color:{{ it.iconColor }};"><i class="fa-solid {{ it.icon }}"></i></span>
+            <span style="flex:1;">{{ it.label }}</span>
+            <sc-if value="{{ it.num }}" hint-placeholder-val="{{ false }}">
+              <span style="font:600 var(--m-xs) var(--font-mono);color:var(--ink3);">{{ it.num }}</span>
+            </sc-if>
+          </button>
+        </sc-for>
+      </div>
+    </sc-for>
+  </nav>
+
+  <div style="border-top:1px solid var(--line2);padding:12px 14px;display:flex;align-items:center;gap:10px;">
+    <div style="width:30px;height:30px;background:var(--panel);border:1px solid var(--line2);display:flex;align-items:center;justify-content:center;color:var(--ink2);font-size:12px;flex:none;">AR</div>
+    <div style="flex:1;min-width:0;">
+      <div style="font-size:var(--t-sm);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Aisha Rahman</div>
+      <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;">HEAD NURSE</div>
+    </div>
+    <button onClick="{{ toggleTheme }}" aria-label="Toggle theme" style="width:34px;height:34px;display:inline-flex;align-items:center;justify-content:center;background:transparent;border:1px solid var(--line);color:var(--ink);"><i class="{{ themeIcon }}"></i></button>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:236,&quot;height&quot;:760}}">
+class Component extends DCLogic {
+  renderVals(){
+    const mode=this.props.mode||'guided';
+    const theme=this.props.theme||'light';
+    const setMode=this.props.setMode||(()=>{});
+    const seg=(on)=>`flex:1;min-height:36px;padding:7px 10px;background:${on?'var(--ink)':'transparent'};color:${on?'var(--on-ink)':'var(--ink2)'};border:none;font:${on?'700':'500'} var(--t-sm) var(--font-ui);border-left:1px solid var(--line);`;
+    const groups=(this.props.nav||[]).map(g=>({
+      title:g.title,
+      items:(g.items||[]).map(it=>({
+        ...it,
+        iconColor: it.active?'var(--brandink)':'var(--ink3)',
+        style:`display:flex;align-items:center;gap:11px;width:100%;text-align:left;padding:10px 12px;border:none;cursor:pointer;background:${it.active?'var(--brandtint)':'transparent'};color:${it.active?'var(--brandink)':'var(--ink2)'};font:${it.active?'600':'500'} var(--t-body) var(--font-ui);`,
+      })),
+    }));
+    return {
+      groups,
+      isGuided:mode==='guided', isAdvanced:mode==='advanced',
+      guidedStyle:`flex:1;min-height:36px;padding:7px 10px;background:${mode==='guided'?'var(--ink)':'transparent'};color:${mode==='guided'?'var(--on-ink)':'var(--ink2)'};border:none;font:${mode==='guided'?'700':'500'} var(--t-sm) var(--font-ui);`,
+      advancedStyle:seg(mode==='advanced'),
+      modeGuided:()=>setMode('guided'), modeAdvanced:()=>setMode('advanced'),
+      toggleTheme:this.props.toggleTheme||(()=>{}),
+      themeIcon: theme==='light'?'fa-solid fa-moon':'fa-solid fa-sun',
+    };
+  }
+}
+</script>
+</body>
+</html>

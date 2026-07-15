@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div class="ns-fade">
+  <div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:var(--space-4);margin-bottom:var(--space-6);">
+    <div style="flex:1;min-width:240px;">
+      <div style="font:600 var(--m-sm) var(--font-ui);letter-spacing:.03em;color:var(--brandink);text-transform:uppercase;margin-bottom:8px;">STEP 3 · SHIFTS</div>
+      <h1 style="font:800 var(--t-display) var(--font-display);letter-spacing:-.02em;margin:0 0 8px;line-height:1.05;">Define the Shifts</h1>
+      <p style="margin:0;color:var(--ink2);max-width:60ch;">Set up the daily shifts your ward runs and how many nurses each needs. <dc-import name="InfoTip" term="How shifts work" text="The minimum is the shift's staffing requirement — edit it here or under Staffing requirements; it's one shared rule. Off (unpaid rest) and Paid leave are reserved day-states handled for you." hint-size="16px,16px"></dc-import></p>
+    </div>
+    <button onClick="{{ toRules }}" style="height:44px;padding:0 20px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-body) var(--font-ui);display:inline-flex;align-items:center;gap:9px;" style-hover="filter:brightness(.94)">Continue to rules <i class="fa-solid fa-arrow-right" style="font-size:12px;"></i></button>
+  </div>
+
+  <div style="display:flex;gap:10px;margin-bottom:var(--space-4);">
+    <button onClick="{{ onAdd }}" style="height:40px;padding:0 16px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:8px;" style-hover="filter:brightness(.94)"><i class="fa-solid fa-plus"></i> Add shift type</button>
+  </div>
+
+  <div class="ns-grid3">
+    <sc-for list="{{ shifts }}" as="s" hint-placeholder-count="4">
+      <div draggable="{{ s.draggable }}" onDragStart="{{ s.onDragStart }}" onDragOver="{{ s.onDragOver }}" onDrop="{{ s.onDrop }}" onDragEnd="{{ s.onDragEnd }}" style="{{ s.cardStyle }}">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+          <div style="display:flex;align-items:center;gap:11px;min-width:0;">
+            <div style="{{ s.tileStyle }}"><i class="fa-solid {{ s.icon }}"></i></div>
+            <div style="min-width:0;">
+              <sc-if value="{{ s.editing }}" hint-placeholder-val="{{ false }}">
+                <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.06em;color:var(--brandink);text-transform:uppercase;line-height:1;margin-bottom:4px;">Editing shift</div>
+              </sc-if>
+              <div style="font:800 var(--t-title) var(--font-display);line-height:1;">{{ s.id }}</div>
+              <sc-if value="{{ s.notEditing }}" hint-placeholder-val="{{ true }}">
+                <div style="font-size:var(--t-sm);color:var(--ink2);margin-top:3px;">{{ s.name }}</div>
+              </sc-if>
+            </div>
+          </div>
+          <sc-if value="{{ s.auto }}" hint-placeholder-val="{{ false }}">
+            <span style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);border:1px solid var(--line);padding:3px 7px;text-transform:uppercase;">AUTO</span>
+          </sc-if>
+        </div>
+
+        <sc-if value="{{ s.editing }}" hint-placeholder-val="{{ false }}">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:15px 14px;border-top:1px solid var(--line2);padding-top:16px;">
+
+            <label style="display:flex;flex-direction:column;gap:6px;min-width:0;">
+              <span style="height:16px;display:flex;align-items:center;font:600 var(--m-xs) var(--font-ui);letter-spacing:.04em;color:var(--ink3);text-transform:uppercase;">Code</span>
+              <input value="{{ draftCode }}" onInput="{{ onCode }}" placeholder="AM" style="width:100%;height:38px;padding:0 11px;border:1px solid var(--line);background:var(--surface);font:700 var(--m-sm) var(--font-ui);text-transform:uppercase;box-sizing:border-box;">
+            </label>
+            <label style="display:flex;flex-direction:column;gap:6px;min-width:0;">
+              <span style="height:16px;display:flex;align-items:center;gap:6px;font:600 var(--m-xs) var(--font-ui);letter-spacing:.04em;color:var(--ink3);text-transform:uppercase;">Name <dc-import name="InfoTip" term="Shift code &amp; name" text="{{ codeHelp }}" hint-size="16px,16px"></dc-import></span>
+              <input value="{{ draftName }}" onInput="{{ onName }}" placeholder="Shift name" style="width:100%;height:38px;padding:0 11px;border:1px solid var(--line);background:var(--surface);font-size:var(--t-sm);box-sizing:border-box;">
+            </label>
+            <sc-if value="{{ codeError }}" hint-placeholder-val="{{ false }}"><div style="grid-column:1/-1;color:var(--error);font-size:var(--t-sm);margin-top:-8px;font-weight:600;"><i class="fa-solid fa-circle-exclamation" style="margin-right:5px;"></i>{{ codeErrorText }}</div></sc-if>
+
+            <div style="grid-column:1/-1;display:flex;flex-direction:column;gap:6px;">
+              <span style="height:16px;display:flex;align-items:center;gap:6px;font:600 var(--m-xs) var(--font-ui);letter-spacing:.04em;color:var(--ink3);text-transform:uppercase;">Time on floor <dc-import name="InfoTip" term="Time on floor" text="{{ timeTip }}" hint-size="16px,16px"></dc-import></span>
+              <div style="display:flex;align-items:center;gap:10px;">
+                <select value="{{ draftStart }}" onChange="{{ onStart }}" style="height:38px;padding:0 10px;border:1px solid var(--line);background:var(--surface);font:600 var(--m-sm) var(--font-mono);box-sizing:border-box;cursor:pointer;">
+                  <option value="" disabled>--:--</option>
+                  <sc-for list="{{ timeOptions }}" as="t" hint-placeholder-count="4"><option value="{{ t.value }}">{{ t.label }}</option></sc-for>
+                </select>
+                <span style="color:var(--ink3);">–</span>
+                <select value="{{ draftEnd }}" onChange="{{ onEnd }}" style="height:38px;padding:0 10px;border:1px solid var(--line);background:var(--surface);font:600 var(--m-sm) var(--font-mono);box-sizing:border-box;cursor:pointer;">
+                  <option value="" disabled>--:--</option>
+                  <sc-for list="{{ timeOptions }}" as="t" hint-placeholder-count="4"><option value="{{ t.value }}">{{ t.label }}</option></sc-for>
+                </select>
+                <sc-if value="{{ isOvernight }}" hint-placeholder-val="{{ false }}">
+                  <span style="border:1px solid var(--line2);padding:4px 8px;color:var(--ink3);font:600 var(--m-xs) var(--font-mono);">+1 day</span>
+                </sc-if>
+              </div>
+            </div>
+
+            <div style="display:flex;flex-direction:column;gap:6px;min-width:0;">
+              <span style="height:16px;display:flex;align-items:center;gap:6px;font:600 var(--m-xs) var(--font-ui);letter-spacing:.04em;color:var(--ink3);text-transform:uppercase;">Rest <dc-import name="InfoTip" term="Rest time" text="{{ restTip }}" hint-size="16px,16px"></dc-import></span>
+              <select value="{{ draftRestTotal }}" onChange="{{ onRest }}" style="width:100%;height:38px;padding:0 10px;border:1px solid var(--line);background:var(--surface);font:700 var(--m-sm) var(--font-mono);box-sizing:border-box;cursor:pointer;">
+                <sc-for list="{{ restOptions }}" as="r" hint-placeholder-count="4"><option value="{{ r.value }}">{{ r.label }}</option></sc-for>
+              </select>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:6px;min-width:0;">
+              <span style="height:16px;display:flex;align-items:center;gap:6px;font:600 var(--m-xs) var(--font-ui);letter-spacing:.04em;color:var(--ink3);text-transform:uppercase;">Working <span style="color:var(--faint);letter-spacing:.04em;">· auto</span></span>
+              <div style="height:38px;display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line2);padding:0 12px;box-sizing:border-box;">
+                <span style="font:800 var(--t-title) var(--font-display);line-height:1;">{{ workHoursLabel }}</span>
+                <span style="font:600 var(--m-xs) var(--font-mono);color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ workCalcLabel }}</span>
+              </div>
+            </div>
+            <sc-if value="{{ gridError }}" hint-placeholder-val="{{ false }}">
+              <div style="grid-column:1/-1;display:flex;align-items:flex-start;gap:7px;color:var(--warn);font-size:var(--t-sm);font-weight:600;margin-top:-6px;"><i class="fa-solid fa-triangle-exclamation" style="margin-top:2px;"></i><span>{{ gridErrorText }}</span></div>
+            </sc-if>
+
+            <label style="display:flex;flex-direction:column;gap:6px;min-width:0;">
+              <span style="height:16px;display:flex;align-items:center;gap:6px;font:600 var(--m-xs) var(--font-ui);letter-spacing:.04em;color:var(--ink3);text-transform:uppercase;">Min. nurses <dc-import name="InfoTip" term="Minimum nurses" text="{{ needHelp }}" hint-size="16px,16px"></dc-import></span>
+              <input type="number" min="0" max="20" value="{{ draftNeed }}" onInput="{{ onNeed }}" style="width:100%;height:38px;padding:0 11px;border:1px solid var(--line);background:var(--surface);font-weight:700;box-sizing:border-box;">
+            </label>
+            <label style="display:flex;flex-direction:column;gap:6px;min-width:0;">
+              <span style="height:16px;display:flex;align-items:center;gap:6px;font:600 var(--m-xs) var(--font-ui);letter-spacing:.04em;color:var(--ink3);text-transform:uppercase;">Preferred <dc-import name="InfoTip" term="Preferred nurses" text="{{ prefHelp }}" hint-size="16px,16px"></dc-import></span>
+              <input type="number" min="0" max="20" value="{{ draftPref }}" onInput="{{ onPref }}" placeholder="—" style="width:100%;height:38px;padding:0 11px;border:1px solid var(--line);background:var(--surface);font-weight:700;box-sizing:border-box;">
+            </label>
+
+            <div style="grid-column:1/-1;display:flex;gap:8px;margin-top:4px;padding-top:14px;border-top:1px solid var(--line2);">
+              <button onClick="{{ onSave }}" style="height:38px;padding:0 18px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:7px;" style-hover="filter:brightness(.94)"><i class="fa-solid fa-check" style="font-size:11px;"></i> Save</button>
+              <button onClick="{{ onCancel }}" style="height:38px;padding:0 18px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);" style-hover="background:var(--panel)">Cancel</button>
+            </div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ s.notEditing }}" hint-placeholder-val="{{ true }}">
+          <div style="display:flex;align-items:center;gap:8px;border-top:1px solid var(--line2);padding-top:12px;">
+            <i class="fa-regular fa-clock" style="color:var(--ink3);font-size:12px;"></i>
+            <span style="font:600 var(--m-sm) var(--font-mono);color:var(--ink2);">{{ s.time }}</span>
+            <sc-if value="{{ s.hasDur }}" hint-placeholder-val="{{ false }}">
+              <span style="font:600 var(--m-xs) var(--font-mono);color:var(--ink3);border:1px solid var(--line2);padding:2px 7px;">{{ s.durLabel }}</span>
+            </sc-if>
+          </div>
+          <sc-if value="{{ s.showNeed }}" hint-placeholder-val="{{ true }}">
+            <div style="margin-top:14px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+                <span style="font-size:var(--t-body);color:var(--ink2);">Minimum nurses</span>
+                <span style="font:800 var(--t-title) var(--font-display);line-height:1;">{{ s.need }}</span>
+              </div>
+              <sc-if value="{{ s.hasPref }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:6px;">
+                  <span style="font-size:var(--t-sm);color:var(--ink3);">Preferred</span>
+                  <span style="font:600 var(--m-sm) var(--font-mono);color:var(--ink2);">{{ s.prefLabel }}</span>
+                </div>
+              </sc-if>
+              <sc-if value="{{ s.hasReqMeta }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;">
+                  <sc-if value="{{ s.hasQualifier }}" hint-placeholder-val="{{ false }}">
+                    <span style="display:inline-flex;align-items:center;gap:6px;font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--brandink);background:var(--brandtint);border:1px solid var(--brand);padding:2px 8px;text-transform:uppercase;"><i class="fa-solid fa-user-shield" style="font-size:9px;"></i> {{ s.qualifierLabel }}</span>
+                  </sc-if>
+                  <sc-if value="{{ s.hasExtra }}" hint-placeholder-val="{{ false }}">
+                    <span style="display:inline-flex;align-items:center;gap:6px;font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);background:var(--panel);border:1px solid var(--line2);padding:2px 8px;text-transform:uppercase;"><i class="fa-solid fa-layer-group" style="font-size:9px;"></i> {{ s.extraChip }}</span>
+                  </sc-if>
+                </div>
+              </sc-if>
+              <button onClick="{{ onOpenReq }}" style="margin-top:10px;background:none;border:none;padding:0;font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--brandink);text-transform:uppercase;cursor:pointer;display:inline-flex;align-items:center;gap:6px;" style-hover="text-decoration:underline">View staffing requirement <i class="fa-solid fa-arrow-up-right-from-square" style="font-size:9px;"></i></button>
+            </div>
+          </sc-if>
+          <sc-if value="{{ s.auto }}" hint-placeholder-val="{{ false }}">
+            <div style="margin-top:12px;font-size:var(--t-sm);color:var(--ink3);">{{ s.autoCopy }}</div>
+          </sc-if>
+          <sc-if value="{{ s.showActions }}" hint-placeholder-val="{{ true }}">
+            <div style="display:flex;gap:6px;margin-top:auto;border-top:1px solid var(--line2);padding-top:12px;">
+              <button onClick="{{ s.onEdit }}" style="height:32px;padding:0 12px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:7px;" style-hover="background:var(--panel)"><i class="fa-solid fa-pen" style="font-size:10px;"></i> Edit</button>
+              <button onClick="{{ s.onDel }}" style="height:32px;padding:0 12px;background:transparent;border:1px solid var(--line);color:var(--error);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:7px;" style-hover="background:var(--errortint)"><i class="fa-solid fa-trash" style="font-size:10px;"></i> Delete</button>
+            </div>
+          </sc-if>
+        </sc-if>
+      </div>
+    </sc-for>
+  </div>
+
+  <div style="background:var(--surface);border:1px solid var(--line);margin-top:var(--space-4);">
+    <div style="padding:16px 18px;border-bottom:1px solid var(--line2);display:flex;align-items:center;justify-content:space-between;gap:10px;">
+      <div>
+        <div style="font:800 var(--t-cardhead) var(--font-display);letter-spacing:-.02em;">Shift groups</div>
+        <div style="color:var(--ink2);font-size:var(--t-sm);margin-top:2px;">Bundle shifts so rules can target them together — e.g. "count all working shifts".</div>
+      </div>
+      <button onClick="{{ onGroupAdd }}" style="height:34px;padding:0 13px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:7px;flex:none;" style-hover="background:var(--panel)"><i class="fa-solid fa-plus" style="font-size:11px;"></i> Group</button>
+    </div>
+    <div style="padding:18px;display:flex;flex-direction:column;gap:14px;">
+      <sc-for list="{{ autoGroups }}" as="g" hint-placeholder-count="1">
+        <div style="border:1px solid var(--line2);background:var(--panel);padding:14px 16px;">
+          <div style="flex:1;min-width:0;">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+              <span style="font:600 var(--m-lg) var(--font-mono);">{{ g.id }}</span>
+              <span style="font:600 var(--m-xs) var(--font-mono);color:var(--ink3);">{{ g.count }}</span>
+              <span style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);border:1px solid var(--line);padding:3px 7px;text-transform:uppercase;">AUTO</span>
+            </div>
+            <div style="font-size:var(--t-sm);color:var(--ink3);margin-bottom:8px;max-width:60ch;">{{ g.note }}</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;">
+              <sc-if value="{{ g.empty }}" hint-placeholder-val="{{ false }}"><span style="color:var(--faint);font-size:var(--t-sm);">No shift types</span></sc-if>
+              <sc-for list="{{ g.members }}" as="m" hint-placeholder-count="3">
+                <span style="border:1px solid var(--line);background:var(--surface);padding:2px 9px;font:600 var(--m-sm) var(--font-mono);border-radius:2px;">{{ m }}</span>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </sc-for>
+      <sc-if value="{{ noGroups }}" hint-placeholder-val="{{ false }}">
+        <div style="border:1.5px dashed var(--line2);padding:32px 20px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:11px;">
+          <div style="width:46px;height:46px;border:1.5px dashed var(--line2);display:flex;align-items:center;justify-content:center;font-size:20px;color:var(--faint);line-height:1;">∅</div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+            <div style="font:700 var(--t-title) var(--font-display);color:var(--ink2);">No custom shift groups yet</div>
+            <div style="font-size:var(--t-sm);color:var(--ink3);max-width:44ch;">Bundle shift types — like “Working” or “Night” — so a rule can count or target them together.</div>
+          </div>
+          <button onClick="{{ onGroupAdd }}" style="height:34px;padding:0 14px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:7px;margin-top:2px;" style-hover="filter:brightness(.94)"><i class="fa-solid fa-plus" style="font-size:11px;"></i> New group</button>
+        </div>
+      </sc-if>
+      <sc-for list="{{ groups }}" as="g" hint-placeholder-count="3">
+        <div draggable="{{ g.draggable }}" onDragStart="{{ g.onDragStart }}" onDragOver="{{ g.onDragOver }}" onDrop="{{ g.onDrop }}" onDragEnd="{{ g.onDragEnd }}" style="{{ g.wrapStyle }}">
+          <sc-if value="{{ g.editing }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;flex-direction:column;gap:12px;">
+              <label style="display:block;max-width:320px;">
+                <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;margin-bottom:6px;">GROUP NAME</div>
+                <input value="{{ draftGroupName }}" onInput="{{ onGroupName }}" placeholder="e.g. Working" style="width:100%;height:36px;padding:0 10px;border:1px solid var(--brand);background:var(--surface);font-weight:600;">
+              </label>
+              <div>
+                <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:8px;">
+                  <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;">SHIFT TYPES</div>
+                  <div style="display:flex;gap:12px;">
+                    <button onClick="{{ onSelectAll }}" style="background:none;border:none;padding:0;font:600 var(--t-sm) var(--font-ui);color:var(--brandink);cursor:pointer;">Add all</button>
+                    <button onClick="{{ onClearAll }}" style="background:none;border:none;padding:0;font:600 var(--t-sm) var(--font-ui);color:var(--ink3);cursor:pointer;">Remove all</button>
+                  </div>
+                </div>
+                <div class="ns-xfer">
+                  <div style="border:1px solid var(--line);background:var(--surface);display:flex;flex-direction:column;min-height:150px;max-height:220px;">
+                    <div style="padding:8px 12px;border-bottom:1px solid var(--line2);background:var(--panel);font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;display:flex;justify-content:space-between;"><span>AVAILABLE</span><span>{{ availCount }}</span></div>
+                    <div style="flex:1;overflow-y:auto;">
+                      <sc-if value="{{ noAvail }}" hint-placeholder-val="{{ false }}"><div style="padding:22px 12px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:6px;color:var(--faint);font-size:var(--t-sm);"><span style="font-size:15px;line-height:1;">✓</span>All shift types added.</div></sc-if>
+                      <sc-for list="{{ available }}" as="a" hint-placeholder-count="3">
+                        <button onClick="{{ a.onAdd }}" style="width:100%;text-align:left;padding:9px 12px;border:none;border-bottom:1px solid var(--line2);background:transparent;font:600 var(--m-sm) var(--font-mono);color:var(--ink);cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;" style-hover="background:var(--panel)"><span>{{ a.name }}</span><i class="fa-solid fa-arrow-right" style="font-size:10px;color:var(--ink3);"></i></button>
+                      </sc-for>
+                    </div>
+                  </div>
+                  <div class="ns-xfer-mid" style="align-items:center;">
+                    <button onClick="{{ onSelectAll }}" aria-label="Add all" style="width:36px;height:36px;border:1px solid var(--line);background:var(--surface);color:var(--ink2);cursor:pointer;" style-hover="background:var(--panel)"><i class="fa-solid fa-angles-right" style="font-size:12px;"></i></button>
+                    <button onClick="{{ onClearAll }}" aria-label="Remove all" style="width:36px;height:36px;border:1px solid var(--line);background:var(--surface);color:var(--ink2);cursor:pointer;" style-hover="background:var(--panel)"><i class="fa-solid fa-angles-left" style="font-size:12px;"></i></button>
+                  </div>
+                  <div style="border:1px solid var(--brand);background:var(--surface);display:flex;flex-direction:column;min-height:150px;max-height:220px;">
+                    <div style="padding:8px 12px;border-bottom:1px solid var(--line2);background:var(--brandtint);font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--brandink);text-transform:uppercase;display:flex;justify-content:space-between;"><span>IN GROUP</span><span>{{ selCount }}</span></div>
+                    <div style="flex:1;overflow-y:auto;">
+                      <sc-if value="{{ noSel }}" hint-placeholder-val="{{ true }}"><div style="padding:22px 12px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:6px;color:var(--faint);font-size:var(--t-sm);"><span style="font-size:16px;line-height:1;">←</span>Empty — pick from the left.</div></sc-if>
+                      <sc-for list="{{ selected }}" as="s" hint-placeholder-count="3">
+                        <button onClick="{{ s.onRemove }}" style="width:100%;text-align:left;padding:9px 12px;border:none;border-bottom:1px solid var(--line2);background:transparent;font:600 var(--m-sm) var(--font-mono);color:var(--ink);cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;" style-hover="background:var(--errortint)"><span style="display:inline-flex;align-items:center;gap:8px;"><i class="fa-solid fa-arrow-left" style="font-size:10px;color:var(--ink3);"></i>{{ s.name }}</span><i class="fa-solid fa-xmark" style="font-size:11px;color:var(--ink3);"></i></button>
+                      </sc-for>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div style="display:flex;gap:6px;">
+                <button onClick="{{ onGroupSave }}" style="height:34px;padding:0 14px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:7px;" style-hover="filter:brightness(.94)"><i class="fa-solid fa-check" style="font-size:11px;"></i> Save</button>
+                <button onClick="{{ onGroupCancel }}" style="height:34px;padding:0 14px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);" style-hover="background:var(--panel)">Cancel</button>
+                <div style="flex:1;"></div>
+                <button onClick="{{ g.onDelete }}" style="height:34px;padding:0 12px;background:transparent;border:1px solid var(--line);color:var(--error);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:7px;" style-hover="background:var(--errortint)"><i class="fa-solid fa-trash" style="font-size:10px;"></i> Delete</button>
+              </div>
+            </div>
+          </sc-if>
+          <sc-if value="{{ g.notEditing }}" hint-placeholder-val="{{ true }}">
+            <div style="display:flex;align-items:flex-start;gap:12px;">
+              <div style="flex:1;min-width:0;">
+                <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:8px;">
+                  <span style="font:600 var(--m-lg) var(--font-mono);">{{ g.id }}</span>
+                  <span style="font:600 var(--m-xs) var(--font-mono);color:var(--ink3);">{{ g.count }}</span>
+                </div>
+                <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                  <sc-if value="{{ g.empty }}" hint-placeholder-val="{{ false }}"><span style="color:var(--faint);font-size:var(--t-sm);">No shift types</span></sc-if>
+                  <sc-for list="{{ g.members }}" as="m" hint-placeholder-count="3">
+                    <span style="border:1px solid var(--line);background:var(--panel);padding:2px 9px;font:600 var(--m-sm) var(--font-mono);border-radius:2px;">{{ m }}</span>
+                  </sc-for>
+                </div>
+              </div>
+              <div style="display:flex;gap:4px;flex:none;">
+                <button onClick="{{ g.onEdit }}" aria-label="Edit group" style="width:30px;height:30px;background:transparent;border:1px solid var(--line);color:var(--ink2);" style-hover="background:var(--panel)"><i class="fa-solid fa-pen" style="font-size:11px;"></i></button>
+                <button onClick="{{ g.onDelete }}" aria-label="Delete group" style="width:30px;height:30px;background:transparent;border:1px solid var(--line);color:var(--error);" style-hover="background:var(--errortint)"><i class="fa-solid fa-trash" style="font-size:11px;"></i></button>
+              </div>
+            </div>
+          </sc-if>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1200,&quot;height&quot;:720}}">
+class Component extends DCLogic {
+  state={ codeError:'', dragK:null, overK:null, dragKind:null };
+  _gridError(draft){
+    const onGrid=t=>/^\d{1,2}:(00|30)$/.test(t||'');
+    const okT=t=>/^\d{1,2}:\d{2}$/.test(t||'');
+    if(!(draft.startTime||draft.endTime)) return '';
+    if(!(okT(draft.startTime)&&okT(draft.endTime))) return '';
+    if(!(onGrid(draft.startTime)&&onGrid(draft.endTime))) return 'Start and end must fall on the half-hour — HH:00 or HH:30.';
+    const tm=t=>{const[h,m]=t.split(':').map(Number);return h*60+m;};
+    let span=tm(draft.endTime)-tm(draft.startTime); if(span<=0) span+=1440;
+    const restTotal=Math.max(0,Number(draft.restHours)||0)*60+Math.max(0,Number(draft.restMins)||0);
+    if(restTotal%30!==0) return 'Rest time must be a whole number of half-hours (a multiple of 30 minutes).';
+    if(restTotal>=span) return 'Rest time must be less than the clock span.';
+    const work=span-restTotal;
+    if(work<=0) return 'Working time must be greater than zero.';
+    if(work%30!==0) return 'Working time must land on the 30-minute grid.';
+    return '';
+  }
+  doSave=()=>{ const v=this.props.vals||{}; const draft=v.draft||{}; const code=((draft.code)||'').trim(); if(code && ['OFF','ALL','LEAVE'].includes(code.toUpperCase())){ this.setState({codeError:'"'+code+'" is a reserved keyword and cannot be used as a shift code'}); return; } if(this._gridError(draft)){ this.setState({codeError:''}); return; } this.setState({codeError:''}); (v.save||(()=>{}))(); };
+  renderVals(){
+    const v=this.props.vals||{};
+    const editK=v.editK;
+    const draft=v.draft||{};
+    const shifts=(v.shifts||[]).map(s=>{
+      const editing=s._k===editK;
+      const canDrag=!s.auto && !editK;
+      return {...s,
+        cardStyle:`background:var(--surface);border:1px solid ${editing?'var(--brand)':((this.state.overK===s._k&&this.state.dragKind==='card')?'var(--brand)':(s.auto?'var(--line2)':'var(--line)'))};padding:18px;display:flex;flex-direction:column;${canDrag?'cursor:grab;':''}${this.state.dragK===s._k?'opacity:.5;':''}`,
+        draggable:canDrag,
+        onDragStart:canDrag?(()=>this.setState({dragK:s._k,dragKind:'card'})):(()=>{}),
+        onDragOver:canDrag?((e)=>{ if(this.state.dragKind==='card'){ e.preventDefault(); if(this.state.overK!==s._k) this.setState({overK:s._k}); } }):(()=>{}),
+        onDrop:canDrag?((e)=>{ e.preventDefault(); const d=this.state.dragK; this.setState({dragK:null,overK:null,dragKind:null}); if(d&&d!==s._k)(v.reorder||(()=>{}))(d,s._k); }):(()=>{}),
+        onDragEnd:()=>this.setState({dragK:null,overK:null,dragKind:null}),
+        tileStyle:`width:42px;height:42px;background:${s.id==='N'?'var(--ink)':(s.credit?'var(--brandtint)':'var(--panel)')};color:${s.id==='N'?'var(--on-ink)':(s.credit?'var(--brandink)':'var(--ink2)')};border:1px solid var(--line2);display:flex;align-items:center;justify-content:center;font-size:17px;flex:none;`,
+        showNeed:!s.auto, showActions:!s.auto,
+        hasPref:(!s.auto)&&(s.reqPreferred!=null)&&(Number(s.reqPreferred)>Number(s.need!=null?s.need:0)),
+        prefLabel:(s.reqPreferred!=null?String(s.reqPreferred):''),
+        hasQualifier:(!s.auto)&&!!(s.reqQualified&&String(s.reqQualified).toUpperCase()!=='ALL'),
+        qualifierLabel:(s.reqQualified?String(s.reqQualified)+' only':''),
+        hasExtra:(s.reqExtra||0)>0,
+        extraChip:((s.reqExtra||0)>0)?('+'+s.reqExtra+' date variant'+((s.reqExtra>1)?'s':'')):'',
+        hasReqMeta:(!s.auto)&&((!!(s.reqQualified&&String(s.reqQualified).toUpperCase()!=='ALL'))||((s.reqExtra||0)>0)),
+        hasDur:!s.auto && s.durationMinutes!=null,
+        durLabel:(s.durationMinutes!=null?(s.durationMinutes/60)+'h':''),
+        autoCopy:(s.credit?'Paid leave · credits 8h toward contracted hours. Never fills coverage — pin it per nurse on the Requests & Leave screen.':'Rest / no assignment. Generated automatically.'),
+        editing:editing && !s.auto, notEditing:!(editing && !s.auto),
+        onEdit:()=>(v.edit||(()=>{}))(s._k), onDel:()=>(v.del||(()=>{}))(s._k)};
+    });
+    // editable shift groups (transfer list)
+    const editGroup=v.editGroup;
+    // Auto-computed duration readout from the draft time range (overnight rolls +24h).
+    let durMin=null, overnight=false;
+    const okT=t=>/^\d{1,2}:\d{2}$/.test(t||'');
+    if(okT(draft.startTime)&&okT(draft.endTime)){
+      const tm=t=>{const[h,m]=t.split(':').map(Number);return h*60+m;};
+      let d=tm(draft.endTime)-tm(draft.startTime); if(d<=0){d+=1440;overnight=true;} durMin=d;
+    }
+    const fmtH=h=>(Number.isInteger(h)?h+'h':h.toFixed(1)+'h');
+    const clockSpanLabel = durMin!=null ? fmtH(durMin/60) : null;
+    // Working hours are auto-derived: clock span minus the rest time the user enters (h + m).
+    const restH=Math.max(0,Number(draft.restHours)||0);
+    const restM=Math.max(0,Number(draft.restMins)||0);
+    const restTotal=restH*60+restM;
+    const workMin=(durMin!=null)?Math.max(0,durMin-restTotal):null;
+    const workHoursLabel=(workMin!=null)?fmtH(workMin/60):'—';
+    const restReadable=restTotal>0?((restH?restH+'h ':'')+(restM?restM+'m':'')).trim():'no rest';
+    const workCalcLabel=(durMin!=null)?('= '+clockSpanLabel+' − '+restReadable):'set start & end first';
+    // 30-minute grid: start/end can only be picked on the half-hour, and rest is a multiple of 30 min.
+    const pad=n=>String(n).padStart(2,'0');
+    const timeOptions=[];
+    for(let m=0;m<1440;m+=30){ const hh=pad(Math.floor(m/60)), mm=pad(m%60); timeOptions.push({value:hh+':'+mm, label:hh+':'+mm}); }
+    const restOptions=[{value:0,label:'No rest'}];
+    for(let m=30;m<=1410;m+=30){ const h=Math.floor(m/60), mi=m%60; restOptions.push({value:m, label:((h?h+'h':'')+(mi?' '+mi+'m':'')).trim()}); }
+    // Guarantee the current rest value always has a matching option (covers legacy off-grid data).
+    if(restTotal>0 && !restOptions.some(o=>o.value===restTotal)){ const h=Math.floor(restTotal/60), mi=restTotal%60; restOptions.push({value:restTotal, label:((h?h+'h':'')+(mi?' '+mi+'m':'')).trim()+' (custom)'}); restOptions.sort((a,b)=>a.value-b.value); }
+    const gdraft=v.groupDraft||{members:[]};
+    const allShifts=v.allShifts||[];
+    const sel=gdraft.members||[];
+    const toggle=v.groupToggleMember||(()=>{});
+    const available=allShifts.filter(n=>!sel.includes(n)).map(n=>({name:n, onAdd:()=>toggle(n)}));
+    const selected=sel.map(n=>({name:n, onRemove:()=>toggle(n)}));
+    const groups=(v.groups||[]).map(g=>{
+      const editing=g._k===editGroup;
+      const canDrag=!editGroup;
+      return {...g, editing, notEditing:!editing, draggable:canDrag,
+        onDragStart:canDrag?(()=>this.setState({dragK:g._k,dragKind:'grp'})):(()=>{}),
+        onDragOver:canDrag?((e)=>{ if(this.state.dragKind==='grp'){ e.preventDefault(); if(this.state.overK!==g._k) this.setState({overK:g._k}); } }):(()=>{}),
+        onDrop:canDrag?((e)=>{ e.preventDefault(); const d=this.state.dragK; this.setState({dragK:null,overK:null,dragKind:null}); if(d&&d!==g._k)(v.groupReorder||(()=>{}))(d,g._k); }):(()=>{}),
+        onDragEnd:()=>this.setState({dragK:null,overK:null,dragKind:null}),
+        count:g.members.length+(g.members.length===1?' TYPE':' TYPES'),
+        empty:g.members.length===0,
+        wrapStyle:`border:1px solid ${editing?'var(--brand)':((this.state.overK===g._k&&this.state.dragKind==='grp')?'var(--brand)':'var(--line2)')};background:${editing?'var(--brandtint)':'var(--panel)'};padding:14px 16px;${canDrag?'cursor:grab;':''}${this.state.dragK===g._k?'opacity:.5;':''}`,
+        onEdit:()=>(v.groupEdit||(()=>{}))(g._k), onDelete:()=>(v.groupDelete||(()=>{}))(g._k)};
+    });
+    const editShiftObj=(v.shifts||[]).find(x=>x._k===editK);
+    const editId=editShiftObj?editShiftObj.id:'';
+    const autoGroups=[{ id:'ALL', members:[...allShifts], empty:allShifts.length===0,
+      count:allShifts.length+(allShifts.length===1?' TYPE':' TYPES'),
+      note:'Every worked shift type — rules can target them all at once. Updates automatically as you add or remove shifts. Off and Paid leave are excluded.' }];
+    return { shifts, groups, autoGroups,
+      available, selected, availCount:available.length, selCount:selected.length,
+      noAvail:available.length===0, noSel:selected.length===0, noGroups:(v.groups||[]).length===0,
+      draftGroupName:gdraft.id||'',
+      onGroupAdd:v.groupAdd||(()=>{}), onGroupName:(e)=>(v.groupDraftName||(()=>{}))(e.target.value),
+      onGroupSave:v.groupSave||(()=>{}), onGroupCancel:v.groupCancel||(()=>{}),
+      onSelectAll:()=>{ allShifts.filter(n=>!sel.includes(n)).forEach(n=>toggle(n)); },
+      onClearAll:()=>{ [...sel].forEach(n=>toggle(n)); },
+      draftName:draft.name||'', draftStart:draft.startTime||'', draftEnd:draft.endTime||'', draftNeed:(draft.need!=null?draft.need:0),
+      draftPref:(draft.pref!=null?draft.pref:''),
+      onPref:(e)=>(v.draftSet||(()=>{}))('pref', e.target.value),
+      prefHelp:'Ideal number of nurses for this shift when staffing allows — a soft target above the minimum. The generator fills up to preferred if spare nurses are available, but never breaks the minimum to reach it. Leave blank to use the minimum only.',
+      draftCode:draft.code||'',
+      codeHelp:'The code rules, groups and the roster refer to. Renaming it here updates every reference automatically.',
+      isOvernight:overnight,
+      clockSpanLabel, hasClockSpan:clockSpanLabel!=null,
+      draftRestHours:(draft.restHours!=null?draft.restHours:0), draftRestMins:(draft.restMins!=null?draft.restMins:0),
+      draftRestTotal:restTotal, timeOptions, restOptions,
+      onRest:(e)=>{ const total=Math.max(0,Number(e.target.value)||0); const set=v.draftSet||(()=>{}); set('restHours',Math.floor(total/60)); set('restMins',total%60); },
+      workHoursLabel, workCalcLabel,
+      gridError:!!this._gridError(draft), gridErrorText:this._gridError(draft),
+      clockSpanTip:(clockSpanLabel!=null?('Clock span '+clockSpanLabel+' — set the paid working hours below.'):'Start and end are when the shift is on the floor; they appear on the roster.'),
+      onRestHours:(e)=>(v.draftSet||(()=>{}))('restHours', e.target.value),
+      onRestMins:(e)=>(v.draftSet||(()=>{}))('restMins', e.target.value),
+      timeTip:'Start and end are the on-the-floor clock times shown on the roster. They fall on the half-hour (HH:00 or HH:30). They do NOT set the paid length — enter rest time separately below and working hours are calculated for you, because unpaid breaks make the clock span longer than the hours that count.',
+      restTip:'Total unpaid break time during the shift — a whole number of half-hours (multiple of 30 minutes), less than the clock span. Working hours = clock span − rest time, calculated automatically. An 08:00–17:00 shift (9h clock span) with 1h rest = 8 working hours.',
+      onName:(e)=>(v.draftSet||(()=>{}))('name', e.target.value),
+      onOpenReq:()=>(v.openReq||(()=>{}))(),
+      onCode:(e)=>{ this.setState({codeError:''}); (v.draftSet||(()=>{}))('code', e.target.value); },
+      codeError:!!this.state.codeError, codeErrorText:this.state.codeError||'',
+      onStart:(e)=>(v.draftSet||(()=>{}))('startTime', e.target.value),
+      onEnd:(e)=>(v.draftSet||(()=>{}))('endTime', e.target.value),
+      onNeed:(e)=>(v.draftSet||(()=>{}))('need', e.target.value),
+      needHelp: editId? ('This is the '+editId+' staffing requirement over all dates — the same rule under Staffing requirements. Editing here updates that one object.') : 'This sets the shift’s staffing requirement over all dates.',
+      onSave:this.doSave, onCancel:v.cancel||(()=>{}), onAdd:v.add||(()=>{}),
+      toRules:()=>(v.go||(()=>{}))('rules') };
+  }
+}
+</script>
+</body>
+</html>

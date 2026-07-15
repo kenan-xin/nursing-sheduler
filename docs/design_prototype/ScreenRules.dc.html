@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div class="ns-fade">
+  <div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:var(--space-4);margin-bottom:var(--space-5);">
+    <div style="flex:1;min-width:240px;">
+      <div style="font:600 var(--m-sm) var(--font-ui);letter-spacing:.03em;color:var(--brandink);text-transform:uppercase;margin-bottom:8px;">STEP 4 · RULES</div>
+      <h1 style="font:800 var(--t-display) var(--font-display);letter-spacing:-.02em;margin:0 0 8px;line-height:1.05;">Choose the Rules</h1>
+      <p style="margin:0;color:var(--ink2);max-width:68ch;">Rules is a friendly, pinned view of the ward's constraints — the same library you edit under Advanced. A <b>linked</b> rule reads and writes the exact constraint record it's pinned from; a <b>built-in</b> rule is a structural rule the engine always enforces. Pin any Advanced constraint as a quick-access rule with <b>Customise library</b>.</p>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <button onClick="{{ toggleAdmin }}" style="{{ adminBtnStyle }}" style-hover="background:var(--panel)"><i class="fa-solid {{ adminIcon }}"></i> {{ adminBtnLabel }}</button>
+      <button onClick="{{ toRequests }}" style="height:44px;padding:0 20px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-body) var(--font-ui);display:inline-flex;align-items:center;gap:9px;" style-hover="filter:brightness(.94)">Continue <i class="fa-solid fa-arrow-right" style="font-size:12px;"></i></button>
+    </div>
+  </div>
+
+  <sc-if value="{{ admin }}" hint-placeholder-val="{{ false }}">
+    <div style="display:flex;align-items:center;gap:10px;border:1px solid var(--brand);background:var(--brandtint);padding:11px 14px;margin-bottom:var(--space-4);flex-wrap:wrap;">
+      <i class="fa-solid fa-thumbtack" style="color:var(--brandink);"></i>
+      <div style="flex:1;min-width:180px;font-size:var(--t-sm);color:var(--ink2);"><b>Pin a constraint.</b> Surface any advanced constraint as a quick-access rule and pick which fields become inline edits. Edits sync to the constraint. Unpinning only removes the shortcut — the constraint stays in Advanced.</div>
+      <button onClick="{{ newShortcut }}" style="height:36px;padding:0 14px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:8px;" style-hover="filter:brightness(.94)"><i class="fa-solid fa-thumbtack"></i> Pin a constraint</button>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ showForm }}" hint-placeholder-val="{{ false }}">
+    <div style="background:var(--surface);border:1px solid var(--brand);margin-bottom:var(--space-5);">
+      <div style="padding:14px 18px;border-bottom:1px solid var(--line2);background:var(--brandtint);"><div style="font:800 var(--t-cardhead) var(--font-display);letter-spacing:-.02em;color:var(--brandink);">{{ formHeading }}</div></div>
+      <div style="padding:18px;">
+        <label style="display:block;margin-bottom:16px;">
+          <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;margin-bottom:7px;">CONSTRAINT TO PIN</div>
+          <div style="position:relative;">
+            <select value="{{ dUid }}" onChange="{{ onRecord }}" style="width:100%;height:40px;padding:0 34px 0 12px;border:1px solid var(--line);background:var(--surface);appearance:none;">
+              <option value="">Choose a constraint…</option>
+              <sc-for list="{{ recordOptions }}" as="rc" hint-placeholder-count="6"><option value="{{ rc.value }}">{{ rc.label }}</option></sc-for>
+            </select>
+            <span style="position:absolute;right:13px;top:50%;transform:translateY(-25%);width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-top:6px solid var(--ink3);pointer-events:none;"></span>
+          </div>
+          <sc-if value="{{ noRecords }}" hint-placeholder-val="{{ false }}"><div style="font-size:var(--t-sm);color:var(--ink3);margin-top:6px;">No constraints yet — add one in an Advanced editor first.</div></sc-if>
+          <sc-if value="{{ hasPickedKind }}" hint-placeholder-val="{{ false }}"><div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--brandink);text-transform:uppercase;margin-top:7px;"><i class="fa-solid fa-tag" style="font-size:9px;"></i> {{ dKindLabel }}</div></sc-if>
+        </label>
+        <label style="display:block;margin-bottom:14px;">
+          <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;margin-bottom:7px;">RULE NAME</div>
+          <input value="{{ dTitle }}" onInput="{{ onTitle }}" placeholder="e.g. Cap nights per nurse" style="width:100%;height:40px;padding:0 12px;border:1px solid var(--line);background:var(--surface);">
+          <div style="font-size:var(--t-sm);color:var(--ink3);margin-top:6px;">This is the constraint's name — editing it renames the constraint in Advanced too, so the two always match.</div>
+        </label>
+        <label style="display:block;margin-bottom:16px;">
+          <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;margin-bottom:7px;">DESCRIPTION</div>
+          <input value="{{ dDesc }}" onInput="{{ onDesc }}" placeholder="A sentence explaining the rule" style="width:100%;height:40px;padding:0 12px;border:1px solid var(--line);background:var(--surface);">
+        </label>
+        <div style="margin-bottom:16px;">
+          <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;margin-bottom:8px;">CATEGORY</div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;">
+            <sc-for list="{{ categoryChips }}" as="cc" hint-placeholder-count="6">
+              <button onClick="{{ cc.onToggle }}" style="{{ cc.style }}"><i class="fa-solid {{ cc.icon }}" style="font-size:10px;"></i> {{ cc.name }}</button>
+            </sc-for>
+          </div>
+        </div>
+        <div style="border-top:1px solid var(--line2);padding-top:16px;">
+          <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;">QUICK-EDIT NUMBERS</div>
+          <div style="font-size:var(--t-sm);color:var(--ink3);margin-top:3px;margin-bottom:12px;max-width:64ch;">Pick which of this constraint's numbers you want to tweak inline from the Rules list — each ticked number becomes an <b>Adjust</b> control that writes straight back to the constraint. People, shift-type and date fields aren't offered here; they stay in the full Advanced editor. Tick none for a display-only pin.</div>
+          <sc-if value="{{ hasFieldOpts }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;flex-wrap:wrap;gap:8px;">
+              <sc-for list="{{ fieldChecks }}" as="fc" hint-placeholder-count="4">
+                <button onClick="{{ fc.onToggle }}" style="{{ fc.style }}"><i class="fa-solid {{ fc.icon }}" style="font-size:10px;"></i> {{ fc.k }} <span style="opacity:.65;font-weight:600;">{{ fc.val }}</span></button>
+              </sc-for>
+            </div>
+          </sc-if>
+          <sc-if value="{{ pickedNoQuick }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;align-items:flex-start;gap:8px;font-size:var(--t-sm);color:var(--ink2);border:1px solid var(--line2);background:var(--panel);padding:12px 14px;"><i class="fa-solid fa-circle-info" style="color:var(--ink3);margin-top:2px;flex:none;"></i><span>This constraint has no adjustable numbers — it will pin as a <b>display-only</b> rule with a link to its full editor in Advanced.</span></div>
+          </sc-if>
+          <sc-if value="{{ noFieldPick }}" hint-placeholder-val="{{ true }}">
+            <div style="font-size:var(--t-sm);color:var(--faint);border:1px dashed var(--line2);padding:12px 14px;">Choose a constraint above to see its adjustable numbers.</div>
+          </sc-if>
+        </div>
+      </div>
+      <div style="padding:14px 18px;border-top:1px solid var(--line2);display:flex;justify-content:flex-end;gap:10px;">
+        <button onClick="{{ onCancel }}" style="height:40px;padding:0 18px;background:transparent;border:1px solid var(--line);font:600 var(--t-body) var(--font-ui);" style-hover="background:var(--panel)">Cancel</button>
+        <button onClick="{{ onSave }}" style="{{ saveStyle }}" style-hover="filter:brightness(.94)"><i class="fa-solid fa-thumbtack"></i> {{ submitLabel }}</button>
+      </div>
+    </div>
+  </sc-if>
+
+  <div style="display:flex;align-items:center;gap:14px;margin-bottom:var(--space-5);flex-wrap:wrap;">
+    <div style="display:inline-flex;align-items:baseline;gap:8px;border:1px solid var(--line);background:var(--surface);padding:9px 14px;">
+      <span style="font:800 var(--t-title) var(--font-display);">{{ onCount }}</span>
+      <span style="font:600 var(--m-sm) var(--font-mono);color:var(--ink3);">OF {{ total }} RULES ON</span>
+    </div>
+    <div style="flex:1;min-width:180px;font-size:var(--t-sm);color:var(--ink2);display:flex;align-items:center;gap:8px;">
+      <i class="fa-solid fa-circle-info" style="color:var(--ink3);flex:none;"></i>
+      <span>Rules with numbers show an <b>Adjust</b> button. Tap a rule's <b>↳ constraint</b> link to edit the exact record in Advanced. Use <b>Customise library</b> to pin your own quick-access rules.</span>
+    </div>
+  </div>
+
+  <sc-if value="{{ showAdvBanner }}" hint-placeholder-val="{{ false }}">
+    <div style="display:flex;align-items:center;gap:12px;border:1px solid var(--line);background:var(--panel);padding:12px 14px;margin-bottom:var(--space-5);flex-wrap:wrap;">
+      <i class="fa-solid fa-sliders" style="color:var(--ink2);"></i>
+      <div style="flex:1;min-width:200px;font-size:var(--t-sm);color:var(--ink2);"><b>{{ advTotal }} advanced constraint records</b> back these rules — {{ advBreakdown }}. Advanced shows every one, including variants not surfaced here.</div>
+      <button onClick="{{ openAdvanced }}" style="height:36px;padding:0 14px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:8px;white-space:nowrap;" style-hover="background:var(--surface)">Open Advanced <i class="fa-solid fa-arrow-right" style="font-size:11px;"></i></button>
+    </div>
+  </sc-if>
+
+  <div style="display:flex;flex-direction:column;gap:var(--space-5);">
+    <sc-for list="{{ cats }}" as="cat" hint-placeholder-count="5">
+      <div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+          <div style="width:30px;height:30px;background:var(--panel);border:1px solid var(--line2);display:flex;align-items:center;justify-content:center;color:var(--ink2);font-size:13px;"><i class="fa-solid {{ cat.icon }}"></i></div>
+          <div style="font:600 var(--m-sm) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;">{{ cat.cat }}</div>
+          <div style="flex:1;height:1px;background:var(--line2);"></div>
+        </div>
+        <div style="border:1px solid var(--line);background:var(--surface);">
+          <sc-for list="{{ cat.items }}" as="r" hint-placeholder-count="3">
+            <div style="{{ r.wrapStyle }}">
+              <div style="display:flex;gap:14px;padding:16px 18px;align-items:flex-start;">
+                <button role="switch" aria-checked="{{ r.on }}" onClick="{{ r.onToggle }}" style="{{ r.trackStyle }}" aria-label="Toggle rule" title="{{ r.toggleTitle }}"><span style="{{ r.knobStyle }}"></span></button>
+                <div style="flex:1;min-width:0;">
+                  <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap;">
+                    <span style="font-weight:700;font-size:var(--t-body);color:{{ r.titleColor }};">{{ r.title }}</span>
+                    <sc-if value="{{ r.showLock }}" hint-placeholder-val="{{ false }}"><span title="Always on" style="color:var(--ink3);font-size:11px;"><i class="fa-solid fa-lock"></i></span></sc-if>
+                    <sc-if value="{{ r.isUserShortcut }}" hint-placeholder-val="{{ false }}"><span title="Pinned shortcut" style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--brandink);border:1px solid var(--brand);padding:1px 6px;text-transform:uppercase;display:inline-flex;align-items:center;gap:5px;"><i class="fa-solid fa-thumbtack" style="font-size:8px;"></i> Pinned</span></sc-if>
+                  </div>
+                  <div style="color:var(--ink2);font-size:var(--t-sm);margin-top:3px;">{{ r.desc }}</div>
+                  <sc-if value="{{ r.isLink }}" hint-placeholder-val="{{ true }}">
+                    <button onClick="{{ r.onOpenAdvRule }}" style="margin-top:6px;background:none;border:none;padding:0;font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--brandink);text-transform:uppercase;cursor:pointer;display:inline-flex;align-items:center;gap:6px;" style-hover="text-decoration:underline">↳ {{ r.linkLabel }} <i class="fa-solid fa-arrow-up-right-from-square" style="font-size:9px;"></i></button>
+                  </sc-if>
+                  <sc-if value="{{ r.isSetup }}" hint-placeholder-val="{{ false }}">
+                    <button onClick="{{ r.onOpenAdvRule }}" style="margin-top:6px;background:none;border:none;padding:0;font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;cursor:pointer;display:inline-flex;align-items:center;gap:6px;" style-hover="text-decoration:underline"><i class="fa-solid fa-plus" style="font-size:9px;"></i> Set up in Advanced</button>
+                  </sc-if>
+                  <sc-if value="{{ r.isBuiltin }}" hint-placeholder-val="{{ false }}">
+                    <div title="Structural constraint the engine always enforces." style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;margin-top:6px;display:inline-flex;align-items:center;gap:6px;"><i class="fa-solid fa-shield-halved" style="font-size:9px;"></i> Built-in</div>
+                  </sc-if>
+                </div>
+                <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;flex:none;">
+                  <span style="{{ r.cfgStyle }}">{{ r.cfg }}</span>
+                  <div style="display:flex;gap:5px;align-items:center;">
+                    <sc-if value="{{ r.canAdjust }}" hint-placeholder-val="{{ false }}">
+                      <button onClick="{{ r.onAdjust }}" style="{{ r.adjustStyle }}" style-hover="background:var(--panel)"><i class="fa-solid fa-sliders" style="font-size:10px;"></i> {{ r.adjustLabel }}</button>
+                    </sc-if>
+                    <sc-if value="{{ r.showAdmin }}" hint-placeholder-val="{{ false }}">
+                      <button onClick="{{ r.onEditShortcut }}" aria-label="Edit shortcut" title="Edit shortcut" style="width:28px;height:28px;background:transparent;border:1px solid var(--line);color:var(--ink2);" style-hover="background:var(--panel)"><i class="fa-solid fa-pen" style="font-size:10px;"></i></button>
+                    </sc-if>
+                    <sc-if value="{{ r.showUnpin }}" hint-placeholder-val="{{ false }}">
+                      <button onClick="{{ r.onUnpin }}" aria-label="Unpin" title="Unpin — keeps the constraint in Advanced" style="width:28px;height:28px;background:transparent;border:1px solid var(--line);color:var(--ink2);" style-hover="background:var(--errortint)"><i class="fa-solid fa-xmark" style="font-size:12px;"></i></button>
+                    </sc-if>
+                  </div>
+                </div>
+              </div>
+              <sc-if value="{{ r.adjustOpen }}" hint-placeholder-val="{{ false }}">
+                <div style="border-top:1px dashed var(--line);background:var(--panel);padding:14px 18px;">
+                  <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;margin-bottom:12px;">Adjust parameters</div>
+                  <sc-if value="{{ r.hasAdjustNote }}" hint-placeholder-val="{{ false }}">
+                    <div style="display:flex;align-items:flex-start;gap:8px;border:1px solid var(--brand);background:var(--brandtint);padding:9px 12px;margin-bottom:14px;font-size:var(--t-sm);color:var(--ink2);"><i class="fa-solid fa-link" style="color:var(--brandink);margin-top:2px;font-size:11px;"></i><span>{{ r.adjustNote }}</span></div>
+                  </sc-if>
+                  <div style="display:flex;flex-wrap:wrap;gap:18px;">
+                    <sc-for list="{{ r.paramInputs }}" as="pin" hint-placeholder-count="2">
+                      <label style="display:block;">
+                        <div style="font-size:var(--t-sm);color:var(--ink2);margin-bottom:6px;">{{ pin.label }}</div>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                          <sc-if value="{{ pin.isNumber }}" hint-placeholder-val="{{ true }}">
+                            <input type="number" min="{{ pin.min }}" max="{{ pin.max }}" value="{{ pin.value }}" onInput="{{ pin.onChange }}" style="width:88px;height:36px;padding:0 10px;border:1px solid var(--line);background:var(--surface);font-weight:700;">
+                          </sc-if>
+                          <sc-if value="{{ pin.isText }}" hint-placeholder-val="{{ false }}">
+                            <input type="text" value="{{ pin.value }}" onInput="{{ pin.onChange }}" style="width:170px;height:36px;padding:0 10px;border:1px solid var(--line);background:var(--surface);font-weight:600;">
+                          </sc-if>
+                          <sc-if value="{{ pin.unit }}" hint-placeholder-val="{{ false }}"><span style="font:600 var(--m-sm) var(--font-mono);color:var(--ink3);">{{ pin.unit }}</span></sc-if>
+                        </div>
+                      </label>
+                    </sc-for>
+                  </div>
+                  <sc-if value="{{ r.hasAdvExtras }}" hint-placeholder-val="{{ false }}">
+                    <div style="margin-top:14px;border:1px solid var(--line2);background:var(--surface);padding:12px 14px;">
+                      <div style="display:flex;align-items:center;gap:8px;font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;margin-bottom:8px;"><i class="fa-solid fa-lock" style="font-size:10px;"></i> Set in Advanced only</div>
+                      <ul style="margin:0 0 10px;padding-left:18px;display:flex;flex-direction:column;gap:4px;">
+                        <sc-for list="{{ r.advExtras }}" as="ax" hint-placeholder-count="1"><li style="font-size:var(--t-sm);color:var(--ink2);">{{ ax }}</li></sc-for>
+                      </ul>
+                      <button onClick="{{ r.openAdv }}" style="height:32px;padding:0 12px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:7px;" style-hover="background:var(--panel)">Edit in Advanced <i class="fa-solid fa-arrow-right" style="font-size:10px;"></i></button>
+                    </div>
+                  </sc-if>
+                  <div style="margin-top:14px;">
+                    <button onClick="{{ r.onAdjust }}" style="height:34px;padding:0 16px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:7px;" style-hover="filter:brightness(.94)"><i class="fa-solid fa-check" style="font-size:11px;"></i> Done</button>
+                  </div>
+                </div>
+              </sc-if>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </sc-for>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1200,&quot;height&quot;:940}}">
+class Component extends DCLogic {
+  state={ adjustId:null, libMode:'list', editK:null, draft:null };
+  toggleAdjust=(id)=> this.setState(s=>({adjustId:s.adjustId===id?null:id}));
+  toggleAdmin=()=>{ const v=this.props.vals||{}; (v.setAdmin||(()=>{}))(!v.admin); this.setState({libMode:'list',draft:null,editK:null}); };
+  newShortcut=()=>{ this.setState({libMode:'add',editK:null,draft:{kind:'',uid:'',title:'',desc:'',cat:'Custom shortcuts',fields:[]}}); window.scrollTo({top:0,behavior:'instant'}); };
+  editShortcut=(r)=>{ this.setState({libMode:'edit',editK:r.id,draft:{kind:r.scKind,uid:r.scUid,title:r.title,desc:r.desc,cat:r.cat,fields:[...(r.scFields||[])]}}); window.scrollTo({top:0,behavior:'instant'}); };
+  cancelLib=()=>this.setState({libMode:'list',draft:null,editK:null});
+  setD=(k,val)=>this.setState(s=>({draft:{...s.draft,[k]:val}}));
+  onKind=(k)=>this.setState(s=>({draft:{...s.draft,kind:k,uid:'',fields:[]}}));
+  onRecord=(uid)=>this.setState(s=>{ const v=this.props.vals||{}; let rec=null,kind=''; Object.keys(v.recordCatalog||{}).forEach(k=>{ (v.recordCatalog[k]||[]).forEach(r=>{ if(r.uid===uid){ rec=r; kind=r.kind||k; } }); }); return {draft:{...s.draft, uid, kind, title:(rec?rec.desc:(s.draft.title||'')), fields:[]}}; });
+  toggleField=(fk)=>this.setState(s=>{ const f=s.draft.fields||[]; const nf=f.includes(fk)?f.filter(x=>x!==fk):[...f,fk]; return {draft:{...s.draft,fields:nf}}; });
+  saveLib=()=>{ const v=this.props.vals||{}; const d=this.state.draft; if(!d||!d.uid) return; const sc={kind:d.kind,uid:d.uid,title:(d.title||'Shortcut').trim()||'Shortcut',desc:(d.desc||'').trim(),cat:(d.cat||'Custom shortcuts').trim()||'Custom shortcuts',fields:d.fields||[]}; if(this.state.libMode==='add') (v.addShortcut||(()=>{}))(sc); else (v.updateShortcut||(()=>{}))(this.state.editK,sc); this.setState({libMode:'list',draft:null,editK:null}); };
+  renderVals(){
+    const v=this.props.vals||{};
+    const toggle=v.toggle||(()=>{});
+    const admin=!!v.admin;
+    const adjustId=this.state.adjustId;
+    const cats=(v.cats||[]).map(c=>({
+      ...c,
+      items:c.items.map((r,i)=>{
+        const source=r.source||'policy';
+        const isLink=(source==='record') && (r.configured!==false);
+        const isSetup=(source==='record') && (r.configured===false);
+        const isPolicy=(source==='policy');
+        const isBuiltin=(source==='builtin');
+        const hasParams=(r.params||[]).length>0;
+        const canAdjust=hasParams && r.on && !r.locked;
+        const adjustOpen=canAdjust && adjustId===r.id;
+        return {
+          ...r,
+          isLink, isSetup, isPolicy, isBuiltin, showLock:isBuiltin,
+          linkLabel:r.linkLabel||r.maps,
+          onOpenAdvRule:()=>(v.openAdvanced||(()=>{}))(r.advScreen||'requirements'),
+          hasParams, canAdjust, adjustOpen,
+          adjustLabel: adjustOpen?'Close':'Adjust',
+          adjustStyle:`height:28px;padding:0 10px;background:${adjustOpen?'var(--brandtint)':'transparent'};border:1px solid ${adjustOpen?'var(--brand)':'var(--line)'};color:${adjustOpen?'var(--brandink)':'var(--ink2)'};font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:6px;`,
+          onAdjust:()=>this.toggleAdjust(r.id),
+          adjustNote:r.adjustNote||'', hasAdjustNote:!!r.adjustNote,
+          advExtras:r.advExtras||[], hasAdvExtras:(r.advExtras||[]).length>0, openAdv:()=>(v.openAdvanced||(()=>{}))(r.advScreen||'requirements'),
+          showAdmin: admin && !!r.isUserShortcut,
+          showUnpin: !!r.isUserShortcut,
+          onEditShortcut:()=>this.editShortcut(r), onUnpin:()=>(v.deleteShortcut||(()=>{}))(r.id),
+          paramInputs:(r.params||[]).map(p=>({
+            ...p,
+            value:(p.value!=null?p.value:''),
+            isNumber:p.type!=='select'&&p.type!=='text', isText:p.type==='text',
+            min:(p.min!=null?p.min:0), max:(p.max!=null?p.max:9999),
+            onChange:(e)=>(v.setParam||(()=>{}))(r.id, p.key, e.target.value),
+          })),
+          wrapStyle:`${i>0?'border-top:1px solid var(--line2);':''}${r.on?'':'opacity:.72;'}`,
+          onToggle:()=>{ if(!r.locked) toggle(r.id); },
+          titleColor: r.on?'var(--ink)':'var(--ink2)',
+          trackStyle:`position:relative;width:38px;height:22px;border-radius:11px;border:none;flex:none;margin-top:2px;cursor:${r.locked?'not-allowed':'pointer'};background:${r.on?'var(--brand)':'var(--line)'};transition:background var(--dur-fast) var(--ease);`,
+          knobStyle:`position:absolute;top:2px;left:2px;width:18px;height:18px;background:#fff;border-radius:11px;transform:translateX(${r.on?'16px':'0'});transition:transform var(--dur-fast) var(--ease);`,
+          cfgStyle:`font:600 var(--m-xs) var(--font-mono);letter-spacing:.04em;padding:4px 9px;white-space:nowrap;${r.on?'color:var(--brandink);background:var(--brandtint);':'color:var(--ink3);background:var(--panel);'}`,
+        };
+      }),
+    }));
+    const ac=v.advCounts||{};
+    const advTotal=(ac.requirements||0)+(ac.successions||0)+(ac.counts||0)+(ac.affinities||0)+(ac.coverings||0);
+    const _ap=[];
+    if(ac.requirements) _ap.push(ac.requirements+' requirements');
+    if(ac.successions) _ap.push(ac.successions+' successions');
+    if(ac.counts) _ap.push(ac.counts+' counts');
+    if(ac.affinities) _ap.push(ac.affinities+' affinities');
+    if(ac.coverings) _ap.push(ac.coverings+' coverings');
+    const advBreakdown=_ap.join(' · ');
+    // library form
+    const d=this.state.draft;
+    const kindLabels=v.kindLabels||{};
+    const allRecs=[];
+    Object.keys(v.recordCatalog||{}).forEach(k=>{ (v.recordCatalog[k]||[]).forEach(rc=>{ allRecs.push({...rc, kind:rc.kind||k}); }); });
+    const recordOptions = allRecs.map(rc=>{ const w=(rc.weight!=null&&rc.weight!=='')?(' · '+rc.weight):''; return {value:rc.uid, label:(kindLabels[rc.kind]||rc.kind)+' · '+rc.desc+w}; });
+    const selRec = d ? allRecs.find(rc=>rc.uid===d.uid) : null;
+    const allFieldOpts = selRec ? (selRec.fields||[]) : [];
+    const fieldOpts = allFieldOpts.filter(f=>f.quick);
+    const recordPicked = !!(d && d.uid);
+    const chipStyle=(on)=>`height:32px;padding:0 12px;border:1px solid ${on?'var(--brand)':'var(--line)'};background:${on?'var(--brand)':'var(--surface)'};color:${on?'var(--onbrand)':'var(--ink)'};font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:7px;cursor:pointer;`;
+    const catOpts=v.categoryOptions||[];
+    const canSave = !!(d && d.uid);
+    return {
+      cats, onCount:v.onCount, total:v.total, toRequests:()=>(v.go||(()=>{}))('requests'),
+      showAdvBanner:(v.mode!=='advanced') && advTotal>0, advTotal, advBreakdown,
+      openAdvanced:()=>(v.openAdvanced||(()=>{}))('requirements'),
+      admin, toggleAdmin:this.toggleAdmin, newShortcut:this.newShortcut,
+      adminBtnLabel: admin?'Done customising':'Customise library',
+      adminIcon: admin?'fa-check':'fa-thumbtack',
+      adminBtnStyle:`height:44px;padding:0 16px;border:1px solid ${admin?'var(--brand)':'var(--line)'};background:${admin?'var(--brandtint)':'transparent'};color:${admin?'var(--brandink)':'var(--ink)'};font:600 var(--t-body) var(--font-ui);display:inline-flex;align-items:center;gap:9px;`,
+      showForm:this.state.libMode!=='list',
+      formHeading:this.state.libMode==='add'?'Pin a constraint to Rules':'Edit pinned rule',
+      submitLabel:this.state.libMode==='add'?'Pin to Rules':'Save',
+      saveStyle:`height:40px;padding:0 20px;border:none;font:700 var(--t-body) var(--font-ui);display:inline-flex;align-items:center;gap:8px;${canSave?'background:var(--brand);color:var(--onbrand);':'background:var(--panel);color:var(--faint);cursor:not-allowed;'}`,
+      dUid:d?d.uid:'', dTitle:d?d.title:'', dDesc:d?d.desc:'', dCat:d?d.cat:'',
+      dKindLabel:(d&&d.kind)?(kindLabels[d.kind]||''):'', hasPickedKind:!!(d&&d.kind),
+      recordOptions, noRecords:recordOptions.length===0,
+      onRecord:(e)=>this.onRecord(e.target.value),
+      onTitle:(e)=>this.setD('title',e.target.value), onDesc:(e)=>this.setD('desc',e.target.value), onCat:(e)=>this.setD('cat',e.target.value),
+      hasFieldOpts:fieldOpts.length>0, noFieldPick:!recordPicked, pickedNoQuick:recordPicked && fieldOpts.length===0,
+      fieldChecks:fieldOpts.map(f=>{ const fk=f.k; const on=!!(d&&(d.fields||[]).includes(fk)); const val=(f.v==null||f.v==='')?'—':f.v; return {k:fk, val, on, icon:on?'fa-check':'fa-plus', style:chipStyle(on), onToggle:()=>this.toggleField(fk)}; }),
+      categoryChips:catOpts.map(c=>{ const on=!!(d&&d.cat===c.name); return {name:c.name, icon:c.icon, on, style:chipStyle(on), onToggle:()=>this.setD('cat',c.name)}; }),
+      onCancel:this.cancelLib, onSave:this.saveLib,
+    };
+  }
+}
+</script>
+</body>
+</html>
