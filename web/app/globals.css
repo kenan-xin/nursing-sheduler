@@ -5,138 +5,447 @@
 @custom-variant dark (&:is(.dark *));
 
 /* ==========================================================================
-   T03 PLACEHOLDER — shadcn-init default token baseline (base-nova preset).
-   Everything from here to the matching "END T03 PLACEHOLDER" marker is the
-   GENERATED default (neutral colors, radius 0.625rem, Geist font wiring). It is
-   NOT the settled design system. T03 replaces it with the design-README tokens:
-   radius 0, Figtree / Hanken Grotesk / Spline Sans Mono, motion tokens, the
-   480–1920 breakpoint ladder + density multiplier.
-   Icon note: components.json has `iconLibrary: "lucide"`; T03 must reconcile this
-   to react-icons Font Awesome 6 BEFORE any shadcn component is generated, so the
-   repo does not accumulate two icon systems.
+   Design system — tokens ported from docs/design_prototype/README.md and the
+   prototype shell `<style>` block (the authored source of truth). Nothing here
+   is invented: colors (light + dark), the fluid type scale, the 4px spacing
+   scale, motion, shadows, the density multiplier, and the 480–1920 breakpoint
+   ladder all mirror the prototype. Radius is 0 everywhere (square corners are
+   intentional). Theme switching is class-based (`.dark` on <html>), which is
+   what the Tailwind `dark` variant above keys off; density is driven by the
+   `data-density` attribute on <html>.
+
+   Fonts (README): body/UI = Hanken Grotesk, display/headings = Figtree, mono =
+   Spline Sans Mono. The next/font CSS variables (--font-hanken / --font-figtree
+   / --font-spline-mono) are wired in app/layout.tsx.
    ========================================================================== */
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-geist-sans);
-  --color-sidebar-ring: var(--sidebar-ring);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar: var(--sidebar);
-  --color-chart-5: var(--chart-5);
-  --color-chart-4: var(--chart-4);
-  --color-chart-3: var(--chart-3);
-  --color-chart-2: var(--chart-2);
-  --color-chart-1: var(--chart-1);
-  --color-ring: var(--ring);
-  --color-input: var(--input);
-  --color-border: var(--border);
-  --color-destructive: var(--destructive);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-accent: var(--accent);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-muted: var(--muted);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-secondary: var(--secondary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-primary: var(--primary);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-popover: var(--popover);
-  --color-card-foreground: var(--card-foreground);
-  --color-card: var(--card);
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
-  --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
-}
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  color-scheme: light;
+
+  /* Font stacks (fed by next/font variables from layout.tsx) */
+  --ff-body: var(--font-hanken), system-ui, sans-serif;
+  --ff-heading: var(--font-figtree), system-ui, sans-serif;
+  --ff-mono: var(--font-spline-mono), ui-monospace, monospace;
+
+  /* Color — light theme */
+  --ink: #14161b;
+  --ink2: #4a515c;
+  /* Accessibility note (design decision, review finding #3): --ink3 and --faint
+     are DELIBERATELY sub-AA low-emphasis text (≈3.14:1 / ≈2.18:1 on surface) —
+     used for tertiary labels and placeholders only, never functional text. They
+     are intentionally exempt from the 4.5:1 rule. Functional text (destructive
+     action fill, status badge text) is AA-guaranteed via --error-strong and the
+     ink-on-tint badge treatment, and is test-protected in the e2e suite. */
+  --ink3: #8b929c;
+  --faint: #aab0ba;
+  --on-ink: #ffffff;
+  --bg: #fbfcfd;
+  --surface: #ffffff;
+  --panel: #f2f4f7;
+  --panel-alt: #f1f3f6;
+  --line: #c8cdd5;
+  --line2: #e2e5ea;
+  --rule: #14161b;
+  --sidebar: #ffffff;
+  --chrome: #14161b;
+  --sidebar-w: 280px;
+
+  /* Selectable accent (README: #2360c4 / #0e7490 / #b0357a / #3f4a63). The
+     accent axis is set via data-accent on <html>; brand-ink / brand-tint are
+     DERIVED from it via color-mix exactly as the prototype does
+     (Nurse Scheduling.dc.html:1190-1194) — light uses the accent as-is for ink
+     and a 9%-on-white tint; dark lightens both. */
+  --accent-color: #2360c4;
+  --brand: var(--accent-color);
+  --brandink: var(--accent-color);
+  --brandtint: color-mix(in srgb, var(--accent-color) 9%, #ffffff);
+  --onbrand: #ffffff;
+  --success: #1f9a5c;
+  --successtint: #eafaf1;
+  --warn: #b07d10;
+  --warntint: #fbf3df;
+  --error: #d94032;
+  --errortint: #fbeae8;
+  /* Accessible destructive-action fill (review #3). The --error swatch stays the
+     canonical palette value for status; white text on it is only 4.44:1, so
+     action buttons use this darker red (white ≈ 5.44:1, clears AA in both
+     themes). Not overridden in .dark — a fixed strong red reads on both bgs. */
+  --error-strong: #c0392b;
+
+  /* Density multiplier — Spacious 1.16 / Comfortable 1.0 / Compact 0.9.
+     Drives both the spacing scale and the fluid type scale. */
+  --density: 1;
+
+  /* Spacing scale (4px grid × density). Tailwind's `--spacing` base is set from
+     this below so padding/margin/gap utilities inherit the density multiplier. */
+  --space-1: calc(4px * var(--density));
+  --space-2: calc(8px * var(--density));
+  --space-3: calc(12px * var(--density));
+  --space-4: calc(16px * var(--density));
+  --space-5: calc(20px * var(--density));
+  --space-6: calc(24px * var(--density));
+  --space-8: calc(32px * var(--density));
+  --space-12: calc(48px * var(--density));
+
+  /* Fluid type scale. --base-h/--base-b/--base-l step up at the breakpoint
+     ladder below; every size folds in the density multiplier. */
+  --base-h: 26px;
+  --base-b: 15.5px;
+  --base-l: 12px;
+  --fs-xl: calc(var(--base-h) * var(--density));
+  --fs-card: calc(var(--base-h) * 0.78 * var(--density));
+  --fs-lg: calc(var(--base-h) * 0.6 * var(--density));
+  --fs-md: calc(var(--base-b) * var(--density));
+  --fs-sm: calc(var(--base-b) * 0.92 * var(--density));
+  --fs-lbl: calc(var(--base-l) * var(--density));
+  --fs-lblmd: calc(var(--base-l) * 1.13 * var(--density));
+  --fs-lbllg: calc(var(--base-l) * 1.27 * var(--density));
+  --t-display: var(--fs-xl);
+  --t-h2: var(--fs-xl);
+  --t-cardhead: var(--fs-card);
+  --t-h3: var(--fs-lg);
+  --t-title: var(--fs-lg);
+  --t-body: var(--fs-md);
+  --t-sm: var(--fs-sm);
+  --t-xs: var(--fs-sm);
+  --m-xs: var(--fs-lbl);
+  --m-sm: var(--fs-lbl);
+  --m-md: var(--fs-lblmd);
+  --m-lg: var(--fs-lbllg);
+
+  /* Motion */
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur-fast: 0.15s;
+  --dur-base: 0.22s;
+
+  /* Shadows */
+  --shadow-toast: 0 8px 26px rgba(20, 30, 50, 0.16);
+  --shadow-dialog: 0 12px 34px rgba(20, 30, 50, 0.18);
+  --shadow-side: -16px 0 40px rgba(20, 30, 50, 0.18);
 }
 
+/* Dark theme — full authored value set from the prototype shell. README lists a
+   subset; the tint/faint/rule values here come from the prototype's dark block. */
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  color-scheme: dark;
+  --ink: #eef1f4;
+  --ink2: #9aa3b0;
+  --ink3: #6b7585;
+  --faint: #5c6675;
+  --on-ink: #0f1319;
+  --bg: #13171e;
+  --surface: #181d25;
+  --panel: #1d242e;
+  --panel-alt: #1d242e;
+  --line: #313a46;
+  --line2: #262e38;
+  --rule: #3a4454;
+  --sidebar: #13171e;
+  --chrome: #0f1319;
+  /* Dark lightens the accent for ink (60% on white) and darkens the tint
+     (26% on the dark bg) — prototype Nurse Scheduling.dc.html:1192-1193. */
+  --brand: var(--accent-color);
+  --brandink: color-mix(in srgb, var(--accent-color) 60%, #ffffff);
+  --brandtint: color-mix(in srgb, var(--accent-color) 26%, #13171e);
+  --onbrand: #ffffff;
+  --success: #5fcf94;
+  --successtint: #16271d;
+  --warn: #d6a743;
+  --warntint: #2a2310;
+  --error: #e06a5e;
+  --errortint: #2a1714;
+}
+
+/* Density presets (data-density on <html>) */
+[data-density="spacious"] {
+  --density: 1.16;
+}
+[data-density="compact"] {
+  --density: 0.9;
+}
+
+/* Selectable-accent presets (data-accent on <html>). "blue" is the :root
+   default; the other three come from README line 116. brand/brandink/brandtint
+   re-derive automatically from --accent-color in both themes. */
+[data-accent="teal"] {
+  --accent-color: #0e7490;
+}
+[data-accent="magenta"] {
+  --accent-color: #b0357a;
+}
+[data-accent="slate"] {
+  --accent-color: #3f4a63;
+}
+
+/* Fluid type ladder — base sizes step up at 480/768/1024/1280/1440/1920. */
+@media (min-width: 480px) {
+  :root {
+    --base-h: 27px;
+    --base-b: 15.5px;
+  }
+}
+@media (min-width: 768px) {
+  :root {
+    --base-h: 29px;
+    --base-b: 16px;
+    --base-l: 12.5px;
+  }
+}
+@media (min-width: 1024px) {
+  :root {
+    --base-h: 31px;
+    --base-b: 16.5px;
+    --base-l: 13px;
+  }
+}
+@media (min-width: 1280px) {
+  :root {
+    --base-h: 32px;
+    --base-b: 17px;
+    --base-l: 13px;
+  }
+}
+@media (min-width: 1440px) {
+  :root {
+    --base-h: 34px;
+    --base-b: 17px;
+    --base-l: 13.5px;
+  }
+}
+@media (min-width: 1920px) {
+  :root {
+    --base-h: 38px;
+    --base-b: 18px;
+    --base-l: 14px;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Tailwind theme wiring.
+
+   `@theme inline` is used wherever a token references one of our runtime CSS
+   variables (colors switch with `.dark`; spacing/type react to density and the
+   breakpoint ladder) so the generated utilities emit `var(--…)` rather than a
+   value frozen at build time. Static tokens (fonts, breakpoints, radius,
+   keyframes) use plain `@theme`.
+   -------------------------------------------------------------------------- */
+@theme {
+  /* Fonts */
+  --font-sans: var(--ff-body);
+  --font-heading: var(--ff-heading);
+  --font-mono: var(--ff-mono);
+
+  /* Breakpoint ladder (480–1920) + the 920px nav pivot from the shell */
+  --breakpoint-xs: 480px;
+  --breakpoint-sm: 640px;
+  --breakpoint-nav: 920px;
+  --breakpoint-md: 768px;
+  --breakpoint-lg: 1024px;
+  --breakpoint-xl: 1280px;
+  --breakpoint-2xl: 1440px;
+  --breakpoint-3xl: 1920px;
+
+  /* Radius: 0 everywhere. */
+  --radius: 0px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+  --radius-2xl: 0px;
+  --radius-3xl: 0px;
+  --radius-4xl: 0px;
+
+  /* Motion easing */
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Named animations (keyframes below). Skeletons use `animate-shimmer`. */
+  --animate-shimmer: ns-shimmer 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  --animate-fade: ns-fade var(--dur-base) cubic-bezier(0.4, 0, 0.2, 1);
+  --animate-spin-slow: ns-spin 1s linear infinite;
+}
+
+@theme inline {
+  /* Density-aware spacing base: p-1 == 4px × density, and so on up the scale. */
+  --spacing: calc(0.25rem * var(--density));
+
+  /* Design color tokens → bg-x / text-x / border-x utilities */
+  --color-ink: var(--ink);
+  --color-ink2: var(--ink2);
+  --color-ink3: var(--ink3);
+  --color-faint: var(--faint);
+  --color-on-ink: var(--on-ink);
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-panel: var(--panel);
+  --color-panel-alt: var(--panel-alt);
+  --color-chrome: var(--chrome);
+  --color-line: var(--line);
+  --color-line2: var(--line2);
+  --color-rule: var(--rule);
+  --color-brand: var(--brand);
+  --color-brandink: var(--brandink);
+  --color-brandtint: var(--brandtint);
+  --color-onbrand: var(--onbrand);
+  --color-success: var(--success);
+  --color-successtint: var(--successtint);
+  --color-warn: var(--warn);
+  --color-warntint: var(--warntint);
+  --color-error: var(--error);
+  --color-errortint: var(--errortint);
+  --color-error-strong: var(--error-strong);
+
+  /* shadcn/Base UI semantic aliases → the design palette. This is what keeps
+     generated shadcn components on-token with no hard-coded colors. */
+  --color-background: var(--bg);
+  --color-foreground: var(--ink);
+  --color-card: var(--surface);
+  --color-card-foreground: var(--ink);
+  --color-popover: var(--surface);
+  --color-popover-foreground: var(--ink);
+  --color-primary: var(--brand);
+  --color-primary-foreground: var(--onbrand);
+  --color-secondary: var(--panel);
+  --color-secondary-foreground: var(--ink);
+  --color-muted: var(--panel);
+  --color-muted-foreground: var(--ink3);
+  --color-accent: var(--brandtint);
+  --color-accent-foreground: var(--brandink);
+  --color-destructive: var(--error);
+  --color-destructive-foreground: var(--onbrand);
+  --color-border: var(--line);
+  --color-input: var(--line);
+  --color-ring: var(--brand);
+  --color-chart-1: var(--brand);
+  --color-chart-2: var(--success);
+  --color-chart-3: var(--warn);
+  --color-chart-4: var(--error);
+  --color-chart-5: var(--ink3);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--ink);
+  --color-sidebar-primary: var(--brand);
+  --color-sidebar-primary-foreground: var(--onbrand);
+  --color-sidebar-accent: var(--brandtint);
+  --color-sidebar-accent-foreground: var(--brandink);
+  --color-sidebar-border: var(--line);
+  --color-sidebar-ring: var(--brand);
+
+  /* Fluid type scale → text-* utilities (design-named; default text-sm/base/xs
+     are left untouched so shadcn internals keep their expected sizes). */
+  --text-display: var(--t-display);
+  --text-h2: var(--t-h2);
+  --text-cardhead: var(--t-cardhead);
+  --text-h3: var(--t-h3);
+  --text-title: var(--t-title);
+  --text-body: var(--t-body);
+  --text-meta: var(--t-sm);
+  --text-label: var(--m-sm);
+  --text-label-md: var(--m-md);
+  --text-label-lg: var(--m-lg);
+
+  /* Motion durations → duration-* utilities */
+  --duration-fast: var(--dur-fast);
+  --duration-base: var(--dur-base);
+
+  /* Shadows → shadow-* utilities */
+  --shadow-toast: var(--shadow-toast);
+  --shadow-dialog: var(--shadow-dialog);
+  --shadow-side: var(--shadow-side);
+}
+
+/* Keyframes ported from the prototype shell. */
+@keyframes ns-fade {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes ns-scrim {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes ns-slide {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: none;
+  }
+}
+@keyframes ns-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes ns-shimmer {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+@keyframes ns-toast {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 14px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
-  body {
-    @apply bg-background text-foreground;
-  }
   html {
-    @apply font-sans;
+    font-family: var(--ff-body);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    background-color: var(--bg);
+    color: var(--ink);
+    font-size: var(--t-body);
+    line-height: 1.5;
+  }
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--ff-heading);
+    letter-spacing: -0.02em;
+  }
+  ::selection {
+    background: var(--brandtint);
+    color: var(--brandink);
+  }
+  :focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: -1px;
   }
 }
-/* ===== END T03 PLACEHOLDER (shadcn-init default token baseline) ===== */
+
+/* Reduced-motion: suppress the motion tokens' effect globally. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

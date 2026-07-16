@@ -1,19 +1,31 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Figtree, Hanken_Grotesk, Spline_Sans_Mono } from "next/font/google";
 import "./globals.css";
+import { Providers } from "./providers";
+import { ThemeScript } from "@/components/theme/theme-script";
 
-// T03 PLACEHOLDER: Geist / Geist_Mono are the shadcn-init defaults. T03 replaces
-// these with the design-README fonts (Figtree / Hanken Grotesk / Spline Sans Mono)
-// and rewires the --font-* variables in globals.css accordingly.
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+// Design-system fonts (docs/design_prototype/README.md): Hanken Grotesk drives
+// body/UI, Figtree drives display/headings, Spline Sans Mono drives codes/data.
+// Each is exposed as a CSS variable consumed by the --ff-* stacks in globals.css.
+const figtree = Figtree({
+  variable: "--font-figtree",
   subsets: ["latin"],
+  weight: ["500", "600", "700", "800", "900"],
+  display: "swap",
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const hankenGrotesk = Hanken_Grotesk({
+  variable: "--font-hanken",
   subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  display: "swap",
+});
+
+const splineSansMono = Spline_Sans_Mono({
+  variable: "--font-spline-mono",
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -27,8 +39,17 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
-      <body className="min-h-full flex flex-col">{children}</body>
+    <html
+      lang="en"
+      suppressHydrationWarning
+      className={`${figtree.variable} ${hankenGrotesk.variable} ${splineSansMono.variable} h-full antialiased`}
+    >
+      <head>
+        <ThemeScript />
+      </head>
+      <body className="min-h-full flex flex-col">
+        <Providers>{children}</Providers>
+      </body>
     </html>
   );
 }
