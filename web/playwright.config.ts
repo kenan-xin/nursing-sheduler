@@ -22,7 +22,17 @@ export default defineConfig({
     // with output:'standalone').
     command: "pnpm build && pnpm start",
     url: baseURL,
-    env: { PORT: String(PORT), HOSTNAME: "127.0.0.1", NEXT_PUBLIC_APP_VERSION: "0.1.0" },
+    // BACKEND_API_URL + PUBLIC_ORIGIN are required at startup in production
+    // (T06's instrumentation fail-fast). The design-system specs don't call the
+    // backend, so a localhost placeholder satisfies the config gate without a
+    // live backend.
+    env: {
+      PORT: String(PORT),
+      HOSTNAME: "127.0.0.1",
+      NEXT_PUBLIC_APP_VERSION: "0.1.0",
+      BACKEND_API_URL: "http://127.0.0.1:8000",
+      PUBLIC_ORIGIN: baseURL,
+    },
     timeout: 120_000,
     reuseExistingServer: !process.env.CI,
   },
