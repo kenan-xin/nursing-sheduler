@@ -24,8 +24,14 @@ function themeBlock(selector: string): string {
 }
 
 function tokenHex(block: string, token: string): string {
-  const match = block.match(new RegExp(`--${token}:\\s*(#[0-9a-fA-F]{3,8})`));
-  if (!match) throw new Error(`--${token} not found in theme block`);
+  // The token contract uses OPAQUE hex only (3- or 6-digit). Restrict to those
+  // and require a non-hex boundary after, so an 8-digit alpha hex (e.g. a
+  // transparent #ffffff00) is NOT silently truncated to its opaque prefix and
+  // waved through — it fails to match and trips the guard instead.
+  const match = block.match(
+    new RegExp(`--${token}:\\s*(#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{3}))(?![0-9a-fA-F])`),
+  );
+  if (!match) throw new Error(`--${token} not found as an opaque 3-/6-digit hex in theme block`);
   return match[1];
 }
 
