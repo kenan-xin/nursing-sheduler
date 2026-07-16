@@ -132,7 +132,10 @@
   --ink2: #9aa3b0;
   --ink3: #6b7585;
   --faint: #5c6675;
-  --on-ink: #0f1319;
+  /* on-ink is the foreground for the ink/chrome bar, which stays dark in BOTH
+     themes (see --chrome below), so on-ink does NOT invert with --ink — it must
+     read light here. Was #0f1319, colliding 1:1 with --chrome (nursing-sheduler-2dn). */
+  --on-ink: #ffffff;
   --bg: #13171e;
   --surface: #181d25;
   --panel: #1d242e;

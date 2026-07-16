@@ -39,9 +39,9 @@ export function UndoRedoControls() {
   const { canUndo, canRedo, undo, redo } = useUndoRedo();
 
   // On the dark chrome top bar the shared `ghost` variant's `text-ink` is
-  // invisible (1:1). Override to `onbrand` (#fff in BOTH themes) — note `on-ink`
-  // collapses to the chrome color in dark mode, so it would only fix light.
-  const chromeGhost = "text-onbrand hover:bg-onbrand/10";
+  // invisible (1:1). `on-ink` is the foreground token for the ink/chrome bar
+  // (light in both themes; see nursing-sheduler-2dn).
+  const chromeGhost = "text-on-ink hover:bg-on-ink/10";
 
   return (
     <div className="flex items-center gap-1" data-testid="undo-redo-controls">

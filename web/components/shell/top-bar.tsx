@@ -15,7 +15,7 @@ export function TopBar() {
   return (
     <header
       data-testid="top-bar"
-      className="flex h-14 shrink-0 items-center gap-2 border-b border-line bg-chrome px-3 text-onbrand sm:gap-3 sm:px-4"
+      className="flex h-14 shrink-0 items-center gap-2 border-b border-line bg-chrome px-3 text-on-ink sm:gap-3 sm:px-4"
     >
       {/* Mobile hamburger — visible on mobile, hidden on desktop (≥920px nav breakpoint) */}
       <span className="shrink-0 nav:hidden">

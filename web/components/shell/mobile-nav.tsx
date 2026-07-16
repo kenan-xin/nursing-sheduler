@@ -39,9 +39,9 @@ export function MobileNav() {
         aria-label="Open navigation menu"
         data-testid="mobile-nav-trigger"
         onClick={() => setOpen(true)}
-        // Chrome top bar: `ghost`'s text-ink is invisible on dark chrome. `onbrand`
-        // is #fff in both themes (on-ink would collapse to chrome in dark).
-        className="text-onbrand hover:bg-onbrand/10"
+        // Chrome top bar: `ghost`'s text-ink is invisible on dark chrome; `on-ink`
+        // is the ink/chrome-bar foreground token (light in both themes).
+        className="text-on-ink hover:bg-on-ink/10"
       >
         <FaBars />
       </Button>
