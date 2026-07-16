@@ -33,6 +33,19 @@ export {
   FaUsers,
   FaClock,
   FaArrowRotateRight,
+  FaRotateLeft,
+  FaHouse,
+  FaLayerGroup,
+  FaDownload,
+  FaBolt,
+  FaClipboard,
+  FaFloppyDisk,
+  FaSliders,
+  FaArrowsLeftRight,
+  FaArrowRightArrowLeft,
+  FaListOl,
+  FaHandshake,
+  FaChalkboardUser,
 } from "react-icons/fa6";
 
 export type { IconType } from "react-icons";

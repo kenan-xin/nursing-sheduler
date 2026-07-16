@@ -38,7 +38,7 @@ function swatchColor(page: Page, token: string) {
 
 test.describe("design system — style reference", () => {
   test("all sections + controls render", async ({ page }) => {
-    await page.goto("/");
+    await page.goto("/design-system");
     for (const id of ["palette", "typography", "spacing", "components", "skeletons", "controls"]) {
       await expect(page.getByTestId(id)).toBeVisible();
     }
@@ -48,7 +48,7 @@ test.describe("design system — style reference", () => {
   });
 
   test("theme toggle flips light ↔ dark and tokens resolve in both", async ({ page }) => {
-    await page.goto("/");
+    await page.goto("/design-system");
     const html = page.locator("html");
     await expect(html).not.toHaveClass(/dark/);
 
@@ -87,7 +87,7 @@ test.describe("design system — style reference", () => {
   });
 
   test("accent axis re-derives brand via color-mix", async ({ page }) => {
-    await page.goto("/");
+    await page.goto("/design-system");
     const brandDefault = await swatchColor(page, "brand");
     expect(brandDefault).toBe("rgb(35, 96, 196)"); // #2360c4
 
@@ -100,7 +100,7 @@ test.describe("design system — style reference", () => {
   });
 
   test("every component + nested part renders border-radius 0", async ({ page }) => {
-    await page.goto("/");
+    await page.goto("/design-system");
     const radii = await page
       .getByRole("main")
       .locator(
@@ -114,7 +114,7 @@ test.describe("design system — style reference", () => {
   });
 
   test("functional text meets WCAG AA (4.5:1) in light and dark", async ({ page }) => {
-    await page.goto("/");
+    await page.goto("/design-system");
     const components = page.getByTestId("components");
     const targets = [
       { name: "destructive button", loc: components.locator("button", { hasText: "Delete" }) },
@@ -154,7 +154,7 @@ test.describe("design system — style reference", () => {
 
   test("prefers-reduced-motion suppresses motion tokens", async ({ page }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
-    await page.goto("/");
+    await page.goto("/design-system");
     const duration = await page
       .getByTestId("skeletons")
       .locator("[data-slot='skeleton']")
@@ -164,7 +164,7 @@ test.describe("design system — style reference", () => {
   });
 
   test("fluid type scale steps up across the exact breakpoint ladder", async ({ page }) => {
-    await page.goto("/");
+    await page.goto("/design-system");
     const display = page.getByRole("heading", { name: "Design system", level: 1 });
     const ladder = [480, 768, 1024, 1280, 1440, 1920];
     let previous = 0;
@@ -179,7 +179,7 @@ test.describe("design system — style reference", () => {
   });
 
   test("density multiplier scales type and spacing", async ({ page }) => {
-    await page.goto("/");
+    await page.goto("/design-system");
     await page.setViewportSize({ width: 1280, height: 1000 });
     const display = page.getByRole("heading", { name: "Design system", level: 1 });
     const spaceBox = page.getByTestId("space-4").locator("div");
@@ -203,7 +203,7 @@ test.describe("design system — style reference", () => {
   });
 
   test("skeleton mirrors the structure of the box it stands in for", async ({ page }) => {
-    await page.goto("/");
+    await page.goto("/design-system");
     const skeletons = page.getByTestId("skeletons");
     const skeletonCard = skeletons.locator("[data-slot='skeleton-card']");
 
@@ -238,7 +238,7 @@ test.describe("design system — style reference", () => {
       localStorage.setItem("ns-density", "spacious");
       localStorage.setItem("ns-accent", "teal");
     });
-    await page.goto("/");
+    await page.goto("/design-system");
 
     const html = page.locator("html");
     await expect(html).toHaveClass(/dark/);
