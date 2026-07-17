@@ -1,12 +1,9 @@
-import { PlaceholderScreen } from "@/components/shell/placeholder-screen";
-import { FaArrowRightArrowLeft } from "@/components/icons";
+// Shift Type Successions screen (T12 M1 clone, spec 05) — replaces the T08
+// placeholder. The editor is a client component (it binds the durable scenario
+// store); this route module just mounts it.
+
+import { SuccessionsEditor } from "@/components/successions/successions-editor";
 
 export default function ShiftTypeSuccessionsPage() {
-  return (
-    <PlaceholderScreen
-      title="Shift Type Successions"
-      description="Constrain which shift types may follow one another."
-      icon={FaArrowRightArrowLeft}
-    />
-  );
+  return <SuccessionsEditor />;
 }

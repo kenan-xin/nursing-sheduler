@@ -23,6 +23,7 @@ export {
   FaPen,
   FaChevronDown,
   FaChevronUp,
+  FaChevronLeft,
   FaChevronRight,
   FaCircleInfo,
   FaTriangleExclamation,
