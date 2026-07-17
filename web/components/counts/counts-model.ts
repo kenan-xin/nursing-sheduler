@@ -22,6 +22,7 @@ import {
   type ContractedHoursCountCard,
   type CoefficientEntry,
   type DateRef,
+  type OrdinaryCountCard,
   type OrdinaryCountCardBody,
   type PersonRef,
   type ScenarioUiState,
@@ -354,7 +355,7 @@ export function isAdvancedCountCard(card: CountCard): boolean {
 /** Whether `card` can be opened in this generic scalar form — neither a
  *  contracted-hours card (M2, not built here) nor an unmarked advanced/list count
  *  (FR-PR-55a). */
-export function isEditableCountCard(card: CountCard): boolean {
+export function isEditableCountCard(card: CountCard): card is OrdinaryCountCard {
   return !isContractedHoursCard(card) && !isAdvancedCountCard(card);
 }
 

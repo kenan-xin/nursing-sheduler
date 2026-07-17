@@ -636,6 +636,264 @@ test.describe.serial("T12 M2a-3 contracted coverage-gated commit", () => {
   });
 });
 
+test.describe.serial("T12 M2a-4 Convert ↔ generic", () => {
+  test.beforeEach(async ({ page }, testInfo) => {
+    testInfo.setTimeout(30_000);
+    await page.addInitScript(() => {
+      (window as unknown as { __NS_ENABLE_TEST_BRIDGE?: boolean }).__NS_ENABLE_TEST_BRIDGE = true;
+    });
+  });
+
+  test("converts a scalar generic count to contracted in place (same list position, one undo)", async ({
+    page,
+  }) => {
+    await gotoReady(page);
+    await seed(page, BASE_SEED);
+    await seed(page, {
+      cardsByKind: {
+        requirements: [],
+        successions: [],
+        affinities: [],
+        coverings: [],
+        counts: [
+          {
+            uid: "count-a",
+            description: "First",
+            person: ["Aisha"],
+            countDates: ["ALL"],
+            countShiftTypes: ["D"],
+            expression: "x >= T",
+            target: 5,
+            weight: -1,
+          },
+          {
+            uid: "count-b",
+            description: "Second",
+            person: ["Aisha"],
+            countDates: ["ALL"],
+            countShiftTypes: ["D"],
+            countShiftTypeCoefficients: [["D", 16]],
+            expression: "x >= T",
+            target: 5,
+            weight: -1,
+          },
+        ],
+      },
+    });
+    await expect(page.getByTestId("count-card-1")).toContainText("Second");
+
+    const before = await pastCount(page);
+    // The generic card offers Convert to contracted; it opens the GUIDED editor
+    // seeded from the card with a BLANK target (the generic target was a count).
+    await page.getByTestId("count-convert-contracted-1").click();
+    await expect(page.getByTestId("card-editor-form")).toBeVisible();
+    await expect(page.getByTestId("contracted-policy-exact")).toBeVisible();
+    await expect(page.getByTestId("contracted-target-exact")).toHaveValue("");
+    // The carried coefficient satisfies coverage; only the hours target is missing.
+    await expect(page.getByTestId("contracted-coefficient-fields-input-D")).toHaveValue("16");
+
+    await page.getByTestId("contracted-target-exact").fill("160h");
+    await page.getByTestId("card-editor-submit").click();
+
+    // Marked card, SAME index (1) and stable description; the other card is untouched.
+    await expect(page.getByTestId("count-contracted-badge-1")).toBeVisible();
+    const cards = await readCounts(page);
+    expect(cards).toHaveLength(2);
+    expect(cards[0].description).toBe("First");
+    expect(cards[0].tag).toBeUndefined();
+    expect(cards[1].uid).toBe("count-b");
+    expect(cards[1].description).toBe("Second");
+    expect(cards[1].tag).toBe("contracted_hours");
+    expect(cards[1].policy).toBe("exact");
+    expect(cards[1].expression).toBe("x = T");
+    expect(cards[1].target).toBe(320);
+    expect(cards[1].weight).toBe(Infinity);
+    expect((await pastCount(page)) - before).toBe(1);
+  });
+
+  test("converts a contracted Exact card to a generic editable Shift Count (previewed, one undo)", async ({
+    page,
+  }) => {
+    await gotoReady(page);
+    await seed(page, BASE_SEED);
+    await seed(page, {
+      cardsByKind: {
+        requirements: [],
+        successions: [],
+        affinities: [],
+        coverings: [],
+        counts: [
+          {
+            uid: "count-ch",
+            description: "Monthly contract",
+            tag: "contracted_hours",
+            policy: "exact",
+            unit: "half-hour",
+            person: ["Aisha"],
+            countDates: ["ALL"],
+            countShiftTypes: ["D"],
+            countShiftTypeCoefficients: [["D", 16]],
+            expression: "x = T",
+            target: 320,
+            weight: Infinity,
+          },
+        ],
+      },
+    });
+    await expect(page.getByTestId("count-contracted-badge-0")).toBeVisible();
+
+    const before = await pastCount(page);
+    // Convert-to-generic is previewed by a minimal inline Confirm/Cancel panel.
+    await page.getByTestId("count-convert-generic-0").click();
+    await expect(page.getByTestId("count-convert-generic-confirm-0")).toContainText(
+      "editable Shift Count",
+    );
+    await page.getByTestId("count-convert-generic-commit-0").click();
+
+    // Marker gone; the card is now an editable ordinary count, one tracked mutation.
+    await expect(page.getByTestId("count-contracted-badge-0")).toHaveCount(0);
+    await expect(page.getByTestId("count-readonly-note-0")).toHaveCount(0);
+    const cards = await readCounts(page);
+    expect(cards[0].uid).toBe("count-ch");
+    expect(cards[0].tag).toBeUndefined();
+    expect(cards[0].policy).toBeUndefined();
+    expect(cards[0].expression).toBe("x = T");
+    expect((await pastCount(page)) - before).toBe(1);
+
+    // It reopens in the SCALAR form (count-desc + no policy toggle).
+    await page.getByTestId("count-edit-0").click();
+    await expect(page.getByTestId("count-desc")).toBeVisible();
+    await expect(page.getByTestId("contracted-policy-exact")).toHaveCount(0);
+  });
+
+  test("converts a contracted Range card to an advanced (list) read-only rule", async ({
+    page,
+  }) => {
+    await gotoReady(page);
+    await seed(page, BASE_SEED);
+    await seed(page, {
+      cardsByKind: {
+        requirements: [],
+        successions: [],
+        affinities: [],
+        coverings: [],
+        counts: [
+          {
+            uid: "count-range",
+            description: "Range contract",
+            tag: "contracted_hours",
+            policy: "range",
+            unit: "half-hour",
+            person: ["Aisha"],
+            countDates: ["ALL"],
+            countShiftTypes: ["D"],
+            countShiftTypeCoefficients: [["D", 16]],
+            expression: ["x >= T", "x <= T"],
+            target: [300, 340],
+            weight: Infinity,
+          },
+        ],
+      },
+    });
+
+    await page.getByTestId("count-convert-generic-0").click();
+    await expect(page.getByTestId("count-convert-generic-confirm-0")).toContainText(
+      "advanced (list) rule",
+    );
+    await page.getByTestId("count-convert-generic-commit-0").click();
+
+    // The array fields make it an unmarked advanced card: read-only note, no Edit,
+    // and a DISABLED convert-to-contracted (YAML-first).
+    await expect(page.getByTestId("count-advanced-badge-0")).toBeVisible();
+    await expect(page.getByTestId("count-readonly-note-0")).toBeVisible();
+    await expect(page.getByTestId("count-edit-0")).toHaveCount(0);
+    await expect(page.getByTestId("count-convert-contracted-0")).toBeDisabled();
+    const cards = await readCounts(page);
+    expect(cards[0].tag).toBeUndefined();
+    expect(cards[0].expression).toEqual(["x >= T", "x <= T"]);
+    expect(cards[0].target).toEqual([300, 340]);
+  });
+
+  test("an advanced-array card shows a DISABLED convert with the YAML-first explanation", async ({
+    page,
+  }) => {
+    await gotoReady(page);
+    await seed(page, BASE_SEED);
+    await seed(page, {
+      cardsByKind: {
+        requirements: [],
+        successions: [],
+        affinities: [],
+        coverings: [],
+        counts: [
+          {
+            uid: "count-adv",
+            description: "Advanced range",
+            person: ["Aisha"],
+            countDates: ["ALL"],
+            countShiftTypes: ["D"],
+            expression: ["x >= T", "x <= T"],
+            target: [300, 340],
+            weight: Infinity,
+          },
+        ],
+      },
+    });
+
+    const convert = page.getByTestId("count-convert-contracted-0");
+    await expect(convert).toBeDisabled();
+    await expect(convert).toHaveAttribute("title", "Edit via Save & Load (YAML) first.");
+    // The reason must be discoverable without hover/focus (the disabled button is
+    // unfocusable): it is persistent visible text linked via aria-describedby.
+    const reason = page.getByTestId("count-convert-contracted-0-reason");
+    await expect(reason).toHaveText("Edit via Save & Load (YAML) first.");
+    await expect(convert).toHaveAttribute("aria-describedby", "count-convert-contracted-0-reason");
+  });
+
+  test("Cancel on convert-to-generic leaves the card and position unchanged (no mutation)", async ({
+    page,
+  }) => {
+    await gotoReady(page);
+    await seed(page, BASE_SEED);
+    await seed(page, {
+      cardsByKind: {
+        requirements: [],
+        successions: [],
+        affinities: [],
+        coverings: [],
+        counts: [
+          {
+            uid: "count-ch",
+            description: "Monthly contract",
+            tag: "contracted_hours",
+            policy: "exact",
+            unit: "half-hour",
+            person: ["Aisha"],
+            countDates: ["ALL"],
+            countShiftTypes: ["D"],
+            expression: "x = T",
+            target: 320,
+            weight: Infinity,
+          },
+        ],
+      },
+    });
+
+    const before = await pastCount(page);
+    await page.getByTestId("count-convert-generic-0").click();
+    await expect(page.getByTestId("count-convert-generic-confirm-0")).toBeVisible();
+    await page.getByTestId("count-convert-generic-cancel-0").click();
+
+    // Confirm dismissed, card still marked, nothing committed.
+    await expect(page.getByTestId("count-convert-generic-confirm-0")).toHaveCount(0);
+    await expect(page.getByTestId("count-contracted-badge-0")).toBeVisible();
+    const cards = await readCounts(page);
+    expect(cards).toHaveLength(1);
+    expect(cards[0].tag).toBe("contracted_hours");
+    expect(await pastCount(page)).toBe(before);
+  });
+});
+
 test.describe.serial("T12 ALL date scope (allValue=['ALL']) round-trip", () => {
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(() => {

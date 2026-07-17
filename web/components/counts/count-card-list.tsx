@@ -14,7 +14,16 @@
 
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
-import { FaPowerOff, FaPen, FaCopy, FaTrash, FaChevronUp, FaChevronDown } from "@/components/icons";
+import { Button } from "@/components/ui/button";
+import {
+  FaPowerOff,
+  FaPen,
+  FaCopy,
+  FaTrash,
+  FaChevronUp,
+  FaChevronDown,
+  FaArrowRightArrowLeft,
+} from "@/components/icons";
 import { WeightPill } from "@/components/card-editor/weight-field";
 import type { CountCard } from "@/lib/scenario";
 import {
@@ -26,8 +35,14 @@ import {
   describeCountExpressionTarget,
   isAdvancedCountCard,
   isContractedHoursCard,
+  isEditableCountCard,
   summarizeRefs,
 } from "./counts-model";
+import { convertContractedToGeneric } from "./convert-model";
+
+/** The YAML-first explanation shown on a disabled Convert for an advanced-array
+ *  count — its shape can only be edited through Save & Load first. */
+const CONVERT_ADVANCED_REASON = "Edit via Save & Load (YAML) first.";
 
 interface CountCardListProps {
   counts: CountCard[];
@@ -39,6 +54,64 @@ interface CountCardListProps {
   /** Primary DnD reorder (the shared card-list reorder interaction). `position` is
    *  the pointer half of the drop target (insert before/after — FR-PR-12). */
   onReorder: (fromUid: string, toUid: string, position: DropPosition) => void;
+  /** Seed the guided contracted editor from a scalar generic count (M2a-4). */
+  onConvertToContracted: (uid: string) => void;
+  /** Request the inline convert-to-generic confirm for a marked card. */
+  onConvertToGeneric: (uid: string) => void;
+  /** The marked card whose convert-to-generic confirm panel is currently open. */
+  convertToGenericUid: string | null;
+  /** Commit the convert-to-generic (one replace-in-place mutation). */
+  onConfirmConvertToGeneric: (uid: string) => void;
+  /** Dismiss the convert-to-generic confirm without mutating. */
+  onCancelConvertToGeneric: () => void;
+}
+
+/** The inline Confirm/Cancel panel for converting a marked card back to a generic
+ *  count. Previews what the card becomes: an Exact contract's scalar fields yield
+ *  an editable Shift Count; a Range contract's array fields yield an advanced (list)
+ *  rule that is edited via Save & Load (YAML). */
+function ConvertToGenericConfirm({
+  card,
+  index,
+  onConfirm,
+  onCancel,
+}: {
+  card: CountCard;
+  index: number;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const willBeEditable = isContractedHoursCard(card)
+    ? isEditableCountCard(convertContractedToGeneric(card))
+    : true;
+  const preview = willBeEditable
+    ? "This becomes an editable Shift Count."
+    : "This becomes an advanced (list) rule, editable via Save & Load (YAML).";
+  return (
+    <div
+      className="mt-3 border border-line2 bg-panel p-3.5"
+      data-testid={`count-convert-generic-confirm-${index}`}
+    >
+      <p className="mb-2.5 text-meta text-ink2">Remove the contracted-hours marker? {preview}</p>
+      <div className="flex flex-wrap items-center gap-2.5">
+        <Button
+          className="h-9 px-4"
+          data-testid={`count-convert-generic-commit-${index}`}
+          onClick={onConfirm}
+        >
+          Convert to generic
+        </Button>
+        <Button
+          variant="outline"
+          className="h-9 px-4"
+          data-testid={`count-convert-generic-cancel-${index}`}
+          onClick={onCancel}
+        >
+          Cancel
+        </Button>
+      </div>
+    </div>
+  );
 }
 
 function CoefficientChips({ card }: { card: CountCard }) {
@@ -65,6 +138,11 @@ export function CountCardList({
   onMove,
   onSetDisabled,
   onReorder,
+  onConvertToContracted,
+  onConvertToGeneric,
+  convertToGenericUid,
+  onConfirmConvertToGeneric,
+  onCancelConvertToGeneric,
 }: CountCardListProps) {
   // HTML5 DnD state for the shared card-list reorder (the primary control; the
   // keyboard Up/Down buttons below are the accessibility supplement).
@@ -164,6 +242,27 @@ export function CountCardList({
                     Read-only here — edit via Save &amp; Load (YAML)
                   </span>
                 )}
+                {contractedHours ? (
+                  <CardActionButton
+                    icon={<FaArrowRightArrowLeft className="size-3" />}
+                    onClick={() => onConvertToGeneric(card.uid)}
+                    testId={`count-convert-generic-${index}`}
+                    ariaLabel="Convert to generic shift count"
+                  >
+                    Convert to generic
+                  </CardActionButton>
+                ) : (
+                  <CardActionButton
+                    icon={<FaArrowRightArrowLeft className="size-3" />}
+                    onClick={() => onConvertToContracted(card.uid)}
+                    testId={`count-convert-contracted-${index}`}
+                    ariaLabel="Convert to contracted hours"
+                    disabled={advanced}
+                    disabledReason={CONVERT_ADVANCED_REASON}
+                  >
+                    Convert to contracted
+                  </CardActionButton>
+                )}
                 <CardActionButton
                   icon={<FaCopy className="size-3" />}
                   onClick={() => onDuplicate(card.uid)}
@@ -198,6 +297,16 @@ export function CountCardList({
                   Down
                 </CardActionButton>
               </>
+            }
+            footer={
+              contractedHours && convertToGenericUid === card.uid ? (
+                <ConvertToGenericConfirm
+                  card={card}
+                  index={index}
+                  onConfirm={() => onConfirmConvertToGeneric(card.uid)}
+                  onCancel={onCancelConvertToGeneric}
+                />
+              ) : undefined
             }
           />
         );

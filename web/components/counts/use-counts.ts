@@ -39,6 +39,11 @@ export interface CountsController {
   /** Replace a contracted-hours card, preserving its uid + `disabled`/`applied`
    *  markers exactly like the ordinary {@link CountsController.update} path. */
   updateContracted: (uid: string, form: ContractedFormState) => void;
+  /** Swap a card for an already-built one in place — same uid + list index, with
+   *  `disabled`/`applied` carried forward (mirrors {@link CountsController.updateContracted}'s
+   *  marker discipline). The Convert ↔ generic entry point (M2a-4); one tracked
+   *  mutation, so one undo entry. */
+  replaceCard: (uid: string, nextCard: CountCard) => void;
   remove: (uid: string) => void;
   duplicate: (uid: string) => void;
   /** Swap a card one slot up (-1) or down (+1) — the keyboard-supplement control. */
@@ -91,6 +96,19 @@ export function useCounts(): CountsController {
       const markers: Pick<CountCard, "disabled" | "applied"> = {};
       if (source?.disabled) markers.disabled = true;
       if (source?.applied) markers.applied = true;
+      const next = markers.disabled || markers.applied ? { ...rebuilt, ...markers } : rebuilt;
+      commitCounts(counts.map((card) => (card.uid === uid ? next : card)));
+    },
+    replaceCard(uid, nextCard) {
+      // Swap the card in place: keep the uid + list index, and carry forward the UI
+      // markers so a convert never silently re-enables a card the user turned off —
+      // the same discipline as update/updateContracted.
+      const source = counts.find((card) => card.uid === uid);
+      if (!source) return;
+      const markers: Pick<CountCard, "disabled" | "applied"> = {};
+      if (source.disabled) markers.disabled = true;
+      if (source.applied) markers.applied = true;
+      const rebuilt = { ...nextCard, uid } as CountCard;
       const next = markers.disabled || markers.applied ? { ...rebuilt, ...markers } : rebuilt;
       commitCounts(counts.map((card) => (card.uid === uid ? next : card)));
     },

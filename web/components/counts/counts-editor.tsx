@@ -43,6 +43,7 @@ import {
   toContractedForm,
   type ContractedFormState,
 } from "./contracted-model";
+import { convertContractedToGeneric, seedContractedFormFromGeneric } from "./convert-model";
 import type { CountCard } from "@/lib/scenario";
 
 // A `kind` tag distinguishes the ordinary scalar draft from the guided
@@ -84,6 +85,7 @@ export function CountsEditor() {
     update,
     addContracted,
     updateContracted,
+    replaceCard,
     remove,
     duplicate,
     move,
@@ -92,6 +94,9 @@ export function CountsEditor() {
     getCards,
   } = useCounts();
   const [draft, setDraft] = useState<Draft | null>(null);
+  // The marked card whose convert-to-generic inline confirm panel is open. It is
+  // mutually exclusive with an open form draft: opening one dismisses the other.
+  const [convertToGenericUid, setConvertToGenericUid] = useState<string | null>(null);
   // FR-PR-06: arm the shared open-draft navigation guard while a form is visible.
   useCardEditorDraftGuard(!!draft);
   // Stale-open-edit guard (the entity-editor `isStale` pattern, ported to the
@@ -140,6 +145,7 @@ export function CountsEditor() {
   // records/restores scroll (FR-PR-07). Clicking a button whose own kind of form is
   // open closes it; clicking it while the OTHER kind is open switches to this kind.
   function openAdd() {
+    setConvertToGenericUid(null);
     setDraft(
       draft?.kind === "ordinary"
         ? null
@@ -148,11 +154,26 @@ export function CountsEditor() {
   }
 
   function openAddContracted() {
+    setConvertToGenericUid(null);
     setDraft(
       draft?.kind === "contracted"
         ? null
         : { kind: "contracted", mode: "add", uid: null, form: emptyContractedForm() },
     );
+  }
+
+  // Record the pre-edit offset ONCE (an edit→edit switch keeps the original), then
+  // scroll to the top so the just-opened form is in view. Restore happens on close.
+  function scrollToFormTop() {
+    const scroller = scrollContainer();
+    if (pendingRestore.current === null) {
+      pendingRestore.current = {
+        el: scroller,
+        top: scroller ? scroller.scrollTop : window.scrollY,
+      };
+    }
+    if (scroller) scroller.scrollTo({ top: 0, behavior: "instant" });
+    else window.scrollTo({ top: 0, behavior: "instant" });
   }
 
   function openEdit(uid: string) {
@@ -169,18 +190,40 @@ export function CountsEditor() {
       next = { kind: "ordinary", mode: "edit", uid, form: countToForm(card, domain) };
     }
     if (!next) return;
-    // Record the pre-edit offset ONCE (an edit→edit switch keeps the original), then
-    // scroll to the top so the form is in view. Restore happens on close.
-    const scroller = scrollContainer();
-    if (pendingRestore.current === null) {
-      pendingRestore.current = {
-        el: scroller,
-        top: scroller ? scroller.scrollTop : window.scrollY,
-      };
-    }
-    if (scroller) scroller.scrollTo({ top: 0, behavior: "instant" });
-    else window.scrollTo({ top: 0, behavior: "instant" });
+    setConvertToGenericUid(null);
+    scrollToFormTop();
     setDraft(next);
+  }
+
+  // Convert a scalar generic count into a guided contracted draft, seeded from the
+  // generic card (blank target). The draft opens in "edit" mode so Confirm routes
+  // through `updateContracted` → replace-in-place (same uid + list index + markers),
+  // one tracked mutation. Only a scalar editable count is eligible.
+  function openConvertToContracted(uid: string) {
+    const card = counts.find((c) => c.uid === uid);
+    if (!card || !isEditableCountCard(card)) return;
+    setConvertToGenericUid(null);
+    scrollToFormTop();
+    setDraft({
+      kind: "contracted",
+      mode: "edit",
+      uid,
+      form: seedContractedFormFromGeneric(card, state),
+    });
+  }
+
+  // Convert-to-generic uses a minimal inline confirm panel (no form draft): opening
+  // it dismisses any open draft, Confirm commits ONE replace-in-place mutation.
+  function openConvertToGeneric(uid: string) {
+    setDraft(null);
+    setConvertToGenericUid(uid);
+  }
+
+  function confirmConvertToGeneric(uid: string) {
+    const card = counts.find((c) => c.uid === uid);
+    setConvertToGenericUid(null);
+    if (!card || !isContractedHoursCard(card)) return;
+    replaceCard(uid, convertContractedToGeneric(card));
   }
 
   // Synchronous stale-Save guard shared by both forms: if the cards slice changed
@@ -213,9 +256,11 @@ export function CountsEditor() {
     setDraft(null);
   }
 
-  // List ops cancel any open draft first (spec 05 EDGE-PR-02).
+  // List ops cancel any open draft (and any open convert confirm) first
+  // (spec 05 EDGE-PR-02).
   function withDraftDismissed(op: () => void) {
     setDraft(null);
+    setConvertToGenericUid(null);
     op();
   }
 
@@ -277,6 +322,11 @@ export function CountsEditor() {
             withDraftDismissed(() => reorder(fromUid, toUid, position))
           }
           onSetDisabled={(uid, value) => withDraftDismissed(() => setDisabled(uid, value))}
+          onConvertToContracted={openConvertToContracted}
+          onConvertToGeneric={openConvertToGeneric}
+          convertToGenericUid={convertToGenericUid}
+          onConfirmConvertToGeneric={confirmConvertToGeneric}
+          onCancelConvertToGeneric={() => setConvertToGenericUid(null)}
         />
       ) : null}
     </CardEditorScreen>

@@ -368,6 +368,7 @@ export function CardListItem({
   badges,
   fields,
   actions,
+  footer,
   disabled,
   testId,
   draggable,
@@ -384,6 +385,9 @@ export function CardListItem({
   badges?: React.ReactNode;
   fields: { label: string; value: React.ReactNode }[];
   actions: React.ReactNode;
+  /** Optional slot below the action row (e.g. an inline Convert confirm panel).
+   *  Backward compatible: consumers that omit it render exactly as before. */
+  footer?: React.ReactNode;
   disabled?: boolean;
   testId?: string;
   draggable?: boolean;
@@ -460,12 +464,18 @@ export function CardListItem({
         ))}
       </div>
       <div className="mt-3.5 flex flex-wrap items-center gap-1.5">{actions}</div>
+      {footer}
     </li>
   );
 }
 
 /** A labelled action-row button for a saved card (Disable/Edit/Duplicate/Delete).
- *  `danger` gives the destructive red treatment (Delete). */
+ *  `danger` gives the destructive red treatment (Delete). `disabled` renders a
+ *  non-interactive treatment; `disabledReason` (e.g. an advanced-array card whose
+ *  Convert is YAML-gated) is then shown as PERSISTENT adjacent text — a native
+ *  `disabled` button is unfocusable, so a `title`-only reason is invisible to
+ *  keyboard and screen-reader users. The reason is also wired via `aria-describedby`
+ *  and kept as the `title`. Backward compatible: consumers that omit it are unchanged. */
 export function CardActionButton({
   icon,
   children,
@@ -473,6 +483,8 @@ export function CardActionButton({
   onClick,
   testId,
   ariaLabel,
+  disabled,
+  disabledReason,
 }: {
   icon: React.ReactNode;
   children: React.ReactNode;
@@ -480,18 +492,39 @@ export function CardActionButton({
   onClick: () => void;
   testId?: string;
   ariaLabel?: string;
+  disabled?: boolean;
+  disabledReason?: string;
 }) {
-  return (
+  const showReason = Boolean(disabled && disabledReason);
+  const reasonId = showReason && testId ? `${testId}-reason` : undefined;
+  const button = (
     <button
       type="button"
       data-testid={testId}
       aria-label={ariaLabel}
+      title={disabled ? disabledReason : undefined}
+      disabled={disabled}
+      aria-disabled={disabled || undefined}
+      aria-describedby={reasonId}
       onClick={onClick}
       className={`inline-flex h-8 items-center gap-[7px] border border-line bg-transparent px-3 text-meta font-semibold ${
-        danger ? "text-error hover:bg-errortint" : "text-ink hover:bg-panel"
+        disabled
+          ? "cursor-not-allowed text-ink3 opacity-55"
+          : danger
+            ? "text-error hover:bg-errortint"
+            : "text-ink hover:bg-panel"
       }`}
     >
       {icon} {children}
     </button>
+  );
+  if (!showReason) return button;
+  return (
+    <span className="inline-flex items-center gap-2">
+      {button}
+      <span id={reasonId} className="text-meta italic text-ink3" data-testid={reasonId}>
+        {disabledReason}
+      </span>
+    </span>
   );
 }
