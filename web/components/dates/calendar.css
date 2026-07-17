@@ -1,0 +1,449 @@
+/* Dates screen styling (T10) — token-driven, scoped under the Dates screen so it
+   never leaks. FullCalendar is restyled under `.ns-month-calendar`; the rest are
+   the Dates UI primitives that only render on this one screen. Prototype target:
+   docs/design_prototype/ScreenDates.dc.html. */
+
+/* Responsive two-column work area (prototype `.ns-grid2`: 1 col, 2 cols ≥900px). */
+.ns-grid2 {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+@media (min-width: 900px) {
+  .ns-grid2 {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+/* ==========================================================================
+   FullCalendar restyle — square corners, hairline borders, token palette.
+   Cells are Monday-first (firstDay={1}); content comes from dayCellContent.
+   ========================================================================== */
+.ns-month-calendar .fc {
+  --fc-border-color: var(--color-line2);
+  --fc-page-bg-color: var(--color-surface);
+  --fc-neutral-bg-color: var(--color-panel);
+  --fc-today-bg-color: transparent;
+  font-family: inherit;
+  font-size: 0.8125rem;
+}
+
+.ns-month-calendar .fc .fc-scrollgrid {
+  border-color: var(--color-line2);
+}
+
+.ns-month-calendar .fc .fc-col-header-cell {
+  background: transparent;
+  border: none;
+  padding: 0.25rem 0;
+}
+.ns-month-calendar .fc .fc-col-header-cell-cushion {
+  color: var(--color-ink3);
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 0.625rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.25rem;
+}
+
+/* Day-cell layout: fill the frame and center our custom content. */
+.ns-month-calendar .fc .fc-daygrid-day-frame {
+  position: relative;
+  min-height: 2.375rem;
+  aspect-ratio: 1 / 1;
+  padding: 0;
+}
+.ns-month-calendar .fc .fc-daygrid-day-top {
+  position: absolute;
+  inset: 0;
+  flex-direction: column;
+}
+.ns-month-calendar .fc .fc-daygrid-day-number {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  color: inherit;
+}
+.ns-month-calendar .fc .fc-daygrid-day-events,
+.ns-month-calendar .fc .fc-daygrid-day-bottom {
+  display: none;
+}
+
+.ns-cal-num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.8125rem;
+}
+.ns-cal-endlabel {
+  position: absolute;
+  bottom: 2px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 7px;
+  letter-spacing: 0.08em;
+  color: var(--color-onbrand);
+  opacity: 0.85;
+}
+.ns-cal-holiday-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  background: var(--color-warn);
+}
+
+/* Display-variant day states (audit MAJOR 4). */
+.ns-month-calendar--display .fc-day.ns-cal-outside {
+  background: var(--color-surface);
+}
+.ns-month-calendar--display .fc-day.ns-cal-outside .ns-cal-num {
+  color: var(--color-faint);
+  font-weight: 500;
+}
+.ns-month-calendar--display .fc-day.ns-cal-in {
+  background: var(--color-brandtint);
+}
+.ns-month-calendar--display .fc-day.ns-cal-in .ns-cal-num {
+  color: var(--color-brandink);
+  font-weight: 700;
+}
+.ns-month-calendar--display .fc-day.ns-cal-in.ns-cal-weekend {
+  background: color-mix(in srgb, var(--color-brand) 15%, var(--color-panel));
+}
+.ns-month-calendar--display .fc-day.ns-cal-in.ns-cal-holiday {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--color-warntint) 0 3px,
+    var(--color-surface) 3px 9px
+  );
+}
+.ns-month-calendar--display .fc-day.ns-cal-in.ns-cal-holiday .ns-cal-num {
+  color: var(--color-warn);
+}
+.ns-month-calendar--display .fc-day.ns-cal-start,
+.ns-month-calendar--display .fc-day.ns-cal-end {
+  background: var(--color-brand);
+}
+.ns-month-calendar--display .fc-day.ns-cal-start .ns-cal-num,
+.ns-month-calendar--display .fc-day.ns-cal-end .ns-cal-num {
+  color: var(--color-onbrand);
+  font-weight: 800;
+}
+
+/* Picker-variant day states (audit MAJOR 5 + MINOR 2/3). The picker sits in its own
+   bordered surface (so it reads as a discrete control, not the tinted editor card),
+   and every day cell is an individually bordered, separated square — the prototype's
+   discrete day controls (ScreenDates 178-198). Separation is a per-cell frame margin
+   (a div, so margin works) rather than fragile table border-spacing. */
+.ns-scope-grids {
+  max-width: 440px;
+  border: 1px solid var(--color-line2);
+  background: var(--color-surface);
+  padding: 0.625rem;
+}
+.ns-month-calendar--picker .fc,
+.ns-month-calendar--picker .fc .fc-scrollgrid,
+.ns-month-calendar--picker .fc .fc-scrollgrid td,
+.ns-month-calendar--picker .fc .fc-scrollgrid th {
+  border: none !important;
+}
+.ns-month-calendar--picker .fc-daygrid-day-frame {
+  min-height: 1.75rem;
+  margin: 1.5px;
+  border: 1px solid var(--color-line2);
+  background: var(--color-surface);
+}
+.ns-month-calendar--picker .fc-day.ns-pick {
+  cursor: pointer;
+}
+.ns-month-calendar--picker .fc-day.ns-pick-weekend .fc-daygrid-day-frame {
+  background: var(--color-panel);
+}
+.ns-month-calendar--picker .fc-day.ns-pick-holiday .fc-daygrid-day-frame {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--color-warntint) 0 3px,
+    var(--color-surface) 3px 9px
+  );
+}
+.ns-month-calendar--picker .fc-day.ns-pick-holiday .ns-cal-num {
+  color: var(--color-warn);
+}
+.ns-month-calendar--picker .fc-day.ns-pick:hover .fc-daygrid-day-frame {
+  background: color-mix(in oklab, var(--color-brandtint) 70%, transparent);
+}
+.ns-month-calendar--picker .fc-day.ns-pick-selected .fc-daygrid-day-frame {
+  background: var(--color-brand);
+  border-color: var(--color-brand);
+}
+.ns-month-calendar--picker .fc-day.ns-pick-selected .ns-cal-num {
+  color: var(--color-onbrand);
+  font-weight: 700;
+}
+.ns-month-calendar--picker .fc-day.ns-pick-out {
+  cursor: not-allowed;
+}
+.ns-month-calendar--picker .fc-day.ns-pick-out .fc-daygrid-day-frame {
+  border-color: transparent;
+}
+.ns-month-calendar--picker .fc-day.ns-pick-out .ns-cal-num {
+  color: var(--color-faint);
+  opacity: 0.4;
+}
+
+/* Legend swatches (prototype's three-item legend). */
+.ns-legend {
+  display: inline-block;
+  width: 0.625rem;
+  height: 0.625rem;
+}
+.ns-legend--inrange {
+  background: var(--color-brandtint);
+  border: 1px solid var(--color-brand);
+}
+.ns-legend--endpoint {
+  background: var(--color-brand);
+}
+.ns-legend--holiday {
+  background: var(--color-warn);
+}
+
+/* ==========================================================================
+   Buttons / inputs.
+   ========================================================================== */
+.ns-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4375rem;
+  padding: 0 0.8125rem;
+  height: 2.125rem;
+  border: 1px solid var(--color-line);
+  background: transparent;
+  color: var(--color-ink);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+.ns-btn:hover {
+  background: var(--color-panel);
+}
+.ns-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.ns-btn--primary {
+  background: var(--color-brand);
+  border-color: var(--color-brand);
+  color: var(--color-onbrand);
+  font-weight: 700;
+}
+.ns-btn--primary:hover {
+  filter: brightness(0.94);
+  background: var(--color-brand);
+}
+.ns-btn--danger {
+  color: var(--color-error);
+}
+.ns-btn--danger:hover {
+  background: var(--color-errortint);
+}
+
+.ns-input {
+  padding: 0 0.75rem;
+  border: 1px solid var(--color-line);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-size: var(--t-sm);
+  font-variant-numeric: tabular-nums;
+}
+.ns-input:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: -1px;
+}
+.ns-input[aria-invalid="true"] {
+  border-color: var(--color-error);
+}
+
+.ns-quick-pick {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: var(--t-sm);
+  font-weight: 600;
+  color: var(--color-brandink);
+  cursor: pointer;
+}
+.ns-quick-pick:hover {
+  text-decoration: underline;
+}
+.ns-quick-pick--muted {
+  color: var(--color-ink3);
+}
+
+.ns-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.625rem;
+  height: 1.625rem;
+  flex: none;
+  border: 1px solid var(--color-line);
+  background: transparent;
+  color: var(--color-ink2);
+  cursor: pointer;
+}
+.ns-icon-btn:hover {
+  background: var(--color-panel);
+}
+
+/* Square action buttons on group cards (preview / edit / delete). */
+.ns-square-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.875rem;
+  height: 1.875rem;
+  border: 1px solid var(--color-line);
+  background: transparent;
+  color: var(--color-ink2);
+  cursor: pointer;
+}
+.ns-square-btn:hover {
+  background: var(--color-panel);
+}
+.ns-square-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.ns-square-btn--on {
+  background: var(--color-brand);
+  border-color: var(--color-brand);
+  color: var(--color-onbrand);
+}
+.ns-square-btn--danger {
+  color: var(--color-error);
+}
+.ns-square-btn--danger:hover {
+  background: var(--color-errortint);
+}
+
+/* Holiday import switch (prototype role="switch"). */
+.ns-switch {
+  position: relative;
+  width: 38px;
+  height: 22px;
+  border-radius: 11px;
+  border: none;
+  flex: none;
+  background: var(--color-line);
+  cursor: pointer;
+  transition: background 150ms ease;
+}
+.ns-switch:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.ns-switch--on {
+  background: var(--color-brand);
+}
+.ns-switch__knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 11px;
+  background: #fff;
+  transition: transform 150ms ease;
+}
+.ns-switch--on .ns-switch__knob {
+  transform: translateX(16px);
+}
+
+/* Date-group day chips + auto-derived preview chips. */
+.ns-day-chip {
+  border: 1px solid var(--color-line);
+  background: var(--color-panel);
+  padding: 0.125rem 0.5rem;
+  border-radius: 2px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: var(--m-xs);
+}
+
+.ns-derived-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5625rem;
+  border: 1px solid var(--color-line2);
+  background: var(--color-panel);
+  color: var(--color-ink2);
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+}
+.ns-derived-chip:hover {
+  filter: brightness(0.97);
+}
+.ns-derived-chip--on {
+  background: var(--color-brand);
+  border-color: var(--color-brand);
+  color: var(--color-onbrand);
+}
+
+/* Sticky preview panel (audit MAJOR 6). */
+.ns-dg-preview {
+  position: sticky;
+  top: 60px;
+  z-index: 6;
+  background: var(--color-surface);
+  border: 1px solid var(--color-brand);
+  box-shadow: 0 4px 14px rgb(8 10 14 / 0.1);
+}
+.ns-dg-preview__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  background: var(--color-brand);
+  color: var(--color-onbrand);
+  padding: 0.125rem 0.25rem 0.125rem 0.5rem;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: var(--m-xs);
+  letter-spacing: 0.02em;
+}
+.ns-dg-preview__chip-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border: none;
+  padding: 0;
+  color: var(--color-onbrand);
+  background: rgb(255 255 255 / 0.22);
+  cursor: pointer;
+}
+.ns-dg-preview__chip-x:hover {
+  background: rgb(255 255 255 / 0.4);
+}
+.ns-dg-preview__day {
+  flex: none;
+  border: 1px solid var(--color-brand);
+  background: var(--color-brandtint);
+  color: var(--color-brandink);
+  padding: 0.1875rem 0.5rem;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: var(--m-xs);
+  white-space: nowrap;
+}
