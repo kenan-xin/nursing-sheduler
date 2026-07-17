@@ -17,6 +17,7 @@
 
 import { z } from "zod";
 import { DAY_STATE_SELECTOR_VALUES, PREFERENCE_TYPE, RESERVED_SHIFT_TYPE } from "../types";
+import { validateContractedHoursContract } from "./contracted-hours";
 import {
   buildShiftTypeIndexMap,
   expandShiftTypeSelector,
@@ -458,7 +459,9 @@ function buildAndReportShiftTypeMap(doc: ProducerDoc, ctx: z.RefinementCtx) {
   }
 }
 
-// Mirrors group_map._validate_policy_encoding + _validate_coverage (DL09 D4).
+// Thin adapter over the shared marked-contract helper (DL09 D4): mirrors
+// group_map._validate_policy_encoding + _validate_coverage by translating each
+// structured `ContractedHoursError` into the exact Zod issue emitted before.
 function validateContractedHours(
   doc: ProducerDoc,
   map: Map<number | string, number[]>,
@@ -467,129 +470,20 @@ function validateContractedHours(
 ): void {
   doc.preferences.forEach((pref, prefIndex) => {
     if (pref.type !== PREFERENCE_TYPE.shiftCount || !pref.hoursContract) return;
-    const path = (rest: (string | number)[]) => ["preferences", prefIndex, ...rest];
-    const addIssue = (message: string, rest: (string | number)[] = []) =>
-      ctx.addIssue({ code: "custom", message, path: path(rest) });
-
-    // Policy encoding.
-    if (pref.weight !== Infinity)
-      addIssue(`A contracted-hours shift count must use weight '.inf', but got ${pref.weight}.`, [
-        "weight",
-      ]);
-    if (pref.hoursContract.policy === "exact") {
-      if (pref.expression !== "x = T")
-        addIssue("An exact contracted-hours shift count must use expression 'x = T'.", [
-          "expression",
-        ]);
-      if (Array.isArray(pref.target))
-        addIssue("An exact contracted-hours shift count must use a scalar target.", ["target"]);
-      else if (pref.target < 0)
-        addIssue(`Contracted-hours target must be non-negative, but got ${pref.target}.`, [
-          "target",
-        ]);
-    } else {
-      if (
-        !Array.isArray(pref.expression) ||
-        pref.expression[0] !== "x >= T" ||
-        pref.expression[1] !== "x <= T" ||
-        pref.expression.length !== 2
-      )
-        addIssue("A range contracted-hours shift count must use expression ['x >= T', 'x <= T'].", [
-          "expression",
-        ]);
-      if (!Array.isArray(pref.target) || pref.target.length !== 2)
-        addIssue(
-          "A range contracted-hours shift count must use a two-element [minimum, maximum] target.",
-          ["target"],
-        );
-      else {
-        const [min, max] = pref.target;
-        if (min < 0 || max < 0)
-          addIssue(
-            `Contracted-hours range targets must be non-negative, but got [${min}, ${max}].`,
-            ["target"],
-          );
-        else if (min > max)
-          addIssue(
-            `Contracted-hours range minimum must not exceed maximum, but got [${min}, ${max}].`,
-            ["target"],
-          );
-      }
-    }
-
-    // Coverage: expanded selectors must equal the explicit coefficient set exactly.
-    const selectors = Array.isArray(pref.countShiftTypes)
-      ? pref.countShiftTypes
-      : [pref.countShiftTypes];
-    if (selectors.length === 0) {
-      addIssue("A contracted-hours shift count requires non-empty countShiftTypes.", [
-        "countShiftTypes",
-      ]);
-      return;
-    }
-    const expanded = new Set<number>();
-    let unknownSelector = false;
-    for (const selector of selectors) {
-      const indices = expandShiftTypeSelector(selector, map);
-      if (indices == null) {
-        addIssue(`Unknown shift type ID: ${selector}`, ["countShiftTypes"]);
-        unknownSelector = true;
-        continue;
-      }
-      for (const s of indices) expanded.add(s);
-    }
-    if (unknownSelector) return;
-    if (expanded.size === 0)
-      addIssue("A contracted-hours shift count must select at least one shift type.", [
-        "countShiftTypes",
-      ]);
-    if (expanded.has(OFF_SID))
-      addIssue("'OFF' is not allowed in a contracted-hours shift count.", ["countShiftTypes"]);
-
-    const coefficientSids = new Set<number>();
-    for (const [shiftTypeId, coefficient] of pref.countShiftTypeCoefficients ?? []) {
-      if (coefficient < 1) {
-        addIssue(`Contracted-hours coefficient for '${shiftTypeId}' must be at least 1.`, [
-          "countShiftTypeCoefficients",
-        ]);
-        continue;
-      }
-      if (shiftTypeId === RESERVED_SHIFT_TYPE.off) {
-        addIssue("'OFF' is not allowed in a contracted-hours shift count.", [
-          "countShiftTypeCoefficients",
-        ]);
-        continue;
-      }
-      if (shiftTypeId === RESERVED_SHIFT_TYPE.all || groupIds.has(shiftTypeId)) {
-        addIssue(
-          `Contracted-hours coefficient '${shiftTypeId}' must be a concrete shift type or 'LEAVE', not a group or 'ALL'.`,
-          ["countShiftTypeCoefficients"],
-        );
-        continue;
-      }
-      const indices = expandShiftTypeSelector(shiftTypeId, map);
-      if (indices == null || indices.length !== 1) {
-        addIssue(`Unknown shift type ID: ${shiftTypeId}`, ["countShiftTypeCoefficients"]);
-        continue;
-      }
-      const sid = indices[0];
-      if (coefficientSids.has(sid)) {
-        addIssue(`Duplicate contracted-hours coefficient for '${shiftTypeId}'.`, [
-          "countShiftTypeCoefficients",
-        ]);
-        continue;
-      }
-      coefficientSids.add(sid);
-    }
-    if ([...expanded].some((s) => !coefficientSids.has(s)))
-      addIssue(
-        "A contracted-hours shift count must list an explicit coefficient for every selected shift type (including LEAVE); coverage is incomplete.",
-        ["countShiftTypeCoefficients"],
-      );
-    if ([...coefficientSids].some((s) => !expanded.has(s)))
-      addIssue("A contracted-hours coefficient does not correspond to any selected shift type.", [
-        "countShiftTypeCoefficients",
-      ]);
+    const { errors } = validateContractedHoursContract(
+      {
+        weight: pref.weight,
+        expression: pref.expression,
+        target: pref.target as number | [number, number],
+        policy: pref.hoursContract.policy,
+        countShiftTypes: pref.countShiftTypes,
+        countShiftTypeCoefficients: pref.countShiftTypeCoefficients,
+      },
+      map,
+      groupIds,
+    );
+    for (const { field, message } of errors)
+      ctx.addIssue({ code: "custom", message, path: ["preferences", prefIndex, field] });
   });
 }
 

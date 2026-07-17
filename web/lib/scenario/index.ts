@@ -34,3 +34,10 @@ export {
   LEAVE_SID,
   ShiftTypeMapError,
 } from "./schemas/shift-type-map";
+export {
+  validateContractedHoursContract,
+  type ContractedHoursInput,
+  type ContractedHoursField,
+  type ContractedHoursError,
+  type ContractedHoursValidation,
+} from "./schemas/contracted-hours";
