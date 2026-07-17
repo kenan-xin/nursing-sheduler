@@ -1,6 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const PORT = 3100;
+// Defaults to 3100; override via PLAYWRIGHT_PORT so isolated worktrees can run
+// the e2e suite concurrently without colliding on the host port.
+const PORT = Number(process.env.PLAYWRIGHT_PORT) || 3100;
 const baseURL = `http://127.0.0.1:${PORT}`;
 
 // E2E smoke runs against a production build of the empty app. `webServer` builds
