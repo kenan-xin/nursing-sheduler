@@ -13,14 +13,14 @@
 import { useEffect } from "react";
 import { useStore } from "zustand";
 import { useScenarioStore } from "@/lib/store";
-import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { FaRotateLeft, FaArrowRotateRight } from "@/components/icons";
 
 // `store.temporal` is a vanilla zundo StoreApi — reading `pastStates` /
 // `futureStates` off it directly is NOT reactive (zundo docs). Subscribe through
 // zustand's `useStore(api, selector)` so the buttons re-render as history grows
 // and shrinks. The imperative undo()/redo() go through `.getState()`.
-export function useUndoRedo() {
+function useUndoRedo() {
   const pastLength = useStore(useScenarioStore.temporal, (s) => s.pastStates.length);
   const futureLength = useStore(useScenarioStore.temporal, (s) => s.futureStates.length);
 
@@ -35,40 +35,67 @@ export function useUndoRedo() {
   };
 }
 
+// Secondary bordered-surface control pair (MINOR 7), sized to the prototype's
+// 40×40 surface control (ScreenSchedule.dc.html:39-46,376). Disabled state drops
+// the icon to `faint` with a not-allowed cursor rather than relying on opacity.
+function UndoRedoButton({
+  onClick,
+  disabled,
+  label,
+  title,
+  testId,
+  children,
+}: {
+  onClick: () => void;
+  disabled: boolean;
+  label: string;
+  title: string;
+  testId: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      title={title}
+      data-testid={testId}
+      className={cn(
+        "flex size-9 items-center justify-center border bg-surface outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand [&_svg]:size-4",
+        disabled
+          ? "cursor-not-allowed border-line2 text-faint"
+          : "border-line text-ink hover:bg-panel",
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
 export function UndoRedoControls() {
   const { canUndo, canRedo, undo, redo } = useUndoRedo();
 
-  // On the dark chrome top bar the shared `ghost` variant's `text-ink` is
-  // invisible (1:1). `on-ink` is the foreground token for the ink/chrome bar
-  // (light in both themes; see nursing-sheduler-2dn).
-  const chromeGhost = "text-on-ink hover:bg-on-ink/10";
-
   return (
-    <div className="flex items-center gap-1" data-testid="undo-redo-controls">
-      <Button
-        variant="ghost"
-        size="icon"
+    <div className="flex items-center gap-1.5" data-testid="undo-redo-controls">
+      <UndoRedoButton
         onClick={undo}
         disabled={!canUndo}
-        aria-label="Undo"
+        label="Undo"
         title="Undo (Ctrl/Cmd+Z)"
-        data-testid="undo-button"
-        className={chromeGhost}
+        testId="undo-button"
       >
         <FaRotateLeft />
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon"
+      </UndoRedoButton>
+      <UndoRedoButton
         onClick={redo}
         disabled={!canRedo}
-        aria-label="Redo"
+        label="Redo"
         title="Redo (Ctrl/Cmd+Y)"
-        data-testid="redo-button"
-        className={chromeGhost}
+        testId="redo-button"
       >
         <FaArrowRotateRight />
-      </Button>
+      </UndoRedoButton>
     </div>
   );
 }

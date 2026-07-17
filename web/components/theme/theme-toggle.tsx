@@ -6,7 +6,10 @@ import { cn } from "@/lib/utils";
 import { FaSun, FaMoon } from "@/components/icons";
 
 // Icon button that flips light/dark. Icon reflects the theme it switches TO.
-export function ThemeToggle() {
+// An optional `className` overrides the default 36px icon size — the SideNav
+// footer passes `size-[34px]` to match the prototype's 34×34 theme control
+// (SideNav.dc.html:54, audit MAJOR 5); tailwind-merge lets it win over `size-9`.
+export function ThemeToggle({ className }: { className?: string }) {
   const { theme, toggleTheme } = useTheme();
   const next = theme === "dark" ? "light" : "dark";
   return (
@@ -16,6 +19,7 @@ export function ThemeToggle() {
       onClick={toggleTheme}
       aria-label={`Switch to ${next} theme`}
       title={`Switch to ${next} theme`}
+      className={className}
     >
       {theme === "dark" ? <FaSun /> : <FaMoon />}
     </Button>

@@ -1,49 +1,64 @@
 "use client";
 
-// Top bar (T08). App title, mode toggle, undo/redo, theme/density/accent
-// controls, and the New-schedule button. On mobile (below the 920px nav
-// breakpoint) the sidebar is hidden and a hamburger drawer trigger replaces it.
+// Contextual top bar (T08, BLOCKER 1 / MAJOR 5). This is NOT a full-viewport
+// chrome bar: it is the 56px `bg-surface` header that lives INSIDE the right-hand
+// main column, beside the branded rail (see app-shell.tsx). Its job is
+// orientation, not controls: the mobile menu, a small product tile, the current
+// route crumb, the scenario context, the persistence status, and the (secondary)
+// global undo/redo. Mode, density, accent, theme, New-schedule and version have
+// moved to their owning surfaces (SideNav / display settings / Save & Load).
 
-import { ThemeToggle, DensityControl, AccentControl } from "@/components/theme/theme-toggle";
-import { ModeToggle } from "./mode-toggle";
+import { usePathname } from "next/navigation";
+import { useScenarioStore } from "@/lib/store";
+import { ALL_NAV_ITEMS } from "./nav-config";
 import { UndoRedoControls } from "./undo-redo-controls";
-import { NewScheduleButton } from "./new-schedule-button";
+import { PersistenceStatus } from "./persistence-status";
 import { MobileNav } from "./mobile-nav";
-import { AppVersion } from "@/components/app-version";
+import { FaDiagramProject } from "@/components/icons";
+
+function useCrumb(): string {
+  const pathname = usePathname();
+  if (pathname === "/") return "Home";
+  return ALL_NAV_ITEMS.find((item) => item.path === pathname)?.label ?? "Home";
+}
 
 export function TopBar() {
+  const crumb = useCrumb();
+  const scenarioName = useScenarioStore((s) => s.meta.description);
+
   return (
     <header
       data-testid="top-bar"
-      className="flex h-14 shrink-0 items-center gap-2 border-b border-line bg-chrome px-3 text-on-ink sm:gap-3 sm:px-4"
+      className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-3 border-b border-line bg-surface px-4 sm:px-5"
     >
-      {/* Mobile hamburger — visible on mobile, hidden on desktop (≥920px nav breakpoint) */}
+      {/* Mobile hamburger — visible below the 920px nav breakpoint only. */}
       <span className="shrink-0 nav:hidden">
         <MobileNav />
       </span>
 
-      {/* Title yields space first on narrow viewports so the action controls stay
-          fully on-screen (no horizontal overflow at 320px). */}
-      <div className="flex min-w-0 flex-1 items-center gap-2">
-        <span className="truncate font-heading text-cardhead font-bold tracking-tight">
-          Nurse Scheduler
+      <div className="flex min-w-0 items-center gap-2.5">
+        <span className="flex size-[26px] shrink-0 items-center justify-center bg-chrome text-[13px] text-on-ink">
+          <FaDiagramProject />
+        </span>
+        <span
+          data-testid="route-crumb"
+          className="truncate text-label uppercase tracking-[0.03em] text-ink2"
+        >
+          {crumb}
         </span>
       </div>
 
-      <div className="flex shrink-0 items-center gap-2">
+      <div className="flex-1" />
+
+      <div className="flex shrink-0 items-center gap-3">
+        <span
+          data-testid="scenario-context"
+          className="hidden max-w-[36ch] truncate text-label uppercase tracking-[0.03em] text-ink3 sm:inline"
+        >
+          {scenarioName || "Untitled schedule"}
+        </span>
+        <PersistenceStatus />
         <UndoRedoControls />
-        <span className="hidden items-center gap-2 sm:flex">
-          <ModeToggle />
-        </span>
-        <span className="hidden items-center gap-2 lg:flex">
-          <DensityControl />
-          <AccentControl />
-        </span>
-        <ThemeToggle />
-        <NewScheduleButton />
-        <span className="hidden sm:inline">
-          <AppVersion />
-        </span>
       </div>
     </header>
   );

@@ -1,17 +1,22 @@
 "use client";
 
-// App shell (T08). Composes the responsive layout: top bar, desktop sidebar
-// (hidden below the 920px `nav` breakpoint), the mobile sheet (in the top bar),
-// and the hydration gate. It also mounts the app-wide singletons that must exist
-// exactly once: the toast surface (sonner), the shared dirty-nav confirm dialog
+// App shell (T08, BLOCKER 1). The desktop root is a ROW: a sticky, full-height
+// (100dvh) branded side rail from the top edge, beside a main column whose 56px
+// bg-surface contextual top bar and scrollable content live INSIDE that column
+// only (never a full-viewport dark bar above everything). Below the 920px `nav`
+// breakpoint the rail is hidden and the same AppSideNav composition is reached
+// through the mobile drawer in the top bar.
+//
+// It also mounts the app-wide singletons that must exist exactly once: the toast
+// surface (sonner, themed to the prototype), the shared dirty-nav confirm dialog
 // (acceptance row 2), the global delete-confirm dialog (ticket item 1), the
 // browser-level dirty guard, and the e2e driving seam.
 
 import { useRouter } from "next/navigation";
 import { Toaster } from "sonner";
 import { useTheme } from "@/components/theme/theme-provider";
+import { AppSideNav } from "./app-side-nav";
 import { TopBar } from "./top-bar";
-import { SidebarNav } from "./sidebar-nav";
 import { HydrationGate } from "./hydration-gate";
 import { ConfirmDialog } from "./confirm-dialog";
 import { TestBridge } from "./test-bridge";
@@ -24,25 +29,31 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   useDirtyBeforeUnload();
 
   return (
-    <div className="flex min-h-screen flex-col">
-      <TopBar />
-      <div className="flex flex-1 overflow-hidden">
-        {/* Desktop sidebar — hidden below 920px (mobile uses the sheet in the top bar) */}
-        <aside
-          data-testid="desktop-sidebar"
-          className="hidden w-[var(--sidebar-w)] shrink-0 flex-col gap-2 overflow-y-auto border-r border-line bg-sidebar p-3 nav:flex"
-        >
-          <SidebarNav />
-        </aside>
+    <div className="flex h-dvh overflow-hidden">
+      {/* Desktop rail — full-height from the top edge; hidden below 920px. */}
+      <aside
+        data-testid="desktop-sidebar"
+        className="hidden w-[var(--sidebar-w)] shrink-0 border-r border-line bg-sidebar nav:block"
+      >
+        <AppSideNav />
+      </aside>
 
-        <main className="flex-1 overflow-y-auto">
+      {/* Main column — contextual top bar + scrollable content. */}
+      <main className="flex min-w-0 flex-1 flex-col">
+        <TopBar />
+        <div className="min-h-0 flex-1 overflow-y-auto">
           <HydrationGate>{children}</HydrationGate>
-        </main>
-      </div>
+        </div>
+      </main>
 
       <DirtyNavDialog />
       <GlobalConfirmDialog />
-      <Toaster theme={theme} position="bottom-right" closeButton />
+      <Toaster
+        theme={theme}
+        position="bottom-center"
+        className="ns-sonner"
+        toastOptions={{ className: "ns-toast" }}
+      />
       <TestBridge />
     </div>
   );
@@ -95,6 +106,7 @@ function GlobalConfirmDialog() {
       confirmLabel={request?.confirmLabel}
       cancelLabel={request?.cancelLabel}
       variant={request?.variant}
+      consequences={request?.consequences}
       onConfirm={() => settle(true)}
     />
   );

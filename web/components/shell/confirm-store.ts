@@ -14,6 +14,8 @@ export interface ConfirmRequest {
   confirmLabel?: string;
   cancelLabel?: string;
   variant?: "default" | "destructive";
+  /** Structured cascade consequences for delete/cascade confirmations. */
+  consequences?: string[];
 }
 
 interface ConfirmState {

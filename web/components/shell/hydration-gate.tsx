@@ -22,6 +22,7 @@ import { SkeletonCard } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "./confirm-dialog";
 import { useUndoRedoShortcuts } from "./undo-redo-controls";
+import { usePersistenceStatusController } from "./persistence-status";
 import { useSyncModePersistence } from "@/lib/mode/use-mode";
 import { toast } from "sonner";
 
@@ -39,6 +40,7 @@ export function HydrationGate({ children }: { children: React.ReactNode }) {
   }, [scenario, hot]);
 
   useUndoRedoShortcuts();
+  usePersistenceStatusController();
   useSyncModePersistence();
 
   if (status === "unhydrated" || status === "hydrating") {

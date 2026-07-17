@@ -11,7 +11,8 @@ import { expect, test, type Page } from "@playwright/test";
 // seam mounted by the shell (components/shell/test-bridge.tsx) — a genuine tracked
 // mutation, not a mock.
 
-// The fixed 13-tab nav set (spec 07 FR-ST-28), grouped model→rules→generate→save.
+// The fixed 13-tab nav set (spec 07 FR-ST-28). Grouped by the user-approved
+// audit mapping as Home (headerless) → SET UP → OUTPUT → SYSTEM.
 const NAV_PATHS = [
   "/",
   "/dates",
@@ -93,8 +94,13 @@ test.describe("T08 app shell", () => {
     await expect(page).toHaveURL(/\/people$/);
   });
 
-  test("row 3 — New-schedule resets all slices after confirm", async ({ page }) => {
+  test("row 3 — Start over resets all slices after confirm", async ({ page }) => {
     await gotoReadyHome(page);
+    // The reset affordance now lives in Save & Load (MINOR 8). Route there while
+    // the scenario is still clean (no guard), then dirty it and reset.
+    await page.getByTestId("nav-link-/save-and-load").click();
+    await expect(page.getByTestId("start-over-card")).toBeVisible();
+
     await mutate(page, {
       rangeStart: "2026-03-01",
       staff: [{ _k: "p1", id: 1, description: "Nurse A" }],
@@ -167,7 +173,7 @@ test.describe("T08 app shell", () => {
   }) => {
     await gotoReadyHome(page);
     // Guided is the default lens.
-    await expect(page.getByTestId("mode-toggle-guided")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("mode-toggle-guided")).toHaveAttribute("aria-selected", "true");
 
     // Every one of the 13 nav entries is present AND navigable in Guided mode —
     // nothing unreachable (critique #8), incl. Export Layout. Scenario stays clean
@@ -198,9 +204,9 @@ test.describe("T08 app shell", () => {
 
     // Server + first paint render Guided; after mount the stored Advanced value is
     // adopted, so the toggle and the model agree (the bug was a stale Guided toggle).
-    await expect(page.getByTestId("mode-toggle-advanced")).toHaveAttribute("aria-pressed", "true");
-    await expect(page.getByTestId("mode-toggle-guided")).toHaveAttribute("aria-pressed", "false");
-    await expect(page.getByTestId("home-screen")).toContainText("Full control");
+    await expect(page.getByTestId("mode-toggle-advanced")).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByTestId("mode-toggle-guided")).toHaveAttribute("aria-selected", "false");
+    await expect(page.getByTestId("home-screen")).toContainText("every editor directly");
 
     // No hydration-mismatch console errors (favicon 404 is benign).
     const unexpected = errors.filter((t) => !/favicon/i.test(t));
@@ -219,7 +225,7 @@ test.describe("T08 app shell", () => {
     await expect(drawer).toBeVisible();
     await drawer.getByTestId("mode-toggle-advanced").click();
     await expect(drawer.getByTestId("mode-toggle-advanced")).toHaveAttribute(
-      "aria-pressed",
+      "aria-selected",
       "true",
     );
   });

@@ -73,10 +73,13 @@ describe("chrome bar contrast — --on-ink vs --chrome (nursing-sheduler-2dn)", 
   });
 });
 
-describe("chrome shell controls use the on-ink foreground token (not text-ink)", () => {
-  // If any of these is repointed back to the inverting `text-ink`, its
-  // `text-on-ink` reference disappears and this trips.
-  it.each(["top-bar.tsx", "mobile-nav.tsx", "undo-redo-controls.tsx"])(
+describe("on-ink surfaces use the on-ink foreground token (not text-ink)", () => {
+  // After the T08 shell rebuild the top bar is `bg-surface` (not dark chrome), so
+  // the on-ink foreground now lives on the genuinely dark tiles/segments: the
+  // top-bar product tile (bg-chrome), the SideNav brand tile (bg-chrome), and the
+  // active mode segment (bg-ink). If any is repointed back to the inverting
+  // `text-ink`, its `text-on-ink` reference disappears and this trips.
+  it.each(["top-bar.tsx", "app-side-nav.tsx", "mode-toggle.tsx"])(
     "%s references text-on-ink",
     (name) => {
       const src = readFileSync(join(shellDir, name), "utf8");

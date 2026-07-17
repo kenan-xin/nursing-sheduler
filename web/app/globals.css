@@ -441,6 +441,28 @@
   }
 }
 
+/* Sonner toast → prototype shell toast (Nurse Scheduling.dc.html:193-197):
+   bottom-center ink surface with on-ink text, a green success left rule and a
+   green checkmark. Class hooks come from <Toaster className="ns-sonner"
+   toastOptions={{ className: "ns-toast" }} /> in app-shell.tsx. */
+.ns-toast {
+  background: var(--ink) !important;
+  color: var(--on-ink) !important;
+  border: 1px solid var(--ink) !important;
+  border-left: 3px solid var(--success) !important;
+  border-radius: 0 !important;
+  box-shadow: var(--shadow-side) !important;
+  font-family: var(--ff-body);
+  font-size: var(--t-sm);
+  font-weight: 600;
+}
+.ns-toast [data-title] {
+  color: var(--on-ink) !important;
+}
+.ns-toast [data-icon] {
+  color: var(--success) !important;
+}
+
 /* Reduced-motion: suppress the motion tokens' effect globally. */
 @media (prefers-reduced-motion: reduce) {
   *,
