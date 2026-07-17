@@ -12,6 +12,7 @@
 
 import { useEffect } from "react";
 import { selectIsDirty, useHotStore, useScenarioStore } from "@/lib/store";
+import { useNavGuardStore } from "./nav-guard-store";
 
 declare global {
   interface Window {
@@ -24,6 +25,9 @@ declare global {
       scenario: typeof useScenarioStore;
       hot: typeof useHotStore;
       isDirty: () => boolean;
+      // The nav-guard store, so specs can drive the draft-only nav/unload guard
+      // (FR-PR-06) via `setDraftOpen` without mounting a real card editor.
+      navGuard: typeof useNavGuardStore;
     };
   }
 }
@@ -45,6 +49,7 @@ export function TestBridge() {
       scenario: useScenarioStore,
       hot: useHotStore,
       isDirty: () => selectIsDirty(useScenarioStore.getState()),
+      navGuard: useNavGuardStore,
     };
     return () => {
       delete window.__nsStore;

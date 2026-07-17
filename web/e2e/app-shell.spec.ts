@@ -1,10 +1,18 @@
 import { expect, test, type Page } from "@playwright/test";
 
-// T08 acceptance matrix (Playwright rows): dirty-nav guard (row 2), New-schedule
-// reset (row 3), app-wide undo/redo via Ctrl-Z/Y (row 4), and Guided-mode nav
-// reachability incl. Export Layout (row 5). Row 1 (toggle ⇒ store byte-identical)
-// is proven in lib/mode/mode.test.ts; the vitest half of row 3 in
-// components/shell/reset.test.ts.
+// T08 acceptance matrix (Playwright rows): open-draft nav guard (row 2, narrowed —
+// see below), New-schedule reset (row 3), app-wide undo/redo via Ctrl-Z/Y (row 4),
+// and Guided-mode nav reachability incl. Export Layout (row 5). Row 1 (toggle ⇒
+// store byte-identical) is proven in lib/mode/mode.test.ts; the vitest half of
+// row 3 in components/shell/reset.test.ts.
+//
+// Row 2 scope note (qq0.21): the nav/unload guard fires ONLY on an open card-editor
+// draft (FR-PR-06), NOT on a merely "dirty" scenario. Scenario mutations
+// auto-persist to IndexedDB (T04) so they can't be lost on navigation, and the
+// Save/Load (YAML) feature that would clear dirty isn't built yet — so guarding on
+// dirty fired on every click. The whole-scenario "leave without saving?" warning is
+// deferred to qq0.22. These specs assert the narrowed policy: dirty-but-no-draft
+// navigates freely; an open draft still prompts.
 //
 // The editor screens that would normally mutate the scenario belong to later
 // tickets, so these specs drive the real T04 store through the `window.__nsStore`
@@ -43,6 +51,7 @@ type NsWindow = {
   __nsStore: {
     scenario: { getState(): Record<string, unknown> & { mutateScenario(x: unknown): void } };
     isDirty(): boolean;
+    navGuard: { getState(): { setDraftOpen(open: boolean): void } };
   };
 };
 
@@ -51,6 +60,13 @@ async function mutate(page: Page, patch: Record<string, unknown>) {
   await page.evaluate((p) => {
     (window as unknown as NsWindow).__nsStore.scenario.getState().mutateScenario(p);
   }, patch);
+}
+
+/** Arm/disarm the open-draft nav guard through the store seam (FR-PR-06). */
+async function setDraftOpen(page: Page, open: boolean) {
+  await page.evaluate((o) => {
+    (window as unknown as NsWindow).__nsStore.navGuard.getState().setDraftOpen(o);
+  }, open);
 }
 
 /** Read a single scenario field from the live store. */
@@ -75,10 +91,34 @@ test.describe("T08 app shell", () => {
     });
   });
 
-  test("row 2 — dirty scenario prompts a guard before navigation", async ({ page }) => {
+  test("row 2 — a dirty scenario with no open draft navigates freely (qq0.21)", async ({
+    page,
+  }) => {
     await gotoReadyHome(page);
     await mutate(page, { rangeStart: "2026-03-01" });
+    // Dirty in the T04 sense (differs from the persisted baseline)…
     expect(await isDirty(page)).toBe(true);
+
+    // …but with no card-editor draft open, the guard does NOT fire — the sidebar
+    // link navigates directly. Scenario mutations auto-persist (T04), so there is
+    // nothing to lose; the whole-scenario "leave without saving?" warning is
+    // deferred to qq0.22. (This is the exact condition that popped the dialog on
+    // every click before qq0.21.)
+    await page.getByTestId("nav-link-/people").click();
+    await expect(page).toHaveURL(/\/people$/);
+    await expect(page.getByRole("heading", { name: "Unsaved changes" })).toBeHidden();
+  });
+
+  test("row 2 — an open card-editor draft prompts the guard before navigation (FR-PR-06)", async ({
+    page,
+  }) => {
+    await gotoReadyHome(page);
+    // Arm the open-draft guard through the store seam (a real editor form does this
+    // via useCardEditorDraftGuard; the end-to-end path is covered in counts.spec.ts
+    // / affinities.spec.ts). The scenario stays clean, isolating draftOpen as the
+    // only reason the guard can fire.
+    await setDraftOpen(page, true);
+    expect(await isDirty(page)).toBe(false);
 
     // Attempt to navigate via the sidebar → guard dialog intercepts.
     await page.getByTestId("nav-link-/people").click();
@@ -148,7 +188,36 @@ test.describe("T08 app shell", () => {
     expect(await readField(page, "rangeStart")).toBe("");
   });
 
-  test("row 2 — beforeunload guards a dirty scenario (browser leave)", async ({ page }) => {
+  test("qq0.21 — reload keeps the T04 baseline (restored-unsaved stays dirty) yet the nav guard is not armed", async ({
+    page,
+  }) => {
+    await gotoReadyHome(page);
+    // Make a tracked edit and let the auto-persist write settle, but do NOT
+    // markSaved (no UI action does yet — Save/Load is unbuilt).
+    await mutate(page, { rangeStart: "2026-03-01" });
+    expect(await isDirty(page)).toBe(true);
+    await page.waitForTimeout(800);
+
+    await page.reload();
+    await expect(page.getByTestId("home-screen")).toBeVisible();
+    await page.waitForFunction(() =>
+      Boolean((window as unknown as { __nsStore?: unknown }).__nsStore),
+    );
+
+    // T04 contract preserved: the persisted baseline is RESTORED (not recomputed),
+    // so restored-unsaved ≠ clean — the scenario is still dirty after reload. The
+    // fix for qq0.21 is that the nav guard no longer consumes dirty, so with no
+    // open draft every sidebar link still navigates without the "Unsaved changes"
+    // dialog.
+    expect(await isDirty(page)).toBe(true);
+    await page.getByTestId("nav-link-/people").click();
+    await expect(page).toHaveURL(/\/people$/);
+    await expect(page.getByRole("heading", { name: "Unsaved changes" })).toBeHidden();
+  });
+
+  test("row 2 — beforeunload guards an open draft, not a merely dirty scenario (browser leave)", async ({
+    page,
+  }) => {
     await gotoReadyHome(page);
 
     // Dispatch a cancelable beforeunload and observe whether the shell handler
@@ -163,9 +232,19 @@ test.describe("T08 app shell", () => {
     // Clean → no prompt.
     expect(await dispatchUnload()).toBe(false);
 
-    // Dirty → prompt (preventDefault).
+    // Dirty scenario but NO open draft → still no prompt (qq0.21): scenario
+    // mutations auto-persist and cannot be lost on leave.
     await mutate(page, { rangeStart: "2026-03-01" });
+    expect(await isDirty(page)).toBe(true);
+    expect(await dispatchUnload()).toBe(false);
+
+    // Open card-editor draft → prompt (preventDefault), FR-PR-06.
+    await setDraftOpen(page, true);
     expect(await dispatchUnload()).toBe(true);
+
+    // Closing the draft clears the guard again.
+    await setDraftOpen(page, false);
+    expect(await dispatchUnload()).toBe(false);
   });
 
   test("row 5 — Guided mode keeps every capability reachable, incl. Export Layout", async ({
