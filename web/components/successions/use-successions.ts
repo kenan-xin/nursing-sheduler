@@ -28,6 +28,9 @@ function commitSuccessions(next: SuccessionCard[]) {
 export interface SuccessionsController {
   state: ScenarioUiState;
   successions: SuccessionCard[];
+  /** Read the LIVE successions slice at call time (not a render snapshot) — the
+   *  stale guard keys on its ref-identity change since the draft opened. */
+  getCards: () => SuccessionCard[];
   add: (form: SuccessionFormState) => void;
   update: (uid: string, form: SuccessionFormState) => void;
   remove: (uid: string) => void;
@@ -51,6 +54,7 @@ export function useSuccessions(): SuccessionsController {
   return {
     state,
     successions,
+    getCards: () => useScenarioStore.getState().cardsByKind.successions,
     add(form) {
       commitSuccessions([...successions, buildSuccessionCard(form)]);
     },

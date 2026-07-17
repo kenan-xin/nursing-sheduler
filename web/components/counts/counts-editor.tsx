@@ -20,9 +20,11 @@ import {
   CardEditorScreen,
   CardEditorHeader,
   CardEditorInfoStrip,
+  CardEditorInstructions,
   CardListHeading,
   CardEditorEmptyState,
   useCardEditorDraftGuard,
+  useCardEditorStaleGuard,
 } from "@/components/card-editor/card-editor-shell";
 import { CountForm } from "./count-form";
 import { CountCardList } from "./count-card-list";
@@ -34,6 +36,7 @@ import {
   isEditableCountCard,
   type CountFormState,
 } from "./counts-model";
+import type { CountCard } from "@/lib/scenario";
 
 type Draft =
   | { mode: "add"; uid: null; form: CountFormState }
@@ -43,16 +46,40 @@ const EYEBROW = "CONSTRAINT · SHIFT COUNTS";
 const TITLE = "Shift Counts";
 const SUBTITLE =
   "Targets for how many of a shift type each person works over a set of dates — including a monthly contracted-hours target, where each worked shift and paid-leave day contributes its coefficient. Positive weight encourages, negative discourages.";
-const ADD_LABEL = "Add shift count";
-const LIST_TITLE = "Current shift counts";
-const EMPTY_TITLE = "No shift counts defined yet.";
-const EMPTY_BODY = "Add your first shift count to define this constraint.";
+const ADD_LABEL = "Add Shift Count";
+const LIST_TITLE = "Current Shift Counts";
+const EMPTY_MESSAGE =
+  "No shift counts defined yet. Add a Shift Count or Contracted Hours rule to get started.";
+
+// FR-PR-02 verbatim (spec 05 counts instructions).
+const INSTRUCTIONS = [
+  'Set up shift count rules for people (e.g., "Working shifts should be close to the average")',
+  "Select one or more people that this constraint applies to",
+  "Select which dates to count shifts for",
+  "Select which shift types to count",
+  "Choose a mathematical expression to evaluate (e.g., 'x >= T' means count should be at least the target)",
+  "Set the numeric target value",
+  "Set positive weight to encourage constraint matches and negative weight to discourage them",
+  "Navigate using the tabs or keyboard shortcuts (1, 2, etc.) to continue setup",
+] as const;
 
 export function CountsEditor() {
-  const { state, counts, add, update, remove, duplicate, move, reorder, setDisabled } = useCounts();
+  const { state, counts, add, update, remove, duplicate, move, reorder, setDisabled, getCards } =
+    useCounts();
   const [draft, setDraft] = useState<Draft | null>(null);
   // FR-PR-06: arm the shared open-draft navigation guard while a form is visible.
   useCardEditorDraftGuard(!!draft);
+  // Stale-open-edit guard (the entity-editor `isStale` pattern, ported to the
+  // card-editor family): a draft formed against a stale cards slice (undo/redo
+  // temporal travel, or an external cascade) visibly closes, and its Submit is
+  // blocked synchronously so a stale draft can never overwrite a newer card or
+  // mint a spurious history entry.
+  const { isStale } = useCardEditorStaleGuard<CountCard>({
+    cards: counts,
+    draftOpen: !!draft,
+    readLiveCards: getCards,
+    onStale: () => setDraft(null),
+  });
   // FR-PR-07: starting an edit records the scroll offset (add does not) and scrolls
   // to the top; Save/Cancel of that edit restores the offset. The app shell scrolls
   // an inner `overflow-y-auto` container (not the window), so we operate on the
@@ -111,6 +138,15 @@ export function CountsEditor() {
   }
 
   function save(form: CountFormState) {
+    // Synchronous stale-Save guard: if the cards slice changed since this draft
+    // opened (temporal travel / external cascade), abort the write entirely — no
+    // commit, no history entry — and let the close-on-external effect dismiss
+    // the draft. Self-Save is never stale: drafts don't mutate the live slice, so
+    // the token is still the form-open ref until this very commit.
+    if (isStale()) {
+      setDraft(null);
+      return;
+    }
     // Closing the draft triggers the layout-effect restore (no synchronous restore —
     // the form must unmount first so the list collapses back to its edit-time height).
     if (draft?.mode === "edit") update(draft.uid, form);
@@ -138,6 +174,7 @@ export function CountsEditor() {
         addLabel={ADD_LABEL}
         formOpen={!!draft}
         onAdd={openAdd}
+        instructions={<CardEditorInstructions items={INSTRUCTIONS} />}
       />
       <CardEditorInfoStrip />
 
@@ -156,12 +193,7 @@ export function CountsEditor() {
       <CardListHeading title={LIST_TITLE} count={counts.length} />
 
       {counts.length === 0 && !draft ? (
-        <CardEditorEmptyState
-          title={EMPTY_TITLE}
-          body={EMPTY_BODY}
-          addLabel={ADD_LABEL}
-          onAdd={openAdd}
-        />
+        <CardEditorEmptyState title={EMPTY_MESSAGE} addLabel={ADD_LABEL} onAdd={openAdd} />
       ) : counts.length > 0 ? (
         <CountCardList
           counts={counts}

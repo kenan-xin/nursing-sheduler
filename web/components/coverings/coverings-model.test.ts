@@ -9,6 +9,9 @@ import {
   emptyCoveringForm,
   expandDateRange,
   flattenRefs,
+  isAdvancedCoveringCard,
+  isEditableCoveringCard,
+  reorderByDrop,
   isSelected,
   selectionReachesDayState,
   shiftGroupContainsDayState,
@@ -200,10 +203,38 @@ describe("coveringToForm load round-trip (FR-CV-08)", () => {
     expect(loaded.dates).toEqual([]);
   });
 
+  it("keeps multi-term imported selectors read-only instead of flattening them on edit", () => {
+    const advanced = {
+      ...buildCoveringCard(form({ shiftTypes: ["D"] }), "advanced"),
+      preceptors: [["Anna"], ["Lil"]],
+    };
+    expect(isAdvancedCoveringCard(advanced)).toBe(true);
+    expect(isEditableCoveringCard(advanced)).toBe(false);
+    expect(advanced.preceptors).toEqual([["Anna"], ["Lil"]]);
+  });
+
   it("flattenRefs and summarizeRefs handle nested trees and empties", () => {
     expect(flattenRefs([["A", "B"], "C"])).toEqual(["A", "B", "C"]);
     expect(summarizeRefs([["A", "B"]])).toBe("A, B");
     expect(summarizeRefs([[]])).toBe("(all)");
+  });
+});
+
+describe("pointer-half reorder", () => {
+  const cards = [{ uid: "A" }, { uid: "B" }, { uid: "C" }];
+
+  it("inserts before or after the hovered card without spending a no-op mutation", () => {
+    expect(reorderByDrop(cards, "A", "C", "before").map((card) => card.uid)).toEqual([
+      "B",
+      "A",
+      "C",
+    ]);
+    expect(reorderByDrop(cards, "A", "C", "after").map((card) => card.uid)).toEqual([
+      "B",
+      "C",
+      "A",
+    ]);
+    expect(reorderByDrop(cards, "A", "A", "after")).toEqual(cards);
   });
 });
 

@@ -9,18 +9,27 @@
 // is a transient draft that only touches state through the `useCoverings`
 // operations (one tracked mutation each).
 
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import {
   CardEditorScreen,
   CardEditorHeader,
   CardEditorInfoStrip,
+  CardEditorInstructions,
   CardListHeading,
   CardEditorEmptyState,
+  useCardEditorDraftGuard,
+  useCardEditorStaleGuard,
 } from "@/components/card-editor/card-editor-shell";
+import type { CoveringCard } from "@/lib/scenario";
 import { CoveringForm } from "./covering-form";
 import { CoveringCardList } from "./covering-card-list";
 import { useCoverings } from "./use-coverings";
-import { coveringToForm, emptyCoveringForm, type CoveringFormState } from "./coverings-model";
+import {
+  coveringToForm,
+  emptyCoveringForm,
+  isEditableCoveringCard,
+  type CoveringFormState,
+} from "./coverings-model";
 
 type Draft =
   | { mode: "add"; uid: null; form: CoveringFormState }
@@ -30,15 +39,50 @@ const EYEBROW = "CONSTRAINT · SHIFT TYPE COVERINGS";
 const TITLE = "Shift Type Coverings";
 const SUBTITLE =
   "A separate hard constraint: whenever a preceptee works a chosen shift type, at least one of their preceptors must be on the same shift. Distinct from affinities, which only encourage people to work together.";
-const ADD_LABEL = "Add shift type covering";
-const LIST_TITLE = "Current shift type coverings";
-const EMPTY_TITLE = "No covering rules yet.";
-const EMPTY_BODY = "Add your first covering to define this constraint.";
+const ADD_LABEL = "Add Shift Type Covering";
+const LIST_TITLE = "Current Shift Type Coverings";
+const EMPTY_MESSAGE = 'No covering rules yet. Click "Add Shift Type Covering" to get started.';
+const INSTRUCTIONS = [
+  "Define a shift type covering rule to enforce that whenever someone in Preceptees works the chosen shift, at least one person in Preceptors also works it.",
+  "Pick the Dates this rule applies to. Leave empty to apply to all dates.",
+  "Select Preceptors — these are the senior staff who must cover (e.g. supervising nurses).",
+  "Select Preceptees — these are the people who must be covered (e.g. students, mentees).",
+  "Select the Shift Types this rule applies to (e.g. Day shift).",
+  "Set the Weight. Use 1 (default) for a soft preference or +Infinity (∞) for a hard require the solver cannot violate.",
+  "Use Edit / Duplicate / Delete on a saved rule to manage it. Drag cards to reorder.",
+] as const;
 
 export function CoveringsEditor() {
-  const { state, coverings, add, update, remove, duplicate, move, reorder, setDisabled } =
+  const { state, coverings, add, update, remove, duplicate, move, reorder, setDisabled, getCards } =
     useCoverings();
   const [draft, setDraft] = useState<Draft | null>(null);
+  useCardEditorDraftGuard(!!draft);
+  const { isStale } = useCardEditorStaleGuard<CoveringCard>({
+    cards: coverings,
+    draftOpen: !!draft,
+    readLiveCards: getCards,
+    onStale: () => setDraft(null),
+  });
+  const topRef = useRef<HTMLDivElement>(null);
+  const pendingRestore = useRef<{ el: HTMLElement | null; top: number } | null>(null);
+
+  function scrollContainer(): HTMLElement | null {
+    let el: HTMLElement | null = topRef.current?.parentElement ?? null;
+    while (el) {
+      const overflowY = getComputedStyle(el).overflowY;
+      if (overflowY === "auto" || overflowY === "scroll") return el;
+      el = el.parentElement;
+    }
+    return null;
+  }
+
+  useLayoutEffect(() => {
+    if (draft !== null || pendingRestore.current === null) return;
+    const { el, top } = pendingRestore.current;
+    pendingRestore.current = null;
+    if (el) el.scrollTo({ top, behavior: "instant" });
+    else window.scrollTo({ top, behavior: "instant" });
+  }, [draft]);
 
   function openAdd() {
     // The Add toggle also closes an open draft (spec 11 FR-CV-03).
@@ -47,10 +91,24 @@ export function CoveringsEditor() {
 
   function openEdit(uid: string) {
     const card = coverings.find((c) => c.uid === uid);
-    if (card) setDraft({ mode: "edit", uid, form: coveringToForm(card) });
+    if (!card || !isEditableCoveringCard(card)) return;
+    const scroller = scrollContainer();
+    if (pendingRestore.current === null) {
+      pendingRestore.current = {
+        el: scroller,
+        top: scroller ? scroller.scrollTop : window.scrollY,
+      };
+    }
+    if (scroller) scroller.scrollTo({ top: 0, behavior: "instant" });
+    else window.scrollTo({ top: 0, behavior: "instant" });
+    setDraft({ mode: "edit", uid, form: coveringToForm(card) });
   }
 
   function save(form: CoveringFormState) {
+    if (isStale()) {
+      setDraft(null);
+      return;
+    }
     if (draft?.mode === "edit") update(draft.uid, form);
     else add(form);
     setDraft(null);
@@ -64,6 +122,7 @@ export function CoveringsEditor() {
 
   return (
     <CardEditorScreen screen="Shift Type Coverings">
+      <div ref={topRef} aria-hidden className="sr-only" />
       <CardEditorHeader
         eyebrow={EYEBROW}
         title={TITLE}
@@ -71,6 +130,7 @@ export function CoveringsEditor() {
         addLabel={ADD_LABEL}
         formOpen={!!draft}
         onAdd={openAdd}
+        instructions={<CardEditorInstructions items={INSTRUCTIONS} />}
       />
       <CardEditorInfoStrip />
 
@@ -89,12 +149,7 @@ export function CoveringsEditor() {
       <CardListHeading title={LIST_TITLE} count={coverings.length} />
 
       {coverings.length === 0 && !draft ? (
-        <CardEditorEmptyState
-          title={EMPTY_TITLE}
-          body={EMPTY_BODY}
-          addLabel={ADD_LABEL}
-          onAdd={openAdd}
-        />
+        <CardEditorEmptyState title={EMPTY_MESSAGE} addLabel={ADD_LABEL} onAdd={openAdd} />
       ) : coverings.length > 0 ? (
         <CoveringCardList
           coverings={coverings}
@@ -102,7 +157,9 @@ export function CoveringsEditor() {
           onDuplicate={(uid) => withDraftDismissed(() => duplicate(uid))}
           onDelete={(uid) => withDraftDismissed(() => remove(uid))}
           onMove={(uid, direction) => withDraftDismissed(() => move(uid, direction))}
-          onReorder={(fromUid, toUid) => withDraftDismissed(() => reorder(fromUid, toUid))}
+          onReorder={(fromUid, toUid, position) =>
+            withDraftDismissed(() => reorder(fromUid, toUid, position))
+          }
           onSetDisabled={(uid, value) => withDraftDismissed(() => setDisabled(uid, value))}
         />
       ) : null}

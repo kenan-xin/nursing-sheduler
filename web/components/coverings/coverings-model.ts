@@ -31,6 +31,7 @@ import {
 import type { TransferOption } from "@/components/entity-editor/transfer-list";
 import type { DateScopeOption, DateScopeItem } from "@/components/card-editor/date-scope-field";
 import { deriveDateGroups, generateDateItems } from "@/lib/dates";
+import type { DropPosition } from "@/components/card-editor/card-editor-shell";
 
 /**
  * The single, non-editable weight every covering card serializes with. A covering
@@ -302,6 +303,37 @@ export function coveringToForm(card: CoveringCard): CoveringFormState {
     shiftTypes: flattenRefs<ShiftTypeRef>(card.shiftTypes),
     dates: card.date === undefined ? [] : flattenRefs(card.date),
   };
+}
+
+/** A covering form can author exactly one OR term per selector. Imported cards
+ * with multiple terms carry meaning the flat form cannot represent; keep them
+ * read-only so an edit can never flatten and silently change the constraint. */
+export function isAdvancedCoveringCard(card: CoveringCard): boolean {
+  return (
+    card.preceptors.length !== 1 || card.preceptees.length !== 1 || card.shiftTypes.length !== 1
+  );
+}
+
+export function isEditableCoveringCard(card: CoveringCard): boolean {
+  return !isAdvancedCoveringCard(card);
+}
+
+/** Pointer-half DnD reorder, shared in behavior with the other card editors. */
+export function reorderByDrop<T extends { uid: string }>(
+  list: readonly T[],
+  fromUid: string,
+  toUid: string,
+  position: DropPosition,
+): T[] {
+  const from = list.findIndex((card) => card.uid === fromUid);
+  const to = list.findIndex((card) => card.uid === toUid);
+  if (from === -1 || to === -1 || from === to) return [...list];
+  let insertAt = position === "before" ? to : to + 1;
+  const next = [...list];
+  const [moved] = next.splice(from, 1);
+  if (from < insertAt) insertAt -= 1;
+  next.splice(insertAt, 0, moved);
+  return next;
 }
 
 /** Comma-joined flattened ids for a card summary; empty ⇒ `(all)` (spec 11 FR-CV-19). */

@@ -15,10 +15,13 @@ import {
   CardEditorScreen,
   CardEditorHeader,
   CardEditorInfoStrip,
+  CardEditorInstructions,
   CardListHeading,
   CardEditorEmptyState,
   useCardEditorDraftGuard,
+  useCardEditorStaleGuard,
 } from "@/components/card-editor/card-editor-shell";
+import type { SuccessionCard } from "@/lib/scenario";
 import { SuccessionForm } from "./succession-form";
 import { SuccessionCardList } from "./succession-card-list";
 import { useSuccessions } from "./use-successions";
@@ -37,17 +40,40 @@ const EYEBROW = "CONSTRAINT · SUCCESSIONS";
 const TITLE = "Shift Successions";
 const SUBTITLE =
   "Encourage or forbid one shift type following another for the same person, across an ordered sequence of shift types. Positive weight encourages the pattern, negative discourages it.";
-const ADD_LABEL = "Add succession";
-const LIST_TITLE = "Current successions";
-const EMPTY_TITLE = "No successions defined yet.";
-const EMPTY_BODY = "Add your first succession to define this constraint.";
+const ADD_LABEL = "Add Succession";
+const LIST_TITLE = "Current Successions";
+const EMPTY_MESSAGE = 'No successions defined yet. Click "Add Succession" to get started.';
+const INSTRUCTIONS = [
+  'Define shift type succession preferences (e.g., "Forbid Evening -> Day succession")',
+  "Select one or more people or groups this preference applies to",
+  "Define the pattern of shift types in succession (minimum 2 shift types required)",
+  "Specify specific dates this succession applies to",
+  "Set positive weight to encourage successions and negative weight to discourage them",
+  "Navigate using the tabs or keyboard shortcuts (1, 2, etc.) to continue setup",
+] as const;
 
 export function SuccessionsEditor() {
-  const { state, successions, add, update, remove, duplicate, move, reorder, setDisabled } =
-    useSuccessions();
+  const {
+    state,
+    successions,
+    add,
+    update,
+    remove,
+    duplicate,
+    move,
+    reorder,
+    setDisabled,
+    getCards,
+  } = useSuccessions();
   const [draft, setDraft] = useState<Draft | null>(null);
   // FR-PR-06: arm the shared open-draft navigation guard while a form is visible.
   useCardEditorDraftGuard(!!draft);
+  const { isStale } = useCardEditorStaleGuard<SuccessionCard>({
+    cards: successions,
+    draftOpen: !!draft,
+    readLiveCards: getCards,
+    onStale: () => setDraft(null),
+  });
   // FR-PR-07: starting an edit records the scroll offset (add does not) and scrolls
   // to the top; Save/Cancel of that edit restores the offset. The app shell scrolls
   // an inner `overflow-y-auto` container (not the window), so we operate on the
@@ -106,6 +132,10 @@ export function SuccessionsEditor() {
   }
 
   function save(form: SuccessionFormState) {
+    if (isStale()) {
+      setDraft(null);
+      return;
+    }
     // Closing the draft triggers the layout-effect restore (no synchronous restore —
     // the form must unmount first so the list collapses back to its edit-time height).
     if (draft?.mode === "edit") update(draft.uid, form);
@@ -133,6 +163,7 @@ export function SuccessionsEditor() {
         addLabel={ADD_LABEL}
         formOpen={!!draft}
         onAdd={openAdd}
+        instructions={<CardEditorInstructions items={INSTRUCTIONS} />}
       />
       <CardEditorInfoStrip />
 
@@ -151,12 +182,7 @@ export function SuccessionsEditor() {
       <CardListHeading title={LIST_TITLE} count={successions.length} />
 
       {successions.length === 0 && !draft ? (
-        <CardEditorEmptyState
-          title={EMPTY_TITLE}
-          body={EMPTY_BODY}
-          addLabel={ADD_LABEL}
-          onAdd={openAdd}
-        />
+        <CardEditorEmptyState title={EMPTY_MESSAGE} addLabel={ADD_LABEL} onAdd={openAdd} />
       ) : successions.length > 0 ? (
         <SuccessionCardList
           successions={successions}

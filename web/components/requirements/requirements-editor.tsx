@@ -15,10 +15,13 @@ import {
   CardEditorScreen,
   CardEditorHeader,
   CardEditorInfoStrip,
+  CardEditorInstructions,
   CardListHeading,
   CardEditorEmptyState,
   useCardEditorDraftGuard,
+  useCardEditorStaleGuard,
 } from "@/components/card-editor/card-editor-shell";
+import type { RequirementCard } from "@/lib/scenario";
 import { FaTriangleExclamation } from "@/components/icons";
 import { RequirementForm } from "./requirement-form";
 import { RequirementCardList } from "./requirement-card-list";
@@ -40,10 +43,19 @@ const EYEBROW = "CONSTRAINT · REQUIREMENTS";
 const TITLE = "Staffing Requirements";
 const SUBTITLE =
   "How many qualified people each shift type needs, per date. Set a preferred headcount above the required minimum to make extra staffing a soft goal.";
-const ADD_LABEL = "Add requirement";
-const LIST_TITLE = "Current requirements";
-const EMPTY_TITLE = "No requirements defined yet.";
-const EMPTY_BODY = 'Click "Add Requirement" to get started.';
+const ADD_LABEL = "Add Requirement";
+const LIST_TITLE = "Current Requirements";
+const EMPTY_MESSAGE = 'No requirements defined yet. Click "Add Requirement" to get started.';
+const INSTRUCTIONS = [
+  'Define requirements for specific shift types (e.g., "Night shifts need 3 senior nurses")',
+  "Select one shift type or group that this requirement applies to",
+  "Set the required number of people for each instance of the shift type",
+  "Optionally specify which people or groups are qualified for this requirement",
+  "Optionally set a preferred number of people when extra staffing is useful",
+  "Optionally specify specific dates this requirement applies to",
+  "Set weight only when the preferred number of people differs from the required number",
+  "Navigate using the tabs or keyboard shortcuts (1, 2, etc.) to continue setup",
+] as const;
 
 function CoverageWarningBanner({
   warnings,
@@ -88,11 +100,27 @@ function CoverageWarningBanner({
 }
 
 export function RequirementsEditor() {
-  const { state, requirements, add, update, remove, duplicate, move, reorder, setDisabled } =
-    useRequirements();
+  const {
+    state,
+    requirements,
+    add,
+    update,
+    remove,
+    duplicate,
+    move,
+    reorder,
+    setDisabled,
+    getCards,
+  } = useRequirements();
   const [draft, setDraft] = useState<Draft | null>(null);
   // FR-PR-06: arm the shared open-draft navigation guard while a form is visible.
   useCardEditorDraftGuard(!!draft);
+  const { isStale } = useCardEditorStaleGuard<RequirementCard>({
+    cards: requirements,
+    draftOpen: !!draft,
+    readLiveCards: getCards,
+    onStale: () => setDraft(null),
+  });
   // FR-PR-07: starting an edit records the scroll offset (add does not) and scrolls
   // to the top; Save/Cancel of that edit restores the offset. The app shell scrolls
   // an inner `overflow-y-auto` container (not the window), so we operate on the
@@ -142,6 +170,10 @@ export function RequirementsEditor() {
   }
 
   function save(form: RequirementFormState) {
+    if (isStale()) {
+      setDraft(null);
+      return;
+    }
     if (draft?.mode === "edit") update(draft.uid, form);
     else add(form);
     setDraft(null);
@@ -169,6 +201,7 @@ export function RequirementsEditor() {
         addLabel={ADD_LABEL}
         formOpen={!!draft}
         onAdd={openAdd}
+        instructions={<CardEditorInstructions items={INSTRUCTIONS} />}
       />
       <CardEditorInfoStrip />
       <CoverageWarningBanner warnings={warnings} />
@@ -188,12 +221,7 @@ export function RequirementsEditor() {
       <CardListHeading title={LIST_TITLE} count={requirements.length} />
 
       {requirements.length === 0 && !draft ? (
-        <CardEditorEmptyState
-          title={EMPTY_TITLE}
-          body={EMPTY_BODY}
-          addLabel={ADD_LABEL}
-          onAdd={openAdd}
-        />
+        <CardEditorEmptyState title={EMPTY_MESSAGE} addLabel={ADD_LABEL} onAdd={openAdd} />
       ) : requirements.length > 0 ? (
         <RequirementCardList
           requirements={requirements}

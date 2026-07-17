@@ -28,6 +28,9 @@ function commitCounts(next: CountCard[]) {
 export interface CountsController {
   state: ScenarioUiState;
   counts: CountCard[];
+  /** Read the LIVE counts slice at call time (not a render snapshot) — the stale
+   *  guard keys on its ref-identity change since the draft opened. */
+  getCards: () => CountCard[];
   add: (form: CountFormState) => void;
   update: (uid: string, form: CountFormState) => void;
   remove: (uid: string) => void;
@@ -51,6 +54,7 @@ export function useCounts(): CountsController {
   return {
     state,
     counts,
+    getCards: () => useScenarioStore.getState().cardsByKind.counts,
     add(form) {
       const domain = buildCountShiftTypeDomain(state);
       commitCounts([...counts, buildCountCard(form, domain)]);

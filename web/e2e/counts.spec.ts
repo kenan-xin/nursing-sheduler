@@ -42,7 +42,12 @@ type NsWindow = {
         markSaved: () => void;
       };
       temporal: {
-        getState: () => { pastStates: unknown[]; futureStates: unknown[] };
+        getState: () => {
+          pastStates: unknown[];
+          futureStates: unknown[];
+          undo: () => void;
+          redo: () => void;
+        };
       };
     };
     isDirty: () => boolean;
@@ -835,5 +840,67 @@ test.describe.serial("T12 cold-review fixes (Minor)", () => {
     await page.getByRole("button", { name: "Cancel" }).click();
     await expect(page.getByTestId("card-editor-form")).toHaveCount(0);
     await expect.poll(() => scrollerTop(page)).toBeGreaterThanOrEqual(preEdit - 5);
+  });
+
+  test("temporal change closes an open edit and an immediate stale Save cannot overwrite Redo", async ({
+    page,
+  }) => {
+    await gotoReady(page);
+    await seed(page, BASE_SEED);
+    const original = {
+      uid: "temporal-count",
+      description: "Original",
+      person: ["Aisha"],
+      countDates: ["2026-01-01"],
+      countShiftTypes: ["D"],
+      expression: "x >= T",
+      target: 1,
+      weight: -1,
+    };
+    const redone = { ...original, description: "Redone by temporal change" };
+    await seed(page, {
+      cardsByKind: {
+        requirements: [],
+        successions: [],
+        affinities: [],
+        coverings: [],
+        counts: [original],
+      },
+    });
+    await seed(page, {
+      cardsByKind: {
+        requirements: [],
+        successions: [],
+        affinities: [],
+        coverings: [],
+        counts: [redone],
+      },
+    });
+    await page.evaluate(() =>
+      (window as unknown as NsWindow).__nsStore.scenario.temporal.getState().undo(),
+    );
+    await expect(page.getByTestId("count-card-0")).toContainText("Original");
+
+    const before = await pastCount(page);
+    await page.getByTestId("count-edit-0").click();
+    await page.getByTestId("count-desc").fill("Stale local edit");
+    // Reproduce the render→effect race: Redo and submit occur synchronously in
+    // one task, before React can passively close the stale draft. Require the
+    // Submit control — an optional-chained `?.click()` would silently no-op if it
+    // were missing, letting the passive stale-close alone satisfy the assertions
+    // below and mask a broken synchronous guard (a false green).
+    await page.evaluate(() => {
+      const store = (window as unknown as NsWindow).__nsStore.scenario;
+      store.temporal.getState().redo();
+      const submit = document.querySelector<HTMLElement>('[data-testid="card-editor-submit"]');
+      if (!submit)
+        throw new Error("card-editor-submit not found — cannot exercise the stale Save race");
+      submit.click();
+    });
+
+    await expect(page.getByTestId("card-editor-form")).toHaveCount(0);
+    await expect(page.getByTestId("count-card-0")).toContainText("Redone by temporal change");
+    expect((await readCounts(page))[0].description).toBe("Redone by temporal change");
+    expect(await pastCount(page)).toBe(before + 1); // Redo only; stale Save adds no entry.
   });
 });

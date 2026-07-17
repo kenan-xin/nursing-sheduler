@@ -8,7 +8,14 @@
 
 import { useScenarioStore } from "@/lib/store";
 import type { CoveringCard, ScenarioUiState } from "@/lib/scenario";
-import { buildCoveringCard, withCardDisabled, type CoveringFormState } from "./coverings-model";
+import { getUniqueCopyLabel } from "@/components/entity-editor/core";
+import type { DropPosition } from "@/components/card-editor/card-editor-shell";
+import {
+  buildCoveringCard,
+  reorderByDrop,
+  withCardDisabled,
+  type CoveringFormState,
+} from "./coverings-model";
 
 /** Replace the coverings list in one tracked mutation (fresh refs for history). */
 function commitCoverings(next: CoveringCard[]) {
@@ -20,14 +27,17 @@ function commitCoverings(next: CoveringCard[]) {
 export interface CoveringsController {
   state: ScenarioUiState;
   coverings: CoveringCard[];
+  /** Read the LIVE coverings slice at call time (not a render snapshot) — the
+   *  stale guard keys on its ref-identity change since the draft opened. */
+  getCards: () => CoveringCard[];
   add: (form: CoveringFormState) => void;
   update: (uid: string, form: CoveringFormState) => void;
   remove: (uid: string) => void;
   duplicate: (uid: string) => void;
   /** Swap a card one slot up (-1) or down (+1) — the keyboard-supplement control. */
   move: (uid: string, direction: -1 | 1) => void;
-  /** Move the `from` card to the `to` card's position (the primary DnD control). */
-  reorder: (fromUid: string, toUid: string) => void;
+  /** Move the `from` card relative to the `to` card, honoring the pointer half. */
+  reorder: (fromUid: string, toUid: string, position: DropPosition) => void;
   /** Set the UI-only `disabled` marker (M4). A disabled covering is excluded from
    *  the canonical doc (canonical.ts drops `card.disabled`), so this is one tracked
    *  mutation — one zundo entry, one persisted revision. */
@@ -43,6 +53,7 @@ export function useCoverings(): CoveringsController {
   return {
     state,
     coverings,
+    getCards: () => useScenarioStore.getState().cardsByKind.coverings,
     add(form) {
       commitCoverings([...coverings, buildCoveringCard(form)]);
     },
@@ -67,10 +78,11 @@ export function useCoverings(): CoveringsController {
       const index = coverings.findIndex((card) => card.uid === uid);
       if (index === -1) return;
       const source = coverings[index];
+      const descriptions = coverings.map((card) => card.description ?? "");
       const clone: CoveringCard = {
         ...structuredClone(source),
         uid: crypto.randomUUID(),
-        ...(source.description ? { description: `${source.description} copy` } : {}),
+        description: getUniqueCopyLabel(source.description ?? "", descriptions),
       };
       commitCoverings([...coverings.slice(0, index + 1), clone, ...coverings.slice(index + 1)]);
     },
@@ -82,14 +94,9 @@ export function useCoverings(): CoveringsController {
       [next[index], next[target]] = [next[target], next[index]];
       commitCoverings(next);
     },
-    reorder(fromUid, toUid) {
-      const from = coverings.findIndex((card) => card.uid === fromUid);
-      const to = coverings.findIndex((card) => card.uid === toUid);
-      if (from === -1 || to === -1 || from === to) return;
-      const next = [...coverings];
-      const [moved] = next.splice(from, 1);
-      next.splice(to, 0, moved);
-      commitCoverings(next);
+    reorder(fromUid, toUid, position) {
+      const next = reorderByDrop(coverings, fromUid, toUid, position);
+      if (next.some((card, index) => card.uid !== coverings[index].uid)) commitCoverings(next);
     },
     setDisabled(uid, value) {
       commitCoverings(

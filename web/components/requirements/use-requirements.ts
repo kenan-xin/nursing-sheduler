@@ -29,6 +29,9 @@ function commitRequirements(next: RequirementCard[]) {
 export interface RequirementsController {
   state: ScenarioUiState;
   requirements: RequirementCard[];
+  /** Read the LIVE requirements slice at call time (not a render snapshot) — the
+   *  stale guard keys on its ref-identity change since the draft opened. */
+  getCards: () => RequirementCard[];
   add: (form: RequirementFormState) => void;
   update: (uid: string, form: RequirementFormState) => void;
   remove: (uid: string) => void;
@@ -52,6 +55,7 @@ export function useRequirements(): RequirementsController {
   return {
     state,
     requirements,
+    getCards: () => useScenarioStore.getState().cardsByKind.requirements,
     add(form) {
       const domain = buildRequirementShiftTypeDomain(state);
       commitRequirements([...requirements, buildRequirementCard(form, domain)]);

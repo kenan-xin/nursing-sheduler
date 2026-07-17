@@ -14,10 +14,13 @@ import {
   CardEditorScreen,
   CardEditorHeader,
   CardEditorInfoStrip,
+  CardEditorInstructions,
   CardListHeading,
   CardEditorEmptyState,
   useCardEditorDraftGuard,
+  useCardEditorStaleGuard,
 } from "@/components/card-editor/card-editor-shell";
+import type { AffinityCard } from "@/lib/scenario";
 import { AffinityForm } from "./affinity-form";
 import { AffinityCardList } from "./affinity-card-list";
 import { useAffinities } from "./use-affinities";
@@ -36,17 +39,41 @@ const EYEBROW = "CONSTRAINT · AFFINITIES";
 const TITLE = "Shift Affinities";
 const SUBTITLE =
   "Encourage or discourage groups of people working the same shift together. For enforced preceptor supervision, use Shift type coverings instead.";
-const ADD_LABEL = "Add affinity";
+const ADD_LABEL = "Add Shift Affinity";
 const LIST_TITLE = "Current Shift Affinities";
-const EMPTY_TITLE = "No shift affinities defined yet.";
-const EMPTY_BODY = 'Click "Add Shift Affinity" to get started.';
+const EMPTY_MESSAGE = 'No shift affinities defined yet. Click "Add Shift Affinity" to get started.';
+const INSTRUCTIONS = [
+  "Define shift affinity preferences to encourage or discourage people working together",
+  "Select the dates when this affinity rule applies",
+  "Select the first group of people (People 1)",
+  "Select the second group of people (People 2)",
+  "Select which shift types this affinity applies to",
+  "Set positive weight to encourage working together and negative weight to discourage it",
+  "Navigate using the tabs or keyboard shortcuts (1, 2, etc.) to continue setup",
+] as const;
 
 export function AffinitiesEditor() {
-  const { state, affinities, add, update, remove, duplicate, move, reorder, setDisabled } =
-    useAffinities();
+  const {
+    state,
+    affinities,
+    add,
+    update,
+    remove,
+    duplicate,
+    move,
+    reorder,
+    setDisabled,
+    getCards,
+  } = useAffinities();
   const [draft, setDraft] = useState<Draft | null>(null);
   // FR-PR-06: arm the shared open-draft navigation guard while a form is visible.
   useCardEditorDraftGuard(!!draft);
+  const { isStale } = useCardEditorStaleGuard<AffinityCard>({
+    cards: affinities,
+    draftOpen: !!draft,
+    readLiveCards: getCards,
+    onStale: () => setDraft(null),
+  });
   // FR-PR-07: starting an edit records the scroll offset (add does not) and scrolls
   // to the top; Save/Cancel of that edit restores the offset. The app shell scrolls
   // an inner `overflow-y-auto` container (not the window), so we operate on the
@@ -105,6 +132,10 @@ export function AffinitiesEditor() {
   }
 
   function save(form: AffinityFormState) {
+    if (isStale()) {
+      setDraft(null);
+      return;
+    }
     // Closing the draft triggers the layout-effect restore (no synchronous restore —
     // the form must unmount first so the list collapses back to its edit-time height).
     if (draft?.mode === "edit") update(draft.uid, form);
@@ -132,6 +163,7 @@ export function AffinitiesEditor() {
         addLabel={ADD_LABEL}
         formOpen={!!draft}
         onAdd={openAdd}
+        instructions={<CardEditorInstructions items={INSTRUCTIONS} />}
       />
       <CardEditorInfoStrip />
 
@@ -150,12 +182,7 @@ export function AffinitiesEditor() {
       <CardListHeading title={LIST_TITLE} count={affinities.length} />
 
       {affinities.length === 0 && !draft ? (
-        <CardEditorEmptyState
-          title={EMPTY_TITLE}
-          body={EMPTY_BODY}
-          addLabel={ADD_LABEL}
-          onAdd={openAdd}
-        />
+        <CardEditorEmptyState title={EMPTY_MESSAGE} addLabel={ADD_LABEL} onAdd={openAdd} />
       ) : affinities.length > 0 ? (
         <AffinityCardList
           affinities={affinities}

@@ -28,6 +28,9 @@ function commitAffinities(next: AffinityCard[]) {
 export interface AffinitiesController {
   state: ScenarioUiState;
   affinities: AffinityCard[];
+  /** Read the LIVE affinities slice at call time (not a render snapshot) — the
+   *  stale guard keys on its ref-identity change since the draft opened. */
+  getCards: () => AffinityCard[];
   add: (form: AffinityFormState) => void;
   update: (uid: string, form: AffinityFormState) => void;
   remove: (uid: string) => void;
@@ -51,6 +54,7 @@ export function useAffinities(): AffinitiesController {
   return {
     state,
     affinities,
+    getCards: () => useScenarioStore.getState().cardsByKind.affinities,
     add(form) {
       commitAffinities([...affinities, buildAffinityCard(form)]);
     },
