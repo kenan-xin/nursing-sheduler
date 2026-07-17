@@ -44,6 +44,13 @@ import {
   type ContractedErrors,
   type ContractedFormState,
 } from "./contracted-model";
+import {
+  applyContractedRefresh,
+  deriveContractedRefresh,
+  type RefreshCategory,
+  type RefreshPreview,
+  type RefreshRow,
+} from "./refresh-model";
 import { formatHalfHours, parseHalfHours, parseRawHalfHours } from "./half-hour-codec";
 
 interface ContractedFormProps {
@@ -242,6 +249,121 @@ function SolverDetails({
   );
 }
 
+/** Human labels + copy for each Refresh preview category, in display order. */
+const REFRESH_CATEGORIES: { key: RefreshCategory; label: string; hint: string }[] = [
+  { key: "added", label: "Added", hint: "Filled in from the shift's working time." },
+  { key: "changed", label: "Changed", hint: "Replaces the current manual value." },
+  { key: "unchanged", label: "Unchanged", hint: "Already matches the derived value." },
+  {
+    key: "non-derivable",
+    label: "Non-derivable",
+    hint: "No valid working time — the existing value is kept; enter one manually.",
+  },
+  { key: "removed", label: "Removed", hint: "No longer a selected shift type — dropped." },
+];
+
+/** One previewed value as display text: the derived coefficient, or the kept manual
+ *  value for a non-derivable/removed row (blank ⇒ an em-dash placeholder). */
+function refreshRowValueText(row: RefreshRow): string {
+  if (row.derived !== null) return String(row.derived);
+  return row.current === "" ? "—" : `${row.current} (kept)`;
+}
+
+/**
+ * The Refresh-from-Shift-Types preview: a non-mutating panel that categorizes every
+ * concrete coefficient id against its Shift-Type-derived value (added / changed /
+ * unchanged / non-derivable / removed). Confirm applies the derivation to the draft;
+ * Cancel dismisses it without applying anything. Explicit-only — it never runs on
+ * mount or selector change.
+ */
+function RefreshPanel({
+  preview,
+  onConfirm,
+  onCancel,
+}: {
+  preview: RefreshPreview;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div
+      className="flex flex-col gap-3 border border-line2 bg-panel p-3.5"
+      data-testid="contracted-refresh-preview"
+    >
+      <span className="text-label font-semibold uppercase tracking-[0.03em] text-ink2">
+        Refresh preview
+      </span>
+      {REFRESH_CATEGORIES.map(({ key, label, hint }) => {
+        const rows = preview.rows.filter((row) => row.category === key);
+        if (rows.length === 0) return null;
+        return (
+          <div
+            key={key}
+            className="flex flex-col gap-1.5"
+            data-testid={`contracted-refresh-${key}`}
+          >
+            <span className="text-label font-semibold text-ink3">
+              {label} ({rows.length})
+            </span>
+            <span className="text-meta italic text-ink3">{hint}</span>
+            <div className="flex flex-wrap gap-2">
+              {rows.map((row) => (
+                <span
+                  key={row.id}
+                  className="border border-line2 px-2 py-1 font-mono text-meta text-ink"
+                  data-testid={`contracted-refresh-row-${row.id}`}
+                  data-category={row.category}
+                >
+                  {row.id}: {refreshRowValueText(row)}
+                </span>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+      {preview.unresolved.length > 0 && (
+        <div className="flex flex-col gap-1.5" data-testid="contracted-refresh-unresolved">
+          <span className="text-label font-semibold text-ink3">
+            Non-derivable — unresolved ({preview.unresolved.length})
+          </span>
+          <span className="text-meta italic text-ink3">
+            These selected shift types can&apos;t be resolved — fix the selection.
+          </span>
+          <div className="flex flex-wrap gap-2">
+            {preview.unresolved.map((id) => (
+              <span
+                key={id}
+                className="border border-warn px-2 py-1 font-mono text-meta text-warn"
+                data-testid={`contracted-refresh-unresolved-${id}`}
+              >
+                {id}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+      <div className="flex gap-2">
+        <button
+          type="button"
+          data-testid="contracted-refresh-confirm"
+          onClick={onConfirm}
+          className="border border-brand bg-brand px-3.5 py-2 text-meta font-semibold text-brandink"
+        >
+          Confirm
+        </button>
+        <button
+          type="button"
+          data-testid="contracted-refresh-cancel"
+          onClick={onCancel}
+          className="border border-line2 px-3.5 py-2 text-meta font-semibold text-ink2 hover:bg-panel"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function ContractedForm({
   state,
   mode,
@@ -251,11 +373,16 @@ export function ContractedForm({
 }: ContractedFormProps) {
   const [form, setForm] = useState<ContractedFormState>(initialForm);
   const [errors, setErrors] = useState<ContractedErrors>({});
+  // The pending Refresh preview (M2a-5). Non-null only between an explicit Refresh
+  // click and its Confirm/Cancel — the derivation NEVER runs on mount or selector
+  // change, and Confirm is the only path that mutates the draft's coefficients.
+  const [refreshPreview, setRefreshPreview] = useState<RefreshPreview | null>(null);
 
   // A fresh draft (add vs edit-of-another-card) resets the local state.
   useEffect(() => {
     setForm(initialForm);
     setErrors({});
+    setRefreshPreview(null);
   }, [initialForm]);
 
   const people = buildPeopleTransferOptions(state);
@@ -472,6 +599,9 @@ export function ContractedForm({
               const cleared = clearCoefficientErrors(prev);
               return cleared.countShiftTypes ? { ...cleared, countShiftTypes: undefined } : cleared;
             });
+            // A pending preview was derived against the OLD selection — dismiss it so
+            // Confirm can never apply a stale derivation to the new concrete domain.
+            setRefreshPreview(null);
           }}
           itemLabel="SHIFT TYPES"
           searchPlaceholder="Search shift types"
@@ -508,8 +638,41 @@ export function ContractedForm({
         onChange={(next) => {
           setForm((prev) => ({ ...prev, countShiftTypeCoefficients: next }));
           setErrors((prev) => clearCoefficientErrors(prev));
+          // A pending preview was derived against the pre-edit coefficients; dismiss
+          // it so a stale snapshot can never be Confirmed over the manual edit.
+          setRefreshPreview(null);
         }}
       />
+
+      {form.countShiftTypes.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <div>
+            <button
+              type="button"
+              data-testid="contracted-refresh-button"
+              onClick={() => setRefreshPreview(deriveContractedRefresh(form, state))}
+              className="border border-line2 px-3.5 py-2 text-meta font-semibold text-ink2 hover:bg-panel"
+            >
+              Refresh from Shift Types
+            </button>
+            <p className="mt-1 text-meta italic text-ink3">
+              Preview coefficients derived from each shift&apos;s working time (LEAVE credited at{" "}
+              8h). Nothing changes until you Confirm.
+            </p>
+          </div>
+          {refreshPreview && (
+            <RefreshPanel
+              preview={refreshPreview}
+              onConfirm={() => {
+                setForm((prev) => applyContractedRefresh(prev, refreshPreview));
+                setErrors((prev) => clearCoefficientErrors(prev));
+                setRefreshPreview(null);
+              }}
+              onCancel={() => setRefreshPreview(null)}
+            />
+          )}
+        </div>
+      )}
 
       <FieldShell label="Count dates" required error={errors.countDates}>
         {noDates ? (

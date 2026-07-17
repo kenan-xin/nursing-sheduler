@@ -894,6 +894,113 @@ test.describe.serial("T12 M2a-4 Convert ↔ generic", () => {
   });
 });
 
+// D is worked 8h (durationMinutes 480 → 16 half-hours); W has NO working time so it
+// is non-derivable and must be authored manually.
+const REFRESH_SEED = {
+  rangeStart: "2026-01-01",
+  rangeEnd: "2026-01-31",
+  staff: [{ id: "Aisha", history: [] }],
+  shifts: [{ id: "D", durationMinutes: 480 }, { id: "W" }],
+};
+
+test.describe.serial("T12 M2a-5 Refresh from Shift Types", () => {
+  test.beforeEach(async ({ page }, testInfo) => {
+    testInfo.setTimeout(30_000);
+    await page.addInitScript(() => {
+      (window as unknown as { __NS_ENABLE_TEST_BRIDGE?: boolean }).__NS_ENABLE_TEST_BRIDGE = true;
+    });
+  });
+
+  test("Refresh previews derived coefficients; Confirm fills them and saves; a shift without working time is non-derivable; Refresh never fires without the click", async ({
+    page,
+  }) => {
+    await gotoReady(page);
+    await seed(page, REFRESH_SEED);
+
+    await page.getByTestId("add-contracted-toggle").click();
+    await expect(page.getByTestId("card-editor-form")).toBeVisible();
+    await page.getByTestId("contracted-desc").fill("Full-time contract");
+    await page.getByTestId("contracted-target-exact").fill("160h");
+    await page.getByRole("button", { name: "Add Aisha to people" }).click();
+    await page.getByRole("button", { name: "Add D to count shift types" }).click();
+    await page.getByRole("button", { name: "Add W to count shift types" }).click();
+    await page
+      .getByTestId("date-scope-field")
+      .getByRole("button", { name: /all dates/i })
+      .click();
+
+    // Refresh NEVER fires without the click: no preview, coefficients still blank.
+    await expect(page.getByTestId("contracted-refresh-preview")).toHaveCount(0);
+    await expect(page.getByTestId("contracted-coefficient-fields-input-D")).toHaveValue("");
+
+    // Explicit Refresh previews the derivation without mutating the draft.
+    await page.getByTestId("contracted-refresh-button").click();
+    await expect(page.getByTestId("contracted-refresh-preview")).toBeVisible();
+    // D (8h) is an "added" row deriving to 16; W (no working time) is non-derivable.
+    await expect(page.getByTestId("contracted-refresh-row-D")).toContainText("16");
+    await expect(page.getByTestId("contracted-refresh-row-D")).toHaveAttribute(
+      "data-category",
+      "added",
+    );
+    await expect(page.getByTestId("contracted-refresh-row-W")).toHaveAttribute(
+      "data-category",
+      "non-derivable",
+    );
+    // The draft coefficient is still blank — the preview mutates nothing.
+    await expect(page.getByTestId("contracted-coefficient-fields-input-D")).toHaveValue("");
+
+    // Confirm applies the derivation into the OPEN DRAFT and closes the preview.
+    await page.getByTestId("contracted-refresh-confirm").click();
+    await expect(page.getByTestId("contracted-refresh-preview")).toHaveCount(0);
+    await expect(page.getByTestId("contracted-coefficient-fields-input-D")).toHaveValue("16");
+    // The non-derivable W is left blank for a manual value.
+    await expect(page.getByTestId("contracted-coefficient-fields-input-W")).toHaveValue("");
+
+    // Supplying W manually completes coverage; the whole flow is ONE tracked mutation
+    // (the save) — Refresh + Confirm are in-draft only and commit nothing.
+    await page.getByTestId("contracted-coefficient-fields-input-W").fill("16");
+    const before = await pastCount(page);
+    await page.getByTestId("card-editor-submit").click();
+    await expect(page.getByTestId("count-card-0")).toBeVisible();
+    expect((await pastCount(page)) - before).toBe(1);
+
+    const cards = await readCounts(page);
+    expect(cards[0].tag).toBe("contracted_hours");
+    expect(cards[0].countShiftTypeCoefficients).toEqual([
+      ["D", 16],
+      ["W", 16],
+    ]);
+  });
+
+  test("Cancel on the Refresh preview applies nothing (the manual value survives, no mutation)", async ({
+    page,
+  }) => {
+    await gotoReady(page);
+    await seed(page, REFRESH_SEED);
+
+    await page.getByTestId("add-contracted-toggle").click();
+    await page.getByRole("button", { name: "Add Aisha to people" }).click();
+    await page.getByRole("button", { name: "Add D to count shift types" }).click();
+
+    // A manual coefficient the derivation would replace (D derives to 16).
+    await page.getByTestId("contracted-coefficient-fields-input-D").fill("10");
+    const before = await pastCount(page);
+
+    await page.getByTestId("contracted-refresh-button").click();
+    await expect(page.getByTestId("contracted-refresh-row-D")).toHaveAttribute(
+      "data-category",
+      "changed",
+    );
+
+    // Cancel dismisses the preview and applies NOTHING — the manual 10 is untouched
+    // and no scenario mutation was committed.
+    await page.getByTestId("contracted-refresh-cancel").click();
+    await expect(page.getByTestId("contracted-refresh-preview")).toHaveCount(0);
+    await expect(page.getByTestId("contracted-coefficient-fields-input-D")).toHaveValue("10");
+    expect(await pastCount(page)).toBe(before);
+  });
+});
+
 test.describe.serial("T12 ALL date scope (allValue=['ALL']) round-trip", () => {
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(() => {
