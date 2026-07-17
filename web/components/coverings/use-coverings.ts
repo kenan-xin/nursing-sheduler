@@ -1,0 +1,100 @@
+"use client";
+
+// Store binding for the coverings editor (T13). Reads the covering cards from the
+// durable scenario slice and exposes CRUD + reorder as operations that each apply
+// exactly one `mutateScenario` patch — so every op is one zundo/undo entry and one
+// persisted revision (T04 store discipline). All logic lives in `coverings-model`;
+// this hook is only the store glue.
+
+import { useScenarioStore } from "@/lib/store";
+import type { CoveringCard, ScenarioUiState } from "@/lib/scenario";
+import { buildCoveringCard, withCardDisabled, type CoveringFormState } from "./coverings-model";
+
+/** Replace the coverings list in one tracked mutation (fresh refs for history). */
+function commitCoverings(next: CoveringCard[]) {
+  useScenarioStore.getState().mutateScenario((state) => ({
+    cardsByKind: { ...state.cardsByKind, coverings: next },
+  }));
+}
+
+export interface CoveringsController {
+  state: ScenarioUiState;
+  coverings: CoveringCard[];
+  add: (form: CoveringFormState) => void;
+  update: (uid: string, form: CoveringFormState) => void;
+  remove: (uid: string) => void;
+  duplicate: (uid: string) => void;
+  /** Swap a card one slot up (-1) or down (+1) — the keyboard-supplement control. */
+  move: (uid: string, direction: -1 | 1) => void;
+  /** Move the `from` card to the `to` card's position (the primary DnD control). */
+  reorder: (fromUid: string, toUid: string) => void;
+  /** Set the UI-only `disabled` marker (M4). A disabled covering is excluded from
+   *  the canonical doc (canonical.ts drops `card.disabled`), so this is one tracked
+   *  mutation — one zundo entry, one persisted revision. */
+  setDisabled: (uid: string, value: boolean) => void;
+}
+
+export function useCoverings(): CoveringsController {
+  // The durable store state is a superset of `ScenarioUiState`, so it satisfies
+  // the pure model's input directly.
+  const state: ScenarioUiState = useScenarioStore((s) => s);
+  const coverings = useScenarioStore((s) => s.cardsByKind.coverings);
+
+  return {
+    state,
+    coverings,
+    add(form) {
+      commitCoverings([...coverings, buildCoveringCard(form)]);
+    },
+    update(uid, form) {
+      // Preserve the card's identity (uid) so it stays the same row on replace,
+      // AND carry forward its UI markers (`disabled`/`applied`). Only the dedicated
+      // Enable/Disable action changes `disabled`; an edit-save must NOT silently
+      // re-enable a covering the user turned off — canonical.ts drops disabled
+      // coverings, so losing the marker would change solver input (cold-review M1).
+      const source = coverings.find((card) => card.uid === uid);
+      const rebuilt = buildCoveringCard(form, uid);
+      const markers: Pick<CoveringCard, "disabled" | "applied"> = {};
+      if (source?.disabled) markers.disabled = true;
+      if (source?.applied) markers.applied = true;
+      const next = markers.disabled || markers.applied ? { ...rebuilt, ...markers } : rebuilt;
+      commitCoverings(coverings.map((card) => (card.uid === uid ? next : card)));
+    },
+    remove(uid) {
+      commitCoverings(coverings.filter((card) => card.uid !== uid));
+    },
+    duplicate(uid) {
+      const index = coverings.findIndex((card) => card.uid === uid);
+      if (index === -1) return;
+      const source = coverings[index];
+      const clone: CoveringCard = {
+        ...structuredClone(source),
+        uid: crypto.randomUUID(),
+        ...(source.description ? { description: `${source.description} copy` } : {}),
+      };
+      commitCoverings([...coverings.slice(0, index + 1), clone, ...coverings.slice(index + 1)]);
+    },
+    move(uid, direction) {
+      const index = coverings.findIndex((card) => card.uid === uid);
+      const target = index + direction;
+      if (index === -1 || target < 0 || target >= coverings.length) return;
+      const next = [...coverings];
+      [next[index], next[target]] = [next[target], next[index]];
+      commitCoverings(next);
+    },
+    reorder(fromUid, toUid) {
+      const from = coverings.findIndex((card) => card.uid === fromUid);
+      const to = coverings.findIndex((card) => card.uid === toUid);
+      if (from === -1 || to === -1 || from === to) return;
+      const next = [...coverings];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      commitCoverings(next);
+    },
+    setDisabled(uid, value) {
+      commitCoverings(
+        coverings.map((card) => (card.uid === uid ? withCardDisabled(card, value) : card)),
+      );
+    },
+  };
+}

@@ -1,12 +1,9 @@
-import { PlaceholderScreen } from "@/components/shell/placeholder-screen";
-import { FaChalkboardUser } from "@/components/icons";
+// Shift Type Coverings screen (T13, spec 11) — replaces the T08 placeholder.
+// The editor is a client component (it binds the durable scenario store); this
+// route module just mounts it.
+
+import { CoveringsEditor } from "@/components/coverings/coverings-editor";
 
 export default function ShiftTypeCoveringsPage() {
-  return (
-    <PlaceholderScreen
-      title="Shift Type Coverings"
-      description="Model preceptor supervision across shift types."
-      icon={FaChalkboardUser}
-    />
-  );
+  return <CoveringsEditor />;
 }
