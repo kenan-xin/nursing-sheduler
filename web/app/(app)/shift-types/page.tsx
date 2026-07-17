@@ -1,12 +1,8 @@
-import { PlaceholderScreen } from "@/components/shell/placeholder-screen";
-import { FaClock } from "@/components/icons";
+"use client";
+
+import { EntityEditor } from "@/components/entity-editor/entity-editor";
+import { shiftTypesDescriptor } from "@/components/shift-types/shift-types-descriptor";
 
 export default function ShiftTypesPage() {
-  return (
-    <PlaceholderScreen
-      title="Shift Types"
-      description="Define shift types, their hours, and qualifications."
-      icon={FaClock}
-    />
-  );
+  return <EntityEditor descriptor={shiftTypesDescriptor} />;
 }

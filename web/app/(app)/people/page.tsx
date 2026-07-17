@@ -1,12 +1,8 @@
-import { PlaceholderScreen } from "@/components/shell/placeholder-screen";
-import { FaUsers } from "@/components/icons";
+"use client";
+
+import { EntityEditor } from "@/components/entity-editor/entity-editor";
+import { peopleDescriptor } from "@/components/people/people-descriptor";
 
 export default function PeoplePage() {
-  return (
-    <PlaceholderScreen
-      title="People"
-      description="Manage the nurses and people groups in the roster."
-      icon={FaUsers}
-    />
-  );
+  return <EntityEditor descriptor={peopleDescriptor} />;
 }
