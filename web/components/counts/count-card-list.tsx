@@ -26,7 +26,6 @@ import {
   describeCountExpressionTarget,
   isAdvancedCountCard,
   isContractedHoursCard,
-  isEditableCountCard,
   summarizeRefs,
 } from "./counts-model";
 
@@ -77,7 +76,10 @@ export function CountCardList({
       {counts.map((card, index) => {
         const contractedHours = isContractedHoursCard(card);
         const advanced = isAdvancedCountCard(card);
-        const editable = isEditableCountCard(card);
+        // An ordinary card edits in the scalar form; a contracted card routes to the
+        // guided contracted editor (M2a-2). Only the unmarked advanced-array card
+        // (FR-PR-55a) stays read-only here — YAML is its only edit path.
+        const showEdit = !advanced;
         const coefficients = card.countShiftTypeCoefficients ?? [];
 
         return (
@@ -144,7 +146,7 @@ export function CountCardList({
                 >
                   {card.disabled ? "Enable" : "Disable"}
                 </CardActionButton>
-                {editable ? (
+                {showEdit ? (
                   <CardActionButton
                     icon={<FaPen className="size-3" />}
                     onClick={() => onEdit(card.uid)}

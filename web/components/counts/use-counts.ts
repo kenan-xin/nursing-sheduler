@@ -17,6 +17,7 @@ import {
   withCardDisabled,
   type CountFormState,
 } from "./counts-model";
+import { buildContractedCard, type ContractedFormState } from "./contracted-model";
 
 /** Replace the counts list in one tracked mutation (fresh refs for history). */
 function commitCounts(next: CountCard[]) {
@@ -33,6 +34,11 @@ export interface CountsController {
   getCards: () => CountCard[];
   add: (form: CountFormState) => void;
   update: (uid: string, form: CountFormState) => void;
+  /** Author a MARKED contracted-hours card (M2a-2) — one tracked mutation. */
+  addContracted: (form: ContractedFormState) => void;
+  /** Replace a contracted-hours card, preserving its uid + `disabled`/`applied`
+   *  markers exactly like the ordinary {@link CountsController.update} path. */
+  updateContracted: (uid: string, form: ContractedFormState) => void;
   remove: (uid: string) => void;
   duplicate: (uid: string) => void;
   /** Swap a card one slot up (-1) or down (+1) — the keyboard-supplement control. */
@@ -67,6 +73,23 @@ export function useCounts(): CountsController {
       const domain = buildCountShiftTypeDomain(state);
       const source = counts.find((card) => card.uid === uid);
       const rebuilt = buildCountCard(form, domain, uid);
+      const markers: Pick<CountCard, "disabled" | "applied"> = {};
+      if (source?.disabled) markers.disabled = true;
+      if (source?.applied) markers.applied = true;
+      const next = markers.disabled || markers.applied ? { ...rebuilt, ...markers } : rebuilt;
+      commitCounts(counts.map((card) => (card.uid === uid ? next : card)));
+    },
+    addContracted(form) {
+      const domain = buildCountShiftTypeDomain(state);
+      commitCounts([...counts, buildContractedCard(form, domain)]);
+    },
+    updateContracted(uid, form) {
+      // Same identity/marker discipline as the ordinary update: preserve the uid so
+      // the row is replaced in place, and carry forward `disabled`/`applied` — an
+      // edit-save must never silently re-enable a card the user turned off.
+      const domain = buildCountShiftTypeDomain(state);
+      const source = counts.find((card) => card.uid === uid);
+      const rebuilt = buildContractedCard(form, domain, uid);
       const markers: Pick<CountCard, "disabled" | "applied"> = {};
       if (source?.disabled) markers.disabled = true;
       if (source?.applied) markers.applied = true;

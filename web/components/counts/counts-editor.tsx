@@ -27,26 +27,39 @@ import {
   useCardEditorStaleGuard,
 } from "@/components/card-editor/card-editor-shell";
 import { CountForm } from "./count-form";
+import { ContractedForm } from "./contracted-form";
 import { CountCardList } from "./count-card-list";
 import { useCounts } from "./use-counts";
 import {
   countToForm,
   buildCountShiftTypeDomain,
   emptyCountForm,
+  isContractedHoursCard,
   isEditableCountCard,
   type CountFormState,
 } from "./counts-model";
+import {
+  emptyContractedForm,
+  toContractedForm,
+  type ContractedFormState,
+} from "./contracted-model";
 import type { CountCard } from "@/lib/scenario";
 
+// A `kind` tag distinguishes the ordinary scalar draft from the guided
+// contracted-hours draft so the right form renders and Save routes to the right
+// store op. Each variant still carries the add/edit mode + uid.
 type Draft =
-  | { mode: "add"; uid: null; form: CountFormState }
-  | { mode: "edit"; uid: string; form: CountFormState };
+  | { kind: "ordinary"; mode: "add"; uid: null; form: CountFormState }
+  | { kind: "ordinary"; mode: "edit"; uid: string; form: CountFormState }
+  | { kind: "contracted"; mode: "add"; uid: null; form: ContractedFormState }
+  | { kind: "contracted"; mode: "edit"; uid: string; form: ContractedFormState };
 
 const EYEBROW = "CONSTRAINT · SHIFT COUNTS";
 const TITLE = "Shift Counts";
 const SUBTITLE =
   "Targets for how many of a shift type each person works over a set of dates — including a monthly contracted-hours target, where each worked shift and paid-leave day contributes its coefficient. Positive weight encourages, negative discourages.";
 const ADD_LABEL = "Add Shift Count";
+const ADD_CONTRACTED_LABEL = "Add Contracted Hours";
 const LIST_TITLE = "Current Shift Counts";
 const EMPTY_MESSAGE =
   "No shift counts defined yet. Add a Shift Count or Contracted Hours rule to get started.";
@@ -64,8 +77,20 @@ const INSTRUCTIONS = [
 ] as const;
 
 export function CountsEditor() {
-  const { state, counts, add, update, remove, duplicate, move, reorder, setDisabled, getCards } =
-    useCounts();
+  const {
+    state,
+    counts,
+    add,
+    update,
+    addContracted,
+    updateContracted,
+    remove,
+    duplicate,
+    move,
+    reorder,
+    setDisabled,
+    getCards,
+  } = useCounts();
   const [draft, setDraft] = useState<Draft | null>(null);
   // FR-PR-06: arm the shared open-draft navigation guard while a form is visible.
   useCardEditorDraftGuard(!!draft);
@@ -111,17 +136,39 @@ export function CountsEditor() {
     else window.scrollTo({ top, behavior: "instant" });
   }, [draft]);
 
+  // The Add toggles also close an open draft (spec 05 FR-PR-01/03) and neither
+  // records/restores scroll (FR-PR-07). Clicking a button whose own kind of form is
+  // open closes it; clicking it while the OTHER kind is open switches to this kind.
   function openAdd() {
-    // The Add toggle also closes an open draft (spec 05 FR-PR-01/03). Add does not
-    // save/restore scroll (FR-PR-07).
-    setDraft(draft ? null : { mode: "add", uid: null, form: emptyCountForm() });
+    setDraft(
+      draft?.kind === "ordinary"
+        ? null
+        : { kind: "ordinary", mode: "add", uid: null, form: emptyCountForm() },
+    );
+  }
+
+  function openAddContracted() {
+    setDraft(
+      draft?.kind === "contracted"
+        ? null
+        : { kind: "contracted", mode: "add", uid: null, form: emptyContractedForm() },
+    );
   }
 
   function openEdit(uid: string) {
     const card = counts.find((c) => c.uid === uid);
-    // A contracted-hours (M2) or unmarked generic-array (FR-PR-55a) card is never
-    // openable here — the list omits its Edit button, so this is a defensive guard.
-    if (!card || !isEditableCountCard(card)) return;
+    if (!card) return;
+    // Resolve the draft BEFORE touching scroll state: an unmarked generic-array
+    // (FR-PR-55a) card has no editor here (the list omits its Edit button — this is
+    // a defensive guard), so it must not leave a dangling scroll-restore behind.
+    const domain = buildCountShiftTypeDomain(state);
+    let next: Draft | null = null;
+    if (isContractedHoursCard(card)) {
+      next = { kind: "contracted", mode: "edit", uid, form: toContractedForm(card, domain) };
+    } else if (isEditableCountCard(card)) {
+      next = { kind: "ordinary", mode: "edit", uid, form: countToForm(card, domain) };
+    }
+    if (!next) return;
     // Record the pre-edit offset ONCE (an edit→edit switch keeps the original), then
     // scroll to the top so the form is in view. Restore happens on close.
     const scroller = scrollContainer();
@@ -133,24 +180,32 @@ export function CountsEditor() {
     }
     if (scroller) scroller.scrollTo({ top: 0, behavior: "instant" });
     else window.scrollTo({ top: 0, behavior: "instant" });
-    const domain = buildCountShiftTypeDomain(state);
-    setDraft({ mode: "edit", uid, form: countToForm(card, domain) });
+    setDraft(next);
   }
 
-  function save(form: CountFormState) {
-    // Synchronous stale-Save guard: if the cards slice changed since this draft
-    // opened (temporal travel / external cascade), abort the write entirely — no
-    // commit, no history entry — and let the close-on-external effect dismiss
-    // the draft. Self-Save is never stale: drafts don't mutate the live slice, so
-    // the token is still the form-open ref until this very commit.
+  // Synchronous stale-Save guard shared by both forms: if the cards slice changed
+  // since this draft opened (temporal travel / external cascade), abort the write
+  // entirely — no commit, no history entry — and let the close-on-external effect
+  // dismiss the draft. Self-Save is never stale: drafts don't mutate the live slice.
+  function saveOrdinary(form: CountFormState) {
     if (isStale()) {
       setDraft(null);
       return;
     }
     // Closing the draft triggers the layout-effect restore (no synchronous restore —
     // the form must unmount first so the list collapses back to its edit-time height).
-    if (draft?.mode === "edit") update(draft.uid, form);
+    if (draft?.kind === "ordinary" && draft.mode === "edit") update(draft.uid, form);
     else add(form);
+    setDraft(null);
+  }
+
+  function saveContracted(form: ContractedFormState) {
+    if (isStale()) {
+      setDraft(null);
+      return;
+    }
+    if (draft?.kind === "contracted" && draft.mode === "edit") updateContracted(draft.uid, form);
+    else addContracted(form);
     setDraft(null);
   }
 
@@ -172,20 +227,37 @@ export function CountsEditor() {
         title={TITLE}
         subtitle={SUBTITLE}
         addLabel={ADD_LABEL}
-        formOpen={!!draft}
+        formOpen={draft?.kind === "ordinary"}
         onAdd={openAdd}
+        secondaryAction={{
+          label: ADD_CONTRACTED_LABEL,
+          formOpen: draft?.kind === "contracted",
+          onAdd: openAddContracted,
+          testId: "add-contracted-toggle",
+        }}
         instructions={<CardEditorInstructions items={INSTRUCTIONS} />}
       />
       <CardEditorInfoStrip />
 
-      {draft && (
+      {draft?.kind === "ordinary" && (
         <CountForm
           // Remount on target change so the form resets cleanly per draft.
-          key={draft.uid ?? "add"}
+          key={`ordinary-${draft.uid ?? "add"}`}
           state={state}
           mode={draft.mode}
           initialForm={draft.form}
-          onSave={save}
+          onSave={saveOrdinary}
+          onCancel={cancel}
+        />
+      )}
+
+      {draft?.kind === "contracted" && (
+        <ContractedForm
+          key={`contracted-${draft.uid ?? "add"}`}
+          state={state}
+          mode={draft.mode}
+          initialForm={draft.form}
+          onSave={saveContracted}
           onCancel={cancel}
         />
       )}

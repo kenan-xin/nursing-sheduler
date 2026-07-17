@@ -47,8 +47,9 @@ interface CountFormProps {
 }
 
 /** The prototype's per-field shell: an uppercase label, an optional inline hint,
- *  the control, and the verbatim validation error line. */
-function FieldShell({
+ *  the control, and the verbatim validation error line. Shared with the sibling
+ *  contracted-hours form so both authoring flows render identical field chrome. */
+export function FieldShell({
   label,
   required,
   hint,

@@ -131,6 +131,7 @@ export function CardEditorHeader({
   addLabel,
   formOpen,
   onAdd,
+  secondaryAction,
   instructions,
   helpLabel = "Help",
 }: {
@@ -140,6 +141,15 @@ export function CardEditorHeader({
   addLabel: string;
   formOpen: boolean;
   onAdd: () => void;
+  /** Optional second entry action rendered beside the primary Add (e.g. Counts'
+   *  "Add Contracted Hours"). Backward-compatible: editors that omit it are
+   *  unchanged. `formOpen` toggles the button's icon like the primary one. */
+  secondaryAction?: {
+    label: string;
+    formOpen: boolean;
+    onAdd: () => void;
+    testId?: string;
+  };
   /** Optional per-editor instructions panel (FR-PR-02). When present, a help
    *  toggle is rendered beside the title; the panel is collapsed by default. */
   instructions?: React.ReactNode;
@@ -175,15 +185,28 @@ export function CardEditorHeader({
           </div>
           <p className="m-0 max-w-[64ch] text-ink2">{subtitle}</p>
         </div>
-        <Button
-          variant={formOpen ? "outline" : "default"}
-          className="h-11 px-[18px]"
-          data-testid="add-card-toggle"
-          aria-expanded={formOpen}
-          onClick={onAdd}
-        >
-          {formOpen ? <FaXmark /> : <FaPlus />} {addLabel}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <Button
+            variant={formOpen ? "outline" : "default"}
+            className="h-11 px-[18px]"
+            data-testid="add-card-toggle"
+            aria-expanded={formOpen}
+            onClick={onAdd}
+          >
+            {formOpen ? <FaXmark /> : <FaPlus />} {addLabel}
+          </Button>
+          {secondaryAction ? (
+            <Button
+              variant={secondaryAction.formOpen ? "outline" : "default"}
+              className="h-11 px-[18px]"
+              data-testid={secondaryAction.testId ?? "add-secondary-toggle"}
+              aria-expanded={secondaryAction.formOpen}
+              onClick={secondaryAction.onAdd}
+            >
+              {secondaryAction.formOpen ? <FaXmark /> : <FaPlus />} {secondaryAction.label}
+            </Button>
+          ) : null}
+        </div>
       </div>
       {instructions && helpOpen ? (
         <div

@@ -400,14 +400,16 @@ test.describe.serial("T12 generic-array lossless fallback (FR-PR-55a)", () => {
   });
 });
 
-test.describe.serial("T12 contracted-hours card renders read-only (M2 seam)", () => {
+test.describe.serial("T12 M2a-2 contracted-hours guided editing", () => {
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(() => {
       (window as unknown as { __NS_ENABLE_TEST_BRIDGE?: boolean }).__NS_ENABLE_TEST_BRIDGE = true;
     });
   });
 
-  test("shows the Contracted hours badge and blocks Edit", async ({ page }) => {
+  test("a marked card shows Edit (no read-only note) and reopens in the guided editor", async ({
+    page,
+  }) => {
     await gotoReady(page);
     await seed(page, BASE_SEED);
     await seed(page, {
@@ -422,6 +424,7 @@ test.describe.serial("T12 contracted-hours card renders read-only (M2 seam)", ()
             description: "Monthly contract",
             tag: "contracted_hours",
             policy: "exact",
+            unit: "half-hour",
             person: ["Aisha"],
             countDates: ["2026-01-01"],
             countShiftTypes: ["D"],
@@ -433,9 +436,132 @@ test.describe.serial("T12 contracted-hours card renders read-only (M2 seam)", ()
       },
     });
 
+    // The badge stays; the marked card is now EDITABLE — Edit button, no read-only note.
     await expect(page.getByTestId("count-contracted-badge-0")).toBeVisible();
-    await expect(page.getByTestId("count-edit-0")).toHaveCount(0);
-    await expect(page.getByTestId("count-readonly-note-0")).toBeVisible();
+    await expect(page.getByTestId("count-readonly-note-0")).toHaveCount(0);
+    await expect(page.getByTestId("count-edit-0")).toBeVisible();
+
+    // Edit dispatches to the GUIDED contracted editor (policy toggle + hours target),
+    // NOT the ordinary scalar form (which has no policy toggle).
+    await page.getByTestId("count-edit-0").click();
+    await expect(page.getByTestId("card-editor-form")).toBeVisible();
+    await expect(page.getByTestId("contracted-policy-exact")).toBeVisible();
+    await expect(page.getByTestId("contracted-target-exact")).toHaveValue("160h");
+    await expect(page.getByTestId("count-desc")).toHaveCount(0);
+  });
+
+  test("Add Contracted Hours creates a marked card that reopens in the guided editor", async ({
+    page,
+  }) => {
+    await gotoReady(page);
+    await seed(page, BASE_SEED);
+    await expect(page.getByTestId("card-editor-empty")).toBeVisible();
+
+    const before = await pastCount(page);
+    await page.getByTestId("add-contracted-toggle").click();
+    await expect(page.getByTestId("card-editor-form")).toBeVisible();
+    await expect(page.getByTestId("contracted-policy-exact")).toBeVisible();
+
+    await page.getByTestId("contracted-desc").fill("Full-time contract");
+    await page.getByTestId("contracted-target-exact").fill("160h");
+    await page.getByRole("button", { name: "Add Aisha to people" }).click();
+    await page.getByRole("button", { name: "Add D to count shift types" }).click();
+    await page
+      .getByTestId("date-scope-field")
+      .getByRole("button", { name: /all dates/i })
+      .click();
+    await page.getByTestId("card-editor-submit").click();
+
+    // One tracked mutation; the durable card carries the full marked encoding.
+    await expect(page.getByTestId("count-card-0")).toBeVisible();
+    await expect(page.getByTestId("count-contracted-badge-0")).toBeVisible();
+    expect((await pastCount(page)) - before).toBe(1);
+
+    const cards = await readCounts(page);
+    expect(cards).toHaveLength(1);
+    expect(cards[0].tag).toBe("contracted_hours");
+    expect(cards[0].policy).toBe("exact");
+    expect(cards[0].expression).toBe("x = T");
+    expect(cards[0].target).toBe(320);
+    expect(cards[0].weight).toBe(Infinity);
+    expect(cards[0].person).toEqual(["Aisha"]);
+    expect(cards[0].countShiftTypes).toEqual(["D"]);
+
+    // Reopening dispatches to the guided editor, not the ordinary form.
+    await page.getByTestId("count-edit-0").click();
+    await expect(page.getByTestId("contracted-target-exact")).toHaveValue("160h");
+    await expect(page.getByTestId("count-desc")).toHaveCount(0);
+  });
+
+  test("Add Contracted Hours (Range) encodes the two-bound target", async ({ page }) => {
+    await gotoReady(page);
+    await seed(page, BASE_SEED);
+
+    await page.getByTestId("add-contracted-toggle").click();
+    await page.getByTestId("contracted-policy-range").click();
+    await page.getByTestId("contracted-target-min").fill("150h");
+    await page.getByTestId("contracted-target-max").fill("170h");
+    await page.getByRole("button", { name: "Add Aisha to people" }).click();
+    await page.getByRole("button", { name: "Add D to count shift types" }).click();
+    await page
+      .getByTestId("date-scope-field")
+      .getByRole("button", { name: /all dates/i })
+      .click();
+    await page.getByTestId("card-editor-submit").click();
+
+    await expect(page.getByTestId("count-card-0")).toBeVisible();
+    const cards = await readCounts(page);
+    expect(cards[0].policy).toBe("range");
+    expect(cards[0].expression).toEqual(["x >= T", "x <= T"]);
+    expect(cards[0].target).toEqual([300, 340]);
+  });
+
+  test("an ordinary card still edits in the scalar form; an advanced-array card stays read-only", async ({
+    page,
+  }) => {
+    await gotoReady(page);
+    await seed(page, BASE_SEED);
+    await seed(page, {
+      cardsByKind: {
+        requirements: [],
+        successions: [],
+        affinities: [],
+        coverings: [],
+        counts: [
+          {
+            uid: "count-ord",
+            description: "Ordinary",
+            person: ["Aisha"],
+            countDates: ["2026-01-01"],
+            countShiftTypes: ["D"],
+            expression: "x >= T",
+            target: 5,
+            weight: -1,
+          },
+          {
+            uid: "count-adv",
+            description: "Advanced range",
+            person: ["Aisha"],
+            countDates: ["2026-01-01"],
+            countShiftTypes: ["D"],
+            expression: ["x >= T", "x <= T"],
+            target: [300, 340],
+            weight: Infinity,
+          },
+        ],
+      },
+    });
+
+    // Ordinary card → scalar form (has count-desc + expression field, no policy toggle).
+    await page.getByTestId("count-edit-0").click();
+    await expect(page.getByTestId("count-desc")).toBeVisible();
+    await expect(page.getByTestId("contracted-policy-exact")).toHaveCount(0);
+    await page.getByRole("button", { name: "Cancel" }).click();
+
+    // Advanced-array card → still read-only, no Edit button.
+    await expect(page.getByTestId("count-advanced-badge-1")).toBeVisible();
+    await expect(page.getByTestId("count-edit-1")).toHaveCount(0);
+    await expect(page.getByTestId("count-readonly-note-1")).toBeVisible();
   });
 });
 
