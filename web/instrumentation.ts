@@ -4,21 +4,15 @@
 // (NEXT_PHASE === "phase-production-build"), so a production build with unset vars
 // still succeeds; only a running server enforces the requirement.
 //
-// IMPORTANT: a THROWN error from `register()` does NOT reliably terminate the Next
-// 16 standalone server — it degrades to a live process that binds and serves 500s.
-// So on invalid config we log the actionable message and `process.exit(1)`, which
-// fires wherever the Node server initializes (`node server.js`, `pnpm start`,
-// `next dev`) BEFORE the port is bound. That makes fail-fast genuinely fatal.
+// Next invokes `register()` in BOTH the Node.js and Edge runtimes, and Turbopack
+// statically compiles this module for each. The fail-fast path uses `process.exit`
+// (a Node-only API), so it lives in `./instrumentation-node` and is loaded only via
+// the dynamic import below under the Node runtime — keeping it out of the Edge
+// compilation. See https://nextjs.org/docs/app/api-reference/file-conventions/instrumentation
 export async function register(): Promise<void> {
   // The Edge runtime also calls register(); config validation is a Node concern.
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
 
-  const { assertBffConfigValid } = await import("@/lib/backend");
-  try {
-    assertBffConfigValid();
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(`[bff-config] fatal — refusing to start the server: ${message}`);
-    process.exit(1);
-  }
+  const { registerNode } = await import("./instrumentation-node");
+  registerNode();
 }

@@ -55,6 +55,14 @@ function toIssues(error: z.ZodError): ScenarioValidationIssue[] {
  *   2. implicit-all → explicit `ALL` — an omitted shift-type-requirement
  *      `qualifiedPeople` / `date` becomes explicit `ALL` (the backend treats
  *      `None` and `ALL` identically; the frontend normalizes to explicit `ALL`).
+ *   3. drop empty `date: []` — the three optional-date preferences (`shift type
+ *      requirement`, `shift type successions`, `shift type covering`) treat an
+ *      OMITTED `date` as "all dates" while an explicit empty array is a backend
+ *      no-op (no dates). See core/nurse_scheduling/preference_types.py: the
+ *      `if preference.date is not None` guard before `parse_dates` means `None`
+ *      expands to every day but `[]` parses to none. Dropping an empty array
+ *      makes a load→save round-trip preserve "all dates" instead of silently
+ *      flipping it to "no dates".
  */
 export function canonicalizeScenarioDocument(
   doc: CanonicalScenarioDocument,
@@ -64,6 +72,15 @@ export function canonicalizeScenarioDocument(
     if (shiftType.restMinutes === 0) delete shiftType.restMinutes;
   }
   for (const pref of clone.preferences) {
+    if (
+      (pref.type === PREFERENCE_TYPE.shiftTypeRequirement ||
+        pref.type === PREFERENCE_TYPE.shiftTypeSuccessions ||
+        pref.type === PREFERENCE_TYPE.shiftTypeCovering) &&
+      Array.isArray(pref.date) &&
+      pref.date.length === 0
+    ) {
+      delete pref.date;
+    }
     if (pref.type === PREFERENCE_TYPE.shiftTypeRequirement) {
       if (pref.qualifiedPeople === undefined) pref.qualifiedPeople = RESERVED_SHIFT_TYPE.all;
       if (pref.date === undefined) pref.date = RESERVED_SHIFT_TYPE.all;
