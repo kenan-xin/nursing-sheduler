@@ -20,18 +20,29 @@ interface NavGuardState {
   pendingPath: string | null;
   /** Whether the dirty-nav confirm dialog is currently shown. */
   open: boolean;
+  /**
+   * Whether a card-editor add/edit draft is currently open. An open draft holds
+   * unsaved work that is NOT a durable scenario mutation, so the dirty check alone
+   * misses it; guarded navigation ORs this in so leaving with an open draft still
+   * prompts (FR-PR-06). Set via `setDraftOpen` by the card editors.
+   */
+  draftOpen: boolean;
   /** Intercept a navigation to `path`: stash it and open the confirm. */
   requestGuard: (path: string) => void;
   /** Dismiss the confirm without navigating (Stay / backdrop / Esc). */
   cancel: () => void;
   /** Clear guard state after the navigation has been committed. */
   clear: () => void;
+  /** Arm/disarm the open-draft guard (FR-PR-06). */
+  setDraftOpen: (open: boolean) => void;
 }
 
 export const useNavGuardStore = create<NavGuardState>((set) => ({
   pendingPath: null,
   open: false,
+  draftOpen: false,
   requestGuard: (path) => set({ pendingPath: path, open: true }),
   cancel: () => set({ pendingPath: null, open: false }),
   clear: () => set({ pendingPath: null, open: false }),
+  setDraftOpen: (open) => set({ draftOpen: open }),
 }));

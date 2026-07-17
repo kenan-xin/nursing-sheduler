@@ -30,7 +30,11 @@ export function useGuardedNavigation(): GuardedNavigation {
       // Same-route clicks are no-ops.
       if (path === pathname) return;
 
-      if (!selectIsDirty(useScenarioStore.getState())) {
+      // Guard on a dirty scenario OR an open card-editor draft (FR-PR-06): an open
+      // add/edit form holds unsaved work that isn't a durable mutation yet.
+      const dirty = selectIsDirty(useScenarioStore.getState());
+      const draftOpen = useNavGuardStore.getState().draftOpen;
+      if (!dirty && !draftOpen) {
         router.push(path);
         return;
       }
@@ -51,7 +55,7 @@ export function useGuardedNavigation(): GuardedNavigation {
 export function useDirtyBeforeUnload(): void {
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
-      if (selectIsDirty(useScenarioStore.getState())) {
+      if (selectIsDirty(useScenarioStore.getState()) || useNavGuardStore.getState().draftOpen) {
         e.preventDefault();
         e.returnValue = "";
       }

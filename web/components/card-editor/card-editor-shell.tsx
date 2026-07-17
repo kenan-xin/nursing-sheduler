@@ -15,6 +15,7 @@
 import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { FaPlus, FaXmark, FaCircleInfo, FaCheck, FaLock, FaGripVertical } from "@/components/icons";
+import { useNavGuardStore } from "@/components/shell/nav-guard-store";
 
 /** Outer screen wrapper — centred column wide enough for the 940px form body. */
 export function CardEditorScreen({
@@ -33,6 +34,22 @@ export function CardEditorScreen({
       {children}
     </div>
   );
+}
+
+/**
+ * Arm the shared open-draft navigation guard while a card-editor add/edit form is
+ * visible (FR-PR-06). An open draft holds unsaved work that is not a durable
+ * scenario mutation, so the dirty-only guard would let a sidebar click discard it
+ * silently; this feeds the draft-open state into the shared guard so leaving
+ * prompts. Every card editor (Counts seed + the R/S/A clones) calls this with its
+ * own `!!draft`, and the effect clears the flag on unmount/close.
+ */
+export function useCardEditorDraftGuard(active: boolean): void {
+  const setDraftOpen = useNavGuardStore((s) => s.setDraftOpen);
+  React.useEffect(() => {
+    setDraftOpen(active);
+    return () => setDraftOpen(false);
+  }, [active, setDraftOpen]);
 }
 
 /** Eyebrow · title · subtitle, with the inline top-right Add that toggles to a
@@ -187,10 +204,20 @@ export function CardEditorEmptyState({
   );
 }
 
+/** Where a drop lands relative to the hovered card, decided by the pointer's
+ *  vertical position vs the card's midpoint (FR-PR-12). */
+export type DropPosition = "before" | "after";
+
 /** One saved-card frame: numbered square, title + badges, field grid, action row.
  *  Optional `drag` props enable native HTML5 reorder (the shared card-list pattern
  *  from the entity editor); when `draggable` is true the numbered square shows a
- *  grip and the row gains the grab cursor. */
+ *  grip and the row gains the grab cursor.
+ *
+ *  `onDrop` receives the pointer-half `DropPosition` (FR-PR-12) — additive: a
+ *  consumer that ignores the argument (e.g. Coverings) keeps its prior
+ *  insert-at-index behavior unchanged. `accent="brand"` gives the card a brand
+ *  border + 3px left rule (the Contracted Hours treatment); the default `"none"`
+ *  is the neutral `border-line` every existing consumer already gets. */
 export function CardListItem({
   index,
   title,
@@ -200,6 +227,7 @@ export function CardListItem({
   disabled,
   testId,
   draggable,
+  accent = "none",
   onDragStart,
   onDragOver,
   onDrop,
@@ -215,9 +243,10 @@ export function CardListItem({
   disabled?: boolean;
   testId?: string;
   draggable?: boolean;
+  accent?: "none" | "brand";
   onDragStart?: () => void;
   onDragOver?: () => void;
-  onDrop?: () => void;
+  onDrop?: (position: DropPosition) => void;
   onDragEnd?: () => void;
   isDragging?: boolean;
   isOver?: boolean;
@@ -238,7 +267,12 @@ export function CardListItem({
         draggable
           ? (e) => {
               e.preventDefault();
-              onDrop?.();
+              // FR-PR-12: upper half of the hovered card ⇒ drop BEFORE it, lower
+              // half ⇒ drop AFTER it. Computed from the pointer Y vs the card mid.
+              const rect = e.currentTarget.getBoundingClientRect();
+              const position: DropPosition =
+                e.clientY < rect.top + rect.height / 2 ? "before" : "after";
+              onDrop?.(position);
             }
           : undefined
       }
@@ -247,7 +281,7 @@ export function CardListItem({
         disabled ? "opacity-55" : ""
       } ${draggable ? "cursor-grab" : ""} ${isDragging ? "opacity-50" : ""} ${
         isOver ? "shadow-[inset_0_2px_0_var(--color-brand)]" : ""
-      } ${disabled ? "border-line" : "border-line"}`}
+      } ${accent === "brand" ? "border-brand border-l-[3px]" : "border-line"}`}
       data-testid={testId}
       data-disabled={disabled ? "true" : undefined}
     >

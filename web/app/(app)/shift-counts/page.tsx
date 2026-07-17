@@ -1,12 +1,9 @@
-import { PlaceholderScreen } from "@/components/shell/placeholder-screen";
-import { FaListOl } from "@/components/icons";
+// Shift Counts screen (T12 seed, spec 05) — replaces the T08 placeholder.
+// The editor is a client component (it binds the durable scenario store); this
+// route module just mounts it.
+
+import { CountsEditor } from "@/components/counts/counts-editor";
 
 export default function ShiftCountsPage() {
-  return (
-    <PlaceholderScreen
-      title="Shift Counts"
-      description="Bound the number of shifts a person works over the period."
-      icon={FaListOl}
-    />
-  );
+  return <CountsEditor />;
 }

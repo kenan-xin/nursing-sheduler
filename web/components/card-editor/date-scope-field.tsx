@@ -43,6 +43,17 @@ interface DateScopeFieldProps {
   value: readonly DateRef[];
   /** Emitted refs are always strings (chip ids or parsed specific dates). */
   onChange: (next: string[]) => void;
+  /**
+   * The refs emitted when the ALL scope chip is chosen. Defaults to `[]` — which
+   * Coverings relies on: an OMITTED (empty) `date` serializes as "all dates" (DL08),
+   * so its optional field must clear to `[]`. A consumer whose date field is
+   * REQUIRED (e.g. Counts' `countDates`, where `[]` means "count over zero dates",
+   * not "all dates") passes `["ALL"]` so ALL emits the explicit all-dates keyword
+   * that also satisfies a non-empty validation. The read path is unaffected:
+   * `activeScope` treats BOTH `[]` and `["ALL"]` as ALL-active, so either value
+   * shows the ALL chip lit.
+   */
+  allValue?: readonly string[];
 }
 
 const ALL_SCOPE = "ALL";
@@ -156,6 +167,7 @@ export function DateScopeField({
   dateItems,
   value,
   onChange,
+  allValue = [],
 }: DateScopeFieldProps) {
   const scope = activeScope(value, dateGroups);
   // Custom text is kept distinct from the chips: it shows only when the value is
@@ -165,7 +177,7 @@ export function DateScopeField({
 
   const selectScope = (id: string) => {
     setText("");
-    onChange(id.toUpperCase() === ALL_SCOPE ? [] : [id]);
+    onChange(id.toUpperCase() === ALL_SCOPE ? [...allValue] : [id]);
   };
 
   const onCustom = (next: string) => {
