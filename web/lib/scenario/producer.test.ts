@@ -139,6 +139,35 @@ describe("producer schema — contracted hours coverage (DL09 D4)", () => {
     expect(issuesFor(doc).some((m) => /coverage is incomplete/.test(m))).toBe(true);
   });
 
+  it("maps the helper's incomplete-coverage error to the exact Zod message and path", () => {
+    const doc = docFrom((s) => {
+      s.cardsByKind.counts = [
+        {
+          uid: "h1",
+          person: "ALL",
+          countDates: "ALL",
+          countShiftTypes: ["D", "E"],
+          countShiftTypeCoefficients: [["D", 1]], // missing E — incomplete
+          expression: "x = T",
+          target: 5,
+          weight: Infinity,
+          tag: "contracted_hours",
+          policy: "exact",
+        },
+      ];
+    });
+    const result = validateScenario(doc);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    // The adapter re-emits the helper's structured error at the marked count's
+    // preference index under the `countShiftTypeCoefficients` field suffix.
+    const issue = result.issues.find((i) => /coverage is incomplete/.test(i.message));
+    expect(issue?.message).toBe(
+      "A contracted-hours shift count must list an explicit coefficient for every selected shift type (including LEAVE); coverage is incomplete.",
+    );
+    expect(issue?.path).toMatch(/^preferences\.\d+\.countShiftTypeCoefficients$/);
+  });
+
   it("accepts complete coefficient coverage", () => {
     const doc = docFrom((s) => {
       s.cardsByKind.counts = [

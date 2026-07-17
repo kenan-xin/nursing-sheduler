@@ -18,7 +18,10 @@ import { expandShiftTypeSelector, OFF_SID, type ShiftTypeMapKey } from "./shift-
 export interface ContractedHoursInput {
   weight: number;
   expression: unknown; // scalar string or 2-tuple
-  target: number | [number, number];
+  // Matches the producer's parsed `target` (`number | number[]`): the validator is
+  // required to DIAGNOSE a malformed array (e.g. a one-element range), so the input
+  // type must admit it rather than force callers into an unsafe cast.
+  target: number | number[];
   policy: "exact" | "range"; // from hoursContract.policy
   countShiftTypes: ShiftTypeGroupMember | ShiftTypeGroupMember[];
   countShiftTypeCoefficients?: ReadonlyArray<readonly [string, number]>;

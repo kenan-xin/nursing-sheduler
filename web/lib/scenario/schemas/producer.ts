@@ -474,7 +474,7 @@ function validateContractedHours(
       {
         weight: pref.weight,
         expression: pref.expression,
-        target: pref.target as number | [number, number],
+        target: pref.target,
         policy: pref.hoursContract.policy,
         countShiftTypes: pref.countShiftTypes,
         countShiftTypeCoefficients: pref.countShiftTypeCoefficients,
