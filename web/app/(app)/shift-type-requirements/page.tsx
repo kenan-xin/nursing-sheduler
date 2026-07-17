@@ -1,12 +1,9 @@
-import { PlaceholderScreen } from "@/components/shell/placeholder-screen";
-import { FaSliders } from "@/components/icons";
+// Staffing Requirements screen (T12 M1 clone, spec 05) — replaces the T08
+// placeholder. The editor is a client component (it binds the durable scenario
+// store); this route module just mounts it.
+
+import { RequirementsEditor } from "@/components/requirements/requirements-editor";
 
 export default function ShiftTypeRequirementsPage() {
-  return (
-    <PlaceholderScreen
-      title="Shift Type Requirements"
-      description="Set how many qualified people each shift type needs."
-      icon={FaSliders}
-    />
-  );
+  return <RequirementsEditor />;
 }
