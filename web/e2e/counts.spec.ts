@@ -466,6 +466,8 @@ test.describe.serial("T12 M2a-2 contracted-hours guided editing", () => {
     await page.getByTestId("contracted-target-exact").fill("160h");
     await page.getByRole("button", { name: "Add Aisha to people" }).click();
     await page.getByRole("button", { name: "Add D to count shift types" }).click();
+    // Coverage is a hard commit gate (M2a-3): the selected D needs a coefficient.
+    await page.getByTestId("contracted-coefficient-fields-input-D").fill("16");
     await page
       .getByTestId("date-scope-field")
       .getByRole("button", { name: /all dates/i })
@@ -503,6 +505,8 @@ test.describe.serial("T12 M2a-2 contracted-hours guided editing", () => {
     await page.getByTestId("contracted-target-max").fill("170h");
     await page.getByRole("button", { name: "Add Aisha to people" }).click();
     await page.getByRole("button", { name: "Add D to count shift types" }).click();
+    // Coverage is a hard commit gate (M2a-3): the selected D needs a coefficient.
+    await page.getByTestId("contracted-coefficient-fields-input-D").fill("16");
     await page
       .getByTestId("date-scope-field")
       .getByRole("button", { name: /all dates/i })
@@ -562,6 +566,73 @@ test.describe.serial("T12 M2a-2 contracted-hours guided editing", () => {
     await expect(page.getByTestId("count-advanced-badge-1")).toBeVisible();
     await expect(page.getByTestId("count-edit-1")).toHaveCount(0);
     await expect(page.getByTestId("count-readonly-note-1")).toBeVisible();
+  });
+});
+
+test.describe.serial("T12 M2a-3 contracted coverage-gated commit", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      (window as unknown as { __NS_ENABLE_TEST_BRIDGE?: boolean }).__NS_ENABLE_TEST_BRIDGE = true;
+    });
+  });
+
+  test("incomplete coverage blocks Save; completing it saves and round-trips through the shared validator", async ({
+    page,
+  }) => {
+    await gotoReady(page);
+    await seed(page, BASE_SEED);
+
+    await page.getByTestId("add-contracted-toggle").click();
+    await expect(page.getByTestId("card-editor-form")).toBeVisible();
+    await page.getByTestId("contracted-desc").fill("Full-time contract");
+    await page.getByTestId("contracted-target-exact").fill("160h");
+    await page.getByRole("button", { name: "Add Aisha to people" }).click();
+    // Select TWO worked shift types so the coverage bijection needs both.
+    await page.getByRole("button", { name: "Add D to count shift types" }).click();
+    await page.getByRole("button", { name: "Add N to count shift types" }).click();
+    await page
+      .getByTestId("date-scope-field")
+      .getByRole("button", { name: /all dates/i })
+      .click();
+
+    // Only D gets a coefficient — N is left uncovered.
+    await page.getByTestId("contracted-coefficient-fields-input-D").fill("16");
+
+    const before = await pastCount(page);
+    await page.getByTestId("card-editor-submit").click();
+
+    // Save is BLOCKED: the form stays open with the coverage aggregate error and no
+    // mutation is committed (the draft stays recoverable).
+    await expect(page.getByTestId("card-editor-form")).toBeVisible();
+    await expect(page.getByTestId("contracted-coefficient-fields-aggregate-error")).toContainText(
+      "coverage is incomplete",
+    );
+    expect(await pastCount(page)).toBe(before);
+
+    // Completing the coverage lets it save in exactly one tracked mutation.
+    await page.getByTestId("contracted-coefficient-fields-input-N").fill("16");
+    await page.getByTestId("card-editor-submit").click();
+    await expect(page.getByTestId("count-card-0")).toBeVisible();
+    expect((await pastCount(page)) - before).toBe(1);
+
+    const cards = await readCounts(page);
+    expect(cards[0].tag).toBe("contracted_hours");
+    expect(cards[0].target).toBe(320);
+    expect(cards[0].countShiftTypeCoefficients).toEqual([
+      ["D", 16],
+      ["N", 16],
+    ]);
+
+    // Round-trip: reopening and re-submitting passes the SAME shared validator the
+    // producer boundary uses — the commit gate calls validateContractedHoursContract.
+    await page.getByTestId("count-edit-0").click();
+    await expect(page.getByTestId("card-editor-form")).toBeVisible();
+    await page.getByTestId("card-editor-submit").click();
+    await expect(page.getByTestId("count-card-0")).toBeVisible();
+    expect((await readCounts(page))[0].countShiftTypeCoefficients).toEqual([
+      ["D", 16],
+      ["N", 16],
+    ]);
   });
 });
 

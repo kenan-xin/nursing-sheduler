@@ -80,16 +80,14 @@ export function useCounts(): CountsController {
       commitCounts(counts.map((card) => (card.uid === uid ? next : card)));
     },
     addContracted(form) {
-      const domain = buildCountShiftTypeDomain(state);
-      commitCounts([...counts, buildContractedCard(form, domain)]);
+      commitCounts([...counts, buildContractedCard(form, state)]);
     },
     updateContracted(uid, form) {
       // Same identity/marker discipline as the ordinary update: preserve the uid so
       // the row is replaced in place, and carry forward `disabled`/`applied` — an
       // edit-save must never silently re-enable a card the user turned off.
-      const domain = buildCountShiftTypeDomain(state);
       const source = counts.find((card) => card.uid === uid);
-      const rebuilt = buildContractedCard(form, domain, uid);
+      const rebuilt = buildContractedCard(form, state, uid);
       const markers: Pick<CountCard, "disabled" | "applied"> = {};
       if (source?.disabled) markers.disabled = true;
       if (source?.applied) markers.applied = true;

@@ -164,7 +164,7 @@ export function CountsEditor() {
     const domain = buildCountShiftTypeDomain(state);
     let next: Draft | null = null;
     if (isContractedHoursCard(card)) {
-      next = { kind: "contracted", mode: "edit", uid, form: toContractedForm(card, domain) };
+      next = { kind: "contracted", mode: "edit", uid, form: toContractedForm(card, state) };
     } else if (isEditableCountCard(card)) {
       next = { kind: "ordinary", mode: "edit", uid, form: countToForm(card, domain) };
     }

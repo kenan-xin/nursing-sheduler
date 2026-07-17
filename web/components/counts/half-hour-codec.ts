@@ -69,6 +69,21 @@ export function parseHalfHours(raw: string): number | null {
 }
 
 /**
+ * Strict parse of a RAW half-hour integer string (the Solver-details D10 override).
+ * Accepts ONLY a clean non-negative safe integer — no decimals, exponents, or signs
+ * — and returns it verbatim; anything else is `null`. Unlike {@link parseHalfHours}
+ * this does not interpret hours/minutes (the value already IS half-hours), and it
+ * never truncates: `"3.5"`/`"1e3"` are rejected rather than silently rounded, so an
+ * invalid raw edit can never rewrite the target to a different valid value.
+ */
+export function parseRawHalfHours(raw: string): number | null {
+  const text = raw.trim();
+  if (!/^\d+$/.test(text)) return null;
+  const value = Number(text);
+  return Number.isSafeInteger(value) ? value : null;
+}
+
+/**
  * Format a `[min, max]` half-hour range as a single hours string with the unit
  * emitted once when the minimum lands on a whole hour: `[300, 340] → "150–170h"`.
  * A minimum with a minutes remainder keeps its full segment (e.g. `"8h 30m–9h"`).

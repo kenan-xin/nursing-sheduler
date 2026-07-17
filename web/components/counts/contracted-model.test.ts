@@ -4,11 +4,14 @@ import {
   type ContractedHoursCountCard,
   type ScenarioUiState,
 } from "@/lib/scenario";
-import { buildCountShiftTypeDomain } from "./counts-model";
 import {
   buildContractedCard,
+  buildContractedCoefficientDomain,
+  contractedCoefficientIds,
   emptyContractedForm,
+  hasContractedErrors,
   toContractedForm,
+  validateContractedCommit,
   validateContractedForm,
   type ContractedFormState,
 } from "./contracted-model";
@@ -18,6 +21,7 @@ import {
   formatHalfHours,
   parseHalfHourRange,
   parseHalfHours,
+  parseRawHalfHours,
 } from "./half-hour-codec";
 
 function scenario(overrides: Partial<ScenarioUiState> = {}): ScenarioUiState {
@@ -32,7 +36,6 @@ const BASE = scenario({
   staff: [{ id: "Anna" }, { id: "Lil" }],
   shifts: [{ id: "D" }, { id: "N" }],
 });
-const DOMAIN = buildCountShiftTypeDomain(BASE);
 
 describe("half-hour codec (scalar)", () => {
   it("formats integer half-hours as human hours", () => {
@@ -81,6 +84,19 @@ describe("half-hour codec (scalar)", () => {
   it("exposes the LEAVE default credit as 16 half-hours (8h)", () => {
     expect(LEAVE_CREDIT_HALF_HOURS).toBe(16);
     expect(formatHalfHours(LEAVE_CREDIT_HALF_HOURS)).toBe("8h");
+  });
+
+  it("parseRawHalfHours accepts clean non-negative integers and rejects everything else", () => {
+    expect(parseRawHalfHours("320")).toBe(320);
+    expect(parseRawHalfHours(" 16 ")).toBe(16);
+    expect(parseRawHalfHours("0")).toBe(0);
+    // Reject (never truncate) decimals, exponents, signs, and unsafe magnitudes.
+    expect(parseRawHalfHours("3.5")).toBeNull();
+    expect(parseRawHalfHours("1e3")).toBeNull();
+    expect(parseRawHalfHours("-5")).toBeNull();
+    expect(parseRawHalfHours("")).toBeNull();
+    expect(parseRawHalfHours("abc")).toBeNull();
+    expect(parseRawHalfHours("9007199254740993")).toBeNull();
   });
 });
 
@@ -160,7 +176,7 @@ describe("buildContractedCard — exact policy", () => {
         countShiftTypes: ["D"],
         targetExact: "160h",
       }),
-      DOMAIN,
+      BASE,
       "uid-exact",
     );
     expect(card).toMatchObject({
@@ -191,7 +207,7 @@ describe("buildContractedCard — range policy", () => {
         targetRangeMin: "150h",
         targetRangeMax: "170h",
       }),
-      DOMAIN,
+      BASE,
       "uid-range",
     );
     expect(card.policy).toBe("range");
@@ -212,7 +228,7 @@ describe("buildContractedCard — coefficients", () => {
         countShiftTypeCoefficients: [["D", 2]],
         targetExact: "160h",
       }),
-      DOMAIN,
+      BASE,
       "uid-coef",
     );
     expect(card.countShiftTypeCoefficients).toEqual([["D", 2]]);
@@ -234,7 +250,7 @@ describe("toContractedForm — round-trips a marked card into a draft", () => {
       target: 320,
       weight: Infinity,
     };
-    const draft = toContractedForm(card, DOMAIN);
+    const draft = toContractedForm(card, BASE);
     expect(draft.policy).toBe("exact");
     expect(draft.targetExact).toBe("160h");
     expect(draft.targetRangeMin).toBe("");
@@ -255,7 +271,7 @@ describe("toContractedForm — round-trips a marked card into a draft", () => {
       target: [300, 340],
       weight: Infinity,
     };
-    const draft = toContractedForm(card, DOMAIN);
+    const draft = toContractedForm(card, BASE);
     expect(draft.policy).toBe("range");
     expect(draft.targetRangeMin).toBe("150h");
     expect(draft.targetRangeMax).toBe("170h");
@@ -270,10 +286,169 @@ describe("toContractedForm — round-trips a marked card into a draft", () => {
         countShiftTypes: ["D"],
         targetExact: "160h",
       }),
-      DOMAIN,
+      BASE,
       "uid-rt",
     );
-    const rebuilt = buildContractedCard(toContractedForm(original, DOMAIN), DOMAIN, "uid-rt");
+    const rebuilt = buildContractedCard(toContractedForm(original, BASE), BASE, "uid-rt");
     expect(rebuilt).toEqual(original);
+  });
+});
+
+const GROUPED = scenario({
+  staff: [{ id: "Anna" }],
+  shifts: [{ id: "D" }, { id: "N" }],
+  shiftGroups: [{ id: "Both", members: ["D", "N"] }],
+});
+
+describe("buildContractedCoefficientDomain — concrete leaf bijection", () => {
+  it("expands a selected group to its concrete member rows, with no group/ALL row", () => {
+    const domain = buildContractedCoefficientDomain(GROUPED, ["Both"]);
+    expect(contractedCoefficientIds(domain)).toEqual(["D", "N"]);
+    expect(domain.groups).toEqual([]);
+  });
+
+  it("expands ALL to worked shift types only (never a group/ALL/OFF row)", () => {
+    const domain = buildContractedCoefficientDomain(GROUPED, ["ALL"]);
+    expect(contractedCoefficientIds(domain)).toEqual(["D", "N"]);
+  });
+
+  it("includes LEAVE when selected", () => {
+    const domain = buildContractedCoefficientDomain(GROUPED, ["D", "LEAVE"]);
+    expect(contractedCoefficientIds(domain)).toEqual(["D", "LEAVE"]);
+  });
+
+  it("excludes OFF even when it is selected", () => {
+    const domain = buildContractedCoefficientDomain(GROUPED, ["D", "OFF"]);
+    expect(contractedCoefficientIds(domain)).toEqual(["D"]);
+  });
+
+  it("is empty when nothing is selected", () => {
+    expect(contractedCoefficientIds(buildContractedCoefficientDomain(GROUPED, []))).toEqual([]);
+  });
+});
+
+describe("validateContractedCommit — coverage-gated commit via the shared validator", () => {
+  const complete = (overrides: Partial<ContractedFormState> = {}) =>
+    form({
+      person: ["Anna"],
+      countDates: ["ALL"],
+      countShiftTypes: ["D"],
+      countShiftTypeCoefficients: [["D", 16]],
+      targetExact: "160h",
+      ...overrides,
+    });
+
+  it("returns no errors for a fully-covered Exact contract", () => {
+    const errors = validateContractedCommit(complete(), GROUPED);
+    expect(hasContractedErrors(errors)).toBe(false);
+  });
+
+  it("returns no errors for a fully-covered Range contract", () => {
+    const errors = validateContractedCommit(
+      complete({
+        policy: "range",
+        targetExact: "",
+        targetRangeMin: "150h",
+        targetRangeMax: "170h",
+      }),
+      GROUPED,
+    );
+    expect(hasContractedErrors(errors)).toBe(false);
+  });
+
+  it("returns no errors when a group selector's members are all covered", () => {
+    const errors = validateContractedCommit(
+      complete({
+        countShiftTypes: ["Both"],
+        countShiftTypeCoefficients: [
+          ["D", 16],
+          ["N", 16],
+        ],
+      }),
+      GROUPED,
+    );
+    expect(hasContractedErrors(errors)).toBe(false);
+  });
+
+  it("maps incomplete coverage to the coefficient aggregate", () => {
+    const errors = validateContractedCommit(
+      complete({ countShiftTypes: ["D", "N"], countShiftTypeCoefficients: [["D", 16]] }),
+      GROUPED,
+    );
+    expect(errors.coefficientAggregate).toBeDefined();
+    expect(errors.coefficientErrorsById).toBeUndefined();
+  });
+
+  it("drops an extra (non-selected) coefficient like serialization does (validate ≡ persist)", () => {
+    // With only D selected, N is not in the concrete domain, so the sync drops it
+    // both in the commit gate and in buildContractedCard — the editor never emits an
+    // extra id (the "does not correspond" guard still fires at the producer boundary).
+    const draft = complete({
+      countShiftTypes: ["D"],
+      countShiftTypeCoefficients: [
+        ["D", 16],
+        ["N", 16],
+      ],
+    });
+    expect(hasContractedErrors(validateContractedCommit(draft, GROUPED))).toBe(false);
+    expect(buildContractedCard(draft, GROUPED, "uid-extra").countShiftTypeCoefficients).toEqual([
+      ["D", 16],
+    ]);
+  });
+
+  it("collapses a duplicate coefficient id like serialization does (validate ≡ persist)", () => {
+    // The commit gate validates the SAME entry set buildContractedCard persists, and
+    // that path syncs pairs to eligible ids (collapsing a repeated id to its first
+    // value) — so a duplicate id is a no-op dedup, not a blocking error.
+    const draft = complete({
+      countShiftTypeCoefficients: [
+        ["D", 16],
+        ["D", 16],
+      ],
+    });
+    expect(hasContractedErrors(validateContractedCommit(draft, GROUPED))).toBe(false);
+    expect(buildContractedCard(draft, GROUPED, "uid-dup").countShiftTypeCoefficients).toEqual([
+      ["D", 16],
+    ]);
+  });
+
+  it("blocks a non-integer coefficient that serialization would drop (P1 regression)", () => {
+    // 1.5 satisfies the shared helper's `< 1` check but validateCoefficientPairs drops
+    // it on save — the commit gate must catch it so a card with missing coverage can
+    // never be written. validate ≡ persist.
+    const draft = complete({ countShiftTypeCoefficients: [["D", 1.5]] });
+    const errors = validateContractedCommit(draft, GROUPED);
+    expect(hasContractedErrors(errors)).toBe(true);
+    expect(errors.coefficientErrorsById?.D).toBeDefined();
+    // The value serialization would have silently discarded is exactly what's blocked.
+    expect(
+      buildContractedCard(draft, GROUPED, "uid-nonint").countShiftTypeCoefficients,
+    ).toBeUndefined();
+  });
+
+  it("maps a below-one coefficient to the per-id slot", () => {
+    const errors = validateContractedCommit(
+      complete({ countShiftTypeCoefficients: [["D", 0]] }),
+      GROUPED,
+    );
+    expect(errors.coefficientErrorsById?.D).toBeDefined();
+  });
+
+  it("still surfaces the range-order field error", () => {
+    const errors = validateContractedCommit(
+      complete({
+        policy: "range",
+        targetExact: "",
+        targetRangeMin: "170h",
+        targetRangeMax: "150h",
+      }),
+      GROUPED,
+    );
+    expect(errors.targetRangeMax).toBeDefined();
+  });
+
+  it("still surfaces an unparsable target field error", () => {
+    const errors = validateContractedCommit(complete({ targetExact: "8h 15m" }), GROUPED);
+    expect(errors.targetExact).toBeDefined();
   });
 });

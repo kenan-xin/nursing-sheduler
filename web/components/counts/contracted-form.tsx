@@ -1,24 +1,32 @@
 "use client";
 
-// The guided add/edit form for a Contracted-Hours shift count (T12 M2a-2). A
-// MINIMAL route target that authors the marked card end-to-end: a policy toggle
+// The guided add/edit form for a Contracted-Hours shift count (T12 M2a-3). The
+// full guided editor that authors the marked card end-to-end: a policy toggle
 // (Exact / Range), the target in human hours (converted via the half-hour codec),
-// and the same People / Count shift types / Count dates / Description controls the
-// ordinary `count-form.tsx` uses. Expression and weight are LOCKED by policy and
-// never shown as editable fields.
+// the shared per-shift-type coefficient sub-editor wired over the CONCRETE day-state
+// expansion, a read-only view of the locked expression/weight encoding, and a
+// collapsible Solver-details section exposing the raw stored encoding plus a raw
+// half-hour target override. Save is gated by the SHARED coverage validator
+// (`validateContractedCommit` → `validateContractedHoursContract`): a draft with
+// incomplete/extra/invalid coverage is blocked with the error in place and the
+// draft stays recoverable, never silently dropped.
 //
-// Out of scope here (M2a-3): the coefficient sub-editor, the coverage-bijection
-// commit gate, and the locked expression/weight display polish. The form collects
-// coefficients in its draft state (carried through by `buildContractedCard`) but
-// does not render an editor for them yet, and Save never hard-blocks on coverage.
+// Expression and weight are LOCKED by policy — changing them requires converting to
+// a generic Shift Count (the Convert action itself is M2a-4; only the note lives
+// here). Refresh-from-Shift-Types derivation is M2a-5; coefficients are entered
+// MANUALLY here.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ScenarioUiState } from "@/lib/scenario";
 import { Input } from "@/components/ui/input";
 import { CardEditorForm } from "@/components/card-editor/card-editor-shell";
 import { TransferList } from "@/components/entity-editor/transfer-list";
 import { entityKey, sameEntityId } from "@/components/entity-editor/core";
 import { DateScopeField } from "@/components/card-editor/date-scope-field";
+import {
+  CoefficientFields,
+  syncCoefficientPairs,
+} from "@/components/card-editor/coefficient-fields";
 import { FieldShell } from "./count-form";
 import {
   buildCountShiftTypeTransferOptions,
@@ -29,10 +37,14 @@ import {
   toggleInSelection,
 } from "./counts-model";
 import {
-  validateContractedForm,
+  buildContractedCoefficientDomain,
+  contractedCoefficientIds,
+  hasContractedErrors,
+  validateContractedCommit,
   type ContractedErrors,
   type ContractedFormState,
 } from "./contracted-model";
+import { formatHalfHours, parseHalfHours, parseRawHalfHours } from "./half-hour-codec";
 
 interface ContractedFormProps {
   state: ScenarioUiState;
@@ -79,6 +91,157 @@ function PolicyToggle({
   );
 }
 
+/** The read-only rows for the encoding the policy locks: the solver expression and
+ *  the hard (`+∞`) weight, with the note that changing them needs a convert. */
+function LockedEncoding({
+  policy,
+  expressionError,
+  weightError,
+}: {
+  policy: "exact" | "range";
+  expressionError?: string;
+  weightError?: string;
+}) {
+  const expressionText = policy === "range" ? "x ≥ T and x ≤ T" : "x = T";
+  return (
+    <div
+      className="flex flex-col gap-2 border border-line2 bg-panel p-3.5"
+      data-testid="contracted-locked-encoding"
+    >
+      <span className="text-label font-semibold uppercase tracking-[0.03em] text-ink2">
+        Locked encoding
+      </span>
+      <div className="flex flex-wrap gap-x-8 gap-y-2">
+        <div className="flex flex-col gap-0.5">
+          <span className="text-label font-semibold text-ink3">Expression</span>
+          <span className="font-mono text-meta text-ink" data-testid="contracted-locked-expression">
+            {expressionText}
+          </span>
+          {expressionError && (
+            <span className="text-meta font-semibold text-error">{expressionError}</span>
+          )}
+        </div>
+        <div className="flex flex-col gap-0.5">
+          <span className="text-label font-semibold text-ink3">Weight</span>
+          <span className="font-mono text-meta text-ink" data-testid="contracted-locked-weight">
+            Hard (∞)
+          </span>
+          {weightError && <span className="text-meta font-semibold text-error">{weightError}</span>}
+        </div>
+      </div>
+      <p className="text-meta italic text-ink3">
+        Expression and weight are fixed by the policy. Changing them requires converting this rule
+        to a generic Shift Count.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Solver-details escape hatch (DL09 D10): a collapsed section that shows the exact
+ * `{ expression, target, weight }` the card will serialize and offers a RAW
+ * half-hour target editor (integer half-hours, not the human-hours codec) kept in
+ * two-way sync with the human-hours target inputs. Coefficients are already raw
+ * half-hour integers in the coefficient sub-editor, so no duplicate editor is
+ * needed here.
+ */
+function SolverDetails({
+  form,
+  onRawTargetChange,
+}: {
+  form: ContractedFormState;
+  onRawTargetChange: (patch: Partial<ContractedFormState>) => void;
+}) {
+  const isRange = form.policy === "range";
+  const expressionText = isRange ? '["x >= T", "x <= T"]' : '"x = T"';
+  const rawExact = parseHalfHours(form.targetExact);
+  const rawMin = parseHalfHours(form.targetRangeMin);
+  const rawMax = parseHalfHours(form.targetRangeMax);
+  const targetText = isRange ? `[${rawMin ?? "?"}, ${rawMax ?? "?"}]` : String(rawExact ?? "?");
+
+  // A raw half-hour edit writes straight back through the human-hours field so the
+  // two views never drift; a cleared/non-integer raw value clears the human field.
+  const setRaw = (key: "targetExact" | "targetRangeMin" | "targetRangeMax", raw: string) => {
+    if (raw === "") {
+      onRawTargetChange({ [key]: "" });
+      return;
+    }
+    // Strict integer half-hours — reject (don't truncate) "3.5"/"1e3"/negatives so a
+    // malformed raw edit can never silently rewrite the target to a different value.
+    const half = parseRawHalfHours(raw);
+    if (half === null) return;
+    onRawTargetChange({ [key]: formatHalfHours(half) });
+  };
+
+  return (
+    <details className="border border-line2 bg-panel" data-testid="contracted-solver-details">
+      <summary
+        className="cursor-pointer px-3.5 py-2 text-label font-semibold uppercase tracking-[0.03em] text-ink2"
+        data-testid="contracted-solver-details-toggle"
+      >
+        Solver details
+      </summary>
+      <div className="flex flex-col gap-3 border-t border-line2 p-3.5">
+        <pre
+          className="whitespace-pre-wrap font-mono text-label text-ink2"
+          data-testid="contracted-raw-encoding"
+        >
+          {`expression: ${expressionText}\ntarget: ${targetText}\nweight: .inf`}
+        </pre>
+        <div className="flex flex-col gap-1.5">
+          <span className="text-label font-semibold uppercase tracking-[0.03em] text-ink3">
+            Raw target (half-hours)
+          </span>
+          {isRange ? (
+            <div className="flex flex-wrap gap-3">
+              <label className="flex flex-col gap-1">
+                <span className="text-label text-ink3">Minimum</span>
+                <Input
+                  type="number"
+                  min={0}
+                  step={1}
+                  data-testid="contracted-raw-target-min"
+                  aria-label="Raw minimum target in half-hours"
+                  value={rawMin ?? ""}
+                  onChange={(e) => setRaw("targetRangeMin", e.target.value)}
+                  className="h-9 w-28 font-mono"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-label text-ink3">Maximum</span>
+                <Input
+                  type="number"
+                  min={0}
+                  step={1}
+                  data-testid="contracted-raw-target-max"
+                  aria-label="Raw maximum target in half-hours"
+                  value={rawMax ?? ""}
+                  onChange={(e) => setRaw("targetRangeMax", e.target.value)}
+                  className="h-9 w-28 font-mono"
+                />
+              </label>
+            </div>
+          ) : (
+            <Input
+              type="number"
+              min={0}
+              step={1}
+              data-testid="contracted-raw-target"
+              aria-label="Raw target in half-hours"
+              value={rawExact ?? ""}
+              onChange={(e) => setRaw("targetExact", e.target.value)}
+              className="h-9 w-28 font-mono"
+            />
+          )}
+          <span className="text-meta italic text-ink3">
+            Integer half-hours (2 per hour) — stays in sync with the hours field above.
+          </span>
+        </div>
+      </div>
+    </details>
+  );
+}
+
 export function ContractedForm({
   state,
   mode,
@@ -103,9 +266,27 @@ export function ContractedForm({
   const noPeople = people.items.length === 0 && people.groups.length === 0;
   const noDates = autoScopes.length === 0 && dateGroups.length === 0 && dateItems.length === 0;
 
+  // The CONCRETE coefficient domain (backend expansion, leaf sources only) — the
+  // exact day-state set the coverage bijection is defined over. Its own ids are the
+  // `selection` the sub-editor eligibility is derived from.
+  const coefficientDomain = useMemo(
+    () => buildContractedCoefficientDomain(state, form.countShiftTypes),
+    [state, form.countShiftTypes],
+  );
+  const coefficientSelection = useMemo(
+    () => contractedCoefficientIds(coefficientDomain),
+    [coefficientDomain],
+  );
+
+  function clearCoefficientErrors(prev: ContractedErrors): ContractedErrors {
+    return prev.coefficientErrorsById || prev.coefficientAggregate
+      ? { ...prev, coefficientErrorsById: undefined, coefficientAggregate: undefined }
+      : prev;
+  }
+
   function submit() {
-    const nextErrors = validateContractedForm(form);
-    if (Object.keys(nextErrors).length > 0) {
+    const nextErrors = validateContractedCommit(form, state);
+    if (hasContractedErrors(nextErrors)) {
       setErrors(nextErrors);
       return;
     }
@@ -224,6 +405,12 @@ export function ContractedForm({
         </div>
       )}
 
+      <LockedEncoding
+        policy={form.policy}
+        expressionError={errors.expression}
+        weightError={errors.weight}
+      />
+
       <FieldShell label="People" required error={errors.person}>
         <TransferList<string | number>
           idPrefix="contracted-people"
@@ -248,7 +435,12 @@ export function ContractedForm({
         />
       </FieldShell>
 
-      <FieldShell label="Count shift types" required error={errors.countShiftTypes}>
+      <FieldShell
+        label="Count shift types"
+        required
+        hint="Each selected worked shift and LEAVE needs a half-hour coefficient below"
+        error={errors.countShiftTypes}
+      >
         <TransferList<string | number>
           idPrefix="contracted-shift-types"
           keyOf={entityKey}
@@ -260,13 +452,26 @@ export function ContractedForm({
             // Disabled (numeric-id) options never fire `onToggle`, so this is
             // always a genuine string `ShiftTypeRef` at runtime.
             const shiftRef = ref as string;
-            setForm((prev) => ({
-              ...prev,
-              countShiftTypes: toggleInSelection(prev.countShiftTypes, shiftRef),
-            }));
-            setErrors((prev) =>
-              prev.countShiftTypes ? { ...prev, countShiftTypes: undefined } : prev,
-            );
+            setForm((prev) => {
+              const nextShiftTypes = toggleInSelection(prev.countShiftTypes, shiftRef);
+              // Re-sync coefficient pairs to the newly-eligible CONCRETE ids in the
+              // same update (FR-PR-73 parity with count-form) so re-adding a source
+              // yields a fresh blank row and coverage lines up with the bijection.
+              const nextDomain = buildContractedCoefficientDomain(state, nextShiftTypes);
+              return {
+                ...prev,
+                countShiftTypes: nextShiftTypes,
+                countShiftTypeCoefficients: syncCoefficientPairs(
+                  contractedCoefficientIds(nextDomain),
+                  prev.countShiftTypeCoefficients,
+                  nextDomain,
+                ),
+              };
+            });
+            setErrors((prev) => {
+              const cleared = clearCoefficientErrors(prev);
+              return cleared.countShiftTypes ? { ...cleared, countShiftTypes: undefined } : cleared;
+            });
           }}
           itemLabel="SHIFT TYPES"
           searchPlaceholder="Search shift types"
@@ -281,6 +486,30 @@ export function ContractedForm({
           removeAria={(l) => `Remove ${l} from count shift types`}
         />
       </FieldShell>
+
+      {coefficientSelection.length > 0 && (
+        <p className="text-meta italic text-ink3" data-testid="contracted-expanded-ids">
+          Concrete coverage: {coefficientSelection.join(", ")}
+        </p>
+      )}
+
+      <CoefficientFields
+        selection={coefficientSelection}
+        pairs={form.countShiftTypeCoefficients}
+        domain={coefficientDomain}
+        label="Shift Type"
+        testId="contracted-coefficient-fields"
+        errorsById={errors.coefficientErrorsById}
+        // Always surface the aggregate. Unlike count-form (where the aggregate is the
+        // mutually-exclusive overlap message), the contracted helper can emit a per-id
+        // error AND a simultaneous incomplete/extra-coverage aggregate — they are
+        // distinct concerns, so suppressing the aggregate would drop a required error.
+        aggregateError={errors.coefficientAggregate}
+        onChange={(next) => {
+          setForm((prev) => ({ ...prev, countShiftTypeCoefficients: next }));
+          setErrors((prev) => clearCoefficientErrors(prev));
+        }}
+      />
 
       <FieldShell label="Count dates" required error={errors.countDates}>
         {noDates ? (
@@ -301,6 +530,22 @@ export function ContractedForm({
           />
         )}
       </FieldShell>
+
+      <SolverDetails
+        form={form}
+        onRawTargetChange={(patch) => {
+          setForm((prev) => ({ ...prev, ...patch }));
+          setErrors((prev) => {
+            if (!prev.targetExact && !prev.targetRangeMin && !prev.targetRangeMax) return prev;
+            return {
+              ...prev,
+              targetExact: undefined,
+              targetRangeMin: undefined,
+              targetRangeMax: undefined,
+            };
+          });
+        }}
+      />
     </CardEditorForm>
   );
 }
