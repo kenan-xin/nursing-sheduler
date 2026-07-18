@@ -20,15 +20,28 @@ import { create } from "zustand";
 
 export type AppMode = "guided" | "advanced";
 
+/**
+ * Whether the persisted mode preference has been adopted yet (T08c). `ready`
+ * only after `useSyncModePersistence`'s post-mount reconciliation has run —
+ * before that, a route-validity gate (T08d) cannot yet trust `mode` to reflect
+ * the stored preference (SSR/first paint always render the `guided` default).
+ */
+export type ModeAdoption = "unhydrated" | "ready";
+
 export interface ModeState {
   mode: AppMode;
+  adoption: ModeAdoption;
   setMode: (mode: AppMode) => void;
   toggleMode: () => void;
+  /** Mark the persisted preference adopted. Idempotent; called once by
+   *  `useSyncModePersistence` after its post-mount reconciliation. */
+  markAdopted: () => void;
 }
 
 export function createModeStore(initial: AppMode = "guided") {
   return create<ModeState>((set, get) => ({
     mode: initial,
+    adoption: "unhydrated",
     setMode: (mode) => {
       set({ mode });
       persistMode(mode);
@@ -38,6 +51,7 @@ export function createModeStore(initial: AppMode = "guided") {
       set({ mode: next });
       persistMode(next);
     },
+    markAdopted: () => set({ adoption: "ready" }),
   }));
 }
 

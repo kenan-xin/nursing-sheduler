@@ -14,7 +14,7 @@
 // never editable/deletable (no affordance is rendered; the handlers guard anyway).
 
 import { useMemo } from "react";
-import Link from "next/link";
+import { GuardedLink } from "@/components/shell/guarded-link";
 import {
   addGroup,
   deleteGroup,
@@ -103,13 +103,13 @@ export function DatesScreen() {
             holidays are marked for you.
           </p>
         </div>
-        <Link
+        <GuardedLink
           href="/people"
           className="ns-btn ns-btn--primary h-11 px-5 text-body"
           data-testid="dates-continue"
         >
           Continue to staff <FaArrowRight className="size-3" />
-        </Link>
+        </GuardedLink>
       </header>
 
       <div className="ns-grid2 items-start">

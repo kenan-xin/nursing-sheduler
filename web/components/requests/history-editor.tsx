@@ -8,6 +8,7 @@
 
 import { Dialog } from "@base-ui/react/dialog";
 import { Button } from "@/components/ui/button";
+import { useLosableDraft } from "@/components/shell/use-losable-draft";
 import { cn } from "@/lib/utils";
 import { FaXmark } from "@/components/icons";
 
@@ -37,6 +38,9 @@ export function HistoryEditor({
   onClear,
   onClose,
 }: HistoryEditorProps) {
+  // FR-PR-06: register the open history-slot draft as a losable draft (T08a).
+  useLosableDraft("requests-history-editor", open, "Requests history editor");
+
   return (
     <Dialog.Root
       open={open}

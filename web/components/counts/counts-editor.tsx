@@ -98,7 +98,7 @@ export function CountsEditor() {
   // mutually exclusive with an open form draft: opening one dismisses the other.
   const [convertToGenericUid, setConvertToGenericUid] = useState<string | null>(null);
   // FR-PR-06: arm the shared open-draft navigation guard while a form is visible.
-  useCardEditorDraftGuard(!!draft);
+  useCardEditorDraftGuard("counts", !!draft);
   // Stale-open-edit guard (the entity-editor `isStale` pattern, ported to the
   // card-editor family): a draft formed against a stale cards slice (undo/redo
   // temporal travel, or an external cascade) visibly closes, and its Submit is

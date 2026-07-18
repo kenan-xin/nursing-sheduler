@@ -9,7 +9,7 @@
 // (one tracked store write per operation).
 
 import { useMemo, useState } from "react";
-import Link from "next/link";
+import { GuardedLink } from "@/components/shell/guarded-link";
 import { toast } from "sonner";
 import { FaCircleInfo, FaLayerGroup, FaTableCells } from "@/components/icons";
 // Not re-exported from the icon barrel (icons.tsx is owned by a concurrently
@@ -362,27 +362,27 @@ export function RequestsEditor() {
           {missingRequirement === "dates" && (
             <p className="text-body text-ink2">
               Set a roster date range on the{" "}
-              <Link href="/dates" className="font-semibold text-brandink underline">
+              <GuardedLink href="/dates" className="font-semibold text-brandink underline">
                 Dates
-              </Link>{" "}
+              </GuardedLink>{" "}
               screen before authoring shift requests.
             </p>
           )}
           {missingRequirement === "people" && (
             <p className="text-body text-ink2">
               Add at least one person on the{" "}
-              <Link href="/people" className="font-semibold text-brandink underline">
+              <GuardedLink href="/people" className="font-semibold text-brandink underline">
                 People
-              </Link>{" "}
+              </GuardedLink>{" "}
               screen before authoring shift requests.
             </p>
           )}
           {missingRequirement === "shiftTypes" && (
             <p className="text-body text-ink2">
               Add at least one shift type on the{" "}
-              <Link href="/shift-types" className="font-semibold text-brandink underline">
+              <GuardedLink href="/shift-types" className="font-semibold text-brandink underline">
                 Shift Types
-              </Link>{" "}
+              </GuardedLink>{" "}
               screen before authoring shift requests.
             </p>
           )}

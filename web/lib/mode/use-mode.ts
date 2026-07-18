@@ -5,10 +5,17 @@
 "use client";
 
 import { useEffect } from "react";
-import { useModeStore, readStoredMode, type AppMode } from "./mode";
+import { useModeStore, readStoredMode, type AppMode, type ModeAdoption } from "./mode";
 
 export function useAppMode(): AppMode {
   return useModeStore((s) => s.mode);
+}
+
+/** T08c: whether the persisted mode preference has been adopted yet. A
+ *  route-validity gate (T08d) must wait for `"ready"` before redirecting, so a
+ *  stored Advanced preference is never bounced by the initial Guided default. */
+export function useModeAdoption(): ModeAdoption {
+  return useModeStore((s) => s.adoption);
 }
 
 export function useModeActions() {
@@ -23,11 +30,16 @@ export function useModeActions() {
 // no mismatch. `setMode` write-through re-persists the same value (idempotent), so
 // nothing is clobbered. Ongoing changes persist via the store actions themselves.
 // Call once near the root of the client tree (inside the shell layout).
+//
+// `markAdopted` runs after reconciling — regardless of whether the stored value
+// differed from the default — so `useModeAdoption()` flips to `"ready"` exactly
+// once per mount, whether or not the preference actually changed.
 export function useSyncModePersistence(): void {
   useEffect(() => {
     const stored = readStoredMode();
     if (stored !== useModeStore.getState().mode) {
       useModeStore.getState().setMode(stored);
     }
+    useModeStore.getState().markAdopted();
   }, []);
 }

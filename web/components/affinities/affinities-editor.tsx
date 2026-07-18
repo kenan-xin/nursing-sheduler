@@ -67,7 +67,7 @@ export function AffinitiesEditor() {
   } = useAffinities();
   const [draft, setDraft] = useState<Draft | null>(null);
   // FR-PR-06: arm the shared open-draft navigation guard while a form is visible.
-  useCardEditorDraftGuard(!!draft);
+  useCardEditorDraftGuard("affinities", !!draft);
   const { isStale } = useCardEditorStaleGuard<AffinityCard>({
     cards: affinities,
     draftOpen: !!draft,

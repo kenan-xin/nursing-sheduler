@@ -18,6 +18,7 @@ import { useEffect, useState } from "react";
 import { Dialog } from "@base-ui/react/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useLosableDraft } from "@/components/shell/use-losable-draft";
 import { cn } from "@/lib/utils";
 import type { UiRequestCell } from "@/lib/scenario";
 import {
@@ -92,6 +93,8 @@ export function CellPreferenceEditor({
 }: CellPreferenceEditorProps) {
   const [draft, setDraft] = useState<Draft>(() => draftFromCells(cells, targets));
   const [error, setError] = useState<string | undefined>(undefined);
+  // FR-PR-06: register the open cell draft as a losable draft (T08a).
+  useLosableDraft("requests-cell-editor", open, "Requests cell editor");
 
   useEffect(() => {
     if (open) {

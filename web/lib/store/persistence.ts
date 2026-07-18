@@ -669,6 +669,13 @@ export interface GuardedStorage extends StateStorage {
  * rejection since `persist` ignores the returned promise) and surfaced via
  * `consumeWriteError`. `getItem` reads directly (reads need no ordering).
  *
+ * Newest-wins applies to errors too: a later `setItem` revision that succeeds
+ * clears any error left by an earlier one (the queue is strict FIFO, so an
+ * older revision always fully settles — success or failure — before a newer
+ * one starts; a newer success can therefore only ever supersede, never race,
+ * an older failure). Without this, a transient failure on an old revision
+ * would keep reporting `error` forever after a later write actually succeeded.
+ *
  * The inner adapter is created on first use, so the browser Dexie default is only
  * constructed on the client at first read/write — never during SSR.
  */
@@ -700,6 +707,7 @@ export function createGuardedStorage(createInner: () => StateStorage): GuardedSt
         try {
           await getInner().setItem(name, value);
           lastWrittenRevision = revision;
+          writeError = null; // this revision is newer than any prior error
         } catch (error) {
           writeError = error;
           throw error;

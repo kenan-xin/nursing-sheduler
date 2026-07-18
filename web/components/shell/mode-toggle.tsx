@@ -19,7 +19,8 @@
 // are unchanged.
 
 import { useRef } from "react";
-import { useAppMode, useModeActions } from "@/lib/mode/use-mode";
+import { useAppMode } from "@/lib/mode/use-mode";
+import { useModeTransition } from "./use-mode-transition";
 import { cn } from "@/lib/utils";
 import type { AppMode } from "@/lib/mode/mode";
 
@@ -30,16 +31,22 @@ const OPTIONS: { value: AppMode; label: string }[] = [
 
 export function ModeToggle() {
   const mode = useAppMode();
-  const { setMode } = useModeActions();
+  const { requestModeChange } = useModeTransition();
   const tabsRef = useRef<Array<HTMLButtonElement | null>>([]);
 
   // Automatic-activation tabs: select `value` and move focus onto its tab. The
   // selected tab reclaims tabIndex=0 after the re-render; programmatic .focus()
-  // works regardless of the (pre-render) tabIndex.
+  // works regardless of the (pre-render) tabIndex. Both click and keyboard
+  // activation route through the same mode-transition transaction (T08c) —
+  // never a bare `setMode`. Focus moves ONLY from `onCommitted` (T08f P2):
+  // today the transaction always commits synchronously (no shipped route is
+  // ever invalid), so this is indistinguishable from moving focus eagerly —
+  // but once T08d can stage a draft-aware redirect, moving focus before the
+  // mode has actually changed would strand it on the not-yet-selected tab if
+  // the transition is later canceled.
   const activate = (value: AppMode) => {
-    setMode(value);
     const idx = OPTIONS.findIndex((o) => o.value === value);
-    tabsRef.current[idx]?.focus();
+    requestModeChange(value, () => tabsRef.current[idx]?.focus());
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {

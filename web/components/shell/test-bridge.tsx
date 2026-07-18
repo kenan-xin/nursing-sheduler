@@ -25,8 +25,8 @@ declare global {
       scenario: typeof useScenarioStore;
       hot: typeof useHotStore;
       isDirty: () => boolean;
-      // The nav-guard store, so specs can drive the draft-only nav/unload guard
-      // (FR-PR-06) via `setDraftOpen` without mounting a real card editor.
+      // The nav-guard store, so specs can drive the losable-draft nav/unload guard
+      // (FR-PR-06) via `registerDraft` without mounting a real card editor.
       navGuard: typeof useNavGuardStore;
     };
   }

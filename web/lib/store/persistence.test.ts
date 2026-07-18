@@ -53,8 +53,36 @@ describe("guarded storage", () => {
     let call = 0;
     const inner: StateStorage = {
       getItem: async (name) => backing.get(name) ?? null,
+      setItem: async () => {
+        // Every write fails; the newest revision still leaves an error.
+        call++;
+        throw new Error("disk full");
+      },
+      removeItem: async (name) => {
+        backing.delete(name);
+      },
+    };
+    const guard = createGuardedStorage(() => inner);
+
+    guard.setItem("k", "v1"); // rejects internally
+    guard.setItem("k", "v2"); // newest — also rejects, so the error stands
+    await guard.drain();
+
+    expect(call).toBe(2);
+    expect(guard.consumeWriteError()).toBeInstanceOf(Error);
+    // The error is consumed once.
+    expect(guard.consumeWriteError()).toBeNull();
+  });
+
+  it("a newer successful write supersedes an older failure (newest-wins applies to errors)", async () => {
+    const backing = new Map<string, string>();
+    let call = 0;
+    const inner: StateStorage = {
+      getItem: async (name) => backing.get(name) ?? null,
       setItem: async (name, value) => {
-        // First write fails; the second (newest) must still land.
+        // v1 fails; v2 (newest) succeeds and must clear the stale v1 error —
+        // otherwise a transient failure would keep reporting `error` forever
+        // after a later write actually landed.
         if (call++ === 0) throw new Error("disk full");
         backing.set(name, value);
       },
@@ -65,12 +93,10 @@ describe("guarded storage", () => {
     const guard = createGuardedStorage(() => inner);
 
     guard.setItem("k", "v1"); // rejects internally
-    guard.setItem("k", "v2"); // newest — must be persisted
+    guard.setItem("k", "v2"); // newest — succeeds, superseding v1's error
     await guard.drain();
 
     expect(backing.get("k")).toBe("v2");
-    expect(guard.consumeWriteError()).toBeInstanceOf(Error);
-    // The error is consumed once.
     expect(guard.consumeWriteError()).toBeNull();
   });
 

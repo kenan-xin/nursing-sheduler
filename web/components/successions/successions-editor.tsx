@@ -67,7 +67,7 @@ export function SuccessionsEditor() {
   } = useSuccessions();
   const [draft, setDraft] = useState<Draft | null>(null);
   // FR-PR-06: arm the shared open-draft navigation guard while a form is visible.
-  useCardEditorDraftGuard(!!draft);
+  useCardEditorDraftGuard("successions", !!draft);
   const { isStale } = useCardEditorStaleGuard<SuccessionCard>({
     cards: successions,
     draftOpen: !!draft,

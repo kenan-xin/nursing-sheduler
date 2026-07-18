@@ -12,7 +12,6 @@
 // (acceptance row 2), the global delete-confirm dialog (ticket item 1), the
 // browser-level dirty guard, and the e2e driving seam.
 
-import { useRouter } from "next/navigation";
 import { Toaster } from "sonner";
 import { useTheme } from "@/components/theme/theme-provider";
 import { AppSideNav } from "./app-side-nav";
@@ -20,13 +19,14 @@ import { TopBar } from "./top-bar";
 import { HydrationGate } from "./hydration-gate";
 import { ConfirmDialog } from "./confirm-dialog";
 import { TestBridge } from "./test-bridge";
-import { useDirtyBeforeUnload } from "./use-guarded-navigation";
+import { useBrowserBackGuard, useDirtyBeforeUnload } from "./use-guarded-navigation";
 import { useNavGuardStore } from "./nav-guard-store";
 import { useConfirmStore } from "./confirm-store";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { theme } = useTheme();
   useDirtyBeforeUnload();
+  useBrowserBackGuard();
 
   return (
     <div className="flex h-dvh overflow-hidden">
@@ -59,15 +59,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   );
 }
 
-// Dirty-nav guard (acceptance row 2). Driven by the shared nav-guard store so every
-// navigation path funnels through this one dialog. The router push runs here on
-// confirm; the store owns only the pending path + open flag.
+// Navigation-intent guard (T08a/b, acceptance row 2). Driven by the shared
+// nav-guard store so every push/replace/back funnels through this one dialog.
+// `confirm`/`cancel` run the staged intent's own `commit`/`onCancel` — the
+// shell renders the dialog but holds no router or history logic itself.
 function DirtyNavDialog() {
-  const router = useRouter();
   const open = useNavGuardStore((s) => s.open);
-  const pendingPath = useNavGuardStore((s) => s.pendingPath);
+  const confirm = useNavGuardStore((s) => s.confirm);
   const cancel = useNavGuardStore((s) => s.cancel);
-  const clear = useNavGuardStore((s) => s.clear);
 
   return (
     <ConfirmDialog
@@ -80,11 +79,7 @@ function DirtyNavDialog() {
       confirmLabel="Leave without saving"
       cancelLabel="Stay"
       variant="destructive"
-      onConfirm={() => {
-        const path = pendingPath;
-        clear();
-        if (path) router.push(path);
-      }}
+      onConfirm={confirm}
     />
   );
 }

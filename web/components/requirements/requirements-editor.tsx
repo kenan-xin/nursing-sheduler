@@ -114,7 +114,7 @@ export function RequirementsEditor() {
   } = useRequirements();
   const [draft, setDraft] = useState<Draft | null>(null);
   // FR-PR-06: arm the shared open-draft navigation guard while a form is visible.
-  useCardEditorDraftGuard(!!draft);
+  useCardEditorDraftGuard("requirements", !!draft);
   const { isStale } = useCardEditorStaleGuard<RequirementCard>({
     cards: requirements,
     draftOpen: !!draft,

@@ -26,6 +26,7 @@
 import * as React from "react";
 import { toast } from "sonner";
 import { useScenarioStore } from "@/lib/store";
+import { useLosableDraft } from "@/components/shell/use-losable-draft";
 import type { ScenarioUiState } from "@/lib/scenario";
 import { RenameCollisionError } from "@/lib/cascade";
 import { Button } from "@/components/ui/button";
@@ -221,6 +222,12 @@ export function EntityEditor<TItem extends EditorItemBase>({
   const [uploadOpen, setUploadOpen] = React.useState(false);
 
   const editing = sel !== null;
+  // FR-PR-06: register the open add/edit/inline form as a losable draft (T08a).
+  useLosableDraft(
+    `entity-editor:${descriptor.domain}`,
+    editing,
+    `${descriptor.labels.itemPlural} editor`,
+  );
 
   // Staleness detection for an open add/edit/inline form. When a form OPENS we capture
   // the item + group slice references it was formed against ("form-open token"), held
