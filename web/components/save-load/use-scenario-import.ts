@@ -6,8 +6,8 @@
 // replace, fresh baseline, history cleared) -> uncredited-LEAVE fence. Both
 // inbound entry points call `handleFile` and render the same
 // `VersionConfirmModal` / `ImportWarningsBanner` from the state this hook
-// returns -- `load-controls.tsx` (Upload) and `scenario-yaml-preview.tsx`
-// (Edit YAML).
+// returns -- the Upload modal and the Edit-YAML Apply, both wired in
+// `save-load-workspace.tsx`.
 
 import { useState } from "react";
 import { toast } from "sonner";
@@ -42,6 +42,7 @@ export interface UseScenarioImportOptions {
 export interface UseScenarioImportResult {
   issues: ScenarioValidationIssue[] | null;
   clearIssues: () => void;
+  clearImportState: () => void;
   confirm: PendingImportConfirm | null;
   warnings: string[] | null;
   dismissWarnings: () => void;
@@ -105,6 +106,11 @@ export function useScenarioImport(options: UseScenarioImportOptions = {}): UseSc
   return {
     issues,
     clearIssues: () => setIssues(null),
+    clearImportState: () => {
+      setIssues(null);
+      setStaged(null);
+      setWarnings(null);
+    },
     confirm,
     warnings,
     dismissWarnings: () => setWarnings(null),

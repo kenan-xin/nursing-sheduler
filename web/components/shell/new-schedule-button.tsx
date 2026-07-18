@@ -12,13 +12,18 @@ import { useScenarioStore, useHotStore, resetToNewScenario } from "@/lib/store";
 import { ConfirmDialog } from "./confirm-dialog";
 import { toast } from "sonner";
 
-export function StartOverCard() {
+export interface StartOverCardProps {
+  onResetComplete?: () => void;
+}
+
+export function StartOverCard({ onResetComplete }: StartOverCardProps) {
   const [open, setOpen] = useState(false);
   const scenario = useScenarioStore;
   const hot = useHotStore;
 
   const handleConfirm = async () => {
     await resetToNewScenario(scenario, hot);
+    onResetComplete?.();
     toast.success("New schedule created");
   };
 

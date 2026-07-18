@@ -15,9 +15,10 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { stringify } from "yaml";
+import { parse, stringify } from "yaml";
 import { serializeScenario, validateScenario } from "../serialize";
 import { importScenarioYaml } from "../import-scenario";
+import { currentAppVersion } from "../app-version";
 import { toCanonicalScenarioDocument } from "../canonical";
 import { anonymizeDocument, buildIdMap } from "../anonymize";
 import { buildShiftTypeIndexMap } from "../schemas/shift-type-map";
@@ -36,6 +37,7 @@ interface OracleResponse {
   model?: Record<string, unknown>;
   map?: Record<string, number[]>;
   equivalent?: boolean;
+  appVersion?: { raw: unknown; roundtrip: unknown };
   csv?: string | null;
   xlsxBytes?: number;
   cells?: Record<string, unknown>;
@@ -460,6 +462,13 @@ preferences:
         const roundtripYaml = serializeScenario(hydrate(imported.target));
         const res = callOracle({ op: "roundtrip", raw, roundtrip: roundtripYaml });
         expect(res.ok).toBe(true);
+        // `appVersion` is provenance metadata (C1 CON-YAML-03; FR-SL-02): the
+        // producer re-stamps the current build version on every serialize, so it
+        // is the one field a round-trip may mutate. The oracle excludes it from
+        // the semantic comparison and surfaces it separately; pin it exactly so
+        // a dropped stamp or a forwarded stale version fails here by name.
+        const rawAppVersion = (parse(raw) as { appVersion?: string }).appVersion ?? null;
+        expect(res.appVersion).toEqual({ raw: rawAppVersion, roundtrip: currentAppVersion() });
         expect(res.equivalent).toBe(true);
       });
     }

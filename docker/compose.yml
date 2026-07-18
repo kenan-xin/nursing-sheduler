@@ -39,7 +39,9 @@ services:
       # Trusted public scheme+host that drives the cookie `Secure` rule (consumed
       # by the cookie-handling BFF routes in T06 — passed through here). This is a
       # RUNTIME-only value, so it is not required to parse for `build`; `make up`
-      # validates it is non-empty before starting.
+      # validates it is non-empty before starting. Blank injection is deliberate:
+      # the web runtime fails closed on it. `make verify-deploy` passes its own
+      # throwaway origin for the gated stack (see docker/verify-deploy.sh).
       PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-}
     depends_on:
       backend:

@@ -63,7 +63,8 @@ are stamped from the **same** value, so the FR-OE-29 mismatch check is meaningfu
 ## Non-streaming deploy gates
 
 Run them all reproducibly (no `docker/.env` needed — this path does not start
-cloudflared):
+cloudflared, and the script passes its own throwaway `PUBLIC_ORIGIN` to the gated
+stack since the production web runtime fails closed on a blank one):
 
 ```bash
 make verify-deploy      # docker/verify-deploy.sh — exits non-zero on any failure

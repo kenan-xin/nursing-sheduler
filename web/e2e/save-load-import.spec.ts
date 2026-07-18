@@ -1,20 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 
-// T17b-2 coverage — the Load flow UI (`LoadControls`: Upload button + modal,
-// version-mismatch confirm, import warnings banner, full-state replace).
-// Kept in its own spec file (rather than extending e2e/save-load.spec.ts) to
-// avoid colliding with that file's concurrent T17a-4/T17a-5 growth; both drive
-// the real T04 store through the same `window.__nsStore` seam
-// (test-bridge.tsx), mirroring e2e/app-shell-rebuild.spec.ts.
-//
-// NOTE: `LoadControls` is a self-contained component (T17b-2) mounted onto the
-// Save & Load screen by the T17 orchestrator once the concurrently edited page
-// shell (T17b-1 / qq0.17.5) and this ticket have both landed. This spec targets
-// the `LoadControls` testids (`load-upload-button`, `upload-file-input`,
-// `upload-load-sample-button`, `confirm-dialog-*`, `scenario-export-issues`,
-// `import-warnings-banner`) unconditionally on `/save-and-load`; it will only
-// pass once that mount lands, at which point the T17 end-of-ticket Playwright
-// gate exercises it.
+// T17b-2 coverage — the Load flow UI: the Scenario-file card's Upload button
+// opens the upload modal, then the shared import pipeline (version-mismatch
+// confirm, import warnings banner, full-state replace). Kept in its own spec
+// file (rather than extending e2e/save-load.spec.ts) to avoid colliding with
+// that file's growth; both drive the real T04 store through the same
+// `window.__nsStore` seam (test-bridge.tsx), mirroring
+// e2e/app-shell-rebuild.spec.ts.
 
 type NsWindow = {
   __nsStore: {
@@ -91,7 +83,7 @@ test.beforeEach(async ({ page }) => {
 test.describe("T17b-2 — Load flow UI", () => {
   test("Upload opens the modal with a dropzone and a load-sample affordance", async ({ page }) => {
     await gotoReadySaveAndLoad(page);
-    await page.getByTestId("load-upload-button").click();
+    await page.getByTestId("scenario-upload-button").click();
     await expect(page.getByTestId("upload-modal")).toBeVisible();
     await expect(page.getByTestId("upload-dropzone")).toBeVisible();
     await expect(page.getByTestId("upload-load-sample-button")).toBeVisible();
@@ -99,7 +91,7 @@ test.describe("T17b-2 — Load flow UI", () => {
 
   test("Load a sample scenario replaces state and clears undo history", async ({ page }) => {
     await gotoReadySaveAndLoad(page);
-    await page.getByTestId("load-upload-button").click();
+    await page.getByTestId("scenario-upload-button").click();
     await page.getByTestId("upload-load-sample-button").click();
 
     await expect.poll(() => rangeStart(page)).not.toBe(null);
@@ -111,14 +103,16 @@ test.describe("T17b-2 — Load flow UI", () => {
     await gotoReadySaveAndLoad(page);
     const before = await rangeStart(page);
 
-    await page.getByTestId("load-upload-button").click();
+    await page.getByTestId("scenario-upload-button").click();
     await page.getByTestId("upload-file-input").setInputFiles({
       name: "bad.yaml",
       mimeType: "text/yaml",
       buffer: Buffer.from(INVALID_YAML),
     });
 
-    await expect(page.getByTestId("scenario-export-issues")).toBeVisible();
+    await expect(
+      page.getByTestId("scenario-file-card").getByTestId("scenario-export-issues"),
+    ).toBeVisible();
     expect(await rangeStart(page)).toBe(before);
   });
 
@@ -126,7 +120,7 @@ test.describe("T17b-2 — Load flow UI", () => {
     await gotoReadySaveAndLoad(page);
     const before = await rangeStart(page);
 
-    await page.getByTestId("load-upload-button").click();
+    await page.getByTestId("scenario-upload-button").click();
     await page.getByTestId("upload-file-input").setInputFiles({
       name: "no-version.yaml",
       mimeType: "text/yaml",
@@ -144,7 +138,7 @@ test.describe("T17b-2 — Load flow UI", () => {
   test("a version mismatch's Continue commits the load", async ({ page }) => {
     await gotoReadySaveAndLoad(page);
 
-    await page.getByTestId("load-upload-button").click();
+    await page.getByTestId("scenario-upload-button").click();
     await page.getByTestId("upload-file-input").setInputFiles({
       name: "mismatch.yaml",
       mimeType: "text/yaml",

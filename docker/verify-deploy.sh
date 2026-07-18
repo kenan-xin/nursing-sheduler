@@ -9,6 +9,10 @@
 #   - a deliberate mismatch (web stamped differently) makes equality FAIL as expected
 # Exits non-zero on any failed assertion. The production named-tunnel streaming
 # smoke stays manual (T16) — it needs external Cloudflare state.
+#
+# The production web runtime refuses an unset/blank PUBLIC_ORIGIN (fail-closed,
+# web/lib/backend.ts), so this gate supplies its own throwaway origin on the
+# host-published port. It never reads docker/.env — verification stays hermetic.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -24,6 +28,9 @@ COMPOSE="docker compose -f docker/compose.yml"
 WEB_PORT=3000
 MIS_PORT=3001
 MIS_VER="9.9.9-mismatch"
+# Throwaway origin for the gated stack only; real deploys set PUBLIC_ORIGIN via
+# docker/.env (`make up` validates it). Blank here would reproduce the audit P0.
+PUBLIC_ORIGIN="http://localhost:${WEB_PORT}"
 PASS=0
 FAIL=0
 ok() { echo "  PASS: $1"; PASS=$((PASS + 1)); }
@@ -40,7 +47,7 @@ echo "== build backend+web (APP_VERSION=$APP_VERSION) =="
 APP_VERSION="$APP_VERSION" $COMPOSE build backend web >/dev/null || { echo "FAIL: build"; exit 1; }
 
 echo "== up backend+web =="
-APP_VERSION="$APP_VERSION" $COMPOSE up -d backend web >/dev/null || { echo "FAIL: up"; exit 1; }
+APP_VERSION="$APP_VERSION" PUBLIC_ORIGIN="$PUBLIC_ORIGIN" $COMPOSE up -d backend web >/dev/null || { echo "FAIL: up"; exit 1; }
 
 echo "== wait for web health =="
 st=none
@@ -93,7 +100,8 @@ else
   docker build -f docker/Dockerfile.web --target runner --build-arg APP_VERSION="$MIS_VER" \
     -t vd-web-mismatch:test . >/dev/null 2>&1 || bad "mismatch web build failed"
   docker run -d --rm --name vd-web-mismatch --network "$net" \
-    -e BACKEND_API_URL=http://backend:8000 -p "${MIS_PORT}:3000" vd-web-mismatch:test >/dev/null 2>&1
+    -e BACKEND_API_URL=http://backend:8000 -e PUBLIC_ORIGIN="http://localhost:${MIS_PORT}" \
+    -p "${MIS_PORT}:3000" vd-web-mismatch:test >/dev/null 2>&1
   for _ in $(seq 1 20); do curl -fsS "http://127.0.0.1:${MIS_PORT}/" >/dev/null 2>&1 && break; sleep 1; done
   mis_health="$(curl -fsS "http://127.0.0.1:${MIS_PORT}/api/health" 2>/dev/null | sed -n 's/.*"appVersion":"\([^"]*\)".*/\1/p')"
   if docker exec vd-web-mismatch sh -c "grep -rq \"$MIS_VER\" .next/static 2>/dev/null"; then

@@ -1,17 +1,18 @@
 // @vitest-environment jsdom
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { prepareScenarioLoad, serializeScenario } from "@/lib/scenario";
 import { makeValidUiState } from "@/lib/scenario/test-fixtures";
 import {
   drainScenarioPersist,
   loadScenario,
+  pickScenario,
   resetToNewScenario,
   useHotStore,
   useScenarioStore,
 } from "@/lib/store";
-import { ScenarioFileCard } from "./scenario-file-card";
+import { ScenarioFileCard, type ScenarioFileCardProps } from "./scenario-file-card";
 
 async function seedValidScenario() {
   await resetToNewScenario(useScenarioStore, useHotStore);
@@ -19,6 +20,20 @@ async function seedValidScenario() {
   const result = prepareScenarioLoad(serializeScenario(makeValidUiState()));
   if (!result.target) throw new Error("fixture must normalize cleanly");
   loadScenario(useScenarioStore, useHotStore, result.target);
+}
+
+function renderCard(overrides: Partial<ScenarioFileCardProps> = {}) {
+  const props: ScenarioFileCardProps = {
+    scenario: pickScenario(useScenarioStore.getState()),
+    canEditYaml: true,
+    editing: false,
+    importIssues: null,
+    onUpload: vi.fn(),
+    onStartEdit: vi.fn(),
+    ...overrides,
+  };
+  render(<ScenarioFileCard {...props} />);
+  return props;
 }
 
 beforeEach(async () => {
@@ -29,14 +44,62 @@ afterEach(() => {
   cleanup();
 });
 
-describe("ScenarioFileCard — render (no infinite-loop regression)", () => {
-  // Renders the component against the real store. `useScenarioStore(pickScenario)`
-  // builds a fresh object each call; without `useShallow` this loops
-  // ("Maximum update depth exceeded"), which throws and fails this render.
-  it("mounts without a render loop", () => {
-    render(<ScenarioFileCard />);
-    expect(screen.getByTestId("scenario-file-card")).toBeInTheDocument();
-    expect(screen.getByTestId("scenario-download-button")).toBeInTheDocument();
+describe("ScenarioFileCard — the prototype's four file actions", () => {
+  it("renders Download, Upload, Copy, and Edit YAML together in the canonical order", () => {
+    renderCard();
+    const card = screen.getByTestId("scenario-file-card");
+    const buttons = within(card).getAllByRole("button");
+    expect(buttons.map((button) => button.getAttribute("data-testid"))).toEqual([
+      "scenario-download-button",
+      "scenario-upload-button",
+      "scenario-copy-button",
+      "scenario-edit-yaml-button",
+    ]);
+  });
+
+  it("Upload and Edit YAML are triggers owned by the workspace container", () => {
+    const props = renderCard();
+
+    fireEvent.click(screen.getByTestId("scenario-upload-button"));
+    expect(props.onUpload).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByTestId("scenario-edit-yaml-button"));
+    expect(props.onStartEdit).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables Edit YAML when the draft has no valid export to seed from, or while already editing", () => {
+    const { rerender } = render(
+      <ScenarioFileCard
+        scenario={pickScenario(useScenarioStore.getState())}
+        canEditYaml={false}
+        editing={false}
+        importIssues={null}
+        onUpload={vi.fn()}
+        onStartEdit={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("scenario-edit-yaml-button")).toBeDisabled();
+
+    rerender(
+      <ScenarioFileCard
+        scenario={pickScenario(useScenarioStore.getState())}
+        canEditYaml
+        editing
+        importIssues={null}
+        onUpload={vi.fn()}
+        onStartEdit={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("scenario-edit-yaml-button")).toBeDisabled();
+  });
+
+  it("surfaces a failed Upload's V-issues below the action row", () => {
+    renderCard({
+      importIssues: [{ path: "preferences[0]", message: "Unknown preference type" }],
+    });
+    expect(screen.getByTestId("scenario-export-issues")).toHaveTextContent(
+      "Unknown preference type",
+    );
   });
 });
 
@@ -60,7 +123,7 @@ describe("ScenarioFileCard — Copy clipboard failure (FR-SL-09)", () => {
     });
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    render(<ScenarioFileCard />);
+    renderCard();
     fireEvent.click(screen.getByTestId("scenario-copy-button"));
 
     await waitFor(() =>
@@ -79,7 +142,7 @@ describe("ScenarioFileCard — Copy clipboard failure (FR-SL-09)", () => {
       configurable: true,
     });
 
-    render(<ScenarioFileCard />);
+    renderCard();
     fireEvent.click(screen.getByTestId("scenario-copy-button"));
 
     await waitFor(() =>

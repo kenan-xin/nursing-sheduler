@@ -1,21 +1,16 @@
-// Save & Load (T08 shell, T17a-4 Scenario-file card + read-only preview,
-// T17a-5 Anonymise card). The dedicated persistence surface: the browser
-// auto-save explanation, the stateful persistence status (Restoring / Saving
-// / Saved / Save failed), the Scenario-file card (Download/Copy — Upload/Edit
-// YAML are later tickets), the destructive "Start over" reset (relocated here
-// from the top bar per the prototype), the Anonymise card (3 toggles +
-// Download-anonymised, DL10 D2), and the read-only YAML preview, the build
-// version. A two-column layout (actions left, preview right) faithful to
-// ScreenSaveLoad.dc.html.
+// Save & Load (T08 shell, T17 Save/Load + anonymise). The dedicated persistence
+// surface: the browser auto-save explanation, the stateful persistence status
+// (Restoring / Saving / Saved / Save failed), and the workspace below — the
+// Scenario-file card (Download / Upload / Copy / Edit YAML, per the prototype),
+// the destructive "Start over" reset (relocated here from the top bar per the
+// prototype), the Anonymise card (3 toggles + Download-anonymised, DL10 D2),
+// and the YAML preview/editor panel with the build version. A two-column
+// layout (actions left, preview right) faithful to ScreenSaveLoad.dc.html.
 
-import { StartOverCard } from "@/components/shell/new-schedule-button";
 import { PersistenceBadge } from "@/components/shell/persistence-status";
 import { AppVersion } from "@/components/app-version";
 import { FaFloppyDisk } from "@/components/icons";
-import { AnonymiseCard } from "@/components/save-load/anonymise-card";
-import { LoadControls } from "@/components/save-load/load-controls";
-import { ScenarioFileCard } from "@/components/save-load/scenario-file-card";
-import { ScenarioYamlPreview } from "@/components/save-load/scenario-yaml-preview";
+import { SaveLoadWorkspace } from "@/components/save-load/save-load-workspace";
 
 export default function SaveAndLoadPage() {
   return (
@@ -55,15 +50,7 @@ export default function SaveAndLoadPage() {
         <AppVersion />
       </section>
 
-      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
-        <div className="flex flex-col gap-6">
-          <ScenarioFileCard />
-          <LoadControls />
-          <StartOverCard />
-          <AnonymiseCard />
-        </div>
-        <ScenarioYamlPreview />
-      </div>
+      <SaveLoadWorkspace />
     </div>
   );
 }

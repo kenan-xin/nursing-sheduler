@@ -1,9 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
 
-// T17a-4/T17a-5 coverage — the Save screen shell's Scenario-file card
-// (Download/Copy), read-only YAML preview, and Anonymise card (3 toggles +
-// Download-anonymised). Drives the real T04 store through the
-// `window.__nsStore` seam (test-bridge.tsx), mirroring e2e/app-shell-rebuild.spec.ts.
+// T17 coverage — the Save screen shell's Scenario-file card (Download / Upload /
+// Copy / Edit YAML, per the prototype's action group), read-only YAML preview,
+// and Anonymise card (3 toggles + Download-anonymised). Drives the real T04
+// store through the `window.__nsStore` seam (test-bridge.tsx), mirroring
+// e2e/app-shell-rebuild.spec.ts.
 //
 // Dirty-machinery decision under test: Download clears dirty (`markSaved`) on a
 // SUCCESSFUL write only; Copy and Download-anonymised never clear dirty; an
@@ -95,6 +96,25 @@ test.beforeEach(async ({ page }) => {
 });
 
 test.describe("T17a-4 — Scenario-file card + read-only preview", () => {
+  test("all four prototype file actions are co-located in the Scenario file card in canonical order; no separate Load card remains", async ({
+    page,
+  }) => {
+    await gotoReadySaveAndLoad(page);
+    const card = page.getByTestId("scenario-file-card");
+
+    const testids = await card
+      .locator("button[data-testid]")
+      .evaluateAll((els) => els.map((el) => el.getAttribute("data-testid")));
+    expect(testids).toEqual([
+      "scenario-download-button",
+      "scenario-upload-button",
+      "scenario-copy-button",
+      "scenario-edit-yaml-button",
+    ]);
+
+    await expect(page.getByTestId("load-controls")).toHaveCount(0);
+  });
+
   test("the ● SAVED badge (browser auto-save status) is present", async ({ page }) => {
     await gotoReadySaveAndLoad(page);
     const badge = page.getByTestId("auto-save-status").getByTestId("persistence-badge");

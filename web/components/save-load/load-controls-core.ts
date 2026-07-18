@@ -1,4 +1,4 @@
-// Pure core for the T17b-2 Load flow UI. Kept out of `load-controls.tsx` so the
+// Pure core for the T17b-2 Load flow UI. Kept out of the UI components so the
 // version-mismatch wording and the non-blocking uncredited-LEAVE detector are
 // unit-testable without mounting a component, mirroring the established
 // `scenario-file-export.ts` pure-core / `-card.tsx` UI split.

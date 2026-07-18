@@ -48,7 +48,7 @@ const INSTRUCTIONS = [
   "Select Preceptors — these are the senior staff who must cover (e.g. supervising nurses).",
   "Select Preceptees — these are the people who must be covered (e.g. students, mentees).",
   "Select the Shift Types this rule applies to (e.g. Day shift).",
-  "Set the Weight. Use 1 (default) for a soft preference or +Infinity (∞) for a hard require the solver cannot violate.",
+  "This covering is always enforced as a hard rule — the solver ignores its weight, so there is no soft/hard dial here.",
   "Use Edit / Duplicate / Delete on a saved rule to manage it. Drag cards to reorder.",
 ] as const;
 

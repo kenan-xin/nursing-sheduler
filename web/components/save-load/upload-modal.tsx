@@ -6,7 +6,7 @@
 // the dropped/selected file to TEXT and hands it to `onFile` (or defers to
 // `onLoadSample` for the demo affordance) — it knows nothing about
 // `prepareScenarioLoad`, the version gate, or the store; that wiring lives in
-// `load-controls.tsx` so this stays a dumb, reusable file picker.
+// `save-load-workspace.tsx` so this stays a dumb, reusable file picker.
 
 import { useState } from "react";
 import { Dialog } from "@base-ui/react/dialog";

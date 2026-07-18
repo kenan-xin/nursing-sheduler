@@ -179,11 +179,24 @@ def _atomize(model_dump):
 def op_roundtrip(req):
     """Import round-trip: load raw YAML and the JS-round-tripped YAML, then assert
     semantic-model-projection equivalence (raw -> Python vs
-    raw -> import -> normalize -> canonical -> YAML -> Python)."""
+    raw -> import -> normalize -> canonical -> YAML -> Python).
+
+    `appVersion` is frontend provenance metadata, not scenario semantics (C1
+    CON-YAML-03; FR-SL-02 — every save re-stamps the current build version), so
+    it is excluded from the comparison and returned separately for explicit
+    assertion. Every other model field stays under strict comparison.
+    """
     try:
         raw = _atomize(_json_safe(_dump(load_data(req["raw"].encode("utf-8")))))
         trip = _atomize(_json_safe(_dump(load_data(req["roundtrip"].encode("utf-8")))))
-        return {"ok": True, "equivalent": raw == trip, "raw": raw, "roundtrip": trip}
+        app_version = {"raw": raw.pop("appVersion", None), "roundtrip": trip.pop("appVersion", None)}
+        return {
+            "ok": True,
+            "equivalent": raw == trip,
+            "raw": raw,
+            "roundtrip": trip,
+            "appVersion": app_version,
+        }
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": str(e), "errorType": type(e).__name__}
 

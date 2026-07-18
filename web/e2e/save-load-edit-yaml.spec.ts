@@ -1,12 +1,13 @@
 import { expect, test, type Page } from "@playwright/test";
 
-// T17b-3 coverage — the right-panel Edit-YAML mode (`ScenarioYamlPreview`):
-// Edit toggles the read-only `<pre>` into a textarea seeded from the same
-// `prepareExport` YAML, Apply drives the SAME `useScenarioImport` pipeline as
-// the Upload entry point (e2e/save-load-import.spec.ts) — block on V-issues,
-// gate on `classifyImportVersion`, full-state replace via `loadScenario` — and
-// Cancel discards the draft with no state change. Kept in its own spec file
-// per e2e/save-load-import.spec.ts's convention, to avoid colliding with the
+// T17b-3 coverage — the right-panel Edit-YAML mode (`ScenarioYamlPreview`,
+// entered via the Scenario-file card's Edit YAML button): Edit swaps the
+// read-only `<pre>` for a textarea seeded from the same `prepareExport` YAML,
+// Apply drives the SAME `useScenarioImport` pipeline as the Upload entry point
+// (e2e/save-load-import.spec.ts) — block on V-issues, gate on
+// `classifyImportVersion`, full-state replace via `loadScenario` — and Cancel
+// discards the draft with no state change. Kept in its own spec file per
+// e2e/save-load-import.spec.ts's convention, to avoid colliding with the
 // concurrently growing e2e/save-load.spec.ts. Drives the real T04 store
 // through the `window.__nsStore` seam (test-bridge.tsx).
 
@@ -150,7 +151,7 @@ test.describe("T17b-3 — Edit-YAML mode", () => {
     const preview = page.getByTestId("scenario-yaml-preview");
     const previewText = await preview.getByTestId("scenario-yaml-content").textContent();
 
-    await preview.getByTestId("yaml-edit-toggle").click();
+    await page.getByTestId("scenario-edit-yaml-button").click();
     const textarea = preview.getByTestId("scenario-yaml-textarea");
     await expect(textarea).toBeVisible();
     await expect(textarea).toHaveValue(previewText ?? "");
@@ -166,6 +167,23 @@ test.describe("T17b-3 — Edit-YAML mode", () => {
     expect(await rangeStart(page)).toBe(before);
   });
 
+  test("Start over closes active Edit YAML mode and discards the draft", async ({ page }) => {
+    await gotoReadySaveAndLoad(page);
+    await mutate(page, VALID_SCENARIO_PATCH);
+
+    const preview = page.getByTestId("scenario-yaml-preview");
+    await page.getByTestId("scenario-edit-yaml-button").click();
+    await preview.getByTestId("scenario-yaml-textarea").fill("stale draft");
+
+    await page.getByTestId("new-schedule-button").click();
+    await page.getByTestId("confirm-dialog-confirm").click();
+
+    await expect.poll(() => rangeStart(page)).toBe("");
+    await expect(preview.getByTestId("scenario-yaml-textarea")).toBeHidden();
+    await expect(preview.getByTestId("yaml-apply-button")).toBeHidden();
+    await expect(preview.getByTestId("scenario-export-issues")).toBeVisible();
+  });
+
   test("Apply on `::bad::` surfaces an inline parse error and leaves state untouched", async ({
     page,
   }) => {
@@ -174,7 +192,7 @@ test.describe("T17b-3 — Edit-YAML mode", () => {
     const before = await rangeStart(page);
 
     const preview = page.getByTestId("scenario-yaml-preview");
-    await preview.getByTestId("yaml-edit-toggle").click();
+    await page.getByTestId("scenario-edit-yaml-button").click();
     await preview.getByTestId("scenario-yaml-textarea").fill("::bad::");
     await preview.getByTestId("yaml-apply-button").click();
 
@@ -191,7 +209,7 @@ test.describe("T17b-3 — Edit-YAML mode", () => {
     await mutate(page, VALID_SCENARIO_PATCH);
 
     const preview = page.getByTestId("scenario-yaml-preview");
-    await preview.getByTestId("yaml-edit-toggle").click();
+    await page.getByTestId("scenario-edit-yaml-button").click();
     await preview.getByTestId("scenario-yaml-textarea").fill(EDITED_VALID_YAML);
     await preview.getByTestId("yaml-apply-button").click();
 
