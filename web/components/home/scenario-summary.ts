@@ -23,7 +23,6 @@ import { useMemo } from "react";
 import { useScenarioStore } from "@/lib/store";
 import { hasCompleteRange, rangeDayCount } from "@/lib/dates";
 import { isValidIso } from "@/lib/dates/date-id";
-import type { NavCountKey } from "@/components/shell/nav-config";
 import type { ScenarioUiState } from "@/lib/scenario";
 
 /** The scenario fields the summary is derived from (the rest is irrelevant here). */
@@ -172,28 +171,4 @@ export function useScenarioSummary(): ScenarioSummary {
       }),
     [staff, staffGroups, shifts, reqData, cardsByKind, exportLayout, rangeStart, rangeEnd],
   );
-}
-
-/** Resolve a nav row's live count badge value from the summary (0 hides the badge). */
-export function navCountFor(summary: ScenarioSummary, key: NavCountKey): number {
-  switch (key) {
-    case "people":
-      return summary.peopleCount;
-    case "shiftTypes":
-      return summary.shiftTypesCount;
-    case "shiftRequests":
-      return summary.shiftRequestsCount;
-    case "requirements":
-      return summary.ruleCounts.requirements;
-    case "successions":
-      return summary.ruleCounts.successions;
-    case "shiftCounts":
-      return summary.ruleCounts.shiftCounts;
-    case "affinities":
-      return summary.ruleCounts.affinities;
-    case "coverings":
-      return summary.ruleCounts.coverings;
-    case "exportRules":
-      return summary.exportRulesCount;
-  }
 }

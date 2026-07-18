@@ -1,15 +1,19 @@
 "use client";
 
-// Advanced Home body (T08, BLOCKER 2). The warning/explanation band plus a
-// responsive grid of direct editor entry points (ScreenHome.dc.html:65-81).
-// Unlike the prototype, EVERY committed destination stays reachable here (T08
-// all-capability reachability) — the grid is driven from the shared nav config,
-// so it can never fall out of sync with the sidebar.
+// Advanced Home body (T08, BLOCKER 2; mode-filtered by T08d). The
+// warning/explanation band plus a responsive grid of direct editor entry
+// points (ScreenHome.dc.html:65-81). The grid reuses `getNavGroupsForMode`
+// (the same filtered registry the sidebar and route validity read), so it can
+// never fall out of sync with what Advanced mode actually exposes — every
+// Guided destination (incl. Rules) plus the raw Constraints group and Export
+// Layout.
 
-import { ALL_NAV_ITEMS } from "@/components/shell/nav-config";
+import { getNavGroupsForMode } from "@/components/shell/nav-config";
 
 export function HomeAdvanced({ onNavigate }: { onNavigate: (path: string) => void }) {
-  const editors = ALL_NAV_ITEMS.filter((item) => item.path !== "/");
+  const editors = getNavGroupsForMode("advanced")
+    .flatMap((group) => group.items)
+    .filter((item) => item.path !== "/");
 
   return (
     <div className="flex flex-col gap-5" data-testid="home-advanced">

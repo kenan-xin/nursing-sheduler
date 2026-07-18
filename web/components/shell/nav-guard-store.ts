@@ -11,12 +11,14 @@
 //
 // T08b: navigation is one of four typed intents — `push`, `replace`, `back`,
 // `mode-transition` — each carrying its own `commit` (what actually happens on
-// Confirm; Cancel needs no counterpart — the guard keeps the dialog fully
-// shielded while it's open, see use-guarded-navigation's back guard, so there
-// is never a navigation side effect to undo). The store stays free of any
-// router/mode import: callers (use-guarded-navigation, T08c's mode transaction)
-// supply `commit` as a closure, so the store only ever holds and runs it,
-// never authors it.
+// Confirm). Cancel never touches history or mode — every intent kind leaves
+// both untouched until `commit` actually runs — but a caller may still need a
+// pure UI-side cleanup when Cancel is chosen instead: `onCancel` (T08d repair
+// P2) is that optional hook, e.g. the mode toggle restoring roving-tab focus
+// to the still-selected tab after a pointer click focused the (cancelled)
+// target tab. The store stays free of any router/mode import: callers
+// (use-guarded-navigation, T08c's mode transaction) supply `commit`/`onCancel`
+// as closures, so the store only ever holds and runs them, never authors them.
 //
 // Losable-draft registry (T08a, replacing the old `draftOpen: boolean`): a
 // boolean is unsafe once two editors can mount/unmount independently — closing
@@ -41,12 +43,14 @@ export type NavIntentKind = "push" | "replace" | "back" | "mode-transition";
 
 /** A staged navigation the guard may confirm or cancel. `commit` performs the
  *  actual navigation (and, for `mode-transition`, the mode change) — the store
- *  never touches the router or mode store itself. Cancel has no counterpart
- *  action: every intent kind leaves history/mode untouched until `commit`
- *  actually runs, so dismissing the dialog is always a pure no-op. */
+ *  never touches the router or mode store itself. Cancel never runs `commit`;
+ *  history/mode are always untouched by it. `onCancel` (T08d repair P2) is an
+ *  optional, purely cosmetic hook for the rare case a caller needs to react to
+ *  Cancel itself (not to undo anything, since there is nothing to undo). */
 export interface PendingNavIntent {
   kind: NavIntentKind;
   commit: () => void;
+  onCancel?: () => void;
 }
 
 interface NavGuardState {
@@ -64,7 +68,8 @@ interface NavGuardState {
   requestIntent: (intent: PendingNavIntent) => void;
   /** Confirm — run the staged intent's `commit` and close. */
   confirm: () => void;
-  /** Cancel — close without running anything (Stay / backdrop / Esc). */
+  /** Cancel — close without running `commit` (Stay / backdrop / Esc), then run
+   *  the staged intent's `onCancel` if it supplied one. */
   cancel: () => void;
   /** Register a losable draft under `id`. Returns idempotent cleanup that only
    *  ever removes THIS registration — closing/unmounting one owner can never
@@ -95,7 +100,11 @@ export const useNavGuardStore = create<NavGuardState>((set, get) => {
       set({ pendingIntent: null, open: false });
       intent?.commit();
     },
-    cancel: () => set({ pendingIntent: null, open: false }),
+    cancel: () => {
+      const intent = get().pendingIntent;
+      set({ pendingIntent: null, open: false });
+      intent?.onCancel?.();
+    },
     registerDraft: (registration) => {
       const token = Symbol(registration.id);
       draftTokens.set(registration.id, token);

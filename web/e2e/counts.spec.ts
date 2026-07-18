@@ -65,7 +65,11 @@ async function seed(page: Page, patch: Record<string, unknown>) {
   }, patch);
 }
 
+/** Shift Counts is Advanced-only since T08d (DL12 §2); adopt the stored
+ *  Advanced preference first so the route-validity gate doesn't redirect this
+ *  direct visit to Home under the Guided default. */
 async function gotoReady(page: Page) {
+  await page.addInitScript(() => localStorage.setItem("ns-app-mode", "advanced"));
   await page.goto("/shift-counts");
   await page.waitForFunction(() => Boolean((window as unknown as NsWindow).__nsStore));
   await expect(page.getByTestId("add-card-toggle")).toBeVisible();
@@ -1055,6 +1059,10 @@ test.describe.serial("T12 Coverings regression — default allValue keeps ALL em
     // Guards the shared DateScopeField default: Coverings relies on ALL emitting []
     // so an OMITTED `date` serializes as "all dates" (DL08). This must be unchanged
     // by the Counts allValue addition.
+    // Shift Type Coverings is Advanced-only since T08d (DL12 §2); adopt the
+    // stored Advanced preference first so the route-validity gate doesn't
+    // redirect this direct visit to Home under the Guided default.
+    await page.addInitScript(() => localStorage.setItem("ns-app-mode", "advanced"));
     await page.goto("/shift-type-coverings");
     await page.waitForFunction(() => Boolean((window as unknown as NsWindow).__nsStore));
     await expect(page.getByTestId("add-card-toggle")).toBeVisible();

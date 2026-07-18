@@ -1,10 +1,18 @@
 "use client";
 
-// Guided Home body (T08, BLOCKER 2). The "N of 6 steps ready" progress meter and
-// the six numbered, status-aware workflow cards (ScreenHome.dc.html:33-63). Each
-// card's status (done / current / to do), summary line, and CTA (Review /
-// Continue / Set up) are derived from real state and route to the committed
-// destinations (not the prototype's Staff/Shifts labels).
+// Guided Home body (T08, BLOCKER 2; step 4 repointed to /rules by T08d). The
+// "N of 6 steps ready" progress meter and the six numbered, status-aware
+// workflow cards (ScreenHome.dc.html:33-63). Each card's status (done /
+// current / to do), summary line, and CTA (Review / Continue / Set up) are
+// derived from real state and route to the committed destinations (not the
+// prototype's Staff/Shifts labels).
+//
+// `STEPS` derives its path/label/icon/step-number from `getNavGroupsForMode`
+// (the same filtered registry the sidebar reuses) rather than a second
+// hardcoded list — the two are structurally guaranteed to agree on which six
+// routes are the Guided workflow and in what order. `STEP_CONTENT` supplies
+// only the Home-specific copy (description, summary line, readiness key) that
+// isn't route-registry data.
 //
 // Completion is honest (cold-review Major): the five SETUP steps are done from
 // their real scenario data (Dates only for a VALID range); the sixth GENERATE
@@ -13,20 +21,15 @@
 // `idle` and Generate is "current" (ready to run) when prerequisites are met, and
 // "to do" otherwise — it can never show ✓ Done without a generated roster.
 
-import { GUIDED_STEP_COUNT } from "@/components/shell/nav-config";
+import {
+  GUIDED_STEP_COUNT,
+  getNavGroupsForMode,
+  type NavItem,
+} from "@/components/shell/nav-config";
 import { useHotStore } from "@/lib/store";
 import type { ScenarioSummary, StepReadiness } from "./scenario-summary";
 import { cn } from "@/lib/utils";
-import {
-  FaCalendarDays,
-  FaUserNurse,
-  FaLayerGroup,
-  FaListCheck,
-  FaTableCells,
-  FaWandMagicSparkles,
-  FaArrowRight,
-  type IconType,
-} from "@/components/icons";
+import { FaArrowRight, type IconType } from "@/components/icons";
 
 type StepStatus = "done" | "current" | "todo";
 
@@ -41,64 +44,74 @@ interface StepDef {
   summary: (s: ScenarioSummary) => string;
 }
 
-const STEPS: StepDef[] = [
-  {
-    step: 1,
-    path: "/dates",
-    readyKey: "dates",
+interface StepContent {
+  label: string;
+  readyKey?: keyof StepReadiness;
+  desc: string;
+  summary: (s: ScenarioSummary) => string;
+}
+
+const STEP_CONTENT: Record<string, StepContent> = {
+  "/dates": {
     label: "Set the dates",
+    readyKey: "dates",
     desc: "Pick the roster range and mark public holidays.",
-    icon: FaCalendarDays,
     summary: (s) =>
       s.durationDays > 0
         ? `${s.rosterMonthLabel ?? "Range set"} · ${s.durationDays} days`
         : "No valid range yet",
   },
-  {
-    step: 2,
-    path: "/people",
-    readyKey: "people",
+  "/people": {
     label: "Add your people",
+    readyKey: "people",
     desc: "List nurses and organise people groups.",
-    icon: FaUserNurse,
     summary: (s) => `${s.peopleCount} people · ${s.staffGroupsCount} groups`,
   },
-  {
-    step: 3,
-    path: "/shift-types",
-    readyKey: "shiftTypes",
+  "/shift-types": {
     label: "Define the shifts",
+    readyKey: "shiftTypes",
     desc: "Set up your daily shift types.",
-    icon: FaLayerGroup,
     summary: (s) => `${s.shiftTypesCount} shift types`,
   },
-  {
-    step: 4,
-    path: "/shift-type-requirements",
-    readyKey: "rules",
+  "/rules": {
     label: "Choose the rules",
-    desc: "Set minimum staffing and skill mix per shift.",
-    icon: FaListCheck,
+    readyKey: "rules",
+    desc: "Pick plain-English rules for staffing and skill mix.",
     summary: (s) => `${s.rulesTotal} rules set`,
   },
-  {
-    step: 5,
-    path: "/shift-requests",
-    readyKey: "requests",
+  "/shift-requests": {
     label: "Requests & leave",
+    readyKey: "requests",
     desc: "Pin leave, off-days and shift preferences.",
-    icon: FaTableCells,
     summary: (s) => `${s.shiftRequestsCount} requests entered`,
   },
-  {
-    step: 6,
-    path: "/optimize-and-export",
+  "/optimize-and-export": {
     label: "Generate the roster",
     desc: "Build a fair roster that respects every rule.",
-    icon: FaWandMagicSparkles,
     summary: (s) => (s.prerequisitesMet ? "Ready to generate" : "Ready when the steps are done"),
   },
-];
+};
+
+function isGuidedStep(item: NavItem): item is NavItem & { guidedStep: number } {
+  return item.guidedStep != null;
+}
+
+const STEPS: StepDef[] = getNavGroupsForMode("guided")
+  .flatMap((group) => group.items)
+  .filter(isGuidedStep)
+  .sort((a, b) => a.guidedStep - b.guidedStep)
+  .map((item) => {
+    const content = STEP_CONTENT[item.path];
+    return {
+      step: item.guidedStep,
+      path: item.path,
+      readyKey: content.readyKey,
+      label: content.label,
+      desc: content.desc,
+      icon: item.icon,
+      summary: content.summary,
+    };
+  });
 
 const BADGE: Record<StepStatus, { label: string; className: string }> = {
   done: { label: "✓ Done", className: "bg-successtint text-success" },

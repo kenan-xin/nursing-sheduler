@@ -22,22 +22,29 @@ import { expect, test, type Page } from "@playwright/test";
 // seam mounted by the shell (components/shell/test-bridge.tsx) — a genuine tracked
 // mutation, not a mock.
 
-// The fixed 13-tab nav set (spec 07 FR-ST-28). Grouped by the user-approved
-// audit mapping as Home (headerless) → SET UP → OUTPUT → SYSTEM.
-const NAV_PATHS = [
+// The fixed 13-tab route set (spec 07 FR-ST-28), split by the DL12 §2
+// Guided/Advanced matrix (T08d): Guided foregrounds Dates, People, Shift
+// Types, Rules and Shift Requests; Advanced adds the raw Constraints group and
+// Export Layout. Every route still exists — the two lists below just record
+// which mode each is reachable in DIRECTLY from the sidebar.
+const GUIDED_NAV_PATHS = [
   "/",
   "/dates",
   "/people",
   "/shift-types",
-  "/shift-type-requirements",
+  "/rules",
   "/shift-requests",
+  "/optimize-and-export",
+  "/save-and-load",
+];
+
+const ADVANCED_ONLY_PATHS = [
+  "/shift-type-requirements",
   "/shift-type-successions",
   "/shift-counts",
   "/shift-affinities",
   "/shift-type-coverings",
-  "/optimize-and-export",
   "/export-layout",
-  "/save-and-load",
 ];
 
 /** Wait until the shell has hydrated (Home content past the hydration gate). */
@@ -548,17 +555,15 @@ test.describe("T08 app shell", () => {
     expect(await dispatchUnload()).toBe(false);
   });
 
-  test("row 5 — Guided mode keeps every capability reachable, incl. Export Layout", async ({
-    page,
-  }) => {
+  test("row 5 — Guided mode keeps every Guided destination reachable", async ({ page }) => {
     await gotoReadyHome(page);
     // Guided is the default lens.
     await expect(page.getByTestId("mode-toggle-guided")).toHaveAttribute("aria-selected", "true");
 
-    // Every one of the 13 nav entries is present AND navigable in Guided mode —
-    // nothing unreachable (critique #8), incl. Export Layout. Scenario stays clean
-    // here, so each click routes directly (no guard).
-    for (const path of NAV_PATHS) {
+    // Every Guided nav entry is present AND navigable — nothing unreachable
+    // (critique #8). Scenario stays clean here, so each click routes directly
+    // (no guard).
+    for (const path of GUIDED_NAV_PATHS) {
       await expect(page.getByTestId(`nav-link-${path}`)).toBeVisible();
       await page.getByTestId(`nav-link-${path}`).click();
       // Client-side navigation commits asynchronously — use the auto-retrying
@@ -566,6 +571,12 @@ test.describe("T08 app shell", () => {
       // Next router push).
       await expect(page).toHaveURL((url) => url.pathname === path);
       await expect(page.getByTestId(path === "/" ? "home-screen" : "screen")).toBeVisible();
+    }
+
+    // The raw Constraints editors + Export Layout are Advanced-only (DL12
+    // §2) — not listed directly in the Guided sidebar.
+    for (const path of ADVANCED_ONLY_PATHS) {
+      await expect(page.getByTestId(`nav-link-${path}`)).toHaveCount(0);
     }
   });
 
@@ -593,15 +604,16 @@ test.describe("T08 app shell", () => {
     expect(unexpected, errors.join(" | ")).toEqual([]);
   });
 
-  test("mode — the transition transaction commits immediately with an open draft (T08c, no route changes today)", async ({
+  test("mode — the transition transaction commits immediately when the route survives the switch", async ({
     page,
   }) => {
     await gotoReadyHome(page);
     await openTestDraft(page);
 
-    // Every shipped route is valid in both modes today (T08d hasn't restricted
-    // any yet), so the mode-transition transaction finds nothing to unmount and
-    // commits without ever staging the shared guard dialog.
+    // Home ("/") is valid in both modes, so the mode-transition transaction
+    // finds nothing to unmount and commits without ever staging the shared
+    // guard dialog. The draft-guarded Advanced-only → Guided redirect is
+    // covered in mode-aware-shell.spec.ts.
     await page.getByTestId("mode-toggle-advanced").click();
     await expect(page.getByTestId("mode-toggle-advanced")).toHaveAttribute("aria-selected", "true");
     await expect(page.getByRole("heading", { name: "Unsaved changes" })).toBeHidden();

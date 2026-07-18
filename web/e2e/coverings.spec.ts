@@ -58,8 +58,12 @@ async function seed(page: Page, patch: Record<string, unknown>) {
 
 /** Navigate to the coverings screen and wait for the store seam + the editor to
  *  mount. The TestBridge only exposes `window.__nsStore` from a deferred effect,
- *  so seeding immediately after `goto` races it (cf. app-shell-rebuild.spec). */
+ *  so seeding immediately after `goto` races it (cf. app-shell-rebuild.spec).
+ *  Shift Type Coverings is Advanced-only since T08d (DL12 §2); adopt the
+ *  stored Advanced preference first so the route-validity gate doesn't
+ *  redirect this direct visit to Home under the Guided default. */
 async function gotoReady(page: Page) {
+  await page.addInitScript(() => localStorage.setItem("ns-app-mode", "advanced"));
   await page.goto("/shift-type-coverings");
   await page.waitForFunction(() => Boolean((window as unknown as NsWindow).__nsStore));
   await expect(page.getByTestId("add-card-toggle")).toBeVisible();

@@ -61,7 +61,11 @@ async function seed(page: Page, patch: Record<string, unknown>) {
   }, patch);
 }
 
+/** Shift Type Successions is Advanced-only since T08d (DL12 §2); adopt the
+ *  stored Advanced preference first so the route-validity gate doesn't
+ *  redirect this direct visit to Home under the Guided default. */
 async function gotoReady(page: Page) {
+  await page.addInitScript(() => localStorage.setItem("ns-app-mode", "advanced"));
   await page.goto("/shift-type-successions");
   await page.waitForFunction(() => Boolean((window as unknown as NsWindow).__nsStore));
   await expect(page.getByTestId("add-card-toggle")).toBeVisible();

@@ -10,16 +10,24 @@
 
 import { usePathname } from "next/navigation";
 import { useScenarioStore } from "@/lib/store";
-import { ALL_NAV_ITEMS } from "./nav-config";
+import { useAppMode } from "@/lib/mode/use-mode";
+import { getNavItemForMode } from "./nav-config";
 import { UndoRedoControls } from "./undo-redo-controls";
 import { PersistenceStatus } from "./persistence-status";
 import { MobileNav } from "./mobile-nav";
 import { FaDiagramProject } from "@/components/icons";
 
+// T08d repair (P2): resolves through `getNavItemForMode` — the same
+// `getNavGroupsForMode` projection the sidebar/Home/mobile drawer render —
+// rather than an unfiltered lookup, so the crumb can never drift from what
+// the current mode actually exposes. An Advanced-only route is only ever
+// mounted while mode is Advanced (route-validity gate redirects otherwise),
+// so this always resolves for a genuinely reachable page.
 function useCrumb(): string {
   const pathname = usePathname();
+  const mode = useAppMode();
   if (pathname === "/") return "Home";
-  return ALL_NAV_ITEMS.find((item) => item.path === pathname)?.label ?? "Home";
+  return getNavItemForMode(pathname, mode)?.label ?? "Home";
 }
 
 export function TopBar() {
