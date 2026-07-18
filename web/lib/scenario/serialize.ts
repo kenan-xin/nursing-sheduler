@@ -6,6 +6,7 @@
 // the one dumped — there is no unchecked second serialization path.
 
 import { stringify } from "yaml";
+import { currentAppVersion } from "./app-version";
 import { toCanonicalScenarioDocument } from "./canonical";
 import { producerScenarioSchema } from "./schemas/producer";
 import {
@@ -107,15 +108,36 @@ export function validateScenario(document: CanonicalScenarioDocument): ScenarioV
 const YAML_OPTIONS = { version: "1.2" as const };
 
 /**
- * Serialize durable UI state to a backend-facing YAML 1.2 string. Projects to the
- * canonical document (T18), canonicalizes + runs producer preflight, and dumps the
- * validated canonical document. Throws `ScenarioValidationError` (carrying the
+ * Stamp the current build version as the **last** top-level key (FR-SL-02),
+ * overriding any imported/stale `appVersion` (integrity-only metadata, never
+ * re-exported), then run producer preflight on the stamped document and dump
+ * exactly what was validated. Throws `ScenarioValidationError` (carrying the
  * flattened issues) if preflight fails — so nothing crosses the boundary
  * structurally unvalidated, and there is no bypass path.
+ *
+ * The shared core behind `serializeScenario` (plain UI-state export) and the
+ * anonymised export path (T17a-2): both stamp/validate/dump identically, so an
+ * anonymised download carries `appVersion` last exactly like a plain one.
  */
-export function serializeScenario(state: ScenarioUiState): string {
-  const projected = toCanonicalScenarioDocument(state);
-  const result = validateScenario(projected);
+export function serializeCanonicalDocument(doc: CanonicalScenarioDocument): string {
+  const { appVersion: _ignored, ...rest } = doc;
+  const stamped: CanonicalScenarioDocument = {
+    ...rest,
+    appVersion: currentAppVersion(),
+  };
+  const result = validateScenario(stamped);
   if (!result.ok) throw new ScenarioValidationError(result.issues);
   return stringify(result.document, YAML_OPTIONS);
+}
+
+/**
+ * Serialize durable UI state to a backend-facing YAML 1.2 string. Projects to the
+ * canonical document (T18) and defers to `serializeCanonicalDocument` for the
+ * stamp/validate/dump core. Build version is intentionally injected there — not
+ * in `toCanonicalScenarioDocument` — so the canonical projection that feeds the
+ * dirty-fingerprint hash is invariant under app-version changes (otherwise a
+ * restored scenario would go spuriously "dirty" after any build bump).
+ */
+export function serializeScenario(state: ScenarioUiState): string {
+  return serializeCanonicalDocument(toCanonicalScenarioDocument(state));
 }

@@ -9,9 +9,13 @@ export default defineConfig({
     },
   },
   test: {
-    // Node environment is enough for the current unit smoke. Component/DOM tests
-    // (jsdom + testing-library) are wired by the tickets that add components.
+    // Node environment is enough for the plain `.ts` unit suite. `.tsx` component
+    // tests (T17b-2, `LoadControls`) opt into jsdom per-file via a
+    // `// @vitest-environment jsdom` docblock (vitest 4 dropped the workspace-level
+    // `environmentMatchGlobs` option), so the existing `.ts` tests keep the faster
+    // node environment.
     environment: "node",
+    setupFiles: ["./vitest.setup.ts"],
     include: ["**/*.{test,spec}.{ts,tsx}"],
     exclude: ["node_modules", ".next", "e2e"],
   },

@@ -1,9 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { parse } from "yaml";
 import { serializeScenario, validateScenario, ScenarioValidationError } from "./serialize";
 import { toCanonicalScenarioDocument } from "./canonical";
 import { makeValidUiState } from "./test-fixtures";
 import type { ScenarioUiState } from "./types";
+
+const APP_VERSION_ENV = "NEXT_PUBLIC_APP_VERSION";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe("serializeScenario (F2 boundary)", () => {
   it("dumps a valid UI state to backend-shaped YAML 1.2", () => {
@@ -83,5 +89,37 @@ describe("canonicalization is applied before dump (not just validated)", () => {
     expect(requirement.date).toBe("ALL");
     const day = parsed.shiftTypes.items.find((s: { id: string }) => s.id === "D");
     expect("restMinutes" in day).toBe(false);
+  });
+});
+
+describe("serializeScenario stamps the current build version LAST (FR-SL-02)", () => {
+  function fixtureWithoutAppVersion(): ScenarioUiState {
+    const state = makeValidUiState();
+    delete state.meta.appVersion;
+    return state;
+  }
+
+  it("emits the current build version as the last top-level key for a new state", () => {
+    vi.stubEnv(APP_VERSION_ENV, "9.9.9");
+    const yaml = serializeScenario(fixtureWithoutAppVersion());
+    const parsed = parse(yaml) as Record<string, unknown>;
+    expect(parsed.appVersion).toBe("9.9.9");
+    expect(Object.keys(parsed).at(-1)).toBe("appVersion");
+  });
+
+  it("overrides an imported/stale meta.appVersion with the current build version", () => {
+    const state = makeValidUiState();
+    state.meta.appVersion = "0.0.1-old";
+    vi.stubEnv(APP_VERSION_ENV, "9.9.9");
+    const yaml = serializeScenario(state);
+    const parsed = parse(yaml) as Record<string, unknown>;
+    expect(parsed.appVersion).toBe("9.9.9");
+  });
+
+  it("preserves a -dirty build suffix verbatim (exact-string passthrough)", () => {
+    vi.stubEnv(APP_VERSION_ENV, "9.9.9-dirty");
+    const yaml = serializeScenario(fixtureWithoutAppVersion());
+    const parsed = parse(yaml) as Record<string, unknown>;
+    expect(parsed.appVersion).toBe("9.9.9-dirty");
   });
 });

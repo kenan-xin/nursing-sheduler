@@ -8,23 +8,47 @@
 export * from "./types";
 export { createEmptyScenarioUiState, toCanonicalScenarioDocument } from "./canonical";
 export { canonicalHash, canonicalStringify } from "./hash";
+export { currentAppVersion } from "./app-version";
 
 // T05 — serialization/validation boundary (F2), import path, anonymize transform.
 export {
   serializeScenario,
+  serializeCanonicalDocument,
   validateScenario,
   canonicalizeScenarioDocument,
   ScenarioValidationError,
   type ScenarioValidationIssue,
   type ScenarioValidationResult,
 } from "./serialize";
+// T17a-2 — validated export gate (plain + anonymised), shared by preview/Download/Copy.
+export {
+  prepareExport,
+  prepareAnonymizedExport,
+  type PrepareExportResult,
+  type PrepareAnonymizedExportOptions,
+} from "./prepare-export";
 export {
   parseScenarioYaml,
   importScenarioYaml,
   importScenarioValue,
   type ImportResult,
 } from "./import-scenario";
-export { buildIdMap, anonymizeDocument, type AnonymizationIdMap } from "./anonymize";
+// T17b — pure pre-commit load seam (project + validate, no store mutation).
+export {
+  projectImportTarget,
+  prepareScenarioLoad,
+  classifyImportVersion,
+  type PrepareScenarioLoadResult,
+  type ImportVersionStatus,
+} from "./prepare-scenario-load";
+export {
+  buildIdMap,
+  anonymizeDocument,
+  scatterShiftRequests,
+  getMissingPreferredScatterDateGroups,
+  type AnonymizationIdMap,
+  type Rng,
+} from "./anonymize";
 export { producerScenarioSchema } from "./schemas/producer";
 export { importScenarioSchema } from "./schemas/import";
 export {

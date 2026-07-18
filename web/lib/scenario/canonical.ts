@@ -1,5 +1,5 @@
-// Canonical projection (T18) — the pure, deterministic map from durable UI state
-// to the backend-facing `CanonicalScenarioDocument`.
+// Canonical projection (T18) — the pure, deterministic map from a scenario's
+// durable/importable state to the backend-facing `CanonicalScenarioDocument`.
 //
 // Per the tech-plan §4 flow (`UI state → toCanonicalScenarioDocument (strip F2
 // fields, map markers) → producer schema + refinements → YAML`), this function
@@ -13,12 +13,21 @@
 // It deliberately does NOT apply value refinements (implicit→explicit `ALL`,
 // zero-rest omission, etc.) — those belong to T05's producer schema, which
 // consumes this output. The function is side-effect-free and order-preserving.
+//
+// The projection reads only backend-facing *body* fields (never a card's F2
+// `uid`), so it is generalized (`projectScenarioDocument`) over both durable UI
+// state and the keyless import target. `toCanonicalScenarioDocument` keeps its
+// `ScenarioUiState` signature as the thin, unchanged public entry (T04 store,
+// serializer, and fingerprint all call it); `projectImportTarget` (T17b) reuses
+// the same generalized core on the keyless `ImportNormalizationTarget` without
+// inventing any uids, keeping the pre-commit load projection pure/deterministic.
 
 import {
   isDayStateSelector,
   LEAVE_PIN_WEIGHT,
   PREFERENCE_TYPE,
   RESERVED_SHIFT_TYPE,
+  type AffinityCardBody,
   type CanonicalDateGroup,
   type CanonicalExportConfig,
   type CanonicalPeopleGroup,
@@ -28,15 +37,43 @@ import {
   type CanonicalShiftCountPreference,
   type CanonicalShiftType,
   type CanonicalShiftTypeGroup,
-  type CardsByKind,
+  type CountCardBody,
+  type CoveringCardBody,
   type ExportLayout,
+  type RequirementCardBody,
+  type ScenarioStateShared,
   type ScenarioUiState,
+  type SuccessionCardBody,
   type UiDateGroup,
   type UiPeopleGroup,
   type UiPerson,
   type UiShiftType,
   type UiShiftTypeGroup,
 } from "./types";
+
+// A projectable card is a keyless backend body plus the *optional* guided
+// `disabled` marker the projection consults. Both a full `…Card` (marker + body,
+// from `ScenarioUiState`) and a bare `…CardBody` (from the import target) satisfy
+// it, and neither the projection nor this type ever reads a card's `uid`.
+type Projectable<Body> = Body & { disabled?: boolean };
+
+/** The card collection the projection accepts — durable cards or keyless bodies. */
+export interface ProjectableCardsByKind {
+  requirements: Projectable<RequirementCardBody>[];
+  successions: Projectable<SuccessionCardBody>[];
+  counts: Projectable<CountCardBody>[];
+  affinities: Projectable<AffinityCardBody>[];
+  coverings: Projectable<CoveringCardBody>[];
+}
+
+/**
+ * The generalized projection source: every field shared by durable UI state and
+ * the keyless import target, with card bodies that carry no store identity. Both
+ * `ScenarioUiState` and `ImportNormalizationTarget` structurally satisfy it.
+ */
+export type ProjectableScenario = ScenarioStateShared & {
+  cardsByKind: ProjectableCardsByKind;
+};
 
 /** Drop `undefined`-valued keys so canonical objects carry no absent fields. */
 function compact<T extends object>(obj: T): T {
@@ -93,17 +130,17 @@ function mapDateGroup(group: UiDateGroup): CanonicalDateGroup {
 
 // Fixed, deterministic preference emission order: the backend-required
 // max-one-shift-per-day first, then each card kind, then matrix requests.
-function mapPreferences(state: ScenarioUiState): CanonicalPreference[] {
+function mapPreferences(source: ProjectableScenario): CanonicalPreference[] {
   const preferences: CanonicalPreference[] = [];
 
   preferences.push(
     compact({
       type: PREFERENCE_TYPE.maxOneShiftPerDay,
-      description: state.maxOneShiftPerDay?.description,
+      description: source.maxOneShiftPerDay?.description,
     }),
   );
 
-  const cards: CardsByKind = state.cardsByKind;
+  const cards: ProjectableCardsByKind = source.cardsByKind;
 
   for (const card of cards.requirements) {
     if (card.disabled) continue;
@@ -194,7 +231,7 @@ function mapPreferences(state: ScenarioUiState): CanonicalPreference[] {
   // The person×date matrix folds into shift-request preferences. `kind` is the
   // single authority: the backend selector and weight are *derived* from it, so
   // a leave cell can never serialize as a worked shift.
-  for (const cell of state.reqData) {
+  for (const cell of source.reqData) {
     let shiftType: string;
     let weight: number;
     switch (cell.kind) {
@@ -262,38 +299,50 @@ function mapExport(layout: ExportLayout): CanonicalExportConfig | undefined {
 }
 
 /**
- * Project durable UI state into the backend-facing canonical document. Pure and
- * deterministic: same input ⇒ identical output, arrays kept in source order,
- * F2-only fields stripped, contracted-hours markers mapped. Empty group
- * collections and an empty export layout are omitted (minimal-dump parity).
+ * Project any projectable scenario (durable UI state OR the keyless import
+ * target) into the backend-facing canonical document. Pure and deterministic:
+ * same input ⇒ identical output, arrays kept in source order, F2-only fields
+ * stripped, contracted-hours markers mapped. Never reads a card `uid`, so it
+ * needs none — the keyless import target projects without inventing identity.
+ * Empty group collections and an empty export layout are omitted (minimal-dump
+ * parity).
  */
-export function toCanonicalScenarioDocument(state: ScenarioUiState): CanonicalScenarioDocument {
-  const peopleGroups = state.staffGroups.map(mapPeopleGroup);
-  const shiftTypeGroups = state.shiftGroups.map(mapShiftTypeGroup);
-  const dateGroups = state.dateGroups.map(mapDateGroup);
+export function projectScenarioDocument(source: ProjectableScenario): CanonicalScenarioDocument {
+  const peopleGroups = source.staffGroups.map(mapPeopleGroup);
+  const shiftTypeGroups = source.shiftGroups.map(mapShiftTypeGroup);
+  const dateGroups = source.dateGroups.map(mapDateGroup);
 
   const doc: CanonicalScenarioDocument = {
-    appVersion: state.meta.appVersion,
-    apiVersion: state.meta.apiVersion,
-    description: state.meta.description,
+    appVersion: source.meta.appVersion,
+    apiVersion: source.meta.apiVersion,
+    description: source.meta.description,
     dates: compact({
-      range: { startDate: state.rangeStart, endDate: state.rangeEnd },
+      range: { startDate: source.rangeStart, endDate: source.rangeEnd },
       groups: dateGroups.length > 0 ? dateGroups : undefined,
     }),
-    country: state.meta.country,
+    country: source.meta.country,
     people: compact({
-      items: state.staff.map(mapPerson),
+      items: source.staff.map(mapPerson),
       groups: peopleGroups.length > 0 ? peopleGroups : undefined,
     }),
     shiftTypes: compact({
-      items: state.shifts.map(mapShiftType),
+      items: source.shifts.map(mapShiftType),
       groups: shiftTypeGroups.length > 0 ? shiftTypeGroups : undefined,
     }),
-    preferences: mapPreferences(state),
-    export: mapExport(state.exportLayout),
+    preferences: mapPreferences(source),
+    export: mapExport(source.exportLayout),
   };
 
   return compact(doc);
+}
+
+/**
+ * Project durable UI state into the backend-facing canonical document. The
+ * unchanged public entry (T04 store, serializer, fingerprint) — a thin,
+ * type-narrowed call into the generalized `projectScenarioDocument`.
+ */
+export function toCanonicalScenarioDocument(state: ScenarioUiState): CanonicalScenarioDocument {
+  return projectScenarioDocument(state);
 }
 
 /**
