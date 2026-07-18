@@ -64,4 +64,30 @@ describe("ModeToggle — focus follows commit, not request (T08f P2)", () => {
     expect(useModeStore.getState().mode).toBe("guided");
     expect(document.activeElement).toBe(guidedTab);
   });
+
+  it("restores focus to the still-selected tab when Cancel follows a pointer click (T08d repair P2)", () => {
+    // jsdom's synthetic `.click()` does NOT move DOM focus the way a real
+    // browser does on a pointer click — that's exactly why this regression
+    // (T08d repair P2, real-browser coverage in mode-aware-shell.spec.ts)
+    // wasn't caught by the two tests above. This test reproduces the browser
+    // behavior explicitly: the clicked (target) button receives focus BEFORE
+    // its own onClick handler runs.
+    useNavGuardStore.getState().registerDraft({ id: "d", label: "Draft" });
+    render(<ModeToggle />);
+    const guidedTab = screen.getByTestId("mode-toggle-guided");
+    const advancedTab = screen.getByTestId("mode-toggle-advanced");
+    guidedTab.focus();
+
+    advancedTab.focus(); // simulates the browser's native click-focus
+    advancedTab.click();
+    expect(useNavGuardStore.getState().pendingIntent).not.toBeNull();
+    expect(document.activeElement).toBe(advancedTab); // still unselected at this point
+
+    useNavGuardStore.getState().cancel();
+
+    expect(useModeStore.getState().mode).toBe("guided");
+    // Focus must land back on the still-selected Guided tab, never stay on
+    // the now-cancelled, unselected Advanced tab (tabIndex=-1).
+    expect(document.activeElement).toBe(guidedTab);
+  });
 });

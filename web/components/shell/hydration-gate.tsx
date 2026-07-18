@@ -24,6 +24,7 @@ import { ConfirmDialog } from "./confirm-dialog";
 import { useUndoRedoShortcuts } from "./undo-redo-controls";
 import { usePersistenceStatusController } from "./persistence-status";
 import { useSyncModePersistence } from "@/lib/mode/use-mode";
+import { useRouteValidityGate } from "./use-route-validity-gate";
 import { toast } from "sonner";
 
 export function HydrationGate({ children }: { children: React.ReactNode }) {
@@ -42,6 +43,7 @@ export function HydrationGate({ children }: { children: React.ReactNode }) {
   useUndoRedoShortcuts();
   usePersistenceStatusController();
   useSyncModePersistence();
+  useRouteValidityGate();
 
   if (status === "unhydrated" || status === "hydrating") {
     return (

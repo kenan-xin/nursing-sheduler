@@ -39,14 +39,27 @@ export function ModeToggle() {
   // works regardless of the (pre-render) tabIndex. Both click and keyboard
   // activation route through the same mode-transition transaction (T08c) —
   // never a bare `setMode`. Focus moves ONLY from `onCommitted` (T08f P2):
-  // today the transaction always commits synchronously (no shipped route is
-  // ever invalid), so this is indistinguishable from moving focus eagerly —
-  // but once T08d can stage a draft-aware redirect, moving focus before the
-  // mode has actually changed would strand it on the not-yet-selected tab if
-  // the transition is later canceled.
+  // moving it on the mere request would strand it on the not-yet-selected tab
+  // if the transition is later canceled.
+  //
+  // A pointer click, unlike keyboard activation, moves DOM focus to the
+  // clicked (target) button BEFORE `onClick` runs — a browser default, not
+  // something this component controls. If the transition then stages (an open
+  // draft on a route the target mode can't keep) and the user cancels, focus
+  // would be left on that now-unselected target tab with `tabIndex=-1` (T08d
+  // repair P2). Capturing the currently-selected tab's index before the
+  // request and restoring focus to it via `onCancelled` fixes that without
+  // touching the committed-focus path above: on an immediate commit
+  // `onCancelled` never fires, and for keyboard activation focus never left
+  // the current tab in the first place, so restoring it there is a no-op.
   const activate = (value: AppMode) => {
     const idx = OPTIONS.findIndex((o) => o.value === value);
-    requestModeChange(value, () => tabsRef.current[idx]?.focus());
+    const previousIdx = OPTIONS.findIndex((o) => o.value === mode);
+    requestModeChange(
+      value,
+      () => tabsRef.current[idx]?.focus(),
+      () => tabsRef.current[previousIdx]?.focus(),
+    );
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {

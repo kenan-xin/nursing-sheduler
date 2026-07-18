@@ -78,14 +78,16 @@ test.describe("T08 rebuild — two-mode Home (BLOCKER 2)", () => {
     await expect(page.getByTestId("home-screen")).toHaveAttribute("data-mode", "advanced");
     await expect(page.getByTestId("home-advanced")).toBeVisible();
     await expect(page.getByTestId("home-wizard-grid")).toHaveCount(0);
-    // Every committed destination except Home is a direct entry point (12 of 13).
-    await expect(page.locator('[data-testid^="home-adv-"]')).toHaveCount(12);
+    // Every Advanced-visible destination except Home is a direct entry point
+    // (13 of 14 — DL12 §2: Guided's five Set up entries incl. Rules, plus the
+    // five raw Constraints editors and Export Layout).
+    await expect(page.locator('[data-testid^="home-adv-"]')).toHaveCount(13);
     // Reachability preserved: still routes.
     await page.getByTestId("home-adv-/dates").click();
     await expect(page).toHaveURL(/\/dates$/);
   });
 
-  test("stat strip and nav counts reflect real scenario data", async ({ page }) => {
+  test("stat strip reflects real scenario data", async ({ page }) => {
     await gotoReadyHome(page);
     await mutate(page, {
       staff: [
@@ -93,10 +95,9 @@ test.describe("T08 rebuild — two-mode Home (BLOCKER 2)", () => {
         { _k: "p2", id: 2, description: "B" },
       ],
     });
-    // Stat strip NURSES tile.
+    // Stat strip NURSES tile. Live counts stay on Home (DL12 §2) — the
+    // sidebar no longer renders a second, ambiguous count badge per row.
     await expect(page.getByTestId("home-stat-strip")).toContainText("2");
-    // Sidebar People row carries a live count badge.
-    await expect(page.getByTestId("nav-count-/people")).toHaveText("2");
   });
 
   test("Generate is only 'ready to run' (not Done) when all prerequisites exist but no roster", async ({

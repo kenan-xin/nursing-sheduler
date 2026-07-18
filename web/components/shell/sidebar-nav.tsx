@@ -1,23 +1,28 @@
 "use client";
 
-// Shared navigation list body (T08). One flat, always-open list rendered inside
-// AppSideNav — used verbatim by both the desktop rail and the mobile drawer, so
-// their nav hierarchy can never drift (MAJOR 3).
+// Shared navigation list body (T08, mode-filtered by T08d). One flat,
+// always-open list rendered inside AppSideNav — used verbatim by both the
+// desktop rail and the mobile drawer, so their nav hierarchy can never drift
+// (MAJOR 3). It reuses `getNavGroupsForMode` (nav-config.ts) — the same
+// filtered registry Home and route validity read — so the sidebar can never
+// list a destination Home/crumbs/validity disagree about.
 //
 // Presentation matches the prototype SideNav (SideNav.dc.html:29-46): flat,
 // always-visible groups (no collapsibles), a headerless Home group followed by
-// the labeled SET UP / OUTPUT / SYSTEM groups, and per-row ordering of a 20px
-// centered icon → flexible label → trailing metadata cluster (audit MAJOR 2). A
-// full-row brand-tint active state and a `panel` hover are kept from the prior
-// verified-conformance pass.
+// the labeled SET UP / CONSTRAINTS / OUTPUT / SYSTEM groups (Constraints only
+// in Advanced), and per-row ordering of a 20px centered icon → flexible label →
+// trailing metadata cluster (audit MAJOR 2). A full-row brand-tint active
+// state and a `panel` hover are kept from the prior verified-conformance pass.
 //
 // Typography (audit MAJOR 3): inactive rows 500, active rows 600, with an
-// explicit ~42px row height (10px 12px padding retained). The trailing cluster
-// holds a live scenario count (hidden when zero) and, when present, the Guided
-// step number — count immediately before step (audit MAJOR 2).
+// explicit ~42px row height (10px 12px padding retained). DL12 §2: the
+// trailing cluster holds only the Guided workflow step, and only in Guided
+// mode — live scenario counts stay on Home rather than rendering a second,
+// ambiguous number, and Advanced rows never show a Guided step number since
+// Advanced has no workflow to number.
 
-import { NAV_GROUPS, type NavItem } from "./nav-config";
-import { navCountFor, useScenarioSummary } from "@/components/home/scenario-summary";
+import { useAppMode } from "@/lib/mode/use-mode";
+import { getNavGroupsForMode, type NavItem } from "./nav-config";
 import { cn } from "@/lib/utils";
 
 export function NavList({
@@ -27,11 +32,12 @@ export function NavList({
   activePath: string;
   onNavigate: (path: string) => void;
 }) {
-  const summary = useScenarioSummary();
+  const mode = useAppMode();
+  const groups = getNavGroupsForMode(mode);
 
   return (
     <nav data-testid="sidebar-nav" aria-label="Main navigation" className="flex flex-col py-1">
-      {NAV_GROUPS.map((group, idx) => (
+      {groups.map((group, idx) => (
         <div
           key={group.id}
           data-testid={`nav-group-${group.id}`}
@@ -50,7 +56,7 @@ export function NavList({
               key={item.path}
               item={item}
               active={activePath === item.path}
-              count={item.countKey ? navCountFor(summary, item.countKey) : 0}
+              showStep={mode === "guided"}
               onClick={() => onNavigate(item.path)}
             />
           ))}
@@ -63,16 +69,16 @@ export function NavList({
 function NavLink({
   item,
   active,
-  count,
+  showStep,
   onClick,
 }: {
   item: NavItem;
   active: boolean;
-  count: number;
+  showStep: boolean;
   onClick: () => void;
 }) {
   const Icon = item.icon;
-  const hasTrailing = count > 0 || item.guidedStep != null;
+  const hasTrailing = showStep && item.guidedStep != null;
   return (
     <button
       type="button"
@@ -101,19 +107,9 @@ function NavLink({
             active ? "text-brandink" : "text-ink3",
           )}
         >
-          {count > 0 ? (
-            <span
-              data-testid={`nav-count-${item.path}`}
-              aria-label={`${count} ${item.label.toLowerCase()}`}
-            >
-              {count}
-            </span>
-          ) : null}
-          {item.guidedStep != null ? (
-            <span data-testid={`nav-step-${item.path}`} aria-label={`Step ${item.guidedStep}`}>
-              {item.guidedStep}
-            </span>
-          ) : null}
+          <span data-testid={`nav-step-${item.path}`} aria-label={`Step ${item.guidedStep}`}>
+            {item.guidedStep}
+          </span>
         </span>
       ) : null}
     </button>
