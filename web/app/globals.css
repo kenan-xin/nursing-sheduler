@@ -345,9 +345,12 @@
   --text-label-md: var(--m-md);
   --text-label-lg: var(--m-lg);
 
-  /* Motion durations → duration-* utilities */
-  --duration-fast: var(--dur-fast);
-  --duration-base: var(--dur-base);
+  /* Motion durations → duration-* utilities. Tailwind v4's `duration-<name>`
+     utility resolves from the `--transition-duration-*` theme namespace (see
+     node_modules/tailwindcss/theme.css); a plain `--duration-*` key emits no
+     rule. */
+  --transition-duration-fast: var(--dur-fast);
+  --transition-duration-base: var(--dur-base);
 
   /* Shadows → shadow-* utilities */
   --shadow-toast: var(--shadow-toast);

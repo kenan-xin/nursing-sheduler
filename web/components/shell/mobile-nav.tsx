@@ -38,12 +38,12 @@ export function MobileNav() {
         <FaBars />
       </Dialog.Trigger>
       <Dialog.Portal>
-        <Dialog.Backdrop className="fixed inset-0 z-40 bg-[rgba(8,10,14,0.5)] transition-opacity [transition-duration:var(--dur-fast)] data-[ending-style]:opacity-0 data-[starting-style]:opacity-0" />
+        <Dialog.Backdrop className="fixed inset-0 z-40 bg-[rgba(8,10,14,0.5)] transition-opacity duration-fast data-[ending-style]:opacity-0 data-[starting-style]:opacity-0" />
         <Dialog.Popup
           data-testid="mobile-nav-drawer"
           className={cn(
             "fixed inset-y-0 left-0 z-50 flex w-[250px] max-w-[84vw] flex-col bg-sidebar shadow-side outline-none",
-            "transition-transform [transition-duration:var(--dur-base)] data-[ending-style]:-translate-x-full data-[starting-style]:-translate-x-full",
+            "transition-transform duration-base data-[ending-style]:-translate-x-full data-[starting-style]:-translate-x-full",
           )}
         >
           <Dialog.Title className="sr-only">Navigation</Dialog.Title>
