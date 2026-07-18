@@ -15,7 +15,7 @@
 import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { FaPlus, FaXmark, FaCircleInfo, FaCheck, FaLock, FaGripVertical } from "@/components/icons";
-import { useNavGuardStore } from "@/components/shell/nav-guard-store";
+import { useLosableDraft } from "@/components/shell/use-losable-draft";
 /** Outer screen wrapper — centred column wide enough for the 940px form body. */
 export function CardEditorScreen({
   screen,
@@ -36,19 +36,14 @@ export function CardEditorScreen({
 }
 
 /**
- * Arm the shared open-draft navigation guard while a card-editor add/edit form is
+ * Register the shared losable-draft guard while a card-editor add/edit form is
  * visible (FR-PR-06). An open draft holds unsaved work that is not a durable
  * scenario mutation, so the dirty-only guard would let a sidebar click discard it
- * silently; this feeds the draft-open state into the shared guard so leaving
- * prompts. Every card editor (Counts seed + the R/S/A clones) calls this with its
- * own `!!draft`, and the effect clears the flag on unmount/close.
+ * silently; this registers the draft under `kind` so leaving prompts. Every card
+ * editor (Counts seed + the R/S/A clones) calls this with its own kind + `!!draft`.
  */
-export function useCardEditorDraftGuard(active: boolean): void {
-  const setDraftOpen = useNavGuardStore((s) => s.setDraftOpen);
-  React.useEffect(() => {
-    setDraftOpen(active);
-    return () => setDraftOpen(false);
-  }, [active, setDraftOpen]);
+export function useCardEditorDraftGuard(kind: string, active: boolean): void {
+  useLosableDraft(`card-editor:${kind}`, active, `${kind} editor`);
 }
 
 /**

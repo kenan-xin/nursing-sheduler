@@ -18,6 +18,7 @@
 //     offers an edit/delete affordance for them), preserving the settled guard.
 
 import { useMemo, useState } from "react";
+import { useLosableDraft } from "@/components/shell/use-losable-draft";
 import {
   dateIdToIso,
   deriveDateGroups,
@@ -125,6 +126,8 @@ export function DateGroupsCard({
   const previewOpen = sel.length > 0 && !previewClosed;
 
   const busy = creating || editingId !== null;
+  // FR-PR-06: register the open create/edit draft as a losable draft (T08a).
+  useLosableDraft("date-groups-editor", busy, "Date groups editor");
 
   const startCreate = () => {
     setCreating(true);

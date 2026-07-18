@@ -134,3 +134,27 @@ describe("mode lens — non-mutating", () => {
     expect(selectIsDirty(spine.scenario.getState())).toBe(true);
   });
 });
+
+// T08c — mode adoption lifecycle. A route-validity gate (T08d) must not trust
+// `mode` as the adopted preference before `useSyncModePersistence`'s post-mount
+// reconciliation has run — otherwise a direct visit to an Advanced-only URL
+// could be redirected during the initial server-default Guided render even
+// though the stored preference is Advanced.
+describe("mode adoption lifecycle", () => {
+  it("starts unhydrated and flips to ready exactly once marked", () => {
+    const mode = createModeStore("guided");
+    expect(mode.getState().adoption).toBe("unhydrated");
+
+    mode.getState().markAdopted();
+    expect(mode.getState().adoption).toBe("ready");
+  });
+
+  it("marking adopted does not change the mode value itself", () => {
+    const mode = createModeStore("guided");
+    mode.getState().setMode("advanced");
+    mode.getState().markAdopted();
+
+    expect(mode.getState().mode).toBe("advanced");
+    expect(mode.getState().adoption).toBe("ready");
+  });
+});

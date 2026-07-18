@@ -56,7 +56,7 @@ export function CoveringsEditor() {
   const { state, coverings, add, update, remove, duplicate, move, reorder, setDisabled, getCards } =
     useCoverings();
   const [draft, setDraft] = useState<Draft | null>(null);
-  useCardEditorDraftGuard(!!draft);
+  useCardEditorDraftGuard("coverings", !!draft);
   const { isStale } = useCardEditorStaleGuard<CoveringCard>({
     cards: coverings,
     draftOpen: !!draft,

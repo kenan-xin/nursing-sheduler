@@ -16,6 +16,7 @@ import { useShallow } from "zustand/react/shallow";
 import { pickScenario, useScenarioStore } from "@/lib/store";
 import { prepareExport } from "@/lib/scenario";
 import { StartOverCard } from "@/components/shell/new-schedule-button";
+import { useLosableDraft } from "@/components/shell/use-losable-draft";
 import { AnonymiseCard } from "./anonymise-card";
 import { ImportWarningsBanner } from "./import-warnings-banner";
 import { buildSampleScenarioYaml } from "./load-controls-core";
@@ -35,6 +36,8 @@ export function SaveLoadWorkspace() {
   const [uploadOpen, setUploadOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
+  // FR-PR-06: register the open Edit-YAML draft as a losable draft (T08a).
+  useLosableDraft("save-load:edit-yaml", editing, "Edit YAML");
   const { issues, clearIssues, clearImportState, confirm, warnings, dismissWarnings, handleFile } =
     useScenarioImport({ onCommitted: () => setEditing(false) });
 
