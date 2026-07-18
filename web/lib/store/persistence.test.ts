@@ -137,6 +137,56 @@ describe("migrateScenarioState", () => {
     expect(() => migrateScenarioState(undefined, 0)).not.toThrow();
     expect(() => migrateScenarioState({}, 0)).not.toThrow();
   });
+
+  it("upgrades a v1 payload: defaults an absent guidedRulePins to []", () => {
+    const migrated = migrateScenarioState({ rangeStart: "2026-01-01" }, 1) as Record<
+      string,
+      unknown
+    >;
+    expect(migrated.guidedRulePins).toEqual([]);
+    expect(migrated.rangeStart).toBe("2026-01-01");
+  });
+
+  it("does not clobber an already-present guidedRulePins on re-migration", () => {
+    const pin = {
+      id: "p1",
+      constraintKind: "counts",
+      constraintId: "c1",
+      category: "Hours",
+      quickFields: [],
+    };
+    const migrated = migrateScenarioState({ guidedRulePins: [pin] }, 0) as Record<string, unknown>;
+    expect(migrated.guidedRulePins).toEqual([pin]);
+  });
+
+  it("upgrades a v2 payload: collapses duplicate legacy pins for the same source to the most recent one (T14d)", () => {
+    const older = {
+      id: "older",
+      constraintKind: "counts",
+      constraintId: "c1",
+      category: "Hours",
+      quickFields: [],
+    };
+    const newer = {
+      id: "newer",
+      constraintKind: "counts",
+      constraintId: "c1",
+      category: "Custom shortcuts",
+      quickFields: ["target"],
+    };
+    const unrelated = {
+      id: "unrelated",
+      constraintKind: "requirements",
+      constraintId: "r1",
+      category: "Staffing",
+      quickFields: [],
+    };
+    const migrated = migrateScenarioState(
+      { guidedRulePins: [older, newer, unrelated] },
+      2,
+    ) as Record<string, unknown>;
+    expect(migrated.guidedRulePins).toEqual([newer, unrelated]);
+  });
 });
 
 describe("sanitizePersistedScenario", () => {
@@ -268,8 +318,70 @@ describe("sanitizePersistedScenario", () => {
         ],
         coverings: [{ uid: "v1", preceptors: [], preceptees: [], shiftTypes: [], weight: 1 }],
       },
+      guidedRulePins: [
+        {
+          id: "pin1",
+          constraintKind: "counts",
+          constraintId: "c1",
+          category: "Hours",
+          description: "Cap nights",
+          quickFields: ["target"],
+        },
+      ],
       maxOneShiftPerDay: { description: "enforced" },
       baselineFingerprint: "deadbeef",
+    };
+    expect(sanitizePersistedScenario(payload)).toEqual(payload);
+  });
+
+  it("throws on guidedRulePins malformation (T14a)", () => {
+    // missing constraintKind/constraintId/category/quickFields
+    expect(() => sanitizePersistedScenario({ guidedRulePins: [{ id: "p1" }] })).toThrow(
+      /guidedRulePins\[0\]/,
+    );
+    // an unrecognized constraintKind
+    expect(() =>
+      sanitizePersistedScenario({
+        guidedRulePins: [
+          { id: "p1", constraintKind: "bogus", constraintId: "c1", category: "X", quickFields: [] },
+        ],
+      }),
+    ).toThrow(/constraintKind/);
+    // quickFields must be an array of strings
+    expect(() =>
+      sanitizePersistedScenario({
+        guidedRulePins: [
+          {
+            id: "p1",
+            constraintKind: "counts",
+            constraintId: "c1",
+            category: "X",
+            quickFields: [1],
+          },
+        ],
+      }),
+    ).toThrow(/quickFields/);
+  });
+
+  it("accepts a well-formed guidedRulePins list, including an optional description", () => {
+    const payload = {
+      guidedRulePins: [
+        {
+          id: "p1",
+          constraintKind: "requirements",
+          constraintId: "r1",
+          category: "Staffing",
+          quickFields: [],
+        },
+        {
+          id: "p2",
+          constraintKind: "counts",
+          constraintId: "c1",
+          category: "Hours",
+          description: "Cap nights",
+          quickFields: ["target"],
+        },
+      ],
     };
     expect(sanitizePersistedScenario(payload)).toEqual(payload);
   });

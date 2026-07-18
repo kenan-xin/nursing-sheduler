@@ -96,6 +96,43 @@ function fixture(): ScenarioUiState {
       { uid: "er1", type: "count", header: "P1 row", countShiftTypes: ["D"], countPeople: ["P1"] },
     ],
   };
+  state.guidedRulePins = [
+    {
+      id: "pin-r1",
+      constraintKind: "requirements",
+      constraintId: "r1",
+      category: "Staffing",
+      quickFields: [],
+    },
+    {
+      id: "pin-s1",
+      constraintKind: "successions",
+      constraintId: "s1",
+      category: "Sequencing",
+      quickFields: [],
+    },
+    {
+      id: "pin-cnt1",
+      constraintKind: "counts",
+      constraintId: "cnt1",
+      category: "Hours",
+      quickFields: ["target"],
+    },
+    {
+      id: "pin-a1",
+      constraintKind: "affinities",
+      constraintId: "a1",
+      category: "Pairing",
+      quickFields: [],
+    },
+    {
+      id: "pin-cov1",
+      constraintKind: "coverings",
+      constraintId: "cov1",
+      category: "Supervision",
+      quickFields: [],
+    },
+  ];
   return state;
 }
 
@@ -221,6 +258,35 @@ describe("deleteEntity — cascade + prune emptied preferences (findings #3/#4)"
     expect(after.cardsByKind.coverings[0].date).toBeUndefined();
     // requirement date ["2026-05-14"]→[] is required → requirement dropped
     expect(after.cardsByKind.requirements).toHaveLength(0);
+  });
+});
+
+describe("deleteEntity — Guided rule pin reconciliation (T14a)", () => {
+  it("drops pins whose source card was pruned by the cascade, keeps pins for survivors", () => {
+    const after = deleteEntity(fixture(), "person", "P1");
+    // successions/counts (person ["P1"]→[]) and affinities/coverings (P1 was the
+    // sole people1/preceptor) are all pruned by the person delete → their pins go.
+    expect(after.cardsByKind.successions).toHaveLength(0);
+    expect(after.cardsByKind.counts).toHaveLength(0);
+    expect(after.cardsByKind.affinities).toHaveLength(0);
+    expect(after.cardsByKind.coverings).toHaveLength(0);
+    // requirements[0] (r1) survives: qualifiedPeople ["P1","P2"]→["P2"], non-empty.
+    expect(after.cardsByKind.requirements.map((c) => c.uid)).toEqual(["r1"]);
+    expect(after.guidedRulePins.map((p) => p.id)).toEqual(["pin-r1"]);
+  });
+
+  it("a delete that prunes no cards leaves guidedRulePins reference-identical", () => {
+    const before = fixture();
+    // Deleting an unreferenced group leaves every card kind (and hence every
+    // pin) exactly as-is.
+    const after = deleteEntity(before, "date", "2026-05-17");
+    expect(after.guidedRulePins).toBe(before.guidedRulePins);
+  });
+
+  it("renameEntity never touches guidedRulePins (pins key on card uid, not entity id)", () => {
+    const before = fixture();
+    const after = renameEntity(before, "person", "P1", "PX");
+    expect(after.guidedRulePins).toBe(before.guidedRulePins);
   });
 });
 

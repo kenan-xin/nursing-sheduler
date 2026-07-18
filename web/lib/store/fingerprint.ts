@@ -23,6 +23,7 @@ export const SCENARIO_KEYS = [
   "reqData",
   "exportLayout",
   "cardsByKind",
+  "guidedRulePins",
   "maxOneShiftPerDay",
 ] as const satisfies readonly (keyof ScenarioUiState)[];
 
@@ -40,6 +41,7 @@ export function pickScenario(state: ScenarioUiState): ScenarioUiState {
     reqData: state.reqData,
     exportLayout: state.exportLayout,
     cardsByKind: state.cardsByKind,
+    guidedRulePins: state.guidedRulePins,
     maxOneShiftPerDay: state.maxOneShiftPerDay,
   };
 }

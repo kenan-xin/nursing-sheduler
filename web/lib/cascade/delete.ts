@@ -12,12 +12,14 @@
 // FR-RI-09); and the Export Layout rows (filter → drop emptied — FR-RI-12).
 
 import type {
+  CardsByKind,
   CoefficientEntry,
   ExportLayout,
   ScenarioUiState,
   UiPerson,
   UiRequestCell,
 } from "@/lib/scenario";
+import { pruneOrphanedGuidedRulePins } from "@/lib/scenario";
 import type { EntityDomain, EntityRef } from "./domain";
 import {
   CARD_COEFFICIENT_FIELD,
@@ -189,8 +191,10 @@ function pruneDefinitions(
 
 /**
  * Delete an entity or group and cascade the removal everywhere it is referenced,
- * pruning any preference/export row whose required fields became empty. Pure:
- * returns a new `ScenarioUiState`, never mutating the input.
+ * pruning any preference/export row whose required fields became empty, and any
+ * Guided rule pin whose source card was itself pruned (T14a — no dangling pin may
+ * survive silently). Pure: returns a new `ScenarioUiState`, never mutating the
+ * input.
  */
 export function deleteEntity(
   state: ScenarioUiState,
@@ -199,16 +203,18 @@ export function deleteEntity(
 ): ScenarioUiState {
   const deleted = new Set<RefLeaf>([id]);
   const cards = state.cardsByKind;
+  const nextCardsByKind: CardsByKind = {
+    requirements: pruneCards(cards.requirements, "requirements", domain, deleted),
+    successions: pruneCards(cards.successions, "successions", domain, deleted),
+    counts: pruneCards(cards.counts, "counts", domain, deleted),
+    affinities: pruneCards(cards.affinities, "affinities", domain, deleted),
+    coverings: pruneCards(cards.coverings, "coverings", domain, deleted),
+  };
   return {
     ...state,
     ...pruneDefinitions(state, domain, deleted),
-    cardsByKind: {
-      requirements: pruneCards(cards.requirements, "requirements", domain, deleted),
-      successions: pruneCards(cards.successions, "successions", domain, deleted),
-      counts: pruneCards(cards.counts, "counts", domain, deleted),
-      affinities: pruneCards(cards.affinities, "affinities", domain, deleted),
-      coverings: pruneCards(cards.coverings, "coverings", domain, deleted),
-    },
+    cardsByKind: nextCardsByKind,
+    guidedRulePins: pruneOrphanedGuidedRulePins(state.guidedRulePins, nextCardsByKind),
     reqData: pruneReqData(state.reqData, domain, deleted),
     exportLayout: pruneExportLayout(state.exportLayout, domain, deleted),
   };

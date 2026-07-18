@@ -8,7 +8,11 @@
 // `use-counts.ts`'s `reorderByDrop` + `getUniqueCopyLabel` pattern).
 
 import { useScenarioStore } from "@/lib/store";
-import type { AffinityCard, ScenarioUiState } from "@/lib/scenario";
+import {
+  pruneOrphanedGuidedRulePins,
+  type AffinityCard,
+  type ScenarioUiState,
+} from "@/lib/scenario";
 import { getUniqueCopyLabel } from "@/components/entity-editor/core";
 import type { DropPosition } from "@/components/card-editor/card-editor-shell";
 import {
@@ -18,11 +22,17 @@ import {
   type AffinityFormState,
 } from "./affinities-model";
 
-/** Replace the affinities list in one tracked mutation (fresh refs for history). */
+/** Replace the affinities list in one tracked mutation (fresh refs for history).
+ *  Also reconciles Guided rule pins (T14a): a removed card's pin is pruned in the
+ *  SAME mutation, so no dangling pin can survive a direct delete. */
 function commitAffinities(next: AffinityCard[]) {
-  useScenarioStore.getState().mutateScenario((state) => ({
-    cardsByKind: { ...state.cardsByKind, affinities: next },
-  }));
+  useScenarioStore.getState().mutateScenario((state) => {
+    const cardsByKind = { ...state.cardsByKind, affinities: next };
+    return {
+      cardsByKind,
+      guidedRulePins: pruneOrphanedGuidedRulePins(state.guidedRulePins, cardsByKind),
+    };
+  });
 }
 
 export interface AffinitiesController {

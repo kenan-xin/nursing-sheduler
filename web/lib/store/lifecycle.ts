@@ -63,11 +63,13 @@ function assignUid<T extends object>(body: T): T & { uid: string } {
 /**
  * Hydrate a keyless import target (T05 output) into durable UI state by assigning
  * card identity. Entity/request/export `uid`s are already optional, so only cards
- * need hydrating.
+ * need hydrating. `guidedRulePins` has no import-boundary counterpart yet (T17
+ * owns the Workspace `guidedRules` contract), so every Load starts pin-free.
  */
 function hydrateImportTarget(target: ImportNormalizationTarget): ScenarioUiState {
   return {
     ...target,
+    guidedRulePins: [],
     cardsByKind: {
       requirements: target.cardsByKind.requirements.map(assignUid),
       successions: target.cardsByKind.successions.map(assignUid),

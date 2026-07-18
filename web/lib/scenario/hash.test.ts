@@ -102,6 +102,7 @@ describe("canonicalHash", () => {
       shiftGroups: [],
       dateGroups: [],
       cardsByKind: { requirements: [], successions: [], counts: [], affinities: [], coverings: [] },
+      guidedRulePins: [],
       reqData: [],
       exportLayout: { formatting: [], extraColumns: [], extraRows: [] },
     };
