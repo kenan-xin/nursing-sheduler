@@ -96,6 +96,11 @@ const VALID_SCENARIO_PATCH = {
   ],
   exportLayout: {
     formatting: [{ uid: "f1", type: "row", people: ["Alice"], backgroundColor: "#ff0000" }],
+    // mutateScenario shallow-merges exportLayout, and computeScenarioSummary (rendered
+    // on every page via the sidebar) reads .length on all three arrays — so a partial
+    // exportLayout leaves these undefined and crashes the tree, wiping __nsStore.
+    extraColumns: [],
+    extraRows: [],
   },
 };
 

@@ -144,12 +144,16 @@ test.describe("T08 rebuild — persistence status (MAJOR 6)", () => {
 
     // Route to Save & Load while clean (no dirty guard), then dirty the scenario.
     await page.getByTestId("nav-link-/save-and-load").click();
-    await expect(page.getByTestId("persistence-badge")).toHaveAttribute("data-status", "saved");
+    await expect(
+      page.getByTestId("auto-save-status").getByTestId("persistence-badge"),
+    ).toHaveAttribute("data-status", "saved");
 
     await mutate(page, { rangeStart: "2026-02-01", rangeEnd: "2026-02-28" });
     // The queued write settles back to Saved in both the top-bar chip and the badge.
     await expect(page.getByTestId("persistence-status")).toHaveAttribute("data-status", "saved");
-    await expect(page.getByTestId("persistence-badge")).toHaveAttribute("data-status", "saved");
+    await expect(
+      page.getByTestId("auto-save-status").getByTestId("persistence-badge"),
+    ).toHaveAttribute("data-status", "saved");
   });
 });
 

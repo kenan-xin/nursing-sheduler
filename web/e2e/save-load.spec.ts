@@ -80,6 +80,11 @@ const VALID_SCENARIO_PATCH = {
   ],
   exportLayout: {
     formatting: [{ uid: "f1", type: "row", people: ["Alice"], backgroundColor: "#ff0000" }],
+    // mutateScenario shallow-merges exportLayout, and computeScenarioSummary (rendered
+    // on every page via the sidebar) reads .length on all three arrays — so a partial
+    // exportLayout leaves these undefined and crashes the tree, wiping __nsStore.
+    extraColumns: [],
+    extraRows: [],
   },
 };
 
@@ -92,8 +97,9 @@ test.beforeEach(async ({ page }) => {
 test.describe("T17a-4 — Scenario-file card + read-only preview", () => {
   test("the ● SAVED badge (browser auto-save status) is present", async ({ page }) => {
     await gotoReadySaveAndLoad(page);
-    await expect(page.getByTestId("persistence-badge")).toBeVisible();
-    await expect(page.getByTestId("persistence-badge")).toContainText(/saved/i);
+    const badge = page.getByTestId("auto-save-status").getByTestId("persistence-badge");
+    await expect(badge).toBeVisible();
+    await expect(badge).toContainText(/saved/i);
   });
 
   test("Download on a valid scenario writes a scenario.yaml file and clears dirty", async ({
