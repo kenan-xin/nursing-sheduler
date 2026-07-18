@@ -175,6 +175,7 @@ function nextUid(): string {
 function hydrate(target: ImportNormalizationTarget): ScenarioUiState {
   return {
     ...target,
+    guidedRulePins: [],
     cardsByKind: {
       requirements: target.cardsByKind.requirements.map((b) => ({ ...b, uid: nextUid() })),
       successions: target.cardsByKind.successions.map((b) => ({ ...b, uid: nextUid() })),

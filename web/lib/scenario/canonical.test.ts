@@ -69,6 +69,7 @@ function makeUiState(): ScenarioUiState {
         { uid: "cu6", preceptors: [1], preceptees: [0], shiftTypes: [["LD"]], weight: 1 },
       ],
     },
+    guidedRulePins: [],
     reqData: [
       { uid: "r1", person: 0, date: 10, kind: "leave", description: "Feb 10" },
       { uid: "r2", person: 0, date: 11, kind: "leave" },

@@ -84,6 +84,57 @@ describe("hydration lifecycle", () => {
     });
   });
 
+  it("runs the v1→v2 guidedRulePins migration, defaulting an absent field to []", async () => {
+    const mem = createMemoryStorage(envelope({ rangeStart: "2026-01-01" }, 1));
+    const spine = createStateSpine({ createStorage: () => mem });
+
+    await hydrateScenarioStore(spine.scenario, spine.hot);
+
+    expect(spine.hot.getState().hydrationStatus).toBe("ready");
+    expect(spine.scenario.getState().guidedRulePins).toEqual([]);
+  });
+
+  it("round-trips guidedRulePins through a v2 persisted record", async () => {
+    const pin = {
+      id: "pin1",
+      constraintKind: "counts",
+      constraintId: "c1",
+      category: "Rest",
+      quickFields: ["target"],
+    };
+    const mem = createMemoryStorage(envelope({ guidedRulePins: [pin] }, SCENARIO_PERSIST_VERSION));
+    const spine = createStateSpine({ createStorage: () => mem });
+
+    await hydrateScenarioStore(spine.scenario, spine.hot);
+
+    expect(spine.hot.getState().hydrationStatus).toBe("ready");
+    expect(spine.scenario.getState().guidedRulePins).toEqual([pin]);
+  });
+
+  it("runs the v2→v3 migration, collapsing legacy duplicate pins for the same source (T14d)", async () => {
+    const older = {
+      id: "older",
+      constraintKind: "counts",
+      constraintId: "c1",
+      category: "Hours",
+      quickFields: [],
+    };
+    const newer = {
+      id: "newer",
+      constraintKind: "counts",
+      constraintId: "c1",
+      category: "Custom shortcuts",
+      quickFields: ["target"],
+    };
+    const mem = createMemoryStorage(envelope({ guidedRulePins: [older, newer] }, 2));
+    const spine = createStateSpine({ createStorage: () => mem });
+
+    await hydrateScenarioStore(spine.scenario, spine.hot);
+
+    expect(spine.hot.getState().hydrationStatus).toBe("ready");
+    expect(spine.scenario.getState().guidedRulePins).toEqual([newer]);
+  });
+
   it("recovers from a corrupt (unparseable) record, then user-resets", async () => {
     const mem = createMemoryStorage({ [SCENARIO_PERSIST_KEY]: "{{{ not valid json" });
     const spine = createStateSpine({ createStorage: () => mem });
@@ -126,6 +177,12 @@ describe("hydration lifecycle", () => {
       { reqData: [{ kind: "leave" }] },
       { staffGroups: [{ id: "g1" }] },
       { meta: { apiVersion: "alpha" }, cardsByKind: { requirements: [{ weight: 1 }] } },
+      { guidedRulePins: [{ id: "p1" }] },
+      {
+        guidedRulePins: [
+          { id: "p1", constraintKind: "bogus", constraintId: "c1", category: "X", quickFields: [] },
+        ],
+      },
     ]) {
       const mem = createMemoryStorage(envelope(payload, 1));
       const spine = createStateSpine({ createStorage: () => mem });
@@ -355,6 +412,28 @@ describe("Load / New lifecycle", () => {
     expect(selectIsDirty(spine.scenario.getState())).toBe(false);
   });
 
+  it("New clears any Guided rule pins along with the rest of the scenario", async () => {
+    const spine = createStateSpine({ createStorage: () => createMemoryStorage() });
+    await hydrateScenarioStore(spine.scenario, spine.hot);
+
+    spine.scenario.getState().mutateScenario({
+      guidedRulePins: [
+        {
+          id: "pin1",
+          constraintKind: "counts",
+          constraintId: "c1",
+          category: "Rest",
+          quickFields: [],
+        },
+      ],
+    });
+    expect(spine.scenario.getState().guidedRulePins).toHaveLength(1);
+
+    newScenario(spine.scenario, spine.hot);
+
+    expect(spine.scenario.getState().guidedRulePins).toEqual([]);
+  });
+
   it("Load replaces state, assigns card identity, clears history, and is clean", async () => {
     const spine = createStateSpine({ createStorage: () => createMemoryStorage() });
     await hydrateScenarioStore(spine.scenario, spine.hot);
@@ -379,6 +458,27 @@ describe("Load / New lifecycle", () => {
     expect(typeof spine.scenario.getState().cardsByKind.requirements[0].uid).toBe("string");
     expect(spine.scenario.temporal.getState().pastStates.length).toBe(0);
     expect(selectIsDirty(spine.scenario.getState())).toBe(false);
+  });
+
+  it("Load starts pin-free (guidedRulePins has no import-boundary counterpart yet)", async () => {
+    const spine = createStateSpine({ createStorage: () => createMemoryStorage() });
+    await hydrateScenarioStore(spine.scenario, spine.hot);
+
+    spine.scenario.getState().mutateScenario({
+      guidedRulePins: [
+        {
+          id: "pin1",
+          constraintKind: "counts",
+          constraintId: "c1",
+          category: "Rest",
+          quickFields: [],
+        },
+      ],
+    });
+
+    loadScenario(spine.scenario, spine.hot, createEmptyScenarioUiState());
+
+    expect(spine.scenario.getState().guidedRulePins).toEqual([]);
   });
 
   it("Load/New reset the hot store so a staged paint from A cannot commit into B", async () => {

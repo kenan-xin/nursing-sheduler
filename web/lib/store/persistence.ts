@@ -10,14 +10,18 @@
 // strands the newest value when an inner op rejects.
 
 import type { StateStorage } from "zustand/middleware";
-import type { ScenarioUiState } from "@/lib/scenario";
+import {
+  dedupeGuidedRulePinsBySource,
+  type GuidedRulePin,
+  type ScenarioUiState,
+} from "@/lib/scenario";
 import { SCENARIO_KEYS } from "./fingerprint";
 
 /** The single IndexedDB key the durable scenario store persists under. */
 export const SCENARIO_PERSIST_KEY = "nurse-scheduler/scenario";
 
 /** Current persistence payload version; a bump triggers `migrateScenarioState`. */
-export const SCENARIO_PERSIST_VERSION = 1;
+export const SCENARIO_PERSIST_VERSION = 3;
 
 /**
  * The persisted `state` payload at the current version: the durable scenario
@@ -43,6 +47,12 @@ export type PersistedScenarioState = ScenarioUiState & {
  *
  * v0 → v1: the person×date matrix was stored under `requests`; the export layout
  * and baseline fingerprint could be absent.
+ * v1 → v2: `guidedRulePins` (T14a) is a new durable field; a record from before it
+ * existed defaults to an empty pin list.
+ * v2 → v3: `pinConstraint` (T14d) now enforces at most one pin per source
+ * constraint; a record written before that invariant existed may hold
+ * duplicate pins for the same `(constraintKind, constraintId)` — collapse them
+ * to the most recently written one so no hidden, unrenderable pin survives.
  */
 export function migrateScenarioState(persisted: unknown, fromVersion: number): unknown {
   if (fromVersion > SCENARIO_PERSIST_VERSION) {
@@ -50,6 +60,11 @@ export function migrateScenarioState(persisted: unknown, fromVersion: number): u
       `Persisted scenario version ${fromVersion} is newer than the supported version ${SCENARIO_PERSIST_VERSION}; refusing to downgrade.`,
     );
   }
+
+  // An explicitly null persisted payload is corrupt at any version — preserve
+  // that signal rather than coercing it to `{}`, so the sanitizer's null check
+  // (not a version mismatch) is what reports the corruption.
+  if (persisted === null) return null;
 
   const source = (persisted ?? {}) as Record<string, unknown>;
   const migrated: Record<string, unknown> = { ...source };
@@ -61,6 +76,20 @@ export function migrateScenarioState(persisted: unknown, fromVersion: number): u
     delete migrated.requests;
     if (migrated.exportLayout === undefined) {
       migrated.exportLayout = { formatting: [], extraColumns: [], extraRows: [] };
+    }
+  }
+
+  if (fromVersion < 2) {
+    if (migrated.guidedRulePins === undefined) {
+      migrated.guidedRulePins = [];
+    }
+  }
+
+  if (fromVersion < 3) {
+    if (Array.isArray(migrated.guidedRulePins)) {
+      migrated.guidedRulePins = dedupeGuidedRulePinsBySource(
+        migrated.guidedRulePins as GuidedRulePin[],
+      );
     }
   }
 
@@ -537,6 +566,31 @@ const CARD_BODY_VALIDATORS: Record<
   coverings: validateCoveringCard,
 };
 
+const GUIDED_RULE_CONSTRAINT_KINDS = new Set<string>(CARD_KIND_KEYS);
+
+function validateGuidedRulePin(el: Record<string, unknown>, i: number): void {
+  const label = `guidedRulePins[${i}]`;
+  requireString(el.id, `${label}.id`);
+  if (
+    typeof el.constraintKind !== "string" ||
+    !GUIDED_RULE_CONSTRAINT_KINDS.has(el.constraintKind)
+  ) {
+    throw new Error(
+      `Persisted ${label}.constraintKind must be one of ${[...GUIDED_RULE_CONSTRAINT_KINDS].join(", ")}.`,
+    );
+  }
+  requireString(el.constraintId, `${label}.constraintId`);
+  requireString(el.category, `${label}.category`);
+  requireOptionalString(el.description, `${label}.description`);
+  if (!Array.isArray(el.quickFields) || el.quickFields.some((f) => typeof f !== "string")) {
+    throw new Error(`Persisted ${label}.quickFields must be an array of strings.`);
+  }
+}
+
+function validateGuidedRulePins(value: unknown): void {
+  requireObjectArray(value, "guidedRulePins").forEach(validateGuidedRulePin);
+}
+
 function validateCardsByKind(value: unknown): void {
   if (!isPlainObject(value)) throw new Error(`Persisted "cardsByKind" must be an object.`);
   for (const kind of CARD_KIND_KEYS) {
@@ -594,6 +648,9 @@ function validateScenarioField(key: string, value: unknown): void {
       break;
     case "cardsByKind":
       validateCardsByKind(value);
+      break;
+    case "guidedRulePins":
+      validateGuidedRulePins(value);
       break;
     case "maxOneShiftPerDay":
       if (value === undefined) break;

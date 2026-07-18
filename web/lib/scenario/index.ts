@@ -9,6 +9,18 @@ export * from "./types";
 export { createEmptyScenarioUiState, toCanonicalScenarioDocument } from "./canonical";
 export { canonicalHash, canonicalStringify } from "./hash";
 export { currentAppVersion } from "./app-version";
+// T14a — durable Guided rule pin metadata + source-card-deletion reconciliation.
+export {
+  createGuidedRulePin,
+  upsertGuidedRulePin,
+  upsertGuidedRulePinBySource,
+  updateGuidedRulePin,
+  removeGuidedRulePin,
+  removeGuidedRulePins,
+  pruneOrphanedGuidedRulePins,
+  dedupeGuidedRulePinsBySource,
+  type GuidedRulePinDraft,
+} from "./guided-rule-pins";
 
 // T05 — serialization/validation boundary (F2), import path, anonymize transform.
 export {

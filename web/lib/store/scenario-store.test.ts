@@ -36,6 +36,28 @@ describe("durable scenario store — undo/redo", () => {
     expect(scenario.getState().rangeStart).toBe("2026-02-01");
   });
 
+  it("tracks guidedRulePins mutations through undo/redo (T14a)", () => {
+    const { scenario } = spine;
+    expect(scenario.getState().guidedRulePins).toEqual([]);
+
+    const pin = {
+      id: "pin1",
+      constraintKind: "counts" as const,
+      constraintId: "c1",
+      category: "Hours",
+      quickFields: [],
+    };
+    scenario.getState().mutateScenario({ guidedRulePins: [pin] });
+    expect(scenario.getState().guidedRulePins).toEqual([pin]);
+    expect(temporal(scenario).pastStates.length).toBe(1);
+
+    temporal(scenario).undo();
+    expect(scenario.getState().guidedRulePins).toEqual([]);
+
+    temporal(scenario).redo();
+    expect(scenario.getState().guidedRulePins).toEqual([pin]);
+  });
+
   it("records only the scenario slice — never baseline or action functions", () => {
     const { scenario } = spine;
     scenario.getState().mutateScenario({ rangeStart: "2026-02-01" });

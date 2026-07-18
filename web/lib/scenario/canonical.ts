@@ -367,6 +367,7 @@ export function createEmptyScenarioUiState(apiVersion = "alpha"): ScenarioUiStat
       affinities: [],
       coverings: [],
     },
+    guidedRulePins: [],
     reqData: [],
     exportLayout: { formatting: [], extraColumns: [], extraRows: [] },
   };

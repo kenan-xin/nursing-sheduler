@@ -8,7 +8,11 @@
 // `use-counts.ts`).
 
 import { useScenarioStore } from "@/lib/store";
-import type { RequirementCard, ScenarioUiState } from "@/lib/scenario";
+import {
+  pruneOrphanedGuidedRulePins,
+  type RequirementCard,
+  type ScenarioUiState,
+} from "@/lib/scenario";
 import { getUniqueCopyLabel } from "@/components/entity-editor/core";
 import type { DropPosition } from "@/components/card-editor/card-editor-shell";
 import {
@@ -19,11 +23,17 @@ import {
   type RequirementFormState,
 } from "./requirements-model";
 
-/** Replace the requirements list in one tracked mutation (fresh refs for history). */
+/** Replace the requirements list in one tracked mutation (fresh refs for history).
+ *  Also reconciles Guided rule pins (T14a): a removed card's pin is pruned in the
+ *  SAME mutation, so no dangling pin can survive a direct delete. */
 function commitRequirements(next: RequirementCard[]) {
-  useScenarioStore.getState().mutateScenario((state) => ({
-    cardsByKind: { ...state.cardsByKind, requirements: next },
-  }));
+  useScenarioStore.getState().mutateScenario((state) => {
+    const cardsByKind = { ...state.cardsByKind, requirements: next };
+    return {
+      cardsByKind,
+      guidedRulePins: pruneOrphanedGuidedRulePins(state.guidedRulePins, cardsByKind),
+    };
+  });
 }
 
 export interface RequirementsController {

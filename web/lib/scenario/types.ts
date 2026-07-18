@@ -614,13 +614,42 @@ export interface ScenarioStateShared {
   maxOneShiftPerDay?: { description?: string };
 }
 
+/** The constraint kinds a Guided rule pin can reference — same union as `CardKind`. */
+export type GuidedRuleConstraintKind = keyof CardsByKind;
+
+/**
+ * Durable shortcut metadata pinning an existing Advanced constraint card into
+ * Guided Rules (T14, tech-plan §3). `constraintId` is the source card's stable
+ * `uid` — the same identity T17's Workspace boundary calls `workspaceId` — never
+ * a duplicated constraint value. Unpinning removes only this shortcut; the
+ * pinned constraint is untouched. `category`/`description` are shortcut display
+ * metadata (renaming the displayed rule title updates the source constraint's
+ * own description when the mapper supports it — T14b). `quickFields` names which
+ * of the source card's mapper-declared numeric fields the pin exposes as an
+ * inline Adjust control.
+ */
+export interface GuidedRulePin {
+  id: string;
+  constraintKind: GuidedRuleConstraintKind;
+  constraintId: string;
+  category: string;
+  description?: string;
+  quickFields: string[];
+}
+
 /**
  * Durable scenario/authoring state — the persisted slice (T04) and the producer
  * source (T05). Everything here projects to a `CanonicalScenarioDocument` via
  * `toCanonicalScenarioDocument`, dropping the F2-only fields above.
+ *
+ * `guidedRulePins` is intentionally NOT part of `ScenarioStateShared`: it is
+ * local-store-only durable metadata (IndexedDB + zundo), not yet part of the
+ * import/export boundary — `ImportNormalizationTarget` has no pin field until
+ * T17 wires the Workspace YAML `guidedRules` contract (tech-plan §4).
  */
 export interface ScenarioUiState extends ScenarioStateShared {
   cardsByKind: CardsByKind;
+  guidedRulePins: GuidedRulePin[];
 }
 
 /**
