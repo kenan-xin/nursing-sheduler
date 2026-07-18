@@ -388,9 +388,7 @@ describe("Load / New lifecycle", () => {
     // Scenario A: stage a paint gesture and some run progress.
     spine.hot.getState().pushProgress({ progress: 0.5 });
     spine.hot.getState().beginPaint();
-    spine.hot
-      .getState()
-      .stagePaintCell("p1", "2026-01-01", { kind: "leave", person: "p1", date: "2026-01-01" });
+    spine.hot.getState().stagePaintDayState("p1", "2026-01-01", { kind: "leave" });
 
     // Load scenario B.
     loadScenario(spine.scenario, spine.hot, {

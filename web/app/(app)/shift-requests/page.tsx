@@ -1,12 +1,9 @@
-import { PlaceholderScreen } from "@/components/shell/placeholder-screen";
-import { FaArrowsLeftRight } from "@/components/icons";
+// Shift Requests screen (T11) — replaces the T08 placeholder. The editor is a
+// client component (it binds the durable scenario store); this route module
+// just mounts it.
+
+import { RequestsEditor } from "@/components/requests/requests-editor";
 
 export default function ShiftRequestsPage() {
-  return (
-    <PlaceholderScreen
-      title="Shift Requests"
-      description="Record per-person shift requests, leave, and preferences."
-      icon={FaArrowsLeftRight}
-    />
-  );
+  return <RequestsEditor />;
 }

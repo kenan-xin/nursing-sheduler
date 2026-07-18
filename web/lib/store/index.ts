@@ -8,7 +8,8 @@
 //   • dirty baseline  — `selectIsDirty`, `markSaved`
 //   • lifecycle       — `hydrateScenarioStore`, `loadScenario`, `newScenario`,
 //                       `resetToNewScenario`, `registerPagehideFlush`
-//   • paint gesture   — `commitPaintGesture` (+ hot-store `beginPaint`/`stagePaintCell`)
+//   • paint gesture   — `commitPaintGesture` (+ hot-store `beginPaint` /
+//                       `stagePaintDayState` / `stagePaintRequestDelta` / `stagePaintErase`)
 
 export {
   createStateSpine,
@@ -72,5 +73,6 @@ export {
   type RunState,
   type RunProgressEvent,
   type PaintCellKey,
-  type StagedPaintCell,
+  type StagedCoordinate,
+  type StagedDayState,
 } from "./types";

@@ -56,9 +56,7 @@ describe("hot store never triggers a durable write", () => {
     hot.getState().setUi({ selectedPerson: "p1" });
     hot.getState().setDraft("d", { x: 1 });
     hot.getState().beginPaint();
-    hot
-      .getState()
-      .stagePaintCell("p1", "2026-01-01", { kind: "leave", person: "p1", date: "2026-01-01" });
+    hot.getState().stagePaintDayState("p1", "2026-01-01", { kind: "leave" });
 
     hot.getState().resetEphemeral();
 

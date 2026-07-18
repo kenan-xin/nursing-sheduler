@@ -9,7 +9,7 @@
 // This module carries only the hot-store value shapes and the persistence
 // lifecycle enum; the durable store's shape lives in `scenario-store.ts`.
 
-import type { DateRef, PersonRef, UiRequestCell } from "@/lib/scenario";
+import type { DateRef, PersonRef, ShiftTypeRef, Weight } from "@/lib/scenario";
 
 // ---------------------------------------------------------------------------
 // Persistence lifecycle
@@ -71,10 +71,27 @@ export const INITIAL_RUN_STATE: RunState = {
 export type PaintCellKey = string;
 
 /**
- * A staged paint mutation: an upserted matrix cell, or `null` to erase whatever
- * cell currently occupies that person/date coordinate.
+ * A day-state authored during paint. Mirrors the day-state arm of
+ * `UiRequestCell` minus the coordinate (which the staging key already carries):
+ * `leave` is a hard pin (no weight), `off` a soft weight.
  */
-export type StagedPaintCell = UiRequestCell | null;
+export type StagedDayState = { kind: "leave" } | { kind: "off"; weight: Weight };
+
+/**
+ * The staged intent for a single person×date coordinate — a per-coordinate
+ * transaction, not a single value. Author-time XOR lives here: a coordinate is
+ * being turned into a day-state, a request-set, or erased, never a mix. See
+ * `paint.ts` for how each mode reconciles against the existing `reqData`.
+ *
+ *   • `erase`     — drop every cell at the coordinate.
+ *   • `day-state` — replace the coordinate with a single `leave`/`off` cell.
+ *   • `requests`  — additive per-selector deltas; weight `0` removes that
+ *                   selector, any other weight upserts it.
+ */
+export type StagedCoordinate =
+  | { mode: "erase" }
+  | { mode: "day-state"; dayState: StagedDayState }
+  | { mode: "requests"; deltas: Map<ShiftTypeRef, Weight> };
 
 /**
  * Deterministic paint-cell key. JSON-encoding the `[person, date]` pair is

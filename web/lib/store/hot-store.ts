@@ -14,9 +14,10 @@ import {
   type PaintCellKey,
   type RunProgressEvent,
   type RunState,
-  type StagedPaintCell,
+  type StagedCoordinate,
+  type StagedDayState,
 } from "./types";
-import type { DateRef, PersonRef, UiRequestCell } from "@/lib/scenario";
+import type { DateRef, PersonRef, ShiftTypeRef, Weight } from "@/lib/scenario";
 
 export interface HotStoreState {
   /** The durable store's Dexie hydration lifecycle status (drives the ready gate). */
@@ -33,10 +34,12 @@ export interface HotStoreState {
   /** In-progress editor form drafts, keyed by an editor-defined draft id. */
   drafts: Record<string, unknown>;
   /**
-   * Staged paint mutations during a drag, keyed by person×date. `null` while no
-   * gesture is active. Committed atomically to the durable store on pointer-up.
+   * Staged paint intents during a drag, keyed by person×date. Each value is a
+   * per-coordinate transaction (`erase` / `day-state` / `requests`), not a
+   * single cell. `null` while no gesture is active. Committed atomically to the
+   * durable store on pointer-up.
    */
-  paint: Map<PaintCellKey, StagedPaintCell> | null;
+  paint: Map<PaintCellKey, StagedCoordinate> | null;
 
   setHydrationStatus(status: HydrationStatus): void;
   setRun(patch: Partial<RunState>): void;
@@ -48,8 +51,24 @@ export interface HotStoreState {
 
   /** Start a paint gesture (fresh empty staging buffer). */
   beginPaint(): void;
-  /** Stage an upserted cell (or `null` to erase) at the given coordinate. */
-  stagePaintCell(person: PersonRef, date: DateRef, cell: StagedPaintCell): void;
+  /**
+   * Stage a day-state (`leave`/`off`) at the coordinate. XOR: drops any staged
+   * request deltas — the coordinate becomes `mode:"day-state"`.
+   */
+  stagePaintDayState(person: PersonRef, date: DateRef, dayState: StagedDayState): void;
+  /**
+   * Stage one request-selector delta at the coordinate (weight `0` removes that
+   * selector on commit). XOR: if the coordinate was staged as a day-state it
+   * switches to `mode:"requests"`; otherwise deltas for other selectors merge.
+   */
+  stagePaintRequestDelta(
+    person: PersonRef,
+    date: DateRef,
+    selector: ShiftTypeRef,
+    weight: Weight,
+  ): void;
+  /** Stage a coordinate-wide erase (drops any staged day-state / deltas). */
+  stagePaintErase(person: PersonRef, date: DateRef): void;
   /** Discard the staging buffer without committing (also used post-commit). */
   cancelPaint(): void;
 
@@ -93,14 +112,38 @@ export function createHotStore() {
         return { drafts: rest };
       }),
 
-    beginPaint: () => set({ paint: new Map<PaintCellKey, StagedPaintCell>() }),
+    beginPaint: () => set({ paint: new Map<PaintCellKey, StagedCoordinate>() }),
 
-    stagePaintCell: (person, date, cell) =>
+    stagePaintDayState: (person, date, dayState) =>
       set((state) => {
         // Ignore staging outside an active gesture — `beginPaint` opens the buffer.
         if (!state.paint) return state;
         const next = new Map(state.paint);
-        next.set(paintCellKey(person, date), cell);
+        next.set(paintCellKey(person, date), { mode: "day-state", dayState });
+        return { paint: next };
+      }),
+
+    stagePaintRequestDelta: (person, date, selector, weight) =>
+      set((state) => {
+        if (!state.paint) return state;
+        const next = new Map(state.paint);
+        const key = paintCellKey(person, date);
+        const existing = next.get(key);
+        // Merge onto an existing request-set; a day-state/erase intent is dropped (XOR).
+        const deltas =
+          existing?.mode === "requests"
+            ? new Map(existing.deltas)
+            : new Map<ShiftTypeRef, Weight>();
+        deltas.set(selector, weight);
+        next.set(key, { mode: "requests", deltas });
+        return { paint: next };
+      }),
+
+    stagePaintErase: (person, date) =>
+      set((state) => {
+        if (!state.paint) return state;
+        const next = new Map(state.paint);
+        next.set(paintCellKey(person, date), { mode: "erase" });
         return { paint: next };
       }),
 
@@ -110,6 +153,3 @@ export function createHotStore() {
       set({ run: INITIAL_RUN_STATE, progress: [], ui: {}, drafts: {}, paint: null }),
   }));
 }
-
-/** Re-exported so callers building a `UiRequestCell` to stage keep one import site. */
-export type { UiRequestCell };
