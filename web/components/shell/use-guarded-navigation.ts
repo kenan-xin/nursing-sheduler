@@ -6,15 +6,14 @@
 // to the shared nav-guard store, which opens the single confirm dialog rendered by
 // the AppShell. The shell resolves the pending push on confirm.
 //
-// Scope note (qq0.21): the guard fires ONLY on an open draft, NOT on a merely
-// "dirty" scenario. Scenario mutations auto-persist to IndexedDB (T04) so they
-// cannot be lost on navigation; the "unsaved-to-YAML" meaning of dirty belongs to
-// the not-yet-built Save/Load feature (spec §08). With no Save UI, `markSaved` is
-// never called, so scenario-`dirty` latched true after the first edit and armed
-// this guard on every click. The whole-scenario "leave without saving?" warning
-// (T08 acceptance row 2) is deferred to qq0.22 and re-enabled once Save/Load can
-// actually clear dirty. T04's dirty machinery (`selectIsDirty` / persisted
-// baseline) stays intact for that.
+// Scope note (qq0.22): the guard fires on an open draft OR a "dirty" scenario.
+// The scenario-`dirty` branch was narrowed out in qq0.21 because Save/Load (spec
+// §08) was unbuilt — `markSaved` had no caller, so `selectIsDirty` latched true
+// after the first edit and armed the guard on every click. T17 shipped Save/Load:
+// a YAML Download now calls `markSaved` and a Load resets the baseline, so dirty
+// can return to clean, and the whole-scenario "leave without saving?" warning
+// (T08 acceptance row 2) is re-enabled here. Scenario edits still auto-persist to
+// IndexedDB (T04) — the warning is about unsaved-to-YAML, not data loss.
 //
 // A browser-level `beforeunload` guard (refresh / tab close / external nav) is a
 // separate hook, `useDirtyBeforeUnload`, mounted once in the shell — the in-app
@@ -22,6 +21,7 @@
 
 import { useCallback, useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import { selectIsDirty, useScenarioStore } from "@/lib/store";
 import { useNavGuardStore } from "./nav-guard-store";
 
 export interface GuardedNavigation {
@@ -39,11 +39,14 @@ export function useGuardedNavigation(): GuardedNavigation {
       // Same-route clicks are no-ops.
       if (path === pathname) return;
 
-      // Guard only on an open card-editor draft (FR-PR-06): an open add/edit form
-      // holds unsaved work that isn't a durable mutation yet. A dirty-but-no-draft
-      // scenario navigates freely — see the scope note above (qq0.21 / qq0.22).
+      // Guard on either an open card-editor draft (FR-PR-06 — unsaved work not yet
+      // a durable mutation) OR a scenario that is dirty against the last explicit
+      // Save/Load baseline (T08 acceptance row 2, re-enabled in qq0.22 now that
+      // T17's YAML Download wires `markSaved` and Load resets the baseline, so
+      // `selectIsDirty` can actually return to clean). Otherwise navigate freely.
       const draftOpen = useNavGuardStore.getState().draftOpen;
-      if (!draftOpen) {
+      const dirty = selectIsDirty(useScenarioStore.getState());
+      if (!draftOpen && !dirty) {
         router.push(path);
         return;
       }
@@ -57,16 +60,15 @@ export function useGuardedNavigation(): GuardedNavigation {
 }
 
 // Browser-level guard: warns before refresh / tab close / external nav while a
-// card-editor draft is open (FR-PR-06). It mirrors the in-app nav guard's
-// condition — draft-only, NOT scenario-`dirty` — because scenario mutations
-// auto-persist to IndexedDB (T04) and cannot be lost on leave, whereas an open
-// draft is not yet committed. The whole-scenario dirty warning is deferred with
-// the in-app guard (qq0.21 / qq0.22). The native prompt string is
-// browser-controlled; setting `returnValue` is what triggers it.
+// card-editor draft is open (FR-PR-06) OR the scenario is dirty vs the last
+// explicit Save/Load baseline (T08 row 2, re-enabled qq0.22). It mirrors the
+// in-app nav guard's condition. Scenario edits auto-persist to IndexedDB (T04),
+// so the warning is about unsaved-to-YAML, not data loss. The native prompt
+// string is browser-controlled; setting `returnValue` is what triggers it.
 export function useDirtyBeforeUnload(): void {
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
-      if (useNavGuardStore.getState().draftOpen) {
+      if (useNavGuardStore.getState().draftOpen || selectIsDirty(useScenarioStore.getState())) {
         e.preventDefault();
         e.returnValue = "";
       }
