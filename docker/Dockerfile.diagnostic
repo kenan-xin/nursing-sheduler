@@ -1,0 +1,49 @@
+# Diagnostic image — the opt-in public diagnostic runner (U30b, refresh 5027e2f).
+#
+# Built ENTIRELY from local vendored source: it NEVER clones the upstream `dev`
+# branch (upstream's Dockerfile.api did; rejected here, like Dockerfile.backend).
+# Build context = repo root so `COPY core/...` resolves.
+#
+# Importing `nurse_scheduling.server.diagnostic` runs the package `__init__`, which
+# imports the scheduler, so the diagnostic needs the full app package and the same
+# runtime dependencies as the backend. This image is therefore the lean backend
+# runtime PLUS exactly ONE extra asset: the real large-ward scenario the diagnostic
+# submits. It still ships NO core/tests/ tree and NO vendored caches — only the app
+# package and that single scenario file.
+FROM python:3.12-slim
+
+# Version stamping: the SAME boundary as Dockerfile.backend — `get_app_version()`
+# resolves APP_VERSION (env) → /app/VERSION → v0.0.0-unknown, with NO Git at build
+# or runtime. APP_VERSION is fed by the build wrapper (`make diagnostic`); there is
+# deliberately no literal default, so a stamp-less build fails loudly like the backend.
+ARG APP_VERSION
+ENV APP_VERSION=${APP_VERSION}
+COPY VERSION /app/VERSION
+
+WORKDIR /app/core
+COPY core/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+# Selective copy: the app package only — NOT core/tests/ or vendored caches.
+COPY core/nurse_scheduling/ ./nurse_scheduling/
+# Exactly one runtime asset: the real 87-person scenario the diagnostic submits.
+# Copied to a dedicated path OUTSIDE the tests/ tree and pinned via
+# DIAGNOSTIC_SCENARIO_PATH, so no tests/ directory is ever created in the image.
+COPY core/tests/testcases/real/large-ward-with-87-people-2025-11.yaml \
+     /app/diagnostic/large-ward-with-87-people-2025-11.yaml
+
+# Bake the scenario path and the report directory so a bare `docker run` works; the
+# Compose service and CLI flags can still override both.
+ENV DIAGNOSTIC_SCENARIO_PATH=/app/diagnostic/large-ward-with-87-people-2025-11.yaml \
+    DIAGNOSTIC_REPORT_DIR=/reports
+
+# Non-root uid 1000 (parity with backend/web). `/reports` is prepared for that user
+# so the run needs no `--user` override; a first-time named-volume mount inherits
+# this ownership, keeping report writes non-root.
+RUN useradd -m -u 1000 user \
+    && mkdir -p /reports \
+    && chown -R user:user /app /reports
+USER user
+
+# Opt-in ONE-SHOT runner — never a long-lived service, so no EXPOSE and no
+# healthcheck. `--entrypoint sh` still works for report extraction.
+ENTRYPOINT ["python", "-m", "nurse_scheduling.server.diagnostic"]

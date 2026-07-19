@@ -123,7 +123,10 @@ describe("mode lens — non-mutating", () => {
     const spine = createStateSpine({ createStorage: () => createMemoryStorage() });
     await hydrateScenarioStore(spine.scenario, spine.hot);
 
-    // Make a change so the scenario is dirty.
+    // Hydration no longer invents a backup baseline (T17r review P0), so establish
+    // one (as a plain Download would) before editing, then make a change so the
+    // scenario is genuinely dirty against that baseline.
+    spine.scenario.getState().markSaved();
     spine.scenario.getState().mutateScenario({ rangeStart: "2026-05-01" });
     expect(selectIsDirty(spine.scenario.getState())).toBe(true);
 

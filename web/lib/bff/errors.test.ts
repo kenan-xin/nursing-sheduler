@@ -1,93 +1,179 @@
 import { describe, expect, it } from "vitest";
-import { classifyOptimizeError, errorDetailMessage, extractErrorDetail } from "@/lib/bff/errors";
+import {
+  classifyOptimizeError,
+  extractErrorDetail,
+  extractStructuredError,
+  OptimizeApiError,
+} from "@/lib/bff/errors";
 
-describe("classifyOptimizeError", () => {
-  it("classifies the EXACT plain 404 as expired (recovery)", () => {
-    expect(classifyOptimizeError(404, "Optimization job not found", "poll").kind).toBe("expired");
-    expect(classifyOptimizeError(404, "Optimization job not found", "events").kind).toBe("expired");
-  });
+// Helper: the code-first `{ error: { ... } }` envelope every application, cursor,
+// and scheduling-content failure ships.
+const envelope = (error: Record<string, unknown>) => ({ error });
 
-  it("classifies a structured XLSX 404 as known-terminal no-result (NOT expiry)", () => {
-    const info = classifyOptimizeError(
-      404,
-      { message: "No feasible solution is available.", status: "infeasible" },
-      "xlsx",
-    );
-    expect(info.kind).toBe("no-result");
-    expect(info.jobStatus).toBe("infeasible");
-  });
-
-  // Negative cases — the exact bug the review flagged: nothing else may become "expired".
-  it("does NOT classify an unrelated 404 as expired", () => {
-    expect(classifyOptimizeError(404, "Some other 404", "poll").kind).toBe("unknown");
-    expect(classifyOptimizeError(404, "optimization job not found", "poll").kind).toBe("unknown"); // wrong case
-  });
-
-  it("does NOT classify a detail-less 404 as expired", () => {
-    expect(classifyOptimizeError(404, null, "poll").kind).toBe("unknown");
-    expect(classifyOptimizeError(404, undefined).kind).toBe("unknown");
-  });
-
-  it("does NOT classify the no-result detail as no-result off the XLSX endpoint", () => {
+describe("classifyOptimizeError — code-first", () => {
+  it("classifies job_not_found as recovery, regardless of endpoint", () => {
     expect(
-      classifyOptimizeError(404, { message: "No feasible solution is available." }, "poll").kind,
-    ).toBe("unknown");
-    // Also unknown when the endpoint is omitted entirely.
-    expect(classifyOptimizeError(404, { message: "No feasible solution is available." }).kind).toBe(
+      classifyOptimizeError(404, envelope({ code: "job_not_found", message: "gone" }), "poll").kind,
+    ).toBe("job-not-found");
+    expect(
+      classifyOptimizeError(404, envelope({ code: "job_not_found", message: "gone" }), "events")
+        .kind,
+    ).toBe("job-not-found");
+  });
+
+  it("classifies the expired event cursor and carries oldest_event_id", () => {
+    const info = classifyOptimizeError(
+      409,
+      envelope({
+        code: "event_cursor_expired",
+        message: "Requested event history is no longer retained.",
+        oldest_event_id: "v1.abc.def",
+      }),
+      "events",
+    );
+    expect(info.kind).toBe("event-cursor-expired");
+    expect(info.oldestEventId).toBe("v1.abc.def");
+  });
+
+  it("classifies the invalid event cursor", () => {
+    expect(
+      classifyOptimizeError(
+        400,
+        envelope({
+          code: "invalid_event_cursor",
+          message: "Last-Event-ID is not valid for this job.",
+        }),
+        "events",
+      ).kind,
+    ).toBe("invalid-event-cursor");
+  });
+
+  it("maps both artifact codes to no-artifact (not job expiry)", () => {
+    expect(
+      classifyOptimizeError(404, envelope({ code: "job_artifact_not_found", message: "x" }), "xlsx")
+        .kind,
+    ).toBe("no-artifact");
+    expect(
+      classifyOptimizeError(409, envelope({ code: "job_artifact_not_ready", message: "x" }), "xlsx")
+        .kind,
+    ).toBe("no-artifact");
+  });
+
+  it("classifies capacity and lifecycle conflicts by code", () => {
+    expect(
+      classifyOptimizeError(429, envelope({ code: "job_capacity_exceeded", message: "x" })).kind,
+    ).toBe("queue-full");
+    expect(
+      classifyOptimizeError(409, envelope({ code: "job_operation_not_allowed", message: "x" }))
+        .kind,
+    ).toBe("conflict");
+    expect(
+      classifyOptimizeError(409, envelope({ code: "job_operation_contention", message: "x" })).kind,
+    ).toBe("conflict");
+  });
+
+  it("classifies scheduling-content 422 codes as validation and keeps issues", () => {
+    const issues = [{ path: ["solver"], code: "unsupported_value", message: "no" }];
+    const info = classifyOptimizeError(
+      422,
+      envelope({ code: "unsupported_solver", message: "Unsupported solver.", issues }),
+    );
+    expect(info.kind).toBe("validation");
+    expect(info.issues).toEqual(issues);
+    for (const code of [
+      "workspace_not_ready",
+      "invalid_scheduling_data",
+      "unsupported_workspace_version",
+    ]) {
+      expect(classifyOptimizeError(422, envelope({ code, message: "m" })).kind).toBe("validation");
+    }
+  });
+
+  it("classifies BFF-synthesized fail-closed codes", () => {
+    expect(
+      classifyOptimizeError(502, envelope({ code: "backend_unreachable", message: "x" })).kind,
+    ).toBe("backend-unreachable");
+    expect(
+      classifyOptimizeError(503, envelope({ code: "backend_unready", message: "x" })).kind,
+    ).toBe("backend-unready");
+  });
+
+  it("treats an unrecognized structured code as server-error (5xx) or unknown", () => {
+    expect(
+      classifyOptimizeError(500, envelope({ code: "server_error", message: "boom" })).kind,
+    ).toBe("server-error");
+    expect(classifyOptimizeError(418, envelope({ code: "teapot", message: "?" })).kind).toBe(
       "unknown",
     );
   });
+});
 
-  it("classifies the 409 'Result is not ready yet.' as non-terminal", () => {
-    const info = classifyOptimizeError(
-      409,
-      { message: "Result is not ready yet.", status: "running" },
-      "xlsx",
-    );
-    expect(info.kind).toBe("not-ready");
+describe("classifyOptimizeError — FastAPI detail fallback", () => {
+  it("classifies the exact 413 (detail form)", () => {
+    const info = classifyOptimizeError(413, { detail: "Scheduling YAML is too large" });
+    expect(info.kind).toBe("too-large");
+    expect(info.code).toBeNull();
+    expect(info.message).toBe("Scheduling YAML is too large");
   });
 
-  it("keeps other structured 409s as conflict (endpoint-specific status)", () => {
+  it("classifies a 400 parse/source failure as request-invalid", () => {
     expect(
-      classifyOptimizeError(409, {
-        message: "Optimization job has already finished.",
-        status: "optimal",
-      }).kind,
-    ).toBe("conflict");
-    expect(
-      classifyOptimizeError(409, {
-        message: "Cannot delete a running optimization job.",
-        status: "running",
-      }).kind,
-    ).toBe("conflict");
+      classifyOptimizeError(400, { detail: "Either 'file' or 'yaml_content' must be provided" })
+        .kind,
+    ).toBe("request-invalid");
   });
 
-  it("classifies 429 and 413", () => {
+  it("classifies a native 422 request-schema array as request-invalid", () => {
     expect(
-      classifyOptimizeError(429, "Too many optimization jobs are already queued or running").kind,
-    ).toBe("queue-full");
-    expect(classifyOptimizeError(413, "Scheduling YAML is too large").kind).toBe("too-large");
+      classifyOptimizeError(422, { detail: [{ loc: ["body"], msg: "field required" }] }).kind,
+    ).toBe("request-invalid");
+  });
+
+  it("falls back to unknown for an unstructured non-error body", () => {
+    expect(classifyOptimizeError(404, null).kind).toBe("unknown");
+    expect(classifyOptimizeError(404, { something: "else" }).kind).toBe("unknown");
   });
 });
 
-describe("detail tolerance (string or object)", () => {
-  it("extracts detail from a FastAPI error body", () => {
-    expect(extractErrorDetail({ detail: "Optimization job not found" })).toBe(
-      "Optimization job not found",
-    );
-    expect(
-      extractErrorDetail({ detail: { message: "Result is not ready yet.", status: "running" } }),
-    ).toEqual({
-      message: "Result is not ready yet.",
-      status: "running",
+describe("extractStructuredError / extractErrorDetail", () => {
+  it("reads a code-first envelope only when error.code is a non-empty string", () => {
+    expect(extractStructuredError(envelope({ code: "job_not_found", message: "gone" }))).toEqual({
+      code: "job_not_found",
+      message: "gone",
+      oldest_event_id: undefined,
+      issues: undefined,
     });
-    expect(extractErrorDetail(null)).toBeNull();
+    expect(extractStructuredError(envelope({ code: "" }))).toBeNull();
+    expect(extractStructuredError({ detail: "x" })).toBeNull();
+    expect(extractStructuredError(null)).toBeNull();
   });
 
-  it("reads a message from string and object details", () => {
-    expect(errorDetailMessage("plain")).toBe("plain");
-    expect(errorDetailMessage({ message: "structured" })).toBe("structured");
-    expect(errorDetailMessage({ status: "running" })).toBe("");
-    expect(errorDetailMessage(null)).toBe("");
+  it("reads the FastAPI detail field", () => {
+    expect(extractErrorDetail({ detail: "Scheduling YAML is too large" })).toBe(
+      "Scheduling YAML is too large",
+    );
+    expect(extractErrorDetail(null)).toBeNull();
+  });
+});
+
+describe("OptimizeApiError", () => {
+  it("carries the classifier verdict and a usable message", () => {
+    const error = new OptimizeApiError(
+      409,
+      envelope({
+        code: "event_cursor_expired",
+        message: "history gone",
+        oldest_event_id: "v1.a.b",
+      }),
+      "events",
+    );
+    expect(error.status).toBe(409);
+    expect(error.info.kind).toBe("event-cursor-expired");
+    expect(error.info.oldestEventId).toBe("v1.a.b");
+    expect(error.message).toBe("history gone");
+  });
+
+  it("synthesizes a message when the body carries none", () => {
+    expect(new OptimizeApiError(500, null).message).toBe("Optimize request failed (500)");
   });
 });

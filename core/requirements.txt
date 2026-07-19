@@ -1,7 +1,9 @@
 ortools==9.15.6755
 pandas
-ruamel.yaml
-pydantic
+# Pinned canonical-boundary dependencies: these exact versions define the golden
+# canonical YAML bytes, validation locations, and 422 fixtures (T19 / tech-plan §1).
+ruamel.yaml==0.19.1
+pydantic==2.13.4
 openpyxl # For XLSX output support
 jinja2 # For prettifying output
 # For CI
@@ -10,4 +12,9 @@ pytest-cov
 ruff
 # For web backend
 fastapi[standard]
+# Diagnostic HTTP client for the public production diagnostic runner (U30a).
+httpx
 python-multipart
+# Redis job store and its in-memory test double (memory mode never imports redis eagerly)
+redis
+fakeredis

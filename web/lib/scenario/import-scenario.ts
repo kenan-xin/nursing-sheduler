@@ -41,7 +41,7 @@ export function parseScenarioYaml(text: string): unknown {
 }
 
 /** Backend default weights per preference type (models.py `Field(default=...)`). */
-const DEFAULT_WEIGHT: Record<string, Weight> = {
+export const DEFAULT_WEIGHT: Record<string, Weight> = {
   [PREFERENCE_TYPE.shiftRequest]: 1,
   [PREFERENCE_TYPE.shiftTypeSuccessions]: 1,
   [PREFERENCE_TYPE.shiftTypeRequirement]: -1,
@@ -162,6 +162,9 @@ function normalizeImport(data: ImportScenarioParsed): ImportNormalizationTarget 
         []) as unknown as ImportNormalizationTarget["exportLayout"]["extraRows"],
     },
     cardsByKind,
+    // The legacy backend YAML carries no Guided metadata, so a legacy import
+    // restores no pins; the Workspace V1 path populates these from `guidedRules`.
+    guidedRulePins: [],
   };
   if (maxOneShiftPerDay !== undefined) target.maxOneShiftPerDay = maxOneShiftPerDay;
   return target;
@@ -349,3 +352,23 @@ function str(value: unknown): string | undefined {
 function num(value: unknown): number | undefined {
   return typeof value === "number" ? value : undefined;
 }
+
+// Reused by the Workspace V1 hydration bridge (T17r): a Workspace preference is a
+// legacy preference body plus `workspaceId`/`enabled`, so the same per-type body
+// normalizers reconstruct its card/cell — the Workspace path then re-attaches the
+// durable identity (`uid`) and `disabled` flag the legacy path drops.
+export {
+  isoDate as normalizeIsoDate,
+  inferPreferenceType,
+  normalizePerson,
+  normalizePeopleGroup,
+  normalizeShiftType,
+  normalizeShiftTypeGroup,
+  normalizeDateGroup,
+  normalizeRequirement,
+  normalizeSuccession,
+  normalizeCount,
+  normalizeAffinity,
+  normalizeCovering,
+  normalizeShiftRequest,
+};

@@ -1,0 +1,11 @@
+# Direct-access ingress overlay (tech-plan §3, `make up`). Publishes ONLY `web`.
+# backend and redis stay private (no ports in the base, none added here).
+#
+# Default bind is loopback (127.0.0.1) so a fresh `make up` is not silently exposed
+# on the LAN. A LAN/IP operator must DELIBERATELY set WEB_BIND_ADDRESS=0.0.0.0 in
+# docker/.env and configure their own firewall.
+
+services:
+  web:
+    ports:
+      - "${WEB_BIND_ADDRESS:-127.0.0.1}:${WEB_PORT:-3000}:3000"

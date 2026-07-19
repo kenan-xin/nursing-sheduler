@@ -1,28 +1,83 @@
-# Deploy topology: Cloudflare (named tunnel) -> web (Next server) -> backend.
-# Only `web` is published to the host; `backend` is internal-only. Build context
-# is the repo root (..) so both Dockerfiles can COPY the vendored `core/`, the
-# root `VERSION`, and `web/`.
+# Private base topology (tech-plan §3, T02r). THREE private services, NO
+# host-published port: `web` (Next BFF), `backend` (FastAPI) and `redis`. Exactly
+# one ingress overlay is layered on for a real deployment:
+#   make up            → base + docker/compose.direct.yml    (publishes web only)
+#   make up-cloudflare → base + docker/compose.cloudflare.yml (adds cloudflared)
+#
+# Build context is the repo root (..) so both Dockerfiles can COPY the vendored
+# `core/`, the root `VERSION`, and `web/`.
 #
 # APP_VERSION MUST be provided (exported by `make build`, which reads + validates
 # the root VERSION once). It is intentionally NOT defaulted — a silent
 # `v0.0.0-dev` would make the version-equality gate meaningless.
+#
+# Reachability is a TOPOLOGY invariant, not a convention: three segmented networks
+# make the only permitted service edges cloudflared→web (ingress), web→backend
+# (app) and backend→redis (data). cloudflared cannot reach backend or redis; web
+# cannot reach redis. See docs/production-deployment-cloudflare.md.
+
+networks:
+  ingress: {} # cloudflared ↔ web
+  app: {} # web ↔ backend
+  data: {} # backend ↔ redis
 
 services:
+  redis:
+    # Redis 8.8.0 pinned to its official multi-arch index digest (matches the T19
+    # gate's Redis 8.8.0). Bump the tag AND the digest together; the digest is what
+    # actually gets deployed.
+    image: redis:8.8.0-alpine@sha256:9d317178eceac8454a2284a9e6df2466b93c745529947f0cd42a0fa9609d7005
+    # No `ports:` — reachable only inside the compose network, exclusively by the
+    # backend. Default RDB snapshots to the named volume; jobs are temporary
+    # computation state, so AOF/managed Redis stays a deferred operational choice.
+    volumes:
+      - redis-data:/data
+    networks:
+      - data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
   backend:
     build:
       context: ..
       dockerfile: docker/Dockerfile.backend
       args:
         APP_VERSION: ${APP_VERSION:?APP_VERSION is not set — build via `make build`}
-    # No `ports:` — the backend is reachable only inside the compose network,
-    # exclusively via the web BFF (DL11 D1).
+    # No `ports:` — internal only, reached exclusively via the web BFF (DL11 D1).
+    environment:
+      # Redis-backed durable job store. Memory mode is for local/unit tests only.
+      JOB_BACKEND: redis
+      JOB_REDIS_URL: redis://redis:6379/0
+      # Versioned key namespace: bump the trailing schema version on any
+      # incompatible job-record change so old keys can never be misread.
+      JOB_REDIS_KEY_PREFIX: nurse_scheduling:jobs:v0
+    networks:
+      - app
+      - data
+    depends_on:
+      redis:
+        condition: service_healthy
     restart: unless-stopped
+    # `depends_on: service_healthy` only orders STARTUP — Compose does not route or
+    # gate runtime traffic on it (docker.com/reference/compose-file/services/#depends_on).
+    # When Redis fails, `/ready` and `/health` return a bounded 503 (fail closed),
+    # but web/cloudflared keep running and can still forward to this backend. The
+    # runtime "do not forward business requests to an unready backend" guarantee is
+    # a BFF readiness check owned by the revised T06 ticket, not this topology.
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/ready"]
       interval: 10s
       timeout: 3s
       retries: 5
       start_period: 20s
+    # One Uvicorn worker initially (Dockerfile.backend CMD `--workers 1`). Redis
+    # makes multiple workers safe; worker count is a measured capacity setting, not
+    # a correctness requirement.
 
   web:
     build:
@@ -30,19 +85,22 @@ services:
       dockerfile: docker/Dockerfile.web
       args:
         APP_VERSION: ${APP_VERSION:?APP_VERSION is not set — build via `make build`}
-    # The only host-published service.
-    ports:
-      - "3000:3000"
+    # No `ports:` in the base — an ingress overlay publishes it. `expose` documents
+    # the internal port for cloudflared / the direct overlay.
+    expose:
+      - "3000"
     environment:
       # Server-side base URL for the BFF; the browser never sees this.
       BACKEND_API_URL: http://backend:8000
       # Trusted public scheme+host that drives the cookie `Secure` rule (consumed
-      # by the cookie-handling BFF routes in T06 — passed through here). This is a
-      # RUNTIME-only value, so it is not required to parse for `build`; `make up`
-      # validates it is non-empty before starting. Blank injection is deliberate:
-      # the web runtime fails closed on it. `make verify-deploy` passes its own
-      # throwaway origin for the gated stack (see docker/verify-deploy.sh).
+      # by the cookie-handling BFF routes in T06). This is a RUNTIME-only value, so
+      # it is not required to parse for `build`; `make up`/`make up-cloudflare`
+      # validate it before starting. Blank injection is deliberate: the web runtime
+      # fails closed on it. `make verify-deploy` passes its own throwaway origin.
       PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-}
+    networks:
+      - ingress
+      - app
     depends_on:
       backend:
         condition: service_healthy
@@ -54,19 +112,59 @@ services:
       retries: 5
       start_period: 20s
 
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    # Named tunnel. The public-hostname origin MUST target http://web:3000 (set in
-    # the Cloudflare dashboard / tunnel config, NOT here) — see the runbook. A
-    # token-only run does not itself prove the origin was changed.
-    #
-    # The token is a RUNTIME-only credential passed via the documented TUNNEL_TOKEN
-    # container env (not a `${...:?}` command arg), so `build` never requires it.
-    # `make up` validates it is non-empty before starting.
-    # https://developers.cloudflare.com/tunnel/advanced/run-parameters/
-    command: tunnel --no-autoupdate run
-    environment:
-      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+  # Opt-in public diagnostic (refresh 5027e2f, U30b). Gated behind the `diagnostic`
+  # Compose profile so it NEVER starts with a plain `up`, `make up`,
+  # `make up-cloudflare`, or `make verify-deploy` — only `--profile diagnostic`
+  # (e.g. `make diagnostic`) activates it. It is a bounded ONE-SHOT run
+  # (`restart: "no"`), not a long-lived service, and publishes NO host port.
+  #
+  # Topology: it joins ONLY the `app` network, so — exactly like `web` — it can
+  # reach `backend` but NOT `redis`; segmentation is preserved. By default it
+  # diagnoses the internal `backend` on the PRIVATE backend contract
+  # (DIAGNOSTIC_API_PATH_MODE=backend, unprefixed `/info`, `/optimize/**`); point
+  # DIAGNOSTIC_TARGET_URL at a public URL to diagnose a real deployment (egress uses
+  # the app network's default gateway, and pair it with `--no-deps` so the local
+  # backend is not started). A public deployment exposes ONLY the same-origin BFF,
+  # so external targeting MUST set DIAGNOSTIC_API_PATH_MODE=bff to route every request
+  # through the rebuilt `/api/*` contract.
+  #
+  # Adapted from upstream: expected concurrency defaults to 1 (upstream 3) for the
+  # one-worker deployment, and DIAGNOSTIC_MAX_JOBS defaults to the rebuild's pending
+  # capacity 8 (upstream 128 / JOB_MAX_PENDING 32).
+  diagnostic:
+    profiles: ["diagnostic"]
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.diagnostic
+      args:
+        # Stamp the diagnostic image with the SAME version boundary as backend/web
+        # (no literal default — a stamp-less build fails loudly). `make diagnostic`
+        # exports it from the validated root VERSION.
+        APP_VERSION: ${APP_VERSION:?APP_VERSION is not set — build via `make diagnostic`}
+    image: nurse-scheduling-diagnostic:local
+    restart: "no"
     depends_on:
-      - web
-    restart: unless-stopped
+      backend:
+        condition: service_healthy
+    environment:
+      DIAGNOSTIC_TARGET_URL: ${DIAGNOSTIC_TARGET_URL:-http://backend:8000}
+      # backend = private unprefixed contract (internal default); bff = same-origin
+      # `/api/*` contract for a public/direct/Cloudflare deployment.
+      DIAGNOSTIC_API_PATH_MODE: ${DIAGNOSTIC_API_PATH_MODE:-backend}
+      DIAGNOSTIC_EXPECTED_CONCURRENCY: ${DIAGNOSTIC_EXPECTED_CONCURRENCY:-1}
+      DIAGNOSTIC_MAX_JOBS: ${DIAGNOSTIC_MAX_JOBS:-8}
+      DIAGNOSTIC_INFO_SAMPLES: ${DIAGNOSTIC_INFO_SAMPLES:-100}
+      DIAGNOSTIC_PARALLEL_REQUESTS: ${DIAGNOSTIC_PARALLEL_REQUESTS:-10}
+      DIAGNOSTIC_QUEUE_STABLE_SECONDS: ${DIAGNOSTIC_QUEUE_STABLE_SECONDS:-10}
+      DIAGNOSTIC_WORKFLOW_TIMEOUT_SECONDS: ${DIAGNOSTIC_WORKFLOW_TIMEOUT_SECONDS:-600}
+      DIAGNOSTIC_JOB_TIMEOUT_SECONDS: ${DIAGNOSTIC_JOB_TIMEOUT_SECONDS:-3600}
+      DIAGNOSTIC_REPORT_DIR: /reports
+    networks:
+      - app
+    volumes:
+      # Timestamped JSON reports persist here; survives `down`, removed by `down -v`.
+      - diagnostic-reports:/reports
+
+volumes:
+  redis-data:
+  diagnostic-reports:

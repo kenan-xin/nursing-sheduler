@@ -16,3 +16,7 @@ htmlcov/
 
 # Docker local runtime env (copy from docker/.env.example)
 docker/.env
+
+# Extracted diagnostic reports (make diagnostic-report); the source of truth is the
+# diagnostic-reports named volume, this is only the host-side extraction dir.
+/docker/diagnostic-reports/

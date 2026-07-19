@@ -89,13 +89,16 @@ test.describe("T17b-2 — Load flow UI", () => {
     await expect(page.getByTestId("upload-load-sample-button")).toBeVisible();
   });
 
-  test("Load a sample scenario replaces state and clears undo history", async ({ page }) => {
+  test("Load a sample scenario replaces state as one undoable transaction", async ({ page }) => {
     await gotoReadySaveAndLoad(page);
     await page.getByTestId("scenario-upload-button").click();
     await page.getByTestId("upload-load-sample-button").click();
 
     await expect.poll(() => rangeStart(page)).not.toBe(null);
-    expect(await pastStatesLength(page)).toBe(0);
+    // Load is one tracked full-slice mutation (Undo restores the prior workspace),
+    // not a history-clearing replace (T17r P0).
+    expect(await pastStatesLength(page)).toBeGreaterThan(0);
+    // An imported file is not a fresh local backup: baseline stays unknown (null).
     expect(await isDirty(page)).toBe(false);
   });
 
@@ -149,6 +152,7 @@ test.describe("T17b-2 — Load flow UI", () => {
     await page.getByTestId("confirm-dialog-confirm").click();
 
     await expect.poll(() => rangeStart(page)).toBe("2026-06-01");
-    expect(await pastStatesLength(page)).toBe(0);
+    // Confirmed Load is one tracked, undoable transaction (T17r P0).
+    expect(await pastStatesLength(page)).toBeGreaterThan(0);
   });
 });

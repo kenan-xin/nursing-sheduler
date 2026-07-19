@@ -22,8 +22,6 @@ import {
   type ContractedHoursCountCard,
   type ContractedHoursCountCardBody,
   type ContractedHoursInput,
-  type DateRef,
-  type PersonRef,
   type ScenarioUiState,
   type ShiftTypeRef,
 } from "@/lib/scenario";
@@ -31,30 +29,22 @@ import {
   sortIdsByEntryOrder,
   syncCoefficientPairs,
   validateCoefficientPairs,
-  type CoefficientDomain,
   type CoefficientPair,
 } from "@/components/card-editor/coefficient-fields";
 import { buildCountShiftTypeDomain, COUNT_MESSAGES } from "./counts-model";
-import { formatHalfHours, parseHalfHours } from "./half-hour-codec";
+import { formatHalfHours, LEAVE_CREDIT_HALF_HOURS, parseHalfHours } from "./half-hour-codec";
+import { applyContractedRefresh, deriveContractedRefresh } from "./refresh-model";
+import {
+  buildContractedCoefficientDomain,
+  contractedCoefficientIds,
+  type ContractedFormState,
+} from "./contracted-domain";
 
-/** The flat draft the guided contracted form edits. Target values are held as the
- *  human hours STRINGS the author types (e.g. "160h", "8h 30m") and converted to
- *  integer half-hours via the codec on build; expression/weight are derived from
- *  `policy`, never free draft fields. */
-export interface ContractedFormState {
-  description: string;
-  person: PersonRef[];
-  countDates: DateRef[];
-  countShiftTypes: ShiftTypeRef[];
-  countShiftTypeCoefficients: CoefficientPair[];
-  policy: "exact" | "range";
-  /** Exact-policy target as authored (human hours). */
-  targetExact: string;
-  /** Range-policy minimum target as authored (human hours). */
-  targetRangeMin: string;
-  /** Range-policy maximum target as authored (human hours). */
-  targetRangeMax: string;
-}
+// The draft shape and the CONCRETE coefficient-domain expansion live in the
+// lower-level `contracted-domain` module (qq0.23c cycle-free fixup) so that
+// `refresh-model.ts` can depend on them without importing this module back —
+// re-exported here for source compatibility with every existing caller.
+export { buildContractedCoefficientDomain, contractedCoefficientIds, type ContractedFormState };
 
 /** Verbatim per-field messages for the contracted form. Selection messages reuse
  *  the shared count table; target messages describe the half-hour grid. */
@@ -82,56 +72,29 @@ export function emptyContractedForm(): ContractedFormState {
 }
 
 /**
- * The CONCRETE coefficient domain for a contracted-hours draft — the exact
- * day-state set the coverage bijection is defined over. Unlike the M1
- * {@link buildCountShiftTypeDomain} (which deliberately makes a selected
- * GROUP/`ALL` id itself coefficient-eligible), this expands the selected
- * `countShiftTypes` under BACKEND semantics ({@link buildShiftTypeIndexMap}) and
- * returns ONLY the concrete leaf sources — authored STRING shift ids plus `LEAVE`
- * when reached, never a group/`ALL`, and `OFF` excluded — as `items` with
- * `groups: []`. Feeding this (with its own {@link contractedCoefficientIds} as the
- * `selection`) to `CoefficientFields` makes its eligibility, coverage strip, and
- * `syncCoefficientPairs` line up 1:1 with `validateContractedHoursContract`. A
- * malformed scenario map yields an empty domain — the commit gate surfaces the map
- * error separately rather than throwing here.
+ * The safe default draft for a freshly-opened "Add Contracted Hours" (qq0.23,
+ * settled guided-creation default): every current STRING-id worked shift item,
+ * in item order, then direct `LEAVE` — so a new contract credits an
+ * already-pinned leave day by default instead of silently requiring it worked
+ * on top. A numeric-id shift item is preserved elsewhere but never selected or
+ * stringified here, matching the rebuild's typed-ID contract; groups, `ALL`,
+ * and `OFF` are likewise never seeded. Coefficient rows are derived through
+ * the same Refresh preview/apply pair a manual "Refresh from Shift Types"
+ * click uses (`deriveContractedRefresh` / `applyContractedRefresh`) rather
+ * than a second duration formula, so a shift with missing or off-grid working
+ * time is left as a blank, non-derivable row for the existing commit gate to
+ * block on.
  */
-export function buildContractedCoefficientDomain(
-  state: ScenarioUiState,
-  selection: readonly ShiftTypeRef[],
-): CoefficientDomain {
-  let map: ReturnType<typeof buildShiftTypeIndexMap>;
-  try {
-    map = buildShiftTypeIndexMap(state.shifts, state.shiftGroups);
-  } catch {
-    return { items: [], groups: [] };
-  }
-  // Expand the selectors to concrete day-state indices, exactly as the validator's
-  // coverage check does — a group/`ALL` selector contributes its member indices.
-  const expanded = new Set<number>();
-  for (const selector of selection) {
-    const indices = expandShiftTypeSelector(selector, map);
-    if (indices) for (const s of indices) expanded.add(s);
-  }
-  // Candidate concrete leaf SOURCES, in canonical order: authored string shift ids
-  // (a numeric shift id can never be a coefficient source), then `LEAVE`. `OFF` is
-  // never a valid contracted coefficient, so it is excluded even when reached.
-  const leafSources: string[] = [
-    ...state.shifts.filter((s) => typeof s.id === "string").map((s) => s.id as string),
-    RESERVED_SHIFT_TYPE.leave,
-  ];
-  const items = leafSources
-    .filter((id) => {
-      const indices = expandShiftTypeSelector(id, map);
-      return indices != null && indices.length === 1 && expanded.has(indices[0]);
-    })
-    .map((id) => ({ id }));
-  return { items, groups: [] };
-}
-
-/** The concrete coefficient ids of a contracted domain (its `items`, in order) —
- *  the `selection` a `CoefficientFields` fed that domain must receive. */
-export function contractedCoefficientIds(domain: CoefficientDomain): string[] {
-  return domain.items.map((item) => item.id);
+export function defaultContractedForm(state: ScenarioUiState): ContractedFormState {
+  const workedShiftTypes = state.shifts
+    .filter((shift) => typeof shift.id === "string")
+    .map((shift) => shift.id as string);
+  const seeded: ContractedFormState = {
+    ...emptyContractedForm(),
+    countShiftTypes: [...workedShiftTypes, RESERVED_SHIFT_TYPE.leave],
+  };
+  const preview = deriveContractedRefresh(seeded, state);
+  return applyContractedRefresh(seeded, preview);
 }
 
 /**
@@ -379,4 +342,67 @@ export function buildContractedCard(
   };
   if (entries.length > 0) body.countShiftTypeCoefficients = entries as CoefficientEntry[];
   return { uid, ...body };
+}
+
+/**
+ * Whether `selectors` already reaches `LEAVE` under `map` — directly, or via a
+ * selected group's expansion. Falls back to a literal `"LEAVE"` membership
+ * check when the map is unbuilt (malformed scenario) or the reserved selector
+ * itself fails to expand, so a map failure never blocks the repair.
+ */
+function selectorsAlreadyCreditLeave(
+  selectors: readonly ShiftTypeRef[],
+  map: ReturnType<typeof buildShiftTypeIndexMap> | null,
+): boolean {
+  const leaveIndices = map ? expandShiftTypeSelector(RESERVED_SHIFT_TYPE.leave, map) : null;
+  if (!leaveIndices) return selectors.includes(RESERVED_SHIFT_TYPE.leave);
+  const leaveSet = new Set(leaveIndices);
+  return selectors.some((selector) => {
+    const indices = expandShiftTypeSelector(selector, map!);
+    return indices != null && indices.some((index) => leaveSet.has(index));
+  });
+}
+
+/**
+ * The pure "Add LEAVE · 16" draft repair (qq0.23c/qq0.23d): a functional update
+ * that credits leave on the OPEN draft without touching the saved card or
+ * scenario until Update. Rebuilds the current shift map and recomputes the
+ * draft's selector expansion — appending a direct `LEAVE` selector only when
+ * that expansion does not already contain it (a selector group that already
+ * reaches `LEAVE` is never duplicated, and a shared shift group is never
+ * rewritten). Every existing `LEAVE` coefficient row is replaced with exactly
+ * one `["LEAVE", 16]` row, appended after all non-LEAVE rows, which keep their
+ * current order. Every other selector, coefficient, target, policy, and
+ * description field is preserved verbatim. Returns a new draft; `form` and
+ * `state` are never mutated.
+ */
+export function addLeaveCreditToContractDraft(
+  form: ContractedFormState,
+  state: ScenarioUiState,
+): ContractedFormState {
+  // Defensive scalar normalization: `countShiftTypes` is typed as an array, but a
+  // draft seeded from a not-yet-normalized scalar selector (mirroring
+  // `toContractedForm`'s own `Array.isArray` guard) must not be treated as a
+  // single multi-character selector.
+  const countShiftTypes = Array.isArray(form.countShiftTypes)
+    ? [...form.countShiftTypes]
+    : [form.countShiftTypes as ShiftTypeRef];
+
+  let map: ReturnType<typeof buildShiftTypeIndexMap> | null;
+  try {
+    map = buildShiftTypeIndexMap(state.shifts, state.shiftGroups);
+  } catch {
+    map = null;
+  }
+
+  const nextCountShiftTypes = selectorsAlreadyCreditLeave(countShiftTypes, map)
+    ? countShiftTypes
+    : [...countShiftTypes, RESERVED_SHIFT_TYPE.leave];
+
+  const countShiftTypeCoefficients: CoefficientPair[] = [
+    ...form.countShiftTypeCoefficients.filter(([id]) => id !== RESERVED_SHIFT_TYPE.leave),
+    [RESERVED_SHIFT_TYPE.leave, LEAVE_CREDIT_HALF_HOURS],
+  ];
+
+  return { ...form, countShiftTypes: nextCountShiftTypes, countShiftTypeCoefficients };
 }

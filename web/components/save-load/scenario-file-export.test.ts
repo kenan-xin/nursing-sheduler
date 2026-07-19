@@ -3,10 +3,22 @@ import { makeValidUiState } from "@/lib/scenario/test-fixtures";
 import type { ScenarioUiState } from "@/lib/scenario";
 import { performCopy, performDownload, SCENARIO_DOWNLOAD_FILENAME } from "./scenario-file-export";
 
-/** A producer-invalid draft (equal start/end shift — mirrors T05's own fixture trick). */
-function makeInvalidUiState(): ScenarioUiState {
+/** An imperfect draft (equal start/end shift) — producer-invalid, but a Workspace
+ *  backup preserves it (DL12 §2: readiness gates Optimize, not backup). */
+function makeImperfectUiState(): ScenarioUiState {
   const state = makeValidUiState();
   state.shifts[1] = { id: "E", startTime: "09:00", endTime: "09:00" };
+  return state;
+}
+
+/** A structurally corrupt draft: two cards share a `uid`, so the emitted Workspace
+ *  would carry a duplicate `workspaceId` — the one thing backup still blocks. */
+function makeDuplicateIdUiState(): ScenarioUiState {
+  const state = makeValidUiState();
+  state.cardsByKind.requirements = [
+    { uid: "dup", shiftType: "D", requiredNumPeople: 1, weight: -1 },
+    { uid: "dup", shiftType: "E", requiredNumPeople: 1, weight: -1 },
+  ];
   return state;
 }
 
@@ -25,11 +37,22 @@ describe("performDownload", () => {
     expect(markSaved).toHaveBeenCalledTimes(1);
   });
 
-  it("on an invalid draft, surfaces issues and writes nothing (dirty untouched)", () => {
+  it("backs up an imperfect draft — backup preserves incomplete work (DL12 §2)", () => {
     const writeFile = vi.fn();
     const markSaved = vi.fn();
 
-    const result = performDownload(makeInvalidUiState(), { writeFile, markSaved });
+    const result = performDownload(makeImperfectUiState(), { writeFile, markSaved });
+
+    expect(result.ok).toBe(true);
+    expect(writeFile).toHaveBeenCalledTimes(1);
+    expect(markSaved).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks a structurally corrupt draft (duplicate workspace identity), writing nothing", () => {
+    const writeFile = vi.fn();
+    const markSaved = vi.fn();
+
+    const result = performDownload(makeDuplicateIdUiState(), { writeFile, markSaved });
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.issues.length).toBeGreaterThan(0);
@@ -51,13 +74,21 @@ describe("performCopy", () => {
     // there is nothing here that could clear dirty even by mistake.
   });
 
-  it("on an invalid draft, surfaces issues and writes nothing to the clipboard", () => {
+  it("copies an imperfect draft — backup preserves incomplete work (DL12 §2)", () => {
     const writeClipboard = vi.fn();
 
-    const result = performCopy(makeInvalidUiState(), { writeClipboard });
+    const result = performCopy(makeImperfectUiState(), { writeClipboard });
+
+    expect(result.ok).toBe(true);
+    expect(writeClipboard).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks a structurally corrupt draft (duplicate workspace identity)", () => {
+    const writeClipboard = vi.fn();
+
+    const result = performCopy(makeDuplicateIdUiState(), { writeClipboard });
 
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.issues.length).toBeGreaterThan(0);
     expect(writeClipboard).not.toHaveBeenCalled();
   });
 });

@@ -1,0 +1,39 @@
+# Cloudflare ingress overlay (tech-plan §3, `make up-cloudflare`). Adds ONLY
+# `cloudflared` and publishes NOTHING — web, backend and redis all stay private.
+# The tunnel reaches web over the internal network at http://web:3000.
+#
+# The named-tunnel token is consumed from a Docker secret (a file) via cloudflared's
+# `--token-file`, never an env var, so it never appears in `docker inspect`.
+#
+# The tunnel's public-hostname origin MUST point at http://web:3000 (set in the
+# Cloudflare dashboard / tunnel config, NOT here) — see docs/production-deployment-cloudflare.md
+# and docker/README.md. A token-only run does not by itself prove the origin was changed.
+# https://developers.cloudflare.com/tunnel/advanced/run-parameters/
+#
+# cloudflared joins ONLY the `ingress` network, so a dashboard route mistake or a
+# connector compromise can reach web:3000 but never backend:8000 or redis:6379.
+
+services:
+  cloudflared:
+    # Pinned by digest (cloudflared 2026.7.2). Bump the tag comment AND the digest together.
+    image: cloudflare/cloudflared:latest@sha256:4f6655284ab3d252b7f28fedb19fe6c8fc82ee5b1295c20ac74d475e5398a52d
+    command:
+      - tunnel
+      - --no-autoupdate
+      - run
+      - --token-file
+      - /run/secrets/cloudflare_tunnel_token
+    secrets:
+      - cloudflare_tunnel_token
+    networks:
+      - ingress
+    depends_on:
+      web:
+        condition: service_healthy
+    restart: unless-stopped
+
+secrets:
+  cloudflare_tunnel_token:
+    # Relative to the Compose project directory (docker/). Create it with the
+    # named-tunnel token before `make up-cloudflare`; docker/secrets/ is git-ignored.
+    file: secrets/cloudflare-tunnel-token

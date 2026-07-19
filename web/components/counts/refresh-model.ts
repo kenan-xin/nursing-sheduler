@@ -33,7 +33,7 @@ import {
   buildContractedCoefficientDomain,
   contractedCoefficientIds,
   type ContractedFormState,
-} from "./contracted-model";
+} from "./contracted-domain";
 
 /** Minutes represented by one half-hour grid step — the derivation divisor. */
 const MINUTES_PER_HALF_HOUR = 30;

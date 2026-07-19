@@ -1,11 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import { OptimizeApiError } from "@/lib/bff/errors";
-import type { OptimizeJobResponse } from "@/lib/bff/types";
+import type { JobResponse } from "@/lib/bff/types";
 import { type OptimizeEventLoopDeps, runOptimizeEventLoop } from "@/lib/query/event-stream";
-import type { StreamOutcome } from "@/lib/query/sse";
+import type { SseFrame, StreamOutcome } from "@/lib/query/sse";
 
-const runningJob = { status: "running" } as unknown as OptimizeJobResponse;
-const doneJob = { status: "optimal" } as unknown as OptimizeJobResponse;
+const job = (over: Partial<JobResponse>): JobResponse => over as JobResponse;
+const runningJob = job({ state: "running", terminal: false });
+const completedJob = job({ state: "completed", terminal: true });
+
+const errorEnvelope = (code: string, extra: Record<string, unknown> = {}) => ({
+  error: { code, message: code, ...extra },
+});
 
 function deps(overrides: Partial<OptimizeEventLoopDeps>): OptimizeEventLoopDeps {
   return {
@@ -14,30 +19,63 @@ function deps(overrides: Partial<OptimizeEventLoopDeps>): OptimizeEventLoopDeps 
     connect: async () => ({ type: "closed" }) as StreamOutcome,
     pollJob: async () => runningJob,
     delay: async () => {},
+    resetCursor: () => {},
     onFrame: () => {},
     ...overrides,
   };
 }
 
+const terminalFrame: SseFrame = {
+  id: "v1.j.9",
+  event: "job.state_changed",
+  data: '{"state":"completed","terminal":true}',
+};
+
 describe("runOptimizeEventLoop", () => {
-  it("stops on a terminal frame without polling", async () => {
+  it("on a terminal frame, polls once for the full job and stops", async () => {
     const onTerminal = vi.fn();
-    const pollJob = vi.fn(async () => runningJob);
+    const pollJob = vi.fn(async () => completedJob);
 
     await runOptimizeEventLoop(
       deps({
-        connect: async () => ({ type: "terminal", frame: { event: "complete", data: "{}" } }),
+        connect: async () => ({ type: "terminal", frame: terminalFrame }),
         pollJob,
         onTerminal,
       }),
     );
 
-    expect(onTerminal).toHaveBeenCalledOnce();
-    expect(pollJob).not.toHaveBeenCalled();
+    expect(pollJob).toHaveBeenCalledOnce();
+    expect(onTerminal).toHaveBeenCalledWith({ frame: terminalFrame, job: completedJob });
   });
 
-  it("classifies an exact expired 404 error-response and stops without polling", async () => {
-    const onExpired = vi.fn();
+  it("surfaces a worker_lost terminal failure through the refreshed job", async () => {
+    const workerLost = job({
+      state: "failed",
+      terminal: true,
+      error: { code: "worker_lost", message: "The worker was lost." },
+    });
+    const onTerminal = vi.fn();
+
+    await runOptimizeEventLoop(
+      deps({
+        connect: async () => ({
+          type: "terminal",
+          frame: {
+            id: "v1.j.9",
+            event: "job.state_changed",
+            data: '{"state":"failed","terminal":true}',
+          },
+        }),
+        pollJob: async () => workerLost,
+        onTerminal,
+      }),
+    );
+
+    expect(onTerminal.mock.calls[0][0].job.error.code).toBe("worker_lost");
+  });
+
+  it("stops and fires onJobGone on a code-first job_not_found, without polling", async () => {
+    const onJobGone = vi.fn();
     const pollJob = vi.fn(async () => runningJob);
 
     await runOptimizeEventLoop(
@@ -45,15 +83,104 @@ describe("runOptimizeEventLoop", () => {
         connect: async () => ({
           type: "error-response",
           status: 404,
-          body: { detail: "Optimization job not found" },
+          body: errorEnvelope("job_not_found"),
         }),
         pollJob,
-        onExpired,
+        onJobGone,
       }),
     );
 
-    expect(onExpired).toHaveBeenCalledOnce();
+    expect(onJobGone).toHaveBeenCalledOnce();
     expect(pollJob).not.toHaveBeenCalled();
+  });
+
+  it("recovers from event_cursor_expired: clears history, resets the cursor, reconnects while running", async () => {
+    const onCursorExpired = vi.fn();
+    const resetCursor = vi.fn();
+    let connectCalls = 0;
+
+    await runOptimizeEventLoop(
+      deps({
+        connect: async () => {
+          connectCalls += 1;
+          if (connectCalls === 1) {
+            return {
+              type: "error-response",
+              status: 409,
+              body: errorEnvelope("event_cursor_expired", { oldest_event_id: "v1.j.5" }),
+            };
+          }
+          return { type: "terminal", frame: terminalFrame };
+        },
+        pollJob: async () => (connectCalls >= 2 ? completedJob : runningJob),
+        onCursorExpired,
+        resetCursor,
+      }),
+    );
+
+    expect(onCursorExpired).toHaveBeenCalledOnce();
+    expect(onCursorExpired.mock.calls[0][0].oldestEventId).toBe("v1.j.5");
+    expect(resetCursor).toHaveBeenCalledOnce();
+    expect(connectCalls).toBe(2); // reconnected after clearing the cursor
+  });
+
+  it("recovers from invalid_event_cursor distinctly and resets the cursor", async () => {
+    const onCursorInvalid = vi.fn();
+    const onCursorExpired = vi.fn();
+    const resetCursor = vi.fn();
+    let connectCalls = 0;
+
+    await runOptimizeEventLoop(
+      deps({
+        maxReconnects: 1,
+        connect: async () => {
+          connectCalls += 1;
+          return connectCalls === 1
+            ? { type: "error-response", status: 400, body: errorEnvelope("invalid_event_cursor") }
+            : { type: "terminal", frame: terminalFrame };
+        },
+        pollJob: async () => (connectCalls >= 2 ? completedJob : runningJob),
+        onCursorInvalid,
+        onCursorExpired,
+        resetCursor,
+      }),
+    );
+
+    expect(onCursorInvalid).toHaveBeenCalledOnce();
+    expect(onCursorExpired).not.toHaveBeenCalled();
+    expect(resetCursor).toHaveBeenCalledOnce();
+  });
+
+  it("treats a close without a terminal frame as a disconnect: polls and reconnects while running (never cancels)", async () => {
+    let connectCalls = 0;
+    const cancelSpy = vi.fn(); // there is no cancel in the loop; assert it is never wired
+
+    await runOptimizeEventLoop(
+      deps({
+        connect: async () => {
+          connectCalls += 1;
+          return { type: "closed" };
+        },
+        pollJob: async () => (connectCalls >= 3 ? completedJob : runningJob),
+      }),
+    );
+
+    expect(connectCalls).toBe(3); // reconnected twice while running, then poll-terminal stopped
+    expect(cancelSpy).not.toHaveBeenCalled();
+  });
+
+  it("stops when a poll reveals a terminal job after an ambiguous close", async () => {
+    const onTerminal = vi.fn();
+
+    await runOptimizeEventLoop(
+      deps({
+        connect: async () => ({ type: "closed" }),
+        pollJob: async () => completedJob,
+        onTerminal,
+      }),
+    );
+
+    expect(onTerminal).toHaveBeenCalledWith({ job: completedJob });
   });
 
   it("retries an initial 5xx via poll and surfaces onError after the budget", async () => {
@@ -73,8 +200,8 @@ describe("runOptimizeEventLoop", () => {
     expect(onError).toHaveBeenCalledOnce();
   });
 
-  it("stops on an expired job discovered by polling after a network failure", async () => {
-    const onExpired = vi.fn();
+  it("stops (job gone) when polling after a network failure returns job_not_found", async () => {
+    const onJobGone = vi.fn();
     const onError = vi.fn();
 
     await runOptimizeEventLoop(
@@ -83,53 +210,52 @@ describe("runOptimizeEventLoop", () => {
           throw new Error("network dropped");
         },
         pollJob: async () => {
-          throw new OptimizeApiError(404, "Optimization job not found", "poll");
+          throw new OptimizeApiError(
+            404,
+            { error: { code: "job_not_found", message: "gone" } },
+            "poll",
+          );
         },
-        onExpired,
+        onJobGone,
         onError,
       }),
     );
 
-    expect(onExpired).toHaveBeenCalledOnce();
+    expect(onJobGone).toHaveBeenCalledOnce();
     expect(onError).not.toHaveBeenCalled();
   });
 
-  it("treats a transient poll failure as retryable and surfaces onError after the budget", async () => {
-    const connect = vi.fn(async () => {
-      throw new Error("stream failed");
-    });
+  it("recovers after a frame application throws: reconnects, keeps the budget, no onError", async () => {
+    let connectCalls = 0;
+    let threwOnce = false;
     const onError = vi.fn();
 
     await runOptimizeEventLoop(
       deps({
         maxReconnects: 1,
-        connect,
-        pollJob: async () => {
-          throw new OptimizeApiError(500, "upstream unreachable", "poll");
+        // First frame application throws (cache/consumer failure) → the injected
+        // connect rejects; the loop must poll + reconnect, not surface onError.
+        onFrame: () => {
+          if (!threwOnce) {
+            threwOnce = true;
+            throw new Error("apply failed");
+          }
         },
+        connect: async (onFrame) => {
+          connectCalls += 1;
+          if (connectCalls === 1) {
+            await onFrame({ id: "v1.j.1", event: "job.progressed", data: "{}" }); // rejects out of connect
+            return { type: "closed" };
+          }
+          return { type: "terminal", frame: terminalFrame };
+        },
+        pollJob: async () => (connectCalls >= 2 ? completedJob : runningJob),
         onError,
       }),
     );
 
-    expect(connect).toHaveBeenCalledTimes(2); // reconnect 1, then 2 > 1 → onError
-    expect(onError).toHaveBeenCalledOnce();
-  });
-
-  it("stops immediately when a poll reveals a terminal status", async () => {
-    const onError = vi.fn();
-    const onTerminal = vi.fn();
-
-    await runOptimizeEventLoop(
-      deps({
-        connect: async () => ({ type: "closed" }),
-        pollJob: async () => doneJob,
-        onError,
-        onTerminal,
-      }),
-    );
-
-    expect(onError).not.toHaveBeenCalled();
-    // The loop stops on the terminal poll; onTerminal is only for terminal frames.
+    expect(connectCalls).toBe(2); // reconnected once after the throw
+    expect(onError).not.toHaveBeenCalled(); // a throwing frame did not falsely reset or exhaust the budget
   });
 
   it("resets the reconnect budget after a connection that delivered new frames", async () => {
@@ -141,18 +267,15 @@ describe("runOptimizeEventLoop", () => {
         maxReconnects: 2,
         connect: async (onFrame) => {
           connectCalls += 1;
-          onFrame({ event: "progress", data: "{}" }); // progress each round
+          await onFrame({ id: `v1.j.${connectCalls}`, event: "job.progressed", data: "{}" });
           return { type: "closed" };
         },
-        pollJob: async () => runningJob, // still running → reconnect
-        // Stop the otherwise-endless healthy loop after 4 rounds.
+        pollJob: async () => runningJob,
         isCancelled: () => connectCalls >= 4,
         onError,
       }),
     );
 
-    // With per-progress budget reset, 4 reconnects with maxReconnects=2 never
-    // exhaust the budget → no onError (without the reset, it would fire at #3).
     expect(connectCalls).toBe(4);
     expect(onError).not.toHaveBeenCalled();
   });

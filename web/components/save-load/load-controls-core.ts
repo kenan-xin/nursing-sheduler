@@ -68,6 +68,49 @@ export function versionMismatchCopy(
 }
 
 // ---------------------------------------------------------------------------
+// Combined replacement + version confirmation (T17r review P0). DL12 requires
+// EVERY load into a non-empty workspace to confirm replacement — including a
+// matching-version load — so the confirm may carry a replacement warning alone, a
+// version warning alone, or both combined into one dialog.
+// ---------------------------------------------------------------------------
+
+/** Title/lead for the replacement half of the combined load confirmation. */
+export const REPLACEMENT_CONFIRM_TITLE = "Replace your current workspace?";
+export const REPLACEMENT_CONFIRM_BODY =
+  "Loading this file replaces your current workspace — your current setup will be " +
+  "overwritten. You can undo the load afterwards to restore it.";
+
+export interface LoadConfirmCopy {
+  title: string;
+  description: string;
+}
+
+/**
+ * Build the single combined confirmation copy for a staged load. `replacement` is
+ * true when the current workspace is non-empty (its content would be overwritten);
+ * `versionStatus` is `null` on a version match, or the FR-SL-19 case otherwise.
+ * When both apply they are merged into one dialog (replacement lead + the exact
+ * FR-SL-19 version wording, unaltered); either alone yields its own copy.
+ */
+export function loadConfirmCopy(
+  versionStatus: VersionConfirmStatus | null,
+  replacement: boolean,
+  fileVersion: string | undefined,
+  current: string,
+): LoadConfirmCopy {
+  const version =
+    versionStatus !== null ? versionMismatchCopy(versionStatus, fileVersion, current) : null;
+  if (replacement && version) {
+    return {
+      title: REPLACEMENT_CONFIRM_TITLE,
+      description: `${REPLACEMENT_CONFIRM_BODY}\n\n${version.title}\n\n${version.description}`,
+    };
+  }
+  if (version) return version;
+  return { title: REPLACEMENT_CONFIRM_TITLE, description: REPLACEMENT_CONFIRM_BODY };
+}
+
+// ---------------------------------------------------------------------------
 // Non-blocking uncredited-LEAVE warn-fence (qq0.17 blocks qq0.23; the real
 // editor-time guard is deferred — this ticket ships only the import-time fence).
 // ---------------------------------------------------------------------------

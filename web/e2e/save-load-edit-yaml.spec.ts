@@ -181,7 +181,10 @@ test.describe("T17b-3 — Edit-YAML mode", () => {
     await expect.poll(() => rangeStart(page)).toBe("");
     await expect(preview.getByTestId("scenario-yaml-textarea")).toBeHidden();
     await expect(preview.getByTestId("yaml-apply-button")).toBeHidden();
-    await expect(preview.getByTestId("scenario-export-issues")).toBeVisible();
+    // An empty scenario is a valid (incomplete) Workspace backup, not an error:
+    // the read-only preview returns with no blocking issues (DL12 §2).
+    await expect(preview.getByTestId("scenario-yaml-content")).toBeVisible();
+    await expect(preview.getByTestId("scenario-export-issues")).toHaveCount(0);
   });
 
   test("Apply on `::bad::` surfaces an inline parse error and leaves state untouched", async ({
@@ -202,7 +205,7 @@ test.describe("T17b-3 — Edit-YAML mode", () => {
     await expect(preview.getByTestId("scenario-yaml-textarea")).toBeVisible();
   });
 
-  test("Apply on valid edited YAML runs the same block/gate/replace pipeline as Upload: full-state replace, history cleared", async ({
+  test("Apply on valid edited YAML runs the same block/gate/replace pipeline as Upload: undoable full-state replace", async ({
     page,
   }) => {
     await gotoReadySaveAndLoad(page);
@@ -213,12 +216,15 @@ test.describe("T17b-3 — Edit-YAML mode", () => {
     await preview.getByTestId("scenario-yaml-textarea").fill(EDITED_VALID_YAML);
     await preview.getByTestId("yaml-apply-button").click();
 
-    // No app version in the edited YAML -- the same version-confirm gate as Upload.
+    // Apply into the non-empty workspace stages the same combined replacement /
+    // version confirmation as Upload.
     await expect(page.getByTestId("confirm-dialog-confirm")).toBeVisible();
     await page.getByTestId("confirm-dialog-confirm").click();
 
     await expect.poll(() => rangeStart(page)).toBe("2026-06-01");
-    expect(await pastStatesLength(page)).toBe(0);
+    // Confirmed Load is one tracked, undoable transaction, not a history-clearing
+    // replace; an imported file is not a fresh local backup (T17r P0).
+    expect(await pastStatesLength(page)).toBeGreaterThan(0);
     expect(await isDirty(page)).toBe(false);
 
     // Editing mode closes back to the read-only preview once the replace commits.

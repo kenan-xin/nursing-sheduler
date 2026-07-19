@@ -1,35 +1,33 @@
 "use client";
 
-// Version-mismatch confirm modal (T17b-2; FR-SL-19/20; prototype
-// ScreenSaveLoad.dc.html:141-158). Thin wrapper over the shared shell
-// `ConfirmDialog` (read-only reuse — do not fork it): the wording comes from
-// `versionMismatchCopy`, so the exact FR-SL-19 three-case text lives in one
-// pure, unit-tested place. Cancel is a plain `onOpenChange(false)` — no
+// Combined load-confirmation modal (T17b-2 / T17r review P0; FR-SL-19/20;
+// prototype ScreenSaveLoad.dc.html:141-158). Thin wrapper over the shared shell
+// `ConfirmDialog` (read-only reuse — do not fork it). The wording is built by the
+// pure, unit-tested `loadConfirmCopy` in `load-controls-core` (replacement +/or
+// the exact FR-SL-19 version text), so this component only renders the already
+// combined `title`/`description`. Cancel is a plain `onOpenChange(false)` — no
 // `onConfirm` runs, so the caller's staged import is simply discarded (no-op,
 // current state intact); Continue runs `onContinue` then closes.
 
 import { ConfirmDialog } from "@/components/shell/confirm-dialog";
-import { versionMismatchCopy, type VersionConfirmStatus } from "./load-controls-core";
 
 export interface VersionConfirmModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  status: VersionConfirmStatus;
-  fileVersion: string | undefined;
-  currentVersion: string;
+  /** Pre-built combined replacement/version dialog title (`loadConfirmCopy`). */
+  title: string;
+  /** Pre-built combined replacement/version dialog body (`loadConfirmCopy`). */
+  description: string;
   onContinue: () => void;
 }
 
 export function VersionConfirmModal({
   open,
   onOpenChange,
-  status,
-  fileVersion,
-  currentVersion,
+  title,
+  description,
   onContinue,
 }: VersionConfirmModalProps) {
-  const { title, description } = versionMismatchCopy(status, fileVersion, currentVersion);
-
   return (
     <ConfirmDialog
       open={open}

@@ -139,6 +139,17 @@ async function mutate(page: Page, patch: Record<string, unknown>) {
   }, patch);
 }
 
+/**
+ * Establish a clean backup baseline (as a successful plain Download would). Load/New
+ * no longer invent a baseline (T17r review P0), so a scenario is only "dirty" against
+ * a real prior save — tests that need a dirty precondition mark saved before editing.
+ */
+async function markSaved(page: Page) {
+  await page.evaluate(() => {
+    (window as unknown as NsWindow).__nsStore.scenario.getState().markSaved();
+  });
+}
+
 /** Register a losable test draft through the store seam (FR-PR-06, T08a). */
 async function openTestDraft(page: Page) {
   await page.evaluate(() => {
@@ -182,6 +193,9 @@ test.describe("T08 app shell", () => {
     page,
   }) => {
     await gotoReadyHome(page);
+    // Establish a baseline (as a Download would), then edit so the scenario is
+    // genuinely dirty against it — Load/New no longer invent a baseline (T17r P0).
+    await markSaved(page);
     await mutate(page, VALID_SCENARIO_PATCH);
     // Dirty in the T04/backup sense (differs from the persisted baseline)…
     expect(await isDirty(page)).toBe(true);
@@ -432,6 +446,8 @@ test.describe("T08 app shell", () => {
     await page.getByTestId("nav-link-/save-and-load").click();
     await expect(page.getByTestId("start-over-card")).toBeVisible();
 
+    // Baseline first (Load/New no longer invent one — T17r P0), then dirty it.
+    await markSaved(page);
     await mutate(page, {
       rangeStart: "2026-03-01",
       staff: [{ _k: "p1", id: 1, description: "Nurse A" }],
@@ -483,8 +499,11 @@ test.describe("T08 app shell", () => {
     page,
   }) => {
     await gotoReadyHome(page);
-    // Make a tracked edit and let the auto-persist write settle, but do NOT
-    // markSaved (no UI Download in this test).
+    // Establish a backup baseline (as a Download would), then make a tracked edit
+    // and let the auto-persist write settle. Both the baseline and the edited state
+    // persist, so reload can restore them — Load/New no longer invent a baseline
+    // (T17r P0), so a dirty precondition requires a real prior save.
+    await markSaved(page);
     await mutate(page, { rangeStart: "2026-03-01" });
     expect(await isDirty(page)).toBe(true);
     await page.waitForTimeout(800);
@@ -509,6 +528,10 @@ test.describe("T08 app shell", () => {
     page,
   }) => {
     await gotoReadyHome(page);
+    // Establish a baseline (as a Download would) so a later edit is dirty against
+    // it — the store starts clean (current === baseline), and Load/New no longer
+    // invent a baseline (T17r P0).
+    await markSaved(page);
 
     // Dispatch a cancelable beforeunload and observe whether the shell handler
     // called preventDefault (which is what triggers the browser's leave prompt).

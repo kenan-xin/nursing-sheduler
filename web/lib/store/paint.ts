@@ -63,10 +63,14 @@ export function commitPaintGesture(scenario: ScenarioStore, hot: HotStore): void
       // XOR: the coordinate becomes a single day-state cell, dropping requests.
       const priorDayState = existing.find(isDayStateCell);
       const { dayState } = intent;
+      // Preserve an existing day-state cell's uid for F2 stability; a brand-new
+      // cell gets a durable uid at creation so its Workspace identity never depends
+      // on array position (T17r review P1).
+      const uid = priorDayState?.uid ?? crypto.randomUUID();
       const cell: UiRequestCell =
         dayState.kind === "leave"
-          ? { kind: "leave", person, date, uid: priorDayState?.uid }
-          : { kind: "off", person, date, weight: dayState.weight, uid: priorDayState?.uid };
+          ? { kind: "leave", person, date, uid }
+          : { kind: "off", person, date, weight: dayState.weight, uid };
       byCoordinate.set(key, [cell]);
       continue;
     }
@@ -92,7 +96,7 @@ export function commitPaintGesture(scenario: ScenarioStore, hot: HotStore): void
         date,
         shiftType: selector,
         weight,
-        uid: prev?.uid,
+        uid: prev?.uid ?? crypto.randomUUID(),
       });
     }
     byCoordinate.set(key, [...bySelector.values()]);

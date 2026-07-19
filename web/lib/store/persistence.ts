@@ -21,7 +21,7 @@ import { SCENARIO_KEYS } from "./fingerprint";
 export const SCENARIO_PERSIST_KEY = "nurse-scheduler/scenario";
 
 /** Current persistence payload version; a bump triggers `migrateScenarioState`. */
-export const SCENARIO_PERSIST_VERSION = 3;
+export const SCENARIO_PERSIST_VERSION = 4;
 
 /**
  * The persisted `state` payload at the current version: the durable scenario
@@ -53,6 +53,11 @@ export type PersistedScenarioState = ScenarioUiState & {
  * constraint; a record written before that invariant existed may hold
  * duplicate pins for the same `(constraintKind, constraintId)` — collapse them
  * to the most recently written one so no hidden, unrenderable pin survives.
+ * v3 → v4: the backup-freshness baseline was redefined (T17r review P0) to mean
+ * "the state at the last successful plain Download". Older records stored a
+ * baseline computed under the previous strict-projection scheme and set on
+ * hydration/New/Load, which no longer marks a genuine backup — clear it to `null`
+ * (unknown) so no stale backup is falsely claimed fresh.
  */
 export function migrateScenarioState(persisted: unknown, fromVersion: number): unknown {
   if (fromVersion > SCENARIO_PERSIST_VERSION) {
@@ -91,6 +96,12 @@ export function migrateScenarioState(persisted: unknown, fromVersion: number): u
         migrated.guidedRulePins as GuidedRulePin[],
       );
     }
+  }
+
+  if (fromVersion < 4) {
+    // A pre-v4 baseline was set under the old strict-projection/download-baseline
+    // semantics; it no longer denotes a real backup. Reset to unknown (`null`).
+    migrated.baselineFingerprint = null;
   }
 
   return migrated;

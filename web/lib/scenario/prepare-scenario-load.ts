@@ -21,7 +21,16 @@ import { currentAppVersion } from "./app-version";
 import { projectScenarioDocument } from "./canonical";
 import { importScenarioValue, parseScenarioYaml } from "./import-scenario";
 import { validateScenario, type ScenarioValidationIssue } from "./serialize";
+import {
+  checkWorkspaceGuidedIntegrity,
+  checkWorkspaceIdentityIntegrity,
+  classifyWorkspaceSource,
+  normalizeWorkspaceToImportTarget,
+  parseWorkspaceV1Document,
+  workspaceRootSchema,
+} from "./workspace";
 import type { CanonicalScenarioDocument, ImportNormalizationTarget } from "./types";
+import type { z } from "zod";
 
 /** The pure pre-commit load result. `issues` empty ⇒ safe to commit via `loadScenario`. */
 export interface PrepareScenarioLoadResult {
@@ -65,6 +74,23 @@ export function projectImportTarget(target: ImportNormalizationTarget): Canonica
  * (this function has no store handle).
  */
 export function prepareScenarioLoad(raw: string): PrepareScenarioLoadResult {
+  // 0. Dual-format dispatch (DL12 §4). A `workspaceVersion` scalar routes to the
+  //    Workspace V1 loader; its absence keeps the legacy strict/import path below,
+  //    which is unchanged. Only the discriminator picks the path — a Workspace file
+  //    never enters the legacy schema, and a legacy file never enters Workspace V1.
+  const source = classifyWorkspaceSource(raw);
+  if (source.kind === "v1") return prepareWorkspaceLoad(raw);
+  if (source.kind === "unsupported") {
+    return {
+      target: null,
+      doc: null,
+      issues: [
+        { path: "workspaceVersion", message: `Unsupported workspaceVersion: ${source.display}.` },
+      ],
+      warnings: [],
+    };
+  }
+
   // 1. Parse (YAML 1.2). A syntax error is the first, blocking channel.
   let parsed: unknown;
   try {
@@ -110,6 +136,75 @@ export function prepareScenarioLoad(raw: string): PrepareScenarioLoadResult {
     return { target, doc, issues: validation.issues, warnings };
   }
   return { target, doc: validation.document, issues: [], warnings };
+}
+
+/**
+ * The Workspace V1 branch of the load pipeline. Parse → strict structural schema →
+ * identity-preserving normalization. A Workspace backup preserves incomplete work
+ * (DL12 §2), so it loads and restores authoring state even when it is not
+ * optimize-ready: only a YAML syntax error or a structural schema violation
+ * (unknown field, wrong type) blocks. Full readiness is enforced later, at Optimize.
+ */
+function prepareWorkspaceLoad(raw: string): PrepareScenarioLoadResult {
+  let parsed: unknown;
+  try {
+    parsed = parseWorkspaceV1Document(raw);
+  } catch (error) {
+    return {
+      target: null,
+      doc: null,
+      issues: [{ path: "", message: `YAML parse error: ${(error as Error).message}` }],
+      warnings: [],
+    };
+  }
+  const result = workspaceRootSchema.safeParse(parsed);
+  if (!result.success) {
+    return { target: null, doc: null, issues: workspaceZodIssues(result.error), warnings: [] };
+  }
+  // Identity integrity must block hydration even though incomplete work otherwise
+  // loads (DL12 §2): a duplicate preference `workspaceId` (across cards or request
+  // cells) or a duplicate Guided pin id/source would collide on one durable id or
+  // corrupt the one-pin-per-source invariant once carried into the store. A missing
+  // preference id is already rejected structurally by the schema above.
+  const identityIssues = [
+    ...checkWorkspaceIdentityIntegrity(result.data),
+    ...checkWorkspaceGuidedIntegrity(result.data),
+  ];
+  if (identityIssues.length > 0) {
+    return {
+      target: null,
+      doc: null,
+      issues: identityIssues.map(workspaceIssueToValidation),
+      warnings: [],
+    };
+  }
+  return {
+    target: normalizeWorkspaceToImportTarget(result.data),
+    doc: null,
+    issues: [],
+    warnings: [],
+  };
+}
+
+/** Flatten a structured Workspace issue to the load pipeline's `ScenarioValidationIssue`. */
+function workspaceIssueToValidation(issue: {
+  path: Array<string | number>;
+  message: string;
+}): ScenarioValidationIssue {
+  return { path: issue.path.map(String).join("."), message: issue.message };
+}
+
+/** Flatten a Workspace schema error to `ScenarioValidationIssue`s (unknown keys expanded). */
+function workspaceZodIssues(error: z.ZodError): ScenarioValidationIssue[] {
+  return error.issues.flatMap((issue) => {
+    if (issue.code === "unrecognized_keys") {
+      return issue.keys.map((key) => ({
+        path: [...issue.path, key].map(String).join("."),
+        message: `Unrecognized field: ${key}.`,
+      }));
+    }
+    return [{ path: issue.path.map(String).join("."), message: issue.message }];
+  });
 }
 
 // ---------------------------------------------------------------------------

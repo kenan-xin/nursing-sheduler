@@ -1,21 +1,26 @@
-import { TERMINAL_EVENT_NAMES } from "@/lib/bff/types";
+import { LAST_EVENT_ID_HEADER } from "@/lib/bff/types";
+import { parseStateChangedPayload } from "@/lib/query/event-payloads";
 
-// fetch-stream SSE consumption for `/api/optimize/{id}/events` (tech-plan §3).
+// fetch-stream SSE consumption for `/api/optimize/{id}/events` (tech-plan §5).
 // Two concerns handled here, both unit-tested:
-//   1. Frame parsing — C2 frames are `event: <name>\n data: <json>\n\n`, with
-//      `: keepalive\n\n` comment frames in between; no `id:` field.
-//   2. Ordinal-skip replay dedupe — the backend replays its ordered event array
-//      from index 0 on every (re)connect, and frames carry no id, so we dedupe by
-//      POSITION, not value: track how many frames have been applied and skip the
-//      first N on reconnect.
+//   1. Frame parsing — revised backend frames are
+//      `id: <opaque cursor>\n event: <name>\n data: <json>\n\n`, with
+//      `: keepalive\n\n` comment frames in between. The `id` is the persisted,
+//      job-bound cursor.
+//   2. Opaque-cursor dedupe — the backend replays strictly AFTER the client's
+//      `Last-Event-ID` and owns ordering, so we no longer dedupe by position.
+//      Instead we remember the last applied cursor and skip only an exact
+//      duplicate id (a defensive net; ordinal replay is gone).
 
 export interface SseFrame {
+  // The opaque, job-bound cursor for this event, or null for id-less frames.
+  id: string | null;
   event: string;
   data: string;
 }
 
 // Incremental SSE record parser. Feed decoded text; get back complete frames.
-// Comment-only records (keepalives) yield nothing and are not counted as frames.
+// Comment-only records (keepalives) yield nothing.
 export function createSseParser() {
   let buffer = "";
 
@@ -38,6 +43,7 @@ export function createSseParser() {
 }
 
 function parseRecord(record: string): SseFrame | null {
+  let id: string | null = null;
   let event = "message";
   const dataLines: string[] = [];
   let hasField = false;
@@ -52,7 +58,12 @@ function parseRecord(record: string): SseFrame | null {
     let value = colon === -1 ? "" : line.slice(colon + 1);
     if (value.startsWith(" ")) value = value.slice(1);
 
-    if (field === "event") {
+    if (field === "id") {
+      // The cursor is opaque: keep it as the exact string the server sent, never
+      // parse or compare it as a number.
+      id = value;
+      hasField = true;
+    } else if (field === "event") {
       event = value;
       hasField = true;
     } else if (field === "data") {
@@ -60,32 +71,50 @@ function parseRecord(record: string): SseFrame | null {
       hasField = true;
       hasData = true;
     }
-    // `id` / `retry` / unknown fields are ignored (C2 sends neither `id` nor `retry`).
+    // `retry` / unknown fields are ignored.
   }
 
   if (!hasField) return null;
-  return { event, data: hasData ? dataLines.join("\n") : "" };
+  return { id, event, data: hasData ? dataLines.join("\n") : "" };
 }
 
-// Position-based replay dedupe. `appliedCount` persists across reconnects; each
-// new connection restarts at per-connection index 0.
-export class OrdinalSkipTracker {
-  private applied: number;
+// Opaque-cursor tracker. Remembers the last APPLIED cursor so it can (a) supply it
+// as `Last-Event-ID` on reconnect and (b) skip an exact duplicate id. It never
+// interprets the cursor's structure.
+//
+// Duplicate detection and cursor commit are deliberately SEPARATE operations. The
+// cursor advances only via `commit(frame)`, which callers invoke strictly AFTER the
+// frame has been fully applied (cache write + all consumer callbacks). If
+// application throws, the cursor is not advanced, so reconnect resends the prior
+// cursor and the failed event is replayed and reapplied — no silent durable loss.
+export class CursorTracker {
+  private lastId: string | null;
 
-  constructor(initialApplied = 0) {
-    this.applied = initialApplied;
+  constructor(initial: string | null = null) {
+    this.lastId = initial;
   }
 
-  get appliedCount(): number {
-    return this.applied;
+  // The last applied cursor, sent as `Last-Event-ID` on reconnect (null → none).
+  get lastEventId(): string | null {
+    return this.lastId;
   }
 
-  // Given a frame's 0-based index within the CURRENT connection, report whether
-  // it is new (not yet applied) and advance the applied count when it is.
-  accept(connectionIndex: number): boolean {
-    if (connectionIndex < this.applied) return false;
-    this.applied = connectionIndex + 1;
-    return true;
+  // Discard the saved cursor so the next connection resumes from the retained
+  // floor. Used after `event_cursor_expired` / `invalid_event_cursor` recovery.
+  reset(): void {
+    this.lastId = null;
+  }
+
+  // Whether this frame is an exact duplicate of the last applied cursor. An id-less
+  // frame is never a duplicate (nothing to compare); this performs NO commit.
+  isDuplicate(frame: SseFrame): boolean {
+    return frame.id !== null && frame.id === this.lastId;
+  }
+
+  // Advance the cursor to this frame's id. Call ONLY after the frame has been fully
+  // applied. An id-less frame leaves the cursor unchanged.
+  commit(frame: SseFrame): void {
+    if (frame.id !== null) this.lastId = frame.id;
   }
 }
 
@@ -96,21 +125,48 @@ export type StreamOutcome =
 
 export interface StreamOptions {
   signal: AbortSignal;
-  tracker: OrdinalSkipTracker;
-  onEvent: (frame: SseFrame) => void;
+  tracker: CursorTracker;
+  // May be async: the cursor commits only AFTER this resolves, so per-frame
+  // reconciliation (poll + cache replace) of a malformed durable payload completes
+  // before the cursor advances. A rejection leaves the cursor at the prior id.
+  onEvent: (frame: SseFrame) => void | Promise<void>;
 }
 
-// Connect once, parse frames, dispatch only NEW frames (ordinal-skip), and report
-// the outcome. Non-2xx returns `error-response` (so the caller can classify an
-// expired 404 vs a 5xx) rather than throwing; a network/read failure throws.
+// A `job.state_changed` frame whose FULLY VALIDATED payload marks the lifecycle
+// terminal is the in-stream terminal signal (there is no terminal event NAME
+// anymore). Terminal recognition reuses the same strict parser as cache
+// application: a semantically invalid state/error/queue payload — even one bearing
+// `terminal: true` — is NOT trusted to close the stream. It reconciles (poll)
+// instead, and true terminality is then observed via the authoritative poll.
+function isTerminalFrame(frame: SseFrame): boolean {
+  if (frame.event !== "job.state_changed") return false;
+  let data: unknown;
+  try {
+    data = JSON.parse(frame.data);
+  } catch {
+    return false;
+  }
+  const payload = parseStateChangedPayload(data);
+  return payload !== null && payload.terminal === true;
+}
+
+// Connect once, parse frames, dispatch only NEW frames (exact-duplicate dedupe by
+// cursor), and report the outcome. The last applied cursor is sent as
+// `Last-Event-ID` so the BFF forwards it upstream for replay. Non-2xx returns
+// `error-response` (so the caller can classify expired/invalid cursor vs gone job
+// vs 5xx) rather than throwing; a network/read failure throws.
 export async function streamOptimizeEvents(
   url: string,
   options: StreamOptions,
 ): Promise<StreamOutcome> {
+  const headers: Record<string, string> = { accept: "text/event-stream" };
+  const cursor = options.tracker.lastEventId;
+  if (cursor !== null) headers[LAST_EVENT_ID_HEADER] = cursor;
+
   const response = await fetch(url, {
     signal: options.signal,
     cache: "no-store",
-    headers: { accept: "text/event-stream" },
+    headers,
   });
 
   if (!response.ok) {
@@ -122,7 +178,6 @@ export async function streamOptimizeEvents(
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   const parser = createSseParser();
-  let connectionIndex = 0;
 
   try {
     for (;;) {
@@ -130,12 +185,14 @@ export async function streamOptimizeEvents(
       if (done) break;
 
       for (const frame of parser.push(decoder.decode(value, { stream: true }))) {
-        const isNew = options.tracker.accept(connectionIndex);
-        connectionIndex += 1;
-        if (isNew) options.onEvent(frame);
-        if (TERMINAL_EVENT_NAMES.has(frame.event)) {
-          return { type: "terminal", frame };
-        }
+        if (options.tracker.isDuplicate(frame)) continue; // exact-duplicate id
+        // Apply (and reconcile, if the durable payload was malformed) BEFORE
+        // committing the cursor. If `onEvent` throws/rejects — a cache, consumer, or
+        // reconcile-poll failure — the cursor stays at the prior id so reconnect
+        // replays and reapplies this exact frame instead of skipping it.
+        await options.onEvent(frame);
+        options.tracker.commit(frame);
+        if (isTerminalFrame(frame)) return { type: "terminal", frame };
       }
     }
   } finally {

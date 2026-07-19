@@ -16,6 +16,10 @@ describe("New-schedule reset — all slices", () => {
     const spine = createStateSpine({ createStorage: () => createMemoryStorage() });
     await hydrateScenarioStore(spine.scenario, spine.hot);
 
+    // Hydration no longer invents a backup baseline (T17r review P0); establish a
+    // clean one (as a plain Download would) so the edit below is genuinely dirty.
+    spine.scenario.getState().markSaved();
+
     // Dirty every axis: scenario data (one tracked mutation → one history entry),
     // plus hot-store ephemeral state that must not leak past a reset.
     spine.scenario.getState().mutateScenario({

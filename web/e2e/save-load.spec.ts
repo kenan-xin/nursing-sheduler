@@ -12,7 +12,12 @@ import { expect, test, type Page } from "@playwright/test";
 
 type NsWindow = {
   __nsStore: {
-    scenario: { getState(): Record<string, unknown> & { mutateScenario(x: unknown): void } };
+    scenario: {
+      getState(): Record<string, unknown> & {
+        mutateScenario(x: unknown): void;
+        markSaved(): void;
+      };
+    };
     isDirty(): boolean;
   };
 };
@@ -29,6 +34,16 @@ async function mutate(page: Page, patch: Record<string, unknown>) {
   await page.evaluate((p) => {
     (window as unknown as NsWindow).__nsStore.scenario.getState().mutateScenario(p);
   }, patch);
+}
+
+// Establish a clean backup baseline (as a successful plain Download would). The
+// app no longer invents a baseline on load (T17r review P0), so a scenario is only
+// "dirty" against a real prior save — tests that need a dirty precondition call
+// this before editing.
+async function markSaved(page: Page) {
+  await page.evaluate(() => {
+    (window as unknown as NsWindow).__nsStore.scenario.getState().markSaved();
+  });
 }
 
 function isDirty(page: Page): Promise<boolean> {
@@ -126,6 +141,7 @@ test.describe("T17a-4 — Scenario-file card + read-only preview", () => {
     page,
   }) => {
     await gotoReadySaveAndLoad(page);
+    await markSaved(page);
     await mutate(page, VALID_SCENARIO_PATCH);
     expect(await isDirty(page)).toBe(true);
 
@@ -151,6 +167,7 @@ test.describe("T17a-4 — Scenario-file card + read-only preview", () => {
   }) => {
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     await gotoReadySaveAndLoad(page);
+    await markSaved(page);
     await mutate(page, VALID_SCENARIO_PATCH);
     expect(await isDirty(page)).toBe(true);
 
@@ -164,33 +181,31 @@ test.describe("T17a-4 — Scenario-file card + read-only preview", () => {
     expect(await isDirty(page)).toBe(true);
   });
 
-  test("an invalid draft shows V-issues in both the card and the preview; Download/Copy write nothing and dirty is not cleared", async ({
+  test("an incomplete draft still backs up (DL12 §2): Download writes scenario.yaml and clears dirty", async ({
     page,
   }) => {
     await gotoReadySaveAndLoad(page);
-    // Leaving the date range blank/default fails producer validation (zIsoDate),
-    // and diverges from the clean baseline so dirty is observably true.
+    // Leaving the date range blank is INCOMPLETE, not corrupt. A Workspace backup
+    // preserves incomplete work (DL12 §2) — readiness gates Optimize, not backup —
+    // so it must download, not block.
+    await markSaved(page);
     await mutate(page, { staff: [{ id: "Nurse A" }] });
     expect(await isDirty(page)).toBe(true);
 
+    // No blocking export-issues panel: the backup is permissive.
     await expect(
       page.getByTestId("scenario-yaml-preview").getByTestId("scenario-export-issues"),
-    ).toBeVisible();
+    ).toHaveCount(0);
+    // The preview shows the flat Workspace document, incomplete dates and all.
+    await expect(page.getByTestId("scenario-yaml-content")).toContainText("workspaceVersion: 1");
 
-    const downloadAttempt = page.waitForEvent("download", { timeout: 800 }).catch(() => null);
-    await page.getByTestId("scenario-download-button").click();
-    expect(await downloadAttempt).toBeNull();
-    await expect(
-      page.getByTestId("scenario-file-card").getByTestId("scenario-export-issues"),
-    ).toBeVisible();
-    expect(await isDirty(page)).toBe(true); // Download did not clear dirty.
-
-    await page.getByTestId("scenario-copy-button").click();
-    await expect(page.getByTestId("scenario-copy-button")).not.toContainText("Copied!");
-    await expect(
-      page.getByTestId("scenario-file-card").getByTestId("scenario-export-issues"),
-    ).toBeVisible();
-    expect(await isDirty(page)).toBe(true); // Copy did not clear dirty either.
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      page.getByTestId("scenario-download-button").click(),
+    ]);
+    expect(download.suggestedFilename()).toBe("scenario.yaml");
+    // A successful plain Workspace Download is the one path that clears dirty.
+    expect(await isDirty(page)).toBe(false);
   });
 });
 
@@ -239,6 +254,7 @@ test.describe("T17a-5 -- Anonymise card", () => {
     page,
   }) => {
     await gotoReadySaveAndLoad(page);
+    await markSaved(page);
     await mutate(page, VALID_SCENARIO_PATCH);
     expect(await isDirty(page)).toBe(true);
 
@@ -254,18 +270,57 @@ test.describe("T17a-5 -- Anonymise card", () => {
     expect(await isDirty(page)).toBe(true);
   });
 
-  test("an invalid draft shows V-issues in the Anonymise card and writes nothing", async ({
+  test("an incomplete draft still anonymises (DL12 §2 backup), leaving dirty set", async ({
     page,
   }) => {
     await gotoReadySaveAndLoad(page);
+    // Incomplete (blank dates), not corrupt: the anonymised Workspace backup
+    // preserves it and writes, rather than blocking.
+    await markSaved(page);
     await mutate(page, { staff: [{ id: "Nurse A" }] });
     expect(await isDirty(page)).toBe(true);
 
     const card = page.getByTestId("anonymise-card");
-    const downloadAttempt = page.waitForEvent("download", { timeout: 800 }).catch(() => null);
-    await card.getByTestId("anonymise-download-button").click();
-    expect(await downloadAttempt).toBeNull();
-    await expect(card.getByTestId("scenario-export-issues")).toBeVisible();
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      card.getByTestId("anonymise-download-button").click(),
+    ]);
+    expect(download.suggestedFilename()).toBe("scenario-anonymised.yaml");
+    // An anonymised copy is a redacted export, never a save — dirty stays set.
     expect(await isDirty(page)).toBe(true);
   });
+
+  // Scatter needs a complete, valid calendar. A null, partial, or reversed range
+  // must surface a structured blocking issue BEFORE any transform, write no file,
+  // and leave the source state untouched (T17r review P2).
+  for (const [label, range] of [
+    ["a null (unset) range", { rangeStart: "", rangeEnd: "" }],
+    ["a partial range (start only)", { rangeStart: "2026-05-14", rangeEnd: "" }],
+    ["a reversed range (end before start)", { rangeStart: "2026-05-20", rangeEnd: "2026-05-14" }],
+  ] as const) {
+    test(`Scatter on ${label} blocks with a structured issue and downloads nothing`, async ({
+      page,
+    }) => {
+      await gotoReadySaveAndLoad(page);
+      await mutate(page, { ...VALID_SCENARIO_PATCH, ...range });
+
+      const card = page.getByTestId("anonymise-card");
+      await card.getByTestId("anonymise-toggle-scatter").click();
+
+      let downloaded = false;
+      page.on("download", () => {
+        downloaded = true;
+      });
+      await card.getByTestId("anonymise-download-button").click();
+
+      // The range guard surfaces a blocking issue in the card and writes no file.
+      await expect(card.getByTestId("scenario-export-issues")).toBeVisible();
+      expect(downloaded).toBe(false);
+      // Source state is untouched — the guard runs before the clone/transform.
+      const rangeStart = await page.evaluate(
+        () => (window as unknown as NsWindow).__nsStore.scenario.getState().rangeStart,
+      );
+      expect(rangeStart).toBe(range.rangeStart);
+    });
+  }
 });

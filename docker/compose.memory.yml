@@ -1,0 +1,20 @@
+# Memory-store overlay (diagnostic/testing aid, U30b; adapts upstream
+# compose.backend.memory.yml). Flips `backend` to the in-process memory job store
+# so the opt-in diagnostic can exercise a MEMORY deployment as well as the default
+# Redis one.
+#
+# This is NOT a production ingress path: the memory store is per-process and lost on
+# restart, and it does not exercise the Redis lease/replay fences. Production stays
+# the Redis base + exactly one ingress overlay. `redis` is still defined by the base
+# and started (backend keeps its healthy-Redis startup dependency) but is unused in
+# this mode. Combine with the `diagnostic` profile, e.g.:
+#
+#   docker compose -f docker/compose.yml -f docker/compose.memory.yml \
+#     --profile diagnostic run --rm diagnostic
+#
+# or simply `make diagnostic-memory`.
+services:
+  backend:
+    environment:
+      # Memory mode: process-local job store (U30a store identity = instance_id).
+      JOB_BACKEND: memory

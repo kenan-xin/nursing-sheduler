@@ -39,7 +39,7 @@ import {
   type CountFormState,
 } from "./counts-model";
 import {
-  emptyContractedForm,
+  defaultContractedForm,
   toContractedForm,
   type ContractedFormState,
 } from "./contracted-model";
@@ -158,7 +158,7 @@ export function CountsEditor() {
     setDraft(
       draft?.kind === "contracted"
         ? null
-        : { kind: "contracted", mode: "add", uid: null, form: emptyContractedForm() },
+        : { kind: "contracted", mode: "add", uid: null, form: defaultContractedForm(state) },
     );
   }
 

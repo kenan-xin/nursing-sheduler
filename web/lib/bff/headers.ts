@@ -5,13 +5,11 @@ import { rewriteSetCookieSecure } from "@/lib/bff/cookies";
 // headers like `connection`/`transfer-encoding` that break the Node/Next layer).
 export const JSON_RESPONSE_HEADERS = ["content-type"] as const;
 
-// XLSX download must carry the schedule metadata end-to-end (C2 expose_headers).
-export const XLSX_RESPONSE_HEADERS = [
-  "content-type",
-  "content-disposition",
-  "x-schedule-score",
-  "x-schedule-status",
-] as const;
+// XLSX download carries only the filename now: the revised backend
+// (api/optimize.py::download_xlsx) sets `Content-Disposition` alone. Score/status
+// are read from the retained `JobResponse.result`, not from response headers
+// (tech-plan §5), so the old `x-schedule-*` headers are gone.
+export const XLSX_RESPONSE_HEADERS = ["content-type", "content-disposition"] as const;
 
 // SSE passthrough headers that must survive Next AND Cloudflare (tech-plan §3).
 export const SSE_RESPONSE_HEADERS = ["content-type", "cache-control", "x-accel-buffering"] as const;

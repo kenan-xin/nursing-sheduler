@@ -170,7 +170,8 @@ describe("coordinate-transaction reconciliation", () => {
     commitPaintGesture(scenario, hot);
 
     const cells = coordCells(spine, "p1", "d1");
-    expect(cells).toEqual([{ kind: "leave", person: "p1", date: "d1", uid: undefined }]);
+    // A brand-new cell is allocated a durable uid at creation (T17r review P1).
+    expect(cells).toEqual([{ kind: "leave", person: "p1", date: "d1", uid: expect.any(String) }]);
   });
 
   it("a request paint onto a coordinate holding a leave is skipped (precedence)", async () => {
@@ -199,7 +200,14 @@ describe("coordinate-transaction reconciliation", () => {
 
     const cells = coordCells(spine, "p1", "d1");
     expect(cells).toEqual([
-      { kind: "request", person: "p1", date: "d1", shiftType: "D", weight: 5, uid: undefined },
+      {
+        kind: "request",
+        person: "p1",
+        date: "d1",
+        shiftType: "D",
+        weight: 5,
+        uid: expect.any(String),
+      },
     ]);
   });
 

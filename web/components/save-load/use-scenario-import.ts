@@ -1,11 +1,13 @@
 "use client";
 
-// Shared inbound scenario-import pipeline (T17b-3). The single place that
-// runs `prepareScenarioLoad` (T17b-1, pure) -> block on V-issues, or gate on
-// `classifyImportVersion` -> commit via the store's `loadScenario` (paused
-// replace, fresh baseline, history cleared) -> uncredited-LEAVE fence. Both
-// inbound entry points call `handleFile` and render the same
-// `VersionConfirmModal` / `ImportWarningsBanner` from the state this hook
+// Shared inbound scenario-import pipeline (T17b-3; T17r review P0). The single
+// place that runs `prepareScenarioLoad` (T17b-1, pure) -> block on V-issues ->
+// stage a combined replacement/version confirmation whenever the current
+// workspace is non-empty OR the version is incompatible (direct commit only for a
+// genuinely empty workspace on a matching version) -> commit via the store's
+// `loadScenario` (one tracked undoable full-slice replacement, backup baseline
+// null) -> uncredited-LEAVE fence. Both inbound entry points call `handleFile`
+// and render the same confirm / `ImportWarningsBanner` from the state this hook
 // returns -- the Upload modal and the Edit-YAML Apply, both wired in
 // `save-load-workspace.tsx`.
 
@@ -18,18 +20,20 @@ import {
   type ImportNormalizationTarget,
   type ScenarioValidationIssue,
 } from "@/lib/scenario";
-import { loadScenario, useHotStore, useScenarioStore } from "@/lib/store";
+import { isScenarioSliceEmpty, loadScenario, useHotStore, useScenarioStore } from "@/lib/store";
 import {
   hasUncreditedLeave,
+  loadConfirmCopy,
   UNCREDITED_LEAVE_WARNING,
   type VersionConfirmStatus,
 } from "./load-controls-core";
 
-/** Ready-to-render props for `VersionConfirmModal` (minus `open`, which the caller controls). */
+/** Ready-to-render props for the combined load confirmation dialog. */
 export interface PendingImportConfirm {
-  status: VersionConfirmStatus;
-  fileVersion: string | undefined;
-  currentVersion: string;
+  /** Combined replacement + version dialog title. */
+  title: string;
+  /** Combined replacement + version dialog body. */
+  description: string;
   onContinue: () => void;
   onCancel: () => void;
 }
@@ -50,7 +54,10 @@ export interface UseScenarioImportResult {
 }
 
 interface StagedTarget {
-  status: VersionConfirmStatus;
+  /** The FR-SL-19 version case, or `null` when the file version matches. */
+  versionStatus: VersionConfirmStatus | null;
+  /** Whether the current (pre-load) workspace is non-empty and would be overwritten. */
+  replacement: boolean;
   fileVersion: string | undefined;
   target: ImportNormalizationTarget;
   warnings: string[];
@@ -81,12 +88,19 @@ export function useScenarioImport(options: UseScenarioImportOptions = {}): UseSc
     }
     setIssues(null);
     const status = classifyImportVersion(result.target.meta.appVersion);
-    if (status === "match") {
+    const versionStatus: VersionConfirmStatus | null = status === "match" ? null : status;
+    // Emptiness is computed against the CURRENT (pre-load) workspace at the moment
+    // of load — the state the incoming file would overwrite.
+    const replacement = !isScenarioSliceEmpty(useScenarioStore.getState());
+    // DL12: only a genuinely empty workspace on a matching version commits
+    // directly; every other load stages one combined confirmation.
+    if (versionStatus === null && !replacement) {
       commit(result.target, result.warnings);
       return;
     }
     setStaged({
-      status,
+      versionStatus,
+      replacement,
       fileVersion: result.target.meta.appVersion,
       target: result.target,
       warnings: result.warnings,
@@ -95,9 +109,12 @@ export function useScenarioImport(options: UseScenarioImportOptions = {}): UseSc
 
   const confirm: PendingImportConfirm | null = staged
     ? {
-        status: staged.status,
-        fileVersion: staged.fileVersion,
-        currentVersion: currentAppVersion(),
+        ...loadConfirmCopy(
+          staged.versionStatus,
+          staged.replacement,
+          staged.fileVersion,
+          currentAppVersion(),
+        ),
         onContinue: () => commit(staged.target, staged.warnings),
         onCancel: () => setStaged(null),
       }

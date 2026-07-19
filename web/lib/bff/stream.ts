@@ -1,5 +1,36 @@
 import { copyAllowedHeaders, SSE_RESPONSE_HEADERS } from "@/lib/bff/headers";
+import { LAST_EVENT_ID_HEADER } from "@/lib/bff/types";
 import { backendUnreachable, buildUpstreamHeaders, upstreamUrl } from "@/lib/bff/upstream";
+
+// Whitelist the reconnect cursor. The client resumes by sending its last applied
+// opaque cursor as `Last-Event-ID`; we forward ONLY that request header upstream,
+// where the backend validates it and replays after it (tech-plan §5). The cursor is
+// opaque and job-bound, not a credential.
+function reconnectHeader(request: Request): Record<string, string> {
+  const cursor = request.headers.get(LAST_EVENT_ID_HEADER);
+  return cursor !== null ? { [LAST_EVENT_ID_HEADER]: cursor } : {};
+}
+
+// Relay a non-2xx SSE upstream response (an expired-job 404, a structured 4xx/5xx
+// error) as a JSON body verbatim. `fetch()` resolving only means headers arrived
+// — the error body stream itself can still reset or truncate mid-read (a
+// declared Content-Length never satisfied, a connection drop). `arrayBuffer()`
+// rejects in that case; without this boundary it escapes as an uncaught
+// rejection (a framework 500) instead of the code-first `backend_unreachable`
+// envelope every other upstream failure maps to (same shape as the JSON relay
+// boundary in `upstream.ts`). `path` is only ever used for safe server-side
+// logging — the private backend URL must never reach the browser (DL11 D1).
+export async function relayEventErrorResponse(upstream: Response, path: string): Promise<Response> {
+  const headers = copyAllowedHeaders(upstream.headers, ["content-type"]);
+  headers.set("cache-control", "no-store");
+  let body: ArrayBuffer;
+  try {
+    body = await upstream.arrayBuffer();
+  } catch (error) {
+    return backendUnreachable(error, path);
+  }
+  return new Response(body, { status: upstream.status, headers });
+}
 
 // fetch-stream SSE proxy (tech-plan §3, critique #1/#4). Native EventSource can't
 // read the HTTP status/body, so it can't tell an expired-job 404 from a
@@ -24,7 +55,10 @@ export async function proxyEventStream(request: Request, path: string): Promise<
   try {
     upstream = await fetch(upstreamUrl(path), {
       method: "GET",
-      headers: buildUpstreamHeaders(request, { accept: "text/event-stream" }),
+      headers: buildUpstreamHeaders(request, {
+        accept: "text/event-stream",
+        ...reconnectHeader(request),
+      }),
       cache: "no-store",
       redirect: "manual",
       signal: controller.signal,
@@ -37,10 +71,7 @@ export async function proxyEventStream(request: Request, path: string): Promise<
   // Inspect initial status/body before streaming.
   if (!upstream.ok || upstream.body === null) {
     request.signal.removeEventListener("abort", onDownstreamAbort);
-    const headers = copyAllowedHeaders(upstream.headers, ["content-type"]);
-    headers.set("cache-control", "no-store");
-    const body = await upstream.arrayBuffer();
-    return new Response(body, { status: upstream.status, headers });
+    return relayEventErrorResponse(upstream, path);
   }
 
   const reader = upstream.body.getReader();

@@ -5,7 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { stringify } from "yaml";
 import {
   currentAppVersion,
-  prepareExport,
+  prepareWorkspaceExport,
   prepareScenarioLoad,
   serializeScenario,
   toCanonicalScenarioDocument,
@@ -109,7 +109,7 @@ describe("SaveLoadWorkspace — composition", () => {
 });
 
 describe("SaveLoadWorkspace — Upload flow", () => {
-  it("a valid file with a matching app version loads directly: full-state replace, history cleared, clean baseline", async () => {
+  it("a valid file with a matching app version loads directly into an empty workspace: undoable full-state replace, unknown baseline", async () => {
     render(<SaveLoadWorkspace />);
 
     fireEvent.click(screen.getByTestId("scenario-upload-button"));
@@ -118,9 +118,40 @@ describe("SaveLoadWorkspace — Upload flow", () => {
 
     await waitFor(() => expect(currentState().rangeStart).toBe("2026-05-14"));
     expect(currentState().staff.map((p) => p.id)).toEqual(["Alice", "Bob"]);
-    expect(useScenarioStore.temporal.getState().pastStates.length).toBe(0);
+    // The empty workspace + matching version commits directly (no confirm), but the
+    // Load is one undoable transaction, not a history-clearing replace (T17r P0).
+    expect(useScenarioStore.temporal.getState().pastStates.length).toBeGreaterThan(0);
+    // An imported file is not a fresh local backup: baseline stays unknown (null).
     expect(selectIsDirty(currentState())).toBe(false);
+    expect(currentState().baselineFingerprint).toBeNull();
     expect(screen.queryByTestId("confirm-dialog-confirm")).not.toBeInTheDocument();
+  });
+
+  it("a matching-version load into a NON-EMPTY workspace stages the replacement confirmation (P0)", async () => {
+    render(<SaveLoadWorkspace />);
+
+    // First load fills the (empty) workspace, committing directly.
+    fireEvent.click(screen.getByTestId("scenario-upload-button"));
+    await screen.findByTestId("upload-modal");
+    uploadTextFile(validYaml());
+    await waitFor(() => expect(currentState().rangeStart).toBe("2026-05-14"));
+
+    // A second load — same matching version — must now confirm replacement rather
+    // than commit directly, because the current workspace is non-empty (DL12 P0-1).
+    fireEvent.click(screen.getByTestId("scenario-upload-button"));
+    await screen.findByTestId("upload-modal");
+    uploadTextFile(validYaml());
+
+    await screen.findByTestId("confirm-dialog-confirm");
+    expect(screen.getByText(/replace your current workspace/i)).toBeInTheDocument();
+
+    // Continue commits the replacement (still one tracked, undoable transaction).
+    fireEvent.click(screen.getByTestId("confirm-dialog-confirm"));
+    await waitFor(() =>
+      expect(screen.queryByTestId("confirm-dialog-confirm")).not.toBeInTheDocument(),
+    );
+    expect(currentState().staff.map((p) => p.id)).toEqual(["Alice", "Bob"]);
+    expect(useScenarioStore.temporal.getState().pastStates.length).toBeGreaterThan(0);
   });
 
   it("invalid YAML blocks the load: V-issues shown in the Scenario file card, loadScenario not called, store untouched", async () => {
@@ -177,7 +208,9 @@ describe("SaveLoadWorkspace — Upload flow", () => {
     fireEvent.click(screen.getByTestId("confirm-dialog-confirm"));
 
     await waitFor(() => expect(currentState().rangeStart).toBe("2026-05-14"));
-    expect(useScenarioStore.temporal.getState().pastStates.length).toBe(0);
+    // Confirmed Load is one tracked, undoable full-slice transaction — it no
+    // longer clears the temporal stack (T17r P0).
+    expect(useScenarioStore.temporal.getState().pastStates.length).toBeGreaterThan(0);
   });
 
   it("a missing app version also gates on the confirm modal", async () => {
@@ -234,12 +267,12 @@ describe("SaveLoadWorkspace — Edit YAML flow", () => {
   });
 
   function currentYaml(): string {
-    const result = prepareExport(pickScenario(currentState()));
+    const result = prepareWorkspaceExport(pickScenario(currentState()));
     if (!result.ok) throw new Error("expected a valid draft");
     return result.yaml;
   }
 
-  it("Edit seeds a textarea with the current prepareExport YAML", () => {
+  it("Edit seeds a textarea with the current Workspace YAML", () => {
     render(<SaveLoadWorkspace />);
     const yaml = currentYaml();
 
@@ -250,16 +283,23 @@ describe("SaveLoadWorkspace — Edit YAML flow", () => {
     expect(screen.queryByTestId("scenario-yaml-content")).not.toBeInTheDocument();
   });
 
-  it("Apply on a valid edit replaces state through the same load pipeline as Upload", async () => {
+  it("Apply on a valid edit replaces state through the same staged load pipeline as Upload", async () => {
     render(<SaveLoadWorkspace />);
 
     fireEvent.click(screen.getByTestId("scenario-edit-yaml-button"));
     editYaml(serializeScenario(makeValidUiState()));
     fireEvent.click(screen.getByTestId("yaml-apply-button"));
 
+    // Apply into the seeded (non-empty) workspace stages the same combined
+    // replacement confirmation as Upload rather than committing directly (T17r P0).
+    fireEvent.click(await screen.findByTestId("confirm-dialog-confirm"));
+
     await waitFor(() => expect(currentState().rangeStart).toBe("2026-05-14"));
     expect(currentState().staff.map((p) => p.id)).toEqual(["Alice", "Bob"]);
-    expect(useScenarioStore.temporal.getState().pastStates.length).toBe(0);
+    // Confirmed Load is one tracked, undoable transaction, not a history-clearing
+    // replace, and an applied edit is not a fresh local backup (T17r P0).
+    expect(useScenarioStore.temporal.getState().pastStates.length).toBeGreaterThan(0);
+    expect(currentState().baselineFingerprint).toBeNull();
 
     // Editing mode closes back to the read-only preview once the replace commits.
     await waitFor(() =>

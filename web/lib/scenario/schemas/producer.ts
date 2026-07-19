@@ -530,3 +530,23 @@ function validateShiftRequestReservedExpansion(
 function quote(value: unknown): string {
   return typeof value === "string" ? `'${value}'` : String(value);
 }
+
+// Exact structural sub-schemas reused by the flat Workspace V1 layer (T17r), so
+// the Workspace schema validates entities/containers/export/preference bodies with
+// the same strict (`extra="forbid"`-equivalent) rules as the strict producer —
+// rather than re-declaring them and risking cross-language drift. The Workspace
+// layer composes these (adding `workspaceId`/`enabled` and an optional weight) and
+// owns the cross-field readiness rules itself.
+export {
+  zPeopleContainer as producerPeopleContainer,
+  zShiftTypesContainer as producerShiftTypesContainer,
+  zDateGroup as producerDateGroup,
+  zExportConfig as producerExportConfig,
+  zMaxOneShiftPerDay as producerMaxOneShiftPerDay,
+  zShiftRequest as producerShiftRequest,
+  zSuccessions as producerSuccessions,
+  zRequirement as producerRequirement,
+  zShiftCount as producerShiftCount,
+  zAffinity as producerAffinity,
+  zCovering as producerCovering,
+};

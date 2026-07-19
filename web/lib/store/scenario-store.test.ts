@@ -58,6 +58,28 @@ describe("durable scenario store — undo/redo", () => {
     expect(scenario.getState().guidedRulePins).toEqual([pin]);
   });
 
+  it("backup freshness reacts to a Guided-pin-only change (normalized Workspace fingerprint)", () => {
+    // T17r review P1 #139: the fingerprint hashes the Workspace projection, which
+    // preserves Guided metadata — so a pin-only edit makes the backup stale, unlike
+    // the old strict-projection hash that stripped it.
+    const { scenario } = spine;
+    scenario.getState().markSaved();
+    expect(selectIsDirty(scenario.getState())).toBe(false);
+
+    scenario.getState().mutateScenario({
+      guidedRulePins: [
+        {
+          id: "p",
+          constraintKind: "counts" as const,
+          constraintId: "c1",
+          category: "Hours",
+          quickFields: [],
+        },
+      ],
+    });
+    expect(selectIsDirty(scenario.getState())).toBe(true);
+  });
+
   it("records only the scenario slice — never baseline or action functions", () => {
     const { scenario } = spine;
     scenario.getState().mutateScenario({ rangeStart: "2026-02-01" });

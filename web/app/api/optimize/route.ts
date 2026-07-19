@@ -1,3 +1,4 @@
+import { withReadinessGate } from "@/lib/bff/readiness";
 import {
   backendUnreachable,
   buildUpstreamHeaders,
@@ -6,17 +7,19 @@ import {
   upstreamUrl,
 } from "@/lib/bff/upstream";
 
-// POST /api/optimize — multipart submit (serve.py::create_optimize_job, 202).
+// POST /api/optimize — multipart submit (api/optimize.py::create_job, 202).
 // The body is piped through UNPARSED: Node/undici need `duplex: "half"` for a
 // ReadableStream body, and the EXACT inbound `Content-Type` (incl. the multipart
 // boundary) must be forwarded or the multipart parser never sees the parts. The
 // backend enforces the 2 MiB limit (exact 413 "Scheduling YAML is too large");
 // the client's 2 MiB check is UX only. This is also where the backend mints the
-// `nurse_scheduling_client_uuid` cookie, so `Set-Cookie` is rewritten (Secure).
+// `nurse_scheduling_client_id` cookie, so `Set-Cookie` is rewritten (Secure).
+// The readiness gate runs first, so an unready backend fails closed BEFORE the
+// upload stream is read.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function POST(request: Request): Promise<Response> {
+export const POST = withReadinessGate(async (request: Request): Promise<Response> => {
   const contentType = request.headers.get("content-type");
   if (contentType === null) {
     return Response.json(
@@ -41,5 +44,5 @@ export async function POST(request: Request): Promise<Response> {
     return backendUnreachable(error, "/optimize");
   }
 
-  return relayJsonResponse(upstream);
-}
+  return relayJsonResponse(upstream, "/optimize");
+});

@@ -537,13 +537,22 @@ export interface CardsByKind {
   coverings: CoveringCard[];
 }
 
-/** The keyless card bodies the import path produces (no store identity yet). */
+/**
+ * An import-path card body that MAY already carry durable identity. The legacy
+ * import path produces bodies with neither field set (the store assigns a fresh
+ * `uid` on hydration). The Workspace V1 load path preserves the file's authoring
+ * state, so it fills `uid` (from the record's `workspaceId`) and `disabled` (from
+ * `enabled: false`) — hydration then keeps them instead of minting new identity.
+ */
+export type ImportCard<Body> = Body & { uid?: string; disabled?: boolean };
+
+/** The card bodies the import path produces, optionally carrying restored identity. */
 export interface ImportCardsByKind {
-  requirements: RequirementCardBody[];
-  successions: SuccessionCardBody[];
-  counts: CountCardBody[];
-  affinities: AffinityCardBody[];
-  coverings: CoveringCardBody[];
+  requirements: ImportCard<RequirementCardBody>[];
+  successions: ImportCard<SuccessionCardBody>[];
+  counts: ImportCard<CountCardBody>[];
+  affinities: ImportCard<AffinityCardBody>[];
+  coverings: ImportCard<CoveringCardBody>[];
 }
 
 // A person×date matrix cell — a discriminated union with a single source of
@@ -661,4 +670,11 @@ export interface ScenarioUiState extends ScenarioStateShared {
  */
 export interface ImportNormalizationTarget extends ScenarioStateShared {
   cardsByKind: ImportCardsByKind;
+  /**
+   * Guided rule pins restored from a Workspace V1 file's `guidedRules`. The legacy
+   * import path emits `[]` (backend YAML has no Guided metadata); the Workspace
+   * path reconstructs the full durable pins so Load restores the Guided lens
+   * instead of clearing it.
+   */
+  guidedRulePins: GuidedRulePin[];
 }

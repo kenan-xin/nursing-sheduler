@@ -46,6 +46,7 @@ export {
 
 export {
   computeScenarioFingerprint,
+  isScenarioSliceEmpty,
   pickScenario,
   scenarioShallowEqual,
   SCENARIO_KEYS,

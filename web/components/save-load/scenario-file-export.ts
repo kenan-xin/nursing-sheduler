@@ -10,7 +10,11 @@
 // `PerformCopyDeps` has no such field, so Copy structurally cannot clear the
 // dirty baseline — there is no wiring mistake to make.
 
-import { prepareExport, type PrepareExportResult, type ScenarioUiState } from "@/lib/scenario";
+import {
+  prepareWorkspaceExport,
+  type PrepareExportResult,
+  type ScenarioUiState,
+} from "@/lib/scenario";
 
 /** The filename stamped on every plain (non-anonymised) scenario download. */
 export const SCENARIO_DOWNLOAD_FILENAME = "scenario.yaml";
@@ -35,7 +39,7 @@ export function performDownload(
   state: ScenarioUiState,
   deps: PerformDownloadDeps,
 ): PrepareExportResult {
-  const result = prepareExport(state);
+  const result = prepareWorkspaceExport(state);
   if (!result.ok) return result;
   deps.writeFile(result.yaml, SCENARIO_DOWNLOAD_FILENAME);
   deps.markSaved();
@@ -49,7 +53,7 @@ export function performDownload(
  * Save/Load baseline, not against clipboard writes).
  */
 export function performCopy(state: ScenarioUiState, deps: PerformCopyDeps): PrepareExportResult {
-  const result = prepareExport(state);
+  const result = prepareWorkspaceExport(state);
   if (!result.ok) return result;
   deps.writeClipboard(result.yaml);
   return result;

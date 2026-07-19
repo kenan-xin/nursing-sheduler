@@ -1,23 +1,32 @@
-// Durable-store lifecycle controller (T04, tech-plan §4). Owns every transition
-// that must keep rehydration/replacement OUT of undo history, via one shared
-// paused-replace protocol:
+// Durable-store lifecycle controller (T04, tech-plan §4; T17r review P0). Two
+// distinct replacement disciplines, by whether the transition is a user-visible
+// edit:
 //
-//   pause zundo → rehydrate/migrate or replace state → clear temporal history →
-//   restore/compute the baseline fingerprint → resume.
+//   • Initialization (hydration / New / user-reset) is NOT an authoring action,
+//     so it must stay OUT of undo history. It uses the paused-replace protocol:
+//       pause zundo → rehydrate/migrate or replace state → clear temporal history
+//       → resume. It never invents a backup baseline (only a real plain Download
+//       does that — DL12/T17r review P0); the baseline stays whatever was
+//       persisted, or `null` (unknown) for a fresh store.
 //
-// The whole protocol is wrapped so zundo always resumes and the status always
+//   • A confirmed Load IS a durable authoring action (DL12): it is one TRACKED
+//     full-slice transaction, so Undo restores the complete prior workspace, Redo
+//     restores the imported one, and older history is preserved. It resets the hot
+//     store after the commit and sets the backup baseline to `null` (unknown) —
+//     the imported file is not a fresh local backup.
+//
+// The paused protocol is wrapped so zundo always resumes and the status always
 // settles (`ready` | `recoverable-error`) even if any step throws — a malformed
 // restored payload can make fingerprinting throw, and that must not strand the
-// store `hydrating` with tracking paused. Hydration is client-only (IndexedDB);
-// Load / New / user-reset replace state and clear history the same way, and also
-// reset the hot store so scenario A's transient state can't leak into B.
+// store `hydrating` with tracking paused. Hydration is client-only (IndexedDB).
 
 import {
   createEmptyScenarioUiState,
   type ImportNormalizationTarget,
   type ScenarioUiState,
+  type UiRequestCell,
 } from "@/lib/scenario";
-import { computeScenarioFingerprint, pickScenario } from "./fingerprint";
+import { pickScenario } from "./fingerprint";
 import type { HotStore } from "./hot-store";
 import { SCENARIO_PERSIST_KEY } from "./persistence";
 import {
@@ -55,27 +64,39 @@ function withPausedReplace(scenario: ScenarioStore, apply: () => void): void {
   }
 }
 
-/** Assign store identity (a `uid`) to a keyless imported card body. */
-function assignUid<T extends object>(body: T): T & { uid: string } {
-  return { ...body, uid: crypto.randomUUID() };
+/**
+ * Give an imported card body durable store identity. A legacy import body has no
+ * `uid`, so a fresh one is minted; a Workspace V1 body already carries its restored
+ * `uid` (and `disabled` flag), which is preserved so Guided pins that reference it
+ * still resolve.
+ */
+function hydrateCard<T extends { uid?: string }>(body: T): T & { uid: string } {
+  return { ...body, uid: body.uid ?? crypto.randomUUID() };
+}
+
+/** Ensure a matrix cell carries a durable `uid` (a legacy import cell has none). */
+function ensureCellUid(cell: UiRequestCell): UiRequestCell {
+  return cell.uid ? cell : { ...cell, uid: crypto.randomUUID() };
 }
 
 /**
- * Hydrate a keyless import target (T05 output) into durable UI state by assigning
- * card identity. Entity/request/export `uid`s are already optional, so only cards
- * need hydrating. `guidedRulePins` has no import-boundary counterpart yet (T17
- * owns the Workspace `guidedRules` contract), so every Load starts pin-free.
+ * Hydrate an import target into durable UI state. Card and matrix-cell identity is
+ * assigned where missing and preserved where restored; Workspace `guidedRulePins`
+ * are carried through verbatim (a legacy import supplies `[]`). Every durable
+ * card/cell ends up with a stable `uid`, so Workspace serialization never has to
+ * fall back to a positional id.
  */
 function hydrateImportTarget(target: ImportNormalizationTarget): ScenarioUiState {
   return {
     ...target,
-    guidedRulePins: [],
+    guidedRulePins: target.guidedRulePins,
+    reqData: target.reqData.map(ensureCellUid),
     cardsByKind: {
-      requirements: target.cardsByKind.requirements.map(assignUid),
-      successions: target.cardsByKind.successions.map(assignUid),
-      counts: target.cardsByKind.counts.map(assignUid),
-      affinities: target.cardsByKind.affinities.map(assignUid),
-      coverings: target.cardsByKind.coverings.map(assignUid),
+      requirements: target.cardsByKind.requirements.map(hydrateCard),
+      successions: target.cardsByKind.successions.map(hydrateCard),
+      counts: target.cardsByKind.counts.map(hydrateCard),
+      affinities: target.cardsByKind.affinities.map(hydrateCard),
+      coverings: target.cardsByKind.coverings.map(hydrateCard),
     },
   };
 }
@@ -100,13 +121,9 @@ export async function hydrateScenarioStore(scenario: ScenarioStore, hot: HotStor
     if (error !== null) throw error;
 
     scenario.temporal.getState().clear();
-    const state = scenario.getState();
-    if (state.baselineFingerprint === null) {
-      scenario.setState(
-        { baselineFingerprint: computeScenarioFingerprint(pickScenario(state)) },
-        false,
-      );
-    }
+    // Hydration does NOT invent a backup baseline: a persisted baseline survives
+    // the rehydrate, and a fresh store keeps `null` (unknown). Only a real plain
+    // Download marks a backup fresh (DL12/T17r review P0).
     hot.getState().setHydrationStatus("ready");
   } catch {
     hot.getState().setHydrationStatus("recoverable-error");
@@ -116,9 +133,14 @@ export async function hydrateScenarioStore(scenario: ScenarioStore, hot: HotStor
 }
 
 /**
- * Load a scenario from a keyless import target: assign card identity, replace
- * durable state, clear history, set the fresh baseline (loaded state is clean),
- * and reset the hot store. Same paused-replace protocol as hydration.
+ * Load a scenario from a keyless import target as ONE tracked full-slice
+ * transaction (DL12/T17r review P0): assign card/cell identity, then replace the
+ * durable scenario slice through the privileged `setState` WITHOUT pausing zundo,
+ * so the replacement lands as a single undo entry — Undo restores the complete
+ * prior workspace, Redo restores this import, and older history is preserved. The
+ * backup baseline is set to `null` (unknown): an imported file is not a fresh
+ * local backup. The hot store is reset AFTER the durable commit so scenario A's
+ * transient state cannot leak into B.
  */
 export function loadScenario(
   scenario: ScenarioStore,
@@ -126,20 +148,22 @@ export function loadScenario(
   target: ImportNormalizationTarget,
 ): void {
   const hydrated = hydrateImportTarget(target);
-  const baseline = computeScenarioFingerprint(hydrated);
-  withPausedReplace(scenario, () => replaceScenarioState(scenario, hydrated, baseline));
+  // Tracked (un-paused) full-slice set → exactly one zundo entry. Baseline is not
+  // part of the temporal slice, so Undo/Redo never touch it.
+  scenario.setState({ ...pickScenario(hydrated), baselineFingerprint: null }, false);
   hot.getState().resetEphemeral();
   hot.getState().setHydrationStatus("ready");
 }
 
 /**
- * New scenario: reset every scenario slice to empty, clear history, set the empty
- * baseline (a fresh scenario is clean), and reset the hot store. Same protocol.
+ * New scenario: reset every scenario slice to empty, clear history, and reset the
+ * hot store. Uses the paused-replace protocol (initialization, not an authoring
+ * edit) and does NOT invent a backup baseline — the empty workspace has no fresh
+ * local backup, so the baseline is `null` (unknown) (DL12/T17r review P0).
  */
 export function newScenario(scenario: ScenarioStore, hot: HotStore, apiVersion?: string): void {
   const empty = createEmptyScenarioUiState(apiVersion);
-  const baseline = computeScenarioFingerprint(empty);
-  withPausedReplace(scenario, () => replaceScenarioState(scenario, empty, baseline));
+  withPausedReplace(scenario, () => replaceScenarioState(scenario, empty, null));
   hot.getState().resetEphemeral();
   hot.getState().setHydrationStatus("ready");
 }

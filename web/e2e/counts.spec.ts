@@ -466,11 +466,16 @@ test.describe.serial("T12 M2a-2 contracted-hours guided editing", () => {
     await expect(page.getByTestId("card-editor-form")).toBeVisible();
     await expect(page.getByTestId("contracted-policy-exact")).toBeVisible();
 
+    // The guided default (qq0.23c) already snapshots every string-ID worked shift
+    // (D and N) plus LEAVE; this test isolates the single-shift D scenario, so
+    // remove N and LEAVE rather than weakening the default.
+    await page.getByRole("button", { name: "Remove N from count shift types" }).click();
+    await page.getByRole("button", { name: /Remove LEAVE.*from count shift types/ }).click();
+
     await page.getByTestId("contracted-desc").fill("Full-time contract");
     await page.getByTestId("contracted-target-exact").fill("160h");
     await page.getByRole("button", { name: "Add Aisha to people" }).click();
-    await page.getByRole("button", { name: "Add D to count shift types" }).click();
-    // Coverage is a hard commit gate (M2a-3): the selected D needs a coefficient.
+    // D is already selected by the guided default; only its coefficient is manual.
     await page.getByTestId("contracted-coefficient-fields-input-D").fill("16");
     await page
       .getByTestId("date-scope-field")
@@ -504,12 +509,14 @@ test.describe.serial("T12 M2a-2 contracted-hours guided editing", () => {
     await seed(page, BASE_SEED);
 
     await page.getByTestId("add-contracted-toggle").click();
+    // Isolate the single-shift D scenario from the guided default's D+N+LEAVE snapshot.
+    await page.getByRole("button", { name: "Remove N from count shift types" }).click();
+    await page.getByRole("button", { name: /Remove LEAVE.*from count shift types/ }).click();
     await page.getByTestId("contracted-policy-range").click();
     await page.getByTestId("contracted-target-min").fill("150h");
     await page.getByTestId("contracted-target-max").fill("170h");
     await page.getByRole("button", { name: "Add Aisha to people" }).click();
-    await page.getByRole("button", { name: "Add D to count shift types" }).click();
-    // Coverage is a hard commit gate (M2a-3): the selected D needs a coefficient.
+    // D is already selected by the guided default; only its coefficient is manual.
     await page.getByTestId("contracted-coefficient-fields-input-D").fill("16");
     await page
       .getByTestId("date-scope-field")
@@ -591,9 +598,9 @@ test.describe.serial("T12 M2a-3 contracted coverage-gated commit", () => {
     await page.getByTestId("contracted-desc").fill("Full-time contract");
     await page.getByTestId("contracted-target-exact").fill("160h");
     await page.getByRole("button", { name: "Add Aisha to people" }).click();
-    // Select TWO worked shift types so the coverage bijection needs both.
-    await page.getByRole("button", { name: "Add D to count shift types" }).click();
-    await page.getByRole("button", { name: "Add N to count shift types" }).click();
+    // D and N are already selected by the guided default; remove the unrelated
+    // default LEAVE row to isolate this test's deliberate two-worked-shift case.
+    await page.getByRole("button", { name: /Remove LEAVE.*from count shift types/ }).click();
     await page
       .getByTestId("date-scope-field")
       .getByRole("button", { name: /all dates/i })
@@ -926,6 +933,13 @@ test.describe.serial("T12 M2a-5 Refresh from Shift Types", () => {
     await page.getByTestId("contracted-desc").fill("Full-time contract");
     await page.getByTestId("contracted-target-exact").fill("160h");
     await page.getByRole("button", { name: "Add Aisha to people" }).click();
+    // The guided default already snapshots D/W plus LEAVE, with D's coefficient
+    // pre-derived (16). Reset D and W to fresh blank rows (re-adding after removal
+    // always yields blank, FR-PR-73) to isolate the "no auto Refresh" assertion
+    // below, and drop the unrelated default LEAVE row for this two-shift scenario.
+    await page.getByRole("button", { name: "Remove D from count shift types" }).click();
+    await page.getByRole("button", { name: "Remove W from count shift types" }).click();
+    await page.getByRole("button", { name: /Remove LEAVE.*from count shift types/ }).click();
     await page.getByRole("button", { name: "Add D to count shift types" }).click();
     await page.getByRole("button", { name: "Add W to count shift types" }).click();
     await page
@@ -984,7 +998,7 @@ test.describe.serial("T12 M2a-5 Refresh from Shift Types", () => {
 
     await page.getByTestId("add-contracted-toggle").click();
     await page.getByRole("button", { name: "Add Aisha to people" }).click();
-    await page.getByRole("button", { name: "Add D to count shift types" }).click();
+    // D is already selected by the guided default (pre-derived to 16).
 
     // A manual coefficient the derivation would replace (D derives to 16).
     await page.getByTestId("contracted-coefficient-fields-input-D").fill("10");

@@ -5,9 +5,11 @@ import {
   type ScenarioUiState,
 } from "@/lib/scenario";
 import {
+  addLeaveCreditToContractDraft,
   buildContractedCard,
   buildContractedCoefficientDomain,
   contractedCoefficientIds,
+  defaultContractedForm,
   emptyContractedForm,
   hasContractedErrors,
   toContractedForm,
@@ -127,6 +129,196 @@ describe("emptyContractedForm", () => {
       targetRangeMin: "",
       targetRangeMax: "",
     });
+  });
+});
+
+describe("defaultContractedForm — safe guided-creation default (qq0.23c)", () => {
+  it("snapshots every string-ID worked shift in item order, then direct LEAVE", () => {
+    const state = scenario({
+      shifts: [
+        { id: "N", durationMinutes: 480 },
+        { id: "D", durationMinutes: 480 },
+      ],
+    });
+    expect(defaultContractedForm(state).countShiftTypes).toEqual(["N", "D", "LEAVE"]);
+  });
+
+  it("derives worked-shift coefficients via durationMinutes/30 and LEAVE=16", () => {
+    const state = scenario({ shifts: [{ id: "D", durationMinutes: 480 }] });
+    expect(defaultContractedForm(state).countShiftTypeCoefficients).toEqual([
+      ["D", 16],
+      ["LEAVE", LEAVE_CREDIT_HALF_HOURS],
+    ]);
+  });
+
+  it("excludes numeric-ID items, never stringifying them, but includes string siblings", () => {
+    const state = scenario({
+      shifts: [
+        { id: 1, durationMinutes: 480 },
+        { id: "D", durationMinutes: 480 },
+      ],
+    });
+    const draft = defaultContractedForm(state);
+    expect(draft.countShiftTypes).toEqual(["D", "LEAVE"]);
+    expect(draft.countShiftTypes).not.toContain(1);
+    expect(draft.countShiftTypes).not.toContain("1");
+  });
+
+  it("excludes groups, ALL, and OFF from the initial selector list", () => {
+    const state = scenario({
+      shifts: [{ id: "D", durationMinutes: 480 }],
+      shiftGroups: [{ id: "Both", members: ["D"] }],
+    });
+    const draft = defaultContractedForm(state);
+    expect(draft.countShiftTypes).toEqual(["D", "LEAVE"]);
+  });
+
+  it("yields direct LEAVE only when there are no string-ID worked shifts", () => {
+    const state = scenario({ shifts: [{ id: 1, durationMinutes: 480 }] });
+    const draft = defaultContractedForm(state);
+    expect(draft.countShiftTypes).toEqual(["LEAVE"]);
+    expect(draft.countShiftTypeCoefficients).toEqual([["LEAVE", LEAVE_CREDIT_HALF_HOURS]]);
+  });
+
+  it("yields direct LEAVE only when there are no worked shifts at all", () => {
+    const draft = defaultContractedForm(scenario());
+    expect(draft.countShiftTypes).toEqual(["LEAVE"]);
+  });
+
+  it("leaves missing or off-grid working time as a blank, non-derivable row", () => {
+    const state = scenario({
+      shifts: [{ id: "D", durationMinutes: 480 }, { id: "F", durationMinutes: 445 }, { id: "G" }],
+    });
+    const draft = defaultContractedForm(state);
+    expect(draft.countShiftTypeCoefficients).toEqual([
+      ["D", 16],
+      ["F", ""],
+      ["G", ""],
+      ["LEAVE", LEAVE_CREDIT_HALF_HOURS],
+    ]);
+  });
+
+  it("does not mutate the source scenario state", () => {
+    const shifts = [{ id: "D", durationMinutes: 480 }];
+    const state = scenario({ shifts });
+    const snapshot = JSON.parse(JSON.stringify(state));
+    defaultContractedForm(state);
+    expect(state).toEqual(snapshot);
+    expect(state.shifts).toBe(shifts);
+  });
+});
+
+describe("addLeaveCreditToContractDraft — pure draft repair (qq0.23c/d)", () => {
+  it("appends direct LEAVE and a single [LEAVE, 16] coefficient row", () => {
+    const next = addLeaveCreditToContractDraft(
+      form({ countShiftTypes: ["D"], countShiftTypeCoefficients: [["D", 16]] }),
+      BASE,
+    );
+    expect(next.countShiftTypes).toEqual(["D", "LEAVE"]);
+    expect(next.countShiftTypeCoefficients).toEqual([
+      ["D", 16],
+      ["LEAVE", LEAVE_CREDIT_HALF_HOURS],
+    ]);
+  });
+
+  it("does not duplicate a direct LEAVE selector already present", () => {
+    const next = addLeaveCreditToContractDraft(
+      form({ countShiftTypes: ["D", "LEAVE"], countShiftTypeCoefficients: [["D", 16]] }),
+      BASE,
+    );
+    expect(next.countShiftTypes).toEqual(["D", "LEAVE"]);
+  });
+
+  it("does not add a direct LEAVE selector when a selected group already contains it", () => {
+    const grouped = scenario({
+      shifts: [{ id: "D" }],
+      shiftGroups: [{ id: "Both", members: ["D", "LEAVE"] }],
+    });
+    const next = addLeaveCreditToContractDraft(form({ countShiftTypes: ["Both"] }), grouped);
+    expect(next.countShiftTypes).toEqual(["Both"]);
+  });
+
+  it("still sets a single [LEAVE, 16] coefficient row when LEAVE is group-contained", () => {
+    const grouped = scenario({
+      shifts: [{ id: "D" }],
+      shiftGroups: [{ id: "Both", members: ["D", "LEAVE"] }],
+    });
+    const next = addLeaveCreditToContractDraft(form({ countShiftTypes: ["Both"] }), grouped);
+    expect(next.countShiftTypeCoefficients).toEqual([["LEAVE", LEAVE_CREDIT_HALF_HOURS]]);
+  });
+
+  it("never rewrites the shared shift group's own membership", () => {
+    const grouped = scenario({
+      shifts: [{ id: "D" }],
+      shiftGroups: [{ id: "Both", members: ["D", "LEAVE"] }],
+    });
+    addLeaveCreditToContractDraft(form({ countShiftTypes: ["Both"] }), grouped);
+    expect(grouped.shiftGroups[0]).toEqual({ id: "Both", members: ["D", "LEAVE"] });
+  });
+
+  it("collapses stray/duplicate LEAVE coefficient rows to exactly one final row", () => {
+    const next = addLeaveCreditToContractDraft(
+      form({
+        countShiftTypes: ["D", "LEAVE"],
+        countShiftTypeCoefficients: [
+          ["LEAVE", 4],
+          ["D", 16],
+          ["LEAVE", 8],
+        ],
+      }),
+      BASE,
+    );
+    expect(next.countShiftTypeCoefficients).toEqual([
+      ["D", 16],
+      ["LEAVE", LEAVE_CREDIT_HALF_HOURS],
+    ]);
+  });
+
+  it("preserves non-LEAVE row order and every unrelated field", () => {
+    const draft = form({
+      description: "Monthly contract",
+      person: ["Anna"],
+      countDates: ["ALL"],
+      countShiftTypes: ["N", "D"],
+      countShiftTypeCoefficients: [
+        ["N", 15],
+        ["D", 16],
+      ],
+      policy: "range",
+      targetRangeMin: "150h",
+      targetRangeMax: "170h",
+    });
+    const next = addLeaveCreditToContractDraft(draft, BASE);
+    expect(next.countShiftTypeCoefficients).toEqual([
+      ["N", 15],
+      ["D", 16],
+      ["LEAVE", LEAVE_CREDIT_HALF_HOURS],
+    ]);
+    expect(next.description).toBe("Monthly contract");
+    expect(next.person).toEqual(["Anna"]);
+    expect(next.countDates).toEqual(["ALL"]);
+    expect(next.policy).toBe("range");
+    expect(next.targetRangeMin).toBe("150h");
+    expect(next.targetRangeMax).toBe("170h");
+  });
+
+  it("normalizes a scalar selector to an array before appending LEAVE", () => {
+    const scalarDraft = {
+      ...form(),
+      countShiftTypes: "D" as unknown as ContractedFormState["countShiftTypes"],
+    };
+    const next = addLeaveCreditToContractDraft(scalarDraft, BASE);
+    expect(next.countShiftTypes).toEqual(["D", "LEAVE"]);
+  });
+
+  it("returns a new draft without mutating the input form or scenario state", () => {
+    const draft = form({ countShiftTypes: ["D"], countShiftTypeCoefficients: [["D", 16]] });
+    const draftSnapshot = JSON.parse(JSON.stringify(draft));
+    const stateSnapshot = JSON.parse(JSON.stringify(BASE));
+    const next = addLeaveCreditToContractDraft(draft, BASE);
+    expect(draft).toEqual(draftSnapshot);
+    expect(BASE).toEqual(stateSnapshot);
+    expect(next).not.toBe(draft);
   });
 });
 

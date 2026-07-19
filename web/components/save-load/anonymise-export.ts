@@ -10,7 +10,7 @@
 // of the working scenario (mirrors why Copy doesn't clear dirty either).
 
 import {
-  prepareAnonymizedExport,
+  prepareAnonymizedWorkspaceExport,
   type PrepareAnonymizedExportOptions,
   type PrepareExportResult,
   type ScenarioUiState,
@@ -71,7 +71,7 @@ export function performAnonymisedDownload(
   toggles: AnonymiseToggleState,
   deps: PerformAnonymisedDownloadDeps,
 ): PrepareExportResult {
-  const result = prepareAnonymizedExport(state, {
+  const result = prepareAnonymizedWorkspaceExport(state, {
     people: toggles.people,
     groups: toggles.groups,
     scatter: toggles.scatter,

@@ -14,7 +14,7 @@
 import { useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { pickScenario, useScenarioStore } from "@/lib/store";
-import { prepareExport } from "@/lib/scenario";
+import { prepareWorkspaceExport } from "@/lib/scenario";
 import { StartOverCard } from "@/components/shell/new-schedule-button";
 import { useLosableDraft } from "@/components/shell/use-losable-draft";
 import { AnonymiseCard } from "./anonymise-card";
@@ -31,7 +31,9 @@ export function SaveLoadWorkspace() {
   // fields rather than reference identity, avoiding the classic zustand v5
   // "getSnapshot should be cached" infinite-render loop.
   const scenario = useScenarioStore(useShallow(pickScenario));
-  const exportResult = useMemo(() => prepareExport(scenario), [scenario]);
+  // The Save/Load screen previews and edits the Workspace V1 backup (DL13 D6),
+  // which preserves incomplete authoring state — not the strict solver projection.
+  const exportResult = useMemo(() => prepareWorkspaceExport(scenario), [scenario]);
 
   const [uploadOpen, setUploadOpen] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -119,9 +121,8 @@ export function SaveLoadWorkspace() {
           onOpenChange={(open) => {
             if (!open) confirm.onCancel();
           }}
-          status={confirm.status}
-          fileVersion={confirm.fileVersion}
-          currentVersion={confirm.currentVersion}
+          title={confirm.title}
+          description={confirm.description}
           onContinue={confirm.onContinue}
         />
       ) : null}

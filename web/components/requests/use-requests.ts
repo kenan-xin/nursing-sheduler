@@ -108,6 +108,16 @@ export interface UseRequestsOptions {
   quickPaintWeightText: string;
 }
 
+/**
+ * The per-coordinate identity key of a request cell: a `request` cell is keyed by
+ * its worked selector, a day-state cell by its `kind`. Two edits that re-emit the
+ * same selector at a coordinate resolve to the same key, so identity is preserved
+ * across the edit rather than reallocated.
+ */
+function cellSelectorKey(cell: UiRequestCell): string {
+  return cell.kind === "request" ? `request:${cell.shiftType}` : cell.kind;
+}
+
 function stageCellIntent(
   hot: ReturnType<typeof useHotStore.getState>,
   person: PersonRef,
@@ -317,11 +327,22 @@ export function useRequests({
 
   function commitCellEdit(person: PersonRef, date: DateRef, result: CellEditorResult): void {
     const scenario = useScenarioStore.getState();
+    const atCoordinate = scenario.reqData.filter((c) => c.person === person && c.date === date);
     const others = scenario.reqData.filter((c) => !(c.person === person && c.date === date));
+    // Preserve durable identity per selector/day-state so an edit re-using an
+    // existing selector keeps its `uid` (Workspace identity never depends on array
+    // position); a genuinely new cell is minted a fresh `uid` at creation (T17r
+    // review P1 — every manual create path allocates identity).
+    const uidBySelector = new Map<string, string>();
+    for (const cell of atCoordinate) {
+      if (cell.uid) uidBySelector.set(cellSelectorKey(cell), cell.uid);
+    }
+    const uidFor = (selector: string): string => uidBySelector.get(selector) ?? crypto.randomUUID();
+
     let cells: UiRequestCell[] = [];
-    if (result.kind === "leave") cells = [{ kind: "leave", person, date }];
+    if (result.kind === "leave") cells = [{ kind: "leave", person, date, uid: uidFor("leave") }];
     else if (result.kind === "off")
-      cells = [{ kind: "off", person, date, weight: result.weight ?? 0 }];
+      cells = [{ kind: "off", person, date, weight: result.weight ?? 0, uid: uidFor("off") }];
     else if (result.kind === "requests") {
       // Empty prefs is an erase (parity note): `cells` stays `[]`.
       cells = result.prefs.map((p) => ({
@@ -330,6 +351,7 @@ export function useRequests({
         date,
         shiftType: p.shiftType,
         weight: p.weight,
+        uid: uidFor(`request:${p.shiftType}`),
       }));
     }
     scenario.setReqData([...others, ...cells]);

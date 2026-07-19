@@ -114,8 +114,17 @@ test.describe("T11 shift requests matrix", () => {
     await expect(page.getByTestId("requests-count")).toHaveText("1");
     await expect(page.getByTestId("requests-footer")).toContainText("1 requests");
 
-    const reqData = (await readReqData(page)) as { kind: string; person: string; date: string }[];
-    expect(reqData).toEqual([{ kind: "leave", person: "Aisha", date: "01" }]);
+    const reqData = (await readReqData(page)) as {
+      uid?: string;
+      kind: string;
+      person: string;
+      date: string;
+    }[];
+    expect(reqData).toMatchObject([{ kind: "leave", person: "Aisha", date: "01" }]);
+    // A manually-created cell carries a durable, non-positional uid (T17r P1) so
+    // Workspace serialization never falls back to a content/index-derived id.
+    expect(typeof reqData[0].uid).toBe("string");
+    expect(reqData[0].uid).toBeTruthy();
     expect((await pastCount(page)) - before).toBe(1);
   });
 

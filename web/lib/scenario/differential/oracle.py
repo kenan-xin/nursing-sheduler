@@ -31,6 +31,11 @@ import nurse_scheduling  # noqa: E402
 from nurse_scheduling import exporter, group_map  # noqa: E402
 from nurse_scheduling.loader import load_data  # noqa: E402
 from nurse_scheduling.models import ShiftType, ShiftTypeGroup  # noqa: E402
+from nurse_scheduling.server.scheduling_errors import SchedulingContentError  # noqa: E402
+from nurse_scheduling.server.scheduling_input import (  # noqa: E402
+    MalformedInputError,
+    canonicalize_submission,
+)
 from openpyxl import load_workbook  # noqa: E402
 
 
@@ -201,12 +206,65 @@ def op_roundtrip(req):
         return {"ok": False, "error": str(e), "errorType": type(e).__name__}
 
 
+def op_workspace_canonical(req):
+    """T17r: drive the real pre-job submission boundary (`canonicalize_submission`).
+
+    Accept -> the canonical strict YAML text plus the reparsed strict model dump;
+    a scheduling-content rejection returns the normative envelope's error code and
+    issues; malformed source returns the 400 marker. This is the authoritative
+    Python half of the Workspace V1 cross-language contract.
+    """
+    try:
+        canonical = canonicalize_submission(req["yaml"].encode("utf-8"))
+        return {"ok": True, "canonical": canonical.decode("utf-8"), "model": _dump(load_data(canonical))}
+    except MalformedInputError as e:
+        return {"ok": False, "error": str(e), "errorType": "MalformedInputError"}
+    except SchedulingContentError as e:
+        return {
+            "ok": False,
+            "errorCode": e.error_code,
+            "error": e.message,
+            "issues": [issue.as_dict() for issue in e.issues],
+        }
+
+
+def op_workspace_equiv(req):
+    """T17r: prove a TypeScript-produced Workspace document projects, through the
+    real Python `canonicalize_submission`, to the same strict scheduling model as
+    the frontend's own strict producer projection.
+
+    `strict` is strict YAML loaded directly; `workspace` is Workspace V1 YAML run
+    through the pre-job boundary. Both strict models are atomized (order-independent
+    shift-request multiset) and compared. `appVersion` is provenance and is excluded
+    from the comparison, returned separately for explicit assertion.
+    """
+    try:
+        strict = _atomize(_json_safe(_dump(load_data(req["strict"].encode("utf-8")))))
+        canonical = canonicalize_submission(req["workspace"].encode("utf-8"))
+        workspace = _atomize(_json_safe(_dump(load_data(canonical))))
+        app_version = {
+            "strict": strict.pop("appVersion", None),
+            "workspace": workspace.pop("appVersion", None),
+        }
+        return {
+            "ok": True,
+            "equivalent": strict == workspace,
+            "strict": strict,
+            "workspace": workspace,
+            "appVersion": app_version,
+        }
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": str(e), "errorType": type(e).__name__}
+
+
 OPS = {
     "load": op_load,
     "schedule": op_schedule,
     "shift_map": op_shift_map,
     "export": op_export,
     "roundtrip": op_roundtrip,
+    "workspace_canonical": op_workspace_canonical,
+    "workspace_equiv": op_workspace_equiv,
 }
 
 

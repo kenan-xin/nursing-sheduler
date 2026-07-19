@@ -83,7 +83,7 @@ describe("performAnonymisedDownload", () => {
     expect(yaml).toContain("Seniors");
   });
 
-  it("on an invalid draft, surfaces issues and writes nothing", () => {
+  it("anonymises an imperfect draft — backup preserves incomplete work (DL12 §2)", () => {
     const writeFile = vi.fn();
 
     const result = performAnonymisedDownload(
@@ -94,9 +94,8 @@ describe("performAnonymisedDownload", () => {
       },
     );
 
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.issues.length).toBeGreaterThan(0);
-    expect(writeFile).not.toHaveBeenCalled();
+    expect(result.ok).toBe(true);
+    expect(writeFile).toHaveBeenCalledTimes(1);
   });
 
   it("has no markSaved dependency to call -- an anonymised download cannot clear dirty", () => {
@@ -116,5 +115,30 @@ describe("performAnonymisedDownload", () => {
 
     expect(result.ok).toBe(true);
     expect(writeFile).toHaveBeenCalledTimes(1);
+  });
+
+  // Scatter needs a concrete, valid calendar to move requests within. A null,
+  // partial, or reversed range would silently move nothing yet still report a
+  // successful scattered download, so it must be a structured blocking issue that
+  // fires BEFORE any transform and mutates nothing (T17r review P2).
+  it.each([
+    ["a null (unset) range", { rangeStart: "", rangeEnd: "" }],
+    ["a partially-specified range (start only)", { rangeStart: "2026-05-14", rangeEnd: "" }],
+    ["a partially-specified range (end only)", { rangeStart: "", rangeEnd: "2026-05-20" }],
+    ["a reversed range (end before start)", { rangeStart: "2026-05-20", rangeEnd: "2026-05-14" }],
+  ])("blocks Scatter on %s with no mutation and no download", (_label, range) => {
+    const writeFile = vi.fn();
+    const state = { ...makeValidUiState(), ...range };
+    const before = structuredClone(state);
+
+    const result = performAnonymisedDownload(state, { ...allOff, scatter: true }, { writeFile });
+
+    // A structured blocking issue on the range — never a successful download.
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.issues).toContainEqual(expect.objectContaining({ path: "dates.range" }));
+    // No file was written, and the source state is byte-for-byte unchanged.
+    expect(writeFile).not.toHaveBeenCalled();
+    expect(state).toEqual(before);
   });
 });

@@ -58,12 +58,14 @@ describe("hydration lifecycle", () => {
     expect(selectIsDirty(reloaded.scenario.getState())).toBe(true);
   });
 
-  it("a fresh store (no persisted record) hydrates ready and clean", async () => {
+  it("a fresh store hydrates ready with an unknown (null) backup baseline", async () => {
     const spine = createStateSpine({ createStorage: () => createMemoryStorage() });
     await hydrateScenarioStore(spine.scenario, spine.hot);
 
+    // Hydration does NOT invent a Download baseline (DL12/T17r review P0): the
+    // baseline stays unknown (null) until a real plain Download marks it fresh.
     expect(spine.hot.getState().hydrationStatus).toBe("ready");
-    expect(spine.scenario.getState().baselineFingerprint).not.toBeNull();
+    expect(spine.scenario.getState().baselineFingerprint).toBeNull();
     expect(selectIsDirty(spine.scenario.getState())).toBe(false);
   });
 
@@ -434,10 +436,12 @@ describe("Load / New lifecycle", () => {
     expect(spine.scenario.getState().guidedRulePins).toEqual([]);
   });
 
-  it("Load replaces state, assigns card identity, clears history, and is clean", async () => {
+  it("Load is one tracked undoable transaction: assigns identity, preserves history, baseline unknown", async () => {
     const spine = createStateSpine({ createStorage: () => createMemoryStorage() });
     await hydrateScenarioStore(spine.scenario, spine.hot);
+    // An earlier edit (part of the older history that must survive a Load).
     spine.scenario.getState().mutateScenario({ rangeStart: "2026-02-01" });
+    const historyBeforeLoad = spine.scenario.temporal.getState().pastStates.length;
 
     const target: ImportNormalizationTarget = {
       ...createEmptyScenarioUiState(),
@@ -456,8 +460,23 @@ describe("Load / New lifecycle", () => {
     expect(spine.scenario.getState().rangeStart).toBe("2026-09-01");
     expect(spine.scenario.getState().cardsByKind.requirements).toHaveLength(1);
     expect(typeof spine.scenario.getState().cardsByKind.requirements[0].uid).toBe("string");
-    expect(spine.scenario.temporal.getState().pastStates.length).toBe(0);
-    expect(selectIsDirty(spine.scenario.getState())).toBe(false);
+    // The Load is ONE tracked entry appended onto the preserved older history, and
+    // the backup baseline is unknown (an imported file is not a fresh backup).
+    expect(spine.scenario.temporal.getState().pastStates.length).toBe(historyBeforeLoad + 1);
+    expect(spine.scenario.getState().baselineFingerprint).toBeNull();
+
+    // Undo restores the complete prior workspace; Redo restores the import.
+    spine.scenario.temporal.getState().undo();
+    expect(spine.scenario.getState().rangeStart).toBe("2026-02-01");
+    expect(spine.scenario.getState().cardsByKind.requirements).toHaveLength(0);
+    spine.scenario.temporal.getState().redo();
+    expect(spine.scenario.getState().rangeStart).toBe("2026-09-01");
+    expect(spine.scenario.getState().cardsByKind.requirements).toHaveLength(1);
+
+    // The older pre-edit history is still reachable after the Load entry.
+    spine.scenario.temporal.getState().undo();
+    spine.scenario.temporal.getState().undo();
+    expect(spine.scenario.getState().rangeStart).toBe("");
   });
 
   it("Load starts pin-free (guidedRulePins has no import-boundary counterpart yet)", async () => {
