@@ -3,6 +3,12 @@ name = "nurse-scheduling"
 version = "0.0.0"
 requires-python = ">=3.10"
 
+[tool.pytest.ini_options]
+# Scope discovery to the test tree so runnable tools under core/scripts (for
+# example the slow real CP-SAT capability probe) can never be collected or
+# executed by an ordinary pytest run.
+testpaths = ["tests"]
+
 [tool.ruff]
 target-version = "py312"
 line-length = 120

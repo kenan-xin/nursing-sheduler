@@ -46,3 +46,6 @@ python tests/real/run_schedule.py \
   --timeout 180 \
   --progress-output progress.jsonl
 ```
+
+The supervised CP-SAT capability gate is a separate opt-in tool that lives
+outside the test tree; see `core/scripts/README.md`.
