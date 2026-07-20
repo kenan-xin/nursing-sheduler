@@ -208,6 +208,9 @@ describe("parseResultAvailablePayload", () => {
       parseResultAvailablePayload(feasible({ termination_reason: "user_requested" }))?.outcome,
     ).toBe("feasible");
     expect(
+      parseResultAvailablePayload(feasible({ termination_reason: "solver_timeout" }))?.outcome,
+    ).toBe("feasible");
+    expect(
       parseResultAvailablePayload(
         feasible({
           outcome: "optimal",
@@ -236,6 +239,14 @@ describe("parseResultAvailablePayload", () => {
     ["fractional score", feasible({ score: 1.5 })],
     ["feasible without score", feasible({ score: null })],
     ["feasible without artifact", feasible({ artifact_name: null })],
+    [
+      "solver_timeout without artifact",
+      feasible({ termination_reason: "solver_timeout", artifact_name: null }),
+    ],
+    [
+      "solver_timeout without score",
+      feasible({ termination_reason: "solver_timeout", score: null }),
+    ],
     ["feasible with wrong status", feasible({ solver_status: "OPTIMAL" })],
     ["feasible with wrong reason", feasible({ termination_reason: "optimality_proven" })],
     ["optimal with feasible status", feasible({ outcome: "optimal" })],
@@ -381,6 +392,17 @@ describe("parseJobResponse", () => {
           score: 4,
           solver_status: "FEASIBLE",
           termination_reason: "user_requested",
+        },
+      }),
+    ).not.toBeNull();
+    expect(
+      parseJobResponse({
+        ...completed,
+        result: {
+          outcome: "feasible",
+          score: 4,
+          solver_status: "FEASIBLE",
+          termination_reason: "solver_timeout",
         },
       }),
     ).not.toBeNull();

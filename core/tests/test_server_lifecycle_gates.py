@@ -25,6 +25,7 @@ survives a store outage during failure persistence.
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import asyncio
+import multiprocessing
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -42,6 +43,7 @@ from nurse_scheduling.server.jobs.models import (
     StoredArtifact,
     StoreLimits,
 )
+from nurse_scheduling.server.jobs.process_executor import ProcessControl, ProcessResult, ProcessStatus
 from nurse_scheduling.server.jobs.runner import RunOutput
 from nurse_scheduling.server.jobs.worker import JobWorker
 from nurse_scheduling.server.stores.memory import MemoryJobStore
@@ -59,8 +61,10 @@ class SuccessfulRunner:
 
 class StoppableRunner:
     def __init__(self):
-        self.started = threading.Event()
-        self.finished = threading.Event()
+        # Spawn-shared events stay observable across the supervised child boundary.
+        context = multiprocessing.get_context("spawn")
+        self.started = context.Event()
+        self.finished = context.Event()
 
     def run(self, job, input_bytes, *, event_callback, should_stop):
         self.started.set()
@@ -245,15 +249,375 @@ def test_worker_survives_when_failure_persistence_also_fails():
         worker.stop()
 
 
-def test_worker_renews_claim_during_long_running_job():
-    now = [datetime.now(timezone.utc)]
+def _claimed_running_job(store, clock):
+    """Create and claim one running job under a frozen-clock controller."""
+    controller = JobController(
+        store,
+        limits=StoreLimits(max_pending=1, max_retained=2),
+        retention_seconds=60,
+        claim_lease_seconds=30,
+        clock=lambda: clock[0],
+    )
+    controller.create_job(
+        input_name="input.yaml",
+        client_id="client",
+        solver="ortools/cp-sat",
+        prettify=True,
+        timeout_seconds=60,
+        input_bytes=b"apiVersion: alpha\n",
+    )
+    claimed = controller.claim_next_job("worker")
+    assert claimed is not None
+    return controller, claimed
+
+
+def test_worker_shutdown_discards_buffered_event(monkeypatch):
+    # A buffered child event the executor drains ahead of an abort must not be
+    # persisted once shutdown is in effect; maintenance owns the eventual worker_lost.
+    clock = [datetime.now(timezone.utc)]
+    store = MemoryJobStore()
+    controller, claimed = _claimed_running_job(store, clock)
+    before_events = list(controller.prepare_event_replay(claimed.id, None).initial_events)
+
+    def fake_run_optimization_process(*_args, event_callback, control, **_kwargs):
+        worker._stop.set()
+        event_callback("job.phase_changed", {"phase": "buffered"}, None)
+        return ProcessResult(status=ProcessStatus.ABORTED)
+
+    monkeypatch.setattr(
+        "nurse_scheduling.server.jobs.worker.run_optimization_process",
+        fake_run_optimization_process,
+    )
+    worker = JobWorker(controller, object(), worker_id="worker", claim_poll_seconds=0.005, claim_lease_seconds=30)
+    worker._execute(claimed)
+
+    assert controller.get_job(claimed.id).state == JobState.RUNNING
+    assert controller.prepare_event_replay(claimed.id, None).initial_events == before_events
+
+    clock[0] += timedelta(seconds=31)
+    assert controller.expire_worker_claims() == [claimed.id]
+    assert controller.get_job(claimed.id).failure.code == "worker_lost"
+
+
+def test_worker_shutdown_discards_buffered_result(monkeypatch):
+    # A completion the executor returns ahead of an abort must not commit once
+    # shutdown is in effect; the job stays running for maintenance to reclaim.
+    clock = [datetime.now(timezone.utc)]
+    store = MemoryJobStore()
+    controller, claimed = _claimed_running_job(store, clock)
+
+    def fake_run_optimization_process(*_args, control, **_kwargs):
+        worker._stop.set()
+        return ProcessResult(
+            status=ProcessStatus.COMPLETED,
+            output=RunOutput(
+                result=OptimizationResult(OptimizationOutcome.OPTIMAL, 42, "OPTIMAL", "optimality_proven"),
+                artifact=StoredArtifact("schedule.xlsx", "application/test", b"fake xlsx"),
+            ),
+        )
+
+    monkeypatch.setattr(
+        "nurse_scheduling.server.jobs.worker.run_optimization_process",
+        fake_run_optimization_process,
+    )
+    worker = JobWorker(controller, object(), worker_id="worker", claim_poll_seconds=0.005, claim_lease_seconds=30)
+    worker._execute(claimed)
+
+    current = controller.get_job(claimed.id)
+    assert current.state == JobState.RUNNING
+    assert current.result is None
+    assert current.artifact_name is None
+
+    clock[0] += timedelta(seconds=31)
+    assert controller.expire_worker_claims() == [claimed.id]
+    assert controller.get_job(claimed.id).failure.code == "worker_lost"
+
+
+def test_worker_shutdown_suppresses_abort_cleanup_failure(monkeypatch):
+    # An abort-path cleanup exception raised during shutdown must not persist a
+    # failure over the still-valid lease; maintenance owns the worker_lost write.
+    clock = [datetime.now(timezone.utc)]
+    store = MemoryJobStore()
+    controller, claimed = _claimed_running_job(store, clock)
+
+    def fake_run_optimization_process(*_args, control, **_kwargs):
+        worker._stop.set()
+        raise OSError("abort cleanup failed")
+
+    monkeypatch.setattr(
+        "nurse_scheduling.server.jobs.worker.run_optimization_process",
+        fake_run_optimization_process,
+    )
+    worker = JobWorker(controller, object(), worker_id="worker", claim_poll_seconds=0.005, claim_lease_seconds=30)
+    worker._execute(claimed)
+
+    current = controller.get_job(claimed.id)
+    assert current.state == JobState.RUNNING
+    assert current.failure is None
+
+    clock[0] += timedelta(seconds=31)
+    assert controller.expire_worker_claims() == [claimed.id]
+    assert controller.get_job(claimed.id).failure.code == "worker_lost"
+
+
+def test_stop_blocks_until_admitted_completion_persists(monkeypatch):
+    # Linearization: a completion admitted past the shutdown gate holds
+    # _shutdown_lock across the controller write, so stop() cannot set the shutdown
+    # flag until the write resolves. The write admitted before stop therefore
+    # completes, and stop() only returns afterward.
+    clock = [datetime.now(timezone.utc)]
+    store = MemoryJobStore()
+    base_controller, claimed = _claimed_running_job(store, clock)
+
+    write_entered = threading.Event()
+    release_write = threading.Event()
+
+    class PausingController:
+        def __getattr__(self, name):
+            return getattr(base_controller, name)
+
+        def complete_job(self, *args, **kwargs):
+            write_entered.set()
+            assert release_write.wait(timeout=2)
+            return base_controller.complete_job(*args, **kwargs)
+
+    def fake_run_optimization_process(*_args, control, **_kwargs):
+        return ProcessResult(
+            status=ProcessStatus.COMPLETED,
+            output=RunOutput(
+                result=OptimizationResult(OptimizationOutcome.OPTIMAL, 42, "OPTIMAL", "optimality_proven"),
+                artifact=StoredArtifact("schedule.xlsx", "application/test", b"fake xlsx"),
+            ),
+        )
+
+    monkeypatch.setattr(
+        "nurse_scheduling.server.jobs.worker.run_optimization_process",
+        fake_run_optimization_process,
+    )
+    worker = JobWorker(
+        PausingController(), object(), worker_id="worker", claim_poll_seconds=0.005, claim_lease_seconds=30
+    )
+
+    execute_thread = threading.Thread(target=worker._execute, args=(claimed,))
+    execute_thread.start()
+    stop_returned = threading.Event()
+    try:
+        assert write_entered.wait(timeout=2)
+
+        def do_stop():
+            worker.stop()
+            stop_returned.set()
+
+        stop_thread = threading.Thread(target=do_stop)
+        stop_thread.start()
+        try:
+            # stop() is blocked acquiring _shutdown_lock; it cannot enter between
+            # the write's admission and its persistence.
+            assert not stop_returned.wait(timeout=0.2)
+            assert not worker._stop.is_set()
+
+            release_write.set()
+            assert stop_returned.wait(timeout=3)
+            assert worker._stop.is_set()
+        finally:
+            stop_thread.join(timeout=3)
+        execute_thread.join(timeout=3)
+        assert base_controller.get_job(claimed.id).state == JobState.COMPLETED
+    finally:
+        release_write.set()
+        worker.stop()
+        execute_thread.join(timeout=3)
+
+
+def test_stop_blocks_until_admitted_event_persists(monkeypatch):
+    # The same serialization protects the progress-event write: an event admitted
+    # before stop persists, and stop() cannot set the flag mid-write.
+    clock = [datetime.now(timezone.utc)]
+    store = MemoryJobStore()
+    base_controller, claimed = _claimed_running_job(store, clock)
+    before_events = list(base_controller.prepare_event_replay(claimed.id, None).initial_events)
+
+    write_entered = threading.Event()
+    release_write = threading.Event()
+
+    class PausingController:
+        def __getattr__(self, name):
+            return getattr(base_controller, name)
+
+        def record_event(self, *args, **kwargs):
+            write_entered.set()
+            assert release_write.wait(timeout=2)
+            return base_controller.record_event(*args, **kwargs)
+
+    def fake_run_optimization_process(*_args, event_callback, control, **_kwargs):
+        event_callback("job.phase_changed", {"phase": "admitted"}, None)
+        return ProcessResult(status=ProcessStatus.ABORTED)
+
+    monkeypatch.setattr(
+        "nurse_scheduling.server.jobs.worker.run_optimization_process",
+        fake_run_optimization_process,
+    )
+    worker = JobWorker(
+        PausingController(), object(), worker_id="worker", claim_poll_seconds=0.005, claim_lease_seconds=30
+    )
+
+    execute_thread = threading.Thread(target=worker._execute, args=(claimed,))
+    execute_thread.start()
+    stop_returned = threading.Event()
+    try:
+        assert write_entered.wait(timeout=2)
+
+        def do_stop():
+            worker.stop()
+            stop_returned.set()
+
+        stop_thread = threading.Thread(target=do_stop)
+        stop_thread.start()
+        try:
+            assert not stop_returned.wait(timeout=0.2)
+            assert not worker._stop.is_set()
+
+            release_write.set()
+            assert stop_returned.wait(timeout=3)
+        finally:
+            stop_thread.join(timeout=3)
+        execute_thread.join(timeout=3)
+        events_after = list(base_controller.prepare_event_replay(claimed.id, None).initial_events)
+        assert len(events_after) == len(before_events) + 1
+    finally:
+        release_write.set()
+        worker.stop()
+        execute_thread.join(timeout=3)
+
+
+def test_cancellation_settles_when_cleanup_raises_after_shutdown(monkeypatch):
+    # Cancellation observed under a valid claim beats a later ordinary shutdown even
+    # when executor cleanup raises: it settles cancelled immediately through the
+    # lease-fenced complete_cancellation rather than waiting for maintenance.
     store = MemoryJobStore()
     controller = JobController(
         store,
         limits=StoreLimits(max_pending=1, max_retained=2),
         retention_seconds=60,
-        claim_lease_seconds=0.06,
-        clock=lambda: now[0],
+        claim_lease_seconds=30,
+    )
+    created = controller.create_job(
+        input_name="input.yaml",
+        client_id="client",
+        solver="ortools/cp-sat",
+        prettify=True,
+        timeout_seconds=60,
+        input_bytes=b"apiVersion: alpha\n",
+    )
+    process_started = threading.Event()
+    cleanup_raised = threading.Event()
+
+    def fake_run_optimization_process(*_args, control, **_kwargs):
+        process_started.set()
+        deadline = time.monotonic() + 3
+        while control() is not ProcessControl.CANCEL:
+            if time.monotonic() >= deadline:
+                raise AssertionError("worker did not observe cancellation")
+            time.sleep(0.005)
+        # Ordinary shutdown races in after cancellation was observed, then the
+        # executor's abort cleanup fails.
+        worker._stop.set()
+        cleanup_raised.set()
+        raise OSError("abort cleanup failed")
+
+    monkeypatch.setattr(
+        "nurse_scheduling.server.jobs.worker.run_optimization_process",
+        fake_run_optimization_process,
+    )
+    worker = JobWorker(controller, object(), worker_id="worker", claim_poll_seconds=0.005, claim_lease_seconds=30)
+    worker.start()
+    try:
+        assert process_started.wait(timeout=3)
+        controller.cancel_job(created.id)
+        for _ in range(400):
+            if controller.get_job(created.id).state.terminal:
+                break
+            time.sleep(0.005)
+
+        assert cleanup_raised.is_set()
+        settled = controller.get_job(created.id)
+        assert settled.state == JobState.CANCELLED
+        assert settled.failure.code == "cancelled"
+    finally:
+        worker.stop()
+
+
+def test_worker_cancellation_takes_priority_over_concurrent_shutdown(monkeypatch):
+    # A cancellation observed under a valid claim must beat an ordinary shutdown
+    # that races in afterward, and settle the job cancelled via complete_cancellation.
+    store = MemoryJobStore()
+    controller = JobController(
+        store,
+        limits=StoreLimits(max_pending=1, max_retained=2),
+        retention_seconds=60,
+        claim_lease_seconds=30,
+    )
+    created = controller.create_job(
+        input_name="input.yaml",
+        client_id="client",
+        solver="ortools/cp-sat",
+        prettify=True,
+        timeout_seconds=60,
+        input_bytes=b"apiVersion: alpha\n",
+    )
+    process_started = threading.Event()
+    control_selected = threading.Event()
+    selected_controls = []
+
+    def fake_run_optimization_process(*_args, control, **_kwargs):
+        process_started.set()
+        deadline = time.monotonic() + 3
+        while control() is not ProcessControl.CANCEL:
+            if time.monotonic() >= deadline:
+                raise AssertionError("worker did not observe cancellation")
+            time.sleep(0.005)
+        # Shutdown begins after the worker observed cancellation but before the
+        # executor consumes the highest-priority pending control.
+        worker._stop.set()
+        selected = control()
+        selected_controls.append(selected)
+        control_selected.set()
+        status = ProcessStatus.CANCELLED if selected is ProcessControl.CANCEL else ProcessStatus.ABORTED
+        return ProcessResult(status=status)
+
+    monkeypatch.setattr(
+        "nurse_scheduling.server.jobs.worker.run_optimization_process",
+        fake_run_optimization_process,
+    )
+    worker = JobWorker(controller, object(), worker_id="worker", claim_poll_seconds=0.005, claim_lease_seconds=30)
+    worker.start()
+    try:
+        assert process_started.wait(timeout=3)
+        controller.cancel_job(created.id)
+        assert control_selected.wait(timeout=3)
+        for _ in range(200):
+            if controller.get_job(created.id).state.terminal:
+                break
+            time.sleep(0.005)
+
+        assert selected_controls == [ProcessControl.CANCEL]
+        assert controller.get_job(created.id).state == JobState.CANCELLED
+    finally:
+        worker.stop()
+
+
+def test_worker_renews_claim_during_long_running_job(monkeypatch):
+    # The supervised child is emulated in-thread so lease renewal and the
+    # finish-now hand-off are observed deterministically, without the spawn
+    # latency that the rebuild's real-time confirmed-deadline abort reacts to.
+    # A real clock and a several-second lease keep the store's wall-clock claim
+    # fence satisfied while the heartbeat (lease/3) still renews within the test.
+    store = MemoryJobStore()
+    controller = JobController(
+        store,
+        limits=StoreLimits(max_pending=1, max_retained=2),
+        retention_seconds=60,
+        claim_lease_seconds=3.0,
     )
     created = controller.create_job(
         input_name="input.yaml",
@@ -283,21 +647,48 @@ def test_worker_renews_claim_during_long_running_job():
             return renewed
 
     worker_controller = ControllerWithRenewalSignal(controller)
-    runner = StoppableRunner()
+    process_started = threading.Event()
+    finish_observed = threading.Event()
+
+    def fake_run_optimization_process(*_args, control, **_kwargs):
+        process_started.set()
+        deadline = time.monotonic() + 3
+        while True:
+            requested = control()
+            if requested is ProcessControl.FINISH:
+                finish_observed.set()
+                return ProcessResult(
+                    status=ProcessStatus.COMPLETED,
+                    output=RunOutput(
+                        result=OptimizationResult(OptimizationOutcome.FEASIBLE, 7, "FEASIBLE", "user_requested"),
+                        artifact=StoredArtifact("schedule.xlsx", "application/test", b"partial"),
+                    ),
+                )
+            if requested is ProcessControl.ABORT or time.monotonic() >= deadline:
+                return ProcessResult(status=ProcessStatus.ABORTED)
+            time.sleep(0.005)
+
+    monkeypatch.setattr(
+        "nurse_scheduling.server.jobs.worker.run_optimization_process",
+        fake_run_optimization_process,
+    )
     worker = JobWorker(
-        worker_controller, runner, worker_id="worker", claim_poll_seconds=0.005, claim_lease_seconds=0.06
+        worker_controller, object(), worker_id="worker", claim_poll_seconds=0.005, claim_lease_seconds=3.0
     )
     worker.start()
     try:
-        assert runner.started.wait(timeout=3)
+        assert process_started.wait(timeout=3)
         initial_claim = controller.get_job(created.id)
-        now[0] += timedelta(seconds=0.01)
         worker_controller.renewal_allowed.set()
-        assert worker_controller.claim_renewed.wait(timeout=3)
+        assert worker_controller.claim_renewed.wait(timeout=5)
         assert worker_controller.renewed_job.claim_expires_at > initial_claim.claim_expires_at
 
         controller.request_early_completion(created.id)
-        assert runner.finished.wait(timeout=3)
+        assert finish_observed.wait(timeout=3)
+        for _ in range(200):
+            if controller.get_job(created.id).state == JobState.COMPLETED:
+                break
+            time.sleep(0.005)
         assert controller.get_job(created.id).state == JobState.COMPLETED
     finally:
         worker.stop()

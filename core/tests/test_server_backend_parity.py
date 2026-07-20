@@ -147,6 +147,59 @@ def test_controller_cancellation_policy_is_shared_by_stores(store):
     assert failed.state == JobState.CANCELLED
 
 
+def test_complete_cancellation_is_lease_fenced_across_stores(store):
+    # A cooperatively cancelled job is finalized only by its owning worker under a
+    # still-active claim; a foreign worker cannot manufacture the terminal write.
+    controller = _controller(store)
+    running = _create(controller)
+    controller.claim_next_job("worker")
+    assert controller.cancel_job(running.id).state == JobState.CANCELLING
+
+    foreign = controller.complete_cancellation(running.id, worker_id="other-worker")
+    assert foreign.state == JobState.CANCELLING
+
+    cancelled = controller.complete_cancellation(running.id, worker_id="worker")
+    assert cancelled.state == JobState.CANCELLED
+    assert cancelled.failure == JobFailure("cancelled", "Optimization cancelled.")
+
+    # Re-finalizing a terminal job is a no-op.
+    assert controller.complete_cancellation(running.id, worker_id="worker").state == JobState.CANCELLED
+
+
+def test_complete_cancellation_after_lease_expiry_defers_to_maintenance(store):
+    # Once the lease lapses the worker can no longer settle the cancellation; the
+    # write is refused and maintenance retains authority to terminate the job.
+    start = datetime.now(timezone.utc)
+    controller = _controller(store, now=start)
+    running = _create(controller)
+    controller.claim_next_job("worker")
+    assert controller.cancel_job(running.id).state == JobState.CANCELLING
+
+    expired = _controller(store, now=start + timedelta(seconds=31))
+    unchanged = expired.complete_cancellation(running.id, worker_id="worker")
+    assert unchanged.state == JobState.CANCELLING
+
+    assert expired.expire_worker_claims() == [running.id]
+    assert expired.get_job(running.id).state == JobState.CANCELLED
+
+
+def test_process_timeout_failure_does_not_overwrite_worker_lost(store):
+    # A watchdog process_timeout arriving from a worker that already lost its claim
+    # must not overwrite the worker_lost outcome maintenance settled first.
+    start = datetime.now(timezone.utc)
+    controller = _controller(store, now=start)
+    running = _create(controller)
+    controller.claim_next_job("worker")
+
+    expired = _controller(store, now=start + timedelta(seconds=31))
+    assert expired.expire_worker_claims() == [running.id]
+    assert expired.get_job(running.id).failure.code == "worker_lost"
+
+    refused = expired.fail_job(running.id, JobFailure("process_timeout", "timed out"), worker_id="worker")
+    assert refused.state == JobState.FAILED
+    assert refused.failure.code == "worker_lost"
+
+
 def test_revision_prevents_late_overwrite(store):
     controller = _controller(store)
     created = _create(controller)

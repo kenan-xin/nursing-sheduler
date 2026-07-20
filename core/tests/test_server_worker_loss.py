@@ -36,7 +36,7 @@ from nurse_scheduling.server.jobs.models import (
     StoredArtifact,
     StoreLimits,
 )
-from nurse_scheduling.server.jobs.runner import RunOutput
+from nurse_scheduling.server.jobs.process_executor import ProcessControl, ProcessResult, ProcessStatus
 from nurse_scheduling.server.jobs.worker import JobWorker
 from nurse_scheduling.server.maintenance import JobMaintenance
 from nurse_scheduling.server.stores.memory import MemoryJobStore
@@ -227,9 +227,15 @@ def test_active_worker_with_valid_lease_can_complete():
     assert completed.result.score == 7
 
 
-@pytest.mark.parametrize("operation", ["event", "complete", "fail", "renew"])
+@pytest.mark.parametrize("operation", ["event", "complete", "fail", "renew", "complete_cancellation"])
 def test_worker_commit_fence_rejects_writes_that_reach_store_after_lease_expiry(store_factory, operation):
-    """A transition admitted before expiry cannot mutate the store after it."""
+    """A transition admitted before expiry cannot mutate the store after it.
+
+    `complete_cancellation` is included so owner/revision/observed-deadline
+    fencing is proven for the cancellation settle path too: a cancellation that
+    passes the controller pre-check but whose lease lapses before the store
+    commit must write nothing and leave the terminal transition to maintenance.
+    """
     store = store_factory()
     controller = JobController(
         store,
@@ -247,6 +253,10 @@ def test_worker_commit_fence_rejects_writes_that_reach_store_after_lease_expiry(
     )
     claimed = controller.claim_next_job("worker-1")
     assert claimed is not None
+    if operation == "complete_cancellation":
+        # cancel_job carries no worker identity, so it commits before the fence
+        # window under the original save and leaves a CANCELLING job to settle.
+        assert controller.cancel_job(created.id).state == JobState.CANCELLING
     before = controller.get_job(created.id)
     before_events = list(controller.prepare_event_replay(created.id, None).initial_events)
     original_save = store.save
@@ -267,21 +277,34 @@ def test_worker_commit_fence_rejects_writes_that_reach_store_after_lease_expiry(
         )
     elif operation == "fail":
         controller.fail_job(created.id, JobFailure("solver_failed", "late"), worker_id="worker-1")
+    elif operation == "complete_cancellation":
+        controller.complete_cancellation(created.id, worker_id="worker-1")
     else:
         assert controller.renew_claim(created.id, "worker-1") is None
 
+    expected_state = JobState.CANCELLING if operation == "complete_cancellation" else JobState.RUNNING
     current = controller.get_job(created.id)
-    assert current.state == JobState.RUNNING
+    assert current.state == expected_state
     assert current.revision == before.revision
     assert current.artifact_name is None
     assert controller.prepare_event_replay(created.id, None).initial_events == before_events
     assert controller.expire_worker_claims() == [created.id]
-    assert controller.get_job(created.id).failure.code == "worker_lost"
+    settled = controller.get_job(created.id)
+    if operation == "complete_cancellation":
+        assert settled.state == JobState.CANCELLED
+        assert settled.failure.code == "cancelled"
+    else:
+        assert settled.failure.code == "worker_lost"
 
 
-@pytest.mark.parametrize("operation", ["event", "complete", "fail", "renew"])
+@pytest.mark.parametrize("operation", ["event", "complete", "fail", "renew", "complete_cancellation"])
 def test_fakeredis_worker_commit_is_fenced_when_lease_expires_inside_commit_window(operation):
-    """The fakeredis commit boundary revalidates after its pre-check pause."""
+    """The fakeredis commit boundary revalidates after its pre-check pause.
+
+    `complete_cancellation` exercises the same owner/revision/observed-deadline
+    Lua revalidation for the cancellation settle path: the lease expires inside
+    the commit window, so nothing mutates and maintenance owns termination.
+    """
     preconditions_passed = Event()
     allow_commit = Event()
 
@@ -306,6 +329,10 @@ def test_fakeredis_worker_commit_is_fenced_when_lease_expires_inside_commit_wind
     )
     claimed = controller.claim_next_job("worker-1")
     assert claimed is not None
+    if operation == "complete_cancellation":
+        # cancel_job carries no worker identity, so it does not enter the fenced
+        # commit boundary and settles the job into CANCELLING before the window.
+        assert controller.cancel_job(created.id).state == JobState.CANCELLING
     before = controller.get_job(created.id)
     before_events = list(controller.prepare_event_replay(created.id, None).initial_events)
 
@@ -330,6 +357,8 @@ def test_fakeredis_worker_commit_is_fenced_when_lease_expires_inside_commit_wind
                 JobFailure("solver_failed", "late"),
                 worker_id="worker-1",
             )
+        if operation == "complete_cancellation":
+            return controller.complete_cancellation(created.id, worker_id="worker-1")
         return controller.renew_claim(created.id, "worker-1")
 
     with ThreadPoolExecutor(max_workers=1) as executor:
@@ -340,8 +369,9 @@ def test_fakeredis_worker_commit_is_fenced_when_lease_expires_inside_commit_wind
         allow_commit.set()
         result.result(timeout=2.0)
 
+    expected_state = JobState.CANCELLING if operation == "complete_cancellation" else JobState.RUNNING
     current = controller.get_job(created.id)
-    assert current.state == JobState.RUNNING
+    assert current.state == expected_state
     assert current.revision == before.revision
     assert current.worker_id == before.worker_id
     assert current.claim_expires_at == before.claim_expires_at
@@ -352,12 +382,18 @@ def test_fakeredis_worker_commit_is_fenced_when_lease_expires_inside_commit_wind
         store.get_artifact(created.id, "late.xlsx")
     assert controller.prepare_event_replay(created.id, None).initial_events == before_events
     assert controller.expire_worker_claims() == [created.id]
-    assert controller.get_job(created.id).failure.code == "worker_lost"
+    settled = controller.get_job(created.id)
+    if operation == "complete_cancellation":
+        assert settled.state == JobState.CANCELLED
+        assert settled.failure.code == "cancelled"
+    else:
+        assert settled.failure.code == "worker_lost"
 
 
-def test_worker_stops_execution_when_renewal_outage_outlasts_lease():
-    # A worker whose claim renewals keep failing must stop its solver once the last
-    # confirmed lease deadline passes, rather than run against an unrenewed claim.
+def test_worker_stops_execution_when_renewal_outage_outlasts_lease(monkeypatch):
+    # A worker whose claim renewals keep failing must abort its child once the last
+    # confirmed lease deadline passes, rather than run against an unrenewed claim,
+    # and must write no terminal result so maintenance owns `worker_lost`.
     class _RenewalOutageController:
         def get_input(self, job_id):
             return b""
@@ -365,38 +401,39 @@ def test_worker_stops_execution_when_renewal_outage_outlasts_lease():
         def renew_claim(self, job_id, worker_id):
             raise RuntimeError("store outage")
 
-        def record_event(self, *args, **kwargs):
-            return None
-
-        def record_score_and_event(self, *args, **kwargs):
-            return None
-
         def is_stop_requested(self, job_id, worker_id=None):
             return False
 
         def complete_job(self, *args, **kwargs):
-            self.completed = True
-            return None
+            raise AssertionError("must not commit a result after a renewal outage")
 
         def fail_job(self, *args, **kwargs):
-            return None
+            raise AssertionError("must not commit a failure after a renewal outage")
 
-    stopped = []
+        def complete_cancellation(self, *args, **kwargs):
+            raise AssertionError("must not commit a cancellation after a renewal outage")
 
-    class _StoppableRunner:
-        def run(self, job, content, *, event_callback, should_stop):
-            while not should_stop():
-                time.sleep(0.02)
-            stopped.append(True)
-            return RunOutput(
-                result=OptimizationResult(OptimizationOutcome.FEASIBLE, 0, "FEASIBLE", "limit_or_stop"),
-                artifact=None,
-            )
+    aborted = []
 
+    def fake_run_optimization_process(*_args, control, **_kwargs):
+        # Emulate the supervised child: forward controls until the worker's
+        # confirmed-deadline abort surfaces, then stop the tree writing nothing.
+        deadline = time.monotonic() + 2
+        while control() is not ProcessControl.ABORT:
+            if time.monotonic() >= deadline:
+                raise AssertionError("worker did not abort after the renewal outage outlasted its lease")
+            time.sleep(0.005)
+        aborted.append(True)
+        return ProcessResult(status=ProcessStatus.ABORTED)
+
+    monkeypatch.setattr(
+        "nurse_scheduling.server.jobs.worker.run_optimization_process",
+        fake_run_optimization_process,
+    )
     controller = _RenewalOutageController()
     worker = JobWorker(
         controller,
-        _StoppableRunner(),
+        object(),
         worker_id="worker-1",
         claim_poll_seconds=0.05,
         claim_lease_seconds=0.3,
@@ -406,8 +443,8 @@ def test_worker_stops_execution_when_renewal_outage_outlasts_lease():
     worker._execute(job)
     elapsed = time.monotonic() - started
 
-    assert stopped == [True]
-    assert elapsed < 2.0  # stopped near the 0.3s lease deadline, not indefinitely
+    assert aborted == [True]
+    assert elapsed < 2.0  # aborted near the 0.3s lease deadline, not indefinitely
 
 
 def _make_running_job():

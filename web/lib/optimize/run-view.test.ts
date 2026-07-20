@@ -289,6 +289,25 @@ describe("reduceRunView — authoritative job snapshots", () => {
     expect(next.resubmittable).toBe(true);
   });
 
+  it("process_timeout is a structured terminal failure but does NOT offer Resubmit", () => {
+    const next = reduceRunView(INITIAL_OPTIMIZE_RUN_VIEW, {
+      type: "job-snapshot",
+      job: terminalJob("failed", {
+        error: {
+          code: "process_timeout",
+          message: "The optimization exceeded its timeout and was force-terminated.",
+        },
+      }),
+    });
+    expect(next.lifecycle).toBe("failed");
+    expect(next.error).toEqual({
+      source: "job",
+      code: "process_timeout",
+      message: "The optimization exceeded its timeout and was force-terminated.",
+    });
+    expect(next.resubmittable).toBe(false);
+  });
+
   it("a later snapshot without an error clears a prior job error authoritatively", () => {
     const withError = reduceRunView(INITIAL_OPTIMIZE_RUN_VIEW, {
       type: "job-snapshot",

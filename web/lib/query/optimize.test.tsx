@@ -445,6 +445,16 @@ describe("applyFrameToCache (exact backend-wire fixtures)", () => {
     expect(cached()?.error?.code).toBe("worker_lost");
   });
 
+  it("merges the top-level error from a terminal process_timeout state frame", () => {
+    applyFrameToCache(client, "opt_1", {
+      id: "v1.j.2b",
+      event: "job.state_changed",
+      data: '{"occurred_at":"2026-07-20T00:00:00+00:00","state":"failed","queue_position":null,"cancel_requested":false,"early_completion_requested":false,"terminal":true,"controls":{"cancellable":false,"early_completion_available":false},"error":{"code":"process_timeout","message":"The optimization exceeded its timeout and was force-terminated."}}',
+    });
+    expect(cached()?.state).toBe("failed");
+    expect(cached()?.error?.code).toBe("process_timeout");
+  });
+
   it("clears early_completion_available from a job.control_changed frame (flag only)", () => {
     applyFrameToCache(client, "opt_1", {
       id: "v1.j.3",
@@ -467,6 +477,21 @@ describe("applyFrameToCache (exact backend-wire fixtures)", () => {
       score: 42,
       solver_status: "FEASIBLE",
       termination_reason: "limit_or_stop",
+    });
+    expect(cached()?.links.schedule).toBe("/optimize/opt_1/xlsx");
+  });
+
+  it("accepts solver_timeout as a feasible termination reason from job.result_available", () => {
+    applyFrameToCache(client, "opt_1", {
+      id: "v1.j.4b",
+      event: "job.result_available",
+      data: '{"occurred_at":"2026-07-20T00:00:00+00:00","outcome":"feasible","score":42,"solver_status":"FEASIBLE","termination_reason":"solver_timeout","artifact_name":"schedule.xlsx"}',
+    });
+    expect(cached()?.result).toEqual({
+      outcome: "feasible",
+      score: 42,
+      solver_status: "FEASIBLE",
+      termination_reason: "solver_timeout",
     });
     expect(cached()?.links.schedule).toBe("/optimize/opt_1/xlsx");
   });
@@ -535,6 +560,16 @@ describe("applyFrameToCache (exact backend-wire fixtures)", () => {
       "feasible result without artifact",
       "job.result_available",
       '{"occurred_at":"2026-07-20T00:00:00+00:00","outcome":"feasible","score":42,"solver_status":"FEASIBLE","termination_reason":"limit_or_stop","artifact_name":null}',
+    ],
+    [
+      "solver_timeout result without artifact",
+      "job.result_available",
+      '{"occurred_at":"2026-07-20T00:00:00+00:00","outcome":"feasible","score":42,"solver_status":"FEASIBLE","termination_reason":"solver_timeout","artifact_name":null}',
+    ],
+    [
+      "solver_timeout result with no score",
+      "job.result_available",
+      '{"occurred_at":"2026-07-20T00:00:00+00:00","outcome":"feasible","score":null,"solver_status":"FEASIBLE","termination_reason":"solver_timeout","artifact_name":"schedule.xlsx"}',
     ],
     [
       "infeasible result with artifact",

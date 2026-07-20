@@ -285,6 +285,43 @@ describe("runOptimizeEventLoop", () => {
     expect(onTerminal.mock.calls[0][0].job.error.code).toBe("worker_lost");
   });
 
+  it("surfaces a process_timeout structured terminal failure through the refreshed job", async () => {
+    const forceTerminated = job({
+      state: "failed",
+      terminal: true,
+      finished_at: "2026-07-20T00:01:00Z",
+      error: { code: "process_timeout", message: "The process was force-terminated." },
+      controls: { cancellable: false, early_completion_available: false },
+    });
+    const onTerminal = vi.fn();
+
+    await runOptimizeEventLoop(
+      deps({
+        connect: async () => ({
+          type: "terminal",
+          frame: parseStrictTerminalFrame({
+            id: "v1.j.10",
+            event: "job.state_changed",
+            data: JSON.stringify({
+              occurred_at: "2026-07-20T00:01:00+00:00",
+              state: "failed",
+              terminal: true,
+              queue_position: null,
+              cancel_requested: false,
+              early_completion_requested: false,
+              controls: { cancellable: false, early_completion_available: false },
+              error: { code: "process_timeout", message: "The process was force-terminated." },
+            }),
+          })!,
+        }),
+        pollJob: async () => forceTerminated,
+        onTerminal,
+      }),
+    );
+
+    expect(onTerminal.mock.calls[0][0].job.error.code).toBe("process_timeout");
+  });
+
   it("stops and fires onJobGone on a code-first job_not_found, without polling", async () => {
     const onJobGone = vi.fn();
     const pollJob = vi.fn(async () => runningJob);

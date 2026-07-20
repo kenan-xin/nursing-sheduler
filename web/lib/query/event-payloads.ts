@@ -222,11 +222,15 @@ function hasValidOptimizationResult(
         artifact.length > 0
       );
     case "feasible":
+      // `solver_timeout` (native feasible timeout) and `user_requested` (cooperative
+      // finish-now) are the current reasons; `limit_or_stop` remains readable for
+      // retained legacy results (U31 process-supervision addendum).
       return (
         result.score !== null &&
         result.solver_status === "FEASIBLE" &&
         (result.termination_reason === "limit_or_stop" ||
-          result.termination_reason === "user_requested") &&
+          result.termination_reason === "user_requested" ||
+          result.termination_reason === "solver_timeout") &&
         artifact !== null &&
         artifact.length > 0
       );

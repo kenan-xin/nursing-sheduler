@@ -409,6 +409,43 @@ class JobController:
         )
         return job
 
+    def complete_cancellation(self, job_id: str, *, worker_id: str) -> Job:
+        """Settle a cooperatively cancelled job under the reporting worker's claim.
+
+        A worker that observed cancellation while it still owned an unexpired
+        claim finalizes `cancelled` here. The reporting `worker_id` is mandatory
+        and must still hold that active claim; otherwise the transition writes
+        nothing so an ordinary shutdown or claim loss cannot manufacture a
+        terminal result, and maintenance retains authority for `worker_lost`.
+
+        Raises:
+            JobNotFoundError: If the job does not exist.
+            JobOperationContentionError: If concurrent updates exhaust the retry limit.
+        """
+
+        def transition(job: Job, now: datetime):
+            """Build the terminal cancellation transition while the claim holds."""
+            if (
+                job.state.terminal
+                or job.state != JobState.CANCELLING
+                or not job.cancel_requested
+                or not self._holds_active_claim(job, worker_id, now)
+            ):
+                return job, [], None
+            cancelled = replace(
+                job,
+                state=JobState.CANCELLED,
+                failure=JobFailure(code="cancelled", message="Optimization cancelled."),
+                finished_at=now,
+                queue_position=None,
+                claim_expires_at=None,
+            )
+            return cancelled, [self._state_event(cancelled, now)], None
+
+        cancelled = self._update_job_with_retry(job_id, transition, worker_id=worker_id)
+        self._log_terminal_job(cancelled)
+        return cancelled
+
     def request_early_completion(self, job_id: str) -> Job:
         """Ask a supported running solver to return its current result.
 
