@@ -49,8 +49,10 @@ import {
   buildProvisionalSession,
   runSubmissionTransaction,
   type OptimizeRunOptions,
+  type PreparedDegradedCleanup,
   type SessionTransactionStorage,
 } from "./session-transaction";
+import { acquireSessionStorage } from "./session-storage";
 import type { PeopleReverseMap } from "@/lib/scenario";
 import { isExactJobGoneError, type OptimizeErrorInfo } from "@/lib/bff/errors";
 import type { JobResponse } from "@/lib/bff/types";
@@ -152,10 +154,25 @@ export interface PreparedRecoveryAttachment {
   activation: Omit<RunActivation, "jobId">;
   /** The opaque resume cursor to seed the stream's first `Last-Event-ID`. */
   initialCursor: string | null;
-  /** Forwarded from T16p after each cursor commit — the only safe cursor to persist. */
-  onCursorCommit?: (cursor: string) => void;
-  /** Forwarded from T16p when an expired/invalid cursor is cleared. */
-  onCursorReset?: () => void;
+}
+
+/**
+ * A T16b-owned cursor-persistence provider. The controller drives it by identity, not
+ * by frozen closures, so the CURRENT mounted provider is always the observation sink:
+ *   • `prepare(jobId, reloadRecoveryAvailable)` — a durable/degraded job became current;
+ *     the provider resets its health to that job (degraded ⇒ reload recovery unavailable).
+ *   • `onCommit(jobId, cursor)` / `onReset(jobId)` — the post-commit/reset opaque cursor
+ *     for the live durable job; the provider persists/clears it and records durability.
+ *   • `revoke(jobId)` — exact attachment authority ended; health becomes idle.
+ * The controller resolves the CURRENT provider at call time, so a recovery-hook remount
+ * over a still-live stream takes over persistence without stale frozen callbacks and
+ * without restarting transport. T16a never parses or writes the record.
+ */
+export interface CursorPersistenceProvider {
+  prepare(jobId: string, reloadRecoveryAvailable: boolean): void;
+  onCommit(jobId: string, cursor: string): void;
+  onReset(jobId: string): void;
+  revoke(jobId: string): void;
 }
 
 /** The job + people reverse map retained for T16c XLSX restoration and T16b/e. */
@@ -194,6 +211,23 @@ export interface OptimizeRunController {
   resubmit(input: OptimizeRunSubmitInput): Promise<OptimizeRunResubmitOutcome>;
   /** Attach transport-ready recovery data prepared by T16b. */
   attachRecoveredSession(input: PreparedRecoveryAttachment): RecoveredAttachOutcome;
+  /** The job id of the CURRENT live attachment, or null when none is live. Lets T16b
+   *  boot idempotently against the actual live attachment (not a one-way flag), so a
+   *  StrictMode setup→cleanup→setup replay re-attaches instead of going silent. */
+  getLiveJobId(): string | null;
+  /** Register T16b's cursor-persistence provider. Returns an identity-scoped
+   *  unregister that clears the controller provider ONLY if this provider is still the
+   *  registration. The newest live registration is current; removing it restores the
+   *  previous survivor. If a durable/degraded job is already live, the provider is
+   *  immediately `prepare`d for it. */
+  registerCursorPersistence(provider: CursorPersistenceProvider): () => void;
+  /** The opaque authority to clean up a degraded (`activation-persistence-failed` /
+   *  `-unverified`) run's retained PROVISIONAL record, or null when the current live
+   *  attachment is not that degraded job. Forwarded verbatim; never interpreted here. */
+  prepareDegradedCleanup(jobId: string): PreparedDegradedCleanup | null;
+  /** End cursor-persistence authority for the exact current job without resetting the
+   * terminal view. Used after verified durable cleanup. */
+  revokeCursorPersistence(jobId: string): void;
   cancel(): Promise<void>;
   finishNow(): Promise<void>;
   /** Reset hot/controller state only. Durable cleanup belongs to T16b/T16e. */
@@ -208,24 +242,6 @@ export interface OptimizeRunController {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function acquireSessionStorage(): SessionTransactionStorage {
-  let storage: Storage;
-  try {
-    storage = globalThis.sessionStorage;
-  } catch {
-    return throwingStorage();
-  }
-  if (!storage) return throwingStorage();
-  return storage;
-}
-
-function throwingStorage(): SessionTransactionStorage {
-  const throwing = (): never => {
-    throw new Error("sessionStorage is unavailable.");
-  };
-  return { getItem: throwing, setItem: throwing, removeItem: throwing };
-}
 
 function defaultOwnerId(): string {
   const cryptoObj = globalThis.crypto;
@@ -297,24 +313,69 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
   // outcome; it carries (generation, attemptId) only.
   const submitAttemptRef = useRef<{ generation: number; attemptId: string } | null>(null);
 
-  // T16b recovery seams. Stored in refs; read by the stream effect. Bound to the
-  // attachment token so a revoked stream cannot persist or clear a later job's
-  // cursor (P1 #3).
+  // T16b recovery seams. Stored in refs; read by the stream effect.
+  //   • `initialCursorRef` — the recovered resume cursor to seed the first request.
+  //   • `persistCtxRef` — the CURRENT durable/degraded persistence context (job +
+  //     whether reload recovery is available). Bound to the attachment token via the
+  //     stream fence so a revoked stream cannot persist/clear a later job's cursor.
+  //   • `providerRegistrationsRef` — ordered mounted T16b providers. The last entry is
+  //     resolved at call time; removing it restores the previous survivor.
+  //   • `degradedCleanupRef` — the opaque provisional-cleanup authority for the current
+  //     degraded run, scoped to its exact attachment token.
   const initialCursorRef = useRef<string | null>(null);
-  const onCursorCommitRef = useRef<((cursor: string) => void) | undefined>(undefined);
-  const onCursorResetRef = useRef<(() => void) | undefined>(undefined);
+  const persistCtxRef = useRef<{ jobId: string; reloadRecoveryAvailable: boolean } | null>(null);
+  const providerRegistrationsRef = useRef<
+    Array<{ registration: symbol; provider: CursorPersistenceProvider }>
+  >([]);
+  const degradedCleanupRef = useRef<{
+    token: AttachmentToken;
+    jobId: string;
+    cleanup: PreparedDegradedCleanup;
+  } | null>(null);
+
+  const currentProvider = useCallback((): CursorPersistenceProvider | null => {
+    const registrations = providerRegistrationsRef.current;
+    return registrations.length > 0 ? registrations[registrations.length - 1].provider : null;
+  }, []);
+
+  const revokeRegisteredProviders = useCallback((jobId: string): void => {
+    for (const { provider } of providerRegistrationsRef.current) {
+      provider.revoke(jobId);
+    }
+  }, []);
+
+  const revokePersistenceAuthority = useCallback(
+    (expectedToken: AttachmentToken | null): void => {
+      if (expectedToken === null || tokenRef.current !== expectedToken) return;
+      const ctx = persistCtxRef.current;
+      if (ctx !== null && ctx.jobId === expectedToken.jobId) {
+        // Every mounted provider may have been prepared for this attachment before a
+        // newer registration shadowed it. Revoke the exact job across the ordered set
+        // so a later-restored survivor cannot expose stale health. Each provider guards
+        // by its own current job, so a provider already prepared for successor B ignores
+        // a revoke for A.
+        revokeRegisteredProviders(ctx.jobId);
+      }
+      initialCursorRef.current = null;
+      persistCtxRef.current = null;
+      degradedCleanupRef.current = null;
+    },
+    [revokeRegisteredProviders],
+  );
 
   useEffect(() => {
     mountedRef.current = true;
     return () => {
-      mountedRef.current = false;
+      revokePersistenceAuthority(tokenRef.current);
       tokenRef.current = null;
       submitAttemptRef.current = null;
       initialCursorRef.current = null;
-      onCursorCommitRef.current = undefined;
-      onCursorResetRef.current = undefined;
+      persistCtxRef.current = null;
+      degradedCleanupRef.current = null;
+      providerRegistrationsRef.current = [];
+      mountedRef.current = false;
     };
-  }, []);
+  }, [revokePersistenceAuthority]);
 
   const view = useHotStore((state) => state.runView);
 
@@ -335,16 +396,17 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
       prevGenRef.current = genSnapshot;
       const tokenCurrent = tokenRef.current?.generation === genSnapshot;
       if (!tokenCurrent) {
+        revokePersistenceAuthority(tokenRef.current);
         tokenRef.current = null;
-        onCursorCommitRef.current = undefined;
-        onCursorResetRef.current = undefined;
         initialCursorRef.current = null;
+        persistCtxRef.current = null;
+        degradedCleanupRef.current = null;
         setJobId(null);
         setActivation(null);
         setAttachmentIdentity(null);
       }
     }
-  }, [genSnapshot]);
+  }, [genSnapshot, revokePersistenceAuthority]);
 
   // --- dispatch -------------------------------------------------------------
   // The unfenced dispatch — for synchronous, controller-initiated signals.
@@ -369,25 +431,29 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
     [],
   );
 
-  // Clear the T16b recovery bundle (resume cursor + consumer cursor callbacks) so a
-  // later attachment cannot inherit a prior recovery's cursor or invoke its
-  // callbacks (P1 #2). Called on every detach and on a fresh (non-recovery) attach.
+  // Clear the T16b recovery bundle (resume cursor + persistence context + degraded
+  // cleanup) so a later attachment cannot inherit a prior recovery's cursor context or
+  // degraded-cleanup authority. The registered provider persists across attachments
+  // (it is per-hook, not per-run). Called on every detach and reset.
   const clearRecoveryRefs = useCallback(() => {
     initialCursorRef.current = null;
-    onCursorCommitRef.current = undefined;
-    onCursorResetRef.current = undefined;
+    persistCtxRef.current = null;
+    degradedCleanupRef.current = null;
   }, []);
 
   // Detach a server-confirmed-gone job from the current controller view.
   const detachGoneJob = useCallback(
-    (_goneJobId: string) => {
+    (goneJobId: string) => {
+      const token = tokenRef.current;
+      if (token === null || token.jobId !== goneJobId) return;
+      revokePersistenceAuthority(token);
       setJobId(null);
       setActivation(null);
       tokenRef.current = null;
       clearRecoveryRefs();
       setAttachmentIdentity(null);
     },
-    [clearRecoveryRefs],
+    [clearRecoveryRefs, revokePersistenceAuthority],
   );
 
   // The token-fenced dispatch — for async completions (poll, stream, control).
@@ -502,9 +568,18 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
       outcomeToSignals(outcome).forEach(dispatch);
 
       const attach = (id: string, reloadRecoveryAvailable: boolean): void => {
+        revokePersistenceAuthority(tokenRef.current);
         const token = makeToken(generation, attemptId, id);
         tokenRef.current = token;
-        clearRecoveryRefs();
+        // A fresh run always starts at the floor — no seeded resume cursor. Set the
+        // persistence context and `prepare` the current provider so its cursor writer
+        // is installed for a DURABLE run (and health resets to this job); a degraded
+        // (non-durable) activation reports reload recovery unavailable and keeps no
+        // writer. Any prior degraded-cleanup authority is dropped for a fresh attach.
+        initialCursorRef.current = null;
+        persistCtxRef.current = { jobId: id, reloadRecoveryAvailable };
+        degradedCleanupRef.current = null;
+        currentProvider()?.prepare(id, reloadRecoveryAvailable);
         setActivation({
           jobId: id,
           anonymized: prep.anonymized,
@@ -516,16 +591,26 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
         setAttachmentIdentity(token);
       };
 
+      // Capture the opaque degraded provisional-cleanup authority for the attachment
+      // just created (its retained record is the provisional this transaction staged).
+      const captureDegradedCleanup = (id: string, cleanup: PreparedDegradedCleanup): void => {
+        if (tokenRef.current) {
+          degradedCleanupRef.current = { token: tokenRef.current, jobId: id, cleanup };
+        }
+      };
+
       if (outcome.status === "activated") {
         attach(outcome.record.jobId, true);
         return { status: "activated", jobId: outcome.record.jobId };
       }
       if (outcome.status === "activation-persistence-failed") {
         attach(outcome.volatile.jobId, false);
+        captureDegradedCleanup(outcome.volatile.jobId, outcome.cleanupDegraded);
         return { status: "activation-persistence-failed", jobId: outcome.volatile.jobId };
       }
       if (outcome.status === "activation-unverified") {
         attach(outcome.volatile.jobId, false);
+        captureDegradedCleanup(outcome.volatile.jobId, outcome.cleanupDegraded);
         return {
           status: "activation-unverified",
           jobId: outcome.volatile.jobId,
@@ -540,7 +625,7 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
       }
       return { status: "acceptance-unknown" };
     },
-    [clearRecoveryRefs, dispatch, submitMutation],
+    [currentProvider, dispatch, revokePersistenceAuthority, submitMutation],
   );
 
   const resubmit = useCallback(
@@ -560,9 +645,7 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
         typeof input.jobId !== "string" ||
         input.jobId.length === 0 ||
         input.jobId.length > 512 ||
-        !(input.initialCursor === null || typeof input.initialCursor === "string") ||
-        !(input.onCursorCommit === undefined || typeof input.onCursorCommit === "function") ||
-        !(input.onCursorReset === undefined || typeof input.onCursorReset === "function")
+        !(input.initialCursor === null || typeof input.initialCursor === "string")
       ) {
         return {
           status: "invalid",
@@ -607,16 +690,21 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
 
       const generation = useHotStore.getState().runGeneration;
       const attemptId = defaultAttemptId();
+      revokePersistenceAuthority(tokenRef.current);
       const token = makeToken(generation, attemptId, input.jobId);
       tokenRef.current = token;
 
-      // Store the cursor callbacks. They are bound to the subscription: the
-      // T16p seam freezes them at stream start, and the wrapping checks
-      // `tokenRef.current` before forwarding, so a revoked stream cannot
-      // persist or clear a later cursor.
+      // Seed the resume cursor and set the durable persistence context, then `prepare`
+      // the current provider so cursor persistence targets the CURRENT mounted provider
+      // (not a frozen closure). A recovered attach is always durable. Any prior degraded
+      // authority is dropped.
       initialCursorRef.current = input.initialCursor;
-      onCursorCommitRef.current = input.onCursorCommit;
-      onCursorResetRef.current = input.onCursorReset;
+      persistCtxRef.current = {
+        jobId: input.jobId,
+        reloadRecoveryAvailable: input.activation.reloadRecoveryAvailable,
+      };
+      degradedCleanupRef.current = null;
+      currentProvider()?.prepare(input.jobId, input.activation.reloadRecoveryAvailable);
 
       dispatch({
         type: "job-activated",
@@ -632,7 +720,63 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
       setAttachmentIdentity(token);
       return { status: "attached", jobId: input.jobId };
     },
-    [dispatch, tokenIsLive],
+    [currentProvider, dispatch, revokePersistenceAuthority, tokenIsLive],
+  );
+
+  // The job id of the CURRENT live attachment (exact-token + live generation), or
+  // null. T16b boots idempotently against this real state: after a StrictMode
+  // setup→cleanup→setup replay clears the token, this returns null and T16b re-attaches.
+  const getLiveJobId = useCallback((): string | null => {
+    const t = tokenRef.current;
+    return t && tokenIsLive(t) ? t.jobId : null;
+  }, [tokenIsLive]);
+
+  // Minimal ordered provider registrations. The last mounted registrant is current.
+  // Removing it restores the previous survivor; removing an older entry leaves the
+  // current provider untouched. Exact registration symbols make duplicate provider
+  // objects safe under StrictMode replay.
+  const registerCursorPersistence = useCallback(
+    (provider: CursorPersistenceProvider): (() => void) => {
+      const registration = Symbol("cursor-persistence-provider");
+      providerRegistrationsRef.current.push({ registration, provider });
+      const ctx = persistCtxRef.current;
+      if (ctx !== null) provider.prepare(ctx.jobId, ctx.reloadRecoveryAvailable);
+      return () => {
+        const registrations = providerRegistrationsRef.current;
+        const index = registrations.findIndex((entry) => entry.registration === registration);
+        if (index < 0) return;
+        const wasCurrent = index === registrations.length - 1;
+        registrations.splice(index, 1);
+        if (!wasCurrent) return;
+        const liveCtx = persistCtxRef.current;
+        if (liveCtx !== null) provider.revoke(liveCtx.jobId);
+        const survivor = currentProvider();
+        if (liveCtx !== null && survivor !== null) {
+          survivor.prepare(liveCtx.jobId, liveCtx.reloadRecoveryAvailable);
+        }
+      };
+    },
+    [currentProvider],
+  );
+
+  // The opaque degraded provisional-cleanup authority for the current live degraded
+  // run, or null. Exact-token + exact-job scoped so a stale/superseded degraded run's
+  // authority is never returned. Forwarded to T16b verbatim; never interpreted here.
+  const prepareDegradedCleanup = useCallback(
+    (id: string): PreparedDegradedCleanup | null => {
+      const d = degradedCleanupRef.current;
+      return d && d.jobId === id && tokenIsLive(d.token) ? d.cleanup : null;
+    },
+    [tokenIsLive],
+  );
+
+  const revokeCursorPersistence = useCallback(
+    (id: string): void => {
+      const token = tokenRef.current;
+      if (token === null || token.jobId !== id || !tokenIsLive(token)) return;
+      revokePersistenceAuthority(token);
+    },
+    [revokePersistenceAuthority, tokenIsLive],
   );
 
   // --- controls (cancel / finish-now) ---------------------------------------
@@ -709,13 +853,14 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
   const reset = useCallback(() => {
     // Durable cleanup is deliberately not a controller reset side effect. T16b/T16e
     // inspect and remove the one session record without erasing a terminal result.
+    revokePersistenceAuthority(tokenRef.current);
     tokenRef.current = null;
     clearRecoveryRefs();
     setJobId(null);
     setActivation(null);
     setAttachmentIdentity(null);
     useHotStore.getState().resetRunView();
-  }, [clearRecoveryRefs]);
+  }, [clearRecoveryRefs, revokePersistenceAuthority]);
 
   // --- authoritative poll → snapshot ---------------------------------------
   // Provenance-isolated poll: keyed by the immutable attachment token, so a
@@ -779,22 +924,26 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
       // Generation-fenced (P1 #1): between a New/Load generation bump and the passive
       // revocation effect, `tokenRef.current` may still equal A's token, so plain
       // reference equality would let A persist its cursor. `tokenIsLive` also
-      // compares the live canonical generation, making the late commit inert.
-      if (tokenIsLive(creating)) {
-        onCursorCommitRef.current?.(cursor);
+      // compares the live canonical generation, making the late commit inert. The
+      // CURRENT provider is resolved at call time (a remount takes over the sink), and
+      // only a durable job (reload recovery available) persists its cursor.
+      const ctx = persistCtxRef.current;
+      if (tokenIsLive(creating) && ctx?.reloadRecoveryAvailable) {
+        currentProvider()?.onCommit(ctx.jobId, cursor);
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [attachmentIdentity, tokenIsLive],
+    [attachmentIdentity, currentProvider, tokenIsLive],
   );
 
   const onCursorReset = useCallback(() => {
     if (tokenIsLive(creating)) {
       dispatchIfAttached({ type: "cursor-reset" }, creating);
-      onCursorResetRef.current?.();
+      const ctx = persistCtxRef.current;
+      if (ctx?.reloadRecoveryAvailable) currentProvider()?.onReset(ctx.jobId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [attachmentIdentity, dispatchIfAttached, tokenIsLive]);
+  }, [attachmentIdentity, currentProvider, dispatchIfAttached, tokenIsLive]);
 
   // The stream callbacks memo uses the same `creating` token captured at this
   // render. Recreated on attachment identity change so each new subscription has
@@ -907,6 +1056,10 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
     submit,
     resubmit,
     attachRecoveredSession,
+    getLiveJobId,
+    registerCursorPersistence,
+    prepareDegradedCleanup,
+    revokeCursorPersistence,
     cancel,
     finishNow,
     reset,

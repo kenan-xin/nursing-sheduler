@@ -203,6 +203,11 @@ function preparedAttachment(
   };
 }
 
+/** A spy cursor-persistence provider (the T16b seam the controller drives by identity). */
+function spyProvider() {
+  return { prepare: vi.fn(), onCommit: vi.fn(), onReset: vi.fn(), revoke: vi.fn() };
+}
+
 // Record every requested URL so we can assert no heartbeat is ever sent.
 let requested: string[];
 
@@ -654,6 +659,10 @@ describe("useOptimizeRun — generation fencing (P1 #1)", () => {
       throw new Error(`unexpected: ${u}`);
     });
     const { result } = renderHook(() => useOptimizeRun(deps()), { wrapper });
+    const provider = spyProvider();
+    act(() => {
+      result.current.registerCursorPersistence(provider);
+    });
 
     await act(async () => {
       await result.current.submit({ document: doc, anonymize: false });
@@ -673,6 +682,7 @@ describe("useOptimizeRun — generation fencing (P1 #1)", () => {
     // The view was cleared by resetEphemeral; no late snapshot repopulated it.
     expect(result.current.view.lifecycle).toBe("idle");
     expect(result.current.view.jobId).toBeNull();
+    expect(provider.revoke).toHaveBeenCalledWith("opt_1");
   });
 
   it("reset during a pending cancel drops the late cancel response", async () => {
@@ -737,9 +747,6 @@ describe("useOptimizeRun — attachRecoveredSession (P1 #2)", () => {
       ["P2", 2],
     ];
 
-    const onCursorCommit = vi.fn();
-    const onCursorReset = vi.fn();
-
     const { result } = renderHook(() => useOptimizeRun(deps()), { wrapper });
 
     act(() => {
@@ -753,8 +760,6 @@ describe("useOptimizeRun — attachRecoveredSession (P1 #2)", () => {
           },
         }),
         initialCursor: "cursor-from-reload",
-        onCursorCommit,
-        onCursorReset,
       });
     });
 
@@ -800,6 +805,25 @@ describe("useOptimizeRun — storage getter SecurityError (P1 #4)", () => {
 });
 
 describe("useOptimizeRun — exact poll job-gone proof", () => {
+  it("revokes cursor health when an exact poll proves the job is gone", async () => {
+    routeFetch((u) => {
+      if (u.endsWith("/events")) return streamResponse(": keepalive\n\n");
+      if (u.endsWith("/api/optimize/poll_A")) {
+        return json(404, { error: { code: "job_not_found", message: "gone" } });
+      }
+      throw new Error(`unexpected: ${u}`);
+    });
+    const { result } = renderHook(() => useOptimizeRun(deps()), { wrapper });
+    const provider = spyProvider();
+    act(() => {
+      result.current.registerCursorPersistence(provider);
+      result.current.attachRecoveredSession(preparedAttachment("poll_A"));
+    });
+
+    await waitFor(() => expect(result.current.activation).toBeNull());
+    expect(provider.revoke).toHaveBeenCalledWith("poll_A");
+  });
+
   it.each([
     [500, { error: { code: "job_not_found", message: "gone" } }],
     [404, { error: { code: "job_not_found" } }],
@@ -855,6 +879,10 @@ describe("useOptimizeRun — control job_not_found (P1 #5)", () => {
       throw new Error(`unexpected: ${u}`);
     });
     const { result } = renderHook(() => useOptimizeRun(deps()), { wrapper });
+    const provider = spyProvider();
+    act(() => {
+      result.current.registerCursorPersistence(provider);
+    });
 
     await act(async () => {
       await result.current.submit({ document: doc, anonymize: false });
@@ -869,6 +897,7 @@ describe("useOptimizeRun — control job_not_found (P1 #5)", () => {
     expect(result.current.view.error?.code).toBe("job_not_found");
     expect(result.current.view.resubmittable).toBe(true);
     expect(result.current.activation).toBeNull();
+    expect(provider.revoke).toHaveBeenCalledWith("opt_1");
   });
 
   it("finish-now job_not_found becomes job-gone, detaches, and is resubmittable", async () => {
@@ -1040,15 +1069,11 @@ describe("useOptimizeRun — prepared recovery transport", () => {
   });
 
   it("idempotent re-attach of the same job id with the same cursor leaves the token untouched", () => {
-    const originalCommit = vi.fn();
     const { result } = renderHook(() => useOptimizeRun(deps()), { wrapper });
     let first!: ReturnType<typeof result.current.attachRecoveredSession>;
     act(() => {
       first = result.current.attachRecoveredSession(
-        preparedAttachment("same_job", {
-          initialCursor: "cursor-A",
-          onCursorCommit: originalCommit,
-        }),
+        preparedAttachment("same_job", { initialCursor: "cursor-A" }),
       );
     });
     expect(first.status).toBe("attached");
@@ -1056,41 +1081,28 @@ describe("useOptimizeRun — prepared recovery transport", () => {
     const seqAfterFirst = result.current.view.seq;
     const logLenAfterFirst = result.current.view.log.length;
 
-    const refreshedCommit = vi.fn();
     let second!: ReturnType<typeof result.current.attachRecoveredSession>;
     act(() => {
       second = result.current.attachRecoveredSession(
-        preparedAttachment("same_job", {
-          initialCursor: "cursor-A",
-          onCursorCommit: refreshedCommit,
-        }),
+        preparedAttachment("same_job", { initialCursor: "cursor-A" }),
       );
     });
     expect(second.status).toBe("attached");
 
+    // Same job + cursor is a true no-mutation idempotent result.
     expect(result.current.view.seq).toBe(seqAfterFirst);
     expect(result.current.view.log.length).toBe(logLenAfterFirst);
-
-    expect(currentStreamOptions).not.toBeNull();
-    currentStreamOptions!.onCursorCommit?.("cursor-fresh");
-    expect(originalCommit).toHaveBeenCalledWith("cursor-fresh");
-    expect(refreshedCommit).not.toHaveBeenCalled();
   });
 
   it("does not compare prepared activation data on an idempotent live re-attach", () => {
-    const originalCommit = vi.fn();
     const { result } = renderHook(() => useOptimizeRun(deps()), { wrapper });
     act(() => {
       result.current.attachRecoveredSession(
-        preparedAttachment("same_job", {
-          initialCursor: "cursor-A",
-          onCursorCommit: originalCommit,
-        }),
+        preparedAttachment("same_job", { initialCursor: "cursor-A" }),
       );
     });
     const seqAfterFirst = result.current.view.seq;
 
-    const refreshedCommit = vi.fn();
     let outcome!: ReturnType<typeof result.current.attachRecoveredSession>;
     act(() => {
       outcome = result.current.attachRecoveredSession(
@@ -1102,16 +1114,13 @@ describe("useOptimizeRun — prepared recovery transport", () => {
             reloadRecoveryAvailable: true,
           },
           initialCursor: "cursor-A",
-          onCursorCommit: refreshedCommit,
         }),
       );
     });
     expect(outcome.status).toBe("attached");
     expect(result.current.view.seq).toBe(seqAfterFirst);
+    // The live activation is untouched by the idempotent re-attach's prepared data.
     expect(result.current.activation?.peopleCount).toBe(0);
-    currentStreamOptions!.onCursorCommit?.("cursor-x");
-    expect(originalCommit).toHaveBeenCalledWith("cursor-x");
-    expect(refreshedCommit).not.toHaveBeenCalled();
   });
 
   it("same-job re-attach with a CHANGED cursor returns conflict (never silent swap)", () => {
@@ -1137,6 +1146,166 @@ describe("useOptimizeRun — prepared recovery transport", () => {
   });
 });
 
+describe("useOptimizeRun — identity-scoped cursor provider lifetime (fixup P1)", () => {
+  it("an overlapping provider's unregister never revokes the surviving current provider", async () => {
+    routeFetch((u, init) => {
+      const method = init?.method ?? "GET";
+      if (u.endsWith("/api/optimize") && method === "POST") return json(202, job());
+      if (u.endsWith("/events")) return streamResponse(": keepalive\n\n");
+      if (/\/api\/optimize\/[^/]+$/.test(u)) return json(200, job());
+      throw new Error(`unexpected: ${u}`);
+    });
+
+    const { result } = renderHook(() => useOptimizeRun(deps()), { wrapper });
+    const a = spyProvider();
+    const b = spyProvider();
+    let unregA!: () => void;
+    act(() => {
+      unregA = result.current.registerCursorPersistence(a);
+    });
+    act(() => {
+      result.current.registerCursorPersistence(b);
+    });
+    // A (registered first) unmounts AFTER B — its token-checked unregister must be a
+    // no-op, leaving B as the current provider.
+    act(() => unregA());
+
+    await act(async () => {
+      await result.current.submit({ document: doc, anonymize: false });
+    });
+    await waitFor(() => expect(result.current.view.jobId).toBe("opt_1"));
+
+    // The durable activation prepared the SURVIVING provider (B), not the revoked A.
+    expect(b.prepare).toHaveBeenCalledWith("opt_1", true);
+    expect(a.prepare).not.toHaveBeenCalled();
+  });
+
+  it("restores the older provider when the current provider unregisters first", async () => {
+    const stream = controlledStream();
+    routeFetch((u) => {
+      if (u.endsWith("/events")) return stream.response;
+      if (/\/api\/optimize\/[^/]+$/.test(u)) return json(200, job());
+      throw new Error(`unexpected: ${u}`);
+    });
+
+    const { result } = renderHook(() => useOptimizeRun(deps()), { wrapper });
+    const a = spyProvider();
+    const b = spyProvider();
+    let unregisterA!: () => void;
+    let unregisterB!: () => void;
+    act(() => {
+      unregisterA = result.current.registerCursorPersistence(a);
+      unregisterB = result.current.registerCursorPersistence(b);
+      result.current.attachRecoveredSession(preparedAttachment("opt_1"));
+    });
+    await waitFor(() => expect(currentStreamOptions).not.toBeNull());
+
+    expect(b.prepare).toHaveBeenCalledWith("opt_1", true);
+    act(() => unregisterB());
+    expect(b.revoke).toHaveBeenCalledWith("opt_1");
+    expect(a.prepare).toHaveBeenCalledWith("opt_1", true);
+
+    act(() => currentStreamOptions!.onCursorCommit?.("after-B"));
+    expect(a.onCommit).toHaveBeenCalledWith("opt_1", "after-B");
+    expect(b.onCommit).not.toHaveBeenCalled();
+
+    act(() => unregisterA());
+    expect(a.revoke).toHaveBeenCalledWith("opt_1");
+    act(() => currentStreamOptions!.onCursorReset?.());
+    expect(a.onReset).not.toHaveBeenCalled();
+    expect(b.onReset).not.toHaveBeenCalled();
+    stream.close();
+  });
+
+  it("a recovery-only remount takes over cursor persistence for the still-live run", async () => {
+    const stream = controlledStream();
+    routeFetch((u, init) => {
+      const method = init?.method ?? "GET";
+      if (u.endsWith("/api/optimize") && method === "POST") return json(202, job());
+      if (u.endsWith("/events")) return stream.response;
+      if (/\/api\/optimize\/[^/]+$/.test(u)) return json(200, job());
+      throw new Error(`unexpected: ${u}`);
+    });
+
+    const { result } = renderHook(() => useOptimizeRun(deps()), { wrapper });
+    const a = spyProvider();
+    let unregA!: () => void;
+    act(() => {
+      unregA = result.current.registerCursorPersistence(a);
+    });
+    act(() => {
+      result.current.attachRecoveredSession(preparedAttachment("opt_1", { initialCursor: null }));
+    });
+    await waitFor(() => expect(result.current.view.jobId).toBe("opt_1"));
+    expect(a.prepare).toHaveBeenCalledWith("opt_1", true);
+
+    // Recovery-only remount: hook A unmounts, hook B mounts (registers) while the SAME
+    // run stays live and the SAME stream keeps flowing (no re-attach, no new transport).
+    const b = spyProvider();
+    act(() => {
+      unregA();
+      result.current.registerCursorPersistence(b);
+    });
+    // The controller immediately prepared B for the live job → B is the new sink.
+    expect(b.prepare).toHaveBeenCalledWith("opt_1", true);
+
+    await act(async () => {
+      stream.push(
+        'id: cX\nevent: job.progressed\ndata: {"source":"solver","currentBestScore":9,"elapsedSeconds":1,"occurred_at":"2026-07-19T10:00:00Z"}\n\n',
+      );
+      await new Promise((r) => setTimeout(r, 30));
+    });
+    // The committed cursor routes to the remounted provider B, never the stale A.
+    expect(b.onCommit).toHaveBeenCalledWith("opt_1", "cX");
+    expect(a.onCommit).not.toHaveBeenCalled();
+    stream.close();
+  });
+
+  it("ignores a late revoke for A after successor B is attached", () => {
+    const { result } = renderHook(() => useOptimizeRun(deps()), { wrapper });
+    const provider = spyProvider();
+    act(() => {
+      result.current.registerCursorPersistence(provider);
+      result.current.attachRecoveredSession(preparedAttachment("job-A"));
+      result.current.reset();
+      result.current.attachRecoveredSession(preparedAttachment("job-B"));
+    });
+    provider.revoke.mockClear();
+
+    act(() => result.current.revokeCursorPersistence("job-A"));
+    expect(provider.revoke).not.toHaveBeenCalled();
+    expect(result.current.getLiveJobId()).toBe("job-B");
+  });
+});
+
+describe("useOptimizeRun — stream job-gone revocation", () => {
+  it("revokes the exact attachment provider when the stream proves job-gone", async () => {
+    routeFetch((u) => {
+      if (u.endsWith("/events")) return streamResponse(": keepalive\n\n");
+      if (/\/api\/optimize\/[^/]+$/.test(u)) return json(200, job());
+      throw new Error(`unexpected: ${u}`);
+    });
+    const { result } = renderHook(() => useOptimizeRun(deps()), { wrapper });
+    const provider = spyProvider();
+    act(() => {
+      result.current.registerCursorPersistence(provider);
+      result.current.attachRecoveredSession(preparedAttachment("opt_1"));
+    });
+    await waitFor(() => expect(currentStreamOptions?.onJobGone).toBeDefined());
+
+    act(() => {
+      currentStreamOptions!.onJobGone?.({
+        kind: "job-not-found",
+        status: 404,
+        code: "job_not_found",
+        message: "gone",
+      });
+    });
+    expect(provider.revoke).toHaveBeenCalledWith("opt_1");
+    expect(result.current.activation).toBeNull();
+  });
+});
+
 describe("useOptimizeRun — cursor callbacks fire post-commit (closure-review P1 #3)", () => {
   it("onCursorCommit fires after a stream frame applies, with the committed cursor", async () => {
     const stream = controlledStream();
@@ -1150,20 +1319,15 @@ describe("useOptimizeRun — cursor callbacks fire post-commit (closure-review P
 
     const { result } = renderHook(() => useOptimizeRun(deps()), { wrapper });
 
-    const onCursorCommit = vi.fn();
-    const onCursorReset = vi.fn();
-
-    // Install the cursor callbacks via the LEGITIMATE fresh-attach path (no prior
-    // submit): a recovered session is the primary attachment, so the callbacks are
-    // wired as its own subscription inputs — never swapped in behind a live one.
+    const provider = spyProvider();
     act(() => {
-      result.current.attachRecoveredSession(
-        preparedAttachment("opt_1", {
-          initialCursor: null,
-          onCursorCommit,
-          onCursorReset,
-        }),
-      );
+      result.current.registerCursorPersistence(provider);
+    });
+
+    // A recovered session is the primary attachment; the controller drives the
+    // registered provider by identity (never a per-attachment frozen callback).
+    act(() => {
+      result.current.attachRecoveredSession(preparedAttachment("opt_1", { initialCursor: null }));
     });
     await waitFor(() => expect(result.current.view.jobId).toBe("opt_1"));
 
@@ -1175,9 +1339,7 @@ describe("useOptimizeRun — cursor callbacks fire post-commit (closure-review P
       await new Promise((r) => setTimeout(r, 30));
     });
 
-    expect(onCursorCommit).toHaveBeenCalled();
-    const committed = onCursorCommit.mock.calls.at(-1)?.[0];
-    expect(committed).toBe("committed-cursor");
+    expect(provider.onCommit).toHaveBeenCalledWith("opt_1", "committed-cursor");
     expect(result.current.view.progress.length).toBeGreaterThanOrEqual(1);
     stream.close();
   });
@@ -1197,24 +1359,19 @@ describe("useOptimizeRun — cursor callbacks fire post-commit (closure-review P
     });
 
     const { result } = renderHook(() => useOptimizeRun(deps()), { wrapper });
+    const provider = spyProvider();
+    act(() => {
+      result.current.registerCursorPersistence(provider);
+    });
     await act(async () => {
       await result.current.submit({ document: doc, anonymize: false });
     });
     await waitFor(() => expect(result.current.view.jobId).toBe("opt_1"));
 
-    const onCursorReset = vi.fn();
-    act(() => {
-      result.current.attachRecoveredSession(
-        preparedAttachment("opt_1", {
-          initialCursor: null,
-          onCursorReset,
-        }),
-      );
-    });
-
-    // Controller reset must NOT forward onCursorReset.
+    // Controller reset must NOT forward a cursor reset to the provider.
     act(() => result.current.reset());
-    expect(onCursorReset).not.toHaveBeenCalled();
+    expect(provider.onReset).not.toHaveBeenCalled();
+    expect(provider.revoke).toHaveBeenCalledWith("opt_1");
     stream.close();
   });
 });
@@ -1238,18 +1395,12 @@ describe("useOptimizeRun — revoked stream cannot forward cursor callbacks (clo
 
     const { result } = renderHook(() => useOptimizeRun(deps()), { wrapper });
 
-    const onCursorCommit = vi.fn();
-    const onCursorReset = vi.fn();
-    // Fresh-attach the recovered session as the primary attachment (the legitimate
-    // path that installs cursor callbacks); no prior submit swaps them in.
+    const provider = spyProvider();
     act(() => {
-      result.current.attachRecoveredSession(
-        preparedAttachment("opt_1", {
-          initialCursor: null,
-          onCursorCommit,
-          onCursorReset,
-        }),
-      );
+      result.current.registerCursorPersistence(provider);
+    });
+    act(() => {
+      result.current.attachRecoveredSession(preparedAttachment("opt_1", { initialCursor: null }));
     });
     await waitFor(() => expect(result.current.view.jobId).toBe("opt_1"));
 
@@ -1258,22 +1409,22 @@ describe("useOptimizeRun — revoked stream cannot forward cursor callbacks (clo
       await new Promise((r) => setTimeout(r, 10));
     });
 
-    // Sanity: while the token is current, the wrapping forwards.
+    // Sanity: while the token is current, the wrapping forwards to the provider.
     expect(currentStreamOptions).not.toBeNull();
     currentStreamOptions!.onCursorCommit?.("cursor-active");
-    expect(onCursorCommit).toHaveBeenCalledWith("cursor-active");
+    expect(provider.onCommit).toHaveBeenCalledWith("opt_1", "cursor-active");
 
     // Reset revokes the attachment token (tokenRef.current → null).
     act(() => result.current.reset());
     expect(result.current.view.lifecycle).toBe("idle");
 
-    // After reset, the revoked stream's commit/reset callbacks are dropped.
-    // These calls simulate the in-flight race window where the old stream's
-    // tracker advances after the user-triggered reset.
+    // After reset, the revoked stream's commit/reset callbacks are dropped. These
+    // calls simulate the in-flight race window where the old stream's tracker
+    // advances after the user-triggered reset.
     currentStreamOptions!.onCursorCommit?.("cursor-revoked");
     currentStreamOptions!.onCursorReset?.();
-    expect(onCursorCommit).not.toHaveBeenCalledWith("cursor-revoked");
-    expect(onCursorReset).not.toHaveBeenCalled();
+    expect(provider.onCommit).not.toHaveBeenCalledWith("opt_1", "cursor-revoked");
+    expect(provider.onReset).not.toHaveBeenCalled();
     stream.close();
   });
 });
@@ -1431,24 +1582,16 @@ describe("useOptimizeRun — exact-token fence (final nested repair)", () => {
     });
 
     const { result } = renderHook(() => useOptimizeRun(deps()), { wrapper });
+    const provider = spyProvider();
+    act(() => {
+      result.current.registerCursorPersistence(provider);
+    });
     await act(async () => {
       await result.current.submit({ document: doc, anonymize: false });
     });
     await waitFor(() => expect(result.current.view.jobId).toBe("opt_1"));
 
-    const consumerCommit = vi.fn();
-    const consumerReset = vi.fn();
-    act(() => {
-      result.current.attachRecoveredSession(
-        preparedAttachment("opt_1", {
-          initialCursor: null,
-          onCursorCommit: consumerCommit,
-          onCursorReset: consumerReset,
-        }),
-      );
-    });
-
-    // Capture A's frozen cursor callbacks.
+    // Capture A's frozen stream cursor callbacks.
     const aStreamOptions = currentStreamOptions;
     const aCommit = aStreamOptions!.onCursorCommit;
     const aReset = aStreamOptions!.onCursorReset;
@@ -1461,11 +1604,11 @@ describe("useOptimizeRun — exact-token fence (final nested repair)", () => {
     expect(result.current.view.lifecycle).toBe("idle");
 
     // A's frozen callbacks, invoked during the in-flight race window, must NOT
-    // forward to the consumer.
+    // forward to the provider (the persistence context was cleared on reset).
     aCommit?.("stale-cursor");
     aReset?.();
-    expect(consumerCommit).not.toHaveBeenCalled();
-    expect(consumerReset).not.toHaveBeenCalled();
+    expect(provider.onCommit).not.toHaveBeenCalledWith("opt_1", "stale-cursor");
+    expect(provider.onReset).not.toHaveBeenCalled();
     stream.close();
   });
 });

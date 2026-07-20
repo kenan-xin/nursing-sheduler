@@ -10,6 +10,7 @@ import {
   OPTIMIZE_SESSION_STORAGE_KEY,
   runSubmissionTransaction,
   stageProvisionalSession,
+  updateActiveCursor,
   type ActiveOptimizeSession,
   type ProvisionalOptimizeSession,
   type SessionCodec,
@@ -553,6 +554,71 @@ describe("runSubmissionTransaction — closed submit seam + owner scoping", () =
     expect(inspectPersistedSession(storage).kind).toBe("interrupted");
   });
 
+  it("degraded cleanup classifies exact owned variants, absence, conflicts, and storage failures", async () => {
+    async function prepared(storage: FakeStorage) {
+      const provisional = anonymizedProvisional("owner-cleanup");
+      const outcome = await runSubmissionTransaction(provisional, {
+        storage,
+        submit: async () => {
+          storage.onSet = () => {};
+          return { status: "accepted", jobId: "job-cleanup" };
+        },
+      });
+      expect(outcome.status).toBe("activation-persistence-failed");
+      if (outcome.status !== "activation-persistence-failed") throw new Error("not degraded");
+      storage.onSet = null;
+      return outcome.cleanupDegraded;
+    }
+
+    const provisional = new FakeStorage();
+    const removeProvisional = await prepared(provisional);
+    expect(removeProvisional()).toEqual({ status: "removed", variant: "provisional" });
+
+    const active = new FakeStorage();
+    const removeActive = await prepared(active);
+    active.seed(validActiveJson("job-cleanup", "owner-cleanup"));
+    expect(removeActive()).toEqual({ status: "removed", variant: "active" });
+
+    const absent = new FakeStorage();
+    const classifyAbsent = await prepared(absent);
+    absent.removeItem(KEY);
+    expect(classifyAbsent()).toEqual({ status: "absent" });
+
+    const foreignProvisional = new FakeStorage();
+    const preserveForeignProvisional = await prepared(foreignProvisional);
+    foreignProvisional.seed(JSON.stringify(anonymizedProvisional("owner-foreign")));
+    expect(preserveForeignProvisional()).toEqual({
+      status: "conflict",
+      evidence: "foreign-provisional",
+    });
+
+    const foreignActive = new FakeStorage();
+    const preserveForeignActive = await prepared(foreignActive);
+    foreignActive.seed(validActiveJson("job-cleanup", "owner-foreign"));
+    expect(preserveForeignActive()).toEqual({
+      status: "conflict",
+      evidence: "foreign-active",
+    });
+
+    const unreadable = new FakeStorage();
+    const preserveUnreadable = await prepared(unreadable);
+    unreadable.seed("{corrupt");
+    expect(preserveUnreadable()).toEqual({ status: "conflict", evidence: "unreadable" });
+
+    const readFailure = new FakeStorage();
+    const classifyReadFailure = await prepared(readFailure);
+    readFailure.onGet = securityError;
+    expect(classifyReadFailure()).toEqual({ status: "unverified", operation: "read" });
+
+    const removeFailure = new FakeStorage();
+    const classifyRemoveFailure = await prepared(removeFailure);
+    removeFailure.onRemove = () => {};
+    expect(classifyRemoveFailure()).toEqual({
+      status: "unverified",
+      operation: "remove-or-verify",
+    });
+  });
+
   // --- interleaved A/B ownership -----------------------------------------
   it.each([
     ["anonymized", anonymizedProvisional("owner-B")],
@@ -771,5 +837,106 @@ describe("forgetInspectedSession — confirmed unchanged-record removal", () => 
     expect(FORGET_OPTIMIZE_SESSION_WARNING).toContain(
       "unknown backend optimization may continue until terminal state or server retention",
     );
+  });
+});
+
+describe("updateActiveCursor — job-scoped, validated, verified cursor persistence", () => {
+  function seedActive(storage: FakeStorage, jobId = "job-1", ownerId = "owner-seed"): void {
+    storage.seed(validActiveJson(jobId, ownerId));
+  }
+
+  it("persists the last committed cursor onto the exact active record and read-back-verifies", () => {
+    const storage = new FakeStorage();
+    seedActive(storage);
+    const outcome = updateActiveCursor(storage, "job-1", "cursor-42");
+    expect(outcome.status).toBe("updated");
+    const stored = JSON.parse(storage.raw(KEY)!);
+    expect(stored).toMatchObject({ phase: "active", jobId: "job-1", lastCursor: "cursor-42" });
+    // The persisted record still round-trips as resumable with the cursor readable.
+    const inspected = inspectPersistedSession(storage);
+    expect(inspected.kind).toBe("resumable");
+    if (inspected.kind === "resumable") {
+      expect(inspected.record.lastCursor).toBe("cursor-42");
+    }
+  });
+
+  it("rebuilds from the CURRENT record (a concurrently changed field is not clobbered)", () => {
+    const storage = new FakeStorage();
+    seedActive(storage, "job-1", "owner-seed");
+    updateActiveCursor(storage, "job-1", "cursor-1");
+    // A later commit advances the cursor without touching the rest of the record.
+    updateActiveCursor(storage, "job-1", "cursor-2");
+    const stored = JSON.parse(storage.raw(KEY)!);
+    expect(stored.lastCursor).toBe("cursor-2");
+    expect(stored.ownerId).toBe("owner-seed");
+    expect(stored.reverseMap).toEqual(REVERSE_MAP);
+  });
+
+  it("clears the persisted cursor on reset (removes the key, not stores undefined)", () => {
+    const storage = new FakeStorage();
+    seedActive(storage);
+    updateActiveCursor(storage, "job-1", "cursor-42");
+    const cleared = updateActiveCursor(storage, "job-1", null);
+    expect(cleared.status).toBe("updated");
+    const stored = JSON.parse(storage.raw(KEY)!);
+    expect("lastCursor" in stored).toBe(false);
+    expect(inspectPersistedSession(storage).kind).toBe("resumable");
+  });
+
+  it("is a no-op fast path when the cursor already matches (no redundant write)", () => {
+    const storage = new FakeStorage();
+    seedActive(storage);
+    updateActiveCursor(storage, "job-1", "cursor-42");
+    const before = storage.setCalls;
+    const again = updateActiveCursor(storage, "job-1", "cursor-42");
+    expect(again.status).toBe("updated");
+    expect(storage.setCalls).toBe(before);
+  });
+
+  it("reports STALE for a different job, a provisional record, or an empty slot", () => {
+    const other = new FakeStorage();
+    seedActive(other, "job-1");
+    expect(updateActiveCursor(other, "job-2", "c").status).toBe("stale");
+
+    const provisional = new FakeStorage();
+    stageProvisionalSession(provisional, anonymizedProvisional());
+    expect(updateActiveCursor(provisional, "job-1", "c").status).toBe("stale");
+
+    const empty = new FakeStorage();
+    expect(updateActiveCursor(empty, "job-1", "c").status).toBe("stale");
+  });
+
+  it("reports STALE for unreadable bytes rather than overwriting them", () => {
+    const storage = new FakeStorage();
+    storage.seed("{corrupt");
+    expect(updateActiveCursor(storage, "job-1", "c").status).toBe("stale");
+    expect(storage.raw(KEY)).toBe("{corrupt");
+  });
+
+  it("reports UNVERIFIED when the read, the write, or the read-back cannot be proven", () => {
+    const readThrows = new FakeStorage();
+    readThrows.seed(validActiveJson("job-1"));
+    readThrows.onGet = securityError;
+    expect(updateActiveCursor(readThrows, "job-1", "c").status).toBe("unverified");
+
+    const writeThrows = new FakeStorage();
+    writeThrows.seed(validActiveJson("job-1"));
+    writeThrows.onSet = securityError;
+    expect(updateActiveCursor(writeThrows, "job-1", "c").status).toBe("unverified");
+
+    const noopWrite = new FakeStorage();
+    noopWrite.seed(validActiveJson("job-1"));
+    noopWrite.onSet = () => {};
+    expect(updateActiveCursor(noopWrite, "job-1", "c").status).toBe("unverified");
+  });
+
+  it("rejects a persisted active record whose lastCursor is not a non-empty string", () => {
+    const empty = new FakeStorage();
+    empty.seed(JSON.stringify({ ...JSON.parse(validActiveJson("job-1")), lastCursor: "" }));
+    expect(inspectPersistedSession(empty).kind).toBe("unreadable");
+
+    const typed = new FakeStorage();
+    typed.seed(JSON.stringify({ ...JSON.parse(validActiveJson("job-1")), lastCursor: 5 }));
+    expect(inspectPersistedSession(typed).kind).toBe("unreadable");
   });
 });

@@ -125,6 +125,7 @@ describe("outcomeToSignals", () => {
     const outcome: SubmissionTransactionOutcome = {
       status: "activation-persistence-failed",
       volatile: volatile("opt_8"),
+      cleanupDegraded: () => ({ status: "absent" }),
     };
     expect(outcomeToSignals(outcome)).toEqual([
       {
@@ -141,6 +142,7 @@ describe("outcomeToSignals", () => {
       status: "activation-unverified",
       volatile: volatile("opt_9"),
       reason: "owner-conflict",
+      cleanupDegraded: () => ({ status: "absent" }),
     };
     expect(outcomeToSignals(outcome)).toEqual([
       {

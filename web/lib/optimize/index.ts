@@ -55,6 +55,7 @@ export {
   OPTIMIZE_POLL_INTERVAL_MS,
   useOptimizeRun,
   type AttachmentToken,
+  type CursorPersistenceProvider,
   type OptimizeRunController,
   type OptimizeRunSubmitInput,
   type OptimizeRunSubmitOutcome,
@@ -71,6 +72,9 @@ export {
   inspectPersistedSession,
   runSubmissionTransaction,
   stageProvisionalSession,
+  updateActiveCursor,
+  type PreparedDegradedCleanup,
+  type DegradedCleanupOutcome,
   OPTIMIZE_SESSION_SCHEMA_VERSION,
   OPTIMIZE_SESSION_STORAGE_KEY,
   OPTIMIZE_TIMEOUT_MAX_SECONDS,
@@ -89,5 +93,21 @@ export {
   type StageProvisionalOutcome,
   type SubmissionTransactionOutcome,
   type SubmitResult,
+  type UpdateActiveCursorOutcome,
   type VolatileActivation,
 } from "./session-transaction";
+
+export { acquireSessionStorage } from "./session-storage";
+
+export {
+  buildRecoveryAttachment,
+  interpretInspectedSession,
+  useOptimizeSessionRecovery,
+  type CursorPersistenceState,
+  type OptimizeCleanupOutcome,
+  type OptimizeForgetOutcome,
+  type OptimizeRecovery,
+  type OptimizeResumeOutcome,
+  type OptimizeSessionRecovery,
+  type UseOptimizeSessionRecoveryDeps,
+} from "./session-recovery";

@@ -71,6 +71,13 @@ export interface ProvisionalOptimizeSession extends OptimizeSessionCommon {
 export interface ActiveOptimizeSession extends OptimizeSessionCommon {
   phase: "active";
   jobId: string;
+  /**
+   * The last opaque event cursor T16p reported committed (post-apply). Absent
+   * until the resumed stream commits its first frame; a reload seeds it as the
+   * stream's initial `Last-Event-ID`. Opaque — stored verbatim, never parsed.
+   * T16b persists it through `updateActiveCursor` and clears it on cursor reset.
+   */
+  lastCursor?: string;
 }
 
 export type OptimizeSessionRecord = ProvisionalOptimizeSession | ActiveOptimizeSession;
@@ -193,8 +200,12 @@ export function buildProvisionalSession(input: {
   };
 }
 
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
 function isValidJobId(jobId: unknown): jobId is string {
-  return typeof jobId === "string" && jobId.length > 0;
+  return isNonEmptyString(jobId);
 }
 
 /** Decode + strictly validate raw bytes into a typed record, or null. */
@@ -231,7 +242,11 @@ function recordsEqual(a: OptimizeSessionRecord, b: OptimizeSessionRecord): boole
   if (a.peopleCount !== b.peopleCount) return false;
   if (!runOptionsEqual(a.runOptions, b.runOptions)) return false;
   if (!reverseMapsEqual(a.reverseMap, b.reverseMap)) return false;
-  if (a.phase === "active" && b.phase === "active" && a.jobId !== b.jobId) return false;
+  if (a.phase === "active" && b.phase === "active") {
+    if (a.jobId !== b.jobId) return false;
+    // `undefined === undefined` treats an absent cursor as equal on both sides.
+    if (a.lastCursor !== b.lastCursor) return false;
+  }
   return true;
 }
 
@@ -457,6 +472,64 @@ export function activateSession(
   };
 }
 
+// --- active cursor persistence (during a resumed run) ----------------------
+
+/** The closed result of persisting (or clearing) an active record's resume cursor. */
+export type UpdateActiveCursorOutcome =
+  | { status: "updated"; record: ActiveOptimizeSession }
+  // The slot no longer holds an active record for this job (gone / superseded /
+  // a different job / unreadable). Non-fatal: the next commit retries.
+  | { status: "stale" }
+  // Storage could not be read, or the write could not be proven durable.
+  | { status: "unverified" };
+
+/** Return the active record with its cursor removed (no `lastCursor: undefined` key). */
+function withoutCursor(record: ActiveOptimizeSession): ActiveOptimizeSession {
+  if (record.lastCursor === undefined) return record;
+  const { lastCursor: _omit, ...rest } = record;
+  return rest;
+}
+
+/**
+ * Persist the last committed opaque cursor onto the durable ACTIVE record for
+ * `jobId`, or clear it when `cursor` is null (an expired/invalid cursor reset).
+ * Job-scoped, not owner-scoped: the cursor belongs to the resumed job, and the
+ * stored owner id is deliberately not treated as caller authorization after a
+ * reload. The record is re-read immediately before the write (no `await` in the
+ * critical section), rebuilt from the CURRENT durable record so a concurrent
+ * field change is never clobbered, writer-validated, and verified by read-back —
+ * so a stale/foreign/unreadable slot is never overwritten and a partial write is
+ * never reported as durable.
+ */
+export function updateActiveCursor(
+  storage: SessionTransactionStorage,
+  jobId: string,
+  cursor: string | null,
+  codec: SessionCodec = defaultCodec,
+): UpdateActiveCursorOutcome {
+  const cur = readCurrent(storage, codec);
+  if (!cur.ok) return { status: "unverified" };
+  const record = cur.record;
+  if (record === null || record.phase !== "active" || record.jobId !== jobId) {
+    return { status: "stale" };
+  }
+
+  const nextCursor = isNonEmptyString(cursor) ? cursor : undefined;
+  // No-op fast path: the durable cursor already matches; skip a redundant write.
+  if (record.lastCursor === nextCursor) return { status: "updated", record };
+
+  const updated: ActiveOptimizeSession =
+    nextCursor === undefined ? withoutCursor(record) : { ...record, lastCursor: nextCursor };
+  const serialized = serializeOwnedRecord(updated, codec);
+  if (serialized === null) return { status: "unverified" };
+
+  const write = guardedSet(storage, serialized);
+  if (!write.ok) return { status: "unverified" };
+  const after = readCurrent(storage, codec);
+  if (after.ok && after.raw === serialized) return { status: "updated", record: updated };
+  return { status: "unverified" };
+}
+
 /** A record we expect to own before removing it: exact owner AND variant. */
 interface ExpectedRecord {
   ownerId: string;
@@ -474,6 +547,59 @@ type RemovalOutcome =
   // Storage could not be read, or the record survived the removal (no-op/partial/
   // throwing remove) — absence is NOT proven.
   | { status: "unverified" };
+
+/** Closed evidence returned by the in-tab degraded cleanup authority. */
+export type DegradedCleanupOutcome =
+  | { status: "removed"; variant: "provisional" | "active" }
+  | { status: "absent" }
+  | {
+      status: "conflict";
+      evidence: "foreign-provisional" | "foreign-active" | "owned-active-other-job" | "unreadable";
+    }
+  | { status: "unverified"; operation: "read" | "remove-or-verify" };
+
+/**
+ * An OPAQUE, in-tab authority to remove the exact record a degraded post-202
+ * activation may have left behind. It captures only the transaction owner and the
+ * accepted job id. That is enough to authorize either the owned provisional or the
+ * owned active record when the active write landed but its read-back was unavailable.
+ * A foreign record is never authorized by job id alone. This is not reload authority:
+ * it is never persisted or reconstructed.
+ */
+export type PreparedDegradedCleanup = () => DegradedCleanupOutcome;
+
+function removeDegradedRecord(
+  storage: SessionTransactionStorage,
+  expected: { ownerId: string; jobId: string },
+  codec: SessionCodec,
+): DegradedCleanupOutcome {
+  const current = readCurrent(storage, codec);
+  if (!current.ok) return { status: "unverified", operation: "read" };
+  if (current.raw === null) return { status: "absent" };
+  const record = current.record;
+  if (record === null) return { status: "conflict", evidence: "unreadable" };
+
+  if (record.ownerId !== expected.ownerId) {
+    return {
+      status: "conflict",
+      evidence: record.phase === "active" ? "foreign-active" : "foreign-provisional",
+    };
+  }
+
+  let variant: "provisional" | "active";
+  if (record.phase === "provisional") {
+    variant = "provisional";
+  } else if (record.jobId === expected.jobId) {
+    variant = "active";
+  } else {
+    return { status: "conflict", evidence: "owned-active-other-job" };
+  }
+
+  guardedRemove(storage);
+  const after = readCurrent(storage, codec);
+  if (after.ok && after.raw === null) return { status: "removed", variant };
+  return { status: "unverified", operation: "remove-or-verify" };
+}
 
 /**
  * Remove the key ONLY when it currently holds the exact expected owner + variant,
@@ -536,13 +662,20 @@ export type SubmissionTransactionOutcome =
   | { status: "acceptance-unknown"; error: unknown }
   // 202 accepted and the active record persisted; the session is resumable.
   | { status: "activated"; record: ActiveOptimizeSession }
-  // 202 accepted but the active write failed; degraded in-tab-only recovery.
-  | { status: "activation-persistence-failed"; volatile: VolatileActivation }
+  // 202 accepted but the active write failed; degraded in-tab-only recovery. The
+  // The durable slot may hold this transaction's provisional or an active write whose
+  // verification failed; `cleanupDegraded` classifies both through exact authority.
+  | {
+      status: "activation-persistence-failed";
+      volatile: VolatileActivation;
+      cleanupDegraded: PreparedDegradedCleanup;
+    }
   // 202 accepted but durable state could not be proven ours (superseded/unknown).
   | {
       status: "activation-unverified";
       volatile: VolatileActivation;
       reason: ActivationUnverifiedReason;
+      cleanupDegraded: PreparedDegradedCleanup;
     };
 
 /**
@@ -605,13 +738,23 @@ export async function runSubmissionTransaction(
   if (activated.status === "activated") {
     return { status: "activated", record: activated.record };
   }
+  // Degraded: verification could have failed before or after the active write landed.
+  // Bind cleanup to the exact owner + accepted job so it can safely remove either
+  // legitimate owned variant while preserving every foreign/wrong/unreadable record.
+  const cleanupDegraded: PreparedDegradedCleanup = () =>
+    removeDegradedRecord(deps.storage, { ownerId: record.ownerId, jobId: result.jobId }, codec);
   if (activated.status === "activation-persistence-failed") {
-    return { status: "activation-persistence-failed", volatile: activated.volatile };
+    return {
+      status: "activation-persistence-failed",
+      volatile: activated.volatile,
+      cleanupDegraded,
+    };
   }
   return {
     status: "activation-unverified",
     volatile: activated.volatile,
     reason: activated.reason,
+    cleanupDegraded,
   };
 }
 
@@ -662,12 +805,29 @@ const COMMON_KEYS = [
   "reverseMap",
 ] as const;
 const PROVISIONAL_KEYS = new Set<string>(COMMON_KEYS);
-const ACTIVE_KEYS = new Set<string>([...COMMON_KEYS, "jobId"]);
+// The active variant requires the provisional keys plus `jobId`, and optionally
+// carries `lastCursor` (absent until the resumed stream commits its first frame).
+const ACTIVE_REQUIRED_KEYS = new Set<string>([...COMMON_KEYS, "jobId"]);
+const ACTIVE_ALLOWED_KEYS = new Set<string>([...COMMON_KEYS, "jobId", "lastCursor"]);
 const RUN_OPTION_KEYS = new Set<string>(["prettify", "timeout"]);
 
 function hasExactKeys(record: Record<string, unknown>, allowed: Set<string>): boolean {
   const keys = Object.keys(record);
   return keys.length === allowed.size && keys.every((key) => allowed.has(key));
+}
+
+/** Every present key is allowed AND every required key is present (allows optionals). */
+function hasAllowedKeys(
+  record: Record<string, unknown>,
+  required: Set<string>,
+  allowed: Set<string>,
+): boolean {
+  const keys = Object.keys(record);
+  if (!keys.every((key) => allowed.has(key))) return false;
+  for (const key of required) {
+    if (!(key in record)) return false;
+  }
+  return true;
 }
 
 function isNonNegativeInteger(value: unknown): value is number {
@@ -724,8 +884,11 @@ function parseSession(value: unknown): OptimizeSessionRecord | null {
     return { ...(candidate as unknown as ProvisionalOptimizeSession), reverseMap };
   }
   if (candidate.phase === "active") {
-    if (!hasExactKeys(candidate, ACTIVE_KEYS)) return null;
+    if (!hasAllowedKeys(candidate, ACTIVE_REQUIRED_KEYS, ACTIVE_ALLOWED_KEYS)) return null;
     if (!isValidJobId(candidate.jobId)) return null;
+    // A present cursor must be a non-empty string; a persisted record never stores
+    // `undefined` (JSON drops it), so the key is either absent or a real cursor.
+    if ("lastCursor" in candidate && !isNonEmptyString(candidate.lastCursor)) return null;
     return { ...(candidate as unknown as ActiveOptimizeSession), reverseMap };
   }
   return null;
