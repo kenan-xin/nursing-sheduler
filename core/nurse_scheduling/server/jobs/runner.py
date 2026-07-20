@@ -85,6 +85,7 @@ class OptimizationRunner:
             progress_callback=publish_progress,
             should_stop=should_stop,
         )
+        stop_requested_when_solver_returned = should_stop is not None and should_stop()
 
         normalized_status = str(solver_status)
         if normalized_status == "INFEASIBLE":
@@ -110,7 +111,15 @@ class OptimizationRunner:
         created_at = job.created_at.astimezone(timezone.utc)
         output_filename = f"nurse-scheduling-{created_at:%Y%m%dT%H%M%SZ}.xlsx"
         outcome = OptimizationOutcome.OPTIMAL if normalized_status == "OPTIMAL" else OptimizationOutcome.FEASIBLE
-        termination_reason = "optimality_proven" if outcome == OptimizationOutcome.OPTIMAL else "limit_or_stop"
+        # A feasible-but-not-optimal result is classified by why the solver
+        # stopped: a cooperative finish-now request (`user_requested`) or the
+        # native timeout expiring (`solver_timeout`).
+        if outcome == OptimizationOutcome.OPTIMAL:
+            termination_reason = "optimality_proven"
+        elif stop_requested_when_solver_returned:
+            termination_reason = "user_requested"
+        else:
+            termination_reason = "solver_timeout"
         return RunOutput(
             result=OptimizationResult(
                 outcome=outcome,
