@@ -8,9 +8,14 @@ either maps to the pinned upstream revision or has a documented adaptation.
 - **Upstream source:** `/home/kenan/work/nurse-scheduling`
 - **Pinned revision:** `0420ccdc0cb3f9aa29db85d288bd36a0d4f37046` (T19 baseline);
   refreshed to `5027e2f5fd7d16b7006ed1ab572b905fa6845ea1` for the public-diagnostics
-  refresh — see [U30a refresh](#u30a--upstream-5027e2f-public-diagnostics-refresh).
+  refresh — see [U30a refresh](#u30a--upstream-5027e2f-public-diagnostics-refresh);
+  refreshed again to `d63519bdbfa6140558afee00f78a5766ad179e6d` for the supervised
+  optimization-execution work — see
+  [U31 refresh](#u31--upstream-5027e2fd63519b-supervised-optimization-refresh).
 - **Governing plan:** rebuild-tech-plan → `upstream-redis-workspace-protocol-technical-plan`;
-  refresh governed by `upstream-public-diagnostics-refresh-2026-07-19`.
+  the `5027e2f` refresh is governed by `upstream-public-diagnostics-refresh-2026-07-19`;
+  the `d63519b` refresh is governed by the
+  `d63519b-process-supervision-addendum` and ticket `U31`.
 
 ## Ported files (upstream → rebuild)
 
@@ -265,3 +270,128 @@ From `core/`, `PYTHONPATH=.`, system Python 3.14 user-site:
   **562 passed, 0 skipped**, including the multiprocess `SIGKILL`
   replacement-process gate, wrong-authentication gate, delayed worker-commit
   fence, replay, Workspace, and the new identity/retry/diagnostic gates.
+
+## U31 — Upstream `5027e2f..d63519b` supervised optimization refresh
+
+Execution note for ticket **U31 — Refresh the rebuild to upstream `d63519b`**.
+Reconciles the full upstream delta `git diff 5027e2f..d63519b` (34 changed
+paths) against the rebuild. U31 imports upstream's per-job **process-supervision**
+work (spawned, process-tree-supervised child; forced timeout/cancel; cooperative
+finish-now) but **not** its re-widened multi-solver product. It does not reopen
+the settled Redis, Workspace, replay, BFF, runtime-identity, or deployment
+architecture. Governed by the rebuild-tech-plan
+`d63519b-process-supervision-addendum` and split across children U31a–U31e.
+
+### Settled adaptation invariants
+
+- **CP-SAT stays the only solver.** Upstream `d63519b` restored a `solver`
+  selector on its CLI/HTTP boundary and a multi-solver capability registry
+  (`server/solver_capabilities.py`) plus PuLP/CBC. The rebuild keeps the
+  previously settled single-solver boundary: `STOPPABLE_SOLVERS` is narrowed to
+  `{ortools/cp-sat}` in `server/jobs/models.py` and `solver_supports_stop` is
+  retained there; upstream's `server/solver_capabilities.py`, PuLP source/tests,
+  and the multi-solver docs matrix are **excluded**. The browser sends no solver
+  field; the backend accepts only a missing/default or exact `ortools/cp-sat`
+  selector before capacity is reserved.
+- **One spawned child per claimed job.** `server/jobs/process_tree.py` is imported
+  verbatim and `server/jobs/process_executor.py` is imported with one small
+  adaptation (a child-side `OptimizationExecutionError` → `JobFailure` bridge, see
+  the table); together they run each optimization in a process-tree-supervised
+  child. The lease-owning worker remains the only store/controller client (one
+  Uvicorn worker, private Redis unchanged).
+- **Timeout grace is positive-finite, default 90s.** `OPTIMIZE_TIMEOUT_GRACE_SECONDS`
+  (`server/config.py` `timeout_grace_seconds`) arms the watchdog from child launch
+  through terminal delivery and forces termination after `timeout + grace`. A
+  native feasible timeout classifies as `solver_timeout`; a forced watchdog
+  failure classifies as `process_timeout`. The rebuild retains its own
+  `OptimizationExecutionError` classification path in `server/jobs/runner.py`
+  rather than upstream's `JobFailure`-return refactor.
+- **Cancel / finish-now / lease-loss are unchanged product behavior.** Cancel is
+  server-enforced for a running CP-SAT job, kills the child tree, discards output,
+  and settles `cancelled` via the new lease-fenced `complete_cancellation`. Finish
+  now is cooperative (`user_requested` incumbent). Worker shutdown or claim loss
+  writes nothing and leaves maintenance to own the eventual `worker_lost`. The
+  rebuild keeps its narrow `solver_supports_stop` cancel/early-completion guard in
+  `server/jobs/controller.py` (dead for the CP-SAT-only product, so cancel of a
+  running job always succeeds) rather than adopting upstream's removal of that
+  guard.
+- **`JOB_MAX_PENDING=8`, opaque cursors, runtime/store identity, `APP_VERSION` →
+  `/app/VERSION`, non-root, and the private one-worker topology are all preserved
+  untouched.** No public `JobResponse` key, lifecycle state, SSE event name, or BFF
+  route changed; `solver_timeout` / `process_timeout` are purely additive; legacy
+  `limit_or_stop` remains readable during retention.
+
+### Source coverage — all 34 upstream paths
+
+Legend: **direct** = imported verbatim; **adapted** = imported with the invariants
+above; **excluded** = intentionally not applied (owner/reason noted); **mapped** =
+the rebuild has no identically-named file, so the upstream behavior is represented
+in a differently-organized rebuild path.
+
+| Upstream path | Disposition | Notes |
+| --- | --- | --- |
+| `core/nurse_scheduling/server/jobs/process_executor.py` | adapted | Spawned-child supervisor (`run_optimization_process`, `ProcessControl`, `ProcessStatus`) imported by U31a, with one rebuild adaptation: it imports `OptimizationExecutionError` and adds a child-side `except OptimizationExecutionError` branch that buffers a structured `JobFailure(code, message)` terminal frame — because the rebuild runner **raises** those expected failures rather than returning them (upstream returns `JobFailure`). This keeps the public FAILED contract without pickling the exception across the pipe. |
+| `core/nurse_scheduling/server/jobs/process_tree.py` | direct | Verbatim process-tree kill/reap guard with platform fallbacks (byte-identical to upstream `d63519b`). Imported by U31a. |
+| `core/nurse_scheduling/server/config.py` | adapted | Added `timeout_grace_seconds` / `OPTIMIZE_TIMEOUT_GRACE_SECONDS` (positive-finite, default 90s) to `ServerSettings` and `from_env`. |
+| `core/nurse_scheduling/server/app.py` | adapted | Threads `settings.timeout_grace_seconds` into the worker/controller wiring; no other change. |
+| `core/nurse_scheduling/server/jobs/runner.py` | adapted | CP-SAT-only `scheduler.schedule` bridge; classifies `solver_timeout` / `user_requested`; **retains** `OptimizationExecutionError` for `invalid_model` / `no_solution_found` rather than upstream's `JobFailure`-return refactor. |
+| `core/nurse_scheduling/server/jobs/worker.py` | adapted | Runs the claimed job through `run_optimization_process` behind the lease-owning worker; arms the timeout-grace watchdog; aborts the child and writes nothing on shutdown / lease loss; keeps mandatory worker-ID + observed-deadline commit fencing. |
+| `core/nurse_scheduling/server/jobs/controller.py` | adapted | Added lease-fenced `complete_cancellation(job_id, *, worker_id=…)`; retains T19 mandatory-worker-identity/observed-deadline fence and the narrow `solver_supports_stop` cancel/early-completion guard (dead for CP-SAT-only). |
+| `core/nurse_scheduling/server/jobs/models.py` | adapted | Narrows `STOPPABLE_SOLVERS` to `{ortools/cp-sat}` and **retains** `solver_supports_stop`; upstream instead deleted both and moved capability lookup into `solver_capabilities.py`. |
+| `core/nurse_scheduling/server/api/schemas.py` | adapted | `JobResponse` shape preserved; keeps `solver_supports_stop` from `models` for `controls.cancellable` / `early_completion_available` instead of upstream's `solver_capabilities.solver_supports_finish_now`. |
+| `core/nurse_scheduling/server/api/optimize.py` | adapted | CP-SAT-only selector boundary; keeps `solver_supports_stop` for the SSE control projection; unchanged public-cursor SSE and reconcile-before-commit. |
+| `core/nurse_scheduling/server/errors.py` | adapted | **Retains** `OptimizationExecutionError` (upstream removed it), because the rebuild's runner still raises it for the expected/unexpected failure split. |
+| `core/nurse_scheduling/server/solver_capabilities.py` | excluded | Multi-solver capability registry (`solver_supports_finish_now`, graceful-timeout traits for CBC/SCIP/BOP/MathOpt). Not imported; the rebuild keeps its narrow `solver_supports_stop` in `models.py`. |
+| `core/nurse_scheduling/solver_pulp.py` | excluded | PuLP feasibility-check change. No PuLP backend exists in the rebuild. |
+| `core/tests/test_process_executor.py` | adapted | Imported as the executor/tree suite: startup guard, hard timeout, buffered-terminal priority, cancel-vs-abort, descendant cleanup, abrupt child, platform fallbacks. |
+| `core/tests/real/solver_capabilities.py` | mapped | The multi-solver real probe is re-authored as the CP-SAT-only `core/scripts/solver_capability_probe.py` (U31d), kept outside pytest discovery (`pyproject.toml` `testpaths = ["tests"]`). |
+| `core/tests/test_real_solver_capabilities.py` | mapped | Its pure classification/reporting assertions map into the fast, always-collected `core/tests/test_real_solver_capability_probe.py`; the slow rounds run only via the explicit `scripts/` gate. |
+| `core/tests/real/README.md` | mapped | The upstream capability-probe documentation is re-authored as `core/scripts/README.md` for the CP-SAT-only probe; the multi-solver support text is not carried over. |
+| `core/tests/test_optimize_job_backends.py` | mapped | Target has no such file (T19 deleted the monolithic backend test); the `complete_cancellation` owner/stale assertions are represented by the rebuild's `test_server_*` worker/store suites. |
+| `core/tests/test_serve.py` | excluded (mapped) | The rebuild has no monolithic `test_serve.py` (deleted at T19); upstream's new-behavior assertions are represented in the `test_server_*` suites and its multi-solver additions are not ported. |
+| `core/tests/test_solver_pulp_cbc.py` | excluded | PuLP/CBC feasibility tests; no PuLP backend in the rebuild. |
+| `docker/compose.backend.yml` | adapted (mapped) | The rebuild's `compose.yml` already passes the `APP_VERSION` build arg to the backend; U31e adds an **active** `OPTIMIZE_TIMEOUT_GRACE_SECONDS: ${OPTIMIZE_TIMEOUT_GRACE_SECONDS:-90}` passthrough on the backend service (default 90, behavior-neutral), while `docker/.env.example` only documents the optional override. The private one-worker topology is unchanged. |
+| `docker/compose.backend.memory.yml` | adapted (mapped) | Mapped to `compose.memory.yml`, which already passes `APP_VERSION`; unchanged private topology. |
+| `docker/README.md` | adapted | The rebuild's deploy runbook. U31e adds a **Supervised optimization execution** section (parent/child/guard, forced cancel, cooperative finish-now, timeout grace, lease-loss write-nothing, CP-SAT-only) and the optional grace knob. Upstream's `.app-version` / `git describe` staging text does not apply. |
+| `docker/Dockerfile.api.staging` | excluded (superseded) | Upstream reworks the staging image's `.app-version` / `git describe` derivation. The rebuild has no staging image: `Dockerfile.backend` stamps `APP_VERSION` → `/app/VERSION` with no runtime Git (DL11 D2). |
+| `docker/Dockerfile.api.staging.dockerignore` | excluded (superseded) | Same staging-image boundary; superseded by the rebuild's selective-copy Dockerfiles. |
+| `AGENTS.md` | excluded | Upstream contributor-workflow text; repository/agent instructions already govern the rebuild. |
+| `core/AGENTS.md` | excluded | Upstream module workflow file; not vendored. |
+| `docs/AGENTS.md` | excluded | Upstream module workflow file; not vendored. |
+| `docs/backend-server.md` | excluded | New upstream mkdocs backend page (multi-solver server narrative). The rebuild's operational docs live in `docker/README.md`; the mkdocs site is not vendored. |
+| `docs/solvers.md` | excluded | Multi-solver support matrix (CBC/SCIP/BOP/MathOpt/HiGHS). Directly contradicts the rebuild's CP-SAT-only boundary; not ported. |
+| `docs/mkdocs.yml` | excluded | Upstream mkdocs site config (adds the backend/solvers pages, mermaid fences). The rebuild ships no mkdocs site. |
+| `README.md` | excluded | Upstream project README tweaks (RedisInsight `docker run --rm`, absolute CONTRIBUTORS link). Not part of the rebuild's runtime or deploy contract. |
+| `.vscode/settings.json` | excluded | Editor config (`omlet.rootPath`); U31 out-of-scope. |
+| `plans/handoffs/HANDOFF_rebuild-kickoff_2026-07-15.md` | excluded | Historical upstream handoff note; U31 out-of-scope. |
+
+### Verification performed (U31, 2026-07-20)
+
+From `core/`, `PYTHONPATH=.`, system Python 3.14 user-site (see the
+`backend-test-invocation` note); Web from `web/` with pnpm; deploy from the repo
+root. The source manifest was advanced to `d63519b` only after the rebuild source
+(commits `a204889`, `0647f01`, `05b6e0d`) and these gates landed.
+
+- `ruff check` and `ruff format --check` on `nurse_scheduling/`, `tests/`, and
+  `scripts/`: clean (89 files already formatted). `python -m compileall
+  nurse_scheduling`: clean.
+- Full backend `pytest` with no configured Redis: **579 passed, 47 skipped**
+  (the real-Redis-gated identity/lease/replay/worker-loss variants).
+- Full backend `pytest` against a real Redis 8 container (`NURSE_TEST_REDIS_URL`):
+  **626 passed, 0 skipped**, including the supervised-worker, lease-fence,
+  cancellation-commit, and process-timeout-vs-worker-loss gates.
+- Supervised CP-SAT capability gate
+  (`scripts/solver_capability_probe.py --solver ortools/cp-sat`) on the
+  87-person real scenario: all five rounds **PASS** — native `solver_timeout`
+  (feasible artifact), forced `process_timeout`, cancellation with discarded
+  output, cooperative `user_requested`, and 17 intermediate incumbents — with a
+  clean post-run process-tree residue audit on each cancel/watchdog round.
+- Full Web: `tsc --noEmit`, `oxlint`, `oxfmt --check` clean; Vitest **1,963
+  passed, 63 skipped**; Next production build succeeded.
+- `make verify-deploy` (private-base build, network segmentation, non-root,
+  version equality, restart persistence, replay, worker-loss, redis-outage
+  fail-closed): recorded with the U31e closure evidence.
+
+Installed boundary versions unchanged: `pydantic 2.13.4`, `ruamel.yaml 0.19.1`,
+`redis 8.x`, `fakeredis 2.x`. No new runtime dependency was introduced by the
+`d63519b` refresh.

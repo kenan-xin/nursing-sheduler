@@ -119,6 +119,53 @@ healthcheck. The backend `depends_on` a **healthy** Redis, exposes `/ready`
 **one** Uvicorn worker initially. Jobs are temporary computation state — a snapshot
 lost to an abrupt crash is acceptable; AOF/managed Redis is deferred (tech-plan §2).
 
+## Supervised optimization execution
+
+Each claimed optimization runs in **one spawned, process-tree-supervised child**,
+not in the worker thread. The lease-owning worker is the only Redis/JobStore
+client; the child only computes.
+
+```
+backend (uvicorn, 1 worker) ─ lease-owning worker ─▶ spawned executor child ─▶ CP-SAT + descendants
+        │  events/results/failures/cancellations (worker-ID + observed-deadline fenced)
+        ▼
+      Redis JobStore
+```
+
+- **CP-SAT only.** The only accepted solver is `ortools/cp-sat`. The browser sends
+  no solver field, and the backend accepts only a missing/default or exact
+  `ortools/cp-sat` selector before a job is created. This is a deliberate product
+  boundary: upstream now exposes a multi-solver selector and PuLP, but the rebuild
+  does **not** import them. See `docs/T19-upstream-backend-source-manifest.md`
+  (U31 section).
+- **Timeout grace.** The solver gets its requested native timeout. A watchdog is
+  armed from child launch through terminal delivery and force-terminates the child
+  tree after `timeout + OPTIMIZE_TIMEOUT_GRACE_SECONDS` (default **90s**, positive
+  and finite). A native feasible timeout completes as `result.outcome="feasible"`
+  with `result.termination_reason="solver_timeout"`. A forced watchdog kill fails
+  the job with `error.code="process_timeout"` and no artifact.
+- **Cancel (forced).** Cancelling a running job is server-enforced: it kills the
+  child tree when needed, **discards** any buffered result/artifact, and settles as
+  `cancelled`.
+- **Finish now (cooperative).** Finish-now asks CP-SAT to return its current
+  feasible incumbent, which completes with `termination_reason="user_requested"`.
+  If no incumbent exists yet, it still produces a structured failure — never a
+  guaranteed roster.
+- **Worker shutdown / lease loss ≠ cancellation.** On ordinary shutdown or a lost
+  claim, the worker aborts the child and **writes nothing**; the maintenance loop
+  later owns the `worker_lost` transition after the lease expires. Every event,
+  result, failure, and cancellation commit carries the worker identity and passes
+  the owner/revision/observed-deadline lease fence (T19).
+- Retained legacy jobs may still report `limit_or_stop`; clients accept it during
+  the retention window. Running execution is still not checkpointed or
+  auto-restarted.
+
+`OPTIMIZE_TIMEOUT_GRACE_SECONDS` is read by the backend at startup
+(`server/config.py`) and defaults to 90s. The base `compose.yml` forwards
+`${OPTIMIZE_TIMEOUT_GRACE_SECONDS:-90}` to the backend, so it needs no setup; to
+change the grace for a deployment, set it in `docker/.env` (see `.env.example`).
+The private one-worker topology is unchanged.
+
 ## Non-streaming deploy gates
 
 Run them all reproducibly (no `docker/.env` needed — this path does not start

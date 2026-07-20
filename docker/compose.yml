@@ -56,6 +56,11 @@ services:
       # Versioned key namespace: bump the trailing schema version on any
       # incompatible job-record change so old keys can never be misread.
       JOB_REDIS_KEY_PREFIX: nurse_scheduling:jobs:v0
+      # Forced-termination grace after a solver's native timeout. The watchdog
+      # kills the supervised optimization child tree at `timeout + grace`. Defaults
+      # to the backend's own 90s (config.py) — override via docker/.env only if
+      # needed. Does not change the private one-worker topology.
+      OPTIMIZE_TIMEOUT_GRACE_SECONDS: ${OPTIMIZE_TIMEOUT_GRACE_SECONDS:-90}
     networks:
       - app
       - data
