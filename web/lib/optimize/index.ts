@@ -119,3 +119,47 @@ export {
   type OptimizeSessionRecovery,
   type UseOptimizeSessionRecoveryDeps,
 } from "./session-recovery";
+
+export {
+  deriveOptimizeReadiness,
+  type OptimizeReadiness,
+  type OptimizeReadinessIssue,
+  type OptimizeReadinessSource,
+} from "./optimize-readiness";
+
+export {
+  createOptimizeObservability,
+  OPTIMIZE_OBSERVABILITY_MAX_EVENTS,
+  OPTIMIZE_OBSERVABILITY_TAG,
+  type ObservedOptimizeEvent,
+  type OptimizeObservability,
+  type OptimizeObservabilitySink,
+  type OptimizeObservation,
+} from "./optimize-observability";
+
+export {
+  classifyOptimizeServerInfo,
+  optimizeVersionMismatch,
+  useOptimizeServerInfo,
+  type FetchOptimizeInfo,
+  type OptimizeServerInfo,
+  type OptimizeServerStatus,
+  type UseOptimizeServerInfoDeps,
+} from "./optimize-server-info";
+
+export {
+  useOptimizeTerminal,
+  type CleanupCallOutcome,
+  type CleanupPhase,
+  type OptimizeTerminal,
+  type UseOptimizeTerminalDeps,
+} from "./use-optimize-terminal";
+
+export {
+  formatRunStatus,
+  formatScore,
+  jobDetailLine,
+  scoreLabel,
+  type RunStatusDisplay,
+  type RunStatusTone,
+} from "./run-display";

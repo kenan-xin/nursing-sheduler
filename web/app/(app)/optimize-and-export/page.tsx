@@ -1,12 +1,5 @@
-import { PlaceholderScreen } from "@/components/shell/placeholder-screen";
-import { FaBolt } from "@/components/icons";
+import { OptimizeAndExportScreen } from "@/components/optimize/optimize-and-export-screen";
 
 export default function OptimizeAndExportPage() {
-  return (
-    <PlaceholderScreen
-      title="Optimize and Export"
-      description="Run the solver and download the generated schedule."
-      icon={FaBolt}
-    />
-  );
+  return <OptimizeAndExportScreen />;
 }
