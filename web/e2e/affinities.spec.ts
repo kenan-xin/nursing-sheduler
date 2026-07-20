@@ -41,13 +41,13 @@ type NsWindow = {
       getState: () => Record<string, unknown> & {
         cardsByKind: { affinities: AffinityCard[] };
         mutateScenario: (patch: Record<string, unknown>) => void;
-        markSaved: () => void;
+        recordBackup: () => void;
       };
       temporal: {
         getState: () => { pastStates: unknown[]; futureStates: unknown[] };
       };
     };
-    isDirty: () => boolean;
+    backupStatus: () => "none" | "current" | "stale";
   };
 };
 
@@ -541,19 +541,19 @@ test.describe.serial("T12 Affinities — open-draft navigation guard", () => {
   test("an open draft arms the navigation guard on a clean scenario", async ({ page }) => {
     await gotoReady(page);
     await seed(page, BASE_SEED);
-    // Reset the baseline so the scenario is CLEAN — isolates draftOpen as the only
-    // reason the guard can fire.
+    // Record a backup so the scenario's backup is CURRENT — isolates draftOpen as
+    // the only reason the guard can fire.
     await page.evaluate(() =>
-      (window as unknown as NsWindow).__nsStore.scenario.getState().markSaved(),
+      (window as unknown as NsWindow).__nsStore.scenario.getState().recordBackup(),
     );
-    expect(await page.evaluate(() => (window as unknown as NsWindow).__nsStore.isDirty())).toBe(
-      false,
-    );
+    expect(
+      await page.evaluate(() => (window as unknown as NsWindow).__nsStore.backupStatus()),
+    ).toBe("current");
 
     await page.getByTestId("add-card-toggle").click();
     await expect(page.getByTestId("card-editor-form")).toBeVisible();
 
-    // Sidebar navigation is intercepted by the guard even though nothing is dirty.
+    // Sidebar navigation is intercepted by the guard even though the backup is current.
     await page.getByTestId("nav-link-/people").click();
     await expect(page.getByRole("heading", { name: "Unsaved changes" })).toBeVisible();
     await page.getByTestId("confirm-dialog-cancel").click();

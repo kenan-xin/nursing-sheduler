@@ -5,7 +5,7 @@
 //
 //   • wired spine    — `useScenarioStore` / `useHotStore` / `createStateSpine`
 //   • undo/redo       — `store.temporal.getState()` (zundo)
-//   • dirty baseline  — `selectIsDirty`, `markSaved`
+//   • backup freshness— `selectBackupStatus`, `recordBackup`
 //   • lifecycle       — `hydrateScenarioStore`, `loadScenario`, `newScenario`,
 //                       `resetToNewScenario`, `registerPagehideFlush`
 //   • paint gesture   — `commitPaintGesture` (+ hot-store `beginPaint` /
@@ -22,9 +22,10 @@ export {
 
 export {
   createScenarioStore,
-  selectIsDirty,
+  selectBackupStatus,
   consumeHydrationError,
   getScenarioStorage,
+  type BackupStatus,
   type ScenarioStore,
   type ScenarioStoreState,
   type ScenarioStoreConfig,

@@ -20,6 +20,24 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## End-to-end tests
+
+```bash
+pnpm test:e2e          # required release gate — deterministic, bounded workers
+pnpm test:e2e:stress   # fixed high-parallelism lane (32 workers)
+```
+
+`test:e2e` builds a production bundle and runs Playwright with a **bounded,
+deterministic** worker count (`min(floor(cpus/2), 8)`). Playwright's built-in
+default scales unbounded with the host, which lets the suite pass on a laptop
+yet fail under CPU starvation on a large CI runner; the cap removes that
+ambiguity. Override the count with `PLAYWRIGHT_WORKERS=<n>` (or the `--workers`
+flag) for ad-hoc runs. `test:e2e:stress` pins a fixed **32 workers** to exercise
+the high-parallelism path — always well above the bounded release default, but
+not a guaranteed oversubscription: whether 32 workers exceed a host's capacity
+depends on its logical-CPU count and load (on a host with 32 or more logical
+cores it runs at or below one worker per core). It is **not** the release gate.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

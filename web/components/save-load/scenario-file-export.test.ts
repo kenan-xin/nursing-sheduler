@@ -23,46 +23,46 @@ function makeDuplicateIdUiState(): ScenarioUiState {
 }
 
 describe("performDownload", () => {
-  it("writes the validated YAML to the injected file writer, then clears dirty", () => {
+  it("writes the validated YAML to the injected file writer, then records the backup", () => {
     const writeFile = vi.fn();
-    const markSaved = vi.fn();
+    const recordBackup = vi.fn();
 
-    const result = performDownload(makeValidUiState(), { writeFile, markSaved });
+    const result = performDownload(makeValidUiState(), { writeFile, recordBackup });
 
     expect(result.ok).toBe(true);
     expect(writeFile).toHaveBeenCalledTimes(1);
     expect(writeFile).toHaveBeenCalledWith(expect.any(String), SCENARIO_DOWNLOAD_FILENAME);
     const [yaml] = writeFile.mock.calls[0] as [string, string];
     expect(yaml).toContain("apiVersion: alpha");
-    expect(markSaved).toHaveBeenCalledTimes(1);
+    expect(recordBackup).toHaveBeenCalledTimes(1);
   });
 
   it("backs up an imperfect draft — backup preserves incomplete work (DL12 §2)", () => {
     const writeFile = vi.fn();
-    const markSaved = vi.fn();
+    const recordBackup = vi.fn();
 
-    const result = performDownload(makeImperfectUiState(), { writeFile, markSaved });
+    const result = performDownload(makeImperfectUiState(), { writeFile, recordBackup });
 
     expect(result.ok).toBe(true);
     expect(writeFile).toHaveBeenCalledTimes(1);
-    expect(markSaved).toHaveBeenCalledTimes(1);
+    expect(recordBackup).toHaveBeenCalledTimes(1);
   });
 
   it("blocks a structurally corrupt draft (duplicate workspace identity), writing nothing", () => {
     const writeFile = vi.fn();
-    const markSaved = vi.fn();
+    const recordBackup = vi.fn();
 
-    const result = performDownload(makeDuplicateIdUiState(), { writeFile, markSaved });
+    const result = performDownload(makeDuplicateIdUiState(), { writeFile, recordBackup });
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.issues.length).toBeGreaterThan(0);
     expect(writeFile).not.toHaveBeenCalled();
-    expect(markSaved).not.toHaveBeenCalled();
+    expect(recordBackup).not.toHaveBeenCalled();
   });
 });
 
 describe("performCopy", () => {
-  it("writes the validated YAML to the clipboard and never clears dirty", () => {
+  it("writes the validated YAML to the clipboard and never records a backup", () => {
     const writeClipboard = vi.fn();
 
     const result = performCopy(makeValidUiState(), { writeClipboard });
@@ -70,8 +70,8 @@ describe("performCopy", () => {
     expect(result.ok).toBe(true);
     expect(writeClipboard).toHaveBeenCalledTimes(1);
     expect(writeClipboard).toHaveBeenCalledWith(expect.any(String));
-    // Structural guarantee: PerformCopyDeps has no markSaved field to call —
-    // there is nothing here that could clear dirty even by mistake.
+    // Structural guarantee: PerformCopyDeps has no recordBackup field to call —
+    // there is nothing here that could record a backup even by mistake.
   });
 
   it("copies an imperfect draft — backup preserves incomplete work (DL12 §2)", () => {

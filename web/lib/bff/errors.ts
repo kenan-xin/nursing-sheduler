@@ -144,6 +144,7 @@ export function classifyOptimizeError(
 export class OptimizeApiError extends Error {
   readonly status: number;
   readonly info: OptimizeErrorInfo;
+  readonly body: unknown;
 
   constructor(status: number, body: unknown, endpoint?: OptimizeEndpoint) {
     const info = classifyOptimizeError(status, body, endpoint);
@@ -151,5 +152,32 @@ export class OptimizeApiError extends Error {
     this.name = "OptimizeApiError";
     this.status = status;
     this.info = info;
+    this.body = body;
   }
+}
+
+function hasExactKeys(value: object, expected: readonly string[]): boolean {
+  const keys = Object.keys(value);
+  return keys.length === expected.length && keys.every((key) => expected.includes(key));
+}
+
+/** Proof-only predicate. The broader UI classifier deliberately accepts degraded
+ * envelopes, but lifecycle authority requires the exact backend 404 contract. */
+export function isExactJobGoneResponse(status: number, body: unknown): boolean {
+  if (status !== 404 || !body || typeof body !== "object" || Array.isArray(body)) return false;
+  if (!hasExactKeys(body, ["error"])) return false;
+  const error = (body as { error?: unknown }).error;
+  return (
+    !!error &&
+    typeof error === "object" &&
+    !Array.isArray(error) &&
+    hasExactKeys(error, ["code", "message"]) &&
+    (error as { code?: unknown }).code === "job_not_found" &&
+    typeof (error as { message?: unknown }).message === "string" &&
+    (error as { message: string }).message.length > 0
+  );
+}
+
+export function isExactJobGoneError(error: unknown): error is OptimizeApiError {
+  return error instanceof OptimizeApiError && isExactJobGoneResponse(error.status, error.body);
 }

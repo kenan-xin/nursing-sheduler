@@ -17,7 +17,7 @@ import {
   loadScenario,
   pickScenario,
   resetToNewScenario,
-  selectIsDirty,
+  selectBackupStatus,
   useHotStore,
   useScenarioStore,
 } from "@/lib/store";
@@ -121,9 +121,9 @@ describe("SaveLoadWorkspace — Upload flow", () => {
     // The empty workspace + matching version commits directly (no confirm), but the
     // Load is one undoable transaction, not a history-clearing replace (T17r P0).
     expect(useScenarioStore.temporal.getState().pastStates.length).toBeGreaterThan(0);
-    // An imported file is not a fresh local backup: baseline stays unknown (null).
-    expect(selectIsDirty(currentState())).toBe(false);
-    expect(currentState().baselineFingerprint).toBeNull();
+    // An imported file is not a fresh local backup: backup stays unknown (null).
+    expect(selectBackupStatus(currentState())).toBe("none");
+    expect(currentState().backupFingerprint).toBeNull();
     expect(screen.queryByTestId("confirm-dialog-confirm")).not.toBeInTheDocument();
   });
 
@@ -299,7 +299,7 @@ describe("SaveLoadWorkspace — Edit YAML flow", () => {
     // Confirmed Load is one tracked, undoable transaction, not a history-clearing
     // replace, and an applied edit is not a fresh local backup (T17r P0).
     expect(useScenarioStore.temporal.getState().pastStates.length).toBeGreaterThan(0);
-    expect(currentState().baselineFingerprint).toBeNull();
+    expect(currentState().backupFingerprint).toBeNull();
 
     // Editing mode closes back to the read-only preview once the replace commits.
     await waitFor(() =>

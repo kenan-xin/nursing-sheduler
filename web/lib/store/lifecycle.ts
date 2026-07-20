@@ -37,16 +37,16 @@ import {
 } from "./scenario-store";
 
 /**
- * Replace the durable scenario slice + baseline through the privileged
+ * Replace the durable scenario slice + backup fingerprint through the privileged
  * `store.setState` path (bypassing the mutation gate). Merge (not replace) so the
  * store's action functions are preserved.
  */
 function replaceScenarioState(
   scenario: ScenarioStore,
   next: ScenarioUiState,
-  baselineFingerprint: string | null,
+  backupFingerprint: string | null,
 ): void {
-  scenario.setState({ ...pickScenario(next), baselineFingerprint }, false);
+  scenario.setState({ ...pickScenario(next), backupFingerprint }, false);
 }
 
 /**
@@ -150,7 +150,7 @@ export function loadScenario(
   const hydrated = hydrateImportTarget(target);
   // Tracked (un-paused) full-slice set → exactly one zundo entry. Baseline is not
   // part of the temporal slice, so Undo/Redo never touch it.
-  scenario.setState({ ...pickScenario(hydrated), baselineFingerprint: null }, false);
+  scenario.setState({ ...pickScenario(hydrated), backupFingerprint: null }, false);
   hot.getState().resetEphemeral();
   hot.getState().setHydrationStatus("ready");
 }

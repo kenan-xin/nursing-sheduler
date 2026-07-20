@@ -9,13 +9,13 @@ import { expect, test, type Page } from "@playwright/test";
 // Row 2 scope (T08a/b, DL12/reopened T08): the nav/unload guard fires ONLY on a
 // registered losable draft (FR-PR-06) or, for browser unload only, an unsettled
 // local write (`saving`/`error`). Internal navigation and the browser Back
-// button never read the whole-scenario backup fingerprint (`selectIsDirty`) —
+// button never read the whole-scenario backup fingerprint (`selectBackupStatus`) —
 // DL12 rejected that "leave without saving?" warning as product behavior: a
 // committed edit is already durable through T04 autosave, so there is nothing
-// to warn about on an internal route change. `isDirty`/`markSaved` still exist
-// (T08e will surface them as an honest, non-blocking "Backup out of date"
-// display once T17's Workspace fingerprint lands) — this spec only asserts
-// they no longer gate navigation.
+// to warn about on an internal route change. `backupStatus`/`recordBackup` still
+// exist (T08e surfaces them as an honest, non-blocking tri-state No backup /
+// Backup current / Backup out of date display over T17's Workspace fingerprint) —
+// this spec only asserts they no longer gate navigation.
 //
 // The editor screens that would normally mutate the scenario belong to later
 // tickets, so these specs drive the real T04 store through the `window.__nsStore`
@@ -62,10 +62,11 @@ type NsWindow = {
     scenario: {
       getState(): Record<string, unknown> & {
         mutateScenario(x: unknown): void;
-        markSaved(): void;
+        recordBackup(): void;
       };
     };
-    isDirty(): boolean;
+    backupStatus(): "none" | "current" | "stale";
+    persistenceStatus(): "restoring" | "saving" | "saved" | "error";
     navGuard: {
       getState(): {
         registerDraft(registration: { id: string; label: string }): () => void;
@@ -80,7 +81,7 @@ type NsWindow = {
 // source isn't exported for browser-context use). Needed here (rather than the
 // partial `{ rangeStart: ... }` patches used elsewhere in this file) because the
 // qq0.22 round-trip test drives a real Download, which validates the draft before
-// it clears dirty.
+// it records the backup.
 const VALID_SCENARIO_PATCH = {
   rangeStart: "2026-05-14",
   rangeEnd: "2026-05-20",
@@ -140,13 +141,13 @@ async function mutate(page: Page, patch: Record<string, unknown>) {
 }
 
 /**
- * Establish a clean backup baseline (as a successful plain Download would). Load/New
- * no longer invent a baseline (T17r review P0), so a scenario is only "dirty" against
- * a real prior save — tests that need a dirty precondition mark saved before editing.
+ * Record a current Workspace backup (as a successful plain Download would). Load/New
+ * no longer invent a backup (T17r review P0), so a scenario is only "stale" against
+ * a real prior backup — tests that need a stale precondition record one before editing.
  */
-async function markSaved(page: Page) {
+async function recordBackup(page: Page) {
   await page.evaluate(() => {
-    (window as unknown as NsWindow).__nsStore.scenario.getState().markSaved();
+    (window as unknown as NsWindow).__nsStore.scenario.getState().recordBackup();
   });
 }
 
@@ -175,8 +176,22 @@ async function readField(page: Page, key: string): Promise<unknown> {
   );
 }
 
-async function isDirty(page: Page): Promise<boolean> {
-  return page.evaluate(() => (window as unknown as NsWindow).__nsStore.isDirty());
+async function backupStatus(page: Page): Promise<string> {
+  return page.evaluate(() => (window as unknown as NsWindow).__nsStore.backupStatus());
+}
+
+/**
+ * Wait for the durable persist queue to quiesce (persistence status settles to
+ * `saved`). A tracked write — including `recordBackup`'s fingerprint write —
+ * synchronously flips the status to `saving`, which correctly arms the browser
+ * unload guard until the write drains. A "clean, no prompt" assertion must wait
+ * for that settle with this deterministic seam, not race the in-flight write
+ * (and not paper over it with an arbitrary timeout).
+ */
+async function waitForPersistSettled(page: Page) {
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as NsWindow).__nsStore.persistenceStatus()))
+    .toBe("saved");
 }
 
 test.describe("T08 app shell", () => {
@@ -189,16 +204,16 @@ test.describe("T08 app shell", () => {
     });
   });
 
-  test("row 2 — a dirty scenario with no open draft navigates immediately (DL12)", async ({
+  test("row 2 — a scenario with a stale backup and no open draft navigates immediately (DL12)", async ({
     page,
   }) => {
     await gotoReadyHome(page);
     // Establish a baseline (as a Download would), then edit so the scenario is
-    // genuinely dirty against it — Load/New no longer invent a baseline (T17r P0).
-    await markSaved(page);
+    // genuinely stale against it — Load/New no longer invent a backup (T17r P0).
+    await recordBackup(page);
     await mutate(page, VALID_SCENARIO_PATCH);
-    // Dirty in the T04/backup sense (differs from the persisted baseline)…
-    expect(await isDirty(page)).toBe(true);
+    // Stale in the backup sense (differs from the recorded backup)…
+    expect(await backupStatus(page)).toBe("stale");
 
     // …but with no losable draft open, internal navigation is immediate — DL12
     // rejected the old whole-scenario "leave without saving?" warning. The
@@ -207,19 +222,19 @@ test.describe("T08 app shell", () => {
     await expect(page).toHaveURL(/\/people$/);
     await expect(page.getByRole("heading", { name: "Unsaved changes" })).toBeHidden();
 
-    // The backup fingerprint is untouched by navigation — still dirty, and a
+    // The backup fingerprint is untouched by navigation — still stale, and a
     // real Download still clears it (T08e will surface this as a non-blocking
     // "Backup out of date" display; this spec only proves it never gates nav).
     await page.getByTestId("nav-link-/save-and-load").click();
     await expect(page).toHaveURL(/\/save-and-load$/);
-    expect(await isDirty(page)).toBe(true);
+    expect(await backupStatus(page)).toBe("stale");
 
     const [download] = await Promise.all([
       page.waitForEvent("download"),
       page.getByTestId("scenario-download-button").click(),
     ]);
     expect(download.suggestedFilename()).toBe("scenario.yaml");
-    expect(await isDirty(page)).toBe(false);
+    expect(await backupStatus(page)).toBe("current");
   });
 
   test("row 2 — an open card-editor draft prompts the guard before navigation (FR-PR-06)", async ({
@@ -231,7 +246,7 @@ test.describe("T08 app shell", () => {
     // / affinities.spec.ts). The scenario stays clean, isolating the open draft as
     // the only reason the guard can fire.
     await openTestDraft(page);
-    expect(await isDirty(page)).toBe(false);
+    expect(await backupStatus(page)).toBe("none");
 
     // Attempt to navigate via the sidebar → guard dialog intercepts.
     await page.getByTestId("nav-link-/people").click();
@@ -442,17 +457,17 @@ test.describe("T08 app shell", () => {
   test("row 3 — Start over resets all slices after confirm", async ({ page }) => {
     await gotoReadyHome(page);
     // The reset affordance now lives in Save & Load (MINOR 8). Route there while
-    // the scenario is still clean (no guard), then dirty it and reset.
+    // the scenario's backup is still current (no guard), then make it stale and reset.
     await page.getByTestId("nav-link-/save-and-load").click();
     await expect(page.getByTestId("start-over-card")).toBeVisible();
 
-    // Baseline first (Load/New no longer invent one — T17r P0), then dirty it.
-    await markSaved(page);
+    // Record a backup first (Load/New no longer invent one — T17r P0), then make it stale.
+    await recordBackup(page);
     await mutate(page, {
       rangeStart: "2026-03-01",
       staff: [{ _k: "p1", id: 1, description: "Nurse A" }],
     });
-    expect(await isDirty(page)).toBe(true);
+    expect(await backupStatus(page)).toBe("stale");
 
     await page.getByTestId("new-schedule-button").click();
     await page.getByTestId("confirm-dialog-confirm").click();
@@ -461,7 +476,7 @@ test.describe("T08 app shell", () => {
     await expect(page.getByText("New schedule created")).toBeVisible();
     expect(await readField(page, "rangeStart")).toBe("");
     expect((await readField(page, "staff")) as unknown[]).toHaveLength(0);
-    expect(await isDirty(page)).toBe(false);
+    expect(await backupStatus(page)).toBe("none");
   });
 
   test("row 4 — Ctrl/Cmd+Z/Y undo/redo app-wide, Alt/Shift rejected", async ({ page }) => {
@@ -495,17 +510,17 @@ test.describe("T08 app shell", () => {
     expect(await readField(page, "rangeStart")).toBe("");
   });
 
-  test("qq0.22 — reload keeps the T04 baseline (restored-unsaved stays dirty) but never gates nav (DL12)", async ({
+  test("qq0.22 — reload keeps the T04 backup (restored-unsaved stays stale) but never gates nav (DL12)", async ({
     page,
   }) => {
     await gotoReadyHome(page);
     // Establish a backup baseline (as a Download would), then make a tracked edit
     // and let the auto-persist write settle. Both the baseline and the edited state
     // persist, so reload can restore them — Load/New no longer invent a baseline
-    // (T17r P0), so a dirty precondition requires a real prior save.
-    await markSaved(page);
+    // (T17r P0), so a stale precondition requires a real prior backup.
+    await recordBackup(page);
     await mutate(page, { rangeStart: "2026-03-01" });
-    expect(await isDirty(page)).toBe(true);
+    expect(await backupStatus(page)).toBe("stale");
     await page.waitForTimeout(800);
 
     await page.reload();
@@ -515,10 +530,10 @@ test.describe("T08 app shell", () => {
     );
 
     // T04 contract preserved: the persisted baseline is RESTORED (not
-    // recomputed), so restored-unsaved ≠ clean — the scenario is still dirty
+    // recomputed), so restored-unsaved ≠ current — the scenario's backup is still stale
     // after reload. DL12: that backup-fingerprint dirtiness never gates internal
     // navigation, with no open draft required — the edit is already durable.
-    expect(await isDirty(page)).toBe(true);
+    expect(await backupStatus(page)).toBe("stale");
     await page.getByTestId("nav-link-/people").click();
     await expect(page).toHaveURL(/\/people$/);
     await expect(page.getByRole("heading", { name: "Unsaved changes" })).toBeHidden();
@@ -528,10 +543,15 @@ test.describe("T08 app shell", () => {
     page,
   }) => {
     await gotoReadyHome(page);
-    // Establish a baseline (as a Download would) so a later edit is dirty against
+    // Record a backup (as a Download would) so a later edit is stale against
     // it — the store starts clean (current === baseline), and Load/New no longer
-    // invent a baseline (T17r P0).
-    await markSaved(page);
+    // invent a baseline (T17r P0). recordBackup persists the fingerprint (a real
+    // durable write that arms the unload guard while "saving"), so wait for that
+    // write to settle before the clean baseline below — otherwise the "no
+    // prompt" assertion races the in-flight backup write (deterministic seam,
+    // not an arbitrary timeout).
+    await recordBackup(page);
+    await waitForPersistSettled(page);
 
     // Dispatch a cancelable beforeunload and observe whether the shell handler
     // called preventDefault (which is what triggers the browser's leave prompt).
@@ -561,11 +581,12 @@ test.describe("T08 app shell", () => {
     );
     expect(savingWarns).toBe(true);
 
-    // Dirty in the T04/backup sense…
-    expect(await isDirty(page)).toBe(true);
+    // Stale in the backup sense…
+    expect(await backupStatus(page)).toBe("stale");
     // …but once the write settles to "saved" with no open draft, the backup
-    // fingerprint alone never re-arms the unload guard (DL12).
-    await page.waitForTimeout(800);
+    // fingerprint alone never re-arms the unload guard (DL12). Wait on the same
+    // deterministic saved-state seam rather than an arbitrary timeout.
+    await waitForPersistSettled(page);
     expect(await dispatchUnload()).toBe(false);
 
     // Open a losable draft → prompts, FR-PR-06.
@@ -573,7 +594,7 @@ test.describe("T08 app shell", () => {
     expect(await dispatchUnload()).toBe(true);
 
     // Closing the draft, with the write long settled, fully disarms it —
-    // dirty/backup state plays no part.
+    // backup state plays no part.
     await closeTestDraft(page);
     expect(await dispatchUnload()).toBe(false);
   });

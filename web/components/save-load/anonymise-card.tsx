@@ -5,8 +5,8 @@
 // descriptions" toggle -- descriptions are preserved. Routes through
 // `performAnonymisedDownload`, which always calls `prepareAnonymizedExport`
 // (T17a-2) so the transform runs on a clone; the live scenario is never
-// mutated and `markSaved` is deliberately never called here (an anonymised
-// copy is not a save of the working scenario).
+// mutated and `recordBackup` is deliberately never called here (an anonymised
+// copy is not a Workspace backup).
 
 import { useState } from "react";
 import { toast } from "sonner";

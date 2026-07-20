@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createEmptyScenarioUiState } from "@/lib/scenario";
-import { createStateSpine, pickScenario, selectIsDirty } from "@/lib/store";
+import { createStateSpine, pickScenario, selectBackupStatus } from "@/lib/store";
 import { createMemoryStorage } from "@/lib/store/persistence";
 import { hydrateScenarioStore, resetToNewScenario } from "@/lib/store/lifecycle";
 import { INITIAL_RUN_STATE } from "@/lib/store/types";
@@ -8,17 +8,17 @@ import { INITIAL_RUN_STATE } from "@/lib/store/types";
 // Acceptance matrix row 3 (vitest half) — New-schedule resets EVERY slice. The
 // New button (new-schedule-button.tsx) confirms, then calls resetToNewScenario;
 // this proves that call restores the empty default across all scenario slices,
-// clears undo/redo history, drops the dirty flag, and resets the hot store. The
-// Playwright half proves the confirm + button flow drives this same path.
+// clears undo/redo history, resets backup currentness, and resets the hot store.
+// The Playwright half proves the confirm + button flow drives this same path.
 
 describe("New-schedule reset — all slices", () => {
-  it("resets scenario, history, dirty flag, and hot store", async () => {
+  it("resets scenario, history, backup currentness, and hot store", async () => {
     const spine = createStateSpine({ createStorage: () => createMemoryStorage() });
     await hydrateScenarioStore(spine.scenario, spine.hot);
 
-    // Hydration no longer invents a backup baseline (T17r review P0); establish a
-    // clean one (as a plain Download would) so the edit below is genuinely dirty.
-    spine.scenario.getState().markSaved();
+    // Hydration no longer invents a backup fingerprint (T17r review P0); record a
+    // clean one (as a plain Download would) so the edit below is genuinely stale.
+    spine.scenario.getState().recordBackup();
 
     // Dirty every axis: scenario data (one tracked mutation → one history entry),
     // plus hot-store ephemeral state that must not leak past a reset.
@@ -31,7 +31,7 @@ describe("New-schedule reset — all slices", () => {
     spine.hot.getState().setRun({ phase: "running" });
     spine.hot.getState().setUi({ selection: "cell-1" });
 
-    expect(selectIsDirty(spine.scenario.getState())).toBe(true);
+    expect(selectBackupStatus(spine.scenario.getState())).toBe("stale");
     expect(spine.scenario.temporal.getState().pastStates.length).toBeGreaterThan(0);
 
     await resetToNewScenario(spine.scenario, spine.hot);
@@ -40,8 +40,9 @@ describe("New-schedule reset — all slices", () => {
     const empty = pickScenario(createEmptyScenarioUiState());
     expect(pickScenario(spine.scenario.getState())).toEqual(empty);
 
-    // A fresh scenario is clean, with no undo/redo history to travel back into.
-    expect(selectIsDirty(spine.scenario.getState())).toBe(false);
+    // A fresh scenario has no recorded backup, and no undo/redo history to travel
+    // back into.
+    expect(selectBackupStatus(spine.scenario.getState())).toBe("none");
     expect(spine.scenario.temporal.getState().pastStates.length).toBe(0);
     expect(spine.scenario.temporal.getState().futureStates.length).toBe(0);
 

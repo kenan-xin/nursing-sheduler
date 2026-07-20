@@ -8,7 +8,7 @@ import { expect, test, type Page } from "@playwright/test";
 type NsWindow = {
   __nsStore: {
     scenario: { getState(): Record<string, unknown> & { mutateScenario(x: unknown): void } };
-    isDirty(): boolean;
+    backupStatus(): "none" | "current" | "stale";
   };
 };
 

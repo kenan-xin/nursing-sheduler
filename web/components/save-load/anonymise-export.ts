@@ -6,8 +6,8 @@
 //
 // DL10 D2 overrides the prototype's 4th "Remove free-text descriptions"
 // toggle: descriptions are preserved, not stripped. Deliberately has no
-// `markSaved` dependency to call -- an anonymised/redacted copy is not a save
-// of the working scenario (mirrors why Copy doesn't clear dirty either).
+// `recordBackup` dependency to call -- an anonymised/redacted copy is not a
+// Workspace backup (mirrors why Copy doesn't record a backup either).
 
 import {
   prepareAnonymizedWorkspaceExport,
@@ -63,7 +63,7 @@ export interface PerformAnonymisedDownloadDeps {
  * Download-anonymised: routes through `prepareAnonymizedExport` (T17a-2),
  * never the plain `prepareExport` path, so the transform always runs on a
  * clone and the live scenario is never mutated. Deliberately has NO
- * `markSaved` field in its deps -- there is no wiring mistake to make here,
+ * `recordBackup` field in its deps -- there is no wiring mistake to make here,
  * unlike `performDownload`'s deps which require it.
  */
 export function performAnonymisedDownload(

@@ -251,14 +251,24 @@ test.describe("T08d — Advanced-only → Guided atomic transaction", () => {
     // onClick even runs — the exact browser behavior a jsdom `.click()` can't
     // reproduce, and the one the P2 finding was about.
     await page.getByTestId("mode-toggle-guided").click();
-    await expect(page.getByTestId("mode-toggle-guided")).toBeFocused();
+
+    // The staged confirm dialog's focus trap then takes focus off the mode
+    // tablist. Asserting Guided *stays* focused here is a racy transient — the
+    // trap deterministically supersedes it (under parallel load the trap wins
+    // before the assertion polls), so assert the stable states instead: the
+    // dialog is up and focus has genuinely left the still-selected Advanced tab.
+    // That keeps the post-Cancel restore below a real move, never a vacuous
+    // no-op, without racing a transient the product never guarantees.
     await expect(page.getByRole("heading", { name: "Unsaved changes" })).toBeVisible();
+    await expect(page.getByTestId("mode-toggle-advanced")).not.toBeFocused();
     await page.getByTestId("confirm-dialog-cancel").click();
 
     await expect(page.getByTestId("mode-toggle-advanced")).toHaveAttribute("aria-selected", "true");
     await expect(page).toHaveURL(/\/shift-type-requirements$/);
-    // Focus must return to the still-selected Advanced tab, never stay on the
-    // now-unselected Guided tab (tabIndex=-1).
+    // Focus must return to the still-selected Advanced tab (T08d repair P2's
+    // `onCancelled`), never be left in the dialog or on the now-unselected
+    // Guided tab (tabIndex=-1) where the browser's own close-restore would put
+    // it.
     await expect(page.getByTestId("mode-toggle-advanced")).toBeFocused();
     await closeTestDraft(page);
   });

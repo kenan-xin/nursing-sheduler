@@ -3,6 +3,8 @@ import {
   classifyOptimizeError,
   extractErrorDetail,
   extractStructuredError,
+  isExactJobGoneError,
+  isExactJobGoneResponse,
   OptimizeApiError,
 } from "@/lib/bff/errors";
 
@@ -175,5 +177,24 @@ describe("OptimizeApiError", () => {
 
   it("synthesizes a message when the body carries none", () => {
     expect(new OptimizeApiError(500, null).message).toBe("Optimize request failed (500)");
+  });
+});
+
+describe("exact job-gone proof", () => {
+  it("requires status 404 and the exact nonempty structured envelope", () => {
+    const valid = envelope({ code: "job_not_found", message: "gone" });
+    expect(isExactJobGoneResponse(404, valid)).toBe(true);
+    expect(isExactJobGoneError(new OptimizeApiError(404, valid, "poll"))).toBe(true);
+    expect(isExactJobGoneResponse(500, valid)).toBe(false);
+    expect(isExactJobGoneResponse(404, envelope({ code: "job_not_found" }))).toBe(false);
+    expect(isExactJobGoneResponse(404, envelope({ code: "job_not_found", message: "" }))).toBe(
+      false,
+    );
+    expect(
+      isExactJobGoneResponse(
+        404,
+        envelope({ code: "job_not_found", message: "gone", unexpected: true }),
+      ),
+    ).toBe(false);
   });
 });

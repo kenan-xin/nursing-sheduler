@@ -1,15 +1,15 @@
-// The durable scenario store (T04): `ScenarioUiState` (T18) + the persisted dirty
-// baseline, wrapped in `persist(temporal(...))`.
+// The durable scenario store (T04): `ScenarioUiState` (T18) + the persisted
+// Workspace-backup fingerprint, wrapped in `persist(temporal(...))`.
 //
 // Middleware order (documented zundo pattern): `persist` OUTER, `temporal` INNER.
 // zundo keeps undo history in a *separate* `.temporal` store, not in main state,
 // so persist only ever serializes the scenario slice — history is never
 // persisted. Both `.persist` and `.temporal` are attached to the same store api.
 //
-//   • temporal is partialized to the scenario slice only (never the baseline or
-//     actions) and depth-limited to 50, so undo/redo restores scenario data and
-//     nothing else.
-//   • persist is partialized to the scenario slice + the baseline fingerprint,
+//   • temporal is partialized to the scenario slice only (never the backup
+//     fingerprint or actions) and depth-limited to 50, so undo/redo restores
+//     scenario data and nothing else.
+//   • persist is partialized to the scenario slice + the backup fingerprint,
 //     uses `skipHydration` (hydration is a client-only manual protocol — see
 //     `lifecycle.ts`), a `version` + `migrate`, a sanitizing `merge`, and the
 //     guarded storage queue.
@@ -40,17 +40,26 @@ import {
 } from "./persistence";
 
 /**
- * The durable store's state: the scenario slice, the persisted baseline
+ * Backup currentness of the live scenario relative to the last recorded Workspace
+ * backup. A display-only tri-state (No backup / Backup current / Backup out of
+ * date); never blocks navigation or unload. See {@link selectBackupStatus}.
+ */
+export type BackupStatus = "none" | "current" | "stale";
+
+/**
+ * The durable store's state: the scenario slice, the persisted Workspace-backup
  * fingerprint, and the spine mutation primitives. Editor-specific CRUD actions
  * (staff/shift/card editors) are added by their own tickets; T04 provides the
  * generic tracked-mutation primitives. All mutating actions no-op until `ready`.
  */
 export interface ScenarioStoreState extends ScenarioUiState {
   /**
-   * Fingerprint of the last explicit Save/Load baseline, persisted alongside the
-   * scenario. `null` before the first hydration/new-scenario has set it.
+   * Fingerprint of the Workspace document at the last successful plain Download —
+   * the emitted local backup. `null` means "no backup recorded" (unknown): a fresh
+   * store, a loaded/replaced scenario, or a migrated legacy record. Only a real
+   * plain Download sets it (DL12/T17r review P0); hydration/New/Load never do.
    */
-  baselineFingerprint: string | null;
+  backupFingerprint: string | null;
 
   /**
    * Apply a scenario patch as one tracked mutation (the editor primitive).
@@ -68,8 +77,12 @@ export interface ScenarioStoreState extends ScenarioUiState {
    */
   setReqData(reqData: UiRequestCell[]): void;
 
-  /** Mark the current scenario as the clean baseline (Save). No-op unless `ready`. */
-  markSaved(): void;
+  /**
+   * Record the current scenario as the emitted Workspace backup — called only
+   * after a successful plain Download, which writes exactly this state. Sets
+   * `backupFingerprint` to the current scenario's fingerprint. No-op unless `ready`.
+   */
+  recordBackup(): void;
 }
 
 /** Zustand store api for the durable scenario store, incl. persist + temporal. */
@@ -139,7 +152,7 @@ export function createScenarioStore(config: ScenarioStoreConfig = {}) {
       temporal(
         (set, get) => ({
           ...createEmptyScenarioUiState(),
-          baselineFingerprint: null,
+          backupFingerprint: null,
 
           mutateScenario: (patch) => {
             if (!isReady()) return;
@@ -152,16 +165,16 @@ export function createScenarioStore(config: ScenarioStoreConfig = {}) {
             set({ reqData }, false);
           },
 
-          markSaved: () => {
+          recordBackup: () => {
             if (!isReady()) return;
-            set({ baselineFingerprint: computeScenarioFingerprint(pickScenario(get())) }, false);
+            set({ backupFingerprint: computeScenarioFingerprint(pickScenario(get())) }, false);
           },
         }),
         {
-          // Depth ~50; scenario slice only — never baseline/actions.
+          // Depth ~50; scenario slice only — never the backup fingerprint/actions.
           limit: 50,
           partialize: (state) => pickScenario(state),
-          // Skip recording no-op sets (e.g. markSaved, pagehide flush) that leave
+          // Skip recording no-op sets (e.g. recordBackup, pagehide flush) that leave
           // the scenario slice's references untouched.
           equality: (past, current) => scenarioShallowEqual(past, current),
         },
@@ -170,11 +183,12 @@ export function createScenarioStore(config: ScenarioStoreConfig = {}) {
         name: SCENARIO_PERSIST_KEY,
         version: SCENARIO_PERSIST_VERSION,
         storage: createJSONStorage(() => guarded),
-        // Persist the scenario slice + the baseline fingerprint (so a reload can
-        // distinguish restored-unsaved from clean). Actions are dropped.
+        // Persist the scenario slice + the backup fingerprint (so a reload can tell
+        // whether the restored work matches its last downloaded backup). Actions
+        // are dropped.
         partialize: (state) => ({
           ...pickScenario(state),
-          baselineFingerprint: state.baselineFingerprint,
+          backupFingerprint: state.backupFingerprint,
         }),
         skipHydration: true,
         migrate: (persisted, version) => migrateScenarioState(persisted, version),
@@ -200,11 +214,21 @@ export function createScenarioStore(config: ScenarioStoreConfig = {}) {
 }
 
 /**
- * Whether the current scenario differs from the persisted baseline. `false`
- * before a baseline exists (nothing loaded/saved yet); otherwise the canonical
- * fingerprint of the current scenario vs the stored baseline.
+ * Backup currentness of the live scenario against the last recorded Workspace
+ * backup — a nonblocking display state, never a guard input:
+ *
+ *   • `"none"`    — no backup recorded (`backupFingerprint === null`): a fresh,
+ *                   loaded, replaced, or migrated-legacy workspace.
+ *   • `"current"` — the live scenario matches the last downloaded backup.
+ *   • `"stale"`   — the live scenario has diverged from the last downloaded backup.
+ *
+ * Computed from the canonical Workspace V1 fingerprint (see `fingerprint.ts`), so
+ * Guided pins, disabled/incomplete records, and export layout all count — a
+ * strict-projection edit can never be misreported as a current backup.
  */
-export function selectIsDirty(state: ScenarioStoreState): boolean {
-  if (state.baselineFingerprint === null) return false;
-  return computeScenarioFingerprint(pickScenario(state)) !== state.baselineFingerprint;
+export function selectBackupStatus(state: ScenarioStoreState): BackupStatus {
+  if (state.backupFingerprint === null) return "none";
+  return computeScenarioFingerprint(pickScenario(state)) === state.backupFingerprint
+    ? "current"
+    : "stale";
 }

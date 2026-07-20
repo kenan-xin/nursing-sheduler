@@ -18,12 +18,29 @@ import {
   type StagedDayState,
 } from "./types";
 import type { DateRef, PersonRef, ShiftTypeRef, Weight } from "@/lib/scenario";
+import { INITIAL_OPTIMIZE_RUN_VIEW, type OptimizeRunView } from "@/lib/optimize/run-view";
 
 export interface HotStoreState {
   /** The durable store's Dexie hydration lifecycle status (drives the ready gate). */
   hydrationStatus: HydrationStatus;
-  /** Current optimize-run snapshot. */
+  /** Current optimize-run snapshot (lean placeholder; see `runView` for T16). */
   run: RunState;
+  /**
+   * The typed feature-local Optimize run view (T16a). The controller replaces this
+   * whole projection through `setRunView`; the reducer that computes it lives in
+   * `@/lib/optimize/run-view`. Ephemeral like every other hot slice — never persisted.
+   */
+  runView: OptimizeRunView;
+  /**
+   * Monotonic generation counter for the run controller's attachment authority
+   * (T16a P1). Every reset path (`resetRun`/`resetRunView`/`resetEphemeral`) bumps
+   * it, so the canonical New/Load path (which calls `resetEphemeral`) automatically
+   * revokes any in-flight controller attachment. The controller captures the
+   * generation when it attaches a job and refuses to dispatch signals from a prior
+   * generation — late frames/poll/snapshots/controls from scenario A's run can never
+   * repopulate scenario B's view. Ephemeral: starts at 0, never persisted.
+   */
+  runGeneration: number;
   /** Ordered SSE progress frames for the current run. */
   progress: RunProgressEvent[];
   /**
@@ -45,6 +62,10 @@ export interface HotStoreState {
   setRun(patch: Partial<RunState>): void;
   pushProgress(event: RunProgressEvent): void;
   resetRun(): void;
+  /** Replace the whole typed run view (the T16a controller owns the reducer). */
+  setRunView(next: OptimizeRunView): void;
+  /** Reset the run view to its zero value (New / Load / explicit clear). */
+  resetRunView(): void;
   setUi(patch: Record<string, unknown>): void;
   setDraft(id: string, draft: unknown): void;
   clearDraft(id: string): void;
@@ -73,9 +94,10 @@ export interface HotStoreState {
   cancelPaint(): void;
 
   /**
-   * Reset all ephemeral slices — run, progress, ui, drafts, and any in-flight
-   * paint — WITHOUT touching `hydrationStatus`. Load / New call this so scenario
-   * A's transient state (a staged paint especially) cannot leak into scenario B.
+   * Reset all ephemeral slices — run, run view, progress, ui, drafts, and any
+   * in-flight paint — WITHOUT touching `hydrationStatus`. Load / New call this so
+   * scenario A's transient state (a staged paint especially) cannot leak into
+   * scenario B.
    */
   resetEphemeral(): void;
 }
@@ -88,6 +110,8 @@ export function createHotStore() {
   return create<HotStoreState>()((set) => ({
     hydrationStatus: "unhydrated",
     run: INITIAL_RUN_STATE,
+    runView: INITIAL_OPTIMIZE_RUN_VIEW,
+    runGeneration: 0,
     progress: [],
     ui: {},
     drafts: {},
@@ -99,7 +123,21 @@ export function createHotStore() {
 
     pushProgress: (event) => set((state) => ({ progress: [...state.progress, event] })),
 
-    resetRun: () => set({ run: INITIAL_RUN_STATE, progress: [] }),
+    resetRun: () =>
+      set((state) => ({
+        run: INITIAL_RUN_STATE,
+        runView: INITIAL_OPTIMIZE_RUN_VIEW,
+        progress: [],
+        runGeneration: state.runGeneration + 1,
+      })),
+
+    setRunView: (runView) => set({ runView }),
+
+    resetRunView: () =>
+      set((state) => ({
+        runView: INITIAL_OPTIMIZE_RUN_VIEW,
+        runGeneration: state.runGeneration + 1,
+      })),
 
     setUi: (patch) => set((state) => ({ ui: { ...state.ui, ...patch } })),
 
@@ -150,6 +188,14 @@ export function createHotStore() {
     cancelPaint: () => set({ paint: null }),
 
     resetEphemeral: () =>
-      set({ run: INITIAL_RUN_STATE, progress: [], ui: {}, drafts: {}, paint: null }),
+      set((state) => ({
+        run: INITIAL_RUN_STATE,
+        runView: INITIAL_OPTIMIZE_RUN_VIEW,
+        progress: [],
+        ui: {},
+        drafts: {},
+        paint: null,
+        runGeneration: state.runGeneration + 1,
+      })),
   }));
 }

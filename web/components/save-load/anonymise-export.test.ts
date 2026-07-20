@@ -98,11 +98,11 @@ describe("performAnonymisedDownload", () => {
     expect(writeFile).toHaveBeenCalledTimes(1);
   });
 
-  it("has no markSaved dependency to call -- an anonymised download cannot clear dirty", () => {
+  it("has no recordBackup dependency to call -- an anonymised download cannot record a backup", () => {
     // Structural guarantee: `PerformAnonymisedDownloadDeps` has only
-    // `writeFile` (+ optional `rng`) -- no `markSaved` field exists to call,
+    // `writeFile` (+ optional `rng`) -- no `recordBackup` field exists to call,
     // mirroring why `PerformCopyDeps` has none either. A successful download
-    // still resolves ok and never reaches for a save-baseline side effect.
+    // still resolves ok and never reaches for a backup-fingerprint side effect.
     const writeFile = vi.fn();
 
     const result = performAnonymisedDownload(

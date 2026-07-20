@@ -6,9 +6,9 @@
 // the real `Blob`/anchor/`navigator.clipboard` calls (e2e-covered).
 //
 // The two functions' dependency shapes are the enforcement mechanism for the
-// ticket's dirty-machinery decision: `PerformDownloadDeps` requires `markSaved`,
-// `PerformCopyDeps` has no such field, so Copy structurally cannot clear the
-// dirty baseline — there is no wiring mistake to make.
+// ticket's backup-freshness decision: `PerformDownloadDeps` requires
+// `recordBackup`, `PerformCopyDeps` has no such field, so Copy structurally
+// cannot record a Workspace backup — there is no wiring mistake to make.
 
 import {
   prepareWorkspaceExport,
@@ -22,8 +22,8 @@ export const SCENARIO_DOWNLOAD_FILENAME = "scenario.yaml";
 export interface PerformDownloadDeps {
   /** Write the validated YAML to a file download. Never called on an invalid draft. */
   writeFile: (yaml: string, filename: string) => void;
-  /** Clear the dirty baseline (`markSaved`). Called ONLY after a successful write. */
-  markSaved: () => void;
+  /** Record the emitted Workspace backup (`recordBackup`). Called ONLY after a successful write. */
+  recordBackup: () => void;
 }
 
 export interface PerformCopyDeps {
@@ -32,8 +32,8 @@ export interface PerformCopyDeps {
 }
 
 /**
- * Download: validate via `prepareExport`, write the file, then clear dirty.
- * An invalid draft writes nothing and never touches `markSaved` (FR-SL-02b).
+ * Download: validate via `prepareExport`, write the file, then record the backup.
+ * An invalid draft writes nothing and never touches `recordBackup` (FR-SL-02b).
  */
 export function performDownload(
   state: ScenarioUiState,
@@ -42,15 +42,15 @@ export function performDownload(
   const result = prepareWorkspaceExport(state);
   if (!result.ok) return result;
   deps.writeFile(result.yaml, SCENARIO_DOWNLOAD_FILENAME);
-  deps.markSaved();
+  deps.recordBackup();
   return result;
 }
 
 /**
  * Copy: validate via `prepareExport`, write the clipboard. Deliberately has no
- * `markSaved` dependency to call — Copy produces no durable artifact and must
- * not clear dirty (ticket decision: dirty is defined against the last explicit
- * Save/Load baseline, not against clipboard writes).
+ * `recordBackup` dependency to call — Copy produces no durable backup artifact and
+ * must not mark a backup current (ticket decision: backup freshness is defined
+ * against the last plain Download, not against clipboard writes).
  */
 export function performCopy(state: ScenarioUiState, deps: PerformCopyDeps): PrepareExportResult {
   const result = prepareWorkspaceExport(state);

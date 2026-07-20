@@ -1,5 +1,16 @@
-import { classifyOptimizeError, OptimizeApiError, type OptimizeErrorInfo } from "@/lib/bff/errors";
+import {
+  classifyOptimizeError,
+  isExactJobGoneError,
+  isExactJobGoneResponse,
+  OptimizeApiError,
+  type OptimizeErrorInfo,
+} from "@/lib/bff/errors";
 import type { JobResponse } from "@/lib/bff/types";
+import {
+  parseJobResponse,
+  parseStrictTerminalFrame,
+  type StrictTerminalFrame,
+} from "@/lib/query/event-payloads";
 import type { SseFrame, StreamOutcome } from "@/lib/query/sse";
 
 // Framework-agnostic SSE reconnect loop (tech-plan §5). Extracted from the React
@@ -18,6 +29,11 @@ import type { SseFrame, StreamOutcome } from "@/lib/query/sse";
 export interface OptimizeEventLoopDeps {
   maxReconnects: number;
   isCancelled: () => boolean;
+  // Frame mutation authority can outlive transport cancellation briefly (for
+  // example, a terminal view disables the effect while buffered frames drain).
+  // T16a supplies its exact attachment predicate; unkeyed callers fall back to
+  // transport cancellation.
+  canApplyFrame?: () => boolean;
   // Run ONE SSE connection, invoking `onFrame` per NEW frame; resolve with the
   // outcome or reject on a network/read failure.
   connect: (onFrame: (frame: SseFrame) => void) => Promise<StreamOutcome>;
@@ -27,13 +43,23 @@ export interface OptimizeEventLoopDeps {
   delay: (attempt: number) => Promise<void>;
   // Discard the saved event cursor so the next connection resumes from the floor.
   resetCursor: () => void;
+  // Fired AFTER `resetCursor` clears the tracker, on `event_cursor_expired` /
+  // `invalid_event_cursor` recovery, before the cursorless reconnect. Distinct from
+  // `onCursorExpired`/`onCursorInvalid` (which report the reason so the consumer can
+  // drop ephemeral history): this signals that any persisted resume cursor is now
+  // stale and must be cleared so a reload does not resend it.
+  onCursorReset?: () => void;
   // May be async: applies the frame to the cache, reconciles a malformed durable
   // payload, and runs consumer callbacks. Awaited before the cursor commits.
   onFrame: (frame: SseFrame) => void | Promise<void>;
   // Terminal reached, via a terminal frame and/or an authoritative poll.
-  onTerminal?: (result: { frame?: SseFrame; job?: JobResponse }) => void;
+  onTerminal?: (result: { frame?: StrictTerminalFrame; job?: JobResponse }) => void;
+  // Exact source evidence, delivered even when cancellation wins after the
+  // transport has already resolved. It must not mutate cache/view/cursor state.
+  onTerminalProof?: (result: { frame?: StrictTerminalFrame; job?: JobResponse }) => void;
   // The job no longer exists (job_not_found) — recovery, not a retryable error.
   onJobGone?: (info: OptimizeErrorInfo) => void;
+  onJobGoneProof?: (info: OptimizeErrorInfo) => void;
   // Retained history rolled past the cursor; the consumer clears ephemeral history.
   onCursorExpired?: (info: OptimizeErrorInfo) => void;
   // The saved cursor was malformed/foreign; the consumer clears ephemeral history.
@@ -51,15 +77,20 @@ export async function runOptimizeEventLoop(deps: OptimizeEventLoopDeps): Promise
   //   "reconnect" → still running OR a transient poll failure: retry within budget.
   const recover = async (): Promise<"stop" | "reconnect"> => {
     try {
-      const job = await deps.pollJob();
+      const job = parseJobResponse(await deps.pollJob());
+      if (job === null) throw new Error("Optimize recovery returned an invalid JobResponse.");
       if (job.terminal) {
+        deps.onTerminalProof?.({ job });
+        if (deps.isCancelled()) return "stop";
         deps.onTerminal?.({ job });
         return "stop";
       }
       return "reconnect";
     } catch (error) {
       lastError = error;
-      if (error instanceof OptimizeApiError && error.info.kind === "job-not-found") {
+      if (isExactJobGoneError(error)) {
+        deps.onJobGoneProof?.(error.info);
+        if (deps.isCancelled()) return "stop";
         deps.onJobGone?.(error.info);
         return "stop";
       }
@@ -74,45 +105,65 @@ export async function runOptimizeEventLoop(deps: OptimizeEventLoopDeps): Promise
 
     try {
       const outcome = await deps.connect(async (frame) => {
+        const canApply = deps.canApplyFrame?.() ?? !deps.isCancelled();
+        if (!canApply) throw new Error("Optimize event application was cancelled.");
         // `onFrame` writes the cache, reconciles, and runs consumer callbacks; it
         // may throw/reject. Count progress only AFTER it succeeds so a persistently
         // failing frame cannot keep resetting the reconnect budget.
         await deps.onFrame(frame);
+        const canCommit = deps.canApplyFrame?.() ?? !deps.isCancelled();
+        if (!canCommit) throw new Error("Optimize event application was cancelled.");
         madeProgress = true;
       });
 
-      if (deps.isCancelled()) return;
-
       if (outcome.type === "terminal") {
-        // Refresh the full JobResponse (result/error/links) the terminal frame
-        // does not carry; still stop even if that poll fails.
-        try {
-          const job = await deps.pollJob();
-          deps.onTerminal?.({ frame: outcome.frame, job });
-        } catch {
-          deps.onTerminal?.({ frame: outcome.frame });
+        const terminalFrame = parseStrictTerminalFrame(outcome.frame);
+        if (terminalFrame === null) {
+          if (deps.isCancelled()) return;
+          lastError = new Error("Optimize stream returned an invalid terminal outcome.");
+          needRecover = true;
+        } else {
+          deps.onTerminalProof?.({ frame: terminalFrame });
+          if (deps.isCancelled()) return;
+          // Refresh the full JobResponse (result/error/links) the terminal frame
+          // does not carry; still stop even if that poll fails.
+          try {
+            const job = parseJobResponse(await deps.pollJob());
+            if (job === null) {
+              throw new Error("Optimize terminal refresh returned an invalid JobResponse.");
+            }
+            if (job.terminal) deps.onTerminalProof?.({ job });
+            if (deps.isCancelled()) return;
+            deps.onTerminal?.({ frame: terminalFrame, job });
+          } catch {
+            deps.onTerminal?.({ frame: terminalFrame });
+          }
+          return;
         }
-        return;
-      }
-
-      if (outcome.type === "error-response") {
+      } else if (outcome.type === "error-response") {
         const info = classifyOptimizeError(outcome.status, outcome.body, "events");
-        if (info.kind === "job-not-found") {
+        if (isExactJobGoneResponse(outcome.status, outcome.body)) {
+          deps.onJobGoneProof?.(info);
+          if (deps.isCancelled()) return;
           deps.onJobGone?.(info);
           return;
         }
+        if (deps.isCancelled()) return;
         if (info.kind === "event-cursor-expired") {
           deps.onCursorExpired?.(info);
           deps.resetCursor();
+          deps.onCursorReset?.();
         } else if (info.kind === "invalid-event-cursor") {
           deps.onCursorInvalid?.(info);
           deps.resetCursor();
+          deps.onCursorReset?.();
         } else {
           // 5xx / unknown / backend-unready → poll + retry (never a silent stop).
           lastError = new OptimizeApiError(outcome.status, outcome.body, "events");
         }
         needRecover = true;
       } else {
+        if (deps.isCancelled()) return;
         // Closed without a terminal frame → poll to learn the final state. A browser
         // disconnect NEVER cancels the job; the loop simply reconnects if running.
         needRecover = true;

@@ -17,7 +17,7 @@ type NsWindow = {
       getState(): Record<string, unknown> & { mutateScenario(x: unknown): void };
       temporal: { getState(): { pastStates: unknown[] } };
     };
-    isDirty(): boolean;
+    backupStatus(): "none" | "current" | "stale";
   };
 };
 
@@ -47,8 +47,8 @@ function pastStatesLength(page: Page): Promise<number> {
   );
 }
 
-function isDirty(page: Page): Promise<boolean> {
-  return page.evaluate(() => (window as unknown as NsWindow).__nsStore.isDirty());
+function backupStatus(page: Page): Promise<string> {
+  return page.evaluate(() => (window as unknown as NsWindow).__nsStore.backupStatus());
 }
 
 // Mirrors e2e/save-load.spec.ts's VALID_SCENARIO_PATCH / lib/scenario/test-fixtures.ts's
@@ -225,7 +225,7 @@ test.describe("T17b-3 — Edit-YAML mode", () => {
     // Confirmed Load is one tracked, undoable transaction, not a history-clearing
     // replace; an imported file is not a fresh local backup (T17r P0).
     expect(await pastStatesLength(page)).toBeGreaterThan(0);
-    expect(await isDirty(page)).toBe(false);
+    expect(await backupStatus(page)).toBe("none");
 
     // Editing mode closes back to the read-only preview once the replace commits.
     await expect(preview.getByTestId("scenario-yaml-textarea")).toBeHidden();

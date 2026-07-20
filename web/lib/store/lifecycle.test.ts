@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createEmptyScenarioUiState, type ImportNormalizationTarget } from "@/lib/scenario";
 import { createMemoryStorage, SCENARIO_PERSIST_KEY, SCENARIO_PERSIST_VERSION } from "./persistence";
-import { selectIsDirty } from "./scenario-store";
+import { selectBackupStatus } from "./scenario-store";
 import { createStateSpine } from "./spine";
 import {
   drainScenarioPersist,
@@ -25,7 +25,7 @@ describe("hydration lifecycle", () => {
     const first = createStateSpine({ createStorage: () => mem });
     await hydrateScenarioStore(first.scenario, first.hot);
     first.scenario.getState().mutateScenario({ rangeStart: "2026-02-01", rangeEnd: "2026-02-28" });
-    first.scenario.getState().markSaved();
+    first.scenario.getState().recordBackup();
     await drainScenarioPersist(first.scenario);
 
     const reloaded = createStateSpine({ createStorage: () => mem });
@@ -34,7 +34,7 @@ describe("hydration lifecycle", () => {
     expect(reloaded.scenario.getState().rangeStart).toBe("2026-02-01");
     expect(reloaded.hot.getState().hydrationStatus).toBe("ready");
     expect(reloaded.scenario.temporal.getState().pastStates.length).toBe(0);
-    expect(selectIsDirty(reloaded.scenario.getState())).toBe(false);
+    expect(selectBackupStatus(reloaded.scenario.getState())).toBe("current");
 
     reloaded.scenario.getState().mutateScenario({ rangeStart: "2026-03-01" });
     expect(reloaded.scenario.temporal.getState().pastStates.length).toBe(1);
@@ -46,7 +46,7 @@ describe("hydration lifecycle", () => {
     const first = createStateSpine({ createStorage: () => mem });
     await hydrateScenarioStore(first.scenario, first.hot);
     first.scenario.getState().mutateScenario({ rangeStart: "2026-01-01" });
-    first.scenario.getState().markSaved(); // baseline = fingerprint(S0)
+    first.scenario.getState().recordBackup(); // baseline = fingerprint(S0)
     await drainScenarioPersist(first.scenario);
     first.scenario.getState().mutateScenario({ rangeStart: "2026-06-01" }); // edit to S1, NOT saved
     await drainScenarioPersist(first.scenario);
@@ -55,7 +55,7 @@ describe("hydration lifecycle", () => {
     await hydrateScenarioStore(reloaded.scenario, reloaded.hot);
 
     expect(reloaded.scenario.getState().rangeStart).toBe("2026-06-01");
-    expect(selectIsDirty(reloaded.scenario.getState())).toBe(true);
+    expect(selectBackupStatus(reloaded.scenario.getState())).toBe("stale");
   });
 
   it("a fresh store hydrates ready with an unknown (null) backup baseline", async () => {
@@ -65,8 +65,8 @@ describe("hydration lifecycle", () => {
     // Hydration does NOT invent a Download baseline (DL12/T17r review P0): the
     // baseline stays unknown (null) until a real plain Download marks it fresh.
     expect(spine.hot.getState().hydrationStatus).toBe("ready");
-    expect(spine.scenario.getState().baselineFingerprint).toBeNull();
-    expect(selectIsDirty(spine.scenario.getState())).toBe(false);
+    expect(spine.scenario.getState().backupFingerprint).toBeNull();
+    expect(selectBackupStatus(spine.scenario.getState())).toBe("none");
   });
 
   it("runs the persistence migration on an older payload", async () => {
@@ -150,7 +150,7 @@ describe("hydration lifecycle", () => {
     await drainScenarioPersist(spine.scenario);
     expect(spine.hot.getState().hydrationStatus).toBe("ready");
     expect(spine.scenario.getState().staff).toEqual([]);
-    expect(selectIsDirty(spine.scenario.getState())).toBe(false);
+    expect(selectBackupStatus(spine.scenario.getState())).toBe("none");
 
     const stored = mem.snapshot()[SCENARIO_PERSIST_KEY];
     expect(stored).toBeDefined();
@@ -196,7 +196,7 @@ describe("hydration lifecycle", () => {
       expect(spine.scenario.getState().staff).toEqual([]);
       expect(spine.scenario.getState().reqData).toEqual([]);
       expect(spine.scenario.getState().meta).toEqual({ apiVersion: "alpha" });
-      expect(spine.scenario.getState().baselineFingerprint).toBeNull();
+      expect(spine.scenario.getState().backupFingerprint).toBeNull();
       // Actions survived.
       expect(typeof spine.scenario.getState().mutateScenario).toBe("function");
       // zundo resumed (not stranded paused).
@@ -235,7 +235,7 @@ describe("hydration lifecycle", () => {
     expect(spine.scenario.getState().staff).toEqual([]);
     expect(spine.scenario.getState().reqData).toEqual([]);
     expect(spine.scenario.getState().meta).toEqual({ apiVersion: "alpha" });
-    expect(spine.scenario.getState().baselineFingerprint).toBeNull();
+    expect(spine.scenario.getState().backupFingerprint).toBeNull();
     expect(typeof spine.scenario.getState().mutateScenario).toBe("function");
     expect(spine.scenario.temporal.getState().isTracking).toBe(true);
     expect(mem.snapshot()[SCENARIO_PERSIST_KEY]).toBe(record[SCENARIO_PERSIST_KEY]);
@@ -255,7 +255,7 @@ describe("hydration lifecycle", () => {
     expect(spine.scenario.getState().staff).toEqual([]);
     expect(spine.scenario.getState().reqData).toEqual([]);
     expect(spine.scenario.getState().meta).toEqual({ apiVersion: "alpha" });
-    expect(spine.scenario.getState().baselineFingerprint).toBeNull();
+    expect(spine.scenario.getState().backupFingerprint).toBeNull();
     expect(typeof spine.scenario.getState().mutateScenario).toBe("function");
     expect(spine.scenario.temporal.getState().isTracking).toBe(true);
     expect(mem.snapshot()[SCENARIO_PERSIST_KEY]).toBe(record[SCENARIO_PERSIST_KEY]);
@@ -364,7 +364,7 @@ describe("hydration lifecycle", () => {
       expect(spine.scenario.getState().staff, name).toEqual([]);
       expect(spine.scenario.getState().reqData, name).toEqual([]);
       expect(spine.scenario.getState().meta, name).toEqual({ apiVersion: "alpha" });
-      expect(spine.scenario.getState().baselineFingerprint, name).toBeNull();
+      expect(spine.scenario.getState().backupFingerprint, name).toBeNull();
       expect(typeof spine.scenario.getState().mutateScenario, name).toBe("function");
       expect(spine.scenario.temporal.getState().isTracking, name).toBe(true);
       expect(mem.snapshot()[SCENARIO_PERSIST_KEY], name).toBe(record[SCENARIO_PERSIST_KEY]);
@@ -411,7 +411,7 @@ describe("Load / New lifecycle", () => {
     expect(spine.scenario.getState().rangeStart).toBe("");
     expect(spine.scenario.getState().staff).toEqual([]);
     expect(spine.scenario.temporal.getState().pastStates.length).toBe(0);
-    expect(selectIsDirty(spine.scenario.getState())).toBe(false);
+    expect(selectBackupStatus(spine.scenario.getState())).toBe("none");
   });
 
   it("New clears any Guided rule pins along with the rest of the scenario", async () => {
@@ -463,7 +463,7 @@ describe("Load / New lifecycle", () => {
     // The Load is ONE tracked entry appended onto the preserved older history, and
     // the backup baseline is unknown (an imported file is not a fresh backup).
     expect(spine.scenario.temporal.getState().pastStates.length).toBe(historyBeforeLoad + 1);
-    expect(spine.scenario.getState().baselineFingerprint).toBeNull();
+    expect(spine.scenario.getState().backupFingerprint).toBeNull();
 
     // Undo restores the complete prior workspace; Redo restores the import.
     spine.scenario.temporal.getState().undo();

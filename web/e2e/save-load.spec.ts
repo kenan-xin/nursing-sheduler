@@ -6,19 +6,20 @@ import { expect, test, type Page } from "@playwright/test";
 // store through the `window.__nsStore` seam (test-bridge.tsx), mirroring
 // e2e/app-shell-rebuild.spec.ts.
 //
-// Dirty-machinery decision under test: Download clears dirty (`markSaved`) on a
-// SUCCESSFUL write only; Copy and Download-anonymised never clear dirty; an
-// invalid draft blocks all three and leaves dirty untouched.
+// Backup-freshness decision under test: Download records the Workspace backup
+// (`recordBackup`) on a SUCCESSFUL write only, marking it current; Copy and
+// Download-anonymised never record a backup; an invalid draft blocks all three and
+// leaves backup currentness untouched.
 
 type NsWindow = {
   __nsStore: {
     scenario: {
       getState(): Record<string, unknown> & {
         mutateScenario(x: unknown): void;
-        markSaved(): void;
+        recordBackup(): void;
       };
     };
-    isDirty(): boolean;
+    backupStatus(): "none" | "current" | "stale";
   };
 };
 
@@ -36,18 +37,18 @@ async function mutate(page: Page, patch: Record<string, unknown>) {
   }, patch);
 }
 
-// Establish a clean backup baseline (as a successful plain Download would). The
-// app no longer invents a baseline on load (T17r review P0), so a scenario is only
-// "dirty" against a real prior save — tests that need a dirty precondition call
+// Record a current Workspace backup (as a successful plain Download would). The
+// app no longer invents a backup on load (T17r review P0), so a scenario is only
+// "stale" against a real prior backup — tests that need a stale precondition call
 // this before editing.
-async function markSaved(page: Page) {
+async function recordBackup(page: Page) {
   await page.evaluate(() => {
-    (window as unknown as NsWindow).__nsStore.scenario.getState().markSaved();
+    (window as unknown as NsWindow).__nsStore.scenario.getState().recordBackup();
   });
 }
 
-function isDirty(page: Page): Promise<boolean> {
-  return page.evaluate(() => (window as unknown as NsWindow).__nsStore.isDirty());
+function backupStatus(page: Page): Promise<string> {
+  return page.evaluate(() => (window as unknown as NsWindow).__nsStore.backupStatus());
 }
 
 // A minimal but backend-valid scenario patch (mirrors
@@ -137,13 +138,13 @@ test.describe("T17a-4 — Scenario-file card + read-only preview", () => {
     await expect(badge).toContainText(/saved/i);
   });
 
-  test("Download on a valid scenario writes a scenario.yaml file and clears dirty", async ({
+  test("Download on a valid scenario writes a scenario.yaml file and marks the backup current", async ({
     page,
   }) => {
     await gotoReadySaveAndLoad(page);
-    await markSaved(page);
+    await recordBackup(page);
     await mutate(page, VALID_SCENARIO_PATCH);
-    expect(await isDirty(page)).toBe(true);
+    expect(await backupStatus(page)).toBe("stale");
 
     await expect(page.getByTestId("scenario-yaml-content")).toContainText("apiVersion: alpha");
     await expect(page.getByTestId("scenario-yaml-preview")).not.toContainText(
@@ -157,19 +158,19 @@ test.describe("T17a-4 — Scenario-file card + read-only preview", () => {
     ]);
     expect(download.suggestedFilename()).toBe("scenario.yaml");
 
-    // Download is the ONLY path that clears dirty (unblocks qq0.22).
-    expect(await isDirty(page)).toBe(false);
+    // Download is the ONLY path that records a backup / marks it current (unblocks qq0.22).
+    expect(await backupStatus(page)).toBe("current");
   });
 
-  test("Copy on a valid scenario writes the clipboard, toggles the label, and leaves dirty set", async ({
+  test("Copy on a valid scenario writes the clipboard, toggles the label, and leaves the backup stale", async ({
     page,
     context,
   }) => {
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     await gotoReadySaveAndLoad(page);
-    await markSaved(page);
+    await recordBackup(page);
     await mutate(page, VALID_SCENARIO_PATCH);
-    expect(await isDirty(page)).toBe(true);
+    expect(await backupStatus(page)).toBe("stale");
 
     await page.getByTestId("scenario-copy-button").click();
     await expect(page.getByTestId("scenario-copy-button")).toContainText("Copied!");
@@ -177,20 +178,20 @@ test.describe("T17a-4 — Scenario-file card + read-only preview", () => {
     const clipboardText = await page.evaluate(() => navigator.clipboard.readText());
     expect(clipboardText).toContain("apiVersion: alpha");
 
-    // Copy produces no durable artifact and must NOT clear dirty.
-    expect(await isDirty(page)).toBe(true);
+    // Copy produces no durable artifact and must NOT record a backup.
+    expect(await backupStatus(page)).toBe("stale");
   });
 
-  test("an incomplete draft still backs up (DL12 §2): Download writes scenario.yaml and clears dirty", async ({
+  test("an incomplete draft still backs up (DL12 §2): Download writes scenario.yaml and marks the backup current", async ({
     page,
   }) => {
     await gotoReadySaveAndLoad(page);
     // Leaving the date range blank is INCOMPLETE, not corrupt. A Workspace backup
     // preserves incomplete work (DL12 §2) — readiness gates Optimize, not backup —
     // so it must download, not block.
-    await markSaved(page);
+    await recordBackup(page);
     await mutate(page, { staff: [{ id: "Nurse A" }] });
-    expect(await isDirty(page)).toBe(true);
+    expect(await backupStatus(page)).toBe("stale");
 
     // No blocking export-issues panel: the backup is permissive.
     await expect(
@@ -204,8 +205,8 @@ test.describe("T17a-4 — Scenario-file card + read-only preview", () => {
       page.getByTestId("scenario-download-button").click(),
     ]);
     expect(download.suggestedFilename()).toBe("scenario.yaml");
-    // A successful plain Workspace Download is the one path that clears dirty.
-    expect(await isDirty(page)).toBe(false);
+    // A successful plain Workspace Download is the one path that records a backup.
+    expect(await backupStatus(page)).toBe("current");
   });
 });
 
@@ -250,13 +251,13 @@ test.describe("T17a-5 -- Anonymise card", () => {
     await expect(downloadButton).toBeEnabled();
   });
 
-  test("Download anonymised on a valid scenario writes scenario-anonymised.yaml and does NOT clear dirty", async ({
+  test("Download anonymised on a valid scenario writes scenario-anonymised.yaml and does NOT record a backup", async ({
     page,
   }) => {
     await gotoReadySaveAndLoad(page);
-    await markSaved(page);
+    await recordBackup(page);
     await mutate(page, VALID_SCENARIO_PATCH);
-    expect(await isDirty(page)).toBe(true);
+    expect(await backupStatus(page)).toBe("stale");
 
     const card = page.getByTestId("anonymise-card");
     const [download] = await Promise.all([
@@ -266,19 +267,19 @@ test.describe("T17a-5 -- Anonymise card", () => {
     expect(download.suggestedFilename()).toBe("scenario-anonymised.yaml");
 
     // An anonymised copy is a redacted export, not a save of the working
-    // scenario (mirrors why Copy doesn't clear dirty) -- dirty stays set.
-    expect(await isDirty(page)).toBe(true);
+    // scenario (mirrors why Copy doesn't record a backup) -- the backup stays stale.
+    expect(await backupStatus(page)).toBe("stale");
   });
 
-  test("an incomplete draft still anonymises (DL12 §2 backup), leaving dirty set", async ({
+  test("an incomplete draft still anonymises (DL12 §2 backup), leaving the backup stale", async ({
     page,
   }) => {
     await gotoReadySaveAndLoad(page);
     // Incomplete (blank dates), not corrupt: the anonymised Workspace backup
     // preserves it and writes, rather than blocking.
-    await markSaved(page);
+    await recordBackup(page);
     await mutate(page, { staff: [{ id: "Nurse A" }] });
-    expect(await isDirty(page)).toBe(true);
+    expect(await backupStatus(page)).toBe("stale");
 
     const card = page.getByTestId("anonymise-card");
     const [download] = await Promise.all([
@@ -286,8 +287,8 @@ test.describe("T17a-5 -- Anonymise card", () => {
       card.getByTestId("anonymise-download-button").click(),
     ]);
     expect(download.suggestedFilename()).toBe("scenario-anonymised.yaml");
-    // An anonymised copy is a redacted export, never a save — dirty stays set.
-    expect(await isDirty(page)).toBe(true);
+    // An anonymised copy is a redacted export, never a backup — the backup stays stale.
+    expect(await backupStatus(page)).toBe("stale");
   });
 
   // Scatter needs a complete, valid calendar. A null, partial, or reversed range
@@ -323,4 +324,104 @@ test.describe("T17a-5 -- Anonymise card", () => {
       expect(rangeStart).toBe(range.rangeStart);
     });
   }
+});
+
+// T08e — the visible, accessible tri-state backup-freshness indicator on the
+// Save & Load surface. It is display-only (never gates nav/unload/operations —
+// that decoupling is proven in app-shell.spec.ts) and DISTINCT from the browser
+// auto-save persistence badge: the persistence badge answers "saved in this
+// browser?", this one answers "does my downloaded backup still match my work?".
+test.describe("T08e — Workspace-backup freshness indicator", () => {
+  test("reads No backup → Backup current after a plain Download → Backup out of date after an edit", async ({
+    page,
+  }) => {
+    await gotoReadySaveAndLoad(page);
+    const badge = page.getByTestId("backup-status");
+
+    // A fresh workspace has no downloaded backup.
+    await expect(badge).toHaveAttribute("data-status", "none");
+    await expect(badge).toContainText(/no backup/i);
+
+    // A successful plain Download records the backup → current.
+    await mutate(page, VALID_SCENARIO_PATCH);
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      page.getByTestId("scenario-download-button").click(),
+    ]);
+    expect(download.suggestedFilename()).toBe("scenario.yaml");
+    await expect(badge).toHaveAttribute("data-status", "current");
+    await expect(badge).toContainText(/backup current/i);
+
+    // Any edit diverges from the downloaded file → out of date.
+    await mutate(page, { rangeStart: "2027-01-01" });
+    await expect(badge).toHaveAttribute("data-status", "stale");
+    await expect(badge).toContainText(/backup out of date/i);
+  });
+
+  test("Copy and Download-anonymised never falsely mark the backup current", async ({
+    page,
+    context,
+  }) => {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    await gotoReadySaveAndLoad(page);
+    const badge = page.getByTestId("backup-status");
+
+    // Reach 'current' via a real Download, then edit to 'stale'.
+    await mutate(page, VALID_SCENARIO_PATCH);
+    await Promise.all([
+      page.waitForEvent("download"),
+      page.getByTestId("scenario-download-button").click(),
+    ]);
+    await expect(badge).toHaveAttribute("data-status", "current");
+    await mutate(page, { rangeStart: "2027-01-01" });
+    await expect(badge).toHaveAttribute("data-status", "stale");
+
+    // Copy produces no durable backup → stays stale, never flips to current.
+    await page.getByTestId("scenario-copy-button").click();
+    await expect(page.getByTestId("scenario-copy-button")).toContainText("Copied!");
+    await expect(badge).toHaveAttribute("data-status", "stale");
+
+    // Download-anonymised is a redacted export, not a backup → stays stale.
+    await Promise.all([
+      page.waitForEvent("download"),
+      page.getByTestId("anonymise-download-button").click(),
+    ]);
+    await expect(badge).toHaveAttribute("data-status", "stale");
+  });
+
+  test("importing a scenario clears freshness to No backup, never current", async ({ page }) => {
+    await gotoReadySaveAndLoad(page);
+    const badge = page.getByTestId("backup-status");
+
+    // Reach 'current' first, so the import is proven to CLEAR an existing backup.
+    await mutate(page, VALID_SCENARIO_PATCH);
+    await Promise.all([
+      page.waitForEvent("download"),
+      page.getByTestId("scenario-download-button").click(),
+    ]);
+    await expect(badge).toHaveAttribute("data-status", "current");
+
+    // Import a sample into the non-empty workspace (stages the replace confirm).
+    await page.getByTestId("scenario-upload-button").click();
+    await page.getByTestId("upload-load-sample-button").click();
+    await page.getByTestId("confirm-dialog-confirm").click();
+
+    // An imported file is not a fresh local backup → freshness clears to none.
+    await expect(badge).toHaveAttribute("data-status", "none");
+    await expect(badge).toContainText(/no backup/i);
+  });
+
+  test("the backup badge is a distinct surface from the auto-save persistence badge", async ({
+    page,
+  }) => {
+    await gotoReadySaveAndLoad(page);
+    const backup = page.getByTestId("backup-status");
+    const persistence = page.getByTestId("auto-save-status").getByTestId("persistence-badge");
+
+    await expect(backup).toBeVisible();
+    await expect(persistence).toBeVisible();
+    // Two different axes: local autosave says Saved; the backup is not yet taken.
+    await expect(persistence).toContainText(/saved/i);
+    await expect(backup).toContainText(/no backup/i);
+  });
 });

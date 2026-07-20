@@ -41,6 +41,17 @@ export {
 } from "./prepare-export";
 // T17r — Workspace V1 backup export (plain + anonymised), the Save/Load artifacts.
 export { prepareWorkspaceExport, prepareAnonymizedWorkspaceExport } from "./workspace-export";
+// T16q — shared Optimize submission preparation: co-derived strict YAML, people
+// count, and serializable people-only reverse map from one validated transform.
+export {
+  prepareOptimizeSubmission,
+  validatePeopleReverseMap,
+  type OptimizeSubmissionPrep,
+  type PrepareOptimizeSubmissionResult,
+  type PrepareOptimizeSubmissionOptions,
+  type PeopleReverseMap,
+  type ReverseMapTuple,
+} from "./prepare-optimize-submission";
 export {
   parseScenarioYaml,
   importScenarioYaml,
@@ -104,3 +115,35 @@ export {
   type ContractedHoursError,
   type ContractedHoursValidation,
 } from "./schemas/contracted-hours";
+// qq0.23a — total, ordered, fail-closed C3 selector resolution for the
+// uncredited-leave guard, plus the lossless typed-key record transport.
+export {
+  buildScenarioResolutionContext,
+  buildPeopleIndexMap,
+  buildDateIndexMap,
+  resolvePeopleSelector,
+  resolveShiftTypeSelector,
+  resolveDateSelector,
+  toTypedKeyRecords,
+  PeopleMapError,
+  DateMapError,
+  type Resolution,
+  type TypedMapKey,
+  type TypedKeyRecord,
+  type ResolutionContextInput,
+  type ScenarioResolutionContext,
+} from "./leave-guard/resolution";
+// qq0.23b — the shared, pure uncredited-leave detector plus the saved-state and
+// normalized-import adapters that snapshot scenario state into its input.
+export {
+  findUncreditedLeaveFindings,
+  type LeaveGuardCountInput,
+  type LeaveGuardInput,
+  type UncreditedLeaveFinding,
+} from "./leave-guard/detector";
+export {
+  findSavedUncreditedLeaveFindings,
+  findImportUncreditedLeaveFindings,
+  type SavedLeaveGuardSnapshot,
+  type ImportLeaveGuardSnapshot,
+} from "./leave-guard/adapters";

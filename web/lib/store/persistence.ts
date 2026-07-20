@@ -21,15 +21,15 @@ import { SCENARIO_KEYS } from "./fingerprint";
 export const SCENARIO_PERSIST_KEY = "nurse-scheduler/scenario";
 
 /** Current persistence payload version; a bump triggers `migrateScenarioState`. */
-export const SCENARIO_PERSIST_VERSION = 4;
+export const SCENARIO_PERSIST_VERSION = 5;
 
 /**
  * The persisted `state` payload at the current version: the durable scenario
- * slice plus the baseline fingerprint (persisted alongside so a reload can tell
- * restored-unsaved work from clean).
+ * slice plus the Workspace-backup fingerprint (persisted alongside so a reload can
+ * tell whether the restored work still matches its last downloaded backup).
  */
 export type PersistedScenarioState = ScenarioUiState & {
-  baselineFingerprint: string | null;
+  backupFingerprint: string | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -58,6 +58,10 @@ export type PersistedScenarioState = ScenarioUiState & {
  * baseline computed under the previous strict-projection scheme and set on
  * hydration/New/Load, which no longer marks a genuine backup — clear it to `null`
  * (unknown) so no stale backup is falsely claimed fresh.
+ * v4 → v5: the persisted key `baselineFingerprint` was renamed to
+ * `backupFingerprint` (T08e) to name the download-backup contract explicitly. A v4
+ * record already stored its value under the download-baseline semantics (set only
+ * by a real plain Download), so carry it across verbatim under the new key.
  */
 export function migrateScenarioState(persisted: unknown, fromVersion: number): unknown {
   if (fromVersion > SCENARIO_PERSIST_VERSION) {
@@ -102,6 +106,16 @@ export function migrateScenarioState(persisted: unknown, fromVersion: number): u
     // A pre-v4 baseline was set under the old strict-projection/download-baseline
     // semantics; it no longer denotes a real backup. Reset to unknown (`null`).
     migrated.baselineFingerprint = null;
+  }
+
+  if (fromVersion < 5) {
+    // Rename the persisted key to the explicit backup-contract name. A v4 record's
+    // value already means "the last plain Download", so carry it across verbatim;
+    // a pre-v4 record was just cleared to `null` above and is renamed the same way.
+    if ("baselineFingerprint" in migrated) {
+      migrated.backupFingerprint = migrated.baselineFingerprint;
+      delete migrated.baselineFingerprint;
+    }
   }
 
   return migrated;
@@ -677,7 +691,7 @@ function validateScenarioField(key: string, value: unknown): void {
 
 /**
  * Allowlist a parseable persisted payload down to the known scenario-slice keys
- * (plus `baselineFingerprint`), recursively validating each present field's
+ * (plus `backupFingerprint`), recursively validating each present field's
  * complete structure. Unknown keys are dropped — so a well-formed-but-wrong
  * payload can never overwrite store actions or inject foreign state.
  *
@@ -705,12 +719,12 @@ export function sanitizePersistedScenario(persisted: unknown): Partial<Persisted
     out[key] = value;
   }
 
-  if ("baselineFingerprint" in persisted) {
-    const fingerprint = persisted.baselineFingerprint;
+  if ("backupFingerprint" in persisted) {
+    const fingerprint = persisted.backupFingerprint;
     if (fingerprint !== null && typeof fingerprint !== "string") {
-      throw new Error("Persisted baselineFingerprint is invalid.");
+      throw new Error("Persisted backupFingerprint is invalid.");
     }
-    out.baselineFingerprint = fingerprint;
+    out.backupFingerprint = fingerprint;
   }
 
   return out as Partial<PersistedScenarioState>;

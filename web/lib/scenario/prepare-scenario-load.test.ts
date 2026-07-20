@@ -164,13 +164,13 @@ describe("prepareScenarioLoad — the no-mutation lock", () => {
     const spine = createStateSpine({ createStorage: () => createMemoryStorage() });
     await hydrateScenarioStore(spine.scenario, spine.hot);
     spine.scenario.getState().mutateScenario({ rangeStart: "2026-02-01", rangeEnd: "2026-02-28" });
-    spine.scenario.getState().markSaved();
+    spine.scenario.getState().recordBackup();
     return spine;
   }
 
   interface StoreSnapshot {
     fingerprint: string;
-    baseline: string | null;
+    backup: string | null;
     state: string;
     past: number;
     future: number;
@@ -180,7 +180,7 @@ describe("prepareScenarioLoad — the no-mutation lock", () => {
     const state = spine.scenario.getState();
     return {
       fingerprint: computeScenarioFingerprint(pickScenario(state)),
-      baseline: state.baselineFingerprint,
+      backup: state.backupFingerprint,
       state: JSON.stringify(pickScenario(state)),
       past: spine.scenario.temporal.getState().pastStates.length,
       future: spine.scenario.temporal.getState().futureStates.length,

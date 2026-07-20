@@ -3,9 +3,9 @@
 // Scenario-file card (T17 repair; prototype ScreenSaveLoad.dc.html:40-48). All
 // four file actions live here in the prototype's order — Download, Upload,
 // Copy, Edit YAML. Download/Copy route through the pure
-// `performDownload`/`performCopy` core so the dirty-machinery decision
-// (Download clears dirty via `markSaved`, Copy never does) stays enforced by
-// the core's dependency shapes. Upload and Edit YAML are triggers only — the
+// `performDownload`/`performCopy` core so the backup-freshness decision
+// (Download records the backup via `recordBackup`, Copy never does) stays enforced
+// by the core's dependency shapes. Upload and Edit YAML are triggers only — the
 // workspace container owns the upload modal, the edit draft, and the single
 // shared `useScenarioImport` pipeline they feed.
 
@@ -15,6 +15,7 @@ import { useScenarioStore } from "@/lib/store";
 import type { ScenarioUiState, ScenarioValidationIssue } from "@/lib/scenario";
 import { Button } from "@/components/ui/button";
 import { FaCheck, FaCopy, FaDownload, FaPen, FaUpload } from "@/components/icons";
+import { BackupStatusBadge } from "./backup-status-badge";
 import { performCopy, performDownload, SCENARIO_DOWNLOAD_FILENAME } from "./scenario-file-export";
 import { ScenarioIssuesList } from "./scenario-issues-list";
 
@@ -54,12 +55,12 @@ export function ScenarioFileCard({
   onUpload,
   onStartEdit,
 }: ScenarioFileCardProps) {
-  const markSaved = useScenarioStore((s) => s.markSaved);
+  const recordBackup = useScenarioStore((s) => s.recordBackup);
   const [copied, setCopied] = useState(false);
   const [issues, setIssues] = useState<ScenarioValidationIssue[] | null>(null);
 
   const handleDownload = () => {
-    const result = performDownload(scenario, { writeFile: writeYamlFile, markSaved });
+    const result = performDownload(scenario, { writeFile: writeYamlFile, recordBackup });
     if (!result.ok) {
       setIssues(result.issues);
       return;
@@ -95,8 +96,9 @@ export function ScenarioFileCard({
 
   return (
     <section className="border border-line bg-surface" data-testid="scenario-file-card">
-      <div className="border-b border-line2 px-[18px] py-4">
+      <div className="flex items-center justify-between gap-3 border-b border-line2 px-[18px] py-4">
         <h2 className="font-heading text-cardhead font-extrabold tracking-tight">Scenario file</h2>
+        <BackupStatusBadge />
       </div>
       <div className="flex flex-col gap-3 p-[18px]">
         <div className="flex flex-wrap gap-2.5">

@@ -5,14 +5,16 @@
 // be mutable from a browser test — but the editor screens that produce those
 // mutations are owned by later tickets (T07/T14/T15) and don't exist yet. This
 // component exposes the app's store singletons on `window.__nsStore` so the
-// Playwright specs can drive a real tracked mutation (`mutateScenario`), read
-// `isDirty`, and inspect slice state, exercising the genuine T04 wiring rather
-// than a mock. It renders nothing and is safe to leave mounted (references only —
-// no secrets live in the store for this local tool).
+// Playwright specs can drive a real tracked mutation (`mutateScenario`), read the
+// Workspace-backup currentness (`backupStatus`), and inspect slice state,
+// exercising the genuine T04 wiring rather than a mock. It renders nothing and is
+// safe to leave mounted (references only — no secrets live in the store for this
+// local tool).
 
 import { useEffect } from "react";
-import { selectIsDirty, useHotStore, useScenarioStore } from "@/lib/store";
+import { selectBackupStatus, useHotStore, useScenarioStore, type BackupStatus } from "@/lib/store";
 import { useNavGuardStore } from "./nav-guard-store";
+import { getPersistenceStatus, type PersistenceStatus } from "./persistence-status";
 
 declare global {
   interface Window {
@@ -24,7 +26,13 @@ declare global {
     __nsStore?: {
       scenario: typeof useScenarioStore;
       hot: typeof useHotStore;
-      isDirty: () => boolean;
+      backupStatus: () => BackupStatus;
+      // Synchronous read of the shell's persistence status, so specs can wait
+      // for a durable write to settle (`saved`) with a deterministic seam
+      // instead of an arbitrary timeout before asserting the unload guard is
+      // disarmed. A tracked write (incl. recordBackup's fingerprint write) flips
+      // this to `saving` synchronously, arming the guard until the queue drains.
+      persistenceStatus: () => PersistenceStatus;
       // The nav-guard store, so specs can drive the losable-draft nav/unload guard
       // (FR-PR-06) via `registerDraft` without mounting a real card editor.
       navGuard: typeof useNavGuardStore;
@@ -48,7 +56,8 @@ export function TestBridge() {
     window.__nsStore = {
       scenario: useScenarioStore,
       hot: useHotStore,
-      isDirty: () => selectIsDirty(useScenarioStore.getState()),
+      backupStatus: () => selectBackupStatus(useScenarioStore.getState()),
+      persistenceStatus: () => getPersistenceStatus(),
       navGuard: useNavGuardStore,
     };
     return () => {

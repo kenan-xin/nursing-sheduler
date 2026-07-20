@@ -40,13 +40,13 @@ type NsWindow = {
       getState: () => Record<string, unknown> & {
         cardsByKind: { requirements: RequirementCard[] };
         mutateScenario: (patch: Record<string, unknown>) => void;
-        markSaved: () => void;
+        recordBackup: () => void;
       };
       temporal: {
         getState: () => { pastStates: unknown[]; futureStates: unknown[] };
       };
     };
-    isDirty: () => boolean;
+    backupStatus: () => "none" | "current" | "stale";
   };
 };
 
@@ -589,11 +589,11 @@ test.describe.serial("T12 staffing requirements editor (M1 clone)", () => {
     await gotoReady(page);
     await seed(page, BASE_SEED);
     await page.evaluate(() =>
-      (window as unknown as NsWindow).__nsStore.scenario.getState().markSaved(),
+      (window as unknown as NsWindow).__nsStore.scenario.getState().recordBackup(),
     );
-    expect(await page.evaluate(() => (window as unknown as NsWindow).__nsStore.isDirty())).toBe(
-      false,
-    );
+    expect(
+      await page.evaluate(() => (window as unknown as NsWindow).__nsStore.backupStatus()),
+    ).toBe("current");
 
     await page.getByTestId("add-card-toggle").click();
     await expect(page.getByTestId("card-editor-form")).toBeVisible();

@@ -154,7 +154,7 @@ describe("streamOptimizeEvents", () => {
   it("dispatches new frames, dedupes exact-duplicate ids, and returns terminal on a terminal state frame", async () => {
     // A terminal frame must carry the FULL enriched state payload to be recognized.
     const terminalData =
-      '{"state":"completed","queue_position":null,"cancel_requested":false,"early_completion_requested":false,"terminal":true,"controls":{"cancellable":false,"early_completion_available":false}}';
+      '{"occurred_at":"2026-07-20T00:01:00+00:00","state":"completed","queue_position":null,"cancel_requested":false,"early_completion_requested":false,"terminal":true,"controls":{"cancellable":false,"early_completion_available":false}}';
     globalThis.fetch = vi.fn(async () =>
       streamResponse(
         'id: v1.j.1\nevent: job.progressed\ndata: {"p":1}\n\n' +
@@ -177,6 +177,34 @@ describe("streamOptimizeEvents", () => {
       type: "terminal",
       frame: { id: "v1.j.2", event: "job.state_changed", data: terminalData },
     });
+  });
+
+  it("reports strict terminal source proof before a cancelled apply and does not commit", async () => {
+    const terminalData =
+      '{"occurred_at":"2026-07-20T00:01:00+00:00","state":"completed","queue_position":null,"cancel_requested":false,"early_completion_requested":false,"terminal":true,"controls":{"cancellable":false,"early_completion_available":false}}';
+    globalThis.fetch = vi.fn(async () =>
+      streamResponse(`id: v1.j.2\nevent: job.state_changed\ndata: ${terminalData}\n\n`),
+    ) as typeof fetch;
+    const tracker = new CursorTracker("v1.j.1");
+    const onTerminalObserved = vi.fn();
+
+    await expect(
+      streamOptimizeEvents("/api/optimize/x/events", {
+        signal: new AbortController().signal,
+        tracker,
+        onTerminalObserved,
+        onEvent: () => {
+          throw new Error("attachment revoked");
+        },
+      }),
+    ).rejects.toThrow("attachment revoked");
+
+    expect(onTerminalObserved).toHaveBeenCalledWith({
+      id: "v1.j.2",
+      event: "job.state_changed",
+      data: terminalData,
+    });
+    expect(tracker.lastEventId).toBe("v1.j.1");
   });
 
   it("returns error-response with the parsed body on a non-2xx (expired cursor)", async () => {
@@ -244,6 +272,101 @@ describe("streamOptimizeEvents", () => {
     expect(tracker.lastEventId).toBe("v1.j.7");
   });
 
+  it("fires onCommit with each committed opaque cursor, once, only after apply", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      streamResponse(
+        'id: v1.j.1\nevent: job.progressed\ndata: {"p":1}\n\n' +
+          'id: v1.j.1\nevent: job.progressed\ndata: {"p":1}\n\n' + // exact duplicate → no commit
+          'event: job.progressed\ndata: {"p":2}\n\n' + // id-less → nothing to commit
+          'id: v1.j.2\nevent: job.progressed\ndata: {"p":3}\n\n',
+      ),
+    ) as typeof fetch;
+
+    const committed: string[] = [];
+    const appliedAt: number[] = [];
+    let applyCount = 0;
+    await streamOptimizeEvents("/api/optimize/x/events", {
+      signal: new AbortController().signal,
+      tracker: new CursorTracker(),
+      onEvent: () => {
+        applyCount += 1;
+      },
+      onCommit: (cursor) => {
+        committed.push(cursor);
+        appliedAt.push(applyCount);
+      },
+    });
+
+    // Only real, newly-applied cursors are reported — no duplicate, no id-less frame.
+    expect(committed).toEqual(["v1.j.1", "v1.j.2"]);
+    // Each commit was observed strictly after its frame's apply ran (never before).
+    expect(appliedAt).toEqual([1, 3]);
+  });
+
+  it("does NOT fire onCommit when onEvent throws (cursor stays put for replay)", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      streamResponse('id: v1.j.7\nevent: job.progressed\ndata: {"p":1}\n\n'),
+    ) as typeof fetch;
+
+    const tracker = new CursorTracker("v1.j.6");
+    const onCommit = vi.fn();
+    await expect(
+      streamOptimizeEvents("/api/optimize/x/events", {
+        signal: new AbortController().signal,
+        tracker,
+        onEvent: () => {
+          throw new Error("apply failed");
+        },
+        onCommit,
+      }),
+    ).rejects.toThrow("apply failed");
+
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(tracker.lastEventId).toBe("v1.j.6");
+  });
+
+  it("awaits an async onEvent: a rejection leaves the cursor uncommitted, replays, then commits once", async () => {
+    const frameText = 'id: v1.j.7\nevent: job.progressed\ndata: {"p":1}\n\n';
+    globalThis.fetch = vi.fn(async () => streamResponse(frameText)) as typeof fetch;
+
+    const tracker = new CursorTracker("v1.j.6");
+    const onCommit = vi.fn();
+    const applied: string[] = [];
+    let shouldReject = true;
+    // A promise-returning consumer: it must be awaited, so a REJECTION is observed
+    // before the commit — identical to the synchronous throw path.
+    const onEvent = async (frame: SseFrame) => {
+      if (shouldReject) {
+        shouldReject = false;
+        throw new Error("async apply failed");
+      }
+      applied.push(frame.id ?? "∅");
+    };
+
+    await expect(
+      streamOptimizeEvents("/api/optimize/x/events", {
+        signal: new AbortController().signal,
+        tracker,
+        onEvent,
+        onCommit,
+      }),
+    ).rejects.toThrow("async apply failed");
+    expect(tracker.lastEventId).toBe("v1.j.6"); // not advanced
+    expect(onCommit).not.toHaveBeenCalled();
+
+    // Reconnect resends the prior cursor and reapplies the frame exactly once.
+    await streamOptimizeEvents("/api/optimize/x/events", {
+      signal: new AbortController().signal,
+      tracker,
+      onEvent,
+      onCommit,
+    });
+    expect(applied).toEqual(["v1.j.7"]);
+    expect(tracker.lastEventId).toBe("v1.j.7");
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit).toHaveBeenCalledWith("v1.j.7");
+  });
+
   it("returns closed when the stream ends without a terminal frame", async () => {
     globalThis.fetch = vi.fn(async () =>
       streamResponse('id: v1.j.1\nevent: job.progressed\ndata: {"p":1}\n\n'),
@@ -286,7 +409,11 @@ describe("malformed durable event reconciliation through the stream fence", () =
   it("commits the cursor only AFTER a successful poll reconcile, exactly once (no infinite replay)", async () => {
     globalThis.fetch = vi.fn(async () => streamResponse(malformedState)) as typeof fetch;
     const client = new QueryClient();
-    const reconcile = vi.fn(async () => {});
+    const authoritative = seededJob({ state: "cancelling" });
+    const reconcile = vi.fn(async () => {
+      client.setQueryData(optimizeKeys.job("opt_1"), authoritative);
+      return authoritative;
+    });
     const tracker = new CursorTracker("v1.j.6");
 
     await streamOptimizeEvents("/api/optimize/opt_1/events", {
@@ -296,6 +423,7 @@ describe("malformed durable event reconciliation through the stream fence", () =
     });
 
     expect(reconcile).toHaveBeenCalledOnce();
+    expect(client.getQueryData<JobResponse>(optimizeKeys.job("opt_1"))?.state).toBe("cancelling");
     expect(tracker.lastEventId).toBe("v1.j.7"); // committed after reconcile
     // A permanently malformed retained event cannot loop forever: once committed, a
     // resend of the same id is an exact duplicate and is skipped.
@@ -329,6 +457,7 @@ describe("malformed durable event reconciliation through the stream fence", () =
   const controls = { cancellable: false, early_completion_available: false };
 
   const invalidStateBase = {
+    occurred_at: "2026-07-20T00:00:00+00:00",
     queue_position: null,
     cancel_requested: false,
     early_completion_requested: false,
@@ -349,6 +478,7 @@ describe("malformed durable event reconciliation through the stream fence", () =
         ...invalidStateBase,
         state: "running",
         terminal: false,
+        worker_id: "worker-1",
         queue_position: -1,
       }),
     ],
@@ -358,6 +488,7 @@ describe("malformed durable event reconciliation through the stream fence", () =
         ...invalidStateBase,
         state: "running",
         terminal: false,
+        worker_id: "worker-1",
         queue_position: 2.5,
       }),
     ],
@@ -376,6 +507,7 @@ describe("malformed durable event reconciliation through the stream fence", () =
         ...invalidStateBase,
         state: "running",
         terminal: true,
+        worker_id: "worker-1",
       }),
     ],
     [
@@ -387,8 +519,42 @@ describe("malformed durable event reconciliation through the stream fence", () =
       }),
     ],
     [
+      "queued state without a queue position",
+      frame("v1.s.9", "job.state_changed", {
+        ...invalidStateBase,
+        state: "queued",
+        terminal: false,
+        controls: { cancellable: true, early_completion_available: false },
+      }),
+    ],
+    [
+      "running state with terminal controls",
+      frame("v1.s.12", "job.state_changed", {
+        ...invalidStateBase,
+        state: "running",
+        terminal: false,
+        worker_id: "worker-1",
+      }),
+    ],
+    [
+      "failed state without an error",
+      frame("v1.s.13", "job.state_changed", {
+        ...invalidStateBase,
+        state: "failed",
+        terminal: true,
+      }),
+    ],
+    [
+      "control_changed false",
+      frame("v1.c.1", "job.control_changed", {
+        occurred_at: "2026-07-20T00:00:00+00:00",
+        early_completion_requested: false,
+      }),
+    ],
+    [
       "unknown outcome",
       frame("v1.r.1", "job.result_available", {
+        occurred_at: "2026-07-20T00:00:00+00:00",
         outcome: "bogus",
         score: 1,
         solver_status: "X",
@@ -399,11 +565,53 @@ describe("malformed durable event reconciliation through the stream fence", () =
     [
       "fractional score",
       frame("v1.r.2", "job.result_available", {
+        occurred_at: "2026-07-20T00:00:00+00:00",
         outcome: "feasible",
         score: 1.5,
         solver_status: "X",
         termination_reason: null,
         artifact_name: null,
+      }),
+    ],
+    [
+      "feasible result without an artifact",
+      frame("v1.r.3", "job.result_available", {
+        occurred_at: "2026-07-20T00:00:00+00:00",
+        outcome: "feasible",
+        score: 1,
+        solver_status: "FEASIBLE",
+        termination_reason: "limit_or_stop",
+        artifact_name: null,
+      }),
+    ],
+    [
+      "optimal result with a feasible solver status",
+      frame("v1.r.4", "job.result_available", {
+        occurred_at: "2026-07-20T00:00:00+00:00",
+        outcome: "optimal",
+        score: 1,
+        solver_status: "FEASIBLE",
+        termination_reason: "optimality_proven",
+        artifact_name: "schedule.xlsx",
+      }),
+    ],
+    [
+      "running state with an unknown key",
+      frame("v1.s.14", "job.state_changed", {
+        ...invalidStateBase,
+        state: "running",
+        terminal: false,
+        worker_id: "worker-1",
+        mystery: true,
+      }),
+    ],
+    [
+      "running state without worker_id",
+      frame("v1.s.15", "job.state_changed", {
+        ...invalidStateBase,
+        state: "running",
+        terminal: false,
+        controls: { cancellable: true, early_completion_available: true },
       }),
     ],
   ];
@@ -413,17 +621,31 @@ describe("malformed durable event reconciliation through the stream fence", () =
     async (_name, frameText) => {
       globalThis.fetch = vi.fn(async () => streamResponse(frameText)) as typeof fetch;
       const client = new QueryClient();
-      const reconcile = vi.fn(async () => {});
+      client.setQueryData(optimizeKeys.job("opt_1"), seededJob());
+      const authoritative = seededJob({ state: "cancelling" });
+      const reconcile = vi.fn(async () => {
+        client.setQueryData(optimizeKeys.job("opt_1"), authoritative);
+        return authoritative;
+      });
+      const committed: string[] = [];
       const tracker = new CursorTracker("v1.prev");
 
       const outcome = await streamOptimizeEvents("/api/optimize/opt_1/events", {
         signal: new AbortController().signal,
         tracker,
         onEvent: onEvent(client, reconcile),
+        onCommit: (cursor) => {
+          expect(client.getQueryData<JobResponse>(optimizeKeys.job("opt_1"))?.state).toBe(
+            "cancelling",
+          );
+          committed.push(cursor);
+        },
       });
 
       expect(reconcile).toHaveBeenCalledOnce(); // reconciled, not applied
+      expect(client.getQueryData<JobResponse>(optimizeKeys.job("opt_1"))?.state).toBe("cancelling");
       expect(tracker.lastEventId).not.toBe("v1.prev"); // cursor advanced exactly once, after reconcile
+      expect(committed).toEqual([tracker.lastEventId]);
       expect(outcome.type).not.toBe("terminal");
     },
   );
@@ -450,19 +672,30 @@ describe("malformed durable event reconciliation through the stream fence", () =
     expect(tracker.lastEventId).toBe("v1.s.5"); // committed after reconcile
   });
 
-  it("a failed reconcile on a semantically invalid frame retains the prior cursor for replay", async () => {
-    const invalidOutcome = frame("v1.r.9", "job.result_available", {
-      outcome: "bogus",
-      score: 1,
-      solver_status: "X",
-      termination_reason: null,
-      artifact_name: null,
+  it("a failed reconcile for malformed running runtime retains the prior cursor for replay", async () => {
+    const invalidRuntime = frame("v1.s.16", "job.state_changed", {
+      ...invalidStateBase,
+      state: "running",
+      terminal: false,
+      worker_id: "worker-1",
+      controls: { cancellable: true, early_completion_available: true },
+      runtime: {
+        service_name: "nurse-scheduling-api",
+        api_version: "alpha",
+        app_version: "v-test",
+        deployment_id: "deployment-test",
+        instance_id: "instance-test",
+        started_at: "not-an-iso-timestamp",
+        job_backend: "memory",
+        job_store_id: "store-test",
+      },
     });
-    globalThis.fetch = vi.fn(async () => streamResponse(invalidOutcome)) as typeof fetch;
+    globalThis.fetch = vi.fn(async () => streamResponse(invalidRuntime)) as typeof fetch;
     const client = new QueryClient();
     const reconcile = vi.fn(async () => {
       throw new Error("poll failed");
     });
+    const onCommit = vi.fn();
     const tracker = new CursorTracker("v1.prev");
 
     await expect(
@@ -470,9 +703,11 @@ describe("malformed durable event reconciliation through the stream fence", () =
         signal: new AbortController().signal,
         tracker,
         onEvent: onEvent(client, reconcile),
+        onCommit,
       }),
     ).rejects.toThrow("poll failed");
     expect(tracker.lastEventId).toBe("v1.prev"); // unchanged → replay on reconnect
+    expect(onCommit).not.toHaveBeenCalled();
   });
 
   it("a live state falsely bearing terminal:true reconciles and does NOT close the stream", async () => {
@@ -482,6 +717,7 @@ describe("malformed durable event reconciliation through the stream fence", () =
       ...invalidStateBase,
       state: "running",
       terminal: true,
+      worker_id: "worker-1",
     });
     globalThis.fetch = vi.fn(async () => streamResponse(liveMarkedTerminal)) as typeof fetch;
     const client = new QueryClient();
@@ -527,6 +763,7 @@ describe("malformed durable event reconciliation through the stream fence", () =
   it("a VALID terminal state frame with an existing cache applies directly and closes terminal", async () => {
     const validTerminal = frame("v1.s.6", "job.state_changed", {
       ...invalidStateBase,
+      occurred_at: "2026-07-20T00:01:00+00:00",
       state: "completed",
       terminal: true,
     });
@@ -558,19 +795,24 @@ describe("malformed durable event reconciliation through the stream fence", () =
         ...invalidStateBase,
         state: "running",
         terminal: false,
+        worker_id: "worker-1",
       }),
     ],
     [
       "control_changed",
-      frame("v1.n.2", "job.control_changed", { early_completion_requested: true }),
+      frame("v1.n.2", "job.control_changed", {
+        occurred_at: "2026-07-20T00:00:00+00:00",
+        early_completion_requested: true,
+      }),
     ],
     [
       "result_available",
       frame("v1.n.3", "job.result_available", {
+        occurred_at: "2026-07-20T00:00:00+00:00",
         outcome: "feasible",
         score: 42,
         solver_status: "FEASIBLE",
-        termination_reason: null,
+        termination_reason: "limit_or_stop",
         artifact_name: "schedule.xlsx",
       }),
     ],

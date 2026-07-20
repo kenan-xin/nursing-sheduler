@@ -14,7 +14,7 @@ type NsWindow = {
       getState(): Record<string, unknown> & { mutateScenario(x: unknown): void };
       temporal: { getState(): { pastStates: unknown[] } };
     };
-    isDirty(): boolean;
+    backupStatus(): "none" | "current" | "stale";
   };
 };
 
@@ -38,8 +38,8 @@ function pastStatesLength(page: Page): Promise<number> {
   );
 }
 
-function isDirty(page: Page): Promise<boolean> {
-  return page.evaluate(() => (window as unknown as NsWindow).__nsStore.isDirty());
+function backupStatus(page: Page): Promise<string> {
+  return page.evaluate(() => (window as unknown as NsWindow).__nsStore.backupStatus());
 }
 
 // A minimal backend-valid YAML fixture (mirrors lib/scenario/test-fixtures.ts'
@@ -98,8 +98,8 @@ test.describe("T17b-2 — Load flow UI", () => {
     // Load is one tracked full-slice mutation (Undo restores the prior workspace),
     // not a history-clearing replace (T17r P0).
     expect(await pastStatesLength(page)).toBeGreaterThan(0);
-    // An imported file is not a fresh local backup: baseline stays unknown (null).
-    expect(await isDirty(page)).toBe(false);
+    // An imported file is not a fresh local backup: backup stays unknown (none).
+    expect(await backupStatus(page)).toBe("none");
   });
 
   test("invalid YAML blocks the load: V-issues shown, store untouched", async ({ page }) => {

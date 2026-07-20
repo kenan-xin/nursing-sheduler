@@ -35,7 +35,7 @@ describe("Dexie StateStorage adapter (fake-indexeddb)", () => {
     const first = createStateSpine({ createStorage: () => createDexieStorage(dbName) });
     await hydrateScenarioStore(first.scenario, first.hot);
     first.scenario.getState().mutateScenario({ rangeStart: "2026-04-01", rangeEnd: "2026-04-30" });
-    first.scenario.getState().markSaved();
+    first.scenario.getState().recordBackup();
     // Await the guarded write queue instead of guessing a timeout.
     await drainScenarioPersist(first.scenario);
 

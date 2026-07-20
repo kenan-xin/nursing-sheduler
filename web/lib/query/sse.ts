@@ -1,5 +1,5 @@
 import { LAST_EVENT_ID_HEADER } from "@/lib/bff/types";
-import { parseStateChangedPayload } from "@/lib/query/event-payloads";
+import { parseStrictTerminalFrame, type StrictTerminalFrame } from "@/lib/query/event-payloads";
 
 // fetch-stream SSE consumption for `/api/optimize/{id}/events` (tech-plan §5).
 // Two concerns handled here, both unit-tested:
@@ -119,7 +119,7 @@ export class CursorTracker {
 }
 
 export type StreamOutcome =
-  | { type: "terminal"; frame: SseFrame }
+  | { type: "terminal"; frame: StrictTerminalFrame }
   | { type: "closed" }
   | { type: "error-response"; status: number; body: unknown };
 
@@ -130,6 +130,16 @@ export interface StreamOptions {
   // reconciliation (poll + cache replace) of a malformed durable payload completes
   // before the cursor advances. A rejection leaves the cursor at the prior id.
   onEvent: (frame: SseFrame) => void | Promise<void>;
+  // Fired with the just-committed opaque cursor, STRICTLY AFTER `onEvent` resolved
+  // (cache reconcile + consumer application) and `tracker.commit` advanced the id.
+  // It never fires when `onEvent` throws (cursor unchanged), for an exact-duplicate
+  // id (skipped before apply), or for an id-less frame (nothing committed) — so a
+  // consumer persisting the resume point stores only fully applied cursors, exactly
+  // once each. The value is opaque: never parse or compare it.
+  onCommit?: (cursor: string) => void;
+  // Strict terminal source evidence, emitted before cache/consumer application and
+  // cursor commit. This survives an abort that wins after the frame was parsed.
+  onTerminalObserved?: (frame: StrictTerminalFrame) => void;
 }
 
 // A `job.state_changed` frame whose FULLY VALIDATED payload marks the lifecycle
@@ -138,18 +148,6 @@ export interface StreamOptions {
 // application: a semantically invalid state/error/queue payload — even one bearing
 // `terminal: true` — is NOT trusted to close the stream. It reconciles (poll)
 // instead, and true terminality is then observed via the authoritative poll.
-function isTerminalFrame(frame: SseFrame): boolean {
-  if (frame.event !== "job.state_changed") return false;
-  let data: unknown;
-  try {
-    data = JSON.parse(frame.data);
-  } catch {
-    return false;
-  }
-  const payload = parseStateChangedPayload(data);
-  return payload !== null && payload.terminal === true;
-}
-
 // Connect once, parse frames, dispatch only NEW frames (exact-duplicate dedupe by
 // cursor), and report the outcome. The last applied cursor is sent as
 // `Last-Event-ID` so the BFF forwards it upstream for replay. Non-2xx returns
@@ -186,13 +184,19 @@ export async function streamOptimizeEvents(
 
       for (const frame of parser.push(decoder.decode(value, { stream: true }))) {
         if (options.tracker.isDuplicate(frame)) continue; // exact-duplicate id
+        const terminal = parseStrictTerminalFrame(frame);
+        if (terminal !== null) options.onTerminalObserved?.(terminal);
         // Apply (and reconcile, if the durable payload was malformed) BEFORE
         // committing the cursor. If `onEvent` throws/rejects — a cache, consumer, or
         // reconcile-poll failure — the cursor stays at the prior id so reconnect
         // replays and reapplies this exact frame instead of skipping it.
         await options.onEvent(frame);
         options.tracker.commit(frame);
-        if (isTerminalFrame(frame)) return { type: "terminal", frame };
+        // Post-commit: notify only when a real cursor advanced (id-less frames commit
+        // nothing). Fires after apply + commit, so a persisted resume point never runs
+        // ahead of a frame the cache/consumer actually received.
+        if (frame.id !== null) options.onCommit?.(frame.id);
+        if (terminal !== null) return { type: "terminal", frame: terminal };
       }
     }
   } finally {

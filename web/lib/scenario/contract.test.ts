@@ -190,32 +190,35 @@ function hydrate(target: ImportNormalizationTarget): ScenarioUiState {
 // --- T04-shaped consumer stub ----------------------------------------------
 class StoreStub {
   state: ScenarioUiState = createEmptyScenarioUiState();
-  baseline = "";
+  backup: string | null = null;
 
   fingerprint(): string {
     return canonicalHash(toCanonicalScenarioDocument(this.state));
   }
 
-  markSaved(): void {
-    this.baseline = this.fingerprint();
+  recordBackup(): void {
+    this.backup = this.fingerprint();
   }
 
-  get isDirty(): boolean {
-    return this.fingerprint() !== this.baseline;
+  get backupStatus(): "none" | "current" | "stale" {
+    if (this.backup === null) return "none";
+    return this.fingerprint() === this.backup ? "current" : "stale";
   }
 }
 
 describe("shared contract surface", () => {
-  it("T04-shaped store consumes the projection + hash for dirty tracking", () => {
+  it("T04-shaped store consumes the projection + hash for backup currentness", () => {
     const store = new StoreStub();
-    store.markSaved();
-    expect(store.isDirty).toBe(false);
+    expect(store.backupStatus).toBe("none");
+
+    store.recordBackup();
+    expect(store.backupStatus).toBe("current");
 
     store.state.staff = [{ id: 7, description: "Nurse 7" }];
-    expect(store.isDirty).toBe(true);
+    expect(store.backupStatus).toBe("stale");
 
-    store.markSaved();
-    expect(store.isDirty).toBe(false);
+    store.recordBackup();
+    expect(store.backupStatus).toBe("current");
   });
 
   it("T05-shaped path: keyless import target → hydrate → canonical doc with every preference kind", () => {

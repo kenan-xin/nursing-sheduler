@@ -2,9 +2,9 @@
 // and anonymised download (tech-plan §4, critique major 3). Wraps
 // `serializeScenario`/`serializeCanonicalDocument`, turning the
 // `ScenarioValidationError` throw into a discriminated result so an invalid
-// draft blocks the caller structurally instead of crashing it or clearing
-// dirty with no artifact produced (FR-SL-02b). Never writes, never calls
-// `markSaved`, never mutates live state — that wiring belongs to later UI
+// draft blocks the caller structurally instead of crashing it or recording a
+// backup with no artifact produced (FR-SL-02b). Never writes, never calls
+// `recordBackup`, never mutates live state — that wiring belongs to later UI
 // tickets (T17a-4/T17a-5).
 
 import {

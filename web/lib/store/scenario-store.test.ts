@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createMemoryStorage } from "./persistence";
-import { createScenarioStore, selectIsDirty } from "./scenario-store";
+import { createScenarioStore, selectBackupStatus } from "./scenario-store";
 import { createStateSpine, type StateSpine } from "./spine";
 import { hydrateScenarioStore } from "./lifecycle";
 
@@ -63,8 +63,8 @@ describe("durable scenario store — undo/redo", () => {
     // preserves Guided metadata — so a pin-only edit makes the backup stale, unlike
     // the old strict-projection hash that stripped it.
     const { scenario } = spine;
-    scenario.getState().markSaved();
-    expect(selectIsDirty(scenario.getState())).toBe(false);
+    scenario.getState().recordBackup();
+    expect(selectBackupStatus(scenario.getState())).toBe("current");
 
     scenario.getState().mutateScenario({
       guidedRulePins: [
@@ -77,63 +77,63 @@ describe("durable scenario store — undo/redo", () => {
         },
       ],
     });
-    expect(selectIsDirty(scenario.getState())).toBe(true);
+    expect(selectBackupStatus(scenario.getState())).toBe("stale");
   });
 
-  it("records only the scenario slice — never baseline or action functions", () => {
+  it("records only the scenario slice — never the backup fingerprint or action functions", () => {
     const { scenario } = spine;
     scenario.getState().mutateScenario({ rangeStart: "2026-02-01" });
 
     const snapshot = temporal(scenario).pastStates[0] as Record<string, unknown>;
-    expect("baselineFingerprint" in snapshot).toBe(false);
+    expect("backupFingerprint" in snapshot).toBe(false);
     expect("mutateScenario" in snapshot).toBe(false);
     expect(typeof snapshot.reqData).toBe("object");
   });
 
-  it("does not add a history entry for a save (baseline-only change)", () => {
+  it("does not add a history entry for recording a backup (fingerprint-only change)", () => {
     const { scenario } = spine;
     scenario.getState().mutateScenario({ rangeStart: "2026-02-01" });
     const before = temporal(scenario).pastStates.length;
 
-    scenario.getState().markSaved();
+    scenario.getState().recordBackup();
 
     expect(temporal(scenario).pastStates.length).toBe(before);
   });
 });
 
-describe("durable scenario store — dirty vs baseline", () => {
-  it("is clean at the saved fingerprint and dirty after an edit", async () => {
+describe("durable scenario store — backup currentness", () => {
+  it("is current at the recorded backup and stale after an edit", async () => {
     const { scenario } = await readySpine();
-    scenario.getState().markSaved();
-    expect(selectIsDirty(scenario.getState())).toBe(false);
+    scenario.getState().recordBackup();
+    expect(selectBackupStatus(scenario.getState())).toBe("current");
 
     scenario.getState().mutateScenario({ rangeStart: "2026-02-01" });
-    expect(selectIsDirty(scenario.getState())).toBe(true);
+    expect(selectBackupStatus(scenario.getState())).toBe("stale");
 
-    scenario.getState().markSaved();
-    expect(selectIsDirty(scenario.getState())).toBe(false);
+    scenario.getState().recordBackup();
+    expect(selectBackupStatus(scenario.getState())).toBe("current");
   });
 
-  it("save → edit → undo-to-saved returns to clean", async () => {
+  it("backup → edit → undo-to-backup returns to current", async () => {
     const { scenario } = await readySpine();
     scenario.getState().mutateScenario({ rangeStart: "2026-02-01" });
-    scenario.getState().markSaved();
-    expect(selectIsDirty(scenario.getState())).toBe(false);
+    scenario.getState().recordBackup();
+    expect(selectBackupStatus(scenario.getState())).toBe("current");
 
     scenario.getState().mutateScenario({ rangeStart: "2026-03-01" });
-    expect(selectIsDirty(scenario.getState())).toBe(true);
+    expect(selectBackupStatus(scenario.getState())).toBe("stale");
 
     temporal(scenario).undo();
     expect(scenario.getState().rangeStart).toBe("2026-02-01");
-    expect(selectIsDirty(scenario.getState())).toBe(false);
+    expect(selectBackupStatus(scenario.getState())).toBe("current");
   });
 });
 
 describe("ready gate", () => {
-  it("is not dirty and has no baseline before any hydration", () => {
+  it("has no backup recorded before any hydration", () => {
     const scenario = createScenarioStore({ createStorage: () => createMemoryStorage() });
-    expect(scenario.getState().baselineFingerprint).toBeNull();
-    expect(selectIsDirty(scenario.getState())).toBe(false);
+    expect(scenario.getState().backupFingerprint).toBeNull();
+    expect(selectBackupStatus(scenario.getState())).toBe("none");
   });
 
   it("mutating actions are no-ops until the spine reports ready", () => {
@@ -143,11 +143,11 @@ describe("ready gate", () => {
 
     spine.scenario.getState().mutateScenario({ rangeStart: "2026-02-01" });
     spine.scenario.getState().setReqData([{ kind: "leave", person: "p1", date: "2026-01-01" }]);
-    spine.scenario.getState().markSaved();
+    spine.scenario.getState().recordBackup();
 
     expect(spine.scenario.getState().rangeStart).toBe("");
     expect(spine.scenario.getState().reqData).toEqual([]);
-    expect(spine.scenario.getState().baselineFingerprint).toBeNull();
+    expect(spine.scenario.getState().backupFingerprint).toBeNull();
     expect(spine.scenario.temporal.getState().pastStates.length).toBe(0);
   });
 });

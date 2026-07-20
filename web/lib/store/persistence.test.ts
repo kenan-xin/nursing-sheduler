@@ -187,6 +187,38 @@ describe("migrateScenarioState", () => {
     ) as Record<string, unknown>;
     expect(migrated.guidedRulePins).toEqual([newer, unrelated]);
   });
+
+  it("upgrades a v3 payload: clears the legacy strict-projection baseline to null", () => {
+    // A pre-v4 baseline was computed under the old strict-projection scheme and set
+    // on hydration/New/Load, so it no longer denotes a real backup. The v3→v4 step
+    // clears it (under the old key, before v5 renames the key).
+    const migrated = migrateScenarioState(
+      { rangeStart: "2026-01-01", baselineFingerprint: "legacy-strict-hash" },
+      3,
+    ) as Record<string, unknown>;
+    expect(migrated.backupFingerprint).toBeNull();
+    expect("baselineFingerprint" in migrated).toBe(false);
+  });
+
+  it("upgrades a v4 payload: renames baselineFingerprint → backupFingerprint, preserving its value", () => {
+    // A v4 record already stored the value under the download-baseline semantics
+    // (set only by a real plain Download), so v4→v5 carries it across verbatim.
+    const migrated = migrateScenarioState(
+      { rangeStart: "2026-01-01", baselineFingerprint: "real-download-hash" },
+      4,
+    ) as Record<string, unknown>;
+    expect(migrated.backupFingerprint).toBe("real-download-hash");
+    expect("baselineFingerprint" in migrated).toBe(false);
+  });
+
+  it("renames a null v4 backup fingerprint to the new key", () => {
+    const migrated = migrateScenarioState({ baselineFingerprint: null }, 4) as Record<
+      string,
+      unknown
+    >;
+    expect(migrated.backupFingerprint).toBeNull();
+    expect("baselineFingerprint" in migrated).toBe(false);
+  });
 });
 
 describe("sanitizePersistedScenario", () => {
@@ -211,7 +243,7 @@ describe("sanitizePersistedScenario", () => {
         coverings: [],
       },
       exportLayout: { formatting: [], extraColumns: [], extraRows: [] },
-      baselineFingerprint: "abc",
+      backupFingerprint: "abc",
       mutateScenario: () => "hijack", // foreign — must be dropped
       bogus: 123,
     });
@@ -227,7 +259,7 @@ describe("sanitizePersistedScenario", () => {
         coverings: [],
       },
       exportLayout: { formatting: [], extraColumns: [], extraRows: [] },
-      baselineFingerprint: "abc",
+      backupFingerprint: "abc",
     });
     expect("mutateScenario" in sanitized).toBe(false);
     expect("bogus" in sanitized).toBe(false);
@@ -237,7 +269,7 @@ describe("sanitizePersistedScenario", () => {
     expect(() => sanitizePersistedScenario("not an object")).toThrow();
     expect(() => sanitizePersistedScenario({ reqData: "should be an array" })).toThrow();
     expect(() => sanitizePersistedScenario({ meta: "should be an object" })).toThrow();
-    expect(() => sanitizePersistedScenario({ baselineFingerprint: 42 })).toThrow();
+    expect(() => sanitizePersistedScenario({ backupFingerprint: 42 })).toThrow();
   });
 
   it("throws on nested malformation that container-type checks miss", () => {
@@ -329,7 +361,7 @@ describe("sanitizePersistedScenario", () => {
         },
       ],
       maxOneShiftPerDay: { description: "enforced" },
-      baselineFingerprint: "deadbeef",
+      backupFingerprint: "deadbeef",
     };
     expect(sanitizePersistedScenario(payload)).toEqual(payload);
   });

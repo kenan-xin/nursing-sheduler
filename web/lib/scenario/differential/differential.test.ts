@@ -21,7 +21,15 @@ import { importScenarioYaml } from "../import-scenario";
 import { currentAppVersion } from "../app-version";
 import { toCanonicalScenarioDocument } from "../canonical";
 import { anonymizeDocument, buildIdMap } from "../anonymize";
+import { prepareOptimizeSubmission } from "../prepare-optimize-submission";
 import { buildShiftTypeIndexMap } from "../schemas/shift-type-map";
+import {
+  buildPeopleIndexMap,
+  buildScenarioResolutionContext,
+  toTypedKeyRecords,
+  type Resolution,
+  type TypedKeyRecord,
+} from "../leave-guard/resolution";
 import { makeValidUiState } from "../test-fixtures";
 import type { CardsByKind, ImportNormalizationTarget, ScenarioUiState } from "../types";
 
@@ -36,6 +44,9 @@ interface OracleResponse {
   status?: string;
   model?: Record<string, unknown>;
   map?: Record<string, number[]>;
+  records?: TypedKeyRecord[];
+  resolved?: boolean;
+  indices?: number[];
   equivalent?: boolean;
   appVersion?: { raw: unknown; roundtrip: unknown };
   csv?: string | null;
@@ -300,6 +311,186 @@ ${dateLine}    weight: .inf
   });
 });
 
+// qq0.23a — lossless people/date resolution parity. Tagged ordered records
+// preserve numeric/string identity across JSON (no `String(k)` collision), and
+// the dedicated resolve ops compare sorted indices + resolved/unresolved status
+// to the vendored `parse_pids` / `parse_dates` without any transport-level
+// stringification. The date op's `str(...)` boundary lives inside `parse_dates`.
+describe.skipIf(!AVAILABLE)("differential — qq0.23a (lossless people/date resolution)", () => {
+  const RANGE = { startDate: "2026-05-14", endDate: "2026-05-20" };
+
+  /** Extract the sorted indices for a resolved TS result; null when unresolved. */
+  function tsValues(result: Resolution<number>): number[] | null {
+    return result.resolved ? [...result.values].sort((a, b) => a - b) : null;
+  }
+
+  it('people map: numeric 1 vs string "1" stay two distinct tagged records', () => {
+    const staff = [1, "1"] as const;
+    const backend = callOracle({ op: "people_map", staff: [...staff], groups: [] });
+    expect(backend.ok).toBe(true);
+    const js = toTypedKeyRecords(buildPeopleIndexMap(staff.map((id) => ({ id }))));
+    // Tagged records compared WITHOUT any String(...) coercion on either side.
+    expect(js).toEqual(backend.records);
+    // The typed collision is observable: two entries with different keyType.
+    expect(backend.records!.slice(0, 2)).toEqual([
+      { keyType: "number", key: 1, indices: [0] },
+      { keyType: "string", key: "1", indices: [1] },
+    ]);
+  });
+
+  it("people resolution: numeric and string selectors resolve independently", () => {
+    const staff = [1, "1"] as const;
+    const ctx = buildScenarioResolutionContext({
+      staff: staff.map((id) => ({ id })),
+      staffGroups: [],
+      shifts: [],
+      shiftGroups: [],
+      rangeStart: RANGE.startDate,
+      rangeEnd: RANGE.endDate,
+      dateGroups: [],
+    });
+    for (const [selector, expected] of [
+      [1, [0]],
+      ["1", [1]],
+    ] as const) {
+      const backend = callOracle({
+        op: "resolve_people",
+        staff: [1, "1"],
+        groups: [],
+        selector,
+      });
+      expect(backend.resolved).toBe(true);
+      expect(backend.indices).toEqual(expected);
+      expect(tsValues(ctx.resolvePeople(selector))).toEqual(expected);
+    }
+  });
+
+  it("people resolution: an unknown id and a forward-group both fail closed", () => {
+    const unknown = callOracle({ op: "resolve_people", staff: ["A"], groups: [], selector: "Z" });
+    expect(unknown.resolved).toBe(false);
+    const ctxUnknown = buildScenarioResolutionContext({
+      staff: [{ id: "A" }],
+      staffGroups: [],
+      shifts: [],
+      shiftGroups: [],
+      rangeStart: RANGE.startDate,
+      rangeEnd: RANGE.endDate,
+      dateGroups: [],
+    });
+    expect(ctxUnknown.resolvePeople("Z").resolved).toBe(false);
+
+    const forwardGroups = [
+      { id: "g", members: ["later"] },
+      { id: "later", members: ["A"] },
+    ];
+    const forward = callOracle({
+      op: "resolve_people",
+      staff: ["A"],
+      groups: forwardGroups,
+      selector: "g",
+    });
+    expect(forward.resolved).toBe(false);
+    const ctxForward = buildScenarioResolutionContext({
+      staff: [{ id: "A" }],
+      staffGroups: forwardGroups,
+      shifts: [],
+      shiftGroups: [],
+      rangeStart: RANGE.startDate,
+      rangeEnd: RANGE.endDate,
+      dateGroups: [],
+    });
+    // Observable behavior only — the domain maps are closed over, not public.
+    expect(ctxForward.resolvePeople("g").resolved).toBe(false);
+  });
+
+  it("date resolution: direct key, numeric fallback, ranges, keywords, and failures", () => {
+    const ctx = buildScenarioResolutionContext({
+      staff: [],
+      staffGroups: [],
+      shifts: [],
+      shiftGroups: [],
+      rangeStart: RANGE.startDate,
+      rangeEnd: RANGE.endDate,
+      dateGroups: [],
+    });
+    const cases: Array<[string | number, number[] | null]> = [
+      ["2026-05-15", [1]], // direct ISO key precedence
+      [16, [2]], // numeric member stringified through parse_dates
+      ["14~16", [0, 1, 2]], // inclusive range
+      ["16~14", []], // reversed range → empty resolved set
+      ["WEEKEND", [2, 3]], // C3 keyword
+      ["05-15", [1]], // MM-DD literal
+      ["nonsense", null], // malformed → unresolved
+      ["2026-06-01", null], // out-of-range → unresolved
+    ];
+    for (const [selector, expected] of cases) {
+      const backend = callOracle({
+        op: "resolve_dates",
+        startDate: RANGE.startDate,
+        endDate: RANGE.endDate,
+        groups: [],
+        selector,
+      });
+      if (expected === null) {
+        expect(backend.resolved).toBe(false);
+        expect(ctx.resolveDates(selector).resolved).toBe(false);
+      } else {
+        expect(backend.resolved).toBe(true);
+        expect(backend.indices).toEqual(expected);
+        expect(tsValues(ctx.resolveDates(selector))).toEqual(expected);
+      }
+    }
+  });
+
+  it("year-zero range fails closed on both sides without crashing the oracle", () => {
+    // ISO `0000` is a valid JS date but has no Python `datetime.date`; the backend
+    // must return a data-level unresolved result (not exit non-zero) and TS must
+    // match. `callOracle` throws on a non-zero exit, so a crash fails this test.
+    const backend = callOracle({
+      op: "resolve_dates",
+      startDate: "0000-01-01",
+      endDate: "0000-01-02",
+      groups: [],
+      selector: "0000-01-01",
+    });
+    expect(backend.ok).toBe(true);
+    expect(backend.resolved).toBe(false);
+    const ctx = buildScenarioResolutionContext({
+      staff: [],
+      staffGroups: [],
+      shifts: [],
+      shiftGroups: [],
+      rangeStart: "0000-01-01",
+      rangeEnd: "0000-01-02",
+      dateGroups: [],
+    });
+    expect(ctx.resolveDates("0000-01-01").resolved).toBe(false);
+  });
+
+  it("date group: direct-key precedence before parse, then group is addressable", () => {
+    const groups = [{ id: "picks", members: ["2026-05-14", 16, "18~19"] }];
+    const backend = callOracle({
+      op: "resolve_dates",
+      startDate: RANGE.startDate,
+      endDate: RANGE.endDate,
+      groups,
+      selector: "picks",
+    });
+    expect(backend.resolved).toBe(true);
+    expect(backend.indices).toEqual([0, 2, 4, 5]);
+    const ctx = buildScenarioResolutionContext({
+      staff: [],
+      staffGroups: [],
+      shifts: [],
+      shiftGroups: [],
+      rangeStart: RANGE.startDate,
+      rangeEnd: RANGE.endDate,
+      dateGroups: groups,
+    });
+    expect(tsValues(ctx.resolveDates("picks"))).toEqual([0, 2, 4, 5]);
+  });
+});
+
 describe.skipIf(!AVAILABLE)("differential — C5 (exporter, exact workbook)", () => {
   it("produces exact cells, a painted cell fill, frozen panes, and export notes", () => {
     const yaml = `apiVersion: alpha
@@ -408,6 +599,62 @@ describe.skipIf(!AVAILABLE)("differential — anonymized path", () => {
     expect(res.ok).toBe(true);
     const model = res.model as { people: { items: { id: string }[] } };
     expect(model.people.items.map((p) => p.id)).toEqual(["P1", "P2"]);
+  });
+
+  // T16q: the co-derived submission YAML and reverse map come from ONE validated
+  // transform. Prove the anonymized bytes load in the backend AND that every
+  // person id the backend sees maps, via the reverse map, back to the exact
+  // original id — including a Unicode id and a numeric (typed) id.
+  it("co-derived submission YAML loads in the backend and its reverse map restores the originals", () => {
+    const state = makeValidUiState();
+    state.staff = [{ id: "Zoë 张三" }, { id: 42 as unknown as string }];
+    state.staffGroups = [{ id: "Seniors", members: ["Zoë 张三", 42 as unknown as string] }];
+    state.reqData = [
+      {
+        uid: "c",
+        kind: "request",
+        person: "Zoë 张三",
+        date: "2026-05-15",
+        shiftType: "D",
+        weight: 1,
+      },
+    ];
+    state.exportLayout.formatting = [{ uid: "f", type: "row", people: ["Zoë 张三"] }];
+
+    const document = toCanonicalScenarioDocument(state);
+    const result = prepareOptimizeSubmission(document, { anonymize: true });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const res = callOracle({ op: "load", yaml: result.prep.yaml });
+    expect(res.ok).toBe(true);
+    const model = res.model as { people: { items: { id: string }[] } };
+    // The backend sees only anonymized ids...
+    const backendIds = model.people.items.map((p) => p.id);
+    expect(backendIds).toEqual(["P1", "P2"]);
+    // ...and each maps back through the reverse map to a real original id.
+    const lookup = new Map(result.prep.reverseMap.map(([anon, original]) => [anon, original]));
+    expect(backendIds.map((id) => lookup.get(id))).toEqual(["Zoë 张三", 42]);
+    expect(result.prep.peopleCount).toBe(2);
+  });
+
+  // T16q: descriptions must never leave for the solver on the anonymized path.
+  it("co-derived anonymized submission loads in the backend with all descriptions stripped", () => {
+    const state = makeValidUiState();
+    state.meta.description = "PRIVATE-NOTE scenario";
+    state.staff = [{ id: "Alice", description: "PRIVATE-NOTE person" }, { id: "Bob" }];
+    state.staffGroups = [
+      { id: "Seniors", members: ["Alice", "Bob"], description: "PRIVATE-NOTE group" },
+    ];
+
+    const document = toCanonicalScenarioDocument(state);
+    const result = prepareOptimizeSubmission(document, { anonymize: true });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.prep.yaml).not.toContain("PRIVATE-NOTE");
+
+    const res = callOracle({ op: "load", yaml: result.prep.yaml });
+    expect(res.ok).toBe(true);
   });
 });
 

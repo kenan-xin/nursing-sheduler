@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createModeStore } from "./mode";
 import { createEmptyScenarioUiState, type ScenarioUiState } from "@/lib/scenario";
-import { createStateSpine, pickScenario, selectIsDirty } from "@/lib/store";
+import { createStateSpine, pickScenario, selectBackupStatus } from "@/lib/store";
 import type { ScenarioStoreState } from "@/lib/store/scenario-store";
 import { createMemoryStorage } from "@/lib/store/persistence";
 import { hydrateScenarioStore } from "@/lib/store/lifecycle";
@@ -75,17 +75,17 @@ describe("mode lens — non-mutating", () => {
     await hydrateScenarioStore(spine.scenario, spine.hot);
 
     const advanced = scenarioWithAdvancedDetail();
-    // Seed a real baseline so the persisted partial (scenario slice + baseline) is
-    // meaningful for the comparison.
-    spine.scenario.setState({ ...advanced, baselineFingerprint: "baseline-xyz" }, false);
+    // Seed a real backup fingerprint so the persisted partial (scenario slice +
+    // backup fingerprint) is meaningful for the comparison.
+    spine.scenario.setState({ ...advanced, backupFingerprint: "backup-xyz" }, false);
 
     // The exact partial `persist` would serialize: the scenario slice plus the
-    // baseline fingerprint. structuredClone preserves non-JSON numbers (Infinity),
+    // backup fingerprint. structuredClone preserves non-JSON numbers (Infinity),
     // so — unlike JSON.stringify — a lossy flatten of the Advanced weight or a
-    // dropped baseline cannot masquerade as byte-identical.
+    // dropped backup fingerprint cannot masquerade as byte-identical.
     const persistedPartial = (state: ScenarioStoreState) => ({
       ...pickScenario(state),
-      baselineFingerprint: state.baselineFingerprint,
+      backupFingerprint: state.backupFingerprint,
     });
     const before = structuredClone(persistedPartial(spine.scenario.getState()));
 
@@ -100,11 +100,11 @@ describe("mode lens — non-mutating", () => {
     const after = persistedPartial(spine.scenario.getState());
 
     // Deep structural equality (Object.is-based → Infinity === Infinity), covering
-    // every persisted field plus the baseline.
+    // every persisted field plus the backup fingerprint.
     expect(after).toEqual(before);
-    // Explicitly guard the load-bearing non-JSON value and the baseline.
+    // Explicitly guard the load-bearing non-JSON value and the backup fingerprint.
     expect(after.cardsByKind.requirements[0].weight).toBe(Infinity);
-    expect(after.baselineFingerprint).toBe("baseline-xyz");
+    expect(after.backupFingerprint).toBe("backup-xyz");
   });
 
   it("mode store is independent — no import path reaches the scenario store", () => {
@@ -119,22 +119,22 @@ describe("mode lens — non-mutating", () => {
     expect(mode.getState().mode).toBe("guided");
   });
 
-  it("dirty flag is unaffected by mode toggles", async () => {
+  it("backup currentness is unaffected by mode toggles", async () => {
     const spine = createStateSpine({ createStorage: () => createMemoryStorage() });
     await hydrateScenarioStore(spine.scenario, spine.hot);
 
-    // Hydration no longer invents a backup baseline (T17r review P0), so establish
+    // Hydration no longer invents a backup fingerprint (T17r review P0), so record
     // one (as a plain Download would) before editing, then make a change so the
-    // scenario is genuinely dirty against that baseline.
-    spine.scenario.getState().markSaved();
+    // scenario is genuinely stale against that backup.
+    spine.scenario.getState().recordBackup();
     spine.scenario.getState().mutateScenario({ rangeStart: "2026-05-01" });
-    expect(selectIsDirty(spine.scenario.getState())).toBe(true);
+    expect(selectBackupStatus(spine.scenario.getState())).toBe("stale");
 
     const mode = createModeStore("guided");
     mode.getState().toggleMode();
     mode.getState().toggleMode();
 
-    expect(selectIsDirty(spine.scenario.getState())).toBe(true);
+    expect(selectBackupStatus(spine.scenario.getState())).toBe("stale");
   });
 });
 

@@ -29,9 +29,11 @@ sys.path.insert(0, os.path.join(_ROOT, "core"))
 
 import nurse_scheduling  # noqa: E402
 from nurse_scheduling import exporter, group_map  # noqa: E402
+from nurse_scheduling.constants import ALL, MAP_DATE_KEYWORD_TO_FILTER, MAP_WEEKDAY_TO_STR  # noqa: E402
 from nurse_scheduling.loader import load_data  # noqa: E402
-from nurse_scheduling.models import ShiftType, ShiftTypeGroup  # noqa: E402
+from nurse_scheduling.models import DateRange, ShiftType, ShiftTypeGroup  # noqa: E402
 from nurse_scheduling.server.scheduling_errors import SchedulingContentError  # noqa: E402
+from nurse_scheduling.utils import parse_dates, parse_pids  # noqa: E402
 from nurse_scheduling.server.scheduling_input import (  # noqa: E402
     MalformedInputError,
     canonicalize_submission,
@@ -91,6 +93,109 @@ def op_shift_map(req):
         return {"ok": True, "map": {str(k): v for k, v in result.items()}}
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": str(e), "errorType": type(e).__name__}
+
+
+def _typed_key_records(mapping):
+    """Emit one lossless record per map entry in insertion order, preserving the
+    original key TYPE and value. This is the transport that distinguishes numeric
+    `1` from string `"1"` — a JSON object keyed by `str(k)` would collide them."""
+    records = []
+    for key, indices in mapping.items():
+        records.append(
+            {
+                "keyType": "number" if isinstance(key, (int, float)) and not isinstance(key, bool) else "string",
+                "key": key,
+                "indices": list(indices),
+            }
+        )
+    return records
+
+
+def _build_people_index_map(staff, groups):
+    """Mirror scheduler.py `ctx.map_pid_p` construction: raw typed person ids, then
+    the `ALL` keyword, then people groups in declaration order resolving through
+    the map built so far. Keys keep their original int/str identity."""
+    map_pid_p = {}
+    n_people = len(staff)
+    for p in range(n_people):
+        map_pid_p[staff[p]] = [p]
+    map_pid_p[ALL] = list(range(n_people))
+    for group in groups:
+        map_pid_p[group["id"]] = sorted(set().union(*[map_pid_p[pid] for pid in group["members"]]) if group["members"] else set())
+    return map_pid_p
+
+
+def _build_date_index_map(date_range, groups):
+    """Mirror scheduler.py `ctx.map_did_d` construction: each ISO date, then the
+    date-filter keywords, then weekday names, then date groups (direct-lookup-then-
+    parse per member) in declaration order."""
+    import datetime
+
+    startdate, enddate = date_range.startDate, date_range.endDate
+    n_days = (enddate - startdate).days + 1
+    items = [startdate + datetime.timedelta(days=d) for d in range(n_days)]
+    map_did_d = {}
+    for d in range(n_days):
+        map_did_d[str(items[d])] = [d]
+    for keyword in MAP_DATE_KEYWORD_TO_FILTER:
+        map_did_d[keyword] = [d for d in range(n_days) if MAP_DATE_KEYWORD_TO_FILTER[keyword](items[d])]
+    for keyword in MAP_WEEKDAY_TO_STR:
+        weekday_index = MAP_WEEKDAY_TO_STR.index(keyword)
+        map_did_d[keyword] = [d for d in range(n_days) if items[d].weekday() == weekday_index]
+    for group in groups:
+        date_indices = set()
+        for member in group["members"]:
+            if member in map_did_d:
+                date_indices.update(map_did_d[member])
+            else:
+                date_indices.update(parse_dates(member, map_did_d, date_range))
+        map_did_d[group["id"]] = sorted(set(date_indices))
+    return map_did_d
+
+
+def op_people_map(req):
+    """C3: the ordered person-id -> [indices] map as LOSSLESS tagged records, so a
+    numeric/string person-id collision is observable rather than merged."""
+    try:
+        map_pid_p = _build_people_index_map(req["staff"], req.get("groups", []))
+        return {"ok": True, "records": _typed_key_records(map_pid_p)}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": str(e), "errorType": type(e).__name__}
+
+
+def op_resolve_people(req):
+    """C3: resolve a person selector through `parse_pids` over the ordered people
+    map. Returns the discriminated {resolved, indices}; an unknown id is unresolved."""
+    try:
+        map_pid_p = _build_people_index_map(req["staff"], req.get("groups", []))
+    except Exception as e:  # noqa: BLE001 — map construction failure is data
+        return {"ok": True, "resolved": False, "error": str(e)}
+    try:
+        indices = parse_pids(req["selector"], map_pid_p)
+        return {"ok": True, "resolved": True, "indices": indices}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": True, "resolved": False, "error": str(e)}
+
+
+def op_resolve_dates(req):
+    """C3: resolve a date selector through `parse_dates` over the ordered date map.
+    The `str(...)` boundary lives inside `parse_dates`, so a numeric member can
+    legitimately fall back through date-syntax parsing. Malformed / out-of-range /
+    reversed inputs surface as {resolved: false} or an empty resolved set."""
+    try:
+        # `DateRange` construction is inside the failure envelope: an unsupported
+        # calendar year (e.g. ISO `0000`, which has no `datetime.date`) raises here
+        # and must surface as a data-level unresolved result, not crash the oracle
+        # process (qq0.23a fixup, closure-review P1).
+        date_range = DateRange(startDate=req["startDate"], endDate=req["endDate"])
+        map_did_d = _build_date_index_map(date_range, req.get("groups", []))
+    except Exception as e:  # noqa: BLE001
+        return {"ok": True, "resolved": False, "error": str(e)}
+    try:
+        indices = parse_dates(req["selector"], map_did_d, date_range)
+        return {"ok": True, "resolved": True, "indices": indices}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": True, "resolved": False, "error": str(e)}
 
 
 def op_export(req):
@@ -261,6 +366,9 @@ OPS = {
     "load": op_load,
     "schedule": op_schedule,
     "shift_map": op_shift_map,
+    "people_map": op_people_map,
+    "resolve_people": op_resolve_people,
+    "resolve_dates": op_resolve_dates,
     "export": op_export,
     "roundtrip": op_roundtrip,
     "workspace_canonical": op_workspace_canonical,

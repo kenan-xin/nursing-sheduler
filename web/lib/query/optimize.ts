@@ -2,12 +2,19 @@
 
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
-import { OptimizeApiError, type OptimizeEndpoint, type OptimizeErrorInfo } from "@/lib/bff/errors";
+import {
+  isExactJobGoneError,
+  OptimizeApiError,
+  type OptimizeEndpoint,
+  type OptimizeErrorInfo,
+} from "@/lib/bff/errors";
 import type { JobResponse } from "@/lib/bff/types";
 import {
   parseControlChangedPayload,
+  parseJobResponse,
   parseResultAvailablePayload,
   parseStateChangedPayload,
+  type StrictTerminalFrame,
 } from "@/lib/query/event-payloads";
 import { runOptimizeEventLoop } from "@/lib/query/event-stream";
 import { optimizeKeys } from "@/lib/query/keys";
@@ -20,18 +27,23 @@ export { OptimizeApiError } from "@/lib/bff/errors";
 // ("Scheduling YAML is too large"). Never treat this as the enforcement boundary.
 export const OPTIMIZE_MAX_YAML_BYTES = 2 * 1024 * 1024;
 
-async function requestOptimizeJson<T>(
+async function requestOptimizeJob(
   input: string,
   init?: RequestInit,
   endpoint?: OptimizeEndpoint,
-): Promise<T> {
+  expectedId?: string,
+): Promise<JobResponse> {
   const response = await fetch(input, { cache: "no-store", ...init });
   const body = await response.json().catch(() => null);
   if (!response.ok) {
     // The code-first envelope (or FastAPI `detail`) is classified from the raw body.
     throw new OptimizeApiError(response.status, body, endpoint);
   }
-  return body as T;
+  const job = parseJobResponse(body, expectedId);
+  if (job === null) {
+    throw new Error("Optimize API returned an invalid JobResponse.");
+  }
+  return job;
 }
 
 export interface SubmitOptimizeInput {
@@ -58,11 +70,7 @@ export function useSubmitOptimize() {
       if (input.prettify !== undefined) form.set("prettify", String(input.prettify));
       if (input.timeout !== undefined) form.set("timeout", String(input.timeout));
 
-      return requestOptimizeJson<JobResponse>(
-        "/api/optimize",
-        { method: "POST", body: form },
-        "submit",
-      );
+      return requestOptimizeJob("/api/optimize", { method: "POST", body: form }, "submit");
     },
     onSuccess: (job) => {
       queryClient.setQueryData(optimizeKeys.job(job.id), job);
@@ -80,14 +88,93 @@ export function useOptimizeJob(
   return useQuery<JobResponse, OptimizeApiError>({
     queryKey: jobId ? optimizeKeys.job(jobId) : optimizeKeys.all,
     queryFn: () =>
-      requestOptimizeJson<JobResponse>(
+      requestOptimizeJob(
         `/api/optimize/${encodeURIComponent(jobId as string)}`,
         undefined,
         "poll",
+        jobId as string,
       ),
     enabled: Boolean(jobId) && (options?.enabled ?? true),
     refetchInterval: options?.refetchInterval ?? false,
   });
+}
+
+// A provenance-isolated poll for the T16a controller (P1 #2). The query is keyed by
+// the caller's opaque `attachmentKey` (its attachment/subscription identity) IN
+// ADDITION to the job id, so a superseded attachment's in-flight request can NEVER
+// populate a later attachment's observer: reset/re-attach B to the SAME job starts a
+// DIFFERENT query, and A's delayed 200/404 resolves into A's now-unobserved query,
+// not B's. The abort `signal` is forwarded to `fetch`, so the superseded request is
+// cancelled rather than left to resolve. The controller mirrors an exact response to
+// the shared base only after its live-ownership fence.
+export function useOptimizeJobScoped(
+  jobId: string | null,
+  attachmentKey: unknown,
+  options?: {
+    enabled?: boolean;
+    refetchInterval?: number | false;
+    /** Source-provenance callback. It runs for an exact URL-bound response even if
+     * the observer is superseded before React can apply the snapshot. */
+    onResponse?: (job: JobResponse) => void;
+    onJobGone?: (info: OptimizeErrorInfo) => void;
+  },
+) {
+  return useQuery<JobResponse, Error>({
+    queryKey: jobId ? optimizeKeys.jobScoped(jobId, attachmentKey) : optimizeKeys.all,
+    queryFn: async ({ signal }) => {
+      // Fetch with the abort signal (a superseded attachment's in-flight request is
+      // cancelled) and return the response for THIS scoped observer only. The response
+      // is NOT written to the shared base here — the controller mirrors to base ONLY
+      // after its live exact-token ownership fence (P1 #6/#7), so a stale A response
+      // cannot leak into the base or a later attachment.
+      let job: JobResponse;
+      try {
+        job = await requestOptimizeJob(
+          `/api/optimize/${encodeURIComponent(jobId as string)}`,
+          { signal },
+          "poll",
+          jobId as string,
+        );
+      } catch (error) {
+        if (isExactJobGoneError(error)) {
+          options?.onJobGone?.(error.info);
+        }
+        throw error;
+      }
+      options?.onResponse?.(job);
+      return job;
+    },
+    enabled: Boolean(jobId) && (options?.enabled ?? true),
+    refetchInterval: options?.refetchInterval ?? false,
+  });
+}
+
+export interface ScopedOptimizeControlInput {
+  jobId: string;
+  attachmentKey: unknown;
+  isCurrentAttachment: () => boolean;
+}
+
+export type OptimizeControlInput = string | ScopedOptimizeControlInput;
+
+function controlJobId(input: OptimizeControlInput): string {
+  return typeof input === "string" ? input : input.jobId;
+}
+
+function cacheControlResponse(
+  queryClient: QueryClient,
+  job: JobResponse,
+  input: OptimizeControlInput,
+): void {
+  if (typeof input === "string") {
+    queryClient.setQueryData(optimizeKeys.job(job.id), job);
+    return;
+  }
+  if (job.id !== input.jobId) return;
+  queryClient.setQueryData(optimizeKeys.jobScoped(input.jobId, input.attachmentKey), job);
+  if (input.isCurrentAttachment()) {
+    queryClient.setQueryData(optimizeKeys.job(input.jobId), job);
+  }
 }
 
 // POST /api/optimize/{id}/cancel. Server-authoritative: the returned JobResponse's
@@ -96,15 +183,18 @@ export function useOptimizeJob(
 export function useCancelOptimize() {
   const queryClient = useQueryClient();
 
-  return useMutation<JobResponse, OptimizeApiError, string>({
-    mutationFn: (jobId) =>
-      requestOptimizeJson<JobResponse>(
+  return useMutation<JobResponse, OptimizeApiError, OptimizeControlInput>({
+    mutationFn: (input) => {
+      const jobId = controlJobId(input);
+      return requestOptimizeJob(
         `/api/optimize/${encodeURIComponent(jobId)}/cancel`,
         { method: "POST" },
         "cancel",
-      ),
-    onSuccess: (job) => {
-      queryClient.setQueryData(optimizeKeys.job(job.id), job);
+        jobId,
+      );
+    },
+    onSuccess: (job, input) => {
+      cacheControlResponse(queryClient, job, input);
     },
   });
 }
@@ -115,32 +205,70 @@ export function useCancelOptimize() {
 export function useFinishNowOptimize() {
   const queryClient = useQueryClient();
 
-  return useMutation<JobResponse, OptimizeApiError, string>({
-    mutationFn: (jobId) =>
-      requestOptimizeJson<JobResponse>(
+  return useMutation<JobResponse, OptimizeApiError, OptimizeControlInput>({
+    mutationFn: (input) => {
+      const jobId = controlJobId(input);
+      return requestOptimizeJob(
         `/api/optimize/${encodeURIComponent(jobId)}/finish-now`,
         { method: "POST" },
         "finish-now",
-      ),
-    onSuccess: (job) => {
-      queryClient.setQueryData(optimizeKeys.job(job.id), job);
+        jobId,
+      );
+    },
+    onSuccess: (job, input) => {
+      cacheControlResponse(queryClient, job, input);
     },
   });
 }
 
 export interface UseOptimizeEventStreamOptions {
   enabled: boolean;
-  onEvent?: (frame: SseFrame) => void;
-  onTerminal?: (result: { frame?: SseFrame; job?: JobResponse }) => void;
+  // Opaque resume cursor to seed the tracker with, so the FIRST request carries it as
+  // `Last-Event-ID` (a session resuming after reload). Null/undefined starts from the
+  // retained floor. Read once when the subscription starts; never parsed or compared.
+  initialCursor?: string | null;
+  /**
+   * Optional subscription-identity key (T16a attachment epoch). When the consumer
+   * bumps this value, the active stream subscription is torn down and a new one is
+   * started, and the options frozen at that start are used for the new subscription's
+   * lifetime. This prevents an A stream from invoking B's latest callback refs
+   * through the mutable `optionsRef`. The T16a run controller bumps this on every
+   * new attachment so an old stream cannot dispatch signals, advance the cursor,
+   * or forward cursor callbacks into a later attachment's view. Leave undefined to
+   * keep the legacy behavior.
+   */
+  subscriptionKey?: unknown;
+  // May be async: it is AWAITED inside the apply-before-commit fence, so the cursor
+  // commits (and `onCursorCommit` fires) only after consumer application resolves. A
+  // rejection leaves the cursor at the prior id, so the frame replays on reconnect.
+  onEvent?: (frame: SseFrame) => void | Promise<void>;
+  onTerminal?: (result: { frame?: StrictTerminalFrame; job?: JobResponse }) => void;
+  onTerminalProof?: (result: { frame?: StrictTerminalFrame; job?: JobResponse }) => void;
   // The job is gone (job_not_found) — expired/deleted/never existed.
   onJobGone?: (info: OptimizeErrorInfo) => void;
+  onJobGoneProof?: (info: OptimizeErrorInfo) => void;
   // Cursor recoveries: the consumer clears ephemeral chart/log history and labels
   // earlier progress unavailable. Two distinct reasons are surfaced separately.
   onCursorExpired?: (info: OptimizeErrorInfo) => void;
   onCursorInvalid?: (info: OptimizeErrorInfo) => void;
+  // The opaque cursor just committed — fired only after the frame's cache
+  // reconciliation and consumer application succeeded and the tracker advanced. A
+  // consumer persists this to resume from on reload; it is the ONLY safe resume point
+  // (never a pre-apply frame id). Opaque: store verbatim, never parse.
+  onCursorCommit?: (cursor: string) => void;
+  // The saved cursor was cleared during expired/invalid recovery. A consumer clears
+  // any persisted resume cursor so a later reload does not resend the stale value.
+  onCursorReset?: () => void;
   // Called once the reconnect budget is exhausted (stream down, job not terminal).
   onError?: (error: unknown) => void;
   maxReconnects?: number;
+  // T16a P1 cache provenance: when KEYED, the stream applies/reconciles durable frames
+  // into an ATTACHMENT-SCOPED cache key (`jobScoped(jobId, subscriptionKey)`) instead
+  // of the shared base, so a superseded stream never mutates the base or a later
+  // attachment. The current exact-token attachment mirrors scoped state to the base
+  // only when `isCurrentAttachment()` returns true. Unkeyed callers ignore both and
+  // keep writing the base directly (legacy).
+  isCurrentAttachment?: () => boolean;
 }
 
 // fetch-stream SSE subscription with opaque-cursor reconnect and server-authoritative
@@ -162,45 +290,108 @@ export function useOptimizeEventStream(
   useEffect(() => {
     if (!jobId || !enabled) return;
 
+    // T16p subscription-identity seam: capture the options AT subscription start.
+    // The T16a consumer bumps `subscriptionKey` on each new attachment; combined
+    // with capturing, this guarantees an A stream cannot invoke B's latest
+    // callbacks through the mutable `optionsRef`. Even if A's underlying transport
+    // is still alive during the React commit window, its in-flight dispatches use
+    // A's frozen callbacks (which close over A's attachment token), so the
+    // controller's exact-equality fence drops them.
+    const captured = optionsRef.current;
+
+    // Callback resolution honors the documented contract:
+    //   • KEYED subscriptions (a `subscriptionKey` was supplied) freeze the
+    //     callbacks captured at start — an A stream can never reach B's callbacks.
+    //   • UNKEYED subscriptions preserve the legacy live-`optionsRef` behavior, so a
+    //     consumer re-rendering the SAME job with a refreshed callback still updates
+    //     the live handler. `initialCursor`/`maxReconnects` remain start-only reads
+    //     in BOTH modes (they are subscription-lifetime, not per-render).
+    const keyed = captured.subscriptionKey !== undefined;
+    const cb = () => (keyed ? captured : optionsRef.current);
+
+    // Cache provenance (P1 #6/#7): a keyed stream writes durable state to its OWN
+    // attachment-scoped key; an unkeyed stream keeps writing the shared base. The base
+    // is mirrored only when this attachment is still the live owner.
+    const cacheKey: readonly unknown[] = keyed
+      ? optimizeKeys.jobScoped(jobId, captured.subscriptionKey)
+      : optimizeKeys.job(jobId);
+    const mirrorToBase = (job: JobResponse) => {
+      if (keyed && captured.isCurrentAttachment?.()) {
+        queryClient.setQueryData(optimizeKeys.job(job.id), job);
+      }
+    };
+
     const controller = new AbortController();
-    const tracker = new CursorTracker();
+    // Seed the tracker with the supplied resume cursor so the first request carries it
+    // as `Last-Event-ID`. Read once at subscription start (like maxReconnects).
+    const tracker = new CursorTracker(captured.initialCursor ?? null);
     const eventsUrl = `/api/optimize/${encodeURIComponent(jobId)}/events`;
     const pollUrl = `/api/optimize/${encodeURIComponent(jobId)}`;
 
     // Authoritative poll + cache replacement, reused by the loop's recovery and by
-    // per-frame reconciliation of malformed durable events.
+    // per-frame reconciliation of malformed durable events. The abort signal is
+    // forwarded so a superseded recovery poll is cancelled (P1 #7); it writes the
+    // attachment-scoped key and mirrors to the base only under the ownership fence.
     const pollAndCache = async (): Promise<JobResponse> => {
-      const job = await requestOptimizeJson<JobResponse>(pollUrl, undefined, "poll");
-      queryClient.setQueryData(optimizeKeys.job(jobId), job);
+      const job = await requestOptimizeJob(pollUrl, { signal: controller.signal }, "poll", jobId);
+      const mayMutate = keyed
+        ? (captured.isCurrentAttachment?.() ?? !controller.signal.aborted)
+        : !controller.signal.aborted;
+      if (mayMutate) {
+        queryClient.setQueryData(cacheKey, job);
+        mirrorToBase(job);
+      }
       return job;
     };
 
     void runOptimizeEventLoop({
-      maxReconnects: optionsRef.current.maxReconnects ?? 5,
+      maxReconnects: captured.maxReconnects ?? 5,
       isCancelled: () => controller.signal.aborted,
+      canApplyFrame: () => captured.isCurrentAttachment?.() ?? !controller.signal.aborted,
       connect: (onFrame) =>
-        streamOptimizeEvents(eventsUrl, { signal: controller.signal, tracker, onEvent: onFrame }),
+        streamOptimizeEvents(eventsUrl, {
+          signal: controller.signal,
+          tracker,
+          onEvent: onFrame,
+          onTerminalObserved: (frame) => cb().onTerminalProof?.({ frame }),
+          // Fires after the frame applied AND the tracker committed; forward the
+          // committed opaque cursor so a consumer can persist the resume point.
+          onCommit: (cursor) => cb().onCursorCommit?.(cursor),
+        }),
       pollJob: pollAndCache,
       delay: (attempt) => abortableDelay(reconnectDelayMs(attempt), controller.signal),
       resetCursor: () => tracker.reset(),
+      onCursorReset: () => cb().onCursorReset?.(),
       // Async: a malformed durable frame reconciles (poll + replace) BEFORE the
       // cursor commits; a poll/cache/consumer failure rejects so the cursor stays
       // at the prior id and the frame is replayed on reconnect.
       onFrame: async (frame) => {
-        await applyFrameWithReconcile(queryClient, jobId, frame, pollAndCache);
-        optionsRef.current.onEvent?.(frame);
+        await applyFrameWithReconcile(queryClient, jobId, frame, pollAndCache, cacheKey);
+        if (keyed && captured.isCurrentAttachment && !captured.isCurrentAttachment()) return;
+        // Mirror the just-applied scoped durable state to the shared base under the
+        // ownership fence, so unkeyed consumers/recovery see current SSE state without
+        // a stale stream ever writing the base (P1 #6/#7).
+        if (keyed) {
+          const scopedJob = queryClient.getQueryData<JobResponse>(cacheKey);
+          if (scopedJob) mirrorToBase(scopedJob);
+        }
+        // Await the consumer so a rejecting async `onEvent` keeps the cursor at the
+        // prior id (no commit, no onCursorCommit) and the frame replays on reconnect.
+        await cb().onEvent?.(frame);
       },
-      onTerminal: (result) => optionsRef.current.onTerminal?.(result),
-      onJobGone: (info) => optionsRef.current.onJobGone?.(info),
-      onCursorExpired: (info) => optionsRef.current.onCursorExpired?.(info),
-      onCursorInvalid: (info) => optionsRef.current.onCursorInvalid?.(info),
-      onError: (error) => optionsRef.current.onError?.(error),
+      onTerminal: (result) => cb().onTerminal?.(result),
+      onTerminalProof: (result) => cb().onTerminalProof?.(result),
+      onJobGone: (info) => cb().onJobGone?.(info),
+      onJobGoneProof: (info) => cb().onJobGoneProof?.(info),
+      onCursorExpired: (info) => cb().onCursorExpired?.(info),
+      onCursorInvalid: (info) => cb().onCursorInvalid?.(info),
+      onError: (error) => cb().onError?.(error),
     });
 
     return () => {
       controller.abort();
     };
-  }, [jobId, enabled, queryClient]);
+  }, [jobId, enabled, queryClient, options.subscriptionKey]);
 }
 
 // Download the workbook (T16 owns the browser save gesture). Throws OptimizeApiError
@@ -247,6 +438,9 @@ export function applyFrameToCache(
   queryClient: QueryClient,
   jobId: string,
   frame: SseFrame,
+  // The cache key to patch. Defaults to the shared base; the keyed T16a stream passes
+  // its ATTACHMENT-SCOPED key so a superseded stream never writes the base (P1 #6/#7).
+  cacheKey: readonly unknown[] = optimizeKeys.job(jobId),
 ): FrameApplyOutcome {
   const durable = DURABLE_EVENTS.has(frame.event);
   let data: unknown;
@@ -256,7 +450,7 @@ export function applyFrameToCache(
     // Malformed JSON on a durable event must reconcile; ephemeral/raw frames don't.
     return durable ? "needs-reconcile" : "applied";
   }
-  const key = optimizeKeys.job(jobId);
+  const key = cacheKey;
 
   // A durable frame carries only a PARTIAL patch onto an existing JobResponse — its
   // flat T19 payload cannot construct the full response on its own. If no response is
@@ -335,8 +529,9 @@ export async function applyFrameWithReconcile(
   jobId: string,
   frame: SseFrame,
   reconcile: () => Promise<unknown>,
+  cacheKey: readonly unknown[] = optimizeKeys.job(jobId),
 ): Promise<void> {
-  if (applyFrameToCache(queryClient, jobId, frame) === "needs-reconcile") {
+  if (applyFrameToCache(queryClient, jobId, frame, cacheKey) === "needs-reconcile") {
     await reconcile();
   }
 }
