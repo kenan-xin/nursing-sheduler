@@ -100,6 +100,14 @@ export {
 export { acquireSessionStorage } from "./session-storage";
 
 export {
+  RESTORED_XLSX_MIME_TYPE,
+  XlsxRestorationError,
+  applyPeopleIdRestoration,
+  restorePeopleIdsInXlsx,
+  type PeopleIdRestorationInput,
+} from "./restore-people-ids-in-xlsx";
+
+export {
   buildRecoveryAttachment,
   interpretInspectedSession,
   useOptimizeSessionRecovery,

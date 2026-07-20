@@ -1,0 +1,30 @@
+{
+  "plain-3people": {
+    "file": "c5-plain-3people.xlsx",
+    "peopleCount": 3,
+    "columnAIds": ["P1", "P2", "P3"],
+    "prettify": false,
+    "notes": "bare non-prettify grid; no styles/history/notes."
+  },
+  "prettify-history": {
+    "file": "c5-prettify-history.xlsx",
+    "peopleCount": 3,
+    "columnAIds": ["P1", "P2", "P3"],
+    "prettify": true,
+    "notes": "prettify: history columns, borders, freeze panes, styles."
+  },
+  "collision-skipped": {
+    "file": "c5-collision-skipped.xlsx",
+    "peopleCount": 3,
+    "columnAIds": ["P1", "P3", "P4"],
+    "prettify": false,
+    "notes": "non-contiguous anonymized ids from a collision-skipped map."
+  },
+  "notes-hyperlinks": {
+    "file": "c5-notes-hyperlinks.xlsx",
+    "peopleCount": 3,
+    "columnAIds": ["P1", "P2", "P3"],
+    "prettify": true,
+    "notes": "second 'Notes' sheet with bidirectional hyperlinks + Hyperlink style."
+  }
+}
