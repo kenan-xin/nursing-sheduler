@@ -207,8 +207,78 @@ The `redis outage` gate proves only that the stack **fails closed with a bounded
 response** — it does **not** prove business requests stop reaching the backend.
 That runtime-readiness gating is the revised **T06 BFF** ticket's responsibility.
 
-The **production named-tunnel streaming smoke test** (SSE first-byte, keepalive,
-disconnect closes upstream) is **T16**, not this runbook.
+The `verify-deploy` gate is deliberately **non-streaming** — it probes the private
+base over the internal network and never publishes a host port. The assembled
+**streaming** run protocol is proven by a separate release-blocking gate below;
+`verify-deploy` stays as-is.
+
+## Assembled streaming gate (release-blocking, T16)
+
+```bash
+make verify-stream      # docker/verify-stream.sh — exits non-zero on any failure
+```
+
+This is the **release-blocking assembled streaming gate**. Unlike `verify-deploy`,
+it brings up the **direct overlay** (`compose.yml` + `compose.direct.yml`), so the
+Next BFF is published on a real host port, and drives the durable **Optimize &
+Export** SSE run protocol end to end through the assembled **Browser→Next→FastAPI**
+path. It has two phases:
+
+1. **Browser phase (PRIMARY)**: launches Playwright/Chromium against the published
+   port with zero `/api/**` route interception, driving the real Optimize screen
+   against the real BFF + FastAPI backend. The spec asserts bounded first
+   response, live-stream liveness, opaque cursor persistence, strictly-after
+   replay on reload, browser-disconnect → BFF upstream-body abort propagation
+   (via a bounded BFF log seam in `lib/bff/stream.ts`), terminal artifact
+   auto-download, and cleanup DELETE.
+
+2. **curl phase (SUPPORTING diagnostics)**: protocol-level checks that submit
+   returns HTTP 202 + parsed JSON, the stream delivers `text/event-stream` with
+   `id:` cursors + `job.*` events, a confirmed nonterminal job is cancelled to
+   terminal, `Last-Event-ID` replay delivers ≥1 strictly-after frame (not just
+   "no old cursor re-sent"), the tiny feasible job reaches `completed` with a
+   valid XLSX (`PK\x03\x04` zip magic), `DELETE` → 204, subsequent `GET` → 404
+   `job_not_found`.
+
+A kernel-assigned free loopback port (not a PID-modulo scheme) keeps concurrent
+runs collision-free; every request is bounded with `curl --max-time` so the gate
+cannot hang; the browser phase is serialized (workers=1) against the single
+backend solver worker. The gate tears its own images/volumes/networks down on
+exit and asserts zero residue.
+
+| Phase | Assertion |
+| --- | --- |
+| base Compose | renders without the gate overlay, omits `JOB_SSE_KEEPALIVE_SECONDS`, and constructs backend settings with the validated `10.0s` default |
+| browser: first response | the browser's real `/events` fetch receives `text/event-stream` response headers and a first raw body chunk within bounded deadlines |
+| browser: liveness | the observed raw SSE body contains a genuine `: keepalive` comment from FastAPI; repeated job frames or rendered controls do not count |
+| browser: cursor persistence | the controller writes `lastCursor` to the durable session record |
+| browser: replay | an atomic pre-reload snapshot preserves the exact persisted cursor and raw ID set; the first reconnect sends that exact `Last-Event-ID`, no old ID reappears, and at least one new raw ID is durably committed |
+| browser: abort | the same isolated test first fails as a no-navigation negative control; logs are then re-baselined, and only a passing `/about` navigation plus a new BFF upstream-abort log passes |
+| browser: terminal | tiny job: completion → auto-download → cleanup DELETE → submit re-enabled |
+| curl: submit | `POST /api/optimize` returns HTTP 202 + valid JSON with a non-empty `id` |
+| curl: streaming | `text/event-stream` + `x-accel-buffering: no` + `cache-control: no-cache` + real `id:` cursors + `job.*` events |
+| curl: live cancel | confirmed nonterminal state before cancel → POST cancel → terminal state |
+| curl: replay | `Last-Event-ID` reconnect delivers ≥1 strictly-after frame, none already-seen |
+| curl: terminal | tiny job → `completed`, `GET .../xlsx` → PK zip magic + `Content-Disposition`, `DELETE` → 204, `GET` → 404 `job_not_found` |
+| residue | after cleanup, **no** containers/images/networks/volumes remain for this PID-scoped project |
+
+**Inputs.** Runs are serialized on the single worker, so the gate submits the
+**large** case first and cancels it, then the **tiny** case:
+
+- `core/tests/testcases/real/large-ward-with-87-people-2025-11.yaml` — submitted
+  with a long client `timeout` (120s) so the job stays **live** long enough to
+  observe streaming, capture cursors, exercise `Last-Event-ID` replay, and cancel
+  it mid-flight. A trivial instant solve would finish before any of that is
+  observable.
+- `core/tests/testcases/basics/01_1nurse_1shift_1day.yaml` — 1 nurse / 1 shift /
+  1 day, feasible and effectively instant, so it deterministically reaches
+  `completed` for the artifact-download-and-delete path once the worker is free.
+
+The **production Cloudflare named-tunnel streaming validation** (real external
+tunnel, quick `trycloudflare.com` tunnels do **not** support SSE) remains
+**optional / manual** — it needs external Cloudflare state. Its absence does **not**
+weaken this direct gate: `make verify-stream` proves the durable SSE run protocol
+over the assembled Browser→Next→FastAPI topology on every run.
 
 ## Public diagnostic (opt-in profile)
 

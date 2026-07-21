@@ -49,7 +49,7 @@ VERSION_FILE := VERSION
 APP_VERSION := $(strip $(shell cat $(VERSION_FILE) 2>/dev/null))
 
 .PHONY: build up up-cloudflare down down-cloudflare logs logs-cloudflare \
-	verify-deploy version check-version check-env check-public-origin \
+	verify-deploy verify-stream version check-version check-env check-public-origin \
 	check-public-origin-https check-tunnel-secret \
 	diagnostic diagnostic-memory diagnostic-report diagnostic-version-check
 
@@ -113,6 +113,12 @@ logs-cloudflare:
 # Reproducible non-streaming deploy gates (tech-plan §3/§6/§7). See docker/verify-deploy.sh.
 verify-deploy: check-version
 	APP_VERSION="$(APP_VERSION)" bash docker/verify-deploy.sh
+
+# Release-blocking ASSEMBLED streaming gate (T16): brings up the DIRECT overlay and
+# drives the durable Optimize & Export SSE run protocol through the published web
+# port. Separate from the non-streaming verify-deploy. See docker/verify-stream.sh.
+verify-stream: check-version
+	APP_VERSION="$(APP_VERSION)" bash docker/verify-stream.sh
 
 # Opt-in ONE-SHOT public diagnostic against a REDIS-backed backend. `run --build`
 # rebuilds the diagnostic image first (BuildKit caches unchanged layers, so this is

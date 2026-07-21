@@ -22,6 +22,11 @@ const workers = resolveWorkerCount({
 // and starts Next, then the smoke spec asserts the shell renders.
 export default defineConfig({
   testDir: "./e2e",
+  // The assembled Browser→Next→FastAPI spec requires the live direct Compose
+  // stack (no route interception, real backend). Exclude it from the base
+  // suite — it runs only under `playwright.assembled.config.ts` via
+  // `make verify-stream`.
+  testIgnore: /optimize-assembled-stream\.spec\.ts/,
   fullyParallel: true,
   workers,
   forbidOnly: !!process.env.CI,

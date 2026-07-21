@@ -43,7 +43,14 @@ export async function relayEventErrorResponse(upstream: Response, path: string):
 //     NOT propagate cancellation — hence the explicit wrapper + `cancel()` hook.
 export async function proxyEventStream(request: Request, path: string): Promise<Response> {
   const controller = new AbortController();
-  const onDownstreamAbort = () => controller.abort();
+  const onDownstreamAbort = () => {
+    // Bounded, behavior-neutral observability: one line when the browser
+    // disconnects (request.signal aborts) and we propagate to the upstream
+    // fetch. Lets the assembled release gate assert abort propagation via
+    // `docker compose logs web` without network-introspection machinery.
+    console.info("[optimize-stream] downstream cancelled; propagating to upstream body", { path });
+    controller.abort();
+  };
 
   if (request.signal.aborted) {
     controller.abort();
@@ -92,6 +99,15 @@ export async function proxyEventStream(request: Request, path: string): Promise<
     },
     cancel(reason) {
       // Downstream disconnected/cancelled → propagate to the upstream body.
+      // Bounded, behavior-neutral observability: a single info-level log when
+      // the browser disconnects and we propagate the cancel to the upstream
+      // fetch body. This lets the assembled release gate assert abort
+      // propagation at the BFF→upstream boundary via `docker compose logs web`
+      // without network-introspection machinery. One line per disconnect;
+      // no metrics, no payload, no unbounded output.
+      console.info("[optimize-stream] downstream cancelled; propagating to upstream body", {
+        path,
+      });
       controller.abort(reason);
       reader.cancel(reason).catch(() => {});
       request.signal.removeEventListener("abort", onDownstreamAbort);

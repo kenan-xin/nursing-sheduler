@@ -103,6 +103,10 @@ services:
       # validate it before starting. Blank injection is deliberate: the web runtime
       # fails closed on it. `make verify-deploy` passes its own throwaway origin.
       PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-}
+      # Dev-fixture gate (T16f): the `/optimize-*-fixture` routes 404 unless this
+      # is "1"/"true". Empty in production; `make verify-stream` sets it to expose
+      # the durable-stream fixture for the assembled browser phase.
+      NS_ENABLE_DEV_FIXTURES: ${NS_ENABLE_DEV_FIXTURES:-}
     networks:
       - ingress
       - app

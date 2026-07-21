@@ -1,0 +1,8 @@
+# Gate-only overlay: shortens the backend SSE keepalive interval so the
+# verification gate can observe a genuine `: keepalive` comment in a bounded
+# streaming window. Normal Compose (without this overlay) uses the backend's
+# validated 10s default (config.py). Applied only by `docker/verify-stream.sh`.
+services:
+  backend:
+    environment:
+      JOB_SSE_KEEPALIVE_SECONDS: "2"
