@@ -18,7 +18,8 @@ import {
 } from "@/lib/query/event-payloads";
 import { runOptimizeEventLoop } from "@/lib/query/event-stream";
 import { optimizeKeys } from "@/lib/query/keys";
-import { CursorTracker, type SseFrame, streamOptimizeEvents } from "@/lib/query/sse";
+import { createResumeCursor, type SseFrame, streamOptimizeEvents } from "@/lib/query/sse";
+import { MAX_CURSOR_BYTES } from "@/lib/query/sse-limits";
 
 // Re-export so consumers can keep importing the error type from the hooks module.
 export { OptimizeApiError } from "@/lib/bff/errors";
@@ -323,8 +324,24 @@ export function useOptimizeEventStream(
 
     const controller = new AbortController();
     // Seed the tracker with the supplied resume cursor so the first request carries it
-    // as `Last-Event-ID`. Read once at subscription start (like maxReconnects).
-    const tracker = new CursorTracker(captured.initialCursor ?? null);
+    // as `Last-Event-ID`. Read once at subscription start (like maxReconnects). An
+    // oversized restored cursor (a corrupted/foreign resume point — normally already
+    // rejected by session decode) must NOT be sent as a header or silently downgraded
+    // to a cursorless resume: seed empty and route it through the SAME explicit
+    // invalid-cursor recovery the backend `invalid_event_cursor` path uses, so the UI
+    // shows the recovery and the persisted cursor is cleared before we reconnect.
+    const { cursor: tracker, rejected: restoredCursorInvalid } = createResumeCursor(
+      captured.initialCursor ?? null,
+    );
+    if (restoredCursorInvalid) {
+      cb().onCursorInvalid?.({
+        kind: "invalid-event-cursor",
+        status: 400,
+        code: "invalid_event_cursor",
+        message: `The restored resume cursor exceeded MAX_CURSOR_BYTES=${MAX_CURSOR_BYTES}.`,
+      });
+      cb().onCursorReset?.();
+    }
     const eventsUrl = `/api/optimize/${encodeURIComponent(jobId)}/events`;
     const pollUrl = `/api/optimize/${encodeURIComponent(jobId)}`;
 

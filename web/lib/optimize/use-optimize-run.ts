@@ -154,6 +154,12 @@ export interface PreparedRecoveryAttachment {
   activation: Omit<RunActivation, "jobId">;
   /** The opaque resume cursor to seed the stream's first `Last-Event-ID`. */
   initialCursor: string | null;
+  /**
+   * The persisted resume cursor was oversized and has been cleared: this attach must
+   * resume from the retained floor (`initialCursor` is null) AND surface explicit
+   * invalid-cursor recovery so the run log records the reset. Defaults to false.
+   */
+  invalidCursorReset?: boolean;
 }
 
 /**
@@ -228,6 +234,10 @@ export interface OptimizeRunController {
   /** End cursor-persistence authority for the exact current job without resetting the
    * terminal view. Used after verified durable cleanup. */
   revokeCursorPersistence(jobId: string): void;
+  /** Emit ONE invalid-cursor reset signal against the CURRENT live attachment for `jobId`
+   *  WITHOUT re-attaching — used after T16b verifies a durable poison-cursor clear on an
+   *  already-live job. Returns whether the exact job was live (no-op + false otherwise). */
+  notifyInvalidCursorReset(jobId: string): boolean;
   cancel(): Promise<void>;
   finishNow(): Promise<void>;
   /** Reset hot/controller state only. Durable cleanup belongs to T16b/T16e. */
@@ -711,6 +721,12 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
         jobId: input.jobId,
         reloadRecoveryAvailable: input.activation.reloadRecoveryAvailable,
       });
+      // A recovered attach whose persisted cursor was oversized surfaces the SAME
+      // explicit invalid-cursor recovery the mid-stream `invalid_event_cursor` path
+      // uses, so the log records the reset before resuming from the retained floor.
+      if (input.invalidCursorReset) {
+        dispatch({ type: "cursor-recovery", reason: "invalid" });
+      }
 
       setActivation({
         jobId: input.jobId,
@@ -721,6 +737,20 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
       return { status: "attached", jobId: input.jobId };
     },
     [currentProvider, dispatch, revokePersistenceAuthority, tokenIsLive],
+  );
+
+  // Emit ONE invalid-cursor reset against the exact live attachment for `jobId`, without
+  // re-attaching or opening a second transport. Used when T16b verifies a durable poison-
+  // cursor clear on an already-live job: the live stream is preserved and only the visible
+  // reset signal (the same mid-stream `invalid_event_cursor` path uses) is recorded.
+  const notifyInvalidCursorReset = useCallback(
+    (jobId: string): boolean => {
+      const t = tokenRef.current;
+      if (t === null || !tokenIsLive(t) || t.jobId !== jobId) return false;
+      dispatch({ type: "cursor-recovery", reason: "invalid" });
+      return true;
+    },
+    [dispatch, tokenIsLive],
   );
 
   // The job id of the CURRENT live attachment (exact-token + live generation), or
@@ -1060,6 +1090,7 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
     registerCursorPersistence,
     prepareDegradedCleanup,
     revokeCursorPersistence,
+    notifyInvalidCursorReset,
     cancel,
     finishNow,
     reset,

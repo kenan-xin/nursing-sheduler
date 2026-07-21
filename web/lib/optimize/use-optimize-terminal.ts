@@ -22,6 +22,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchOptimizeXlsx } from "@/lib/query/optimize";
 import { isExactJobGoneResponse } from "@/lib/bff/errors";
+import { MAX_DISPLAY_FILENAME_BYTES, truncateUtf8 } from "@/lib/query/sse-limits";
 import {
   applyPeopleIdRestoration,
   type PeopleIdRestorationInput,
@@ -183,10 +184,16 @@ export function useOptimizeTerminal(deps: UseOptimizeTerminalDeps): OptimizeTerm
         reverseMap: activation.reverseMap,
         peopleCount: activation.peopleCount,
       });
+      // The immediate browser download uses the AUTHORITATIVE server filename
+      // (backend stores upload names verbatim, uncapped). Everything RETAINED —
+      // the tab-lifetime Download Again copy and the React display state — stores
+      // only the UTF-8-safe bounded copy so a pathological filename cannot pin
+      // unbounded memory. The run view bounds its own copy from this same value.
       seams.current.saveBlob(restored, filename);
-      retainRef.current = { jobId, blob: restored, filename };
-      if (mountedRef.current) setRetained({ jobId, filename });
-      controller.notifyDownloadSucceeded(filename);
+      const displayFilename = truncateUtf8(filename, MAX_DISPLAY_FILENAME_BYTES);
+      retainRef.current = { jobId, blob: restored, filename: displayFilename };
+      if (mountedRef.current) setRetained({ jobId, filename: displayFilename });
+      controller.notifyDownloadSucceeded(displayFilename);
       return true;
     } catch (error) {
       controller.notifyDownloadFailed(

@@ -17,6 +17,7 @@ import {
   useSubmitOptimize,
 } from "@/lib/query/optimize";
 import { optimizeKeys } from "@/lib/query/keys";
+import { MAX_CURSOR_BYTES } from "@/lib/query/sse-limits";
 
 const originalFetch = globalThis.fetch;
 let client: QueryClient;
@@ -739,6 +740,39 @@ describe("useOptimizeEventStream (T16p resume seam)", () => {
 
     await waitFor(() => expect(onTerminal).toHaveBeenCalled());
     expect(eventsHeader()).toBe("v1.j.42");
+  });
+
+  it("routes an oversized restored initialCursor through explicit invalid-cursor recovery (never silently cursorless, never sent as a header)", async () => {
+    // A corrupted/foreign restored cursor past the byte cap must NOT be seeded as a
+    // `Last-Event-ID` header nor silently downgraded to a cursorless resume: it takes
+    // the SAME explicit invalid-cursor recovery the backend `invalid_event_cursor`
+    // path uses (surface the recovery + clear the persisted cursor), then resumes
+    // from the retained floor.
+    client.setQueryData(optimizeKeys.job("opt_1"), baseJob({}));
+    const { eventsHeader } = mockStream(
+      `id: v1.j.9\nevent: job.state_changed\ndata: ${terminalData}\n\n`,
+    );
+    const onTerminal = vi.fn();
+    const onCursorInvalid = vi.fn();
+    const onCursorReset = vi.fn();
+    const oversized = "c".repeat(MAX_CURSOR_BYTES + 1);
+
+    renderHook(
+      () =>
+        useOptimizeEventStream("opt_1", {
+          enabled: true,
+          initialCursor: oversized,
+          onTerminal,
+          onCursorInvalid,
+          onCursorReset,
+        }),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(onTerminal).toHaveBeenCalled());
+    expect(onCursorInvalid).toHaveBeenCalledTimes(1); // explicit recovery, not a silent null
+    expect(onCursorReset).toHaveBeenCalledTimes(1); // persisted cursor cleared
+    expect(eventsHeader()).toBeNull(); // the poison cursor was never sent as a header
   });
 
   it("emits onCursorCommit with each committed cursor, after apply, once", async () => {

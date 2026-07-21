@@ -25,6 +25,13 @@
 //     never claims a resumable session it cannot prove.
 
 import type { JobResponse, JobState, OptimizationOutcome } from "@/lib/bff/types";
+import {
+  MAX_CURSOR_BYTES,
+  MAX_DISPLAY_FILENAME_BYTES,
+  MAX_DISPLAY_LABEL_BYTES,
+  MAX_DISPLAY_MESSAGE_BYTES,
+  truncateUtf8,
+} from "@/lib/query/sse-limits";
 
 // ---------------------------------------------------------------------------
 // Bounded-history limits + deterministic eviction
@@ -419,6 +426,67 @@ export type RunSignal =
 /** The `worker_lost` structured code — the failure that offers Resubmit. */
 export const WORKER_LOST_CODE = "worker_lost";
 
+/** A UTF-8-safe-truncated structured error for display retention. Structural
+ * codes/messages are never rejected here (the backend does not cap them); only
+ * the retained user-visible copy is bounded so histories stay finite. */
+function boundError(source: RunErrorSource, code: string | null, message: string): RunError {
+  return {
+    source,
+    code: code === null ? null : truncateUtf8(code, MAX_DISPLAY_LABEL_BYTES),
+    message: truncateUtf8(message, MAX_DISPLAY_MESSAGE_BYTES),
+  };
+}
+
+/** Bound the user-visible string fields of a typed log payload. Numbers/enums
+ * of fixed domain are left untouched; free-form mirrors (error code/message,
+ * solver/termination/artifact, progress/phase source/code/message) are
+ * truncated so the duplicated log copy cannot grow the budget unbounded. */
+function boundLogPayload(payload: RunLogPayload | null): RunLogPayload | null {
+  if (payload === null) return null;
+  switch (payload.kind) {
+    case "state":
+      return payload.error === null
+        ? payload
+        : {
+            ...payload,
+            error: {
+              code: truncateUtf8(payload.error.code, MAX_DISPLAY_LABEL_BYTES),
+              message: truncateUtf8(payload.error.message, MAX_DISPLAY_MESSAGE_BYTES),
+            },
+          };
+    case "control":
+      return payload;
+    case "result":
+      return {
+        ...payload,
+        solverStatus: truncateUtf8(payload.solverStatus, MAX_DISPLAY_LABEL_BYTES),
+        terminationReason:
+          payload.terminationReason === null
+            ? null
+            : truncateUtf8(payload.terminationReason, MAX_DISPLAY_LABEL_BYTES),
+        artifactName:
+          payload.artifactName === null
+            ? null
+            : truncateUtf8(payload.artifactName, MAX_DISPLAY_FILENAME_BYTES),
+      };
+    case "progress":
+      return { ...payload, source: truncateUtf8(payload.source, MAX_DISPLAY_LABEL_BYTES) };
+    case "phase":
+      return {
+        ...payload,
+        source: truncateUtf8(payload.source, MAX_DISPLAY_LABEL_BYTES),
+        code: truncateUtf8(payload.code, MAX_DISPLAY_LABEL_BYTES),
+        message: truncateUtf8(payload.message, MAX_DISPLAY_MESSAGE_BYTES),
+      };
+  }
+}
+
+// Every log entry is minted here, so this is the single choke point that bounds
+// each retained display string (label, event name, cursor, detail, occurredAt,
+// and the typed payload mirrors). Structural values retained elsewhere (jobId,
+// authoritative cursor) are validated at their own seams; these are the
+// user-visible copies. Truncation is UTF-8-safe and idempotent, so a normal
+// short value passes through unchanged.
 function appendLog(
   view: OptimizeRunView,
   kind: RunLogKind,
@@ -440,13 +508,13 @@ function appendLog(
       {
         seq,
         kind,
-        label,
-        event,
-        cursor,
-        payload,
-        detail,
+        label: truncateUtf8(label, MAX_DISPLAY_LABEL_BYTES),
+        event: event === null ? null : truncateUtf8(event, MAX_DISPLAY_LABEL_BYTES),
+        cursor: cursor === null ? null : truncateUtf8(cursor, MAX_CURSOR_BYTES),
+        payload: boundLogPayload(payload),
+        detail: detail === null ? null : truncateUtf8(detail, MAX_DISPLAY_MESSAGE_BYTES),
         elapsedSeconds,
-        occurredAt,
+        occurredAt: occurredAt === null ? null : truncateUtf8(occurredAt, MAX_DISPLAY_LABEL_BYTES),
         eventTime: null,
       },
       MAX_LOG_ENTRIES,
@@ -457,11 +525,16 @@ function appendLog(
 
 function mapResult(job: JobResponse): RunResult | null {
   if (job.result === null) return null;
+  // `solver_status` / `termination_reason` are backend-valid free-form strings
+  // (no schema cap); bound the retained display copy without rejecting them.
   return {
     outcome: job.result.outcome,
     score: job.result.score,
-    solverStatus: job.result.solver_status,
-    terminationReason: job.result.termination_reason,
+    solverStatus: truncateUtf8(job.result.solver_status, MAX_DISPLAY_LABEL_BYTES),
+    terminationReason:
+      job.result.termination_reason === null
+        ? null
+        : truncateUtf8(job.result.termination_reason, MAX_DISPLAY_LABEL_BYTES),
   };
 }
 
@@ -505,7 +578,7 @@ export function reduceRunView(view: OptimizeRunView, signal: RunSignal): Optimiz
         lifecycle: "submit-blocked",
         jobId: null,
         controls: INITIAL_CONTROLS,
-        error: { source: "session", code: signal.code, message: signal.message },
+        error: boundError("session", signal.code, signal.message),
         sessionRecovery: INITIAL_SESSION_RECOVERY,
         resubmittable: false,
         log,
@@ -521,7 +594,7 @@ export function reduceRunView(view: OptimizeRunView, signal: RunSignal): Optimiz
         lifecycle: "submit-rejected",
         jobId: null,
         controls: INITIAL_CONTROLS,
-        error: { source: "submit", code: signal.code, message: signal.message },
+        error: boundError("submit", signal.code, signal.message),
         sessionRecovery: INITIAL_SESSION_RECOVERY,
         // A clean rejection created no job, so a corrected resubmission is safe.
         resubmittable: true,
@@ -538,7 +611,7 @@ export function reduceRunView(view: OptimizeRunView, signal: RunSignal): Optimiz
         lifecycle: "submit-unknown",
         jobId: null,
         controls: INITIAL_CONTROLS,
-        error: { source: "submit", code: signal.code, message: signal.message },
+        error: boundError("submit", signal.code, signal.message),
         // A job MAY exist; do not offer a one-click resubmit that could double-run.
         sessionRecovery: INITIAL_SESSION_RECOVERY,
         resubmittable: false,
@@ -548,14 +621,21 @@ export function reduceRunView(view: OptimizeRunView, signal: RunSignal): Optimiz
     }
 
     case "job-activated": {
-      const detail = signal.reason ?? (signal.reloadRecoveryAvailable ? "durable" : "volatile");
+      // `reason` is a free-form display string; bound the retained copy (session
+      // recovery state + the log detail) rather than reject it. Current callers
+      // pass short fixed reasons, but the retained mirror must stay finite.
+      const reason =
+        signal.reason === null || signal.reason === undefined
+          ? null
+          : truncateUtf8(signal.reason, MAX_DISPLAY_LABEL_BYTES);
+      const detail = reason ?? (signal.reloadRecoveryAvailable ? "durable" : "volatile");
       const { log, seq } = appendLog(view, "lifecycle", `activated:${signal.jobId}`, detail);
       return {
         ...view,
         jobId: signal.jobId,
         sessionRecovery: {
           reloadRecoveryAvailable: signal.reloadRecoveryAvailable,
-          reason: signal.reason ?? null,
+          reason,
         },
         log,
         seq,
@@ -605,16 +685,19 @@ export function reduceRunView(view: OptimizeRunView, signal: RunSignal): Optimiz
         // A final result score supersedes the live incumbent; otherwise keep it.
         latestScore: result?.score ?? view.latestScore,
         // Authoritative: adopt the server error, or clear a prior job error.
-        error: job.error
-          ? { source: "job", code: job.error.code, message: job.error.message }
-          : null,
+        error: job.error ? boundError("job", job.error.code, job.error.message) : null,
         download,
         resubmittable: workerLost,
       };
     }
 
     case "progress": {
-      const p = signal.point;
+      // `source` is a backend-valid free-form string; bound the retained copy
+      // (chart array + log payload) rather than reject it.
+      const p: RunProgressPoint = {
+        ...signal.point,
+        source: truncateUtf8(signal.point.source, MAX_DISPLAY_LABEL_BYTES),
+      };
       const parts: string[] = [`score=${p.currentBestScore}`, `elapsed=${p.elapsedSeconds}s`];
       if (p.solutionIndex !== null) parts.push(`solution=#${p.solutionIndex}`);
       if (p.commentCount !== null) parts.push(`comments=${p.commentCount}`);
@@ -639,7 +722,7 @@ export function reduceRunView(view: OptimizeRunView, signal: RunSignal): Optimiz
       );
       return {
         ...view,
-        progress: pushBounded(view.progress, signal.point, MAX_PROGRESS_POINTS),
+        progress: pushBounded(view.progress, p, MAX_PROGRESS_POINTS),
         latestScore: p.currentBestScore,
         log,
         seq,
@@ -647,7 +730,14 @@ export function reduceRunView(view: OptimizeRunView, signal: RunSignal): Optimiz
     }
 
     case "phase": {
-      const e = signal.entry;
+      // `source`/`code`/`message` are backend-valid free-form strings; bound the
+      // retained copy (phase array + log payload/detail) rather than reject it.
+      const e: RunPhaseEntry = {
+        ...signal.entry,
+        source: truncateUtf8(signal.entry.source, MAX_DISPLAY_LABEL_BYTES),
+        code: truncateUtf8(signal.entry.code, MAX_DISPLAY_LABEL_BYTES),
+        message: truncateUtf8(signal.entry.message, MAX_DISPLAY_MESSAGE_BYTES),
+      };
       const detail = e.message ? `${e.code}: ${e.message}` : e.code;
       const payload: RunLogPayload = {
         kind: "phase",
@@ -669,7 +759,7 @@ export function reduceRunView(view: OptimizeRunView, signal: RunSignal): Optimiz
       );
       return {
         ...view,
-        phases: pushBounded(view.phases, signal.entry, MAX_PHASE_ENTRIES),
+        phases: pushBounded(view.phases, e, MAX_PHASE_ENTRIES),
         log,
         seq,
       };
@@ -697,18 +787,19 @@ export function reduceRunView(view: OptimizeRunView, signal: RunSignal): Optimiz
     }
 
     case "cursor-recovery": {
-      const { log, seq } = appendLog(
-        view,
-        "recovery",
-        `cursor-${signal.reason}`,
-        signal.oldestEventId ?? null,
-      );
+      // `oldestEventId` is an opaque cursor-shaped display value from the error
+      // body; bound the retained copy at the cursor structural size.
+      const oldestEventId =
+        signal.oldestEventId === null || signal.oldestEventId === undefined
+          ? null
+          : truncateUtf8(signal.oldestEventId, MAX_CURSOR_BYTES);
+      const { log, seq } = appendLog(view, "recovery", `cursor-${signal.reason}`, oldestEventId);
       // Earlier progress/phase history is no longer trustworthy after a cursor
       // recovery — clear the ephemeral chart/log data (reconciled spec) but keep the
       // audit log and the authoritative job fields.
       return {
         ...view,
-        cursorRecovery: { reason: signal.reason, oldestEventId: signal.oldestEventId ?? null },
+        cursorRecovery: { reason: signal.reason, oldestEventId },
         progress: [],
         phases: [],
         log,
@@ -735,7 +826,7 @@ export function reduceRunView(view: OptimizeRunView, signal: RunSignal): Optimiz
         jobId: null,
         queuePosition: null,
         controls: INITIAL_CONTROLS,
-        error: { source: "job", code: signal.code, message: signal.message },
+        error: boundError("job", signal.code, signal.message),
         download: { ...view.download, status: "unavailable", artifactAvailable: false },
         sessionRecovery: INITIAL_SESSION_RECOVERY,
         resubmittable: true,
@@ -752,7 +843,7 @@ export function reduceRunView(view: OptimizeRunView, signal: RunSignal): Optimiz
       const { log, seq } = appendLog(view, "error", "stream-disconnected", signal.message);
       return {
         ...view,
-        error: { source: "stream", code: null, message: signal.message },
+        error: boundError("stream", null, signal.message),
         log,
         seq,
       };
@@ -765,7 +856,7 @@ export function reduceRunView(view: OptimizeRunView, signal: RunSignal): Optimiz
       const { log, seq } = appendLog(view, "error", "control-error", signal.code ?? "unknown");
       return {
         ...view,
-        error: { source: "control", code: signal.code, message: signal.message },
+        error: boundError("control", signal.code, signal.message),
         log,
         seq,
       };
@@ -777,13 +868,19 @@ export function reduceRunView(view: OptimizeRunView, signal: RunSignal): Optimiz
     }
 
     case "download-succeeded": {
-      const { log, seq } = appendLog(view, "result", "download-succeeded", signal.filename ?? null);
+      // Bound the retained display filename (backend stores upload names verbatim
+      // with no length cap); keep the prior filename when none is supplied.
+      const filename =
+        signal.filename === null
+          ? view.download.filename
+          : truncateUtf8(signal.filename, MAX_DISPLAY_FILENAME_BYTES);
+      const { log, seq } = appendLog(view, "result", "download-succeeded", filename);
       return {
         ...view,
         download: {
           status: "downloaded",
           artifactAvailable: true,
-          filename: signal.filename ?? view.download.filename,
+          filename,
         },
         log,
         seq,
@@ -804,7 +901,7 @@ export function reduceRunView(view: OptimizeRunView, signal: RunSignal): Optimiz
       const { log, seq } = appendLog(view, "error", "download-failed", signal.message);
       return {
         ...view,
-        error: { source: "job", code: null, message: signal.message },
+        error: boundError("job", null, signal.message),
         // A failed download leaves the artifact still available to retry.
         download: { ...view.download, status: "available" },
         log,

@@ -33,6 +33,7 @@
 //     accepted the job.
 
 import { validatePeopleReverseMap, type PeopleReverseMap } from "@/lib/scenario";
+import { MAX_CURSOR_BYTES, isNonEmptyStringWithin, withinUtf8Bytes } from "@/lib/query/sse-limits";
 
 /** Bump when the record shape changes; a mismatched version is not resumable. */
 export const OPTIMIZE_SESSION_SCHEMA_VERSION = 1;
@@ -481,7 +482,11 @@ export type UpdateActiveCursorOutcome =
   // a different job / unreadable). Non-fatal: the next commit retries.
   | { status: "stale" }
   // Storage could not be read, or the write could not be proven durable.
-  | { status: "unverified" };
+  | { status: "unverified" }
+  // The cursor violated the structural byte cap and was refused (never written).
+  // Distinct from `stale` (record gone) and `unverified` (I/O): the record is
+  // healthy, only the cursor was rejected. Non-fatal — durability is not claimed.
+  | { status: "rejected" };
 
 /** Return the active record with its cursor removed (no `lastCursor: undefined` key). */
 function withoutCursor(record: ActiveOptimizeSession): ActiveOptimizeSession {
@@ -514,6 +519,15 @@ export function updateActiveCursor(
     return { status: "stale" };
   }
 
+  // Never persist an oversized opaque cursor. Unreachable on the real path (only a
+  // cursor validated by the stream's `checkCursor` boundary before application ever
+  // reaches `onCursorCommit`), this is a defense-in-depth seam:
+  // a poison cursor is never written, so a later reload cannot re-send it as a
+  // `Last-Event-ID` header. Surfaced as `rejected` (the record is healthy, only
+  // the cursor was refused) — NOT `stale`, which would wrongly imply the slot is
+  // gone and trigger a refresh. Non-fatal: durability is simply not claimed.
+  if (cursor !== null && !withinUtf8Bytes(cursor, MAX_CURSOR_BYTES)) return { status: "rejected" };
+
   const nextCursor = isNonEmptyString(cursor) ? cursor : undefined;
   // No-op fast path: the durable cursor already matches; skip a redundant write.
   if (record.lastCursor === nextCursor) return { status: "updated", record };
@@ -528,6 +542,44 @@ export function updateActiveCursor(
   const after = readCurrent(storage, codec);
   if (after.ok && after.raw === serialized) return { status: "updated", record: updated };
   return { status: "unverified" };
+}
+
+export type ClearInvalidCursorOutcome =
+  | { status: "cleared"; record: ActiveOptimizeSession }
+  // Nothing to clear: no record, a different job, or not this recoverable case
+  // (already clean, or other corruption that stays unreadable).
+  | { status: "none" }
+  // Storage could not be read, or the rewrite could not be proven durable.
+  | { status: "unverified" };
+
+/**
+ * Durably drop an oversized saved cursor from the persisted ACTIVE record for
+ * `jobId`, verified by read-back. This is the verified persistence seam for the
+ * invalid-cursor recovery: only when the on-disk record's SOLE defect is an oversized
+ * cursor (via `decodeActiveWithInvalidCursor`) and it belongs to `jobId` does it
+ * rewrite the record cursor-less, so a later reload sees a clean resumable session
+ * instead of re-entering recovery. Job-scoped, not owner-authorized. `none` when
+ * there is nothing to clear; `unverified` when the write could not be proven.
+ */
+export function clearInvalidActiveCursor(
+  storage: SessionTransactionStorage,
+  jobId: string,
+  codec: SessionCodec = defaultCodec,
+): ClearInvalidCursorOutcome {
+  const read = guardedGet(storage);
+  if (!read.ok) return { status: "unverified" };
+  if (read.raw === null) return { status: "none" };
+  const recovered = decodeActiveWithInvalidCursor(read.raw, codec);
+  if (recovered === null || recovered.jobId !== jobId) return { status: "none" };
+
+  const serialized = serializeOwnedRecord(recovered, codec);
+  if (serialized === null) return { status: "unverified" };
+  const write = guardedSet(storage, serialized);
+  if (!write.ok) return { status: "unverified" };
+  const after = readCurrent(storage, codec);
+  return after.ok && after.raw === serialized
+    ? { status: "cleared", record: recovered }
+    : { status: "unverified" };
 }
 
 /** A record we expect to own before removing it: exact owner AND variant. */
@@ -781,8 +833,16 @@ export type InspectedSession =
       record: ProvisionalOptimizeSession;
       identity: SessionRecordIdentity;
     }
-  // An active record with an accepted job id — a resumable session.
-  | { kind: "resumable"; record: ActiveOptimizeSession; identity: SessionRecordIdentity }
+  // An active record with an accepted job id — a resumable session. `cursorReset` is
+  // true when the otherwise-valid record carried an oversized saved cursor: the
+  // record here has that cursor stripped, so recovery resumes from the retained floor
+  // and enters explicit invalid-cursor recovery rather than the Forget flow.
+  | {
+      kind: "resumable";
+      record: ActiveOptimizeSession;
+      identity: SessionRecordIdentity;
+      cursorReset?: boolean;
+    }
   // A corrupt, incomplete, or version-mismatched record; discardable, never resumable.
   | { kind: "unreadable"; identity: SessionRecordIdentity | null };
 
@@ -886,12 +946,49 @@ function parseSession(value: unknown): OptimizeSessionRecord | null {
   if (candidate.phase === "active") {
     if (!hasAllowedKeys(candidate, ACTIVE_REQUIRED_KEYS, ACTIVE_ALLOWED_KEYS)) return null;
     if (!isValidJobId(candidate.jobId)) return null;
-    // A present cursor must be a non-empty string; a persisted record never stores
-    // `undefined` (JSON drops it), so the key is either absent or a real cursor.
-    if ("lastCursor" in candidate && !isNonEmptyString(candidate.lastCursor)) return null;
+    // A present cursor must be a non-empty string WITHIN the opaque-cursor byte
+    // cap; a persisted record never stores `undefined` (JSON drops it), so the key
+    // is either absent or a real cursor. An oversized persisted cursor (corrupted
+    // or foreign) makes the whole record unreadable — fail closed rather than
+    // reload it and re-send it as a `Last-Event-ID` header.
+    if (
+      "lastCursor" in candidate &&
+      !isNonEmptyStringWithin(candidate.lastCursor, MAX_CURSOR_BYTES)
+    )
+      return null;
     return { ...(candidate as unknown as ActiveOptimizeSession), reverseMap };
   }
   return null;
+}
+
+/**
+ * Decode a raw record whose ONLY invalidity is an oversized saved cursor: an
+ * otherwise fully valid ACTIVE session (identity, anonymization map, run options)
+ * carrying a `lastCursor` that is a non-empty string past the byte cap. Returns that
+ * active record with the cursor STRIPPED, or `null` for anything else (a within-cap
+ * cursor, a structurally garbage cursor, or any other corruption — all of which stay
+ * generically unreadable). The rest is validated by the strict `parseSession` on a
+ * cursor-less copy, so a second defect never masquerades as this recoverable case.
+ */
+function decodeActiveWithInvalidCursor(
+  raw: string,
+  codec: SessionCodec,
+): ActiveOptimizeSession | null {
+  let value: unknown;
+  try {
+    value = codec.deserialize(raw);
+  } catch {
+    return null;
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  // The distinguishing defect: a present, non-empty-string cursor OVER the cap.
+  if (typeof candidate.lastCursor !== "string" || candidate.lastCursor.length === 0) return null;
+  if (isNonEmptyStringWithin(candidate.lastCursor, MAX_CURSOR_BYTES)) return null;
+  // Everything else must be a valid active record. Strip the cursor and re-validate.
+  const { lastCursor: _oversized, ...rest } = candidate;
+  const parsed = parseSession(rest);
+  return parsed !== null && parsed.phase === "active" ? parsed : null;
 }
 
 /**
@@ -911,7 +1008,16 @@ export function inspectPersistedSession(
 
   const record = decodeRecord(read.raw, codec);
   const identity = recordIdentity(read.raw);
-  if (record === null) return { kind: "unreadable", identity };
+  if (record === null) {
+    // Distinguish an otherwise-valid active session whose ONLY defect is an oversized
+    // saved cursor from generic corruption: it stays resumable (cursor stripped, so it
+    // resumes from the retained floor) and enters explicit invalid-cursor recovery.
+    // Every other unreadable record keeps the confirmed Forget flow.
+    const recovered = decodeActiveWithInvalidCursor(read.raw, codec);
+    if (recovered !== null)
+      return { kind: "resumable", record: recovered, identity, cursorReset: true };
+    return { kind: "unreadable", identity };
+  }
   return record.phase === "provisional"
     ? { kind: "interrupted", record, identity }
     : { kind: "resumable", record, identity };

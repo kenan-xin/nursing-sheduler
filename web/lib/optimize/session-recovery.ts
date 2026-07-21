@@ -39,6 +39,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { acquireSessionStorage } from "./session-storage";
 import {
+  clearInvalidActiveCursor,
   FORGET_OPTIMIZE_SESSION_WARNING,
   forgetInspectedSession,
   inspectPersistedSession,
@@ -209,7 +210,10 @@ function identityOf(inspected: InspectedSession): SessionRecordIdentity | null {
  * stream's first `Last-Event-ID`. Cursor persistence is driven separately through the
  * registered provider (resolved at call time), so the attachment carries no callbacks.
  */
-export function buildRecoveryAttachment(record: ActiveOptimizeSession): PreparedRecoveryAttachment {
+export function buildRecoveryAttachment(
+  record: ActiveOptimizeSession,
+  invalidCursorReset = false,
+): PreparedRecoveryAttachment {
   return {
     jobId: record.jobId,
     activation: {
@@ -220,6 +224,9 @@ export function buildRecoveryAttachment(record: ActiveOptimizeSession): Prepared
       reloadRecoveryAvailable: true,
     },
     initialCursor: record.lastCursor ?? null,
+    // The saved cursor was oversized and has been cleared: resume from the retained
+    // floor and surface explicit invalid-cursor recovery on attach.
+    invalidCursorReset,
   };
 }
 
@@ -254,6 +261,7 @@ type RecoveryController = Pick<
   OptimizeRunController,
   | "attachRecoveredSession"
   | "getLiveJobId"
+  | "notifyInvalidCursorReset"
   | "registerCursorPersistence"
   | "prepareDegradedCleanup"
   | "revokeCursorPersistence"
@@ -283,6 +291,7 @@ export function useOptimizeSessionRecovery(
   const {
     attachRecoveredSession,
     getLiveJobId,
+    notifyInvalidCursorReset,
     registerCursorPersistence,
     prepareDegradedCleanup,
     revokeCursorPersistence,
@@ -372,19 +381,56 @@ export function useOptimizeSessionRecovery(
   // attachment. Runs on each mount (StrictMode replays it); attaching only when the
   // controller is not already live for this exact job keeps exactly one live transport.
   useEffect(() => {
-    const inspected = inspectPersistedSession(storageRef.current!, codec);
-    applyInspection(inspected);
-    if (inspected.kind === "resumable") {
+    // One bounded classifier for BOTH the initial inspection and a `none` re-inspection.
+    // `depth` caps re-inspection at a single hop, so a record that keeps changing surfaces
+    // a visible conflict rather than looping or leaving a stuck `resumable + resume=null`.
+    const resolve = (inspected: InspectedSession, depth: number): OptimizeResumeOutcome | null => {
+      applyInspection(inspected); // set the UI state + identity for EVERY classification
+      // none/interrupted/unreadable/storage-error are visible through `state` alone.
+      if (inspected.kind !== "resumable") return null;
       const jobId = inspected.record.jobId;
-      const outcome =
-        getLiveJobId() === jobId
-          ? ({ status: "attached", jobId } as const)
-          : attachRecoveredSession(buildRecoveryAttachment(inspected.record));
-      if (mountedRef.current) setResume(outcome);
-    } else if (mountedRef.current) {
-      setResume(null);
+
+      if (!inspected.cursorReset) {
+        // Clean resumable: attach, idempotent against an already-live attachment.
+        return getLiveJobId() === jobId
+          ? { status: "attached", jobId }
+          : attachRecoveredSession(buildRecoveryAttachment(inspected.record, false));
+      }
+
+      // Invalid-cursor resumable: verify the durable clear BEFORE any same-live shortcut,
+      // so an already-live poisoned record is still cleared and read-back-verified.
+      const cleared = clearInvalidActiveCursor(storageRef.current!, jobId, codec);
+      if (cleared.status === "cleared") {
+        if (getLiveJobId() === jobId) {
+          // Keep the live transport; emit exactly one exact-job invalid-cursor reset signal
+          // (no second stream). Durable recovery is now truthful — the poison is removed.
+          notifyInvalidCursorReset(jobId);
+          return { status: "attached", jobId };
+        }
+        return attachRecoveredSession(buildRecoveryAttachment(cleared.record, true));
+      }
+      if (cleared.status === "none") {
+        // Changed/vanished between inspect and clear — never attach the stale decoded
+        // record. Re-inspect ONCE and treat the CURRENT record as the new authority.
+        if (depth > 0) {
+          return {
+            status: "conflict",
+            reason: "The recovery record kept changing during cleanup; reload to retry.",
+          };
+        }
+        return resolve(inspectPersistedSession(storageRef.current!, codec), depth + 1);
+      }
+      // `unverified`: storage read/write/read-back failed — fail closed, no durability claim.
+      setState({ kind: "storage-error" });
+      return null;
+    };
+
+    const resume = resolve(inspectPersistedSession(storageRef.current!, codec), 0);
+
+    if (mountedRef.current) {
+      setResume(resume);
+      setReady(true);
     }
-    if (mountedRef.current) setReady(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

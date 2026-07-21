@@ -5,11 +5,42 @@ import type { JobResponse } from "@/lib/bff/types";
 import { applyFrameWithReconcile } from "@/lib/query/optimize";
 import { optimizeKeys } from "@/lib/query/keys";
 import {
-  createSseParser,
-  CursorTracker,
+  createResumeCursor,
+  type ResumeCursor,
   type SseFrame,
   streamOptimizeEvents,
+  SseCursorOverflowError,
 } from "@/lib/query/sse";
+import { MAX_CURSOR_BYTES } from "@/lib/query/sse-limits";
+
+// Build a resume-cursor handle from a restored cursor (the real public seam). A raw
+// oversized string is rejected at runtime by `createResumeCursor` itself.
+const track = (initial: string | null = null): ResumeCursor => createResumeCursor(initial).cursor;
+
+// Observe the cursor a handle currently retains via the REAL surface: run one no-op
+// stream and read back the `Last-Event-ID` header the transport would replay. Saves and
+// restores the ambient fetch mock so it does not disturb the caller's own stubbing.
+async function retainedCursor(tracker: ResumeCursor): Promise<string | null> {
+  const prev = globalThis.fetch;
+  let sent: string | null = null;
+  globalThis.fetch = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+    sent = new Headers(init?.headers).get(LAST_EVENT_ID_HEADER);
+    return new Response(new ReadableStream<Uint8Array>({ start: (c) => c.close() }), {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    });
+  }) as typeof fetch;
+  try {
+    await streamOptimizeEvents("/api/optimize/x/events", {
+      signal: new AbortController().signal,
+      tracker,
+      onEvent: () => {},
+    });
+  } finally {
+    globalThis.fetch = prev;
+  }
+  return sent;
+}
 
 // A minimal full JobResponse to pre-seed the durable cache when a test needs the
 // partial-frame apply path (rather than the cache-absent reconcile path).
@@ -26,80 +57,370 @@ const seededJob = (over: Partial<JobResponse> = {}): JobResponse =>
     ...over,
   }) as JobResponse;
 
-describe("createSseParser", () => {
-  it("parses id/event/data frames and ignores keepalive comments", () => {
-    const parser = createSseParser();
-    const frames = parser.push(
-      'id: v1.j.1\nevent: job.state_changed\ndata: {"state":"queued"}\n\n' +
-        ": keepalive\n\n" +
-        'id: v1.j.2\nevent: job.progressed\ndata: {"score":1}\n\n',
-    );
-    expect(frames).toEqual<SseFrame[]>([
+const enc = (s: string) => new TextEncoder().encode(s);
+
+function byteStreamResponse(chunks: Uint8Array[]): Response {
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const c of chunks) controller.enqueue(c);
+      controller.close();
+    },
+  });
+  return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+}
+
+// SSE SYNTAX/FRAMING is owned by `eventsource-parser`; these are the
+// INTEGRATION behaviors the durable adapter depends on (not a re-run of the
+// library's conformance suite): the bounded raw-byte feed + adapter must round
+// -trip real frames, split delimiters, and multibyte sequences, and must NOT
+// re-introduce the old custom framer's CRLF-split corruption.
+describe("SSE framing through the maintained parser (integration)", () => {
+  const originalFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  async function collect(chunks: Uint8Array[], initial: string | null = null) {
+    globalThis.fetch = vi.fn(async () => byteStreamResponse(chunks)) as typeof fetch;
+    const tracker = track(initial);
+    const applied: SseFrame[] = [];
+    const outcome = await streamOptimizeEvents("/api/optimize/x/events", {
+      signal: new AbortController().signal,
+      tracker,
+      onEvent: (f) => {
+        applied.push(f);
+      },
+    });
+    return { applied, outcome, tracker };
+  }
+
+  it("parses id/event/data frames and ignores keepalive comments", async () => {
+    const { applied } = await collect([
+      enc(
+        'id: v1.j.1\nevent: job.state_changed\ndata: {"state":"queued"}\n\n' +
+          ": keepalive\n\n" +
+          'id: v1.j.2\nevent: job.progressed\ndata: {"score":1}\n\n',
+      ),
+    ]);
+    expect(applied).toEqual<SseFrame[]>([
       { id: "v1.j.1", event: "job.state_changed", data: '{"state":"queued"}' },
       { id: "v1.j.2", event: "job.progressed", data: '{"score":1}' },
     ]);
   });
 
-  it("yields a null id for id-less frames", () => {
-    const parser = createSseParser();
-    expect(parser.push('event: job.progressed\ndata: {"score":2}\n\n')).toEqual([
-      { id: null, event: "job.progressed", data: '{"score":2}' },
-    ]);
+  it('yields a null id for id-less frames and defaults a missing event name to "message"', async () => {
+    const withEvent = await collect([enc('event: job.progressed\ndata: {"score":2}\n\n')]);
+    expect(withEvent.applied).toEqual([{ id: null, event: "job.progressed", data: '{"score":2}' }]);
+    const noEvent = await collect([enc('data: {"score":3}\n\n')]);
+    expect(noEvent.applied).toEqual([{ id: null, event: "message", data: '{"score":3}' }]);
   });
 
-  it("buffers frames split across chunk boundaries", () => {
-    const parser = createSseParser();
-    expect(parser.push("id: v1.j.9\nevent: job.progressed\nda")).toEqual([]);
-    expect(parser.push('ta: {"score":2}\n\n')).toEqual([
-      { id: "v1.j.9", event: "job.progressed", data: '{"score":2}' },
+  it("keeps opaque non-numeric cursors verbatim (never parsed as numbers)", async () => {
+    const { applied } = await collect([
+      enc("id: v1.YWJj.ZGVm\nevent: job.state_changed\ndata: {}\n\n"),
     ]);
+    expect(applied[0].id).toBe("v1.YWJj.ZGVm");
   });
 
-  it("keeps opaque non-numeric ids verbatim (never parsed as numbers)", () => {
-    const parser = createSseParser();
-    const [frame] = parser.push("id: v1.YWJj.ZGVm\nevent: job.state_changed\ndata: {}\n\n");
-    expect(frame.id).toBe("v1.YWJj.ZGVm");
+  it("handles CRLF line endings within a record", async () => {
+    const { applied } = await collect([
+      enc("id: v1.j.3\r\nevent: job.result_available\r\ndata: {}\r\n\r\n"),
+    ]);
+    expect(applied).toEqual([{ id: "v1.j.3", event: "job.result_available", data: "{}" }]);
   });
 
-  it("tolerates CRLF line endings", () => {
-    const parser = createSseParser();
-    expect(parser.push("id: v1.j.3\r\nevent: job.result_available\r\ndata: {}\r\n\r\n")).toEqual([
-      { id: "v1.j.3", event: "job.result_available", data: "{}" },
+  // P1 regression: the old custom framer normalized each decoded chunk
+  // independently, so a CRLF split between chunks turned the trailing `\r` into
+  // a `\n` and the next chunk's leading `\n` into a phantom blank-line delimiter
+  // — emitting a false id-only frame that committed an early cursor. The
+  // maintained parser is stateful across feeds, so no phantom frame appears.
+  it("does not corrupt framing when a CRLF is split across chunks (no phantom frame)", async () => {
+    const { applied } = await collect([
+      enc("id: c1\r"),
+      enc('\nevent: job.progressed\r\ndata: {"x":1}\r\n\r\n'),
     ]);
+    expect(applied).toEqual([{ id: "c1", event: "job.progressed", data: '{"x":1}' }]);
+  });
+
+  it("buffers a record split across chunk boundaries and emits it once complete", async () => {
+    const { applied } = await collect([
+      enc("id: v1.j.9\nevent: job.progressed\nda"),
+      enc('ta: {"score":2}\n\n'),
+    ]);
+    expect(applied).toEqual([{ id: "v1.j.9", event: "job.progressed", data: '{"score":2}' }]);
+  });
+
+  it("reassembles a multibyte UTF-8 sequence split across the byte boundary", async () => {
+    // U+3042 (あ) is 3 UTF-8 bytes; split the byte stream one byte into it. The
+    // shared streaming decoder must carry the partial sequence to the next chunk.
+    const full = 'id: v1.j.1\nevent: job.progressed\ndata: {"x":"あ"}\n\n';
+    const bytes = enc(full);
+    const byteOffset = enc(full.slice(0, full.indexOf("あ"))).length + 1;
+    const { applied } = await collect([bytes.slice(0, byteOffset), bytes.slice(byteOffset)]);
+    expect(applied).toEqual([{ id: "v1.j.1", event: "job.progressed", data: '{"x":"あ"}' }]);
+  });
+
+  it("applies arbitrarily many legal records from one large chunk (no per-record cap)", async () => {
+    // ~110 KiB of small records in ONE chunk: the adapter applies every legal
+    // record with no application-level record-size ceiling. SSE framing is owned
+    // by the maintained parser; the adapter only orchestrates apply/commit.
+    const count = 2000;
+    const many = Array.from(
+      { length: count },
+      (_, i) => `id: v1.j.${i}\nevent: job.progressed\ndata: {"p":${i}}\n\n`,
+    ).join("");
+    expect(many.length).toBeGreaterThan(64 * 1024);
+    const { applied, tracker } = await collect([enc(many)]);
+    expect(applied).toHaveLength(count);
+    expect(applied[0].id).toBe("v1.j.0");
+    expect(applied[count - 1].id).toBe(`v1.j.${count - 1}`);
+    expect(await retainedCursor(tracker)).toBe(`v1.j.${count - 1}`);
   });
 });
 
-describe("CursorTracker (opaque dedupe, apply-before-commit)", () => {
-  it("commit advances the cursor; isDuplicate flags an exact repeat of the last applied id", () => {
-    const tracker = new CursorTracker();
-    const f1 = { id: "v1.j.1", event: "e", data: "{}" };
-    expect(tracker.isDuplicate(f1)).toBe(false);
-    tracker.commit(f1);
-    expect(tracker.lastEventId).toBe("v1.j.1");
-    expect(tracker.isDuplicate({ id: "v1.j.1", event: "e", data: "{}" })).toBe(true);
-    expect(tracker.isDuplicate({ id: "v1.j.2", event: "e", data: "{}" })).toBe(false);
+describe("streamOptimizeEvents cursor-bound + abort fencing", () => {
+  const originalFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
   });
 
-  it("does NOT advance the cursor when a frame is only checked, not committed", () => {
-    const tracker = new CursorTracker("v1.j.5");
-    expect(tracker.isDuplicate({ id: "v1.j.6", event: "e", data: "{}" })).toBe(false);
-    // No commit ⇒ the cursor stays put, so a reconnect resends from the prior id.
-    expect(tracker.lastEventId).toBe("v1.j.5");
+  it("throws SseCursorOverflowError for an oversized FIRST in-stream cursor, applying nothing and never skipping ahead", async () => {
+    // `adaptMessage` measures the cursor (non-allocating) during the synchronous feed
+    // and defers an oversized one as a `cursor-error` sentinel. `drain` throws it
+    // before applying that frame, so it is never applied/committed/dropped-and-advanced.
+    // The throw takes the loop's ordinary recovery path (no special protocol handling).
+    const hugeCursor = "c".repeat(MAX_CURSOR_BYTES + 1);
+    const text =
+      `id: ${hugeCursor}\nevent: job.state_changed\ndata: {"p":1}\n\n` +
+      'id: v1.j.2\nevent: job.progressed\ndata: {"p":2}\n\n';
+    globalThis.fetch = vi.fn(async () => byteStreamResponse([enc(text)])) as typeof fetch;
+
+    const tracker = track("v1.j.0");
+    const applied: SseFrame[] = [];
+    await expect(
+      streamOptimizeEvents("/api/optimize/x/events", {
+        signal: new AbortController().signal,
+        tracker,
+        onEvent: (f) => {
+          applied.push(f);
+        },
+      }),
+    ).rejects.toBeInstanceOf(SseCursorOverflowError);
+
+    expect(applied).toEqual([]); // never applied
+    expect(await retainedCursor(tracker)).toBe("v1.j.0"); // never advanced past the dropped frame
   });
 
-  it("treats id-less frames as never-duplicate and leaves the cursor unchanged on commit", () => {
-    const tracker = new CursorTracker("v1.j.5");
-    const idless = { id: null, event: "e", data: "{}" };
-    expect(tracker.isDuplicate(idless)).toBe(false);
-    tracker.commit(idless);
-    expect(tracker.lastEventId).toBe("v1.j.5");
+  it("same-feed A + invalid-cursor B + C: A applies/commits, B never applies, C is ignored, retry begins from A", async () => {
+    // All three records arrive in ONE synchronous feed. A valid frame collected before
+    // an oversized-cursor sentinel must fully drain (apply + commit + onCommit) BEFORE
+    // the sentinel throws; the offending B and everything after it (C) are ignored, and
+    // the next reconnect resumes from A's committed cursor — not the prior floor.
+    const hugeCursor = "c".repeat(MAX_CURSOR_BYTES + 1);
+    const text =
+      'id: v1.A\nevent: job.progressed\ndata: {"p":1}\n\n' + // A: valid
+      `id: ${hugeCursor}\nevent: job.progressed\ndata: {"p":2}\n\n` + // B: oversized cursor
+      'id: v1.C\nevent: job.progressed\ndata: {"p":3}\n\n'; // C: later, must be ignored
+    const sentCursors: (string | null)[] = [];
+    globalThis.fetch = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      sentCursors.push(new Headers(init?.headers).get(LAST_EVENT_ID_HEADER));
+      return byteStreamResponse([enc(text)]);
+    }) as typeof fetch;
+
+    const tracker = track("v1.floor");
+    const applied: string[] = [];
+    const committed: string[] = [];
+    const run = () =>
+      streamOptimizeEvents("/api/optimize/x/events", {
+        signal: new AbortController().signal,
+        tracker,
+        onEvent: (f) => {
+          applied.push(f.id ?? "∅");
+        },
+        onCommit: (cursor) => committed.push(cursor),
+      });
+
+    await expect(run()).rejects.toBeInstanceOf(SseCursorOverflowError);
+    expect(applied).toEqual(["v1.A"]); // A applied; B and C never applied
+    expect(committed).toEqual(["v1.A"]); // A committed; the sentinel fired after
+    expect(await retainedCursor(tracker)).toBe("v1.A"); // advanced to A, not stuck at the floor
+
+    // The next reconnect resumes strictly after A (the last committed cursor).
+    await expect(run()).rejects.toBeInstanceOf(SseCursorOverflowError);
+    expect(sentCursors).toEqual(["v1.floor", "v1.A"]);
   });
 
-  it("resumes from a supplied cursor and resets to the floor", () => {
-    const tracker = new CursorTracker("v1.j.7");
-    expect(tracker.lastEventId).toBe("v1.j.7");
-    tracker.reset();
-    expect(tracker.lastEventId).toBeNull();
+  it("fences later frames collected by the SAME synchronous feed when onEvent throws on revocation/abort", async () => {
+    // `eventsource-parser` emits every complete record in one chunk synchronously,
+    // so a single feed collects multiple frames. Abort/revocation fencing is the
+    // awaited consumer's responsibility (exactly as the wrapped loop's canApplyFrame
+    // throw supplies): once `onEvent` throws, every later already-collected frame
+    // must NOT apply or commit, and the cursor stays put for replay.
+    const text =
+      'id: v1.j.1\nevent: job.progressed\ndata: {"p":1}\n\n' +
+      'id: v1.j.2\nevent: job.progressed\ndata: {"p":2}\n\n' +
+      'id: v1.j.3\nevent: job.progressed\ndata: {"p":3}\n\n';
+    globalThis.fetch = vi.fn(async () => byteStreamResponse([enc(text)])) as typeof fetch;
+
+    const controller = new AbortController();
+    const tracker = track();
+    const applied: string[] = [];
+    // A direct caller that mirrors the loop's revocation predicate: apply the first
+    // frame, revoke, then throw for the next — fencing the remaining collected feed.
+    const onEvent = (f: SseFrame) => {
+      if (controller.signal.aborted) throw new Error("attachment revoked mid-feed");
+      applied.push(f.id ?? "∅");
+      controller.abort(); // revoke after the FIRST frame applies
+    };
+
+    await expect(
+      streamOptimizeEvents("/api/optimize/x/events", {
+        signal: controller.signal,
+        tracker,
+        onEvent,
+      }),
+    ).rejects.toThrow("attachment revoked mid-feed");
+
+    // Only the first collected frame applied/committed; the throw fenced the rest.
+    expect(applied).toEqual(["v1.j.1"]);
+    expect(await retainedCursor(tracker)).toBe("v1.j.1");
+  });
+
+  it("flushes the decoder at end of stream so a complete final record still emits", async () => {
+    const bytes = enc('id: v1.j.1\nevent: job.progressed\ndata: {"p":1}\n\n');
+    globalThis.fetch = vi.fn(async () => byteStreamResponse([bytes])) as typeof fetch;
+
+    const tracker = track();
+    const applied: SseFrame[] = [];
+    await streamOptimizeEvents("/api/optimize/x/events", {
+      signal: new AbortController().signal,
+      tracker,
+      onEvent: (f) => {
+        applied.push(f);
+      },
+    });
+    expect(applied).toEqual([{ id: "v1.j.1", event: "job.progressed", data: '{"p":1}' }]);
+    expect(await retainedCursor(tracker)).toBe("v1.j.1");
+  });
+
+  it("propagates an abort from fetch rather than swallowing it", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    globalThis.fetch = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.signal?.aborted) {
+        throw Object.assign(new Error("The operation was aborted."), { name: "AbortError" });
+      }
+      return byteStreamResponse([]);
+    }) as typeof fetch;
+
+    await expect(
+      streamOptimizeEvents("/api/optimize/x/events", {
+        signal: controller.signal,
+        tracker: track(),
+        onEvent: () => {},
+      }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+  });
+});
+
+// The cursor boundary is a RUNTIME check exercised through the only public seams: the
+// `createResumeCursor` factory and the actual `Last-Event-ID` header the transport
+// sends. There is no exported tracker class, so no raw string can be typed/asserted past
+// the boundary — these tests use raw 4,097-byte strings, not `checkCursor(...) === null`.
+describe("createResumeCursor + the real Last-Event-ID header (runtime cursor boundary)", () => {
+  const originalFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  // Run one stream through the handle and return the Last-Event-ID header actually sent.
+  async function sentHeaderFor(tracker: ResumeCursor, streamText = ""): Promise<string | null> {
+    let sent: string | null = null;
+    globalThis.fetch = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      sent = new Headers(init?.headers).get(LAST_EVENT_ID_HEADER);
+      return byteStreamResponse(streamText ? [enc(streamText)] : []);
+    }) as typeof fetch;
+    await streamOptimizeEvents("/api/optimize/x/events", {
+      signal: new AbortController().signal,
+      tracker,
+      onEvent: () => {},
+    });
+    return sent;
+  }
+
+  it("replays a valid restored cursor as the Last-Event-ID header", async () => {
+    const { cursor, rejected } = createResumeCursor("v1.j.42");
+    expect(rejected).toBe(false);
+    expect(await sentHeaderFor(cursor)).toBe("v1.j.42");
+  });
+
+  it("sends no Last-Event-ID header when there is no restored cursor", async () => {
+    const { cursor, rejected } = createResumeCursor(null);
+    expect(rejected).toBe(false);
+    expect(await sentHeaderFor(cursor)).toBeNull();
+  });
+
+  it("REJECTS a raw 4,097-byte restored cursor at runtime and never replays it as a header", async () => {
+    const oversized = "c".repeat(MAX_CURSOR_BYTES + 1); // a plain, untyped string over the cap
+    const { cursor, rejected } = createResumeCursor(oversized);
+    expect(rejected).toBe(true); // runtime rejection reported to the caller (route to recovery)
+    expect(await sentHeaderFor(cursor)).toBeNull(); // the poison value never reaches the wire
+  });
+
+  it("REJECTS an `any`/asserted oversized cursor — the boundary is a runtime check, not an erased brand", async () => {
+    // A JS or `any`-typed caller cannot smuggle an oversized cursor into the header: the
+    // factory measures bytes at runtime regardless of the static type it was handed.
+    const smuggled = "c".repeat(MAX_CURSOR_BYTES + 1) as unknown as string;
+    const { cursor, rejected } = createResumeCursor(smuggled);
+    expect(rejected).toBe(true);
+    expect(await sentHeaderFor(cursor)).toBeNull();
+  });
+
+  it("REJECTS a FORGED structural handle (JS/any) with an oversized lastEventId BEFORE any request/header", async () => {
+    // The emitted public API accepts a structural `ResumeCursor`; a JS/`any` caller could
+    // forge one carrying an oversized `lastEventId` and its own `commit`/`isDuplicate`. The
+    // transport must verify handle IDENTITY (only a `createResumeCursor` tracker) and throw
+    // before it ever reads state, fetches, or builds the header.
+    const forged = {
+      reset() {},
+      lastEventId: "x".repeat(MAX_CURSOR_BYTES + 1),
+      isDuplicate: () => false,
+      commit() {},
+    } as unknown as ResumeCursor;
+    const fetchSpy = vi.fn();
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+
+    await expect(
+      streamOptimizeEvents("/api/optimize/x/events", {
+        signal: new AbortController().signal,
+        tracker: forged,
+        onEvent: () => {},
+      }),
+    ).rejects.toBeInstanceOf(TypeError);
+    expect(fetchSpy).not.toHaveBeenCalled(); // no request, so no oversized Last-Event-ID header
+  });
+
+  it("reset() discards the cursor so the next request resumes from the floor (no header)", async () => {
+    const { cursor } = createResumeCursor("v1.j.7");
+    expect(await sentHeaderFor(cursor)).toBe("v1.j.7");
+    cursor.reset();
+    expect(await sentHeaderFor(cursor)).toBeNull();
+  });
+
+  it("a committed valid in-stream cursor becomes the Last-Event-ID on the next reconnect", async () => {
+    // The only way a value reaches the header besides construction is committing a
+    // validated frame; there is no public raw-commit seam. An oversized in-stream cursor
+    // is a `cursor-error` (never committed) — see the same-feed A+B+C test.
+    const { cursor } = createResumeCursor(null);
+    const first = await sentHeaderFor(
+      cursor,
+      'id: v1.applied\nevent: job.progressed\ndata: {"p":1}\n\n',
+    );
+    expect(first).toBeNull(); // first request had no prior cursor
+    expect(await sentHeaderFor(cursor)).toBe("v1.applied"); // committed cursor replayed
   });
 });
 
@@ -127,7 +448,7 @@ describe("streamOptimizeEvents", () => {
       return streamResponse("");
     }) as typeof fetch;
 
-    const tracker = new CursorTracker("v1.j.42");
+    const tracker = track("v1.j.42");
     await streamOptimizeEvents("/api/optimize/x/events", {
       signal: new AbortController().signal,
       tracker,
@@ -145,7 +466,7 @@ describe("streamOptimizeEvents", () => {
 
     await streamOptimizeEvents("/api/optimize/x/events", {
       signal: new AbortController().signal,
-      tracker: new CursorTracker(),
+      tracker: track(),
       onEvent: () => {},
     });
     expect(hasHeader).toBe(false);
@@ -166,7 +487,7 @@ describe("streamOptimizeEvents", () => {
     const applied: string[] = [];
     const outcome = await streamOptimizeEvents("/api/optimize/x/events", {
       signal: new AbortController().signal,
-      tracker: new CursorTracker(),
+      tracker: track(),
       onEvent: (f) => {
         applied.push(f.id ?? "∅");
       },
@@ -185,7 +506,7 @@ describe("streamOptimizeEvents", () => {
     globalThis.fetch = vi.fn(async () =>
       streamResponse(`id: v1.j.2\nevent: job.state_changed\ndata: ${terminalData}\n\n`),
     ) as typeof fetch;
-    const tracker = new CursorTracker("v1.j.1");
+    const tracker = track("v1.j.1");
     const onTerminalObserved = vi.fn();
 
     await expect(
@@ -204,7 +525,7 @@ describe("streamOptimizeEvents", () => {
       event: "job.state_changed",
       data: terminalData,
     });
-    expect(tracker.lastEventId).toBe("v1.j.1");
+    expect(await retainedCursor(tracker)).toBe("v1.j.1");
   });
 
   it("returns error-response with the parsed body on a non-2xx (expired cursor)", async () => {
@@ -225,7 +546,7 @@ describe("streamOptimizeEvents", () => {
 
     const outcome = await streamOptimizeEvents("/api/optimize/x/events", {
       signal: new AbortController().signal,
-      tracker: new CursorTracker(),
+      tracker: track(),
       onEvent: () => {},
     });
     expect(outcome).toEqual({ type: "error-response", status: 409, body });
@@ -239,7 +560,7 @@ describe("streamOptimizeEvents", () => {
       return streamResponse(frameText);
     }) as typeof fetch;
 
-    const tracker = new CursorTracker("v1.j.6");
+    const tracker = track("v1.j.6");
     const applied: string[] = [];
     let shouldThrow = true;
     const onEvent = (frame: { id: string | null }) => {
@@ -258,7 +579,7 @@ describe("streamOptimizeEvents", () => {
         onEvent,
       }),
     ).rejects.toThrow("apply failed");
-    expect(tracker.lastEventId).toBe("v1.j.6");
+    expect(await retainedCursor(tracker)).toBe("v1.j.6");
 
     // Reconnect: the prior cursor is resent, the frame is reapplied successfully,
     // and only now does the cursor advance. No durable loss, no double apply.
@@ -269,7 +590,7 @@ describe("streamOptimizeEvents", () => {
     });
     expect(sentCursors).toEqual(["v1.j.6", "v1.j.6"]);
     expect(applied).toEqual(["v1.j.7"]);
-    expect(tracker.lastEventId).toBe("v1.j.7");
+    expect(await retainedCursor(tracker)).toBe("v1.j.7");
   });
 
   it("fires onCommit with each committed opaque cursor, once, only after apply", async () => {
@@ -287,7 +608,7 @@ describe("streamOptimizeEvents", () => {
     let applyCount = 0;
     await streamOptimizeEvents("/api/optimize/x/events", {
       signal: new AbortController().signal,
-      tracker: new CursorTracker(),
+      tracker: track(),
       onEvent: () => {
         applyCount += 1;
       },
@@ -308,7 +629,7 @@ describe("streamOptimizeEvents", () => {
       streamResponse('id: v1.j.7\nevent: job.progressed\ndata: {"p":1}\n\n'),
     ) as typeof fetch;
 
-    const tracker = new CursorTracker("v1.j.6");
+    const tracker = track("v1.j.6");
     const onCommit = vi.fn();
     await expect(
       streamOptimizeEvents("/api/optimize/x/events", {
@@ -322,14 +643,14 @@ describe("streamOptimizeEvents", () => {
     ).rejects.toThrow("apply failed");
 
     expect(onCommit).not.toHaveBeenCalled();
-    expect(tracker.lastEventId).toBe("v1.j.6");
+    expect(await retainedCursor(tracker)).toBe("v1.j.6");
   });
 
   it("awaits an async onEvent: a rejection leaves the cursor uncommitted, replays, then commits once", async () => {
     const frameText = 'id: v1.j.7\nevent: job.progressed\ndata: {"p":1}\n\n';
     globalThis.fetch = vi.fn(async () => streamResponse(frameText)) as typeof fetch;
 
-    const tracker = new CursorTracker("v1.j.6");
+    const tracker = track("v1.j.6");
     const onCommit = vi.fn();
     const applied: string[] = [];
     let shouldReject = true;
@@ -351,7 +672,7 @@ describe("streamOptimizeEvents", () => {
         onCommit,
       }),
     ).rejects.toThrow("async apply failed");
-    expect(tracker.lastEventId).toBe("v1.j.6"); // not advanced
+    expect(await retainedCursor(tracker)).toBe("v1.j.6"); // not advanced
     expect(onCommit).not.toHaveBeenCalled();
 
     // Reconnect resends the prior cursor and reapplies the frame exactly once.
@@ -362,7 +683,7 @@ describe("streamOptimizeEvents", () => {
       onCommit,
     });
     expect(applied).toEqual(["v1.j.7"]);
-    expect(tracker.lastEventId).toBe("v1.j.7");
+    expect(await retainedCursor(tracker)).toBe("v1.j.7");
     expect(onCommit).toHaveBeenCalledTimes(1);
     expect(onCommit).toHaveBeenCalledWith("v1.j.7");
   });
@@ -374,7 +695,7 @@ describe("streamOptimizeEvents", () => {
 
     const outcome = await streamOptimizeEvents("/api/optimize/x/events", {
       signal: new AbortController().signal,
-      tracker: new CursorTracker(),
+      tracker: track(),
       onEvent: () => {},
     });
     expect(outcome).toEqual({ type: "closed" });
@@ -414,7 +735,7 @@ describe("malformed durable event reconciliation through the stream fence", () =
       client.setQueryData(optimizeKeys.job("opt_1"), authoritative);
       return authoritative;
     });
-    const tracker = new CursorTracker("v1.j.6");
+    const tracker = track("v1.j.6");
 
     await streamOptimizeEvents("/api/optimize/opt_1/events", {
       signal: new AbortController().signal,
@@ -424,12 +745,17 @@ describe("malformed durable event reconciliation through the stream fence", () =
 
     expect(reconcile).toHaveBeenCalledOnce();
     expect(client.getQueryData<JobResponse>(optimizeKeys.job("opt_1"))?.state).toBe("cancelling");
-    expect(tracker.lastEventId).toBe("v1.j.7"); // committed after reconcile
+    expect(await retainedCursor(tracker)).toBe("v1.j.7"); // committed after reconcile
     // A permanently malformed retained event cannot loop forever: once committed, a
-    // resend of the same id is an exact duplicate and is skipped.
-    expect(
-      tracker.isDuplicate({ id: "v1.j.7", event: "job.state_changed", data: "{malformed" }),
-    ).toBe(true);
+    // resend of the same id is an exact duplicate and is skipped (onEvent never re-runs).
+    const reapplied = vi.fn();
+    globalThis.fetch = vi.fn(async () => streamResponse(malformedState)) as typeof fetch;
+    await streamOptimizeEvents("/api/optimize/opt_1/events", {
+      signal: new AbortController().signal,
+      tracker,
+      onEvent: reapplied,
+    });
+    expect(reapplied).not.toHaveBeenCalled();
   });
 
   it("does NOT commit when the reconcile poll fails, so reconnect replays the prior cursor", async () => {
@@ -438,7 +764,7 @@ describe("malformed durable event reconciliation through the stream fence", () =
     const reconcile = vi.fn(async () => {
       throw new Error("poll failed");
     });
-    const tracker = new CursorTracker("v1.j.6");
+    const tracker = track("v1.j.6");
 
     await expect(
       streamOptimizeEvents("/api/optimize/opt_1/events", {
@@ -447,7 +773,7 @@ describe("malformed durable event reconciliation through the stream fence", () =
         onEvent: onEvent(client, reconcile),
       }),
     ).rejects.toThrow("poll failed");
-    expect(tracker.lastEventId).toBe("v1.j.6"); // cursor unchanged → replay on reconnect
+    expect(await retainedCursor(tracker)).toBe("v1.j.6"); // cursor unchanged → replay on reconnect
   });
 
   // Semantically invalid (but JSON-valid) durable payloads: unknown enum values,
@@ -628,7 +954,7 @@ describe("malformed durable event reconciliation through the stream fence", () =
         return authoritative;
       });
       const committed: string[] = [];
-      const tracker = new CursorTracker("v1.prev");
+      const tracker = track("v1.prev");
 
       const outcome = await streamOptimizeEvents("/api/optimize/opt_1/events", {
         signal: new AbortController().signal,
@@ -644,8 +970,9 @@ describe("malformed durable event reconciliation through the stream fence", () =
 
       expect(reconcile).toHaveBeenCalledOnce(); // reconciled, not applied
       expect(client.getQueryData<JobResponse>(optimizeKeys.job("opt_1"))?.state).toBe("cancelling");
-      expect(tracker.lastEventId).not.toBe("v1.prev"); // cursor advanced exactly once, after reconcile
-      expect(committed).toEqual([tracker.lastEventId]);
+      const retained = await retainedCursor(tracker);
+      expect(retained).not.toBe("v1.prev"); // cursor advanced exactly once, after reconcile
+      expect(committed).toEqual([retained]);
       expect(outcome.type).not.toBe("terminal");
     },
   );
@@ -659,7 +986,7 @@ describe("malformed durable event reconciliation through the stream fence", () =
     globalThis.fetch = vi.fn(async () => streamResponse(invalidTerminal)) as typeof fetch;
     const client = new QueryClient();
     const reconcile = vi.fn(async () => {});
-    const tracker = new CursorTracker("v1.prev");
+    const tracker = track("v1.prev");
 
     const outcome = await streamOptimizeEvents("/api/optimize/opt_1/events", {
       signal: new AbortController().signal,
@@ -669,7 +996,7 @@ describe("malformed durable event reconciliation through the stream fence", () =
 
     expect(reconcile).toHaveBeenCalledOnce();
     expect(outcome.type).toBe("closed"); // stream ended naturally, NOT a terminal close
-    expect(tracker.lastEventId).toBe("v1.s.5"); // committed after reconcile
+    expect(await retainedCursor(tracker)).toBe("v1.s.5"); // committed after reconcile
   });
 
   it("a failed reconcile for malformed running runtime retains the prior cursor for replay", async () => {
@@ -696,7 +1023,7 @@ describe("malformed durable event reconciliation through the stream fence", () =
       throw new Error("poll failed");
     });
     const onCommit = vi.fn();
-    const tracker = new CursorTracker("v1.prev");
+    const tracker = track("v1.prev");
 
     await expect(
       streamOptimizeEvents("/api/optimize/opt_1/events", {
@@ -706,7 +1033,7 @@ describe("malformed durable event reconciliation through the stream fence", () =
         onCommit,
       }),
     ).rejects.toThrow("poll failed");
-    expect(tracker.lastEventId).toBe("v1.prev"); // unchanged → replay on reconnect
+    expect(await retainedCursor(tracker)).toBe("v1.prev"); // unchanged → replay on reconnect
     expect(onCommit).not.toHaveBeenCalled();
   });
 
@@ -722,7 +1049,7 @@ describe("malformed durable event reconciliation through the stream fence", () =
     globalThis.fetch = vi.fn(async () => streamResponse(liveMarkedTerminal)) as typeof fetch;
     const client = new QueryClient();
     const reconcile = vi.fn(async () => {});
-    const tracker = new CursorTracker("v1.prev");
+    const tracker = track("v1.prev");
 
     const outcome = await streamOptimizeEvents("/api/optimize/opt_1/events", {
       signal: new AbortController().signal,
@@ -732,7 +1059,7 @@ describe("malformed durable event reconciliation through the stream fence", () =
 
     expect(reconcile).toHaveBeenCalledOnce();
     expect(outcome.type).toBe("closed"); // NOT a terminal close from the bad frame
-    expect(tracker.lastEventId).toBe("v1.s.10"); // committed once, after reconcile
+    expect(await retainedCursor(tracker)).toBe("v1.s.10"); // committed once, after reconcile
   });
 
   it("a terminal state falsely marked non-terminal reconciles; a failed reconcile replays the prior cursor", async () => {
@@ -748,7 +1075,7 @@ describe("malformed durable event reconciliation through the stream fence", () =
     const reconcile = vi.fn(async () => {
       throw new Error("poll failed");
     });
-    const tracker = new CursorTracker("v1.prev");
+    const tracker = track("v1.prev");
 
     await expect(
       streamOptimizeEvents("/api/optimize/opt_1/events", {
@@ -757,7 +1084,7 @@ describe("malformed durable event reconciliation through the stream fence", () =
         onEvent: onEvent(client, reconcile),
       }),
     ).rejects.toThrow("poll failed");
-    expect(tracker.lastEventId).toBe("v1.prev"); // unchanged → replay on reconnect
+    expect(await retainedCursor(tracker)).toBe("v1.prev"); // unchanged → replay on reconnect
   });
 
   it("a VALID terminal state frame with an existing cache applies directly and closes terminal", async () => {
@@ -771,7 +1098,7 @@ describe("malformed durable event reconciliation through the stream fence", () =
     const client = new QueryClient();
     client.setQueryData(optimizeKeys.job("opt_1"), seededJob()); // full response present ⇒ partial patch applies
     const reconcile = vi.fn(async () => {});
-    const tracker = new CursorTracker();
+    const tracker = track();
 
     const outcome = await streamOptimizeEvents("/api/optimize/opt_1/events", {
       signal: new AbortController().signal,
@@ -781,7 +1108,7 @@ describe("malformed durable event reconciliation through the stream fence", () =
 
     expect(reconcile).not.toHaveBeenCalled(); // valid + cached ⇒ applied, not reconciled
     expect(outcome.type).toBe("terminal");
-    expect(tracker.lastEventId).toBe("v1.s.6");
+    expect(await retainedCursor(tracker)).toBe("v1.s.6");
     expect(client.getQueryData<JobResponse>(optimizeKeys.job("opt_1"))?.state).toBe("completed");
   });
 
@@ -826,7 +1153,7 @@ describe("malformed durable event reconciliation through the stream fence", () =
       const reconcile = vi.fn(async () => {
         client.setQueryData(optimizeKeys.job("opt_1"), seededJob());
       });
-      const tracker = new CursorTracker("v1.prev");
+      const tracker = track("v1.prev");
 
       const outcome = await streamOptimizeEvents("/api/optimize/opt_1/events", {
         signal: new AbortController().signal,
@@ -835,7 +1162,7 @@ describe("malformed durable event reconciliation through the stream fence", () =
       });
 
       expect(reconcile).toHaveBeenCalledOnce(); // reconciled, not applied
-      expect(tracker.lastEventId).not.toBe("v1.prev"); // cursor advanced exactly once, after reconcile
+      expect(await retainedCursor(tracker)).not.toBe("v1.prev"); // cursor advanced exactly once, after reconcile
       expect(outcome.type).not.toBe("terminal");
     },
   );
@@ -855,7 +1182,7 @@ describe("malformed durable event reconciliation through the stream fence", () =
     const reconcile = vi.fn(async () => {
       throw new Error("poll failed");
     });
-    const tracker = new CursorTracker("v1.prev");
+    const tracker = track("v1.prev");
 
     await expect(
       streamOptimizeEvents("/api/optimize/opt_1/events", {
@@ -864,6 +1191,6 @@ describe("malformed durable event reconciliation through the stream fence", () =
         onEvent: onEvent(client, reconcile),
       }),
     ).rejects.toThrow("poll failed");
-    expect(tracker.lastEventId).toBe("v1.prev"); // unchanged → replay, no direct terminal close
+    expect(await retainedCursor(tracker)).toBe("v1.prev"); // unchanged → replay, no direct terminal close
   });
 });

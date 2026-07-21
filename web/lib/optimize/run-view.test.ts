@@ -790,3 +790,148 @@ describe("reduceRunView — durable-frame-applied (P1 #4)", () => {
     ]);
   });
 });
+
+// End-to-end retained-memory bound (`sse-record-byte-bounds` P1 #5): every
+// user-visible string retained by the reducer is truncated (UTF-8-safe) to a
+// finite ceiling, so the bounded histories cannot pin unbounded memory even
+// when a controller/programmatic signal carries a multi-megabyte string. This
+// is the review's reproduction (a 2 MiB string retained twice per path),
+// asserted now to be bounded at every duplicated mirror.
+describe("reduceRunView — retained display byte bound (P1 #5)", () => {
+  const HUGE = "z".repeat(2 * 1024 * 1024); // 2 MiB
+  const utf8 = (s: string) => new TextEncoder().encode(s).length;
+  const LABEL_CAP = 640;
+  const MESSAGE_CAP = 2048;
+  const FILENAME_CAP = 512;
+  const CURSOR_CAP = 4096;
+
+  it("bounds a stream-error message in BOTH view.error.message and its log detail mirror", () => {
+    const view = reduceRunView(INITIAL_OPTIMIZE_RUN_VIEW, { type: "stream-error", message: HUGE });
+    expect(utf8(view.error!.message)).toBe(MESSAGE_CAP);
+    const entry = view.log[view.log.length - 1];
+    expect(utf8(entry.detail!)).toBe(MESSAGE_CAP);
+  });
+
+  it("bounds an expired-cursor oldestEventId in BOTH cursorRecovery and its log detail mirror", () => {
+    const view = reduceRunView(INITIAL_OPTIMIZE_RUN_VIEW, {
+      type: "cursor-recovery",
+      reason: "expired",
+      oldestEventId: HUGE,
+    });
+    expect(utf8(view.cursorRecovery!.oldestEventId!)).toBe(CURSOR_CAP);
+    const entry = view.log[view.log.length - 1];
+    // The log detail mirror is bounded by the message cap (a display copy).
+    expect(utf8(entry.detail!)).toBe(MESSAGE_CAP);
+  });
+
+  it("bounds a download filename in BOTH download.filename and its log detail mirror", () => {
+    const view = reduceRunView(INITIAL_OPTIMIZE_RUN_VIEW, {
+      type: "download-succeeded",
+      filename: HUGE,
+    });
+    expect(utf8(view.download.filename!)).toBe(FILENAME_CAP);
+    const entry = view.log[view.log.length - 1];
+    expect(utf8(entry.detail!)).toBe(FILENAME_CAP);
+  });
+
+  it("bounds a job snapshot's error.code/message in view.error and never rejects it", () => {
+    const failed = {
+      id: "job-A",
+      state: "failed",
+      terminal: true,
+      queue_position: null,
+      created_at: "2026-07-20T00:00:00Z",
+      started_at: "2026-07-20T00:00:01Z",
+      finished_at: "2026-07-20T00:01:00Z",
+      request: {
+        input_name: "s.yaml",
+        solver: "ortools/cp-sat",
+        prettify: null,
+        timeout_seconds: 60,
+      },
+      result: null,
+      error: { code: HUGE, message: HUGE },
+      controls: { cancellable: false, early_completion_available: false },
+      links: {
+        self: "/optimize/job-A",
+        events: "/optimize/job-A/events",
+        cancellation: "/optimize/job-A/cancel",
+        early_completion: "/optimize/job-A/finish-now",
+        schedule: null,
+      },
+    } as unknown as JobResponse;
+    const view = reduceRunView(INITIAL_OPTIMIZE_RUN_VIEW, { type: "job-snapshot", job: failed });
+    // The oversized backend error is retained (not rejected) but bounded for display.
+    expect(view.lifecycle).toBe("failed");
+    expect(utf8(view.error!.code!)).toBe(LABEL_CAP);
+    expect(utf8(view.error!.message)).toBe(MESSAGE_CAP);
+  });
+
+  it("bounds progress/phase source, code, message in the retained arrays AND log payload mirrors", () => {
+    const withProgress = reduceRunView(INITIAL_OPTIMIZE_RUN_VIEW, {
+      type: "progress",
+      point: {
+        source: HUGE,
+        currentBestScore: 1,
+        elapsedSeconds: 1,
+        solutionIndex: null,
+        commentCount: null,
+      },
+    });
+    expect(utf8(withProgress.progress[0].source)).toBe(LABEL_CAP);
+    const pEntry = withProgress.log[withProgress.log.length - 1];
+    expect(pEntry.payload?.kind).toBe("progress");
+    if (pEntry.payload?.kind === "progress") expect(utf8(pEntry.payload.source)).toBe(LABEL_CAP);
+
+    const withPhase = reduceRunView(INITIAL_OPTIMIZE_RUN_VIEW, {
+      type: "phase",
+      entry: { source: HUGE, code: HUGE, message: HUGE, elapsedSeconds: 1 },
+    });
+    const stored = withPhase.phases[0];
+    expect(utf8(stored.source)).toBe(LABEL_CAP);
+    expect(utf8(stored.code)).toBe(LABEL_CAP);
+    expect(utf8(stored.message)).toBe(MESSAGE_CAP);
+    const phEntry = withPhase.log[withPhase.log.length - 1];
+    if (phEntry.payload?.kind === "phase") {
+      expect(utf8(phEntry.payload.source)).toBe(LABEL_CAP);
+      expect(utf8(phEntry.payload.code)).toBe(LABEL_CAP);
+      expect(utf8(phEntry.payload.message)).toBe(MESSAGE_CAP);
+    }
+  });
+
+  it("truncation is UTF-8-safe: a multibyte message is never split mid-character", () => {
+    const multibyte = "あ".repeat(2000); // 3 bytes each = 6000 bytes > message cap
+    const view = reduceRunView(INITIAL_OPTIMIZE_RUN_VIEW, {
+      type: "stream-error",
+      message: multibyte,
+    });
+    // Bounded at or below the cap, and a whole number of 3-byte chars (no partial).
+    expect(utf8(view.error!.message)).toBeLessThanOrEqual(MESSAGE_CAP);
+    expect(utf8(view.error!.message) % 3).toBe(0);
+  });
+
+  it("leaves normal-sized strings untouched (truncation is a no-op below the cap)", () => {
+    const view = reduceRunView(INITIAL_OPTIMIZE_RUN_VIEW, {
+      type: "submit-rejected",
+      code: "invalid_input",
+      message: "The scenario has no people.",
+    });
+    expect(view.error).toEqual({
+      source: "submit",
+      code: "invalid_input",
+      message: "The scenario has no people.",
+    });
+  });
+
+  it("bounds a job-activated recovery reason in BOTH sessionRecovery.reason and its log detail mirror", () => {
+    const view = reduceRunView(INITIAL_OPTIMIZE_RUN_VIEW, {
+      type: "job-activated",
+      jobId: "opt_9",
+      reloadRecoveryAvailable: true,
+      reason: HUGE,
+    });
+    expect(utf8(view.sessionRecovery.reason!)).toBe(LABEL_CAP);
+    const entry = view.log[view.log.length - 1];
+    expect(utf8(entry.detail!)).toBe(LABEL_CAP);
+  });
+});

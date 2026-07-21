@@ -1,16 +1,14 @@
+import { createParser, type EventSourceMessage } from "eventsource-parser";
 import { LAST_EVENT_ID_HEADER } from "@/lib/bff/types";
 import { parseStrictTerminalFrame, type StrictTerminalFrame } from "@/lib/query/event-payloads";
+import { MAX_CURSOR_BYTES, utf8ByteLength } from "@/lib/query/sse-limits";
 
-// fetch-stream SSE consumption for `/api/optimize/{id}/events` (tech-plan §5).
-// Two concerns handled here, both unit-tested:
-//   1. Frame parsing — revised backend frames are
-//      `id: <opaque cursor>\n event: <name>\n data: <json>\n\n`, with
-//      `: keepalive\n\n` comment frames in between. The `id` is the persisted,
-//      job-bound cursor.
-//   2. Opaque-cursor dedupe — the backend replays strictly AFTER the client's
-//      `Last-Event-ID` and owns ordering, so we no longer dedupe by position.
-//      Instead we remember the last applied cursor and skip only an exact
-//      duplicate id (a defensive net; ordinal replay is gone).
+// fetch-stream SSE consumption for `/api/optimize/{id}/events` (tech-plan §5). SSE syntax
+// and framing (CR/LF/CRLF incl. split delimiters, BOM, `data:` multiline assembly,
+// comments, field parsing) is delegated to the maintained, zero-dependency
+// `eventsource-parser` (pinned 3.1.0); there is NO application record-size ceiling. This
+// module owns only the durable-recovery additions: a runtime opaque-cursor boundary,
+// exact-duplicate dedupe, and apply-before-commit orchestration.
 
 export interface SseFrame {
   // The opaque, job-bound cursor for this event, or null for id-less frames.
@@ -19,103 +17,79 @@ export interface SseFrame {
   data: string;
 }
 
-// Incremental SSE record parser. Feed decoded text; get back complete frames.
-// Comment-only records (keepalives) yield nothing.
-export function createSseParser() {
-  let buffer = "";
-
-  return {
-    push(chunk: string): SseFrame[] {
-      buffer += chunk.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-
-      const frames: SseFrame[] = [];
-      let separator = buffer.indexOf("\n\n");
-      while (separator !== -1) {
-        const record = buffer.slice(0, separator);
-        buffer = buffer.slice(separator + 2);
-        const frame = parseRecord(record);
-        if (frame !== null) frames.push(frame);
-        separator = buffer.indexOf("\n\n");
-      }
-      return frames;
-    },
-  };
+// The single cursor boundary — a RUNTIME check, not an erased type brand: the string if it
+// fits `MAX_CURSOR_BYTES`, else null. Every value entering the tracker passes through here.
+function checkCursor(value: string): string | null {
+  return utf8ByteLength(value) <= MAX_CURSOR_BYTES ? value : null;
 }
 
-function parseRecord(record: string): SseFrame | null {
-  let id: string | null = null;
-  let event = "message";
-  const dataLines: string[] = [];
-  let hasField = false;
-  let hasData = false;
-
-  for (const line of record.split("\n")) {
-    // Blank lines and comments (`:` prefix, e.g. `: keepalive`) carry no field.
-    if (line === "" || line.startsWith(":")) continue;
-
-    const colon = line.indexOf(":");
-    const field = colon === -1 ? line : line.slice(0, colon);
-    let value = colon === -1 ? "" : line.slice(colon + 1);
-    if (value.startsWith(" ")) value = value.slice(1);
-
-    if (field === "id") {
-      // The cursor is opaque: keep it as the exact string the server sent, never
-      // parse or compare it as a number.
-      id = value;
-      hasField = true;
-    } else if (field === "event") {
-      event = value;
-      hasField = true;
-    } else if (field === "data") {
-      dataLines.push(value);
-      hasField = true;
-      hasData = true;
-    }
-    // `retry` / unknown fields are ignored.
+// An `id` past `MAX_CURSOR_BYTES`. Thrown by `drain` after earlier valid frames commit
+// and before the offending frame applies (never applied/committed/dropped-and-advanced).
+// The backend never emits one; the throw takes the loop's ordinary recovery path.
+export class SseCursorOverflowError extends Error {
+  constructor(public readonly bytes: number) {
+    super(`Optimize SSE cursor exceeded MAX_CURSOR_BYTES=${MAX_CURSOR_BYTES} (got ${bytes}).`);
+    this.name = "SseCursorOverflowError";
   }
-
-  if (!hasField) return null;
-  return { id, event, data: hasData ? dataLines.join("\n") : "" };
 }
 
-// Opaque-cursor tracker. Remembers the last APPLIED cursor so it can (a) supply it
-// as `Last-Event-ID` on reconnect and (b) skip an exact duplicate id. It never
-// interprets the cursor's structure.
-//
-// Duplicate detection and cursor commit are deliberately SEPARATE operations. The
-// cursor advances only via `commit(frame)`, which callers invoke strictly AFTER the
-// frame has been fully applied (cache write + all consumer callbacks). If
-// application throws, the cursor is not advanced, so reconnect resends the prior
-// cursor and the failed event is replayed and reapplied — no silent durable loss.
-export class CursorTracker {
+// One synchronously-parsed item, in emission order: an adapted frame with its checked
+// cursor, or a cursor-boundary violation deferred to `drain` (never thrown in the callback).
+type CollectedItem =
+  | { kind: "frame"; frame: SseFrame; cursor: string | null }
+  | { kind: "cursor-error"; error: SseCursorOverflowError };
+
+// Adapt one library message WITHOUT throwing (oversized `id` → deferred `cursor-error`).
+function adaptMessage(message: EventSourceMessage): CollectedItem {
+  const id = message.id ?? null;
+  const frame: SseFrame = { id, event: message.event ?? "message", data: message.data };
+  if (id === null) return { kind: "frame", frame, cursor: null };
+  const cursor = checkCursor(id);
+  if (cursor === null)
+    return { kind: "cursor-error", error: new SseCursorOverflowError(utf8ByteLength(id)) };
+  return { kind: "frame", frame, cursor };
+}
+
+// The opaque resume-cursor handle held across reconnects; only `reset` (to the retained
+// floor) is public, and `createResumeCursor` is the sole constructor.
+export type ResumeCursor = { reset(): void };
+
+// Module-private: it holds only `checkCursor`-validated values, so `lastEventId` (the
+// replayed header) is always within cap and `commit` is infallible. The transport verifies
+// handle identity by `instanceof`, so a forged `ResumeCursor` cannot substitute a raw cursor.
+class CursorTracker implements ResumeCursor {
   private lastId: string | null;
 
-  constructor(initial: string | null = null) {
+  constructor(initial: string | null) {
     this.lastId = initial;
   }
 
-  // The last applied cursor, sent as `Last-Event-ID` on reconnect (null → none).
   get lastEventId(): string | null {
     return this.lastId;
   }
 
-  // Discard the saved cursor so the next connection resumes from the retained
-  // floor. Used after `event_cursor_expired` / `invalid_event_cursor` recovery.
   reset(): void {
     this.lastId = null;
   }
 
-  // Whether this frame is an exact duplicate of the last applied cursor. An id-less
-  // frame is never a duplicate (nothing to compare); this performs NO commit.
-  isDuplicate(frame: SseFrame): boolean {
-    return frame.id !== null && frame.id === this.lastId;
+  isDuplicate(cursor: string | null): boolean {
+    return cursor !== null && cursor === this.lastId;
   }
 
-  // Advance the cursor to this frame's id. Call ONLY after the frame has been fully
-  // applied. An id-less frame leaves the cursor unchanged.
-  commit(frame: SseFrame): void {
-    if (frame.id !== null) this.lastId = frame.id;
+  commit(cursor: string): void {
+    this.lastId = cursor;
   }
+}
+
+// Build a resume-cursor handle from a restored cursor, validating it at RUNTIME: an
+// oversized value is rejected (never seeded as a header) and reported via `rejected` so
+// the caller routes it through explicit invalid-cursor recovery.
+export function createResumeCursor(initial: string | null): {
+  cursor: ResumeCursor;
+  rejected: boolean;
+} {
+  const rejected = initial !== null && checkCursor(initial) === null;
+  return { cursor: new CursorTracker(rejected ? null : initial), rejected };
 }
 
 export type StreamOutcome =
@@ -125,40 +99,35 @@ export type StreamOutcome =
 
 export interface StreamOptions {
   signal: AbortSignal;
-  tracker: CursorTracker;
-  // May be async: the cursor commits only AFTER this resolves, so per-frame
-  // reconciliation (poll + cache replace) of a malformed durable payload completes
-  // before the cursor advances. A rejection leaves the cursor at the prior id.
+  tracker: ResumeCursor;
+  // May be async: the cursor commits only AFTER this resolves, so per-frame reconcile of a
+  // malformed durable payload completes first. A rejection leaves the prior cursor and fences
+  // the rest of the current feed.
   onEvent: (frame: SseFrame) => void | Promise<void>;
-  // Fired with the just-committed opaque cursor, STRICTLY AFTER `onEvent` resolved
-  // (cache reconcile + consumer application) and `tracker.commit` advanced the id.
-  // It never fires when `onEvent` throws (cursor unchanged), for an exact-duplicate
-  // id (skipped before apply), or for an id-less frame (nothing committed) — so a
-  // consumer persisting the resume point stores only fully applied cursors, exactly
-  // once each. The value is opaque: never parse or compare it.
+  // Fired with the just-committed opaque cursor, STRICTLY AFTER `onEvent` resolved and the id
+  // advanced. Never on a throw, an exact duplicate, or an id-less frame — so a resume-point
+  // consumer stores only fully applied cursors, once each. Opaque.
   onCommit?: (cursor: string) => void;
-  // Strict terminal source evidence, emitted before cache/consumer application and
-  // cursor commit. This survives an abort that wins after the frame was parsed.
+  // Strict terminal source evidence, emitted before application/commit (survives a late abort).
   onTerminalObserved?: (frame: StrictTerminalFrame) => void;
 }
 
-// A `job.state_changed` frame whose FULLY VALIDATED payload marks the lifecycle
-// terminal is the in-stream terminal signal (there is no terminal event NAME
-// anymore). Terminal recognition reuses the same strict parser as cache
-// application: a semantically invalid state/error/queue payload — even one bearing
-// `terminal: true` — is NOT trusted to close the stream. It reconciles (poll)
-// instead, and true terminality is then observed via the authoritative poll.
-// Connect once, parse frames, dispatch only NEW frames (exact-duplicate dedupe by
-// cursor), and report the outcome. The last applied cursor is sent as
-// `Last-Event-ID` so the BFF forwards it upstream for replay. Non-2xx returns
-// `error-response` (so the caller can classify expired/invalid cursor vs gone job
-// vs 5xx) rather than throwing; a network/read failure throws.
+// Connect once, adapt and dispatch only NEW frames (exact-duplicate dedupe), and report the
+// outcome. A `job.state_changed` with a FULLY VALIDATED terminal payload is the in-stream
+// terminal signal; a semantically invalid one (even bearing `terminal: true`) is reconciled
+// (poll), never trusted to close. A non-2xx returns `error-response`; a read failure throws.
 export async function streamOptimizeEvents(
   url: string,
   options: StreamOptions,
 ): Promise<StreamOutcome> {
+  // Reject a forged structural handle by RUNTIME IDENTITY before any fetch/header: only the
+  // module-private `CursorTracker` passes `instanceof`, which also narrows the type (no cast).
+  if (!(options.tracker instanceof CursorTracker)) {
+    throw new TypeError("streamOptimizeEvents requires a ResumeCursor from createResumeCursor().");
+  }
+  const tracker = options.tracker;
   const headers: Record<string, string> = { accept: "text/event-stream" };
-  const cursor = options.tracker.lastEventId;
+  const cursor = tracker.lastEventId;
   if (cursor !== null) headers[LAST_EVENT_ID_HEADER] = cursor;
 
   const response = await fetch(url, {
@@ -175,29 +144,59 @@ export async function streamOptimizeEvents(
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
-  const parser = createSseParser();
+
+  // `eventsource-parser` invokes `onEvent` inline during `feed()`, so we buffer the
+  // synchronously-emitted items in emission order and drain them (async apply + commit)
+  // afterward. The callback never throws, so a late oversized cursor cannot starve an earlier one.
+  const collected: CollectedItem[] = [];
+  const parser = createParser({
+    onEvent(message) {
+      collected.push(adaptMessage(message));
+    },
+  });
+
+  // Drain in emission order: apply/commit each valid frame (skipping duplicates, surfacing
+  // terminal proof); a deferred cursor error throws AFTER every earlier frame committed and
+  // BEFORE the offending frame applies, so all later items are ignored. Abort/revocation
+  // fencing is the awaited `onEvent`'s job (the wrapped loop supplies it via `canApplyFrame`,
+  // so the raw signal is not consulted here — see `event-stream.ts`).
+  const drain = async (): Promise<StreamOutcome | null> => {
+    for (const item of collected) {
+      if (item.kind === "cursor-error") throw item.error;
+      const { frame, cursor } = item;
+      if (tracker.isDuplicate(cursor)) continue; // exact-duplicate id
+      const terminal = parseStrictTerminalFrame(frame);
+      if (terminal !== null) options.onTerminalObserved?.(terminal);
+      // Apply (reconciling a malformed durable payload) BEFORE committing; a
+      // throw/reject leaves the prior cursor, so reconnect replays it.
+      await options.onEvent(frame);
+      if (cursor !== null) {
+        tracker.commit(cursor); // validated by `checkCursor` before application
+        options.onCommit?.(cursor);
+      }
+      if (terminal !== null) return { type: "terminal", frame: terminal };
+    }
+    return null;
+  };
 
   try {
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
+      collected.length = 0;
+      parser.feed(decoder.decode(value, { stream: true }));
+      const outcome = await drain();
+      if (outcome !== null) return outcome;
+    }
 
-      for (const frame of parser.push(decoder.decode(value, { stream: true }))) {
-        if (options.tracker.isDuplicate(frame)) continue; // exact-duplicate id
-        const terminal = parseStrictTerminalFrame(frame);
-        if (terminal !== null) options.onTerminalObserved?.(terminal);
-        // Apply (and reconcile, if the durable payload was malformed) BEFORE
-        // committing the cursor. If `onEvent` throws/rejects — a cache, consumer, or
-        // reconcile-poll failure — the cursor stays at the prior id so reconnect
-        // replays and reapplies this exact frame instead of skipping it.
-        await options.onEvent(frame);
-        options.tracker.commit(frame);
-        // Post-commit: notify only when a real cursor advanced (id-less frames commit
-        // nothing). Fires after apply + commit, so a persisted resume point never runs
-        // ahead of a frame the cache/consumer actually received.
-        if (frame.id !== null) options.onCommit?.(frame.id);
-        if (terminal !== null) return { type: "terminal", frame: terminal };
-      }
+    // Final flush emits any withheld trailing multibyte sequence; an unterminated final
+    // record is NOT dispatched (SSE needs a blank line).
+    const flushed = decoder.decode();
+    if (flushed.length > 0) {
+      collected.length = 0;
+      parser.feed(flushed);
+      const outcome = await drain();
+      if (outcome !== null) return outcome;
     }
   } finally {
     reader.cancel().catch(() => {});

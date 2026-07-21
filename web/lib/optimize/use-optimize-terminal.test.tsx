@@ -9,6 +9,7 @@ import {
 } from "./use-optimize-terminal";
 import type { OptimizeCleanupOutcome } from "./session-recovery";
 import type { RunActivation } from "./use-optimize-run";
+import { MAX_DISPLAY_FILENAME_BYTES } from "@/lib/query/sse-limits";
 
 afterEach(() => cleanup());
 
@@ -114,6 +115,37 @@ describe("useOptimizeTerminal — completed with artifact", () => {
     expect(notify.cleanup).toHaveBeenCalledWith("cleaned");
     expect(result.current.canDownloadAgain).toBe(true);
     expect(result.current.downloadAgainFilename).toBe("schedule.xlsx");
+  });
+
+  it("uses the AUTHORITATIVE filename for the immediate download but retains only the bounded display copy", async () => {
+    // The backend stores upload names verbatim (uncapped). A pathological
+    // multi-KiB filename must not pin unbounded memory in the retained React/ref
+    // state, yet the FIRST browser download must save under the exact server name.
+    const huge = "n".repeat(MAX_DISPLAY_FILENAME_BYTES + 500) + ".xlsx";
+    const utf8 = (s: string) => new TextEncoder().encode(s).length;
+    const fetchXlsx = vi.fn(async () => ({ blob: xlsxBlob, filename: huge }));
+    const restored = new Blob(["restored"], { type: "x" });
+    const restore = vi.fn(async () => restored);
+    const saveBlob = vi.fn();
+    const deleteJob = vi.fn(async (): Promise<CleanupCallOutcome> => ({ status: "confirmed" }));
+
+    const { result, rerender } = render(
+      { controller: undefined as never, fetchXlsx, restore, saveBlob, deleteJob },
+      INITIAL_OPTIMIZE_RUN_VIEW,
+      activation({ anonymized: true, reverseMap: [["P1", 1]], peopleCount: 1 }),
+    );
+    rerender({
+      view: completedView("opt_1", true),
+      act: activation({ anonymized: true, reverseMap: [["P1", 1]], peopleCount: 1 }),
+    });
+
+    await waitFor(() => expect(result.current.cleanupPhase).toBe("cleaned"));
+    // Immediate download: exact authoritative filename (never truncated).
+    expect(saveBlob).toHaveBeenCalledWith(restored, huge);
+    // Retained display + run-view notification: bounded UTF-8-safe copy only.
+    expect(utf8(result.current.downloadAgainFilename!)).toBe(MAX_DISPLAY_FILENAME_BYTES);
+    expect(notify.succeeded).toHaveBeenCalledTimes(1);
+    expect(utf8(notify.succeeded.mock.calls[0][0])).toBe(MAX_DISPLAY_FILENAME_BYTES);
   });
 
   it("keeps the plain download byte-path unchanged (same blob saved)", async () => {

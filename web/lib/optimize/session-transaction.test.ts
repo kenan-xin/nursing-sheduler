@@ -3,6 +3,7 @@ import type { PeopleReverseMap } from "@/lib/scenario";
 import {
   activateSession,
   buildProvisionalSession,
+  clearInvalidActiveCursor,
   forgetInspectedSession,
   inspectPersistedSession,
   FORGET_OPTIMIZE_SESSION_WARNING,
@@ -938,5 +939,82 @@ describe("updateActiveCursor — job-scoped, validated, verified cursor persiste
     const typed = new FakeStorage();
     typed.seed(JSON.stringify({ ...JSON.parse(validActiveJson("job-1")), lastCursor: 5 }));
     expect(inspectPersistedSession(typed).kind).toBe("unreadable");
+  });
+
+  // Cursor byte invariant (`sse-record-byte-bounds` P1 #4): an oversized opaque
+  // cursor is a protocol violation at BOTH the durable write and the reload
+  // decode seams — never persisted, never reloaded and re-sent as a header.
+  it("refuses to persist an oversized cursor (write seam, defense-in-depth)", () => {
+    const storage = new FakeStorage();
+    seedActive(storage);
+    const oversized = "c".repeat(4096 + 1); // > MAX_CURSOR_BYTES
+    const outcome = updateActiveCursor(storage, "job-1", oversized);
+    // `rejected` (cursor refused, record healthy) — NOT `stale` (record gone),
+    // which would wrongly trigger a refresh. Coherent, visible, non-fatal.
+    expect(outcome.status).toBe("rejected"); // not written
+    const stored = JSON.parse(storage.raw(KEY)!);
+    expect("lastCursor" in stored).toBe(false); // the poison cursor never landed
+  });
+
+  // Persisted-recovery classification (`cursor-seam-and-feed-order` P1 #2): an
+  // otherwise-valid active session whose ONLY defect is an oversized saved cursor
+  // must enter explicit invalid-cursor RECOVERY (resumable, cursor stripped) rather
+  // than the generic unreadable/Forget flow — while every other corruption stays
+  // unreadable.
+  it("classifies an oversized-cursor active record as resumable+cursorReset with the cursor stripped", () => {
+    const oversized = "c".repeat(4096 + 1);
+    const storage = new FakeStorage();
+    storage.seed(
+      JSON.stringify({ ...JSON.parse(validActiveJson("job-1")), lastCursor: oversized }),
+    );
+    const inspected = inspectPersistedSession(storage);
+    expect(inspected.kind).toBe("resumable");
+    if (inspected.kind !== "resumable") throw new Error("unreachable");
+    expect(inspected.cursorReset).toBe(true);
+    expect(inspected.record.jobId).toBe("job-1"); // identity preserved
+    expect("lastCursor" in inspected.record).toBe(false); // the poison cursor is stripped
+  });
+
+  it("keeps a SECOND defect alongside an oversized cursor generically unreadable", () => {
+    const oversized = "c".repeat(4096 + 1);
+    const storage = new FakeStorage();
+    // Oversized cursor AND an invalid schema version: not the recoverable case.
+    storage.seed(
+      JSON.stringify({
+        ...JSON.parse(validActiveJson("job-1")),
+        schemaVersion: 999,
+        lastCursor: oversized,
+      }),
+    );
+    expect(inspectPersistedSession(storage).kind).toBe("unreadable");
+  });
+
+  it("clearInvalidActiveCursor durably rewrites the record cursor-less (verified), so a reload is clean", () => {
+    const oversized = "c".repeat(4096 + 1);
+    const storage = new FakeStorage();
+    storage.seed(
+      JSON.stringify({ ...JSON.parse(validActiveJson("job-1")), lastCursor: oversized }),
+    );
+    const outcome = clearInvalidActiveCursor(storage, "job-1");
+    expect(outcome.status).toBe("cleared");
+    const stored = JSON.parse(storage.raw(KEY)!);
+    expect("lastCursor" in stored).toBe(false); // durably dropped
+    // A subsequent reload now sees a clean resumable record (no re-recovery).
+    const reinspected = inspectPersistedSession(storage);
+    expect(reinspected.kind).toBe("resumable");
+    if (reinspected.kind !== "resumable") throw new Error("unreachable");
+    expect(reinspected.cursorReset ?? false).toBe(false);
+  });
+
+  it("clearInvalidActiveCursor is a no-op for a different job or a clean record", () => {
+    const oversized = "c".repeat(4096 + 1);
+    const storage = new FakeStorage();
+    storage.seed(
+      JSON.stringify({ ...JSON.parse(validActiveJson("job-1")), lastCursor: oversized }),
+    );
+    expect(clearInvalidActiveCursor(storage, "other-job").status).toBe("none"); // job-scoped
+    const clean = new FakeStorage();
+    clean.seed(validActiveJson("job-1"));
+    expect(clearInvalidActiveCursor(clean, "job-1").status).toBe("none"); // nothing to clear
   });
 });

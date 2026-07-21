@@ -114,10 +114,13 @@ function makeController(opts?: {
     provider?.prepare(input.jobId, input.activation.reloadRecoveryAvailable);
     return { status: "attached", jobId: input.jobId };
   });
+  // Emits a reset signal only against the exact live attachment (no re-attach).
+  const notifyInvalidCursorReset = vi.fn((jobId: string): boolean => jobId === live);
   return {
     controller: {
       attachRecoveredSession: attach,
       getLiveJobId: () => live,
+      notifyInvalidCursorReset,
       registerCursorPersistence: (p: CursorPersistenceProvider): (() => void) => {
         provider = p;
         if (live !== null) p.prepare(live, true);
@@ -130,6 +133,7 @@ function makeController(opts?: {
       revokeCursorPersistence: (jobId: string): void => provider?.revoke(jobId),
     },
     attach,
+    notifyInvalidCursorReset,
     getProvider: () => provider,
     setLive: (jobId: string | null) => {
       live = jobId;
@@ -216,6 +220,202 @@ describe("useOptimizeSessionRecovery — boot interpretation + auto-resume", () 
 
     rerender();
     expect(c.attach).toHaveBeenCalledTimes(1);
+  });
+
+  it("boots a persisted active session with an oversized cursor into invalid-cursor recovery: clears the cursor, resumes from the floor, no Forget", () => {
+    // The real persisted-restore path (`cursor-seam-and-feed-order` P1 #2): an
+    // otherwise-valid active record whose saved cursor is oversized must resume the
+    // job — cursor cleared through the verified seam, attach from the retained floor,
+    // and the explicit invalid-cursor reset flag set — NOT become a manual Forget.
+    const storage = new FakeStorage();
+    seedActive(storage, { lastCursor: "c".repeat(4096 + 1) });
+    const c = makeController();
+
+    const { result } = renderHook(() => useOptimizeSessionRecovery(c.controller, { storage }));
+
+    expect(c.attach).toHaveBeenCalledTimes(1);
+    const attachment = c.attach.mock.calls[0][0];
+    expect(attachment.jobId).toBe("job-1"); // identity preserved
+    expect(attachment.initialCursor).toBeNull(); // resume from the retained floor
+    expect(attachment.invalidCursorReset).toBe(true); // explicit invalid-cursor recovery
+    // The oversized cursor is durably cleared, so a later reload sees a clean record.
+    expect("lastCursor" in JSON.parse(storage.raw()!)).toBe(false);
+    // The session resumed — it is NOT surfaced as unreadable/Forget.
+    expect(result.current.state.kind).toBe("resumable");
+    expect(result.current.resume).toEqual({ status: "attached", jobId: "job-1" });
+  });
+
+  // P1 #2 (runtime-boundary-and-clear-outcome): boot must BRANCH on the durable clear
+  // result — never attach + claim recovery when the poison cursor was not actually removed.
+  const OVERSIZED = "c".repeat(4096 + 1);
+
+  it("boot: clear returns `none` (record changed since inspect) — re-inspects and follows the CURRENT classification, never a stale attach", () => {
+    const storage = new FakeStorage();
+    const poison = JSON.stringify(activeRecord({ jobId: "job-1", lastCursor: OVERSIZED }));
+    const clean = JSON.stringify(activeRecord({ jobId: "job-1" })); // no cursor now
+    let calls = 0;
+    // inspect reads the poison; by the time the clear (and re-inspect) read, the record
+    // has been replaced by a clean cursorless active record for the same job.
+    storage.onGet = () => {
+      calls += 1;
+      return calls === 1 ? poison : clean;
+    };
+    const c = makeController();
+
+    const { result } = renderHook(() => useOptimizeSessionRecovery(c.controller, { storage }));
+
+    expect(c.attach).toHaveBeenCalledTimes(1);
+    const attachment = c.attach.mock.calls[0][0];
+    expect(attachment.jobId).toBe("job-1");
+    // Attaches the RE-INSPECTED clean record (its own state), NOT the stale poison record,
+    // and NOT as an invalid-cursor reset.
+    expect(attachment.invalidCursorReset ?? false).toBe(false);
+    expect(attachment.initialCursor).toBeNull();
+    expect(result.current.state.kind).toBe("resumable");
+  });
+
+  const poison = (job: string): string =>
+    JSON.stringify(activeRecord({ jobId: job, lastCursor: OVERSIZED }));
+
+  it("boot: already-live poisoned record — verified clear runs anyway, ONE exact-job reset signal, no second transport, truthful durability", () => {
+    const storage = new FakeStorage();
+    seedActive(storage, { lastCursor: OVERSIZED });
+    const c = makeController({ live: "job-1" }); // the matching job is already live
+
+    const { result } = renderHook(() => useOptimizeSessionRecovery(c.controller, { storage }));
+
+    // The verified clear runs BEFORE the same-live shortcut: the durable poison is removed.
+    expect("lastCursor" in JSON.parse(storage.raw()!)).toBe(false);
+    // Exactly one exact-job invalid-cursor reset signal, and NO re-attach (no second stream).
+    expect(c.notifyInvalidCursorReset).toHaveBeenCalledTimes(1);
+    expect(c.notifyInvalidCursorReset).toHaveBeenCalledWith("job-1");
+    expect(c.attach).not.toHaveBeenCalled();
+    // Truthful durable recovery for the already-live job.
+    expect(result.current.resume).toEqual({ status: "attached", jobId: "job-1" });
+    expect(result.current.state.kind).toBe("resumable");
+  });
+
+  it("boot: `none` replacement is ANOTHER invalid-cursor job — treats it as the new authority (verified clear + attach)", () => {
+    const storage = new FakeStorage();
+    storage.seed(poison("job-2")); // the CURRENT record after the race
+    let firstRead = true;
+    storage.onGet = () => {
+      if (firstRead) {
+        firstRead = false;
+        return poison("job-1"); // the initial inspection sees the OLD job-1 poison
+      }
+      storage.onGet = null; // everything after uses the real store (job-2 poison)
+      return storage.raw();
+    };
+    const c = makeController();
+
+    const { result } = renderHook(() => useOptimizeSessionRecovery(c.controller, { storage }));
+
+    // job-1's clear returns `none`; the re-inspection processes job-2 as the new authority,
+    // verifies ITS clear, and attaches it as an invalid-cursor reset from the floor.
+    expect(c.attach).toHaveBeenCalledTimes(1);
+    const attachment = c.attach.mock.calls[0][0];
+    expect(attachment.jobId).toBe("job-2");
+    expect(attachment.invalidCursorReset).toBe(true);
+    expect(attachment.initialCursor).toBeNull();
+    expect("lastCursor" in JSON.parse(storage.raw()!)).toBe(false); // job-2 poison durably cleared
+    expect(result.current.resume).toEqual({ status: "attached", jobId: "job-2" });
+  });
+
+  it("boot: `none` replacement is ABSENT — no attach, state none", () => {
+    const storage = new FakeStorage();
+    let calls = 0;
+    storage.onGet = () => {
+      calls += 1;
+      return calls === 1 ? poison("job-1") : null; // record vanished after inspect
+    };
+    const c = makeController();
+
+    const { result } = renderHook(() => useOptimizeSessionRecovery(c.controller, { storage }));
+
+    expect(c.attach).not.toHaveBeenCalled();
+    expect(result.current.state.kind).toBe("none");
+    expect(result.current.resume).toBeNull();
+  });
+
+  it("boot: `none` replacement has a SECOND defect — no attach, state unreadable", () => {
+    const storage = new FakeStorage();
+    const secondDefect = JSON.stringify({ ...JSON.parse(poison("job-1")), schemaVersion: 999 });
+    let calls = 0;
+    storage.onGet = () => {
+      calls += 1;
+      return calls === 1 ? poison("job-1") : secondDefect; // oversized cursor AND bad version
+    };
+    const c = makeController();
+
+    const { result } = renderHook(() => useOptimizeSessionRecovery(c.controller, { storage }));
+
+    expect(c.attach).not.toHaveBeenCalled();
+    expect(result.current.state.kind).toBe("unreadable");
+    expect(result.current.resume).toBeNull();
+  });
+
+  it("boot: record changes AGAIN during a re-inspected invalid-cursor clear — explicit visible conflict, no attach or loop", () => {
+    const storage = new FakeStorage();
+    const seq = [poison("job-1"), poison("job-2"), poison("job-2"), poison("job-3")];
+    let i = 0;
+    storage.onGet = () => seq[Math.min(i++, seq.length - 1)];
+    const c = makeController();
+
+    const { result } = renderHook(() => useOptimizeSessionRecovery(c.controller, { storage }));
+
+    expect(c.attach).not.toHaveBeenCalled();
+    expect(c.notifyInvalidCursorReset).not.toHaveBeenCalled();
+    // Surfaced as an explicit visible conflict — NOT a stuck resumable+null or a loop.
+    expect(result.current.resume?.status).toBe("conflict");
+    expect(result.current.state.kind).toBe("resumable"); // resumable + conflict → RecoveryNotice error
+  });
+
+  it("boot: `unverified` clear (durable WRITE fails) fails closed — no attach, storage-error state, poison retained", () => {
+    const storage = new FakeStorage();
+    seedActive(storage, { lastCursor: OVERSIZED });
+    storage.onSet = () => securityError(); // the verified clear's write throws
+    const c = makeController();
+
+    const { result } = renderHook(() => useOptimizeSessionRecovery(c.controller, { storage }));
+
+    expect(c.attach).not.toHaveBeenCalled(); // fail closed — never attach on an unverified clear
+    expect(result.current.state.kind).toBe("storage-error"); // visible, not a healthy-reload claim
+    expect(result.current.resume).toBeNull();
+    expect("lastCursor" in JSON.parse(storage.raw()!)).toBe(true); // poison NOT durably removed
+  });
+
+  it("boot: `unverified` clear (READ-BACK mismatch) fails closed — no attach, storage-error state", () => {
+    const storage = new FakeStorage();
+    seedActive(storage, { lastCursor: OVERSIZED });
+    storage.onSet = () => {}; // swallow the write, so the read-back still sees the poison record
+    const c = makeController();
+
+    const { result } = renderHook(() => useOptimizeSessionRecovery(c.controller, { storage }));
+
+    expect(c.attach).not.toHaveBeenCalled();
+    expect(result.current.state.kind).toBe("storage-error");
+    expect(result.current.resume).toBeNull();
+    expect("lastCursor" in JSON.parse(storage.raw()!)).toBe(true);
+  });
+
+  it("boot: `unverified` clear (storage READ failure) fails closed — no attach, storage-error state", () => {
+    const storage = new FakeStorage();
+    const poison = JSON.stringify(activeRecord({ jobId: "job-1", lastCursor: OVERSIZED }));
+    let calls = 0;
+    // inspect reads the poison; the clear's own read then fails (private-mode/security).
+    storage.onGet = () => {
+      calls += 1;
+      if (calls >= 2) return securityError();
+      return poison;
+    };
+    const c = makeController();
+
+    const { result } = renderHook(() => useOptimizeSessionRecovery(c.controller, { storage }));
+
+    expect(c.attach).not.toHaveBeenCalled();
+    expect(result.current.state.kind).toBe("storage-error");
+    expect(result.current.resume).toBeNull();
   });
 
   it("does NOT re-attach when the controller is already live for the record (idempotent)", () => {
