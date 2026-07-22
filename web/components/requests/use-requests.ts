@@ -394,9 +394,24 @@ export function useRequests({
 
   function applyRequestsCsv(deltas: ShiftRequestDelta[], weight: number): void {
     if (deltas.length === 0) return;
+    // The CSV delta carries a STRINGIFIED person id (built in `requests-editor.tsx`
+    // via `state.staff.map(p => String(p.id))`), but the matrix, manual edits, and
+    // quick-paint all key coordinates by the real typed `PersonRef` under strict
+    // `===`. Resolve each stringified id back to its typed id before staging so a
+    // numeric-id person's imported cell lands on the same coordinate it renders,
+    // merges, and clears at — the inverse of `applyHistoryCsv` (which maps from
+    // entries and iterates staff). (Shares the accepted numeric-vs-string
+    // `String(p.id)` collision caveat.)
+    const typedIdByString = new Map<string, PersonRef>(
+      useScenarioStore.getState().staff.map((p) => [String(p.id), p.id]),
+    );
     const hot = useHotStore.getState();
     hot.beginPaint();
-    for (const d of deltas) hot.stagePaintRequestDelta(d.personId, d.dateId, d.shiftType, weight);
+    for (const d of deltas) {
+      const person = typedIdByString.get(d.personId);
+      if (person === undefined) continue;
+      hot.stagePaintRequestDelta(person, d.dateId, d.shiftType, weight);
+    }
     commitPaintGesture(useScenarioStore, useHotStore);
   }
 

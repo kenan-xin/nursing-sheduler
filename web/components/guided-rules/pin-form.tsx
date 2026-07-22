@@ -87,6 +87,11 @@ export function PinForm({ records, initial, onCancel, onSubmit }: PinFormProps) 
 
   const selected = records.find((r) => `${r.kind}:${r.constraintId}` === selectedKey);
 
+  // The record `<select>` is disabled in edit mode, so `selectedKey` only ever
+  // changes in add mode. Guard the reset below against the first render, which
+  // would otherwise clobber the edit-mode init `useState(initial?.pin.quickFields)`.
+  const didMountRef = React.useRef(false);
+
   // Roving tabindex for the category radiogroup (WAI-ARIA APG radio pattern):
   // only the checked chip is a Tab stop; arrow keys move both the selection
   // and focus among the rest, wrapping at the ends.
@@ -105,10 +110,17 @@ export function PinForm({ records, initial, onCancel, onSubmit }: PinFormProps) 
   }
 
   React.useEffect(() => {
-    // Selecting a different record resets the field selection to that record's
-    // own set — a stale key from a previously-selected record must never carry
-    // over (a different kind's fields rarely share the same key by coincidence,
-    // but nothing should be assumed).
+    // Skip the very first run: on mount `selectedKey` reflects `initial`, so
+    // resetting here would wipe the edit-mode init `initial?.pin.quickFields`.
+    // From then on, selecting a different record (add mode only — the select is
+    // disabled when editing) resets the field selection to that record's own
+    // set — a stale key from a previously-selected record must never carry over
+    // (a different kind's fields rarely share the same key by coincidence, but
+    // nothing should be assumed).
+    if (!didMountRef.current) {
+      didMountRef.current = true;
+      return;
+    }
     setQuickFields([]);
   }, [selectedKey]);
 
@@ -132,7 +144,12 @@ export function PinForm({ records, initial, onCancel, onSubmit }: PinFormProps) 
               const next = e.target.value;
               setSelectedKey(next);
               const record = records.find((r) => `${r.kind}:${r.constraintId}` === next);
-              if (record && !title.trim()) setTitle(record.label);
+              // Re-sync the rule name to the newly selected record's label on
+              // every switch — not only when blank. Gating on `!title.trim()`
+              // let a stale auto-filled label survive a picker switch, so submit
+              // renamed the wrong constraint. The select is disabled in edit
+              // mode, so overwriting here only affects add mode.
+              if (record) setTitle(record.label);
             }}
             disabled={Boolean(initial)}
             className="h-10 w-full border border-line bg-surface px-3 text-body text-ink disabled:opacity-60"

@@ -10,6 +10,7 @@ import {
   useHotStore,
   useScenarioStore,
 } from "@/lib/store";
+import type { ShiftRequestDelta } from "./requests-csv";
 import { useRequests } from "./use-requests";
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
@@ -108,5 +109,85 @@ describe("useRequests — quick-paint history gesture", () => {
     fireEvent.mouseUp(window);
     expect(staffHistory("Aisha")).toEqual(["AM"]);
     expect(useScenarioStore.temporal.getState().pastStates.length - before).toBe(1);
+  });
+});
+
+describe("useRequests — Requests-CSV import preserves typed person identity (P1)", () => {
+  // An imported scenario can carry a NUMERIC person id (UI-created ids are
+  // strings, so only imported/loaded scenarios hit this). The CSV delta always
+  // carries a STRINGIFIED person id; the matrix, quick-paint, and clear all key
+  // by the real typed `PersonRef` under strict `===`. `applyRequestsCsv` must
+  // resolve the stringified id back to the typed id before staging so the cell
+  // lands on the coordinate it renders / merges / clears at (id 0, date "01").
+  const NUMERIC_ID = 0;
+  // Range 2026-01-01..03 is a single month, so date ids are DD-formatted ("01").
+  const csvDeltas: ShiftRequestDelta[] = [
+    { personId: String(NUMERIC_ID), dateId: "01", shiftType: "AM" },
+  ];
+
+  beforeEach(() => {
+    seed({ staff: [{ id: NUMERIC_ID, history: [] }] });
+  });
+
+  function reqCellsAt(person: number, date: string) {
+    return useScenarioStore
+      .getState()
+      .reqData.filter((c) => c.person === person && c.date === date);
+  }
+
+  it("stages the imported cell under the TYPED numeric id, so it resolves in the matrix", () => {
+    const { result } = renderHook(() =>
+      useRequests({ quickPaintSelectedIds: [], quickPaintWeightText: "0" }),
+    );
+    act(() => result.current.applyRequestsCsv(csvDeltas, 5));
+
+    // The bug staged the STRING "0" (a coordinate the matrix, keyed by the typed
+    // number 0 under `===`, never resolves). Assert both the strict identity and
+    // the runtime type so a regression to the stringified id is caught.
+    const cells = reqCellsAt(NUMERIC_ID, "01");
+    expect(cells).toHaveLength(1);
+    expect(cells[0]).toMatchObject({ kind: "request", shiftType: "AM", weight: 5 });
+    expect(typeof cells[0].person).toBe("number");
+    // No phantom string-keyed row survives.
+    expect(useScenarioStore.getState().reqData.some((c) => (c.person as unknown) === "0")).toBe(
+      false,
+    );
+  });
+
+  it("merges the imported cell with a later manual quick-paint on the same person/date", () => {
+    const { result, rerender } = renderHook(
+      ({ ids }: { ids: string[] }) =>
+        useRequests({ quickPaintSelectedIds: ids, quickPaintWeightText: "3" }),
+      { initialProps: { ids: [] as string[] } },
+    );
+    act(() => result.current.applyRequestsCsv(csvDeltas, 5));
+
+    // A manual quick-paint of PM at the SAME typed coordinate must merge onto the
+    // imported AM cell (commitPaintGesture folds by coordinate key). Under the bug
+    // the import sat at the string "0" key, so this landed at a separate coordinate
+    // and never merged.
+    rerender({ ids: ["PM"] });
+    act(() => result.current.onCellPointerDown(NUMERIC_ID, "01"));
+    fireEvent.mouseUp(window);
+
+    const cells = reqCellsAt(NUMERIC_ID, "01");
+    expect(cells.map((c) => (c.kind === "request" ? c.shiftType : c.kind)).sort()).toEqual([
+      "AM",
+      "PM",
+    ]);
+  });
+
+  it("removes the imported cell via an INDIVIDUAL-scoped clear (not only a group clear)", () => {
+    const { result } = renderHook(() =>
+      useRequests({ quickPaintSelectedIds: [], quickPaintWeightText: "0" }),
+    );
+    act(() => result.current.applyRequestsCsv(csvDeltas, 5));
+    expect(reqCellsAt(NUMERIC_ID, "01")).toHaveLength(1);
+
+    // individual-person + individual-date is the scope that classifies the cell by
+    // typed-id membership. Under the bug the string "0" was absent from the typed
+    // `individualPersonIds` set, so the cell was misread as a group and survived.
+    act(() => result.current.clearRequestsByShape("individual", "individual"));
+    expect(reqCellsAt(NUMERIC_ID, "01")).toHaveLength(0);
   });
 });
