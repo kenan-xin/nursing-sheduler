@@ -172,6 +172,14 @@ _SHIFT_TYPE_COEFFICIENT_FIELDS = ("shiftTypeCoefficients", "countShiftTypeCoeffi
 _DATE_REFERENCE_FIELDS = ("date", "countDates")
 
 
+# `workspaceVersion` is the file-format contract number for saved scheduling
+# documents — deliberate and rarely bumped, distinct from build provenance
+# (appVersion/backendVersion). Bump only on a breaking format change, and keep
+# every prior version routable. The frontend mirrors this as `WORKSPACE_VERSION`.
+CURRENT_WORKSPACE_VERSION = 1
+SUPPORTED_WORKSPACE_VERSIONS = frozenset({CURRENT_WORKSPACE_VERSION})
+
+
 class WorkspaceSchedulingDataV1(BaseModel):
     """Flat superset of the strict scheduling document preserving authoring state.
 

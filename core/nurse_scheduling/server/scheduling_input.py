@@ -35,7 +35,7 @@ from .scheduling_errors import (
     SchedulingIssue,
     invalid_scheduling_data,
 )
-from .workspace import convert_workspace_to_strict
+from .workspace import SUPPORTED_WORKSPACE_VERSIONS, convert_workspace_to_strict
 
 
 # The rebuild server exposes exactly one solver. A missing/default selector maps
@@ -104,7 +104,7 @@ def _validate_workspace_version(parsed: dict[str, Any]) -> NurseSchedulingData:
     version = parsed["workspaceVersion"]
     # `bool` is a subclass of `int` and `True == 1`, so booleans are excluded
     # explicitly before the integer check.
-    if not isinstance(version, bool) and isinstance(version, int) and version == 1:
+    if not isinstance(version, bool) and isinstance(version, int) and version in SUPPORTED_WORKSPACE_VERSIONS:
         return convert_workspace_to_strict(parsed)
     message = f"Unsupported workspaceVersion: {version}."
     raise SchedulingContentError(
