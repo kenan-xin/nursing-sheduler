@@ -24,9 +24,11 @@ export interface DateScopeOption {
 }
 
 export interface DateScopeItem {
-  /** The concrete date ref stored in the card. */
+  /** The concrete date ref stored in the card — always full ISO (`YYYY-MM-DD`). */
   id: string;
-  /** Day-of-month (1-31) used to interpret the specific-dates text. */
+  /** Day-of-month (1-31). Retained for interface compatibility with the five
+   *  `buildDateScopeDateItems` producers; the specific-dates text is now derived
+   *  from `id` (month-aware) so multi-month rosters don't collide on day-of-month. */
   dayOfMonth: number;
 }
 
@@ -61,7 +63,7 @@ const ALL_SCOPE = "ALL";
 /** Whether the value names a single scope chip (derived keyword or authored
  *  group). A numeric ref is never a scope — return null (custom path) without
  *  calling string-only methods on it (cold-review Major 2). */
-function activeScope(value: readonly DateRef[], authored: DateScopeOption[]): string | null {
+export function activeScope(value: readonly DateRef[], authored: DateScopeOption[]): string | null {
   if (value.length === 0) return ALL_SCOPE;
   if (value.length !== 1) return null;
   const id = value[0];
@@ -72,14 +74,51 @@ function activeScope(value: readonly DateRef[], authored: DateScopeOption[]): st
   return null;
 }
 
-/** Compact concrete date refs into the "1, 5–8, 14" specific-dates text. Numeric
- *  or unknown refs are absent from `dateItems` and so contribute nothing (they are
- *  preserved in the value, not clobbered). */
-function refsToText(value: readonly DateRef[], dateItems: DateScopeItem[]): string {
-  const byId = new Map(dateItems.map((it, index) => [it.id, { index, day: it.dayOfMonth }]));
+/** The display grammar for the specific-dates text, chosen from the roster's span.
+ *  This is a *display* choice only — every token still resolves back to the
+ *  full-ISO `it.id`. Single-month rosters keep bare `DD` (the common case, and the
+ *  pre-fix behavior); multi-month rosters qualify by month so two dates that share
+ *  a day-of-month no longer collide. */
+type DateTextFormat = "day" | "monthday" | "iso";
+
+function detectFormat(dateItems: DateScopeItem[]): DateTextFormat {
+  const years = new Set<string>();
+  const months = new Set<string>();
+  for (const it of dateItems) {
+    years.add(it.id.slice(0, 4));
+    months.add(it.id.slice(0, 7));
+  }
+  if (years.size > 1) return "iso";
+  if (months.size > 1) return "monthday";
+  return "day";
+}
+
+/** Render a full-ISO id as a token in the chosen grammar. */
+function tokenFor(id: string, format: DateTextFormat): string {
+  if (format === "iso") return id; // YYYY-MM-DD
+  if (format === "monthday") return id.slice(5); // MM-DD
+  return String(Number(id.slice(8, 10))); // bare DD, no leading zero
+}
+
+function sameRefs(a: readonly DateRef[], b: readonly DateRef[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) if (String(a[i]) !== String(b[i])) return false;
+  return true;
+}
+
+/** Compact concrete date refs into the "1, 5–8, 14" specific-dates text. Runs are
+ *  compacted by chronological adjacency (index), with both endpoints rendered in the
+ *  roster's grammar. Numeric or unknown refs are absent from `dateItems` and so
+ *  contribute nothing (they are preserved in the value, not clobbered). */
+export function refsToText(value: readonly DateRef[], dateItems: DateScopeItem[]): string {
+  const format = detectFormat(dateItems);
+  const indexById = new Map(dateItems.map((it, index) => [it.id, index]));
   const picked = value
-    .map((id) => byId.get(String(id)))
-    .filter((x): x is { index: number; day: number } => x !== undefined)
+    .map((id) => {
+      const index = indexById.get(String(id));
+      return index === undefined ? undefined : { index, id: String(id) };
+    })
+    .filter((x): x is { index: number; id: string } => x !== undefined)
     .sort((a, b) => a.index - b.index);
   if (picked.length === 0) return "";
   const parts: string[] = [];
@@ -89,7 +128,11 @@ function refsToText(value: readonly DateRef[], dateItems: DateScopeItem[]): stri
     const cur = picked[i];
     const contiguous = cur && cur.index === prev.index + 1;
     if (!contiguous) {
-      parts.push(runStart === prev ? `${runStart.day}` : `${runStart.day}–${prev.day}`);
+      parts.push(
+        runStart === prev
+          ? tokenFor(runStart.id, format)
+          : `${tokenFor(runStart.id, format)}–${tokenFor(prev.id, format)}`,
+      );
       if (cur) runStart = cur;
     }
     if (cur) prev = cur;
@@ -97,34 +140,73 @@ function refsToText(value: readonly DateRef[], dateItems: DateScopeItem[]): stri
   return parts.join(", ");
 }
 
-/** Parse the specific-dates text into concrete date refs from the range. */
-function textToRefs(text: string, dateItems: DateScopeItem[]): string[] {
-  const byDay = new Map<number, string>();
-  for (const it of dateItems) if (!byDay.has(it.dayOfMonth)) byDay.set(it.dayOfMonth, it.id);
+/** Parse the specific-dates text into concrete date refs from the range. Tokens
+ *  resolve full-ISO → `MM-DD` → bare `DD` against the roster, always keying on the
+ *  full-ISO `it.id` — never first-wins across months. Ambiguous shorter forms
+ *  (e.g. a bare day that occurs in two months) resolve to null and are dropped. */
+export function textToRefs(text: string, dateItems: DateScopeItem[]): string[] {
+  const format = detectFormat(dateItems);
+  const indexById = new Map(dateItems.map((it, i) => [it.id, i]));
+  const byIso = new Map<string, string>();
+  const byMonthDay = new Map<string, string | null>();
+  const byDay = new Map<number, string | null>();
+  for (const it of dateItems) {
+    byIso.set(it.id, it.id);
+    const md = it.id.slice(5);
+    byMonthDay.set(md, byMonthDay.has(md) ? null : it.id);
+    const day = Number(it.id.slice(8, 10));
+    byDay.set(day, byDay.has(day) ? null : it.id);
+  }
+  const resolveSingle = (tok: string): string | undefined => {
+    const t = tok.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return byIso.get(t);
+    if (/^\d{2}-\d{2}$/.test(t)) return byMonthDay.get(t) ?? undefined;
+    if (/^\d{1,2}$/.test(t)) return byDay.get(Number(t)) ?? undefined;
+    return undefined;
+  };
   const seen = new Set<string>();
   const refs: string[] = [];
-  const add = (day: number) => {
-    const id = byDay.get(day);
+  const addId = (id: string | undefined) => {
     if (id && !seen.has(id)) {
       seen.add(id);
       refs.push(id);
     }
   };
   for (const raw of text.split(",")) {
-    const token = raw.trim().replace(/[–—]/g, "-");
+    const token = raw.trim();
     if (token === "") continue;
-    const range = token.match(/^(\d{1,2})-(\d{1,2})$/);
-    if (range) {
-      const lo = Number(range[1]);
-      const hi = Number(range[2]);
-      for (let d = Math.min(lo, hi); d <= Math.max(lo, hi); d += 1) add(d);
-    } else if (/^\d{1,2}$/.test(token)) {
-      add(Number(token));
+    if (format === "day") {
+      // Single-month grammar: bare days, ranges via any dash (pre-fix behavior).
+      const norm = token.replace(/[–—]/g, "-");
+      const range = norm.match(/^(\d{1,2})-(\d{1,2})$/);
+      if (range) {
+        const lo = Number(range[1]);
+        const hi = Number(range[2]);
+        for (let d = Math.min(lo, hi); d <= Math.max(lo, hi); d += 1)
+          addId(byDay.get(d) ?? undefined);
+      } else if (/^\d{1,2}$/.test(norm)) {
+        addId(byDay.get(Number(norm)) ?? undefined);
+      }
+      continue;
+    }
+    // Month-aware grammar: ranges split on en/em-dash (or a spaced hyphen) so the
+    // hyphens inside MM-DD / YYYY-MM-DD tokens are not mistaken for a range.
+    const ends = token.split(/\s*[–—]\s*|\s+-\s+/);
+    if (ends.length === 2) {
+      const loId = resolveSingle(ends[0]);
+      const hiId = resolveSingle(ends[1]);
+      if (loId !== undefined && hiId !== undefined) {
+        let i = indexById.get(loId) ?? 0;
+        let j = indexById.get(hiId) ?? 0;
+        if (i > j) [i, j] = [j, i];
+        for (let k = i; k <= j; k += 1) addId(dateItems[k].id);
+      }
+    } else {
+      addId(resolveSingle(token));
     }
   }
   // Preserve chronological order regardless of how the text was typed.
-  const order = new Map(dateItems.map((it, i) => [it.id, i]));
-  return refs.sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
+  return refs.sort((a, b) => (indexById.get(a) ?? 0) - (indexById.get(b) ?? 0));
 }
 
 function Chip({
@@ -171,9 +253,19 @@ export function DateScopeField({
 }: DateScopeFieldProps) {
   const scope = activeScope(value, dateGroups);
   // Custom text is kept distinct from the chips: it shows only when the value is
-  // concrete dates (no scope active). Seeded once per draft from the value.
+  // concrete dates (no scope active). Seeded from the value on mount.
   const isCustom = scope === null;
   const [text, setText] = React.useState(() => (isCustom ? refsToText(value, dateItems) : ""));
+
+  // Re-sync `text` on GENUINE external `value` changes (a consumer loading a new
+  // card, switching scope, undo/redo) so the field can't desync. We must NOT
+  // clobber the field's own onCustom round-trip or in-progress typing: if the
+  // current text already parses to `value`, it's in sync — leave it. A value that
+  // is a scope (not custom) clears the text.
+  React.useEffect(() => {
+    if (isCustom && sameRefs(textToRefs(text, dateItems), value)) return;
+    setText(isCustom ? refsToText(value, dateItems) : "");
+  }, [value, dateItems, isCustom, text]);
 
   const selectScope = (id: string) => {
     setText("");
