@@ -5,7 +5,7 @@ import { expect, test, type Page } from "@playwright/test";
 // read-only `<pre>` for a textarea seeded from the same `prepareExport` YAML,
 // Apply drives the SAME `useScenarioImport` pipeline as the Upload entry point
 // (e2e/save-load-import.spec.ts) — block on V-issues, gate on
-// `classifyImportVersion`, full-state replace via `loadScenario` — and Cancel
+// `classifyLoadVersion`, full-state replace via `loadScenario` — and Cancel
 // discards the draft with no state change. Kept in its own spec file per
 // e2e/save-load-import.spec.ts's convention, to avoid colliding with the
 // concurrently growing e2e/save-load.spec.ts. Drives the real T04 store

@@ -10,7 +10,7 @@ import {
   LEAVE_SID,
   serializeScenario,
   type ImportNormalizationTarget,
-  type ImportVersionStatus,
+  type VersionConfirmStatus,
 } from "@/lib/scenario";
 
 // ---------------------------------------------------------------------------
@@ -18,8 +18,6 @@ import {
 // codebase's `getVersionWarning`; the load-integrity check never parses
 // version parts — FR-SL-20).
 // ---------------------------------------------------------------------------
-
-export type VersionConfirmStatus = Exclude<ImportVersionStatus, "match">;
 
 export interface VersionMismatchCopy {
   title: string;
@@ -54,7 +52,7 @@ export function versionMismatchCopy(
           `This YAML was created by a development build with uncommitted changes. It may not ` +
           `match a reproducible application version. If nothing breaks, you can continue.`,
       };
-    case "mismatch":
+    case "incompatible":
       return {
         title: "App version mismatch detected",
         description:
