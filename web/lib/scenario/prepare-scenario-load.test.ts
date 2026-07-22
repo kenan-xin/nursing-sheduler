@@ -176,6 +176,27 @@ describe("classifyLoadVersion — Decision A tier → load behavior", () => {
   it("normalizes an optional leading v — bare-semver file on the same line stays silent", () => {
     expect(classifyLoadVersion("0.1.5", "v0.1.9")).toBeNull();
   });
+
+  // Self-unknown-silent: if my own build can't identify itself, I can't judge any
+  // file's compatibility, so don't nag (mirrors surface (a)'s null guard).
+  it("current build unidentifiable + file has a real version → silent (null)", () => {
+    expect(classifyLoadVersion("v0.1.1", "unknown")).toBeNull();
+    expect(classifyLoadVersion("v0.1.1", "")).toBeNull();
+    expect(classifyLoadVersion("v0.1.1", "v0.0.0-unknown")).toBeNull();
+  });
+
+  it("current build unidentifiable + file missing → silent (null)", () => {
+    expect(classifyLoadVersion(undefined, "unknown")).toBeNull();
+  });
+
+  it("current build KNOWN + file missing → still 'missing' confirm (regression guard)", () => {
+    expect(classifyLoadVersion(undefined, "v0.1.1")).toBe("missing");
+  });
+
+  it("current build KNOWN + file dirty/incompatible → still confirm as before", () => {
+    expect(classifyLoadVersion("v0.1.1-5-gabc1234-dirty", "v0.1.1-5-gabc1234")).toBe("dirty");
+    expect(classifyLoadVersion("v0.2.0", "v0.1.1")).toBe("incompatible");
+  });
 });
 
 describe("prepareScenarioLoad — the no-mutation lock", () => {

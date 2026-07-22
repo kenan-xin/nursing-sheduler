@@ -17,7 +17,7 @@
 // to what `importScenarioValue` produced, so the later `loadScenario(target)` can
 // allocate its own fresh card identity without collision.
 
-import { classifyVersionCompatibility } from "@/lib/version/version-compat";
+import { classifyVersionCompatibility, isIdentifiableVersion } from "@/lib/version/version-compat";
 import { currentAppVersion } from "./app-version";
 import { projectScenarioDocument } from "./canonical";
 import { importScenarioValue, parseScenarioYaml } from "./import-scenario";
@@ -282,11 +282,18 @@ export type VersionConfirmStatus = "missing" | "dirty" | "incompatible";
  * `indeterminate` (no tag to judge) — or the confirm status for the three tiers
  * that warrant a modal. Grammar normalization (optional leading `v`) and sentinel
  * folding live in the shared util, so legacy bare-semver YAML stays comparable.
+ *
+ * Self-unknown-silent: when the current build can't identify its own version
+ * (absent / blank / unknown sentinel), we can't judge any file's compatibility,
+ * so the load is silent regardless of the file's `appVersion` — mirroring surface
+ * (a)'s not-applicable guard. A confirm still stages when the current build IS
+ * identifiable but the file lacks a version (that stays `missing`).
  */
 export function classifyLoadVersion(
   fileVersion: string | undefined,
   current: string = currentAppVersion(),
 ): VersionConfirmStatus | null {
+  if (!isIdentifiableVersion(current)) return null;
   switch (classifyVersionCompatibility(fileVersion, current)) {
     case "missing":
       return "missing";

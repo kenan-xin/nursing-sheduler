@@ -42,6 +42,15 @@ function normalizeInput(raw: string | null | undefined): string | undefined {
   return trimmed;
 }
 
+/**
+ * Whether a version string carries identifiable version info — i.e. it is not
+ * absent, blank, or one of the unknown sentinels. Shares the classifier's own
+ * sentinel/normalization logic so callers never hardcode the sentinel strings.
+ */
+export function isIdentifiableVersion(raw: string | null | undefined): boolean {
+  return normalizeInput(raw) !== undefined;
+}
+
 export function parseVersionParts(version: string): VersionParts {
   const isDirty = version.endsWith("-dirty");
   const cleanVersion = isDirty ? version.slice(0, -"-dirty".length) : version;
