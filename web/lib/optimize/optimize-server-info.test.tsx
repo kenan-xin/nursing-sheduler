@@ -52,6 +52,15 @@ describe("classifyOptimizeServerInfo", () => {
     expect(result.versionTier).toBe("dirty");
   });
 
+  it("grades an equal `-dirty` build on both sides as dirty (dirty beats identical)", () => {
+    const result = classifyOptimizeServerInfo(
+      200,
+      { status: "ready", ...identity, app_version: "1.2.3-dirty" },
+      "1.2.3-dirty",
+    );
+    expect(result.versionTier).toBe("dirty");
+  });
+
   it("treats a 503 identity report as offline but keeps its versions", () => {
     const result = classifyOptimizeServerInfo(
       503,

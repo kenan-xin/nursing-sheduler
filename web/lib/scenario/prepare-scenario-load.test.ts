@@ -161,6 +161,13 @@ describe("classifyLoadVersion — Decision A tier → load behavior", () => {
     expect(classifyLoadVersion("v0.1.1-5-gabc1234-dirty", "v0.1.1-5-gabc1234")).toBe("dirty");
   });
 
+  it("equal dirty (exactly-matching dirty file + build) → 'dirty' confirm, not a silent load", () => {
+    // Two equal `-dirty` strings do NOT prove identical code — uncommitted
+    // changes are not captured in the version string — so this must stage a
+    // confirm rather than load silently.
+    expect(classifyLoadVersion("v0.1.1-5-gabc1234-dirty", "v0.1.1-5-gabc1234-dirty")).toBe("dirty");
+  });
+
   it("incompatible (major.minor differ) → 'incompatible' confirm", () => {
     expect(classifyLoadVersion("v0.1.1", "v0.2.0")).toBe("incompatible");
     expect(classifyLoadVersion("v0.1.1", "v1.0.0")).toBe("incompatible");
