@@ -8,7 +8,18 @@ import { FaSpinner, FaWifi } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { OptimizeServerInfo } from "@/lib/optimize";
+import type { CompatibilityTier } from "@/lib/version/version-compat";
 import { Callout } from "./callout";
+
+// Passive info-line copy for the non-warning, non-silent compatibility tiers.
+// `incompatible` renders the louder warning callout below; `identical` and the
+// not-applicable (`null`) case render nothing.
+const VERSION_NOTE: Partial<Record<CompatibilityTier, string>> = {
+  compatible: "Frontend and backend are different builds on the same version line.",
+  indeterminate: "No tagged version is available to compare frontend and backend.",
+  dirty: "One side is a development build with uncommitted changes.",
+  missing: "Version information is missing, so compatibility can't be verified.",
+};
 
 export interface ServerIdentityProps {
   info: OptimizeServerInfo;
@@ -56,9 +67,13 @@ export function ServerIdentity({ info }: ServerIdentityProps) {
         version: {info.backendVersion ?? "—"}
       </p>
 
-      {info.versionMismatch ? (
+      {info.versionTier === "incompatible" ? (
         <Callout tone="warn" data-testid="optimize-version-mismatch">
           Frontend and backend versions do not match. If nothing breaks, you can continue.
+        </Callout>
+      ) : info.versionTier !== null && info.versionTier in VERSION_NOTE ? (
+        <Callout tone="info" data-testid="optimize-version-note">
+          {VERSION_NOTE[info.versionTier]}
         </Callout>
       ) : null}
 
