@@ -139,7 +139,6 @@ export {
 
 export {
   classifyOptimizeServerInfo,
-  optimizeVersionMismatch,
   useOptimizeServerInfo,
   type FetchOptimizeInfo,
   type OptimizeServerInfo,

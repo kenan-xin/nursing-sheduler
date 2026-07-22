@@ -35,7 +35,7 @@ function serverInfo(over: Partial<OptimizeServerInfo>): OptimizeServerInfo {
     apiVersion: "alpha",
     backendVersion: "1.0.0",
     clientVersion: "1.0.0",
-    versionMismatch: false,
+    versionTier: "identical",
     unavailableReason: null,
     recheck: noop,
     ...over,
@@ -152,7 +152,9 @@ export default function OptimizeScreenFixtureClient() {
         <ServerIdentity info={serverInfo({})} />
       </Panel>
       <Panel id="fx-server-mismatch" title="Server identity — version mismatch">
-        <ServerIdentity info={serverInfo({ versionMismatch: true, backendVersion: "9.9.9" })} />
+        <ServerIdentity
+          info={serverInfo({ versionTier: "incompatible", backendVersion: "9.9.9" })}
+        />
       </Panel>
       <Panel id="fx-server-offline" title="Server identity — offline">
         <ServerIdentity
