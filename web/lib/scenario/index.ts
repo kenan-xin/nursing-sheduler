@@ -62,9 +62,9 @@ export {
 export {
   projectImportTarget,
   prepareScenarioLoad,
-  classifyImportVersion,
+  classifyLoadVersion,
   type PrepareScenarioLoadResult,
-  type ImportVersionStatus,
+  type VersionConfirmStatus,
 } from "./prepare-scenario-load";
 export {
   buildIdMap,

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { stringify } from "yaml";
 import {
-  classifyImportVersion,
+  classifyLoadVersion,
   prepareScenarioLoad,
   projectImportTarget,
 } from "./prepare-scenario-load";
@@ -138,24 +138,36 @@ describe("projectImportTarget — determinism", () => {
   });
 });
 
-describe("classifyImportVersion", () => {
-  it("returns match on exact equality", () => {
-    expect(classifyImportVersion("1.2.3", "1.2.3")).toBe("match");
+describe("classifyLoadVersion — Decision A tier → load behavior", () => {
+  it("identical (same full string) → null (silent, no modal)", () => {
+    expect(classifyLoadVersion("v0.1.1-5-gabc1234", "v0.1.1-5-gabc1234")).toBeNull();
   });
 
-  it("returns missing when the file carries no version", () => {
-    expect(classifyImportVersion(undefined, "1.2.3")).toBe("missing");
-    expect(classifyImportVersion("", "1.2.3")).toBe("missing");
+  it("compatible (same major.minor, different commit) → null (silent — stop per-commit nagging)", () => {
+    expect(classifyLoadVersion("v0.1.1-5-gabc1234", "v0.1.1-6-gdef5678")).toBeNull();
   });
 
-  it("returns dirty for a -dirty suffix, checked before equality/mismatch", () => {
-    expect(classifyImportVersion("1.2.3-dirty", "1.2.3")).toBe("dirty");
-    // Dirty wins even when the strings are equal (FR-SL-19 case order).
-    expect(classifyImportVersion("1.2.3-dirty", "1.2.3-dirty")).toBe("dirty");
+  it("indeterminate (bare hash — no tag to judge) → null (silent, don't cry wolf)", () => {
+    expect(classifyLoadVersion("abc1234", "v0.1.1-5-gabc1234")).toBeNull();
   });
 
-  it("returns mismatch on exact string inequality", () => {
-    expect(classifyImportVersion("1.0.0", "2.0.0")).toBe("mismatch");
+  it("missing (absent or sentinel file version) → 'missing' confirm", () => {
+    expect(classifyLoadVersion(undefined, "v0.1.1")).toBe("missing");
+    expect(classifyLoadVersion("", "v0.1.1")).toBe("missing");
+    expect(classifyLoadVersion("unknown", "v0.1.1")).toBe("missing");
+  });
+
+  it("dirty (one side -dirty, strings differ) → 'dirty' confirm", () => {
+    expect(classifyLoadVersion("v0.1.1-5-gabc1234-dirty", "v0.1.1-5-gabc1234")).toBe("dirty");
+  });
+
+  it("incompatible (major.minor differ) → 'incompatible' confirm", () => {
+    expect(classifyLoadVersion("v0.1.1", "v0.2.0")).toBe("incompatible");
+    expect(classifyLoadVersion("v0.1.1", "v1.0.0")).toBe("incompatible");
+  });
+
+  it("normalizes an optional leading v — bare-semver file on the same line stays silent", () => {
+    expect(classifyLoadVersion("0.1.5", "v0.1.9")).toBeNull();
   });
 });
 

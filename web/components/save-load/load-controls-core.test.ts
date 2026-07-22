@@ -60,8 +60,8 @@ describe("versionMismatchCopy — FR-SL-19 verbatim wording", () => {
     );
   });
 
-  it("mismatch — verbatim byte-for-byte text, including the embedded paragraph breaks", () => {
-    const { description } = versionMismatchCopy("mismatch", "1.0.0", "1.4.0");
+  it("incompatible — verbatim byte-for-byte text, including the embedded paragraph breaks", () => {
+    const { description } = versionMismatchCopy("incompatible", "1.0.0", "1.4.0");
     expect(description).toBe(
       "App version mismatch detected.\n\n" +
         "File app version: 1.0.0\n" +

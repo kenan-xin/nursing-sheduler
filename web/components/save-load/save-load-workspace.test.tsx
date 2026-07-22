@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "fake-indexeddb/auto";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { stringify } from "yaml";
 import {
@@ -25,6 +25,29 @@ import { SaveLoadWorkspace } from "./save-load-workspace";
 
 const YAML_OPTIONS = { version: "1.2" as const };
 
+// Post-T1, `git describe` always yields a real `vX.Y.Z-…` stamp in dev/prod;
+// only a source tarball with no `.git` falls back to "unknown". The version gate
+// now consumes the shared major.minor classifier (T2/T4), which folds the
+// "unknown" sentinel to "absent" → the `missing` tier. So drive this suite from a
+// real stamp: an unstamped-vs-unstamped pair would otherwise resolve `missing`
+// (a confirm), not the `identical` silent load these matching-version cases mean
+// to exercise. `serializeScenario` re-stamps files with this same value.
+const ENV_KEY = "NEXT_PUBLIC_APP_VERSION";
+const ORIGINAL_APP_VERSION = process.env[ENV_KEY];
+const TEST_APP_VERSION = "v0.1.1-5-gabc1234";
+
+beforeAll(() => {
+  process.env[ENV_KEY] = TEST_APP_VERSION;
+});
+
+afterAll(() => {
+  if (ORIGINAL_APP_VERSION === undefined) {
+    delete process.env[ENV_KEY];
+  } else {
+    process.env[ENV_KEY] = ORIGINAL_APP_VERSION;
+  }
+});
+
 function currentState() {
   return useScenarioStore.getState();
 }
@@ -34,8 +57,8 @@ function stateSnapshot(): string {
 }
 
 /** A backend-valid YAML string whose stamped `appVersion` equals the test env's
- *  `currentAppVersion()` ("unknown", `NEXT_PUBLIC_APP_VERSION` unset) — so the
- *  version gate resolves `match` and Load proceeds without the confirm modal. */
+ *  `currentAppVersion()` (the real `TEST_APP_VERSION` stamp set above) — so the
+ *  version gate resolves `identical` and Load proceeds without the confirm modal. */
 function validYaml(): string {
   return serializeScenario(makeValidUiState());
 }
