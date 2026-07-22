@@ -92,6 +92,10 @@ export function RosterPeriodCard({ range, onCommit }: RosterPeriodCardProps) {
   }, [range.start, range.end]);
 
   const complete = hasCompleteRange(draft);
+  // A no-commit draft is INVALID (not merely incomplete) when both endpoints are
+  // present but out of order. `type="date"` inputs only emit valid ISO or "", so a
+  // non-empty pair that isn't `complete` can only be `start > end`.
+  const invalid = Boolean(draft.start && draft.end) && draft.start > draft.end;
   const supported = useMemo(
     () => Boolean(draft.start && draft.end) && isRangeSupported(draft),
     [draft],
@@ -155,10 +159,16 @@ export function RosterPeriodCard({ range, onCommit }: RosterPeriodCardProps) {
             Duration
           </span>
           <span className="font-heading text-title font-extrabold" data-testid="range-duration">
-            {duration} day{duration === 1 ? "" : "s"}
+            {invalid ? "—" : `${duration} day${duration === 1 ? "" : "s"}`}
           </span>
           <span className="text-sm text-ink3">· {monthLabel}</span>
         </div>
+
+        {invalid ? (
+          <p className="mt-3 text-sm text-warn" data-testid="range-invalid">
+            End date must be on or after the start date.
+          </p>
+        ) : null}
 
         <div
           className="mt-3.5 border border-line2 bg-panel px-3.5 py-3"
