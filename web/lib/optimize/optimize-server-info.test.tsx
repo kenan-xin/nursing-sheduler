@@ -1,11 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
-import {
-  classifyOptimizeServerInfo,
-  optimizeVersionMismatch,
-  useOptimizeServerInfo,
-} from "./optimize-server-info";
+import { classifyOptimizeServerInfo, useOptimizeServerInfo } from "./optimize-server-info";
 
 const identity = {
   service_name: "nurse",
@@ -20,35 +16,49 @@ const identity = {
 
 afterEach(() => cleanup());
 
-describe("optimizeVersionMismatch", () => {
-  it("matches identical clean versions", () => {
-    expect(optimizeVersionMismatch("1.2.3", "1.2.3")).toBe(false);
-  });
-  it("warns when versions differ", () => {
-    expect(optimizeVersionMismatch("1.2.3", "1.2.4")).toBe(true);
-  });
-  it("warns when either side is dirty even if equal", () => {
-    expect(optimizeVersionMismatch("1.2.3-dirty", "1.2.3-dirty")).toBe(true);
-    expect(optimizeVersionMismatch("1.2.3", "1.2.3-dirty")).toBe(true);
-  });
-});
-
 describe("classifyOptimizeServerInfo", () => {
-  it("reads a ready 200 payload as online with identity and no mismatch when equal", () => {
+  it("reads a ready 200 payload as online with an identical tier when equal", () => {
     const result = classifyOptimizeServerInfo(200, { status: "ready", ...identity }, "1.2.3");
     expect(result).toMatchObject({
       status: "online",
       apiVersion: "alpha",
       backendVersion: "1.2.3",
-      versionMismatch: false,
+      versionTier: "identical",
       unavailableReason: null,
     });
   });
 
-  it("flags a version mismatch on a ready payload", () => {
+  it("grades a major.minor difference as incompatible on a ready payload", () => {
     const result = classifyOptimizeServerInfo(200, { status: "ready", ...identity }, "9.9.9");
     expect(result.status).toBe("online");
-    expect(result.versionMismatch).toBe(true);
+    expect(result.versionTier).toBe("incompatible");
+  });
+
+  it("grades a same major.minor different-commit pair as compatible (not a warning)", () => {
+    const result = classifyOptimizeServerInfo(
+      200,
+      { status: "ready", ...identity, app_version: "v1.2.3-4-gabcdef0" },
+      "v1.2.3-9-g1234567",
+    );
+    expect(result.versionTier).toBe("compatible");
+  });
+
+  it("grades a `-dirty` build as the dirty tier", () => {
+    const result = classifyOptimizeServerInfo(
+      200,
+      { status: "ready", ...identity, app_version: "1.2.3-dirty" },
+      "1.2.3",
+    );
+    expect(result.versionTier).toBe("dirty");
+  });
+
+  it("grades an equal `-dirty` build on both sides as dirty (dirty beats identical)", () => {
+    const result = classifyOptimizeServerInfo(
+      200,
+      { status: "ready", ...identity, app_version: "1.2.3-dirty" },
+      "1.2.3-dirty",
+    );
+    expect(result.versionTier).toBe("dirty");
   });
 
   it("treats a 503 identity report as offline but keeps its versions", () => {
@@ -72,9 +82,19 @@ describe("classifyOptimizeServerInfo", () => {
       status: "offline",
       apiVersion: null,
       backendVersion: null,
-      versionMismatch: false,
+      versionTier: null,
       unavailableReason: "backend_unreachable",
     });
+  });
+
+  it("leaves the version tier not-applicable (null) when the backend version is absent", () => {
+    const result = classifyOptimizeServerInfo(
+      503,
+      { status: "unavailable", reason: "starting" },
+      "1.2.3",
+    );
+    expect(result.backendVersion).toBeNull();
+    expect(result.versionTier).toBeNull();
   });
 });
 

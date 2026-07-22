@@ -132,6 +132,12 @@ describe("classifyVersionCompatibility", () => {
         "dirty",
       );
     });
+
+    it("returns dirty for two identical dirty strings (equal strings don't prove identical code)", () => {
+      expect(
+        classifyVersionCompatibility("v0.1.1-442-g89190ab-dirty", "v0.1.1-442-g89190ab-dirty"),
+      ).toBe("dirty");
+    });
   });
 
   describe("missing", () => {
@@ -162,6 +168,10 @@ describe("classifyVersionCompatibility", () => {
 describe("precedence", () => {
   it("missing beats dirty (dirty + missing → missing)", () => {
     expect(classifyVersionCompatibility("v0.1.1-dirty", undefined)).toBe("missing");
+  });
+
+  it("dirty beats identical (two equal dirty strings → dirty, not identical)", () => {
+    expect(classifyVersionCompatibility("v0.1.1-dirty", "v0.1.1-dirty")).toBe("dirty");
   });
 
   it("dirty beats incompatible (dirty + different major.minor → dirty)", () => {

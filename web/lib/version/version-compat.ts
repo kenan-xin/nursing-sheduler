@@ -42,6 +42,15 @@ function normalizeInput(raw: string | null | undefined): string | undefined {
   return trimmed;
 }
 
+/**
+ * Whether a version string carries identifiable version info — i.e. it is not
+ * absent, blank, or one of the unknown sentinels. Shares the classifier's own
+ * sentinel/normalization logic so callers never hardcode the sentinel strings.
+ */
+export function isIdentifiableVersion(raw: string | null | undefined): boolean {
+  return normalizeInput(raw) !== undefined;
+}
+
 export function parseVersionParts(version: string): VersionParts {
   const isDirty = version.endsWith("-dirty");
   const cleanVersion = isDirty ? version.slice(0, -"-dirty".length) : version;
@@ -88,10 +97,13 @@ export function parseVersionParts(version: string): VersionParts {
  *
  * Precedence (evaluated in this order):
  * 1. **missing** — one side has no version info (sentinels: undefined, null, "",
- *    "unknown", "v0.0.0-unknown")
- * 2. **identical** — full strings are exactly equal (same build — short-circuit
- *    before dirty/indeterminate so identical dirty or hash-only builds match)
- * 3. **dirty** — either side ends in `-dirty`
+ *    "unknown", "v0.0.0-unknown"). Absent info wins over everything.
+ * 2. **dirty** — either side ends in `-dirty`. Ranks ABOVE `identical`: two equal
+ *    `-dirty` strings do NOT prove identical code, because uncommitted changes
+ *    aren't captured in the version string — so dirty must surface even when the
+ *    strings match exactly.
+ * 3. **identical** — full strings are exactly equal (same clean build — no dirty
+ *    on either side)
  * 4. **indeterminate** — either side has no parseable semver (bare hash — no tag)
  * 5. **incompatible** — major.minor differ
  * 6. **compatible** — major.minor equal, full strings differ
@@ -104,12 +116,14 @@ export function classifyVersionCompatibility(
   const b = normalizeInput(mine);
 
   if (a === undefined || b === undefined) return "missing";
-  if (a === b) return "identical";
 
   const partsA = parseVersionParts(a);
   const partsB = parseVersionParts(b);
 
+  // Dirty ranks above identical: equal `-dirty` strings don't prove identical
+  // code, since uncommitted changes aren't captured in the version string.
   if (partsA.dirty || partsB.dirty) return "dirty";
+  if (a === b) return "identical";
   if (partsA.major === null || partsB.major === null) return "indeterminate";
   if (partsA.major !== partsB.major || partsA.minor !== partsB.minor) {
     return "incompatible";

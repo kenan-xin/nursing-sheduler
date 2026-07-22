@@ -7,12 +7,14 @@
 // versions disagreed. The rebuild reads the SAME identity through the same-origin
 // BFF `/api/info` proxy (never a cross-origin backend URL). A `ready` payload at
 // HTTP 200 is "online"; a `503` identity report or the BFF's fail-closed `502`
-// body is "offline". The version-mismatch rule mirrors the old page: warn when the
-// backend app version differs from this bundle's version, or when either carries a
-// `-dirty` build suffix.
+// body is "offline". Frontend/backend compatibility is judged by the shared
+// version-compat classifier (T2), which grades the pair into a tier the banner
+// renders per its severity. A `null` backend version (BFF/runtime failure) is
+// NOT a version tier — the offline state already owns that surface.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { currentAppVersion } from "@/lib/scenario/app-version";
+import { classifyVersionCompatibility, type CompatibilityTier } from "@/lib/version/version-compat";
 import type { InfoIdentity } from "@/app/api/info/types";
 
 export type OptimizeServerStatus = "checking" | "online" | "offline";
@@ -23,7 +25,12 @@ export interface OptimizeServerInfo {
   apiVersion: string | null;
   backendVersion: string | null;
   clientVersion: string;
-  versionMismatch: boolean;
+  /**
+   * Frontend↔backend compatibility tier from the shared classifier, or `null`
+   * when there is no backend version to compare (runtime/BFF failure). `null`
+   * is not-applicable — the offline state, not a version note, owns that case.
+   */
+  versionTier: CompatibilityTier | null;
   /** The `unavailable` reason when offline with a reason, else null. */
   unavailableReason: string | null;
   /** Re-fetch `/api/info`, aborting any in-flight check. */
@@ -42,20 +49,6 @@ function readIdentityVersions(
   const appVersion = body.app_version;
   if (typeof apiVersion !== "string" || typeof appVersion !== "string") return null;
   return { api_version: apiVersion, app_version: appVersion };
-}
-
-/** True when a build stamp carries the uncommitted `-dirty` suffix. */
-function isDirtyVersion(version: string): boolean {
-  return version.endsWith("-dirty");
-}
-
-/**
- * Whether the backend and client versions should raise the mismatch warning.
- * Mirrors the old page: any difference, or a `-dirty` suffix on either side.
- */
-export function optimizeVersionMismatch(backendVersion: string, clientVersion: string): boolean {
-  if (isDirtyVersion(backendVersion) || isDirtyVersion(clientVersion)) return true;
-  return backendVersion !== clientVersion;
 }
 
 /**
@@ -81,8 +74,8 @@ export function classifyOptimizeServerInfo(
     apiVersion: versions?.api_version ?? null,
     backendVersion,
     clientVersion,
-    versionMismatch:
-      backendVersion !== null ? optimizeVersionMismatch(backendVersion, clientVersion) : false,
+    versionTier:
+      backendVersion !== null ? classifyVersionCompatibility(backendVersion, clientVersion) : null,
     unavailableReason: status === "offline" ? reason : null,
   };
 }
@@ -106,7 +99,7 @@ const CHECKING: Omit<OptimizeServerInfo, "recheck"> = {
   apiVersion: null,
   backendVersion: null,
   clientVersion: "",
-  versionMismatch: false,
+  versionTier: null,
   unavailableReason: null,
 };
 

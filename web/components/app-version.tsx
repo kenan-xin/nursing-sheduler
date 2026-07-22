@@ -7,10 +7,13 @@
 // is owned by later tickets; this is the minimal surface that makes the stamp
 // observable.
 export function AppVersion() {
-  const version = process.env.NEXT_PUBLIC_APP_VERSION ?? "unknown";
+  const raw = process.env.NEXT_PUBLIC_APP_VERSION ?? "unknown";
+  // The stamp is now `v`-prefixed git-describe output (`v0.1.1-…`); prefix only
+  // when it is not already `v`-prefixed, so a prefixed value never renders `vv0.1.1`.
+  const version = raw.startsWith("v") ? raw : `v${raw}`;
   return (
     <span data-testid="app-version" className="text-muted-foreground text-xs">
-      v{version}
+      {version}
     </span>
   );
 }

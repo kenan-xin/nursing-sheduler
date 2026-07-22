@@ -13,7 +13,7 @@ function info(over: Partial<OptimizeServerInfo> = {}): OptimizeServerInfo {
     apiVersion: "alpha",
     backendVersion: "1.2.3",
     clientVersion: "1.2.3",
-    versionMismatch: false,
+    versionTier: "identical",
     unavailableReason: null,
     recheck: vi.fn(),
     ...over,
@@ -21,20 +21,52 @@ function info(over: Partial<OptimizeServerInfo> = {}): OptimizeServerInfo {
 }
 
 describe("ServerIdentity", () => {
-  it("shows the online pill and the version identity line", () => {
+  it("shows the online pill and the version identity line, silent on an identical tier", () => {
     render(<ServerIdentity info={info()} />);
     expect(screen.getByText("Online")).toBeInTheDocument();
     expect(screen.getByTestId("optimize-server-identity")).toHaveTextContent(
       "API version: alpha · Frontend version: 1.2.3 · Backend version: 1.2.3",
     );
     expect(screen.queryByTestId("optimize-version-mismatch")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("optimize-version-note")).not.toBeInTheDocument();
   });
 
-  it("warns on a version mismatch", () => {
-    render(<ServerIdentity info={info({ versionMismatch: true, backendVersion: "9.9.9" })} />);
+  it("warns on an incompatible tier", () => {
+    render(
+      <ServerIdentity info={info({ versionTier: "incompatible", backendVersion: "9.9.9" })} />,
+    );
     expect(screen.getByTestId("optimize-version-mismatch")).toHaveTextContent(
       "Frontend and backend versions do not match.",
     );
+    expect(screen.queryByTestId("optimize-version-note")).not.toBeInTheDocument();
+  });
+
+  it("shows a passive note (not a warning) on a compatible tier", () => {
+    render(<ServerIdentity info={info({ versionTier: "compatible" })} />);
+    expect(screen.getByTestId("optimize-version-note")).toHaveTextContent("same version line");
+    expect(screen.queryByTestId("optimize-version-mismatch")).not.toBeInTheDocument();
+  });
+
+  it("shows the dev-build note on a dirty tier", () => {
+    render(<ServerIdentity info={info({ versionTier: "dirty" })} />);
+    expect(screen.getByTestId("optimize-version-note")).toHaveTextContent("uncommitted changes");
+  });
+
+  it("shows a note on indeterminate and missing tiers", () => {
+    const { rerender } = render(<ServerIdentity info={info({ versionTier: "indeterminate" })} />);
+    expect(screen.getByTestId("optimize-version-note")).toHaveTextContent("No tagged version");
+    rerender(<ServerIdentity info={info({ versionTier: "missing" })} />);
+    expect(screen.getByTestId("optimize-version-note")).toHaveTextContent(
+      "Version information is missing",
+    );
+  });
+
+  it("renders no version banner when the tier is not-applicable (backend null)", () => {
+    render(
+      <ServerIdentity info={info({ status: "online", versionTier: null, backendVersion: null })} />,
+    );
+    expect(screen.queryByTestId("optimize-version-mismatch")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("optimize-version-note")).not.toBeInTheDocument();
   });
 
   it("shows the offline warning with its reason", () => {

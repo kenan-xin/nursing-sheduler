@@ -17,6 +17,7 @@
 // to what `importScenarioValue` produced, so the later `loadScenario(target)` can
 // allocate its own fresh card identity without collision.
 
+import { classifyVersionCompatibility, isIdentifiableVersion } from "@/lib/version/version-compat";
 import { currentAppVersion } from "./app-version";
 import { projectScenarioDocument } from "./canonical";
 import { importScenarioValue, parseScenarioYaml } from "./import-scenario";
@@ -267,24 +268,40 @@ function collectImportWarnings(target: ImportNormalizationTarget): string[] {
 // ---------------------------------------------------------------------------
 
 /**
- * The version-gate outcome, keyed on the imported file's `appVersion` vs the
- * current build. `match` needs no dialog; the other three drive a confirm-before-load.
+ * The subset of compatibility tiers that stage a confirm-before-load dialog
+ * (Decision A). The shared `classifyVersionCompatibility` (T2) returns six tiers;
+ * `identical` / `compatible` / `indeterminate` load silently (no modal), so the
+ * load flow only ever sees these three — each carries its own FR-SL-19 copy.
  */
-export type ImportVersionStatus = "match" | "missing" | "dirty" | "mismatch";
+export type VersionConfirmStatus = "missing" | "dirty" | "incompatible";
 
 /**
- * Classify the imported file's `appVersion` against the current build version.
- * Pure; mirrors FR-SL-19's exact order and comparison: `missing` when absent,
- * `dirty` when it ends with `-dirty` (checked BEFORE plain mismatch), `mismatch`
- * on exact string inequality, else `match`. The comparison is exact-string; it
- * does not parse semver parts (FR-SL-20).
+ * Map the imported file's `appVersion` (vs the current build) onto the load-flow
+ * confirm decision via the shared major.minor classifier (T2). Returns `null` when
+ * the load is silent — `identical` / `compatible` (same major.minor line) /
+ * `indeterminate` (no tag to judge) — or the confirm status for the three tiers
+ * that warrant a modal. Grammar normalization (optional leading `v`) and sentinel
+ * folding live in the shared util, so legacy bare-semver YAML stays comparable.
+ *
+ * Self-unknown-silent: when the current build can't identify its own version
+ * (absent / blank / unknown sentinel), we can't judge any file's compatibility,
+ * so the load is silent regardless of the file's `appVersion` — mirroring surface
+ * (a)'s not-applicable guard. A confirm still stages when the current build IS
+ * identifiable but the file lacks a version (that stays `missing`).
  */
-export function classifyImportVersion(
+export function classifyLoadVersion(
   fileVersion: string | undefined,
   current: string = currentAppVersion(),
-): ImportVersionStatus {
-  if (!fileVersion) return "missing";
-  if (fileVersion.endsWith("-dirty")) return "dirty";
-  if (fileVersion !== current) return "mismatch";
-  return "match";
+): VersionConfirmStatus | null {
+  if (!isIdentifiableVersion(current)) return null;
+  switch (classifyVersionCompatibility(fileVersion, current)) {
+    case "missing":
+      return "missing";
+    case "dirty":
+      return "dirty";
+    case "incompatible":
+      return "incompatible";
+    default:
+      return null;
+  }
 }

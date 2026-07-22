@@ -14,18 +14,18 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import {
-  classifyImportVersion,
+  classifyLoadVersion,
   currentAppVersion,
   prepareScenarioLoad,
   type ImportNormalizationTarget,
   type ScenarioValidationIssue,
+  type VersionConfirmStatus,
 } from "@/lib/scenario";
 import { isScenarioSliceEmpty, loadScenario, useHotStore, useScenarioStore } from "@/lib/store";
 import {
   hasUncreditedLeave,
   loadConfirmCopy,
   UNCREDITED_LEAVE_WARNING,
-  type VersionConfirmStatus,
 } from "./load-controls-core";
 
 /** Ready-to-render props for the combined load confirmation dialog. */
@@ -87,8 +87,7 @@ export function useScenarioImport(options: UseScenarioImportOptions = {}): UseSc
       return;
     }
     setIssues(null);
-    const status = classifyImportVersion(result.target.meta.appVersion);
-    const versionStatus: VersionConfirmStatus | null = status === "match" ? null : status;
+    const versionStatus = classifyLoadVersion(result.target.meta.appVersion);
     // Emptiness is computed against the CURRENT (pre-load) workspace at the moment
     // of load — the state the incoming file would overwrite.
     const replacement = !isScenarioSliceEmpty(useScenarioStore.getState());
