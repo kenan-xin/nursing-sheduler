@@ -23,6 +23,8 @@ import {
   type RequestRow,
   type ShiftTypeOrderIndex,
 } from "@/components/requests/requests-model";
+import { FaBriefcase, FaCalendar, FaLayerGroup, FaMugHot, type IconType } from "@/components/icons";
+import { isSingaporePublicHoliday, utcDayOfWeek } from "@/lib/dates";
 import { cn } from "@/lib/utils";
 
 export interface RequestsMatrixProps {
@@ -51,13 +53,39 @@ export interface RequestsMatrixProps {
 }
 
 const ROW_HEIGHT = 40;
+/** Header row is taller than a body row (ROW_HEIGHT) to fit the date-group icon +
+ *  count, and the date-item weekday sub-label + holiday dot (prototype
+ *  ScreenRequests.dc.html:98-102). */
+const HEADER_ROW_HEIGHT = 52;
 const NURSE_COL_WIDTH = 176;
 const HISTORY_COL_WIDTH = 40;
 const DATE_GROUP_COL_WIDTH = 76;
 const DATE_ITEM_COL_WIDTH = 56;
 
+const WEEKDAY_ABBR = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
+
+/** Prototype's holiday header stripe (ScreenRequests.dc.html `HOLIDAY_BG`). */
+const HOLIDAY_STRIPE_BG =
+  "repeating-linear-gradient(135deg, var(--warntint) 0px, var(--warntint) 3px, var(--surface) 3px, var(--surface) 9px)";
+
 function columnWidth(column: RequestColumn): number {
   return column.kind === "date-group" ? DATE_GROUP_COL_WIDTH : DATE_ITEM_COL_WIDTH;
+}
+
+/** Date-group header icon: ALL -> calendar, WEEKDAY -> briefcase, WEEKEND -> mug-hot,
+ *  a custom group -> layer-group (prototype `_dateGroupCols` icon map). */
+function dateGroupIcon(ref: DateRef, synthetic: boolean): IconType {
+  if (!synthetic) return FaLayerGroup;
+  switch (ref) {
+    case "ALL":
+      return FaCalendar;
+    case "WEEKDAY":
+      return FaBriefcase;
+    case "WEEKEND":
+      return FaMugHot;
+    default:
+      return FaLayerGroup;
+  }
 }
 
 /** The reserved day-state precedence for display (LEAVE > OFF > worked; ticket's
@@ -201,7 +229,7 @@ export function RequestsMatrix({
         >
           <div
             className="sticky left-0 z-30 flex items-center border-b border-r border-line bg-panel px-3 py-2 text-label font-semibold uppercase tracking-[0.03em] text-ink2"
-            style={{ height: ROW_HEIGHT }}
+            style={{ height: HEADER_ROW_HEIGHT }}
           >
             Nurse
           </div>
@@ -209,41 +237,66 @@ export function RequestsMatrix({
             <div
               key={`h-head-${i}`}
               className="flex items-center justify-center border-b border-r border-line2 bg-warntint font-mono text-label text-ink2"
-              style={{ height: ROW_HEIGHT }}
+              style={{ height: HEADER_ROW_HEIGHT }}
               title={label}
               data-testid={`hist-head-${i}`}
             >
               {label}
             </div>
           ))}
-          {columns.map((col, i) => (
-            <div
-              key={`col-head-${i}`}
-              className={cn(
-                "flex flex-col items-center justify-center border-b border-r border-line2 px-1 text-center",
-                col.kind === "date-group"
-                  ? "bg-brandtint"
-                  : col.weekend
-                    ? "bg-panel"
-                    : "bg-surface",
-              )}
-              style={{ height: ROW_HEIGHT }}
-              title={col.kind === "date-group" ? (col.description ?? col.label) : col.label}
-              data-testid={`col-head-${i}`}
-            >
-              <span
+          {columns.map((col, i) => {
+            const holiday = col.kind === "date-item" && isSingaporePublicHoliday(col.iso);
+            const GroupIcon =
+              col.kind === "date-group" ? dateGroupIcon(col.ref, col.synthetic) : null;
+            return (
+              <div
+                key={`col-head-${i}`}
                 className={cn(
-                  "font-mono text-label",
-                  col.kind === "date-group" ? "font-bold text-brandink" : "text-ink",
+                  "flex flex-col items-center justify-center gap-0.5 border-b border-r border-line2 px-1 text-center",
+                  col.kind === "date-group"
+                    ? "bg-brandtint"
+                    : col.weekend
+                      ? "bg-panel"
+                      : "bg-surface",
                 )}
+                style={{
+                  height: HEADER_ROW_HEIGHT,
+                  ...(holiday ? { backgroundImage: HOLIDAY_STRIPE_BG } : null),
+                }}
+                title={col.kind === "date-group" ? (col.description ?? col.label) : col.label}
+                data-testid={`col-head-${i}`}
               >
-                {col.label}
-              </span>
-              {col.kind === "date-group" && col.count !== undefined ? (
-                <span className="text-[9px] text-ink3">{col.count}</span>
-              ) : null}
-            </div>
-          ))}
+                {GroupIcon ? <GroupIcon className="size-2.5 text-brandink" aria-hidden /> : null}
+                <span
+                  className={cn(
+                    "font-mono text-label",
+                    col.kind === "date-group"
+                      ? "font-bold text-brandink"
+                      : holiday
+                        ? "text-warn"
+                        : "text-ink",
+                  )}
+                >
+                  {col.label}
+                </span>
+                {col.kind === "date-group" && col.count !== undefined ? (
+                  <span className="text-[9px] text-ink3">{col.count}</span>
+                ) : null}
+                {col.kind === "date-item" ? (
+                  <span className="font-mono text-[9px] text-ink3">
+                    {WEEKDAY_ABBR[utcDayOfWeek(col.iso)]}
+                  </span>
+                ) : null}
+                {holiday ? (
+                  <span
+                    className="size-[5px] bg-warn"
+                    data-testid={`col-head-${i}-holiday`}
+                    aria-hidden
+                  />
+                ) : null}
+              </div>
+            );
+          })}
         </div>
 
         {/* Body — virtualized rows */}
@@ -286,6 +339,10 @@ export function RequestsMatrix({
                   }
                   const value = historyValueAt(person, columnIndex, historyCount);
                   const clickable = isHistorySlotClickable(person, columnIndex, historyCount);
+                  // Prototype `showPlus`: an empty, clickable slot in normal mode gets a
+                  // faint "+" add affordance (ScreenRequests.dc.html:553-555); quick mode
+                  // never shows it since a click there doesn't open the history editor.
+                  const showPlus = !value && clickable && mode === "normal";
                   const handlers = !clickable
                     ? {}
                     : mode === "normal"
@@ -299,12 +356,17 @@ export function RequestsMatrix({
                       key={`hist-${columnIndex}`}
                       className={cn(
                         "flex items-center justify-center border-b border-r border-line2 font-mono text-label",
-                        clickable ? "cursor-pointer text-ink2 hover:bg-panel" : "text-faint",
+                        clickable
+                          ? cn(
+                              "cursor-pointer hover:bg-panel",
+                              showPlus ? "text-faint" : "text-ink2",
+                            )
+                          : "text-faint",
                       )}
                       data-testid={`hist-${row.id}-${columnIndex}`}
                       {...handlers}
                     >
-                      {value ?? ""}
+                      {value ?? (showPlus ? "+" : "")}
                     </div>
                   );
                 })}

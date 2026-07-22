@@ -11,6 +11,7 @@ import { useState } from "react";
 import { useScenarioStore, useHotStore, resetToNewScenario } from "@/lib/store";
 import { ConfirmDialog } from "./confirm-dialog";
 import { toast } from "sonner";
+import { FaFileCirclePlus } from "@/components/icons";
 
 export interface StartOverCardProps {
   onResetComplete?: () => void;
@@ -37,7 +38,7 @@ export function StartOverCard({ onResetComplete }: StartOverCardProps) {
       </h2>
       <p className="max-w-[60ch] text-meta text-ink2">
         Clear your entire current schedule and begin a new, empty one. This removes everything saved
-        in this browser and cannot be undone.
+        in this browser and cannot be undone. Download a copy first if you want to keep it.
       </p>
       <button
         type="button"
@@ -45,6 +46,7 @@ export function StartOverCard({ onResetComplete }: StartOverCardProps) {
         data-testid="new-schedule-button"
         className="mt-1 inline-flex h-9 items-center gap-2 border border-error bg-surface px-4 text-meta font-semibold text-error outline-none transition-colors hover:bg-errortint focus-visible:ring-2 focus-visible:ring-error"
       >
+        <FaFileCirclePlus className="size-4" aria-hidden />
         New schedule
       </button>
       <ConfirmDialog

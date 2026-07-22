@@ -304,7 +304,7 @@ export function DateGroupsCard({
                       className="text-sm opacity-90"
                       data-testid={`derived-group-${group.id}-count`}
                     >
-                      {group.members.length}
+                      {group.members.length} day{group.members.length === 1 ? "" : "s"}
                     </span>
                   </button>
                 );

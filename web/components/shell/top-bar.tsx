@@ -11,7 +11,7 @@
 import { usePathname } from "next/navigation";
 import { useScenarioStore } from "@/lib/store";
 import { useAppMode } from "@/lib/mode/use-mode";
-import { getNavItemForMode } from "./nav-config";
+import { getNavGroupsForMode, getNavItemForMode } from "./nav-config";
 import { UndoRedoControls } from "./undo-redo-controls";
 import { PersistenceStatus } from "./persistence-status";
 import { MobileNav } from "./mobile-nav";
@@ -23,11 +23,23 @@ import { FaDiagramProject } from "@/components/icons";
 // the current mode actually exposes. An Advanced-only route is only ever
 // mounted while mode is Advanced (route-validity gate redirects otherwise),
 // so this always resolves for a genuinely reachable page.
+//
+// CW-6: restores the prototype's "Step N ·" crumb prefix (Nurse Scheduling
+// 1186) for the five SET UP steps only — the prototype's own crumbMap gives
+// `generate` (Optimize and Export, guidedStep 6 but OUTPUT-group) a plain
+// label with no ordinal, so the prefix is gated on Set-up group membership
+// rather than on `guidedStep` alone.
 function useCrumb(): string {
   const pathname = usePathname();
   const mode = useAppMode();
   if (pathname === "/") return "Home";
-  return getNavItemForMode(pathname, mode)?.label ?? "Home";
+  const item = getNavItemForMode(pathname, mode);
+  if (!item) return "Home";
+  if (item.guidedStep == null) return item.label;
+  const inSetupGroup = getNavGroupsForMode(mode).some(
+    (group) => group.id === "setup" && group.items.some((i) => i.path === pathname),
+  );
+  return inSetupGroup ? `Step ${item.guidedStep} · ${item.label}` : item.label;
 }
 
 export function TopBar() {

@@ -76,7 +76,7 @@ export interface WeightFieldProps {
   onChange: (next: WeightFieldValue) => void;
   /** Default `"Weight (priority)"`. */
   label?: string;
-  /** Default `"e.g. -1, -10, ∞"` (spec 05 FR-PR-18 — Affinities overrides to positive examples). */
+  /** Default `"e.g. −50, +∞"` (spec 05 FR-PR-18 — Affinities overrides to positive examples). */
   placeholder?: string;
   /** Default: generic soft/hard explainer. */
   help?: string;
@@ -98,7 +98,7 @@ export function WeightField({
   value,
   onChange,
   label = "Weight (priority)",
-  placeholder = "e.g. -1, -10, ∞",
+  placeholder = "e.g. −50, +∞",
   help = DEFAULT_HELP,
   error,
   note,

@@ -10,7 +10,19 @@
 import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { FaThumbtack, FaXmark } from "@/components/icons";
+import {
+  FaArrowRight,
+  FaCalculator,
+  FaCheck,
+  FaPeopleArrows,
+  FaPlus,
+  FaSliders,
+  FaThumbtack,
+  FaUserNurse,
+  FaUserShield,
+  FaXmark,
+} from "@/components/icons";
+import type { IconType } from "@/components/icons";
 import type { GuidedRulePin } from "@/lib/scenario";
 import type { PinnableRecord } from "./types";
 
@@ -22,6 +34,23 @@ const DEFAULT_CATEGORIES = [
   "Supervision",
   "Custom shortcuts",
 ];
+
+// Mirrors rules-screen.tsx's CATEGORY_ICONS (minus "Structural", which isn't a
+// pinnable category) — kept local rather than shared, to avoid a
+// rules-screen.tsx <-> pin-form.tsx import cycle (rules-screen.tsx renders
+// PinForm).
+const CATEGORY_ICONS: Record<string, IconType> = {
+  Staffing: FaUserNurse,
+  Sequencing: FaArrowRight,
+  Hours: FaCalculator,
+  Pairing: FaPeopleArrows,
+  Supervision: FaUserShield,
+  "Custom shortcuts": FaThumbtack,
+};
+
+function categoryIcon(category: string): IconType {
+  return CATEGORY_ICONS[category] ?? FaSliders;
+}
 
 export interface PinFormSubmission {
   constraintKind: PinnableRecord["kind"];
@@ -164,6 +193,7 @@ export function PinForm({ records, initial, onCancel, onSubmit }: PinFormProps) 
           >
             {DEFAULT_CATEGORIES.map((c, i) => {
               const checked = category === c;
+              const Icon = categoryIcon(c);
               return (
                 <button
                   key={c}
@@ -177,13 +207,13 @@ export function PinForm({ records, initial, onCancel, onSubmit }: PinFormProps) 
                   onClick={() => setCategory(c)}
                   onKeyDown={(e) => handleCategoryKeyDown(e, i)}
                   data-testid={`pin-form-category-${c}`}
-                  className={`h-8 border px-3 text-meta font-semibold ${
+                  className={`inline-flex h-8 items-center gap-2 border px-3 text-meta font-semibold ${
                     checked
                       ? "border-brand bg-brand text-onbrand"
                       : "border-line bg-surface text-ink"
                   }`}
                 >
-                  {c}
+                  <Icon className="size-2.5" /> {c}
                 </button>
               );
             })}
@@ -209,6 +239,7 @@ export function PinForm({ records, initial, onCancel, onSubmit }: PinFormProps) 
             >
               {selected.quickFieldOptions.map((f) => {
                 const on = quickFields.includes(f.key);
+                const Icon = on ? FaCheck : FaPlus;
                 return (
                   <button
                     key={f.key}
@@ -220,11 +251,12 @@ export function PinForm({ records, initial, onCancel, onSubmit }: PinFormProps) 
                         prev.includes(f.key) ? prev.filter((k) => k !== f.key) : [...prev, f.key],
                       )
                     }
-                    className={`h-8 border px-3 text-meta font-semibold ${
+                    className={`inline-flex h-8 items-center gap-2 border px-3 text-meta font-semibold ${
                       on ? "border-brand bg-brand text-onbrand" : "border-line bg-surface text-ink"
                     }`}
                   >
-                    {f.label} <span className="opacity-70">{f.value}</span>
+                    <Icon className="size-2.5" /> {f.label}{" "}
+                    <span className="opacity-70">{f.value}</span>
                   </button>
                 );
               })}

@@ -33,8 +33,8 @@ export interface AnonymiseToggleConfig {
  * toggle; the card shows a preservation note instead.
  */
 export const ANONYMISE_TOGGLES: readonly AnonymiseToggleConfig[] = [
-  { key: "people", label: "Replace item IDs", defaultOn: true },
-  { key: "groups", label: "Replace group IDs", defaultOn: false },
+  { key: "people", label: "Replace people item IDs", defaultOn: true },
+  { key: "groups", label: "Replace people group IDs", defaultOn: false },
   { key: "scatter", label: "Scatter shift requests (developer only)", defaultOn: false },
 ];
 

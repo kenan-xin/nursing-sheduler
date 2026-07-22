@@ -272,6 +272,8 @@ export function RequirementForm({
         pairs={form.shiftTypeCoefficients}
         domain={domain}
         label="Shift Type"
+        showCoverage={false}
+        note="How much one assignment counts toward the required headcount. Default is 1 (one person = one unit of coverage). Raise it when a single assignment is worth more than one — e.g. a senior on D_sup with a coefficient of 2 counts as two toward the staffing minimum because they can supervise, so one senior satisfies a requirement of 2. This is a coverage-value weight per person, not hours (no auto-fill)."
         errorsById={errors.coefficientErrorsById}
         aggregateError={
           errors.coefficientErrorsById && Object.keys(errors.coefficientErrorsById).length > 0

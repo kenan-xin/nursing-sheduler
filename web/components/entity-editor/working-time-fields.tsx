@@ -18,7 +18,6 @@
 
 import * as React from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { paidMinutesFor, validateWorkingTimeDraft, type WorkingTimeValue } from "./core";
 
 const PAD = (n: number) => String(n).padStart(2, "0");
@@ -141,20 +140,25 @@ export function WorkingTimeFields({ value, onChange, idPrefix }: WorkingTimeFiel
             ))}
           </select>
         </label>
-        <label className="flex min-w-[8rem] flex-col gap-1">
+        <div className="flex min-w-[8rem] flex-col gap-1">
           <span className="text-label font-semibold uppercase tracking-[0.03em] text-ink3">
             Working <span className="text-faint">· auto</span>
           </span>
-          <Input
+          <div
             data-testid={`${idPrefix}-duration`}
-            aria-label="Working minutes (auto)"
-            readOnly
-            tabIndex={-1}
-            className="h-9 border-line2 bg-panel font-mono"
-            value={paid != null ? String(paid) : ""}
-            placeholder="—"
-          />
-        </label>
+            aria-label="Working duration (auto)"
+            className="flex h-9 items-center gap-2 border border-line2 bg-panel px-3"
+          >
+            <span className="font-heading text-title font-extrabold leading-none">
+              {paid != null ? fmtHours(paid) : "—"}
+            </span>
+            {paid != null && (
+              <span className="truncate font-mono text-label text-ink3">
+                = {fmtHours(paid + rest)} − {rest > 0 ? fmtHours(rest) : "no rest"}
+              </span>
+            )}
+          </div>
+        </div>
       </div>
 
       {firstError && (

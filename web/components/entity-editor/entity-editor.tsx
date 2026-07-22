@@ -138,13 +138,19 @@ function workingTimePatch(v: WorkingTimeValue): WorkingTimeItem {
   };
 }
 
+/** Format working minutes as the design's "8h" / "8h 30m" readout. */
+function fmtWorkingHours(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m === 0 ? `${h}h` : `${h}h ${m}m`;
+}
+
 /** A short human summary of a shift's working time, or null when none authored. */
 function workingTimeSummary(value: WorkingTimeValue): string | null {
   if (!value.startTime && !value.endTime && value.durationMinutes == null) return null;
   const clock = value.startTime && value.endTime ? `${value.startTime}–${value.endTime}` : null;
-  const rest = value.restMinutes ? ` (${value.restMinutes}m rest)` : "";
-  const dur = value.durationMinutes != null ? `${value.durationMinutes}m` : null;
-  return [clock, dur].filter(Boolean).join(" · ") + rest || null;
+  const dur = value.durationMinutes != null ? fmtWorkingHours(value.durationMinutes) : null;
+  return [clock, dur].filter(Boolean).join(" · ") || null;
 }
 
 /**

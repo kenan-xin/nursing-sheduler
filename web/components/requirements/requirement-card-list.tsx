@@ -70,9 +70,6 @@ export function RequirementCardList({
         const showWeight =
           card.preferredNumPeople !== undefined &&
           card.preferredNumPeople !== card.requiredNumPeople;
-        const requiredValue = card.preferredNumPeople
-          ? `${card.requiredNumPeople} (Preferred: ${card.preferredNumPeople})`
-          : `${card.requiredNumPeople}`;
 
         return (
           <CardListItem
@@ -112,7 +109,11 @@ export function RequirementCardList({
                     },
                   ]
                 : []),
-              { label: "Required", value: requiredValue },
+              { label: "Required", value: `${card.requiredNumPeople}` },
+              {
+                label: "Preferred",
+                value: card.preferredNumPeople != null ? String(card.preferredNumPeople) : "—",
+              },
               { label: "Qualified", value: summarizeRefs(card.qualifiedPeople ?? "ALL") },
               { label: "Dates", value: summarizeRefs(card.date ?? "ALL") },
             ]}

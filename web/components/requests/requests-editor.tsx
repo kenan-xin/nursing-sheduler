@@ -271,19 +271,22 @@ export function RequestsEditor() {
     setConfirm({ text, onConfirm });
   }
 
+  // Labels + order match the canonical set (ScreenRequests.dc.html:607-614):
+  // all-history, all-requests, then the four person/group x individual/group
+  // shapes with a right arrow between the two axes.
   const clearButtons: ClearButton[] = [
     {
-      label: "Clear all requests",
-      onClick: () =>
-        askConfirm("Are you sure you want to clear ALL shift requests?", clearAllRequests),
-    },
-    {
-      label: "Clear all history",
+      label: "All people history",
       onClick: () =>
         askConfirm("Are you sure you want to clear all people history?", clearAllHistory),
     },
     {
-      label: "Person ↔ Date",
+      label: "All requests",
+      onClick: () =>
+        askConfirm("Are you sure you want to clear ALL shift requests?", clearAllRequests),
+    },
+    {
+      label: "Person → individual dates",
       onClick: () =>
         askConfirm(
           "Are you sure you want to clear all requests between individual people and individual dates?",
@@ -291,7 +294,7 @@ export function RequestsEditor() {
         ),
     },
     {
-      label: "Group ↔ Date",
+      label: "Group → individual dates",
       onClick: () =>
         askConfirm(
           "Are you sure you want to clear all requests between people groups and individual dates?",
@@ -299,7 +302,7 @@ export function RequestsEditor() {
         ),
     },
     {
-      label: "Person ↔ Date group",
+      label: "Person → date groups",
       onClick: () =>
         askConfirm(
           "Are you sure you want to clear all requests between individual people and date groups?",
@@ -307,7 +310,7 @@ export function RequestsEditor() {
         ),
     },
     {
-      label: "Group ↔ Date group",
+      label: "Group → date groups",
       onClick: () =>
         askConfirm(
           "Are you sure you want to clear all requests between people groups and date groups?",

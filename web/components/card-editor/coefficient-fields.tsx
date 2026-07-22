@@ -18,6 +18,7 @@
 
 import * as React from "react";
 import { Input } from "@/components/ui/input";
+import { FaCircleInfo } from "@/components/icons";
 
 /**
  * A concrete member id inside the coefficient domain. Members are compared with
@@ -232,6 +233,8 @@ export interface CoefficientFieldsProps {
   aggregateError?: string;
   /** e.g. `"Count Shift Type"` / `"Shift Type"` — feeds the heading + empty copy. */
   label?: string;
+  /** Explanatory note shown under the heading (per-mode coverage-value / count copy). */
+  note?: string;
   /** Show the "All N have a coefficient" / "N need a coefficient" strip (default true). */
   showCoverage?: boolean;
   testId?: string;
@@ -245,6 +248,7 @@ export function CoefficientFields({
   errorsById = {},
   aggregateError,
   label = "Coefficient",
+  note,
   showCoverage = true,
   testId = "coefficient-fields",
 }: CoefficientFieldsProps) {
@@ -273,6 +277,12 @@ export function CoefficientFields({
       <span className="text-label font-semibold uppercase tracking-[0.03em] text-ink2">
         {label} Coefficients
       </span>
+      {note && (
+        <p className="flex items-start gap-2 text-meta text-ink3" data-testid={`${testId}-note`}>
+          <FaCircleInfo className="mt-0.5 flex-none text-brandink" />
+          <span>{note}</span>
+        </p>
+      )}
       {showCoverage && (
         <div
           className={`flex items-center gap-2 border px-3 py-2 text-meta font-semibold ${

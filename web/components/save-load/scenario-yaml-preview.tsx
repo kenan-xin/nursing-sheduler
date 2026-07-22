@@ -13,7 +13,7 @@ import type { PrepareExportResult, ScenarioValidationIssue } from "@/lib/scenari
 import { AppVersion } from "@/components/app-version";
 import { PersistenceBadge } from "@/components/shell/persistence-status";
 import { Button } from "@/components/ui/button";
-import { FaCodeBranch } from "@/components/icons";
+import { FaCheck, FaCodeBranch } from "@/components/icons";
 import { ScenarioIssuesList } from "./scenario-issues-list";
 
 export interface ScenarioYamlPreviewProps {
@@ -65,6 +65,7 @@ export function ScenarioYamlPreview({
           {issues ? <ScenarioIssuesList issues={issues} /> : null}
           <div className="flex gap-2.5">
             <Button type="button" onClick={onApply} data-testid="yaml-apply-button">
+              <FaCheck className="size-4" aria-hidden />
               Apply changes
             </Button>
             <Button

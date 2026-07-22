@@ -12,6 +12,8 @@ import { Button } from "@/components/ui/button";
 import {
   FaArrowRight,
   FaCalculator,
+  FaCheck,
+  FaCircleInfo,
   FaLock,
   FaPeopleArrows,
   FaSliders,
@@ -156,7 +158,8 @@ export function RulesScreen({ onOpenAdvanced }: RulesScreenProps) {
             onClick={() => setAdmin((v) => !v)}
             data-testid="rules-admin-toggle"
           >
-            <FaThumbtack className="size-3" /> {admin ? "Done customising" : "Customise library"}
+            {admin ? <FaCheck className="size-3" /> : <FaThumbtack className="size-3" />}{" "}
+            {admin ? "Done customising" : "Customise library"}
           </Button>
           <Button
             size="lg"
@@ -198,7 +201,8 @@ export function RulesScreen({ onOpenAdvanced }: RulesScreenProps) {
           <FaThumbtack className="text-brandink" />
           <div className="min-w-[180px] flex-1 text-meta text-ink2">
             <b>Pin a constraint.</b> Surface any Advanced constraint as a quick-access rule and pick
-            which fields become inline edits. Unpinning only removes the shortcut.
+            which fields become inline edits. Edits sync to the constraint. Unpinning only removes
+            the shortcut — the constraint stays in Advanced.
           </div>
           <Button
             size="sm"
@@ -234,9 +238,13 @@ export function RulesScreen({ onOpenAdvanced }: RulesScreenProps) {
           <span className="font-heading text-title font-extrabold">{onCount}</span>
           <span className="font-mono text-label text-ink3">OF {total} RULES ON</span>
         </div>
-        <div className="min-w-[180px] flex-1 text-meta text-ink2">
-          Rules with numbers show an <b>Adjust</b> button. Use <b>Customise library</b> to pin your
-          own quick-access rules.
+        <div className="flex min-w-[180px] flex-1 items-center gap-2 text-meta text-ink2">
+          <FaCircleInfo className="shrink-0 text-ink3" />
+          <span>
+            Rules with numbers show an <b>Adjust</b> button. Tap a rule&rsquo;s <b>↳ constraint</b>{" "}
+            link to edit the exact record in Advanced. Use <b>Customise library</b> to pin your own
+            quick-access rules.
+          </span>
         </div>
       </div>
 

@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 // T08 acceptance matrix (Playwright rows): losable-draft nav guard (row 2),
 // New-schedule reset (row 3), app-wide undo/redo via Ctrl-Z/Y (row 4), and
-// Guided-mode nav reachability incl. Export Layout (row 5). Row 1 (toggle ⇒
+// Guided-mode nav reachability (row 5). Row 1 (toggle ⇒
 // store byte-identical) is proven in lib/mode/mode.test.ts; the vitest half of
 // row 3 in components/shell/reset.test.ts.
 //
@@ -22,11 +22,12 @@ import { expect, test, type Page } from "@playwright/test";
 // seam mounted by the shell (components/shell/test-bridge.tsx) — a genuine tracked
 // mutation, not a mock.
 
-// The fixed 13-tab route set (spec 07 FR-ST-28), split by the DL12 §2
-// Guided/Advanced matrix (T08d): Guided foregrounds Dates, People, Shift
-// Types, Rules and Shift Requests; Advanced adds the raw Constraints group and
-// Export Layout. Every route still exists — the two lists below just record
-// which mode each is reachable in DIRECTLY from the sidebar.
+// The route set (spec 07 FR-ST-28, less the backlog-deferred Export Layout
+// screen — T15 / nursing-sheduler-qq0.15), split by the DL12 §2 Guided/Advanced
+// matrix (T08d): Guided foregrounds Dates, People, Shift Types, Rules and Shift
+// Requests; Advanced adds the raw Constraints group. Every route still exists —
+// the two lists below just record which mode each is reachable in DIRECTLY from
+// the sidebar.
 const GUIDED_NAV_PATHS = [
   "/",
   "/dates",
@@ -44,7 +45,6 @@ const ADVANCED_ONLY_PATHS = [
   "/shift-counts",
   "/shift-affinities",
   "/shift-type-coverings",
-  "/export-layout",
 ];
 
 /** Wait until the shell has hydrated (Home content past the hydration gate). */
@@ -617,8 +617,8 @@ test.describe("T08 app shell", () => {
       await expect(page.getByTestId(path === "/" ? "home-screen" : "screen")).toBeVisible();
     }
 
-    // The raw Constraints editors + Export Layout are Advanced-only (DL12
-    // §2) — not listed directly in the Guided sidebar.
+    // The raw Constraints editors are Advanced-only (DL12 §2) — not listed
+    // directly in the Guided sidebar.
     for (const path of ADVANCED_ONLY_PATHS) {
       await expect(page.getByTestId(`nav-link-${path}`)).toHaveCount(0);
     }

@@ -233,6 +233,8 @@ export function CountForm({ state, mode, initialForm, onSave, onCancel }: CountF
         pairs={form.countShiftTypeCoefficients}
         domain={domain}
         label="Count Shift Type"
+        showCoverage={false}
+        note="Each selected shift type counts toward x by its coefficient (a positive integer, default 1). x is the weighted sum over the selected people, shift types and dates; compare it to your target with the expression above. For an hours-based monthly target, use Add Contracted Hours instead."
         errorsById={errors.coefficientErrorsById}
         // `errors.coefficients` holds the joined per-id messages when per-id errors
         // exist (already shown inline via errorsById) OR the overlap message when

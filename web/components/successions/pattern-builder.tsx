@@ -23,6 +23,7 @@ import {
   FaChevronRight,
   FaLayerGroup,
   FaXmark,
+  FaPlus,
   FaCircleExclamation,
 } from "@/components/icons";
 import type { PatternShiftTypeOptionValue } from "./successions-model";
@@ -150,6 +151,7 @@ function SourceButton({
     >
       {group && <FaLayerGroup className="size-2.5 opacity-70" />}
       {option.label}
+      <FaPlus className="size-2.5 text-ink3" aria-hidden />
     </button>
   );
 }

@@ -842,7 +842,7 @@ test.describe.serial("T09 people & shift-types editors", () => {
     await page.getByTestId("add-item-id").fill("Day");
     await page.getByTestId("add-item-start").selectOption("08:00");
     await page.getByTestId("add-item-end").selectOption("16:00");
-    await expect(page.getByTestId("add-item-duration")).toHaveValue("480");
+    await expect(page.getByTestId("add-item-duration")).toContainText("8h");
     await page.getByTestId("add-item-save").click();
 
     await expect(page.getByTestId(`item-row-${sk("Day")}`)).toBeVisible();

@@ -30,7 +30,7 @@ export default function SaveAndLoadPage() {
           <h1 className="font-heading text-title font-semibold tracking-tight">Save &amp; Load</h1>
           <p className="text-meta text-ink2">
             Everything you set up is saved automatically in this browser. Download a copy to back it
-            up or share it.
+            up or share it, load a scenario file, or edit the YAML directly.
           </p>
         </div>
       </header>

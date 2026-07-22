@@ -6,14 +6,17 @@
 // Model/Rules/Generate/Save headings.
 //
 // The committed destination LABELS are retained (DL10-D4 / FR-ST-28): People,
-// Shift Types, the six rule-editor names, Optimize and Export, Export Layout,
-// Save and Load. Only the phase headings + grouping change.
+// Shift Types, the six rule-editor names, Optimize and Export, Save and Load.
+// Only the phase headings + grouping change. (Export Layout — prototype
+// ScreenExport — is deferred to the backlog (T15 / nursing-sheduler-qq0.15)
+// and has no shipped screen or nav entry; the exportLayout data model and its
+// default XLSX layout are unaffected.)
 //
 // Mode-visible navigation (DL12 tech-plan §2, superseding the earlier DL10
 // "identical in both modes" reading): Guided foregrounds Dates, People, Shift
 // Types, Rules and Shift Requests; Advanced adds the raw Constraints group
-// (Shift Type Requirements, Successions, Counts, Affinities, Coverings) and
-// Export Layout. Every capability still has an entry point somewhere — the raw
+// (Shift Type Requirements, Successions, Counts, Affinities, Coverings).
+// Every capability still has an entry point somewhere — the raw
 // constraint editors are reachable from Advanced mode directly, or from Guided
 // via the Rules screen's "Edit in Advanced" contextual links — but the Guided
 // sidebar/Home/crumb projection no longer lists them as if they were Guided
@@ -41,7 +44,6 @@ import {
   FaPeopleArrows,
   FaUserShield,
   FaWandMagicSparkles,
-  FaTableColumns,
   FaFloppyDisk,
 } from "@/components/icons";
 import type { IconType } from "@/components/icons";
@@ -163,13 +165,6 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: FaWandMagicSparkles,
         blurb: "Run the optimiser & export",
         guidedStep: 6,
-      },
-      {
-        label: "Export Layout",
-        path: "/export-layout",
-        icon: FaTableColumns,
-        blurb: "Spreadsheet colours & summaries",
-        advancedOnly: true,
       },
     ],
   },

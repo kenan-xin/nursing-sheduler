@@ -5,8 +5,8 @@ import { expect, test, type Page } from "@playwright/test";
 // Home cards, crumbs and `isRouteValidForMode` together, so this spec proves
 // they agree rather than re-testing any single surface's own conformance
 // (already covered by app-shell-rebuild.spec.ts / app-shell.spec.ts):
-//  • Guided sidebar/Home hide the raw Constraints group + Export Layout;
-//    Advanced shows them, plus the new Rules destination.
+//  • Guided sidebar/Home hide the raw Constraints group;
+//    Advanced shows it, plus the new Rules destination.
 //  • The route-validity gate redirects an Advanced-only URL to Home once mode
 //    adoption completes — never before (no transient false redirect).
 //  • Advanced-only → Guided is a draft-guarded atomic transaction (Confirm
@@ -72,7 +72,7 @@ async function closeTestDraft(page: Page) {
 }
 
 test.describe("T08d — Guided/Advanced route registry", () => {
-  test("Guided sidebar hides the raw Constraints group and Export Layout", async ({ page }) => {
+  test("Guided sidebar hides the raw Constraints group", async ({ page }) => {
     await gotoReadyHome(page);
     await expect(page.getByTestId("nav-group-setup")).toBeVisible();
     await expect(page.getByTestId("nav-group-constraints")).toHaveCount(0);
@@ -83,7 +83,6 @@ test.describe("T08d — Guided/Advanced route registry", () => {
       "/shift-counts",
       "/shift-affinities",
       "/shift-type-coverings",
-      "/export-layout",
     ]) {
       await expect(page.getByTestId(`nav-link-${path}`)).toHaveCount(0);
     }
@@ -100,7 +99,6 @@ test.describe("T08d — Guided/Advanced route registry", () => {
     await expect(page.getByTestId("nav-group-constraints")).toBeVisible();
     await expect(page.getByTestId("nav-group-label-constraints")).toHaveText(/constraints/i);
     await expect(page.getByTestId("nav-link-/shift-type-requirements")).toBeVisible();
-    await expect(page.getByTestId("nav-link-/export-layout")).toBeVisible();
 
     // Advanced never shows a Guided step number, even on a row that carries
     // one in Guided (Rules, guidedStep 4).
@@ -108,11 +106,11 @@ test.describe("T08d — Guided/Advanced route registry", () => {
     await expect(page.getByTestId("nav-step-/dates")).toHaveCount(0);
   });
 
-  test("the /rules crumb reads Rules, not the Home fallback", async ({ page }) => {
+  test("the /rules crumb reads Step 4 · Rules, not the Home fallback", async ({ page }) => {
     await gotoReadyHome(page);
     await page.getByTestId("nav-link-/rules").click();
     await expect(page).toHaveURL(/\/rules$/);
-    await expect(page.getByTestId("route-crumb")).toHaveText("Rules");
+    await expect(page.getByTestId("route-crumb")).toHaveText("Step 4 · Rules");
   });
 
   test("Advanced Home lists Rules alongside the raw Constraints editors", async ({ page }) => {
@@ -128,9 +126,9 @@ test.describe("T08d — Guided/Advanced route registry", () => {
   }) => {
     await gotoReadyHome(page);
     await page.getByTestId("mode-toggle-advanced").click();
-    await page.getByTestId("nav-link-/export-layout").click();
-    await expect(page).toHaveURL(/\/export-layout$/);
-    await expect(page.getByTestId("route-crumb")).toHaveText("Export Layout");
+    await page.getByTestId("nav-link-/shift-counts").click();
+    await expect(page).toHaveURL(/\/shift-counts$/);
+    await expect(page.getByTestId("route-crumb")).toHaveText("Shift Counts");
   });
 });
 
@@ -156,7 +154,6 @@ const ADVANCED_ONLY_PATHS = [
   "/shift-counts",
   "/shift-affinities",
   "/shift-type-coverings",
-  "/export-layout",
 ];
 const ALL_REGISTERED_PATHS = [...GUIDED_VISIBLE_PATHS, ...ADVANCED_ONLY_PATHS];
 

@@ -66,7 +66,7 @@ export function ConfirmDialog({
 
           {/* Band 2 — body + optional consequence list */}
           <div className="flex flex-col gap-3 px-5 py-4">
-            <AlertDialog.Description className="text-meta text-ink2">
+            <AlertDialog.Description className="whitespace-pre-line text-meta text-ink2">
               {description}
             </AlertDialog.Description>
             {hasConsequences && (

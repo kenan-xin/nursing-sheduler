@@ -53,7 +53,7 @@ interface StepContent {
 
 const STEP_CONTENT: Record<string, StepContent> = {
   "/dates": {
-    label: "Set the dates",
+    label: "Set the Dates",
     readyKey: "dates",
     desc: "Pick the roster range and mark public holidays.",
     summary: (s) =>
@@ -62,31 +62,31 @@ const STEP_CONTENT: Record<string, StepContent> = {
         : "No valid range yet",
   },
   "/people": {
-    label: "Add your people",
+    label: "Add Your People",
     readyKey: "people",
     desc: "List nurses and organise people groups.",
     summary: (s) => `${s.peopleCount} people · ${s.staffGroupsCount} groups`,
   },
   "/shift-types": {
-    label: "Define the shifts",
+    label: "Define the Shifts",
     readyKey: "shiftTypes",
     desc: "Set up your daily shift types.",
     summary: (s) => `${s.shiftTypesCount} shift types`,
   },
   "/rules": {
-    label: "Choose the rules",
+    label: "Choose the Rules",
     readyKey: "rules",
     desc: "Pick plain-English rules for staffing and skill mix.",
     summary: (s) => `${s.rulesTotal} rules set`,
   },
   "/shift-requests": {
-    label: "Requests & leave",
+    label: "Requests & Leave",
     readyKey: "requests",
     desc: "Pin leave, off-days and shift preferences.",
     summary: (s) => `${s.shiftRequestsCount} requests entered`,
   },
   "/optimize-and-export": {
-    label: "Generate the roster",
+    label: "Generate the Roster",
     desc: "Build a fair roster that respects every rule.",
     summary: (s) => (s.prerequisitesMet ? "Ready to generate" : "Ready when the steps are done"),
   },

@@ -115,7 +115,7 @@ test.describe("T10 Dates & Calendar", () => {
   test("page identity — STEP 1 hero + Continue to staff CTA", async ({ page }) => {
     await gotoDates(page);
     await expect(page.getByRole("heading", { name: "Schedule Dates" })).toBeVisible();
-    await expect(page.getByText("Step 1 · Dates")).toBeVisible();
+    await expect(page.locator("main > div").getByText("Step 1 · Dates")).toBeVisible();
     const cta = page.getByTestId("dates-continue");
     await expect(cta).toHaveText(/Continue to staff/);
     await expect(cta).toHaveAttribute("href", "/people");
@@ -336,8 +336,9 @@ test.describe("T10 Dates & Calendar", () => {
     await expect(page.getByTestId("date-group-preview-count")).toContainText("day");
 
     // WEEKEND (Sat+Sun) is a superset of SUNDAY, so the union equals WEEKEND's size.
-    const weekendCount = Number(
-      await page.getByTestId("derived-group-WEEKEND-count").textContent(),
+    const weekendCount = Number.parseInt(
+      (await page.getByTestId("derived-group-WEEKEND-count").textContent()) ?? "",
+      10,
     );
     await expect(page.getByTestId("date-group-preview-count")).toHaveText(`${weekendCount} days`);
 

@@ -184,6 +184,17 @@ export function ExpressionField({
           </span>
         </label>
       </div>
+      <p
+        className="flex items-start gap-2 text-meta text-ink3"
+        data-testid={`${testId}-target-note`}
+      >
+        <FaCircleInfo className="mt-0.5 flex-none text-brandink" />
+        <span>
+          {isSquaredExpression(expression)
+            ? "T is the ideal count. |x − T|² pushes x toward T from both sides — pair it with a negative or −∞ weight (a positive weight is rejected)."
+            : "T is a whole number in the same unit as the coefficients — e.g. a 160h contract in half-hour units is 320."}
+        </span>
+      </p>
       {error && (
         <p className="flex items-center gap-1.5 text-meta font-semibold text-error" role="alert">
           <FaCircleExclamation className="size-3 flex-none" /> {error}
