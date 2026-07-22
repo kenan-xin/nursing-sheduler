@@ -1,9 +1,11 @@
 # Build wrapper + deployment targets (DL11 D2, tech-plan §2/§3).
 #
-# `make build` reads and validates the root VERSION file ONCE, then feeds it to
-# BOTH images as APP_VERSION via Compose build args. A Dockerfile ARG cannot read a
-# build-context file, so the value must be fed in here. If VERSION is missing or
-# empty the build FAILS LOUDLY — there is deliberately no silent `v0.0.0-dev`.
+# `make build` computes the version via `git describe --tags --always --dirty`
+# ONCE on the host, then feeds it to BOTH images as APP_VERSION via Compose build
+# args. Git runs only here on the host — the containers never invoke git. An
+# exported `APP_VERSION` or `make APP_VERSION=… build` overrides the git
+# computation (for archive/CI builds with no `.git`). If the version is empty
+# the build FAILS LOUDLY — there is deliberately no silent `v0.0.0-dev`.
 #
 # Deployment is a private base topology (web + backend + redis, no host ports) plus
 # exactly ONE ingress overlay:
@@ -44,9 +46,13 @@ DIAGNOSTIC_ENV_FLAG := $(if $(wildcard $(ENV_FILE)),--env-file $(ENV_FILE),)
 COMPOSE_DIAGNOSTIC := docker compose $(DIAGNOSTIC_ENV_FLAG) -f $(BASE) --profile diagnostic
 COMPOSE_DIAGNOSTIC_MEMORY := docker compose $(DIAGNOSTIC_ENV_FLAG) -f $(BASE) -f $(MEMORY) --profile diagnostic
 
-VERSION_FILE := VERSION
-# Strip surrounding whitespace/newline; empty string if the file is missing.
-APP_VERSION := $(strip $(shell cat $(VERSION_FILE) 2>/dev/null))
+# Version = git describe (single source of truth, computed once on the host).
+# Use origin check + := (NOT ?=, which is recursively expanded and would re-run
+# git describe on every reference). Override with `make APP_VERSION=… build` or
+# `export APP_VERSION=…` for archive/CI builds with no .git.
+ifeq ($(origin APP_VERSION),undefined)
+  APP_VERSION := $(shell git describe --tags --always --dirty 2>/dev/null)
+endif
 
 .PHONY: build up up-cloudflare down down-cloudflare logs logs-cloudflare \
 	verify-deploy verify-stream version check-version check-env check-public-origin \
@@ -55,8 +61,11 @@ APP_VERSION := $(strip $(shell cat $(VERSION_FILE) 2>/dev/null))
 
 check-version:
 	@if [ -z "$(APP_VERSION)" ]; then \
-		echo "ERROR: $(VERSION_FILE) is missing or empty — refusing to build without a version stamp." >&2; \
+		echo "ERROR: git describe failed — refusing to build without a version stamp." >&2; \
 		exit 1; \
+	fi
+	@if ! echo "$(APP_VERSION)" | grep -q 'v[0-9]'; then \
+		echo "WARNING: APP_VERSION='$(APP_VERSION)' has no version tag (bare hash) — consider tagging: git tag vX.Y.Z" >&2; \
 	fi
 
 check-env:

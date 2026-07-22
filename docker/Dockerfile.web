@@ -29,6 +29,7 @@ ENV CI=true
 COPY --from=deps /app/node_modules ./node_modules
 COPY web/ ./
 ARG APP_VERSION
+RUN test -n "$APP_VERSION" || { echo "ERROR: APP_VERSION is empty — build via 'make build'" >&2; exit 1; }
 ENV NEXT_PUBLIC_APP_VERSION=${APP_VERSION}
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm build

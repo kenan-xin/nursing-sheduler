@@ -4,7 +4,7 @@
 # asserts:
 #   - base publishes NO host ports (web, backend, redis all internal)
 #   - redis answers PING and runs non-root; backend `/ready` is ready; web `/api/health` works
-#   - NEXT_PUBLIC_APP_VERSION (client bundle) == /api/health.appVersion == stamped VERSION
+#   - NEXT_PUBLIC_APP_VERSION (client bundle) == /api/health.appVersion == APP_VERSION
 #   - web and backend run as uid 1000; backend CMD keeps `--workers 1`
 #   - segmented networks: web↔backend reachable; web✗redis, an ingress-only peer✗backend/redis
 #   - a queued job survives a backend restart AND a Redis CONTAINER REPLACEMENT (named volume)
@@ -25,9 +25,9 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-APP_VERSION="${APP_VERSION:-$(tr -d '[:space:]' < VERSION 2>/dev/null)}"
+APP_VERSION="${APP_VERSION:-$(git describe --tags --always --dirty 2>/dev/null)}"
 if [ -z "$APP_VERSION" ]; then
-  echo "FAIL: APP_VERSION/VERSION is empty" >&2
+  echo "FAIL: APP_VERSION is empty (git describe failed)" >&2
   exit 1
 fi
 
@@ -218,8 +218,8 @@ echo "== web health + version equality =="
 health="$($COMPOSE exec -T web wget -q -O - http://127.0.0.1:3000/api/health 2>/dev/null || true)"
 be_ver="$(printf '%s' "$health" | sed -n 's/.*"appVersion":"\([^"]*\)".*/\1/p')"
 [ -n "$be_ver" ] && ok "/api/health returned appVersion=$be_ver" || bad "/api/health missing appVersion (body: $health)"
-[ "$be_ver" = "$APP_VERSION" ] && ok "backend appVersion == stamped VERSION" \
-  || bad "backend appVersion ($be_ver) != stamped VERSION ($APP_VERSION)"
+[ "$be_ver" = "$APP_VERSION" ] && ok "backend appVersion == APP_VERSION" \
+  || bad "backend appVersion ($be_ver) != APP_VERSION ($APP_VERSION)"
 if $COMPOSE exec -T web sh -c "grep -rq \"$APP_VERSION\" .next/static 2>/dev/null"; then
   ok "client bundle contains NEXT_PUBLIC_APP_VERSION=$APP_VERSION"
 else

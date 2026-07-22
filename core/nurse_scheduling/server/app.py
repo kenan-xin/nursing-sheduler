@@ -19,6 +19,7 @@
 
 import logging
 import os
+import subprocess
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -75,21 +76,54 @@ server_logger = logging.getLogger("nurse_scheduling.server")
 server_logger.setLevel(logging.INFO)
 
 
-def get_app_version() -> str:
-    """Resolve the build version from `APP_VERSION`, then `/app/VERSION`, then a fallback.
+def _git_describe_version(repo_root: Path) -> str | None:
+    """Try ``git describe`` from *repo_root*; return ``None`` if ``.git`` is absent or git fails.
 
-    The rebuild stamps the version at image build time and must not depend on Git
-    being present at runtime (see the upstream Redis/Workspace technical plan §1).
+    The ``.git`` existence check is the hermeticity backstop: in a container there
+    is no ``.git`` directory, so this function returns ``None`` without ever
+    spawning a subprocess — git is unreachable from a hermetic image.
+    """
+    if not (repo_root / ".git").exists():
+        return None
+    try:
+        return (
+            subprocess.check_output(
+                [
+                    "git",
+                    "-c",
+                    f"safe.directory={repo_root}",
+                    "-C",
+                    str(repo_root),
+                    "describe",
+                    "--tags",
+                    "--always",
+                    "--dirty",
+                ],
+                stderr=subprocess.DEVNULL,
+                text=True,
+            ).strip()
+            or None
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
+def get_app_version() -> str:
+    """Resolve the build version: ``APP_VERSION`` env → ``git describe`` → fallback.
+
+    In the container, ``APP_VERSION`` is always set (``ENV`` from the build arg),
+    so the git branch is unreachable there — the container never invokes git.
+    From source (dev), ``APP_VERSION`` is typically unset, so it falls through to
+    ``git describe`` of the current checkout, yielding ``v0.1.1-442-gHASH``-style
+    provenance that matches the frontend's dev stamp.
     """
     env_version = os.environ.get("APP_VERSION")
     if env_version and env_version.strip():
         return env_version.strip()
-    try:
-        file_version = Path("/app/VERSION").read_text().strip()
-        if file_version:
-            return file_version
-    except OSError:
-        pass
+    repo_root = Path(__file__).resolve().parents[3]
+    git_version = _git_describe_version(repo_root)
+    if git_version:
+        return git_version
     return "v0.0.0-unknown"
 
 

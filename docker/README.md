@@ -35,8 +35,8 @@ therefore contained to `web:3000`.
 ## Prerequisites
 
 - Docker + Docker Compose v2.
-- Root `VERSION` file present and non-empty (single source of truth for the
-  version stamp).
+- Git repository with at least one `vX.Y.Z` tag (the version is computed via
+  `git describe --tags --always --dirty`).
 - For Cloudflare mode: a **named** Cloudflare tunnel (quick `trycloudflare.com`
   tunnels do **not** support SSE, which the optimize stream needs — T16).
 
@@ -80,7 +80,7 @@ after deploy.
 ## Build & run
 
 ```bash
-make build            # reads+validates VERSION once, stamps BOTH images (APP_VERSION)
+make build            # computes version via git describe, stamps BOTH images (APP_VERSION)
 
 make up               # base + direct overlay (publishes web only)
 make down
@@ -91,15 +91,15 @@ make down-cloudflare
 make logs-cloudflare
 ```
 
-`make build` **fails loudly** if `VERSION` is missing/empty — there is no silent
-`v0.0.0-dev` fallback. The version is fed to both images as the `APP_VERSION` build
-arg; a Dockerfile `ARG` cannot read the build-context `VERSION` file, so the build
-wrapper feeds it in.
+`make build` **fails loudly** if `git describe` fails (e.g. no `.git`, git not
+installed) — there is no silent `v0.0.0-dev` fallback. The version is computed on
+the host via `git describe --tags --always --dirty` and fed to both images as the
+`APP_VERSION` build arg.
 
 - **web**: `APP_VERSION` → `NEXT_PUBLIC_APP_VERSION` **before** `pnpm build`
   (compiled into the client bundle; a runtime env cannot change a built bundle).
-- **backend**: `APP_VERSION` → runtime `ENV` + bundled `VERSION` file, read by
-  `serve.py` (replaces the removed `git describe`, DL11 D2).
+- **backend**: `APP_VERSION` → runtime `ENV`, read by `get_app_version()`
+  (replaces the retired `VERSION` file / `git describe`, DL11 D2).
 
 Result: `NEXT_PUBLIC_APP_VERSION` (client) and `/api/health.appVersion` (backend)
 are stamped from the **same** value, so the version mismatch check is meaningful.
@@ -187,7 +187,7 @@ It builds+starts the **private base** and asserts each gate, then tears down
 | redis health / non-root | `redis-cli ping` → PONG; redis process runs non-root |
 | backend readiness | `/ready` reports `ready` |
 | web health | `/api/health` returns backend JSON incl. `appVersion` |
-| version equality | backend `appVersion` == stamped `VERSION` == `NEXT_PUBLIC_APP_VERSION` in the client bundle |
+| version equality | backend `appVersion` == `APP_VERSION` == `NEXT_PUBLIC_APP_VERSION` in the client bundle |
 | non-root | web and backend both run as **uid 1000** |
 | one worker | backend CMD retains `--workers 1` |
 | restart persistence | a queued job survives a **backend** restart and a **redis container replacement** — the container ID changes, the named volume reattaches, and the job survives |
@@ -359,8 +359,8 @@ so equal IDs are evidence, not proof, of sharing.
   `dev` branch. `Dockerfile.diagnostic` builds from **local vendored source** with a
   selective copy (app package + the single scenario asset), like `Dockerfile.backend`.
   It is **version-stamped identically** to the backend — `APP_VERSION` build arg →
-  `ENV` + `/app/VERSION` (root `VERSION`), so `get_app_version()` reports the deployed
-  version with no Git at build or runtime. `make diagnostic-version-check` gates this.
+  `ENV`, so `get_app_version()` reports the deployed version with no Git at build
+  or runtime. `make diagnostic-version-check` gates this.
 - **Base profile, not bundled public topology.** Upstream bundled the diagnostic with
   its public API + Cloudflare topology and defaulted the target to its public host.
   Here it is an opt-in profile on the private base, defaulting to the internal
@@ -383,7 +383,7 @@ The runtime image ships **only** the app package — `Dockerfile.backend` does a
 selective `COPY core/nurse_scheduling/ ./nurse_scheduling/`, so `core/tests/` and
 the vendored caches never enter the image (`ls /app/core` → `nurse_scheduling`,
 `requirements.txt`). The app runs from source via uvicorn (no `pip install .`), and
-`serve.py` reads its version from `APP_VERSION` → `/app/VERSION` (not from
+`get_app_version()` reads its version from the `APP_VERSION` env var (not from
 `pyproject.toml`/metadata), so no test tree or project metadata is needed at
 runtime. `deploy_gate_driver.py` therefore imports only `nurse_scheduling.server`.
 

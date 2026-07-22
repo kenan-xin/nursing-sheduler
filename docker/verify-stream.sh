@@ -33,9 +33,9 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-APP_VERSION="${APP_VERSION:-$(tr -d '[:space:]' < VERSION 2>/dev/null)}"
+APP_VERSION="${APP_VERSION:-$(git describe --tags --always --dirty 2>/dev/null)}"
 if [ -z "$APP_VERSION" ]; then
-  echo "FAIL: APP_VERSION/VERSION is empty" >&2
+  echo "FAIL: APP_VERSION is empty (git describe failed)" >&2
   exit 1
 fi
 export APP_VERSION

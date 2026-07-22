@@ -4,7 +4,7 @@
 # branch (upstream's Dockerfile.api did; rejected here, like Dockerfile.backend).
 # Build context = repo root so `COPY core/...` resolves.
 #
-# Importing `nurse_scheduling.server.diagnostic` runs the package `__init__`, which
+# Importing `nurse_scheduling.server.diagnostic` runs the package `__init__, which
 # imports the scheduler, so the diagnostic needs the full app package and the same
 # runtime dependencies as the backend. This image is therefore the lean backend
 # runtime PLUS exactly ONE extra asset: the real large-ward scenario the diagnostic
@@ -12,13 +12,12 @@
 # package and that single scenario file.
 FROM python:3.12-slim
 
-# Version stamping: the SAME boundary as Dockerfile.backend — `get_app_version()`
-# resolves APP_VERSION (env) → /app/VERSION → v0.0.0-unknown, with NO Git at build
-# or runtime. APP_VERSION is fed by the build wrapper (`make diagnostic`); there is
-# deliberately no literal default, so a stamp-less build fails loudly like the backend.
+# Version stamping: the SAME boundary as Dockerfile.backend — APP_VERSION env var
+# (fed by the build wrapper), with NO Git at build or runtime. There is deliberately
+# no literal default, so a stamp-less build fails loudly like the backend.
 ARG APP_VERSION
+RUN test -n "$APP_VERSION" || { echo "ERROR: APP_VERSION is empty — build via 'make diagnostic'" >&2; exit 1; }
 ENV APP_VERSION=${APP_VERSION}
-COPY VERSION /app/VERSION
 
 WORKDIR /app/core
 COPY core/requirements.txt .

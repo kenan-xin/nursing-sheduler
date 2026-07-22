@@ -5,10 +5,10 @@
 #   make up-cloudflare → base + docker/compose.cloudflare.yml (adds cloudflared)
 #
 # Build context is the repo root (..) so both Dockerfiles can COPY the vendored
-# `core/`, the root `VERSION`, and `web/`.
+# `core/` and `web/`.
 #
-# APP_VERSION MUST be provided (exported by `make build`, which reads + validates
-# the root VERSION once). It is intentionally NOT defaulted — a silent
+# APP_VERSION MUST be provided (exported by `make build`, which computes it via
+# `git describe`). It is intentionally NOT defaulted — a silent
 # `v0.0.0-dev` would make the version-equality gate meaningless.
 #
 # Reachability is a TOPOLOGY invariant, not a convention: three segmented networks
@@ -148,7 +148,7 @@ services:
       args:
         # Stamp the diagnostic image with the SAME version boundary as backend/web
         # (no literal default — a stamp-less build fails loudly). `make diagnostic`
-        # exports it from the validated root VERSION.
+        # exports it from `git describe`.
         APP_VERSION: ${APP_VERSION:?APP_VERSION is not set — build via `make diagnostic`}
     image: nurse-scheduling-diagnostic:local
     restart: "no"
