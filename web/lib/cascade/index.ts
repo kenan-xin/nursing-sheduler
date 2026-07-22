@@ -3,7 +3,7 @@
 // design review findings #3/#4/#5). The store wires each op as one tracked
 // mutation (T04 `mutateScenario`); these functions never touch the store.
 
-export { renameEntity, applyRename } from "./rename";
+export { renameEntity, applyRename, remapDateReferences } from "./rename";
 export { deleteEntity, applyDelete } from "./delete";
 export {
   RenameCollisionError,

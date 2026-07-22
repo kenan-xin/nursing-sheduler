@@ -208,3 +208,38 @@ export function renameEntity(
 
 /** Acceptance-matrix alias for {@link renameEntity} (`applyRename(state, …)`). */
 export const applyRename = renameEntity;
+
+/**
+ * Remap a batch of date-id references old-id → new-id across the three span-id
+ * surfaces — the person×date matrix (`reqData`), the export-layout date rows/
+ * columns, and date-group members — WITHOUT the {@link renameEntity} collision
+ * assertion. `renameEntity` cannot be used here: `assertNoRenameCollision`
+ * (`domain.ts` `DATE_LITERAL_PATTERNS`) reads every date literal (`DD`/`MM-DD`/
+ * `YYYY-MM-DD`) as a reserved id and throws `RenameCollisionError("reserved")` on
+ * every date target. The range-change cascade uses this to migrate the dates that
+ * stay in range but are re-keyed when the roster span class changes.
+ *
+ * Only generated-id → generated-id pairs belong in `remap`: keyword group members
+ * (`WEEKEND`/weekday names/`ALL`) and imported range-literals (`"01~15"`) are
+ * span-independent, never appear as keys, and pass through untouched; full-ISO
+ * preference-card date fields are not span ids and are deliberately NOT a surface
+ * here. The `DD`/`MM-DD`/`YYYY-MM-DD` id-spaces are disjoint, so no new-id ever
+ * equals another pair's old-id — applying the pairs in sequence never chains.
+ * Pure: returns a new `ScenarioUiState`, never mutating the input.
+ */
+export function remapDateReferences(
+  state: ScenarioUiState,
+  remap: ReadonlyMap<string, string>,
+): ScenarioUiState {
+  if (remap.size === 0) return state;
+  let reqData = state.reqData;
+  let exportLayout = state.exportLayout;
+  let dateGroups = state.dateGroups;
+  for (const [oldId, newId] of remap) {
+    reqData = renameReqData(reqData, "date", oldId, newId);
+    exportLayout = renameExportLayout(exportLayout, "date", oldId, newId);
+    dateGroups =
+      renameDefinitions({ ...state, dateGroups }, "date", oldId, newId).dateGroups ?? dateGroups;
+  }
+  return { ...state, reqData, exportLayout, dateGroups };
+}
