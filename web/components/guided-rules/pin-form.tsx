@@ -88,9 +88,10 @@ export function PinForm({ records, initial, onCancel, onSubmit }: PinFormProps) 
   const selected = records.find((r) => `${r.kind}:${r.constraintId}` === selectedKey);
 
   // The record `<select>` is disabled in edit mode, so `selectedKey` only ever
-  // changes in add mode. Guard the reset below against the first render, which
+  // changes in add mode. Track the prior `selectedKey` so the reset below fires
+  // only on a genuine change — never on mount, whose StrictMode double-invoke
   // would otherwise clobber the edit-mode init `useState(initial?.pin.quickFields)`.
-  const didMountRef = React.useRef(false);
+  const prevSelectedKeyRef = React.useRef(selectedKey);
 
   // Roving tabindex for the category radiogroup (WAI-ARIA APG radio pattern):
   // only the checked chip is a Tab stop; arrow keys move both the selection
@@ -110,17 +111,17 @@ export function PinForm({ records, initial, onCancel, onSubmit }: PinFormProps) 
   }
 
   React.useEffect(() => {
-    // Skip the very first run: on mount `selectedKey` reflects `initial`, so
-    // resetting here would wipe the edit-mode init `initial?.pin.quickFields`.
-    // From then on, selecting a different record (add mode only — the select is
+    // Reset only when `selectedKey` actually changed from its previous value —
+    // not on mount, where it reflects `initial` and resetting would wipe the
+    // edit-mode init `initial?.pin.quickFields`. The ref starts equal to the
+    // mount `selectedKey`, so mount (and its StrictMode double-invoke) is a
+    // no-op. Selecting a different record (add mode only — the select is
     // disabled when editing) resets the field selection to that record's own
     // set — a stale key from a previously-selected record must never carry over
     // (a different kind's fields rarely share the same key by coincidence, but
     // nothing should be assumed).
-    if (!didMountRef.current) {
-      didMountRef.current = true;
-      return;
-    }
+    if (prevSelectedKeyRef.current === selectedKey) return;
+    prevSelectedKeyRef.current = selectedKey;
     setQuickFields([]);
   }, [selectedKey]);
 

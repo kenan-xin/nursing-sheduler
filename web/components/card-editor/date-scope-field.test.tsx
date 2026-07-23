@@ -159,6 +159,33 @@ describe("DateScopeField (RTL)", () => {
     expect(input().value).toBe("");
   });
 
+  it("does not clobber in-progress multi-month typing that transiently parses to []", () => {
+    function Harness() {
+      const [value, setValue] = React.useState<readonly DateRef[]>([]);
+      return (
+        <DateScopeField
+          autoScopes={[]}
+          dateGroups={[]}
+          dateItems={MULTI_MONTH}
+          value={value}
+          onChange={setValue}
+        />
+      );
+    }
+    render(<Harness />);
+    const input = screen.getByTestId("date-scope-custom") as HTMLInputElement;
+    // Incremental keyboard entry: each partial token parses to [] (month-aware
+    // grammar), which flips isCustom false. The field must retain what was typed.
+    fireEvent.change(input, { target: { value: "08" } });
+    expect(input.value).toBe("08");
+    fireEvent.change(input, { target: { value: "08-1" } });
+    expect(input.value).toBe("08-1");
+    fireEvent.change(input, { target: { value: "08-15" } });
+    expect(input.value).toBe("08-15");
+    // The completed token resolves to the exact full-ISO ref.
+    expect(textToRefs(input.value, MULTI_MONTH)).toEqual(["2026-08-15"]);
+  });
+
   it("does not clobber in-progress typing that parses to the same refs", () => {
     function Harness() {
       const [value, setValue] = React.useState<readonly DateRef[]>(["2026-07-05"]);

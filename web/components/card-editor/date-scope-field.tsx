@@ -256,25 +256,37 @@ export function DateScopeField({
   // concrete dates (no scope active). Seeded from the value on mount.
   const isCustom = scope === null;
   const [text, setText] = React.useState(() => (isCustom ? refsToText(value, dateItems) : ""));
+  // The refs this field last emitted from its own `onCustom`. Used to distinguish
+  // the field's own round-trip (including a partial token that transiently parses
+  // to `[]` mid-typing) from a GENUINE external `value` change. `null` means "no
+  // pending self-emit" (mount, or after a scope pick), so the effect re-seeds.
+  const lastEmittedRef = React.useRef<readonly DateRef[] | null>(null);
 
-  // Re-sync `text` on GENUINE external `value` changes (a consumer loading a new
-  // card, switching scope, undo/redo) so the field can't desync. We must NOT
-  // clobber the field's own onCustom round-trip or in-progress typing: if the
-  // current text already parses to `value`, it's in sync — leave it. A value that
-  // is a scope (not custom) clears the text.
+  // Re-sync `text` on GENUINE external `value` changes only (a consumer loading a
+  // new card, switching scope, undo/redo) so the field can't desync. If `value`
+  // equals the refs we just emitted, this is our own round-trip — leave the text
+  // as typed (an empty `[]` is a valid emitted value, so partial-token typing that
+  // transiently parses to `[]` is NOT clobbered). A value that is a scope (not
+  // custom) clears the text.
   React.useEffect(() => {
-    if (isCustom && sameRefs(textToRefs(text, dateItems), value)) return;
+    if (lastEmittedRef.current !== null && sameRefs(value, lastEmittedRef.current)) return;
+    lastEmittedRef.current = null;
     setText(isCustom ? refsToText(value, dateItems) : "");
-  }, [value, dateItems, isCustom, text]);
+  }, [value, dateItems, isCustom]);
 
   const selectScope = (id: string) => {
+    // A scope pick is not a custom round-trip; clear the marker so the effect
+    // re-seeds text to "" for the scope value.
+    lastEmittedRef.current = null;
     setText("");
     onChange(id.toUpperCase() === ALL_SCOPE ? [...allValue] : [id]);
   };
 
   const onCustom = (next: string) => {
+    const refs = textToRefs(next, dateItems);
+    lastEmittedRef.current = refs;
     setText(next);
-    onChange(textToRefs(next, dateItems));
+    onChange(refs);
   };
 
   return (
