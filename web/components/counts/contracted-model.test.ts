@@ -11,6 +11,7 @@ import {
   contractedCoefficientIds,
   defaultContractedForm,
   emptyContractedForm,
+  findContractedDraftLeaveAdvisory,
   hasContractedErrors,
   toContractedForm,
   validateContractedCommit,
@@ -319,6 +320,99 @@ describe("addLeaveCreditToContractDraft — pure draft repair (qq0.23c/d)", () =
     expect(draft).toEqual(draftSnapshot);
     expect(BASE).toEqual(stateSnapshot);
     expect(next).not.toBe(draft);
+  });
+});
+
+describe("findContractedDraftLeaveAdvisory — draft-aware editor advisory (qq0.23d)", () => {
+  // A leave pin on Anna over a concrete in-range date; a contract counting only D
+  // (never LEAVE) over ALL people/dates therefore leaves Anna's leave uncredited.
+  function leaveScenario(overrides: Partial<ScenarioUiState> = {}): ScenarioUiState {
+    return scenario({
+      staff: [{ id: "Anna" }, { id: "Lil" }],
+      shifts: [{ id: "D" }, { id: "N" }],
+      rangeStart: "2026-01-01",
+      rangeEnd: "2026-01-31",
+      reqData: [{ kind: "leave", person: "Anna", date: "2026-01-05" }],
+      ...overrides,
+    });
+  }
+
+  const unsafeDraft = (overrides: Partial<ContractedFormState> = {}) =>
+    form({
+      person: ["ALL"],
+      countDates: ["ALL"],
+      countShiftTypes: ["D"],
+      countShiftTypeCoefficients: [["D", 16]],
+      targetExact: "160h",
+      ...overrides,
+    });
+
+  it("names the overlapping leave-pinned person when the draft omits LEAVE", () => {
+    expect(findContractedDraftLeaveAdvisory(unsafeDraft(), leaveScenario(), true)).toEqual([
+      "Anna",
+    ]);
+  });
+
+  it("returns null once the repaired draft already credits LEAVE (unsafe → safe)", () => {
+    const repaired = addLeaveCreditToContractDraft(unsafeDraft(), leaveScenario());
+    expect(findContractedDraftLeaveAdvisory(repaired, leaveScenario(), true)).toBeNull();
+  });
+
+  it("re-warns after LEAVE is removed from an otherwise-safe draft (safe → unsafe)", () => {
+    const state = leaveScenario();
+    const safe = unsafeDraft({ countShiftTypes: ["D", "LEAVE"] });
+    expect(findContractedDraftLeaveAdvisory(safe, state, true)).toBeNull();
+    const unsafe = { ...safe, countShiftTypes: ["D"] };
+    expect(findContractedDraftLeaveAdvisory(unsafe, state, true)).toEqual(["Anna"]);
+  });
+
+  it("suppresses the advisory when the source card is disabled/absent (isEnabled=false)", () => {
+    expect(findContractedDraftLeaveAdvisory(unsafeDraft(), leaveScenario(), false)).toBeNull();
+  });
+
+  it("returns null when no resolved leave pin overlaps the draft's people", () => {
+    const state = leaveScenario({
+      reqData: [{ kind: "leave", person: "Lil", date: "2026-01-05" }],
+    });
+    // Count only Anna; the only leave pin is on Lil — no overlap.
+    expect(
+      findContractedDraftLeaveAdvisory(unsafeDraft({ person: ["Anna"] }), state, true),
+    ).toBeNull();
+  });
+
+  it("orders affected names by staff declaration, not selector order", () => {
+    const state = leaveScenario({
+      reqData: [
+        { kind: "leave", person: "Lil", date: "2026-01-05" },
+        { kind: "leave", person: "Anna", date: "2026-01-06" },
+      ],
+    });
+    // Select people in reversed order; names still follow staff order [Anna, Lil].
+    const names = findContractedDraftLeaveAdvisory(
+      unsafeDraft({ person: ["Lil", "Anna"] }),
+      state,
+      true,
+    );
+    expect(names).toEqual(["Anna", "Lil"]);
+  });
+
+  it("is null when the count selector already reaches LEAVE via a group", () => {
+    const state = leaveScenario({ shiftGroups: [{ id: "WithLeave", members: ["D", "LEAVE"] }] });
+    expect(
+      findContractedDraftLeaveAdvisory(
+        unsafeDraft({ countShiftTypes: ["WithLeave"] }),
+        state,
+        true,
+      ),
+    ).toBeNull();
+  });
+
+  it("recomputes from the LIVE pin snapshot — no pin yields null, adding one warns", () => {
+    const noPin = leaveScenario({ reqData: [] });
+    expect(findContractedDraftLeaveAdvisory(unsafeDraft(), noPin, true)).toBeNull();
+    expect(findContractedDraftLeaveAdvisory(unsafeDraft(), leaveScenario(), true)).toEqual([
+      "Anna",
+    ]);
   });
 });
 

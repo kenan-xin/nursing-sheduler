@@ -1,15 +1,12 @@
 // Pure core for the T17b-2 Load flow UI. Kept out of the UI components so the
-// version-mismatch wording and the non-blocking uncredited-LEAVE detector are
-// unit-testable without mounting a component, mirroring the established
-// `scenario-file-export.ts` pure-core / `-card.tsx` UI split.
+// version-mismatch wording is unit-testable without mounting a component,
+// mirroring the established `scenario-file-export.ts` pure-core / `-card.tsx` UI
+// split. (The uncredited-leave guard now lives in the shared detector — see
+// `lib/scenario/leave-guard` — and is wired into import in `use-scenario-import.ts`.)
 
 import {
-  buildShiftTypeIndexMap,
   createEmptyScenarioUiState,
-  expandShiftTypeSelector,
-  LEAVE_SID,
   serializeScenario,
-  type ImportNormalizationTarget,
   type VersionConfirmStatus,
 } from "@/lib/scenario";
 
@@ -106,51 +103,6 @@ export function loadConfirmCopy(
   }
   if (version) return version;
   return { title: REPLACEMENT_CONFIRM_TITLE, description: REPLACEMENT_CONFIRM_BODY };
-}
-
-// ---------------------------------------------------------------------------
-// Non-blocking uncredited-LEAVE warn-fence (qq0.17 blocks qq0.23; the real
-// editor-time guard is deferred — this ticket ships only the import-time fence).
-// ---------------------------------------------------------------------------
-
-export const UNCREDITED_LEAVE_WARNING =
-  "This scenario has a paid-leave request, but its contracted-hours count does not include " +
-  "LEAVE in countShiftTypes — those hours will not be credited toward the contract. (The full " +
-  "uncredited-leave guard is tracked separately; this file will still load.)";
-
-/**
- * Non-blocking detector: a MARKED (`tag === "contracted_hours"`) count whose
- * expanded `countShiftTypes` selectors never reach the reserved LEAVE day-state,
- * while the imported scenario has at least one leave-pin (`reqData` cell with
- * `kind: "leave"`). An unresolved selector suppresses that card's check entirely
- * (no false positive) — the concrete per-person naming + one-click fix is
- * qq0.23's scope, not this fence's.
- */
-export function hasUncreditedLeave(target: ImportNormalizationTarget): boolean {
-  const hasLeavePin = target.reqData.some((cell) => cell.kind === "leave");
-  if (!hasLeavePin) return false;
-
-  const map = buildShiftTypeIndexMap(target.shifts, target.shiftGroups);
-  for (const count of target.cardsByKind.counts) {
-    if (count.tag !== "contracted_hours") continue;
-    const selectors = Array.isArray(count.countShiftTypes)
-      ? count.countShiftTypes
-      : [count.countShiftTypes];
-
-    let unresolved = false;
-    let coversLeave = false;
-    for (const selector of selectors) {
-      const indices = expandShiftTypeSelector(selector, map);
-      if (indices === null) {
-        unresolved = true;
-        break;
-      }
-      if (indices.includes(LEAVE_SID)) coversLeave = true;
-    }
-    if (unresolved) continue;
-    if (!coversLeave) return true;
-  }
-  return false;
 }
 
 // ---------------------------------------------------------------------------

@@ -15,7 +15,7 @@
 // (read-only) in the list via `CountCardList`, and Edit is simply not offered for
 // those shapes (so the scalar form is never opened on a card it cannot author).
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   CardEditorScreen,
   CardEditorHeader,
@@ -44,7 +44,7 @@ import {
   type ContractedFormState,
 } from "./contracted-model";
 import { convertContractedToGeneric, seedContractedFormFromGeneric } from "./convert-model";
-import type { CountCard } from "@/lib/scenario";
+import { findSavedUncreditedLeaveFindings, type CountCard } from "@/lib/scenario";
 
 // A `kind` tag distinguishes the ordinary scalar draft from the guided
 // contracted-hours draft so the right form renders and Save routes to the right
@@ -119,6 +119,38 @@ export function CountsEditor() {
   // short — so it is deferred to a `useLayoutEffect` keyed on the draft closing.
   const topRef = useRef<HTMLDivElement>(null);
   const pendingRestore = useRef<{ el: HTMLElement | null; top: number } | null>(null);
+
+  // qq0.23d saved-card guard: the set of marked-card uids whose current expansion
+  // omits LEAVE while overlapping a leave pin. Recomputed FRESH from the live store
+  // scenario (via the shared detector's saved adapter) on every scenario change and
+  // joined by uid, so the "Leave not credited" badge follows a card through
+  // reorder/duplicate and never rides a persisted count index.
+  const leaveGuardUids = useMemo(() => {
+    const findings = findSavedUncreditedLeaveFindings({
+      staff: state.staff,
+      staffGroups: state.staffGroups,
+      shifts: state.shifts,
+      shiftGroups: state.shiftGroups,
+      rangeStart: state.rangeStart,
+      rangeEnd: state.rangeEnd,
+      dateGroups: state.dateGroups,
+      reqData: state.reqData,
+      counts,
+    });
+    return new Set(findings.keys());
+  }, [state, counts]);
+
+  // Bind the editor advisory + Add-LEAVE action to the source card's enablement
+  // (qq0.23-UI critique P2): an "Add" draft is a new (enabled) contract; an edit/
+  // convert draft inherits `!sourceCard.disabled`. A vanished source (mid-edit
+  // replacement) resolves to `false`, so a disabled/absent contract shows no
+  // advisory — matching the saved badge, which the same detector also suppresses.
+  function contractedDraftEnabled(): boolean {
+    if (draft?.kind !== "contracted") return false;
+    if (draft.mode === "add") return true;
+    const source = counts.find((card) => card.uid === draft.uid);
+    return !!source && !source.disabled;
+  }
 
   function scrollContainer(): HTMLElement | null {
     let el: HTMLElement | null = topRef.current?.parentElement ?? null;
@@ -302,6 +334,7 @@ export function CountsEditor() {
           state={state}
           mode={draft.mode}
           initialForm={draft.form}
+          isEnabled={contractedDraftEnabled()}
           onSave={saveContracted}
           onCancel={cancel}
         />
@@ -327,6 +360,7 @@ export function CountsEditor() {
           convertToGenericUid={convertToGenericUid}
           onConfirmConvertToGeneric={confirmConvertToGeneric}
           onCancelConvertToGeneric={() => setConvertToGenericUid(null)}
+          leaveGuardUids={leaveGuardUids}
         />
       ) : null}
     </CardEditorScreen>

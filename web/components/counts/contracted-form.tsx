@@ -17,8 +17,9 @@
 // MANUALLY here.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ScenarioUiState } from "@/lib/scenario";
+import { formatUncreditedLeaveWarning, type ScenarioUiState } from "@/lib/scenario";
 import { Input } from "@/components/ui/input";
+import { FaPlus, FaTriangleExclamation } from "@/components/icons";
 import { CardEditorForm } from "@/components/card-editor/card-editor-shell";
 import { TransferList } from "@/components/entity-editor/transfer-list";
 import { entityKey, sameEntityId } from "@/components/entity-editor/core";
@@ -37,8 +38,10 @@ import {
   toggleInSelection,
 } from "./counts-model";
 import {
+  addLeaveCreditToContractDraft,
   buildContractedCoefficientDomain,
   contractedCoefficientIds,
+  findContractedDraftLeaveAdvisory,
   hasContractedErrors,
   validateContractedCommit,
   type ContractedErrors,
@@ -51,12 +54,21 @@ import {
   type RefreshPreview,
   type RefreshRow,
 } from "./refresh-model";
-import { formatHalfHours, parseHalfHours, parseRawHalfHours } from "./half-hour-codec";
+import {
+  formatHalfHours,
+  LEAVE_CREDIT_HALF_HOURS,
+  parseHalfHours,
+  parseRawHalfHours,
+} from "./half-hour-codec";
 
 interface ContractedFormProps {
   state: ScenarioUiState;
   mode: "add" | "edit";
   initialForm: ContractedFormState;
+  /** Whether the source card is enabled (`!sourceCard.disabled`; always true for a
+   *  fresh "Add"). A disabled/absent source suppresses the uncredited-leave advisory
+   *  and its Add-LEAVE action, matching the saved badge (qq0.23-UI critique P2). */
+  isEnabled: boolean;
   onSave: (form: ContractedFormState) => void;
   onCancel: () => void;
 }
@@ -364,10 +376,52 @@ function RefreshPanel({
   );
 }
 
+/**
+ * The non-blocking uncredited-leave advisory shown inside the contracted editor
+ * (qq0.23d, ported from the old app's `LeaveCreditAdvisory` and the prototype's
+ * warn panel). It names the affected people (scenario order) through the SHARED
+ * `formatUncreditedLeaveWarning`, so it words the policy identically to the import
+ * banner, and offers the one-click `Add LEAVE · 16` repair. It never gates Update.
+ */
+function LeaveCreditAdvisory({
+  affectedNames,
+  onAddLeave,
+}: {
+  affectedNames: string[];
+  onAddLeave: () => void;
+}) {
+  return (
+    <div
+      className="flex items-start gap-2.5 border border-warn bg-warntint p-3.5"
+      role="status"
+      aria-live="polite"
+      data-testid="contracted-leave-advisory"
+    >
+      <FaTriangleExclamation className="mt-0.5 size-4 flex-shrink-0 text-warn" />
+      <div className="flex flex-1 flex-col gap-2">
+        <span className="text-meta font-semibold text-ink">Leave not credited</span>
+        <p className="text-meta text-ink2" data-testid="contracted-leave-advisory-text">
+          {formatUncreditedLeaveWarning(affectedNames)}
+        </p>
+        <button
+          type="button"
+          data-testid="contracted-add-leave"
+          onClick={onAddLeave}
+          className="inline-flex w-fit items-center gap-2 border border-warn bg-warntint px-3.5 py-2 text-meta font-semibold text-ink hover:opacity-90"
+        >
+          <FaPlus className="size-3" />
+          Add LEAVE · {LEAVE_CREDIT_HALF_HOURS}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function ContractedForm({
   state,
   mode,
   initialForm,
+  isEnabled,
   onSave,
   onCancel,
 }: ContractedFormProps) {
@@ -403,6 +457,15 @@ export function ContractedForm({
   const coefficientSelection = useMemo(
     () => contractedCoefficientIds(coefficientDomain),
     [coefficientDomain],
+  );
+
+  // The draft-aware uncredited-leave advisory (qq0.23d): recomputed from the CURRENT
+  // draft selectors and the LIVE scenario pins through the shared detector whenever
+  // the draft or scenario entities/requests change — never the saved-card finding.
+  // `null` when the source card is disabled/absent or no resolved leave pin overlaps.
+  const leaveAdvisoryNames = useMemo(
+    () => findContractedDraftLeaveAdvisory(form, state, isEnabled),
+    [form, state, isEnabled],
   );
 
   function clearCoefficientErrors(prev: ContractedErrors): ContractedErrors {
@@ -672,6 +735,21 @@ export function ContractedForm({
             />
           )}
         </div>
+      )}
+
+      {leaveAdvisoryNames !== null && (
+        <LeaveCreditAdvisory
+          affectedNames={leaveAdvisoryNames}
+          onAddLeave={() => {
+            // Repair mutates the DRAFT only — append direct LEAVE + one [LEAVE, 16]
+            // coefficient row. Persistence still happens through the single existing
+            // Update → `updateContracted` mutation (one undo step); Cancel is a no-op.
+            setForm((prev) => addLeaveCreditToContractDraft(prev, state));
+            setErrors((prev) => clearCoefficientErrors(prev));
+            // A pending Refresh preview was derived against the pre-repair coefficients.
+            setRefreshPreview(null);
+          }}
+        />
       )}
 
       <FieldShell label="Count dates" required error={errors.countDates}>

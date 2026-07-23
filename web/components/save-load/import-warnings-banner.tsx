@@ -3,8 +3,9 @@
 // Import warnings banner (T17b-2; FR-SL-31/32; prototype
 // ScreenSaveLoad.dc.html:17-31). Non-blocking — the load has already committed
 // by the time this renders. Shows the deduped advanced-syntax survivors (V12/V13,
-// from `prepareScenarioLoad`'s `warnings`) plus, when present, the uncredited-LEAVE
-// warn-fence line (`hasUncreditedLeave`, `qq0.23`'s real guard is deferred).
+// from `prepareScenarioLoad`'s `warnings`) plus, when present, the shared
+// uncredited-leave guard's named findings (qq0.23e, merged in
+// `use-scenario-import.ts` before the single `loadScenario` commit).
 
 import { FaTriangleExclamation } from "@/components/icons";
 
@@ -23,9 +24,7 @@ export function ImportWarningsBanner({ warnings, onDismiss }: ImportWarningsBann
     >
       <FaTriangleExclamation className="mt-0.5 size-4 shrink-0 text-warn" aria-hidden />
       <div className="min-w-0 flex-1">
-        <div className="mb-1.5 text-meta font-semibold">
-          Imported YAML contains advanced backend syntax.
-        </div>
+        <div className="mb-1.5 text-meta font-semibold">Imported scenario warnings</div>
         <ul className="list-disc space-y-1 pl-[18px] text-meta text-ink2">
           {warnings.map((warning, index) => (
             <li key={`${index}-${warning}`}>{warning}</li>

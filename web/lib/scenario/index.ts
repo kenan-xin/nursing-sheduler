@@ -147,3 +147,10 @@ export {
   type SavedLeaveGuardSnapshot,
   type ImportLeaveGuardSnapshot,
 } from "./leave-guard/adapters";
+// Shared, deterministic guard-warning naming reused by the import banner and the
+// editor advisory so both surfaces word the policy identically.
+export {
+  affectedPersonNames,
+  formatUncreditedLeaveWarning,
+  formatUncreditedLeaveWarnings,
+} from "./leave-guard/warning-format";

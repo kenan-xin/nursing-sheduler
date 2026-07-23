@@ -118,7 +118,7 @@ describe("findImportUncreditedLeaveFindings — keyless import snapshot", () => 
     expect(findings).toEqual([{ countIndex: 0, affectedPersonIndices: [0] }]);
   });
 
-  it("treats every count as enabled, even one carrying a restored disabled flag", () => {
+  it("honors a restored disabled flag: a disabled imported marked count produces no finding", () => {
     const findings = findImportUncreditedLeaveFindings(
       importSnapshot([
         {
@@ -134,7 +134,37 @@ describe("findImportUncreditedLeaveFindings — keyless import snapshot", () => 
         },
       ]),
     );
-    expect(findings).toEqual([{ countIndex: 0, affectedPersonIndices: [0] }]);
+    expect(findings).toEqual([]);
+  });
+
+  it("an enabled count on the same scenario still fires when a sibling is disabled", () => {
+    const findings = findImportUncreditedLeaveFindings(
+      importSnapshot([
+        {
+          tag: "contracted_hours",
+          policy: "exact",
+          person: "ALL",
+          countDates: "ALL",
+          countShiftTypes: "D",
+          expression: "==",
+          target: 1,
+          weight: -1,
+          disabled: true,
+        },
+        {
+          tag: "contracted_hours",
+          policy: "exact",
+          person: "ALL",
+          countDates: "ALL",
+          countShiftTypes: "D",
+          expression: "==",
+          target: 1,
+          weight: -1,
+        },
+      ]),
+    );
+    // The disabled count at index 0 is suppressed; the enabled count at index 1 fires.
+    expect(findings).toEqual([{ countIndex: 1, affectedPersonIndices: [0] }]);
   });
 });
 

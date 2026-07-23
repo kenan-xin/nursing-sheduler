@@ -13,8 +13,10 @@
 // exact coverage. All logic is side-effect-free so it is provable in `node` vitest.
 
 import {
+  affectedPersonNames,
   buildShiftTypeIndexMap,
   expandShiftTypeSelector,
+  findUncreditedLeaveFindings,
   RESERVED_SHIFT_TYPE,
   ShiftTypeMapError,
   validateContractedHoursContract,
@@ -405,4 +407,49 @@ export function addLeaveCreditToContractDraft(
   ];
 
   return { ...form, countShiftTypes: nextCountShiftTypes, countShiftTypeCoefficients };
+}
+
+/**
+ * Recompute the editor's uncredited-leave advisory from the OPEN draft and the
+ * live scenario pins (qq0.23d, tech-plan §4). Builds a one-count `LeaveGuardInput`
+ * from the current draft selectors and the live `state` entities/requests, runs it
+ * through the SAME shared detector the saved badge and import warning use, and
+ * returns the affected people in scenario (staff-declaration) order — or `null`
+ * when no resolved leave pin overlaps the draft, so the advisory is hidden.
+ *
+ * `isEnabled` binds the advisory to the source card's enablement: a disabled
+ * contract (or an absent source card mid-edit) passes `isEnabled = false` and never
+ * warns, matching the *Count disabled → No finding* rule. The draft is authoritative
+ * — this never reuses the saved-card finding — and a malformed scenario map is
+ * fail-closed to `null` rather than throwing, so the guard never blocks editing.
+ */
+export function findContractedDraftLeaveAdvisory(
+  form: ContractedFormState,
+  state: ScenarioUiState,
+  isEnabled: boolean,
+): string[] | null {
+  if (!isEnabled) return null;
+
+  let body: ContractedHoursCountCard;
+  try {
+    body = buildContractedCard(form, state, "__leave-guard-draft__");
+  } catch {
+    return null;
+  }
+
+  const findings = findUncreditedLeaveFindings({
+    staff: state.staff,
+    staffGroups: state.staffGroups,
+    shifts: state.shifts,
+    shiftGroups: state.shiftGroups,
+    rangeStart: state.rangeStart,
+    rangeEnd: state.rangeEnd,
+    dateGroups: state.dateGroups,
+    reqData: state.reqData,
+    counts: [{ body, isEnabled: true }],
+  });
+
+  const finding = findings[0];
+  if (!finding) return null;
+  return affectedPersonNames(finding.affectedPersonIndices, state.staff);
 }

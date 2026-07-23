@@ -73,6 +73,79 @@ afterEach(() => {
   cleanup();
 });
 
+describe("CountCardList — uncredited-leave saved badge (qq0.23d)", () => {
+  // A second marked card, identical body but distinct uid, models a duplicate.
+  const exactContractedDup: CountCard = { ...exactContractedCard, uid: "c-exact-dup" };
+
+  it("renders the 'Leave not credited' badge on a marked card whose uid is flagged", () => {
+    render(
+      <CountCardList
+        counts={[exactContractedCard]}
+        {...NOOP_PROPS}
+        leaveGuardUids={new Set(["c-exact"])}
+      />,
+    );
+    const card = screen.getByTestId("count-card-0");
+    expect(within(card).getByTestId("count-leave-warning-badge-0")).toBeTruthy();
+    expect(within(card).getByText("Leave not credited")).toBeTruthy();
+  });
+
+  it("omits the badge when the card's uid is not flagged", () => {
+    render(
+      <CountCardList counts={[exactContractedCard]} {...NOOP_PROPS} leaveGuardUids={new Set()} />,
+    );
+    expect(screen.queryByTestId("count-leave-warning-badge-0")).toBeNull();
+    expect(screen.queryByText("Leave not credited")).toBeNull();
+  });
+
+  it("never badges an ordinary (unmarked) card even if its uid is flagged", () => {
+    render(
+      <CountCardList
+        counts={[ordinaryCard]}
+        {...NOOP_PROPS}
+        leaveGuardUids={new Set(["ordinary"])}
+      />,
+    );
+    expect(screen.queryByTestId("count-leave-warning-badge-0")).toBeNull();
+  });
+
+  it("follows the flagged uid through a reorder (identity, not index)", () => {
+    // Flag only the SECOND card's uid. In [exact, range] it badges card-1.
+    const { rerender } = render(
+      <CountCardList
+        counts={[exactContractedCard, rangeContractedCard]}
+        {...NOOP_PROPS}
+        leaveGuardUids={new Set(["c-range"])}
+      />,
+    );
+    expect(screen.queryByTestId("count-leave-warning-badge-0")).toBeNull();
+    expect(screen.getByTestId("count-leave-warning-badge-1")).toBeTruthy();
+
+    // Reorder to [range, exact] with the SAME uid flagged — the badge moves to card-0.
+    rerender(
+      <CountCardList
+        counts={[rangeContractedCard, exactContractedCard]}
+        {...NOOP_PROPS}
+        leaveGuardUids={new Set(["c-range"])}
+      />,
+    );
+    expect(screen.getByTestId("count-leave-warning-badge-0")).toBeTruthy();
+    expect(screen.queryByTestId("count-leave-warning-badge-1")).toBeNull();
+  });
+
+  it("badges each of two duplicate identical marked cards independently by uid", () => {
+    render(
+      <CountCardList
+        counts={[exactContractedCard, exactContractedDup]}
+        {...NOOP_PROPS}
+        leaveGuardUids={new Set(["c-exact", "c-exact-dup"])}
+      />,
+    );
+    expect(screen.getByTestId("count-leave-warning-badge-0")).toBeTruthy();
+    expect(screen.getByTestId("count-leave-warning-badge-1")).toBeTruthy();
+  });
+});
+
 describe("CountCardList — contracted-hours human-hours summary (ds1)", () => {
   it("renders an exact contracted card's target and coefficients in human hours", () => {
     render(<CountCardList counts={[exactContractedCard]} {...NOOP_PROPS} />);

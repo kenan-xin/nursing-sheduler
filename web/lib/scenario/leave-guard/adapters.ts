@@ -69,10 +69,13 @@ export function findSavedUncreditedLeaveFindings(
 }
 
 /**
- * Evaluate a keyless normalized-import snapshot. Imported cards carry no `uid` and
- * no `disabled` flag, so every count is treated as enabled (`isEnabled = true`,
- * per tech-plan §2); the caller formats findings against the same input snapshot
- * by `countIndex` rather than by identity.
+ * Evaluate a keyless normalized-import snapshot. Imported cards carry no `uid`,
+ * but they DO carry the restored `disabled` flag — Workspace normalization
+ * preserves `enabled: false` as `disabled: true` and `prepareScenarioLoad`/
+ * `loadScenario` keep it — so `isEnabled = !body.disabled`, per tech-plan §2. A
+ * disabled imported count must not warn (the *Count disabled → No finding* rule).
+ * The caller formats findings against the same input snapshot by `countIndex`
+ * rather than by identity.
  */
 export function findImportUncreditedLeaveFindings(
   snapshot: ImportLeaveGuardSnapshot,
@@ -86,6 +89,6 @@ export function findImportUncreditedLeaveFindings(
     rangeEnd: snapshot.rangeEnd,
     dateGroups: snapshot.dateGroups,
     reqData: snapshot.reqData,
-    counts: snapshot.counts.map((body) => ({ body, isEnabled: true })),
+    counts: snapshot.counts.map((body) => ({ body, isEnabled: !body.disabled })),
   });
 }

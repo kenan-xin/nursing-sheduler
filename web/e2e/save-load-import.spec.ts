@@ -70,7 +70,11 @@ preferences:
     date: ALL
 `;
 
-const VALID_YAML_MISMATCHED_VERSION = `${VALID_YAML_NO_VERSION}appVersion: v0.0.1-e2e-fixture\n`;
+// A parseable but INCOMPATIBLE semver (major/minor differ from the e2e build's
+// pinned NEXT_PUBLIC_APP_VERSION="0.1.0"), so the tiered classifier flags it as
+// `incompatible` and surfaces the load-confirm. A non-semver string (e.g. an
+// `-e2e-fixture` suffix) would parse to `indeterminate` and be silently accepted.
+const VALID_YAML_MISMATCHED_VERSION = `${VALID_YAML_NO_VERSION}appVersion: v9.9.9\n`;
 
 const INVALID_YAML = "preferences: [unterminated, flow";
 

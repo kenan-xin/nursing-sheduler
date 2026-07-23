@@ -23,6 +23,7 @@ import {
   FaChevronUp,
   FaChevronDown,
   FaArrowRightArrowLeft,
+  FaTriangleExclamation,
 } from "@/components/icons";
 import { WeightPill } from "@/components/card-editor/weight-field";
 import type { CountCard } from "@/lib/scenario";
@@ -65,6 +66,11 @@ interface CountCardListProps {
   onConfirmConvertToGeneric: (uid: string) => void;
   /** Dismiss the convert-to-generic confirm without mutating. */
   onCancelConvertToGeneric: () => void;
+  /** UIDs of marked contracted cards whose current expansion omits `LEAVE` while
+   *  overlapping a leave pin (qq0.23d). Computed FRESH from the store scenario via
+   *  `findSavedUncreditedLeaveFindings` and joined by `uid`, so the badge follows
+   *  the card through reorder/duplicate and never rides a persisted index. */
+  leaveGuardUids?: ReadonlySet<string>;
 }
 
 /** The inline Confirm/Cancel panel for converting a marked card back to a generic
@@ -157,6 +163,7 @@ export function CountCardList({
   convertToGenericUid,
   onConfirmConvertToGeneric,
   onCancelConvertToGeneric,
+  leaveGuardUids,
 }: CountCardListProps) {
   // HTML5 DnD state for the shared card-list reorder (the primary control; the
   // keyboard Up/Down buttons below are the accessibility supplement).
@@ -202,6 +209,16 @@ export function CountCardList({
                 {contractedHours && (
                   <Badge variant="brand" data-testid={`count-contracted-badge-${index}`}>
                     ◆ Contracted hours
+                  </Badge>
+                )}
+                {contractedHours && leaveGuardUids?.has(card.uid) && (
+                  <Badge
+                    variant="warn"
+                    data-testid={`count-leave-warning-badge-${index}`}
+                    title="This contract omits LEAVE, so paid leave won't count toward its hours."
+                  >
+                    <FaTriangleExclamation />
+                    Leave not credited
                   </Badge>
                 )}
                 {!contractedHours && advanced && (
