@@ -61,25 +61,37 @@ function validateShiftRequestRows(
   const expectedPeopleCount = peopleIds.length;
   const expectedDateCount = dateItemIds.length;
 
-  if (rows.length !== expectedPeopleCount) {
+  const validPersonIds = new Set(peopleIds);
+
+  // Accept an optional leading header row (as emitted by the planned matrix CSV
+  // export). Only strip row 0 when the row count is exactly one more than the
+  // number of people AND that first row's first cell is not a valid person ID.
+  // A genuine person row always has a valid person ID in cell 0, so it can never
+  // be misclassified as a header; a headerless file (row count already == N) is
+  // never touched.
+  const dataRows =
+    rows.length === expectedPeopleCount + 1 && !validPersonIds.has(rows[0][0])
+      ? rows.slice(1)
+      : rows;
+
+  if (dataRows.length !== expectedPeopleCount) {
     return {
       ok: false,
-      error: `CSV should have ${expectedPeopleCount} rows (1 header + ${expectedPeopleCount} people), but has ${rows.length} rows.`,
+      error: `CSV should have ${expectedPeopleCount} rows (one per person), but has ${dataRows.length} rows.`,
     };
   }
 
-  const validPersonIds = new Set(peopleIds);
   const personRowMap = new Map<string, number>();
 
-  for (let i = 0; i < rows.length; i++) {
-    if (rows[i].length !== expectedDateCount + 1) {
+  for (let i = 0; i < dataRows.length; i++) {
+    if (dataRows[i].length !== expectedDateCount + 1) {
       return {
         ok: false,
-        error: `Row ${i + 1} should have ${expectedDateCount + 1} columns (dates), but has ${rows[i].length} columns.`,
+        error: `Row ${i + 1} should have ${expectedDateCount + 1} columns (dates), but has ${dataRows[i].length} columns.`,
       };
     }
 
-    const personId = rows[i][0];
+    const personId = dataRows[i][0];
     if (!validPersonIds.has(personId)) {
       return {
         ok: false,
@@ -109,10 +121,10 @@ function validateShiftRequestRows(
   const validShiftTypeSet = new Set(validShiftTypeIds);
   const deltas: ShiftRequestDelta[] = [];
 
-  for (let r = 0; r < rows.length; r++) {
-    const personId = rows[r][0];
-    for (let c = 1; c < rows[r].length; c++) {
-      const cellValue = rows[r][c];
+  for (let r = 0; r < dataRows.length; r++) {
+    const personId = dataRows[r][0];
+    for (let c = 1; c < dataRows[r].length; c++) {
+      const cellValue = dataRows[r][c];
       if (!cellValue) continue;
 
       if (!validShiftTypeSet.has(cellValue)) {

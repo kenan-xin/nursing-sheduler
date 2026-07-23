@@ -30,6 +30,13 @@ import { rangeSpanLabel } from "./range-span-label";
 export interface RosterPeriodCardProps {
   /** The committed roster range (`""` endpoints when unset). */
   range: DateRange;
+  /**
+   * Whether the loaded scenario ACTUALLY carries the imported Singapore holiday
+   * groups (WORKDAY / NON-WORKDAY / PH). Seeds the import switch's initial state so
+   * a loaded scenario without those groups never shows the switch ON / a false
+   * "N marked" (spec 02 FR-DC-40).
+   */
+  importedHolidaysPresent: boolean;
   /** Commit a confirmed range + the effective import flag (one tracked mutation). */
   onCommit: (range: DateRange, importHolidays: boolean) => void;
 }
@@ -79,9 +86,19 @@ function dateIdInfo(range: DateRange): { format: string; example: string; note: 
   };
 }
 
-export function RosterPeriodCard({ range, onCommit }: RosterPeriodCardProps) {
+export function RosterPeriodCard({
+  range,
+  importedHolidaysPresent,
+  onCommit,
+}: RosterPeriodCardProps) {
   const [draft, setDraft] = useState<DateRange>(range);
-  const [importHolidays, setImportHolidays] = useState(true);
+  // Honest initial state. A LOADED scenario (complete committed range at mount)
+  // reflects whether the SG holiday groups are actually present, so it never shows
+  // a false "N marked". A FRESH roster (no committed range yet) keeps auto-import
+  // ON so a brand-new scenario imports SG holidays on its first commit.
+  const [importHolidays, setImportHolidays] = useState(
+    hasCompleteRange(range) ? importedHolidaysPresent : true,
+  );
   const startId = useId();
   const endId = useId();
 

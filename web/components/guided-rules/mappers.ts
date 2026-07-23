@@ -115,6 +115,7 @@ export const successionsMapper: GuidedRuleMapper<SuccessionCard> = {
         key: "weight",
         label: "Weight",
         value: card.weight,
+        allowsInfinity: true,
         validate: (value) =>
           isValidWeightValue(value) ? undefined : SUCCESSION_MESSAGES.weightInvalid,
       },
@@ -195,6 +196,7 @@ export const affinitiesMapper: GuidedRuleMapper<AffinityCard> = {
         key: "weight",
         label: "Weight",
         value: card.weight,
+        allowsInfinity: true,
         validate: (value) =>
           isValidWeightValue(value) ? undefined : AFFINITY_MESSAGES.weightInvalid,
       },

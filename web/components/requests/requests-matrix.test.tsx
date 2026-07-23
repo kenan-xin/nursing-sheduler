@@ -8,7 +8,13 @@ import {
   type RequestColumn,
   type RequestRow,
 } from "@/components/requests/requests-model";
-import { RequestsMatrix, type RequestsMatrixProps } from "./requests-matrix";
+import { cellPreferenceSet } from "@/components/requests/requests-model";
+import {
+  RequestsMatrix,
+  buildCellsByCoord,
+  coordKey,
+  type RequestsMatrixProps,
+} from "./requests-matrix";
 
 // jsdom (as of the pinned version) has no ResizeObserver; @tanstack/react-virtual
 // observes the scroll element's size, so a minimal stub is required for it to render.
@@ -178,5 +184,41 @@ describe("RequestsMatrix", () => {
   it("degrades gracefully when rows or columns are empty", () => {
     render(<RequestsMatrix {...makeProps({ rows: [] })} />);
     expect(screen.getByTestId("requests-matrix-empty")).toBeInTheDocument();
+  });
+});
+
+// The per-cell `cellPreferenceSet` scan + `JSON.stringify` was replaced by a
+// single `buildCellsByCoord(reqData)` memo with O(1) `map.get(coordKey(...))`
+// lookups. These assert the memoized lookup returns EXACTLY the membership the
+// old per-cell scan did (identical semantics; pure perf refactor).
+describe("buildCellsByCoord (matrix cell-membership memo)", () => {
+  const multiCoordReqData: UiRequestCell[] = [
+    { kind: "request", person: "Alice", date: "2026-05-01", shiftType: "AM", weight: 5 },
+    { kind: "off", person: "Alice", date: "2026-05-01", weight: -2 },
+    { kind: "leave", person: "Bob", date: "2026-05-01" },
+    { kind: "off", person: "Alice", date: "ALL", weight: -3 },
+  ];
+
+  it("lookup returns the same membership (and order) as cellPreferenceSet, per coordinate", () => {
+    const map = buildCellsByCoord(multiCoordReqData);
+    const coords: [string, string][] = [
+      ["Alice", "2026-05-01"], // two coexisting cells, order preserved
+      ["Bob", "2026-05-01"], // single leave cell
+      ["Alice", "ALL"], // single off cell
+      ["Bob", "ALL"], // empty coordinate -> undefined (empty set)
+    ];
+    for (const [person, date] of coords) {
+      const viaMap = map.get(coordKey(person, date)) ?? [];
+      expect(viaMap).toEqual(cellPreferenceSet(multiCoordReqData, person, date));
+    }
+  });
+
+  it("is built once from reqData rather than scanned per cell", () => {
+    // A distinct entry per non-empty coordinate; each holds only its own cells,
+    // so the whole matrix is served by one pass over reqData (this Map), not a
+    // full-reqData scan per rendered cell.
+    const map = buildCellsByCoord(multiCoordReqData);
+    expect(map.size).toBe(3);
+    expect(map.get(coordKey("Alice", "2026-05-01"))).toHaveLength(2);
   });
 });

@@ -51,7 +51,37 @@ describe("validateShiftRequestCsv", () => {
     const result = validateShiftRequestCsv(csv, shiftRequestOptions());
     expect(result).toEqual({
       ok: false,
-      error: "CSV should have 3 rows (1 header + 3 people), but has 2 rows.",
+      error: "CSV should have 3 rows (one per person), but has 2 rows.",
+    });
+  });
+
+  it("imports a headered file identically to its headerless equivalent", () => {
+    const withoutHeader = ["alice,DAY,", "bob,,NIGHT", "carol,ALL_SHIFTS,DAY"].join("\n");
+    const withHeader = ["person,d1,d2", ...withoutHeader.split("\n")].join("\n");
+
+    const headerless = validateShiftRequestCsv(withoutHeader, shiftRequestOptions());
+    const headered = validateShiftRequestCsv(withHeader, shiftRequestOptions());
+
+    expect(headered).toEqual(headerless);
+    expect(headered).toEqual({
+      ok: true,
+      data: [
+        { personId: "alice", dateId: "d1", shiftType: "DAY" },
+        { personId: "bob", dateId: "d2", shiftType: "NIGHT" },
+        { personId: "carol", dateId: "d1", shiftType: "ALL_SHIFTS" },
+        { personId: "carol", dateId: "d2", shiftType: "DAY" },
+      ],
+    });
+  });
+
+  it("does not strip a valid person row as a header (N+1 real person rows)", () => {
+    // Four rows for three people: the first row is a real (duplicate) person, not
+    // a header — its first cell is a valid person ID, so it must not be dropped.
+    const csv = ["alice,DAY,", "alice,,NIGHT", "bob,,", "carol,,"].join("\n");
+    const result = validateShiftRequestCsv(csv, shiftRequestOptions());
+    expect(result).toEqual({
+      ok: false,
+      error: "CSV should have 3 rows (one per person), but has 4 rows.",
     });
   });
 

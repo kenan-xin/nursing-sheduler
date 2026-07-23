@@ -6,6 +6,8 @@
 // old "warning" splits into "clear" (no targets) vs "removal" (weight 0); old
 // "neutral" is "apply").
 
+import { RESERVED_SHIFT_TYPE } from "@/lib/scenario";
+import { computeQuickPaintCellIntent } from "./requests-gestures";
 import { weightDisplayLabel } from "./requests-model";
 
 const INFINITY_TOKENS = ["∞", "+∞", "inf", "+inf", "infinity", "+infinity"];
@@ -33,6 +35,30 @@ export interface QuickPaintStatus {
 }
 
 /**
+ * The targets the drag will ACTUALLY paint, resolved through the gesture's own
+ * precedence (`computeQuickPaintCellIntent`): LEAVE overrides everything, and a
+ * co-selected OFF is dropped once a worked shift is also selected. The status
+ * line announces this resolved set rather than the raw `selectedIds`, so e.g.
+ * `OFF + AM` announces only `AM` (what's applied), not both. `weight` is already
+ * parsed and non-null at the call site (the invalid-weight case returns "error"
+ * before this runs).
+ */
+function appliedQuickPaintTargets(selectedIds: readonly string[], weight: number): string[] {
+  const intent = computeQuickPaintCellIntent(selectedIds, weight);
+  if (!intent) return [];
+  switch (intent.mode) {
+    case "erase":
+      return [];
+    case "day-state":
+      return [
+        intent.dayState.kind === "leave" ? RESERVED_SHIFT_TYPE.leave : RESERVED_SHIFT_TYPE.off,
+      ];
+    case "requests":
+      return [...intent.deltas.keys()];
+  }
+}
+
+/**
  * FR-SR-29 (verbatim strings): no targets selected → "clear" (dragging clears
  * cells); an unparseable weight → "error"; a valid weight of exactly `0` →
  * "removal" (dragging removes those types); otherwise → "apply".
@@ -53,7 +79,7 @@ export function quickPaintStatus(selectedIds: readonly string[], weight: string)
     };
   }
 
-  const targets = selectedIds.join(", ");
+  const targets = appliedQuickPaintTargets(selectedIds, parsed).join(", ");
   if (parsed === 0) {
     return {
       tone: "removal",

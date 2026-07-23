@@ -27,6 +27,9 @@ import {
   hasCompleteRange,
   isDerivedDateGroupId,
   isReservedDateGroupId,
+  SINGAPORE_NONWORKDAY_GROUP_ID,
+  SINGAPORE_PH_GROUP_ID,
+  SINGAPORE_WORKDAY_GROUP_ID,
   type DateRange,
 } from "@/lib/dates";
 import { FaArrowRight } from "@/components/icons";
@@ -34,6 +37,14 @@ import { datesDescriptor } from "./dates-descriptor";
 import { RosterPeriodCard } from "./roster-period-card";
 import { CalendarView } from "./calendar-view";
 import { DateGroupsCard } from "./date-groups-card";
+
+// The three editable groups the SG holiday import writes; their presence in a
+// loaded scenario is what makes the roster card's import switch honest.
+const SG_HOLIDAY_GROUP_IDS: ReadonlySet<string> = new Set([
+  SINGAPORE_WORKDAY_GROUP_ID,
+  SINGAPORE_NONWORKDAY_GROUP_ID,
+  SINGAPORE_PH_GROUP_ID,
+]);
 
 export function DatesScreen() {
   const rangeStart = useScenarioStore((s) => s.rangeStart);
@@ -45,6 +56,13 @@ export function DatesScreen() {
 
   const editableGroups = useMemo(
     () => dateGroups.filter((group) => !isDerivedDateGroupId(group.id)),
+    [dateGroups],
+  );
+
+  // Whether the loaded scenario actually carries the imported SG holiday groups, so
+  // the roster card's import switch shows an honest initial state (no false import).
+  const importedHolidaysPresent = useMemo(
+    () => dateGroups.some((group) => SG_HOLIDAY_GROUP_IDS.has(group.id)),
     [dateGroups],
   );
 
@@ -113,7 +131,11 @@ export function DatesScreen() {
       </header>
 
       <div className="ns-grid2 items-start">
-        <RosterPeriodCard range={range} onCommit={handleCommit} />
+        <RosterPeriodCard
+          range={range}
+          importedHolidaysPresent={importedHolidaysPresent}
+          onCommit={handleCommit}
+        />
         {complete ? (
           <CalendarView range={range} />
         ) : (

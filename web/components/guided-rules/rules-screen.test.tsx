@@ -63,12 +63,46 @@ describe("RulesScreen — a linked (auto-derived) rule row", () => {
     expect(useScenarioStore.getState().cardsByKind.requirements[0].disabled).toBe(true);
   });
 
-  it("Adjust opens the quick-edit panel and commits a valid value", () => {
+  it("Adjust opens the quick-edit panel and commits a valid value on blur", () => {
     render(<RulesScreen />);
     fireEvent.click(screen.getByTestId("rule-adjust-toggle-requirements:r1"));
     const input = screen.getByTestId("rule-adjust-input-requirements:r1-requiredNumPeople");
     fireEvent.change(input, { target: { value: "5" } });
+    // Typing alone must not write the store — the commit happens on blur.
+    expect(useScenarioStore.getState().cardsByKind.requirements[0].requiredNumPeople).toBe(2);
+    fireEvent.blur(input, { target: { value: "5" } });
     expect(useScenarioStore.getState().cardsByKind.requirements[0].requiredNumPeople).toBe(5);
+  });
+
+  it("commits a multi-digit Adjust value as exactly one undo entry (no per-keystroke commit)", () => {
+    render(<RulesScreen />);
+    fireEvent.click(screen.getByTestId("rule-adjust-toggle-requirements:r1"));
+    const input = screen.getByTestId("rule-adjust-input-requirements:r1-requiredNumPeople");
+    const before = useScenarioStore.temporal.getState().pastStates.length;
+    // Type "15" over "2": intermediate "1" must never reach the store or history.
+    fireEvent.change(input, { target: { value: "1" } });
+    fireEvent.change(input, { target: { value: "15" } });
+    expect(useScenarioStore.temporal.getState().pastStates.length).toBe(before);
+    expect(useScenarioStore.getState().cardsByKind.requirements[0].requiredNumPeople).toBe(2);
+    fireEvent.blur(input, { target: { value: "15" } });
+    expect(useScenarioStore.getState().cardsByKind.requirements[0].requiredNumPeople).toBe(15);
+    expect(useScenarioStore.temporal.getState().pastStates.length).toBe(before + 1);
+    // A single Undo returns to the pre-edit value (2), never an intermediate "1".
+    useScenarioStore.temporal.getState().undo();
+    expect(useScenarioStore.getState().cardsByKind.requirements[0].requiredNumPeople).toBe(2);
+  });
+
+  it("shows a live error while typing an invalid value but does not commit until valid", () => {
+    render(<RulesScreen />);
+    fireEvent.click(screen.getByTestId("rule-adjust-toggle-requirements:r1"));
+    const input = screen.getByTestId("rule-adjust-input-requirements:r1-requiredNumPeople");
+    const before = useScenarioStore.temporal.getState().pastStates.length;
+    fireEvent.change(input, { target: { value: "-1" } });
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    fireEvent.blur(input, { target: { value: "-1" } });
+    // An invalid draft never commits, on change or blur.
+    expect(useScenarioStore.getState().cardsByKind.requirements[0].requiredNumPeople).toBe(2);
+    expect(useScenarioStore.temporal.getState().pastStates.length).toBe(before);
   });
 
   it("Adjust shows a validation error for an invalid value and does not commit it", () => {
@@ -84,6 +118,60 @@ describe("RulesScreen — a linked (auto-derived) rule row", () => {
     render(<RulesScreen />);
     const before = useScenarioStore.temporal.getState().pastStates.length;
     fireEvent.click(screen.getByTestId("rule-toggle-requirements:r1"));
+    expect(useScenarioStore.temporal.getState().pastStates.length).toBe(before + 1);
+  });
+});
+
+describe("RulesScreen — a hard-weight (±Infinity) Adjust control", () => {
+  function seedSuccession(weight: number) {
+    useScenarioStore.getState().mutateScenario((state) => ({
+      cardsByKind: {
+        ...state.cardsByKind,
+        successions: [
+          { uid: "s1", person: ["P1"], pattern: ["N", "D"], weight, description: "No N→D" },
+        ],
+      },
+    }));
+  }
+
+  it("renders a hard (-Infinity) weight legibly rather than as a blank box", () => {
+    seedSuccession(-Infinity);
+    render(<RulesScreen />);
+    fireEvent.click(screen.getByTestId("rule-adjust-toggle-successions:s1"));
+    const input = screen.getByTestId("rule-adjust-input-successions:s1-weight") as HTMLInputElement;
+    expect(input.value).toBe("-Infinity");
+    expect(input.value).not.toBe("");
+  });
+
+  it("keeps a hard weight on blur without downgrading it to a finite value", () => {
+    seedSuccession(-Infinity);
+    render(<RulesScreen />);
+    fireEvent.click(screen.getByTestId("rule-adjust-toggle-successions:s1"));
+    const input = screen.getByTestId("rule-adjust-input-successions:s1-weight");
+    // Blur with the untouched draft — the hard weight must survive, not become 0/NaN.
+    fireEvent.blur(input, { target: { value: (input as HTMLInputElement).value } });
+    expect(useScenarioStore.getState().cardsByKind.successions[0].weight).toBe(-Infinity);
+  });
+
+  it("switches soft→hard and preserves the Infinity sign", () => {
+    seedSuccession(-2);
+    render(<RulesScreen />);
+    fireEvent.click(screen.getByTestId("rule-adjust-toggle-successions:s1"));
+    fireEvent.click(screen.getByTestId("rule-adjust-minus-inf-successions:s1-weight"));
+    expect(useScenarioStore.getState().cardsByKind.successions[0].weight).toBe(-Infinity);
+    fireEvent.click(screen.getByTestId("rule-adjust-plus-inf-successions:s1-weight"));
+    expect(useScenarioStore.getState().cardsByKind.successions[0].weight).toBe(Infinity);
+  });
+
+  it("switches hard→soft by typing a finite weight, as one undo entry", () => {
+    seedSuccession(Infinity);
+    render(<RulesScreen />);
+    fireEvent.click(screen.getByTestId("rule-adjust-toggle-successions:s1"));
+    const input = screen.getByTestId("rule-adjust-input-successions:s1-weight");
+    const before = useScenarioStore.temporal.getState().pastStates.length;
+    fireEvent.change(input, { target: { value: "25" } });
+    fireEvent.blur(input, { target: { value: "25" } });
+    expect(useScenarioStore.getState().cardsByKind.successions[0].weight).toBe(25);
     expect(useScenarioStore.temporal.getState().pastStates.length).toBe(before + 1);
   });
 });

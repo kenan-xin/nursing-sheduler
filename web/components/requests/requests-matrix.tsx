@@ -16,7 +16,6 @@ import {
   cellAlpha,
   cellDisplay,
   cellPreferenceOf,
-  cellPreferenceSet,
   historyValueAt,
   isHistorySlotClickable,
   type RequestColumn,
@@ -70,6 +69,35 @@ const HOLIDAY_STRIPE_BG =
 
 function columnWidth(column: RequestColumn): number {
   return column.kind === "date-group" ? DATE_GROUP_COL_WIDTH : DATE_ITEM_COL_WIDTH;
+}
+
+/** Shared empty membership for coordinates with no cells — avoids a fresh `[]`
+ *  allocation per empty cell and keeps a stable reference across renders. */
+const EMPTY_CELLS: readonly UiRequestCell[] = [];
+
+/** The `(person, date)` coordinate key. Matches the container's `stagedKeys`
+ *  convention (`JSON.stringify([person, colRef])`, see `use-requests.ts`) so the
+ *  same string serves both the cell-membership lookup and the staged-highlight
+ *  check — and mirrors the strict `person`/`date` equality of the old
+ *  `cellPreferenceSet` scan this Map replaces. */
+export function coordKey(person: PersonRef, date: DateRef): string {
+  return JSON.stringify([person, date]);
+}
+
+/** Index `reqData` by {@link coordKey} once, so a cell renders its membership via
+ *  an O(1) `map.get` instead of a full-`reqData` scan (`cellPreferenceSet`). Push
+ *  preserves `reqData` order within a coordinate, so `map.get(coordKey(p, d))`
+ *  returns exactly what `cellPreferenceSet(reqData, p, d)` did (an absent key is
+ *  the empty set). Pure and exported for the co-located refactor-parity test. */
+export function buildCellsByCoord(reqData: readonly UiRequestCell[]): Map<string, UiRequestCell[]> {
+  const map = new Map<string, UiRequestCell[]>();
+  for (const cell of reqData) {
+    const key = coordKey(cell.person, cell.date);
+    const cells = map.get(key);
+    if (cells) cells.push(cell);
+    else map.set(key, [cell]);
+  }
+  return map;
 }
 
 /** Date-group header icon: ALL -> calendar, WEEKDAY -> briefcase, WEEKEND -> mug-hot,
@@ -183,6 +211,12 @@ export function RequestsMatrix({
     for (const p of people) map.set(String(p.id), p);
     return map;
   }, [people]);
+
+  // Coordinate → cell membership, computed once per `reqData` change. Replaces a
+  // per-cell `cellPreferenceSet` full scan (O(reqData) each) with an O(1)
+  // `map.get(key)`, so the hot quick-paint/drag re-render path no longer runs a
+  // people×days scan per visible cell.
+  const cellsByCoord = useMemo(() => buildCellsByCoord(reqData), [reqData]);
 
   const virtualizer = useVirtualizer({
     count: rows.length,
@@ -373,9 +407,9 @@ export function RequestsMatrix({
 
                 {columns.map((col, colIdx) => {
                   const colRef = col.ref;
-                  const cellsAt = cellPreferenceSet(reqData, row.id, colRef);
+                  const key = coordKey(row.id, colRef);
+                  const cellsAt = cellsByCoord.get(key) ?? EMPTY_CELLS;
                   const view = buildCellView(cellsAt, shiftTypeOrderIndex);
-                  const key = JSON.stringify([row.id, colRef]);
                   const staged = stagedKeys?.has(key) ?? false;
                   const handlers =
                     mode === "normal"

@@ -20,6 +20,11 @@ export interface GuidedQuickField {
   min?: number;
   max?: number;
   unit?: string;
+  /** When set, this field is a soft/hard weight: it accepts `±Infinity` (a hard
+   *  constraint) alongside finite values, so the Adjust control renders a weight
+   *  text/`±∞` affordance instead of a plain `type="number"` box (which can't
+   *  represent Infinity). Plain numeric fields (people/target) leave this unset. */
+  allowsInfinity?: boolean;
   /** Returns an error message for an invalid value, `undefined` when valid. */
   validate(value: number): string | undefined;
 }

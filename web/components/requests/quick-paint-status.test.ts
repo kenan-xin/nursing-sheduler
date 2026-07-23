@@ -76,4 +76,38 @@ describe("quickPaintStatus (FR-SR-29)", () => {
       "Drag over cells to apply LEAVE with weight +∞.",
     );
   });
+
+  // The status line must announce what the drag ACTUALLY paints (the gesture's
+  // `computeQuickPaintCellIntent` precedence), not the raw selection.
+  describe("announces the actually-applied intent, not the raw selection", () => {
+    it("apply: a co-selected OFF is dropped when a worked shift is selected", () => {
+      // Gesture drops OFF and paints only AM — the status must match.
+      expect(quickPaintStatus(["OFF", "AM"], "5")).toEqual({
+        tone: "apply",
+        text: "Drag over cells to apply AM with weight +5.",
+      });
+    });
+
+    it("removal: a co-selected OFF is dropped for the removal wording too", () => {
+      expect(quickPaintStatus(["OFF", "AM"], "0")).toEqual({
+        tone: "removal",
+        text: "Drag over cells to remove AM. Empty cells without it will not change.",
+      });
+    });
+
+    it("apply: LEAVE overrides every co-selected target", () => {
+      // LEAVE wins over AM and OFF — only LEAVE is announced.
+      expect(quickPaintStatus(["OFF", "AM", "LEAVE"], "5")).toEqual({
+        tone: "apply",
+        text: "Drag over cells to apply LEAVE with weight +5.",
+      });
+    });
+
+    it("apply: a sole OFF selection is still announced (it is a day-state)", () => {
+      expect(quickPaintStatus(["OFF"], "5")).toEqual({
+        tone: "apply",
+        text: "Drag over cells to apply OFF with weight +5.",
+      });
+    });
+  });
 });

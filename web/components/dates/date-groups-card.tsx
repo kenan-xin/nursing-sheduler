@@ -17,7 +17,7 @@
 //     membership — derived ids remain non-editable/non-deletable (the store never
 //     offers an edit/delete affordance for them), preserving the settled guard.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLosableDraft } from "@/components/shell/use-losable-draft";
 import {
   dateIdToIso,
@@ -98,6 +98,25 @@ export function DateGroupsCard({
   const [draftName, setDraftName] = useState("");
   const [draftSelected, setDraftSelected] = useState<ReadonlySet<string>>(new Set());
   const [draftError, setDraftError] = useState<string | null>(null);
+
+  // When the committed range changes underneath us (undo/redo, external cascade, a
+  // self-commit that re-keys/purges ids), any open preview or draft can still point
+  // at members the cascade already re-keyed or purged. Reset the preview and close
+  // any open draft so a stale draft can never be saved (via `buildMembers`) against
+  // those ids. Skip the initial mount so a freshly rendered card keeps its seed.
+  const prevRangeKey = useRef(`${range.start}|${range.end}`);
+  useEffect(() => {
+    const key = `${range.start}|${range.end}`;
+    if (prevRangeKey.current === key) return;
+    prevRangeKey.current = key;
+    setSel([]);
+    setPreviewClosed(false);
+    setCreating(false);
+    setEditingId(null);
+    setDraftName("");
+    setDraftSelected(new Set());
+    setDraftError(null);
+  }, [range.start, range.end]);
 
   /** Resolve a group's member ids to in-order ISO dates for preview/chips. */
   const memberIso = (members: readonly (string | number)[]): string[] =>

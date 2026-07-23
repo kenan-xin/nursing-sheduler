@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { parseWeightInput } from "@/components/card-editor/weight-field";
 import {
   FaArrowRight,
   FaCheck,
@@ -170,6 +171,28 @@ export function RuleRow({
   );
 }
 
+/** Parse an Adjust field's raw text into the number the store would commit, plus
+ *  the live validation message. A weight field (`allowsInfinity`) accepts the
+ *  soft/hard weight spellings (finite, `∞`, `-∞`, `Infinity`, suffixes) via the
+ *  shared `parseWeightInput`; every other field is a plain non-empty number. In
+ *  both cases the field's OWN `validate` decides the message, so validation stays
+ *  identical to an Advanced edit — an unparseable draft becomes `NaN`, which
+ *  `validate` already rejects. */
+function evaluateDraft(
+  field: GuidedRuleRow["quickFields"][number],
+  raw: string,
+): { value: number; message: string | undefined } {
+  if (field.allowsInfinity) {
+    const parsed = parseWeightInput(raw);
+    const value = typeof parsed === "number" ? parsed : Number.NaN;
+    return { value, message: field.validate(value) };
+  }
+  if (raw.trim() === "") return { value: Number.NaN, message: "Enter a number" };
+  const value = Number(raw);
+  if (Number.isNaN(value)) return { value, message: "Enter a number" };
+  return { value, message: field.validate(value) };
+}
+
 function AdjustPanel({
   row,
   onAdjustField,
@@ -194,30 +217,90 @@ function AdjustPanel({
         {row.quickFields.map((field) => {
           const draftValue = drafts[field.key] ?? String(field.value);
           const error = errors[field.key];
+          const setError = (message: string | undefined) =>
+            setErrors((er) => ({ ...er, [field.key]: message }));
+
+          // Live feedback only — update the draft + error on every keystroke, but
+          // never write the store here (that would make each digit its own zundo
+          // entry). The commit happens once, on blur/Enter, below.
+          const onChangeRaw = (raw: string) => {
+            setDrafts((d) => ({ ...d, [field.key]: raw }));
+            setError(evaluateDraft(field, raw).message);
+          };
+
+          // Commit exactly once: validate the final draft and, when valid AND
+          // actually changed, apply the single mutation via `onAdjustField`
+          // (which validates + writes the store, exactly like an Advanced edit).
+          const commitValue = (value: number) => {
+            const message = field.validate(value);
+            if (message) return setError(message);
+            if (value === field.value) return setError(undefined);
+            setError(onAdjustField(field.key, value));
+          };
+          const commitRaw = (raw: string) => {
+            const { value, message } = evaluateDraft(field, raw);
+            if (message) return setError(message);
+            commitValue(value);
+          };
+          const setHard = (value: number) => {
+            setDrafts((d) => ({ ...d, [field.key]: String(value) }));
+            commitValue(value);
+          };
+
+          const commonProps = {
+            value: draftValue,
+            "aria-label": field.label,
+            "data-testid": `rule-adjust-input-${row.id}-${field.key}`,
+            onChange: (e: React.ChangeEvent<HTMLInputElement>) => onChangeRaw(e.target.value),
+            onBlur: (e: React.FocusEvent<HTMLInputElement>) => commitRaw(e.target.value),
+            onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                commitRaw(e.currentTarget.value);
+              }
+            },
+          };
+
           return (
             <label key={field.key} className="block">
               <span className="mb-1.5 block text-meta text-ink2">{field.label}</span>
               <div className="flex items-center gap-2">
-                <Input
-                  type="number"
-                  min={field.min}
-                  max={field.max}
-                  value={draftValue}
-                  className="w-24 font-mono font-bold"
-                  aria-label={field.label}
-                  data-testid={`rule-adjust-input-${row.id}-${field.key}`}
-                  onChange={(e) => {
-                    const raw = e.target.value;
-                    setDrafts((d) => ({ ...d, [field.key]: raw }));
-                    const parsed = Number(raw);
-                    if (raw.trim() === "" || Number.isNaN(parsed)) {
-                      setErrors((er) => ({ ...er, [field.key]: "Enter a number" }));
-                      return;
-                    }
-                    const message = onAdjustField(field.key, parsed);
-                    setErrors((er) => ({ ...er, [field.key]: message }));
-                  }}
-                />
+                {field.allowsInfinity ? (
+                  <>
+                    <Input
+                      type="text"
+                      inputMode="text"
+                      className="w-24 font-mono font-bold"
+                      {...commonProps}
+                    />
+                    <button
+                      type="button"
+                      title="Hard rule (positive infinity)"
+                      onClick={() => setHard(Infinity)}
+                      data-testid={`rule-adjust-plus-inf-${row.id}-${field.key}`}
+                      className="h-9 flex-none border border-line px-2.5 font-mono text-label font-semibold hover:bg-surface"
+                    >
+                      +∞
+                    </button>
+                    <button
+                      type="button"
+                      title="Hard rule (negative infinity)"
+                      onClick={() => setHard(-Infinity)}
+                      data-testid={`rule-adjust-minus-inf-${row.id}-${field.key}`}
+                      className="h-9 flex-none border border-line px-2.5 font-mono text-label font-semibold hover:bg-surface"
+                    >
+                      −∞
+                    </button>
+                  </>
+                ) : (
+                  <Input
+                    type="number"
+                    min={field.min}
+                    max={field.max}
+                    className="w-24 font-mono font-bold"
+                    {...commonProps}
+                  />
+                )}
                 {field.unit && <span className="font-mono text-label text-ink3">{field.unit}</span>}
               </div>
               {error && (

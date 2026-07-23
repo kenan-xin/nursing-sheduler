@@ -3,7 +3,8 @@
 // The generic item/group editor (T09, Option A). Domain-agnostic: it reads a
 // descriptor and renders the full spec-03 editing surface — an items table with
 // native HTML5 drag-reorder, an add form, per-row full edit (edit-toggle) and
-// double-click inline edit, immediate duplicate/delete, per-row group toggle chips,
+// double-click inline edit, immediate duplicate/delete, per-row group membership
+// badges each with an inline ×-remove (one tracked membership toggle),
 // and a groups section with a live transfer-list membership picker plus (People
 // only) a .txt/.csv bulk upload. People and Shift Types are thin descriptor-driven
 // wrappers (see components/people + components/shift-types); Dates adopt the same
@@ -682,6 +683,17 @@ function ItemRow<TItem extends EditorItemBase>({
           {memberOf.map((g) => (
             <Badge key={g.id} variant="neutral">
               {g.id}
+              <button
+                type="button"
+                aria-label={`Remove ${item.id} from ${g.id}`}
+                data-testid={`item-group-remove-${itemKey}-${g.id}`}
+                className="-mr-0.5 ml-0.5 inline-flex items-center text-ink3 hover:text-error"
+                onClick={() =>
+                  commit(toggleGroupMembership(currentState(), descriptor, g.id, item.id))
+                }
+              >
+                <FaXmark aria-hidden />
+              </button>
             </Badge>
           ))}
         </div>
@@ -1169,6 +1181,17 @@ function GroupRow<TItem extends EditorItemBase>({
             {group.members.map((m) => (
               <Badge key={entityKey(m)} variant="outline">
                 {String(m)}
+                <button
+                  type="button"
+                  aria-label={`Remove ${String(m)} from ${group.id}`}
+                  data-testid={`group-member-remove-${group.id}-${entityKey(m)}`}
+                  className="-mr-0.5 ml-0.5 inline-flex items-center text-ink3 hover:text-error"
+                  onClick={() =>
+                    commit(toggleGroupMembership(currentState(), descriptor, group.id, m))
+                  }
+                >
+                  <FaXmark aria-hidden />
+                </button>
               </Badge>
             ))}
           </div>
