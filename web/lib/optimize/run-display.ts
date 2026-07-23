@@ -3,8 +3,12 @@
 // stay faithful to the old application's copy (page.tsx `formatRunStatus`,
 // `formatProgressSummary`, and the job-detail line).
 
+import { parseIsoDateTime } from "@/lib/time/iso-date-time";
 import type { OptimizeRunView, RunProgressPoint } from "./run-view";
 import { WORKER_LOST_CODE } from "./run-view";
+
+/** Placeholder shown when a value cannot be derived (a missing timestamp). */
+const MISSING_ELAPSED_TEXT = "—";
 
 export type RunStatusTone = "neutral" | "brand" | "success" | "warn" | "error";
 
@@ -107,4 +111,67 @@ export function jobDetailLine(view: OptimizeRunView, submitting: boolean): strin
   }
   if (view.jobId !== null) return `Job ${view.jobId}`;
   return "No optimization has been started.";
+}
+
+/**
+ * Format an elapsed-seconds value like the live timer (the progress chart's
+ * `formatElapsedSeconds` ladder, reimplemented here so `@/lib/optimize` stays
+ * free of a `components/` dependency):
+ *   • < 10s    → "x.x s"
+ *   • < 60s    → "x s"
+ *   • < 1h     → "Xm YYs"
+ *   • ≥ 1h     → "Xh YYm"
+ */
+export function formatElapsedSeconds(value: number): string {
+  if (value < 10) return `${value.toFixed(1)}s`;
+  if (value < 60) return `${Math.round(value)}s`;
+  const totalSeconds = Math.round(value);
+  if (totalSeconds < 3600) {
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${minutes}m ${seconds.toString().padStart(2, "0")}s`;
+  }
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  return `${hours}h ${minutes.toString().padStart(2, "0")}m`;
+}
+
+/**
+ * ELAPSED for the terminal success grid: `max(0, finished_at − started_at)`
+ * from the job's timestamps (Contract C2 `JobResponse`) — NEVER the last
+ * progress frame's `elapsedSeconds` (a fast run may have no progress frame at
+ * all, and a queued wait must not be counted). Shows `—` when either
+ * timestamp is absent or fails to parse.
+ */
+export function elapsedLabel(view: OptimizeRunView): string {
+  if (view.startedAt === null || view.finishedAt === null) return MISSING_ELAPSED_TEXT;
+  const started = parseIsoDateTime(view.startedAt);
+  const finished = parseIsoDateTime(view.finishedAt);
+  if (started === null || finished === null) return MISSING_ELAPSED_TEXT;
+  const seconds =
+    finished.seconds - started.seconds + (finished.nanoseconds - started.nanoseconds) / 1e9;
+  return formatElapsedSeconds(Math.max(0, seconds));
+}
+
+/**
+ * The large terminal-outcome heading (proto `ScreenGenerate.dc.html:88-89,315`),
+ * shown above the success grid / infeasible panel / cancelled notice — not just
+ * the status Badge. Null for every non-terminal lifecycle and for `failed`
+ * (which keeps its existing Callout-only presentation).
+ */
+export function terminalHeading(view: OptimizeRunView): string | null {
+  if (view.lifecycle === "completed") {
+    switch (view.result?.outcome) {
+      case "optimal":
+        return "Optimal roster found";
+      case "feasible":
+        return "A feasible roster was found";
+      case "infeasible":
+        return "This roster can't be built";
+      default:
+        return null;
+    }
+  }
+  if (view.lifecycle === "cancelled") return "Run cancelled";
+  return null;
 }

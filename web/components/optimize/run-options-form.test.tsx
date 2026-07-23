@@ -8,6 +8,7 @@ afterEach(() => cleanup());
 
 function setup(over: Partial<RunOptionsFormProps> = {}) {
   const props: RunOptionsFormProps = {
+    stats: { nurses: 12, days: 28, shifts: 3, rulesOn: 5 },
     prettify: true,
     anonymize: true,
     timeout: "300",
@@ -31,7 +32,7 @@ describe("RunOptionsForm", () => {
     setup();
     expect(screen.getByRole("switch", { name: "Prettify XLSX" })).toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "Anonymize schedule data" })).toBeInTheDocument();
-    expect(screen.getByText("Apply formatting to the generated workbook.")).toBeInTheDocument();
+    expect(screen.getByText("Apply color formatting to the workbook.")).toBeInTheDocument();
   });
 
   it("toggles prettify and anonymize", async () => {
@@ -83,5 +84,22 @@ describe("RunOptionsForm", () => {
     setup({ optionsDisabled: true });
     expect(screen.getByRole("switch", { name: "Prettify XLSX" })).toHaveAttribute("data-disabled");
     expect(screen.getByLabelText("Solver Timeout")).toBeDisabled();
+  });
+
+  it("renders the scenario stat grid (NURSES / DAYS / SHIFTS / RULES ON)", () => {
+    setup({ stats: { nurses: 12, days: 28, shifts: 3, rulesOn: 5 } });
+    expect(screen.getByTestId("optimize-stat-nurses")).toHaveTextContent("12");
+    expect(screen.getByTestId("optimize-stat-nurses")).toHaveTextContent("Nurses");
+    expect(screen.getByTestId("optimize-stat-days")).toHaveTextContent("28");
+    expect(screen.getByTestId("optimize-stat-shifts")).toHaveTextContent("3");
+    expect(screen.getByTestId("optimize-stat-rules-on")).toHaveTextContent("5");
+    expect(screen.getByTestId("optimize-stat-rules-on")).toHaveTextContent("Rules on");
+  });
+
+  it("orders fields timeout, then anonymize, then prettify (proto ScreenGenerate.dc.html:38-45)", () => {
+    setup();
+    const form = screen.getByTestId("optimize-run-options");
+    const labels = Array.from(form.querySelectorAll("label")).map((el) => el.textContent);
+    expect(labels).toEqual(["Solver Timeout", "Anonymize schedule data", "Prettify XLSX"]);
   });
 });

@@ -9,7 +9,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FaBolt } from "@/components/icons";
+import { rangeDayCount } from "@/lib/dates";
 import { toCanonicalScenarioDocument } from "@/lib/scenario/canonical";
+import type { CardsByKind } from "@/lib/scenario";
 import { useScenarioStore } from "@/lib/store";
 import { confirmDialog } from "@/components/shell/confirm-store";
 import {
@@ -39,6 +41,25 @@ import { RunStatusPanel } from "./run-status-panel";
 import { ServerIdentity } from "./server-identity";
 
 const TIMEOUT_ERROR = "Solver timeout must be a valid positive integer.";
+
+/**
+ * RULES ON — the count of ENABLED rule cards (not the total), mirroring the
+ * Guided Rules screen's own "{onCount} OF {total} RULES ON" semantics
+ * (`components/guided-rules/rules-screen.tsx`): the always-on built-in
+ * structural rule (`components/guided-rules/builtins.ts` — exactly one today,
+ * "at most one shift per day", never disableable) plus every card across the
+ * five constraint kinds whose `disabled` flag is not set.
+ */
+function countEnabledRules(cardsByKind: CardsByKind): number {
+  const BUILTIN_RULE_COUNT = 1;
+  const enabledCards =
+    cardsByKind.requirements.filter((card) => !card.disabled).length +
+    cardsByKind.successions.filter((card) => !card.disabled).length +
+    cardsByKind.counts.filter((card) => !card.disabled).length +
+    cardsByKind.affinities.filter((card) => !card.disabled).length +
+    cardsByKind.coverings.filter((card) => !card.disabled).length;
+  return BUILTIN_RULE_COUNT + enabledCards;
+}
 
 /** Parse the timeout field, enforcing an integer within the settled bounds. */
 function parseTimeoutInput(raw: string): { ok: true; value: number } | { ok: false } {
@@ -117,6 +138,19 @@ export function OptimizeAndExportScreen({
   const readiness = useMemo(
     () => deriveOptimizeReadiness({ staff, shifts, shiftGroups, rangeStart, rangeEnd }),
     [staff, shifts, shiftGroups, rangeStart, rangeEnd],
+  );
+
+  // B2-2 — the scenario stat grid (NURSES / DAYS / SHIFTS / RULES ON) rendered
+  // with the run settings (proto ScreenGenerate.dc.html:32-37).
+  const cardsByKind = useScenarioStore((state) => state.cardsByKind);
+  const runOptionsStats = useMemo(
+    () => ({
+      nurses: staff.length,
+      days: rangeDayCount({ start: rangeStart, end: rangeEnd }),
+      shifts: shifts.length,
+      rulesOn: countEnabledRules(cardsByKind),
+    }),
+    [staff, rangeStart, rangeEnd, shifts, cardsByKind],
   );
 
   const [prettify, setPrettify] = useState(true);
@@ -329,6 +363,7 @@ export function OptimizeAndExportScreen({
             <div className="space-y-5">
               <ServerIdentity info={serverInfo} />
               <RunOptionsForm
+                stats={runOptionsStats}
                 prettify={prettify}
                 anonymize={anonymize}
                 timeout={timeoutValue}
@@ -362,6 +397,14 @@ export function OptimizeAndExportScreen({
               onDownloadAgain={terminal.downloadAgain}
               onRetryCleanup={terminal.retryCleanup}
               onAbandonCleanup={onAbandonCleanup}
+              // The idle-panel CTA must respect the SAME submission gates as the
+              // settings-form Optimize button — wire it only when a run is actually
+              // permitted, so an offline / not-ready / recovery- or cleanup-blocked
+              // idle screen can't submit through it (which would risk overwriting a
+              // retained terminal view with `submit-blocked`). When not submittable
+              // the idle panel shows the explainer only; the settings button carries
+              // the disabled reason.
+              onStartRun={submitEnabled ? onSubmit : undefined}
             />
           </Section>
         </div>

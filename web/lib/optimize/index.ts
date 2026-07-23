@@ -155,10 +155,13 @@ export {
 } from "./use-optimize-terminal";
 
 export {
+  elapsedLabel,
+  formatElapsedSeconds,
   formatRunStatus,
   formatScore,
   jobDetailLine,
   scoreLabel,
+  terminalHeading,
   type RunStatusDisplay,
   type RunStatusTone,
 } from "./run-display";

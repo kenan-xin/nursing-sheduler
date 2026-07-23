@@ -97,7 +97,7 @@ const completedView = view({
   download: { status: "downloaded", artifactAvailable: true, filename: "schedule.xlsx" },
 });
 
-const noArtifactView = view({
+const infeasibleView = view({
   lifecycle: "completed",
   jobId: "opt_1",
   result: {
@@ -105,6 +105,22 @@ const noArtifactView = view({
     score: null,
     solverStatus: "INFEASIBLE",
     terminationReason: "infeasibility_proven",
+  },
+  download: { status: "unavailable", artifactAvailable: false, filename: null },
+});
+
+// A completed run whose artifact is genuinely absent WITHOUT being infeasible —
+// the rare anomaly the generic no-artifact callout still covers (infeasible now
+// has its own dedicated panel).
+const noArtifactView = view({
+  lifecycle: "completed",
+  jobId: "opt_1",
+  latestScore: 30,
+  result: {
+    outcome: "feasible",
+    score: 30,
+    solverStatus: "FEASIBLE",
+    terminationReason: "limit_or_stop",
   },
   download: { status: "unavailable", artifactAvailable: false, filename: null },
 });
@@ -164,6 +180,7 @@ export default function OptimizeScreenFixtureClient() {
 
       <Panel id="fx-options" title="Run options">
         <RunOptionsForm
+          stats={{ nurses: 12, days: 28, shifts: 3, rulesOn: 5 }}
           prettify
           anonymize
           timeout="300"
@@ -204,6 +221,17 @@ export default function OptimizeScreenFixtureClient() {
       <Panel id="fx-no-artifact" title="Completed, no artifact">
         <RunStatusPanel
           view={noArtifactView}
+          submitting={false}
+          cleanupPhase="idle"
+          canDownloadAgain={false}
+          downloadAgainFilename={null}
+          {...statusHandlers}
+        />
+      </Panel>
+
+      <Panel id="fx-infeasible" title="Completed, infeasible">
+        <RunStatusPanel
+          view={infeasibleView}
           submitting={false}
           cleanupPhase="idle"
           canDownloadAgain={false}

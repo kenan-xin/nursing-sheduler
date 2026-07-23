@@ -5,6 +5,13 @@ import userEvent from "@testing-library/user-event";
 import { INITIAL_OPTIMIZE_RUN_VIEW, type CleanupPhase, type OptimizeRunView } from "@/lib/optimize";
 import { RunStatusPanel, type RunStatusPanelProps } from "./run-status-panel";
 
+// GuardedLink (the infeasible "Adjust rules" CTA) reads the Next router; a lightweight
+// stub keeps this a focused render test, mirroring readiness-banner.test.tsx.
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  usePathname: () => "/optimize-and-export",
+}));
+
 afterEach(() => cleanup());
 
 const handlers = {
@@ -36,16 +43,37 @@ function setup(v: OptimizeRunView, over: Partial<RunStatusPanelProps> = {}) {
   return props;
 }
 
-describe("RunStatusPanel — status and score", () => {
-  it("shows the idle status and no-incumbent score", () => {
+describe("RunStatusPanel — idle empty state", () => {
+  it("shows the centered empty state instead of the bare score skeleton", () => {
     setup(INITIAL_OPTIMIZE_RUN_VIEW);
-    expect(screen.getByTestId("optimize-status")).toHaveTextContent("Idle");
-    expect(screen.getByTestId("optimize-score")).toHaveTextContent("No incumbent yet");
-    expect(screen.getByTestId("optimize-job-detail")).toHaveTextContent(
-      "No optimization has been started.",
-    );
+    expect(screen.getByTestId("optimize-idle")).toHaveTextContent("Ready to optimise");
+    // No live score skeleton while idle.
+    expect(screen.queryByTestId("optimize-score")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("optimize-status")).not.toBeInTheDocument();
   });
 
+  it("renders the in-panel Optimize CTA only when an onStartRun handler is wired", async () => {
+    const onStartRun = vi.fn();
+    setup(INITIAL_OPTIMIZE_RUN_VIEW, { onStartRun });
+    const cta = screen.getByTestId("optimize-start");
+    await userEvent.click(cta);
+    expect(onStartRun).toHaveBeenCalled();
+  });
+
+  it("omits the in-panel CTA when no run-start handler is provided", () => {
+    setup(INITIAL_OPTIMIZE_RUN_VIEW);
+    expect(screen.queryByTestId("optimize-start")).not.toBeInTheDocument();
+  });
+
+  it("does not treat the brief submitting window as idle", () => {
+    setup(INITIAL_OPTIMIZE_RUN_VIEW, { submitting: true });
+    // submitting masks idle — the live skeleton (status badge) renders instead.
+    expect(screen.queryByTestId("optimize-idle")).not.toBeInTheDocument();
+    expect(screen.getByTestId("optimize-status")).toBeInTheDocument();
+  });
+});
+
+describe("RunStatusPanel — status and score", () => {
   it("shows the live incumbent and queue position", () => {
     setup(view({ lifecycle: "queued", jobId: "opt_1", queuePosition: 3, latestScore: 12 }));
     expect(screen.getByTestId("optimize-status")).toHaveTextContent("Queued, position 3");
@@ -101,6 +129,48 @@ describe("RunStatusPanel — terminal outcomes", () => {
     expect(screen.getByTestId("optimize-download-again")).toHaveTextContent("schedule.xlsx");
   });
 
+  it("success: terminal heading + SOLVER STATUS / FINAL SCORE / ELAPSED grid", () => {
+    setup(
+      view({
+        lifecycle: "completed",
+        jobId: "opt_1",
+        result: {
+          outcome: "feasible",
+          score: -142,
+          solverStatus: "FEASIBLE",
+          terminationReason: "solver_timeout",
+        },
+        latestScore: -142,
+        startedAt: "2026-07-20T00:00:01+00:00",
+        finishedAt: "2026-07-20T00:00:19.4+00:00",
+        download: { status: "available", artifactAvailable: true, filename: null },
+      }),
+    );
+    // Terminal outcome heading (not the live score skeleton).
+    expect(screen.getByRole("heading")).toHaveTextContent("A feasible roster was found");
+    const grid = screen.getByTestId("optimize-summary-grid");
+    expect(grid).toHaveTextContent("FEASIBLE");
+    expect(grid).toHaveTextContent("Final score");
+    expect(grid).toHaveTextContent("-142");
+    expect(grid).toHaveTextContent("Elapsed");
+    // 18.4s derived from the job timestamps (not a progress frame); the ladder
+    // rounds to whole seconds once ≥ 10s.
+    expect(grid).toHaveTextContent("18s");
+  });
+
+  it("success: ELAPSED shows — when a timestamp is absent", () => {
+    setup(
+      view({
+        lifecycle: "completed",
+        jobId: "opt_1",
+        result: { outcome: "optimal", score: 9, solverStatus: "OPTIMAL", terminationReason: null },
+        // No startedAt/finishedAt on the view.
+        download: { status: "available", artifactAvailable: true, filename: null },
+      }),
+    );
+    expect(screen.getByTestId("optimize-summary-grid")).toHaveTextContent("—");
+  });
+
   it("row 1 retry: a failed download offers a manual Download", async () => {
     const props = setup(
       view({
@@ -114,8 +184,8 @@ describe("RunStatusPanel — terminal outcomes", () => {
     expect(props.onDownloadArtifact).toHaveBeenCalled();
   });
 
-  it("row 2: completed with no artifact shows the outcome reason", () => {
-    setup(
+  it("infeasible: dedicated panel with heading, verdict label, and Adjust rules + Try again", async () => {
+    const props = setup(
       view({
         lifecycle: "completed",
         jobId: "opt_1",
@@ -123,14 +193,24 @@ describe("RunStatusPanel — terminal outcomes", () => {
           outcome: "infeasible",
           score: null,
           solverStatus: "INFEASIBLE",
-          terminationReason: "no_solution",
+          terminationReason: "infeasibility_proven",
         },
         download: { status: "unavailable", artifactAvailable: false, filename: null },
       }),
     );
-    expect(screen.getByTestId("optimize-no-artifact")).toHaveTextContent(
-      "No downloadable schedule is available. Job outcome: infeasible (no_solution).",
-    );
+    expect(screen.getByRole("heading")).toHaveTextContent("This roster can't be built");
+    const panel = screen.getByTestId("optimize-infeasible");
+    expect(panel).toHaveTextContent("verdict: infeasibility_proven");
+    // No per-conflict list, no generic no-artifact callout.
+    expect(screen.queryByTestId("optimize-no-artifact")).not.toBeInTheDocument();
+    // Adjust rules is a self-contained GuardedLink to /rules.
+    const adjust = screen.getByTestId("optimize-adjust-rules");
+    expect(adjust).toHaveAttribute("href", "/rules");
+    expect(adjust).toHaveTextContent("Adjust rules");
+    // Try again drives the run-start path.
+    const tryAgain = screen.getByTestId("optimize-try-again");
+    await userEvent.click(tryAgain);
+    expect(props.onResubmit).toHaveBeenCalled();
   });
 
   it("row 3: worker-lost failure shows the error and Resubmit", async () => {
@@ -158,6 +238,8 @@ describe("RunStatusPanel — terminal outcomes", () => {
         resubmittable: false,
       }),
     );
+    // Cancel always settles Cancelled (never routed to Failed) — heading present.
+    expect(screen.getByRole("heading")).toHaveTextContent("Run cancelled");
     expect(screen.getByTestId("optimize-terminal-error")).toHaveTextContent(
       "Optimization cancelled.",
     );

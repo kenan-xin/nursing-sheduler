@@ -40,10 +40,21 @@ test.describe("Optimize & Export screen — browser coverage", () => {
       page.getByTestId("fx-completed").getByTestId("optimize-download-again"),
     ).toBeVisible();
 
-    // No-artifact reason.
+    // No-artifact reason (non-infeasible completed-without-artifact anomaly).
     await expect(page.getByTestId("optimize-no-artifact")).toContainText(
       "No downloadable schedule is available",
     );
+
+    // Infeasible dedicated panel: explanation + solver verdict, no fabricated conflict list.
+    const infeasible = page.getByTestId("fx-infeasible");
+    await expect(infeasible).toContainText("This roster can");
+    await expect(infeasible.getByTestId("optimize-infeasible")).toContainText(
+      "no roster satisfies every hard rule",
+    );
+    await expect(infeasible.getByTestId("optimize-infeasible")).toContainText(
+      "infeasibility_proven",
+    );
+    await expect(infeasible.getByTestId("optimize-adjust-rules")).toHaveAttribute("href", "/rules");
 
     // Worker-lost: resubmit + dismiss + cleanup failed retry/abandon.
     const workerLost = page.getByTestId("fx-worker-lost");

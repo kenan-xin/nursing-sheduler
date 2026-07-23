@@ -4,6 +4,14 @@
 // (T16a `RunLogEntry[]`) as a collapsible list: a category badge, the stable
 // label, a short detail, and the event's wall-clock time. Poll/cache snapshots
 // deliberately produce no log entry, so this stays faithful to the real SSE wire.
+//
+// B2-2 — naming reconciled to the prototype's "Event log" (ScreenGenerate.dc.html
+// :190-193). Placement is a conscious deviation: the prototype seats the log in a
+// column beside the progress chart, but the chart is owned by the guarded
+// `run-status-panel.tsx` (B2-1, do-not-edit), so pulling it out to build that
+// two-column row is out of scope here. The full-width collapsible (this file's
+// existing structure) is kept instead — it already covers the same content with
+// a working scroll/auto-follow behavior.
 
 import { useCallback, useEffect, useRef } from "react";
 import type { RunLogEntry, RunLogKind } from "@/lib/optimize";
@@ -68,7 +76,7 @@ export function RunEventLog({ log, active }: RunEventLogProps) {
       data-testid="optimize-event-log"
     >
       <summary className="flex cursor-pointer items-center justify-between gap-2 px-4 py-2.5 text-body font-semibold">
-        <span>Optimization Events</span>
+        <span>Event log</span>
         <span className="text-meta font-normal text-ink3">{count} events</span>
       </summary>
       <div

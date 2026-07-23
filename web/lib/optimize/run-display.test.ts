@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { INITIAL_OPTIMIZE_RUN_VIEW, type OptimizeRunView, type RunProgressPoint } from "./run-view";
-import { formatRunStatus, formatScore, jobDetailLine, scoreLabel } from "./run-display";
+import {
+  elapsedLabel,
+  formatElapsedSeconds,
+  formatRunStatus,
+  formatScore,
+  jobDetailLine,
+  scoreLabel,
+  terminalHeading,
+} from "./run-display";
 
 function view(over: Partial<OptimizeRunView>): OptimizeRunView {
   return { ...INITIAL_OPTIMIZE_RUN_VIEW, ...over };
@@ -102,5 +110,114 @@ describe("jobDetailLine", () => {
   it("summarizes the live incumbent from the latest progress point", () => {
     const v = view({ lifecycle: "running", jobId: "opt_1", latestScore: 10, progress: [point()] });
     expect(jobDetailLine(v, false)).toBe("Solution #3 · 5s elapsed · 2 comments · solver");
+  });
+});
+
+describe("formatElapsedSeconds", () => {
+  it("uses a tenth-second ladder below 10s", () => {
+    expect(formatElapsedSeconds(0)).toBe("0.0s");
+    expect(formatElapsedSeconds(8.46)).toBe("8.5s");
+  });
+  it("rounds whole seconds under a minute", () => {
+    expect(formatElapsedSeconds(42)).toBe("42s");
+    expect(formatElapsedSeconds(59.6)).toBe("60s");
+  });
+  it("formats sub-hour durations as Xm YYs", () => {
+    expect(formatElapsedSeconds(125)).toBe("2m 05s");
+  });
+  it("formats hour-plus durations as Xh YYm", () => {
+    expect(formatElapsedSeconds(3725)).toBe("1h 02m");
+  });
+});
+
+describe("elapsedLabel (terminal grid)", () => {
+  it("derives max(0, finished − started) from the job timestamps", () => {
+    const v = view({
+      lifecycle: "completed",
+      startedAt: "2026-07-20T00:00:01+00:00",
+      finishedAt: "2026-07-20T00:00:19.4+00:00",
+    });
+    // 18.4s — the final duration, never the last progress frame's elapsedSeconds.
+    // The ladder rounds to whole seconds once ≥ 10s.
+    expect(elapsedLabel(v)).toBe("18s");
+  });
+  it("clamps a clock-skew (finished before started) to zero, not negative", () => {
+    const v = view({
+      lifecycle: "completed",
+      startedAt: "2026-07-20T00:00:10+00:00",
+      finishedAt: "2026-07-20T00:00:05+00:00",
+    });
+    expect(elapsedLabel(v)).toBe("0.0s");
+  });
+  it("shows — when a timestamp is absent", () => {
+    expect(elapsedLabel(view({ lifecycle: "completed", startedAt: null, finishedAt: null }))).toBe(
+      "—",
+    );
+    expect(
+      elapsedLabel(
+        view({ lifecycle: "completed", startedAt: "2026-07-20T00:00:01+00:00", finishedAt: null }),
+      ),
+    ).toBe("—");
+  });
+  it("shows — when a timestamp fails to parse", () => {
+    expect(
+      elapsedLabel(
+        view({ lifecycle: "completed", startedAt: "not-a-date", finishedAt: "2026-07-20+00:00" }),
+      ),
+    ).toBe("—");
+  });
+});
+
+describe("terminalHeading", () => {
+  it("names an optimal / feasible completion", () => {
+    expect(
+      terminalHeading(
+        view({
+          lifecycle: "completed",
+          result: {
+            outcome: "optimal",
+            score: 1,
+            solverStatus: "OPTIMAL",
+            terminationReason: null,
+          },
+        }),
+      ),
+    ).toBe("Optimal roster found");
+    expect(
+      terminalHeading(
+        view({
+          lifecycle: "completed",
+          result: {
+            outcome: "feasible",
+            score: 1,
+            solverStatus: "FEASIBLE",
+            terminationReason: "solver_timeout",
+          },
+        }),
+      ),
+    ).toBe("A feasible roster was found");
+  });
+  it("names an infeasible completion", () => {
+    expect(
+      terminalHeading(
+        view({
+          lifecycle: "completed",
+          result: {
+            outcome: "infeasible",
+            score: null,
+            solverStatus: "INFEASIBLE",
+            terminationReason: "infeasibility_proven",
+          },
+        }),
+      ),
+    ).toBe("This roster can't be built");
+  });
+  it("names a cancellation", () => {
+    expect(terminalHeading(view({ lifecycle: "cancelled" }))).toBe("Run cancelled");
+  });
+  it("is null for failed, active, and idle lifecycles", () => {
+    expect(terminalHeading(view({ lifecycle: "failed" }))).toBeNull();
+    expect(terminalHeading(view({ lifecycle: "running" }))).toBeNull();
+    expect(terminalHeading(INITIAL_OPTIMIZE_RUN_VIEW)).toBeNull();
   });
 });

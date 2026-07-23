@@ -290,6 +290,14 @@ export interface OptimizeRunView {
   outcome: OptimizationOutcome | null;
   /** Latest displayed incumbent score (live progress, then the final result). */
   latestScore: number | null;
+  /**
+   * The job's `started_at` / `finished_at` timestamps (ISO strings), mirrored
+   * verbatim from the latest `JobResponse` snapshot. B2-1's terminal ELAPSED
+   * summary derives from these — NOT from the last progress frame's
+   * `elapsedSeconds` (a fast run may have no progress frame at all).
+   */
+  startedAt: string | null;
+  finishedAt: string | null;
   error: RunError | null;
   cursorRecovery: CursorRecoveryState | null;
   progress: RunProgressPoint[];
@@ -327,6 +335,8 @@ export const INITIAL_OPTIMIZE_RUN_VIEW: OptimizeRunView = {
   result: null,
   outcome: null,
   latestScore: null,
+  startedAt: null,
+  finishedAt: null,
   error: null,
   cursorRecovery: null,
   progress: [],
@@ -684,6 +694,11 @@ export function reduceRunView(view: OptimizeRunView, signal: RunSignal): Optimiz
         outcome: result?.outcome ?? null,
         // A final result score supersedes the live incumbent; otherwise keep it.
         latestScore: result?.score ?? view.latestScore,
+        // Mirrored verbatim on every snapshot (present on every JobResponse, not
+        // just terminal ones) so the terminal ELAPSED summary always has the
+        // latest server-reported timestamps to derive from.
+        startedAt: job.started_at,
+        finishedAt: job.finished_at,
         // Authoritative: adopt the server error, or clear a prior job error.
         error: job.error ? boundError("job", job.error.code, job.error.message) : null,
         download,

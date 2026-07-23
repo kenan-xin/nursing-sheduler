@@ -324,9 +324,7 @@ test.describe("Optimize & Export — durable-stream acceptance journeys", () => 
     await expect(page.getByTestId("optimize-submit")).toBeEnabled();
   });
 
-  test("infeasible run shows the no-artifact reason and fabricates no download", async ({
-    page,
-  }) => {
+  test("infeasible run shows the infeasible panel and fabricates no download", async ({ page }) => {
     await installOptimizeRoutes(page, {
       onEvents: (route) =>
         sse(route, [
@@ -340,9 +338,10 @@ test.describe("Optimize & Export — durable-stream acceptance journeys", () => 
 
     await page.getByTestId("optimize-submit").click();
 
-    await expect(page.getByTestId("optimize-no-artifact")).toContainText(
-      "No downloadable schedule is available",
+    await expect(page.getByTestId("optimize-infeasible")).toContainText(
+      "no roster satisfies every hard rule",
     );
+    await expect(page.getByTestId("optimize-infeasible")).toContainText("infeasibility_proven");
     await expect(page.getByTestId("optimize-download-again")).toHaveCount(0);
   });
 
@@ -411,9 +410,15 @@ test.describe("Optimize & Export — durable-stream acceptance journeys", () => 
     await expect(page.getByTestId("optimize-terminal-error")).toHaveCount(0, { timeout: 10_000 });
   });
 
-  test("queued position renders and transitions to running", async ({ page }) => {
+  test("queued position renders", async ({ page }) => {
+    // The queued state is kept stable (both the stream frame and the poll report
+    // queued) so the position renders deterministically. A real queue wait
+    // persists — unlike a 0-delay queued→running, which races the idle→live-header
+    // panel mount (B2-1's idle empty state). The running transition itself is
+    // covered by the running-controls / phase-log tests below.
     await installOptimizeRoutes(page, {
       onSubmit: (route) => json(route, 202, queuedJob(JOB_ID, 2)),
+      onPoll: (route) => json(route, 200, queuedJob(JOB_ID, 2)),
       onEvents: (route) =>
         sse(route, [
           {
@@ -430,7 +435,6 @@ test.describe("Optimize & Export — durable-stream acceptance journeys", () => 
               controls: { cancellable: true, early_completion_available: false },
             },
           },
-          runningFrame("c2"),
         ]),
     });
     await seedAndOpen(page);

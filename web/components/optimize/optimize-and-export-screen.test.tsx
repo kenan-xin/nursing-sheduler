@@ -197,6 +197,26 @@ describe("OptimizeAndExportScreen — gating", () => {
       "Backend unavailable.",
     );
     expect(screen.getByTestId("optimize-submit")).toBeDisabled();
+    // The idle-panel CTA mirrors the same gate: it is NOT offered while a run is
+    // blocked, so it cannot bypass the submission guard (cold-review P1).
+    expect(screen.getByTestId("optimize-idle")).toBeInTheDocument();
+    expect(screen.queryByTestId("optimize-start")).not.toBeInTheDocument();
+  });
+
+  it("offers the idle-panel CTA only when a run is permitted", async () => {
+    readyStore();
+    routeFetch(() => json(200, baseJob()));
+    render(
+      <OptimizeAndExportScreen
+        serverInfoDeps={onlineInfo()}
+        controllerDeps={{ prepare: () => okPrep, storage: memStorage() }}
+      />,
+      { wrapper },
+    );
+    await waitFor(() => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
+    // Ready + online + idle → the idle empty state offers the in-panel Optimize CTA.
+    expect(screen.getByTestId("optimize-idle")).toBeInTheDocument();
+    expect(screen.getByTestId("optimize-start")).toBeInTheDocument();
   });
 
   it("warns on a frontend/backend version mismatch", async () => {
@@ -442,7 +462,7 @@ describe("OptimizeAndExportScreen — terminal release", () => {
     });
   }
 
-  it("row 2: completed-no-artifact shows the reason and auto-cleans", async () => {
+  it("row 2: infeasible shows the dedicated panel and auto-cleans", async () => {
     readyStore();
     routeTerminal(infeasibleJob);
     const deleteJob = vi.fn(async (): Promise<CleanupCallOutcome> => ({ status: "confirmed" }));
@@ -458,7 +478,11 @@ describe("OptimizeAndExportScreen — terminal release", () => {
     );
     await waitFor(() => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
     await userEvent.click(screen.getByTestId("optimize-submit"));
-    await waitFor(() => expect(screen.getByTestId("optimize-no-artifact")).toBeInTheDocument());
+    // B2-1: infeasible renders its dedicated panel (heading + verdict + CTAs), not the
+    // generic no-artifact callout.
+    await waitFor(() => expect(screen.getByTestId("optimize-infeasible")).toBeInTheDocument());
+    expect(screen.getByTestId("optimize-infeasible")).toHaveTextContent("infeasibility_proven");
+    expect(screen.getByTestId("optimize-adjust-rules")).toHaveAttribute("href", "/rules");
     await waitFor(() => expect(deleteJob).toHaveBeenCalledWith("opt_1"));
   });
 
@@ -511,7 +535,8 @@ describe("OptimizeAndExportScreen — terminal release", () => {
     expect(screen.queryByTestId("optimize-resubmit")).not.toBeInTheDocument();
     await userEvent.click(screen.getByTestId("optimize-dismiss"));
     await waitFor(() => expect(deleteJob).toHaveBeenCalledWith("opt_1"));
-    await waitFor(() => expect(screen.getByTestId("optimize-status")).toHaveTextContent("Idle"));
+    // Dismissed → the B2-1 idle empty state (not a bare status badge).
+    await waitFor(() => expect(screen.getByTestId("optimize-idle")).toBeInTheDocument());
   });
 
   it("worker_lost: a failed cleanup does NOT resubmit and preserves the terminal result", async () => {
@@ -584,7 +609,7 @@ describe("OptimizeAndExportScreen — terminal release", () => {
     await waitFor(() => expect(screen.getByTestId("optimize-dismiss")).toBeInTheDocument());
     await userEvent.click(screen.getByTestId("optimize-dismiss"));
     // Exact job-not-found is a confirmed cleanup → back to idle.
-    await waitFor(() => expect(screen.getByTestId("optimize-status")).toHaveTextContent("Idle"));
+    await waitFor(() => expect(screen.getByTestId("optimize-idle")).toBeInTheDocument());
   });
 });
 
