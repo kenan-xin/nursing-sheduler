@@ -17,9 +17,9 @@ import { getMissingPreferredScatterDateGroups, type ScenarioValidationIssue } fr
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import {
-  ANONYMISE_DOWNLOAD_FILENAME,
   ANONYMISE_TOGGLES,
   defaultAnonymiseToggleState,
+  filenameForToggles,
   isAnonymiseDownloadEnabled,
   performAnonymisedDownload,
   type AnonymiseToggleState,
@@ -60,7 +60,7 @@ export function AnonymiseCard() {
       return;
     }
     setIssues(null);
-    toast.success(`Downloaded ${ANONYMISE_DOWNLOAD_FILENAME}`);
+    toast.success(`Downloaded ${filenameForToggles(toggles)}`);
   };
 
   return (

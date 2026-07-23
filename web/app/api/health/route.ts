@@ -7,14 +7,30 @@ import { getBackendApiUrl } from "@/lib/backend";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// Bounded deadline for the private in-network hop to `/health`, matching the
+// `/info` proxy and readiness probe: a backend that accepts the connection then
+// deadlocks before sending headers must never stall this request up to undici's
+// ~300s default (deploy/version-gate polls would pile up open Next requests).
+const HEALTH_REQUEST_TIMEOUT_MS = 2_000;
+
 export async function GET() {
   const upstream = `${getBackendApiUrl()}/health`;
 
   try {
     const response = await fetch(upstream, {
+      method: "GET",
       cache: "no-store",
       headers: { accept: "application/json" },
+      redirect: "manual",
+      signal: AbortSignal.timeout(HEALTH_REQUEST_TIMEOUT_MS),
     });
+
+    if (response.type === "opaqueredirect") {
+      // `redirect: "manual"` surfaces a backend 3xx as an opaque redirect (status
+      // 0). A redirect from the health endpoint is unexpected — treat it as
+      // unreachable rather than relaying a status-0 response.
+      throw new Error(`unexpected redirect from health upstream (${response.status})`);
+    }
 
     const body = await response.text();
     return new Response(body, {

@@ -16,8 +16,19 @@ import {
   type ScenarioUiState,
 } from "@/lib/scenario";
 
-/** The filename stamped on every anonymised scenario download. */
+/**
+ * The filename for a download that actually anonymises identities (people
+ * and/or groups replaced). Only honest when at least one identity toggle is on.
+ */
 export const ANONYMISE_DOWNLOAD_FILENAME = "scenario-anonymised.yaml";
+
+/**
+ * The filename for a Scatter-only download: dates are shuffled but identities
+ * (names, groups, history, descriptions) are left verbatim. The `-anonymised`
+ * name would assert a protection that didn't happen, so this reflects what the
+ * transform actually did instead.
+ */
+export const ANONYMISE_SCATTER_ONLY_FILENAME = "scenario-dates-scattered.yaml";
 
 export type AnonymiseToggleKey = "people" | "groups" | "scatter";
 
@@ -52,6 +63,19 @@ export function isAnonymiseDownloadEnabled(toggles: AnonymiseToggleState): boole
   return ANONYMISE_TOGGLES.some((toggle) => toggles[toggle.key]);
 }
 
+/**
+ * The download filename honestly derived from the toggle state. The
+ * `-anonymised` name is reserved for downloads that actually anonymise
+ * identities (`people` and/or `groups`). A Scatter-only download leaves names,
+ * groups, history and descriptions verbatim, so it gets a `-dates-scattered`
+ * name instead of asserting a protection that didn't happen. (The all-off case
+ * is unreachable via the CTA, which is gated by `isAnonymiseDownloadEnabled`.)
+ */
+export function filenameForToggles(toggles: AnonymiseToggleState): string {
+  if (toggles.people || toggles.groups) return ANONYMISE_DOWNLOAD_FILENAME;
+  return ANONYMISE_SCATTER_ONLY_FILENAME;
+}
+
 export interface PerformAnonymisedDownloadDeps {
   /** Write the validated anonymised YAML to a file download. Never called on an invalid draft. */
   writeFile: (yaml: string, filename: string) => void;
@@ -78,6 +102,6 @@ export function performAnonymisedDownload(
     rng: deps.rng,
   });
   if (!result.ok) return result;
-  deps.writeFile(result.yaml, ANONYMISE_DOWNLOAD_FILENAME);
+  deps.writeFile(result.yaml, filenameForToggles(toggles));
   return result;
 }

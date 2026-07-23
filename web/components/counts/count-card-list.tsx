@@ -39,6 +39,7 @@ import {
   summarizeRefs,
 } from "./counts-model";
 import { convertContractedToGeneric } from "./convert-model";
+import { formatHalfHours, formatHalfHourRange } from "./half-hour-codec";
 
 /** The YAML-first explanation shown on a disabled Convert for an advanced-array
  *  count — its shape can only be edited through Save & Load first. */
@@ -114,8 +115,21 @@ function ConvertToGenericConfirm({
   );
 }
 
+/** Format a contracted-hours card's half-hour target the way the guided editor's
+ *  target inputs display it: an exact scalar as human hours (320 -> "160h"), a
+ *  [min, max] range as a single hours span (formatHalfHourRange). */
+function describeContractedTarget(target: number | number[]): string {
+  return Array.isArray(target)
+    ? formatHalfHourRange([target[0], target[1]])
+    : formatHalfHours(target);
+}
+
 function CoefficientChips({ card }: { card: CountCard }) {
   const coefficients = card.countShiftTypeCoefficients ?? [];
+  // A contracted-hours card stores coefficients as raw half-hours (the guided
+  // flow's grid unit); show them in human hours to match the target display, so a
+  // ward manager never reads 16 as shifts. Ordinary counts keep their raw value.
+  const contracted = isContractedHoursCard(card);
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       {coefficients.map(([id, value]) => (
@@ -123,7 +137,7 @@ function CoefficientChips({ card }: { card: CountCard }) {
           key={id}
           className="border border-line2 bg-panel px-2 py-0.5 font-mono text-label font-semibold text-ink"
         >
-          {id} · {value}
+          {id} · {contracted && typeof value === "number" ? formatHalfHours(value) : value}
         </span>
       ))}
     </div>
@@ -206,7 +220,9 @@ export function CountCardList({
                 label: "Expression",
                 value: (
                   <code className="font-mono">
-                    {describeCountExpressionTarget(card.expression, card.target)}
+                    {contractedHours
+                      ? describeContractedTarget(card.target)
+                      : describeCountExpressionTarget(card.expression, card.target)}
                   </code>
                 ),
               },

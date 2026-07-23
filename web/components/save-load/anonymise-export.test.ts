@@ -3,8 +3,10 @@ import { makeValidUiState } from "@/lib/scenario/test-fixtures";
 import type { ScenarioUiState } from "@/lib/scenario";
 import {
   ANONYMISE_DOWNLOAD_FILENAME,
+  ANONYMISE_SCATTER_ONLY_FILENAME,
   ANONYMISE_TOGGLES,
   defaultAnonymiseToggleState,
+  filenameForToggles,
   isAnonymiseDownloadEnabled,
   performAnonymisedDownload,
   type AnonymiseToggleState,
@@ -49,6 +51,26 @@ describe("isAnonymiseDownloadEnabled", () => {
   });
 });
 
+describe("filenameForToggles", () => {
+  // The `-anonymised` name asserts identity protection, so it must be gated on
+  // an identity toggle actually being on. A Scatter-only export shuffles dates
+  // but ships names/groups/history verbatim, so it gets an honest name instead.
+  it("uses the -anonymised name when an identity toggle (people/groups) is on", () => {
+    expect(filenameForToggles({ ...allOff, people: true })).toBe(ANONYMISE_DOWNLOAD_FILENAME);
+    expect(filenameForToggles({ ...allOff, groups: true })).toBe(ANONYMISE_DOWNLOAD_FILENAME);
+    // Scatter alongside an identity toggle still anonymises identities.
+    expect(filenameForToggles({ people: true, groups: false, scatter: true })).toBe(
+      ANONYMISE_DOWNLOAD_FILENAME,
+    );
+  });
+
+  it("uses the honest -dates-scattered name when ONLY scatter is on", () => {
+    expect(filenameForToggles({ ...allOff, scatter: true })).toBe(ANONYMISE_SCATTER_ONLY_FILENAME);
+    // Guard the naming intent: the scatter-only artifact must not claim to be anonymised.
+    expect(ANONYMISE_SCATTER_ONLY_FILENAME).not.toContain("anonymised");
+  });
+});
+
 describe("performAnonymisedDownload", () => {
   it("writes the anonymised YAML to the injected file writer under the anonymised filename", () => {
     const writeFile = vi.fn();
@@ -64,6 +86,25 @@ describe("performAnonymisedDownload", () => {
     expect(result.ok).toBe(true);
     expect(writeFile).toHaveBeenCalledTimes(1);
     expect(writeFile).toHaveBeenCalledWith(expect.any(String), ANONYMISE_DOWNLOAD_FILENAME);
+  });
+
+  it("writes under the honest -dates-scattered name when ONLY scatter is on (identities untouched)", () => {
+    const writeFile = vi.fn();
+
+    const result = performAnonymisedDownload(
+      makeValidUiState(),
+      { ...allOff, scatter: true },
+      {
+        writeFile,
+      },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(writeFile).toHaveBeenCalledTimes(1);
+    // The -anonymised name must NOT be used: names/groups ship verbatim here.
+    expect(writeFile).toHaveBeenCalledWith(expect.any(String), ANONYMISE_SCATTER_ONLY_FILENAME);
+    const [yaml] = writeFile.mock.calls[0] as [string, string];
+    expect(yaml).toContain("Alice");
   });
 
   it("passes the toggle-derived opts through to prepareAnonymizedExport (people rewritten, groups untouched)", () => {
