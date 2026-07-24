@@ -166,9 +166,7 @@ export function SuccessionForm({
           searchPlaceholder="Search people"
           selectedTitle="PEOPLE"
           selectedTestKey="people"
-          availableEmpty={
-            noPeople ? "No people set up — add some on the People screen." : undefined
-          }
+          availableEmpty={noPeople ? "No people set up — add some on the Staff screen." : undefined}
           addAria={(l) => `Add ${l} to people`}
           removeAria={(l) => `Remove ${l} from people`}
         />

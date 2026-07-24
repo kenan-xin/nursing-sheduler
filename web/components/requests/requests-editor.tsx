@@ -352,7 +352,9 @@ export function RequestsEditor() {
             <FaTableCells className="size-4" />
           </span>
           <div className="flex flex-col gap-0.5">
-            <h1 className="font-heading text-title font-semibold tracking-tight">Shift Requests</h1>
+            <h1 className="font-heading text-title font-semibold tracking-tight">
+              Requests &amp; Leave
+            </h1>
             <p className="text-meta text-ink2">
               Record per-person shift requests, leave, and preferences.
             </p>
@@ -375,7 +377,7 @@ export function RequestsEditor() {
             <p className="text-body text-ink2">
               Add at least one person on the{" "}
               <GuardedLink href="/people" className="font-semibold text-brandink underline">
-                People
+                Staff
               </GuardedLink>{" "}
               screen before authoring shift requests.
             </p>
@@ -384,7 +386,7 @@ export function RequestsEditor() {
             <p className="text-body text-ink2">
               Add at least one shift type on the{" "}
               <GuardedLink href="/shift-types" className="font-semibold text-brandink underline">
-                Shift Types
+                Shifts
               </GuardedLink>{" "}
               screen before authoring shift requests.
             </p>

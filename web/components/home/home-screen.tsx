@@ -29,7 +29,7 @@ export function HomeScreen() {
   const stats: HomeStat[] = [
     { value: String(summary.peopleCount), label: "Nurses" },
     { value: String(summary.seniorsCount), label: "Seniors" },
-    { value: String(summary.shiftTypesCount), label: "Shift Types" },
+    { value: String(summary.shiftTypesCount), label: "Shifts" },
     { value: String(summary.durationDays), label: "Roster Days" },
     { value: String(summary.rulesTotal), label: "Rules" },
   ];

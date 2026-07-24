@@ -1,0 +1,8 @@
+# Pins the host Python for the deploy guards (make up / verify-deploy.sh) and the
+# vitest verify-deploy differential, which shell out to `python3`. Matches the
+# runtime image (docker/Dockerfile.backend: python:3.12-slim). validate_origin.py
+# requires Python 3.10+ (PEP 604 unions); this keeps host/CI aligned with Docker.
+[tools]
+# node matches local dev + web/package.json engines (>=20.9.0); pins CI to the same.
+node = "24.14.0"
+python = "3.12.13"

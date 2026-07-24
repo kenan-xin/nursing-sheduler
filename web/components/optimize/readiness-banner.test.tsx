@@ -30,10 +30,7 @@ describe("ReadinessBanner", () => {
     const banner = screen.getByTestId("optimize-readiness");
     expect(banner).toHaveTextContent("Please set up your dates first by visiting the");
     expect(screen.getByRole("link", { name: "Dates" })).toHaveAttribute("href", "/dates");
-    expect(screen.getByRole("link", { name: "People" })).toHaveAttribute("href", "/people");
-    expect(screen.getByRole("link", { name: "Shift Types" })).toHaveAttribute(
-      "href",
-      "/shift-types",
-    );
+    expect(screen.getByRole("link", { name: "Staff" })).toHaveAttribute("href", "/people");
+    expect(screen.getByRole("link", { name: "Shifts" })).toHaveAttribute("href", "/shift-types");
   });
 });

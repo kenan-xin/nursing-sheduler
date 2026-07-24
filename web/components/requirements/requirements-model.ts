@@ -23,7 +23,6 @@ import {
   isDayStateSelector,
   type CoefficientEntry,
   type DateRef,
-  type NestedShiftTypeRefList,
   type PersonRef,
   type RequirementCard,
   type RequirementCardBody,
@@ -45,6 +44,12 @@ import {
   type WeightFieldValue,
 } from "@/components/card-editor/weight-field";
 import { deriveDateGroups, generateDateItems } from "@/lib/dates";
+import {
+  expandDateRefs,
+  expandShiftTypeRefs,
+  flattenShiftTypeRefs,
+  type DerivedGroupLike,
+} from "@/lib/rules";
 
 /** Verbatim validation messages (spec 05 "Shift Type Requirements" validation table). */
 export const REQUIREMENT_MESSAGES = {
@@ -368,13 +373,6 @@ export function validateRequirementForm(
   return errors;
 }
 
-/** Flatten a (possibly nested, possibly scalar) shift-type ref tree to a flat
- *  list — defensive for imported data; this UI only ever WRITES a flat `[id]`. */
-function flattenShiftTypeRefs(tree: ShiftTypeRef | NestedShiftTypeRefList): ShiftTypeRef[] {
-  if (Array.isArray(tree)) return tree.flatMap((node) => flattenShiftTypeRefs(node));
-  return [tree];
-}
-
 /**
  * Assemble the saved requirement card from a validated draft (spec 05 FR-PR-20..26,
  * EDGE-PR-03). The weight/preferred pair is FORCED when preferred does not differ
@@ -502,64 +500,6 @@ export function hasCoverageWarnings(warnings: CoverageWarnings): boolean {
 }
 
 const DUPLICATE_EXAMPLE_LIMIT = 5;
-
-interface DerivedGroupLike {
-  id: string;
-  members: readonly string[];
-}
-
-function expandDateRefs(
-  refs: readonly DateRef[],
-  state: ScenarioUiState,
-  allDateIds: readonly string[],
-  derivedGroups: readonly DerivedGroupLike[],
-): Set<string> {
-  const set = new Set<string>();
-  const derivedByUpper = new Map(derivedGroups.map((g) => [g.id.toUpperCase(), g.members]));
-  const authoredById = new Map(state.dateGroups.map((g) => [String(g.id), g.members.map(String)]));
-  for (const ref of refs) {
-    const key = String(ref);
-    if (key.toUpperCase() === RESERVED_SHIFT_TYPE.all) {
-      allDateIds.forEach((d) => set.add(d));
-      continue;
-    }
-    const derived = derivedByUpper.get(key.toUpperCase());
-    if (derived) {
-      derived.forEach((d) => set.add(d));
-      continue;
-    }
-    const authored = authoredById.get(key);
-    if (authored) {
-      authored.forEach((d) => set.add(d));
-      continue;
-    }
-    set.add(key);
-  }
-  return set;
-}
-
-function expandShiftTypeRefs(
-  refs: readonly ShiftTypeRef[],
-  state: ScenarioUiState,
-  seen: ReadonlySet<string> = new Set(),
-): Set<string> {
-  const set = new Set<string>();
-  const itemIds = new Set(state.shifts.map((s) => String(s.id)));
-  for (const ref of refs) {
-    const key = String(ref);
-    if (itemIds.has(key)) {
-      set.add(key);
-      continue;
-    }
-    if (seen.has(key)) continue;
-    const group = state.shiftGroups.find((g) => String(g.id) === key);
-    if (group) {
-      const nextSeen = new Set(seen).add(key);
-      expandShiftTypeRefs(group.members.map(String), state, nextSeen).forEach((id) => set.add(id));
-    }
-  }
-  return set;
-}
 
 /** EDGE-PR-14: label a missing-dates set as `ALL` when it's the full range, an
  *  authored/derived group id when it exactly matches that group's expansion,

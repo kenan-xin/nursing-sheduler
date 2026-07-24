@@ -79,7 +79,7 @@ export function ShiftTypeSingleSelect({
   if (items.length === 0 && groups.length === 0) {
     return (
       <p className="text-meta italic text-ink3" data-testid={`${testId}-empty`}>
-        No shift types available. Please set up shift types in the Shift Types tab first.
+        No shift types available. Please set up shift types in the Shifts tab first.
       </p>
     );
   }

@@ -328,7 +328,7 @@ export function RequirementForm({
       <FieldShell label="Qualified people" required error={errors.qualifiedPeople}>
         {noPeople ? (
           <p className="border border-line bg-panel px-3.5 py-3 text-center text-meta italic text-ink3">
-            No people set up — add some on the People screen first.
+            No people set up — add some on the Staff screen first.
           </p>
         ) : (
           <TransferList<string | number>
@@ -355,7 +355,7 @@ export function RequirementForm({
             selectedTestKey="qualified"
             availableEmpty={
               people.items.length === 0 && people.groups.length === 0
-                ? "No people set up — add some on the People screen."
+                ? "No people set up — add some on the Staff screen."
                 : undefined
             }
             addAria={(l) => `Add ${l} to qualified people`}

@@ -59,6 +59,8 @@ export interface TransferListProps<V = string> {
   itemLabel?: string;
   /** Placeholder for the available-pane search. */
   searchPlaceholder?: string;
+  /** Show the available-pane member-search box. Default `true`. */
+  showSearch?: boolean;
   /** Visible title of the selected pane. */
   selectedTitle?: string;
   /** Testid fragment for the selected pane (`transfer-<selectedTestKey>-<id>`). */
@@ -85,6 +87,7 @@ export function TransferList<V = string>({
   sameValue = (a, b) => String(a) === String(b),
   itemLabel,
   searchPlaceholder = "Search",
+  showSearch = true,
   selectedTitle = "SELECTED",
   selectedTestKey = "selected",
   availableEmpty = "Everything is selected.",
@@ -142,13 +145,15 @@ export function TransferList<V = string>({
         data-testid={`transfer-available-${idPrefix}`}
       >
         <PaneHeader title="AVAILABLE" count={availCount} />
-        <SearchBox
-          value={availQ}
-          onChange={setAvailQ}
-          placeholder={searchPlaceholder}
-          testId={`transfer-search-${idPrefix}`}
-          ariaLabel="Search available"
-        />
+        {showSearch && (
+          <SearchBox
+            value={availQ}
+            onChange={setAvailQ}
+            placeholder={searchPlaceholder}
+            testId={`transfer-search-${idPrefix}`}
+            ariaLabel="Search available"
+          />
+        )}
         <div className="h-[228px] overflow-y-auto overflow-x-hidden border-t border-line2 px-1.5 pb-1.5">
           {availGroups.length > 0 && <SectionLabel>{groupSectionLabel}</SectionLabel>}
           {availGroups.map((opt) => (

@@ -42,7 +42,7 @@ async function waitForStore(page: Page) {
 async function gotoReady(page: Page) {
   await page.goto("/shift-requests");
   await waitForStore(page);
-  await expect(page.getByRole("heading", { name: "Shift Requests" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Requests & Leave" })).toBeVisible();
 }
 
 /** Seed the durable store directly (mirrors successions.spec.ts's `seed`). */

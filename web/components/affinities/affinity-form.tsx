@@ -129,7 +129,7 @@ export function AffinityForm({ state, mode, initialForm, onSave, onCancel }: Aff
 
   return (
     <CardEditorForm
-      heading={mode === "add" ? "Add new shift affinity" : "Edit shift affinity"}
+      heading={mode === "add" ? "Add new affinity" : "Edit affinity"}
       submitLabel={mode === "add" ? "Add" : "Update"}
       onSubmit={submit}
       onCancel={onCancel}
@@ -161,9 +161,7 @@ export function AffinityForm({ state, mode, initialForm, onSave, onCancel }: Aff
           searchPlaceholder="e.g. Chloe Ng"
           selectedTitle="PEOPLE 1"
           selectedTestKey="people1"
-          availableEmpty={
-            noPeople ? "No people set up — add some on the People screen." : undefined
-          }
+          availableEmpty={noPeople ? "No people set up — add some on the Staff screen." : undefined}
           addAria={(l) => `Add ${l} to people 1`}
           removeAria={(l) => `Remove ${l} from people 1`}
         />
@@ -185,9 +183,7 @@ export function AffinityForm({ state, mode, initialForm, onSave, onCancel }: Aff
           searchPlaceholder="e.g. Aisha Rahman"
           selectedTitle="PEOPLE 2"
           selectedTestKey="people2"
-          availableEmpty={
-            noPeople ? "No people set up — add some on the People screen." : undefined
-          }
+          availableEmpty={noPeople ? "No people set up — add some on the Staff screen." : undefined}
           addAria={(l) => `Add ${l} to people 2`}
           removeAria={(l) => `Remove ${l} from people 2`}
         />
@@ -217,7 +213,7 @@ export function AffinityForm({ state, mode, initialForm, onSave, onCancel }: Aff
           selectedTitle="SHIFT TYPES"
           selectedTestKey="shiftTypes"
           availableEmpty={
-            noShifts ? "No shift types set up — add some on the Shift Types screen." : undefined
+            noShifts ? "No shift types set up — add some on the Shifts screen." : undefined
           }
           addAria={(l) => `Add ${l} to shift types`}
           removeAria={(l) => `Remove ${l} from shift types`}

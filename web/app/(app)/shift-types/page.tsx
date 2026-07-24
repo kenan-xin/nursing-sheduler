@@ -1,8 +1,7 @@
 "use client";
 
-import { EntityEditor } from "@/components/entity-editor/entity-editor";
-import { shiftTypesDescriptor } from "@/components/shift-types/shift-types-descriptor";
+import { ShiftTypeGrid } from "@/components/shift-types/shift-type-grid";
 
 export default function ShiftTypesPage() {
-  return <EntityEditor descriptor={shiftTypesDescriptor} />;
+  return <ShiftTypeGrid />;
 }

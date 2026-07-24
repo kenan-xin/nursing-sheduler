@@ -617,9 +617,7 @@ export function ContractedForm({
           searchPlaceholder="Search people"
           selectedTitle="PEOPLE"
           selectedTestKey="contracted-people"
-          availableEmpty={
-            noPeople ? "No people set up — add some on the People screen." : undefined
-          }
+          availableEmpty={noPeople ? "No people set up — add some on the Staff screen." : undefined}
           addAria={(l) => `Add ${l} to people`}
           removeAria={(l) => `Remove ${l} from people`}
         />
@@ -672,7 +670,7 @@ export function ContractedForm({
           selectedTestKey="contracted-shift-types"
           availableEmpty={
             shiftTypes.items.length === 0 && shiftTypes.groups.length === 0
-              ? "No shift types set up — add some on the Shift Types screen."
+              ? "No shift types set up — add some on the Shifts screen."
               : undefined
           }
           addAria={(l) => `Add ${l} to count shift types`}

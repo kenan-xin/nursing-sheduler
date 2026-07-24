@@ -398,11 +398,12 @@ test.describe("T08 app shell", () => {
     await page.getByTestId("nav-link-/people").click();
     await expect(page).toHaveURL(/\/people$/);
 
-    // A REAL route-owned draft — the People add-item form — not the test-bridge
-    // seam. Its `useLosableDraft` registration unmounts for real when the route
-    // changes, which is exactly the lifecycle this race depends on.
-    await page.getByTestId("add-item-toggle").click();
-    await expect(page.getByTestId("add-item-form")).toBeVisible();
+    // A REAL route-owned draft — the People (Staff) add-nurse inline row (DR-2's
+    // bespoke PeopleTable) — not the test-bridge seam. Its `useLosableDraft`
+    // registration unmounts for real when the route changes, which is exactly the
+    // lifecycle this race depends on.
+    await page.getByTestId("people-add").click();
+    await expect(page.getByTestId("people-edit-row-__new__")).toBeVisible();
 
     await page.getByTestId("nav-link-/shift-types").click();
     await expect(page.getByRole("heading", { name: "Unsaved changes" })).toBeVisible();

@@ -4,8 +4,8 @@
 // "N of 6 steps ready" progress meter and the six numbered, status-aware
 // workflow cards (ScreenHome.dc.html:33-63). Each card's status (done /
 // current / to do), summary line, and CTA (Review / Continue / Set up) are
-// derived from real state and route to the committed destinations (not the
-// prototype's Staff/Shifts labels).
+// derived from real state and route to the prototype destinations (NAV-1 /
+// Decision A adopted the prototype's Staff/Shifts/… labels; see nav-config.ts).
 //
 // `STEPS` derives its path/label/icon/step-number from `getNavGroupsForMode`
 // (the same filtered registry the sidebar reuses) rather than a second
@@ -62,7 +62,7 @@ const STEP_CONTENT: Record<string, StepContent> = {
         : "No valid range yet",
   },
   "/people": {
-    label: "Add Your People",
+    label: "Add Your Staff",
     readyKey: "people",
     desc: "List nurses and organise people groups.",
     summary: (s) => `${s.peopleCount} people · ${s.staffGroupsCount} groups`,

@@ -36,14 +36,14 @@ type Draft =
   | { mode: "edit"; uid: string; form: AffinityFormState };
 
 const EYEBROW = "CONSTRAINT · AFFINITIES";
-const TITLE = "Shift Affinities";
+const TITLE = "Affinities";
 const SUBTITLE =
   "Encourage or discourage groups of people working the same shift together. For enforced preceptor supervision, use Shift type coverings instead.";
-const ADD_LABEL = "Add Shift Affinity";
-const LIST_TITLE = "Current Shift Affinities";
-const EMPTY_MESSAGE = 'No shift affinities defined yet. Click "Add Shift Affinity" to get started.';
+const ADD_LABEL = "Add Affinity";
+const LIST_TITLE = "Current Affinities";
+const EMPTY_MESSAGE = 'No affinities defined yet. Click "Add Affinity" to get started.';
 const INSTRUCTIONS = [
-  "Define shift affinity preferences to encourage or discourage people working together",
+  "Define affinity preferences to encourage or discourage people working together",
   "Select the dates when this affinity rule applies",
   "Select the first group of people (People 1)",
   "Select the second group of people (People 2)",

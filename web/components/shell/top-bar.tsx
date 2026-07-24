@@ -26,7 +26,7 @@ import { FaDiagramProject } from "@/components/icons";
 //
 // CW-6: restores the prototype's "Step N ·" crumb prefix (Nurse Scheduling
 // 1186) for the five SET UP steps only — the prototype's own crumbMap gives
-// `generate` (Optimize and Export, guidedStep 6 but OUTPUT-group) a plain
+// `generate` (Optimize & Export, guidedStep 6 but OUTPUT-group) a plain
 // label with no ordinal, so the prefix is gated on Set-up group membership
 // rather than on `guidedStep` alone.
 function useCrumb(): string {

@@ -1,8 +1,7 @@
 "use client";
 
-import { EntityEditor } from "@/components/entity-editor/entity-editor";
-import { peopleDescriptor } from "@/components/people/people-descriptor";
+import { PeopleTable } from "@/components/people/people-table";
 
 export default function PeoplePage() {
-  return <EntityEditor descriptor={peopleDescriptor} />;
+  return <PeopleTable />;
 }

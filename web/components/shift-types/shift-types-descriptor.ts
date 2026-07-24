@@ -10,11 +10,14 @@ import type { EntityDescriptor } from "@/components/entity-editor/core";
 
 export const shiftTypesDescriptor: EntityDescriptor<UiShiftType> = {
   domain: "shift",
+  // NAV-1 override: the Shift Types screen is presented as "Shifts". Routes
+  // (/shift-types), data keys (`shifts`/`shiftGroups`) and testids are unchanged;
+  // only the user-facing voice (headings, validation messages) says "Shift(s)".
   labels: {
-    item: "Shift Type",
-    itemPlural: "Shift Types",
-    itemLower: "shift type",
-    itemPluralLower: "shift types",
+    item: "Shift",
+    itemPlural: "Shifts",
+    itemLower: "shift",
+    itemPluralLower: "shifts",
   },
   reservedKeywords: [RESERVED_SHIFT_TYPE.all, RESERVED_SHIFT_TYPE.off, RESERVED_SHIFT_TYPE.leave],
   supportsWorkingTime: true,

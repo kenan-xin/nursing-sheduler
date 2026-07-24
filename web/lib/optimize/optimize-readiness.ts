@@ -43,7 +43,8 @@ const DATES_ISSUE: OptimizeReadinessIssue = {
 const PEOPLE_ISSUE: OptimizeReadinessIssue = {
   kind: "people",
   before: "Please set up your people first by visiting the ",
-  linkLabel: "People",
+  // Label matches the nav destination name (NAV-1 override: People→Staff). Route unchanged.
+  linkLabel: "Staff",
   href: "/people",
   after: " tab.",
 };
@@ -51,7 +52,8 @@ const PEOPLE_ISSUE: OptimizeReadinessIssue = {
 const SHIFT_TYPES_ISSUE: OptimizeReadinessIssue = {
   kind: "shift-types",
   before: "Please set up your shift types first by visiting the ",
-  linkLabel: "Shift Types",
+  // Label matches the nav destination name (NAV-1 override: Shift Types→Shifts). Route unchanged.
+  linkLabel: "Shifts",
   href: "/shift-types",
   after: " tab.",
 };

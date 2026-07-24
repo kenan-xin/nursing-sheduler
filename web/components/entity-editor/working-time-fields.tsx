@@ -19,6 +19,7 @@
 import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { paidMinutesFor, validateWorkingTimeDraft, type WorkingTimeValue } from "./core";
+import { InfoTip } from "@/components/ui/info-tip";
 
 const PAD = (n: number) => String(n).padStart(2, "0");
 /** The 48 half-hour clock slots 00:00..23:30 (the design's timeOptions). */
@@ -34,6 +35,11 @@ function fmtHours(minutes: number): string {
   const m = minutes % 60;
   return m === 0 ? `${h}h` : `${h}h ${m}m`;
 }
+
+const TIME_TIP =
+  "Start and end are the on-the-floor clock times shown on the roster. They fall on the half-hour (HH:00 or HH:30). They do NOT set the paid length — enter rest time separately below and working hours are calculated for you, because unpaid breaks make the clock span longer than the hours that count.";
+const REST_TIP =
+  "Total unpaid break time during the shift — a whole number of half-hours (multiple of 30 minutes), less than the clock span. Working hours = clock span − rest time, calculated automatically. An 08:00–17:00 shift (9h clock span) with 1h rest = 8 working hours.";
 
 /**
  * Recompute a whole working-time value from a clock/rest edit: the paid
@@ -80,55 +86,57 @@ export function WorkingTimeFields({ value, onChange, idPrefix }: WorkingTimeFiel
 
   return (
     <div className="flex flex-col gap-2" data-testid={`${idPrefix}-wt`}>
-      <div className="flex flex-wrap items-end gap-3">
-        <label className="flex flex-col gap-1">
-          <span className="text-label font-semibold uppercase tracking-[0.03em] text-ink3">
-            Start
+      <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
+        <div className="flex flex-col gap-1">
+          <span className="flex items-center gap-1.5 text-label font-semibold uppercase tracking-[0.03em] text-ink3">
+            Time on floor
+            <InfoTip label="Time on floor" text={TIME_TIP} />
           </span>
-          <select
-            data-testid={`${idPrefix}-start`}
-            className="h-9 rounded-none border border-line bg-surface px-2 font-mono text-body text-ink"
-            value={start}
-            onChange={(e) => set({ startTime: e.target.value || undefined })}
-          >
-            <option value="">--:--</option>
-            {TIME_OPTIONS.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </select>
-        </label>
-        <span className="pb-2 text-ink3">–</span>
-        <label className="flex flex-col gap-1">
-          <span className="text-label font-semibold uppercase tracking-[0.03em] text-ink3">
-            End
-          </span>
-          <select
-            data-testid={`${idPrefix}-end`}
-            className="h-9 rounded-none border border-line bg-surface px-2 font-mono text-body text-ink"
-            value={end}
-            onChange={(e) => set({ endTime: e.target.value || undefined })}
-          >
-            <option value="">--:--</option>
-            {TIME_OPTIONS.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </select>
-        </label>
-        {overnight && (
-          <span className="mb-2 border border-line2 px-2 py-1 font-mono text-label text-ink3">
-            +1 day
-          </span>
-        )}
-        <label className="flex flex-col gap-1">
-          <span className="text-label font-semibold uppercase tracking-[0.03em] text-ink3">
+          <div className="flex items-center gap-2">
+            <select
+              data-testid={`${idPrefix}-start`}
+              aria-label="Start time"
+              className="h-9 rounded-none border border-line bg-surface px-2 font-mono text-body text-ink"
+              value={start}
+              onChange={(e) => set({ startTime: e.target.value || undefined })}
+            >
+              <option value="">--:--</option>
+              {TIME_OPTIONS.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+            <span className="text-ink3">–</span>
+            <select
+              data-testid={`${idPrefix}-end`}
+              aria-label="End time"
+              className="h-9 rounded-none border border-line bg-surface px-2 font-mono text-body text-ink"
+              value={end}
+              onChange={(e) => set({ endTime: e.target.value || undefined })}
+            >
+              <option value="">--:--</option>
+              {TIME_OPTIONS.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+            {overnight && (
+              <span className="border border-line2 px-2 py-1 font-mono text-label text-ink3">
+                +1 day
+              </span>
+            )}
+          </div>
+        </div>
+        <div className="flex flex-col gap-1">
+          <span className="flex items-center gap-1.5 text-label font-semibold uppercase tracking-[0.03em] text-ink3">
             Rest
+            <InfoTip label="Rest time" text={REST_TIP} />
           </span>
           <select
             data-testid={`${idPrefix}-rest`}
+            aria-label="Rest time"
             className="h-9 rounded-none border border-line bg-surface px-2 font-mono text-body text-ink"
             value={String(rest)}
             onChange={(e) => set({ restMinutes: Number(e.target.value) || undefined })}
@@ -139,7 +147,7 @@ export function WorkingTimeFields({ value, onChange, idPrefix }: WorkingTimeFiel
               </option>
             ))}
           </select>
-        </label>
+        </div>
         <div className="flex min-w-[8rem] flex-col gap-1">
           <span className="text-label font-semibold uppercase tracking-[0.03em] text-ink3">
             Working <span className="text-faint">· auto</span>
@@ -153,7 +161,7 @@ export function WorkingTimeFields({ value, onChange, idPrefix }: WorkingTimeFiel
               {paid != null ? fmtHours(paid) : "—"}
             </span>
             {paid != null && (
-              <span className="truncate font-mono text-label text-ink3">
+              <span className="whitespace-nowrap font-mono text-label text-ink3">
                 = {fmtHours(paid + rest)} − {rest > 0 ? fmtHours(rest) : "no rest"}
               </span>
             )}

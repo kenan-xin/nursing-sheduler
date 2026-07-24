@@ -351,7 +351,11 @@ describe("fetchOptimizeXlsx", () => {
   it("returns the blob and filename from Content-Disposition", async () => {
     globalThis.fetch = vi.fn(
       async () =>
-        new Response(new Blob([new Uint8Array([1, 2])]), {
+        // Body is a Uint8Array (valid BodyInit), not a jsdom Blob: this file runs in
+        // jsdom, whose Blob lacks `.stream()`, which the global (undici) Response
+        // constructor calls — `new Response(jsdomBlob)` throws "object.stream is not a
+        // function". The SUT's `response.blob()` still returns the bytes.
+        new Response(new Uint8Array([1, 2]), {
           status: 200,
           headers: { "content-disposition": 'attachment; filename="schedule.xlsx"' },
         }),

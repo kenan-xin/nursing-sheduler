@@ -15,13 +15,8 @@ import {
 } from "@/lib/scenario";
 import { getUniqueCopyLabel } from "@/components/entity-editor/core";
 import type { DropPosition } from "@/components/card-editor/card-editor-shell";
-import {
-  buildRequirementCard,
-  buildRequirementShiftTypeDomain,
-  reorderByDrop,
-  withCardDisabled,
-  type RequirementFormState,
-} from "./requirements-model";
+import { reorderByDrop, withCardDisabled, type RequirementFormState } from "./requirements-model";
+import { applyRequirementPatch } from "./requirement-patch";
 
 /** Replace the requirements list in one tracked mutation (fresh refs for history).
  *  Also reconciles Guided rule pins (T14a): a removed card's pin is pruned in the
@@ -67,22 +62,14 @@ export function useRequirements(): RequirementsController {
     requirements,
     getCards: () => useScenarioStore.getState().cardsByKind.requirements,
     add(form) {
-      const domain = buildRequirementShiftTypeDomain(state);
-      commitRequirements([...requirements, buildRequirementCard(form, domain)]);
+      useScenarioStore
+        .getState()
+        .mutateScenario((live) => applyRequirementPatch(live, { type: "add", form }));
     },
     update(uid, form) {
-      // Preserve the card's identity (uid) so it stays the same row on replace,
-      // AND carry forward its UI markers (`disabled`/`applied`) — only the
-      // dedicated Enable/Disable action changes `disabled`; an edit-save must NOT
-      // silently re-enable a requirement the user turned off.
-      const domain = buildRequirementShiftTypeDomain(state);
-      const source = requirements.find((card) => card.uid === uid);
-      const rebuilt = buildRequirementCard(form, domain, uid);
-      const markers: Pick<RequirementCard, "disabled" | "applied"> = {};
-      if (source?.disabled) markers.disabled = true;
-      if (source?.applied) markers.applied = true;
-      const next = markers.disabled || markers.applied ? { ...rebuilt, ...markers } : rebuilt;
-      commitRequirements(requirements.map((card) => (card.uid === uid ? next : card)));
+      useScenarioStore
+        .getState()
+        .mutateScenario((live) => applyRequirementPatch(live, { type: "update", uid, form }));
     },
     remove(uid) {
       commitRequirements(requirements.filter((card) => card.uid !== uid));

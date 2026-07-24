@@ -162,9 +162,7 @@ export function CoveringForm({ state, mode, initialForm, onSave, onCancel }: Cov
           searchPlaceholder="Search people"
           selectedTitle="PRECEPTORS"
           selectedTestKey="preceptors"
-          availableEmpty={
-            noPeople ? "No people set up — add some on the People screen." : undefined
-          }
+          availableEmpty={noPeople ? "No people set up — add some on the Staff screen." : undefined}
           addAria={(l) => `Add ${l} as a preceptor`}
           removeAria={(l) => `Remove ${l} from preceptors`}
         />
@@ -183,9 +181,7 @@ export function CoveringForm({ state, mode, initialForm, onSave, onCancel }: Cov
           searchPlaceholder="Search people"
           selectedTitle="PRECEPTEES"
           selectedTestKey="preceptees"
-          availableEmpty={
-            noPeople ? "No people set up — add some on the People screen." : undefined
-          }
+          availableEmpty={noPeople ? "No people set up — add some on the Staff screen." : undefined}
           addAria={(l) => `Add ${l} as a preceptee`}
           removeAria={(l) => `Remove ${l} from preceptees`}
         />
@@ -210,7 +206,7 @@ export function CoveringForm({ state, mode, initialForm, onSave, onCancel }: Cov
           selectedTitle="SHIFT TYPES"
           selectedTestKey="shiftTypes"
           availableEmpty={
-            noShifts ? "No shift types set up — add some on the Shift Types screen." : undefined
+            noShifts ? "No shift types set up — add some on the Shifts screen." : undefined
           }
           addAria={(l) => `Add ${l} as a covered shift type`}
           removeAria={(l) => `Remove ${l} from covered shift types`}

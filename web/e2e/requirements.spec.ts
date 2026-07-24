@@ -249,7 +249,7 @@ test.describe.serial("T12 staffing requirements editor (M1 clone)", () => {
     // The synthetic ALL group is no longer offered against an empty people domain —
     // the authoritative setup guidance shows and the picker is absent.
     await expect(
-      page.getByText("No people set up — add some on the People screen first."),
+      page.getByText("No people set up — add some on the Staff screen first."),
     ).toBeVisible();
     await expect(page.getByTestId("transfer-list-qualified")).toHaveCount(0);
   });

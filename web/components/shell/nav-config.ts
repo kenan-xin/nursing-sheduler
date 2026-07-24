@@ -5,9 +5,16 @@
 // CONSTRAINTS → OUTPUT → SYSTEM — which reverses this ticket's original
 // Model/Rules/Generate/Save headings.
 //
-// The committed destination LABELS are retained (DL10-D4 / FR-ST-28): People,
-// Shift Types, the six rule-editor names, Optimize and Export, Save and Load.
-// Only the phase headings + grouping change. (Export Layout — prototype
+// NAV-1 / Decision A — SPEC DEVIATION (recorded): the destination LABELS below
+// are the PROTOTYPE's (SideNav.dc.html + Nurse Scheduling.dc.html), NOT spec 07
+// FR-ST-28 / DL10-D4. This is a deliberate display-text-only override for visual
+// fidelity (chosen by dev-seahouse) — Staff (was People), Shifts (was Shift
+// Types), Requests & Leave (was Shift Requests), Staffing Requirements (was Shift
+// Type Requirements), Shift Successions (was Shift Type Successions), Affinities
+// (was Shift Affinities), Optimize & Export, Save & Load. ROUTES, data keys,
+// icons and testids are UNCHANGED (/people, /shift-types, …). A future
+// spec-conformance check must NOT "fix" these labels back to FR-ST-28. (Export
+// Layout — prototype
 // ScreenExport — is deferred to the backlog (T15 / nursing-sheduler-qq0.15)
 // and has no shipped screen or nav entry; the exportLayout data model and its
 // default XLSX layout are unaffected.)
@@ -85,14 +92,14 @@ export const NAV_GROUPS: NavGroup[] = [
         guidedStep: 1,
       },
       {
-        label: "People",
+        label: "Staff",
         path: "/people",
         icon: FaUserNurse,
         blurb: "Nurses and people groups",
         guidedStep: 2,
       },
       {
-        label: "Shift Types",
+        label: "Shifts",
         path: "/shift-types",
         icon: FaLayerGroup,
         blurb: "Shifts and shift-type groups",
@@ -106,7 +113,7 @@ export const NAV_GROUPS: NavGroup[] = [
         guidedStep: 4,
       },
       {
-        label: "Shift Requests",
+        label: "Requests & Leave",
         path: "/shift-requests",
         icon: FaTableCells,
         blurb: "Person × date preferences & leave",
@@ -119,14 +126,14 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Constraints",
     items: [
       {
-        label: "Shift Type Requirements",
+        label: "Staffing Requirements",
         path: "/shift-type-requirements",
         icon: FaClipboardList,
         blurb: "Min nurses & skill mix per shift",
         advancedOnly: true,
       },
       {
-        label: "Shift Type Successions",
+        label: "Shift Successions",
         path: "/shift-type-successions",
         icon: FaArrowRightLong,
         blurb: "Forbid / encourage shift sequences",
@@ -140,7 +147,7 @@ export const NAV_GROUPS: NavGroup[] = [
         advancedOnly: true,
       },
       {
-        label: "Shift Affinities",
+        label: "Affinities",
         path: "/shift-affinities",
         icon: FaPeopleArrows,
         blurb: "Keep people together or apart",
@@ -160,7 +167,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Output",
     items: [
       {
-        label: "Optimize and Export",
+        label: "Optimize & Export",
         path: "/optimize-and-export",
         icon: FaWandMagicSparkles,
         blurb: "Run the optimiser & export",
@@ -173,7 +180,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "System",
     items: [
       {
-        label: "Save and Load",
+        label: "Save & Load",
         path: "/save-and-load",
         icon: FaFloppyDisk,
         blurb: "Download, upload, anonymise, start over",

@@ -112,7 +112,11 @@ test.describe("Rules screen — Advanced -> Rules -> source-record mutation roun
 
     await page.getByTestId("rule-toggle-requirements:r1").click();
     await page.getByTestId("rule-adjust-toggle-requirements:r1").click();
-    await page.getByTestId("rule-adjust-input-requirements:r1-requiredNumPeople").fill("6");
+    const adjustInput = page.getByTestId("rule-adjust-input-requirements:r1-requiredNumPeople");
+    await adjustInput.fill("6");
+    // AdjustPanel commits on blur/Enter (not per-keystroke, to keep the edit one undo
+    // entry) — fill() alone never writes the store, so press Enter like a real user.
+    await adjustInput.press("Enter");
 
     await expect
       .poll(async () => {

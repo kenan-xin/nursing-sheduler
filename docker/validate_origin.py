@@ -42,6 +42,16 @@ import os
 import re
 import sys
 
+# This validator uses PEP 604 unions (`str | None`) that are evaluated at import
+# time, so it requires Python 3.10+. Fail with a clear message rather than a cryptic
+# `TypeError: unsupported operand type(s) for |` on a stale interpreter. Host/CI must
+# provide 3.10+ (see repo `.mise.toml`, matching docker/Dockerfile.backend python:3.12).
+if sys.version_info < (3, 10):
+    raise SystemExit(
+        f"validate_origin.py requires Python 3.10+ (found "
+        f"{sys.version_info.major}.{sys.version_info.minor}); activate mise or use python 3.12"
+    )
+
 
 _DEFAULT_PORT = {"http": 80, "https": 443}
 _SCHEME_RE = re.compile(r"^(https?)://(.*)$", re.DOTALL)

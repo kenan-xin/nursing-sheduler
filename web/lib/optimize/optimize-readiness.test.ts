@@ -44,11 +44,11 @@ describe("deriveOptimizeReadiness", () => {
     expect(result.issues.map((i) => i.kind)).toEqual(["people", "shift-types"]);
     expect(result.issues[0]).toMatchObject({
       before: "Please set up your people first by visiting the ",
-      linkLabel: "People",
+      linkLabel: "Staff",
       href: "/people",
       after: " tab.",
     });
-    expect(result.issues[1]).toMatchObject({ linkLabel: "Shift Types", href: "/shift-types" });
+    expect(result.issues[1]).toMatchObject({ linkLabel: "Shifts", href: "/shift-types" });
   });
 
   it("returns issues in priority order dates → people → shift types", () => {
