@@ -359,7 +359,14 @@ describe("SaveLoadWorkspace — Edit YAML flow", () => {
     fireEvent.click(screen.getByRole("button", { name: "Start over" }));
 
     await waitFor(() => expect(currentState().rangeStart).toBe(""));
-    expect(screen.queryByTestId("scenario-yaml-textarea")).not.toBeInTheDocument();
+    // The editor closes one render *after* the store commit: StartOverCard awaits
+    // resetToNewScenario (which sets rangeStart="") and only then fires
+    // onResetComplete → setEditing(false). Wait for the DOM to catch up rather
+    // than asserting it synchronously against the store state (mirrors the Apply
+    // test above) — a synchronous check races the re-render under parallel-file load.
+    await waitFor(() =>
+      expect(screen.queryByTestId("scenario-yaml-textarea")).not.toBeInTheDocument(),
+    );
     expect(screen.queryByTestId("yaml-apply-button")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Continue" })).not.toBeInTheDocument();
   });
