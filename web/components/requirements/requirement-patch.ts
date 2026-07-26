@@ -1,8 +1,4 @@
-import {
-  pruneOrphanedGuidedRulePins,
-  type RequirementCard,
-  type ScenarioUiState,
-} from "@/lib/scenario";
+import type { RequirementCard, ScenarioUiState } from "@/lib/scenario";
 import {
   buildRequirementCard,
   buildRequirementShiftTypeDomain,
@@ -43,10 +39,8 @@ export function applyRequirementPatch(
     nextRequirements = requirements.map((card) => (card.uid === patch.uid ? next : card));
   }
 
-  const cardsByKind = { ...state.cardsByKind, requirements: nextRequirements };
   return {
     ...state,
-    cardsByKind,
-    guidedRulePins: pruneOrphanedGuidedRulePins(state.guidedRulePins, cardsByKind),
+    cardsByKind: { ...state.cardsByKind, requirements: nextRequirements },
   };
 }

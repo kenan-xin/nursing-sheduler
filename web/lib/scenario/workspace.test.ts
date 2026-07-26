@@ -21,7 +21,7 @@ import {
 } from "./workspace";
 import { prepareScenarioLoad } from "./prepare-scenario-load";
 import { makeValidUiState } from "./test-fixtures";
-import { PREFERENCE_TYPE, type GuidedRulePin } from "./types";
+import { PREFERENCE_TYPE } from "./types";
 
 // A minimal, optimize-ready Workspace document mirroring the T19 Python fixture,
 // used by the readiness/error cases that need a valid baseline to perturb.
@@ -352,21 +352,12 @@ describe("workspace strict projection", () => {
 });
 
 describe("workspace full-authoring round trip (hydration, separate from strict projection)", () => {
-  it("restores disabled records, complete Guided pins, stable request ids, and incomplete dates", () => {
-    const pin: GuidedRulePin = {
-      id: "pin-1",
-      constraintKind: "requirements",
-      constraintId: "req-1",
-      category: "Coverage",
-      quickFields: ["requiredNumPeople"],
-      description: "Cover the day shift",
-    };
+  it("restores disabled records, stable request ids, and incomplete dates", () => {
     const state = makeValidUiState();
-    // A DISABLED requirement carrying a known uid, plus a Guided pin over it.
+    // A DISABLED requirement carrying a known uid.
     state.cardsByKind.requirements = [
       { uid: "req-1", shiftType: "D", requiredNumPeople: 1, weight: -1, disabled: true },
     ];
-    state.guidedRulePins = [pin];
     state.reqData = [
       {
         uid: "cell-1",
@@ -384,8 +375,6 @@ describe("workspace full-authoring round trip (hydration, separate from strict p
     const target = loaded.target;
     if (!target) throw new Error("expected a hydrated target");
 
-    // Every durable Guided pin field survives — not just id/description.
-    expect(target.guidedRulePins).toEqual([pin]);
     // The disabled record is preserved (not filtered) and keeps its workspaceId as uid.
     expect(target.cardsByKind.requirements[0]).toMatchObject({ uid: "req-1", disabled: true });
     // Stable request-cell identity is preserved from the file, not re-derived.
@@ -404,7 +393,7 @@ describe("workspace full-authoring round trip (hydration, separate from strict p
   it("routes a legacy (no workspaceVersion) file through the unchanged legacy path", () => {
     const legacy = prepareScenarioLoad(serializeScenario(makeValidUiState()));
     expect(legacy.issues).toEqual([]);
-    expect(legacy.target?.guidedRulePins).toEqual([]);
+    expect(legacy.target?.cardsByKind.requirements.length).toBeGreaterThan(0);
   });
 });
 

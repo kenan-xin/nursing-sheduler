@@ -19,7 +19,6 @@ import type {
   UiPerson,
   UiRequestCell,
 } from "@/lib/scenario";
-import { pruneOrphanedGuidedRulePins } from "@/lib/scenario";
 import type { EntityDomain, EntityRef } from "./domain";
 import {
   CARD_COEFFICIENT_FIELD,
@@ -191,10 +190,8 @@ function pruneDefinitions(
 
 /**
  * Delete an entity or group and cascade the removal everywhere it is referenced,
- * pruning any preference/export row whose required fields became empty, and any
- * Guided rule pin whose source card was itself pruned (T14a — no dangling pin may
- * survive silently). Pure: returns a new `ScenarioUiState`, never mutating the
- * input.
+ * pruning any preference/export row whose required fields became empty. Pure:
+ * returns a new `ScenarioUiState`, never mutating the input.
  */
 export function deleteEntity(
   state: ScenarioUiState,
@@ -214,7 +211,6 @@ export function deleteEntity(
     ...state,
     ...pruneDefinitions(state, domain, deleted),
     cardsByKind: nextCardsByKind,
-    guidedRulePins: pruneOrphanedGuidedRulePins(state.guidedRulePins, nextCardsByKind),
     reqData: pruneReqData(state.reqData, domain, deleted),
     exportLayout: pruneExportLayout(state.exportLayout, domain, deleted),
   };

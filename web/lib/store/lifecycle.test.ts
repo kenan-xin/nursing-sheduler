@@ -86,17 +86,14 @@ describe("hydration lifecycle", () => {
     });
   });
 
-  it("runs the v1→v2 guidedRulePins migration, defaulting an absent field to []", async () => {
-    const mem = createMemoryStorage(envelope({ rangeStart: "2026-01-01" }, 1));
-    const spine = createStateSpine({ createStorage: () => mem });
-
-    await hydrateScenarioStore(spine.scenario, spine.hot);
-
-    expect(spine.hot.getState().hydrationStatus).toBe("ready");
-    expect(spine.scenario.getState().guidedRulePins).toEqual([]);
-  });
-
-  it("round-trips guidedRulePins through a v2 persisted record", async () => {
+  // RP-2 removed the durable `guidedRulePins` field WITHOUT a persist-version bump
+  // or a delete-migration, on the strength of exactly this behaviour: the key is no
+  // longer in `SCENARIO_KEYS`, so the sanitizer never reads it and it is silently
+  // dropped. A record written by an older build must still hydrate cleanly.
+  it.each([
+    ["a current-version record", SCENARIO_PERSIST_VERSION],
+    ["a pre-migration (v1) record", 1],
+  ])("hydrates %s still carrying guidedRulePins as ready, dropping the key", async (_, version) => {
     const pin = {
       id: "pin1",
       constraintKind: "counts",
@@ -104,37 +101,16 @@ describe("hydration lifecycle", () => {
       category: "Rest",
       quickFields: ["target"],
     };
-    const mem = createMemoryStorage(envelope({ guidedRulePins: [pin] }, SCENARIO_PERSIST_VERSION));
+    const mem = createMemoryStorage(
+      envelope({ rangeStart: "2026-01-01", guidedRulePins: [pin] }, version),
+    );
     const spine = createStateSpine({ createStorage: () => mem });
 
     await hydrateScenarioStore(spine.scenario, spine.hot);
 
     expect(spine.hot.getState().hydrationStatus).toBe("ready");
-    expect(spine.scenario.getState().guidedRulePins).toEqual([pin]);
-  });
-
-  it("runs the v2→v3 migration, collapsing legacy duplicate pins for the same source (T14d)", async () => {
-    const older = {
-      id: "older",
-      constraintKind: "counts",
-      constraintId: "c1",
-      category: "Hours",
-      quickFields: [],
-    };
-    const newer = {
-      id: "newer",
-      constraintKind: "counts",
-      constraintId: "c1",
-      category: "Custom shortcuts",
-      quickFields: ["target"],
-    };
-    const mem = createMemoryStorage(envelope({ guidedRulePins: [older, newer] }, 2));
-    const spine = createStateSpine({ createStorage: () => mem });
-
-    await hydrateScenarioStore(spine.scenario, spine.hot);
-
-    expect(spine.hot.getState().hydrationStatus).toBe("ready");
-    expect(spine.scenario.getState().guidedRulePins).toEqual([newer]);
+    expect(spine.scenario.getState().rangeStart).toBe("2026-01-01");
+    expect("guidedRulePins" in spine.scenario.getState()).toBe(false);
   });
 
   it("recovers from a corrupt (unparseable) record, then user-resets", async () => {
@@ -179,12 +155,6 @@ describe("hydration lifecycle", () => {
       { reqData: [{ kind: "leave" }] },
       { staffGroups: [{ id: "g1" }] },
       { meta: { apiVersion: "alpha" }, cardsByKind: { requirements: [{ weight: 1 }] } },
-      { guidedRulePins: [{ id: "p1" }] },
-      {
-        guidedRulePins: [
-          { id: "p1", constraintKind: "bogus", constraintId: "c1", category: "X", quickFields: [] },
-        ],
-      },
     ]) {
       const mem = createMemoryStorage(envelope(payload, 1));
       const spine = createStateSpine({ createStorage: () => mem });
@@ -414,28 +384,6 @@ describe("Load / New lifecycle", () => {
     expect(selectBackupStatus(spine.scenario.getState())).toBe("none");
   });
 
-  it("New clears any Guided rule pins along with the rest of the scenario", async () => {
-    const spine = createStateSpine({ createStorage: () => createMemoryStorage() });
-    await hydrateScenarioStore(spine.scenario, spine.hot);
-
-    spine.scenario.getState().mutateScenario({
-      guidedRulePins: [
-        {
-          id: "pin1",
-          constraintKind: "counts",
-          constraintId: "c1",
-          category: "Rest",
-          quickFields: [],
-        },
-      ],
-    });
-    expect(spine.scenario.getState().guidedRulePins).toHaveLength(1);
-
-    newScenario(spine.scenario, spine.hot);
-
-    expect(spine.scenario.getState().guidedRulePins).toEqual([]);
-  });
-
   it("Load is one tracked undoable transaction: assigns identity, preserves history, baseline unknown", async () => {
     const spine = createStateSpine({ createStorage: () => createMemoryStorage() });
     await hydrateScenarioStore(spine.scenario, spine.hot);
@@ -477,27 +425,6 @@ describe("Load / New lifecycle", () => {
     spine.scenario.temporal.getState().undo();
     spine.scenario.temporal.getState().undo();
     expect(spine.scenario.getState().rangeStart).toBe("");
-  });
-
-  it("Load starts pin-free (guidedRulePins has no import-boundary counterpart yet)", async () => {
-    const spine = createStateSpine({ createStorage: () => createMemoryStorage() });
-    await hydrateScenarioStore(spine.scenario, spine.hot);
-
-    spine.scenario.getState().mutateScenario({
-      guidedRulePins: [
-        {
-          id: "pin1",
-          constraintKind: "counts",
-          constraintId: "c1",
-          category: "Rest",
-          quickFields: [],
-        },
-      ],
-    });
-
-    loadScenario(spine.scenario, spine.hot, createEmptyScenarioUiState());
-
-    expect(spine.scenario.getState().guidedRulePins).toEqual([]);
   });
 
   it("Load/New reset the hot store so a staged paint from A cannot commit into B", async () => {

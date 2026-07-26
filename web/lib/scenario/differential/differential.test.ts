@@ -99,7 +99,7 @@ function hydrate(target: ImportNormalizationTarget): ScenarioUiState {
     affinities: target.cardsByKind.affinities.map((b) => ({ uid: uid(), ...b })),
     coverings: target.cardsByKind.coverings.map((b) => ({ uid: uid(), ...b })),
   };
-  return { ...target, guidedRulePins: [], cardsByKind };
+  return { ...target, cardsByKind };
 }
 
 // Fail-closed guard: when gated, the backend MUST be reachable, else the whole

@@ -28,7 +28,6 @@ export const SCENARIO_KEYS = [
   "reqData",
   "exportLayout",
   "cardsByKind",
-  "guidedRulePins",
   "maxOneShiftPerDay",
 ] as const satisfies readonly (keyof ScenarioUiState)[];
 
@@ -46,7 +45,6 @@ export function pickScenario(state: ScenarioUiState): ScenarioUiState {
     reqData: state.reqData,
     exportLayout: state.exportLayout,
     cardsByKind: state.cardsByKind,
-    guidedRulePins: state.guidedRulePins,
     maxOneShiftPerDay: state.maxOneShiftPerDay,
   };
 }
@@ -63,8 +61,8 @@ export function scenarioShallowEqual(a: ScenarioUiState, b: ScenarioUiState): bo
 
 /**
  * Whether the current scenario slice holds no authoring content — every entity,
- * group, date range, request, card, guided pin, and export-layout collection is
- * empty and no `maxOneShiftPerDay` description is set. This is the pure
+ * group, date range, request, card, and export-layout collection is empty and no
+ * `maxOneShiftPerDay` description is set. This is the pure
  * "genuinely empty workspace" test the Load flow uses (T17r review P0): a Load
  * into an empty workspace with a compatible version may commit directly, while a
  * Load into any non-empty workspace must first confirm the replacement. `meta`
@@ -83,7 +81,6 @@ export function isScenarioSliceEmpty(scenario: ScenarioUiState): boolean {
     scenario.reqData.length === 0 &&
     scenario.rangeStart === "" &&
     scenario.rangeEnd === "" &&
-    scenario.guidedRulePins.length === 0 &&
     cards.requirements.length === 0 &&
     cards.successions.length === 0 &&
     cards.counts.length === 0 &&
@@ -102,10 +99,10 @@ export function isScenarioSliceEmpty(scenario: ScenarioUiState): boolean {
  * the backup baseline and compared against for backup-freshness ("dirty")
  * detection. It hashes the NORMALIZED Workspace V1 projection (minus the volatile
  * `appVersion` build stamp), not the strict canonical document: the strict
- * projection intentionally strips Guided pins and disabled-authoring state, so
- * hashing it would leave a Guided-only or enable/disable edit invisible to backup
- * freshness (T17r review P1; DL12 §1). The Workspace projection preserves exactly
- * the state a Workspace backup would.
+ * projection intentionally strips disabled-authoring state, so hashing it would
+ * leave an enable/disable edit invisible to backup freshness (T17r review P1;
+ * DL12 §1). The Workspace projection preserves exactly the state a Workspace
+ * backup would.
  */
 export function computeScenarioFingerprint(scenario: ScenarioUiState): string {
   const { appVersion: _appVersion, ...normalized } = buildWorkspaceDocument(scenario);

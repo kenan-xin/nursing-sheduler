@@ -162,9 +162,6 @@ function normalizeImport(data: ImportScenarioParsed): ImportNormalizationTarget 
         []) as unknown as ImportNormalizationTarget["exportLayout"]["extraRows"],
     },
     cardsByKind,
-    // The legacy backend YAML carries no Guided metadata, so a legacy import
-    // restores no pins; the Workspace V1 path populates these from `guidedRules`.
-    guidedRulePins: [],
   };
   if (maxOneShiftPerDay !== undefined) target.maxOneShiftPerDay = maxOneShiftPerDay;
   return target;

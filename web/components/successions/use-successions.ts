@@ -8,11 +8,7 @@
 // `use-counts.ts`).
 
 import { useScenarioStore } from "@/lib/store";
-import {
-  pruneOrphanedGuidedRulePins,
-  type ScenarioUiState,
-  type SuccessionCard,
-} from "@/lib/scenario";
+import type { ScenarioUiState, SuccessionCard } from "@/lib/scenario";
 import { getUniqueCopyLabel } from "@/components/entity-editor/core";
 import type { DropPosition } from "@/components/card-editor/card-editor-shell";
 import {
@@ -22,17 +18,11 @@ import {
   type SuccessionFormState,
 } from "./successions-model";
 
-/** Replace the successions list in one tracked mutation (fresh refs for history).
- *  Also reconciles Guided rule pins (T14a): a removed card's pin is pruned in the
- *  SAME mutation, so no dangling pin can survive a direct delete. */
+/** Replace the successions list in one tracked mutation (fresh refs for history). */
 function commitSuccessions(next: SuccessionCard[]) {
-  useScenarioStore.getState().mutateScenario((state) => {
-    const cardsByKind = { ...state.cardsByKind, successions: next };
-    return {
-      cardsByKind,
-      guidedRulePins: pruneOrphanedGuidedRulePins(state.guidedRulePins, cardsByKind),
-    };
-  });
+  useScenarioStore.getState().mutateScenario((state) => ({
+    cardsByKind: { ...state.cardsByKind, successions: next },
+  }));
 }
 
 export interface SuccessionsController {

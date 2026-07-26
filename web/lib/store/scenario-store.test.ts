@@ -36,47 +36,29 @@ describe("durable scenario store — undo/redo", () => {
     expect(scenario.getState().rangeStart).toBe("2026-02-01");
   });
 
-  it("tracks guidedRulePins mutations through undo/redo (T14a)", () => {
-    const { scenario } = spine;
-    expect(scenario.getState().guidedRulePins).toEqual([]);
-
-    const pin = {
-      id: "pin1",
-      constraintKind: "counts" as const,
-      constraintId: "c1",
-      category: "Hours",
-      quickFields: [],
-    };
-    scenario.getState().mutateScenario({ guidedRulePins: [pin] });
-    expect(scenario.getState().guidedRulePins).toEqual([pin]);
-    expect(temporal(scenario).pastStates.length).toBe(1);
-
-    temporal(scenario).undo();
-    expect(scenario.getState().guidedRulePins).toEqual([]);
-
-    temporal(scenario).redo();
-    expect(scenario.getState().guidedRulePins).toEqual([pin]);
-  });
-
-  it("backup freshness reacts to a Guided-pin-only change (normalized Workspace fingerprint)", () => {
+  it("backup freshness reacts to a disabled-only change (normalized Workspace fingerprint)", () => {
     // T17r review P1 #139: the fingerprint hashes the Workspace projection, which
-    // preserves Guided metadata — so a pin-only edit makes the backup stale, unlike
-    // the old strict-projection hash that stripped it.
+    // preserves authoring metadata the strict projection strips — so an enable/
+    // disable edit makes the backup stale, unlike the old strict-projection hash.
     const { scenario } = spine;
+    scenario.getState().mutateScenario({
+      cardsByKind: {
+        requirements: [{ uid: "r1", shiftType: "D", requiredNumPeople: 1, weight: -1 }],
+        successions: [],
+        counts: [],
+        affinities: [],
+        coverings: [],
+      },
+    });
     scenario.getState().recordBackup();
     expect(selectBackupStatus(scenario.getState())).toBe("current");
 
-    scenario.getState().mutateScenario({
-      guidedRulePins: [
-        {
-          id: "p",
-          constraintKind: "counts" as const,
-          constraintId: "c1",
-          category: "Hours",
-          quickFields: [],
-        },
-      ],
-    });
+    scenario.getState().mutateScenario((state) => ({
+      cardsByKind: {
+        ...state.cardsByKind,
+        requirements: state.cardsByKind.requirements.map((card) => ({ ...card, disabled: true })),
+      },
+    }));
     expect(selectBackupStatus(scenario.getState())).toBe("stale");
   });
 

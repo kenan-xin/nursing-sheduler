@@ -12,16 +12,15 @@
 // Rules screen never becomes a second source of truth for a rule's label.
 
 import { useScenarioStore } from "@/lib/store";
-import {
-  pruneOrphanedGuidedRulePins,
-  type AffinityCard,
-  type CardsByKind,
-  type CountCard,
-  type CoveringCard,
-  type GuidedRuleConstraintKind,
-  type RequirementCard,
-  type ScenarioUiState,
-  type SuccessionCard,
+import type {
+  AffinityCard,
+  CardsByKind,
+  CountCard,
+  CoveringCard,
+  GuidedRuleConstraintKind,
+  RequirementCard,
+  ScenarioUiState,
+  SuccessionCard,
 } from "@/lib/scenario";
 import { projectGuidedRules } from "./registry";
 import {
@@ -45,19 +44,14 @@ import {
 } from "./mutations";
 import type { GuidedMutationOutcome, GuidedRuleRow } from "./types";
 
-/** Replace one card kind's array in a single tracked mutation, reconciling any
- *  orphaned pin in the SAME commit (T14a's `pruneOrphanedGuidedRulePins`) —
- *  identical shape to every existing per-kind hook's `commitX`. Every caller
- *  pairs `kind` with that exact kind's own card array by construction (the
- *  per-kind switch branches below), so the internal cast is safe. */
+/** Replace one card kind's array in a single tracked mutation — identical shape to
+ *  every existing per-kind hook's `commitX`. Every caller pairs `kind` with that
+ *  exact kind's own card array by construction (the per-kind switch branches
+ *  below), so the internal cast is safe. */
 function commitCards(kind: GuidedRuleConstraintKind, next: readonly { uid: string }[]) {
-  useScenarioStore.getState().mutateScenario((state) => {
-    const cardsByKind = { ...state.cardsByKind, [kind]: next } as CardsByKind;
-    return {
-      cardsByKind,
-      guidedRulePins: pruneOrphanedGuidedRulePins(state.guidedRulePins, cardsByKind),
-    };
-  });
+  useScenarioStore.getState().mutateScenario((state) => ({
+    cardsByKind: { ...state.cardsByKind, [kind]: next } as CardsByKind,
+  }));
 }
 
 function replaceInPlace<TCard extends { uid: string }>(

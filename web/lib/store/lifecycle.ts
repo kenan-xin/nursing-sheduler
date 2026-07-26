@@ -67,8 +67,8 @@ function withPausedReplace(scenario: ScenarioStore, apply: () => void): void {
 /**
  * Give an imported card body durable store identity. A legacy import body has no
  * `uid`, so a fresh one is minted; a Workspace V1 body already carries its restored
- * `uid` (and `disabled` flag), which is preserved so Guided pins that reference it
- * still resolve.
+ * `uid` (and `disabled` flag), which is preserved so a reloaded card keeps the
+ * identity the file recorded.
  */
 function hydrateCard<T extends { uid?: string }>(body: T): T & { uid: string } {
   return { ...body, uid: body.uid ?? crypto.randomUUID() };
@@ -81,15 +81,13 @@ function ensureCellUid(cell: UiRequestCell): UiRequestCell {
 
 /**
  * Hydrate an import target into durable UI state. Card and matrix-cell identity is
- * assigned where missing and preserved where restored; Workspace `guidedRulePins`
- * are carried through verbatim (a legacy import supplies `[]`). Every durable
- * card/cell ends up with a stable `uid`, so Workspace serialization never has to
- * fall back to a positional id.
+ * assigned where missing and preserved where restored. Every durable card/cell
+ * ends up with a stable `uid`, so Workspace serialization never has to fall back
+ * to a positional id.
  */
 function hydrateImportTarget(target: ImportNormalizationTarget): ScenarioUiState {
   return {
     ...target,
-    guidedRulePins: target.guidedRulePins,
     reqData: target.reqData.map(ensureCellUid),
     cardsByKind: {
       requirements: target.cardsByKind.requirements.map(hydrateCard),

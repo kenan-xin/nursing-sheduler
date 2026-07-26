@@ -165,7 +165,6 @@ const importTarget = {
     extraColumns: [extraColumn],
     extraRows: [extraRow],
   },
-  guidedRulePins: [],
 } satisfies ImportNormalizationTarget;
 
 // T04's job: hydrate the keyless bodies into store-keyed cards.
@@ -176,7 +175,6 @@ function nextUid(): string {
 function hydrate(target: ImportNormalizationTarget): ScenarioUiState {
   return {
     ...target,
-    guidedRulePins: [],
     cardsByKind: {
       requirements: target.cardsByKind.requirements.map((b) => ({ ...b, uid: nextUid() })),
       successions: target.cardsByKind.successions.map((b) => ({ ...b, uid: nextUid() })),

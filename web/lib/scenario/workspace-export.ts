@@ -88,10 +88,10 @@ function selectIdMapDomains(
 
 /**
  * The anonymised Workspace backup path. Builds the full Workspace document
- * (disabled records and Guided pins included) and applies the SAME shared
+ * (disabled records included) and applies the SAME shared
  * copy-not-mutate transforms the strict path uses — optional scatter, then the
  * independently-toggled people/group id rewrite — over its people domain. The
- * transforms only touch people identifiers, so `workspaceId`/`enabled`/`guidedRules`
+ * transforms only touch people identifiers, so `workspaceId`/`enabled`
  * pass through untouched and the anonymised backup remains a lossless, reloadable
  * Workspace file. The live `state` is never mutated.
  */

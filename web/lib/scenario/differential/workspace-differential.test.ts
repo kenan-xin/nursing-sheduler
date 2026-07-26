@@ -109,22 +109,6 @@ function withDisabledRequirement(): ScenarioUiState {
   return state;
 }
 
-function withGuidedPin(): ScenarioUiState {
-  const state = makeValidUiState();
-  // Pin the requirement card (uid "r1") into a Guided rule; the workspace emits
-  // `guidedRules`, and both sides must strip it before solving.
-  state.guidedRulePins = [
-    {
-      id: "g1",
-      constraintKind: "requirements",
-      constraintId: "r1",
-      category: "Coverage",
-      quickFields: [],
-    },
-  ];
-  return state;
-}
-
 function withUnicodeAndInfinity(): ScenarioUiState {
   const state = makeValidUiState();
   state.meta.description = "Ward 7B — 病棟";
@@ -152,7 +136,6 @@ function withUnicodeAndInfinity(): ScenarioUiState {
 const STATE_VARIANTS: Record<string, () => ScenarioUiState> = {
   base: makeValidUiState,
   "disabled requirement (filtered)": withDisabledRequirement,
-  "guided pin (stripped)": withGuidedPin,
   "unicode + infinite weight": withUnicodeAndInfinity,
 };
 
@@ -575,45 +558,9 @@ describe.skipIf(!AVAILABLE)(
         { uid: "c3", kind: "off", person: "Bob", date: "2026-05-16", weight: 1 },
       ]);
 
-      // All five Guided kinds + every durable field are reconstructed EXACTLY.
-      expect(state.guidedRulePins).toEqual([
-        {
-          id: "g-req",
-          constraintKind: "requirements",
-          constraintId: "r1",
-          category: "Coverage",
-          quickFields: ["requiredNumPeople"],
-          description: "cover D",
-        },
-        {
-          id: "g-succ",
-          constraintKind: "successions",
-          constraintId: "s1",
-          category: "Pattern",
-          quickFields: ["pattern"],
-        },
-        {
-          id: "g-cnt",
-          constraintKind: "counts",
-          constraintId: "n1",
-          category: "Load",
-          quickFields: ["expression"],
-        },
-        {
-          id: "g-aff",
-          constraintKind: "affinities",
-          constraintId: "a1",
-          category: "Pairing",
-          quickFields: ["people1", "people2"],
-        },
-        {
-          id: "g-cov",
-          constraintKind: "coverings",
-          constraintId: "v1",
-          category: "Mentoring",
-          quickFields: ["preceptors"],
-        },
-      ]);
+      // RP-2 removed the durable pin state: the fixture's `guidedRules` records
+      // still parse (the wire field survives until RP-3) but restore nothing.
+      expect("guidedRulePins" in state).toBe(false);
 
       expect(state.exportLayout.formatting).toMatchObject([
         { type: "row", people: ["Alice"], backgroundColor: "#ff0000" },
@@ -642,15 +589,6 @@ describe.skipIf(!AVAILABLE)(
         { uid: "r2", disabled: true, shiftType: "E", requiredNumPeople: 2 },
       ]);
       expect(state.cardsByKind.requirements[0].disabled).not.toBe(true);
-      expect(state.guidedRulePins).toEqual([
-        {
-          id: "g-req",
-          constraintKind: "requirements",
-          constraintId: "r1",
-          category: "Coverage",
-          quickFields: ["requiredNumPeople"],
-        },
-      ]);
 
       // Python accepts the backup and its strict model drops the disabled record.
       const canonical = callOracle({ op: "workspace_canonical", yaml: DISABLED_RECORD });
@@ -837,7 +775,7 @@ preferences:
     );
   });
 
-  it("a duplicate Guided source is not_ready on both sides and blocks hydration in TS", () => {
+  it("a duplicate Guided source is not_ready on both sides (optimize readiness)", () => {
     const fixture = `workspaceVersion: 1
 apiVersion: alpha
 dates:
@@ -872,9 +810,10 @@ guidedRules:
     expect(callOracle({ op: "workspace_canonical", yaml: fixture }).errorCode).toBe(
       "workspace_not_ready",
     );
-    // The duplicate source also blocks the Load (hydration) path: it would corrupt
-    // the durable one-pin-per-source invariant, so no import target is produced.
-    expect(prepareScenarioLoad(fixture).target).toBeNull();
+    // The Load path no longer rejects it: RP-2 deleted the durable pin state, so a
+    // duplicate Guided source can no longer corrupt anything on hydration. The
+    // records are parsed and discarded, and the rest of the file still loads.
+    expect(prepareScenarioLoad(fixture).target).not.toBeNull();
   });
 });
 

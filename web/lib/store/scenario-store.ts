@@ -223,8 +223,8 @@ export function createScenarioStore(config: ScenarioStoreConfig = {}) {
  *   • `"stale"`   — the live scenario has diverged from the last downloaded backup.
  *
  * Computed from the canonical Workspace V1 fingerprint (see `fingerprint.ts`), so
- * Guided pins, disabled/incomplete records, and export layout all count — a
- * strict-projection edit can never be misreported as a current backup.
+ * disabled/incomplete records and export layout all count — a strict-projection
+ * edit can never be misreported as a current backup.
  */
 export function selectBackupStatus(state: ScenarioStoreState): BackupStatus {
   if (state.backupFingerprint === null) return "none";

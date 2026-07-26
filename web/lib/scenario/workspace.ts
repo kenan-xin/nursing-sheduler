@@ -31,7 +31,7 @@
 //   5. serialization         — durable UI state → flat Workspace V1 YAML backup.
 //   6. hydration bridge       — a Workspace file → keyless-but-identity-bearing
 //                              `ImportNormalizationTarget` (cards keep their
-//                              `uid`/`disabled`, pins are fully restored).
+//                              `uid`/`disabled`).
 
 import { z } from "zod";
 import { parse, parseDocument, isAlias, isScalar, stringify } from "yaml";
@@ -64,7 +64,6 @@ import type {
   CanonicalScenarioDocument,
   CanonicalShiftTypesContainer,
   GuidedRuleConstraintKind,
-  GuidedRulePin,
   ImportCardsByKind,
   ImportNormalizationTarget,
   IsoDate,
@@ -118,11 +117,9 @@ export type WorkspacePreferenceRecord = {
 } & Record<string, unknown>;
 
 /**
- * A top-level Guided rule — the exact, lossless serialization of the durable
- * store pin type (T14 `GuidedRulePin`): the pin `id`, the pinned constraint's
- * kind + id, the shortcut category, the required quick fields, and an optional
- * description. `id` and `quickFields` are required (no defaults), so the wire
- * record cannot accept a document the durable type could never author. Stripped
+ * A top-level Guided rule. The durable pin state it mirrored is gone (RP-2), so
+ * nothing writes one any more and a loaded one restores nothing — the wire field
+ * survives only until RP-3 removes it from both language contracts. Stripped
  * before solving.
  */
 export interface WorkspaceGuidedRule {
@@ -558,42 +555,6 @@ function guidedRuleIssues(
   return issues;
 }
 
-/**
- * Structural Guided-record integrity, independent of optimize readiness: a
- * duplicate pin `id` or a duplicate `(constraintKind, constraintId)` source both
- * corrupt the durable T14 one-pin-per-source invariant, so they must block a Load
- * (hydration) even though a Workspace backup otherwise preserves incomplete work
- * (DL12 §2). Reference resolution and kind/source-type matching stay a readiness
- * concern (they depend on the pinned preference existing). Mirrors the identity
- * half of Python's `_guided_rule_issues`, which runs before `_strict_dict`.
- */
-export function checkWorkspaceGuidedIntegrity(workspace: ParsedWorkspace): WorkspaceIssue[] {
-  const issues: WorkspaceIssue[] = [];
-  const seenRuleIds = new Set<string>();
-  const seenSources = new Set<string>();
-  workspace.guidedRules.forEach((rule, ruleIndex) => {
-    if (seenRuleIds.has(rule.id)) {
-      issues.push({
-        path: ["guidedRules", ruleIndex, "id"],
-        code: "duplicate_workspace_id",
-        message: `Duplicate guided rule id: ${rule.id}.`,
-      });
-    }
-    seenRuleIds.add(rule.id);
-
-    const source = `${rule.constraintKind}\u0000${rule.constraintId}`;
-    if (seenSources.has(source)) {
-      issues.push({
-        path: ["guidedRules", ruleIndex, "constraintId"],
-        code: "duplicate_workspace_id",
-        message: `Duplicate guided rule source: (${rule.constraintKind}, ${rule.constraintId}).`,
-      });
-    }
-    seenSources.add(source);
-  });
-  return sortIssues(issues);
-}
-
 // ---------------------------------------------------------------------------
 // Strict projection (filter disabled, strip Workspace-only identity/guided data)
 // ---------------------------------------------------------------------------
@@ -738,8 +699,8 @@ function pathSegment(segment: PropertyKey): string | number {
 /**
  * Build the flat Workspace V1 document from durable UI state, preserving authoring
  * state the strict projection drops: incomplete (`null`) dates, disabled
- * preferences (as `enabled: false`), each preference's stable `workspaceId`, and
- * the full Guided pins. Preference bodies and their emission order come from the
+ * preferences (as `enabled: false`) and each preference's stable `workspaceId`.
+ * Preference bodies and their emission order come from the
  * shared canonical projection with disabled cards force-included, so this builder's
  * field mapping stays in lockstep with the strict producer's (drift is caught by
  * the differential gate). Emitted preference `workspaceId`s are asserted unique.
@@ -770,7 +731,11 @@ export function buildWorkspaceDocument(state: ScenarioUiState): WorkspaceDocumen
     people: canonical.people,
     shiftTypes: canonical.shiftTypes,
     preferences,
-    guidedRules: buildGuidedRules(state),
+    // TEMPORARY (RP-2): the durable pin state is gone, so there is nothing left to
+    // emit here — but the wire shape must stay byte-identical while the Python side
+    // still declares `guidedRules`, so the cross-language differential gate keeps
+    // agreeing. Ticket RP-3 removes the field from both contracts and deletes this.
+    guidedRules: [],
     ...(canonical.export ? { export: canonical.export } : {}),
     appVersion: currentAppVersion(),
   };
@@ -798,18 +763,6 @@ export function serializeWorkspace(state: ScenarioUiState): string {
 export function serializeWorkspaceDocument(document: WorkspaceDocumentV1): string {
   assertUniqueWorkspaceIds(document.preferences);
   return stringify(document, { version: "1.2", aliasDuplicateObjects: false });
-}
-
-/** Map durable Guided rule pins to the lossless shared `guidedRules` records. */
-function buildGuidedRules(state: ScenarioUiState): WorkspaceGuidedRule[] {
-  return state.guidedRulePins.map((pin) => ({
-    id: pin.id,
-    constraintKind: pin.constraintKind,
-    constraintId: pin.constraintId,
-    category: pin.category,
-    quickFields: pin.quickFields,
-    ...(pin.description !== undefined ? { description: pin.description } : {}),
-  }));
 }
 
 /** A shallow clone of `state` with every card's guided `disabled` flag cleared. */
@@ -893,9 +846,8 @@ function assertUniqueWorkspaceIds(preferences: WorkspacePreferenceRecord[]): voi
 /**
  * Normalize a validated Workspace document into an `ImportNormalizationTarget` that
  * preserves authoring identity — cards carry their `uid` (from `workspaceId`) and
- * `disabled` (from `enabled: false`), matrix cells carry their `uid`, and Guided
- * pins are fully reconstructed — so a Download → Load round-trip restores the
- * complete authoring state (DL12). Incomplete (`null`) dates load as empty strings.
+ * `disabled` (from `enabled: false`) and matrix cells carry their `uid` — so a
+ * Download → Load round-trip restores the complete authoring state (DL12). Incomplete (`null`) dates load as empty strings.
  * Preference bodies reuse the shared legacy normalizers; only identity is re-attached.
  */
 export function normalizeWorkspaceToImportTarget(
@@ -974,16 +926,6 @@ export function normalizeWorkspaceToImportTarget(
         []) as unknown as ImportNormalizationTarget["exportLayout"]["extraRows"],
     },
     cardsByKind,
-    guidedRulePins: workspace.guidedRules.map(
-      (rule): GuidedRulePin => ({
-        id: rule.id,
-        constraintKind: rule.constraintKind,
-        constraintId: rule.constraintId,
-        category: rule.category,
-        quickFields: rule.quickFields,
-        ...(rule.description !== undefined ? { description: rule.description } : {}),
-      }),
-    ),
   };
   if (maxOneShiftPerDay !== undefined) target.maxOneShiftPerDay = maxOneShiftPerDay;
   return target;

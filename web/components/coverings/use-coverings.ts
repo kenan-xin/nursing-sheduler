@@ -7,11 +7,7 @@
 // this hook is only the store glue.
 
 import { useScenarioStore } from "@/lib/store";
-import {
-  pruneOrphanedGuidedRulePins,
-  type CoveringCard,
-  type ScenarioUiState,
-} from "@/lib/scenario";
+import type { CoveringCard, ScenarioUiState } from "@/lib/scenario";
 import { getUniqueCopyLabel } from "@/components/entity-editor/core";
 import type { DropPosition } from "@/components/card-editor/card-editor-shell";
 import {
@@ -21,17 +17,11 @@ import {
   type CoveringFormState,
 } from "./coverings-model";
 
-/** Replace the coverings list in one tracked mutation (fresh refs for history).
- *  Also reconciles Guided rule pins (T14a): a removed card's pin is pruned in the
- *  SAME mutation, so no dangling pin can survive a direct delete. */
+/** Replace the coverings list in one tracked mutation (fresh refs for history). */
 function commitCoverings(next: CoveringCard[]) {
-  useScenarioStore.getState().mutateScenario((state) => {
-    const cardsByKind = { ...state.cardsByKind, coverings: next };
-    return {
-      cardsByKind,
-      guidedRulePins: pruneOrphanedGuidedRulePins(state.guidedRulePins, cardsByKind),
-    };
-  });
+  useScenarioStore.getState().mutateScenario((state) => ({
+    cardsByKind: { ...state.cardsByKind, coverings: next },
+  }));
 }
 
 export interface CoveringsController {

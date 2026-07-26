@@ -23,7 +23,6 @@ import { projectScenarioDocument } from "./canonical";
 import { importScenarioValue, parseScenarioYaml } from "./import-scenario";
 import { validateScenario, type ScenarioValidationIssue } from "./serialize";
 import {
-  checkWorkspaceGuidedIntegrity,
   checkWorkspaceIdentityIntegrity,
   classifyWorkspaceSource,
   normalizeWorkspaceToImportTarget,
@@ -164,13 +163,9 @@ function prepareWorkspaceLoad(raw: string): PrepareScenarioLoadResult {
   }
   // Identity integrity must block hydration even though incomplete work otherwise
   // loads (DL12 §2): a duplicate preference `workspaceId` (across cards or request
-  // cells) or a duplicate Guided pin id/source would collide on one durable id or
-  // corrupt the one-pin-per-source invariant once carried into the store. A missing
+  // cells) would collide on one durable id once carried into the store. A missing
   // preference id is already rejected structurally by the schema above.
-  const identityIssues = [
-    ...checkWorkspaceIdentityIntegrity(result.data),
-    ...checkWorkspaceGuidedIntegrity(result.data),
-  ];
+  const identityIssues = checkWorkspaceIdentityIntegrity(result.data);
   if (identityIssues.length > 0) {
     return {
       target: null,

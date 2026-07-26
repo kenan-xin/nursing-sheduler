@@ -44,9 +44,9 @@ function StatusMark({ status }: { status: BackupStatus }) {
 /**
  * Tri-state backup-freshness badge for the Scenario-file card header. Subscribes
  * to the durable store through `selectBackupStatus`, which recomputes the Workspace
- * V1 fingerprint each render — so Guided pins, disabled/incomplete records and
- * export layout all count toward "out of date", and a strict-projection edit can
- * never be misreported as current.
+ * V1 fingerprint each render — so disabled/incomplete records and export layout all
+ * count toward "out of date", and a strict-projection edit can never be
+ * misreported as current.
  */
 export function BackupStatusBadge() {
   const status = useScenarioStore(selectBackupStatus);
