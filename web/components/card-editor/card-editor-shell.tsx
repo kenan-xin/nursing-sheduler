@@ -423,6 +423,9 @@ export function CardListItem({
       } ${accent === "brand" ? "border-brand border-l-[3px]" : "border-line"}`}
       data-testid={testId}
       data-disabled={disabled ? "true" : undefined}
+      // Drag state is otherwise only an opacity class. Exposed so a test can wait
+      // for React to have registered the drag instead of sleeping on a guess.
+      data-dragging={isDragging ? "true" : undefined}
     >
       <div className="mb-4 flex items-center gap-3">
         <div

@@ -206,6 +206,8 @@ function PatternChip({
         isDragging ? "opacity-50" : ""
       } ${isOver ? "border-brand shadow-[inset_2px_0_0_var(--color-brand)]" : "border-line"}`}
       data-testid={`pattern-chip-${index}`}
+      // See CardListItem: a waitable hook for the drag state the chips share.
+      data-dragging={isDragging ? "true" : undefined}
     >
       {label}
       <button

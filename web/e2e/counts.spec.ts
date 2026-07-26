@@ -1231,7 +1231,9 @@ test.describe.serial("T12 cold-review fixes (Major)", () => {
         new DragEvent("dragstart", { bubbles: true, cancelable: true, dataTransfer: dt }),
       );
     });
-    await page.waitForTimeout(50);
+    // The drop is only meaningful once React has registered the drag; waiting on
+    // that state beats sleeping on a guess (nursing-sheduler-wyb).
+    await expect(page.getByTestId("count-card-0")).toHaveAttribute("data-dragging", "true");
     await page.evaluate(() => {
       const source = document.querySelector('[data-testid="count-card-0"]')!;
       const target = document.querySelector('[data-testid="count-card-2"]')!;
