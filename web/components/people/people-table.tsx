@@ -517,7 +517,8 @@ function ReadRow({
         {memberOf.length > 0 ? (
           <div className="flex flex-wrap gap-1.5" data-testid={`people-groups-${itemKey}`}>
             {memberOf.map((g) => (
-              <Badge key={g.id} variant="neutral">
+              /* Group NAMES render as authored (prototype chips are not uppercased). */
+              <Badge key={g.id} variant="neutral" className="normal-case">
                 {g.id}
               </Badge>
             ))}

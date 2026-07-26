@@ -465,7 +465,9 @@ function GroupRow<TItem extends EditorItemBase>({
           {group.members.length > 0 && (
             <div className="flex flex-wrap gap-1">
               {group.members.map((m) => (
-                <Badge key={entityKey(m)} variant="outline">
+                /* Member NAMES render as authored — the prototype's read-row chips are
+                   not uppercased (only status badges like AUTO are). */
+                <Badge key={entityKey(m)} variant="outline" className="normal-case">
                   {String(m)}
                 </Badge>
               ))}
