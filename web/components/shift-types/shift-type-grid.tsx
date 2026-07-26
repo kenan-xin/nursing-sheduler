@@ -247,11 +247,11 @@ export function ShiftTypeGrid() {
       </div>
 
       <section
-        // The prototype's .ns-grid3 ladder: 2-up at 640px, 3-up at 1100px
-        // (Nurse Scheduling.dc.html:80-82). Tailwind's `lg` is 1024px, which turned
-        // 3-up 76px early and squeezed each card to ~220px at spacious density,
-        // pushing controls past the card edge.
-        className="grid grid-cols-1 gap-4 sm:grid-cols-2 min-[1100px]:grid-cols-3"
+        // `.ns-grid3` — two-up at 640px, three-up at 1100px (Nurse Scheduling.dc.html:
+        // 80-82). `sm` already IS the 640px step; `grid3:` carries the 1100px one.
+        // Tailwind's `lg` (1024px) used to stand in for it, turning three-up 76px early
+        // and squeezing each card to ~220px at spacious, pushing controls past the edge.
+        className="grid grid-cols-1 gap-4 sm:grid-cols-2 grid3:grid-cols-3"
         data-testid="shift-grid"
       >
         {sel?.t === "add-shift" && (
@@ -719,6 +719,10 @@ function StaffingEditor({
 
   return (
     <div className="flex flex-col gap-3 border-t border-line2 pt-3">
+      {/* NOT `.ns-formgrid`. The shift card's editing grid is the card's own inline
+          rule — a flat `1fr 1fr` with no media query at all (ScreenShifts.dc.html:46) —
+          so `sm` here is our own concession to phones, not a stand-in for a prototype
+          breakpoint. Don't "correct" it to `formgrid:`. */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-1.5">

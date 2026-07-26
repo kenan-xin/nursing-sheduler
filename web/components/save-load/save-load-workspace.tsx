@@ -83,7 +83,10 @@ export function SaveLoadWorkspace() {
     <>
       {warnings ? <ImportWarningsBanner warnings={warnings} onDismiss={dismissWarnings} /> : null}
 
-      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
+      {/* `.ns-grid2` — two-up at 900px with a `--space-4` gap (ScreenSaveLoad.dc.html:37).
+          `lg` (1024px) held this at one column for 124px more than the design does, and
+          `gap-6` ran 8px wider than the class specifies. */}
+      <div className="grid grid-cols-1 items-start gap-4 grid2:grid-cols-2">
         <div className="flex flex-col gap-6">
           <ScenarioFileCard
             scenario={scenario}

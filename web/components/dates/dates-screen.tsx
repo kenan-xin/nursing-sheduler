@@ -126,7 +126,11 @@ export function DatesScreen() {
         </GuardedLink>
       </header>
 
-      <div className="ns-grid2 items-start">
+      {/* `.ns-grid2` — two-up at 900px with a 16px gap (ScreenDates.dc.html:20). This
+          was the one layout rule already ported at its true value, as a hand-written
+          class in calendar.css; it now shares the layout ladder with every other one
+          rather than being a second mechanism for the same job. */}
+      <div className="grid grid-cols-1 items-start gap-4 grid2:grid-cols-2">
         <RosterPeriodCard
           range={range}
           importedHolidaysPresent={importedHolidaysPresent}

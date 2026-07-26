@@ -357,7 +357,11 @@ export function OptimizeAndExportScreen({
         forgetPending={forgetPending}
       />
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
+      {/* `.ns-grid2` — an even two-up at 900px with a `--space-4` gap, items-start
+          (ScreenGenerate.dc.html:27). This had drifted on three counts: `lg` (1024px)
+          held one column for 124px longer than the design, `gap-6` ran 8px wide, and
+          the 1fr/1.1fr split gave the right pane 5% more than the class allows. */}
+      <div className="grid items-start gap-4 grid2:grid-cols-2">
         <div className="space-y-6">
           <Section title="Setup and Run">
             <div className="space-y-5">

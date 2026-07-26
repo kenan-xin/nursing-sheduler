@@ -27,8 +27,9 @@ export function HomeAdvanced({ onNavigate }: { onNavigate: (path: string) => voi
 
       <div
         data-testid="home-advanced-grid"
-        // .ns-grid3 ladder, as on the Shifts grid: 2-up at 640px, 3-up at 1100px.
-        className="grid grid-cols-1 gap-4 sm:grid-cols-2 min-[1100px]:grid-cols-3"
+        // `.ns-grid3` ladder, as on the Shifts grid: two-up at 640px (`sm`), three-up
+        // at 1100px (`grid3:`).
+        className="grid grid-cols-1 gap-4 sm:grid-cols-2 grid3:grid-cols-3"
       >
         {editors.map((item) => {
           const Icon = item.icon;

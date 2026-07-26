@@ -159,7 +159,9 @@ export function HomeGuided({
       {/* Workflow cards */}
       <div
         data-testid="home-wizard-grid"
-        className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3"
+        // `.ns-wizgrid` — two-up at 760px, three-up at 1200px (ScreenHome.dc.html:42).
+        // `xl` (1280px) showed two wizard steps where the design shows three.
+        className="grid grid-cols-1 gap-3 wizgrid:grid-cols-2 wizgrid3:grid-cols-3"
       >
         {STEPS.map((step, i) => {
           const status: StepStatus = done[i] ? "done" : i === currentIndex ? "current" : "todo";

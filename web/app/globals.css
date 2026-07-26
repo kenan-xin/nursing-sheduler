@@ -238,7 +238,9 @@
   --font-heading: var(--ff-heading);
   --font-mono: var(--ff-mono);
 
-  /* Breakpoint ladder (480–1920) + the 920px nav pivot from the shell */
+  /* TYPE ladder (480–1920) + the 920px nav pivot from the shell. These mirror the
+     prototype's fluid-type steps (Nurse Scheduling.dc.html:45-50) — the same values
+     the `--base-h/b/l` media queries above step on. */
   --breakpoint-xs: 480px;
   --breakpoint-sm: 640px;
   --breakpoint-nav: 920px;
@@ -247,6 +249,29 @@
   --breakpoint-xl: 1280px;
   --breakpoint-2xl: 1440px;
   --breakpoint-3xl: 1920px;
+
+  /* LAYOUT ladder — the prototype's SECOND, disjoint set of breakpoints, one per
+     layout class (Nurse Scheduling.dc.html:78-95). None of these values coincide
+     with a type step except `.ns-grid3`'s 640px two-up, which is `sm` already.
+     Each variant is named for the prototype class it comes from, so a grid's
+     breakpoint is traceable to the rule it implements.
+
+     They exist because the two ladders are easy to conflate: before this, every
+     layout grid was snapped to the nearest TYPE step and drifted from the design by
+     40–124px — `.ns-grid3`'s 1100px three-up became `lg` (1024px) and shipped three
+     cards where the design shows two. Reach for these when porting a `.ns-*` layout
+     rule; reach for the type ladder for everything else. (bmw.7)
+
+     `.ns-xfer` (620px) is deliberately absent: it is the three-column transfer list
+     with a middle control band, and the port has no implementation of it — our
+     transfer list is the two-pane `.ns-panes2`. Add it here when that changes, not
+     before, so every value in this block is one something actually uses. */
+  --breakpoint-panes2: 600px;
+  --breakpoint-formgrid: 720px;
+  --breakpoint-wizgrid: 760px;
+  --breakpoint-grid2: 900px;
+  --breakpoint-grid3: 1100px;
+  --breakpoint-wizgrid3: 1200px;
 
   /* Radius: 0 everywhere. */
   --radius: 0px;

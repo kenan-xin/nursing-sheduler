@@ -257,12 +257,12 @@ export function RequirementForm({
       />
 
       {/* The prototype lays these out as two cells of `.ns-formgrid`: `1fr` → `1fr 1fr`
-          at min-width 720px, gap 20/24px (Nurse Scheduling.dc.html:91-92). `md:` (768px)
-          is the nearest breakpoint on the app's ladder — `sm:` (640px) would split the
-          row a full 80px earlier than the prototype does, into cells too narrow for
-          these labels. A shrink-to-fit flex row, the previous layout, instead collapsed
-          each cell to its input width and wrapped the labels. */}
-      <div className="grid grid-cols-1 gap-x-6 gap-y-5 md:grid-cols-2">
+          at min-width 720px, gap 20/24px (Nurse Scheduling.dc.html:91-92). `formgrid:`
+          IS that 720px — the layout ladder now carries it, so this no longer has to
+          settle for the nearest type step (`md:` 768px, which split 48px late). A
+          shrink-to-fit flex row, the layout before that, instead collapsed each cell to
+          its input width and wrapped the labels. */}
+      <div className="grid grid-cols-1 gap-x-[24px] gap-y-[20px] formgrid:grid-cols-2">
         <FieldShell label="Required number of people" required error={errors.requiredNumPeople}>
           <input
             type="number"

@@ -136,7 +136,10 @@ export function TransferList<V = string>({
 
   return (
     <div
-      className="grid grid-cols-1 items-start gap-3 sm:grid-cols-2"
+      // `.ns-panes2` — the AVAILABLE/SELECTED pane pair, two-up at 600px with a 12px
+      // gap (ScreenCards.dc.html:220). Not `.ns-xfer`, which is the three-column
+      // variant with a middle control band.
+      className="grid grid-cols-1 items-start gap-[12px] panes2:grid-cols-2"
       data-testid={`transfer-list-${idPrefix}`}
     >
       {/* AVAILABLE pane */}

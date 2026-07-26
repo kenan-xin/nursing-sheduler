@@ -3,17 +3,9 @@
    the Dates UI primitives that only render on this one screen. Prototype target:
    docs/design_prototype/ScreenDates.dc.html. */
 
-/* Responsive two-column work area (prototype `.ns-grid2`: 1 col, 2 cols ≥900px). */
-.ns-grid2 {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 1rem;
-}
-@media (min-width: 900px) {
-  .ns-grid2 {
-    grid-template-columns: 1fr 1fr;
-  }
-}
+/* The `.ns-grid2` two-column work area that lived here now comes from the layout
+   ladder in globals.css (`grid2:` = 900px), shared with Save/Load and Optimize
+   instead of being a Dates-only class. See bmw.7. */
 
 /* ==========================================================================
    FullCalendar restyle — square corners, hairline borders, token palette.

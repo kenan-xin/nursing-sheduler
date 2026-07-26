@@ -559,7 +559,12 @@ export function ContractedForm({
           />
         </FieldShell>
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div
+          // `.ns-formgrid` cell pair — two-up at 720px, not `sm` (640px), which split
+          // these into cells 80px narrower than the design allows. Gap is the class's
+          // literal 20/24, not the 16px this used to carry.
+          className="grid grid-cols-1 gap-x-[24px] gap-y-[20px] formgrid:grid-cols-2"
+        >
           <FieldShell label="Minimum hours" required hint="e.g. 150h" error={errors.targetRangeMin}>
             <Input
               data-testid="contracted-target-min"
