@@ -52,7 +52,11 @@ export function TopBar() {
   return (
     <header
       data-testid="top-bar"
-      className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-3 border-b border-line bg-surface px-4 sm:px-5"
+      // Side padding is FLAT: the prototype header is `padding:0 var(--space-5)` with
+      // no media query (Nurse Scheduling.dc.html:122). The `px-4 sm:px-5` this carried
+      // pivoted at 640px, a step the design does not have — and it tightened the phone
+      // case, where the rail is hidden and there is more room, not less.
+      className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-3 border-b border-line bg-surface px-5"
     >
       {/* Mobile hamburger — visible below the 920px nav breakpoint only. */}
       <span className="shrink-0 nav:hidden">
