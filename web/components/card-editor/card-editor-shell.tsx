@@ -16,7 +16,11 @@ import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { FaPlus, FaXmark, FaCircleInfo, FaCheck, FaLock, FaGripVertical } from "@/components/icons";
 import { useLosableDraft } from "@/components/shell/use-losable-draft";
-/** Outer screen wrapper — centred column wide enough for the 940px form body. */
+
+/** Outer screen wrapper — a bare flex column with the standard screen gap. It sets
+ *  no width, margin or page padding: the app shell owns those for every screen at
+ *  one place (`app-shell.tsx`, `max-w-[1240px]` — bmw.6). The 940px cap that used to
+ *  be justified here belongs to `CardEditorForm`'s body, which still carries it. */
 export function CardEditorScreen({
   screen,
   children,
@@ -266,7 +270,14 @@ export function CardEditorForm({
           {heading}
         </div>
       </div>
-      <div className="flex max-w-[940px] flex-col gap-5 p-[18px] sm:px-7 sm:py-6">{children}</div>
+      {/* `.ns-formbody` — 18px, then 26/28px at 720px (Nurse Scheduling.dc.html:96-97).
+          Both are the class's own literals, so they stay literal rather than stepping
+          on the 0.9 scale; `px-7`/`py-6` resolved to 25.2/21.6px. The pivot is
+          `formgrid:` (720px), the same breakpoint the grid INSIDE this body uses — it
+          was `sm:` (640px), splitting 80px early. */}
+      <div className="flex max-w-[940px] flex-col gap-5 p-[18px] formgrid:px-[28px] formgrid:py-[26px]">
+        {children}
+      </div>
       <div className="flex justify-end gap-2.5 border-t border-line2 px-[18px] py-3.5">
         <Button variant="outline" className="h-10 px-[18px]" onClick={onCancel}>
           Cancel
