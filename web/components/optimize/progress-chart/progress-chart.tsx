@@ -793,9 +793,16 @@ const ProgressPanel = function ProgressPanelImpl(props: ProgressPanelProps) {
   return (
     <svg
       data-testid={testId}
-      width={width}
+      // CSS width follows the container so the SVG box never inherits the
+      // 800px fallback; viewBox still anchors on the measured `width` so the
+      // geometry and `hitTestPointer` stay in viewBox coordinates. The viewBox
+      // is stretched (preserveAspectRatio="none") so the fallback renders
+      // end-to-end across the responsive box and the CSS→viewBox pointer
+      // scale stays uniform even before the observer reports `containerWidth`.
+      width="100%"
       height={height}
       viewBox={`0 0 ${width} ${height}`}
+      preserveAspectRatio="none"
       aria-hidden="true"
       onPointerMove={onPointerMove}
       onPointerDown={onPointerDown}

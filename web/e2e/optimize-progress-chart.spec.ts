@@ -11,7 +11,51 @@ import { expect, test } from "@playwright/test";
 
 const FIXTURE_URL = "/progress-chart-fixture";
 
+async function freezeResizeObserver(page: import("@playwright/test").Page) {
+  await page.addInitScript(() => {
+    class FrozenResizeObserver {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    window.ResizeObserver = FrozenResizeObserver;
+  });
+}
+
 test.describe("Optimization progress chart — browser coverage", () => {
+  test("renders the fallback geometry without mobile overflow or wide-box hit-test drift", async ({
+    page,
+  }) => {
+    // Freeze delivery before navigation so this exercises the 800px fallback
+    // deterministically instead of merely observing the settled chart.
+    await freezeResizeObserver(page);
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto(FIXTURE_URL);
+
+    const scorePanel = page.getByTestId("progress-chart-score-panel");
+    await expect(scorePanel).toBeVisible();
+    const narrowFirstPaint = await scorePanel.evaluate((el) => ({
+      overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      width: el.clientWidth,
+      viewBox: el.getAttribute("viewBox"),
+      preserveAspectRatio: el.getAttribute("preserveAspectRatio"),
+    }));
+    expect(narrowFirstPaint.overflow).toBeLessThanOrEqual(1);
+    expect(narrowFirstPaint.width).toBeLessThanOrEqual(375);
+    expect(narrowFirstPaint.viewBox).toBe("0 0 800 250");
+    expect(narrowFirstPaint.preserveAspectRatio).toBe("none");
+
+    // A wide responsive box is where the old default `meet` transform had
+    // horizontal letterboxing. The frozen observer keeps the 800px viewBox
+    // while the CSS box expands, so this pointer assertion proves the full
+    // box and hit-test transform remain aligned before measurement.
+    await page.setViewportSize({ width: 1280, height: 1000 });
+    const box = await scorePanel.boundingBox();
+    expect(box).not.toBeNull();
+    await page.mouse.move(box!.x + box!.width * 0.9, box!.y + box!.height / 2);
+    await expect(page.getByTestId("progress-chart-tooltip")).toContainText(/1\.0s elapsed/i);
+  });
+
   test("renders the two-point dataset and exposes the figure label", async ({ page }) => {
     await page.goto(FIXTURE_URL);
     await expect(page.getByTestId("progress-chart")).toBeVisible();

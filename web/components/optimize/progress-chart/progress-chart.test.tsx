@@ -81,6 +81,15 @@ describe("ProgressChart — rendering", () => {
     expect(d).toContain("V");
   });
 
+  it("fills a responsive SVG box without letterboxing the fallback viewBox", () => {
+    render(<ProgressChart points={TWO_POINTS} />);
+
+    const scorePanel = screen.getByTestId("progress-chart-score-panel");
+    expect(scorePanel).toHaveAttribute("width", "100%");
+    expect(scorePanel).toHaveAttribute("viewBox", "0 0 800 250");
+    expect(scorePanel).toHaveAttribute("preserveAspectRatio", "none");
+  });
+
   it("renders the latest-point reference dot in both panels", () => {
     render(<ProgressChart points={TWO_POINTS} />);
     expect(screen.getByTestId("progress-chart-score-panel-latest-dot")).toBeInTheDocument();
@@ -343,6 +352,39 @@ describe("ProgressChart — tooltip content", () => {
     expect(within(tooltip).getByText(/ortools/i)).toBeInTheDocument();
     // Header shows formatted elapsed time.
     expect(within(tooltip).getByText(/1\.0s|1s elapsed/i)).toBeInTheDocument();
+  });
+
+  it("maps a wider responsive CSS box back into fallback viewBox coordinates", () => {
+    const original = SVGElement.prototype.getBoundingClientRect;
+    vi.spyOn(SVGElement.prototype, "getBoundingClientRect").mockImplementation(
+      function (this: SVGElement) {
+        if (this.getAttribute("data-testid") === "progress-chart-score-panel") {
+          return {
+            width: 1200,
+            height: 250,
+            x: 0,
+            y: 0,
+            top: 0,
+            left: 0,
+            bottom: 250,
+            right: 1200,
+            toJSON: () => ({}),
+          } as DOMRect;
+        }
+        return original.call(this);
+      },
+    );
+    render(<ProgressChart points={TWO_POINTS} />);
+
+    const scorePanel = screen.getByTestId("progress-chart-score-panel");
+    // 1050 CSS px becomes 700 viewBox px (1050 * 800 / 1200), which is
+    // nearest to the second point. With preserveAspectRatio="none", the
+    // rendered line occupies that same full-width transform.
+    fireEvent.pointerMove(scorePanel, { clientX: 1050, clientY: 100 });
+
+    expect(
+      within(screen.getByTestId("progress-chart-tooltip")).getByText(/1\.0s|1s elapsed/i),
+    ).toBeInTheDocument();
   });
 
   it("shows 'N/A' for missing comment count and missing solution index", () => {
