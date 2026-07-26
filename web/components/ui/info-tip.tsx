@@ -25,7 +25,11 @@ export function InfoTip({ label, text }: { label: string; text: string }) {
           e.preventDefault();
           setOpen((o) => !o);
         }}
-        className="inline-flex size-4 items-center justify-center rounded-full text-ink3 hover:text-ink2 focus-visible:text-ink2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-brand"
+        // Square corners like everything else (globals.css: radius is 0 everywhere).
+        // The button paints no fill or border, so the radius only ever shaped the
+        // focus outline; `rounded-full` was a leftover, not a prototype detail —
+        // InfoTip.dc.html is a bare `fa-circle-info` with no wrapper radius.
+        className="inline-flex size-4 items-center justify-center rounded-none text-ink3 hover:text-ink2 focus-visible:text-ink2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-brand"
       >
         <FaCircleInfo aria-hidden className="size-3.5" />
       </button>

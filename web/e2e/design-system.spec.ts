@@ -104,7 +104,7 @@ test.describe("design system — style reference", () => {
     const radii = await page
       .getByRole("main")
       .locator(
-        "button, input, [data-slot='badge'], [data-slot='card'], [data-slot='switch'], [data-slot='switch-thumb'], [data-slot='skeleton'], [data-slot='skeleton-card']",
+        "button, input, select, [data-slot='badge'], [data-slot='card'], [data-slot='switch'], [data-slot='switch-thumb'], [data-slot='skeleton'], [data-slot='skeleton-card']",
       )
       .evaluateAll((els) => els.map((el) => getComputedStyle(el).borderRadius));
     expect(radii.length).toBeGreaterThan(8);
