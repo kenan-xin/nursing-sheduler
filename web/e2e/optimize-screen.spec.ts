@@ -111,10 +111,22 @@ test.describe("Optimize & Export screen — browser coverage", () => {
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
       await page.goto(FIXTURE_URL);
       await expect(page.getByTestId("optimize-fixture")).toBeVisible();
-      const overflow = await page.evaluate(
-        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
-      );
-      expect(overflow).toBeLessThanOrEqual(1);
+      // Poll rather than measure once: a visible root is not a settled layout. The
+      // progress chart renders at its DEFAULT_CONTAINER_WIDTH (800px) until the
+      // ResizeObserver in progress-chart.tsx reports the real container width, so a
+      // single measurement that wins the race against that callback sees the chart
+      // at 800px and reports a transient 475px overflow here at 375px wide
+      // (nursing-sheduler-02h — this failed 1-2 runs in 8).
+      //
+      // This keeps the test's teeth: a REAL overflow never settles, so polling still
+      // fails it, just after the timeout rather than instantly.
+      await expect
+        .poll(async () =>
+          page.evaluate(
+            () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+          ),
+        )
+        .toBeLessThanOrEqual(1);
     });
   }
 
