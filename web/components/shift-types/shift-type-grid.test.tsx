@@ -105,7 +105,8 @@ describe("ShiftTypeGrid — add + working-time reuse", () => {
     // Working(auto) derivation is visible whenever start+end are set.
     const duration = screen.getByTestId("shift-add-duration");
     expect(duration).toHaveTextContent("8h");
-    expect(duration).toHaveTextContent(/no rest/);
+    // No rest is written "− 0", keeping the caption one arithmetic shape throughout.
+    expect(duration).toHaveTextContent("= 8h − 0");
 
     fireEvent.click(screen.getByTestId("shift-add-save"));
 
@@ -116,6 +117,27 @@ describe("ShiftTypeGrid — add + working-time reuse", () => {
       endTime: "16:00",
       durationMinutes: 480,
     });
+  });
+
+  it("reads a half-hour shift in decimal hours with a compact rest caption", () => {
+    render(<ShiftTypeGrid />);
+
+    fireEvent.click(screen.getByTestId("add-shift-toggle"));
+    fireEvent.change(screen.getByTestId("shift-add-start"), { target: { value: "07:00" } });
+    fireEvent.change(screen.getByTestId("shift-add-end"), { target: { value: "19:00" } });
+    fireEvent.change(screen.getByTestId("shift-add-rest"), { target: { value: "30" } });
+
+    // Rest keeps the prototype's hours-and-minutes form, with the zero hour dropped.
+    const rest = screen.getByTestId("shift-add-rest") as HTMLSelectElement;
+    expect(rest.selectedOptions[0]?.textContent).toBe("30m");
+
+    // The paid figure is decimal (the prototype's fmtH) and the caption below it
+    // carries the whole derivation. The leading `=` is load-bearing: without it
+    // "11.5h − 30m" reads as a subtraction still to do.
+    const duration = screen.getByTestId("shift-add-duration");
+    expect(duration).toHaveTextContent("11.5h");
+    expect(duration).toHaveTextContent("= 12h − 30m");
+    expect(duration).toHaveAttribute("title", "11.5h working = 12h on floor − 30m rest");
   });
 
   it("shows the +1 day overnight badge for a wrap-around clock", () => {

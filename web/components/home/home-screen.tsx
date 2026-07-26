@@ -35,11 +35,7 @@ export function HomeScreen() {
   ];
 
   return (
-    <div
-      data-testid="home-screen"
-      data-mode={mode}
-      className="mx-auto flex w-full max-w-[1240px] animate-fade flex-col gap-6 px-5 py-6 pb-16"
-    >
+    <div data-testid="home-screen" data-mode={mode} className="flex animate-fade flex-col gap-6">
       {/* Header — shown in both modes */}
       <div className="flex flex-wrap items-end gap-4">
         <div className="min-w-[240px] flex-1">

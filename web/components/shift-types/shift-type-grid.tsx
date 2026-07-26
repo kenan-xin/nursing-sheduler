@@ -225,7 +225,7 @@ export function ShiftTypeGrid() {
     <div
       data-testid="screen"
       data-screen={descriptor.labels.itemPlural}
-      className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-5 py-8"
+      className="flex flex-col gap-6"
     >
       <header className="flex flex-col gap-1">
         <h1 className="font-heading text-title font-semibold tracking-tight">Shifts</h1>
@@ -247,7 +247,11 @@ export function ShiftTypeGrid() {
       </div>
 
       <section
-        className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
+        // The prototype's .ns-grid3 ladder: 2-up at 640px, 3-up at 1100px
+        // (Nurse Scheduling.dc.html:80-82). Tailwind's `lg` is 1024px, which turned
+        // 3-up 76px early and squeezed each card to ~220px at spacious density,
+        // pushing controls past the card edge.
+        className="grid grid-cols-1 gap-4 sm:grid-cols-2 min-[1100px]:grid-cols-3"
         data-testid="shift-grid"
       >
         {sel?.t === "add-shift" && (

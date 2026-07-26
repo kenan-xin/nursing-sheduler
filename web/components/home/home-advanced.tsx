@@ -27,7 +27,8 @@ export function HomeAdvanced({ onNavigate }: { onNavigate: (path: string) => voi
 
       <div
         data-testid="home-advanced-grid"
-        className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
+        // .ns-grid3 ladder, as on the Shifts grid: 2-up at 640px, 3-up at 1100px.
+        className="grid grid-cols-1 gap-4 sm:grid-cols-2 min-[1100px]:grid-cols-3"
       >
         {editors.map((item) => {
           const Icon = item.icon;

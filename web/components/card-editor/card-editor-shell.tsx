@@ -25,11 +25,7 @@ export function CardEditorScreen({
   children: React.ReactNode;
 }) {
   return (
-    <div
-      data-testid="screen"
-      data-screen={screen}
-      className="mx-auto flex w-full max-w-5xl flex-col gap-4 px-5 py-8"
-    >
+    <div data-testid="screen" data-screen={screen} className="flex flex-col gap-4">
       {children}
     </div>
   );

@@ -127,11 +127,7 @@ export function RulesScreen({ onOpenAdvanced }: RulesScreenProps) {
     .join(" · ");
 
   return (
-    <div
-      className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-5 py-8"
-      data-testid="screen"
-      data-screen="rules"
-    >
+    <div className="flex flex-col gap-5" data-testid="screen" data-screen="rules">
       <div className="flex flex-wrap items-end gap-4">
         <div className="min-w-[240px] flex-1">
           <div className="mb-2 text-label font-semibold uppercase tracking-[0.03em] text-brandink">

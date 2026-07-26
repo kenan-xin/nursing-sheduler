@@ -335,7 +335,7 @@ export function OptimizeAndExportScreen({
   const reloadRecoveryUnavailable = controller.activation?.reloadRecoveryAvailable === false;
 
   return (
-    <div data-testid="screen" className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-5 py-8">
+    <div data-testid="screen" className="flex flex-col gap-6">
       <header className="flex items-start gap-3">
         <span className="flex size-9 shrink-0 items-center justify-center border border-line bg-panel">
           <FaBolt className="size-4 text-brandink" aria-hidden />

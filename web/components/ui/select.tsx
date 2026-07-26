@@ -55,10 +55,15 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(function 
       {/* Prototype caret: a 10×6 solid triangle in --ink3, 10px from the edge. It
           fades with the control when disabled (`peer-disabled`) — the native arrow
           it replaces was part of the select and dimmed with it, so a sibling left
-          at full contrast would read as an enabled caret on a greyed-out field. */}
+          at full contrast would read as an enabled caret on a greyed-out field.
+
+          Centred with -translate-y-1/2, NOT the prototype's translateY(-25%): the
+          triangle's box is 6px tall (all border-top), so -25% lifts it 1.5px where
+          centring needs 3px — measurably 1.5px below the value beside it in all
+          three selects. The prototype's own value is off-centre. */}
       <span
         aria-hidden
-        className="pointer-events-none absolute right-2.5 top-1/2 size-0 -translate-y-[25%] border-x-[5px] border-x-transparent border-t-[6px] border-t-ink3 peer-disabled:opacity-60"
+        className="pointer-events-none absolute right-2.5 top-1/2 size-0 -translate-y-1/2 border-x-[5px] border-x-transparent border-t-[6px] border-t-ink3 peer-disabled:opacity-60"
       />
     </span>
   );

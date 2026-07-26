@@ -42,7 +42,28 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <main className="flex min-w-0 flex-1 flex-col">
         <TopBar />
         <div className="min-h-0 flex-1 overflow-y-auto">
-          <HydrationGate>{children}</HydrationGate>
+          <HydrationGate>
+            {/* The ONE screen container (bmw.6). The prototype sets the content width
+                once in its shell and every screen inherits it; the port had let five
+                per-screen widths drift apart (max-w-4xl, 5xl, 6xl, 1240px, 1400px).
+                Screens render a bare flex column and must NOT set a width, margin or
+                page padding of their own. The hydration states sit outside this,
+                centred on their own.
+
+                Two nested elements, mirroring Nurse Scheduling.dc.html:137 exactly:
+                the padding is on the OUTER box and the cap on an UNPADDED inner one,
+                so content is a full 1240px at the cap. Collapsing them into one
+                border-box div would silently spend 40px of the cap on padding.
+
+                The 72px bottom is LITERAL, as in the prototype. Tailwind's spacing
+                scale here is density-scaled (globals.css drives --spacing off
+                --space-1), so `pb-18` would ride the multiplier to 83.5px at spacious
+                and 64.8px at compact. Top and sides do scale in the prototype too,
+                so pt-6 / px-5 are correct as scale utilities. */}
+            <div className="px-5 pt-6 pb-[72px]">
+              <div className="mx-auto w-full max-w-[1240px]">{children}</div>
+            </div>
+          </HydrationGate>
         </div>
       </main>
 

@@ -14,11 +14,7 @@ import { SaveLoadWorkspace } from "@/components/save-load/save-load-workspace";
 
 export default function SaveAndLoadPage() {
   return (
-    <div
-      data-testid="screen"
-      data-screen="Save and Load"
-      className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-5 py-8"
-    >
+    <div data-testid="screen" data-screen="Save and Load" className="flex flex-col gap-6">
       <header className="flex items-center gap-3">
         <span className="flex size-9 items-center justify-center border border-line bg-panel text-ink2">
           <FaFloppyDisk className="size-4" />

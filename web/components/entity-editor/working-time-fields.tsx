@@ -15,6 +15,32 @@
 // Validation (equal start/end, partial clock) comes from the T05-reused validator.
 //
 // DL10: no role/seniority here. durationMinutes is authoring-only.
+//
+// Durations read in DECIMAL hours — the prototype's `fmtH` ("11.5h", not "11h 30m") —
+// for the headline figure; rest keeps the hours-and-minutes form the prototype uses
+// for it.
+//
+// The caption keeps the prototype's `= <clock span> − <rest>` (ScreenShifts.dc.html:330)
+// on ONE line beside the figure, with two changes. No rest is written `− 0` rather
+// than `− no rest`, and the Rest select's zero option is "None" rather than "No rest":
+// six and three characters back, and `− 0` keeps the caption one arithmetic shape at
+// every rest value. The leading `=` stays because it is load-bearing — without it
+// "11.5h − 30m" reads as a subtraction still to be done and invites you to land on
+// 11h, when the break is already out.
+//
+// This row does not fit at 1280 and that is a KNOWN, ACCEPTED trade (user call,
+// 2026-07-26), not an oversight. Measured there: the row has 252px, while one line
+// wants ~277px — 102px for the Rest select at "1h 30m" and ~175px for the readout at
+// "= 12h − 30m" beside an 11.5h figure. So the column split is pushed to 1fr / 1.6fr
+// and the caption still ellipsises on a break of 1h 30m or more; the prototype
+// anticipates exactly this with text-overflow:ellipsis on the same span, and the
+// box's title carries the full sentence. Everything fits from ~1440px up. The
+// alternative that fits at 1280 is stacking the caption under the figure, which was
+// built and measured (all cases fit) and rejected for the taller box.
+//
+// Before re-tuning any of this: measure the REST select by testid, not the first
+// <select> in the row, and measure its label with canvas metrics — a <select> reports
+// no overflow of its own, so scrollWidth checks silently pass while it clips.
 
 import * as React from "react";
 import { paidMinutesFor, validateWorkingTimeDraft, type WorkingTimeValue } from "./core";
@@ -29,11 +55,20 @@ const TIME_OPTIONS: string[] = Array.from({ length: 48 }, (_, i) => {
   return `${PAD(h)}:${PAD(m)}`;
 });
 
-/** Format minutes as the design's "8h" / "8h 30m" readout. */
-function fmtHours(minutes: number): string {
+/** Rest reads in hours-and-minutes — the prototype's `restOptions` / `restReadable`
+ *  form: "1h 30m", "1h", "30m" (a zero hour is dropped, never "0h 30m"). */
+function fmtRest(minutes: number): string {
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
+  if (h === 0) return `${m}m`;
   return m === 0 ? `${h}h` : `${h}h ${m}m`;
+}
+
+/** Durations read in decimal hours — the prototype's `fmtH`: "8h", "11.5h". Both the
+ *  headline figure and the clock span in the derivation use it. */
+function fmtDuration(minutes: number): string {
+  const hours = minutes / 60;
+  return Number.isInteger(hours) ? `${hours}h` : `${hours.toFixed(1)}h`;
 }
 
 const TIME_TIP =
@@ -86,13 +121,37 @@ export function WorkingTimeFields({ value, onChange, idPrefix }: WorkingTimeFiel
 
   return (
     <div className="flex flex-col gap-3" data-testid={`${idPrefix}-wt`}>
-      <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
+      {/* Rest | Working share a row as in the prototype, but not 50/50 — see the
+          header note: the Rest select takes only the width it needs, so the spare
+          width in its column goes to the readout, which needs every pixel for its
+          caption.
+
+          `max-content` rather than a ratio because the select's need is not a
+          constant anyone can hold in their head: it is the widest option ("11h 30m")
+          plus the caret gutter the shared Select reserves, both of which scale with
+          density. A 1fr/1.6fr split happened to give it 78px, which was 16px short
+          of that once the caret gutter landed — a native select has no ellipsis and
+          no title, so it silently chopped glyphs ("No res"). The readout absorbs the
+          remainder instead: its caption truncates cleanly and carries the full
+          sentence on the box's title.
+
+          Measured across 700–1920 × all three densities: Rest never clips and the
+          row never overflows. */}
+      <div className="grid grid-cols-1 gap-x-3 gap-y-3 sm:grid-cols-[minmax(0,max-content)_minmax(0,1fr)]">
         <div className="flex flex-col gap-1 sm:col-span-2">
           <span className="flex items-center gap-1.5 text-label font-semibold uppercase tracking-[0.03em] text-ink3">
             Time on floor
             <InfoTip label="Time on floor" text={TIME_TIP} />
           </span>
-          <div className="flex items-center gap-2">
+          {/* Wraps rather than overflows, and an OVERNIGHT shift is what makes that
+              load-bearing: the "+1 day" badge joins the row beside two clock selects
+              that each carry the shared Select's caret gutter. Pinned by e2e (see
+              "the overnight clock row wraps" in e2e/shift-types.spec.ts): with nowrap,
+              children escape the card at 1100 and 1150 in BOTH densities — an ordinary
+              night shift, not a corner case — and fit again by 1280. Letting the
+              selects shrink instead chops digits off a time with no ellipsis to warn
+              you, so wrapping is the graceful failure. */}
+          <div data-testid={`${idPrefix}-clocks`} className="flex flex-wrap items-center gap-2">
             <Select
               data-testid={`${idPrefix}-start`}
               aria-label="Start time"
@@ -137,14 +196,13 @@ export function WorkingTimeFields({ value, onChange, idPrefix }: WorkingTimeFiel
           <Select
             data-testid={`${idPrefix}-rest`}
             aria-label="Rest time"
-            fullWidth
             className="font-mono text-label font-bold"
             value={String(rest)}
             onChange={(e) => set({ restMinutes: Number(e.target.value) || undefined })}
           >
             {restOptions.map((m) => (
               <option key={m} value={String(m)}>
-                {m === 0 ? "No rest" : fmtHours(m)}
+                {m === 0 ? "None" : fmtRest(m)}
               </option>
             ))}
           </Select>
@@ -156,14 +214,21 @@ export function WorkingTimeFields({ value, onChange, idPrefix }: WorkingTimeFiel
           <div
             data-testid={`${idPrefix}-duration`}
             aria-label="Working duration (auto)"
-            className="flex h-9 items-center gap-2 overflow-hidden border border-line2 bg-panel px-3"
+            title={
+              paid != null
+                ? `${fmtDuration(paid)} working = ${fmtDuration(paid + rest)} on floor − ${
+                    rest > 0 ? fmtRest(rest) : "no"
+                  } rest`
+                : undefined
+            }
+            className="flex h-9 items-center gap-1.5 overflow-hidden border border-line2 bg-panel px-2.5"
           >
             <span className="flex-none font-heading text-title font-extrabold leading-none">
-              {paid != null ? fmtHours(paid) : "—"}
+              {paid != null ? fmtDuration(paid) : "—"}
             </span>
             {paid != null && (
               <span className="min-w-0 truncate font-mono text-label text-ink3">
-                = {fmtHours(paid + rest)} − {rest > 0 ? fmtHours(rest) : "no rest"}
+                = {fmtDuration(paid + rest)} − {rest > 0 ? fmtRest(rest) : "0"}
               </span>
             )}
           </div>

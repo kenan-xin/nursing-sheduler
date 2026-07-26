@@ -103,11 +103,7 @@ export function DatesScreen() {
   };
 
   return (
-    <div
-      data-testid="screen"
-      data-screen="Dates"
-      className="mx-auto flex w-full max-w-5xl flex-col gap-4 px-5 py-8"
-    >
+    <div data-testid="screen" data-screen="Dates" className="flex flex-col gap-4">
       <header className="mb-2 flex flex-wrap items-end gap-4">
         <div className="min-w-[240px] flex-1">
           <div className="mb-2 text-label font-semibold uppercase tracking-[0.03em] text-brandink">

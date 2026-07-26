@@ -238,3 +238,90 @@ test.describe.serial("DR-3 Shifts card-grid", () => {
     expect((await readRequirements(page))[0].preferredNumPeople).toBeUndefined();
   });
 });
+
+// Layout guard for the Time-on-floor clock row, which only over-subscribes in its
+// COMPOSED state: an overnight shift adds the "+1 day" badge beside the two clock
+// selects, and each select carries the shared Select's caret gutter. At the widths
+// where the card grid is 3-up the children then want more than one line.
+//
+// This lives in e2e and not vitest because the assertion IS layout — wrapping,
+// overflow and text clipping are all resolved by the engine against the real
+// stylesheet, and jsdom computes none of it. The failure mode is silent and visual
+// (a select pushed past the card edge, or digits chopped off a time with no ellipsis
+// to warn you), so nothing else in the suite goes red when it breaks.
+//
+// The row overflowed for overnight shifts even before the caret gutter existed; the
+// gutter only made it unmissable. Assertions are on the invariant — nothing escapes
+// the row, no glyphs are clipped — rather than on `flex-wrap` specifically, so a
+// future fix that stacks the row differently still passes.
+test.describe("DR-5 shift card — the overnight clock row wraps instead of overflowing", () => {
+  // 1100 is where the card grid turns 3-up (the prototype's ns-grid3 ladder), so
+  // 1100–1280 is the narrowest a card gets; both densities that inflate it.
+  const WIDTHS = [1100, 1150, 1280];
+  const DENSITIES = ["comfortable", "spacious"];
+
+  for (const width of WIDTHS) {
+    for (const density of DENSITIES) {
+      test(`${width}px × ${density}`, async ({ page }, testInfo) => {
+        testInfo.setTimeout(30_000);
+        await page.setViewportSize({ width, height: 1300 });
+        await page.goto("/shift-types");
+        await expect(page.getByTestId("add-shift-toggle")).toBeVisible();
+        await page.evaluate(
+          (d) => document.documentElement.setAttribute("data-density", d),
+          density,
+        );
+
+        await page.getByTestId("add-shift-toggle").click();
+        await page.getByTestId("shift-add-code").fill("Night");
+        // end <= start is the overnight case, which is what summons the badge.
+        await page.getByTestId("shift-add-start").selectOption("19:00");
+        await page.getByTestId("shift-add-end").selectOption("07:00");
+
+        const row = page.getByTestId("shift-add-clocks");
+        // Guard the premise: without the badge this row is not the composed state
+        // the test exists for, and every assertion below would pass trivially.
+        await expect(row.getByText("+1 day")).toBeVisible();
+
+        const geometry = await row.evaluate((el) => {
+          const box = el.getBoundingClientRect();
+          const children = [...el.children];
+          const gap = parseFloat(getComputedStyle(el).columnGap) || 0;
+          return {
+            rowWidth: box.width,
+            // What the children would need laid out on ONE line.
+            oneLineNeed:
+              children.reduce((sum, c) => sum + c.getBoundingClientRect().width, 0) +
+              gap * (children.length - 1),
+            lineCount: new Set(children.map((c) => Math.round(c.getBoundingClientRect().top))).size,
+            escapes: children
+              .filter((c) => c.getBoundingClientRect().right > box.right + 1)
+              .map((c) => c.getAttribute("data-testid") ?? c.textContent?.trim() ?? "?"),
+            overflows: el.scrollWidth > el.clientWidth + 1,
+            // A select whose text is wider than its content box chops glyphs with no
+            // ellipsis — the failure mode of "shrink instead of wrap".
+            clipped: [...el.querySelectorAll("select")]
+              .filter((s) => s.scrollWidth > s.clientWidth + 1)
+              .map((s) => s.getAttribute("data-testid") ?? "?"),
+          };
+        });
+
+        expect(geometry.escapes, "no child may extend past the row").toEqual([]);
+        expect(geometry.overflows, "the row must not overflow").toBe(false);
+        expect(geometry.clipped, "no clock select may clip its time").toEqual([]);
+
+        // Prove the test is in the regime it was written for: where one line is not
+        // enough, the row must actually have taken a second one. Asserted only when
+        // the arithmetic demands it, since the widest band still fits on one line.
+        if (geometry.oneLineNeed > geometry.rowWidth + 1) {
+          expect(
+            geometry.lineCount,
+            `children need ${Math.round(geometry.oneLineNeed)}px in a ${Math.round(
+              geometry.rowWidth,
+            )}px row, so the row must wrap`,
+          ).toBeGreaterThan(1);
+        }
+      });
+    }
+  }
+});
