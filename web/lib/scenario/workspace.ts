@@ -7,9 +7,9 @@
 // Workspace YAML is a flat *superset* of the strict backend document: same
 // top-level `apiVersion`/`dates`/`people`/`shiftTypes`/`preferences`/`export`,
 // plus authoring state the strict solver model never sees — a `workspaceVersion`
-// tag, incomplete (`null`) dates, per-preference `workspaceId` + `enabled`,
-// top-level `guidedRules`, and a last-positioned `appVersion` provenance stamp
-// (DL13 decisions 1–3). There is no `scenario`/`ui` wrapper.
+// tag, incomplete (`null`) dates, per-preference `workspaceId` + `enabled`, and a
+// last-positioned `appVersion` provenance stamp (DL13 decisions 1–3). There is no
+// `scenario`/`ui` wrapper.
 //
 // Responsibilities, in dependency order:
 //   1. source selection      — dispatch from the *lossless* YAML version scalar so
@@ -21,13 +21,12 @@
 //                              `workspaceId`/`enabled` and an optional weight), so
 //                              an unknown field at ANY nesting level — including in
 //                              a disabled record — is rejected in both languages.
-//   3. optimize readiness    — incomplete dates/entities, missing/duplicate
-//                              `workspaceId`, and the Guided rule kind/source
-//                              relationship, reported with the structured contract.
+//   3. optimize readiness    — incomplete dates/entities and missing/duplicate
+//                              `workspaceId`, reported with the structured contract.
 //   4. strict projection     — a ready Workspace projects to the exact
 //                              `CanonicalScenarioDocument` the strict producer
 //                              emits (filter disabled, strip Workspace-only
-//                              identity/guided metadata, fill default weights).
+//                              identity metadata, fill default weights).
 //   5. serialization         — durable UI state → flat Workspace V1 YAML backup.
 //   6. hydration bridge       — a Workspace file → keyless-but-identity-bearing
 //                              `ImportNormalizationTarget` (cards keep their
@@ -63,7 +62,6 @@ import type {
   CanonicalPreference,
   CanonicalScenarioDocument,
   CanonicalShiftTypesContainer,
-  GuidedRuleConstraintKind,
   ImportCardsByKind,
   ImportNormalizationTarget,
   IsoDate,
@@ -97,15 +95,6 @@ export const WORKSPACE_VERSION = 1 as const;
  */
 export const MAX_ONE_SHIFT_PER_DAY_WORKSPACE_ID = "max-one-shift-per-day";
 
-/** The five pinnable constraint kinds and the strict preference `type` each pins. */
-export const GUIDED_CONSTRAINT_KIND_TO_TYPE: Record<GuidedRuleConstraintKind, string> = {
-  requirements: PREFERENCE_TYPE.shiftTypeRequirement,
-  successions: PREFERENCE_TYPE.shiftTypeSuccessions,
-  counts: PREFERENCE_TYPE.shiftCount,
-  affinities: PREFERENCE_TYPE.shiftAffinity,
-  coverings: PREFERENCE_TYPE.shiftTypeCovering,
-};
-
 // ---------------------------------------------------------------------------
 // Emitted document shape
 // ---------------------------------------------------------------------------
@@ -115,21 +104,6 @@ export type WorkspacePreferenceRecord = {
   workspaceId: string;
   enabled: boolean;
 } & Record<string, unknown>;
-
-/**
- * A top-level Guided rule. The durable pin state it mirrored is gone (RP-2), so
- * nothing writes one any more and a loaded one restores nothing — the wire field
- * survives only until RP-3 removes it from both language contracts. Stripped
- * before solving.
- */
-export interface WorkspaceGuidedRule {
-  id: string;
-  constraintKind: GuidedRuleConstraintKind;
-  constraintId: string;
-  category: string;
-  quickFields: string[];
-  description?: string;
-}
 
 /**
  * The flat Workspace V1 document the frontend emits for backup/sharing. Field
@@ -148,7 +122,6 @@ export interface WorkspaceDocumentV1 {
   people: CanonicalPeopleContainer;
   shiftTypes: CanonicalShiftTypesContainer;
   preferences: WorkspacePreferenceRecord[];
-  guidedRules: WorkspaceGuidedRule[];
   export?: CanonicalExportConfig;
   appVersion?: string;
 }
@@ -179,15 +152,6 @@ const zWorkspacePreference = z.discriminatedUnion("type", [
   producerCovering.extend(zOptionalWeight).extend(zAuthoring),
 ]);
 
-const zWorkspaceGuidedRule = z.strictObject({
-  id: z.string(),
-  constraintKind: z.enum(["requirements", "successions", "counts", "affinities", "coverings"]),
-  constraintId: z.string(),
-  category: z.string(),
-  quickFields: z.array(z.string()),
-  description: z.string().optional(),
-});
-
 // Dates carry a required range whose bounds may be null while setup is
 // incomplete. `items` is backend-generated and ignored here; `groups` reuse the
 // exact producer date-group schema.
@@ -216,7 +180,6 @@ export const workspaceRootSchema = z.strictObject({
   people: producerPeopleContainer,
   shiftTypes: producerShiftTypesContainer,
   preferences: z.array(zWorkspacePreference).default([]),
-  guidedRules: z.array(zWorkspaceGuidedRule).default([]),
   export: producerExportConfig.optional(),
   appVersion: z.string().optional(),
 });
@@ -374,7 +337,7 @@ export function parseWorkspaceV1Document(text: string): unknown {
 }
 
 // ---------------------------------------------------------------------------
-// Optimize readiness — incomplete dates/entities, workspaceId + Guided integrity
+// Optimize readiness — incomplete dates/entities, workspaceId integrity
 // ---------------------------------------------------------------------------
 
 /**
@@ -449,11 +412,10 @@ export function checkWorkspaceIdentityIntegrity(workspace: ParsedWorkspace): Wor
 
 /**
  * Collect Workspace readiness issues: incomplete dates, empty people/shift-type
- * collections, duplicate preference `workspaceId`, and Guided rule integrity
- * (unique rule id, resolvable `constraintId`, and a `constraintKind` that matches
- * the pinned preference's type). This mirrors the workspace-structural half of
- * Python's `_readiness_issues`; full scheduling reference resolution
- * (person/shift/date) is delegated to the strict producer and backend boundary.
+ * collections, and missing/duplicate preference `workspaceId`. This mirrors the
+ * workspace-structural half of Python's `_readiness_issues`; full scheduling
+ * reference resolution (person/shift/date) is delegated to the strict producer and
+ * backend boundary.
  */
 export function checkWorkspaceReadiness(workspace: ParsedWorkspace): WorkspaceIssue[] {
   const issues: WorkspaceIssue[] = [];
@@ -488,82 +450,21 @@ export function checkWorkspaceReadiness(workspace: ParsedWorkspace): WorkspaceIs
   }
 
   // The schema requires the id key, so the two remaining identity defects a
-  // valid-shaped document can carry are an empty id and a duplicate id. An empty id
-  // is skipped from the declared-type map, exactly as Python's readiness loop
-  // `continue`s past a falsy id.
-  const declaredTypes = new Map<string, string>();
-  for (const preference of workspace.preferences) {
-    if (preference.workspaceId === "") continue;
-    declaredTypes.set(preference.workspaceId, preference.type);
-  }
+  // valid-shaped document can carry are an empty id and a duplicate id.
   issues.push(...emptyPreferenceIdIssues(workspace));
   issues.push(...duplicatePreferenceIdIssues(workspace));
-  issues.push(...guidedRuleIssues(workspace, declaredTypes));
   return sortIssues(issues);
 }
 
-/**
- * Validate each Guided rule's uniqueness and kind/source relationship: a unique
- * pin `id`, at most one rule per `(constraintKind, constraintId)` source (the
- * durable T14 one-pin-per-source invariant), a resolvable `constraintId`, and a
- * `constraintKind` that matches the pinned preference's type.
- */
-function guidedRuleIssues(
-  workspace: ParsedWorkspace,
-  declaredTypes: Map<string, string>,
-): WorkspaceIssue[] {
-  const issues: WorkspaceIssue[] = [];
-  const seenRuleIds = new Set<string>();
-  const seenSources = new Set<string>();
-  workspace.guidedRules.forEach((rule, ruleIndex) => {
-    if (seenRuleIds.has(rule.id)) {
-      issues.push({
-        path: ["guidedRules", ruleIndex, "id"],
-        code: "duplicate_workspace_id",
-        message: `Duplicate guided rule id: ${rule.id}.`,
-      });
-    }
-    seenRuleIds.add(rule.id);
-
-    const source = `${rule.constraintKind}\u0000${rule.constraintId}`;
-    if (seenSources.has(source)) {
-      issues.push({
-        path: ["guidedRules", ruleIndex, "constraintId"],
-        code: "duplicate_workspace_id",
-        message: `Duplicate guided rule source: (${rule.constraintKind}, ${rule.constraintId}).`,
-      });
-    }
-    seenSources.add(source);
-
-    const pinnedType = declaredTypes.get(rule.constraintId);
-    if (pinnedType === undefined) {
-      issues.push({
-        path: ["guidedRules", ruleIndex, "constraintId"],
-        code: "unresolved_workspace_reference",
-        message: `Guided rule references unknown preference workspaceId: ${rule.constraintId}.`,
-      });
-      return;
-    }
-    if (pinnedType !== GUIDED_CONSTRAINT_KIND_TO_TYPE[rule.constraintKind]) {
-      issues.push({
-        path: ["guidedRules", ruleIndex, "constraintKind"],
-        code: "unresolved_workspace_reference",
-        message: `Guided rule constraintKind '${rule.constraintKind}' does not match the pinned preference '${rule.constraintId}'.`,
-      });
-    }
-  });
-  return issues;
-}
-
 // ---------------------------------------------------------------------------
-// Strict projection (filter disabled, strip Workspace-only identity/guided data)
+// Strict projection (filter disabled, strip Workspace-only identity data)
 // ---------------------------------------------------------------------------
 
 /**
  * Project a Workspace document into the backend-facing `CanonicalScenarioDocument`
  * the strict producer consumes: drop `enabled: false` preferences and strip each
- * survivor's `workspaceId`/`enabled`; drop `workspaceVersion` and `guidedRules`
- * entirely. Field order and canonicalization match the strict producer, so a
+ * survivor's `workspaceId`/`enabled`; drop `workspaceVersion` entirely. Field
+ * order and canonicalization match the strict producer, so a
  * Workspace round-trip and a direct strict projection converge on identical bytes.
  * An absent weight is filled with the backend default so an externally-authored
  * Workspace validates identically to its legacy equivalent.
@@ -731,11 +632,6 @@ export function buildWorkspaceDocument(state: ScenarioUiState): WorkspaceDocumen
     people: canonical.people,
     shiftTypes: canonical.shiftTypes,
     preferences,
-    // TEMPORARY (RP-2): the durable pin state is gone, so there is nothing left to
-    // emit here — but the wire shape must stay byte-identical while the Python side
-    // still declares `guidedRules`, so the cross-language differential gate keeps
-    // agreeing. Ticket RP-3 removes the field from both contracts and deletes this.
-    guidedRules: [],
     ...(canonical.export ? { export: canonical.export } : {}),
     appVersion: currentAppVersion(),
   };

@@ -17,7 +17,7 @@ import { SCENARIO_KEYS } from "./fingerprint";
 export const SCENARIO_PERSIST_KEY = "nurse-scheduler/scenario";
 
 /** Current persistence payload version; a bump triggers `migrateScenarioState`. */
-export const SCENARIO_PERSIST_VERSION = 5;
+export const SCENARIO_PERSIST_VERSION = 6;
 
 /**
  * The persisted `state` payload at the current version: the durable scenario
@@ -55,6 +55,11 @@ export type PersistedScenarioState = ScenarioUiState & {
  * `backupFingerprint` (T08e) to name the download-backup contract explicitly. A v4
  * record already stored its value under the download-baseline semantics (set only
  * by a real plain Download), so carry it across verbatim under the new key.
+ * v5 → v6: `guidedRules` left the Workspace V1 document (RP-3), and the backup
+ * fingerprint hashes that document — so every pre-v6 fingerprint, including one
+ * taken from a scenario whose `guidedRules` was the empty list, names bytes this
+ * build can no longer reproduce. Clear it to `null` (unknown), following the v3 → v4
+ * precedent, so no stale backup is falsely reported current.
  */
 export function migrateScenarioState(persisted: unknown, fromVersion: number): unknown {
   if (fromVersion > SCENARIO_PERSIST_VERSION) {
@@ -95,6 +100,12 @@ export function migrateScenarioState(persisted: unknown, fromVersion: number): u
       migrated.backupFingerprint = migrated.baselineFingerprint;
       delete migrated.baselineFingerprint;
     }
+  }
+
+  if (fromVersion < 6) {
+    // The Workspace document the fingerprint hashes lost its `guidedRules` key, so
+    // a pre-v6 backup can no longer be reproduced byte-for-byte. Reset to unknown.
+    migrated.backupFingerprint = null;
   }
 
   return migrated;

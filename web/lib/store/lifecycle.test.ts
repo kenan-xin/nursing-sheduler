@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createEmptyScenarioUiState, type ImportNormalizationTarget } from "@/lib/scenario";
 import { createMemoryStorage, SCENARIO_PERSIST_KEY, SCENARIO_PERSIST_VERSION } from "./persistence";
+import { computeScenarioFingerprint } from "./fingerprint";
 import { selectBackupStatus } from "./scenario-store";
 import { createStateSpine } from "./spine";
 import {
@@ -84,6 +85,27 @@ describe("hydration lifecycle", () => {
       extraColumns: [],
       extraRows: [],
     });
+  });
+
+  it("migrates a v5 backup baseline to no backup", async () => {
+    const scenario = { ...createEmptyScenarioUiState(), rangeStart: "2026-01-01" };
+    // This is deliberately a fingerprint that the current scenario would otherwise
+    // consider current; v5 named bytes containing the removed guidedRules key.
+    const mem = createMemoryStorage(
+      envelope(
+        {
+          rangeStart: scenario.rangeStart,
+          backupFingerprint: computeScenarioFingerprint(scenario),
+        },
+        5,
+      ),
+    );
+    const spine = createStateSpine({ createStorage: () => mem });
+
+    await hydrateScenarioStore(spine.scenario, spine.hot);
+
+    expect(spine.scenario.getState().backupFingerprint).toBeNull();
+    expect(selectBackupStatus(spine.scenario.getState())).toBe("none");
   });
 
   // RP-2 removed the durable `guidedRulePins` field WITHOUT a persist-version bump

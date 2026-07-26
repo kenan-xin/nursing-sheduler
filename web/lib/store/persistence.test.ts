@@ -164,14 +164,14 @@ describe("migrateScenarioState", () => {
     expect("baselineFingerprint" in migrated).toBe(false);
   });
 
-  it("upgrades a v4 payload: renames baselineFingerprint → backupFingerprint, preserving its value", () => {
-    // A v4 record already stored the value under the download-baseline semantics
-    // (set only by a real plain Download), so v4→v5 carries it across verbatim.
+  it("upgrades a v4 payload: renames then clears the obsolete Workspace baseline", () => {
+    // v4→v5 renames the download baseline, then v5→v6 clears it because it names
+    // a Workspace document that still contained the removed guidedRules key.
     const migrated = migrateScenarioState(
       { rangeStart: "2026-01-01", baselineFingerprint: "real-download-hash" },
       4,
     ) as Record<string, unknown>;
-    expect(migrated.backupFingerprint).toBe("real-download-hash");
+    expect(migrated.backupFingerprint).toBeNull();
     expect("baselineFingerprint" in migrated).toBe(false);
   });
 
@@ -182,6 +182,15 @@ describe("migrateScenarioState", () => {
     >;
     expect(migrated.backupFingerprint).toBeNull();
     expect("baselineFingerprint" in migrated).toBe(false);
+  });
+
+  it("upgrades a v5 payload: clears the Workspace fingerprint baseline", () => {
+    const migrated = migrateScenarioState(
+      { rangeStart: "2026-01-01", backupFingerprint: "old-workspace-hash" },
+      5,
+    ) as Record<string, unknown>;
+    expect(migrated.rangeStart).toBe("2026-01-01");
+    expect(migrated.backupFingerprint).toBeNull();
   });
 });
 

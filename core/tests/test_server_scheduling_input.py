@@ -78,12 +78,6 @@ preferences:
     person: alice
     date: 2025-01-01
     shiftType: day
-guidedRules:
-  - id: g1
-    constraintKind: requirements
-    constraintId: r2
-    category: Coverage
-    quickFields: [requiredNumPeople]
 appVersion: 1.0.0
 """
 
@@ -99,7 +93,6 @@ def test_legacy_and_workspace_converge_on_same_strict():
     assert len(workspace_model.preferences) == 2
     assert workspace_canonical.replace(b"appVersion: 1.0.0\n", b"") == legacy_canonical
     assert b"workspaceId" not in workspace_canonical
-    assert b"guidedRules" not in workspace_canonical
     assert b"enabled" not in workspace_canonical
 
 
@@ -239,7 +232,12 @@ preferences:
     assert any(issue.code == "duplicate_workspace_id" for issue in error.issues)
 
 
-def test_workspace_broken_guided_pin():
+def test_workspace_guided_rules_is_now_an_unknown_field():
+    # `guidedRules` left the V1 contract (RP-3) without a `workspaceVersion` bump, a
+    # ratified pre-production exception. A document emitted by an older build is
+    # therefore rejected by `extra="forbid"` as an unknown field — NOT as a Guided
+    # reference issue — and the frontend's Zod `strictObject` rejects it symmetrically
+    # (web/lib/scenario/workspace.test.ts).
     document = """
 workspaceVersion: 1
 apiVersion: alpha
@@ -259,13 +257,13 @@ preferences:
 guidedRules:
   - id: g1
     constraintKind: requirements
-    constraintId: does-not-exist
+    constraintId: r1
     category: Coverage
     quickFields: []
 """
     error = _content_error(document)
-    assert error.error_code == "workspace_not_ready"
-    assert any(issue.code == "unresolved_workspace_reference" for issue in error.issues)
+    assert error.error_code == "invalid_scheduling_data"
+    assert any(issue.path == ["guidedRules"] and issue.code == "unknown_field" for issue in error.issues)
 
 
 def test_workspace_unknown_top_level_field():
@@ -540,165 +538,6 @@ def test_workspace_enabled_leave_pin_survives_projection():
     assert leave and leave[0].weight == float("inf")
 
 
-# --- Lossless Guided record (T19e) --------------------------------------------
-
-
-def test_workspace_guided_rule_every_constraint_kind_is_accepted_and_stripped():
-    document = """
-workspaceVersion: 1
-apiVersion: alpha
-dates:
-  range:
-    startDate: 2025-01-01
-    endDate: 2025-01-01
-people:
-  items:
-    - id: alice
-    - id: bob
-shiftTypes:
-  items:
-    - id: day
-    - id: night
-preferences:
-  - workspaceId: r1
-    type: at most one shift per day
-  - workspaceId: p_req
-    type: shift type requirement
-    shiftType: day
-    requiredNumPeople: 1
-  - workspaceId: p_succ
-    type: shift type successions
-    person: alice
-    pattern: [[day], [night]]
-  - workspaceId: p_count
-    type: shift count
-    person: alice
-    countDates: ALL
-    countShiftTypes: [day]
-    expression: x = T
-    target: 1
-  - workspaceId: p_aff
-    type: shift affinity
-    date: ALL
-    people1: [alice]
-    people2: [bob]
-    shiftTypes: [[day]]
-  - workspaceId: p_cov
-    type: shift type covering
-    preceptors: [alice]
-    preceptees: [bob]
-    shiftTypes: [[day]]
-guidedRules:
-  - id: g_req
-    constraintKind: requirements
-    constraintId: p_req
-    category: Coverage
-    quickFields: [requiredNumPeople]
-  - id: g_succ
-    constraintKind: successions
-    constraintId: p_succ
-    category: Patterns
-    quickFields: []
-  - id: g_count
-    constraintKind: counts
-    constraintId: p_count
-    category: Balance
-    quickFields: [target]
-    description: Balance the workload
-  - id: g_aff
-    constraintKind: affinities
-    constraintId: p_aff
-    category: Teams
-    quickFields: []
-  - id: g_cov
-    constraintKind: coverings
-    constraintId: p_cov
-    category: Mentoring
-    quickFields: []
-"""
-    canonical = canonicalize_submission(document.encode())
-    # Every Guided field is solver-inert and stripped from the canonical document.
-    assert b"guidedRules" not in canonical
-    assert b"constraintKind" not in canonical
-    assert b"quickFields" not in canonical
-
-
-def test_workspace_guided_rule_kind_source_mismatch_is_not_ready():
-    # constraintKind claims counts, but the pinned preference is a requirement.
-    document = (
-        _workspace_with_preferences(
-            """  - workspaceId: r1
-    type: at most one shift per day
-  - workspaceId: p_req
-    type: shift type requirement
-    shiftType: day
-    requiredNumPeople: 1"""
-        )
-        + """guidedRules:
-  - id: g1
-    constraintKind: counts
-    constraintId: p_req
-    category: X
-    quickFields: []
-"""
-    )
-    error = _content_error(document)
-    assert error.error_code == "workspace_not_ready"
-    assert any(
-        issue.path == ["guidedRules", 0, "constraintKind"] and issue.code == "unresolved_workspace_reference"
-        for issue in error.issues
-    )
-
-
-def test_workspace_duplicate_guided_rule_id_is_not_ready():
-    document = (
-        _workspace_with_preferences(
-            """  - workspaceId: r1
-    type: at most one shift per day
-  - workspaceId: p_req
-    type: shift type requirement
-    shiftType: day
-    requiredNumPeople: 1"""
-        )
-        + """guidedRules:
-  - id: g1
-    constraintKind: requirements
-    constraintId: p_req
-    category: X
-    quickFields: []
-  - id: g1
-    constraintKind: requirements
-    constraintId: p_req
-    category: Y
-    quickFields: []
-"""
-    )
-    error = _content_error(document)
-    assert error.error_code == "workspace_not_ready"
-    assert any(
-        issue.path == ["guidedRules", 1, "id"] and issue.code == "duplicate_workspace_id" for issue in error.issues
-    )
-
-
-def test_workspace_guided_rule_unknown_constraint_kind_is_invalid():
-    document = (
-        _workspace_with_preferences(
-            """  - workspaceId: r1
-    type: at most one shift per day"""
-        )
-        + """guidedRules:
-  - id: g1
-    constraintKind: mystery
-    constraintId: r1
-    category: X
-    quickFields: []
-"""
-    )
-    error = _content_error(document)
-    assert error.error_code == "invalid_scheduling_data"
-    assert any(issue.path == ["guidedRules", 0, "constraintKind"] for issue in error.issues)
-
-
 # --- Strict Workspace authoring models (F3) -----------------------------------
 
 
@@ -711,101 +550,6 @@ def test_workspace_non_boolean_enabled_is_invalid():
     error = _content_error(document)
     assert error.error_code == "invalid_scheduling_data"
     assert any(issue.path == ["preferences", 0, "enabled"] for issue in error.issues)
-
-
-def test_workspace_guided_rule_unknown_field_is_invalid():
-    document = """
-workspaceVersion: 1
-apiVersion: alpha
-dates:
-  range:
-    startDate: 2025-01-01
-    endDate: 2025-01-01
-people:
-  items:
-    - id: alice
-shiftTypes:
-  items:
-    - id: day
-preferences:
-  - workspaceId: r1
-    type: at most one shift per day
-guidedRules:
-  - id: g1
-    constraintKind: requirements
-    constraintId: r1
-    category: Coverage
-    quickFields: []
-    mystery: 1
-"""
-    error = _content_error(document)
-    assert error.error_code == "invalid_scheduling_data"
-    assert any(issue.path == ["guidedRules", 0, "mystery"] and issue.code == "unknown_field" for issue in error.issues)
-
-
-def test_workspace_guided_rule_missing_quick_fields_is_invalid():
-    # `quickFields` is a required durable T14 field; a record omitting it is one the
-    # durable pin type could never author, so it fails structural validation.
-    document = """
-workspaceVersion: 1
-apiVersion: alpha
-dates:
-  range:
-    startDate: 2025-01-01
-    endDate: 2025-01-01
-people:
-  items:
-    - id: alice
-shiftTypes:
-  items:
-    - id: day
-preferences:
-  - workspaceId: r1
-    type: at most one shift per day
-guidedRules:
-  - id: g1
-    constraintKind: requirements
-    constraintId: r1
-    category: Coverage
-"""
-    error = _content_error(document)
-    assert error.error_code == "invalid_scheduling_data"
-    assert any(
-        issue.path == ["guidedRules", 0, "quickFields"] and issue.code == "missing_field" for issue in error.issues
-    )
-
-
-def test_workspace_duplicate_guided_rule_source_is_not_ready():
-    # Two rules with distinct ids pin the SAME (constraintKind, constraintId) source,
-    # violating the durable T14 one-pin-per-source invariant.
-    document = (
-        _workspace_with_preferences(
-            """  - workspaceId: r1
-    type: at most one shift per day
-  - workspaceId: p_req
-    type: shift type requirement
-    shiftType: day
-    requiredNumPeople: 1"""
-        )
-        + """guidedRules:
-  - id: g1
-    constraintKind: requirements
-    constraintId: p_req
-    category: X
-    quickFields: []
-  - id: g2
-    constraintKind: requirements
-    constraintId: p_req
-    category: Y
-    quickFields: []
-"""
-    )
-    error = _content_error(document)
-    assert error.error_code == "workspace_not_ready"
-    assert any(
-        issue.path == ["guidedRules", 1, "constraintId"] and issue.code == "duplicate_workspace_id"
-        for issue in error.issues
-    )
 
 
 @pytest.mark.parametrize(

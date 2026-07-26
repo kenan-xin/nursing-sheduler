@@ -67,7 +67,6 @@ export {
 export {
   WORKSPACE_VERSION,
   MAX_ONE_SHIFT_PER_DAY_WORKSPACE_ID,
-  GUIDED_CONSTRAINT_KIND_TO_TYPE,
   workspaceRootSchema,
   classifyWorkspaceSource,
   checkWorkspaceReadiness,
@@ -80,7 +79,6 @@ export {
   normalizeWorkspaceToImportTarget,
   type WorkspaceDocumentV1,
   type WorkspacePreferenceRecord,
-  type WorkspaceGuidedRule,
   type ParsedWorkspace,
   type WorkspaceSource,
   type WorkspaceIssue,

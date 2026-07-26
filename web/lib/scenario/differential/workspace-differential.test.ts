@@ -9,7 +9,7 @@
 //      projects to the same strict scheduling model as the frontend's own strict
 //      producer projection (`serializeScenario`).
 //   2. Python fixtures import equivalently in TS. Externally-authored Workspace
-//      YAML (weights omitted, disabled/guided authoring metadata present) that the
+//      YAML (weights omitted, disabled authoring metadata present) that the
 //      Python boundary accepts also converts in TS to a strict document Python
 //      then canonicalizes to the same model.
 //   3. Full authoring state hydrates through the REAL frontend load path. External
@@ -140,11 +140,11 @@ const STATE_VARIANTS: Record<string, () => ScenarioUiState> = {
 };
 
 // --- Externally-authored Workspace fixtures exercised in direction 2 ---------
-// Weights are deliberately omitted (backend defaults), disabled/guided authoring
+// Weights are deliberately omitted (backend defaults), disabled authoring
 // metadata is present, and dates/refs are ready — the Python-flavoured shape.
 
 const READY_FIXTURES: Record<string, string> = {
-  "converged legacy equivalent (disabled + guided)": `workspaceVersion: 1
+  "converged legacy equivalent (disabled)": `workspaceVersion: 1
 apiVersion: alpha
 dates:
   range:
@@ -172,12 +172,6 @@ preferences:
     person: alice
     date: 2025-01-01
     shiftType: day
-guidedRules:
-  - id: g1
-    constraintKind: requirements
-    constraintId: r2
-    category: Coverage
-    quickFields: [requiredNumPeople]
 appVersion: 1.0.0
 `,
   "unicode description + infinite request weight": `workspaceVersion: 1
@@ -261,8 +255,8 @@ describe.skipIf(!AVAILABLE)(
 // golden. Strict projection is compared SEPARATELY (via the oracle) so the two
 // checks cannot mask each other.
 
-/** A rich, optimize-ready Workspace exercising every card kind, all five Guided
- *  kinds and their fields, all three request-cell kinds, and export layout. */
+/** A rich, optimize-ready Workspace exercising every card kind, all three
+ *  request-cell kinds, and export layout. */
 const FULL_AUTHORING = `workspaceVersion: 1
 apiVersion: alpha
 description: T05 fixture
@@ -377,39 +371,6 @@ preferences:
     date: 2026-05-16
     shiftType: OFF
     weight: 1
-guidedRules:
-  - id: g-req
-    constraintKind: requirements
-    constraintId: r1
-    category: Coverage
-    quickFields:
-      - requiredNumPeople
-    description: cover D
-  - id: g-succ
-    constraintKind: successions
-    constraintId: s1
-    category: Pattern
-    quickFields:
-      - pattern
-  - id: g-cnt
-    constraintKind: counts
-    constraintId: n1
-    category: Load
-    quickFields:
-      - expression
-  - id: g-aff
-    constraintKind: affinities
-    constraintId: a1
-    category: Pairing
-    quickFields:
-      - people1
-      - people2
-  - id: g-cov
-    constraintKind: coverings
-    constraintId: v1
-    category: Mentoring
-    quickFields:
-      - preceptors
 export:
   formatting:
     - type: row
@@ -419,9 +380,8 @@ export:
 appVersion: unknown
 `;
 
-/** A structurally-valid backup with a DISABLED requirement and a Guided pin on the
- *  enabled one — the disabled record survives to authoring state but is filtered
- *  out of the strict projection. */
+/** A structurally-valid backup with a DISABLED requirement — the disabled record
+ *  survives to authoring state but is filtered out of the strict projection. */
 const DISABLED_RECORD = `workspaceVersion: 1
 apiVersion: alpha
 dates:
@@ -450,13 +410,6 @@ preferences:
     type: shift type requirement
     shiftType: E
     requiredNumPeople: 2
-guidedRules:
-  - id: g-req
-    constraintKind: requirements
-    constraintId: r1
-    category: Coverage
-    quickFields:
-      - requiredNumPeople
 appVersion: unknown
 `;
 
@@ -480,7 +433,6 @@ preferences:
     type: shift type requirement
     shiftType: D
     requiredNumPeople: 1
-guidedRules: []
 appVersion: unknown
 `;
 
@@ -557,10 +509,6 @@ describe.skipIf(!AVAILABLE)(
         },
         { uid: "c3", kind: "off", person: "Bob", date: "2026-05-16", weight: 1 },
       ]);
-
-      // RP-2 removed the durable pin state: the fixture's `guidedRules` records
-      // still parse (the wire field survives until RP-3) but restore nothing.
-      expect("guidedRulePins" in state).toBe(false);
 
       expect(state.exportLayout.formatting).toMatchObject([
         { type: "row", people: ["Alice"], backgroundColor: "#ff0000" },
@@ -773,47 +721,6 @@ preferences:
     expect(callOracle({ op: "workspace_canonical", yaml: fixture }).errorCode).toBe(
       "invalid_scheduling_data",
     );
-  });
-
-  it("a duplicate Guided source is not_ready on both sides (optimize readiness)", () => {
-    const fixture = `workspaceVersion: 1
-apiVersion: alpha
-dates:
-  range:
-    startDate: 2025-01-01
-    endDate: 2025-01-01
-people:
-  items:
-    - id: alice
-shiftTypes:
-  items:
-    - id: day
-preferences:
-  - workspaceId: r1
-    enabled: true
-    type: shift type requirement
-    shiftType: day
-    requiredNumPeople: 1
-guidedRules:
-  - id: g1
-    constraintKind: requirements
-    constraintId: r1
-    category: Coverage
-    quickFields: [requiredNumPeople]
-  - id: g2
-    constraintKind: requirements
-    constraintId: r1
-    category: Coverage
-    quickFields: [requiredNumPeople]
-`;
-    expect(convertWorkspaceForOptimize(fixture).status).toBe("not_ready");
-    expect(callOracle({ op: "workspace_canonical", yaml: fixture }).errorCode).toBe(
-      "workspace_not_ready",
-    );
-    // The Load path no longer rejects it: RP-2 deleted the durable pin state, so a
-    // duplicate Guided source can no longer corrupt anything on hydration. The
-    // records are parsed and discarded, and the rest of the file still loads.
-    expect(prepareScenarioLoad(fixture).target).not.toBeNull();
   });
 });
 

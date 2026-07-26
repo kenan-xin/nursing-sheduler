@@ -53,12 +53,6 @@ preferences:
     person: alice
     date: 2025-01-01
     shiftType: day
-guidedRules:
-  - id: g1
-    constraintKind: requirements
-    constraintId: r2
-    category: Coverage
-    quickFields: [requiredNumPeople]
 appVersion: 1.0.0
 `;
 
@@ -166,17 +160,37 @@ describe("workspace structural validation", () => {
     );
   });
 
-  it("rejects an unknown field inside a Guided rule", () => {
+  it("rejects a root guidedRules key left over from an older build", () => {
+    // RP-3 cut `guidedRules` from V1 without a `workspaceVersion` bump (a ratified
+    // pre-production exception), so a document a previous build emitted is now
+    // rejected by the root `strictObject` as an unknown field — the same
+    // `invalid`/`unknown_field` contract Python's `extra="forbid"` returns
+    // (core/tests/test_server_scheduling_input.py).
     const yaml = READY_WORKSPACE.replace(
-      "quickFields: [requiredNumPeople]",
-      "quickFields: [requiredNumPeople]\n    mystery: 1",
+      "appVersion: 1.0.0",
+      `guidedRules:
+  - id: g1
+    constraintKind: requirements
+    constraintId: r2
+    category: Coverage
+    quickFields: [requiredNumPeople]
+appVersion: 1.0.0`,
     );
     const result = convert(yaml);
     expect(result.status).toBe("invalid");
     if (result.status !== "invalid") return;
     expect(result.issues).toContainEqual(
-      expect.objectContaining({ path: ["guidedRules", 0, "mystery"], code: "unknown_field" }),
+      expect.objectContaining({ path: ["guidedRules"], code: "unknown_field" }),
     );
+  });
+
+  it("rejects a root guidedRules key through the Workspace load path", () => {
+    // The same rejection at the production LOAD seam, where a backup is hydrated
+    // rather than submitted: the structural schema refuses it before readiness.
+    const yaml = READY_WORKSPACE.replace("appVersion: 1.0.0", "guidedRules: []\nappVersion: 1.0.0");
+    const prepared = prepareScenarioLoad(yaml);
+    expect(prepared.target).toBeNull();
+    expect(prepared.issues).toContainEqual(expect.objectContaining({ path: "guidedRules" }));
   });
 
   it("rejects a non-boolean enabled flag (StrictBool parity)", () => {
@@ -245,32 +259,6 @@ preferences: []
       expect.objectContaining({
         path: ["preferences", 1, "workspaceId"],
         code: "missing_field",
-      }),
-    );
-  });
-
-  it("flags an unresolved Guided reference", () => {
-    const yaml = READY_WORKSPACE.replace("constraintId: r2", "constraintId: does-not-exist");
-    const result = convert(yaml);
-    expect(result.status).toBe("not_ready");
-    if (result.status !== "not_ready") return;
-    expect(result.issues).toContainEqual(
-      expect.objectContaining({
-        path: ["guidedRules", 0, "constraintId"],
-        code: "unresolved_workspace_reference",
-      }),
-    );
-  });
-
-  it("flags a Guided rule whose constraintKind does not match the pinned preference", () => {
-    const yaml = READY_WORKSPACE.replace("constraintKind: requirements", "constraintKind: counts");
-    const result = convert(yaml);
-    expect(result.status).toBe("not_ready");
-    if (result.status !== "not_ready") return;
-    expect(result.issues).toContainEqual(
-      expect.objectContaining({
-        path: ["guidedRules", 0, "constraintKind"],
-        code: "unresolved_workspace_reference",
       }),
     );
   });

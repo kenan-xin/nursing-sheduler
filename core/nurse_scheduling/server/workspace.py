@@ -18,7 +18,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import datetime
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError
 
@@ -70,42 +70,6 @@ class WorkspaceDateContainer(BaseModel):
     range: WorkspaceDateRange
     items: list[datetime.date] = Field(default_factory=list)
     groups: list[DateGroup] = Field(default_factory=list)
-
-
-# The five pinnable constraint kinds and the strict preference `type` each pins.
-# A Guided rule pins exactly one constraint card (never a matrix request or the
-# structural max-one-shift-per-day), so `constraintKind` maps one-to-one onto a
-# strict preference type. Kept in sync with the TypeScript `GuidedRuleConstraintKind`.
-GUIDED_CONSTRAINT_KIND_TO_TYPE: dict[str, str] = {
-    "requirements": "shift type requirement",
-    "successions": "shift type successions",
-    "counts": "shift count",
-    "affinities": "shift affinity",
-    "coverings": "shift type covering",
-}
-
-
-class WorkspaceGuidedRule(BaseModel):
-    """Authoring-only Guided rule pinning one strict constraint into the Guided lens.
-
-    Guided rules never reach the solver; they are stripped during conversion. The
-    record is the exact, lossless serialization of the durable store pin type
-    (T14 `GuidedRulePin`): a stable pin `id`, the pinned constraint's
-    `constraintKind` + `constraintId` (a preference `workspaceId`), the shortcut
-    `category`, the required `quickFields` exposed as inline adjust controls, and
-    an optional description. `id` and `quickFields` are required (not defaulted),
-    so the wire record cannot accept a document the durable type could never
-    author. Unknown fields are rejected so malformed authoring data cannot pass
-    the workspace boundary silently.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-    id: str
-    constraintKind: Literal["requirements", "successions", "counts", "affinities", "coverings"]
-    constraintId: str
-    category: str
-    quickFields: list[str]
-    description: str | None = None
 
 
 class _WorkspacePreferenceFields(BaseModel):
@@ -174,8 +138,18 @@ _DATE_REFERENCE_FIELDS = ("date", "countDates")
 
 # `workspaceVersion` is the file-format contract number for saved scheduling
 # documents — deliberate and rarely bumped, distinct from build provenance
-# (appVersion/backendVersion). Bump only on a breaking format change, and keep
-# every prior version routable. The frontend mirrors this as `WORKSPACE_VERSION`.
+# (appVersion/backendVersion). The standing rule is: bump only on a breaking format
+# change, and keep every prior version routable. The frontend mirrors this as
+# `WORKSPACE_VERSION`.
+#
+# Ratified exception — V1 was narrowed in place. Removing the top-level
+# `guidedRules` key broke V1 compatibility WITHOUT a version bump, so a document
+# emitted by an older build still claims `workspaceVersion: 1` while carrying a
+# shape this model now rejects as an unknown field. That was decided deliberately
+# on the grounds that the app is pre-production, with no users and no files in the
+# wild — no tolerance shim, no deprecation window (decision 7 of
+# `decisions/rules-remove-customise-library`, amending DL13). Read the divergence
+# as that exception, not as a bug; the rule above governs every future change.
 CURRENT_WORKSPACE_VERSION = 1
 SUPPORTED_WORKSPACE_VERSIONS = frozenset({CURRENT_WORKSPACE_VERSION})
 
@@ -186,8 +160,7 @@ class WorkspaceSchedulingDataV1(BaseModel):
     People, shift types, and export configuration reuse the strict models because
     their shape is identical. Preferences stay raw at this level and are validated
     one strict authoring model at a time (see `_preference_body_issues`) so union
-    branches never leak into error paths. `guidedRules` is authoring metadata
-    stripped before solving.
+    branches never leak into error paths.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -199,7 +172,6 @@ class WorkspaceSchedulingDataV1(BaseModel):
     people: PeopleContainer
     shiftTypes: ShiftTypesContainer
     preferences: list[dict[str, Any]] = Field(default_factory=list)
-    guidedRules: list[WorkspaceGuidedRule] = Field(default_factory=list)
     export: ExportConfig = Field(default_factory=ExportConfig)
     appVersion: str | None = None
 
@@ -387,69 +359,12 @@ def _reference_issue(index: int, field: str, value: Any, kind: str) -> Schedulin
     )
 
 
-def _guided_rule_issues(workspace: WorkspaceSchedulingDataV1, declared_types: dict[str, Any]) -> list[SchedulingIssue]:
-    """Validate each Guided rule's uniqueness and kind/source relationship.
-
-    A rule's `id` must be unique among rules; at most one rule may pin a given
-    `(constraintKind, constraintId)` source (the durable T14 one-pin-per-source
-    invariant); its `constraintId` must reference a declared preference; and that
-    preference's `type` must be the one its `constraintKind` pins (per
-    `GUIDED_CONSTRAINT_KIND_TO_TYPE`). Structural field shape and the closed
-    `constraintKind` set are already enforced by the Pydantic model.
-    """
-    issues: list[SchedulingIssue] = []
-    seen_rule_ids: set[str] = set()
-    seen_sources: set[tuple[str, str]] = set()
-    for rule_index, rule in enumerate(workspace.guidedRules):
-        if rule.id in seen_rule_ids:
-            issues.append(
-                SchedulingIssue(
-                    ["guidedRules", rule_index, "id"],
-                    ISSUE_DUPLICATE_WORKSPACE_ID,
-                    f"Duplicate guided rule id: {rule.id}.",
-                )
-            )
-        seen_rule_ids.add(rule.id)
-
-        source = (rule.constraintKind, rule.constraintId)
-        if source in seen_sources:
-            issues.append(
-                SchedulingIssue(
-                    ["guidedRules", rule_index, "constraintId"],
-                    ISSUE_DUPLICATE_WORKSPACE_ID,
-                    f"Duplicate guided rule source: ({rule.constraintKind}, {rule.constraintId}).",
-                )
-            )
-        seen_sources.add(source)
-
-        if rule.constraintId not in declared_types:
-            issues.append(
-                SchedulingIssue(
-                    ["guidedRules", rule_index, "constraintId"],
-                    ISSUE_UNRESOLVED_WORKSPACE_REFERENCE,
-                    f"Guided rule references unknown preference workspaceId: {rule.constraintId}.",
-                )
-            )
-            continue
-        expected_type = GUIDED_CONSTRAINT_KIND_TO_TYPE[rule.constraintKind]
-        if declared_types[rule.constraintId] != expected_type:
-            issues.append(
-                SchedulingIssue(
-                    ["guidedRules", rule_index, "constraintKind"],
-                    ISSUE_UNRESOLVED_WORKSPACE_REFERENCE,
-                    f"Guided rule constraintKind {rule.constraintKind!r} does not match the pinned "
-                    f"preference {rule.constraintId!r}.",
-                )
-            )
-    return issues
-
-
 def _readiness_issues(workspace: WorkspaceSchedulingDataV1) -> list[SchedulingIssue]:
     """Collect authoring-completeness and reference-integrity issues.
 
     Covers incomplete dates, empty people/shift-type collections, unique
-    preference `workspaceId`, Guided-pin integrity, and — once the entity
-    prerequisites hold — unresolved scheduling references.
+    preference `workspaceId`, and — once the entity prerequisites hold —
+    unresolved scheduling references.
     """
     issues: list[SchedulingIssue] = []
 
@@ -474,7 +389,6 @@ def _readiness_issues(workspace: WorkspaceSchedulingDataV1) -> list[SchedulingIs
             SchedulingIssue(["shiftTypes", "items"], ISSUE_WORKSPACE_INCOMPLETE, "At least one shift type is required.")
         )
 
-    declared_types: dict[str, Any] = {}
     seen_ids: set[str] = set()
     for index, preference in enumerate(workspace.preferences):
         workspace_id = preference.get("workspaceId")
@@ -487,7 +401,6 @@ def _readiness_issues(workspace: WorkspaceSchedulingDataV1) -> list[SchedulingIs
                 )
             )
             continue
-        declared_types[workspace_id] = preference.get("type")
         if workspace_id in seen_ids:
             issues.append(
                 SchedulingIssue(
@@ -497,8 +410,6 @@ def _readiness_issues(workspace: WorkspaceSchedulingDataV1) -> list[SchedulingIs
                 )
             )
         seen_ids.add(workspace_id)
-
-    issues.extend(_guided_rule_issues(workspace, declared_types))
 
     # Scheduling references can only resolve once dates and entities exist. When a
     # prerequisite is missing, reporting those readiness issues alone avoids a
@@ -523,8 +434,7 @@ def _strict_dict(workspace: WorkspaceSchedulingDataV1) -> dict[str, Any]:
     """Project a ready workspace into a strict `NurseSchedulingData` input dict.
 
     Disabled preferences are filtered out and authoring metadata (`workspaceId`,
-    `enabled`, `guidedRules`, `workspaceVersion`) is stripped. Absent `enabled`
-    means enabled.
+    `enabled`, `workspaceVersion`) is stripped. Absent `enabled` means enabled.
 
     The dump uses `mode="python"`, not `mode="json"`: preferences are stored as
     raw `dict[str, Any]`, and JSON mode coerces a non-finite nested weight (every
