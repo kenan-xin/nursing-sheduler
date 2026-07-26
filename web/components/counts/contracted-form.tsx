@@ -28,7 +28,7 @@ import {
   CoefficientFields,
   syncCoefficientPairs,
 } from "@/components/card-editor/coefficient-fields";
-import { FieldShell } from "./count-form";
+import { FieldShell } from "@/components/card-editor/field-shell";
 import {
   buildCountShiftTypeTransferOptions,
   buildDateScopeAutoScopes,

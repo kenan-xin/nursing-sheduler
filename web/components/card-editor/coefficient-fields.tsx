@@ -257,33 +257,30 @@ export function CoefficientFields({
     [selection, domain],
   );
 
-  if (eligible.length === 0) {
-    return (
-      <p className="text-meta italic text-ink3" data-testid={`${testId}-empty`}>
-        Coefficients are not needed when no {label.toLowerCase()} is selected.
-      </p>
-    );
-  }
-
   const filledCount = eligible.filter((id) => {
     const value = coefficientValueFor(pairs, id);
     return value !== "" && typeof value === "number";
   }).length;
   const allFilled = filledCount === eligible.length;
   const missing = eligible.length - filledCount;
+  const hasEligible = eligible.length > 0;
 
+  // One panel whose BODY is conditional — the prototype's shape: `coefEmpty` and
+  // `coefRows` are sibling branches inside a single container and `unitNote` closes
+  // it either way (ScreenCards.dc.html:325-352). The panel therefore stays mounted
+  // with nothing selected, so picking a shift type fills the rows in place rather
+  // than making a whole panel appear.
   return (
     <div className="flex flex-col gap-3 border border-line2 bg-panel p-3.5" data-testid={testId}>
       <span className="text-label font-semibold uppercase tracking-[0.03em] text-ink2">
         {label} Coefficients
       </span>
-      {note && (
-        <p className="flex items-start gap-2 text-meta text-ink3" data-testid={`${testId}-note`}>
-          <FaCircleInfo className="mt-0.5 flex-none text-brandink" />
-          <span>{note}</span>
+      {!hasEligible && (
+        <p className="text-meta italic text-ink3" data-testid={`${testId}-empty`}>
+          Coefficients are not needed when no {label.toLowerCase()} is selected.
         </p>
       )}
-      {showCoverage && (
+      {hasEligible && showCoverage && (
         <div
           className={`flex items-center gap-2 border px-3 py-2 text-meta font-semibold ${
             allFilled
@@ -297,13 +294,20 @@ export function CoefficientFields({
             : `${missing} ${missing === 1 ? "type needs" : "types need"} a coefficient`}
         </div>
       )}
-      <div className="flex flex-wrap gap-3">
+      {/* One row per eligible id: a fixed-width id tag, the value, then the row's
+          message slot — the prototype's coefficient rows (ScreenCards.dc.html:341-350).
+          Stacked rows keep the ids left-aligned and readable; a wrapping grid of
+          label-over-input columns loses that column and stretches the inputs. */}
+      <div className="flex flex-col gap-2 empty:hidden">
         {eligible.map((id) => {
           const value = coefficientValueFor(pairs, id);
           const err = errorsById[id];
           return (
-            <label key={id} className="flex flex-col gap-1">
-              <span className="truncate text-label font-semibold text-ink3" title={id}>
+            <label key={id} className="flex flex-wrap items-center gap-3">
+              <span
+                className="min-w-[66px] border border-line2 bg-surface px-2.5 py-[5px] text-center font-mono text-label font-semibold text-ink"
+                title={id}
+              >
                 {id}
               </span>
               <Input
@@ -317,13 +321,22 @@ export function CoefficientFields({
                   const parsed = parseCoefficientInput(e.target.value);
                   onChange(updateCoefficientPair(eligible, pairs, id, parsed), id);
                 }}
-                className="h-9 w-24 font-mono"
+                placeholder="—"
+                className="h-[34px] w-[88px] px-2.5 font-mono font-bold"
               />
               {err && <span className="text-meta font-semibold text-error">{err}</span>}
             </label>
           );
         })}
       </div>
+      {/* The explainer closes the panel in the prototype (`unitNote`, margin-top 11px),
+          after the rows it describes — not between the heading and the controls. */}
+      {note && (
+        <p className="flex items-start gap-2 text-meta text-ink3" data-testid={`${testId}-note`}>
+          <FaCircleInfo className="mt-0.5 flex-none text-ink3" />
+          <span>{note}</span>
+        </p>
+      )}
       {aggregateError && (
         <p
           className="text-meta font-semibold text-error"

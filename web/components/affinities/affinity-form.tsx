@@ -14,8 +14,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { ScenarioUiState } from "@/lib/scenario";
 import { Input } from "@/components/ui/input";
-import { FaCircleExclamation } from "@/components/icons";
 import { CardEditorForm } from "@/components/card-editor/card-editor-shell";
+import { FieldShell } from "@/components/card-editor/field-shell";
 import { TransferList } from "@/components/entity-editor/transfer-list";
 import { entityKey, sameEntityId } from "@/components/entity-editor/core";
 import { DateScopeField } from "@/components/card-editor/date-scope-field";
@@ -38,40 +38,6 @@ interface AffinityFormProps {
   initialForm: AffinityFormState;
   onSave: (form: AffinityFormState) => void;
   onCancel: () => void;
-}
-
-/** The prototype's per-field shell: an uppercase label, an optional inline hint,
- *  the control, and the verbatim validation error line. */
-function FieldShell({
-  label,
-  required,
-  hint,
-  error,
-  children,
-}: {
-  label: string;
-  required?: boolean;
-  hint?: string;
-  error?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="text-label font-semibold uppercase tracking-[0.03em] text-ink2">
-          {label}
-          {required && <span className="text-error"> *</span>}
-        </span>
-        {hint && <span className="text-meta italic text-ink3">{hint}</span>}
-      </div>
-      {children}
-      {error && (
-        <p className="flex items-center gap-1.5 text-meta font-semibold text-error" role="alert">
-          <FaCircleExclamation className="size-3 flex-none" /> {error}
-        </p>
-      )}
-    </div>
-  );
 }
 
 export function AffinityForm({ state, mode, initialForm, onSave, onCancel }: AffinityFormProps) {

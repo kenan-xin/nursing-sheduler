@@ -15,8 +15,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { ScenarioUiState } from "@/lib/scenario";
 import { Input } from "@/components/ui/input";
-import { FaCircleExclamation } from "@/components/icons";
 import { CardEditorForm } from "@/components/card-editor/card-editor-shell";
+import { FieldShell } from "@/components/card-editor/field-shell";
 import { TransferList } from "@/components/entity-editor/transfer-list";
 import { entityKey, sameEntityId } from "@/components/entity-editor/core";
 import { DateScopeField } from "@/components/card-editor/date-scope-field";
@@ -53,7 +53,7 @@ const WEIGHT_NOTE =
   "Weight is not needed when the preferred number of people equals the required number.";
 const WEIGHT_HELP =
   "Penalty applied when the preferred number of people isn't met (the more negative, the higher the penalty). -Infinity makes it a hard requirement.";
-const PREFERRED_HELP =
+const PREFERRED_NOTE =
   "Defaults to Required if left empty. Set higher to make extra staffing a soft goal (a weight then applies).";
 
 /** Parse a Required/Preferred number input as an integer (FR-PR-22/23): blank
@@ -70,40 +70,6 @@ function parseRequirementInteger(raw: string): RequirementNumberValue {
  *  staffing accidentally (EDGE-PR-12). */
 function blurOnWheel(e: React.WheelEvent<HTMLInputElement>) {
   (e.target as HTMLInputElement).blur();
-}
-
-/** The prototype's per-field shell: an uppercase label, an optional inline hint,
- *  the control, and the verbatim validation error line. */
-function FieldShell({
-  label,
-  required,
-  hint,
-  error,
-  children,
-}: {
-  label: string;
-  required?: boolean;
-  hint?: string;
-  error?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="text-label font-semibold uppercase tracking-[0.03em] text-ink2">
-          {label}
-          {required && <span className="text-error"> *</span>}
-        </span>
-        {hint && <span className="text-meta italic text-ink3">{hint}</span>}
-      </div>
-      {children}
-      {error && (
-        <p className="flex items-center gap-1.5 text-meta font-semibold text-error" role="alert">
-          <FaCircleExclamation className="size-3 flex-none" /> {error}
-        </p>
-      )}
-    </div>
-  );
 }
 
 export function RequirementForm({
@@ -290,7 +256,13 @@ export function RequirementForm({
         }}
       />
 
-      <div className="flex flex-wrap gap-5">
+      {/* The prototype lays these out as two cells of `.ns-formgrid`: `1fr` → `1fr 1fr`
+          at min-width 720px, gap 20/24px (Nurse Scheduling.dc.html:91-92). `md:` (768px)
+          is the nearest breakpoint on the app's ladder — `sm:` (640px) would split the
+          row a full 80px earlier than the prototype does, into cells too narrow for
+          these labels. A shrink-to-fit flex row, the previous layout, instead collapsed
+          each cell to its input width and wrapped the labels. */}
+      <div className="grid grid-cols-1 gap-x-6 gap-y-5 md:grid-cols-2">
         <FieldShell label="Required number of people" required error={errors.requiredNumPeople}>
           <input
             type="number"
@@ -301,27 +273,36 @@ export function RequirementForm({
             value={form.requiredNumPeople}
             onChange={(e) => onRequiredChange(e.target.value)}
             onWheel={blurOnWheel}
-            className="h-10 w-[132px] border border-line bg-surface px-3 font-mono font-bold"
+            placeholder="e.g. 3"
+            className="h-10 w-[132px] border border-line bg-surface px-3 font-bold"
           />
         </FieldShell>
 
+        {/* FR-PR-23's explainer is the prototype's `prefNote`, which renders BESIDE
+            the input — not as the label hint, where its length overruns the row
+            (ScreenCards.dc.html:212-217). The label hint is the short `optional`. */}
         <FieldShell
           label="Preferred number of people"
-          hint={PREFERRED_HELP}
+          hint="optional"
           error={errors.preferredNumPeople}
         >
-          <input
-            type="number"
-            min={1}
-            step={1}
-            data-testid="requirement-preferred"
-            aria-label="Preferred number of people"
-            value={form.preferredNumPeople}
-            onChange={(e) => onPreferredChange(e.target.value)}
-            onWheel={blurOnWheel}
-            placeholder="= Required"
-            className="h-10 w-[132px] border border-line bg-surface px-3 font-mono font-bold"
-          />
+          <div className="flex flex-wrap items-start gap-3.5">
+            <input
+              type="number"
+              min={1}
+              step={1}
+              data-testid="requirement-preferred"
+              aria-label="Preferred number of people"
+              value={form.preferredNumPeople}
+              onChange={(e) => onPreferredChange(e.target.value)}
+              onWheel={blurOnWheel}
+              placeholder="= Required"
+              className="h-10 w-[132px] flex-none border border-line bg-surface px-3 font-bold"
+            />
+            <p className="max-w-[44ch] min-w-[200px] flex-1 text-meta leading-[1.45] text-ink3">
+              {PREFERRED_NOTE}
+            </p>
+          </div>
         </FieldShell>
       </div>
 
