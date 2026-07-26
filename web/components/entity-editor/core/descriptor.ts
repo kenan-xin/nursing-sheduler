@@ -74,9 +74,10 @@ export interface SyntheticRow {
 export interface EntityDescriptor<TItem extends EditorItemBase = EditorItemBase> {
   /**
    * Cascade reference namespace — drives reserved sets + rename/delete (T07).
-   * People + Shift Types drive the full generic {@link EntityEditor}; Dates (T10)
-   * reuses only the pure group CRUD/validation core (add/rename/delete/set-members
-   * over `dateGroups`) behind a date-scope picker, so `"date"` is admitted here.
+   * People + Shift Types drive this core via the bespoke `PeopleTable` / `ShiftTypeGrid`
+   * screens; Dates (T10) reuses only the pure group CRUD/validation core
+   * (add/rename/delete/set-members over `dateGroups`) behind a date-scope picker, so
+   * `"date"` is admitted here.
    */
   domain: Extract<EntityDomain, "person" | "shift" | "date">;
   labels: EntityLabels;

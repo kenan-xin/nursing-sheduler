@@ -2,11 +2,11 @@
 
 // People bulk-upload dialog (.txt / .csv) — spec 03 FR-ED-29..32 / AC-ED-16..17.
 //
-// Extracted verbatim-in-behavior from the monolithic `entity-editor.tsx` (DR-2)
-// so the Staff upload feature survives the later retirement of that file (DR-5).
-// It is People-owned copy but stays generic over the descriptor so both the
-// bespoke `PeopleTable` and (transitionally) `EntityEditor` drive it through the
-// same pure `reorderByUpload` core op — one produced state ⇒ one `mutateScenario`
+// Extracted verbatim-in-behavior from the (now-retired) monolithic `entity-editor.tsx`
+// (DR-2) so the Staff upload feature survived the retirement of that file (DR-5).
+// It is People-owned copy but stays generic over the descriptor so the bespoke
+// `PeopleTable` drives it through the same pure `reorderByUpload` core op — one
+// produced state ⇒ one `mutateScenario`
 // commit ⇒ one zundo entry, with reserved / duplicate / group-collision rejection
 // and the identical-upload no-op preserved exactly.
 

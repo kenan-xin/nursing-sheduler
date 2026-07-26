@@ -1,9 +1,10 @@
 // Dates domain descriptor for the shared entity-editor core (T10 + fs7).
 //
 // Spec 03 mandates one shared group-editing core across People / Shift Types /
-// Dates. People + Shift Types drive the full generic `EntityEditor` (item table +
-// transfer-list membership); Dates has no item table and its membership is a
-// calendar day-scope, so it reuses ONLY the pure group CRUD/validation core
+// Dates. People + Shift Types are bespoke screens (`PeopleTable` / `ShiftTypeGrid`)
+// over that core (item table + transfer-list membership); Dates has no item table
+// and its membership is a calendar day-scope, so it reuses ONLY the pure group
+// CRUD/validation core
 // (`addGroup` / `renameGroup` / `deleteGroup` / `setGroupMembers` /
 // `validate*Id`, all in `entity-editor/core`) behind a descriptor, instead of the
 // bespoke membership-only editor T10 shipped in Wave A.
