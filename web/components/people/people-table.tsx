@@ -90,6 +90,8 @@ const STAFF_GROUPS_CONFIG: GroupsSectionConfig = {
   addLabel: "Group",
   emptyText:
     "No staff groups yet — bundle nurses into a team (like Seniors or Team A) so a rule can target them all at once.",
+  autoGroupNote:
+    "Every nurse, always. Generated automatically — use it in rules that target the whole ward.",
 };
 
 /** Avatar initials from a nurse name (prototype `init`): up to two leading letters. */
@@ -517,17 +519,6 @@ function ReadRow({
             {memberOf.map((g) => (
               <Badge key={g.id} variant="neutral">
                 {g.id}
-                <button
-                  type="button"
-                  aria-label={`Remove ${item.id} from ${g.id}`}
-                  data-testid={`people-group-remove-${itemKey}-${g.id}`}
-                  className="-mr-0.5 ml-0.5 inline-flex items-center text-ink3 hover:text-error"
-                  onClick={() =>
-                    commit(toggleGroupMembership(currentState(), descriptor, g.id, item.id))
-                  }
-                >
-                  <FaXmark aria-hidden />
-                </button>
               </Badge>
             ))}
           </div>

@@ -214,23 +214,6 @@ describe.each([
     expect(membersOf("Nums")).toEqual(["1"]);
   });
 
-  it("removes exactly one member via the row ×-remove (one tracked mutation)", () => {
-    seed({
-      staff: [
-        { id: "Aisha", history: [] },
-        { id: "Chloe", history: [] },
-      ],
-      staffGroups: [{ id: "Nurses", members: ["Aisha", "Chloe"] }],
-    });
-    render(<GroupsHarness config={config} />);
-
-    const before = historyLength();
-    fireEvent.click(screen.getByTestId("group-member-remove-Nurses-string:Chloe"));
-
-    expect(membersOf("Nurses")).toEqual(["Aisha"]);
-    expect(historyLength()).toBe(before + 1);
-  });
-
   it("reorders groups by keyboard (Up/Down) — one commit / one undo entry", () => {
     seed({
       staff: [],

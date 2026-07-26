@@ -138,7 +138,7 @@ test.describe("T10 Dates & Calendar", () => {
     // Legend is the exact three-item prototype legend.
     const calendar = page.getByTestId("calendar-view");
     await expect(calendar).toContainText("In roster");
-    await expect(calendar).toContainText("Start / end");
+    await expect(calendar).toContainText("Start / End");
     await expect(calendar).toContainText("Holiday");
 
     // Endpoints are solid and labelled — exactly one START and one END.

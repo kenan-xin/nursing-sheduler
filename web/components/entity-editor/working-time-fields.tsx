@@ -17,7 +17,6 @@
 // DL10: no role/seniority here. durationMinutes is authoring-only.
 
 import * as React from "react";
-import { Button } from "@/components/ui/button";
 import { paidMinutesFor, validateWorkingTimeDraft, type WorkingTimeValue } from "./core";
 import { InfoTip } from "@/components/ui/info-tip";
 
@@ -85,9 +84,9 @@ export function WorkingTimeFields({ value, onChange, idPrefix }: WorkingTimeFiel
   const firstError = issues[0]?.message;
 
   return (
-    <div className="flex flex-col gap-2" data-testid={`${idPrefix}-wt`}>
-      <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
-        <div className="flex flex-col gap-1">
+    <div className="flex flex-col gap-3" data-testid={`${idPrefix}-wt`}>
+      <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
+        <div className="flex flex-col gap-1 sm:col-span-2">
           <span className="flex items-center gap-1.5 text-label font-semibold uppercase tracking-[0.03em] text-ink3">
             Time on floor
             <InfoTip label="Time on floor" text={TIME_TIP} />
@@ -96,7 +95,7 @@ export function WorkingTimeFields({ value, onChange, idPrefix }: WorkingTimeFiel
             <select
               data-testid={`${idPrefix}-start`}
               aria-label="Start time"
-              className="h-9 rounded-none border border-line bg-surface px-2 font-mono text-body text-ink"
+              className="h-9 rounded-none border border-line bg-surface px-2 font-mono text-label text-ink"
               value={start}
               onChange={(e) => set({ startTime: e.target.value || undefined })}
             >
@@ -111,7 +110,7 @@ export function WorkingTimeFields({ value, onChange, idPrefix }: WorkingTimeFiel
             <select
               data-testid={`${idPrefix}-end`}
               aria-label="End time"
-              className="h-9 rounded-none border border-line bg-surface px-2 font-mono text-body text-ink"
+              className="h-9 rounded-none border border-line bg-surface px-2 font-mono text-label text-ink"
               value={end}
               onChange={(e) => set({ endTime: e.target.value || undefined })}
             >
@@ -137,7 +136,7 @@ export function WorkingTimeFields({ value, onChange, idPrefix }: WorkingTimeFiel
           <select
             data-testid={`${idPrefix}-rest`}
             aria-label="Rest time"
-            className="h-9 rounded-none border border-line bg-surface px-2 font-mono text-body text-ink"
+            className="h-9 rounded-none border border-line bg-surface px-2 font-mono text-label text-ink"
             value={String(rest)}
             onChange={(e) => set({ restMinutes: Number(e.target.value) || undefined })}
           >
@@ -148,20 +147,20 @@ export function WorkingTimeFields({ value, onChange, idPrefix }: WorkingTimeFiel
             ))}
           </select>
         </div>
-        <div className="flex min-w-[8rem] flex-col gap-1">
+        <div className="flex flex-col gap-1">
           <span className="text-label font-semibold uppercase tracking-[0.03em] text-ink3">
             Working <span className="text-faint">· auto</span>
           </span>
           <div
             data-testid={`${idPrefix}-duration`}
             aria-label="Working duration (auto)"
-            className="flex h-9 items-center gap-2 border border-line2 bg-panel px-3"
+            className="flex h-9 items-center gap-2 overflow-hidden border border-line2 bg-panel px-3"
           >
-            <span className="font-heading text-title font-extrabold leading-none">
+            <span className="flex-none font-heading text-title font-extrabold leading-none">
               {paid != null ? fmtHours(paid) : "—"}
             </span>
             {paid != null && (
-              <span className="whitespace-nowrap font-mono text-label text-ink3">
+              <span className="min-w-0 truncate font-mono text-label text-ink3">
                 = {fmtHours(paid + rest)} − {rest > 0 ? fmtHours(rest) : "no rest"}
               </span>
             )}
@@ -173,19 +172,6 @@ export function WorkingTimeFields({ value, onChange, idPrefix }: WorkingTimeFiel
         <span className="text-label text-error" role="alert" data-testid={`${idPrefix}-wt-error`}>
           {firstError}
         </span>
-      )}
-
-      {(start || end || rest || value.durationMinutes != null) && (
-        <div>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => onChange({})}
-            data-testid={`${idPrefix}-wt-clear`}
-          >
-            Clear working time
-          </Button>
-        </div>
       )}
     </div>
   );

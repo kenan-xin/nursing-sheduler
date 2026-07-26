@@ -3,9 +3,9 @@
 // Shared, reusable groups section (DR-1) — extracted verbatim-in-behavior from the
 // monolithic entity-editor. It renders the auto-`ALL` read-only card, the custom
 // group cards, and the inline transfer-list membership editor over the generic
-// `TransferList` + the pure group-mutation core. People and Shift Types both drive
-// it (today through `EntityEditor`; the bespoke `PeopleTable` / `ShiftTypeGrid`
-// screens adopt it directly in later tickets).
+// `TransferList` + the pure group-mutation core. The bespoke `PeopleTable` and
+// `ShiftTypeGrid` screens consume it directly (the generic `EntityEditor` it was
+// extracted from is retired — DR-5).
 //
 // It is parameterized by copy + explicit flags/optional slots (NOT copy-only), so
 // the Staff/Shift divergence is expressible without a false "identical" abstraction:
@@ -15,8 +15,8 @@
 //     (Shift);
 //   • `formatCount` — the per-group count noun (`N members` vs `N TYPES`);
 //   • `autoGroupNote` — the reserved auto-group's explanation.
-// Every option defaults to today's People/Shift behavior so a consumer that passes
-// no config (as `EntityEditor` does) is byte-for-byte unchanged.
+// Every option defaults to today's People/Shift behavior, preserving the exact
+// look the section had before it was extracted from the (now-retired) EntityEditor.
 //
 // EXTRACTION CONTRACT (parity preserved — the section was never standalone):
 //   • controlled single-draft edit; atomic Save = ONE composed `ScenarioUiState` +
@@ -45,7 +45,6 @@ import {
   FaTrash,
   FaCopy,
   FaCheck,
-  FaXmark,
   FaLock,
   FaGripVertical,
   FaChevronUp,
@@ -58,7 +57,6 @@ import {
   reorderGroups,
   renameGroup,
   setGroupMembers,
-  toggleGroupMembership,
   updateGroupFields,
   validateFullEditId,
   entityKey,
@@ -75,7 +73,7 @@ type CurrentState = () => ScenarioUiState;
 
 // ---------------------------------------------------------------------------
 // Public config — copy + explicit flags. Every field is optional and defaults to
-// today's People/Shift behavior (so `EntityEditor` passes nothing and is unchanged).
+// today's People/Shift behavior (a consumer that passes no config gets the original look).
 // ---------------------------------------------------------------------------
 
 export interface GroupsSectionConfig {
@@ -273,7 +271,12 @@ export function GroupsSection<TItem extends EditorItemBase>({
 
       <div className="flex flex-col gap-2">
         {descriptor.syntheticGroups.map((row) => (
-          <AutoGroupRow key={row.id} id={row.id} note={cfg.autoGroupNote ?? row.description} />
+          <AutoGroupRow
+            key={row.id}
+            id={row.id}
+            note={cfg.autoGroupNote ?? row.description}
+            countLabel={cfg.formatCount(items.length)}
+          />
         ))}
         {groups.length === 0 && descriptor.syntheticGroups.length === 0 && (
           <p className="border border-dashed border-line bg-surface p-4 text-meta text-ink2">
@@ -318,19 +321,30 @@ export function GroupsSection<TItem extends EditorItemBase>({
 
 /** The reserved auto-group card (`ALL`): read-only/locked, with an explanatory note
  *  visible and echoed on hover/focus so the lock is never an unexplained control. */
-function AutoGroupRow({ id, note }: { id: string; note?: string }) {
+function AutoGroupRow({
+  id,
+  note,
+  countLabel,
+}: {
+  id: string;
+  note?: string;
+  countLabel?: string;
+}) {
   return (
     <div
       data-testid={`synthetic-${id}`}
       title={note}
-      className="flex items-center gap-3 border border-line bg-panel px-3 py-2"
+      className="flex flex-col gap-1.5 border border-line2 bg-panel px-4 py-3.5"
     >
-      <Badge variant="neutral">
-        <FaLock aria-hidden />
-        Auto
-      </Badge>
-      <span className="font-medium">{id}</span>
-      {note && <span className="text-meta text-ink2">{note}</span>}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-mono text-label font-semibold">{id}</span>
+        <Badge variant="neutral">
+          <FaLock aria-hidden />
+          Auto
+        </Badge>
+        {countLabel && <span className="font-mono text-label text-ink3">{countLabel}</span>}
+      </div>
+      {note && <p className="text-meta text-ink3">{note}</p>}
     </div>
   );
 }
@@ -436,33 +450,29 @@ function GroupRow<TItem extends EditorItemBase>({
         isDragging ? "opacity-50" : ""
       }`}
     >
-      <div className="flex flex-wrap items-center gap-2">
-        {canDrag && <FaGripVertical aria-hidden className="size-3 text-ink3" />}
-        <span data-testid={`group-id-text-${group.id}`} className="font-mono font-semibold">
-          {group.id}
-        </span>
-        <Badge variant="neutral">{cfg.formatCount(memberCount)}</Badge>
-        {group.members.length > 0 && (
-          <div className="flex flex-wrap gap-1">
-            {group.members.map((m) => (
-              <Badge key={entityKey(m)} variant="outline">
-                {String(m)}
-                <button
-                  type="button"
-                  aria-label={`Remove ${String(m)} from ${group.id}`}
-                  data-testid={`group-member-remove-${group.id}-${entityKey(m)}`}
-                  className="-mr-0.5 ml-0.5 inline-flex items-center text-ink3 hover:text-error"
-                  onClick={() =>
-                    commit(toggleGroupMembership(currentState(), descriptor, group.id, m))
-                  }
-                >
-                  <FaXmark aria-hidden />
-                </button>
-              </Badge>
-            ))}
+      <div className="flex items-start gap-3">
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {canDrag && <FaGripVertical aria-hidden className="size-3 text-ink3" />}
+            <span
+              data-testid={`group-id-text-${group.id}`}
+              className="font-mono text-label-lg font-semibold"
+            >
+              {group.id}
+            </span>
+            <span className="font-mono text-label text-ink3">{cfg.formatCount(memberCount)}</span>
           </div>
-        )}
-        <div className="ml-auto flex items-center gap-1">
+          {group.members.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {group.members.map((m) => (
+                <Badge key={entityKey(m)} variant="outline">
+                  {String(m)}
+                </Badge>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="flex flex-none items-center gap-1">
           {canReorder && (
             <>
               <Button

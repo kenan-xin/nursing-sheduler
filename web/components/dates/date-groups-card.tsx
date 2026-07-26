@@ -318,7 +318,9 @@ export function DateGroupsCard({
                     onClick={() => togglePreview(label, group.id, memberIso(group.members))}
                   >
                     <FaCalendarDay className="size-2.5" />
-                    <span className="font-mono text-label tracking-[0.02em]">{group.id}</span>
+                    <span className="font-mono text-label font-semibold tracking-[0.02em]">
+                      {group.id}
+                    </span>
                     <span
                       className="text-sm opacity-90"
                       data-testid={`derived-group-${group.id}-count`}
@@ -449,7 +451,9 @@ function GroupViewCard({
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <div className="mb-2 flex items-baseline gap-2">
-            <span className="font-mono text-label-lg tracking-[0.02em]">{group.id}</span>
+            <span className="font-mono text-label-lg font-semibold tracking-[0.02em]">
+              {group.id}
+            </span>
             {group.description ? (
               <FaCircleInfo
                 className="size-3.5 text-ink3"

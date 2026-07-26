@@ -105,7 +105,7 @@ function Legend() {
         <span className="ns-legend ns-legend--inrange" aria-hidden /> In roster
       </li>
       <li className="flex items-center gap-1.5">
-        <span className="ns-legend ns-legend--endpoint" aria-hidden /> Start / end
+        <span className="ns-legend ns-legend--endpoint" aria-hidden /> Start / End
       </li>
       <li className="flex items-center gap-1.5">
         <span className="ns-legend ns-legend--holiday" aria-hidden /> Holiday
