@@ -14,8 +14,9 @@
 // trailing metadata cluster (audit MAJOR 2). A full-row brand-tint active
 // state and a `panel` hover are kept from the prior verified-conformance pass.
 //
-// Typography (audit MAJOR 3): inactive rows 500, active rows 600, with an
-// explicit ~42px row height (10px 12px padding retained). DL12 §2: the
+// Typography (audit MAJOR 3): inactive rows 500, active rows 600, with an explicit
+// row height from `leading-[normal]` + `py-2.5` — 38px, not the prototype's 42,
+// since the padding is spacing-derived and carries the 0.9 baseline (globals.css). DL12 §2: the
 // trailing cluster holds only the Guided workflow step, and only in Guided
 // mode — live scenario counts stay on Home rather than rendering a second,
 // ambiguous number, and Advanced rows never show a Guided step number since

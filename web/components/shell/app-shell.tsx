@@ -1,9 +1,11 @@
 "use client";
 
 // App shell (T08, BLOCKER 1). The desktop root is a ROW: a sticky, full-height
-// (100dvh) branded side rail from the top edge, beside a main column whose 56px
+// (100dvh) branded side rail from the top edge, beside a main column whose
 // bg-surface contextual top bar and scrollable content live INSIDE that column
-// only (never a full-viewport dark bar above everything). Below the 920px `nav`
+// only (never a full-viewport dark bar above everything). The bar is `h-14`,
+// which renders 50px rather than the prototype's 56 — spacing utilities carry
+// the 0.9 baseline, and the shell scales with the content it frames. Below the 920px `nav`
 // breakpoint the rail is hidden and the same AppSideNav composition is reached
 // through the mobile drawer in the top bar.
 //

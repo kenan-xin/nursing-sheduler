@@ -53,7 +53,12 @@ test.describe("T08 rebuild — shell geometry (BLOCKER 1)", () => {
     // it does not span the full viewport above everything.
     expect(bar!.x).toBeGreaterThanOrEqual(rail!.width - 1);
     expect(bar!.y).toBeLessThan(2);
-    expect(Math.round(bar!.height)).toBe(56);
+    // 50px, not the prototype's 56: the bar is `h-14`, and Tailwind's `--spacing`
+    // base carries the 0.9 baseline (globals.css), so 14 × 4px × 0.9 = 50.4. The
+    // shell scales with the content it frames — 0.9 is what shipped (the density
+    // knob was removed in favour of the Compact scale users already had), so the
+    // scaled geometry is the intended one, not drift (nursing-sheduler-yea).
+    expect(Math.round(bar!.height)).toBe(50);
   });
 });
 
@@ -200,7 +205,7 @@ test.describe("T08 rebuild — sidebar prototype-conformance audit", () => {
     expect(labelBox!.x).toBeLessThan(stepBox!.x);
   });
 
-  test("M3 — inactive rows are 500, active rows are 600, 42px tall", async ({ page }) => {
+  test("M3 — inactive rows are 500, active rows are 600, 38px tall", async ({ page }) => {
     // Home is active on "/", Dates is inactive.
     const homeWeight = await page
       .getByTestId("nav-link-/")
@@ -211,10 +216,17 @@ test.describe("T08 rebuild — sidebar prototype-conformance audit", () => {
     expect(homeWeight).toBe("600");
     expect(datesWeight).toBe("500");
 
-    // Row height hits the prototype's 42px (leading-[normal] + 10px padding). The
-    // previous leading-[1.4] rendered 43.8px → rounds to 44, so this guards a revert.
+    // Row height is `leading-[normal]` + `py-2.5`, which lands on 38px: the padding
+    // is spacing-derived, so it carries the same 0.9 baseline as the top bar above
+    // (2 × 2.5 × 4px × 0.9 = 18px) around a normal-leading body line box. The
+    // prototype's 42px is the unscaled figure; 38 is that geometry at the shipped
+    // scale (nursing-sheduler-yea).
+    //
+    // Asserted as equality rather than a range on purpose: this row's line-height
+    // has regressed before (a `leading-[1.4]` renders a taller box), and only an
+    // exact check catches a revert.
     const rowBox = await page.getByTestId("nav-link-/dates").boundingBox();
-    expect(Math.round(rowBox!.height)).toBe(42);
+    expect(Math.round(rowBox!.height)).toBe(38);
   });
 
   test("M5 — footer is one 34px theme button and no gear", async ({ page }) => {

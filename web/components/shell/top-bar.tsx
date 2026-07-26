@@ -1,8 +1,11 @@
 "use client";
 
 // Contextual top bar (T08, BLOCKER 1 / MAJOR 5). This is NOT a full-viewport
-// chrome bar: it is the 56px `bg-surface` header that lives INSIDE the right-hand
-// main column, beside the branded rail (see app-shell.tsx). Its job is
+// chrome bar: it is the `h-14` `bg-surface` header that lives INSIDE the right-hand
+// main column, beside the branded rail (see app-shell.tsx). `h-14` resolves to
+// 50px, not the prototype's 56: Tailwind's `--spacing` base carries the 0.9
+// baseline (globals.css), and the shell scales with the content it frames — the
+// e2e geometry check pins the scaled figure (nursing-sheduler-yea). Its job is
 // orientation, not controls: the mobile menu, a small product tile, the current
 // route crumb, the scenario context, the persistence status, and the (secondary)
 // global undo/redo. Mode, accent, theme, New-schedule and version have
