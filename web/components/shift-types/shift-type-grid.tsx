@@ -664,6 +664,11 @@ function numberDraft(value: string): RequirementNumberValue {
   return value === "" ? "" : Number(value);
 }
 
+/** Shown inline and on the Enter/Save path when a numbers-only code is entered —
+ *  staffing selectors are string-only, so a numeric-only code can't carry one. */
+const NUMERIC_CODE_HINT =
+  "Shift codes need at least one letter (like AM or N2) so they can carry staffing.";
+
 function StaffingEditor({
   prefix,
   staffing,
@@ -903,6 +908,12 @@ function ShiftCardEditor({
       toast.error(idCheck.message);
       return;
     }
+    // Mirror the disabled-Save gate: Enter in the Code/Name inputs also routes here,
+    // so a numbers-only code must be blocked on this path too — not only by the button.
+    if (codeNumericOnly) {
+      toast.error(NUMERIC_CODE_HINT);
+      return;
+    }
     if (!validateWorkingTimeDraft(draft.workingTime).ok) {
       toast.error("Fix the working-time errors first.");
       return;
@@ -933,8 +944,20 @@ function ShiftCardEditor({
         }
       }}
     >
-      <div className="font-heading text-label font-semibold uppercase tracking-[0.06em] text-brandink">
-        {mode === "add" ? "New shift" : "Editing shift"}
+      <div className="flex items-center gap-3 border-b border-line2 pb-4">
+        <div className="flex size-[42px] flex-none items-center justify-center border border-line2 bg-panel text-ink2">
+          <FaClock aria-hidden />
+        </div>
+        <div className="min-w-0">
+          <div className="font-heading text-label font-semibold uppercase leading-none tracking-[0.06em] text-brandink">
+            {mode === "add" ? "New shift" : "Editing shift"}
+          </div>
+          {(mode === "edit" || draft.code) && (
+            <div className="mt-1 truncate font-heading text-title font-extrabold uppercase leading-none">
+              {mode === "edit" ? String(item!.id) : draft.code}
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -946,7 +969,7 @@ function ShiftCardEditor({
             value={draft.code}
             autoFocus
             placeholder="AM"
-            className="font-semibold uppercase"
+            className="text-label font-semibold uppercase"
             onChange={(e) => setCode(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") save();
@@ -960,7 +983,7 @@ function ShiftCardEditor({
           )}
           {idCheck.ok && codeNumericOnly && (
             <span className="text-label text-error" role="alert">
-              Shift codes need at least one letter (like AM or N2) so they can carry staffing.
+              {NUMERIC_CODE_HINT}
             </span>
           )}
         </div>
@@ -975,6 +998,7 @@ function ShiftCardEditor({
           <Input
             id={`${prefix}-name`}
             data-testid={`${prefix}-name`}
+            className="text-meta"
             value={draft.name}
             placeholder="Shift name"
             onChange={(e) => setName(e.target.value)}
@@ -1008,7 +1032,12 @@ function ShiftCardEditor({
       )}
 
       <div className="flex items-center gap-2 border-t border-line2 pt-3">
-        <Button onClick={save} disabled={!canSave} data-testid={`${prefix}-save`}>
+        <Button
+          onClick={save}
+          disabled={!canSave}
+          data-testid={`${prefix}-save`}
+          className="border border-transparent"
+        >
           <FaCheck />
           {mode === "add" ? "Add shift" : "Save"}
         </Button>

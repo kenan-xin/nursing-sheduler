@@ -135,7 +135,8 @@ test.describe.serial("DR-3 Shifts card-grid", () => {
     });
 
     await page.getByTestId(`shift-edit-${sk("Day")}`).click();
-    await page.getByTestId(`shift-edit-${sk("Day")}-wt-clear`).click();
+    await page.getByTestId(`shift-edit-${sk("Day")}-start`).selectOption("");
+    await page.getByTestId(`shift-edit-${sk("Day")}-end`).selectOption("");
     await page.getByTestId(`shift-edit-${sk("Day")}-save`).click();
 
     const day = (await readShifts(page)).find((s) => s.id === "Day");

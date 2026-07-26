@@ -169,7 +169,8 @@ describe("ShiftTypeGrid — edit", () => {
     render(<ShiftTypeGrid />);
 
     fireEvent.click(screen.getByTestId("shift-edit-string:Day"));
-    fireEvent.click(screen.getByTestId("shift-edit-string:Day-wt-clear"));
+    fireEvent.change(screen.getByTestId("shift-edit-string:Day-start"), { target: { value: "" } });
+    fireEvent.change(screen.getByTestId("shift-edit-string:Day-end"), { target: { value: "" } });
     fireEvent.click(screen.getByTestId("shift-edit-string:Day-save"));
 
     const day = shifts().find((s) => s.id === "Day");
@@ -366,6 +367,20 @@ describe("ShiftTypeGrid — staffing states", () => {
     fireEvent.change(screen.getByTestId("shift-add-code"), { target: { value: "N2" } });
     expect(screen.queryByText(/at least one letter/i)).not.toBeInTheDocument();
     expect(screen.getByTestId("shift-add-save")).not.toBeDisabled();
+  });
+
+  it("blocks Enter from bypassing the numeric-only-code guard (button-disabled is not the only gate)", () => {
+    render(<ShiftTypeGrid />);
+    fireEvent.click(screen.getByTestId("add-shift-toggle"));
+    fireEvent.change(screen.getByTestId("shift-add-code"), { target: { value: "1" } });
+    fireEvent.change(screen.getByTestId("shift-add-required"), { target: { value: "3" } });
+    // Enter in the Code input routes to save(), which must honor the same guard the
+    // disabled button enforces — committing neither the shift nor a numeric selector.
+    fireEvent.keyDown(screen.getByTestId("shift-add-code"), { key: "Enter" });
+
+    expect(shifts()).toHaveLength(0);
+    expect(requirements()).toHaveLength(0);
+    expect(screen.getByTestId("shift-add-form")).toBeInTheDocument();
   });
 });
 

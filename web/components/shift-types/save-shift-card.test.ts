@@ -261,6 +261,19 @@ describe("saveShiftTypeCard", () => {
         },
       }),
     ).toThrow(NumericShiftTypeStaffingError);
+    // Add-mode defense in depth: a numbers-only code can't build a valid selector.
+    expect(() =>
+      saveShiftTypeCard(mutate, {
+        mode: "add",
+        fields: { code: "1", name: "", workingTime: {} },
+        staffing: {
+          type: "editable",
+          token: { baselineUid: null, baselineCard: null },
+          required: 2,
+          preferred: "",
+        },
+      }),
+    ).toThrow(NumericShiftTypeStaffingError);
   });
 
   it("makes EDGE-PR-03 explicit in the result and writes the forced collapse", () => {

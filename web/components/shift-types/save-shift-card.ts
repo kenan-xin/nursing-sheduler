@@ -341,6 +341,16 @@ export function saveShiftTypeCard(
   ) {
     throw new NumericShiftTypeStaffingError();
   }
+  // Defense in depth (the UI already blocks this): a numbers-only add code would
+  // build a string selector `["1"]` that can't reference a numeric shift id — reject
+  // it here too rather than trusting the caller to have gated it.
+  if (
+    input.mode === "add" &&
+    input.staffing.type === "editable" &&
+    /^\d+$/.test(String(input.fields.code).trim())
+  ) {
+    throw new NumericShiftTypeStaffingError();
+  }
 
   let result: SaveShiftTypeCardResult = {
     effectiveId: originalId,
