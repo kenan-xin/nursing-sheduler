@@ -2,7 +2,7 @@
 //
 // Runs against the `/progress-chart-fixture` dev page (built alongside the
 // design-system reference), covering responsive behavior, accessibility, dark
-// mode + density token fidelity, range presets, comments toggle, tooltip
+// mode + token fidelity, range presets, comments toggle, tooltip
 // semantics, and the four safety streams (empty, sparse, dense, no-comments,
 // duplicate-times). jsdom component tests cover the same surface at the
 // React-DOM level; this spec verifies it in a real browser layout.

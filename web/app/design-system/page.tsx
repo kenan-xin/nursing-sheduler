@@ -16,14 +16,14 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton, SkeletonCard, SkeletonText } from "@/components/ui/skeleton";
-import { ThemeToggle, DensityControl, AccentControl } from "@/components/theme/theme-toggle";
+import { ThemeToggle, AccentControl } from "@/components/theme/theme-toggle";
 import { AppVersion } from "@/components/app-version";
 import { FaPlus, FaTrash, FaCircleCheck } from "@/components/icons";
 
 // Living style reference. Exercises the ported token system end-to-end: palette
 // (light + dark via the toggle), the fluid type scale, the spacing scale, the
 // restyled shadcn/Base UI components, skeleton primitives, and the theme +
-// density controls. Each section carries a data-testid so the acceptance
+// accent controls. Each section carries a data-testid so the acceptance
 // Playwright/vitest checks can target it.
 
 const COLOR_TOKENS = [
@@ -102,7 +102,6 @@ export default function StyleReferencePage() {
         </div>
         <div className="flex flex-wrap items-center gap-3" data-testid="controls">
           <AccentControl />
-          <DensityControl />
           <ThemeToggle />
         </div>
       </header>

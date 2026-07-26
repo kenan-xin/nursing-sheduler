@@ -17,8 +17,9 @@
 // and merging `pr-7` last only yields `px-3 pr-7`, leaving the winner to stylesheet
 // source order rather than anything this component controls. Either way the label
 // slides back under the caret — the exact bug this file exists to fix, and `px-3` is
-// what one call site already passed. The value tracks `--spacing` (and so density)
-// exactly as `pr-7` would. `select.test.tsx` pins the contract.
+// what one call site already passed. The value tracks `--spacing` (which carries
+// the 0.9 baseline — see globals.css) exactly as `pr-7` would. `select.test.tsx`
+// pins the contract.
 
 import * as React from "react";
 import { cn } from "@/lib/utils";
@@ -30,7 +31,7 @@ export interface SelectProps extends React.ComponentPropsWithoutRef<"select"> {
   wrapperClassName?: string;
 }
 
-/** The caret's reserved space — `pr-7` in inline form, density-scaled via --spacing. */
+/** The caret's reserved space — `pr-7` in inline form, carried via --spacing. */
 const CARET_GUTTER = "calc(var(--spacing) * 7)";
 
 export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(function Select(

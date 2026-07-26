@@ -1,4 +1,4 @@
-// External store backing the theme/density/accent axes. It exists to solve the
+// External store backing the theme/accent axes. It exists to solve the
 // hydration problem: the head script (theme-script.tsx) applies the persisted
 // values to <html> before paint, but the server has no way to know them, so SSR
 // and the hydration render MUST use a fixed default snapshot or React reports a
@@ -9,29 +9,29 @@
 //   - getSnapshot() → the live store value.
 //   - subscribe() → runs only AFTER commit; on first subscribe it ADOPTS the
 //     already-applied <html> state, which flips the snapshot and triggers one
-//     reconciliation render so the controls (toggle label, density/accent
-//     selection) catch up. No localStorage write happens during adoption — only
-//     explicit user actions persist — so a persisted value is never clobbered.
+//     reconciliation render so the controls (toggle label, accent selection) catch
+//     up. No localStorage write happens during adoption — only explicit user
+//     actions persist — so a persisted value is never clobbered.
+//
+// Density used to be a third axis here; it was removed (bmw.8) because the control
+// was unreachable in the product UI. The 0.9 spacing/type scale it produced is
+// preserved as literals in globals.css instead.
 
 export type Theme = "light" | "dark";
-export type Density = "comfortable" | "spacious" | "compact";
 export type Accent = "blue" | "teal" | "magenta" | "slate";
 
 export interface ThemeState {
   theme: Theme;
-  density: Density;
   accent: Accent;
 }
 
 export const THEME_KEY = "ns-theme";
-export const DENSITY_KEY = "ns-density";
 export const ACCENT_KEY = "ns-accent";
 
-const DENSITIES: readonly Density[] = ["comfortable", "spacious", "compact"];
 const ACCENTS: readonly Accent[] = ["blue", "teal", "magenta", "slate"];
 
 // Stable reference — required by useSyncExternalStore for the server snapshot.
-const SERVER_SNAPSHOT: ThemeState = { theme: "light", density: "comfortable", accent: "blue" };
+const SERVER_SNAPSHOT: ThemeState = { theme: "light", accent: "blue" };
 
 let state: ThemeState = SERVER_SNAPSHOT;
 let adopted = false;
@@ -39,11 +39,9 @@ const listeners = new Set<() => void>();
 
 function readDom(): ThemeState {
   const el = document.documentElement;
-  const density = el.getAttribute("data-density") as Density | null;
   const accent = el.getAttribute("data-accent") as Accent | null;
   return {
     theme: el.classList.contains("dark") ? "dark" : "light",
-    density: density && DENSITIES.includes(density) ? density : "comfortable",
     accent: accent && ACCENTS.includes(accent) ? accent : "blue",
   };
 }
@@ -77,11 +75,9 @@ function commit(next: ThemeState) {
   state = next;
   const el = document.documentElement;
   el.classList.toggle("dark", next.theme === "dark");
-  el.setAttribute("data-density", next.density);
   el.setAttribute("data-accent", next.accent);
   try {
     localStorage.setItem(THEME_KEY, next.theme);
-    localStorage.setItem(DENSITY_KEY, next.density);
     localStorage.setItem(ACCENT_KEY, next.accent);
   } catch {}
   emit();
@@ -93,10 +89,6 @@ export function setTheme(theme: Theme) {
 
 export function toggleTheme() {
   commit({ ...state, theme: state.theme === "dark" ? "light" : "dark" });
-}
-
-export function setDensity(density: Density) {
-  commit({ ...state, density });
 }
 
 export function setAccent(accent: Accent) {

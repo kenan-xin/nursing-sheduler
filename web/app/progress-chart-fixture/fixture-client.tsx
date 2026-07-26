@@ -4,14 +4,14 @@
 //
 // This is a test harness, not a production screen. T16e owns the real Optimize
 // & Export screen; this fixture exercises the chart in a real browser for
-// responsive / accessibility / dark-mode / density coverage. The route is gated
-// off in production by `page.tsx` (see `NS_ENABLE_DEV_FIXTURES`), so this body
-// only ever renders under the Playwright/dev harness.
+// responsive / accessibility / dark-mode coverage. The route is gated off in
+// production by `page.tsx` (see `NS_ENABLE_DEV_FIXTURES`), so this body only
+// ever renders under the Playwright/dev harness.
 
 import { useState } from "react";
 import { ProgressChart } from "@/components/optimize/progress-chart";
 import type { RunProgressPoint } from "@/lib/optimize";
-import { ThemeToggle, DensityControl, AccentControl } from "@/components/theme/theme-toggle";
+import { ThemeToggle, AccentControl } from "@/components/theme/theme-toggle";
 
 type DatasetKey =
   | "empty"
@@ -149,12 +149,11 @@ export default function ProgressChartFixtureClient() {
             Optimization progress chart fixture
           </h1>
           <p className="text-meta text-ink2">
-            T16d browser fixture — responsive, dark-mode, density, and a11y coverage.
+            T16d browser fixture — responsive, dark-mode, and a11y coverage.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3" data-testid="fixture-controls">
           <AccentControl />
-          <DensityControl />
           <ThemeToggle />
         </div>
       </header>

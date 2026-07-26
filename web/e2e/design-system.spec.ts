@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
-// Render / viewport / density / accent / reduced-motion / hydration rows of the
-// T03 acceptance matrix. Static rows (token snapshot, accent/shell derivation,
+// Render / viewport / accent / reduced-motion / hydration rows of the T03
+// acceptance matrix. Static rows (token snapshot, accent/shell derivation,
 // radius decls, no-raw-color guard) live in app/design-system.test.ts.
 
 // WCAG 2.2 SC 1.4.3 relative-luminance contrast, computed from rendered colors.
@@ -178,30 +178,6 @@ test.describe("design system — style reference", () => {
     }
   });
 
-  test("density multiplier scales type and spacing", async ({ page }) => {
-    await page.goto("/design-system");
-    await page.setViewportSize({ width: 1280, height: 1000 });
-    const display = page.getByRole("heading", { name: "Design system", level: 1 });
-    const spaceBox = page.getByTestId("space-4").locator("div");
-
-    const measure = async (density: string) => {
-      await page.evaluate((d) => document.documentElement.setAttribute("data-density", d), density);
-      return {
-        font: await display.evaluate((el) => parseFloat(getComputedStyle(el).fontSize)),
-        space: await spaceBox.evaluate((el) => parseFloat(getComputedStyle(el).width)),
-      };
-    };
-
-    const compact = await measure("compact");
-    const comfortable = await measure("comfortable");
-    const spacious = await measure("spacious");
-
-    expect(comfortable.font).toBeGreaterThan(compact.font);
-    expect(spacious.font).toBeGreaterThan(comfortable.font);
-    expect(comfortable.space).toBeGreaterThan(compact.space);
-    expect(spacious.space).toBeGreaterThan(comfortable.space);
-  });
-
   test("skeleton mirrors the structure of the box it stands in for", async ({ page }) => {
     await page.goto("/design-system");
     const skeletons = page.getByTestId("skeletons");
@@ -226,7 +202,7 @@ test.describe("design system — style reference", () => {
     expect(Math.abs((cardBox?.height ?? 0) - (skeletonBox?.height ?? 0))).toBeLessThanOrEqual(2);
   });
 
-  test("persisted dark + non-default density/accent hydrate with no mismatch", async ({ page }) => {
+  test("persisted dark + non-default accent hydrate with no mismatch", async ({ page }) => {
     const consoleErrors: string[] = [];
     page.on("console", (msg) => {
       if (msg.type() === "error") consoleErrors.push(msg.text());
@@ -235,23 +211,17 @@ test.describe("design system — style reference", () => {
 
     await page.addInitScript(() => {
       localStorage.setItem("ns-theme", "dark");
-      localStorage.setItem("ns-density", "spacious");
       localStorage.setItem("ns-accent", "teal");
     });
     await page.goto("/design-system");
 
     const html = page.locator("html");
     await expect(html).toHaveClass(/dark/);
-    await expect(html).toHaveAttribute("data-density", "spacious");
     await expect(html).toHaveAttribute("data-accent", "teal");
 
     // Controls must reconcile to the adopted state (finding #1): a persisted dark
-    // page announces "switch to light", Spacious is pressed, teal is selected.
+    // page announces "switch to light", teal is selected.
     await expect(page.getByRole("button", { name: /switch to light theme/i })).toBeVisible();
-    await expect(page.getByRole("button", { name: "spacious" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
     await expect(page.getByRole("button", { name: "teal accent" })).toHaveAttribute(
       "aria-pressed",
       "true",

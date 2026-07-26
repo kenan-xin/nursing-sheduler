@@ -128,15 +128,15 @@ export function WorkingTimeFields({ value, onChange, idPrefix }: WorkingTimeFiel
 
           `max-content` rather than a ratio because the select's need is not a
           constant anyone can hold in their head: it is the widest option ("11h 30m")
-          plus the caret gutter the shared Select reserves, both of which scale with
-          density. A 1fr/1.6fr split happened to give it 78px, which was 16px short
-          of that once the caret gutter landed — a native select has no ellipsis and
-          no title, so it silently chopped glyphs ("No res"). The readout absorbs the
-          remainder instead: its caption truncates cleanly and carries the full
-          sentence on the box's title.
+          plus the caret gutter the shared Select reserves, both of which sit on the
+          baked 0.9 spacing scale. A 1fr/1.6fr split happened to give it 78px, which
+          was 16px short of that once the caret gutter landed — a native select has
+          no ellipsis and no title, so it silently chopped glyphs ("No res"). The
+          readout absorbs the remainder instead: its caption truncates cleanly and
+          carries the full sentence on the box's title.
 
-          Measured across 700–1920 × all three densities: Rest never clips and the
-          row never overflows. */}
+          Measured across 700–1920 at the now-single 0.9 scale: Rest never clips
+          and the row never overflows. */}
       <div className="grid grid-cols-1 gap-x-3 gap-y-3 sm:grid-cols-[minmax(0,max-content)_minmax(0,1fr)]">
         <div className="flex flex-col gap-1 sm:col-span-2">
           <span className="flex items-center gap-1.5 text-label font-semibold uppercase tracking-[0.03em] text-ink3">
@@ -147,10 +147,10 @@ export function WorkingTimeFields({ value, onChange, idPrefix }: WorkingTimeFiel
               load-bearing: the "+1 day" badge joins the row beside two clock selects
               that each carry the shared Select's caret gutter. Pinned by e2e (see
               "the overnight clock row wraps" in e2e/shift-types.spec.ts): with nowrap,
-              children escape the card at 1100 and 1150 in BOTH densities — an ordinary
-              night shift, not a corner case — and fit again by 1280. Letting the
-              selects shrink instead chops digits off a time with no ellipsis to warn
-              you, so wrapping is the graceful failure. */}
+              children escape the card at 1100 and 1150 at the single 0.9 scale — an
+              ordinary night shift, not a corner case — and fit again by 1280. Letting
+              the selects shrink instead chops digits off a time with no ellipsis to
+              warn you, so wrapping is the graceful failure. */}
           <div data-testid={`${idPrefix}-clocks`} className="flex flex-wrap items-center gap-2">
             <Select
               data-testid={`${idPrefix}-start`}

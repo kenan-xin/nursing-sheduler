@@ -5,7 +5,7 @@
 // main column, beside the branded rail (see app-shell.tsx). Its job is
 // orientation, not controls: the mobile menu, a small product tile, the current
 // route crumb, the scenario context, the persistence status, and the (secondary)
-// global undo/redo. Mode, density, accent, theme, New-schedule and version have
+// global undo/redo. Mode, accent, theme, New-schedule and version have
 // moved to their owning surfaces (SideNav / display settings / Save & Load).
 
 import { usePathname } from "next/navigation";

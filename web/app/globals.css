@@ -8,11 +8,12 @@
    Design system — tokens ported from docs/design_prototype/README.md and the
    prototype shell `<style>` block (the authored source of truth). Nothing here
    is invented: colors (light + dark), the fluid type scale, the 4px spacing
-   scale, motion, shadows, the density multiplier, and the 480–1920 breakpoint
+   scale, motion, shadows, and both the 480–1920 type ladder and the layout
    ladder all mirror the prototype. Radius is 0 everywhere (square corners are
    intentional). Theme switching is class-based (`.dark` on <html>), which is
-   what the Tailwind `dark` variant above keys off; density is driven by the
-   `data-density` attribute on <html>.
+   what the Tailwind `dark` variant above keys off. The prototype's density
+   multiplier is NOT ported as a knob — see the spacing scale below for how
+   the prior 0.9 baseline is preserved.
 
    Fonts (README): body/UI = Hanken Grotesk, display/headings = Figtree, mono =
    Spline Sans Mono. The next/font CSS variables (--font-hanken / --font-figtree
@@ -72,34 +73,42 @@
      themes). Not overridden in .dark — a fixed strong red reads on both bgs. */
   --error-strong: #c0392b;
 
-  /* Density multiplier — Spacious 1.16 / Comfortable 1.0 / Compact 0.9.
-     Drives both the spacing scale and the fluid type scale. */
-  --density: 1;
+  /* Spacing scale — a 4px grid baked at 0.9. Tailwind's `--spacing` base is set
+     from this below so padding/margin/gap utilities stay on the same grid.
 
-  /* Spacing scale (4px grid × density). Tailwind's `--spacing` base is set from
-     this below so padding/margin/gap utilities inherit the density multiplier. */
-  --space-1: calc(4px * var(--density));
-  --space-2: calc(8px * var(--density));
-  --space-3: calc(12px * var(--density));
-  --space-4: calc(16px * var(--density));
-  --space-5: calc(20px * var(--density));
-  --space-6: calc(24px * var(--density));
-  --space-8: calc(32px * var(--density));
-  --space-12: calc(48px * var(--density));
+     Density is gone as a product feature: `DensityControl` lived only on
+     /design-system and a dev fixture, both outside the (app) route group, so the
+     product had three untested rendering modes nobody could reach. But the user's
+     browser had `ns-density=compact` persisted, so what actually shipped was the
+     Compact scale — spacing and type at a 0.9 multiplier. Removing the knob and
+     flattening to 1.0 (Comfortable) would inflate every space and every line an
+     extra ~11% past what the user has been looking at. The 0.9 factor is therefore
+     baked in here as a literal — it is the prior visual, not a knob. There is no
+     `--density` / `--sp` / `--dens` token to turn; the multiplier is a fact about
+     the size, written where the size is (bmw.8). */
+  --space-1: calc(4px * 0.9);
+  --space-2: calc(8px * 0.9);
+  --space-3: calc(12px * 0.9);
+  --space-4: calc(16px * 0.9);
+  --space-5: calc(20px * 0.9);
+  --space-6: calc(24px * 0.9);
+  --space-8: calc(32px * 0.9);
+  --space-12: calc(48px * 0.9);
 
-  /* Fluid type scale. --base-h/--base-b/--base-l step up at the breakpoint
-     ladder below; every size folds in the density multiplier. */
+  /* Fluid type scale. --base-h/--base-b/--base-l step up at the breakpoint ladder
+     below; each ratio is then folded with the 0.9 baseline above (see spacing scale
+     comment for why the multiplier is baked as a literal rather than a token). */
   --base-h: 26px;
   --base-b: 15.5px;
   --base-l: 12px;
-  --fs-xl: calc(var(--base-h) * var(--density));
-  --fs-card: calc(var(--base-h) * 0.78 * var(--density));
-  --fs-lg: calc(var(--base-h) * 0.6 * var(--density));
-  --fs-md: calc(var(--base-b) * var(--density));
-  --fs-sm: calc(var(--base-b) * 0.92 * var(--density));
-  --fs-lbl: calc(var(--base-l) * var(--density));
-  --fs-lblmd: calc(var(--base-l) * 1.13 * var(--density));
-  --fs-lbllg: calc(var(--base-l) * 1.27 * var(--density));
+  --fs-xl: calc(var(--base-h) * 0.9);
+  --fs-card: calc(var(--base-h) * 0.78 * 0.9);
+  --fs-lg: calc(var(--base-h) * 0.6 * 0.9);
+  --fs-md: calc(var(--base-b) * 0.9);
+  --fs-sm: calc(var(--base-b) * 0.92 * 0.9);
+  --fs-lbl: calc(var(--base-l) * 0.9);
+  --fs-lblmd: calc(var(--base-l) * 1.13 * 0.9);
+  --fs-lbllg: calc(var(--base-l) * 1.27 * 0.9);
   --t-display: var(--fs-xl);
   --t-h2: var(--fs-xl);
   --t-cardhead: var(--fs-card);
@@ -157,14 +166,6 @@
   --warntint: #2a2310;
   --error: #e06a5e;
   --errortint: #2a1714;
-}
-
-/* Density presets (data-density on <html>) */
-[data-density="spacious"] {
-  --density: 1.16;
-}
-[data-density="compact"] {
-  --density: 0.9;
 }
 
 /* Selectable-accent presets (data-accent on <html>). "blue" is the :root
@@ -227,8 +228,8 @@
    Tailwind theme wiring.
 
    `@theme inline` is used wherever a token references one of our runtime CSS
-   variables (colors switch with `.dark`; spacing/type react to density and the
-   breakpoint ladder) so the generated utilities emit `var(--…)` rather than a
+   variables (colors switch with `.dark`; type reacts to the breakpoint ladder)
+   so the generated utilities emit `var(--…)` rather than a
    value frozen at build time. Static tokens (fonts, breakpoints, radius,
    keyframes) use plain `@theme`.
    -------------------------------------------------------------------------- */
@@ -293,8 +294,8 @@
 }
 
 @theme inline {
-  /* Density-aware spacing base: p-1 == 4px × density, and so on up the scale. */
-  --spacing: calc(0.25rem * var(--density));
+  /* Spacing base: p-1 == 4px × 0.9 (see :root note), and so on up the scale. */
+  --spacing: calc(0.25rem * 0.9);
 
   /* Design color tokens → bg-x / text-x / border-x utilities */
   --color-ink: var(--ink);

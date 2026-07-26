@@ -9,7 +9,7 @@ import { ThemeProvider } from "@/components/theme/theme-provider";
 // created once per browser session via useState so it survives re-renders but is
 // never shared across requests on the server.
 //
-// The class-based ThemeProvider (light/dark + density) sits inside the QueryClient
+// The class-based ThemeProvider (light/dark + accent) sits inside the QueryClient
 // wrapper so every client component has both contexts. The QueryClient wrapper is
 // left intact per T06's ownership of the data-fetching spine.
 export function Providers({ children }: { children: React.ReactNode }) {

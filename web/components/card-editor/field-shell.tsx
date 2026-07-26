@@ -12,11 +12,19 @@
 // chars). One definition now means one label row everywhere.
 //
 // The label deliberately does NOT carry `white-space:nowrap`, even though the
-// prototype's does (ScreenCards.dc.html:84). The prototype has no density
-// multiplier; this app scales `--m-xs` by `--density` (up to 1.16 on Spacious,
-// globals.css:80,105,163-165), and at that size a nowrap label + hint overflows a
-// half-width grid cell and paints outside the form panel. Wrapping is the graceful
-// failure here.
+// prototype's does (ScreenCards.dc.html:84). With a nowrap label + hint, the row
+// overflows a half-width grid cell and paints outside the form panel — verified at
+// the 0.9 type scale this app shipped (bmw.8 kept the prior persisted-Compact
+// baseline as literals in globals.css rather than the 1.0 Comfortable the prototype
+// uses). Wrapping is the graceful failure here: it costs nothing when the label +
+// hint fit on one line, and saves the overflow when they do not.
+//
+// History note (bmw.8). This used to overdramatize the overflow as a "density range"
+// effect: the prototype has two density multipliers (`--sp` for spacing, `--dens`
+// for type, Nurse Scheduling.dc.html:25-26), but neither is ported as a knob — the
+// match between the prototype's `--m-xs` × `--dens` and this app's `text-label` ×
+// 0.9 is now a single fixed size. The wrap is kept because the overflow it prevents
+// is still real at that fixed size.
 
 import * as React from "react";
 import { FaCircleExclamation } from "@/components/icons";

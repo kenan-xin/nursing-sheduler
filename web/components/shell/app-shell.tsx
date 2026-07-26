@@ -56,10 +56,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 border-box div would silently spend 40px of the cap on padding.
 
                 The 72px bottom is LITERAL, as in the prototype. Tailwind's spacing
-                scale here is density-scaled (globals.css drives --spacing off
-                --space-1), so `pb-18` would ride the multiplier to 83.5px at spacious
-                and 64.8px at compact. Top and sides do scale in the prototype too,
-                so pt-6 / px-5 are correct as scale utilities. */}
+                scale here is baked at the 0.9 baseline (globals.css drives --spacing
+                off --space-1 × 0.9 — see the density-removal note there), so `pb-18`
+                would resolve to 64.8px. Top and sides step on the same scale, so
+                pt-6 / px-5 are correct as scale utilities. */}
             <div className="px-5 pt-6 pb-[72px]">
               <div className="mx-auto w-full max-w-[1240px]">{children}</div>
             </div>

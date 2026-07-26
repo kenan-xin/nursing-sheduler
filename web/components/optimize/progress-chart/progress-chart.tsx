@@ -61,7 +61,7 @@ export interface ProgressChartProps {
 }
 
 // Layout constants (mirror the old chart's vertical rhythm; redesigned on the
-// rebuild's 4px density-aware scale via the Tailwind `text-*` / `p-*` utilities
+// rebuild's 4px scale baked at 0.9 via the Tailwind `text-*` / `p-*` utilities
 // elsewhere in the component).
 const SCORE_PANEL_HEIGHT = 250;
 const COMMENT_PANEL_HEIGHT = 170;

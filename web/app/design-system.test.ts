@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 // Design-system acceptance checks verifiable statically (token snapshot,
 // accent/shell token port, radius-0 declarations, icon-import guard, and a
-// raw-color source guard over components/ui/**). Render / viewport / density /
+// raw-color source guard over components/ui/**). Render / viewport / accent /
 // reduced-motion / hydration rows are covered by e2e/design-system.spec.ts.
 
 const webRoot = join(__dirname, "..");
@@ -133,13 +133,33 @@ describe("breakpoint ladder", () => {
   }
 });
 
-describe("density presets", () => {
-  it.each([
-    ["spacious", "1.16"],
-    ["compact", "0.9"],
-  ])("[data-density=%s] → --density: %s", (name, value) => {
-    const block = sliceBlock(globals, `[data-density="${name}"]`);
-    expect(block).toContain(`--density: ${value};`);
+describe("density is gone, 0.9 baseline preserved", () => {
+  // Density was unreachable in the product (the control lived only on
+  // /design-system and a dev fixture), so it was removed (bmw.8). What shipped
+  // to the user's browser was the Compact (0.9) scale — `ns-density=compact`
+  // was what they had persisted — so removing the knob and flattening to 1.0
+  // would have inflated every space and every line an extra ~11% past what
+  // they were looking at. The 0.9 factor is therefore baked into the spacing
+  // and type literals here as a fact, not a token — there is no `--density`,
+  // `--sp`, or `--dens` to turn (acceptance criterion #2).
+  it("has no density selector or density token", () => {
+    expect(globals).not.toContain('[data-density="');
+    expect(globals).not.toContain("var(--density)");
+    expect(globals).not.toContain("var(--sp)");
+    expect(globals).not.toContain("var(--dens)");
+  });
+
+  it("bakes the 0.9 baseline into the spacing scale", () => {
+    expect(globals).toContain("--space-1: calc(4px * 0.9);");
+    expect(globals).toContain("--space-4: calc(16px * 0.9);");
+    expect(globals).toContain("--space-12: calc(48px * 0.9);");
+    expect(globals).toContain("--spacing: calc(0.25rem * 0.9);");
+  });
+
+  it("bakes the 0.9 baseline into the fluid type scale", () => {
+    expect(globals).toContain("--fs-xl: calc(var(--base-h) * 0.9);");
+    expect(globals).toContain("--fs-card: calc(var(--base-h) * 0.78 * 0.9);");
+    expect(globals).toContain("--fs-lbl: calc(var(--base-l) * 0.9);");
   });
 });
 

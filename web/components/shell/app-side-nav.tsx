@@ -13,9 +13,9 @@
 // from `meta.description`.
 //
 // Footer (audit MAJOR 5): the persistent sidebar footer is exactly identity +
-// one 34×34 theme control, matching SideNav.dc.html:48-55. The density/accent
-// display settings were prototype preview-only props and are no longer chrome —
-// they remain exposed on the /design-system page.
+// one 34×34 theme control, matching SideNav.dc.html:48-55. Density was a
+// prototype preview-only prop and is no longer chrome (bmw.8 removed it
+// entirely); accent remains exposed on the /design-system page.
 //
 // `headerActions` reserves a trailing slot in the brand header for the mobile
 // drawer's accessible close control (audit m8), without overlaying the brand

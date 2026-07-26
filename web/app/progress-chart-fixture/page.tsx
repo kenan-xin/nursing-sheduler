@@ -1,6 +1,6 @@
 // T16d — production gate for the optimization progress chart TEST FIXTURE.
 //
-// The fixture is a browser test harness (responsive / a11y / dark-mode / density
+// The fixture is a browser test harness (responsive / a11y / dark-mode
 // coverage), NOT a shipped screen like the intentionally-public `/design-system`
 // living style reference. To keep it off the production surface while still
 // running deterministically under Playwright — which serves a real production
