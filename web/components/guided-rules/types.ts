@@ -1,14 +1,13 @@
 // Guided rule projection/mutation types (T14b). A `GuidedRuleRow` is the plain-
-// English Rules-screen unit: EVERY enabled card of the five constraint kinds gets
-// exactly one row via its kind's mapper (tech-plan §3 — "derive every row from
+// English Rules-screen unit: EVERY card of the five constraint kinds gets exactly
+// one row via its kind's mapper (tech-plan §3 — "derive every row from
 // `cardsByKind` through a per-kind mapper registry"); built-in structural rules
 // (e.g. "at most one shift per day") are additional, separately-derived, always-
-// locked rows. A `GuidedRulePin` (T14a) is an optional shortcut OVERLAY on top of
-// an existing row — its `category`/`quickFields` override the mapper defaults and
-// its presence flags the row as user-pinned — never a second source of truth for
-// the constraint itself.
+// locked rows. There is nothing to opt into and nothing to configure — the row
+// set IS the constraint set, and a row never holds a value the source record
+// does not.
 
-import type { GuidedRuleConstraintKind, GuidedRulePin } from "@/lib/scenario";
+import type { GuidedRuleConstraintKind } from "@/lib/scenario";
 
 /** One numeric field a mapper declares eligible for the Guided inline Adjust
  *  control, with its current value and validator. People/shift-type/date fields
@@ -33,7 +32,8 @@ export interface GuidedQuickField {
  *  store access — so the projection/mutation seam is fully unit-testable. */
 export interface GuidedRuleMapper<TCard> {
   kind: GuidedRuleConstraintKind;
-  /** Default category a row of this kind is grouped under, absent a pin override. */
+  /** The plain-English heading rows of this kind are grouped under. Derived from
+   *  the kind alone, so it can never go stale against the record. */
   category: string;
   /** The Advanced route this kind's editor lives at (the "Edit in Advanced" link). */
   advancedRoute: string;
@@ -59,7 +59,7 @@ export interface GuidedRuleMapper<TCard> {
 /** One row the Rules screen renders. */
 export interface GuidedRuleRow {
   /** Stable list key: `builtin:<id>` for a structural rule, `<kind>:<uid>` for a
-   *  card-derived row — never the pin id, so the row survives a pin edit/removal. */
+   *  card-derived row. */
   id: string;
   source: "builtin" | "record";
   kind?: GuidedRuleConstraintKind;
@@ -77,34 +77,6 @@ export interface GuidedRuleRow {
   /** Present when the record's shape can't be natively rendered — the "Set in
    *  Advanced only" read-only fallback (never hidden/flattened). */
   unsupportedReason?: string;
-  /** The pin overlay this row was built from, when the constraint is pinned. */
-  pin?: GuidedRulePin;
-}
-
-/** The result of projecting Guided rules from durable scenario state. */
-export interface GuidedRuleProjection {
-  rows: GuidedRuleRow[];
-  /** Ids of pins that are never rendered on any row — either because their
-   *  source constraint no longer resolves, or because a later duplicate for
-   *  the same source superseded them (T14d). Should be empty in practice
-   *  (T14a prunes orphaned pins on every card mutation; `pinConstraint` never
-   *  appends a duplicate for an already-pinned source); surfaced as a
-   *  structured, actionable signal — and a one-click cleanup target — rather
-   *  than a silently dropped row. */
-  stalePinIds: string[];
-}
-
-/** A pinnable record surfaced by the "Customise library" picker — one entry per
- *  enabled card of the five kinds, independent of whether it is already pinned. */
-export interface PinnableRecord {
-  kind: GuidedRuleConstraintKind;
-  constraintId: string;
-  label: string;
-  category: string;
-  /** The mapper's full declared quick-field set for this record (key/label/
-   *  current value), so the picker can render a labelled tick-list rather than
-   *  bare keys — `[]` when the record's shape is unsupported. */
-  quickFieldOptions: { key: string; label: string; value: number }[];
 }
 
 /** Structured outcomes for a Guided mutation — T14c renders these directly
@@ -114,10 +86,3 @@ export type GuidedMutationOutcome<TCard> =
   | { kind: "missing-source" }
   | { kind: "unsupported-field" }
   | { kind: "invalid-value"; message: string };
-
-/** Structured outcomes for a pin CRUD operation (T14b — "pin catalog and CRUD
- *  adapters over T14a"). */
-export type GuidedPinOutcome =
-  | { kind: "applied"; pins: GuidedRulePin[] }
-  | { kind: "missing-source" }
-  | { kind: "unsupported-field"; field: string };

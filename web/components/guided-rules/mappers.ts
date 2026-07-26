@@ -55,7 +55,7 @@ function isSupportedRequirementCard(card: RequirementCard): boolean {
 
 export const requirementsMapper: GuidedRuleMapper<RequirementCard> = {
   kind: "requirements",
-  category: "Staffing",
+  category: "Staffing levels",
   advancedRoute: "/shift-type-requirements",
   defaultTitle(card) {
     const trimmed = card.description?.trim();
@@ -95,7 +95,7 @@ export const requirementsMapper: GuidedRuleMapper<RequirementCard> = {
 
 export const successionsMapper: GuidedRuleMapper<SuccessionCard> = {
   kind: "successions",
-  category: "Sequencing",
+  category: "Shift sequences",
   advancedRoute: "/shift-type-successions",
   defaultTitle(card) {
     const trimmed = card.description?.trim();
@@ -135,7 +135,7 @@ export const successionsMapper: GuidedRuleMapper<SuccessionCard> = {
 
 export const countsMapper: GuidedRuleMapper<CountCard> = {
   kind: "counts",
-  category: "Hours",
+  category: "Hours & contracts",
   advancedRoute: "/shift-counts",
   defaultTitle(card) {
     const trimmed = card.description?.trim();
@@ -177,7 +177,7 @@ export const countsMapper: GuidedRuleMapper<CountCard> = {
 
 export const affinitiesMapper: GuidedRuleMapper<AffinityCard> = {
   kind: "affinities",
-  category: "Pairing",
+  category: "Who works together",
   advancedRoute: "/shift-affinities",
   defaultTitle(card) {
     const trimmed = card.description?.trim();
@@ -229,8 +229,7 @@ export const coveringsMapper: GuidedRuleMapper<CoveringCard> = {
     return `${summarizeCoveringRefs(card.preceptors)} supervise ${summarizeCoveringRefs(card.preceptees)} on ${shiftLabel}, ${dateLabel}.`;
   },
   // A covering's weight is a structural constant (COVERING_WEIGHT) the backend
-  // ignores — there is no editable number to expose (tech-plan §3: display-only
-  // pins are expected for records with no adjustable numbers).
+  // ignores — there is no editable number to expose, so this row is display-only.
   quickFields(): GuidedQuickField[] {
     return [];
   },

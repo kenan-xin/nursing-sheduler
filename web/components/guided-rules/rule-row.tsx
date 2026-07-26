@@ -1,13 +1,15 @@
 "use client";
 
 // One Guided rule row (T14c) — faithful to docs/design_prototype/ScreenRules.dc.html
-// rows 108-193: a switch, title + lock/pinned badges, summary, an Advanced link
-// (or "Set up in Advanced" for a not-yet-authored built-in), a config pill, and
-// Adjust/Edit-shortcut/Unpin actions. The inline Adjust panel is a dashed-top
+// rows 108-193: a switch, title + lock badge, summary, an Advanced link, a config
+// pill, and the Adjust/Rename actions. The inline Adjust panel is a dashed-top
 // drawer beneath the row, matching the prototype's expand-in-place behavior.
+//
+// Rename is offered on EVERY row — locked and "Set in Advanced only" ones
+// included — because a ward-legible label is never the constraint's shape. The
+// draft lives in the screen above, which owns the losable-draft guard.
 
 import * as React from "react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -19,37 +21,41 @@ import {
   FaPen,
   FaShieldHalved,
   FaSliders,
-  FaThumbtack,
-  FaXmark,
 } from "@/components/icons";
 import type { GuidedRuleRow } from "./types";
 
 export interface RuleRowProps {
   row: GuidedRuleRow;
-  admin: boolean;
   adjustOpen: boolean;
   onToggleAdjust: () => void;
   onToggleEnabled: (enabled: boolean) => void;
   onOpenAdvanced: () => void;
-  onEditShortcut: () => void;
-  onUnpin: () => void;
+  /** Whether this row's title is currently being edited in place. */
+  renaming: boolean;
+  renameDraft: string;
+  onRenameStart: () => void;
+  onRenameDraftChange: (value: string) => void;
+  onRenameCancel: () => void;
+  onRenameSubmit: () => void;
   /** Returns a validation error, or `undefined` on success (already committed). */
   onAdjustField: (key: string, value: number) => string | undefined;
 }
 
 export function RuleRow({
   row,
-  admin,
   adjustOpen,
   onToggleAdjust,
   onToggleEnabled,
   onOpenAdvanced,
-  onEditShortcut,
-  onUnpin,
+  renaming,
+  renameDraft,
+  onRenameStart,
+  onRenameDraftChange,
+  onRenameCancel,
+  onRenameSubmit,
   onAdjustField,
 }: RuleRowProps) {
   const canAdjust = row.quickFields.length > 0 && row.enabled && !row.locked;
-  const isPinned = row.source === "record" && row.pin !== undefined;
 
   return (
     <li
@@ -66,21 +72,57 @@ export function RuleRow({
           data-testid={`rule-toggle-${row.id}`}
         />
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className={`text-body font-bold ${row.enabled ? "text-ink" : "text-ink2"}`}>
-              {row.title}
-            </span>
-            {row.locked && (
-              <span title="Always on" className="text-ink3">
-                <FaLock className="size-2.5" />
+          {renaming ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                autoFocus
+                aria-label={`Rename ${row.title}`}
+                className="h-8 w-full max-w-[32ch] font-bold"
+                value={renameDraft}
+                data-testid={`rule-rename-input-${row.id}`}
+                onChange={(e) => onRenameDraftChange(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    onRenameSubmit();
+                  }
+                  if (e.key === "Escape") onRenameCancel();
+                }}
+              />
+              <Button size="sm" onClick={onRenameSubmit} data-testid={`rule-rename-save-${row.id}`}>
+                <FaCheck className="size-2.5" /> Save
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onRenameCancel}
+                data-testid={`rule-rename-cancel-${row.id}`}
+              >
+                Cancel
+              </Button>
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={`text-body font-bold ${row.enabled ? "text-ink" : "text-ink2"}`}>
+                {row.title}
               </span>
-            )}
-            {isPinned && (
-              <Badge variant="brand" data-testid={`rule-pinned-badge-${row.id}`}>
-                <FaThumbtack className="size-2" /> Pinned
-              </Badge>
-            )}
-          </div>
+              {row.locked && (
+                <span title="Always on" className="text-ink3">
+                  <FaLock className="size-2.5" />
+                </span>
+              )}
+              <button
+                type="button"
+                aria-label={`Rename ${row.title}`}
+                title="Rename this rule"
+                onClick={onRenameStart}
+                className="inline-flex items-center gap-1 bg-transparent p-0 text-label font-semibold uppercase tracking-[0.03em] text-ink3 hover:text-brandink hover:underline"
+                data-testid={`rule-rename-${row.id}`}
+              >
+                <FaPen className="size-2.5" /> Rename
+              </button>
+            </div>
+          )}
           <p className="mt-0.5 text-meta text-ink2">{row.summary}</p>
           {row.source === "record" && !row.unsupportedReason && (
             <button
@@ -115,32 +157,6 @@ export function RuleRow({
                 data-testid={`rule-adjust-toggle-${row.id}`}
               >
                 <FaSliders className="size-2.5" /> {adjustOpen ? "Close" : "Adjust"}
-              </Button>
-            )}
-            {admin && isPinned && (
-              <Button
-                variant="outline"
-                size="icon"
-                className="size-7"
-                aria-label="Edit shortcut"
-                title="Edit shortcut"
-                onClick={onEditShortcut}
-                data-testid={`rule-edit-shortcut-${row.id}`}
-              >
-                <FaPen className="size-2.5" />
-              </Button>
-            )}
-            {isPinned && (
-              <Button
-                variant="outline"
-                size="icon"
-                className="size-7"
-                aria-label="Unpin"
-                title="Unpin — keeps the constraint in Advanced"
-                onClick={onUnpin}
-                data-testid={`rule-unpin-${row.id}`}
-              >
-                <FaXmark className="size-3" />
               </Button>
             )}
           </div>

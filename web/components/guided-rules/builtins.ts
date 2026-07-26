@@ -13,11 +13,11 @@ export function projectBuiltinRules(state: ScenarioUiState): GuidedRuleRow[] {
     {
       id: MAX_ONE_SHIFT_PER_DAY_ID,
       source: "builtin",
-      category: "Structural",
-      title: "At most one shift per day",
-      summary:
-        state.maxOneShiftPerDay?.description?.trim() ||
-        "Nobody can work more than one shift on the same day.",
+      category: "Always on",
+      // Same title/summary split as a card row: `description` is the renamable
+      // label, the summary is the fixed plain-English explanation.
+      title: state.maxOneShiftPerDay?.description?.trim() || "At most one shift per day",
+      summary: "Nobody can work more than one shift on the same day.",
       enabled: true,
       locked: true,
       quickFields: [],

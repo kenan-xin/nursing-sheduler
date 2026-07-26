@@ -12,13 +12,13 @@ test.beforeEach(async ({ page }) => {
 // (navigation exposure is T08d's job — this route must stand on its own),
 // driven against the real T04 store (`window.__nsStore`), proving:
 //  • the built-in structural rule always renders, locked/on;
-//  • a linked rule is derived from `cardsByKind` (Advanced -> Rules), and its
+//  • EVERY constraint gets a row, with no opt-in step and nothing to configure;
+//  • a rule is derived from `cardsByKind` (Advanced -> Rules), and its
 //    Toggle/Adjust write straight back to the SAME card — one tracked mutation
 //    each — round-tripping without data loss;
 //  • an unsupported (multi-shift-type) requirement renders read-only, never
 //    hidden/flattened;
-//  • pinning/unpinning via "Customise library" only ever touches
-//    `guidedRulePins`, never the source constraint;
+//  • rename writes the source constraint's own `description` and round-trips;
 //  • the screen loads and wraps sensibly at both desktop and mobile widths.
 
 type NsWindow = {
@@ -26,7 +26,7 @@ type NsWindow = {
     scenario: {
       getState: () => Record<string, unknown> & {
         cardsByKind: Record<string, { uid: string; disabled?: boolean; description?: string }[]>;
-        guidedRulePins: unknown[];
+        maxOneShiftPerDay?: { description?: string };
         mutateScenario: (patch: Record<string, unknown>) => void;
       };
       temporal: { getState: () => { pastStates: unknown[]; undo: () => void } };
@@ -151,67 +151,81 @@ test.describe("Rules screen — Advanced -> Rules -> source-record mutation roun
   });
 });
 
-test.describe("Rules screen — pin CRUD", () => {
-  test("pinning surfaces a Pinned badge; unpinning removes only the shortcut", async ({ page }) => {
+test.describe("Rules screen — every constraint appears", () => {
+  test("one row per constraint of every kind, under its plain-English heading", async ({
+    page,
+  }) => {
     await gotoReady(page);
     await seed(page, {
       cardsByKind: {
-        requirements: [{ uid: "r1", shiftType: "D", requiredNumPeople: 2, weight: -1 }],
-        successions: [],
-        counts: [],
-        affinities: [],
-        coverings: [],
+        requirements: [
+          { uid: "r1", shiftType: "D", requiredNumPeople: 2, weight: -1 },
+          // Unsupported shape — still gets a row, read-only.
+          { uid: "r2", shiftType: ["D", "N"], requiredNumPeople: 1, weight: -1 },
+        ],
+        successions: [{ uid: "s1", person: ["P1"], pattern: ["N", "D"], weight: -1 }],
+        // Disabled — still gets a row.
+        counts: [
+          {
+            uid: "c1",
+            person: "ALL",
+            countDates: "ALL",
+            countShiftTypes: "N",
+            expression: "x >= T",
+            target: 3,
+            weight: 1,
+            disabled: true,
+          },
+        ],
+        affinities: [
+          {
+            uid: "a1",
+            people1: ["P1"],
+            people2: ["P2"],
+            shiftTypes: ["D"],
+            date: "ALL",
+            weight: 1,
+          },
+        ],
+        coverings: [
+          { uid: "v1", preceptors: ["P1"], preceptees: ["P2"], shiftTypes: ["D"], weight: -1 },
+        ],
       },
     });
     await page.reload();
     await waitForStore(page);
 
-    await page.getByTestId("rules-admin-toggle").click();
-    await page.getByTestId("rules-new-pin").click();
-    await page.getByTestId("pin-form-record-select").selectOption("requirements:r1");
-    await page.getByTestId("pin-form-submit").click();
+    for (const id of [
+      "builtin:max-one-shift-per-day",
+      "requirements:r1",
+      "requirements:r2",
+      "successions:s1",
+      "counts:c1",
+      "affinities:a1",
+      "coverings:v1",
+    ]) {
+      await expect(page.getByTestId(`rule-row-${id}`)).toBeVisible();
+    }
+    await expect(page.getByTestId("rule-row-counts:c1")).toHaveAttribute("data-disabled", "true");
 
-    await expect(page.getByTestId("rule-pinned-badge-requirements:r1")).toBeVisible();
-    let state = await storeState(page);
-    expect(state.guidedRulePins).toHaveLength(1);
-
-    await page.getByTestId("rule-unpin-requirements:r1").click();
-    state = await storeState(page);
-    expect(state.guidedRulePins).toHaveLength(0);
-    expect(state.cardsByKind.requirements).toHaveLength(1);
+    const headings = await page
+      .locator("[data-testid^='rule-category-']")
+      .evaluateAll((els) =>
+        els.map((el) => el.getAttribute("data-testid")!.replace("rule-category-", "")),
+      );
+    expect(headings).toEqual([
+      "Always on",
+      "Staffing levels",
+      "Shift sequences",
+      "Hours & contracts",
+      "Who works together",
+      "Supervision",
+    ]);
   });
 });
 
-test.describe("Rules screen — stale-pin cleanup (T14d)", () => {
-  test("shows an actionable stale-pin notice and clears every stale pin in one atomic action", async ({
-    page,
-  }) => {
-    await gotoReady(page);
-    await seed(page, {
-      guidedRulePins: [
-        {
-          id: "orphan",
-          constraintKind: "requirements",
-          constraintId: "gone",
-          category: "Staffing",
-          quickFields: [],
-        },
-      ],
-    });
-    await page.reload();
-    await waitForStore(page);
-
-    await expect(page.getByTestId("rules-stale-pin-notice")).toBeVisible();
-    await page.getByTestId("rules-cleanup-stale-pins").click();
-
-    await expect(page.getByTestId("rules-stale-pin-notice")).toHaveCount(0);
-    const state = await storeState(page);
-    expect(state.guidedRulePins).toHaveLength(0);
-  });
-});
-
-test.describe("Rules screen — Pin submit as one undoable step (T14d)", () => {
-  test("a Pin submit with a changed title is a single Undo step for the rename and the pin together", async ({
+test.describe("Rules screen — rename round trip", () => {
+  test("renaming a rule writes the source constraint's own description, as one Undo step", async ({
     page,
   }) => {
     await gotoReady(page);
@@ -229,24 +243,38 @@ test.describe("Rules screen — Pin submit as one undoable step (T14d)", () => {
     await page.reload();
     await waitForStore(page);
 
-    await page.getByTestId("rules-admin-toggle").click();
-    await page.getByTestId("rules-new-pin").click();
-    await page.getByTestId("pin-form-record-select").selectOption("requirements:r1");
-    await page.getByTestId("pin-form-title").fill("Renamed rule");
+    await expect(page.getByText("Day cap")).toBeVisible();
 
     const before = await pastCount(page);
-    await page.getByTestId("pin-form-submit").click();
+    await page.getByTestId("rule-rename-requirements:r1").click();
+    await page.getByTestId("rule-rename-input-requirements:r1").fill("Day shift cover");
+    await page.getByTestId("rule-rename-save-requirements:r1").click();
 
+    await expect(page.getByText("Day shift cover")).toBeVisible();
     await expect.poll(() => pastCount(page)).toBe(before + 1);
     let state = await storeState(page);
-    expect(state.cardsByKind.requirements[0].description).toBe("Renamed rule");
-    expect(state.guidedRulePins).toHaveLength(1);
+    expect(state.cardsByKind.requirements[0].description).toBe("Day shift cover");
 
     await undo(page);
 
     state = await storeState(page);
     expect(state.cardsByKind.requirements[0].description).toBe("Day cap");
-    expect(state.guidedRulePins).toHaveLength(0);
+    await expect(page.getByText("Day cap")).toBeVisible();
+  });
+
+  test("the locked built-in rule can be relabelled even though it cannot be switched off", async ({
+    page,
+  }) => {
+    await gotoReady(page);
+    const rowId = "builtin:max-one-shift-per-day";
+
+    await page.getByTestId(`rule-rename-${rowId}`).click();
+    await page.getByTestId(`rule-rename-input-${rowId}`).fill("One shift a day");
+    await page.getByTestId(`rule-rename-save-${rowId}`).click();
+
+    await expect(page.getByText("One shift a day")).toBeVisible();
+    const state = await storeState(page);
+    expect(state.maxOneShiftPerDay?.description).toBe("One shift a day");
   });
 });
 
@@ -263,6 +291,6 @@ test.describe("Rules screen — responsive", () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await gotoReady(page);
     await expect(page.getByTestId("rules-continue")).toBeVisible();
-    await expect(page.getByTestId("rules-admin-toggle")).toBeVisible();
+    await expect(page.getByTestId(/rule-row-builtin/)).toBeVisible();
   });
 });

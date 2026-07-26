@@ -2,20 +2,18 @@
 
 // Store binding for the Guided Rules screen (T14c). Reads the durable scenario
 // slice, projects it into `GuidedRuleRow`s via the T14b registry, and exposes
-// toggle/adjust/pin CRUD as operations that each apply exactly one
+// toggle/adjust/rename as operations that each apply exactly one
 // `mutateScenario` patch — so a Guided edit is exactly as tracked as its Advanced
 // equivalent (one zundo entry, one persisted revision), mirroring every other
 // card hook's `commitX` discipline (`components/counts/use-counts.ts`).
 //
-// `submitPin` (T14d) composes the optional source-title rename with the
-// pin/repin metadata write into that SAME single patch, so one Pin/Repin form
-// submit is exactly one tracked mutation — never two — and the rename half is
-// skipped entirely when the submitted title matches the source's current title.
+// `rename` writes the source constraint's OWN `description` (the built-in row's
+// `maxOneShiftPerDay.description`), exactly as an Advanced edit does — so the
+// Rules screen never becomes a second source of truth for a rule's label.
 
 import { useScenarioStore } from "@/lib/store";
 import {
   pruneOrphanedGuidedRulePins,
-  removeGuidedRulePins,
   type AffinityCard,
   type CardsByKind,
   type CountCard,
@@ -45,18 +43,7 @@ import {
   toggleRequirementRule,
   toggleSuccessionRule,
 } from "./mutations";
-import {
-  listPinnableRecords,
-  pinConstraint,
-  repinConstraint,
-  unpinConstraint,
-} from "./pin-catalog";
-import type {
-  GuidedMutationOutcome,
-  GuidedPinOutcome,
-  GuidedRuleProjection,
-  PinnableRecord,
-} from "./types";
+import type { GuidedMutationOutcome, GuidedRuleRow } from "./types";
 
 /** Replace one card kind's array in a single tracked mutation, reconciling any
  *  orphaned pin in the SAME commit (T14a's `pruneOrphanedGuidedRulePins`) —
@@ -93,20 +80,10 @@ function commitOutcome<TCard extends { uid: string }>(
   return outcome;
 }
 
-/** The fields a Pin/Repin form submit carries for the pin's own shortcut
- *  metadata — mirrors `PinConstraintInput` minus the source identity, which
- *  `submitPin` supplies from `kind`/`constraintId` (add) or resolves from the
- *  pin being edited (repin). */
-export interface GuidedPinMetadataPatch {
-  category: string;
-  description?: string;
-  quickFields: string[];
-}
-
 /** Recompute `cardsByKind` with the source card's title (its `description`)
  *  set to `title` — or `undefined` when the card is missing or `title` already
- *  matches its current default title, so `submitPin` can skip an unnecessary
- *  rename half entirely (T14d: "skip source updates when unchanged"). */
+ *  matches its current default title, so an unchanged title never spends a
+ *  history entry on a no-op write. */
 function renamedCardsByKind(
   cardsByKind: CardsByKind,
   kind: GuidedRuleConstraintKind,
@@ -175,9 +152,8 @@ function renamedCardsByKind(
 
 export interface GuidedRulesController {
   state: ScenarioUiState;
-  projection: GuidedRuleProjection;
-  pinnableRecords: PinnableRecord[];
-  /** Toggle a linked rule's enabled state — writes the source card's `disabled`
+  rows: GuidedRuleRow[];
+  /** Toggle a rule's enabled state — writes the source card's `disabled`
    *  marker. A no-op (returns `missing-source`) for a built-in/locked row. */
   toggle(kind: GuidedRuleConstraintKind, constraintId: string, enabled: boolean): void;
   /** Apply a numeric quick edit; returns the outcome so the caller can render an
@@ -189,37 +165,22 @@ export interface GuidedRulesController {
     rawValue: number,
   ): GuidedMutationOutcome<unknown>;
   /**
-   * One Pin/Repin form submit, as one tracked mutation (T14d). Validates and
-   * applies the pin/repin metadata patch exactly like `pinConstraint`/
-   * `repinConstraint` — a repin when `editingPinId` is given, else a new pin
-   * for `(kind, constraintId)`. When that succeeds AND `title` differs from
-   * the source's current title, the rename is folded into the SAME
-   * `mutateScenario` patch — so Undo restores both together, and an unchanged
-   * title never spends an extra history entry on a no-op rename.
+   * Relabel a rule by writing the source constraint's own `description` — the
+   * card's for a record row, `maxOneShiftPerDay.description` for the built-in.
+   * Available on every row, including locked and "Set in Advanced only" ones:
+   * a label is not the constraint's shape. Exactly one tracked mutation, and a
+   * blank or unchanged title writes nothing at all.
    */
-  submitPin(
-    kind: GuidedRuleConstraintKind,
-    constraintId: string,
-    title: string,
-    patch: GuidedPinMetadataPatch,
-    editingPinId?: string,
-  ): GuidedPinOutcome;
-  unpin(id: string): void;
-  /** Remove every currently-stale pin (orphaned or superseded-duplicate, per
-   *  `projection.stalePinIds`) in one atomic tracked mutation — the Rules
-   *  screen's "clear stale pins" cleanup (T14d). A no-op for an empty list. */
-  cleanupStalePins(staleIds: readonly string[]): void;
+  rename(row: GuidedRuleRow, title: string): void;
 }
 
 export function useGuidedRules(): GuidedRulesController {
   const state: ScenarioUiState = useScenarioStore((s) => s);
-  const projection = projectGuidedRules(state);
-  const pinnableRecords = listPinnableRecords(state);
+  const rows = projectGuidedRules(state);
 
   return {
     state,
-    projection,
-    pinnableRecords,
+    rows,
     toggle(kind, constraintId, enabled) {
       switch (kind) {
         case "requirements":
@@ -313,36 +274,22 @@ export function useGuidedRules(): GuidedRulesController {
           );
       }
     },
-    submitPin(kind, constraintId, title, patch, editingPinId) {
-      const outcome = editingPinId
-        ? repinConstraint(state.cardsByKind, state.guidedRulePins, editingPinId, patch)
-        : pinConstraint(state.cardsByKind, state.guidedRulePins, {
-            constraintKind: kind,
-            constraintId,
-            ...patch,
-          });
-      if (outcome.kind !== "applied") return outcome;
+    rename(row, title) {
+      const next = title.trim();
+      // A blank title would leave the rule with no label at all; treat it as a
+      // cancelled edit rather than writing an empty description.
+      if (!next || next === row.title) return;
 
-      const cardsByKind = renamedCardsByKind(state.cardsByKind, kind, constraintId, title);
-      useScenarioStore
-        .getState()
-        .mutateScenario(
-          cardsByKind
-            ? { cardsByKind, guidedRulePins: outcome.pins }
-            : { guidedRulePins: outcome.pins },
-        );
-      return outcome;
-    },
-    unpin(id) {
-      useScenarioStore.getState().mutateScenario({
-        guidedRulePins: unpinConstraint(state.guidedRulePins, id),
-      });
-    },
-    cleanupStalePins(staleIds) {
-      if (staleIds.length === 0) return;
-      useScenarioStore.getState().mutateScenario((s) => ({
-        guidedRulePins: removeGuidedRulePins(s.guidedRulePins, staleIds),
-      }));
+      if (row.source === "builtin") {
+        useScenarioStore.getState().mutateScenario((s) => ({
+          maxOneShiftPerDay: { ...s.maxOneShiftPerDay, description: next },
+        }));
+        return;
+      }
+      if (!row.kind || !row.constraintId) return;
+      const cardsByKind = renamedCardsByKind(state.cardsByKind, row.kind, row.constraintId, next);
+      if (!cardsByKind) return;
+      commitCards(row.kind, cardsByKind[row.kind]);
     },
   };
 }

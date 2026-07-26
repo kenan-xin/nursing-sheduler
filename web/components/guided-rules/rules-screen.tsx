@@ -2,9 +2,9 @@
 
 // The Guided Rules screen (T14c) — a direct, real /rules route faithful to
 // docs/design_prototype/ScreenRules.dc.html. Every row is derived from
-// `cardsByKind` through the T14b mapper registry; a `GuidedRulePin` is an
-// optional shortcut overlay. Navigation exposure (sidebar/Home/crumbs, global
-// mode switching) is explicitly T08d's job — this screen is complete and
+// `cardsByKind` through the T14b mapper registry: every constraint appears,
+// always, with nothing to opt into. Navigation exposure (sidebar/Home/crumbs,
+// global mode switching) is explicitly T08d's job — this screen is complete and
 // directly routable on its own.
 
 import * as React from "react";
@@ -12,13 +12,10 @@ import { Button } from "@/components/ui/button";
 import {
   FaArrowRight,
   FaCalculator,
-  FaCheck,
   FaCircleInfo,
   FaLock,
   FaPeopleArrows,
   FaSliders,
-  FaThumbtack,
-  FaTriangleExclamation,
   FaUserNurse,
   FaUserShield,
 } from "@/components/icons";
@@ -27,17 +24,15 @@ import { useGuardedNavigation } from "@/components/shell/use-guarded-navigation"
 import { useCardEditorDraftGuard } from "@/components/card-editor/card-editor-shell";
 import { useGuidedRules } from "./use-guided-rules";
 import { RuleRow } from "./rule-row";
-import { PinForm, type PinFormSubmission } from "./pin-form";
 import type { GuidedRuleRow } from "./types";
 
 const CATEGORY_ICONS: Record<string, IconType> = {
-  Staffing: FaUserNurse,
-  Sequencing: FaArrowRight,
-  Hours: FaCalculator,
-  Pairing: FaPeopleArrows,
+  "Always on": FaLock,
+  "Staffing levels": FaUserNurse,
+  "Shift sequences": FaArrowRight,
+  "Hours & contracts": FaCalculator,
+  "Who works together": FaPeopleArrows,
   Supervision: FaUserShield,
-  Structural: FaLock,
-  "Custom shortcuts": FaThumbtack,
 };
 
 function categoryIcon(category: string): IconType {
@@ -75,15 +70,35 @@ export interface RulesScreenProps {
 
 export function RulesScreen({ onOpenAdvanced }: RulesScreenProps) {
   const { navigate } = useGuardedNavigation();
-  const { state, projection, pinnableRecords, toggle, adjust, submitPin, unpin, cleanupStalePins } =
-    useGuidedRules();
+  const { state, rows, toggle, adjust, rename } = useGuidedRules();
 
-  const [admin, setAdmin] = React.useState(false);
-  const [formMode, setFormMode] = React.useState<"none" | "add" | "edit">("none");
-  const [editingPinId, setEditingPinId] = React.useState<string | null>(null);
   const [openAdjustId, setOpenAdjustId] = React.useState<string | null>(null);
+  const [renamingId, setRenamingId] = React.useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = React.useState("");
 
-  useCardEditorDraftGuard("guided-rules", formMode !== "none");
+  const renamingRow = renamingId ? rows.find((r) => r.id === renamingId) : undefined;
+  // Only a rename holding an actual change is losable work — an open input still
+  // showing the current title has nothing to discard.
+  const renameDirty =
+    renamingRow !== undefined &&
+    renameDraft.trim() !== "" &&
+    renameDraft.trim() !== renamingRow.title;
+  useCardEditorDraftGuard("guided-rules", renameDirty);
+
+  function startRename(row: GuidedRuleRow) {
+    setRenamingId(row.id);
+    setRenameDraft(row.title);
+  }
+
+  function closeRename() {
+    setRenamingId(null);
+    setRenameDraft("");
+  }
+
+  function submitRename(row: GuidedRuleRow) {
+    rename(row, renameDraft);
+    closeRename();
+  }
 
   const openAdvanced = React.useCallback(
     (route: string) => {
@@ -93,10 +108,10 @@ export function RulesScreen({ onOpenAdvanced }: RulesScreenProps) {
     [onOpenAdvanced, navigate],
   );
 
-  const groups = groupByCategory(projection.rows);
-  const hasRecords = projection.rows.some((r) => r.source === "record");
-  const onCount = projection.rows.filter((r) => r.enabled).length;
-  const total = projection.rows.length;
+  const groups = groupByCategory(rows);
+  const hasRecords = rows.some((r) => r.source === "record");
+  const onCount = rows.filter((r) => r.enabled).length;
+  const total = rows.length;
 
   const advCounts = {
     requirements: state.cardsByKind.requirements.length,
@@ -110,25 +125,6 @@ export function RulesScreen({ onOpenAdvanced }: RulesScreenProps) {
     .filter((k) => advCounts[k] > 0)
     .map((k) => `${advCounts[k]} ${KIND_LABELS[k]}`)
     .join(" · ");
-
-  const editingPin =
-    editingPinId !== null ? projection.rows.find((r) => r.pin?.id === editingPinId) : undefined;
-
-  function handlePinSubmit(submission: PinFormSubmission) {
-    submitPin(
-      submission.constraintKind,
-      submission.constraintId,
-      submission.title,
-      {
-        category: submission.category,
-        description: submission.description || undefined,
-        quickFields: submission.quickFields,
-      },
-      formMode === "edit" && editingPinId ? editingPinId : undefined,
-    );
-    setFormMode("none");
-    setEditingPinId(null);
-  }
 
   return (
     <div
@@ -145,22 +141,13 @@ export function RulesScreen({ onOpenAdvanced }: RulesScreenProps) {
             Choose the Rules
           </h1>
           <p className="m-0 max-w-[68ch] text-ink2">
-            Rules is a friendly, pinned view of the ward&rsquo;s constraints — the same library you
-            edit under Advanced. A <b>linked</b> rule reads and writes the exact constraint record
-            it belongs to; a <b>built-in</b> rule is a structural rule the engine always enforces.
-            Pin any Advanced constraint as a quick-access rule with <b>Customise library</b>.
+            Every rule your ward runs on, in plain English. Switch a rule off, change its numbers,
+            or rename it to the words your team actually uses — each one reads and writes the same
+            record you would edit under Advanced, so nothing here is a copy. A <b>built-in</b> rule
+            is one the engine always enforces; it can be renamed but never switched off.
           </p>
         </div>
         <div className="flex flex-wrap gap-2.5">
-          <Button
-            variant={admin ? "secondary" : "outline"}
-            size="lg"
-            onClick={() => setAdmin((v) => !v)}
-            data-testid="rules-admin-toggle"
-          >
-            {admin ? <FaCheck className="size-3" /> : <FaThumbtack className="size-3" />}{" "}
-            {admin ? "Done customising" : "Customise library"}
-          </Button>
           <Button
             size="lg"
             onClick={() => navigate("/shift-requests")}
@@ -171,68 +158,6 @@ export function RulesScreen({ onOpenAdvanced }: RulesScreenProps) {
         </div>
       </div>
 
-      {projection.stalePinIds.length > 0 && (
-        <div
-          className="flex flex-wrap items-center gap-3 border border-warn bg-warntint px-3.5 py-3"
-          data-testid="rules-stale-pin-notice"
-        >
-          <FaTriangleExclamation className="text-warn" />
-          <div className="min-w-[200px] flex-1 text-meta text-ink2">
-            <b>
-              {projection.stalePinIds.length} pinned shortcut
-              {projection.stalePinIds.length === 1 ? "" : "s"}
-            </b>{" "}
-            no longer {projection.stalePinIds.length === 1 ? "points" : "point"} to a live
-            constraint. The underlying rules are unaffected — only the shortcut metadata is stale.
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => cleanupStalePins(projection.stalePinIds)}
-            data-testid="rules-cleanup-stale-pins"
-          >
-            Remove stale pins
-          </Button>
-        </div>
-      )}
-
-      {admin && formMode === "none" && (
-        <div className="flex flex-wrap items-center gap-2.5 border border-brand bg-brandtint px-3.5 py-3">
-          <FaThumbtack className="text-brandink" />
-          <div className="min-w-[180px] flex-1 text-meta text-ink2">
-            <b>Pin a constraint.</b> Surface any Advanced constraint as a quick-access rule and pick
-            which fields become inline edits. Edits sync to the constraint. Unpinning only removes
-            the shortcut — the constraint stays in Advanced.
-          </div>
-          <Button
-            size="sm"
-            onClick={() => {
-              setFormMode("add");
-              setEditingPinId(null);
-            }}
-            data-testid="rules-new-pin"
-          >
-            <FaThumbtack className="size-2.5" /> Pin a constraint
-          </Button>
-        </div>
-      )}
-
-      {formMode !== "none" && (
-        <PinForm
-          records={pinnableRecords}
-          initial={
-            formMode === "edit" && editingPin
-              ? { pin: editingPin.pin!, title: editingPin.title }
-              : undefined
-          }
-          onCancel={() => {
-            setFormMode("none");
-            setEditingPinId(null);
-          }}
-          onSubmit={handlePinSubmit}
-        />
-      )}
-
       <div className="flex flex-wrap items-center gap-3.5">
         <div className="inline-flex items-baseline gap-2 border border-line bg-surface px-3.5 py-2.5">
           <span className="font-heading text-title font-extrabold">{onCount}</span>
@@ -241,19 +166,18 @@ export function RulesScreen({ onOpenAdvanced }: RulesScreenProps) {
         <div className="flex min-w-[180px] flex-1 items-center gap-2 text-meta text-ink2">
           <FaCircleInfo className="shrink-0 text-ink3" />
           <span>
-            Rules with numbers show an <b>Adjust</b> button. Tap a rule&rsquo;s <b>↳ constraint</b>{" "}
-            link to edit the exact record in Advanced. Use <b>Customise library</b> to pin your own
-            quick-access rules.
+            Rules with numbers show an <b>Adjust</b> button, and any rule can be renamed. Tap a
+            rule&rsquo;s <b>↳ constraint</b> link to edit the exact record in Advanced.
           </span>
         </div>
       </div>
 
-      {!admin && advTotal > 0 && (
+      {advTotal > 0 && (
         <div className="flex flex-wrap items-center gap-3 border border-line bg-panel px-3.5 py-3">
           <FaSliders className="text-ink2" />
           <div className="min-w-[200px] flex-1 text-meta text-ink2">
-            <b>{advTotal} advanced constraint records</b> back these rules — {advBreakdown}.
-            Advanced shows every one, including variants not surfaced here.
+            Every rule below comes from a record you can open in Advanced — {advBreakdown}. Advanced
+            shows each one in full detail.
           </div>
           <Button
             variant="outline"
@@ -288,23 +212,19 @@ export function RulesScreen({ onOpenAdvanced }: RulesScreenProps) {
                   <RuleRow
                     key={row.id}
                     row={row}
-                    admin={admin}
                     adjustOpen={openAdjustId === row.id}
                     onToggleAdjust={() => setOpenAdjustId((id) => (id === row.id ? null : row.id))}
+                    renaming={renamingId === row.id}
+                    renameDraft={renameDraft}
+                    onRenameStart={() => startRename(row)}
+                    onRenameDraftChange={setRenameDraft}
+                    onRenameCancel={closeRename}
+                    onRenameSubmit={() => submitRename(row)}
                     onToggleEnabled={(enabled) => {
                       if (row.kind && row.constraintId) toggle(row.kind, row.constraintId, enabled);
                     }}
                     onOpenAdvanced={() => {
                       if (row.advancedRoute) openAdvanced(row.advancedRoute);
-                    }}
-                    onEditShortcut={() => {
-                      if (row.pin) {
-                        setEditingPinId(row.pin.id);
-                        setFormMode("edit");
-                      }
-                    }}
-                    onUnpin={() => {
-                      if (row.pin) unpin(row.pin.id);
                     }}
                     onAdjustField={(key, value) => {
                       if (!row.kind || !row.constraintId) return undefined;
@@ -323,10 +243,11 @@ export function RulesScreen({ onOpenAdvanced }: RulesScreenProps) {
             data-testid="rules-empty-state"
           >
             <div className="font-heading text-title font-bold text-ink2">
-              No advanced constraints yet
+              No ward rules yet, beyond the built-in one
             </div>
             <p className="max-w-[44ch] text-meta text-ink3">
-              Add a constraint in Advanced, then pin it here for quick access.
+              Add a constraint in Advanced and it shows up here automatically — there is nothing to
+              set up.
             </p>
           </div>
         )}

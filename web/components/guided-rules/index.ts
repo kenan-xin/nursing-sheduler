@@ -1,12 +1,9 @@
-// Guided rule projection/mutation/pin-catalog registry (T14b) — public surface.
+// Guided rule projection/mutation registry (T14b) — public surface.
 export type {
   GuidedMutationOutcome,
-  GuidedPinOutcome,
   GuidedQuickField,
   GuidedRuleMapper,
-  GuidedRuleProjection,
   GuidedRuleRow,
-  PinnableRecord,
 } from "./types";
 
 export {
@@ -36,11 +33,3 @@ export {
   toggleRequirementRule,
   toggleSuccessionRule,
 } from "./mutations";
-
-export {
-  listPinnableRecords,
-  pinConstraint,
-  repinConstraint,
-  unpinConstraint,
-  type PinConstraintInput,
-} from "./pin-catalog";
