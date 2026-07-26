@@ -19,6 +19,7 @@
 import * as React from "react";
 import { paidMinutesFor, validateWorkingTimeDraft, type WorkingTimeValue } from "./core";
 import { InfoTip } from "@/components/ui/info-tip";
+import { Select } from "@/components/ui/select";
 
 const PAD = (n: number) => String(n).padStart(2, "0");
 /** The 48 half-hour clock slots 00:00..23:30 (the design's timeOptions). */
@@ -92,10 +93,10 @@ export function WorkingTimeFields({ value, onChange, idPrefix }: WorkingTimeFiel
             <InfoTip label="Time on floor" text={TIME_TIP} />
           </span>
           <div className="flex items-center gap-2">
-            <select
+            <Select
               data-testid={`${idPrefix}-start`}
               aria-label="Start time"
-              className="h-9 rounded-none border border-line bg-surface px-2 font-mono text-label text-ink"
+              className="font-mono text-label font-semibold"
               value={start}
               onChange={(e) => set({ startTime: e.target.value || undefined })}
             >
@@ -105,12 +106,12 @@ export function WorkingTimeFields({ value, onChange, idPrefix }: WorkingTimeFiel
                   {t}
                 </option>
               ))}
-            </select>
+            </Select>
             <span className="text-ink3">–</span>
-            <select
+            <Select
               data-testid={`${idPrefix}-end`}
               aria-label="End time"
-              className="h-9 rounded-none border border-line bg-surface px-2 font-mono text-label text-ink"
+              className="font-mono text-label font-semibold"
               value={end}
               onChange={(e) => set({ endTime: e.target.value || undefined })}
             >
@@ -120,7 +121,7 @@ export function WorkingTimeFields({ value, onChange, idPrefix }: WorkingTimeFiel
                   {t}
                 </option>
               ))}
-            </select>
+            </Select>
             {overnight && (
               <span className="border border-line2 px-2 py-1 font-mono text-label text-ink3">
                 +1 day
@@ -133,10 +134,11 @@ export function WorkingTimeFields({ value, onChange, idPrefix }: WorkingTimeFiel
             Rest
             <InfoTip label="Rest time" text={REST_TIP} />
           </span>
-          <select
+          <Select
             data-testid={`${idPrefix}-rest`}
             aria-label="Rest time"
-            className="h-9 rounded-none border border-line bg-surface px-2 font-mono text-label text-ink"
+            fullWidth
+            className="font-mono text-label font-bold"
             value={String(rest)}
             onChange={(e) => set({ restMinutes: Number(e.target.value) || undefined })}
           >
@@ -145,7 +147,7 @@ export function WorkingTimeFields({ value, onChange, idPrefix }: WorkingTimeFiel
                 {m === 0 ? "No rest" : fmtHours(m)}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
         <div className="flex flex-col gap-1">
           <span className="text-label font-semibold uppercase tracking-[0.03em] text-ink3">
