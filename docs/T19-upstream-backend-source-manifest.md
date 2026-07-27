@@ -249,6 +249,32 @@ above; **excluded** = intentionally not applied in `core/**` (owner noted).
 | `core/tests/test_server_identity.py` | Deployment identity sharing/rotation; memory store instance-id and empty rejection; Redis persistent store id, dual-client timeouts, identity-change health rejection, no-retry read, and construction-fatal identity failure. |
 | `core/tests/test_server_controller_retry.py` | Controller store-write retry uses the shared bounded backoff and converts exhausted conflicts to a contention error. |
 
+### Net-new catalogue-oracle test modules (2026-07-27)
+
+No upstream counterpart. Both are **net-new, additive, and test-only** — nothing under
+`nurse_scheduling/` was touched, so upstream drift is unchanged.
+
+| File | Purpose |
+| --- | --- |
+| `core/tests/catalogue_oracle.py` | Reusable CP-SAT oracle harness for vetting frontend Tier-1 conflict-catalogue checks: tiny-scenario YAML builder (people/shift-types/groups/preferences), `solve()` reducing an outcome to `INFEASIBLE`/`SOLVED`, and `assert_sound()`. Helper module, not collected as tests — same role as `schedule_test_helper.py` / `solver_test_utils.py`. |
+| `core/tests/test_catalogue_oracle_g7.py` | Vets catalogue check **G7** (weighted attainable-max) across 19 candidate shapes, and pins the three build-time premises its soundness rests on: coefficients >= 1, duplicate coefficient entries rejected, `at most one shift per day` mandatory. |
+
+**Why it lives in `tests/` rather than `scripts/`.** `pyproject.toml` scopes discovery to
+the test tree so slow real-solver tools under `core/scripts` (e.g.
+`solver_capability_probe.py`) are never collected. That exemption exists for *runtime*,
+and does not apply here: these scenarios are 1-2 people over 6-28 days, so the whole
+sweep solves in **~0.5 s** and belongs in the ordinary run.
+
+**Contract — assert only the sound direction.** `predicted infeasible => solver returns
+INFEASIBLE`. The converse is deliberately never asserted: catalogue checks are bounded
+relaxations, so a solver-proven-infeasible scenario may sit outside every check (low
+recall, the intended trade). A check firing on a solvable scenario is a false positive —
+if one appears, drop the check rather than weakening the test.
+
+**Verification (2026-07-27):** `pytest tests/test_catalogue_oracle_g7.py` — 24 passed in
+0.49 s. Full `core` suite — 600 passed, 51 skipped. `ruff check` + `ruff format --check`
+on `tests/` — clean.
+
 ### Verification performed (U30a)
 
 From `core/`, `PYTHONPATH=.`, system Python 3.14 user-site:
