@@ -425,8 +425,15 @@ async function expectStatusPairing(page: Page, label: string) {
  * rather than satisfied by any one of them. The failure it exists to catch is a
  * child that opts out — a label inside a `bg-brand` control forcing `text-ink3`
  * — which leaves the fill correct, the parent's own colour correct, and the
- * words on it unreadable. A subtree that establishes its own opaque background
- * is no longer painted on the fill, so it is not held to the fill's pairing.
+ * words on it unreadable.
+ *
+ * Traversal stops only at an ACTUALLY OPAQUE replacement plane. The earlier
+ * version stopped at any background that was not fully transparent, which let a
+ * translucent child — `rgba(…, 0.5)`, a tint, a hover wash — end the walk and
+ * carry its whole subtree out of the contract. That child is still painted over
+ * the fill: the fill shows through it, so its text is still text on the fill and
+ * still owes the paired `--on-*` foreground. Alpha is parsed and compared
+ * against 1 rather than being treated as a boolean.
  */
 async function expectSolidFillPairing(page: Page, label: string) {
   const offenders = await page.evaluate(() => {
@@ -445,6 +452,22 @@ async function expectSolidFillPairing(page: Page, label: string) {
       ["--fill-warn", "--on-warn"],
       ["--ink", "--on-ink"],
     ] as const;
+
+    /**
+     * The alpha of a computed colour. Chromium serializes an opaque colour as
+     * `rgb(r, g, b)` and a translucent one as `rgba(r, g, b, a)` or with a slash,
+     * so anything without an explicit alpha component is opaque.
+     */
+    const alphaOf = (value: string): number => {
+      const slash = value.match(/\/\s*([\d.]+)(%?)\s*\)/);
+      if (slash) return slash[2] === "%" ? Number(slash[1]) / 100 : Number(slash[1]);
+      const rgba = value.match(/^rgba\(([^)]*)\)$/);
+      if (rgba) {
+        const parts = rgba[1].split(",").map((p) => p.trim());
+        if (parts.length === 4) return Number(parts[3]);
+      }
+      return 1;
+    };
 
     /** Text this element renders itself, ignoring what its children render. */
     const ownText = (el: Element) =>
@@ -470,7 +493,10 @@ async function expectSolidFillPairing(page: Page, label: string) {
           // on the fill, so the fill's pairing does not govern its text.
           if (el !== filled) {
             const bg = getComputedStyle(el).backgroundColor;
-            if (bg !== "rgba(0, 0, 0, 0)" && bg !== fill) continue;
+            // Only a fully opaque plane replaces the fill. Anything translucent
+            // still has the fill showing through it, so its text remains bound by
+            // the fill's pairing and the walk must continue into it.
+            if (bg !== fill && alphaOf(bg) === 1) continue;
           }
           const text = ownText(el);
           const color = getComputedStyle(el).color;
@@ -772,6 +798,58 @@ test.describe("runtime scanner fixtures", () => {
     await expectSolidFillPairing(page, "fixture");
   });
 
+  // A TRANSLUCENT descendant is still painted over the fill — the fill shows
+  // through it — so its text is still text on the fill and still owes the paired
+  // foreground. The traversal used to stop at any background that was not fully
+  // transparent, which let a single `rgba(…, .5)` wrapper carry its whole subtree
+  // out of the contract silently.
+  test("a translucent descendant cannot carry its text out of the fill contract", async ({
+    page,
+  }) => {
+    await page.goto(FIXTURE_ROW.route);
+    await awaitRowReady(page, FIXTURE_ROW);
+
+    await page.evaluate(() => {
+      const host = document.createElement("div");
+      host.innerHTML = `<button id="probe-translucent" style="background: var(--brand); color: var(--onbrand)">
+        <span id="probe-veil" style="background: rgba(255,255,255,0.5)">
+          <span id="probe-veiled-text" style="color: var(--ink3)">2.5 h</span>
+        </span>
+      </button>`;
+      document.body.appendChild(host);
+    });
+
+    // Discriminating: the offending text sits two levels down, behind a
+    // translucent plane that previously terminated the walk.
+    await expect(expectSolidFillPairing(page, "fixture")).rejects.toThrow(/paired --on-\* token/);
+
+    // Pairing the veiled text fixes it — the veil itself was never the problem.
+    await page.evaluate(() => {
+      document.getElementById("probe-veiled-text")!.setAttribute("style", "color: var(--onbrand)");
+    });
+    await expectSolidFillPairing(page, "fixture");
+  });
+
+  test("an opaque replacement plane still ends the traversal", async ({ page }) => {
+    // The other half of the same rule. A child that paints its own OPAQUE plane
+    // genuinely covers the fill, so its text is not on the fill and must not be
+    // held to the fill's pairing — otherwise every nested card inside a brand
+    // surface would be a false positive.
+    await page.goto(FIXTURE_ROW.route);
+    await awaitRowReady(page, FIXTURE_ROW);
+
+    await page.evaluate(() => {
+      const host = document.createElement("div");
+      host.innerHTML = `<div id="probe-opaque-parent" style="background: var(--brand); color: var(--onbrand)">
+        <div id="probe-opaque-child" style="background: var(--surface); color: var(--ink)">covered</div>
+      </div>`;
+      document.body.appendChild(host);
+    });
+
+    // `--ink` on `--surface` is correct and must NOT be reported.
+    await expectSolidFillPairing(page, "fixture");
+  });
+
   test("reports a gradient as a diagnostic rather than guessing at it", async ({ page }) => {
     const { verdict } = await collectWithProbe(
       page,
@@ -905,7 +983,7 @@ test.describe("runtime scanner fixtures", () => {
       // transition whose end event mutates the DOM.
       host.innerHTML = `
         <div id="probe-order-gradient" style="background-image: linear-gradient(rgb(0,0,0), rgb(255,255,255)); height: 20px">g</div>
-        <div id="probe-order-transition" style="height: 20px; background-color: rgb(252,254,253); transition: background-color 30s linear">t</div>`;
+        <div id="probe-order-transition" style="height: 20px; background-color: rgb(252,254,253); transition: background-color 600s linear">t</div>`;
       document.body.appendChild(host);
 
       const target = document.getElementById("probe-order-transition")!;
@@ -915,11 +993,34 @@ test.describe("runtime scanner fixtures", () => {
         target.setAttribute("data-probe-mutated", "true");
       });
 
-      // Start the transition on the next frame so it is genuinely running.
-      requestAnimationFrame(() => {
-        target.style.backgroundColor = "rgb(17, 24, 22)";
-      });
+      // Start the transition SYNCHRONOUSLY. Reading a computed style flushes the
+      // element's initial value, so the assignment that follows is a genuine
+      // change between two settled styles and begins a transition immediately.
+      //
+      // This deliberately does NOT use requestAnimationFrame. rAF only runs on a
+      // rendering frame, and the production path that follows is a rapid series
+      // of whole-document getComputedStyle sweeps; under parallel load the
+      // browser can go seconds without painting, so the callback had not fired
+      // by the time the deferred capture ran. The capture then had nothing to
+      // fast-forward and the liveness postcondition saw zero events — exactly the
+      // clean-baseline failure R4's preflight hit, reproduced here at 9 failures
+      // in 10 runs before this change.
+      void getComputedStyle(target).backgroundColor;
+      target.style.backgroundColor = "rgb(17, 24, 22)";
     });
+
+    // Liveness is a PROVEN PRECONDITION, not a hope. Everything below is only
+    // meaningful while a real transition is in flight, so wait for Chromium to
+    // report one rather than assuming timing.
+    await page.waitForFunction(
+      () =>
+        document
+          .getElementById("probe-order-transition")!
+          .getAnimations()
+          .some((a) => a.constructor.name === "CSSTransition" && a.playState === "running"),
+      undefined,
+      { timeout: 10_000 },
+    );
 
     const settled = () =>
       page.evaluate(() => ({

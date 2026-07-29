@@ -29,11 +29,13 @@ const twMerge = extendTailwindMerge({
     //
     // Without this, tailwind-merge could not classify `size-control` at all: it
     // kept BOTH that class and the caller's `size-[34px]`, and emitted CSS order
-    // silently decided the winner. 33 call sites overrode a control size through
-    // `className` and every one of them was being ignored — the sidebar footer
-    // theme button rendered 36px against an explicit `size-[34px]`, which is the
-    // only one any test caught. Same bug class as the `font-size` entry below,
-    // which is why both live here.
+    // silently decided the winner. An AST sweep audited 33 shared-primitive call
+    // sites carrying a sizing override; 27 of them were height/size overrides
+    // against a custom token and were therefore being ignored (the remaining 6
+    // were width-only, which conflicts with the standard `w-full` and always
+    // merged correctly). The sidebar footer theme button rendered 36px against an
+    // explicit `size-[34px]`, and it was the only one any test caught. Same bug
+    // class as the `font-size` entry below, which is why both live here.
     //
     // Note what this deliberately does NOT do: `min-h-*` and `min-w-*` are their
     // own groups, so a caller shrinking a control with `h-8` still keeps the
