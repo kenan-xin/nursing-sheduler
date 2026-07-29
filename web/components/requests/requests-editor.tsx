@@ -8,7 +8,7 @@
 // in the durable store; every actual mutation routes through `useRequests`
 // (one tracked store write per operation).
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { GuardedLink } from "@/components/shell/guarded-link";
 import { toast } from "sonner";
 import { FaCircleInfo, FaLayerGroup, FaTableCells } from "@/components/icons";
@@ -35,8 +35,17 @@ import { useRequests } from "./use-requests";
 
 type ConfirmState = { text: string; onConfirm: () => void } | null;
 type CsvKind = "requests" | "history" | null;
-type CellEditorState = { person: PersonRef; date: DateRef } | null;
-type HistoryEditorState = { personId: PersonRef; historyIndex: number } | null;
+// `origin` is the exact matrix element that opened the editor. It is held
+// ALONGSIDE the coordinate, never derived from it: after a commit the matrix
+// re-renders and a coordinate-shaped `querySelector` could resolve to a
+// different node (or, once virtualization recycles the row, to none), so the
+// element itself is the only honest focus-restoration target.
+type CellEditorState = { person: PersonRef; date: DateRef; origin: HTMLElement } | null;
+type HistoryEditorState = {
+  personId: PersonRef;
+  historyIndex: number;
+  origin: HTMLElement;
+} | null;
 
 const RESERVED_TARGET_LABELS: Record<string, string> = {
   OFF: "Off / rest day",
@@ -320,11 +329,43 @@ export function RequestsEditor() {
   ];
 
   // --- Cell / history editor wiring ------------------------------------------
-  function openCellEditor(person: PersonRef, date: DateRef) {
-    setCellEditor({ person, date });
+  //
+  // Focus restoration (F3): both editors promise focus back to the matrix cell
+  // that opened them. Base UI restores focus to whatever was focused when the
+  // dialog opened, which is only the right element because the matrix cells are
+  // now real keyboard controls that take focus on activation — but the parent
+  // unmounts these editors outright rather than animating them closed, so the
+  // restoration is made explicit here instead of being left to that ordering.
+  //
+  // The element is stashed on close and focused from an effect, i.e. after React
+  // has committed the unmount, so focus is never handed to a node while the
+  // overlay still owns the focus trap. A stale origin (its row scrolled out of
+  // the virtualizer, its person deleted) is simply dropped: focusing `body` or
+  // the nearest lookalike cell would be worse than leaving focus where it is.
+  const pendingRefocus = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const origin = pendingRefocus.current;
+    if (!origin) return;
+    pendingRefocus.current = null;
+    if (origin.isConnected) origin.focus();
+  }, [cellEditor, historyEditor]);
+
+  function openCellEditor(person: PersonRef, date: DateRef, origin: HTMLElement) {
+    setCellEditor({ person, date, origin });
   }
-  function openHistoryEditor(person: PersonRef, historyIndex: number) {
-    setHistoryEditor({ personId: person, historyIndex });
+  function openHistoryEditor(person: PersonRef, historyIndex: number, origin: HTMLElement) {
+    setHistoryEditor({ personId: person, historyIndex, origin });
+  }
+  /** Every Cell Preference close path — Escape, backdrop, Cancel, Save, Clear. */
+  function closeCellEditor() {
+    pendingRefocus.current = cellEditor?.origin ?? null;
+    setCellEditor(null);
+  }
+  /** Every History close path — Escape, backdrop, X, Done, option select, Clear. */
+  function closeHistoryEditor() {
+    pendingRefocus.current = historyEditor?.origin ?? null;
+    setHistoryEditor(null);
   }
 
   const activeCellCells = cellEditor
@@ -522,7 +563,7 @@ export function RequestsEditor() {
           targets={cellEditorTargets}
           onSave={(result) => commitCellEdit(cellEditor.person, cellEditor.date, result)}
           onClear={() => clearCell(cellEditor.person, cellEditor.date)}
-          onClose={() => setCellEditor(null)}
+          onClose={closeCellEditor}
         />
       )}
 
@@ -536,13 +577,13 @@ export function RequestsEditor() {
           onSet={(value) => {
             // FR-SR-19: a selection saves AND closes.
             commitHistorySet(historyEditor.personId, historyEditor.historyIndex, value);
-            setHistoryEditor(null);
+            closeHistoryEditor();
           }}
           onClear={() => {
             commitHistoryClear(historyEditor.personId, historyEditor.historyIndex);
-            setHistoryEditor(null);
+            closeHistoryEditor();
           }}
-          onClose={() => setHistoryEditor(null)}
+          onClose={closeHistoryEditor}
         />
       )}
 

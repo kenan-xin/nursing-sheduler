@@ -1,0 +1,142 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-27T00:00:00Z",
+  "title": "Design System: Nurse Scheduling",
+  "extensions": {
+    "colorMeta": {
+      "brand": { "role": "primary", "displayName": "Instrument Blue", "canonical": "#2360c4", "tonalRamp": ["#0e2140", "#123362", "#164683", "#1a58a5", "#2360c4", "#5a8bd6", "#a4c3ea", "#eef4fc"] },
+      "ink": { "role": "neutral", "displayName": "Ink", "canonical": "#14161b", "tonalRamp": ["#0a0b0e", "#14161b", "#2a2d35", "#4a515c", "#8b929c", "#aab0ba", "#c8cdd5", "#fbfcfd"] },
+      "success": { "role": "status-positive", "displayName": "Confirm Green", "canonical": "#1f9a5c", "tonalRamp": ["#0d3f26", "#125a35", "#187645", "#1d8a51", "#1f9a5c", "#5fcf94", "#a7e6c6", "#eafaf1"] },
+      "warn": { "role": "status-caution", "displayName": "Caution Amber", "canonical": "#b07d10", "tonalRamp": ["#4a3407", "#6b4b0a", "#8c620d", "#a06e0f", "#b07d10", "#d6a743", "#ecc885", "#fbf3df"] },
+      "error": { "role": "status-negative", "displayName": "Alert Red", "canonical": "#d94032", "tonalRamp": ["#4d120d", "#6e1a13", "#95251b", "#c0392b", "#d94032", "#e06a5e", "#eda49c", "#fbeae8"] }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Page-level headings only." },
+      "headline": { "displayName": "Headline", "purpose": "Card headers - 0.78x display, its own step." },
+      "title": { "displayName": "Title", "purpose": "Section/subsection titles - 0.6x display." },
+      "body": { "displayName": "Body", "purpose": "All running text and form content." },
+      "label": { "displayName": "Label", "purpose": "Eyebrow labels, badge text, field labels. Uppercase where used." },
+      "mono": { "displayName": "Mono", "purpose": "Codes, weights, and data values - so numbers read as data, not prose." }
+    },
+    "shadows": [
+      { "name": "toast", "value": "0 8px 26px rgba(20,30,50,.16)", "purpose": "Bottom-center toast notification." },
+      { "name": "dialog", "value": "0 12px 34px rgba(20,30,50,.18)", "purpose": "Modal dialogs and confirm sheets." },
+      { "name": "side", "value": "-16px 0 40px rgba(20,30,50,.18)", "purpose": "Mobile nav drawer sliding in." }
+    ],
+    "motion": [
+      { "name": "ease-standard", "value": "cubic-bezier(0.4, 0, 0.2, 1)", "purpose": "Default easing for all state transitions." },
+      { "name": "duration-fast", "value": "0.15s", "purpose": "Micro-interactions (hover, toggle)." },
+      { "name": "duration-base", "value": "0.22s", "purpose": "Standard transitions (fade, slide, scrim)." }
+    ],
+    "breakpoints": [
+      { "name": "xs", "value": "480px" },
+      { "name": "sm", "value": "640px" },
+      { "name": "nav", "value": "920px" },
+      { "name": "md", "value": "768px" },
+      { "name": "lg", "value": "1024px" },
+      { "name": "xl", "value": "1280px" },
+      { "name": "2xl", "value": "1440px" },
+      { "name": "3xl", "value": "1920px" },
+      { "name": "layout-panes2", "value": "600px" },
+      { "name": "layout-formgrid", "value": "720px" },
+      { "name": "layout-wizgrid", "value": "760px" },
+      { "name": "layout-grid2", "value": "900px" },
+      { "name": "layout-grid3", "value": "1100px" },
+      { "name": "layout-wizgrid3", "value": "1200px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Main call-to-action. Accent fill, square corners, no shadow.",
+      "html": "<button class=\"ds-btn-primary\">Save schedule</button>",
+      "css": ".ds-btn-primary { background: #2360c4; color: #ffffff; padding: 0 16px; height: 36px; font-family: 'Hanken Grotesk', system-ui, sans-serif; font-size: 14px; font-weight: 500; border: none; border-radius: 0; transition: background 0.15s cubic-bezier(0.4,0,0.2,1); } .ds-btn-primary:hover { background: #1d55ac; } .ds-btn-primary:focus-visible { outline: 2px solid #2360c4; outline-offset: -1px; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Lower-emphasis action alongside a primary button.",
+      "html": "<button class=\"ds-btn-secondary\">Cancel</button>",
+      "css": ".ds-btn-secondary { background: #f2f4f7; color: #14161b; padding: 0 16px; height: 36px; font-family: 'Hanken Grotesk', system-ui, sans-serif; font-size: 14px; font-weight: 500; border: none; border-radius: 0; transition: background 0.15s cubic-bezier(0.4,0,0.2,1); } .ds-btn-secondary:hover { background: #e9ecf1; } .ds-btn-secondary:focus-visible { outline: 2px solid #2360c4; outline-offset: -1px; }"
+    },
+    {
+      "name": "Destructive Button",
+      "kind": "button",
+      "refersTo": "button-destructive",
+      "description": "Delete/remove actions. Uses the AA-safe strong red, never the display Alert Red.",
+      "html": "<button class=\"ds-btn-destructive\">Delete shift type</button>",
+      "css": ".ds-btn-destructive { background: #c0392b; color: #ffffff; padding: 0 16px; height: 36px; font-family: 'Hanken Grotesk', system-ui, sans-serif; font-size: 14px; font-weight: 500; border: none; border-radius: 0; transition: background 0.15s cubic-bezier(0.4,0,0.2,1); } .ds-btn-destructive:hover { background: #a5311f; } .ds-btn-destructive:focus-visible { outline: 2px solid #2360c4; outline-offset: -1px; }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Standard text field. Hairline border, square corners, accent focus ring.",
+      "html": "<input class=\"ds-input\" type=\"text\" placeholder=\"e.g. Jane Tan\" />",
+      "css": ".ds-input { background: #ffffff; color: #14161b; border: 1px solid #c8cdd5; border-radius: 0; height: 36px; padding: 4px 12px; font-family: 'Hanken Grotesk', system-ui, sans-serif; font-size: 14px; outline: none; } .ds-input::placeholder { color: #aab0ba; } .ds-input:focus-visible { border-color: #2360c4; box-shadow: 0 0 0 2px rgba(35,96,196,0.3); }"
+    },
+    {
+      "name": "Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Flat, hairline-bordered container. No shadow at rest.",
+      "html": "<div class=\"ds-card\"><div class=\"ds-card-header\">Shift type</div><div class=\"ds-card-body\">Day 07:00-19:00, 12h, minimum 3 nurses.</div></div>",
+      "css": ".ds-card { background: #ffffff; border: 1px solid #c8cdd5; border-radius: 0; } .ds-card-header { font-family: 'Figtree', system-ui, sans-serif; font-size: 18px; font-weight: 600; letter-spacing: -0.02em; padding: 20px 20px 4px; color: #14161b; } .ds-card-body { padding: 0 20px 20px; font-family: 'Hanken Grotesk', system-ui, sans-serif; font-size: 14px; color: #4a515c; }"
+    },
+    {
+      "name": "Status Badge",
+      "kind": "chip",
+      "refersTo": "badge-status",
+      "description": "Semantic status indicator. Tint fill, matching border and ink text so meaning never depends on hue alone.",
+      "html": "<span class=\"ds-badge-success\">Feasible</span>",
+      "css": ".ds-badge-success { display: inline-flex; align-items: center; gap: 4px; background: #eafaf1; border: 1px solid #1f9a5c; color: #14161b; border-radius: 0; padding: 2px 8px; font-family: 'Hanken Grotesk', system-ui, sans-serif; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }"
+    },
+    {
+      "name": "Success Toast",
+      "kind": "custom",
+      "refersTo": null,
+      "description": "Signature component. Ink-dark surface, on-ink text, floating side shadow, and the one deliberate side-stripe exception in the whole system.",
+      "html": "<div class=\"ds-toast\"><span class=\"ds-toast-icon\">&#10003;</span><span>Roster saved</span></div>",
+      "css": ".ds-toast { display: flex; align-items: center; gap: 8px; background: #14161b; color: #ffffff; border: 1px solid #14161b; border-left: 3px solid #1f9a5c; border-radius: 0; box-shadow: -16px 0 40px rgba(20,30,50,.18); font-family: 'Hanken Grotesk', system-ui, sans-serif; font-size: 13px; font-weight: 600; padding: 10px 16px; } .ds-toast-icon { color: #5fcf94; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Ward Instrument",
+    "overview": "This is a precise, purpose-built tool for shift scheduling, not a consumer app and not a cold clinical terminal. Every squared-off edge (radius: 0 everywhere, no exceptions) reads as engineered discipline rather than decoration: this is an instrument a ward manager operates with confidence, the same way a calibrated device earns trust through precision, not ornament. The top chrome bar stays dark in both light and dark theme, an always-on instrument-panel reference point that never flips with the rest of the surface. The palette is restrained: near-white paper and pure-white cards, ink-dark text, a single user-selectable accent, and status color reserved strictly for meaning. Type pairs a confident display face (Figtree) against a plain, highly-legible body face (Hanken Grotesk), with a monospace face reserved for codes, weights, and data values.",
+    "keyCharacteristics": [
+      "Square corners everywhere (radius: 0), no exceptions, ever.",
+      "Flat by default: cards, panels, and inputs carry a hairline border, never a shadow.",
+      "One user-selectable accent color drives brand, focus rings, and links; status colors are reserved for meaning only.",
+      "Figtree for display/headings, Hanken Grotesk for body/UI, Spline Sans Mono for codes and data values.",
+      "A fluid type scale stepping up at six breakpoints, baked at a fixed 0.9 density multiplier.",
+      "Two independent, deliberately disjoint breakpoint ladders: type and layout - never conflate them."
+    ],
+    "rules": [
+      { "name": "The One Accent Rule", "body": "Exactly one accent color is live at a time, user-selected from four options. Brand-tint fills are always derived from that single accent via a fixed mix formula.", "section": "colors" },
+      { "name": "The Redundant Signal Rule", "body": "Status is never carried by color alone: every status badge pairs its tint with an ink-dark text color and a matching border.", "section": "colors" },
+      { "name": "The Negative-Tracking Rule", "body": "Every heading-weight face carries -0.02em letter-spacing; every uppercase label carries +0.03em.", "section": "typography" },
+      { "name": "The Floating-Only Rule", "body": "A shadow is permitted only on a surface that visually floats above the rest of the page (toast, dialog, drawer). A resting card, panel, or input never gets one.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do keep every corner at radius: 0 - cards, buttons, inputs, badges, dialogs, the drawer. No exceptions.",
+      "Do use a hairline border as the default separation for resting surfaces instead of a shadow.",
+      "Do reserve shadow for genuinely floating surfaces only: toast, dialog, side drawer.",
+      "Do pair every status color with matching text/border so meaning never depends on hue alone.",
+      "Do use the Alert Red Strong fill, not the display Alert Red, for any destructive action button.",
+      "Do route every new component through the tokens above - no hard-coded hex, no default shadcn blue.",
+      "Do use the layout ladder for grid/form breakpoints, and the type ladder for everything else."
+    ],
+    "donts": [
+      "Don't ship a generic SaaS dashboard cliche - no gradient hero metrics, no glowing stat tiles, no glassmorphism-as-default.",
+      "Don't make it read as cold clinical hospital software - sterile and intimidating is a failure state.",
+      "Don't introduce playful-consumer-app cues - no rounded bubbly shapes, no mascots, no bright primary colors outside the defined palette.",
+      "Don't let anything look like an unstyled shadcn default.",
+      "Don't use a colored left/right border stripe as a decorative accent, except the one narrow success-toast exception ported from the canonical prototype.",
+      "Don't use gradient text or any background-clip: text treatment.",
+      "Don't snap a layout grid to the nearest type-ladder breakpoint instead of its own layout-ladder value."
+    ]
+  }
+}

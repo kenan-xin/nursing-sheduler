@@ -9,23 +9,23 @@
 <x-dc>
 <div class="ns-fade">
   <div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:var(--space-4);margin-bottom:var(--space-4);">
-    <div style="flex:1;min-width:240px;">
+    <div style="flex:1 1 440px;min-width:min(100%,440px);">
       <div style="font:600 var(--m-sm) var(--font-ui);letter-spacing:.03em;color:var(--brandink);text-transform:uppercase;margin-bottom:8px;">STEP 5 · REQUESTS &amp; LEAVE</div>
-      <h1 style="font:800 var(--t-display) var(--font-display);letter-spacing:-.02em;margin:0 0 8px;line-height:1.05;">Requests &amp; Leave</h1>
+      <h1 style="font:700 var(--t-display) var(--font-display);letter-spacing:-.015em;margin:0 0 8px;line-height:1.05;">Requests &amp; Leave</h1>
       <p style="margin:0;color:var(--ink2);max-width:66ch;">Pin approved <b>paid leave</b>, set off-days, and enter shift preferences. Use <b>Quick paint</b> to drag presets across cells, or <b>Edit</b> to open a cell and set a precise weight per shift.</p>
     </div>
-    <button onClick="{{ toGenerate }}" style="height:44px;padding:0 20px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-body) var(--font-ui);display:inline-flex;align-items:center;gap:9px;" style-hover="filter:brightness(.94)">Continue <i class="fa-solid fa-arrow-right" style="font-size:12px;"></i></button>
+    <button onClick="{{ toGenerate }}" style="height:44px;padding:0 20px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-body) var(--font-ui);display:inline-flex;align-items:center;gap:8px;" style-hover="filter:brightness(.94)">Continue <i class="fa-solid fa-arrow-right" style="font-size:12px;"></i></button>
   </div>
 
   <sc-if value="{{ flash }}" hint-placeholder-val="{{ false }}">
-    <div style="background:var(--successtint);border:1px solid var(--success);padding:10px 13px;margin-bottom:var(--space-3);display:flex;align-items:center;gap:9px;font-size:var(--t-sm);color:var(--ink);"><i class="fa-solid fa-circle-check" style="color:var(--success);"></i> {{ flash }}</div>
+    <div style="background:var(--successtint);border:1px solid var(--success);padding:10px 12px;margin-bottom:var(--space-3);display:flex;align-items:center;gap:8px;font-size:var(--t-sm);color:var(--ink);"><i class="fa-solid fa-circle-check" style="color:var(--successink);"></i> {{ flash }}</div>
   </sc-if>
 
   <!-- toolbar -->
   <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:var(--space-3);">
     <div role="tablist" style="display:inline-flex;border:1px solid var(--line);">
-      <button onClick="{{ setNormal }}" style="{{ normalTabStyle }}"><i class="fa-solid fa-arrow-pointer" style="margin-right:6px;font-size:11px;"></i>Edit cells</button>
-      <button onClick="{{ setQuick }}" style="{{ quickTabStyle }}"><i class="fa-solid fa-brush" style="margin-right:6px;font-size:11px;"></i>Quick paint</button>
+      <button onClick="{{ setNormal }}" style="{{ normalTabStyle }}"><i class="fa-solid fa-arrow-pointer" style="margin-right:6px;font-size:12px;"></i>Edit cells</button>
+      <button onClick="{{ setQuick }}" style="{{ quickTabStyle }}"><i class="fa-solid fa-brush" style="margin-right:6px;font-size:12px;"></i>Quick paint</button>
     </div>
 
     <sc-if value="{{ quickMode }}" hint-placeholder-val="{{ false }}">
@@ -34,13 +34,13 @@
 
     <button onClick="{{ openPrefsCsv }}" style="height:40px;padding:0 14px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:8px;" style-hover="background:var(--panel)"><i class="fa-solid fa-file-arrow-up"></i> Requests CSV</button>
     <button onClick="{{ openHistCsv }}" style="height:40px;padding:0 14px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:8px;" style-hover="background:var(--panel)"><i class="fa-solid fa-clock-rotate-left"></i> History CSV</button>
-    <button onClick="{{ toggleClear }}" style="height:40px;padding:0 14px;background:transparent;border:1px solid var(--line);color:var(--error);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:8px;" style-hover="background:var(--errortint)"><i class="fa-solid fa-eraser"></i> Clear data</button>
+    <button onClick="{{ toggleClear }}" style="height:40px;padding:0 14px;background:transparent;border:1px solid var(--line);color:var(--errorink);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:8px;" style-hover="background:var(--errortint)"><i class="fa-solid fa-eraser"></i> Clear data</button>
   </div>
 
   <!-- quick paint panel -->
   <sc-if value="{{ quickMode }}" hint-placeholder-val="{{ false }}">
     <div style="border:1px solid var(--line);background:var(--surface);padding:16px 18px;margin-bottom:var(--space-3);">
-      <div style="font:800 var(--t-cardhead) var(--font-display);letter-spacing:-.02em;">Add shift preference</div>
+      <div style="font:700 var(--t-cardhead) var(--font-display);letter-spacing:-.015em;">Add shift preference</div>
       <div style="font-size:var(--t-sm);color:var(--ink3);margin-top:2px;margin-bottom:14px;">Pick one or more targets and a weight, then drag across grid cells to apply. Select nothing to clear cells instead.</div>
       <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;margin-bottom:8px;">Shift types <span style="color:var(--ink3);font-weight:500;text-transform:none;letter-spacing:0;">— select multiple to set each</span></div>
       <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;">
@@ -51,8 +51,8 @@
       <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;margin-bottom:8px;">Weight <span style="color:var(--ink3);font-weight:500;text-transform:none;letter-spacing:0;">(priority)</span></div>
       <div style="display:flex;align-items:center;gap:8px;max-width:440px;">
         <input value="{{ qWeight }}" onInput="{{ onQWeight }}" placeholder="0" style="flex:1;height:38px;padding:0 12px;border:1px solid var(--line);background:var(--surface);font:600 var(--t-body) var(--font-mono);">
-        <button onClick="{{ onWeightPosInf }}" style="height:38px;padding:0 14px;border:1px solid var(--success);background:var(--successtint);color:var(--success);font:700 var(--t-sm) var(--font-mono);flex:none;" style-hover="filter:brightness(.97)">+∞</button>
-        <button onClick="{{ onWeightNegInf }}" style="height:38px;padding:0 14px;border:1px solid var(--warn);background:var(--warntint);color:var(--warn);font:700 var(--t-sm) var(--font-mono);flex:none;" style-hover="filter:brightness(.97)">−∞</button>
+        <button onClick="{{ onWeightPosInf }}" style="height:38px;padding:0 14px;border:1px solid var(--success);background:var(--successtint);color:var(--successink);font:700 var(--t-sm) var(--font-mono);flex:none;" style-hover="filter:brightness(.97)">+∞</button>
+        <button onClick="{{ onWeightNegInf }}" style="height:38px;padding:0 14px;border:1px solid var(--warn);background:var(--warntint);color:var(--warnink);font:700 var(--t-sm) var(--font-mono);flex:none;" style-hover="filter:brightness(.97)">−∞</button>
       </div>
       <div style="font-size:var(--t-sm);margin-top:14px;padding:8px 12px;{{ quickStatusStyle }}"><i class="fa-solid fa-brush" style="margin-right:6px;"></i>{{ quickStatus }}</div>
     </div>
@@ -77,13 +77,13 @@
     <span style="display:inline-flex;align-items:center;gap:6px;font:500 var(--t-sm) var(--font-ui);color:var(--ink2);"><span style="width:12px;height:12px;background:var(--warntint);border:1px solid var(--warn);"></span>H-n · recent history</span>
     <span style="display:inline-flex;align-items:center;gap:6px;font:500 var(--t-sm) var(--font-ui);color:var(--ink2);"><span style="width:12px;height:12px;background:var(--brandtint);border:1px solid var(--brand);"></span>Date-group column</span>
   </div>
-  <div style="display:flex;align-items:flex-start;gap:9px;border:1px solid var(--line);background:var(--panel);padding:10px 13px;margin-bottom:var(--space-3);">
+  <div style="display:flex;align-items:flex-start;gap:8px;border:1px solid var(--line);background:var(--panel);padding:10px 12px;margin-bottom:var(--space-3);">
     <i class="fa-solid fa-layer-group" style="color:var(--brandink);margin-top:2px;font-size:12px;"></i>
     <div style="font-size:var(--t-sm);color:var(--ink2);"><b>Shortcut rows &amp; columns.</b> The top <b style="color:var(--brandink);">people-group</b> rows (tagged <span style="font-family:var(--font-mono);">GROUP</span>) set one preference for every nurse in the group at once — synced from your Staff groups. Likewise the tinted <b style="color:var(--brandink);">date-group</b> columns (ALL, WEEKDAY, WEEKEND, and your own groups) apply to every date in the group. The <b>H-n</b> columns capture each nurse's <b>recent history</b> — the shifts worked in the days just before the roster starts — which the rest &amp; succession rules read; click a slot (or the <span style="font-family:var(--font-mono);">+</span>) to edit it. Group rows have no history.</div>
   </div>
-  <div style="display:flex;align-items:flex-start;gap:9px;border:1px solid var(--line);background:var(--brandtint);padding:10px 13px;margin-bottom:var(--space-4);">
+  <div style="display:flex;align-items:flex-start;gap:8px;border:1px solid var(--line);background:var(--brandtint);padding:10px 12px;margin-bottom:var(--space-4);">
     <i class="fa-solid fa-thumbtack" style="color:var(--brandink);margin-top:2px;font-size:12px;"></i>
-    <div style="font-size:var(--t-sm);color:var(--ink2);"><b style="color:var(--brandink);">Paid leave is a hard pin.</b> A pinned <span style="font-family:var(--font-mono);font-weight:700;">Leave</span> day is always honored, credits 8h toward the contracted-hours total, and never fills a shift's coverage. Weight is ignored for leave — it is a pin, not a weighted request.</div>
+    <div style="font-size:var(--t-sm);color:var(--ink2);"><b style="color:var(--brandink);">Paid leave is a hard pin.</b> A pinned <span style="font-family:var(--font-mono);font-weight:700;">Leave</span> day is always honoured, credits 8h toward the contracted-hours total, and never fills a shift's coverage. Weight is ignored for leave — it is a pin, not a weighted request.</div>
   </div>
 
   <!-- matrix -->
@@ -96,7 +96,7 @@
             <th title="{{ h.title }}" style="position:sticky;top:0;z-index:1;padding:6px 4px;min-width:34px;text-align:center;border-bottom:1px solid var(--line);border-right:1px solid var(--line2);background:var(--warntint);"><div style="font:600 var(--m-xs) var(--font-mono);color:var(--ink2);">{{ h.label }}</div></th>
           </sc-for>
           <sc-for list="{{ dgHead }}" as="g" hint-placeholder-count="3">
-            <th title="{{ g.title }}" style="{{ g.headStyle }}"><div style="display:flex;flex-direction:column;align-items:center;gap:2px;"><i class="fa-solid {{ g.icon }}" style="font-size:11px;color:var(--brandink);"></i><div style="font:700 var(--m-xs) var(--font-ui);letter-spacing:.02em;color:var(--brandink);white-space:nowrap;">{{ g.id }}</div><div style="font:600 9px var(--font-mono);color:var(--ink3);white-space:nowrap;">{{ g.count }}</div></div></th>
+            <th title="{{ g.title }}" style="{{ g.headStyle }}"><div style="display:flex;flex-direction:column;align-items:center;gap:2px;"><i class="fa-solid {{ g.icon }}" style="font-size:12px;color:var(--brandink);"></i><div style="font:700 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--brandink);white-space:nowrap;">{{ g.id }}</div><div style="font:600 var(--t-nano) var(--font-mono);color:var(--ink3);white-space:nowrap;">{{ g.count }}</div></div></th>
           </sc-for>
           <sc-for list="{{ days }}" as="d" hint-placeholder-count="14">
             <th style="{{ d.headStyle }}"><div style="font:600 var(--m-md) var(--font-mono);line-height:1;color:{{ d.numColor }};">{{ d.d }}</div><div style="font:600 var(--m-xs) var(--font-mono);color:var(--ink3);margin-top:2px;">{{ d.label }}</div><sc-if value="{{ d.holiday }}" hint-placeholder-val="{{ false }}"><span style="display:block;width:5px;height:5px;background:var(--warn);margin:3px auto 0;"></span></sc-if></th>
@@ -130,13 +130,13 @@
 
   <!-- current shift requests (FR-SR-39) — derived from the matrix above -->
   <div style="margin-top:var(--space-5);background:var(--surface);border:1px solid var(--line);">
-    <div style="padding:14px 18px;border-bottom:1px solid var(--line2);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
-      <div style="font:800 var(--t-cardhead) var(--font-display);letter-spacing:-.02em;">Current shift requests</div>
+    <div style="padding:16px 18px;border-bottom:1px solid var(--line2);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+      <div style="font:700 var(--t-cardhead) var(--font-display);letter-spacing:-.015em;">Current shift requests</div>
       <div style="display:flex;align-items:center;gap:10px;">
         <div style="position:relative;display:inline-flex;align-items:center;">
-          <i class="fa-solid fa-magnifying-glass" style="position:absolute;left:10px;font-size:11px;color:var(--ink3);pointer-events:none;"></i>
+          <i class="fa-solid fa-magnifying-glass" style="position:absolute;left:10px;font-size:12px;color:var(--ink3);pointer-events:none;"></i>
           <input value="{{ crQuery }}" onInput="{{ onCrQuery }}" placeholder="Search person, date, shift…" style="height:34px;width:230px;max-width:52vw;padding:0 28px 0 28px;border:1px solid var(--line);background:var(--surface);font:500 var(--t-sm) var(--font-ui);">
-          <sc-if value="{{ crHasQuery }}" hint-placeholder-val="{{ false }}"><button onClick="{{ clearCrQuery }}" aria-label="Clear search" style="position:absolute;right:6px;width:20px;height:20px;background:transparent;border:none;color:var(--ink3);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;"><i class="fa-solid fa-xmark" style="font-size:11px;"></i></button></sc-if>
+          <sc-if value="{{ crHasQuery }}" hint-placeholder-val="{{ false }}"><button onClick="{{ clearCrQuery }}" aria-label="Clear search" style="position:absolute;right:6px;width:20px;height:20px;background:transparent;border:none;color:var(--ink3);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;"><i class="fa-solid fa-xmark" style="font-size:12px;"></i></button></sc-if>
         </div>
         <div style="font:600 var(--m-sm) var(--font-mono);color:var(--ink3);">{{ crCount }}</div>
       </div>
@@ -155,11 +155,11 @@
         <div style="max-height:340px;overflow:auto;">
           <sc-for list="{{ crList }}" as="e" hint-placeholder-count="6">
             <div style="{{ e.rowStyle }}">
-              <span style="display:inline-flex;align-items:center;gap:6px;overflow:hidden;"><i class="fa-solid fa-user-group" style="font-size:9px;{{ e.personIconStyle }}"></i><span style="font:600 var(--t-sm) var(--font-ui);color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ e.person }}</span></span>
-              <span style="{{ e.dateStyle }}"><i class="fa-solid fa-layer-group" style="font-size:9px;{{ e.groupIconStyle }}"></i>{{ e.date }}</span>
+              <span style="display:inline-flex;align-items:center;gap:6px;overflow:hidden;"><i class="fa-solid fa-user-group" style="font-size:10px;{{ e.personIconStyle }}"></i><span style="font:600 var(--t-sm) var(--font-ui);color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ e.person }}</span></span>
+              <span style="{{ e.dateStyle }}"><i class="fa-solid fa-layer-group" style="font-size:10px;{{ e.groupIconStyle }}"></i>{{ e.date }}</span>
               <span style="{{ e.shiftStyle }}">{{ e.shift }}</span>
               <span style="{{ e.weightStyle }}">{{ e.weight }}</span>
-              <span style="display:inline-flex;align-items:center;gap:7px;"><span style="{{ e.dotStyle }}"></span><span style="{{ e.capStyle }}">{{ e.caption }}</span></span>
+              <span style="display:inline-flex;align-items:center;gap:8px;"><span style="{{ e.dotStyle }}"></span><span style="{{ e.capStyle }}">{{ e.caption }}</span></span>
             </div>
           </sc-for>
         </div>
@@ -169,8 +169,8 @@
 
   <!-- current people history (FR-SR-40) — derived from the H-n columns above -->
   <div style="margin-top:var(--space-4);background:var(--surface);border:1px solid var(--line);">
-    <div style="padding:14px 18px;border-bottom:1px solid var(--line2);display:flex;align-items:baseline;justify-content:space-between;gap:10px;">
-      <div style="font:800 var(--t-cardhead) var(--font-display);letter-spacing:-.02em;">Current people history</div>
+    <div style="padding:16px 18px;border-bottom:1px solid var(--line2);display:flex;align-items:baseline;justify-content:space-between;gap:10px;">
+      <div style="font:700 var(--t-cardhead) var(--font-display);letter-spacing:-.015em;">Current people history</div>
       <div style="font:600 var(--m-sm) var(--font-mono);color:var(--ink3);">{{ chCount }}</div>
     </div>
     <sc-if value="{{ chEmpty }}" hint-placeholder-val="{{ true }}">
@@ -195,9 +195,9 @@
   <!-- preference editor modal -->
   <sc-if value="{{ prefOpen }}" hint-placeholder-val="{{ false }}">
     <div onClick="{{ closePref }}" style="position:fixed;inset:0;background:rgba(8,10,14,.5);z-index:60;animation:ns-scrim var(--dur-fast) var(--ease);"></div>
-    <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:61;width:440px;max-width:92vw;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow-dialog);animation:ns-fade var(--dur-base) var(--ease);">
+    <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:61;width:440px;max-width:92vw;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow-dialog);animation:ns-dialog var(--dur-base) var(--ease);">
       <div style="padding:16px 18px;border-bottom:1px solid var(--line2);">
-        <div style="font:800 var(--t-cardhead) var(--font-display);letter-spacing:-.02em;">Cell preference</div>
+        <div style="font:700 var(--t-cardhead) var(--font-display);letter-spacing:-.015em;">Cell preference</div>
         <div style="font-size:var(--t-sm);color:var(--ink3);margin-top:2px;">{{ prefWho }}</div>
       </div>
       <div style="padding:18px;">
@@ -225,21 +225,21 @@
           </div>
         </sc-if>
         <sc-if value="{{ showLeaveNote }}" hint-placeholder-val="{{ false }}">
-          <div style="font-size:var(--t-sm);color:var(--ink2);background:var(--brandtint);border:1px solid var(--brand);padding:10px 12px;">Pinned as paid leave — always honored, credits 8h, no coverage. Weight is not applicable.</div>
+          <div style="font-size:var(--t-sm);color:var(--ink2);background:var(--brandtint);border:1px solid var(--brand);padding:10px 12px;">Pinned as paid leave — always honoured, credits 8h, no coverage. Weight is not applicable.</div>
         </sc-if>
         <sc-if value="{{ showOffNote }}" hint-placeholder-val="{{ false }}">
           <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;margin-bottom:4px;">OFF WEIGHT</div>
-          <div style="font-size:var(--t-sm);color:var(--ink3);margin-bottom:10px;">A soft preference for a rest day off — the nurse's weekend equivalent (usually ~2 per week). Positive prefers OFF, negative avoids it, 0 means no preference. Use ∞ for a hard pin.</div>
+          <div style="font-size:var(--t-sm);color:var(--ink3);margin-bottom:10px;">A soft preference for a rest day off — the nurse’s weekend equivalent (usually ~2 per week). Positive prefers OFF, negative avoids it, 0 means no preference. Use ∞ for a hard pin.</div>
           <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
             <div style="width:44px;font:700 var(--t-sm) var(--font-mono);">OFF</div>
             <div style="flex:1;font-size:var(--t-sm);color:var(--ink3);">Requests off</div>
             <input value="{{ offWeight }}" onInput="{{ onOffWeight }}" placeholder="0" style="width:64px;height:34px;padding:0 8px;border:1px solid var(--line);background:var(--surface);font-size:var(--t-sm);text-align:center;">
             <div style="width:34px;font-size:var(--t-sm);font-weight:600;color:{{ offTagColor }};">{{ offTag }}</div>
           </div>
-          <div style="font-size:var(--t-sm);color:var(--ink2);background:var(--errortint);border:1px solid var(--error);padding:10px 12px;">Requests a rest day off — the nurse's weekend equivalent. Leave weight blank for a plain OFF request.</div>
+          <div style="font-size:var(--t-sm);color:var(--ink2);background:var(--errortint);border:1px solid var(--error);padding:10px 12px;">Requests a rest day off — the nurse’s weekend equivalent. Leave weight blank for a plain OFF request.</div>
         </sc-if>
       </div>
-      <div style="padding:14px 18px;border-top:1px solid var(--line2);display:flex;justify-content:space-between;gap:10px;">
+      <div style="padding:16px 18px;border-top:1px solid var(--line2);display:flex;justify-content:space-between;gap:10px;">
         <button onClick="{{ clearCell }}" style="height:40px;padding:0 14px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);color:var(--ink2);" style-hover="background:var(--panel)">Clear cell</button>
         <div style="display:flex;gap:10px;">
           <button onClick="{{ closePref }}" style="height:40px;padding:0 14px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);" style-hover="background:var(--panel)">Cancel</button>
@@ -252,9 +252,9 @@
   <!-- history editor modal -->
   <sc-if value="{{ histOpen }}" hint-placeholder-val="{{ false }}">
     <div onClick="{{ closeHist }}" style="position:fixed;inset:0;background:rgba(8,10,14,.5);z-index:60;animation:ns-scrim var(--dur-fast) var(--ease);"></div>
-    <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:61;width:380px;max-width:92vw;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow-dialog);animation:ns-fade var(--dur-base) var(--ease);">
+    <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:61;width:380px;max-width:92vw;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow-dialog);animation:ns-dialog var(--dur-base) var(--ease);">
       <div style="padding:16px 18px;border-bottom:1px solid var(--line2);">
-        <div style="font:800 var(--t-cardhead) var(--font-display);letter-spacing:-.02em;">Edit history</div>
+        <div style="font:700 var(--t-cardhead) var(--font-display);letter-spacing:-.015em;">Edit history</div>
         <div style="font-size:var(--t-sm);color:var(--ink3);margin-top:2px;">{{ histWho }}</div>
       </div>
       <div style="padding:18px;">
@@ -265,7 +265,7 @@
           </sc-for>
         </div>
       </div>
-      <div style="padding:14px 18px;border-top:1px solid var(--line2);display:flex;justify-content:flex-end;">
+      <div style="padding:16px 18px;border-top:1px solid var(--line2);display:flex;justify-content:flex-end;">
         <button onClick="{{ closeHist }}" style="height:40px;padding:0 16px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);" style-hover="background:var(--panel)">Done</button>
       </div>
     </div>
@@ -274,16 +274,16 @@
   <!-- csv modal -->
   <sc-if value="{{ csvOpen }}" hint-placeholder-val="{{ false }}">
     <div onClick="{{ closeCsv }}" style="position:fixed;inset:0;background:rgba(8,10,14,.5);z-index:60;animation:ns-scrim var(--dur-fast) var(--ease);"></div>
-    <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:61;width:460px;max-width:92vw;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow-dialog);animation:ns-fade var(--dur-base) var(--ease);">
+    <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:61;width:460px;max-width:92vw;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow-dialog);animation:ns-dialog var(--dur-base) var(--ease);">
       <div style="padding:16px 18px;border-bottom:1px solid var(--line2);display:flex;align-items:center;justify-content:space-between;">
-        <div style="font:800 var(--t-cardhead) var(--font-display);letter-spacing:-.02em;">{{ csvTitle }}</div>
+        <div style="font:700 var(--t-cardhead) var(--font-display);letter-spacing:-.015em;">{{ csvTitle }}</div>
         <button onClick="{{ closeCsv }}" aria-label="Close" style="width:32px;height:32px;background:transparent;border:1px solid var(--line);color:var(--ink2);" style-hover="background:var(--panel)"><i class="fa-solid fa-xmark"></i></button>
       </div>
       <div style="padding:18px;">
         <div style="font-size:var(--t-sm);color:var(--ink2);margin-bottom:10px;">{{ csvDesc }}</div>
         <pre style="margin:0 0 14px;background:var(--bg);border:1px solid var(--line2);padding:10px 12px;font:500 var(--t-sm) var(--font-mono);color:var(--ink2);overflow:auto;">{{ csvExample }}</pre>
-        <label style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;border:1.5px dashed var(--line);background:var(--panel);padding:22px;text-align:center;cursor:pointer;" style-hover="border-color:var(--brand)">
-          <i class="fa-solid fa-file-arrow-up" style="font-size:22px;color:var(--ink3);"></i>
+        <label style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;border:1.5px dashed var(--line);background:var(--panel);padding:22px;text-align:center;cursor:pointer;" style-hover="border-color:var(--brandink)">
+          <i class="fa-solid fa-file-arrow-up" style="font-size:24px;color:var(--ink3);"></i>
           <div style="font-weight:600;font-size:var(--t-sm);">Choose a .csv / .txt file</div>
           <input type="file" accept=".csv,.txt" onChange="{{ onCsvFile }}" style="display:none;">
         </label>
@@ -295,15 +295,15 @@
   <!-- clear confirm -->
   <sc-if value="{{ confirmOpen }}" hint-placeholder-val="{{ false }}">
     <div style="position:fixed;inset:0;background:rgba(8,10,14,.5);z-index:62;animation:ns-scrim var(--dur-fast) var(--ease);"></div>
-    <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:63;width:420px;max-width:92vw;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow-dialog);animation:ns-fade var(--dur-base) var(--ease);">
+    <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:63;width:420px;max-width:92vw;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow-dialog);animation:ns-dialog var(--dur-base) var(--ease);">
       <div style="padding:18px 20px;border-bottom:1px solid var(--line2);display:flex;align-items:center;gap:12px;">
-        <div style="width:34px;height:34px;background:var(--errortint);color:var(--error);display:flex;align-items:center;justify-content:center;flex:none;"><i class="fa-solid fa-triangle-exclamation"></i></div>
-        <div style="font:800 var(--t-cardhead) var(--font-display);letter-spacing:-.01em;">Confirm</div>
+        <div style="width:34px;height:34px;background:var(--errortint);color:var(--errorink);display:flex;align-items:center;justify-content:center;flex:none;"><i class="fa-solid fa-triangle-exclamation"></i></div>
+        <div style="font:700 var(--t-cardhead) var(--font-display);letter-spacing:-.01em;">Confirm</div>
       </div>
       <div style="padding:18px 20px;font-size:var(--t-sm);color:var(--ink2);line-height:1.6;">{{ confirmText }}</div>
-      <div style="padding:14px 20px;border-top:1px solid var(--line2);display:flex;justify-content:flex-end;gap:10px;">
+      <div style="padding:16px 20px;border-top:1px solid var(--line2);display:flex;justify-content:flex-end;gap:10px;">
         <button onClick="{{ confirmCancel }}" style="height:40px;padding:0 16px;background:transparent;border:1px solid var(--line);font:600 var(--t-body) var(--font-ui);" style-hover="background:var(--panel)">Cancel</button>
-        <button onClick="{{ confirmYes }}" style="height:40px;padding:0 18px;background:var(--error);color:#fff;border:none;font:700 var(--t-body) var(--font-ui);" style-hover="filter:brightness(.94)">Clear</button>
+        <button onClick="{{ confirmYes }}" style="height:40px;padding:0 18px;background:var(--fill-error);color:var(--on-error);border:none;font:700 var(--t-body) var(--font-ui);" style-hover="filter:brightness(.94)">Clear</button>
       </div>
     </div>
   </sc-if>
@@ -470,16 +470,16 @@ class Component extends DCLogic {
       });
     });
     const crListAll=currentRequests.map((e,i)=>({...e,
-      rowStyle:`display:grid;grid-template-columns:minmax(120px,1.4fr) minmax(90px,1fr) 64px 76px minmax(90px,1fr);gap:10px;align-items:center;padding:9px 12px;border-bottom:1px solid var(--line2);background:${i%2?'var(--panel)':'var(--surface)'};`,
+      rowStyle:`display:grid;grid-template-columns:minmax(120px,1.4fr) minmax(90px,1fr) 64px 76px minmax(90px,1fr);gap:10px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line2);background:${i%2?'var(--panel-alt)':'var(--surface)'};`,
       dateStyle:`display:inline-flex;align-items:center;gap:6px;font:600 var(--t-sm) var(--font-ui);${e.isGroup?'color:var(--brandink);':'color:var(--ink);'}`,
       groupTag:e.isGroup?'group':'', shiftStyle:`font:700 var(--m-xs) var(--font-mono);color:var(--ink2);`,
       weightStyle:`font:700 var(--t-sm) var(--font-mono);color:${e.wColor};text-align:center;`,
-      capStyle:`font:600 var(--m-xs) var(--font-ui);letter-spacing:.02em;text-transform:uppercase;color:${e.capColor};`,
+      capStyle:`font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;text-transform:uppercase;color:${e.capColor};`,
       dotStyle:`width:8px;height:8px;border-radius:50%;background:${e.dot};flex:none;`,
       groupIconStyle:e.isGroup?'':'display:none;', personIconStyle:e.personIsGroup?'color:var(--brandink);':'display:none;' }));
     const crQuery=s.crQuery||''; const q=crQuery.trim().toLowerCase();
     const crList=(q?crListAll.filter(e=>(e.person+' '+e.date+' '+e.shift+' '+e.weight+' '+e.caption).toLowerCase().includes(q)):crListAll)
-      .map((e,i)=>({...e, rowStyle:`display:grid;grid-template-columns:minmax(120px,1.4fr) minmax(90px,1fr) 64px 76px minmax(90px,1fr);gap:10px;align-items:center;padding:9px 12px;border-bottom:1px solid var(--line2);background:${i%2?'var(--panel)':'var(--surface)'};`}));
+      .map((e,i)=>({...e, rowStyle:`display:grid;grid-template-columns:minmax(120px,1.4fr) minmax(90px,1fr) 64px 76px minmax(90px,1fr);gap:10px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line2);background:${i%2?'var(--panel-alt)':'var(--surface)'};`}));
     const crEmpty=crListAll.length===0; const crNoMatch=crListAll.length>0 && crList.length===0; const crHasItems=crList.length>0;
 
     // Current People History summary (FR-SR-40) — each nurse with non-empty history, entries as H-n
@@ -487,9 +487,9 @@ class Component extends DCLogic {
     people.forEach(p=>{ const harr=hist[p.id]||[]; if(!harr.length) return;
       const entries=harr.map((val,j)=>{ const n=harr.length-j; const lv=val==='LEAVE', off=val==='OFF';
         return { hn:'H-'+n, label: lv?'Lv':off?'Off':val,
-          chipStyle:`display:inline-flex;align-items:baseline;gap:5px;border:1px solid ${lv?'var(--brand)':off?'var(--error)':'var(--line)'};background:${lv?'var(--brandtint)':off?'var(--errortint)':'var(--panel)'};padding:2px 8px;`,
-          hnStyle:'font:600 9px var(--font-mono);color:var(--ink3);',
-          valStyle:`font:700 var(--m-xs) var(--font-mono);color:${lv?'var(--brandink)':off?'var(--error)':'var(--ink)'};` }; });
+          chipStyle:`display:inline-flex;align-items:baseline;gap:4px;border:1px solid ${lv?'var(--brand)':off?'var(--error)':'var(--line)'};background:${lv?'var(--brandtint)':off?'var(--errortint)':'var(--panel)'};padding:2px 8px;`,
+          hnStyle:'font:600 var(--t-nano) var(--font-mono);color:var(--ink3);',
+          valStyle:`font:700 var(--m-xs) var(--font-mono);color:${lv?'var(--brandink)':off?'var(--errorink)':'var(--ink)'};` }; });
       chList.push({ person:p.id, entries }); });
     const chEmpty=chList.length===0; const chHasItems=chList.length>0;
 
@@ -502,9 +502,9 @@ class Component extends DCLogic {
     const inSel=(ri,ci)=>{ if(!drag) return false; const r0=Math.min(drag.r0,drag.r1),r1=Math.max(drag.r0,drag.r1),c0=Math.min(drag.c0,drag.c1),c1=Math.max(drag.c0,drag.c1); return ri>=r0&&ri<=r1&&ci>=c0&&ci<=c1; };
 
     const cellDisplay=(cell)=>{ // returns {bg,mark,mc,title}
-      if(!cell) return {bg:null,mark:'',mc:'color:var(--faint);',title:''};
+      if(!cell) return {bg:null,mark:'',mc:'color:var(--ink3);',title:''};
       if(cell.state==='leave') return {bg:'var(--brandtint)',mark:'Lv',mc:'font:700 var(--m-xs) var(--font-mono);color:var(--brandink);',title:'Paid leave — pinned (credits 8h, no coverage)'};
-      if(cell.state==='off') return {bg:'var(--errortint)',mark:'Off',mc:'font:700 var(--m-xs) var(--font-mono);color:var(--error);',title:'Requests off (rest day)'};
+      if(cell.state==='off') return {bg:'var(--errortint)',mark:'Off',mc:'font:700 var(--m-xs) var(--font-mono);color:var(--errorink);',title:'Requests off (rest day)'};
       const prefs=cell.prefs||[]; if(!prefs.length) return {bg:null,mark:'',mc:'',title:''};
       const top=prefs.slice().sort((a,b)=>Math.abs(b.weight)-Math.abs(a.weight))[0];
       const allPos=prefs.every(p=>p.weight>0), allNeg=prefs.every(p=>p.weight<0);
@@ -520,7 +520,7 @@ class Component extends DCLogic {
     const cols=this._allCols();
     const G=dgDefs.length;
     const dgHead=dgDefs.map((g,gi)=>({ id:g.id, icon:g.icon, count:g.count+(g.count===1?' day':' days'), title:g.desc+' — set one preference that applies to every date in this group',
-      headStyle:`position:sticky;top:0;z-index:1;padding:7px 9px;min-width:74px;text-align:center;border-bottom:1px solid var(--line);border-right:${gi===G-1?'2px':'1px'} solid var(--line);background:var(--brandtint);` }));
+      headStyle:`position:sticky;top:0;z-index:1;padding:8px 8px;min-width:74px;text-align:center;border-bottom:1px solid var(--line);border-right:${gi===G-1?'2px':'1px'} solid var(--line);background:var(--brandtint);` }));
 
     const mkCell=(p,ri,col,ci)=>{
       const cell=(req[p.id]||{})[col.colId]; const disp=cellDisplay(cell);
@@ -541,7 +541,7 @@ class Component extends DCLogic {
       const histCells=[];
       if(isGrp){
         // FR-SR-09: people-group rows have no history — em-dash placeholder, inert.
-        for(let i=0;i<histN;i++){ histCells.push({ mark:'—', markStyle:'font:600 var(--m-xs) var(--font-mono);color:var(--faint);',
+        for(let i=0;i<histN;i++){ histCells.push({ mark:'—', markStyle:'font:600 var(--m-xs) var(--font-mono);color:var(--ink3);',
           title:'People groups have no history', onClick:(()=>{}),
           style:'width:34px;min-width:34px;height:34px;text-align:center;border-right:1px solid var(--line2);border-bottom:1px solid var(--line2);background:var(--panel);' }); }
       } else {
@@ -552,7 +552,7 @@ class Component extends DCLogic {
           const clickable=i>=offset-1;
           const showPlus=!val && clickable && !quick;
           const label = val==='LEAVE'?'Lv':val==='OFF'?'Off':(val||(showPlus?'+':''));
-          histCells.push({ mark:label, markStyle:`font:600 var(--m-xs) var(--font-mono);color:${val==='LEAVE'?'var(--brandink)':val==='OFF'?'var(--error)':showPlus?'var(--faint)':'var(--ink2)'};`,
+          histCells.push({ mark:label, markStyle:`font:600 var(--m-xs) var(--font-mono);color:${val==='LEAVE'?'var(--brandink)':val==='OFF'?'var(--errorink)':showPlus?'var(--ink3)':'var(--ink2)'};`,
             title: showPlus?'Add what this nurse worked before the roster starts':(clickable?'Edit this history entry':''),
             onClick: (!quick && clickable) ? ()=>this.openHist(p.id,i-offset<0?harr.length:i-offset) : (()=>{}),
             style:`width:34px;min-width:34px;height:34px;text-align:center;border-right:1px solid var(--line2);border-bottom:1px solid var(--line2);background:${real?'var(--warntint)':'var(--surface)'};${(!quick&&clickable)?'cursor:pointer;':''}` });
@@ -561,8 +561,8 @@ class Component extends DCLogic {
       const allRowCells=cols.map((col,ci)=>mkCell(p,ri,col,ci));
       const roleBadge=isGrp?'GROUP':(roleShort[p.role]||'');
       const roleStyle=isGrp
-        ? 'font:700 9px var(--font-mono);letter-spacing:.04em;color:var(--brandink);border:1px solid var(--brand);background:var(--brandtint);padding:1px 5px;'
-        : 'font:600 9px var(--font-mono);color:var(--ink3);border:1px solid var(--line2);padding:1px 4px;';
+        ? 'font:700 var(--t-nano) var(--font-mono);letter-spacing:.04em;color:var(--brandink);border:1px solid var(--brand);background:var(--brandtint);padding:1px 4px;'
+        : 'font:600 var(--t-nano) var(--font-mono);color:var(--ink3);border:1px solid var(--line2);padding:1px 4px;';
       return {id:p.id, isGroup:isGrp, memberTitle:isGrp?('Group of '+(p.members||[]).length+': '+((p.members||[]).join(', ')||'empty')):'', idStyle:`font-weight:${isGrp?'700':'600'};font-size:var(--t-sm);white-space:nowrap;`, role:roleBadge, roleStyle, hist:histCells, groupCells:allRowCells.slice(0,G), cells:allRowCells.slice(G)};
     });
 
@@ -575,10 +575,10 @@ class Component extends DCLogic {
       : ('Drag over cells to apply '+qNames+' with weight '+this.fmtW(qW)+'.');
     const paintChips=this._paintTargets().map(t=>{ const on=qTypes.includes(t.id);
       return {id:t.id, label:t.id, title:t.name, check:on?'✓':'', onClick:()=>this.toggleType(t.id),
-        style:`display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 12px;border:1px solid ${on?'var(--brand)':'var(--line)'};background:${on?'var(--brandtint)':'var(--surface)'};color:${on?'var(--brandink)':'var(--ink)'};font:600 var(--t-sm) var(--font-ui);`,
-        boxStyle:`width:15px;height:15px;flex:none;border:1.5px solid ${on?'var(--brand)':'var(--line)'};background:${on?'var(--brand)':'transparent'};color:var(--onbrand);display:inline-flex;align-items:center;justify-content:center;font-size:10px;line-height:1;`}; });
+        style:`display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 12px;border:1px solid ${on?'var(--brand)':'var(--line)'};background:${on?'var(--brandtint)':'var(--surface)'};color:${on?'var(--brandink)':'var(--ink)'};font:600 var(--t-sm) var(--font-ui);`,
+        boxStyle:`width:15px;height:15px;flex:none;border:1.5px solid ${on?'var(--brand)':'var(--line)'};background:${on?'var(--brand)':'transparent'};color:var(--onbrand);display:inline-flex;align-items:center;justify-content:center;font-size:var(--t-nano);line-height:1;`}; });
     const qStatusStyle = !qTypes.length ? 'color:var(--ink2);background:var(--panel);border:1px solid var(--line2);'
-      : (!qTypes.includes('LEAVE') && qW==null) ? 'color:var(--error);background:var(--errortint);border:1px solid var(--error);'
+      : (!qTypes.includes('LEAVE') && qW==null) ? 'color:var(--errorink);background:var(--errortint);border:1px solid var(--error);'
       : 'color:var(--ink2);background:var(--panel);border:1px solid var(--line2);';
 
     // pref editor derived
@@ -592,13 +592,13 @@ class Component extends DCLogic {
         sepStyle:sepShow?`display:flex;align-items:baseline;justify-content:space-between;gap:8px;font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;${isFirstGroup?'border-top:1px solid var(--line2);padding-top:10px;':''}margin-bottom:6px;`:'display:none;'}; });
     const offRaw=draft.offWeight||''; const offPW=this.parseW(offRaw); const offTag=(offRaw===''||offPW===0||offPW==null)?'':this.fmtW(offPW);
     const prefWho=s.prefCell?`${s.prefCell.person} · ${this._colLabel(s.prefCell.col)}`:'';
-    const segT=(on)=>`flex:1;height:36px;background:${on?'var(--ink)':'transparent'};color:${on?'var(--on-ink)':'var(--ink2)'};border:none;font:${on?'700':'500'} var(--t-sm) var(--font-ui);border-right:1px solid var(--line);`;
-    const segTLast=(on)=>`flex:1;height:36px;background:${on?'var(--ink)':'transparent'};color:${on?'var(--on-ink)':'var(--ink2)'};border:none;font:${on?'700':'500'} var(--t-sm) var(--font-ui);`;
+    const segT=(on)=>`flex:1;height:36px;background:${on?'var(--brand)':'transparent'};color:${on?'var(--onbrand)':'var(--ink2)'};border:none;font:${on?'700':'500'} var(--t-sm) var(--font-ui);border-right:1px solid var(--line);`;
+    const segTLast=(on)=>`flex:1;height:36px;background:${on?'var(--brand)':'transparent'};color:${on?'var(--onbrand)':'var(--ink2)'};border:none;font:${on?'700':'500'} var(--t-sm) var(--font-ui);`;
 
     // history opts — worked items (synced) + reserved OFF/LEAVE (per FR-SR-19: items only, no groups)
     const histOptDefs=[['','Clear'], ...this._worked().map(w=>[w.id,w.id]), ['OFF','Off'],['LEAVE','Leave']];
     const histOpts=histOptDefs.map(([val,label])=>({label, onClick:()=>this.setHistVal(val),
-      style:`height:34px;padding:0 13px;background:${val==='LEAVE'?'var(--brandtint)':'var(--surface)'};border:1px solid ${val==='LEAVE'?'var(--brand)':'var(--line)'};color:${val==='LEAVE'?'var(--brandink)':val===''?'var(--error)':'var(--ink)'};font:600 var(--t-sm) var(--font-ui);`}));
+      style:`height:34px;padding:0 12px;background:${val==='LEAVE'?'var(--brandtint)':'var(--surface)'};border:1px solid ${val==='LEAVE'?'var(--brand)':'var(--line)'};color:${val==='LEAVE'?'var(--brandink)':val===''?'var(--errorink)':'var(--ink)'};font:600 var(--t-sm) var(--font-ui);`}));
     const histWho=s.histCell?`${s.histCell.person}`:'';
 
     // clear buttons
@@ -617,8 +617,8 @@ class Component extends DCLogic {
       flash:s.flash,
       quickMode:quick,
       setNormal:()=>this.setState({mode:'normal'}), setQuick:()=>this.setState({mode:'quick'}),
-      normalTabStyle:`height:34px;padding:0 14px;background:${!quick?'var(--ink)':'transparent'};color:${!quick?'var(--on-ink)':'var(--ink2)'};border:none;font:${!quick?'700':'500'} var(--t-sm) var(--font-ui);border-right:1px solid var(--line);display:inline-flex;align-items:center;`,
-      quickTabStyle:`height:34px;padding:0 14px;background:${quick?'var(--ink)':'transparent'};color:${quick?'var(--on-ink)':'var(--ink2)'};border:none;font:${quick?'700':'500'} var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;`,
+      normalTabStyle:`height:34px;padding:0 14px;background:${!quick?'var(--brand)':'transparent'};color:${!quick?'var(--onbrand)':'var(--ink2)'};border:none;font:${!quick?'700':'500'} var(--t-sm) var(--font-ui);border-right:1px solid var(--line);display:inline-flex;align-items:center;`,
+      quickTabStyle:`height:34px;padding:0 14px;background:${quick?'var(--brand)':'transparent'};color:${quick?'var(--onbrand)':'var(--ink2)'};border:none;font:${quick?'700':'500'} var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;`,
       qWeight:s.qWeight, paintChips,
       onQWeight:(e)=>this.setState({qWeight:e.target.value}),
       onWeightPosInf:()=>this.setState({qWeight:'∞'}), onWeightNegInf:()=>this.setState({qWeight:'-∞'}),

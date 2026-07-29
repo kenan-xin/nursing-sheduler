@@ -2,13 +2,18 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-// Regression guard for nursing-sheduler-2dn. The ink/chrome bar stays dark in
-// BOTH themes (--chrome), so its foreground token --on-ink must never collapse
-// to --chrome — that collision rendered chrome text/icons invisible at 1:1.
-// Two revert paths are guarded deterministically (no browser, so this runs
-// without the e2e webServer; the rendered contrast is measured live in the
-// cold review and exercised by the app-shell e2e):
-//   1) --on-ink reset to a value that no longer contrasts with --chrome;
+// Contrast guard for the chrome plane, carried forward from nursing-sheduler-2dn.
+//
+// In v2 the chrome bar is no longer a fixed near-black: `--chrome` aliases the
+// LIVE accent (`var(--brand)`), so the pair that has to clear AA is the accent's
+// own `--onbrand` against each of the eight accent/theme `--brand` values. That
+// makes this a guard over the accent contract itself — adding or re-tuning an
+// accent without checking its on-colour fails here, deterministically and
+// without a browser.
+//
+// The original collision guard is kept in spirit: a foreground token must never
+// collapse toward the plane it sits on. Two revert paths stay covered:
+//   1) an accent or --onbrand value retuned until the pair no longer clears AA;
 //   2) a chrome shell control repointed from `text-on-ink` back to `text-ink`.
 
 const shellDir = __dirname;
@@ -62,14 +67,71 @@ function contrastRatio(fg: string, bg: string): number {
   return (hi + 0.05) / (lo + 0.05);
 }
 
-describe("chrome bar contrast — --on-ink vs --chrome (nursing-sheduler-2dn)", () => {
+const ACCENTS = ["teal", "sage", "rose", "plum"] as const;
+
+// Thresholds are compared UNROUNDED. W3C is explicit that a computed 4.4999:1
+// does not meet 4.5:1 (Understanding SC 1.4.3), so nothing here may round, floor
+// or format a ratio before the assertion — the raw value goes straight into the
+// comparison, and the full-precision number appears only in the failure message.
+//
+// Measured ratios (--onbrand on --brand): light teal 5.0632, sage 4.7091,
+// rose 4.5224, plum 5.7681; dark teal 5.6822, sage 6.7689, rose 6.2713,
+// plum 6.2457. Light rose is the tightest pair in the system and is the one
+// decision D4c retuned from #b0605a — which computed to 4.49985:1, a fail that
+// only ever looked like a pass because a helper rounded it first.
+
+describe("chrome plane contrast — --onbrand vs the live --brand (nursing-sheduler-2dn)", () => {
+  it("--chrome aliases --brand rather than declaring its own value", () => {
+    // If chrome ever re-acquires an independent hex, the pairs asserted below
+    // stop describing what the app-mark tile actually paints.
+    expect(themeBlock(":root {")).toContain("--chrome: var(--brand);");
+  });
+
+  it.each(ACCENTS)("light theme: onbrand meets AA (>= 4.5:1) on the %s chrome", (accent) => {
+    const onbrand = tokenHex(themeBlock(":root {"), "onbrand");
+    const brand = tokenHex(themeBlock(`html[data-accent="${accent}"] {`), "brand");
+    const ratio = contrastRatio(onbrand, brand);
+    expect(ratio, `${onbrand} on ${brand} = ${ratio}:1`).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it.each(ACCENTS)("dark theme: onbrand meets AA (>= 4.5:1) on the %s chrome", (accent) => {
+    const onbrand = tokenHex(themeBlock(".dark {"), "onbrand");
+    const brand = tokenHex(themeBlock(`html.dark[data-accent="${accent}"] {`), "brand");
+    const ratio = contrastRatio(onbrand, brand);
+    expect(ratio, `${onbrand} on ${brand} = ${ratio}:1`).toBeGreaterThanOrEqual(4.5);
+  });
+
+  // The regression this fixup exists for. If the tightest pair drifts back, or a
+  // helper starts rounding again, one of these two trips.
+  it("the superseded light rose #b0605a is gone and would not have passed", () => {
+    expect(contrastRatio("#ffffff", "#b0605a")).toBeLessThan(4.5);
+    expect(themeBlock('html[data-accent="rose"] {')).not.toContain("#b0605a");
+  });
+
+  // The teal fallback that holds before data-accent exists must clear the same
+  // bar as the explicit selectors — it is what an unsupported stored value paints.
   it.each([
     ["light", ":root {"],
     ["dark", ".dark {"],
-  ])("%s theme: on-ink meets AA (>= 4.5:1) against chrome", (_name, selector) => {
+  ])("%s theme: the pre-attribute teal fallback also clears AA", (_name, selector) => {
     const block = themeBlock(selector);
-    const ratio = contrastRatio(tokenHex(block, "on-ink"), tokenHex(block, "chrome"));
-    expect(ratio).toBeGreaterThanOrEqual(4.5);
+    const onbrand = tokenHex(block, "onbrand");
+    const brand = tokenHex(block, "brand");
+    const ratio = contrastRatio(onbrand, brand);
+    expect(ratio, `${onbrand} on ${brand} = ${ratio}:1`).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
+describe("ink surfaces — --on-ink vs --ink", () => {
+  it.each([
+    ["light", ":root {"],
+    ["dark", ".dark {"],
+  ])("%s theme: on-ink meets AA (>= 4.5:1) against ink", (_name, selector) => {
+    const block = themeBlock(selector);
+    const onInk = tokenHex(block, "on-ink");
+    const ink = tokenHex(block, "ink");
+    const ratio = contrastRatio(onInk, ink);
+    expect(ratio, `${onInk} on ${ink} = ${ratio}:1`).toBeGreaterThanOrEqual(4.5);
   });
 });
 

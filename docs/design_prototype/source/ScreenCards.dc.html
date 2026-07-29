@@ -9,14 +9,14 @@
 <x-dc>
 <div class="ns-fade">
   <div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:var(--space-4);margin-bottom:var(--space-5);">
-    <div style="flex:1;min-width:240px;">
+    <div style="flex:1 1 440px;min-width:min(100%,440px);">
       <div style="font:600 var(--m-sm) var(--font-ui);letter-spacing:.03em;color:var(--brandink);text-transform:uppercase;margin-bottom:8px;">{{ eyebrow }}</div>
-      <h1 style="font:800 var(--t-display) var(--font-display);letter-spacing:-.02em;margin:0 0 8px;line-height:1.05;">{{ title }}</h1>
+      <h1 style="font:700 var(--t-display) var(--font-display);letter-spacing:-.015em;margin:0 0 8px;line-height:1.05;">{{ title }}</h1>
       <p style="margin:0;color:var(--ink2);max-width:64ch;">{{ subtitle }}</p>
     </div>
     <sc-if value="{{ showTwoAdd }}" hint-placeholder-val="{{ false }}">
       <div style="display:flex;gap:10px;flex-wrap:wrap;">
-        <button onClick="{{ addContract }}" style="height:44px;padding:0 18px;background:var(--surface);color:var(--brandink);border:1px solid var(--brand);font:700 var(--t-body) var(--font-ui);display:inline-flex;align-items:center;gap:9px;white-space:nowrap;" style-hover="background:var(--brandtint)"><i class="fa-solid fa-file-contract"></i> Add Contracted Hours</button>
+        <button onClick="{{ addContract }}" style="height:44px;padding:0 18px;background:var(--surface);color:var(--brandink);border:1px solid var(--brand);font:700 var(--t-body) var(--font-ui);display:inline-flex;align-items:center;gap:8px;white-space:nowrap;" style-hover="background:var(--brandtint)"><i class="fa-solid fa-file-contract"></i> Add Contracted Hours</button>
         <button onClick="{{ addNew }}" style="{{ addBtnStyle }}" style-hover="filter:brightness(.94)"><i class="fa-solid {{ addIcon }}"></i> {{ addBtnLabel }}</button>
       </div>
     </sc-if>
@@ -25,18 +25,18 @@
     </sc-if>
   </div>
 
-  <div style="display:flex;align-items:flex-start;gap:9px;border:1px solid var(--line);background:var(--panel);padding:11px 14px;margin-bottom:var(--space-4);">
+  <div style="display:flex;align-items:flex-start;gap:8px;border:1px solid var(--line);background:var(--panel);padding:12px 14px;margin-bottom:var(--space-4);">
     <i class="fa-solid fa-circle-info" style="color:var(--ink3);margin-top:2px;"></i>
     <div style="font-size:var(--t-sm);color:var(--ink2);">These are the exact constraints behind the plain-English <b>Rules</b>. Editing here gives you full control; the guided Rules screen is the friendly view of the same data.</div>
   </div>
 
   <!-- coverage warnings (requirements only) -->
   <sc-if value="{{ showCoverage }}" hint-placeholder-val="{{ false }}">
-    <div style="border:1px solid var(--warn);background:var(--warntint);padding:13px 16px;margin-bottom:var(--space-4);">
-      <div style="display:flex;align-items:center;gap:8px;font:700 var(--t-body) var(--font-ui);color:var(--warn);margin-bottom:6px;"><i class="fa-solid fa-triangle-exclamation"></i> Requirement coverage warnings</div>
+    <div style="border:1px solid var(--warn);background:var(--warntint);padding:12px 16px;margin-bottom:var(--space-4);">
+      <div style="display:flex;align-items:center;gap:8px;font:700 var(--t-body) var(--font-ui);color:var(--warnink);margin-bottom:6px;"><i class="fa-solid fa-triangle-exclamation"></i> Requirement coverage warnings</div>
       <div style="font-size:var(--t-sm);color:var(--ink2);margin-bottom:8px;">{{ coverageMsg }}</div>
-      <ul style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:3px;">
-        <sc-for list="{{ coverageItems }}" as="ci" hint-placeholder-count="3"><li style="font:600 var(--m-sm) var(--font-mono);color:var(--warn);">{{ ci }}</li></sc-for>
+      <ul style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:4px;">
+        <sc-for list="{{ coverageItems }}" as="ci" hint-placeholder-count="3"><li style="font:600 var(--m-sm) var(--font-mono);color:var(--warnink);">{{ ci }}</li></sc-for>
       </ul>
     </div>
   </sc-if>
@@ -44,29 +44,29 @@
   <!-- add / edit form -->
   <sc-if value="{{ showForm }}" hint-placeholder-val="{{ false }}">
     <div style="background:var(--surface);border:1px solid var(--brand);margin-bottom:var(--space-5);">
-      <div style="padding:14px 18px;border-bottom:1px solid var(--line2);background:var(--brandtint);">
-        <div style="font:800 var(--t-cardhead) var(--font-display);letter-spacing:-.02em;color:var(--brandink);">{{ formHeading }}</div>
+      <div style="padding:16px 18px;border-bottom:1px solid var(--line2);background:var(--brandtint);">
+        <div style="font:700 var(--t-cardhead) var(--font-display);letter-spacing:-.015em;color:var(--brandink);">{{ formHeading }}</div>
       </div>
       <div class="ns-formbody" style="max-width:940px;">
         <label style="display:block;margin-bottom:18px;">
-          <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;margin-bottom:7px;">DESCRIPTION</div>
+          <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;margin-bottom:8px;">DESCRIPTION</div>
           <input value="{{ draftDesc }}" onInput="{{ onDesc }}" placeholder="Short label for this rule" style="width:100%;height:40px;padding:0 12px;border:1px solid var(--line);background:var(--surface);">
         </label>
         <sc-if value="{{ isContractForm }}" hint-placeholder-val="{{ false }}">
-          <div style="background:var(--panel);border:1px solid var(--line2);padding:15px 16px;margin-bottom:16px;">
-            <div style="display:flex;align-items:center;gap:10px;margin-bottom:9px;flex-wrap:wrap;">
-              <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.05em;color:var(--ink3);text-transform:uppercase;flex:1;">IN PLAIN ENGLISH</div>
-              <button onClick="{{ onRefreshShifts }}" style="height:30px;padding:0 12px;background:var(--surface);border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:7px;" style-hover="background:var(--brandtint)"><i class="fa-solid fa-rotate" style="font-size:10px;"></i> Refresh from Shift Types</button>
+          <div style="background:var(--panel);border:1px solid var(--line2);padding:16px 16px;margin-bottom:16px;">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap;">
+              <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.04em;color:var(--ink3);text-transform:uppercase;flex:1;">IN PLAIN ENGLISH</div>
+              <button onClick="{{ onRefreshShifts }}" style="height:30px;padding:0 12px;background:var(--surface);border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:8px;" style-hover="background:var(--brandtint)"><i class="fa-solid fa-rotate" style="font-size:10px;"></i> Refresh from Shift Types</button>
             </div>
             <p style="margin:0;font:600 var(--t-body) var(--font-ui);line-height:1.5;color:var(--ink);">{{ contractSentence }}</p>
           </div>
           <sc-if value="{{ hasRefresh }}" hint-placeholder-val="{{ false }}">
-            <div style="border:1px solid var(--brand);background:var(--brandtint);padding:13px 15px;margin-bottom:16px;">
-              <div style="display:flex;align-items:center;gap:8px;margin-bottom:9px;"><i class="fa-solid fa-rotate" style="color:var(--brandink);font-size:12px;"></i><span style="font:700 var(--t-body) var(--font-ui);color:var(--brandink);">Shift Types changed — review before applying</span></div>
-              <div style="display:flex;gap:16px;flex-wrap:wrap;font:600 var(--m-sm) var(--font-mono);margin-bottom:11px;">
-                <span style="color:var(--success);">+ {{ refreshAdded }} added</span>
-                <span style="color:var(--error);">− {{ refreshRemoved }} removed</span>
-                <span style="color:var(--warn);">✎ {{ refreshChanged }} changed</span>
+            <div style="border:1px solid var(--brand);background:var(--brandtint);padding:12px 16px;margin-bottom:16px;">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><i class="fa-solid fa-rotate" style="color:var(--brandink);font-size:12px;"></i><span style="font:700 var(--t-body) var(--font-ui);color:var(--brandink);">Shift Types changed — review before applying</span></div>
+              <div style="display:flex;gap:16px;flex-wrap:wrap;font:600 var(--m-sm) var(--font-mono);margin-bottom:12px;">
+                <span style="color:var(--successink);">+ {{ refreshAdded }} added</span>
+                <span style="color:var(--errorink);">− {{ refreshRemoved }} removed</span>
+                <span style="color:var(--warnink);">✎ {{ refreshChanged }} changed</span>
                 <span style="color:var(--ink3);">{{ refreshUnchanged }} unchanged</span>
               </div>
               <div style="display:flex;gap:8px;">
@@ -98,11 +98,11 @@
                       <button onClick="{{ f.onExact }}" style="{{ f.exactStyle }}">Exact</button>
                       <button onClick="{{ f.onRange }}" style="{{ f.rangeStyle }}">Allowed range</button>
                     </div>
-                    <div style="display:flex;align-items:flex-start;gap:7px;margin-top:8px;font-size:var(--t-sm);color:var(--ink3);line-height:1.45;"><i class="fa-solid fa-lock" style="margin-top:2px;font-size:10px;"></i><span>Hard requirement — the solver must satisfy it. Weight is fixed at +∞.</span></div>
+                    <div style="display:flex;align-items:flex-start;gap:8px;margin-top:8px;font-size:var(--t-sm);color:var(--ink3);line-height:1.45;"><i class="fa-solid fa-lock" style="margin-top:2px;font-size:10px;"></i><span>Hard requirement — the solver must satisfy it. Weight is fixed at +∞.</span></div>
                   </div>
                   <sc-if value="{{ f.policyExact }}" hint-placeholder-val="{{ true }}">
                     <div>
-                      <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px;"><div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;">TARGET HOURS PER NURSE</div><div style="font:800 var(--t-title) var(--font-display);color:var(--brandink);">{{ f.exactHours }}h</div></div>
+                      <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px;"><div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;">TARGET HOURS PER NURSE</div><div style="font:700 var(--t-title) var(--font-display);color:var(--brandink);">{{ f.exactHours }}h</div></div>
                       <div style="position:relative;height:22px;margin:0 10px;">
                         <div style="position:absolute;top:9px;left:0;right:0;height:4px;background:var(--line2);"></div>
                         <div style="position:absolute;top:9px;left:0;width:{{ f.exactPct }}%;height:4px;background:var(--brand);"></div>
@@ -113,7 +113,7 @@
                   </sc-if>
                   <sc-if value="{{ f.policyRange }}" hint-placeholder-val="{{ false }}">
                     <div>
-                      <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px;"><div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;">HOURS PER NURSE</div><div style="font:800 var(--t-title) var(--font-display);color:var(--brandink);">{{ f.minHours }}h – {{ f.maxHours }}h</div></div>
+                      <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px;"><div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;">HOURS PER NURSE</div><div style="font:700 var(--t-title) var(--font-display);color:var(--brandink);">{{ f.minHours }}h – {{ f.maxHours }}h</div></div>
                       <div style="position:relative;height:22px;margin:0 10px;">
                         <div style="position:absolute;top:9px;left:0;right:0;height:4px;background:var(--line2);"></div>
                         <div style="position:absolute;top:9px;left:{{ f.rangeLeftPct }}%;width:{{ f.rangeWidthPct }}%;height:4px;background:var(--brand);"></div>
@@ -128,12 +128,12 @@
                       </div>
                     </div>
                   </sc-if>
-                  <sc-if value="{{ f.policyErr }}" hint-placeholder-val="{{ false }}"><div style="color:var(--error);font-size:var(--t-sm);font-weight:600;"><i class="fa-solid fa-circle-exclamation" style="margin-right:5px;"></i>{{ f.policyErr }}</div></sc-if>
+                  <sc-if value="{{ f.policyErr }}" hint-placeholder-val="{{ false }}"><div style="color:var(--errorink);font-size:var(--t-sm);font-weight:600;"><i class="fa-solid fa-circle-exclamation" style="margin-right:4px;"></i>{{ f.policyErr }}</div></sc-if>
                 </div>
               </sc-if>
 
               <sc-if value="{{ f.isExpr }}" hint-placeholder-val="{{ false }}">
-                <div style="display:flex;flex-direction:column;gap:13px;">
+                <div style="display:flex;flex-direction:column;gap:12px;">
                   <div style="display:flex;align-items:flex-start;gap:8px;font-size:var(--t-sm);color:var(--ink2);line-height:1.5;border:1px solid var(--line2);background:var(--panel);padding:10px 12px;">
                     <i class="fa-solid fa-circle-info" style="margin-top:2px;color:var(--brandink);flex:none;"></i>
                     <span><b style="font-family:var(--font-mono);">x</b> is this person's count — the selected shift types over the selected dates, each weighted by its coefficient. Pick how <b style="font-family:var(--font-mono);">x</b> should relate to your target <b style="font-family:var(--font-mono);">T</b>.</span>
@@ -146,18 +146,18 @@
                           <span style="font:700 var(--t-body) var(--font-ui);color:var(--ink);">{{ op.title }}</span>
                           <span style="font-size:var(--t-sm);color:var(--ink3);line-height:1.4;">{{ op.help }}</span>
                         </span>
-                        <sc-if value="{{ op.selected }}" hint-placeholder-val="{{ false }}"><i class="fa-solid fa-circle-check" style="color:var(--brand);font-size:16px;flex:none;margin-left:auto;"></i></sc-if>
+                        <sc-if value="{{ op.selected }}" hint-placeholder-val="{{ false }}"><i class="fa-solid fa-circle-check" style="color:var(--brandink);font-size:16px;flex:none;margin-left:auto;"></i></sc-if>
                       </button>
                     </sc-for>
                   </div>
                   <div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:16px;padding-top:2px;">
-                    <div style="display:flex;flex-direction:column;gap:7px;">
+                    <div style="display:flex;flex-direction:column;gap:8px;">
                       <span style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;">TARGET VALUE (T)</span>
                       <input type="number" min="0" step="1" value="{{ f.targetVal }}" onInput="{{ f.onTarget }}" placeholder="e.g. 320" style="width:132px;height:40px;padding:0 12px;border:1px solid var(--line);background:var(--surface);font-weight:700;font-family:var(--font-mono);">
                     </div>
-                    <div style="display:flex;flex-direction:column;gap:7px;">
+                    <div style="display:flex;flex-direction:column;gap:8px;">
                       <span style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;">READS AS</span>
-                      <span style="font:700 var(--t-body) var(--font-mono);color:var(--brandink);background:var(--brandtint);border:1px solid var(--brand);padding:9px 14px;white-space:nowrap;">{{ f.exprPreview }}</span>
+                      <span style="font:700 var(--t-body) var(--font-mono);color:var(--brandink);background:var(--brandtint);border:1px solid var(--brand);padding:8px 14px;white-space:nowrap;">{{ f.exprPreview }}</span>
                     </div>
                     <div style="font-size:var(--t-sm);color:var(--ink3);line-height:1.45;flex:1;min-width:200px;max-width:42ch;">{{ f.targetNote }}</div>
                   </div>
@@ -168,17 +168,17 @@
                 <div style="display:flex;flex-direction:column;gap:14px;">
                   <sc-if value="{{ f.hasPattern }}" hint-placeholder-val="{{ false }}">
                     <div style="border:1px solid var(--brand);background:var(--brandtint);padding:12px 14px;">
-                      <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--brandink);text-transform:uppercase;margin-bottom:9px;">PATTERN ORDER</div>
+                      <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--brandink);text-transform:uppercase;margin-bottom:8px;">PATTERN ORDER</div>
                       <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;">
                         <sc-for list="{{ f.patternTags }}" as="pt" hint-placeholder-count="2">
                           <span style="display:inline-flex;align-items:center;gap:6px;background:var(--surface);border:1px solid var(--line);padding:4px 6px 4px 10px;">
-                            <i class="fa-solid {{ pt.icon }}" style="font-size:9px;color:var(--ink3);"></i>
+                            <i class="fa-solid {{ pt.icon }}" style="font-size:10px;color:var(--ink3);"></i>
                             <span style="font:700 var(--m-sm) var(--font-mono);color:var(--ink);">{{ pt.label }}</span>
-                            <button onClick="{{ pt.onLeft }}" aria-label="Move earlier" style="background:none;border:none;padding:0 2px;color:var(--ink3);cursor:pointer;" style-hover="color:var(--ink)"><i class="fa-solid fa-chevron-left" style="font-size:9px;"></i></button>
-                            <button onClick="{{ pt.onRight }}" aria-label="Move later" style="background:none;border:none;padding:0 2px;color:var(--ink3);cursor:pointer;" style-hover="color:var(--ink)"><i class="fa-solid fa-chevron-right" style="font-size:9px;"></i></button>
-                            <button onClick="{{ pt.onRemove }}" aria-label="Remove" style="background:none;border:none;padding:0 2px;color:var(--ink3);cursor:pointer;" style-hover="color:var(--error)"><i class="fa-solid fa-xmark" style="font-size:11px;"></i></button>
+                            <button onClick="{{ pt.onLeft }}" aria-label="Move earlier" style="background:none;border:none;padding:0 2px;color:var(--ink3);cursor:pointer;" style-hover="color:var(--ink)"><i class="fa-solid fa-chevron-left" style="font-size:10px;"></i></button>
+                            <button onClick="{{ pt.onRight }}" aria-label="Move later" style="background:none;border:none;padding:0 2px;color:var(--ink3);cursor:pointer;" style-hover="color:var(--ink)"><i class="fa-solid fa-chevron-right" style="font-size:10px;"></i></button>
+                            <button onClick="{{ pt.onRemove }}" aria-label="Remove" style="background:none;border:none;padding:0 2px;color:var(--ink3);cursor:pointer;" style-hover="color:var(--errorink)"><i class="fa-solid fa-xmark" style="font-size:12px;"></i></button>
                           </span>
-                          <sc-if value="{{ pt.canRight }}" hint-placeholder-val="{{ true }}"><i class="fa-solid fa-arrow-right-long" style="font-size:11px;color:var(--brandink);"></i></sc-if>
+                          <sc-if value="{{ pt.canRight }}" hint-placeholder-val="{{ true }}"><i class="fa-solid fa-arrow-right-long" style="font-size:12px;color:var(--brandink);"></i></sc-if>
                         </sc-for>
                       </div>
                     </div>
@@ -188,17 +188,17 @@
                   </sc-if>
                   <div>
                     <sc-if value="{{ f.hasPatternGroups }}" hint-placeholder-val="{{ false }}">
-                      <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;margin-bottom:7px;">SHIFT GROUPS</div>
+                      <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;margin-bottom:8px;">SHIFT GROUPS</div>
                       <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;">
                         <sc-for list="{{ f.patternGroups }}" as="op" hint-placeholder-count="3">
-                          <button onClick="{{ op.onAdd }}" style="display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 12px;background:var(--surface);border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);color:var(--ink);cursor:pointer;" style-hover="background:var(--brandtint);border-color:var(--brand)"><i class="fa-solid fa-layer-group" style="font-size:9px;color:var(--ink3);"></i> {{ op.label }} <i class="fa-solid fa-plus" style="font-size:8px;color:var(--brandink);"></i></button>
+                          <button onClick="{{ op.onAdd }}" style="display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 12px;background:var(--surface);border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);color:var(--ink);cursor:pointer;" style-hover="background:var(--brandtint);border-color:var(--brandink)"><i class="fa-solid fa-layer-group" style="font-size:10px;color:var(--ink3);"></i> {{ op.label }} <i class="fa-solid fa-plus" style="font-size:10px;color:var(--brandink);"></i></button>
                         </sc-for>
                       </div>
                     </sc-if>
-                    <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;margin-bottom:7px;">SHIFT TYPES</div>
+                    <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;margin-bottom:8px;">SHIFT TYPES</div>
                     <div style="display:flex;flex-wrap:wrap;gap:6px;">
                       <sc-for list="{{ f.patternItems }}" as="op" hint-placeholder-count="5">
-                        <button onClick="{{ op.onAdd }}" style="display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 12px;background:var(--surface);border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);color:var(--ink);cursor:pointer;" style-hover="background:var(--brandtint);border-color:var(--brand)"><i class="fa-solid {{ op.icon }}" style="font-size:9px;color:var(--ink3);"></i> {{ op.label }} <i class="fa-solid fa-plus" style="font-size:8px;color:var(--brandink);"></i></button>
+                        <button onClick="{{ op.onAdd }}" style="display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 12px;background:var(--surface);border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);color:var(--ink);cursor:pointer;" style-hover="background:var(--brandtint);border-color:var(--brandink)"><i class="fa-solid {{ op.icon }}" style="font-size:10px;color:var(--ink3);"></i> {{ op.label }} <i class="fa-solid fa-plus" style="font-size:10px;color:var(--brandink);"></i></button>
                       </sc-for>
                     </div>
                   </div>
@@ -220,12 +220,12 @@
                 <div class="ns-panes2">
                   <!-- AVAILABLE pane -->
                   <div style="border:1px solid var(--line);background:var(--surface);display:flex;flex-direction:column;">
-                    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 11px;border-bottom:1px solid var(--line2);background:var(--panel);">
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 12px;border-bottom:1px solid var(--line2);background:var(--panel);">
                       <span style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;">AVAILABLE</span>
                       <span style="font:600 var(--m-xs) var(--font-mono);color:var(--ink3);">{{ f.availCount }}</span>
                     </div>
-                    <div style="position:relative;padding:9px 10px;">
-                      <i class="fa-solid fa-magnifying-glass" style="position:absolute;left:21px;top:50%;transform:translateY(-50%);font-size:11px;color:var(--ink3);"></i>
+                    <div style="position:relative;padding:8px 10px;">
+                      <i class="fa-solid fa-magnifying-glass" style="position:absolute;left:21px;top:50%;transform:translateY(-50%);font-size:12px;color:var(--ink3);"></i>
                       <input value="{{ f.fieldQ }}" onInput="{{ f.onFieldSearch }}" placeholder="{{ f.searchPh }}" style="width:100%;height:34px;padding:0 32px;border:1px solid var(--line);background:var(--surface);font-size:var(--t-sm);box-sizing:border-box;">
                       <sc-if value="{{ f.hasFieldQ }}" hint-placeholder-val="{{ false }}">
                         <button onClick="{{ f.onClearFieldSearch }}" aria-label="Clear search" style="position:absolute;right:19px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--ink3);padding:0;display:inline-flex;cursor:pointer;" style-hover="color:var(--ink)"><i class="fa-solid fa-xmark" style="font-size:12px;"></i></button>
@@ -233,37 +233,37 @@
                     </div>
                     <div style="height:228px;overflow-y:auto;overflow-x:hidden;padding:0 6px 6px;border-top:1px solid var(--line2);">
                       <sc-if value="{{ f.everyoneActive }}" hint-placeholder-val="{{ false }}">
-                        <div style="display:flex;align-items:flex-start;gap:8px;padding:11px 8px 6px;font-size:var(--t-sm);color:var(--ink3);line-height:1.45;"><i class="fa-solid fa-circle-info" style="margin-top:2px;color:var(--brandink);flex:none;"></i><span><b style="color:var(--ink2);">Everyone is included.</b> Pick a group or names below to restrict to a specific subset instead.</span></div>
+                        <div style="display:flex;align-items:flex-start;gap:8px;padding:12px 8px 6px;font-size:var(--t-sm);color:var(--ink3);line-height:1.45;"><i class="fa-solid fa-circle-info" style="margin-top:2px;color:var(--brandink);flex:none;"></i><span><b style="color:var(--ink2);">Everyone is included.</b> Pick a group or names below to restrict to a specific subset instead.</span></div>
                       </sc-if>
                       <sc-if value="{{ f.hasOptGroups }}" hint-placeholder-val="{{ false }}">
-                        <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;padding:8px 6px 5px;position:sticky;top:0;background:var(--surface);">GROUPS</div>
+                        <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;padding:8px 6px 4px;position:sticky;top:0;background:var(--surface);">GROUPS</div>
                         <sc-for list="{{ f.optGroups }}" as="op" hint-placeholder-count="2">
-                          <button onClick="{{ op.onAdd }}" style="width:100%;text-align:left;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 8px;border:none;background:transparent;font:500 var(--t-sm) var(--font-ui);color:var(--ink);cursor:pointer;" style-hover="background:var(--panel)"><span style="display:inline-flex;align-items:center;gap:8px;min-width:0;"><i class="fa-solid fa-layer-group" style="font-size:10px;color:var(--ink3);flex:none;"></i><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ op.label }}</span></span><i class="fa-solid fa-arrow-right" style="font-size:10px;color:var(--ink3);flex:none;"></i></button>
+                          <button onClick="{{ op.onAdd }}" style="width:100%;text-align:left;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 8px;border:none;background:transparent;font:500 var(--t-sm) var(--font-ui);color:var(--ink);cursor:pointer;" style-hover="background:var(--panel)"><span style="display:inline-flex;align-items:center;gap:8px;min-width:0;"><i class="fa-solid fa-layer-group" style="font-size:10px;color:var(--ink3);flex:none;"></i><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ op.label }}</span></span><i class="fa-solid fa-arrow-right" style="font-size:10px;color:var(--ink3);flex:none;"></i></button>
                         </sc-for>
                       </sc-if>
                       <sc-if value="{{ f.hasOptItems }}" hint-placeholder-val="{{ true }}">
-                        <sc-if value="{{ f.hasOptGroups }}" hint-placeholder-val="{{ false }}"><div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;padding:9px 6px 5px;position:sticky;top:0;background:var(--surface);">{{ f.itemLabel }}</div></sc-if>
+                        <sc-if value="{{ f.hasOptGroups }}" hint-placeholder-val="{{ false }}"><div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;padding:8px 6px 4px;position:sticky;top:0;background:var(--surface);">{{ f.itemLabel }}</div></sc-if>
                         <sc-for list="{{ f.optItems }}" as="op" hint-placeholder-count="6">
-                          <button onClick="{{ op.onAdd }}" style="width:100%;text-align:left;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 8px;border:none;background:transparent;font:500 var(--t-sm) var(--font-ui);color:var(--ink);cursor:pointer;" style-hover="background:var(--panel)"><span style="display:inline-flex;align-items:center;gap:8px;min-width:0;"><i class="fa-solid {{ op.icon }}" style="font-size:10px;color:var(--ink3);flex:none;"></i><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ op.label }}</span></span><i class="fa-solid fa-arrow-right" style="font-size:10px;color:var(--ink3);flex:none;"></i></button>
+                          <button onClick="{{ op.onAdd }}" style="width:100%;text-align:left;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 8px;border:none;background:transparent;font:500 var(--t-sm) var(--font-ui);color:var(--ink);cursor:pointer;" style-hover="background:var(--panel)"><span style="display:inline-flex;align-items:center;gap:8px;min-width:0;"><i class="fa-solid {{ op.icon }}" style="font-size:10px;color:var(--ink3);flex:none;"></i><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ op.label }}</span></span><i class="fa-solid fa-arrow-right" style="font-size:10px;color:var(--ink3);flex:none;"></i></button>
                         </sc-for>
                       </sc-if>
                       <sc-if value="{{ f.noOpts }}" hint-placeholder-val="{{ false }}">
-                        <div style="padding:18px 8px;text-align:center;font-size:var(--t-sm);color:var(--faint);font-style:italic;">{{ f.optEmptyMsg }}</div>
+                        <div style="padding:18px 8px;text-align:center;font-size:var(--t-sm);color:var(--ink3);font-style:italic;">{{ f.optEmptyMsg }}</div>
                       </sc-if>
                     </div>
                     <sc-if value="{{ f.canAddAll }}" hint-placeholder-val="{{ false }}">
-                      <button onClick="{{ f.onAddAll }}" style="border:none;border-top:1px solid var(--line2);background:transparent;padding:9px 11px;text-align:left;display:flex;align-items:center;gap:7px;font:600 var(--t-sm) var(--font-ui);color:var(--brandink);cursor:pointer;" style-hover="background:var(--panel)"><i class="fa-solid fa-angles-right" style="font-size:10px;"></i> {{ f.addAllLabel }}</button>
+                      <button onClick="{{ f.onAddAll }}" style="border:none;border-top:1px solid var(--line2);background:transparent;padding:8px 12px;text-align:left;display:flex;align-items:center;gap:8px;font:600 var(--t-sm) var(--font-ui);color:var(--brandink);cursor:pointer;" style-hover="background:var(--panel)"><i class="fa-solid fa-angles-right" style="font-size:10px;"></i> {{ f.addAllLabel }}</button>
                     </sc-if>
                   </div>
                   <!-- SELECTED pane -->
                   <div style="border:1px solid var(--brand);background:var(--surface);display:flex;flex-direction:column;">
-                    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 11px;border-bottom:1px solid var(--line2);background:var(--brandtint);">
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 12px;border-bottom:1px solid var(--line2);background:var(--brandtint);">
                       <span style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--brandink);text-transform:uppercase;">SELECTED</span>
                       <span style="font:600 var(--m-xs) var(--font-mono);color:var(--brandink);">{{ f.selCount }}</span>
                     </div>
                     <sc-if value="{{ f.showSelSearch }}" hint-placeholder-val="{{ false }}">
-                      <div style="position:relative;padding:9px 10px;border-bottom:1px solid var(--line2);">
-                        <i class="fa-solid fa-magnifying-glass" style="position:absolute;left:21px;top:50%;transform:translateY(-50%);font-size:11px;color:var(--ink3);"></i>
+                      <div style="position:relative;padding:8px 10px;border-bottom:1px solid var(--line2);">
+                        <i class="fa-solid fa-magnifying-glass" style="position:absolute;left:21px;top:50%;transform:translateY(-50%);font-size:12px;color:var(--ink3);"></i>
                         <input value="{{ f.selQ }}" onInput="{{ f.onSelSearch }}" placeholder="Filter selected" style="width:100%;height:34px;padding:0 32px;border:1px solid var(--line);background:var(--surface);font-size:var(--t-sm);box-sizing:border-box;">
                         <sc-if value="{{ f.hasSelQ }}" hint-placeholder-val="{{ false }}">
                           <button onClick="{{ f.onClearSelSearch }}" aria-label="Clear filter" style="position:absolute;right:19px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--ink3);padding:0;display:inline-flex;cursor:pointer;" style-hover="color:var(--ink)"><i class="fa-solid fa-xmark" style="font-size:12px;"></i></button>
@@ -273,27 +273,27 @@
                     <div style="height:228px;overflow-y:auto;overflow-x:hidden;padding:6px;">
                       <sc-if value="{{ f.everyoneActive }}" hint-placeholder-val="{{ false }}">
                         <sc-for list="{{ f.selAllTokens }}" as="tk" hint-placeholder-count="1">
-                          <button onClick="{{ tk.onRemove }}" title="Remove" style="width:100%;text-align:left;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 8px;border:none;background:transparent;font:500 var(--t-sm) var(--font-ui);color:var(--ink);cursor:pointer;" style-hover="background:var(--panel)"><span style="display:inline-flex;align-items:center;gap:8px;min-width:0;"><i class="fa-solid {{ tk.icon }}" style="{{ tk.iconStyle }}"></i><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ tk.label }}</span></span><i class="fa-solid fa-xmark" style="font-size:12px;color:var(--ink3);flex:none;"></i></button>
+                          <button onClick="{{ tk.onRemove }}" title="Remove" style="width:100%;text-align:left;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 8px;border:none;background:transparent;font:500 var(--t-sm) var(--font-ui);color:var(--ink);cursor:pointer;" style-hover="background:var(--panel)"><span style="display:inline-flex;align-items:center;gap:8px;min-width:0;"><i class="fa-solid {{ tk.icon }}" style="{{ tk.iconStyle }}"></i><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ tk.label }}</span></span><i class="fa-solid fa-xmark" style="font-size:12px;color:var(--ink3);flex:none;"></i></button>
                         </sc-for>
                       </sc-if>
                       <sc-if value="{{ f.hasSelGroups }}" hint-placeholder-val="{{ false }}">
-                        <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;padding:8px 6px 5px;position:sticky;top:0;background:var(--surface);">GROUPS</div>
+                        <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;padding:8px 6px 4px;position:sticky;top:0;background:var(--surface);">GROUPS</div>
                         <sc-for list="{{ f.selGroupTokens }}" as="tk" hint-placeholder-count="1">
-                          <button onClick="{{ tk.onRemove }}" title="Remove" style="width:100%;text-align:left;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 8px;border:none;background:transparent;font:500 var(--t-sm) var(--font-ui);color:var(--ink);cursor:pointer;" style-hover="background:var(--panel)"><span style="display:inline-flex;align-items:center;gap:8px;min-width:0;"><i class="fa-solid {{ tk.icon }}" style="{{ tk.iconStyle }}"></i><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ tk.label }}</span></span><i class="fa-solid fa-xmark" style="font-size:12px;color:var(--ink3);flex:none;"></i></button>
+                          <button onClick="{{ tk.onRemove }}" title="Remove" style="width:100%;text-align:left;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 8px;border:none;background:transparent;font:500 var(--t-sm) var(--font-ui);color:var(--ink);cursor:pointer;" style-hover="background:var(--panel)"><span style="display:inline-flex;align-items:center;gap:8px;min-width:0;"><i class="fa-solid {{ tk.icon }}" style="{{ tk.iconStyle }}"></i><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ tk.label }}</span></span><i class="fa-solid fa-xmark" style="font-size:12px;color:var(--ink3);flex:none;"></i></button>
                         </sc-for>
                       </sc-if>
                       <sc-if value="{{ f.hasSelItems }}" hint-placeholder-val="{{ true }}">
-                        <sc-if value="{{ f.hasSelGroups }}" hint-placeholder-val="{{ false }}"><div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;padding:9px 6px 5px;position:sticky;top:0;background:var(--surface);">{{ f.itemLabel }}</div></sc-if>
+                        <sc-if value="{{ f.hasSelGroups }}" hint-placeholder-val="{{ false }}"><div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;padding:8px 6px 4px;position:sticky;top:0;background:var(--surface);">{{ f.itemLabel }}</div></sc-if>
                         <sc-for list="{{ f.selItemTokens }}" as="tk" hint-placeholder-count="2">
-                          <button onClick="{{ tk.onRemove }}" title="Remove" style="width:100%;text-align:left;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 8px;border:none;background:transparent;font:500 var(--t-sm) var(--font-ui);color:var(--ink);cursor:pointer;" style-hover="background:var(--panel)"><span style="display:inline-flex;align-items:center;gap:8px;min-width:0;"><i class="fa-solid {{ tk.icon }}" style="{{ tk.iconStyle }}"></i><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ tk.label }}</span></span><i class="fa-solid fa-xmark" style="font-size:12px;color:var(--ink3);flex:none;"></i></button>
+                          <button onClick="{{ tk.onRemove }}" title="Remove" style="width:100%;text-align:left;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 8px;border:none;background:transparent;font:500 var(--t-sm) var(--font-ui);color:var(--ink);cursor:pointer;" style-hover="background:var(--panel)"><span style="display:inline-flex;align-items:center;gap:8px;min-width:0;"><i class="fa-solid {{ tk.icon }}" style="{{ tk.iconStyle }}"></i><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ tk.label }}</span></span><i class="fa-solid fa-xmark" style="font-size:12px;color:var(--ink3);flex:none;"></i></button>
                         </sc-for>
                       </sc-if>
                       <sc-if value="{{ f.selEmpty }}" hint-placeholder-val="{{ true }}">
-                        <div style="padding:18px 8px;text-align:center;font-size:var(--t-sm);color:var(--faint);font-style:italic;">{{ f.selEmptyMsg }}</div>
+                        <div style="padding:18px 8px;text-align:center;font-size:var(--t-sm);color:var(--ink3);font-style:italic;">{{ f.selEmptyMsg }}</div>
                       </sc-if>
                     </div>
                     <sc-if value="{{ f.canClear }}" hint-placeholder-val="{{ false }}">
-                      <button onClick="{{ f.onClearField }}" style="border:none;border-top:1px solid var(--line2);background:transparent;padding:9px 11px;text-align:left;display:flex;align-items:center;gap:7px;font:600 var(--t-sm) var(--font-ui);color:var(--ink3);cursor:pointer;" style-hover="background:var(--panel)"><i class="fa-solid fa-angles-left" style="font-size:10px;"></i> Clear all</button>
+                      <button onClick="{{ f.onClearField }}" style="border:none;border-top:1px solid var(--line2);background:transparent;padding:8px 12px;text-align:left;display:flex;align-items:center;gap:8px;font:600 var(--t-sm) var(--font-ui);color:var(--ink3);cursor:pointer;" style-hover="background:var(--panel)"><i class="fa-solid fa-angles-left" style="font-size:10px;"></i> Clear all</button>
                     </sc-if>
                   </div>
                 </div>
@@ -307,7 +307,7 @@
                         <span style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;">GROUPS</span>
                         <div style="display:flex;flex-wrap:wrap;gap:6px;">
                           <sc-for list="{{ f.groupChips }}" as="ch" hint-placeholder-count="3">
-                            <button onClick="{{ ch.onToggle }}" style="{{ ch.style }}"><i class="fa-solid fa-layer-group" style="font-size:9px;opacity:.7;"></i> {{ ch.label }}</button>
+                            <button onClick="{{ ch.onToggle }}" style="{{ ch.style }}"><i class="fa-solid fa-layer-group" style="font-size:10px;opacity:.7;"></i> {{ ch.label }}</button>
                           </sc-for>
                         </div>
                       </div>
@@ -322,8 +322,8 @@
                     </div>
                   </div>
 
-                  <div style="border:1px solid var(--line2);background:var(--panel);padding:13px 14px;">
-                    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:11px;">
+                  <div style="border:1px solid var(--line2);background:var(--panel);padding:12px 14px;">
+                    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:12px;">
                       <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;">{{ f.coefHeading }}</div>
                       <div style="flex:1;"></div>
                     </div>
@@ -331,7 +331,7 @@
                       <button onClick="{{ f.onToggleCollapse }}" style="{{ f.coverageStripStyle }}">
                         <i class="fa-solid {{ f.coverageIcon }}" style="font-size:12px;"></i>
                         <span style="flex:1;text-align:left;font:600 var(--t-sm) var(--font-ui);">{{ f.coverageText }}</span>
-                        <i class="fa-solid {{ f.collapseChevron }}" style="font-size:11px;"></i>
+                        <i class="fa-solid {{ f.collapseChevron }}" style="font-size:12px;"></i>
                       </button>
                     </sc-if>
                     <sc-if value="{{ f.noEligible }}" hint-placeholder-val="{{ true }}">
@@ -348,27 +348,27 @@
                         </sc-for>
                       </div>
                     </sc-if>
-                    <div style="margin-top:11px;font-size:var(--t-sm);color:var(--ink3);display:flex;align-items:flex-start;gap:7px;"><i class="fa-solid fa-circle-info" style="margin-top:2px;"></i><span>{{ f.unitNote }}</span></div>
+                    <div style="margin-top:12px;font-size:var(--t-sm);color:var(--ink3);display:flex;align-items:flex-start;gap:8px;"><i class="fa-solid fa-circle-info" style="margin-top:2px;"></i><span>{{ f.unitNote }}</span></div>
                   </div>
                 </div>
               </sc-if>
 
               <sc-if value="{{ f.isDates }}" hint-placeholder-val="{{ false }}">
-                <div style="display:flex;flex-direction:column;gap:13px;">
-                  <div style="display:flex;flex-direction:column;gap:7px;">
+                <div style="display:flex;flex-direction:column;gap:12px;">
+                  <div style="display:flex;flex-direction:column;gap:8px;">
                     <span style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;">AUTO-DERIVED</span>
                     <div style="display:flex;flex-wrap:wrap;gap:6px;">
                       <sc-for list="{{ f.autoChips }}" as="ch" hint-placeholder-count="3">
-                        <button onClick="{{ ch.onToggle }}" style="{{ ch.style }}"><i class="fa-solid fa-calendar-day" style="font-size:9px;opacity:.7;"></i> {{ ch.label }}</button>
+                        <button onClick="{{ ch.onToggle }}" style="{{ ch.style }}"><i class="fa-solid fa-calendar-day" style="font-size:10px;opacity:.7;"></i> {{ ch.label }}</button>
                       </sc-for>
                     </div>
                   </div>
                   <sc-if value="{{ f.hasDateGroups }}" hint-placeholder-val="{{ false }}">
-                    <div style="display:flex;flex-direction:column;gap:7px;">
+                    <div style="display:flex;flex-direction:column;gap:8px;">
                       <span style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;">DATE GROUPS</span>
                       <div style="display:flex;flex-wrap:wrap;gap:6px;">
                         <sc-for list="{{ f.dateGroupChips }}" as="ch" hint-placeholder-count="2">
-                          <button onClick="{{ ch.onToggle }}" style="{{ ch.style }}"><i class="fa-solid fa-layer-group" style="font-size:9px;opacity:.7;"></i> {{ ch.label }}</button>
+                          <button onClick="{{ ch.onToggle }}" style="{{ ch.style }}"><i class="fa-solid fa-layer-group" style="font-size:10px;opacity:.7;"></i> {{ ch.label }}</button>
                         </sc-for>
                       </div>
                     </div>
@@ -379,37 +379,37 @@
                   </div>
                 </div>
               </sc-if>
-              <sc-if value="{{ f.error }}" hint-placeholder-val="{{ false }}"><div style="color:var(--error);font-size:var(--t-sm);margin-top:8px;font-weight:600;"><i class="fa-solid fa-circle-exclamation" style="margin-right:5px;"></i>{{ f.error }}</div></sc-if>
+              <sc-if value="{{ f.error }}" hint-placeholder-val="{{ false }}"><div style="color:var(--errorink);font-size:var(--t-sm);margin-top:8px;font-weight:600;"><i class="fa-solid fa-circle-exclamation" style="margin-right:4px;"></i>{{ f.error }}</div></sc-if>
             </div>
           </sc-for>
         </div>
         <sc-if value="{{ isContractForm }}" hint-placeholder-val="{{ false }}">
           <sc-if value="{{ leaveGuardShow }}" hint-placeholder-val="{{ false }}">
             <div style="border:1px solid var(--warn);background:var(--warntint);padding:12px 14px;margin-top:16px;display:flex;gap:10px;align-items:flex-start;">
-              <i class="fa-solid fa-triangle-exclamation" style="color:var(--warn);margin-top:2px;"></i>
+              <i class="fa-solid fa-triangle-exclamation" style="color:var(--warnink);margin-top:2px;"></i>
               <div style="flex:1;">
-                <div style="font:700 var(--t-body) var(--font-ui);color:var(--warn);margin-bottom:3px;">Leave isn’t credited</div>
+                <div style="font:700 var(--t-body) var(--font-ui);color:var(--warnink);margin-bottom:4px;">Leave isn’t credited</div>
                 <div style="font-size:var(--t-sm);color:var(--ink2);line-height:1.45;margin-bottom:4px;">{{ leaveGuardText }}</div>
-                <div style="font:600 var(--m-xs) var(--font-mono);color:var(--ink3);margin-bottom:9px;">{{ leaveGuardNames }}</div>
-                <button onClick="{{ onAddLeave }}" style="height:30px;padding:0 12px;background:var(--warn);color:#fff;border:none;font:700 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:7px;"><i class="fa-solid fa-plus" style="font-size:10px;"></i> Credit Leave ({{ leaveCreditHalf }} half-hours)</button>
+                <div style="font:600 var(--m-xs) var(--font-mono);color:var(--ink3);margin-bottom:8px;">{{ leaveGuardNames }}</div>
+                <button onClick="{{ onAddLeave }}" style="height:30px;padding:0 12px;background:var(--fill-warn);color:var(--on-warn);border:none;font:700 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:8px;"><i class="fa-solid fa-plus" style="font-size:10px;"></i> Credit Leave ({{ leaveCreditHalf }} half-hours)</button>
               </div>
             </div>
           </sc-if>
           <div style="border:1px solid var(--line2);margin-top:16px;">
-            <button onClick="{{ onToggleSolver }}" style="width:100%;text-align:left;padding:11px 14px;background:var(--panel);border:none;display:flex;align-items:center;gap:9px;cursor:pointer;">
-              <i class="fa-solid {{ solverChevron }}" style="font-size:11px;color:var(--ink3);"></i>
-              <span style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.05em;color:var(--ink2);text-transform:uppercase;flex:1;">SOLVER DETAILS &amp; OVERRIDES</span>
+            <button onClick="{{ onToggleSolver }}" style="width:100%;text-align:left;padding:12px 14px;background:var(--panel);border:none;display:flex;align-items:center;gap:8px;cursor:pointer;">
+              <i class="fa-solid {{ solverChevron }}" style="font-size:12px;color:var(--ink3);"></i>
+              <span style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.04em;color:var(--ink2);text-transform:uppercase;flex:1;">SOLVER DETAILS &amp; OVERRIDES</span>
               <span style="font:600 var(--m-xs) var(--font-mono);color:var(--ink3);">{{ solverExpr }} · +∞</span>
             </button>
             <sc-if value="{{ solverOpen }}" hint-placeholder-val="{{ false }}">
-              <div style="padding:15px 14px;display:flex;flex-direction:column;gap:14px;border-top:1px solid var(--line2);">
+              <div style="padding:16px 14px;display:flex;flex-direction:column;gap:14px;border-top:1px solid var(--line2);">
                 <div style="display:flex;gap:16px;flex-wrap:wrap;">
                   <div>
-                    <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.05em;color:var(--ink3);text-transform:uppercase;margin-bottom:6px;">EXPRESSION</div>
+                    <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.04em;color:var(--ink3);text-transform:uppercase;margin-bottom:6px;">EXPRESSION</div>
                     <div style="display:inline-flex;align-items:center;gap:8px;font:700 var(--t-body) var(--font-mono);color:var(--ink2);background:var(--panel);border:1px solid var(--line2);padding:8px 12px;"><i class="fa-solid fa-lock" style="font-size:10px;color:var(--ink3);"></i> {{ solverExpr }}</div>
                   </div>
                   <div>
-                    <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.05em;color:var(--ink3);text-transform:uppercase;margin-bottom:6px;">WEIGHT</div>
+                    <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.04em;color:var(--ink3);text-transform:uppercase;margin-bottom:6px;">WEIGHT</div>
                     <div style="display:inline-flex;align-items:center;gap:8px;font:700 var(--t-body) var(--font-mono);color:var(--ink2);background:var(--panel);border:1px solid var(--line2);padding:8px 12px;"><i class="fa-solid fa-lock" style="font-size:10px;color:var(--ink3);"></i> +∞</div>
                   </div>
                 </div>
@@ -420,19 +420,19 @@
         </sc-if>
         <sc-if value="{{ showWeight }}" hint-placeholder-val="{{ false }}">
           <div style="margin-top:16px;max-width:340px;">
-            <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;margin-bottom:7px;">WEIGHT (PRIORITY)</div>
+            <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;margin-bottom:8px;">WEIGHT (PRIORITY)</div>
             <div style="display:flex;gap:8px;">
               <input value="{{ draftWeight }}" onInput="{{ onWeight }}" placeholder="e.g. −50, +∞" style="flex:1;height:40px;padding:0 12px;border:1px solid var(--line);background:var(--surface);font-family:var(--font-mono);">
               <button onClick="{{ setPlusInf }}" style="height:40px;padding:0 12px;background:transparent;border:1px solid var(--line);font:600 var(--m-sm) var(--font-mono);" style-hover="background:var(--panel)">+∞</button>
               <button onClick="{{ setMinusInf }}" style="height:40px;padding:0 12px;background:transparent;border:1px solid var(--line);font:600 var(--m-sm) var(--font-mono);" style-hover="background:var(--panel)">−∞</button>
             </div>
             <div style="font-size:var(--t-sm);color:var(--ink3);margin-top:6px;">{{ weightHelp }}</div>
-            <sc-if value="{{ weightError }}" hint-placeholder-val="{{ false }}"><div style="color:var(--error);font-size:var(--t-sm);margin-top:6px;font-weight:600;"><i class="fa-solid fa-circle-exclamation" style="margin-right:5px;"></i>{{ weightErrorText }}</div></sc-if>
+            <sc-if value="{{ weightError }}" hint-placeholder-val="{{ false }}"><div style="color:var(--errorink);font-size:var(--t-sm);margin-top:6px;font-weight:600;"><i class="fa-solid fa-circle-exclamation" style="margin-right:4px;"></i>{{ weightErrorText }}</div></sc-if>
           </div>
         </sc-if>
         <sc-if value="{{ showWeightNote }}" hint-placeholder-val="{{ false }}">
           <div style="margin-top:16px;max-width:420px;">
-            <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;margin-bottom:7px;">WEIGHT (PRIORITY)</div>
+            <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;margin-bottom:8px;">WEIGHT (PRIORITY)</div>
             <div style="font-style:italic;color:var(--ink3);font-size:var(--t-sm);">Weight is not needed when the preferred number of people equals the required number.</div>
           </div>
         </sc-if>
@@ -443,7 +443,7 @@
           </div>
         </sc-if>
       </div>
-      <div style="padding:14px 18px;border-top:1px solid var(--line2);display:flex;justify-content:flex-end;gap:10px;">
+      <div style="padding:16px 18px;border-top:1px solid var(--line2);display:flex;justify-content:flex-end;gap:10px;">
         <button onClick="{{ onCancel }}" style="height:40px;padding:0 18px;background:transparent;border:1px solid var(--line);font:600 var(--t-body) var(--font-ui);" style-hover="background:var(--panel)">Cancel</button>
         <button onClick="{{ onSave }}" style="height:40px;padding:0 20px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-body) var(--font-ui);display:inline-flex;align-items:center;gap:8px;" style-hover="filter:brightness(.94)"><i class="fa-solid fa-check"></i> {{ submitLabel }}</button>
       </div>
@@ -451,7 +451,7 @@
   </sc-if>
 
   <sc-if value="{{ hasNote }}" hint-placeholder-val="{{ false }}">
-    <div style="{{ noteStyle }}"><span style="font-weight:800;">{{ noteMark }}</span><span style="font-size:var(--t-sm);">{{ noteText }}</span></div>
+    <div style="{{ noteStyle }}"><span style="font-weight:700;">{{ noteMark }}</span><span style="font-size:var(--t-sm);">{{ noteText }}</span></div>
   </sc-if>
 
   <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
@@ -461,31 +461,31 @@
 
   <sc-if value="{{ isEmpty }}" hint-placeholder-val="{{ false }}">
     <div style="border:1.5px dashed var(--line);padding:48px 40px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:14px;">
-      <div style="width:54px;height:54px;border:1.5px dashed var(--line);display:flex;align-items:center;justify-content:center;font-size:24px;color:var(--faint);line-height:1;">∅</div>
-      <div style="display:flex;flex-direction:column;align-items:center;gap:5px;">
+      <div style="width:54px;height:54px;border:1.5px dashed var(--line);display:flex;align-items:center;justify-content:center;font-size:24px;color:var(--ink3);line-height:1;">∅</div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
         <div style="font:700 var(--t-title) var(--font-display);color:var(--ink2);">{{ empty }}</div>
         <div style="font-size:var(--t-sm);color:var(--ink3);max-width:44ch;">{{ emptyBody }}</div>
       </div>
-      <button onClick="{{ addNew }}" style="height:40px;padding:0 18px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-body) var(--font-ui);display:inline-flex;align-items:center;gap:9px;margin-top:2px;white-space:nowrap;" style-hover="filter:brightness(.94)"><i class="fa-solid fa-plus"></i> {{ addBtnLabel }}</button>
+      <button onClick="{{ addNew }}" style="height:40px;padding:0 18px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-body) var(--font-ui);display:inline-flex;align-items:center;gap:8px;margin-top:2px;white-space:nowrap;" style-hover="filter:brightness(.94)"><i class="fa-solid fa-plus"></i> {{ addBtnLabel }}</button>
     </div>
   </sc-if>
 
   <div style="display:flex;flex-direction:column;gap:12px;">
     <sc-for list="{{ cards }}" as="c" hint-placeholder-count="3">
       <div style="{{ c.cardStyle }}">
-        <div style="display:flex;align-items:center;gap:13px;margin-bottom:16px;">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
           <div style="width:32px;height:32px;background:var(--panel);border:1px solid var(--line2);display:flex;align-items:center;justify-content:center;color:var(--ink2);font:600 var(--m-md) var(--font-mono);flex:none;">{{ c.num }}</div>
           <div style="flex:1;min-width:0;">
-            <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap;">
-              <span style="font:800 var(--t-title) var(--font-display);letter-spacing:-.01em;line-height:1.15;">{{ c.desc }}</span>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <span style="font:700 var(--t-title) var(--font-display);letter-spacing:-.01em;line-height:1.15;">{{ c.desc }}</span>
               <sc-if value="{{ c.isContract }}" hint-placeholder-val="{{ false }}">
-                <span style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--brandink);background:var(--brandtint);padding:3px 7px;text-transform:uppercase;">◆ CONTRACTED HOURS</span>
+                <span style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--brandink);background:var(--brandtint);padding:4px 8px;text-transform:uppercase;">◆ CONTRACTED HOURS</span>
               </sc-if>
               <sc-if value="{{ c.disabled }}" hint-placeholder-val="{{ false }}">
-                <span title="Turned off from the guided Rules screen" style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);background:var(--panel);border:1px solid var(--line2);padding:3px 7px;text-transform:uppercase;">Disabled</span>
+                <span title="Turned off from the guided Rules screen" style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);background:var(--panel);border:1px solid var(--line2);padding:4px 8px;text-transform:uppercase;">Disabled</span>
               </sc-if>
               <sc-if value="{{ c.hardBadge }}" hint-placeholder-val="{{ false }}">
-                <span title="Coverings are always enforced — weight is ignored by the solver" style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--error);background:var(--errortint);padding:3px 7px;text-transform:uppercase;">● Always enforced</span>
+                <span title="Coverings are always enforced — weight is ignored by the solver" style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--errorink);background:var(--errortint);padding:4px 8px;text-transform:uppercase;">Always enforced</span>
               </sc-if>
             </div>
           </div>
@@ -496,8 +496,8 @@
         <div style="{{ c.fieldGridStyle }}">
           <sc-for list="{{ c.fields }}" as="f" hint-placeholder-count="4">
             <div style="{{ f.style }}">
-              <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;margin-bottom:7px;">{{ f.k }}</div>
-              <div style="font:700 var(--t-body) var(--font-ui);letter-spacing:-.005em;line-height:1.25;">{{ f.v }}</div>
+              <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;margin-bottom:8px;">{{ f.k }}</div>
+              <div style="font:700 var(--t-body) var(--font-ui);letter-spacing:-.01em;line-height:1.25;">{{ f.v }}</div>
             </div>
           </sc-for>
         </div>
@@ -510,10 +510,10 @@
           </div>
         </sc-if>
         <div style="display:flex;gap:6px;margin-top:14px;">
-          <button onClick="{{ c.onToggleDisabled }}" style="height:32px;padding:0 12px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:7px;" style-hover="background:var(--panel)"><i class="fa-solid fa-power-off" style="font-size:10px;"></i> {{ c.disabledLabel }}</button>
-          <button onClick="{{ c.onEdit }}" style="height:32px;padding:0 12px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:7px;" style-hover="background:var(--panel)"><i class="fa-solid fa-pen" style="font-size:10px;"></i> Edit</button>
-          <button onClick="{{ c.onDup }}" style="height:32px;padding:0 12px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:7px;" style-hover="background:var(--panel)"><i class="fa-solid fa-copy" style="font-size:10px;"></i> Duplicate</button>
-          <button onClick="{{ c.onDelete }}" style="height:32px;padding:0 12px;background:transparent;border:1px solid var(--line);color:var(--error);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:7px;" style-hover="background:var(--errortint)"><i class="fa-solid fa-trash" style="font-size:10px;"></i> Delete</button>
+          <button onClick="{{ c.onToggleDisabled }}" style="height:32px;padding:0 12px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:8px;" style-hover="background:var(--panel)"><i class="fa-solid fa-power-off" style="font-size:10px;"></i> {{ c.disabledLabel }}</button>
+          <button onClick="{{ c.onEdit }}" style="height:32px;padding:0 12px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:8px;" style-hover="background:var(--panel)"><i class="fa-solid fa-pen" style="font-size:10px;"></i> Edit</button>
+          <button onClick="{{ c.onDup }}" style="height:32px;padding:0 12px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:8px;" style-hover="background:var(--panel)"><i class="fa-solid fa-copy" style="font-size:10px;"></i> Duplicate</button>
+          <button onClick="{{ c.onDelete }}" style="height:32px;padding:0 12px;background:transparent;border:1px solid var(--line);color:var(--errorink);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:8px;" style-hover="background:var(--errortint)"><i class="fa-solid fa-trash" style="font-size:10px;"></i> Delete</button>
         </div>
       </div>
     </sc-for>
@@ -738,12 +738,12 @@ class Component extends DCLogic {
     const listTitles={requirements:'Current requirements',successions:'Current successions',counts:'Current shift counts',affinities:'Current affinities',coverings:'Current shift type coverings'};
     const weightStyle=(w)=>{
       let c='color:var(--ink2);background:var(--panel);';
-      if(w && w.indexOf('+')===0) c='color:var(--success);background:var(--successtint);';
-      else if(w==='−∞') c='color:var(--error);background:var(--errortint);';
-      else if(w && w.indexOf('−')===0) c='color:var(--warn);background:var(--warntint);';
-      return `font:600 var(--m-xs) var(--font-mono);letter-spacing:.05em;padding:4px 9px;white-space:nowrap;${c}`;
+      if(w && w.indexOf('+')===0) c='color:var(--successink);background:var(--successtint);';
+      else if(w==='−∞') c='color:var(--errorink);background:var(--errortint);';
+      else if(w && w.indexOf('−')===0) c='color:var(--warnink);background:var(--warntint);';
+      return `font:600 var(--m-xs) var(--font-mono);letter-spacing:.04em;padding:4px 8px;white-space:nowrap;${c}`;
     };
-    const coefChipStyle=(leaf)=>`font:600 var(--m-xs) var(--font-mono);padding:3px 9px;border:1px solid ${leaf?'var(--brand)':'var(--line2)'};background:${leaf?'var(--brandtint)':'var(--surface)'};color:${leaf?'var(--brandink)':'var(--ink)'};`;
+    const coefChipStyle=(leaf)=>`font:600 var(--m-xs) var(--font-mono);padding:4px 8px;border:1px solid ${leaf?'var(--brand)':'var(--line2)'};background:${leaf?'var(--brandtint)':'var(--surface)'};color:${leaf?'var(--brandink)':'var(--ink)'};`;
     const cards=list.map((c,i)=>{
       let flds=c.fields;
       if(kind==='requirements') flds=flds.filter(f=>!(f.k==='Preferred' && (!f.v || f.v==='')));
@@ -754,7 +754,7 @@ class Component extends DCLogic {
         onToggleDisabled:()=>(ed.setDisabled||(()=>{}))(kind,i,!c.disabled),
         cardStyle:`background:var(--surface);border:1px solid ${(kind==='counts'&&c.tag==='contracted_hours')?'var(--brand)':'var(--line)'};${(kind==='counts'&&c.tag==='contracted_hours')?'border-left:3px solid var(--brand);':''}padding:20px;${c.disabled?'opacity:.55;':''}`,
         fieldGridStyle:`display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:1px;background:var(--line2);border:1px solid var(--line2);`,
-        fields:flds.map((f,fi)=>({...f, style:`background:var(--surface);padding:13px 15px;`})),
+        fields:flds.map((f,fi)=>({...f, style:`background:var(--surface);padding:12px 16px;`})),
         hasCoef:!!c.coef,
         coefLabel:(kind==='requirements'?'Coefficients · staffing multiplier':'Coefficients'),
         coefChips:c.coef?Object.entries(c.coef).map(([k,val])=>({text:(k==='LEAVE'?'Leave':k)+' · '+val, style:coefChipStyle(k==='LEAVE')})):[],
@@ -773,9 +773,9 @@ class Component extends DCLogic {
     const isCoverageKind=(kind==='requirements'||kind==='coverings');
     const dateAuto=ed.dateAutoGroups||ed.dateScopes||['ALL','WEEKDAY','WEEKEND'];
     const dateUserGroups=ed.dateGroups||[];
-    const chipStyle=(on)=>`height:30px;padding:0 11px;border:1px solid ${on?'var(--brand)':'var(--line)'};background:${on?'var(--brand)':'var(--surface)'};color:${on?'var(--onbrand)':'var(--ink)'};font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:6px;white-space:nowrap;cursor:pointer;`;
-    const grpChipStyle=(on)=>`height:30px;padding:0 11px;border:1px solid ${on?'var(--brand)':'var(--line2)'};background:${on?'var(--brand)':'var(--panel)'};color:${on?'var(--onbrand)':'var(--ink2)'};font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:6px;white-space:nowrap;cursor:pointer;`;
-    const leaveChipStyle=(on)=>`height:30px;padding:0 11px;border:1px solid var(--brand);background:${on?'var(--brand)':'var(--brandtint)'};color:${on?'var(--onbrand)':'var(--brandink)'};font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:6px;white-space:nowrap;cursor:pointer;`;
+    const chipStyle=(on)=>`height:30px;padding:0 12px;border:1px solid ${on?'var(--brand)':'var(--line)'};background:${on?'var(--brand)':'var(--surface)'};color:${on?'var(--onbrand)':'var(--ink)'};font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:6px;white-space:nowrap;cursor:pointer;`;
+    const grpChipStyle=(on)=>`height:30px;padding:0 12px;border:1px solid ${on?'var(--brand)':'var(--line2)'};background:${on?'var(--brand)':'var(--panel)'};color:${on?'var(--onbrand)':'var(--ink2)'};font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:6px;white-space:nowrap;cursor:pointer;`;
+    const leaveChipStyle=(on)=>`height:30px;padding:0 12px;border:1px solid var(--brand);background:${on?'var(--brand)':'var(--brandtint)'};color:${on?'var(--onbrand)':'var(--brandink)'};font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:6px;white-space:nowrap;cursor:pointer;`;
     // shared coefficient sub-editor builder (counts = hours w/ auto-fill+unit; requirements = staffing multiplier)
     const buildCoef=(base,i,f,opts)=>{
       base.isCountCoef=true; base.cellStyle='display:block;grid-column:1 / -1;';
@@ -791,7 +791,7 @@ class Component extends DCLogic {
         const val=(draft&&draft.coef&&draft.coef[id]!=null)?draft.coef[id]:'';
         const hasVal=(val!==''&&val!=null);
         return {id, label:leaf?'Leave':id, isLeave:leaf, val,
-          tagStyle:`font:600 var(--m-sm) var(--font-mono);padding:5px 11px;border:1px solid ${leaf?'var(--brand)':'var(--line2)'};background:${leaf?'var(--brandtint)':'var(--surface)'};color:${leaf?'var(--brandink)':'var(--ink)'};min-width:66px;text-align:center;`,
+          tagStyle:`font:600 var(--m-sm) var(--font-mono);padding:4px 12px;border:1px solid ${leaf?'var(--brand)':'var(--line2)'};background:${leaf?'var(--brandtint)':'var(--surface)'};color:${leaf?'var(--brandink)':'var(--ink)'};min-width:66px;text-align:center;`,
           onInput:(e)=>this.setCoef(id,e.target.value),
           hint: '' };
       });
@@ -823,7 +823,7 @@ class Component extends DCLogic {
           if(need) att++;
           const hrs=(m!=null)?(m/60):null;
           return {id, label:leaf?'Leave':id, isLeave:leaf, val:shown, needsAttention:need,
-            tagStyle:'font:600 var(--m-sm) var(--font-mono);padding:5px 11px;border:1px solid '+(need?'var(--warn)':(leaf?'var(--brand)':'var(--line2)'))+';background:'+(need?'var(--warntint)':(leaf?'var(--brandtint)':'var(--surface)'))+';color:'+(need?'var(--warn)':(leaf?'var(--brandink)':'var(--ink)'))+';min-width:66px;text-align:center;',
+            tagStyle:'font:600 var(--m-sm) var(--font-mono);padding:4px 12px;border:1px solid '+(need?'var(--warn)':(leaf?'var(--brand)':'var(--line2)'))+';background:'+(need?'var(--warntint)':(leaf?'var(--brandtint)':'var(--surface)'))+';color:'+(need?'var(--warn)':(leaf?'var(--brandink)':'var(--ink)'))+';min-width:66px;text-align:center;',
             onInput:(e)=>this.setCoef(id,e.target.value),
             hint: need ? 'no working time — set manually' : (leaf? (credH+'h credit · editable') : (hrs+'h × 2 · from working time'))};
         });
@@ -859,7 +859,7 @@ class Component extends DCLogic {
         base.isPolicy=true; base.cellStyle='display:block;grid-column:1 / -1;'; base.showLabel=false; base.hint='';
         const pol=draft.policy||'range';
         base.policyExact=(pol==='exact'); base.policyRange=(pol==='range');
-        const segS=(on)=>`flex:1;text-align:center;padding:9px;font:${on?'700':'600'} var(--t-body) var(--font-ui);color:${on?'var(--onbrand)':'var(--ink2)'};background:${on?'var(--brand)':'var(--surface)'};border:none;cursor:pointer;`;
+        const segS=(on)=>`flex:1;text-align:center;padding:8px;font:${on?'700':'600'} var(--t-body) var(--font-ui);color:${on?'var(--onbrand)':'var(--ink2)'};background:${on?'var(--brand)':'var(--surface)'};border:none;cursor:pointer;`;
         base.exactStyle=segS(pol==='exact'); base.rangeStyle=segS(pol==='range')+'border-left:1px solid var(--line);';
         base.onExact=()=>this.setPolicy('exact'); base.onRange=()=>this.setPolicy('range');
         const mn=draft.minHalf||'', mx=draft.maxHalf||'', tg=draft.targetHalf||'';
@@ -878,8 +878,8 @@ class Component extends DCLogic {
         base.exprOptions=this.EXPR_OPS.map(o=>{
           const sel=(o.id===parsed.opId);
           return {id:o.id, glyph:o.glyph, title:o.title, help:o.help, selected:sel,
-            style:`display:flex;align-items:center;gap:13px;width:100%;text-align:left;padding:11px 13px;border:1px solid ${sel?'var(--brand)':'var(--line)'};background:${sel?'var(--brandtint)':'var(--surface)'};cursor:pointer;`,
-            badgeStyle:`font:700 var(--m-md) var(--font-mono);white-space:nowrap;padding:7px 12px;min-width:74px;text-align:center;border:1px solid ${sel?'var(--brand)':'var(--line2)'};background:${sel?'var(--surface)':'var(--panel)'};color:${sel?'var(--brandink)':'var(--ink2)'};flex:none;`,
+            style:`display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:12px 12px;border:1px solid ${sel?'var(--brand)':'var(--line)'};background:${sel?'var(--brandtint)':'var(--surface)'};cursor:pointer;`,
+            badgeStyle:`font:700 var(--m-md) var(--font-mono);white-space:nowrap;padding:8px 12px;min-width:74px;text-align:center;border:1px solid ${sel?'var(--brand)':'var(--line2)'};background:${sel?'var(--surface)':'var(--panel)'};color:${sel?'var(--brandink)':'var(--ink2)'};flex:none;`,
             onPick:()=>this.setFieldVal(i,this._buildExpr(o.id,parsed.target))};
         });
         base.targetVal=parsed.target;
@@ -927,7 +927,7 @@ class Component extends DCLogic {
         const knownSet=new Set([...groups,...items]);
         // ---- SELECTED pane (right) — user's saved order; unknown typed values still show ----
         const rawSelQ=(this.state.fieldQ||{})[f.k+'::sel']||''; const selQ=rawSelQ.trim().toLowerCase();
-        const tkIconStyle=(g,a)=>`font-size:10px;flex:none;color:${(g||a)?'var(--brandink)':'var(--ink3)'};`;
+        const tkIconStyle=(g,a)=>`font-size:var(--t-nano);flex:none;color:${(g||a)?'var(--brandink)':'var(--ink3)'};`;
         const allTokens=sel.map(v=>{const g=groups.includes(v);const a=false;return {label:dispOf(v), isGroup:g, isAll:a, isUnknown:!knownSet.has(v),
           icon:(a?'fa-users':(g?'fa-layer-group':itemIcon)), iconStyle:tkIconStyle(g,a),
           onRemove:()=>this.setFieldVal(i,this.toggleInVal(f.v,v,single))};});
@@ -1039,8 +1039,8 @@ class Component extends DCLogic {
       eyebrow:meta.eyebrow, title:meta.title, subtitle:meta.subtitle, empty:meta.empty,
       addBtnLabel:meta.addLabel||'Add', addIcon: this.state.mode==='list'?'fa-plus':'fa-xmark',
       addBtnStyle: this.state.mode==='list'
-        ? 'height:44px;padding:0 18px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-body) var(--font-ui);display:inline-flex;align-items:center;gap:9px;white-space:nowrap;'
-        : 'height:44px;padding:0 18px;background:transparent;color:var(--ink);border:1px solid var(--line);font:700 var(--t-body) var(--font-ui);display:inline-flex;align-items:center;gap:9px;white-space:nowrap;',
+        ? 'height:44px;padding:0 18px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-body) var(--font-ui);display:inline-flex;align-items:center;gap:8px;white-space:nowrap;'
+        : 'height:44px;padding:0 18px;background:transparent;color:var(--ink);border:1px solid var(--line);font:700 var(--t-body) var(--font-ui);display:inline-flex;align-items:center;gap:8px;white-space:nowrap;',
       addNew: this.state.mode==='list'? this.addNew : this.cancel,
       listTitle:listTitles[kind], countLabel:list.length+(list.length===1?' RULE':' RULES'),
       isEmpty:list.length===0 && this.state.mode==='list', emptyBody:'Add your first '+t.entity+' to define this constraint.', cards,
@@ -1062,7 +1062,7 @@ class Component extends DCLogic {
       showTwoAdd:(kind==='counts' && this.state.mode==='list'), showOneAdd:!(kind==='counts' && this.state.mode==='list'), addContract:this.addContract,
       showCoverage, coverageMsg, coverageItems,
       hasNote:!!note && this.state.mode==='list' && !showCoverage, noteText:note&&note.text, noteMark:note&&note.tone==='success'?'✓':'!',
-      noteStyle: note?`display:flex;align-items:center;gap:10px;border:1px solid ${note.tone==='success'?'var(--success)':'var(--warn)'};background:${note.tone==='success'?'var(--successtint)':'var(--warntint)'};color:${note.tone==='success'?'var(--success)':'var(--warn)'};padding:11px 14px;margin-bottom:var(--space-4);`:'',
+      noteStyle: note?`display:flex;align-items:center;gap:10px;border:1px solid ${note.tone==='success'?'var(--success)':'var(--warn)'};background:${note.tone==='success'?'var(--successtint)':'var(--warntint)'};color:${note.tone==='success'?'var(--successink)':'var(--warnink)'};padding:12px 14px;margin-bottom:var(--space-4);`:'',
     };
   }
 }

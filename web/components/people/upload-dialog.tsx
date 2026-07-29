@@ -14,6 +14,13 @@ import * as React from "react";
 import { toast } from "sonner";
 import type { ScenarioUiState } from "@/lib/scenario";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { FaFileArrowUp, FaXmark } from "@/components/icons";
 import {
   reorderByUpload,
@@ -76,31 +83,50 @@ export function UploadDialog<TItem extends EditorItemBase>({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-[rgba(8,10,14,0.5)]"
-      onClick={onClose}
+    // The parent mounts this component only while the dialog should be open, so
+    // the shell is held open and every close route is routed back through
+    // `onClose` — which unmounts it.
+    <Dialog
+      open
+      onOpenChange={(next, eventDetails) => {
+        if (next) return;
+        // THE one exception in the app: People upload ignores Escape. The
+        // dialog is a destructive-ish bulk reorder reached from a table row, and
+        // a stray Escape while the OS file picker has just closed used to throw
+        // the whole flow away. Cancelling the Base UI event (rather than merely
+        // not calling `onClose`) also stops Base from running its own close
+        // handling for that key. Backdrop, the close button and a successful
+        // import still close; a validation error never does.
+        if (eventDetails.reason === "escape-key") {
+          eventDetails.cancel();
+          return;
+        }
+        onClose();
+      }}
     >
-      <div
-        role="dialog"
-        aria-label="Upload people list"
+      <DialogContent
         data-testid="upload-dialog"
-        className="w-[460px] max-w-[92vw] border border-line bg-surface shadow-dialog"
-        onClick={(e) => e.stopPropagation()}
+        showCloseButton={false}
+        className="gap-0 overflow-hidden p-0"
       >
         <div className="flex items-center justify-between border-b border-line2 px-4 py-3">
-          <h3 className="font-heading text-cardhead font-semibold">Upload people list</h3>
-          <Button size="icon" variant="outline" aria-label="Close" onClick={onClose}>
+          <DialogTitle>Upload people list</DialogTitle>
+          <DialogClose
+            aria-label="Close"
+            data-testid="upload-dialog-close"
+            render={<Button size="icon" variant="outline" />}
+          >
             <FaXmark />
-          </Button>
+          </DialogClose>
         </div>
         <div className="flex flex-col gap-3 p-4">
-          <p className="text-meta text-ink2">
+          <DialogDescription>
             One name per line (<code className="font-mono">.txt</code> /{" "}
             <code className="font-mono">.csv</code>). Existing people are reordered to match the
             file, new names are added, and any not listed move to the end. Lines starting with{" "}
             <code className="font-mono">#</code> are skipped.
-          </p>
-          <label className="flex cursor-pointer flex-col items-center justify-center gap-2 border border-dashed border-line bg-panel p-6 text-center hover:border-brand">
+          </DialogDescription>
+          <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-control border border-dashed border-line bg-panel p-6 text-center hover:border-brand">
             <FaFileArrowUp className="size-6 text-ink3" />
             <span className="font-medium text-meta">Choose a .txt / .csv file</span>
             <input
@@ -115,7 +141,7 @@ export function UploadDialog<TItem extends EditorItemBase>({
             />
           </label>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

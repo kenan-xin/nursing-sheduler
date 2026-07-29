@@ -23,8 +23,8 @@ import {
   getScenarioStorage,
   type GuardedStorage,
 } from "@/lib/store";
-import { cn } from "@/lib/utils";
-import { FaSpinner, FaCircleCheck, FaTriangleExclamation } from "@/components/icons";
+import { Badge } from "@/components/ui/badge";
+import { FaSpinner } from "@/components/icons";
 
 export type PersistenceStatus = "restoring" | "saving" | "saved" | "error";
 
@@ -102,38 +102,45 @@ const LABEL: Record<PersistenceStatus, string> = {
   error: "Save failed",
 };
 
-function StatusMark({ status }: { status: PersistenceStatus }) {
-  if (status === "restoring" || status === "saving") {
-    return <FaSpinner className="size-3 animate-spin-slow text-ink3" aria-hidden />;
-  }
-  if (status === "error") {
-    return <FaTriangleExclamation className="size-3 text-error" aria-hidden />;
-  }
-  return <FaCircleCheck className="size-3 text-success" aria-hidden />;
-}
+// F2 owns this file's PRESENTATION only, and is its sole visual owner before F4 —
+// R1 and R7 consume both surfaces below without editing them.
+//
+// v2 status surfaces ARE Badges: each state picks the semantic tier, and the shared
+// primitive pairs that tint with its MATCHING ink and border (every pair clears AA
+// in both themes, the tightest being warn at 4.88:1). Mapping state onto the shared
+// vocabulary is what lets this presenter stop authoring its own tone classes.
+const VARIANT: Record<PersistenceStatus, "neutral" | "success" | "error"> = {
+  restoring: "neutral",
+  saving: "neutral",
+  saved: "success",
+  error: "error",
+};
 
-function toneClass(status: PersistenceStatus): string {
-  if (status === "error") return "text-error";
-  if (status === "saved") return "text-success";
-  return "text-ink3";
+// DESIGN.md §5 retires decorative ornament on status — no check glyphs, no coloured
+// leader dots; the label text plus the semantic tint/ink/border triple carries the
+// state, and the prototype's own SAVED badge is text-only
+// (ScreenSaveLoad.dc.html:87). The in-flight spinner is KEPT because it reports
+// ACTIVITY, which neither static text nor a hue can express, and it inherits the
+// badge's ink rather than introducing a second colour.
+function StatusMark({ status }: { status: PersistenceStatus }) {
+  if (status !== "restoring" && status !== "saving") return null;
+  return <FaSpinner className="animate-spin-slow" aria-hidden />;
 }
 
 // Compact top-bar status chip (the "compact secondary status surface" of MAJOR 5).
 export function PersistenceStatus() {
   const status = usePersistenceStatusStore((s) => s.status);
   return (
-    <span
+    <Badge
       data-testid="persistence-status"
       data-status={status}
       role="status"
-      className={cn(
-        "hidden items-center gap-1.5 text-label uppercase tracking-[0.03em] sm:inline-flex",
-        toneClass(status),
-      )}
+      variant={VARIANT[status]}
+      className="hidden sm:inline-flex"
     >
       <StatusMark status={status} />
       {LABEL[status]}
-    </span>
+    </Badge>
   );
 }
 
@@ -146,16 +153,14 @@ export function PersistenceStatus() {
 export function PersistenceBadge() {
   const status = usePersistenceStatusStore((s) => s.status);
   return (
-    <span
+    <Badge
       data-testid="persistence-badge"
       data-status={status}
-      className={cn(
-        "inline-flex items-center gap-2 border border-line bg-surface px-3 py-1.5 text-label uppercase tracking-[0.03em]",
-        toneClass(status),
-      )}
+      variant={VARIANT[status]}
+      className="gap-2 px-3 py-1.5"
     >
       <StatusMark status={status} />
       {LABEL[status]}
-    </span>
+    </Badge>
   );
 }

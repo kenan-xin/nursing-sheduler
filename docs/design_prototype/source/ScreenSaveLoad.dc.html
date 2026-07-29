@@ -10,7 +10,7 @@
 <div class="ns-fade">
   <div style="margin-bottom:var(--space-5);">
     <div style="font:600 var(--m-sm) var(--font-ui);letter-spacing:.03em;color:var(--brandink);text-transform:uppercase;margin-bottom:8px;">SYSTEM · SAVE &amp; LOAD</div>
-    <h1 style="font:800 var(--t-display) var(--font-display);letter-spacing:-.02em;margin:0 0 8px;line-height:1.05;">Save &amp; Load</h1>
+    <h1 style="font:700 var(--t-display) var(--font-display);letter-spacing:-.015em;margin:0 0 8px;line-height:1.05;">Save &amp; Load</h1>
     <p style="margin:0;color:var(--ink2);max-width:64ch;">Everything you set up is saved automatically in this browser. Download a copy to back it up, share it, load a scenario file, or edit the YAML directly.</p>
   </div>
 
@@ -18,7 +18,7 @@
   <sc-if value="{{ warningsOpen }}" hint-placeholder-val="{{ false }}">
     <div style="background:var(--warntint);border:1px solid var(--warn);padding:14px 16px;margin-bottom:var(--space-4);">
       <div style="display:flex;align-items:flex-start;gap:10px;">
-        <i class="fa-solid fa-triangle-exclamation" style="color:var(--warn);margin-top:2px;"></i>
+        <i class="fa-solid fa-triangle-exclamation" style="color:var(--warnink);margin-top:2px;"></i>
         <div style="flex:1;min-width:0;">
           <div style="font-weight:700;font-size:var(--t-sm);margin-bottom:6px;">Imported YAML contains advanced backend syntax.</div>
           <ul style="margin:0;padding-left:18px;color:var(--ink2);font-size:var(--t-sm);line-height:1.6;">
@@ -31,14 +31,14 @@
   </sc-if>
 
   <sc-if value="{{ flash }}" hint-placeholder-val="{{ false }}">
-    <div style="background:var(--successtint);border:1px solid var(--success);padding:11px 14px;margin-bottom:var(--space-4);display:flex;align-items:center;gap:10px;font-size:var(--t-sm);color:var(--ink);"><i class="fa-solid fa-circle-check" style="color:var(--success);"></i> {{ flash }}</div>
+    <div style="background:var(--successtint);border:1px solid var(--success);padding:12px 14px;margin-bottom:var(--space-4);display:flex;align-items:center;gap:10px;font-size:var(--t-sm);color:var(--ink);"><i class="fa-solid fa-circle-check" style="color:var(--successink);"></i> {{ flash }}</div>
   </sc-if>
 
-  <div class="ns-grid2" style="align-items:start;">
-    <div style="display:flex;flex-direction:column;gap:var(--space-4);">
+  <div class="ns-grid2" style="align-items:start;min-width:0;">
+    <div style="display:flex;flex-direction:column;gap:var(--space-4);min-width:0;">
       <!-- file actions -->
       <div style="background:var(--surface);border:1px solid var(--line);">
-        <div style="padding:16px 18px;border-bottom:1px solid var(--line2);"><div style="font:800 var(--t-cardhead) var(--font-display);letter-spacing:-.02em;">Scenario file</div></div>
+        <div style="padding:16px 18px;border-bottom:1px solid var(--line2);"><div style="font:700 var(--t-cardhead) var(--font-display);letter-spacing:-.015em;">Scenario file</div></div>
         <div style="padding:18px;display:flex;flex-wrap:wrap;gap:10px;">
           <button onClick="{{ download }}" style="height:40px;padding:0 16px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:8px;" style-hover="filter:brightness(.94)"><i class="fa-solid fa-download"></i> Download</button>
           <button onClick="{{ openUpload }}" style="height:40px;padding:0 16px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:8px;" style-hover="background:var(--panel)"><i class="fa-solid fa-upload"></i> Upload</button>
@@ -50,18 +50,18 @@
       <!-- new schedule (reset) -->
       <div style="background:var(--surface);border:1px solid var(--line);">
         <div style="padding:16px 18px;border-bottom:1px solid var(--line2);">
-          <div style="font:800 var(--t-cardhead) var(--font-display);letter-spacing:-.02em;">Start over</div>
-          <div style="color:var(--ink2);font-size:var(--t-sm);margin-top:2px;">Clear this ward's setup and begin a fresh schedule with default shifts and rules. Download a copy first if you want to keep it.</div>
+          <div style="font:700 var(--t-cardhead) var(--font-display);letter-spacing:-.015em;">Start over</div>
+          <div style="color:var(--ink2);font-size:var(--t-sm);margin-top:2px;">Clear the current setup and begin a fresh schedule with default shifts and rules. Download a copy first if you want to keep it.</div>
         </div>
         <div style="padding:18px;">
-          <button onClick="{{ onNew }}" style="height:40px;padding:0 16px;background:transparent;border:1px solid var(--error);color:var(--error);font:700 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:8px;" style-hover="background:var(--errortint)"><i class="fa-solid fa-file-circle-plus"></i> New schedule</button>
+          <button onClick="{{ onNew }}" style="height:40px;padding:0 16px;background:transparent;border:1px solid var(--error);color:var(--errorink);font:700 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:8px;" style-hover="background:var(--errortint)"><i class="fa-solid fa-file-circle-plus"></i> New schedule</button>
         </div>
       </div>
 
       <!-- anonymise -->
       <div style="background:var(--surface);border:1px solid var(--line);">
         <div style="padding:16px 18px;border-bottom:1px solid var(--line2);">
-          <div style="font:800 var(--t-cardhead) var(--font-display);letter-spacing:-.02em;">Anonymise</div>
+          <div style="font:700 var(--t-cardhead) var(--font-display);letter-spacing:-.015em;">Anonymise</div>
           <div style="color:var(--ink2);font-size:var(--t-sm);margin-top:2px;">Strip identifying data before sharing a scenario for support.</div>
         </div>
         <div style="padding:18px;display:flex;flex-direction:column;gap:14px;">
@@ -72,7 +72,7 @@
             </div>
           </sc-for>
           <sc-if value="{{ scatterMissing }}" hint-placeholder-val="{{ false }}">
-            <div style="font-size:var(--t-sm);color:var(--warn);">{{ scatterMissingText }}</div>
+            <div style="font-size:var(--t-sm);color:var(--warnink);">{{ scatterMissingText }}</div>
           </sc-if>
           <button style="{{ anonBtn }}" onClick="{{ anonDownload }}"><i class="fa-solid fa-user-secret"></i> Download anonymised</button>
         </div>
@@ -80,18 +80,18 @@
     </div>
 
     <!-- yaml preview / editor -->
-    <div style="background:var(--surface);border:1px solid var(--line);display:flex;flex-direction:column;">
+    <div style="background:var(--surface);border:1px solid var(--line);display:flex;flex-direction:column;min-width:0;">
       <div style="padding:16px 18px;border-bottom:1px solid var(--line2);display:flex;align-items:center;justify-content:space-between;">
-        <div style="font:800 var(--t-cardhead) var(--font-display);letter-spacing:-.02em;">{{ panelTitle }}</div>
+        <div style="font:700 var(--t-cardhead) var(--font-display);letter-spacing:-.015em;">{{ panelTitle }}</div>
         <sc-if value="{{ notEditing }}" hint-placeholder-val="{{ true }}">
-          <span style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--success);background:var(--successtint);padding:4px 8px;text-transform:uppercase;">● SAVED</span>
+          <span style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--successink);background:var(--successtint);padding:4px 8px;text-transform:uppercase;">SAVED</span>
         </sc-if>
       </div>
 
       <sc-if value="{{ notEditing }}" hint-placeholder-val="{{ true }}">
-        <pre style="margin:0;padding:16px 18px;font:500 var(--t-sm) var(--font-mono);color:var(--ink2);line-height:1.6;overflow:auto;max-height:56vh;white-space:pre;">{{ yaml }}</pre>
-        <div style="border-top:1px solid var(--line2);padding:11px 18px;display:flex;align-items:center;gap:8px;">
-          <i class="fa-solid fa-code-branch" style="color:var(--ink3);font-size:11px;"></i>
+        <pre style="margin:0;padding:16px 18px;font:500 var(--t-sm) var(--font-mono);color:var(--ink2);line-height:1.6;overflow:auto;max-height:56vh;white-space:pre;min-width:0;">{{ yaml }}</pre>
+        <div style="border-top:1px solid var(--line2);padding:12px 18px;display:flex;align-items:center;gap:8px;">
+          <i class="fa-solid fa-code-branch" style="color:var(--ink3);font-size:12px;"></i>
           <span style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;">APP VERSION v1.4.0 · SCHEMA alpha</span>
         </div>
       </sc-if>
@@ -100,7 +100,7 @@
         <div style="padding:16px 18px;display:flex;flex-direction:column;gap:12px;">
           <textarea onInput="{{ onEditInput }}" spellcheck="false" style="width:100%;height:46vh;resize:vertical;border:1px solid var(--line);background:var(--bg);padding:12px 14px;font:500 var(--t-sm) var(--font-mono);color:var(--ink);line-height:1.6;white-space:pre;overflow:auto;">{{ editedYaml }}</textarea>
           <sc-if value="{{ yamlError }}" hint-placeholder-val="{{ false }}">
-            <div style="background:var(--errortint);border:1px solid var(--error);padding:10px 12px;font-size:var(--t-sm);color:var(--error);"><i class="fa-solid fa-circle-exclamation"></i> {{ yamlErrorText }}</div>
+            <div style="background:var(--errortint);border:1px solid var(--error);padding:10px 12px;font-size:var(--t-sm);color:var(--errorink);"><i class="fa-solid fa-circle-exclamation"></i> {{ yamlErrorText }}</div>
           </sc-if>
           <div style="display:flex;gap:10px;">
             <button onClick="{{ saveEdit }}" style="height:40px;padding:0 18px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:8px;" style-hover="filter:brightness(.94)"><i class="fa-solid fa-check"></i> Apply changes</button>
@@ -116,21 +116,21 @@
   <!-- upload modal -->
   <sc-if value="{{ uploadOpen }}" hint-placeholder-val="{{ false }}">
     <div onClick="{{ closeUpload }}" style="position:fixed;inset:0;background:rgba(8,10,14,.5);z-index:60;animation:ns-scrim var(--dur-fast) var(--ease);"></div>
-    <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:61;width:460px;max-width:92vw;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow-dialog);animation:ns-fade var(--dur-base) var(--ease);">
+    <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:61;width:460px;max-width:92vw;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow-dialog);animation:ns-dialog var(--dur-base) var(--ease);">
       <div style="padding:16px 18px;border-bottom:1px solid var(--line2);display:flex;align-items:center;justify-content:space-between;">
-        <div style="font:800 var(--t-cardhead) var(--font-display);letter-spacing:-.02em;">Upload scenario</div>
+        <div style="font:700 var(--t-cardhead) var(--font-display);letter-spacing:-.015em;">Upload scenario</div>
         <button onClick="{{ closeUpload }}" aria-label="Close" style="width:32px;height:32px;background:transparent;border:1px solid var(--line);color:var(--ink2);" style-hover="background:var(--panel)"><i class="fa-solid fa-xmark"></i></button>
       </div>
       <div style="padding:18px;">
-        <label style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;border:1.5px dashed var(--line);background:var(--panel);padding:30px 20px;text-align:center;cursor:pointer;" style-hover="border-color:var(--brand)">
-          <i class="fa-solid fa-file-arrow-up" style="font-size:26px;color:var(--ink3);"></i>
+        <label style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;border:1.5px dashed var(--line);background:var(--panel);padding:30px 20px;text-align:center;cursor:pointer;" style-hover="border-color:var(--brandink)">
+          <i class="fa-solid fa-file-arrow-up" style="font-size:24px;color:var(--ink3);"></i>
           <div style="font-weight:600;font-size:var(--t-sm);">Drag a <code style="font-family:var(--font-mono);">.yaml</code> / <code style="font-family:var(--font-mono);">.yml</code> file here</div>
           <div style="font-size:var(--t-sm);color:var(--ink3);">or click to choose a file</div>
           <input type="file" accept=".yaml,.yml" onChange="{{ onFile }}" style="display:none;">
         </label>
         <div style="margin-top:14px;display:flex;align-items:center;gap:10px;">
           <div style="flex:1;height:1px;background:var(--line2);"></div>
-          <span style="font-size:var(--t-sm);color:var(--faint);">or</span>
+          <span style="font-size:var(--t-sm);color:var(--ink3);">or</span>
           <div style="flex:1;height:1px;background:var(--line2);"></div>
         </div>
         <button onClick="{{ loadSample }}" style="margin-top:14px;width:100%;height:40px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;justify-content:center;gap:8px;" style-hover="background:var(--panel)"><i class="fa-solid fa-flask"></i> Load a sample scenario (demo)</button>
@@ -141,16 +141,16 @@
   <!-- version mismatch confirm -->
   <sc-if value="{{ confirmOpen }}" hint-placeholder-val="{{ false }}">
     <div style="position:fixed;inset:0;background:rgba(8,10,14,.5);z-index:62;animation:ns-scrim var(--dur-fast) var(--ease);"></div>
-    <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:63;width:480px;max-width:92vw;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow-dialog);animation:ns-fade var(--dur-base) var(--ease);">
+    <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:63;width:480px;max-width:92vw;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow-dialog);animation:ns-dialog var(--dur-base) var(--ease);">
       <div style="padding:18px 20px;border-bottom:1px solid var(--line2);display:flex;align-items:center;gap:12px;">
-        <div style="width:34px;height:34px;background:var(--warntint);color:var(--warn);display:flex;align-items:center;justify-content:center;flex:none;"><i class="fa-solid fa-triangle-exclamation"></i></div>
-        <div style="font:800 var(--t-cardhead) var(--font-display);letter-spacing:-.01em;">App version mismatch detected</div>
+        <div style="width:34px;height:34px;background:var(--warntint);color:var(--warnink);display:flex;align-items:center;justify-content:center;flex:none;"><i class="fa-solid fa-triangle-exclamation"></i></div>
+        <div style="font:700 var(--t-cardhead) var(--font-display);letter-spacing:-.01em;">App version mismatch detected</div>
       </div>
       <div style="padding:18px 20px;font-size:var(--t-sm);color:var(--ink2);line-height:1.6;">
         <div style="font-family:var(--font-mono);background:var(--panel);border:1px solid var(--line2);padding:10px 12px;margin-bottom:12px;">File app version: v1.2.0<br>Current app version: v1.4.0</div>
         Older YAML may not work after breaking changes, though we try to preserve compatibility. If nothing breaks, you can continue.<br><br>Do you want to continue loading the file?
       </div>
-      <div style="padding:14px 20px;border-top:1px solid var(--line2);display:flex;justify-content:flex-end;gap:10px;">
+      <div style="padding:16px 20px;border-top:1px solid var(--line2);display:flex;justify-content:flex-end;gap:10px;">
         <button onClick="{{ confirmCancel }}" style="height:40px;padding:0 16px;background:transparent;border:1px solid var(--line);font:600 var(--t-body) var(--font-ui);" style-hover="background:var(--panel)">Cancel</button>
         <button onClick="{{ confirmContinue }}" style="height:40px;padding:0 18px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-body) var(--font-ui);" style-hover="filter:brightness(.94)">Continue</button>
       </div>
@@ -171,7 +171,7 @@ class Component extends DCLogic {
     'preferences[5].person uses backend-compatible syntax that is outside the web UI editing subset. It was preserved and may be replaced if edited in the web UI.',
   ];
   YAML=`apiVersion: alpha
-description: "Ward 7B — General Medicine · Feb 2026"
+description: "Roster · Feb 2026"
 dates:
   range:
     startDate: 2026-02-01

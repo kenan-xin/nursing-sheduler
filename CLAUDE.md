@@ -76,3 +76,11 @@ _Add a brief overview of your project architecture_
 ## Conventions & Patterns
 
 _Add your project-specific conventions here_
+
+## Design Context
+
+`PRODUCT.md` and `DESIGN.md` at the project root carry the design system for the web app (register: `product`). North Star: **"Mint Canvas, Warm Ink"** (adopted 2026-07-27, replacing "The Ward Instrument") — warm espresso ink and warm hairlines on a cool recessed mint canvas, a stepped L0→L2 surface ladder where tone carries separation before shadow does, and selective rounding (cards 16px / controls 12px / chips 9px / pill buttons) with every data surface held square.
+
+**`DESIGN.md` is canon ahead of code.** The shipped `web/` still runs the retired v1 system (cold near-black ink, `radius: 0`, flat-with-hairlines); `web/app/globals.css` and `DESIGN.md` deliberately disagree until the re-skin lands. Do not "fix" one to match the other without checking which is intended.
+
+The canonical UI reference is the v2 bundle at `docs/design_prototype/` — `standalone/nurse-scheduling-v2-standalone.html` to click through, `source/Screen*.dc.html` for markup, `v1_reference/` for diffing during the port. Prototype fidelity is scoped to the **visual system**. Precedence is product contracts and ratified decisions → `DESIGN.md` visual rules → prototype examples; the bundle never silently overrides behaviour, architecture, data contracts, or feature priority. See `DESIGN.md` §1 for the complete deviation matrix, including removed Customise/pinning and the separate deferred Export Layout route. Run `/impeccable document` to refresh `DESIGN.md` if the visual system drifts from these files.

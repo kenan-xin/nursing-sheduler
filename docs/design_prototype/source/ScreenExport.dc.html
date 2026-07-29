@@ -9,41 +9,41 @@
 <x-dc>
 <div class="ns-fade">
   <div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:var(--space-4);margin-bottom:var(--space-4);">
-    <div style="flex:1;min-width:240px;">
+    <div style="flex:1 1 440px;min-width:min(100%,440px);">
       <div style="font:600 var(--m-sm) var(--font-ui);letter-spacing:.03em;color:var(--brandink);text-transform:uppercase;margin-bottom:8px;">OUTPUT · EXPORT LAYOUT</div>
-      <h1 style="font:800 var(--t-display) var(--font-display);letter-spacing:-.02em;margin:0 0 8px;line-height:1.05;">Export Layout</h1>
+      <h1 style="font:700 var(--t-display) var(--font-display);letter-spacing:-.015em;margin:0 0 8px;line-height:1.05;">Export Layout</h1>
       <p style="margin:0;color:var(--ink2);max-width:64ch;">Control how the printable spreadsheet looks — cell colours, header bands, and summary columns and rows. Every rule below is fully editable.</p>
     </div>
-    <button onClick="{{ onAdd }}" style="height:44px;padding:0 18px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-body) var(--font-ui);display:inline-flex;align-items:center;gap:9px;" style-hover="filter:brightness(.94)"><i class="fa-solid fa-plus"></i> Add rule</button>
+    <button onClick="{{ onAdd }}" style="height:44px;padding:0 18px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-body) var(--font-ui);display:inline-flex;align-items:center;gap:8px;" style-hover="filter:brightness(.94)"><i class="fa-solid fa-plus"></i> Add rule</button>
   </div>
 
-  <div style="display:flex;align-items:flex-start;gap:9px;border:1px solid var(--warn);background:var(--warntint);padding:11px 14px;margin-bottom:var(--space-5);">
-    <span style="color:var(--warn);font-weight:800;">!</span>
+  <div style="display:flex;align-items:flex-start;gap:8px;border:1px solid var(--warn);background:var(--warntint);padding:12px 14px;margin-bottom:var(--space-5);">
+    <span style="color:var(--warnink);font-weight:700;">!</span>
     <div style="font-size:var(--t-sm);color:var(--ink2);">This page is advanced. The defaults are sensible — change entries only if you know how they affect the exported workbook.</div>
   </div>
 
   <!-- rendered preview -->
   <div style="margin-bottom:var(--space-5);">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-      <div style="width:30px;height:30px;background:var(--panel);border:1px solid var(--line2);display:flex;align-items:center;justify-content:center;color:var(--ink2);font-size:13px;"><i class="fa-solid fa-eye"></i></div>
+      <div style="width:30px;height:30px;background:var(--panel);border:1px solid var(--line2);display:flex;align-items:center;justify-content:center;color:var(--ink2);font-size:12px;"><i class="fa-solid fa-eye"></i></div>
       <div style="font:600 var(--m-sm) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;">Preview</div>
       <span style="font:600 var(--m-xs) var(--font-mono);color:var(--ink3);">with layout applied · Feb 8–14</span>
       <div style="flex:1;height:1px;background:var(--line2);"></div>
     </div>
-    <div style="border:1px solid var(--line);background:var(--surface);overflow-x:auto;">
+    <div style="border:1px solid var(--line);background:#ffffff;overflow-x:auto;">
       <table style="border-collapse:collapse;width:100%;font:500 var(--t-sm) var(--font-mono);">
         <thead>
-          <tr><th style="{{ pv.headBand }}" colspan="{{ pv.span }}">HISTORY &amp; SCHEDULE · WARD 7B</th></tr>
+          <tr><th style="{{ pv.headBand }}" colspan="{{ pv.span }}">HISTORY &amp; SCHEDULE · FEB 2026</th></tr>
           <tr>
-            <th style="position:sticky;left:0;z-index:1;background:var(--panel);border:1px solid var(--line2);padding:7px 12px;text-align:left;font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;">Nurse</th>
-            <sc-for list="{{ pv.head }}" as="h" hint-placeholder-count="7"><th style="{{ h.style }}"><div>{{ h.d }}</div><div style="font-size:9px;color:var(--ink3);font-weight:500;">{{ h.dow }}</div></th></sc-for>
+            <th style="position:sticky;left:0;z-index:1;background:#f1f4f2;border:1px solid #d5dcd8;padding:8px 12px;text-align:left;font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:#48584f;text-transform:uppercase;">Nurse</th>
+            <sc-for list="{{ pv.head }}" as="h" hint-placeholder-count="7"><th style="{{ h.style }}"><div>{{ h.d }}</div><div style="{{ h.dowStyle }}">{{ h.dow }}</div></th></sc-for>
             <sc-for list="{{ pv.sumHead }}" as="sh" hint-placeholder-count="3"><th style="{{ sh.style }}">{{ sh.label }}</th></sc-for>
           </tr>
         </thead>
         <tbody>
           <sc-for list="{{ pv.rows }}" as="r" hint-placeholder-count="4">
             <tr>
-              <td style="position:sticky;left:0;z-index:1;background:var(--surface);border:1px solid var(--line2);padding:7px 12px;font:600 var(--t-sm) var(--font-ui);white-space:nowrap;">{{ r.name }}</td>
+              <td style="position:sticky;left:0;z-index:1;background:#ffffff;border:1px solid #d5dcd8;padding:8px 12px;font:600 var(--t-sm) var(--font-ui);color:#1c2b26;white-space:nowrap;">{{ r.name }}</td>
               <sc-for list="{{ r.cells }}" as="c" hint-placeholder-count="7"><td style="{{ c.style }}">{{ c.text }}</td></sc-for>
               <sc-for list="{{ r.sum }}" as="sc" hint-placeholder-count="3"><td style="{{ sc.style }}">{{ sc.v }}</td></sc-for>
             </tr>
@@ -57,16 +57,16 @@
     <sc-for list="{{ sections }}" as="sec" hint-placeholder-count="3">
       <div>
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-          <div style="width:30px;height:30px;background:var(--panel);border:1px solid var(--line2);display:flex;align-items:center;justify-content:center;color:var(--ink2);font-size:13px;"><i class="fa-solid {{ sec.icon }}"></i></div>
+          <div style="width:30px;height:30px;background:var(--panel);border:1px solid var(--line2);display:flex;align-items:center;justify-content:center;color:var(--ink2);font-size:12px;"><i class="fa-solid {{ sec.icon }}"></i></div>
           <div style="font:600 var(--m-sm) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;">{{ sec.title }}</div>
           <span style="font:600 var(--m-xs) var(--font-mono);color:var(--ink3);">{{ sec.count }}</span>
           <div style="flex:1;height:1px;background:var(--line2);"></div>
-          <button onClick="{{ sec.onAdd }}" style="height:30px;padding:0 11px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:6px;" style-hover="background:var(--panel)"><i class="fa-solid fa-plus" style="font-size:10px;"></i> Add</button>
+          <button onClick="{{ sec.onAdd }}" style="height:30px;padding:0 12px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:6px;" style-hover="background:var(--panel)"><i class="fa-solid fa-plus" style="font-size:10px;"></i> Add</button>
         </div>
         <div style="border:1px solid var(--line);background:var(--surface);">
           <sc-if value="{{ sec.empty }}" hint-placeholder-val="{{ false }}">
             <div style="padding:28px 16px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;">
-              <div style="width:38px;height:38px;border:1.5px dashed var(--line2);display:flex;align-items:center;justify-content:center;font-size:16px;color:var(--faint);line-height:1;">∅</div>
+              <div style="width:38px;height:38px;border:1.5px dashed var(--line2);display:flex;align-items:center;justify-content:center;font-size:16px;color:var(--ink3);line-height:1;">∅</div>
               <div style="font-size:var(--t-sm);color:var(--ink3);max-width:40ch;">Nothing here yet. Use <b>Add</b> to create an entry.</div>
             </div>
           </sc-if>
@@ -75,14 +75,14 @@
               <span style="{{ r.tagStyle }}">{{ r.tag }}</span>
               <div style="flex:1;min-width:0;">
                 <div style="font-weight:600;font-size:var(--t-sm);">{{ r.label }}</div>
-                <sc-if value="{{ r.meta }}" hint-placeholder-val="{{ false }}"><div style="font:500 var(--m-xs) var(--font-mono);color:var(--ink3);margin-top:3px;">{{ r.meta }}</div></sc-if>
+                <sc-if value="{{ r.meta }}" hint-placeholder-val="{{ false }}"><div style="font:500 var(--m-xs) var(--font-mono);color:var(--ink3);margin-top:4px;">{{ r.meta }}</div></sc-if>
               </div>
               <sc-if value="{{ r.swatch }}" hint-placeholder-val="{{ false }}">
-                <span style="display:inline-flex;align-items:center;gap:7px;"><span style="width:16px;height:16px;border:1px solid var(--line);background:{{ r.swatch }};"></span><span style="font:600 var(--m-xs) var(--font-mono);color:var(--ink3);">{{ r.swatch }}</span></span>
+                <span style="display:inline-flex;align-items:center;gap:8px;"><span style="width:16px;height:16px;border:1px solid var(--line);background:{{ r.swatch }};"></span><span style="font:600 var(--m-xs) var(--font-mono);color:var(--ink3);">{{ r.swatch }}</span></span>
               </sc-if>
               <div style="display:flex;gap:4px;">
                 <button onClick="{{ r.onEdit }}" aria-label="Edit" style="width:30px;height:30px;background:transparent;border:1px solid var(--line);color:var(--ink2);" style-hover="background:var(--panel)"><i class="fa-solid fa-pen" style="font-size:10px;"></i></button>
-                <button onClick="{{ r.onDel }}" aria-label="Delete" style="width:30px;height:30px;background:transparent;border:1px solid var(--line);color:var(--error);" style-hover="background:var(--errortint)"><i class="fa-solid fa-trash" style="font-size:10px;"></i></button>
+                <button onClick="{{ r.onDel }}" aria-label="Delete" style="width:30px;height:30px;background:transparent;border:1px solid var(--line);color:var(--errorink);" style-hover="background:var(--errortint)"><i class="fa-solid fa-trash" style="font-size:10px;"></i></button>
               </div>
             </div>
           </sc-for>
@@ -94,9 +94,9 @@
   <!-- edit modal -->
   <sc-if value="{{ editOpen }}" hint-placeholder-val="{{ false }}">
     <div onClick="{{ closeEdit }}" style="position:fixed;inset:0;background:rgba(8,10,14,.5);z-index:60;animation:ns-scrim var(--dur-fast) var(--ease);"></div>
-    <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:61;width:520px;max-width:94vw;max-height:90vh;overflow:auto;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow-dialog);animation:ns-fade var(--dur-base) var(--ease);">
+    <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:61;width:520px;max-width:94vw;max-height:90vh;overflow:auto;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow-dialog);animation:ns-dialog var(--dur-base) var(--ease);">
       <div style="padding:16px 18px;border-bottom:1px solid var(--line2);display:flex;align-items:center;justify-content:space-between;">
-        <div style="font:800 var(--t-cardhead) var(--font-display);letter-spacing:-.02em;">{{ modalTitle }}</div>
+        <div style="font:700 var(--t-cardhead) var(--font-display);letter-spacing:-.015em;">{{ modalTitle }}</div>
         <button onClick="{{ closeEdit }}" aria-label="Close" style="width:32px;height:32px;background:transparent;border:1px solid var(--line);color:var(--ink2);" style-hover="background:var(--panel)"><i class="fa-solid fa-xmark"></i></button>
       </div>
       <div style="padding:20px;">
@@ -112,7 +112,7 @@
         </sc-if>
 
         <label style="display:block;margin-bottom:16px;">
-          <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;margin-bottom:7px;">LABEL</div>
+          <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;margin-bottom:8px;">LABEL</div>
           <input value="{{ dLabel }}" onInput="{{ onLabel }}" placeholder="{{ labelPh }}" style="width:100%;height:40px;padding:0 12px;border:1px solid var(--line);background:var(--surface);">
         </label>
 
@@ -130,7 +130,7 @@
             </div>
           </div>
           <label style="display:block;">
-            <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;margin-bottom:7px;">APPLIES TO <span style="color:var(--faint);">optional note</span></div>
+            <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;margin-bottom:8px;">APPLIES TO <span style="color:var(--ink3);">optional note</span></div>
             <input value="{{ dNote }}" onInput="{{ onNote }}" placeholder="e.g. people ALL · dates ALL" style="width:100%;height:40px;padding:0 12px;border:1px solid var(--line);background:var(--surface);font-family:var(--font-mono);font-size:var(--t-sm);">
           </label>
         </sc-if>
@@ -150,7 +150,7 @@
           </div>
         </sc-if>
       </div>
-      <div style="padding:14px 18px;border-top:1px solid var(--line2);display:flex;justify-content:flex-end;gap:10px;">
+      <div style="padding:16px 18px;border-top:1px solid var(--line2);display:flex;justify-content:flex-end;gap:10px;">
         <button onClick="{{ closeEdit }}" style="height:40px;padding:0 16px;background:transparent;border:1px solid var(--line);font:600 var(--t-body) var(--font-ui);" style-hover="background:var(--panel)">Cancel</button>
         <button onClick="{{ saveEdit }}" style="height:40px;padding:0 20px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-body) var(--font-ui);display:inline-flex;align-items:center;gap:8px;" style-hover="filter:brightness(.94)"><i class="fa-solid fa-check"></i> {{ saveLabel }}</button>
       </div>
@@ -219,22 +219,35 @@ class Component extends DCLogic {
 
     // preview (static illustration)
     const WK='#dbeafe', BAND='#fefce8';
-    const head=[['08','Sun',1],['09','Mon',0],['10','Tue',0],['11','Wed',0],['12','Thu',0],['13','Fri',0],['14','Sat',1]].map(([d,dow,we])=>({d,dow,style:`border:1px solid var(--line2);padding:6px 4px;min-width:40px;text-align:center;font:600 var(--m-xs) var(--font-mono);color:var(--ink2);background:${we?WK:'var(--panel)'};`}));
-    const sumHead=['OFF','Leave','N'].map(label=>({label, style:'border:1px solid var(--line2);padding:6px 8px;text-align:center;font:600 9px var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;background:var(--panel);white-space:nowrap;'}));
+    // This preview is a sheet of PAPER, not a themed surface — it shows what the exported workbook
+    // will look like, and the workbook has no dark mode. So every colour in the table is literal:
+    // theme tokens inverted here, which left grey-on-pale text (as low as 1.05:1) and turned the
+    // night-shift fill into the BRIGHTEST cell in the preview, reading the convention backwards.
+    // Only the shell around the table follows the theme.
+    const PAPER='#1c2b26', PAPER_MUTED='#48584f', PAPER_DARK='#1c2b26', ON_PAPER_DARK='#f2f6f4',
+          PAPER_LEAVE='#e2f3ee', ON_PAPER_LEAVE='#12564a',
+          PAPER_WHITE='#ffffff', PAPER_BAND='#f1f4f2', PAPER_LINE='#d5dcd8';
+    const head=[['08','Sun',1],['09','Mon',0],['10','Tue',0],['11','Wed',0],['12','Thu',0],['13','Fri',0],['14','Sat',1]].map(([d,dow,we])=>({d,dow,
+      style:`border:1px solid ${PAPER_LINE};padding:6px 4px;min-width:40px;text-align:center;font:600 var(--m-xs) var(--font-mono);color:${PAPER};background:${we?WK:PAPER_BAND};`,
+      dowStyle:`font-size:var(--t-nano);font-weight:500;color:${PAPER_MUTED};`}));
+    const sumHead=['OFF','Leave','N'].map(label=>({label, style:`border:1px solid ${PAPER_LINE};padding:6px 8px;text-align:center;font:600 var(--t-nano) var(--font-ui);letter-spacing:.03em;color:${PAPER_MUTED};text-transform:uppercase;background:${PAPER_BAND};white-space:nowrap;`}));
     const data=[{name:'Aisha Rahman',s:['AM','AM','PM','N','N','OFF','OFF']},{name:'Kevin Ong',s:['OFF','LEAVE','LEAVE','AM','AM','PM','N']},{name:'Chloe Ng',s:['AM','AM','AM','OFF','PM','PM','OFF']},{name:'Priya Nair',s:['N','N','OFF','AM','AM','LEAVE','OFF']}];
     const weCol=[1,0,0,0,0,0,1];
-    const cellFor=(val,we)=>{ const base=`border:1px solid var(--line2);padding:6px 4px;text-align:center;font:600 var(--m-xs) var(--font-mono);`;
-      if(val==='LEAVE') return {text:'Leave', style:base+'background:var(--brandtint);color:var(--brandink);'};
-      if(val==='OFF') return {text:'·', style:base+`background:${we?WK:'var(--surface)'};color:var(--faint);`};
-      const dark=(val==='N'); return {text:val, style:base+`background:${dark?'var(--ink)':(we?WK:'var(--surface)')};color:${dark?'var(--on-ink)':'var(--ink)'};`}; };
-    const sumStyle='border:1px solid var(--line2);padding:6px 8px;text-align:center;font:700 var(--m-xs) var(--font-mono);color:var(--ink2);background:var(--panel);';
-    const pvRows=data.map(r=>({name:r.name, cells:r.s.map((val,i)=>cellFor(val,weCol[i])), sum:[{v:String(r.s.filter(x=>x==='OFF').length),style:sumStyle},{v:String(r.s.filter(x=>x==='LEAVE').length),style:sumStyle+'color:var(--brandink);'},{v:String(r.s.filter(x=>x==='N').length),style:sumStyle}]}));
-    const pv={head, sumHead, rows:pvRows, span:11, headBand:`background:${BAND};border:1px solid var(--line2);padding:6px 12px;text-align:left;font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;`};
+    const cellFor=(val,we)=>{ const base=`border:1px solid ${PAPER_LINE};padding:6px 4px;text-align:center;font:600 var(--m-xs) var(--font-mono);`;
+      if(val==='LEAVE') return {text:'Leave', style:base+`background:${PAPER_LEAVE};color:${ON_PAPER_LEAVE};`};
+      if(val==='OFF') return {text:'·', style:base+`background:${we?WK:PAPER_WHITE};color:${PAPER_MUTED};`};
+      // The night fill is the whole point of the convention this preview illustrates, so it is a
+      // literal dark ON a literal light — not --ink/--on-ink, which invert and made N the BRIGHTEST
+      // cell in dark mode, reading backwards against the pale weekend fills beside it.
+      const dark=(val==='N'); return {text:val, style:base+`background:${dark?PAPER_DARK:(we?WK:PAPER_WHITE)};color:${dark?ON_PAPER_DARK:PAPER};`}; };
+    const sumStyle=`border:1px solid ${PAPER_LINE};padding:6px 8px;text-align:center;font:700 var(--m-xs) var(--font-mono);color:${PAPER};background:${PAPER_BAND};`;
+    const pvRows=data.map(r=>({name:r.name, cells:r.s.map((val,i)=>cellFor(val,weCol[i])), sum:[{v:String(r.s.filter(x=>x==='OFF').length),style:sumStyle},{v:String(r.s.filter(x=>x==='LEAVE').length),style:sumStyle+`color:${ON_PAPER_LEAVE};`},{v:String(r.s.filter(x=>x==='N').length),style:sumStyle}]}));
+    const pv={head, sumHead, rows:pvRows, span:11, headBand:`background:${BAND};border:1px solid ${PAPER_LINE};padding:6px 12px;text-align:left;font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:${PAPER};text-transform:uppercase;`};
 
     // modal
     const d=s.draft||{label:'',element:'cell',color:'',note:'',countShifts:[],scope:[]};
     const isStyle=s.secKey==='style'; const isCount=!isStyle;
-    const segBtn=(on,first)=>`flex:1;height:36px;background:${on?'var(--ink)':'transparent'};color:${on?'var(--on-ink)':'var(--ink2)'};border:none;font:${on?'700':'500'} var(--t-sm) var(--font-ui);${first?'':'border-left:1px solid var(--line);'}`;
+    const segBtn=(on,first)=>`flex:1;height:36px;background:${on?'var(--brand)':'transparent'};color:${on?'var(--onbrand)':'var(--ink2)'};border:none;font:${on?'700':'500'} var(--t-sm) var(--font-ui);${first?'':'border-left:1px solid var(--line);'}`;
     const elementChips=this.ELEMENTS.map(el=>({label:el, onClick:()=>this.setD({element:el}), style:chip(d.element===el)}));
     const colorSwatches=this.COLORS.map(([name,hex])=>({name, onClick:()=>this.setD({color:hex}),
       style:`width:34px;height:34px;border:2px solid ${d.color===hex?'var(--brand)':'var(--line)'};background:${hex||'var(--surface)'};cursor:pointer;${hex?'':'background-image:repeating-linear-gradient(135deg,var(--line2) 0 4px,transparent 4px 8px);'}`}));

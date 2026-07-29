@@ -55,6 +55,7 @@
     "lefthook": "^2.1.10",
     "oxfmt": "^0.59.0",
     "oxlint": "^1.74.0",
+    "postcss": "^8.5.23",
     "shadcn": "^4.13.0",
     "tailwindcss": "^4",
     "typescript": "^5",

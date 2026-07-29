@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { UiRequestCell } from "@/lib/scenario";
 import {
   CellPreferenceEditor,
@@ -172,5 +173,96 @@ describe("CellPreferenceEditor — clear cell / cancel", () => {
     expect(onClose).toHaveBeenCalledOnce();
     expect(onSave).not.toHaveBeenCalled();
     expect(onClear).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The shared-overlay half of the contract (F3). The editor holds a LOCAL draft,
+// so what matters is that every cancel-like route discards it and only Save /
+// Clear commit — exactly once each.
+// ---------------------------------------------------------------------------
+
+function classesOf(element: Element | null): string {
+  return element?.getAttribute("class") ?? "";
+}
+
+describe("CellPreferenceEditor — shared overlay contract", () => {
+  it("renders through the shared portal as an L2 raised card behind bg-scrim", () => {
+    renderEditor();
+    const popup = screen.getByTestId("cell-preference-editor");
+    const overlay = document.querySelector("[data-slot='dialog-overlay']");
+    expect(popup.closest("[data-slot='dialog-portal']")).not.toBeNull();
+    expect(classesOf(popup)).toContain("bg-surface2");
+    expect(classesOf(popup)).toContain("rounded-card");
+    expect(classesOf(popup)).toContain("shadow-3");
+    expect(classesOf(overlay)).toContain("bg-scrim");
+    expect(classesOf(overlay)).not.toContain("bg-black");
+  });
+
+  it("names the coordinate through a real title and description", () => {
+    renderEditor();
+    const popup = screen.getByTestId("cell-preference-editor");
+    expect(popup).toHaveAccessibleName("Cell preference");
+    expect(popup).toHaveAccessibleDescription("1. Kevin Ong · 2026-01-05");
+  });
+
+  it("is a base-layer overlay", () => {
+    renderEditor();
+    expect(screen.getByTestId("cell-preference-editor")).toHaveAttribute("data-layer", "base");
+  });
+});
+
+describe("CellPreferenceEditor — implicit dismissal discards the draft", () => {
+  it("Escape discards: onClose fires, nothing is committed", async () => {
+    const { onSave, onClear, onClose } = renderEditor();
+    fireEvent.change(screen.getByTestId("cell-editor-weight-input-AM"), {
+      target: { value: "5" },
+    });
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    expect(onSave).not.toHaveBeenCalled();
+    expect(onClear).not.toHaveBeenCalled();
+  });
+
+  it("a backdrop press discards: onClose fires, nothing is committed", async () => {
+    const { onSave, onClear, onClose } = renderEditor();
+    fireEvent.click(screen.getByTestId("cell-editor-tab-leave"));
+    const overlay = document.querySelector("[data-slot='dialog-overlay']") as HTMLElement;
+    await userEvent.click(overlay);
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(onSave).not.toHaveBeenCalled();
+    expect(onClear).not.toHaveBeenCalled();
+  });
+
+  it("reopening reseeds from the live cells, so a discarded draft cannot survive", () => {
+    const props = {
+      personLabel: "1. Kevin Ong",
+      dateLabel: "2026-01-05",
+      cells: [] as UiRequestCell[],
+      targets: TARGETS,
+      onSave: vi.fn(),
+      onClear: vi.fn(),
+      onClose: vi.fn(),
+    };
+    const { rerender } = render(<CellPreferenceEditor open {...props} />);
+    fireEvent.change(screen.getByTestId("cell-editor-weight-input-AM"), {
+      target: { value: "9" },
+    });
+    rerender(<CellPreferenceEditor open={false} {...props} />);
+    rerender(<CellPreferenceEditor open {...props} />);
+    expect(screen.getByTestId("cell-editor-weight-input-AM")).toHaveValue("0");
+  });
+
+  it("Save and Clear each commit exactly once", () => {
+    const save = renderEditor();
+    fireEvent.click(screen.getByTestId("cell-editor-save"));
+    expect(save.onSave).toHaveBeenCalledOnce();
+    expect(save.onClear).not.toHaveBeenCalled();
+    cleanup();
+
+    const clear = renderEditor();
+    fireEvent.click(screen.getByTestId("cell-editor-clear"));
+    expect(clear.onClear).toHaveBeenCalledOnce();
+    expect(clear.onSave).not.toHaveBeenCalled();
   });
 });

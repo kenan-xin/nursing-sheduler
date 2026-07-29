@@ -30,15 +30,27 @@
 // and threaded in via `addOpen` / `editingGroupId` + the `onToggleAdd` /
 // `onEditGroup` / `onCloseForm` callbacks, so opening a group form still closes any
 // open item form and keeps the parent's losable-draft + stale token accurate.
+//
+// F2 owns this file's PRESENTATION only, and is its sole visual owner before F4 —
+// the route tickets configure it through public props and never edit it. Every
+// surface here goes through the shared `surfaceVariants` recipe rather than
+// restating tone/border/elevation, radius follows the semantic role (group cards
+// round at 16, the locked auto-group is an inset well at 12), the reorder/edit/
+// duplicate/delete controls are real 44x44 targets on a coarse pointer, and the
+// destructive control uses the `destructive-outline` Button variant instead of
+// hand-overriding a variant's colours. Mutation, validation, identity, stale-save,
+// reorder and membership behaviour are untouched.
 
 import * as React from "react";
 import { toast } from "sonner";
 import type { ScenarioUiState } from "@/lib/scenario";
 import { RenameCollisionError } from "@/lib/cascade";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Surface, surfaceVariants } from "@/components/ui/surface";
 import {
   FaPlus,
   FaPen,
@@ -278,11 +290,15 @@ export function GroupsSection<TItem extends EditorItemBase>({
             countLabel={cfg.formatCount(items.length)}
           />
         ))}
-        {groups.length === 0 && descriptor.syntheticGroups.length === 0 && (
-          <p className="border border-dashed border-line bg-surface p-4 text-meta text-ink2">
-            {cfg.emptyText}
-          </p>
-        )}
+        {groups.length === 0 &&
+          descriptor.syntheticGroups.length === 0 && (
+            // Dashed is the empty-state affordance, so this one keeps a hand-authored
+            // border rather than the `surface` role's solid hairline. Radius still
+            // follows the card role.
+            <p className="rounded-card border border-dashed border-line bg-surface p-4 text-meta text-ink2">
+              {cfg.emptyText}
+            </p>
+          )}
         {groups.map((group, index) => (
           <GroupRow
             key={group.id}
@@ -320,7 +336,12 @@ export function GroupsSection<TItem extends EditorItemBase>({
 }
 
 /** The reserved auto-group card (`ALL`): read-only/locked, with an explanatory note
- *  visible and echoed on hover/focus so the lock is never an unexplained control. */
+ *  visible and echoed on hover/focus so the lock is never an unexplained control.
+ *
+ *  It is a `well` on the control radius, not an L1 card: the recessed tone is what
+ *  distinguishes an inert, un-authorable row from the editable group cards beside
+ *  it, so the surface role carries the "locked" reading rather than the padlock
+ *  glyph carrying it alone. */
 function AutoGroupRow({
   id,
   note,
@@ -331,10 +352,12 @@ function AutoGroupRow({
   countLabel?: string;
 }) {
   return (
-    <div
+    <Surface
+      level="well"
+      geometry="control"
       data-testid={`synthetic-${id}`}
       title={note}
-      className="flex flex-col gap-1.5 border border-line2 bg-panel px-4 py-3.5"
+      className="flex flex-col gap-1.5 px-4 py-3.5"
     >
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-mono text-label font-semibold">{id}</span>
@@ -345,7 +368,7 @@ function AutoGroupRow({
         {countLabel && <span className="font-mono text-label text-ink3">{countLabel}</span>}
       </div>
       {note && <p className="text-meta text-ink3">{note}</p>}
-    </div>
+    </Surface>
   );
 }
 
@@ -399,11 +422,11 @@ function GroupRow<TItem extends EditorItemBase>({
   onDragEnd: () => void;
 }) {
   if (isEditing) {
+    // No surface of its own: the open form IS the active editor card (the
+    // `selected` role, applied inside GroupForm). Wrapping it in a second L1 card
+    // would stack two surfaces of the same tone, which DESIGN.md §4 rule 5 forbids.
     return (
-      <div
-        data-testid={`group-row-${group.id}`}
-        className="border border-brand bg-brandtint/40 p-3"
-      >
+      <div data-testid={`group-row-${group.id}`}>
         <GroupForm
           mode="edit"
           descriptor={descriptor}
@@ -444,11 +467,20 @@ function GroupRow<TItem extends EditorItemBase>({
           : undefined
       }
       onDragEnd={canDrag ? onDragEnd : undefined}
-      className={`flex flex-col gap-2 border border-line bg-surface p-3 ${
-        canDrag ? "cursor-grab" : ""
-      } ${isOver ? "shadow-[inset_0_2px_0_var(--color-brand)]" : ""} ${
-        isDragging ? "opacity-50" : ""
-      }`}
+      className={cn(
+        "flex flex-col gap-2 p-3",
+        // A drop candidate takes its OWN role. It is not `selected`: the row
+        // under the pointer is neither the current selection nor the active
+        // editor, and reusing that role would make the two indistinguishable to
+        // any later semantic check. The grab/drag affordances come from the same
+        // recipe because `cursor-*` and `opacity-*` are not layout utilities and
+        // so cannot be authored here.
+        surfaceVariants({
+          role: isOver ? "drop-target" : "surface",
+          geometry: "card",
+          interaction: isDragging ? "dragging" : canDrag ? "grabbable" : undefined,
+        }),
+      )}
     >
       <div className="flex items-start gap-3">
         <div className="flex min-w-0 flex-1 flex-col gap-2">
@@ -466,8 +498,10 @@ function GroupRow<TItem extends EditorItemBase>({
             <div className="flex flex-wrap gap-1">
               {group.members.map((m) => (
                 /* Member NAMES render as authored — the prototype's read-row chips are
-                   not uppercased (only status badges like AUTO are). */
-                <Badge key={entityKey(m)} variant="outline" className="normal-case">
+                   not uppercased (only status badges like AUTO are). `casing` is a
+                   Badge variant, so this is a choice of chip kind rather than a
+                   caller-owned override of the badge's typography. */
+                <Badge key={entityKey(m)} variant="outline" casing="normal">
                   {String(m)}
                 </Badge>
               ))}
@@ -519,10 +553,9 @@ function GroupRow<TItem extends EditorItemBase>({
           </Button>
           <Button
             size="icon"
-            variant="outline"
+            variant="destructive-outline"
             aria-label="Delete group"
             data-testid={`group-delete-${group.id}`}
-            className="text-error hover:bg-errortint"
             onClick={() => {
               onCloseForm();
               commit(deleteGroup(currentState(), descriptor, group.id));
@@ -645,7 +678,12 @@ function GroupForm<TItem extends EditorItemBase>({
 
   return (
     <div
-      className="flex flex-col gap-3 border border-line bg-surface p-4"
+      className={cn(
+        "flex flex-col gap-3 p-4",
+        // An open EDIT form is the active editor card and takes the `selected`
+        // role; an ADD form is a new L1 card on the page.
+        surfaceVariants({ role: mode === "edit" ? "selected" : "surface", geometry: "card" }),
+      )}
       data-testid={mode === "add" ? "add-group-form" : `group-edit-form-${group!.id}`}
       onKeyDown={(e) => {
         if (e.key === "Escape") {

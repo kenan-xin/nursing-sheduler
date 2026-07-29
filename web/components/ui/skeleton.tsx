@@ -61,7 +61,11 @@ export function SkeletonCard({ className, ...props }: React.ComponentProps<"div"
         <SkeletonLine className="text-body w-2/3" />
       </CardContent>
       <CardFooter>
-        <Skeleton className="h-8 w-24" />
+        {/* Stands in for a `size="sm"` Button, so it must track the ABSOLUTE control
+            token rather than a spacing step: `h-8` is 8 x 4px x 0.9 = 28.8px, while
+            a small control is a flat 32px, and the 3.2px gap is exactly what makes
+            the skeleton box stop matching the resolved box. */}
+        <Skeleton className="h-control-sm w-24" />
       </CardFooter>
     </Card>
   );

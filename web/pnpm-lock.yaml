@@ -123,6 +123,9 @@ importers:
       oxlint:
         specifier: ^1.74.0
         version: 1.74.0
+      postcss:
+        specifier: ^8.5.23
+        version: 8.5.23
       shadcn:
         specifier: ^4.13.0
         version: 4.13.0(typescript@5.9.3)
@@ -2577,6 +2580,10 @@ packages:
     resolution: {integrity: sha512-Mz8SaolMd8nB+G13WkORcxQKHZ/NE4xXevtkJHVuG+guo9/wYKlIMTKAqGdEmYOXR2ijPjTYNHssizdaVSUNdQ==}
     engines: {node: ^10 || ^12 || >=14}
 
+  postcss@8.5.23:
+    resolution: {integrity: sha512-g50586zr4bZmwFiTlflMu8E0bDTb5I5gertgwAKmsdUlTQIhZtunzUlD1WSzwcVWPoAVpsrA6vlfCD7oXvRwgg==}
+    engines: {node: ^10 || ^12 || >=14}
+
   powershell-utils@0.1.0:
     resolution: {integrity: sha512-dM0jVuXJPsDN6DvRpea484tCUaMiXWjuCn++HGTqUWzGDjv5tZkEZldAJ/UMlqRYGFrD/etByo4/xOuC/snX2A==}
     engines: {node: '>=20'}
@@ -3993,7 +4000,7 @@ snapshots:
       '@alloc/quick-lru': 5.2.0
       '@tailwindcss/node': 4.3.2
       '@tailwindcss/oxide': 4.3.2
-      postcss: 8.5.19
+      postcss: 8.5.23
       tailwindcss: 4.3.2
 
   '@tanstack/query-core@5.101.2': {}
@@ -5347,6 +5354,12 @@ snapshots:
       picocolors: 1.1.1
       source-map-js: 1.2.1
 
+  postcss@8.5.23:
+    dependencies:
+      nanoid: 3.3.16
+      picocolors: 1.1.1
+      source-map-js: 1.2.1
+
   powershell-utils@0.1.0: {}
 
   preact@10.12.1: {}
@@ -5562,7 +5575,7 @@ snapshots:
       kleur: 4.1.5
       open: 11.0.0
       ora: 8.2.0
-      postcss: 8.5.19
+      postcss: 8.5.23
       postcss-selector-parser: 7.1.4
       prompts: 2.4.2
       recast: 0.23.12

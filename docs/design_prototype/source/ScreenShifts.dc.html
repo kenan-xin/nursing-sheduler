@@ -9,12 +9,12 @@
 <x-dc>
 <div class="ns-fade">
   <div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:var(--space-4);margin-bottom:var(--space-6);">
-    <div style="flex:1;min-width:240px;">
+    <div style="flex:1 1 440px;min-width:min(100%,440px);">
       <div style="font:600 var(--m-sm) var(--font-ui);letter-spacing:.03em;color:var(--brandink);text-transform:uppercase;margin-bottom:8px;">STEP 3 · SHIFTS</div>
-      <h1 style="font:800 var(--t-display) var(--font-display);letter-spacing:-.02em;margin:0 0 8px;line-height:1.05;">Define the Shifts</h1>
-      <p style="margin:0;color:var(--ink2);max-width:60ch;">Set up the daily shifts your ward runs and how many nurses each needs. <dc-import name="InfoTip" term="How shifts work" text="The minimum is the shift's staffing requirement — edit it here or under Staffing requirements; it's one shared rule. Off (unpaid rest) and Paid leave are reserved day-states handled for you." hint-size="16px,16px"></dc-import></p>
+      <h1 style="font:700 var(--t-display) var(--font-display);letter-spacing:-.015em;margin:0 0 8px;line-height:1.05;">Define the Shifts</h1>
+      <p style="margin:0;color:var(--ink2);max-width:60ch;">Set up the daily shifts you run and how many nurses each needs. <dc-import name="InfoTip" term="How shifts work" text="The minimum is the shift's staffing requirement — edit it here or under Staffing requirements; it's one shared rule. Off (unpaid rest) and Paid leave are reserved day-states handled for you." hint-size="16px,16px"></dc-import></p>
     </div>
-    <button onClick="{{ toRules }}" style="height:44px;padding:0 20px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-body) var(--font-ui);display:inline-flex;align-items:center;gap:9px;" style-hover="filter:brightness(.94)">Continue to rules <i class="fa-solid fa-arrow-right" style="font-size:12px;"></i></button>
+    <button onClick="{{ toRules }}" style="height:44px;padding:0 20px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-body) var(--font-ui);display:inline-flex;align-items:center;gap:8px;" style-hover="filter:brightness(.94)">Continue to rules <i class="fa-solid fa-arrow-right" style="font-size:12px;"></i></button>
   </div>
 
   <div style="display:flex;gap:10px;margin-bottom:var(--space-4);">
@@ -25,35 +25,35 @@
     <sc-for list="{{ shifts }}" as="s" hint-placeholder-count="4">
       <div draggable="{{ s.draggable }}" onDragStart="{{ s.onDragStart }}" onDragOver="{{ s.onDragOver }}" onDrop="{{ s.onDrop }}" onDragEnd="{{ s.onDragEnd }}" style="{{ s.cardStyle }}">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
-          <div style="display:flex;align-items:center;gap:11px;min-width:0;">
+          <div style="display:flex;align-items:center;gap:12px;min-width:0;">
             <div style="{{ s.tileStyle }}"><i class="fa-solid {{ s.icon }}"></i></div>
             <div style="min-width:0;">
               <sc-if value="{{ s.editing }}" hint-placeholder-val="{{ false }}">
-                <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.06em;color:var(--brandink);text-transform:uppercase;line-height:1;margin-bottom:4px;">Editing shift</div>
+                <div style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.04em;color:var(--brandink);text-transform:uppercase;line-height:1;margin-bottom:4px;">Editing shift</div>
               </sc-if>
-              <div style="font:800 var(--t-title) var(--font-display);line-height:1;">{{ s.id }}</div>
+              <div style="font:700 var(--t-title) var(--font-display);line-height:1;">{{ s.id }}</div>
               <sc-if value="{{ s.notEditing }}" hint-placeholder-val="{{ true }}">
-                <div style="font-size:var(--t-sm);color:var(--ink2);margin-top:3px;">{{ s.name }}</div>
+                <div style="font-size:var(--t-sm);color:var(--ink2);margin-top:4px;">{{ s.name }}</div>
               </sc-if>
             </div>
           </div>
           <sc-if value="{{ s.auto }}" hint-placeholder-val="{{ false }}">
-            <span style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);border:1px solid var(--line);padding:3px 7px;text-transform:uppercase;">AUTO</span>
+            <span style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);border:1px solid var(--line);padding:4px 8px;text-transform:uppercase;">AUTO</span>
           </sc-if>
         </div>
 
         <sc-if value="{{ s.editing }}" hint-placeholder-val="{{ false }}">
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:15px 14px;border-top:1px solid var(--line2);padding-top:16px;">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px 14px;border-top:1px solid var(--line2);padding-top:16px;">
 
             <label style="display:flex;flex-direction:column;gap:6px;min-width:0;">
               <span style="height:16px;display:flex;align-items:center;font:600 var(--m-xs) var(--font-ui);letter-spacing:.04em;color:var(--ink3);text-transform:uppercase;">Code</span>
-              <input value="{{ draftCode }}" onInput="{{ onCode }}" placeholder="AM" style="width:100%;height:38px;padding:0 11px;border:1px solid var(--line);background:var(--surface);font:700 var(--m-sm) var(--font-ui);text-transform:uppercase;box-sizing:border-box;">
+              <input value="{{ draftCode }}" onInput="{{ onCode }}" placeholder="AM" style="width:100%;height:38px;padding:0 12px;border:1px solid var(--line);background:var(--surface);font:700 var(--m-sm) var(--font-ui);text-transform:uppercase;box-sizing:border-box;">
             </label>
             <label style="display:flex;flex-direction:column;gap:6px;min-width:0;">
               <span style="height:16px;display:flex;align-items:center;gap:6px;font:600 var(--m-xs) var(--font-ui);letter-spacing:.04em;color:var(--ink3);text-transform:uppercase;">Name <dc-import name="InfoTip" term="Shift code &amp; name" text="{{ codeHelp }}" hint-size="16px,16px"></dc-import></span>
-              <input value="{{ draftName }}" onInput="{{ onName }}" placeholder="Shift name" style="width:100%;height:38px;padding:0 11px;border:1px solid var(--line);background:var(--surface);font-size:var(--t-sm);box-sizing:border-box;">
+              <input value="{{ draftName }}" onInput="{{ onName }}" placeholder="Shift name" style="width:100%;height:38px;padding:0 12px;border:1px solid var(--line);background:var(--surface);font-size:var(--t-sm);box-sizing:border-box;">
             </label>
-            <sc-if value="{{ codeError }}" hint-placeholder-val="{{ false }}"><div style="grid-column:1/-1;color:var(--error);font-size:var(--t-sm);margin-top:-8px;font-weight:600;"><i class="fa-solid fa-circle-exclamation" style="margin-right:5px;"></i>{{ codeErrorText }}</div></sc-if>
+            <sc-if value="{{ codeError }}" hint-placeholder-val="{{ false }}"><div style="grid-column:1/-1;color:var(--errorink);font-size:var(--t-sm);margin-top:-8px;font-weight:600;"><i class="fa-solid fa-circle-exclamation" style="margin-right:4px;"></i>{{ codeErrorText }}</div></sc-if>
 
             <div style="grid-column:1/-1;display:flex;flex-direction:column;gap:6px;">
               <span style="height:16px;display:flex;align-items:center;gap:6px;font:600 var(--m-xs) var(--font-ui);letter-spacing:.04em;color:var(--ink3);text-transform:uppercase;">Time on floor <dc-import name="InfoTip" term="Time on floor" text="{{ timeTip }}" hint-size="16px,16px"></dc-import></span>
@@ -80,27 +80,27 @@
               </select>
             </div>
             <div style="display:flex;flex-direction:column;gap:6px;min-width:0;">
-              <span style="height:16px;display:flex;align-items:center;gap:6px;font:600 var(--m-xs) var(--font-ui);letter-spacing:.04em;color:var(--ink3);text-transform:uppercase;">Working <span style="color:var(--faint);letter-spacing:.04em;">· auto</span></span>
+              <span style="height:16px;display:flex;align-items:center;gap:6px;font:600 var(--m-xs) var(--font-ui);letter-spacing:.04em;color:var(--ink3);text-transform:uppercase;">Working <span style="color:var(--ink3);letter-spacing:.04em;">· auto</span></span>
               <div style="height:38px;display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line2);padding:0 12px;box-sizing:border-box;">
-                <span style="font:800 var(--t-title) var(--font-display);line-height:1;">{{ workHoursLabel }}</span>
+                <span style="font:700 var(--t-title) var(--font-display);line-height:1;">{{ workHoursLabel }}</span>
                 <span style="font:600 var(--m-xs) var(--font-mono);color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ workCalcLabel }}</span>
               </div>
             </div>
             <sc-if value="{{ gridError }}" hint-placeholder-val="{{ false }}">
-              <div style="grid-column:1/-1;display:flex;align-items:flex-start;gap:7px;color:var(--warn);font-size:var(--t-sm);font-weight:600;margin-top:-6px;"><i class="fa-solid fa-triangle-exclamation" style="margin-top:2px;"></i><span>{{ gridErrorText }}</span></div>
+              <div style="grid-column:1/-1;display:flex;align-items:flex-start;gap:8px;color:var(--warnink);font-size:var(--t-sm);font-weight:600;margin-top:-6px;"><i class="fa-solid fa-triangle-exclamation" style="margin-top:2px;"></i><span>{{ gridErrorText }}</span></div>
             </sc-if>
 
             <label style="display:flex;flex-direction:column;gap:6px;min-width:0;">
               <span style="height:16px;display:flex;align-items:center;gap:6px;font:600 var(--m-xs) var(--font-ui);letter-spacing:.04em;color:var(--ink3);text-transform:uppercase;">Min. nurses <dc-import name="InfoTip" term="Minimum nurses" text="{{ needHelp }}" hint-size="16px,16px"></dc-import></span>
-              <input type="number" min="0" max="20" value="{{ draftNeed }}" onInput="{{ onNeed }}" style="width:100%;height:38px;padding:0 11px;border:1px solid var(--line);background:var(--surface);font-weight:700;box-sizing:border-box;">
+              <input type="number" min="0" max="20" value="{{ draftNeed }}" onInput="{{ onNeed }}" style="width:100%;height:38px;padding:0 12px;border:1px solid var(--line);background:var(--surface);font-weight:700;box-sizing:border-box;">
             </label>
             <label style="display:flex;flex-direction:column;gap:6px;min-width:0;">
               <span style="height:16px;display:flex;align-items:center;gap:6px;font:600 var(--m-xs) var(--font-ui);letter-spacing:.04em;color:var(--ink3);text-transform:uppercase;">Preferred <dc-import name="InfoTip" term="Preferred nurses" text="{{ prefHelp }}" hint-size="16px,16px"></dc-import></span>
-              <input type="number" min="0" max="20" value="{{ draftPref }}" onInput="{{ onPref }}" placeholder="—" style="width:100%;height:38px;padding:0 11px;border:1px solid var(--line);background:var(--surface);font-weight:700;box-sizing:border-box;">
+              <input type="number" min="0" max="20" value="{{ draftPref }}" onInput="{{ onPref }}" placeholder="—" style="width:100%;height:38px;padding:0 12px;border:1px solid var(--line);background:var(--surface);font-weight:700;box-sizing:border-box;">
             </label>
 
             <div style="grid-column:1/-1;display:flex;gap:8px;margin-top:4px;padding-top:14px;border-top:1px solid var(--line2);">
-              <button onClick="{{ onSave }}" style="height:38px;padding:0 18px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:7px;" style-hover="filter:brightness(.94)"><i class="fa-solid fa-check" style="font-size:11px;"></i> Save</button>
+              <button onClick="{{ onSave }}" style="height:38px;padding:0 18px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:8px;" style-hover="filter:brightness(.94)"><i class="fa-solid fa-check" style="font-size:12px;"></i> Save</button>
               <button onClick="{{ onCancel }}" style="height:38px;padding:0 18px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);" style-hover="background:var(--panel)">Cancel</button>
             </div>
           </div>
@@ -111,14 +111,14 @@
             <i class="fa-regular fa-clock" style="color:var(--ink3);font-size:12px;"></i>
             <span style="font:600 var(--m-sm) var(--font-mono);color:var(--ink2);">{{ s.time }}</span>
             <sc-if value="{{ s.hasDur }}" hint-placeholder-val="{{ false }}">
-              <span style="font:600 var(--m-xs) var(--font-mono);color:var(--ink3);border:1px solid var(--line2);padding:2px 7px;">{{ s.durLabel }}</span>
+              <span style="font:600 var(--m-xs) var(--font-mono);color:var(--ink3);border:1px solid var(--line2);padding:2px 8px;">{{ s.durLabel }}</span>
             </sc-if>
           </div>
           <sc-if value="{{ s.showNeed }}" hint-placeholder-val="{{ true }}">
             <div style="margin-top:14px;">
               <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
                 <span style="font-size:var(--t-body);color:var(--ink2);">Minimum nurses</span>
-                <span style="font:800 var(--t-title) var(--font-display);line-height:1;">{{ s.need }}</span>
+                <span style="font:700 var(--t-title) var(--font-display);line-height:1;">{{ s.need }}</span>
               </div>
               <sc-if value="{{ s.hasPref }}" hint-placeholder-val="{{ false }}">
                 <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:6px;">
@@ -129,14 +129,14 @@
               <sc-if value="{{ s.hasReqMeta }}" hint-placeholder-val="{{ false }}">
                 <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;">
                   <sc-if value="{{ s.hasQualifier }}" hint-placeholder-val="{{ false }}">
-                    <span style="display:inline-flex;align-items:center;gap:6px;font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--brandink);background:var(--brandtint);border:1px solid var(--brand);padding:2px 8px;text-transform:uppercase;"><i class="fa-solid fa-user-shield" style="font-size:9px;"></i> {{ s.qualifierLabel }}</span>
+                    <span style="display:inline-flex;align-items:center;gap:6px;font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--brandink);background:var(--brandtint);border:1px solid var(--brand);padding:2px 8px;text-transform:uppercase;"><i class="fa-solid fa-user-shield" style="font-size:10px;"></i> {{ s.qualifierLabel }}</span>
                   </sc-if>
                   <sc-if value="{{ s.hasExtra }}" hint-placeholder-val="{{ false }}">
-                    <span style="display:inline-flex;align-items:center;gap:6px;font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);background:var(--panel);border:1px solid var(--line2);padding:2px 8px;text-transform:uppercase;"><i class="fa-solid fa-layer-group" style="font-size:9px;"></i> {{ s.extraChip }}</span>
+                    <span style="display:inline-flex;align-items:center;gap:6px;font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);background:var(--panel);border:1px solid var(--line2);padding:2px 8px;text-transform:uppercase;"><i class="fa-solid fa-layer-group" style="font-size:10px;"></i> {{ s.extraChip }}</span>
                   </sc-if>
                 </div>
               </sc-if>
-              <button onClick="{{ onOpenReq }}" style="margin-top:10px;background:none;border:none;padding:0;font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--brandink);text-transform:uppercase;cursor:pointer;display:inline-flex;align-items:center;gap:6px;" style-hover="text-decoration:underline">View staffing requirement <i class="fa-solid fa-arrow-up-right-from-square" style="font-size:9px;"></i></button>
+              <button onClick="{{ onOpenReq }}" style="margin-top:10px;background:none;border:none;padding:0;font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--brandink);text-transform:uppercase;cursor:pointer;display:inline-flex;align-items:center;gap:6px;" style-hover="text-decoration:underline">View staffing requirement <i class="fa-solid fa-arrow-up-right-from-square" style="font-size:10px;"></i></button>
             </div>
           </sc-if>
           <sc-if value="{{ s.auto }}" hint-placeholder-val="{{ false }}">
@@ -144,8 +144,8 @@
           </sc-if>
           <sc-if value="{{ s.showActions }}" hint-placeholder-val="{{ true }}">
             <div style="display:flex;gap:6px;margin-top:auto;border-top:1px solid var(--line2);padding-top:12px;">
-              <button onClick="{{ s.onEdit }}" style="height:32px;padding:0 12px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:7px;" style-hover="background:var(--panel)"><i class="fa-solid fa-pen" style="font-size:10px;"></i> Edit</button>
-              <button onClick="{{ s.onDel }}" style="height:32px;padding:0 12px;background:transparent;border:1px solid var(--line);color:var(--error);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:7px;" style-hover="background:var(--errortint)"><i class="fa-solid fa-trash" style="font-size:10px;"></i> Delete</button>
+              <button onClick="{{ s.onEdit }}" style="height:32px;padding:0 12px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:8px;" style-hover="background:var(--panel)"><i class="fa-solid fa-pen" style="font-size:10px;"></i> Edit</button>
+              <button onClick="{{ s.onDel }}" style="height:32px;padding:0 12px;background:transparent;border:1px solid var(--line);color:var(--errorink);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:8px;" style-hover="background:var(--errortint)"><i class="fa-solid fa-trash" style="font-size:10px;"></i> Delete</button>
             </div>
           </sc-if>
         </sc-if>
@@ -156,10 +156,10 @@
   <div style="background:var(--surface);border:1px solid var(--line);margin-top:var(--space-4);">
     <div style="padding:16px 18px;border-bottom:1px solid var(--line2);display:flex;align-items:center;justify-content:space-between;gap:10px;">
       <div>
-        <div style="font:800 var(--t-cardhead) var(--font-display);letter-spacing:-.02em;">Shift groups</div>
-        <div style="color:var(--ink2);font-size:var(--t-sm);margin-top:2px;">Bundle shifts so rules can target them together — e.g. "count all working shifts".</div>
+        <div style="font:700 var(--t-cardhead) var(--font-display);letter-spacing:-.015em;">Shift groups</div>
+        <div style="color:var(--ink2);font-size:var(--t-sm);margin-top:2px;">Bundle shifts so rules can target them together — e.g. “count all working shifts”.</div>
       </div>
-      <button onClick="{{ onGroupAdd }}" style="height:34px;padding:0 13px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:7px;flex:none;" style-hover="background:var(--panel)"><i class="fa-solid fa-plus" style="font-size:11px;"></i> Group</button>
+      <button onClick="{{ onGroupAdd }}" style="height:34px;padding:0 12px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:8px;flex:none;" style-hover="background:var(--panel)"><i class="fa-solid fa-plus" style="font-size:12px;"></i> Group</button>
     </div>
     <div style="padding:18px;display:flex;flex-direction:column;gap:14px;">
       <sc-for list="{{ autoGroups }}" as="g" hint-placeholder-count="1">
@@ -168,26 +168,26 @@
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
               <span style="font:600 var(--m-lg) var(--font-mono);">{{ g.id }}</span>
               <span style="font:600 var(--m-xs) var(--font-mono);color:var(--ink3);">{{ g.count }}</span>
-              <span style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);border:1px solid var(--line);padding:3px 7px;text-transform:uppercase;">AUTO</span>
+              <span style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);border:1px solid var(--line);padding:4px 8px;text-transform:uppercase;">AUTO</span>
             </div>
             <div style="font-size:var(--t-sm);color:var(--ink3);margin-bottom:8px;max-width:60ch;">{{ g.note }}</div>
             <div style="display:flex;flex-wrap:wrap;gap:6px;">
-              <sc-if value="{{ g.empty }}" hint-placeholder-val="{{ false }}"><span style="color:var(--faint);font-size:var(--t-sm);">No shift types</span></sc-if>
+              <sc-if value="{{ g.empty }}" hint-placeholder-val="{{ false }}"><span style="color:var(--ink3);font-size:var(--t-sm);">No shift types</span></sc-if>
               <sc-for list="{{ g.members }}" as="m" hint-placeholder-count="3">
-                <span style="border:1px solid var(--line);background:var(--surface);padding:2px 9px;font:600 var(--m-sm) var(--font-mono);border-radius:2px;">{{ m }}</span>
+                <span style="border:1px solid var(--line);background:var(--surface);padding:2px 8px;font:600 var(--m-sm) var(--font-mono);border-radius:2px;">{{ m }}</span>
               </sc-for>
             </div>
           </div>
         </div>
       </sc-for>
       <sc-if value="{{ noGroups }}" hint-placeholder-val="{{ false }}">
-        <div style="border:1.5px dashed var(--line2);padding:32px 20px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:11px;">
-          <div style="width:46px;height:46px;border:1.5px dashed var(--line2);display:flex;align-items:center;justify-content:center;font-size:20px;color:var(--faint);line-height:1;">∅</div>
+        <div style="border:1.5px dashed var(--line2);padding:32px 20px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:12px;">
+          <div style="width:46px;height:46px;border:1.5px dashed var(--line2);display:flex;align-items:center;justify-content:center;font-size:20px;color:var(--ink3);line-height:1;">∅</div>
           <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
             <div style="font:700 var(--t-title) var(--font-display);color:var(--ink2);">No custom shift groups yet</div>
             <div style="font-size:var(--t-sm);color:var(--ink3);max-width:44ch;">Bundle shift types — like “Working” or “Night” — so a rule can count or target them together.</div>
           </div>
-          <button onClick="{{ onGroupAdd }}" style="height:34px;padding:0 14px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:7px;margin-top:2px;" style-hover="filter:brightness(.94)"><i class="fa-solid fa-plus" style="font-size:11px;"></i> New group</button>
+          <button onClick="{{ onGroupAdd }}" style="height:34px;padding:0 14px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:8px;margin-top:2px;" style-hover="filter:brightness(.94)"><i class="fa-solid fa-plus" style="font-size:12px;"></i> New group</button>
         </div>
       </sc-if>
       <sc-for list="{{ groups }}" as="g" hint-placeholder-count="3">
@@ -210,9 +210,9 @@
                   <div style="border:1px solid var(--line);background:var(--surface);display:flex;flex-direction:column;min-height:150px;max-height:220px;">
                     <div style="padding:8px 12px;border-bottom:1px solid var(--line2);background:var(--panel);font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;display:flex;justify-content:space-between;"><span>AVAILABLE</span><span>{{ availCount }}</span></div>
                     <div style="flex:1;overflow-y:auto;">
-                      <sc-if value="{{ noAvail }}" hint-placeholder-val="{{ false }}"><div style="padding:22px 12px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:6px;color:var(--faint);font-size:var(--t-sm);"><span style="font-size:15px;line-height:1;">✓</span>All shift types added.</div></sc-if>
+                      <sc-if value="{{ noAvail }}" hint-placeholder-val="{{ false }}"><div style="padding:22px 12px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:6px;color:var(--ink3);font-size:var(--t-sm);"><span style="font-size:16px;line-height:1;">✓</span>All shift types added.</div></sc-if>
                       <sc-for list="{{ available }}" as="a" hint-placeholder-count="3">
-                        <button onClick="{{ a.onAdd }}" style="width:100%;text-align:left;padding:9px 12px;border:none;border-bottom:1px solid var(--line2);background:transparent;font:600 var(--m-sm) var(--font-mono);color:var(--ink);cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;" style-hover="background:var(--panel)"><span>{{ a.name }}</span><i class="fa-solid fa-arrow-right" style="font-size:10px;color:var(--ink3);"></i></button>
+                        <button onClick="{{ a.onAdd }}" style="width:100%;text-align:left;padding:8px 12px;border:none;border-bottom:1px solid var(--line2);background:transparent;font:600 var(--m-sm) var(--font-mono);color:var(--ink);cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;" style-hover="background:var(--panel)"><span>{{ a.name }}</span><i class="fa-solid fa-arrow-right" style="font-size:10px;color:var(--ink3);"></i></button>
                       </sc-for>
                     </div>
                   </div>
@@ -223,19 +223,19 @@
                   <div style="border:1px solid var(--brand);background:var(--surface);display:flex;flex-direction:column;min-height:150px;max-height:220px;">
                     <div style="padding:8px 12px;border-bottom:1px solid var(--line2);background:var(--brandtint);font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--brandink);text-transform:uppercase;display:flex;justify-content:space-between;"><span>IN GROUP</span><span>{{ selCount }}</span></div>
                     <div style="flex:1;overflow-y:auto;">
-                      <sc-if value="{{ noSel }}" hint-placeholder-val="{{ true }}"><div style="padding:22px 12px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:6px;color:var(--faint);font-size:var(--t-sm);"><span style="font-size:16px;line-height:1;">←</span>Empty — pick from the left.</div></sc-if>
+                      <sc-if value="{{ noSel }}" hint-placeholder-val="{{ true }}"><div style="padding:22px 12px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:6px;color:var(--ink3);font-size:var(--t-sm);"><span style="font-size:16px;line-height:1;">←</span>Empty — pick from the left.</div></sc-if>
                       <sc-for list="{{ selected }}" as="s" hint-placeholder-count="3">
-                        <button onClick="{{ s.onRemove }}" style="width:100%;text-align:left;padding:9px 12px;border:none;border-bottom:1px solid var(--line2);background:transparent;font:600 var(--m-sm) var(--font-mono);color:var(--ink);cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;" style-hover="background:var(--errortint)"><span style="display:inline-flex;align-items:center;gap:8px;"><i class="fa-solid fa-arrow-left" style="font-size:10px;color:var(--ink3);"></i>{{ s.name }}</span><i class="fa-solid fa-xmark" style="font-size:11px;color:var(--ink3);"></i></button>
+                        <button onClick="{{ s.onRemove }}" style="width:100%;text-align:left;padding:8px 12px;border:none;border-bottom:1px solid var(--line2);background:transparent;font:600 var(--m-sm) var(--font-mono);color:var(--ink);cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;" style-hover="background:var(--errortint)"><span style="display:inline-flex;align-items:center;gap:8px;"><i class="fa-solid fa-arrow-left" style="font-size:10px;color:var(--ink3);"></i>{{ s.name }}</span><i class="fa-solid fa-xmark" style="font-size:12px;color:var(--ink3);"></i></button>
                       </sc-for>
                     </div>
                   </div>
                 </div>
               </div>
               <div style="display:flex;gap:6px;">
-                <button onClick="{{ onGroupSave }}" style="height:34px;padding:0 14px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:7px;" style-hover="filter:brightness(.94)"><i class="fa-solid fa-check" style="font-size:11px;"></i> Save</button>
+                <button onClick="{{ onGroupSave }}" style="height:34px;padding:0 14px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:8px;" style-hover="filter:brightness(.94)"><i class="fa-solid fa-check" style="font-size:12px;"></i> Save</button>
                 <button onClick="{{ onGroupCancel }}" style="height:34px;padding:0 14px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);" style-hover="background:var(--panel)">Cancel</button>
                 <div style="flex:1;"></div>
-                <button onClick="{{ g.onDelete }}" style="height:34px;padding:0 12px;background:transparent;border:1px solid var(--line);color:var(--error);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:7px;" style-hover="background:var(--errortint)"><i class="fa-solid fa-trash" style="font-size:10px;"></i> Delete</button>
+                <button onClick="{{ g.onDelete }}" style="height:34px;padding:0 12px;background:transparent;border:1px solid var(--line);color:var(--errorink);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:8px;" style-hover="background:var(--errortint)"><i class="fa-solid fa-trash" style="font-size:10px;"></i> Delete</button>
               </div>
             </div>
           </sc-if>
@@ -247,15 +247,15 @@
                   <span style="font:600 var(--m-xs) var(--font-mono);color:var(--ink3);">{{ g.count }}</span>
                 </div>
                 <div style="display:flex;flex-wrap:wrap;gap:6px;">
-                  <sc-if value="{{ g.empty }}" hint-placeholder-val="{{ false }}"><span style="color:var(--faint);font-size:var(--t-sm);">No shift types</span></sc-if>
+                  <sc-if value="{{ g.empty }}" hint-placeholder-val="{{ false }}"><span style="color:var(--ink3);font-size:var(--t-sm);">No shift types</span></sc-if>
                   <sc-for list="{{ g.members }}" as="m" hint-placeholder-count="3">
-                    <span style="border:1px solid var(--line);background:var(--panel);padding:2px 9px;font:600 var(--m-sm) var(--font-mono);border-radius:2px;">{{ m }}</span>
+                    <span style="border:1px solid var(--line);background:var(--panel);padding:2px 8px;font:600 var(--m-sm) var(--font-mono);border-radius:2px;">{{ m }}</span>
                   </sc-for>
                 </div>
               </div>
               <div style="display:flex;gap:4px;flex:none;">
-                <button onClick="{{ g.onEdit }}" aria-label="Edit group" style="width:30px;height:30px;background:transparent;border:1px solid var(--line);color:var(--ink2);" style-hover="background:var(--panel)"><i class="fa-solid fa-pen" style="font-size:11px;"></i></button>
-                <button onClick="{{ g.onDelete }}" aria-label="Delete group" style="width:30px;height:30px;background:transparent;border:1px solid var(--line);color:var(--error);" style-hover="background:var(--errortint)"><i class="fa-solid fa-trash" style="font-size:11px;"></i></button>
+                <button onClick="{{ g.onEdit }}" aria-label="Edit group" style="width:30px;height:30px;background:transparent;border:1px solid var(--line);color:var(--ink2);" style-hover="background:var(--panel)"><i class="fa-solid fa-pen" style="font-size:12px;"></i></button>
+                <button onClick="{{ g.onDelete }}" aria-label="Delete group" style="width:30px;height:30px;background:transparent;border:1px solid var(--line);color:var(--errorink);" style-hover="background:var(--errortint)"><i class="fa-solid fa-trash" style="font-size:12px;"></i></button>
               </div>
             </div>
           </sc-if>
@@ -299,7 +299,7 @@ class Component extends DCLogic {
         onDragOver:canDrag?((e)=>{ if(this.state.dragKind==='card'){ e.preventDefault(); if(this.state.overK!==s._k) this.setState({overK:s._k}); } }):(()=>{}),
         onDrop:canDrag?((e)=>{ e.preventDefault(); const d=this.state.dragK; this.setState({dragK:null,overK:null,dragKind:null}); if(d&&d!==s._k)(v.reorder||(()=>{}))(d,s._k); }):(()=>{}),
         onDragEnd:()=>this.setState({dragK:null,overK:null,dragKind:null}),
-        tileStyle:`width:42px;height:42px;background:${s.id==='N'?'var(--ink)':(s.credit?'var(--brandtint)':'var(--panel)')};color:${s.id==='N'?'var(--on-ink)':(s.credit?'var(--brandink)':'var(--ink2)')};border:1px solid var(--line2);display:flex;align-items:center;justify-content:center;font-size:17px;flex:none;`,
+        tileStyle:`width:42px;height:42px;background:${s.id==='N'?'var(--ink)':(s.credit?'var(--brandtint)':'var(--panel)')};color:${s.id==='N'?'var(--on-ink)':(s.credit?'var(--brandink)':'var(--ink2)')};border:1px solid var(--line2);display:flex;align-items:center;justify-content:center;font-size:16px;flex:none;`,
         showNeed:!s.auto, showActions:!s.auto,
         hasPref:(!s.auto)&&(s.reqPreferred!=null)&&(Number(s.reqPreferred)>Number(s.need!=null?s.need:0)),
         prefLabel:(s.reqPreferred!=null?String(s.reqPreferred):''),

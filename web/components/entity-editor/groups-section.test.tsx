@@ -242,6 +242,59 @@ describe.each([
   });
 });
 
+describe("GroupsSection — drag-over is its own state, not selection", () => {
+  function seedThree() {
+    seed({
+      staff: [],
+      staffGroups: [
+        { id: "A", members: [] },
+        { id: "B", members: [] },
+      ],
+    });
+  }
+
+  it("marks the row under the pointer as a drop target, never as selected", () => {
+    seedThree();
+    render(<GroupsHarness />);
+    const target = screen.getByTestId("group-row-B");
+    expect(target.className).not.toContain("border-dashed");
+
+    fireEvent.dragStart(screen.getByTestId("group-row-A"));
+    fireEvent.dragOver(target);
+
+    // The drop candidate takes the dashed brand edge over the hover tone...
+    expect(target.className).toContain("border-dashed");
+    expect(target.className).toContain("border-brand");
+    expect(target.className).toContain("bg-panel-alt");
+    // ...and specifically NOT the selection language reserved for "current".
+    expect(target.className).not.toContain("bg-brandtint");
+    // The dragged source row is dimmed by the same recipe, not by a local class.
+    expect(screen.getByTestId("group-row-A").className).toContain("opacity-50");
+  });
+
+  it("uses the selected role for the open editor, which the drop state never borrows", () => {
+    seedThree();
+    render(<GroupsHarness />);
+    fireEvent.click(screen.getByTestId("group-edit-A"));
+    const form = screen.getByTestId("group-edit-form-A");
+    expect(form.className).toContain("border-brand");
+    expect(form.className).not.toContain("border-dashed");
+  });
+
+  it("still reorders on drop, unchanged", () => {
+    seedThree();
+    render(<GroupsHarness />);
+    const before = historyLength();
+
+    fireEvent.dragStart(screen.getByTestId("group-row-A"));
+    fireEvent.dragOver(screen.getByTestId("group-row-B"));
+    fireEvent.drop(screen.getByTestId("group-row-B"));
+
+    expect(groupOrder()).toEqual(["B", "A"]);
+    expect(historyLength()).toBe(before + 1);
+  });
+});
+
 describe("GroupsSection parameterization — copy + flags", () => {
   it("Staff config shows the member search, MEMBERS pane, and 'N members' count", () => {
     seed({

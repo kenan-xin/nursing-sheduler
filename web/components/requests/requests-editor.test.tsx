@@ -2,6 +2,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
 import type { ScenarioUiState } from "@/lib/scenario";
 import {
@@ -194,6 +195,168 @@ describe("RequestsEditor — Normal history editor saves AND closes (FR-SR-19)",
     expect(screen.queryByTestId("history-editor")).not.toBeInTheDocument();
     // Clearing through position 0 drops the newest entry, keeping the older tail.
     expect(staffHistory("Aisha")).toEqual(["PM"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Focus restoration to the EXACT originating cell (F3 round-four P1).
+//
+// The container holds the initiating element alongside the coordinate. These
+// tests are written against element IDENTITY (`toBe(cell)`), not against a
+// re-query by testid, because a coordinate-derived lookup is exactly the
+// implementation this seam must not have: it would pass even if the container
+// had thrown the element away.
+// ---------------------------------------------------------------------------
+
+describe("RequestsEditor — Cell Preference restores focus to its exact origin", () => {
+  function openCellEditor() {
+    seed(BASE_SEED);
+    render(<RequestsEditor />);
+    const cell = screen.getByTestId("cell-Aisha-01");
+    cell.focus();
+    fireEvent.click(cell);
+    expect(screen.getByTestId("cell-preference-editor")).toBeInTheDocument();
+    return cell;
+  }
+
+  it("Cancel returns focus to the very cell that opened it", async () => {
+    const cell = openCellEditor();
+    fireEvent.click(screen.getByTestId("cell-editor-cancel"));
+    await waitFor(() => expect(document.activeElement).toBe(cell));
+  });
+
+  it("Escape returns focus to the very cell that opened it", async () => {
+    const cell = openCellEditor();
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByTestId("cell-preference-editor")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(cell));
+  });
+
+  it("Save commits AND returns focus to the very cell that opened it", async () => {
+    const cell = openCellEditor();
+    fireEvent.click(screen.getByTestId("cell-editor-tab-leave"));
+    fireEvent.click(screen.getByTestId("cell-editor-save"));
+    await waitFor(() => expect(screen.queryByTestId("cell-preference-editor")).toBeNull());
+    // The commit re-renders the matrix; React reconciles the same key to the same
+    // DOM node, so the captured element is still the live cell.
+    expect(useScenarioStore.getState().reqData).toMatchObject([
+      { kind: "leave", person: "Aisha", date: "01" },
+    ]);
+    await waitFor(() => expect(document.activeElement).toBe(cell));
+  });
+
+  it("Clear cell returns focus to the very cell that opened it", async () => {
+    const cell = openCellEditor();
+    fireEvent.click(screen.getByTestId("cell-editor-clear"));
+    await waitFor(() => expect(document.activeElement).toBe(cell));
+  });
+
+  it("opens from the keyboard and returns focus there too", async () => {
+    seed(BASE_SEED);
+    render(<RequestsEditor />);
+    const cell = screen.getByTestId("cell-Chloe-02");
+    cell.focus();
+    // The origin is a native button, so activation is the browser's synthesized
+    // click from the key press — a bare `keyDown` no longer stands in for it.
+    await userEvent.keyboard("{Enter}");
+    expect(screen.getByTestId("cell-preference-editor")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("cell-editor-cancel"));
+    await waitFor(() => expect(document.activeElement).toBe(cell));
+  });
+
+  it("does not steal focus when the captured origin has left the document", async () => {
+    const cell = openCellEditor();
+    // Simulate the row being recycled by the virtualizer while the editor is open.
+    cell.remove();
+    expect(cell.isConnected).toBe(false);
+    const parked = document.createElement("button");
+    document.body.append(parked);
+
+    fireEvent.click(screen.getByTestId("cell-editor-cancel"));
+    await waitFor(() => expect(screen.queryByTestId("cell-preference-editor")).toBeNull());
+    parked.focus();
+    // No focus() on a disconnected node, no fallback to body, and no hunt for a
+    // lookalike cell: whatever the user is on stays put.
+    await waitFor(() => expect(document.activeElement).toBe(parked));
+    parked.remove();
+  });
+});
+
+describe("RequestsEditor — History Editor restores focus to its exact origin", () => {
+  const HISTORY_SEED: Partial<ScenarioUiState> = {
+    ...BASE_SEED,
+    staff: [
+      { id: "Aisha", history: ["PM", "AM"] },
+      { id: "Chloe", history: [] },
+    ],
+  };
+
+  function openHistoryEditor() {
+    seed(HISTORY_SEED);
+    render(<RequestsEditor />);
+    const slot = screen.getByTestId("hist-Aisha-1");
+    slot.focus();
+    fireEvent.click(slot);
+    expect(screen.getByTestId("history-editor")).toBeInTheDocument();
+    return slot;
+  }
+
+  it("Done returns focus to the very history slot that opened it", async () => {
+    const slot = openHistoryEditor();
+    fireEvent.click(screen.getByTestId("history-editor-done"));
+    await waitFor(() => expect(document.activeElement).toBe(slot));
+  });
+
+  it("the close control returns focus to the very history slot", async () => {
+    const slot = openHistoryEditor();
+    fireEvent.click(screen.getByTestId("history-editor-close"));
+    await waitFor(() => expect(document.activeElement).toBe(slot));
+  });
+
+  it("Escape returns focus to the very history slot", async () => {
+    const slot = openHistoryEditor();
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByTestId("history-editor")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(slot));
+  });
+
+  it("an option selection commits AND returns focus to the very history slot", async () => {
+    const slot = openHistoryEditor();
+    fireEvent.click(screen.getByTestId("history-editor-option-AM"));
+    await waitFor(() => expect(screen.queryByTestId("history-editor")).toBeNull());
+    expect(staffHistory("Aisha")).toContain("AM");
+    await waitFor(() => expect(document.activeElement).toBe(slot));
+  });
+
+  it("Clear commits AND returns focus to the very history slot", async () => {
+    const slot = openHistoryEditor();
+    fireEvent.click(screen.getByTestId("history-editor-clear"));
+    await waitFor(() => expect(screen.queryByTestId("history-editor")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(slot));
+  });
+
+  it("opens from the keyboard and returns focus there too", async () => {
+    seed(HISTORY_SEED);
+    render(<RequestsEditor />);
+    const slot = screen.getByTestId("hist-Aisha-2");
+    slot.focus();
+    await userEvent.keyboard(" ");
+    expect(screen.getByTestId("history-editor")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("history-editor-done"));
+    await waitFor(() => expect(document.activeElement).toBe(slot));
+  });
+
+  it("does not steal focus when the captured history origin has left the document", async () => {
+    const slot = openHistoryEditor();
+    slot.remove();
+    const parked = document.createElement("button");
+    document.body.append(parked);
+
+    fireEvent.click(screen.getByTestId("history-editor-done"));
+    await waitFor(() => expect(screen.queryByTestId("history-editor")).toBeNull());
+    parked.focus();
+    await waitFor(() => expect(document.activeElement).toBe(parked));
+    parked.remove();
   });
 });
 

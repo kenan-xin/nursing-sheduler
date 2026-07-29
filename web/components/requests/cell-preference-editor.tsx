@@ -15,7 +15,7 @@
 // other card-editor `*-model.ts` files' `weightInvalid` constant.
 
 import { useEffect, useState } from "react";
-import { Dialog } from "@base-ui/react/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useLosableDraft } from "@/components/shell/use-losable-draft";
@@ -142,197 +142,195 @@ export function CellPreferenceEditor({
   };
 
   return (
-    <Dialog.Root
+    // Every non-confirm dismissal route — Escape, the backdrop and Cancel — lands
+    // on `onClose`, which discards the local draft without committing. Save and
+    // Clear are the only paths that commit, and each commits exactly once.
+    <Dialog
       open={open}
       onOpenChange={(next) => {
         if (!next) onClose();
       }}
     >
-      <Dialog.Portal>
-        <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/40 animate-fade" />
-        <Dialog.Popup
-          data-testid="cell-preference-editor"
-          className="fixed left-1/2 top-1/2 z-50 w-[440px] max-w-[92vw] -translate-x-1/2 -translate-y-1/2 border border-line bg-surface shadow-dialog animate-fade"
-        >
-          <div className="border-b border-line2 px-[18px] py-4">
-            <Dialog.Title className="font-heading text-cardhead font-extrabold tracking-tight">
-              Cell preference
-            </Dialog.Title>
-            <div className="mt-0.5 text-meta text-ink3">
-              {personLabel} · {dateLabel}
-            </div>
+      <DialogContent
+        data-testid="cell-preference-editor"
+        showCloseButton={false}
+        className="gap-0 overflow-hidden p-0"
+      >
+        <div className="border-b border-line2 px-4.5 py-4">
+          <DialogTitle>Cell preference</DialogTitle>
+          <DialogDescription className="mt-0.5 text-ink3">
+            {personLabel} · {dateLabel}
+          </DialogDescription>
+        </div>
+
+        <div className="p-4.5">
+          <div className="mb-2 text-label font-semibold uppercase tracking-[0.03em] text-ink2">
+            Day state
+          </div>
+          <div role="tablist" className="mb-4 flex border border-line">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={draft.dayState === "available"}
+              data-testid="cell-editor-tab-available"
+              onClick={() => setDayState("available")}
+              className={cn(
+                "flex-1 h-9 text-meta font-semibold",
+                draft.dayState === "available" ? "bg-brand text-onbrand" : "hover:bg-panel",
+              )}
+            >
+              Available
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={draft.dayState === "leave"}
+              data-testid="cell-editor-tab-leave"
+              onClick={() => setDayState("leave")}
+              className={cn(
+                "flex-1 h-9 border-l border-line text-meta font-semibold",
+                draft.dayState === "leave" ? "bg-brand text-onbrand" : "hover:bg-panel",
+              )}
+            >
+              Paid leave
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={draft.dayState === "off"}
+              data-testid="cell-editor-tab-off"
+              onClick={() => setDayState("off")}
+              className={cn(
+                "flex-1 h-9 border-l border-line text-meta font-semibold",
+                draft.dayState === "off" ? "bg-brand text-onbrand" : "hover:bg-panel",
+              )}
+            >
+              Requests off
+            </button>
           </div>
 
-          <div className="p-[18px]">
-            <div className="mb-2 text-label font-semibold uppercase tracking-[0.03em] text-ink2">
-              Day state
-            </div>
-            <div role="tablist" className="mb-4 flex border border-line">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={draft.dayState === "available"}
-                data-testid="cell-editor-tab-available"
-                onClick={() => setDayState("available")}
-                className={cn(
-                  "flex-1 h-9 text-meta font-semibold",
-                  draft.dayState === "available" ? "bg-brand text-onbrand" : "hover:bg-panel",
-                )}
-              >
-                Available
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={draft.dayState === "leave"}
-                data-testid="cell-editor-tab-leave"
-                onClick={() => setDayState("leave")}
-                className={cn(
-                  "flex-1 h-9 border-l border-line text-meta font-semibold",
-                  draft.dayState === "leave" ? "bg-brand text-onbrand" : "hover:bg-panel",
-                )}
-              >
-                Paid leave
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={draft.dayState === "off"}
-                data-testid="cell-editor-tab-off"
-                onClick={() => setDayState("off")}
-                className={cn(
-                  "flex-1 h-9 border-l border-line text-meta font-semibold",
-                  draft.dayState === "off" ? "bg-brand text-onbrand" : "hover:bg-panel",
-                )}
-              >
-                Requests off
-              </button>
-            </div>
-
-            {draft.dayState === "available" && (
-              <div data-testid="cell-editor-weights">
-                <div className="mb-1 text-label font-semibold uppercase tracking-[0.03em] text-ink2">
-                  Set weights per shift type &amp; group
-                </div>
-                <p className="mb-3 text-meta text-ink3">
-                  Positive prefers, negative avoids, 0 means no preference. Use ∞ / -∞ for a hard
-                  pin.
-                </p>
-                <div className="flex flex-col gap-2">
-                  {targets.map((target) => {
-                    const value = draft.weights[target.id];
-                    const invalid = !isValidWeightValue(value);
-                    return (
-                      <div
-                        key={target.id}
-                        data-testid={`cell-editor-weight-row-${target.id}`}
-                        className="flex items-center gap-2.5"
-                      >
-                        <div className="min-w-11 whitespace-nowrap font-mono text-meta font-bold">
-                          {target.id}
-                        </div>
-                        <div className="min-w-0 flex-1 truncate text-meta text-ink3">
-                          {target.name}
-                          {target.isGroup && (
-                            <span className="ml-1.5 text-label uppercase tracking-[0.03em] text-ink3">
-                              group
-                            </span>
-                          )}
-                        </div>
-                        <Input
-                          value={String(value)}
-                          onChange={(e) => setWeight(target.id, parseWeightInput(e.target.value))}
-                          placeholder="0"
-                          data-testid={`cell-editor-weight-input-${target.id}`}
-                          className="h-8.5 w-16 flex-none text-center text-meta"
-                        />
-                        <div
-                          className={cn(
-                            "w-8.5 flex-none text-meta font-semibold",
-                            invalid
-                              ? "text-error"
-                              : Number(value) > 0
-                                ? "text-success"
-                                : Number(value) < 0
-                                  ? "text-warn"
-                                  : "text-ink3",
-                          )}
-                        >
-                          {formatWeight(value)}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
+          {draft.dayState === "available" && (
+            <div data-testid="cell-editor-weights">
+              <div className="mb-1 text-label font-semibold uppercase tracking-[0.03em] text-ink2">
+                Set weights per shift type &amp; group
               </div>
-            )}
-
-            {draft.dayState === "leave" && (
-              <div
-                data-testid="cell-editor-leave-note"
-                className="border border-brand bg-brandtint px-3 py-2.5 text-meta text-ink2"
-              >
-                Pinned as paid leave — always honored, no coverage. No built-in hours credit; any
-                credit depends on the configured contracted-hours rules. Weight is not applicable.
-              </div>
-            )}
-
-            {draft.dayState === "off" && (
-              <div data-testid="cell-editor-off">
-                <div className="mb-1 text-label font-semibold uppercase tracking-[0.03em] text-ink2">
-                  Off weight
-                </div>
-                <p className="mb-2.5 text-meta text-ink3">
-                  A soft preference for a rest day off. Positive prefers OFF, negative avoids it, 0
-                  means no preference. Use ∞ for a hard pin.
-                </p>
-                <div className="mb-3 flex items-center gap-2.5">
-                  <div className="min-w-11 font-mono text-meta font-bold">OFF</div>
-                  <div className="flex-1 text-meta text-ink3">Requests off</div>
-                  <Input
-                    value={String(draft.offWeight)}
-                    onChange={(e) => setOffWeight(parseWeightInput(e.target.value))}
-                    placeholder="0"
-                    data-testid="cell-editor-off-weight-input"
-                    className="h-8.5 w-16 flex-none text-center text-meta"
-                  />
-                  <div className="w-8.5 flex-none text-meta font-semibold text-ink2">
-                    {formatWeight(draft.offWeight)}
-                  </div>
-                </div>
-                <div className="border border-error bg-errortint px-3 py-2.5 text-meta text-ink2">
-                  Requests a rest day off — the nurse&apos;s weekend equivalent. Leave weight blank
-                  for a plain OFF request.
-                </div>
-              </div>
-            )}
-
-            {error && (
-              <p
-                className="mt-3 text-meta font-semibold text-error"
-                role="alert"
-                data-testid="cell-editor-error"
-              >
-                {error}
+              <p className="mb-3 text-meta text-ink3">
+                Positive prefers, negative avoids, 0 means no preference. Use ∞ / -∞ for a hard pin.
               </p>
-            )}
-          </div>
-
-          <div className="flex items-center justify-between gap-2.5 border-t border-line2 px-[18px] py-3.5">
-            <Button variant="outline" data-testid="cell-editor-clear" onClick={handleClearCell}>
-              Clear cell
-            </Button>
-            <div className="flex gap-2.5">
-              <Button variant="outline" data-testid="cell-editor-cancel" onClick={onClose}>
-                Cancel
-              </Button>
-              <Button data-testid="cell-editor-save" onClick={handleSave}>
-                Save
-              </Button>
+              <div className="flex flex-col gap-2">
+                {targets.map((target) => {
+                  const value = draft.weights[target.id];
+                  const invalid = !isValidWeightValue(value);
+                  return (
+                    <div
+                      key={target.id}
+                      data-testid={`cell-editor-weight-row-${target.id}`}
+                      className="flex items-center gap-2.5"
+                    >
+                      <div className="min-w-11 whitespace-nowrap font-mono text-meta font-bold">
+                        {target.id}
+                      </div>
+                      <div className="min-w-0 flex-1 truncate text-meta text-ink3">
+                        {target.name}
+                        {target.isGroup && (
+                          <span className="ml-1.5 text-label uppercase tracking-[0.03em] text-ink3">
+                            group
+                          </span>
+                        )}
+                      </div>
+                      <Input
+                        value={String(value)}
+                        onChange={(e) => setWeight(target.id, parseWeightInput(e.target.value))}
+                        placeholder="0"
+                        data-testid={`cell-editor-weight-input-${target.id}`}
+                        className="h-8.5 w-16 flex-none text-center text-meta"
+                      />
+                      <div
+                        className={cn(
+                          "w-8.5 flex-none text-meta font-semibold",
+                          invalid
+                            ? "text-error"
+                            : Number(value) > 0
+                              ? "text-success"
+                              : Number(value) < 0
+                                ? "text-warn"
+                                : "text-ink3",
+                        )}
+                      >
+                        {formatWeight(value)}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
+          )}
+
+          {draft.dayState === "leave" && (
+            <div
+              data-testid="cell-editor-leave-note"
+              className="border border-brand bg-brandtint px-3 py-2.5 text-meta text-ink2"
+            >
+              Pinned as paid leave — always honored, no coverage. No built-in hours credit; any
+              credit depends on the configured contracted-hours rules. Weight is not applicable.
+            </div>
+          )}
+
+          {draft.dayState === "off" && (
+            <div data-testid="cell-editor-off">
+              <div className="mb-1 text-label font-semibold uppercase tracking-[0.03em] text-ink2">
+                Off weight
+              </div>
+              <p className="mb-2.5 text-meta text-ink3">
+                A soft preference for a rest day off. Positive prefers OFF, negative avoids it, 0
+                means no preference. Use ∞ for a hard pin.
+              </p>
+              <div className="mb-3 flex items-center gap-2.5">
+                <div className="min-w-11 font-mono text-meta font-bold">OFF</div>
+                <div className="flex-1 text-meta text-ink3">Requests off</div>
+                <Input
+                  value={String(draft.offWeight)}
+                  onChange={(e) => setOffWeight(parseWeightInput(e.target.value))}
+                  placeholder="0"
+                  data-testid="cell-editor-off-weight-input"
+                  className="h-8.5 w-16 flex-none text-center text-meta"
+                />
+                <div className="w-8.5 flex-none text-meta font-semibold text-ink2">
+                  {formatWeight(draft.offWeight)}
+                </div>
+              </div>
+              <div className="border border-error bg-errortint px-3 py-2.5 text-meta text-ink2">
+                Requests a rest day off — the nurse&apos;s weekend equivalent. Leave weight blank
+                for a plain OFF request.
+              </div>
+            </div>
+          )}
+
+          {error && (
+            <p
+              className="mt-3 text-meta font-semibold text-error"
+              role="alert"
+              data-testid="cell-editor-error"
+            >
+              {error}
+            </p>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between gap-2.5 rounded-b-card border-t border-line2 bg-panel px-4.5 py-3.5">
+          <Button variant="outline" data-testid="cell-editor-clear" onClick={handleClearCell}>
+            Clear cell
+          </Button>
+          <div className="flex gap-2.5">
+            <Button variant="outline" data-testid="cell-editor-cancel" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button data-testid="cell-editor-save" onClick={handleSave}>
+              Save
+            </Button>
           </div>
-        </Dialog.Popup>
-      </Dialog.Portal>
-    </Dialog.Root>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

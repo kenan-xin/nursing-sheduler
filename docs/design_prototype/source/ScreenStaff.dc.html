@@ -9,16 +9,16 @@
 <x-dc>
 <div class="ns-fade">
   <div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:var(--space-4);margin-bottom:var(--space-6);">
-    <div style="flex:1;min-width:240px;">
+    <div style="flex:1 1 440px;min-width:min(100%,440px);">
       <div style="font:600 var(--m-sm) var(--font-ui);letter-spacing:.03em;color:var(--brandink);text-transform:uppercase;margin-bottom:8px;">STEP 2 · STAFF</div>
-      <h1 style="font:800 var(--t-display) var(--font-display);letter-spacing:-.02em;margin:0 0 8px;line-height:1.05;">Your Ward Staff</h1>
+      <h1 style="font:700 var(--t-display) var(--font-display);letter-spacing:-.015em;margin:0 0 8px;line-height:1.05;">Your Nursing Staff</h1>
       <p style="margin:0;color:var(--ink2);max-width:60ch;">List your nurses, then bundle them into groups (like Seniors or Team A) so rules can target a whole team. Preceptor supervision lives in <b>Shift type coverings</b>.</p>
     </div>
-    <button onClick="{{ toShifts }}" style="height:44px;padding:0 20px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-body) var(--font-ui);display:inline-flex;align-items:center;gap:9px;" style-hover="filter:brightness(.94)">Continue to shifts <i class="fa-solid fa-arrow-right" style="font-size:12px;"></i></button>
+    <button onClick="{{ toShifts }}" style="height:44px;padding:0 20px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-body) var(--font-ui);display:inline-flex;align-items:center;gap:8px;" style-hover="filter:brightness(.94)">Continue to shifts <i class="fa-solid fa-arrow-right" style="font-size:12px;"></i></button>
   </div>
 
   <sc-if value="{{ flash }}" hint-placeholder-val="{{ false }}">
-    <div style="background:var(--successtint);border:1px solid var(--success);padding:10px 13px;margin-bottom:var(--space-4);display:flex;align-items:center;gap:9px;font-size:var(--t-sm);color:var(--ink);"><i class="fa-solid fa-circle-check" style="color:var(--success);"></i> {{ flash }}</div>
+    <div style="background:var(--successtint);border:1px solid var(--success);padding:10px 12px;margin-bottom:var(--space-4);display:flex;align-items:center;gap:8px;font-size:var(--t-sm);color:var(--ink);"><i class="fa-solid fa-circle-check" style="color:var(--successink);"></i> {{ flash }}</div>
   </sc-if>
 
   <!-- toolbar -->
@@ -49,11 +49,11 @@
       <tbody>
         <sc-for list="{{ rows }}" as="p" hint-placeholder-count="12">
           <tr draggable="{{ p.draggable }}" onDragStart="{{ p.onDragStart }}" onDragOver="{{ p.onDragOver }}" onDrop="{{ p.onDrop }}" onDragEnd="{{ p.onDragEnd }}" style="{{ p.trStyle }}" style-hover="background:var(--panel)">
-            <td style="padding:11px 14px;font:600 var(--m-sm) var(--font-mono);color:var(--ink3);">{{ p.num }}</td>
-            <td style="padding:11px 14px;">
+            <td style="padding:12px 14px;font:600 var(--m-sm) var(--font-mono);color:var(--ink3);">{{ p.num }}</td>
+            <td style="padding:12px 14px;">
               <sc-if value="{{ p.editing }}" hint-placeholder-val="{{ false }}">
                 <input value="{{ draftId }}" onInput="{{ onName }}" autofocus="true" placeholder="Nurse name" style="width:100%;max-width:280px;height:34px;padding:0 10px;border:1px solid var(--brand);background:var(--surface);font-weight:600;">
-                <sc-if value="{{ nameError }}" hint-placeholder-val="{{ false }}"><div style="color:var(--error);font-size:var(--t-sm);margin-top:5px;font-weight:600;">{{ nameErrorText }}</div></sc-if>
+                <sc-if value="{{ nameError }}" hint-placeholder-val="{{ false }}"><div style="color:var(--errorink);font-size:var(--t-sm);margin-top:4px;font-weight:600;">{{ nameErrorText }}</div></sc-if>
               </sc-if>
               <sc-if value="{{ p.notEditing }}" hint-placeholder-val="{{ true }}">
                 <div style="display:flex;align-items:center;gap:10px;">
@@ -62,34 +62,34 @@
                 </div>
               </sc-if>
             </td>
-            <td style="padding:11px 14px;">
+            <td style="padding:12px 14px;">
               <sc-if value="{{ p.editing }}" hint-placeholder-val="{{ false }}">
                 <div style="display:flex;flex-wrap:wrap;gap:6px;">
                   <sc-for list="{{ p.groupToggles }}" as="g" hint-placeholder-count="2"><button onClick="{{ g.onClick }}" style="{{ g.style }}">{{ g.id }}</button></sc-for>
-                  <sc-if value="{{ p.noGroupsExist }}" hint-placeholder-val="{{ false }}"><span style="color:var(--faint);font-size:var(--t-sm);">No groups yet — add one below</span></sc-if>
+                  <sc-if value="{{ p.noGroupsExist }}" hint-placeholder-val="{{ false }}"><span style="color:var(--ink3);font-size:var(--t-sm);">No groups yet — add one below</span></sc-if>
                 </div>
               </sc-if>
               <sc-if value="{{ p.notEditing }}" hint-placeholder-val="{{ true }}">
                 <sc-if value="{{ p.hasGroups }}" hint-placeholder-val="{{ true }}">
-                  <div style="display:flex;flex-wrap:wrap;gap:5px;">
-                    <sc-for list="{{ p.groupChips }}" as="g" hint-placeholder-count="2"><span style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.02em;color:var(--ink2);background:var(--panel);border:1px solid var(--line2);padding:3px 8px;">{{ g }}</span></sc-for>
+                  <div style="display:flex;flex-wrap:wrap;gap:4px;">
+                    <sc-for list="{{ p.groupChips }}" as="g" hint-placeholder-count="2"><span style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);background:var(--panel);border:1px solid var(--line2);padding:4px 8px;">{{ g }}</span></sc-for>
                   </div>
                 </sc-if>
-                <sc-if value="{{ p.noGroups }}" hint-placeholder-val="{{ false }}"><span style="color:var(--faint);font-size:var(--t-sm);">—</span></sc-if>
+                <sc-if value="{{ p.noGroups }}" hint-placeholder-val="{{ false }}"><span style="color:var(--ink3);font-size:var(--t-sm);">—</span></sc-if>
               </sc-if>
             </td>
             <td style="padding:8px 14px;text-align:right;white-space:nowrap;">
               <sc-if value="{{ p.editing }}" hint-placeholder-val="{{ false }}">
                 <div style="display:inline-flex;gap:6px;">
-                  <button onClick="{{ onSave }}" title="Save" style="height:30px;padding:0 11px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:6px;" style-hover="filter:brightness(.94)"><i class="fa-solid fa-check" style="font-size:11px;"></i> Save</button>
+                  <button onClick="{{ onSave }}" title="Save" style="height:30px;padding:0 12px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:6px;" style-hover="filter:brightness(.94)"><i class="fa-solid fa-check" style="font-size:12px;"></i> Save</button>
                   <button onClick="{{ onCancel }}" title="Cancel" style="width:30px;height:30px;background:transparent;border:1px solid var(--line);color:var(--ink2);" style-hover="background:var(--panel)"><i class="fa-solid fa-xmark" style="font-size:12px;"></i></button>
                 </div>
               </sc-if>
               <sc-if value="{{ p.notEditing }}" hint-placeholder-val="{{ true }}">
                 <div style="display:inline-flex;gap:4px;">
-                  <button onClick="{{ p.onEdit }}" aria-label="Edit" title="Edit" style="width:30px;height:30px;background:transparent;border:1px solid var(--line);color:var(--ink2);" style-hover="background:var(--panel)"><i class="fa-solid fa-pen" style="font-size:11px;"></i></button>
-                  <button onClick="{{ p.onDup }}" aria-label="Duplicate" title="Duplicate" style="width:30px;height:30px;background:transparent;border:1px solid var(--line);color:var(--ink2);" style-hover="background:var(--panel)"><i class="fa-solid fa-copy" style="font-size:11px;"></i></button>
-                  <button onClick="{{ p.onDel }}" aria-label="Delete" title="Delete" style="width:30px;height:30px;background:transparent;border:1px solid var(--line);color:var(--error);" style-hover="background:var(--errortint)"><i class="fa-solid fa-trash" style="font-size:11px;"></i></button>
+                  <button onClick="{{ p.onEdit }}" aria-label="Edit" title="Edit" style="width:30px;height:30px;background:transparent;border:1px solid var(--line);color:var(--ink2);" style-hover="background:var(--panel)"><i class="fa-solid fa-pen" style="font-size:12px;"></i></button>
+                  <button onClick="{{ p.onDup }}" aria-label="Duplicate" title="Duplicate" style="width:30px;height:30px;background:transparent;border:1px solid var(--line);color:var(--ink2);" style-hover="background:var(--panel)"><i class="fa-solid fa-copy" style="font-size:12px;"></i></button>
+                  <button onClick="{{ p.onDel }}" aria-label="Delete" title="Delete" style="width:30px;height:30px;background:transparent;border:1px solid var(--line);color:var(--errorink);" style-hover="background:var(--errortint)"><i class="fa-solid fa-trash" style="font-size:12px;"></i></button>
                 </div>
               </sc-if>
             </td>
@@ -98,9 +98,9 @@
         <sc-if value="{{ noMatches }}" hint-placeholder-val="{{ false }}">
           <tr style="border-top:1px solid var(--line2);">
             <td colspan="4" style="padding:34px 14px;">
-              <div style="display:flex;flex-direction:column;align-items:center;text-align:center;gap:9px;">
-                <div style="width:42px;height:42px;border:1.5px dashed var(--line2);display:flex;align-items:center;justify-content:center;color:var(--faint);"><i class="fa-solid fa-magnifying-glass" style="font-size:15px;"></i></div>
-                <div style="display:flex;flex-direction:column;align-items:center;gap:3px;">
+              <div style="display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;">
+                <div style="width:42px;height:42px;border:1.5px dashed var(--line2);display:flex;align-items:center;justify-content:center;color:var(--ink3);"><i class="fa-solid fa-magnifying-glass" style="font-size:16px;"></i></div>
+                <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
                   <div style="font:700 var(--t-title) var(--font-display);color:var(--ink2);">No matches</div>
                   <div style="font-size:var(--t-sm);color:var(--ink3);">No nurses match “{{ searchVal }}”.</div>
                 </div>
@@ -117,20 +117,20 @@
   <div style="background:var(--surface);border:1px solid var(--line);margin-top:var(--space-4);">
     <div style="padding:16px 18px;border-bottom:1px solid var(--line2);display:flex;align-items:center;justify-content:space-between;gap:10px;">
       <div>
-        <div style="font:800 var(--t-cardhead) var(--font-display);letter-spacing:-.02em;">Staff groups</div>
+        <div style="font:700 var(--t-cardhead) var(--font-display);letter-spacing:-.015em;">Staff groups</div>
         <div style="color:var(--ink2);font-size:var(--t-sm);margin-top:2px;">Bundle nurses so rules and constraints can target a whole team at once.</div>
       </div>
-      <button onClick="{{ onGroupAdd }}" style="height:34px;padding:0 13px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:7px;flex:none;" style-hover="background:var(--panel)"><i class="fa-solid fa-plus" style="font-size:11px;"></i> Group</button>
+      <button onClick="{{ onGroupAdd }}" style="height:34px;padding:0 12px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:8px;flex:none;" style-hover="background:var(--panel)"><i class="fa-solid fa-plus" style="font-size:12px;"></i> Group</button>
     </div>
     <div style="padding:18px;display:flex;flex-direction:column;gap:14px;">
       <sc-if value="{{ noGroups }}" hint-placeholder-val="{{ false }}">
-        <div style="border:1.5px dashed var(--line2);padding:32px 20px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:11px;">
-          <div style="width:46px;height:46px;border:1.5px dashed var(--line2);display:flex;align-items:center;justify-content:center;font-size:20px;color:var(--faint);line-height:1;">∅</div>
+        <div style="border:1.5px dashed var(--line2);padding:32px 20px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:12px;">
+          <div style="width:46px;height:46px;border:1.5px dashed var(--line2);display:flex;align-items:center;justify-content:center;font-size:20px;color:var(--ink3);line-height:1;">∅</div>
           <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
             <div style="font:700 var(--t-title) var(--font-display);color:var(--ink2);">No staff groups yet</div>
             <div style="font-size:var(--t-sm);color:var(--ink3);max-width:44ch;">Bundle nurses into a team — like “Seniors” or “Team A” — so a rule can target them all at once.</div>
           </div>
-          <button onClick="{{ onGroupAdd }}" style="height:34px;padding:0 14px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:7px;margin-top:2px;" style-hover="filter:brightness(.94)"><i class="fa-solid fa-plus" style="font-size:11px;"></i> New group</button>
+          <button onClick="{{ onGroupAdd }}" style="height:34px;padding:0 14px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:8px;margin-top:2px;" style-hover="filter:brightness(.94)"><i class="fa-solid fa-plus" style="font-size:12px;"></i> New group</button>
         </div>
       </sc-if>
       <sc-for list="{{ autoGroups }}" as="ag" hint-placeholder-count="1">
@@ -139,12 +139,12 @@
           <div style="flex:1;min-width:0;">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
               <span style="font:600 var(--m-lg) var(--font-mono);">{{ ag.id }}</span>
-              <span style="font:600 9px var(--font-ui);letter-spacing:.04em;color:var(--ink3);background:var(--surface);border:1px solid var(--line2);padding:2px 6px;text-transform:uppercase;">Auto</span>
+              <span style="font:600 var(--t-nano) var(--font-ui);letter-spacing:.04em;color:var(--ink3);background:var(--surface);border:1px solid var(--line2);padding:2px 6px;text-transform:uppercase;">Auto</span>
               <span style="font:600 var(--m-xs) var(--font-mono);color:var(--ink3);">{{ ag.count }}</span>
             </div>
-            <div style="font-size:var(--t-sm);color:var(--ink3);">Every nurse, always. Generated automatically — use it in rules that target the whole ward.</div>
+            <div style="font-size:var(--t-sm);color:var(--ink3);">Every nurse, always. Generated automatically — use it in rules that target everyone.</div>
           </div>
-          <i class="fa-solid fa-lock" style="font-size:12px;color:var(--faint);flex:none;margin-top:3px;" title="Auto group — not editable"></i>
+          <i class="fa-solid fa-lock" style="font-size:12px;color:var(--ink3);flex:none;margin-top:4px;" title="Auto group — not editable"></i>
         </div>
       </div>
       </sc-for>
@@ -165,7 +165,7 @@
                   </div>
                 </div>
                 <div style="position:relative;margin-bottom:10px;">
-                  <i class="fa-solid fa-magnifying-glass" style="position:absolute;left:11px;top:50%;transform:translateY(-50%);font-size:11px;color:var(--ink3);"></i>
+                  <i class="fa-solid fa-magnifying-glass" style="position:absolute;left:11px;top:50%;transform:translateY(-50%);font-size:12px;color:var(--ink3);"></i>
                   <input value="{{ transferQ }}" onInput="{{ onTransferSearch }}" placeholder="Search members" style="width:100%;height:34px;padding:0 32px;border:1px solid var(--line);background:var(--surface);font-size:var(--t-sm);box-sizing:border-box;">
                   <sc-if value="{{ hasTransferQ }}" hint-placeholder-val="{{ false }}">
                     <button onClick="{{ onClearTransfer }}" aria-label="Clear member search" style="position:absolute;right:9px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--ink3);padding:0;display:inline-flex;cursor:pointer;" style-hover="color:var(--ink)"><i class="fa-solid fa-xmark" style="font-size:12px;"></i></button>
@@ -176,9 +176,9 @@
                   <div style="border:1px solid var(--line);background:var(--surface);display:flex;flex-direction:column;min-height:180px;max-height:260px;">
                     <div style="padding:8px 12px;border-bottom:1px solid var(--line2);background:var(--panel);font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink3);text-transform:uppercase;display:flex;justify-content:space-between;"><span>AVAILABLE</span><span>{{ availCount }}</span></div>
                     <div style="flex:1;overflow-y:auto;">
-                      <sc-if value="{{ noAvail }}" hint-placeholder-val="{{ false }}"><div style="padding:24px 12px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:6px;color:var(--faint);font-size:var(--t-sm);"><span style="font-size:15px;line-height:1;">{{ availEmptyIcon }}</span>{{ availEmptyMsg }}</div></sc-if>
+                      <sc-if value="{{ noAvail }}" hint-placeholder-val="{{ false }}"><div style="padding:24px 12px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:6px;color:var(--ink3);font-size:var(--t-sm);"><span style="font-size:16px;line-height:1;">{{ availEmptyIcon }}</span>{{ availEmptyMsg }}</div></sc-if>
                       <sc-for list="{{ available }}" as="a" hint-placeholder-count="6">
-                        <button onClick="{{ a.onAdd }}" style="width:100%;text-align:left;padding:9px 12px;border:none;border-bottom:1px solid var(--line2);background:transparent;font:500 var(--t-sm) var(--font-ui);color:var(--ink);cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;" style-hover="background:var(--panel)"><span style="display:inline-flex;align-items:center;gap:8px;"><span style="{{ a.badgeStyle }}">{{ a.role }}</span>{{ a.name }}</span><i class="fa-solid fa-arrow-right" style="font-size:10px;color:var(--ink3);"></i></button>
+                        <button onClick="{{ a.onAdd }}" style="width:100%;text-align:left;padding:8px 12px;border:none;border-bottom:1px solid var(--line2);background:transparent;font:500 var(--t-sm) var(--font-ui);color:var(--ink);cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;" style-hover="background:var(--panel)"><span style="display:inline-flex;align-items:center;gap:8px;"><span style="{{ a.badgeStyle }}">{{ a.role }}</span>{{ a.name }}</span><i class="fa-solid fa-arrow-right" style="font-size:10px;color:var(--ink3);"></i></button>
                       </sc-for>
                     </div>
                   </div>
@@ -191,19 +191,19 @@
                   <div style="border:1px solid var(--brand);background:var(--surface);display:flex;flex-direction:column;min-height:180px;max-height:260px;">
                     <div style="padding:8px 12px;border-bottom:1px solid var(--line2);background:var(--brandtint);font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--brandink);text-transform:uppercase;display:flex;justify-content:space-between;"><span>MEMBERS</span><span>{{ selCount }}</span></div>
                     <div style="flex:1;overflow-y:auto;">
-                      <sc-if value="{{ noSel }}" hint-placeholder-val="{{ true }}"><div style="padding:24px 12px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:6px;color:var(--faint);font-size:var(--t-sm);"><span style="font-size:16px;line-height:1;">{{ selEmptyIcon }}</span>{{ selEmptyMsg }}</div></sc-if>
+                      <sc-if value="{{ noSel }}" hint-placeholder-val="{{ true }}"><div style="padding:24px 12px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:6px;color:var(--ink3);font-size:var(--t-sm);"><span style="font-size:16px;line-height:1;">{{ selEmptyIcon }}</span>{{ selEmptyMsg }}</div></sc-if>
                       <sc-for list="{{ selected }}" as="s" hint-placeholder-count="4">
-                        <button onClick="{{ s.onRemove }}" style="width:100%;text-align:left;padding:9px 12px;border:none;border-bottom:1px solid var(--line2);background:transparent;font:500 var(--t-sm) var(--font-ui);color:var(--ink);cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;" style-hover="background:var(--errortint)"><span style="display:inline-flex;align-items:center;gap:8px;"><i class="fa-solid fa-arrow-left" style="font-size:10px;color:var(--ink3);"></i><span style="{{ s.badgeStyle }}">{{ s.role }}</span>{{ s.name }}</span><i class="fa-solid fa-xmark" style="font-size:11px;color:var(--ink3);"></i></button>
+                        <button onClick="{{ s.onRemove }}" style="width:100%;text-align:left;padding:8px 12px;border:none;border-bottom:1px solid var(--line2);background:transparent;font:500 var(--t-sm) var(--font-ui);color:var(--ink);cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;" style-hover="background:var(--errortint)"><span style="display:inline-flex;align-items:center;gap:8px;"><i class="fa-solid fa-arrow-left" style="font-size:10px;color:var(--ink3);"></i><span style="{{ s.badgeStyle }}">{{ s.role }}</span>{{ s.name }}</span><i class="fa-solid fa-xmark" style="font-size:12px;color:var(--ink3);"></i></button>
                       </sc-for>
                     </div>
                   </div>
                 </div>
               </div>
               <div style="display:flex;gap:6px;">
-                <button onClick="{{ onGroupSave }}" style="height:34px;padding:0 14px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:7px;" style-hover="filter:brightness(.94)"><i class="fa-solid fa-check" style="font-size:11px;"></i> Save</button>
+                <button onClick="{{ onGroupSave }}" style="height:34px;padding:0 14px;background:var(--brand);color:var(--onbrand);border:none;font:700 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:8px;" style-hover="filter:brightness(.94)"><i class="fa-solid fa-check" style="font-size:12px;"></i> Save</button>
                 <button onClick="{{ onGroupCancel }}" style="height:34px;padding:0 14px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);" style-hover="background:var(--panel)">Cancel</button>
                 <div style="flex:1;"></div>
-                <button onClick="{{ g.onDelete }}" style="height:34px;padding:0 12px;background:transparent;border:1px solid var(--line);color:var(--error);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:7px;" style-hover="background:var(--errortint)"><i class="fa-solid fa-trash" style="font-size:10px;"></i> Delete</button>
+                <button onClick="{{ g.onDelete }}" style="height:34px;padding:0 12px;background:transparent;border:1px solid var(--line);color:var(--errorink);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:8px;" style-hover="background:var(--errortint)"><i class="fa-solid fa-trash" style="font-size:10px;"></i> Delete</button>
               </div>
             </div>
           </sc-if>
@@ -215,15 +215,15 @@
                   <span style="font:600 var(--m-xs) var(--font-mono);color:var(--ink3);">{{ g.count }}</span>
                 </div>
                 <div style="display:flex;flex-wrap:wrap;gap:6px;">
-                  <sc-if value="{{ g.empty }}" hint-placeholder-val="{{ false }}"><span style="color:var(--faint);font-size:var(--t-sm);">No members</span></sc-if>
+                  <sc-if value="{{ g.empty }}" hint-placeholder-val="{{ false }}"><span style="color:var(--ink3);font-size:var(--t-sm);">No members</span></sc-if>
                   <sc-for list="{{ g.members }}" as="m" hint-placeholder-count="4">
-                    <span style="border:1px solid var(--line);background:var(--surface);border-radius:2px;padding:3px 9px;font-size:var(--t-sm);">{{ m }}</span>
+                    <span style="border:1px solid var(--line);background:var(--surface);border-radius:2px;padding:4px 8px;font-size:var(--t-sm);">{{ m }}</span>
                   </sc-for>
                 </div>
               </div>
               <div style="display:flex;gap:4px;flex:none;">
-                <button onClick="{{ g.onEdit }}" aria-label="Edit group" style="width:30px;height:30px;background:transparent;border:1px solid var(--line);color:var(--ink2);" style-hover="background:var(--panel)"><i class="fa-solid fa-pen" style="font-size:11px;"></i></button>
-                <button onClick="{{ g.onDelete }}" aria-label="Delete group" style="width:30px;height:30px;background:transparent;border:1px solid var(--line);color:var(--error);" style-hover="background:var(--errortint)"><i class="fa-solid fa-trash" style="font-size:11px;"></i></button>
+                <button onClick="{{ g.onEdit }}" aria-label="Edit group" style="width:30px;height:30px;background:transparent;border:1px solid var(--line);color:var(--ink2);" style-hover="background:var(--panel)"><i class="fa-solid fa-pen" style="font-size:12px;"></i></button>
+                <button onClick="{{ g.onDelete }}" aria-label="Delete group" style="width:30px;height:30px;background:transparent;border:1px solid var(--line);color:var(--errorink);" style-hover="background:var(--errortint)"><i class="fa-solid fa-trash" style="font-size:12px;"></i></button>
               </div>
             </div>
           </sc-if>
@@ -233,9 +233,9 @@
   </div>
   <sc-if value="{{ uploadOpen }}" hint-placeholder-val="{{ false }}">
     <div onClick="{{ closeUpload }}" style="position:fixed;inset:0;background:rgba(8,10,14,.5);z-index:60;animation:ns-scrim var(--dur-fast) var(--ease);"></div>
-    <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:61;width:460px;max-width:92vw;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow-dialog);animation:ns-fade var(--dur-base) var(--ease);">
+    <div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:61;width:460px;max-width:92vw;background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow-dialog);animation:ns-dialog var(--dur-base) var(--ease);">
       <div style="padding:16px 18px;border-bottom:1px solid var(--line2);display:flex;align-items:center;justify-content:space-between;">
-        <div style="font:800 var(--t-cardhead) var(--font-display);letter-spacing:-.02em;">Upload people list</div>
+        <div style="font:700 var(--t-cardhead) var(--font-display);letter-spacing:-.015em;">Upload people list</div>
         <button onClick="{{ closeUpload }}" aria-label="Close" style="width:32px;height:32px;background:transparent;border:1px solid var(--line);color:var(--ink2);" style-hover="background:var(--panel)"><i class="fa-solid fa-xmark"></i></button>
       </div>
       <div style="padding:18px;">
@@ -244,8 +244,8 @@
 Priya Nair
 Kevin Ong
 # comment lines are ignored</pre>
-        <label style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;border:1.5px dashed var(--line);background:var(--panel);padding:22px;text-align:center;cursor:pointer;" style-hover="border-color:var(--brand)">
-          <i class="fa-solid fa-file-arrow-up" style="font-size:22px;color:var(--ink3);"></i>
+        <label style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;border:1.5px dashed var(--line);background:var(--panel);padding:22px;text-align:center;cursor:pointer;" style-hover="border-color:var(--brandink)">
+          <i class="fa-solid fa-file-arrow-up" style="font-size:24px;color:var(--ink3);"></i>
           <div style="font-weight:600;font-size:var(--t-sm);">Choose a .txt / .csv file</div>
           <input type="file" accept=".txt,.csv" onChange="{{ onFile }}" style="display:none;">
         </label>
@@ -277,7 +277,7 @@ class Component extends DCLogic {
     const draft=v.draft||{};
     const badge=(role)=>{
       if(role==='Senior') return {label:'SENIOR', style:'font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--on-ink);background:var(--ink);padding:4px 8px;text-transform:uppercase;'};
-      if(role==='Preceptee') return {label:'PRECEPTEE', style:'font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--warn);background:var(--warntint);padding:4px 8px;text-transform:uppercase;'};
+      if(role==='Preceptee') return {label:'PRECEPTEE', style:'font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--warnink);background:var(--warntint);padding:4px 8px;text-transform:uppercase;'};
       return {label:'JUNIOR', style:'font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);background:var(--panel);padding:4px 8px;text-transform:uppercase;'};
     };
     const rows=filtered.map((p,i)=>{
@@ -288,7 +288,7 @@ class Component extends DCLogic {
       const toggleGroup=v.toggleGroup||(()=>{});
       const groupToggles=(v.groups||[]).map(g=>{ const on=(g.members||[]).includes(p.id);
         return {id:g.id, on, onClick:()=>toggleGroup(p.id,g.id),
-          style:`display:inline-flex;align-items:center;gap:5px;font:600 var(--m-xs) var(--font-ui);letter-spacing:.02em;padding:3px 9px;border-radius:2px;cursor:pointer;border:1px solid ${on?'var(--brand)':'var(--line)'};background:${on?'var(--brand)':'var(--surface)'};color:${on?'var(--onbrand)':'var(--ink2)'};`}; });
+          style:`display:inline-flex;align-items:center;gap:4px;font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;padding:4px 8px;border-radius:2px;cursor:pointer;border:1px solid ${on?'var(--brand)':'var(--line)'};background:${on?'var(--brand)':'var(--surface)'};color:${on?'var(--onbrand)':'var(--ink2)'};`}; });
       const noGroupsExist=(v.groups||[]).length===0;
       return {...p, num:i+1, initials:this.init(p.id), badgeLabel:b.label, badgeStyle:b.style,
         groupChips:memberOf, hasGroups:memberOf.length>0, noGroups:memberOf.length===0, groupToggles, noGroupsExist,
@@ -320,8 +320,8 @@ class Component extends DCLogic {
     });
     const roleShort=(role)=>role==='Senior'?'S':(role==='Preceptee'?'P':'J');
     const roleBadge=(role)=>{
-      const on = role==='Senior' ? 'color:var(--on-ink);background:var(--ink);' : (role==='Preceptee' ? 'color:var(--warn);background:var(--warntint);' : 'color:var(--ink2);background:var(--panel);');
-      return `font:600 9px var(--font-mono);letter-spacing:.04em;padding:2px 5px;${on}`;
+      const on = role==='Senior' ? 'color:var(--on-ink);background:var(--ink);' : (role==='Preceptee' ? 'color:var(--warnink);background:var(--warntint);' : 'color:var(--ink2);background:var(--panel);');
+      return `font:600 var(--t-nano) var(--font-mono);letter-spacing:.04em;padding:2px 4px;${on}`;
     };
     const sel=gdraft.members||[];
     const toggle=v.groupToggleMember||(()=>{});
@@ -331,7 +331,7 @@ class Component extends DCLogic {
       return {name, role, badgeStyle:roleBadge(p?p.role:''),
         onAdd:()=>toggle(name), onRemove:()=>toggle(name)};
     };
-    // Per-pane member search (the available list can be long on a big ward).
+    // Per-pane member search (the available list can be long).
     const tq=(this.state.tq||'').trim().toLowerCase();
     const matchTq=n=>!tq || n.toLowerCase().includes(tq);
     const availAll=allNames.filter(n=>!sel.includes(n));

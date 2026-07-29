@@ -31,16 +31,16 @@
 -->
 <div class="ns-fade">
   <div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:var(--space-4);margin-bottom:var(--space-5);">
-    <div style="flex:1;min-width:240px;">
-      <div style="font:600 var(--m-sm) var(--font-ui);letter-spacing:.03em;color:var(--brandink);text-transform:uppercase;margin-bottom:8px;">● ROSTER · {{ monthTitleUpper }}</div>
-      <h1 style="font:800 var(--t-display) var(--font-display);letter-spacing:-.02em;margin:0 0 8px;line-height:1.05;">Review &amp; Adjust the Roster</h1>
+    <div style="flex:1 1 440px;min-width:min(100%,440px);">
+      <div style="font:600 var(--m-sm) var(--font-ui);letter-spacing:.03em;color:var(--brandink);text-transform:uppercase;margin-bottom:8px;">ROSTER · {{ monthTitleUpper }}</div>
+      <h1 style="font:700 var(--t-display) var(--font-display);letter-spacing:-.015em;margin:0 0 8px;line-height:1.05;">Review &amp; Adjust the Roster</h1>
       <p style="margin:0;color:var(--ink2);max-width:64ch;">{{ subtitle }}</p>
     </div>
     <div style="display:flex;gap:8px;align-items:center;">
       <div role="tablist" style="display:flex;border:1px solid var(--line);">
-        <button onClick="{{ viewGrid }}" style="{{ gridBtn }}"><i class="fa-solid fa-table-cells" style="font-size:11px;margin-right:6px;"></i>Grid</button>
-        <button onClick="{{ viewCov }}" style="{{ covBtn }}"><i class="fa-solid fa-layer-group" style="font-size:11px;margin-right:6px;"></i>Coverage</button>
-        <button onClick="{{ viewDay }}" style="{{ dayBtn }}"><i class="fa-solid fa-calendar-day" style="font-size:11px;margin-right:6px;"></i>Day</button>
+        <button onClick="{{ viewGrid }}" style="{{ gridBtn }}"><i class="fa-solid fa-table-cells" style="font-size:12px;margin-right:6px;"></i>Grid</button>
+        <button onClick="{{ viewCov }}" style="{{ covBtn }}"><i class="fa-solid fa-layer-group" style="font-size:12px;margin-right:6px;"></i>Coverage</button>
+        <button onClick="{{ viewDay }}" style="{{ dayBtn }}"><i class="fa-solid fa-calendar-day" style="font-size:12px;margin-right:6px;"></i>Day</button>
       </div>
       <button onClick="{{ undo }}" style="{{ undoStyle }}" title="Undo"><i class="fa-solid fa-rotate-left" style="font-size:12px;"></i></button>
       <button style="height:40px;padding:0 14px;background:transparent;border:1px solid var(--line);font:600 var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;gap:8px;" style-hover="background:var(--panel)"><i class="fa-solid fa-file-excel"></i> Export</button>
@@ -51,12 +51,12 @@
   <sc-if value="{{ loading }}" hint-placeholder-val="{{ false }}">
     <div role="status" aria-label="Loading roster" style="border:1px solid var(--line);background:var(--surface);padding:16px;overflow:hidden;">
       <div style="display:flex;gap:6px;margin-bottom:12px;">
-        <div style="width:150px;height:26px;flex:none;background:var(--line2);animation:ns-shimmer 1.1s var(--ease) infinite;"></div>
-        <sc-for list="{{ skelCols }}" as="c" hint-placeholder-count="14"><div style="width:40px;height:26px;flex:none;background:var(--line2);animation:ns-shimmer 1.1s var(--ease) infinite;"></div></sc-for>
+        <div style="width:150px;height:26px;flex:none;background:var(--line2);animation:ns-shimmer var(--dur-loop) var(--ease-loop) infinite;"></div>
+        <sc-for list="{{ skelCols }}" as="c" hint-placeholder-count="14"><div style="width:40px;height:26px;flex:none;background:var(--line2);animation:ns-shimmer var(--dur-loop) var(--ease-loop) infinite;"></div></sc-for>
       </div>
       <sc-for list="{{ skelRows }}" as="r" hint-placeholder-count="8">
         <div style="display:flex;gap:6px;margin-bottom:6px;">
-          <div style="width:150px;height:34px;flex:none;background:var(--line2);opacity:.75;animation:ns-shimmer 1.1s var(--ease) infinite;"></div>
+          <div style="width:150px;height:34px;flex:none;background:var(--line2);opacity:.75;animation:ns-shimmer var(--dur-loop) var(--ease-loop) infinite;"></div>
           <sc-for list="{{ skelCols }}" as="c" hint-placeholder-count="14"><div style="{{ c.cellStyle }}"></div></sc-for>
         </div>
       </sc-for>
@@ -75,24 +75,24 @@
       </div>
     </sc-if>
     <div style="display:flex;gap:12px 16px;flex-wrap:wrap;margin-bottom:var(--space-3);align-items:center;">
-      <sc-for list="{{ legend }}" as="lg" hint-placeholder-count="5"><span style="display:inline-flex;align-items:center;gap:7px;font:500 var(--t-sm) var(--font-ui);color:var(--ink2);"><span style="{{ lg.sw }}">{{ lg.k }}</span>{{ lg.name }}</span></sc-for>
+      <sc-for list="{{ legend }}" as="lg" hint-placeholder-count="5"><span style="display:inline-flex;align-items:center;gap:8px;font:500 var(--t-sm) var(--font-ui);color:var(--ink2);"><span style="{{ lg.sw }}">{{ lg.k }}</span>{{ lg.name }}</span></sc-for>
       <span style="flex:1;"></span>
-      <span style="font-size:var(--t-sm);color:var(--ink3);display:inline-flex;align-items:center;gap:7px;"><i class="fa-solid fa-hand-pointer" style="font-size:11px;"></i> Tap a cell to change · drag to swap</span>
+      <span style="font-size:var(--t-sm);color:var(--ink3);display:inline-flex;align-items:center;gap:8px;"><i class="fa-solid fa-hand-pointer" style="font-size:12px;"></i> Tap a cell to change · drag to swap</span>
     </div>
     <div style="border:1px solid var(--line);overflow:auto;background:var(--surface);max-height:66vh;">
       <table style="border-collapse:collapse;min-width:max-content;">
         <thead>
           <tr>
-            <th style="position:sticky;left:0;top:0;z-index:3;background:var(--panel);border-bottom:1px solid var(--line);padding:10px 14px;text-align:left;font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;min-width:190px;">Nurse</th>
+            <th style="position:sticky;left:0;top:0;z-index:5;background:var(--panel);border-bottom:2px solid var(--line);box-shadow:var(--sh-edge);padding:10px 14px;text-align:left;font:600 var(--m-xs) var(--font-ui);letter-spacing:.03em;color:var(--ink2);text-transform:uppercase;min-width:170px;">Nurse</th>
             <sc-for list="{{ gridHead }}" as="d" hint-placeholder-count="14"><th style="{{ d.headStyle }}" title="{{ d.title }}"><div style="font:600 var(--m-md) var(--font-mono);line-height:1;color:{{ d.numColor }};">{{ d.d }}</div><div style="font:500 var(--m-xs) var(--font-mono);color:var(--ink3);margin-top:2px;">{{ d.label }}</div><sc-if value="{{ d.holiday }}" hint-placeholder-val="{{ false }}"><span style="display:block;width:5px;height:5px;background:var(--warn);margin:3px auto 0;"></span></sc-if></th></sc-for>
             <sc-for list="{{ summHead }}" as="sh" hint-placeholder-count="6"><th style="{{ sh.headStyle }}" title="{{ sh.title }}">{{ sh.label }}</th></sc-for>
           </tr>
         </thead>
         <tbody>
           <sc-for list="{{ rows }}" as="r" hint-placeholder-count="10">
-            <tr style="{{ r.trStyle }}">
-              <td style="position:sticky;left:0;z-index:2;background:var(--surface);border-bottom:1px solid var(--line2);padding:7px 14px;">
-                <div style="display:flex;align-items:center;gap:9px;"><span style="{{ r.avatar }}">{{ r.initials }}</span><div style="min-width:0;"><span style="font-weight:600;font-size:var(--t-sm);white-space:nowrap;">{{ r.id }}</span></div></div>
+            <tr style="{{ r.trStyle }}" style-hover="background:var(--panel-alt)">
+              <td style="position:sticky;left:0;z-index:2;background:var(--surface);border-bottom:1px solid var(--line2);box-shadow:var(--sh-edge);padding:6px 14px;">
+                <div style="display:flex;align-items:center;gap:8px;"><span style="{{ r.avatar }}">{{ r.initials }}</span><div style="min-width:0;"><span style="font-weight:600;font-size:var(--t-sm);white-space:nowrap;">{{ r.id }}</span></div></div>
               </td>
               <sc-for list="{{ r.cells }}" as="c" hint-placeholder-count="14"><td style="{{ c.tdStyle }}" onClick="{{ c.onClick }}" draggable="true" onDragStart="{{ c.onDragStart }}" onDragOver="{{ allowDrop }}" onDrop="{{ c.onDrop }}" title="{{ c.title }}"><span style="{{ c.chip }}">{{ c.mark }}</span></td></sc-for>
               <sc-for list="{{ r.summ }}" as="sm" hint-placeholder-count="6"><td style="{{ sm.style }}">{{ sm.v }}</td></sc-for>
@@ -102,7 +102,7 @@
         <tfoot>
           <sc-for list="{{ footRows }}" as="fr" hint-placeholder-count="3">
             <tr>
-              <td style="{{ fr.labelStyle }}"><div style="display:flex;align-items:center;gap:8px;"><span style="{{ fr.dot }}"></span><span style="font:700 var(--t-sm) var(--font-ui);white-space:nowrap;">{{ fr.label }}</span><span style="font:500 9px var(--font-mono);color:var(--faint);">{{ fr.need }}</span></div></td>
+              <td style="{{ fr.labelStyle }}"><div style="display:flex;align-items:center;gap:8px;"><span style="{{ fr.dot }}"></span><span style="font:700 var(--t-sm) var(--font-ui);white-space:nowrap;">{{ fr.label }}</span><span style="font:500 var(--t-nano) var(--font-mono);color:var(--ink3);">{{ fr.need }}</span></div></td>
               <sc-for list="{{ fr.cells }}" as="fc" hint-placeholder-count="14"><td style="{{ fc.tdStyle }}">{{ fc.v }}</td></sc-for>
               <td colspan="{{ fr.summColspan }}" style="border-top:{{ fr.summTop }};border-left:2px solid var(--line);background:var(--panel);"></td>
             </tr>
@@ -115,7 +115,7 @@
   <!-- ============ COVERAGE (1C name-chip board) ============ -->
   <sc-if value="{{ isCoverage }}" hint-placeholder-val="{{ false }}">
     <div style="display:flex;gap:18px;margin-bottom:var(--space-3);flex-wrap:wrap;align-items:center;">
-      <sc-for list="{{ heatLegend }}" as="l" hint-placeholder-count="1"><span style="display:inline-flex;align-items:center;gap:7px;font:500 var(--t-sm) var(--font-ui);color:var(--ink2);"><span style="{{ l.sw }}"></span>{{ l.name }}</span></sc-for>
+      <sc-for list="{{ heatLegend }}" as="l" hint-placeholder-count="1"><span style="display:inline-flex;align-items:center;gap:8px;font:500 var(--t-sm) var(--font-ui);color:var(--ink2);"><span style="{{ l.sw }}"></span>{{ l.name }}</span></sc-for>
       <span style="font-size:var(--t-sm);color:var(--ink3);">Each cell shows staffed / required · initials of who is on.</span>
     </div>
     <div style="border:1px solid var(--line);overflow:auto;background:var(--surface);max-height:66vh;">
@@ -127,12 +127,12 @@
         </div>
         <sc-for list="{{ covLanes }}" as="ln" hint-placeholder-count="3">
           <div style="{{ ln.rowStyle }}">
-            <div style="{{ ln.labelStyle }}"><div style="display:flex;align-items:center;gap:8px;"><span style="{{ ln.dot }}"></span><span style="font:700 var(--t-sm) var(--font-ui);white-space:nowrap;">{{ ln.name }}</span></div><div style="font:500 var(--m-xs) var(--font-mono);color:var(--faint);padding-left:19px;">{{ ln.time }} · min {{ ln.min }}</div></div>
+            <div style="{{ ln.labelStyle }}"><div style="display:flex;align-items:center;gap:8px;"><span style="{{ ln.dot }}"></span><span style="font:700 var(--t-sm) var(--font-ui);white-space:nowrap;">{{ ln.name }}</span></div><div style="display:flex;align-items:baseline;gap:6px;margin-top:2px;margin-left:20px;font:500 var(--m-xs) var(--font-mono);color:var(--ink3);"><span style="white-space:nowrap;">{{ ln.time }}</span><span style="white-space:nowrap;">· min {{ ln.min }}</span></div></div>
             <sc-for list="{{ ln.cells }}" as="c" hint-placeholder-count="14">
               <div style="{{ c.cellStyle }}">
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-                  <span style="{{ c.countStyle }}">{{ c.count }}<span style="color:var(--faint);font-weight:500;">/{{ c.need }}</span></span>
-                  <sc-if value="{{ c.short }}" hint-placeholder-val="{{ false }}"><span style="font:700 9px var(--font-ui);letter-spacing:.05em;color:var(--error);text-transform:uppercase;">Short</span></sc-if>
+                  <span style="{{ c.countStyle }}">{{ c.count }}<span style="color:var(--ink3);font-weight:500;">/{{ c.need }}</span></span>
+                  <sc-if value="{{ c.short }}" hint-placeholder-val="{{ false }}"><span style="font:700 var(--t-nano) var(--font-ui);letter-spacing:.04em;color:var(--errorink);text-transform:uppercase;">Short</span></sc-if>
                 </div>
                 <div style="display:flex;flex-wrap:wrap;gap:4px;">
                   <sc-for list="{{ c.chips }}" as="ch" hint-placeholder-count="3"><span style="{{ ch.style }}" title="{{ ch.name }}">{{ ch.txt }}</span></sc-for>
@@ -151,15 +151,15 @@
             <div style="padding:0 12px 8px;">
               <sc-for list="{{ d.shifts }}" as="s" hint-placeholder-count="3">
                 <div style="{{ s.rowStyle }}">
-                  <span style="{{ s.dot }}margin-top:5px;"></span>
+                  <span style="{{ s.dot }}margin-top:4px;"></span>
                   <div style="flex:1;min-width:0;">
-                    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:5px;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px;">
                       <div style="min-width:0;"><span style="font:700 var(--t-sm) var(--font-ui);">{{ s.name }}</span> <span style="font:500 var(--m-xs) var(--font-mono);color:var(--ink3);">{{ s.time }}</span></div>
-                      <div style="display:flex;align-items:center;gap:8px;flex:none;"><span style="{{ s.countStyle }}">{{ s.count }}<span style="color:var(--faint);font-weight:500;">/{{ s.need }}</span></span><sc-if value="{{ s.short }}" hint-placeholder-val="{{ false }}"><span style="font:700 9px var(--font-ui);letter-spacing:.05em;color:var(--error);text-transform:uppercase;">Short</span></sc-if></div>
+                      <div style="display:flex;align-items:center;gap:8px;flex:none;"><span style="{{ s.countStyle }}">{{ s.count }}<span style="color:var(--ink3);font-weight:500;">/{{ s.need }}</span></span><sc-if value="{{ s.short }}" hint-placeholder-val="{{ false }}"><span style="font:700 var(--t-nano) var(--font-ui);letter-spacing:.04em;color:var(--errorink);text-transform:uppercase;">Short</span></sc-if></div>
                     </div>
-                    <div style="display:flex;flex-wrap:wrap;gap:5px;">
+                    <div style="display:flex;flex-wrap:wrap;gap:4px;">
                       <sc-for list="{{ s.chips }}" as="ch" hint-placeholder-count="3"><span style="{{ ch.style }}">{{ ch.txt }}</span></sc-for>
-                      <sc-if value="{{ s.empty }}" hint-placeholder-val="{{ false }}"><span style="font-size:var(--t-sm);color:var(--faint);">Nobody assigned</span></sc-if>
+                      <sc-if value="{{ s.empty }}" hint-placeholder-val="{{ false }}"><span style="font-size:var(--t-sm);color:var(--ink3);">Nobody assigned</span></sc-if>
                     </div>
                   </div>
                 </div>
@@ -176,27 +176,27 @@
   <sc-if value="{{ isDay }}" hint-placeholder-val="{{ false }}">
     <div style="border:1px solid var(--line);background:var(--surface);padding:16px;">
       <div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:14px;border-bottom:1px solid var(--line2);margin-bottom:16px;">
-        <sc-for list="{{ dayStrip }}" as="d" hint-placeholder-count="14"><button onClick="{{ d.onClick }}" style="{{ d.style }}"><div style="font:700 var(--m-sm) var(--font-mono);">{{ d.d }}</div><div style="font:500 9px var(--font-mono);opacity:.7;">{{ d.label }}</div><span style="{{ d.dot }}"></span></button></sc-for>
+        <sc-for list="{{ dayStrip }}" as="d" hint-placeholder-count="14"><button onClick="{{ d.onClick }}" style="{{ d.style }}"><div style="font:700 var(--m-sm) var(--font-mono);">{{ d.d }}</div><div style="font:500 var(--t-nano) var(--font-mono);opacity:.7;">{{ d.label }}</div><span style="{{ d.dot }}"></span></button></sc-for>
       </div>
-      <div style="font:800 var(--t-title) var(--font-display);letter-spacing:-.01em;margin-bottom:14px;">{{ selTitle }}</div>
+      <div style="font:700 var(--t-title) var(--font-display);letter-spacing:-.01em;margin-bottom:14px;">{{ selTitle }}</div>
       <div style="display:flex;gap:14px;align-items:stretch;flex-wrap:wrap;">
         <sc-for list="{{ dayLanes }}" as="ln" hint-placeholder-count="3">
           <div style="{{ ln.panel }}">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:10px;">
               <div style="display:flex;align-items:center;gap:8px;"><span style="{{ ln.dot }}"></span><div><div style="font:700 var(--t-body) var(--font-display);">{{ ln.name }}</div><div style="font:500 var(--m-xs) var(--font-mono);color:var(--ink3);">{{ ln.time }}</div></div></div>
-              <div style="text-align:right;"><span style="{{ ln.countStyle }}">{{ ln.count }}<span style="color:var(--faint);font-weight:500;">/{{ ln.need }}</span></span><sc-if value="{{ ln.short }}" hint-placeholder-val="{{ false }}"><div style="font:700 9px var(--font-ui);letter-spacing:.06em;color:var(--error);text-transform:uppercase;">Short</div></sc-if></div>
+              <div style="text-align:right;"><span style="{{ ln.countStyle }}">{{ ln.count }}<span style="color:var(--ink3);font-weight:500;">/{{ ln.need }}</span></span><sc-if value="{{ ln.short }}" hint-placeholder-val="{{ false }}"><div style="font:700 var(--t-nano) var(--font-ui);letter-spacing:.04em;color:var(--errorink);text-transform:uppercase;">Short</div></sc-if></div>
             </div>
-            <div style="display:flex;flex-direction:column;gap:7px;">
-              <sc-for list="{{ ln.cards }}" as="p" hint-placeholder-count="3"><div style="display:flex;align-items:center;gap:9px;background:var(--surface);border:1px solid var(--line2);padding:6px 9px;"><span style="{{ p.avatar }}">{{ p.initials }}</span><div style="flex:1;min-width:0;"><div style="font:600 var(--t-sm) var(--font-ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ p.name }}</div></div><span style="{{ p.codeTag }}">{{ p.code }}</span></div></sc-for>
-              <sc-if value="{{ ln.empty }}" hint-placeholder-val="{{ false }}"><div style="font:500 var(--t-sm) var(--font-ui);color:var(--faint);padding:6px 2px;">Nobody assigned</div></sc-if>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <sc-for list="{{ ln.cards }}" as="p" hint-placeholder-count="3"><div style="display:flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--line2);padding:6px 8px;"><span style="{{ p.avatar }}">{{ p.initials }}</span><div style="flex:1;min-width:0;"><div style="font:600 var(--t-sm) var(--font-ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ p.name }}</div></div><span style="{{ p.codeTag }}">{{ p.code }}</span></div></sc-for>
+              <sc-if value="{{ ln.empty }}" hint-placeholder-val="{{ false }}"><div style="font:500 var(--t-sm) var(--font-ui);color:var(--ink3);padding:6px 2px;">Nobody assigned</div></sc-if>
             </div>
           </div>
         </sc-for>
       </div>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:16px;padding-top:14px;border-top:1px solid var(--line2);">
-        <span style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.05em;color:var(--ink3);text-transform:uppercase;">Off / leave</span>
+        <span style="font:600 var(--m-xs) var(--font-ui);letter-spacing:.04em;color:var(--ink3);text-transform:uppercase;">Off / leave</span>
         <sc-for list="{{ offChips }}" as="o" hint-placeholder-count="4"><span style="{{ o.style }}">{{ o.txt }}</span></sc-for>
-        <sc-if value="{{ noneOff }}" hint-placeholder-val="{{ false }}"><span style="font-size:var(--t-sm);color:var(--faint);">Everyone is on duty.</span></sc-if>
+        <sc-if value="{{ noneOff }}" hint-placeholder-val="{{ false }}"><span style="font-size:var(--t-sm);color:var(--ink3);">Everyone is on duty.</span></sc-if>
       </div>
     </div>
   </sc-if>
@@ -221,7 +221,7 @@ class Component extends DCLogic {
     const summCols=[...workedIds,'OFF','WKND'];
     const fmtH=(h)=>Number.isInteger(h)?String(h):h.toFixed(1);
     const HOLIDAY_BG='repeating-linear-gradient(135deg,var(--warntint) 0 3px,var(--surface) 3px 9px)';
-    const LEAVE={fill:'var(--brandtint)',ink:'var(--brandink)',border:'var(--brand)'};
+    const LEAVE={fill:'var(--panel)',ink:'var(--ink3)'};
 
     // colour resolver — worked shifts by start-time palette (3A); leave & rest reserved
     const colorFor=(code)=>{
@@ -229,11 +229,13 @@ class Component extends DCLogic {
       if(code==='LV'||code==='LEAVE') return {...LEAVE, leave:true};
       return colors[code] || {fill:'var(--panel)',ink:'var(--ink2)'};
     };
-    const chipFor=(code)=>{
-      const c=colorFor(code);
-      if(c.rest) return {mark:'·', chip:`display:inline-flex;align-items:center;justify-content:center;min-width:34px;height:30px;color:var(--faint);font:500 var(--m-sm) var(--font-mono);`};
-      const border=c.dark?c.bar:(c.leave?c.border:'transparent');
-      return {mark:code, chip:`display:inline-flex;align-items:center;justify-content:center;min-width:36px;height:30px;padding:0 7px;background:${c.fill};color:${c.ink};border:1px solid ${border};border-radius:6px;font:700 var(--m-sm) var(--font-mono);`};
+    // Every chip shares one box (34x28) so columns never jitter between worked / leave / rest.
+    const CHIP_W=34, CHIP_H=28;
+    const chipFor=(code,w,h)=>{
+      const c=colorFor(code); const W=w||CHIP_W, H=h||CHIP_H;
+      const box=`display:inline-flex;align-items:center;justify-content:center;min-width:${W}px;height:${H}px;`;
+      if(c.rest) return {mark:'·', chip:box+`color:var(--ink3);font:500 var(--m-sm) var(--font-mono);`};
+      return {mark:code, chip:box+`padding:0 6px;background:${c.fill};color:${c.ink};border-radius:var(--r-chip);font:700 var(--m-sm) var(--font-mono);${c.dark?'box-shadow:inset 0 0 0 1px '+c.bar+';':''}`};
     };
 
     // per-day / per-shift counts + short flags
@@ -249,7 +251,7 @@ class Component extends DCLogic {
     // ---------- GRID ----------
     const gridHead=days.map((d,di)=>({ d:d.d, label:d.label, holiday:!!d.holiday, numColor:d.holiday?'var(--warn)':'var(--ink)',
       title:d.holiday?'Public holiday':'',
-      headStyle:`position:sticky;top:0;z-index:1;padding:7px 4px;min-width:42px;text-align:center;background:${d.holiday?HOLIDAY_BG:(d.weekend?'var(--panel)':'var(--surface)')};border-bottom:2px solid var(--line);` }));
+      headStyle:`position:sticky;top:0;z-index:3;padding:8px 4px;min-width:40px;text-align:center;background:${d.holiday?HOLIDAY_BG:(d.weekend?'var(--panel)':'var(--surface)')};border-bottom:2px solid var(--line);` }));
     const rows=people.map(p=>{
       const arr=schedule[p.id]||[];
       const cells=days.map((day,di)=>{
@@ -269,30 +271,32 @@ class Component extends DCLogic {
         const val = k==='WKND'?wkndOff:(k==='OFF'?offN:(tal[k]||0));
         const flag = k==='WKND' && val===0;          // no weekend rest all period → fairness flag
         const zero = val===0;
-        return {v:val, style:`text-align:center;border-bottom:1px solid var(--line2);border-left:${ki===0?'2px solid var(--line)':'1px solid var(--line2)'};font:700 var(--m-sm) var(--font-mono);color:${flag?'var(--error)':(zero?'var(--faint)':'var(--ink2)')};background:${flag?'var(--errortint)':'var(--surface)'};`};
+        return {v:val, style:`text-align:center;border-bottom:1px solid var(--line2);border-left:${ki===0?'2px solid var(--line)':'1px solid var(--line2)'};font:700 var(--m-sm) var(--font-mono);color:${flag?'var(--errorink)':(zero?'var(--ink3)':'var(--ink2)')};background:${flag?'var(--errortint)':'var(--surface)'};`};
       });
       return {id:p.id, role:roleShort[p.role]||'', initials:this.initials(p.id),
-        avatar:`display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;flex:none;border-radius:50%;background:var(--panel);color:var(--ink2);font:700 10px var(--font-mono);border:1px solid var(--line2);`,
-        roleStyle:'font:600 9px var(--font-mono);color:var(--ink3);border:1px solid var(--line2);padding:1px 4px;',
+        avatar:`display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;flex:none;border-radius:50%;background:var(--panel);color:var(--ink2);font:700 var(--t-nano) var(--font-mono);`,
+        roleStyle:'font:600 var(--t-nano) var(--font-mono);color:var(--ink3);border:1px solid var(--line2);padding:1px 4px;',
         summ, trStyle:'', cells};
     });
     // per-nurse summary column headers (right side of the grid)
     const summHead=summCols.map((k,ki)=>({
       label: k==='WKND'?'W·off':(k==='OFF'?'Off':k),
       title: k==='WKND'?'Weekend rest days (0 = worked every weekend day — check fairness)':(k==='OFF'?'Rest (OFF) days this period':((meta[k]&&meta[k].name)||k)+' shifts this period'),
-      headStyle:`position:sticky;top:0;z-index:1;padding:7px 4px;min-width:38px;text-align:center;background:var(--panel);border-bottom:2px solid var(--line);border-left:${ki===0?'2px solid var(--line)':'1px solid var(--line2)'};font:700 var(--m-xs) var(--font-mono);color:${k==='WKND'?'var(--ink)':'var(--ink2)'};`}));
+      headStyle:`position:sticky;top:0;z-index:3;padding:8px 4px;min-width:36px;text-align:center;background:var(--panel);border-bottom:2px solid var(--line);border-left:${ki===0?'2px solid var(--line)':'1px solid var(--line2)'};font:700 var(--m-xs) var(--font-mono);color:${k==='WKND'?'var(--ink)':'var(--ink2)'};`}));
     const footRows=workedIds.map((id,fi)=>{
       const need=needs[id]||0;
       const topB=fi===0?'2px solid var(--line)':'1px solid var(--line2)';
       const cells=days.map((day,di)=>{ const n=dayCount[di][id]||0; const sh=n<need;
-        return {v:n, tdStyle:`text-align:center;height:34px;min-width:42px;border-top:${topB};font:700 var(--m-sm) var(--font-mono);color:${sh?'var(--error)':'var(--ink2)'};background:${sh?'rgba(200,40,40,.08)':(day.holiday?HOLIDAY_BG:(day.weekend?'var(--panel)':'var(--surface)'))};`}; });
+        return {v:n, tdStyle:`text-align:center;height:32px;min-width:40px;border-top:${topB};font:700 var(--m-sm) var(--font-mono);color:${sh?'var(--errorink)':'var(--ink2)'};background:${sh?'var(--errortint)':(day.holiday?HOLIDAY_BG:(day.weekend?'var(--panel)':'var(--surface)'))};`}; });
       const c=colorFor(id);
       return {label:(meta[id]&&meta[id].name)||id, need:'min '+need, cells, summColspan:summCols.length, summTop:topB,
-        dot:`width:10px;height:10px;border-radius:2px;flex:none;background:${c.dark?c.bar:(c.fill||'var(--line)')};border:1px solid ${c.dark?c.bar:(c.ink||'var(--line)')};`,
-        labelStyle:`position:sticky;left:0;z-index:2;background:var(--panel);border-top:${topB};padding:7px 12px;`};
+        dot:`width:10px;height:10px;border-radius:3px;flex:none;background:${c.dark?c.bar:(c.fill||'var(--line)')};border:1px solid ${c.dark?c.bar:(c.ink||'var(--line)')};`,
+        labelStyle:`position:sticky;left:0;z-index:2;background:var(--panel);border-top:${topB};box-shadow:var(--sh-edge);padding:8px 12px;`};
     });
-    const legend=workedIds.map(id=>{ const ch=chipFor(id); return {k:id, name:(meta[id]&&meta[id].name)||id, sw:ch.chip.replace('min-width:36px;height:30px','min-width:26px;height:20px').replace("font:700 var(--m-sm)","font:700 9px") }; })
-      .concat([{k:'LV',name:'Leave',sw:chipFor('LV').chip.replace('min-width:36px;height:30px','min-width:26px;height:20px').replace("font:700 var(--m-sm)","font:700 9px")},{k:'·',name:'Off / rest',sw:`display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:20px;color:var(--faint);font:500 12px var(--font-mono);`}]);
+    const swatch=(code)=>chipFor(code,26,20).chip+'font-size:var(--t-nano);';
+    const legend=workedIds.map(id=>({k:id, name:(meta[id]&&meta[id].name)||id, sw:swatch(id)}))
+      .concat([{k:'LV',name:'Leave',sw:swatch('LV')},
+               {k:'·',name:'Off / rest',sw:`display:inline-flex;align-items:center;justify-content:center;min-width:26px;height:20px;color:var(--ink3);font:500 12px var(--font-mono);`}]);
 
     // edit bar
     const shiftOpts=[...workedIds,'OFF','LV'].map(id=>({ id, onClick:()=>{ if(sel) setCell(sel.person,sel.di,id); },
@@ -300,14 +304,14 @@ class Component extends DCLogic {
     let editLabel=''; if(sel){ const d=days[sel.di]; editLabel=`${sel.person} · ${d?d.label:''} ${d?d.d:''}`; }
 
     // ---------- COVERAGE (1C name-chip board) ----------
-    const covGrid=`display:grid;grid-template-columns:184px repeat(${days.length},128px);gap:6px;`;
+    const covGrid=`display:grid;grid-template-columns:212px repeat(${days.length},128px);gap:6px;`;
     const covDays=days.map((d,di)=>({d:d.d,label:d.label,numColor:d.holiday?'var(--warn)':(d.weekend?'var(--ink3)':'var(--ink)'),style:`text-align:center;padding:6px 0 8px;`}));
     const covLanes=workedIds.map(id=>{ const need=needs[id]||0; const c=colorFor(id);
       const cells=days.map((day,di)=>{ const assigned=people.filter(p=>(schedule[p.id]||[])[di]===id); const n=assigned.length; const short=n<need;
-        const chips=assigned.map(p=>({txt:this.initials(p.id), name:p.id, style:`display:inline-flex;align-items:center;justify-content:center;height:20px;padding:0 7px;background:var(--panel);border:1px solid var(--line2);border-radius:11px;font:600 10px var(--font-mono);color:var(--ink2);cursor:default;`}));
+        const chips=assigned.map(p=>({txt:this.initials(p.id), name:p.id, style:`display:inline-flex;align-items:center;justify-content:center;height:20px;padding:0 8px;background:var(--panel);border:1px solid var(--line2);border-radius:11px;font:600 var(--t-nano) var(--font-mono);color:var(--ink2);cursor:default;`}));
         return {count:n, need, short, chips, empty:n===0,
-          countStyle:`font:800 var(--m-md) var(--font-mono);color:${short?'var(--error)':'var(--ink)'};`,
-          cellStyle:`min-height:72px;padding:8px;border-radius:8px;background:${short?'var(--errortint)':(day.holiday?HOLIDAY_BG:(day.weekend?'var(--panel)':'var(--surface)'))};border:1px solid ${short?'#f0c0b8':'var(--line2)'};`}; });
+          countStyle:`font:700 var(--m-md) var(--font-mono);color:${short?'var(--errorink)':'var(--ink)'};`,
+          cellStyle:`min-height:72px;padding:8px;border-radius:var(--r-chip);background:${short?'var(--errortint)':(day.holiday?HOLIDAY_BG:(day.weekend?'var(--panel)':'var(--surface)'))};border:1px solid ${short?'var(--error)':'var(--line2)'};`}; });
       return {name:(meta[id]&&meta[id].name)||id, time:(meta[id]&&meta[id].time)||'', min:need,
         dot:`width:11px;height:11px;border-radius:3px;flex:none;background:${c.dark?c.bar:(c.bar||c.ink||'var(--line)')};`,
         labelStyle:`position:sticky;left:0;z-index:2;background:var(--surface);padding:8px 12px 8px 4px;`,
@@ -318,35 +322,35 @@ class Component extends DCLogic {
     const covDayCards=days.map((day,di)=>{
       const shifts=workedIds.map(id=>{ const need=needs[id]||0; const c=colorFor(id);
         const assigned=people.filter(p=>(schedule[p.id]||[])[di]===id); const n=assigned.length; const short=n<need;
-        const chips=assigned.map(p=>({txt:this.initials(p.id), name:p.id, style:`display:inline-flex;align-items:center;justify-content:center;height:22px;padding:0 8px;background:var(--surface);border:1px solid var(--line2);border-radius:11px;font:600 11px var(--font-mono);color:var(--ink2);`}));
+        const chips=assigned.map(p=>({txt:this.initials(p.id), name:p.id, style:`display:inline-flex;align-items:center;justify-content:center;height:22px;padding:0 8px;background:var(--surface);border:1px solid var(--line2);border-radius:11px;font:600 var(--t-micro) var(--font-mono);color:var(--ink2);`}));
         return {name:(meta[id]&&meta[id].name)||id, time:(meta[id]&&meta[id].time)||'', need, count:n, short, chips, empty:n===0,
           dot:`width:11px;height:11px;border-radius:3px;flex:none;background:${c.dark?c.bar:(c.bar||c.ink||'var(--line)')};`,
-          countStyle:`font:800 var(--m-md) var(--font-mono);color:${short?'var(--error)':'var(--ink)'};`,
+          countStyle:`font:700 var(--m-md) var(--font-mono);color:${short?'var(--errorink)':'var(--ink)'};`,
           rowStyle:`display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-top:1px solid var(--line2);${short?'':''}`}; });
       return {dateLabel:day.label+' '+day.d, weekend:day.weekend, holiday:day.holiday, shifts,
-        headStyle:`display:flex;align-items:center;gap:8px;padding:9px 12px;background:${day.holiday?HOLIDAY_BG:(day.weekend?'var(--panel)':'var(--panel)')};border-bottom:1px solid var(--line2);`,
+        headStyle:`display:flex;align-items:center;gap:8px;padding:8px 12px;background:${day.holiday?HOLIDAY_BG:(day.weekend?'var(--panel)':'var(--panel)')};border-bottom:1px solid var(--line2);`,
         cardStyle:`border:1px solid var(--line2);background:var(--surface);margin-bottom:10px;`};
     });
-    const heatLegend=[['Under minimum','var(--errortint)','#f0c0b8']].map(([t,bg,bd])=>({name:t,sw:`width:16px;height:16px;border-radius:4px;background:${bg};border:1px solid ${bd};`}));
+    const heatLegend=[['Under minimum','var(--errortint)','var(--error)']].map(([t,bg,bd])=>({name:t,sw:`width:16px;height:16px;border-radius:3px;background:${bg};border:1px solid ${bd};`}));
 
     // ---------- DAY DETAIL ----------
     const nDays=days.length; const selDay=Math.min(this.state.selDay||0, Math.max(0,nDays-1));
     const dayStrip=days.map((d,di)=>{ const w=worstOfDay(di); const dc=w==='under'?'var(--error)':(w==='at'?'var(--warn)':'var(--success)'); const on=di===selDay;
       return {d:d.d,label:d.label, onClick:()=>this.setState({selDay:di}),
         dot:`display:block;width:6px;height:6px;border-radius:50%;background:${dc};margin:4px auto 0;`,
-        style:`flex:none;width:50px;text-align:center;padding:7px 0 6px;cursor:pointer;background:${on?'var(--ink)':(d.weekend?'var(--panel)':'var(--surface)')};border:1px solid ${on?'var(--ink)':'var(--line2)'};color:${on?'var(--on-ink)':'var(--ink)'};`}; });
+        style:`flex:none;width:50px;text-align:center;padding:8px 0 6px;cursor:pointer;background:${on?'var(--brand)':(d.weekend?'var(--panel)':'var(--surface)')};border:1px solid ${on?'var(--brand)':'var(--line2)'};color:${on?'var(--on-ink)':'var(--ink)'};`}; });
     const sd=days[selDay]||{};
     const selTitle=(sd.label?sd.label+' ':'')+(sd.d!=null?sd.d:'')+' · '+(v.monthTitle||'');
     const dayLanes=workedIds.map(id=>{ const need=needs[id]||0; const c=colorFor(id);
       const assigned=people.filter(p=>(schedule[p.id]||[])[selDay]===id);
       const short=assigned.length<need;
       const cards=assigned.map(p=>({initials:this.initials(p.id),name:p.id,role:p.role,code:id,
-        avatar:`display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;flex:none;border-radius:50%;background:var(--panel);color:var(--ink2);font:700 11px var(--font-mono);border:1px solid var(--line2);`,
-        codeTag:`font:700 var(--m-xs) var(--font-mono);color:${c.dark?'#fff':c.ink};background:${c.dark?c.bar:c.fill};padding:2px 8px;border-radius:5px;`}));
+        avatar:`display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;flex:none;border-radius:50%;background:var(--panel);color:var(--ink2);font:700 var(--t-micro) var(--font-mono);border:1px solid var(--line2);`,
+        codeTag:`font:700 var(--m-xs) var(--font-mono);color:${c.dark?'#fff':c.ink};background:${c.dark?c.bar:c.fill};padding:2px 8px;border-radius:var(--r-chip);`}));
       return {name:(meta[id]&&meta[id].name)||id, time:(meta[id]&&meta[id].time)||'', need, count:assigned.length, short, cards, empty:assigned.length===0,
         dot:`width:12px;height:12px;border-radius:3px;flex:none;background:${c.dark?c.bar:(c.bar||c.ink)};`,
-        panel:`flex:1;min-width:220px;background:${short?'var(--errortint)':'var(--panel)'};border:1px solid ${short?'#f0c0b8':'var(--line2)'};padding:12px;`,
-        countStyle:`font:800 var(--t-title) var(--font-mono);color:${short?'var(--error)':'var(--ink)'};`};
+        panel:`flex:1;min-width:220px;background:${short?'var(--errortint)':'var(--panel)'};border:1px solid ${short?'var(--error)':'var(--line2)'};padding:12px;`,
+        countStyle:`font:700 var(--t-title) var(--font-mono);color:${short?'var(--errorink)':'var(--ink)'};`};
     });
     const offChips=people.filter(p=>{ const s=(schedule[p.id]||[])[selDay]; return s==='OFF'||s==='LV'; }).map(p=>{ const s=(schedule[p.id]||[])[selDay]; const leave=s==='LV';
       return {txt:p.id+' · '+(leave?'Leave':'Off'), style:`display:inline-flex;align-items:center;height:24px;padding:0 10px;background:${leave?'var(--brandtint)':'var(--panel)'};color:${leave?'var(--brandink)':'var(--ink3)'};border-radius:12px;font:600 var(--m-xs) var(--font-mono);`}; });
@@ -358,14 +362,14 @@ class Component extends DCLogic {
     const status=(v.solverStatus||'OPTIMAL').toUpperCase();
     const statusMap={OPTIMAL:{c:'var(--success)',t:'var(--successtint)'},FEASIBLE:{c:'var(--warn)',t:'var(--warntint)'},INFEASIBLE:{c:'var(--error)',t:'var(--errortint)'}};
     const st=statusMap[status]||statusMap.OPTIMAL;
-    const metric=(label,value,ok)=>({label,value,dot:`width:9px;height:9px;flex:none;border-radius:50%;background:${ok?'var(--success)':'var(--error)'};`,valStyle:`font:800 var(--t-body) var(--font-mono);color:${ok?'var(--ink)':'var(--error)'};line-height:1;`});
-    const resultBanner={ status, statusStyle:`display:inline-flex;align-items:center;gap:8px;padding:6px 12px;background:${st.t};border:1px solid ${st.c};font:800 var(--m-sm) var(--font-ui);letter-spacing:.04em;color:${st.c};text-transform:uppercase;`,
+    const metric=(label,value,ok)=>({label,value,dot:`width:9px;height:9px;flex:none;border-radius:50%;background:${ok?'var(--success)':'var(--error)'};`,valStyle:`font:700 var(--t-body) var(--font-mono);color:${ok?'var(--ink)':'var(--errorink)'};line-height:1;`});
+    const resultBanner={ status, statusStyle:`display:inline-flex;align-items:center;gap:8px;padding:6px 12px;background:${st.t};border:1px solid ${st.c};font:700 var(--m-sm) var(--font-ui);letter-spacing:.04em;color:${st.c};text-transform:uppercase;`,
       score:(v.score!=null?String(v.score):'—'),
       metrics:[ metric('coverage'+(understaffed?' gaps':' complete'), understaffed===0?'All shifts staffed':understaffed+' under min', understaffed===0),
         metric('hours on 160h', onTarget+' / '+nonPre.length, onTarget===nonPre.length) ] };
 
-    const seg=(on)=>`height:40px;padding:0 14px;background:${on?'var(--ink)':'transparent'};color:${on?'var(--on-ink)':'var(--ink2)'};border:none;font:${on?'700':'500'} var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;cursor:pointer;`;
-    const skelCols=Array.from({length:14},(_,i)=>({cellStyle:`width:42px;height:32px;flex:none;background:var(--line2);animation:ns-shimmer 1.1s var(--ease) infinite;animation-delay:${(i%6)*0.1}s;`}));
+    const seg=(on)=>`height:40px;padding:0 14px;background:${on?'var(--brand)':'transparent'};color:${on?'var(--onbrand)':'var(--ink2)'};border:none;font:${on?'700':'500'} var(--t-sm) var(--font-ui);display:inline-flex;align-items:center;cursor:pointer;`;
+    const skelCols=Array.from({length:14},(_,i)=>({cellStyle:`width:42px;height:32px;flex:none;background:var(--line2);animation:ns-shimmer var(--dur-loop) var(--ease-loop) infinite;animation-delay:${(i%6)*0.1}s;`}));
     return {
       loading, ready:!loading, skelCols, skelRows:Array.from({length:8},()=>({})),
       monthTitleUpper:(v.monthTitle||'').toUpperCase(),

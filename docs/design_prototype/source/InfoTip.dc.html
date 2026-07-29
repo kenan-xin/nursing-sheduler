@@ -13,7 +13,7 @@
   </button>
   <sc-if value="{{ open }}" hint-placeholder-val="{{ false }}">
     <span onMouseEnter="{{ onEnter }}" onMouseLeave="{{ onLeave }}" style="{{ popStyle }}">
-      <sc-if value="{{ hasTitle }}" hint-placeholder-val="{{ false }}"><span style="display:block;font:700 var(--m-xs) var(--font-mono);letter-spacing:.05em;text-transform:uppercase;color:var(--on-ink);opacity:.62;margin-bottom:4px;">{{ term }}</span></sc-if>
+      <sc-if value="{{ hasTitle }}" hint-placeholder-val="{{ false }}"><span style="display:block;font:700 var(--m-xs) var(--font-mono);letter-spacing:.04em;text-transform:uppercase;color:var(--on-ink);opacity:.62;margin-bottom:4px;">{{ term }}</span></sc-if>
       {{ text }}
     </span>
   </sc-if>
@@ -33,7 +33,7 @@ class Component extends DCLogic {
       onEnter:()=>this.setState({hover:true}),
       onLeave:()=>this.setState({hover:false}),
       btnStyle:`display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;padding:0;border:none;background:transparent;cursor:pointer;color:${open?'var(--brandink)':'var(--ink3)'};`,
-      popStyle:`position:absolute;top:calc(100% + 7px);left:50%;transform:translateX(-50%);z-index:60;width:min(250px,62vw);background:var(--ink);color:var(--on-ink);font:500 13px var(--font-ui);line-height:1.45;padding:9px 11px;box-shadow:0 6px 22px rgba(8,10,14,.24);text-align:left;text-transform:none;letter-spacing:normal;white-space:normal;`,
+      popStyle:`position:absolute;top:calc(100% + 7px);left:50%;transform:translateX(-50%);z-index:60;width:min(250px,62vw);background:var(--ink);color:var(--on-ink);font:500 12px var(--font-ui);line-height:1.45;padding:8px 12px;box-shadow:var(--sh-2);text-align:left;text-transform:none;letter-spacing:normal;white-space:normal;`,
     };
   }
 }

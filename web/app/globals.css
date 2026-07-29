@@ -5,19 +5,36 @@
 @custom-variant dark (&:is(.dark *));
 
 /* ==========================================================================
-   Design system — tokens ported from docs/design_prototype/README.md and the
-   prototype shell `<style>` block (the authored source of truth). Nothing here
-   is invented: colors (light + dark), the fluid type scale, the 4px spacing
-   scale, motion, shadows, and both the 480–1920 type ladder and the layout
-   ladder all mirror the prototype. Radius is 0 everywhere (square corners are
-   intentional). Theme switching is class-based (`.dark` on <html>), which is
-   what the Tailwind `dark` variant above keys off. The prototype's density
-   multiplier is NOT ported as a knob — see the spacing scale below for how
-   the prior 0.9 baseline is preserved.
+   Design system — v2 "Mint Canvas, Warm Ink" (DESIGN.md is canon; this file is
+   the single runtime value authority for it).
 
-   Fonts (README): body/UI = Hanken Grotesk, display/headings = Figtree, mono =
-   Spline Sans Mono. The next/font CSS variables (--font-hanken / --font-figtree
-   / --font-spline-mono) are wired in app/layout.tsx.
+   Warm espresso ink on a cool recessed mint canvas, a stepped L0->L2 surface
+   ladder where tone carries separation before shadow does, five warm-tinted
+   elevation tokens plus one directional side-overlay exception, and selective
+   rounding (card 16 / control 12 / chip 9 / pill) with every data surface held
+   square.
+
+   Contract rules (v2 technical plan T1-T3, T7-T8):
+     - The compact runtime names below (--ink2, --surface2, --line2, --r-ctl, …)
+       are canonical. DESIGN.md's longer frontmatter labels are documentation
+       keys, NOT a second set of CSS variables.
+     - :root holds light, .dark holds dark. Theme differences never surface as
+       consumer `dark:` colour overrides.
+     - `@theme inline` below maps these runtime variables into Tailwind
+       namespaces and straight onto the shadcn semantics. There is no second
+       long-form value layer and no self-referential alias: the runtime shadow
+       names (--sh-*) and the Tailwind namespace names (--shadow-*) are
+       deliberately distinct.
+     - Accent is resolved in CSS from `data-accent` on <html>; JavaScript stores
+       the CHOICE, never a resolved hex. The allowlist is exactly
+       teal | sage | rose | plum, and anything else falls back to teal.
+     - Radius and shadow values are absolute px and are NOT multiplied by the
+       0.9 density baseline. Only spacing and type ride that multiplier, which
+       stays baked in as a literal (density is not a product knob — bmw.8).
+
+   Fonts: body/UI = Hanken Grotesk, display/headings = Figtree, mono = Spline
+   Sans Mono. The next/font CSS variables (--font-hanken / --font-figtree /
+   --font-spline-mono) are wired in app/layout.tsx.
    ========================================================================== */
 
 :root {
@@ -28,50 +45,74 @@
   --ff-heading: var(--font-figtree), system-ui, sans-serif;
   --ff-mono: var(--font-spline-mono), ui-monospace, monospace;
 
-  /* Color — light theme */
-  --ink: #14161b;
-  --ink2: #4a515c;
-  /* Accessibility note (design decision, review finding #3): --ink3 and --faint
-     are DELIBERATELY sub-AA low-emphasis text (≈3.14:1 / ≈2.18:1 on surface) —
-     used for tertiary labels and placeholders only, never functional text. They
-     are intentionally exempt from the 4.5:1 rule. Functional text (destructive
-     action fill, status badge text) is AA-guaranteed via --error-strong and the
-     ink-on-tint badge treatment, and is test-protected in the e2e suite. */
-  --ink3: #8b929c;
-  --faint: #aab0ba;
-  --on-ink: #ffffff;
-  --bg: #fbfcfd;
-  --surface: #ffffff;
-  --panel: #f2f4f7;
-  --panel-alt: #f1f3f6;
-  --line: #c8cdd5;
-  --line2: #e2e5ea;
-  --rule: #14161b;
-  --sidebar: #ffffff;
-  --chrome: #14161b;
+  /* Ink ramp — warm espresso, never true black (DESIGN.md No-Black Rule).
+     --ink3 and --faint remain deliberately low-emphasis: tertiary labels and
+     placeholders only, never functional text. */
+  --ink: #332e2b;
+  --ink2: #57504b;
+  --ink3: #665d57;
+  --faint: #9d938c;
+  --on-ink: #fbf9f7;
+
+  /* Surface ladder — L0 page, L1 surface, L2 raised, plus the inset well.
+     Tone carries the separation; shadow only confirms it. */
+  --bg: #f3f6f4;
+  --surface: #fcfefd;
+  --surface2: #ffffff;
+  --panel: #eef3f0;
+  --panel-alt: #f9fbfa;
+  --line: #e0e3da;
+  --line2: #ecefe9;
+  --rule: #d1cec5;
+  --sidebar: #f7faf8;
+  --scrim: rgb(17 24 22 / 0.52);
   --sidebar-w: 280px;
 
-  /* Selectable accent (README: #2360c4 / #0e7490 / #b0357a / #3f4a63). The
-     accent axis is set via data-accent on <html>; brand-ink / brand-tint are
-     DERIVED from it via color-mix exactly as the prototype does
-     (Nurse Scheduling.dc.html:1190-1194) — light uses the accent as-is for ink
-     and a 9%-on-white tint; dark lightens both. */
-  --accent-color: #2360c4;
-  --brand: var(--accent-color);
-  --brandink: var(--accent-color);
-  --brandtint: color-mix(in srgb, var(--accent-color) 9%, #ffffff);
+  /* Accent — the teal fallback that holds BEFORE data-accent exists on <html>.
+     The explicit per-accent selectors further down own the four pairs; the
+     static --brandink/--brandtint here are the same unsupported-color-mix()
+     fallback contract, replaced by the guarded formulas in the @supports block
+     at the end of this cascade. --chrome aliases the live accent. */
+  --brand: #0b7d68;
+  --brandink: #096755;
+  --brandtint: #e4f1ee;
   --onbrand: #ffffff;
-  --success: #1f9a5c;
-  --successtint: #eafaf1;
-  --warn: #b07d10;
-  --warntint: #fbf3df;
-  --error: #d94032;
-  --errortint: #fbeae8;
-  /* Accessible destructive-action fill (review #3). The --error swatch stays the
-     canonical palette value for status; white text on it is only 4.44:1, so
-     action buttons use this darker red (white ≈ 5.44:1, clears AA in both
-     themes). Not overridden in .dark — a fixed strong red reads on both bgs. */
-  --error-strong: #c0392b;
+  --chrome: var(--brand);
+
+  /* Semantic status — base / tint / ink for all three tiers, plus paired solid
+     actions for warn and error only. Success deliberately has no solid pair: it
+     stays a quiet informational state and never competes with the accent. */
+  --success: #1f6b52;
+  --successtint: #e2f1ea;
+  --successink: #1f6b52;
+  --warn: #8c5f1c;
+  --warntint: #f8efdd;
+  --warnink: #8c5f1c;
+  --error: #bd4a28;
+  --errortint: #fae7df;
+  --errorink: #9e3d1c;
+  --fill-error: #bd4a28;
+  --on-error: #ffffff;
+  --fill-warn: #8c5f1c;
+  --on-warn: #ffffff;
+
+  /* Radius roles. Absolute px — selective rounding, with every data surface
+     (tables, cells, full-bleed bands, sticky edges, swatches) held square via
+     an explicit `rounded-none`, not by a token. */
+  --r-card: 16px;
+  --r-ctl: 12px;
+  --r-chip: 9px;
+  --r-pill: 999px;
+
+  /* Control sizes. Absolute px, deliberately NOT derived from --spacing: the
+     0.9 density baseline must not be able to shrink a hit target. Precise
+     pointers get 32/36/44; coarse pointers get an actual 44px minimum via the
+     `pointer-coarse` variant on the real control (never a pseudo-element
+     hitbox). */
+  --ctl-sm: 32px;
+  --ctl: 36px;
+  --ctl-lg: 44px;
+  --touch-min: 44px;
 
   /* Spacing scale — a 4px grid baked at 0.9. Tailwind's `--spacing` base is set
      from this below so padding/margin/gap utilities stay on the same grid.
@@ -85,7 +126,8 @@
      extra ~11% past what the user has been looking at. The 0.9 factor is therefore
      baked in here as a literal — it is the prior visual, not a knob. There is no
      `--density` / `--sp` / `--dens` token to turn; the multiplier is a fact about
-     the size, written where the size is (bmw.8). */
+     the size, written where the size is (bmw.8). v2 takes the redesign's ratios
+     but keeps this baseline (adoption record D3). */
   --space-1: calc(4px * 0.9);
   --space-2: calc(8px * 0.9);
   --space-3: calc(12px * 0.9);
@@ -127,58 +169,152 @@
   --dur-fast: 0.15s;
   --dur-base: 0.22s;
 
-  /* Shadows */
-  --shadow-toast: 0 8px 26px rgba(20, 30, 50, 0.16);
-  --shadow-dialog: 0 12px 34px rgba(20, 30, 50, 0.18);
-  --shadow-side: -16px 0 40px rgba(20, 30, 50, 0.18);
+  /* Elevation — five general-purpose tokens plus one specialized directional
+     side-overlay shadow. Warm brown-tinted in light mode, never neutral grey or
+     black. --sh-side is for side drawers and mobile navigation only; it is not
+     a general surface elevation. */
+  --sh-1: 0 1px 2px rgba(60, 55, 45, 0.05), 0 2px 8px rgba(60, 55, 45, 0.05);
+  --sh-2: 0 2px 4px rgba(60, 55, 45, 0.06), 0 10px 24px rgba(60, 55, 45, 0.09);
+  --sh-3: 0 20px 50px rgba(60, 55, 45, 0.22);
+  --sh-edge: 6px 0 8px -6px rgba(60, 55, 45, 0.16);
+  --sh-well: inset 0 1px 2px rgba(60, 55, 45, 0.05);
+  --sh-side: -16px 0 50px rgba(60, 55, 45, 0.2);
 }
 
-/* Dark theme — full authored value set from the prototype shell. README lists a
-   subset; the tint/faint/rule values here come from the prototype's dark block. */
+/* Dark theme — a desaturated mint-black canvas with a still-warm ink ramp. Not
+   an inversion: wells go DARKER than their surface, raised surfaces go lighter.
+   The dark shadows are the one place black is a legitimate authored input (as
+   translucent tints, never a resolved foreground/background). */
 .dark {
   color-scheme: dark;
-  --ink: #eef1f4;
-  --ink2: #9aa3b0;
-  --ink3: #6b7585;
-  --faint: #5c6675;
-  /* on-ink is the foreground for the ink/chrome bar, which stays dark in BOTH
-     themes (see --chrome below), so on-ink does NOT invert with --ink — it must
-     read light here. Was #0f1319, colliding 1:1 with --chrome (nursing-sheduler-2dn). */
-  --on-ink: #ffffff;
-  --bg: #13171e;
-  --surface: #181d25;
-  --panel: #1d242e;
-  --panel-alt: #1d242e;
-  --line: #313a46;
-  --line2: #262e38;
-  --rule: #3a4454;
-  --sidebar: #13171e;
-  --chrome: #0f1319;
-  /* Dark lightens the accent for ink (60% on white) and darkens the tint
-     (26% on the dark bg) — prototype Nurse Scheduling.dc.html:1192-1193. */
-  --brand: var(--accent-color);
-  --brandink: color-mix(in srgb, var(--accent-color) 60%, #ffffff);
-  --brandtint: color-mix(in srgb, var(--accent-color) 26%, #13171e);
-  --onbrand: #ffffff;
-  --success: #5fcf94;
-  --successtint: #16271d;
-  --warn: #d6a743;
-  --warntint: #2a2310;
-  --error: #e06a5e;
-  --errortint: #2a1714;
+  --ink: #f0ece7;
+  --ink2: #b3aca6;
+  --ink3: #a09892;
+  --faint: #6a635e;
+  --on-ink: #1d1a18;
+  --bg: #111816;
+  --surface: #1a2220;
+  --surface2: #222b28;
+  --panel: #151d1b;
+  --panel-alt: #1f2826;
+  --line: #2f3936;
+  --line2: #27302e;
+  --rule: #404b47;
+  --sidebar: #141b19;
+  --scrim: rgb(17 24 22 / 0.72);
+
+  /* Dark teal fallback, mirroring :root. */
+  --brand: #12a389;
+  --brandink: #71c8b8;
+  --brandtint: #18443b;
+  --onbrand: #111816;
+
+  --success: #63c79e;
+  --successtint: #1a3129;
+  --successink: #7fd7b2;
+  --warn: #d9a85c;
+  --warntint: #33280f;
+  --warnink: #e8bd7c;
+  --error: #e58164;
+  --errortint: #38201a;
+  --errorink: #f09b80;
+  --fill-error: #e58164;
+  --on-error: #1d1a18;
+  --fill-warn: #d9a85c;
+  --on-warn: #1d1a18;
+
+  --sh-1: 0 1px 2px rgba(0, 0, 0, 0.34), 0 2px 8px rgba(0, 0, 0, 0.24);
+  --sh-2: 0 2px 4px rgba(0, 0, 0, 0.36), 0 10px 24px rgba(0, 0, 0, 0.34);
+  --sh-3: 0 20px 50px rgba(0, 0, 0, 0.55);
+  --sh-edge: 6px 0 10px -6px rgba(0, 0, 0, 0.5);
+  --sh-well: inset 0 1px 2px rgba(0, 0, 0, 0.3);
+  --sh-side: -16px 0 50px rgba(0, 0, 0, 0.5);
 }
 
-/* Selectable-accent presets (data-accent on <html>). "blue" is the :root
-   default; the other three come from README line 116. brand/brandink/brandtint
-   re-derive automatically from --accent-color in both themes. */
-[data-accent="teal"] {
-  --accent-color: #0e7490;
+/* --------------------------------------------------------------------------
+   Accent selection (data-accent on <html>).
+
+   Four accents, each with an audited light AND dark value, so the user's choice
+   survives a theme change without JavaScript ever writing a resolved hex
+   (adoption record D4/D4a). The allowlist is exactly teal | sage | rose | plum;
+   a missing, empty or unsupported attribute matches none of these selectors and
+   therefore inherits the theme's teal fallback declared above. There is no
+   legacy blue/magenta/slate mapping and no migration layer (D4b).
+
+   Order and specificity are load-bearing. The light selectors are (0,1,1), so
+   they outrank `.dark` at (0,1,0) — the dark pairs must therefore be written as
+   `html.dark[data-accent=…]` at (0,2,1) AND come after. The --brandink /
+   --brandtint values in each block are the exact nearest-8-bit sRGB rendering
+   of the color-mix() formulas, and exist so an engine without color-mix()
+   support still paints a valid, audited pair. The @supports block at the end
+   replaces them with the live formulas.
+   -------------------------------------------------------------------------- */
+html[data-accent="teal"] {
+  --brand: #0b7d68;
+  --brandink: #096755;
+  --brandtint: #e4f1ee;
 }
-[data-accent="magenta"] {
-  --accent-color: #b0357a;
+html[data-accent="sage"] {
+  --brand: #3f7f6b;
+  --brandink: #346858;
+  --brandtint: #e9f1ee;
 }
-[data-accent="slate"] {
-  --accent-color: #3f4a63;
+html[data-accent="rose"] {
+  --brand: #af605a;
+  --brandink: #904f4a;
+  --brandtint: #f4eeed;
+}
+html[data-accent="plum"] {
+  --brand: #6b5f8c;
+  --brandink: #584e73;
+  --brandtint: #eeeef2;
+}
+
+html.dark[data-accent="teal"] {
+  --brand: #12a389;
+  --brandink: #71c8b8;
+  --brandtint: #18443b;
+}
+html.dark[data-accent="sage"] {
+  --brand: #72aa94;
+  --brandink: #aaccbf;
+  --brandtint: #31453e;
+}
+html.dark[data-accent="rose"] {
+  --brand: #d1847e;
+  --brandink: #e3b5b2;
+  --brandtint: #4a3b38;
+}
+html.dark[data-accent="plum"] {
+  --brand: #9e91c2;
+  --brandink: #c5bdda;
+  --brandtint: #3c3f4a;
+}
+
+/* The live derivation. Every selector above is repeated here at matching or
+   higher specificity so the guarded formulas win wherever color-mix() is
+   supported, and the static pairs above remain the only paint when it is not.
+   `black`/`white` are derivation ENDPOINTS, not rendered colours — the No-Black
+   Rule constrains resolved foreground/background paint, not mix inputs. Note
+   the tint mixes against --surface, so it re-tracks the surface ladder. */
+@supports (color: color-mix(in srgb, black, white)) {
+  :root,
+  html[data-accent="teal"],
+  html[data-accent="sage"],
+  html[data-accent="rose"],
+  html[data-accent="plum"] {
+    --brandink: color-mix(in srgb, var(--brand) 82%, black);
+    --brandtint: color-mix(in srgb, var(--brand) 10%, var(--surface));
+  }
+
+  .dark,
+  html.dark[data-accent="teal"],
+  html.dark[data-accent="sage"],
+  html.dark[data-accent="rose"],
+  html.dark[data-accent="plum"] {
+    --brandink: color-mix(in srgb, var(--brand) 60%, white);
+    --brandtint: color-mix(in srgb, var(--brand) 26%, var(--surface));
+  }
 }
 
 /* Fluid type ladder — base sizes step up at 480/768/1024/1280/1440/1920. */
@@ -228,10 +364,10 @@
    Tailwind theme wiring.
 
    `@theme inline` is used wherever a token references one of our runtime CSS
-   variables (colors switch with `.dark`; type reacts to the breakpoint ladder)
-   so the generated utilities emit `var(--…)` rather than a
-   value frozen at build time. Static tokens (fonts, breakpoints, radius,
-   keyframes) use plain `@theme`.
+   variables (colors switch with `.dark` and with the accent; type reacts to the
+   breakpoint ladder) so the generated utilities emit `var(--…)` rather than a
+   value frozen at build time. Static tokens (fonts, breakpoints, the generic
+   shadcn radius fallbacks, keyframes) use plain `@theme`.
    -------------------------------------------------------------------------- */
 @theme {
   /* Fonts */
@@ -239,9 +375,7 @@
   --font-heading: var(--ff-heading);
   --font-mono: var(--ff-mono);
 
-  /* TYPE ladder (480–1920) + the 920px nav pivot from the shell. These mirror the
-     prototype's fluid-type steps (Nurse Scheduling.dc.html:45-50) — the same values
-     the `--base-h/b/l` media queries above step on. */
+  /* TYPE ladder (480–1920) + the 920px nav pivot from the shell. */
   --breakpoint-xs: 480px;
   --breakpoint-sm: 640px;
   --breakpoint-nav: 920px;
@@ -252,21 +386,15 @@
   --breakpoint-3xl: 1920px;
 
   /* LAYOUT ladder — the prototype's SECOND, disjoint set of breakpoints, one per
-     layout class (Nurse Scheduling.dc.html:78-95). None of these values coincide
-     with a type step except `.ns-grid3`'s 640px two-up, which is `sm` already.
-     Each variant is named for the prototype class it comes from, so a grid's
-     breakpoint is traceable to the rule it implements.
+     layout class. None of these values coincide with a type step except
+     `.ns-grid3`'s 640px two-up, which is `sm` already. Each variant is named for
+     the layout rule it implements, so a grid's breakpoint is traceable.
 
      They exist because the two ladders are easy to conflate: before this, every
      layout grid was snapped to the nearest TYPE step and drifted from the design by
      40–124px — `.ns-grid3`'s 1100px three-up became `lg` (1024px) and shipped three
      cards where the design shows two. Reach for these when porting a `.ns-*` layout
-     rule; reach for the type ladder for everything else. (bmw.7)
-
-     `.ns-xfer` (620px) is deliberately absent: it is the three-column transfer list
-     with a middle control band, and the port has no implementation of it — our
-     transfer list is the two-pane `.ns-panes2`. Add it here when that changes, not
-     before, so every value in this block is one something actually uses. */
+     rule; reach for the type ladder for everything else. (bmw.7) */
   --breakpoint-panes2: 600px;
   --breakpoint-formgrid: 720px;
   --breakpoint-wizgrid: 760px;
@@ -274,7 +402,11 @@
   --breakpoint-grid3: 1100px;
   --breakpoint-wizgrid3: 1200px;
 
-  /* Radius: 0 everywhere. */
+  /* Generic shadcn radius scale — kept at 0 as the SQUARE compatibility
+     fallback. v2 rounds by semantic role, not by a global step, so owned
+     components reach for `rounded-card` / `rounded-control` / `rounded-chip` /
+     `rounded-pill` (registered in the inline block below) and every data
+     surface keeps an explicit `rounded-none`. */
   --radius: 0px;
   --radius-sm: 0px;
   --radius-md: 0px;
@@ -305,42 +437,52 @@
   --color-on-ink: var(--on-ink);
   --color-bg: var(--bg);
   --color-surface: var(--surface);
+  --color-surface2: var(--surface2);
   --color-panel: var(--panel);
   --color-panel-alt: var(--panel-alt);
   --color-chrome: var(--chrome);
   --color-line: var(--line);
   --color-line2: var(--line2);
   --color-rule: var(--rule);
+  --color-scrim: var(--scrim);
   --color-brand: var(--brand);
   --color-brandink: var(--brandink);
   --color-brandtint: var(--brandtint);
   --color-onbrand: var(--onbrand);
   --color-success: var(--success);
   --color-successtint: var(--successtint);
+  --color-successink: var(--successink);
   --color-warn: var(--warn);
   --color-warntint: var(--warntint);
+  --color-warnink: var(--warnink);
   --color-error: var(--error);
   --color-errortint: var(--errortint);
-  --color-error-strong: var(--error-strong);
+  --color-errorink: var(--errorink);
+  --color-fill-error: var(--fill-error);
+  --color-on-error: var(--on-error);
+  --color-fill-warn: var(--fill-warn);
+  --color-on-warn: var(--on-warn);
 
-  /* shadcn/Base UI semantic aliases → the design palette. This is what keeps
-     generated shadcn components on-token with no hard-coded colors. */
+  /* shadcn/Base UI semantic aliases → the canonical runtime variables directly.
+     There is no second --background/--primary value layer. `accent` is the
+     generic hover/zebra tone and never carries selection semantics: selection
+     uses brand tint/ink or the sidebar selection aliases below. */
   --color-background: var(--bg);
   --color-foreground: var(--ink);
   --color-card: var(--surface);
   --color-card-foreground: var(--ink);
-  --color-popover: var(--surface);
+  --color-popover: var(--surface2);
   --color-popover-foreground: var(--ink);
   --color-primary: var(--brand);
   --color-primary-foreground: var(--onbrand);
-  --color-secondary: var(--panel);
+  --color-secondary: var(--surface);
   --color-secondary-foreground: var(--ink);
   --color-muted: var(--panel);
-  --color-muted-foreground: var(--ink3);
-  --color-accent: var(--brandtint);
-  --color-accent-foreground: var(--brandink);
-  --color-destructive: var(--error);
-  --color-destructive-foreground: var(--onbrand);
+  --color-muted-foreground: var(--ink2);
+  --color-accent: var(--panel-alt);
+  --color-accent-foreground: var(--ink);
+  --color-destructive: var(--fill-error);
+  --color-destructive-foreground: var(--on-error);
   --color-border: var(--line);
   --color-input: var(--line);
   --color-ring: var(--brand);
@@ -357,6 +499,20 @@
   --color-sidebar-accent-foreground: var(--brandink);
   --color-sidebar-border: var(--line);
   --color-sidebar-ring: var(--brand);
+
+  /* Radius roles → rounded-card / rounded-control / rounded-chip / rounded-pill */
+  --radius-card: var(--r-card);
+  --radius-control: var(--r-ctl);
+  --radius-chip: var(--r-chip);
+  --radius-pill: var(--r-pill);
+
+  /* Absolute control/touch sizes → h-control / size-control / min-h-touch /
+     min-w-touch. Registered in the spacing namespace but sourced from the
+     absolute px tokens, so the 0.9 baseline cannot shrink a hit target. */
+  --spacing-control-sm: var(--ctl-sm);
+  --spacing-control: var(--ctl);
+  --spacing-control-lg: var(--ctl-lg);
+  --spacing-touch: var(--touch-min);
 
   /* Fluid type scale → text-* utilities (design-named; default text-sm/base/xs
      are left untouched so shadcn internals keep their expected sizes). */
@@ -378,10 +534,18 @@
   --transition-duration-fast: var(--dur-fast);
   --transition-duration-base: var(--dur-base);
 
-  /* Shadows → shadow-* utilities */
-  --shadow-toast: var(--shadow-toast);
-  --shadow-dialog: var(--shadow-dialog);
-  --shadow-side: var(--shadow-side);
+  /* Shadows → shadow-* utilities. `shadow-dialog` and `shadow-toast` are
+     semantic aliases of --sh-3 and carry no independent value. `shadow-side`
+     reads the specialized runtime --sh-side; the two names differ on purpose so
+     the emitted theme contains no self-reference. */
+  --shadow-1: var(--sh-1);
+  --shadow-2: var(--sh-2);
+  --shadow-3: var(--sh-3);
+  --shadow-edge: var(--sh-edge);
+  --shadow-well: var(--sh-well);
+  --shadow-dialog: var(--sh-3);
+  --shadow-toast: var(--sh-3);
+  --shadow-side: var(--sh-side);
 }
 
 /* Keyframes ported from the prototype shell. */
@@ -470,17 +634,54 @@
   }
 }
 
-/* Sonner toast → prototype shell toast (Nurse Scheduling.dc.html:193-197):
-   bottom-center ink surface with on-ink text, a green success left rule and a
-   green checkmark. Class hooks come from <Toaster className="ns-sonner"
-   toastOptions={{ className: "ns-toast" }} /> in app-shell.tsx. */
+/* --------------------------------------------------------------------------
+   Accent preview swatches.
+
+   The AccentControl and the /design-system specimens each need to show what an
+   accent LOOKS like while a different accent is active, so they cannot read
+   --brand (which resolves to the live choice only). This block is the single
+   authority for that preview paint — previously it was an inline hex table in
+   theme-toggle.tsx, which put four colour literals in a component and made the
+   control impossible to restyle from CSS.
+
+   These four values are, and must remain, byte-identical to the LIGHT --brand
+   literals in the html[data-accent="…"] selectors above. They are a preview of
+   the choice, never a second source of truth for it, and
+   app/design-system.test.ts fails if the two ever drift apart.
+   -------------------------------------------------------------------------- */
+[data-accent-swatch="teal"] {
+  background: #0b7d68;
+}
+[data-accent-swatch="sage"] {
+  background: #3f7f6b;
+}
+[data-accent-swatch="rose"] {
+  background: #af605a;
+}
+[data-accent-swatch="plum"] {
+  background: #6b5f8c;
+}
+
+/* Sonner toast. Class hooks come from <Toaster className="ns-sonner"
+   toastOptions={{ className: "ns-toast" }} /> in app-shell.tsx. The toast sits
+   on the modal layer, so it takes --sh-3 (the value behind `shadow-toast`)
+   rather than borrowing the directional drawer shadow.
+
+   v2 (DESIGN.md §5 Toast): bottom-centre, --ink fill, --on-ink text, leading ✓
+   mark, --shadow-toast. Two v1 treatments are RETIRED here along with the rest
+   of the component layer:
+     - the 3px --success left-edge rule, and with it the no-side-stripe exception
+       that justified it. Nothing in the toast is keyed to a status hue any more,
+       so the ✓ mark takes --on-ink; --success on the ink fill computes to about
+       1.4:1 and was never legible as a colour signal in the first place;
+     - the square corner. A floating panel on the modal layer rounds at the card
+       role, like every other L2 surface. */
 .ns-toast {
   background: var(--ink) !important;
   color: var(--on-ink) !important;
   border: 1px solid var(--ink) !important;
-  border-left: 3px solid var(--success) !important;
-  border-radius: 0 !important;
-  box-shadow: var(--shadow-side) !important;
+  border-radius: var(--r-card) !important;
+  box-shadow: var(--sh-3) !important;
   font-family: var(--ff-body);
   font-size: var(--t-sm);
   font-weight: 600;
@@ -489,7 +690,7 @@
   color: var(--on-ink) !important;
 }
 .ns-toast [data-icon] {
-  color: var(--success) !important;
+  color: var(--on-ink) !important;
 }
 
 /* Reduced-motion: suppress the motion tokens' effect globally. */

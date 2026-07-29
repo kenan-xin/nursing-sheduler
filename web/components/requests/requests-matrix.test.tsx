@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { UiPerson, UiRequestCell } from "@/lib/scenario";
 import {
   historyColumnLabels,
@@ -109,7 +110,9 @@ describe("RequestsMatrix", () => {
     const cell = screen.getByTestId("hist-Alice-1");
     expect(cell).toHaveTextContent("N");
     fireEvent.click(cell);
-    expect(onHistoryClick).toHaveBeenCalledWith("Alice", 1);
+    // The third argument is the exact element that was activated — the container
+    // needs it to restore focus, and a coordinate alone cannot supply it.
+    expect(onHistoryClick).toHaveBeenCalledExactlyOnceWith("Alice", 1, cell);
   });
 
   it("a non-clickable padding history slot does not fire onHistoryClick", () => {
@@ -126,15 +129,15 @@ describe("RequestsMatrix", () => {
     render(<RequestsMatrix {...makeProps({ onHistoryClick })} />);
     const clickablePadding = screen.getByTestId("hist-Bob-2");
     fireEvent.click(clickablePadding);
-    expect(onHistoryClick).toHaveBeenCalledWith("Bob", 2);
+    expect(onHistoryClick).toHaveBeenCalledExactlyOnceWith("Bob", 2, clickablePadding);
   });
 
-  it("normal mode: clicking a request cell fires onCellClick with (person, colRef)", () => {
+  it("normal mode: clicking a request cell fires onCellClick with (person, colRef, origin)", () => {
     const onCellClick = vi.fn();
     render(<RequestsMatrix {...makeProps({ onCellClick })} />);
     const cell = screen.getByTestId("cell-Alice-2026-05-01");
     fireEvent.click(cell);
-    expect(onCellClick).toHaveBeenCalledWith("Alice", "2026-05-01");
+    expect(onCellClick).toHaveBeenCalledExactlyOnceWith("Alice", "2026-05-01", cell);
   });
 
   it("quick mode: pointerdown/pointerenter drive paint staging instead of onClick", () => {
@@ -184,6 +187,208 @@ describe("RequestsMatrix", () => {
   it("degrades gracefully when rows or columns are empty", () => {
     render(<RequestsMatrix {...makeProps({ rows: [] })} />);
     expect(screen.getByTestId("requests-matrix-empty")).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Keyboard operability of the matrix origins.
+//
+// The two editors promise focus back to the cell that opened them, which is only
+// possible if that cell is a real control: focusable, named, and openable
+// without a pointer. What must NOT happen is the opposite over-reach — a
+// quick-paint drag target or an inert history pad advertising a button it does
+// not implement.
+// ---------------------------------------------------------------------------
+
+describe("RequestsMatrix — actionable origins are native buttons", () => {
+  it("a normal-mode request cell IS a native button, not an ARIA impersonation", () => {
+    render(<RequestsMatrix {...makeProps()} />);
+    const cell = screen.getByTestId("cell-Alice-2026-05-01");
+    expect(cell.tagName).toBe("BUTTON");
+    // `type` is explicit: the HTML default is `submit`, which would post a form.
+    expect(cell).toHaveAttribute("type", "button");
+    // The role is IMPLICIT — no `role` attribute should be restating it.
+    expect(cell).not.toHaveAttribute("role");
+    // Discovered by its own accessible name, not by testid — the implicit role
+    // is what makes this queryable at all.
+    expect(cell).toBe(screen.getByRole("button", { name: /^Edit 1\. Alice on 05\/01/ }));
+    expect(cell).toHaveAccessibleName(/1\. Alice/);
+    expect(cell).toHaveAccessibleName(/05\/01/);
+  });
+
+  it("a normal-mode actionable history slot IS a native button naming its position", () => {
+    render(<RequestsMatrix {...makeProps()} />);
+    const slot = screen.getByTestId("hist-Alice-1");
+    expect(slot.tagName).toBe("BUTTON");
+    expect(slot).toHaveAttribute("type", "button");
+    expect(slot).not.toHaveAttribute("role");
+    expect(slot).toHaveAccessibleName(/H-2/);
+    expect(slot).toHaveAccessibleName(/1\. Alice/);
+  });
+
+  it("is a tab stop natively, with no hand-written tabindex", () => {
+    render(<RequestsMatrix {...makeProps()} />);
+    const cell = screen.getByTestId("cell-Alice-2026-05-01");
+    // A native button is focusable and tabbable without an explicit attribute.
+    // (The product-scale tab-order concern is unchanged and tracked as P4.)
+    expect(cell).not.toHaveAttribute("tabindex");
+    cell.focus();
+    expect(cell).toHaveFocus();
+  });
+
+  it("keeps the exact presentation contract the div carried", () => {
+    render(<RequestsMatrix {...makeProps()} />);
+    const cell = screen.getByTestId("cell-Alice-2026-05-01");
+    // Geometry and paint live entirely in these classes, which is why the
+    // element swap is layout-neutral (proven live in Chromium). Border tokens
+    // are deliberately absent here: this cell carries a request, so the visual
+    // recipe's all-sides `border` wins the tailwind-merge over `border-b`/`-r`.
+    for (const token of [
+      "flex",
+      "items-center",
+      "justify-center",
+      "overflow-hidden",
+      "px-1",
+      "text-center",
+    ]) {
+      expect(cell.className).toContain(token);
+    }
+    expect(cell).toHaveAttribute("title");
+
+    // An empty cell keeps the plain hairline edges.
+    const emptyCell = screen.getByTestId("cell-Bob-ALL");
+    for (const token of ["border-b", "border-r"]) {
+      expect(emptyCell.className).toContain(token);
+    }
+
+    const slot = screen.getByTestId("hist-Alice-1");
+    for (const token of ["flex", "items-center", "justify-center", "border-b", "border-r"]) {
+      expect(slot.className).toContain(token);
+    }
+  });
+
+  it.each(["{Enter}", " "])(
+    "native %s activation opens the cell editor exactly once, with the focused cell as the origin",
+    async (key) => {
+      const onCellClick = vi.fn();
+      render(<RequestsMatrix {...makeProps({ onCellClick })} />);
+      const cell = screen.getByTestId("cell-Alice-2026-05-01");
+      cell.focus();
+      expect(cell).toHaveFocus();
+      await userEvent.keyboard(key);
+      // Exactly once: the browser synthesizes ONE click from the key press, and
+      // there is no hand-written keydown handler left to fire a second time.
+      expect(onCellClick).toHaveBeenCalledExactlyOnceWith("Alice", "2026-05-01", cell);
+    },
+  );
+
+  it.each(["{Enter}", " "])(
+    "native %s activation opens the history editor exactly once, with the focused slot as the origin",
+    async (key) => {
+      const onHistoryClick = vi.fn();
+      render(<RequestsMatrix {...makeProps({ onHistoryClick })} />);
+      const slot = screen.getByTestId("hist-Alice-1");
+      slot.focus();
+      await userEvent.keyboard(key);
+      expect(onHistoryClick).toHaveBeenCalledExactlyOnceWith("Alice", 1, slot);
+    },
+  );
+
+  it("a pointer click and a key press never stack into a double activation", async () => {
+    const onCellClick = vi.fn();
+    render(<RequestsMatrix {...makeProps({ onCellClick })} />);
+    const cell = screen.getByTestId("cell-Alice-2026-05-01");
+    await userEvent.click(cell);
+    expect(onCellClick).toHaveBeenCalledTimes(1);
+    await userEvent.keyboard(" ");
+    expect(onCellClick).toHaveBeenCalledTimes(2);
+    await userEvent.keyboard("{Enter}");
+    expect(onCellClick).toHaveBeenCalledTimes(3);
+    // Every call carried the same element and coordinate — one activation each.
+    for (const call of onCellClick.mock.calls) {
+      expect(call).toEqual(["Alice", "2026-05-01", cell]);
+    }
+  });
+
+  it("an unrelated key does nothing", async () => {
+    const onCellClick = vi.fn();
+    render(<RequestsMatrix {...makeProps({ onCellClick })} />);
+    const cell = screen.getByTestId("cell-Alice-2026-05-01");
+    cell.focus();
+    await userEvent.keyboard("{ArrowRight}");
+    await userEvent.keyboard("a");
+    expect(onCellClick).not.toHaveBeenCalled();
+  });
+});
+
+describe("RequestsMatrix — non-actionable cells never become buttons", () => {
+  it("quick-paint cells stay divs and drag targets", async () => {
+    const onCellClick = vi.fn();
+    const onCellPointerDown = vi.fn();
+    render(<RequestsMatrix {...makeProps({ mode: "quick", onCellClick, onCellPointerDown })} />);
+    const cell = screen.getByTestId("cell-Alice-2026-05-01");
+    expect(cell.tagName).toBe("DIV");
+    expect(cell).not.toHaveAttribute("role", "button");
+    expect(cell).not.toHaveAttribute("tabindex");
+    fireEvent.keyDown(cell, { key: "Enter" });
+    fireEvent.keyDown(cell, { key: " " });
+    expect(onCellClick).not.toHaveBeenCalled();
+    // The drag seam is untouched by the element swap.
+    fireEvent.pointerDown(cell);
+    expect(onCellPointerDown).toHaveBeenCalledExactlyOnceWith("Alice", "2026-05-01");
+  });
+
+  it("quick-paint history slots stay divs and drag targets", () => {
+    const onHistoryClick = vi.fn();
+    const onHistoryPointerDown = vi.fn();
+    render(
+      <RequestsMatrix {...makeProps({ mode: "quick", onHistoryClick, onHistoryPointerDown })} />,
+    );
+    const slot = screen.getByTestId("hist-Alice-1");
+    expect(slot.tagName).toBe("DIV");
+    expect(slot).not.toHaveAttribute("role", "button");
+    expect(slot).not.toHaveAttribute("tabindex");
+    fireEvent.keyDown(slot, { key: "Enter" });
+    expect(onHistoryClick).not.toHaveBeenCalled();
+    fireEvent.pointerDown(slot);
+    expect(onHistoryPointerDown).toHaveBeenCalledExactlyOnceWith("Alice", 1);
+  });
+
+  it("non-clickable history padding is an inert div in normal mode", () => {
+    const onHistoryClick = vi.fn();
+    render(<RequestsMatrix {...makeProps({ onHistoryClick })} />);
+    // Bob: offset = 3 - 0 = 3; clickable only from index >= offset - 1 = 2.
+    const inert = screen.getByTestId("hist-Bob-0");
+    expect(inert.tagName).toBe("DIV");
+    expect(inert).not.toHaveAttribute("role", "button");
+    expect(inert).not.toHaveAttribute("tabindex");
+    fireEvent.keyDown(inert, { key: "Enter" });
+    expect(onHistoryClick).not.toHaveBeenCalled();
+  });
+
+  it("a group row's em-dash history cell is an inert div", () => {
+    const onHistoryClick = vi.fn();
+    render(<RequestsMatrix {...makeProps({ onHistoryClick })} />);
+    const groupCell = screen.getByTestId("hist-NightOwls-1");
+    expect(groupCell.tagName).toBe("DIV");
+    expect(groupCell).not.toHaveAttribute("role", "button");
+    expect(groupCell).not.toHaveAttribute("tabindex");
+    fireEvent.keyDown(groupCell, { key: "Enter" });
+    expect(onHistoryClick).not.toHaveBeenCalled();
+  });
+
+  it("exposes exactly the actionable origins as buttons — no inert cell leaks in", () => {
+    render(<RequestsMatrix {...makeProps()} />);
+    const buttons = screen.getAllByRole("button");
+    // Every button is an actionable origin…
+    for (const button of buttons) {
+      const testid = button.getAttribute("data-testid") ?? "";
+      expect(testid).toMatch(/^(cell|hist)-/);
+    }
+    // …and the known-inert coordinates are absent from that set.
+    for (const inertTestId of ["hist-Bob-0", "hist-Bob-1", "hist-NightOwls-1"]) {
+      expect(buttons).not.toContain(screen.getByTestId(inertTestId));
+    }
   });
 });
 
