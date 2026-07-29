@@ -186,6 +186,71 @@ function classesOf(element: Element | null): string {
   return element?.getAttribute("class") ?? "";
 }
 
+describe("CellPreferenceEditor — the compact weight fields keep the control floor", () => {
+  // F4's custom-spacing merge registration made the old `h-8.5` override newly
+  // effective, and 8.5 × the 0.9-baked spacing unit is 30.6px — under the 32px
+  // precise-pointer floor. These pin the CANONICAL token instead, so the same
+  // regression cannot return through the spacing scale.
+  const WEIGHT_INPUT_TESTIDS = [
+    "cell-editor-weight-input-AM",
+    "cell-editor-weight-input-PM",
+    "cell-editor-weight-input-EARLY",
+  ];
+
+  it("sizes every per-target weight field with the canonical small-control token", () => {
+    renderEditor();
+    for (const testid of WEIGHT_INPUT_TESTIDS) {
+      const input = screen.getByTestId(testid);
+      expect(classesOf(input), testid).toContain("h-control-sm");
+      // No spacing-scale height may size a control: `--spacing` carries the 0.9
+      // density baseline, which is exactly what must not shrink a hit target.
+      expect(classesOf(input), testid).not.toMatch(/(^|\s)h-\d/);
+    }
+  });
+
+  it("sizes the OFF weight field with the same canonical token", () => {
+    const { onSave } = renderEditor();
+    fireEvent.click(screen.getByTestId("cell-editor-tab-off"));
+    const input = screen.getByTestId("cell-editor-off-weight-input");
+    expect(classesOf(input)).toContain("h-control-sm");
+    expect(classesOf(input)).not.toMatch(/(^|\s)h-\d/);
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("keeps the coarse-pointer floor the shared Input supplies", () => {
+    renderEditor();
+    // The override sets HEIGHT only; the primitive's `min-h-touch` still raises
+    // the floor to a real 44px on a coarse pointer, and the two compose.
+    for (const testid of WEIGHT_INPUT_TESTIDS) {
+      expect(classesOf(screen.getByTestId(testid)), testid).toContain("pointer-coarse:min-h-touch");
+    }
+    fireEvent.click(screen.getByTestId("cell-editor-tab-off"));
+    expect(classesOf(screen.getByTestId("cell-editor-off-weight-input"))).toContain(
+      "pointer-coarse:min-h-touch",
+    );
+  });
+
+  it("leaves the sibling weight-readout column untouched", () => {
+    renderEditor();
+    // The readout beside each field is a plain text column, not a control — its
+    // spacing-scale width is correct and deliberately not swept up in this fix.
+    const row = screen.getByTestId("cell-editor-weight-row-AM");
+    expect(row.querySelector(".w-8\\.5")).not.toBeNull();
+  });
+
+  it("still parses and commits through the resized fields", () => {
+    const { onSave } = renderEditor();
+    fireEvent.change(screen.getByTestId("cell-editor-weight-input-AM"), {
+      target: { value: "5" },
+    });
+    fireEvent.click(screen.getByTestId("cell-editor-save"));
+    expect(onSave).toHaveBeenCalledExactlyOnceWith({
+      kind: "requests",
+      prefs: [{ shiftType: "AM", weight: 5 }],
+    });
+  });
+});
+
 describe("CellPreferenceEditor — shared overlay contract", () => {
   it("renders through the shared portal as an L2 raised card behind bg-scrim", () => {
     renderEditor();

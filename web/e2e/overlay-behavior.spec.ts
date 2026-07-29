@@ -691,6 +691,72 @@ test.describe("Requests origins are native buttons with unchanged geometry", () 
   });
 });
 
+// The two compact weight fields carry the only control-height override inside an
+// F3 overlay. F4's custom-spacing merge registration made that override newly
+// effective at 30.6px (8.5 × the 0.9-baked spacing unit), under the 32px precise
+// floor — so both pointer classes are measured here against the live control,
+// not inferred from a class name.
+test.describe("Cell Preference weight fields keep the control floor", () => {
+  const PRECISE_FLOOR = 32;
+
+  async function openWeightFields(page: Page) {
+    await gotoReady(page, "/shift-requests");
+    await seed(page, REQUESTS_SEED);
+    await expect(page.getByTestId("requests-matrix")).toBeVisible();
+    await page.getByTestId("cell-Aisha-01").click();
+    await expect(page.getByTestId("cell-preference-editor")).toBeVisible();
+  }
+
+  test("both fields clear 32px on a precise pointer", async ({ page }) => {
+    await openWeightFields(page);
+    expect(await page.evaluate(() => matchMedia("(pointer: fine)").matches)).toBe(true);
+
+    const weight = page.getByTestId("cell-editor-weight-input-AM");
+    const weightBox = (await weight.boundingBox())!;
+    expect(weightBox.height).toBeGreaterThanOrEqual(PRECISE_FLOOR);
+    // The canonical token resolves to exactly --ctl-sm, not a spacing step.
+    expect(await style(weight, "height")).toBe("32px");
+
+    await page.getByTestId("cell-editor-tab-off").click();
+    const off = page.getByTestId("cell-editor-off-weight-input");
+    const offBox = (await off.boundingBox())!;
+    expect(offBox.height).toBeGreaterThanOrEqual(PRECISE_FLOOR);
+    expect(await style(off, "height")).toBe("32px");
+  });
+
+  test("the fields remain usable and the editor still commits at that size", async ({ page }) => {
+    await openWeightFields(page);
+    const weight = page.getByTestId("cell-editor-weight-input-AM");
+    await weight.fill("5");
+    await page.getByTestId("cell-editor-save").click();
+    await expect(page.getByTestId("cell-preference-editor")).toHaveCount(0);
+    await expect(page.getByTestId("requests-count")).toHaveText("1");
+  });
+});
+
+test.describe("Cell Preference weight fields on a coarse pointer", () => {
+  test.use({ viewport: { width: 393, height: 851 }, hasTouch: true, isMobile: true });
+
+  test("both fields reach a real 44px touch target", async ({ page }) => {
+    await gotoReady(page, "/shift-requests");
+    await seed(page, REQUESTS_SEED);
+    await expect(page.getByTestId("requests-matrix")).toBeVisible();
+    expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
+
+    await page.getByTestId("cell-Aisha-01").click();
+    await expect(page.getByTestId("cell-preference-editor")).toBeVisible();
+
+    // `h-control-sm` sets height and `pointer-coarse:min-h-touch` sets the floor,
+    // so the coarse minimum wins on the real control rather than on a hitbox.
+    const weightBox = (await page.getByTestId("cell-editor-weight-input-AM").boundingBox())!;
+    expect(weightBox.height).toBeGreaterThanOrEqual(44);
+
+    await page.getByTestId("cell-editor-tab-off").click();
+    const offBox = (await page.getByTestId("cell-editor-off-weight-input").boundingBox())!;
+    expect(offBox.height).toBeGreaterThanOrEqual(44);
+  });
+});
+
 test.describe("overlay controls on a coarse pointer", () => {
   // Emulated touch/mobile rather than a spread device descriptor: a device
   // preset also carries `defaultBrowserType`, which Playwright refuses inside a

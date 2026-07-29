@@ -8,6 +8,16 @@
 // container commits it as the coordinate transaction (paint-store seam is out
 // of scope here; this component never touches the store).
 //
+// The two weight fields are compact, so they override the shared Input's default
+// 36px height with the CANONICAL small-control token (`h-control-sm` → `--ctl-sm`
+// → 32px) rather than a spacing-scale step. They previously used `h-8.5`, which
+// reads 8.5 × the 0.9-baked spacing unit = 30.6px — below the 32px precise-pointer
+// floor. Control sizes are deliberately absolute px in globals.css precisely so
+// the density baseline cannot shrink a hit target, and a spacing-scale height on
+// a control routes around that guarantee. The Input's own
+// `pointer-coarse:min-h-touch` is untouched, so a coarse pointer still gets a
+// real 44px: `h-*` sets height, `min-h-*` sets the floor, and they compose.
+//
 // Weight parsing reuses `weight-field.tsx`'s `parseWeightInput`/
 // `isValidWeightValue`/`formatWeight` (the project's one weight-parse
 // contract) rather than reimplementing it, per T11's "reuse weight-field.tsx
@@ -243,7 +253,7 @@ export function CellPreferenceEditor({
                         onChange={(e) => setWeight(target.id, parseWeightInput(e.target.value))}
                         placeholder="0"
                         data-testid={`cell-editor-weight-input-${target.id}`}
-                        className="h-8.5 w-16 flex-none text-center text-meta"
+                        className="h-control-sm w-16 flex-none text-center text-meta"
                       />
                       <div
                         className={cn(
@@ -293,7 +303,7 @@ export function CellPreferenceEditor({
                   onChange={(e) => setOffWeight(parseWeightInput(e.target.value))}
                   placeholder="0"
                   data-testid="cell-editor-off-weight-input"
-                  className="h-8.5 w-16 flex-none text-center text-meta"
+                  className="h-control-sm w-16 flex-none text-center text-meta"
                 />
                 <div className="w-8.5 flex-none text-meta font-semibold text-ink2">
                   {formatWeight(draft.offWeight)}
