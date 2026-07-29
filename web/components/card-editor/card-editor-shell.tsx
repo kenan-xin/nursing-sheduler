@@ -13,14 +13,21 @@
 // presentational and fully controlled — no store access, no domain logic.
 
 import * as React from "react";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Surface, surfaceVariants } from "@/components/ui/surface";
 import { FaPlus, FaXmark, FaCircleInfo, FaCheck, FaLock, FaGripVertical } from "@/components/icons";
 import { useLosableDraft } from "@/components/shell/use-losable-draft";
 
-/** Outer screen wrapper — a bare flex column with the standard screen gap. It sets
- *  no width, margin or page padding: the app shell owns those for every screen at
- *  one place (`app-shell.tsx`, `max-w-[1240px]` — bmw.6). The 940px cap that used to
- *  be justified here belongs to `CardEditorForm`'s body, which still carries it. */
+/** Outer screen wrapper — the L0 app plane for every card editor, with the standard
+ *  screen gap. It sets no width, margin or page padding: the app shell owns those
+ *  for every screen at one place (`app-shell.tsx`, `max-w-[1240px]` — bmw.6). The
+ *  940px cap that used to be justified here belongs to `CardEditorForm`'s body,
+ *  which still carries it.
+ *
+ *  The `page` role is what the F4 matrix pins for all five routes: the screen root
+ *  must RESOLVE `--bg` rather than inherit a transparent box, so the ladder starts
+ *  from a real L0 plane instead of from whatever happens to be painted behind it. */
 export function CardEditorScreen({
   screen,
   children,
@@ -29,9 +36,15 @@ export function CardEditorScreen({
   children: React.ReactNode;
 }) {
   return (
-    <div data-testid="screen" data-screen={screen} className="flex flex-col gap-4">
+    <Surface
+      level="page"
+      geometry="square"
+      data-testid="screen"
+      data-screen={screen}
+      className="flex flex-col gap-4"
+    >
       {children}
-    </div>
+    </Surface>
   );
 }
 
@@ -161,21 +174,25 @@ export function CardEditorHeader({
             {eyebrow}
           </div>
           <div className="mb-2 flex flex-wrap items-center gap-2.5">
-            <h1 className="font-heading text-display font-extrabold leading-[1.05] tracking-[-0.02em]">
+            {/* Display: Figtree 700 / 1.15 / -0.015em (DESIGN.md §3). v1 ran 800 at
+                1.05 and -0.02em; v2 is deliberately one weight step lighter with a
+                slightly opener line. Sizes, copy and wrapping are unchanged — only
+                the weight/line-height/tracking recipe moves. */}
+            <h1 className="font-heading text-display font-bold leading-[1.15] tracking-[-0.015em]">
               {title}
             </h1>
             {instructions ? (
-              <button
-                type="button"
+              <Button
+                variant="outline"
+                size="sm"
                 title="Toggle instructions"
                 aria-expanded={helpOpen}
                 aria-controls="card-editor-instructions"
                 data-testid="card-editor-help-toggle"
                 onClick={() => setHelpOpen((v) => !v)}
-                className="inline-flex h-8 items-center gap-1.5 border border-line bg-transparent px-2.5 text-meta font-semibold text-ink2 hover:bg-panel"
               >
-                <FaCircleInfo className="size-3" /> {helpLabel}
-              </button>
+                <FaCircleInfo /> {helpLabel}
+              </Button>
             ) : null}
           </div>
           <p className="m-0 max-w-[64ch] text-ink2">{subtitle}</p>
@@ -183,7 +200,7 @@ export function CardEditorHeader({
         <div className="flex flex-wrap items-center gap-2.5">
           <Button
             variant={formOpen ? "outline" : "default"}
-            className="h-11 px-[18px]"
+            size="lg"
             data-testid="add-card-toggle"
             aria-expanded={formOpen}
             onClick={onAdd}
@@ -193,7 +210,7 @@ export function CardEditorHeader({
           {secondaryAction ? (
             <Button
               variant={secondaryAction.formOpen ? "outline" : "default"}
-              className="h-11 px-[18px]"
+              size="lg"
               data-testid={secondaryAction.testId ?? "add-secondary-toggle"}
               aria-expanded={secondaryAction.formOpen}
               onClick={secondaryAction.onAdd}
@@ -204,13 +221,15 @@ export function CardEditorHeader({
         </div>
       </div>
       {instructions && helpOpen ? (
-        <div
+        <Surface
+          level="well"
+          geometry="control"
           id="card-editor-instructions"
           data-testid="card-editor-instructions"
-          className="mb-1 border border-line bg-panel px-4 py-3.5"
+          className="mb-1 px-4 py-3.5"
         >
           {instructions}
-        </div>
+        </Surface>
       ) : null}
     </>
   );
@@ -230,20 +249,27 @@ export function CardEditorInstructions({ items }: { items: readonly string[] }) 
   );
 }
 
-/** The persistent shared strip explaining Advanced ↔ guided Rules equivalence. */
+/** The persistent shared strip explaining Advanced ↔ guided Rules equivalence — an
+ *  inset note strip, which DESIGN.md §4 puts on the `well` level rather than giving
+ *  it a card's hairline-and-drop-shadow box. */
 export function CardEditorInfoStrip() {
   return (
-    <div className="mb-1 flex items-start gap-2.5 border border-line bg-panel px-3.5 py-3">
+    <Surface level="well" geometry="control" className="mb-1 flex items-start gap-2.5 px-3.5 py-3">
       <FaCircleInfo className="mt-0.5 flex-none text-ink3" />
       <div className="text-meta text-ink2">
         These are the exact constraints behind the plain-English <b>Rules</b>. Editing here gives
         you full control; the guided Rules screen is the friendly view of the same data.
       </div>
-    </div>
+    </Surface>
   );
 }
 
-/** The brand-bordered add/edit panel: tinted heading, body, right-aligned footer. */
+/** The brand-bordered add/edit panel: tinted heading, body, right-aligned footer.
+ *  An open draft IS the active editor card, so it takes the `selected` role — the
+ *  `--brand` border and `--sh-2` lift DESIGN.md §4 reserves for exactly that. Both
+ *  the tinted heading band and the footer are full-bleed and therefore square;
+ *  `overflow-hidden` on the panel is what clips them to its card radius instead of
+ *  leaving a sliver of page background in each corner. */
 export function CardEditorForm({
   heading,
   submitLabel,
@@ -261,12 +287,18 @@ export function CardEditorForm({
 }) {
   return (
     <div
-      className="mb-2 border border-brand bg-surface"
+      className={cn(
+        "mb-2 overflow-hidden",
+        surfaceVariants({ role: "selected", geometry: "card" }),
+      )}
       data-testid="card-editor-form"
       onKeyDown={onKeyDown}
     >
       <div className="border-b border-line2 bg-brandtint px-[18px] py-3.5">
-        <div className="font-heading text-cardhead font-extrabold tracking-[-0.02em] text-brandink">
+        {/* Headline: Figtree 600 / 1.2 / -0.015em. The line-height is explicit
+            because `--text-cardhead` carries a SIZE only — without it this div
+            inherited the body's 1.5, which is a paragraph rhythm on a card header. */}
+        <div className="font-heading text-cardhead font-semibold leading-[1.2] tracking-[-0.015em] text-brandink">
           {heading}
         </div>
       </div>
@@ -279,10 +311,10 @@ export function CardEditorForm({
         {children}
       </div>
       <div className="flex justify-end gap-2.5 border-t border-line2 px-[18px] py-3.5">
-        <Button variant="outline" className="h-10 px-[18px]" onClick={onCancel}>
+        <Button variant="outline" onClick={onCancel}>
           Cancel
         </Button>
-        <Button className="h-10 px-5" data-testid="card-editor-submit" onClick={onSubmit}>
+        <Button data-testid="card-editor-submit" onClick={onSubmit}>
           <FaCheck /> {submitLabel}
         </Button>
       </div>
@@ -290,16 +322,19 @@ export function CardEditorForm({
   );
 }
 
-/** The locked hard-rule note shown in place of a weight control (coverings). */
+/** The locked hard-rule note shown in place of a weight control (coverings) — an
+ *  inset note strip on the `well` level, like the shared info strip. */
 export function CardEditorHardRuleNote({ children }: { children: React.ReactNode }) {
   return (
-    <div
-      className="flex max-w-[520px] items-start gap-2.5 border border-line bg-panel px-3.5 py-3"
+    <Surface
+      level="well"
+      geometry="control"
+      className="flex max-w-lg items-start gap-2.5 px-3.5 py-3"
       data-testid="card-editor-hard-note"
     >
       <FaLock className="mt-0.5 flex-none text-ink3" />
       <div className="text-meta text-ink2">{children}</div>
-    </div>
+    </Surface>
   );
 }
 
@@ -332,18 +367,21 @@ export function CardEditorEmptyState({
   onAdd: () => void;
 }) {
   return (
+    // Dashed is the zero-data affordance, so this keeps a hand-authored border
+    // rather than the `surface` role's solid hairline (the same call the shared
+    // entity-editor empty state makes). Radius still follows the card role.
     <div
-      className="flex flex-col items-center gap-3.5 border-[1.5px] border-dashed border-line px-10 py-12 text-center"
+      className="flex flex-col items-center gap-3.5 rounded-card border border-dashed border-line bg-surface px-10 py-12 text-center"
       data-testid="card-editor-empty"
     >
-      <div className="flex size-[54px] items-center justify-center border-[1.5px] border-dashed border-line text-2xl leading-none text-faint">
+      <div className="flex size-[54px] items-center justify-center rounded-control border border-dashed border-line text-2xl leading-none text-faint">
         ∅
       </div>
       <div className="flex flex-col items-center gap-1.5">
         <div className="font-heading text-title font-bold text-ink2">{title}</div>
         {body ? <div className="max-w-[44ch] text-meta text-ink3">{body}</div> : null}
       </div>
-      <Button className="mt-0.5 h-10 px-[18px]" onClick={onAdd}>
+      <Button className="mt-0.5" onClick={onAdd}>
         <FaPlus /> {addLabel}
       </Button>
     </div>
@@ -361,9 +399,19 @@ export type DropPosition = "before" | "after";
  *
  *  `onDrop` receives the pointer-half `DropPosition` (FR-PR-12) — additive: a
  *  consumer that ignores the argument (e.g. Coverings) keeps its prior
- *  insert-at-index behavior unchanged. `accent="brand"` gives the card a brand
- *  border + 3px left rule (the Contracted Hours treatment); the default `"none"`
- *  is the neutral `border-line` every existing consumer already gets. */
+ *  insert-at-index behavior unchanged.
+ *
+ *  Every visual state is a ROLE on the shared surface recipe rather than a local
+ *  fork, which is also why none of them is spelled out in `className` here:
+ *    • `accent="brand"` (the Contracted Hours treatment) is `selected` — the
+ *      `--brand` border + `--sh-2` lift DESIGN.md §4 reserves for a marked card.
+ *      The old hand-drawn 3px left rule is retired with it;
+ *    • a drag candidate is `drop-target`, deliberately NOT `selected`, so "release
+ *      here" and "this is the one" stay distinguishable;
+ *    • a DISABLED card recedes to the `well` tone instead of the whole card being
+ *      faded. `opacity` on a card dims its text along with everything else, which
+ *      costs the contrast every label in it has to clear; tone-first is the v2
+ *      answer, and the `Disabled` badge is the redundant signal beside it. */
 export function CardListItem({
   index,
   title,
@@ -427,11 +475,20 @@ export function CardListItem({
           : undefined
       }
       onDragEnd={draggable ? onDragEnd : undefined}
-      className={`border bg-surface p-5 ${
-        disabled ? "opacity-55" : ""
-      } ${draggable ? "cursor-grab" : ""} ${isDragging ? "opacity-50" : ""} ${
-        isOver ? "shadow-[inset_0_2px_0_var(--color-brand)]" : ""
-      } ${accent === "brand" ? "border-brand border-l-[3px]" : "border-line"}`}
+      className={cn(
+        "p-5",
+        surfaceVariants({
+          role: isOver
+            ? "drop-target"
+            : disabled
+              ? "well"
+              : accent === "brand"
+                ? "selected"
+                : "surface",
+          geometry: "card",
+          interaction: isDragging ? "dragging" : draggable ? "grabbable" : undefined,
+        }),
+      )}
       data-testid={testId}
       data-disabled={disabled ? "true" : undefined}
       // Drag state is otherwise only an opacity class. Exposed so a test can wait
@@ -440,7 +497,7 @@ export function CardListItem({
     >
       <div className="mb-4 flex items-center gap-3">
         <div
-          className={`flex size-8 flex-none items-center justify-center border border-line2 bg-panel font-mono text-label-md font-semibold text-ink2 ${
+          className={`flex size-8 flex-none items-center justify-center rounded-chip border border-line2 bg-panel font-mono text-label-md font-semibold text-ink2 ${
             draggable ? "flex items-center gap-1" : ""
           }`}
         >
@@ -449,14 +506,19 @@ export function CardListItem({
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2.5">
-            <span className="font-heading text-title font-extrabold leading-[1.15] tracking-[-0.01em]">
+            {/* Title: Figtree 600 / 1.25 / -0.015em. v1 used 800 at -0.01em, which
+                both over-weighted the card title against the page h1 and broke the
+                Negative-Tracking Rule's single -0.015em value for heading faces. */}
+            <span className="font-heading text-title font-semibold leading-[1.25] tracking-[-0.015em]">
               {title}
             </span>
             {badges}
           </div>
         </div>
       </div>
-      <div className="grid grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-px border border-line2 bg-line2">
+      {/* A field grid is a data surface: hairline seams, flush cells, and
+          explicitly square corners (DESIGN.md §5 — don't round data structure). */}
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-px rounded-none border border-line2 bg-line2">
         {fields.map((f) => (
           <div key={f.label} className="bg-surface px-[15px] py-3">
             <div className="mb-[7px] text-label font-semibold uppercase tracking-[0.03em] text-ink3">
@@ -474,8 +536,11 @@ export function CardListItem({
   );
 }
 
-/** A labelled action-row button for a saved card (Disable/Edit/Duplicate/Delete).
- *  `danger` gives the destructive red treatment (Delete). `disabled` renders a
+/** A labelled action-row button for a saved card (Disable/Edit/Duplicate/Delete),
+ *  on the shared `Button` contract so it inherits the pill shape, the L1 fill
+ *  DESIGN.md §4 rule 4 requires of a non-primary action, and a real 44x44 target on
+ *  a coarse pointer instead of a 32px-tall hand-rolled box.
+ *  `danger` gives the destructive outline treatment (Delete). `disabled` renders a
  *  non-interactive treatment; `disabledReason` (e.g. an advanced-array card whose
  *  Convert is YAML-gated) is then shown as PERSISTENT adjacent text — a native
  *  `disabled` button is unfocusable, so a `title`-only reason is invisible to
@@ -503,8 +568,9 @@ export function CardActionButton({
   const showReason = Boolean(disabled && disabledReason);
   const reasonId = showReason && testId ? `${testId}-reason` : undefined;
   const button = (
-    <button
-      type="button"
+    <Button
+      variant={danger ? "destructive-outline" : "outline"}
+      size="sm"
       data-testid={testId}
       aria-label={ariaLabel}
       title={disabled ? disabledReason : undefined}
@@ -512,16 +578,9 @@ export function CardActionButton({
       aria-disabled={disabled || undefined}
       aria-describedby={reasonId}
       onClick={onClick}
-      className={`inline-flex h-8 items-center gap-[7px] border border-line bg-transparent px-3 text-meta font-semibold ${
-        disabled
-          ? "cursor-not-allowed text-ink3 opacity-55"
-          : danger
-            ? "text-error hover:bg-errortint"
-            : "text-ink hover:bg-panel"
-      }`}
     >
       {icon} {children}
-    </button>
+    </Button>
   );
   if (!showReason) return button;
   return (

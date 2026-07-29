@@ -19,6 +19,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { formatUncreditedLeaveWarning, type ScenarioUiState } from "@/lib/scenario";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Surface } from "@/components/ui/surface";
 import { FaPlus, FaTriangleExclamation } from "@/components/icons";
 import { CardEditorForm } from "@/components/card-editor/card-editor-shell";
 import { TransferList } from "@/components/entity-editor/transfer-list";
@@ -73,8 +75,33 @@ interface ContractedFormProps {
   onCancel: () => void;
 }
 
-/** The Exact / Range policy segmented toggle. Selecting a policy locks the
- *  expression/weight encoding downstream (`buildContractedCard`). */
+/**
+ * The Exact / Range policy segmented toggle. Selecting a policy locks the
+ * expression/weight encoding downstream (`buildContractedCard`).
+ *
+ * THE SELECTED SEGMENT'S FOREGROUND IS THE WHOLE POINT HERE. A user reported the
+ * selected "Exact x = T" segment as unreadable, and it was two separate mistakes
+ * compounding on one control:
+ *
+ *   1. the fill was `--brand` but the label took `--brandink`, which is
+ *      `color-mix(--brand 82%, black)` — a DARKENED version of the very colour
+ *      behind it, so the label was near-black-on-teal by construction. `--onbrand`
+ *      is the token that exists for exactly this pairing, and it flips per theme
+ *      (`#ffffff` light / `#111816` dark) precisely so a solid brand fill stays
+ *      legible in both;
+ *   2. the formula child then set `--ink3` unconditionally, so even fixing the
+ *      parent would have left the `x = T` half of the label opted out.
+ *
+ * The fix is the canonical pair on the segment and NO descendant foreground
+ * override on it at all — the hint inherits. The unselected segment keeps `--ink3`
+ * on its hint, which is correct: it sits on the well track, not on a brand fill.
+ * DESIGN.md §6: "Don't hardcode white on a semantic fill; use the paired --on-*
+ * token" — and, symmetrically, don't let a child opt out of it.
+ *
+ * Geometry follows DESIGN.md §5, which names segmented controls in the pill row:
+ * a `--panel` well track carrying pill segments, rather than the old square
+ * hairline box. Both segments are real 44px targets on a coarse pointer.
+ */
 function PolicyToggle({
   policy,
   onChange,
@@ -87,7 +114,11 @@ function PolicyToggle({
     { value: "range", label: "Range", hint: "min ≤ x ≤ max" },
   ];
   return (
-    <div className="inline-flex border border-line2" role="group" aria-label="Contract policy">
+    <div
+      className="inline-flex gap-1 rounded-pill bg-panel p-1 shadow-well"
+      role="group"
+      aria-label="Contract policy"
+    >
       {options.map((option) => {
         const active = policy === option.value;
         return (
@@ -97,12 +128,19 @@ function PolicyToggle({
             aria-pressed={active}
             data-testid={`contracted-policy-${option.value}`}
             onClick={() => onChange(option.value)}
-            className={`flex items-center gap-2 px-3.5 py-2 text-meta font-semibold ${
-              active ? "bg-brand text-brandink" : "bg-transparent text-ink2 hover:bg-panel"
+            className={`flex items-center gap-2 rounded-pill px-3.5 py-2 text-meta font-semibold transition-[background-color,box-shadow] duration-fast pointer-coarse:min-h-touch pointer-coarse:min-w-touch ${
+              active
+                ? "bg-brand text-onbrand shadow-1"
+                : "text-ink2 hover:bg-panel-alt hover:shadow-1"
             }`}
           >
             {option.label}
-            <span className="font-mono text-label text-ink3">{option.hint}</span>
+            {/* Deliberately NO colour class on the selected side: it inherits
+                `--onbrand` from the segment. A `text-ink3` here is the exact
+                regression the user reported. */}
+            <span className={`font-mono text-label ${active ? "" : "text-ink3"}`}>
+              {option.hint}
+            </span>
           </button>
         );
       })}
@@ -123,8 +161,10 @@ function LockedEncoding({
 }) {
   const expressionText = policy === "range" ? "x ≥ T and x ≤ T" : "x = T";
   return (
-    <div
-      className="flex flex-col gap-2 border border-line2 bg-panel p-3.5"
+    <Surface
+      level="well"
+      geometry="control"
+      className="flex flex-col gap-2 p-3.5"
       data-testid="contracted-locked-encoding"
     >
       <span className="text-label font-semibold uppercase tracking-[0.03em] text-ink2">
@@ -152,7 +192,7 @@ function LockedEncoding({
         Expression and weight are fixed by the policy. Changing them requires converting this rule
         to a generic Shift Count.
       </p>
-    </div>
+    </Surface>
   );
 }
 
@@ -193,7 +233,10 @@ function SolverDetails({
   };
 
   return (
-    <details className="border border-line2 bg-panel" data-testid="contracted-solver-details">
+    <details
+      className="overflow-hidden rounded-control bg-panel shadow-well"
+      data-testid="contracted-solver-details"
+    >
       <summary
         className="cursor-pointer px-3.5 py-2 text-label font-semibold uppercase tracking-[0.03em] text-ink2"
         data-testid="contracted-solver-details-toggle"
@@ -223,7 +266,7 @@ function SolverDetails({
                   aria-label="Raw minimum target in half-hours"
                   value={rawMin ?? ""}
                   onChange={(e) => setRaw("targetRangeMin", e.target.value)}
-                  className="h-9 w-28 font-mono"
+                  className="h-control-sm w-28 font-mono"
                 />
               </label>
               <label className="flex flex-col gap-1">
@@ -236,7 +279,7 @@ function SolverDetails({
                   aria-label="Raw maximum target in half-hours"
                   value={rawMax ?? ""}
                   onChange={(e) => setRaw("targetRangeMax", e.target.value)}
-                  className="h-9 w-28 font-mono"
+                  className="h-control-sm w-28 font-mono"
                 />
               </label>
             </div>
@@ -249,7 +292,7 @@ function SolverDetails({
               aria-label="Raw target in half-hours"
               value={rawExact ?? ""}
               onChange={(e) => setRaw("targetExact", e.target.value)}
-              className="h-9 w-28 font-mono"
+              className="h-control-sm w-28 font-mono"
             />
           )}
           <span className="text-meta italic text-ink3">
@@ -298,8 +341,10 @@ function RefreshPanel({
   onCancel: () => void;
 }) {
   return (
-    <div
-      className="flex flex-col gap-3 border border-line2 bg-panel p-3.5"
+    <Surface
+      level="well"
+      geometry="control"
+      className="flex flex-col gap-3 p-3.5"
       data-testid="contracted-refresh-preview"
     >
       <span className="text-label font-semibold uppercase tracking-[0.03em] text-ink2">
@@ -322,7 +367,7 @@ function RefreshPanel({
               {rows.map((row) => (
                 <span
                   key={row.id}
-                  className="border border-line2 px-2 py-1 font-mono text-meta text-ink"
+                  className="rounded-chip border border-line2 bg-surface px-2 py-1 font-mono text-meta text-ink"
                   data-testid={`contracted-refresh-row-${row.id}`}
                   data-category={row.category}
                 >
@@ -345,7 +390,7 @@ function RefreshPanel({
             {preview.unresolved.map((id) => (
               <span
                 key={id}
-                className="border border-warn px-2 py-1 font-mono text-meta text-warn"
+                className="rounded-chip border border-warn bg-warntint px-2 py-1 font-mono text-meta text-warnink"
                 data-testid={`contracted-refresh-unresolved-${id}`}
               >
                 {id}
@@ -355,24 +400,22 @@ function RefreshPanel({
         </div>
       )}
       <div className="flex gap-2">
-        <button
-          type="button"
-          data-testid="contracted-refresh-confirm"
-          onClick={onConfirm}
-          className="border border-brand bg-brand px-3.5 py-2 text-meta font-semibold text-brandink"
-        >
+        {/* `--brand` fill with `--brandink` text was the same defect as the policy
+            toggle: a darkened brand on brand. The Button `default` variant is the
+            canonical `--brand` + `--onbrand` pair. */}
+        <Button size="sm" data-testid="contracted-refresh-confirm" onClick={onConfirm}>
           Confirm
-        </button>
-        <button
-          type="button"
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
           data-testid="contracted-refresh-cancel"
           onClick={onCancel}
-          className="border border-line2 px-3.5 py-2 text-meta font-semibold text-ink2 hover:bg-panel"
         >
           Cancel
-        </button>
+        </Button>
       </div>
-    </div>
+    </Surface>
   );
 }
 
@@ -391,27 +434,34 @@ function LeaveCreditAdvisory({
   onAddLeave: () => void;
 }) {
   return (
+    // The tint pairs with `--warnink`, not `--warn`: the two coincide in light mode
+    // but diverge in dark, so a `--warn` heading left this advisory carrying its
+    // status by colour alone the moment the theme flipped (the Redundant Signal
+    // Rule, DESIGN.md §2). The repair action is an ordinary outline Button rather
+    // than a second warn-tinted box nested inside the first — stacking the same
+    // tint made the button read as part of the panel instead of as pressable.
     <div
-      className="flex items-start gap-2.5 border border-warn bg-warntint p-3.5"
+      className="flex items-start gap-2.5 rounded-control border border-warn bg-warntint p-3.5"
       role="status"
       aria-live="polite"
       data-testid="contracted-leave-advisory"
     >
-      <FaTriangleExclamation className="mt-0.5 size-4 flex-shrink-0 text-warn" />
+      <FaTriangleExclamation className="mt-0.5 size-4 flex-shrink-0 text-warnink" />
       <div className="flex flex-1 flex-col gap-2">
-        <span className="text-meta font-semibold text-ink">Leave not credited</span>
+        <span className="text-meta font-semibold text-warnink">Leave not credited</span>
         <p className="text-meta text-ink2" data-testid="contracted-leave-advisory-text">
           {formatUncreditedLeaveWarning(affectedNames)}
         </p>
-        <button
-          type="button"
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-fit"
           data-testid="contracted-add-leave"
           onClick={onAddLeave}
-          className="inline-flex w-fit items-center gap-2 border border-warn bg-warntint px-3.5 py-2 text-meta font-semibold text-ink hover:opacity-90"
         >
-          <FaPlus className="size-3" />
+          <FaPlus />
           Add LEAVE · {LEAVE_CREDIT_HALF_HOURS}
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -519,7 +569,6 @@ export function ContractedForm({
           value={form.description}
           onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
           placeholder="e.g., Monthly contracted hours"
-          className="h-10"
         />
       </FieldShell>
 
@@ -555,7 +604,7 @@ export function ContractedForm({
               setErrors((prev) => (prev.targetExact ? { ...prev, targetExact: undefined } : prev));
             }}
             placeholder="160h"
-            className="h-10 max-w-[220px]"
+            className="max-w-[220px]"
           />
         </FieldShell>
       ) : (
@@ -578,7 +627,7 @@ export function ContractedForm({
                 );
               }}
               placeholder="150h"
-              className="h-10 max-w-[220px]"
+              className="max-w-[220px]"
             />
           </FieldShell>
           <FieldShell label="Maximum hours" required hint="e.g. 170h" error={errors.targetRangeMax}>
@@ -594,7 +643,7 @@ export function ContractedForm({
                 );
               }}
               placeholder="170h"
-              className="h-10 max-w-[220px]"
+              className="max-w-[220px]"
             />
           </FieldShell>
         </div>
@@ -713,14 +762,14 @@ export function ContractedForm({
       {form.countShiftTypes.length > 0 && (
         <div className="flex flex-col gap-2">
           <div>
-            <button
-              type="button"
+            <Button
+              variant="outline"
+              size="sm"
               data-testid="contracted-refresh-button"
               onClick={() => setRefreshPreview(deriveContractedRefresh(form, state))}
-              className="border border-line2 px-3.5 py-2 text-meta font-semibold text-ink2 hover:bg-panel"
             >
               Refresh from Shift Types
-            </button>
+            </Button>
             <p className="mt-1 text-meta italic text-ink3">
               Preview coefficients derived from each shift&apos;s working time (LEAVE credited at{" "}
               8h). Nothing changes until you Confirm.
@@ -757,7 +806,7 @@ export function ContractedForm({
 
       <FieldShell label="Count dates" required error={errors.countDates}>
         {noDates ? (
-          <p className="border border-line bg-panel px-3.5 py-3 text-center text-meta italic text-ink3">
+          <p className="rounded-control bg-panel px-3.5 py-3 text-center text-meta italic text-ink3 shadow-well">
             No dates available. Please set up dates in the Dates screen first.
           </p>
         ) : (

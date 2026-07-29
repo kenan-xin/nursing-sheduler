@@ -10,6 +10,8 @@
 // translated to the exact ASCII backend strings (spec 05 FR-PR-52, AC-PR-12).
 
 import * as React from "react";
+import { Input } from "@/components/ui/input";
+import { Surface } from "@/components/ui/surface";
 import { FaCircleCheck, FaCircleExclamation, FaCircleInfo } from "@/components/icons";
 
 export interface ExpressionOp {
@@ -108,15 +110,15 @@ export function ExpressionField({
 
   return (
     <div className="flex flex-col gap-3" data-testid={testId}>
-      <div className="flex items-start gap-2 border border-line2 bg-panel p-2.5 text-meta text-ink2">
+      <Surface level="well" geometry="control" className="flex items-start gap-2 p-2.5">
         <FaCircleInfo className="mt-0.5 flex-none text-brandink" />
-        <span>
+        <span className="text-meta text-ink2">
           <b className="font-mono">x</b> is this person&apos;s count — the selected shift types over
           the selected dates, each weighted by its coefficient. Pick how{" "}
           <b className="font-mono">x</b> should relate to your target <b className="font-mono">T</b>
           .
         </span>
-      </div>
+      </Surface>
       <div className="flex flex-col gap-2">
         {EXPRESSION_OPS.map((op) => {
           const selected = op.value === expression;
@@ -127,12 +129,14 @@ export function ExpressionField({
               data-testid={`${testId}-op-${op.id}`}
               aria-pressed={selected}
               onClick={() => onChange({ expression: op.value, target })}
-              className={`flex items-center gap-3 border px-3 py-2.5 text-left ${
-                selected ? "border-brand bg-brandtint" : "border-line bg-surface"
+              className={`flex items-center gap-3 rounded-control border px-3 py-2.5 text-left transition-[background-color,box-shadow] duration-fast pointer-coarse:min-h-touch ${
+                selected
+                  ? "border-brand bg-brandtint shadow-2"
+                  : "border-line bg-surface shadow-1 hover:bg-panel-alt hover:shadow-2"
               }`}
             >
               <span
-                className={`min-w-[74px] flex-none whitespace-nowrap border px-3 py-1.5 text-center font-mono text-label-md font-bold ${
+                className={`min-w-[74px] flex-none whitespace-nowrap rounded-chip border px-3 py-1.5 text-center font-mono text-label-md font-bold ${
                   selected
                     ? "border-brand bg-surface text-brandink"
                     : "border-line2 bg-panel text-ink2"
@@ -154,7 +158,7 @@ export function ExpressionField({
           <span className="text-label font-semibold uppercase tracking-[0.03em] text-ink3">
             Target value (T)
           </span>
-          <input
+          <Input
             type="number"
             min={0}
             step={1}
@@ -169,15 +173,18 @@ export function ExpressionField({
               onChange({ expression, target: nextTarget });
             }}
             placeholder="e.g. 5"
-            className="h-10 w-[132px] border border-line bg-surface px-3 font-mono font-bold"
+            className="w-[132px] font-mono font-bold"
           />
         </label>
         <label className="flex flex-col gap-1.5">
           <span className="text-label font-semibold uppercase tracking-[0.03em] text-ink3">
             Reads as
           </span>
+          {/* A read-only echo of the chosen expression, so it is an inset well
+              rather than the `--brandtint` + `--brand` box DESIGN.md §6 reserves
+              for selection. The accent stays, carried by `--brandink` text. */}
           <span
-            className="border border-brand bg-brandtint px-3.5 py-2 font-mono font-bold text-brandink"
+            className="rounded-control bg-panel px-3.5 py-2 font-mono font-bold text-brandink shadow-well"
             data-testid={`${testId}-preview`}
           >
             {preview}

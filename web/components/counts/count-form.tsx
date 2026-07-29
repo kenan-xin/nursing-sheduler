@@ -112,7 +112,6 @@ export function CountForm({ state, mode, initialForm, onSave, onCancel }: CountF
           value={form.description}
           onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
           placeholder="e.g., Working shifts should be close to the average"
-          className="h-10"
         />
       </FieldShell>
 
@@ -220,7 +219,7 @@ export function CountForm({ state, mode, initialForm, onSave, onCancel }: CountF
 
       <FieldShell label="Count dates" required error={errors.countDates}>
         {noDates ? (
-          <p className="border border-line bg-panel px-3.5 py-3 text-center text-meta italic text-ink3">
+          <p className="rounded-control bg-panel px-3.5 py-3 text-center text-meta italic text-ink3 shadow-well">
             No dates available. Please set up dates in the Dates screen first.
           </p>
         ) : (

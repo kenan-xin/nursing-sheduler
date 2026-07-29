@@ -38,7 +38,7 @@ function CoefficientChips({ card }: { card: RequirementCard }) {
       {coefficients.map(([id, value]) => (
         <span
           key={id}
-          className="border border-line2 bg-panel px-2 py-0.5 font-mono text-label font-semibold text-ink"
+          className="rounded-chip border border-line2 bg-panel px-2 py-0.5 font-mono text-label font-semibold text-ink"
         >
           {id} · {value}
         </span>

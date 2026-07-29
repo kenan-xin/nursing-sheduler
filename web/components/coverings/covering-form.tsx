@@ -111,7 +111,6 @@ export function CoveringForm({ state, mode, initialForm, onSave, onCancel }: Cov
           value={form.description}
           onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
           placeholder="Short label for this rule"
-          className="h-10"
         />
       </FieldShell>
 

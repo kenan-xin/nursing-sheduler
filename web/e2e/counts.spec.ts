@@ -1490,3 +1490,228 @@ test.describe.serial("T12 cold-review fixes (Minor)", () => {
     expect(await pastCount(page)).toBe(before + 1); // Redo only; stale Save adds no entry.
   });
 });
+
+// ---------------------------------------------------------------------------
+// R4 — the Contracted Hours policy segment's selected foreground.
+//
+// A user reported the selected "Exact  x = T" segment as unreadable. The control
+// painted a solid `--brand` fill and then set `--brandink` on the label, which is
+// `color-mix(--brand 82%, black)` — a DARKENED version of the colour behind it —
+// while the `x = T` formula child separately forced `--ink3`. Both are foregrounds
+// that were never meant to sit on a brand fill.
+//
+// This suite is the regression, and it is deliberately not a class assertion: the
+// defect was about what the pixel actually resolves to, so everything below reads
+// COMPUTED style out of a production build and computes real WCAG contrast. It runs
+// the full theme x accent grid because that is exactly where the pairing moves —
+// `--brand` changes with the accent, `--onbrand` flips with the theme, and
+// `--brandink` tracks the accent, so a single-combination check would have passed
+// on three of the eight cells while the other five stayed broken.
+// ---------------------------------------------------------------------------
+
+const ACCENTS = ["teal", "sage", "rose", "plum"] as const;
+const THEMES = ["light", "dark"] as const;
+
+/** Parse a computed `rgb()`/`rgba()` colour into channels. */
+function parseRgb(value: string): { r: number; g: number; b: number } {
+  const nums = value.match(/[\d.]+/g);
+  if (!nums || nums.length < 3) throw new Error(`unparseable computed colour: ${value}`);
+  return { r: Number(nums[0]), g: Number(nums[1]), b: Number(nums[2]) };
+}
+
+/** WCAG 2.x relative luminance. */
+function luminance({ r, g, b }: { r: number; g: number; b: number }): number {
+  const channel = (c: number) => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+}
+
+/**
+ * WCAG contrast ratio, UNROUNDED. D4c is explicit that a threshold is never
+ * compared after rounding — a computed 4.4999:1 does not meet 4.5:1 — so this
+ * returns the raw ratio and the assertions below compare it directly.
+ */
+function contrastRatio(fg: string, bg: string): number {
+  const a = luminance(parseRgb(fg));
+  const b = luminance(parseRgb(bg));
+  const [hi, lo] = a > b ? [a, b] : [b, a];
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+async function gotoContractedForm(
+  page: Page,
+  theme: (typeof THEMES)[number],
+  accent: (typeof ACCENTS)[number],
+) {
+  await page.addInitScript(
+    ([t, a]) => {
+      localStorage.setItem("ns-app-mode", "advanced");
+      localStorage.setItem("ns-theme", t);
+      localStorage.setItem("ns-accent", a);
+    },
+    [theme, accent] as const,
+  );
+  await page.goto("/shift-counts");
+  await waitForStore(page);
+  await seed(page, BASE_SEED);
+
+  // Prove the axes actually applied before measuring anything on them.
+  await expect(page.locator("html")).toHaveAttribute("data-accent", accent);
+  if (theme === "dark") await expect(page.locator("html")).toHaveClass(/dark/);
+  else await expect(page.locator("html")).not.toHaveClass(/dark/);
+
+  await page.getByTestId("add-contracted-toggle").click();
+  await expect(page.getByTestId("contracted-policy-exact")).toBeVisible();
+}
+
+/** Resolve a theme token to the colour Chromium actually computes for it. */
+async function resolveToken(page: Page, token: string, property: "color" | "backgroundColor") {
+  return page.evaluate(
+    ([tok, prop]) => {
+      const probe = document.createElement("div");
+      probe.style.setProperty(prop === "color" ? "color" : "background-color", `var(${tok})`);
+      document.body.appendChild(probe);
+      const value = getComputedStyle(probe)[prop as "color" | "backgroundColor"];
+      probe.remove();
+      return value;
+    },
+    [token, property] as const,
+  );
+}
+
+test.describe("R4 contracted-hours policy segment foreground (user-reported defect)", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      (window as unknown as { __NS_ENABLE_TEST_BRIDGE?: boolean }).__NS_ENABLE_TEST_BRIDGE = true;
+    });
+  });
+
+  for (const theme of THEMES) {
+    for (const accent of ACCENTS) {
+      test(`selected Exact segment pairs --brand with --onbrand (${theme}/${accent})`, async ({
+        page,
+      }) => {
+        await gotoContractedForm(page, theme, accent);
+
+        const brand = await resolveToken(page, "--brand", "backgroundColor");
+        const onbrand = await resolveToken(page, "--onbrand", "color");
+        const brandink = await resolveToken(page, "--brandink", "color");
+        const ink3 = await resolveToken(page, "--ink3", "color");
+
+        // Exact is the default policy, so the reported state is the state on open.
+        const exact = page.getByTestId("contracted-policy-exact");
+        await expect(exact).toHaveAttribute("aria-pressed", "true");
+
+        const measured = await exact.evaluate((el) => {
+          const self = getComputedStyle(el);
+          // Every text-bearing descendant, so the formula child cannot opt out
+          // unnoticed the way it originally did.
+          const descendants = Array.from(el.querySelectorAll("*")).map((child) => ({
+            text: (child.textContent ?? "").trim(),
+            color: getComputedStyle(child).color,
+            background: getComputedStyle(child).backgroundColor,
+          }));
+          return { background: self.backgroundColor, color: self.color, descendants };
+        });
+
+        // 1. The fill is the canonical accent, and the segment's own label is the
+        //    paired foreground — not the darkened `--brandink` it used to carry.
+        expect(measured.background).toBe(brand);
+        expect(measured.color).toBe(onbrand);
+        expect(measured.color).not.toBe(brandink);
+
+        // 2. EVERY descendant inherits the pair. The formula span is the one that
+        //    regressed, and it is asserted by name as well as by the sweep.
+        expect(measured.descendants.length).toBeGreaterThan(0);
+        for (const child of measured.descendants) {
+          if (child.text === "") continue;
+          expect(
+            child.color,
+            `"${child.text}" on the selected segment must inherit --onbrand, not ${child.color}`,
+          ).toBe(onbrand);
+          expect(child.color).not.toBe(ink3);
+          // No descendant may hide behind its own plane — opaque OR translucent.
+          // A translucent veil still has the brand fill showing through it, so it
+          // would not rescue the text underneath.
+          expect(child.background).toBe("rgba(0, 0, 0, 0)");
+        }
+
+        const formula = exact.locator("span", { hasText: "x = T" });
+        await expect(formula).toHaveCSS("color", onbrand);
+
+        // 3. The pair actually clears AA on the unrounded ratio (D4c).
+        const ratio = contrastRatio(measured.color, measured.background);
+        expect(
+          ratio,
+          `--onbrand on --brand measured ${ratio.toFixed(4)}:1 for ${theme}/${accent}`,
+        ).toBeGreaterThanOrEqual(4.5);
+
+        // 4. The counterfactual, so this suite is evidence about THIS defect and
+        //    not just a palette that happens to be legible. `--ink3` is what the
+        //    formula child forced, and it is the half of the bug that was broken
+        //    in every theme and every accent — which is why the user's report was
+        //    specifically about the `x = T` text.
+        expect(
+          contrastRatio(ink3, brand),
+          `--ink3 on --brand is the reported formula-child defect and must remain a failing pair`,
+        ).toBeLessThan(4.5);
+
+        // The label's own former colour, `--brandink`, is NOT asserted as a
+        // universal failure, because it genuinely is not one: in light mode it is
+        // `color-mix(--brand 82%, black)` — a darkened brand on brand, which is the
+        // illegible case — but in dark mode the formula flips to
+        // `color-mix(--brand 60%, white)`, a LIGHTENED brand that clears AA against
+        // its own fill by accident. Asserting it as always-failing would have been
+        // a false claim; recording the measured ratio keeps the real asymmetry
+        // visible without over-stating it.
+        test.info().annotations.push({
+          type: "contrast",
+          description:
+            `${theme}/${accent}: --onbrand on --brand = ` +
+            `${contrastRatio(onbrand, brand).toFixed(4)}:1; ` +
+            `former --brandink label = ${contrastRatio(brandink, brand).toFixed(4)}:1; ` +
+            `former --ink3 formula = ${contrastRatio(ink3, brand).toFixed(4)}:1`,
+        });
+      });
+    }
+  }
+
+  test("the unselected segment keeps its own ink and does not borrow --onbrand", async ({
+    page,
+  }) => {
+    await gotoContractedForm(page, "light", "teal");
+
+    const range = page.getByTestId("contracted-policy-range");
+    await expect(range).toHaveAttribute("aria-pressed", "false");
+
+    // An unselected segment sits on the well track, not on a brand fill, so it
+    // must NOT be painted with the on-brand pair — that would make "selected"
+    // unreadable as a state.
+    const brand = await resolveToken(page, "--brand", "backgroundColor");
+    await expect(range).not.toHaveCSS("background-color", brand);
+    await expect(range).toHaveCSS("color", await resolveToken(page, "--ink2", "color"));
+  });
+
+  test("switching policy moves the pairing with the selection", async ({ page }) => {
+    await gotoContractedForm(page, "dark", "rose");
+
+    const onbrand = await resolveToken(page, "--onbrand", "color");
+    const brand = await resolveToken(page, "--brand", "backgroundColor");
+
+    await page.getByTestId("contracted-policy-range").click();
+
+    const range = page.getByTestId("contracted-policy-range");
+    await expect(range).toHaveAttribute("aria-pressed", "true");
+    await expect(range).toHaveCSS("background-color", brand);
+    await expect(range).toHaveCSS("color", onbrand);
+    await expect(range.locator("span", { hasText: "min" })).toHaveCSS("color", onbrand);
+
+    // ...and the previously-selected one gives it back.
+    await expect(page.getByTestId("contracted-policy-exact")).not.toHaveCSS(
+      "background-color",
+      brand,
+    );
+  });
+});

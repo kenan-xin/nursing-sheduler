@@ -7,14 +7,19 @@
 // an ORDERED SEQUENCE, not a set: clicking a source button APPENDS its id
 // (duplicates allowed, order significant — e.g. `Evening → Day`); each existing
 // position exposes move-earlier / move-later / remove. Rendered per the
-// prototype (ScreenCards.dc.html:166-206): a brand-tinted "PATTERN ORDER" panel
-// of `→`-joined chips above the SHIFT GROUPS / SHIFT TYPES source buttons.
+// prototype (ScreenCards.dc.html:166-206): a "PATTERN ORDER" panel of `→`-joined
+// chips above the SHIFT GROUPS / SHIFT TYPES source buttons. The panel carries the
+// shared `selected` role rather than the prototype's `--brandtint` wash, per the
+// adoption deviation rule that DESIGN.md outranks prototype examples.
 //
 // Fully controlled (`value`/`onChange`) — no store access, no domain logic. The
 // append/move/remove list math is exported as pure helpers so it is unit-testable
 // without mounting React (`pattern-builder.test.ts`).
 
 import * as React from "react";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { surfaceVariants } from "@/components/ui/surface";
 import type { ShiftTypeRef } from "@/lib/scenario";
 import type { TransferOption } from "@/components/entity-editor/transfer-list";
 import {
@@ -134,7 +139,7 @@ function SourceButton({
   if (option.disabled) {
     return (
       <span
-        className="inline-flex h-[34px] cursor-not-allowed items-center gap-1.5 whitespace-nowrap border border-line2 bg-panel px-3 text-meta font-semibold text-ink opacity-50"
+        className="inline-flex h-control-sm cursor-not-allowed items-center gap-1.5 whitespace-nowrap rounded-pill border border-line2 bg-panel px-3 text-meta font-semibold text-ink opacity-50"
         title={option.disabledReason}
       >
         {group && <FaLayerGroup className="size-2.5 opacity-70" />}
@@ -142,17 +147,21 @@ function SourceButton({
       </span>
     );
   }
+  // The `--brandtint` + `--brand` hover is retired here for the same reason as the
+  // date-scope chips: DESIGN.md §6 reserves that pairing for selection, and these
+  // are a palette of things you can ADD, none of which is selected. The shared
+  // Button contract supplies the L1 fill, the pill, and the coarse-pointer target.
   return (
-    <button
-      type="button"
+    <Button
+      variant="outline"
+      size="sm"
       aria-label={`Add ${option.label} to the pattern`}
       onClick={onClick}
-      className="inline-flex h-[34px] items-center gap-1.5 whitespace-nowrap border border-line bg-surface px-3 text-meta font-semibold text-ink hover:border-brand hover:bg-brandtint"
     >
       {group && <FaLayerGroup className="size-2.5 opacity-70" />}
       {option.label}
       <FaPlus className="size-2.5 text-ink3" aria-hidden />
-    </button>
+    </Button>
   );
 }
 
@@ -202,9 +211,15 @@ function PatternChip({
         onDrop(e.clientX < rect.left + rect.width / 2 ? "before" : "after");
       }}
       onDragEnd={onDragEnd}
-      className={`inline-flex cursor-grab items-center gap-1 border bg-surface py-1 pl-2.5 pr-1 text-meta font-semibold text-ink ${
+      // The drop candidate borrows the shared `drop-target` LANGUAGE — a dashed
+      // brand edge over the hover tone — rather than the hand-authored inset rule
+      // it used to carry. That arbitrary `shadow-[inset_2px_0_0_...]` was an
+      // untokened elevation value, which the F4 provenance scanner rejects even
+      // when the value happens to match: a copy stops tracking its source the
+      // moment either side is retuned.
+      className={`inline-flex cursor-grab items-center gap-1 rounded-pill border py-1 pl-2.5 pr-1 text-meta font-semibold text-ink ${
         isDragging ? "opacity-50" : ""
-      } ${isOver ? "border-brand shadow-[inset_2px_0_0_var(--color-brand)]" : "border-line"}`}
+      } ${isOver ? "border-dashed border-brand bg-panel-alt shadow-2" : "border-line bg-surface shadow-1"}`}
       data-testid={`pattern-chip-${index}`}
       // See CardListItem: a waitable hook for the drag state the chips share.
       data-dragging={isDragging ? "true" : undefined}
@@ -215,7 +230,7 @@ function PatternChip({
         aria-label="Move earlier"
         disabled={!canMoveEarlier}
         onClick={onMoveEarlier}
-        className="px-1 text-ink3 hover:text-ink disabled:opacity-30 disabled:hover:text-ink3"
+        className="inline-flex items-center justify-center px-1 text-ink3 hover:text-ink disabled:opacity-30 disabled:hover:text-ink3 pointer-coarse:min-h-touch pointer-coarse:min-w-touch"
       >
         <FaChevronLeft className="size-2.5" />
       </button>
@@ -224,7 +239,7 @@ function PatternChip({
         aria-label="Move later"
         disabled={!canMoveLater}
         onClick={onMoveLater}
-        className="px-1 text-ink3 hover:text-ink disabled:opacity-30 disabled:hover:text-ink3"
+        className="inline-flex items-center justify-center px-1 text-ink3 hover:text-ink disabled:opacity-30 disabled:hover:text-ink3 pointer-coarse:min-h-touch pointer-coarse:min-w-touch"
       >
         <FaChevronRight className="size-2.5" />
       </button>
@@ -232,7 +247,7 @@ function PatternChip({
         type="button"
         aria-label={`Remove ${label}`}
         onClick={onRemove}
-        className="px-1 text-ink3 hover:text-error"
+        className="inline-flex items-center justify-center px-1 text-ink3 hover:text-errorink pointer-coarse:min-h-touch pointer-coarse:min-w-touch"
       >
         <FaXmark className="size-3" />
       </button>
@@ -256,8 +271,15 @@ export function PatternBuilder({ items, groups, value, onChange, error }: Patter
           Minimum 2, duplicates allowed.
         </p>
       ) : (
+        // The built pattern IS the selection, so it takes the shared `selected`
+        // role (a `--brand` border and `--sh-2` on `--surface`) — the same treatment
+        // the transfer list's SELECTED pane uses — rather than a `--brandtint`
+        // wash that would compete with the chips sitting on it.
         <div
-          className="flex flex-wrap items-center gap-1.5 border border-brand bg-brandtint p-3"
+          className={cn(
+            "flex flex-wrap items-center gap-1.5 p-3",
+            surfaceVariants({ role: "selected", geometry: "control" }),
+          )}
           data-testid="pattern-builder-order"
         >
           {value.map((id, index) => (

@@ -107,7 +107,6 @@ export function AffinityForm({ state, mode, initialForm, onSave, onCancel }: Aff
           value={form.description}
           onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
           placeholder="e.g., Encourage newcomers and seniors to work together"
-          className="h-10"
         />
       </FieldShell>
 
@@ -188,7 +187,7 @@ export function AffinityForm({ state, mode, initialForm, onSave, onCancel }: Aff
 
       <FieldShell label="Dates" required error={errors.date}>
         {noDates ? (
-          <p className="border border-line bg-panel px-3.5 py-3 text-center text-meta italic text-ink3">
+          <p className="rounded-control bg-panel px-3.5 py-3 text-center text-meta italic text-ink3 shadow-well">
             No dates available. Please set up dates in the Dates screen first.
           </p>
         ) : (

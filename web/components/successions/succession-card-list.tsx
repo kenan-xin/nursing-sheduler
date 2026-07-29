@@ -60,7 +60,7 @@ function PatternChips({ card }: { card: SuccessionCard }) {
       {positions.map((label, index) => (
         <span key={index} className="flex items-center gap-1.5">
           {index > 0 && <FaArrowRightLong className="size-2.5 text-ink3" aria-hidden />}
-          <span className="border border-line2 bg-panel px-2 py-0.5 font-mono text-label font-semibold text-ink">
+          <span className="rounded-chip border border-line2 bg-panel px-2 py-0.5 font-mono text-label font-semibold text-ink">
             {label}
           </span>
         </span>

@@ -18,6 +18,7 @@
 
 import * as React from "react";
 import { Input } from "@/components/ui/input";
+import { Surface } from "@/components/ui/surface";
 import { FaCircleInfo } from "@/components/icons";
 
 /**
@@ -271,7 +272,12 @@ export function CoefficientFields({
   // with nothing selected, so picking a shift type fills the rows in place rather
   // than making a whole panel appear.
   return (
-    <div className="flex flex-col gap-3 border border-line2 bg-panel p-3.5" data-testid={testId}>
+    <Surface
+      level="well"
+      geometry="control"
+      className="flex flex-col gap-3 p-3.5"
+      data-testid={testId}
+    >
       <span className="text-label font-semibold uppercase tracking-[0.03em] text-ink2">
         {label} Coefficients
       </span>
@@ -282,10 +288,10 @@ export function CoefficientFields({
       )}
       {hasEligible && showCoverage && (
         <div
-          className={`flex items-center gap-2 border px-3 py-2 text-meta font-semibold ${
+          className={`flex items-center gap-2 rounded-control border px-3 py-2 text-meta font-semibold ${
             allFilled
-              ? "border-success bg-successtint text-success"
-              : "border-warn bg-warntint text-warn"
+              ? "border-success bg-successtint text-successink"
+              : "border-warn bg-warntint text-warnink"
           }`}
           data-testid={`${testId}-coverage`}
         >
@@ -305,7 +311,7 @@ export function CoefficientFields({
           return (
             <label key={id} className="flex flex-wrap items-center gap-3">
               <span
-                className="min-w-[66px] border border-line2 bg-surface px-2.5 py-[5px] text-center font-mono text-label font-semibold text-ink"
+                className="min-w-[66px] rounded-chip border border-line2 bg-surface px-2.5 py-[5px] text-center font-mono text-label font-semibold text-ink"
                 title={id}
               >
                 {id}
@@ -322,7 +328,7 @@ export function CoefficientFields({
                   onChange(updateCoefficientPair(eligible, pairs, id, parsed), id);
                 }}
                 placeholder="—"
-                className="h-[34px] w-[88px] px-2.5 font-mono font-bold"
+                className="w-[88px] px-2.5 font-mono font-bold"
               />
               {err && <span className="text-meta font-semibold text-error">{err}</span>}
             </label>
@@ -346,6 +352,6 @@ export function CoefficientFields({
           {aggregateError}
         </p>
       )}
-    </div>
+    </Surface>
   );
 }

@@ -195,7 +195,6 @@ export function RequirementForm({
           value={form.description}
           onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
           placeholder="e.g., Night shifts need senior nurses"
-          className="h-10"
         />
       </FieldShell>
 
@@ -264,7 +263,7 @@ export function RequirementForm({
           its input width and wrapped the labels. */}
       <div className="grid grid-cols-1 gap-x-[24px] gap-y-[20px] formgrid:grid-cols-2">
         <FieldShell label="Required number of people" required error={errors.requiredNumPeople}>
-          <input
+          <Input
             type="number"
             min={0}
             step={1}
@@ -274,7 +273,7 @@ export function RequirementForm({
             onChange={(e) => onRequiredChange(e.target.value)}
             onWheel={blurOnWheel}
             placeholder="e.g. 3"
-            className="h-10 w-[132px] border border-line bg-surface px-3 font-bold"
+            className="w-[132px] font-bold"
           />
         </FieldShell>
 
@@ -287,7 +286,7 @@ export function RequirementForm({
           error={errors.preferredNumPeople}
         >
           <div className="flex flex-wrap items-start gap-3.5">
-            <input
+            <Input
               type="number"
               min={1}
               step={1}
@@ -297,7 +296,7 @@ export function RequirementForm({
               onChange={(e) => onPreferredChange(e.target.value)}
               onWheel={blurOnWheel}
               placeholder="= Required"
-              className="h-10 w-[132px] flex-none border border-line bg-surface px-3 font-bold"
+              className="w-[132px] flex-none font-bold"
             />
             <p className="max-w-[44ch] min-w-[200px] flex-1 text-meta leading-[1.45] text-ink3">
               {PREFERRED_NOTE}
@@ -308,7 +307,7 @@ export function RequirementForm({
 
       <FieldShell label="Qualified people" required error={errors.qualifiedPeople}>
         {noPeople ? (
-          <p className="border border-line bg-panel px-3.5 py-3 text-center text-meta italic text-ink3">
+          <p className="rounded-control bg-panel px-3.5 py-3 text-center text-meta italic text-ink3 shadow-well">
             No people set up — add some on the Staff screen first.
           </p>
         ) : (
@@ -347,7 +346,7 @@ export function RequirementForm({
 
       <FieldShell label="Dates" required error={errors.date}>
         {noDates ? (
-          <p className="border border-line bg-panel px-3.5 py-3 text-center text-meta italic text-ink3">
+          <p className="rounded-control bg-panel px-3.5 py-3 text-center text-meta italic text-ink3 shadow-well">
             No dates available. Please set up dates in the Dates screen first.
           </p>
         ) : (
