@@ -22,6 +22,11 @@ const workers = resolveWorkerCount({
 // and starts Next, then the smoke spec asserts the shell renders.
 export default defineConfig({
   testDir: "./e2e",
+  // Browser suites are `*.spec.ts`, full stop (F4). Playwright's default
+  // `testMatch` also claims `*.test.ts`, which would sweep up the vitest unit
+  // tests that now sit beside the shared support modules in `e2e/support/` and
+  // fail them for calling `describe()` outside a Playwright runner.
+  testMatch: /\.spec\.ts$/,
   // The assembled Browser→Next→FastAPI spec requires the live direct Compose
   // stack (no route interception, real backend). Exclude it from the base
   // suite — it runs only under `playwright.assembled.config.ts` via
@@ -36,7 +41,25 @@ export default defineConfig({
     baseURL,
     trace: "on-first-retry",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [
+    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+    // F4's coarse-pointer lane. Scoped by `testMatch` to the ONE spec that
+    // measures real touch targets, so it adds a single extra run rather than
+    // doubling the whole legacy suite. `hasTouch` is what actually flips the
+    // pointer media query — the spec asserts `(pointer: coarse)` and
+    // `navigator.maxTouchPoints` BEFORE measuring anything, because a context
+    // that silently stayed fine-pointer would measure the 32/36px sizes and
+    // "pass" for exactly the wrong reason.
+    {
+      name: "v2-touch",
+      testMatch: /v2-visual-system\.spec\.ts/,
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 390, height: 844 },
+        hasTouch: true,
+      },
+    },
+  ],
   webServer: {
     // Build, then serve the standalone artifact via `pnpm start` (which prepares
     // static/public and runs the standalone server — `next start` is unsupported

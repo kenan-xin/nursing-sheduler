@@ -608,6 +608,13 @@ html.dark[data-accent="plum"] {
     font-family: var(--ff-body);
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
+    /* The ROOT element, not just <body>. DESIGN.md's No-Black Rule is that
+       NOTHING inherits the UA default black, and <html> was still computing
+       rgb(0, 0, 0) for `color` — and, through it, `text-decoration-color`.
+       Nothing visible inherited that in practice, because <body> below sets the
+       same value; but "in practice" is the shape a rule fails in, and F4's
+       runtime paint scanner reads the root like every other element. */
+    color: var(--ink);
   }
   body {
     background-color: var(--bg);

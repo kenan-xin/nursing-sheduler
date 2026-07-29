@@ -238,6 +238,54 @@ test.describe("T08 rebuild — sidebar prototype-conformance audit", () => {
     expect(Math.round(box!.height)).toBe(34);
   });
 
+  // The other half of the M5 contract, and the reason the ii7.10.1 merge fix is
+  // safe to ship. The footer control's authored `size-[34px]` now actually beats
+  // the `size-control` variant — but it must NOT be able to beat the Button's
+  // `pointer-coarse:min-h-touch` / `min-w-touch`, which live in their own
+  // tailwind-merge groups behind their own variant. 34px on a precise pointer
+  // and a real 44px target on a coarse one are both required, and a merge
+  // regression that collapsed those groups would silently trade the second for
+  // the first.
+  //
+  // The coarse context is built here rather than borrowed from F4's `v2-touch`
+  // project, because this spec runs only under `chromium` and the claim belongs
+  // beside the 34px assertion it qualifies.
+  test("M5 — the 34px footer control still meets the coarse-pointer minimum", async ({
+    browser,
+  }) => {
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+      hasTouch: true,
+    });
+    const page = await context.newPage();
+    try {
+      await page.addInitScript(() => {
+        (window as unknown as { __NS_ENABLE_TEST_BRIDGE?: boolean }).__NS_ENABLE_TEST_BRIDGE = true;
+      });
+      await gotoReadyHome(page);
+
+      // Assert the pointer state BEFORE measuring: a context that silently
+      // stayed fine-pointer would measure 34px and "pass" for the wrong reason.
+      const media = await page.evaluate(() => ({
+        coarse: matchMedia("(pointer: coarse)").matches,
+        touchPoints: navigator.maxTouchPoints,
+      }));
+      expect(media.coarse, "the context must report (pointer: coarse)").toBe(true);
+      expect(media.touchPoints).toBeGreaterThanOrEqual(1);
+
+      // Below 920px the rail is a drawer, so open it to reach the footer.
+      await page.getByTestId("mobile-nav-trigger").click();
+      const theme = page.getByRole("button", { name: /switch to .* theme/i });
+      await expect(theme).toBeVisible();
+
+      const box = await theme.boundingBox();
+      expect(Math.round(box!.width)).toBeGreaterThanOrEqual(44);
+      expect(Math.round(box!.height)).toBeGreaterThanOrEqual(44);
+    } finally {
+      await context.close();
+    }
+  });
+
   test("m7 — mode control exposes tablist / tab semantics with aria-selected", async ({ page }) => {
     const list = page.getByTestId("mode-toggle");
     await expect(list).toHaveAttribute("role", "tablist");

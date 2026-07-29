@@ -1,4 +1,7 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { rowForRoute } from "./support/v2-surface-matrix";
+import { prepareRow } from "./support/v2-seed";
+import { awaitRowReady, enterScreenshotMode, SCREENSHOT_ATTRIBUTE } from "./support/v2-readiness";
 
 // Render / viewport / accent / reduced-motion / hydration rows of the T03
 // acceptance matrix. Static rows (token snapshot, accent/shell derivation,
@@ -206,9 +209,90 @@ async function expectMixedSwatch(
   }
 }
 
+// F4's foundation row. This spec is the one place the manifest's descriptors
+// meet the surface they describe, so it uses them rather than restating them.
+const FOUNDATION_ROW = rowForRoute("/design-system")!;
+
+// ---------------------------------------------------------------------------
+// F4 — the shared harness, proven against the foundation surface.
+//
+// The manifest's foundation descriptors are used by three other suites that
+// cannot see this page's markup. These tests are what keep the two honest: if
+// the marker moves, or the reset stops resetting, or screenshot mode stops
+// suppressing motion, it fails HERE rather than as a puzzling flake in a
+// route ticket's baseline six weeks from now.
+// ---------------------------------------------------------------------------
+test.describe("F4 shared harness", () => {
+  test("the manifest's foundation descriptor matches this page", async ({ page }) => {
+    expect(FOUNDATION_ROW.readiness.strategy).toBe("bare");
+    expect(FOUNDATION_ROW.readiness.mode).toBeNull();
+
+    await prepareRow(page, FOUNDATION_ROW);
+    await page.goto(FOUNDATION_ROW.route);
+    await awaitRowReady(page, FOUNDATION_ROW);
+
+    // The marker the manifest names is a real element on this page — not a
+    // selector that happens to resolve to nothing and settle instantly.
+    await expect(page.locator(FOUNDATION_ROW.readiness.marker)).toHaveCount(1);
+
+    // This route renders outside the (app) group, so it has no shell, no
+    // hydration gate and no store seam. `storeSeam: false` in the manifest is
+    // that fact, and this is the assertion that it stays true.
+    expect(FOUNDATION_ROW.readiness.storeSeam).toBe(false);
+    expect(await page.evaluate(() => "__nsStore" in window)).toBe(false);
+  });
+
+  test("every semantic check in the frozen row resolves on this page", async ({ page }) => {
+    // The runner reports a check that matched nothing as a failure, but only
+    // when it runs. This proves each selector is live before nine tickets start
+    // trusting the same shape of declaration for their own rows.
+    await page.goto("/design-system");
+    await awaitRowReady(page, FOUNDATION_ROW);
+
+    const missing: string[] = [];
+    for (const check of FOUNDATION_ROW.semanticChecks) {
+      const count = await page.locator(check.selector).count();
+      const required = check.minCount ?? 1;
+      if (count < required)
+        missing.push(`${check.label} (${check.selector}): ${count}/${required}`);
+    }
+    expect(missing, `unresolved semantic checks:\n  ${missing.join("\n  ")}`).toEqual([]);
+  });
+
+  test("screenshot mode marks the root and stops the running animations", async ({ page }) => {
+    await page.goto("/design-system");
+    await awaitRowReady(page, FOUNDATION_ROW);
+
+    // The skeleton shimmer runs forever by design, which is exactly why the
+    // readiness contract cannot wait it out and why screenshot mode has to
+    // remove it instead.
+    const before = await page.evaluate(
+      () => document.getAnimations().filter((a) => a.playState === "running").length,
+    );
+    expect(
+      before,
+      "the reference page should have a live infinite animation to suppress",
+    ).toBeGreaterThan(0);
+
+    await enterScreenshotMode(page);
+
+    expect(await page.locator("html").getAttribute(SCREENSHOT_ATTRIBUTE)).toBe("");
+    const after = await page.evaluate(
+      () => document.getAnimations().filter((a) => a.playState === "running").length,
+    );
+    expect(after, "screenshot mode must leave no animation running").toBe(0);
+  });
+});
+
 test.describe("design system — style reference", () => {
   test("all sections + controls render", async ({ page }) => {
     await page.goto("/design-system");
+    // The shared readiness contract, exercised on the surface it was written
+    // for: hydration is not applicable here (this route renders outside the
+    // (app) group), but the marker, fonts, portals and stable-frame conditions
+    // all are. F1's theme/accent lifecycle rows below are NOT re-run through it
+    // — they own that coverage and several of them deliberately break storage.
+    await awaitRowReady(page, FOUNDATION_ROW);
     for (const id of [
       "palette",
       "accent",

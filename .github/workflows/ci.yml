@@ -53,7 +53,17 @@ jobs:
 
   e2e:
     name: e2e (playwright)
-    runs-on: ubuntu-latest
+    # PINNED, not `ubuntu-latest`. This job compares committed screenshot
+    # baselines, and a snapshot filename encodes the platform (`linux`) but NOT
+    # the distro version or the architecture — so a rolling alias can change the
+    # rendering environment underneath filenames that stay perfectly valid.
+    # GitHub documents `ubuntu-latest` as Ubuntu 24.04 x64 today, with 26.04
+    # already in public preview behind the same alias. The committed Linux
+    # baselines were generated and reviewed on Ubuntu 24.04 x64
+    # (mcr.microsoft.com/playwright:v1.61.1-noble, --platform linux/amd64), so
+    # this label is part of the baseline contract: moving it means regenerating
+    # and re-reviewing the Linux set in the new environment first.
+    runs-on: ubuntu-24.04
     needs: checks
     defaults:
       run:
