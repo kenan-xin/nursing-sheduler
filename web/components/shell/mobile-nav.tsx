@@ -42,7 +42,7 @@ export function MobileNav() {
       <DialogTrigger
         aria-label="Open navigation menu"
         data-testid="mobile-nav-trigger"
-        className="flex size-10 items-center justify-center border border-line bg-transparent text-ink outline-none hover:bg-panel focus-visible:ring-2 focus-visible:ring-brand [&_svg]:size-4"
+        className="flex size-10 items-center justify-center border border-line bg-transparent text-ink outline-none pointer-coarse:min-h-touch pointer-coarse:min-w-touch hover:bg-panel focus-visible:ring-2 focus-visible:ring-brand [&_svg]:size-4"
       >
         <FaBars />
       </DialogTrigger>

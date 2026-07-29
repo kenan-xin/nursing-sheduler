@@ -62,7 +62,7 @@ function UndoRedoButton({
       title={title}
       data-testid={testId}
       className={cn(
-        "flex size-9 items-center justify-center border bg-surface outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand [&_svg]:size-4",
+        "flex size-9 items-center justify-center border bg-surface outline-none transition-colors pointer-coarse:min-h-touch pointer-coarse:min-w-touch focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand [&_svg]:size-4",
         disabled
           ? "cursor-not-allowed border-line2 text-faint"
           : "border-line text-ink hover:bg-panel",

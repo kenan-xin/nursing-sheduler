@@ -97,6 +97,20 @@ describe("MobileNav — drawer geometry and surface role", () => {
   });
 });
 
+describe("MobileNav — coarse-pointer contract", () => {
+  it("keeps the precise 36px trigger box and adds the real coarse-pointer floor", () => {
+    render(<MobileNav />);
+    const classes = classesOf(screen.getByTestId("mobile-nav-trigger"));
+    // Precise-pointer geometry is untouched: still the measured 36px box
+    // (`size-10` under this app's 0.9 spacing scale), not 44px.
+    expect(classes).toContain("size-10");
+    // The real control grows via Tailwind's `pointer-coarse` variant — never a
+    // pseudo-element hitbox or a hardcoded 44px arbitrary value.
+    expect(classes).toContain("pointer-coarse:min-h-touch");
+    expect(classes).toContain("pointer-coarse:min-w-touch");
+  });
+});
+
 describe("MobileNav — modal behaviour and every dismissal route", () => {
   it("traps focus inside the drawer and locks page scroll while open", async () => {
     const drawer = await openDrawer();
