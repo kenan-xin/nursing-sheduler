@@ -33,9 +33,6 @@
 // gated a missing/broken backend is a hard failure, never a green skip.
 
 import "fake-indexeddb/auto";
-import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { serializeScenario, serializeCanonicalDocument } from "../serialize";
 import { convertWorkspaceForOptimize, serializeWorkspace } from "../workspace";
@@ -50,9 +47,13 @@ import {
   useScenarioStore,
 } from "@/lib/store";
 
-const ORACLE = resolve(dirname(fileURLToPath(import.meta.url)), "oracle.py");
-const PYTHON = process.env.PYTHON ?? "python3";
-const GATED = !!process.env.RUN_DIFFERENTIAL;
+import {
+  callOracleRaw,
+  GATED,
+  oracleBudget,
+  probeBackend,
+  probeFailureReason,
+} from "./oracle-client";
 
 interface OracleResponse {
   ok: boolean;
@@ -64,12 +65,11 @@ interface OracleResponse {
   issues?: Array<{ path: Array<string | number>; code: string; message: string }>;
 }
 
-function callOracle(request: object): OracleResponse {
-  const result = spawnSync(PYTHON, [ORACLE], { input: JSON.stringify(request), encoding: "utf-8" });
-  if (result.status !== 0) {
-    throw new Error(`oracle exited ${result.status}: ${result.stderr || result.stdout}`);
-  }
-  return JSON.parse(result.stdout) as OracleResponse;
+/** Every call runs under `oracle-client`'s per-child budget and fail-closed
+ *  diagnostics (ii7.10.7). `caseLabel` names the call when one test issues several
+ *  of the same op, so a wedged or broken child reports WHICH one. */
+function callOracle(request: object, caseLabel?: string): OracleResponse {
+  return callOracleRaw<OracleResponse>(request, caseLabel);
 }
 
 const READY_PROBE = `workspaceVersion: 1
@@ -90,16 +90,8 @@ preferences:
     type: at most one shift per day
 `;
 
-function backendAvailable(): boolean {
-  if (!GATED) return false;
-  try {
-    return callOracle({ op: "workspace_canonical", yaml: READY_PROBE }).ok === true;
-  } catch {
-    return false;
-  }
-}
-
-const AVAILABLE = GATED && backendAvailable();
+const PROBE = probeBackend({ op: "workspace_canonical", yaml: READY_PROBE });
+const AVAILABLE = GATED && PROBE.available;
 
 // --- Frontend UI-state variants exercised in direction 1 ---------------------
 
@@ -204,7 +196,9 @@ appVersion: 2.0.0
 
 describe.skipIf(!GATED)("workspace differential — backend availability (fail-closed)", () => {
   it("Python + vendored server boundary are importable", () => {
-    expect(AVAILABLE).toBe(true);
+    // The probe's reason rides along, so an unreachable backend names WHY rather
+    // than only asserting `false === true`.
+    expect(AVAILABLE, probeFailureReason(PROBE)).toBe(true);
   });
 });
 
@@ -212,16 +206,23 @@ describe.skipIf(!AVAILABLE)(
   "workspace differential — TS dump → Python strict ≡ strict producer",
   () => {
     for (const [name, build] of Object.entries(STATE_VARIANTS)) {
-      it(`serializeWorkspace ≡ serializeScenario through canonicalize_submission (${name})`, () => {
-        const state = build();
-        const res = callOracle({
-          op: "workspace_equiv",
-          strict: serializeScenario(state),
-          workspace: serializeWorkspace(state),
-        });
-        expect(res.ok).toBe(true);
-        expect(res.equivalent).toBe(true);
-      });
+      it(
+        `serializeWorkspace ≡ serializeScenario through canonicalize_submission (${name})`,
+        { timeout: oracleBudget(1) },
+        () => {
+          const state = build();
+          const res = callOracle(
+            {
+              op: "workspace_equiv",
+              strict: serializeScenario(state),
+              workspace: serializeWorkspace(state),
+            },
+            name,
+          );
+          expect(res.ok).toBe(true);
+          expect(res.equivalent).toBe(true);
+        },
+      );
     }
   },
 );
@@ -230,20 +231,27 @@ describe.skipIf(!AVAILABLE)(
   "workspace differential — Python fixtures import equivalently in TS",
   () => {
     for (const [name, fixture] of Object.entries(READY_FIXTURES)) {
-      it(`TS convert → strict ≡ Python canonicalize_submission (${name})`, () => {
-        const result = convertWorkspaceForOptimize(fixture);
-        expect(result.status).toBe("ok");
-        if (result.status !== "ok") return;
-        const res = callOracle({
-          op: "workspace_equiv",
-          strict: serializeCanonicalDocument(result.document),
-          workspace: fixture,
-        });
-        expect(res.ok).toBe(true);
-        expect(res.equivalent).toBe(true);
-        // The Python pre-job boundary accepts the identical fixture bytes.
-        expect(callOracle({ op: "workspace_canonical", yaml: fixture }).ok).toBe(true);
-      });
+      it(
+        `TS convert → strict ≡ Python canonicalize_submission (${name})`,
+        { timeout: oracleBudget(2) },
+        () => {
+          const result = convertWorkspaceForOptimize(fixture);
+          expect(result.status).toBe("ok");
+          if (result.status !== "ok") return;
+          const res = callOracle(
+            {
+              op: "workspace_equiv",
+              strict: serializeCanonicalDocument(result.document),
+              workspace: fixture,
+            },
+            name,
+          );
+          expect(res.ok).toBe(true);
+          expect(res.equivalent).toBe(true);
+          // The Python pre-job boundary accepts the identical fixture bytes.
+          expect(callOracle({ op: "workspace_canonical", yaml: fixture }, name).ok).toBe(true);
+        },
+      );
     }
   },
 );
@@ -456,114 +464,133 @@ describe.skipIf(!AVAILABLE)(
       await drainScenarioPersist(useScenarioStore);
     });
 
-    it("every durable field survives the production dispatcher + store Load (independent golden)", async () => {
-      const state = await hydrateThroughStore(FULL_AUTHORING);
+    it(
+      "every durable field survives the production dispatcher + store Load (independent golden)",
+      { timeout: oracleBudget(1) },
+      async () => {
+        const state = await hydrateThroughStore(FULL_AUTHORING);
 
-      expect(state.meta.description).toBe("T05 fixture");
-      expect(state.meta.apiVersion).toBe("alpha");
-      expect(state.rangeStart).toBe("2026-05-14");
-      expect(state.rangeEnd).toBe("2026-05-20");
-      expect(state.staff).toMatchObject([{ id: "Alice", history: ["D"] }, { id: "Bob" }]);
-      expect(state.staffGroups).toMatchObject([{ id: "Seniors", members: ["Alice", "Bob"] }]);
-      expect(state.shifts).toMatchObject([{ id: "D" }, { id: "E" }, { id: "N" }]);
-      expect(state.shiftGroups).toMatchObject([{ id: "DayOrEvening", members: ["D", "E"] }]);
-      expect(state.dateGroups).toMatchObject([
-        { id: "FirstTwo", members: ["2026-05-14", "2026-05-15"] },
-      ]);
-      expect(state.maxOneShiftPerDay).toMatchObject({ description: "one per day" });
+        expect(state.meta.description).toBe("T05 fixture");
+        expect(state.meta.apiVersion).toBe("alpha");
+        expect(state.rangeStart).toBe("2026-05-14");
+        expect(state.rangeEnd).toBe("2026-05-20");
+        expect(state.staff).toMatchObject([{ id: "Alice", history: ["D"] }, { id: "Bob" }]);
+        expect(state.staffGroups).toMatchObject([{ id: "Seniors", members: ["Alice", "Bob"] }]);
+        expect(state.shifts).toMatchObject([{ id: "D" }, { id: "E" }, { id: "N" }]);
+        expect(state.shiftGroups).toMatchObject([{ id: "DayOrEvening", members: ["D", "E"] }]);
+        expect(state.dateGroups).toMatchObject([
+          { id: "FirstTwo", members: ["2026-05-14", "2026-05-15"] },
+        ]);
+        expect(state.maxOneShiftPerDay).toMatchObject({ description: "one per day" });
 
-      // Card identity + bodies, per kind. Non-positional uid comes from workspaceId.
-      expect(state.cardsByKind.requirements).toMatchObject([
-        { uid: "r1", shiftType: "D", requiredNumPeople: 1 },
-      ]);
-      expect(state.cardsByKind.successions).toMatchObject([
-        { uid: "s1", person: "ALL", pattern: [["D", "N"]] },
-      ]);
-      expect(state.cardsByKind.counts).toMatchObject([
-        {
-          uid: "n1",
-          person: "ALL",
-          countDates: "ALL",
-          countShiftTypes: ["D"],
-          expression: "x >= 0",
-          target: 0,
-        },
-      ]);
-      expect(state.cardsByKind.affinities).toMatchObject([
-        { uid: "a1", date: "ALL", people1: ["Alice"], people2: ["Bob"], shiftTypes: ["D"] },
-      ]);
-      expect(state.cardsByKind.coverings).toMatchObject([
-        { uid: "v1", date: "ALL", preceptors: ["Alice"], preceptees: ["Bob"], shiftTypes: ["D"] },
-      ]);
+        // Card identity + bodies, per kind. Non-positional uid comes from workspaceId.
+        expect(state.cardsByKind.requirements).toMatchObject([
+          { uid: "r1", shiftType: "D", requiredNumPeople: 1 },
+        ]);
+        expect(state.cardsByKind.successions).toMatchObject([
+          { uid: "s1", person: "ALL", pattern: [["D", "N"]] },
+        ]);
+        expect(state.cardsByKind.counts).toMatchObject([
+          {
+            uid: "n1",
+            person: "ALL",
+            countDates: "ALL",
+            countShiftTypes: ["D"],
+            expression: "x >= 0",
+            target: 0,
+          },
+        ]);
+        expect(state.cardsByKind.affinities).toMatchObject([
+          { uid: "a1", date: "ALL", people1: ["Alice"], people2: ["Bob"], shiftTypes: ["D"] },
+        ]);
+        expect(state.cardsByKind.coverings).toMatchObject([
+          { uid: "v1", date: "ALL", preceptors: ["Alice"], preceptees: ["Bob"], shiftTypes: ["D"] },
+        ]);
 
-      // Every request cell keeps its durable, non-positional uid and its kind.
-      expect(state.reqData).toMatchObject([
-        { uid: "c1", kind: "leave", person: "Alice", date: "2026-05-14" },
-        {
-          uid: "c2",
-          kind: "request",
-          person: "Bob",
-          date: "2026-05-15",
-          shiftType: "D",
-          weight: 2,
-        },
-        { uid: "c3", kind: "off", person: "Bob", date: "2026-05-16", weight: 1 },
-      ]);
+        // Every request cell keeps its durable, non-positional uid and its kind.
+        expect(state.reqData).toMatchObject([
+          { uid: "c1", kind: "leave", person: "Alice", date: "2026-05-14" },
+          {
+            uid: "c2",
+            kind: "request",
+            person: "Bob",
+            date: "2026-05-15",
+            shiftType: "D",
+            weight: 2,
+          },
+          { uid: "c3", kind: "off", person: "Bob", date: "2026-05-16", weight: 1 },
+        ]);
 
-      expect(state.exportLayout.formatting).toMatchObject([
-        { type: "row", people: ["Alice"], backgroundColor: "#ff0000" },
-      ]);
+        expect(state.exportLayout.formatting).toMatchObject([
+          { type: "row", people: ["Alice"], backgroundColor: "#ff0000" },
+        ]);
 
-      // SEPARATELY: the strict projection of the same fixture matches the strict
-      // model Python builds — proven through the real Python boundary, not the
-      // shared TS mapping used for hydration above.
-      const converted = convertWorkspaceForOptimize(FULL_AUTHORING);
-      expect(converted.status).toBe("ok");
-      if (converted.status !== "ok") return;
-      const equiv = callOracle({
-        op: "workspace_equiv",
-        strict: serializeCanonicalDocument(converted.document),
-        workspace: FULL_AUTHORING,
-      });
-      expect(equiv.ok).toBe(true);
-      expect(equiv.equivalent).toBe(true);
-    });
+        // SEPARATELY: the strict projection of the same fixture matches the strict
+        // model Python builds — proven through the real Python boundary, not the
+        // shared TS mapping used for hydration above.
+        const converted = convertWorkspaceForOptimize(FULL_AUTHORING);
+        expect(converted.status).toBe("ok");
+        if (converted.status !== "ok") return;
+        const equiv = callOracle(
+          {
+            op: "workspace_equiv",
+            strict: serializeCanonicalDocument(converted.document),
+            workspace: FULL_AUTHORING,
+          },
+          "FULL_AUTHORING",
+        );
+        expect(equiv.ok).toBe(true);
+        expect(equiv.equivalent).toBe(true);
+      },
+    );
 
-    it("a disabled record survives to authoring state but is stripped from strict projection", async () => {
-      const state = await hydrateThroughStore(DISABLED_RECORD);
+    it(
+      "a disabled record survives to authoring state but is stripped from strict projection",
+      { timeout: oracleBudget(1) },
+      async () => {
+        const state = await hydrateThroughStore(DISABLED_RECORD);
 
-      expect(state.cardsByKind.requirements).toMatchObject([
-        { uid: "r1", shiftType: "D", requiredNumPeople: 1 },
-        { uid: "r2", disabled: true, shiftType: "E", requiredNumPeople: 2 },
-      ]);
-      expect(state.cardsByKind.requirements[0].disabled).not.toBe(true);
+        expect(state.cardsByKind.requirements).toMatchObject([
+          { uid: "r1", shiftType: "D", requiredNumPeople: 1 },
+          { uid: "r2", disabled: true, shiftType: "E", requiredNumPeople: 2 },
+        ]);
+        expect(state.cardsByKind.requirements[0].disabled).not.toBe(true);
 
-      // Python accepts the backup and its strict model drops the disabled record.
-      const canonical = callOracle({ op: "workspace_canonical", yaml: DISABLED_RECORD });
-      expect(canonical.ok).toBe(true);
-      const converted = convertWorkspaceForOptimize(DISABLED_RECORD);
-      expect(converted.status).toBe("ok");
-      if (converted.status !== "ok") return;
-      const requirements = converted.document.preferences.filter(
-        (p) => p.type === "shift type requirement",
-      );
-      expect(requirements).toHaveLength(1);
-      expect(requirements[0]).toMatchObject({ shiftType: "D" });
-    });
+        // Python accepts the backup and its strict model drops the disabled record.
+        const canonical = callOracle(
+          { op: "workspace_canonical", yaml: DISABLED_RECORD },
+          "DISABLED_RECORD",
+        );
+        expect(canonical.ok).toBe(true);
+        const converted = convertWorkspaceForOptimize(DISABLED_RECORD);
+        expect(converted.status).toBe("ok");
+        if (converted.status !== "ok") return;
+        const requirements = converted.document.preferences.filter(
+          (p) => p.type === "shift type requirement",
+        );
+        expect(requirements).toHaveLength(1);
+        expect(requirements[0]).toMatchObject({ shiftType: "D" });
+      },
+    );
 
-    it("an incomplete backup hydrates in TS while Python reports not_ready", async () => {
-      const state = await hydrateThroughStore(INCOMPLETE_BACKUP);
+    it(
+      "an incomplete backup hydrates in TS while Python reports not_ready",
+      { timeout: oracleBudget(1) },
+      async () => {
+        const state = await hydrateThroughStore(INCOMPLETE_BACKUP);
 
-      expect(state.rangeStart).toBe("");
-      expect(state.rangeEnd).toBe("");
-      expect(state.staff).toMatchObject([{ id: "Alice" }]);
-      expect(state.cardsByKind.requirements).toMatchObject([{ uid: "r1", shiftType: "D" }]);
+        expect(state.rangeStart).toBe("");
+        expect(state.rangeEnd).toBe("");
+        expect(state.staff).toMatchObject([{ id: "Alice" }]);
+        expect(state.cardsByKind.requirements).toMatchObject([{ uid: "r1", shiftType: "D" }]);
 
-      expect(convertWorkspaceForOptimize(INCOMPLETE_BACKUP).status).toBe("not_ready");
-      expect(callOracle({ op: "workspace_canonical", yaml: INCOMPLETE_BACKUP }).errorCode).toBe(
-        "workspace_not_ready",
-      );
-    });
+        expect(convertWorkspaceForOptimize(INCOMPLETE_BACKUP).status).toBe("not_ready");
+        expect(
+          callOracle({ op: "workspace_canonical", yaml: INCOMPLETE_BACKUP }, "INCOMPLETE_BACKUP")
+            .errorCode,
+        ).toBe("workspace_not_ready");
+      },
+    );
   },
 );
 
@@ -591,8 +618,8 @@ preferences:
 `;
 
 /** `true` when Python's real loader selects + accepts V1 for this document. */
-function pythonSelectsV1(yaml: string): boolean {
-  const res = callOracle({ op: "workspace_canonical", yaml });
+function pythonSelectsV1(yaml: string, caseLabel: string): boolean {
+  const res = callOracle({ op: "workspace_canonical", yaml }, caseLabel);
   // A ready V1 doc canonicalizes (ok); a non-V1 version is the normative
   // unsupported-version rejection. Any other error would be a parity break.
   if (res.ok) return true;
@@ -633,16 +660,20 @@ const SCALAR_MATRIX: Array<{ label: string; scalar: string; v1: boolean }> = [
 
 describe.skipIf(!AVAILABLE)("workspace differential — version scalar dispatch parity", () => {
   for (const { label, scalar, v1 } of SCALAR_MATRIX) {
-    it(`TS and Python agree that "${label}" ${v1 ? "selects" : "rejects"} V1`, () => {
-      const yaml = `workspaceVersion: ${scalar}\n${SCALAR_BODY}`;
-      expect(pythonSelectsV1(yaml)).toBe(v1);
-      expect(tsSelectsV1(yaml)).toBe(v1);
-    });
+    it(
+      `TS and Python agree that "${label}" ${v1 ? "selects" : "rejects"} V1`,
+      { timeout: oracleBudget(1) },
+      () => {
+        const yaml = `workspaceVersion: ${scalar}\n${SCALAR_BODY}`;
+        expect(pythonSelectsV1(yaml, label)).toBe(v1);
+        expect(tsSelectsV1(yaml)).toBe(v1);
+      },
+    );
   }
 });
 
 describe.skipIf(!AVAILABLE)("workspace differential — rejection-category parity", () => {
-  it("an incomplete backup is not_ready on both sides", () => {
+  it("an incomplete backup is not_ready on both sides", { timeout: oracleBudget(1) }, () => {
     const fixture = `workspaceVersion: 1
 apiVersion: alpha
 dates:
@@ -656,20 +687,20 @@ shiftTypes:
 preferences: []
 `;
     expect(convertWorkspaceForOptimize(fixture).status).toBe("not_ready");
-    expect(callOracle({ op: "workspace_canonical", yaml: fixture }).errorCode).toBe(
-      "workspace_not_ready",
-    );
+    expect(
+      callOracle({ op: "workspace_canonical", yaml: fixture }, "incomplete backup").errorCode,
+    ).toBe("workspace_not_ready");
   });
 
-  it("an unsupported version is rejected on both sides", () => {
+  it("an unsupported version is rejected on both sides", { timeout: oracleBudget(1) }, () => {
     const fixture = "workspaceVersion: 2\napiVersion: alpha\n";
     expect(convertWorkspaceForOptimize(fixture).status).toBe("unsupported_version");
-    expect(callOracle({ op: "workspace_canonical", yaml: fixture }).errorCode).toBe(
-      "unsupported_workspace_version",
-    );
+    expect(
+      callOracle({ op: "workspace_canonical", yaml: fixture }, "unsupported version").errorCode,
+    ).toBe("unsupported_workspace_version");
   });
 
-  it("an unknown top-level field is invalid on both sides", () => {
+  it("an unknown top-level field is invalid on both sides", { timeout: oracleBudget(1) }, () => {
     const fixture = `workspaceVersion: 1
 apiVersion: alpha
 mysteryField: 1
@@ -689,15 +720,18 @@ preferences:
     type: at most one shift per day
 `;
     expect(convertWorkspaceForOptimize(fixture).status).toBe("invalid");
-    expect(callOracle({ op: "workspace_canonical", yaml: fixture }).errorCode).toBe(
-      "invalid_scheduling_data",
-    );
+    expect(
+      callOracle({ op: "workspace_canonical", yaml: fixture }, "unknown top-level field").errorCode,
+    ).toBe("invalid_scheduling_data");
   });
 
-  it("an unknown field inside a DISABLED preference is invalid on both sides", () => {
-    // The strict body is validated BEFORE disabled filtering, so an unknown field
-    // hiding in a disabled record cannot slip through on either side.
-    const fixture = `workspaceVersion: 1
+  it(
+    "an unknown field inside a DISABLED preference is invalid on both sides",
+    { timeout: oracleBudget(1) },
+    () => {
+      // The strict body is validated BEFORE disabled filtering, so an unknown field
+      // hiding in a disabled record cannot slip through on either side.
+      const fixture = `workspaceVersion: 1
 apiVersion: alpha
 dates:
   range:
@@ -717,11 +751,13 @@ preferences:
     requiredNumPeople: 1
     mysteryField: 9
 `;
-    expect(convertWorkspaceForOptimize(fixture).status).toBe("invalid");
-    expect(callOracle({ op: "workspace_canonical", yaml: fixture }).errorCode).toBe(
-      "invalid_scheduling_data",
-    );
-  });
+      expect(convertWorkspaceForOptimize(fixture).status).toBe("invalid");
+      expect(
+        callOracle({ op: "workspace_canonical", yaml: fixture }, "unknown field in disabled record")
+          .errorCode,
+      ).toBe("invalid_scheduling_data");
+    },
+  );
 });
 
 // --- Workspace identity rejection parity (T17r review P1) -----------------------
@@ -863,21 +899,25 @@ function hasIssueAtPath(
 
 describe.skipIf(!AVAILABLE)("workspace differential — Workspace identity rejection parity", () => {
   for (const { label, preferences, tsStatus, pyErrorCode, path } of IDENTITY_CASES) {
-    it(`${label} is rejected in the same category AND at the same path by both sides, never hydrating`, () => {
-      const fixture = `${IDENTITY_HEAD}\npreferences:${preferences}\n`;
-      // Optimize path: TS and Python agree on the normative rejection category…
-      const converted = convertWorkspaceForOptimize(fixture);
-      expect(converted.status).toBe(tsStatus);
-      const oracle = callOracle({ op: "workspace_canonical", yaml: fixture });
-      expect(oracle.errorCode).toBe(pyErrorCode);
-      // …and on the exact issue path.
-      const tsIssues = "issues" in converted ? converted.issues : undefined;
-      expect(hasIssueAtPath(tsIssues, path)).toBe(true);
-      expect(hasIssueAtPath(oracle.issues, path)).toBe(true);
-      // Load path: the production dispatcher rejects before hydration — no import
-      // target is produced, so `loadScenario` is never reached and no replacement
-      // identity (empty-string → minted UUID) is created.
-      expect(prepareScenarioLoad(fixture).target).toBeNull();
-    });
+    it(
+      `${label} is rejected in the same category AND at the same path by both sides, never hydrating`,
+      { timeout: oracleBudget(1) },
+      () => {
+        const fixture = `${IDENTITY_HEAD}\npreferences:${preferences}\n`;
+        // Optimize path: TS and Python agree on the normative rejection category…
+        const converted = convertWorkspaceForOptimize(fixture);
+        expect(converted.status).toBe(tsStatus);
+        const oracle = callOracle({ op: "workspace_canonical", yaml: fixture }, label);
+        expect(oracle.errorCode).toBe(pyErrorCode);
+        // …and on the exact issue path.
+        const tsIssues = "issues" in converted ? converted.issues : undefined;
+        expect(hasIssueAtPath(tsIssues, path)).toBe(true);
+        expect(hasIssueAtPath(oracle.issues, path)).toBe(true);
+        // Load path: the production dispatcher rejects before hydration — no import
+        // target is produced, so `loadScenario` is never reached and no replacement
+        // identity (empty-string → minted UUID) is created.
+        expect(prepareScenarioLoad(fixture).target).toBeNull();
+      },
+    );
   }
 });
