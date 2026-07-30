@@ -8,10 +8,13 @@
    a stylesheet. That is the whole remaining job here: the FullCalendar restyle,
    the per-cell state marks, and the legend swatches those cells are read against.
 
-   WHAT LEFT. The Dates-only v1 primitives this file used to carry — `.ns-input`,
+   WHAT LEFT. The v1 primitives this file used to carry — `.ns-input`,
    `.ns-switch`, `.ns-icon-btn`, `.ns-square-btn`, `.ns-quick-pick`,
    `.ns-day-chip`, `.ns-derived-chip`, `.ns-dg-preview*`, `.ns-scope-grids` and
-   `.ns-btn--danger` — are gone. Those surfaces are now the shared v2 contracts
+   the whole `.ns-btn` family — are gone. R2a retired every Dates consumer and
+   left `.ns-btn` / `.ns-btn--primary` standing for their last live consumer,
+   People's "Continue to shifts" CTA; R2b moved that CTA onto the shared Button
+   and deleted the rules with it. Those surfaces are now the shared v2 contracts
    (`Button` / `Input` / `Switch` / `Badge` and the `surfaceVariants` recipe), so
    their radius, elevation, tone and coarse-pointer sizing are decided in one
    place instead of being forked per screen.
@@ -248,46 +251,4 @@
 }
 .ns-legend--holiday {
   background: var(--color-warn);
-}
-
-/* ==========================================================================
-   RETAINED v1 BUTTON, ON PURPOSE — NOT a Dates surface any more.
-
-   Dates no longer renders `.ns-btn`; every action on this screen is a shared
-   `Button`. But `components/people/people-table.tsx` still uses
-   `ns-btn ns-btn--primary` for its "Continue to shifts" CTA, and People is R2b's
-   file set. Deleting the rule here would silently restyle another ticket's route,
-   which is exactly the boundary R2a must not cross. R2b removes the consumer and
-   this block goes with it; G1's cleanup sweep is the backstop.
-   ========================================================================== */
-.ns-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.4375rem;
-  padding: 0 0.8125rem;
-  height: 2.125rem;
-  border: 1px solid var(--color-line);
-  background: transparent;
-  color: var(--color-ink);
-  font-size: var(--t-sm);
-  font-weight: 600;
-  cursor: pointer;
-}
-.ns-btn:hover {
-  background: var(--color-panel);
-}
-.ns-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.ns-btn--primary {
-  background: var(--color-brand);
-  border-color: var(--color-brand);
-  color: var(--color-onbrand);
-  font-weight: 700;
-}
-.ns-btn--primary:hover {
-  filter: brightness(0.94);
-  background: var(--color-brand);
 }

@@ -19,6 +19,14 @@
 //     `UploadDialog`; search has a clear button and a live result count; a "No
 //     matches" empty state offers Clear-search.
 //
+// V2 RE-SKIN (R2a's sibling, R2b). Surfaces, in ladder order (DESIGN.md §4): the
+// screen root is the L0 page plane; the table container is a resting L1 `surface`
+// on the card radius that CLIPS its own scroll region; the column header row is a
+// full-bleed square `band`; the open inline editor row is the shared `selected`
+// role. Every action is a shared `Button` — the last `.ns-btn` consumer in the app
+// left with this ticket, and the rule it depended on was deleted with it. Data
+// structure stays square throughout: the table, its rows and its cells never round.
+//
 // Store discipline (T04): every action feeds ONE produced `ScenarioUiState` to one
 // `mutateScenario` (one patch ⇒ one zundo entry). A compound inline edit (rename +
 // membership) composes the pure core transforms and commits once. Rename/delete
@@ -35,9 +43,11 @@ import { useLosableDraft } from "@/components/shell/use-losable-draft";
 import { GuardedLink } from "@/components/shell/guarded-link";
 import type { ScenarioUiState, UiPerson } from "@/lib/scenario";
 import { RenameCollisionError } from "@/lib/cascade";
-import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Surface, surfaceVariants } from "@/components/ui/surface";
 import {
   FaPlus,
   FaFileArrowUp,
@@ -178,13 +188,22 @@ export function PeopleTable() {
     : `${items.length} ${items.length === 1 ? "nurse" : "nurses"}`;
 
   return (
-    <div data-testid="screen" data-screen="Staff" className="flex flex-col gap-4">
+    <Surface
+      level="page"
+      geometry="square"
+      data-testid="screen"
+      data-screen="Staff"
+      className="flex flex-col gap-4"
+    >
       <header className="mb-2 flex flex-wrap items-end gap-4">
         <div className="min-w-[240px] flex-1">
           <div className="mb-2 text-label font-semibold uppercase tracking-[0.03em] text-brandink">
             Step 2 · Staff
           </div>
-          <h1 className="mb-2 font-heading text-display font-extrabold leading-[1.05] tracking-[-0.02em]">
+          {/* Display: Figtree 700 / 1.15 / -0.015em (DESIGN.md §3). v1 ran 800 at
+              1.05 and -0.02em; v2 is one weight step lighter with an opener line.
+              Copy and wrapping are unchanged. */}
+          <h1 className="mb-2 font-heading text-display font-bold leading-[1.15] tracking-[-0.015em]">
             Your Ward Staff
           </h1>
           <p className="max-w-[60ch] text-ink2">
@@ -192,12 +211,17 @@ export function PeopleTable() {
             target a whole team at once.
           </p>
         </div>
+        {/* Still a real `<a href>`, so copy-link and open-in-new-tab keep working and
+            the shell's draft guard still stages on a plain click. It wears the shared
+            Button recipe instead of the retired `.ns-btn` fork, so the pill, `--sh-1`,
+            active-flatten, focus outline and 44px coarse floor come from one contract.
+            `lg` is the prototype's 44px primary action (ScreenStaff.dc.html:12). */}
         <GuardedLink
           href="/shift-types"
-          className="ns-btn ns-btn--primary h-11 px-5 text-body"
+          className={cn(buttonVariants({ size: "lg" }), "font-bold")}
           data-testid="people-continue"
         >
-          Continue to shifts <FaArrowRight className="size-3" />
+          Continue to shifts <FaArrowRight />
         </GuardedLink>
       </header>
 
@@ -217,24 +241,30 @@ export function PeopleTable() {
         </Button>
         <div className="ml-auto flex flex-col items-end gap-1">
           <div className="relative w-full max-w-xs">
-            <FaMagnifyingGlass className="pointer-events-none absolute left-3 top-1/2 size-3 -translate-y-1/2 text-ink3" />
+            <FaMagnifyingGlass
+              aria-hidden
+              className="pointer-events-none absolute left-3 top-1/2 size-3 -translate-y-1/2 text-ink3"
+            />
             <Input
               data-testid="people-search"
-              className="pl-8 pr-8"
+              className="pl-8 pr-9 pointer-coarse:pr-14"
               placeholder="Search nurses"
               aria-label="Search nurses"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
             {q && (
+              // A real control, sized honestly: 16px beside a 36px field on a precise
+              // pointer, a true 44x44 box on a coarse one (the field's own padding
+              // grows with it). No pseudo-element hitbox — v2 technical plan T8.
               <button
                 type="button"
                 aria-label="Clear search"
                 data-testid="people-search-clear"
-                className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex items-center text-ink3 hover:text-ink"
+                className="absolute right-2 top-1/2 inline-flex size-4 -translate-y-1/2 items-center justify-center rounded-full text-ink3 pointer-coarse:size-touch hover:text-ink"
                 onClick={() => setQuery("")}
               >
-                <FaXmark aria-hidden />
+                <FaXmark aria-hidden className="size-3" />
               </button>
             )}
           </div>
@@ -249,17 +279,24 @@ export function PeopleTable() {
         </div>
       </div>
 
-      {/* Table (horizontal-scroll wrapper) */}
+      {/* Table container: a resting L1 card whose own scroll region ends the card,
+          so it takes the card radius and CLIPS to it (DESIGN.md §4 rule 3). Everything
+          inside — the header band, every row, every cell — stays square. */}
       <div
         data-testid="people-table-wrap"
-        className="w-full overflow-x-auto border border-line bg-surface"
+        className={cn(
+          "w-full overflow-x-auto",
+          surfaceVariants({ role: "surface", geometry: "card" }),
+        )}
       >
         <table data-testid="people-table" className="w-full min-w-[520px] border-collapse">
           <caption className="sr-only">
             Ward staff — each nurse, the groups they belong to, and row actions.
           </caption>
           <thead>
-            <tr className="bg-panel">
+            {/* Full-bleed header band: square and flat by contract — a band that spans
+                the whole card never takes a chip radius or a well shadow. */}
+            <tr className={surfaceVariants({ role: "band", geometry: "square" })}>
               <th
                 scope="col"
                 className="w-10 px-3 py-2.5 text-left text-label font-semibold uppercase tracking-[0.03em] text-ink2"
@@ -361,19 +398,23 @@ export function PeopleTable() {
                       data-testid="people-empty"
                       className="flex flex-col items-center gap-2 text-center"
                     >
-                      <div className="flex size-11 items-center justify-center border border-dashed border-line2 text-faint">
-                        <FaMagnifyingGlass />
+                      <div className="flex size-11 items-center justify-center border border-dashed border-line2 text-ink3">
+                        <FaMagnifyingGlass aria-hidden />
                       </div>
-                      <div className="font-heading text-title font-bold text-ink2">No matches</div>
+                      {/* Title: 600 at -0.015em (DESIGN.md §3). The prototype draws it
+                          at 700; the type contract outranks a prototype weight. */}
+                      <div className="font-heading text-title font-semibold tracking-[-0.015em] text-ink2">
+                        No matches
+                      </div>
                       <div className="text-meta text-ink3">No nurses match “{query.trim()}”.</div>
-                      <button
-                        type="button"
+                      <Button
+                        variant="link"
+                        size="sm"
                         data-testid="people-empty-clear"
-                        className="mt-1 text-meta font-semibold text-brandink hover:underline"
                         onClick={() => setQuery("")}
                       >
                         Clear search
-                      </button>
+                      </Button>
                     </div>
                   ) : (
                     <p data-testid="people-empty" className="text-center text-meta text-ink3">
@@ -411,7 +452,7 @@ export function PeopleTable() {
           onClose={() => setUploadOpen(false)}
         />
       )}
-    </div>
+    </Surface>
   );
 }
 
@@ -486,9 +527,22 @@ function ReadRow({
           : undefined
       }
       onDragEnd={canDrag ? onDragEnd : undefined}
-      className={`border-t border-line2 hover:bg-panel ${canDrag ? "cursor-grab" : ""} ${
-        isOver ? "shadow-[inset_0_2px_0_var(--color-brand)]" : ""
-      } ${isDragging ? "opacity-50" : ""}`}
+      // Row states, all on canonical tokens. Hover is `--panel-alt`, NOT `--panel`:
+      // DESIGN.md §6 reserves the well tone for header bands and true insets, and
+      // the prototype's `--panel` row hover would collide with the header band
+      // directly above it. The drop candidate speaks the shared `drop-target`
+      // LANGUAGE — a dashed `--brand` edge over `--panel-alt` — rather than the
+      // recipe role itself: a `<tr>` in the collapsed-border model paints no
+      // box-shadow, so the role's `--sh-2` would be a claim the browser never
+      // honours, and the recipe cannot share a class list with the hover tone
+      // (`surface-contract.test.ts` holds a consumer's className to layout only).
+      // This replaces the v1 `shadow-[inset_0_2px_0_...]` arbitrary elevation.
+      className={cn(
+        "border-t border-line2 transition-colors duration-fast",
+        canDrag && "cursor-grab",
+        isDragging && "opacity-50",
+        isOver ? "border-dashed border-brand bg-panel-alt" : "hover:bg-panel-alt",
+      )}
     >
       <td className="px-3 py-2.5 font-mono text-meta text-ink3">
         <span className="inline-flex items-center gap-1.5">
@@ -567,12 +621,15 @@ function ReadRow({
           >
             <FaCopy />
           </Button>
+          {/* The destructive affordance is a VARIANT, not a caller-owned colour
+              override: `destructive-outline` is the paired outline treatment
+              (`--errorink` on `--surface`, `--errortint` on hover) the prototype
+              draws at ScreenStaff.dc.html:62. */}
           <Button
             size="icon"
-            variant="outline"
+            variant="destructive-outline"
             aria-label={`Delete ${item.id}`}
             data-testid={`people-delete-${itemKey}`}
-            className="text-error hover:bg-errortint"
             onClick={onDelete}
           >
             <FaTrash />
@@ -668,7 +725,15 @@ function RowEditor({
   };
 
   return (
-    <tr data-testid={`people-edit-row-${key}`} className="border-t border-line2 bg-brandtint/40">
+    // The open editor row IS the active editor, so it takes the shared `selected`
+    // role: `--surface` under a `--brand` border. The prototype washes it in
+    // `--brandtint`, which DESIGN.md §6 reserves for the selection MARKS (the
+    // brand-filled group toggles sitting inside this very row would disappear into
+    // it). Same call R2a recorded for the previewed date-group row.
+    <tr
+      data-testid={`people-edit-row-${key}`}
+      className={surfaceVariants({ role: "selected", geometry: "square" })}
+    >
       <td className="px-3 py-3 align-top font-mono text-meta text-ink3">{ordinal}</td>
       <td className="px-3 py-3 align-top">
         <Input
@@ -692,7 +757,7 @@ function RowEditor({
           <div
             role="alert"
             data-testid={`people-name-error-${key}`}
-            className="mt-1.5 text-label font-semibold text-error"
+            className="mt-1.5 text-label font-semibold text-errorink"
           >
             {check.message}
           </div>
@@ -700,15 +765,28 @@ function RowEditor({
       </td>
       <td className="px-3 py-3 align-top">
         {groups.length === 0 ? (
-          <span className="text-meta text-faint">No groups yet — add one below.</span>
+          <span className="text-meta text-ink3">No groups yet — add one below.</span>
         ) : (
-          <div className="flex flex-wrap gap-1.5" data-testid={`people-group-toggles-${key}`}>
+          // Named group, so a screen-reader user entering this cell hears WHOSE
+          // memberships these toggles are rather than a bare run of pressed buttons.
+          <div
+            role="group"
+            aria-label={`Groups for ${mode === "edit" ? String(item!.id) : "the new nurse"}`}
+            className="flex flex-wrap gap-1.5"
+            data-testid={`people-group-toggles-${key}`}
+          >
             {groups.map((g) => {
               const on = draftGroups.includes(g.id);
               return (
-                <button
+                // A membership toggle is a real action, so it is a shared Button
+                // rather than a hand-skinned 2px-radius chip: the pill, the paired
+                // `--onbrand` foreground on the brand fill, the focus outline and the
+                // 44px coarse floor all arrive from one contract. `aria-pressed`
+                // carries the on/off state it always did.
+                <Button
                   key={g.id}
-                  type="button"
+                  size="sm"
+                  variant={on ? "default" : "secondary"}
                   data-testid={`people-group-${key}-${g.id}`}
                   aria-pressed={on}
                   onClick={() =>
@@ -716,12 +794,9 @@ function RowEditor({
                       cur.includes(g.id) ? cur.filter((x) => x !== g.id) : [...cur, g.id],
                     )
                   }
-                  className={`border px-2.5 py-1 text-label font-semibold ${
-                    on ? "border-brand bg-brand text-onbrand" : "border-line bg-surface text-ink2"
-                  }`}
                 >
                   {g.id}
-                </button>
+                </Button>
               );
             })}
           </div>
