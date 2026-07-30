@@ -1,5 +1,6 @@
-import { spawnSync } from "node:child_process";
+import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { performance } from "node:perf_hooks";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -128,6 +129,22 @@ const VALIDATOR = join(repoRoot, "docker", "validate_origin.py");
 type OriginMode = "direct" | "cloudflare";
 type OriginCase = readonly [value: string, mode: OriginMode];
 
+// Each synchronous validator invocation is given an explicit budget. spawnSync
+// blocks the JS thread, so while a child runs Vitest's own test timer cannot
+// fire — only the child's own `timeout` can bound a wedged process. A single
+// invocation costs ~20-55ms idle and <=506ms under 10x CPU contention (measured
+// over all 65 cases below), so 5s is ~10x the worst observed case and only a
+// genuinely hung child can trip it; the diagnostic in `runValidatorChild` then
+// names the offending corpus case.
+const VALIDATOR_CHILD_TIMEOUT_MS = 5_000;
+
+// Explicit headroom for the whole 65-process differential: ~4-5s idle and
+// ~6.3s under 10x contention including Vitest overhead (the prior implicit 5s
+// default failed under that contention). 15s is ~2.5x the contended time with
+// comfortable CI margin; the per-child timeout guarantees the loop always
+// yields, so this timer is interruptible rather than cosmetic.
+const VALIDATOR_DIFFERENTIAL_TIMEOUT_MS = 15_000;
+
 const requiredBareBrackets: readonly OriginCase[] = [
   ["https://a[b", "direct"],
   ["https://a[b", "cloudflare"],
@@ -240,26 +257,104 @@ function browserOriginValid(value: string, mode: OriginMode): boolean {
   return url.origin === value;
 }
 
+// Identifies a corpus case in diagnostics. These are STATIC fixtures (the same
+// ones the validator's own selftest echoes safely), not operator input, so the
+// raw value is included to uniquely name the offending case. The validator's
+// production stderr stays credential-safe separately; this is test-only output.
+function caseLabel(value: string, mode: OriginMode): string {
+  return JSON.stringify({ value, mode });
+}
+
+// Fail closed, immediately and diagnostically, for every state a wedged or
+// broken validator child can leave spawnSync in. Returns the failure message
+// (always naming the case) or null when the child exited cleanly with 0 or 1 —
+// the only statuses the validator ever produces. A hung child otherwise surfaces
+// only as a generic Vitest timeout with no clue which input was running.
+function childFailure(result: SpawnSyncReturns<string>, label: string): string | null {
+  if (result.error) {
+    const code = (result.error as NodeJS.ErrnoException).code ?? result.error.message;
+    return `validate_origin.py child error (${code}) for case ${label}`;
+  }
+  if (result.signal !== null) {
+    return `validate_origin.py child killed by signal ${result.signal} for case ${label}`;
+  }
+  if (result.status !== 0 && result.status !== 1) {
+    return `validate_origin.py child exited with unexpected status ${result.status} for case ${label}`;
+  }
+  return null;
+}
+
+// Runs one validator child under the shared child budget and asserts it landed
+// in a healthy terminal state, throwing the case-naming diagnostic otherwise.
+function runValidatorChild(value: string, mode: OriginMode): SpawnSyncReturns<string> {
+  const result = spawnSync(PYTHON, [VALIDATOR, mode], {
+    encoding: "utf-8",
+    env: { ...process.env, PUBLIC_ORIGIN: value },
+    timeout: VALIDATOR_CHILD_TIMEOUT_MS,
+  });
+  const failure = childFailure(result, caseLabel(value, mode));
+  if (failure) {
+    throw new Error(failure);
+  }
+  return result;
+}
+
 describe("validate_origin.py matches Node URL.origin (WHATWG parity)", () => {
   it("retains the reviewed bare-bracket cases in both modes", () => {
     expect(originCasesByCategory.bareBrackets).toEqual(requiredBareBrackets);
   });
 
-  it("agrees with the browser for the independent adversarial corpus", () => {
-    const divergences = originCases.flatMap(([value, mode]) => {
-      const result = spawnSync(PYTHON, [VALIDATOR, mode], {
-        encoding: "utf-8",
-        env: { ...process.env, PUBLIC_ORIGIN: value },
+  it(
+    "agrees with the browser for the independent adversarial corpus",
+    () => {
+      const divergences = originCases.flatMap(([value, mode]) => {
+        const result = runValidatorChild(value, mode);
+        const validatorValid = result.status === 0;
+        if (!validatorValid && value !== "") {
+          expect(result.stderr).not.toContain(value);
+        }
+        return validatorValid === browserOriginValid(value, mode)
+          ? []
+          : [{ value, mode, validatorValid }];
       });
-      expect([0, 1], result.stderr).toContain(result.status);
-      const validatorValid = result.status === 0;
-      if (!validatorValid && value !== "") {
-        expect(result.stderr).not.toContain(value);
-      }
-      return validatorValid === browserOriginValid(value, mode)
-        ? []
-        : [{ value, mode, validatorValid }];
+      expect(divergences, `python/browser divergence: ${JSON.stringify(divergences)}`).toEqual([]);
+    },
+    VALIDATOR_DIFFERENTIAL_TIMEOUT_MS,
+  );
+
+  it("bounds and reports a child that overruns its spawn budget", () => {
+    // The exact failure mode the per-child timeout exists for: a validator that
+    // wedges on blocking I/O. spawnSync blocks the JS thread, so while this
+    // child runs Vitest's own timer is powerless — only the child's `timeout`
+    // can interrupt it. We prove that mechanism fires and names the case, NOT
+    // Vitest's outer timer: only spawnSync's own timeout sets
+    // `error.code === "ETIMEDOUT"` + `signal === "SIGTERM"`; if the outer timer
+    // had fired instead, this test would already have failed and never reached
+    // these assertions. A tight local budget keeps the case fast while the test
+    // timeout stays well above it (so the child budget, not the test budget, is
+    // what binds) and well below the sleep (so a broken budget fails the test
+    // rather than hanging it).
+    const CHILD_TIMEOUT_MS = 400;
+    const label = caseLabel("<blocked-validator>", "direct");
+    const start = performance.now();
+    const result = spawnSync(PYTHON, ["-c", "import time; time.sleep(30)"], {
+      encoding: "utf-8",
+      env: { ...process.env, PUBLIC_ORIGIN: "unused" },
+      timeout: CHILD_TIMEOUT_MS,
     });
-    expect(divergences, `python/browser divergence: ${JSON.stringify(divergences)}`).toEqual([]);
-  });
+    const elapsed = performance.now() - start;
+
+    expect((result.error as NodeJS.ErrnoException | undefined)?.code ?? null).toBe("ETIMEDOUT");
+    expect(result.signal).toBe("SIGTERM");
+    expect(result.status).toBeNull();
+    // Measurable proof the child was killed near its budget, not after the sleep.
+    expect(elapsed, `elapsed ${elapsed.toFixed(0)}ms`).toBeLessThan(CHILD_TIMEOUT_MS * 4);
+    expect(elapsed).toBeLessThan(30_000);
+    // The same fail-closed diagnostic the differential uses must surface the
+    // error code AND name the case. Only the error branch of `childFailure`
+    // includes the code, so this also proves that branch is load-bearing.
+    const failure = childFailure(result, label);
+    expect(failure).toContain("ETIMEDOUT");
+    expect(failure).toContain(label);
+  }, 5_000);
 });
