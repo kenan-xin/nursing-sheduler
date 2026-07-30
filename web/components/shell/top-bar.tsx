@@ -18,6 +18,8 @@ import { getNavGroupsForMode, getNavItemForMode } from "./nav-config";
 import { UndoRedoControls } from "./undo-redo-controls";
 import { PersistenceStatus } from "./persistence-status";
 import { MobileNav } from "./mobile-nav";
+import { surfaceVariants } from "@/components/ui/surface";
+import { cn } from "@/lib/utils";
 import { FaDiagramProject } from "@/components/icons";
 
 // T08d repair (P2): resolves through `getNavItemForMode` — the same
@@ -56,7 +58,15 @@ export function TopBar() {
       // no media query (Nurse Scheduling.dc.html:122). The `px-4 sm:px-5` this carried
       // pivoted at 640px, a step the design does not have — and it tightened the phone
       // case, where the rail is hidden and there is more room, not less.
-      className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-3 border-b border-line bg-surface px-5"
+      //
+      // Tone, single bottom edge and elevation come from the `sticky` surface
+      // role — an L1 plane that carries --sh-1 and stays square, because a
+      // rounded corner on a full-bleed bar leaves a sliver of page background
+      // in the corner (DESIGN.md §5).
+      className={cn(
+        "sticky top-0 z-30 flex h-14 shrink-0 items-center gap-3 px-5",
+        surfaceVariants({ role: "sticky", geometry: "square" }),
+      )}
     >
       {/* Mobile hamburger — visible below the 920px nav breakpoint only. */}
       <span className="shrink-0 nav:hidden">
@@ -64,7 +74,9 @@ export function TopBar() {
       </span>
 
       <div className="flex min-w-0 items-center gap-2.5">
-        <span className="flex size-[26px] shrink-0 items-center justify-center bg-chrome text-[13px] text-on-ink">
+        {/* `--chrome` aliases the live `--brand`, so the tile's foreground is the
+            accent's paired `--onbrand`, not the ink ramp's `--on-ink`. */}
+        <span className="flex size-[26px] shrink-0 items-center justify-center rounded-chip bg-chrome text-[13px] text-onbrand">
           <FaDiagramProject />
         </span>
         <span

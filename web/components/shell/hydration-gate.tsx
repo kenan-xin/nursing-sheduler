@@ -63,7 +63,17 @@ export function HydrationGate({ children }: { children: React.ReactNode }) {
         className="mx-auto flex w-full max-w-md flex-col gap-4 p-8 text-center"
         data-testid="hydration-error"
       >
-        <h2 className="font-heading text-h3 font-semibold">Stored data could not be loaded</h2>
+        {/* Explicit -0.015em, like every other R1-owned heading. Without it this
+            heading inherits globals.css's still-deferred v1 `h1–h6 {
+            letter-spacing: -0.02em }` rule (G1 owns removing that), which would
+            leave the recovery state as the one mixed v1/v2 surface on the route
+            — and it is rare enough that nothing else would notice. */}
+        <h2
+          data-testid="hydration-error-heading"
+          className="font-heading text-h3 font-semibold tracking-[-0.015em]"
+        >
+          Stored data could not be loaded
+        </h2>
         <p className="text-body text-ink2">
           Your saved schedule appears to be corrupted. You can reset to a new schedule to continue.
         </p>

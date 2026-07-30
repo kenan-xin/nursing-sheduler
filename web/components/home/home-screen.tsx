@@ -14,6 +14,7 @@ import { useScenarioSummary } from "./scenario-summary";
 import { HomeStatStrip, type HomeStat } from "./home-stat-strip";
 import { HomeGuided } from "./home-guided";
 import { HomeAdvanced } from "./home-advanced";
+import { Button } from "@/components/ui/button";
 import { FaWandMagicSparkles } from "@/components/icons";
 
 export function HomeScreen() {
@@ -35,14 +36,26 @@ export function HomeScreen() {
   ];
 
   return (
-    <div data-testid="home-screen" data-mode={mode} className="flex animate-fade flex-col gap-6">
+    <div
+      data-testid="home-screen"
+      data-mode={mode}
+      className="flex animate-fade flex-col gap-6 bg-bg"
+    >
       {/* Header — shown in both modes */}
       <div className="flex flex-wrap items-end gap-4">
         <div className="min-w-[240px] flex-1">
-          <div className="mb-2 text-label uppercase tracking-[0.03em] text-brandink">
-            ● Ward Scheduling
+          {/* Eyebrow — text only, no leader dot (DESIGN.md §5: no decorative
+              ornament on labels). The COPY is product content and stays as
+              shipped; only the ● ornament is retired. The prototype's own
+              "ROSTER SETUP" wording is an example, and the deviation matrix puts
+              product contracts above prototype examples. */}
+          <div className="mb-2 text-label font-semibold uppercase tracking-[0.03em] text-brandink">
+            Ward Scheduling
           </div>
-          <h1 className="mb-2 font-heading text-display font-extrabold leading-tight tracking-tight">
+          {/* Explicit -0.015em: globals.css still carries v1's -0.02em on h1–h6
+              (G1 owns that cleanup) and Tailwind's `tracking-tight` is -0.025em,
+              so neither default lands on the v2 value. */}
+          <h1 className="mb-2 font-heading text-display font-bold leading-tight tracking-[-0.015em]">
             {rosterTitle}
           </h1>
           <p className="max-w-[56ch] text-body text-ink2">
@@ -50,15 +63,20 @@ export function HomeScreen() {
             rule. You can jump to any step at any time.
           </p>
         </div>
-        <button
-          type="button"
+        {/* The shared Button recipe, not a hand-authored equivalent: `lg` is the
+            absolute 44px control token the prototype's primary action uses, and
+            the variant carries the pill, --sh-1, active-flatten, focus outline
+            and coarse-pointer floor as one contract. Only the prototype's 700
+            weight is added on top. */}
+        <Button
+          size="lg"
           onClick={() => navigate("/optimize-and-export")}
           data-testid="home-generate"
-          className="inline-flex h-11 items-center gap-2.5 bg-brand px-5 font-heading text-body font-bold text-onbrand outline-none transition-[filter] hover:brightness-95 focus-visible:ring-2 focus-visible:ring-brand"
+          className="font-bold"
         >
-          <FaWandMagicSparkles className="size-4" />
+          <FaWandMagicSparkles />
           Generate roster
-        </button>
+        </Button>
       </div>
 
       {/* Stat strip — shown in both modes */}

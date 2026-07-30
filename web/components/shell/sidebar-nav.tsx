@@ -87,7 +87,10 @@ function NavLink({
       aria-current={active ? "page" : undefined}
       data-testid={`nav-link-${item.path}`}
       className={cn(
-        "flex items-center gap-2.5 px-3 py-2.5 text-left text-body leading-[normal] outline-none transition-colors focus-visible:ring-brand focus-visible:ring-inset focus-visible:ring-2",
+        // The coarse-pointer floor is on the real control, never a pseudo-element
+        // hitbox (DESIGN.md §5). The precise-pointer row keeps its spacing-derived
+        // height; only a touch device grows it to the 44px minimum.
+        "flex items-center gap-2.5 rounded-pill px-3 py-2.5 text-left text-body leading-[normal] outline-none transition-colors pointer-coarse:min-h-touch focus-visible:ring-brand focus-visible:ring-inset focus-visible:ring-2",
         active
           ? "bg-brandtint font-semibold text-brandink"
           : "font-medium text-ink2 hover:bg-panel hover:text-ink",

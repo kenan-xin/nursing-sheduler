@@ -10,11 +10,12 @@ import {
 } from "@/lib/store";
 import { UndoRedoControls } from "./undo-redo-controls";
 
-// F3's shell-shared trigger fix (fix-shell-coarse-targets) adds the real
-// coarse-pointer floor to these R1-owned controls without touching R1's
-// precise-pointer geometry, disabled semantics, or undo/redo wiring. This
-// pins both halves: the coarse-pointer contract this ticket adds, and the
-// existing disabled-state/callback-cardinality contract it must not disturb.
+// F3's shell-shared trigger fix (fix-shell-coarse-targets) added the real
+// coarse-pointer floor to these R1-owned controls; R1's v2 re-skin then replaced
+// the hand-authored control with the shared Button recipe, which owns that floor
+// as part of its base contract. This pins both halves: the geometry/elevation
+// contract the recipe supplies, and the disabled-state / callback-cardinality
+// contract the re-skin must not disturb.
 
 function classesOf(element: Element | null): string {
   return element?.getAttribute("class") ?? "";
@@ -32,18 +33,42 @@ beforeEach(async () => {
 
 afterEach(() => cleanup());
 
-describe("UndoRedoControls — coarse-pointer contract", () => {
-  it("keeps the precise ~32px control box and adds the real coarse-pointer floor on both buttons", () => {
+describe("UndoRedoControls — v2 control contract", () => {
+  it("uses the absolute 36px icon-control box, not a spacing-derived one", () => {
     render(<UndoRedoControls />);
     for (const testId of ["undo-button", "redo-button"]) {
       const classes = classesOf(screen.getByTestId(testId));
-      // Precise-pointer geometry is untouched: still the compact size-9 box.
-      expect(classes).toContain("size-9");
+      // `size-control` resolves to --ctl (36px). `size-9` would resolve through
+      // --spacing, which carries the 0.9 density baseline, to 32.4px — and
+      // DESIGN.md is explicit that control sizes are absolute and are NOT
+      // multiplied by that baseline.
+      expect(classes).toContain("size-control");
+      expect(classes).not.toContain("size-9");
+    }
+  });
+
+  it("keeps the real coarse-pointer floor on both buttons", () => {
+    render(<UndoRedoControls />);
+    for (const testId of ["undo-button", "redo-button"]) {
+      const classes = classesOf(screen.getByTestId(testId));
       // The real control grows via Tailwind's `pointer-coarse` variant — never a
       // pseudo-element hitbox or a hardcoded 44px arbitrary value.
       expect(classes).toContain("pointer-coarse:min-h-touch");
       expect(classes).toContain("pointer-coarse:min-w-touch");
     }
+  });
+
+  it("is the L1 secondary treatment — a real surface fill, hairline and resting shadow", () => {
+    render(<UndoRedoControls />);
+    const classes = classesOf(screen.getByTestId("undo-button"));
+    // DESIGN.md §4 rule 4: a transparent outlined button on the recessed page
+    // does not read as pressable, so these are --surface + --line + --sh-1, and
+    // the shadow drops on :active.
+    expect(classes).toContain("bg-surface");
+    expect(classes).toContain("border-line");
+    expect(classes).toContain("shadow-1");
+    expect(classes).toContain("active:shadow-none");
+    expect(classes).toContain("rounded-pill");
   });
 });
 

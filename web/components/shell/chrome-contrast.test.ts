@@ -12,9 +12,13 @@ import { describe, expect, it } from "vitest";
 // without a browser.
 //
 // The original collision guard is kept in spirit: a foreground token must never
-// collapse toward the plane it sits on. Two revert paths stay covered:
+// collapse toward the plane it sits on. Three revert paths stay covered:
 //   1) an accent or --onbrand value retuned until the pair no longer clears AA;
-//   2) a chrome shell control repointed from `text-on-ink` back to `text-ink`.
+//   2) a --brandink value retuned until it no longer clears AA on the L1 plane,
+//      which is the pair R1's v2 mode toggle introduced (active segment =
+//      --surface fill + --brandink text, SideNav.dc.html:81);
+//   3) a chrome shell control repointed away from the paired ON-colour its own
+//      fill declares.
 
 const shellDir = __dirname;
 const webRoot = join(shellDir, "..", "..");
@@ -122,6 +126,38 @@ describe("chrome plane contrast — --onbrand vs the live --brand (nursing-shedu
   });
 });
 
+// The v2 mode toggle's active segment lifts to the L1 surface tone and takes
+// --brandink text (SideNav.dc.html:81), so --brandink on --surface joined the
+// set of chrome pairs that must clear AA. Like the pairs above it is audited per
+// accent AND per theme, because --brandink derives from the theme-specific
+// --brand and the surface ladder inverts between them.
+describe("mode-segment contrast — --brandink on the L1 --surface plane", () => {
+  it.each(ACCENTS)("light theme: brandink meets AA (>= 4.5:1) on %s", (accent) => {
+    const surface = tokenHex(themeBlock(":root {"), "surface");
+    const brandink = tokenHex(themeBlock(`html[data-accent="${accent}"] {`), "brandink");
+    const ratio = contrastRatio(brandink, surface);
+    expect(ratio, `${brandink} on ${surface} = ${ratio}:1`).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it.each(ACCENTS)("dark theme: brandink meets AA (>= 4.5:1) on %s", (accent) => {
+    const surface = tokenHex(themeBlock(".dark {"), "surface");
+    const brandink = tokenHex(themeBlock(`html.dark[data-accent="${accent}"] {`), "brandink");
+    const ratio = contrastRatio(brandink, surface);
+    expect(ratio, `${brandink} on ${surface} = ${ratio}:1`).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it.each([
+    ["light", ":root {"],
+    ["dark", ".dark {"],
+  ])("%s theme: the pre-attribute teal fallback also clears AA", (_name, selector) => {
+    const block = themeBlock(selector);
+    const surface = tokenHex(block, "surface");
+    const brandink = tokenHex(block, "brandink");
+    const ratio = contrastRatio(brandink, surface);
+    expect(ratio, `${brandink} on ${surface} = ${ratio}:1`).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
 describe("ink surfaces — --on-ink vs --ink", () => {
   it.each([
     ["light", ":root {"],
@@ -135,17 +171,39 @@ describe("ink surfaces — --on-ink vs --ink", () => {
   });
 });
 
-describe("on-ink surfaces use the on-ink foreground token (not text-ink)", () => {
-  // After the T08 shell rebuild the top bar is `bg-surface` (not dark chrome), so
-  // the on-ink foreground now lives on the genuinely dark tiles/segments: the
-  // top-bar product tile (bg-chrome), the SideNav brand tile (bg-chrome), and the
-  // active mode segment (bg-ink). If any is repointed back to the inverting
-  // `text-ink`, its `text-on-ink` reference disappears and this trips.
-  it.each(["top-bar.tsx", "app-side-nav.tsx", "mode-toggle.tsx"])(
-    "%s references text-on-ink",
+// Each chrome fill must carry the ON-colour its own token declares. This used to
+// assert `text-on-ink` on all three files, which was true only while the app
+// marks were read as dark INK tiles and the mode toggle's active segment was a
+// `bg-ink` fill. In v2 neither holds: `--chrome` aliases `--brand`, so the app
+// marks pair with `--onbrand`; and the active mode segment lifts to the L1
+// `--surface` plane with `--brandink` text (SideNav.dc.html:81). The guard is
+// re-pointed at the pairs that are now correct rather than dropped — both the
+// positive pairing and the retired v1 pairing are pinned, so a revert in either
+// direction trips.
+describe("chrome fills carry their own paired ON-colour", () => {
+  const read = (name: string) => readFileSync(join(shellDir, name), "utf8");
+
+  it.each(["top-bar.tsx", "app-side-nav.tsx"])(
+    "%s pairs the bg-chrome app mark with text-onbrand, not the ink ramp",
     (name) => {
-      const src = readFileSync(join(shellDir, name), "utf8");
-      expect(src).toContain("text-on-ink");
+      const src = read(name);
+      expect(src).toContain("bg-chrome");
+      expect(src).toContain("text-onbrand");
+      // `--chrome` is the accent, so BOTH ink-ramp foregrounds are wrong on it:
+      // `text-ink` inverts, and `text-on-ink` is the ON-colour of a different
+      // fill that merely happened to look close in light mode.
+      expect(src).not.toContain("text-on-ink");
+      expect(src).not.toMatch(/bg-chrome[^"]*text-ink\b/);
     },
   );
+
+  it("mode-toggle.tsx lifts the active segment to bg-surface + text-brandink", () => {
+    const src = read("mode-toggle.tsx");
+    expect(src).toContain("bg-surface");
+    expect(src).toContain("text-brandink");
+    // The retired v1 pair. `bg-ink`/`text-on-ink` here would be the dark-chrome
+    // segment coming back, which is the exact revert this guard exists for.
+    expect(src).not.toContain("bg-ink");
+    expect(src).not.toContain("text-on-ink");
+  });
 });

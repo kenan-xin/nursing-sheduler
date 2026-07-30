@@ -13,7 +13,7 @@
 import { useEffect } from "react";
 import { useStore } from "zustand";
 import { useScenarioStore } from "@/lib/store";
-import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import { FaRotateLeft, FaArrowRotateRight } from "@/components/icons";
 
 // `store.temporal` is a vanilla zundo StoreApi — reading `pastStates` /
@@ -35,9 +35,14 @@ function useUndoRedo() {
   };
 }
 
-// Secondary bordered-surface control pair (MINOR 7), sized to the prototype's
-// 40×40 surface control (ScreenSchedule.dc.html:39-46,376). Disabled state drops
-// the icon to `faint` with a not-allowed cursor rather than relying on opacity.
+// Secondary bordered-surface control pair, composed from the shared Button
+// recipe rather than re-authoring it: `secondary` + `icon` IS the v2 treatment
+// this used to spell out by hand (L1 --surface fill, --line hairline, --sh-1,
+// hover --panel-alt + --sh-2, active flattens to none, pill), and the recipe
+// also owns the absolute 36px control box, the coarse-pointer 44px floor and
+// the focus-visible outline. The hand-authored version had drifted to `size-9`,
+// which the 0.9 spacing baseline renders as 32.4px rather than the control
+// token's 36. Disabled is the shared reduced-opacity treatment (DESIGN.md §5).
 function UndoRedoButton({
   onClick,
   disabled,
@@ -54,22 +59,17 @@ function UndoRedoButton({
   children: React.ReactNode;
 }) {
   return (
-    <button
-      type="button"
+    <Button
+      variant="secondary"
+      size="icon"
       onClick={onClick}
       disabled={disabled}
       aria-label={label}
       title={title}
       data-testid={testId}
-      className={cn(
-        "flex size-9 items-center justify-center border bg-surface outline-none transition-colors pointer-coarse:min-h-touch pointer-coarse:min-w-touch focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand [&_svg]:size-4",
-        disabled
-          ? "cursor-not-allowed border-line2 text-faint"
-          : "border-line text-ink hover:bg-panel",
-      )}
     >
       {children}
-    </button>
+    </Button>
   );
 }
 
