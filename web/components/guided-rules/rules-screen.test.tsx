@@ -5,6 +5,10 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { drainScenarioPersist, newScenario, useHotStore, useScenarioStore } from "@/lib/store";
 import { RulesScreen } from "./rules-screen";
 
+function classesOf(element: Element | null): string {
+  return element?.getAttribute("class") ?? "";
+}
+
 const pushMock = vi.fn();
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: pushMock }),
@@ -331,5 +335,279 @@ describe("RulesScreen — unsupported (advanced-shaped) records", () => {
     expect(screen.getByTestId("rule-row-requirements:r2")).toBeInTheDocument();
     expect(screen.queryByTestId("rule-adjust-toggle-requirements:r2")).not.toBeInTheDocument();
     expect(screen.getByText(/adjust it in Advanced/i)).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R3 — the v2 presentation contract.
+//
+// The browser matrix judges /rules in light and dark at both pointer densities,
+// but it judges RESOLVED paint: a surface that forgot its role reads as "nothing
+// to report" to an analytic scanner rather than as a failure, and a control that
+// lost its coarse-pointer floor is only visible in the touch project. The classes
+// that make those claims true are authored here, so they are pinned here — along
+// with the v1 presentation this ticket removes, which is invisible unless a test
+// names it.
+// ---------------------------------------------------------------------------
+
+describe("RulesScreen — v2 surface ladder", () => {
+  it("paints the screen root as the L0 page plane through the shared recipe", () => {
+    render(<RulesScreen />);
+    const root = screen.getByTestId("screen");
+    // F4's R3 row declares this element `role: page`, which resolves to --bg with
+    // no elevation. A transparent root computes rgba(0, 0, 0, 0) and the runtime
+    // scanner cannot judge that as the page tone.
+    expect(root.getAttribute("data-slot")).toBe("surface");
+    expect(root.getAttribute("data-level")).toBe("page");
+    expect(classesOf(root)).toContain("bg-bg");
+    expect(classesOf(root)).not.toMatch(/\bshadow-[123]\b/);
+  });
+
+  it("rests the on-count summary on L1 at the control radius, not as a well", () => {
+    render(<RulesScreen />);
+    const chip = screen.getByText(/OF \d+ RULES ON/).parentElement!;
+    // DESIGN.md §4 puts wells INSIDE an L1 card; this island sits on the page.
+    expect(classesOf(chip)).toContain("bg-surface");
+    expect(classesOf(chip)).toContain("border-line");
+    expect(classesOf(chip)).toContain("shadow-1");
+    expect(classesOf(chip)).toContain("rounded-control");
+    expect(classesOf(chip)).not.toContain("shadow-well");
+  });
+
+  it("gives the advanced-records strip the inset well role, never an outer shadow", () => {
+    seedRequirement();
+    render(<RulesScreen />);
+    const strip = screen.getByTestId("rules-open-advanced-banner").parentElement!;
+    expect(strip.getAttribute("data-level")).toBe("well");
+    expect(classesOf(strip)).toContain("bg-panel");
+    expect(classesOf(strip)).toContain("shadow-well");
+    // Direction of light is fixed (DESIGN.md §4 rule 1).
+    expect(classesOf(strip)).not.toMatch(/\bshadow-[123]\b/);
+  });
+
+  it("makes each category list one resting L1 card that clips its square rows", () => {
+    seedRequirement();
+    render(<RulesScreen />);
+    const list = classesOf(screen.getByTestId("rule-category-Staffing levels"));
+    expect(list).toContain("rounded-card");
+    expect(list).toContain("bg-surface");
+    expect(list).toContain("border-line");
+    expect(list).toContain("shadow-1");
+    // Without the clip, the first row's square top edge cuts the card's corners.
+    expect(list).toContain("overflow-hidden");
+  });
+
+  it("rounds the empty state as a card while keeping dashed as the zero-data edge", () => {
+    render(<RulesScreen />);
+    const empty = classesOf(screen.getByTestId("rules-empty-state"));
+    expect(empty).toContain("rounded-card");
+    expect(empty).toContain("border-dashed");
+    expect(empty).toContain("bg-surface");
+    // v1's off-token 1.5px edge is retired with the rest of the flat system.
+    expect(empty).not.toContain("border-[1.5px]");
+  });
+
+  it("tracks R3-owned headings at the v2 -0.015em rather than a globals default", () => {
+    render(<RulesScreen />);
+    const heading = classesOf(screen.getByRole("heading", { level: 1 }));
+    expect(heading).toContain("tracking-[-0.015em]");
+    expect(heading).not.toContain("tracking-[-0.02em]");
+    expect(heading).not.toContain("font-extrabold");
+  });
+});
+
+describe("RulesScreen — rule-row state and status pairs", () => {
+  function seedDisabledRequirement() {
+    useScenarioStore.getState().mutateScenario((state) => ({
+      cardsByKind: {
+        ...state.cardsByKind,
+        requirements: [
+          {
+            uid: "r1",
+            shiftType: "D",
+            requiredNumPeople: 2,
+            weight: -1,
+            description: "Day cap",
+            disabled: true,
+          },
+        ],
+      },
+    }));
+  }
+
+  it("keeps a row's divider a square single edge, never a rounded box", () => {
+    seedRequirement();
+    render(<RulesScreen />);
+    const row = classesOf(screen.getByTestId("rule-row-requirements:r1"));
+    expect(row).toContain("border-t");
+    expect(row).toContain("border-line2");
+    expect(row).toContain("first:border-t-0");
+    expect(row).not.toMatch(/\brounded-(card|control|chip|pill)\b/);
+  });
+
+  it("recedes a switched-off row in TONE instead of fading it with opacity", () => {
+    seedDisabledRequirement();
+    render(<RulesScreen />);
+    const row = screen.getByTestId("rule-row-requirements:r1");
+    expect(row.getAttribute("data-disabled")).toBe("true");
+    expect(classesOf(row)).toContain("bg-panel");
+    // v1 used `opacity-60`, which dims the row's text with its box and costs
+    // every label in it the contrast it just cleared.
+    expect(classesOf(row)).not.toMatch(/\bopacity-\d+\b/);
+  });
+
+  it("leaves an enabled row on the card's own L1 plane", () => {
+    seedRequirement();
+    render(<RulesScreen />);
+    expect(classesOf(screen.getByTestId("rule-row-requirements:r1"))).not.toContain("bg-panel");
+  });
+
+  it("pairs the ON/OFF chip on chip geometry with a neutral hairline, not the selection language", () => {
+    seedRequirement();
+    render(<RulesScreen />);
+    const on = classesOf(within(screen.getByTestId("rule-row-requirements:r1")).getByText("ON"));
+    expect(on).toContain("rounded-chip");
+    expect(on).toContain("border-line");
+    expect(on).toContain("bg-brandtint");
+    expect(on).toContain("text-brandink");
+    // DESIGN.md §6 reserves --brandtint WITH a --brand border for selection; an
+    // enabled rule is the ordinary state, not "this is the one".
+    expect(on).not.toContain("border-brand");
+
+    cleanup();
+    seedDisabledRequirement();
+    render(<RulesScreen />);
+    const off = classesOf(within(screen.getByTestId("rule-row-requirements:r1")).getByText("OFF"));
+    expect(off).toContain("rounded-chip");
+    // The hairline is what keeps OFF legible once the row itself is --panel.
+    expect(off).toContain("border-line");
+    expect(off).toContain("bg-panel");
+    expect(off).toContain("text-ink2");
+  });
+
+  it("marks a built-in through the shared Badge recipe and drops the padlock ornament", () => {
+    render(<RulesScreen />);
+    const row = screen.getByTestId("rule-row-builtin:max-one-shift-per-day");
+    const badge = within(row).getByText("Built-in");
+    expect(badge.getAttribute("data-slot")).toBe("badge");
+    expect(badge.getAttribute("data-variant")).toBe("neutral");
+    expect(classesOf(badge)).toContain("rounded-chip");
+    expect(classesOf(badge)).toContain("uppercase");
+    // `locked` is true exactly when a row is a built-in, so v1's unlabelled
+    // padlock beside the title duplicated this badge with a glyph that had no
+    // accessible name (DESIGN.md §5 retires ornament on status).
+    expect(within(row).queryByTitle("Always on")).not.toBeInTheDocument();
+  });
+});
+
+describe("RulesScreen — the adjustment band", () => {
+  beforeEach(() => seedRequirement());
+
+  it("is a full-bleed square band on the --panel tone with a dashed top edge", () => {
+    render(<RulesScreen />);
+    fireEvent.click(screen.getByTestId("rule-adjust-toggle-requirements:r1"));
+    const band = classesOf(screen.getByTestId("rule-adjust-panel-requirements:r1"));
+    expect(band).toContain("bg-panel");
+    expect(band).toContain("border-t");
+    expect(band).toContain("border-dashed");
+    // A full-bleed band is square by contract (DESIGN.md §4 rule 2); a radius
+    // here would leave a sliver of the card's own plane in each corner.
+    expect(band).toContain("rounded-none");
+  });
+
+  it("exposes the Adjust toggle as a real disclosure over the band", () => {
+    render(<RulesScreen />);
+    const toggle = screen.getByTestId("rule-adjust-toggle-requirements:r1");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).not.toHaveAttribute("aria-controls");
+
+    fireEvent.click(toggle);
+    const band = screen.getByTestId("rule-adjust-panel-requirements:r1");
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(toggle.getAttribute("aria-controls")).toBe(band.id);
+  });
+
+  it("reports a validation error in the semantic ink tier, not the base hue", () => {
+    render(<RulesScreen />);
+    fireEvent.click(screen.getByTestId("rule-adjust-toggle-requirements:r1"));
+    fireEvent.change(screen.getByTestId("rule-adjust-input-requirements:r1-requiredNumPeople"), {
+      target: { value: "-1" },
+    });
+    const alert = classesOf(screen.getByRole("alert"));
+    // DESIGN.md §2 makes the ink tier the deepest treatment; error TEXT on a
+    // --panel band needs it to clear AA.
+    expect(alert).toContain("text-errorink");
+    expect(alert).not.toMatch(/\btext-error\b/);
+  });
+});
+
+describe("RulesScreen — real controls at the coarse-pointer floor", () => {
+  it("builds the ±∞ weight affordances from the shared Button contract", () => {
+    useScenarioStore.getState().mutateScenario((state) => ({
+      cardsByKind: {
+        ...state.cardsByKind,
+        successions: [{ uid: "s1", person: ["P1"], pattern: ["N", "D"], weight: -2 }],
+      },
+    }));
+    render(<RulesScreen />);
+    fireEvent.click(screen.getByTestId("rule-adjust-toggle-successions:s1"));
+
+    for (const testId of [
+      "rule-adjust-plus-inf-successions:s1-weight",
+      "rule-adjust-minus-inf-successions:s1-weight",
+    ]) {
+      const button = screen.getByTestId(testId);
+      expect(button.getAttribute("data-slot")).toBe("button");
+      // `h-control-sm` is the absolute 32px token; v1's `h-9` resolves through
+      // the 0.9 density baseline to 32.4px and carried no touch floor at all.
+      expect(classesOf(button)).toContain("h-control-sm");
+      expect(classesOf(button)).not.toContain("h-9");
+      expect(classesOf(button)).toContain("pointer-coarse:min-h-touch");
+      expect(classesOf(button)).toContain("pointer-coarse:min-w-touch");
+    }
+  });
+
+  it("gives the inline text affordances the 44px floor without a pseudo-element hitbox", () => {
+    seedRequirement();
+    render(<RulesScreen />);
+    for (const testId of ["rule-rename-requirements:r1", "rule-open-advanced-requirements:r1"]) {
+      const classes = classesOf(screen.getByTestId(testId));
+      // T8: the real control grows; nothing simulates the target with `after:`.
+      expect(classes).toContain("pointer-coarse:min-h-touch");
+      expect(classes).toContain("pointer-coarse:min-w-touch");
+      expect(classes).not.toMatch(/\bafter:/);
+    }
+  });
+
+  it("leaves the rename field on its own absolute control height", () => {
+    seedRequirement();
+    render(<RulesScreen />);
+    fireEvent.click(screen.getByTestId("rule-rename-requirements:r1"));
+    const input = screen.getByTestId("rule-rename-input-requirements:r1");
+    // v1 forced `h-8`, which the repaired tailwind-merge now really applies as
+    // 28.8px — under the 32px floor and off-token.
+    expect(classesOf(input)).not.toMatch(/\bh-8\b/);
+    expect(classesOf(input)).toContain("h-control");
+    expect(classesOf(input)).toContain("pointer-coarse:min-h-touch");
+  });
+
+  it("hands an unsupported record off through a real control below its reason", () => {
+    useScenarioStore.getState().mutateScenario((state) => ({
+      cardsByKind: {
+        ...state.cardsByKind,
+        requirements: [{ uid: "r2", shiftType: ["D", "N"], requiredNumPeople: 1, weight: -1 }],
+      },
+    }));
+    render(<RulesScreen />);
+    const handoff = screen.getByTestId("rule-open-advanced-unsupported-requirements:r2");
+    expect(handoff.getAttribute("data-slot")).toBe("button");
+    expect(classesOf(handoff)).toContain("pointer-coarse:min-h-touch");
+
+    // The note strip keeps a hairline: the row's own tone is --panel too once the
+    // rule is switched off, so tone alone cannot define this box.
+    const strip = classesOf(handoff.parentElement);
+    expect(strip).toContain("rounded-control");
+    expect(strip).toContain("border-line2");
+    expect(strip).toContain("bg-panel");
   });
 });

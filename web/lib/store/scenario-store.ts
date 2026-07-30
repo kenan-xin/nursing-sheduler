@@ -46,6 +46,176 @@ import {
  */
 export type BackupStatus = "none" | "current" | "stale";
 
+// ---------------------------------------------------------------------------
+// Non-finite weight codec — the JSON persistence boundary
+// ---------------------------------------------------------------------------
+//
+// `Weight` is "an integer, or ±Infinity for a hard constraint" (lib/scenario/types.ts),
+// and the product exposes both signs as real actions — the Guided Rules ±∞
+// controls, and `LEAVE_PIN_WEIGHT`. Native `JSON.stringify` has no
+// representation for a non-finite number and silently emits `null`, so every
+// hard weight written to IndexedDB came back as `null`, `sanitizePersistedScenario`
+// rejected it (`weight` must be a number), and the whole application landed in
+// the destructive "Stored data could not be loaded" state.
+//
+// The repair belongs HERE, at the one shared serialization seam, and not in any
+// route's value handling: `createJSONStorage` is the only place the scenario
+// becomes JSON, and a route-local coercion would have to lie about the value.
+//
+// The representation is a single-key tagged OBJECT rather than a sentinel string,
+// which is what makes it unambiguous in both directions:
+//   • encoding only ever wraps a number, so an authored string that happens to
+//     read `"Infinity"` — or even the envelope's own JSON text — round-trips as
+//     exactly that string;
+//   • decoding only ever unwraps an object carrying the reserved key, and the
+//     durable scenario shape has no free-form record that could produce one.
+//
+// The codec is also SCOPED BY FIELD, because "a non-finite number" is not a
+// property of the payload — it is a property of the DOMAIN a value sits in. A
+// global codec revived a forged tag under `requiredNumPeople` into numeric
+// `Infinity`, and the sanitizer's generic `typeof value === "number"` check
+// happily accepted it, so a foreign record could hydrate `ready` in a state the
+// producer schema forbids. The approved positions below were derived by auditing
+// the persisted slice (`SCENARIO_KEYS`) against the producer/import schemas:
+//
+//   • `weight` — every `Weight`-typed field in the durable slice is spelled
+//     exactly this: the five card kinds and the `off`/`request` matrix cells.
+//     `zWeight` is "an integer, or ±Infinity".
+//   • `weightRange` — `exportLayout.formatting[].when.preference.weightRange` is
+//     an ARRAY of `zLooseNumber`, which the schema documents as "unlike a
+//     preference weight — unrestricted", and whose sanitizer accepts any number.
+//     It is reachable today through a Workspace Load, so scoping to `weight`
+//     alone would have silently turned a valid infinite bound into `null`.
+//
+// Every other numeric field — `requiredNumPeople`, `preferredNumPeople`,
+// `target`, `durationMinutes`, `restMinutes`, ids, coefficients — is finite-only,
+// and a tag there is refused rather than decoded.
+//
+// Three deliberate non-goals:
+//   • `NaN` is NOT encoded. It is not a representable `Weight`, so it keeps
+//     serializing to `null` and keeps failing closed at the sanitizer — encoding
+//     it would carry a corrupt value PAST the gate that exists to catch it.
+//   • an already-corrupted `null` is left alone. Its sign is unrecoverable, and
+//     guessing one would silently invent a hard constraint in a ward's roster.
+//   • nothing here tries to out-validate the sanitizer on FOREIGN keys. A tag at
+//     `meta.weight` still decodes, exactly as a plain `meta.weight: 5` would
+//     already survive today — parity with an ordinary JSON number is the bar, and
+//     stripping unknown nested keys is the sanitizer's job, not the codec's.
+
+/** The reserved key tagging a non-finite number in the persisted JSON payload. */
+export const NON_FINITE_PERSIST_TAG = "$nsNonFinite";
+
+const POSITIVE_INFINITY_TAG = "Infinity";
+const NEGATIVE_INFINITY_TAG = "-Infinity";
+
+/** Scalar properties whose domain admits a signed infinity (see the audit above). */
+const SIGNED_INFINITY_SCALAR_KEYS: ReadonlySet<string> = new Set(["weight"]);
+
+/** Properties holding an ARRAY of numbers whose domain admits signed infinities. */
+const SIGNED_INFINITY_LIST_KEYS: ReadonlySet<string> = new Set(["weightRange"]);
+
+/** Whether `value` is an object carrying the reserved tag — well-formed or not. */
+function isTagged(value: unknown): value is Record<string, unknown> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.prototype.hasOwnProperty.call(value, NON_FINITE_PERSIST_TAG)
+  );
+}
+
+/** Wrap `±Infinity`; leave everything else (including `NaN`) exactly as it is. */
+function encodeIfInfinite(value: unknown): unknown {
+  // Only a number can be equal to an infinity, so no `typeof` guard is needed.
+  if (value === Number.POSITIVE_INFINITY) {
+    return { [NON_FINITE_PERSIST_TAG]: POSITIVE_INFINITY_TAG };
+  }
+  if (value === Number.NEGATIVE_INFINITY) {
+    return { [NON_FINITE_PERSIST_TAG]: NEGATIVE_INFINITY_TAG };
+  }
+  return value;
+}
+
+/** Unwrap a well-formed envelope; THROW on a tagged-but-malformed one. */
+function decodeEnvelope(value: unknown): unknown {
+  if (!isTagged(value)) return value;
+  const tag = value[NON_FINITE_PERSIST_TAG];
+  // Exactly one key: a tag carrying passengers is malformed, not a hard weight.
+  if (Object.keys(value).length === 1) {
+    if (tag === POSITIVE_INFINITY_TAG) return Number.POSITIVE_INFINITY;
+    if (tag === NEGATIVE_INFINITY_TAG) return Number.NEGATIVE_INFINITY;
+  }
+  throw new Error(
+    `Persisted scenario carries a malformed ${NON_FINITE_PERSIST_TAG} envelope ` +
+      `(${JSON.stringify(value).slice(0, 120)}); refusing to guess a value.`,
+  );
+}
+
+/**
+ * `JSON.stringify` replacer for the durable payload. `stringify` applies the
+ * replacer BEFORE it would coerce a non-finite number to `null`, so the tagged
+ * envelope is what reaches storage.
+ *
+ * The replacer visits a holder BEFORE its children, which is why an
+ * infinity-tolerant LIST is rewritten here at its own key rather than element by
+ * element: an array element's own visit knows only its index, never which array it
+ * belongs to. The rewritten array is walked afterwards, where each envelope is
+ * already an object and passes straight through — so there is no recursion.
+ *
+ * An infinity at any other key is deliberately left alone, becomes `null`, and is
+ * refused by the sanitizer on the next load: the app can therefore never author a
+ * tag into a finite-only slot.
+ */
+export function encodeNonFiniteNumbers(key: string, value: unknown): unknown {
+  if (SIGNED_INFINITY_SCALAR_KEYS.has(key)) return encodeIfInfinite(value);
+  if (SIGNED_INFINITY_LIST_KEYS.has(key) && Array.isArray(value)) {
+    return value.map((element) => encodeIfInfinite(element));
+  }
+  return value;
+}
+
+/**
+ * `JSON.parse` reviver for the durable payload — the matching decode, which runs
+ * inside `storage.getItem` and therefore strictly BEFORE `migrate` and the
+ * sanitizing `merge`. Hydration sees real numeric infinities at the positions
+ * whose domain admits them, exactly as the binding types say it should.
+ *
+ * Three outcomes, and every one of them is closed:
+ *   • an approved position with a well-formed envelope decodes to the signed
+ *     numeric infinity;
+ *   • an approved position with a tagged-but-malformed envelope THROWS;
+ *   • a FINITE-ONLY position carrying a tag THROWS — the value is refused rather
+ *     than revived into a domain the schema forbids.
+ *
+ * A throw lands in `persist`'s hydrate chain, reaches `onRehydrateStorage` as an
+ * error and routes to `recoverable-error` through the same contract a malformed
+ * field already uses, leaving the stored record intact.
+ *
+ * `JSON.parse` walks bottom-up and binds `this` to the holder, so an ARRAY element
+ * is passed over here and judged by its parent on the next visit — that is what
+ * lets an infinity-tolerant list decode while an element of any other numeric
+ * array is left as an object for the sanitizer to reject.
+ *
+ * Every value the codec never wrote — finite numbers, strings, `null`, ordinary
+ * objects, and every pre-existing persisted envelope — passes through untouched,
+ * so no migration or version bump is required.
+ */
+export function decodeNonFiniteNumbers(this: unknown, key: string, value: unknown): unknown {
+  if (SIGNED_INFINITY_SCALAR_KEYS.has(key)) return decodeEnvelope(value);
+  if (SIGNED_INFINITY_LIST_KEYS.has(key) && Array.isArray(value)) {
+    return value.map((element) => decodeEnvelope(element));
+  }
+  // An array element is decided by its parent, which is visited next.
+  if (Array.isArray(this)) return value;
+  if (isTagged(value)) {
+    throw new Error(
+      `Persisted scenario carries a ${NON_FINITE_PERSIST_TAG} envelope at the finite-only ` +
+        `field "${key}"; a signed infinity is only valid for a weight.`,
+    );
+  }
+  return value;
+}
+
 /**
  * The durable store's state: the scenario slice, the persisted Workspace-backup
  * fingerprint, and the spine mutation primitives. Editor-specific CRUD actions
@@ -182,7 +352,13 @@ export function createScenarioStore(config: ScenarioStoreConfig = {}) {
       {
         name: SCENARIO_PERSIST_KEY,
         version: SCENARIO_PERSIST_VERSION,
-        storage: createJSONStorage(() => guarded),
+        // The codec above is the whole repair: `guarded` (the FIFO write queue,
+        // its revision/newest-wins bookkeeping and its drain) is untouched, and so
+        // are `migrate`, `merge`, and the hydration-failure and reset paths.
+        storage: createJSONStorage(() => guarded, {
+          replacer: encodeNonFiniteNumbers,
+          reviver: decodeNonFiniteNumbers,
+        }),
         // Persist the scenario slice + the backup fingerprint (so a reload can tell
         // whether the restored work matches its last downloaded backup). Actions
         // are dropped.
