@@ -86,7 +86,11 @@ describe("RosterPeriodCard — import switch honest initial state (FR-DC-40)", (
 
     const toggle = screen.getByTestId("import-toggle");
     expect(toggle.getAttribute("aria-checked")).toBe("true");
-    expect(toggle.className).toContain("ns-switch--on");
+    // The shared Base UI Switch publishes its state as `data-checked` /
+    // `data-unchecked`; the v1 `ns-switch--on` class is gone with the hand-rolled
+    // control, so the primitive's own state contract is what is pinned here.
+    expect(toggle.getAttribute("data-slot")).toBe("switch");
+    expect(toggle.hasAttribute("data-checked")).toBe(true);
     expect(onCommit).toHaveBeenLastCalledWith(VALID_RANGE, true);
   });
 
@@ -95,7 +99,7 @@ describe("RosterPeriodCard — import switch honest initial state (FR-DC-40)", (
 
     const toggle = screen.getByTestId("import-toggle");
     expect(toggle.getAttribute("aria-checked")).toBe("true");
-    expect(toggle.className).toContain("ns-switch--on");
+    expect(toggle.hasAttribute("data-checked")).toBe(true);
     // The import list is rendered, honestly reflecting the present groups.
     expect(screen.queryByTestId("import-count")).not.toBeNull();
   });
@@ -107,7 +111,8 @@ describe("RosterPeriodCard — import switch honest initial state (FR-DC-40)", (
 
     const toggle = screen.getByTestId("import-toggle");
     expect(toggle.getAttribute("aria-checked")).toBe("false");
-    expect(toggle.className).not.toContain("ns-switch--on");
+    expect(toggle.hasAttribute("data-checked")).toBe(false);
+    expect(toggle.hasAttribute("data-unchecked")).toBe(true);
     // No import summary is shown, so nothing implies an import that never happened.
     expect(screen.queryByTestId("import-changes")).toBeNull();
     expect(screen.queryByTestId("import-count")).toBeNull();

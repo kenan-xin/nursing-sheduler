@@ -466,3 +466,194 @@ test.describe("T10 Dates & Calendar", () => {
     expect(ids).toEqual(expect.arrayContaining(reserved));
   });
 });
+
+// ---------------------------------------------------------------------------
+// R2a — the v2 "Mint Canvas, Warm Ink" visual system, measured on the real route.
+//
+// This is the RESOLVED half of the route's own evidence: `components/dates/
+// dates-v2-roles.test.tsx` pins which contract authored each surface, and these
+// tests prove what Chromium actually paints and lays out. Both halves are needed —
+// a role can be spelled correctly and still resolve to the wrong tone if a token
+// moves, and a token can be right while a full-bleed band rounds its corners.
+//
+// F4's owner matrix covers the coarse-pointer lane for `/dates`. What is added
+// here is what F4 deliberately does NOT assert per route: the exact resting tone,
+// radius and elevation of THIS screen's named surfaces, its precise-pointer
+// control sizes, and its behaviour at the narrow viewport.
+// ---------------------------------------------------------------------------
+
+/** Resolve runtime tokens the way the app resolves them — through the cascade. */
+async function resolveTokens(page: Page, tokens: string[]): Promise<Record<string, string>> {
+  return page.evaluate((list) => {
+    const out: Record<string, string> = {};
+    for (const token of list) {
+      const probe = document.createElement("div");
+      probe.style.backgroundColor = `var(${token})`;
+      document.body.appendChild(probe);
+      out[token] = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+    }
+    return out;
+  }, tokens);
+}
+
+/** Load `/dates` with a theme pinned before first paint. */
+async function gotoDatesInTheme(page: Page, theme: "light" | "dark") {
+  await page.addInitScript((t) => {
+    try {
+      window.localStorage.setItem("ns-theme", t);
+    } catch {}
+  }, theme);
+  await gotoDates(page);
+  const html = page.locator("html");
+  if (theme === "dark") await expect(html).toHaveClass(/dark/);
+  else await expect(html).not.toHaveClass(/dark/);
+}
+
+test.describe("R2a — v2 visual system on /dates", () => {
+  for (const theme of ["light", "dark"] as const) {
+    test(`surface ladder resolves in the ${theme} theme`, async ({ page }) => {
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await gotoDatesInTheme(page, theme);
+      await setRange(page, "2026-07-01", "2026-07-31");
+
+      const tone = await resolveTokens(page, ["--bg", "--surface", "--panel"]);
+
+      // L0: the screen root is the recessed page plane, and it is never a box.
+      const root = page.getByTestId("screen");
+      await expect(root).toHaveCSS("background-color", tone["--bg"]);
+      await expect(root).toHaveCSS("border-radius", "0px");
+
+      // L1: every card on that plane rests at --surface / 16px / --sh-1.
+      for (const testId of ["roster-period-card", "calendar-view", "date-groups-panel"]) {
+        const card = page.getByTestId(testId);
+        await expect(card, testId).toHaveCSS("background-color", tone["--surface"]);
+        await expect(card, testId).toHaveCSS("border-radius", "16px");
+        const shadow = await card.evaluate((el) => getComputedStyle(el).boxShadow);
+        expect(shadow, `${testId} must carry a resting elevation`).not.toBe("none");
+        expect(shadow, `${testId} must not be an inset`).not.toContain("inset");
+      }
+
+      // well: an inset island inside a card — --panel, 12px, inset cast only.
+      const well = page.getByTestId("date-id-explainer");
+      await expect(well).toHaveCSS("background-color", tone["--panel"]);
+      await expect(well).toHaveCSS("border-radius", "12px");
+      expect(await well.evaluate((el) => getComputedStyle(el).boxShadow)).toContain("inset");
+
+      // band: the holiday heading spans its box, so it is --panel, square, flat.
+      const band = page.getByTestId("import-count").locator("..");
+      await expect(band).toHaveCSS("background-color", tone["--panel"]);
+      await expect(band).toHaveCSS("border-radius", "0px");
+      expect(await band.evaluate((el) => getComputedStyle(el).boxShadow)).toBe("none");
+    });
+  }
+
+  test("a previewed group row lifts from the inset well to the brand-edged selection", async ({
+    page,
+  }) => {
+    await gotoDates(page);
+    await setRange(page, "2026-07-01", "2026-07-31");
+    await patchStore(page, [{ id: "SummerRun", members: ["01", "02", "03"] }]);
+
+    const tone = await resolveTokens(page, ["--surface", "--panel", "--brand"]);
+    const row = page.getByTestId("editable-group-SummerRun");
+
+    await expect(row).toHaveCSS("background-color", tone["--panel"]);
+    await expect(row).toHaveCSS("border-radius", "12px");
+    expect(await row.evaluate((el) => getComputedStyle(el).boxShadow)).toContain("inset");
+
+    await page.getByTestId("editable-group-preview-SummerRun").click();
+
+    await expect(row).toHaveCSS("background-color", tone["--surface"]);
+    await expect(row).toHaveCSS("border-top-color", tone["--brand"]);
+    const lifted = await row.evaluate((el) => getComputedStyle(el).boxShadow);
+    expect(lifted).not.toBe("none");
+    expect(lifted).not.toContain("inset");
+
+    // The sticky preview panel is the same selection language, clipped to 16px.
+    const panel = page.getByTestId("date-group-preview");
+    await expect(panel).toHaveCSS("border-radius", "16px");
+    await expect(panel).toHaveCSS("border-top-color", tone["--brand"]);
+    await expect(panel).toHaveCSS("position", "sticky");
+  });
+
+  test("every date-grid data surface stays square in both calendars", async ({ page }) => {
+    await gotoDates(page);
+    await setRange(page, "2026-07-01", "2026-07-31");
+    await patchStore(page, [{ id: "SummerRun", members: ["01"] }]);
+    await page.getByTestId("editable-group-edit-SummerRun").click();
+    await expect(page.getByTestId("date-scope-picker")).toBeVisible();
+
+    const report = await page.evaluate(() => {
+      const nodes = Array.from(
+        document.querySelectorAll(
+          ".ns-month-calendar table, .ns-month-calendar thead, .ns-month-calendar tbody, " +
+            ".ns-month-calendar tr, .ns-month-calendar th, .ns-month-calendar td, .ns-legend",
+        ),
+      );
+      const rounded = nodes
+        .filter((el) => getComputedStyle(el).borderRadius !== "0px")
+        .map((el) => `${el.tagName.toLowerCase()} → ${getComputedStyle(el).borderRadius}`);
+      return { measured: nodes.length, rounded };
+    });
+
+    // Vacuity guard: both grids plus the legend must actually have been measured.
+    expect(report.measured).toBeGreaterThan(50);
+    expect(report.rounded, "a date grid or legend swatch was rounded").toEqual([]);
+  });
+
+  test("real control geometry on a precise pointer — 36px actions and fields", async ({ page }) => {
+    await gotoDates(page);
+    await setRange(page, "2026-07-01", "2026-07-31");
+    await patchStore(page, [{ id: "SummerRun", members: ["01"] }]);
+
+    // Icon actions own BOTH axes at the absolute 36px control size — the size is
+    // on the control itself, so its own box is what is measured here.
+    for (const testId of [
+      "editable-group-preview-SummerRun",
+      "editable-group-edit-SummerRun",
+      "editable-group-delete-SummerRun",
+    ]) {
+      const box = await page.getByTestId(testId).boundingBox();
+      expect(box, testId).not.toBeNull();
+      expect(Math.round(box!.width), `${testId} width`).toBe(36);
+      expect(Math.round(box!.height), `${testId} height`).toBe(36);
+    }
+
+    // Fields are a height claim; the 0.9 density baseline must not shrink them.
+    for (const testId of ["range-start", "range-end"]) {
+      const box = await page.getByTestId(testId).boundingBox();
+      expect(Math.round(box!.height), `${testId} height`).toBe(36);
+    }
+
+    // The primary CTA is the prototype's 44px action, and it is still an anchor.
+    const cta = page.getByTestId("dates-continue");
+    expect(await cta.evaluate((el) => el.tagName)).toBe("A");
+    const ctaBox = await cta.boundingBox();
+    expect(Math.round(ctaBox!.height)).toBe(44);
+  });
+
+  test("no horizontal overflow at the 390px touch viewport, and the work area stacks", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await gotoDates(page);
+    // A two-month range, so both calendars render every grid they can.
+    await setRange(page, "2026-07-01", "2026-08-15");
+    await patchStore(page, [{ id: "SummerRun", members: ["01"] }]);
+    await page.getByTestId("editable-group-edit-SummerRun").click();
+    await expect(page.getByTestId("date-scope-picker")).toBeVisible();
+
+    const overflow = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+    }));
+    expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth + 1);
+
+    // Below the 900px `grid2` layout-ladder step the two cards stack rather than
+    // sharing a row.
+    const roster = await page.getByTestId("roster-period-card").boundingBox();
+    const calendar = await page.getByTestId("calendar-view").boundingBox();
+    expect(calendar!.y).toBeGreaterThanOrEqual(roster!.y + roster!.height - 1);
+  });
+});

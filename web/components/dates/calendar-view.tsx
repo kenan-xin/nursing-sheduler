@@ -1,6 +1,10 @@
 "use client";
 
-// Read-only roster calendar card (T10; spec 02 FR-DC-17/18 / acceptance row 5).
+// Read-only roster calendar card (T10; spec 02 FR-DC-17/18 / acceptance row 5),
+// re-skinned for v2 "Mint Canvas, Warm Ink" (R2a) against
+// docs/design_prototype/source/ScreenDates.dc.html. The card is a resting L1
+// `surface` and everything inside the grid stays SQUARE — a month grid is a data
+// surface, and DESIGN.md §5 forbids rounding one.
 // Renders the prototype's calendar card (ScreenDates lines 82-126): a header with
 // the month identity + the exact three-item legend, then one Monday-first month
 // grid per spanned month. Ordinary in-range days carry a brand-tint band, the two
@@ -14,6 +18,8 @@ import {
   type DateRange,
 } from "@/lib/dates";
 import { FaCalendarDays } from "@/components/icons";
+import { cn } from "@/lib/utils";
+import { surfaceVariants } from "@/components/ui/surface";
 import { MonthGrids } from "./month-grids";
 import type { DayCellInfo } from "./month-calendar";
 import { rangeSpanLabel } from "./range-span-label";
@@ -73,11 +79,14 @@ export function CalendarView({ range }: { range: DateRange }) {
   };
 
   return (
-    <section className="border border-line bg-surface" data-testid="calendar-view">
+    <section
+      className={cn(surfaceVariants({ role: "surface", geometry: "card" }))}
+      data-testid="calendar-view"
+    >
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line2 px-[18px] py-4">
         <div className="flex min-w-0 items-center gap-2">
           <FaCalendarDays className="size-3.5 text-ink3" />
-          <h2 className="font-heading text-cardhead font-extrabold tracking-tight">
+          <h2 className="font-heading text-cardhead font-semibold tracking-[-0.015em]">
             {headerLabel}
           </h2>
         </div>

@@ -1,10 +1,18 @@
 "use client";
 
 // Roster-period card (T10; spec 02 FR-DC-01..12/20/21/29/30/37..40 / acceptance
-// rows 2 & 3). ONE bordered card consolidating the whole roster-period surface the
-// prototype teaches at ScreenDates lines 22-79: the two date inputs, the live
-// DURATION + month, the span-dependent Date-IDs explainer (format badge / example /
-// note), and the Singapore holiday import switch + compact holiday list.
+// rows 2 & 3), re-skinned for v2 "Mint Canvas, Warm Ink" (R2a) against
+// docs/design_prototype/source/ScreenDates.dc.html. ONE card consolidating the
+// whole roster-period surface the prototype teaches at ScreenDates lines 22-79:
+// the two date inputs, the live DURATION + month, the span-dependent Date-IDs
+// explainer (format badge / example / note), and the Singapore holiday import
+// switch + compact holiday list.
+//
+// Surfaces (DESIGN.md §4): the card is a resting L1 `surface` on the page plane;
+// the Date-IDs explainer is an inset `well` inside it; the holiday list's heading
+// is a full-bleed `band` (square, flat) inside a control-radius box that clips it.
+// Fields, the switch and the format chip are the shared v2 primitives, so their
+// radius, focus treatment and coarse-pointer sizing are decided once.
 //
 // The card owns an isolated `{start,end}` draft seeded from the committed range and
 // re-seeded whenever the committed range changes underneath it (undo/redo, external
@@ -25,6 +33,12 @@ import {
   type DateRange,
 } from "@/lib/dates";
 import { FaHashtag } from "@/components/icons";
+import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Surface, surfaceVariants } from "@/components/ui/surface";
+import { Switch } from "@/components/ui/switch";
 import { rangeSpanLabel } from "./range-span-label";
 
 export interface RosterPeriodCardProps {
@@ -137,58 +151,72 @@ export function RosterPeriodCard({
   };
 
   return (
-    <section className="border border-line bg-surface" data-testid="roster-period-card">
+    <section
+      className={cn(surfaceVariants({ role: "surface", geometry: "card" }))}
+      data-testid="roster-period-card"
+    >
       <div className="border-b border-line2 px-[18px] py-4">
-        <h2 className="font-heading text-cardhead font-extrabold tracking-tight">Roster period</h2>
+        {/* Headline: Figtree 600 / -0.015em (DESIGN.md §3). v1 ran 800 at the
+            default tracking; v2 is two weight steps lighter. */}
+        <h2 className="font-heading text-cardhead font-semibold tracking-[-0.015em]">
+          Roster period
+        </h2>
       </div>
       <div className="p-[18px]">
         <div className="flex flex-wrap gap-3.5">
-          <label className="flex min-w-[140px] flex-1 flex-col gap-[7px]">
-            <span className="text-label font-semibold uppercase tracking-[0.03em] text-ink2">
-              Start date
-            </span>
-            <input
+          {/* The label is explicitly associated rather than relying on a wrapping
+              <label>, so the field's accessible name survives the primitive swap. */}
+          <div className="flex min-w-[140px] flex-1 flex-col gap-[7px]">
+            <Label htmlFor={startId}>Start date</Label>
+            <Input
               type="date"
               id={startId}
-              className="ns-input h-10"
               data-testid="range-start"
               value={draft.start}
               onChange={(e) => editEndpoint("start", e.target.value)}
             />
-          </label>
-          <label className="flex min-w-[140px] flex-1 flex-col gap-[7px]">
-            <span className="text-label font-semibold uppercase tracking-[0.03em] text-ink2">
-              End date
-            </span>
-            <input
+          </div>
+          <div className="flex min-w-[140px] flex-1 flex-col gap-[7px]">
+            <Label htmlFor={endId}>End date</Label>
+            <Input
               type="date"
               id={endId}
-              className="ns-input h-10"
               data-testid="range-end"
               value={draft.end}
               onChange={(e) => editEndpoint("end", e.target.value)}
             />
-          </label>
+          </div>
         </div>
 
+        {/* `--rule` is the emphasis rule (DESIGN.md §2), the one place a 2px edge
+            is intended — it separates the committed summary from the inputs. */}
         <div className="mt-4 flex items-center gap-2.5 border-t-2 border-rule pt-3.5">
           <span className="text-label font-semibold uppercase tracking-[0.03em] text-ink3">
             Duration
           </span>
-          <span className="font-heading text-title font-extrabold" data-testid="range-duration">
+          <span
+            className="font-heading text-title font-semibold tracking-[-0.015em]"
+            data-testid="range-duration"
+          >
             {invalid ? "—" : `${duration} day${duration === 1 ? "" : "s"}`}
           </span>
-          <span className="text-sm text-ink3">· {monthLabel}</span>
+          <span className="text-meta text-ink3">· {monthLabel}</span>
         </div>
 
+        {/* Semantic text on a plain surface takes the deepest `ink` tier, not the
+            base tier, which DESIGN.md §2 scopes to text on its own tint. */}
         {invalid ? (
-          <p className="mt-3 text-sm text-warn" data-testid="range-invalid">
+          <p className="mt-3 text-meta text-warnink" data-testid="range-invalid">
             End date must be on or after the start date.
           </p>
         ) : null}
 
-        <div
-          className="mt-3.5 border border-line2 bg-panel px-3.5 py-3"
+        {/* An inset island inside the card, so it is the `well` level: `--panel`
+            with the inset cast and no border of its own (DESIGN.md §4 rule 1). */}
+        <Surface
+          level="well"
+          geometry="control"
+          className="mt-3.5 px-3.5 py-3"
           data-testid="date-id-explainer"
         >
           <div className="mb-1.5 flex flex-wrap items-center gap-2">
@@ -196,49 +224,69 @@ export function RosterPeriodCard({
             <span className="text-label font-semibold uppercase tracking-[0.03em] text-ink2">
               Date IDs
             </span>
-            <span
-              className="bg-brandtint px-1.5 py-0.5 font-mono text-label font-bold text-brandink"
+            {/* The format is authored-looking data (`MM-DD`), so the chip reads
+                exactly as written rather than being uppercased. */}
+            <Badge
+              variant="brand"
+              casing="normal"
+              className="font-mono"
               data-testid="date-id-format"
             >
               {ids.format}
-            </span>
+            </Badge>
           </div>
           <div className="mb-1 font-mono text-label-md text-ink">{ids.example}</div>
-          <div className="text-sm text-ink3">
+          <div className="text-meta text-ink3">
             {ids.note} These IDs are what rules, groups, and the YAML reference.
           </div>
-        </div>
+        </Surface>
 
         <div className="mt-[18px] flex items-start justify-between gap-3">
           <div>
-            <div className="text-body font-bold">Import Singapore public holidays</div>
-            <div className="mt-[3px] max-w-[38ch] text-sm text-ink2">
+            <div className="text-body font-semibold">Import Singapore public holidays</div>
+            <div className="mt-[3px] max-w-[38ch] text-meta text-ink2">
               Marks gazetted holidays as non-work days so the roster staffs them like weekends.
             </div>
           </div>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={effectiveImport}
+          {/* The shared Base UI Switch: the pressable root IS the 44x44 coarse
+              target and the 36x20 track is its centred child, so nothing here
+              simulates a touch target with an overlapping pseudo-element (T8). */}
+          <Switch
             aria-label="Import Singapore public holidays"
-            className={`ns-switch ${effectiveImport ? "ns-switch--on" : ""}`}
             data-testid="import-toggle"
+            checked={effectiveImport}
             disabled={!supported}
-            onClick={toggleImport}
-          >
-            <span className="ns-switch__knob" />
-          </button>
+            onCheckedChange={toggleImport}
+          />
         </div>
 
         {!supported ? (
-          <p className="mt-3 text-sm text-warn" data-testid="import-unsupported">
+          <p className="mt-3 text-meta text-warnink" data-testid="import-unsupported">
             Available only when the roster range stays within {getSupportLabel()}.
           </p>
         ) : effectiveImport ? (
-          <div className="mt-4 border border-line2" data-testid="import-changes">
-            <div className="flex justify-between bg-panel px-3 py-[9px] text-label font-semibold uppercase tracking-[0.03em] text-ink2">
-              <span>{monthLabel} holidays</span>
-              <span data-testid="import-count">{holidays.length} marked</span>
+          // A small bordered list, so the heading band it clips is FULL-BLEED and
+          // square while the box itself takes the control radius (DESIGN.md §4
+          // rule 2). `overflow-hidden` is what makes the band meet the corners.
+          <div
+            className="mt-4 overflow-hidden rounded-control border border-line2"
+            data-testid="import-changes"
+          >
+            <div
+              className={cn(
+                "flex justify-between px-3 py-2.5",
+                surfaceVariants({ role: "band", geometry: "square" }),
+              )}
+            >
+              <span className="text-label font-semibold uppercase tracking-[0.03em] text-ink2">
+                {monthLabel} holidays
+              </span>
+              <span
+                className="text-label font-semibold uppercase tracking-[0.03em] text-ink2"
+                data-testid="import-count"
+              >
+                {holidays.length} marked
+              </span>
             </div>
             {holidays.map((entry) => (
               <div
@@ -246,11 +294,12 @@ export function RosterPeriodCard({
                 className="flex items-center gap-2.5 border-t border-line2 px-3 py-2.5"
                 data-testid={`holiday-${entry.date}`}
               >
+                {/* A data mark, so it stays a square 8px block. */}
                 <span className="size-2 flex-none bg-warn" aria-hidden />
                 <span className="min-w-[96px] font-mono text-label text-ink2">
                   {holidayDayLabel(entry.date)}
                 </span>
-                <span className="text-sm">{entry.name}</span>
+                <span className="text-meta">{entry.name}</span>
               </div>
             ))}
           </div>

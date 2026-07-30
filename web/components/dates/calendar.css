@@ -1,14 +1,32 @@
-/* Dates screen styling (T10) — token-driven, scoped under the Dates screen so it
-   never leaks. FullCalendar is restyled under `.ns-month-calendar`; the rest are
-   the Dates UI primitives that only render on this one screen. Prototype target:
-   docs/design_prototype/ScreenDates.dc.html. */
+/* Dates screen styling (T10, re-skinned for v2 "Mint Canvas, Warm Ink" by R2a).
+   Token-driven and scoped under `.ns-month-calendar` so it never leaks. Prototype
+   target: docs/design_prototype/source/ScreenDates.dc.html.
 
-/* The `.ns-grid2` two-column work area that lived here now comes from the layout
-   ladder in globals.css (`grid2:` = 900px), shared with Save/Load and Optimize
-   instead of being a Dates-only class. See bmw.7. */
+   WHY THIS FILE STILL EXISTS. FullCalendar builds its grid imperatively after
+   mount, so its day cells cannot be React elements carrying utility classes —
+   the render hooks hand us a class NAME per cell and the styling has to live in
+   a stylesheet. That is the whole remaining job here: the FullCalendar restyle,
+   the per-cell state marks, and the legend swatches those cells are read against.
+
+   WHAT LEFT. The Dates-only v1 primitives this file used to carry — `.ns-input`,
+   `.ns-switch`, `.ns-icon-btn`, `.ns-square-btn`, `.ns-quick-pick`,
+   `.ns-day-chip`, `.ns-derived-chip`, `.ns-dg-preview*`, `.ns-scope-grids` and
+   `.ns-btn--danger` — are gone. Those surfaces are now the shared v2 contracts
+   (`Button` / `Input` / `Switch` / `Badge` and the `surfaceVariants` recipe), so
+   their radius, elevation, tone and coarse-pointer sizing are decided in one
+   place instead of being forked per screen.
+
+   The `.ns-grid2` two-column work area moved to the layout ladder in globals.css
+   (`grid2:` = 900px), shared with Save/Load and Optimize. See bmw.7.
+
+   ========================================================================== */
 
 /* ==========================================================================
-   FullCalendar restyle — square corners, hairline borders, token palette.
+   FullCalendar restyle.
+
+   Every cell stays SQUARE: a month grid is a data surface, and DESIGN.md §5 is
+   explicit that rounding a date grid breaks the column read. The card AROUND the
+   grid carries the 16px card radius; nothing inside it does.
    Cells are Monday-first (firstDay={1}); content comes from dayCellContent.
    ========================================================================== */
 .ns-month-calendar .fc {
@@ -17,7 +35,7 @@
   --fc-neutral-bg-color: var(--color-panel);
   --fc-today-bg-color: transparent;
   font-family: inherit;
-  font-size: 0.8125rem;
+  font-size: var(--t-sm);
 }
 
 .ns-month-calendar .fc .fc-scrollgrid {
@@ -29,12 +47,15 @@
   border: none;
   padding: 0.25rem 0;
 }
+/* Day-of-week eyebrow: mono, uppercase. Tracking is +0.03em, not the prototype's
+   0.04em — DESIGN.md §3's Negative-Tracking Rule is unconditional for uppercase
+   labels, and a ratified rule outranks a prototype example. */
 .ns-month-calendar .fc .fc-col-header-cell-cushion {
   color: var(--color-ink3);
   font-family: var(--font-mono);
   font-weight: 600;
-  font-size: 0.625rem;
-  letter-spacing: 0.06em;
+  font-size: var(--m-xs);
+  letter-spacing: 0.03em;
   text-transform: uppercase;
   padding: 0.25rem;
 }
@@ -69,8 +90,13 @@
 .ns-cal-num {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 0.8125rem;
+  font-size: var(--m-md);
 }
+/* START / END sits on the solid brand endpoint cell, so it takes the paired
+   `--onbrand` foreground at FULL strength. The prototype's `opacity:.85` faded it
+   to a computed 4.13:1 against light teal, which axe reports as a WCAG AA failure
+   at 4.5:1 — and every light accent clears AA against `--onbrand` unfaded
+   (DESIGN.md §2, tightest is rose at 4.5224:1). */
 .ns-cal-endlabel {
   position: absolute;
   bottom: 2px;
@@ -82,8 +108,8 @@
   font-size: 7px;
   letter-spacing: 0.08em;
   color: var(--color-onbrand);
-  opacity: 0.85;
 }
+/* A holiday marker is a data mark, so it stays a square 6px block. */
 .ns-cal-holiday-dot {
   position: absolute;
   top: 3px;
@@ -93,12 +119,15 @@
   background: var(--color-warn);
 }
 
-/* Display-variant day states (audit MAJOR 4). */
+/* Display-variant day states (ScreenDates 315-350).
+   Out-of-range and adjacent-month days read at `--ink3`, NOT `--faint`: v2
+   retires v1's sub-AA tertiary exemption (DESIGN.md §2), and `--faint` is
+   reserved for genuinely non-functional disabled marks. */
 .ns-month-calendar--display .fc-day.ns-cal-outside {
   background: var(--color-surface);
 }
 .ns-month-calendar--display .fc-day.ns-cal-outside .ns-cal-num {
-  color: var(--color-faint);
+  color: var(--color-ink3);
   font-weight: 500;
 }
 .ns-month-calendar--display .fc-day.ns-cal-in {
@@ -118,8 +147,10 @@
     var(--color-surface) 3px 9px
   );
 }
+/* The deepest semantic tier for a numeral (DESIGN.md §2 "ink"), so the day
+   number stays legible on the striped holiday fill. */
 .ns-month-calendar--display .fc-day.ns-cal-in.ns-cal-holiday .ns-cal-num {
-  color: var(--color-warn);
+  color: var(--color-warnink);
 }
 .ns-month-calendar--display .fc-day.ns-cal-start,
 .ns-month-calendar--display .fc-day.ns-cal-end {
@@ -128,20 +159,14 @@
 .ns-month-calendar--display .fc-day.ns-cal-start .ns-cal-num,
 .ns-month-calendar--display .fc-day.ns-cal-end .ns-cal-num {
   color: var(--color-onbrand);
-  font-weight: 800;
+  font-weight: 700;
 }
 
-/* Picker-variant day states (audit MAJOR 5 + MINOR 2/3). The picker sits in its own
-   bordered surface (so it reads as a discrete control, not the tinted editor card),
-   and every day cell is an individually bordered, separated square — the prototype's
-   discrete day controls (ScreenDates 178-198). Separation is a per-cell frame margin
-   (a div, so margin works) rather than fragile table border-spacing. */
-.ns-scope-grids {
-  max-width: 440px;
-  border: 1px solid var(--color-line2);
-  background: var(--color-surface);
-  padding: 0.625rem;
-}
+/* Picker-variant day states (ScreenDates 355-370). The picker sits inside an
+   inset `well` tray provided by DateScopePicker, so each day tile is an
+   `--surface` square on `--panel` — a discrete, separated day control. Separation
+   is a per-cell frame margin (a div, so margin works) rather than fragile table
+   border-spacing. */
 .ns-month-calendar--picker .fc,
 .ns-month-calendar--picker .fc .fc-scrollgrid,
 .ns-month-calendar--picker .fc .fc-scrollgrid td,
@@ -153,6 +178,17 @@
   margin: 1.5px;
   border: 1px solid var(--color-line2);
   background: var(--color-surface);
+}
+/* A coarse pointer aims at the DAY, so the day's own box grows — never an
+   overlapping pseudo-element hitbox (v2 technical plan T8). Seven 44px tiles
+   plus the tray padding still fit the 390px touch viewport. */
+@media (pointer: coarse) {
+  .ns-month-calendar--picker .fc-daygrid-day-frame {
+    min-height: 44px;
+  }
+}
+.ns-month-calendar--picker .ns-cal-num {
+  font-size: var(--m-sm);
 }
 .ns-month-calendar--picker .fc-day.ns-pick {
   cursor: pointer;
@@ -168,10 +204,12 @@
   );
 }
 .ns-month-calendar--picker .fc-day.ns-pick-holiday .ns-cal-num {
-  color: var(--color-warn);
+  color: var(--color-warnink);
 }
+/* `--panel-alt` is the system's generic hover tone (DESIGN.md §2); the previous
+   translucent brand wash was a second, untracked hover language. */
 .ns-month-calendar--picker .fc-day.ns-pick:hover .fc-daygrid-day-frame {
-  background: color-mix(in oklab, var(--color-brandtint) 70%, transparent);
+  background: var(--color-panel-alt);
 }
 .ns-month-calendar--picker .fc-day.ns-pick-selected .fc-daygrid-day-frame {
   background: var(--color-brand);
@@ -186,13 +224,16 @@
 }
 .ns-month-calendar--picker .fc-day.ns-pick-out .fc-daygrid-day-frame {
   border-color: transparent;
+  background: transparent;
 }
+/* Out-of-range days are unpickable, and they say so through a missing tile edge
+   and `not-allowed` rather than through a contrast level nobody can read. The
+   prototype's `opacity:.4` on top of `--ink3` is deliberately dropped. */
 .ns-month-calendar--picker .fc-day.ns-pick-out .ns-cal-num {
-  color: var(--color-faint);
-  opacity: 0.4;
+  color: var(--color-ink3);
 }
 
-/* Legend swatches (prototype's three-item legend). */
+/* Legend swatches — small square marks, never chips (DESIGN.md §5). */
 .ns-legend {
   display: inline-block;
   width: 0.625rem;
@@ -210,7 +251,14 @@
 }
 
 /* ==========================================================================
-   Buttons / inputs.
+   RETAINED v1 BUTTON, ON PURPOSE — NOT a Dates surface any more.
+
+   Dates no longer renders `.ns-btn`; every action on this screen is a shared
+   `Button`. But `components/people/people-table.tsx` still uses
+   `ns-btn ns-btn--primary` for its "Continue to shifts" CTA, and People is R2b's
+   file set. Deleting the rule here would silently restyle another ticket's route,
+   which is exactly the boundary R2a must not cross. R2b removes the consumer and
+   this block goes with it; G1's cleanup sweep is the backstop.
    ========================================================================== */
 .ns-btn {
   display: inline-flex;
@@ -242,200 +290,4 @@
 .ns-btn--primary:hover {
   filter: brightness(0.94);
   background: var(--color-brand);
-}
-.ns-btn--danger {
-  color: var(--color-error);
-}
-.ns-btn--danger:hover {
-  background: var(--color-errortint);
-}
-
-.ns-input {
-  padding: 0 0.75rem;
-  border: 1px solid var(--color-line);
-  background: var(--color-surface);
-  color: var(--color-ink);
-  font-size: var(--t-sm);
-  font-variant-numeric: tabular-nums;
-}
-.ns-input:focus-visible {
-  outline: 2px solid var(--color-brand);
-  outline-offset: -1px;
-}
-.ns-input[aria-invalid="true"] {
-  border-color: var(--color-error);
-}
-
-.ns-quick-pick {
-  background: none;
-  border: none;
-  padding: 0;
-  font-size: var(--t-sm);
-  font-weight: 600;
-  color: var(--color-brandink);
-  cursor: pointer;
-}
-.ns-quick-pick:hover {
-  text-decoration: underline;
-}
-.ns-quick-pick--muted {
-  color: var(--color-ink3);
-}
-
-.ns-icon-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.625rem;
-  height: 1.625rem;
-  flex: none;
-  border: 1px solid var(--color-line);
-  background: transparent;
-  color: var(--color-ink2);
-  cursor: pointer;
-}
-.ns-icon-btn:hover {
-  background: var(--color-panel);
-}
-
-/* Square action buttons on group cards (preview / edit / delete). */
-.ns-square-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.875rem;
-  height: 1.875rem;
-  border: 1px solid var(--color-line);
-  background: transparent;
-  color: var(--color-ink2);
-  cursor: pointer;
-}
-.ns-square-btn:hover {
-  background: var(--color-panel);
-}
-.ns-square-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.ns-square-btn--on {
-  background: var(--color-brand);
-  border-color: var(--color-brand);
-  color: var(--color-onbrand);
-}
-.ns-square-btn--danger {
-  color: var(--color-error);
-}
-.ns-square-btn--danger:hover {
-  background: var(--color-errortint);
-}
-
-/* Holiday import switch (prototype role="switch"). */
-.ns-switch {
-  position: relative;
-  width: 38px;
-  height: 22px;
-  border-radius: 11px;
-  border: none;
-  flex: none;
-  background: var(--color-line);
-  cursor: pointer;
-  transition: background 150ms ease;
-}
-.ns-switch:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.ns-switch--on {
-  background: var(--color-brand);
-}
-.ns-switch__knob {
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 18px;
-  height: 18px;
-  border-radius: 11px;
-  background: #fff;
-  transition: transform 150ms ease;
-}
-.ns-switch--on .ns-switch__knob {
-  transform: translateX(16px);
-}
-
-/* Date-group day chips + auto-derived preview chips. */
-.ns-day-chip {
-  border: 1px solid var(--color-line);
-  background: var(--color-panel);
-  padding: 0.125rem 0.5rem;
-  border-radius: 2px;
-  font-family: var(--font-mono);
-  font-weight: 600;
-  font-size: var(--m-xs);
-}
-
-.ns-derived-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5625rem;
-  border: 1px solid var(--color-line2);
-  background: var(--color-panel);
-  color: var(--color-ink2);
-  padding: 0.5rem 0.75rem;
-  cursor: pointer;
-}
-.ns-derived-chip:hover {
-  filter: brightness(0.97);
-}
-.ns-derived-chip--on {
-  background: var(--color-brand);
-  border-color: var(--color-brand);
-  color: var(--color-onbrand);
-}
-
-/* Sticky preview panel (audit MAJOR 6). */
-.ns-dg-preview {
-  position: sticky;
-  top: 60px;
-  z-index: 6;
-  background: var(--color-surface);
-  border: 1px solid var(--color-brand);
-  box-shadow: 0 4px 14px rgb(8 10 14 / 0.1);
-}
-.ns-dg-preview__chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.375rem;
-  background: var(--color-brand);
-  color: var(--color-onbrand);
-  padding: 0.125rem 0.25rem 0.125rem 0.5rem;
-  font-family: var(--font-mono);
-  font-weight: 600;
-  font-size: var(--m-xs);
-  letter-spacing: 0.02em;
-}
-.ns-dg-preview__chip-x {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 15px;
-  height: 15px;
-  border: none;
-  padding: 0;
-  color: var(--color-onbrand);
-  background: rgb(255 255 255 / 0.22);
-  cursor: pointer;
-}
-.ns-dg-preview__chip-x:hover {
-  background: rgb(255 255 255 / 0.4);
-}
-.ns-dg-preview__day {
-  flex: none;
-  border: 1px solid var(--color-brand);
-  background: var(--color-brandtint);
-  color: var(--color-brandink);
-  padding: 0.1875rem 0.5rem;
-  font-family: var(--font-mono);
-  font-weight: 600;
-  font-size: var(--m-xs);
-  white-space: nowrap;
 }

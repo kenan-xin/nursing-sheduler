@@ -1,9 +1,15 @@
 "use client";
 
-// Dates screen orchestrator (T10; spec 02; audit MAJOR 1-6). Reproduces the
-// prototype ScreenDates layout: a STEP 1 hero with the "Continue to staff" CTA, a
-// responsive two-column work area (Roster-period card | Calendar card), and the
-// full-width Date-groups card beneath it.
+// Dates screen orchestrator (T10; spec 02; audit MAJOR 1-6), re-skinned for v2
+// "Mint Canvas, Warm Ink" (R2a) against
+// docs/design_prototype/source/ScreenDates.dc.html. Reproduces the prototype
+// ScreenDates layout: a STEP 1 hero with the "Continue to staff" CTA, a responsive
+// two-column work area (Roster-period card | Calendar card), and the full-width
+// Date-groups card beneath it.
+//
+// Surfaces, in ladder order (DESIGN.md §4): the screen root is the L0 page plane
+// and every card on it is a resting L1 `surface`. Wells, bands and the selection
+// language live inside those cards, in their own components.
 //
 // Every mutation is ONE tracked patch (one zundo entry): a range commit runs the
 // pure range cascade (`applyRangeChange`, which wraps the T07 delete cascade for
@@ -33,6 +39,9 @@ import {
   type DateRange,
 } from "@/lib/dates";
 import { FaArrowRight } from "@/components/icons";
+import { cn } from "@/lib/utils";
+import { buttonVariants } from "@/components/ui/button";
+import { Surface, surfaceVariants } from "@/components/ui/surface";
 import { datesDescriptor } from "./dates-descriptor";
 import { RosterPeriodCard } from "./roster-period-card";
 import { CalendarView } from "./calendar-view";
@@ -103,13 +112,22 @@ export function DatesScreen() {
   };
 
   return (
-    <div data-testid="screen" data-screen="Dates" className="flex flex-col gap-4">
-      <header className="mb-2 flex flex-wrap items-end gap-4">
+    <Surface
+      level="page"
+      geometry="square"
+      data-testid="screen"
+      data-screen="Dates"
+      className="flex flex-col gap-5"
+    >
+      <header className="flex flex-wrap items-end gap-4">
         <div className="min-w-[240px] flex-1">
           <div className="mb-2 text-label font-semibold uppercase tracking-[0.03em] text-brandink">
             Step 1 · Dates
           </div>
-          <h1 className="mb-2 font-heading text-display font-extrabold leading-[1.05] tracking-[-0.02em]">
+          {/* Display: Figtree 700 / 1.15 / -0.015em (DESIGN.md §3). v1 ran 800 at
+              1.05 and -0.02em; v2 is one weight step lighter with an opener line.
+              Copy and wrapping are unchanged. */}
+          <h1 className="mb-2 font-heading text-display font-bold leading-[1.15] tracking-[-0.015em]">
             Schedule Dates
           </h1>
           <p className="max-w-[56ch] text-ink2">
@@ -117,12 +135,17 @@ export function DatesScreen() {
             holidays are marked for you.
           </p>
         </div>
+        {/* Still a real `<a href>`, so copy-link and open-in-new-tab keep working
+            and the shell's draft guard still stages on a plain click. It wears the
+            shared Button recipe rather than a hand-rolled skin, so the pill,
+            `--sh-1`, active-flatten, focus outline and 44px coarse floor all come
+            from one contract. `lg` is the prototype's 44px primary action. */}
         <GuardedLink
           href="/people"
-          className="ns-btn ns-btn--primary h-11 px-5 text-body"
+          className={cn(buttonVariants({ size: "lg" }), "font-bold")}
           data-testid="dates-continue"
         >
-          Continue to staff <FaArrowRight className="size-3" />
+          Continue to staff <FaArrowRight />
         </GuardedLink>
       </header>
 
@@ -139,11 +162,18 @@ export function DatesScreen() {
         {complete ? (
           <CalendarView range={range} />
         ) : (
+          // The placeholder stands in for the calendar card, so it is the same
+          // resting L1 card and holds the column's height while the range is unset.
           <section
-            className="flex min-h-[220px] items-center justify-center border border-line bg-surface p-6 text-center text-sm text-ink3"
+            className={cn(
+              "flex min-h-61 items-center justify-center p-6",
+              surfaceVariants({ role: "surface", geometry: "card" }),
+            )}
             data-testid="calendar-empty"
           >
-            Set a start and end date to preview the roster calendar.
+            <p className="text-center text-meta text-ink3">
+              Set a start and end date to preview the roster calendar.
+            </p>
           </section>
         )}
       </div>
@@ -155,6 +185,6 @@ export function DatesScreen() {
         onSaveGroup={handleSaveGroup}
         onDeleteGroup={handleDeleteGroup}
       />
-    </div>
+    </Surface>
   );
 }
