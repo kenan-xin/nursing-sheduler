@@ -607,6 +607,29 @@ test.describe("R2a — v2 visual system on /dates", () => {
     await setRange(page, "2026-07-01", "2026-07-31");
     await patchStore(page, [{ id: "SummerRun", members: ["01"] }]);
 
+    // RAW dimensions, never rounded. `--ctl` 36 and `--ctl-lg` 44 are absolute
+    // integer tokens that the 0.9 density baseline is forbidden to touch, so the
+    // unrounded box is what has to land on them. `Math.round` here would not be a
+    // tolerance — it would widen every claim below into a half-pixel band
+    // ("exactly 36" becoming any value in [35.5, 36.5)), which is precisely the
+    // fractional undersizing this test exists to catch.
+    //
+    // Measured on the shipped tree before this oracle was tightened, at device
+    // pixel ratios 1, 1.5 and 2 and at viewports 1280x720, 1280x900, 1440x900 and
+    // 390x844: every dimension asserted below is exactly integral in all twelve
+    // combinations, so equality is the truthful contract and no tolerance is
+    // warranted.
+    //
+    // The same boxes DO carry fractional values — but only on the text- and
+    // flex-driven WIDTH axis, which is fractional by construction and varies with
+    // the viewport (the date fields measure 212.09375px at 1280px and 151.703125px
+    // at 390px; the CTA 180.984375px and 170.71875px). Those axes are no contract
+    // of this route's, so they are deliberately not asserted rather than asserted
+    // through a rounding wrapper. Where this spec genuinely needs slack for a
+    // layout-derived value — the two-column proximity band, the 1px sub-pixel
+    // overflow allowance, the stacking check — it says so with an explicit
+    // threshold, which is a stated tolerance rather than a hidden one.
+
     // Icon actions own BOTH axes at the absolute 36px control size — the size is
     // on the control itself, so its own box is what is measured here.
     for (const testId of [
@@ -616,21 +639,21 @@ test.describe("R2a — v2 visual system on /dates", () => {
     ]) {
       const box = await page.getByTestId(testId).boundingBox();
       expect(box, testId).not.toBeNull();
-      expect(Math.round(box!.width), `${testId} width`).toBe(36);
-      expect(Math.round(box!.height), `${testId} height`).toBe(36);
+      expect(box!.width, `${testId} width`).toBe(36);
+      expect(box!.height, `${testId} height`).toBe(36);
     }
 
     // Fields are a height claim; the 0.9 density baseline must not shrink them.
     for (const testId of ["range-start", "range-end"]) {
       const box = await page.getByTestId(testId).boundingBox();
-      expect(Math.round(box!.height), `${testId} height`).toBe(36);
+      expect(box!.height, `${testId} height`).toBe(36);
     }
 
     // The primary CTA is the prototype's 44px action, and it is still an anchor.
     const cta = page.getByTestId("dates-continue");
     expect(await cta.evaluate((el) => el.tagName)).toBe("A");
     const ctaBox = await cta.boundingBox();
-    expect(Math.round(ctaBox!.height)).toBe(44);
+    expect(ctaBox!.height, "Continue CTA height").toBe(44);
   });
 
   test("no horizontal overflow at the 390px touch viewport, and the work area stacks", async ({
