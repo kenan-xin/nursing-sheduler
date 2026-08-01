@@ -1,7 +1,7 @@
 "use client";
 
 // Bespoke Shifts card-grid (DR-3) — replaces the generic `EntityEditor` for the
-// /shift-types route. It follows docs/design_prototype/ScreenShifts.dc.html: a
+// /shift-types route. It follows docs/design_prototype/source/ScreenShifts.dc.html: a
 // 3-column card grid where each shift renders as a read card (icon tile, big code,
 // name subtitle, clock time + duration badge), the reserved OFF/LEAVE day-states
 // render locked (AUTO, never a raw disabled control), and Edit expands the card
@@ -25,6 +25,17 @@
 // group/qualified/date/multi-target coverage is read-only with a deep-link. The
 // Save path commits shift fields + the validated requirement patch in one
 // live-state updater, with rename-first ordering and a form-open identity guard.
+//
+// R2c (v2 "Mint Canvas, Warm Ink"): every surface on this route goes through the
+// shared `surfaceVariants` recipe rather than restating tone/border/elevation —
+// the screen root is the L0 page plane, each shift and reserved tile is a resting
+// L1 card at `--r-card`, the open editor is the ladder's `selected` role, the icon
+// tiles and the read-only staffing boxes are inset `well`s, and the drop candidate
+// is the shared `drop-target` role instead of a hand-authored inset shadow.
+// Actions use the shared Button variants (including `destructive-outline`) so the
+// pill, `--sh-1`, active-flatten, focus outline and 44px coarse floor come from
+// one contract. Domain behaviour, ordering, reserved OFF/LEAVE semantics, the
+// staffing tie-in and every `data-testid` are untouched.
 
 import * as React from "react";
 import { toast } from "sonner";
@@ -33,10 +44,12 @@ import { useLosableDraft } from "@/components/shell/use-losable-draft";
 import type { ScenarioUiState, UiShiftType } from "@/lib/scenario";
 import { RenameCollisionError } from "@/lib/cascade";
 import { GuardedLink } from "@/components/shell/guarded-link";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Surface, surfaceVariants } from "@/components/ui/surface";
 import {
   FaPlus,
   FaPen,
@@ -222,14 +235,32 @@ export function ShiftTypeGrid() {
   };
 
   return (
-    <div
+    // L0 app plane. Everything on this screen sits on it and nothing floats free
+    // (DESIGN.md §4): the card grid, the reserved tiles and the F2 groups card are
+    // all L1 boxes on this tone rather than a run of hairline outlines on nothing.
+    <Surface
+      level="page"
+      geometry="square"
       data-testid="screen"
       data-screen={descriptor.labels.itemPlural}
-      className="flex flex-col gap-6"
+      className="flex flex-col gap-5"
     >
-      <header className="flex flex-col gap-1">
-        <h1 className="font-heading text-title font-semibold tracking-tight">Shifts</h1>
-        <p className="text-meta text-ink2">
+      <header className="flex flex-col gap-2">
+        {/* The setup wizard's step eyebrow, matching Dates (Step 1) and Staff
+            (Step 2). ScreenShifts.dc.html opens on the same STEP 3 · SHIFTS mark;
+            without it this route is the one hole in the chain. It is a label, not
+            an affordance — the prototype's "Continue to rules" CTA beside it is a
+            navigation addition and is deliberately NOT introduced here. */}
+        <div className="text-label font-semibold uppercase tracking-[0.03em] text-brandink">
+          Step 3 · Shifts
+        </div>
+        {/* Display: Figtree 700 / 1.15 / -0.015em (DESIGN.md §3). v1 ran this page
+            heading at the TITLE step with `tracking-tight`, two steps down from the
+            display face every other setup route uses. */}
+        <h1 className="font-heading text-display font-bold leading-[1.15] tracking-[-0.015em]">
+          Define the Shifts
+        </h1>
+        <p className="max-w-[60ch] text-ink2">
           Set up the daily shifts your ward runs, their working time, and how you group them. Off
           and Paid leave are reserved day-states handled for you.
         </p>
@@ -253,6 +284,10 @@ export function ShiftTypeGrid() {
         // and squeezing each card to ~220px at spacious, pushing controls past the edge.
         className="grid grid-cols-1 gap-4 sm:grid-cols-2 grid3:grid-cols-3"
         data-testid="shift-grid"
+        // Bounded a11y quick win: an unnamed <section> is not exposed as a
+        // region, so the whole card grid was unreachable by landmark navigation
+        // and indistinguishable from the Shift groups card below it.
+        aria-label="Shift types"
       >
         {sel?.t === "add-shift" && (
           <ShiftCardEditor
@@ -332,7 +367,7 @@ export function ShiftTypeGrid() {
         onCloseForm={() => setSel(null)}
         config={SHIFT_GROUPS_CONFIG}
       />
-    </div>
+    </Surface>
   );
 }
 
@@ -359,17 +394,34 @@ function ReservedCard({ id, description }: { id: string; description?: string })
   const Icon = meta?.icon ?? FaLock;
   const reason = meta?.reason ?? description;
   return (
+    // A resting L1 card, exactly like an authorable shift (ScreenShifts.dc.html
+    // draws the auto cards on `--surface` too). "Locked" is carried by the AUTO
+    // badge, the padlock and the absent action row — not by a second tone, which
+    // the shared recipe cannot express without a caller-side border override.
     <div
       data-testid={`synthetic-${id}`}
-      className="flex flex-col gap-3 border border-line2 bg-panel p-[18px]"
+      className={cn(
+        "flex flex-col gap-3 p-5",
+        surfaceVariants({ role: "surface", geometry: "card" }),
+      )}
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-3">
-          <div className="flex size-[42px] flex-none items-center justify-center border border-line2 bg-surface text-ink2">
-            <Icon aria-hidden />
+          {/* An inset island inside the card, so it is the `well` level on the chip
+              radius (DESIGN.md §4 rule 1: a well never takes an outer shadow). */}
+          <div
+            data-slot="shift-tile"
+            className={cn(
+              "flex size-control-lg flex-none items-center justify-center",
+              surfaceVariants({ role: "well", geometry: "chip" }),
+            )}
+          >
+            <Icon aria-hidden className="text-ink2" />
           </div>
           <div className="min-w-0">
-            <div className="font-heading text-title font-extrabold leading-none">{id}</div>
+            <div className="font-heading text-title font-bold leading-none tracking-[-0.015em]">
+              {id}
+            </div>
           </div>
         </div>
         <Badge variant="neutral">
@@ -455,21 +507,35 @@ function ShiftCard({
           : undefined
       }
       onDragEnd={canDrag ? onDragEnd : undefined}
-      className={`flex flex-col gap-3 border border-line bg-surface p-[18px] ${
-        canDrag ? "cursor-grab" : ""
-      } ${isOver ? "shadow-[inset_0_2px_0_var(--color-brand)]" : ""} ${
-        isDragging ? "opacity-50" : ""
-      }`}
+      // Resting L1 card; the drop candidate swaps to the shared `drop-target`
+      // role (a dashed `--brand` edge over `--panel-alt`) rather than the v1
+      // hand-authored `inset 0 2px 0` shadow, which the static provenance gate
+      // rejects as an arbitrary elevation. Unlike R2b's <tr>, a card is a real
+      // box, so the role's `--sh-2` genuinely paints here.
+      className={cn(
+        "flex flex-col gap-3 p-5",
+        surfaceVariants({
+          role: isOver ? "drop-target" : "surface",
+          geometry: "card",
+          interaction: isDragging ? "dragging" : canDrag ? "grabbable" : undefined,
+        }),
+      )}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex min-w-0 items-center gap-3">
-          <div className="flex size-[42px] flex-none items-center justify-center border border-line2 bg-panel text-ink2">
-            <FaClock aria-hidden />
+          <div
+            data-slot="shift-tile"
+            className={cn(
+              "flex size-control-lg flex-none items-center justify-center",
+              surfaceVariants({ role: "well", geometry: "chip" }),
+            )}
+          >
+            <FaClock aria-hidden className="text-ink2" />
           </div>
           <div className="min-w-0">
             <div
               data-testid={`shift-code-${cardKey}`}
-              className="font-heading text-title font-extrabold uppercase leading-none"
+              className="font-heading text-title font-bold uppercase leading-none tracking-[-0.015em]"
             >
               {String(item.id)}
             </div>
@@ -488,12 +554,17 @@ function ShiftCard({
         <FaClock aria-hidden className="size-3 text-ink3" />
         <span className="font-mono text-meta text-ink2">{time ?? "No set time"}</span>
         {hasDur && (
-          <span
+          // The prototype's bordered duration pill, now the shared Badge on the
+          // v2 chip radius. `casing="normal"` because "8h 30m" is authored data,
+          // not a status eyebrow.
+          <Badge
+            variant="outline"
+            casing="normal"
+            className="font-mono"
             data-testid={`shift-dur-${cardKey}`}
-            className="border border-line2 px-[7px] py-0.5 font-mono text-label text-ink3"
           >
             {fmtHours(item.durationMinutes!)}
-          </span>
+          </Badge>
         )}
       </div>
 
@@ -525,13 +596,24 @@ function ShiftCard({
           </>
         )}
         <div className="ml-auto flex items-center gap-2">
-          <Button variant="outline" data-testid={`shift-edit-${cardKey}`} onClick={onEdit}>
+          {/* Bounded a11y quick win: the visible label is the same word on every
+              card, so an accessible name that names the shift is what makes the
+              action list navigable. The visible text stays a substring of the
+              accessible name (WCAG 2.5.3 Label in Name). */}
+          <Button
+            variant="outline"
+            aria-label={`Edit ${String(item.id)}`}
+            data-testid={`shift-edit-${cardKey}`}
+            onClick={onEdit}
+          >
             <FaPen />
             Edit
           </Button>
+          {/* The shared destructive OUTLINE variant, not an `outline` button
+              with its colours hand-overridden at the call site. */}
           <Button
-            variant="outline"
-            className="text-error hover:bg-errortint"
+            variant="destructive-outline"
+            aria-label={`Delete ${String(item.id)}`}
             data-testid={`shift-delete-${cardKey}`}
             onClick={onDelete}
           >
@@ -576,7 +658,7 @@ function StaffingValues({
       <div className="flex items-center justify-between gap-3">
         <span className="text-body text-ink2">Minimum nurses</span>
         <span
-          className="font-heading text-title font-extrabold leading-none"
+          className="font-heading text-title font-bold leading-none tracking-[-0.015em]"
           data-testid={`staffing-min-${testKey}`}
         >
           {card ? card.requiredNumPeople : "—"}
@@ -692,17 +774,20 @@ function StaffingEditor({
   if (staffing.kind === "numeric") {
     return (
       <div
-        className="border border-line bg-panel px-3 py-2.5 text-meta text-ink3"
+        className={cn("px-3 py-2.5", surfaceVariants({ role: "well", geometry: "control" }))}
         data-testid={`${prefix}-staffing-numeric`}
       >
-        {staffing.explanation}
+        <p className="text-meta text-ink3">{staffing.explanation}</p>
       </div>
     );
   }
   if (staffing.kind === "readonly") {
     return (
       <div
-        className="flex flex-col gap-2 border border-line bg-panel px-3 py-2.5"
+        className={cn(
+          "flex flex-col gap-2 px-3 py-2.5",
+          surfaceVariants({ role: "well", geometry: "control" }),
+        )}
         data-testid={`${prefix}-staffing-readonly`}
       >
         <StaffingValues card={staffing.primary.card} testKey={`${prefix}-editor`} />
@@ -769,8 +854,11 @@ function StaffingEditor({
       )}
 
       {preferredWillCollapse && (
+        // Status pairs its tint with the MATCHING semantic ink and a base-hue
+        // border (DESIGN.md §2 Redundant Signal Rule); the copy says what will
+        // happen, so colour never carries the state alone.
         <div
-          className="border border-warn bg-warntint px-3 py-2 text-label font-semibold text-ink"
+          className="rounded-control border border-warn bg-warntint px-3 py-2 text-label font-semibold text-warnink"
           data-testid={`${prefix}-preferred-collapse`}
         >
           Preferred will be cleared and its weight reset from {staffing.baseline?.weight} to -1 when
@@ -942,8 +1030,15 @@ function ShiftCardEditor({
   };
 
   return (
+    // The active editor card is the ladder's `selected` L1: `--surface` with a
+    // `--brand` border and `--sh-2`. v1 washed it in `--brandtint`, which
+    // DESIGN.md §6 reserves for selection MARKS — and the brand-inked eyebrow and
+    // chips inside this very card would sink into it. Same call R2a/R2b recorded.
     <div
-      className="flex flex-col gap-4 border border-brand bg-brandtint/40 p-[18px]"
+      className={cn(
+        "flex flex-col gap-4 p-5",
+        surfaceVariants({ role: "selected", geometry: "card" }),
+      )}
       data-testid={mode === "add" ? "shift-add-form" : `shift-edit-form-${entityKey(item!.id)}`}
       onKeyDown={(e) => {
         if (e.key === "Escape") {
@@ -953,15 +1048,23 @@ function ShiftCardEditor({
       }}
     >
       <div className="flex items-center gap-3 border-b border-line2 pb-4">
-        <div className="flex size-[42px] flex-none items-center justify-center border border-line2 bg-panel text-ink2">
-          <FaClock aria-hidden />
+        <div
+          data-slot="shift-tile"
+          className={cn(
+            "flex size-control-lg flex-none items-center justify-center",
+            surfaceVariants({ role: "well", geometry: "chip" }),
+          )}
+        >
+          <FaClock aria-hidden className="text-ink2" />
         </div>
         <div className="min-w-0">
-          <div className="font-heading text-label font-semibold uppercase leading-none tracking-[0.06em] text-brandink">
+          {/* Uppercase labels carry +0.03em, never a bespoke tracking value
+              (DESIGN.md §3 Negative-Tracking Rule). v1 ran this one at 0.06em. */}
+          <div className="font-heading text-label font-semibold uppercase leading-none tracking-[0.03em] text-brandink">
             {mode === "add" ? "New shift" : "Editing shift"}
           </div>
           {(mode === "edit" || draft.code) && (
-            <div className="mt-1 truncate font-heading text-title font-extrabold uppercase leading-none">
+            <div className="mt-1 truncate font-heading text-title font-bold uppercase leading-none tracking-[-0.015em]">
               {mode === "edit" ? String(item!.id) : draft.code}
             </div>
           )}
@@ -985,12 +1088,12 @@ function ShiftCardEditor({
             aria-invalid={!idCheck.ok || codeNumericOnly}
           />
           {!idCheck.ok && draft.code.length > 0 && (
-            <span className="text-label text-error" role="alert">
+            <span className="text-label text-errorink" role="alert">
               {idCheck.message}
             </span>
           )}
           {idCheck.ok && codeNumericOnly && (
-            <span className="text-label text-error" role="alert">
+            <span className="text-label text-errorink" role="alert">
               {NUMERIC_CODE_HINT}
             </span>
           )}
@@ -1032,7 +1135,7 @@ function ShiftCardEditor({
         <div
           role="alert"
           data-testid={`${prefix}-save-error`}
-          className="flex items-start gap-2 border border-error bg-errortint px-3 py-2 text-meta font-semibold text-ink"
+          className="flex items-start gap-2 rounded-control border border-error bg-errortint px-3 py-2 text-meta font-semibold text-errorink"
         >
           <FaCircleExclamation aria-hidden className="mt-0.5 flex-none text-error" />
           <span>{saveError}</span>
@@ -1040,12 +1143,7 @@ function ShiftCardEditor({
       )}
 
       <div className="flex items-center gap-2 border-t border-line2 pt-3">
-        <Button
-          onClick={save}
-          disabled={!canSave}
-          data-testid={`${prefix}-save`}
-          className="border border-transparent"
-        >
+        <Button onClick={save} disabled={!canSave} data-testid={`${prefix}-save`}>
           <FaCheck />
           {mode === "add" ? "Add shift" : "Save"}
         </Button>
