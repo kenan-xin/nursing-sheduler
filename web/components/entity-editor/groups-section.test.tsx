@@ -396,7 +396,7 @@ describe.each([
     expect(auto.className).toContain("border-line2");
     // Through the shared authority, so the hairline is visible to the recipe
     // rather than hidden in a className string.
-    expect(auto.getAttribute("data-edge")).toBe("hairline");
+    expect(auto.getAttribute("data-emphasis")).toBe("hairline");
   });
 
   it("gives BOTH the add and the edit form the active-editor `selected` role", () => {
@@ -442,6 +442,73 @@ describe.each([
       useScenarioStore.getState().mutateScenario({ staffGroups: [{ id: "Team", members: [] }] });
     });
     expect(screen.queryByTestId("groups-empty")).not.toBeInTheDocument();
+  });
+
+  it("renders the canonical four-part empty hierarchy, not one flattened sentence", () => {
+    seed({ staff: [{ id: "P1", history: [] }], staffGroups: [] });
+    render(
+      <GroupsHarness
+        config={{
+          ...config,
+          emptyTitle: "No staff groups yet",
+          emptyText: "Bundle nurses into a team.",
+          emptyActionLabel: "New group",
+        }}
+      />,
+    );
+
+    const empty = screen.getByTestId("groups-empty");
+    // 1 — decorative glyph, hidden from the accessibility tree.
+    const glyph = within(empty).getByText("∅");
+    expect(glyph).toHaveAttribute("aria-hidden");
+    // 2 + 3 — display title and explanatory body, as SEPARATE nodes.
+    expect(within(empty).getByText("No staff groups yet")).toBeInTheDocument();
+    expect(within(empty).getByText("Bundle nurses into a team.")).toBeInTheDocument();
+    // 4 — a real, local, named add-group control.
+    const cta = within(empty).getByTestId("groups-empty-add");
+    expect(cta.tagName).toBe("BUTTON");
+    expect(cta).toHaveAccessibleName(/New group/);
+  });
+
+  it("drives the empty-state CTA through the EXISTING add-group toggle", () => {
+    seed({ staff: [{ id: "P1", history: [] }], staffGroups: [] });
+    render(<GroupsHarness config={config} />);
+
+    expect(screen.queryByTestId("add-group-form")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("groups-empty-add"));
+
+    // Same single selection the header control owns — no second lifecycle.
+    const form = screen.getByTestId("add-group-form");
+    expect(form).toBeInTheDocument();
+    expect(screen.getByTestId("add-group-toggle")).toHaveAttribute("aria-pressed", "true");
+
+    // And it still saves through the one existing path.
+    fireEvent.change(screen.getByTestId("add-group-id"), { target: { value: "Nurses" } });
+    fireEvent.click(screen.getByTestId("group-save-__new__"));
+    expect(groupOrder()).toContain("Nurses");
+    // The prompt is gone now that a custom group exists.
+    expect(screen.queryByTestId("groups-empty")).not.toBeInTheDocument();
+  });
+
+  it("honours each screen's authored order relative to the reserved ALL row", () => {
+    seed({ staff: [{ id: "P1", history: [] }], staffGroups: [] });
+
+    // Staff authors the prompt BEFORE ALL (ScreenStaff.dc.html:126).
+    const before = render(<GroupsHarness config={{ ...config, emptyPlacement: "before-auto" }} />);
+    const bodyBefore = screen.getByTestId("groups-body");
+    const orderBefore = [...bodyBefore.children].map((c) => c.getAttribute("data-testid"));
+    expect(orderBefore.indexOf("groups-empty")).toBeLessThan(orderBefore.indexOf("synthetic-ALL"));
+    before.unmount();
+
+    // Shifts authors ALL first (ScreenShifts.dc.html:164,181) — the default.
+    render(<GroupsHarness config={{ ...config, emptyPlacement: "after-auto" }} />);
+    const bodyAfter = screen.getByTestId("groups-body");
+    const orderAfter = [...bodyAfter.children].map((c) => c.getAttribute("data-testid"));
+    expect(orderAfter.indexOf("synthetic-ALL")).toBeLessThan(orderAfter.indexOf("groups-empty"));
+
+    // Both orders still show BOTH nodes — synthetic ALL never suppresses the prompt.
+    expect(orderBefore).toContain("synthetic-ALL");
+    expect(orderAfter).toContain("groups-empty");
   });
 });
 

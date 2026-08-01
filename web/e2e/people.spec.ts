@@ -896,6 +896,52 @@ test.describe("R2b — v2 visual system on /people", () => {
     });
   }
 
+  // ii7.8.5.2 — the canonical empty hierarchy, PAINTED, and Staff's authored
+  // order: the prompt sits BEFORE the reserved ALL row (ScreenStaff.dc.html:126).
+  for (const theme of ["light", "dark"] as const) {
+    test(`staff groups show the canonical empty hierarchy in the ${theme} theme`, async ({
+      page,
+    }) => {
+      await page.addInitScript((t) => {
+        try {
+          window.localStorage.setItem("ns-theme", t);
+        } catch {}
+      }, theme);
+      await gotoPeople(page);
+      await seed(page, { staff: [{ id: "P1", history: [] }], staffGroups: [] });
+
+      const empty = page.getByTestId("groups-empty");
+      await expect(empty).toBeVisible();
+      // It coexists with the reserved row rather than replacing it...
+      await expect(page.getByTestId("synthetic-ALL")).toBeVisible();
+      // ...and Staff authors the prompt FIRST.
+      const order = await page
+        .getByTestId("groups-body")
+        .evaluate((body) =>
+          [...body.children].map((c) => c.getAttribute("data-testid")).filter(Boolean),
+        );
+      expect(order.indexOf("groups-empty")).toBeLessThan(order.indexOf("synthetic-ALL"));
+
+      // Four-part hierarchy, not one flattened sentence.
+      await expect(empty.getByText("No staff groups yet")).toBeVisible();
+      await expect(
+        empty.getByText(
+          "Bundle nurses into a team — like “Seniors” or “Team A” — so a rule can target them all at once.",
+        ),
+      ).toBeVisible();
+
+      // The local action is a real control that drives the SAME add-group toggle
+      // the header owns — no second lifecycle.
+      const cta = page.getByTestId("groups-empty-add");
+      await expect(cta).toBeVisible();
+      const box = await cta.boundingBox();
+      expect(box!.height, "the empty-state CTA is a real control").toBeGreaterThanOrEqual(36);
+      await cta.click();
+      await expect(page.getByTestId("add-group-form")).toBeVisible();
+      await expect(page.getByTestId("add-group-toggle")).toHaveAttribute("aria-pressed", "true");
+    });
+  }
+
   test("every table data surface stays square", async ({ page }) => {
     await gotoPeople(page);
     await seed(page, {

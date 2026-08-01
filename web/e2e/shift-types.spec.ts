@@ -197,6 +197,38 @@ test.describe("F2 — shift groups surface hierarchy", () => {
       await target.dispatchEvent("dragend");
     });
   }
+
+  // Shift Types authors the reserved ALL row FIRST and the prompt after it
+  // (ScreenShifts.dc.html:164,181) — the opposite of Staff, deliberately.
+  test("shift groups show the canonical empty hierarchy in its authored order", async ({
+    page,
+  }) => {
+    await page.goto("/shift-types");
+    await expect(page.getByTestId("add-shift-toggle")).toBeVisible();
+    await seed(page, { shifts: [{ id: "Day" }], shiftGroups: [] });
+
+    const empty = page.getByTestId("groups-empty");
+    await expect(empty).toBeVisible();
+    await expect(page.getByTestId("synthetic-ALL")).toBeVisible();
+
+    const order = await page
+      .getByTestId("groups-body")
+      .evaluate((body) =>
+        [...body.children].map((c) => c.getAttribute("data-testid")).filter(Boolean),
+      );
+    expect(order.indexOf("synthetic-ALL")).toBeLessThan(order.indexOf("groups-empty"));
+
+    await expect(empty.getByText("No custom shift groups yet")).toBeVisible();
+    await expect(
+      empty.getByText(
+        "Bundle shift types — like “Working” or “Night” — so a rule can count or target them together.",
+      ),
+    ).toBeVisible();
+
+    const cta = page.getByTestId("groups-empty-add");
+    await cta.click();
+    await expect(page.getByTestId("add-group-form")).toBeVisible();
+  });
 });
 
 test.describe.serial("DR-3 Shifts card-grid", () => {

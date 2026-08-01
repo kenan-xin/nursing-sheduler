@@ -341,6 +341,24 @@ export interface OpaqueSite {
 }
 
 /**
+ * An illegal (role, emphasis) request — the OTHER half of the contract.
+ *
+ * The className allowlist governs what a consumer may ADD to a surface. This
+ * governs what it may ASK the recipe for. `emphasis` describes the edge of a
+ * recessed row, so `SurfaceVariantProps` makes it legal only on a `well` and
+ * makes every other tuple unrepresentable in TypeScript. A caller can still
+ * reach the recipe through `as any`, an untyped re-export, or a JS boundary,
+ * so the same rule is re-checked here over the real program.
+ */
+export interface TupleViolation {
+  file: string;
+  line: number;
+  site: string;
+  tuple: string;
+  reason: string;
+}
+
+/**
  * Splits a class into its variant chain and base utility, ignoring any ":"
  * inside [...] or (...) so `data-[open]:animate-in` is not split on its inner
  * colon. Brackets are rejected outright below, but the split must still be
@@ -442,6 +460,16 @@ export interface Analysis {
     /** References to a stored recipe result, and how many were refused. */
     recipeResultRefs: number;
     recipeResultOpaque: number;
+  };
+  /**
+   * Recipe/Surface call sites that requested an `emphasis`, and the ones whose
+   * (role, emphasis) tuple is illegal or unprovable. `checked` is the vacuity
+   * guard: a change that stops finding emphasis sites at all must fail loudly
+   * rather than report a clean empty list.
+   */
+  tuples: {
+    checked: number;
+    illegal: TupleViolation[];
   };
 }
 
@@ -1429,6 +1457,159 @@ export function analyzeProgram(program: ts.Program, rootFilter?: (f: string) => 
     visit(file);
   }
 
+  // --- tuple legality: the public (role, emphasis) contract ---------------
+  //
+  // Fail-closed, like everything else here: an `emphasis` whose role or value
+  // cannot be PROVEN is reported, not assumed legal.
+  const tupleViolations: TupleViolation[] = [];
+  let tuplesChecked = 0;
+
+  type Option = { values: string[] | null; present: boolean };
+  const ABSENT: Option = { values: [], present: false };
+
+  /** The string values an expression can take, or null when unprovable. */
+  const stringValues = (node: ts.Expression | undefined): string[] | null => {
+    if (!node) return [];
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return [node.text];
+    if (node.kind === ts.SyntaxKind.NullKeyword) return [];
+    if (ts.isIdentifier(node) && node.text === "undefined") return [];
+    if (
+      ts.isParenthesizedExpression(node) ||
+      ts.isAsExpression(node) ||
+      ts.isNonNullExpression(node)
+    ) {
+      return stringValues(node.expression);
+    }
+    // Both arms of a ternary are real possibilities, so both are checked.
+    if (ts.isConditionalExpression(node)) {
+      const whenTrue = stringValues(node.whenTrue);
+      const whenFalse = stringValues(node.whenFalse);
+      return whenTrue && whenFalse ? [...whenTrue, ...whenFalse] : null;
+    }
+    return null;
+  };
+
+  const readOption = (literal: ts.ObjectLiteralExpression, name: string): Option => {
+    let found = ABSENT;
+    for (const property of literal.properties) {
+      if (ts.isPropertyAssignment(property)) {
+        const key = property.name;
+        const named =
+          ts.isIdentifier(key) || ts.isStringLiteral(key)
+            ? key.text
+            : ts.isComputedPropertyName(key) && ts.isStringLiteral(key.expression)
+              ? key.expression.text
+              : null;
+        if (named === name) found = { values: stringValues(property.initializer), present: true };
+      } else if (ts.isShorthandPropertyAssignment(property) && property.name.text === name) {
+        found = { values: null, present: true };
+      } else if (ts.isSpreadAssignment(property)) {
+        const inner = property.expression;
+        if (ts.isObjectLiteralExpression(inner)) {
+          const nested = readOption(inner, name);
+          if (nested.present) found = nested;
+        } else {
+          // An unprovable spread may carry either key; refuse rather than guess.
+          found = { values: null, present: true };
+        }
+      }
+    }
+    return found;
+  };
+
+  const jsxOption = (attributes: ts.JsxAttributes, name: string): Option => {
+    let found = ABSENT;
+    for (const attribute of attributes.properties) {
+      if (ts.isJsxAttribute(attribute)) {
+        if (attribute.name.getText(attribute.getSourceFile()) !== name) continue;
+        const init = attribute.initializer;
+        if (!init) found = { values: null, present: true };
+        else if (ts.isStringLiteral(init)) found = { values: [init.text], present: true };
+        else if (ts.isJsxExpression(init))
+          found = { values: stringValues(init.expression), present: true };
+        else found = { values: null, present: true };
+      } else {
+        // A spread onto <Surface> may carry either prop.
+        found = { values: null, present: true };
+      }
+    }
+    return found;
+  };
+
+  const checkTuple = (
+    file: ts.SourceFile,
+    node: ts.Node,
+    site: string,
+    roleOption: Option,
+    emphasisOption: Option,
+  ) => {
+    if (!emphasisOption.present) return;
+    const emphasis = emphasisOption.values;
+    // An explicit `undefined` asks for nothing at all.
+    if (emphasis && emphasis.length === 0) return;
+    tuplesChecked += 1;
+    const push = (tuple: string, reason: string) =>
+      tupleViolations.push({ file: rel(file), line: lineOf(file, node), site, tuple, reason });
+
+    // Legality is a property of the ROLE: every emphasis value is legal on a
+    // `well` and none is legal anywhere else. So the role must be provable, and
+    // the emphasis value need only be named in the report. That distinction
+    // matters for the `Surface` adapter itself, which forwards a typed
+    // `emphasis` prop (unprovable by value) into a literal `role: "well"`.
+    if (roleOption.values === null) {
+      push("<unprovable>", "an `emphasis` whose role cannot be proven");
+      return;
+    }
+    // No role means the recipe's own default, which is `surface` — not a well.
+    const roles = roleOption.present && roleOption.values.length ? roleOption.values : ["surface"];
+    const named = emphasis ? emphasis.join("|") : "<any>";
+    for (const role of roles) {
+      if (role !== "well") {
+        push(
+          role + " + " + named,
+          "`emphasis` is the edge of a RECESSED ROW and is legal only on `well`",
+        );
+      }
+    }
+  };
+
+  for (const file of analyzed) {
+    const visitTuples = (node: ts.Node) => {
+      if (
+        ts.isCallExpression(node) &&
+        !ts.isPropertyAccessExpression(node.expression) &&
+        kindOfCallee(node.expression) === "recipe"
+      ) {
+        for (const argument of node.arguments) {
+          if (ts.isObjectLiteralExpression(argument)) {
+            checkTuple(
+              file,
+              argument,
+              "surfaceVariants()",
+              readOption(argument, "role"),
+              readOption(argument, "emphasis"),
+            );
+          }
+        }
+      } else if (ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node)) {
+        const tag = node.tagName;
+        const identifier = ts.isPropertyAccessExpression(tag) ? tag.name : tag;
+        const symbol = ts.isIdentifier(identifier) ? symbolAt(identifier) : undefined;
+        if (symbol && tracked.get(symbol) === "surface") {
+          checkTuple(
+            file,
+            node,
+            "<Surface>",
+            jsxOption(node.attributes, "level"),
+            jsxOption(node.attributes, "emphasis"),
+          );
+        }
+      }
+      ts.forEachChild(node, visitTuples);
+    };
+    visitTuples(file);
+  }
+
   const discovered = refs.filter((r) => tracked.has(r.symbol)).length;
   const wrapperNames = [...wrappers.entries()].flatMap(([symbol, props]) =>
     [...props].map((prop) => symbol.name + "." + prop),
@@ -1453,6 +1634,10 @@ export function analyzeProgram(program: ts.Program, rootFilter?: (f: string) => 
       dynamicMemberAccess,
       recipeResultRefs,
       recipeResultOpaque,
+    },
+    tuples: {
+      checked: tuplesChecked,
+      illegal: tupleViolations,
     },
   };
 }
@@ -1631,6 +1816,118 @@ function analyzeFixture(files: Record<string, string>): Analysis {
     }),
   );
 }
+
+/**
+ * Tuple-legality fixtures. TypeScript already makes these unrepresentable
+ * (`SurfaceVariantProps`), so each of these reaches the recipe through the
+ * untyped fixture stub — which is exactly the `as any` / JS-boundary case the
+ * analyzer exists to cover.
+ */
+describe("adversarial fixtures — (role, emphasis) tuple legality", () => {
+  const head = `import { Surface, surfaceVariants } from "@/components/ui/surface";
+        import { cn } from "@/lib/utils";
+        `;
+
+  const illegal = (body: string, label: string, expected: string) => {
+    const r = analyzeFixture({ "components/probe.tsx": head + body });
+    expect(r.authoritiesFound, label).toBe(true);
+    expect(
+      r.tuples.illegal.map((v) => v.tuple),
+      label,
+    ).toContain(expected);
+  };
+
+  it("rejects page + hairline", () => {
+    illegal(
+      `export const A = cn(surfaceVariants({ role: "page", emphasis: "hairline" }));`,
+      "page+hairline",
+      "page + hairline",
+    );
+  });
+
+  it("rejects raised + drop-candidate", () => {
+    illegal(
+      `export const A = cn(surfaceVariants({ role: "raised", emphasis: "drop-candidate" }));`,
+      "raised+candidate",
+      "raised + drop-candidate",
+    );
+  });
+
+  it("rejects an emphasis with NO role, which defaults to `surface`", () => {
+    illegal(
+      `export const A = cn(surfaceVariants({ geometry: "control", emphasis: "hairline" }));`,
+      "default role",
+      "surface + hairline",
+    );
+  });
+
+  it("rejects an illegal <Surface> level/emphasis pair", () => {
+    illegal(
+      `export const A = () => <Surface level="raised" geometry="card" emphasis="hairline" />;`,
+      "jsx",
+      "raised + hairline",
+    );
+  });
+
+  it("catches a conditional emphasis and names BOTH arms in the report", () => {
+    // Legality is decided by the role, so neither arm can rescue this call — but
+    // the report still has to say which values were asked for.
+    illegal(
+      `export const A = (o: boolean) => cn(surfaceVariants({ role: "surface", emphasis: o ? "hairline" : "drop-candidate" }));`,
+      "ternary",
+      "surface + hairline|drop-candidate",
+    );
+  });
+
+  it("catches an illegal role chosen by a ternary, even when one arm is legal", () => {
+    illegal(
+      `export const A = (o: boolean) => cn(surfaceVariants({ role: o ? "well" : "raised", emphasis: "hairline" }));`,
+      "ternary role",
+      "raised + hairline",
+    );
+  });
+
+  it("refuses an emphasis whose role cannot be proven", () => {
+    illegal(
+      `declare const role: any;
+       export const A = cn(surfaceVariants({ role, emphasis: "hairline" }));`,
+      "unprovable role",
+      "<unprovable>",
+    );
+  });
+
+  it("refuses an emphasis carried by an unprovable spread", () => {
+    illegal(
+      `declare const extra: any;
+       export const A = cn(surfaceVariants({ role: "well", ...extra }));`,
+      "spread",
+      "<unprovable>",
+    );
+  });
+
+  it("accepts the two sanctioned recessed-row tuples", () => {
+    const r = analyzeFixture({
+      "components/probe.tsx":
+        head +
+        `export const A = cn(surfaceVariants({ role: "well", geometry: "control", emphasis: "hairline" }));
+         export const B = cn(surfaceVariants({ role: "well", geometry: "control", emphasis: "drop-candidate" }));
+         export const C = (o: boolean) => cn(surfaceVariants({ role: "well", geometry: "control", emphasis: o ? "drop-candidate" : "hairline" }));
+         export const D = () => <Surface level="well" geometry="control" emphasis="hairline" />;`,
+    });
+    expect(r.tuples.illegal).toEqual([]);
+    // Four sites asked for an emphasis; none of them was refused.
+    expect(r.tuples.checked).toBe(4);
+  });
+
+  it("ignores a call that asks for no emphasis at all", () => {
+    const r = analyzeFixture({
+      "components/probe.tsx":
+        head + `export const A = cn(surfaceVariants({ role: "page", geometry: "square" }));`,
+    });
+    expect(r.tuples.checked).toBe(0);
+    expect(r.tuples.illegal).toEqual([]);
+  });
+});
 
 /** No executable bypass may report a clean, empty result. */
 function expectCaught(result: Analysis, label: string) {
@@ -2321,6 +2618,20 @@ describe("every Surface / surfaceVariants consumer keeps className layout-only",
     expect(result.wrappers).toEqual(
       expect.arrayContaining(["Card.className", "SkeletonCard.className"]),
     );
+  });
+
+  it("finds real emphasis call sites, so the tuple gate cannot pass vacuously", () => {
+    // GroupsSection is the only owner that asks for one today: the auto row via
+    // <Surface emphasis>, and the custom row via surfaceVariants(). If this ever
+    // drops to 0 the tuple rule below is checking nothing.
+    expect(result.tuples.checked).toBeGreaterThan(0);
+  });
+
+  it("requests no illegal (role, emphasis) tuple anywhere in the program", () => {
+    expect(
+      result.tuples.illegal,
+      result.tuples.illegal.length + " illegal surface tuple(s)",
+    ).toEqual([]);
   });
 
   it("accounts for every authority reference, with no unclassified remainder", () => {

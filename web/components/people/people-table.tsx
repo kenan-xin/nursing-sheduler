@@ -101,8 +101,13 @@ const STAFF_GROUPS_CONFIG: GroupsSectionConfig = {
   // line of the header band, not new copy.
   description: "Bundle nurses so rules and constraints can target a whole team at once.",
   addLabel: "Group",
+  // Canonical empty state, verbatim from ScreenStaff.dc.html:130-133. Staff
+  // authors the prompt BEFORE the reserved ALL row (ScreenStaff.dc.html:126).
+  emptyTitle: "No staff groups yet",
   emptyText:
-    "No staff groups yet — bundle nurses into a team (like Seniors or Team A) so a rule can target them all at once.",
+    "Bundle nurses into a team — like “Seniors” or “Team A” — so a rule can target them all at once.",
+  emptyActionLabel: "New group",
+  emptyPlacement: "before-auto",
   autoGroupNote:
     "Every nurse, always. Generated automatically — use it in rules that target the whole ward.",
 };

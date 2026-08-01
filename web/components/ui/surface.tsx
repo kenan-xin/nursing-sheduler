@@ -25,7 +25,7 @@ import { cn } from "@/lib/utils";
 // level/geometry pairs that are legal — see `SurfaceVisualProps`.
 // ---------------------------------------------------------------------------
 
-const surfaceVariants = cva("", {
+const surfaceRecipe = cva("", {
   variants: {
     role: {
       /** L0 app plane. Nothing floats free on it. */
@@ -72,38 +72,35 @@ const surfaceVariants = cva("", {
       square: "rounded-none",
     },
     /**
-     * An optional canonical hairline, composable with any role.
+     * RECESSED-ROW EMPHASIS — the edge treatment of a `--panel` row nested
+     * inside an L1 card. One axis, so "both edges at once" is structurally
+     * unrepresentable rather than merely discouraged, and `SurfaceVariantProps`
+     * below admits it only on a `well`.
      *
-     * Both prototypes author `border:1px solid var(--line2)` on the recessed
-     * group rows inside the Staff/Shift groups card, while this app's other
-     * wells are deliberately borderless — R2a's `date-id-explainer` says so in
-     * as many words, and the segmented ToggleGroup track would grow an edge it
-     * never had. Those are two genuinely different surfaces, so the hairline is
-     * an ADDITIVE axis rather than a change to the `well` role itself: no
-     * existing consumer passes `edge`, so no existing consumer moves.
+     * Why an emphasis axis rather than more roles:
+     *
+     *   • `hairline` — both prototypes author `border:1px solid var(--line2)`
+     *     on the group rows, while this app's other wells are deliberately
+     *     borderless (R2a's `date-id-explainer` says so in as many words, and
+     *     the segmented ToggleGroup track would grow an edge it never had).
+     *     Folding the border into the `well` ROLE would have re-skinned all
+     *     ~15 of those consumers.
+     *
+     *   • `drop-candidate` — the `drop-target` ROLE restates `--panel-alt` plus
+     *     an outer `--sh-2`, which is right for an L1 card (the card editor's
+     *     drop zone) and wrong for a well: DESIGN.md §4 rule 1 fixes the
+     *     direction of light, so lifting a recessed row inverts it. Changing
+     *     only the EDGE lets the row keep its own inset cast.
+     *
+     * `drop-candidate` is deliberately DASHED: §6 reserves a solid `--brand`
+     * edge for selection, and a row under the pointer is neither the current
+     * selection nor the open editor. The canonical sources agree on the rest —
+     * their own drop candidate keeps `background:var(--panel)` and swaps only
+     * the border colour.
      */
-    edge: {
+    emphasis: {
       hairline: "border border-line2",
-    },
-    /**
-     * Transient drag-and-drop emphasis, composable with any role so the surface
-     * keeps its OWN tone and its own direction of light.
-     *
-     * The `drop-target` ROLE restates `--panel-alt` plus an outer `--sh-2`.
-     * That is right for an L1 card (the card editor's drop zone) and wrong for
-     * a well: DESIGN.md §4 rule 1 fixes the direction of light, so lifting a
-     * recessed row on an outer cast inverts it. This axis changes only the
-     * EDGE, so a well stays inset and a card stays raised.
-     *
-     * It is deliberately DASHED. A solid brand edge is the selection /
-     * active-editor language (§6 reserves `--brandtint` + `--brand` for
-     * selection), and a row under the pointer is neither the current selection
-     * nor the open editor. The canonical sources agree on everything else: the
-     * prototypes' own drop candidate keeps `background:var(--panel)` and swaps
-     * only the border to `var(--brand)`.
-     */
-    drop: {
-      candidate: "border border-dashed border-brand",
+      "drop-candidate": "border border-dashed border-brand",
     },
     /**
      * Entrance/exit treatment for surfaces that appear and disappear. This lives
@@ -158,9 +155,41 @@ const surfaceVariants = cva("", {
   },
 });
 
-export type SurfaceRole = NonNullable<VariantProps<typeof surfaceVariants>["role"]>;
-export type SurfaceGeometry = NonNullable<VariantProps<typeof surfaceVariants>["geometry"]>;
-export type SurfaceEdge = NonNullable<VariantProps<typeof surfaceVariants>["edge"]>;
+type SurfaceRecipeProps = VariantProps<typeof surfaceRecipe>;
+
+export type SurfaceRole = NonNullable<SurfaceRecipeProps["role"]>;
+export type SurfaceGeometry = NonNullable<SurfaceRecipeProps["geometry"]>;
+export type SurfaceEmphasis = NonNullable<SurfaceRecipeProps["emphasis"]>;
+
+/**
+ * THE PUBLIC RECIPE CONTRACT.
+ *
+ * `emphasis` describes the edge of a RECESSED ROW, so it is legal only on a
+ * `well`. Expressing that as a discriminated union rather than as an optional
+ * axis makes the illegal tuples unrepresentable at the type boundary instead of
+ * merely unused by today's callers:
+ *
+ *   surfaceVariants({ role: "page",    emphasis: "hairline" })       ✗ rejected
+ *   surfaceVariants({ role: "raised",  emphasis: "drop-candidate" }) ✗ rejected
+ *   surfaceVariants({ role: "surface", emphasis: "hairline" })       ✗ rejected
+ *   surfaceVariants({ role: "well",    emphasis: "hairline" })       ✓
+ *   surfaceVariants({ role: "well",    emphasis: "drop-candidate" }) ✓
+ *
+ * "Both edges at once" needs no rule: `emphasis` is a single axis, so it cannot
+ * be spelled. That is why this replaced the earlier pair of independent
+ * `edge`/`drop` axes, whose legal use depended on a caller convention and on
+ * tailwind-merge resolving two competing borders.
+ *
+ * `surface-contract.test.ts` re-checks the same tuple rule over the real
+ * program, so a caller that reaches the recipe through `as any` or an untyped
+ * boundary is still caught.
+ */
+export type SurfaceVariantProps =
+  | (Omit<SurfaceRecipeProps, "emphasis"> & { emphasis?: never })
+  | (Omit<SurfaceRecipeProps, "emphasis" | "role"> & {
+      role: "well";
+      emphasis: SurfaceEmphasis;
+    });
 
 /**
  * The legal level/geometry pairs for an ordinary container. TypeScript enforces
@@ -173,20 +202,25 @@ export type SurfaceEdge = NonNullable<VariantProps<typeof surfaceVariants>["edge
  * `bg-*`/`border-*`/`shadow-*`/`rounded-*` utility there would silently defeat
  * the recipe. `surface-contract.test.ts` is the AST guard for that half.
  */
+// `emphasis?: never` on the three non-well members is load-bearing, not noise:
+// it states that those levels HAVE no recessed edge (so `<Surface level="page"
+// emphasis="hairline">` is a type error) while still declaring the property on
+// every member, which lets the component destructure it straight off its props
+// instead of casting the union apart. That matters beyond tidiness — the
+// fail-closed analyzer in `surface-contract.test.ts` only accepts a `className`
+// it can prove is a component prop, and a cast breaks that proof.
 export type SurfaceVisualProps =
-  | { level: "page"; geometry: "square" }
-  | { level: "surface"; geometry: "card" | "square" }
-  | { level: "raised"; geometry: "card" }
-  | { level: "well"; geometry: "control" | "chip" | "square" };
+  | { level: "page"; geometry: "square"; emphasis?: never }
+  | { level: "surface"; geometry: "card" | "square"; emphasis?: never }
+  | { level: "raised"; geometry: "card"; emphasis?: never }
+  | {
+      level: "well";
+      geometry: "control" | "chip" | "square";
+      /** Recessed-row edge. Only a `well` has one — see `SurfaceVariantProps`. */
+      emphasis?: SurfaceEmphasis;
+    };
 
-export type SurfaceProps = SurfaceVisualProps & {
-  /**
-   * Optional canonical `--line2` hairline (see `surfaceVariants.edge`). Purely
-   * additive: omitting it reproduces the previous output exactly, so this
-   * widens the accepted props without changing any existing call site.
-   */
-  edge?: SurfaceEdge;
-} & React.HTMLAttributes<HTMLDivElement>;
+export type SurfaceProps = SurfaceVisualProps & React.HTMLAttributes<HTMLDivElement>;
 
 /**
  * The ordinary-container adapter over the recipe. `level` maps onto the
@@ -194,8 +228,9 @@ export type SurfaceProps = SurfaceVisualProps & {
  * preserved so a caller never needs a wrapper just to attach a handler, an id,
  * or a ref.
  */
+
 export const Surface = React.forwardRef<HTMLDivElement, SurfaceProps>(function Surface(
-  { level, geometry, edge, className, ...props },
+  { level, geometry, emphasis, className, ...domProps },
   ref,
 ) {
   return (
@@ -204,11 +239,23 @@ export const Surface = React.forwardRef<HTMLDivElement, SurfaceProps>(function S
       data-slot="surface"
       data-level={level}
       data-geometry={geometry}
-      data-edge={edge}
-      className={cn(surfaceVariants({ role: level, geometry, edge }), className)}
-      {...props}
+      data-emphasis={emphasis}
+      className={cn(
+        emphasis
+          ? surfaceVariants({ role: "well", geometry, emphasis })
+          : surfaceVariants({ role: level, geometry }),
+        className,
+      )}
+      {...domProps}
     />
   );
 });
 
-export { surfaceVariants };
+/**
+ * The public recipe. Thin typed wrapper over the CVA instance: the runtime is
+ * unchanged, and the wrapper exists so the (role, emphasis) tuple rule above is
+ * enforced by the compiler at every call site.
+ */
+export function surfaceVariants(props?: SurfaceVariantProps): string {
+  return surfaceRecipe(props as SurfaceRecipeProps);
+}

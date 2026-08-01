@@ -126,8 +126,24 @@ export interface GroupsSectionConfig {
   description?: string;
   /** Add-button label. Default `"Group"`. */
   addLabel?: string;
-  /** Empty-state copy when no custom or synthetic groups exist. */
+  /**
+   * Empty-state BODY copy — the explanatory line under the title. Both
+   * prototypes pair it with a display title and a local action; see
+   * `emptyTitle` / `emptyActionLabel`.
+   */
   emptyText?: string;
+  /** Empty-state display title, e.g. "No staff groups yet". */
+  emptyTitle?: string;
+  /** Label for the empty state's local add-group action. Default `"New group"`. */
+  emptyActionLabel?: string;
+  /**
+   * Where the empty state sits relative to the reserved auto-group row. The two
+   * canonical screens differ and both are authored deliberately: Staff puts the
+   * prompt FIRST (`ScreenStaff.dc.html:126`), Shifts puts `ALL` first and the
+   * prompt after it (`ScreenShifts.dc.html:164,181`). Default `"after-auto"`,
+   * which is the Shift order and the order this section already shipped.
+   */
+  emptyPlacement?: "before-auto" | "after-auto";
   /**
    * Show the member-search box inside the transfer list. Staff → true; Shift →
    * false (ScreenShifts has no member search). Default `true`.
@@ -162,6 +178,9 @@ interface ResolvedConfig {
   description?: string;
   addLabel: string;
   emptyText: string;
+  emptyTitle: string;
+  emptyActionLabel: string;
+  emptyPlacement: "before-auto" | "after-auto";
   showMemberSearch: boolean;
   selectedPaneLabel: string;
   selectedTestKey: string;
@@ -179,7 +198,10 @@ function resolveConfig(config?: GroupsSectionConfig): ResolvedConfig {
     heading: config?.heading ?? "Groups",
     description: config?.description,
     addLabel: config?.addLabel ?? "Group",
-    emptyText: config?.emptyText ?? "No groups yet — add one above.",
+    emptyText: config?.emptyText ?? "Bundle items into a group so a rule can target them together.",
+    emptyTitle: config?.emptyTitle ?? "No groups yet",
+    emptyActionLabel: config?.emptyActionLabel ?? "New group",
+    emptyPlacement: config?.emptyPlacement ?? "after-auto",
     showMemberSearch: config?.showMemberSearch ?? true,
     selectedPaneLabel: config?.selectedPaneLabel ?? "MEMBERS",
     selectedTestKey: config?.selectedTestKey ?? "members",
@@ -287,6 +309,45 @@ export function GroupsSection<TItem extends EditorItemBase>({
     commit(reorderGroups(currentState(), descriptor, from, to));
   };
 
+  // The canonical empty state (`ScreenStaff.dc.html:126-136`,
+  // `ScreenShifts.dc.html:181-191`): a decorative glyph tile, a display title, an
+  // explanatory body, and a LOCAL add-group action — not one flattened sentence.
+  // The action is the shared `Button` driving the SAME `onToggleAdd` the header
+  // control uses, so it inherits the 44px coarse-pointer minimum and adds no new
+  // lifecycle. `emptyPlacement` carries the two screens' deliberately different
+  // orders relative to the reserved `ALL` row.
+  //
+  // Gated on CUSTOM groups only, matching the prototypes' own `noGroups`. The
+  // original condition also required zero synthetic groups, which both live
+  // routes always have — so this could never render on either screen.
+  const emptyBlock =
+    groups.length === 0 ? (
+      <div
+        data-testid="groups-empty"
+        // Dashed is the empty-state affordance, so it keeps a hand-authored border
+        // rather than a role's solid hairline. It is a well-tier island inside the
+        // L1 card, so it takes the control radius and states no fill.
+        className="flex flex-col items-center gap-3.5 rounded-control border border-dashed border-line2 px-5 py-8 text-center"
+      >
+        <span
+          aria-hidden
+          className="flex size-13 items-center justify-center rounded-control border border-dashed border-line2 text-h3 leading-none text-ink3"
+        >
+          ∅
+        </span>
+        <span className="flex flex-col items-center gap-1">
+          <span className="font-heading text-title font-semibold tracking-[-0.015em] text-ink2">
+            {cfg.emptyTitle}
+          </span>
+          <span className="max-w-[44ch] text-meta text-ink3">{cfg.emptyText}</span>
+        </span>
+        <Button onClick={onToggleAdd} aria-pressed={addOpen} data-testid="groups-empty-add">
+          <FaPlus />
+          {cfg.emptyActionLabel}
+        </Button>
+      </div>
+    ) : null;
+
   return (
     // The single L1 containing card. It owns no padding of its own: the header
     // band and the body each carry the prototype's own insets, so the band's
@@ -318,6 +379,8 @@ export function GroupsSection<TItem extends EditorItemBase>({
       </div>
 
       <div data-testid="groups-body" className="flex flex-col gap-4 p-5">
+        {emptyBlock && cfg.emptyPlacement === "before-auto" && emptyBlock}
+
         {addOpen && (
           <GroupForm
             mode="add"
@@ -340,24 +403,8 @@ export function GroupsSection<TItem extends EditorItemBase>({
             countLabel={cfg.formatCount(items.length)}
           />
         ))}
-        {groups.length === 0 && (
-          // Gated on CUSTOM groups only, matching the prototypes' own `noGroups`
-          // (`ScreenStaff.dc.html:341`, `ScreenShifts.dc.html:370`), which sit the
-          // empty state directly beside the auto group. The previous condition
-          // also required zero synthetic groups, which both live routes always
-          // have — so the `emptyText` each route already authors could never
-          // render on either screen.
-          //
-          // Dashed is the empty-state affordance, so this keeps a hand-authored
-          // border rather than a role's solid hairline. It is a well-tier island
-          // inside the L1 card, so it takes the control radius and states no fill.
-          <p
-            data-testid="groups-empty"
-            className="rounded-control border border-dashed border-line2 px-5 py-8 text-center text-meta text-ink2"
-          >
-            {cfg.emptyText}
-          </p>
-        )}
+        {emptyBlock && cfg.emptyPlacement === "after-auto" && emptyBlock}
+
         {groups.map((group, index) => (
           <GroupRow
             key={group.id}
@@ -414,7 +461,7 @@ function AutoGroupRow({
     <Surface
       level="well"
       geometry="control"
-      edge="hairline"
+      emphasis="hairline"
       data-testid={`synthetic-${id}`}
       title={note}
       className="flex flex-col gap-1.5 px-4.5 py-4"
@@ -544,8 +591,9 @@ function GroupRow<TItem extends EditorItemBase>({
         // brand edge is the selection / open-editor language, and a row under
         // the pointer is neither.
         //
-        // Exactly one of `edge`/`drop` is ever passed, so the resulting border
-        // never depends on tailwind-merge resolving two competing edges.
+        // `emphasis` is ONE axis, so "both edges at once" is unrepresentable
+        // rather than merely avoided: the border can never depend on
+        // tailwind-merge resolving two competing edges.
         //
         // The grab/drag affordances come from the same recipe because
         // `cursor-*` and `opacity-*` are not layout utilities and so cannot be
@@ -553,8 +601,7 @@ function GroupRow<TItem extends EditorItemBase>({
         surfaceVariants({
           role: "well",
           geometry: "control",
-          edge: isOver ? undefined : "hairline",
-          drop: isOver ? "candidate" : undefined,
+          emphasis: isOver ? "drop-candidate" : "hairline",
           interaction: isDragging ? "dragging" : canDrag ? "grabbable" : undefined,
         }),
       )}

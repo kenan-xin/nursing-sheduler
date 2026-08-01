@@ -471,10 +471,10 @@ describe("Surface / surfaceVariants — the single visual authority", () => {
     expect(dragging).toContain("opacity-50");
   });
 
-  // ii7.8.5.1 — the two ADDITIVE axes that let a recessed row carry the
-  // canonical hairline and a drop edge without inheriting a card's elevation.
-  it("adds the canonical --line2 hairline through `edge`, and only on request", () => {
-    expect(surfaceVariants({ role: "well", geometry: "control", edge: "hairline" })).toContain(
+  // ii7.8.5.2 — the recessed-row `emphasis` axis. ONE axis, legal only on a
+  // `well`, so the illegal tuples are unrepresentable rather than merely unused.
+  it("adds the canonical --line2 hairline through `emphasis`, and only on request", () => {
+    expect(surfaceVariants({ role: "well", geometry: "control", emphasis: "hairline" })).toContain(
       "border-line2",
     );
     // Opt-in: the bare role is byte-identical to what it produced before the
@@ -482,20 +482,65 @@ describe("Surface / surfaceVariants — the single visual authority", () => {
     expect(surfaceVariants({ role: "well", geometry: "control" })).not.toContain("border");
   });
 
-  it("gives a drop candidate an EDGE, never an elevation, so each role keeps its own light", () => {
-    const wellDrop = surfaceVariants({ role: "well", geometry: "control", drop: "candidate" });
+  it("gives a drop candidate an EDGE, never an elevation, so the well keeps its own light", () => {
+    const wellDrop = surfaceVariants({
+      role: "well",
+      geometry: "control",
+      emphasis: "drop-candidate",
+    });
     expect(wellDrop).toContain("border-dashed");
     expect(wellDrop).toContain("border-brand");
     // The whole point: a recessed row stays recessed while it is a drop target.
     expect(wellDrop).toContain("shadow-well");
     expect(wellDrop).not.toContain("shadow-2");
     expect(wellDrop).not.toContain("bg-panel-alt");
-    // A card-tier drop zone composed the same way keeps ITS outer elevation.
-    const cardDrop = surfaceVariants({ role: "surface", geometry: "card", drop: "candidate" });
-    expect(cardDrop).toContain("shadow-1");
-    expect(cardDrop).not.toContain("shadow-well");
     // Dashed, because a solid brand edge is the selection language (§6).
     expect(wellDrop).not.toContain("bg-brandtint");
+  });
+
+  it("cannot express two edges at once — emphasis is a single axis", () => {
+    // The earlier `edge` + `drop` pair could emit `border-line2` AND
+    // `border-dashed border-brand` together, leaving the winner to merge order.
+    // Exactly one emphasis class is now reachable per call.
+    const hairline = surfaceVariants({ role: "well", geometry: "control", emphasis: "hairline" });
+    const drop = surfaceVariants({
+      role: "well",
+      geometry: "control",
+      emphasis: "drop-candidate",
+    });
+    expect(hairline).not.toContain("border-dashed");
+    expect(hairline).not.toContain("border-brand");
+    expect(drop).not.toContain("border-line2");
+  });
+
+  it("rejects every illegal (role, emphasis) tuple at the TYPE boundary", () => {
+    // @ts-expect-error — the page plane is never a bordered box.
+    surfaceVariants({ role: "page", geometry: "square", emphasis: "hairline" });
+    // @ts-expect-error — a raised surface is never a recessed row.
+    surfaceVariants({ role: "raised", geometry: "card", emphasis: "drop-candidate" });
+    // @ts-expect-error — an L1 card is not a recessed row either.
+    surfaceVariants({ role: "surface", geometry: "card", emphasis: "hairline" });
+    // @ts-expect-error — `emphasis` without a role falls back to `surface`.
+    surfaceVariants({ geometry: "control", emphasis: "hairline" });
+    // @ts-expect-error — the retired loose axes are gone, not merely unused.
+    surfaceVariants({ role: "well", geometry: "control", edge: "hairline" });
+    // @ts-expect-error — ditto.
+    surfaceVariants({ role: "well", geometry: "control", drop: "candidate" });
+
+    // ...and the two sanctioned tuples still compile and still paint.
+    expect(surfaceVariants({ role: "well", geometry: "control", emphasis: "hairline" })).toContain(
+      "bg-panel",
+    );
+    expect(
+      surfaceVariants({ role: "well", geometry: "control", emphasis: "drop-candidate" }),
+    ).toContain("bg-panel");
+  });
+
+  it("rejects an illegal Surface level/emphasis tuple at the TYPE boundary", () => {
+    // @ts-expect-error — only `level="well"` carries an emphasis.
+    expect(<Surface level="page" geometry="square" emphasis="hairline" />).toBeTruthy();
+    // @ts-expect-error — ditto for a raised container.
+    expect(<Surface level="raised" geometry="card" emphasis="drop-candidate" />).toBeTruthy();
   });
 
   it("leaves every pre-existing role byte-identical — the new axes are additive", () => {
