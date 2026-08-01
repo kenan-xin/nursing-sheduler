@@ -52,11 +52,9 @@
 
 import * as React from "react";
 import { paidMinutesFor, validateWorkingTimeDraft, type WorkingTimeValue } from "./core";
-import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { InfoTip } from "@/components/ui/info-tip";
 import { Select } from "@/components/ui/select";
-import { surfaceVariants } from "@/components/ui/surface";
 
 const PAD = (n: number) => String(n).padStart(2, "0");
 /** The 48 half-hour clock slots 00:00..23:30 (the design's timeOptions). */
@@ -237,34 +235,30 @@ export function WorkingTimeFields({ value, onChange, idPrefix }: WorkingTimeFiel
                   } rest`
                 : undefined
             }
-            // An inset island inside the editor card: the `well` role on the
-            // control radius (DESIGN.md §4 rule 1 — a well takes the inset cast
-            // and never an outer shadow).
-            className={cn(
-              "flex overflow-hidden px-2.5",
-              surfaceVariants({ role: "well", geometry: "control" }),
-            )}
+            // An inset island inside the editor card. The prototype draws it as
+            // `--panel` behind a `--line2` hairline at the control radius; the
+            // shared `well` role draws no border, and a border added beside the
+            // recipe would be rejected as a non-layout class, so this one surface
+            // is authored from canonical tokens directly (same call, and same
+            // reason, as the icon tiles on the Shift Types grid).
+            //
+            // The absolute 36px control token sits on the box ITSELF (border-box,
+            // so the hairline is inside it), which is what keeps the readout level
+            // with the Rest select beside it. The prototype draws this box at 38px
+            // because its own selects are 38px; ours are the ratified 36px (D10),
+            // and matching our neighbours is the alignment that actually matters.
+            // A density-derived `h-10` would land on 36px today and silently drift
+            // if the 0.9 baseline ever moved.
+            className="flex h-control items-center gap-1.5 overflow-hidden rounded-control border border-line2 bg-panel px-2.5 shadow-well pointer-coarse:min-h-touch"
           >
-            {/* The height lives on this inner row, not on the box above it: a
-                consumer's className beside the recipe is held to LAYOUT-ONLY
-                utilities with validated values, and `h-control` is not one of
-                them (`surface-contract.test.ts` admits `size-control*` but not
-                `h-control`). Putting the absolute 36px control token here keeps
-                the readout level with the Rest select beside it — and lets it
-                reach a real 44px on a coarse pointer — without paying for it
-                with a density-derived `h-10`, which would silently drift if the
-                0.9 baseline ever moved. The box has no vertical padding, so its
-                height IS this row's. */}
-            <div className="flex h-control w-full items-center gap-1.5 pointer-coarse:min-h-touch">
-              <span className="flex-none font-heading text-title font-bold leading-none tracking-[-0.015em]">
-                {paid != null ? fmtDuration(paid) : "—"}
+            <span className="flex-none font-heading text-title font-bold leading-none tracking-[-0.015em]">
+              {paid != null ? fmtDuration(paid) : "—"}
+            </span>
+            {paid != null && (
+              <span className="min-w-0 truncate font-mono text-label text-ink3">
+                = {fmtDuration(paid + rest)} − {rest > 0 ? fmtRest(rest) : "0"}
               </span>
-              {paid != null && (
-                <span className="min-w-0 truncate font-mono text-label text-ink3">
-                  = {fmtDuration(paid + rest)} − {rest > 0 ? fmtRest(rest) : "0"}
-                </span>
-              )}
-            </div>
+            )}
           </div>
         </div>
       </div>

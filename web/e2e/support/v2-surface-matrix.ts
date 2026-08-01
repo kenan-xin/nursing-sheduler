@@ -566,6 +566,16 @@ export const V2_HARNESS_ROUTES: readonly string[] = Object.freeze(
 export const V2_STYLE_OWNER_FILES: Readonly<Record<V2Owner, readonly string[]>> = Object.freeze({
   // The value authority plus every shared primitive, theme control and shared
   // entity-editor presenter migrated once by F1–F3 ahead of its route consumers.
+  //
+  // The entity-editor presenters are enumerated by FAMILY rather than swept with
+  // `components/entity-editor/**/*.tsx`, because exactly one file in that
+  // directory is NOT foundation-owned: `working-time-fields.tsx` belongs to R2c
+  // (see the R2c entry below). The glob grammar here is deliberately tiny — `**`
+  // and `*`, no negation — so an exception is expressed by naming what IS owned,
+  // not by subtracting from a sweep. The consequence is intended: a NEW
+  // entity-editor presenter matches no owner and fails the "every presentation
+  // source has exactly one owner" gate until it is assigned, which is the
+  // fail-closed behaviour this map exists for.
   foundation: Object.freeze([
     "app/globals.css",
     "app/layout.tsx",
@@ -573,7 +583,8 @@ export const V2_STYLE_OWNER_FILES: Readonly<Record<V2Owner, readonly string[]>> 
     "app/design-system/page.tsx",
     "components/ui/**/*.tsx",
     "components/theme/**/*.tsx",
-    "components/entity-editor/**/*.tsx",
+    "components/entity-editor/groups-section*.tsx",
+    "components/entity-editor/transfer-list*.tsx",
     "components/icons.tsx",
     "components/app-version.tsx",
   ]),
@@ -592,7 +603,18 @@ export const V2_STYLE_OWNER_FILES: Readonly<Record<V2Owner, readonly string[]>> 
     "components/dates/calendar.css",
   ]),
   R2b: Object.freeze(["app/(app)/people/page.tsx", "components/people/**/*.tsx"]),
-  R2c: Object.freeze(["app/(app)/shift-types/page.tsx", "components/shift-types/**/*.tsx"]),
+  // `working-time-fields` is the one entity-editor presenter that is NOT
+  // foundation-owned. Shift Types is its only live UI consumer, so the R2c
+  // ticket is authoritative that R2c is its sole visual owner — and the static
+  // scan has to agree, or `V2_STYLE_OWNER=R2c` silently skips a file R2c
+  // changed. Named as exact paths, never a `working-time-fields*` sweep: an
+  // exception should not be able to widen itself.
+  R2c: Object.freeze([
+    "app/(app)/shift-types/page.tsx",
+    "components/shift-types/**/*.tsx",
+    "components/entity-editor/working-time-fields.tsx",
+    "components/entity-editor/working-time-fields.test.tsx",
+  ]),
   R3: Object.freeze(["app/(app)/rules/page.tsx", "components/guided-rules/**/*.tsx"]),
   R4: Object.freeze([
     "app/(app)/shift-type-requirements/page.tsx",

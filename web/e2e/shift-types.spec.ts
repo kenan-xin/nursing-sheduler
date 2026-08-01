@@ -479,6 +479,8 @@ test.describe("R2c — v2 visual system on /shift-types", () => {
         "--panel",
         "--panel-alt",
         "--brand",
+        "--line",
+        "--line2",
       ]);
       const cast = await resolveShadows(page, ["--sh-1", "--sh-2", "--sh-well"]);
 
@@ -498,18 +500,25 @@ test.describe("R2c — v2 visual system on /shift-types", () => {
       );
       expect(cardShadow, "a resting card is never an inset").not.toContain("inset");
 
-      // A reserved day-state is the SAME L1 card. "Locked" is the AUTO badge and
-      // the absent action row, not a second tone — a --panel tile recedes in
-      // light and RISES in dark, so tone cannot carry it across both themes.
+      // Quiet L1 — the reserved day-state keeps the surface plane but takes the
+      // QUIETER `--line2` hairline and NO cast, which is how the prototype draws
+      // it and what makes it read as inert beside the authorable cards.
       const reserved = page.getByTestId("synthetic-OFF");
       await expect(reserved).toHaveCSS("background-color", tone["--surface"]);
       await expect(reserved).toHaveCSS("border-radius", "16px");
+      await expect(reserved).toHaveCSS("border-color", tone["--line2"]);
+      expect(
+        paintedLayers(await reserved.evaluate((el) => getComputedStyle(el).boxShadow)),
+        "a reserved tile carries no elevation at all",
+      ).toBe("none");
 
-      // well — the icon tile is an inset island on the chip radius. Direction of
-      // light is fixed: inset only, never an outer cast (DESIGN.md §4 rule 1).
+      // The icon tile: `--panel` behind a `--line2` hairline at the CONTROL
+      // radius, exactly as measured off the prototype. Direction of light is
+      // fixed: inset only, never an outer cast (DESIGN.md §4 rule 1).
       const tile = card.locator('[data-slot="shift-tile"]');
       await expect(tile).toHaveCSS("background-color", tone["--panel"]);
-      await expect(tile).toHaveCSS("border-radius", "9px");
+      await expect(tile).toHaveCSS("border-radius", "12px");
+      await expect(tile).toHaveCSS("border-color", tone["--line2"]);
       const tileShadow = await tile.evaluate((el) => getComputedStyle(el).boxShadow);
       expect(paintedLayers(tileShadow), "a well carries exactly --sh-well").toBe(
         paintedLayers(cast["--sh-well"]),
@@ -631,13 +640,15 @@ test.describe("R2c — v2 visual system on /shift-types", () => {
     const readout = await page.getByTestId(`${prefix}-duration`).boundingBox();
     expect(readout!.height, "working readout height").toBe(36);
 
-    // The icon tiles are the one deliberately token-bound decorative box.
+    // The icon tile is the prototype's own 42px mark, measured raw. It is NOT a
+    // control, so it is deliberately not bound to a control-size token — 42 is
+    // the canonical value read off ScreenShifts.dc.html in Chromium.
     const tile = await page
       .getByTestId(`shift-card-${sk("Night")}`)
       .locator('[data-slot="shift-tile"]')
       .boundingBox();
-    expect(tile!.width, "icon tile width").toBe(44);
-    expect(tile!.height, "icon tile height").toBe(44);
+    expect(tile!.width, "icon tile width").toBe(42);
+    expect(tile!.height, "icon tile height").toBe(42);
   });
 
   test("every real target reaches 44px on an actual coarse pointer", async ({ browser }) => {
@@ -748,6 +759,67 @@ test.describe("R2c — v2 visual system on /shift-types", () => {
         measured.pageClient + 1,
       );
     }
+  });
+
+  // The prototype's `toRules` action, added after the cold review on an explicit
+  // product decision. What needs a browser is not that the anchor exists (the
+  // roles suite pins that) but that it goes through the app's ALREADY-RATIFIED
+  // draft guard rather than a second navigation lifecycle — and the only way to
+  // tell those apart is to open a draft and click it.
+  test("Continue to rules navigates directly when no draft is open", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 1200 });
+    await gotoShifts(page);
+    await seedWard(page);
+
+    const cta = page.getByTestId("shift-types-continue");
+    await expect(cta).toHaveAttribute("href", "/rules");
+    expect(await cta.evaluate((el) => el.tagName)).toBe("A");
+    // The prototype's 44px primary action, measured raw.
+    expect((await cta.boundingBox())!.height, "Continue CTA height").toBe(44);
+
+    await cta.click();
+    await expect(page).toHaveURL(/\/rules$/);
+    // Guard the premise: no confirm was staged, because there was no draft.
+    await expect(page.getByRole("heading", { name: "Unsaved changes" })).toHaveCount(0);
+  });
+
+  test("Continue to rules stages the ratified draft guard when an editor is open", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 1200 });
+    await gotoShifts(page);
+    await seedWard(page);
+
+    await page.getByTestId(`shift-edit-${sk("Day")}`).click();
+    const form = page.getByTestId(`shift-edit-form-${sk("Day")}`);
+    await expect(form).toBeVisible();
+    // Dirty the draft, so a silent discard would lose real work.
+    await page.getByTestId(`shift-edit-${sk("Day")}-name`).fill("Renamed by the guard test");
+
+    await page.getByTestId("shift-types-continue").click();
+
+    // Staged, not navigated — this is the shell's single confirm dialog, the same
+    // one the sidebar links raise, reached because the grid already registers a
+    // losable draft for the whole time an editor is open.
+    await expect(page.getByRole("heading", { name: "Unsaved changes" })).toBeVisible();
+    expect(new URL(page.url()).pathname).toBe("/shift-types");
+
+    // Stay: the route AND the open draft survive, with the typed text intact.
+    await page.getByTestId("confirm-dialog-cancel").click();
+    expect(new URL(page.url()).pathname).toBe("/shift-types");
+    await expect(form).toBeVisible();
+    await expect(page.getByTestId(`shift-edit-${sk("Day")}-name`)).toHaveValue(
+      "Renamed by the guard test",
+    );
+    // Nothing was committed behind the dialog.
+    expect((await readShifts(page)).find((s) => s.id === "Day")?.description).toBe("Day shift");
+
+    // Leave without saving: now it navigates, and the draft is discarded rather
+    // than written.
+    await page.getByTestId("shift-types-continue").click();
+    await page.getByTestId("confirm-dialog-confirm").click();
+    await expect(page).toHaveURL(/\/rules$/);
+    expect((await readShifts(page)).find((s) => s.id === "Day")?.description).toBe("Day shift");
   });
 
   test("no data surface on the route is rounded, and no control is square", async ({ page }) => {

@@ -2,7 +2,6 @@
 import * as React from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { surfaceVariants } from "@/components/ui/surface";
 import { WorkingTimeFields } from "./working-time-fields";
 import type { WorkingTimeValue } from "./core";
 
@@ -38,12 +37,6 @@ function Harness({ initial = {} }: { initial?: WorkingTimeValue }) {
 
 function emitted(): WorkingTimeValue {
   return JSON.parse(screen.getByTestId("emitted").textContent || "{}");
-}
-
-function roleClasses(...args: Parameters<typeof surfaceVariants>): string[] {
-  return surfaceVariants(...args)
-    .split(/\s+/)
-    .filter(Boolean);
 }
 
 const start = () => screen.getByTestId("wt-start") as HTMLSelectElement;
@@ -221,25 +214,26 @@ describe("WorkingTimeFields — v2 presentation authority", () => {
 
     const box = readout();
     const classes = box.className.split(/\s+/);
-    for (const token of roleClasses({ role: "well", geometry: "control" })) {
-      expect(classes, `readout → ${token}`).toContain(token);
-    }
-    // Direction of light is fixed: a well takes the inset cast and NEVER an
-    // outer elevation (DESIGN.md §4 rule 1).
+    // The prototype's inset readout, measured in Chromium: `--panel` behind a
+    // `--line2` hairline at the control radius, with the inset cast.
+    expect(classes).toContain("bg-panel");
+    expect(classes).toContain("border-line2");
+    expect(classes).toContain("rounded-control");
+    expect(classes).toContain("shadow-well");
+    // Direction of light is fixed: the inset cast and NEVER an outer elevation
+    // (DESIGN.md §4 rule 1).
     expect(box.className).not.toMatch(/\bshadow-[123]\b/);
-    // Retired v1 authoring: a hand-drawn hairline box on `--panel` with no radius.
-    expect(classes).not.toContain("border-line2");
+    // Retired v1 authoring: a square box at a density-derived height.
     expect(classes).not.toContain("h-9");
+    expect(classes).not.toContain("rounded-none");
   });
 
   it("holds the readout at the ABSOLUTE control height with a real coarse-pointer floor", () => {
     render(<Harness initial={{ startTime: "08:00", endTime: "16:00", durationMinutes: 480 }} />);
 
-    // The box has no vertical padding, so its height IS this row's; the height
-    // lives here because the recipe consumer's className is held to layout-only
-    // utilities and `h-control` is not one of them.
-    const row = readout().firstElementChild as HTMLElement;
-    const classes = row.className.split(/\s+/);
+    // On the box itself (border-box, so the hairline is inside the 36px), which is
+    // what keeps it level with the 36px selects beside it.
+    const classes = readout().className.split(/\s+/);
     expect(classes).toContain("h-control");
     expect(classes).toContain("pointer-coarse:min-h-touch");
     // A density-derived height would silently drift off the 36px selects beside

@@ -11,6 +11,7 @@ import {
   useHotStore,
   useScenarioStore,
 } from "@/lib/store";
+import { cn } from "@/lib/utils";
 import { surfaceVariants } from "@/components/ui/surface";
 import { buttonVariants } from "@/components/ui/button";
 import { ShiftTypeGrid } from "./shift-type-grid";
@@ -157,44 +158,51 @@ describe("R2c surface ladder — authored by the shared recipe, not by hand", ()
     });
   });
 
-  it("renders the reserved OFF/LEAVE tiles as L1 cards, locked by badge not by tone", () => {
+  it("renders the reserved OFF/LEAVE tiles as a QUIET L1 — line2 hairline, no elevation", () => {
     render(<ShiftTypeGrid />);
 
     for (const id of ["OFF", "LEAVE"]) {
       const tile = screen.getByTestId(`synthetic-${id}`);
-      expectRole(tile, { role: "surface", geometry: "card" });
-      // Not a well: a `--panel` tile RECEDES in light mode and RISES in dark
-      // (dark `--panel` is lighter than dark `--bg`), so tone cannot carry
-      // "locked" across both themes. The AUTO badge and the absent action row do.
-      expectNotRole(tile, { role: "well", geometry: "card" });
+      const classes = tile.className.split(/\s+/);
+      // The prototype's own treatment, measured in Chromium: the surface plane
+      // with the QUIETER hairline and no cast, so the tile reads inert beside
+      // authorable cards that carry `--line` + `--sh-1`.
+      expect(classes).toContain("bg-surface");
+      expect(classes).toContain("border-line2");
+      expect(classes).toContain("rounded-card");
+      expect(classes).not.toContain("border-line");
+      // No elevation at all — this is the half that reads as "not yours".
+      expect(tile.className).not.toMatch(/\bshadow-/);
+      // And deliberately NOT the shared `surface` role, whose `--line` border and
+      // `--sh-1` are fixed and would make it identical to an editable card.
+      expectNotRole(tile, { role: "surface", geometry: "card" });
       expect(within(tile).getByText("Auto")).toBeInTheDocument();
       expect(within(tile).queryByRole("button")).toBeNull();
     }
   });
 
-  it("renders every icon tile as an inset well on the chip radius", () => {
+  it("renders every icon tile at the prototype's 42px on the CONTROL radius", () => {
     seed({ shifts: [{ id: "Day" }] });
     render(<ShiftTypeGrid />);
 
-    const tiles = [
-      screen.getByTestId(`shift-card-${DAY}`).querySelector('[data-slot="surface-tile"]'),
-      ...Array.from(document.querySelectorAll('[data-slot="surface-tile"]')),
-    ];
-    // Fall back to a structural sweep: the tiles are unlabelled marks, so they are
-    // found by the role they claim rather than by a testid.
-    const wells = Array.from(document.querySelectorAll("div")).filter((el) =>
-      roleClasses({ role: "well", geometry: "chip" }).every((token) =>
-        el.className.split(/\s+/).includes(token),
-      ),
-    );
+    const tiles = Array.from(document.querySelectorAll('[data-slot="shift-tile"]'));
     // One per shift card + one per reserved tile.
-    expect(wells.length).toBeGreaterThanOrEqual(3);
-    for (const well of wells) {
-      // A well never takes an outer shadow (DESIGN.md §4 rule 1).
-      expect(well.className).not.toMatch(/\bshadow-[123]\b/);
-      expect(well.className.split(/\s+/)).toContain("size-control-lg");
+    expect(tiles.length).toBeGreaterThanOrEqual(3);
+
+    for (const tile of tiles) {
+      const classes = tile.className.split(/\s+/);
+      // Measured off the prototype: 42px, `--panel` behind a `--line2` hairline.
+      expect(classes).toContain("size-[42px]");
+      expect(classes).toContain("bg-panel");
+      expect(classes).toContain("border-line2");
+      // DESIGN.md §5 files "inner bordered boxes" under the control radius. The
+      // chip radius this carried before was a step too tight.
+      expect(classes).toContain("rounded-control");
+      expect(classes).not.toContain("rounded-chip");
+      // Direction of light is fixed: inset only, never an outer cast.
+      expect(classes).toContain("shadow-well");
+      expect(tile.className).not.toMatch(/\bshadow-[123]\b/);
     }
-    expect(tiles.length).toBeGreaterThan(0);
   });
 
   it("lifts the open editor to the `selected` role instead of washing it in brandtint", () => {
@@ -283,6 +291,25 @@ describe("R2c primitive adoption — shared components, not caller-side override
     // Authored data reads as the user set it — not uppercased like a status eyebrow.
     expect(badge.className.split(/\s+/)).toContain("normal-case");
     expect(badge).toHaveTextContent("8h 30m");
+  });
+
+  it("renders Continue to rules as a real guarded anchor wearing the Button recipe", () => {
+    render(<ShiftTypeGrid />);
+
+    const cta = screen.getByTestId("shift-types-continue");
+    // A real `<a href>`, so copy-link and open-in-new-tab keep working and the
+    // shell's draft guard stages on a plain click. A <button> here would be a
+    // second navigation lifecycle.
+    expect(cta.tagName).toBe("A");
+    expect(cta).toHaveAttribute("href", "/rules");
+    expect(cta).toHaveTextContent("Continue to rules");
+    // The prototype's 44px primary action, from the shared recipe rather than a
+    // hand-rolled skin — same contract as the Dates and Staff CTAs. Compared as
+    // the exact composed string, not token-by-token: the recipe's own
+    // `font-medium` is legitimately REPLACED by the `font-bold` the siblings also
+    // pass, so a presence check would either fail on it or have to special-case
+    // it. Equality also means no extra visual class can be smuggled alongside.
+    expect(cta.className).toBe(cn(buttonVariants({ size: "lg" }), "font-bold"));
   });
 
   it("leaves the Save button's visuals entirely to the Button recipe", () => {
@@ -387,7 +414,6 @@ describe("R2c typography and status — the named rules", () => {
     // reserved, editing and grouped) rather than one element at a time.
     for (const retired of [
       "p-[18px]",
-      "size-[42px]",
       "bg-brandtint/40",
       "shadow-[",
       "font-extrabold",

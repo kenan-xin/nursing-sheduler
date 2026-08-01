@@ -45,13 +45,14 @@ import type { ScenarioUiState, UiShiftType } from "@/lib/scenario";
 import { RenameCollisionError } from "@/lib/cascade";
 import { GuardedLink } from "@/components/shell/guarded-link";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Surface, surfaceVariants } from "@/components/ui/surface";
 import {
   FaPlus,
+  FaArrowRight,
   FaPen,
   FaTrash,
   FaCheck,
@@ -245,25 +246,48 @@ export function ShiftTypeGrid() {
       data-screen={descriptor.labels.itemPlural}
       className="flex flex-col gap-5"
     >
-      <header className="flex flex-col gap-2">
-        {/* The setup wizard's step eyebrow, matching Dates (Step 1) and Staff
-            (Step 2). ScreenShifts.dc.html opens on the same STEP 3 · SHIFTS mark;
-            without it this route is the one hole in the chain. It is a label, not
-            an affordance — the prototype's "Continue to rules" CTA beside it is a
-            navigation addition and is deliberately NOT introduced here. */}
-        <div className="text-label font-semibold uppercase tracking-[0.03em] text-brandink">
-          Step 3 · Shifts
+      <header className="flex flex-wrap items-end gap-4">
+        <div className="min-w-[240px] flex-1">
+          {/* The setup wizard's step eyebrow, matching Dates (Step 1) and Staff
+              (Step 2). ScreenShifts.dc.html opens on the same STEP 3 · SHIFTS mark;
+              without it this route was the one hole in the chain. */}
+          <div className="mb-2 text-label font-semibold uppercase tracking-[0.03em] text-brandink">
+            Step 3 · Shifts
+          </div>
+          {/* Display: Figtree 700 / 1.15 / -0.015em (DESIGN.md §3). v1 ran this page
+              heading at the TITLE step with `tracking-tight`, two steps down from the
+              display face every other setup route uses. */}
+          <h1 className="mb-2 font-heading text-display font-bold leading-[1.15] tracking-[-0.015em]">
+            Define the Shifts
+          </h1>
+          <p className="max-w-[60ch] text-ink2">
+            Set up the daily shifts your ward runs, their working time, and how you group them. Off
+            and Paid leave are reserved day-states handled for you.
+          </p>
         </div>
-        {/* Display: Figtree 700 / 1.15 / -0.015em (DESIGN.md §3). v1 ran this page
-            heading at the TITLE step with `tracking-tight`, two steps down from the
-            display face every other setup route uses. */}
-        <h1 className="font-heading text-display font-bold leading-[1.15] tracking-[-0.015em]">
-          Define the Shifts
-        </h1>
-        <p className="max-w-[60ch] text-ink2">
-          Set up the daily shifts your ward runs, their working time, and how you group them. Off
-          and Paid leave are reserved day-states handled for you.
-        </p>
+        {/* The prototype's `toRules` action (ScreenShifts.dc.html:11-18), closing
+            the Dates → Staff → Shifts → Rules setup path. User-approved as a
+            product decision after the cold review; R2c's first pass deliberately
+            left it out rather than inventing it.
+
+            It uses the app's EXISTING navigation contract verbatim — the same
+            `GuardedLink` the Dates and Staff CTAs use. That matters: a plain
+            `<Link>` pushes straight through the router and would silently discard
+            an open shift draft, while `GuardedLink` routes an unmodified primary
+            click through `useGuardedNavigation().navigate`, which stages the
+            shell's single confirm dialog whenever a losable draft is registered.
+            This grid ALREADY registers one for the whole time an editor is open
+            (`useLosableDraft("shift-type-grid", editing, …)` above), so the
+            ratified draft guard arms itself here with no second lifecycle, no new
+            state and no local interception. Modified clicks, middle-click and
+            open-in-new-tab keep native anchor behaviour. */}
+        <GuardedLink
+          href="/rules"
+          className={cn(buttonVariants({ size: "lg" }), "font-bold")}
+          data-testid="shift-types-continue"
+        >
+          Continue to rules <FaArrowRight />
+        </GuardedLink>
       </header>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -376,6 +400,36 @@ export function ShiftTypeGrid() {
 // Never a raw disabled control.
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Two surfaces on this route are authored from canonical tokens rather than
+// through `surfaceVariants`, because the recipe cannot express them and a
+// consumer's className beside the recipe is held to LAYOUT-ONLY utilities
+// (`surface-contract.test.ts`) — so `border-line2` next to a role is rejected
+// outright. Both values below were measured off the canonical prototype in
+// Chromium (see the ii7.21.3 visual-fidelity evidence), not guessed.
+//
+// Changing the shared recipe to add a "quiet L1" role is deliberately NOT done
+// here: it would alter every other owner's surfaces.
+// ---------------------------------------------------------------------------
+
+/**
+ * A reserved day-state tile. The prototype draws it on the SAME `--surface`
+ * plane as an authorable card but with the quieter `--line2` hairline and NO
+ * elevation, which is what makes it read as inert beside siblings carrying
+ * `--line` + `--sh-1`. Radius stays DESIGN.md §5's card value: the prototype
+ * renders 12px here only because its attribute-substring compatibility CSS keys
+ * off the `--line2` border, and §6 forbids porting those selectors.
+ */
+const RESERVED_CARD_SURFACE = "rounded-card border border-line2 bg-surface";
+
+/**
+ * The 42px icon tile: `--panel` behind a `--line2` hairline at the CONTROL
+ * radius. DESIGN.md §5 files "inner bordered boxes" under `--r-ctl`, which is
+ * exactly what this is — the chip radius it carried before was a step too tight
+ * and the hairline was missing entirely.
+ */
+const ICON_TILE_SURFACE = "size-[42px] rounded-control border border-line2 bg-panel shadow-well";
+
 const RESERVED_META: Record<string, { icon: IconType; reason: string }> = {
   OFF: {
     icon: FaPowerOff,
@@ -394,27 +448,19 @@ function ReservedCard({ id, description }: { id: string; description?: string })
   const Icon = meta?.icon ?? FaLock;
   const reason = meta?.reason ?? description;
   return (
-    // A resting L1 card, exactly like an authorable shift (ScreenShifts.dc.html
-    // draws the auto cards on `--surface` too). "Locked" is carried by the AUTO
-    // badge, the padlock and the absent action row — not by a second tone, which
-    // the shared recipe cannot express without a caller-side border override.
+    // Quiet L1: the surface plane on a `--line2` hairline with NO elevation, so a
+    // reserved day-state is visibly inert beside the authorable cards around it.
+    // The AUTO badge, the padlock and the absent action row say the same thing in
+    // text; the tone difference is what says it at a glance.
     <div
       data-testid={`synthetic-${id}`}
-      className={cn(
-        "flex flex-col gap-3 p-5",
-        surfaceVariants({ role: "surface", geometry: "card" }),
-      )}
+      className={cn("flex flex-col gap-3 p-5", RESERVED_CARD_SURFACE)}
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-3">
-          {/* An inset island inside the card, so it is the `well` level on the chip
-              radius (DESIGN.md §4 rule 1: a well never takes an outer shadow). */}
           <div
             data-slot="shift-tile"
-            className={cn(
-              "flex size-control-lg flex-none items-center justify-center",
-              surfaceVariants({ role: "well", geometry: "chip" }),
-            )}
+            className={cn("flex flex-none items-center justify-center", ICON_TILE_SURFACE)}
           >
             <Icon aria-hidden className="text-ink2" />
           </div>
@@ -525,10 +571,7 @@ function ShiftCard({
         <div className="flex min-w-0 items-center gap-3">
           <div
             data-slot="shift-tile"
-            className={cn(
-              "flex size-control-lg flex-none items-center justify-center",
-              surfaceVariants({ role: "well", geometry: "chip" }),
-            )}
+            className={cn("flex flex-none items-center justify-center", ICON_TILE_SURFACE)}
           >
             <FaClock aria-hidden className="text-ink2" />
           </div>
@@ -596,12 +639,16 @@ function ShiftCard({
           </>
         )}
         <div className="ml-auto flex items-center gap-2">
-          {/* Bounded a11y quick win: the visible label is the same word on every
+          {/* `secondary`, not `outline`: the prototype's card actions sit on the
+              `--line` hairline, and `outline` is the heavier `--rule` edge.
+              Measured against ScreenShifts.dc.html — same tone, same elevation.
+
+              Bounded a11y quick win: the visible label is the same word on every
               card, so an accessible name that names the shift is what makes the
               action list navigable. The visible text stays a substring of the
               accessible name (WCAG 2.5.3 Label in Name). */}
           <Button
-            variant="outline"
+            variant="secondary"
             aria-label={`Edit ${String(item.id)}`}
             data-testid={`shift-edit-${cardKey}`}
             onClick={onEdit}
@@ -1050,10 +1097,7 @@ function ShiftCardEditor({
       <div className="flex items-center gap-3 border-b border-line2 pb-4">
         <div
           data-slot="shift-tile"
-          className={cn(
-            "flex size-control-lg flex-none items-center justify-center",
-            surfaceVariants({ role: "well", geometry: "chip" }),
-          )}
+          className={cn("flex flex-none items-center justify-center", ICON_TILE_SURFACE)}
         >
           <FaClock aria-hidden className="text-ink2" />
         </div>
