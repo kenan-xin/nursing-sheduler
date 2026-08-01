@@ -74,6 +74,75 @@ async function seed(page: Page, patch: Record<string, unknown>) {
   }, patch);
 }
 
+/** Resolve runtime tokens the way the app resolves them — through the cascade. */
+async function resolveTokens(page: Page, tokens: string[]): Promise<Record<string, string>> {
+  return page.evaluate((list) => {
+    const out: Record<string, string> = {};
+    for (const token of list) {
+      const probe = document.createElement("div");
+      probe.style.backgroundColor = `var(${token})`;
+      document.body.appendChild(probe);
+      out[token] = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+    }
+    return out;
+  }, tokens);
+}
+
+// ii7.8.5 — the SECOND configuration of the shared GroupsSection, painted. The
+// component is F2-owned and both routes consume it through public props only, so
+// a regression could land on one screen's config and not the other; this proves
+// the Shift config resolves the same prototype hierarchy (`ScreenShifts.dc.html`,
+// measured in this same Chromium) that the Staff config does.
+test.describe("F2 — shift groups surface hierarchy", () => {
+  test.beforeEach(async ({ page }, testInfo) => {
+    testInfo.setTimeout(30_000);
+    await page.addInitScript(() => {
+      (window as unknown as { __NS_ENABLE_TEST_BRIDGE?: boolean }).__NS_ENABLE_TEST_BRIDGE = true;
+    });
+  });
+
+  for (const theme of ["light", "dark"] as const) {
+    test(`shift groups render as one L1 card of wells in the ${theme} theme`, async ({ page }) => {
+      await page.addInitScript((t) => {
+        try {
+          window.localStorage.setItem("ns-theme", t);
+        } catch {}
+      }, theme);
+      await page.goto("/shift-types");
+      await expect(page.getByTestId("add-shift-toggle")).toBeVisible();
+      await seed(page, {
+        shifts: [{ id: "Day" }],
+        shiftGroups: [{ id: "Working", members: ["Day"] }],
+      });
+
+      const tone = await resolveTokens(page, ["--surface", "--panel", "--line", "--line2"]);
+
+      const section = page.getByTestId("groups-section");
+      await expect(section).toHaveCSS("background-color", tone["--surface"]);
+      await expect(section).toHaveCSS("border-radius", "16px");
+      await expect(section).toHaveCSS("border-top-color", tone["--line"]);
+      const cardShadow = await section.evaluate((el) => getComputedStyle(el).boxShadow);
+      expect(cardShadow, "the groups card must carry a resting elevation").not.toBe("none");
+      expect(cardShadow, "a resting card is never an inset").not.toContain("inset");
+
+      const band = page.getByTestId("groups-header");
+      await expect(band).toHaveCSS("border-bottom-width", "1px");
+      await expect(band).toHaveCSS("border-bottom-color", tone["--line2"]);
+      await expect(band).toHaveCSS("border-radius", "0px");
+      expect(await band.evaluate((el) => getComputedStyle(el).boxShadow)).toBe("none");
+
+      for (const id of ["synthetic-ALL", "group-row-Working"]) {
+        const row = page.getByTestId(id);
+        await expect(row, id).toHaveCSS("background-color", tone["--panel"]);
+        await expect(row, id).toHaveCSS("border-radius", "12px");
+        const rowShadow = await row.evaluate((el) => getComputedStyle(el).boxShadow);
+        expect(rowShadow, `${id} must be recessed, not raised`).toContain("inset");
+      }
+    });
+  }
+});
+
 test.describe.serial("DR-3 Shifts card-grid", () => {
   test.beforeEach(async ({ page }, testInfo) => {
     testInfo.setTimeout(30_000);

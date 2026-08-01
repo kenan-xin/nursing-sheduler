@@ -772,6 +772,59 @@ test.describe("R2b — v2 visual system on /people", () => {
     });
   }
 
+  // ii7.8.5 — the shared GroupsSection's containing card / header band / nested
+  // well hierarchy, PAINTED. The focused vitest suite pins which recipe role each
+  // node takes; only a real engine can prove the roles resolve to the prototype's
+  // measured values (`ScreenStaff.dc.html`, read in this same Chromium: container
+  // --surface / 1px --line / 16px / --sh-1, band a single --line2 bottom edge, and
+  // every group row --panel / 12px / inset --sh-well).
+  for (const theme of ["light", "dark"] as const) {
+    test(`staff groups render as one L1 card of wells in the ${theme} theme`, async ({ page }) => {
+      await page.addInitScript((t) => {
+        try {
+          window.localStorage.setItem("ns-theme", t);
+        } catch {}
+      }, theme);
+      await gotoPeople(page);
+      await seed(page, {
+        staff: [{ id: "P1", history: [] }],
+        staffGroups: [{ id: "Team", members: ["P1"] }],
+      });
+
+      const tone = await resolveTokens(page, ["--surface", "--panel", "--line", "--line2"]);
+
+      // The containing plane is a real L1 card, not transparent space.
+      const section = page.getByTestId("groups-section");
+      await expect(section).toHaveCSS("background-color", tone["--surface"]);
+      await expect(section).toHaveCSS("border-radius", "16px");
+      await expect(section).toHaveCSS("border-top-color", tone["--line"]);
+      await expect(section).toHaveCSS("border-top-width", "1px");
+      const cardShadow = await section.evaluate((el) => getComputedStyle(el).boxShadow);
+      expect(cardShadow, "the groups card must carry a resting elevation").not.toBe("none");
+      expect(cardShadow, "a resting card is never an inset").not.toContain("inset");
+
+      // The header band is a single bottom edge, so it stays square and flat.
+      const band = page.getByTestId("groups-header");
+      await expect(band).toHaveCSS("border-bottom-width", "1px");
+      await expect(band).toHaveCSS("border-bottom-color", tone["--line2"]);
+      await expect(band).toHaveCSS("border-top-width", "0px");
+      await expect(band).toHaveCSS("border-radius", "0px");
+      expect(await band.evaluate((el) => getComputedStyle(el).boxShadow)).toBe("none");
+
+      // Every row nested in that card is a WELL — recessed tone, control radius,
+      // and an INSET cast. An L1 card here would be the same-tone stack DESIGN.md
+      // §4 rule 5 forbids, and is what this screen shipped before.
+      for (const id of ["synthetic-ALL", "group-row-Team"]) {
+        const row = page.getByTestId(id);
+        await expect(row, id).toHaveCSS("background-color", tone["--panel"]);
+        await expect(row, id).toHaveCSS("border-radius", "12px");
+        const rowShadow = await row.evaluate((el) => getComputedStyle(el).boxShadow);
+        expect(rowShadow, `${id} must be recessed, not raised`).toContain("inset");
+        expect(row, id).not.toHaveCSS("background-color", tone["--surface"]);
+      }
+    });
+  }
+
   test("every table data surface stays square", async ({ page }) => {
     await gotoPeople(page);
     await seed(page, {

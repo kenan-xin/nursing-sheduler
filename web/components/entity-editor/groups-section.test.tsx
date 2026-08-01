@@ -295,6 +295,139 @@ describe("GroupsSection — drag-over is its own state, not selection", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// ii7.8.5 — the prototype's containing card / header band / nested well hierarchy.
+//
+// These pin the SHAPE of the surface tree (which role each node takes, and that
+// the containing card and its band exist at all). The resolved PAINT — real
+// computed background, border, radius, shadow — cannot be measured in jsdom, so it
+// is proven in Chromium by the narrow route assertions in `e2e/people.spec.ts` and
+// `e2e/shift-types.spec.ts`. Neither layer is sufficient alone: this one would pass
+// on a class name that resolved to nothing, and that one cannot run in both configs
+// as cheaply.
+// ---------------------------------------------------------------------------
+
+describe.each([
+  ["Staff config (defaults)", undefined],
+  ["Shift config", shiftConfig],
+])("GroupsSection surface hierarchy — %s", (_name, config) => {
+  function seedTwo() {
+    seed({
+      staff: [
+        { id: "P1", history: [] },
+        { id: "P2", history: [] },
+      ],
+      staffGroups: [
+        { id: "Team", members: ["P1"] },
+        { id: "Squad", members: ["P2"] },
+      ],
+    });
+  }
+
+  it("the section IS the single L1 containing card — not a transparent wrapper", () => {
+    seedTwo();
+    render(<GroupsHarness config={config} />);
+
+    const section = screen.getByTestId("groups-section");
+    // L1: --surface fill, --line hairline, --sh-1, card radius (DESIGN.md §5
+    // Cards; measured on the prototype as rgb(252,254,253) / 1px --line / 16px).
+    expect(section.className).toContain("bg-surface");
+    expect(section.className).toContain("border-line");
+    expect(section.className).toContain("shadow-1");
+    expect(section.className).toContain("rounded-card");
+    // The card itself carries no padding: the band and the body own the insets so
+    // the band's hairline reaches the card edge.
+    expect(section.className).not.toMatch(/(?:^|\s)p-\d/);
+  });
+
+  it("carries a full-bleed header band with a single bottom hairline, and stays square", () => {
+    seedTwo();
+    render(<GroupsHarness config={config} />);
+
+    const header = screen.getByTestId("groups-header");
+    expect(header.className).toContain("border-b");
+    expect(header.className).toContain("border-line2");
+    // DESIGN.md §5: a container whose border is a single edge rather than a box
+    // stays square, and never takes a box border or a well shadow.
+    expect(header.className).not.toMatch(/rounded-(?!none)/);
+    expect(header.className).not.toMatch(/(?:^|\s)shadow-/);
+    expect(header.className).not.toMatch(/(?:^|\s)border(?:$|\s)/);
+
+    // The heading and the add control both live in the band.
+    expect(within(header).getByRole("heading", { level: 2 })).toBeInTheDocument();
+    expect(within(header).getByTestId("add-group-toggle")).toBeInTheDocument();
+  });
+
+  it("nests every group row as a WELL inside that card, never as a second L1 card", () => {
+    seedTwo();
+    render(<GroupsHarness config={config} />);
+
+    for (const id of ["Team", "Squad"]) {
+      const row = screen.getByTestId(`group-row-${id}`);
+      // The prototype measures --panel / 12px / --sh-well on these rows, and
+      // DESIGN.md §4 rule 5 forbids an L1 card inside an L1 card.
+      expect(row.className).toContain("bg-panel");
+      expect(row.className).toContain("shadow-well");
+      expect(row.className).toContain("rounded-control");
+      expect(row.className).not.toContain("bg-surface");
+      expect(row.className).not.toContain("shadow-1");
+      expect(row.className).not.toContain("rounded-card");
+    }
+
+    // The locked auto group sits on the SAME plane as the authorable rows — it is
+    // distinguished by its lock and copy, not by being a different surface.
+    const auto = screen.getByTestId("synthetic-ALL");
+    expect(auto.className).toContain("bg-panel");
+    expect(auto.className).toContain("shadow-well");
+    expect(auto.className).toContain("rounded-control");
+  });
+
+  it("gives BOTH the add and the edit form the active-editor `selected` role", () => {
+    seedTwo();
+    render(<GroupsHarness config={config} />);
+
+    fireEvent.click(screen.getByTestId("add-group-toggle"));
+    const add = screen.getByTestId("add-group-form");
+    expect(add.className).toContain("border-brand");
+    expect(add.className).toContain("shadow-2");
+    // A plain L1 form inside the L1 card would be the same-tone stack §4 rule 5
+    // forbids, with no brand edge to tell it apart.
+    expect(add.className).toContain("bg-surface");
+    expect(add.className).not.toContain("border-line");
+    fireEvent.click(screen.getByTestId("group-cancel-__new__"));
+
+    fireEvent.click(screen.getByTestId("group-edit-Team"));
+    const edit = screen.getByTestId("group-edit-form-Team");
+    expect(edit.className).toContain("border-brand");
+    expect(edit.className).toContain("shadow-2");
+
+    // The add and edit forms are ONE visual state, as they are in the prototype
+    // ("add group" there opens a new row already in the editing state).
+    expect(edit.className).toBe(add.className);
+  });
+
+  it("shows the empty state beside the auto group whenever no CUSTOM group exists", () => {
+    seed({ staff: [{ id: "P1", history: [] }], staffGroups: [] });
+    render(<GroupsHarness config={config} />);
+
+    // Both live routes always publish a synthetic group, so gating the empty
+    // state on `syntheticGroups.length === 0` made every route's authored
+    // `emptyText` unreachable. The prototypes' own `noGroups` counts custom
+    // groups only and renders the empty state next to the auto row.
+    expect(screen.getByTestId("synthetic-ALL")).toBeInTheDocument();
+    const empty = screen.getByTestId("groups-empty");
+    expect(empty).toBeInTheDocument();
+    expect(empty.className).toContain("border-dashed");
+    expect(empty.className).toContain("rounded-control");
+
+    // ...and it goes away as soon as one exists.
+    act(() => {
+      useScenarioStore.getState().mutateScenario({ staffGroups: [{ id: "Team", members: [] }] });
+    });
+    expect(screen.queryByTestId("groups-empty")).not.toBeInTheDocument();
+  });
+});
+
 describe("GroupsSection parameterization — copy + flags", () => {
   it("Staff config shows the member search, MEMBERS pane, and 'N members' count", () => {
     seed({
@@ -332,6 +465,19 @@ describe("GroupsSection parameterization — copy + flags", () => {
     fireEvent.click(screen.getByTestId("add-group-toggle"));
     expect(screen.queryByTestId("transfer-search-__new__")).not.toBeInTheDocument();
     expect(screen.getByText("IN GROUP")).toBeInTheDocument();
+  });
+
+  it("renders the optional header description inside the band, and omits it by default", () => {
+    seed({ staff: [], staffGroups: [] });
+    const { unmount } = render(<GroupsHarness />);
+    // Default: a single-line band, exactly as before this prop existed.
+    expect(within(screen.getByTestId("groups-header")).queryByText(/Bundle nurses/)).toBeNull();
+    unmount();
+
+    render(<GroupsHarness config={{ description: "Bundle nurses into a team." }} />);
+    expect(
+      within(screen.getByTestId("groups-header")).getByText("Bundle nurses into a team."),
+    ).toBeInTheDocument();
   });
 
   it("renders the reserved auto-group locked with an accessible note", () => {
