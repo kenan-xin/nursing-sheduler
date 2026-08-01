@@ -711,6 +711,25 @@ async function gotoPeople(page: Page) {
   await expect(page.getByTestId("people-add")).toBeVisible();
 }
 
+/**
+ * The PAINTING layers of a computed `box-shadow`, split on the commas that are
+ * not inside `rgba(...)`.
+ *
+ * Tailwind composes every shadow utility as
+ * `var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)`, so an
+ * element with no ring still computes two `rgba(0, 0, 0, 0) 0px 0px 0px 0px`
+ * placeholders in front of the real layer. Those are fully transparent and
+ * zero-sized — they paint nothing — so a direction-of-light check must skip
+ * them. Dropping them is not a weakened assertion: any layer with real alpha
+ * still has to be inset, which `drop-target`'s outer `--sh-2` is not.
+ */
+function visibleShadowLayers(shadow: string): string[] {
+  return shadow
+    .split(/,(?![^(]*\))/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0 && !/rgba\(\s*\d+,\s*\d+,\s*\d+,\s*0\s*\)/.test(s));
+}
+
 test.describe("R2b — v2 visual system on /people", () => {
   test.beforeEach(async ({ page }, testInfo) => {
     testInfo.setTimeout(30_000);
@@ -788,10 +807,19 @@ test.describe("R2b — v2 visual system on /people", () => {
       await gotoPeople(page);
       await seed(page, {
         staff: [{ id: "P1", history: [] }],
-        staffGroups: [{ id: "Team", members: ["P1"] }],
+        staffGroups: [
+          { id: "Team", members: ["P1"] },
+          { id: "Squad", members: [] },
+        ],
       });
 
-      const tone = await resolveTokens(page, ["--surface", "--panel", "--line", "--line2"]);
+      const tone = await resolveTokens(page, [
+        "--surface",
+        "--panel",
+        "--line",
+        "--line2",
+        "--brand",
+      ]);
 
       // The containing plane is a real L1 card, not transparent space.
       const section = page.getByTestId("groups-section");
@@ -820,8 +848,51 @@ test.describe("R2b — v2 visual system on /people", () => {
         await expect(row, id).toHaveCSS("border-radius", "12px");
         const rowShadow = await row.evaluate((el) => getComputedStyle(el).boxShadow);
         expect(rowShadow, `${id} must be recessed, not raised`).toContain("inset");
-        expect(row, id).not.toHaveCSS("background-color", tone["--surface"]);
+        // EVERY layer must be inset — not just one of them. A row that kept an
+        // outer cast alongside the inset one would still pass a bare
+        // `toContain("inset")`, and that is precisely the direction-of-light
+        // inversion this fixup exists to remove.
+        const rowLayers = visibleShadowLayers(rowShadow);
+        expect(rowLayers.length, `${id} must paint a shadow at all`).toBeGreaterThan(0);
+        expect(
+          rowLayers.every((l) => l.includes("inset")),
+          `${id} layers`,
+        ).toBe(true);
+        // AWAITED. Unawaited, this matcher outlives the test and races page
+        // teardown, which is exactly how it failed the one-shot full E2E gate.
+        await expect(row, id).not.toHaveCSS("background-color", tone["--surface"]);
+        // The canonical --line2 hairline, through the shared recipe.
+        await expect(row, id).toHaveCSS("border-top-width", "1px");
+        await expect(row, id).toHaveCSS("border-top-style", "solid");
+        await expect(row, id).toHaveCSS("border-top-color", tone["--line2"]);
       }
+
+      // The canonical band is two lines: heading + a route-voiced description.
+      await expect(
+        page
+          .getByTestId("groups-header")
+          .getByText("Bundle nurses so rules and constraints can target a whole team at once."),
+      ).toBeVisible();
+
+      // A drop candidate keeps the well's recessed depth and swaps only its
+      // edge — it is never lifted onto an outer cast. Drag a real row onto a
+      // DIFFERENT real row, so source and target states stay distinct.
+      await page.getByTestId("group-row-Team").dispatchEvent("dragstart");
+      const target = page.getByTestId("group-row-Squad");
+      await target.dispatchEvent("dragover");
+      await expect(target).toHaveCSS("border-top-style", "dashed");
+      await expect(target).toHaveCSS("border-top-color", tone["--brand"]);
+      const dropLayers = visibleShadowLayers(
+        await target.evaluate((el) => getComputedStyle(el).boxShadow),
+      );
+      expect(dropLayers.length, "a drop candidate must still carry its well cast").toBeGreaterThan(
+        0,
+      );
+      expect(
+        dropLayers.every((l) => l.includes("inset")),
+        "a drop candidate must stay recessed",
+      ).toBe(true);
+      await target.dispatchEvent("dragend");
     });
   }
 

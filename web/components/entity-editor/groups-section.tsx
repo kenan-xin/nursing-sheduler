@@ -414,6 +414,7 @@ function AutoGroupRow({
     <Surface
       level="well"
       geometry="control"
+      edge="hairline"
       data-testid={`synthetic-${id}`}
       title={note}
       className="flex flex-col gap-1.5 px-4.5 py-4"
@@ -534,15 +535,26 @@ function GroupRow<TItem extends EditorItemBase>({
         // the L1 containing card that would stack two surfaces of the same tone
         // (DESIGN.md §4 rule 5).
         //
-        // A drop candidate takes its OWN role. It is not `selected`: the row
-        // under the pointer is neither the current selection nor the active
-        // editor, and reusing that role would make the two indistinguishable to
-        // any later semantic check. The grab/drag affordances come from the same
-        // recipe because `cursor-*` and `opacity-*` are not layout utilities and
-        // so cannot be authored here.
+        // A drop candidate stays the SAME well and swaps only its edge, so the
+        // recessed direction of light survives the drag (DESIGN.md §4 rule 1 —
+        // a well is never lifted on an outer cast). It deliberately does not
+        // take the `drop-target` ROLE: that role restates `--panel-alt` and an
+        // outer `--sh-2`, which is correct for the card editor's L1 drop zone
+        // and would invert this one. Dashed rather than solid because a solid
+        // brand edge is the selection / open-editor language, and a row under
+        // the pointer is neither.
+        //
+        // Exactly one of `edge`/`drop` is ever passed, so the resulting border
+        // never depends on tailwind-merge resolving two competing edges.
+        //
+        // The grab/drag affordances come from the same recipe because
+        // `cursor-*` and `opacity-*` are not layout utilities and so cannot be
+        // authored here.
         surfaceVariants({
-          role: isOver ? "drop-target" : "well",
+          role: "well",
           geometry: "control",
+          edge: isOver ? undefined : "hairline",
+          drop: isOver ? "candidate" : undefined,
           interaction: isDragging ? "dragging" : canDrag ? "grabbable" : undefined,
         }),
       )}

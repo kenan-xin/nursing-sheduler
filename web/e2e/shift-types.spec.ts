@@ -74,6 +74,19 @@ async function seed(page: Page, patch: Record<string, unknown>) {
   }, patch);
 }
 
+/**
+ * The PAINTING layers of a computed `box-shadow`. Tailwind prefixes every shadow
+ * with two fully-transparent, zero-sized ring placeholders, which paint nothing
+ * and must not be judged for direction of light. Any layer with real alpha still
+ * has to be inset.
+ */
+function visibleShadowLayers(shadow: string): string[] {
+  return shadow
+    .split(/,(?![^(]*\))/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0 && !/rgba\(\s*\d+,\s*\d+,\s*\d+,\s*0\s*\)/.test(s));
+}
+
 /** Resolve runtime tokens the way the app resolves them — through the cascade. */
 async function resolveTokens(page: Page, tokens: string[]): Promise<Record<string, string>> {
   return page.evaluate((list) => {
@@ -113,10 +126,19 @@ test.describe("F2 — shift groups surface hierarchy", () => {
       await expect(page.getByTestId("add-shift-toggle")).toBeVisible();
       await seed(page, {
         shifts: [{ id: "Day" }],
-        shiftGroups: [{ id: "Working", members: ["Day"] }],
+        shiftGroups: [
+          { id: "Working", members: ["Day"] },
+          { id: "Nights", members: [] },
+        ],
       });
 
-      const tone = await resolveTokens(page, ["--surface", "--panel", "--line", "--line2"]);
+      const tone = await resolveTokens(page, [
+        "--surface",
+        "--panel",
+        "--line",
+        "--line2",
+        "--brand",
+      ]);
 
       const section = page.getByTestId("groups-section");
       await expect(section).toHaveCSS("background-color", tone["--surface"]);
@@ -138,7 +160,41 @@ test.describe("F2 — shift groups surface hierarchy", () => {
         await expect(row, id).toHaveCSS("border-radius", "12px");
         const rowShadow = await row.evaluate((el) => getComputedStyle(el).boxShadow);
         expect(rowShadow, `${id} must be recessed, not raised`).toContain("inset");
+        const rowLayers = visibleShadowLayers(rowShadow);
+        expect(rowLayers.length, `${id} must paint a shadow at all`).toBeGreaterThan(0);
+        expect(
+          rowLayers.every((l) => l.includes("inset")),
+          `${id} layers`,
+        ).toBe(true);
+        await expect(row, id).toHaveCSS("border-top-width", "1px");
+        await expect(row, id).toHaveCSS("border-top-style", "solid");
+        await expect(row, id).toHaveCSS("border-top-color", tone["--line2"]);
       }
+
+      await expect(
+        page
+          .getByTestId("groups-header")
+          .getByText(
+            "Bundle shifts so rules can target them together — e.g. “count all working shifts”.",
+          ),
+      ).toBeVisible();
+
+      await page.getByTestId("group-row-Working").dispatchEvent("dragstart");
+      const target = page.getByTestId("group-row-Nights");
+      await target.dispatchEvent("dragover");
+      await expect(target).toHaveCSS("border-top-style", "dashed");
+      await expect(target).toHaveCSS("border-top-color", tone["--brand"]);
+      const dropLayers = visibleShadowLayers(
+        await target.evaluate((el) => getComputedStyle(el).boxShadow),
+      );
+      expect(dropLayers.length, "a drop candidate must still carry its well cast").toBeGreaterThan(
+        0,
+      );
+      expect(
+        dropLayers.every((l) => l.includes("inset")),
+        "a drop candidate must stay recessed",
+      ).toBe(true);
+      await target.dispatchEvent("dragend");
     });
   }
 });

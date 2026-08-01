@@ -262,12 +262,21 @@ describe("GroupsSection — drag-over is its own state, not selection", () => {
     fireEvent.dragStart(screen.getByTestId("group-row-A"));
     fireEvent.dragOver(target);
 
-    // The drop candidate takes the dashed brand edge over the hover tone...
+    // The drop candidate takes the dashed brand edge...
     expect(target.className).toContain("border-dashed");
     expect(target.className).toContain("border-brand");
-    expect(target.className).toContain("bg-panel-alt");
+    // ...while STAYING the same recessed well. DESIGN.md §4 rule 1 fixes the
+    // direction of light, so a row under the pointer is never lifted onto an
+    // outer cast. It keeps `--panel` + the inset well shadow and takes no
+    // `--sh-2`, which is what the `drop-target` ROLE would have imposed.
+    expect(target.className).toContain("bg-panel");
+    expect(target.className).toContain("shadow-well");
+    expect(target.className).not.toContain("shadow-2");
+    expect(target.className).not.toContain("bg-panel-alt");
     // ...and specifically NOT the selection language reserved for "current".
     expect(target.className).not.toContain("bg-brandtint");
+    // Exactly one edge is authored, so the border never depends on merge order.
+    expect(target.className).not.toContain("border-line2");
     // The dragged source row is dimmed by the same recipe, not by a local class.
     expect(screen.getByTestId("group-row-A").className).toContain("opacity-50");
   });
@@ -372,6 +381,10 @@ describe.each([
       expect(row.className).not.toContain("bg-surface");
       expect(row.className).not.toContain("shadow-1");
       expect(row.className).not.toContain("rounded-card");
+      // The canonical `border:1px solid var(--line2)` both prototypes author on
+      // these rows, carried by the shared recipe's `edge` axis — not by a
+      // caller-owned border utility.
+      expect(row.className).toContain("border-line2");
     }
 
     // The locked auto group sits on the SAME plane as the authorable rows — it is
@@ -380,6 +393,10 @@ describe.each([
     expect(auto.className).toContain("bg-panel");
     expect(auto.className).toContain("shadow-well");
     expect(auto.className).toContain("rounded-control");
+    expect(auto.className).toContain("border-line2");
+    // Through the shared authority, so the hairline is visible to the recipe
+    // rather than hidden in a className string.
+    expect(auto.getAttribute("data-edge")).toBe("hairline");
   });
 
   it("gives BOTH the add and the edit form the active-editor `selected` role", () => {

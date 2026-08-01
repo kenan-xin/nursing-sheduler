@@ -97,6 +97,9 @@ type Sel =
  *  "N members" count — all defaults; heading/empty carry the ward-staff voice). */
 const STAFF_GROUPS_CONFIG: GroupsSectionConfig = {
   heading: "Staff groups",
+  // Verbatim from the canonical screen (ScreenStaff.dc.html:119) — the second
+  // line of the header band, not new copy.
+  description: "Bundle nurses so rules and constraints can target a whole team at once.",
   addLabel: "Group",
   emptyText:
     "No staff groups yet — bundle nurses into a team (like Seniors or Team A) so a rule can target them all at once.",

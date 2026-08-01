@@ -86,6 +86,8 @@ type CurrentState = () => ScenarioUiState;
 
 const SHIFT_GROUPS_CONFIG: GroupsSectionConfig = {
   heading: "Shift groups",
+  // Verbatim from the canonical screen (ScreenShifts.dc.html:159).
+  description: "Bundle shifts so rules can target them together — e.g. “count all working shifts”.",
   addLabel: "Group",
   emptyText:
     "No custom shift groups yet — bundle shift types so a rule can count or target them together.",

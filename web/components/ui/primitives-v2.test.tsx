@@ -14,7 +14,7 @@ import { Switch } from "./switch";
 import { Label } from "./label";
 import { Separator } from "./separator";
 import { InfoTip } from "./info-tip";
-import { Surface, surfaceVariants } from "./surface";
+import { Surface, surfaceVariants, type SurfaceRole } from "./surface";
 import { ToggleGroup, ToggleGroupItem } from "./toggle-group";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "./dialog";
 import {
@@ -469,6 +469,53 @@ describe("Surface / surfaceVariants — the single visual authority", () => {
     const dragging = surfaceVariants({ role: "surface", interaction: "dragging" });
     expect(dragging).toContain("cursor-grabbing");
     expect(dragging).toContain("opacity-50");
+  });
+
+  // ii7.8.5.1 — the two ADDITIVE axes that let a recessed row carry the
+  // canonical hairline and a drop edge without inheriting a card's elevation.
+  it("adds the canonical --line2 hairline through `edge`, and only on request", () => {
+    expect(surfaceVariants({ role: "well", geometry: "control", edge: "hairline" })).toContain(
+      "border-line2",
+    );
+    // Opt-in: the bare role is byte-identical to what it produced before the
+    // axis existed, so no existing `well` consumer moves.
+    expect(surfaceVariants({ role: "well", geometry: "control" })).not.toContain("border");
+  });
+
+  it("gives a drop candidate an EDGE, never an elevation, so each role keeps its own light", () => {
+    const wellDrop = surfaceVariants({ role: "well", geometry: "control", drop: "candidate" });
+    expect(wellDrop).toContain("border-dashed");
+    expect(wellDrop).toContain("border-brand");
+    // The whole point: a recessed row stays recessed while it is a drop target.
+    expect(wellDrop).toContain("shadow-well");
+    expect(wellDrop).not.toContain("shadow-2");
+    expect(wellDrop).not.toContain("bg-panel-alt");
+    // A card-tier drop zone composed the same way keeps ITS outer elevation.
+    const cardDrop = surfaceVariants({ role: "surface", geometry: "card", drop: "candidate" });
+    expect(cardDrop).toContain("shadow-1");
+    expect(cardDrop).not.toContain("shadow-well");
+    // Dashed, because a solid brand edge is the selection language (§6).
+    expect(wellDrop).not.toContain("bg-brandtint");
+  });
+
+  it("leaves every pre-existing role byte-identical — the new axes are additive", () => {
+    // Frozen expectations captured from the recipe BEFORE the two axes landed.
+    // If a future edit reaches into a role to add an edge, this fails.
+    const FROZEN: Record<SurfaceRole, string> = {
+      page: "bg-bg",
+      surface: "border border-line bg-surface shadow-1",
+      selected: "border border-brand bg-surface shadow-2",
+      "drop-target": "border border-dashed border-brand bg-panel-alt shadow-2",
+      raised: "border border-line bg-surface2 shadow-3",
+      drawer: "border-r border-line bg-sidebar shadow-side",
+      well: "bg-panel shadow-well",
+      band: "bg-panel",
+      zebra: "bg-panel-alt",
+      sticky: "border-b border-line bg-surface shadow-1",
+    };
+    for (const role of Object.keys(FROZEN) as SurfaceRole[]) {
+      expect(surfaceVariants({ role }), role).toBe(FROZEN[role]);
+    }
   });
 
   it("keeps the direction of light fixed — wells inset, raised surfaces outer", () => {

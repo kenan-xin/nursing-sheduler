@@ -72,6 +72,40 @@ const surfaceVariants = cva("", {
       square: "rounded-none",
     },
     /**
+     * An optional canonical hairline, composable with any role.
+     *
+     * Both prototypes author `border:1px solid var(--line2)` on the recessed
+     * group rows inside the Staff/Shift groups card, while this app's other
+     * wells are deliberately borderless — R2a's `date-id-explainer` says so in
+     * as many words, and the segmented ToggleGroup track would grow an edge it
+     * never had. Those are two genuinely different surfaces, so the hairline is
+     * an ADDITIVE axis rather than a change to the `well` role itself: no
+     * existing consumer passes `edge`, so no existing consumer moves.
+     */
+    edge: {
+      hairline: "border border-line2",
+    },
+    /**
+     * Transient drag-and-drop emphasis, composable with any role so the surface
+     * keeps its OWN tone and its own direction of light.
+     *
+     * The `drop-target` ROLE restates `--panel-alt` plus an outer `--sh-2`.
+     * That is right for an L1 card (the card editor's drop zone) and wrong for
+     * a well: DESIGN.md §4 rule 1 fixes the direction of light, so lifting a
+     * recessed row on an outer cast inverts it. This axis changes only the
+     * EDGE, so a well stays inset and a card stays raised.
+     *
+     * It is deliberately DASHED. A solid brand edge is the selection /
+     * active-editor language (§6 reserves `--brandtint` + `--brand` for
+     * selection), and a row under the pointer is neither the current selection
+     * nor the open editor. The canonical sources agree on everything else: the
+     * prototypes' own drop candidate keeps `background:var(--panel)` and swaps
+     * only the border to `var(--brand)`.
+     */
+    drop: {
+      candidate: "border border-dashed border-brand",
+    },
+    /**
      * Entrance/exit treatment for surfaces that appear and disappear. This lives
      * in the recipe rather than at the call site because a consumer's
      * `className` is layout-only: animation and transition utilities are
@@ -126,6 +160,7 @@ const surfaceVariants = cva("", {
 
 export type SurfaceRole = NonNullable<VariantProps<typeof surfaceVariants>["role"]>;
 export type SurfaceGeometry = NonNullable<VariantProps<typeof surfaceVariants>["geometry"]>;
+export type SurfaceEdge = NonNullable<VariantProps<typeof surfaceVariants>["edge"]>;
 
 /**
  * The legal level/geometry pairs for an ordinary container. TypeScript enforces
@@ -144,7 +179,14 @@ export type SurfaceVisualProps =
   | { level: "raised"; geometry: "card" }
   | { level: "well"; geometry: "control" | "chip" | "square" };
 
-export type SurfaceProps = SurfaceVisualProps & React.HTMLAttributes<HTMLDivElement>;
+export type SurfaceProps = SurfaceVisualProps & {
+  /**
+   * Optional canonical `--line2` hairline (see `surfaceVariants.edge`). Purely
+   * additive: omitting it reproduces the previous output exactly, so this
+   * widens the accepted props without changing any existing call site.
+   */
+  edge?: SurfaceEdge;
+} & React.HTMLAttributes<HTMLDivElement>;
 
 /**
  * The ordinary-container adapter over the recipe. `level` maps onto the
@@ -153,7 +195,7 @@ export type SurfaceProps = SurfaceVisualProps & React.HTMLAttributes<HTMLDivElem
  * or a ref.
  */
 export const Surface = React.forwardRef<HTMLDivElement, SurfaceProps>(function Surface(
-  { level, geometry, className, ...props },
+  { level, geometry, edge, className, ...props },
   ref,
 ) {
   return (
@@ -162,7 +204,8 @@ export const Surface = React.forwardRef<HTMLDivElement, SurfaceProps>(function S
       data-slot="surface"
       data-level={level}
       data-geometry={geometry}
-      className={cn(surfaceVariants({ role: level, geometry }), className)}
+      data-edge={edge}
+      className={cn(surfaceVariants({ role: level, geometry, edge }), className)}
       {...props}
     />
   );
