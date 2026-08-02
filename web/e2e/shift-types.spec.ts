@@ -492,26 +492,16 @@ test.describe("DR-5 shift card — the overnight clock row wraps instead of over
 // radius and control tokens measured RAW, and the elevation direction observed.
 // ---------------------------------------------------------------------------
 
-/** Resolve runtime tokens the way the app resolves them — through the cascade. */
-async function resolveTokens(page: Page, tokens: string[]): Promise<Record<string, string>> {
-  return page.evaluate((list) => {
-    const out: Record<string, string> = {};
-    for (const token of list) {
-      const probe = document.createElement("div");
-      probe.style.backgroundColor = `var(${token})`;
-      document.body.appendChild(probe);
-      out[token] = getComputedStyle(probe).backgroundColor;
-      probe.remove();
-    }
-    return out;
-  }, tokens);
-}
+// `resolveTokens` is F2's, declared above with its own describe block — this
+// suite consumes it rather than carrying a second byte-identical copy. Both
+// sides added one independently during ii7.8.5, which merged textually clean and
+// then failed `tsc` with TS2393; see `fix-f2-merge-duplicate-helper`.
 
 /**
- * The same idea for elevation. Comparing against the RESOLVED token is what makes
- * the claim theme-aware and provenance-bearing: an eyeballed "has some shadow"
- * passes on a hand-authored cast, and a hardcoded rgba string passes in exactly
- * one theme.
+ * Elevation, resolved the same way. Comparing against the RESOLVED token is what
+ * makes the claim theme-aware and provenance-bearing: an eyeballed "has some
+ * shadow" passes on a hand-authored cast, and a hardcoded rgba string passes in
+ * exactly one theme.
  */
 async function resolveShadows(page: Page, tokens: string[]): Promise<Record<string, string>> {
   return page.evaluate((list) => {
@@ -534,6 +524,12 @@ async function resolveShadows(page: Page, tokens: string[]): Promise<Record<stri
  * no reason to carry. Dropping the layers that PAINT NOTHING is not a loosening:
  * the remaining layers still have to be byte-identical to the token, so a
  * hand-authored cast — or a genuine extra visible layer — still fails.
+ *
+ * NOT a duplicate of F2's `visibleShadowLayers` above, despite the family
+ * resemblance: that one returns the painting layers as an ARRAY so F2 can assert
+ * each is `inset` (direction of light); this returns a normalized STRING so R2c
+ * can assert byte equality against a resolved `--sh-*` token (provenance).
+ * Collapsing them would force one suite's oracle onto the other's question.
  */
 const paintedLayers = (shadow: string) =>
   shadow
