@@ -543,6 +543,43 @@ describe("Surface / surfaceVariants — the single visual authority", () => {
     expect(<Surface level="raised" geometry="card" emphasis="drop-candidate" />).toBeTruthy();
   });
 
+  // ii7.8.5.5 — RUNTIME discrimination. These record what CVA actually does, and
+  // are the reason the static analyzer has to fail closed on the same shapes.
+  it("drops an unknown emphasis value SILENTLY, which is why unknown must fail closed", () => {
+    const bare = surfaceVariants({ role: "well", geometry: "control" });
+
+    for (const value of ["hairline", "drop-candidate"] as const) {
+      const out = surfaceVariants({ role: "well", geometry: "control", emphasis: value });
+      expect(out, value).toContain("border");
+      expect(out, value).not.toBe(bare);
+    }
+
+    // An unrecognised value is not an error and not a fallback — the edge simply
+    // never renders, so a role-only check would pass a row with no border.
+    const bogus = surfaceVariants({
+      role: "well",
+      geometry: "control",
+      emphasis: "bogus",
+    } as unknown as Parameters<typeof surfaceVariants>[0]);
+    expect(bogus).toBe(bare);
+    expect(bogus).not.toContain("border");
+  });
+
+  it("consumes INHERITED `__proto__` options, which a syntactic walk cannot see", () => {
+    // The exact shape the analyzer must refuse: `Object.keys` is empty, so a
+    // property walk finds nothing, yet CVA resolves both fields through the
+    // prototype chain and emits the forbidden page tone plus a row edge.
+    const poisoned = {
+      __proto__: { role: "page", emphasis: "hairline" },
+    } as unknown as Parameters<typeof surfaceVariants>[0];
+
+    expect(Object.keys(poisoned as object)).toEqual([]);
+
+    const out = surfaceVariants(poisoned);
+    expect(out).toContain("bg-bg");
+    expect(out).toContain("border-line2");
+  });
+
   it("leaves every pre-existing role byte-identical — the new axes are additive", () => {
     // Frozen expectations captured from the recipe BEFORE the two axes landed.
     // If a future edit reaches into a role to add an edge, this fails.
