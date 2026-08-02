@@ -1326,45 +1326,144 @@ export function analyzeProgram(program: ts.Program, rootFilter?: (f: string) => 
     markOpaque(local, node, "unresolved " + ts.SyntaxKind[node.kind]);
   };
 
+  /**
+   * What an object literal effectively contributes for a governed prop, folded
+   * in real JavaScript SOURCE ORDER: a later own property or spread overwrites
+   * an earlier one, so only the winner is ever analyzed.
+   *
+   * Without this the analyzer both over- and under-reported. It reported an
+   * OVERWRITTEN `className` from an earlier spread (a false positive on legal
+   * code), and it missed a contribution that arrived through a nested spread or
+   * a shorthand — which let `{ ...{ className: "bg-panel" } }` and
+   * `{ className }` ride into a `<Surface>` spread with an all-clean report.
+   */
+  type Contribution =
+    | { kind: "absent" }
+    | { kind: "value"; node: ts.Node; file: ts.SourceFile }
+    | { kind: "unprovable"; node: ts.Node; reason: string };
+
+  const NO_CONTRIBUTION: Contribution = { kind: "absent" };
+
+  const effectiveContribution = (
+    literal: ts.ObjectLiteralExpression,
+    matches: (key: string) => boolean,
+    label: string,
+    seen: Set<ts.ObjectLiteralExpression> = new Set(),
+  ): Contribution => {
+    if (seen.has(literal)) {
+      return { kind: "unprovable", node: literal, reason: "cyclic object literal" };
+    }
+    seen.add(literal);
+
+    let effective: Contribution = NO_CONTRIBUTION;
+    for (const property of literal.properties) {
+      if (
+        ts.isGetAccessorDeclaration(property) ||
+        ts.isSetAccessorDeclaration(property) ||
+        ts.isMethodDeclaration(property)
+      ) {
+        const key = staticKey(property.name);
+        // A dynamic key may BE the governed prop; an accessor can return a
+        // different value on every read.
+        if (key === null || matches(key)) {
+          effective = {
+            kind: "unprovable",
+            node: property,
+            reason: "accessor or method that may contribute " + label,
+          };
+        }
+        continue;
+      }
+      if (ts.isPropertyAssignment(property)) {
+        const key = staticKey(property.name);
+        if (key === null) {
+          effective = {
+            kind: "unprovable",
+            node: property.name,
+            reason: "dynamic computed key that may be " + label,
+          };
+        } else if (key === "__proto__") {
+          effective = {
+            kind: "unprovable",
+            node: property,
+            reason: "`__proto__` makes the observable keys unprovable",
+          };
+        } else if (matches(key)) {
+          effective = {
+            kind: "value",
+            node: property.initializer,
+            file: property.getSourceFile(),
+          };
+        }
+        continue;
+      }
+      if (ts.isShorthandPropertyAssignment(property)) {
+        const key = property.name.text;
+        if (key === "__proto__") {
+          effective = {
+            kind: "unprovable",
+            node: property,
+            reason: "`__proto__` makes the observable keys unprovable",
+          };
+          continue;
+        }
+        if (!matches(key)) continue;
+        const valueSymbol = canonical(checker.getShorthandAssignmentValueSymbol(property));
+        const declaration = valueSymbol?.valueDeclaration;
+        effective =
+          declaration &&
+          ts.isVariableDeclaration(declaration) &&
+          isConstBinding(declaration) &&
+          declaration.initializer
+            ? {
+                kind: "value",
+                node: declaration.initializer,
+                file: declaration.getSourceFile(),
+              }
+            : {
+                kind: "unprovable",
+                node: property,
+                reason: "shorthand " + label + " whose value is not a proven constant",
+              };
+        continue;
+      }
+      if (ts.isSpreadAssignment(property)) {
+        const nested = resolveOptionsLiteral(property.expression);
+        if (!nested) {
+          effective = {
+            kind: "unprovable",
+            node: property,
+            reason: "spread that may carry " + label,
+          };
+          continue;
+        }
+        const inner = effectiveContribution(nested, matches, label, seen);
+        // A spread contributes only if it actually carries the prop; otherwise
+        // an earlier own value survives it, exactly as at runtime.
+        if (inner.kind !== "absent") effective = inner;
+        continue;
+      }
+      effective = { kind: "unprovable", node: property, reason: "unmodelled object member" };
+    }
+    return effective;
+  };
+
+  /** `class` and `className` are the two spellings the recipe forwards. */
+  const isClassKey = (key: string) => key === "className" || key === "class";
+
   const collectRecipeOptions = (ctx: Ctx, rawNode: ts.Node): void => {
     // `(o)`, `o as const` and `o!` do not change the value; unwrap before
     // classifying, or an ordinary legal alias reads as an unprovable argument.
     const node = ts.isExpression(rawNode) ? transparent(rawNode) : rawNode;
     if (ts.isObjectLiteralExpression(node)) {
-      for (const property of node.properties) {
-        if (ts.isGetAccessorDeclaration(property) || ts.isSetAccessorDeclaration(property)) {
-          markOpaque(ctx, property, "accessor property in recipe options");
-          continue;
-        }
-        if (ts.isPropertyAssignment(property)) {
-          const key = property.name;
-          let named: string | null = null;
-          if (ts.isIdentifier(key) || ts.isStringLiteral(key)) named = key.text;
-          else if (ts.isComputedPropertyName(key) && ts.isStringLiteral(key.expression)) {
-            named = key.expression.text;
-          } else {
-            markOpaque(ctx, key, "dynamic computed key in recipe options");
-            continue;
-          }
-          if (named === "className" || named === "class") collect(ctx, property.initializer);
-        } else if (ts.isShorthandPropertyAssignment(property)) {
-          if (property.name.text === "className" || property.name.text === "class") {
-            const valueSymbol = canonical(checker.getShorthandAssignmentValueSymbol(property));
-            const declaration = valueSymbol?.valueDeclaration;
-            if (
-              declaration &&
-              ts.isVariableDeclaration(declaration) &&
-              isConstBinding(declaration) &&
-              declaration.initializer
-            ) {
-              collect({ ...ctx, file: declaration.getSourceFile() }, declaration.initializer);
-            } else {
-              markOpaque(ctx, property, "shorthand className whose value is not a proven constant");
-            }
-          }
-        } else if (ts.isSpreadAssignment(property)) {
-          collectRecipeOptions(ctx, property.expression);
-        }
+      // Fold to the EFFECTIVE class value in source order and analyze only that.
+      // Recursing into every contribution used to report a `className` that a
+      // later own property provably overwrites — a false positive on legal code.
+      const effective = effectiveContribution(node, isClassKey, "className");
+      if (effective.kind === "value") {
+        collect({ ...ctx, file: effective.file }, effective.node);
+      } else if (effective.kind === "unprovable") {
+        markOpaque(ctx, effective.node, effective.reason);
       }
       return;
     }
@@ -1435,74 +1534,52 @@ export function analyzeProgram(program: ts.Program, rootFilter?: (f: string) => 
     site: string,
     propName: string,
   ) => {
+    // JSX props fold in source order too: a later spread overwrites an earlier
+    // explicit attribute and vice versa, so only the WINNING contribution is
+    // analyzed. A spread's contribution is resolved recursively, which is what
+    // closes the nested-spread and shorthand smuggling paths.
+    const matches = (key: string) => key === propName;
+    let effective: Contribution = NO_CONTRIBUTION;
+
     for (const attribute of attributes.properties) {
       if (ts.isJsxAttribute(attribute)) {
         if (attribute.name.getText(file) !== propName) continue;
-        if (attribute.initializer) inspect(file, attribute.initializer, site);
+        // A bare attribute is exactly `={true}`: it overwrites whatever came
+        // before it and contributes no classes of its own, so the effective
+        // value is known and there is nothing to inspect.
+        effective = attribute.initializer
+          ? { kind: "value", node: attribute.initializer, file }
+          : NO_CONTRIBUTION;
         continue;
       }
+
       const expression = attribute.expression;
-      if (expression && ts.isObjectLiteralExpression(expression)) {
-        for (const property of expression.properties) {
-          if (ts.isPropertyAssignment(property)) {
-            const key = property.name;
-            let named: string | null = null;
-            if (ts.isIdentifier(key) || ts.isStringLiteral(key)) named = key.text;
-            else if (ts.isComputedPropertyName(key) && ts.isStringLiteral(key.expression)) {
-              named = key.expression.text; // a STATIC computed key is just a key
-            } else {
-              sites += 1;
-              opaque.push({
-                file: rel(file),
-                line: lineOf(file, key),
-                site,
-                expression: key.getText(file).slice(0, 80),
-                reason: "dynamic computed key in a JSX spread",
-              });
-              continue;
-            }
-            if (named === propName) inspect(file, property.initializer, site);
-          } else if (ts.isShorthandPropertyAssignment(property)) {
-            if (property.name.text === propName) inspect(file, property.name, site);
-          } else {
-            sites += 1;
-            opaque.push({
-              file: rel(file),
-              line: lineOf(file, property),
-              site,
-              expression: property.getText(file).slice(0, 80),
-              reason: "nested spread in a JSX attribute object",
-            });
-          }
-        }
+      // A rest binding that provably excludes the prop contributes nothing.
+      if (expression && ts.isIdentifier(expression) && restExcludes(expression, propName)) continue;
+
+      const resolved = expression ? resolveOptionsLiteral(expression) : null;
+      if (!resolved) {
+        effective = {
+          kind: "unprovable",
+          node: attribute,
+          reason: "JSX spread that may carry " + propName,
+        };
         continue;
       }
-      if (expression && ts.isIdentifier(expression) && restExcludes(expression, propName)) continue;
-      // A spread of a provably immutable object is readable: inspect whatever it
-      // contributes to this prop and move on. Without this, the ordinary legal
-      // `const props = { … } as const; <Surface {...props} />` was reported
-      // opaque even though every key is statically known.
-      if (expression) {
-        const resolved = resolveOptionsLiteral(expression);
-        if (resolved) {
-          const carried = readOption(resolved, propName);
-          if (carried.present) {
-            for (const property of resolved.properties) {
-              if (ts.isPropertyAssignment(property) && staticKey(property.name) === propName) {
-                inspect(resolved.getSourceFile(), property.initializer, site);
-              }
-            }
-          }
-          continue;
-        }
-      }
+      const inner = effectiveContribution(resolved, matches, propName);
+      if (inner.kind !== "absent") effective = inner;
+    }
+
+    if (effective.kind === "value") {
+      inspect(effective.file, effective.node, site);
+    } else if (effective.kind === "unprovable") {
       sites += 1;
       opaque.push({
         file: rel(file),
-        line: lineOf(file, attribute),
+        line: lineOf(effective.node.getSourceFile(), effective.node),
         site,
-        expression: attribute.getText(file).slice(0, 80),
-        reason: "JSX spread that may carry " + propName,
+        expression: effective.node.getText(effective.node.getSourceFile()).slice(0, 80),
+        reason: effective.reason,
       });
     }
   };
@@ -2365,6 +2442,135 @@ describe("adversarial fixtures — (role, emphasis) tuple legality", () => {
     });
     fullyClean(r, "legal alias family");
     expect(r.tuples.checked).toBe(3);
+  });
+
+  // --- ii7.8.5.6: effective-value folding, both directions -----------------
+
+  it("catches a className smuggled through a NESTED spread in a JSX spread", () => {
+    const r = analyzeFixture({
+      "components/probe.tsx":
+        head +
+        `const visual = { className: "bg-panel" } as const;
+         const props = { level: "well", geometry: "control", ...visual } as const;
+         export const A = () => <Surface {...props} />;`,
+    });
+    expect(r.violations.map((v) => v.token)).toContain("bg-panel");
+  });
+
+  it("catches a className smuggled through a SHORTHAND in a JSX spread", () => {
+    const r = analyzeFixture({
+      "components/probe.tsx":
+        head +
+        `const className = "bg-panel";
+         const props = { level: "well", geometry: "control", className } as const;
+         export const A = () => <Surface {...props} />;`,
+    });
+    expect(r.violations.map((v) => v.token)).toContain("bg-panel");
+  });
+
+  it("refuses a dynamic computed key in a JSX spread even when the tuple is decidable", () => {
+    // The tuple is fully decidable here (level and emphasis are explicit), so a
+    // decidable tuple must not be allowed to mask an unprovable class key.
+    const r = analyzeFixture({
+      "components/probe.tsx":
+        head +
+        `declare const key: string;
+         const props: any = { level: "well", geometry: "control", [key]: "bg-panel" };
+         export const A = () => <Surface {...props} />;`,
+    });
+    expect(r.violations.length + r.opaque.length, "must not be all-clean").toBeGreaterThan(0);
+  });
+
+  it("folds JSX class contributions in SOURCE ORDER, both directions", () => {
+    // The spread loses to the later explicit attribute, so the overwritten
+    // value must NOT be reported.
+    const overwritten = analyzeFixture({
+      "components/probe.tsx":
+        head +
+        `const bad = { className: "bg-panel" } as const;
+         export const A = () => <Surface level="well" geometry="control" {...bad} className="flex" />;`,
+    });
+    expect(overwritten.violations).toEqual([]);
+    expect(overwritten.opaque).toEqual([]);
+    expect(overwritten.references.unclassified).toBe(0);
+
+    // Reverse order: the spread wins, so it MUST be reported.
+    const winning = analyzeFixture({
+      "components/probe.tsx":
+        head +
+        `const bad = { className: "bg-panel" } as const;
+         export const A = () => <Surface level="well" geometry="control" className="flex" {...bad} />;`,
+    });
+    expect(winning.violations.map((v) => v.token)).toContain("bg-panel");
+  });
+
+  it("folds RECIPE class contributions in SOURCE ORDER, both directions", () => {
+    // The reviewed false positive: the nested value is provably overwritten.
+    const overwritten = analyzeFixture({
+      "components/probe.tsx":
+        head +
+        `const bad = { className: "bg-panel" } as const;
+         const options = { role: "well", ...bad, className: "flex" } as const;
+         export const A = cn(surfaceVariants(options));`,
+    });
+    expect(overwritten.violations).toEqual([]);
+    expect(overwritten.opaque).toEqual([]);
+    expect(overwritten.references.unclassified).toBe(0);
+
+    // Reverse order: the nested bad value wins and must still be caught.
+    const winning = analyzeFixture({
+      "components/probe.tsx":
+        head +
+        `const bad = { className: "bg-panel" } as const;
+         const options = { role: "well", className: "flex", ...bad } as const;
+         export const A = cn(surfaceVariants(options));`,
+    });
+    expect(winning.violations.map((v) => v.token)).toContain("bg-panel");
+  });
+
+  it("catches a recipe className smuggled through a nested spread or a shorthand", () => {
+    const nested = analyzeFixture({
+      "components/probe.tsx":
+        head +
+        `const visual = { className: "shadow-3" } as const;
+         const options = { role: "well", ...visual } as const;
+         export const A = cn(surfaceVariants(options));`,
+    });
+    expect(nested.violations.map((v) => v.token)).toContain("shadow-3");
+
+    const shorthand = analyzeFixture({
+      "components/probe.tsx":
+        head +
+        `const className = "shadow-3";
+         const options = { role: "well", className } as const;
+         export const A = cn(surfaceVariants(options));`,
+    });
+    expect(shorthand.violations.map((v) => v.token)).toContain("shadow-3");
+  });
+
+  it("refuses an unprovable class contribution even when a later legal one exists", () => {
+    // An accessor is re-read on every access, so a later legal own value does
+    // not make the earlier one safe to ignore — but the LATER own value does
+    // win at runtime, so the accessor must be the one that decides only when it
+    // is last. Both orders are pinned.
+    const accessorLast = analyzeFixture({
+      "components/probe.tsx":
+        head +
+        `const options: any = { role: "well", className: "flex", get class() { return "bg-panel"; } };
+         export const A = cn(surfaceVariants(options));`,
+    });
+    expect(accessorLast.opaque.length, "accessor last must refuse").toBeGreaterThan(0);
+
+    const shorthandUnprovable = analyzeFixture({
+      "components/probe.tsx":
+        head +
+        `declare const className: string;
+         const options: any = { role: "well", className };
+         export const A = cn(surfaceVariants(options));`,
+    });
+    expect(shorthandUnprovable.opaque.length, "unprovable shorthand must refuse").toBeGreaterThan(
+      0,
+    );
   });
 
   it("reads a className carried BY a proven spread rather than ignoring it", () => {
