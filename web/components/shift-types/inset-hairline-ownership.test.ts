@@ -364,20 +364,76 @@ interface Contribution {
 }
 
 /**
- * Static truthiness of a condition, when — and only when — it is a literal.
- * `undefined` means "not statically known", which is the conservative default.
+ * Is this identifier the INTRINSIC global of that name, rather than something
+ * local that merely spells it the same?
+ *
+ * `undefined`, `NaN` and `Infinity` are ordinary identifiers, not keywords, so
+ * they can be shadowed by a parameter, a local, or an import. Recognising them
+ * by spelling meant a shadowed `undefined` — which can hold ANY value — was
+ * treated as statically falsy and nullish. The global has no declaration in user
+ * code; anything with one is a shadow and is refused.
  */
-function staticTruthiness(node: ts.Expression): boolean | undefined {
+function isIntrinsicGlobal(sf: ts.SourceFile, id: ts.Identifier, name: string): boolean {
+  if (id.text !== name) return false;
+  const { checker } = analysisFor(sf);
+  const symbol = checker.getSymbolAtLocation(id);
+  if (!symbol) return true; // no symbol at all ⇒ the intrinsic
+  const decls = symbol.declarations ?? [];
+  if (decls.length === 0) return true; // intrinsic, declared nowhere in source
+  // Declared in a lib.d.ts is still the global; declared anywhere else is a shadow.
+  return decls.every((d) => d.getSourceFile().isDeclarationFile);
+}
+
+/** The identifiers whose global meaning this oracle is willing to rely on. */
+const GLOBAL_SPELLINGS = ["undefined", "NaN", "Infinity"] as const;
+
+/** True when the identifier spells a global but is actually shadowed. */
+function isShadowedGlobal(sf: ts.SourceFile, node: ts.Node): boolean {
+  return (
+    ts.isIdentifier(node) &&
+    (GLOBAL_SPELLINGS as readonly string[]).includes(node.text) &&
+    !isIntrinsicGlobal(sf, node, node.text)
+  );
+}
+
+function staticTruthiness(sf: ts.SourceFile, node: ts.Expression): boolean | undefined {
   let n: ts.Expression = node;
   while (ts.isParenthesizedExpression(n) || ts.isAsExpression(n)) n = n.expression;
   if (n.kind === ts.SyntaxKind.TrueKeyword) return true;
   if (n.kind === ts.SyntaxKind.FalseKeyword) return false;
   if (n.kind === ts.SyntaxKind.NullKeyword) return false;
-  if (ts.isIdentifier(n) && n.text === "undefined") return false;
+  if (ts.isIdentifier(n)) {
+    // Only the true globals are statically known. A shadow holds a runtime
+    // value this oracle cannot see, so it stays unknown and both paths survive.
+    if (isIntrinsicGlobal(sf, n, "undefined")) return false;
+    if (isIntrinsicGlobal(sf, n, "NaN")) return false;
+    if (isIntrinsicGlobal(sf, n, "Infinity")) return true;
+    return undefined;
+  }
   if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) return n.text.length > 0;
   if (ts.isNumericLiteral(n)) return Number(n.text) !== 0;
   return undefined;
 }
+
+/** Deterministic identity for a resolved path, so duplicates collapse. */
+function contributionKey(c: Contribution): string {
+  return JSON.stringify([
+    c.tuples.map((t) => JSON.stringify(t)).sort(),
+    [...c.literals].sort(),
+    [...c.unresolved].sort(),
+  ]);
+}
+
+/**
+ * Analysis bounds. Path expansion is a cartesian product, so a className with
+ * many independent branches could in principle blow up. These make that
+ * impossible: duplicates collapse deterministically, and both the surviving
+ * path count and the total node visits are hard-capped. Exceeding either yields
+ * ONE refusal path with an explicit reason — never a silently truncated set,
+ * which would launder a violation by dropping the path that carries it.
+ */
+const MAX_PATHS = 64;
+const MAX_WORK = 5000;
 
 /**
  * CONTROL FLOW.
@@ -404,8 +460,26 @@ function resolveClassNamePaths(sf: ts.SourceFile, expr: ts.Expression): Contribu
     literals: [...a.literals, ...b.literals],
     unresolved: [...a.unresolved, ...b.unresolved],
   });
+  let work = 0;
+  let overBudget: string | null = null;
+  /** Collapse duplicates deterministically and enforce the path cap. */
+  const bound = (paths: Contribution[]): Contribution[] => {
+    const seenKeys = new Set<string>();
+    const out: Contribution[] = [];
+    for (const p of paths) {
+      const key = contributionKey(p);
+      if (seenKeys.has(key)) continue;
+      seenKeys.add(key);
+      out.push(p);
+    }
+    if (out.length > MAX_PATHS) {
+      overBudget = `class expression exceeds the ${MAX_PATHS}-path analysis budget`;
+      return [{ tuples: [], literals: [], unresolved: [overBudget] }];
+    }
+    return out;
+  };
   const cross = (left: Contribution[], right: Contribution[]): Contribution[] =>
-    left.flatMap((l) => right.map((r) => merge(l, r)));
+    bound(left.flatMap((l) => right.map((r) => merge(l, r))));
   const only = (c: Partial<Contribution>): Contribution[] => [{ ...EMPTY, ...c }];
 
   const active = new Set<ts.Node>();
@@ -414,6 +488,11 @@ function resolveClassNamePaths(sf: ts.SourceFile, expr: ts.Expression): Contribu
     // Cycle guard: an alias that refers to itself resolves to a refusal, never
     // to infinite recursion.
     if (active.has(node)) return only({ unresolved: ["cyclic class expression"] });
+    if (overBudget) return only({ unresolved: [overBudget] });
+    if (++work > MAX_WORK) {
+      overBudget = `class expression exceeds the ${MAX_WORK}-node analysis budget`;
+      return only({ unresolved: [overBudget] });
+    }
     active.add(node);
     try {
       if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
@@ -423,35 +502,37 @@ function resolveClassNamePaths(sf: ts.SourceFile, expr: ts.Expression): Contribu
         return alts(node.expression);
 
       if (ts.isConditionalExpression(node)) {
-        const known = staticTruthiness(node.condition);
+        const known = staticTruthiness(sf, node.condition);
         if (known === true) return alts(node.whenTrue);
         if (known === false) return alts(node.whenFalse);
         // Both arms are reachable, so both must own the recipe on their own.
-        return [...alts(node.whenTrue), ...alts(node.whenFalse)];
+        return bound([...alts(node.whenTrue), ...alts(node.whenFalse)]);
       }
 
       if (ts.isBinaryExpression(node)) {
         const op = node.operatorToken.kind;
-        const known = staticTruthiness(node.left);
+        const known = staticTruthiness(sf, node.left);
         if (op === ts.SyntaxKind.AmpersandAmpersandToken) {
           // left falsy ⇒ the VALUE is left's falsy value: no classes at all.
           if (known === true) return alts(node.right);
           if (known === false) return only({});
-          return [...only({}), ...alts(node.right)];
+          return bound([...only({}), ...alts(node.right)]);
         }
         if (op === ts.SyntaxKind.BarBarToken) {
           if (known === true) return alts(node.left);
           if (known === false) return alts(node.right);
-          return [...alts(node.left), ...alts(node.right)];
+          return bound([...alts(node.left), ...alts(node.right)]);
         }
         if (op === ts.SyntaxKind.QuestionQuestionToken) {
           // Only `null`/`undefined` take the right side; other falsy values do not.
+          // Symbol identity, not spelling: a shadowed `undefined` holds a
+          // runtime value, so it is NOT statically nullish.
           const nullish =
             node.left.kind === ts.SyntaxKind.NullKeyword ||
-            (ts.isIdentifier(node.left) && node.left.text === "undefined");
+            (ts.isIdentifier(node.left) && isIntrinsicGlobal(sf, node.left, "undefined"));
           if (nullish) return alts(node.right);
-          if (known !== undefined) return alts(node.left);
-          return [...alts(node.left), ...alts(node.right)];
+          if (known !== undefined && !isShadowedGlobal(sf, node.left)) return alts(node.left);
+          return bound([...alts(node.left), ...alts(node.right)]);
         }
         return only({ unresolved: [`unmodelled operator ${ts.tokenToString(op)}`] });
       }
@@ -468,7 +549,38 @@ function resolveClassNamePaths(sf: ts.SourceFile, expr: ts.Expression): Contribu
       if (ts.isArrayLiteralExpression(node)) {
         let paths: Contribution[] = only({});
         for (const el of node.elements) {
-          paths = cross(paths, alts(ts.isSpreadElement(el) ? el.expression : el));
+          if (!ts.isSpreadElement(el)) {
+            paths = cross(paths, alts(el));
+            continue;
+          }
+          // Spreading is only safe when the operand is STATICALLY an array.
+          // `[...surfaceVariants(...)]` spreads a STRING, which iterates its
+          // characters — it produces "b","g","-","p"… not the class list, so it
+          // must never be credited as recipe ownership.
+          let operand: ts.Expression = el.expression;
+          while (ts.isParenthesizedExpression(operand) || ts.isAsExpression(operand)) {
+            operand = operand.expression;
+          }
+          if (ts.isIdentifier(operand)) {
+            const boundAlias = resolveBinding(sf, operand);
+            if (boundAlias.kind === "ok") operand = boundAlias.init;
+          }
+          while (ts.isParenthesizedExpression(operand) || ts.isAsExpression(operand)) {
+            operand = operand.expression;
+          }
+          if (!ts.isArrayLiteralExpression(operand)) {
+            paths = cross(
+              paths,
+              only({
+                unresolved: [
+                  "spread of a non-array in a class list: spreading a string iterates its " +
+                    "characters, so it cannot be credited as class ownership",
+                ],
+              }),
+            );
+            continue;
+          }
+          paths = cross(paths, alts(operand));
         }
         return paths;
       }
@@ -527,7 +639,7 @@ function resolveClassNamePaths(sf: ts.SourceFile, expr: ts.Expression): Contribu
         node.kind === ts.SyntaxKind.FalseKeyword ||
         node.kind === ts.SyntaxKind.NullKeyword ||
         ts.isNumericLiteral(node) ||
-        (ts.isIdentifier(node) && (node as ts.Identifier).text === "undefined")
+        (ts.isIdentifier(node) && isIntrinsicGlobal(sf, node, "undefined"))
       ) {
         return only({});
       }
@@ -537,7 +649,7 @@ function resolveClassNamePaths(sf: ts.SourceFile, expr: ts.Expression): Contribu
     }
   };
 
-  return alts(expr);
+  return bound(alts(expr));
 }
 
 /**
@@ -1380,6 +1492,118 @@ describe("inset-hairline surfaces are owned by the shared recipe, per node", () 
       const withTrespass = paths(`cn("flex", cond && "bg-panel", ${RECIPE})`);
       expect(withTrespass).toHaveLength(2);
       expect(withTrespass.some((p) => p.literals.includes("bg-panel"))).toBe(true);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Round 8: shadowed globals, spread safety, and analysis bounds.
+  // -------------------------------------------------------------------------
+  describe("oracle fixtures — globals, spreads and bounds", () => {
+    const TILE_R8 = {
+      label: "r8 tile",
+      file: "fixture.tsx",
+      attr: "data-slot",
+      value: "shift-tile",
+      count: 1,
+      style: {},
+    } as const satisfies GovernedSurface;
+
+    const RECIPE = `surfaceVariants({ role: "well", geometry: "control", emphasis: "hairline" })`;
+    const TUPLE = { role: "well", geometry: "control", emphasis: "hairline" };
+
+    const pathsOf = (expr: string, preamble = "") => {
+      const sf = parseFixtureSource(
+        `${preamble}\nconst X = <div data-slot="shift-tile" className={${expr}} />;`,
+      );
+      const node = findGoverned(sf, TILE_R8)[0];
+      return resolveClassNamePaths(sf, node.className!);
+    };
+    const everyPathOwns = (expr: string, preamble = "") => {
+      const all = pathsOf(expr, preamble);
+      return (
+        all.length > 0 &&
+        all.every(
+          (p) => p.unresolved.length === 0 && JSON.stringify(p.tuples) === JSON.stringify([TUPLE]),
+        )
+      );
+    };
+
+    it("treats the TRUE global undefined as statically falsy/nullish", () => {
+      expect(everyPathOwns(`undefined ? "flex" : ${RECIPE}`)).toBe(true);
+      expect(everyPathOwns(`undefined ?? ${RECIPE}`)).toBe(true);
+      expect(pathsOf(`undefined ? "flex" : ${RECIPE}`)).toHaveLength(1);
+    });
+
+    it("REFUSES to trust a SHADOWED `undefined`", () => {
+      const preamble = `const undefined = "flex";`;
+      const all = pathsOf(`undefined ? "flex" : ${RECIPE}`, preamble);
+      expect(all.length, "both arms must survive a shadow").toBeGreaterThan(1);
+      expect(all.every((p) => JSON.stringify(p.tuples) === JSON.stringify([TUPLE]))).toBe(false);
+    });
+
+    it("REFUSES a shadowed `undefined` on the `??` left side", () => {
+      const preamble = `const undefined = "flex";`;
+      expect(everyPathOwns(`undefined ?? ${RECIPE}`, preamble)).toBe(false);
+      expect(pathsOf(`undefined ?? ${RECIPE}`, preamble).length).toBeGreaterThan(1);
+    });
+
+    it("audits NaN and Infinity by symbol too", () => {
+      expect(everyPathOwns(`NaN ? "flex" : ${RECIPE}`)).toBe(true);
+      expect(everyPathOwns(`Infinity ? ${RECIPE} : "flex"`)).toBe(true);
+      expect(everyPathOwns(`NaN ? "flex" : ${RECIPE}`, `const NaN = 1;`)).toBe(false);
+      expect(everyPathOwns(`Infinity ? ${RECIPE} : "flex"`, `const Infinity = 0;`)).toBe(false);
+    });
+
+    it("REFUSES `[...surfaceVariants(recipe)]` — spreading a string iterates characters", () => {
+      const all = pathsOf(`[...${RECIPE}]`);
+      expect(all.every((p) => p.unresolved.length > 0)).toBe(true);
+      expect(all.flatMap((p) => p.unresolved).join(" ")).toMatch(/iterates its characters/);
+      expect(all.some((p) => p.tuples.length > 0)).toBe(false);
+    });
+
+    it("REFUSES a spread of a string alias or an unknown value", () => {
+      expect(pathsOf(`[...CLS]`, `const CLS = "flex";`).every((p) => p.unresolved.length > 0)).toBe(
+        true,
+      );
+      expect(pathsOf(`[...whatever]`).every((p) => p.unresolved.length > 0)).toBe(true);
+    });
+
+    it("ACCEPTS a statically safe array spread, and ordinary array members", () => {
+      expect(everyPathOwns(`[${RECIPE}]`)).toBe(true);
+      expect(everyPathOwns(`[...[${RECIPE}]]`)).toBe(true);
+      expect(everyPathOwns(`[...ARR]`, `const ARR = [${RECIPE}];`)).toBe(true);
+      expect(everyPathOwns(`["flex", ...[${RECIPE}]]`)).toBe(true);
+    });
+
+    const ternaries = (n: number) =>
+      Array.from({ length: n }, (_, i) => `c${i} ? "a${i}" : "b${i}"`).join(", ");
+
+    it("stays bounded at 16 and 18 independent ternaries, and never truncates silently", () => {
+      for (const n of [16, 18]) {
+        const all = pathsOf(`cn(${ternaries(n)}, ${RECIPE})`);
+        expect(all.length).toBeLessThanOrEqual(MAX_PATHS);
+        expect(all.every((p) => p.unresolved.length > 0)).toBe(true);
+        expect(all.flatMap((p) => p.unresolved).join(" ")).toMatch(/analysis budget/);
+      }
+    });
+
+    it("does not launder a trespass by exceeding the budget", () => {
+      const all = pathsOf(`cn(${ternaries(18)}, "bg-panel", ${RECIPE})`);
+      expect(all.every((p) => p.unresolved.length > 0)).toBe(true);
+      expect(all.some((p) => p.tuples.length > 0 && p.unresolved.length === 0)).toBe(false);
+    });
+
+    it("still analyses a reasonable multi-branch className exactly", () => {
+      const expr = `cn(a ? "x" : "y", b ? "p" : "q", c ? "m" : "n", ${RECIPE})`;
+      const all = pathsOf(expr);
+      expect(all).toHaveLength(8);
+      expect(all.every((p) => p.unresolved.length === 0)).toBe(true);
+      expect(everyPathOwns(expr)).toBe(true);
+    });
+
+    it("collapses duplicate paths deterministically", () => {
+      expect(pathsOf(`cn(a ? "x" : "x", ${RECIPE})`)).toHaveLength(1);
+      expect(pathsOf(`cn(a ? "x" : "y", ${RECIPE})`)).toHaveLength(2);
     });
   });
 
