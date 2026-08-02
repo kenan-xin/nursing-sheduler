@@ -1467,62 +1467,173 @@ export function analyzeProgram(program: ts.Program, rootFilter?: (f: string) => 
   type Option = { values: string[] | null; present: boolean };
   const ABSENT: Option = { values: [], present: false };
 
-  /** The string values an expression can take, or null when unprovable. */
-  const stringValues = (node: ts.Expression | undefined): string[] | null => {
-    if (!node) return [];
-    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return [node.text];
-    if (node.kind === ts.SyntaxKind.NullKeyword) return [];
-    if (ts.isIdentifier(node) && node.text === "undefined") return [];
-    if (
-      ts.isParenthesizedExpression(node) ||
-      ts.isAsExpression(node) ||
-      ts.isNonNullExpression(node)
+  /**
+   * The public `SurfaceEmphasis` domain, mirrored from `surface.tsx`. CVA drops
+   * an unrecognised variant value SILENTLY — `emphasis: "bogus"` renders
+   * `bg-panel shadow-well` with no edge at all — so an unknown value is a
+   * runtime contract failure, not merely a missing diagnostic.
+   */
+  const LEGAL_EMPHASIS = new Set(["hairline", "drop-candidate"]);
+
+  /** Unwrap `(x)`, `x as T` and `x!` — none of them change the runtime value. */
+  const transparent = (node: ts.Expression): ts.Expression => {
+    let current = node;
+    while (
+      ts.isParenthesizedExpression(current) ||
+      ts.isAsExpression(current) ||
+      ts.isNonNullExpression(current)
     ) {
-      return stringValues(node.expression);
+      current = current.expression;
     }
+    return current;
+  };
+
+  /**
+   * A DECLARED type that is a finite union of string literals is a proof of the
+   * value set; `any`, `unknown`, `string` and everything else is not.
+   *
+   * This is what lets the `Surface` adapter forward its own typed `emphasis`
+   * prop — whose value is not statically knowable — without an exemption: its
+   * declared type IS the public enum. A `declare const e: any` still fails
+   * closed, because `any` proves nothing.
+   */
+  const typeStringValues = (node: ts.Expression): string[] | null => {
+    const type = checker.getTypeAtLocation(node);
+    const parts = type.isUnion() ? type.types : [type];
+    const values: string[] = [];
+    for (const part of parts) {
+      if (part.flags & (ts.TypeFlags.Undefined | ts.TypeFlags.Null)) continue;
+      if (part.isStringLiteral()) values.push(part.value);
+      else return null;
+    }
+    return values;
+  };
+
+  /** A `const` string binding. Strings are immutable and a const cannot be
+   *  reassigned, so following one needs no reference audit. */
+  const constStringValues = (symbol: ts.Symbol, seen: Set<ts.Symbol>): string[] | null => {
+    const declaration = symbol.valueDeclaration;
+    if (!declaration || !ts.isVariableDeclaration(declaration)) return null;
+    if (!isConstBinding(declaration) || !declaration.initializer) return null;
+    return stringValues(declaration.initializer, seen);
+  };
+
+  /** The string values an expression can take, or null when unprovable. */
+  const stringValues = (
+    node: ts.Expression | undefined,
+    seen: Set<ts.Symbol> = new Set(),
+  ): string[] | null => {
+    if (!node) return [];
+    const bare = transparent(node);
+    if (ts.isStringLiteral(bare) || ts.isNoSubstitutionTemplateLiteral(bare)) return [bare.text];
+    if (bare.kind === ts.SyntaxKind.NullKeyword) return [];
+    if (ts.isIdentifier(bare) && bare.text === "undefined") return [];
     // Both arms of a ternary are real possibilities, so both are checked.
-    if (ts.isConditionalExpression(node)) {
-      const whenTrue = stringValues(node.whenTrue);
-      const whenFalse = stringValues(node.whenFalse);
+    if (ts.isConditionalExpression(bare)) {
+      const whenTrue = stringValues(bare.whenTrue, seen);
+      const whenFalse = stringValues(bare.whenFalse, seen);
       return whenTrue && whenFalse ? [...whenTrue, ...whenFalse] : null;
     }
-    return null;
+    if (ts.isIdentifier(bare)) {
+      const symbol = symbolAt(bare);
+      if (symbol && !seen.has(symbol)) {
+        seen.add(symbol);
+        const constant = constStringValues(symbol, seen);
+        if (constant) return constant;
+      }
+    }
+    return typeStringValues(bare);
+  };
+
+  /**
+   * A reference position that CANNOT mutate the object it names.
+   *
+   * Reads into a spread, a JSX spread, a direct recipe argument, or another
+   * const alias are safe. Anything else — a property/element write, a delete,
+   * an escape into an arbitrary call that could mutate it, a reassignment — is
+   * refused, so the object's shape at the call site stays provable.
+   */
+  const safeOptionsReference = (node: ts.Node): boolean => {
+    let current: ts.Node = node;
+    let parent = current.parent;
+    while (
+      parent &&
+      (ts.isParenthesizedExpression(parent) ||
+        ts.isAsExpression(parent) ||
+        ts.isNonNullExpression(parent))
+    ) {
+      current = parent;
+      parent = parent.parent;
+    }
+    if (!parent) return false;
+    if (ts.isVariableDeclaration(parent) && parent.name === current) return true;
+    // `const b = a;` — an alias link. `b`'s own safety is proven separately.
+    if (ts.isVariableDeclaration(parent) && parent.initializer === current) {
+      return isConstBinding(parent) && ts.isIdentifier(parent.name);
+    }
+    if (ts.isSpreadAssignment(parent) && parent.expression === current) return true;
+    if (ts.isJsxSpreadAttribute(parent) && parent.expression === current) return true;
+    if (
+      ts.isCallExpression(parent) &&
+      parent.arguments.includes(current as ts.Expression) &&
+      kindOfCallee(parent.expression) === "recipe"
+    ) {
+      return true;
+    }
+    return false;
+  };
+
+  /**
+   * Tuple-scoped immutability proof, deliberately SEPARATE from `optionsProven`.
+   *
+   * `optionsProven` guards the className half and must not be relaxed; it also
+   * demands a bare object-literal initializer and a narrower set of reference
+   * positions, which is why legal `as const`, alias chains and JSX spreads were
+   * being reported as violations. This proof is no weaker — it still requires an
+   * immutable `const` binding and refuses every mutating or escaping reference —
+   * but it understands the shapes a tuple can legitimately arrive in.
+   */
+  const tupleObjectProven = (symbol: ts.Symbol): boolean => {
+    const declaration = symbol.valueDeclaration;
+    if (!declaration || !ts.isVariableDeclaration(declaration)) return false;
+    if (!isConstBinding(declaration) || !ts.isIdentifier(declaration.name)) return false;
+    if (!declaration.initializer) return false;
+    for (const ref of refsBySymbol.get(symbol) ?? []) {
+      if (ref.node === declaration.name) continue;
+      if (!safeOptionsReference(ref.node)) return false;
+    }
+    return true;
   };
 
   /**
    * Resolve a recipe options ARGUMENT to the object literal it really is,
-   * following the same proven-immutable alias graph the authority pass uses
-   * (`optionsProven`). Returns null when the value cannot be proven, which the
-   * caller must treat as a refusal rather than as "no emphasis".
-   *
-   * This closes the decisive-review bypass: the tuple pass used to look only at
-   * an INLINE object literal, so `const options: any = { role: "page",
-   * emphasis: "hairline" }; cn(surfaceVariants(options))` was classified
-   * sanctioned and never tuple-checked, even though the authority pass could
-   * already resolve that exact alias for its className inspection.
+   * through transparent wrappers (`(o)`, `o as const`, `o!`) and proven const
+   * alias chains. Returns null when the value cannot be proven, which the caller
+   * must treat as a refusal rather than as "no emphasis".
    */
   const resolveOptionsLiteral = (
     node: ts.Expression,
     seen: Set<ts.Symbol> = new Set(),
   ): ts.ObjectLiteralExpression | null => {
-    if (ts.isObjectLiteralExpression(node)) return node;
-    if (
-      ts.isParenthesizedExpression(node) ||
-      ts.isAsExpression(node) ||
-      ts.isNonNullExpression(node)
-    ) {
-      return resolveOptionsLiteral(node.expression, seen);
-    }
-    if (ts.isIdentifier(node)) {
-      const symbol = symbolAt(node);
+    const bare = transparent(node);
+    if (ts.isObjectLiteralExpression(bare)) return bare;
+    if (ts.isIdentifier(bare)) {
+      const symbol = symbolAt(bare);
       // A cycle is not a proof; refuse rather than recurse forever.
       if (!symbol || seen.has(symbol)) return null;
       seen.add(symbol);
-      if (!optionsProven(symbol)) return null;
-      const declaration = symbol.valueDeclaration;
-      if (declaration && ts.isVariableDeclaration(declaration) && declaration.initializer) {
-        return resolveOptionsLiteral(declaration.initializer, seen);
-      }
+      if (!tupleObjectProven(symbol)) return null;
+      const declaration = symbol.valueDeclaration as ts.VariableDeclaration;
+      return resolveOptionsLiteral(declaration.initializer!, seen);
+    }
+    return null;
+  };
+
+  /** A property's static key, or null when the key itself is not provable. */
+  const staticKey = (key: ts.PropertyName): string | null => {
+    if (ts.isIdentifier(key) || ts.isStringLiteral(key)) return key.text;
+    if (ts.isComputedPropertyName(key) && ts.isStringLiteral(key.expression)) {
+      return key.expression.text;
     }
     return null;
   };
@@ -1530,17 +1641,35 @@ export function analyzeProgram(program: ts.Program, rootFilter?: (f: string) => 
   const readOption = (literal: ts.ObjectLiteralExpression, name: string): Option => {
     let found = ABSENT;
     for (const property of literal.properties) {
+      // An accessor or a method can return a different value on every read, and
+      // a dynamic computed key may BE the key we are looking for. Either way the
+      // object no longer proves its own shape.
+      if (
+        ts.isGetAccessorDeclaration(property) ||
+        ts.isSetAccessorDeclaration(property) ||
+        ts.isMethodDeclaration(property)
+      ) {
+        const named = staticKey(property.name);
+        if (named === null || named === name) found = { values: null, present: true };
+        continue;
+      }
       if (ts.isPropertyAssignment(property)) {
-        const key = property.name;
-        const named =
-          ts.isIdentifier(key) || ts.isStringLiteral(key)
-            ? key.text
-            : ts.isComputedPropertyName(key) && ts.isStringLiteral(key.expression)
-              ? key.expression.text
-              : null;
-        if (named === name) found = { values: stringValues(property.initializer), present: true };
+        const named = staticKey(property.name);
+        if (named === null) {
+          // A dynamic key could be this one; refuse rather than skip it.
+          found = { values: null, present: true };
+        } else if (named === name) {
+          found = { values: stringValues(property.initializer), present: true };
+        }
       } else if (ts.isShorthandPropertyAssignment(property) && property.name.text === name) {
-        found = { values: null, present: true };
+        // `{ role, emphasis }` — read the value the shorthand actually names.
+        const valueSymbol = canonical(checker.getShorthandAssignmentValueSymbol(property));
+        let values: string[] | null = null;
+        if (valueSymbol) {
+          values = constStringValues(valueSymbol, new Set([valueSymbol]));
+          if (!values) values = typeStringValues(property.name);
+        }
+        found = { values, present: true };
       } else if (ts.isSpreadAssignment(property)) {
         // A spread of a PROVEN immutable object contributes real, readable keys;
         // anything else may carry either key, so refuse rather than guess.
@@ -1565,11 +1694,21 @@ export function analyzeProgram(program: ts.Program, rootFilter?: (f: string) => 
         if (!init) found = { values: null, present: true };
         else if (ts.isStringLiteral(init)) found = { values: [init.text], present: true };
         else if (ts.isJsxExpression(init))
-          found = { values: stringValues(init.expression), present: true };
+          found = init.expression
+            ? { values: stringValues(init.expression), present: true }
+            : ABSENT;
         else found = { values: null, present: true };
-      } else {
-        // A spread onto <Surface> may carry either prop.
-        found = { values: null, present: true };
+      } else if (ts.isJsxSpreadAttribute(attribute)) {
+        // A spread of a PROVEN immutable object contributes readable props, in
+        // source order like any other JSX attribute; anything else may carry
+        // either prop, so refuse rather than guess.
+        const literal = resolveOptionsLiteral(attribute.expression);
+        if (literal) {
+          const nested = readOption(literal, name);
+          if (nested.present) found = nested;
+        } else {
+          found = { values: null, present: true };
+        }
       }
     }
     return found;
@@ -1590,18 +1729,36 @@ export function analyzeProgram(program: ts.Program, rootFilter?: (f: string) => 
     const push = (tuple: string, reason: string) =>
       tupleViolations.push({ file: rel(file), line: lineOf(file, node), site, tuple, reason });
 
-    // Legality is a property of the ROLE: every emphasis value is legal on a
-    // `well` and none is legal anywhere else. So the role must be provable, and
-    // the emphasis value need only be named in the report. That distinction
-    // matters for the `Surface` adapter itself, which forwards a typed
-    // `emphasis` prop (unprovable by value) into a literal `role: "well"`.
+    // 1 — THE VALUE. Every present emphasis must be proven to belong to the
+    //     public `SurfaceEmphasis` domain. CVA drops an unknown variant value
+    //     silently, so `emphasis: "bogus"` and an unprovable `any` both render a
+    //     row with NO edge while looking clean to a role-only check. Both fail
+    //     closed here.
+    if (emphasis === null) {
+      push(
+        "<unprovable emphasis>",
+        "an `emphasis` whose value cannot be proven to be a public SurfaceEmphasis",
+      );
+      return;
+    }
+    const unknown = emphasis.filter((value) => !LEGAL_EMPHASIS.has(value));
+    if (unknown.length) {
+      push(
+        "emphasis " + unknown.join("|"),
+        "not a public SurfaceEmphasis; CVA drops an unknown variant value silently, so the row renders with no edge",
+      );
+      return;
+    }
+
+    // 2 — THE ROLE. Every legal emphasis value belongs to a `well` and to
+    //     nothing else.
     if (roleOption.values === null) {
       push("<unprovable>", "an `emphasis` whose role cannot be proven");
       return;
     }
     // No role means the recipe's own default, which is `surface` — not a well.
     const roles = roleOption.present && roleOption.values.length ? roleOption.values : ["surface"];
-    const named = emphasis ? emphasis.join("|") : "<any>";
+    const named = emphasis.join("|");
     for (const role of roles) {
       if (role !== "well") {
         push(
@@ -1958,6 +2115,180 @@ describe("adversarial fixtures — (role, emphasis) tuple legality", () => {
       `declare const extra: any;
        export const A = cn(surfaceVariants({ role: "well", ...extra }));`,
       "spread",
+      "<unprovable emphasis>",
+    );
+  });
+
+  // --- P1: the emphasis VALUE domain -------------------------------------
+
+  it("refuses an untyped `any` emphasis on a legal well — the reviewed fail-open", () => {
+    illegal(
+      `declare const emphasis: any;
+       export const A = cn(surfaceVariants({ role: "well", emphasis }));`,
+      "any emphasis",
+      "<unprovable emphasis>",
+    );
+  });
+
+  it("rejects a BOGUS emphasis value cast through `any`, on the recipe", () => {
+    illegal(
+      `export const A = cn(surfaceVariants({ role: "well", emphasis: "bogus" as any }));`,
+      "bogus recipe",
+      "emphasis bogus",
+    );
+  });
+
+  it("rejects a BOGUS emphasis value cast through `any`, on <Surface>", () => {
+    illegal(
+      `export const A = () => <Surface level="well" geometry="control" emphasis={"bogus" as any} />;`,
+      "bogus jsx",
+      "emphasis bogus",
+    );
+  });
+
+  it("rejects a ternary where only ONE arm leaves the public domain", () => {
+    illegal(
+      `export const A = (o: boolean) => cn(surfaceVariants({ role: "well", emphasis: (o ? "hairline" : "bogus") as any }));`,
+      "half-bogus ternary",
+      "emphasis bogus",
+    );
+  });
+
+  it("accepts a value whose DECLARED TYPE is the public enum — the adapter's shape", () => {
+    // `Surface` forwards its own typed `emphasis` prop, whose value is not
+    // statically knowable. Its declared type IS the enum, which is a proof — so
+    // the adapter needs no exemption, and `any` still fails closed.
+    const r = analyzeFixture({
+      "components/probe.tsx":
+        head +
+        `declare const e: "hairline" | "drop-candidate";
+         export const A = cn(surfaceVariants({ role: "well", geometry: "control", emphasis: e }));`,
+    });
+    expect(r.tuples.illegal).toEqual([]);
+    expect(r.tuples.checked).toBe(1);
+  });
+
+  it("accepts an optional enum type, and still refuses a widened `string`", () => {
+    const ok = analyzeFixture({
+      "components/probe.tsx":
+        head +
+        `declare const e: "hairline" | "drop-candidate" | undefined;
+         export const A = cn(surfaceVariants({ role: "well", emphasis: e }));`,
+    });
+    expect(ok.tuples.illegal).toEqual([]);
+
+    illegal(
+      `declare const e: string;
+       export const A = cn(surfaceVariants({ role: "well", emphasis: e }));`,
+      "widened string",
+      "<unprovable emphasis>",
+    );
+  });
+
+  // --- P2: legal immutable shapes must NOT false-positive ----------------
+
+  it("accepts the review's exact `as const` recipe alias", () => {
+    const r = analyzeFixture({
+      "components/probe.tsx":
+        head +
+        `const options = { role: "well", geometry: "control", emphasis: "hairline" } as const;
+         export const A = cn(surfaceVariants(options));`,
+    });
+    expect(r.tuples.illegal).toEqual([]);
+    expect(r.tuples.checked).toBe(1);
+  });
+
+  it("accepts the review's exact `as const` JSX spread", () => {
+    const r = analyzeFixture({
+      "components/probe.tsx":
+        head +
+        `const props = { level: "well", geometry: "control", emphasis: "hairline" } as const;
+         export const A = () => <Surface {...props} />;`,
+    });
+    expect(r.tuples.illegal).toEqual([]);
+    expect(r.tuples.checked).toBe(1);
+  });
+
+  it("accepts a legal alias CHAIN and a shorthand literal value", () => {
+    const r = analyzeFixture({
+      "components/probe.tsx":
+        head +
+        `const role = "well";
+         const emphasis = "hairline";
+         const inner = { role, emphasis };
+         const outer = inner;
+         export const A = cn(surfaceVariants(outer));`,
+    });
+    expect(r.tuples.illegal).toEqual([]);
+    expect(r.tuples.checked).toBe(1);
+  });
+
+  it("folds object spreads in SOURCE ORDER — a later key wins", () => {
+    // Legal last: the illegal earlier role is genuinely overwritten.
+    const ok = analyzeFixture({
+      "components/probe.tsx":
+        head +
+        `const base = { role: "page" };
+         export const A = cn(surfaceVariants({ ...base, role: "well", emphasis: "hairline" }));`,
+    });
+    expect(ok.tuples.illegal).toEqual([]);
+
+    // Illegal last: the spread overwrites a legal earlier role.
+    illegal(
+      `const override = { role: "page" };
+       export const A = cn(surfaceVariants({ role: "well", emphasis: "hairline", ...override }));`,
+      "spread overrides role",
+      "page + hairline",
+    );
+  });
+
+  it("folds JSX spreads in SOURCE ORDER against explicit attributes", () => {
+    // Explicit attribute after the spread wins, and is legal.
+    const ok = analyzeFixture({
+      "components/probe.tsx":
+        head +
+        `const props = { level: "page", emphasis: "hairline" };
+         export const A = () => <Surface {...props} level="well" geometry="control" />;`,
+    });
+    expect(ok.tuples.illegal).toEqual([]);
+
+    // Spread after the explicit attribute wins, and is illegal.
+    illegal(
+      `const props = { level: "page" };
+       export const A = () => <Surface level="well" geometry="control" emphasis="hairline" {...props} />;`,
+      "jsx spread overrides level",
+      "page + hairline",
+    );
+  });
+
+  it("keeps refusing mutable, cyclic, computed and accessor shapes", () => {
+    illegal(
+      `let options: any = { role: "well", emphasis: "hairline" };
+       options = { role: "page", emphasis: "hairline" };
+       export const A = cn(surfaceVariants(options));`,
+      "mutable",
+      "<unresolved>",
+    );
+    illegal(
+      `const options: any = { role: "well", emphasis: "hairline" };
+       mutate(options);
+       declare function mutate(o: any): void;
+       export const A = cn(surfaceVariants(options));`,
+      "escapes into a call",
+      "<unresolved>",
+    );
+    illegal(
+      `const options: any = { role: "well", get emphasis() { return "hairline"; } };
+       export const A = cn(surfaceVariants(options));`,
+      "accessor",
+      "<unprovable emphasis>",
+    );
+    // A dynamic key could BE `role` or `emphasis`, so the object no longer
+    // proves its own shape and the call is refused.
+    illegal(
+      `declare const key: string;
+       export const A = cn(surfaceVariants({ role: "well", [key]: "hairline", emphasis: "hairline" } as any));`,
+      "computed key",
       "<unprovable>",
     );
   });
@@ -1975,18 +2306,13 @@ describe("adversarial fixtures — (role, emphasis) tuple legality", () => {
     );
   });
 
-  it("REFUSES an alias chain rather than following it", () => {
-    // `optionsProven` only accepts a const whose own initializer is an object
-    // literal AND whose every reference sits in a sanctioned options position.
-    // `inner` is read as another declaration's initializer, so neither link is
-    // proven and the call is refused. That is the fail-closed outcome — the
-    // tuple is never silently skipped, which is what the finding required.
+  it("RESOLVES a proven const alias chain and judges the tuple it carries", () => {
     illegal(
       `const inner = { role: "raised", emphasis: "drop-candidate" };
        const outer = inner;
        export const classes = cn(surfaceVariants(outer));`,
       "alias chain",
-      "<unresolved>",
+      "raised + drop-candidate",
     );
   });
 
@@ -2008,12 +2334,12 @@ describe("adversarial fixtures — (role, emphasis) tuple legality", () => {
     );
   });
 
-  it("REFUSES an `as const` options alias, whose initializer is not a bare literal", () => {
+  it("RESOLVES an `as const` spread alias through the transparent wrapper", () => {
     illegal(
       `const edge = { emphasis: "hairline" } as const;
        export const classes = cn(surfaceVariants({ role: "page", ...edge }));`,
       "as const spread",
-      "<unprovable>",
+      "page + hairline",
     );
   });
 
