@@ -506,61 +506,10 @@ describe("R2c accessibility — the bounded quick wins, per the ratified priorit
   });
 });
 
-// ---------------------------------------------------------------------------
-// P2-1 (cold review of `57ce7b6`): the icon tile and the working-time readout
-// must go through the PUBLIC recipe, not reimplement its output.
-//
-// This has to be a SOURCE check. Both spellings render byte-identical class
-// lists — that is exactly why the earlier raw-class assertions passed while the
-// authority was being bypassed — so no render-level assertion can tell them
-// apart. Reverting either site to `"rounded-control border border-line2 bg-panel
-// shadow-well"` fails here and nowhere else.
-// ---------------------------------------------------------------------------
-describe("inset-hairline surfaces are owned by the shared recipe", () => {
-  const webRoot = resolve(__dirname, "..", "..");
-  const OWNED = [
-    "components/shift-types/shift-type-grid.tsx",
-    "components/entity-editor/working-time-fields.tsx",
-  ];
-
-  it.each(OWNED)("%s calls the well/control/hairline tuple", (relPath) => {
-    const source = readFileSync(resolve(webRoot, relPath), "utf8");
-    // Whitespace-insensitive: the formatter may wrap the call across lines.
-    const flat = source.replace(/\s+/g, " ");
-    expect(flat).toMatch(
-      /surfaceVariants\(\s*\{[^}]*role:\s*"well"[^}]*geometry:\s*"control"[^}]*emphasis:\s*"hairline"[^}]*\}/,
-    );
-  });
-
-  it.each(OWNED)("%s hand-authors no inset-hairline surface", (relPath) => {
-    const source = readFileSync(resolve(webRoot, relPath), "utf8");
-    // Every quoted class list in the file, checked for the recipe's own triple.
-    const literals = source.match(/"[^"\n]*"/g) ?? [];
-    const reimplemented = literals.filter((lit) => {
-      const t = lit.split(/\s+/);
-      return t.includes("bg-panel") && t.includes("shadow-well");
-    });
-    expect(
-      reimplemented,
-      `${relPath} reimplements the well/hairline surface with raw tokens instead of ` +
-        `calling surfaceVariants({ role: "well", geometry: "control", emphasis: "hairline" })`,
-    ).toEqual([]);
-  });
-
-  it("leaves the reserved card explicitly OFF the recipe, by adjudication", () => {
-    // The cold review of `57ce7b6` adjudicated this one: no role emits
-    // `--surface` + a `--line2` hairline + no elevation, and inventing a
-    // foundation role for a single justified composition is not warranted. This
-    // test exists so a later reader does not "finish the job" by migrating it.
-    const source = readFileSync(
-      resolve(webRoot, "components/shift-types/shift-type-grid.tsx"),
-      "utf8",
-    );
-    expect(source).toMatch(
-      /const RESERVED_CARD_SURFACE = "rounded-card border border-line2 bg-surface"/,
-    );
-  });
-});
+// Recipe OWNERSHIP of the inset-hairline surfaces is proven per NODE, by an AST
+// oracle, in `inset-hairline-ownership.test.ts`. It deliberately does not live
+// here: a file-wide predicate cannot tell "every governed tile calls the tuple"
+// from "one tile was raw-reimplemented and a sibling still calls it".
 
 describe("the fixed shift data palette stays out of the token authority", () => {
   const webRoot = resolve(__dirname, "..", "..");
