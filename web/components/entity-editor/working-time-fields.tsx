@@ -41,11 +41,22 @@
 // Before re-tuning any of this: measure the REST select by testid, not the first
 // <select> in the row, and measure its label with canvas metrics — a <select> reports
 // no overflow of its own, so scrollWidth checks silently pass while it clips.
+//
+// R2c owns this sub-form's PRESENTATION (Shift Types is its only live UI consumer).
+// v2: the derived Working readout is an inset `well` on the control radius at the
+// absolute 36px control height, matching the two Selects beside it and growing to a
+// real 44px on a coarse pointer; the overnight marker is the shared Badge on the
+// chip radius; the validation message uses the deepest semantic tier `--errorink`.
+// The derivation, the 30-minute grid, the validator and every `data-testid` are
+// unchanged.
 
 import * as React from "react";
 import { paidMinutesFor, validateWorkingTimeDraft, type WorkingTimeValue } from "./core";
+import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
 import { InfoTip } from "@/components/ui/info-tip";
 import { Select } from "@/components/ui/select";
+import { surfaceVariants } from "@/components/ui/surface";
 
 const PAD = (n: number) => String(n).padStart(2, "0");
 /** The 48 half-hour clock slots 00:00..23:30 (the design's timeOptions). */
@@ -182,9 +193,11 @@ export function WorkingTimeFields({ value, onChange, idPrefix }: WorkingTimeFiel
               ))}
             </Select>
             {overnight && (
-              <span className="border border-line2 px-2 py-1 font-mono text-label text-ink3">
+              // A data mark, not a status eyebrow — `casing="normal"` keeps "+1 day"
+              // exactly as it reads. The shared Badge carries the v2 chip radius.
+              <Badge variant="outline" casing="normal" className="font-mono">
                 +1 day
-              </span>
+              </Badge>
             )}
           </div>
         </div>
@@ -209,7 +222,10 @@ export function WorkingTimeFields({ value, onChange, idPrefix }: WorkingTimeFiel
         </div>
         <div className="flex flex-col gap-1">
           <span className="text-label font-semibold uppercase tracking-[0.03em] text-ink3">
-            Working <span className="text-faint">· auto</span>
+            {/* `--faint` is for disabled affordances and empty-cell marks only
+                (DESIGN.md §2); "· auto" is a functional qualifier on a real
+                label, so it takes the tertiary ink. */}
+            Working <span className="text-ink3">· auto</span>
           </span>
           <div
             data-testid={`${idPrefix}-duration`}
@@ -221,9 +237,27 @@ export function WorkingTimeFields({ value, onChange, idPrefix }: WorkingTimeFiel
                   } rest`
                 : undefined
             }
-            className="flex h-9 items-center gap-1.5 overflow-hidden border border-line2 bg-panel px-2.5"
+            // An inset island inside the editor card: `--panel` behind a `--line2`
+            // hairline at the control radius, straight from the shared authority.
+            // F2's `ii7.8.5` added the `emphasis` axis, so the recipe now emits
+            // this exact contract and there is no reason to reimplement it with
+            // canonical tokens (technical plan T5).
+            //
+            // Height is a STYLE, not `h-control`: a recipe consumer's className is
+            // held to layout utilities with validated values and the `h` family
+            // admits no `control`. Setting `--ctl` directly keeps the absolute
+            // token — `h-10` would land on 36px only via the 0.9 density baseline
+            // and would drift if that ever moved. Border-box puts the hairline
+            // inside the 36px, which is what keeps the readout level with the Rest
+            // select beside it; the prototype's own box is 38px because its selects
+            // are 38px, and ours are the ratified 36px (D10).
+            style={{ height: "var(--ctl)" }}
+            className={cn(
+              "flex items-center gap-1.5 overflow-hidden px-2.5 pointer-coarse:min-h-touch",
+              surfaceVariants({ role: "well", geometry: "control", emphasis: "hairline" }),
+            )}
           >
-            <span className="flex-none font-heading text-title font-extrabold leading-none">
+            <span className="flex-none font-heading text-title font-bold leading-none tracking-[-0.015em]">
               {paid != null ? fmtDuration(paid) : "—"}
             </span>
             {paid != null && (
@@ -236,7 +270,11 @@ export function WorkingTimeFields({ value, onChange, idPrefix }: WorkingTimeFiel
       </div>
 
       {firstError && (
-        <span className="text-label text-error" role="alert" data-testid={`${idPrefix}-wt-error`}>
+        <span
+          className="text-label text-errorink"
+          role="alert"
+          data-testid={`${idPrefix}-wt-error`}
+        >
           {firstError}
         </span>
       )}
