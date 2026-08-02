@@ -240,18 +240,97 @@ export function terminalUtility(token: string): string | null {
   }
   if (depth !== 0) return null; // unbalanced
   segments.push(current);
+  // EVERY segment must be non-empty, not just the terminal. `dark::flex` has a
+  // balanced but EMPTY intermediate variant and previously slipped through,
+  // contradicting the claim that balanced-but-empty tokens fail closed.
+  if (segments.some((s) => s === "")) return null;
   const base = segments[segments.length - 1].replace(/^!/, "").replace(/!$/, "");
   return base === "" ? null : base;
 }
 
-/** Channels the recipe owns; a consumer literal may not touch them. */
+/** Conventional utility prefixes the recipe owns. */
 const OWNED_CHANNELS = /^-?(bg-|border($|-)|shadow($|-)|rounded($|-)|ring($|-))/;
+
+/** CSS properties that carry tone, edge, elevation or radius. */
+const VISUAL_PROPERTIES = new Set([
+  "background",
+  "background-color",
+  "background-image",
+  "border",
+  "border-color",
+  "border-width",
+  "border-style",
+  "border-radius",
+  "box-shadow",
+  "color",
+  "outline",
+  "outline-color",
+  "fill",
+  "stroke",
+  "opacity",
+  "filter",
+  "backdrop-filter",
+]);
+
+/**
+ * Whether a normalized utility takes a channel the recipe owns.
+ *
+ * Tailwind's arbitrary-PROPERTY form `[background:var(--color-panel)]` names a
+ * CSS property directly, so it carries no conventional prefix — it passed this
+ * oracle 20/20 while only the shared analyzer caught it. An arbitrary property
+ * whose name cannot be parsed is treated as owning, so refusal is fail-closed.
+ */
+export function ownsRecipeChannel(base: string): boolean {
+  if (base.startsWith("[")) {
+    const named = base.match(/^\[\s*([a-zA-Z-]+)\s*:/);
+    if (!named) return true; // cannot prove it is harmless
+    return VISUAL_PROPERTIES.has(named[1].toLowerCase());
+  }
+  return OWNED_CHANNELS.test(base);
+}
 
 interface FoundNode {
   readonly line: number;
+  /** The EFFECTIVE className after applying the attribute list in source order. */
   readonly className: ts.Expression | null;
+  /** The EFFECTIVE style after applying the attribute list in source order. */
   readonly style: ts.Expression | null;
-  readonly hasStyleAttr: boolean;
+  /** Fatal problems found while modelling the attribute list. Non-empty ⇒ fail. */
+  readonly attrProblems: string[];
+}
+
+/**
+ * Resolve an expression to the property map of an object literal, following
+ * immutable const aliases and nested spreads. `null` when it cannot be proven.
+ */
+function objectLiteralProps(
+  sf: ts.SourceFile,
+  expr: ts.Expression,
+  depth = 0,
+): Map<string, ts.Expression> | null {
+  if (depth > 8) return null;
+  const consts = constInitializers(sf);
+  let node: ts.Expression = expr;
+  while (ts.isParenthesizedExpression(node) || ts.isAsExpression(node)) node = node.expression;
+  if (ts.isIdentifier(node)) {
+    const init = consts.get(node.text);
+    return init ? objectLiteralProps(sf, init, depth + 1) : null;
+  }
+  if (!ts.isObjectLiteralExpression(node)) return null;
+  const out = new Map<string, ts.Expression>();
+  for (const prop of node.properties) {
+    if (ts.isSpreadAssignment(prop)) {
+      const inner = objectLiteralProps(sf, prop.expression, depth + 1);
+      if (!inner) return null;
+      for (const [k, v] of inner) out.set(k, v);
+      continue;
+    }
+    if (!ts.isPropertyAssignment(prop)) return null;
+    const key = ts.isIdentifier(prop.name) || ts.isStringLiteral(prop.name) ? prop.name.text : null;
+    if (key === null) return null;
+    out.set(key, prop.initializer);
+  }
+  return out;
 }
 
 /**
@@ -335,12 +414,25 @@ function findGoverned(sf: ts.SourceFile, surface: GovernedSurface): FoundNode[] 
       let matches = false;
       let className: ts.Expression | null = null;
       let style: ts.Expression | null = null;
-      let hasStyleAttr = false;
-      let spread = false;
+      const attrProblems: string[] = [];
+      // SOURCE ORDER, last-wins — which is what React actually does. A later
+      // spread overrides an earlier explicit attribute, and an earlier spread is
+      // genuinely overwritten by a later explicit one. The previous version
+      // collapsed spreads into an unenforced boolean, so a trailing
+      // `{...{ style: { backgroundColor } }}` transferred paint authority away
+      // from the recipe with all 20 tests still green.
       for (const prop of node.attributes.properties) {
-        // A JSX spread could carry className or style invisibly.
         if (ts.isJsxSpreadAttribute(prop)) {
-          spread = true;
+          const props = objectLiteralProps(sf, prop.expression);
+          if (!props) {
+            attrProblems.push(
+              `JSX spread {...${prop.expression.getText(sf).slice(0, 40)}} cannot be resolved, ` +
+                `so it may carry className or style`,
+            );
+            continue;
+          }
+          if (props.has("className")) className = props.get("className")!;
+          if (props.has("style")) style = props.get("style")!;
           continue;
         }
         if (!ts.isJsxAttribute(prop) || !ts.isIdentifier(prop.name)) continue;
@@ -356,11 +448,12 @@ function findGoverned(sf: ts.SourceFile, surface: GovernedSurface): FoundNode[] 
           const init = prop.initializer;
           if (init && ts.isJsxExpression(init) && init.expression) className = init.expression;
           else if (init && ts.isStringLiteral(init)) className = init;
+          else attrProblems.push("className is present but has no resolvable initializer");
         }
         if (name === "style") {
-          hasStyleAttr = true;
           const init = prop.initializer;
           if (init && ts.isJsxExpression(init) && init.expression) style = init.expression;
+          else attrProblems.push("style is present but has no resolvable initializer");
         }
       }
       if (matches) {
@@ -368,9 +461,7 @@ function findGoverned(sf: ts.SourceFile, surface: GovernedSurface): FoundNode[] 
           line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,
           className,
           style,
-          // A spread on a governed node could smuggle either attribute past the
-          // oracle, so it is recorded and refused rather than ignored.
-          hasStyleAttr: hasStyleAttr || spread,
+          attrProblems,
         });
       }
     }
@@ -399,6 +490,13 @@ describe("inset-hairline surfaces are owned by the shared recipe, per node", () 
       // even when its siblings still call the tuple.
       for (const [index, node] of nodes.entries()) {
         it(`instance ${index + 1} (line ${node.line}) is owned by the recipe`, () => {
+          // Attribute-list modelling first: an unresolvable spread means the
+          // effective className/style below cannot be trusted at all.
+          expect(
+            node.attrProblems,
+            `line ${node.line} has attributes this oracle cannot model: ` +
+              node.attrProblems.join("; "),
+          ).toEqual([]);
           expect(node.className, "the governed node has no className").not.toBeNull();
           const resolved = resolveClassName(sf, node.className!);
 
@@ -424,7 +522,7 @@ describe("inset-hairline surfaces are owned by the shared recipe, per node", () 
             unprovable,
             `line ${node.line} has class tokens this oracle cannot normalize: ${unprovable.join(", ")}`,
           ).toEqual([]);
-          const trespass = tokens.filter((t) => OWNED_CHANNELS.test(terminalUtility(t)!));
+          const trespass = tokens.filter((t) => ownsRecipeChannel(terminalUtility(t)!));
           expect(
             trespass,
             `line ${node.line} hand-authors ${trespass.join(", ")} beside the recipe`,
@@ -526,9 +624,40 @@ describe("inset-hairline surfaces are owned by the shared recipe, per node", () 
       expect(styleOf(`style={cond ? BOX : OTHER}`).unresolved).not.toEqual([]);
     });
 
-    it("records a JSX spread on a governed node, so nothing can ride in unseen", () => {
-      const sf = fixture(`{...rest} style={BOX}`);
-      expect(findGoverned(sf, TILE)[0].hasStyleAttr).toBe(true);
+    // The escape the ultimate review demonstrated: a LATER spread wins over the
+    // explicit legal style, exactly as React applies it. These assert the
+    // oracle's verdict, not an unused metadata bit — which is why the previous
+    // spread fixture passed while the hole was open.
+    it("REJECTS a later spread that overrides an allowed style", () => {
+      const sf = fixture(`style={BOX} {...{ style: { backgroundColor: "var(--color-panel)" } }}`);
+      const node = findGoverned(sf, TILE)[0];
+      expect(node.attrProblems).toEqual([]);
+      const resolved = resolveStyle(sf, node.style);
+      expect(resolved.props).toEqual({ backgroundColor: '"var(--color-panel)"' });
+      expect(resolved.props).not.toEqual({ ...TILE.style });
+    });
+
+    it("REJECTS a later spread that overrides className", () => {
+      const sf = fixture(`className={cn("flex", X)} {...{ className: "bg-panel shadow-well" }}`);
+      const node = findGoverned(sf, TILE)[0];
+      const resolved = resolveClassName(sf, node.className!);
+      expect(resolved.tuples).toEqual([]); // the recipe contribution is gone
+    });
+
+    it("accepts an earlier illegal spread PROVABLY overwritten by a later legal style", () => {
+      // Source order is modelled honestly: last wins, so this really is clean.
+      const sf = fixture(
+        `{...{ style: { backgroundColor: "var(--color-panel)" } }} style={{ width: 42, height: 42 }}`,
+      );
+      const node = findGoverned(sf, TILE)[0];
+      expect(node.attrProblems).toEqual([]);
+      expect(resolveStyle(sf, node.style).props).toEqual({ ...TILE.style });
+    });
+
+    it("fails CLOSED on an unresolvable JSX spread", () => {
+      for (const attrs of [`{...rest} style={BOX}`, `style={BOX} {...props.extra}`]) {
+        expect(findGoverned(fixture(attrs), TILE)[0].attrProblems).not.toEqual([]);
+      }
     });
   });
 
@@ -551,6 +680,11 @@ describe("inset-hairline surfaces are owned by the shared recipe, per node", () 
       expect(terminalUtility("data-[open:bg-panel")).toBeNull(); // unbalanced
       expect(terminalUtility("hover:")).toBeNull(); // empty terminal
       expect(terminalUtility("bg-panel]")).toBeNull(); // unbalanced
+      // Balanced but EMPTY intermediate segments — previously accepted, which
+      // contradicted the documented closure.
+      expect(terminalUtility("dark::flex")).toBeNull();
+      expect(terminalUtility(":flex")).toBeNull();
+      expect(terminalUtility("dark::hover:bg-panel")).toBeNull();
     });
 
     it("still catches every owned channel after normalization", () => {
@@ -561,8 +695,25 @@ describe("inset-hairline surfaces are owned by the shared recipe, per node", () 
         "md:rounded-control",
         "focus:ring-2",
       ]) {
-        expect(OWNED_CHANNELS.test(terminalUtility(token)!), token).toBe(true);
+        expect(ownsRecipeChannel(terminalUtility(token)!), token).toBe(true);
       }
+    });
+
+    it("treats an arbitrary PROPERTY naming a visual channel as ownership", () => {
+      // No conventional prefix, so the old check waved these through 20/20.
+      for (const token of [
+        "[background:var(--color-panel)]",
+        "dark:[background-color:red]",
+        "[box-shadow:inset_0_1px_2px_rgba(0,0,0,.05)]",
+        "hover:[border-radius:12px]",
+        "[border:1px_solid_var(--color-line2)]",
+      ]) {
+        expect(ownsRecipeChannel(terminalUtility(token)!), token).toBe(true);
+      }
+      // An unparseable arbitrary property is refused rather than guessed at.
+      expect(ownsRecipeChannel("[not-a-declaration]")).toBe(true);
+      // A layout arbitrary property is still fine.
+      expect(ownsRecipeChannel("[grid-area:header]")).toBe(false);
     });
 
     it("leaves legitimate layout utilities alone", () => {
@@ -577,7 +728,7 @@ describe("inset-hairline surfaces are owned by the shared recipe, per node", () 
         "pointer-coarse:min-h-touch",
         "sm:grid-cols-2",
       ]) {
-        expect(OWNED_CHANNELS.test(terminalUtility(token)!), token).toBe(false);
+        expect(ownsRecipeChannel(terminalUtility(token)!), token).toBe(false);
       }
     });
   });
