@@ -1489,6 +1489,44 @@ export function analyzeProgram(program: ts.Program, rootFilter?: (f: string) => 
     return null;
   };
 
+  /**
+   * Resolve a recipe options ARGUMENT to the object literal it really is,
+   * following the same proven-immutable alias graph the authority pass uses
+   * (`optionsProven`). Returns null when the value cannot be proven, which the
+   * caller must treat as a refusal rather than as "no emphasis".
+   *
+   * This closes the decisive-review bypass: the tuple pass used to look only at
+   * an INLINE object literal, so `const options: any = { role: "page",
+   * emphasis: "hairline" }; cn(surfaceVariants(options))` was classified
+   * sanctioned and never tuple-checked, even though the authority pass could
+   * already resolve that exact alias for its className inspection.
+   */
+  const resolveOptionsLiteral = (
+    node: ts.Expression,
+    seen: Set<ts.Symbol> = new Set(),
+  ): ts.ObjectLiteralExpression | null => {
+    if (ts.isObjectLiteralExpression(node)) return node;
+    if (
+      ts.isParenthesizedExpression(node) ||
+      ts.isAsExpression(node) ||
+      ts.isNonNullExpression(node)
+    ) {
+      return resolveOptionsLiteral(node.expression, seen);
+    }
+    if (ts.isIdentifier(node)) {
+      const symbol = symbolAt(node);
+      // A cycle is not a proof; refuse rather than recurse forever.
+      if (!symbol || seen.has(symbol)) return null;
+      seen.add(symbol);
+      if (!optionsProven(symbol)) return null;
+      const declaration = symbol.valueDeclaration;
+      if (declaration && ts.isVariableDeclaration(declaration) && declaration.initializer) {
+        return resolveOptionsLiteral(declaration.initializer, seen);
+      }
+    }
+    return null;
+  };
+
   const readOption = (literal: ts.ObjectLiteralExpression, name: string): Option => {
     let found = ABSENT;
     for (const property of literal.properties) {
@@ -1504,12 +1542,13 @@ export function analyzeProgram(program: ts.Program, rootFilter?: (f: string) => 
       } else if (ts.isShorthandPropertyAssignment(property) && property.name.text === name) {
         found = { values: null, present: true };
       } else if (ts.isSpreadAssignment(property)) {
-        const inner = property.expression;
-        if (ts.isObjectLiteralExpression(inner)) {
-          const nested = readOption(inner, name);
+        // A spread of a PROVEN immutable object contributes real, readable keys;
+        // anything else may carry either key, so refuse rather than guess.
+        const nestedLiteral = resolveOptionsLiteral(property.expression);
+        if (nestedLiteral) {
+          const nested = readOption(nestedLiteral, name);
           if (nested.present) found = nested;
         } else {
-          // An unprovable spread may carry either key; refuse rather than guess.
           found = { values: null, present: true };
         }
       }
@@ -1573,6 +1612,32 @@ export function analyzeProgram(program: ts.Program, rootFilter?: (f: string) => 
     }
   };
 
+  /**
+   * Judge ONE recipe options argument, whatever shape it arrives in. Fail-closed:
+   * an argument that cannot be resolved to a proven object literal is reported,
+   * because it may carry an `emphasis` this pass cannot see.
+   */
+  const checkTupleArgument = (file: ts.SourceFile, argument: ts.Expression, site: string) => {
+    // An explicit `undefined` (or no options at all) asks for nothing.
+    if (argument.kind === ts.SyntaxKind.UndefinedKeyword) return;
+    if (ts.isIdentifier(argument) && argument.text === "undefined") return;
+
+    const literal = resolveOptionsLiteral(argument);
+    if (!literal) {
+      tuplesChecked += 1;
+      tupleViolations.push({
+        file: rel(file),
+        line: lineOf(file, argument),
+        site,
+        tuple: "<unresolved>",
+        reason:
+          "recipe options that cannot be resolved to a proven immutable object may carry an illegal `emphasis`",
+      });
+      return;
+    }
+    checkTuple(file, literal, site, readOption(literal, "role"), readOption(literal, "emphasis"));
+  };
+
   for (const file of analyzed) {
     const visitTuples = (node: ts.Node) => {
       if (
@@ -1581,15 +1646,7 @@ export function analyzeProgram(program: ts.Program, rootFilter?: (f: string) => 
         kindOfCallee(node.expression) === "recipe"
       ) {
         for (const argument of node.arguments) {
-          if (ts.isObjectLiteralExpression(argument)) {
-            checkTuple(
-              file,
-              argument,
-              "surfaceVariants()",
-              readOption(argument, "role"),
-              readOption(argument, "emphasis"),
-            );
-          }
+          checkTupleArgument(file, argument, "surfaceVariants()");
         }
       } else if (ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node)) {
         const tag = node.tagName;
@@ -1903,6 +1960,102 @@ describe("adversarial fixtures — (role, emphasis) tuple legality", () => {
       "spread",
       "<unprovable>",
     );
+  });
+
+  // The decisive-review bypass, verbatim. `any` defeats `SurfaceVariantProps`,
+  // the object-literal initializer satisfies `optionsProven`, its only read is a
+  // direct recipe argument, and the result reaches a sanctioned `cn(...)` sink —
+  // so before this fixup the call was classified sanctioned with NO tuple check.
+  it("rejects an illegal tuple carried by a typed-`any` const options alias", () => {
+    illegal(
+      `const options: any = { role: "page", emphasis: "hairline" };
+       export const classes = cn(surfaceVariants(options));`,
+      "any const alias",
+      "page + hairline",
+    );
+  });
+
+  it("REFUSES an alias chain rather than following it", () => {
+    // `optionsProven` only accepts a const whose own initializer is an object
+    // literal AND whose every reference sits in a sanctioned options position.
+    // `inner` is read as another declaration's initializer, so neither link is
+    // proven and the call is refused. That is the fail-closed outcome — the
+    // tuple is never silently skipped, which is what the finding required.
+    illegal(
+      `const inner = { role: "raised", emphasis: "drop-candidate" };
+       const outer = inner;
+       export const classes = cn(surfaceVariants(outer));`,
+      "alias chain",
+      "<unresolved>",
+    );
+  });
+
+  it("resolves a PROVEN spread alias and judges the tuple it contributes", () => {
+    illegal(
+      `const base = { role: "surface" };
+       export const classes = cn(surfaceVariants({ ...base, emphasis: "hairline" }));`,
+      "proven spread",
+      "surface + hairline",
+    );
+  });
+
+  it("resolves a proven spread that carries the EMPHASIS onto an illegal role", () => {
+    illegal(
+      `const edge = { emphasis: "hairline" };
+       export const classes = cn(surfaceVariants({ role: "page", ...edge }));`,
+      "spread emphasis",
+      "page + hairline",
+    );
+  });
+
+  it("REFUSES an `as const` options alias, whose initializer is not a bare literal", () => {
+    illegal(
+      `const edge = { emphasis: "hairline" } as const;
+       export const classes = cn(surfaceVariants({ role: "page", ...edge }));`,
+      "as const spread",
+      "<unprovable>",
+    );
+  });
+
+  it("refuses an options argument it cannot resolve at all", () => {
+    illegal(
+      `declare const opts: any;
+       export const classes = cn(surfaceVariants(opts));`,
+      "unresolvable options",
+      "<unresolved>",
+    );
+  });
+
+  it("refuses a MUTABLE options alias, which could be reassigned before the call", () => {
+    illegal(
+      `let options: any = { role: "well", emphasis: "hairline" };
+       options = { role: "page", emphasis: "hairline" };
+       export const classes = cn(surfaceVariants(options));`,
+      "mutable alias",
+      "<unresolved>",
+    );
+  });
+
+  it("still accepts a LEGAL tuple delivered through a proven const alias", () => {
+    const r = analyzeFixture({
+      "components/probe.tsx":
+        head +
+        `const options = { role: "well", geometry: "control", emphasis: "hairline" };
+         export const classes = cn(surfaceVariants(options));`,
+    });
+    expect(r.tuples.illegal).toEqual([]);
+    expect(r.tuples.checked).toBe(1);
+  });
+
+  it("still accepts a LEGAL tuple assembled from a proven spread", () => {
+    const r = analyzeFixture({
+      "components/probe.tsx":
+        head +
+        `const base = { role: "well", geometry: "control" };
+         export const classes = cn(surfaceVariants({ ...base, emphasis: "drop-candidate" }));`,
+    });
+    expect(r.tuples.illegal).toEqual([]);
+    expect(r.tuples.checked).toBe(1);
   });
 
   it("accepts the two sanctioned recessed-row tuples", () => {
