@@ -295,6 +295,11 @@ function resolveBinding(sf: ts.SourceFile, id: ts.Identifier): Binding {
     };
   }
   const decl = decls[0];
+  // A destructured binding is a BindingElement, not a VariableDeclaration — name
+  // the actual mechanism rather than reporting a bare SyntaxKind.
+  if (ts.isBindingElement(decl)) {
+    return { kind: "fail", reason: `"${id.text}" comes from a destructuring pattern` };
+  }
   if (!ts.isVariableDeclaration(decl)) {
     return {
       kind: "fail",
@@ -359,81 +364,194 @@ interface Contribution {
 }
 
 /**
- * What a `className` expression actually contributes, resolved through `cn` and
- * immutable const aliases. Fail-closed by construction.
+ * Static truthiness of a condition, when — and only when — it is a literal.
+ * `undefined` means "not statically known", which is the conservative default.
  */
-function resolveClassName(sf: ts.SourceFile, expr: ts.Expression): Contribution {
-  const tuples: Record<string, string>[] = [];
-  const literals: string[] = [];
-  const unresolved: string[] = [];
-  const seen = new Set<ts.Node>();
+function staticTruthiness(node: ts.Expression): boolean | undefined {
+  let n: ts.Expression = node;
+  while (ts.isParenthesizedExpression(n) || ts.isAsExpression(n)) n = n.expression;
+  if (n.kind === ts.SyntaxKind.TrueKeyword) return true;
+  if (n.kind === ts.SyntaxKind.FalseKeyword) return false;
+  if (n.kind === ts.SyntaxKind.NullKeyword) return false;
+  if (ts.isIdentifier(n) && n.text === "undefined") return false;
+  if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) return n.text.length > 0;
+  if (ts.isNumericLiteral(n)) return Number(n.text) !== 0;
+  return undefined;
+}
 
-  const visit = (node: ts.Node): void => {
-    if (seen.has(node)) return;
-    seen.add(node);
+/**
+ * CONTROL FLOW.
+ *
+ * The previous version visited both arms of a conditional and both sides of a
+ * logical operator and UNIONED the result, so `false ? surfaceVariants(…) :
+ * "flex"` looked like it owned the recipe when at runtime the element only ever
+ * gets `"flex"`. A union answers “could some path contribute the recipe?”;
+ * ownership needs “does EVERY reachable path contribute it?”
+ *
+ * So an expression resolves to a list of ALTERNATIVES — one per runtime path —
+ * and the caller requires every alternative to satisfy the contract
+ * independently. Sequential composition (`cn(a, b)`, array elements, template
+ * spans) is a cartesian product across alternatives. A statically-literal
+ * condition collapses to the branch that actually runs; anything else keeps
+ * both. Short-circuit outcomes are modelled explicitly, so the falsy path of
+ * `cond && recipe` is a real alternative that contributes no recipe — and
+ * therefore fails.
+ */
+function resolveClassNamePaths(sf: ts.SourceFile, expr: ts.Expression): Contribution[] {
+  const EMPTY: Contribution = { tuples: [], literals: [], unresolved: [] };
+  const merge = (a: Contribution, b: Contribution): Contribution => ({
+    tuples: [...a.tuples, ...b.tuples],
+    literals: [...a.literals, ...b.literals],
+    unresolved: [...a.unresolved, ...b.unresolved],
+  });
+  const cross = (left: Contribution[], right: Contribution[]): Contribution[] =>
+    left.flatMap((l) => right.map((r) => merge(l, r)));
+  const only = (c: Partial<Contribution>): Contribution[] => [{ ...EMPTY, ...c }];
 
-    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
-      literals.push(node.text);
-      return;
-    }
-    if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node))
-      return visit(node.expression);
-    if (ts.isConditionalExpression(node)) {
-      visit(node.whenTrue);
-      visit(node.whenFalse);
-      return;
-    }
-    if (ts.isBinaryExpression(node)) {
-      visit(node.left);
-      visit(node.right);
-      return;
-    }
-    if (ts.isTemplateExpression(node)) {
-      literals.push(node.head.text);
-      for (const span of node.templateSpans) {
-        visit(span.expression);
-        literals.push(span.literal.text);
+  const active = new Set<ts.Node>();
+
+  const alts = (node: ts.Node): Contribution[] => {
+    // Cycle guard: an alias that refers to itself resolves to a refusal, never
+    // to infinite recursion.
+    if (active.has(node)) return only({ unresolved: ["cyclic class expression"] });
+    active.add(node);
+    try {
+      if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+        return only({ literals: [node.text] });
       }
-      return;
+      if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node))
+        return alts(node.expression);
+
+      if (ts.isConditionalExpression(node)) {
+        const known = staticTruthiness(node.condition);
+        if (known === true) return alts(node.whenTrue);
+        if (known === false) return alts(node.whenFalse);
+        // Both arms are reachable, so both must own the recipe on their own.
+        return [...alts(node.whenTrue), ...alts(node.whenFalse)];
+      }
+
+      if (ts.isBinaryExpression(node)) {
+        const op = node.operatorToken.kind;
+        const known = staticTruthiness(node.left);
+        if (op === ts.SyntaxKind.AmpersandAmpersandToken) {
+          // left falsy ⇒ the VALUE is left's falsy value: no classes at all.
+          if (known === true) return alts(node.right);
+          if (known === false) return only({});
+          return [...only({}), ...alts(node.right)];
+        }
+        if (op === ts.SyntaxKind.BarBarToken) {
+          if (known === true) return alts(node.left);
+          if (known === false) return alts(node.right);
+          return [...alts(node.left), ...alts(node.right)];
+        }
+        if (op === ts.SyntaxKind.QuestionQuestionToken) {
+          // Only `null`/`undefined` take the right side; other falsy values do not.
+          const nullish =
+            node.left.kind === ts.SyntaxKind.NullKeyword ||
+            (ts.isIdentifier(node.left) && node.left.text === "undefined");
+          if (nullish) return alts(node.right);
+          if (known !== undefined) return alts(node.left);
+          return [...alts(node.left), ...alts(node.right)];
+        }
+        return only({ unresolved: [`unmodelled operator ${ts.tokenToString(op)}`] });
+      }
+
+      if (ts.isTemplateExpression(node)) {
+        let paths = only({ literals: [node.head.text] });
+        for (const span of node.templateSpans) {
+          paths = cross(paths, alts(span.expression));
+          paths = cross(paths, only({ literals: [span.literal.text] }));
+        }
+        return paths;
+      }
+
+      if (ts.isArrayLiteralExpression(node)) {
+        let paths: Contribution[] = only({});
+        for (const el of node.elements) {
+          paths = cross(paths, alts(ts.isSpreadElement(el) ? el.expression : el));
+        }
+        return paths;
+      }
+
+      if (ts.isObjectLiteralExpression(node)) {
+        const literals: string[] = [];
+        const unresolved: string[] = [];
+        for (const property of node.properties) {
+          if (ts.isPropertyAssignment(property)) {
+            const key = property.name;
+            if (ts.isIdentifier(key) || ts.isStringLiteral(key)) literals.push(key.text);
+            else if (ts.isComputedPropertyName(key) && ts.isStringLiteral(key.expression)) {
+              literals.push(key.expression.text);
+            } else unresolved.push("dynamic computed key in a class list");
+          } else if (ts.isShorthandPropertyAssignment(property)) {
+            literals.push(property.name.text);
+          } else unresolved.push("spread inside a class object literal");
+        }
+        return only({ literals, unresolved });
+      }
+
+      if (ts.isCallExpression(node)) {
+        if (!ts.isIdentifier(node.expression)) {
+          return only({ unresolved: [`indirect call ${node.expression.getText(sf)}`] });
+        }
+        const callee = node.expression.text;
+        // Identity, not spelling: a locally-declared or wrong-module
+        // `surfaceVariants` is NOT the authority, and neither is a shadowed `cn`.
+        if (isRecipeCall(sf, node.expression)) {
+          const options = recipeOptions(node.arguments[0]);
+          return options === null
+            ? only({ unresolved: ["surfaceVariants called with a non-literal argument"] })
+            : only({ tuples: [options] });
+        }
+        if (isCombinerCall(sf, node.expression)) {
+          let paths: Contribution[] = only({});
+          for (const argument of node.arguments) paths = cross(paths, alts(argument));
+          return paths;
+        }
+        return only({
+          unresolved: [
+            `opaque call ${callee}(...) — not the canonical surfaceVariants or class combiner`,
+          ],
+        });
+      }
+
+      if (ts.isIdentifier(node)) {
+        const bound = resolveBinding(sf, node);
+        return bound.kind === "fail" ? only({ unresolved: [bound.reason] }) : alts(bound.init);
+      }
+
+      // A bare `true`/`false`/`null`/`undefined` in a class list contributes
+      // nothing — which for a governed node means that path owns no recipe.
+      if (
+        node.kind === ts.SyntaxKind.TrueKeyword ||
+        node.kind === ts.SyntaxKind.FalseKeyword ||
+        node.kind === ts.SyntaxKind.NullKeyword ||
+        ts.isNumericLiteral(node) ||
+        (ts.isIdentifier(node) && (node as ts.Identifier).text === "undefined")
+      ) {
+        return only({});
+      }
+      return only({ unresolved: [`unmodelled ${ts.SyntaxKind[node.kind]}`] });
+    } finally {
+      active.delete(node);
     }
-    if (ts.isCallExpression(node)) {
-      if (!ts.isIdentifier(node.expression)) {
-        unresolved.push(`indirect call ${node.expression.getText(sf)}`);
-        return;
-      }
-      const callee = node.expression.text;
-      // Identity, not spelling: a locally-declared or wrong-module
-      // `surfaceVariants` is NOT the authority, and neither is a shadowed `cn`.
-      if (isRecipeCall(sf, node.expression)) {
-        const options = recipeOptions(node.arguments[0]);
-        if (options === null) unresolved.push("surfaceVariants called with a non-literal argument");
-        else tuples.push(options);
-        return;
-      }
-      if (isCombinerCall(sf, node.expression)) {
-        node.arguments.forEach(visit);
-        return;
-      }
-      unresolved.push(
-        `opaque call ${callee}(...) — not the canonical surfaceVariants or class combiner`,
-      );
-      return;
-    }
-    if (ts.isIdentifier(node)) {
-      const bound = resolveBinding(sf, node);
-      if (bound.kind === "fail") {
-        unresolved.push(bound.reason);
-        return;
-      }
-      visit(bound.init);
-      return;
-    }
-    if (node.kind === ts.SyntaxKind.TrueKeyword || node.kind === ts.SyntaxKind.FalseKeyword) return;
-    unresolved.push(`unmodelled ${ts.SyntaxKind[node.kind]}`);
   };
 
-  visit(expr);
-  return { tuples, literals, unresolved };
+  return alts(expr);
+}
+
+/**
+ * Backwards-compatible single-contribution view, used only where the caller
+ * genuinely wants the union (the reserved-card negative, which asserts that NO
+ * path contributes a tuple).
+ */
+function resolveClassName(sf: ts.SourceFile, expr: ts.Expression): Contribution {
+  const paths = resolveClassNamePaths(sf, expr);
+  return {
+    tuples: paths.flatMap((p) => p.tuples),
+    literals: paths.flatMap((p) => p.literals),
+    unresolved: paths.flatMap((p) => p.unresolved),
+  };
 }
 
 /**
@@ -728,35 +846,41 @@ describe("inset-hairline surfaces are owned by the shared recipe, per node", () 
               node.attrProblems.join("; "),
           ).toEqual([]);
           expect(node.className, "the governed node has no className").not.toBeNull();
-          const resolved = resolveClassName(sf, node.className!);
 
-          expect(
-            resolved.unresolved,
-            `className contains shapes this oracle refuses to model, so ownership ` +
-              `cannot be proven: ${resolved.unresolved.join("; ")}`,
-          ).toEqual([]);
+          // EVERY runtime path must own the recipe on its own. A union across
+          // branches would let `cond ? recipe : "flex"` pass while the element
+          // sometimes renders with no recipe at all.
+          const paths = resolveClassNamePaths(sf, node.className!);
+          expect(paths.length, `line ${node.line} produced no class path`).toBeGreaterThan(0);
 
-          expect(
-            resolved.tuples,
-            `line ${node.line} must derive its surface from exactly one ` +
-              `surfaceVariants(${JSON.stringify(GOVERNED_TUPLE)}) call, but contributed ` +
-              `${JSON.stringify(resolved.tuples)}`,
-          ).toEqual([{ ...GOVERNED_TUPLE }]);
+          paths.forEach((resolved, pathIndex) => {
+            const where = `line ${node.line}, path ${pathIndex + 1} of ${paths.length}`;
+            expect(
+              resolved.unresolved,
+              `${where} contains shapes this oracle refuses to model, so ownership ` +
+                `cannot be proven: ${resolved.unresolved.join("; ")}`,
+            ).toEqual([]);
 
-          // No literal beside the recipe may re-state what the recipe owns.
-          // Variant chains are normalized to their terminal utility, and an
-          // unprovable token fails rather than being waved through.
-          const tokens = resolved.literals.flatMap((lit) => lit.split(/\s+/)).filter(Boolean);
-          const unprovable = tokens.filter((t) => terminalUtility(t) === null);
-          expect(
-            unprovable,
-            `line ${node.line} has class tokens this oracle cannot normalize: ${unprovable.join(", ")}`,
-          ).toEqual([]);
-          const trespass = tokens.filter((t) => ownsRecipeChannel(terminalUtility(t)!));
-          expect(
-            trespass,
-            `line ${node.line} hand-authors ${trespass.join(", ")} beside the recipe`,
-          ).toEqual([]);
+            expect(
+              resolved.tuples,
+              `${where} must derive its surface from exactly one ` +
+                `surfaceVariants(${JSON.stringify(GOVERNED_TUPLE)}) call, but contributed ` +
+                `${JSON.stringify(resolved.tuples)}`,
+            ).toEqual([{ ...GOVERNED_TUPLE }]);
+
+            // No literal beside the recipe may re-state what the recipe owns.
+            const tokens = resolved.literals.flatMap((lit) => lit.split(/\s+/)).filter(Boolean);
+            const unprovable = tokens.filter((t) => terminalUtility(t) === null);
+            expect(
+              unprovable,
+              `${where} has class tokens this oracle cannot normalize: ${unprovable.join(", ")}`,
+            ).toEqual([]);
+            const trespass = tokens.filter((t) => ownsRecipeChannel(terminalUtility(t)!));
+            expect(
+              trespass,
+              `${where} hand-authors ${trespass.join(", ")} beside the recipe`,
+            ).toEqual([]);
+          });
 
           // INLINE STYLE. React's style wins over every class, so a node can own
           // the recipe's channels here without any class-level oracle noticing.
@@ -1003,6 +1127,57 @@ describe("inset-hairline surfaces are owned by the shared recipe, per node", () 
       expect(judge(src).node.attrProblems.length).toBeGreaterThan(0);
     });
 
+    it.each([
+      [
+        "function declaration",
+        `function P() { return { style: {} }; }
+         const R = () => <div data-testid="synthetic-OFF" {...P} />;`,
+        /not a const initializer/,
+      ],
+      [
+        "class declaration",
+        `class P { }
+         const R = () => <div data-testid="synthetic-OFF" {...P} />;`,
+        /not a const initializer/,
+      ],
+      [
+        "destructured const",
+        `const { P } = someObject;
+         const R = () => <div data-testid="synthetic-OFF" {...P} />;`,
+        /destructuring pattern/,
+      ],
+      [
+        "callback parameter",
+        `const R = items.map((P) => <div data-testid="synthetic-OFF" {...P} />);`,
+        /not a const initializer/,
+      ],
+      [
+        "declaration with no initializer",
+        `declare const P: { style: object };
+         const R = () => <div data-testid="synthetic-OFF" {...P} />;`,
+        /no initializer/,
+      ],
+    ])("fails CLOSED on a %s, with a truthful reason", (_label, src, reason) => {
+      const sf = parseFixtureSource(src);
+      const node = findGoverned(sf, RESERVED)[0];
+      // The spread itself is refused, so the node is unjudgeable — which is the
+      // fail-closed outcome.
+      expect(node.attrProblems.length).toBeGreaterThan(0);
+      // And the underlying reason is the mechanism, not a generic message.
+      const id = (() => {
+        let found: ts.Identifier | undefined;
+        const walk = (n: ts.Node) => {
+          if (ts.isJsxSpreadAttribute(n) && ts.isIdentifier(n.expression)) found = n.expression;
+          ts.forEachChild(n, walk);
+        };
+        walk(sf);
+        return found!;
+      })();
+      const bound = resolveBinding(sf, id);
+      expect(bound.kind).toBe("fail");
+      if (bound.kind === "fail") expect(bound.reason).toMatch(reason);
+    });
+
     it("leaves duplicate same-scope declarations to typecheck, which rejects them", () => {
       // Not an oracle guard, and saying otherwise would be false: TypeScript
       // treats a redeclared block-scoped const as a DIAGNOSTIC, not a merged
@@ -1117,6 +1292,94 @@ describe("inset-hairline surfaces are owned by the shared recipe, per node", () 
       // The LOCAL illegal string is what resolves, so the trespass is visible.
       const tokens = resolved.literals.flatMap((l) => l.split(/\s+/)).filter(Boolean);
       expect(tokens.filter((t) => ownsRecipeChannel(terminalUtility(t)!))).not.toEqual([]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // CONTROL FLOW. The round-6 resolver unioned both arms of a conditional and
+  // both sides of a logical operator, so an untaken branch could supply the
+  // recipe for a path that never runs. Ownership is a property of EVERY
+  // reachable path, not of their union.
+  // -------------------------------------------------------------------------
+  describe("oracle fixtures — control flow", () => {
+    const TILE_CF = {
+      label: "cf tile",
+      file: "fixture.tsx",
+      attr: "data-slot",
+      value: "shift-tile",
+      count: 1,
+      style: {},
+    } as const satisfies GovernedSurface;
+
+    const RECIPE = `surfaceVariants({ role: "well", geometry: "control", emphasis: "hairline" })`;
+    const TUPLE = { role: "well", geometry: "control", emphasis: "hairline" };
+
+    /** Alternatives for a governed node whose className is `expr`. */
+    const paths = (expr: string) => {
+      const sf = parseFixtureSource(
+        `const X = <div data-slot="shift-tile" className={${expr}} />;`,
+      );
+      const node = findGoverned(sf, TILE_CF)[0];
+      return resolveClassNamePaths(sf, node.className!);
+    };
+    /** Does every path own exactly the governed tuple? */
+    const everyPathOwns = (expr: string) => {
+      const all = paths(expr);
+      return (
+        all.length > 0 &&
+        all.every(
+          (p) => p.unresolved.length === 0 && JSON.stringify(p.tuples) === JSON.stringify([TUPLE]),
+        )
+      );
+    };
+
+    it("REJECTS the `false ? recipe : flex` bypass, and its inverse", () => {
+      // The untaken arm supplies the recipe; the live arm is a bare layout
+      // string. A union said “owned”; per-path says the live path owns nothing.
+      expect(everyPathOwns(`false ? ${RECIPE} : "flex"`)).toBe(false);
+      expect(paths(`false ? ${RECIPE} : "flex"`)).toHaveLength(1); // collapsed to the live arm
+      // Inverse: the live arm IS the recipe, so this is genuinely owned.
+      expect(everyPathOwns(`false ? "flex" : ${RECIPE}`)).toBe(true);
+      expect(everyPathOwns(`true ? ${RECIPE} : "flex"`)).toBe(true);
+    });
+
+    it("requires BOTH arms of a dynamic ternary to own the recipe", () => {
+      expect(everyPathOwns(`cond ? ${RECIPE} : "flex"`)).toBe(false); // one arm only
+      expect(everyPathOwns(`cond ? "flex" : ${RECIPE}`)).toBe(false);
+      expect(everyPathOwns(`cond ? ${RECIPE} : ${RECIPE}`)).toBe(true); // both arms
+      expect(paths(`cond ? ${RECIPE} : "flex"`)).toHaveLength(2);
+    });
+
+    it("models `&&` short-circuit: the falsy path contributes no recipe", () => {
+      expect(everyPathOwns(`cond && ${RECIPE}`)).toBe(false);
+      expect(everyPathOwns(`true && ${RECIPE}`)).toBe(true); // statically taken
+      expect(everyPathOwns(`false && ${RECIPE}`)).toBe(false); // never runs
+      expect(paths(`cond && ${RECIPE}`)).toHaveLength(2);
+    });
+
+    it("models `||` and `??` outcomes", () => {
+      expect(everyPathOwns(`cond || ${RECIPE}`)).toBe(false); // truthy path is `cond`
+      expect(everyPathOwns(`"" || ${RECIPE}`)).toBe(true); // statically falsy left
+      expect(everyPathOwns(`"flex" || ${RECIPE}`)).toBe(false); // statically truthy left
+      expect(everyPathOwns(`maybe ?? ${RECIPE}`)).toBe(false); // non-nullish path is `maybe`
+      expect(everyPathOwns(`null ?? ${RECIPE}`)).toBe(true);
+    });
+
+    it("expands nested conditionals into every reachable path", () => {
+      expect(everyPathOwns(`a ? (b ? ${RECIPE} : "flex") : ${RECIPE}`)).toBe(false);
+      expect(everyPathOwns(`a ? (b ? ${RECIPE} : ${RECIPE}) : ${RECIPE}`)).toBe(true);
+      expect(paths(`a ? (b ? "x" : "y") : "z"`)).toHaveLength(3);
+    });
+
+    it("keeps a conditional INSIDE cn() honest, per path", () => {
+      // The live code shape, with a conditional smuggled in beside the recipe.
+      expect(everyPathOwns(`cn("flex", ${RECIPE})`)).toBe(true);
+      expect(everyPathOwns(`cn("flex", cond ? ${RECIPE} : "")`)).toBe(false);
+      expect(everyPathOwns(`cn("flex", cond && "bg-panel", ${RECIPE})`)).toBe(true);
+      // …but the trespassing token still shows up on the path that has it.
+      const withTrespass = paths(`cn("flex", cond && "bg-panel", ${RECIPE})`);
+      expect(withTrespass).toHaveLength(2);
+      expect(withTrespass.some((p) => p.literals.includes("bg-panel"))).toBe(true);
     });
   });
 
