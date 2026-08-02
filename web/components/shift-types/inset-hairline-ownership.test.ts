@@ -92,23 +92,102 @@ function parse(relPath: string): ts.SourceFile {
   );
 }
 
-/** Module-level `const NAME = <expr>` initializers, for alias resolution. */
-function constInitializers(sf: ts.SourceFile): Map<string, ts.Expression> {
-  const out = new Map<string, ts.Expression>();
-  const visit = (node: ts.Node) => {
-    if (
-      ts.isVariableDeclaration(node) &&
+/**
+ * LEXICAL binding resolution.
+ *
+ * The previous version built one file-wide map keyed by bare NAME, so any
+ * declaration anywhere in the file could answer for an identifier anywhere else.
+ * A local illegal `const X` inside a component was silently replaced by a later
+ * module-level legal `const X` of the same name, and the governed node passed.
+ * **Name equality is not binding identity.**
+ *
+ * This resolves from the USE SITE outward: the first enclosing scope that
+ * declares the name answers, and every way the answer could be wrong — shadowed,
+ * ambiguous, imported, declared after use (TDZ), not a `const`, no initializer,
+ * or declared only in a sibling scope — fails closed instead of guessing.
+ *
+ * A full `ts.Program` + checker would also resolve this. Lexical resolution is
+ * used because the oracle governs two known files, needs no cross-module
+ * resolution, and refuses every unprovable case rather than approximating it.
+ */
+type Binding =
+  | { readonly kind: "ok"; readonly init: ts.Expression }
+  | { readonly kind: "fail"; readonly reason: string };
+
+/** Does this node introduce a declaration scope? */
+function isScopeBoundary(node: ts.Node): boolean {
+  return (
+    ts.isSourceFile(node) ||
+    ts.isBlock(node) ||
+    ts.isModuleBlock(node) ||
+    ts.isCaseBlock(node) ||
+    ts.isForStatement(node) ||
+    ts.isForInStatement(node) ||
+    ts.isForOfStatement(node) ||
+    ts.isArrowFunction(node) ||
+    ts.isFunctionDeclaration(node) ||
+    ts.isFunctionExpression(node) ||
+    ts.isMethodDeclaration(node)
+  );
+}
+
+/** Declarations of `name` introduced DIRECTLY by this scope, not by nested ones. */
+function declarationsInScope(scope: ts.Node, name: string): ts.Node[] {
+  const hits: ts.Node[] = [];
+  const scan = (node: ts.Node) => {
+    // Never descend into a nested scope: those are different bindings.
+    if (isScopeBoundary(node)) return;
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === name) {
+      hits.push(node);
+    } else if (ts.isImportSpecifier(node) && node.name.text === name) {
+      hits.push(node);
+    } else if (ts.isNamespaceImport(node) && node.name.text === name) {
+      hits.push(node);
+    } else if (
+      (ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) &&
+      node.name &&
       ts.isIdentifier(node.name) &&
-      node.initializer &&
-      ts.isVariableDeclarationList(node.parent) &&
-      (node.parent.flags & ts.NodeFlags.Const) !== 0
+      node.name.text === name
     ) {
-      out.set(node.name.text, node.initializer);
+      hits.push(node);
+    } else if (ts.isParameter(node) && ts.isIdentifier(node.name) && node.name.text === name) {
+      hits.push(node);
     }
-    ts.forEachChild(node, visit);
+    ts.forEachChild(node, scan);
   };
-  visit(sf);
-  return out;
+  ts.forEachChild(scope, scan);
+  return hits;
+}
+
+function resolveBinding(useSite: ts.Node, name: string): Binding {
+  for (let scope: ts.Node | undefined = useSite; scope; scope = scope.parent) {
+    if (!isScopeBoundary(scope)) continue;
+    const hits = declarationsInScope(scope, name);
+    if (hits.length === 0) continue; // not declared here — look outward
+
+    if (hits.length > 1) {
+      return { kind: "fail", reason: `"${name}" has ${hits.length} declarations in one scope` };
+    }
+    const decl = hits[0];
+    if (!ts.isVariableDeclaration(decl)) {
+      return {
+        kind: "fail",
+        reason: `"${name}" resolves to a ${ts.SyntaxKind[decl.kind]}, not a const initializer`,
+      };
+    }
+    const list = decl.parent;
+    if (!ts.isVariableDeclarationList(list) || (list.flags & ts.NodeFlags.Const) === 0) {
+      return { kind: "fail", reason: `"${name}" is not a const binding` };
+    }
+    if (!decl.initializer) return { kind: "fail", reason: `"${name}" has no initializer` };
+    // Temporal dead zone: a const used before its own declaration is a runtime
+    // error, never a silent fallback to some other binding of the same name.
+    if (decl.getStart() > useSite.getStart()) {
+      return { kind: "fail", reason: `"${name}" is used before it is declared (TDZ)` };
+    }
+    return { kind: "ok", init: decl.initializer };
+  }
+  return { kind: "fail", reason: `no visible binding for "${name}"` };
 }
 
 /** The literal `{ key: "value" }` of a recipe call, or null if not all literal. */
@@ -138,7 +217,6 @@ interface Contribution {
  * immutable const aliases. Fail-closed by construction.
  */
 function resolveClassName(sf: ts.SourceFile, expr: ts.Expression): Contribution {
-  const consts = constInitializers(sf);
   const tuples: Record<string, string>[] = [];
   const literals: string[] = [];
   const unresolved: string[] = [];
@@ -192,12 +270,12 @@ function resolveClassName(sf: ts.SourceFile, expr: ts.Expression): Contribution 
       return;
     }
     if (ts.isIdentifier(node)) {
-      const init = consts.get(node.text);
-      if (!init) {
-        unresolved.push(`unresolved identifier ${node.text}`);
+      const bound = resolveBinding(node, node.text);
+      if (bound.kind === "fail") {
+        unresolved.push(bound.reason);
         return;
       }
-      visit(init);
+      visit(bound.init);
       return;
     }
     if (node.kind === ts.SyntaxKind.TrueKeyword || node.kind === ts.SyntaxKind.FalseKeyword) return;
@@ -303,24 +381,21 @@ interface FoundNode {
  * Resolve an expression to the property map of an object literal, following
  * immutable const aliases and nested spreads. `null` when it cannot be proven.
  */
-function objectLiteralProps(
-  sf: ts.SourceFile,
-  expr: ts.Expression,
-  depth = 0,
-): Map<string, ts.Expression> | null {
+function objectLiteralProps(expr: ts.Expression, depth = 0): Map<string, ts.Expression> | null {
   if (depth > 8) return null;
-  const consts = constInitializers(sf);
   let node: ts.Expression = expr;
   while (ts.isParenthesizedExpression(node) || ts.isAsExpression(node)) node = node.expression;
   if (ts.isIdentifier(node)) {
-    const init = consts.get(node.text);
-    return init ? objectLiteralProps(sf, init, depth + 1) : null;
+    // Resolved from the USE SITE, so a shadowed or unprovable binding is refused
+    // rather than answered by an unrelated declaration of the same name.
+    const bound = resolveBinding(node, node.text);
+    return bound.kind === "ok" ? objectLiteralProps(bound.init, depth + 1) : null;
   }
   if (!ts.isObjectLiteralExpression(node)) return null;
   const out = new Map<string, ts.Expression>();
   for (const prop of node.properties) {
     if (ts.isSpreadAssignment(prop)) {
-      const inner = objectLiteralProps(sf, prop.expression, depth + 1);
+      const inner = objectLiteralProps(prop.expression, depth + 1);
       if (!inner) return null;
       for (const [k, v] of inner) out.set(k, v);
       continue;
@@ -342,7 +417,6 @@ function resolveStyle(
   sf: ts.SourceFile,
   expr: ts.Expression | null,
 ): { props: Record<string, string>; unresolved: string[] } {
-  const consts = constInitializers(sf);
   const props: Record<string, string> = {};
   const unresolved: string[] = [];
   const seen = new Set<ts.Node>();
@@ -354,12 +428,12 @@ function resolveStyle(
     if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node))
       return visit(node.expression);
     if (ts.isIdentifier(node)) {
-      const init = consts.get(node.text);
-      if (!init) {
-        unresolved.push(`style alias ${node.text} is not a resolvable const`);
+      const bound = resolveBinding(node, node.text);
+      if (bound.kind === "fail") {
+        unresolved.push(`style alias: ${bound.reason}`);
         return;
       }
-      return visit(init);
+      return visit(bound.init);
     }
     if (!ts.isObjectLiteralExpression(node)) {
       unresolved.push(`style is ${ts.SyntaxKind[node.kind]}, which cannot be proven`);
@@ -423,7 +497,7 @@ function findGoverned(sf: ts.SourceFile, surface: GovernedSurface): FoundNode[] 
       // from the recipe with all 20 tests still green.
       for (const prop of node.attributes.properties) {
         if (ts.isJsxSpreadAttribute(prop)) {
-          const props = objectLiteralProps(sf, prop.expression);
+          const props = objectLiteralProps(prop.expression);
           if (!props) {
             attrProblems.push(
               `JSX spread {...${prop.expression.getText(sf).slice(0, 40)}} cannot be resolved, ` +
@@ -658,6 +732,138 @@ describe("inset-hairline surfaces are owned by the shared recipe, per node", () 
       for (const attrs of [`{...rest} style={BOX}`, `style={BOX} {...props.extra}`]) {
         expect(findGoverned(fixture(attrs), TILE)[0].attrProblems).not.toEqual([]);
       }
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Binding identity. The round-4 oracle keyed aliases by bare NAME across the
+  // whole file, so a local illegal declaration could be answered by an unrelated
+  // module-level one of the same name. Name equality is not binding identity.
+  // -------------------------------------------------------------------------
+  describe("oracle fixtures — lexical binding", () => {
+    const RESERVED = {
+      label: "fixture reserved card",
+      file: "fixture.tsx",
+      attr: "data-testid",
+      value: (raw: string) => raw.includes("synthetic-"),
+      count: 1,
+      style: {},
+    } as const satisfies GovernedSurface;
+
+    const parseFixture = (src: string) =>
+      ts.createSourceFile("fixture.tsx", src, ts.ScriptTarget.ESNext, true, ts.ScriptKind.TSX);
+
+    /** The governed node's effective style, as the oracle would judge it. */
+    const judge = (src: string) => {
+      const sf = parseFixture(src);
+      const nodes = findGoverned(sf, RESERVED);
+      expect(nodes).toHaveLength(1);
+      return { node: nodes[0], style: resolveStyle(sf, nodes[0].style) };
+    };
+
+    it("REJECTS a local illegal spread masked by a later module-level legal const", () => {
+      // THE REPRODUCER. The local binding is what actually runs; the round-4
+      // bare-name map returned the module-level one and passed the target.
+      const { node, style } = judge(`
+        function ReservedCard() {
+          const REVIEW_SHADOW_PROPS = { style: { backgroundColor: "var(--color-panel)" } };
+          return <div data-testid="synthetic-OFF" style={{}} {...REVIEW_SHADOW_PROPS} />;
+        }
+        const REVIEW_SHADOW_PROPS = { style: {} };
+      `);
+      expect(node.attrProblems).toEqual([]);
+      // The LOCAL illegal binding won, so the effective style is not the allowlist.
+      expect(style.props).toEqual({ backgroundColor: '"var(--color-panel)"' });
+      expect(style.props).not.toEqual({ ...RESERVED.style });
+    });
+
+    it("ACCEPTS the inverse — local legal binding, module-level illegal of the same name", () => {
+      const { style } = judge(`
+        const REVIEW_SHADOW_PROPS = { style: { backgroundColor: "var(--color-panel)" } };
+        function ReservedCard() {
+          const REVIEW_SHADOW_PROPS = { style: {} };
+          return <div data-testid="synthetic-OFF" {...REVIEW_SHADOW_PROPS} />;
+        }
+      `);
+      expect(style.props).toEqual({});
+    });
+
+    it("honours a NESTED shadow — the innermost binding wins", () => {
+      const { style } = judge(`
+        const P = { style: {} };
+        function Outer() {
+          const P = { style: { border: "1px solid red" } };
+          function Inner() {
+            const P = { style: { backgroundColor: "var(--color-panel)" } };
+            return <div data-testid="synthetic-OFF" {...P} />;
+          }
+          return Inner;
+        }
+      `);
+      expect(style.props).toEqual({ backgroundColor: '"var(--color-panel)"' });
+    });
+
+    it("fails CLOSED when the only same-named const is in a SIBLING scope", () => {
+      // Not visible from the use site, so there is no binding to resolve — and
+      // the bare-name map would have handed over the sibling's value.
+      // The spread cannot be resolved, so the failure surfaces on the ATTRIBUTE
+      // LIST — which is the channel that makes the whole node unjudgeable.
+      const { node } = judge(`
+        function Sibling() {
+          const P = { style: {} };
+          return P;
+        }
+        function ReservedCard() {
+          return <div data-testid="synthetic-OFF" {...P} />;
+        }
+      `);
+      expect(node.attrProblems.length).toBeGreaterThan(0);
+    });
+
+    it.each([
+      [
+        "TDZ — used before its own declaration",
+        `function R() {
+           const el = <div data-testid="synthetic-OFF" {...P} />;
+           const P = { style: {} };
+           return el;
+         }`,
+      ],
+      [
+        "let, not const",
+        `let P = { style: {} };
+         const R = () => <div data-testid="synthetic-OFF" {...P} />;`,
+      ],
+      [
+        "imported binding — initializer lives in another module",
+        `import { P } from "./elsewhere";
+         const R = () => <div data-testid="synthetic-OFF" {...P} />;`,
+      ],
+      [
+        "declared twice in one scope",
+        `function R() {
+           const P = { style: {} };
+           const P = { style: { backgroundColor: "red" } };
+           return <div data-testid="synthetic-OFF" {...P} />;
+         }`,
+      ],
+    ])("fails CLOSED on %s", (_label, src) => {
+      expect(judge(src).node.attrProblems.length).toBeGreaterThan(0);
+    });
+
+    it("resolves className aliases lexically too, not by bare name", () => {
+      const sf = parseFixture(`
+        function ReservedCard() {
+          const CLS = "bg-panel shadow-well";
+          return <div data-testid="synthetic-OFF" className={CLS} />;
+        }
+        const CLS = "flex";
+      `);
+      const node = findGoverned(sf, RESERVED)[0];
+      const resolved = resolveClassName(sf, node.className!);
+      // The LOCAL illegal string is what resolves, so the trespass is visible.
+      const tokens = resolved.literals.flatMap((l) => l.split(/\s+/)).filter(Boolean);
+      expect(tokens.filter((t) => ownsRecipeChannel(terminalUtility(t)!))).not.toEqual([]);
     });
   });
 
