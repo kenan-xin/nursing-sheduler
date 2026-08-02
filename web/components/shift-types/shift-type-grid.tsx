@@ -100,9 +100,15 @@ type CurrentState = () => ScenarioUiState;
 
 const SHIFT_GROUPS_CONFIG: GroupsSectionConfig = {
   heading: "Shift groups",
+  // Verbatim from the canonical screen (ScreenShifts.dc.html:159).
+  description: "Bundle shifts so rules can target them together — e.g. “count all working shifts”.",
   addLabel: "Group",
+  // Canonical empty state, verbatim from ScreenShifts.dc.html:185-188. Shifts
+  // authors ALL first and the prompt after it, which is the default placement.
+  emptyTitle: "No custom shift groups yet",
   emptyText:
-    "No custom shift groups yet — bundle shift types so a rule can count or target them together.",
+    "Bundle shift types — like “Working” or “Night” — so a rule can count or target them together.",
+  emptyActionLabel: "New group",
   showMemberSearch: false,
   selectedPaneLabel: "IN GROUP",
   selectedTestKey: "in-group",

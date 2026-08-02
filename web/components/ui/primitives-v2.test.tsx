@@ -14,7 +14,7 @@ import { Switch } from "./switch";
 import { Label } from "./label";
 import { Separator } from "./separator";
 import { InfoTip } from "./info-tip";
-import { Surface, surfaceVariants } from "./surface";
+import { Surface, surfaceVariants, type SurfaceRole } from "./surface";
 import { ToggleGroup, ToggleGroupItem } from "./toggle-group";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "./dialog";
 import {
@@ -469,6 +469,161 @@ describe("Surface / surfaceVariants — the single visual authority", () => {
     const dragging = surfaceVariants({ role: "surface", interaction: "dragging" });
     expect(dragging).toContain("cursor-grabbing");
     expect(dragging).toContain("opacity-50");
+  });
+
+  // ii7.8.5.2 — the recessed-row `emphasis` axis. ONE axis, legal only on a
+  // `well`, so the illegal tuples are unrepresentable rather than merely unused.
+  it("adds the canonical --line2 hairline through `emphasis`, and only on request", () => {
+    expect(surfaceVariants({ role: "well", geometry: "control", emphasis: "hairline" })).toContain(
+      "border-line2",
+    );
+    // Opt-in: the bare role is byte-identical to what it produced before the
+    // axis existed, so no existing `well` consumer moves.
+    expect(surfaceVariants({ role: "well", geometry: "control" })).not.toContain("border");
+  });
+
+  it("gives a drop candidate an EDGE, never an elevation, so the well keeps its own light", () => {
+    const wellDrop = surfaceVariants({
+      role: "well",
+      geometry: "control",
+      emphasis: "drop-candidate",
+    });
+    expect(wellDrop).toContain("border-dashed");
+    expect(wellDrop).toContain("border-brand");
+    // The whole point: a recessed row stays recessed while it is a drop target.
+    expect(wellDrop).toContain("shadow-well");
+    expect(wellDrop).not.toContain("shadow-2");
+    expect(wellDrop).not.toContain("bg-panel-alt");
+    // Dashed, because a solid brand edge is the selection language (§6).
+    expect(wellDrop).not.toContain("bg-brandtint");
+  });
+
+  it("cannot express two edges at once — emphasis is a single axis", () => {
+    // The earlier `edge` + `drop` pair could emit `border-line2` AND
+    // `border-dashed border-brand` together, leaving the winner to merge order.
+    // Exactly one emphasis class is now reachable per call.
+    const hairline = surfaceVariants({ role: "well", geometry: "control", emphasis: "hairline" });
+    const drop = surfaceVariants({
+      role: "well",
+      geometry: "control",
+      emphasis: "drop-candidate",
+    });
+    expect(hairline).not.toContain("border-dashed");
+    expect(hairline).not.toContain("border-brand");
+    expect(drop).not.toContain("border-line2");
+  });
+
+  it("rejects every illegal (role, emphasis) tuple at the TYPE boundary", () => {
+    // @ts-expect-error — the page plane is never a bordered box.
+    surfaceVariants({ role: "page", geometry: "square", emphasis: "hairline" });
+    // @ts-expect-error — a raised surface is never a recessed row.
+    surfaceVariants({ role: "raised", geometry: "card", emphasis: "drop-candidate" });
+    // @ts-expect-error — an L1 card is not a recessed row either.
+    surfaceVariants({ role: "surface", geometry: "card", emphasis: "hairline" });
+    // @ts-expect-error — `emphasis` without a role falls back to `surface`.
+    surfaceVariants({ geometry: "control", emphasis: "hairline" });
+    // @ts-expect-error — the retired loose axes are gone, not merely unused.
+    surfaceVariants({ role: "well", geometry: "control", edge: "hairline" });
+    // @ts-expect-error — ditto.
+    surfaceVariants({ role: "well", geometry: "control", drop: "candidate" });
+
+    // ...and the two sanctioned tuples still compile and still paint.
+    expect(surfaceVariants({ role: "well", geometry: "control", emphasis: "hairline" })).toContain(
+      "bg-panel",
+    );
+    expect(
+      surfaceVariants({ role: "well", geometry: "control", emphasis: "drop-candidate" }),
+    ).toContain("bg-panel");
+  });
+
+  it("rejects an illegal Surface level/emphasis tuple at the TYPE boundary", () => {
+    // @ts-expect-error — only `level="well"` carries an emphasis.
+    expect(<Surface level="page" geometry="square" emphasis="hairline" />).toBeTruthy();
+    // @ts-expect-error — ditto for a raised container.
+    expect(<Surface level="raised" geometry="card" emphasis="drop-candidate" />).toBeTruthy();
+  });
+
+  // ii7.8.5.5 — RUNTIME discrimination. These record what CVA actually does, and
+  // are the reason the static analyzer has to fail closed on the same shapes.
+  it("drops an unknown emphasis value SILENTLY, which is why unknown must fail closed", () => {
+    const bare = surfaceVariants({ role: "well", geometry: "control" });
+
+    for (const value of ["hairline", "drop-candidate"] as const) {
+      const out = surfaceVariants({ role: "well", geometry: "control", emphasis: value });
+      expect(out, value).toContain("border");
+      expect(out, value).not.toBe(bare);
+    }
+
+    // An unrecognised value is not an error and not a fallback — the edge simply
+    // never renders, so a role-only check would pass a row with no border.
+    const bogus = surfaceVariants({
+      role: "well",
+      geometry: "control",
+      emphasis: "bogus",
+    } as unknown as Parameters<typeof surfaceVariants>[0]);
+    expect(bogus).toBe(bare);
+    expect(bogus).not.toContain("border");
+  });
+
+  it("emits BOTH `class` and `className`, in either written order", () => {
+    // class-variance-authority@0.7.1 ends in
+    // `cx(base, variants, compound, props.class, props.className)`, so the two
+    // are independent channels that BOTH always contribute — not two spellings
+    // of one slot. This is why the analyzer folds them separately: a safe value
+    // in one must never be able to hide an invalid value in the other.
+    const asOptions = (o: Record<string, string>) =>
+      o as unknown as Parameters<typeof surfaceVariants>[0];
+
+    const classFirst = surfaceVariants(
+      asOptions({ role: "well", class: "bg-error", className: "flex" }),
+    );
+    expect(classFirst).toContain("bg-error");
+    expect(classFirst).toContain("flex");
+
+    const classNameFirst = surfaceVariants(
+      asOptions({ role: "well", className: "bg-error", class: "flex" }),
+    );
+    expect(classNameFirst).toContain("bg-error");
+    expect(classNameFirst).toContain("flex");
+
+    // Fixed emission order, independent of the written order.
+    expect(classFirst.indexOf("bg-error")).toBeLessThan(classFirst.indexOf("flex"));
+    expect(classNameFirst.indexOf("flex")).toBeLessThan(classNameFirst.indexOf("bg-error"));
+  });
+
+  it("consumes INHERITED `__proto__` options, which a syntactic walk cannot see", () => {
+    // The exact shape the analyzer must refuse: `Object.keys` is empty, so a
+    // property walk finds nothing, yet CVA resolves both fields through the
+    // prototype chain and emits the forbidden page tone plus a row edge.
+    const poisoned = {
+      __proto__: { role: "page", emphasis: "hairline" },
+    } as unknown as Parameters<typeof surfaceVariants>[0];
+
+    expect(Object.keys(poisoned as object)).toEqual([]);
+
+    const out = surfaceVariants(poisoned);
+    expect(out).toContain("bg-bg");
+    expect(out).toContain("border-line2");
+  });
+
+  it("leaves every pre-existing role byte-identical — the new axes are additive", () => {
+    // Frozen expectations captured from the recipe BEFORE the two axes landed.
+    // If a future edit reaches into a role to add an edge, this fails.
+    const FROZEN: Record<SurfaceRole, string> = {
+      page: "bg-bg",
+      surface: "border border-line bg-surface shadow-1",
+      selected: "border border-brand bg-surface shadow-2",
+      "drop-target": "border border-dashed border-brand bg-panel-alt shadow-2",
+      raised: "border border-line bg-surface2 shadow-3",
+      drawer: "border-r border-line bg-sidebar shadow-side",
+      well: "bg-panel shadow-well",
+      band: "bg-panel",
+      zebra: "bg-panel-alt",
+      sticky: "border-b border-line bg-surface shadow-1",
+    };
+    for (const role of Object.keys(FROZEN) as SurfaceRole[]) {
+      expect(surfaceVariants({ role }), role).toBe(FROZEN[role]);
+    }
   });
 
   it("keeps the direction of light fixed — wells inset, raised surfaces outer", () => {

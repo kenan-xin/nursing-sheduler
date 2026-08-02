@@ -34,12 +34,37 @@
 // F2 owns this file's PRESENTATION only, and is its sole visual owner before F4 —
 // the route tickets configure it through public props and never edit it. Every
 // surface here goes through the shared `surfaceVariants` recipe rather than
-// restating tone/border/elevation, radius follows the semantic role (group cards
-// round at 16, the locked auto-group is an inset well at 12), the reorder/edit/
-// duplicate/delete controls are real 44x44 targets on a coarse pointer, and the
-// destructive control uses the `destructive-outline` Button variant instead of
-// hand-overriding a variant's colours. Mutation, validation, identity, stale-save,
-// reorder and membership behaviour are untouched.
+// restating tone/border/elevation, the reorder/edit/duplicate/delete controls are
+// real 44x44 targets on a coarse pointer, and the destructive control uses the
+// `destructive-outline` Button variant instead of hand-overriding a variant's
+// colours. Mutation, validation, identity, stale-save, reorder and membership
+// behaviour are untouched.
+//
+// SURFACE HIERARCHY (ii7.8.5 — measured against the rendered prototypes, not
+// inferred from token names). `ScreenStaff.dc.html:116-150` and
+// `ScreenShifts.dc.html:155-193` both author the groups block as ONE L1 card with
+// a header band, and every group row inside it as a `--panel` well:
+//
+//   section  L1 card      --surface / --line hairline / 16px / --sh-1 / no padding
+//   ├ header full-bleed   transparent / --line2 BOTTOM edge only / square / flat
+//   └ body   plain box    18px padding, 14px gap
+//     ├ auto group        --panel / 12px / --sh-well   (locked, un-authorable)
+//     ├ custom group      --panel / 12px / --sh-well   (identical resting tone)
+//     └ open editor       the `selected` role
+//
+// The custom rows are wells rather than L1 cards for two independent reasons that
+// agree: the prototype measures `rgb(238,243,240)` (`--panel`) + `--sh-well` +
+// 12px on them, and DESIGN.md §4 rule 5 forbids stacking two surfaces of the same
+// tone — "an L1 card inside an L1 card becomes a well instead". Before this
+// change the section was a transparent `<section>` (measured: transparent, 0px
+// border, 0 radius, no shadow) holding L1 `--surface` cards, so the containing
+// plane was missing AND the rows were the nested-card anti-pattern.
+//
+// The header band keeps a single bottom edge and therefore stays square
+// (DESIGN.md §5: "any container whose border is a single edge … rather than a
+// box"). The prototype's rendered 16px top corners on that band come from the
+// retrofit shell's CORNERS layer, not from its own authored style, so they are
+// not canon — the same class of phantom value as R2c's D-1.
 
 import * as React from "react";
 import { toast } from "sonner";
@@ -91,10 +116,34 @@ type CurrentState = () => ScenarioUiState;
 export interface GroupsSectionConfig {
   /** Section heading. Default `"Groups"`. */
   heading?: string;
+  /**
+   * One-line explanation under the heading, inside the header band. Both
+   * prototypes carry one ("Bundle nurses so rules and constraints can target a
+   * whole team at once."), but the copy is the ROUTE's voice, so this stays an
+   * opt-in prop rather than a default — a consumer that passes nothing gets a
+   * single-line band, exactly as before.
+   */
+  description?: string;
   /** Add-button label. Default `"Group"`. */
   addLabel?: string;
-  /** Empty-state copy when no custom or synthetic groups exist. */
+  /**
+   * Empty-state BODY copy — the explanatory line under the title. Both
+   * prototypes pair it with a display title and a local action; see
+   * `emptyTitle` / `emptyActionLabel`.
+   */
   emptyText?: string;
+  /** Empty-state display title, e.g. "No staff groups yet". */
+  emptyTitle?: string;
+  /** Label for the empty state's local add-group action. Default `"New group"`. */
+  emptyActionLabel?: string;
+  /**
+   * Where the empty state sits relative to the reserved auto-group row. The two
+   * canonical screens differ and both are authored deliberately: Staff puts the
+   * prompt FIRST (`ScreenStaff.dc.html:126`), Shifts puts `ALL` first and the
+   * prompt after it (`ScreenShifts.dc.html:164,181`). Default `"after-auto"`,
+   * which is the Shift order and the order this section already shipped.
+   */
+  emptyPlacement?: "before-auto" | "after-auto";
   /**
    * Show the member-search box inside the transfer list. Staff → true; Shift →
    * false (ScreenShifts has no member search). Default `true`.
@@ -126,8 +175,12 @@ export interface GroupsSectionConfig {
 /** Config with every default resolved — the shape threaded to the sub-components. */
 interface ResolvedConfig {
   heading: string;
+  description?: string;
   addLabel: string;
   emptyText: string;
+  emptyTitle: string;
+  emptyActionLabel: string;
+  emptyPlacement: "before-auto" | "after-auto";
   showMemberSearch: boolean;
   selectedPaneLabel: string;
   selectedTestKey: string;
@@ -143,8 +196,12 @@ interface ResolvedConfig {
 function resolveConfig(config?: GroupsSectionConfig): ResolvedConfig {
   return {
     heading: config?.heading ?? "Groups",
+    description: config?.description,
     addLabel: config?.addLabel ?? "Group",
-    emptyText: config?.emptyText ?? "No groups yet — add one above.",
+    emptyText: config?.emptyText ?? "Bundle items into a group so a rule can target them together.",
+    emptyTitle: config?.emptyTitle ?? "No groups yet",
+    emptyActionLabel: config?.emptyActionLabel ?? "New group",
+    emptyPlacement: config?.emptyPlacement ?? "after-auto",
     showMemberSearch: config?.showMemberSearch ?? true,
     selectedPaneLabel: config?.selectedPaneLabel ?? "MEMBERS",
     selectedTestKey: config?.selectedTestKey ?? "members",
@@ -252,10 +309,64 @@ export function GroupsSection<TItem extends EditorItemBase>({
     commit(reorderGroups(currentState(), descriptor, from, to));
   };
 
+  // The canonical empty state (`ScreenStaff.dc.html:126-136`,
+  // `ScreenShifts.dc.html:181-191`): a decorative glyph tile, a display title, an
+  // explanatory body, and a LOCAL add-group action — not one flattened sentence.
+  // The action is the shared `Button` driving the SAME `onToggleAdd` the header
+  // control uses, so it inherits the 44px coarse-pointer minimum and adds no new
+  // lifecycle. `emptyPlacement` carries the two screens' deliberately different
+  // orders relative to the reserved `ALL` row.
+  //
+  // Gated on CUSTOM groups only, matching the prototypes' own `noGroups`. The
+  // original condition also required zero synthetic groups, which both live
+  // routes always have — so this could never render on either screen.
+  const emptyBlock =
+    groups.length === 0 ? (
+      <div
+        data-testid="groups-empty"
+        // Dashed is the empty-state affordance, so it keeps a hand-authored border
+        // rather than a role's solid hairline. It is a well-tier island inside the
+        // L1 card, so it takes the control radius and states no fill.
+        className="flex flex-col items-center gap-3.5 rounded-control border border-dashed border-line2 px-5 py-8 text-center"
+      >
+        <span
+          aria-hidden
+          className="flex size-13 items-center justify-center rounded-control border border-dashed border-line2 text-h3 leading-none text-ink3"
+        >
+          ∅
+        </span>
+        <span className="flex flex-col items-center gap-1">
+          <span className="font-heading text-title font-semibold tracking-[-0.015em] text-ink2">
+            {cfg.emptyTitle}
+          </span>
+          <span className="max-w-[44ch] text-meta text-ink3">{cfg.emptyText}</span>
+        </span>
+        <Button onClick={onToggleAdd} aria-pressed={addOpen} data-testid="groups-empty-add">
+          <FaPlus />
+          {cfg.emptyActionLabel}
+        </Button>
+      </div>
+    ) : null;
+
   return (
-    <section className="flex flex-col gap-3" data-testid="groups-section">
-      <div className="flex items-center gap-2">
-        <h2 className="mr-auto font-heading text-cardhead font-semibold">{cfg.heading}</h2>
+    // The single L1 containing card. It owns no padding of its own: the header
+    // band and the body each carry the prototype's own insets, so the band's
+    // bottom hairline runs full-bleed to the card edge rather than floating
+    // inside a gutter.
+    <section
+      data-testid="groups-section"
+      className={surfaceVariants({ role: "surface", geometry: "card" })}
+    >
+      <div
+        data-testid="groups-header"
+        className="flex items-center justify-between gap-3 border-b border-line2 px-5 py-4.5"
+      >
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <h2 className="font-heading text-cardhead font-semibold tracking-[-0.015em]">
+            {cfg.heading}
+          </h2>
+          {cfg.description && <p className="text-meta text-ink2">{cfg.description}</p>}
+        </div>
         <Button
           variant="outline"
           onClick={onToggleAdd}
@@ -267,21 +378,23 @@ export function GroupsSection<TItem extends EditorItemBase>({
         </Button>
       </div>
 
-      {addOpen && (
-        <GroupForm
-          mode="add"
-          descriptor={descriptor}
-          items={items}
-          groups={groups}
-          commit={commit}
-          currentState={currentState}
-          isStale={isStale}
-          onDone={onCloseForm}
-          cfg={cfg}
-        />
-      )}
+      <div data-testid="groups-body" className="flex flex-col gap-4 p-5">
+        {emptyBlock && cfg.emptyPlacement === "before-auto" && emptyBlock}
 
-      <div className="flex flex-col gap-2">
+        {addOpen && (
+          <GroupForm
+            mode="add"
+            descriptor={descriptor}
+            items={items}
+            groups={groups}
+            commit={commit}
+            currentState={currentState}
+            isStale={isStale}
+            onDone={onCloseForm}
+            cfg={cfg}
+          />
+        )}
+
         {descriptor.syntheticGroups.map((row) => (
           <AutoGroupRow
             key={row.id}
@@ -290,15 +403,8 @@ export function GroupsSection<TItem extends EditorItemBase>({
             countLabel={cfg.formatCount(items.length)}
           />
         ))}
-        {groups.length === 0 &&
-          descriptor.syntheticGroups.length === 0 && (
-            // Dashed is the empty-state affordance, so this one keeps a hand-authored
-            // border rather than the `surface` role's solid hairline. Radius still
-            // follows the card role.
-            <p className="rounded-card border border-dashed border-line bg-surface p-4 text-meta text-ink2">
-              {cfg.emptyText}
-            </p>
-          )}
+        {emptyBlock && cfg.emptyPlacement === "after-auto" && emptyBlock}
+
         {groups.map((group, index) => (
           <GroupRow
             key={group.id}
@@ -338,10 +444,10 @@ export function GroupsSection<TItem extends EditorItemBase>({
 /** The reserved auto-group card (`ALL`): read-only/locked, with an explanatory note
  *  visible and echoed on hover/focus so the lock is never an unexplained control.
  *
- *  It is a `well` on the control radius, not an L1 card: the recessed tone is what
- *  distinguishes an inert, un-authorable row from the editable group cards beside
- *  it, so the surface role carries the "locked" reading rather than the padlock
- *  glyph carrying it alone. */
+ *  A `well` on the control radius, which is what the prototype measures here
+ *  (`--panel`, 12px, `--sh-well`, 14x16 padding) and what a row nested inside the
+ *  L1 containing card has to be. It reads locked by TONE; the padlock glyph is not
+ *  carrying that alone. */
 function AutoGroupRow({
   id,
   note,
@@ -355,9 +461,10 @@ function AutoGroupRow({
     <Surface
       level="well"
       geometry="control"
+      emphasis="hairline"
       data-testid={`synthetic-${id}`}
       title={note}
-      className="flex flex-col gap-1.5 px-4 py-3.5"
+      className="flex flex-col gap-1.5 px-4.5 py-4"
     >
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-mono text-label font-semibold">{id}</span>
@@ -468,16 +575,33 @@ function GroupRow<TItem extends EditorItemBase>({
       }
       onDragEnd={canDrag ? onDragEnd : undefined}
       className={cn(
-        "flex flex-col gap-2 p-3",
-        // A drop candidate takes its OWN role. It is not `selected`: the row
-        // under the pointer is neither the current selection nor the active
-        // editor, and reusing that role would make the two indistinguishable to
-        // any later semantic check. The grab/drag affordances come from the same
-        // recipe because `cursor-*` and `opacity-*` are not layout utilities and
-        // so cannot be authored here.
+        "flex flex-col gap-2 px-4.5 py-4",
+        // Resting, a custom group is a `well` on the control radius — the same
+        // surface as the auto row beside it, which is exactly what the prototype
+        // measures (`--panel` / 12px / `--sh-well`). It is NOT an L1 card: inside
+        // the L1 containing card that would stack two surfaces of the same tone
+        // (DESIGN.md §4 rule 5).
+        //
+        // A drop candidate stays the SAME well and swaps only its edge, so the
+        // recessed direction of light survives the drag (DESIGN.md §4 rule 1 —
+        // a well is never lifted on an outer cast). It deliberately does not
+        // take the `drop-target` ROLE: that role restates `--panel-alt` and an
+        // outer `--sh-2`, which is correct for the card editor's L1 drop zone
+        // and would invert this one. Dashed rather than solid because a solid
+        // brand edge is the selection / open-editor language, and a row under
+        // the pointer is neither.
+        //
+        // `emphasis` is ONE axis, so "both edges at once" is unrepresentable
+        // rather than merely avoided: the border can never depend on
+        // tailwind-merge resolving two competing edges.
+        //
+        // The grab/drag affordances come from the same recipe because
+        // `cursor-*` and `opacity-*` are not layout utilities and so cannot be
+        // authored here.
         surfaceVariants({
-          role: isOver ? "drop-target" : "surface",
-          geometry: "card",
+          role: "well",
+          geometry: "control",
+          emphasis: isOver ? "drop-candidate" : "hairline",
           interaction: isDragging ? "dragging" : canDrag ? "grabbable" : undefined,
         }),
       )}
@@ -679,10 +803,15 @@ function GroupForm<TItem extends EditorItemBase>({
   return (
     <div
       className={cn(
-        "flex flex-col gap-3 p-4",
-        // An open EDIT form is the active editor card and takes the `selected`
-        // role; an ADD form is a new L1 card on the page.
-        surfaceVariants({ role: mode === "edit" ? "selected" : "surface", geometry: "card" }),
+        "flex flex-col gap-3.5 px-4.5 py-4",
+        // BOTH modes are the active editor card, so both take the `selected`
+        // role. The prototype makes the same call structurally — "add group"
+        // there just opens a new row in the editing state, so add and edit are
+        // one visual state. It also has to be `selected` rather than `surface`
+        // now: a plain L1 form inside the L1 containing card would be the same
+        // same-tone stack DESIGN.md §4 rule 5 forbids, with no brand edge to
+        // distinguish it.
+        surfaceVariants({ role: "selected", geometry: "card" }),
       )}
       data-testid={mode === "add" ? "add-group-form" : `group-edit-form-${group!.id}`}
       onKeyDown={(e) => {
