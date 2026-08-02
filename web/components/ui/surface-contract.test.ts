@@ -560,6 +560,31 @@ export interface Analysis {
     checked: number;
     illegal: TupleViolation[];
   };
+  /**
+   * Bounded-work accounting for the memoized folders. A COUNT rather than a
+   * timing is the oracle for complexity: it is deterministic, so a regression to
+   * the exponential `T(n) = 2T(n-1)` traversal fails the same way on every
+   * machine instead of flaking under load.
+   */
+  work: {
+    /** Times a contribution was actually folded (a cache miss). */
+    contributionFolds: number;
+    contributionCacheHits: number;
+    /** Times an option object was actually read (a cache miss). */
+    optionFolds: number;
+    optionCacheHits: number;
+    /** Times a literal was re-entered while already on the active path. */
+    cycleRefusals: number;
+    /**
+     * Results DISCARDED rather than cached because their computation consulted
+     * the active stack. Asserted directly, because the guard is defence in
+     * depth: cycle membership is entry-independent in the current model, so
+     * caching such a result is not observably wrong today. It becomes wrong the
+     * moment any refusal is entry-dependent, and this counter is what proves the
+     * guard is still live rather than silently removed.
+     */
+    cycleResultsDiscarded: number;
+  };
 }
 
 const COMPILER_OPTIONS: ts.CompilerOptions = {
@@ -1086,6 +1111,10 @@ export function analyzeProgram(program: ts.Program, rootFilter?: (f: string) => 
     return null;
   };
 
+  const optionCache = new Map<ts.ObjectLiteralExpression, Map<string, Option>>();
+  let optionFolds = 0;
+  let optionCacheHits = 0;
+
   const readOption = (
     literal: ts.ObjectLiteralExpression,
     name: string,
@@ -1094,12 +1123,38 @@ export function analyzeProgram(program: ts.Program, rootFilter?: (f: string) => 
     // from itself along the current path is refused rather than followed for
     // ever. Without this a self-spreading `const a = { ...a }` recursed until
     // the JS stack gave out.
+    //
+    // Memoized on the same discipline: cache only a COMPLETED result whose
+    // computation never consulted the stack (`cycleRefusals` unchanged), keyed
+    // by (literal, option name) so provenance and per-option independence are
+    // preserved. See `effectiveContribution` for the full argument.
     stack: Set<ts.ObjectLiteralExpression> = new Set(),
   ): Option => {
-    if (stack.has(literal)) return { values: null, present: true };
+    const cached = optionCache.get(literal)?.get(name);
+    if (cached) {
+      optionCacheHits += 1;
+      return cached;
+    }
+    if (stack.has(literal)) {
+      cycleRefusals += 1;
+      return { values: null, present: true };
+    }
     stack.add(literal);
+    const refusalsBefore = cycleRefusals;
     try {
-      return readOptionFolded(literal, name, stack);
+      optionFolds += 1;
+      const result = readOptionFolded(literal, name, stack);
+      if (cycleRefusals === refusalsBefore) {
+        let perName = optionCache.get(literal);
+        if (!perName) {
+          perName = new Map();
+          optionCache.set(literal, perName);
+        }
+        perName.set(name, result);
+      } else {
+        cycleResultsDiscarded += 1;
+      }
+      return result;
     } finally {
       stack.delete(literal);
     }
@@ -1367,10 +1422,39 @@ export function analyzeProgram(program: ts.Program, rootFilter?: (f: string) => 
 
   const NO_CONTRIBUTION: Contribution = { kind: "absent" };
 
+  /**
+   * MEMOIZATION, and why it is sound alongside a path-local stack.
+   *
+   * The stack answers "is this literal reachable from itself along the CURRENT
+   * path", so it is deliberately unwound on return. That alone made a legal
+   * immutable diamond — every level spreading the one below it twice — recompute
+   * both branches: `T(n) = 2T(n-1) + O(1)`, i.e. exponential.
+   *
+   * A completed result is a property of the literal and the channel ALONE, so it
+   * can be cached — but only if the computation never consulted the stack. If a
+   * descendant refused as cyclic, the result depended on where we entered from
+   * and is NOT reusable. `cycleRefusals` is compared across the call: unchanged
+   * means the subtree was stack-independent and the result is cacheable; changed
+   * means it is discarded.
+   *
+   * Cache lookup precedes the stack check, which is safe for the same reason: a
+   * cached entry can only exist for a literal that provably contains no cycle
+   * through itself, so returning it can never mask one.
+   *
+   * The key is (literal, channel). The matcher is no longer a caller-supplied
+   * closure — it is derived from the channel string here — so the key cannot
+   * drift from the predicate it stands for, and `class`/`className` keep
+   * genuinely independent entries.
+   */
+  const contributionCache = new Map<ts.ObjectLiteralExpression, Map<string, Contribution>>();
+  let cycleRefusals = 0;
+  let cycleResultsDiscarded = 0;
+  let contributionFolds = 0;
+  let contributionCacheHits = 0;
+
   const effectiveContribution = (
     literal: ts.ObjectLiteralExpression,
-    matches: (key: string) => boolean,
-    label: string,
+    channel: string,
     // A PATH-LOCAL recursion stack, not a global visited set. Spreading the same
     // proven immutable object twice (`{ ...base, ...base }`), or reaching one
     // leaf through two proven parents (a diamond), is ordinary legal JavaScript
@@ -1378,12 +1462,32 @@ export function analyzeProgram(program: ts.Program, rootFilter?: (f: string) => 
     // path is a real cycle, so the entry is removed again on unwind.
     stack: Set<ts.ObjectLiteralExpression> = new Set(),
   ): Contribution => {
+    const cached = contributionCache.get(literal)?.get(channel);
+    if (cached) {
+      contributionCacheHits += 1;
+      return cached;
+    }
     if (stack.has(literal)) {
+      cycleRefusals += 1;
       return { kind: "unprovable", node: literal, reason: "cyclic object literal" };
     }
     stack.add(literal);
+    const refusalsBefore = cycleRefusals;
     try {
-      return foldContribution(literal, matches, label, stack);
+      contributionFolds += 1;
+      const result = foldContribution(literal, channel, stack);
+      // Only a completed, stack-independent result is cacheable.
+      if (cycleRefusals === refusalsBefore) {
+        let perChannel = contributionCache.get(literal);
+        if (!perChannel) {
+          perChannel = new Map();
+          contributionCache.set(literal, perChannel);
+        }
+        perChannel.set(channel, result);
+      } else {
+        cycleResultsDiscarded += 1;
+      }
+      return result;
     } finally {
       stack.delete(literal);
     }
@@ -1391,10 +1495,11 @@ export function analyzeProgram(program: ts.Program, rootFilter?: (f: string) => 
 
   const foldContribution = (
     literal: ts.ObjectLiteralExpression,
-    matches: (key: string) => boolean,
-    label: string,
+    channel: string,
     stack: Set<ts.ObjectLiteralExpression>,
   ): Contribution => {
+    const matches = (key: string) => key === channel;
+    const label = channel;
     let effective: Contribution = NO_CONTRIBUTION;
     for (const property of literal.properties) {
       if (
@@ -1477,7 +1582,7 @@ export function analyzeProgram(program: ts.Program, rootFilter?: (f: string) => 
           };
           continue;
         }
-        const inner = effectiveContribution(nested, matches, label, stack);
+        const inner = effectiveContribution(nested, channel, stack);
         // A spread contributes only if it actually carries the prop; otherwise
         // an earlier own value survives it, exactly as at runtime.
         if (inner.kind !== "absent") effective = inner;
@@ -1515,7 +1620,7 @@ export function analyzeProgram(program: ts.Program, rootFilter?: (f: string) => 
       // safe `className` from hiding an invalid `class` (see CLASS_CHANNELS).
       const reported = new Set<ts.Node>();
       for (const channel of CLASS_CHANNELS) {
-        const effective = effectiveContribution(node, (key) => key === channel, channel);
+        const effective = effectiveContribution(node, channel);
         if (effective.kind === "value") {
           collect({ ...ctx, file: effective.file }, effective.node);
         } else if (effective.kind === "unprovable" && !reported.has(effective.node)) {
@@ -1598,7 +1703,6 @@ export function analyzeProgram(program: ts.Program, rootFilter?: (f: string) => 
     // explicit attribute and vice versa, so only the WINNING contribution is
     // analyzed. A spread's contribution is resolved recursively, which is what
     // closes the nested-spread and shorthand smuggling paths.
-    const matches = (key: string) => key === propName;
     let effective: Contribution = NO_CONTRIBUTION;
 
     for (const attribute of attributes.properties) {
@@ -1626,7 +1730,7 @@ export function analyzeProgram(program: ts.Program, rootFilter?: (f: string) => 
         };
         continue;
       }
-      const inner = effectiveContribution(resolved, matches, propName);
+      const inner = effectiveContribution(resolved, propName);
       if (inner.kind !== "absent") effective = inner;
     }
 
@@ -2121,6 +2225,14 @@ export function analyzeProgram(program: ts.Program, rootFilter?: (f: string) => 
     tuples: {
       checked: tuplesChecked,
       illegal: tupleViolations,
+    },
+    work: {
+      contributionFolds,
+      contributionCacheHits,
+      optionFolds,
+      optionCacheHits,
+      cycleRefusals,
+      cycleResultsDiscarded,
     },
   };
 }
@@ -2763,6 +2875,98 @@ describe("adversarial fixtures — (role, emphasis) tuple legality", () => {
          export const A = cn(surfaceVariants(options));`,
     });
     expect(r.violations.map((v) => v.token)).toContain("bg-panel");
+  });
+
+  // --- ii7.8.5.8: the deep diamond must stay BOUNDED -----------------------
+
+  /**
+   * A legal immutable diamond of depth `d`: every level spreads the level below
+   * it TWICE. Without memoization each level doubles the work — `T(n) =
+   * 2T(n-1) + O(1)` — which the review measured as ~4x per two added levels and
+   * ~14.7s at depth 20.
+   */
+  const deepDiamond = (depth: number, leafClass: string) => {
+    const lines = [`const n0 = { className: "${leafClass}" } as const;`];
+    for (let i = 1; i <= depth; i++) {
+      lines.push(`const n${i} = { ...n${i - 1}, ...n${i - 1} } as const;`);
+    }
+    lines.push(`export const A = cn(surfaceVariants({ role: "well", ...n${depth} } as any));`);
+    return lines.join("\n         ");
+  };
+
+  it("analyzes a deep legal diamond in BOUNDED work, not exponential", () => {
+    const depth = 20;
+    const r = analyzeFixture({ "components/probe.tsx": head + deepDiamond(depth, "flex") });
+
+    // Semantics first: a legal graph stays completely clean.
+    expect(r.violations).toEqual([]);
+    expect(r.opaque).toEqual([]);
+    expect(r.references.unclassified).toBe(0);
+
+    // Complexity: each literal is folded at most once per governed channel, so
+    // the work is LINEAR in the number of literals. Exponential traversal at
+    // depth 20 would be ~2^20 folds; this ceiling is ~100.
+    const literals = depth + 2; // n0..nd plus the inline options object
+    expect(
+      r.work.contributionFolds,
+      `contribution folds must stay linear, got ${r.work.contributionFolds}`,
+    ).toBeLessThanOrEqual(literals * 2 + 20);
+    expect(
+      r.work.optionFolds,
+      `option folds must stay linear, got ${r.work.optionFolds}`,
+    ).toBeLessThanOrEqual(literals * 2 + 20);
+
+    // The saving is real, not an artefact of never revisiting: the diamond does
+    // reach each shared level twice, so the cache must actually be hit.
+    expect(r.work.contributionCacheHits).toBeGreaterThan(0);
+  });
+
+  it("still reports an ILLEGAL value at the bottom of a deep diamond", () => {
+    const depth = 20;
+    const r = analyzeFixture({ "components/probe.tsx": head + deepDiamond(depth, "bg-panel") });
+
+    // Memoization must not launder a violation: the leaf's illegal class is
+    // still the effective winner at the top of a 20-level graph.
+    expect(r.violations.map((v) => v.token)).toContain("bg-panel");
+    expect(r.work.contributionFolds).toBeLessThanOrEqual((depth + 2) * 2 + 20);
+  });
+
+  it("keeps `class` and `className` independent under memoization", () => {
+    // The cache is keyed per channel, so a cached clean `className` must not
+    // satisfy the `class` channel of the same literal.
+    const r = analyzeFixture({
+      "components/probe.tsx":
+        head +
+        `const leaf = { class: "bg-error", className: "flex" } as const;
+         const mid = { ...leaf, ...leaf } as const;
+         export const A = cn(surfaceVariants({ role: "well", ...mid } as any));`,
+    });
+    expect(r.violations.map((v) => v.token)).toContain("bg-error");
+  });
+
+  it("never caches a result reached through a cycle", () => {
+    // A graph where a cyclic branch and a legal branch share a literal: the
+    // cyclic refusal must not be cached and served to the legal use, nor the
+    // reverse. Accounting must still show the refusal.
+    const r = analyzeFixture({
+      "components/probe.tsx":
+        head +
+        `const a: any = { role: "well", ...b };
+         const b: any = { ...a };
+         export const A = cn(surfaceVariants(a));
+         const legal = { className: "flex" } as const;
+         export const B = cn(surfaceVariants({ role: "well", ...legal, ...legal } as any));`,
+    });
+    expect(r.violations.length + r.opaque.length, "the cycle must still refuse").toBeGreaterThan(0);
+    expect(r.work.cycleRefusals, "a cyclic refusal must be recorded").toBeGreaterThan(0);
+    // The completion guard must be LIVE: every result whose computation touched
+    // the active stack is discarded rather than cached. Cycle membership is
+    // entry-independent today, so this is defence in depth — which is exactly
+    // why it is asserted directly instead of being inferred from an outcome.
+    expect(
+      r.work.cycleResultsDiscarded,
+      "a cycle-influenced result must never be cached",
+    ).toBeGreaterThan(0);
   });
 
   it("still refuses a genuine DIRECT cycle", () => {
