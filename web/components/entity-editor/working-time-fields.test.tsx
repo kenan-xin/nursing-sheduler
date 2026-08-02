@@ -2,6 +2,7 @@
 import * as React from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { surfaceVariants } from "@/components/ui/surface";
 import { WorkingTimeFields } from "./working-time-fields";
 import type { WorkingTimeValue } from "./core";
 
@@ -214,12 +215,17 @@ describe("WorkingTimeFields — v2 presentation authority", () => {
 
     const box = readout();
     const classes = box.className.split(/\s+/);
-    // The prototype's inset readout, measured in Chromium: `--panel` behind a
-    // `--line2` hairline at the control radius, with the inset cast.
-    expect(classes).toContain("bg-panel");
-    expect(classes).toContain("border-line2");
-    expect(classes).toContain("rounded-control");
-    expect(classes).toContain("shadow-well");
+    // The prototype's inset readout — `--panel` behind a `--line2` hairline at the
+    // control radius with the inset cast — now emitted by the SHARED recipe
+    // rather than restated here. Asked of the recipe, so it follows the tuple's
+    // definition instead of pinning yesterday's tokens.
+    for (const token of surfaceVariants({
+      role: "well",
+      geometry: "control",
+      emphasis: "hairline",
+    }).split(/\s+/)) {
+      expect(classes, `readout → ${token}`).toContain(token);
+    }
     // Direction of light is fixed: the inset cast and NEVER an outer elevation
     // (DESIGN.md §4 rule 1).
     expect(box.className).not.toMatch(/\bshadow-[123]\b/);
@@ -228,17 +234,18 @@ describe("WorkingTimeFields — v2 presentation authority", () => {
     expect(classes).not.toContain("rounded-none");
   });
 
-  it("holds the readout at the ABSOLUTE control height with a real coarse-pointer floor", () => {
+  it("holds the readout at the ABSOLUTE control token with a real coarse-pointer floor", () => {
     render(<Harness initial={{ startTime: "08:00", endTime: "16:00", durationMinutes: 480 }} />);
 
-    // On the box itself (border-box, so the hairline is inside the 36px), which is
-    // what keeps it level with the 36px selects beside it.
-    const classes = readout().className.split(/\s+/);
-    expect(classes).toContain("h-control");
-    expect(classes).toContain("pointer-coarse:min-h-touch");
-    // A density-derived height would silently drift off the 36px selects beside
-    // it if the 0.9 baseline ever moved (DESIGN.md §1: control sizes are absolute).
-    expect(classes.some((token) => /^h-\d/.test(token))).toBe(false);
+    const box = readout();
+    // The absolute token itself, on the box (border-box, so the hairline sits
+    // inside the 36px) — which is what keeps it level with the 36px selects. It
+    // is a style rather than `h-control` because a recipe consumer's className
+    // admits no `h-control`, and `h-10` would be density-derived: exactly 36px
+    // today, silently adrift if the 0.9 baseline ever moved.
+    expect(box.style.height).toBe("var(--ctl)");
+    expect(box.className.split(/\s+/)).toContain("pointer-coarse:min-h-touch");
+    expect(box.className.split(/\s+/).some((t) => /^h-\d/.test(t))).toBe(false);
   });
 
   it("grows the real controls to 44px on a coarse pointer, never a pseudo-element hitbox", () => {

@@ -406,18 +406,6 @@ export function ShiftTypeGrid() {
 // Never a raw disabled control.
 // ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// Two surfaces on this route are authored from canonical tokens rather than
-// through `surfaceVariants`, because the recipe cannot express them and a
-// consumer's className beside the recipe is held to LAYOUT-ONLY utilities
-// (`surface-contract.test.ts`) — so `border-line2` next to a role is rejected
-// outright. Both values below were measured off the canonical prototype in
-// Chromium (see the ii7.21.3 visual-fidelity evidence), not guessed.
-//
-// Changing the shared recipe to add a "quiet L1" role is deliberately NOT done
-// here: it would alter every other owner's surfaces.
-// ---------------------------------------------------------------------------
-
 /**
  * A reserved day-state tile. The prototype draws it on the SAME `--surface`
  * plane as an authorable card but with the quieter `--line2` hairline and NO
@@ -425,16 +413,41 @@ export function ShiftTypeGrid() {
  * `--line` + `--sh-1`. Radius stays DESIGN.md §5's card value: the prototype
  * renders 12px here only because its attribute-substring compatibility CSS keys
  * off the `--line2` border, and §6 forbids porting those selectors.
+ *
+ * This one surface stays off `surfaceVariants` DELIBERATELY, and the cold review
+ * of `57ce7b6` adjudicated that explicitly: no role emits `--surface` + a
+ * `--line2` hairline + no elevation. `surface` fixes `--line` and `--sh-1`, and
+ * `well` + `hairline` changes both the tone and the direction of light. Adding a
+ * foundation role for a single justified composition is not warranted.
  */
 const RESERVED_CARD_SURFACE = "rounded-card border border-line2 bg-surface";
 
 /**
- * The 42px icon tile: `--panel` behind a `--line2` hairline at the CONTROL
- * radius. DESIGN.md §5 files "inner bordered boxes" under `--r-ctl`, which is
- * exactly what this is — the chip radius it carried before was a step too tight
- * and the hairline was missing entirely.
+ * The icon tile and the working-time readout are the SAME visual contract:
+ * `--panel` behind a `--line2` hairline at the control radius, with the inset
+ * cast. F2's `ii7.8.5` added the `emphasis` axis, so the shared recipe now emits
+ * exactly that — this is the public authority (technical plan T5), not a local
+ * reimplementation with canonical tokens.
+ *
+ * DESIGN.md §5 files "inner bordered boxes" under `--r-ctl`, which is what both
+ * of these are.
  */
-const ICON_TILE_SURFACE = "size-[42px] rounded-control border border-line2 bg-panel shadow-well";
+const INSET_HAIRLINE_BOX = surfaceVariants({
+  role: "well",
+  geometry: "control",
+  emphasis: "hairline",
+});
+
+/**
+ * The tile's box is the prototype's 42px, which has no token and cannot be a
+ * `size-[42px]` utility beside the recipe: a recipe consumer's className is held
+ * to layout utilities with VALIDATED values, and every arbitrary value is
+ * rejected. `size-control-lg` would be 44px and `size-11.6667` is not a size
+ * anyone should read. So the one dimension that has no token is set as a style,
+ * the same mechanism `Select` uses for its caret gutter — and, unlike a class, it
+ * cannot be defeated by a caller.
+ */
+const ICON_TILE_BOX = { width: 42, height: 42 } as const;
 
 const RESERVED_META: Record<string, { icon: IconType; reason: string }> = {
   OFF: {
@@ -466,7 +479,8 @@ function ReservedCard({ id, description }: { id: string; description?: string })
         <div className="flex min-w-0 items-center gap-3">
           <div
             data-slot="shift-tile"
-            className={cn("flex flex-none items-center justify-center", ICON_TILE_SURFACE)}
+            style={ICON_TILE_BOX}
+            className={cn("flex flex-none items-center justify-center", INSET_HAIRLINE_BOX)}
           >
             <Icon aria-hidden className="text-ink2" />
           </div>
@@ -577,7 +591,8 @@ function ShiftCard({
         <div className="flex min-w-0 items-center gap-3">
           <div
             data-slot="shift-tile"
-            className={cn("flex flex-none items-center justify-center", ICON_TILE_SURFACE)}
+            style={ICON_TILE_BOX}
+            className={cn("flex flex-none items-center justify-center", INSET_HAIRLINE_BOX)}
           >
             <FaClock aria-hidden className="text-ink2" />
           </div>
@@ -1103,7 +1118,8 @@ function ShiftCardEditor({
       <div className="flex items-center gap-3 border-b border-line2 pb-4">
         <div
           data-slot="shift-tile"
-          className={cn("flex flex-none items-center justify-center", ICON_TILE_SURFACE)}
+          style={ICON_TILE_BOX}
+          className={cn("flex flex-none items-center justify-center", INSET_HAIRLINE_BOX)}
         >
           <FaClock aria-hidden className="text-ink2" />
         </div>

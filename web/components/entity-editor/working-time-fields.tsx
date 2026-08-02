@@ -52,9 +52,11 @@
 
 import * as React from "react";
 import { paidMinutesFor, validateWorkingTimeDraft, type WorkingTimeValue } from "./core";
+import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { InfoTip } from "@/components/ui/info-tip";
 import { Select } from "@/components/ui/select";
+import { surfaceVariants } from "@/components/ui/surface";
 
 const PAD = (n: number) => String(n).padStart(2, "0");
 /** The 48 half-hour clock slots 00:00..23:30 (the design's timeOptions). */
@@ -235,21 +237,25 @@ export function WorkingTimeFields({ value, onChange, idPrefix }: WorkingTimeFiel
                   } rest`
                 : undefined
             }
-            // An inset island inside the editor card. The prototype draws it as
-            // `--panel` behind a `--line2` hairline at the control radius; the
-            // shared `well` role draws no border, and a border added beside the
-            // recipe would be rejected as a non-layout class, so this one surface
-            // is authored from canonical tokens directly (same call, and same
-            // reason, as the icon tiles on the Shift Types grid).
+            // An inset island inside the editor card: `--panel` behind a `--line2`
+            // hairline at the control radius, straight from the shared authority.
+            // F2's `ii7.8.5` added the `emphasis` axis, so the recipe now emits
+            // this exact contract and there is no reason to reimplement it with
+            // canonical tokens (technical plan T5).
             //
-            // The absolute 36px control token sits on the box ITSELF (border-box,
-            // so the hairline is inside it), which is what keeps the readout level
-            // with the Rest select beside it. The prototype draws this box at 38px
-            // because its own selects are 38px; ours are the ratified 36px (D10),
-            // and matching our neighbours is the alignment that actually matters.
-            // A density-derived `h-10` would land on 36px today and silently drift
-            // if the 0.9 baseline ever moved.
-            className="flex h-control items-center gap-1.5 overflow-hidden rounded-control border border-line2 bg-panel px-2.5 shadow-well pointer-coarse:min-h-touch"
+            // Height is a STYLE, not `h-control`: a recipe consumer's className is
+            // held to layout utilities with validated values and the `h` family
+            // admits no `control`. Setting `--ctl` directly keeps the absolute
+            // token — `h-10` would land on 36px only via the 0.9 density baseline
+            // and would drift if that ever moved. Border-box puts the hairline
+            // inside the 36px, which is what keeps the readout level with the Rest
+            // select beside it; the prototype's own box is 38px because its selects
+            // are 38px, and ours are the ratified 36px (D10).
+            style={{ height: "var(--ctl)" }}
+            className={cn(
+              "flex items-center gap-1.5 overflow-hidden px-2.5 pointer-coarse:min-h-touch",
+              surfaceVariants({ role: "well", geometry: "control", emphasis: "hairline" }),
+            )}
           >
             <span className="flex-none font-heading text-title font-bold leading-none tracking-[-0.015em]">
               {paid != null ? fmtDuration(paid) : "—"}
