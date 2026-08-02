@@ -1086,7 +1086,30 @@ export function analyzeProgram(program: ts.Program, rootFilter?: (f: string) => 
     return null;
   };
 
-  const readOption = (literal: ts.ObjectLiteralExpression, name: string): Option => {
+  const readOption = (
+    literal: ts.ObjectLiteralExpression,
+    name: string,
+    // Path-local, exactly like `effectiveContribution`: repeated and diamond
+    // reuse of the same proven object must resolve, but a literal reachable
+    // from itself along the current path is refused rather than followed for
+    // ever. Without this a self-spreading `const a = { ...a }` recursed until
+    // the JS stack gave out.
+    stack: Set<ts.ObjectLiteralExpression> = new Set(),
+  ): Option => {
+    if (stack.has(literal)) return { values: null, present: true };
+    stack.add(literal);
+    try {
+      return readOptionFolded(literal, name, stack);
+    } finally {
+      stack.delete(literal);
+    }
+  };
+
+  const readOptionFolded = (
+    literal: ts.ObjectLiteralExpression,
+    name: string,
+    stack: Set<ts.ObjectLiteralExpression>,
+  ): Option => {
     let found = ABSENT;
     // `{ __proto__: X }` in an object literal sets the object's PROTOTYPE. The
     // inherited keys are fully visible to a property read — CVA consumes them —
@@ -1141,7 +1164,7 @@ export function analyzeProgram(program: ts.Program, rootFilter?: (f: string) => 
         // anything else may carry either key, so refuse rather than guess.
         const nestedLiteral = resolveOptionsLiteral(property.expression);
         if (nestedLiteral) {
-          const nested = readOption(nestedLiteral, name);
+          const nested = readOption(nestedLiteral, name, stack);
           if (nested.present) found = nested;
         } else {
           found = { values: null, present: true };
@@ -1348,13 +1371,30 @@ export function analyzeProgram(program: ts.Program, rootFilter?: (f: string) => 
     literal: ts.ObjectLiteralExpression,
     matches: (key: string) => boolean,
     label: string,
-    seen: Set<ts.ObjectLiteralExpression> = new Set(),
+    // A PATH-LOCAL recursion stack, not a global visited set. Spreading the same
+    // proven immutable object twice (`{ ...base, ...base }`), or reaching one
+    // leaf through two proven parents (a diamond), is ordinary legal JavaScript
+    // and must resolve. Only a literal reachable from ITSELF along the current
+    // path is a real cycle, so the entry is removed again on unwind.
+    stack: Set<ts.ObjectLiteralExpression> = new Set(),
   ): Contribution => {
-    if (seen.has(literal)) {
+    if (stack.has(literal)) {
       return { kind: "unprovable", node: literal, reason: "cyclic object literal" };
     }
-    seen.add(literal);
+    stack.add(literal);
+    try {
+      return foldContribution(literal, matches, label, stack);
+    } finally {
+      stack.delete(literal);
+    }
+  };
 
+  const foldContribution = (
+    literal: ts.ObjectLiteralExpression,
+    matches: (key: string) => boolean,
+    label: string,
+    stack: Set<ts.ObjectLiteralExpression>,
+  ): Contribution => {
     let effective: Contribution = NO_CONTRIBUTION;
     for (const property of literal.properties) {
       if (
@@ -1437,7 +1477,7 @@ export function analyzeProgram(program: ts.Program, rootFilter?: (f: string) => 
           };
           continue;
         }
-        const inner = effectiveContribution(nested, matches, label, seen);
+        const inner = effectiveContribution(nested, matches, label, stack);
         // A spread contributes only if it actually carries the prop; otherwise
         // an earlier own value survives it, exactly as at runtime.
         if (inner.kind !== "absent") effective = inner;
@@ -1448,22 +1488,42 @@ export function analyzeProgram(program: ts.Program, rootFilter?: (f: string) => 
     return effective;
   };
 
-  /** `class` and `className` are the two spellings the recipe forwards. */
-  const isClassKey = (key: string) => key === "className" || key === "class";
+  /**
+   * The two INDEPENDENT class channels CVA forwards. Verified against the
+   * installed `class-variance-authority@0.7.1`, whose final line is
+   * `cx(base, variants, compound, props.class, props.className)` — so both are
+   * always appended, in that fixed order, whatever order they were written in:
+   *
+   *   { role:"well", class:"bg-error", className:"flex" } → … bg-error flex
+   *   { role:"well", className:"bg-error", class:"flex" } → … flex bg-error
+   *
+   * They are NOT two spellings of one slot, so they must never be folded
+   * against each other: doing so let a safe `className` hide an invalid `class`
+   * and vice versa. Each channel is folded on its own and BOTH winners are
+   * inspected.
+   */
+  const CLASS_CHANNELS = ["class", "className"] as const;
 
   const collectRecipeOptions = (ctx: Ctx, rawNode: ts.Node): void => {
     // `(o)`, `o as const` and `o!` do not change the value; unwrap before
     // classifying, or an ordinary legal alias reads as an unprovable argument.
     const node = ts.isExpression(rawNode) ? transparent(rawNode) : rawNode;
     if (ts.isObjectLiteralExpression(node)) {
-      // Fold to the EFFECTIVE class value in source order and analyze only that.
-      // Recursing into every contribution used to report a `className` that a
-      // later own property provably overwrites — a false positive on legal code.
-      const effective = effectiveContribution(node, isClassKey, "className");
-      if (effective.kind === "value") {
-        collect({ ...ctx, file: effective.file }, effective.node);
-      } else if (effective.kind === "unprovable") {
-        markOpaque(ctx, effective.node, effective.reason);
+      // Fold EACH channel to its effective value in source order and analyze
+      // both winners. Folding within a channel kills the false positive on a
+      // provably overwritten value; keeping the channels apart is what stops a
+      // safe `className` from hiding an invalid `class` (see CLASS_CHANNELS).
+      const reported = new Set<ts.Node>();
+      for (const channel of CLASS_CHANNELS) {
+        const effective = effectiveContribution(node, (key) => key === channel, channel);
+        if (effective.kind === "value") {
+          collect({ ...ctx, file: effective.file }, effective.node);
+        } else if (effective.kind === "unprovable" && !reported.has(effective.node)) {
+          // One undecidable member (a dynamic key, an accessor) is undecidable
+          // for both channels; report its site once.
+          reported.add(effective.node);
+          markOpaque(ctx, effective.node, effective.reason);
+        }
       }
       return;
     }
@@ -2569,6 +2629,161 @@ describe("adversarial fixtures — (role, emphasis) tuple legality", () => {
          export const A = cn(surfaceVariants(options));`,
     });
     expect(shorthandUnprovable.opaque.length, "unprovable shorthand must refuse").toBeGreaterThan(
+      0,
+    );
+  });
+
+  // --- ii7.8.5.7: `class` and `className` are INDEPENDENT CVA channels ------
+
+  it("inspects BOTH class channels, in either written order", () => {
+    // Runtime-verified against class-variance-authority@0.7.1, whose final line
+    // is cx(base, …, props.class, props.className): both always contribute, so
+    // a safe value in one channel must not hide an invalid value in the other.
+    const classFirst = analyzeFixture({
+      "components/probe.tsx":
+        head +
+        `export const A = cn(surfaceVariants({ role: "well", class: "bg-error", className: "flex" } as any));`,
+    });
+    expect(
+      classFirst.violations.map((v) => v.token),
+      "class first",
+    ).toContain("bg-error");
+
+    const classNameFirst = analyzeFixture({
+      "components/probe.tsx":
+        head +
+        `export const A = cn(surfaceVariants({ role: "well", className: "bg-error", class: "flex" } as any));`,
+    });
+    expect(
+      classNameFirst.violations.map((v) => v.token),
+      "className first",
+    ).toContain("bg-error");
+  });
+
+  it("keeps the channels independent through nested spreads and shorthands", () => {
+    const viaSpread = analyzeFixture({
+      "components/probe.tsx":
+        head +
+        `const visual = { class: "bg-error" } as const;
+         const options = { role: "well", ...visual, className: "flex" } as const;
+         export const A = cn(surfaceVariants(options as any));`,
+    });
+    expect(
+      viaSpread.violations.map((v) => v.token),
+      "nested spread",
+    ).toContain("bg-error");
+
+    const viaShorthand = analyzeFixture({
+      "components/probe.tsx":
+        head +
+        `const cls = "bg-error";
+         const options = { role: "well", class: cls, className: "flex" } as const;
+         export const A = cn(surfaceVariants(options as any));`,
+    });
+    expect(
+      viaShorthand.violations.map((v) => v.token),
+      "shorthand",
+    ).toContain("bg-error");
+  });
+
+  it("still folds WITHIN a channel — an overwritten same-channel value is clean", () => {
+    // Positive: `class` is overwritten inside its own channel, so the earlier
+    // invalid value provably never reaches cx.
+    const overwritten = analyzeFixture({
+      "components/probe.tsx":
+        head +
+        `const options = { role: "well", class: "bg-error", class: "flex" } as any;
+         export const A = cn(surfaceVariants(options));`,
+    });
+    expect(overwritten.violations, "overwritten within channel").toEqual([]);
+
+    // Negative: the later same-channel value is the invalid one.
+    const winning = analyzeFixture({
+      "components/probe.tsx":
+        head +
+        `const options = { role: "well", class: "flex", class: "bg-error" } as any;
+         export const A = cn(surfaceVariants(options));`,
+    });
+    expect(
+      winning.violations.map((v) => v.token),
+      "winning within channel",
+    ).toContain("bg-error");
+  });
+
+  // --- ii7.8.5.7: repeated and diamond reuse are not cycles ----------------
+
+  it("resolves a REPEATED spread of the same proven object cleanly", () => {
+    const r = analyzeFixture({
+      "components/probe.tsx":
+        head +
+        `const layout = { className: "flex" } as const;
+         const options = { role: "well", ...layout, ...layout } as const;
+         export const A = cn(surfaceVariants(options));`,
+    });
+    expect(r.violations).toEqual([]);
+    expect(r.opaque).toEqual([]);
+    expect(r.references.unclassified).toBe(0);
+  });
+
+  it("resolves a DIAMOND — one leaf reached through two proven parents", () => {
+    const r = analyzeFixture({
+      "components/probe.tsx":
+        head +
+        `const leaf = { className: "flex" } as const;
+         const left = { ...leaf } as const;
+         const right = { ...leaf } as const;
+         const options = { role: "well", ...left, ...right } as const;
+         export const A = cn(surfaceVariants(options));`,
+    });
+    expect(r.violations).toEqual([]);
+    expect(r.opaque).toEqual([]);
+    expect(r.references.unclassified).toBe(0);
+  });
+
+  it("resolves a repeated / diamond spread through a JSX spread too", () => {
+    const r = analyzeFixture({
+      "components/probe.tsx":
+        head +
+        `const leaf = { className: "flex" } as const;
+         const props = { level: "well", geometry: "control", ...leaf, ...leaf } as const;
+         export const A = () => <Surface {...props} />;`,
+    });
+    expect(r.violations).toEqual([]);
+    expect(r.opaque).toEqual([]);
+    expect(r.references.unclassified).toBe(0);
+  });
+
+  it("still catches an ILLEGAL value delivered through a repeated spread", () => {
+    // Repetition must not become a way to launder a bad value.
+    const r = analyzeFixture({
+      "components/probe.tsx":
+        head +
+        `const bad = { className: "bg-panel" } as const;
+         const options = { role: "well", ...bad, ...bad } as const;
+         export const A = cn(surfaceVariants(options));`,
+    });
+    expect(r.violations.map((v) => v.token)).toContain("bg-panel");
+  });
+
+  it("still refuses a genuine DIRECT cycle", () => {
+    const direct = analyzeFixture({
+      "components/probe.tsx":
+        head +
+        `const a: any = { role: "well", ...a };
+         export const A = cn(surfaceVariants(a));`,
+    });
+    expect(direct.violations.length + direct.opaque.length, "direct cycle").toBeGreaterThan(0);
+  });
+
+  it("still refuses a genuine INDIRECT cycle", () => {
+    const indirect = analyzeFixture({
+      "components/probe.tsx":
+        head +
+        `const a: any = { role: "well", ...b };
+         const b: any = { ...a };
+         export const A = cn(surfaceVariants(a));`,
+    });
+    expect(indirect.violations.length + indirect.opaque.length, "indirect cycle").toBeGreaterThan(
       0,
     );
   });

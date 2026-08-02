@@ -565,6 +565,32 @@ describe("Surface / surfaceVariants — the single visual authority", () => {
     expect(bogus).not.toContain("border");
   });
 
+  it("emits BOTH `class` and `className`, in either written order", () => {
+    // class-variance-authority@0.7.1 ends in
+    // `cx(base, variants, compound, props.class, props.className)`, so the two
+    // are independent channels that BOTH always contribute — not two spellings
+    // of one slot. This is why the analyzer folds them separately: a safe value
+    // in one must never be able to hide an invalid value in the other.
+    const asOptions = (o: Record<string, string>) =>
+      o as unknown as Parameters<typeof surfaceVariants>[0];
+
+    const classFirst = surfaceVariants(
+      asOptions({ role: "well", class: "bg-error", className: "flex" }),
+    );
+    expect(classFirst).toContain("bg-error");
+    expect(classFirst).toContain("flex");
+
+    const classNameFirst = surfaceVariants(
+      asOptions({ role: "well", className: "bg-error", class: "flex" }),
+    );
+    expect(classNameFirst).toContain("bg-error");
+    expect(classNameFirst).toContain("flex");
+
+    // Fixed emission order, independent of the written order.
+    expect(classFirst.indexOf("bg-error")).toBeLessThan(classFirst.indexOf("flex"));
+    expect(classNameFirst.indexOf("flex")).toBeLessThan(classNameFirst.indexOf("bg-error"));
+  });
+
   it("consumes INHERITED `__proto__` options, which a syntactic walk cannot see", () => {
     // The exact shape the analyzer must refuse: `Object.keys` is empty, so a
     // property walk finds nothing, yet CVA resolves both fields through the
