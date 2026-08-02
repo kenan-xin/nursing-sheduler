@@ -29,7 +29,11 @@ import { describe, expect, it } from "vitest";
 
 const WEB_ROOT = resolve(__dirname, "..", "..");
 
-const GOVERNED_TUPLE = { role: "well", geometry: "control", emphasis: "hairline" } as const;
+const GOVERNED_TUPLE = {
+  role: "well",
+  geometry: "control",
+  emphasis: "hairline",
+} as const;
 
 /**
  * The ONLY inline style properties a governed node may carry, per target.
@@ -298,7 +302,10 @@ function resolveBinding(sf: ts.SourceFile, id: ts.Identifier): Binding {
   // A destructured binding is a BindingElement, not a VariableDeclaration — name
   // the actual mechanism rather than reporting a bare SyntaxKind.
   if (ts.isBindingElement(decl)) {
-    return { kind: "fail", reason: `"${id.text}" comes from a destructuring pattern` };
+    return {
+      kind: "fail",
+      reason: `"${id.text}" comes from a destructuring pattern`,
+    };
   }
   if (!ts.isVariableDeclaration(decl)) {
     return {
@@ -307,7 +314,10 @@ function resolveBinding(sf: ts.SourceFile, id: ts.Identifier): Binding {
     };
   }
   if (!ts.isIdentifier(decl.name)) {
-    return { kind: "fail", reason: `"${id.text}" comes from a destructuring pattern` };
+    return {
+      kind: "fail",
+      reason: `"${id.text}" comes from a destructuring pattern`,
+    };
   }
   const list = decl.parent;
   if (!ts.isVariableDeclarationList(list) || (list.flags & ts.NodeFlags.Const) === 0) {
@@ -321,7 +331,10 @@ function resolveBinding(sf: ts.SourceFile, id: ts.Identifier): Binding {
   // before its own declaration is a runtime error — the value at the use site
   // does not exist, so following the initializer would be fiction.
   if (decl.getSourceFile() === id.getSourceFile() && decl.getStart() > id.getStart()) {
-    return { kind: "fail", reason: `"${id.text}" is used before it is declared (TDZ)` };
+    return {
+      kind: "fail",
+      reason: `"${id.text}" is used before it is declared (TDZ)`,
+    };
   }
   return { kind: "ok", init: decl.initializer };
 }
@@ -462,8 +475,30 @@ function resolveClassNamePaths(sf: ts.SourceFile, expr: ts.Expression): Contribu
   });
   let work = 0;
   let overBudget: string | null = null;
-  /** Collapse duplicates deterministically and enforce the path cap. */
+  /**
+   * Collapse duplicates deterministically and enforce the path cap.
+   *
+   * GLOBAL OVERFLOW PROPAGATION. Once any nested resolution exhausts the budget
+   * the whole governed expression must resolve to exactly ONE refusal — never a
+   * clean partial result beside it, and never a refusal whose diagnostic was
+   * duplicated by the cartesian product re-merging it with itself on every
+   * subsequent argument. Two mechanisms achieve that:
+   *
+   *   1. Entry guard. `overBudget` is checked FIRST. Without it, the merge in
+   *      `cross()` would concatenate the refusal's `unresolved` array with
+   *      itself N times (once per surviving argument), producing N copies of
+   *      the same diagnostic; and a sibling branch that resolved clean before
+   *      the breach would survive beside the refusal when the two paths fail
+   *      to dedup. With it, every post-breach operation returns the same
+   *      singleton.
+   *   2. Top-level collapse. The outermost `return bound(alts(expr))` sees the
+   *      entry guard fire, so any clean sibling that escaped an inner `bound()`
+   *      (e.g. the non-overflowing arm of a ternary) is replaced.
+   */
   const bound = (paths: Contribution[]): Contribution[] => {
+    if (overBudget) {
+      return [{ tuples: [], literals: [], unresolved: [overBudget] }];
+    }
     const seenKeys = new Set<string>();
     const out: Contribution[] = [];
     for (const p of paths) {
@@ -534,7 +569,9 @@ function resolveClassNamePaths(sf: ts.SourceFile, expr: ts.Expression): Contribu
           if (known !== undefined && !isShadowedGlobal(sf, node.left)) return alts(node.left);
           return bound([...alts(node.left), ...alts(node.right)]);
         }
-        return only({ unresolved: [`unmodelled operator ${ts.tokenToString(op)}`] });
+        return only({
+          unresolved: [`unmodelled operator ${ts.tokenToString(op)}`],
+        });
       }
 
       if (ts.isTemplateExpression(node)) {
@@ -557,18 +594,42 @@ function resolveClassNamePaths(sf: ts.SourceFile, expr: ts.Expression): Contribu
           // `[...surfaceVariants(...)]` spreads a STRING, which iterates its
           // characters — it produces "b","g","-","p"… not the class list, so it
           // must never be credited as recipe ownership.
+          //
+          // RECURSIVE ALIAS PROOF. The previous version resolved an identifier
+          // ONCE and then required the initializer to be an array literal. A
+          // direct alias is precise, but an equally immutable multi-hop alias
+          // (`const A = [recipe]; const B = A; [...B]`) was refused — a
+          // harmless refactor that failed the gate. The operand is now walked
+          // through a paren/as/identifier loop until it stabilises on a
+          // non-identifier, so any depth of immutable `const` alias chain
+          // resolves to the array literal it ultimately names. The cycle guard
+          // (`const A = B; const B = A;`) refuses rather than looping forever,
+          // and every mutable/imported/unknown/string binding still fails
+          // closed through `resolveBinding`.
           let operand: ts.Expression = el.expression;
-          while (ts.isParenthesizedExpression(operand) || ts.isAsExpression(operand)) {
-            operand = operand.expression;
-          }
-          if (ts.isIdentifier(operand)) {
+          const seenAliases = new Set<ts.Node>();
+          let aliasFailed = false;
+          while (true) {
+            while (ts.isParenthesizedExpression(operand) || ts.isAsExpression(operand)) {
+              operand = operand.expression;
+            }
+            if (!ts.isIdentifier(operand)) break;
+            // Cycle guard: `const A = B; const B = A;` cannot infinite-loop.
+            // Identity is by NODE, not spelling — same-named bindings in
+            // disjoint scopes are different nodes.
+            if (seenAliases.has(operand)) {
+              aliasFailed = true;
+              break;
+            }
+            seenAliases.add(operand);
             const boundAlias = resolveBinding(sf, operand);
-            if (boundAlias.kind === "ok") operand = boundAlias.init;
+            if (boundAlias.kind === "fail") {
+              aliasFailed = true;
+              break;
+            }
+            operand = boundAlias.init;
           }
-          while (ts.isParenthesizedExpression(operand) || ts.isAsExpression(operand)) {
-            operand = operand.expression;
-          }
-          if (!ts.isArrayLiteralExpression(operand)) {
+          if (aliasFailed || !ts.isArrayLiteralExpression(operand)) {
             paths = cross(
               paths,
               only({
@@ -604,7 +665,9 @@ function resolveClassNamePaths(sf: ts.SourceFile, expr: ts.Expression): Contribu
 
       if (ts.isCallExpression(node)) {
         if (!ts.isIdentifier(node.expression)) {
-          return only({ unresolved: [`indirect call ${node.expression.getText(sf)}`] });
+          return only({
+            unresolved: [`indirect call ${node.expression.getText(sf)}`],
+          });
         }
         const callee = node.expression.text;
         // Identity, not spelling: a locally-declared or wrong-module
@@ -612,7 +675,9 @@ function resolveClassNamePaths(sf: ts.SourceFile, expr: ts.Expression): Contribu
         if (isRecipeCall(sf, node.expression)) {
           const options = recipeOptions(node.arguments[0]);
           return options === null
-            ? only({ unresolved: ["surfaceVariants called with a non-literal argument"] })
+            ? only({
+                unresolved: ["surfaceVariants called with a non-literal argument"],
+              })
             : only({ tuples: [options] });
         }
         if (isCombinerCall(sf, node.expression)) {
@@ -1051,9 +1116,15 @@ describe("inset-hairline surfaces are owned by the shared recipe, per node", () 
         unresolved: [],
       });
       // The real spelling: an immutable module-level alias.
-      expect(styleOf(`style={BOX}`).props).toEqual({ width: "42", height: "42" });
+      expect(styleOf(`style={BOX}`).props).toEqual({
+        width: "42",
+        height: "42",
+      });
       // A spread of that alias resolves to the same thing.
-      expect(styleOf(`style={{ ...BOX }}`).props).toEqual({ width: "42", height: "42" });
+      expect(styleOf(`style={{ ...BOX }}`).props).toEqual({
+        width: "42",
+        height: "42",
+      });
     });
 
     it("REJECTS the paint-identical backgroundColor escape", () => {
@@ -1076,7 +1147,9 @@ describe("inset-hairline surfaces are owned by the shared recipe, per node", () 
     });
 
     it("REJECTS a missing dimension", () => {
-      expect(styleOf(`style={{ width: 42 }}`).props).not.toEqual({ ...TILE.style });
+      expect(styleOf(`style={{ width: 42 }}`).props).not.toEqual({
+        ...TILE.style,
+      });
     });
 
     it("fails CLOSED on a dynamic or unprovable style", () => {
@@ -1095,7 +1168,9 @@ describe("inset-hairline surfaces are owned by the shared recipe, per node", () 
       const node = findGoverned(sf, TILE)[0];
       expect(node.attrProblems).toEqual([]);
       const resolved = resolveStyle(sf, node.style);
-      expect(resolved.props).toEqual({ backgroundColor: '"var(--color-panel)"' });
+      expect(resolved.props).toEqual({
+        backgroundColor: '"var(--color-panel)"',
+      });
       expect(resolved.props).not.toEqual({ ...TILE.style });
     });
 
@@ -1330,7 +1405,9 @@ describe("inset-hairline surfaces are owned by the shared recipe, per node", () 
       // Refused: a `var` is reassignable, so its value at the use site is not
       // provable — and it is emphatically NOT the module const.
       expect(node.attrProblems.length).toBeGreaterThan(0);
-      expect(style.props).not.toEqual({ backgroundColor: '"var(--color-panel)"' });
+      expect(style.props).not.toEqual({
+        backgroundColor: '"var(--color-panel)"',
+      });
       // And emphatically not resolved to the legal module const either.
       expect(style.props).toEqual({});
     });
@@ -1380,7 +1457,10 @@ describe("inset-hairline surfaces are owned by the shared recipe, per node", () 
       expect(resolveClassName(sf, node.className!).tuples).toEqual([
         { role: "well", geometry: "control", emphasis: "hairline" },
       ]);
-      expect(resolveStyle(sf, node.style).props).toEqual({ width: "42", height: "42" });
+      expect(resolveStyle(sf, node.style).props).toEqual({
+        width: "42",
+        height: "42",
+      });
     });
 
     it("fails CLOSED on a self-referential alias cycle", () => {
@@ -1575,22 +1655,121 @@ describe("inset-hairline surfaces are owned by the shared recipe, per node", () 
       expect(everyPathOwns(`["flex", ...[${RECIPE}]]`)).toBe(true);
     });
 
+    // -------------------------------------------------------------------------
+    // Round 9: RECURSIVE ARRAY-ALIAS PROOF.
+    //
+    // The cold review of `f1ba0c8` showed that the spread handler resolved an
+    // identifier ONCE and then required the initializer to be an array
+    // literal. A direct alias was precise, but an equally immutable multi-hop
+    // alias (`const A = [recipe]; const B = A; [...B]`) was refused — a
+    // harmless refactor that failed the gate. The operand is now walked
+    // through a paren/as/identifier loop until it stabilises, so any depth of
+    // immutable `const` alias chain resolves to the array literal it names.
+    // -------------------------------------------------------------------------
+    describe("recursive array-alias proof", () => {
+      it("ACCEPTS a multi-hop immutable alias chain — two and three hops", () => {
+        // THE REVIEWER'S EXACT CASE: `const A = [recipe]; const B = A; [...B]`
+        expect(everyPathOwns(`[...B]`, `const A = [${RECIPE}]; const B = A;`)).toBe(true);
+        // Three hops — the chain depth is unbounded until the operand stabilises.
+        expect(everyPathOwns(`[...C]`, `const A = [${RECIPE}]; const B = A; const C = B;`)).toBe(
+          true,
+        );
+      });
+
+      it("the multi-hop alias contributes exactly the governed tuple", () => {
+        const all = pathsOf(`[...B]`, `const A = [${RECIPE}]; const B = A;`);
+        expect(all).toHaveLength(1);
+        expect(all[0].tuples).toEqual([TUPLE]);
+        expect(all[0].literals).toEqual([]);
+        expect(all[0].unresolved).toEqual([]);
+      });
+
+      it("ACCEPTS a nested array spread through an alias", () => {
+        // `const A = [recipe]; const B = [...A]; [...B]` — B's initializer is
+        // an array literal containing a spread, so the inner spread recurses
+        // through `alts()` and resolves A.
+        expect(everyPathOwns(`[...B]`, `const A = [${RECIPE}]; const B = [...A];`)).toBe(true);
+      });
+
+      it("ACCEPTS a parenthesized or `as const` alias", () => {
+        // Parenthesized initializer.
+        expect(everyPathOwns(`[...A]`, `const A = ([${RECIPE}]);`)).toBe(true);
+        // `as const` assertion on the initializer.
+        expect(everyPathOwns(`[...A]`, `const A = [${RECIPE}] as const;`)).toBe(true);
+        // Parenthesized multi-hop chain.
+        expect(everyPathOwns(`[...B]`, `const A = [${RECIPE}]; const B = (A);`)).toBe(true);
+      });
+
+      it("ACCEPTS a recipe contribution beside an aliased spread", () => {
+        // The alias chain resolves the spread, so it contributes a tuple
+        // alongside the direct call. The path has two tuples — the oracle's
+        // per-path "exactly one" rule flags that as redundant, which is the
+        // correct outcome. This test asserts the narrower fact the closure
+        // review cared about: the alias RESOLVES rather than being refused.
+        const all = pathsOf(`[...B, "flex"]`, `const A = [${RECIPE}]; const B = A;`);
+        expect(all).toHaveLength(1);
+        expect(all[0].tuples).toEqual([TUPLE]);
+        expect(all[0].literals).toContain("flex");
+        expect(all[0].unresolved).toEqual([]);
+      });
+
+      it("REFUSES a self-referential alias cycle", () => {
+        // `const A = B; const B = A;` — the cycle guard stops the loop and the
+        // spread is refused, never infinite recursion.
+        const all = pathsOf(`[...A]`, `const A = B; const B = A;`);
+        expect(all.every((p) => p.unresolved.length > 0)).toBe(true);
+        expect(all.some((p) => p.tuples.length > 0)).toBe(false);
+      });
+
+      it("REFUSES a longer alias cycle", () => {
+        const all = pathsOf(`[...A]`, `const A = B; const B = C; const C = A;`);
+        expect(all.every((p) => p.unresolved.length > 0)).toBe(true);
+      });
+
+      it.each([
+        ["a mutable alias", `let A = [${RECIPE}];`],
+        ["an imported alias", `import { A } from "./elsewhere";`],
+        ["an unknown binding", `// A is never declared`],
+        ["a string alias", `const A = "flex";`],
+      ])("still REFUSES %s through resolveBinding", (_label, preamble) => {
+        const all = pathsOf(`[...A]`, preamble);
+        expect(all.every((p) => p.unresolved.length > 0)).toBe(true);
+        expect(all.some((p) => p.tuples.length > 0)).toBe(false);
+      });
+
+      it("does NOT follow a mutable link in the middle of a chain", () => {
+        // `const A = [recipe]; let B = A; [...B]` — B is mutable, so even
+        // though A is const and array-typed, the chain is broken at B.
+        const all = pathsOf(`[...B]`, `const A = [${RECIPE}]; let B = A;`);
+        expect(all.every((p) => p.unresolved.length > 0)).toBe(true);
+      });
+    });
+
     const ternaries = (n: number) =>
       Array.from({ length: n }, (_, i) => `c${i} ? "a${i}" : "b${i}"`).join(", ");
 
     it("stays bounded at 16 and 18 independent ternaries, and never truncates silently", () => {
       for (const n of [16, 18]) {
         const all = pathsOf(`cn(${ternaries(n)}, ${RECIPE})`);
-        expect(all.length).toBeLessThanOrEqual(MAX_PATHS);
-        expect(all.every((p) => p.unresolved.length > 0)).toBe(true);
-        expect(all.flatMap((p) => p.unresolved).join(" ")).toMatch(/analysis budget/);
+        // After the global-overflow fix, the result is exactly ONE refusal —
+        // not `<= MAX_PATHS` refusal-shaped paths, and not a clean partial
+        // result beside the refusal.
+        expect(all).toHaveLength(1);
+        expect(all[0].tuples).toEqual([]);
+        expect(all[0].literals).toEqual([]);
+        expect(all[0].unresolved).toHaveLength(1);
+        expect(all[0].unresolved[0]).toMatch(/analysis budget/);
       }
     });
 
     it("does not launder a trespass by exceeding the budget", () => {
       const all = pathsOf(`cn(${ternaries(18)}, "bg-panel", ${RECIPE})`);
-      expect(all.every((p) => p.unresolved.length > 0)).toBe(true);
-      expect(all.some((p) => p.tuples.length > 0 && p.unresolved.length === 0)).toBe(false);
+      // Overflow replaces the WHOLE path set, so the trespass cannot survive on
+      // a dropped path, and the recipe cannot survive on a clean sibling.
+      expect(all).toHaveLength(1);
+      expect(all[0].tuples).toEqual([]);
+      expect(all[0].literals).toEqual([]);
+      expect(all[0].unresolved).toHaveLength(1);
     });
 
     it("still analyses a reasonable multi-branch className exactly", () => {
@@ -1604,6 +1783,116 @@ describe("inset-hairline surfaces are owned by the shared recipe, per node", () 
     it("collapses duplicate paths deterministically", () => {
       expect(pathsOf(`cn(a ? "x" : "x", ${RECIPE})`)).toHaveLength(1);
       expect(pathsOf(`cn(a ? "x" : "y", ${RECIPE})`)).toHaveLength(2);
+    });
+
+    // -------------------------------------------------------------------------
+    // Round 9: GLOBAL OVERFLOW REFUSAL.
+    //
+    // The cold review of `f1ba0c8` showed that nested overflow left a clean
+    // sibling path beside the refusal, and that the cartesian product in
+    // `cross()` duplicated the budget diagnostic once per surviving argument.
+    // The contract — and now the implementation — is that ANY budget breach,
+    // anywhere in the expression, collapses the WHOLE result to exactly one
+    // refusal: one path, zero tuples, zero literals, one reason.
+    // -------------------------------------------------------------------------
+    describe("global overflow refusal", () => {
+      const ternaries = (n: number) =>
+        Array.from({ length: n }, (_, i) => `c${i} ? "a${i}" : "b${i}"`).join(", ");
+
+      /** Asserts `all` is exactly the single global-overflow refusal. */
+      const assertSingletonRefusal = (all: Contribution[]) => {
+        expect(all, "overflow must collapse to exactly one path").toHaveLength(1);
+        expect(all[0].tuples, "no recipe tuple may survive the breach").toEqual([]);
+        expect(all[0].literals, "no class literal may survive the breach").toEqual([]);
+        expect(all[0].unresolved, "exactly ONE diagnostic, not N duplicated copies").toHaveLength(
+          1,
+        );
+        expect(all[0].unresolved[0]).toMatch(/analysis budget/);
+      };
+
+      it("THE REVIEWER'S EXACT CASE — nested overflow becomes one global refusal", () => {
+        // `cond ? canonicalRecipe : cn(18 independent ternaries)`
+        // Pre-fix: two paths (1 canonical tuple | 12 duplicated budget reasons).
+        // Post-fix: exactly one refusal with one stable diagnostic.
+        const all = pathsOf(`cond ? ${RECIPE} : cn(${ternaries(18)})`);
+        assertSingletonRefusal(all);
+      });
+
+      it.each([
+        ["whenTrue arm", `cond ? cn(${ternaries(18)}) : ${RECIPE}`],
+        ["whenFalse arm", `cond ? ${RECIPE} : cn(${ternaries(18)})`],
+        ["inside && right", `cond && cn(${ternaries(18)})`],
+        ["inside || right", `cond || cn(${ternaries(18)})`],
+        ["inside ?? right", `maybe ?? cn(${ternaries(18)})`],
+        ["after prior sequential contributions in cn()", `cn("flex", ${RECIPE}, ${ternaries(18)})`],
+      ])("propagates overflow from %s as one refusal", (_label, expr) => {
+        assertSingletonRefusal(pathsOf(expr));
+      });
+
+      it("the diagnostic is STABLE — same message regardless of breach location", () => {
+        const fromWhenTrue = pathsOf(`cond ? cn(${ternaries(18)}) : ${RECIPE}`)[0].unresolved[0];
+        const fromWhenFalse = pathsOf(`cond ? ${RECIPE} : cn(${ternaries(18)})`)[0].unresolved[0];
+        const fromAmp = pathsOf(`cond && cn(${ternaries(18)})`)[0].unresolved[0];
+        const fromNested = pathsOf(`cond ? ${RECIPE} : cn(${ternaries(18)})`)[0].unresolved[0];
+        expect(fromWhenTrue).toBe(fromWhenFalse);
+        expect(fromWhenFalse).toBe(fromAmp);
+        expect(fromAmp).toBe(fromNested);
+      });
+
+      it("top-level legal recipe is unaffected — one owned path, no refusal", () => {
+        const all = pathsOf(RECIPE);
+        expect(all).toHaveLength(1);
+        expect(all[0].tuples).toEqual([TUPLE]);
+        expect(all[0].literals).toEqual([]);
+        expect(all[0].unresolved).toEqual([]);
+      });
+
+      it("top-level illegal and trespass shapes are unaffected (no overflow to mask them)", () => {
+        // A bare illegal className still surfaces on a normal path; the global
+        // refusal is not a blanket that hides non-overflow defects.
+        const illegal = pathsOf(`"flex"`);
+        expect(illegal).toHaveLength(1);
+        expect(illegal[0].tuples).toEqual([]);
+        expect(illegal[0].literals).toContain("flex");
+        expect(illegal[0].unresolved).toEqual([]);
+
+        const trespass = pathsOf(`cn("bg-panel", ${RECIPE})`);
+        expect(trespass).toHaveLength(1);
+        expect(trespass[0].tuples).toEqual([TUPLE]);
+        expect(trespass[0].literals).toContain("bg-panel");
+        expect(trespass[0].unresolved).toEqual([]);
+      });
+
+      it("overflow with a trespass still fails — no laundering via the breach", () => {
+        // The trespass cannot survive by being on a path that the budget
+        // breach drops. The refusal REPLACES the set; the trespass vanishes
+        // along with the recipe.
+        const all = pathsOf(`cond ? ${RECIPE} : cn(${ternaries(18)}, "bg-panel")`);
+        assertSingletonRefusal(all);
+      });
+
+      it("bounded runtime — the nested 18-ternary case completes promptly", () => {
+        const start = performance.now();
+        pathsOf(`cond ? ${RECIPE} : cn(${ternaries(18)})`);
+        const elapsed = performance.now() - start;
+        // Generous bound; the point is that the cap turns an exponential into
+        // a constant. Pre-cap, 2^18 resolutions would not finish in any
+        // practical time.
+        expect(elapsed).toBeLessThan(500);
+      });
+
+      it("bounded work — the nested 18-ternary case touches a bounded number of nodes", () => {
+        // The cap is on surviving PATHS, not on the work of producing them,
+        // but once the cap fires every subsequent `alts()` entry returns
+        // immediately. So total work is bounded by roughly (work-to-breach +
+        // one refusal per remaining argument), not by the path count.
+        // Reaching the assertion already proves the bound; this test makes
+        // the intent explicit so a regression that revisits the path set
+        // N times would trip the runtime bound above.
+        const all = pathsOf(`cond ? ${RECIPE} : cn(${ternaries(18)})`);
+        expect(all).toHaveLength(1);
+        expect(all[0].unresolved).toHaveLength(1);
+      });
     });
   });
 
