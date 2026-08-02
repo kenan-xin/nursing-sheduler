@@ -1,5 +1,4 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
@@ -82,14 +81,164 @@ const GOVERNED: readonly GovernedSurface[] = [
   },
 ];
 
+// ---------------------------------------------------------------------------
+// CHECKER-BACKED SYMBOL IDENTITY.
+//
+// Round 5 resolved bindings by walking lexical scopes myself. That was better
+// than the bare-name map it replaced, but it still MODELLED JavaScript scoping
+// instead of asking the compiler — and it got `var` wrong: a function-scoped
+// `var` inside a nested block hoists to the function, while the walker stopped
+// at the block boundary and kept going outward to a module-level `const` of the
+// same name. The illegal local won at runtime; the oracle judged the legal one.
+//
+// Resolution is now the TypeScript checker's. Every identifier is resolved to a
+// SYMBOL, and every helper (`surfaceVariants`, `cn`/`clsx`/`twMerge`) must be
+// the symbol the canonical module exports — not merely something spelled the
+// same. Anything the checker cannot pin to exactly one const declaration is
+// refused.
+// ---------------------------------------------------------------------------
+
+interface Analysis {
+  readonly program: ts.Program;
+  readonly checker: ts.TypeChecker;
+  /** The exported `surfaceVariants` symbol, or undefined if not resolvable. */
+  readonly recipe: ts.Symbol | undefined;
+  /** Canonical class combiners: `cn` and the `clsx`/`twMerge` it wraps. */
+  readonly combiners: ReadonlySet<ts.Symbol>;
+}
+
+/** Keyed by SourceFile so the existing helper signatures stay unchanged. */
+const ANALYSIS = new WeakMap<ts.SourceFile, Analysis>();
+
+function analysisFor(sf: ts.SourceFile): Analysis {
+  const found = ANALYSIS.get(sf);
+  if (!found) throw new Error(`no checker registered for ${sf.fileName}`);
+  return found;
+}
+
+/** Canonical symbol: an import alias is followed to what it actually names. */
+function symbolAt(checker: ts.TypeChecker, node: ts.Node): ts.Symbol | undefined {
+  const symbol = checker.getSymbolAtLocation(node);
+  if (!symbol) return undefined;
+  return symbol.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(symbol) : symbol;
+}
+
+function moduleExport(
+  program: ts.Program,
+  checker: ts.TypeChecker,
+  suffix: string,
+  name: string,
+): ts.Symbol | undefined {
+  const file = program.getSourceFiles().find((f) => f.fileName.endsWith(suffix));
+  const moduleSymbol = file ? checker.getSymbolAtLocation(file) : undefined;
+  if (!moduleSymbol) return undefined;
+  const exported = checker.getExportsOfModule(moduleSymbol).find((e) => e.name === name);
+  if (!exported) return undefined;
+  return exported.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(exported) : exported;
+}
+
+function registerAnalysis(program: ts.Program, sf: ts.SourceFile): ts.SourceFile {
+  const checker = program.getTypeChecker();
+  const combiners = new Set<ts.Symbol>();
+  for (const [suffix, name] of [
+    ["lib/utils.ts", "cn"],
+    ["lib/utils.tsx", "cn"],
+  ] as const) {
+    const symbol = moduleExport(program, checker, suffix, name);
+    if (symbol) combiners.add(symbol);
+  }
+  ANALYSIS.set(sf, {
+    program,
+    checker,
+    recipe:
+      moduleExport(program, checker, "components/ui/surface.tsx", "surfaceVariants") ??
+      moduleExport(program, checker, "components/ui/surface.ts", "surfaceVariants"),
+    combiners,
+  });
+  return sf;
+}
+
+/** The repository program, built once from tsconfig so `@/` paths resolve. */
+let repoProgram: ts.Program | undefined;
+function getRepoProgram(): ts.Program {
+  if (repoProgram) return repoProgram;
+  const configPath = join(WEB_ROOT, "tsconfig.json");
+  const config = ts.readConfigFile(configPath, ts.sys.readFile);
+  const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, WEB_ROOT);
+  repoProgram = ts.createProgram({
+    rootNames: parsed.fileNames,
+    options: { ...parsed.options, noEmit: true, skipLibCheck: true },
+  });
+  return repoProgram;
+}
+
 function parse(relPath: string): ts.SourceFile {
-  return ts.createSourceFile(
-    relPath,
-    readFileSync(resolve(WEB_ROOT, relPath), "utf8"),
-    ts.ScriptTarget.ESNext,
-    true,
-    ts.ScriptKind.TSX,
-  );
+  const program = getRepoProgram();
+  const absolute = resolve(WEB_ROOT, relPath);
+  const sf = program.getSourceFiles().find((f) => resolve(f.fileName) === absolute);
+  if (!sf) throw new Error(`${relPath} is not in the TypeScript program`);
+  return registerAnalysis(program, sf);
+}
+
+/**
+ * An in-memory program for adversarial fixtures, with the canonical modules
+ * stubbed so `surfaceVariants` and `cn` resolve to real, distinct symbols. A
+ * second "wrong module" is provided so a same-named import from elsewhere can be
+ * proven NOT to be the authority.
+ */
+const FIXTURE_PRELUDE =
+  `import { surfaceVariants } from "@/components/ui/surface";\n` +
+  `import { cn } from "@/lib/utils";\n`;
+
+function parseFixtureSource(body: string, prelude = FIXTURE_PRELUDE): ts.SourceFile {
+  const files: Record<string, string> = {
+    "/components/ui/surface.tsx": `export function surfaceVariants(_o?: unknown): string { return ""; }\n`,
+    "/lib/utils.ts": `export function cn(...a: unknown[]): string { return String(a); }\n`,
+    "/impostor.ts":
+      `export function surfaceVariants(_o?: unknown): string { return ""; }\n` +
+      `export function cn(...a: unknown[]): string { return String(a); }\n`,
+    "/fixture.tsx": prelude + body,
+  };
+  const host: ts.CompilerHost = {
+    fileExists: (f) => f in files,
+    readFile: (f) => files[f],
+    getSourceFile: (f) =>
+      f in files
+        ? ts.createSourceFile(f, files[f], ts.ScriptTarget.ESNext, true, ts.ScriptKind.TSX)
+        : undefined,
+    getDefaultLibFileName: () => "/lib.d.ts",
+    writeFile: () => {},
+    getCurrentDirectory: () => "/",
+    getCanonicalFileName: (f) => f,
+    useCaseSensitiveFileNames: () => true,
+    getNewLine: () => "\n",
+    resolveModuleNames: (names, containing) =>
+      names.map((name) => {
+        let base: string;
+        if (name.startsWith("@/")) base = "/" + name.slice(2);
+        else if (name.startsWith(".")) base = resolve(containing, "..", name);
+        else return undefined;
+        for (const candidate of [base, base + ".ts", base + ".tsx"]) {
+          if (candidate in files) return { resolvedFileName: candidate, extension: ".tsx" };
+        }
+        return undefined;
+      }),
+  };
+  const program = ts.createProgram({
+    rootNames: Object.keys(files),
+    options: {
+      target: ts.ScriptTarget.ESNext,
+      module: ts.ModuleKind.ESNext,
+      moduleResolution: ts.ModuleResolutionKind.Bundler,
+      jsx: ts.JsxEmit.ReactJSX,
+      noLib: true,
+      skipLibCheck: true,
+      baseUrl: "/",
+    },
+    host,
+  });
+  const sf = program.getSourceFile("/fixture.tsx")!;
+  return registerAnalysis(program, sf);
 }
 
 /**
@@ -114,80 +263,77 @@ type Binding =
   | { readonly kind: "ok"; readonly init: ts.Expression }
   | { readonly kind: "fail"; readonly reason: string };
 
-/** Does this node introduce a declaration scope? */
-function isScopeBoundary(node: ts.Node): boolean {
-  return (
-    ts.isSourceFile(node) ||
-    ts.isBlock(node) ||
-    ts.isModuleBlock(node) ||
-    ts.isCaseBlock(node) ||
-    ts.isForStatement(node) ||
-    ts.isForInStatement(node) ||
-    ts.isForOfStatement(node) ||
-    ts.isArrowFunction(node) ||
-    ts.isFunctionDeclaration(node) ||
-    ts.isFunctionExpression(node) ||
-    ts.isMethodDeclaration(node)
-  );
-}
-
-/** Declarations of `name` introduced DIRECTLY by this scope, not by nested ones. */
-function declarationsInScope(scope: ts.Node, name: string): ts.Node[] {
-  const hits: ts.Node[] = [];
-  const scan = (node: ts.Node) => {
-    // Never descend into a nested scope: those are different bindings.
-    if (isScopeBoundary(node)) return;
-    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === name) {
-      hits.push(node);
-    } else if (ts.isImportSpecifier(node) && node.name.text === name) {
-      hits.push(node);
-    } else if (ts.isNamespaceImport(node) && node.name.text === name) {
-      hits.push(node);
-    } else if (
-      (ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) &&
-      node.name &&
-      ts.isIdentifier(node.name) &&
-      node.name.text === name
-    ) {
-      hits.push(node);
-    } else if (ts.isParameter(node) && ts.isIdentifier(node.name) && node.name.text === name) {
-      hits.push(node);
-    }
-    ts.forEachChild(node, scan);
-  };
-  ts.forEachChild(scope, scan);
-  return hits;
-}
-
-function resolveBinding(useSite: ts.Node, name: string): Binding {
-  for (let scope: ts.Node | undefined = useSite; scope; scope = scope.parent) {
-    if (!isScopeBoundary(scope)) continue;
-    const hits = declarationsInScope(scope, name);
-    if (hits.length === 0) continue; // not declared here — look outward
-
-    if (hits.length > 1) {
-      return { kind: "fail", reason: `"${name}" has ${hits.length} declarations in one scope` };
-    }
-    const decl = hits[0];
-    if (!ts.isVariableDeclaration(decl)) {
-      return {
-        kind: "fail",
-        reason: `"${name}" resolves to a ${ts.SyntaxKind[decl.kind]}, not a const initializer`,
-      };
-    }
-    const list = decl.parent;
-    if (!ts.isVariableDeclarationList(list) || (list.flags & ts.NodeFlags.Const) === 0) {
-      return { kind: "fail", reason: `"${name}" is not a const binding` };
-    }
-    if (!decl.initializer) return { kind: "fail", reason: `"${name}" has no initializer` };
-    // Temporal dead zone: a const used before its own declaration is a runtime
-    // error, never a silent fallback to some other binding of the same name.
-    if (decl.getStart() > useSite.getStart()) {
-      return { kind: "fail", reason: `"${name}" is used before it is declared (TDZ)` };
-    }
-    return { kind: "ok", init: decl.initializer };
+/**
+ * Resolve an identifier to its unique const initializer, by SYMBOL.
+ *
+ * Every refusal below is a case where the checker can see the binding but this
+ * oracle declines to follow it, because following it would be a guess:
+ *
+ *   • an import alias — the initializer lives in another module;
+ *   • more than one declaration — a merged or ambiguous symbol;
+ *   • a `var` or `let` — reassignable, so the value at the use site is unknown
+ *     (this is also what catches the hoisted nested-block `var`, which the
+ *     lexical walker resolved to an outer const);
+ *   • a function/class declaration, parameter, or destructuring pattern;
+ *   • a const with no initializer.
+ */
+function resolveBinding(sf: ts.SourceFile, id: ts.Identifier): Binding {
+  const { checker } = analysisFor(sf);
+  const raw = checker.getSymbolAtLocation(id);
+  if (!raw) return { kind: "fail", reason: `"${id.text}" resolves to no symbol` };
+  if (raw.flags & ts.SymbolFlags.Alias) {
+    return {
+      kind: "fail",
+      reason: `"${id.text}" is an imported binding, declared in another module`,
+    };
   }
-  return { kind: "fail", reason: `no visible binding for "${name}"` };
+  const decls = raw.declarations ?? [];
+  if (decls.length !== 1) {
+    return {
+      kind: "fail",
+      reason: `"${id.text}" has ${decls.length} declarations (merged/ambiguous)`,
+    };
+  }
+  const decl = decls[0];
+  if (!ts.isVariableDeclaration(decl)) {
+    return {
+      kind: "fail",
+      reason: `"${id.text}" resolves to a ${ts.SyntaxKind[decl.kind]}, not a const initializer`,
+    };
+  }
+  if (!ts.isIdentifier(decl.name)) {
+    return { kind: "fail", reason: `"${id.text}" comes from a destructuring pattern` };
+  }
+  const list = decl.parent;
+  if (!ts.isVariableDeclarationList(list) || (list.flags & ts.NodeFlags.Const) === 0) {
+    return {
+      kind: "fail",
+      reason: `"${id.text}" is not a const binding (var/let are reassignable)`,
+    };
+  }
+  if (!decl.initializer) return { kind: "fail", reason: `"${id.text}" has no initializer` };
+  // Temporal dead zone. The checker resolves the symbol happily, but a const read
+  // before its own declaration is a runtime error — the value at the use site
+  // does not exist, so following the initializer would be fiction.
+  if (decl.getSourceFile() === id.getSourceFile() && decl.getStart() > id.getStart()) {
+    return { kind: "fail", reason: `"${id.text}" is used before it is declared (TDZ)` };
+  }
+  return { kind: "ok", init: decl.initializer };
+}
+
+/** Is this call the canonical `surfaceVariants` export, by symbol? */
+function isRecipeCall(sf: ts.SourceFile, callee: ts.Expression): boolean {
+  const { checker, recipe } = analysisFor(sf);
+  if (!recipe || !ts.isIdentifier(callee)) return false;
+  return symbolAt(checker, callee) === recipe;
+}
+
+/** Is this call a canonical class combiner, by symbol? */
+function isCombinerCall(sf: ts.SourceFile, callee: ts.Expression): boolean {
+  const { checker, combiners } = analysisFor(sf);
+  if (!ts.isIdentifier(callee)) return false;
+  const symbol = symbolAt(checker, callee);
+  return symbol !== undefined && combiners.has(symbol);
 }
 
 /** The literal `{ key: "value" }` of a recipe call, or null if not all literal. */
@@ -256,21 +402,25 @@ function resolveClassName(sf: ts.SourceFile, expr: ts.Expression): Contribution 
         return;
       }
       const callee = node.expression.text;
-      if (callee === "surfaceVariants") {
+      // Identity, not spelling: a locally-declared or wrong-module
+      // `surfaceVariants` is NOT the authority, and neither is a shadowed `cn`.
+      if (isRecipeCall(sf, node.expression)) {
         const options = recipeOptions(node.arguments[0]);
         if (options === null) unresolved.push("surfaceVariants called with a non-literal argument");
         else tuples.push(options);
         return;
       }
-      if (callee === "cn" || callee === "clsx" || callee === "twMerge") {
+      if (isCombinerCall(sf, node.expression)) {
         node.arguments.forEach(visit);
         return;
       }
-      unresolved.push(`opaque call ${callee}(...)`);
+      unresolved.push(
+        `opaque call ${callee}(...) — not the canonical surfaceVariants or class combiner`,
+      );
       return;
     }
     if (ts.isIdentifier(node)) {
-      const bound = resolveBinding(node, node.text);
+      const bound = resolveBinding(sf, node);
       if (bound.kind === "fail") {
         unresolved.push(bound.reason);
         return;
@@ -381,21 +531,27 @@ interface FoundNode {
  * Resolve an expression to the property map of an object literal, following
  * immutable const aliases and nested spreads. `null` when it cannot be proven.
  */
-function objectLiteralProps(expr: ts.Expression, depth = 0): Map<string, ts.Expression> | null {
+function objectLiteralProps(
+  sf: ts.SourceFile,
+  expr: ts.Expression,
+  depth = 0,
+): Map<string, ts.Expression> | null {
+  // Depth cap doubles as the cycle guard: `const A = { ...A }` cannot recur
+  // forever, and a self-referential alias resolves to null rather than hanging.
   if (depth > 8) return null;
   let node: ts.Expression = expr;
   while (ts.isParenthesizedExpression(node) || ts.isAsExpression(node)) node = node.expression;
   if (ts.isIdentifier(node)) {
-    // Resolved from the USE SITE, so a shadowed or unprovable binding is refused
-    // rather than answered by an unrelated declaration of the same name.
-    const bound = resolveBinding(node, node.text);
-    return bound.kind === "ok" ? objectLiteralProps(bound.init, depth + 1) : null;
+    // Resolved by SYMBOL, so a shadowed, hoisted, imported or ambiguous binding
+    // is refused rather than answered by something merely spelled the same.
+    const bound = resolveBinding(sf, node);
+    return bound.kind === "ok" ? objectLiteralProps(sf, bound.init, depth + 1) : null;
   }
   if (!ts.isObjectLiteralExpression(node)) return null;
   const out = new Map<string, ts.Expression>();
   for (const prop of node.properties) {
     if (ts.isSpreadAssignment(prop)) {
-      const inner = objectLiteralProps(prop.expression, depth + 1);
+      const inner = objectLiteralProps(sf, prop.expression, depth + 1);
       if (!inner) return null;
       for (const [k, v] of inner) out.set(k, v);
       continue;
@@ -428,7 +584,7 @@ function resolveStyle(
     if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node))
       return visit(node.expression);
     if (ts.isIdentifier(node)) {
-      const bound = resolveBinding(node, node.text);
+      const bound = resolveBinding(sf, node);
       if (bound.kind === "fail") {
         unresolved.push(`style alias: ${bound.reason}`);
         return;
@@ -497,7 +653,7 @@ function findGoverned(sf: ts.SourceFile, surface: GovernedSurface): FoundNode[] 
       // from the recipe with all 20 tests still green.
       for (const prop of node.attributes.properties) {
         if (ts.isJsxSpreadAttribute(prop)) {
-          const props = objectLiteralProps(prop.expression);
+          const props = objectLiteralProps(sf, prop.expression);
           if (!props) {
             attrProblems.push(
               `JSX spread {...${prop.expression.getText(sf).slice(0, 40)}} cannot be resolved, ` +
@@ -641,13 +797,9 @@ describe("inset-hairline surfaces are owned by the shared recipe, per node", () 
     } as const satisfies GovernedSurface;
 
     const fixture = (attrs: string) =>
-      ts.createSourceFile(
-        "fixture.tsx",
+      parseFixtureSource(
         `const BOX = { width: 42, height: 42 };\n` +
           `const X = <div data-slot="shift-tile" ${attrs} />;\n`,
-        ts.ScriptTarget.ESNext,
-        true,
-        ts.ScriptKind.TSX,
       );
 
     const styleOf = (attrs: string) => {
@@ -750,8 +902,16 @@ describe("inset-hairline surfaces are owned by the shared recipe, per node", () 
       style: {},
     } as const satisfies GovernedSurface;
 
-    const parseFixture = (src: string) =>
-      ts.createSourceFile("fixture.tsx", src, ts.ScriptTarget.ESNext, true, ts.ScriptKind.TSX);
+    const parseFixture = (src: string) => parseFixtureSource(src);
+
+    const TILE = {
+      label: "fixture tile",
+      file: "fixture.tsx",
+      attr: "data-slot",
+      value: "shift-tile",
+      count: 1,
+      style: { width: "42", height: "42" },
+    } as const satisfies GovernedSurface;
 
     /** The governed node's effective style, as the oracle would judge it. */
     const judge = (src: string) => {
@@ -839,19 +999,112 @@ describe("inset-hairline surfaces are owned by the shared recipe, per node", () 
         `import { P } from "./elsewhere";
          const R = () => <div data-testid="synthetic-OFF" {...P} />;`,
       ],
-      [
-        "declared twice in one scope",
-        `function R() {
-           const P = { style: {} };
-           const P = { style: { backgroundColor: "red" } };
-           return <div data-testid="synthetic-OFF" {...P} />;
-         }`,
-      ],
     ])("fails CLOSED on %s", (_label, src) => {
       expect(judge(src).node.attrProblems.length).toBeGreaterThan(0);
     });
 
-    it("resolves className aliases lexically too, not by bare name", () => {
+    it("leaves duplicate same-scope declarations to typecheck, which rejects them", () => {
+      // Not an oracle guard, and saying otherwise would be false: TypeScript
+      // treats a redeclared block-scoped const as a DIAGNOSTIC, not a merged
+      // symbol — the checker still reports exactly one declaration, so the
+      // "more than one declaration" refusal cannot fire. `pnpm typecheck` is a
+      // required gate, so the codebase cannot contain this shape. Asserted here
+      // against the real compiler rather than claimed about another tool.
+      const sf = parseFixtureSource(`function R() {
+           const P = { style: {} };
+           const P = { style: { backgroundColor: "red" } };
+           return <div data-testid="synthetic-OFF" {...P} />;
+         }`);
+      const { program } = analysisFor(sf);
+      const errors = [
+        ...program.getSemanticDiagnostics(sf),
+        ...program.getSyntacticDiagnostics(sf),
+      ];
+      expect(errors.length, "a duplicate block-scoped const must not compile").toBeGreaterThan(0);
+      expect(
+        errors.some((d) => d.code === 2451),
+        "expected TS2451 Cannot redeclare",
+      ).toBe(true);
+    });
+
+    it("REJECTS the reviewer bypass — a nested-block `var` shadowing a legal module const", () => {
+      // THE ROUND-5 HOLE. `var` is FUNCTION-scoped, so this hoists to R() and is
+      // what actually runs; the lexical walker stopped at the block boundary and
+      // resolved outward to the legal module-level const instead.
+      const { node, style } = judge(`
+        const SAFE = { style: {} };
+        function R() {
+          if (true) {
+            var SAFE = { style: { backgroundColor: "var(--color-panel)" } };
+          }
+          return <div data-testid="synthetic-OFF" {...SAFE} />;
+        }
+      `);
+      // Refused: a `var` is reassignable, so its value at the use site is not
+      // provable — and it is emphatically NOT the module const.
+      expect(node.attrProblems.length).toBeGreaterThan(0);
+      expect(style.props).not.toEqual({ backgroundColor: '"var(--color-panel)"' });
+      // And emphatically not resolved to the legal module const either.
+      expect(style.props).toEqual({});
+    });
+
+    it("REJECTS a locally-declared or wrong-module `surfaceVariants`", () => {
+      // Shadowed in-file: same spelling, different symbol.
+      const shadowed = parseFixtureSource(
+        `function surfaceVariants(_o?: unknown) { return "bg-panel shadow-well"; }\n` +
+          `const X = <div data-slot="shift-tile" className={surfaceVariants({ role: "well", geometry: "control", emphasis: "hairline" })} />;\n`,
+        "", // no canonical prelude — the local declaration is all there is
+      );
+      const local = findGoverned(shadowed, TILE)[0];
+      expect(resolveClassName(shadowed, local.className!).tuples).toEqual([]);
+
+      // Imported from the wrong module: also same spelling, different symbol.
+      const wrongModule = parseFixtureSource(
+        `const X = <div data-slot="shift-tile" className={surfaceVariants({ role: "well", geometry: "control", emphasis: "hairline" })} />;\n`,
+        `import { surfaceVariants } from "@/impostor";\n`,
+      );
+      const wrong = findGoverned(wrongModule, TILE)[0];
+      const resolved = resolveClassName(wrongModule, wrong.className!);
+      expect(resolved.tuples, "an impostor module is not the authority").toEqual([]);
+      expect(resolved.unresolved.length).toBeGreaterThan(0);
+    });
+
+    it("REJECTS a shadowed `cn`, so its arguments are not silently traversed", () => {
+      const sf = parseFixtureSource(
+        `function cn(...a: unknown[]) { return String(a); }\n` +
+          `const X = <div data-slot="shift-tile" className={cn("flex", surfaceVariants({ role: "well", geometry: "control", emphasis: "hairline" }))} />;\n`,
+        `import { surfaceVariants } from "@/components/ui/surface";\n`,
+      );
+      const node = findGoverned(sf, TILE)[0];
+      const resolved = resolveClassName(sf, node.className!);
+      // A non-canonical combiner is opaque; nothing inside it is credited.
+      expect(resolved.tuples).toEqual([]);
+      expect(resolved.unresolved.join(" ")).toMatch(/opaque call cn/);
+    });
+
+    it("ACCEPTS the canonical imports and aliases the live code actually uses", () => {
+      const sf = parseFixtureSource(
+        `const BOX = { width: 42, height: 42 };\n` +
+          `const RECIPE = surfaceVariants({ role: "well", geometry: "control", emphasis: "hairline" });\n` +
+          `const X = <div data-slot="shift-tile" style={BOX} className={cn("flex flex-none", RECIPE)} />;\n`,
+      );
+      const node = findGoverned(sf, TILE)[0];
+      expect(node.attrProblems).toEqual([]);
+      expect(resolveClassName(sf, node.className!).tuples).toEqual([
+        { role: "well", geometry: "control", emphasis: "hairline" },
+      ]);
+      expect(resolveStyle(sf, node.style).props).toEqual({ width: "42", height: "42" });
+    });
+
+    it("fails CLOSED on a self-referential alias cycle", () => {
+      const { node } = judge(`
+        const A = { ...A };
+        const R = () => <div data-testid="synthetic-OFF" {...A} />;
+      `);
+      expect(node.attrProblems.length).toBeGreaterThan(0);
+    });
+
+    it("resolves className aliases by symbol, not by bare name", () => {
       const sf = parseFixture(`
         function ReservedCard() {
           const CLS = "bg-panel shadow-well";
