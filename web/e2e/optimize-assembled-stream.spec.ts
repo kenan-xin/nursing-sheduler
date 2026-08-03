@@ -22,10 +22,12 @@ import { resolve } from "node:path";
 import {
   ABORT_BOUNDS,
   ABORT_TEST_TIMEOUT,
+  auditCoverageAfterRelease,
   FIRST_BYTE_TIMEOUT,
   JUDGE_POLL_TIMEOUT,
   judgeEventsAuthority,
   judgeReplayEvidence,
+  judgeVolatileJobIdTexts,
   KEEPALIVE_WINDOW,
   OBSERVATION_EVALUATE_BOUND,
   OPTIMIZE_SESSION_RECORD_KEY,
@@ -41,8 +43,10 @@ import {
   TINY_BOUNDS,
   TINY_TEST_TIMEOUT,
   trackAcceptedJobs,
+  VOLATILE_JOB_ID_SELECTOR,
   type AcceptedJobTracker,
   type OwnershipRecovery,
+  type OwnershipSettlement,
 } from "./support/optimize-durable";
 
 const REPO_ROOT = resolve(__dirname, "../..");
@@ -547,10 +551,13 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
     // an accepted 202 whose body would not read, produced `armed jobs: (none)` and
     // `cleanup ok` while a solver could be running. Now unresolved ownership must be
     // RECOVERED from the page's own session record or the hook fails.
-    let trackerStats = { started: 0, failed: 0 };
+    let trackerStats = { started: 0, unaccounted: 0 };
     let jobIds: string[] = [];
     let settlementNotes: string[] = [];
     let settlementFailures: string[] = [];
+    // Kept whole, not just its pieces: the post-release coverage audit needs the
+    // `coverage` set to know WHICH ids were standing in for something unnamed.
+    let settlement: OwnershipSettlement | null = null;
     if (tracker !== null) {
       const drained = await tracker.drain();
       trackerStats = tracker.stats();
@@ -572,6 +579,37 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
                 OPTIMIZE_SESSION_RECORD_KEY,
               ),
             ),
+          // THE VOLATILE AUTHORITY. `activateSession` can return
+          // `activation-persistence-failed`: the 202 was accepted, a real job is
+          // running, and the durable record deliberately STAYS provisional — the id
+          // exists only in controller state. The screen renders that live id
+          // (`run-status-panel.tsx`), so reading it back is a genuine second authority.
+          //
+          // Bound to a stable `data-testid` on the id VALUE rather than to the
+          // `Job ID:` prose it used to scrape. The prose form coupled a fail-closed
+          // ownership gate to user-visible copy and would have matched any other
+          // paragraph opening the same way. The page returns only RAW texts; every
+          // judgement (absent / multiple / untexted / empty / not-a-bare-id) lives in
+          // `judgeVolatileJobIdTexts`, whose truth table is proved in the unit suite.
+          // A rejected verdict is thrown, which `recoverAcceptedOwnership` records as a
+          // failed recovery — so an unusable answer fails the gate instead of reading
+          // as "no job".
+          readVolatileJobIds: () =>
+            withBound(
+              "volatile job id read",
+              OWNERSHIP_RECOVERY_BOUND,
+              page
+                .evaluate(
+                  (selector) =>
+                    Array.from(document.querySelectorAll(selector)).map((node) => node.textContent),
+                  VOLATILE_JOB_ID_SELECTOR,
+                )
+                .then((texts) => {
+                  const verdict = judgeVolatileJobIdTexts(texts);
+                  if (!verdict.ok) throw new Error(verdict.reason);
+                  return verdict.ids;
+                }),
+            ),
         });
       }
 
@@ -579,7 +617,7 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
       // the listeners is the instant ownership can be lost silently, so anything
       // still in flight then is unresolved rather than finished.
       const disposal = tracker.dispose();
-      const settlement = settleAcceptedOwnership(drained, recovery, disposal);
+      settlement = settleAcceptedOwnership(drained, recovery, disposal);
       jobIds = settlement.ids;
       settlementNotes = settlement.notes;
       settlementFailures = settlement.failures;
@@ -607,26 +645,40 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
       now: () => Date.now(),
     });
 
+    // COVERAGE AUDIT, after release and before the verdict. Cardinality alone cannot
+    // tell a real recovered job from a STALE or invented id: both are "new and
+    // distinct", and a stale one then releases "successfully" down the documented
+    // idempotent 404 branch — so an acceptance we never named would look covered by a
+    // job that was never there. Only ids standing in for something unnamed are audited;
+    // a tracker-observed id legitimately 404s because the product's own terminal
+    // auto-chain already DELETEd it.
+    const coverageAudit =
+      settlement === null
+        ? { ok: true, failures: [] as string[] }
+        : auditCoverageAfterRelease(settlement, outcome);
+
     // ALWAYS attach, before any decision about throwing. `releaseLiveJobs` converts
     // a rejected transport into a named failure rather than propagating it, so this
     // line is reachable on every path.
     const report = [
       `armed jobs: ${jobIds.length === 0 ? "(none)" : jobIds.join(", ")}`,
-      `tracker: ${trackerStats.started} accepted-response read(s), ${trackerStats.failed} unreadable`,
+      `tracker: ${trackerStats.started} acceptance(s), ${trackerStats.unaccounted} unaccounted`,
       ...settlementNotes,
       ...outcome.steps,
       ...settlementFailures,
       ...outcome.failures,
+      ...coverageAudit.failures,
     ].join("\n");
     await testInfo.attach("live-job-cleanup", {
       body: report,
       contentType: "text/plain",
     });
 
-    // Cleanup is successful only when BOTH the release converged AND ownership was
-    // fully accounted for. Releasing an empty set is not success when the reason the
-    // set is empty is that we could not name the job.
-    if (outcome.ok && settlementFailures.length === 0) return;
+    // Cleanup is successful only when the release converged, ownership was fully
+    // accounted for, AND every id counted as coverage turned out to exist. Releasing an
+    // empty set is not success when the reason the set is empty is that we could not
+    // name the job, and releasing a job the backend never had accounts for nothing.
+    if (outcome.ok && settlementFailures.length === 0 && coverageAudit.ok) return;
     // Never replace the primary failure: if the test already failed, the cleanup
     // trace is attached above and that is all. But a cleanup failure on an
     // otherwise PASSING test means the next lane may be starved, so it must fail

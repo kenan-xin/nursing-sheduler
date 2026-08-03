@@ -433,14 +433,19 @@ else
   # above, so its whole truth table is proved by `docker/lib/negative-control.test.sh`
   # instead of only being exercised once per gate run.
   NEG_LOG="$WORKDIR/negative-control.log"
+  # The classifier reads this STRUCTURED report, not the log. The log is kept only as
+  # human-readable context alongside it.
+  NEG_REPORT="$WORKDIR/negative-control.json"
   (cd "$ROOT/web" && \
     ASSEMBLED_BASE_URL="$BASE" \
     ASSEMBLED_SKIP_ABORT_NAVIGATION=1 \
+    ABORT_CONTROL_REPORT="$NEG_REPORT" \
     CI=1 \
     pnpm exec playwright test --config playwright.assembled.config.ts \
-      --reporter=line --trace=off --grep "abort propagation" >"$NEG_LOG" 2>&1)
+      --reporter=line,./e2e/support/abort-control-reporter.ts \
+      --trace=off --grep "abort propagation" >"$NEG_LOG" 2>&1)
   NEG_EXIT=$?
-  case "$(classify_abort_negative_control "$NEG_EXIT" "$NEG_LOG")" in
+  case "$(classify_abort_negative_control "$NEG_EXIT" "$NEG_REPORT" "$BASE")" in
     at-assertion)
       ok "abort negative control fails AT the /about URL assertion, still on the fixture (no global timeout)" ;;
     passed-without-navigation)

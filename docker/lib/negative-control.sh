@@ -8,20 +8,10 @@
 
 # Printed by the abort spec on the line immediately before its URL assertion, in
 # control mode only. Kept in sync with `ABORT_CONTROL_SENTINEL` in
-# `web/e2e/optimize-assembled-stream.spec.ts`.
+# `web/e2e/support/abort-control-reporter.ts`.
 NEG_SENTINEL="R6_ABORT_CONTROL_AT_URL_ASSERTION"
-# Playwright's exact failure line for this matcher on a Page (verified against
-# Playwright 1.61.1 output, not assumed).
-NEG_MATCHER="expect(page).toHaveURL(expected) failed"
-# The exact expected pattern, so some OTHER URL assertion cannot stand in for it.
-NEG_PATTERN='Expected pattern: /\/about$/'
-# Positive evidence that the suppressed navigation is what failed: the page is still
-# on the fixture route.
-NEG_FIXTURE_ROUTE="optimize-durable-fixture"
-# Playwright's global per-test timeout signature, which must NOT be how it went red.
-NEG_GLOBAL_TIMEOUT_RE='Test timeout of [0-9]+ms exceeded'
 
-# classify_abort_negative_control <exit_code> <log_file>
+# classify_abort_negative_control <exit_code> <report_json> <expected_origin>
 #
 # Echoes exactly one verdict token:
 #
@@ -31,37 +21,24 @@ NEG_GLOBAL_TIMEOUT_RE='Test timeout of [0-9]+ms exceeded'
 #   at-assertion               red AT the intended assertion, still on the fixture
 #   not-that-assertion         reached the assertion but failed as something else
 #
-# Only `at-assertion` is a pass. The ordering matters: a global timeout is reported as
-# such even when the sentinel printed, because a lane that runs out of total time has
-# not demonstrated anything about the assertion.
+# Only `at-assertion` is a pass.
+#
+# WHOLE-LOG GREPS ARE GONE. The predecessor ran independent substring greps over the
+# entire log, so fields from DIFFERENT failure records cross-satisfied each other —
+# three measured false greens (separately-printed structural lines after a forged
+# sentinel; a genuine matcher record whose received URL merely CONTAINED the route,
+# `http://evil.invalid/not-the-fixture?next=optimize-durable-fixture`; and
+# matcher/pattern before the sentinel with an unrelated error after it).
+#
+# Text shape could not fix it: a probe showed a hand-thrown `Error` reproduces
+# Playwright's reported message byte-identically. So the decision now reads Playwright's
+# own STEP TREE via `web/e2e/support/abort-control-reporter.ts`, and every field is bound
+# to ONE failing `expect` step — a record that exists only because a matcher ran and
+# failed. The parsing lives in `negative_control_classify.py` because the received URL
+# must be compared as a PARSED URL (foreign host, suffix, query, fragment and embedded
+# credentials all rejected), which is not something to attempt in shell.
 classify_abort_negative_control() {
-  local exit_code="$1" log="$2"
-
-  if [ "$exit_code" = 0 ]; then
-    echo "passed-without-navigation"
-    return
-  fi
-  if [ ! -r "$log" ]; then
-    echo "before-assertion"
-    return
-  fi
-  if grep -qE "$NEG_GLOBAL_TIMEOUT_RE" "$log"; then
-    echo "global-timeout"
-    return
-  fi
-  # POSITIONAL. Nothing that fails before the assertion can have printed this.
-  if ! grep -qF "$NEG_SENTINEL" "$log"; then
-    echo "before-assertion"
-    return
-  fi
-  # STRUCTURAL. -F throughout: exact literals, so a regex metacharacter in the matcher
-  # text cannot quietly widen what counts as a match. A hand-thrown `Error` cannot
-  # produce the matcher line plus the `Expected pattern:`/`Received string:` pair.
-  if grep -qF "$NEG_MATCHER" "$log" &&
-    grep -qF "$NEG_PATTERN" "$log" &&
-    grep -F 'Received string:' "$log" | grep -qF "$NEG_FIXTURE_ROUTE"; then
-    echo "at-assertion"
-    return
-  fi
-  echo "not-that-assertion"
+  local exit_code="$1" report="$2" origin="$3"
+  python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/negative_control_classify.py" \
+    "$exit_code" "$report" "$origin"
 }

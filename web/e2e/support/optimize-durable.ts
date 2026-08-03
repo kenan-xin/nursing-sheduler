@@ -584,6 +584,11 @@ export interface CleanupHttp {
 }
 
 export interface CleanupOutcome {
+  /**
+   * Ids the backend turned out not to have (the documented idempotent 404 branch).
+   * Populated by `releaseLiveJobs`; consumed by `auditCoverageAfterRelease`.
+   */
+  absent?: string[];
   ok: boolean;
   /** Ordered, human-readable trace of every step and its status. */
   steps: string[];
@@ -783,21 +788,47 @@ export const ACCEPTED_PENDING_SETTLE_MS = 5_000;
  *
  * In both, a real solver job could exist while the hook reported success. So the
  * drain now says so: `resolved` is false whenever a submission is still pending or
- * an accepted body could not be read, and the caller must either RECOVER the
- * identity from another authority or fail the gate. Silence is no longer an option.
+ * an acceptance is otherwise unaccounted for, and the caller must either RECOVER the
+ * identity from an authoritative product source or fail the gate.
  */
+
+/**
+ * What became of ONE accepted 202. The tracker's contract is that every accepted
+ * submission ends as exactly one of these — there is no "nothing happened" outcome.
+ */
+export type AcceptedSlotOutcome =
+  /** A valid, canonical, not-previously-seen job id. The only accounted outcome. */
+  | { kind: "id"; jobId: string }
+  /** The body READ fine but carried no usable id (missing / empty / non-string). */
+  | { kind: "invalid-body"; detail: string }
+  /** The body read rejected. */
+  | { kind: "unreadable"; detail: string }
+  /** The body read had not settled when the bounded drain expired. */
+  | { kind: "unfinished" }
+  /** A valid id we had ALREADY seen — so this acceptance is not separately accounted. */
+  | { kind: "duplicate"; jobId: string };
+
 export interface AcceptedDrainOutcome {
-  /** Ids positively observed from accepted 202 bodies, in acceptance order. */
+  /** Unique valid ids, in acceptance order. */
   ids: string[];
-  /** True only when nothing is left pending and no accepted body failed to read. */
-  resolved: boolean;
+  /** Every accepted 202 observed, in acceptance order, with its outcome. */
+  slots: AcceptedSlotOutcome[];
+  /** How many accepted 202s were seen at all. */
+  acceptedCount: number;
+  /**
+   * Accepted 202s that did NOT yield a unique valid id — invalid body, unreadable
+   * body, unfinished read, or a duplicate of an id already owned.
+   *
+   * The invalid-body case is why this replaced a plain `failed` counter: a 202 whose
+   * body read SUCCEEDED but carried `{}` or `{id:""}` left a null slot and incremented
+   * nothing, so the drain reported `resolved: true` with no id and the hook released an
+   * empty set and went green over a job that may well have been running.
+   */
+  unaccountedSlots: number;
   /** Submissions still on the wire when the bounded settle expired. */
   pending: number;
-  /**
-   * Accepted 202s whose id could not be obtained — the body read rejected, OR it was
-   * still unfinished when the bounded drain expired. Both are the same loss.
-   */
-  failed: number;
+  /** True only when every acceptance is accounted for and nothing is still pending. */
+  resolved: boolean;
 }
 
 export interface AcceptedJobTracker {
@@ -819,8 +850,8 @@ export interface AcceptedJobTracker {
    * calls report zero because the first call already detached.
    */
   dispose(): AcceptedDisposal;
-  /** Diagnostics for a report: reads started, reads failed, requests left pending. */
-  stats(): { started: number; failed: number; pending: number };
+  /** Diagnostics for a report: acceptances seen, acceptances unaccounted, pending. */
+  stats(): { started: number; unaccounted: number; pending: number };
 }
 
 /** What detaching the listeners stranded. `orphaned` must be zero for a clean finish. */
@@ -857,12 +888,11 @@ export function trackAcceptedJobs(
   // Slot-indexed by ACCEPTANCE order, not by body-read completion order. A nested or
   // faster read must not reorder ownership, because release order is part of the
   // determinism this promises.
-  const slots: Array<string | null> = [];
+  const slots: Array<AcceptedSlotOutcome | undefined> = [];
   // A SET, not an array, and each read removes itself on settle — so after a bounded
   // drain the remaining size is exactly the number of reads that never landed.
   const inflight = new Set<Promise<void>>();
   let started = 0;
-  let failed = 0;
   let pending = 0;
   let disposed = false;
 
@@ -880,17 +910,36 @@ export function trackAcceptedJobs(
     if (!isAcceptedSubmission(response)) return;
     started += 1;
     const slot = slots.length;
-    slots.push(null);
+    // `undefined` means "this read has not settled yet"; the drain converts any slot
+    // still undefined at its bound into an explicit `unfinished` outcome.
+    slots.push(undefined);
     const read: Promise<void> = response
       .json()
       .then((body) => {
         const id = (body as { id?: unknown } | null)?.id;
-        if (typeof id === "string" && id.length > 0) slots[slot] = id;
+        if (typeof id !== "string") {
+          // FAIL CLOSED on a readable body with no usable id. This used to leave the
+          // slot null and increment nothing, so the drain called it resolved and the
+          // hook released an empty set — green over a possibly-live job.
+          slots[slot] = {
+            kind: "invalid-body",
+            detail: `accepted body id was ${id === undefined ? "absent" : typeof id}`,
+          };
+          return;
+        }
+        if (id.length === 0) {
+          slots[slot] = { kind: "invalid-body", detail: "accepted body id was empty" };
+          return;
+        }
+        slots[slot] = { kind: "id", jobId: id };
       })
-      .catch(() => {
-        // A body that cannot be read is recorded as a failed read rather than
-        // thrown: the hook must still be able to drain and report.
-        failed += 1;
+      .catch((error: unknown) => {
+        // A body that cannot be read is recorded, not thrown: the hook must still be
+        // able to drain and report.
+        slots[slot] = {
+          kind: "unreadable",
+          detail: error instanceof Error ? error.message : String(error),
+        };
       })
       .finally(() => {
         inflight.delete(read);
@@ -905,8 +954,8 @@ export function trackAcceptedJobs(
   return {
     ids: () => {
       const seen: string[] = [];
-      for (const id of slots) {
-        if (id !== null && !seen.includes(id)) seen.push(id);
+      for (const slot of slots) {
+        if (slot?.kind === "id" && !seen.includes(slot.jobId)) seen.push(slot.jobId);
       }
       return seen;
     },
@@ -944,20 +993,34 @@ export function trackAcceptedJobs(
           if (timer !== undefined) clearTimeout(timer);
         }
       }
+      // Resolve every slot to an explicit outcome. A read that never settled becomes
+      // `unfinished` rather than silently vanishing, and a repeat of an id we already
+      // own becomes `duplicate` — because "exactly one unique valid id per acceptance"
+      // is the invariant, so a second slot reporting the same id leaves that ACCEPTANCE
+      // unaccounted for even though the id itself is known.
+      const resolvedSlots: AcceptedSlotOutcome[] = [];
       const observed: string[] = [];
-      for (const id of slots) {
-        if (id !== null && !observed.includes(id)) observed.push(id);
+      for (const slot of slots) {
+        const outcome: AcceptedSlotOutcome = slot ?? { kind: "unfinished" };
+        if (outcome.kind === "id") {
+          if (observed.includes(outcome.jobId)) {
+            resolvedSlots.push({ kind: "duplicate", jobId: outcome.jobId });
+            continue;
+          }
+          observed.push(outcome.jobId);
+        }
+        resolvedSlots.push(outcome);
       }
-      // FAIL CLOSED. A pending submission may have created a job we cannot name; an
-      // unreadable 202 body definitely named one we failed to capture; and a read
-      // still unfinished at the bound is the same loss by a slower route, so it counts
-      // the same way rather than being silently dropped.
-      const unobtainable = failed + inflight.size;
+      const unaccountedSlots = resolvedSlots.filter((slot) => slot.kind !== "id").length;
+      // FAIL CLOSED. A pending submission may have created a job we cannot name, and an
+      // unaccounted acceptance definitely names one we failed to capture.
       return {
         ids: observed,
-        resolved: pending === 0 && unobtainable === 0,
+        slots: resolvedSlots,
+        acceptedCount: resolvedSlots.length,
+        unaccountedSlots,
         pending,
-        failed: unobtainable,
+        resolved: pending === 0 && unaccountedSlots === 0,
       };
     },
     dispose: (): AcceptedDisposal => {
@@ -969,7 +1032,18 @@ export function trackAcceptedJobs(
       // Anything unfinished at this instant will now land unobserved.
       return { orphaned: pending + inflight.size };
     },
-    stats: () => ({ started, failed, pending }),
+    stats: () => {
+      let unaccounted = 0;
+      const seen: string[] = [];
+      for (const slot of slots) {
+        if (slot?.kind === "id" && !seen.includes(slot.jobId)) {
+          seen.push(slot.jobId);
+          continue;
+        }
+        unaccounted += 1;
+      }
+      return { started, unaccounted, pending };
+    },
   };
 }
 
@@ -986,16 +1060,54 @@ export async function releaseLiveJobs(
   http: CleanupHttp,
 ): Promise<CleanupOutcome> {
   if (jobIds.length === 0) {
-    return { ok: true, steps: ["no accepted job was armed; nothing to release"], failures: [] };
+    return {
+      ok: true,
+      steps: ["no accepted job was armed; nothing to release"],
+      failures: [],
+      absent: [],
+    };
   }
   const steps: string[] = [];
   const failures: string[] = [];
+  const absent: string[] = [];
   for (const jobId of jobIds) {
     const outcome = await releaseLiveJob(jobId, http);
     steps.push(`job ${jobId}: ${outcome.steps.join(" | ")}`);
     for (const failure of outcome.failures) failures.push(`job ${jobId}: ${failure}`);
+    // A job the backend never had cannot be evidence that anything was cleaned up.
+    if (outcome.steps.some((step) => step.includes("already absent") || step.includes("404"))) {
+      absent.push(jobId);
+    }
   }
-  return { ok: failures.length === 0, steps, failures };
+  return { ok: failures.length === 0, steps, failures, absent };
+}
+
+/**
+ * Confirm, AFTER release, that every id counted as coverage actually existed.
+ *
+ * Closes the release-404 laundering path: a stale or invented id satisfies the
+ * cardinality check (it is new and distinct) and then releases "successfully" via the
+ * documented idempotent 404 branch — so an unaccounted acceptance would look covered by
+ * a job that was never there. Coverage only counts if the backend actually had it.
+ *
+ * Tracker-observed ids are deliberately exempt: on the success path the product's own
+ * terminal auto-chain DELETEs the job, so the hook legitimately finds it already gone.
+ * Only ids standing in for something we could not name have to prove they existed.
+ */
+export function auditCoverageAfterRelease(
+  settlement: OwnershipSettlement,
+  released: CleanupOutcome,
+): { ok: boolean; failures: string[] } {
+  const failures: string[] = [];
+  for (const jobId of settlement.coverage) {
+    if ((released.absent ?? []).includes(jobId)) {
+      failures.push(
+        `recovered job ${jobId} was counted as coverage but the backend never had it; ` +
+          `the acceptance it was meant to account for is still unnamed`,
+      );
+    }
+  }
+  return { ok: failures.length === 0, failures };
 }
 
 // ===========================================================================
@@ -1016,6 +1128,9 @@ export async function releaseLiveJobs(
 
 /** sessionStorage key of the product's single in-flight submission record. */
 export const OPTIMIZE_SESSION_RECORD_KEY = "nurse.optimize.session";
+
+/** The product's session schema version (`OPTIMIZE_SESSION_SCHEMA_VERSION`). */
+export const OPTIMIZE_SESSION_SCHEMA_VERSION = 1;
 
 /** Bound for the page-side recovery read. One `evaluate`, so it is small. */
 export const OWNERSHIP_RECOVERY_BOUND = 5_000;
@@ -1038,21 +1153,154 @@ export function recoverJobIdFromSessionRecord(
   } catch {
     return { ok: false, reason: "session record is not JSON" };
   }
-  if (typeof parsed !== "object" || parsed === null) {
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     return { ok: false, reason: "session record is not an object" };
   }
-  const jobId = (parsed as { jobId?: unknown }).jobId;
-  if (jobId === undefined || jobId === null) return { ok: true, jobId: null };
+  const record = parsed as Record<string, unknown>;
+
+  // SCHEMA, not shape. This used to accept ANY object with a nonempty `jobId`, so a
+  // corrupt, stale, foreign-schema or future-schema record — and a provisional record
+  // that happened to carry a jobId — all passed as authority for a live job. The
+  // product's own validator (`lib/optimize/session-transaction.ts`) requires the exact
+  // schema version, an exact key set per variant, and `phase` as the discriminator;
+  // only the ACTIVE variant carries a job id at all.
+  if (record.schemaVersion !== OPTIMIZE_SESSION_SCHEMA_VERSION) {
+    return {
+      ok: false,
+      reason: `session record schemaVersion ${String(record.schemaVersion)} is not ${OPTIMIZE_SESSION_SCHEMA_VERSION}`,
+    };
+  }
+  if (typeof record.ownerId !== "string" || record.ownerId.length === 0) {
+    return { ok: false, reason: "session record has no owner id" };
+  }
+
+  if (record.phase === "provisional") {
+    // A provisional record means the POST had not been accepted when it was written, so
+    // it is NOT authority for a live job — not even carrying a jobId, which the
+    // product's exact-key check would itself reject. In the real
+    // `activation-persistence-failed` path the durable record STAYS provisional while a
+    // real job runs, and the id lives only in volatile state; the volatile authority in
+    // `recoverAcceptedOwnership` is what covers that, never a guess from this record.
+    if ("jobId" in record) {
+      return { ok: false, reason: "provisional session record carries a jobId; not valid" };
+    }
+    return { ok: true, jobId: null };
+  }
+  if (record.phase !== "active") {
+    return { ok: false, reason: `session record phase ${String(record.phase)} is not active` };
+  }
+
+  const jobId = record.jobId;
   if (typeof jobId !== "string" || jobId.length === 0) {
-    return { ok: false, reason: "session record has a non-string jobId" };
+    return { ok: false, reason: "active session record has no valid jobId" };
   }
   return { ok: true, jobId };
 }
 
-/** The page-side seam, so settlement is testable without a browser. */
+// ---------------------------------------------------------------------------
+// The volatile (DOM) authority's selector contract
+// ---------------------------------------------------------------------------
+//
+// The volatile read used to scan every `<p>` for the PROSE `Job ID: <id>`. That
+// coupled a fail-closed ownership gate to user-visible copy: a wording change, a
+// translation, or a wrapper element would make recovery silently find nothing, and
+// the acceptance it was meant to cover would be reported unnamed. Worse, the regex
+// was `^Job ID:\s*(\S+)$` over `textContent`, so it could equally match any other
+// paragraph that happened to start that way.
+//
+// So the product now renders a stable, narrow hook on the job-id VALUE
+// (`components/optimize/run-status-panel.tsx`), and everything below judges what
+// that hook yields. The pair is pinned by a DOM test in
+// `components/optimize/run-status-panel.test.tsx`, which imports the constant from
+// here — so the selector and the markup cannot drift apart silently.
+
+/** The `data-testid` on the rendered live job-id VALUE. */
+export const VOLATILE_JOB_ID_TESTID = "optimize-job-id";
+
+/** The exact query the page-side read runs. */
+export const VOLATILE_JOB_ID_SELECTOR = `[data-testid="${VOLATILE_JOB_ID_TESTID}"]`;
+
+/** Job-id texts the page yielded, or a REASON the page's answer is unusable. */
+export type VolatileJobIdsVerdict = { ok: true; ids: string[] } | { ok: false; reason: string };
+
+/**
+ * Judge the raw texts the volatile selector matched.
+ *
+ * Total and fail-closed, because this is an ownership authority: an answer this
+ * cannot vouch for becomes a REASON, which `recoverAcceptedOwnership` turns into a
+ * failed recovery and `settleAcceptedOwnership` turns into a red gate. The one
+ * benign outcome is ABSENCE — no node at all means the page holds no live job id,
+ * which is reported as an empty set and then fails closed at the CARDINALITY check
+ * if an acceptance actually needed covering. Nothing here may invent an id.
+ *
+ * Rejected, each for its own reason:
+ *
+ *   * MULTIPLE nodes — the panel renders at most one in-flight submission, so two
+ *     hooks mean a stale panel or a duplicated mount and neither can be shown to
+ *     name the live job. Picking one would be a guess.
+ *   * a node with NO text, or text that is empty/whitespace once trimmed.
+ *   * text containing INNER whitespace — which is exactly what a hook moved from the
+ *     value onto the whole line would produce (`Job ID: opt_1`), so a regression of
+ *     that shape is named rather than silently parsed back out.
+ *
+ * STALENESS is deliberately NOT judged here: a DOM string carries no evidence of
+ * whether the backend still has that job. It is caught downstream instead — a
+ * recovered id counted as coverage that the backend never had 404s on release and
+ * `auditCoverageAfterRelease` fails the gate.
+ */
+export function judgeVolatileJobIdTexts(
+  texts: readonly (string | null | undefined)[],
+): VolatileJobIdsVerdict {
+  if (!Array.isArray(texts)) {
+    return { ok: false, reason: "page did not report a list of volatile job-id nodes" };
+  }
+  if (texts.length === 0) return { ok: true, ids: [] };
+  if (texts.length > 1) {
+    return {
+      ok: false,
+      reason:
+        `page rendered ${texts.length} "${VOLATILE_JOB_ID_TESTID}" nodes ` +
+        `(${texts.map((text) => JSON.stringify(text)).join(", ")}); ` +
+        `the live job authority is ambiguous`,
+    };
+  }
+  const raw = texts[0];
+  if (typeof raw !== "string") {
+    return {
+      ok: false,
+      reason: `"${VOLATILE_JOB_ID_TESTID}" node carried no text (${String(raw)})`,
+    };
+  }
+  const jobId = raw.trim();
+  if (jobId.length === 0) {
+    return { ok: false, reason: `"${VOLATILE_JOB_ID_TESTID}" node text was empty` };
+  }
+  if (/\s/.test(jobId)) {
+    return {
+      ok: false,
+      reason:
+        `"${VOLATILE_JOB_ID_TESTID}" node text ${JSON.stringify(raw)} is not a bare job id; ` +
+        `the hook must sit on the id VALUE, not on the whole line`,
+    };
+  }
+  return { ok: true, ids: [jobId] };
+}
+
+/** The page-side seams, so settlement is testable without a browser. */
 export interface OwnershipRecoverySource {
-  /** Read the raw session record from the page. Rejects if the page is gone. */
+  /** Read the raw durable session record from the page. Rejects if the page is gone. */
   readSessionRecord(): Promise<string | null>;
+  /**
+   * Read every job id the page currently holds in VOLATILE state.
+   *
+   * Required because the durable record is not always sufficient. `activateSession`
+   * can return `activation-persistence-failed`: the 202 WAS accepted, a real job IS
+   * running, and the durable record deliberately stays PROVISIONAL — the accepted id
+   * exists only in volatile controller state. Recovering from the durable record alone
+   * would report "no job id" over a live solver, which is the exact fail-open shape
+   * this whole path exists to prevent.
+   */
+  readVolatileJobIds(): Promise<string[]>;
 }
 
 /** The outcome of a recovery attempt — total, like every other judge here. */
@@ -1073,20 +1321,50 @@ export async function recoverAcceptedOwnership(
   }
   const parsed = recoverJobIdFromSessionRecord(raw);
   if (!parsed.ok) return { ok: false, reason: parsed.reason };
+
+  const notes: string[] = [];
+  const ids: string[] = [];
   if (parsed.jobId === null) {
-    return { ok: true, ids: [], note: "no active session record; no job id to recover" };
+    notes.push("durable record holds no active job id");
+  } else {
+    ids.push(parsed.jobId);
+    notes.push(`durable active record names job ${parsed.jobId}`);
   }
-  return {
-    ok: true,
-    ids: [parsed.jobId],
-    note: `recovered job ${parsed.jobId} from the page record`,
-  };
+
+  // AUTHORITY 2 — volatile controller state, the ONLY place an accepted id lives when
+  // activation persistence failed after a real 202.
+  let volatileIds: string[];
+  try {
+    volatileIds = await source.readVolatileJobIds();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { ok: false, reason: `page-side volatile job ids were unreadable: ${message}` };
+  }
+  for (const id of volatileIds) {
+    if (typeof id !== "string" || id.length === 0) {
+      return { ok: false, reason: "page reported an invalid volatile job id" };
+    }
+    if (!ids.includes(id)) ids.push(id);
+  }
+  notes.push(
+    volatileIds.length === 0
+      ? "page holds no volatile accepted job id"
+      : `volatile state names ${volatileIds.length} job id(s): ${volatileIds.join(", ")}`,
+  );
+
+  return { ok: true, ids, note: notes.join("; ") };
 }
 
 /** The settled ownership set plus whether it may be trusted as complete. */
 export interface OwnershipSettlement {
   /** Every id to release, tracker-observed first, then recovered, deduplicated. */
   ids: string[];
+  /**
+   * The RECOVERED ids being counted as coverage for unaccounted acceptances. These
+   * must still be confirmed to have existed — see `auditCoverageAfterRelease`. A stale
+   * id that 404s covers nothing, and counting it would launder the missing job.
+   */
+  coverage: string[];
   /** True only when nothing is left unaccounted for. */
   ok: boolean;
   /** Human-readable trail for the attachment. */
@@ -1120,13 +1398,24 @@ export function settleAcceptedOwnership(
   const failures: string[] = [];
 
   notes.push(
-    `drain: ${drained.ids.length} id(s), ${drained.pending} pending, ${drained.failed} unreadable`,
+    `drain: ${drained.acceptedCount} acceptance(s), ${drained.ids.length} known id(s), ` +
+      `${drained.unaccountedSlots} unaccounted, ${drained.pending} pending, ` +
+      `${disposal.orphaned} stranded by disposal`,
   );
 
-  if (!drained.resolved) {
+  // CARDINALITY, not mere non-emptiness. Checking only "recovery returned something"
+  // let ONE id — possibly a duplicate of one already owned, or a stale id — stand in for
+  // ANY number of missing jobs. Coverage must be one-to-one: every unaccounted
+  // acceptance needs its own distinct, NEW identity from an authoritative source.
+  const unresolvedCount = drained.unaccountedSlots + drained.pending + disposal.orphaned;
+  const coverage: string[] = [];
+  if (unresolvedCount > 0) {
     const unresolved: string[] = [];
+    if (drained.unaccountedSlots > 0) {
+      unresolved.push(`${drained.unaccountedSlots} acceptance(s) unaccounted for`);
+    }
     if (drained.pending > 0) unresolved.push(`${drained.pending} submission(s) still pending`);
-    if (drained.failed > 0) unresolved.push(`${drained.failed} accepted body/ies unreadable`);
+    if (disposal.orphaned > 0) unresolved.push(`${disposal.orphaned} stranded by disposal`);
     const summary = unresolved.join(" and ");
     if (recovery === null) {
       failures.push(`accepted ownership unresolved (${summary}) and no recovery was attempted`);
@@ -1136,23 +1425,27 @@ export function settleAcceptedOwnership(
       );
     } else {
       notes.push(`recovery: ${recovery.note}`);
-      const recovered = recovery.ids.filter((id) => !ids.includes(id));
+      // NEW and DISTINCT. An id we already own launders nothing, and a repeated id
+      // cannot cover two different missing jobs.
+      const recovered: string[] = [];
+      for (const id of recovery.ids) {
+        if (ids.includes(id) || recovered.includes(id)) continue;
+        recovered.push(id);
+      }
       ids.push(...recovered);
-      if (recovered.length === 0 && recovery.ids.length === 0) {
+      coverage.push(...recovered);
+      notes.push(
+        `coverage: ${recovered.length} new distinct id(s) for ${unresolvedCount} unresolved acceptance(s)`,
+      );
+      if (recovered.length < unresolvedCount) {
         failures.push(
-          `accepted ownership unresolved (${summary}) and the page held no active job id to recover; a solver job may exist unnamed`,
+          `accepted ownership unresolved (${summary}): authority produced ${recovered.length} new distinct job id(s) for ${unresolvedCount} unresolved acceptance(s); a solver job may exist unnamed`,
         );
       }
     }
   }
 
-  if (disposal.orphaned > 0) {
-    failures.push(
-      `disposing the tracker stranded ${disposal.orphaned} in-flight submission(s)/body read(s); ownership of those is unknown`,
-    );
-  }
-
-  return { ids, ok: failures.length === 0, notes, failures };
+  return { ids, coverage, ok: failures.length === 0, notes, failures };
 }
 
 /** Wire version prefix of the public event cursor (`CURSOR_VERSION`). */

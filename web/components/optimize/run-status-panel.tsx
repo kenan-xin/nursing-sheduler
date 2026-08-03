@@ -283,7 +283,15 @@ export function RunStatusPanel({
               {jobDetailLine(view, submitting)}
             </p>
             {view.jobId !== null ? (
-              <p className="mt-0.5 font-mono text-label text-ink3">Job ID: {view.jobId}</p>
+              // The VALUE carries the testid, not the line: the assembled gate's
+              // ownership recovery reads this back as the volatile authority for the
+              // `activation-persistence-failed` path (a real 202 whose id lives only in
+              // controller state), and a hook anchored on the value cannot be defeated
+              // by the "Job ID:" copy changing. Presentation is unchanged — a bare
+              // <span> in a text line renders identically.
+              <p className="mt-0.5 font-mono text-label text-ink3">
+                Job ID: <span data-testid="optimize-job-id">{view.jobId}</span>
+              </p>
             ) : null}
           </div>
         </>

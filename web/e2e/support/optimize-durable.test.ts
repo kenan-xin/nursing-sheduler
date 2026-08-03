@@ -8,6 +8,8 @@
 // `judgeReplayEvidence` rejects it. If someone ever weakens the judge back
 // toward the old shape, these tests go red and name which rule was lost.
 
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   ABORT_BOUND_KEYS,
@@ -15,8 +17,10 @@ import {
   ABORT_TEST_TIMEOUT,
   CLEANUP_ACCEPTED_STATUS,
   CLEANUP_BOUNDS,
+  auditCoverageAfterRelease,
   isAcceptedSubmission,
   isCanonicalRawAuthority,
+  OPTIMIZE_SESSION_SCHEMA_VERSION,
   isSubmissionRequest,
   OPTIMIZE_SESSION_RECORD_KEY,
   recoverAcceptedOwnership,
@@ -28,6 +32,9 @@ import {
   isTerminalJobBody,
   judgeEventsAuthority,
   judgeReplayEvidence,
+  judgeVolatileJobIdTexts,
+  VOLATILE_JOB_ID_SELECTOR,
+  VOLATILE_JOB_ID_TESTID,
   normalizeExpectedOrigin,
   parseEventsRequestUrl,
   PLAYWRIGHT_DEFAULT_TEST_TIMEOUT,
@@ -46,6 +53,7 @@ import {
   TINY_TEST_TIMEOUT,
   type AcceptedDrainOutcome,
   type CleanupHttp,
+  type OwnershipRecoverySource,
   type ReplayEvidence,
 } from "./optimize-durable";
 
@@ -380,6 +388,27 @@ describe("releaseLiveJob converges on terminal before deleting", () => {
   });
 });
 
+/**
+ * Build a drain outcome; `resolved` is DERIVED so a fixture cannot lie about it.
+ *
+ * Shared by BOTH ownership suites: the tracker suite asserts real drains against it
+ * (so an expectation must state every field the drain reports — ids, per-acceptance
+ * slots, acceptance count, unaccounted count, pending), and the settlement suite
+ * builds inputs with it. One helper means the two cannot drift into disagreeing
+ * about what a drain outcome is.
+ */
+const drain = (over: Partial<AcceptedDrainOutcome> = {}): AcceptedDrainOutcome => {
+  const merged = {
+    ids: [] as string[],
+    slots: [] as AcceptedDrainOutcome["slots"],
+    acceptedCount: 0,
+    unaccountedSlots: 0,
+    pending: 0,
+    ...over,
+  };
+  return { ...merged, resolved: merged.pending === 0 && merged.unaccountedSlots === 0 };
+};
+
 // P2-2. Ownership must not be able to arrive after the hook snapshots. The tracker
 // is a Node-side lifecycle: registered before submit, fed by the response event,
 // DRAINED by the hook before it reads `ids()`.
@@ -431,7 +460,7 @@ describe("trackAcceptedJobs owns every accepted 202 and cannot outlive the drain
     emit(accepted("job-a"));
     await tracker.drain();
     expect(tracker.ids()).toEqual(["job-a"]);
-    expect(tracker.stats()).toEqual({ started: 1, failed: 0, pending: 0 });
+    expect(tracker.stats()).toEqual({ started: 1, unaccounted: 0, pending: 0 });
   });
 
   // The exact race: the id lands while the test is already failing. Draining before
@@ -490,10 +519,22 @@ describe("trackAcceptedJobs owns every accepted 202 and cannot outlive the drain
     const tracker = trackAcceptedJobs(source);
     emit(accepted("x", { json: async () => Promise.reject(new Error("body gone")) }));
     const drained = await tracker.drain();
-    expect(drained).toEqual({ ids: [], resolved: false, pending: 0, failed: 1 });
-    expect(tracker.stats()).toEqual({ started: 1, failed: 1, pending: 0 });
+    // The acceptance is reported as its OWN slot with its own reason, not merely
+    // counted: the hook's attachment has to be able to say WHICH failure lost the id.
+    expect(drained).toEqual(
+      drain({
+        acceptedCount: 1,
+        unaccountedSlots: 1,
+        slots: [{ kind: "unreadable", detail: "body gone" }],
+      }),
+    );
+    expect(tracker.stats()).toEqual({ started: 1, unaccounted: 1, pending: 0 });
   });
 
+  // GENUINELY not an accepted submission — no acceptance happened, so there is nothing
+  // to account for and the drain is RESOLVED. Distinct from an accepted 202 whose body
+  // is unusable, which is the case immediately below: conflating the two is what let an
+  // unusable acceptance read as "no job was ever accepted".
   it.each([
     ["a non-202 status", accepted("x", { status: () => 200 })],
     [
@@ -501,14 +542,59 @@ describe("trackAcceptedJobs owns every accepted 202 and cannot outlive the drain
       accepted("x", { request: () => ({ method: () => "GET", url: () => "/api/optimize" }) }),
     ],
     ["a different route", accepted("x", { url: () => "/api/optimize/abc/events" })],
-    ["a missing id", accepted("x", { json: async () => ({}) })],
-    ["an empty id", accepted("x", { json: async () => ({ id: "" }) })],
-  ])("ignores %s", async (_label, response) => {
+  ])("ignores %s, with nothing left unaccounted", async (_label, response) => {
     const { source, emit } = fakeSource();
     const tracker = trackAcceptedJobs(source);
     emit(response);
-    await tracker.drain();
+    expect(await tracker.drain()).toEqual(drain());
     expect(tracker.ids()).toEqual([]);
+    expect(tracker.stats()).toEqual({ started: 0, unaccounted: 0, pending: 0 });
+  });
+
+  // AN ACCEPTED 202 WHOSE BODY CARRIES NO USABLE ID. The 202 means a job may well be
+  // running; only the NAME is missing. These used to sit in the same "ignores" list as
+  // the cases above and were asserted only through `ids()` being empty — the exact
+  // fail-open reading, since the drain then reported `resolved: true` and the hook
+  // released an empty set and went green. Each is now its own unaccounted SLOT with its
+  // own reason.
+  it.each([
+    ["a missing id", async () => ({}), "accepted body id was absent"],
+    ["a null body", async () => null, "accepted body id was absent"],
+    ["an empty id", async () => ({ id: "" }), "accepted body id was empty"],
+    ["a non-string id", async () => ({ id: 7 }), "accepted body id was number"],
+    ["an object id", async () => ({ id: { v: 1 } }), "accepted body id was object"],
+  ])("reports %s as an UNACCOUNTED acceptance, never as no job", async (_label, json, detail) => {
+    const { source, emit } = fakeSource();
+    const tracker = trackAcceptedJobs(source);
+    emit(accepted("x", { json }));
+    expect(await tracker.drain()).toEqual(
+      drain({ acceptedCount: 1, unaccountedSlots: 1, slots: [{ kind: "invalid-body", detail }] }),
+    );
+    expect(tracker.ids()).toEqual([]);
+    expect(tracker.stats()).toEqual({ started: 1, unaccounted: 1, pending: 0 });
+  });
+
+  // A REPEATED ID IS NOT A FREE ACCEPTANCE. Two 202s naming the same job are two
+  // acceptances, and one identity cannot account for both — the same one-to-one rule
+  // settlement applies to recovery. So the second slot is `duplicate` and the drain is
+  // unresolved, even though every id it saw is perfectly valid.
+  it("treats a second 202 repeating a known id as an unaccounted acceptance", async () => {
+    const { source, emit } = fakeSource();
+    const tracker = trackAcceptedJobs(source);
+    emit(accepted("job-a"));
+    emit(accepted("job-a"));
+    expect(await tracker.drain()).toEqual(
+      drain({
+        ids: ["job-a"],
+        acceptedCount: 2,
+        unaccountedSlots: 1,
+        slots: [
+          { kind: "id", jobId: "job-a" },
+          { kind: "duplicate", jobId: "job-a" },
+        ],
+      }),
+    );
+    expect(tracker.stats()).toEqual({ started: 2, unaccounted: 1, pending: 0 });
   });
 
   it("accepts the absolute submission URL a Request exposes", async () => {
@@ -558,7 +644,9 @@ describe("trackAcceptedJobs owns every accepted 202 and cannot outlive the drain
     const drained = await tracker.drain();
     // Bounded: it returns rather than waiting forever for a response that never came.
     expect(Date.now() - started).toBeLessThan(2_000);
-    expect(drained).toEqual({ ids: [], resolved: false, pending: 1, failed: 0 });
+    // No acceptance was ever seen, so there is no slot to report — the submission
+    // itself is what is unresolved.
+    expect(drained).toEqual(drain({ pending: 1 }));
   });
 
   it("reports a fully accounted drain as RESOLVED", async () => {
@@ -567,7 +655,16 @@ describe("trackAcceptedJobs owns every accepted 202 and cannot outlive the drain
     emit(accepted("job-a"));
     emit(accepted("job-b"));
     const drained = await tracker.drain();
-    expect(drained).toEqual({ ids: ["job-a", "job-b"], resolved: true, pending: 0, failed: 0 });
+    expect(drained).toEqual(
+      drain({
+        ids: ["job-a", "job-b"],
+        acceptedCount: 2,
+        slots: [
+          { kind: "id", jobId: "job-a" },
+          { kind: "id", jobId: "job-b" },
+        ],
+      }),
+    );
   });
 
   // A partially-unreadable drain must not hide the id it DID capture: cleanup still
@@ -577,12 +674,19 @@ describe("trackAcceptedJobs owns every accepted 202 and cannot outlive the drain
     const tracker = trackAcceptedJobs(source);
     emit(accepted("job-good"));
     emit(accepted("job-bad", { json: async () => Promise.reject(new Error("body gone")) }));
-    expect(await tracker.drain()).toEqual({
-      ids: ["job-good"],
-      resolved: false,
-      pending: 0,
-      failed: 1,
-    });
+    expect(await tracker.drain()).toEqual(
+      drain({
+        ids: ["job-good"],
+        acceptedCount: 2,
+        unaccountedSlots: 1,
+        // ACCEPTANCE order is preserved across a mixed outcome, so the good id and the
+        // lost one stay attributable to the submissions that produced them.
+        slots: [
+          { kind: "id", jobId: "job-good" },
+          { kind: "unreadable", detail: "body gone" },
+        ],
+      }),
+    );
   });
 
   // Disposal is where ownership can vanish silently, so it must SAY what it stranded.
@@ -598,7 +702,9 @@ describe("trackAcceptedJobs owns every accepted 202 and cannot outlive the drain
     expect(Date.now() - started).toBeLessThan(2_000);
     // The unfinished read counts as an id we could not obtain — the same loss as a
     // rejected read, reached by a slower route.
-    expect(drained).toEqual({ ids: [], resolved: false, pending: 0, failed: 1 });
+    expect(drained).toEqual(
+      drain({ acceptedCount: 1, unaccountedSlots: 1, slots: [{ kind: "unfinished" }] }),
+    );
     expect(tracker.dispose()).toEqual({ orphaned: 1 });
     expect(tracker.dispose()).toEqual({ orphaned: 0 });
   });
@@ -625,14 +731,21 @@ describe("trackAcceptedJobs owns every accepted 202 and cannot outlive the drain
     const drained = await tracker.drain();
     // The read landed inside its OWN window, so it is owned. Only the never-landing
     // POST is unresolved.
-    expect(drained).toEqual({ ids: ["job-slow-body"], resolved: false, pending: 1, failed: 0 });
+    expect(drained).toEqual(
+      drain({
+        ids: ["job-slow-body"],
+        acceptedCount: 1,
+        pending: 1,
+        slots: [{ kind: "id", jobId: "job-slow-body" }],
+      }),
+    );
   });
 
   it("reports a submission still on the wire at disposal as stranded", async () => {
     const { source, emitRequest } = fakeSource();
     const tracker = trackAcceptedJobs(source, { pendingSettleMs: 10 });
     emitRequest(submissionRequest);
-    expect(await tracker.drain()).toEqual({ ids: [], resolved: false, pending: 1, failed: 0 });
+    expect(await tracker.drain()).toEqual(drain({ pending: 1 }));
     expect(tracker.dispose()).toEqual({ orphaned: 1 });
   });
 
@@ -690,10 +803,50 @@ describe("trackAcceptedJobs owns every accepted 202 and cannot outlive the drain
 // RECOVERED id — cancel -> poll to terminal -> delete — so the recovery path is shown
 // to actually release a job rather than merely to report one.
 describe("accepted-job ownership fails closed and recovers", () => {
-  const CLEAN: AcceptedDrainOutcome = { ids: ["job-a"], resolved: true, pending: 0, failed: 0 };
-  const PENDING: AcceptedDrainOutcome = { ids: [], resolved: false, pending: 1, failed: 0 };
-  const UNREADABLE: AcceptedDrainOutcome = { ids: [], resolved: false, pending: 0, failed: 1 };
+  const CLEAN = drain({
+    ids: ["job-a"],
+    acceptedCount: 1,
+    slots: [{ kind: "id", jobId: "job-a" }],
+  });
+  const PENDING = drain({ pending: 1 });
+  const UNREADABLE = drain({
+    acceptedCount: 1,
+    unaccountedSlots: 1,
+    slots: [{ kind: "unreadable", detail: "body gone" }],
+  });
   const CLEAN_DISPOSAL = { orphaned: 0 };
+
+  /** A REAL active record, exactly as the product's validator requires it. */
+  const activeRecord = (jobId: string): string =>
+    JSON.stringify({
+      schemaVersion: 1,
+      ownerId: "owner-1",
+      phase: "active",
+      anonymized: false,
+      runOptions: { prettify: false, timeout: 30 },
+      peopleCount: 0,
+      reverseMap: [],
+      jobId,
+    });
+
+  /** A REAL provisional record — no jobId, because the schema forbids one. */
+  const provisionalRecord = (): string =>
+    JSON.stringify({
+      schemaVersion: 1,
+      ownerId: "owner-1",
+      phase: "provisional",
+      anonymized: false,
+      runOptions: { prettify: false, timeout: 30 },
+      peopleCount: 0,
+      reverseMap: [],
+    });
+
+  /** Both authorities, defaulting to "nothing here", so each test states only its own. */
+  const source = (over: Partial<OwnershipRecoverySource> = {}): OwnershipRecoverySource => ({
+    readSessionRecord: async () => null,
+    readVolatileJobIds: async () => [],
+    ...over,
+  });
 
   it("settles a resolved drain without consulting recovery at all", () => {
     const settled = settleAcceptedOwnership(CLEAN, null, CLEAN_DISPOSAL);
@@ -705,7 +858,7 @@ describe("accepted-job ownership fails closed and recovers", () => {
   // THE CORE REGRESSION. Unresolved with no recovery is NOT success.
   it.each([
     ["a pending submission", PENDING, "1 submission(s) still pending"],
-    ["an unreadable accepted body", UNREADABLE, "1 accepted body/ies unreadable"],
+    ["an unreadable accepted body", UNREADABLE, "1 acceptance(s) unaccounted for"],
   ])("refuses to call %s settled when no recovery was attempted", (_label, drained, summary) => {
     const settled = settleAcceptedOwnership(drained, null, CLEAN_DISPOSAL);
     expect(settled.ok).toBe(false);
@@ -740,8 +893,11 @@ describe("accepted-job ownership fails closed and recovers", () => {
       CLEAN_DISPOSAL,
     );
     expect(settled.ok).toBe(false);
+    // The message is now CARDINAL rather than merely "nothing to recover": it names how
+    // many distinct new ids the authority produced against how many acceptances needed
+    // covering, which is the same rule that rejects one id standing in for two jobs.
     expect(settled.failures).toEqual([
-      "accepted ownership unresolved (1 accepted body/ies unreadable) and the page held no active job id to recover; a solver job may exist unnamed",
+      "accepted ownership unresolved (1 acceptance(s) unaccounted for): authority produced 0 new distinct job id(s) for 1 unresolved acceptance(s); a solver job may exist unnamed",
     ]);
   });
 
@@ -757,29 +913,94 @@ describe("accepted-job ownership fails closed and recovers", () => {
     ]);
   });
 
-  it("names BOTH unresolved causes when a drain has each", () => {
+  it("names EVERY unresolved cause when a drain has each", () => {
     const settled = settleAcceptedOwnership(
-      { ids: [], resolved: false, pending: 2, failed: 3 },
+      drain({ acceptedCount: 3, unaccountedSlots: 3, pending: 2 }),
       null,
-      CLEAN_DISPOSAL,
+      { orphaned: 1 },
     );
     expect(settled.failures).toEqual([
-      "accepted ownership unresolved (2 submission(s) still pending and 3 accepted body/ies unreadable) and no recovery was attempted",
+      "accepted ownership unresolved (3 acceptance(s) unaccounted for and 2 submission(s) still pending and 1 stranded by disposal) and no recovery was attempted",
     ]);
   });
 
-  // MULTIPLE ACCEPTED POSTS. Every tracked id is released, in acceptance order, and a
-  // recovered id that duplicates a tracked one must not be released twice.
-  it("releases every tracked id in acceptance order, deduplicated against recovery", () => {
+  // REPLACES a test that asserted duplicate recovery was CLEAN. It claimed that
+  // recovering an id we already owned "accounted for" an unreadable body — which is
+  // exactly the laundering this round closed: one identity cannot cover a DIFFERENT
+  // missing job. Coverage is now one-to-one, so this is red.
+  it("refuses a recovered id that merely repeats one already owned", () => {
     const settled = settleAcceptedOwnership(
-      { ids: ["job-1", "job-2"], resolved: false, pending: 0, failed: 1 },
-      { ok: true, ids: ["job-2"], note: "recovered job job-2 from the page record" },
+      drain({ ids: ["job-1", "job-2"], acceptedCount: 3, unaccountedSlots: 1 }),
+      { ok: true, ids: ["job-2"], note: "durable active record names job job-2" },
       CLEAN_DISPOSAL,
     );
-    // Recovery named a job we already own, which DOES account for the unreadable
-    // body, so ownership settles — and the id appears exactly once.
+    expect(settled.ok).toBe(false);
+    expect(settled.coverage).toEqual([]);
+    expect(settled.failures).toEqual([
+      "accepted ownership unresolved (1 acceptance(s) unaccounted for): authority produced 0 new distinct job id(s) for 1 unresolved acceptance(s); a solver job may exist unnamed",
+    ]);
+    // The ids it DID own are still released, exactly once each.
     expect(settled.ids).toEqual(["job-1", "job-2"]);
+  });
+
+  it("covers one unaccounted acceptance with one NEW distinct id", () => {
+    const settled = settleAcceptedOwnership(
+      drain({ ids: ["job-1"], acceptedCount: 2, unaccountedSlots: 1 }),
+      { ok: true, ids: ["job-1", "job-new"], note: "volatile state names 1 job id(s): job-new" },
+      CLEAN_DISPOSAL,
+    );
     expect(settled.ok).toBe(true);
+    expect(settled.coverage).toEqual(["job-new"]);
+    expect(settled.ids).toEqual(["job-1", "job-new"]);
+  });
+
+  // INSUFFICIENT RECOVERY. Two unaccounted acceptances, one new id: still red.
+  it("refuses when recovery cannot cover EVERY unresolved acceptance", () => {
+    const settled = settleAcceptedOwnership(
+      drain({ acceptedCount: 2, unaccountedSlots: 2 }),
+      { ok: true, ids: ["job-new"], note: "durable active record names job job-new" },
+      CLEAN_DISPOSAL,
+    );
+    expect(settled.ok).toBe(false);
+    expect(settled.failures).toEqual([
+      "accepted ownership unresolved (2 acceptance(s) unaccounted for): authority produced 1 new distinct job id(s) for 2 unresolved acceptance(s); a solver job may exist unnamed",
+    ]);
+  });
+
+  // CARDINALITY COUNTS EVERY CAUSE, not just unaccounted slots. One unaccounted
+  // acceptance plus one job stranded by disposal is TWO jobs that may be running, so a
+  // single recovered id covers half of it and the gate stays red. Without this, a rule
+  // that counted only `unaccountedSlots` would look correct against every other case
+  // here.
+  it("counts disposal-stranded work in the coverage denominator", () => {
+    const settled = settleAcceptedOwnership(
+      drain({ acceptedCount: 1, unaccountedSlots: 1 }),
+      { ok: true, ids: ["job-new"], note: "volatile state names 1 job id(s): job-new" },
+      { orphaned: 1 },
+    );
+    expect(settled.ok).toBe(false);
+    expect(settled.failures).toEqual([
+      "accepted ownership unresolved (1 acceptance(s) unaccounted for and 1 stranded by disposal): authority produced 1 new distinct job id(s) for 2 unresolved acceptance(s); a solver job may exist unnamed",
+    ]);
+    // The id it DID recover is still released — failing closed must not also abandon a
+    // job we can name.
+    expect(settled.ids).toEqual(["job-new"]);
+  });
+
+  // AN INVALID-BODY 202 is unaccounted, which is the B finding: it used to leave the
+  // slot null, increment nothing, and report `resolved: true` with no id.
+  it("treats a readable 202 with no usable id as unaccounted", () => {
+    const settled = settleAcceptedOwnership(
+      drain({
+        acceptedCount: 1,
+        unaccountedSlots: 1,
+        slots: [{ kind: "invalid-body", detail: "accepted body id was absent" }],
+      }),
+      null,
+      CLEAN_DISPOSAL,
+    );
+    expect(settled.ok).toBe(false);
+    expect(settled.ids).toEqual([]);
   });
 
   // Disposal orphaning is independent: even a resolved drain cannot be called settled
@@ -788,7 +1009,7 @@ describe("accepted-job ownership fails closed and recovers", () => {
     const settled = settleAcceptedOwnership(CLEAN, null, { orphaned: 2 });
     expect(settled.ok).toBe(false);
     expect(settled.failures).toEqual([
-      "disposing the tracker stranded 2 in-flight submission(s)/body read(s); ownership of those is unknown",
+      "accepted ownership unresolved (2 stranded by disposal) and no recovery was attempted",
     ]);
     // The id it DID know is still released.
     expect(settled.ids).toEqual(["job-a"]);
@@ -796,20 +1017,81 @@ describe("accepted-job ownership fails closed and recovers", () => {
 
   it("always records the drain shape in its notes, settled or not", () => {
     expect(settleAcceptedOwnership(UNREADABLE, null, CLEAN_DISPOSAL).notes).toContain(
-      "drain: 0 id(s), 0 pending, 1 unreadable",
+      "drain: 1 acceptance(s), 0 known id(s), 1 unaccounted, 0 pending, 0 stranded by disposal",
     );
   });
 
-  describe("recoverJobIdFromSessionRecord reads the product's own record", () => {
-    it("recovers the job id from an ACTIVE record", () => {
-      const raw = JSON.stringify({ version: 1, ownerId: "o", jobId: "job-from-page" });
-      expect(recoverJobIdFromSessionRecord(raw)).toEqual({ ok: true, jobId: "job-from-page" });
+  // RELEASE-404 LAUNDERING. A stale id satisfies cardinality (new and distinct) and then
+  // releases "fine" via the documented idempotent 404 — so the unaccounted acceptance
+  // would look covered by a job that never existed.
+  describe("coverage must have actually existed", () => {
+    const settled = settleAcceptedOwnership(
+      drain({ acceptedCount: 1, unaccountedSlots: 1 }),
+      { ok: true, ids: ["job-stale"], note: "durable active record names job job-stale" },
+      CLEAN_DISPOSAL,
+    );
+
+    it("passes cardinality on its own", () => {
+      expect(settled.ok).toBe(true);
+      expect(settled.coverage).toEqual(["job-stale"]);
     });
 
-    // A provisional record is written BEFORE the POST and legitimately has no job id:
-    // absence here means the accepted id never existed, not that we lost it.
-    it("reports no job id for a PROVISIONAL record", () => {
-      expect(recoverJobIdFromSessionRecord(JSON.stringify({ version: 1, ownerId: "o" }))).toEqual({
+    it("is rejected once release shows the backend never had it", () => {
+      const audit = auditCoverageAfterRelease(settled, {
+        ok: true,
+        steps: ["job job-stale: cancel -> 404 | job already absent; nothing to delete"],
+        failures: [],
+        absent: ["job-stale"],
+      });
+      expect(audit.ok).toBe(false);
+      expect(audit.failures).toEqual([
+        "recovered job job-stale was counted as coverage but the backend never had it; " +
+          "the acceptance it was meant to account for is still unnamed",
+      ]);
+    });
+
+    it("accepts coverage the backend really had", () => {
+      const audit = auditCoverageAfterRelease(settled, {
+        ok: true,
+        steps: ["job job-stale: cancel -> 202 | reached terminal | delete -> 204"],
+        failures: [],
+        absent: [],
+      });
+      expect(audit.ok).toBe(true);
+    });
+
+    // A TRACKER-OBSERVED id is exempt: the product's terminal auto-chain legitimately
+    // DELETEs it before the hook runs, so its 404 is expected, not laundering.
+    it("does not penalise a tracker-observed id that was already deleted", () => {
+      const clean = settleAcceptedOwnership(CLEAN, null, CLEAN_DISPOSAL);
+      expect(clean.coverage).toEqual([]);
+      expect(
+        auditCoverageAfterRelease(clean, {
+          ok: true,
+          steps: ["job job-a: cancel -> 404 | job already absent; nothing to delete"],
+          failures: [],
+          absent: ["job-a"],
+        }).ok,
+      ).toBe(true);
+    });
+  });
+
+  // D. The record must satisfy the PRODUCT'S REAL SCHEMA, not merely "has a jobId".
+  // Fixtures below are the genuine shapes `lib/optimize/session-transaction.ts`
+  // validates — exact schema version, owner id, and `phase` as the discriminator.
+  describe("recoverJobIdFromSessionRecord validates the real session schema", () => {
+    it("recovers the job id from a valid ACTIVE record", () => {
+      expect(recoverJobIdFromSessionRecord(activeRecord("job-from-page"))).toEqual({
+        ok: true,
+        jobId: "job-from-page",
+      });
+    });
+
+    // A provisional record is written BEFORE the POST. It legitimately has no job id —
+    // and in the `activation-persistence-failed` path it STAYS provisional while a real
+    // job runs, so the volatile authority is what must cover that, never a guess here.
+    it("reports no job id for a valid PROVISIONAL record", () => {
+      expect(recoverJobIdFromSessionRecord(provisionalRecord())).toEqual({
         ok: true,
         jobId: null,
       });
@@ -823,37 +1105,331 @@ describe("accepted-job ownership fails closed and recovers", () => {
       ["not JSON", "{oops", "session record is not JSON"],
       ["not an object", "42", "session record is not an object"],
       ["null", "null", "session record is not an object"],
-      ["a non-string jobId", '{"jobId":7}', "session record has a non-string jobId"],
-      ["an empty jobId", '{"jobId":""}', "session record has a non-string jobId"],
+      ["an array", "[]", "session record is not an object"],
+      [
+        "the shape the old judge accepted — a bare jobId",
+        '{"jobId":"job-x"}',
+        "session record schemaVersion undefined is not 1",
+      ],
+      [
+        "a FUTURE schema version",
+        JSON.stringify({ schemaVersion: 2, ownerId: "o", phase: "active", jobId: "job-x" }),
+        "session record schemaVersion 2 is not 1",
+      ],
+      [
+        "a stale schema version",
+        JSON.stringify({ schemaVersion: 0, ownerId: "o", phase: "active", jobId: "job-x" }),
+        "session record schemaVersion 0 is not 1",
+      ],
+      [
+        "missing an owner id",
+        JSON.stringify({ schemaVersion: 1, phase: "active", jobId: "job-x" }),
+        "session record has no owner id",
+      ],
+      [
+        "PROVISIONAL but carrying a jobId",
+        JSON.stringify({ schemaVersion: 1, ownerId: "o", phase: "provisional", jobId: "job-x" }),
+        "provisional session record carries a jobId; not valid",
+      ],
+      [
+        "an unknown phase",
+        JSON.stringify({ schemaVersion: 1, ownerId: "o", phase: "zombie", jobId: "job-x" }),
+        "session record phase zombie is not active",
+      ],
+      [
+        "missing a phase entirely",
+        JSON.stringify({ schemaVersion: 1, ownerId: "o", jobId: "job-x" }),
+        "session record phase undefined is not active",
+      ],
+      [
+        "ACTIVE with a non-string jobId",
+        JSON.stringify({ schemaVersion: 1, ownerId: "o", phase: "active", jobId: 7 }),
+        "active session record has no valid jobId",
+      ],
+      [
+        "ACTIVE with an empty jobId",
+        JSON.stringify({ schemaVersion: 1, ownerId: "o", phase: "active", jobId: "" }),
+        "active session record has no valid jobId",
+      ],
     ])("fails closed on a record that is %s", (_label, raw, reason) => {
       expect(recoverJobIdFromSessionRecord(raw)).toEqual({ ok: false, reason });
     });
   });
 
-  describe("recoverAcceptedOwnership never throws at the hook", () => {
-    it("turns a page-read rejection into a reason", async () => {
-      const recovery = await recoverAcceptedOwnership({
-        readSessionRecord: () => Promise.reject(new Error("Target page closed")),
+  // D2. THE VOLATILE AUTHORITY'S DOM CONTRACT. The read used to scrape the prose
+  // `Job ID: <id>` out of every <p>, which coupled a fail-closed ownership gate to
+  // user-visible copy and would equally have matched any other paragraph opening the
+  // same way. It is now anchored to a stable `data-testid` on the id VALUE, and every
+  // judgement about what that hook yielded lives in this total function — so the
+  // whole truth table is provable here rather than inside a Compose run. The markup
+  // half of the contract is pinned in `components/optimize/run-status-panel.test.tsx`,
+  // which imports `VOLATILE_JOB_ID_SELECTOR` from the module under test.
+  describe("judgeVolatileJobIdTexts judges the DOM authority, fail-closed", () => {
+    it("pins the selector to the hook the product renders", () => {
+      expect(VOLATILE_JOB_ID_TESTID).toBe("optimize-job-id");
+      expect(VOLATILE_JOB_ID_SELECTOR).toBe('[data-testid="optimize-job-id"]');
+    });
+
+    it("accepts exactly one bare job id", () => {
+      expect(judgeVolatileJobIdTexts(["opt_e2e_1"])).toEqual({ ok: true, ids: ["opt_e2e_1"] });
+    });
+
+    // `textContent` legitimately carries the surrounding formatting whitespace of the
+    // rendered line, so trimming is part of the contract rather than leniency.
+    it("trims the formatting whitespace textContent carries", () => {
+      expect(judgeVolatileJobIdTexts(["\n  opt_e2e_1  \n"])).toEqual({
+        ok: true,
+        ids: ["opt_e2e_1"],
       });
+    });
+
+    // ABSENCE is the one benign non-answer: no live job is rendered. It must report an
+    // empty set rather than a reason, and let CARDINALITY fail the gate if an
+    // acceptance actually needed covering — proved by the composed case below.
+    it("reports absence as an empty set, never as an id", () => {
+      expect(judgeVolatileJobIdTexts([])).toEqual({ ok: true, ids: [] });
+    });
+
+    it("still fails closed when absence has to cover an unaccounted acceptance", () => {
+      const verdict = judgeVolatileJobIdTexts([]);
+      expect(verdict).toEqual({ ok: true, ids: [] });
+      const settled = settleAcceptedOwnership(
+        drain({ acceptedCount: 1, unaccountedSlots: 1 }),
+        { ok: true, ids: verdict.ok ? verdict.ids : [], note: "page holds no volatile id" },
+        CLEAN_DISPOSAL,
+      );
+      expect(settled.ok).toBe(false);
+    });
+
+    // MULTIPLE hooks — a stale panel, or a duplicated mount. Neither node can be shown
+    // to name the live job, and picking one would be a guess, so this is a reason.
+    // Identical texts are rejected too: sameness is not evidence of which is current.
+    it.each([
+      ["two different ids", ["opt_a", "opt_b"]],
+      ["the same id twice", ["opt_a", "opt_a"]],
+    ])("refuses to guess between %s", (_label, texts) => {
+      const verdict = judgeVolatileJobIdTexts(texts);
+      expect(verdict.ok).toBe(false);
+      if (!verdict.ok) {
+        expect(verdict.reason).toContain(`page rendered ${texts.length} "optimize-job-id" nodes`);
+        expect(verdict.reason).toContain("ambiguous");
+      }
+    });
+
+    it.each([
+      ["an untexted node", [null], "node carried no text (null)"],
+      ["an undefined text", [undefined], "node carried no text (undefined)"],
+      ["a non-string text", [7 as unknown as string], "node carried no text (7)"],
+      ["an empty text", [""], "node text was empty"],
+      ["a whitespace-only text", ["   \n "], "node text was empty"],
+    ])("fails closed on %s", (_label, texts, fragment) => {
+      const verdict = judgeVolatileJobIdTexts(texts as readonly (string | null | undefined)[]);
+      expect(verdict.ok).toBe(false);
+      if (!verdict.ok) expect(verdict.reason).toContain(fragment);
+    });
+
+    // THE REGRESSION THIS HOOK EXISTS TO NAME. If the testid is ever moved from the id
+    // VALUE onto the whole line, the text becomes the prose form again. Silently
+    // parsing the id back out would restore the copy coupling under a new name, so the
+    // judge rejects it and says exactly what is wrong.
+    it("rejects the whole-line prose form instead of parsing it back out", () => {
+      const verdict = judgeVolatileJobIdTexts(["Job ID: opt_e2e_1"]);
+      expect(verdict.ok).toBe(false);
+      if (!verdict.ok) {
+        expect(verdict.reason).toContain("is not a bare job id");
+        expect(verdict.reason).toContain("the hook must sit on the id VALUE");
+      }
+    });
+
+    it("fails closed when the page did not report a list at all", () => {
+      expect(judgeVolatileJobIdTexts("opt_a" as unknown as readonly string[])).toEqual({
+        ok: false,
+        reason: "page did not report a list of volatile job-id nodes",
+      });
+    });
+
+    // COMPOSED, through the real seam the spec wires: an unusable DOM answer is thrown
+    // by the page-side reader, `recoverAcceptedOwnership` turns it into a reason, and
+    // settlement goes red. An unusable answer must never read as "no job".
+    it("turns an unusable DOM answer into a red settlement, not a quiet zero", async () => {
+      const verdict = judgeVolatileJobIdTexts(["opt_a", "opt_b"]);
+      expect(verdict.ok).toBe(false);
+      const recovery = await recoverAcceptedOwnership(
+        source({
+          readSessionRecord: async () => provisionalRecord(),
+          readVolatileJobIds: async () => {
+            throw new Error(verdict.ok ? "unreachable" : verdict.reason);
+          },
+        }),
+      );
+      expect(recovery.ok).toBe(false);
+      if (!recovery.ok) expect(recovery.reason).toContain("volatile job ids were unreadable");
+      const settled = settleAcceptedOwnership(
+        drain({ acceptedCount: 1, unaccountedSlots: 1 }),
+        recovery,
+        CLEAN_DISPOSAL,
+      );
+      expect(settled.ok).toBe(false);
+      expect(settled.failures[0]).toContain("recovery failed");
+    });
+
+    // AND the accepting path all the way through: a real volatile id recovered for a
+    // genuinely provisional record settles, and is counted as coverage that must still
+    // prove it existed (`auditCoverageAfterRelease`, above).
+    it("settles the activation-persistence-failed path through the hook", async () => {
+      const verdict = judgeVolatileJobIdTexts(["opt_volatile_1"]);
+      const recovery = await recoverAcceptedOwnership(
+        source({
+          readSessionRecord: async () => provisionalRecord(),
+          readVolatileJobIds: async () => (verdict.ok ? verdict.ids : []),
+        }),
+      );
+      expect(recovery.ok).toBe(true);
+      const settled = settleAcceptedOwnership(
+        drain({ acceptedCount: 1, unaccountedSlots: 1 }),
+        recovery,
+        CLEAN_DISPOSAL,
+      );
+      expect(settled.ok).toBe(true);
+      expect(settled.ids).toEqual(["opt_volatile_1"]);
+      expect(settled.coverage).toEqual(["opt_volatile_1"]);
+    });
+  });
+
+  // D3. WIRING. Every judge above is pure and provable, which is exactly why it can
+  // also be pure and UNCALLED: this round's audit found `auditCoverageAfterRelease`
+  // fully unit-tested and never invoked by the hook, so the release-404 laundering path
+  // it exists to close was still open in the real gate. A pure function nobody calls is
+  // indistinguishable, from the outside, from one that does not exist.
+  //
+  // These are source scans — deliberately narrow, and anchored on the identifiers and
+  // the decision expression rather than on prose, so a rename that keeps the behaviour
+  // is a one-line update while a silent REMOVAL is red.
+  describe("the assembled hook actually wires the judges it depends on", () => {
+    const SPEC = readFileSync(resolve(__dirname, "../optimize-assembled-stream.spec.ts"), "utf8");
+
+    it.each([
+      ["the DOM authority's selector", "VOLATILE_JOB_ID_SELECTOR"],
+      ["the DOM authority's judge", "judgeVolatileJobIdTexts("],
+      ["the post-release coverage audit", "auditCoverageAfterRelease("],
+      ["the fail-closed settlement", "settleAcceptedOwnership("],
+      ["the two-authority recovery", "recoverAcceptedOwnership("],
+    ])("calls %s", (_label, token) => {
+      expect(SPEC).toContain(token);
+    });
+
+    // The volatile read must not scrape the `Job ID:` copy again. That coupling is the
+    // whole reason the product now renders a stable hook.
+    it("does not scrape the job-id PROSE any more", () => {
+      expect(SPEC).not.toMatch(/\/\^Job ID:/);
+      expect(SPEC).not.toMatch(/querySelectorAll\("p"\)/);
+    });
+
+    // A judge whose verdict does not reach the verdict changes nothing, so the success
+    // condition itself is pinned: release converged AND ownership settled AND coverage
+    // proved real.
+    it("requires all three verdicts before calling cleanup successful", () => {
+      expect(SPEC).toContain(
+        "if (outcome.ok && settlementFailures.length === 0 && coverageAudit.ok) return;",
+      );
+    });
+
+    // The hook must never REPLACE a primary failure with a cleanup failure, and must
+    // clear the tracker so nothing leaks into the next test.
+    it("preserves the primary failure and cannot contaminate the next test", () => {
+      expect(SPEC).toContain("if (testInfo.status === testInfo.expectedStatus) {");
+      expect(SPEC).toContain("acceptedTracker = null;");
+    });
+  });
+
+  describe("recoverAcceptedOwnership consults BOTH authorities and never throws", () => {
+    it("turns a durable-read rejection into a reason", async () => {
+      const recovery = await recoverAcceptedOwnership(
+        source({ readSessionRecord: () => Promise.reject(new Error("Target page closed")) }),
+      );
       expect(recovery).toEqual({
         ok: false,
         reason: "page-side session record was unreadable: Target page closed",
       });
     });
 
-    it("recovers the id the page holds", async () => {
-      const recovery = await recoverAcceptedOwnership({
-        readSessionRecord: async () => JSON.stringify({ jobId: "job-page" }),
-      });
+    it("turns a volatile-read rejection into a reason", async () => {
+      const recovery = await recoverAcceptedOwnership(
+        source({ readVolatileJobIds: () => Promise.reject(new Error("page gone")) }),
+      );
       expect(recovery).toEqual({
-        ok: true,
-        ids: ["job-page"],
-        note: "recovered job job-page from the page record",
+        ok: false,
+        reason: "page-side volatile job ids were unreadable: page gone",
       });
     });
 
-    it("reads the exact key the product writes", () => {
+    it("recovers from a valid ACTIVE durable record", async () => {
+      const recovery = await recoverAcceptedOwnership(
+        source({ readSessionRecord: async () => activeRecord("job-page") }),
+      );
+      expect(recovery.ok).toBe(true);
+      if (recovery.ok) expect(recovery.ids).toEqual(["job-page"]);
+    });
+
+    // THE ACTIVATION-PERSISTENCE-FAILED PATH. The 202 was accepted and a real job is
+    // running, but the durable record deliberately stays PROVISIONAL and the id lives
+    // only in volatile state. Consulting the durable record alone would report "no job
+    // id" over a live solver.
+    it("recovers a volatile id when the durable record is still provisional", async () => {
+      const recovery = await recoverAcceptedOwnership(
+        source({
+          readSessionRecord: async () => provisionalRecord(),
+          readVolatileJobIds: async () => ["job-volatile"],
+        }),
+      );
+      expect(recovery.ok).toBe(true);
+      if (recovery.ok) {
+        expect(recovery.ids).toEqual(["job-volatile"]);
+        expect(recovery.note).toContain("durable record holds no active job id");
+      }
+    });
+
+    it("unions both authorities without duplicating a shared id", async () => {
+      const recovery = await recoverAcceptedOwnership(
+        source({
+          readSessionRecord: async () => activeRecord("job-both"),
+          readVolatileJobIds: async () => ["job-both", "job-extra"],
+        }),
+      );
+      expect(recovery.ok).toBe(true);
+      if (recovery.ok) expect(recovery.ids).toEqual(["job-both", "job-extra"]);
+    });
+
+    // PROVISIONAL-ONLY with no volatile id is NOT a clean "no job": it stays
+    // unresolved, because we must not guess.
+    it("yields nothing for provisional-only, so settlement stays red", async () => {
+      const recovery = await recoverAcceptedOwnership(
+        source({ readSessionRecord: async () => provisionalRecord() }),
+      );
+      expect(recovery.ok).toBe(true);
+      if (recovery.ok) expect(recovery.ids).toEqual([]);
+      expect(
+        settleAcceptedOwnership(
+          drain({ acceptedCount: 1, unaccountedSlots: 1 }),
+          recovery,
+          CLEAN_DISPOSAL,
+        ).ok,
+      ).toBe(false);
+    });
+
+    it("rejects an invalid volatile id rather than owning it", async () => {
+      const recovery = await recoverAcceptedOwnership(
+        source({ readVolatileJobIds: async () => [""] }),
+      );
+      expect(recovery).toEqual({
+        ok: false,
+        reason: "page reported an invalid volatile job id",
+      });
+    });
+
+    it("reads the exact key and schema version the product writes", () => {
       expect(OPTIMIZE_SESSION_RECORD_KEY).toBe("nurse.optimize.session");
+      expect(OPTIMIZE_SESSION_SCHEMA_VERSION).toBe(1);
     });
   });
 
@@ -891,10 +1467,14 @@ describe("accepted-job ownership fails closed and recovers", () => {
     }
 
     it("cancels, waits for terminal, then deletes the recovered job", async () => {
-      const drained: AcceptedDrainOutcome = { ids: [], resolved: false, pending: 0, failed: 1 };
-      const recovery = await recoverAcceptedOwnership({
-        readSessionRecord: async () => JSON.stringify({ jobId: "job-recovered" }),
+      const drained = drain({
+        acceptedCount: 1,
+        unaccountedSlots: 1,
+        slots: [{ kind: "unreadable", detail: "body gone" }],
       });
+      const recovery = await recoverAcceptedOwnership(
+        source({ readSessionRecord: async () => activeRecord("job-recovered") }),
+      );
       const settled = settleAcceptedOwnership(drained, recovery, { orphaned: 0 });
       expect(settled.ok).toBe(true);
 

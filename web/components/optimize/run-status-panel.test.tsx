@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { INITIAL_OPTIMIZE_RUN_VIEW, type CleanupPhase, type OptimizeRunView } from "@/lib/optimize";
+import { judgeVolatileJobIdTexts, VOLATILE_JOB_ID_SELECTOR } from "@/e2e/support/optimize-durable";
 import { RunStatusPanel, type RunStatusPanelProps } from "./run-status-panel";
 
 // GuardedLink (the infeasible "Adjust rules" CTA) reads the Next router; a lightweight
@@ -24,6 +25,18 @@ const handlers = {
   onRetryCleanup: vi.fn(),
   onAbandonCleanup: vi.fn(),
 };
+
+/**
+ * The rendered job-id LINE, located through the ownership hook on its value.
+ *
+ * The hook sits on the id VALUE, so the line is one element with a nested <span>
+ * and `getByText("Job ID: opt_1")` no longer matches it — that query compares an
+ * element's own direct text nodes. Reading `textContent` off the line instead is
+ * what keeps the COPY assertions byte-exact across that structural change.
+ */
+function jobIdLine(): HTMLElement | null {
+  return document.querySelector(VOLATILE_JOB_ID_SELECTOR)?.closest("p") ?? null;
+}
 
 function view(over: Partial<OptimizeRunView>): OptimizeRunView {
   return { ...INITIAL_OPTIMIZE_RUN_VIEW, ...over };
@@ -78,7 +91,40 @@ describe("RunStatusPanel — status and score", () => {
     setup(view({ lifecycle: "queued", jobId: "opt_1", queuePosition: 3, latestScore: 12 }));
     expect(screen.getByTestId("optimize-status")).toHaveTextContent("Queued, position 3");
     expect(screen.getByTestId("optimize-score")).toHaveTextContent("12");
-    expect(screen.getByText("Job ID: opt_1")).toBeInTheDocument();
+    expect(jobIdLine()?.textContent).toBe("Job ID: opt_1");
+  });
+
+  // THE OWNERSHIP HOOK. The assembled gate's fail-closed cleanup recovers a live job
+  // id through this exact selector when the durable session record stayed provisional
+  // (`activation-persistence-failed`), so the selector and this markup are one
+  // contract. Pinning them together here means a drift is a red unit test in seconds
+  // rather than a silent "no job id to recover" inside the Compose gate. The read is
+  // driven through the real judge, so the DOM is proved to satisfy the same total
+  // function the gate runs — not merely to contain a matching node.
+  it("exposes the live job id through the stable ownership hook, value only", () => {
+    setup(view({ lifecycle: "running", jobId: "opt_1" }));
+    const nodes = Array.from(document.querySelectorAll(VOLATILE_JOB_ID_SELECTOR));
+    expect(nodes).toHaveLength(1);
+    // The hook is on the VALUE: no label prose inside it, so the judge accepts it.
+    expect(nodes[0].textContent).toBe("opt_1");
+    expect(judgeVolatileJobIdTexts(nodes.map((node) => node.textContent))).toEqual({
+      ok: true,
+      ids: ["opt_1"],
+    });
+    // ...and the user-visible copy is byte-identical to what it was before the hook.
+    expect(jobIdLine()?.textContent).toBe("Job ID: opt_1");
+  });
+
+  // ABSENCE must stay absence: no hook when there is no job, so recovery reports an
+  // empty set and settlement fails closed on cardinality rather than inventing an id.
+  it("renders no ownership hook while the run has no job id", () => {
+    setup(view({ lifecycle: "submitting", jobId: null }));
+    const nodes = Array.from(document.querySelectorAll(VOLATILE_JOB_ID_SELECTOR));
+    expect(nodes).toHaveLength(0);
+    expect(judgeVolatileJobIdTexts(nodes.map((node) => node.textContent))).toEqual({
+      ok: true,
+      ids: [],
+    });
   });
 });
 
