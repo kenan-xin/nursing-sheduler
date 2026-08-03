@@ -8,7 +8,7 @@
 // bounded column set (history + date-group + date-item) renders fully per column, so
 // the sticky Nurse column and sticky header stay simple `position: sticky` cells.
 
-import { useMemo, useRef, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { DateRef, PersonRef, UiPerson, UiRequestCell } from "@/lib/scenario";
 import {
@@ -60,12 +60,24 @@ export interface RequestsMatrixProps {
 }
 
 const ROW_HEIGHT = 40;
+/**
+ * Coarse-pointer row height. The matrix is a dense data grid (40px rows on a
+ * precise pointer, matching the prototype), but its normal-mode cells are real
+ * `<button>`s, so the universal coarse-pointer target battery measures them. On
+ * a touch device each row grows to the ratified 44px minimum (DESIGN.md §5
+ * "Touch/coarse-pointer rule", decision D10) so a tap lands reliably; the dense
+ * instrument character is preserved on desktop. The growth is pointer-aware,
+ * not theme-aware, and applies to every cell in the row at once.
+ */
+const ROW_HEIGHT_COARSE = 44;
 /** Header row is taller than a body row (ROW_HEIGHT) to fit the date-group icon +
  *  count, and the date-item weekday sub-label + holiday dot (prototype
  *  ScreenRequests.dc.html:98-102). */
 const HEADER_ROW_HEIGHT = 52;
 const NURSE_COL_WIDTH = 176;
 const HISTORY_COL_WIDTH = 40;
+/** Coarse history-column width: the 40px slot is below the 44px touch floor. */
+const HISTORY_COL_COARSE = 44;
 const DATE_GROUP_COL_WIDTH = 76;
 const DATE_ITEM_COL_WIDTH = 56;
 
@@ -203,16 +215,23 @@ interface CellVisual {
 function cellVisual(view: CellView, cellsAt: readonly UiRequestCell[]): CellVisual {
   if (view.empty) return { className: "text-ink3" };
   if (view.dayState === "leave")
+    // `--brandtint` is the selection/pin language, not a status tint, so the
+    // Redundant Signal Rule's status-ink pairing does not govern it; brandink is
+    // the correct paired foreground (DESIGN.md §6 reserves this pair for pins).
     return { className: "bg-brandtint text-brandink border border-brand" };
-  if (view.dayState === "off") return { className: "bg-errortint text-error border border-error" };
+  if (view.dayState === "off")
+    // errortint is a status tint: it must carry its paired --errorink, never the
+    // base --error, so the cell stays legible in dark mode where the two differ
+    // and status is never carried by colour alone (DESIGN.md §2).
+    return { className: "bg-errortint text-errorink border border-error" };
   const prefs = cellsAt.map(cellPreferenceOf);
   const sign = aggregateSign(prefs);
   const alpha = cellAlpha(prefs);
   const base =
     sign === "all-positive"
-      ? "bg-successtint text-success"
+      ? "bg-successtint text-successink"
       : sign === "all-negative"
-        ? "bg-warntint text-warn"
+        ? "bg-warntint text-warnink"
         : "bg-panel text-ink2";
   return { className: `${base} border border-line2`, style: { opacity: alpha } };
 }
@@ -235,6 +254,25 @@ export function RequestsMatrix({
   onHistoryPointerEnter,
 }: RequestsMatrixProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Pointer-aware geometry: dense 40px rows / 40px history columns on a precise
+  // pointer (the prototype's metrics), growing to the 44px coarse minimum on
+  // touch. Default is the precise value so SSR/first paint matches the server
+  // render; a post-mount effect adopts the live media query, which has settled
+  // before the route's readiness wait takes its measurements.
+  const [coarse, setCoarse] = useState(false);
+  useEffect(() => {
+    // jsdom (and SSR) has no matchMedia; the default precise geometry stays,
+    // which is correct for both since neither is a coarse-pointer context.
+    if (typeof matchMedia !== "function") return;
+    const mq = matchMedia("(pointer: coarse)");
+    const update = () => setCoarse(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
+  const rowHeight = coarse ? ROW_HEIGHT_COARSE : ROW_HEIGHT;
+  const historyColWidth = coarse ? HISTORY_COL_COARSE : HISTORY_COL_WIDTH;
+
   const peopleById = useMemo(() => {
     const map = new Map<string, UiPerson>();
     for (const p of people) map.set(String(p.id), p);
@@ -250,18 +288,23 @@ export function RequestsMatrix({
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => ROW_HEIGHT,
+    estimateSize: () => rowHeight,
     overscan: 8,
   });
+  // estimateSize closes over `rowHeight`; when it changes (coarse-pointer
+  // adoption) the per-index measurement cache is stale, so re-measure.
+  useEffect(() => {
+    virtualizer.measure();
+  }, [rowHeight, virtualizer]);
 
   const gridTemplateColumns = useMemo(() => {
     const widths = [
       `${NURSE_COL_WIDTH}px`,
-      ...Array.from({ length: historyCount }, () => `${HISTORY_COL_WIDTH}px`),
+      ...Array.from({ length: historyCount }, () => `${historyColWidth}px`),
       ...columns.map((c) => `${columnWidth(c)}px`),
     ];
     return widths.join(" ");
-  }, [historyCount, columns]);
+  }, [historyCount, columns, historyColWidth]);
 
   if (rows.length === 0 || columns.length === 0) {
     return (
@@ -277,8 +320,15 @@ export function RequestsMatrix({
   return (
     <div
       ref={scrollRef}
+      tabIndex={0}
+      aria-label="Requests matrix"
       className={cn(
-        "relative max-h-[68vh] overflow-auto border border-line bg-surface",
+        // The matrix is a specialized L1 surface: --surface tone + --sh-1, but
+        // emphatically square. Generic card rounding must not leak into the
+        // grid, its sticky header, its first column or its selection outline
+        // (DESIGN.md §5 "Stay square, always"), so `rounded-none` is the
+        // explicit data-surface treatment, not an absence.
+        "relative max-h-[68vh] overflow-auto rounded-none border border-line bg-surface shadow-1 focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-brand",
         mode === "quick" && "select-none",
       )}
       data-testid="requests-matrix"
@@ -299,7 +349,7 @@ export function RequestsMatrix({
           {historyLabels.map((label, i) => (
             <div
               key={`h-head-${i}`}
-              className="flex items-center justify-center border-b border-r border-line2 bg-warntint font-mono text-label text-ink2"
+              className="flex items-center justify-center border-b border-r border-line2 bg-warntint font-mono text-label text-warnink"
               style={{ height: HEADER_ROW_HEIGHT }}
               title={label}
               data-testid={`hist-head-${i}`}

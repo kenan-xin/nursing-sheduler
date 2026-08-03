@@ -12,6 +12,8 @@
 import { useMemo, useState } from "react";
 import { FaLayerGroup, FaMagnifyingGlass, FaUsers, FaXmark } from "@/components/icons";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
+import { surfaceVariants } from "@/components/ui/surface";
 
 export type CurrentRequestWeightTone = "positive" | "negative" | "neutral" | "pin";
 
@@ -45,6 +47,11 @@ function rowHaystack(row: CurrentRequestRow): string {
 export function CurrentRequestsTable({ rows }: CurrentRequestsTableProps) {
   const [query, setQuery] = useState("");
 
+  // L1 card: --surface + --line + --sh-1 at the 16px card radius. The inner
+  // header band and zebra rows are full-bleed inside it, so they stay square
+  // and flat (DESIGN.md §4 rule 2).
+  const sectionClass = cn(surfaceVariants({ role: "surface", geometry: "card" }));
+
   const filtered = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
     if (!needle) return rows;
@@ -53,9 +60,9 @@ export function CurrentRequestsTable({ rows }: CurrentRequestsTableProps) {
 
   if (rows.length === 0) {
     return (
-      <section className="border border-line bg-surface" data-testid="current-requests-table">
-        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line2 px-[18px] py-3.5">
-          <h2 className="font-heading text-cardhead font-extrabold tracking-tight">
+      <section className={sectionClass} data-testid="current-requests-table">
+        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line2 px-5 py-3.5">
+          <h2 className="font-heading text-cardhead font-semibold tracking-[-0.015em]">
             Current shift requests
           </h2>
           <span
@@ -65,10 +72,7 @@ export function CurrentRequestsTable({ rows }: CurrentRequestsTableProps) {
             0
           </span>
         </header>
-        <p
-          className="px-[18px] py-[22px] text-center text-meta text-ink3"
-          data-testid="requests-empty"
-        >
+        <p className="px-5 py-6 text-center text-meta text-ink3" data-testid="requests-empty">
           No shift requests defined yet. Click on any cell in the matrix above to add preferences.
         </p>
       </section>
@@ -78,9 +82,9 @@ export function CurrentRequestsTable({ rows }: CurrentRequestsTableProps) {
   const trimmed = query.trim();
 
   return (
-    <section className="border border-line bg-surface" data-testid="current-requests-table">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line2 px-[18px] py-3.5">
-        <h2 className="font-heading text-cardhead font-extrabold tracking-tight">
+    <section className={sectionClass} data-testid="current-requests-table">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line2 px-5 py-3.5">
+        <h2 className="font-heading text-cardhead font-semibold tracking-[-0.015em]">
           Current shift requests
         </h2>
         <div className="flex items-center gap-2.5">
@@ -115,16 +119,13 @@ export function CurrentRequestsTable({ rows }: CurrentRequestsTableProps) {
       </header>
 
       {filtered.length === 0 ? (
-        <p
-          className="px-[18px] py-[22px] text-center text-meta text-ink3"
-          data-testid="requests-no-match"
-        >
+        <p className="px-5 py-6 text-center text-meta text-ink3" data-testid="requests-no-match">
           No requests match “{trimmed}”.
         </p>
       ) : (
         <div>
           <div
-            className="grid gap-2.5 border-b border-line bg-panel px-3 py-2 font-ui text-label font-semibold uppercase tracking-[0.03em] text-ink3"
+            className="grid gap-2.5 rounded-none border-b border-line bg-panel px-3 py-2 font-ui text-label font-semibold uppercase tracking-[0.03em] text-ink3"
             style={{
               gridTemplateColumns:
                 "minmax(120px,1.4fr) minmax(90px,1fr) 64px 76px minmax(90px,1fr)",
@@ -137,12 +138,22 @@ export function CurrentRequestsTable({ rows }: CurrentRequestsTableProps) {
             <span className="text-center">Weight</span>
             <span>Intent</span>
           </div>
-          <div className="max-h-[340px] overflow-auto">
-            {filtered.map((row) => (
+          <div
+            className="max-h-[340px] overflow-auto"
+            tabIndex={0}
+            aria-label="Current shift requests list"
+          >
+            {filtered.map((row, i) => (
               <div
                 key={row.key}
                 data-testid="requests-row"
-                className="grid items-center gap-2.5 border-b border-line2 px-3 py-2 text-meta"
+                className={cn(
+                  "grid items-center gap-2.5 rounded-none border-b border-line2 px-3 py-2 text-meta",
+                  // Zebra band: --panel-alt on odd rows (DESIGN.md §4 reserves
+                  // --panel for header bands and true insets; --panel-alt is the
+                  // zebra/hover tone), matching the prototype's own striping.
+                  i % 2 ? "bg-panel-alt" : "bg-surface",
+                )}
                 style={{
                   gridTemplateColumns:
                     "minmax(120px,1.4fr) minmax(90px,1fr) 64px 76px minmax(90px,1fr)",

@@ -29,11 +29,17 @@ export interface QuickPaintPanelProps {
   onSetNegInf: () => void;
 }
 
+// Status-line tones follow the prototype's own `quickStatusStyle`: every state
+// is a flat --panel band with a hairline EXCEPT the invalid-weight error, which
+// is the --errortint/--errorink/--error semantic triple. The earlier map painted
+// the clear/removal states as warn tints, which (a) contradicted the prototype
+// and (b) would have failed the Redundant Signal Rule's status-ink pairing in
+// dark mode where --warn and --warnink differ.
 const TONE_CLASS: Record<ReturnType<typeof quickPaintStatus>["tone"], string> = {
-  clear: "bg-warntint text-ink2",
-  error: "bg-errortint text-error",
-  removal: "bg-warntint text-ink2",
-  apply: "bg-panel text-ink2",
+  clear: "border border-line2 bg-panel text-ink2",
+  error: "border border-error bg-errortint text-errorink",
+  removal: "border border-line2 bg-panel text-ink2",
+  apply: "border border-line2 bg-panel text-ink2",
 };
 
 export function QuickPaintPanel({
@@ -48,8 +54,11 @@ export function QuickPaintPanel({
   const status = quickPaintStatus(selectedIds, weight);
 
   return (
-    <div className="mb-3 border border-line bg-surface p-4" data-testid="quick-paint-panel">
-      <div className="font-heading text-cardhead font-extrabold tracking-tight">
+    <div
+      className="mb-3 rounded-card border border-line bg-surface p-4 shadow-1"
+      data-testid="quick-paint-panel"
+    >
+      <div className="font-heading text-cardhead font-semibold tracking-[-0.015em]">
         Add shift preference
       </div>
       <p className="mb-3.5 mt-0.5 text-meta text-ink3">
@@ -76,8 +85,8 @@ export function QuickPaintPanel({
               onClick={() => onToggle(target.id)}
               className={
                 checked
-                  ? "inline-flex items-center gap-2 border border-brand bg-brandtint px-3 py-1.5 text-meta font-semibold text-brandink"
-                  : "inline-flex items-center gap-2 border border-line bg-transparent px-3 py-1.5 text-meta font-semibold text-ink2 hover:bg-panel"
+                  ? "pointer-coarse:min-h-touch inline-flex items-center gap-2 rounded-chip border border-brand bg-brandtint px-3 py-1.5 text-meta font-semibold text-brandink"
+                  : "pointer-coarse:min-h-touch inline-flex items-center gap-2 rounded-chip border border-line bg-surface px-3 py-1.5 text-meta font-semibold text-ink hover:bg-panel-alt"
               }
             >
               <span
@@ -110,7 +119,7 @@ export function QuickPaintPanel({
           type="button"
           data-testid="quick-paint-pos-inf"
           onClick={onSetPosInf}
-          className="h-9.5 flex-none border border-success bg-successtint px-3.5 font-mono text-meta font-bold text-success"
+          className="pointer-coarse:min-h-touch pointer-coarse:min-w-touch h-9.5 flex-none rounded-control border border-success bg-successtint px-3.5 font-mono text-meta font-bold text-successink"
         >
           +∞
         </button>
@@ -118,7 +127,7 @@ export function QuickPaintPanel({
           type="button"
           data-testid="quick-paint-neg-inf"
           onClick={onSetNegInf}
-          className="h-9.5 flex-none border border-warn bg-warntint px-3.5 font-mono text-meta font-bold text-warn"
+          className="pointer-coarse:min-h-touch pointer-coarse:min-w-touch h-9.5 flex-none rounded-control border border-warn bg-warntint px-3.5 font-mono text-meta font-bold text-warnink"
         >
           −∞
         </button>
@@ -126,7 +135,7 @@ export function QuickPaintPanel({
 
       <div
         data-testid="quick-paint-status"
-        className={`mt-3.5 flex items-center gap-1.5 px-3 py-2 text-meta ${TONE_CLASS[status.tone]}`}
+        className={`mt-3.5 flex items-center gap-1.5 rounded-none px-3 py-2 text-meta ${TONE_CLASS[status.tone]}`}
       >
         {status.tone === "error" ? (
           <FaCircleExclamation className="size-3" />
