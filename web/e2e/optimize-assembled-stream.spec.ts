@@ -19,6 +19,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { judgeReplayEvidence } from "./support/optimize-durable";
 
 const REPO_ROOT = resolve(__dirname, "../..");
 const TINY_YAML = readFileSync(
@@ -345,36 +346,44 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
       .poll(async () => (await readSseObs(page)).eventLastEventIds[0], { timeout: 15_000 })
       .toBe(cursorBefore);
 
-    const preReloadSet = new Set(preReloadIds);
-    // Require raw post-reload evidence that contains no old ID, contains at least
-    // one new ID, and has committed one of those exact new IDs durably. Both the
-    // poll and the final re-assertion read ONE atomic snapshot, so the frames and
-    // the durable cursor can no longer advance relative to each other between
-    // captures. Every assertion is unchanged in strength.
+    // Judge the replay through `judgeReplayEvidence`, whose full truth table —
+    // valid / duplicate / foreign / mixed / stale / missing / malformed — is proved
+    // deterministically in `support/optimize-durable.test.ts`, including a
+    // committed adversarial baseline showing the predicate that shipped at
+    // `d981b4d` ACCEPTED a duplicated id, a foreign-job id, and a valid id mixed
+    // with a foreign one.
+    //
+    // Retained exactly: the ONE atomic snapshot (so frames and the durable cursor
+    // cannot advance relative to each other between captures), non-empty evidence,
+    // no pre-reload id re-sent, and the cursor both new and present among the
+    // frames. Added: raw-id uniqueness, and exact job binding for every recorded
+    // id and for the cursor, derived through the canonical `v1.<job>.<native>`
+    // envelope from the pre-reload cursor — which the assertion above has already
+    // pinned as the exact `Last-Event-ID` of the first post-reload request, so the
+    // job it names is the resumed one.
+    const evidenceOf = async () => ({
+      ...(await readReplayObservation(page)),
+      preReloadIds,
+    });
+    const toJudged = (snap: Awaited<ReturnType<typeof evidenceOf>>) =>
+      judgeReplayEvidence({
+        rawIds: snap.rawIds,
+        cursorAfter: snap.cursor,
+        cursorBefore,
+        preReloadIds: snap.preReloadIds,
+      });
+
     await expect
-      .poll(
-        async () => {
-          const snap = await readReplayObservation(page);
-          return (
-            snap.rawIds.length > 0 &&
-            snap.rawIds.every((id) => !preReloadSet.has(id)) &&
-            snap.cursor !== null &&
-            !preReloadSet.has(snap.cursor) &&
-            snap.rawIds.includes(snap.cursor)
-          );
-        },
-        { timeout: 20_000, intervals: [500] },
-      )
+      .poll(async () => toJudged(await evidenceOf()).ok, { timeout: 20_000, intervals: [500] })
       .toBe(true);
 
-    const replay = await readReplayObservation(page);
-    const postReloadIds = replay.rawIds;
-    const cursorAfter = replay.cursor;
-    expect(cursorAfter).not.toBeNull();
-    expect(replay.firstLastEventId).toBe(cursorBefore);
-    expect(postReloadIds.length).toBeGreaterThan(0);
-    expect(postReloadIds.every((id) => !preReloadSet.has(id))).toBe(true);
-    expect(postReloadIds).toContain(cursorAfter);
+    const snapshot = await evidenceOf();
+    const judged = toJudged(snapshot);
+    // The failure list is the diagnostic: a red gate names the exact rule and the
+    // offending ids rather than only reporting `false`.
+    expect(judged.failures, `replay evidence violated the strictly-after contract`).toEqual([]);
+    expect(judged.ok).toBe(true);
+    expect(snapshot.firstLastEventId).toBe(cursorBefore);
     // NOTE: this test does NOT navigate away — the abort is isolated in a
     // separate test so the gate's BFF-log baseline can attribute the cancel
     // to the intended navigation only.
@@ -403,7 +412,11 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
     // return while the URL stayed on the fixture. The beforeunload explanation
     // originally filed for it is DISPROVED: with genuine sticky activation and a
     // `preventDefault()`ing beforeunload listener installed, `page.goto` still
-    // navigates in this harness. Capturing the navigation response distinguishes
+    // navigates in this harness. The combined cold review reproduced that
+    // independently and went further — installing a Playwright dialog listener and
+    // explicitly dismissing the prompt DOES yield `net::ERR_ABORTED`, which shows
+    // the default no-listener harness this gate runs under is materially different
+    // and never reaches that path. Capturing the navigation response distinguishes
     // "the navigation never committed" from "it committed and was undone", so a
     // recurrence names its own mechanism instead of only reporting a stale URL.
     // The assertions below are unchanged in strength.

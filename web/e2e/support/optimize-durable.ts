@@ -12,6 +12,179 @@
 import type { Page, Route } from "@playwright/test";
 import type { JobResponse, JobState, OptimizationOutcome } from "@/lib/bff/types";
 
+// ===========================================================================
+// Replay-oracle judge (R6 combined-cold-review P2)
+// ===========================================================================
+//
+// The assembled gate's release proof for "what the browser recorded after
+// reload" used to assert only: at least one raw id, none of them pre-reload, and
+// the durable cursor present somewhere among them. That predicate accepted three
+// false greens the cold review demonstrated by mutation — a DUPLICATED new id
+// (`[c, c]` with cursor `c`), a single FOREIGN-job id, and a valid id MIXED with
+// a foreign-job id. None of them is a legal replay, and runtime server-side
+// validation does not make this browser oracle stronger: the oracle is precisely
+// the proof of what the browser saw.
+//
+// The judge below is pure, so its whole truth table — valid / duplicate /
+// foreign / mixed / stale / missing / malformed — is provable in a unit test
+// beside it, deterministically, without the Compose stack. The Playwright spec
+// supplies one atomic snapshot and this decides.
+//
+// Job binding is derived through the CANONICAL cursor contract
+// (`core/nurse_scheduling/server/event_cursor.py`), not by string prefix
+// matching: the public cursor is
+//
+//     v1.<unpadded base64url(job_id)>.<unpadded base64url(native_id)>
+//
+// and a segment is canonical only when its decoded UTF-8 text re-encodes to
+// exactly the submitted spelling. Base64 has multiple spellings for the same
+// bytes (`MR` and `MQ` both decode to `"1"`), so the round trip is what rejects
+// aliases the server never emitted — mirroring `_decode_segment` exactly.
+//
+// Deliberately NOT asserted: anything about native-id increments. The native id
+// is an opaque store token (a decimal int in the memory backend, a `<ms>-<seq>`
+// Redis stream id in production); constraining its arithmetic would bind this
+// oracle to a storage detail it must not own.
+
+/** Wire version prefix of the public event cursor (`CURSOR_VERSION`). */
+export const CURSOR_VERSION = "v1";
+
+/** Unpadded base64url: URL-safe alphabet only, no `=` padding, non-empty. */
+const CURSOR_SEGMENT_PATTERN = /^[A-Za-z0-9_-]+$/;
+
+/** One decoded public cursor. */
+export interface DecodedCursor {
+  jobId: string;
+  nativeEventId: string;
+}
+
+/**
+ * Decode one canonical segment, or return `null` when it is not a canonical
+ * unpadded base64url UTF-8 spelling. Mirrors `event_cursor.py::_decode_segment`,
+ * including the byte-for-byte re-encode that rejects non-canonical aliases.
+ */
+function decodeCursorSegment(segment: string): string | null {
+  if (!CURSOR_SEGMENT_PATTERN.test(segment)) return null;
+  const decoded = Buffer.from(segment, "base64url").toString("utf8");
+  // `Buffer` is lenient about both base64 aliases and invalid UTF-8 (it
+  // substitutes U+FFFD rather than throwing), so the round trip carries the
+  // whole rejection: a non-canonical spelling or a bad byte sequence re-encodes
+  // to something other than `segment`.
+  if (Buffer.from(decoded, "utf8").toString("base64url") !== segment) return null;
+  return decoded;
+}
+
+/**
+ * Decode a public cursor, or return `null` when it is malformed. Shape and
+ * version are checked exactly as `event_cursor.py::decode_cursor` does; the job
+ * binding itself is compared by the caller.
+ */
+export function decodePublicCursor(token: string): DecodedCursor | null {
+  const parts = token.split(".");
+  if (parts.length !== 3 || parts[0] !== CURSOR_VERSION) return null;
+  const jobId = decodeCursorSegment(parts[1]);
+  const nativeEventId = decodeCursorSegment(parts[2]);
+  if (jobId === null || nativeEventId === null) return null;
+  return { jobId, nativeEventId };
+}
+
+export interface ReplayEvidence {
+  /** Raw `id:` values recorded from the post-reload SSE body, in wire order. */
+  rawIds: readonly string[];
+  /** The durably persisted cursor read in the SAME atomic snapshot as `rawIds`. */
+  cursorAfter: string | null;
+  /** The exact cursor captured before reload and replayed as `Last-Event-ID`. */
+  cursorBefore: string | null;
+  /** Every raw id observed BEFORE the reload. */
+  preReloadIds: readonly string[];
+}
+
+export interface ReplayJudgement {
+  ok: boolean;
+  /** Every violated rule, named. Empty exactly when `ok`. */
+  failures: string[];
+}
+
+/**
+ * Judge one atomic post-reload snapshot against the strictly-after replay
+ * contract.
+ *
+ * Retained from the original predicate: non-empty evidence, no pre-reload id
+ * re-sent, and the durable cursor both new and present among the recorded
+ * frames. Added: raw-id UNIQUENESS, and exact JOB BINDING for every recorded id
+ * and for the cursor, against the job decoded from `cursorBefore` — the resumed
+ * job, since that same cursor is separately asserted to be the exact
+ * `Last-Event-ID` on the first post-reload request.
+ */
+export function judgeReplayEvidence(evidence: ReplayEvidence): ReplayJudgement {
+  const failures: string[] = [];
+  const { rawIds, cursorAfter, cursorBefore, preReloadIds } = evidence;
+
+  if (cursorBefore === null || cursorBefore.length === 0) {
+    return { ok: false, failures: ["no pre-reload cursor was captured to bind the job"] };
+  }
+  const before = decodePublicCursor(cursorBefore);
+  if (before === null) {
+    return {
+      ok: false,
+      failures: [`pre-reload cursor is not a canonical public cursor: ${cursorBefore}`],
+    };
+  }
+  const expectedJob = before.jobId;
+
+  if (rawIds.length === 0) failures.push("no post-reload frame ids were recorded");
+
+  const preReloadSet = new Set(preReloadIds);
+  const stale = rawIds.filter((id) => preReloadSet.has(id));
+  if (stale.length > 0) {
+    failures.push(`replay re-sent ${stale.length} already-seen id(s): ${stale.join(", ")}`);
+  }
+
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+  for (const id of rawIds) {
+    if (seen.has(id)) duplicates.add(id);
+    seen.add(id);
+  }
+  if (duplicates.size > 0) {
+    failures.push(`post-reload frame ids are not unique: ${[...duplicates].join(", ")}`);
+  }
+
+  for (const id of rawIds) {
+    const decoded = decodePublicCursor(id);
+    if (decoded === null) {
+      failures.push(`recorded id is not a canonical public cursor: ${id}`);
+      continue;
+    }
+    if (decoded.jobId !== expectedJob) {
+      failures.push(
+        `recorded id is bound to job "${decoded.jobId}", not the resumed "${expectedJob}": ${id}`,
+      );
+    }
+  }
+
+  if (cursorAfter === null) {
+    failures.push("no durable cursor was persisted after reload");
+  } else {
+    if (preReloadSet.has(cursorAfter)) {
+      failures.push(`durable cursor is an already-seen id: ${cursorAfter}`);
+    }
+    const after = decodePublicCursor(cursorAfter);
+    if (after === null) {
+      failures.push(`durable cursor is not a canonical public cursor: ${cursorAfter}`);
+    } else if (after.jobId !== expectedJob) {
+      failures.push(
+        `durable cursor is bound to job "${after.jobId}", not the resumed "${expectedJob}"`,
+      );
+    }
+    if (!rawIds.includes(cursorAfter)) {
+      failures.push(`durable cursor ${cursorAfter} is absent from the recorded frames`);
+    }
+  }
+
+  return { ok: failures.length === 0, failures };
+}
+
 export const DURABLE_FIXTURE_URL = "/optimize-durable-fixture";
 export const JOB_ID = "opt_e2e_1";
 
