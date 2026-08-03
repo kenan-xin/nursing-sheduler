@@ -46,9 +46,13 @@ export function RequestsToolbar({
 }: RequestsToolbarProps) {
   return (
     <div className="mb-3 flex flex-wrap items-center gap-3" data-testid="requests-toolbar">
-      {/* Square bordered track with square segments, matching the F3-owned Cell
-          Preference tablist; segments reach the 44px coarse minimum on touch. */}
-      <div role="tablist" className="inline-flex rounded-none border border-line">
+      {/* Pill track (DESIGN.md §5 assigns --r-pill to segmented controls; the
+          canonical ScreenRequests track measures border-radius:999px with
+          overflow:hidden). The square F3-owned Cell Preference tablist is a
+          separate owner and stays untouched. Segments reach the 44px coarse
+          minimum on touch; their outer corners clip to the pill via the track's
+          overflow-hidden. */}
+      <div role="tablist" className="inline-flex overflow-hidden rounded-pill border border-line">
         <button
           type="button"
           role="tab"

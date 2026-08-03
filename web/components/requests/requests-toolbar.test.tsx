@@ -126,3 +126,51 @@ describe("RequestsToolbar", () => {
     expect(screen.getByTestId("requests-open-history-csv")).not.toBeDisabled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// v2 pill segmented track (DESIGN.md §5). The R5-owned Requests mode tablist is
+// a clipped pill (rounded-pill + overflow-hidden); the F3-owned Cell Preference
+// tablist is a separate owner and stays square. This guard is bound to the
+// Requests toolbar's own tablist, so a sibling square tablist cannot satisfy it.
+// ---------------------------------------------------------------------------
+describe("RequestsToolbar — v2 pill segmented track", () => {
+  const baseProps = {
+    mode: "normal" as const,
+    onSetMode: vi.fn(),
+    onOpenRequestsCsv: vi.fn(),
+    onOpenHistoryCsv: vi.fn(),
+    clearOpen: false,
+    onToggleClear: vi.fn(),
+  };
+
+  it("the mode tablist is a clipped pill track (rounded-pill + overflow-hidden)", () => {
+    const { container } = render(<RequestsToolbar {...baseProps} />);
+    const tablist = container.querySelector('[data-testid="requests-toolbar"] [role="tablist"]');
+    expect(tablist, "the Requests toolbar owns exactly one tablist").not.toBeNull();
+    const cls = (tablist as HTMLElement).className.split(/\s+/);
+    expect(cls).toContain("rounded-pill");
+    expect(cls).toContain("overflow-hidden");
+    // The ratified contract is pill; a square track (rounded-none) is the
+    // deviation this guard exists to catch.
+    expect(cls).not.toContain("rounded-none");
+  });
+
+  it("the bound selector does not match a sibling square tablist", () => {
+    // A square segmented control outside the Requests toolbar (the F3 Cell
+    // Preference tablist shape) must NOT satisfy the toolbar's pill contract.
+    const { container } = render(
+      <div>
+        <div data-testid="some-other-toolbar">
+          <div role="tablist" className="inline-flex rounded-none border border-line">
+            <button type="button">x</button>
+          </div>
+        </div>
+        <RequestsToolbar {...baseProps} />
+      </div>,
+    );
+    const sibling = container.querySelector('[data-testid="some-other-toolbar"] [role="tablist"]');
+    const siblingCls = (sibling as HTMLElement).className.split(/\s+/);
+    expect(siblingCls).toContain("rounded-none");
+    expect(siblingCls).not.toContain("rounded-pill");
+  });
+});

@@ -33,11 +33,51 @@ export interface CurrentRequestsTableProps {
   rows: CurrentRequestRow[];
 }
 
+// Weight-column ink (ScreenRequests `wColor`): the weight sign carries the tone
+// — positive → success, negative → warn (an avoid, not an error), leave pin →
+// brandink, and a plain OFF with no/zero weight → the muted ink3.
+//
+// These are text on the neutral zebra row band, not on a status tint, so the
+// base tier is correct here: the Redundant Signal Rule's ink-pairing governs
+// text painted ON a status tint, which this is not.
 const WEIGHT_TONE_CLASS: Record<CurrentRequestWeightTone, string> = {
   positive: "text-success",
-  negative: "text-error",
+  negative: "text-warn",
   pin: "text-brandink",
-  neutral: "text-ink",
+  neutral: "text-ink3",
+};
+
+// Caption ink (ScreenRequests `capColor`). It tracks the weight sign like the
+// weight column, but the canonical model deliberately gives the neutral case a
+// *readable* ink2 rather than the weight column's muted ink3 — the caption is
+// prose the user reads, the weight is a de-emphasised numeric. Kept as a
+// separate map so that divergence cannot be collapsed by accident.
+const CAPTION_TONE_CLASS: Record<CurrentRequestWeightTone, string> = {
+  positive: "text-success",
+  negative: "text-warn",
+  pin: "text-brandink",
+  neutral: "text-ink2",
+};
+
+/**
+ * The canonical intent-marker tone, derived from existing row state
+ * (ScreenRequests `dot` colour): leave → brand, the off day-state → error, a
+ * worked preference → success (positive) or warn (negative). The marker is a
+ * `bg-current` fill, so its `text-*` tone drives the paint.
+ */
+type IntentTone = "leave" | "off" | "positive" | "negative";
+
+function intentOf(row: CurrentRequestRow): IntentTone {
+  if (row.shiftLabel === "LEAVE") return "leave";
+  if (row.shiftLabel === "OFF") return "off";
+  return row.weightTone === "negative" ? "negative" : "positive";
+}
+
+const INTENT_DOT_CLASS: Record<IntentTone, string> = {
+  leave: "text-brand",
+  off: "text-error",
+  positive: "text-success",
+  negative: "text-warn",
 };
 
 function rowHaystack(row: CurrentRequestRow): string {
@@ -143,58 +183,68 @@ export function CurrentRequestsTable({ rows }: CurrentRequestsTableProps) {
             tabIndex={0}
             aria-label="Current shift requests list"
           >
-            {filtered.map((row, i) => (
-              <div
-                key={row.key}
-                data-testid="requests-row"
-                className={cn(
-                  "grid items-center gap-2.5 rounded-none border-b border-line2 px-3 py-2 text-meta",
-                  // Zebra band: --panel-alt on odd rows (DESIGN.md §4 reserves
-                  // --panel for header bands and true insets; --panel-alt is the
-                  // zebra/hover tone), matching the prototype's own striping.
-                  i % 2 ? "bg-panel-alt" : "bg-surface",
-                )}
-                style={{
-                  gridTemplateColumns:
-                    "minmax(120px,1.4fr) minmax(90px,1fr) 64px 76px minmax(90px,1fr)",
-                }}
-              >
-                <span className="inline-flex items-center gap-1.5 overflow-hidden">
-                  {row.personIsGroup ? (
-                    <FaUsers className="size-2.5 shrink-0 text-brandink" />
-                  ) : (
-                    <FaUsers className="size-2.5 shrink-0 text-ink3" />
+            {filtered.map((row, i) => {
+              const intent = intentOf(row);
+              return (
+                <div
+                  key={row.key}
+                  data-testid="requests-row"
+                  className={cn(
+                    "grid items-center gap-2.5 rounded-none border-b border-line2 px-3 py-2 text-meta",
+                    // Zebra band: --panel-alt on odd rows (DESIGN.md §4 reserves
+                    // --panel for header bands and true insets; --panel-alt is the
+                    // zebra/hover tone), matching the prototype's own striping.
+                    i % 2 ? "bg-panel-alt" : "bg-surface",
                   )}
-                  <span className="truncate font-ui text-meta font-semibold text-ink">
-                    {row.person}
-                  </span>
-                </span>
-                <span className="inline-flex items-center gap-1.5 text-meta text-ink2">
-                  {row.dateIsGroup ? (
-                    <FaLayerGroup className="size-2.5 text-brandink" />
-                  ) : (
-                    <FaLayerGroup className="size-2.5 text-ink3" />
-                  )}
-                  {row.dateLabel}
-                </span>
-                <span className="text-center font-mono text-meta font-semibold text-ink">
-                  {row.shiftLabel}
-                </span>
-                <span
-                  className={`text-center font-mono text-meta font-semibold ${WEIGHT_TONE_CLASS[row.weightTone]}`}
+                  style={{
+                    gridTemplateColumns:
+                      "minmax(120px,1.4fr) minmax(90px,1fr) 64px 76px minmax(90px,1fr)",
+                  }}
                 >
-                  {row.weightLabel}
-                </span>
-                <span className="inline-flex items-center gap-1.5 text-meta text-ink2">
+                  <span className="inline-flex items-center gap-1.5 overflow-hidden">
+                    {row.personIsGroup ? (
+                      <FaUsers className="size-2.5 shrink-0 text-brandink" />
+                    ) : (
+                      <FaUsers className="size-2.5 shrink-0 text-ink3" />
+                    )}
+                    <span className="truncate font-ui text-meta font-semibold text-ink">
+                      {row.person}
+                    </span>
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 text-meta text-ink2">
+                    {row.dateIsGroup ? (
+                      <FaLayerGroup className="size-2.5 text-brandink" />
+                    ) : (
+                      <FaLayerGroup className="size-2.5 text-ink3" />
+                    )}
+                    {row.dateLabel}
+                  </span>
+                  <span className="text-center font-mono text-meta font-semibold text-ink">
+                    {row.shiftLabel}
+                  </span>
                   <span
-                    aria-hidden
-                    className="size-2 shrink-0 bg-current opacity-70"
-                    style={{ color: "var(--ink3)" }}
-                  />
-                  <span>{row.caption}</span>
-                </span>
-              </div>
-            ))}
+                    data-testid="requests-weight"
+                    className={`text-center font-mono text-meta font-semibold ${WEIGHT_TONE_CLASS[row.weightTone]}`}
+                  >
+                    {row.weightLabel}
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 text-meta">
+                    <span
+                      aria-hidden
+                      data-testid="requests-intent-dot"
+                      data-intent={intent}
+                      className={`size-2 shrink-0 bg-current ${INTENT_DOT_CLASS[intent]}`}
+                    />
+                    <span
+                      data-testid="requests-caption"
+                      className={CAPTION_TONE_CLASS[row.weightTone]}
+                    >
+                      {row.caption}
+                    </span>
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

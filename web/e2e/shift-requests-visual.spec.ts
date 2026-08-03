@@ -174,4 +174,69 @@ test.describe("R5 shift requests — migrated surface geometry and paint", () =>
     expect(paint.bg).toBe(errortint);
     expect(paint.color).toBe(errorink);
   });
+
+  // DESIGN.md §5 assigns --r-pill to segmented controls. The R5-owned Requests
+  // toolbar track must resolve 999px + hidden; the F3-owned Cell Preference
+  // tablist is a separate owner and stays square. Bound to the toolbar's own
+  // tablist so a sibling square tablist cannot satisfy it.
+  test("the Requests mode tablist is a clipped pill track (999px + hidden)", async ({ page }) => {
+    await gotoReady(page, "light");
+    await seed(page, { ...BASE_SEED, reqData: SEEDED_REQUESTS });
+
+    const track = page.locator('[data-testid="requests-toolbar"] [role="tablist"]');
+    const geom = await track.evaluate((el) => {
+      const s = getComputedStyle(el);
+      return { radius: s.borderRadius, overflow: s.overflow };
+    });
+    expect(geom.radius, "segmented control track is the pill radius").toBe("999px");
+    expect(geom.overflow, "segments clip to the pill").toBe("hidden");
+  });
+
+  // Canonical intent tone (ScreenRequests dot model): the marker + caption carry
+  // the semantic tone per row kind. Proved on resolved theme tokens in BOTH
+  // themes — the discriminating context for status-coloured paint.
+  async function assertIntentTones(page: import("@playwright/test").Page, theme: "light" | "dark") {
+    await gotoReady(page, theme);
+    await seed(page, { ...BASE_SEED, reqData: SEEDED_REQUESTS });
+    await expect(page.getByTestId("current-requests-table")).toBeVisible();
+
+    const tokenOf = (p: "color" | "backgroundColor", t: string) => resolveVar(page, p, t);
+
+    const cases = [
+      { intent: "leave", dotToken: "--brand", captionToken: "--brandink" },
+      // The off dot is the error day-state; its caption follows the off-weight
+      // sign. The seeded off cell carries weight -3, so its caption is warn.
+      { intent: "off", dotToken: "--error", captionToken: "--warn" },
+      { intent: "positive", dotToken: "--success", captionToken: "--success" },
+      { intent: "negative", dotToken: "--warn", captionToken: "--warn" },
+    ];
+
+    for (const c of cases) {
+      const dot = page.locator(`[data-testid="requests-intent-dot"][data-intent="${c.intent}"]`);
+      const dotBg = await dot.evaluate((el) => getComputedStyle(el).backgroundColor);
+      const expectedDot = await tokenOf("color", c.dotToken);
+      expect(dotBg, `${theme}/${c.intent}: dot resolves ${c.dotToken}`).toBe(expectedDot);
+
+      const caption = page.locator(
+        `[data-testid="requests-row"]:has([data-intent="${c.intent}"]) [data-testid="requests-caption"]`,
+      );
+      const capColor = await caption.evaluate((el) => getComputedStyle(el).color);
+      const expectedCap = await tokenOf("color", c.captionToken);
+      expect(capColor, `${theme}/${c.intent}: caption resolves ${c.captionToken}`).toBe(
+        expectedCap,
+      );
+    }
+  }
+
+  test("intent markers + captions resolve to the canonical theme tokens (light)", async ({
+    page,
+  }) => {
+    await assertIntentTones(page, "light");
+  });
+
+  test("intent markers + captions resolve to the canonical theme tokens (dark)", async ({
+    page,
+  }) => {
+    await assertIntentTones(page, "dark");
+  });
 });
