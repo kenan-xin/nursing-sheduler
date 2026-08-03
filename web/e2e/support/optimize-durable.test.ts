@@ -316,9 +316,9 @@ describe("the live replay test's total budget enumerates EVERY sequential bound"
     );
     expect(REPLAY_TEST_TIMEOUT).toBe(manual);
     // 50s fixture setup (20+5+5+5+5+5+5) + 15s submit/arm (5+10)
-    // + 72s stream phases (15+12+10+15+20) + 45s evaluate/navigation (15+20+5+5)
-    // + 8s scheduler allowance = 190s.
-    expect(REPLAY_TEST_TIMEOUT).toBe(190_000);
+    // + 72s stream phases (15+12+10+15+20) + 60s evaluate/navigation (30+20+5+5)
+    // + 8s scheduler allowance = 205s.
+    expect(REPLAY_TEST_TIMEOUT).toBe(205_000);
   });
 
   it("every bound is a positive finite number", () => {

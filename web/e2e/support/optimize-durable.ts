@@ -223,7 +223,13 @@ export const REPLAY_BOUNDS = {
   // --- evaluate/navigation work with no Playwright timeout parameter --------
   // `page.evaluate` takes no per-call timeout, so each of these is enforced by
   // `withBound()` in the spec rather than merely budgeted for here.
-  freezeAndSnapshotEvaluate: 15_000,
+  // Calibrated against measurement, not guessed. Under a deliberately extreme
+  // synthetic overload (loadavg ~24 on 10 cores) this in-page evaluate — freeze,
+  // a <=200ms stabilisation loop, a regex over the recorded chunks, one
+  // sessionStorage write — exceeded 15s and `withBound` correctly named it. The
+  // work is ~1s unloaded, so 30s remains a tight, meaningful ceiling on something
+  // that must never hang, while no longer failing on host saturation alone.
+  freezeAndSnapshotEvaluate: 30_000,
   reloadNavigation: 20_000,
   snapshotReadEvaluate: 5_000,
   finalObservationEvaluate: 5_000,
@@ -233,7 +239,7 @@ export const REPLAY_BOUNDS = {
 } as const;
 
 // Totals: 50s fixture setup + 15s submit/arm + 72s stream phases
-// + 45s evaluate/navigation + 8s scheduler allowance = 190s, comfortably above the
+// + 60s evaluate/navigation + 8s scheduler allowance = 205s, comfortably above the
 // ~152s worst-case legitimate schedule the review constructed and comfortably below
 // the product's 300s solve limit.
 

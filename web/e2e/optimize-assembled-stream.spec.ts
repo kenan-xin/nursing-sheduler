@@ -44,6 +44,13 @@ const LARGE_YAML = readFileSync(
 );
 
 const COMPLETION_TIMEOUT = 90_000;
+/**
+ * How long the main-frame URL may take to settle after a COMMITTED navigation.
+ * Explicit because the default 5s is what the historical `page.goto` symptom
+ * actually tripped over under host saturation — see the abort test for the
+ * evidence. Bounded, so a navigation that genuinely never lands still fails.
+ */
+const ABORT_URL_SETTLE_TIMEOUT = 30_000;
 const REPLAY_SNAPSHOT_KEY = "nurse.optimize.e2e-replay-snapshot";
 const OPTIMIZE_SESSION_KEY = "nurse.optimize.session";
 
@@ -740,7 +747,18 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
       ).not.toBeNull();
       expect(response!.url(), "the committed navigation response is /about").toMatch(/\/about$/);
     }
-    await expect(page).toHaveURL(/\/about$/);
+    // The historical `page.goto` symptom is finally EXPLAINED, and the explanation
+    // came from the diagnostic added for it. Reproduced under a deliberately extreme
+    // synthetic overload (loadavg ~24 on 10 cores): the navigation response above
+    // PASSED — the commit really was `/about` — while `page.url()` still reported the
+    // fixture 13 times across the default 5s window. So the main-frame URL lags a
+    // committed navigation under host saturation; nothing undoes the navigation, and
+    // beforeunload remains disproved.
+    //
+    // The repair is therefore a bounded wait, not a weaker claim: the assertion is
+    // unchanged and still requires the URL to become `/about`; only the settling
+    // window is now explicit instead of an implicit 5s default.
+    await expect(page).toHaveURL(/\/about$/, { timeout: ABORT_URL_SETTLE_TIMEOUT });
     await page.waitForTimeout(2_000);
   });
 });
