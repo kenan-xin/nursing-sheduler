@@ -25,12 +25,15 @@ import {
   judgeEventsAuthority,
   judgeReplayEvidence,
   KEEPALIVE_WINDOW,
+  OBSERVATION_EVALUATE_BOUND,
   parseEventsRequestUrl,
   releaseLiveJob,
   REPLAY_BOUNDS,
   REPLAY_TEST_TIMEOUT,
   RESUMED_HEADER_TIMEOUT,
   RESUMED_SCREEN_TIMEOUT,
+  TINY_BOUNDS,
+  TINY_TEST_TIMEOUT,
 } from "./support/optimize-durable";
 
 const REPO_ROOT = resolve(__dirname, "../..");
@@ -43,7 +46,6 @@ const LARGE_YAML = readFileSync(
   "utf-8",
 );
 
-const COMPLETION_TIMEOUT = 90_000;
 /**
  * How long the main-frame URL may take to settle after a COMMITTED navigation.
  * Explicit because the default 5s is what the historical `page.goto` symptom
@@ -208,17 +210,24 @@ interface SseObservations {
 }
 
 async function readSseObs(page: Page): Promise<SseObservations> {
-  return page.evaluate(() => {
-    const obs = (window as unknown as { __nsSseObs?: SseObservations }).__nsSseObs;
-    return {
-      sseResponseAt: obs?.sseResponseAt ?? null,
-      sseFirstByteAt: obs?.sseFirstByteAt ?? null,
-      sseChunks: obs?.sseChunks ?? [],
-      eventLastEventIds: obs?.eventLastEventIds ?? [],
-      eventUrls: obs?.eventUrls ?? [],
-      acceptedJobIds: obs?.acceptedJobIds ?? [],
-    };
-  });
+  // Bounded like every other observation evaluate: `page.evaluate` takes no timeout
+  // parameter, so without this the call would be governed only by the test total
+  // and the budget entry for it would be an estimate rather than a ceiling.
+  return withBound(
+    "sse observation evaluate",
+    OBSERVATION_EVALUATE_BOUND,
+    page.evaluate(() => {
+      const obs = (window as unknown as { __nsSseObs?: SseObservations }).__nsSseObs;
+      return {
+        sseResponseAt: obs?.sseResponseAt ?? null,
+        sseFirstByteAt: obs?.sseFirstByteAt ?? null,
+        sseChunks: obs?.sseChunks ?? [],
+        eventLastEventIds: obs?.eventLastEventIds ?? [],
+        eventUrls: obs?.eventUrls ?? [],
+        acceptedJobIds: obs?.acceptedJobIds ?? [],
+      };
+    }),
+  );
 }
 
 /**
@@ -423,7 +432,7 @@ interface ReplayObservation {
 async function readReplayObservation(page: Page): Promise<ReplayObservation> {
   return withBound(
     "replay observation evaluate",
-    REPLAY_BOUNDS.finalObservationEvaluate,
+    OBSERVATION_EVALUATE_BOUND,
     page.evaluate(() => {
       const obs = (window as unknown as { __nsSseObs?: SseObservations }).__nsSseObs;
       const rawIds = Array.from(
@@ -513,18 +522,44 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
   });
 
   test("tiny feasible job: SSE first byte, completion, download, cleanup", async ({ page }) => {
+    // This test's own complete budget, derived in `TINY_BOUNDS` from every
+    // sequential bound below. Its 90s completion poll could never reach its own
+    // bound under Playwright's 30s default — the same incomplete-budget shape the
+    // review blocked on for the replay test, in its sibling. No retries, no sleeps,
+    // no blanket suite timeout, and the completion poll itself is unchanged.
+    test.setTimeout(TINY_TEST_TIMEOUT);
+
     await injectYaml(page, TINY_YAML);
     await gotoFixture(page);
 
-    await page.getByTestId("optimize-submit").click();
+    await page.getByTestId("optimize-submit").click({ timeout: TINY_BOUNDS.submitClick });
+
+    // Arm cleanup ownership from the accepted POST, exactly as the replay test does.
+    //
+    // On the SUCCESS path the product itself releases the job — the terminal
+    // auto-chain DELETEs, which is what the slot-freed assertion below proves — so
+    // this hook then finds it already gone and takes the documented idempotent 404
+    // branch. But a FAILURE between submission and that DELETE (a download that
+    // never completes, say) would leave the slot occupied and the next lane would
+    // hit `submit-blocked`. That path is why ownership is armed rather than assumed
+    // away.
+    await expect
+      .poll(async () => (await readSseObs(page)).acceptedJobIds.length, {
+        timeout: TINY_BOUNDS.firstResponsePoll,
+      })
+      .toBeGreaterThan(0);
 
     // Assert the browser observed the actual SSE response (not just that the
     // POST activated the job and controls rendered). This is the real
     // "first response" — the SSE endpoint answered with text/event-stream.
     await expect
-      .poll(async () => (await readSseObs(page)).sseResponseAt, { timeout: FIRST_BYTE_TIMEOUT })
+      .poll(async () => (await readSseObs(page)).sseResponseAt, {
+        timeout: TINY_BOUNDS.firstResponsePoll,
+      })
       .not.toBeNull();
     const obs1 = await readSseObs(page);
+    expect(obs1.acceptedJobIds, "exactly one submission was accepted").toHaveLength(1);
+    liveJobToRelease = obs1.acceptedJobIds[0];
     expect(obs1.sseResponseAt).not.toBeNull();
     // And a first body byte arrived (the stream delivered content).
     expect(obs1.sseFirstByteAt).not.toBeNull();
@@ -534,11 +569,13 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
     // downloads, and DELETEs.
     await expect(page.getByTestId("optimize-completed-artifact")).toContainText(
       "downloaded successfully",
-      { timeout: COMPLETION_TIMEOUT },
+      { timeout: TINY_BOUNDS.completionPoll },
     );
 
     // Cleanup DELETE freed the single-slot: a new run is allowed.
-    await expect(page.getByTestId("optimize-submit")).toBeEnabled({ timeout: 30_000 });
+    await expect(page.getByTestId("optimize-submit")).toBeEnabled({
+      timeout: TINY_BOUNDS.slotFreedAssertion,
+    });
   });
 
   test("live job: SSE first byte, genuine keepalive, cursor persistence, strictly-after replay, abort", async ({

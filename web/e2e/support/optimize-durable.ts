@@ -223,6 +223,15 @@ export const REPLAY_BOUNDS = {
   // --- evaluate/navigation work with no Playwright timeout parameter --------
   // `page.evaluate` takes no per-call timeout, so each of these is enforced by
   // `withBound()` in the spec rather than merely budgeted for here.
+  //
+  // `observationEvaluates` covers the STANDALONE observation reads — the ones
+  // outside any poll, since a poll's own bound already covers the evaluates it
+  // repeats. In the replay test there are exactly four: `readSseObs` for the
+  // accepted-id check and again after the keepalive window, and
+  // `readReplayObservation` for the first resumed request and for the final
+  // snapshot. At `OBSERVATION_EVALUATE_BOUND` each, that is 4 x 5s. (This replaced
+  // a single 5s `finalObservationEvaluate` entry, which accounted for one of the
+  // four — found while applying the same enumeration method to the tiny test.)
   // Calibrated against measurement, not guessed. Under a deliberately extreme
   // synthetic overload (loadavg ~24 on 10 cores) this in-page evaluate — freeze,
   // a <=200ms stabilisation loop, a regex over the recorded chunks, one
@@ -232,16 +241,82 @@ export const REPLAY_BOUNDS = {
   freezeAndSnapshotEvaluate: 30_000,
   reloadNavigation: 20_000,
   snapshotReadEvaluate: 5_000,
-  finalObservationEvaluate: 5_000,
+  observationEvaluates: 20_000,
   // --- one small named allowance, AFTER the full sum ------------------------
   // Worker startup, fixture teardown and OS scheduling jitter between steps.
   schedulerAllowance: 8_000,
 } as const;
 
 // Totals: 50s fixture setup + 15s submit/arm + 72s stream phases
-// + 60s evaluate/navigation + 8s scheduler allowance = 205s, comfortably above the
+// + 75s evaluate/navigation + 8s scheduler allowance = 220s, comfortably above the
 // ~152s worst-case legitimate schedule the review constructed and comfortably below
 // the product's 300s solve limit.
+
+/** One standalone observation `page.evaluate`, enforced by `withBound()`. */
+export const OBSERVATION_EVALUATE_BOUND = 5_000;
+
+/**
+ * The bounds `gotoFixture` spends, shared by BOTH assembled tests. Named as a key
+ * list rather than a literal so the two budgets cannot drift apart from each other
+ * or from the helper's actual call sites.
+ */
+export const GOTO_FIXTURE_BOUND_KEYS = [
+  "gotoFixtureNavigation",
+  "fixtureRootVisible",
+  "screenVisible",
+  "anonymizeAttributeRead",
+  "anonymizeToggleClick",
+  "anonymizeCheckedAssertion",
+  "submitEnabledAssertion",
+] as const;
+
+/** The total `gotoFixture` may spend (50s). */
+export const GOTO_FIXTURE_BOUNDS_TOTAL = GOTO_FIXTURE_BOUND_KEYS.reduce(
+  (total, key) => total + REPLAY_BOUNDS[key],
+  0,
+);
+
+/**
+ * EVERY sequential bound on the TINY assembled test's positive path.
+ *
+ * Same defect shape the review blocked on for the replay test, in its sibling: an
+ * internal 90s completion poll cannot be governed by Playwright's 30s default, so
+ * the assertion could never have reached its own bound. Same repair method — one
+ * named entry per sequential bound, total computed by summing the object, key set
+ * pinned by the unit suite so an omission fails loudly.
+ *
+ * `fixtureSetup` reuses the shared `gotoFixture` total rather than restating the
+ * seven literals, so a change there follows into both budgets.
+ */
+export const TINY_BOUNDS = {
+  /** Two `addInitScript` calls; no network, but not free either. */
+  injectInitScripts: 5_000,
+  fixtureSetup: GOTO_FIXTURE_BOUNDS_TOTAL,
+  /** Explicit: the default action timeout is 0, i.e. bounded only by the total. */
+  submitClick: 5_000,
+  firstResponsePoll: 15_000,
+  /** One standalone `readSseObs` after the poll. */
+  observationEvaluates: OBSERVATION_EVALUATE_BOUND,
+  /**
+   * The terminal auto-chain: artifact fetch, people-id restore, download, DELETE.
+   * Unchanged at 90s — the completion poll is the point of this test and is not
+   * weakened to fit a cap.
+   */
+  completionPoll: 90_000,
+  /** The DELETE freed the single slot, so a new run is permitted again. */
+  slotFreedAssertion: 30_000,
+  /** Worker startup and OS scheduling jitter between steps. */
+  schedulerAllowance: 8_000,
+} as const;
+
+/** The exact key set of `TINY_BOUNDS`, pinned so an omission fails loudly. */
+export const TINY_BOUND_KEYS = Object.keys(TINY_BOUNDS) as ReadonlyArray<keyof typeof TINY_BOUNDS>;
+
+/** 5 + 50 + 5 + 15 + 5 + 90 + 30 + 8 = 208s. */
+export const TINY_TEST_TIMEOUT = Object.values(TINY_BOUNDS).reduce(
+  (total, bound) => total + bound,
+  0,
+);
 
 /** The exact key set of `REPLAY_BOUNDS`, pinned so an omission fails loudly. */
 export const REPLAY_BOUND_KEYS = Object.keys(REPLAY_BOUNDS) as ReadonlyArray<

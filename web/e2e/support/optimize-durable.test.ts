@@ -20,11 +20,17 @@ import {
   parseEventsRequestUrl,
   PLAYWRIGHT_DEFAULT_TEST_TIMEOUT,
   PRODUCT_SOLVE_LIMIT,
+  GOTO_FIXTURE_BOUND_KEYS,
+  GOTO_FIXTURE_BOUNDS_TOTAL,
+  OBSERVATION_EVALUATE_BOUND,
   releaseLiveJob,
   REPLAY_BOUND_KEYS,
   REPLAY_BOUNDS,
   REPLAY_PHASE_BOUNDS,
   REPLAY_TEST_TIMEOUT,
+  TINY_BOUND_KEYS,
+  TINY_BOUNDS,
+  TINY_TEST_TIMEOUT,
   type CleanupHttp,
   type ReplayEvidence,
 } from "./optimize-durable";
@@ -301,7 +307,7 @@ describe("the live replay test's total budget enumerates EVERY sequential bound"
     "freezeAndSnapshotEvaluate",
     "reloadNavigation",
     "snapshotReadEvaluate",
-    "finalObservationEvaluate",
+    "observationEvaluates",
     "schedulerAllowance",
   ];
 
@@ -316,9 +322,9 @@ describe("the live replay test's total budget enumerates EVERY sequential bound"
     );
     expect(REPLAY_TEST_TIMEOUT).toBe(manual);
     // 50s fixture setup (20+5+5+5+5+5+5) + 15s submit/arm (5+10)
-    // + 72s stream phases (15+12+10+15+20) + 60s evaluate/navigation (30+20+5+5)
-    // + 8s scheduler allowance = 205s.
-    expect(REPLAY_TEST_TIMEOUT).toBe(205_000);
+    // + 72s stream phases (15+12+10+15+20) + 75s evaluate/navigation (30+20+5+20)
+    // + 8s scheduler allowance = 220s.
+    expect(REPLAY_TEST_TIMEOUT).toBe(220_000);
   });
 
   it("every bound is a positive finite number", () => {
@@ -351,6 +357,127 @@ describe("the live replay test's total budget enumerates EVERY sequential bound"
   it("keeps the scheduler allowance small relative to the enumerated work", () => {
     // It is an allowance for jitter between steps, not a second margin.
     expect(REPLAY_BOUNDS.schedulerAllowance).toBeLessThan(REPLAY_TEST_TIMEOUT / 10);
+  });
+
+  it("accounts for EVERY standalone observation evaluate, not just one", () => {
+    // The replay test makes four observation reads outside any poll: `readSseObs`
+    // for the accepted-id check and again after the keepalive window, and
+    // `readReplayObservation` for the first resumed request and the final snapshot.
+    // A single-call entry (the earlier `finalObservationEvaluate`) under-counted by
+    // three — the same omission class this suite exists to catch, found while
+    // applying the method to the tiny test.
+    expect(REPLAY_BOUNDS.observationEvaluates).toBe(4 * OBSERVATION_EVALUATE_BOUND);
+  });
+});
+
+// The sibling defect, closed by the same method. The tiny test's own 90s completion
+// poll could never reach its bound under Playwright's 30s default.
+describe("the tiny assembled test's total budget enumerates EVERY sequential bound", () => {
+  const EXPECTED_KEYS = [
+    "injectInitScripts",
+    "fixtureSetup",
+    "submitClick",
+    "firstResponsePoll",
+    "observationEvaluates",
+    "completionPoll",
+    "slotFreedAssertion",
+    "schedulerAllowance",
+  ];
+
+  it("enumerates exactly the expected bounds, in order", () => {
+    expect([...TINY_BOUND_KEYS]).toEqual(EXPECTED_KEYS);
+  });
+
+  it("totals the sum of every enumerated bound and nothing else", () => {
+    const manual = EXPECTED_KEYS.reduce(
+      (total, key) => total + TINY_BOUNDS[key as keyof typeof TINY_BOUNDS],
+      0,
+    );
+    expect(TINY_TEST_TIMEOUT).toBe(manual);
+    // 5 inject + 50 fixture + 5 submit + 15 first response + 5 observation
+    // + 90 completion + 30 slot freed + 8 scheduler = 208s.
+    expect(TINY_TEST_TIMEOUT).toBe(208_000);
+  });
+
+  it("every bound is a positive finite number", () => {
+    for (const key of TINY_BOUND_KEYS) {
+      const value = TINY_BOUNDS[key];
+      expect(Number.isFinite(value), key).toBe(true);
+      expect(value, key).toBeGreaterThan(0);
+    }
+  });
+
+  it("proves the default per-test budget was insufficient BY CONSTRUCTION", () => {
+    // The completion poll ALONE exceeds the default, so the assertion could never
+    // have reached its own bound regardless of host speed. That is the defect.
+    expect(TINY_BOUNDS.completionPoll).toBeGreaterThan(PLAYWRIGHT_DEFAULT_TEST_TIMEOUT);
+    // And so does the shared fixture setup, independently.
+    expect(TINY_BOUNDS.fixtureSetup).toBeGreaterThan(PLAYWRIGHT_DEFAULT_TEST_TIMEOUT);
+  });
+
+  it("preserves the completion poll rather than shrinking it to fit a cap", () => {
+    expect(TINY_BOUNDS.completionPoll).toBe(90_000);
+  });
+
+  it("reuses the shared gotoFixture total instead of restating its literals", () => {
+    // One source of truth: changing a `gotoFixture` bound must follow into both
+    // budgets, so they cannot drift apart from each other or from the helper.
+    expect(TINY_BOUNDS.fixtureSetup).toBe(GOTO_FIXTURE_BOUNDS_TOTAL);
+    expect(GOTO_FIXTURE_BOUNDS_TOTAL).toBe(
+      GOTO_FIXTURE_BOUND_KEYS.reduce((total, key) => total + REPLAY_BOUNDS[key], 0),
+    );
+    expect(GOTO_FIXTURE_BOUNDS_TOTAL).toBe(50_000);
+  });
+
+  it("stays meaningfully inside the product's own solve limit", () => {
+    expect(TINY_TEST_TIMEOUT).toBeLessThan(PRODUCT_SOLVE_LIMIT);
+    expect(PRODUCT_SOLVE_LIMIT - TINY_TEST_TIMEOUT).toBeGreaterThanOrEqual(60_000);
+  });
+
+  it("keeps the scheduler allowance small relative to the enumerated work", () => {
+    expect(TINY_BOUNDS.schedulerAllowance).toBeLessThan(TINY_TEST_TIMEOUT / 10);
+  });
+
+  it("admits a legitimate phase that runs well past the old 30s default", () => {
+    // The point of the cap: a completion that legitimately takes, say, 45s must be
+    // able to finish. Under the old default the TEST died at 30s while the poll
+    // still had 60s of its own bound left.
+    const legitimateSlowCompletion = 45_000;
+    expect(legitimateSlowCompletion).toBeGreaterThan(PLAYWRIGHT_DEFAULT_TEST_TIMEOUT);
+    expect(legitimateSlowCompletion).toBeLessThan(TINY_BOUNDS.completionPoll);
+    // Even with every earlier phase at its own ceiling, the slow completion fits.
+    const earlierPhases =
+      TINY_BOUNDS.injectInitScripts +
+      TINY_BOUNDS.fixtureSetup +
+      TINY_BOUNDS.submitClick +
+      TINY_BOUNDS.firstResponsePoll +
+      TINY_BOUNDS.observationEvaluates;
+    expect(earlierPhases + legitimateSlowCompletion + TINY_BOUNDS.slotFreedAssertion).toBeLessThan(
+      TINY_TEST_TIMEOUT,
+    );
+  });
+
+  it("still fails a never-completing job, at the phase bound and inside the total", () => {
+    // A job that never completes exhausts the completion poll and fails THERE,
+    // rather than silently consuming the whole budget: the sum of every bound up to
+    // and including the completion poll is strictly less than the total.
+    const throughCompletion =
+      TINY_BOUNDS.injectInitScripts +
+      TINY_BOUNDS.fixtureSetup +
+      TINY_BOUNDS.submitClick +
+      TINY_BOUNDS.firstResponsePoll +
+      TINY_BOUNDS.observationEvaluates +
+      TINY_BOUNDS.completionPoll;
+    expect(throughCompletion).toBeLessThan(TINY_TEST_TIMEOUT);
+    // And the total is finite, so a wedged run cannot hang the gate.
+    expect(Number.isFinite(TINY_TEST_TIMEOUT)).toBe(true);
+  });
+
+  it("is independent of the replay budget — neither cap governs the other", () => {
+    expect(TINY_TEST_TIMEOUT).not.toBe(REPLAY_TEST_TIMEOUT);
+    for (const cap of [TINY_TEST_TIMEOUT, REPLAY_TEST_TIMEOUT]) {
+      expect(cap).toBeLessThan(PRODUCT_SOLVE_LIMIT);
+    }
   });
 });
 
