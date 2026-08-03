@@ -6,8 +6,15 @@
 // Behavior is ported one-for-one from the old `OptimizationProgressChart`
 // (score step-line, comment overlay/toggle, live extrapolated x-axis while
 // active, range presets, dot threshold, synchronized hover) but presentation
-// is rebuilt: a native-SVG chart (no `recharts` dependency), square corners,
-// the ink/brand/semantic tokens, and the rebuild's accessibility rules.
+// is rebuilt: a native-SVG chart (no `recharts` dependency), the ink/brand/
+// semantic tokens, and the rebuild's accessibility rules.
+//
+// R6 re-skinned it onto v2 "Mint Canvas, Warm Ink": the container is a WELL
+// because the chart is always nested inside an L1 card (§4 rule 5), its controls
+// are shared `Button`s rather than local boxes, the tooltip is a real L2 raised
+// surface, and series colour is split into a base MARK tier and an ink TEXT tier
+// so every accent clears AA on the well. The plot itself stays structurally
+// square — the SVG carries no radius, and the axes/gridlines are unchanged.
 //
 // The component is feature-local: it accepts already-normalized progress
 // points (finite score + elapsed) and renders. Transport, orchestration, and
@@ -16,6 +23,8 @@
 // interaction is via the labeled controls (range presets, comments toggle).
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { surfaceVariants } from "@/components/ui/surface";
 import type { RunProgressPoint } from "@/lib/optimize";
 import { cn } from "@/lib/utils";
 import {
@@ -81,8 +90,26 @@ const HOVER_EDGE_SLOP_PX = 24;
 const TICK_COLOR_VAR = "var(--ink3)";
 const AXIS_COLOR_VAR = "var(--line)";
 const GRID_COLOR_VAR = "var(--line2)";
-const SCORE_COLOR_VAR = "var(--brand)";
-const COMMENT_COLOR_VAR = "var(--warn)";
+
+// R6 v2 — series colour is split into a MARK tier and a TEXT tier.
+//
+// The plotted line, its dots and the legend swatch must be the exact series hue,
+// so they stay on the BASE tokens. Series TEXT (the panel labels and the tooltip
+// values) moves to the INK tier, which DESIGN.md §2 defines as the deepest
+// treatment for "headings, emphasised numerals". That is not cosmetic: the chart
+// body is a `--panel` well, and light rose `--brand #af605a` on `--panel #eef3f0`
+// computes 4.04:1 — below AA — while `--brandink #904f4a` clears it at 5.5:1. The
+// swatch beside each label still carries the base hue, so the legend keeps its
+// exact colour correspondence with the line.
+const SCORE_MARK_VAR = "var(--brand)";
+const SCORE_TEXT_VAR = "var(--brandink)";
+const COMMENT_MARK_VAR = "var(--warn)";
+const COMMENT_TEXT_VAR = "var(--warnink)";
+
+// The chart body's own plane. The figure is a WELL (see the container below), so
+// the dot halo that punches the line out of its background must be the well tone,
+// not `--surface`.
+const PLOT_PLANE_VAR = "var(--panel)";
 
 /**
  * Default container width used until ResizeObserver reports a real pixel width
@@ -535,37 +562,44 @@ export function ProgressChart({ points, isActive = false, className }: ProgressC
       data-domain-max={domain.max.toFixed(4)}
       data-point-count={visiblePointCount}
       className={cn(
-        // Square border, surface fill, no shadow on the figure itself — the
-        // design system uses shadows only for overlays (toast/dialog/side).
-        "flex flex-col border border-line bg-surface",
+        // R6 v2 — the chart is always mounted INSIDE an L1 card (the Live Result
+        // card on the route, the L1 host in the fixture), and DESIGN.md §4 rule 5
+        // forbids stacking two surfaces of the same tone: an L1 card inside an L1
+        // card becomes a well. So the figure is the canonical well — `--panel`,
+        // the inset `--sh-well` (never an outer shadow, §4 rule 1) and a `--line2`
+        // hairline — on `--r-ctl`, the §5 radius for an inner bordered box. The
+        // PLOT stays structurally square: the SVG carries no radius at all.
+        surfaceVariants({ role: "well", geometry: "control", emphasis: "hairline" }),
+        // Deliberately NOT `overflow-hidden`: the hover tooltip is absolutely
+        // positioned above the score dot and legitimately escapes the figure's box.
+        // Nothing inside paints into the 12px corners, so there is nothing to clip.
+        "flex flex-col",
         className,
       )}
       ref={containerRef}
     >
       <header className="flex flex-wrap items-start justify-between gap-3 border-b border-line2 px-4 py-3">
         <div>
-          <h3 className="font-heading text-cardhead font-semibold tracking-tight">
+          <h3 className="font-heading text-cardhead font-semibold tracking-[-0.015em] text-ink">
             Incumbent Progress
           </h3>
           <p className="mt-1 text-meta text-ink2">
             Higher scores are better. Hover to inspect a solution.
           </p>
         </div>
-        <button
-          type="button"
+        {/* Shared Button, not a hand-rolled control: it brings the v2 pill shape,
+            the real L1 fill (§4 rule 4 — a transparent outline does not read as
+            pressable), the canonical focus outline and the D10 44px coarse-pointer
+            floor, which the local 32px box could never satisfy. */}
+        <Button
+          variant="secondary"
+          size="sm"
           aria-pressed={showComments}
           aria-label={showComments ? "Hide comments panel" : "Show comments panel"}
           onClick={() => setShowComments((current) => !current)}
-          className={cn(
-            "inline-flex h-8 items-center gap-2 border px-3 text-meta font-medium transition-colors",
-            "outline-none focus-visible:ring-2 focus-visible:ring-brand",
-            showComments
-              ? "border-line bg-panel text-ink2 hover:bg-panel/70"
-              : "border-line bg-surface text-ink hover:bg-panel",
-          )}
         >
           {showComments ? "Hide comments" : "Show comments"}
-        </button>
+        </Button>
       </header>
 
       {/* role="figure" is implicit on <figure>; the role="img" annotation lets
@@ -585,12 +619,17 @@ export function ProgressChart({ points, isActive = false, className }: ProgressC
               onKeyDown={handlePlotKeyDown}
               onFocus={handlePlotFocus}
               onBlur={handlePlotBlur}
-              className="outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand"
+              className="outline-none focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-brand"
             >
               <div role="img" id={reactLabelId} aria-label={figureLabel}>
                 <div className="flex items-center justify-between px-2">
-                  <p className="text-meta font-semibold" style={{ color: SCORE_COLOR_VAR }}>
-                    Score
+                  <p className="flex items-center gap-1.5 text-meta font-semibold">
+                    <span
+                      aria-hidden="true"
+                      className="inline-block h-0.5 w-3.5"
+                      style={{ background: SCORE_MARK_VAR }}
+                    />
+                    <span style={{ color: SCORE_TEXT_VAR }}>Score</span>
                   </p>
                   {!dotsEnabled && (
                     <p className="text-label text-ink3">Points hidden · hover to inspect</p>
@@ -609,14 +648,14 @@ export function ProgressChart({ points, isActive = false, className }: ProgressC
                   yTickFormatter={formatCompact}
                   xTickFormatter={formatElapsedSeconds}
                   linePath={scorePath}
-                  lineColorVar={SCORE_COLOR_VAR}
+                  lineColorVar={SCORE_MARK_VAR}
                   dotsEnabled={dotsEnabled}
                   pointPixels={scorePixels}
                   pointValues={visiblePoints}
                   latestPixel={latestScorePixel}
                   hoveredPixel={hoveredScorePixel}
                   hoveredX={hoveredXPixel}
-                  hoveredColorVar={SCORE_COLOR_VAR}
+                  hoveredColorVar={SCORE_MARK_VAR}
                   onPointerMove={handleScorePointerMove}
                   onPointerDown={handlePointerDown}
                   onPointerLeave={handlePointerLeave}
@@ -626,8 +665,13 @@ export function ProgressChart({ points, isActive = false, className }: ProgressC
                 {showComments && (
                   <div className="border-t border-line2 pt-2">
                     <div className="flex items-center justify-between px-2">
-                      <p className="text-meta font-semibold" style={{ color: COMMENT_COLOR_VAR }}>
-                        Comments
+                      <p className="flex items-center gap-1.5 text-meta font-semibold">
+                        <span
+                          aria-hidden="true"
+                          className="inline-block h-0.5 w-3.5"
+                          style={{ background: COMMENT_MARK_VAR }}
+                        />
+                        <span style={{ color: COMMENT_TEXT_VAR }}>Comments</span>
                       </p>
                       {commentSegments.length === 0 && visiblePointCount > 0 && (
                         <p className="text-label text-ink3">No comment frames in range</p>
@@ -646,14 +690,14 @@ export function ProgressChart({ points, isActive = false, className }: ProgressC
                       yTickFormatter={formatCompact}
                       xTickFormatter={formatElapsedSeconds}
                       linePath={commentPath}
-                      lineColorVar={COMMENT_COLOR_VAR}
+                      lineColorVar={COMMENT_MARK_VAR}
                       dotsEnabled={dotsEnabled && commentSegments.length > 0}
                       pointPixels={commentSegments}
                       pointValues={visiblePoints}
                       latestPixel={latestCommentPixel}
                       hoveredPixel={hoveredCommentPixel}
                       hoveredX={hoveredXPixel}
-                      hoveredColorVar={COMMENT_COLOR_VAR}
+                      hoveredColorVar={COMMENT_MARK_VAR}
                       onPointerMove={handleScorePointerMove}
                       onPointerDown={handlePointerDown}
                       onPointerLeave={handlePointerLeave}
@@ -694,8 +738,11 @@ export function ProgressChart({ points, isActive = false, className }: ProgressC
         {activeAnnouncement}
       </p>
 
+      {/* No fill on the footer: the figure is already the `--panel` well, and v1's
+          `bg-panel/40` both stacked the same tone on itself (§4 rule 5) and did it
+          through an arbitrary alpha. A `--line2` top edge carries the separation. */}
       <footer
-        className="flex flex-wrap items-center gap-1.5 border-t border-line2 bg-panel/40 px-4 py-2"
+        className="flex flex-wrap items-center gap-1.5 border-t border-line2 px-4 py-2"
         data-testid="progress-chart-range-controls"
       >
         <span className="mr-1 text-label font-semibold uppercase tracking-[0.03em] text-ink3">
@@ -704,22 +751,22 @@ export function ProgressChart({ points, isActive = false, className }: ProgressC
         {RANGE_PRESETS.map((preset) => {
           const active = rangePreset === preset.value;
           return (
-            <button
+            // Prototype :175-178 gives the selected preset the solid `--brand` fill
+            // and the rest an L1 chip. Both are exactly the shared Button's
+            // `default` / `secondary` variants, which also bring the pill shape and
+            // the coarse-pointer floor — v1's 28px `ring-brand/40` box had neither,
+            // and borrowed `--brandtint` + a brand edge, which DESIGN.md §6 reserves
+            // for selection language.
+            <Button
               key={preset.value}
-              type="button"
+              variant={active ? "default" : "secondary"}
+              size="sm"
               aria-pressed={active}
               data-testid={`progress-chart-range-${preset.value}`}
               onClick={() => setRangePreset(preset.value)}
-              className={cn(
-                "inline-flex h-7 items-center px-2 text-meta font-medium transition-colors",
-                "outline-none focus-visible:ring-2 focus-visible:ring-brand",
-                active
-                  ? "bg-brandtint text-brandink ring-1 ring-inset ring-brand/40"
-                  : "text-ink2 hover:bg-panel hover:text-ink",
-              )}
             >
               {preset.label}
-            </button>
+            </Button>
           );
         })}
         <span className="ml-auto text-label text-ink3" aria-hidden="true">
@@ -803,6 +850,13 @@ const ProgressPanel = function ProgressPanelImpl(props: ProgressPanelProps) {
       height={height}
       viewBox={`0 0 ${width} ${height}`}
       preserveAspectRatio="none"
+      // The No-Black Rule reaches SVG geometry. An `<svg>` and every `<line>`/`<g>`
+      // inside it inherit the UA default `fill: black`, which the runtime paint
+      // scanner reads as `rgb(0, 0, 0)` even though a stroked line paints no fill
+      // area. Declaring `fill="none"` at the root removes the inherited black for
+      // the whole subtree; every element that actually needs a fill (`<text>`,
+      // `<circle>`, the capture `<rect>`) already sets its own.
+      fill="none"
       aria-hidden="true"
       onPointerMove={onPointerMove}
       onPointerDown={onPointerDown}
@@ -910,7 +964,7 @@ const ProgressPanel = function ProgressPanelImpl(props: ProgressPanelProps) {
             cy={pixel.y}
             r={3.25}
             fill={lineColorVar}
-            stroke="var(--surface)"
+            stroke={PLOT_PLANE_VAR}
             strokeWidth={2}
           />
         ))}
@@ -938,7 +992,7 @@ const ProgressPanel = function ProgressPanelImpl(props: ProgressPanelProps) {
           cy={hoveredPixel.y}
           r={6}
           fill={hoveredColorVar}
-          stroke="var(--surface)"
+          stroke={PLOT_PLANE_VAR}
           strokeWidth={2}
         />
       )}
@@ -980,6 +1034,9 @@ interface ProgressTooltipProps {
   style: React.CSSProperties;
 }
 
+// L2 raised (DESIGN.md §4): `--surface2` + `--sh-3` on `--r-card`. v1 painted the
+// tooltip at L1 with an aliased dialog shadow, so it read as flush with the plane
+// it floats above.
 function ProgressTooltip({ point, style }: ProgressTooltipProps) {
   const commentText = formatComments(point.commentCount);
   const solutionText = formatSolutionIndex(point.solutionIndex);
@@ -988,26 +1045,26 @@ function ProgressTooltip({ point, style }: ProgressTooltipProps) {
       role="tooltip"
       data-testid="progress-chart-tooltip"
       style={style}
-      className={cn("z-10 border border-line bg-surface px-3 py-2.5 text-meta", "shadow-dialog")}
+      className={cn(surfaceVariants({ role: "raised", geometry: "card" }), "z-10 px-3 py-2.5")}
     >
-      <p className="mb-2 font-semibold text-ink">
+      <p className="mb-2 text-meta font-semibold text-ink">
         <span data-testid="progress-chart-tooltip-elapsed">
           {formatElapsedSeconds(point.elapsedSeconds)}
         </span>{" "}
         elapsed
       </p>
-      <dl className="space-y-1.5">
+      <dl className="space-y-1.5 text-meta">
         <div className="flex items-center justify-between gap-5">
           <dt className="flex items-center gap-1.5 text-ink2">
             <span
               aria-hidden="true"
               className="inline-block size-2"
-              style={{ background: SCORE_COLOR_VAR }}
+              style={{ background: SCORE_MARK_VAR }}
             />
             <span>Score</span>
             <span className="sr-only">:</span>
           </dt>
-          <dd className="font-semibold tabular-nums" style={{ color: SCORE_COLOR_VAR }}>
+          <dd className="font-semibold tabular-nums" style={{ color: SCORE_TEXT_VAR }}>
             {formatScore(point.currentBestScore)}
           </dd>
         </div>
@@ -1016,12 +1073,12 @@ function ProgressTooltip({ point, style }: ProgressTooltipProps) {
             <span
               aria-hidden="true"
               className="inline-block size-2"
-              style={{ background: COMMENT_COLOR_VAR }}
+              style={{ background: COMMENT_MARK_VAR }}
             />
             <span>Comments</span>
             <span className="sr-only">:</span>
           </dt>
-          <dd className="font-semibold tabular-nums" style={{ color: COMMENT_COLOR_VAR }}>
+          <dd className="font-semibold tabular-nums" style={{ color: COMMENT_TEXT_VAR }}>
             {commentText}
           </dd>
         </div>

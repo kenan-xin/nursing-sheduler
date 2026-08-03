@@ -14,6 +14,8 @@
 // a working scroll/auto-follow behavior.
 
 import { useCallback, useEffect, useRef } from "react";
+import { Badge } from "@/components/ui/badge";
+import { surfaceVariants } from "@/components/ui/surface";
 import type { RunLogEntry, RunLogKind } from "@/lib/optimize";
 import { cn } from "@/lib/utils";
 
@@ -25,16 +27,25 @@ export interface RunEventLogProps {
   active: boolean;
 }
 
-const KIND_STYLE: Record<RunLogKind, string> = {
-  lifecycle: "border-line bg-panel text-ink2",
-  state: "border-line bg-panel text-ink2",
-  control: "border-line bg-panel text-ink2",
-  result: "border-success bg-successtint text-ink",
-  progress: "border-brand/40 bg-brandtint text-brandink",
-  phase: "border-warn bg-warntint text-ink",
-  recovery: "border-brand/40 bg-brandtint text-brandink",
-  terminal: "border-warn bg-warntint text-ink",
-  error: "border-error bg-errortint text-ink",
+/**
+ * Each log category maps onto a shared `Badge` variant rather than a local class
+ * list. That closes two v1 defects at once: the status tints were painted with a
+ * NEUTRAL `--ink` (a Redundant Signal Rule violation — the tint must pair with its
+ * own semantic ink), and the brand rows carried an arbitrary `border-brand/40`
+ * opacity instead of a token edge. The mapping matches the prototype's own
+ * `badgeColor` table (ScreenGenerate.dc.html, renderVals): complete → success,
+ * error → error, progress → brand, phase → warn, everything else → neutral.
+ */
+const KIND_VARIANT: Record<RunLogKind, "neutral" | "success" | "brand" | "warn" | "error"> = {
+  lifecycle: "neutral",
+  state: "neutral",
+  control: "neutral",
+  result: "success",
+  progress: "brand",
+  phase: "warn",
+  recovery: "brand",
+  terminal: "warn",
+  error: "error",
 };
 
 function formatTime(entry: RunLogEntry): string {
@@ -71,36 +82,44 @@ export function RunEventLog({ log, active }: RunEventLogProps) {
 
   return (
     <details
-      className="border border-line bg-surface"
+      className={cn(
+        surfaceVariants({ role: "surface", geometry: "card" }),
+        // DESIGN.md §4 rule 3 — the scroll region ends the card, so the card
+        // clips to its own radius instead of letting rows hit a square edge.
+        "overflow-hidden",
+      )}
       open={active || count === 0}
       data-testid="optimize-event-log"
     >
-      <summary className="flex cursor-pointer items-center justify-between gap-2 px-4 py-2.5 text-body font-semibold">
-        <span>Event log</span>
-        <span className="text-meta font-normal text-ink3">{count} events</span>
+      <summary className="flex cursor-pointer items-center justify-between gap-2 px-5 py-4">
+        <span className="font-heading text-cardhead font-semibold tracking-[-0.015em] text-ink">
+          Event log
+        </span>
+        <span className="text-label font-semibold uppercase tracking-[0.03em] text-ink3">
+          {count} events
+        </span>
       </summary>
       <div
         ref={containerRef}
         onScroll={onScroll}
         data-testid="optimize-event-log-scroll"
-        className="max-h-80 overflow-y-auto border-t border-line"
+        className="max-h-80 overflow-y-auto border-t border-line2"
       >
         {count === 0 ? (
           <p className="px-4 py-3 text-meta text-ink3">
             {active ? "Waiting for optimization events…" : "No optimization events yet."}
           </p>
         ) : (
-          <ul className="divide-y divide-line">
+          <ul className="divide-y divide-line2">
             {log.map((entry) => (
               <li key={entry.seq} className="flex items-start gap-2.5 px-4 py-2">
-                <span
-                  className={cn(
-                    "mt-0.5 shrink-0 border px-1.5 py-0.5 text-label font-semibold uppercase tracking-[0.03em]",
-                    KIND_STYLE[entry.kind],
-                  )}
+                <Badge
+                  variant={KIND_VARIANT[entry.kind]}
+                  data-kind={entry.kind}
+                  className="mt-0.5 min-w-[66px] shrink-0 justify-center"
                 >
                   {entry.kind}
-                </span>
+                </Badge>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline justify-between gap-2">
                     <span className="truncate font-mono text-meta text-ink">{entry.label}</span>

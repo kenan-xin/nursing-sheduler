@@ -8,6 +8,14 @@
 // B2-2 — the scenario stat grid (NURSES / DAYS / SHIFTS / RULES ON, proto
 // ScreenGenerate.dc.html:32-37) sits above the fields; the fields are ordered
 // timeout, then (Anonymize, Prettify) per the prototype's `:38-45`.
+//
+// R6 v2: the stat grid is a DATA surface — four cells divided by `--line2`
+// hairlines — so it stays square and unfilled exactly as the prototype authors it
+// (DESIGN.md §5 "do not round a data structure"). Only its numerals move: v1's
+// `font-extrabold` becomes the v2 Title weight (600) with -0.015em tracking
+// (§3). Validation and gating copy move from the base tier to the semantic INK
+// tier, which is the deepest treatment and the one that stays legible on
+// `--surface` in dark mode.
 
 import { FaDownload, FaSpinner } from "@/components/icons";
 import { Button } from "@/components/ui/button";
@@ -85,7 +93,9 @@ function StatCell({ label, value, testId, borderRight, borderTop }: StatCellProp
         borderTop ? "border-t border-line2" : null,
       )}
     >
-      <div className="font-heading text-title font-extrabold text-ink">{value}</div>
+      <div className="font-heading text-title font-semibold tracking-[-0.015em] text-ink">
+        {value}
+      </div>
       <div className="mt-0.5 text-label font-semibold uppercase tracking-[0.03em] text-ink3">
         {label}
       </div>
@@ -170,7 +180,7 @@ export function RunOptionsForm({
           <p
             id="optimize-timeout-error"
             role="alert"
-            className="text-meta font-semibold text-error"
+            className="text-meta font-semibold text-errorink"
           >
             {timeoutError}
           </p>
@@ -212,7 +222,7 @@ export function RunOptionsForm({
           )}
         </Button>
         {disabledReason !== null && !submitting ? (
-          <p className="text-meta text-warn" data-testid="optimize-disabled-reason">
+          <p className="text-meta text-warnink" data-testid="optimize-disabled-reason">
             {disabledReason}
           </p>
         ) : null}

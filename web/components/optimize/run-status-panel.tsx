@@ -14,6 +14,12 @@
 //   • cancelled    — "Run cancelled" heading + the release affordance (Dismiss).
 //   • failed       — structured error callout; worker_lost additionally offers Resubmit.
 //
+// R6 v2: the terminal eyebrow lost its leading ● — DESIGN.md §5 retires decorative
+// ornament on status ("no coloured leader dots on eyebrows"); the uppercase label
+// and the semantic ink carry the state. Headings drop v1's `font-extrabold` /
+// `tracking-tight` for the v2 weights and -0.015em (§3), and every semantic text
+// tone moves from the base tier to the ink tier (see `toneTextClass`).
+//
 // All lifecycle/controls are server-authoritative — nothing here infers a capability.
 // The infeasible "Try again" and the idle CTA reuse the run-start path; "Adjust rules"
 // is a GuardedLink so the panel needs no new orchestrator callback (file-disjoint from
@@ -72,15 +78,23 @@ export interface RunStatusPanelProps {
   onStartRun?: () => void;
 }
 
-/** The status-eyebrow text colour for a terminal heading. */
+/**
+ * The status-eyebrow / summary-numeral text colour for a terminal heading.
+ *
+ * R6 v2: the INK tier, not the base tier. DESIGN.md §2 assigns base to "text or
+ * icon **on its own tint**" and ink to the "deepest treatment — headings,
+ * emphasised numerals". Both call sites here paint straight onto the L1 card, and
+ * in dark mode the two tiers diverge (`--error #e58164` vs `--errorink #f09b80`),
+ * so the base tier was both the wrong role and the weaker contrast.
+ */
 function toneTextClass(tone: RunStatusTone): string {
   switch (tone) {
     case "success":
-      return "text-success";
+      return "text-successink";
     case "warn":
-      return "text-warn";
+      return "text-warnink";
     case "error":
-      return "text-error";
+      return "text-errorink";
     case "brand":
       return "text-brandink";
     default:
@@ -118,10 +132,11 @@ export function RunStatusPanel({
           className="flex flex-col items-center justify-center px-6 py-11 text-center"
           data-testid="optimize-idle"
         >
-          <div className="mb-4 flex size-14 items-center justify-center border border-line text-ink3">
+          {/* Prototype :62 — a dashed placeholder tile, not a solid box. */}
+          <div className="mb-4 flex size-14 items-center justify-center rounded-control border border-dashed border-line text-ink3">
             <FaBolt className="size-5" aria-hidden />
           </div>
-          <h3 className="font-heading text-title font-extrabold tracking-tight text-ink">
+          <h3 className="font-heading text-title font-semibold tracking-[-0.015em] text-ink">
             Ready to optimise
           </h3>
           <p className="mt-1.5 max-w-[40ch] text-meta text-ink2">
@@ -182,14 +197,15 @@ export function RunStatusPanel({
       {heading !== null ? (
         <div>
           <p
+            data-testid="optimize-terminal-eyebrow"
             className={cn(
               "text-meta font-semibold uppercase tracking-[0.03em]",
               toneTextClass(status.tone),
             )}
           >
-            ● {status.label}
+            {status.label}
           </p>
-          <h3 className="mt-2 font-heading text-cardhead font-extrabold tracking-tight text-ink">
+          <h3 className="mt-2 font-heading text-cardhead font-semibold tracking-[-0.015em] text-ink">
             {heading}
           </h3>
         </div>
@@ -221,7 +237,7 @@ export function RunStatusPanel({
           </p>
           {view.result?.terminationReason !== null &&
           view.result?.terminationReason !== undefined ? (
-            <div className="border border-line2 bg-panel px-2.5 py-2 font-mono text-label text-ink2">
+            <div className="rounded-control border border-line2 bg-panel px-2.5 py-2 font-mono text-label text-ink2 shadow-well">
               verdict: {view.result.terminationReason}
             </div>
           ) : null}
@@ -250,7 +266,7 @@ export function RunStatusPanel({
                 {scoreLabel(view)}
               </p>
               <p
-                className="mt-1 font-heading text-display leading-none text-ink"
+                className="mt-1 font-heading text-display font-bold leading-none tracking-[-0.015em] text-ink"
                 data-testid="optimize-score"
               >
                 {view.latestScore !== null ? formatScore(view.latestScore) : "No incumbent yet"}
@@ -422,7 +438,7 @@ function SummaryCell({
     <div className="flex-1 border-r border-line2 px-3.5 py-3 last:border-r-0">
       <div
         className={cn(
-          "font-heading text-title font-extrabold",
+          "font-heading text-title font-semibold tracking-[-0.015em]",
           tone !== undefined ? toneTextClass(tone) : "text-ink",
         )}
       >

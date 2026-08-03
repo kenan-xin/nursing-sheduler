@@ -2,6 +2,15 @@
 // (full border + semantic tint + a leading status icon), not a new component
 // language. One small primitive keeps the readiness, version, recovery, terminal,
 // and error notices visually consistent with the rest of the app.
+//
+// R6 v2: a callout is an inset ISLAND inside an L1 card, not a full-bleed band,
+// so it takes `--r-ctl` (DESIGN.md §5 "inner bordered boxes") rather than staying
+// square. The neutral `info` tone is the canonical well — `--panel` + `--sh-well`
+// + a `--line2` hairline (§4). Each status tone pairs its tint with the MATCHING
+// semantic ink for BOTH title and body (the Redundant Signal Rule): v1 painted
+// status tints with neutral `--ink`/`--ink2`, which reads as an unrelated grey
+// note in dark mode, where the base and ink tiers diverge. The leading icon keeps
+// the BASE tier, which §2 defines as "text or icon on its own tint".
 
 import type { ReactNode } from "react";
 import {
@@ -15,21 +24,41 @@ import { cn } from "@/lib/utils";
 
 export type CalloutTone = "info" | "warn" | "error" | "success";
 
-const TONE: Record<CalloutTone, { container: string; icon: string; defaultIcon: IconType }> = {
-  info: { container: "border-line bg-panel", icon: "text-ink3", defaultIcon: FaCircleInfo },
+interface CalloutToneSpec {
+  container: string;
+  icon: string;
+  title: string;
+  body: string;
+  defaultIcon: IconType;
+}
+
+const TONE: Record<CalloutTone, CalloutToneSpec> = {
+  info: {
+    container: "rounded-control border-line2 bg-panel shadow-well",
+    icon: "text-ink3",
+    title: "text-ink",
+    body: "text-ink2",
+    defaultIcon: FaCircleInfo,
+  },
   warn: {
-    container: "border-warn bg-warntint",
+    container: "rounded-control border-warn bg-warntint",
     icon: "text-warn",
+    title: "text-warnink",
+    body: "text-warnink",
     defaultIcon: FaTriangleExclamation,
   },
   error: {
-    container: "border-error bg-errortint",
+    container: "rounded-control border-error bg-errortint",
     icon: "text-error",
+    title: "text-errorink",
+    body: "text-errorink",
     defaultIcon: FaCircleExclamation,
   },
   success: {
-    container: "border-success bg-successtint",
+    container: "rounded-control border-success bg-successtint",
     icon: "text-success",
+    title: "text-successink",
+    body: "text-successink",
     defaultIcon: FaCircleCheck,
   },
 };
@@ -62,13 +91,23 @@ export function Callout({
   return (
     <div
       data-testid={testId}
+      data-slot="callout"
+      data-tone={tone}
       role={alert ? "alert" : undefined}
       className={cn("flex items-start gap-2.5 border p-3.5", spec.container, className)}
     >
       <Icon className={cn("mt-0.5 size-4 shrink-0", spec.icon)} aria-hidden />
       <div className="min-w-0 flex-1 space-y-1.5">
-        {title ? <div className="text-meta font-semibold text-ink">{title}</div> : null}
-        {children ? <div className="text-meta text-ink2">{children}</div> : null}
+        {title ? (
+          <div data-slot="callout-title" className={cn("text-meta font-semibold", spec.title)}>
+            {title}
+          </div>
+        ) : null}
+        {children ? (
+          <div data-slot="callout-body" className={cn("text-meta", spec.body)}>
+            {children}
+          </div>
+        ) : null}
         {actions ? <div className="flex flex-wrap items-center gap-2 pt-1">{actions}</div> : null}
       </div>
     </div>

@@ -19,6 +19,7 @@
 
 import { useEffect, useState } from "react";
 import { OptimizeAndExportScreen } from "@/components/optimize/optimize-and-export-screen";
+import { Surface } from "@/components/ui/surface";
 import { useScenarioStore } from "@/lib/store";
 import type {
   PrepareOptimizeSubmissionOptions,
@@ -82,12 +83,19 @@ export default function OptimizeDurableFixtureClient() {
   }, []);
 
   if (!seeded) {
-    return <div data-testid="optimize-durable-seeding">Seeding fixture…</div>;
+    return (
+      <Surface level="page" geometry="square" data-testid="optimize-durable-seeding">
+        <p className="text-meta text-ink2">Seeding fixture…</p>
+      </Surface>
+    );
   }
 
+  // The harness root is the L0 page plane, which is what F4's frozen row for this
+  // route asserts. It draws no border and no shadow, so wrapping the screen's own
+  // page plane adds no visible surface — it is one plane, declared twice.
   return (
-    <div data-testid="optimize-durable-fixture">
+    <Surface level="page" geometry="square" data-testid="optimize-durable-fixture">
       <OptimizeAndExportScreen controllerDeps={{ prepare: cannedPrepare }} />
-    </div>
+    </Surface>
   );
 }
