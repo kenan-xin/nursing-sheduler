@@ -27,7 +27,7 @@ import {
   KEEPALIVE_WINDOW,
   OBSERVATION_EVALUATE_BOUND,
   parseEventsRequestUrl,
-  releaseLiveJob,
+  releaseLiveJobs,
   REPLAY_BOUNDS,
   REPLAY_TEST_TIMEOUT,
   RESUMED_HEADER_TIMEOUT,
@@ -269,6 +269,8 @@ interface ReplaySnapshot {
    * when that passes AND agrees with `sessionJobId`.
    */
   eventUrls: string[];
+  /** The page's own origin, captured in the same task as the evidence. */
+  pageOrigin: string | null;
 }
 
 /** Freeze the observation wrapper's current SSE body, allow already-delivered
@@ -341,7 +343,13 @@ async function captureReplaySnapshotAndReload(page: Page): Promise<ReplaySnapsho
           const eventUrls = (e2eWindow.__nsSseObs?.eventUrls ?? []).slice();
           sessionStorage.setItem(
             snapshotKey,
-            JSON.stringify({ cursor, rawIds, sessionJobId, eventUrls }),
+            JSON.stringify({
+              cursor,
+              rawIds,
+              sessionJobId,
+              eventUrls,
+              pageOrigin: window.location.origin,
+            }),
           );
           window.location.reload();
         },
@@ -358,16 +366,28 @@ async function captureReplaySnapshotAndReload(page: Page): Promise<ReplaySnapsho
       sessionStorage.removeItem(snapshotKey);
       return raw
         ? (JSON.parse(raw) as ReplaySnapshot)
-        : { cursor: null, rawIds: [], sessionJobId: null, eventUrls: [] };
+        : { cursor: null, rawIds: [], sessionJobId: null, eventUrls: [], pageOrigin: null };
     }, REPLAY_SNAPSHOT_KEY),
   );
 }
 
+// TWO sequential `addInitScript` calls, each with its own enforced bound and its
+// own budget key. `addInitScript` takes no timeout parameter, so without
+// `withBound` these were governed only by the test total — and a single shared
+// entry could not distinguish an omitted call from a fast one.
 async function injectYaml(page: Page, yaml: string): Promise<void> {
-  await page.addInitScript(SSE_OBSERVATION_SCRIPT);
-  await page.addInitScript((y) => {
-    (window as unknown as { __NS_DURABLE_FIXTURE_YAML?: string }).__NS_DURABLE_FIXTURE_YAML = y;
-  }, yaml);
+  await withBound(
+    "inject observation script",
+    REPLAY_BOUNDS.injectObservationScript,
+    page.addInitScript(SSE_OBSERVATION_SCRIPT),
+  );
+  await withBound(
+    "inject fixture yaml",
+    REPLAY_BOUNDS.injectFixtureYaml,
+    page.addInitScript((y) => {
+      (window as unknown as { __NS_DURABLE_FIXTURE_YAML?: string }).__NS_DURABLE_FIXTURE_YAML = y;
+    }, yaml),
+  );
 }
 
 // Every wait here carries an EXPLICIT local timeout rather than inheriting
@@ -403,6 +423,12 @@ async function gotoFixture(page: Page): Promise<void> {
 interface ReplayObservation {
   rawIds: string[];
   cursor: string | null;
+  /**
+   * The page's OWN origin, captured in the same observation as the evidence it
+   * authorises. Independent of every URL under test, which is what lets an
+   * absolute events URL be bound rather than merely parsed.
+   */
+  pageOrigin: string | null;
   firstLastEventId: string | null;
   /** The URL of the FIRST resumed events request, captured with its header. */
   firstEventUrl: string | null;
@@ -455,6 +481,7 @@ async function readReplayObservation(page: Page): Promise<ReplayObservation> {
       return {
         rawIds,
         cursor,
+        pageOrigin: window.location.origin,
         firstLastEventId: obs?.eventLastEventIds?.[0] ?? null,
         firstEventUrl: obs?.eventUrls?.[0] ?? null,
         eventUrls: (obs?.eventUrls ?? []).slice(),
@@ -464,31 +491,37 @@ async function readReplayObservation(page: Page): Promise<ReplayObservation> {
 }
 
 test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
-  // Release the LIVE job the replay test submits, so a failure in that test cannot
-  // leave an 87-person solve burning the host for the form's 300s default and
-  // starve the NEXT test's fixture mount. That is the exact correlated failure the
-  // review recorded: one 30s timeout produced 29/2 because the abort case could
-  // not mount within 5s afterwards.
+  // Release EVERY live job the positive tests submit, so a failure cannot leave a
+  // solve burning the host for the form's 300s default and starve the NEXT test's
+  // fixture mount. That is the exact correlated failure recorded earlier: one 30s
+  // timeout produced 29/2 because the abort case could not mount within 5s
+  // afterwards.
   //
-  // Scoped deliberately: only the replay test sets `liveJobToRelease`. The abort
-  // test is SUPPOSED to walk away from a live stream (that is the mechanism it
-  // proves), it is the last test in the file, and the gate tears the stack down
-  // after it — so it is left alone rather than risk perturbing the BFF log audit
-  // that is baselined around it. This runs in `afterEach` rather than a `finally`
-  // because Playwright abandons a timed-out test body but still runs hooks, which
-  // is precisely the case this exists for.
-  let liveJobToRelease: string | null = null;
+  // Both positive tests arm this — the tiny test as well as the replay test — and
+  // each arms it the instant an accepted job id first exists, BEFORE any fallible
+  // cardinality or authority assertion. An array, not a single id: if more than one
+  // submission is ever accepted, arming only the first and then throwing would
+  // orphan the rest.
+  //
+  // The abort test is deliberately NOT armed: it is SUPPOSED to walk away from a
+  // live stream (that is the mechanism it proves), it is the last test in the file,
+  // and the gate tears the stack down after it — so it is left alone rather than
+  // risk perturbing the BFF log audit baselined around it.
+  //
+  // This runs in `afterEach` rather than a `finally` because Playwright abandons a
+  // timed-out test body but still runs hooks, which is precisely the case this
+  // exists for.
+  let liveJobsToRelease: string[] = [];
   test.afterEach(async ({ request }, testInfo) => {
-    const jobId = liveJobToRelease;
-    liveJobToRelease = null;
-    if (jobId === null) return;
+    const jobIds = liveJobsToRelease;
+    liveJobsToRelease = [];
 
     // Cancel -> poll to terminal -> DELETE, asserting the documented status at each
     // step. The previous hook POSTed cancel and DELETEd immediately, checked no
     // status, and treated only a transport exception as failure — so on a RUNNING
     // job it took the documented 409 path (DELETE is legal only after terminal) and
     // finished "successfully" with the solve still alive.
-    const outcome = await releaseLiveJob(jobId, {
+    const outcome = await releaseLiveJobs(jobIds, {
       post: async (url, timeout) => {
         const res = await request.post(url, { timeout });
         return { status: res.status(), body: await res.text() };
@@ -505,7 +538,14 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
       now: () => Date.now(),
     });
 
-    const report = [`job ${jobId}`, ...outcome.steps, ...outcome.failures].join("\n");
+    // ALWAYS attach, before any decision about throwing. `releaseLiveJobs` converts
+    // a rejected transport into a named failure rather than propagating it, so this
+    // line is reachable on every path.
+    const report = [
+      `armed jobs: ${jobIds.length === 0 ? "(none)" : jobIds.join(", ")}`,
+      ...outcome.steps,
+      ...outcome.failures,
+    ].join("\n");
     await testInfo.attach("live-job-cleanup", {
       body: report,
       contentType: "text/plain",
@@ -542,11 +582,18 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
     // branch. But a FAILURE between submission and that DELETE (a download that
     // never completes, say) would leave the slot occupied and the next lane would
     // hit `submit-blocked`. That path is why ownership is armed rather than assumed
-    // away.
+    // away, and why arming happens INSIDE the poll callback — the instant an accepted
+    // id first exists, before the cardinality assertion, before the second poll,
+    // before any further evaluate.
     await expect
-      .poll(async () => (await readSseObs(page)).acceptedJobIds.length, {
-        timeout: TINY_BOUNDS.firstResponsePoll,
-      })
+      .poll(
+        async () => {
+          const seen = (await readSseObs(page)).acceptedJobIds;
+          if (seen.length > 0) liveJobsToRelease = [...seen];
+          return seen.length;
+        },
+        { timeout: TINY_BOUNDS.acceptedIdPoll },
+      )
       .toBeGreaterThan(0);
 
     // Assert the browser observed the actual SSE response (not just that the
@@ -554,12 +601,12 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
     // "first response" — the SSE endpoint answered with text/event-stream.
     await expect
       .poll(async () => (await readSseObs(page)).sseResponseAt, {
-        timeout: TINY_BOUNDS.firstResponsePoll,
+        timeout: TINY_BOUNDS.sseResponsePoll,
       })
       .not.toBeNull();
     const obs1 = await readSseObs(page);
+    liveJobsToRelease = [...obs1.acceptedJobIds];
     expect(obs1.acceptedJobIds, "exactly one submission was accepted").toHaveLength(1);
-    liveJobToRelease = obs1.acceptedJobIds[0];
     expect(obs1.sseResponseAt).not.toBeNull();
     // And a first body byte arrived (the stream delivered content).
     expect(obs1.sseFirstByteAt).not.toBeNull();
@@ -578,7 +625,7 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
     });
   });
 
-  test("live job: SSE first byte, genuine keepalive, cursor persistence, strictly-after replay, abort", async ({
+  test("live job: SSE first byte, genuine keepalive, cursor persistence, strictly-after replay", async ({
     page,
   }) => {
     // The ONE test with an explicit total budget, derived above from its own phase
@@ -598,15 +645,21 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
     // window left `afterEach` with nothing to release and recreated the exact
     // abandoned-solver contamination the hook exists to prevent. The observation
     // wrapper records every 202-accepted submission id, which is the earliest
-    // moment a job exists to own.
+    // moment a job exists to own. Arming is taken INSIDE the poll callback, so a
+    // failure at the cardinality assertion or any later seam still has an owner.
     await expect
-      .poll(async () => (await readSseObs(page)).acceptedJobIds.length, {
-        timeout: REPLAY_BOUNDS.acceptedJobIdPoll,
-      })
+      .poll(
+        async () => {
+          const seen = (await readSseObs(page)).acceptedJobIds;
+          if (seen.length > 0) liveJobsToRelease = [...seen];
+          return seen.length;
+        },
+        { timeout: REPLAY_BOUNDS.acceptedJobIdPoll },
+      )
       .toBeGreaterThan(0);
     const accepted = (await readSseObs(page)).acceptedJobIds;
+    liveJobsToRelease = [...accepted];
     expect(accepted, "exactly one submission was accepted").toHaveLength(1);
-    liveJobToRelease = accepted[0];
 
     // Bounded first response: the browser observed the SSE response.
     await expect
@@ -630,6 +683,7 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
       rawIds: preReloadIds,
       sessionJobId,
       eventUrls: preReloadEventUrls,
+      pageOrigin: preReloadPageOrigin,
     } = await captureReplaySnapshotAndReload(page);
 
     // --- Resolve the replay authority, independently of any cursor -------------
@@ -642,8 +696,13 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
     // failure, not an absence.
     expect(sessionJobId, "the active session must name its job").not.toBeNull();
     expect(sessionJobId!.length).toBeGreaterThan(0);
-    expect(sessionJobId, "the session's job is the one the server accepted").toBe(liveJobToRelease);
-    const preReloadAuthority = judgeEventsAuthority(preReloadEventUrls, sessionJobId);
+    expect(sessionJobId, "the session's job is the one the server accepted").toBe(accepted[0]);
+    expect(preReloadPageOrigin, "the page origin was captured with the evidence").not.toBeNull();
+    const preReloadAuthority = judgeEventsAuthority(
+      preReloadEventUrls,
+      sessionJobId,
+      preReloadPageOrigin,
+    );
     expect(
       preReloadAuthority.failures,
       "every pre-reload events URL is canonical and targets the active job",
@@ -675,7 +734,11 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
       firstResumed.firstEventUrl,
       "the first resumed request has a recorded URL",
     ).not.toBeNull();
-    const firstResumedTarget = parseEventsRequestUrl(firstResumed.firstEventUrl!);
+    expect(firstResumed.pageOrigin, "the resumed page origin was captured").not.toBeNull();
+    const firstResumedTarget = parseEventsRequestUrl(
+      firstResumed.firstEventUrl!,
+      firstResumed.pageOrigin,
+    );
     expect(
       firstResumedTarget.ok ? null : firstResumedTarget.reason,
       "the first resumed URL is a canonical events path",
@@ -734,7 +797,11 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
     expect(snapshot.firstLastEventId).toBe(cursorBefore);
     // And every POST-reload events URL is canonical and on the active job too, so
     // the resumed stream cannot have wandered after the first request was checked.
-    const resumedAuthority = judgeEventsAuthority(snapshot.eventUrls, expectedJobId);
+    const resumedAuthority = judgeEventsAuthority(
+      snapshot.eventUrls,
+      expectedJobId,
+      snapshot.pageOrigin,
+    );
     expect(
       resumedAuthority.failures,
       "every post-reload events URL is canonical and targets the active job",

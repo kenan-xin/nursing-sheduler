@@ -20,7 +20,7 @@
 // resolved computed styles in `e2e/optimize-visual.spec.ts` instead.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { surfaceVariants } from "@/components/ui/surface";
 import {
   INITIAL_OPTIMIZE_RUN_VIEW,
@@ -507,6 +507,32 @@ describe("ProgressChart", () => {
     // The figure IS the --panel well; a --panel band inside it stacks the same tone.
     expect(classesOf(footer).filter((c) => c.startsWith("bg-"))).toEqual([]);
     expectNoRetiredV1(container);
+  });
+
+  // DESIGN.md §3 reserves the mono face for "IDs, counts, hours and solver
+  // expressions — so a number always reads as data". The visible point count and the
+  // tooltip's comment count are counts and were left on the body face.
+  it("sets the visible point count in the mono data face", () => {
+    render(<ProgressChart points={POINTS} />);
+    const count = screen.getByTestId("progress-chart-point-count");
+    expect(count.textContent).toBe(`${POINTS.length} of ${POINTS.length} points`);
+    const classes = classesOf(count);
+    expect(classes).toContain("font-mono");
+    expect(classes).not.toContain("font-heading");
+  });
+
+  it("sets the tooltip comment count in the mono data face", () => {
+    render(<ProgressChart points={POINTS} />);
+    // The tooltip renders only while a point is inspected; drive the keyboard
+    // inspector rather than simulating a pointer, so this binds the real surface.
+    const inspector = screen.getByRole("group", { name: /Progress data points/ });
+    fireEvent.focus(inspector);
+    const comments = screen.getByTestId("progress-chart-tooltip-comments");
+    const classes = classesOf(comments);
+    expect(classes).toContain("font-mono");
+    // The tabular alignment and the series ink tier are both preserved.
+    expect(classes).toContain("tabular-nums");
+    expect(comments.getAttribute("style")).toContain("var(--warnink)");
   });
 
   it("paints series MARKS on the base tier and series TEXT on the ink tier", () => {

@@ -17,6 +17,7 @@ import {
   isTerminalJobBody,
   judgeEventsAuthority,
   judgeReplayEvidence,
+  normalizeExpectedOrigin,
   parseEventsRequestUrl,
   PLAYWRIGHT_DEFAULT_TEST_TIMEOUT,
   PRODUCT_SOLVE_LIMIT,
@@ -24,6 +25,7 @@ import {
   GOTO_FIXTURE_BOUNDS_TOTAL,
   OBSERVATION_EVALUATE_BOUND,
   releaseLiveJob,
+  releaseLiveJobs,
   REPLAY_BOUND_KEYS,
   REPLAY_BOUNDS,
   REPLAY_PHASE_BOUNDS,
@@ -59,6 +61,9 @@ const N3 = "1785742422344-0";
 const N_OLD = "1785742419000-0";
 
 const PRE_RELOAD = [cursor(JOB, N_OLD)];
+
+/** The fixture/page origin the assembled harness actually serves from. */
+const ORIGIN = "http://localhost:51236";
 
 /**
  * Normalize a diagnostic array so exact comparison is readable: substitute the
@@ -268,6 +273,91 @@ describe("releaseLiveJob converges on terminal before deleting", () => {
     expect(CLEANUP_ACCEPTED_STATUS.delete).toEqual([204, 404]);
   });
 
+  // P2-3. A rejected transport used to propagate out of the helper, so the hook
+  // never reached the line that builds and attaches the diagnostic. Every stage is
+  // covered, because each one is a separate await.
+  const REJECTING = (stage: "post" | "get" | "delete"): CleanupHttp => {
+    let clock = 0;
+    const boom = async (): Promise<{ status: number; body: string }> => {
+      throw new Error(`simulated ${stage} transport failure`);
+    };
+    return {
+      post: stage === "post" ? boom : async () => ({ status: 202, body: "{}" }),
+      get:
+        stage === "get"
+          ? boom
+          : async () => ({
+              status: 200,
+              body: JSON.stringify({ state: "cancelled", terminal: true }),
+            }),
+      delete: stage === "delete" ? boom : async () => ({ status: 204, body: "" }),
+      sleep: async () => {},
+      now: () => {
+        clock += CLEANUP_BOUNDS.terminalPollInterval;
+        return clock;
+      },
+    };
+  };
+
+  it.each(["post", "get", "delete"] as const)(
+    "converts a rejected %s into a structured outcome instead of throwing",
+    async (stage) => {
+      const outcome = await releaseLiveJob(JOB, REJECTING(stage));
+      expect(outcome.ok).toBe(false);
+      const label = stage === "post" ? "cancel" : stage === "get" ? "status poll" : "delete";
+      expect(outcome.steps.join(" | ")).toContain(`${label} -> transport error`);
+      expect(outcome.failures.join(" | ")).toMatch(
+        new RegExp(`${label} request failed at the transport level`),
+      );
+      // The report is still buildable, which is what makes the hook's attach reachable.
+      expect(outcome.steps.length).toBeGreaterThan(0);
+    },
+  );
+
+  it("releases EVERY armed job, and reports each by exact identity", async () => {
+    const calls: Call[] = [];
+    const { http: surface } = http(
+      { states: [{ status: 200, body: JSON.stringify({ terminal: true }) }] },
+      calls,
+    );
+    const outcome = await releaseLiveJobs([JOB, OTHER_JOB], surface);
+    expect(outcome.ok).toBe(true);
+    // Arming only the first and throwing would orphan the second.
+    expect(outcome.steps.join(" | ")).toContain(`job ${JOB}:`);
+    expect(outcome.steps.join(" | ")).toContain(`job ${OTHER_JOB}:`);
+    expect(calls.filter((c) => c.kind === "delete").map((c) => c.url)).toEqual([
+      `/api/optimize/${JOB}`,
+      `/api/optimize/${OTHER_JOB}`,
+    ]);
+  });
+
+  it("attempts every job even when an earlier one fails, and prefixes its failures", async () => {
+    let seen = 0;
+    const surface: CleanupHttp = {
+      post: async () => {
+        seen += 1;
+        return seen === 1 ? { status: 500, body: "" } : { status: 202, body: "{}" };
+      },
+      get: async () => ({ status: 200, body: JSON.stringify({ terminal: true }) }),
+      delete: async () => ({ status: 204, body: "" }),
+      sleep: async () => {},
+      now: () => 0,
+    };
+    const outcome = await releaseLiveJobs([JOB, OTHER_JOB], surface);
+    expect(outcome.ok).toBe(false);
+    expect(outcome.failures.join(" | ")).toContain(`job ${JOB}: cancel returned 500`);
+    // The second job was still attempted — one bad release cannot hide the others.
+    expect(outcome.steps.join(" | ")).toContain(`job ${OTHER_JOB}: cancel -> 202`);
+  });
+
+  it("reports nothing to release when no job was armed", async () => {
+    const { http: surface, calls } = http({});
+    const outcome = await releaseLiveJobs([], surface);
+    expect(outcome.ok).toBe(true);
+    expect(outcome.steps).toEqual(["no accepted job was armed; nothing to release"]);
+    expect(calls).toEqual([]);
+  });
+
   it("recognises terminal state from either the flag or the state name", () => {
     expect(isTerminalJobBody(JSON.stringify({ terminal: true }))).toBe(true);
     expect(isTerminalJobBody(JSON.stringify({ state: "completed" }))).toBe(true);
@@ -290,6 +380,8 @@ describe("the live replay test's total budget enumerates EVERY sequential bound"
   // assertion is what makes an omission fail loudly rather than silently shrink the
   // ceiling.
   const EXPECTED_KEYS = [
+    "injectObservationScript",
+    "injectFixtureYaml",
     "gotoFixtureNavigation",
     "fixtureRootVisible",
     "screenVisible",
@@ -321,10 +413,10 @@ describe("the live replay test's total budget enumerates EVERY sequential bound"
       0,
     );
     expect(REPLAY_TEST_TIMEOUT).toBe(manual);
-    // 50s fixture setup (20+5+5+5+5+5+5) + 15s submit/arm (5+10)
-    // + 72s stream phases (15+12+10+15+20) + 75s evaluate/navigation (30+20+5+20)
-    // + 8s scheduler allowance = 220s.
-    expect(REPLAY_TEST_TIMEOUT).toBe(220_000);
+    // 10s initialization (5+5) + 50s fixture setup (20+5+5+5+5+5+5)
+    // + 15s submit/arm (5+10) + 72s stream phases (15+12+10+15+20)
+    // + 75s evaluate/navigation (30+20+5+20) + 8s scheduler allowance = 230s.
+    expect(REPLAY_TEST_TIMEOUT).toBe(230_000);
   });
 
   it("every bound is a positive finite number", () => {
@@ -374,10 +466,12 @@ describe("the live replay test's total budget enumerates EVERY sequential bound"
 // poll could never reach its bound under Playwright's 30s default.
 describe("the tiny assembled test's total budget enumerates EVERY sequential bound", () => {
   const EXPECTED_KEYS = [
-    "injectInitScripts",
+    "injectObservationScript",
+    "injectFixtureYaml",
     "fixtureSetup",
     "submitClick",
-    "firstResponsePoll",
+    "acceptedIdPoll",
+    "sseResponsePoll",
     "observationEvaluates",
     "completionPoll",
     "slotFreedAssertion",
@@ -394,9 +488,29 @@ describe("the tiny assembled test's total budget enumerates EVERY sequential bou
       0,
     );
     expect(TINY_TEST_TIMEOUT).toBe(manual);
-    // 5 inject + 50 fixture + 5 submit + 15 first response + 5 observation
-    // + 90 completion + 30 slot freed + 8 scheduler = 208s.
-    expect(TINY_TEST_TIMEOUT).toBe(208_000);
+    // 5 + 5 init + 50 fixture + 5 submit + 15 accepted-id poll
+    // + 15 sse-response poll + 5 observation + 90 completion + 30 slot freed
+    // + 8 scheduler = 228s.
+    expect(TINY_TEST_TIMEOUT).toBe(228_000);
+  });
+
+  it("counts the TWO sequential polls separately, not once", () => {
+    // The tiny test runs an accepted-id poll AND an SSE-response poll, each 15s. A
+    // single shared key covered both call sites with one entry, so the advertised
+    // ceiling was 15s short of the schedule the test can actually run.
+    expect(TINY_BOUNDS.acceptedIdPoll).toBe(15_000);
+    expect(TINY_BOUNDS.sseResponsePoll).toBe(15_000);
+    expect(TINY_BOUNDS.acceptedIdPoll + TINY_BOUNDS.sseResponsePoll).toBe(30_000);
+  });
+
+  it("counts EACH addInitScript call separately, in both budgets", () => {
+    // `injectYaml` makes two sequential `addInitScript` calls. One arithmetic-only
+    // entry could not distinguish an omitted call from a fast one, and the replay
+    // budget had no initialization entry at all despite calling the same helper.
+    expect(TINY_BOUNDS.injectObservationScript).toBe(5_000);
+    expect(TINY_BOUNDS.injectFixtureYaml).toBe(5_000);
+    expect(REPLAY_BOUNDS.injectObservationScript).toBe(TINY_BOUNDS.injectObservationScript);
+    expect(REPLAY_BOUNDS.injectFixtureYaml).toBe(TINY_BOUNDS.injectFixtureYaml);
   });
 
   it("every bound is a positive finite number", () => {
@@ -447,10 +561,12 @@ describe("the tiny assembled test's total budget enumerates EVERY sequential bou
     expect(legitimateSlowCompletion).toBeLessThan(TINY_BOUNDS.completionPoll);
     // Even with every earlier phase at its own ceiling, the slow completion fits.
     const earlierPhases =
-      TINY_BOUNDS.injectInitScripts +
+      TINY_BOUNDS.injectObservationScript +
+      TINY_BOUNDS.injectFixtureYaml +
       TINY_BOUNDS.fixtureSetup +
       TINY_BOUNDS.submitClick +
-      TINY_BOUNDS.firstResponsePoll +
+      TINY_BOUNDS.acceptedIdPoll +
+      TINY_BOUNDS.sseResponsePoll +
       TINY_BOUNDS.observationEvaluates;
     expect(earlierPhases + legitimateSlowCompletion + TINY_BOUNDS.slotFreedAssertion).toBeLessThan(
       TINY_TEST_TIMEOUT,
@@ -462,10 +578,12 @@ describe("the tiny assembled test's total budget enumerates EVERY sequential bou
     // rather than silently consuming the whole budget: the sum of every bound up to
     // and including the completion poll is strictly less than the total.
     const throughCompletion =
-      TINY_BOUNDS.injectInitScripts +
+      TINY_BOUNDS.injectObservationScript +
+      TINY_BOUNDS.injectFixtureYaml +
       TINY_BOUNDS.fixtureSetup +
       TINY_BOUNDS.submitClick +
-      TINY_BOUNDS.firstResponsePoll +
+      TINY_BOUNDS.acceptedIdPoll +
+      TINY_BOUNDS.sseResponsePoll +
       TINY_BOUNDS.observationEvaluates +
       TINY_BOUNDS.completionPoll;
     expect(throughCompletion).toBeLessThan(TINY_TEST_TIMEOUT);
@@ -485,28 +603,82 @@ describe("the tiny assembled test's total budget enumerates EVERY sequential bou
 // whatever failed to match, so a legacy path, a suffixed path and extra segments
 // all passed as "one job". Every case below is bound to the exact client contract
 // `/api/optimize/${encodeURIComponent(jobId)}/events` (lib/query/optimize.ts:345).
-describe("parseEventsRequestUrl enforces the exact canonical events path", () => {
-  it("accepts the canonical relative path the client actually builds", () => {
-    expect(parseEventsRequestUrl(`/api/optimize/${JOB}/events`)).toEqual({
+describe("parseEventsRequestUrl enforces the exact canonical events path AND origin", () => {
+  it("accepts the canonical relative path resolved against the page origin", () => {
+    expect(parseEventsRequestUrl(`/api/optimize/${JOB}/events`, ORIGIN)).toEqual({
       ok: true,
       jobId: JOB,
     });
   });
 
-  it("accepts the same path as an absolute URL, which is what a Request exposes", () => {
-    expect(parseEventsRequestUrl(`http://localhost:51236/api/optimize/${JOB}/events`)).toEqual({
+  it("accepts an absolute URL ONLY on the page origin, which is what a Request exposes", () => {
+    expect(parseEventsRequestUrl(`${ORIGIN}/api/optimize/${JOB}/events`, ORIGIN)).toEqual({
       ok: true,
       jobId: JOB,
     });
+  });
+
+  it("ignores a default-port spelling difference between equal origins", () => {
+    expect(
+      parseEventsRequestUrl(`http://localhost/api/optimize/${JOB}/events`, "http://localhost:80"),
+    ).toEqual({ ok: true, jobId: JOB });
   });
 
   it("decodes a percent-encoded job segment", () => {
     const weird = "job with spaces/and-slash";
     const encoded = encodeURIComponent(weird);
-    expect(parseEventsRequestUrl(`/api/optimize/${encoded}/events`)).toEqual({
+    expect(parseEventsRequestUrl(`/api/optimize/${encoded}/events`, ORIGIN)).toEqual({
       ok: true,
       jobId: weird,
     });
+  });
+
+  // THE FINDING THIS ROUND CLOSED. Absolute and protocol-relative URLs were parsed
+  // for path and encoding but never bound to an origin, so a foreign host carrying
+  // the right job on the right path passed.
+  const ORIGIN_REJECTED: Array<[string, string, string | null]> = [
+    ["a foreign absolute https host", `https://foreign.example/api/optimize/${JOB}/events`, ORIGIN],
+    ["a foreign absolute http host", `http://foreign.example/api/optimize/${JOB}/events`, ORIGIN],
+    ["a protocol-relative foreign host", `//foreign.example/api/optimize/${JOB}/events`, ORIGIN],
+    ["a foreign port on the right host", `http://localhost:9/api/optimize/${JOB}/events`, ORIGIN],
+    [
+      "a foreign scheme on the right host",
+      `https://localhost:51236/api/optimize/${JOB}/events`,
+      "http://localhost:51236",
+    ],
+  ];
+
+  it.each(ORIGIN_REJECTED)("rejects %s", (_label, url, origin) => {
+    const parsed = parseEventsRequestUrl(url, origin);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.reason).toMatch(/is not the page origin/);
+  });
+
+  it("rejects credentials embedded in an otherwise correct URL", () => {
+    const parsed = parseEventsRequestUrl(
+      `http://user:pass@localhost:51236/api/optimize/${JOB}/events`,
+      "http://localhost:51236",
+    );
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.reason).toMatch(/credentials are not part/);
+  });
+
+  it("fails closed when the expected origin is missing or invalid", () => {
+    for (const bad of [null, "", "not-a-url", "ftp://localhost", "http://u:p@localhost"]) {
+      const parsed = parseEventsRequestUrl(`/api/optimize/${JOB}/events`, bad);
+      expect(parsed.ok, String(bad)).toBe(false);
+      if (!parsed.ok) expect(parsed.reason).toMatch(/no valid expected origin/);
+    }
+  });
+
+  it("normalizes usable origins and refuses unusable ones", () => {
+    expect(normalizeExpectedOrigin("http://localhost:51236/ignored/path")).toBe(
+      "http://localhost:51236",
+    );
+    expect(normalizeExpectedOrigin("https://example.test")).toBe("https://example.test");
+    for (const bad of [null, undefined, "", "nope", "ftp://x", "http://u:p@h"]) {
+      expect(normalizeExpectedOrigin(bad), String(bad)).toBeNull();
+    }
   });
 
   const REJECTED: Array<[string, string, RegExp]> = [
@@ -518,7 +690,9 @@ describe("parseEventsRequestUrl enforces the exact canonical events path", () =>
     ["an empty job segment", "/api/optimize//events", /does not match/],
     ["a query string", `/api/optimize/${JOB}/events?after=1`, /query string is not part/],
     ["a hash", `/api/optimize/${JOB}/events#frag`, /hash is not part/],
-    ["a bare word", "events", /unparseable URL/],
+    // Resolves against the page origin as `/events`, so it fails on the path rather
+    // than on parsing — still red, with a more precise reason than before.
+    ["a bare word", "events", /does not match/],
     ["an empty string", "", /empty URL/],
     [
       "a non-canonical encoding of a plain id",
@@ -528,7 +702,7 @@ describe("parseEventsRequestUrl enforces the exact canonical events path", () =>
   ];
 
   it.each(REJECTED)("rejects %s", (_label, url, reason) => {
-    const parsed = parseEventsRequestUrl(url);
+    const parsed = parseEventsRequestUrl(url, ORIGIN);
     expect(parsed.ok).toBe(false);
     if (!parsed.ok) expect(parsed.reason).toMatch(reason);
   });
@@ -536,7 +710,7 @@ describe("parseEventsRequestUrl enforces the exact canonical events path", () =>
   // A malformed percent-escape would throw inside `decodeURIComponent`; the parser
   // must convert that into a reason rather than propagate it.
   it("rejects an invalid percent-escape without throwing", () => {
-    const parsed = parseEventsRequestUrl("/api/optimize/%E0%A4%A/events");
+    const parsed = parseEventsRequestUrl("/api/optimize/%E0%A4%A/events", ORIGIN);
     expect(parsed.ok).toBe(false);
   });
 });
@@ -546,6 +720,7 @@ describe("judgeEventsAuthority fails closed and never discards evidence", () => 
     const verdict = judgeEventsAuthority(
       [`/api/optimize/${JOB}/events`, `/api/optimize/${JOB}/events`],
       JOB,
+      ORIGIN,
     );
     expect(verdict.failures).toEqual([]);
     expect(verdict.ok).toBe(true);
@@ -557,6 +732,7 @@ describe("judgeEventsAuthority fails closed and never discards evidence", () => 
     const verdict = judgeEventsAuthority(
       [`/api/optimize/${JOB}/events`, "/api/legacy/events"],
       JOB,
+      ORIGIN,
     );
     expect(verdict.ok).toBe(false);
     expect(verdict.failures).toHaveLength(1);
@@ -567,6 +743,7 @@ describe("judgeEventsAuthority fails closed and never discards evidence", () => 
     const verdict = judgeEventsAuthority(
       [`/api/optimize/${JOB}/events`, `/api/optimize/${JOB}/events/old`],
       JOB,
+      ORIGIN,
     );
     expect(verdict.ok).toBe(false);
     expect(verdict.failures).toHaveLength(1);
@@ -576,6 +753,7 @@ describe("judgeEventsAuthority fails closed and never discards evidence", () => 
     const verdict = judgeEventsAuthority(
       [`/api/optimize/${JOB}/events`, `/api/optimize/${OTHER_JOB}/events`],
       JOB,
+      ORIGIN,
     );
     expect(verdict.ok).toBe(false);
     expect(verdict.failures).toHaveLength(1);
@@ -585,19 +763,48 @@ describe("judgeEventsAuthority fails closed and never discards evidence", () => 
   });
 
   it("rejects a query string even on the right job", () => {
-    const verdict = judgeEventsAuthority([`/api/optimize/${JOB}/events?x=1`], JOB);
+    const verdict = judgeEventsAuthority([`/api/optimize/${JOB}/events?x=1`], JOB, ORIGIN);
     expect(verdict.ok).toBe(false);
   });
 
+  it("rejects canonical + a foreign ABSOLUTE origin carrying the right job", () => {
+    const verdict = judgeEventsAuthority(
+      [`/api/optimize/${JOB}/events`, `https://foreign.example/api/optimize/${JOB}/events`],
+      JOB,
+      ORIGIN,
+    );
+    expect(verdict.ok).toBe(false);
+    expect(verdict.failures).toHaveLength(1);
+    expect(verdict.failures[0]).toMatch(/is not the page origin/);
+  });
+
+  it("rejects canonical + a PROTOCOL-RELATIVE foreign host", () => {
+    const verdict = judgeEventsAuthority(
+      [`/api/optimize/${JOB}/events`, `//foreign.example/api/optimize/${JOB}/events`],
+      JOB,
+      ORIGIN,
+    );
+    expect(verdict.ok).toBe(false);
+    expect(verdict.failures[0]).toMatch(/is not the page origin/);
+  });
+
+  it("fails closed with no expected ORIGIN to compare against", () => {
+    for (const missing of [null, "", "not-a-url"]) {
+      const verdict = judgeEventsAuthority([`/api/optimize/${JOB}/events`], JOB, missing);
+      expect(verdict.ok, String(missing)).toBe(false);
+      expect(verdict.failures[0]).toMatch(/no valid expected origin/);
+    }
+  });
+
   it("fails closed with no observed events request at all", () => {
-    const verdict = judgeEventsAuthority([], JOB);
+    const verdict = judgeEventsAuthority([], JOB, ORIGIN);
     expect(verdict.ok).toBe(false);
     expect(verdict.failures).toEqual(["no events request was observed at all"]);
   });
 
   it("fails closed with no authority to compare against", () => {
     for (const missing of [null, ""]) {
-      const verdict = judgeEventsAuthority([`/api/optimize/${JOB}/events`], missing);
+      const verdict = judgeEventsAuthority([`/api/optimize/${JOB}/events`], missing, ORIGIN);
       expect(verdict.ok, String(missing)).toBe(false);
       expect(verdict.failures[0]).toMatch(/no independent job authority/);
     }

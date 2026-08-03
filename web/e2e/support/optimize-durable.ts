@@ -73,6 +73,29 @@ export type EventsUrlParse =
   | { ok: false; url: string; reason: string };
 
 /**
+ * Normalise an expected origin, or return `null` when it is unusable.
+ *
+ * The origin must be supplied by the caller from an INDEPENDENT capture — the
+ * page's own `location.origin`, read in the same snapshot as the evidence — never
+ * derived from the URL under test. A missing or unparseable origin fails closed:
+ * with nothing to compare against, every absolute URL would otherwise be accepted.
+ */
+export function normalizeExpectedOrigin(origin: string | null | undefined): string | null {
+  if (typeof origin !== "string" || origin.length === 0) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(origin);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+  if (parsed.username.length > 0 || parsed.password.length > 0) return null;
+  // `URL.origin` is the canonical scheme://host[:port] form, with the default port
+  // elided — so comparing origins never turns on a `:80` spelling difference.
+  return parsed.origin;
+}
+
+/**
  * Parse one recorded events-request URL against the exact canonical contract.
  *
  * Accepts a root-relative string (what the client passes) or an absolute URL
@@ -82,17 +105,33 @@ export type EventsUrlParse =
  * `encodeURIComponent(decodeURIComponent(seg)) === seg` — the same
  * canonical-spelling discipline the cursor codec applies.
  */
-export function parseEventsRequestUrl(url: string): EventsUrlParse {
+export function parseEventsRequestUrl(url: string, expectedOrigin: string | null): EventsUrlParse {
   const fail = (reason: string): EventsUrlParse => ({ ok: false, url, reason });
   if (typeof url !== "string" || url.length === 0) return fail("empty URL");
 
+  // ORIGIN AUTHORITY. Without an expected origin there is nothing to bind an
+  // absolute URL to, so this fails closed rather than falling back to "any host".
+  const origin = normalizeExpectedOrigin(expectedOrigin);
+  if (origin === null) {
+    return fail(`no valid expected origin was captured (got ${String(expectedOrigin)})`);
+  }
+
   let parsed: URL;
   try {
-    // A throwaway base normalises relative URLs (dot segments, encoded slashes)
-    // through exactly the same path as absolute ones.
-    parsed = url.startsWith("/") ? new URL(url, "http://events-contract.invalid") : new URL(url);
+    // The expected origin IS the base. A root-relative URL therefore resolves onto
+    // it and always matches; a protocol-relative `//host/…` resolves onto the
+    // base's SCHEME but keeps its own foreign host, so it fails the origin compare
+    // below rather than sneaking through as "relative".
+    parsed = new URL(url, origin);
   } catch {
     return fail("unparseable URL");
+  }
+
+  if (parsed.username.length > 0 || parsed.password.length > 0) {
+    return fail("credentials are not part of the contract");
+  }
+  if (parsed.origin !== origin) {
+    return fail(`origin ${parsed.origin} is not the page origin ${origin}`);
   }
 
   if (parsed.search.length > 0) {
@@ -135,6 +174,7 @@ export interface EventsAuthorityVerdict {
 export function judgeEventsAuthority(
   urls: readonly string[],
   expectedJobId: string | null,
+  expectedOrigin: string | null,
 ): EventsAuthorityVerdict {
   const failures: string[] = [];
   const jobIds: string[] = [];
@@ -146,12 +186,19 @@ export function judgeEventsAuthority(
       jobIds,
     };
   }
+  if (normalizeExpectedOrigin(expectedOrigin) === null) {
+    return {
+      ok: false,
+      failures: [`no valid expected origin was captured (got ${String(expectedOrigin)})`],
+      jobIds,
+    };
+  }
   if (urls.length === 0) {
     return { ok: false, failures: ["no events request was observed at all"], jobIds };
   }
 
   for (const url of urls) {
-    const parsed = parseEventsRequestUrl(url);
+    const parsed = parseEventsRequestUrl(url, expectedOrigin);
     if (!parsed.ok) {
       failures.push(`events URL rejected (${parsed.reason})`);
       continue;
@@ -203,6 +250,12 @@ export const PLAYWRIGHT_DEFAULT_TEST_TIMEOUT = 30_000;
  * real ceiling rather than an estimate of defaults.
  */
 export const REPLAY_BOUNDS = {
+  // --- initialization: TWO sequential addInitScript calls -------------------
+  // One key each, both `withBound`-enforced. A single shared entry could not tell
+  // an omitted call from a fast one, and the replay budget previously had no
+  // initialization entry at all even though it calls the same helper.
+  injectObservationScript: 5_000,
+  injectFixtureYaml: 5_000,
   // --- gotoFixture, all explicit at the call site ---------------------------
   gotoFixtureNavigation: 20_000,
   fixtureRootVisible: 5_000,
@@ -247,10 +300,10 @@ export const REPLAY_BOUNDS = {
   schedulerAllowance: 8_000,
 } as const;
 
-// Totals: 50s fixture setup + 15s submit/arm + 72s stream phases
-// + 75s evaluate/navigation + 8s scheduler allowance = 220s, comfortably above the
-// ~152s worst-case legitimate schedule the review constructed and comfortably below
-// the product's 300s solve limit.
+// Totals: 10s initialization + 50s fixture setup + 15s submit/arm
+// + 72s stream phases + 75s evaluate/navigation + 8s scheduler allowance = 230s,
+// comfortably above the ~152s worst-case legitimate schedule the review constructed
+// and comfortably below the product's 300s solve limit.
 
 /** One standalone observation `page.evaluate`, enforced by `withBound()`. */
 export const OBSERVATION_EVALUATE_BOUND = 5_000;
@@ -289,13 +342,20 @@ export const GOTO_FIXTURE_BOUNDS_TOTAL = GOTO_FIXTURE_BOUND_KEYS.reduce(
  * seven literals, so a change there follows into both budgets.
  */
 export const TINY_BOUNDS = {
-  /** Two `addInitScript` calls; no network, but not free either. */
-  injectInitScripts: 5_000,
+  /** One key per `addInitScript` call, both `withBound`-enforced. */
+  injectObservationScript: REPLAY_BOUNDS.injectObservationScript,
+  injectFixtureYaml: REPLAY_BOUNDS.injectFixtureYaml,
   fixtureSetup: GOTO_FIXTURE_BOUNDS_TOTAL,
   /** Explicit: the default action timeout is 0, i.e. bounded only by the total. */
   submitClick: 5_000,
-  firstResponsePoll: 15_000,
-  /** One standalone `readSseObs` after the poll. */
+  /**
+   * TWO sequential polls, counted separately. A single shared 15s key covered both
+   * call sites with one entry, so the advertised ceiling was 15s short of the
+   * schedule the test can actually run.
+   */
+  acceptedIdPoll: 15_000,
+  sseResponsePoll: 15_000,
+  /** One standalone `readSseObs` after the polls. */
   observationEvaluates: OBSERVATION_EVALUATE_BOUND,
   /**
    * The terminal auto-chain: artifact fetch, people-id restore, download, DELETE.
@@ -312,7 +372,7 @@ export const TINY_BOUNDS = {
 /** The exact key set of `TINY_BOUNDS`, pinned so an omission fails loudly. */
 export const TINY_BOUND_KEYS = Object.keys(TINY_BOUNDS) as ReadonlyArray<keyof typeof TINY_BOUNDS>;
 
-/** 5 + 50 + 5 + 15 + 5 + 90 + 30 + 8 = 208s. */
+/** 5 + 5 + 50 + 5 + 15 + 15 + 5 + 90 + 30 + 8 = 228s. */
 export const TINY_TEST_TIMEOUT = Object.values(TINY_BOUNDS).reduce(
   (total, bound) => total + bound,
   0,
@@ -429,7 +489,31 @@ export async function releaseLiveJob(jobId: string, http: CleanupHttp): Promise<
   const failures: string[] = [];
   const path = `/api/optimize/${encodeURIComponent(jobId)}`;
 
-  const cancel = await http.post(`${path}/cancel`, CLEANUP_BOUNDS.cancelRequest);
+  // TRANSPORT SAFETY. Every injected call is wrapped, because a timeout or socket
+  // rejection used to propagate out of this helper — which meant the hook never
+  // reached the line that builds and attaches the diagnostic, and an already-failed
+  // primary test could be replaced by an unstructured cleanup throw. A rejection is
+  // now just another named failure in the outcome.
+  type Attempt = { ok: true; status: number; body: string } | { ok: false; error: string };
+  const attempt = async (
+    label: string,
+    call: () => Promise<{ status: number; body: string }>,
+  ): Promise<Attempt> => {
+    try {
+      return { ok: true, ...(await call()) };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      steps.push(`${label} -> transport error`);
+      failures.push(`${label} request failed at the transport level: ${message}`);
+      return { ok: false, error: message };
+    }
+  };
+
+  const cancelAttempt = await attempt("cancel", () =>
+    http.post(`${path}/cancel`, CLEANUP_BOUNDS.cancelRequest),
+  );
+  if (!cancelAttempt.ok) return { ok: false, steps, failures };
+  const cancel = cancelAttempt;
   steps.push(`cancel -> ${cancel.status}`);
   if (!CLEANUP_ACCEPTED_STATUS.cancel.includes(cancel.status)) {
     failures.push(
@@ -449,7 +533,11 @@ export async function releaseLiveJob(jobId: string, http: CleanupHttp): Promise<
   let lastStatus = 0;
   let lastBody = "";
   while (http.now() <= deadline) {
-    const state = await http.get(path, CLEANUP_BOUNDS.statusRequest);
+    const stateAttempt = await attempt("status poll", () =>
+      http.get(path, CLEANUP_BOUNDS.statusRequest),
+    );
+    if (!stateAttempt.ok) return { ok: false, steps, failures };
+    const state = stateAttempt;
     lastStatus = state.status;
     lastBody = state.body;
     if (state.status === 404) {
@@ -477,7 +565,11 @@ export async function releaseLiveJob(jobId: string, http: CleanupHttp): Promise<
   }
   steps.push("reached terminal");
 
-  const deleted = await http.delete(path, CLEANUP_BOUNDS.deleteRequest);
+  const deleteAttempt = await attempt("delete", () =>
+    http.delete(path, CLEANUP_BOUNDS.deleteRequest),
+  );
+  if (!deleteAttempt.ok) return { ok: false, steps, failures };
+  const deleted = deleteAttempt;
   steps.push(`delete -> ${deleted.status}`);
   if (!CLEANUP_ACCEPTED_STATUS.delete.includes(deleted.status)) {
     failures.push(
@@ -486,6 +578,31 @@ export async function releaseLiveJob(jobId: string, http: CleanupHttp): Promise<
     return { ok: false, steps, failures };
   }
   return { ok: true, steps, failures };
+}
+
+/**
+ * Release EVERY accepted job, deterministically and in the order they were
+ * accepted. A test may observe more than one accepted submission (a resubmit path,
+ * or a retry the product performs); arming only the first and then throwing would
+ * leave the rest orphaned, which is the contamination class this exists to close.
+ * Every job is attempted even if an earlier one fails, so one bad release cannot
+ * hide the others.
+ */
+export async function releaseLiveJobs(
+  jobIds: readonly string[],
+  http: CleanupHttp,
+): Promise<CleanupOutcome> {
+  if (jobIds.length === 0) {
+    return { ok: true, steps: ["no accepted job was armed; nothing to release"], failures: [] };
+  }
+  const steps: string[] = [];
+  const failures: string[] = [];
+  for (const jobId of jobIds) {
+    const outcome = await releaseLiveJob(jobId, http);
+    steps.push(`job ${jobId}: ${outcome.steps.join(" | ")}`);
+    for (const failure of outcome.failures) failures.push(`job ${jobId}: ${failure}`);
+  }
+  return { ok: failures.length === 0, steps, failures };
 }
 
 /** Wire version prefix of the public event cursor (`CURSOR_VERSION`). */

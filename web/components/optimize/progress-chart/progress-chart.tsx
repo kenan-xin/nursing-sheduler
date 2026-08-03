@@ -769,7 +769,13 @@ export function ProgressChart({ points, isActive = false, className }: ProgressC
             </Button>
           );
         })}
-        <span className="ml-auto text-label text-ink3" aria-hidden="true">
+        {/* Counts, so the mono data face (DESIGN.md §3: "IDs, counts, hours and
+            solver expressions — so a number always reads as data"). */}
+        <span
+          data-testid="progress-chart-point-count"
+          className="ml-auto font-mono text-label text-ink3"
+          aria-hidden="true"
+        >
           {visiblePointCount} of {points.length} points
         </span>
       </footer>
@@ -1081,7 +1087,12 @@ function ProgressTooltip({ point, style }: ProgressTooltipProps) {
             <span>Comments</span>
             <span className="sr-only">:</span>
           </dt>
-          <dd className="font-semibold tabular-nums" style={{ color: COMMENT_TEXT_VAR }}>
+          {/* A comment COUNT — mono per DESIGN.md §3, like the point counts above. */}
+          <dd
+            data-testid="progress-chart-tooltip-comments"
+            className="font-mono font-semibold tabular-nums"
+            style={{ color: COMMENT_TEXT_VAR }}
+          >
             {commentText}
           </dd>
         </div>
