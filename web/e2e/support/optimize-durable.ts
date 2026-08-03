@@ -98,12 +98,28 @@ export function normalizeExpectedOrigin(origin: string | null | undefined): stri
 /**
  * Parse one recorded events-request URL against the exact canonical contract.
  *
- * Accepts a root-relative string (what the client passes) or an absolute URL
- * (what a `Request` object exposes). Rejects a query string or hash, because the
- * client never sends either; rejects any suffix, extra segment, or legacy path;
- * and rejects a non-canonical percent-encoding of the job segment by requiring
+ * Accepts exactly two RAW spellings and nothing else:
+ *
+ *   1. the canonical root-relative form the client emits, and
+ *   2. the canonical same-origin absolute form a `Request` object exposes.
+ *
+ * The raw string is validated BEFORE any `URL` normalization, because WHATWG
+ * parsing silently rewrites the very spellings this contract exists to reject.
+ * Normalizing first made all four of these same-origin aliases green:
+ *
+ *   api/optimize/job-A/events                   (path-relative, no leading slash)
+ *   //localhost:51236/api/optimize/job-A/events  (protocol-relative)
+ *   /api/optimize/old/../job-A/events            (dot-segment alias)
+ *   "  /api/optimize/job-A/events  "             (whitespace alias)
+ *
+ * `URL` erased each one into the canonical pathname before the exact path check
+ * ever ran, so a real client-side URL regression could still reach the same server
+ * route while this gate stayed green.
+ *
+ * Also rejects a non-canonical percent-encoding of the job segment by requiring
  * `encodeURIComponent(decodeURIComponent(seg)) === seg` — the same
- * canonical-spelling discipline the cursor codec applies.
+ * canonical-spelling discipline the cursor codec applies. `URL` is still used, but
+ * only for the ORIGIN comparison, and only after the raw form has been accepted.
  */
 export function parseEventsRequestUrl(url: string, expectedOrigin: string | null): EventsUrlParse {
   const fail = (reason: string): EventsUrlParse => ({ ok: false, url, reason });
@@ -116,32 +132,52 @@ export function parseEventsRequestUrl(url: string, expectedOrigin: string | null
     return fail(`no valid expected origin was captured (got ${String(expectedOrigin)})`);
   }
 
+  // ---- RAW-FORM VALIDATION, before any normalization ----------------------
+  if (url !== url.trim()) return fail("leading or trailing whitespace is not canonical");
+  if (/\s/.test(url)) return fail("whitespace inside the URL is not canonical");
+  if (url.includes("\\")) return fail("backslashes are not canonical");
+  if (url.includes("?")) return fail("query string is not part of the contract");
+  if (url.includes("#")) return fail("hash is not part of the contract");
+
+  let rawPath: string;
+  if (url.startsWith("//")) {
+    // Protocol-relative. Normalization would resolve it onto the base scheme and,
+    // for a same-origin host, produce an indistinguishable result.
+    return fail("protocol-relative URLs are not part of the contract");
+  } else if (url.startsWith("/")) {
+    rawPath = url;
+  } else if (/^https?:\/\//.test(url)) {
+    // Absolute same-origin `Request` form. Take the raw path verbatim from after
+    // the authority, so the path is judged as written rather than as normalized.
+    const authorityEnd = url.indexOf("/", url.indexOf("://") + 3);
+    if (authorityEnd === -1) return fail("absolute URL has no path");
+    rawPath = url.slice(authorityEnd);
+  } else if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(url)) {
+    return fail("only http(s) URLs are part of the contract");
+  } else {
+    return fail("path-relative URLs are not part of the contract");
+  }
+
+  // The raw path must match the canonical shape exactly. This is what rejects dot
+  // segments, empty segments, suffixes and extra segments as WRITTEN rather than as
+  // normalized: `/api/optimize/old/../job-A/events` has five raw segments here.
+  const matched = EVENTS_PATH_PATTERN.exec(rawPath);
+  if (matched === null) {
+    return fail(`raw path does not match /api/optimize/<jobId>/events: ${rawPath}`);
+  }
+
+  // ---- ORIGIN COMPARISON, only now, and only for the origin ---------------
   let parsed: URL;
   try {
-    // The expected origin IS the base. A root-relative URL therefore resolves onto
-    // it and always matches; a protocol-relative `//host/…` resolves onto the
-    // base's SCHEME but keeps its own foreign host, so it fails the origin compare
-    // below rather than sneaking through as "relative".
     parsed = new URL(url, origin);
   } catch {
     return fail("unparseable URL");
   }
-
   if (parsed.username.length > 0 || parsed.password.length > 0) {
     return fail("credentials are not part of the contract");
   }
   if (parsed.origin !== origin) {
     return fail(`origin ${parsed.origin} is not the page origin ${origin}`);
-  }
-
-  if (parsed.search.length > 0) {
-    return fail(`query string is not part of the contract: ${parsed.search}`);
-  }
-  if (parsed.hash.length > 0) return fail(`hash is not part of the contract: ${parsed.hash}`);
-
-  const matched = EVENTS_PATH_PATTERN.exec(parsed.pathname);
-  if (matched === null) {
-    return fail(`path does not match /api/optimize/<jobId>/events: ${parsed.pathname}`);
   }
 
   const segment = matched[1];
@@ -378,6 +414,48 @@ export const TINY_TEST_TIMEOUT = Object.values(TINY_BOUNDS).reduce(
   0,
 );
 
+/**
+ * EVERY sequential bound on the ISOLATED ABORT test's positive path.
+ *
+ * The third instance of the same incomplete-budget class. That test had no
+ * `test.setTimeout` and the assembled config declares no suite timeout, so
+ * Playwright's 30s default governed a schedule whose own local bounds already
+ * summed past 137s — and its submit click had no explicit action timeout at all,
+ * where the default is 0 (bounded only by the total).
+ *
+ * `abortUrlSettle` is the 30s window the round-4 investigation established: under
+ * host saturation the main-frame URL lags a COMMITTED navigation, and that window
+ * is what makes the wait bounded rather than a weaker claim.
+ */
+export const ABORT_BOUNDS = {
+  injectObservationScript: REPLAY_BOUNDS.injectObservationScript,
+  injectFixtureYaml: REPLAY_BOUNDS.injectFixtureYaml,
+  fixtureSetup: GOTO_FIXTURE_BOUNDS_TOTAL,
+  /** Explicit: the default action timeout is 0, i.e. bounded only by the total. */
+  submitClick: 5_000,
+  firstResponsePoll: 15_000,
+  /** One standalone `readSseObs` backing the first-response poll's final read. */
+  observationEvaluates: OBSERVATION_EVALUATE_BOUND,
+  /** The intentional navigate-away, explicit at the callsite. */
+  abortNavigation: 30_000,
+  /** Main-frame URL settle after a committed navigation. */
+  abortUrlSettle: 30_000,
+  /** The tail wait that lets the BFF observe and log the upstream cancel. */
+  bffObservationTail: 2_000,
+  schedulerAllowance: 8_000,
+} as const;
+
+/** The exact key set of `ABORT_BOUNDS`, pinned so an omission fails loudly. */
+export const ABORT_BOUND_KEYS = Object.keys(ABORT_BOUNDS) as ReadonlyArray<
+  keyof typeof ABORT_BOUNDS
+>;
+
+/** 5 + 5 + 50 + 5 + 15 + 5 + 30 + 30 + 2 + 8 = 155s. */
+export const ABORT_TEST_TIMEOUT = Object.values(ABORT_BOUNDS).reduce(
+  (total, bound) => total + bound,
+  0,
+);
+
 /** The exact key set of `REPLAY_BOUNDS`, pinned so an omission fails loudly. */
 export const REPLAY_BOUND_KEYS = Object.keys(REPLAY_BOUNDS) as ReadonlyArray<
   keyof typeof REPLAY_BOUNDS
@@ -578,6 +656,183 @@ export async function releaseLiveJob(jobId: string, http: CleanupHttp): Promise<
     return { ok: false, steps, failures };
   }
   return { ok: true, steps, failures };
+}
+
+// ===========================================================================
+// Node-side accepted-job ownership tracker
+// ===========================================================================
+//
+// Ownership USED to be assigned from inside an `expect.poll` callback. That is the
+// right seam on a successful callback, but Playwright races the callback against
+// the poll deadline without cancelling or awaiting the loser, so a callback could
+// observe and arm an accepted 202 AFTER the failed test had entered `afterEach` and
+// after the hook had already copied an empty array. A read-only probe of the
+// installed runtime showed exactly that: `hookSnapshot: []` at timeout, then
+// `armed: ["job-timeout-race"]` 121ms later. The late assignment orphaned that job
+// and leaked ownership into the next test.
+//
+// So ownership is no longer a test-body side effect at all. It is a Node-side
+// tracker registered BEFORE submit, fed by the response event, with an explicit
+// lifecycle: every body read it starts is recorded, and `drain()` awaits all of
+// them. The hook drains before it snapshots, so no ownership mutation can outlive
+// the snapshot. There is no second abandonable callback anywhere in the design.
+//
+// `AcceptedJobSource` is the tiny slice of `Page` this needs, so the lifecycle is
+// unit-testable without a browser.
+export interface AcceptedJobRequest {
+  method(): string;
+  url(): string;
+}
+
+export interface AcceptedJobResponse {
+  status(): number;
+  url(): string;
+  request(): AcceptedJobRequest;
+  json(): Promise<unknown>;
+}
+
+export interface AcceptedJobEvents {
+  response: AcceptedJobResponse;
+  request: AcceptedJobRequest;
+  requestfailed: AcceptedJobRequest;
+}
+
+export interface AcceptedJobSource {
+  on<K extends keyof AcceptedJobEvents>(
+    event: K,
+    handler: (arg: AcceptedJobEvents[K]) => void,
+  ): void;
+  off<K extends keyof AcceptedJobEvents>(
+    event: K,
+    handler: (arg: AcceptedJobEvents[K]) => void,
+  ): void;
+}
+
+/**
+ * How long `drain()` waits for a submission POST that is still IN FLIGHT to be
+ * answered before giving up on it.
+ *
+ * This exists because draining only the body reads was not enough: a test that times
+ * out while the POST is still on the wire would reach the hook with nothing recorded
+ * at all, and the response event would fire after the snapshot. The hook therefore
+ * waits for the request to land first, so the id is owned rather than missed.
+ */
+export const ACCEPTED_PENDING_SETTLE_MS = 5_000;
+
+export interface AcceptedJobTracker {
+  /** Every accepted job id, in acceptance order, deduplicated. */
+  ids(): string[];
+  /** Await every in-flight body read. The hook calls this BEFORE snapshotting. */
+  drain(): Promise<void>;
+  /** Stop listening. Safe to call more than once. */
+  dispose(): void;
+  /** Diagnostics for a report: reads started, reads failed, requests left pending. */
+  stats(): { started: number; failed: number; pending: number };
+}
+
+/** Whether a request is a submission POST to `/api/optimize`. */
+export function isSubmissionRequest(request: AcceptedJobRequest): boolean {
+  if (request.method().toUpperCase() !== "POST") return false;
+  const path = String(request.url()).split("?")[0];
+  return path === "/api/optimize" || path.endsWith("/api/optimize");
+}
+
+/** Whether a response is an accepted (202) submission POST to `/api/optimize`. */
+export function isAcceptedSubmission(response: AcceptedJobResponse): boolean {
+  if (response.status() !== 202) return false;
+  if (response.request().method().toUpperCase() !== "POST") return false;
+  const path = String(response.url()).split("?")[0];
+  return path === "/api/optimize" || path.endsWith("/api/optimize");
+}
+
+/**
+ * Track every accepted submission on the Node side. Register before submit; the
+ * hook drains and disposes.
+ */
+export function trackAcceptedJobs(
+  source: AcceptedJobSource,
+  options: { pendingSettleMs?: number; sleep?: (ms: number) => Promise<void> } = {},
+): AcceptedJobTracker {
+  const pendingSettleMs = options.pendingSettleMs ?? ACCEPTED_PENDING_SETTLE_MS;
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  // Slot-indexed by ACCEPTANCE order, not by body-read completion order. A nested or
+  // faster read must not reorder ownership, because release order is part of the
+  // determinism this promises.
+  const slots: Array<string | null> = [];
+  const inflight: Array<Promise<void>> = [];
+  let started = 0;
+  let failed = 0;
+  let pending = 0;
+  let disposed = false;
+
+  const onRequest = (request: AcceptedJobRequest): void => {
+    if (disposed) return;
+    if (isSubmissionRequest(request)) pending += 1;
+  };
+  const onRequestFailed = (request: AcceptedJobRequest): void => {
+    if (isSubmissionRequest(request) && pending > 0) pending -= 1;
+  };
+
+  const handler = (response: AcceptedJobResponse): void => {
+    if (disposed) return;
+    if (isSubmissionRequest(response.request()) && pending > 0) pending -= 1;
+    if (!isAcceptedSubmission(response)) return;
+    started += 1;
+    const slot = slots.length;
+    slots.push(null);
+    inflight.push(
+      response
+        .json()
+        .then((body) => {
+          const id = (body as { id?: unknown } | null)?.id;
+          if (typeof id === "string" && id.length > 0) slots[slot] = id;
+        })
+        .catch(() => {
+          // A body that cannot be read is recorded as a failed read rather than
+          // thrown: the hook must still be able to drain and report.
+          failed += 1;
+        }),
+    );
+  };
+
+  source.on("request", onRequest);
+  source.on("requestfailed", onRequestFailed);
+  source.on("response", handler);
+
+  return {
+    ids: () => {
+      const seen: string[] = [];
+      for (const id of slots) {
+        if (id !== null && !seen.includes(id)) seen.push(id);
+      }
+      return seen;
+    },
+    drain: async () => {
+      // 1. Wait, bounded, for a submission POST that is still on the wire. Without
+      //    this a test that times out mid-POST reaches the hook with nothing
+      //    recorded and the response fires after the snapshot.
+      const deadline = Date.now() + pendingSettleMs;
+      while (pending > 0 && Date.now() < deadline) {
+        await sleep(25);
+      }
+      // 2. Then drain the body reads. Repeatedly, because awaiting one batch can
+      //    allow another response's read to be registered, and the hook must not
+      //    snapshot until the set is quiet.
+      for (let pass = 0; pass < 5; pass += 1) {
+        const batch = inflight.splice(0, inflight.length);
+        if (batch.length === 0) break;
+        await Promise.allSettled(batch);
+      }
+    },
+    dispose: () => {
+      if (disposed) return;
+      disposed = true;
+      source.off("request", onRequest);
+      source.off("requestfailed", onRequestFailed);
+      source.off("response", handler);
+    },
+    stats: () => ({ started, failed, pending }),
+  };
 }
 
 /**

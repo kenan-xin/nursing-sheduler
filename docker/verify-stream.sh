@@ -396,15 +396,40 @@ else
   # URL assertion. This MUST fail even though Playwright context teardown may
   # still close the SSE request and emit an abort log. A passing control would
   # prove the browser assertion can false-green without the intended action.
+  #
+  # A nonzero exit is NOT sufficient, and used not to be checked any further. Every
+  # one of six audited runs went red via `Test timeout of 30000ms exceeded` — the
+  # lane's global cap, not the missing navigation — so the control was passing for an
+  # unrelated reason and would have kept "passing" even if the URL assertion had been
+  # deleted. It now has to fail for the INTENDED reason:
+  #
+  #   * the output must name the URL expectation (`toHaveURL`) and the `/about`
+  #     pattern the suppressed navigation was supposed to satisfy; and
+  #   * it must NOT carry Playwright's global per-test timeout signature.
+  NEG_LOG="$WORKDIR/negative-control.log"
   if (cd "$ROOT/web" && \
       ASSEMBLED_BASE_URL="$BASE" \
       ASSEMBLED_SKIP_ABORT_NAVIGATION=1 \
       CI=1 \
       pnpm exec playwright test --config playwright.assembled.config.ts \
-        --reporter=line --trace=off --grep "abort propagation" 2>&1); then
+        --reporter=line --trace=off --grep "abort propagation" >"$NEG_LOG" 2>&1); then
     bad "abort negative control unexpectedly passed without navigation"
   else
-    ok "abort negative control fails when the final navigation is removed"
+    NEG_HAS_URL_ASSERT=0
+    NEG_HAS_ABOUT=0
+    NEG_HAS_GLOBAL_TIMEOUT=0
+    grep -q 'toHaveURL' "$NEG_LOG" && NEG_HAS_URL_ASSERT=1
+    grep -qE '/about' "$NEG_LOG" && NEG_HAS_ABOUT=1
+    grep -qE 'Test timeout of [0-9]+ms exceeded' "$NEG_LOG" && NEG_HAS_GLOBAL_TIMEOUT=1
+    if [ "$NEG_HAS_GLOBAL_TIMEOUT" = 1 ]; then
+      bad "abort negative control went red via a GLOBAL test timeout, not the intended URL assertion"
+      echo "    (see $NEG_LOG)"
+    elif [ "$NEG_HAS_URL_ASSERT" = 1 ] && [ "$NEG_HAS_ABOUT" = 1 ]; then
+      ok "abort negative control fails on the intended /about URL assertion (no global timeout)"
+    else
+      bad "abort negative control failed for an unrecognised reason (no toHaveURL//about diagnostic)"
+      echo "    (see $NEG_LOG)"
+    fi
   fi
 
   # Baseline the BFF log count IMMEDIATELY after the negative control and before

@@ -20,6 +20,8 @@ import { expect, test, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
+  ABORT_BOUNDS,
+  ABORT_TEST_TIMEOUT,
   FIRST_BYTE_TIMEOUT,
   JUDGE_POLL_TIMEOUT,
   judgeEventsAuthority,
@@ -34,6 +36,8 @@ import {
   RESUMED_SCREEN_TIMEOUT,
   TINY_BOUNDS,
   TINY_TEST_TIMEOUT,
+  trackAcceptedJobs,
+  type AcceptedJobTracker,
 } from "./support/optimize-durable";
 
 const REPO_ROOT = resolve(__dirname, "../..");
@@ -46,13 +50,9 @@ const LARGE_YAML = readFileSync(
   "utf-8",
 );
 
-/**
- * How long the main-frame URL may take to settle after a COMMITTED navigation.
- * Explicit because the default 5s is what the historical `page.goto` symptom
- * actually tripped over under host saturation — see the abort test for the
- * evidence. Bounded, so a navigation that genuinely never lands still fails.
- */
-const ABORT_URL_SETTLE_TIMEOUT = 30_000;
+// The abort lane's URL-settle window now lives in `ABORT_BOUNDS.abortUrlSettle`,
+// alongside every other bound that lane spends, so its total is derived from the
+// same enumerated object as tiny's and replay's.
 const REPLAY_SNAPSHOT_KEY = "nurse.optimize.e2e-replay-snapshot";
 const OPTIMIZE_SESSION_KEY = "nurse.optimize.session";
 
@@ -497,13 +497,20 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
   // timeout produced 29/2 because the abort case could not mount within 5s
   // afterwards.
   //
-  // Both positive tests arm this — the tiny test as well as the replay test — and
-  // each arms it the instant an accepted job id first exists, BEFORE any fallible
-  // cardinality or authority assertion. An array, not a single id: if more than one
-  // submission is ever accepted, arming only the first and then throwing would
-  // orphan the rest.
+  // Ownership is a NODE-SIDE tracker registered before submit, not a test-body side
+  // effect. It used to be assigned from inside an `expect.poll` callback, which is
+  // the right seam on a successful callback — but Playwright races the callback
+  // against the poll deadline without cancelling or awaiting the loser, so a losing
+  // callback could arm an accepted 202 AFTER this hook had already copied an empty
+  // array. A probe of the installed runtime showed `hookSnapshot: []` at timeout and
+  // `armed: ["job-timeout-race"]` 121ms later: an orphaned job plus ownership state
+  // leaking into the next test.
   //
-  // The abort test is deliberately NOT armed: it is SUPPOSED to walk away from a
+  // The tracker's lifecycle is explicit and the hook DRAINS it before snapshotting,
+  // so no ownership mutation can outlive the snapshot, and there is no second
+  // abandonable callback anywhere in the design.
+  //
+  // The abort test is deliberately NOT tracked: it is SUPPOSED to walk away from a
   // live stream (that is the mechanism it proves), it is the last test in the file,
   // and the gate tears the stack down after it — so it is left alone rather than
   // risk perturbing the BFF log audit baselined around it.
@@ -511,10 +518,20 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
   // This runs in `afterEach` rather than a `finally` because Playwright abandons a
   // timed-out test body but still runs hooks, which is precisely the case this
   // exists for.
-  let liveJobsToRelease: string[] = [];
+  let acceptedTracker: AcceptedJobTracker | null = null;
   test.afterEach(async ({ request }, testInfo) => {
-    const jobIds = liveJobsToRelease;
-    liveJobsToRelease = [];
+    const tracker = acceptedTracker;
+    acceptedTracker = null;
+    // Drain BEFORE the snapshot: every in-flight body read must have landed, so a
+    // 202 that arrived at the deadline is owned rather than missed.
+    let trackerStats = { started: 0, failed: 0 };
+    let jobIds: string[] = [];
+    if (tracker !== null) {
+      await tracker.drain();
+      jobIds = tracker.ids();
+      trackerStats = tracker.stats();
+      tracker.dispose();
+    }
 
     // Cancel -> poll to terminal -> DELETE, asserting the documented status at each
     // step. The previous hook POSTed cancel and DELETEd immediately, checked no
@@ -543,6 +560,7 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
     // line is reachable on every path.
     const report = [
       `armed jobs: ${jobIds.length === 0 ? "(none)" : jobIds.join(", ")}`,
+      `tracker: ${trackerStats.started} accepted-response read(s), ${trackerStats.failed} unreadable`,
       ...outcome.steps,
       ...outcome.failures,
     ].join("\n");
@@ -572,28 +590,21 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
     await injectYaml(page, TINY_YAML);
     await gotoFixture(page);
 
-    await page.getByTestId("optimize-submit").click({ timeout: TINY_BOUNDS.submitClick });
-
-    // Arm cleanup ownership from the accepted POST, exactly as the replay test does.
+    // Register ownership BEFORE submit, on the Node side.
     //
     // On the SUCCESS path the product itself releases the job — the terminal
     // auto-chain DELETEs, which is what the slot-freed assertion below proves — so
-    // this hook then finds it already gone and takes the documented idempotent 404
+    // the hook then finds it already gone and takes the documented idempotent 404
     // branch. But a FAILURE between submission and that DELETE (a download that
     // never completes, say) would leave the slot occupied and the next lane would
-    // hit `submit-blocked`. That path is why ownership is armed rather than assumed
-    // away, and why arming happens INSIDE the poll callback — the instant an accepted
-    // id first exists, before the cardinality assertion, before the second poll,
-    // before any further evaluate.
+    // hit `submit-blocked`. Because the tracker is fed by the response event and
+    // drained by the hook, a 202 that lands at a poll deadline is still owned.
+    acceptedTracker = trackAcceptedJobs(page);
+
+    await page.getByTestId("optimize-submit").click({ timeout: TINY_BOUNDS.submitClick });
+
     await expect
-      .poll(
-        async () => {
-          const seen = (await readSseObs(page)).acceptedJobIds;
-          if (seen.length > 0) liveJobsToRelease = [...seen];
-          return seen.length;
-        },
-        { timeout: TINY_BOUNDS.acceptedIdPoll },
-      )
+      .poll(() => acceptedTracker?.ids().length ?? 0, { timeout: TINY_BOUNDS.acceptedIdPoll })
       .toBeGreaterThan(0);
 
     // Assert the browser observed the actual SSE response (not just that the
@@ -605,7 +616,11 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
       })
       .not.toBeNull();
     const obs1 = await readSseObs(page);
-    liveJobsToRelease = [...obs1.acceptedJobIds];
+    // The Node-side tracker and the in-page wrapper must agree on what was accepted.
+    // Two independent observations of the same 202, so a divergence is a real defect.
+    expect(acceptedTracker!.ids(), "the tracker agrees with the in-page record").toEqual(
+      obs1.acceptedJobIds,
+    );
     expect(obs1.acceptedJobIds, "exactly one submission was accepted").toHaveLength(1);
     expect(obs1.sseResponseAt).not.toBeNull();
     // And a first body byte arrived (the stream delivered content).
@@ -628,37 +643,33 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
   test("live job: SSE first byte, genuine keepalive, cursor persistence, strictly-after replay", async ({
     page,
   }) => {
-    // The ONE test with an explicit total budget, derived above from its own phase
-    // bounds. Not a blanket suite timeout, no retries, no sleeps, and no phase
-    // bound was relaxed to fit it.
+    // This test's own explicit total budget, derived in `REPLAY_BOUNDS` from every
+    // sequential bound below. Not a blanket suite timeout, no retries, no sleeps,
+    // and no phase bound was relaxed to fit it. (Tiny and the abort lane carry their
+    // own derived totals; this one governs only the replay lane.)
     test.setTimeout(REPLAY_TEST_TIMEOUT);
 
     await injectYaml(page, LARGE_YAML);
     await gotoFixture(page);
 
+    // ARM CLEANUP OWNERSHIP FIRST, on the Node side, before submit.
+    //
+    // Ownership was previously assigned from inside the poll callback, which loses
+    // the race at the deadline: Playwright abandons the losing callback, so it could
+    // arm after the hook had already snapshotted. The tracker is fed by the response
+    // event and drained by the hook instead, which removes the race rather than
+    // moving it.
+    acceptedTracker = trackAcceptedJobs(page);
+
     await page.getByTestId("optimize-submit").click({ timeout: REPLAY_BOUNDS.submitClick });
 
-    // ARM CLEANUP OWNERSHIP FIRST, from the accepted POST itself.
-    //
-    // Previously ownership was assigned only after first response, keepalive,
-    // freeze/reload and three authority assertions — so a failure anywhere in that
-    // window left `afterEach` with nothing to release and recreated the exact
-    // abandoned-solver contamination the hook exists to prevent. The observation
-    // wrapper records every 202-accepted submission id, which is the earliest
-    // moment a job exists to own. Arming is taken INSIDE the poll callback, so a
-    // failure at the cardinality assertion or any later seam still has an owner.
     await expect
-      .poll(
-        async () => {
-          const seen = (await readSseObs(page)).acceptedJobIds;
-          if (seen.length > 0) liveJobsToRelease = [...seen];
-          return seen.length;
-        },
-        { timeout: REPLAY_BOUNDS.acceptedJobIdPoll },
-      )
+      .poll(() => acceptedTracker?.ids().length ?? 0, {
+        timeout: REPLAY_BOUNDS.acceptedJobIdPoll,
+      })
       .toBeGreaterThan(0);
     const accepted = (await readSseObs(page)).acceptedJobIds;
-    liveJobsToRelease = [...accepted];
+    expect(acceptedTracker!.ids(), "the tracker agrees with the in-page record").toEqual(accepted);
     expect(accepted, "exactly one submission was accepted").toHaveLength(1);
 
     // Bounded first response: the browser observed the SSE response.
@@ -813,17 +824,27 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
   });
 
   test("abort propagation: browser disconnect cancels upstream SSE body", async ({ page }) => {
+    // This lane's own complete budget, derived in `ABORT_BOUNDS`. It had NO
+    // `test.setTimeout` and the assembled config declares no suite timeout, so
+    // Playwright's 30s default governed a schedule whose local bounds already summed
+    // past 137s — and the submit click below had no explicit action timeout, where the
+    // default is 0. That is the same incomplete-budget class already repaired for
+    // tiny and replay; this is the third and last instance of it.
+    test.setTimeout(ABORT_TEST_TIMEOUT);
+
     // ISOLATED from the replay test. The gate script baselines the BFF log
     // count IMMEDIATELY before this test and checks for a NEW entry after.
     // No reload, prior test, or curl disconnect can satisfy the audit.
     await injectYaml(page, LARGE_YAML);
     await gotoFixture(page);
 
-    await page.getByTestId("optimize-submit").click();
+    await page.getByTestId("optimize-submit").click({ timeout: ABORT_BOUNDS.submitClick });
 
     // Confirm the SSE stream is live before aborting.
     await expect
-      .poll(async () => (await readSseObs(page)).sseResponseAt, { timeout: FIRST_BYTE_TIMEOUT })
+      .poll(async () => (await readSseObs(page)).sseResponseAt, {
+        timeout: ABORT_BOUNDS.firstResponsePoll,
+      })
       .not.toBeNull();
 
     // The ONLY intentional navigate-away in the assembled suite. The gate first
@@ -844,7 +865,7 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
     // recurrence names its own mechanism instead of only reporting a stale URL.
     // The assertions below are unchanged in strength.
     if (process.env.ASSEMBLED_SKIP_ABORT_NAVIGATION !== "1") {
-      const response = await page.goto("/about");
+      const response = await page.goto("/about", { timeout: ABORT_BOUNDS.abortNavigation });
       expect(
         response,
         "page.goto must return a committed navigation response for /about",
@@ -862,7 +883,8 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
     // The repair is therefore a bounded wait, not a weaker claim: the assertion is
     // unchanged and still requires the URL to become `/about`; only the settling
     // window is now explicit instead of an implicit 5s default.
-    await expect(page).toHaveURL(/\/about$/, { timeout: ABORT_URL_SETTLE_TIMEOUT });
-    await page.waitForTimeout(2_000);
+    await expect(page).toHaveURL(/\/about$/, { timeout: ABORT_BOUNDS.abortUrlSettle });
+    // Let the BFF observe and log the upstream cancel before the gate reads its logs.
+    await page.waitForTimeout(ABORT_BOUNDS.bffObservationTail);
   });
 });

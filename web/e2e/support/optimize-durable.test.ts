@@ -10,8 +10,14 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  ABORT_BOUND_KEYS,
+  ABORT_BOUNDS,
+  ABORT_TEST_TIMEOUT,
   CLEANUP_ACCEPTED_STATUS,
   CLEANUP_BOUNDS,
+  isAcceptedSubmission,
+  isSubmissionRequest,
+  trackAcceptedJobs,
   CURSOR_VERSION,
   decodePublicCursor,
   isTerminalJobBody,
@@ -368,6 +374,289 @@ describe("releaseLiveJob converges on terminal before deleting", () => {
   });
 });
 
+// P2-2. Ownership must not be able to arrive after the hook snapshots. The tracker
+// is a Node-side lifecycle: registered before submit, fed by the response event,
+// DRAINED by the hook before it reads `ids()`.
+describe("trackAcceptedJobs owns every accepted 202 and cannot outlive the drain", () => {
+  interface FakeResponse {
+    status(): number;
+    url(): string;
+    request(): { method(): string; url(): string };
+    json(): Promise<unknown>;
+  }
+
+  function fakeSource() {
+    const handlers = new Map<string, (arg: never) => void>();
+    let offCalls = 0;
+    return {
+      offCalls: () => offCalls,
+      source: {
+        on: (event: string, h: (arg: never) => void) => {
+          handlers.set(event, h);
+        },
+        off: (event: string, _h: (arg: never) => void) => {
+          offCalls += 1;
+          handlers.delete(event);
+        },
+      } as unknown as Parameters<typeof trackAcceptedJobs>[0],
+      emit: (r: FakeResponse) =>
+        (handlers.get("response") as ((x: FakeResponse) => void) | undefined)?.(r),
+      emitRequest: (req: { method(): string; url(): string }) =>
+        (handlers.get("request") as ((x: typeof req) => void) | undefined)?.(req),
+      emitRequestFailed: (req: { method(): string; url(): string }) =>
+        (handlers.get("requestfailed") as ((x: typeof req) => void) | undefined)?.(req),
+      isRegistered: () => handlers.has("response"),
+    };
+  }
+
+  const submissionRequest = { method: () => "POST", url: () => "/api/optimize" };
+
+  const accepted = (id: string, over: Partial<FakeResponse> = {}): FakeResponse => ({
+    status: () => 202,
+    url: () => "/api/optimize",
+    request: () => ({ method: () => "POST", url: () => "/api/optimize" }),
+    json: async () => ({ id }),
+    ...over,
+  });
+
+  it("records an accepted submission and exposes it after drain", async () => {
+    const { source, emit } = fakeSource();
+    const tracker = trackAcceptedJobs(source);
+    emit(accepted("job-a"));
+    await tracker.drain();
+    expect(tracker.ids()).toEqual(["job-a"]);
+    expect(tracker.stats()).toEqual({ started: 1, failed: 0, pending: 0 });
+  });
+
+  // The exact race: the id lands while the test is already failing. Draining before
+  // the snapshot is what makes it owned instead of orphaned.
+  it("owns an id whose body read is still in flight when the hook drains", async () => {
+    const { source, emit } = fakeSource();
+    const tracker = trackAcceptedJobs(source);
+    let release: (v: unknown) => void = () => {};
+    emit(
+      accepted("job-timeout-race", {
+        json: () =>
+          new Promise((resolve) => (release = resolve)).then(() => ({ id: "job-timeout-race" })),
+      }),
+    );
+    // Before the drain the id is not visible yet — exactly the window that used to
+    // produce `hookSnapshot: []`.
+    expect(tracker.ids()).toEqual([]);
+    release(null);
+    await tracker.drain();
+    expect(tracker.ids()).toEqual(["job-timeout-race"]);
+  });
+
+  it("drains a read that registers another read, so the set is quiet at snapshot", async () => {
+    const { source, emit } = fakeSource();
+    const tracker = trackAcceptedJobs(source);
+    emit(
+      accepted("first", {
+        json: async () => {
+          emit(accepted("second"));
+          return { id: "first" };
+        },
+      }),
+    );
+    await tracker.drain();
+    // ACCEPTANCE order, not read-completion order: the nested read resolves first,
+    // but ownership order is what release determinism depends on.
+    expect(tracker.ids()).toEqual(["first", "second"]);
+  });
+
+  it("records every accepted id, deduplicated, in acceptance order", async () => {
+    const { source, emit } = fakeSource();
+    const tracker = trackAcceptedJobs(source);
+    emit(accepted("a"));
+    emit(accepted("b"));
+    emit(accepted("a"));
+    await tracker.drain();
+    expect(tracker.ids()).toEqual(["a", "b"]);
+  });
+
+  it("counts an unreadable body as a failed read instead of throwing", async () => {
+    const { source, emit } = fakeSource();
+    const tracker = trackAcceptedJobs(source);
+    emit(accepted("x", { json: async () => Promise.reject(new Error("body gone")) }));
+    await expect(tracker.drain()).resolves.toBeUndefined();
+    expect(tracker.ids()).toEqual([]);
+    expect(tracker.stats()).toEqual({ started: 1, failed: 1, pending: 0 });
+  });
+
+  it.each([
+    ["a non-202 status", accepted("x", { status: () => 200 })],
+    [
+      "a non-POST method",
+      accepted("x", { request: () => ({ method: () => "GET", url: () => "/api/optimize" }) }),
+    ],
+    ["a different route", accepted("x", { url: () => "/api/optimize/abc/events" })],
+    ["a missing id", accepted("x", { json: async () => ({}) })],
+    ["an empty id", accepted("x", { json: async () => ({ id: "" }) })],
+  ])("ignores %s", async (_label, response) => {
+    const { source, emit } = fakeSource();
+    const tracker = trackAcceptedJobs(source);
+    emit(response);
+    await tracker.drain();
+    expect(tracker.ids()).toEqual([]);
+  });
+
+  it("accepts the absolute submission URL a Request exposes", async () => {
+    const { source, emit } = fakeSource();
+    const tracker = trackAcceptedJobs(source);
+    emit(accepted("abs", { url: () => `${ORIGIN}/api/optimize` }));
+    await tracker.drain();
+    expect(tracker.ids()).toEqual(["abs"]);
+  });
+
+  it("stops recording once disposed, and disposing twice is safe", async () => {
+    const { source, emit, isRegistered, offCalls } = fakeSource();
+    const tracker = trackAcceptedJobs(source);
+    tracker.dispose();
+    tracker.dispose();
+    expect(offCalls()).toBe(3);
+    expect(isRegistered()).toBe(false);
+    emit(accepted("after-dispose"));
+    await tracker.drain();
+    expect(tracker.ids()).toEqual([]);
+  });
+
+  // THE HARDEST CASE, and the one that made the request channel necessary: the test
+  // times out while the POST is still on the wire, so at hook time NOTHING is
+  // recorded yet. `drain()` waits for the in-flight request before snapshotting.
+  it("waits for a submission still ON THE WIRE before the snapshot", async () => {
+    const { source, emit, emitRequest } = fakeSource();
+    const tracker = trackAcceptedJobs(source, { pendingSettleMs: 1_000 });
+    emitRequest(submissionRequest);
+    expect(tracker.stats().pending).toBe(1);
+    // The response lands only after the drain has started waiting.
+    setTimeout(() => emit(accepted("job-on-the-wire")), 20);
+    await tracker.drain();
+    expect(tracker.ids()).toEqual(["job-on-the-wire"]);
+    expect(tracker.stats().pending).toBe(0);
+  });
+
+  it("gives up on a pending submission at its bound instead of hanging", async () => {
+    const { source, emitRequest } = fakeSource();
+    const tracker = trackAcceptedJobs(source, { pendingSettleMs: 60 });
+    emitRequest(submissionRequest);
+    const started = Date.now();
+    await tracker.drain();
+    // Bounded: it returns rather than waiting forever for a response that never came.
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(tracker.ids()).toEqual([]);
+    expect(tracker.stats().pending).toBe(1);
+  });
+
+  it("clears a pending submission that fails at the transport level", async () => {
+    const { source, emitRequest, emitRequestFailed } = fakeSource();
+    const tracker = trackAcceptedJobs(source, { pendingSettleMs: 1_000 });
+    emitRequest(submissionRequest);
+    emitRequestFailed(submissionRequest);
+    expect(tracker.stats().pending).toBe(0);
+    await tracker.drain();
+    expect(tracker.ids()).toEqual([]);
+  });
+
+  it("ignores non-submission requests on the pending channel", () => {
+    const { source, emitRequest } = fakeSource();
+    const tracker = trackAcceptedJobs(source, { pendingSettleMs: 10 });
+    emitRequest({ method: () => "GET", url: () => "/api/optimize" });
+    emitRequest({ method: () => "POST", url: () => "/api/optimizer" });
+    expect(tracker.stats().pending).toBe(0);
+  });
+
+  it("classifies a submission request exactly", () => {
+    expect(isSubmissionRequest(submissionRequest)).toBe(true);
+    expect(isSubmissionRequest({ method: () => "post", url: () => `${ORIGIN}/api/optimize` })).toBe(
+      true,
+    );
+    expect(isSubmissionRequest({ method: () => "GET", url: () => "/api/optimize" })).toBe(false);
+    expect(isSubmissionRequest({ method: () => "POST", url: () => "/api/optimizer" })).toBe(false);
+  });
+
+  it("classifies a submission response exactly", () => {
+    expect(isAcceptedSubmission(accepted("a"))).toBe(true);
+    expect(isAcceptedSubmission(accepted("a", { url: () => "/api/optimize?x=1" }))).toBe(true);
+    expect(isAcceptedSubmission(accepted("a", { status: () => 400 }))).toBe(false);
+    expect(isAcceptedSubmission(accepted("a", { url: () => "/api/optimizer" }))).toBe(false);
+  });
+});
+
+// P2-3. The abort lane's own complete budget, the third instance of the class.
+describe("the abort lane's total budget enumerates EVERY sequential bound", () => {
+  const EXPECTED_KEYS = [
+    "injectObservationScript",
+    "injectFixtureYaml",
+    "fixtureSetup",
+    "submitClick",
+    "firstResponsePoll",
+    "observationEvaluates",
+    "abortNavigation",
+    "abortUrlSettle",
+    "bffObservationTail",
+    "schedulerAllowance",
+  ];
+
+  it("enumerates exactly the expected bounds, in order", () => {
+    expect([...ABORT_BOUND_KEYS]).toEqual(EXPECTED_KEYS);
+  });
+
+  it("totals the sum of every enumerated bound and nothing else", () => {
+    const manual = EXPECTED_KEYS.reduce(
+      (total, key) => total + ABORT_BOUNDS[key as keyof typeof ABORT_BOUNDS],
+      0,
+    );
+    expect(ABORT_TEST_TIMEOUT).toBe(manual);
+    // 5 + 5 init + 50 fixture + 5 submit + 15 first response + 5 observation
+    // + 30 navigation + 30 URL settle + 2 BFF tail + 8 scheduler = 155s.
+    expect(ABORT_TEST_TIMEOUT).toBe(155_000);
+  });
+
+  it("every bound is a positive finite number", () => {
+    for (const key of ABORT_BOUND_KEYS) {
+      const value = ABORT_BOUNDS[key];
+      expect(Number.isFinite(value), key).toBe(true);
+      expect(value, key).toBeGreaterThan(0);
+    }
+  });
+
+  it("proves the default per-test budget was insufficient BY CONSTRUCTION", () => {
+    // The review's enumeration reached >=137s of local bounds under a 30s default.
+    const knownSequential =
+      ABORT_BOUNDS.injectObservationScript +
+      ABORT_BOUNDS.injectFixtureYaml +
+      ABORT_BOUNDS.fixtureSetup +
+      ABORT_BOUNDS.firstResponsePoll +
+      ABORT_BOUNDS.abortNavigation +
+      ABORT_BOUNDS.abortUrlSettle +
+      ABORT_BOUNDS.bffObservationTail;
+    expect(knownSequential).toBeGreaterThanOrEqual(137_000);
+    expect(PLAYWRIGHT_DEFAULT_TEST_TIMEOUT).toBeLessThan(knownSequential);
+  });
+
+  it("bounds the submit click, whose action default is 0", () => {
+    expect(ABORT_BOUNDS.submitClick).toBeGreaterThan(0);
+  });
+
+  it("reuses the shared init and fixture bounds rather than restating them", () => {
+    expect(ABORT_BOUNDS.injectObservationScript).toBe(REPLAY_BOUNDS.injectObservationScript);
+    expect(ABORT_BOUNDS.injectFixtureYaml).toBe(REPLAY_BOUNDS.injectFixtureYaml);
+    expect(ABORT_BOUNDS.fixtureSetup).toBe(GOTO_FIXTURE_BOUNDS_TOTAL);
+  });
+
+  it("stays meaningfully inside the product's own solve limit", () => {
+    expect(ABORT_TEST_TIMEOUT).toBeLessThan(PRODUCT_SOLVE_LIMIT);
+    expect(PRODUCT_SOLVE_LIMIT - ABORT_TEST_TIMEOUT).toBeGreaterThanOrEqual(60_000);
+  });
+
+  it("keeps all three lane caps independent and bounded", () => {
+    const caps = [TINY_TEST_TIMEOUT, REPLAY_TEST_TIMEOUT, ABORT_TEST_TIMEOUT];
+    expect(new Set(caps).size).toBe(3);
+    for (const cap of caps) expect(cap).toBeLessThan(PRODUCT_SOLVE_LIMIT);
+  });
+});
+
 // P2-2's derivation, asserted rather than asserted-in-a-comment. The point is not
 // that 120s is a nice number — it is that the sum of the test's OWN phase bounds
 // already exceeds the default budget, so the default could never have covered a run
@@ -639,7 +928,6 @@ describe("parseEventsRequestUrl enforces the exact canonical events path AND ori
   const ORIGIN_REJECTED: Array<[string, string, string | null]> = [
     ["a foreign absolute https host", `https://foreign.example/api/optimize/${JOB}/events`, ORIGIN],
     ["a foreign absolute http host", `http://foreign.example/api/optimize/${JOB}/events`, ORIGIN],
-    ["a protocol-relative foreign host", `//foreign.example/api/optimize/${JOB}/events`, ORIGIN],
     ["a foreign port on the right host", `http://localhost:9/api/optimize/${JOB}/events`, ORIGIN],
     [
       "a foreign scheme on the right host",
@@ -652,6 +940,49 @@ describe("parseEventsRequestUrl enforces the exact canonical events path AND ori
     const parsed = parseEventsRequestUrl(url, origin);
     expect(parsed.ok).toBe(false);
     if (!parsed.ok) expect(parsed.reason).toMatch(/is not the page origin/);
+  });
+
+  // THE FINDING THIS ROUND CLOSED. `new URL()` normalizes each of these
+  // SAME-ORIGIN raw spellings into the canonical pathname, so validating after
+  // normalization made all four green. The raw form is now judged first.
+  const SAME_ORIGIN_ALIASES: Array<[string, string, RegExp]> = [
+    [
+      "a path-relative URL with no leading slash",
+      `api/optimize/${JOB}/events`,
+      /path-relative URLs are not part/,
+    ],
+    [
+      "a same-origin protocol-relative URL",
+      `//localhost:51236/api/optimize/${JOB}/events`,
+      /protocol-relative URLs are not part/,
+    ],
+    ["a dot-segment alias", `/api/optimize/old/../${JOB}/events`, /raw path does not match/],
+    [
+      "a leading/trailing whitespace alias",
+      `  /api/optimize/${JOB}/events  `,
+      /leading or trailing whitespace/,
+    ],
+    ["an inner-whitespace alias", `/api/optimize/${JOB}/ events`, /whitespace inside the URL/],
+    ["a backslash alias", `\\api\\optimize\\${JOB}\\events`, /backslashes are not canonical/],
+    [
+      "a dot-segment alias inside an absolute same-origin URL",
+      `${ORIGIN}/api/optimize/old/../${JOB}/events`,
+      /raw path does not match/,
+    ],
+    ["a same-origin absolute URL with no path", ORIGIN, /absolute URL has no path/],
+    ["a non-http scheme", `ftp://localhost:51236/api/optimize/${JOB}/events`, /only http\(s\)/],
+  ];
+
+  it.each(SAME_ORIGIN_ALIASES)("rejects %s", (_label, url, reason) => {
+    const parsed = parseEventsRequestUrl(url, ORIGIN);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.reason).toMatch(reason);
+  });
+
+  it("rejects a protocol-relative FOREIGN host before it can be normalized", () => {
+    const parsed = parseEventsRequestUrl(`//foreign.example/api/optimize/${JOB}/events`, ORIGIN);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.reason).toMatch(/protocol-relative URLs are not part/);
   });
 
   it("rejects credentials embedded in an otherwise correct URL", () => {
@@ -690,9 +1021,9 @@ describe("parseEventsRequestUrl enforces the exact canonical events path AND ori
     ["an empty job segment", "/api/optimize//events", /does not match/],
     ["a query string", `/api/optimize/${JOB}/events?after=1`, /query string is not part/],
     ["a hash", `/api/optimize/${JOB}/events#frag`, /hash is not part/],
-    // Resolves against the page origin as `/events`, so it fails on the path rather
-    // than on parsing — still red, with a more precise reason than before.
-    ["a bare word", "events", /does not match/],
+    // A bare word has no leading slash and no scheme, so it is rejected as
+    // path-relative before any normalization can rewrite it.
+    ["a bare word", "events", /path-relative URLs are not part/],
     ["an empty string", "", /empty URL/],
     [
       "a non-canonical encoding of a plain id",
@@ -736,7 +1067,7 @@ describe("judgeEventsAuthority fails closed and never discards evidence", () => 
     );
     expect(verdict.ok).toBe(false);
     expect(verdict.failures).toHaveLength(1);
-    expect(verdict.failures[0]).toMatch(/events URL rejected \(path does not match/);
+    expect(verdict.failures[0]).toMatch(/events URL rejected \(raw path does not match/);
   });
 
   it("rejects canonical + suffix", () => {
@@ -785,7 +1116,25 @@ describe("judgeEventsAuthority fails closed and never discards evidence", () => 
       ORIGIN,
     );
     expect(verdict.ok).toBe(false);
-    expect(verdict.failures[0]).toMatch(/is not the page origin/);
+    expect(verdict.failures[0]).toMatch(/protocol-relative URLs are not part/);
+  });
+
+  // MIXED captures: one canonical URL alongside each same-origin alias. The judge
+  // must fail closed on the alias rather than being satisfied by its canonical
+  // neighbour, which is how a partial client regression would present.
+  it.each([
+    ["path-relative", `api/optimize/${JOB}/events`],
+    ["protocol-relative", `//localhost:51236/api/optimize/${JOB}/events`],
+    ["dot-segment", `/api/optimize/old/../${JOB}/events`],
+    ["whitespace", `  /api/optimize/${JOB}/events  `],
+    ["backslash", `\\api\\optimize\\${JOB}\\events`],
+  ])("rejects canonical + a same-origin %s alias", (_label, alias) => {
+    const verdict = judgeEventsAuthority([`/api/optimize/${JOB}/events`, alias], JOB, ORIGIN);
+    expect(verdict.ok).toBe(false);
+    expect(verdict.failures).toHaveLength(1);
+    expect(verdict.failures[0]).toMatch(/^events URL rejected \(/);
+    // The canonical neighbour is still reported, so the diagnostic shows both.
+    expect(verdict.jobIds).toEqual([JOB]);
   });
 
   it("fails closed with no expected ORIGIN to compare against", () => {
