@@ -48,6 +48,126 @@ import type { JobResponse, JobState, OptimizationOutcome } from "@/lib/bff/types
 // oracle to a storage detail it must not own.
 
 // ===========================================================================
+// Exact canonical events-request URL contract
+// ===========================================================================
+//
+// The client builds exactly one shape (`lib/query/optimize.ts:345`):
+//
+//     /api/optimize/${encodeURIComponent(jobId)}/events
+//
+// Root-relative, one path segment for the job, no query and no hash. So the
+// contract below is ANCHORED to precisely that and nothing else. The previous
+// unanchored `/\/optimize\/([^/?#]+)\/events/` matched a legacy path's tail, a
+// suffixed path, and extra segments, and the caller then silently DISCARDED
+// whatever failed to match — so the authority check judged a filtered projection
+// of the evidence instead of the evidence.
+//
+// Everything here is total: a URL either yields a job id or yields a REASON, and
+// the caller must treat a reason as a failure rather than as an absence.
+
+/** The one canonical events path shape, anchored end to end. */
+const EVENTS_PATH_PATTERN = /^\/api\/optimize\/([^/]+)\/events$/;
+
+export type EventsUrlParse =
+  | { ok: true; jobId: string }
+  | { ok: false; url: string; reason: string };
+
+/**
+ * Parse one recorded events-request URL against the exact canonical contract.
+ *
+ * Accepts a root-relative string (what the client passes) or an absolute URL
+ * (what a `Request` object exposes). Rejects a query string or hash, because the
+ * client never sends either; rejects any suffix, extra segment, or legacy path;
+ * and rejects a non-canonical percent-encoding of the job segment by requiring
+ * `encodeURIComponent(decodeURIComponent(seg)) === seg` — the same
+ * canonical-spelling discipline the cursor codec applies.
+ */
+export function parseEventsRequestUrl(url: string): EventsUrlParse {
+  const fail = (reason: string): EventsUrlParse => ({ ok: false, url, reason });
+  if (typeof url !== "string" || url.length === 0) return fail("empty URL");
+
+  let parsed: URL;
+  try {
+    // A throwaway base normalises relative URLs (dot segments, encoded slashes)
+    // through exactly the same path as absolute ones.
+    parsed = url.startsWith("/") ? new URL(url, "http://events-contract.invalid") : new URL(url);
+  } catch {
+    return fail("unparseable URL");
+  }
+
+  if (parsed.search.length > 0) {
+    return fail(`query string is not part of the contract: ${parsed.search}`);
+  }
+  if (parsed.hash.length > 0) return fail(`hash is not part of the contract: ${parsed.hash}`);
+
+  const matched = EVENTS_PATH_PATTERN.exec(parsed.pathname);
+  if (matched === null) {
+    return fail(`path does not match /api/optimize/<jobId>/events: ${parsed.pathname}`);
+  }
+
+  const segment = matched[1];
+  let jobId: string;
+  try {
+    jobId = decodeURIComponent(segment);
+  } catch {
+    return fail(`job segment is not valid percent-encoding: ${segment}`);
+  }
+  if (jobId.length === 0) return fail("job segment decodes to an empty id");
+  if (encodeURIComponent(jobId) !== segment) {
+    return fail(`job segment is not a canonical encodeURIComponent spelling: ${segment}`);
+  }
+  return { ok: true, jobId };
+}
+
+export interface EventsAuthorityVerdict {
+  ok: boolean;
+  failures: string[];
+  /** Every distinct job id parsed out, in first-seen order. */
+  jobIds: string[];
+}
+
+/**
+ * Judge EVERY captured events-related URL against `expectedJobId`, failing closed
+ * on any that is malformed or foreign. Nothing is filtered or deduplicated away
+ * before judging: a URL the wrapper classified as events-related is evidence, and
+ * unparseable evidence is a failure rather than a non-event.
+ */
+export function judgeEventsAuthority(
+  urls: readonly string[],
+  expectedJobId: string | null,
+): EventsAuthorityVerdict {
+  const failures: string[] = [];
+  const jobIds: string[] = [];
+
+  if (expectedJobId === null || expectedJobId.length === 0) {
+    return {
+      ok: false,
+      failures: ["no independent job authority to compare events paths against"],
+      jobIds,
+    };
+  }
+  if (urls.length === 0) {
+    return { ok: false, failures: ["no events request was observed at all"], jobIds };
+  }
+
+  for (const url of urls) {
+    const parsed = parseEventsRequestUrl(url);
+    if (!parsed.ok) {
+      failures.push(`events URL rejected (${parsed.reason})`);
+      continue;
+    }
+    if (!jobIds.includes(parsed.jobId)) jobIds.push(parsed.jobId);
+    if (parsed.jobId !== expectedJobId) {
+      failures.push(
+        `events URL targets job "${parsed.jobId}", not the active "${expectedJobId}": ${url}`,
+      );
+    }
+  }
+
+  return { ok: failures.length === 0, failures, jobIds };
+}
+
+// ===========================================================================
 // The live replay test's phase bounds and total budget
 // ===========================================================================
 //
@@ -67,35 +187,225 @@ import type { JobResponse, JobState, OptimizationOutcome } from "@/lib/bff/types
 /** Playwright's default per-test timeout, kept for the sufficiency comparison. */
 export const PLAYWRIGHT_DEFAULT_TEST_TIMEOUT = 30_000;
 
-/** Bounded first-response observation. */
-export const FIRST_BYTE_TIMEOUT = 15_000;
-/** Fixed keepalive observation window (a real wait, not a poll). */
-export const KEEPALIVE_WINDOW = 12_000;
-/** Post-reload wait for the resumed screen to mount. */
-export const RESUMED_SCREEN_TIMEOUT = 10_000;
-/** Post-reload poll for the FIRST resumed request's exact `Last-Event-ID`. */
-export const RESUMED_HEADER_TIMEOUT = 15_000;
-/** Poll for the replay judgement to become satisfiable. */
-export const JUDGE_POLL_TIMEOUT = 20_000;
+/**
+ * EVERY sequential bound on the live replay test's positive path, one named entry
+ * each. The total is computed by summing this object's values, so a bound that is
+ * added here is automatically inside the cap and a bound that exists in the test
+ * but is MISSING here is caught by the unit suite's key-set assertion — the budget
+ * cannot silently drift away from the work it covers.
+ *
+ * The previous cap summed only the five stream phases (72s) and then added an
+ * unproved 48s "margin". That was incomplete by construction: `page.goto` alone
+ * permits 30s, the reload navigation another 30s, and four web-first expectations
+ * 5s each, so a schedule in which every operation stayed inside its own bound
+ * could reach ~152s and still blow a 120s cap. Every one of those is now an
+ * EXPLICIT local timeout passed at the call site, which is what makes this sum a
+ * real ceiling rather than an estimate of defaults.
+ */
+export const REPLAY_BOUNDS = {
+  // --- gotoFixture, all explicit at the call site ---------------------------
+  gotoFixtureNavigation: 20_000,
+  fixtureRootVisible: 5_000,
+  screenVisible: 5_000,
+  anonymizeAttributeRead: 5_000,
+  anonymizeToggleClick: 5_000,
+  anonymizeCheckedAssertion: 5_000,
+  submitEnabledAssertion: 5_000,
+  // --- submission + early ownership ----------------------------------------
+  submitClick: 5_000,
+  acceptedJobIdPoll: 10_000,
+  // --- the five named stream phases ----------------------------------------
+  firstResponsePoll: 15_000,
+  keepaliveWindow: 12_000,
+  resumedScreenVisible: 10_000,
+  resumedHeaderPoll: 15_000,
+  judgePoll: 20_000,
+  // --- evaluate/navigation work with no Playwright timeout parameter --------
+  // `page.evaluate` takes no per-call timeout, so each of these is enforced by
+  // `withBound()` in the spec rather than merely budgeted for here.
+  freezeAndSnapshotEvaluate: 15_000,
+  reloadNavigation: 20_000,
+  snapshotReadEvaluate: 5_000,
+  finalObservationEvaluate: 5_000,
+  // --- one small named allowance, AFTER the full sum ------------------------
+  // Worker startup, fixture teardown and OS scheduling jitter between steps.
+  schedulerAllowance: 8_000,
+} as const;
 
-/** The sum of every explicit phase bound in the live replay test. */
+// Totals: 50s fixture setup + 15s submit/arm + 72s stream phases
+// + 45s evaluate/navigation + 8s scheduler allowance = 190s, comfortably above the
+// ~152s worst-case legitimate schedule the review constructed and comfortably below
+// the product's 300s solve limit.
+
+/** The exact key set of `REPLAY_BOUNDS`, pinned so an omission fails loudly. */
+export const REPLAY_BOUND_KEYS = Object.keys(REPLAY_BOUNDS) as ReadonlyArray<
+  keyof typeof REPLAY_BOUNDS
+>;
+
+/** The complete cap: the sum of every enumerated bound. */
+export const REPLAY_TEST_TIMEOUT = Object.values(REPLAY_BOUNDS).reduce(
+  (total, bound) => total + bound,
+  0,
+);
+
+/** The five named stream phases, kept as a subtotal for the review's comparison. */
 export const REPLAY_PHASE_BOUNDS =
-  FIRST_BYTE_TIMEOUT +
-  KEEPALIVE_WINDOW +
-  RESUMED_SCREEN_TIMEOUT +
-  RESUMED_HEADER_TIMEOUT +
-  JUDGE_POLL_TIMEOUT;
+  REPLAY_BOUNDS.firstResponsePoll +
+  REPLAY_BOUNDS.keepaliveWindow +
+  REPLAY_BOUNDS.resumedScreenVisible +
+  REPLAY_BOUNDS.resumedHeaderPoll +
+  REPLAY_BOUNDS.judgePoll;
+
+/** The product's own solve ceiling; the cap must stay meaningfully inside it. */
+export const PRODUCT_SOLVE_LIMIT = 300_000;
+
+// Individual re-exports for the spec's call sites, so no literal is duplicated.
+export const FIRST_BYTE_TIMEOUT = REPLAY_BOUNDS.firstResponsePoll;
+export const KEEPALIVE_WINDOW = REPLAY_BOUNDS.keepaliveWindow;
+export const RESUMED_SCREEN_TIMEOUT = REPLAY_BOUNDS.resumedScreenVisible;
+export const RESUMED_HEADER_TIMEOUT = REPLAY_BOUNDS.resumedHeaderPoll;
+export const JUDGE_POLL_TIMEOUT = REPLAY_BOUNDS.judgePoll;
+
+// ===========================================================================
+// Anti-contamination cleanup lifecycle
+// ===========================================================================
+//
+// A failed or timed-out replay test must not leave the 87-person solve running:
+// the fixture submits at the form's 300s default, and an orphaned solver starves
+// the next lane's fixture mount (that is how one 30s timeout produced 29/2).
+//
+// The backend contract this follows, read from source rather than assumed:
+//
+//   * `POST /optimize/{id}/cancel` → **202** (`api/optimize.py:212`). A QUEUED job
+//     goes straight to terminal CANCELLED; a RUNNING one enters **CANCELLING**,
+//     which is NOT terminal (`jobs/controller.py:373-401`). Re-cancelling a
+//     terminal or already-cancelling job returns it unchanged, so cancel is
+//     idempotent.
+//   * `DELETE /optimize/{id}` → **204** (`api/optimize.py:255`), and
+//     `delete_job` raises `JobOperationNotAllowedError` unless the job is already
+//     terminal (`jobs/controller.py:522-536`), which `app.py:250` maps to **409**.
+//   * A missing job is **404**.
+//
+// So DELETE must never be fired while the job is still `cancelling` — the previous
+// implementation did exactly that, ignored every status, and treated only a
+// transport exception as failure, which is why it could "succeed" while leaving
+// the solve alive. This lifecycle cancels, POLLS to terminal within an explicit
+// bound, and only then deletes.
+
+/** Bounds for the cleanup lifecycle. Independent of the test's own cap. */
+export const CLEANUP_BOUNDS = {
+  cancelRequest: 10_000,
+  terminalPoll: 30_000,
+  terminalPollInterval: 500,
+  deleteRequest: 10_000,
+  statusRequest: 10_000,
+} as const;
+
+/** The documented statuses each cleanup step may return. */
+export const CLEANUP_ACCEPTED_STATUS = {
+  /** 202 documented; 404 when a prior attempt already deleted the job. */
+  cancel: [202, 404] as readonly number[],
+  /** 204 documented; 404 is the idempotent already-deleted outcome. */
+  delete: [204, 404] as readonly number[],
+} as const;
+
+export interface CleanupHttp {
+  post(url: string, timeout: number): Promise<{ status: number; body: string }>;
+  delete(url: string, timeout: number): Promise<{ status: number; body: string }>;
+  get(url: string, timeout: number): Promise<{ status: number; body: string }>;
+  sleep(ms: number): Promise<void>;
+  now(): number;
+}
+
+export interface CleanupOutcome {
+  ok: boolean;
+  /** Ordered, human-readable trace of every step and its status. */
+  steps: string[];
+  failures: string[];
+}
+
+/** Whether a job payload reports a terminal state. */
+export function isTerminalJobBody(body: string): boolean {
+  try {
+    const parsed = JSON.parse(body) as { terminal?: unknown; state?: unknown };
+    if (parsed.terminal === true) return true;
+    return (
+      typeof parsed.state === "string" &&
+      ["completed", "cancelled", "failed"].includes(parsed.state)
+    );
+  } catch {
+    return false;
+  }
+}
 
 /**
- * Allowance for the steps bounded by Playwright's own action/navigation defaults
- * rather than by a constant here: fixture setup (goto, two visibility waits, the
- * anonymize toggle, the enabled wait), the submit click, and the
- * freeze/stabilise/reload navigation. Deliberately generous but finite.
+ * Cancel → poll to terminal → delete, asserting the documented status at every
+ * step. Pure with respect to Playwright: `http` is injected, so the whole
+ * lifecycle (including the 409-if-you-delete-too-early hazard) is unit-testable.
  */
-export const REPLAY_SETUP_MARGIN = 48_000;
+export async function releaseLiveJob(jobId: string, http: CleanupHttp): Promise<CleanupOutcome> {
+  const steps: string[] = [];
+  const failures: string[] = [];
+  const path = `/api/optimize/${encodeURIComponent(jobId)}`;
 
-/** 72s of explicit phase bounds + 48s setup/navigation allowance = 120s. */
-export const REPLAY_TEST_TIMEOUT = REPLAY_PHASE_BOUNDS + REPLAY_SETUP_MARGIN;
+  const cancel = await http.post(`${path}/cancel`, CLEANUP_BOUNDS.cancelRequest);
+  steps.push(`cancel -> ${cancel.status}`);
+  if (!CLEANUP_ACCEPTED_STATUS.cancel.includes(cancel.status)) {
+    failures.push(
+      `cancel returned ${cancel.status}; documented outcomes are ${CLEANUP_ACCEPTED_STATUS.cancel.join(" or ")}`,
+    );
+    return { ok: false, steps, failures };
+  }
+  if (cancel.status === 404) {
+    steps.push("job already absent; nothing to delete");
+    return { ok: true, steps, failures };
+  }
+
+  // Poll to terminal. A RUNNING job first enters `cancelling`, and DELETE before
+  // terminal is the documented 409 — so this wait is the whole point.
+  const deadline = http.now() + CLEANUP_BOUNDS.terminalPoll;
+  let terminal = false;
+  let lastStatus = 0;
+  let lastBody = "";
+  while (http.now() <= deadline) {
+    const state = await http.get(path, CLEANUP_BOUNDS.statusRequest);
+    lastStatus = state.status;
+    lastBody = state.body;
+    if (state.status === 404) {
+      steps.push("job disappeared while polling; nothing to delete");
+      return { ok: true, steps, failures };
+    }
+    if (state.status !== 200) {
+      failures.push(`status poll returned ${state.status}; expected 200 or 404`);
+      return { ok: false, steps, failures };
+    }
+    if (isTerminalJobBody(state.body)) {
+      terminal = true;
+      break;
+    }
+    await http.sleep(CLEANUP_BOUNDS.terminalPollInterval);
+  }
+  if (!terminal) {
+    steps.push(
+      `still nonterminal after ${CLEANUP_BOUNDS.terminalPoll}ms (last status ${lastStatus})`,
+    );
+    failures.push(
+      `job did not reach a terminal state within ${CLEANUP_BOUNDS.terminalPoll}ms; last body ${lastBody.slice(0, 200)}`,
+    );
+    return { ok: false, steps, failures };
+  }
+  steps.push("reached terminal");
+
+  const deleted = await http.delete(path, CLEANUP_BOUNDS.deleteRequest);
+  steps.push(`delete -> ${deleted.status}`);
+  if (!CLEANUP_ACCEPTED_STATUS.delete.includes(deleted.status)) {
+    failures.push(
+      `delete returned ${deleted.status}; documented outcomes are ${CLEANUP_ACCEPTED_STATUS.delete.join(" or ")}`,
+    );
+    return { ok: false, steps, failures };
+  }
+  return { ok: true, steps, failures };
+}
 
 /** Wire version prefix of the public event cursor (`CURSOR_VERSION`). */
 export const CURSOR_VERSION = "v1";

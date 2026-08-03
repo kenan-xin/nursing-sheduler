@@ -22,8 +22,12 @@ import { resolve } from "node:path";
 import {
   FIRST_BYTE_TIMEOUT,
   JUDGE_POLL_TIMEOUT,
+  judgeEventsAuthority,
   judgeReplayEvidence,
   KEEPALIVE_WINDOW,
+  parseEventsRequestUrl,
+  releaseLiveJob,
+  REPLAY_BOUNDS,
   REPLAY_TEST_TIMEOUT,
   RESUMED_HEADER_TIMEOUT,
   RESUMED_SCREEN_TIMEOUT,
@@ -74,11 +78,16 @@ const SSE_OBSERVATION_SCRIPT = `
     sseFirstByteAt: null,
     sseChunks: [],
     eventLastEventIds: [],
-    // Every events-request URL in request order. The path segment
-    // /api/optimize/<jobId>/events is an exact authoritative job boundary that
-    // owes nothing to any cursor, so it cross-checks the session's own job id.
+    // EVERY url this wrapper classified as events-related, in request order. It is
+    // recorded unfiltered on purpose: the judge parses each one against the exact
+    // canonical contract and fails closed on anything malformed or foreign, so a
+    // url that cannot be parsed is evidence of a defect, never an absence.
     // (No backticks in this comment: it lives inside a template literal.)
     eventUrls: [],
+    // Job ids from every accepted POST /api/optimize (HTTP 202). Recorded so the
+    // test can arm cleanup ownership from the accepted submission itself, before
+    // any bounded assertion runs.
+    acceptedJobIds: [],
   };
   window.__nsSseObs = obs;
   var originalFetch = window.fetch;
@@ -107,7 +116,30 @@ const SSE_OBSERVATION_SCRIPT = `
 
   window.fetch = function(input, init) {
     var url = typeof input === 'string' ? input : (input && input.url) || '';
+    var method = String((init && init.method) || (input && input.method) || 'GET').toUpperCase();
+    // No regex literal here on purpose. This script lives inside a template
+    // literal, where a backslash escape is consumed before the browser ever sees
+    // it, so an escaped slash inside a pattern would emit a line comment instead.
+    // (No backticks and no backslashes in this comment, for the same reason.)
+    var submitPath = String(url).split('?')[0];
+    var isSubmit = method === 'POST' &&
+      (submitPath === '/api/optimize' || submitPath.endsWith('/api/optimize'));
     var isEvents = url.indexOf('/events') !== -1;
+    if (isSubmit) {
+      // Clone before anyone reads the body, so the controller's own read is
+      // untouched. Recorded as soon as the server accepts, which is the earliest
+      // point at which a job exists to own.
+      return originalFetch.apply(this, arguments).then(function(response) {
+        if (response.status === 202) {
+          response.clone().json().then(function(body) {
+            if (body && typeof body.id === 'string' && body.id.length > 0) {
+              obs.acceptedJobIds.push(body.id);
+            }
+          }).catch(function() {});
+        }
+        return response;
+      });
+    }
     if (isEvents) {
       var id = extractLastEventId(init) ||
         (input && input.headers && typeof input.headers.get === 'function' ? input.headers.get('Last-Event-ID') : null);
@@ -165,6 +197,7 @@ interface SseObservations {
   sseChunks: string[];
   eventLastEventIds: Array<string | null>;
   eventUrls: string[];
+  acceptedJobIds: string[];
 }
 
 async function readSseObs(page: Page): Promise<SseObservations> {
@@ -176,8 +209,31 @@ async function readSseObs(page: Page): Promise<SseObservations> {
       sseChunks: obs?.sseChunks ?? [],
       eventLastEventIds: obs?.eventLastEventIds ?? [],
       eventUrls: obs?.eventUrls ?? [],
+      acceptedJobIds: obs?.acceptedJobIds ?? [],
     };
   });
+}
+
+/**
+ * Enforce a bound on work Playwright cannot bound itself.
+ *
+ * `page.evaluate` and the composite reload step take no per-call timeout, so a
+ * budget entry for them would otherwise be an estimate rather than a ceiling.
+ * Racing them against a rejecting timer makes each one a genuinely enforced phase,
+ * which is what lets `REPLAY_TEST_TIMEOUT` be a complete sum.
+ */
+async function withBound<T>(label: string, ms: number, work: Promise<T>): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} exceeded its ${ms}ms bound`)), ms);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 interface ReplaySnapshot {
@@ -191,11 +247,12 @@ interface ReplaySnapshot {
    */
   sessionJobId: string | null;
   /**
-   * The job segments of every events-request path observed before the reload, as
-   * a second, cursor-independent authority. The judge is fed a job id only when
-   * this agrees with `sessionJobId`.
+   * EVERY events-request url observed before the reload, verbatim and unfiltered.
+   * `judgeEventsAuthority` parses each against the exact canonical contract and
+   * fails closed on any malformed or foreign one; the judge is fed a job id only
+   * when that passes AND agrees with `sessionJobId`.
    */
-  requestJobIds: string[];
+  eventUrls: string[];
 }
 
 /** Freeze the observation wrapper's current SSE body, allow already-delivered
@@ -203,81 +260,91 @@ interface ReplaySnapshot {
  * initiate reload. The e2e-only snapshot key is ignored by the application and
  * removed immediately after the new document reads it. */
 async function captureReplaySnapshotAndReload(page: Page): Promise<ReplaySnapshot> {
+  // Both halves are explicitly bounded: the navigation by Playwright's own
+  // parameter, the evaluate by `withBound` because `page.evaluate` accepts no
+  // timeout. Without that, the budget entry for this step would be an estimate
+  // rather than a ceiling.
   await Promise.all([
-    page.waitForNavigation({ waitUntil: "domcontentloaded" }),
-    page.evaluate(
-      async ([snapshotKey, sessionKey]) => {
-        const e2eWindow = window as unknown as {
-          __nsFreezeSseForReplay?: () => Promise<unknown>;
-          __nsSseObs?: SseObservations;
-        };
-        await e2eWindow.__nsFreezeSseForReplay?.();
+    page.waitForNavigation({
+      waitUntil: "domcontentloaded",
+      timeout: REPLAY_BOUNDS.reloadNavigation,
+    }),
+    withBound(
+      "freeze + pre-reload snapshot evaluate",
+      REPLAY_BOUNDS.freezeAndSnapshotEvaluate,
+      page.evaluate(
+        async ([snapshotKey, sessionKey]) => {
+          const e2eWindow = window as unknown as {
+            __nsFreezeSseForReplay?: () => Promise<unknown>;
+            __nsSseObs?: SseObservations;
+          };
+          await e2eWindow.__nsFreezeSseForReplay?.();
 
-        // The session record carries BOTH the active job id and the last committed
-        // cursor. Reading them in the same task as the raw frames is what makes the
-        // job authority causally simultaneous with the evidence it authorises — not
-        // re-derived later from something the evidence itself supplied.
-        const readSession = (): { jobId: string | null; cursor: string | null } => {
-          const raw = sessionStorage.getItem(sessionKey);
-          if (!raw) return { jobId: null, cursor: null };
-          try {
-            const parsed = JSON.parse(raw) as {
-              phase?: string;
-              jobId?: string;
-              lastCursor?: string;
-            };
-            return {
-              // Only an ACTIVE record names a job; a provisional one has none.
-              jobId: parsed.phase === "active" ? (parsed.jobId ?? null) : null,
-              cursor: parsed.lastCursor ?? null,
-            };
-          } catch {
-            return { jobId: null, cursor: null };
+          // The session record carries BOTH the active job id and the last committed
+          // cursor. Reading them in the same task as the raw frames is what makes the
+          // job authority causally simultaneous with the evidence it authorises — not
+          // re-derived later from something the evidence itself supplied.
+          const readSession = (): { jobId: string | null; cursor: string | null } => {
+            const raw = sessionStorage.getItem(sessionKey);
+            if (!raw) return { jobId: null, cursor: null };
+            try {
+              const parsed = JSON.parse(raw) as {
+                phase?: string;
+                jobId?: string;
+                lastCursor?: string;
+              };
+              return {
+                // Only an ACTIVE record names a job; a provisional one has none.
+                jobId: parsed.phase === "active" ? (parsed.jobId ?? null) : null,
+                cursor: parsed.lastCursor ?? null,
+              };
+            } catch {
+              return { jobId: null, cursor: null };
+            }
+          };
+
+          let cursor: string | null = null;
+          let sessionJobId: string | null = null;
+          let stableReads = 0;
+          for (let attempt = 0; attempt < 20 && stableReads < 3; attempt += 1) {
+            const next = readSession();
+            stableReads = next.cursor !== null && next.cursor === cursor ? stableReads + 1 : 0;
+            cursor = next.cursor;
+            sessionJobId = next.jobId;
+            await new Promise((resolve) => setTimeout(resolve, 10));
           }
-        };
 
-        let cursor: string | null = null;
-        let sessionJobId: string | null = null;
-        let stableReads = 0;
-        for (let attempt = 0; attempt < 20 && stableReads < 3; attempt += 1) {
-          const next = readSession();
-          stableReads = next.cursor !== null && next.cursor === cursor ? stableReads + 1 : 0;
-          cursor = next.cursor;
-          sessionJobId = next.jobId;
-          await new Promise((resolve) => setTimeout(resolve, 10));
-        }
-
-        const chunks = e2eWindow.__nsSseObs?.sseChunks ?? [];
-        const rawIds = Array.from(
-          chunks.join("").matchAll(/^id:\s*(.+?)\r?$/gm),
-          (match) => match[1],
-        );
-        // Second authority: the job segment of every events path actually requested.
-        const requestJobIds = Array.from(
-          new Set(
-            (e2eWindow.__nsSseObs?.eventUrls ?? [])
-              .map((url) => /\/optimize\/([^/?#]+)\/events/.exec(url)?.[1])
-              .filter((id): id is string => typeof id === "string" && id.length > 0)
-              .map((id) => decodeURIComponent(id)),
-          ),
-        );
-        sessionStorage.setItem(
-          snapshotKey,
-          JSON.stringify({ cursor, rawIds, sessionJobId, requestJobIds }),
-        );
-        window.location.reload();
-      },
-      [REPLAY_SNAPSHOT_KEY, OPTIMIZE_SESSION_KEY] as const,
+          const chunks = e2eWindow.__nsSseObs?.sseChunks ?? [];
+          const rawIds = Array.from(
+            chunks.join("").matchAll(/^id:\s*(.+?)\r?$/gm),
+            (match) => match[1],
+          );
+          // Second authority: EVERY events url the wrapper classified, carried out
+          // verbatim and unfiltered. Parsing and rejection happen in the judge, so
+          // nothing can be silently discarded here.
+          const eventUrls = (e2eWindow.__nsSseObs?.eventUrls ?? []).slice();
+          sessionStorage.setItem(
+            snapshotKey,
+            JSON.stringify({ cursor, rawIds, sessionJobId, eventUrls }),
+          );
+          window.location.reload();
+        },
+        [REPLAY_SNAPSHOT_KEY, OPTIMIZE_SESSION_KEY] as const,
+      ),
     ),
   ]);
 
-  return page.evaluate((snapshotKey) => {
-    const raw = sessionStorage.getItem(snapshotKey);
-    sessionStorage.removeItem(snapshotKey);
-    return raw
-      ? (JSON.parse(raw) as ReplaySnapshot)
-      : { cursor: null, rawIds: [], sessionJobId: null, requestJobIds: [] };
-  }, REPLAY_SNAPSHOT_KEY);
+  return withBound(
+    "post-reload snapshot read evaluate",
+    REPLAY_BOUNDS.snapshotReadEvaluate,
+    page.evaluate((snapshotKey) => {
+      const raw = sessionStorage.getItem(snapshotKey);
+      sessionStorage.removeItem(snapshotKey);
+      return raw
+        ? (JSON.parse(raw) as ReplaySnapshot)
+        : { cursor: null, rawIds: [], sessionJobId: null, eventUrls: [] };
+    }, REPLAY_SNAPSHOT_KEY),
+  );
 }
 
 async function injectYaml(page: Page, yaml: string): Promise<void> {
@@ -287,23 +354,44 @@ async function injectYaml(page: Page, yaml: string): Promise<void> {
   }, yaml);
 }
 
+// Every wait here carries an EXPLICIT local timeout rather than inheriting
+// Playwright's action/navigation defaults. That is what makes `REPLAY_BOUNDS` a
+// real ceiling: `page.goto` alone would otherwise permit 30s, and four default
+// web-first expectations another 20s, none of it visible in the budget.
 async function gotoFixture(page: Page): Promise<void> {
-  await page.goto("/optimize-durable-fixture");
-  await expect(page.getByTestId("optimize-durable-fixture")).toBeVisible();
-  await expect(page.getByTestId("screen")).toBeVisible();
+  await page.goto("/optimize-durable-fixture", {
+    timeout: REPLAY_BOUNDS.gotoFixtureNavigation,
+  });
+  await expect(page.getByTestId("optimize-durable-fixture")).toBeVisible({
+    timeout: REPLAY_BOUNDS.fixtureRootVisible,
+  });
+  await expect(page.getByTestId("screen")).toBeVisible({
+    timeout: REPLAY_BOUNDS.screenVisible,
+  });
   // Anonymize defaults ON; turn it OFF for the tiny job (no restoration needed).
   const toggle = page.getByRole("switch", { name: /Anonymize/i });
-  if ((await toggle.getAttribute("aria-checked")) === "true") {
-    await toggle.click();
+  const checked = await toggle.getAttribute("aria-checked", {
+    timeout: REPLAY_BOUNDS.anonymizeAttributeRead,
+  });
+  if (checked === "true") {
+    await toggle.click({ timeout: REPLAY_BOUNDS.anonymizeToggleClick });
   }
-  await expect(toggle).toHaveAttribute("aria-checked", "false");
-  await expect(page.getByTestId("optimize-submit")).toBeEnabled();
+  await expect(toggle).toHaveAttribute("aria-checked", "false", {
+    timeout: REPLAY_BOUNDS.anonymizeCheckedAssertion,
+  });
+  await expect(page.getByTestId("optimize-submit")).toBeEnabled({
+    timeout: REPLAY_BOUNDS.submitEnabledAssertion,
+  });
 }
 
 interface ReplayObservation {
   rawIds: string[];
   cursor: string | null;
   firstLastEventId: string | null;
+  /** The URL of the FIRST resumed events request, captured with its header. */
+  firstEventUrl: string | null;
+  /** Every post-reload events URL, unfiltered, for the anchored authority check. */
+  eventUrls: string[];
 }
 
 /**
@@ -326,23 +414,37 @@ interface ReplayObservation {
  * ordering, which is the point, and no longer tests two clocks against each other.
  */
 async function readReplayObservation(page: Page): Promise<ReplayObservation> {
-  return page.evaluate(() => {
-    const obs = (window as unknown as { __nsSseObs?: SseObservations }).__nsSseObs;
-    const rawIds = Array.from(
-      (obs?.sseChunks ?? []).join("").matchAll(/^id:\s*(.+?)\r?$/gm),
-      (match) => match[1],
-    );
-    let cursor: string | null = null;
-    const raw = sessionStorage.getItem("nurse.optimize.session");
-    if (raw) {
-      try {
-        cursor = (JSON.parse(raw) as { lastCursor?: string }).lastCursor ?? null;
-      } catch {
-        cursor = null;
+  return withBound(
+    "replay observation evaluate",
+    REPLAY_BOUNDS.finalObservationEvaluate,
+    page.evaluate(() => {
+      const obs = (window as unknown as { __nsSseObs?: SseObservations }).__nsSseObs;
+      const rawIds = Array.from(
+        (obs?.sseChunks ?? []).join("").matchAll(/^id:\s*(.+?)\r?$/gm),
+        (match) => match[1],
+      );
+      let cursor: string | null = null;
+      const raw = sessionStorage.getItem("nurse.optimize.session");
+      if (raw) {
+        try {
+          cursor = (JSON.parse(raw) as { lastCursor?: string }).lastCursor ?? null;
+        } catch {
+          cursor = null;
+        }
       }
-    }
-    return { rawIds, cursor, firstLastEventId: obs?.eventLastEventIds?.[0] ?? null };
-  });
+      // The first resumed request's URL and its `Last-Event-ID` are read in the SAME
+      // task and at the SAME index, so the pair genuinely describes one request. The
+      // header alone was assertable before, which left a wrong or malformed first
+      // TARGET invisible whenever a correct request followed it.
+      return {
+        rawIds,
+        cursor,
+        firstLastEventId: obs?.eventLastEventIds?.[0] ?? null,
+        firstEventUrl: obs?.eventUrls?.[0] ?? null,
+        eventUrls: (obs?.eventUrls ?? []).slice(),
+      };
+    }),
+  );
 }
 
 test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
@@ -360,17 +462,46 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
   // because Playwright abandons a timed-out test body but still runs hooks, which
   // is precisely the case this exists for.
   let liveJobToRelease: string | null = null;
-  test.afterEach(async ({ request }) => {
+  test.afterEach(async ({ request }, testInfo) => {
     const jobId = liveJobToRelease;
     liveJobToRelease = null;
     if (jobId === null) return;
-    // Best-effort and non-asserting: this is contamination cleanup, not a proof.
-    // A job that already reached terminal simply 404s/409s here.
-    try {
-      await request.post(`/api/optimize/${encodeURIComponent(jobId)}/cancel`, { timeout: 10_000 });
-      await request.delete(`/api/optimize/${encodeURIComponent(jobId)}`, { timeout: 10_000 });
-    } catch {
-      // Swallowed on purpose: the gate's own teardown is the backstop.
+
+    // Cancel -> poll to terminal -> DELETE, asserting the documented status at each
+    // step. The previous hook POSTed cancel and DELETEd immediately, checked no
+    // status, and treated only a transport exception as failure — so on a RUNNING
+    // job it took the documented 409 path (DELETE is legal only after terminal) and
+    // finished "successfully" with the solve still alive.
+    const outcome = await releaseLiveJob(jobId, {
+      post: async (url, timeout) => {
+        const res = await request.post(url, { timeout });
+        return { status: res.status(), body: await res.text() };
+      },
+      delete: async (url, timeout) => {
+        const res = await request.delete(url, { timeout });
+        return { status: res.status(), body: await res.text() };
+      },
+      get: async (url, timeout) => {
+        const res = await request.get(url, { timeout });
+        return { status: res.status(), body: await res.text() };
+      },
+      sleep: (ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
+      now: () => Date.now(),
+    });
+
+    const report = [`job ${jobId}`, ...outcome.steps, ...outcome.failures].join("\n");
+    await testInfo.attach("live-job-cleanup", {
+      body: report,
+      contentType: "text/plain",
+    });
+
+    if (outcome.ok) return;
+    // Never replace the primary failure: if the test already failed, the cleanup
+    // trace is attached above and that is all. But a cleanup failure on an
+    // otherwise PASSING test means the next lane may be starved, so it must fail
+    // the gate rather than pass quietly.
+    if (testInfo.status === testInfo.expectedStatus) {
+      throw new Error(`live-job cleanup did not converge:\n${report}`);
     }
   });
 
@@ -414,7 +545,24 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
     await injectYaml(page, LARGE_YAML);
     await gotoFixture(page);
 
-    await page.getByTestId("optimize-submit").click();
+    await page.getByTestId("optimize-submit").click({ timeout: REPLAY_BOUNDS.submitClick });
+
+    // ARM CLEANUP OWNERSHIP FIRST, from the accepted POST itself.
+    //
+    // Previously ownership was assigned only after first response, keepalive,
+    // freeze/reload and three authority assertions — so a failure anywhere in that
+    // window left `afterEach` with nothing to release and recreated the exact
+    // abandoned-solver contamination the hook exists to prevent. The observation
+    // wrapper records every 202-accepted submission id, which is the earliest
+    // moment a job exists to own.
+    await expect
+      .poll(async () => (await readSseObs(page)).acceptedJobIds.length, {
+        timeout: REPLAY_BOUNDS.acceptedJobIdPoll,
+      })
+      .toBeGreaterThan(0);
+    const accepted = (await readSseObs(page)).acceptedJobIds;
+    expect(accepted, "exactly one submission was accepted").toHaveLength(1);
+    liveJobToRelease = accepted[0];
 
     // Bounded first response: the browser observed the SSE response.
     await expect
@@ -437,23 +585,29 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
       cursor: cursorBefore,
       rawIds: preReloadIds,
       sessionJobId,
-      requestJobIds,
+      eventUrls: preReloadEventUrls,
     } = await captureReplaySnapshotAndReload(page);
 
     // --- Resolve the replay authority, independently of any cursor -------------
     //
-    // Two cursor-free sources must agree before either is trusted: the ACTIVE
+    // Three cursor-free facts must line up before anything is trusted: the ACTIVE
     // session record's own `jobId` (written by the activation transaction from the
-    // POST 202 response) and the job segment of the events paths the browser
-    // actually requested. Agreement is asserted here rather than inside the judge,
-    // so the judge receives a single already-corroborated value and can never fall
-    // back to decoding a cursor.
+    // POST 202 response), EVERY events path the browser actually requested parsed
+    // against the exact canonical contract, and the id the server accepted at
+    // submission. Nothing is filtered: a malformed or foreign events URL is a
+    // failure, not an absence.
     expect(sessionJobId, "the active session must name its job").not.toBeNull();
     expect(sessionJobId!.length).toBeGreaterThan(0);
-    expect(requestJobIds, "exactly one job's events path was requested").toEqual([sessionJobId]);
+    expect(sessionJobId, "the session's job is the one the server accepted").toBe(liveJobToRelease);
+    const preReloadAuthority = judgeEventsAuthority(preReloadEventUrls, sessionJobId);
+    expect(
+      preReloadAuthority.failures,
+      "every pre-reload events URL is canonical and targets the active job",
+    ).toEqual([]);
+    expect(preReloadAuthority.jobIds, "exactly one job's events path was requested").toEqual([
+      sessionJobId,
+    ]);
     const expectedJobId = sessionJobId!;
-    // Release this job if anything below fails (see the `afterEach` rationale).
-    liveJobToRelease = expectedJobId;
 
     expect(cursorBefore).not.toBeNull();
     expect(cursorBefore!.length).toBeGreaterThan(0);
@@ -462,12 +616,30 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
     await expect(page.getByTestId("screen")).toBeVisible({ timeout: RESUMED_SCREEN_TIMEOUT });
 
     // The FIRST post-reload events request must present the exact cursor captured
-    // above. A wrong, older, different, or null cursor fails.
+    // above AND target the active job's canonical path. Both are read from the same
+    // observation at the same index, so the pair describes one request — asserting
+    // only the header left a wrong, old or malformed first TARGET invisible whenever
+    // a correct request happened to follow it.
     await expect
-      .poll(async () => (await readSseObs(page)).eventLastEventIds[0], {
+      .poll(async () => (await readReplayObservation(page)).firstLastEventId, {
         timeout: RESUMED_HEADER_TIMEOUT,
       })
       .toBe(cursorBefore);
+    const firstResumed = await readReplayObservation(page);
+    expect(firstResumed.firstLastEventId).toBe(cursorBefore);
+    expect(
+      firstResumed.firstEventUrl,
+      "the first resumed request has a recorded URL",
+    ).not.toBeNull();
+    const firstResumedTarget = parseEventsRequestUrl(firstResumed.firstEventUrl!);
+    expect(
+      firstResumedTarget.ok ? null : firstResumedTarget.reason,
+      "the first resumed URL is a canonical events path",
+    ).toBeNull();
+    expect(
+      firstResumedTarget.ok ? firstResumedTarget.jobId : null,
+      "the first resumed request targets the active job",
+    ).toBe(expectedJobId);
 
     // Judge the replay through `judgeReplayEvidence`, whose full truth table —
     // valid / self-consistent-foreign / duplicate / foreign / mixed / stale /
@@ -475,12 +647,13 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
     // `support/optimize-durable.test.ts`, including committed adversarial baselines
     // for every predicate this oracle has previously shipped.
     //
-    // AUTHORITY CHAIN. `expectedJobId` comes from the two cursor-free sources
-    // corroborated above, never from a cursor. The judge binds `cursorBefore` to
-    // it; the assertion immediately above pins the first resumed request's
-    // `Last-Event-ID` to that same `cursorBefore`, so the resumed request is
-    // transitively bound too; and every raw id plus `cursorAfter` is bound to it as
-    // well. A fully self-consistent foreign envelope — foreign cursorBefore,
+    // AUTHORITY CHAIN. `expectedJobId` comes from the cursor-free sources
+    // corroborated above — accepted submission id, ACTIVE session `jobId`, and every
+    // canonical events path — never from a cursor. The judge binds `cursorBefore` to
+    // it; the assertions immediately above pin the first resumed request's
+    // `Last-Event-ID` to that same `cursorBefore` AND its target path to the same
+    // job, so the resumed request is bound directly rather than only by inference;
+    // and every raw id plus `cursorAfter` is bound to it as well. A fully self-consistent foreign envelope — foreign cursorBefore,
     // foreign frames, foreign cursorAfter, all agreeing with each other — is now
     // red, because none of them defines the authority any more.
     //
@@ -515,6 +688,14 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
     expect(judged.failures, `replay evidence violated the strictly-after contract`).toEqual([]);
     expect(judged.ok).toBe(true);
     expect(snapshot.firstLastEventId).toBe(cursorBefore);
+    // And every POST-reload events URL is canonical and on the active job too, so
+    // the resumed stream cannot have wandered after the first request was checked.
+    const resumedAuthority = judgeEventsAuthority(snapshot.eventUrls, expectedJobId);
+    expect(
+      resumedAuthority.failures,
+      "every post-reload events URL is canonical and targets the active job",
+    ).toEqual([]);
+    expect(resumedAuthority.jobIds).toEqual([expectedJobId]);
     // NOTE: this test does NOT navigate away — the abort is isolated in a
     // separate test so the gate's BFF-log baseline can attribute the cancel
     // to the intended navigation only.
