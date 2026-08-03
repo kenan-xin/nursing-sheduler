@@ -19,7 +19,15 @@
 import { expect, test, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { judgeReplayEvidence } from "./support/optimize-durable";
+import {
+  FIRST_BYTE_TIMEOUT,
+  JUDGE_POLL_TIMEOUT,
+  judgeReplayEvidence,
+  KEEPALIVE_WINDOW,
+  REPLAY_TEST_TIMEOUT,
+  RESUMED_HEADER_TIMEOUT,
+  RESUMED_SCREEN_TIMEOUT,
+} from "./support/optimize-durable";
 
 const REPO_ROOT = resolve(__dirname, "../..");
 const TINY_YAML = readFileSync(
@@ -31,10 +39,14 @@ const LARGE_YAML = readFileSync(
   "utf-8",
 );
 
-const FIRST_BYTE_TIMEOUT = 15_000;
 const COMPLETION_TIMEOUT = 90_000;
-const KEEPALIVE_WINDOW = 12_000;
 const REPLAY_SNAPSHOT_KEY = "nurse.optimize.e2e-replay-snapshot";
+const OPTIMIZE_SESSION_KEY = "nurse.optimize.session";
+
+// Every phase bound and the derived total budget live in `support/optimize-durable`
+// so the derivation itself is unit-testable; see the block above
+// `REPLAY_PHASE_BOUNDS` there for why the default per-test budget was insufficient
+// by construction, and how the abandoned solve contaminated the next test.
 
 /**
  * A transparent fetch-wrapper injected BEFORE the page's own scripts. It
@@ -62,6 +74,11 @@ const SSE_OBSERVATION_SCRIPT = `
     sseFirstByteAt: null,
     sseChunks: [],
     eventLastEventIds: [],
+    // Every events-request URL in request order. The path segment
+    // /api/optimize/<jobId>/events is an exact authoritative job boundary that
+    // owes nothing to any cursor, so it cross-checks the session's own job id.
+    // (No backticks in this comment: it lives inside a template literal.)
+    eventUrls: [],
   };
   window.__nsSseObs = obs;
   var originalFetch = window.fetch;
@@ -95,6 +112,7 @@ const SSE_OBSERVATION_SCRIPT = `
       var id = extractLastEventId(init) ||
         (input && input.headers && typeof input.headers.get === 'function' ? input.headers.get('Last-Event-ID') : null);
       obs.eventLastEventIds.push(id || null);
+      obs.eventUrls.push(String(url));
       // The replay test invokes this e2e-only freeze immediately before its
       // atomic snapshot. Holding any controller reconnect in the old document
       // prevents a late frame from advancing durable storage during teardown.
@@ -146,6 +164,7 @@ interface SseObservations {
   sseFirstByteAt: number | null;
   sseChunks: string[];
   eventLastEventIds: Array<string | null>;
+  eventUrls: string[];
 }
 
 async function readSseObs(page: Page): Promise<SseObservations> {
@@ -156,6 +175,7 @@ async function readSseObs(page: Page): Promise<SseObservations> {
       sseFirstByteAt: obs?.sseFirstByteAt ?? null,
       sseChunks: obs?.sseChunks ?? [],
       eventLastEventIds: obs?.eventLastEventIds ?? [],
+      eventUrls: obs?.eventUrls ?? [],
     };
   });
 }
@@ -163,6 +183,19 @@ async function readSseObs(page: Page): Promise<SseObservations> {
 interface ReplaySnapshot {
   cursor: string | null;
   rawIds: string[];
+  /**
+   * The job the ACTIVE pre-reload session was running, read out of the session
+   * record's own `jobId` field — written by the activation transaction from the
+   * POST 202 response, entirely separately from any cursor. This is the
+   * independent replay authority.
+   */
+  sessionJobId: string | null;
+  /**
+   * The job segments of every events-request path observed before the reload, as
+   * a second, cursor-independent authority. The judge is fed a job id only when
+   * this agrees with `sessionJobId`.
+   */
+  requestJobIds: string[];
 }
 
 /** Freeze the observation wrapper's current SSE body, allow already-delivered
@@ -172,44 +205,78 @@ interface ReplaySnapshot {
 async function captureReplaySnapshotAndReload(page: Page): Promise<ReplaySnapshot> {
   await Promise.all([
     page.waitForNavigation({ waitUntil: "domcontentloaded" }),
-    page.evaluate(async (snapshotKey) => {
-      const e2eWindow = window as unknown as {
-        __nsFreezeSseForReplay?: () => Promise<unknown>;
-        __nsSseObs?: SseObservations;
-      };
-      await e2eWindow.__nsFreezeSseForReplay?.();
+    page.evaluate(
+      async ([snapshotKey, sessionKey]) => {
+        const e2eWindow = window as unknown as {
+          __nsFreezeSseForReplay?: () => Promise<unknown>;
+          __nsSseObs?: SseObservations;
+        };
+        await e2eWindow.__nsFreezeSseForReplay?.();
 
-      let cursor: string | null = null;
-      let stableReads = 0;
-      for (let attempt = 0; attempt < 20 && stableReads < 3; attempt += 1) {
-        const rawSession = sessionStorage.getItem("nurse.optimize.session");
-        let nextCursor: string | null = null;
-        if (rawSession) {
+        // The session record carries BOTH the active job id and the last committed
+        // cursor. Reading them in the same task as the raw frames is what makes the
+        // job authority causally simultaneous with the evidence it authorises — not
+        // re-derived later from something the evidence itself supplied.
+        const readSession = (): { jobId: string | null; cursor: string | null } => {
+          const raw = sessionStorage.getItem(sessionKey);
+          if (!raw) return { jobId: null, cursor: null };
           try {
-            nextCursor = (JSON.parse(rawSession) as { lastCursor?: string }).lastCursor ?? null;
+            const parsed = JSON.parse(raw) as {
+              phase?: string;
+              jobId?: string;
+              lastCursor?: string;
+            };
+            return {
+              // Only an ACTIVE record names a job; a provisional one has none.
+              jobId: parsed.phase === "active" ? (parsed.jobId ?? null) : null,
+              cursor: parsed.lastCursor ?? null,
+            };
           } catch {
-            nextCursor = null;
+            return { jobId: null, cursor: null };
           }
-        }
-        stableReads = nextCursor !== null && nextCursor === cursor ? stableReads + 1 : 0;
-        cursor = nextCursor;
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      }
+        };
 
-      const chunks = e2eWindow.__nsSseObs?.sseChunks ?? [];
-      const rawIds = Array.from(
-        chunks.join("").matchAll(/^id:\s*(.+?)\r?$/gm),
-        (match) => match[1],
-      );
-      sessionStorage.setItem(snapshotKey, JSON.stringify({ cursor, rawIds }));
-      window.location.reload();
-    }, REPLAY_SNAPSHOT_KEY),
+        let cursor: string | null = null;
+        let sessionJobId: string | null = null;
+        let stableReads = 0;
+        for (let attempt = 0; attempt < 20 && stableReads < 3; attempt += 1) {
+          const next = readSession();
+          stableReads = next.cursor !== null && next.cursor === cursor ? stableReads + 1 : 0;
+          cursor = next.cursor;
+          sessionJobId = next.jobId;
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+
+        const chunks = e2eWindow.__nsSseObs?.sseChunks ?? [];
+        const rawIds = Array.from(
+          chunks.join("").matchAll(/^id:\s*(.+?)\r?$/gm),
+          (match) => match[1],
+        );
+        // Second authority: the job segment of every events path actually requested.
+        const requestJobIds = Array.from(
+          new Set(
+            (e2eWindow.__nsSseObs?.eventUrls ?? [])
+              .map((url) => /\/optimize\/([^/?#]+)\/events/.exec(url)?.[1])
+              .filter((id): id is string => typeof id === "string" && id.length > 0)
+              .map((id) => decodeURIComponent(id)),
+          ),
+        );
+        sessionStorage.setItem(
+          snapshotKey,
+          JSON.stringify({ cursor, rawIds, sessionJobId, requestJobIds }),
+        );
+        window.location.reload();
+      },
+      [REPLAY_SNAPSHOT_KEY, OPTIMIZE_SESSION_KEY] as const,
+    ),
   ]);
 
   return page.evaluate((snapshotKey) => {
     const raw = sessionStorage.getItem(snapshotKey);
     sessionStorage.removeItem(snapshotKey);
-    return raw ? (JSON.parse(raw) as ReplaySnapshot) : { cursor: null, rawIds: [] };
+    return raw
+      ? (JSON.parse(raw) as ReplaySnapshot)
+      : { cursor: null, rawIds: [], sessionJobId: null, requestJobIds: [] };
   }, REPLAY_SNAPSHOT_KEY);
 }
 
@@ -279,6 +346,34 @@ async function readReplayObservation(page: Page): Promise<ReplayObservation> {
 }
 
 test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
+  // Release the LIVE job the replay test submits, so a failure in that test cannot
+  // leave an 87-person solve burning the host for the form's 300s default and
+  // starve the NEXT test's fixture mount. That is the exact correlated failure the
+  // review recorded: one 30s timeout produced 29/2 because the abort case could
+  // not mount within 5s afterwards.
+  //
+  // Scoped deliberately: only the replay test sets `liveJobToRelease`. The abort
+  // test is SUPPOSED to walk away from a live stream (that is the mechanism it
+  // proves), it is the last test in the file, and the gate tears the stack down
+  // after it — so it is left alone rather than risk perturbing the BFF log audit
+  // that is baselined around it. This runs in `afterEach` rather than a `finally`
+  // because Playwright abandons a timed-out test body but still runs hooks, which
+  // is precisely the case this exists for.
+  let liveJobToRelease: string | null = null;
+  test.afterEach(async ({ request }) => {
+    const jobId = liveJobToRelease;
+    liveJobToRelease = null;
+    if (jobId === null) return;
+    // Best-effort and non-asserting: this is contamination cleanup, not a proof.
+    // A job that already reached terminal simply 404s/409s here.
+    try {
+      await request.post(`/api/optimize/${encodeURIComponent(jobId)}/cancel`, { timeout: 10_000 });
+      await request.delete(`/api/optimize/${encodeURIComponent(jobId)}`, { timeout: 10_000 });
+    } catch {
+      // Swallowed on purpose: the gate's own teardown is the backstop.
+    }
+  });
+
   test("tiny feasible job: SSE first byte, completion, download, cleanup", async ({ page }) => {
     await injectYaml(page, TINY_YAML);
     await gotoFixture(page);
@@ -311,6 +406,11 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
   test("live job: SSE first byte, genuine keepalive, cursor persistence, strictly-after replay, abort", async ({
     page,
   }) => {
+    // The ONE test with an explicit total budget, derived above from its own phase
+    // bounds. Not a blanket suite timeout, no retries, no sleeps, and no phase
+    // bound was relaxed to fit it.
+    test.setTimeout(REPLAY_TEST_TIMEOUT);
+
     await injectYaml(page, LARGE_YAML);
     await gotoFixture(page);
 
@@ -330,43 +430,71 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
     const rawChunks = obsAfterDelay.sseChunks.join("");
     expect(rawChunks).toContain(": keepalive");
 
-    // Atomically preserve the exact durable cursor and every raw frame ID seen
-    // before reload, then start reload in that same browser task.
-    const { cursor: cursorBefore, rawIds: preReloadIds } =
-      await captureReplaySnapshotAndReload(page);
+    // Atomically preserve the independent job authority, the exact durable cursor,
+    // and every raw frame ID seen before reload, then start reload in that same
+    // browser task.
+    const {
+      cursor: cursorBefore,
+      rawIds: preReloadIds,
+      sessionJobId,
+      requestJobIds,
+    } = await captureReplaySnapshotAndReload(page);
+
+    // --- Resolve the replay authority, independently of any cursor -------------
+    //
+    // Two cursor-free sources must agree before either is trusted: the ACTIVE
+    // session record's own `jobId` (written by the activation transaction from the
+    // POST 202 response) and the job segment of the events paths the browser
+    // actually requested. Agreement is asserted here rather than inside the judge,
+    // so the judge receives a single already-corroborated value and can never fall
+    // back to decoding a cursor.
+    expect(sessionJobId, "the active session must name its job").not.toBeNull();
+    expect(sessionJobId!.length).toBeGreaterThan(0);
+    expect(requestJobIds, "exactly one job's events path was requested").toEqual([sessionJobId]);
+    const expectedJobId = sessionJobId!;
+    // Release this job if anything below fails (see the `afterEach` rationale).
+    liveJobToRelease = expectedJobId;
+
     expect(cursorBefore).not.toBeNull();
     expect(cursorBefore!.length).toBeGreaterThan(0);
     expect(preReloadIds.length).toBeGreaterThan(0);
     expect(preReloadIds).toContain(cursorBefore);
-    await expect(page.getByTestId("screen")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId("screen")).toBeVisible({ timeout: RESUMED_SCREEN_TIMEOUT });
 
     // The FIRST post-reload events request must present the exact cursor captured
     // above. A wrong, older, different, or null cursor fails.
     await expect
-      .poll(async () => (await readSseObs(page)).eventLastEventIds[0], { timeout: 15_000 })
+      .poll(async () => (await readSseObs(page)).eventLastEventIds[0], {
+        timeout: RESUMED_HEADER_TIMEOUT,
+      })
       .toBe(cursorBefore);
 
     // Judge the replay through `judgeReplayEvidence`, whose full truth table —
-    // valid / duplicate / foreign / mixed / stale / missing / malformed — is proved
-    // deterministically in `support/optimize-durable.test.ts`, including a
-    // committed adversarial baseline showing the predicate that shipped at
-    // `d981b4d` ACCEPTED a duplicated id, a foreign-job id, and a valid id mixed
-    // with a foreign one.
+    // valid / self-consistent-foreign / duplicate / foreign / mixed / stale /
+    // missing / malformed — is proved deterministically in
+    // `support/optimize-durable.test.ts`, including committed adversarial baselines
+    // for every predicate this oracle has previously shipped.
+    //
+    // AUTHORITY CHAIN. `expectedJobId` comes from the two cursor-free sources
+    // corroborated above, never from a cursor. The judge binds `cursorBefore` to
+    // it; the assertion immediately above pins the first resumed request's
+    // `Last-Event-ID` to that same `cursorBefore`, so the resumed request is
+    // transitively bound too; and every raw id plus `cursorAfter` is bound to it as
+    // well. A fully self-consistent foreign envelope — foreign cursorBefore,
+    // foreign frames, foreign cursorAfter, all agreeing with each other — is now
+    // red, because none of them defines the authority any more.
     //
     // Retained exactly: the ONE atomic snapshot (so frames and the durable cursor
     // cannot advance relative to each other between captures), non-empty evidence,
-    // no pre-reload id re-sent, and the cursor both new and present among the
-    // frames. Added: raw-id uniqueness, and exact job binding for every recorded
-    // id and for the cursor, derived through the canonical `v1.<job>.<native>`
-    // envelope from the pre-reload cursor — which the assertion above has already
-    // pinned as the exact `Last-Event-ID` of the first post-reload request, so the
-    // job it names is the resumed one.
+    // no pre-reload id re-sent, raw-id uniqueness, and the cursor both new and
+    // present among the frames.
     const evidenceOf = async () => ({
       ...(await readReplayObservation(page)),
       preReloadIds,
     });
     const toJudged = (snap: Awaited<ReturnType<typeof evidenceOf>>) =>
       judgeReplayEvidence({
+        expectedJobId,
         rawIds: snap.rawIds,
         cursorAfter: snap.cursor,
         cursorBefore,
@@ -374,7 +502,10 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
       });
 
     await expect
-      .poll(async () => toJudged(await evidenceOf()).ok, { timeout: 20_000, intervals: [500] })
+      .poll(async () => toJudged(await evidenceOf()).ok, {
+        timeout: JUDGE_POLL_TIMEOUT,
+        intervals: [500],
+      })
       .toBe(true);
 
     const snapshot = await evidenceOf();

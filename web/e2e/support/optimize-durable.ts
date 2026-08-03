@@ -31,8 +31,9 @@ import type { JobResponse, JobState, OptimizationOutcome } from "@/lib/bff/types
 // supplies one atomic snapshot and this decides.
 //
 // Job binding is derived through the CANONICAL cursor contract
-// (`core/nurse_scheduling/server/event_cursor.py`), not by string prefix
-// matching: the public cursor is
+// (`core/nurse_scheduling/server/event_cursor.py`), not by string prefix matching,
+// and the job it is compared AGAINST comes from the pre-reload session rather than
+// from any cursor — see `ReplayEvidence.expectedJobId`. The public cursor is
 //
 //     v1.<unpadded base64url(job_id)>.<unpadded base64url(native_id)>
 //
@@ -45,6 +46,56 @@ import type { JobResponse, JobState, OptimizationOutcome } from "@/lib/bff/types
 // is an opaque store token (a decimal int in the memory backend, a `<ms>-<seq>`
 // Redis stream id in production); constraining its arithmetic would bind this
 // oracle to a storage detail it must not own.
+
+// ===========================================================================
+// The live replay test's phase bounds and total budget
+// ===========================================================================
+//
+// These live here, beside the judge, for two reasons: they are a single source of
+// truth for the spec that consumes them, and `e2e/support/**` is unit-testable
+// (Playwright specs are excluded from vitest by filename), so the derivation below
+// is guarded by assertions rather than by a comment.
+//
+// The live replay test is intentionally multi-phase and every phase already carries
+// an explicit bound. Playwright's DEFAULT per-test budget is smaller than the sum of
+// those bounds, so a run in which each phase merely behaved legitimately-slowly
+// could exhaust the test while no phase had exhausted itself. That is what the cold
+// review observed: run 4 of 6 hit the default while still inside its own phase
+// bounds, and the abandoned 87-person solve then starved the following abort test's
+// fixture mount — one under-specified budget, two failures.
+
+/** Playwright's default per-test timeout, kept for the sufficiency comparison. */
+export const PLAYWRIGHT_DEFAULT_TEST_TIMEOUT = 30_000;
+
+/** Bounded first-response observation. */
+export const FIRST_BYTE_TIMEOUT = 15_000;
+/** Fixed keepalive observation window (a real wait, not a poll). */
+export const KEEPALIVE_WINDOW = 12_000;
+/** Post-reload wait for the resumed screen to mount. */
+export const RESUMED_SCREEN_TIMEOUT = 10_000;
+/** Post-reload poll for the FIRST resumed request's exact `Last-Event-ID`. */
+export const RESUMED_HEADER_TIMEOUT = 15_000;
+/** Poll for the replay judgement to become satisfiable. */
+export const JUDGE_POLL_TIMEOUT = 20_000;
+
+/** The sum of every explicit phase bound in the live replay test. */
+export const REPLAY_PHASE_BOUNDS =
+  FIRST_BYTE_TIMEOUT +
+  KEEPALIVE_WINDOW +
+  RESUMED_SCREEN_TIMEOUT +
+  RESUMED_HEADER_TIMEOUT +
+  JUDGE_POLL_TIMEOUT;
+
+/**
+ * Allowance for the steps bounded by Playwright's own action/navigation defaults
+ * rather than by a constant here: fixture setup (goto, two visibility waits, the
+ * anonymize toggle, the enabled wait), the submit click, and the
+ * freeze/stabilise/reload navigation. Deliberately generous but finite.
+ */
+export const REPLAY_SETUP_MARGIN = 48_000;
+
+/** 72s of explicit phase bounds + 48s setup/navigation allowance = 120s. */
+export const REPLAY_TEST_TIMEOUT = REPLAY_PHASE_BOUNDS + REPLAY_SETUP_MARGIN;
 
 /** Wire version prefix of the public event cursor (`CURSOR_VERSION`). */
 export const CURSOR_VERSION = "v1";
@@ -89,6 +140,18 @@ export function decodePublicCursor(token: string): DecodedCursor | null {
 }
 
 export interface ReplayEvidence {
+  /**
+   * THE SOLE JOB AUTHORITY, and it must not come from a cursor.
+   *
+   * Deriving the expected job by decoding `cursorBefore` was circular: a foreign
+   * cursor named its own expected job, and foreign raw ids plus a foreign
+   * `cursorAfter` then agreed with it, so a fully self-consistent foreign envelope
+   * passed. The caller supplies the job the PRE-RELOAD session was actually
+   * running, captured independently of any cursor in the same causal snapshot, and
+   * `cursorBefore` is now something this judge CHECKS rather than something it
+   * trusts.
+   */
+  expectedJobId: string | null;
   /** Raw `id:` values recorded from the post-reload SSE body, in wire order. */
   rawIds: readonly string[];
   /** The durably persisted cursor read in the SAME atomic snapshot as `rawIds`. */
@@ -109,28 +172,47 @@ export interface ReplayJudgement {
  * Judge one atomic post-reload snapshot against the strictly-after replay
  * contract.
  *
- * Retained from the original predicate: non-empty evidence, no pre-reload id
- * re-sent, and the durable cursor both new and present among the recorded
- * frames. Added: raw-id UNIQUENESS, and exact JOB BINDING for every recorded id
- * and for the cursor, against the job decoded from `cursorBefore` — the resumed
- * job, since that same cursor is separately asserted to be the exact
- * `Last-Event-ID` on the first post-reload request.
+ * Retained: non-empty evidence, no pre-reload id re-sent, raw-id UNIQUENESS, and
+ * the durable cursor both new and present among the recorded frames.
+ *
+ * The job authority is now `evidence.expectedJobId` — supplied by the caller from
+ * the pre-reload session, never decoded out of a cursor. Everything cursor-shaped
+ * is bound TO it: `cursorBefore`, every raw id, and `cursorAfter`. Because the
+ * spec separately asserts that the first post-reload `Last-Event-ID` equals
+ * `cursorBefore`, binding `cursorBefore` here transitively binds the resumed
+ * request too.
+ *
+ * On the `cursorAfter` job-binding rule: it is a DIAGNOSTIC REFINEMENT, not an
+ * independently protected gate, and this file does not claim otherwise. Because
+ * `cursorAfter` must also appear among `rawIds` and every raw id is bound, an `ok`
+ * result already entails the cursor is bound — so removing this rule cannot flip
+ * any judgement from red to green. It is kept because it names the CURSOR in the
+ * failure list instead of leaving a reader to infer which id was foreign, and the
+ * unit suite asserts that exact cursor-specific message alongside the per-id one.
  */
 export function judgeReplayEvidence(evidence: ReplayEvidence): ReplayJudgement {
   const failures: string[] = [];
-  const { rawIds, cursorAfter, cursorBefore, preReloadIds } = evidence;
+  const { expectedJobId, rawIds, cursorAfter, cursorBefore, preReloadIds } = evidence;
+
+  // Fail closed: with no independent authority there is nothing to bind against,
+  // and falling back to a cursor is exactly the circularity this replaced.
+  if (expectedJobId === null || expectedJobId.length === 0) {
+    return { ok: false, failures: ["no independent pre-reload job authority was captured"] };
+  }
+  const expectedJob = expectedJobId;
 
   if (cursorBefore === null || cursorBefore.length === 0) {
-    return { ok: false, failures: ["no pre-reload cursor was captured to bind the job"] };
+    failures.push("no pre-reload cursor was captured");
+  } else {
+    const before = decodePublicCursor(cursorBefore);
+    if (before === null) {
+      failures.push(`pre-reload cursor is not a canonical public cursor: ${cursorBefore}`);
+    } else if (before.jobId !== expectedJob) {
+      failures.push(
+        `pre-reload cursor is bound to job "${before.jobId}", not the active "${expectedJob}"`,
+      );
+    }
   }
-  const before = decodePublicCursor(cursorBefore);
-  if (before === null) {
-    return {
-      ok: false,
-      failures: [`pre-reload cursor is not a canonical public cursor: ${cursorBefore}`],
-    };
-  }
-  const expectedJob = before.jobId;
 
   if (rawIds.length === 0) failures.push("no post-reload frame ids were recorded");
 
@@ -158,7 +240,7 @@ export function judgeReplayEvidence(evidence: ReplayEvidence): ReplayJudgement {
     }
     if (decoded.jobId !== expectedJob) {
       failures.push(
-        `recorded id is bound to job "${decoded.jobId}", not the resumed "${expectedJob}": ${id}`,
+        `recorded id is bound to job "${decoded.jobId}", not the active "${expectedJob}": ${id}`,
       );
     }
   }
@@ -174,7 +256,7 @@ export function judgeReplayEvidence(evidence: ReplayEvidence): ReplayJudgement {
       failures.push(`durable cursor is not a canonical public cursor: ${cursorAfter}`);
     } else if (after.jobId !== expectedJob) {
       failures.push(
-        `durable cursor is bound to job "${after.jobId}", not the resumed "${expectedJob}"`,
+        `durable cursor is bound to job "${after.jobId}", not the active "${expectedJob}"`,
       );
     }
     if (!rawIds.includes(cursorAfter)) {
