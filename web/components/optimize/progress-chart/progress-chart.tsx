@@ -1004,7 +1004,10 @@ const ProgressPanel = function ProgressPanelImpl(props: ProgressPanelProps) {
           cy={latestPixel.y}
           r={5.5}
           fill={lineColorVar}
-          stroke="var(--surface)"
+          // The plot plane, exactly like the ordinary and active dots above. This
+          // one was missed in the well migration and kept haloing against the L1
+          // `--surface` it no longer sits on.
+          stroke={PLOT_PLANE_VAR}
           strokeWidth={2}
           data-testid={`${testId}-latest-dot`}
         >

@@ -261,17 +261,31 @@ describe("ReadinessBanner", () => {
 // ---------------------------------------------------------------------------
 
 describe("RunOptionsForm", () => {
-  it("keeps the stat grid square while moving its numerals onto the v2 Title weight", () => {
+  it("keeps the stat grid square and sets its numerals in the mono data face", () => {
     const { container } = renderOptions();
     const grid = screen.getByTestId("optimize-scenario-stats");
     // A data structure is never rounded (§5). No radius utility of any role.
     expect(classesOf(grid).filter((c) => c.startsWith("rounded-"))).toEqual([]);
 
-    const numeral = screen.getByTestId("optimize-stat-nurses").firstElementChild;
-    expect(numeral).not.toBeNull();
-    const classes = classesOf(numeral!);
-    expect(classes).toContain("font-semibold");
-    expect(classes).toContain("tracking-[-0.015em]");
+    // DESIGN.md §3 reserves the mono face for "IDs, counts, hours and solver
+    // expressions", and D8 puts that explicit rule above the prototype's
+    // display-face example. Every one of the four cells is asserted, not just the
+    // first, and the heading face is REJECTED so the retired interpretation cannot
+    // come back while the weight/tracking still look right.
+    for (const testId of [
+      "optimize-stat-nurses",
+      "optimize-stat-days",
+      "optimize-stat-shifts",
+      "optimize-stat-rules-on",
+    ]) {
+      const numeral = screen.getByTestId(testId).firstElementChild;
+      expect(numeral, testId).not.toBeNull();
+      const classes = classesOf(numeral!);
+      expect(classes, `${testId} → mono data face`).toContain("font-mono");
+      expect(classes, `${testId} → not the display face`).not.toContain("font-heading");
+      expect(classes, `${testId} → ratified v2 Title weight`).toContain("font-semibold");
+      expect(classes, `${testId} → ratified tracking`).toContain("tracking-[-0.015em]");
+    }
 
     expectNoRetiredV1(container);
   });
@@ -511,18 +525,61 @@ describe("ProgressChart", () => {
     expect(commentLabel.previousElementSibling!.getAttribute("style")).toContain("var(--warn)");
   });
 
-  it("strokes the plotted line and its dots with the base series hue", () => {
+  it("strokes the plotted line with the base series hue", () => {
     render(<ProgressChart points={POINTS} />);
     const panel = screen.getByTestId("progress-chart-score-panel");
     const path = panel.querySelector("path");
     expect(path).not.toBeNull();
     expect(path!.getAttribute("stroke")).toBe("var(--brand)");
+  });
 
-    // The dot halo punches the line out of the chart's own plane, which is the
-    // WELL tone now — haloing against --surface would leave a visible ring.
-    const dot = panel.querySelector("circle");
-    expect(dot).not.toBeNull();
-    expect(dot!.getAttribute("stroke")).toBe("var(--panel)");
+  // EVERY dot halo punches the line out of the chart's own plane, which is the
+  // WELL tone now — haloing against `--surface` leaves a visible L1 ring on a
+  // `--panel` plot.
+  //
+  // The previous form of this test used `panel.querySelector("circle")`, which
+  // binds the FIRST ordinary dot and can never see the named latest-point marker;
+  // the `--surface` halo on that marker survived a 23-test suite because of it. So
+  // each kind is now bound to its own instance, the LATEST markers are addressed by
+  // their exact testids, and the count of each kind is premise-guarded — a marker
+  // that stops rendering, or a testid that stops matching, fails here instead of
+  // silently vacating the assertion.
+  it("halos every latest-point marker against the --panel plot plane, by exact instance", () => {
+    const { container } = render(<ProgressChart points={POINTS} />);
+
+    const latestDots = Array.from(
+      container.querySelectorAll<SVGCircleElement>('[data-testid$="-latest-dot"]'),
+    );
+    // Both panels carry one: the score panel always, and the comments panel
+    // because the latest point's `commentCount` is finite.
+    expect(latestDots.map((el) => el.getAttribute("data-testid"))).toEqual([
+      "progress-chart-score-panel-latest-dot",
+      "progress-chart-comment-panel-latest-dot",
+    ]);
+    for (const dot of latestDots) {
+      const id = dot.getAttribute("data-testid")!;
+      expect(dot.getAttribute("stroke"), `${id} halo`).toBe("var(--panel)");
+      expect(dot.getAttribute("stroke"), `${id} must not halo against L1`).not.toBe(
+        "var(--surface)",
+      );
+    }
+    // Each latest marker carries the series hue as its FILL, so the halo assertion
+    // above cannot be satisfied by a marker that lost its series identity.
+    expect(latestDots[0].getAttribute("fill")).toBe("var(--brand)");
+    expect(latestDots[1].getAttribute("fill")).toBe("var(--warn)");
+  });
+
+  it("halos the ordinary per-point dots against the same plot plane", () => {
+    render(<ProgressChart points={POINTS} />);
+    const panel = screen.getByTestId("progress-chart-score-panel");
+    // Ordinary dots are the circles that are NOT the named latest marker. Binding
+    // them by exclusion is what proves the latest-dot assertion above is about a
+    // genuinely different instance rather than the same element twice.
+    const ordinary = Array.from(panel.querySelectorAll<SVGCircleElement>("circle")).filter(
+      (el) => !el.hasAttribute("data-testid"),
+    );
+    expect(ordinary.length).toBe(POINTS.length);
+    for (const dot of ordinary) expect(dot.getAttribute("stroke")).toBe("var(--panel)");
   });
 });
 

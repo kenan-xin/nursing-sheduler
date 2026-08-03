@@ -159,10 +159,6 @@ async function readSseObs(page: Page): Promise<SseObservations> {
   });
 }
 
-function rawSseIds(chunks: string[]): string[] {
-  return Array.from(chunks.join("").matchAll(/^id:\s*(.+?)\r?$/gm), (match) => match[1]);
-}
-
 interface ReplaySnapshot {
   cursor: string | null;
   rawIds: string[];
@@ -236,16 +232,48 @@ async function gotoFixture(page: Page): Promise<void> {
   await expect(page.getByTestId("optimize-submit")).toBeEnabled();
 }
 
-/** Read the persisted session cursor from sessionStorage (null if absent). */
-async function readPersistedCursor(page: Page): Promise<string | null> {
+interface ReplayObservation {
+  rawIds: string[];
+  cursor: string | null;
+  firstLastEventId: string | null;
+}
+
+/**
+ * ONE causally ordered snapshot of the raw post-reload frames AND the durable
+ * cursor.
+ *
+ * Reading those two facts as two separate `page.evaluate` calls is a real race on
+ * a live 87-person solve: a frame can arrive and commit its cursor in the gap, so
+ * `cursor` names an id that is genuinely absent from the earlier `rawIds` capture
+ * and `toContain` fails on a stream that is behaving perfectly. That is what made
+ * this gate intermittently red (observed 30/1 against neighbouring 31/0 runs on a
+ * byte-identical tree).
+ *
+ * This body is a single synchronous task with no `await`, so no stream callback,
+ * parser step or storage write can interleave. The ordering that makes the
+ * invariant sound is in the observation wrapper itself: `pull` pushes the chunk
+ * into `sseChunks` BEFORE enqueuing it to the controller's parser, so a cursor can
+ * only be persisted after its frame was recorded. Within one task, therefore,
+ * `cursor` is always already present in `rawIds` — the assertion tests replay
+ * ordering, which is the point, and no longer tests two clocks against each other.
+ */
+async function readReplayObservation(page: Page): Promise<ReplayObservation> {
   return page.evaluate(() => {
+    const obs = (window as unknown as { __nsSseObs?: SseObservations }).__nsSseObs;
+    const rawIds = Array.from(
+      (obs?.sseChunks ?? []).join("").matchAll(/^id:\s*(.+?)\r?$/gm),
+      (match) => match[1],
+    );
+    let cursor: string | null = null;
     const raw = sessionStorage.getItem("nurse.optimize.session");
-    if (!raw) return null;
-    try {
-      return (JSON.parse(raw) as { lastCursor?: string }).lastCursor ?? null;
-    } catch {
-      return null;
+    if (raw) {
+      try {
+        cursor = (JSON.parse(raw) as { lastCursor?: string }).lastCursor ?? null;
+      } catch {
+        cursor = null;
+      }
     }
+    return { rawIds, cursor, firstLastEventId: obs?.eventLastEventIds?.[0] ?? null };
   });
 }
 
@@ -318,30 +346,32 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
       .toBe(cursorBefore);
 
     const preReloadSet = new Set(preReloadIds);
-    // Require raw post-reload evidence that contains no old ID, contains at
-    // least one new ID, and has committed one of those exact new IDs durably.
+    // Require raw post-reload evidence that contains no old ID, contains at least
+    // one new ID, and has committed one of those exact new IDs durably. Both the
+    // poll and the final re-assertion read ONE atomic snapshot, so the frames and
+    // the durable cursor can no longer advance relative to each other between
+    // captures. Every assertion is unchanged in strength.
     await expect
       .poll(
         async () => {
-          const postReloadIds = rawSseIds((await readSseObs(page)).sseChunks);
-          const persisted = await readPersistedCursor(page);
+          const snap = await readReplayObservation(page);
           return (
-            postReloadIds.length > 0 &&
-            postReloadIds.every((id) => !preReloadSet.has(id)) &&
-            persisted !== null &&
-            !preReloadSet.has(persisted) &&
-            postReloadIds.includes(persisted)
+            snap.rawIds.length > 0 &&
+            snap.rawIds.every((id) => !preReloadSet.has(id)) &&
+            snap.cursor !== null &&
+            !preReloadSet.has(snap.cursor) &&
+            snap.rawIds.includes(snap.cursor)
           );
         },
         { timeout: 20_000, intervals: [500] },
       )
       .toBe(true);
 
-    const postReloadObs = await readSseObs(page);
-    const postReloadIds = rawSseIds(postReloadObs.sseChunks);
-    const cursorAfter = await readPersistedCursor(page);
+    const replay = await readReplayObservation(page);
+    const postReloadIds = replay.rawIds;
+    const cursorAfter = replay.cursor;
     expect(cursorAfter).not.toBeNull();
-    expect(postReloadObs.eventLastEventIds[0]).toBe(cursorBefore);
+    expect(replay.firstLastEventId).toBe(cursorBefore);
     expect(postReloadIds.length).toBeGreaterThan(0);
     expect(postReloadIds.every((id) => !preReloadSet.has(id))).toBe(true);
     expect(postReloadIds).toContain(cursorAfter);
@@ -368,8 +398,22 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
     // reruns this test with navigation suppressed as an adversarial control; the
     // URL assertion must fail even though Playwright teardown may still close the
     // stream. It then re-baselines BFF logs and runs this real navigation.
+    //
+    // DIAGNOSTIC, not a repair. One historical run of this gate saw `page.goto`
+    // return while the URL stayed on the fixture. The beforeunload explanation
+    // originally filed for it is DISPROVED: with genuine sticky activation and a
+    // `preventDefault()`ing beforeunload listener installed, `page.goto` still
+    // navigates in this harness. Capturing the navigation response distinguishes
+    // "the navigation never committed" from "it committed and was undone", so a
+    // recurrence names its own mechanism instead of only reporting a stale URL.
+    // The assertions below are unchanged in strength.
     if (process.env.ASSEMBLED_SKIP_ABORT_NAVIGATION !== "1") {
-      await page.goto("/about");
+      const response = await page.goto("/about");
+      expect(
+        response,
+        "page.goto must return a committed navigation response for /about",
+      ).not.toBeNull();
+      expect(response!.url(), "the committed navigation response is /about").toMatch(/\/about$/);
     }
     await expect(page).toHaveURL(/\/about$/);
     await page.waitForTimeout(2_000);

@@ -93,9 +93,12 @@ function StatCell({ label, value, testId, borderRight, borderTop }: StatCellProp
         borderTop ? "border-t border-line2" : null,
       )}
     >
-      <div className="font-heading text-title font-semibold tracking-[-0.015em] text-ink">
-        {value}
-      </div>
+      {/* DESIGN.md §3 reserves Spline Sans Mono for "IDs, counts, hours and solver
+          expressions — so a number always reads as data". These four values ARE
+          counts, and D8 puts that explicit rule above the prototype's display-face
+          example, so the face is mono. Weight and tracking stay on the ratified
+          v2 Title step. */}
+      <div className="font-mono text-title font-semibold tracking-[-0.015em] text-ink">{value}</div>
       <div className="mt-0.5 text-label font-semibold uppercase tracking-[0.03em] text-ink3">
         {label}
       </div>

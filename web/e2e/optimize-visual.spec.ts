@@ -85,6 +85,71 @@ test.describe("R6 Optimize & Export — migrated route geometry and ladder", () 
     expect(plane.shadow).toBe("none");
   });
 
+  // The two cold-review presentation repairs, proved on RESOLVED paint rather than
+  // on the authored class — the component-boundary test pins the contract, this
+  // pins what Chromium actually computes.
+  test("the scenario counts render in the mono data face (DESIGN.md §3)", async ({ page }) => {
+    await gotoReady(page, "/optimize-and-export", "light");
+    await expect(page.getByTestId("optimize-scenario-stats")).toBeVisible();
+
+    // Resolve the token families live so the assertion never hard-codes a stack.
+    const families = await page.evaluate(() => {
+      const probe = document.createElement("div");
+      document.body.appendChild(probe);
+      probe.style.fontFamily = "var(--ff-mono)";
+      const mono = getComputedStyle(probe).fontFamily;
+      probe.style.fontFamily = "var(--ff-heading)";
+      const heading = getComputedStyle(probe).fontFamily;
+      probe.remove();
+      return { mono, heading };
+    });
+    expect(families.mono, "the mono and display faces must be distinguishable").not.toBe(
+      families.heading,
+    );
+
+    for (const testId of [
+      "optimize-stat-nurses",
+      "optimize-stat-days",
+      "optimize-stat-shifts",
+      "optimize-stat-rules-on",
+    ]) {
+      const numeral = page.getByTestId(testId).locator("> div").first();
+      const resolved = await numeral.evaluate((el) => getComputedStyle(el).fontFamily);
+      expect(resolved, `${testId} numeral resolves the mono data face`).toBe(families.mono);
+      expect(resolved, `${testId} numeral is not the display face`).not.toBe(families.heading);
+    }
+  });
+
+  test("every latest-point marker halos against the --panel plot plane", async ({ page }) => {
+    await gotoReady(page, "/optimize-screen-fixture", "light");
+    const chart = page.getByTestId("fx-running").getByTestId("progress-chart");
+    await expect(chart).toBeVisible();
+
+    const panel = await resolveVar(page, "backgroundColor", "--panel");
+    const surface = await resolveVar(page, "backgroundColor", "--surface");
+    expect(panel, "the well and L1 tones must differ for this to discriminate").not.toBe(surface);
+
+    // Bound to the exact named instances, with the count premise-guarded: a marker
+    // that stops rendering (or a testid that stops matching) fails here instead of
+    // silently vacating the assertion. `stroke` is read as a resolved colour, so a
+    // `var(--surface)` regression cannot pass by spelling.
+    const markers = chart.locator('[data-testid$="-latest-dot"]');
+    await expect(markers).toHaveCount(2);
+    const ids = await markers.evaluateAll((els) => els.map((el) => el.getAttribute("data-testid")));
+    expect(ids).toEqual([
+      "progress-chart-score-panel-latest-dot",
+      "progress-chart-comment-panel-latest-dot",
+    ]);
+
+    const strokes = await markers.evaluateAll((els) =>
+      els.map((el) => getComputedStyle(el).stroke),
+    );
+    for (const [i, stroke] of strokes.entries()) {
+      expect(stroke, `${ids[i]} halos against the plot plane`).toBe(panel);
+      expect(stroke, `${ids[i]} must not halo against L1`).not.toBe(surface);
+    }
+  });
+
   test("the scenario stat grid stays square inside its rounded card", async ({ page }) => {
     await gotoReady(page, "/optimize-and-export", "light");
     await expect(page.getByTestId("optimize-scenario-stats")).toBeVisible();
