@@ -96,6 +96,27 @@ export function normalizeExpectedOrigin(origin: string | null | undefined): stri
 }
 
 /**
+ * Whether a RAW absolute authority (`scheme://host[:port]`, no trailing slash) is
+ * the canonical spelling of `origin`.
+ *
+ * `origin` is already `URL.origin`, i.e. canonical scheme + lowercase host with the
+ * default port elided. The only accepted variation is that same origin with its
+ * DEFAULT port spelled out, which is the documented equivalence a `Request` may
+ * produce. Everything else — any host-case, host-encoding, port-padding,
+ * alternate-IP-literal, credential-delimiter or separator difference — is a
+ * different byte string and is therefore rejected without needing to be enumerated.
+ */
+export function isCanonicalRawAuthority(rawAuthority: string, origin: string): boolean {
+  if (rawAuthority === origin) return true;
+  // The one documented equivalence: `http://host` <-> `http://host:80`, and the
+  // https/443 pair. Only when the canonical origin itself elides the port.
+  const defaultPort = origin.startsWith("https://") ? ":443" : ":80";
+  const originHasExplicitPort = /:\d+$/.test(origin);
+  if (!originHasExplicitPort && rawAuthority === `${origin}${defaultPort}`) return true;
+  return false;
+}
+
+/**
  * Parse one recorded events-request URL against the exact canonical contract.
  *
  * Accepts exactly two RAW spellings and nothing else:
@@ -147,10 +168,36 @@ export function parseEventsRequestUrl(url: string, expectedOrigin: string | null
   } else if (url.startsWith("/")) {
     rawPath = url;
   } else if (/^https?:\/\//.test(url)) {
-    // Absolute same-origin `Request` form. Take the raw path verbatim from after
-    // the authority, so the path is judged as written rather than as normalized.
+    // Absolute `Request` form. Split the raw string at the first `/` after the
+    // scheme so BOTH halves are judged as written: the authority against the
+    // canonical origin byte-for-byte, and the path against the anchored shape.
     const authorityEnd = url.indexOf("/", url.indexOf("://") + 3);
     if (authorityEnd === -1) return fail("absolute URL has no path");
+    const rawAuthority = url.slice(0, authorityEnd);
+    // ---- RAW AUTHORITY VALIDATION ----------------------------------------
+    //
+    // Validating only the raw PATH was not enough: `new URL()` still normalized
+    // the authority, so every one of these same-origin aliases was accepted for
+    // expected origin `http://localhost:51236`:
+    //
+    //   http://LOCALHOST:51236/...       host case
+    //   http://%6cocalhost:51236/...     percent-encoded host
+    //   http://@localhost:51236/...      empty credential delimiter
+    //   http://localhost:051236/...      zero-padded port
+    //   http://2130706433/...            integer IPv4 (for 127.0.0.1)
+    //
+    // None of them is the spelling a `Request` exposes; they become
+    // indistinguishable only after WHATWG canonicalization. So rather than
+    // enumerating alias classes (host case, encoding, padded ports, integer/hex/
+    // octal IPv4, IPv6 bracket forms, stray separators...) and hoping the list is
+    // complete, the raw authority must equal the canonical origin BYTE FOR BYTE.
+    // That admits exactly one spelling and therefore closes the whole class.
+    //
+    // The single documented exception is the explicit default port, because
+    // `URL.origin` elides it while a `Request` may spell it out.
+    if (!isCanonicalRawAuthority(rawAuthority, origin)) {
+      return fail(`raw authority ${rawAuthority} is not the canonical origin ${origin}`);
+    }
     rawPath = url.slice(authorityEnd);
   } else if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(url)) {
     return fail("only http(s) URLs are part of the contract");
@@ -719,15 +766,67 @@ export interface AcceptedJobSource {
  */
 export const ACCEPTED_PENDING_SETTLE_MS = 5_000;
 
+/**
+ * The structured, AUTHORITATIVE result of a drain.
+ *
+ * `drain()` used to return `void`, and the hook then snapshotted `ids()` and
+ * reported success regardless of whether anything was left unresolved. Two exact
+ * probes showed what that cost:
+ *
+ *   late accepted after the drain bound:
+ *     before  = { ids: [], stats: { started: 0, failed: 0, pending: 1 } }
+ *     cleanup = { ok: true, steps: ["no accepted job was armed; nothing to release"] }
+ *
+ *   accepted response body rejection:
+ *     state   = { ids: [], stats: { started: 1, failed: 1, pending: 0 } }
+ *     cleanup = { ok: true, steps: ["no accepted job was armed; nothing to release"] }
+ *
+ * In both, a real solver job could exist while the hook reported success. So the
+ * drain now says so: `resolved` is false whenever a submission is still pending or
+ * an accepted body could not be read, and the caller must either RECOVER the
+ * identity from another authority or fail the gate. Silence is no longer an option.
+ */
+export interface AcceptedDrainOutcome {
+  /** Ids positively observed from accepted 202 bodies, in acceptance order. */
+  ids: string[];
+  /** True only when nothing is left pending and no accepted body failed to read. */
+  resolved: boolean;
+  /** Submissions still on the wire when the bounded settle expired. */
+  pending: number;
+  /**
+   * Accepted 202s whose id could not be obtained — the body read rejected, OR it was
+   * still unfinished when the bounded drain expired. Both are the same loss.
+   */
+  failed: number;
+}
+
 export interface AcceptedJobTracker {
   /** Every accepted job id, in acceptance order, deduplicated. */
   ids(): string[];
-  /** Await every in-flight body read. The hook calls this BEFORE snapshotting. */
-  drain(): Promise<void>;
-  /** Stop listening. Safe to call more than once. */
-  dispose(): void;
+  /**
+   * Await in-flight submissions and body reads, then report authoritatively.
+   * The hook calls this BEFORE snapshotting and BEFORE disposing.
+   */
+  drain(): Promise<AcceptedDrainOutcome>;
+  /**
+   * Stop listening, and REPORT what detaching the listeners just orphaned.
+   *
+   * Disposal is the moment ownership can be lost silently: any submission still on
+   * the wire, or any body read still in flight, will now complete with nobody
+   * watching. So disposal is not allowed to be a `void` side effect — it returns
+   * the count it stranded, and the caller must treat a nonzero count as unresolved
+   * ownership rather than as a clean finish. Safe to call more than once; repeat
+   * calls report zero because the first call already detached.
+   */
+  dispose(): AcceptedDisposal;
   /** Diagnostics for a report: reads started, reads failed, requests left pending. */
   stats(): { started: number; failed: number; pending: number };
+}
+
+/** What detaching the listeners stranded. `orphaned` must be zero for a clean finish. */
+export interface AcceptedDisposal {
+  /** Submissions on the wire plus body reads in flight when listeners detached. */
+  orphaned: number;
 }
 
 /** Whether a request is a submission POST to `/api/optimize`. */
@@ -759,7 +858,9 @@ export function trackAcceptedJobs(
   // faster read must not reorder ownership, because release order is part of the
   // determinism this promises.
   const slots: Array<string | null> = [];
-  const inflight: Array<Promise<void>> = [];
+  // A SET, not an array, and each read removes itself on settle — so after a bounded
+  // drain the remaining size is exactly the number of reads that never landed.
+  const inflight = new Set<Promise<void>>();
   let started = 0;
   let failed = 0;
   let pending = 0;
@@ -780,19 +881,21 @@ export function trackAcceptedJobs(
     started += 1;
     const slot = slots.length;
     slots.push(null);
-    inflight.push(
-      response
-        .json()
-        .then((body) => {
-          const id = (body as { id?: unknown } | null)?.id;
-          if (typeof id === "string" && id.length > 0) slots[slot] = id;
-        })
-        .catch(() => {
-          // A body that cannot be read is recorded as a failed read rather than
-          // thrown: the hook must still be able to drain and report.
-          failed += 1;
-        }),
-    );
+    const read: Promise<void> = response
+      .json()
+      .then((body) => {
+        const id = (body as { id?: unknown } | null)?.id;
+        if (typeof id === "string" && id.length > 0) slots[slot] = id;
+      })
+      .catch(() => {
+        // A body that cannot be read is recorded as a failed read rather than
+        // thrown: the hook must still be able to drain and report.
+        failed += 1;
+      })
+      .finally(() => {
+        inflight.delete(read);
+      });
+    inflight.add(read);
   };
 
   source.on("request", onRequest);
@@ -807,7 +910,7 @@ export function trackAcceptedJobs(
       }
       return seen;
     },
-    drain: async () => {
+    drain: async (): Promise<AcceptedDrainOutcome> => {
       // 1. Wait, bounded, for a submission POST that is still on the wire. Without
       //    this a test that times out mid-POST reaches the hook with nothing
       //    recorded and the response fires after the snapshot.
@@ -815,21 +918,56 @@ export function trackAcceptedJobs(
       while (pending > 0 && Date.now() < deadline) {
         await sleep(25);
       }
-      // 2. Then drain the body reads. Repeatedly, because awaiting one batch can
-      //    allow another response's read to be registered, and the hook must not
-      //    snapshot until the set is quiet.
+      // 2. Then drain the body reads, repeatedly — awaiting one batch can allow
+      //    another response's read to be registered, and the hook must not snapshot
+      //    until the set is quiet. BOUNDED, because awaiting these unconditionally
+      //    would hang the fail-closed hook itself on a read that never settles, which
+      //    is the defect class this whole path exists to close. Its OWN window, not
+      //    the remainder of phase 1's: a slow POST must not starve a healthy body read
+      //    into being counted as unobtainable.
+      const readDeadline = Date.now() + pendingSettleMs;
       for (let pass = 0; pass < 5; pass += 1) {
-        const batch = inflight.splice(0, inflight.length);
-        if (batch.length === 0) break;
-        await Promise.allSettled(batch);
+        if (inflight.size === 0) break;
+        const remaining = readDeadline - Date.now();
+        if (remaining <= 0) break;
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          await Promise.race([
+            // The Set is iterated SYNCHRONOUSLY here, and entries remove themselves
+            // only in a later microtask, so passing it directly cannot miss one.
+            Promise.allSettled(inflight),
+            new Promise<void>((resolve) => {
+              timer = setTimeout(resolve, remaining);
+            }),
+          ]);
+        } finally {
+          if (timer !== undefined) clearTimeout(timer);
+        }
       }
+      const observed: string[] = [];
+      for (const id of slots) {
+        if (id !== null && !observed.includes(id)) observed.push(id);
+      }
+      // FAIL CLOSED. A pending submission may have created a job we cannot name; an
+      // unreadable 202 body definitely named one we failed to capture; and a read
+      // still unfinished at the bound is the same loss by a slower route, so it counts
+      // the same way rather than being silently dropped.
+      const unobtainable = failed + inflight.size;
+      return {
+        ids: observed,
+        resolved: pending === 0 && unobtainable === 0,
+        pending,
+        failed: unobtainable,
+      };
     },
-    dispose: () => {
-      if (disposed) return;
+    dispose: (): AcceptedDisposal => {
+      if (disposed) return { orphaned: 0 };
       disposed = true;
       source.off("request", onRequest);
       source.off("requestfailed", onRequestFailed);
       source.off("response", handler);
+      // Anything unfinished at this instant will now land unobserved.
+      return { orphaned: pending + inflight.size };
     },
     stats: () => ({ started, failed, pending }),
   };
@@ -858,6 +996,163 @@ export async function releaseLiveJobs(
     for (const failure of outcome.failures) failures.push(`job ${jobId}: ${failure}`);
   }
   return { ok: failures.length === 0, steps, failures };
+}
+
+// ===========================================================================
+// Ownership recovery + the fail-closed settlement decision
+// ===========================================================================
+//
+// When the Node-side tracker cannot name a job (submission still pending at the
+// settle bound, or an accepted 202 whose body would not read), the id is not gone —
+// it is written elsewhere. The product's submission transaction persists the
+// ACTIVE session record, job id included, as part of accepting the 202
+// (`lib/optimize/session-transaction.ts`, key `nurse.optimize.session`). That record
+// is an INDEPENDENT authority: it is produced by the page, not by the CDP response
+// stream, so it survives exactly the failures that defeat the tracker.
+//
+// So the hook's order is: drain → if unresolved, recover from the page record →
+// settle → dispose → release every id. And if settlement still cannot account for
+// the ownership, the hook FAILS — it does not report cleanup success.
+
+/** sessionStorage key of the product's single in-flight submission record. */
+export const OPTIMIZE_SESSION_RECORD_KEY = "nurse.optimize.session";
+
+/** Bound for the page-side recovery read. One `evaluate`, so it is small. */
+export const OWNERSHIP_RECOVERY_BOUND = 5_000;
+
+/**
+ * Extract the job id from a raw session record, treating anything unexpected as a
+ * REASON rather than as an absence.
+ *
+ * Only the active variant carries a job id; a provisional record (written before the
+ * POST) legitimately has none, which is reported as `jobId: null` rather than as a
+ * failure — a provisional record means the accepted id never existed to recover.
+ */
+export function recoverJobIdFromSessionRecord(
+  raw: string | null,
+): { ok: true; jobId: string | null } | { ok: false; reason: string } {
+  if (raw === null) return { ok: true, jobId: null };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { ok: false, reason: "session record is not JSON" };
+  }
+  if (typeof parsed !== "object" || parsed === null) {
+    return { ok: false, reason: "session record is not an object" };
+  }
+  const jobId = (parsed as { jobId?: unknown }).jobId;
+  if (jobId === undefined || jobId === null) return { ok: true, jobId: null };
+  if (typeof jobId !== "string" || jobId.length === 0) {
+    return { ok: false, reason: "session record has a non-string jobId" };
+  }
+  return { ok: true, jobId };
+}
+
+/** The page-side seam, so settlement is testable without a browser. */
+export interface OwnershipRecoverySource {
+  /** Read the raw session record from the page. Rejects if the page is gone. */
+  readSessionRecord(): Promise<string | null>;
+}
+
+/** The outcome of a recovery attempt — total, like every other judge here. */
+export type OwnershipRecovery =
+  | { ok: true; ids: string[]; note: string }
+  | { ok: false; reason: string };
+
+/** Attempt page-side recovery. A rejection is a reason, never a throw. */
+export async function recoverAcceptedOwnership(
+  source: OwnershipRecoverySource,
+): Promise<OwnershipRecovery> {
+  let raw: string | null;
+  try {
+    raw = await source.readSessionRecord();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { ok: false, reason: `page-side session record was unreadable: ${message}` };
+  }
+  const parsed = recoverJobIdFromSessionRecord(raw);
+  if (!parsed.ok) return { ok: false, reason: parsed.reason };
+  if (parsed.jobId === null) {
+    return { ok: true, ids: [], note: "no active session record; no job id to recover" };
+  }
+  return {
+    ok: true,
+    ids: [parsed.jobId],
+    note: `recovered job ${parsed.jobId} from the page record`,
+  };
+}
+
+/** The settled ownership set plus whether it may be trusted as complete. */
+export interface OwnershipSettlement {
+  /** Every id to release, tracker-observed first, then recovered, deduplicated. */
+  ids: string[];
+  /** True only when nothing is left unaccounted for. */
+  ok: boolean;
+  /** Human-readable trail for the attachment. */
+  notes: string[];
+  /** Why ownership is not settled. Empty exactly when `ok`. */
+  failures: string[];
+}
+
+/**
+ * Decide, purely, whether accepted-job ownership is fully accounted for.
+ *
+ * This is the whole fail-closed rule in one testable function:
+ *
+ *   drain resolved                  -> settled, release the drained ids
+ *   drain unresolved, recovery adds  -> settled, release drained + recovered
+ *   drain unresolved, recovery empty -> NOT settled; a job may exist unnamed
+ *   drain unresolved, recovery error  -> NOT settled
+ *   disposal orphaned anything        -> NOT settled, regardless of the above
+ *
+ * The one deliberate asymmetry: a submission whose transport FAILED already
+ * decrements `pending` in the tracker, so a genuinely aborted POST does not reach
+ * here as unresolved. Only a submission that is still open at the bound does.
+ */
+export function settleAcceptedOwnership(
+  drained: AcceptedDrainOutcome,
+  recovery: OwnershipRecovery | null,
+  disposal: AcceptedDisposal,
+): OwnershipSettlement {
+  const ids = [...drained.ids];
+  const notes: string[] = [];
+  const failures: string[] = [];
+
+  notes.push(
+    `drain: ${drained.ids.length} id(s), ${drained.pending} pending, ${drained.failed} unreadable`,
+  );
+
+  if (!drained.resolved) {
+    const unresolved: string[] = [];
+    if (drained.pending > 0) unresolved.push(`${drained.pending} submission(s) still pending`);
+    if (drained.failed > 0) unresolved.push(`${drained.failed} accepted body/ies unreadable`);
+    const summary = unresolved.join(" and ");
+    if (recovery === null) {
+      failures.push(`accepted ownership unresolved (${summary}) and no recovery was attempted`);
+    } else if (!recovery.ok) {
+      failures.push(
+        `accepted ownership unresolved (${summary}); recovery failed: ${recovery.reason}`,
+      );
+    } else {
+      notes.push(`recovery: ${recovery.note}`);
+      const recovered = recovery.ids.filter((id) => !ids.includes(id));
+      ids.push(...recovered);
+      if (recovered.length === 0 && recovery.ids.length === 0) {
+        failures.push(
+          `accepted ownership unresolved (${summary}) and the page held no active job id to recover; a solver job may exist unnamed`,
+        );
+      }
+    }
+  }
+
+  if (disposal.orphaned > 0) {
+    failures.push(
+      `disposing the tracker stranded ${disposal.orphaned} in-flight submission(s)/body read(s); ownership of those is unknown`,
+    );
+  }
+
+  return { ids, ok: failures.length === 0, notes, failures };
 }
 
 /** Wire version prefix of the public event cursor (`CURSOR_VERSION`). */

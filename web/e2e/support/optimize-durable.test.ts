@@ -16,7 +16,12 @@ import {
   CLEANUP_ACCEPTED_STATUS,
   CLEANUP_BOUNDS,
   isAcceptedSubmission,
+  isCanonicalRawAuthority,
   isSubmissionRequest,
+  OPTIMIZE_SESSION_RECORD_KEY,
+  recoverAcceptedOwnership,
+  recoverJobIdFromSessionRecord,
+  settleAcceptedOwnership,
   trackAcceptedJobs,
   CURSOR_VERSION,
   decodePublicCursor,
@@ -39,6 +44,7 @@ import {
   TINY_BOUND_KEYS,
   TINY_BOUNDS,
   TINY_TEST_TIMEOUT,
+  type AcceptedDrainOutcome,
   type CleanupHttp,
   type ReplayEvidence,
 } from "./optimize-durable";
@@ -475,12 +481,16 @@ describe("trackAcceptedJobs owns every accepted 202 and cannot outlive the drain
     expect(tracker.ids()).toEqual(["a", "b"]);
   });
 
-  it("counts an unreadable body as a failed read instead of throwing", async () => {
+  // REPLACES a test that pinned the fail-OPEN behaviour: it asserted the drain
+  // resolved to `undefined` with empty ids and treated that as the contract. That is
+  // exactly the shape that let the hook report cleanup success over a live job. The
+  // unreadable body is still not thrown — but the drain now REPORTS it unresolved.
+  it("reports an unreadable accepted body as UNRESOLVED rather than as no job", async () => {
     const { source, emit } = fakeSource();
     const tracker = trackAcceptedJobs(source);
     emit(accepted("x", { json: async () => Promise.reject(new Error("body gone")) }));
-    await expect(tracker.drain()).resolves.toBeUndefined();
-    expect(tracker.ids()).toEqual([]);
+    const drained = await tracker.drain();
+    expect(drained).toEqual({ ids: [], resolved: false, pending: 0, failed: 1 });
     expect(tracker.stats()).toEqual({ started: 1, failed: 1, pending: 0 });
   });
 
@@ -512,8 +522,8 @@ describe("trackAcceptedJobs owns every accepted 202 and cannot outlive the drain
   it("stops recording once disposed, and disposing twice is safe", async () => {
     const { source, emit, isRegistered, offCalls } = fakeSource();
     const tracker = trackAcceptedJobs(source);
-    tracker.dispose();
-    tracker.dispose();
+    expect(tracker.dispose()).toEqual({ orphaned: 0 });
+    expect(tracker.dispose()).toEqual({ orphaned: 0 });
     expect(offCalls()).toBe(3);
     expect(isRegistered()).toBe(false);
     emit(accepted("after-dispose"));
@@ -536,16 +546,102 @@ describe("trackAcceptedJobs owns every accepted 202 and cannot outlive the drain
     expect(tracker.stats().pending).toBe(0);
   });
 
-  it("gives up on a pending submission at its bound instead of hanging", async () => {
+  // REPLACES a test that pinned the fail-OPEN behaviour at the DEADLINE BOUNDARY:
+  // it asserted `ids: []` and `pending: 1` and stopped there, so the hook's
+  // "nothing was armed" reading of that state looked like the intended contract.
+  // Still bounded — but now the boundary produces an explicit unresolved verdict.
+  it("reports a pending submission at its bound as UNRESOLVED, bounded", async () => {
     const { source, emitRequest } = fakeSource();
     const tracker = trackAcceptedJobs(source, { pendingSettleMs: 60 });
     emitRequest(submissionRequest);
     const started = Date.now();
-    await tracker.drain();
+    const drained = await tracker.drain();
     // Bounded: it returns rather than waiting forever for a response that never came.
     expect(Date.now() - started).toBeLessThan(2_000);
-    expect(tracker.ids()).toEqual([]);
-    expect(tracker.stats().pending).toBe(1);
+    expect(drained).toEqual({ ids: [], resolved: false, pending: 1, failed: 0 });
+  });
+
+  it("reports a fully accounted drain as RESOLVED", async () => {
+    const { source, emit } = fakeSource();
+    const tracker = trackAcceptedJobs(source);
+    emit(accepted("job-a"));
+    emit(accepted("job-b"));
+    const drained = await tracker.drain();
+    expect(drained).toEqual({ ids: ["job-a", "job-b"], resolved: true, pending: 0, failed: 0 });
+  });
+
+  // A partially-unreadable drain must not hide the id it DID capture: cleanup still
+  // has to release that job even though ownership as a whole is unresolved.
+  it("keeps the ids it captured while still reporting the unreadable one", async () => {
+    const { source, emit } = fakeSource();
+    const tracker = trackAcceptedJobs(source);
+    emit(accepted("job-good"));
+    emit(accepted("job-bad", { json: async () => Promise.reject(new Error("body gone")) }));
+    expect(await tracker.drain()).toEqual({
+      ids: ["job-good"],
+      resolved: false,
+      pending: 0,
+      failed: 1,
+    });
+  });
+
+  // Disposal is where ownership can vanish silently, so it must SAY what it stranded.
+  it("reports what disposal stranded, and a second dispose strands nothing", async () => {
+    const { source, emit, emitRequest } = fakeSource();
+    const tracker = trackAcceptedJobs(source, { pendingSettleMs: 10 });
+    emitRequest(submissionRequest);
+    // The response arrives (so the POST is no longer pending) but its body read never
+    // settles. BOUNDED: an unsettleable read must not hang the fail-closed hook itself.
+    emit(accepted("never-reads", { json: () => new Promise<never>(() => {}) }));
+    const started = Date.now();
+    const drained = await tracker.drain();
+    expect(Date.now() - started).toBeLessThan(2_000);
+    // The unfinished read counts as an id we could not obtain — the same loss as a
+    // rejected read, reached by a slower route.
+    expect(drained).toEqual({ ids: [], resolved: false, pending: 0, failed: 1 });
+    expect(tracker.dispose()).toEqual({ orphaned: 1 });
+    expect(tracker.dispose()).toEqual({ orphaned: 0 });
+  });
+
+  // The two waits are SEPARATE windows: a submission that never lands must not eat
+  // the window a healthy body read needs, or a slow POST would make a perfectly
+  // readable 202 look unobtainable and fail the gate for the wrong reason.
+  it("gives the body-read drain its own window after a never-landing submission", async () => {
+    const { source, emit, emitRequest } = fakeSource();
+    const tracker = trackAcceptedJobs(source, { pendingSettleMs: 80 });
+    // TWO submissions on the wire (`pending` is a counter, so both must be emitted for
+    // the arithmetic to be honest); only the second gets a response.
+    emitRequest(submissionRequest);
+    emitRequest(submissionRequest);
+    let release: (v: unknown) => void = () => {};
+    // The second submission's 202 landed, but its body read is slow.
+    emit(
+      accepted("job-slow-body", {
+        json: () =>
+          new Promise((resolve) => (release = resolve)).then(() => ({ id: "job-slow-body" })),
+      }),
+    );
+    setTimeout(() => release(null), 60);
+    const drained = await tracker.drain();
+    // The read landed inside its OWN window, so it is owned. Only the never-landing
+    // POST is unresolved.
+    expect(drained).toEqual({ ids: ["job-slow-body"], resolved: false, pending: 1, failed: 0 });
+  });
+
+  it("reports a submission still on the wire at disposal as stranded", async () => {
+    const { source, emitRequest } = fakeSource();
+    const tracker = trackAcceptedJobs(source, { pendingSettleMs: 10 });
+    emitRequest(submissionRequest);
+    expect(await tracker.drain()).toEqual({ ids: [], resolved: false, pending: 1, failed: 0 });
+    expect(tracker.dispose()).toEqual({ orphaned: 1 });
+  });
+
+  it("reports a clean disposal as stranding nothing", async () => {
+    const { source, emit } = fakeSource();
+    const tracker = trackAcceptedJobs(source);
+    emit(accepted("job-a"));
+    await tracker.drain();
+    expect(tracker.dispose()).toEqual({ orphaned: 0 });
   });
 
   it("clears a pending submission that fails at the transport level", async () => {
@@ -580,6 +676,275 @@ describe("trackAcceptedJobs owns every accepted 202 and cannot outlive the drain
     expect(isAcceptedSubmission(accepted("a", { url: () => "/api/optimize?x=1" }))).toBe(true);
     expect(isAcceptedSubmission(accepted("a", { status: () => 400 }))).toBe(false);
     expect(isAcceptedSubmission(accepted("a", { url: () => "/api/optimizer" }))).toBe(false);
+  });
+});
+
+// P2-2. Ownership must FAIL CLOSED and then RECOVER. The two probes below are the
+// exact states the hook used to report as cleanup success:
+//
+//   { ids: [], resolved: false, pending: 1, failed: 0 }   late accepted
+//   { ids: [], resolved: false, pending: 0, failed: 1 }   unreadable accepted body
+//
+// `settleAcceptedOwnership` is pure, so the whole truth table is provable here, and
+// the composed proof at the bottom drives the real `releaseLiveJob` lifecycle over a
+// RECOVERED id — cancel -> poll to terminal -> delete — so the recovery path is shown
+// to actually release a job rather than merely to report one.
+describe("accepted-job ownership fails closed and recovers", () => {
+  const CLEAN: AcceptedDrainOutcome = { ids: ["job-a"], resolved: true, pending: 0, failed: 0 };
+  const PENDING: AcceptedDrainOutcome = { ids: [], resolved: false, pending: 1, failed: 0 };
+  const UNREADABLE: AcceptedDrainOutcome = { ids: [], resolved: false, pending: 0, failed: 1 };
+  const CLEAN_DISPOSAL = { orphaned: 0 };
+
+  it("settles a resolved drain without consulting recovery at all", () => {
+    const settled = settleAcceptedOwnership(CLEAN, null, CLEAN_DISPOSAL);
+    expect(settled.ok).toBe(true);
+    expect(settled.ids).toEqual(["job-a"]);
+    expect(settled.failures).toEqual([]);
+  });
+
+  // THE CORE REGRESSION. Unresolved with no recovery is NOT success.
+  it.each([
+    ["a pending submission", PENDING, "1 submission(s) still pending"],
+    ["an unreadable accepted body", UNREADABLE, "1 accepted body/ies unreadable"],
+  ])("refuses to call %s settled when no recovery was attempted", (_label, drained, summary) => {
+    const settled = settleAcceptedOwnership(drained, null, CLEAN_DISPOSAL);
+    expect(settled.ok).toBe(false);
+    expect(settled.ids).toEqual([]);
+    expect(settled.failures).toEqual([
+      `accepted ownership unresolved (${summary}) and no recovery was attempted`,
+    ]);
+  });
+
+  it.each([
+    ["a pending submission", PENDING],
+    ["an unreadable accepted body", UNREADABLE],
+  ])("recovers ownership for %s from the page record", (_label, drained) => {
+    const settled = settleAcceptedOwnership(
+      drained,
+      {
+        ok: true,
+        ids: ["job-recovered"],
+        note: "recovered job job-recovered from the page record",
+      },
+      CLEAN_DISPOSAL,
+    );
+    expect(settled.ok).toBe(true);
+    expect(settled.ids).toEqual(["job-recovered"]);
+    expect(settled.notes).toContain("recovery: recovered job job-recovered from the page record");
+  });
+
+  it("refuses to settle when the page held no job id to recover", () => {
+    const settled = settleAcceptedOwnership(
+      UNREADABLE,
+      { ok: true, ids: [], note: "no active session record; no job id to recover" },
+      CLEAN_DISPOSAL,
+    );
+    expect(settled.ok).toBe(false);
+    expect(settled.failures).toEqual([
+      "accepted ownership unresolved (1 accepted body/ies unreadable) and the page held no active job id to recover; a solver job may exist unnamed",
+    ]);
+  });
+
+  it("refuses to settle when recovery itself failed", () => {
+    const settled = settleAcceptedOwnership(
+      PENDING,
+      { ok: false, reason: "page-side session record was unreadable: page closed" },
+      CLEAN_DISPOSAL,
+    );
+    expect(settled.ok).toBe(false);
+    expect(settled.failures).toEqual([
+      "accepted ownership unresolved (1 submission(s) still pending); recovery failed: page-side session record was unreadable: page closed",
+    ]);
+  });
+
+  it("names BOTH unresolved causes when a drain has each", () => {
+    const settled = settleAcceptedOwnership(
+      { ids: [], resolved: false, pending: 2, failed: 3 },
+      null,
+      CLEAN_DISPOSAL,
+    );
+    expect(settled.failures).toEqual([
+      "accepted ownership unresolved (2 submission(s) still pending and 3 accepted body/ies unreadable) and no recovery was attempted",
+    ]);
+  });
+
+  // MULTIPLE ACCEPTED POSTS. Every tracked id is released, in acceptance order, and a
+  // recovered id that duplicates a tracked one must not be released twice.
+  it("releases every tracked id in acceptance order, deduplicated against recovery", () => {
+    const settled = settleAcceptedOwnership(
+      { ids: ["job-1", "job-2"], resolved: false, pending: 0, failed: 1 },
+      { ok: true, ids: ["job-2"], note: "recovered job job-2 from the page record" },
+      CLEAN_DISPOSAL,
+    );
+    // Recovery named a job we already own, which DOES account for the unreadable
+    // body, so ownership settles — and the id appears exactly once.
+    expect(settled.ids).toEqual(["job-1", "job-2"]);
+    expect(settled.ok).toBe(true);
+  });
+
+  // Disposal orphaning is independent: even a resolved drain cannot be called settled
+  // if detaching the listeners stranded work.
+  it("refuses to settle when disposal stranded in-flight work", () => {
+    const settled = settleAcceptedOwnership(CLEAN, null, { orphaned: 2 });
+    expect(settled.ok).toBe(false);
+    expect(settled.failures).toEqual([
+      "disposing the tracker stranded 2 in-flight submission(s)/body read(s); ownership of those is unknown",
+    ]);
+    // The id it DID know is still released.
+    expect(settled.ids).toEqual(["job-a"]);
+  });
+
+  it("always records the drain shape in its notes, settled or not", () => {
+    expect(settleAcceptedOwnership(UNREADABLE, null, CLEAN_DISPOSAL).notes).toContain(
+      "drain: 0 id(s), 0 pending, 1 unreadable",
+    );
+  });
+
+  describe("recoverJobIdFromSessionRecord reads the product's own record", () => {
+    it("recovers the job id from an ACTIVE record", () => {
+      const raw = JSON.stringify({ version: 1, ownerId: "o", jobId: "job-from-page" });
+      expect(recoverJobIdFromSessionRecord(raw)).toEqual({ ok: true, jobId: "job-from-page" });
+    });
+
+    // A provisional record is written BEFORE the POST and legitimately has no job id:
+    // absence here means the accepted id never existed, not that we lost it.
+    it("reports no job id for a PROVISIONAL record", () => {
+      expect(recoverJobIdFromSessionRecord(JSON.stringify({ version: 1, ownerId: "o" }))).toEqual({
+        ok: true,
+        jobId: null,
+      });
+    });
+
+    it("reports no job id when there is no record at all", () => {
+      expect(recoverJobIdFromSessionRecord(null)).toEqual({ ok: true, jobId: null });
+    });
+
+    it.each([
+      ["not JSON", "{oops", "session record is not JSON"],
+      ["not an object", "42", "session record is not an object"],
+      ["null", "null", "session record is not an object"],
+      ["a non-string jobId", '{"jobId":7}', "session record has a non-string jobId"],
+      ["an empty jobId", '{"jobId":""}', "session record has a non-string jobId"],
+    ])("fails closed on a record that is %s", (_label, raw, reason) => {
+      expect(recoverJobIdFromSessionRecord(raw)).toEqual({ ok: false, reason });
+    });
+  });
+
+  describe("recoverAcceptedOwnership never throws at the hook", () => {
+    it("turns a page-read rejection into a reason", async () => {
+      const recovery = await recoverAcceptedOwnership({
+        readSessionRecord: () => Promise.reject(new Error("Target page closed")),
+      });
+      expect(recovery).toEqual({
+        ok: false,
+        reason: "page-side session record was unreadable: Target page closed",
+      });
+    });
+
+    it("recovers the id the page holds", async () => {
+      const recovery = await recoverAcceptedOwnership({
+        readSessionRecord: async () => JSON.stringify({ jobId: "job-page" }),
+      });
+      expect(recovery).toEqual({
+        ok: true,
+        ids: ["job-page"],
+        note: "recovered job job-page from the page record",
+      });
+    });
+
+    it("reads the exact key the product writes", () => {
+      expect(OPTIMIZE_SESSION_RECORD_KEY).toBe("nurse.optimize.session");
+    });
+  });
+
+  // THE COMPOSED PROOF. An unreadable accepted body, recovered from the page, must
+  // drive the real release lifecycle to completion — otherwise "recovered" would be a
+  // report with no consequence, which is the fail-open shape wearing a new label.
+  describe("a recovered id is actually released, cancel -> terminal -> delete", () => {
+    function fakeHttp(over: Partial<CleanupHttp> = {}) {
+      const calls: string[] = [];
+      let clock = 0;
+      let polls = 0;
+      const http: CleanupHttp = {
+        post: async (url) => {
+          calls.push(`POST ${url}`);
+          return { status: 202, body: "" };
+        },
+        get: async (url) => {
+          calls.push(`GET ${url}`);
+          polls += 1;
+          // First poll is still cancelling; then terminal. The 409-if-you-delete-too-
+          // early hazard is the reason this wait exists at all.
+          return polls === 1
+            ? { status: 200, body: JSON.stringify({ state: "cancelling" }) }
+            : { status: 200, body: JSON.stringify({ state: "cancelled" }) };
+        },
+        delete: async (url) => {
+          calls.push(`DELETE ${url}`);
+          return { status: 204, body: "" };
+        },
+        sleep: async (ms) => void (clock += ms),
+        now: () => clock,
+        ...over,
+      };
+      return { http, calls: () => calls };
+    }
+
+    it("cancels, waits for terminal, then deletes the recovered job", async () => {
+      const drained: AcceptedDrainOutcome = { ids: [], resolved: false, pending: 0, failed: 1 };
+      const recovery = await recoverAcceptedOwnership({
+        readSessionRecord: async () => JSON.stringify({ jobId: "job-recovered" }),
+      });
+      const settled = settleAcceptedOwnership(drained, recovery, { orphaned: 0 });
+      expect(settled.ok).toBe(true);
+
+      const { http, calls } = fakeHttp();
+      const outcome = await releaseLiveJobs(settled.ids, http);
+      expect(outcome.ok).toBe(true);
+      expect(calls()).toEqual([
+        "POST /api/optimize/job-recovered/cancel",
+        "GET /api/optimize/job-recovered",
+        "GET /api/optimize/job-recovered",
+        "DELETE /api/optimize/job-recovered",
+      ]);
+      // NO NEXT-TEST CONTAMINATION: the job is gone and nothing is left owned.
+      expect(outcome.failures).toEqual([]);
+    });
+
+    it("releases MULTIPLE accepted jobs, and one failure cannot hide another", async () => {
+      const { http, calls } = fakeHttp({
+        post: async (url) => {
+          if (url.includes("job-2")) throw new Error("socket hang up");
+          return { status: 202, body: "" };
+        },
+      });
+      const outcome = await releaseLiveJobs(["job-1", "job-2", "job-3"], http);
+      expect(outcome.ok).toBe(false);
+      // Every job was ATTEMPTED: job-2's transport error did not abort the loop.
+      expect(outcome.steps.map((s) => s.split(":")[0])).toEqual([
+        "job job-1",
+        "job job-2",
+        "job job-3",
+      ]);
+      expect(outcome.failures).toEqual([
+        "job job-2: cancel request failed at the transport level: socket hang up",
+      ]);
+      expect(calls().filter((c) => c.startsWith("DELETE"))).toEqual([
+        "DELETE /api/optimize/job-1",
+        "DELETE /api/optimize/job-3",
+      ]);
+    });
+  });
+
+  // MUTATION PROOF. Reverting to the fail-open rule — "if the drain produced no ids,
+  // there is nothing to release" — calls BOTH probe states success.
+  const FAIL_OPEN_RULE = (drained: AcceptedDrainOutcome): boolean => drained.ids.length === 0;
+
+  it("the fail-OPEN rule this replaces called both probe states successful", () => {
+    for (const drained of [PENDING, UNREADABLE]) {
+      expect(FAIL_OPEN_RULE(drained)).toBe(true); // "nothing to release" — the false green
+      expect(settleAcceptedOwnership(drained, null, CLEAN_DISPOSAL).ok).toBe(false);
+    }
   });
 });
 
@@ -939,7 +1304,9 @@ describe("parseEventsRequestUrl enforces the exact canonical events path AND ori
   it.each(ORIGIN_REJECTED)("rejects %s", (_label, url, origin) => {
     const parsed = parseEventsRequestUrl(url, origin);
     expect(parsed.ok).toBe(false);
-    if (!parsed.ok) expect(parsed.reason).toMatch(/is not the page origin/);
+    // Absolute forms are now caught by the RAW authority check, which runs before any
+    // normalization; the post-normalization origin comparison remains as a backstop.
+    if (!parsed.ok) expect(parsed.reason).toMatch(/is not the (canonical|page) origin/);
   });
 
   // THE FINDING THIS ROUND CLOSED. `new URL()` normalizes each of these
@@ -991,7 +1358,9 @@ describe("parseEventsRequestUrl enforces the exact canonical events path AND ori
       "http://localhost:51236",
     );
     expect(parsed.ok).toBe(false);
-    if (!parsed.ok) expect(parsed.reason).toMatch(/credentials are not part/);
+    // Caught by the raw authority check now (`user:pass@localhost:51236` is not the
+    // canonical origin) rather than by the post-normalization credential check.
+    if (!parsed.ok) expect(parsed.reason).toMatch(/is not the canonical origin/);
   });
 
   it("fails closed when the expected origin is missing or invalid", () => {
@@ -1043,6 +1412,248 @@ describe("parseEventsRequestUrl enforces the exact canonical events path AND ori
   it("rejects an invalid percent-escape without throwing", () => {
     const parsed = parseEventsRequestUrl("/api/optimize/%E0%A4%A/events", ORIGIN);
     expect(parsed.ok).toBe(false);
+  });
+});
+
+// P2-1. Validating the raw PATH was not enough: `new URL()` also normalizes the
+// AUTHORITY, so every alias below reached `parsed.origin === origin` already rewritten
+// into the canonical spelling. Each one was measured against Node's own `URL` and
+// confirmed to normalize onto the expected origin, so each was a real false green.
+describe("parseEventsRequestUrl judges the RAW authority, before normalization", () => {
+  // Direct cases. `reason` is asserted exactly so a case cannot be satisfied by some
+  // OTHER rejection (a path or scheme complaint) and silently stop testing authority.
+  const AUTHORITY_ALIASES: Array<[string, string, string]> = [
+    [
+      "an uppercase host",
+      `http://LOCALHOST:51236/api/optimize/${JOB}/events`,
+      "http://LOCALHOST:51236",
+    ],
+    [
+      "a mixed-case host",
+      `http://LocalHost:51236/api/optimize/${JOB}/events`,
+      "http://LocalHost:51236",
+    ],
+    [
+      "a percent-encoded host",
+      `http://%6cocalhost:51236/api/optimize/${JOB}/events`,
+      "http://%6cocalhost:51236",
+    ],
+    [
+      "an empty credential delimiter",
+      `http://@localhost:51236/api/optimize/${JOB}/events`,
+      "http://@localhost:51236",
+    ],
+    [
+      "a zero-padded port",
+      `http://localhost:051236/api/optimize/${JOB}/events`,
+      "http://localhost:051236",
+    ],
+    [
+      "a trailing-dot host",
+      `http://localhost.:51236/api/optimize/${JOB}/events`,
+      "http://localhost.:51236",
+    ],
+  ];
+
+  it.each(AUTHORITY_ALIASES)("rejects %s", (_label, url, rawAuthority) => {
+    const parsed = parseEventsRequestUrl(url, ORIGIN);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) {
+      expect(parsed.reason).toBe(
+        `raw authority ${rawAuthority} is not the canonical origin ${ORIGIN}`,
+      );
+    }
+  });
+
+  // Noncanonical IPv4 literals, which need a host-only expected origin to be the
+  // false green they were: `new URL` renders each of these as `127.0.0.1`.
+  const IPV4_ALIASES: Array<[string, string]> = [
+    ["integer IPv4", "http://2130706433"],
+    ["hex IPv4", "http://0x7f000001"],
+    ["short-form IPv4", "http://127.1"],
+  ];
+
+  it.each(IPV4_ALIASES)("rejects a noncanonical %s literal", (_label, authority) => {
+    const parsed = parseEventsRequestUrl(
+      `${authority}/api/optimize/${JOB}/events`,
+      "http://127.0.0.1",
+    );
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) {
+      expect(parsed.reason).toBe(
+        `raw authority ${authority} is not the canonical origin http://127.0.0.1`,
+      );
+    }
+  });
+
+  // The greens the repair must NOT break.
+  it("still accepts the canonical same-origin absolute form a Request exposes", () => {
+    expect(parseEventsRequestUrl(`${ORIGIN}/api/optimize/${JOB}/events`, ORIGIN)).toEqual({
+      ok: true,
+      jobId: JOB,
+    });
+  });
+
+  it("still accepts the canonical root-relative form, which has no authority", () => {
+    expect(parseEventsRequestUrl(`/api/optimize/${JOB}/events`, ORIGIN)).toEqual({
+      ok: true,
+      jobId: JOB,
+    });
+  });
+
+  // THE ONE documented equivalence, both directions of both default ports.
+  it.each([
+    [
+      "http with an explicit :80",
+      `http://localhost:80/api/optimize/${JOB}/events`,
+      "http://localhost",
+    ],
+    [
+      "http with an elided :80",
+      `http://localhost/api/optimize/${JOB}/events`,
+      "http://localhost:80",
+    ],
+    [
+      "https with an explicit :443",
+      `https://localhost:443/api/optimize/${JOB}/events`,
+      "https://localhost",
+    ],
+    [
+      "https with an elided :443",
+      `https://localhost/api/optimize/${JOB}/events`,
+      "https://localhost:443",
+    ],
+  ])("preserves the documented default-port equivalence: %s", (_label, url, origin) => {
+    expect(parseEventsRequestUrl(url, origin)).toEqual({ ok: true, jobId: JOB });
+  });
+
+  // The allowance is DEFAULT-port only: it must not license an arbitrary port, and it
+  // must not license the wrong scheme's default.
+  it.each([
+    [
+      "a non-default port against a portless origin",
+      `http://localhost:8080/api/optimize/${JOB}/events`,
+      "http://localhost",
+    ],
+    [
+      "http's default against an https origin",
+      `https://localhost:80/api/optimize/${JOB}/events`,
+      "https://localhost",
+    ],
+    [
+      "https's default against an http origin",
+      `http://localhost:443/api/optimize/${JOB}/events`,
+      "http://localhost",
+    ],
+    [
+      "a default port against an origin that already has an explicit one",
+      `http://localhost:80/api/optimize/${JOB}/events`,
+      "http://localhost:51236",
+    ],
+  ])("does not extend the default-port allowance to %s", (_label, url, origin) => {
+    const parsed = parseEventsRequestUrl(url, origin);
+    expect(parsed.ok).toBe(false);
+  });
+
+  it("judges the raw authority directly, with the origin already canonical", () => {
+    expect(isCanonicalRawAuthority("http://localhost:51236", ORIGIN)).toBe(true);
+    expect(isCanonicalRawAuthority("http://localhost:80", "http://localhost")).toBe(true);
+    expect(isCanonicalRawAuthority("https://h:443", "https://h")).toBe(true);
+    expect(isCanonicalRawAuthority("http://LOCALHOST:51236", ORIGIN)).toBe(false);
+    expect(isCanonicalRawAuthority("http://localhost:51236:", ORIGIN)).toBe(false);
+    expect(isCanonicalRawAuthority("http://localhost", ORIGIN)).toBe(false);
+  });
+
+  // MIXED evidence. The authority judge must never accept a run because MOST of its
+  // URLs were canonical: one aliased URL among canonical ones is still a rejection,
+  // and the reason must name the alias rather than a generic count.
+  it("rejects a run that mixes canonical URLs with ONE aliased authority", () => {
+    const verdict = judgeEventsAuthority(
+      [
+        `/api/optimize/${JOB}/events`,
+        `${ORIGIN}/api/optimize/${JOB}/events`,
+        `http://%6cocalhost:51236/api/optimize/${JOB}/events`,
+      ],
+      JOB,
+      ORIGIN,
+    );
+    expect(verdict.ok).toBe(false);
+    expect(verdict.failures).toEqual([
+      `events URL rejected (raw authority http://%6cocalhost:51236 is not the canonical origin ${ORIGIN})`,
+    ]);
+  });
+
+  it("accepts a run whose canonical relative and absolute forms are mixed", () => {
+    const verdict = judgeEventsAuthority(
+      [`/api/optimize/${JOB}/events`, `${ORIGIN}/api/optimize/${JOB}/events`],
+      JOB,
+      ORIGIN,
+    );
+    expect(verdict.ok).toBe(true);
+    expect(verdict.failures).toEqual([]);
+  });
+
+  // MUTATION PROOF. `NORMALIZED_AUTHORITY_JUDGE` is the exact pre-repair shape: raw
+  // PATH validated first (that closure holds), but the authority compared only AFTER
+  // `new URL` normalization. It is kept here as a committed adversarial baseline, and
+  // asserted to ACCEPT every alias the current judge rejects.
+  const NORMALIZED_AUTHORITY_JUDGE = (url: string, origin: string): boolean => {
+    if (url !== url.trim()) return false;
+    if (/\s/.test(url) || url.includes("\\") || url.includes("?") || url.includes("#"))
+      return false;
+    let rawPath: string;
+    if (url.startsWith("//")) return false;
+    if (url.startsWith("/")) {
+      rawPath = url;
+    } else if (/^https?:\/\//.test(url)) {
+      const authorityEnd = url.indexOf("/", url.indexOf("://") + 3);
+      if (authorityEnd === -1) return false;
+      rawPath = url.slice(authorityEnd);
+    } else {
+      return false;
+    }
+    if (!/^\/api\/optimize\/([^/]+)\/events$/.test(rawPath)) return false;
+    let parsed: URL;
+    try {
+      parsed = new URL(url, origin);
+    } catch {
+      return false;
+    }
+    if (parsed.username.length > 0 || parsed.password.length > 0) return false;
+    return parsed.origin === origin; // <-- the normalized comparison, the whole defect
+  };
+
+  it.each(AUTHORITY_ALIASES.filter(([label]) => label !== "a trailing-dot host"))(
+    "the normalized-authority judge this replaces ACCEPTED %s",
+    (_label, url) => {
+      expect(NORMALIZED_AUTHORITY_JUDGE(url, ORIGIN)).toBe(true); // the false green
+      expect(parseEventsRequestUrl(url, ORIGIN).ok).toBe(false); // now red
+    },
+  );
+
+  it.each(IPV4_ALIASES)(
+    "the normalized-authority judge this replaces ACCEPTED %s",
+    (_label, authority) => {
+      const url = `${authority}/api/optimize/${JOB}/events`;
+      expect(NORMALIZED_AUTHORITY_JUDGE(url, "http://127.0.0.1")).toBe(true); // the false green
+      expect(parseEventsRequestUrl(url, "http://127.0.0.1").ok).toBe(false); // now red
+    },
+  );
+
+  // The baseline must still be a FAITHFUL replica: it has to keep the closures the
+  // previous round landed, or "it used to accept this" would prove nothing.
+  it("the baseline retains the raw-PATH closures, so only authority differs", () => {
+    for (const aliased of [
+      `api/optimize/${JOB}/events`,
+      `//localhost:51236/api/optimize/${JOB}/events`,
+      `/api/optimize/old/../${JOB}/events`,
+      `  /api/optimize/${JOB}/events  `,
+    ]) {
+      expect(NORMALIZED_AUTHORITY_JUDGE(aliased, ORIGIN)).toBe(false);
+    }
+    // And it accepts what it should: the canonical forms.
+    expect(NORMALIZED_AUTHORITY_JUDGE(`/api/optimize/${JOB}/events`, ORIGIN)).toBe(true);
+    expect(NORMALIZED_AUTHORITY_JUDGE(`${ORIGIN}/api/optimize/${JOB}/events`, ORIGIN)).toBe(true);
   });
 });
 
@@ -1106,7 +1717,7 @@ describe("judgeEventsAuthority fails closed and never discards evidence", () => 
     );
     expect(verdict.ok).toBe(false);
     expect(verdict.failures).toHaveLength(1);
-    expect(verdict.failures[0]).toMatch(/is not the page origin/);
+    expect(verdict.failures[0]).toMatch(/is not the (canonical|page) origin/);
   });
 
   it("rejects canonical + a PROTOCOL-RELATIVE foreign host", () => {

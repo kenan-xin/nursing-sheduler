@@ -28,8 +28,12 @@ import {
   judgeReplayEvidence,
   KEEPALIVE_WINDOW,
   OBSERVATION_EVALUATE_BOUND,
+  OPTIMIZE_SESSION_RECORD_KEY,
+  OWNERSHIP_RECOVERY_BOUND,
   parseEventsRequestUrl,
+  recoverAcceptedOwnership,
   releaseLiveJobs,
+  settleAcceptedOwnership,
   REPLAY_BOUNDS,
   REPLAY_TEST_TIMEOUT,
   RESUMED_HEADER_TIMEOUT,
@@ -38,6 +42,7 @@ import {
   TINY_TEST_TIMEOUT,
   trackAcceptedJobs,
   type AcceptedJobTracker,
+  type OwnershipRecovery,
 } from "./support/optimize-durable";
 
 const REPO_ROOT = resolve(__dirname, "../..");
@@ -49,6 +54,12 @@ const LARGE_YAML = readFileSync(
   resolve(REPO_ROOT, "core/tests/testcases/real/large-ward-with-87-people-2025-11.yaml"),
   "utf-8",
 );
+
+// Printed immediately before the abort lane's URL assertion, in negative-control mode
+// only, so `docker/verify-stream.sh` can tell "failed AT the intended assertion" from
+// "failed somewhere else with familiar-looking words in the message". Kept in sync
+// with the `NEG_SENTINEL` literal in that script.
+const ABORT_CONTROL_SENTINEL = "R6_ABORT_CONTROL_AT_URL_ASSERTION";
 
 // The abort lane's URL-settle window now lives in `ABORT_BOUNDS.abortUrlSettle`,
 // alongside every other bound that lane spends, so its total is derived from the
@@ -518,19 +529,60 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
   // This runs in `afterEach` rather than a `finally` because Playwright abandons a
   // timed-out test body but still runs hooks, which is precisely the case this
   // exists for.
+  //
+  // Deliberately NOT added to the three enumerated budgets: Playwright counts
+  // `afterEach` inside the test timeout, so on a maximally slow run this hook can be
+  // truncated. That is safe here in the only sense that matters — a truncated hook
+  // makes the test TIME OUT, i.e. red, so it cannot manufacture a false green. The
+  // budgets therefore stay exactly as pinned (they bound the test bodies), and this
+  // hook's own bounds (`ACCEPTED_PENDING_SETTLE_MS`, `OWNERSHIP_RECOVERY_BOUND`,
+  // `CLEANUP_BOUNDS`) are documented at their definitions instead.
   let acceptedTracker: AcceptedJobTracker | null = null;
-  test.afterEach(async ({ request }, testInfo) => {
+  test.afterEach(async ({ page, request }, testInfo) => {
     const tracker = acceptedTracker;
     acceptedTracker = null;
-    // Drain BEFORE the snapshot: every in-flight body read must have landed, so a
-    // 202 that arrived at the deadline is owned rather than missed.
+    // Drain BEFORE the snapshot, and take the drain's own verdict rather than just
+    // its ids. The previous hook awaited a `void` drain, copied `ids()`, disposed,
+    // and reported success — so a submission still pending at the settle bound, or
+    // an accepted 202 whose body would not read, produced `armed jobs: (none)` and
+    // `cleanup ok` while a solver could be running. Now unresolved ownership must be
+    // RECOVERED from the page's own session record or the hook fails.
     let trackerStats = { started: 0, failed: 0 };
     let jobIds: string[] = [];
+    let settlementNotes: string[] = [];
+    let settlementFailures: string[] = [];
     if (tracker !== null) {
-      await tracker.drain();
-      jobIds = tracker.ids();
+      const drained = await tracker.drain();
       trackerStats = tracker.stats();
-      tracker.dispose();
+
+      // Independent authority, consulted ONLY when the tracker fell short. The
+      // product writes the active session record (job id included) as part of
+      // accepting the 202, so it is produced by the page rather than by the CDP
+      // response stream — exactly the failures that defeat the tracker leave it
+      // intact. Bounded, because `page.evaluate` takes no timeout.
+      let recovery: OwnershipRecovery | null = null;
+      if (!drained.resolved) {
+        recovery = await recoverAcceptedOwnership({
+          readSessionRecord: () =>
+            withBound(
+              "ownership recovery read",
+              OWNERSHIP_RECOVERY_BOUND,
+              page.evaluate(
+                (key) => window.sessionStorage.getItem(key),
+                OPTIMIZE_SESSION_RECORD_KEY,
+              ),
+            ),
+        });
+      }
+
+      // Dispose AFTER settling the drain, and take disposal's own report: detaching
+      // the listeners is the instant ownership can be lost silently, so anything
+      // still in flight then is unresolved rather than finished.
+      const disposal = tracker.dispose();
+      const settlement = settleAcceptedOwnership(drained, recovery, disposal);
+      jobIds = settlement.ids;
+      settlementNotes = settlement.notes;
+      settlementFailures = settlement.failures;
     }
 
     // Cancel -> poll to terminal -> DELETE, asserting the documented status at each
@@ -561,7 +613,9 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
     const report = [
       `armed jobs: ${jobIds.length === 0 ? "(none)" : jobIds.join(", ")}`,
       `tracker: ${trackerStats.started} accepted-response read(s), ${trackerStats.failed} unreadable`,
+      ...settlementNotes,
       ...outcome.steps,
+      ...settlementFailures,
       ...outcome.failures,
     ].join("\n");
     await testInfo.attach("live-job-cleanup", {
@@ -569,7 +623,10 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
       contentType: "text/plain",
     });
 
-    if (outcome.ok) return;
+    // Cleanup is successful only when BOTH the release converged AND ownership was
+    // fully accounted for. Releasing an empty set is not success when the reason the
+    // set is empty is that we could not name the job.
+    if (outcome.ok && settlementFailures.length === 0) return;
     // Never replace the primary failure: if the test already failed, the cleanup
     // trace is attached above and that is all. But a cleanup failure on an
     // otherwise PASSING test means the next lane may be starved, so it must fail
@@ -883,6 +940,19 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
     // The repair is therefore a bounded wait, not a weaker claim: the assertion is
     // unchanged and still requires the URL to become `/about`; only the settling
     // window is now explicit instead of an implicit 5s default.
+    //
+    // NEGATIVE-CONTROL SENTINEL, on the line immediately below, in control mode only.
+    // `docker/verify-stream.sh` runs this lane with the navigation suppressed and must
+    // confirm it goes red for the INTENDED reason. Its classifier used to grep the
+    // output for `toHaveURL` and `/about`, which ANY error whose text happens to carry
+    // both tokens satisfies — including one thrown a hundred lines earlier. This gives
+    // the classifier a position it can trust: nothing that fails before the assertion
+    // can print it, and the classifier additionally requires Playwright's exact matcher
+    // output plus a `Received string:` still on the fixture, which a hand-thrown error
+    // cannot forge. See the negative-control block in that script.
+    if (process.env.ASSEMBLED_SKIP_ABORT_NAVIGATION === "1") {
+      process.stdout.write(`${ABORT_CONTROL_SENTINEL}\n`);
+    }
     await expect(page).toHaveURL(/\/about$/, { timeout: ABORT_BOUNDS.abortUrlSettle });
     // Let the BFF observe and log the upstream cancel before the gate reads its logs.
     await page.waitForTimeout(ABORT_BOUNDS.bffObservationTail);

@@ -33,6 +33,12 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# The abort negative-control classifier, as a total function over (exit code, log).
+# Kept in a sourced library so `docker/lib/negative-control.test.sh` can prove its
+# truth table — including the spoofs it must reject — without the Compose stack.
+# shellcheck source=lib/negative-control.sh
+. "$ROOT/docker/lib/negative-control.sh"
+
 APP_VERSION="${APP_VERSION:-$(git describe --tags --always --dirty 2>/dev/null)}"
 if [ -z "$APP_VERSION" ]; then
   echo "FAIL: APP_VERSION is empty (git describe failed)" >&2
@@ -397,40 +403,58 @@ else
   # still close the SSE request and emit an abort log. A passing control would
   # prove the browser assertion can false-green without the intended action.
   #
-  # A nonzero exit is NOT sufficient, and used not to be checked any further. Every
-  # one of six audited runs went red via `Test timeout of 30000ms exceeded` — the
-  # lane's global cap, not the missing navigation — so the control was passing for an
-  # unrelated reason and would have kept "passing" even if the URL assertion had been
-  # deleted. It now has to fail for the INTENDED reason:
+  # A nonzero exit is NOT sufficient. Two successive weakenings were found here:
   #
-  #   * the output must name the URL expectation (`toHaveURL`) and the `/about`
-  #     pattern the suppressed navigation was supposed to satisfy; and
-  #   * it must NOT carry Playwright's global per-test timeout signature.
+  #   1. Originally nothing beyond the exit code was checked. Every one of six audited
+  #      runs went red via `Test timeout of 30000ms exceeded` — the lane's global cap,
+  #      not the missing navigation — so the control was "passing" for an unrelated
+  #      reason and would have kept passing with the URL assertion deleted.
+  #   2. The keyword classifier that replaced it (`grep toHaveURL` + `grep /about`) was
+  #      SPOOFABLE: any error whose text happens to contain both tokens satisfied it,
+  #      including one thrown long before the assertion was reached. Both tokens appear
+  #      in the spec's own source, which Playwright prints as a code frame on ANY
+  #      failure in that function — so the classifier could be satisfied by a failure
+  #      that never reached the assertion at all.
+  #
+  # The discriminator is now POSITIONAL and STRUCTURAL, and all five conditions must
+  # hold together:
+  #
+  #   * NEG_SENTINEL — printed by the spec on the line immediately before the URL
+  #     assertion, in control mode only. Nothing that fails earlier can print it.
+  #   * Playwright's exact matcher failure line for this matcher and this page.
+  #   * The exact expected pattern, so a different URL assertion cannot stand in.
+  #   * A `Received string:` still on the FIXTURE route — the positive evidence that
+  #     the suppressed navigation is what failed, not something incidental.
+  #   * NO global per-test timeout signature.
+  #
+  # A hand-thrown `Error` cannot produce the matcher's `Expected pattern:`/`Received
+  # string:` pair, and an error thrown before the assertion cannot print the sentinel,
+  # so neither spoof survives. The classifier itself lives in `docker/lib/`, sourced
+  # above, so its whole truth table is proved by `docker/lib/negative-control.test.sh`
+  # instead of only being exercised once per gate run.
   NEG_LOG="$WORKDIR/negative-control.log"
-  if (cd "$ROOT/web" && \
-      ASSEMBLED_BASE_URL="$BASE" \
-      ASSEMBLED_SKIP_ABORT_NAVIGATION=1 \
-      CI=1 \
-      pnpm exec playwright test --config playwright.assembled.config.ts \
-        --reporter=line --trace=off --grep "abort propagation" >"$NEG_LOG" 2>&1); then
-    bad "abort negative control unexpectedly passed without navigation"
-  else
-    NEG_HAS_URL_ASSERT=0
-    NEG_HAS_ABOUT=0
-    NEG_HAS_GLOBAL_TIMEOUT=0
-    grep -q 'toHaveURL' "$NEG_LOG" && NEG_HAS_URL_ASSERT=1
-    grep -qE '/about' "$NEG_LOG" && NEG_HAS_ABOUT=1
-    grep -qE 'Test timeout of [0-9]+ms exceeded' "$NEG_LOG" && NEG_HAS_GLOBAL_TIMEOUT=1
-    if [ "$NEG_HAS_GLOBAL_TIMEOUT" = 1 ]; then
+  (cd "$ROOT/web" && \
+    ASSEMBLED_BASE_URL="$BASE" \
+    ASSEMBLED_SKIP_ABORT_NAVIGATION=1 \
+    CI=1 \
+    pnpm exec playwright test --config playwright.assembled.config.ts \
+      --reporter=line --trace=off --grep "abort propagation" >"$NEG_LOG" 2>&1)
+  NEG_EXIT=$?
+  case "$(classify_abort_negative_control "$NEG_EXIT" "$NEG_LOG")" in
+    at-assertion)
+      ok "abort negative control fails AT the /about URL assertion, still on the fixture (no global timeout)" ;;
+    passed-without-navigation)
+      bad "abort negative control unexpectedly passed without navigation" ;;
+    global-timeout)
       bad "abort negative control went red via a GLOBAL test timeout, not the intended URL assertion"
-      echo "    (see $NEG_LOG)"
-    elif [ "$NEG_HAS_URL_ASSERT" = 1 ] && [ "$NEG_HAS_ABOUT" = 1 ]; then
-      ok "abort negative control fails on the intended /about URL assertion (no global timeout)"
-    else
-      bad "abort negative control failed for an unrecognised reason (no toHaveURL//about diagnostic)"
-      echo "    (see $NEG_LOG)"
-    fi
-  fi
+      echo "    (see $NEG_LOG)" ;;
+    before-assertion)
+      bad "abort negative control failed BEFORE reaching the URL assertion (sentinel absent)"
+      echo "    (see $NEG_LOG)" ;;
+    *)
+      bad "abort negative control reached the assertion but did not fail as that assertion"
+      echo "    (see $NEG_LOG)" ;;
+  esac
 
   # Baseline the BFF log count IMMEDIATELY after the negative control and before
   # the real isolated abort test. Replay, curl, and negative-control teardown
