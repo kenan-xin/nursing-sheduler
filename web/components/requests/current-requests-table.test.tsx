@@ -156,3 +156,149 @@ describe("CurrentRequestsTable — search filter (FR-SR-39)", () => {
     expect(screen.getAllByTestId("requests-row")).toHaveLength(3);
   });
 });
+
+// ---------------------------------------------------------------------------
+// v2 intent tone (ScreenRequests `dot`/`capColor` model). The intent marker and
+// caption carry the canonical semantic tone derived from existing row state:
+// leave → brand, the off day-state → error, a worked preference → success (+)
+// or warn (−). The weight column aligns negative → warn (an avoid, not an
+// error). Presentation only; this pins the tone per row kind so a regression to
+// the neutral marker is caught at the component level.
+// ---------------------------------------------------------------------------
+describe("CurrentRequestsTable — v2 intent tone", () => {
+  const tokens = (el: HTMLElement) => el.className.split(/\s+/);
+
+  function renderOne(row: Partial<CurrentRequestRow> & { key: string }) {
+    return render(
+      <CurrentRequestsTable
+        rows={[
+          {
+            person: "Ada",
+            personIsGroup: false,
+            dateLabel: "Mon",
+            dateIsGroup: false,
+            shiftLabel: "AM",
+            weightLabel: "+5",
+            weightTone: "positive",
+            caption: "wants",
+            ...row,
+          },
+        ]}
+      />,
+    );
+  }
+
+  it("a leave pin marks brand and captions brandink", () => {
+    renderOne({
+      key: "lv",
+      shiftLabel: "LEAVE",
+      weightLabel: "pinned",
+      weightTone: "pin",
+      caption: "paid leave · hard pin",
+    });
+    const dot = screen.getByTestId("requests-intent-dot");
+    expect(dot).toHaveAttribute("data-intent", "leave");
+    expect(tokens(dot)).toContain("text-brand");
+    expect(tokens(screen.getByTestId("requests-caption"))).toContain("text-brandink");
+  });
+
+  it("an off day-state marks error regardless of off-weight sign", () => {
+    renderOne({
+      key: "off",
+      shiftLabel: "OFF",
+      weightLabel: "+2",
+      weightTone: "positive",
+      caption: "wants off",
+    });
+    const dot = screen.getByTestId("requests-intent-dot");
+    expect(dot).toHaveAttribute("data-intent", "off");
+    expect(tokens(dot)).toContain("text-error");
+    // The caption follows the weight sign, not the day-state.
+    expect(tokens(screen.getByTestId("requests-caption"))).toContain("text-success");
+  });
+
+  it("a positive worked preference marks success and captions success", () => {
+    renderOne({
+      key: "pos",
+      shiftLabel: "AM",
+      weightLabel: "+5",
+      weightTone: "positive",
+      caption: "wants",
+    });
+    const dot = screen.getByTestId("requests-intent-dot");
+    expect(dot).toHaveAttribute("data-intent", "positive");
+    expect(tokens(dot)).toContain("text-success");
+    expect(tokens(screen.getByTestId("requests-caption"))).toContain("text-success");
+  });
+
+  it("a negative worked preference marks warn and captions warn (not error)", () => {
+    renderOne({
+      key: "neg",
+      shiftLabel: "PM",
+      weightLabel: "−3",
+      weightTone: "negative",
+      caption: "avoids",
+    });
+    const dot = screen.getByTestId("requests-intent-dot");
+    expect(dot).toHaveAttribute("data-intent", "negative");
+    expect(tokens(dot)).toContain("text-warn");
+    expect(tokens(dot)).not.toContain("text-error");
+    expect(tokens(screen.getByTestId("requests-caption"))).toContain("text-warn");
+  });
+
+  it("the intent dot is full tone, not the muted neutral marker", () => {
+    renderOne({
+      key: "pos2",
+      shiftLabel: "AM",
+      weightLabel: "+5",
+      weightTone: "positive",
+      caption: "wants",
+    });
+    const dot = screen.getByTestId("requests-intent-dot");
+    // opacity-70 and the inline ink3 style were the discarded neutral treatment.
+    expect(tokens(dot)).not.toContain("opacity-70");
+    expect(dot).not.toHaveAttribute("style");
+  });
+
+  // The canonical model splits the neutral case across the two columns: the
+  // weight is muted (wColor ink3) while the caption stays readable prose
+  // (capColor ink2). Collapsing them into one map — in either direction — is a
+  // fidelity regression this pins.
+  it("a plain OFF request mutes the weight to ink3 but keeps the caption at ink2", () => {
+    renderOne({
+      key: "off0",
+      shiftLabel: "OFF",
+      weightLabel: "—",
+      weightTone: "neutral",
+      caption: "requests off",
+    });
+    expect(tokens(screen.getByTestId("requests-weight"))).toContain("text-ink3");
+    expect(tokens(screen.getByTestId("requests-caption"))).toContain("text-ink2");
+    // The two neutral tones are genuinely different tiers, not aliases.
+    expect(tokens(screen.getByTestId("requests-caption"))).not.toContain("text-ink3");
+    // The day-state still drives the marker.
+    expect(screen.getByTestId("requests-intent-dot")).toHaveAttribute("data-intent", "off");
+  });
+
+  // A hard-coded inline colour silently defeats every tone map above (the
+  // className stays correct while the paint does not), so no toned surface in
+  // this row may carry one.
+  it("no inline colour overrides the tone maps", () => {
+    renderOne({
+      key: "pin",
+      shiftLabel: "LEAVE",
+      weightLabel: "pinned",
+      weightTone: "pin",
+      caption: "paid leave · hard pin",
+    });
+    for (const id of [
+      "requests-weight",
+      "requests-caption",
+      "requests-intent-dot",
+      "requests-count",
+    ]) {
+      expect(screen.getByTestId(id), `${id} carries no inline style`).not.toHaveAttribute("style");
+    }
+    expect(tokens(screen.getByTestId("requests-weight"))).toContain("text-brandink");
+  });
+});

@@ -18,6 +18,7 @@ import { FaCircleInfo, FaLayerGroup, FaTableCells } from "@/components/icons";
 import { FaThumbtack } from "react-icons/fa6";
 import { RESERVED_SHIFT_TYPE, type DateRef, type PersonRef } from "@/lib/scenario";
 import { useScenarioStore } from "@/lib/store";
+import { Surface } from "@/components/ui/surface";
 import { RequestsToolbar } from "./requests-toolbar";
 import { QuickPaintPanel, type PaintTarget } from "./quick-paint-panel";
 import { parseQuickPaintWeight } from "./quick-paint-status";
@@ -383,13 +384,19 @@ export function RequestsEditor() {
 
   if (!hasRequiredData) {
     return (
-      <div data-testid="screen" data-screen="Shift Requests" className="flex flex-col gap-6">
+      <Surface
+        level="page"
+        geometry="square"
+        data-testid="screen"
+        data-screen="Shift Requests"
+        className="flex flex-col gap-6"
+      >
         <header className="flex items-center gap-3">
-          <span className="flex size-9 items-center justify-center border border-line bg-panel text-ink2">
+          <span className="flex size-9 items-center justify-center rounded-control border border-line bg-panel text-ink2">
             <FaTableCells className="size-4" />
           </span>
           <div className="flex flex-col gap-0.5">
-            <h1 className="font-heading text-title font-semibold tracking-tight">
+            <h1 className="font-heading text-title font-semibold tracking-[-0.015em]">
               Requests &amp; Leave
             </h1>
             <p className="text-meta text-ink2">
@@ -398,7 +405,7 @@ export function RequestsEditor() {
           </div>
         </header>
         <div
-          className="flex flex-col items-start gap-2 border border-dashed border-line bg-surface p-6"
+          className="flex flex-col items-start gap-2 rounded-card border border-dashed border-line bg-surface p-6 shadow-1"
           data-testid="requests-required-data-gate"
         >
           {missingRequirement === "dates" && (
@@ -429,18 +436,26 @@ export function RequestsEditor() {
             </p>
           )}
         </div>
-      </div>
+      </Surface>
     );
   }
 
   return (
-    <div data-testid="screen" data-screen="Shift Requests" className="flex flex-col gap-4">
+    <Surface
+      level="page"
+      geometry="square"
+      data-testid="screen"
+      data-screen="Shift Requests"
+      className="flex flex-col gap-4"
+    >
       <header className="mb-2 flex flex-wrap items-end gap-4">
         <div className="min-w-[240px] flex-1">
           <div className="mb-2 text-label font-semibold uppercase tracking-[0.03em] text-brandink">
             Step 5 · Requests &amp; Leave
           </div>
-          <h1 className="mb-2 font-heading text-display font-extrabold leading-[1.05] tracking-[-0.02em]">
+          {/* Display: Figtree 700 / 1.15 / -0.015em (DESIGN.md §3). v1 ran 800
+              at 1.05 and -0.02em; v2 is one weight step lighter with an opener line. */}
+          <h1 className="mb-2 font-heading text-display font-bold leading-[1.15] tracking-[-0.015em]">
             Requests &amp; Leave
           </h1>
           <p className="max-w-[66ch] text-ink2">
@@ -499,7 +514,11 @@ export function RequestsEditor() {
           <span className="size-3 border border-brand bg-brandtint" /> Date-group column
         </span>
       </div>
-      <div className="mb-3 flex items-start gap-2.5 border border-line bg-panel p-3.5">
+      {/* Full-bleed note strips are square and flat (DESIGN.md §4 rule 2): the
+          shortcut strip is a --panel band with its prototype hairline, and the
+          paid-leave strip is a borderless --brandtint callout (ScreenRequests
+          authors it without a border). Neither takes a radius or a well shadow. */}
+      <div className="mb-3 flex items-start gap-2.5 rounded-none border border-line bg-panel p-3.5">
         <FaLayerGroup className="mt-0.5 size-3 text-brandink" />
         <div className="text-meta text-ink2">
           <b>Shortcut rows &amp; columns.</b> The top people-group rows set one preference for every
@@ -508,7 +527,7 @@ export function RequestsEditor() {
           slot to edit it. Group rows have no history.
         </div>
       </div>
-      <div className="mb-4 flex items-start gap-2.5 border border-line bg-brandtint p-3.5">
+      <div className="mb-4 flex items-start gap-2.5 rounded-none bg-brandtint p-3.5">
         <FaThumbtack className="mt-0.5 size-3 text-brandink" />
         <div className="text-meta text-ink2">
           <b className="text-brandink">Paid leave is a hard pin.</b> A pinned Leave day is always
@@ -603,6 +622,6 @@ export function RequestsEditor() {
         }}
         onCancel={() => setConfirm(null)}
       />
-    </div>
+    </Surface>
   );
 }

@@ -4,8 +4,17 @@
 // tabs (Edit cells / Quick paint) plus the CSV/clear-data action row. Purely
 // presentational — the container owns `mode`/`clearOpen` state and CSV/clear
 // wiring.
+//
+// v2 re-skin: the three action controls are the shared `Button` (secondary /
+// destructive-outline), which carries the pill shape, the L1 --surface fill +
+// --sh-1 that DESIGN.md §4 rule 4 requires of a secondary control (a transparent
+// outline on the recessed page does not read as pressable), and the real 44×44
+// coarse-pointer floor. The mode tabs stay a `role="tablist"` segmented control:
+// they are not standalone buttons, and they mirror the F3-owned Cell Preference
+// tablist (bordered track, square segments) for consistency within the route.
 
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import { FaFileArrowUp } from "@/components/icons";
 // Not re-exported from the icon barrel (icons.tsx is owned by a concurrently
 // edited ticket) — imported directly per the project's react-icons/fa6
@@ -37,7 +46,13 @@ export function RequestsToolbar({
 }: RequestsToolbarProps) {
   return (
     <div className="mb-3 flex flex-wrap items-center gap-3" data-testid="requests-toolbar">
-      <div role="tablist" className="inline-flex border border-line">
+      {/* Pill track (DESIGN.md §5 assigns --r-pill to segmented controls; the
+          canonical ScreenRequests track measures border-radius:999px with
+          overflow:hidden). The square F3-owned Cell Preference tablist is a
+          separate owner and stays untouched. Segments reach the 44px coarse
+          minimum on touch; their outer corners clip to the pill via the track's
+          overflow-hidden. */}
+      <div role="tablist" className="inline-flex overflow-hidden rounded-pill border border-line">
         <button
           type="button"
           role="tab"
@@ -45,7 +60,7 @@ export function RequestsToolbar({
           data-testid="requests-tab-normal"
           onClick={() => onSetMode("normal")}
           className={cn(
-            "inline-flex h-10 items-center gap-1.5 px-3.5 text-meta font-semibold",
+            "pointer-coarse:min-h-touch inline-flex h-control items-center gap-1.5 px-3.5 text-meta font-semibold",
             mode === "normal" ? "bg-brand text-onbrand" : "bg-transparent text-ink2 hover:bg-panel",
           )}
         >
@@ -59,7 +74,7 @@ export function RequestsToolbar({
           data-testid="requests-tab-quick"
           onClick={() => onSetMode("quick")}
           className={cn(
-            "inline-flex h-10 items-center gap-1.5 px-3.5 text-meta font-semibold",
+            "pointer-coarse:min-h-touch inline-flex h-control items-center gap-1.5 px-3.5 text-meta font-semibold",
             mode === "quick" ? "bg-brand text-onbrand" : "bg-transparent text-ink2 hover:bg-panel",
           )}
         >
@@ -79,42 +94,38 @@ export function RequestsToolbar({
           Normal-mode upload would bypass the quick-paint-only import rule. */}
       {mode === "quick" && (
         <>
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            size="sm"
             disabled={requestsCsvDisabled}
-            aria-disabled={requestsCsvDisabled}
             title={requestsCsvDisabled ? requestsCsvDisabledReason : undefined}
             data-testid="requests-open-requests-csv"
             onClick={onOpenRequestsCsv}
-            className={cn(
-              "inline-flex h-10 items-center gap-2 border border-line bg-transparent px-3.5 text-meta font-semibold",
-              requestsCsvDisabled ? "cursor-not-allowed opacity-50" : "hover:bg-panel",
-            )}
           >
-            <FaFileArrowUp className="size-3.5" />
+            <FaFileArrowUp />
             Requests CSV
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
             data-testid="requests-open-history-csv"
             onClick={onOpenHistoryCsv}
-            className="inline-flex h-10 items-center gap-2 border border-line bg-transparent px-3.5 text-meta font-semibold hover:bg-panel"
           >
-            <FaClockRotateLeft className="size-3.5" />
+            <FaClockRotateLeft />
             History CSV
-          </button>
+          </Button>
         </>
       )}
-      <button
-        type="button"
+      <Button
+        variant="destructive-outline"
+        size="sm"
         aria-pressed={clearOpen}
         data-testid="requests-toggle-clear"
         onClick={onToggleClear}
-        className="inline-flex h-10 items-center gap-2 border border-line bg-transparent px-3.5 text-meta font-semibold text-error hover:bg-errortint"
       >
-        <FaEraser className="size-3.5" />
+        <FaEraser />
         Clear data
-      </button>
+      </Button>
     </div>
   );
 }

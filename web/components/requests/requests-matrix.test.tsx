@@ -191,6 +191,91 @@ describe("RequestsMatrix", () => {
 });
 
 // ---------------------------------------------------------------------------
+// v2 status-ink pairing (DESIGN.md §2 Redundant Signal Rule).
+//
+// A status tint must carry its paired semantic *ink*, never the base colour: in
+// dark mode --success and --successink (and --warn/--warnink, --error/--
+// errorink) resolve to DIFFERENT colours, so a tint+base pair would fail the
+// universal status-pairing battery and leave status carried by colour alone.
+// These pin the exact tokens so a regression to the base colour is caught at
+// the component level, before the browser gate.
+// ---------------------------------------------------------------------------
+describe("RequestsMatrix — v2 status-ink pairing", () => {
+  const pairedReqData: UiRequestCell[] = [
+    { kind: "request", person: "Alice", date: "2026-05-01", shiftType: "AM", weight: 5 },
+    { kind: "request", person: "Bob", date: "2026-05-02", shiftType: "PM", weight: -5 },
+    { kind: "off", person: "Alice", date: "ALL", weight: -3 },
+    { kind: "leave", person: "Bob", date: "2026-05-01" },
+  ];
+  // `text-success` is a substring of `text-successink`, so the assertions split
+  // the class list into exact whitespace-delimited tokens rather than using a
+  // substring test — a substring test could not tell the base token from the ink.
+  const tokens = (el: HTMLElement) => el.className.split(/\s+/);
+
+  it("a positive preference pairs successtint with successink (not base success)", () => {
+    render(<RequestsMatrix {...makeProps({ reqData: pairedReqData })} />);
+    const cell = screen.getByTestId("cell-Alice-2026-05-01");
+    expect(tokens(cell)).toContain("bg-successtint");
+    expect(tokens(cell)).toContain("text-successink");
+    expect(tokens(cell)).not.toContain("text-success");
+  });
+
+  it("a negative preference pairs warntint with warnink (not base warn)", () => {
+    render(<RequestsMatrix {...makeProps({ reqData: pairedReqData })} />);
+    const cell = screen.getByTestId("cell-Bob-2026-05-02");
+    expect(tokens(cell)).toContain("bg-warntint");
+    expect(tokens(cell)).toContain("text-warnink");
+    expect(tokens(cell)).not.toContain("text-warn");
+  });
+
+  it("an off cell pairs errortint with errorink (not base error)", () => {
+    render(<RequestsMatrix {...makeProps({ reqData: pairedReqData })} />);
+    const cell = screen.getByTestId("cell-Alice-ALL");
+    expect(tokens(cell)).toContain("bg-errortint");
+    expect(tokens(cell)).toContain("text-errorink");
+    expect(tokens(cell)).not.toContain("text-error");
+  });
+
+  it("the leave pin keeps the brandtint + brandink selection pair", () => {
+    render(<RequestsMatrix {...makeProps({ reqData: pairedReqData })} />);
+    const cell = screen.getByTestId("cell-Bob-2026-05-01");
+    expect(tokens(cell)).toContain("bg-brandtint");
+    expect(tokens(cell)).toContain("text-brandink");
+    // Leave is the pin language, not a status tint, so it must not borrow the
+    // error/off treatment.
+    expect(tokens(cell)).not.toContain("bg-errortint");
+  });
+
+  it("the history header band pairs its warntint with warnink", () => {
+    render(<RequestsMatrix {...makeProps({ reqData: pairedReqData })} />);
+    const head = screen.getByTestId("hist-head-0");
+    expect(tokens(head)).toContain("bg-warntint");
+    expect(tokens(head)).toContain("text-warnink");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v2 surface geometry: the matrix is a specialized L1 surface — square, with
+// --sh-1 — and its data cells stay square. Generic card rounding must not leak
+// into the grid (DESIGN.md §5 "Stay square, always").
+// ---------------------------------------------------------------------------
+describe("RequestsMatrix — v2 surface geometry", () => {
+  const tokens = (el: HTMLElement) => el.className.split(/\s+/);
+
+  it("the matrix container is a square L1 surface (shadow-1, no radius)", () => {
+    render(<RequestsMatrix {...makeProps()} />);
+    const matrix = screen.getByTestId("requests-matrix");
+    expect(tokens(matrix)).toContain("shadow-1");
+    expect(tokens(matrix)).toContain("rounded-none");
+    expect(tokens(matrix)).toContain("bg-surface");
+    // The scroll region is keyboard-reachable so a touch user can scroll it
+    // (bounded coarse-pointer quick win; the roving-tabindex grid stays P4).
+    expect(matrix).toHaveAttribute("tabindex", "0");
+    expect(matrix).toHaveAttribute("aria-label", "Requests matrix");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Keyboard operability of the matrix origins.
 //
 // The two editors promise focus back to the cell that opened them, which is only
