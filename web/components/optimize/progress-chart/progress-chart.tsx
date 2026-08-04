@@ -1120,8 +1120,12 @@ function ProgressTooltip({ point, style }: ProgressTooltipProps) {
         {point.source && (
           <div className="mt-1.5 border-t border-line2 pt-1.5">
             <dt className="sr-only">Source:</dt>
+            {/* The SOLVER SOURCE of the frame — `ortools/cp-sat:solution-callback`, a
+                machine identifier, never prose. Mono per DESIGN.md §3; size and ink
+                are unchanged. */}
             <dd
-              className="break-words text-label text-ink3"
+              data-testid="progress-chart-tooltip-source"
+              className="break-words font-mono text-label text-ink3"
               title={point.source}
               style={{ maxWidth: 220 }}
             >

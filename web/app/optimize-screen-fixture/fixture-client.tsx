@@ -63,6 +63,7 @@ const logEntry = (over: Partial<RunLogEntry>): RunLogEntry => ({
   cursor: null,
   payload: null,
   detail: null,
+  detailKind: null,
   elapsedSeconds: null,
   occurredAt: null,
   eventTime: 1_700_000_000_000,
@@ -74,10 +75,19 @@ const runningView = view({
   jobId: "opt_1",
   latestScore: 12,
   controls: { cancellable: true, earlyCompletionAvailable: true },
+  // The REAL solver source the backend emits on a progress frame. A bare `"solver"`
+  // would let the tooltip's source assertion pass without ever rendering a machine
+  // identifier, which is the value §3 actually reserves the mono face for.
   progress: [
-    { source: "solver", currentBestScore: 8, elapsedSeconds: 2, solutionIndex: 1, commentCount: 0 },
     {
-      source: "solver",
+      source: "ortools/cp-sat:solution-callback",
+      currentBestScore: 8,
+      elapsedSeconds: 2,
+      solutionIndex: 1,
+      commentCount: 0,
+    },
+    {
+      source: "ortools/cp-sat:solution-callback",
       currentBestScore: 12,
       elapsedSeconds: 5,
       solutionIndex: 2,
@@ -347,24 +357,37 @@ export default function OptimizeScreenFixtureClient() {
         <RunEventLog
           active
           log={[
-            logEntry({ seq: 1, kind: "lifecycle", label: "submitting", detail: "anonymized=true" }),
+            // `detailKind` is the product's own classification of each detail string
+            // (`run-view.ts`), carried here verbatim so the harness renders the same
+            // faces the real route does: machine expressions mono, prose on the body
+            // face. Entry 3 is the prose control — a code prefixing a backend sentence.
+            logEntry({
+              seq: 1,
+              kind: "lifecycle",
+              label: "submitting",
+              detail: "anonymized=true",
+              detailKind: "expression",
+            }),
             logEntry({
               seq: 2,
               kind: "progress",
               label: "progress",
               detail: "score=12, elapsed=5s",
+              detailKind: "expression",
             }),
             logEntry({
               seq: 3,
               kind: "phase",
               label: "phase:solve",
               detail: "solve: building model",
+              detailKind: "prose",
             }),
             logEntry({
               seq: 4,
               kind: "result",
               label: "download-succeeded",
               detail: "schedule.xlsx",
+              detailKind: "expression",
             }),
           ]}
         />

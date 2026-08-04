@@ -25,10 +25,12 @@ import { surfaceVariants } from "@/components/ui/surface";
 import {
   formatScore,
   INITIAL_OPTIMIZE_RUN_VIEW,
+  reduceRunView,
   type OptimizeRunView,
   type OptimizeServerInfo,
   type RunLogEntry,
   type RunLogKind,
+  type RunSignal,
 } from "@/lib/optimize";
 import { Callout, type CalloutTone } from "./callout";
 import { ReadinessBanner } from "./readiness-banner";
@@ -182,6 +184,7 @@ const logEntry = (seq: number, kind: RunLogKind): RunLogEntry => ({
   cursor: null,
   payload: null,
   detail: null,
+  detailKind: null,
   elapsedSeconds: null,
   occurredAt: null,
   eventTime: 1_700_000_000_000,
@@ -727,11 +730,189 @@ describe("every data-bearing value on the Optimize route is set in the mono face
       expect(classesOf(dt), `${caption} caption is not data`).not.toContain("font-mono");
     }
   });
+
+  // THE SOLVER SOURCE of an inspected point — `ortools/cp-sat:solution-callback`. §3
+  // names "solver expressions" explicitly, and this is one: a machine identifier the
+  // backend emits, never prose. It was the last value on this route still on the body
+  // face while the round claimed whole-route coverage.
+  it("the tooltip's solver source is mono", () => {
+    render(<ProgressChart points={POINTS_WITH_SOLVER_SOURCE} />);
+    fireEvent.focus(screen.getByRole("group", { name: /Progress data points/ }));
+    const source = within(screen.getByTestId("progress-chart-tooltip")).getByTestId(
+      "progress-chart-tooltip-source",
+    );
+    expect(source.textContent, "the real solver source, not an empty slot").toBe(
+      "ortools/cp-sat:solution-callback",
+    );
+    expectMonoData(source, "tooltip solver source");
+    // Size and ink tier are unchanged — only the face was selected.
+    for (const token of ["text-label", "text-ink3"]) {
+      expect(classesOf(source), `tooltip source → ${token}`).toContain(token);
+    }
+  });
+
+  // THE LOG DETAIL, both halves, against values the REDUCER minted rather than kinds
+  // this test invented. `MINTED_DETAILS` is read inside the callback on purpose — it is
+  // declared further down the file, so touching it at collection time would hit its TDZ.
+  it("every log detail takes the face the product minted it for", () => {
+    const log = MINTED_DETAILS.map(({ signal }, index) => mintedEntry(signal, index + 1));
+
+    // The reducer really produced these values and kinds; the faces below are not being
+    // checked against a fixture this test made up.
+    expect(log.map((entry) => entry.detail)).toEqual(MINTED_DETAILS.map((c) => c.detail));
+    expect(log.map((entry) => entry.detailKind)).toEqual(MINTED_DETAILS.map((c) => c.kind));
+
+    render(<RunEventLog active log={log} />);
+    const rendered = screen.getAllByTestId("optimize-event-detail");
+    expect(rendered).toHaveLength(MINTED_DETAILS.length);
+    for (const [index, element] of rendered.entries()) {
+      const { label, detail, kind } = MINTED_DETAILS[index];
+      expect(element.textContent, `${label} renders its real value`).toBe(detail);
+      if (kind === "expression") {
+        expectMonoData(element, `log detail — ${label}`);
+      } else {
+        expect(classesOf(element), `${label} is a sentence, not data`).not.toContain("font-mono");
+      }
+      // Size and ink are unchanged either way — only the face is selected.
+      expect(classesOf(element), `${label} keeps its size`).toContain("text-meta");
+      expect(classesOf(element), `${label} keeps its ink tier`).toContain("text-ink2");
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
 // Event log
 // ---------------------------------------------------------------------------
+
+// Every case below is MINTED BY THE REDUCER: both the detail text and its kind come
+// from `run-view.ts`, so these cannot pass by feeding the component a hand-made kind
+// the product would never produce. §3 reserves the mono face for codes, ids, counts and
+// solver expressions — the wire lane's `state=`, `queue=`, `early_completion=`,
+// `outcome=`, `score=` forms, error codes, opaque cursors and artifact filenames —
+// while a phase line carrying a backend message, and a transport-error message, are
+// prose and must stay on the body face.
+interface MintedDetailCase {
+  label: string;
+  signal: RunSignal;
+  detail: string;
+  kind: "expression" | "prose";
+}
+
+const MINTED_DETAILS: MintedDetailCase[] = [
+  {
+    label: "the submit key/value summary",
+    signal: { type: "submit-started", anonymized: true, peopleCount: 5 },
+    detail: "anonymized=true, people=5",
+    kind: "expression",
+  },
+  {
+    label: "a wire state and queue position",
+    signal: {
+      type: "durable-frame-applied",
+      event: "job.state_changed",
+      cursor: "cur_1",
+      detail: "state=running, queue=2",
+      payload: {
+        kind: "state",
+        state: "running",
+        terminal: false,
+        queuePosition: 2,
+        cancelRequested: false,
+        earlyCompletionRequested: false,
+        cancellable: true,
+        earlyCompletionAvailable: false,
+        error: null,
+      },
+    },
+    detail: "state=running, queue=2",
+    kind: "expression",
+  },
+  {
+    label: "a wire control flag",
+    signal: {
+      type: "durable-frame-applied",
+      event: "job.control_changed",
+      cursor: "cur_2",
+      detail: "early_completion=true",
+      payload: { kind: "control", earlyCompletionRequested: true },
+    },
+    detail: "early_completion=true",
+    kind: "expression",
+  },
+  {
+    label: "a wire result outcome and score",
+    signal: {
+      type: "durable-frame-applied",
+      event: "job.result_available",
+      cursor: "cur_3",
+      detail: "outcome=optimal, score=42",
+      payload: {
+        kind: "result",
+        outcome: "optimal",
+        score: 42,
+        solverStatus: "OPTIMAL",
+        terminationReason: null,
+        artifactName: null,
+      },
+    },
+    detail: "outcome=optimal, score=42",
+    kind: "expression",
+  },
+  {
+    label: "the progress counts",
+    signal: {
+      type: "progress",
+      point: {
+        source: "ortools/cp-sat:solution-callback",
+        currentBestScore: 42,
+        elapsedSeconds: 3.5,
+        solutionIndex: 7,
+        commentCount: 2,
+      },
+    },
+    detail: "score=42, elapsed=3.5s, solution=#7, comments=2",
+    kind: "expression",
+  },
+  {
+    label: "an error code",
+    signal: { type: "job-gone", code: "job_not_found", message: "gone" },
+    detail: "job_not_found",
+    kind: "expression",
+  },
+  {
+    label: "an opaque cursor",
+    signal: { type: "cursor-recovery", reason: "expired", oldestEventId: "cur_99" },
+    detail: "cur_99",
+    kind: "expression",
+  },
+  {
+    label: "an artifact filename",
+    signal: { type: "download-succeeded", filename: "schedule.xlsx" },
+    detail: "schedule.xlsx",
+    kind: "expression",
+  },
+  {
+    label: "a phase line carrying a backend message",
+    signal: {
+      type: "phase",
+      entry: { source: "scheduler", code: "solve", message: "Solving", elapsedSeconds: 1.2 },
+    },
+    detail: "solve: Solving",
+    kind: "prose",
+  },
+  {
+    label: "a transport disconnect message",
+    signal: { type: "stream-error", message: "Connection lost after 3 attempts." },
+    detail: "Connection lost after 3 attempts.",
+    kind: "prose",
+  },
+];
+
+/** Mint one entry through the real reducer, keeping its real detail and kind. */
+function mintedEntry(signal: RunSignal, seq: number): RunLogEntry {
+  const view = reduceRunView(INITIAL_OPTIMIZE_RUN_VIEW, signal);
+  return { ...view.log[view.log.length - 1], seq };
+}
 
 describe("RunEventLog", () => {
   it("is an L1 card that clips its own scroll region", () => {
@@ -943,6 +1124,17 @@ describe("no retired v1 presentation survives anywhere on the Optimize surface",
     vi.restoreAllMocks();
   });
 });
+
+/** The real solver source the backend emits on a progress frame. */
+const POINTS_WITH_SOLVER_SOURCE = [
+  {
+    source: "ortools/cp-sat:solution-callback",
+    currentBestScore: 8,
+    elapsedSeconds: 2,
+    solutionIndex: 1,
+    commentCount: 0,
+  },
+];
 
 const POINTS_FOR_SWEEP = [
   { source: "solver", currentBestScore: 8, elapsedSeconds: 2, solutionIndex: 1, commentCount: 0 },

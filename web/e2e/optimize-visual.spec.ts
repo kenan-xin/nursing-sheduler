@@ -473,6 +473,79 @@ test.describe("R6 Optimize & Export — data-bearing values resolve the mono fac
     await expect(line).toHaveText("0 events");
     expect(await line.evaluate((el) => getComputedStyle(el).fontFamily)).toBe(faces.body);
   });
+
+  // The three branches this sprint adds: the log's machine-expression details, its prose
+  // detail, and the chart tooltip's solver source. Run in BOTH themes — the face is
+  // theme-independent, so a theme-scoped regression (a dark-only override reaching the
+  // detail line) would pass on light alone. The tests above keep their own light-only
+  // Round 9B coverage untouched.
+  for (const theme of ["light", "dark"] as const) {
+    test(`the log's expression details, its prose detail and the tooltip's solver source resolve their faces (${theme})`, async ({
+      page,
+    }) => {
+      await gotoReady(page, "/optimize-screen-fixture", theme);
+      const log = page.getByTestId("fx-eventlog");
+      await expect(log).toBeVisible();
+
+      const faces = await resolveFaces(page);
+      expect(
+        new Set([faces.mono, faces.body, faces.heading]).size,
+        "mono, body and display must be three distinct stacks for this to discriminate",
+      ).toBe(3);
+
+      // THE LOG DETAIL LINES. The product generates `state=`, `queue=`,
+      // `early_completion=`, `outcome=`, `score=`, codes, cursors and filenames here —
+      // machine expressions per DESIGN.md §3 — and classifies each one where it is
+      // minted (`run-view.ts` `detailKind`), which is what the harness carries. EVERY
+      // expression detail on the page is swept, so a new form cannot be added unfaced.
+      const expressions = log.locator(
+        '[data-testid="optimize-event-detail"][data-detail-kind="expression"]',
+      );
+      const expressionCount = await expressions.count();
+      expect(expressionCount, "the harness renders machine-expression details").toBeGreaterThan(0);
+      for (let index = 0; index < expressionCount; index += 1) {
+        const detail = expressions.nth(index);
+        await expect(detail, `expression detail ${index + 1} is rendered`).toBeVisible();
+        const text = await detail.innerText();
+        const resolved = await detail.evaluate((el) => getComputedStyle(el).fontFamily);
+        expect(resolved, `"${text}" resolves the mono data face`).toBe(faces.mono);
+        expect(resolved, `"${text}" is not the display face`).not.toBe(faces.heading);
+      }
+
+      // ...including the log's own PROSE detail — a phase line carrying a backend
+      // message. This is the case a blanket mono on the detail element would silently
+      // break, which is why it is a required control rather than a nice-to-have.
+      const proseDetails = log.locator(
+        '[data-testid="optimize-event-detail"][data-detail-kind="prose"]',
+      );
+      const proseCount = await proseDetails.count();
+      expect(proseCount, "the harness renders a prose detail as the control").toBeGreaterThan(0);
+      for (let index = 0; index < proseCount; index += 1) {
+        const detail = proseDetails.nth(index);
+        await expect(detail, `prose detail ${index + 1} is rendered`).toBeVisible();
+        const text = await detail.innerText();
+        const resolved = await detail.evaluate((el) => getComputedStyle(el).fontFamily);
+        expect(resolved, `"${text}" stays on the body face`).toBe(faces.body);
+        expect(resolved, `"${text}" is prose, not data`).not.toBe(faces.mono);
+      }
+
+      // THE TOOLTIP'S SOLVER SOURCE — §3 names solver expressions explicitly, and this
+      // is a machine identifier the backend emits. Bound to its EXACT visible value, so
+      // the assertion cannot pass against an empty slot or a bare `solver` placeholder.
+      const running = page.getByTestId("fx-running");
+      await running.getByRole("group", { name: /Progress data points/ }).focus();
+      const tooltip = running.getByTestId("progress-chart-tooltip");
+      await expect(tooltip).toBeVisible();
+      const source = tooltip.getByTestId("progress-chart-tooltip-source");
+      await expect(source, "the tooltip's solver source is rendered").toBeVisible();
+      await expect(source, "the exact realistic solver source, not a placeholder").toHaveText(
+        "ortools/cp-sat:solution-callback",
+      );
+      const sourceFace = await source.evaluate((el) => getComputedStyle(el).fontFamily);
+      expect(sourceFace, "the solver source resolves the mono data face").toBe(faces.mono);
+      expect(sourceFace, "the solver source is not the display face").not.toBe(faces.heading);
+    });
+  }
 });
 
 // ---------------------------------------------------------------------------

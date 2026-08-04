@@ -139,8 +139,24 @@ export function RunEventLog({ log, active }: RunEventLogProps) {
                       {formatTime(entry)}
                     </span>
                   </div>
+                  {/* DESIGN.md §3 reserves the mono face for codes, ids, counts and
+                      solver expressions. A detail is one or the other, and which it is
+                      is decided where the string is MINTED (`run-view.ts`
+                      `detailKind`), never guessed from punctuation here: the wire lane
+                      produces `state=running, queue=2`, `early_completion=true`,
+                      `outcome=optimal, score=42`, codes, cursors and filenames, while a
+                      backend error message is prose and must stay on the body face. */}
                   {entry.detail !== null ? (
-                    <p className="mt-0.5 break-words text-meta text-ink2">{entry.detail}</p>
+                    <p
+                      data-testid="optimize-event-detail"
+                      data-detail-kind={entry.detailKind ?? undefined}
+                      className={cn(
+                        "mt-0.5 break-words text-meta text-ink2",
+                        entry.detailKind === "expression" && "font-mono",
+                      )}
+                    >
+                      {entry.detail}
+                    </p>
                   ) : null}
                 </div>
               </li>
