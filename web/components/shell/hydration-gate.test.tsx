@@ -6,9 +6,11 @@ import { cleanup, render, screen } from "@testing-library/react";
 // The recoverable-error branch is the shell's rarest rendered state: it needs a
 // corrupt IndexedDB record to appear at all, so it is exactly the surface a
 // route-wide visual migration can leave behind without anything noticing. The
-// R1 re-skin did leave it behind once — its heading kept inheriting the
-// still-deferred v1 `h1–h6 { letter-spacing: -0.02em }` rule from globals.css
-// while every other R1 heading moved to the v2 -0.015em.
+// R1 re-skin did leave it behind once — at the time the global `h1–h6` rule
+// still carried v1's -0.02em, so this heading inherited it while every other R1
+// heading moved to the v2 -0.015em. That rule is now -0.015em too, but the
+// assertion below stays: it pins the component contract, and this branch is
+// rare enough that a future drift would otherwise go unseen.
 //
 // `hydrateScenarioStore` is stubbed so the branch can be rendered at all: the
 // real one runs on mount and drives the status straight to `ready`, which is
@@ -60,13 +62,13 @@ describe("HydrationGate — recoverable-error state", () => {
     expect(screen.getByRole("button", { name: /reset to new schedule/i })).toBeTruthy();
   });
 
-  it("tracks its heading at the v2 -0.015em, not the deferred globals default", () => {
+  it("tracks its heading at the v2 -0.015em, not a Tailwind default", () => {
     renderRecoverable();
     const heading = screen.getByTestId("hydration-error-heading");
 
     expect(heading.tagName).toBe("H2");
-    // Without an explicit value this h2 inherits globals.css's v1 -0.02em, which
-    // G1 owns removing — so an R1 heading has to state -0.015em itself.
+    // States the v2 value as a component contract; the global h1–h6 safety net
+    // resolves to the same -0.015em.
     // `tracking-tight` is a different value again (-0.025em) and is not it.
     expect(classesOf(heading)).toContain("tracking-[-0.015em]");
     expect(classesOf(heading)).not.toContain("tracking-tight");

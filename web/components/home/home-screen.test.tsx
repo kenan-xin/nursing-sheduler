@@ -117,11 +117,11 @@ describe("HomeScreen — typography and copy", () => {
     expect(root().textContent).not.toContain("●");
   });
 
-  it("tracks R1-owned headings at the v2 -0.015em, not a Tailwind or globals default", () => {
+  it("tracks R1-owned headings at the v2 -0.015em, not a Tailwind default", () => {
     render(<HomeScreen />);
     const heading = screen.getByRole("heading", { level: 1 });
-    // globals.css still carries v1's -0.02em on h1–h6 (G1 owns that cleanup) and
-    // `tracking-tight` is -0.025em, so an R1 heading has to say -0.015em itself.
+    // The heading states the v2 value itself as a component contract; the global
+    // h1–h6 rule is the same -0.015em, while `tracking-tight` is -0.025em.
     expect(classesOf(heading)).toContain("tracking-[-0.015em]");
     expect(classesOf(heading)).not.toContain("tracking-tight");
     expect(classesOf(heading)).not.toContain("font-extrabold");
