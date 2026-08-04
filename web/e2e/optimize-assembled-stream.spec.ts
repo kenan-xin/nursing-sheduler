@@ -395,10 +395,22 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
       const slotIds = observation.acceptedSlots.flatMap((slot) =>
         slot.kind === "id" ? [slot.jobId] : [],
       );
+      // A handoff is emitted ONLY with retained authority, plus the single lost case the
+      // shell is meant to diagnose itself: every slot readable but more than two of them,
+      // which it detects as excess cardinality. Any other loss — a malformed, unreadable
+      // or unresolved accepted body, or an unresolved matching request — withholds the
+      // file entirely, so the shell sees missing evidence and tears down immediately
+      // instead of mistaking a filtered mixed observation for a valid smaller handoff.
+      const everySlotReadable = slotIds.length === observation.acceptedSlots.length;
+      const excessCardinalityOnly = everySlotReadable && observation.acceptedSlots.length > 2;
       const target = process.env.ASSEMBLED_ABORT_HANDOFF;
       if (target === undefined || target.length === 0) {
         laneFailures.push(
           "ASSEMBLED_ABORT_HANDOFF was unset, so no accepted-slot id could be handed off",
+        );
+      } else if (observation.lostAuthority && !excessCardinalityOnly) {
+        laneFailures.push(
+          `accepted-slot handoff withheld: submit authority was lost over ${observation.acceptedSlots.length} accepted slot(s), ${slotIds.length} of them readable`,
         );
       } else {
         try {

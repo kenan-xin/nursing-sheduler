@@ -77,8 +77,13 @@ STREAM_WINDOW=8           # bounded first-stream window; short so the live cance
 RECONNECT_WINDOW=6        # bounded replay-reconnect window (runs against retained events)
 POLL_MAX=8                # per-request curl deadline for polls/controls
 
-# Shell-side mirror of the Ticket 1 cleanup allocation, in seconds: cancel, bounded
-# terminal proof, safe DELETE, then a RESERVED final GET that is never borrowed from.
+# Shell-side mirror of the Ticket 1 cleanup allocation, in seconds. One id's WHOLE
+# lifecycle composes into CLEANUP_LIFECYCLE_MAX: cancel, the bounded terminal proof and
+# the safe DELETE all share a single mutation budget, and the final GET keeps a reserve
+# no earlier phase can borrow. Per-phase ceilings alone are not enough — 8s cancel plus
+# a 37s window whose last poll overruns plus a full delete plus a full final GET would
+# exceed the total, so every phase is also capped to the remaining budget.
+CLEANUP_LIFECYCLE_MAX=65
 CLEANUP_CANCEL_MAX=8
 CLEANUP_TERMINAL_MAX=37
 CLEANUP_DELETE_MAX=8
@@ -141,6 +146,19 @@ unregister_id() {
   return 0
 }
 
+# phase_timeout <deadline_epoch> <ceiling_seconds>
+#
+# Echo this phase's bounded timeout — the smaller of its own ceiling and whatever is
+# left before the deadline — or return 1 when the deadline leaves no time at all.
+phase_timeout() {
+  local deadline="$1" ceiling="$2" remaining
+  remaining=$(( deadline - $(date +%s) ))
+  [ "$remaining" -le 0 ] && return 1
+  [ "$remaining" -lt "$ceiling" ] && ceiling="$remaining"
+  printf '%s' "$ceiling"
+  return 0
+}
+
 # cleanup_job_lifecycle <job_id>
 #
 # Cancel (exactly 202 or 404) -> bounded terminal proof -> DELETE only after that
@@ -151,21 +169,30 @@ cleanup_job_lifecycle() {
   # command line before assigning anything, so `$a` would still be unset there.
   local id="$1"
   local base="$BASE/api/optimize/$id"
-  local code out state deadline terminal=0 absent=0 broken=0
+  local code out state timeout terminal=0 absent=0 broken=0
+  local final_deadline mutation_deadline terminal_deadline
+  final_deadline=$(( $(date +%s) + CLEANUP_LIFECYCLE_MAX ))
+  mutation_deadline=$(( final_deadline - CLEANUP_FINAL_MAX ))
 
-  code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time "$CLEANUP_CANCEL_MAX" \
-    -X POST "$base/cancel" 2>/dev/null || echo 000)"
-  case "$code" in
-    202) echo "    cleanup $id: cancel -> 202" ;;
-    404) echo "    cleanup $id: cancel -> 404 (already absent)"; absent=1 ;;
-    *)   echo "    cleanup $id: cancel -> $code (expected exactly 202 or 404)"; broken=1 ;;
-  esac
+  if timeout="$(phase_timeout "$mutation_deadline" "$CLEANUP_CANCEL_MAX")"; then
+    code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time "$timeout" \
+      -X POST "$base/cancel" 2>/dev/null || echo 000)"
+    case "$code" in
+      202) echo "    cleanup $id: cancel -> 202" ;;
+      404) echo "    cleanup $id: cancel -> 404 (already absent)"; absent=1 ;;
+      *)   echo "    cleanup $id: cancel -> $code (expected exactly 202 or 404)"; broken=1 ;;
+    esac
+  else
+    echo "    cleanup $id: cancel had no time left before the reserved final GET"
+    broken=1
+  fi
 
   if [ "$absent" -eq 0 ] && [ "$broken" -eq 0 ]; then
-    deadline=$(( $(date +%s) + CLEANUP_TERMINAL_MAX ))
-    while :; do
+    terminal_deadline=$(( $(date +%s) + CLEANUP_TERMINAL_MAX ))
+    [ "$terminal_deadline" -gt "$mutation_deadline" ] && terminal_deadline="$mutation_deadline"
+    while timeout="$(phase_timeout "$terminal_deadline" "$POLL_MAX")"; do
       out="$(tmpfile)"
-      code="$(curl -sS -o "$out" -w '%{http_code}' --max-time "$POLL_MAX" "$base" 2>/dev/null || echo 000)"
+      code="$(curl -sS -o "$out" -w '%{http_code}' --max-time "$timeout" "$base" 2>/dev/null || echo 000)"
       if [ "$code" = 404 ]; then absent=1; rm -f "$out"; break; fi
       if [ "$code" != 200 ]; then
         echo "    cleanup $id: status -> $code (expected 200 or 404)"; broken=1; rm -f "$out"; break
@@ -177,28 +204,35 @@ cleanup_job_lifecycle() {
         queued|running|cancelling) ;;
         *) echo "    cleanup $id: status body malformed (state='$state')"; broken=1; break ;;
       esac
-      [ "$(date +%s)" -lt "$deadline" ] || break
       sleep 1
     done
     if [ "$terminal" -eq 0 ] && [ "$absent" -eq 0 ] && [ "$broken" -eq 0 ]; then
-      echo "    cleanup $id: no terminal proof within ${CLEANUP_TERMINAL_MAX}s"
+      echo "    cleanup $id: no terminal proof within the ${CLEANUP_TERMINAL_MAX}s window"
       broken=1
     fi
   fi
 
   # A job is only safe to DELETE once it is proved terminal.
   if [ "$terminal" -eq 1 ]; then
-    code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time "$CLEANUP_DELETE_MAX" \
-      -X DELETE "$base" 2>/dev/null || echo 000)"
-    case "$code" in
-      204|404) echo "    cleanup $id: delete -> $code" ;;
-      *) echo "    cleanup $id: delete -> $code (expected 204 or 404)"; broken=1 ;;
-    esac
+    if timeout="$(phase_timeout "$mutation_deadline" "$CLEANUP_DELETE_MAX")"; then
+      code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time "$timeout" \
+        -X DELETE "$base" 2>/dev/null || echo 000)"
+      case "$code" in
+        204|404) echo "    cleanup $id: delete -> $code" ;;
+        *) echo "    cleanup $id: delete -> $code (expected 204 or 404)"; broken=1 ;;
+      esac
+    else
+      echo "    cleanup $id: delete had no time left before the reserved final GET"
+      broken=1
+    fi
   fi
 
   # Reserved and unconditional. An earlier failure may suppress an unsafe DELETE; it
-  # never suppresses the absence proof.
-  code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time "$CLEANUP_FINAL_MAX" "$base" 2>/dev/null || echo 000)"
+  # never suppresses the absence proof. The reserve is always at least one second.
+  timeout=$(( final_deadline - $(date +%s) ))
+  [ "$timeout" -gt "$CLEANUP_FINAL_MAX" ] && timeout="$CLEANUP_FINAL_MAX"
+  [ "$timeout" -lt 1 ] && timeout=1
+  code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time "$timeout" "$base" 2>/dev/null || echo 000)"
   if [ "$code" = 404 ]; then
     echo "    cleanup success $id: final GET 404"
   else
@@ -230,40 +264,75 @@ release_known_ids() {
   return 0
 }
 
+# check_residue <label> <project_pattern> <enumeration command...>
+#
+# An enumeration that FAILS is not zero residue. Suppressing the error and counting an
+# empty stream would print PASS without a completed check, so the command's exit status
+# is captured and a failure is reported red as UNKNOWN.
+check_residue() {
+  local label="$1" pattern="$2"
+  shift 2
+  local listing status count
+  listing="$("$@" 2>/dev/null)"
+  status=$?
+  if [ "$status" -ne 0 ]; then
+    bad "could not enumerate $label for $PROJECT (exit $status) — residue UNKNOWN, not zero"
+    return 1
+  fi
+  count="$(printf '%s\n' "$listing" | grep -c "$pattern" || true)"
+  count="${count:-0}"
+  if [ "$count" -eq 0 ]; then
+    ok "no leftover $label for $PROJECT"
+    return 0
+  fi
+  bad "$count leftover $label for $PROJECT"
+  return 1
+}
+
 # The five residue checks: containers, images, networks, volumes, browser downloads.
 residue_audit() {
-  local residue=0 kind name count leftover_downloads
-  for kind in \
-    "containers:$(docker ps -a --format '{{.Names}}' 2>/dev/null | grep -c "^${PROJECT}[-_]" || true)" \
-    "images:$(docker image ls --format '{{.Repository}}' 2>/dev/null | grep -c "^${PROJECT}-" || true)" \
-    "networks:$(docker network ls --format '{{.Name}}' 2>/dev/null | grep -c "^${PROJECT}_" || true)" \
-    "volumes:$(docker volume ls --format '{{.Name}}' 2>/dev/null | grep -c "^${PROJECT}_" || true)"; do
-    name="${kind%%:*}"; count="${kind##*:}"
-    if [ "${count:-0}" -eq 0 ]; then
-      ok "no leftover $name for $PROJECT"
-    else
-      bad "$count leftover $name for $PROJECT"
-      residue=1
-    fi
-  done
+  local residue=0 listing status count
+  check_residue containers "^${PROJECT}[-_]" docker ps -a --format '{{.Names}}' || residue=1
+  check_residue images "^${PROJECT}-" docker image ls --format '{{.Repository}}' || residue=1
+  check_residue networks "^${PROJECT}_" docker network ls --format '{{.Name}}' || residue=1
+  check_residue volumes "^${PROJECT}_" docker volume ls --format '{{.Name}}' || residue=1
 
   # Browser download artifact residue: Playwright manages temp downloads, but
   # assert no ns-test-download files leaked from a prior or current run.
-  leftover_downloads="$(find /tmp -maxdepth 1 -name 'ns-test-download-*.xlsx' 2>/dev/null | wc -l | tr -d ' ')"
-  if [ "$leftover_downloads" = "0" ]; then
-    ok "no leftover browser download artifacts"
-  else
-    bad "$leftover_downloads leftover browser download artifact(s) in /tmp"
+  listing="$(find /tmp -maxdepth 1 -name 'ns-test-download-*.xlsx' 2>/dev/null)"
+  status=$?
+  if [ "$status" -ne 0 ]; then
+    bad "could not enumerate browser download artifacts (exit $status) — residue UNKNOWN, not zero"
     residue=1
+  else
+    count="$(printf '%s' "$listing" | grep -c . || true)"
+    count="${count:-0}"
+    if [ "$count" -eq 0 ]; then
+      ok "no leftover browser download artifacts"
+    else
+      bad "$count leftover browser download artifact(s) in /tmp"
+      residue=1
+    fi
   fi
   return "$residue"
 }
+
+# Set immediately before a boundary that is reached through LOST AUTHORITY, where the
+# job set itself is untrustworthy. Such a boundary must NOT run the normal per-id
+# lifecycle: that is exactly the "normal cleanup" lost authority excludes, and its cost
+# would scale with the bogus cardinality. Compose teardown below destroys the stack and
+# every job inside it, so nothing outlives the run either way.
+LOST_AUTHORITY=0
 
 # The fail-fast stage boundary. A failed stage can never hand work to a later one.
 boundary() {
   [ "$STAGE_FAIL" -eq 0 ] && return 0
   echo "== CONTAINED: stage '$STAGE_NAME' failed ($STAGE_FAIL failure(s)); no later job-owning stage will start =="
-  release_known_ids
+  if [ "$LOST_AUTHORITY" -eq 1 ]; then
+    echo "  lost authority: normal known-id cleanup is skipped; teardown reclaims every job"
+  else
+    release_known_ids
+  fi
   echo "== teardown + zero residue (contained) =="
   cleanup
   residue_audit || echo "  (residue detected — inspect \`docker ... | grep $PROJECT\`)"
@@ -670,7 +739,18 @@ stage "assembled browser abort: direct /about navigation + baselined BFF audit +
 rm -f "$ABORT_HANDOFF"
 # Baseline IMMEDIATELY before the isolated abort run: curl disconnects and the
 # tiny/replay teardown cancels are all before this line and cannot satisfy the audit.
-BFF_LOG_BASELINE="$($COMPOSE logs web 2>&1 | wc -l)"
+#
+# The baseline's exit status is checked, not just its output. A failed `compose logs`
+# would otherwise leave a small line count (or a count of its own error text), and the
+# later read would then tail from a bogus offset and re-include a PRE-baseline
+# cancellation line — false-greening the audit off evidence it must not see. A baseline
+# that cannot be taken stops the stage before any job is submitted.
+BFF_BASELINE_LOG="$WORKDIR/bff-baseline.log"
+if ! $COMPOSE logs web >"$BFF_BASELINE_LOG" 2>&1; then
+  bad "could not baseline the BFF log before the abort run — audit-only-new cannot be honoured"
+  boundary
+fi
+BFF_LOG_BASELINE="$(wc -l < "$BFF_BASELINE_LOG" | tr -d ' ')"
 
 if (cd "$ROOT/web" && \
     ASSEMBLED_BASE_URL="$BASE" \
@@ -686,12 +766,19 @@ fi
 # Audit BEFORE any abort cleanup. Only NEW entries after the baseline count.
 echo "  -- BFF abort-propagation audit (new entries only, before any abort cleanup)"
 sleep 2
-BFF_NEW_LOGS="$($COMPOSE logs web 2>&1 | tail -n +$((BFF_LOG_BASELINE + 1)))"
-if echo "$BFF_NEW_LOGS" | grep -q 'downstream cancelled; propagating to upstream body'; then
-  ok "BFF observed browser downstream cancel → upstream-body abort (NEW log after baseline)"
+BFF_AFTER_LOG="$WORKDIR/bff-after.log"
+if ! $COMPOSE logs web >"$BFF_AFTER_LOG" 2>&1; then
+  # A failed read is a failed audit, never a pass. Cleanup below still runs, because a
+  # valid handoff must be released even when the audit itself failed.
+  bad "could not read the BFF log after the abort run — abort audit failed"
 else
-  bad "BFF abort not correlated to the isolated abort navigation (new 'downstream cancelled' matches: $(
-    echo "$BFF_NEW_LOGS" | grep -c 'downstream cancelled' || true))"
+  BFF_NEW_LOGS="$(tail -n +$((BFF_LOG_BASELINE + 1)) "$BFF_AFTER_LOG")"
+  if echo "$BFF_NEW_LOGS" | grep -q 'downstream cancelled; propagating to upstream body'; then
+    ok "BFF observed browser downstream cancel → upstream-body abort (NEW log after baseline)"
+  else
+    bad "BFF abort not correlated to the isolated abort navigation (new 'downstream cancelled' matches: $(
+      echo "$BFF_NEW_LOGS" | grep -c 'downstream cancelled' || true))"
+  fi
 fi
 
 echo "  -- accepted-slot handoff authority"
@@ -710,6 +797,7 @@ case "$HANDOFF_HEAD" in
     if [ "$ABORT_SLOTS" -gt 2 ]; then
       # Handed off only so cardinality is detectable; this takes teardown, not cleanup.
       bad "abort handoff carried $ABORT_SLOTS accepted slots (>2) — lost authority, no normal cleanup"
+      LOST_AUTHORITY=1
       boundary
     fi
 
@@ -744,6 +832,7 @@ case "$HANDOFF_HEAD" in
     ;;
   *)
     bad "abort authority lost: ${HANDOFF_HEAD#lost } (no guessed id, no later job-owning stage)"
+    LOST_AUTHORITY=1
     boundary
     ;;
 esac
