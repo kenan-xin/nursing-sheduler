@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   ABORT_BOUNDS,
   ABORT_TEST_TIMEOUT,
+  activeSessionFacts,
   CLEANUP_BOUNDS,
   cleanupKnownJob,
   cleanupKnownJobs,
@@ -522,6 +523,82 @@ describe("compact replay and every-request authority judge", () => {
   });
 });
 
+describe("activeSessionFacts defers to the product session inspector", () => {
+  const ACTIVE_JOB = "job_640a73beed6b4c619e0123ee2280da23";
+  const ACTIVE_CURSOR = cursor(ACTIVE_JOB, "100-0");
+
+  // Built to the REAL closed schema, so drift in the product contract fails these
+  // tests instead of silently passing a permissive local subset.
+  const record = (over: Record<string, unknown> = {}): string =>
+    JSON.stringify({
+      schemaVersion: 1,
+      ownerId: "owner-1",
+      phase: "active",
+      anonymized: false,
+      runOptions: {},
+      peopleCount: 3,
+      reverseMap: [],
+      jobId: ACTIVE_JOB,
+      lastCursor: ACTIVE_CURSOR,
+      ...over,
+    });
+
+  const nothing = { jobId: null, cursor: null };
+
+  it("reads job id and cursor from a canonical active record", () => {
+    expect(activeSessionFacts(record())).toEqual({
+      jobId: ACTIVE_JOB,
+      cursor: ACTIVE_CURSOR,
+    });
+  });
+
+  it("reads an active record that has not committed a cursor yet", () => {
+    const parsed = JSON.parse(record()) as Record<string, unknown>;
+    delete parsed.lastCursor;
+    expect(activeSessionFacts(JSON.stringify(parsed))).toEqual({
+      jobId: ACTIVE_JOB,
+      cursor: null,
+    });
+  });
+
+  it("yields nothing when no record is stored", () => {
+    expect(activeSessionFacts(null)).toEqual(nothing);
+  });
+
+  it("yields nothing for a provisional record, which the product never resumes", () => {
+    const provisional = JSON.parse(record()) as Record<string, unknown>;
+    provisional.phase = "provisional";
+    delete provisional.jobId;
+    delete provisional.lastCursor;
+    expect(activeSessionFacts(JSON.stringify(provisional))).toEqual(nothing);
+  });
+
+  it("yields nothing for malformed bytes", () => {
+    expect(activeSessionFacts("{not json")).toEqual(nothing);
+  });
+
+  it("yields nothing for a future schema version", () => {
+    expect(activeSessionFacts(record({ schemaVersion: 2 }))).toEqual(nothing);
+  });
+
+  it("yields nothing when a foreign key is present, because the schema is closed", () => {
+    expect(activeSessionFacts(record({ unexpected: true }))).toEqual(nothing);
+  });
+
+  it("reports the job id but strips a cursor the product itself refuses as oversized", () => {
+    const oversized = activeSessionFacts(record({ lastCursor: "x".repeat(10_000) }));
+    expect(oversized).toEqual({ jobId: ACTIVE_JOB, cursor: null });
+  });
+
+  it("never resumes from a cursor a local permissive parser would have accepted", () => {
+    // A record whose cursor looks fine but whose surrounding contract is invalid must
+    // yield nothing. A `JSON.parse(raw).lastCursor` reader would have returned the
+    // cursor here, which is exactly the drift this helper exists to prevent.
+    expect(activeSessionFacts(record({ ownerId: "" }))).toEqual(nothing);
+    expect(activeSessionFacts(record({ peopleCount: -1 }))).toEqual(nothing);
+  });
+});
+
 describe("simple assembled lane caps", () => {
   it("pins the four outcome caps without reconstructing helper arithmetic", () => {
     expect(TINY_TEST_TIMEOUT).toBe(240_000);
@@ -529,6 +606,10 @@ describe("simple assembled lane caps", () => {
     expect(ABORT_TEST_TIMEOUT).toBe(180_000);
     expect(CLEANUP_BOUNDS.hook).toBe(75_000);
     expect(TINY_BOUNDS.completionPoll).toBe(90_000);
+    // The product auto-delete proof runs inside the tiny body, before the page-close
+    // fence, so its bound must stay within the body cap and independent of the hook.
+    expect(TINY_BOUNDS.autoDeletePoll).toBe(30_000);
+    expect(TINY_BOUNDS.autoDeletePoll).toBeLessThan(TINY_TEST_TIMEOUT);
     expect(ABORT_BOUNDS.abortUrlSettle).toBe(30_000);
     expect(TINY_TEST_TIMEOUT).toBeLessThan(PRODUCT_SOLVE_LIMIT);
     expect(REPLAY_TEST_TIMEOUT).toBeLessThan(PRODUCT_SOLVE_LIMIT);

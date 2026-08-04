@@ -4,9 +4,11 @@
 import { expect, test, type Page } from "@playwright/test";
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import { OPTIMIZE_SESSION_STORAGE_KEY } from "@/lib/optimize/session-transaction";
 import {
   ABORT_BOUNDS,
   ABORT_TEST_TIMEOUT,
+  activeSessionFacts,
   CLEANUP_BOUNDS,
   cleanupKnownJobs,
   finishSubmitObservation,
@@ -40,7 +42,6 @@ const LARGE_YAML = readFileSync(
 );
 
 const REPLAY_SNAPSHOT_KEY = "nurse.optimize.e2e-replay-snapshot";
-const OPTIMIZE_SESSION_KEY = "nurse.optimize.session";
 
 /** Transparent observation only: the product still consumes the real response body. */
 const SSE_OBSERVATION_SCRIPT = `
@@ -203,6 +204,19 @@ async function gotoFixture(page: Page): Promise<void> {
   });
 }
 
+/**
+ * What the browser task captures. `sessionRawBefore` is the EXACT persisted-session
+ * bytes, uninterpreted: no phase, job id or cursor is read in the browser, so this
+ * spec carries no second copy of the product's session schema. All interpretation
+ * happens on the Node side through `activeSessionFacts` -> `inspectPersistedSession`.
+ */
+interface RawReplaySnapshot {
+  sessionRawBefore: string | null;
+  preReloadIds: string[];
+  preReloadRequests: ResumedRequest[];
+  pageOrigin: string | null;
+}
+
 interface ReplaySnapshot {
   cursorBefore: string | null;
   preReloadIds: string[];
@@ -229,33 +243,17 @@ async function captureReplaySnapshotAndReload(page: Page): Promise<ReplaySnapsho
           };
           await e2eWindow.__nsFreezeSseForReplay?.();
 
-          const readSession = (): { jobId: string | null; cursor: string | null } => {
-            const raw = sessionStorage.getItem(sessionKey);
-            if (!raw) return { jobId: null, cursor: null };
-            try {
-              const parsed = JSON.parse(raw) as {
-                phase?: string;
-                jobId?: string;
-                lastCursor?: string;
-              };
-              return {
-                jobId: parsed.phase === "active" ? (parsed.jobId ?? null) : null,
-                cursor: parsed.lastCursor ?? null,
-              };
-            } catch {
-              return { jobId: null, cursor: null };
-            }
-          };
-
-          let cursorBefore: string | null = null;
-          let sessionJobIdDiagnostic: string | null = null;
+          // Settle on the record BYTES, without interpreting them. Byte stability is at
+          // least as strict as cursor stability (the record changes when the cursor
+          // commits), and it keeps every schema judgement on the Node side. As before,
+          // an unsettled window still proceeds with the last observed value rather than
+          // hanging.
+          let sessionRawBefore: string | null = null;
           let stableReads = 0;
           for (let attempt = 0; attempt < 20 && stableReads < 3; attempt += 1) {
-            const next = readSession();
-            stableReads =
-              next.cursor !== null && next.cursor === cursorBefore ? stableReads + 1 : 0;
-            cursorBefore = next.cursor;
-            sessionJobIdDiagnostic = next.jobId;
+            const next = sessionStorage.getItem(sessionKey);
+            stableReads = next !== null && next === sessionRawBefore ? stableReads + 1 : 0;
+            sessionRawBefore = next;
             await new Promise((resolve) => setTimeout(resolve, 10));
           }
 
@@ -268,37 +266,45 @@ async function captureReplaySnapshotAndReload(page: Page): Promise<ReplaySnapsho
           sessionStorage.setItem(
             snapshotKey,
             JSON.stringify({
-              cursorBefore,
+              sessionRawBefore,
               preReloadIds,
               preReloadRequests,
-              sessionJobIdDiagnostic,
               pageOrigin: window.location.origin,
             }),
           );
           window.location.reload();
         },
-        [REPLAY_SNAPSHOT_KEY, OPTIMIZE_SESSION_KEY] as const,
+        [REPLAY_SNAPSHOT_KEY, OPTIMIZE_SESSION_STORAGE_KEY] as const,
       ),
     ),
   ]);
 
-  return withBound(
+  const raw = await withBound(
     "post-reload snapshot read evaluate",
     REPLAY_BOUNDS.snapshotReadEvaluate,
     page.evaluate((snapshotKey) => {
-      const raw = sessionStorage.getItem(snapshotKey);
+      const stored = sessionStorage.getItem(snapshotKey);
       sessionStorage.removeItem(snapshotKey);
-      return raw
-        ? (JSON.parse(raw) as ReplaySnapshot)
+      return stored
+        ? (JSON.parse(stored) as RawReplaySnapshot)
         : {
-            cursorBefore: null,
+            sessionRawBefore: null,
             preReloadIds: [],
             preReloadRequests: [],
-            sessionJobIdDiagnostic: null,
             pageOrigin: null,
           };
     }, REPLAY_SNAPSHOT_KEY),
   );
+
+  // Product authority decides what those bytes mean.
+  const facts = activeSessionFacts(raw.sessionRawBefore);
+  return {
+    cursorBefore: facts.cursor,
+    preReloadIds: raw.preReloadIds,
+    preReloadRequests: raw.preReloadRequests,
+    sessionJobIdDiagnostic: facts.jobId,
+    pageOrigin: raw.pageOrigin,
+  };
 }
 
 interface ReplayObservation {
@@ -311,34 +317,35 @@ interface ReplayObservation {
 
 /** Replay ids, persisted cursor and every resumed request are one atomic observation. */
 async function readReplayObservation(page: Page): Promise<ReplayObservation> {
-  return withBound(
+  const raw = await withBound(
     "replay observation evaluate",
     OBSERVATION_EVALUATE_BOUND,
-    page.evaluate(() => {
+    page.evaluate((sessionKey) => {
       const obs = (window as unknown as { __nsSseObs?: SseObservations }).__nsSseObs;
       const replayIds = Array.from(
         (obs?.sseChunks ?? []).join("").matchAll(/^id:\s*(.+?)\r?$/gm),
         (match) => match[1],
       );
-      let cursorAfter: string | null = null;
-      const raw = sessionStorage.getItem("nurse.optimize.session");
-      if (raw) {
-        try {
-          cursorAfter = (JSON.parse(raw) as { lastCursor?: string }).lastCursor ?? null;
-        } catch {
-          cursorAfter = null;
-        }
-      }
+      // Raw bytes again, uninterpreted, in the same atomic observation.
+      const sessionRawAfter = sessionStorage.getItem(sessionKey);
       const postReloadRequests = (obs?.eventRequests ?? []).slice();
       return {
         replayIds,
-        cursorAfter,
+        sessionRawAfter,
         pageOrigin: window.location.origin,
         firstResumedRequest: postReloadRequests[0] ?? null,
         postReloadRequests,
       };
-    }),
+    }, OPTIMIZE_SESSION_STORAGE_KEY),
   );
+
+  return {
+    replayIds: raw.replayIds,
+    cursorAfter: activeSessionFacts(raw.sessionRawAfter).cursor,
+    pageOrigin: raw.pageOrigin,
+    firstResumedRequest: raw.firstResumedRequest,
+    postReloadRequests: raw.postReloadRequests,
+  };
 }
 
 function emptyCleanup(ids: string[], failure: string): CleanupOutcome {
@@ -482,7 +489,10 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
     }
   });
 
-  test("tiny feasible job: SSE first byte, completion, download, cleanup", async ({ page }) => {
+  test("tiny feasible job: SSE first byte, completion, download, cleanup", async ({
+    page,
+    request,
+  }) => {
     test.setTimeout(TINY_TEST_TIMEOUT);
     await injectYaml(page, TINY_YAML);
     await gotoFixture(page);
@@ -522,8 +532,27 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
     expect(workbookBytes.length).toBeGreaterThan(4);
     expect(workbookBytes.subarray(0, 4)).toEqual(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
 
-    // The product's own successful terminal chain downloads, auto-deletes, and
-    // releases its single submit slot before hook cleanup independently proves 404.
+    // PRODUCT auto-delete, proved here and not by the hook. This poll runs while the
+    // page is still open, before the page-close fence and before `afterEach` performs
+    // its own cancel/terminal/delete/final-GET lifecycle. Without it, a product whose
+    // terminal auto-cleanup effect stopped running would still download and still
+    // re-enable Submit, and the hook's own DELETE would supply the only observed 404 —
+    // false-greening the "Product auto-delete completes" ledger row.
+    const acceptedIds = submitObserver?.knownIds() ?? [];
+    expect(acceptedIds, "exactly one accepted job id owns this lane").toHaveLength(1);
+    const acceptedJobId = acceptedIds[0];
+    await expect
+      .poll(
+        async () =>
+          (await request.get(`/api/optimize/${encodeURIComponent(acceptedJobId)}`)).status(),
+        {
+          timeout: TINY_BOUNDS.autoDeletePoll,
+          message: "the product's terminal chain must auto-delete the accepted job",
+        },
+      )
+      .toBe(404);
+
+    // Separate assertion, separate invariant: the single submit slot is released.
     await expect(page.getByTestId("optimize-submit")).toBeEnabled({
       timeout: TINY_BOUNDS.slotFreedAssertion,
     });
