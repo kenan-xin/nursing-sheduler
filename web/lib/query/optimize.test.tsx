@@ -8,6 +8,7 @@ import type { JobResponse } from "@/lib/bff/types";
 import {
   applyFrameToCache,
   applyFrameWithReconcile,
+  buildOptimizeEventsUrl,
   fetchOptimizeXlsx,
   OptimizeApiError,
   useCancelOptimize,
@@ -694,6 +695,13 @@ describe("applyFrameToCache with NO cached JobResponse (partial frame cannot con
     );
     expect(reconcile).toHaveBeenCalledOnce();
     expect(client.getQueryData<JobResponse>(key)?.state).toBe("completed");
+  });
+});
+
+describe("buildOptimizeEventsUrl", () => {
+  it("authors the exact root-relative encoded events URL", () => {
+    const jobId = "job /?#%é";
+    expect(buildOptimizeEventsUrl(jobId)).toBe(`/api/optimize/${encodeURIComponent(jobId)}/events`);
   });
 });
 
