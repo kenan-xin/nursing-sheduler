@@ -188,7 +188,7 @@ components:
 
 # Design System: Nurse Scheduling
 
-> **Status: canon ahead of code.** This document describes the **v2 "Mint Canvas, Warm Ink"** system, adopted 2026-07-27 from `docs/design_prototype/`. The shipped `web/` code still runs the retired v1 system (cold near-black ink, `radius: 0`, flat-with-hairlines). Read this as the target, not as a description of the running app. The re-skin is tracked separately; until it lands, `web/app/globals.css` and this file deliberately disagree.
+> **Status: shipped.** This document describes the **v2 "Mint Canvas, Warm Ink"** system, adopted 2026-07-27 from `docs/design_prototype/` and now implemented across every shipped route in `web/`. Read it as a description of the running app, not only as a target: `web/app/globals.css` and this file agree. Should they ever drift, this document's visual rules are canon under the authority order below.
 
 **Canonical reference:** `docs/design_prototype/` — open `standalone/nurse-scheduling-v2-standalone.html` to click the whole app, read `source/Screen*.dc.html` for per-screen markup, and `README.md` for the authored handoff. `direction/` holds the two exploration passes that produced this system.
 
