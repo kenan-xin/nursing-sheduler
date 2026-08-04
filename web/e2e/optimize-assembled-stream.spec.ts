@@ -541,21 +541,26 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
     const acceptedIds = submitObserver?.knownIds() ?? [];
     expect(acceptedIds, "exactly one accepted job id owns this lane").toHaveLength(1);
     const acceptedJobId = acceptedIds[0];
-    await expect
-      .poll(
-        async () =>
-          (await request.get(`/api/optimize/${encodeURIComponent(acceptedJobId)}`)).status(),
-        {
-          timeout: TINY_BOUNDS.autoDeletePoll,
-          message: "the product's terminal chain must auto-delete the accepted job",
-        },
-      )
-      .toBe(404);
 
-    // Separate assertion, separate invariant: the single submit slot is released.
-    await expect(page.getByTestId("optimize-submit")).toBeEnabled({
-      timeout: TINY_BOUNDS.slotFreedAssertion,
-    });
+    // Two INDEPENDENT invariants of the same terminal chain: the job is gone
+    // server-side, and the single submit slot is released client-side. They are
+    // awaited CONCURRENTLY so they share wall-clock rather than summing into the
+    // body cap -- each keeps its own bound, assertion and failure message.
+    await Promise.all([
+      expect
+        .poll(
+          async () =>
+            (await request.get(`/api/optimize/${encodeURIComponent(acceptedJobId)}`)).status(),
+          {
+            timeout: TINY_BOUNDS.autoDeletePoll,
+            message: "the product's terminal chain must auto-delete the accepted job",
+          },
+        )
+        .toBe(404),
+      expect(page.getByTestId("optimize-submit")).toBeEnabled({
+        timeout: TINY_BOUNDS.slotFreedAssertion,
+      }),
+    ]);
   });
 
   test("live job: SSE first byte, genuine keepalive, cursor persistence, strictly-after replay", async ({
