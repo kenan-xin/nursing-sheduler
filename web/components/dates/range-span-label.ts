@@ -1,7 +1,7 @@
 // Shared UTC range-span label (T10) — the single human identity for a roster
 // range, used by BOTH the roster-period duration row and the calendar-card heading
 // so they never disagree (audit MINOR 2). Mirrors the prototype's `rangeSpanLabel()`
-// (docs/design_prototype/Nurse Scheduling.dc.html:1157-1166):
+// (docs/design_prototype/source/Nurse Scheduling v2.dc.html:1288-1297):
 //
 //   • unset            → "—"
 //   • one month        → "July 2026"

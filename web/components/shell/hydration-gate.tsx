@@ -63,11 +63,11 @@ export function HydrationGate({ children }: { children: React.ReactNode }) {
         className="mx-auto flex w-full max-w-md flex-col gap-4 p-8 text-center"
         data-testid="hydration-error"
       >
-        {/* Explicit -0.015em, like every other R1-owned heading. Without it this
-            heading inherits globals.css's still-deferred v1 `h1–h6 {
-            letter-spacing: -0.02em }` rule (G1 owns removing that), which would
-            leave the recovery state as the one mixed v1/v2 surface on the route
-            — and it is rare enough that nothing else would notice. */}
+        {/* Explicit -0.015em, like every other R1-owned heading. The global
+            h1–h6 rule already resolves to the same v2 value, so this states the
+            component contract rather than correcting a default — which matters
+            on a recovery state rare enough that nothing else would notice a
+            drift. */}
         <h2
           data-testid="hydration-error-heading"
           className="font-heading text-h3 font-semibold tracking-[-0.015em]"

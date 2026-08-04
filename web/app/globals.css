@@ -622,6 +622,12 @@ html.dark[data-accent="plum"] {
     font-size: var(--t-body);
     line-height: 1.5;
   }
+  /* The heading half of DESIGN.md §3's Negative-Tracking Rule, as a semantic
+     safety net: any h1–h6 that does not name its own tracking still lands on
+     the v2 -0.015em rather than the browser default of 0, which §3 forbids.
+     Route-local `tracking-[-0.015em]` on a specific heading is a deliberate
+     component contract and restates the same value, not a correction of this
+     rule. Tailwind's `tracking-tight` is -0.025em and is NOT the v2 value. */
   h1,
   h2,
   h3,
@@ -629,7 +635,7 @@ html.dark[data-accent="plum"] {
   h5,
   h6 {
     font-family: var(--ff-heading);
-    letter-spacing: -0.02em;
+    letter-spacing: -0.015em;
   }
   ::selection {
     background: var(--brandtint);

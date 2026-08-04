@@ -308,8 +308,8 @@ export function ShiftTypeGrid() {
       </div>
 
       <section
-        // `.ns-grid3` — two-up at 640px, three-up at 1100px (Nurse Scheduling.dc.html:
-        // 80-82). `sm` already IS the 640px step; `grid3:` carries the 1100px one.
+        // `.ns-grid3` — two-up at 640px, three-up at 1100px (Nurse Scheduling v2.dc.html:
+        // 191-193). `sm` already IS the 640px step; `grid3:` carries the 1100px one.
         // Tailwind's `lg` (1024px) used to stand in for it, turning three-up 76px early
         // and squeezing each card to ~220px at spacious, pushing controls past the edge.
         className="grid grid-cols-1 gap-4 sm:grid-cols-2 grid3:grid-cols-3"

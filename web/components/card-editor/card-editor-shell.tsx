@@ -1,7 +1,7 @@
 "use client";
 
 // Shared card-editor shell — the design prototype's ScreenCards chrome
-// (docs/design_prototype/ScreenCards.dc.html). It is the common frame every
+// (docs/design_prototype/source/ScreenCards.dc.html). It is the common frame every
 // Advanced constraint editor mounts: an eyebrow/title/subtitle header with an
 // inline top-right Add, the persistent "exact constraints" info strip, a
 // brand-bordered add/edit form panel (tinted header · body · right-aligned
@@ -302,7 +302,7 @@ export function CardEditorForm({
           {heading}
         </div>
       </div>
-      {/* `.ns-formbody` — 18px, then 26/28px at 720px (Nurse Scheduling.dc.html:96-97).
+      {/* `.ns-formbody` — 18px, then 26/28px at 720px (source/Nurse Scheduling v2.dc.html:207-208).
           Both are the class's own literals, so they stay literal rather than stepping
           on the 0.9 scale; `px-7`/`py-6` resolved to 25.2/21.6px. The pivot is
           `formgrid:` (720px), the same breakpoint the grid INSIDE this body uses — it

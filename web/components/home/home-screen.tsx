@@ -52,9 +52,10 @@ export function HomeScreen() {
           <div className="mb-2 text-label font-semibold uppercase tracking-[0.03em] text-brandink">
             Ward Scheduling
           </div>
-          {/* Explicit -0.015em: globals.css still carries v1's -0.02em on h1–h6
-              (G1 owns that cleanup) and Tailwind's `tracking-tight` is -0.025em,
-              so neither default lands on the v2 value. */}
+          {/* Explicit -0.015em: this heading states its own tracking as a
+              component contract rather than leaning on the global h1–h6 safety
+              net. Same value either way — Tailwind's `tracking-tight` is
+              -0.025em and would not be. */}
           <h1 className="mb-2 font-heading text-display font-bold leading-tight tracking-[-0.015em]">
             {rosterTitle}
           </h1>

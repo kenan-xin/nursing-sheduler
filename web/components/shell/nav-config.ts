@@ -6,7 +6,7 @@
 // Model/Rules/Generate/Save headings.
 //
 // NAV-1 / Decision A — SPEC DEVIATION (recorded): the destination LABELS below
-// are the PROTOTYPE's (SideNav.dc.html + Nurse Scheduling.dc.html), NOT spec 07
+// are the PROTOTYPE's (SideNav.dc.html + Nurse Scheduling v2.dc.html), NOT spec 07
 // FR-ST-28 / DL10-D4. This is a deliberate display-text-only override for visual
 // fidelity (chosen by dev-seahouse) — Staff (was People), Shifts (was Shift
 // Types), Requests & Leave (was Shift Requests), Staffing Requirements (was Shift

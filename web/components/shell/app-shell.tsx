@@ -52,7 +52,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 page padding of their own. The hydration states sit outside this,
                 centred on their own.
 
-                Two nested elements, mirroring Nurse Scheduling.dc.html:137 exactly:
+                Two nested elements, mirroring Nurse Scheduling v2.dc.html:256-257 exactly:
                 the padding is on the OUTER box and the cap on an UNPADDED inner one,
                 so content is a full 1240px at the cap. Collapsing them into one
                 border-box div would silently spend 40px of the cap on padding.
