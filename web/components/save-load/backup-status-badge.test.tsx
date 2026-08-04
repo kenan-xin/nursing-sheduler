@@ -79,6 +79,32 @@ describe("BackupStatusBadge — tri-state Workspace-backup freshness", () => {
     expect(badge().status).toBe("current");
   });
 
+  // R7 v2 — the badge is one of the route's CONDITIONAL surfaces: the browser
+  // matrix only ever loads the default state, so `current` and `stale` never reach
+  // its status-pairing check. These assert the pairing here instead.
+  it("carries the matching semantic tier for each state, so status never rests on colour alone", () => {
+    render(<BackupStatusBadge />);
+    expect(screen.getByTestId("backup-status")).toHaveAttribute("data-variant", "neutral");
+
+    act(() => {
+      useScenarioStore.setState(pickScenario(makeValidUiState()), false);
+      useScenarioStore.getState().recordBackup();
+    });
+    expect(screen.getByTestId("backup-status")).toHaveAttribute("data-variant", "success");
+
+    act(() => {
+      useScenarioStore.getState().mutateScenario({ rangeStart: "2099-01-01" });
+    });
+    expect(screen.getByTestId("backup-status")).toHaveAttribute("data-variant", "warn");
+  });
+
+  it("carries no decorative status glyph — the label is the whole signal (DESIGN.md §5)", () => {
+    render(<BackupStatusBadge />);
+    const el = screen.getByTestId("backup-status");
+    expect(el.querySelector("svg")).toBeNull();
+    expect(el.textContent).toBe("No backup");
+  });
+
   it("is a display-only affordance: a plain span, never an interactive/guarding control", () => {
     render(<BackupStatusBadge />);
     const el = screen.getByTestId("backup-status");

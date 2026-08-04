@@ -85,9 +85,14 @@ export function SaveLoadWorkspace() {
 
       {/* `.ns-grid2` — two-up at 900px with a `--space-4` gap (ScreenSaveLoad.dc.html:37).
           `lg` (1024px) held this at one column for 124px more than the design does, and
-          `gap-6` ran 8px wider than the class specifies. */}
-      <div className="grid grid-cols-1 items-start gap-4 grid2:grid-cols-2">
-        <div className="flex flex-col gap-6">
+          `gap-6` ran 8px wider than the class specifies.
+
+          `min-w-0` on the grid AND the columns: the right pane holds a non-wrapping
+          <pre>, and a default `min-width:auto` track would let it push the whole page
+          into horizontal scroll instead of scrolling itself (DESIGN.md §7 note 6).
+          The prototype authors the same three `min-width:0` declarations (:37-39, :81). */}
+      <div className="grid min-w-0 grid-cols-1 items-start gap-4 grid2:grid-cols-2">
+        <div className="flex min-w-0 flex-col gap-4">
           <ScenarioFileCard
             scenario={scenario}
             canEditYaml={exportResult.ok}

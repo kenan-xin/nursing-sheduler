@@ -142,6 +142,42 @@ test.describe("T17b-2 — Load flow UI", () => {
     expect(await rangeStart(page)).toBe(before);
   });
 
+  // R7 — the ticket's overlay guardrail, made observable. Both halves matter and
+  // neither was previously asserted: the version confirm must SUPERSEDE the upload
+  // modal (not stack on top of it, which would leave a second scrim and a second
+  // focus trap between the user and the decision), and when the decision resolves,
+  // focus must land back on the Upload trigger rather than on `<body>`.
+  //
+  // The assertions are on the SETTLED state deliberately. The upload modal is still
+  // painted for one exit animation while the confirm enters — `toHaveCount(0)`
+  // retries until that transition finishes, so this pins the contract without
+  // pinning the frame, which would be flaky.
+  test("the version confirm supersedes the upload modal and restores focus to the Upload trigger", async ({
+    page,
+  }) => {
+    await gotoReadySaveAndLoad(page);
+
+    await page.getByTestId("scenario-upload-button").click();
+    await expect(page.getByTestId("upload-modal")).toBeVisible();
+    await page.getByTestId("upload-file-input").setInputFiles({
+      name: "no-version.yaml",
+      mimeType: "text/yaml",
+      buffer: Buffer.from(VALID_YAML_NO_VERSION),
+    });
+
+    await expect(page.getByTestId("confirm-dialog-confirm")).toBeVisible();
+    // The upload modal is gone, and the confirm is what is left standing.
+    await expect(page.getByTestId("upload-modal")).toHaveCount(0);
+    await expect(page.getByTestId("confirm-dialog-confirm")).toBeVisible();
+
+    await page.getByTestId("confirm-dialog-cancel").click();
+    await expect(page.getByTestId("confirm-dialog-confirm")).toBeHidden();
+
+    // Focus returns to the control that opened the flow — the shared overlays'
+    // own restoration behaviour, consumed rather than reimplemented here.
+    await expect(page.getByTestId("scenario-upload-button")).toBeFocused();
+  });
+
   test("a version mismatch's Continue commits the load", async ({ page }) => {
     await gotoReadySaveAndLoad(page);
 
