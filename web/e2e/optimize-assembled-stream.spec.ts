@@ -2,8 +2,8 @@
 // Runs only against the live Compose stack with no /api interception.
 
 import { expect, test, type Page } from "@playwright/test";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync, renameSync, writeFileSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 import {
   ABORT_BOUNDS,
   ABORT_TEST_TIMEOUT,
@@ -39,8 +39,6 @@ const LARGE_YAML = readFileSync(
   "utf-8",
 );
 
-// Legacy Ticket 2 seam: the existing reporter/classifier consumes this unchanged.
-const ABORT_CONTROL_SENTINEL = "R6_ABORT_CONTROL_AT_URL_ASSERTION";
 const REPLAY_SNAPSHOT_KEY = "nurse.optimize.e2e-replay-snapshot";
 const OPTIMIZE_SESSION_KEY = "nurse.optimize.session";
 
@@ -347,62 +345,117 @@ function emptyCleanup(ids: string[], failure: string): CleanupOutcome {
   return { ok: false, ids, removedIds: [], steps: [], failures: [failure] };
 }
 
+/**
+ * The abort lane's only handoff to the shell: the accepted-slot ids in slot order,
+ * duplicates intact, written atomically via a same-directory temp file and rename.
+ *
+ * The payload carries NO pass/fail, reason or verdict field. The shell decides
+ * authority from cardinality and readability alone, and audits new BFF log entries
+ * before it cleans anything up — so cleanup can never manufacture its own evidence.
+ */
+function writeAcceptedSlotHandoff(target: string, slotIds: readonly string[]): void {
+  const temporary = join(dirname(target), `.${basename(target)}.${process.pid}.tmp`);
+  writeFileSync(temporary, JSON.stringify(slotIds), "utf-8");
+  renameSync(temporary, target);
+}
+
 test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
   test.describe.configure({ mode: "serial" });
 
-  // Tiny/replay alone use the new observer. Abort deliberately stays outside it
-  // until Ticket 2 wires the ids-only post-BFF handoff.
+  // Every lane attaches the same accepted-submit observer before its click. They
+  // differ only in what happens after the page-close fence: tiny/replay own their
+  // job lifecycle in-browser, while abort hands its accepted ids to the shell and
+  // performs no cancel, status, delete or final GET of its own.
+  type CleanupLane = "lifecycle" | "handoff";
   let submitObserver: SubmitObserver | null = null;
+  let cleanupLane: CleanupLane = "lifecycle";
 
   test.afterEach(async ({ page, request }, testInfo) => {
     const observer = submitObserver;
+    const lane = cleanupLane;
     submitObserver = null;
+    cleanupLane = "lifecycle";
     if (observer === null) return;
 
-    testInfo.setTimeout(testInfo.timeout + CLEANUP_BOUNDS.hook);
+    testInfo.setTimeout(
+      testInfo.timeout +
+        (lane === "handoff"
+          ? CLEANUP_BOUNDS.closeAndSettle + CLEANUP_BOUNDS.report
+          : CLEANUP_BOUNDS.hook),
+    );
     const observation: SubmitObservation = await finishSubmitObservation(observer, async () => {
       if (!page.isClosed()) await page.close({ runBeforeUnload: false });
     });
 
-    const cleanup = observation.lostAuthority
-      ? emptyCleanup(
-          observation.knownIds,
-          "lost submit authority; normal known-id cleanup bypassed for immediate Ticket 2 containment",
-        )
-      : await cleanupKnownJobs(observation.knownIds, {
-          post: async (url, timeout) => {
-            const response = await request.post(url, { timeout });
-            return { status: response.status(), body: await response.text() };
-          },
-          delete: async (url, timeout) => {
-            const response = await request.delete(url, { timeout });
-            return { status: response.status(), body: await response.text() };
-          },
-          get: async (url, timeout) => {
-            const response = await request.get(url, { timeout });
-            return { status: response.status(), body: await response.text() };
-          },
-          sleep: (ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
-          now: () => Date.now(),
-        });
-
-    for (const step of cleanup.steps.filter((value) => value.includes("cleanup success"))) {
-      console.log(step);
+    const laneSteps: string[] = [];
+    const laneFailures: string[] = [];
+    if (lane === "handoff") {
+      // Slot order with duplicates preserved: the shell judges cardinality first,
+      // then deduplicates physical ids for its own post-audit cleanup.
+      const slotIds = observation.acceptedSlots.flatMap((slot) =>
+        slot.kind === "id" ? [slot.jobId] : [],
+      );
+      const target = process.env.ASSEMBLED_ABORT_HANDOFF;
+      if (target === undefined || target.length === 0) {
+        laneFailures.push(
+          "ASSEMBLED_ABORT_HANDOFF was unset, so no accepted-slot id could be handed off",
+        );
+      } else {
+        try {
+          writeAcceptedSlotHandoff(target, slotIds);
+          laneSteps.push(`handed off ${slotIds.length} accepted slot id(s) to ${target}`);
+        } catch (error) {
+          laneFailures.push(
+            `accepted-slot handoff write failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
+    } else {
+      const cleanup = observation.lostAuthority
+        ? emptyCleanup(
+            observation.knownIds,
+            "lost submit authority; normal known-id cleanup bypassed for immediate containment",
+          )
+        : await cleanupKnownJobs(observation.knownIds, {
+            post: async (url, timeout) => {
+              const response = await request.post(url, { timeout });
+              return { status: response.status(), body: await response.text() };
+            },
+            delete: async (url, timeout) => {
+              const response = await request.delete(url, { timeout });
+              return { status: response.status(), body: await response.text() };
+            },
+            get: async (url, timeout) => {
+              const response = await request.get(url, { timeout });
+              return { status: response.status(), body: await response.text() };
+            },
+            sleep: (ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
+            now: () => Date.now(),
+          });
+      for (const step of cleanup.steps.filter((value) => value.includes("cleanup success"))) {
+        console.log(step);
+      }
+      laneSteps.push(...cleanup.steps);
+      laneFailures.push(...cleanup.failures);
     }
+
     let report = [
       `matching submit requests: ${observation.matchingRequests}`,
       `accepted slots: ${observation.acceptedSlots.length}`,
       `known jobs: ${observation.knownIds.join(", ") || "(none)"}`,
       ...observation.failures,
-      ...cleanup.steps,
-      ...cleanup.failures,
+      ...laneSteps,
+      ...laneFailures,
     ].join("\n");
-    const failures = [...observation.failures, ...cleanup.failures];
+    const failures = [...observation.failures, ...laneFailures];
     try {
       await withBound(
         "cleanup report attachment",
         CLEANUP_BOUNDS.report,
-        testInfo.attach("live-job-cleanup", { body: report, contentType: "text/plain" }),
+        testInfo.attach(lane === "handoff" ? "abort-accepted-slot-handoff" : "live-job-cleanup", {
+          body: report,
+          contentType: "text/plain",
+        }),
       );
     } catch (error) {
       const failure = `cleanup report failed: ${error instanceof Error ? error.message : String(error)}`;
@@ -540,26 +593,59 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
     await injectYaml(page, LARGE_YAML);
     await gotoFixture(page);
 
-    await page.getByTestId("optimize-submit").click({ timeout: ABORT_BOUNDS.submitClick });
+    // The shell owns this job's lifecycle: the observer captures the accepted ids and
+    // `afterEach` hands them over without cancelling, deleting or polling anything.
+    cleanupLane = "handoff";
+    submitObserver = observeOptimizeSubmit(page);
+    await runObservedSubmitAction(
+      submitObserver,
+      () => page.getByTestId("optimize-submit").click({ timeout: ABORT_BOUNDS.submitClick }),
+      async () => {
+        if (!page.isClosed()) await page.close({ runBeforeUnload: false });
+      },
+    );
+    await expect
+      .poll(() => submitObserver?.knownIds().length ?? 0, {
+        timeout: ABORT_BOUNDS.firstResponsePoll,
+      })
+      .toBeGreaterThan(0);
     await expect
       .poll(async () => (await readSseObs(page)).sseResponseAt, {
         timeout: ABORT_BOUNDS.firstResponsePoll,
       })
       .not.toBeNull();
 
-    // Ticket 1 deliberately keeps this exact legacy negative-control seam runnable.
-    if (process.env.ASSEMBLED_SKIP_ABORT_NAVIGATION !== "1") {
-      const response = await page.goto("/about", { timeout: ABORT_BOUNDS.abortNavigation });
-      expect(
-        response,
-        "page.goto must return a committed navigation response for /about",
-      ).not.toBeNull();
-      expect(response!.url(), "the committed navigation response is /about").toMatch(/\/about$/);
-    }
-    if (process.env.ASSEMBLED_SKIP_ABORT_NAVIGATION === "1") {
-      process.stdout.write(`${ABORT_CONTROL_SENTINEL}\n`);
-    }
-    await expect(page).toHaveURL(/\/about$/, { timeout: ABORT_BOUNDS.abortUrlSettle });
+    // Direct evidence, no negative control: the real navigation must COMMIT a
+    // main-frame response on the pre-navigation origin at exactly `/about` with no
+    // query or fragment, the page must settle on that exact URL, and the old durable
+    // fixture root must be gone. An unrelated exception, assertion failure or timeout
+    // here is simply a failed Playwright command.
+    const pageOrigin = new URL(page.url()).origin;
+    const response = await page.goto("/about", { timeout: ABORT_BOUNDS.abortNavigation });
+    expect(
+      response,
+      "page.goto must return a committed navigation response for /about",
+    ).not.toBeNull();
+    expect(
+      response!.request().isNavigationRequest(),
+      "the committed response answers a navigation request",
+    ).toBe(true);
+    expect(
+      response!.frame() === page.mainFrame(),
+      "the navigation committed in the main frame",
+    ).toBe(true);
+    const committed = new URL(response!.url());
+    expect(committed.origin, "the committed response shares the pre-navigation origin").toBe(
+      pageOrigin,
+    );
+    expect(committed.pathname, "the committed response path is exactly /about").toBe("/about");
+    expect(committed.search, "the committed response carries no query").toBe("");
+    expect(committed.hash, "the committed response carries no fragment").toBe("");
+
+    await expect
+      .poll(() => page.url(), { timeout: ABORT_BOUNDS.abortUrlSettle })
+      .toBe(`${pageOrigin}/about`);
+    await expect(page.getByTestId("optimize-durable-fixture")).toHaveCount(0);
     await page.waitForTimeout(ABORT_BOUNDS.bffObservationTail);
   });
 });
