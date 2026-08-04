@@ -44,11 +44,9 @@ design_handoff_nurse_scheduling_v2/
 │  ├─ ScreenAppendixAI.dc.html    ← optional LLM assist appendix
 │  ├─ InfoTip.dc.html             ← inline glossary tooltip
 │  └─ support.js                  ← design-tool runtime (NOT for production)
-├─ direction/
-│  ├─ Design Directions.dc.html   ← the three original directions; v2 started from "1a Warm Clinical"
-│  └─ Palette Directions.dc.html  ← the palette explorations that followed; v2 ships option **2a "Mint, Warm Ink"**
-└─ v1_reference/
-   └─ Nurse Scheduling v1.dc.html ← previous visual system, for diffing only
+└─ direction/
+   ├─ Design Directions.dc.html   ← the three original directions; v2 started from "1a Warm Clinical"
+   └─ Palette Directions.dc.html  ← the palette explorations that followed; v2 ships option **2a "Mint, Warm Ink"**
 ```
 
 Open `standalone/nurse-scheduling-v2-standalone.html` first — it is the fastest way to click the whole app.

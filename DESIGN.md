@@ -190,7 +190,7 @@ components:
 
 > **Status: canon ahead of code.** This document describes the **v2 "Mint Canvas, Warm Ink"** system, adopted 2026-07-27 from `docs/design_prototype/`. The shipped `web/` code still runs the retired v1 system (cold near-black ink, `radius: 0`, flat-with-hairlines). Read this as the target, not as a description of the running app. The re-skin is tracked separately; until it lands, `web/app/globals.css` and this file deliberately disagree.
 
-**Canonical reference:** `docs/design_prototype/` — open `standalone/nurse-scheduling-v2-standalone.html` to click the whole app, read `source/Screen*.dc.html` for per-screen markup, and `README.md` for the authored handoff. `direction/` holds the two exploration passes that produced this system; `v1_reference/` is the retired system, kept for diffing during the port and deleted once it lands.
+**Canonical reference:** `docs/design_prototype/` — open `standalone/nurse-scheduling-v2-standalone.html` to click the whole app, read `source/Screen*.dc.html` for per-screen markup, and `README.md` for the authored handoff. `direction/` holds the two exploration passes that produced this system.
 
 **Authority order:** product contracts and ratified decisions → this document's visual rules → prototype examples. The prototype is authoritative for visual treatment and layout, not for product behaviour, architecture, data contracts, or feature priority. When an example conflicts with a ratified decision, the decision wins and the difference belongs in the deviation matrix below.
 

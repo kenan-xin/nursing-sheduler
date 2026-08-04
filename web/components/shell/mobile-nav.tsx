@@ -6,7 +6,7 @@
 // brand, mode, nav, footer — so the two never diverge.
 //
 // Drawer metrics + motion match the prototype (audit MAJOR 6 / m8,
-// Nurse Scheduling.dc.html:113-117): 250px / max-width 84vw (the desktop rail
+// Nurse Scheduling v2.dc.html:231): 250px / max-width 84vw (the desktop rail
 // stays 280px), the canonical `--scrim` backdrop, and the 220ms base slide.
 //
 // Accessible close (audit m8): rather than overlaying a close-X on top of the

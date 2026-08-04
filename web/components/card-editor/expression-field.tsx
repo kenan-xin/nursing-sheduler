@@ -6,7 +6,7 @@
 // substitution card copy is the historical `SUPPORTED_EXPRESSIONS`
 // (core/nurse_scheduling/preference_types.py) and `shift-counts/page.tsx`
 // (`describeExpressionTarget`); the option copy (title/help per glyph) follows the
-// design prototype's `EXPR_OPS` (ScreenCards.dc.html / Nurse Scheduling.dc.html),
+// design prototype's `EXPR_OPS` (ScreenCards.dc.html:540),
 // translated to the exact ASCII backend strings (spec 05 FR-PR-52, AC-PR-12).
 
 import * as React from "react";

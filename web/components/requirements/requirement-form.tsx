@@ -256,7 +256,7 @@ export function RequirementForm({
       />
 
       {/* The prototype lays these out as two cells of `.ns-formgrid`: `1fr` → `1fr 1fr`
-          at min-width 720px, gap 20/24px (Nurse Scheduling.dc.html:91-92). `formgrid:`
+          at min-width 720px, gap 20/24px (source/Nurse Scheduling v2.dc.html:202-203). `formgrid:`
           IS that 720px — the layout ladder now carries it, so this no longer has to
           settle for the nearest type step (`md:` 768px, which split 48px late). A
           shrink-to-fit flex row, the layout before that, instead collapsed each cell to

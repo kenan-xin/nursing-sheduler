@@ -55,7 +55,7 @@ export function TopBar() {
     <header
       data-testid="top-bar"
       // Side padding is FLAT: the prototype header is `padding:0 var(--space-5)` with
-      // no media query (Nurse Scheduling.dc.html:122). The `px-4 sm:px-5` this carried
+      // no media query (Nurse Scheduling v2.dc.html:238). The `px-4 sm:px-5` this carried
       // pivoted at 640px, a step the design does not have — and it tightened the phone
       // case, where the rail is hidden and there is more room, not less.
       //

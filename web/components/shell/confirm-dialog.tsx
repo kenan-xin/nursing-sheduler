@@ -5,7 +5,7 @@
 // the portal, `bg-scrim` backdrop, raised L2 card, focus containment and focus
 // restoration are the same ones every overlay in the app gets.
 //
-// The prototype's three-band composition (Nurse Scheduling.dc.html:200-221) is
+// The prototype's three-band composition (Nurse Scheduling v2.dc.html:319-340) is
 // preserved through the shell's own header / body / footer slots: a severity
 // tile plus title, an explanatory body with an OPTIONAL structured consequence
 // list (for delete/cascade confirmations), and a bordered action band.
