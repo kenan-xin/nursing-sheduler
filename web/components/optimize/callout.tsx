@@ -11,6 +11,19 @@
 // status tints with neutral `--ink`/`--ink2`, which reads as an unrelated grey
 // note in dark mode, where the base and ink tiers diverge. The leading icon keeps
 // the BASE tier, which §2 defines as "text or icon on its own tint".
+//
+// R6 Round 9B — `placement` names WHERE on the surface ladder the callout is
+// mounted, because the neutral tone's correct treatment depends on it. §4 gives
+// L0 no free-floating children and seats note strips "*inside* an L1 card", so a
+// neutral well rendered straight onto the page plane is a ladder violation: it is
+// a recessed plane with no plane to be recessed INTO. A page-mounted neutral
+// notice therefore takes the L1 role instead — `--surface`, a `--line` edge and
+// the outer `--sh-1`, on the card radius, exactly like every other top-level
+// container on the route. The status tones are unchanged at either placement:
+// their tint plus a matching semantic border is already a self-contained banner,
+// and it is the treatment the prototype itself authors for a page-level notice
+// (ScreenSaveLoad.dc.html:19, ScreenExport.dc.html:20, ScreenRequests.dc.html:21).
+// See DESIGN.md §1's deviation matrix for the recorded prototype divergence.
 
 import type { ReactNode } from "react";
 import {
@@ -24,8 +37,26 @@ import { cn } from "@/lib/utils";
 
 export type CalloutTone = "info" | "warn" | "error" | "success";
 
+/**
+ * Where on the surface ladder this callout is mounted.
+ *
+ * `inset` (the default) is the canonical island INSIDE an L1 card. `page` is a
+ * callout mounted directly on the L0 page plane, as a sibling of the route's
+ * cards — see the file header for why the neutral tone cannot stay a well there.
+ */
+export type CalloutPlacement = "inset" | "page";
+
 interface CalloutToneSpec {
+  /** Container treatment as an inset island inside an L1 card. */
   container: string;
+  /**
+   * Container treatment when mounted directly on L0. Declared only by the tones
+   * whose ladder position actually changes — which is the neutral one, because a
+   * well needs a host plane. A tone that omits it keeps `container` verbatim,
+   * which states that its tint-plus-semantic-border IS its page treatment rather
+   * than leaving the answer implicit.
+   */
+  pageContainer?: string;
   icon: string;
   title: string;
   body: string;
@@ -35,6 +66,13 @@ interface CalloutToneSpec {
 const TONE: Record<CalloutTone, CalloutToneSpec> = {
   info: {
     container: "rounded-control border-line2 bg-panel shadow-well",
+    // The L1 role from DESIGN.md §4, on the card radius — the same rung every
+    // other top-level container on this route sits at. Deliberately NOT the
+    // `surfaceVariants` recipe: `surface-contract.test.ts` treats every class
+    // string combined with a recipe result as a consumer className and admits
+    // only layout utilities there, so importing the recipe here would make this
+    // file's own tone table illegal. The tokens are the recipe's, verbatim.
+    pageContainer: "rounded-card border-line bg-surface shadow-1",
     icon: "text-ink3",
     title: "text-ink",
     body: "text-ink2",
@@ -65,6 +103,8 @@ const TONE: Record<CalloutTone, CalloutToneSpec> = {
 
 export interface CalloutProps {
   tone?: CalloutTone;
+  /** Ladder position of the mount point. Defaults to an inset island in an L1 card. */
+  placement?: CalloutPlacement;
   icon?: IconType;
   title?: ReactNode;
   children?: ReactNode;
@@ -78,6 +118,7 @@ export interface CalloutProps {
 
 export function Callout({
   tone = "info",
+  placement = "inset",
   icon,
   title,
   children,
@@ -88,13 +129,15 @@ export function Callout({
 }: CalloutProps) {
   const spec = TONE[tone];
   const Icon = icon ?? spec.defaultIcon;
+  const container = placement === "page" ? (spec.pageContainer ?? spec.container) : spec.container;
   return (
     <div
       data-testid={testId}
       data-slot="callout"
       data-tone={tone}
+      data-placement={placement}
       role={alert ? "alert" : undefined}
-      className={cn("flex items-start gap-2.5 border p-3.5", spec.container, className)}
+      className={cn("flex items-start gap-2.5 border p-3.5", container, className)}
     >
       <Icon className={cn("mt-0.5 size-4 shrink-0", spec.icon)} aria-hidden />
       <div className="min-w-0 flex-1 space-y-1.5">

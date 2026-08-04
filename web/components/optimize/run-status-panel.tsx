@@ -20,6 +20,17 @@
 // `tracking-tight` for the v2 weights and -0.015em (§3), and every semantic text
 // tone moves from the base tier to the ink tier (see `toneTextClass`).
 //
+// R6 Round 9B — the DATA-BEARING values on this panel are set in the mono face.
+// DESIGN.md §3 reserves Spline Sans Mono for "IDs, counts, hours and solver
+// expressions — so a number always reads as data, never as prose in the wrong
+// face", and D8 puts that explicit rule above the prototype's display-face
+// example. Four values on this panel are data: the live incumbent score, and the
+// terminal grid's SOLVER STATUS (a solver expression), FINAL SCORE and ELAPSED
+// (a duration). Only the FACE changes — size, weight, tracking and the semantic
+// ink tier are all retained — and the surrounding prose labels ("Higher scores
+// are better.", the eyebrow, the cell captions, the job detail sentence) stay on
+// the body face, because they are prose and not data.
+//
 // All lifecycle/controls are server-authoritative — nothing here infers a capability.
 // The infeasible "Try again" and the idle CTA reuse the run-start path; "Adjust rules"
 // is a GuardedLink so the panel needs no new orchestrator callback (file-disjoint from
@@ -216,15 +227,21 @@ export function RunStatusPanel({
           ELAPSED is derived from the job timestamps via @/lib/optimize. */}
       {isSuccess ? (
         <div className="flex border border-line2" data-testid="optimize-summary-grid">
-          <SummaryCell label="Solver status" tone={status.tone}>
+          <SummaryCell
+            label="Solver status"
+            tone={status.tone}
+            testId="optimize-summary-solver-status"
+          >
             {view.result?.solverStatus ?? "—"}
           </SummaryCell>
-          <SummaryCell label="Final score">
+          <SummaryCell label="Final score" testId="optimize-summary-final-score">
             {view.result?.score !== null && view.result?.score !== undefined
               ? formatScore(view.result.score)
               : "—"}
           </SummaryCell>
-          <SummaryCell label="Elapsed">{elapsedLabel(view)}</SummaryCell>
+          <SummaryCell label="Elapsed" testId="optimize-summary-elapsed">
+            {elapsedLabel(view)}
+          </SummaryCell>
         </div>
       ) : null}
 
@@ -265,8 +282,16 @@ export function RunStatusPanel({
               <p className="text-label font-semibold uppercase tracking-[0.03em] text-ink3">
                 {scoreLabel(view)}
               </p>
+              {/* The score is data, so it takes the mono face — but the same
+                  element also renders the "No incumbent yet" PROSE placeholder,
+                  which is not. The face therefore follows the content: mono for a
+                  real numeral, the display face for the sentence. Size, weight,
+                  leading, tracking and ink are identical either way. */}
               <p
-                className="mt-1 font-heading text-display font-bold leading-none tracking-[-0.015em] text-ink"
+                className={cn(
+                  "mt-1 text-display font-bold leading-none tracking-[-0.015em] text-ink",
+                  view.latestScore !== null ? "font-mono" : "font-heading",
+                )}
                 data-testid="optimize-score"
               >
                 {view.latestScore !== null ? formatScore(view.latestScore) : "No incumbent yet"}
@@ -432,21 +457,32 @@ export function RunStatusPanel({
   );
 }
 
-/** One cell of the terminal success summary grid. */
+/**
+ * One cell of the terminal success summary grid.
+ *
+ * All three cells carry a DATA value — a solver expression (`OPTIMAL`), a solver
+ * numeral, and a duration — so the value takes the mono face (DESIGN.md §3) while
+ * the caption below it stays a prose label on the body face. The testid is on the
+ * VALUE element, not the cell, for the same reason the job id's is (Round 9A): a
+ * hook anchored on the value cannot be defeated by the caption copy changing.
+ */
 function SummaryCell({
   label,
   tone,
+  testId,
   children,
 }: {
   label: string;
   tone?: RunStatusTone;
+  testId?: string;
   children: React.ReactNode;
 }) {
   return (
     <div className="flex-1 border-r border-line2 px-3.5 py-3 last:border-r-0">
       <div
+        data-testid={testId}
         className={cn(
-          "font-heading text-title font-semibold tracking-[-0.015em]",
+          "font-mono text-title font-semibold tracking-[-0.015em]",
           tone !== undefined ? toneTextClass(tone) : "text-ink",
         )}
       >

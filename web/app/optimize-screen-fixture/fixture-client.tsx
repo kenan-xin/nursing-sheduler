@@ -303,6 +303,39 @@ export default function OptimizeScreenFixtureClient() {
         />
       </Panel>
 
+      {/* NOT Panels — the same reason the event log below is not one. These are the
+          two NEUTRAL recovery states, and `RecoveryNotice` declares them at page
+          placement, where DESIGN.md §4 puts a page-level neutral notice at L1. Inside
+          the harness Panel they would be an L1 card inside an L1 card (§4 rule 5), and
+          the harness would then be proving a ladder the real route never renders. The
+          real product route carries the authoritative light/dark proof for both states
+          (`e2e/optimize-visual.spec.ts`); these rows make them clickable and give the
+          deterministic harness the coverage the Round 8 review found missing. */}
+      <section data-testid="fx-recovery-resumed" className="flex flex-col gap-4">
+        <h2 className="font-heading text-cardhead font-semibold tracking-[-0.015em] text-ink">
+          Recovery — resumed (attached)
+        </h2>
+        <RecoveryNotice
+          state={{ kind: "resumable", jobId: "opt_1", anonymized: false, peopleCount: 2 }}
+          resume={{ status: "attached", jobId: "opt_1" }}
+          reloadRecoveryUnavailable={false}
+          onForget={noop}
+          forgetPending={false}
+        />
+      </section>
+      <section data-testid="fx-recovery-storage-error" className="flex flex-col gap-4">
+        <h2 className="font-heading text-cardhead font-semibold tracking-[-0.015em] text-ink">
+          Recovery — storage unavailable
+        </h2>
+        <RecoveryNotice
+          state={{ kind: "storage-error" }}
+          resume={null}
+          reloadRecoveryUnavailable={false}
+          onForget={noop}
+          forgetPending={false}
+        />
+      </section>
+
       {/* NOT a Panel. `RunEventLog` is itself an L1 card (it is a top-level sibling
           on the real route), and DESIGN.md §4 rule 5 forbids stacking two surfaces of
           the same tone — wrapping it in the L1 harness Panel would have put an L1

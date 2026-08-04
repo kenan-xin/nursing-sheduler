@@ -1056,8 +1056,10 @@ function ProgressTooltip({ point, style }: ProgressTooltipProps) {
       style={style}
       className={cn(surfaceVariants({ role: "raised", geometry: "card" }), "z-10 px-3 py-2.5")}
     >
+      {/* An elapsed DURATION — §3's "hours" — so the value is mono while the
+          "elapsed" noun beside it stays prose on the body face. */}
       <p className="mb-2 text-meta font-semibold text-ink">
-        <span data-testid="progress-chart-tooltip-elapsed">
+        <span data-testid="progress-chart-tooltip-elapsed" className="font-mono">
           {formatElapsedSeconds(point.elapsedSeconds)}
         </span>{" "}
         elapsed
@@ -1073,7 +1075,13 @@ function ProgressTooltip({ point, style }: ProgressTooltipProps) {
             <span>Score</span>
             <span className="sr-only">:</span>
           </dt>
-          <dd className="font-semibold tabular-nums" style={{ color: SCORE_TEXT_VAR }}>
+          {/* A solver numeral — mono per §3, like the comment count below it.
+              The tabular alignment and the series ink tier are retained. */}
+          <dd
+            data-testid="progress-chart-tooltip-score"
+            className="font-mono font-semibold tabular-nums"
+            style={{ color: SCORE_TEXT_VAR }}
+          >
             {formatScore(point.currentBestScore)}
           </dd>
         </div>
@@ -1100,7 +1108,14 @@ function ProgressTooltip({ point, style }: ProgressTooltipProps) {
           <dt className="text-ink2">
             <span>Solution</span>
           </dt>
-          <dd className="font-medium text-ink">{solutionText}</dd>
+          {/* A solution INDEX — an id/count, so mono per §3. Weight and ink
+              are unchanged. */}
+          <dd
+            data-testid="progress-chart-tooltip-solution"
+            className="font-mono font-medium text-ink"
+          >
+            {solutionText}
+          </dd>
         </div>
         {point.source && (
           <div className="mt-1.5 border-t border-line2 pt-1.5">

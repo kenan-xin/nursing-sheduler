@@ -95,8 +95,14 @@ export function RunEventLog({ log, active }: RunEventLogProps) {
         <span className="font-heading text-cardhead font-semibold tracking-[-0.015em] text-ink">
           Event log
         </span>
+        {/* A COUNT, so the numeral is mono (DESIGN.md §3) while the "events"
+            noun beside it stays a prose label on the body face. The hook is on
+            the value, not the line. Size, weight, tracking and ink are unchanged. */}
         <span className="text-label font-semibold uppercase tracking-[0.03em] text-ink3">
-          {count} events
+          <span data-testid="optimize-event-count" className="font-mono">
+            {count}
+          </span>{" "}
+          events
         </span>
       </summary>
       <div
@@ -123,7 +129,15 @@ export function RunEventLog({ log, active }: RunEventLogProps) {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline justify-between gap-2">
                     <span className="truncate font-mono text-meta text-ink">{entry.label}</span>
-                    <span className="shrink-0 text-label text-ink3">{formatTime(entry)}</span>
+                    {/* A wall-clock time — "hours" in §3's data list, and it is
+                        column-aligned down the log, which is exactly what the
+                        mono face is reserved for. */}
+                    <span
+                      data-testid="optimize-event-time"
+                      className="shrink-0 font-mono text-label text-ink3"
+                    >
+                      {formatTime(entry)}
+                    </span>
                   </div>
                   {entry.detail !== null ? (
                     <p className="mt-0.5 break-words text-meta text-ink2">{entry.detail}</p>

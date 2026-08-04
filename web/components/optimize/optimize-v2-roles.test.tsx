@@ -20,9 +20,10 @@
 // resolved computed styles in `e2e/optimize-visual.spec.ts` instead.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { surfaceVariants } from "@/components/ui/surface";
 import {
+  formatScore,
   INITIAL_OPTIMIZE_RUN_VIEW,
   type OptimizeRunView,
   type OptimizeServerInfo,
@@ -31,6 +32,7 @@ import {
 } from "@/lib/optimize";
 import { Callout, type CalloutTone } from "./callout";
 import { ReadinessBanner } from "./readiness-banner";
+import { RecoveryNotice } from "./recovery-notice";
 import { RunEventLog } from "./run-event-log";
 import { RunOptionsForm } from "./run-options-form";
 import { RunStatusPanel } from "./run-status-panel";
@@ -61,6 +63,21 @@ function roleClasses(...args: Parameters<typeof surfaceVariants>): string[] {
 // `SVGAnimatedString`, and this file walks SVG geometry as well as HTML.
 function classesOf(element: Element): string[] {
   return Array.from(element.classList);
+}
+
+/**
+ * A DATA-BEARING value takes the mono face and nothing else changes.
+ *
+ * Both halves matter. Asserting only `font-mono` would stay green if the value
+ * ALSO kept the display face (tailwind-merge resolves the pair, so the rendered
+ * class list would still look right while the authored contract had two faces in
+ * it); asserting only the absence of `font-heading` would stay green for a value
+ * left on the inherited body face, which is the exact defect being closed.
+ */
+function expectMonoData(element: Element, label: string) {
+  const classes = classesOf(element);
+  expect(classes, `${label} → mono data face`).toContain("font-mono");
+  expect(classes, `${label} → not the display face`).not.toContain("font-heading");
 }
 
 function expectRole(element: Element, ...args: Parameters<typeof surfaceVariants>) {
@@ -229,6 +246,77 @@ describe("Callout carries the v2 status pairings and the inset-island geometry",
 });
 
 // ---------------------------------------------------------------------------
+// Ladder placement — what a callout may be, given where it is mounted
+// ---------------------------------------------------------------------------
+//
+// DESIGN.md §4 puts nothing free-floating on L0 and seats a well "*inside* an L1
+// card". A neutral `--panel` callout rendered straight onto the page plane is
+// therefore recessed into nothing — the defect the Round 8 review found on the
+// resumed and storage-unavailable recovery notices. `placement` names the mount
+// point, and the neutral tone answers it by moving to the L1 role.
+
+describe("Callout placement seats the neutral tone on a real rung of the ladder", () => {
+  function renderCallout(props: Partial<React.ComponentProps<typeof Callout>> = {}) {
+    cleanup();
+    render(
+      <Callout title="Title" data-testid="probe" {...props}>
+        Body
+      </Callout>,
+    );
+    return screen.getByTestId("probe");
+  }
+
+  it("a PAGE-placed neutral notice is the shared L1 surface role", () => {
+    const root = renderCallout({ tone: "info", placement: "page" });
+    // Asserted against the recipe the rest of the route's top-level containers
+    // use, not a copied token list: if the L1 role is ever re-specified, this
+    // fails rather than pinning a stale spelling.
+    expectRole(root, { role: "surface", geometry: "card" });
+    expect(root.getAttribute("data-placement")).toBe("page");
+
+    // And it is emphatically NOT the well it used to be. Each token is named so
+    // a partial revert (right tone, dropped shadow) still fails.
+    const classes = classesOf(root);
+    for (const retired of ["bg-panel", "shadow-well", "border-line2", "rounded-control"]) {
+      expect(classes, `page placement must not keep ${retired}`).not.toContain(retired);
+    }
+  });
+
+  it("the neutral well survives unchanged at INSET placement", () => {
+    const root = renderCallout({ tone: "info" });
+    const classes = classesOf(root);
+    // Nested inside an L1 card the well is correct and must not be collateral
+    // damage of the page fix — the version note, the cleanup notices and the
+    // download states all still render this form.
+    for (const token of ["bg-panel", "shadow-well", "border-line2", "rounded-control"]) {
+      expect(classes, `inset placement keeps ${token}`).toContain(token);
+    }
+    expect(classes, "an inset island is not L1").not.toContain("bg-surface");
+    expect(root.getAttribute("data-placement")).toBe("inset");
+  });
+
+  it("an unplaced callout defaults to the inset island", () => {
+    expect(renderCallout({ tone: "info" }).className).toBe(
+      renderCallout({ tone: "info", placement: "inset" }).className,
+    );
+  });
+
+  // The tinted tones already carry a tint plus a matching semantic border, which
+  // is a self-contained banner at either placement AND the treatment the
+  // prototype itself authors for a page-level notice. Placement must therefore
+  // be a no-op for them — a page fix that also restyled every warning would be a
+  // far wider change than the ladder defect called for.
+  it.each(["warn", "error", "success"] as const)(
+    "%s renders identically at both placements",
+    (tone) => {
+      const inset = renderCallout({ tone }).className;
+      const page = renderCallout({ tone, placement: "page" }).className;
+      expect(page).toBe(inset);
+    },
+  );
+});
+
+// ---------------------------------------------------------------------------
 // Readiness banner
 // ---------------------------------------------------------------------------
 
@@ -253,6 +341,90 @@ describe("ReadinessBanner", () => {
     // inline box cannot carry a min-height at all — hence inline-flex.
     expect(classes).toContain("inline-flex");
     expect(classes).toContain("pointer-coarse:min-h-touch");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Recovery notices — the route's only page-plane callouts
+// ---------------------------------------------------------------------------
+
+describe("RecoveryNotice declares the page plane it is actually mounted on", () => {
+  type RecoveryProps = React.ComponentProps<typeof RecoveryNotice>;
+
+  const BASE: RecoveryProps = {
+    state: { kind: "none" },
+    resume: null,
+    reloadRecoveryUnavailable: false,
+    onForget: noop,
+    forgetPending: false,
+  };
+
+  const RESUMABLE = {
+    kind: "resumable",
+    jobId: "opt_1",
+    anonymized: false,
+    peopleCount: 2,
+  } as const;
+
+  // Every notice this component can render, with the tone it is authored at.
+  // Enumerated rather than sampled: the defect was in two states, but the
+  // placement declaration is a property of the component's MOUNT POINT, so a
+  // notice added later without it is the same bug returning.
+  const NOTICES: Array<{ testId: string; tone: string; over: Partial<RecoveryProps> }> = [
+    { testId: "optimize-degraded", tone: "warn", over: { reloadRecoveryUnavailable: true } },
+    {
+      testId: "optimize-resumed",
+      tone: "info",
+      over: { state: RESUMABLE, resume: { status: "attached", jobId: "opt_1" } },
+    },
+    {
+      testId: "optimize-resume-failed",
+      tone: "error",
+      over: { state: RESUMABLE, resume: { status: "conflict", reason: "already attached" } },
+    },
+    {
+      testId: "optimize-interrupted",
+      tone: "warn",
+      over: { state: { kind: "interrupted", anonymized: true, peopleCount: 3 } },
+    },
+    { testId: "optimize-unreadable", tone: "warn", over: { state: { kind: "unreadable" } } },
+    { testId: "optimize-storage-error", tone: "info", over: { state: { kind: "storage-error" } } },
+  ];
+
+  it.each(NOTICES)("$testId is declared at page placement", ({ testId, tone, over }) => {
+    render(<RecoveryNotice {...BASE} {...over} />);
+    const notice = screen.getByTestId(testId);
+    expect(notice.getAttribute("data-tone"), testId).toBe(tone);
+    expect(notice.getAttribute("data-placement"), testId).toBe("page");
+  });
+
+  // The two the review actually faulted: a `--panel` well with an inset cast,
+  // rendered directly onto the L0 route root.
+  it.each(NOTICES.filter((n) => n.tone === "info"))(
+    "$testId resolves the L1 page treatment instead of an unhosted well",
+    ({ testId, over }) => {
+      render(<RecoveryNotice {...BASE} {...over} />);
+      const notice = screen.getByTestId(testId);
+      expectRole(notice, { role: "surface", geometry: "card" });
+      expect(classesOf(notice), "a well needs a host plane").not.toContain("shadow-well");
+      expect(classesOf(notice), "a well needs a host plane").not.toContain("bg-panel");
+    },
+  );
+
+  // No nested L1: the notices are siblings of the route cards, and each renders
+  // exactly one container — the component adds no wrapper of its own.
+  it("adds no container around the notices it renders", () => {
+    const { container } = render(
+      <RecoveryNotice {...BASE} state={{ kind: "storage-error" }} reloadRecoveryUnavailable />,
+    );
+    const roots = Array.from(container.children);
+    expect(roots.map((el) => el.getAttribute("data-testid"))).toEqual([
+      "optimize-degraded",
+      "optimize-storage-error",
+    ]);
+    for (const root of roots) {
+      expect(root.getAttribute("data-slot"), "each notice IS the callout").toBe("callout");
+    }
   });
 });
 
@@ -408,6 +580,152 @@ describe("RunStatusPanel", () => {
     renderStatus(TERMINALS[0].over);
     const grid = screen.getByTestId("optimize-summary-grid");
     expect(classesOf(grid).filter((c) => c.startsWith("rounded-"))).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The mono data face across the whole route (DESIGN.md §3 / D8)
+// ---------------------------------------------------------------------------
+//
+// §3 reserves Spline Sans Mono for "IDs, counts, hours and solver expressions —
+// so a number always reads as data, never as prose in the wrong face", and D8
+// puts that explicit rule above the prototype's display-face example. Each test
+// binds ONE target by its own testid and asserts the face changed while size,
+// weight, tracking and ink did not — a value quietly restyled instead of
+// re-faced fails here.
+
+describe("every data-bearing value on the Optimize route is set in the mono face", () => {
+  const ACTIVE: Partial<OptimizeRunView> = {
+    lifecycle: "running",
+    jobId: "opt_1",
+    latestScore: 4212.5,
+    controls: { cancellable: true, earlyCompletionAvailable: true },
+  };
+
+  const TERMINAL: Partial<OptimizeRunView> = {
+    lifecycle: "completed",
+    jobId: "opt_1",
+    startedAt: "2026-07-20T00:00:01+00:00",
+    finishedAt: "2026-07-20T00:01:00+00:00",
+    result: {
+      outcome: "optimal",
+      score: 42,
+      solverStatus: "OPTIMAL",
+      terminationReason: "optimality_proven",
+    },
+    download: { status: "downloaded", artifactAvailable: true, filename: "schedule.xlsx" },
+  };
+
+  it("the live incumbent score is mono, at the unchanged Display step", () => {
+    renderStatus(ACTIVE);
+    const score = screen.getByTestId("optimize-score");
+    // Through the product's own formatter, so the premise guard does not depend
+    // on the runner's locale.
+    expect(score.textContent).toBe(formatScore(4212.5));
+    expectMonoData(score, "live score");
+    // Size, weight, leading, tracking and ink are all retained.
+    for (const token of [
+      "text-display",
+      "font-bold",
+      "leading-none",
+      "tracking-[-0.015em]",
+      "text-ink",
+    ]) {
+      expect(classesOf(score), `live score → ${token}`).toContain(token);
+    }
+  });
+
+  // The SAME element renders the "No incumbent yet" sentence before the first
+  // feasible solution. That is prose, not data, so it must NOT be mono — and this
+  // is the case a blanket `font-mono` on the element would silently break.
+  it("the pre-incumbent PROSE placeholder stays on the display face", () => {
+    renderStatus({ lifecycle: "running", jobId: "opt_1", latestScore: null });
+    const score = screen.getByTestId("optimize-score");
+    expect(score.textContent).toBe("No incumbent yet");
+    const classes = classesOf(score);
+    expect(classes, "a sentence is not data").not.toContain("font-mono");
+    expect(classes).toContain("font-heading");
+  });
+
+  const SUMMARY: Array<{ testId: string; text: string; label: string }> = [
+    { testId: "optimize-summary-solver-status", text: "OPTIMAL", label: "solver status" },
+    { testId: "optimize-summary-final-score", text: formatScore(42), label: "final score" },
+    { testId: "optimize-summary-elapsed", text: "59s", label: "elapsed" },
+  ];
+
+  it.each(SUMMARY)("the terminal summary $label value is mono", ({ testId, text, label }) => {
+    renderStatus(TERMINAL);
+    const cell = screen.getByTestId(testId);
+    // Premise guard: a testid that stopped naming the real value would otherwise
+    // let the face assertion pass against an empty element.
+    expect(cell.textContent, label).toBe(text);
+    expectMonoData(cell, label);
+    expect(classesOf(cell), `${label} → ratified v2 Title weight`).toContain("font-semibold");
+    expect(classesOf(cell), `${label} → ratified tracking`).toContain("tracking-[-0.015em]");
+  });
+
+  it("the summary caption beside each value stays a PROSE label", () => {
+    renderStatus(TERMINAL);
+    for (const { testId, label } of SUMMARY) {
+      const caption = screen.getByTestId(testId).nextElementSibling;
+      expect(caption, label).not.toBeNull();
+      expect(classesOf(caption!), `${label} caption is not data`).not.toContain("font-mono");
+    }
+  });
+
+  it("the solver status keeps its semantic ink tier while changing face", () => {
+    renderStatus(TERMINAL);
+    expect(classesOf(screen.getByTestId("optimize-summary-solver-status"))).toContain(
+      "text-successink",
+    );
+  });
+
+  it("the event count is mono and the noun beside it is not", () => {
+    render(<RunEventLog active log={[logEntry(1, "progress"), logEntry(2, "phase")]} />);
+    const count = screen.getByTestId("optimize-event-count");
+    expect(count.textContent).toBe("2");
+    expectMonoData(count, "event count");
+    // The uppercase label line still reads "2 events", and the noun is prose.
+    const line = count.parentElement!;
+    expect(line.textContent).toBe("2 events");
+    expect(classesOf(line), "the label line is not itself data").not.toContain("font-mono");
+    for (const token of ["text-label", "font-semibold", "uppercase", "text-ink3"]) {
+      expect(classesOf(line), `event count line → ${token}`).toContain(token);
+    }
+  });
+
+  it("each log row's wall-clock time is mono", () => {
+    render(<RunEventLog active log={[logEntry(1, "progress")]} />);
+    const time = screen.getByTestId("optimize-event-time");
+    expect(time.textContent, "a real formatted time, not an empty slot").toMatch(/\d/);
+    expectMonoData(time, "event time");
+  });
+
+  const TOOLTIP: Array<{ testId: string; label: string }> = [
+    { testId: "progress-chart-tooltip-elapsed", label: "elapsed" },
+    { testId: "progress-chart-tooltip-score", label: "score" },
+    { testId: "progress-chart-tooltip-comments", label: "comments" },
+    { testId: "progress-chart-tooltip-solution", label: "solution index" },
+  ];
+
+  it("every value in the chart tooltip is mono", () => {
+    render(<ProgressChart points={POINTS_FOR_SWEEP} />);
+    // The tooltip renders only while a point is inspected; drive the keyboard
+    // inspector rather than a pointer, so this binds the real surface.
+    fireEvent.focus(screen.getByRole("group", { name: /Progress data points/ }));
+    // Scoped to the tooltip: the panel legend carries its own "Score"/"Comments"
+    // spans, so an unscoped query would be ambiguous once the tooltip is open.
+    const tooltip = within(screen.getByTestId("progress-chart-tooltip"));
+    for (const { testId, label } of TOOLTIP) {
+      const value = tooltip.getByTestId(testId);
+      expect(value.textContent, `${label} renders a value`).not.toBe("");
+      expectMonoData(value, `tooltip ${label}`);
+    }
+    // The dt captions beside them are prose and stay on the body face.
+    for (const caption of ["Score", "Comments", "Solution"]) {
+      const dt = tooltip.getByText(caption, { selector: "span" }).closest("dt")!;
+      expect(classesOf(dt), `${caption} caption is not data`).not.toContain("font-mono");
+    }
   });
 });
 
