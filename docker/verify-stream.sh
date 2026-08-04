@@ -4,27 +4,36 @@
 # brings up the DIRECT overlay — base `compose.yml` + `compose.direct.yml` — so the
 # Next BFF is published on a real host port, and drives the durable Optimize &
 # Export SSE run protocol end to end through the assembled Browser→Next→FastAPI
-# path. It has two phases:
+# path.
 #
-#   1. BROWSER (primary): Playwright/Chromium drives the real Optimize screen
-#      against the published port with ZERO `/api/**` route interception. The
-#      spec observes the actual SSE response/first byte, a genuine `: keepalive`
-#      comment, opaque cursor persistence with strictly-after replay on reload,
-#      and browser-disconnect → BFF upstream-body abort.
+# The gate is a sequence of FAIL-FAST STAGES. Each job-owning stage submits work,
+# asserts real product outcomes, and cleans up the ids it created:
 #
-#   2. CURL (supporting diagnostics): protocol-level checks that submit returns
-#      HTTP 202 + JSON, the stream delivers `text/event-stream` with `id:`
-#      cursors + `job.*` events + a genuine `: keepalive` comment, a confirmed
-#      nonterminal job is cancelled with exactly HTTP 202, `Last-Event-ID` replay
-#      delivers ≥1 strictly-after frame, the tiny job reaches `completed` with a
-#      valid XLSX (PK zip magic), DELETE → 204, subsequent GET → 404.
+#   setup         build + up + health + base-topology keepalive-default proof
+#   curl live     streaming, disconnect pollability, nonterminal cancel, replay, cleanup
+#   curl tiny     completion, real XLSX, content-disposition, DELETE, final 404
+#   browser t/r   real Chromium tiny + replay against the published port, no interception
+#   browser abort real `/about` navigation, baselined BFF audit, ids-only handoff cleanup
 #
-# Everything is bounded (`curl --max-time`, Playwright timeouts) so the gate
-# cannot hang. A PID-scoped project name AND a collision-safe host port (bounded
-# retry on Compose bind failure) keep it isolated. The BFF abort audit is
-# baselined around the browser phase so curl/prior logs cannot satisfy it.
-# Browser-phase failure or pnpm unavailability fails the entire gate. Exits
-# non-zero on any failed assertion.
+# At every stage boundary, ANY assertion, command, authority or cleanup failure
+# releases every id it can safely release, tears Compose down, runs all five residue
+# checks (containers, images, networks, volumes, browser downloads), exits non-zero,
+# and NEVER starts the next job-owning stage. A setup/health failure stops before the
+# first submission. A global failure count is never permission to continue.
+#
+# There is no reporter, classifier, verdict channel or synthetic broken-navigation
+# lane: each stage's own product assertions and lifecycle results decide the verdict.
+# The browser abort lane proves its navigation DIRECTLY — a committed same-origin
+# main-frame response at exactly `/about`, the settled URL, and the old fixture gone —
+# and hands the shell ONLY the accepted job ids it observed. The shell audits NEW BFF
+# log entries BEFORE any abort cleanup, so cleanup can never manufacture the evidence
+# it is audited against. Cleanup-success output below is observational only; nothing
+# parses it, and no process derives a pass/fail decision from it.
+#
+# Everything is bounded (`curl --max-time`, Playwright timeouts) so the gate cannot
+# hang. A PID-scoped project name AND a collision-safe host port (bounded retry on
+# Compose bind failure) keep it isolated. Browser-phase failure or pnpm unavailability
+# fails the entire gate. There is no degraded "skip" path.
 #
 # The production Cloudflare NAMED-TUNNEL streaming validation stays optional/manual
 # (it needs external Cloudflare state); its absence does NOT weaken this direct gate.
@@ -68,12 +77,35 @@ STREAM_WINDOW=8           # bounded first-stream window; short so the live cance
 RECONNECT_WINDOW=6        # bounded replay-reconnect window (runs against retained events)
 POLL_MAX=8                # per-request curl deadline for polls/controls
 
+# Shell-side mirror of the Ticket 1 cleanup allocation, in seconds. One id's WHOLE
+# lifecycle composes into CLEANUP_LIFECYCLE_MAX: cancel, the bounded terminal proof and
+# the safe DELETE all share a single mutation budget, and the final GET keeps a reserve
+# no earlier phase can borrow. Per-phase ceilings alone are not enough — 8s cancel plus
+# a 37s window whose last poll overruns plus a full delete plus a full final GET would
+# exceed the total, so every phase is also capped to the remaining budget.
+CLEANUP_LIFECYCLE_MAX=65
+CLEANUP_CANCEL_MAX=8
+CLEANUP_TERMINAL_MAX=37
+CLEANUP_DELETE_MAX=8
+CLEANUP_FINAL_MAX=8
+
 WORKDIR="$(mktemp -d)"
+ABORT_HANDOFF="$WORKDIR/abort-handoff.json"
+TMP_SEQ=0
+# $BASHPID keeps concurrent cleanup subshells (which each inherit their own copy of
+# TMP_SEQ) from choosing — and deleting — the same scratch file.
+tmpfile() { TMP_SEQ=$((TMP_SEQ + 1)); printf '%s/tmp-%s-%04d' "$WORKDIR" "$BASHPID" "$TMP_SEQ"; }
 
 PASS=0
 FAIL=0
+STAGE_NAME="setup"
+STAGE_FAIL=0
 ok() { echo "  PASS: $1"; PASS=$((PASS + 1)); }
-bad() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
+# Every failure counts against the CURRENT stage as well as the run, so the stage
+# boundary below can contain it. The run-wide count is only ever used for reporting.
+bad() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); STAGE_FAIL=$((STAGE_FAIL + 1)); }
+
+stage() { STAGE_NAME="$1"; STAGE_FAIL=0; echo "== $1 =="; }
 
 # Clean up stale browser download artifacts from prior runs so the zero-residue
 # audit is accurate. Current tests use Playwright's managed temp (download.path()).
@@ -90,6 +122,227 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+
+# ---------------------------------------------------------------------------
+# Known-id registry and the shell-owned cleanup lifecycle
+# ---------------------------------------------------------------------------
+
+# Every id this gate creates or is handed is registered the moment it is known, so a
+# failure at any boundary can still release it.
+KNOWN_IDS=()
+register_id() {
+  KNOWN_IDS+=("$1")
+  echo "  registered job id for cleanup: $1"
+}
+unregister_id() {
+  local keep=() existing
+  if [ "${#KNOWN_IDS[@]}" -gt 0 ]; then
+    for existing in "${KNOWN_IDS[@]}"; do
+      [ "$existing" = "$1" ] || keep+=("$existing")
+    done
+  fi
+  KNOWN_IDS=()
+  if [ "${#keep[@]}" -gt 0 ]; then KNOWN_IDS=("${keep[@]}"); fi
+  return 0
+}
+
+# phase_timeout <deadline_epoch> <ceiling_seconds>
+#
+# Echo this phase's bounded timeout — the smaller of its own ceiling and whatever is
+# left before the deadline — or return 1 when the deadline leaves no time at all.
+phase_timeout() {
+  local deadline="$1" ceiling="$2" remaining
+  remaining=$(( deadline - $(date +%s) ))
+  [ "$remaining" -le 0 ] && return 1
+  [ "$remaining" -lt "$ceiling" ] && ceiling="$remaining"
+  printf '%s' "$ceiling"
+  return 0
+}
+
+# cleanup_job_lifecycle <job_id>
+#
+# Cancel (exactly 202 or 404) -> bounded terminal proof -> DELETE only after that
+# proof -> the reserved final GET, attempted unconditionally on every branch, which
+# must return exactly 404. Returns 0 only when the whole lifecycle held.
+cleanup_job_lifecycle() {
+  # Separate statements on purpose: a single `local a="$1" b="...$a"` expands the whole
+  # command line before assigning anything, so `$a` would still be unset there.
+  local id="$1"
+  local base="$BASE/api/optimize/$id"
+  local code out state timeout terminal=0 absent=0 broken=0
+  local final_deadline mutation_deadline terminal_deadline
+  final_deadline=$(( $(date +%s) + CLEANUP_LIFECYCLE_MAX ))
+  mutation_deadline=$(( final_deadline - CLEANUP_FINAL_MAX ))
+
+  if timeout="$(phase_timeout "$mutation_deadline" "$CLEANUP_CANCEL_MAX")"; then
+    code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time "$timeout" \
+      -X POST "$base/cancel" 2>/dev/null || echo 000)"
+    case "$code" in
+      202) echo "    cleanup $id: cancel -> 202" ;;
+      404) echo "    cleanup $id: cancel -> 404 (already absent)"; absent=1 ;;
+      *)   echo "    cleanup $id: cancel -> $code (expected exactly 202 or 404)"; broken=1 ;;
+    esac
+  else
+    echo "    cleanup $id: cancel had no time left before the reserved final GET"
+    broken=1
+  fi
+
+  if [ "$absent" -eq 0 ] && [ "$broken" -eq 0 ]; then
+    terminal_deadline=$(( $(date +%s) + CLEANUP_TERMINAL_MAX ))
+    [ "$terminal_deadline" -gt "$mutation_deadline" ] && terminal_deadline="$mutation_deadline"
+    while timeout="$(phase_timeout "$terminal_deadline" "$POLL_MAX")"; do
+      out="$(tmpfile)"
+      code="$(curl -sS -o "$out" -w '%{http_code}' --max-time "$timeout" "$base" 2>/dev/null || echo 000)"
+      if [ "$code" = 404 ]; then absent=1; rm -f "$out"; break; fi
+      if [ "$code" != 200 ]; then
+        echo "    cleanup $id: status -> $code (expected 200 or 404)"; broken=1; rm -f "$out"; break
+      fi
+      state="$(sed -n 's/.*"state":"\([^"]*\)".*/\1/p' "$out" | head -n1)"
+      rm -f "$out"
+      case "$state" in
+        completed|cancelled|failed) terminal=1; echo "    cleanup $id: terminal state proved ($state)"; break ;;
+        queued|running|cancelling) ;;
+        *) echo "    cleanup $id: status body malformed (state='$state')"; broken=1; break ;;
+      esac
+      sleep 1
+    done
+    if [ "$terminal" -eq 0 ] && [ "$absent" -eq 0 ] && [ "$broken" -eq 0 ]; then
+      echo "    cleanup $id: no terminal proof within the ${CLEANUP_TERMINAL_MAX}s window"
+      broken=1
+    fi
+  fi
+
+  # A job is only safe to DELETE once it is proved terminal.
+  if [ "$terminal" -eq 1 ]; then
+    if timeout="$(phase_timeout "$mutation_deadline" "$CLEANUP_DELETE_MAX")"; then
+      code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time "$timeout" \
+        -X DELETE "$base" 2>/dev/null || echo 000)"
+      case "$code" in
+        204|404) echo "    cleanup $id: delete -> $code" ;;
+        *) echo "    cleanup $id: delete -> $code (expected 204 or 404)"; broken=1 ;;
+      esac
+    else
+      echo "    cleanup $id: delete had no time left before the reserved final GET"
+      broken=1
+    fi
+  fi
+
+  # Reserved and unconditional. An earlier failure may suppress an unsafe DELETE; it
+  # never suppresses the absence proof. The reserve is always at least one second.
+  timeout=$(( final_deadline - $(date +%s) ))
+  [ "$timeout" -gt "$CLEANUP_FINAL_MAX" ] && timeout="$CLEANUP_FINAL_MAX"
+  [ "$timeout" -lt 1 ] && timeout=1
+  code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time "$timeout" "$base" 2>/dev/null || echo 000)"
+  if [ "$code" = 404 ]; then
+    echo "    cleanup success $id: final GET 404"
+  else
+    echo "    cleanup $id: final GET -> $code (expected exact 404)"
+    broken=1
+  fi
+
+  return "$broken"
+}
+
+# Best-effort release of every distinct registered id, used on the containment path.
+release_known_ids() {
+  local id seen=""
+  if [ -z "${BASE:-}" ]; then
+    echo "  no published base URL yet — no job id can be released"
+    return 0
+  fi
+  if [ "${#KNOWN_IDS[@]}" -eq 0 ]; then
+    echo "  no registered job ids to release"
+    return 0
+  fi
+  echo "  releasing ${#KNOWN_IDS[@]} registered job id(s) before teardown"
+  for id in "${KNOWN_IDS[@]}"; do
+    case " $seen " in *" $id "*) continue ;; esac
+    seen="$seen $id"
+    cleanup_job_lifecycle "$id" || true
+  done
+  KNOWN_IDS=()
+  return 0
+}
+
+# check_residue <label> <project_pattern> <enumeration command...>
+#
+# An enumeration that FAILS is not zero residue. Suppressing the error and counting an
+# empty stream would print PASS without a completed check, so the command's exit status
+# is captured and a failure is reported red as UNKNOWN.
+check_residue() {
+  local label="$1" pattern="$2"
+  shift 2
+  local listing status count
+  listing="$("$@" 2>/dev/null)"
+  status=$?
+  if [ "$status" -ne 0 ]; then
+    bad "could not enumerate $label for $PROJECT (exit $status) — residue UNKNOWN, not zero"
+    return 1
+  fi
+  count="$(printf '%s\n' "$listing" | grep -c "$pattern" || true)"
+  count="${count:-0}"
+  if [ "$count" -eq 0 ]; then
+    ok "no leftover $label for $PROJECT"
+    return 0
+  fi
+  bad "$count leftover $label for $PROJECT"
+  return 1
+}
+
+# The five residue checks: containers, images, networks, volumes, browser downloads.
+residue_audit() {
+  local residue=0 listing status count
+  check_residue containers "^${PROJECT}[-_]" docker ps -a --format '{{.Names}}' || residue=1
+  check_residue images "^${PROJECT}-" docker image ls --format '{{.Repository}}' || residue=1
+  check_residue networks "^${PROJECT}_" docker network ls --format '{{.Name}}' || residue=1
+  check_residue volumes "^${PROJECT}_" docker volume ls --format '{{.Name}}' || residue=1
+
+  # Browser download artifact residue: Playwright manages temp downloads, but
+  # assert no ns-test-download files leaked from a prior or current run.
+  listing="$(find /tmp -maxdepth 1 -name 'ns-test-download-*.xlsx' 2>/dev/null)"
+  status=$?
+  if [ "$status" -ne 0 ]; then
+    bad "could not enumerate browser download artifacts (exit $status) — residue UNKNOWN, not zero"
+    residue=1
+  else
+    count="$(printf '%s' "$listing" | grep -c . || true)"
+    count="${count:-0}"
+    if [ "$count" -eq 0 ]; then
+      ok "no leftover browser download artifacts"
+    else
+      bad "$count leftover browser download artifact(s) in /tmp"
+      residue=1
+    fi
+  fi
+  return "$residue"
+}
+
+# Set immediately before a boundary that is reached through LOST AUTHORITY, where the
+# job set itself is untrustworthy. Such a boundary must NOT run the normal per-id
+# lifecycle: that is exactly the "normal cleanup" lost authority excludes, and its cost
+# would scale with the bogus cardinality. Compose teardown below destroys the stack and
+# every job inside it, so nothing outlives the run either way.
+LOST_AUTHORITY=0
+
+# The fail-fast stage boundary. A failed stage can never hand work to a later one.
+boundary() {
+  [ "$STAGE_FAIL" -eq 0 ] && return 0
+  echo "== CONTAINED: stage '$STAGE_NAME' failed ($STAGE_FAIL failure(s)); no later job-owning stage will start =="
+  if [ "$LOST_AUTHORITY" -eq 1 ]; then
+    echo "  lost authority: normal known-id cleanup is skipped; teardown reclaims every job"
+  else
+    release_known_ids
+  fi
+  echo "== teardown + zero residue (contained) =="
+  cleanup
+  residue_audit || echo "  (residue detected — inspect \`docker ... | grep $PROJECT\`)"
+  echo "== $PASS passed, $FAIL failed =="
+  exit 1
+}
+
+# ---------------------------------------------------------------------------
+# Product helpers
+# ---------------------------------------------------------------------------
 
 wait_healthy() {
   local svc="$1" cid st=none
@@ -143,8 +396,55 @@ poll_until() {
   echo "$st"
 }
 
-echo "== build + up direct overlay (project=$PROJECT, APP_VERSION=$APP_VERSION) =="
-$COMPOSE build web backend >/dev/null || { echo "FAIL: build"; exit 1; }
+# Read the browser's ids-only abort handoff as a TOTAL function over the file.
+#
+# Prints `ok <slots> <distinct>` followed by one distinct id per line, or a single
+# `lost <reason>` line. Missing, unreadable, malformed, non-array, empty, or
+# non-string/empty/unsafe id evidence is lost authority — never a guessed id.
+read_abort_handoff() {
+  python3 - "$1" <<'PY'
+import json
+import re
+import sys
+
+path = sys.argv[1]
+try:
+    with open(path, "r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+except FileNotFoundError:
+    print("lost the handoff file was missing")
+    raise SystemExit(0)
+except (OSError, ValueError, UnicodeDecodeError):
+    print("lost the handoff file was unreadable or not valid JSON")
+    raise SystemExit(0)
+
+if not isinstance(payload, list):
+    print("lost the handoff payload was not a JSON array")
+    raise SystemExit(0)
+if not payload:
+    print("lost the handoff array carried no accepted slot")
+    raise SystemExit(0)
+
+unsafe = re.compile(r"[\s\x00-\x1f\x7f]")
+for slot in payload:
+    if not isinstance(slot, str) or not slot or unsafe.search(slot):
+        print("lost the handoff array carried a non-string, empty or unsafe id")
+        raise SystemExit(0)
+
+distinct = list(dict.fromkeys(payload))
+print("ok %d %d" % (len(payload), len(distinct)))
+for value in distinct:
+    print(value)
+PY
+}
+
+# ---------------------------------------------------------------------------
+# Stage: setup — build, publish, health, and the base-topology keepalive default
+# ---------------------------------------------------------------------------
+
+stage "build + up direct overlay (project=$PROJECT, APP_VERSION=$APP_VERSION)"
+$COMPOSE build web backend >/dev/null || bad "build"
+boundary
 
 # Bounded retry: discover a kernel-free port + immediately bind via Compose.
 # If the port was claimed in the TOCTOU window, retry with a new port.
@@ -167,10 +467,11 @@ for ATTEMPT in $(seq 1 "$MAX_PORT_ATTEMPTS"); do
   echo "  port $WEB_PORT bind failed (attempt $ATTEMPT/$MAX_PORT_ATTEMPTS), retrying..."
   $COMPOSE down -v -t 3 >/dev/null 2>&1 || true
 done
-[ "$UP_OK" = 1 ] || { echo "FAIL: could not start after $MAX_PORT_ATTEMPTS port attempts"; exit 1; }
+[ "$UP_OK" = 1 ] || bad "could not start after $MAX_PORT_ATTEMPTS port attempts"
+boundary
 
 st="$(wait_healthy web)"
-[ "$st" = healthy ] && ok "web healthy on published $BASE" || { bad "web never became healthy (status=$st)"; }
+[ "$st" = healthy ] && ok "web healthy on published $BASE" || bad "web never became healthy (status=$st)"
 
 # No-override proof: render the base topology without suppressing config errors,
 # verify it omits JOB_SSE_KEEPALIVE_SECONDS, then construct ServerSettings in a
@@ -202,13 +503,22 @@ health_code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time "$POLL_MAX" "$
 [ "$health_code" = 200 ] && ok "GET /api/health via published port → 200" \
   || bad "GET /api/health via published port → $health_code"
 
-echo "== submit LARGE live job (timeout=${LIVE_TIMEOUT}s) =="
-LIVE_ID="$(submit_job "$LARGE_YAML" "$LIVE_TIMEOUT")"
-[ -n "$LIVE_ID" ] && ok "POST /api/optimize accepted live job id=$LIVE_ID" \
-  || bad "POST /api/optimize did not return a job id (live)"
+# Setup/health failure stops here, BEFORE the first submission.
+boundary
 
-if [ -n "$LIVE_ID" ]; then
-  echo "== observable first response + live streaming =="
+# ---------------------------------------------------------------------------
+# Stage: curl live — streaming, disconnect, nonterminal cancel, replay, cleanup
+# ---------------------------------------------------------------------------
+
+stage "curl live job: streaming, disconnect, nonterminal cancel, replay, cleanup (timeout=${LIVE_TIMEOUT}s)"
+LIVE_ID="$(submit_job "$LARGE_YAML" "$LIVE_TIMEOUT")"
+if [ -z "$LIVE_ID" ]; then
+  bad "POST /api/optimize did not return a job id (live)"
+else
+  register_id "$LIVE_ID"
+  ok "POST /api/optimize accepted live job id=$LIVE_ID"
+
+  echo "  -- observable first response + live streaming"
   hdr="$WORKDIR/live.hdr"; body="$WORKDIR/live.sse"
   curl -sS --no-buffer --max-time "$STREAM_WINDOW" -D "$hdr" -o "$body" \
     -H "Accept: text/event-stream" "$BASE/api/optimize/$LIVE_ID/events" >/dev/null 2>&1 || true
@@ -247,7 +557,7 @@ if [ -n "$LIVE_ID" ]; then
     bad "no genuine ': keepalive' comment over ${STREAM_WINDOW}s window ($n_jobevents job frames, $n_cursors cursors, 0 keepalives)"
   fi
 
-  echo "== downstream disconnect leaves backend responsive =="
+  echo "  -- downstream disconnect leaves backend responsive"
   # The stream curl above already disconnected at its --max-time deadline. Assert
   # the backend did not wedge on the abandoned SSE body: a fresh bounded poll
   # returns a valid live state promptly (no orphaned stream holding the worker).
@@ -258,7 +568,7 @@ if [ -n "$LIVE_ID" ]; then
     *) bad "job not pollable after SSE disconnect (state='$pre_cancel_state')" ;;
   esac
 
-  echo "== cancel a LIVE job to terminal =="
+  echo "  -- cancel a LIVE job to terminal"
   # The cold-review hardening: confirm a NONTERMINAL state immediately before
   # sending the cancel. A job that already self-terminated (completed/failed/
   # cancelled) means the cancel was never exercised — that is a FAIL, not a
@@ -269,9 +579,7 @@ if [ -n "$LIVE_ID" ]; then
     queued|running|cancelling)
       ok "job confirmed nonterminal immediately before cancel (state=$pre_cancel_state)" ;;
     *)
-      bad "job was already terminal before cancel (state=$pre_cancel_state) — live cancel NOT exercised"
-      final="$pre_cancel_state"
-      ;;
+      bad "job was already terminal before cancel (state=$pre_cancel_state) — live cancel NOT exercised" ;;
   esac
 
   if [ "$pre_cancel_state" = queued ] || [ "$pre_cancel_state" = running ] || [ "$pre_cancel_state" = cancelling ]; then
@@ -289,7 +597,7 @@ if [ -n "$LIVE_ID" ]; then
     esac
   fi
 
-  echo "== opaque replay cursor (Last-Event-ID) =="
+  echo "  -- opaque replay cursor (Last-Event-ID)"
   # Events are retained after the job settles, so the replay-after-cursor invariant
   # is asserted against the retained history: reconnect after the LATEST cursor we
   # already saw and require (1) AT LEAST ONE strictly-after frame and (2) NONE of
@@ -320,14 +628,29 @@ if [ -n "$LIVE_ID" ]; then
   else
     bad "cannot exercise replay: no cursor was captured from the live stream"
   fi
+
+  echo "  -- known-id cleanup to final GET 404"
+  if cleanup_job_lifecycle "$LIVE_ID"; then
+    ok "curl live job cleaned up to exact final GET 404"
+    unregister_id "$LIVE_ID"
+  else
+    bad "curl live job cleanup did not reach exact final GET 404"
+  fi
 fi
+boundary
 
-echo "== submit TINY feasible job → terminal artifact + download + DELETE =="
+# ---------------------------------------------------------------------------
+# Stage: curl tiny — completion, XLSX, content-disposition, DELETE, final 404
+# ---------------------------------------------------------------------------
+
+stage "curl tiny feasible job: terminal artifact + download + DELETE + final 404"
 TINY_ID="$(submit_job "$TINY_YAML" 30)"
-[ -n "$TINY_ID" ] && ok "POST /api/optimize accepted tiny job id=$TINY_ID" \
-  || bad "POST /api/optimize did not return a job id (tiny)"
+if [ -z "$TINY_ID" ]; then
+  bad "POST /api/optimize did not return a job id (tiny)"
+else
+  register_id "$TINY_ID"
+  ok "POST /api/optimize accepted tiny job id=$TINY_ID"
 
-if [ -n "$TINY_ID" ]; then
   tstate="$(poll_until "$TINY_ID" "completed failed cancelled" 40)"
   [ "$tstate" = completed ] && ok "tiny feasible job reached completed" \
     || bad "tiny job did not complete (last=$tstate)"
@@ -358,119 +681,172 @@ if [ -n "$TINY_ID" ]; then
     --max-time "$POLL_MAX" "$BASE/api/optimize/$TINY_ID" 2>/dev/null || echo 000)"
   if [ "$after_code" = 404 ] && grep -q 'job_not_found' "$after_body"; then
     ok "GET after DELETE → 404 job_not_found"
+    # The product's own DELETE + 404 IS this stage's final-404 cleanup.
+    echo "    cleanup success $TINY_ID: final GET 404"
+    unregister_id "$TINY_ID"
   else
     bad "GET after DELETE → $after_code (body: $(tr -d '\n' < "$after_body" | head -c 120))"
   fi
 fi
+boundary
 
 # ---------------------------------------------------------------------------
-# Browser phase: the assembled Browser → Next → FastAPI release gate.
+# Stage: browser tiny + replay — the assembled Browser → Next → FastAPI gate
 # ---------------------------------------------------------------------------
-# The curl phase above is SUPPORTING protocol diagnostics. The ticket's required
+# The curl stages above are SUPPORTING protocol diagnostics. The ticket's required
 # release gate drives a REAL browser (Playwright/Chromium) against the published
 # direct port with ZERO `/api/**` route interception, so the genuine Optimize
 # controller talks through the real BFF to the real FastAPI backend. The spec
 # observes the actual SSE response/first byte, a genuine `: keepalive` comment,
-# opaque cursor persistence with strictly-after replay on reload, and
-# browser-disconnect → BFF upstream-body abort propagation.
+# opaque cursor persistence with strictly-after replay on reload, and the real
+# download/auto-delete/slot-release chain. Each browser test owns its own accepted
+# ids and proves final GET 404 in its own hook.
 #
 # The browser phase is REQUIRED — if pnpm/Playwright are unavailable, or any
 # browser test fails, the ENTIRE gate fails. There is no degraded "skip" path.
-echo "== assembled browser gate (real Browser → Next → FastAPI, no interception) =="
-BROWSER_OK=0
-ABORT_OK=0
-BFF_LOG_BASELINE=0
+
+stage "assembled browser gate: tiny + replay (real Browser → Next → FastAPI, no interception)"
 if ! command -v pnpm >/dev/null 2>&1; then
   bad "pnpm not found — browser phase is REQUIRED (not optional). Gate fails."
 else
-  # Phase 1: replay tests (tiny + live replay). These do NOT navigate away.
   if (cd "$ROOT/web" && \
       ASSEMBLED_BASE_URL="$BASE" \
       CI=1 \
       pnpm exec playwright test --config playwright.assembled.config.ts \
         --reporter=line --grep "tiny feasible|live job" 2>&1); then
-    BROWSER_OK=1
-  fi
-
-  # Adversarial control: suppress the explicit navigation while retaining the
-  # URL assertion. This MUST fail even though Playwright context teardown may
-  # still close the SSE request and emit an abort log. A passing control would
-  # prove the browser assertion can false-green without the intended action.
-  if (cd "$ROOT/web" && \
-      ASSEMBLED_BASE_URL="$BASE" \
-      ASSEMBLED_SKIP_ABORT_NAVIGATION=1 \
-      CI=1 \
-      pnpm exec playwright test --config playwright.assembled.config.ts \
-        --reporter=line --trace=off --grep "abort propagation" 2>&1); then
-    bad "abort negative control unexpectedly passed without navigation"
+    ok "assembled browser gate: SSE first byte + genuine keepalive + cursor replay"
   else
-    ok "abort negative control fails when the final navigation is removed"
-  fi
-
-  # Baseline the BFF log count IMMEDIATELY after the negative control and before
-  # the real isolated abort test. Replay, curl, and negative-control teardown
-  # cancels are all before this boundary and cannot satisfy the audit below.
-  BFF_LOG_BASELINE="$($COMPOSE logs web 2>&1 | wc -l)"
-
-  # Phase 2: isolated abort test. The ONLY navigate-away in the suite.
-  if (cd "$ROOT/web" && \
-      ASSEMBLED_BASE_URL="$BASE" \
-      CI=1 \
-      pnpm exec playwright test --config playwright.assembled.config.ts \
-        --reporter=line --grep "abort propagation" 2>&1); then
-    ABORT_OK=1
+    bad "assembled browser gate FAILED — gate cannot pass without browser evidence"
   fi
 fi
+boundary
 
-if [ "$BROWSER_OK" = 1 ]; then
-  ok "assembled browser gate: SSE first byte + genuine keepalive + cursor replay"
+# ---------------------------------------------------------------------------
+# Stage: browser abort — direct navigation, baselined BFF audit, handoff cleanup
+# ---------------------------------------------------------------------------
+# The abort test is the ONLY navigate-away in the suite and proves its own outcome
+# directly. This stage's causal order is fixed and load-bearing:
+#
+#   baseline BFF log -> run abort -> audit ONLY new BFF entries -> read handoff
+#   authority -> post-audit lifecycle cleanup
+#
+# The audit runs BEFORE any abort cancel or cleanup, so cleanup cannot manufacture
+# the log line it is audited against. A valid one/two-slot handoff is still cleaned
+# up even when Playwright failed or the audit failed — containment must not leak a
+# live job. Lost authority takes teardown instead, never a guessed id.
+
+stage "assembled browser abort: direct /about navigation + baselined BFF audit + ids-only handoff"
+rm -f "$ABORT_HANDOFF"
+# Baseline IMMEDIATELY before the isolated abort run: curl disconnects and the
+# tiny/replay teardown cancels are all before this line and cannot satisfy the audit.
+#
+# The baseline's exit status is checked, not just its output. A failed `compose logs`
+# would otherwise leave a small line count (or a count of its own error text), and the
+# later read would then tail from a bogus offset and re-include a PRE-baseline
+# cancellation line — false-greening the audit off evidence it must not see. A baseline
+# that cannot be taken stops the stage before any job is submitted.
+BFF_BASELINE_LOG="$WORKDIR/bff-baseline.log"
+if ! $COMPOSE logs web >"$BFF_BASELINE_LOG" 2>&1; then
+  bad "could not baseline the BFF log before the abort run — audit-only-new cannot be honoured"
+  boundary
+fi
+BFF_LOG_BASELINE="$(wc -l < "$BFF_BASELINE_LOG" | tr -d ' ')"
+
+if (cd "$ROOT/web" && \
+    ASSEMBLED_BASE_URL="$BASE" \
+    ASSEMBLED_ABORT_HANDOFF="$ABORT_HANDOFF" \
+    CI=1 \
+    pnpm exec playwright test --config playwright.assembled.config.ts \
+      --reporter=line --grep "abort propagation" 2>&1); then
+  ok "abort test proved a committed same-origin /about navigation with the fixture gone"
 else
-  bad "assembled browser gate FAILED — gate cannot pass without browser evidence"
+  bad "abort test FAILED — the real navigation/abort outcome was not proved"
 fi
 
-# Abort-propagation audit: BASELINED immediately before the isolated abort test.
-# Only NEW log entries (after the baseline) count — reload, prior tests, and
-# curl disconnects all produced cancel logs BEFORE the baseline.
-echo "== BFF abort-propagation audit (baselined immediately before abort test) =="
+# Audit BEFORE any abort cleanup. Only NEW entries after the baseline count.
+echo "  -- BFF abort-propagation audit (new entries only, before any abort cleanup)"
 sleep 2
-BFF_NEW_LOGS="$($COMPOSE logs web 2>&1 | tail -n +$((BFF_LOG_BASELINE + 1)))"
-if [ "$ABORT_OK" = 1 ] && echo "$BFF_NEW_LOGS" | grep -q 'downstream cancelled; propagating to upstream body'; then
-  ok "BFF observed browser downstream cancel → upstream-body abort (NEW log, correlated to abort test)"
+BFF_AFTER_LOG="$WORKDIR/bff-after.log"
+if ! $COMPOSE logs web >"$BFF_AFTER_LOG" 2>&1; then
+  # A failed read is a failed audit, never a pass. Cleanup below still runs, because a
+  # valid handoff must be released even when the audit itself failed.
+  bad "could not read the BFF log after the abort run — abort audit failed"
 else
-  bad "BFF abort not correlated to the isolated abort navigation (abort_ok=$ABORT_OK, new_log_match=$(
-    echo "$BFF_NEW_LOGS" | grep -c 'downstream cancelled' || true))"
+  BFF_NEW_LOGS="$(tail -n +$((BFF_LOG_BASELINE + 1)) "$BFF_AFTER_LOG")"
+  if echo "$BFF_NEW_LOGS" | grep -q 'downstream cancelled; propagating to upstream body'; then
+    ok "BFF observed browser downstream cancel → upstream-body abort (NEW log after baseline)"
+  else
+    bad "BFF abort not correlated to the isolated abort navigation (new 'downstream cancelled' matches: $(
+      echo "$BFF_NEW_LOGS" | grep -c 'downstream cancelled' || true))"
+  fi
 fi
 
-echo "== teardown + zero residue =="
+echo "  -- accepted-slot handoff authority"
+mapfile -t HANDOFF_LINES < <(read_abort_handoff "$ABORT_HANDOFF")
+HANDOFF_HEAD="${HANDOFF_LINES[0]:-lost the handoff reader produced no output}"
+case "$HANDOFF_HEAD" in
+  "ok "*)
+    ABORT_SLOTS="$(echo "$HANDOFF_HEAD" | awk '{print $2}')"
+    ABORT_IDS=()
+    for ((line_index = 1; line_index < ${#HANDOFF_LINES[@]}; line_index += 1)); do
+      ABORT_IDS+=("${HANDOFF_LINES[$line_index]}")
+    done
+    # Register before judging: even a lost-authority teardown releases what it knows.
+    for abort_id in "${ABORT_IDS[@]}"; do register_id "$abort_id"; done
+
+    if [ "$ABORT_SLOTS" -gt 2 ]; then
+      # Handed off only so cardinality is detectable; this takes teardown, not cleanup.
+      bad "abort handoff carried $ABORT_SLOTS accepted slots (>2) — lost authority, no normal cleanup"
+      LOST_AUTHORITY=1
+      boundary
+    fi
+
+    if [ "$ABORT_SLOTS" -eq 1 ]; then
+      ok "abort handoff carried exactly one accepted slot id"
+    else
+      # Red on cardinality alone, independently of whether the physical ids clean up.
+      bad "abort handoff carried $ABORT_SLOTS accepted slots (expected exactly 1)"
+    fi
+
+    # Post-audit lifecycle cleanup of every DISTINCT id, at max concurrency two.
+    # Slots are capped at 2 above and distinct ids cannot exceed slots, so launching
+    # them together is exactly a concurrency-2 fan-out.
+    ABORT_CLEANUP_FAIL=0
+    cleanup_pids=(); cleanup_logs=(); cleanup_index=0
+    for abort_id in "${ABORT_IDS[@]}"; do
+      cleanup_index=$((cleanup_index + 1))
+      cleanup_logs+=("$WORKDIR/abort-cleanup-$cleanup_index.log")
+      cleanup_job_lifecycle "$abort_id" >"$WORKDIR/abort-cleanup-$cleanup_index.log" 2>&1 &
+      cleanup_pids+=($!)
+    done
+    for cleanup_pid in "${cleanup_pids[@]}"; do
+      wait "$cleanup_pid" || ABORT_CLEANUP_FAIL=1
+    done
+    for cleanup_log in "${cleanup_logs[@]}"; do cat "$cleanup_log"; done
+    if [ "$ABORT_CLEANUP_FAIL" -eq 0 ]; then
+      ok "abort job cleanup reached exact final GET 404 for ${#ABORT_IDS[@]} distinct id(s)"
+      for abort_id in "${ABORT_IDS[@]}"; do unregister_id "$abort_id"; done
+    else
+      bad "abort job cleanup did not reach exact final GET 404 for every distinct id"
+    fi
+    ;;
+  *)
+    bad "abort authority lost: ${HANDOFF_HEAD#lost } (no guessed id, no later job-owning stage)"
+    LOST_AUTHORITY=1
+    boundary
+    ;;
+esac
+boundary
+
+# ---------------------------------------------------------------------------
+# Successful teardown + the same five residue checks
+# ---------------------------------------------------------------------------
+
+stage "teardown + zero residue"
 cleanup
 # cleanup() removed the WORKDIR too; nothing below needs it. Re-assert an empty
 # footprint for this run's PID-scoped project across every Docker namespace.
-residue=0
-for kind in \
-  "containers:$(docker ps -a --format '{{.Names}}' 2>/dev/null | grep -c "^${PROJECT}[-_]" || true)" \
-  "images:$(docker image ls --format '{{.Repository}}' 2>/dev/null | grep -c "^${PROJECT}-" || true)" \
-  "networks:$(docker network ls --format '{{.Name}}' 2>/dev/null | grep -c "^${PROJECT}_" || true)" \
-  "volumes:$(docker volume ls --format '{{.Name}}' 2>/dev/null | grep -c "^${PROJECT}_" || true)"; do
-  name="${kind%%:*}"; count="${kind##*:}"
-  if [ "${count:-0}" -eq 0 ]; then
-    ok "no leftover $name for $PROJECT"
-  else
-    bad "$count leftover $name for $PROJECT"
-    residue=1
-  fi
-done
-
-# Browser download artifact residue: Playwright manages temp downloads, but
-# assert no ns-test-download files leaked from a prior or current run.
-leftover_downloads="$(find /tmp -maxdepth 1 -name 'ns-test-download-*.xlsx' 2>/dev/null | wc -l | tr -d ' ')"
-if [ "$leftover_downloads" = "0" ]; then
-  ok "no leftover browser download artifacts"
-else
-  bad "$leftover_downloads leftover browser download artifact(s) in /tmp"
-  residue=1
-fi
-
-[ "$residue" -eq 0 ] || echo "  (residue detected — inspect \`docker ... | grep $PROJECT\`)"
+residue_audit || echo "  (residue detected — inspect \`docker ... | grep $PROJECT\`)"
 
 echo "== $PASS passed, $FAIL failed =="
 [ "$FAIL" -eq 0 ]

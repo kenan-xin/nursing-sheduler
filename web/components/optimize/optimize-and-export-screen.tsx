@@ -8,7 +8,8 @@
 // controller's authoritative view and drives server-authoritative controls.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FaBolt } from "@/components/icons";
+import { Surface, surfaceVariants } from "@/components/ui/surface";
+import { cn } from "@/lib/utils";
 import { rangeDayCount } from "@/lib/dates";
 import { toCanonicalScenarioDocument } from "@/lib/scenario/canonical";
 import type { CardsByKind } from "@/lib/scenario";
@@ -93,11 +94,39 @@ export interface OptimizeAndExportScreenProps {
   }) => Promise<boolean>;
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+/**
+ * One L1 route card (DESIGN.md §4): `--surface` + `--line` hairline + `--sh-1` on
+ * `--r-card`, with the prototype's hairline-separated head band
+ * (ScreenGenerate.dc.html:30-31) rather than v1's flat bordered box. The head band
+ * draws only a bottom edge, so it needs no radius of its own and leaves no corner
+ * sliver inside the rounded card.
+ */
+function Section({
+  title,
+  children,
+  testId,
+}: {
+  title: string;
+  children: React.ReactNode;
+  testId?: string;
+}) {
   return (
-    <section className="border border-line bg-surface p-5">
-      <h2 className="mb-4 font-heading text-cardhead text-ink">{title}</h2>
-      {children}
+    <section
+      data-testid={testId}
+      className={cn(
+        surfaceVariants({ role: "surface", geometry: "card" }),
+        // No `overflow-hidden`: the head band draws only a bottom edge, so nothing
+        // paints into the rounded corners and needs clipping — and the nested
+        // chart's absolutely-positioned tooltip must be free to escape the card.
+        "flex flex-col",
+      )}
+    >
+      <div className="border-b border-line2 px-5 py-4">
+        <h2 className="font-heading text-cardhead font-semibold tracking-[-0.015em] text-ink">
+          {title}
+        </h2>
+      </div>
+      <div className="flex-1 p-5">{children}</div>
     </section>
   );
 }
@@ -335,18 +364,36 @@ export function OptimizeAndExportScreen({
   const reloadRecoveryUnavailable = controller.activation?.reloadRecoveryAvailable === false;
 
   return (
-    <div data-testid="screen" className="flex flex-col gap-6">
-      <header className="flex items-start gap-3">
-        <span className="flex size-9 shrink-0 items-center justify-center border border-line bg-panel">
-          <FaBolt className="size-4 text-brandink" aria-hidden />
-        </span>
-        <div>
-          <h1 className="font-heading text-title text-ink">Optimize and Export</h1>
-          <p className="mt-0.5 text-meta text-ink2">
-            Send the current schedule to the backend and download the generated XLSX result.
-          </p>
+    <Surface
+      level="page"
+      geometry="square"
+      data-testid="screen"
+      data-screen="Optimize and Export"
+      className="flex flex-col gap-4"
+    >
+      {/* v2 page head (ScreenGenerate.dc.html:11-15): label eyebrow in `--brandink`,
+          then the Display step — Figtree 700 / 1.15 / -0.015em (DESIGN.md §3). v1 ran
+          this screen at Title weight behind an icon tile the prototype does not have. */}
+      <header className="flex flex-col gap-2">
+        <div className="text-label font-semibold uppercase tracking-[0.03em] text-brandink">
+          Output · Optimize &amp; Export
         </div>
+        <h1 className="font-heading text-display font-bold leading-[1.15] tracking-[-0.015em] text-ink">
+          Optimize and Export
+        </h1>
+        <p className="max-w-[66ch] text-ink2">
+          Send the current schedule to the backend and download the generated XLSX result.
+        </p>
       </header>
+
+      {/* Backend status bar (prototype :19-27) — hoisted out of the run-settings
+          card so server identity reads across the whole route, as designed. */}
+      <div
+        data-testid="optimize-server-bar"
+        className={cn(surfaceVariants({ role: "surface", geometry: "card" }), "px-4 py-3")}
+      >
+        <ServerIdentity info={serverInfo} />
+      </div>
 
       <ReadinessBanner issues={readiness.issues} />
       <RecoveryNotice
@@ -361,61 +408,54 @@ export function OptimizeAndExportScreen({
           (ScreenGenerate.dc.html:27). This had drifted on three counts: `lg` (1024px)
           held one column for 124px longer than the design, `gap-6` ran 8px wide, and
           the 1fr/1.1fr split gave the right pane 5% more than the class allows. */}
-      <div className="grid items-start gap-4 grid2:grid-cols-2">
-        <div className="space-y-6">
-          <Section title="Setup and Run">
-            <div className="space-y-5">
-              <ServerIdentity info={serverInfo} />
-              <RunOptionsForm
-                stats={runOptionsStats}
-                prettify={prettify}
-                anonymize={anonymize}
-                timeout={timeoutValue}
-                timeoutError={timeoutError}
-                optionsDisabled={active || controller.isSubmitting}
-                submitEnabled={submitEnabled}
-                submitting={controller.isSubmitting}
-                disabledReason={disabledReason}
-                onPrettifyChange={setPrettify}
-                onAnonymizeChange={setAnonymize}
-                onTimeoutChange={setTimeoutValue}
-                onSubmit={onSubmit}
-              />
-            </div>
-          </Section>
-        </div>
+      <div className="grid items-stretch gap-4 grid2:grid-cols-2">
+        <Section title="Setup and Run" testId="optimize-run-settings-card">
+          <RunOptionsForm
+            stats={runOptionsStats}
+            prettify={prettify}
+            anonymize={anonymize}
+            timeout={timeoutValue}
+            timeoutError={timeoutError}
+            optionsDisabled={active || controller.isSubmitting}
+            submitEnabled={submitEnabled}
+            submitting={controller.isSubmitting}
+            disabledReason={disabledReason}
+            onPrettifyChange={setPrettify}
+            onAnonymizeChange={setAnonymize}
+            onTimeoutChange={setTimeoutValue}
+            onSubmit={onSubmit}
+          />
+        </Section>
 
-        <div className="space-y-6">
-          <Section title="Live Result">
-            <RunStatusPanel
-              view={view}
-              submitting={controller.isSubmitting}
-              cleanupPhase={terminal.cleanupPhase}
-              canDownloadAgain={terminal.canDownloadAgain}
-              downloadAgainFilename={terminal.downloadAgainFilename}
-              onCancel={onCancel}
-              onFinishNow={controller.finishNow}
-              onResubmit={onResubmit}
-              onDismiss={onDismiss}
-              onDownloadArtifact={terminal.downloadArtifact}
-              onDownloadAgain={terminal.downloadAgain}
-              onRetryCleanup={terminal.retryCleanup}
-              onAbandonCleanup={onAbandonCleanup}
-              // The idle-panel CTA must respect the SAME submission gates as the
-              // settings-form Optimize button — wire it only when a run is actually
-              // permitted, so an offline / not-ready / recovery- or cleanup-blocked
-              // idle screen can't submit through it (which would risk overwriting a
-              // retained terminal view with `submit-blocked`). When not submittable
-              // the idle panel shows the explainer only; the settings button carries
-              // the disabled reason.
-              onStartRun={submitEnabled ? onSubmit : undefined}
-            />
-          </Section>
-        </div>
+        <Section title="Live Result" testId="optimize-live-result-card">
+          <RunStatusPanel
+            view={view}
+            submitting={controller.isSubmitting}
+            cleanupPhase={terminal.cleanupPhase}
+            canDownloadAgain={terminal.canDownloadAgain}
+            downloadAgainFilename={terminal.downloadAgainFilename}
+            onCancel={onCancel}
+            onFinishNow={controller.finishNow}
+            onResubmit={onResubmit}
+            onDismiss={onDismiss}
+            onDownloadArtifact={terminal.downloadArtifact}
+            onDownloadAgain={terminal.downloadAgain}
+            onRetryCleanup={terminal.retryCleanup}
+            onAbandonCleanup={onAbandonCleanup}
+            // The idle-panel CTA must respect the SAME submission gates as the
+            // settings-form Optimize button — wire it only when a run is actually
+            // permitted, so an offline / not-ready / recovery- or cleanup-blocked
+            // idle screen can't submit through it (which would risk overwriting a
+            // retained terminal view with `submit-blocked`). When not submittable
+            // the idle panel shows the explainer only; the settings button carries
+            // the disabled reason.
+            onStartRun={submitEnabled ? onSubmit : undefined}
+          />
+        </Section>
       </div>
 
       <RunEventLog log={view.log} active={active || controller.isSubmitting} />
-    </div>
+    </Surface>
   );
 }
 

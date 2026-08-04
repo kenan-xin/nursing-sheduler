@@ -10,6 +10,10 @@
 
 import { useState } from "react";
 import { ProgressChart } from "@/components/optimize/progress-chart";
+import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { surfaceVariants } from "@/components/ui/surface";
+import { cn } from "@/lib/utils";
 import type { RunProgressPoint } from "@/lib/optimize";
 import { ThemeToggle, AccentControl } from "@/components/theme/theme-toggle";
 
@@ -142,10 +146,10 @@ export default function ProgressChartFixtureClient() {
   const dataset = DATASETS.find((d) => d.key === datasetKey) ?? DATASETS[0];
 
   return (
-    <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-5 py-8">
+    <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 bg-bg px-5 py-8">
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex flex-col gap-1">
-          <h1 className="font-heading text-display font-extrabold tracking-tight">
+          <h1 className="font-heading text-display font-bold leading-[1.15] tracking-[-0.015em] text-ink">
             Optimization progress chart fixture
           </h1>
           <p className="text-meta text-ink2">
@@ -158,42 +162,52 @@ export default function ProgressChartFixtureClient() {
         </div>
       </header>
 
+      {/* R6 v2 — both harness panes are L1 cards, and every control is a shared
+          primitive: the dataset selector uses the Button variants (pill, real L1
+          fill, 44px coarse floor) instead of a local 32px box borrowing the
+          `--brandtint` selection language, and the live-axis toggle is the shared
+          Switch, because a native checkbox is ~13px tall and can never satisfy the
+          D10 coarse-pointer contract that F4's target battery measures. */}
       <section
         data-testid="fixture-dataset-controls"
-        className="flex flex-wrap items-center gap-3 border border-line bg-surface p-4"
+        className={cn(
+          surfaceVariants({ role: "surface", geometry: "card" }),
+          "flex flex-wrap items-center gap-3 p-4",
+        )}
       >
         <span className="text-label font-semibold uppercase tracking-[0.03em] text-ink3">
           Dataset
         </span>
         {DATASETS.map((d) => (
-          <button
+          <Button
             key={d.key}
-            type="button"
+            variant={datasetKey === d.key ? "default" : "secondary"}
+            size="sm"
             aria-pressed={datasetKey === d.key}
             data-testid={`fixture-dataset-${d.key}`}
             onClick={() => setDatasetKey(d.key)}
-            className={
-              "inline-flex h-8 items-center px-3 text-meta font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-brand " +
-              (datasetKey === d.key
-                ? "bg-brandtint text-brandink ring-1 ring-inset ring-brand/40"
-                : "border border-line bg-surface text-ink2 hover:bg-panel hover:text-ink")
-            }
           >
             {d.label}
-          </button>
+          </Button>
         ))}
-        <label className="ml-auto flex items-center gap-2 text-meta text-ink2">
-          <input
-            type="checkbox"
+        <label
+          htmlFor="fixture-active-toggle"
+          className="ml-auto flex items-center gap-2 text-meta text-ink2"
+        >
+          <Switch
+            id="fixture-active-toggle"
             checked={isActive}
-            onChange={(e) => setIsActive(e.target.checked)}
+            onCheckedChange={setIsActive}
             data-testid="fixture-active-toggle"
           />
           isActive (live x-axis extrapolation)
         </label>
       </section>
 
-      <section data-testid="fixture-chart-host" className="border border-line bg-surface p-4">
+      <section
+        data-testid="fixture-chart-host"
+        className={cn(surfaceVariants({ role: "surface", geometry: "card" }), "p-4")}
+      >
         <ProgressChart points={dataset.points} isActive={isActive} />
       </section>
     </main>

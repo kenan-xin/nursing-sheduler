@@ -281,20 +281,93 @@ test.describe("Optimization progress chart — browser coverage", () => {
     await expect(tooltip.getByText("N/A").first()).toBeVisible();
   });
 
-  test("square corners on every interactive element (radius 0 token fidelity)", async ({
+  // R6 replaced v1's "every corner is 0px" assertion. That check encoded the
+  // RETIRED `radius: 0` doctrine, so under v2 it could only ever fail; keeping it
+  // and relaxing it to "anything goes" would have deleted the coverage. The v2
+  // contract is selective rounding, so the replacement is strictly MORE
+  // discriminating: it pins each geometry role to its exact absolute px, and it
+  // still fails a blanket re-round of the plot as well as a blanket un-round of
+  // the controls. Raw computed values, no rounding helper.
+  test("selective v2 geometry: 12px chart well, square plots, pill controls", async ({ page }) => {
+    await page.goto(FIXTURE_URL);
+    await page.getByTestId("fixture-dataset-two-points").click();
+
+    const chart = page.getByTestId("progress-chart");
+    // The chart container is an inner bordered box nested in an L1 host, so it is
+    // the `--r-ctl` well (DESIGN.md §4 rule 5 + §5), never a 16px card and never 0.
+    expect(await chart.evaluate((el) => getComputedStyle(el).borderRadius)).toBe("12px");
+
+    // The plot itself is a data surface and stays structurally square.
+    for (const testId of ["progress-chart-score-panel", "progress-chart-comment-panel"]) {
+      expect(
+        await page.getByTestId(testId).evaluate((el) => getComputedStyle(el).borderRadius),
+        `${testId} plot stays square`,
+      ).toBe("0px");
+    }
+
+    // Every control inside the chart is a shared pill Button — the comments toggle
+    // and all five range presets. A hand-rolled square box reappearing here fails.
+    const controlRadii = await chart
+      .locator("button")
+      .evaluateAll((els) => els.map((el) => getComputedStyle(el).borderRadius));
+    expect(controlRadii.length).toBeGreaterThanOrEqual(6);
+    for (const radius of controlRadii) expect(radius).toBe("999px");
+  });
+
+  test("the hover tooltip is a 16px L2 raised surface, not the chart's own plane", async ({
     page,
   }) => {
     await page.goto(FIXTURE_URL);
     await page.getByTestId("fixture-dataset-two-points").click();
 
-    const radius = await page
-      .getByTestId("progress-chart")
-      .locator("button, [data-testid='progress-chart']")
-      .evaluateAll((els) =>
-        els.map((el) => getComputedStyle(el).borderRadius).filter((r) => r && r !== "0px"),
-      );
-    // Every rendered corner inside the chart resolves to 0px.
-    expect(radius).toEqual([]);
+    const scorePanel = page.getByTestId("progress-chart-score-panel");
+    const box = await scorePanel.boundingBox();
+    expect(box).not.toBeNull();
+    await page.mouse.move(box!.x + box!.width * 0.85, box!.y + box!.height / 2);
+
+    const tooltip = page.getByTestId("progress-chart-tooltip");
+    await expect(tooltip).toBeVisible();
+
+    const paint = await tooltip.evaluate((el) => {
+      const s = getComputedStyle(el);
+      return { radius: s.borderRadius, bg: s.backgroundColor, shadow: s.boxShadow };
+    });
+    const raised = await page.evaluate(() => {
+      const probe = document.createElement("div");
+      probe.style.backgroundColor = "var(--surface2)";
+      document.body.appendChild(probe);
+      const value = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      return value;
+    });
+    expect(paint.radius).toBe("16px");
+    expect(paint.bg, "a raised overlay sits on --surface2, not the well's --panel").toBe(raised);
+    expect(paint.shadow, "L2 carries an OUTER shadow").not.toBe("none");
+    expect(paint.shadow).not.toContain("inset");
+
+    // The tooltip is absolutely positioned ABOVE the score dot and legitimately
+    // escapes the chart figure's box, so no ancestor may clip it. `toBeVisible`
+    // cannot see that — a clipped element still reports a non-empty box — so walk
+    // the real ancestor chain and name any clipping container. This fails the moment
+    // the chart well, the harness host or a route card takes `overflow: hidden`.
+    const clippers = await tooltip.evaluate((el) => {
+      const found: string[] = [];
+      let node = el.parentElement;
+      while (node && node !== document.documentElement) {
+        const s = getComputedStyle(node);
+        for (const axis of [s.overflowX, s.overflowY]) {
+          if (axis === "hidden" || axis === "clip") {
+            const id = node.getAttribute("data-testid") ?? node.tagName.toLowerCase();
+            found.push(`${id}:${axis}`);
+            break;
+          }
+        }
+        node = node.parentElement;
+      }
+      return { found, height: el.getBoundingClientRect().height };
+    });
+    expect(clippers.height).toBeGreaterThan(0);
+    expect(clippers.found, "no ancestor may clip the escaping tooltip").toEqual([]);
   });
 
   test("chart re-renders on viewport resize (responsive container)", async ({ page }) => {

@@ -1,24 +1,35 @@
-// T16f — the ASSEMBLED Browser → Next → FastAPI streaming release gate.
-//
-// Unlike `optimize-durable-stream.spec.ts` (which stubs `/api/**` via
-// `page.route` to drive deterministic client behavior), this spec runs ONLY
-// against the live direct Compose stack brought up by `make verify-stream`.
-// It drives the REAL Optimize screen against the REAL Next BFF + FastAPI
-// backend with ZERO route interception — proving the assembled protocol path
-// the ticket requires.
-//
-// Observations are captured by a transparent fetch-wrapper (`addInitScript`)
-// that records — but does NOT modify — SSE response timing, raw body chunks
-// (for keepalive detection), and Last-Event-ID reconnect headers. The
-// controller's SSE parser processes the response exactly as before; the
-// wrapper is observation-only.
-//
-// Run via: ASSEMBLED_BASE_URL=http://localhost:<port> pnpm exec playwright test
-//          --config playwright.assembled.config.ts
+// Assembled Browser → Next → FastAPI streaming release gate.
+// Runs only against the live Compose stack with no /api interception.
 
 import { expect, test, type Page } from "@playwright/test";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync, renameSync, writeFileSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
+import { OPTIMIZE_SESSION_STORAGE_KEY } from "@/lib/optimize/session-transaction";
+import {
+  ABORT_BOUNDS,
+  ABORT_TEST_TIMEOUT,
+  activeSessionFacts,
+  CLEANUP_BOUNDS,
+  cleanupKnownJobs,
+  finishSubmitObservation,
+  FIRST_BYTE_TIMEOUT,
+  JUDGE_POLL_TIMEOUT,
+  judgeReplayEvidence,
+  KEEPALIVE_WINDOW,
+  observeOptimizeSubmit,
+  OBSERVATION_EVALUATE_BOUND,
+  REPLAY_BOUNDS,
+  REPLAY_TEST_TIMEOUT,
+  RESUMED_HEADER_TIMEOUT,
+  RESUMED_SCREEN_TIMEOUT,
+  runObservedSubmitAction,
+  TINY_BOUNDS,
+  TINY_TEST_TIMEOUT,
+  type CleanupOutcome,
+  type ResumedRequest,
+  type SubmitObserver,
+  type SubmitObservation,
+} from "./support/optimize-durable";
 
 const REPO_ROOT = resolve(__dirname, "../..");
 const TINY_YAML = readFileSync(
@@ -30,37 +41,16 @@ const LARGE_YAML = readFileSync(
   "utf-8",
 );
 
-const FIRST_BYTE_TIMEOUT = 15_000;
-const COMPLETION_TIMEOUT = 90_000;
-const KEEPALIVE_WINDOW = 12_000;
 const REPLAY_SNAPSHOT_KEY = "nurse.optimize.e2e-replay-snapshot";
 
-/**
- * A transparent fetch-wrapper injected BEFORE the page's own scripts. It
- * records SSE-response observations without modifying any response:
- *
- * - `sseResponseAt`: absolute timestamp (ms) when the SSE response HEADERS
- *   arrived — proves the browser received the actual SSE response, not just
- *   that the POST activated the job.
- * - `sseFirstByteAt`: absolute timestamp when the first body CHUNK arrived —
- *   the real "first byte" of the stream.
- * - `sseChunks`: concatenated raw body chunks — used to detect a genuine
- *   `: keepalive` comment (as distinct from repeated job frames).
- * - `eventLastEventIds`: every events-request Last-Event-ID in request order,
- *   including `null`, so the first post-reload request is asserted exactly.
- *
- * The wrapper returns a NEW Response with a wrapped ReadableStream that tees
- * chunks to both the recorder and the consumer. The controller reads from the
- * wrapped stream; the original response.body is consumed by the wrapper's own
- * reader (only one reader per stream, hence the tee).
- */
+/** Transparent observation only: the product still consumes the real response body. */
 const SSE_OBSERVATION_SCRIPT = `
 (function() {
   var obs = {
     sseResponseAt: null,
     sseFirstByteAt: null,
     sseChunks: [],
-    eventLastEventIds: [],
+    eventRequests: [],
   };
   window.__nsSseObs = obs;
   var originalFetch = window.fetch;
@@ -77,26 +67,28 @@ const SSE_OBSERVATION_SCRIPT = `
     }));
   };
 
-  function extractLastEventId(init) {
-    if (!init || !init.headers) return null;
-    var h = init.headers;
+  function extractLastEventId(input, init) {
     try {
-      if (typeof h.get === 'function') return h.get('Last-Event-ID') || null;
-      if (typeof h === 'object') return h['Last-Event-ID'] || h['last-event-id'] || null;
+      if (init && init.headers) {
+        var initHeaders = new Headers(init.headers);
+        var fromInit = initHeaders.get('Last-Event-ID');
+        if (fromInit) return fromInit;
+      }
+      if (input && input.headers && typeof input.headers.get === 'function') {
+        return input.headers.get('Last-Event-ID') || null;
+      }
     } catch (e) {}
     return null;
   }
 
   window.fetch = function(input, init) {
-    var url = typeof input === 'string' ? input : (input && input.url) || '';
-    var isEvents = url.indexOf('/events') !== -1;
+    var authoredUrl = typeof input === 'string' ? input : (input && input.url) || '';
+    var isEvents = authoredUrl.indexOf('/events') !== -1;
     if (isEvents) {
-      var id = extractLastEventId(init) ||
-        (input && input.headers && typeof input.headers.get === 'function' ? input.headers.get('Last-Event-ID') : null);
-      obs.eventLastEventIds.push(id || null);
-      // The replay test invokes this e2e-only freeze immediately before its
-      // atomic snapshot. Holding any controller reconnect in the old document
-      // prevents a late frame from advancing durable storage during teardown.
+      obs.eventRequests.push({
+        url: new URL(String(authoredUrl), window.location.href).href,
+        lastEventId: extractLastEventId(input, init),
+      });
       if (replayFrozen) return new Promise(function() {});
     }
     return originalFetch.apply(this, arguments).then(function(response) {
@@ -116,13 +108,11 @@ const SSE_OBSERVATION_SCRIPT = `
           return reader.read().then(function(result) {
             if (streamState.closed) return;
             if (result.done) { streamState.closed = true; controller.close(); return; }
-            if (obs.sseFirstByteAt === null) {
-              obs.sseFirstByteAt = Date.now();
-            }
+            if (obs.sseFirstByteAt === null) obs.sseFirstByteAt = Date.now();
             obs.sseChunks.push(decoder.decode(result.value, { stream: true }));
             controller.enqueue(result.value);
-          }, function(err) {
-            if (!streamState.closed) controller.error(err);
+          }, function(error) {
+            if (!streamState.closed) controller.error(error);
           });
         },
         cancel: function(reason) {
@@ -144,234 +134,564 @@ interface SseObservations {
   sseResponseAt: number | null;
   sseFirstByteAt: number | null;
   sseChunks: string[];
-  eventLastEventIds: Array<string | null>;
+  eventRequests: ResumedRequest[];
+}
+
+async function withBound<T>(label: string, ms: number, work: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} exceeded ${ms}ms`)), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 async function readSseObs(page: Page): Promise<SseObservations> {
-  return page.evaluate(() => {
-    const obs = (window as unknown as { __nsSseObs?: SseObservations }).__nsSseObs;
-    return {
-      sseResponseAt: obs?.sseResponseAt ?? null,
-      sseFirstByteAt: obs?.sseFirstByteAt ?? null,
-      sseChunks: obs?.sseChunks ?? [],
-      eventLastEventIds: obs?.eventLastEventIds ?? [],
-    };
-  });
-}
-
-function rawSseIds(chunks: string[]): string[] {
-  return Array.from(chunks.join("").matchAll(/^id:\s*(.+?)\r?$/gm), (match) => match[1]);
-}
-
-interface ReplaySnapshot {
-  cursor: string | null;
-  rawIds: string[];
-}
-
-/** Freeze the observation wrapper's current SSE body, allow already-delivered
- * frames to finish committing, then atomically capture cursor + raw IDs and
- * initiate reload. The e2e-only snapshot key is ignored by the application and
- * removed immediately after the new document reads it. */
-async function captureReplaySnapshotAndReload(page: Page): Promise<ReplaySnapshot> {
-  await Promise.all([
-    page.waitForNavigation({ waitUntil: "domcontentloaded" }),
-    page.evaluate(async (snapshotKey) => {
-      const e2eWindow = window as unknown as {
-        __nsFreezeSseForReplay?: () => Promise<unknown>;
-        __nsSseObs?: SseObservations;
+  return withBound(
+    "sse observation evaluate",
+    OBSERVATION_EVALUATE_BOUND,
+    page.evaluate(() => {
+      const obs = (window as unknown as { __nsSseObs?: SseObservations }).__nsSseObs;
+      return {
+        sseResponseAt: obs?.sseResponseAt ?? null,
+        sseFirstByteAt: obs?.sseFirstByteAt ?? null,
+        sseChunks: obs?.sseChunks ?? [],
+        eventRequests: obs?.eventRequests ?? [],
       };
-      await e2eWindow.__nsFreezeSseForReplay?.();
-
-      let cursor: string | null = null;
-      let stableReads = 0;
-      for (let attempt = 0; attempt < 20 && stableReads < 3; attempt += 1) {
-        const rawSession = sessionStorage.getItem("nurse.optimize.session");
-        let nextCursor: string | null = null;
-        if (rawSession) {
-          try {
-            nextCursor = (JSON.parse(rawSession) as { lastCursor?: string }).lastCursor ?? null;
-          } catch {
-            nextCursor = null;
-          }
-        }
-        stableReads = nextCursor !== null && nextCursor === cursor ? stableReads + 1 : 0;
-        cursor = nextCursor;
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      }
-
-      const chunks = e2eWindow.__nsSseObs?.sseChunks ?? [];
-      const rawIds = Array.from(
-        chunks.join("").matchAll(/^id:\s*(.+?)\r?$/gm),
-        (match) => match[1],
-      );
-      sessionStorage.setItem(snapshotKey, JSON.stringify({ cursor, rawIds }));
-      window.location.reload();
-    }, REPLAY_SNAPSHOT_KEY),
-  ]);
-
-  return page.evaluate((snapshotKey) => {
-    const raw = sessionStorage.getItem(snapshotKey);
-    sessionStorage.removeItem(snapshotKey);
-    return raw ? (JSON.parse(raw) as ReplaySnapshot) : { cursor: null, rawIds: [] };
-  }, REPLAY_SNAPSHOT_KEY);
+    }),
+  );
 }
 
 async function injectYaml(page: Page, yaml: string): Promise<void> {
-  await page.addInitScript(SSE_OBSERVATION_SCRIPT);
-  await page.addInitScript((y) => {
-    (window as unknown as { __NS_DURABLE_FIXTURE_YAML?: string }).__NS_DURABLE_FIXTURE_YAML = y;
-  }, yaml);
+  await withBound(
+    "inject observation script",
+    REPLAY_BOUNDS.injectObservationScript,
+    page.addInitScript(SSE_OBSERVATION_SCRIPT),
+  );
+  await withBound(
+    "inject fixture yaml",
+    REPLAY_BOUNDS.injectFixtureYaml,
+    page.addInitScript((value) => {
+      (window as unknown as { __NS_DURABLE_FIXTURE_YAML?: string }).__NS_DURABLE_FIXTURE_YAML =
+        value;
+    }, yaml),
+  );
 }
 
 async function gotoFixture(page: Page): Promise<void> {
-  await page.goto("/optimize-durable-fixture");
-  await expect(page.getByTestId("optimize-durable-fixture")).toBeVisible();
-  await expect(page.getByTestId("screen")).toBeVisible();
-  // Anonymize defaults ON; turn it OFF for the tiny job (no restoration needed).
+  await page.goto("/optimize-durable-fixture", { timeout: REPLAY_BOUNDS.gotoFixtureNavigation });
+  await expect(page.getByTestId("optimize-durable-fixture")).toBeVisible({
+    timeout: REPLAY_BOUNDS.fixtureRootVisible,
+  });
+  await expect(page.getByTestId("screen")).toBeVisible({ timeout: REPLAY_BOUNDS.screenVisible });
   const toggle = page.getByRole("switch", { name: /Anonymize/i });
-  if ((await toggle.getAttribute("aria-checked")) === "true") {
-    await toggle.click();
+  const checked = await toggle.getAttribute("aria-checked", {
+    timeout: REPLAY_BOUNDS.anonymizeAttributeRead,
+  });
+  if (checked === "true") {
+    await toggle.click({ timeout: REPLAY_BOUNDS.anonymizeToggleClick });
   }
-  await expect(toggle).toHaveAttribute("aria-checked", "false");
-  await expect(page.getByTestId("optimize-submit")).toBeEnabled();
+  await expect(toggle).toHaveAttribute("aria-checked", "false", {
+    timeout: REPLAY_BOUNDS.anonymizeCheckedAssertion,
+  });
+  await expect(page.getByTestId("optimize-submit")).toBeEnabled({
+    timeout: REPLAY_BOUNDS.submitEnabledAssertion,
+  });
 }
 
-/** Read the persisted session cursor from sessionStorage (null if absent). */
-async function readPersistedCursor(page: Page): Promise<string | null> {
-  return page.evaluate(() => {
-    const raw = sessionStorage.getItem("nurse.optimize.session");
-    if (!raw) return null;
-    try {
-      return (JSON.parse(raw) as { lastCursor?: string }).lastCursor ?? null;
-    } catch {
-      return null;
-    }
-  });
+/**
+ * What the browser task captures. `sessionRawBefore` is the EXACT persisted-session
+ * bytes, uninterpreted: no phase, job id or cursor is read in the browser, so this
+ * spec carries no second copy of the product's session schema. All interpretation
+ * happens on the Node side through `activeSessionFacts` -> `inspectPersistedSession`.
+ */
+interface RawReplaySnapshot {
+  sessionRawBefore: string | null;
+  preReloadIds: string[];
+  preReloadRequests: ResumedRequest[];
+  pageOrigin: string | null;
+}
+
+interface ReplaySnapshot {
+  cursorBefore: string | null;
+  preReloadIds: string[];
+  preReloadRequests: ResumedRequest[];
+  sessionJobIdDiagnostic: string | null;
+  pageOrigin: string | null;
+}
+
+/** Capture all pre-reload facts and initiate reload in the same browser task. */
+async function captureReplaySnapshotAndReload(page: Page): Promise<ReplaySnapshot> {
+  await Promise.all([
+    page.waitForNavigation({
+      waitUntil: "domcontentloaded",
+      timeout: REPLAY_BOUNDS.reloadNavigation,
+    }),
+    withBound(
+      "freeze + pre-reload snapshot evaluate",
+      REPLAY_BOUNDS.freezeAndSnapshotEvaluate,
+      page.evaluate(
+        async ([snapshotKey, sessionKey]) => {
+          const e2eWindow = window as unknown as {
+            __nsFreezeSseForReplay?: () => Promise<unknown>;
+            __nsSseObs?: SseObservations;
+          };
+          await e2eWindow.__nsFreezeSseForReplay?.();
+
+          // Settle on the record BYTES, without interpreting them. Byte stability is at
+          // least as strict as cursor stability (the record changes when the cursor
+          // commits), and it keeps every schema judgement on the Node side. As before,
+          // an unsettled window still proceeds with the last observed value rather than
+          // hanging.
+          let sessionRawBefore: string | null = null;
+          let stableReads = 0;
+          for (let attempt = 0; attempt < 20 && stableReads < 3; attempt += 1) {
+            const next = sessionStorage.getItem(sessionKey);
+            stableReads = next !== null && next === sessionRawBefore ? stableReads + 1 : 0;
+            sessionRawBefore = next;
+            await new Promise((resolve) => setTimeout(resolve, 10));
+          }
+
+          const chunks = e2eWindow.__nsSseObs?.sseChunks ?? [];
+          const preReloadIds = Array.from(
+            chunks.join("").matchAll(/^id:\s*(.+?)\r?$/gm),
+            (match) => match[1],
+          );
+          const preReloadRequests = (e2eWindow.__nsSseObs?.eventRequests ?? []).slice();
+          sessionStorage.setItem(
+            snapshotKey,
+            JSON.stringify({
+              sessionRawBefore,
+              preReloadIds,
+              preReloadRequests,
+              pageOrigin: window.location.origin,
+            }),
+          );
+          window.location.reload();
+        },
+        [REPLAY_SNAPSHOT_KEY, OPTIMIZE_SESSION_STORAGE_KEY] as const,
+      ),
+    ),
+  ]);
+
+  const raw = await withBound(
+    "post-reload snapshot read evaluate",
+    REPLAY_BOUNDS.snapshotReadEvaluate,
+    page.evaluate((snapshotKey) => {
+      const stored = sessionStorage.getItem(snapshotKey);
+      sessionStorage.removeItem(snapshotKey);
+      return stored
+        ? (JSON.parse(stored) as RawReplaySnapshot)
+        : {
+            sessionRawBefore: null,
+            preReloadIds: [],
+            preReloadRequests: [],
+            pageOrigin: null,
+          };
+    }, REPLAY_SNAPSHOT_KEY),
+  );
+
+  // Product authority decides what those bytes mean.
+  const facts = activeSessionFacts(raw.sessionRawBefore);
+  return {
+    cursorBefore: facts.cursor,
+    preReloadIds: raw.preReloadIds,
+    preReloadRequests: raw.preReloadRequests,
+    sessionJobIdDiagnostic: facts.jobId,
+    pageOrigin: raw.pageOrigin,
+  };
+}
+
+interface ReplayObservation {
+  replayIds: string[];
+  cursorAfter: string | null;
+  pageOrigin: string | null;
+  firstResumedRequest: ResumedRequest | null;
+  postReloadRequests: ResumedRequest[];
+}
+
+/** Replay ids, persisted cursor and every resumed request are one atomic observation. */
+async function readReplayObservation(page: Page): Promise<ReplayObservation> {
+  const raw = await withBound(
+    "replay observation evaluate",
+    OBSERVATION_EVALUATE_BOUND,
+    page.evaluate((sessionKey) => {
+      const obs = (window as unknown as { __nsSseObs?: SseObservations }).__nsSseObs;
+      const replayIds = Array.from(
+        (obs?.sseChunks ?? []).join("").matchAll(/^id:\s*(.+?)\r?$/gm),
+        (match) => match[1],
+      );
+      // Raw bytes again, uninterpreted, in the same atomic observation.
+      const sessionRawAfter = sessionStorage.getItem(sessionKey);
+      const postReloadRequests = (obs?.eventRequests ?? []).slice();
+      return {
+        replayIds,
+        sessionRawAfter,
+        pageOrigin: window.location.origin,
+        firstResumedRequest: postReloadRequests[0] ?? null,
+        postReloadRequests,
+      };
+    }, OPTIMIZE_SESSION_STORAGE_KEY),
+  );
+
+  return {
+    replayIds: raw.replayIds,
+    cursorAfter: activeSessionFacts(raw.sessionRawAfter).cursor,
+    pageOrigin: raw.pageOrigin,
+    firstResumedRequest: raw.firstResumedRequest,
+    postReloadRequests: raw.postReloadRequests,
+  };
+}
+
+function emptyCleanup(ids: string[], failure: string): CleanupOutcome {
+  return { ok: false, ids, removedIds: [], steps: [], failures: [failure] };
+}
+
+/**
+ * The abort lane's only handoff to the shell: the accepted-slot ids in slot order,
+ * duplicates intact, written atomically via a same-directory temp file and rename.
+ *
+ * The payload carries NO pass/fail, reason or verdict field. The shell decides
+ * authority from cardinality and readability alone, and audits new BFF log entries
+ * before it cleans anything up — so cleanup can never manufacture its own evidence.
+ */
+function writeAcceptedSlotHandoff(target: string, slotIds: readonly string[]): void {
+  const temporary = join(dirname(target), `.${basename(target)}.${process.pid}.tmp`);
+  writeFileSync(temporary, JSON.stringify(slotIds), "utf-8");
+  renameSync(temporary, target);
 }
 
 test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
-  test("tiny feasible job: SSE first byte, completion, download, cleanup", async ({ page }) => {
+  test.describe.configure({ mode: "serial" });
+
+  // Every lane attaches the same accepted-submit observer before its click. They
+  // differ only in what happens after the page-close fence: tiny/replay own their
+  // job lifecycle in-browser, while abort hands its accepted ids to the shell and
+  // performs no cancel, status, delete or final GET of its own.
+  type CleanupLane = "lifecycle" | "handoff";
+  let submitObserver: SubmitObserver | null = null;
+  let cleanupLane: CleanupLane = "lifecycle";
+
+  test.afterEach(async ({ page, request }, testInfo) => {
+    const observer = submitObserver;
+    const lane = cleanupLane;
+    submitObserver = null;
+    cleanupLane = "lifecycle";
+    if (observer === null) return;
+
+    testInfo.setTimeout(
+      testInfo.timeout +
+        (lane === "handoff"
+          ? CLEANUP_BOUNDS.closeAndSettle + CLEANUP_BOUNDS.report
+          : CLEANUP_BOUNDS.hook),
+    );
+    const observation: SubmitObservation = await finishSubmitObservation(observer, async () => {
+      if (!page.isClosed()) await page.close({ runBeforeUnload: false });
+    });
+
+    const laneSteps: string[] = [];
+    const laneFailures: string[] = [];
+    if (lane === "handoff") {
+      // Slot order with duplicates preserved: the shell judges cardinality first,
+      // then deduplicates physical ids for its own post-audit cleanup.
+      const slotIds = observation.acceptedSlots.flatMap((slot) =>
+        slot.kind === "id" ? [slot.jobId] : [],
+      );
+      // A handoff is emitted ONLY with retained authority, plus the single lost case the
+      // shell is meant to diagnose itself: every slot readable but more than two of them,
+      // which it detects as excess cardinality. Any other loss — a malformed, unreadable
+      // or unresolved accepted body, or an unresolved matching request — withholds the
+      // file entirely, so the shell sees missing evidence and tears down immediately
+      // instead of mistaking a filtered mixed observation for a valid smaller handoff.
+      const everySlotReadable = slotIds.length === observation.acceptedSlots.length;
+      const excessCardinalityOnly = everySlotReadable && observation.acceptedSlots.length > 2;
+      const target = process.env.ASSEMBLED_ABORT_HANDOFF;
+      if (target === undefined || target.length === 0) {
+        laneFailures.push(
+          "ASSEMBLED_ABORT_HANDOFF was unset, so no accepted-slot id could be handed off",
+        );
+      } else if (observation.lostAuthority && !excessCardinalityOnly) {
+        laneFailures.push(
+          `accepted-slot handoff withheld: submit authority was lost over ${observation.acceptedSlots.length} accepted slot(s), ${slotIds.length} of them readable`,
+        );
+      } else {
+        try {
+          writeAcceptedSlotHandoff(target, slotIds);
+          laneSteps.push(`handed off ${slotIds.length} accepted slot id(s) to ${target}`);
+        } catch (error) {
+          laneFailures.push(
+            `accepted-slot handoff write failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
+    } else {
+      const cleanup = observation.lostAuthority
+        ? emptyCleanup(
+            observation.knownIds,
+            "lost submit authority; normal known-id cleanup bypassed for immediate containment",
+          )
+        : await cleanupKnownJobs(observation.knownIds, {
+            post: async (url, timeout) => {
+              const response = await request.post(url, { timeout });
+              return { status: response.status(), body: await response.text() };
+            },
+            delete: async (url, timeout) => {
+              const response = await request.delete(url, { timeout });
+              return { status: response.status(), body: await response.text() };
+            },
+            get: async (url, timeout) => {
+              const response = await request.get(url, { timeout });
+              return { status: response.status(), body: await response.text() };
+            },
+            sleep: (ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
+            now: () => Date.now(),
+          });
+      for (const step of cleanup.steps.filter((value) => value.includes("cleanup success"))) {
+        console.log(step);
+      }
+      laneSteps.push(...cleanup.steps);
+      laneFailures.push(...cleanup.failures);
+    }
+
+    let report = [
+      `matching submit requests: ${observation.matchingRequests}`,
+      `accepted slots: ${observation.acceptedSlots.length}`,
+      `known jobs: ${observation.knownIds.join(", ") || "(none)"}`,
+      ...observation.failures,
+      ...laneSteps,
+      ...laneFailures,
+    ].join("\n");
+    const failures = [...observation.failures, ...laneFailures];
+    try {
+      await withBound(
+        "cleanup report attachment",
+        CLEANUP_BOUNDS.report,
+        testInfo.attach(lane === "handoff" ? "abort-accepted-slot-handoff" : "live-job-cleanup", {
+          body: report,
+          contentType: "text/plain",
+        }),
+      );
+    } catch (error) {
+      const failure = `cleanup report failed: ${error instanceof Error ? error.message : String(error)}`;
+      failures.push(failure);
+      report += `\n${failure}`;
+    }
+
+    // Preserve an existing primary test failure. A clean body still goes red when
+    // observation, cleanup, or report propagation fails.
+    if (testInfo.status === testInfo.expectedStatus && failures.length > 0) {
+      throw new Error(`submit observation or cleanup failed:\n${report}`);
+    }
+  });
+
+  test("tiny feasible job: SSE first byte, completion, download, cleanup", async ({
+    page,
+    request,
+  }) => {
+    test.setTimeout(TINY_TEST_TIMEOUT);
     await injectYaml(page, TINY_YAML);
     await gotoFixture(page);
 
-    await page.getByTestId("optimize-submit").click();
-
-    // Assert the browser observed the actual SSE response (not just that the
-    // POST activated the job and controls rendered). This is the real
-    // "first response" — the SSE endpoint answered with text/event-stream.
+    submitObserver = observeOptimizeSubmit(page);
+    const downloadPromise = page.waitForEvent("download", { timeout: TINY_BOUNDS.completionPoll });
+    await runObservedSubmitAction(
+      submitObserver,
+      () => page.getByTestId("optimize-submit").click({ timeout: TINY_BOUNDS.submitClick }),
+      async () => {
+        if (!page.isClosed()) await page.close({ runBeforeUnload: false });
+      },
+    );
     await expect
-      .poll(async () => (await readSseObs(page)).sseResponseAt, { timeout: FIRST_BYTE_TIMEOUT })
-      .not.toBeNull();
-    const obs1 = await readSseObs(page);
-    expect(obs1.sseResponseAt).not.toBeNull();
-    // And a first body byte arrived (the stream delivered content).
-    expect(obs1.sseFirstByteAt).not.toBeNull();
-    expect(obs1.sseFirstByteAt! - obs1.sseResponseAt!).toBeLessThan(10_000);
+      .poll(() => submitObserver?.knownIds().length ?? 0, { timeout: TINY_BOUNDS.acceptedIdPoll })
+      .toBeGreaterThan(0);
 
-    // Terminal completion: the auto-chain fetches the artifact, restores it,
-    // downloads, and DELETEs.
+    await expect
+      .poll(async () => (await readSseObs(page)).sseResponseAt, {
+        timeout: TINY_BOUNDS.sseResponsePoll,
+      })
+      .not.toBeNull();
+    const first = await readSseObs(page);
+    expect(first.sseResponseAt).not.toBeNull();
+    expect(first.sseFirstByteAt).not.toBeNull();
+    expect(first.sseFirstByteAt! - first.sseResponseAt!).toBeLessThan(10_000);
+
     await expect(page.getByTestId("optimize-completed-artifact")).toContainText(
       "downloaded successfully",
-      { timeout: COMPLETION_TIMEOUT },
+      { timeout: TINY_BOUNDS.completionPoll },
     );
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toMatch(/\.xlsx$/i);
+    const downloadPath = await download.path();
+    expect(downloadPath, "the browser produced a managed download file").not.toBeNull();
+    const workbookBytes = readFileSync(downloadPath!);
+    expect(workbookBytes.length).toBeGreaterThan(4);
+    expect(workbookBytes.subarray(0, 4)).toEqual(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
 
-    // Cleanup DELETE freed the single-slot: a new run is allowed.
-    await expect(page.getByTestId("optimize-submit")).toBeEnabled({ timeout: 30_000 });
+    // PRODUCT auto-delete, proved here and not by the hook. This poll runs while the
+    // page is still open, before the page-close fence and before `afterEach` performs
+    // its own cancel/terminal/delete/final-GET lifecycle. Without it, a product whose
+    // terminal auto-cleanup effect stopped running would still download and still
+    // re-enable Submit, and the hook's own DELETE would supply the only observed 404 —
+    // false-greening the "Product auto-delete completes" ledger row.
+    const acceptedIds = submitObserver?.knownIds() ?? [];
+    expect(acceptedIds, "exactly one accepted job id owns this lane").toHaveLength(1);
+    const acceptedJobId = acceptedIds[0];
+
+    // Two INDEPENDENT invariants of the same terminal chain: the job is gone
+    // server-side, and the single submit slot is released client-side. They are
+    // awaited CONCURRENTLY so they share wall-clock rather than summing into the
+    // body cap -- each keeps its own bound, assertion and failure message.
+    await Promise.all([
+      expect
+        .poll(
+          async () =>
+            (await request.get(`/api/optimize/${encodeURIComponent(acceptedJobId)}`)).status(),
+          {
+            timeout: TINY_BOUNDS.autoDeletePoll,
+            message: "the product's terminal chain must auto-delete the accepted job",
+          },
+        )
+        .toBe(404),
+      expect(page.getByTestId("optimize-submit")).toBeEnabled({
+        timeout: TINY_BOUNDS.slotFreedAssertion,
+      }),
+    ]);
   });
 
-  test("live job: SSE first byte, genuine keepalive, cursor persistence, strictly-after replay, abort", async ({
+  test("live job: SSE first byte, genuine keepalive, cursor persistence, strictly-after replay", async ({
     page,
   }) => {
+    test.setTimeout(REPLAY_TEST_TIMEOUT);
     await injectYaml(page, LARGE_YAML);
     await gotoFixture(page);
 
-    await page.getByTestId("optimize-submit").click();
+    submitObserver = observeOptimizeSubmit(page);
+    await runObservedSubmitAction(
+      submitObserver,
+      () => page.getByTestId("optimize-submit").click({ timeout: REPLAY_BOUNDS.submitClick }),
+      async () => {
+        if (!page.isClosed()) await page.close({ runBeforeUnload: false });
+      },
+    );
+    await expect
+      .poll(() => submitObserver?.knownIds().length ?? 0, {
+        timeout: REPLAY_BOUNDS.acceptedJobIdPoll,
+      })
+      .toBeGreaterThan(0);
+    const acceptedJobId = submitObserver.knownIds()[0];
 
-    // Bounded first response: the browser observed the SSE response.
     await expect
       .poll(async () => (await readSseObs(page)).sseResponseAt, { timeout: FIRST_BYTE_TIMEOUT })
       .not.toBeNull();
-
-    // Genuine keepalive: wait for the backend's keepalive interval to elapse,
-    // then assert the raw chunks contain a real `: keepalive` comment — NOT
-    // just repeated job frames. The gate configures JOB_SSE_KEEPALIVE_SECONDS
-    // so at least one arrives within this window.
     await page.waitForTimeout(KEEPALIVE_WINDOW);
-    const obsAfterDelay = await readSseObs(page);
-    const rawChunks = obsAfterDelay.sseChunks.join("");
-    expect(rawChunks).toContain(": keepalive");
+    expect((await readSseObs(page)).sseChunks.join("")).toContain(": keepalive");
 
-    // Atomically preserve the exact durable cursor and every raw frame ID seen
-    // before reload, then start reload in that same browser task.
-    const { cursor: cursorBefore, rawIds: preReloadIds } =
-      await captureReplaySnapshotAndReload(page);
-    expect(cursorBefore).not.toBeNull();
-    expect(cursorBefore!.length).toBeGreaterThan(0);
-    expect(preReloadIds.length).toBeGreaterThan(0);
-    expect(preReloadIds).toContain(cursorBefore);
-    await expect(page.getByTestId("screen")).toBeVisible({ timeout: 10_000 });
+    const before = await captureReplaySnapshotAndReload(page);
+    expect(
+      before.sessionJobIdDiagnostic,
+      "session diagnostic corroborates the accepted POST id",
+    ).toBe(acceptedJobId);
+    expect(before.pageOrigin).not.toBeNull();
+    expect(before.cursorBefore).not.toBeNull();
+    expect(before.preReloadIds).toContain(before.cursorBefore);
 
-    // The FIRST post-reload events request must present the exact cursor captured
-    // above. A wrong, older, different, or null cursor fails.
-    await expect
-      .poll(async () => (await readSseObs(page)).eventLastEventIds[0], { timeout: 15_000 })
-      .toBe(cursorBefore);
-
-    const preReloadSet = new Set(preReloadIds);
-    // Require raw post-reload evidence that contains no old ID, contains at
-    // least one new ID, and has committed one of those exact new IDs durably.
+    await expect(page.getByTestId("screen")).toBeVisible({ timeout: RESUMED_SCREEN_TIMEOUT });
     await expect
       .poll(
-        async () => {
-          const postReloadIds = rawSseIds((await readSseObs(page)).sseChunks);
-          const persisted = await readPersistedCursor(page);
-          return (
-            postReloadIds.length > 0 &&
-            postReloadIds.every((id) => !preReloadSet.has(id)) &&
-            persisted !== null &&
-            !preReloadSet.has(persisted) &&
-            postReloadIds.includes(persisted)
-          );
+        async () => (await readReplayObservation(page)).firstResumedRequest?.lastEventId ?? null,
+        {
+          timeout: RESUMED_HEADER_TIMEOUT,
         },
-        { timeout: 20_000, intervals: [500] },
       )
-      .toBe(true);
+      .toBe(before.cursorBefore);
 
-    const postReloadObs = await readSseObs(page);
-    const postReloadIds = rawSseIds(postReloadObs.sseChunks);
-    const cursorAfter = await readPersistedCursor(page);
-    expect(cursorAfter).not.toBeNull();
-    expect(postReloadObs.eventLastEventIds[0]).toBe(cursorBefore);
-    expect(postReloadIds.length).toBeGreaterThan(0);
-    expect(postReloadIds.every((id) => !preReloadSet.has(id))).toBe(true);
-    expect(postReloadIds).toContain(cursorAfter);
-    // NOTE: this test does NOT navigate away — the abort is isolated in a
-    // separate test so the gate's BFF-log baseline can attribute the cancel
-    // to the intended navigation only.
+    const evidence = async () => {
+      const after = await readReplayObservation(page);
+      return {
+        acceptedJobId,
+        expectedOrigin: after.pageOrigin === before.pageOrigin ? after.pageOrigin : null,
+        cursorBefore: before.cursorBefore,
+        preReloadIds: before.preReloadIds,
+        preReloadRequests: before.preReloadRequests,
+        firstResumedRequest: after.firstResumedRequest,
+        postReloadRequests: after.postReloadRequests,
+        replayIds: after.replayIds,
+        cursorAfter: after.cursorAfter,
+      };
+    };
+    await expect
+      .poll(async () => judgeReplayEvidence(await evidence()).ok, {
+        timeout: JUDGE_POLL_TIMEOUT,
+        intervals: [500],
+      })
+      .toBe(true);
+    const judged = judgeReplayEvidence(await evidence());
+    expect(judged.failures).toEqual([]);
   });
 
   test("abort propagation: browser disconnect cancels upstream SSE body", async ({ page }) => {
-    // ISOLATED from the replay test. The gate script baselines the BFF log
-    // count IMMEDIATELY before this test and checks for a NEW entry after.
-    // No reload, prior test, or curl disconnect can satisfy the audit.
+    test.setTimeout(ABORT_TEST_TIMEOUT);
     await injectYaml(page, LARGE_YAML);
     await gotoFixture(page);
 
-    await page.getByTestId("optimize-submit").click();
-
-    // Confirm the SSE stream is live before aborting.
+    // The shell owns this job's lifecycle: the observer captures the accepted ids and
+    // `afterEach` hands them over without cancelling, deleting or polling anything.
+    cleanupLane = "handoff";
+    submitObserver = observeOptimizeSubmit(page);
+    await runObservedSubmitAction(
+      submitObserver,
+      () => page.getByTestId("optimize-submit").click({ timeout: ABORT_BOUNDS.submitClick }),
+      async () => {
+        if (!page.isClosed()) await page.close({ runBeforeUnload: false });
+      },
+    );
     await expect
-      .poll(async () => (await readSseObs(page)).sseResponseAt, { timeout: FIRST_BYTE_TIMEOUT })
+      .poll(() => submitObserver?.knownIds().length ?? 0, {
+        timeout: ABORT_BOUNDS.firstResponsePoll,
+      })
+      .toBeGreaterThan(0);
+    await expect
+      .poll(async () => (await readSseObs(page)).sseResponseAt, {
+        timeout: ABORT_BOUNDS.firstResponsePoll,
+      })
       .not.toBeNull();
 
-    // The ONLY intentional navigate-away in the assembled suite. The gate first
-    // reruns this test with navigation suppressed as an adversarial control; the
-    // URL assertion must fail even though Playwright teardown may still close the
-    // stream. It then re-baselines BFF logs and runs this real navigation.
-    if (process.env.ASSEMBLED_SKIP_ABORT_NAVIGATION !== "1") {
-      await page.goto("/about");
-    }
-    await expect(page).toHaveURL(/\/about$/);
-    await page.waitForTimeout(2_000);
+    // Direct evidence, no negative control: the real navigation must COMMIT a
+    // main-frame response on the pre-navigation origin at exactly `/about` with no
+    // query or fragment, the page must settle on that exact URL, and the old durable
+    // fixture root must be gone. An unrelated exception, assertion failure or timeout
+    // here is simply a failed Playwright command.
+    const pageOrigin = new URL(page.url()).origin;
+    const response = await page.goto("/about", { timeout: ABORT_BOUNDS.abortNavigation });
+    expect(
+      response,
+      "page.goto must return a committed navigation response for /about",
+    ).not.toBeNull();
+    expect(
+      response!.request().isNavigationRequest(),
+      "the committed response answers a navigation request",
+    ).toBe(true);
+    expect(
+      response!.frame() === page.mainFrame(),
+      "the navigation committed in the main frame",
+    ).toBe(true);
+    const committed = new URL(response!.url());
+    expect(committed.origin, "the committed response shares the pre-navigation origin").toBe(
+      pageOrigin,
+    );
+    expect(committed.pathname, "the committed response path is exactly /about").toBe("/about");
+    expect(committed.search, "the committed response carries no query").toBe("");
+    expect(committed.hash, "the committed response carries no fragment").toBe("");
+
+    await expect
+      .poll(() => page.url(), { timeout: ABORT_BOUNDS.abortUrlSettle })
+      .toBe(`${pageOrigin}/about`);
+    await expect(page.getByTestId("optimize-durable-fixture")).toHaveCount(0);
+    await page.waitForTimeout(ABORT_BOUNDS.bffObservationTail);
   });
 });

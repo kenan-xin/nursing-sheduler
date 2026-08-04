@@ -212,6 +212,18 @@ export type RunLogPayload =
     };
 
 /**
+ * What a `detail` string IS, as classified at mint time.
+ *
+ * `expression` — a machine or solver expression: `state=running, queue=2`,
+ * `outcome=optimal, score=42`, an error CODE, an opaque cursor, an artifact filename.
+ * Never a sentence. Rendered on the mono face per DESIGN.md §3.
+ *
+ * `prose` — free-form human text, effectively always a backend-authored message.
+ * Stays on the body face.
+ */
+export type RunLogDetailKind = "expression" | "prose";
+
+/**
  * One entry in the bounded unified event log. Fields:
  *   • `seq` — monotonic, stable for ordering.
  *   • `kind` — coarse category for routing/styling. State/control/result are
@@ -228,6 +240,12 @@ export type RunLogPayload =
  *     controller-initiated entries. T16e renders from this without reparsing.
  *   • `detail` — short renderable summary for controller-initiated entries
  *     (or a fallback for wire frames that don't carry a payload).
+ *   • `detailKind` — WHAT that summary is: a machine/solver EXPRESSION
+ *     (`state=running, queue=2`, a code, a cursor, a filename) or human PROSE
+ *     (a backend error message). Decided here, where the string is minted, so
+ *     the renderer never has to guess from punctuation: DESIGN.md §3 reserves
+ *     the mono face for codes, ids, counts and solver expressions, and a prose
+ *     sentence in that face reads as data it is not.
  *   • `elapsedSeconds` — the frame's solver/scheduler timing where available.
  *   • `occurredAt` — the backend's wall-clock timestamp where present (ISO
  *     string from the SSE envelope's `occurred_at`), or null.
@@ -245,6 +263,8 @@ export interface RunLogEntry {
   cursor: string | null;
   payload: RunLogPayload | null;
   detail: string | null;
+  /** Null exactly when `detail` is null. */
+  detailKind: RunLogDetailKind | null;
   elapsedSeconds: number | null;
   occurredAt: string | null;
   eventTime: number | null;
@@ -491,6 +511,26 @@ function boundLogPayload(payload: RunLogPayload | null): RunLogPayload | null {
   }
 }
 
+/**
+ * A detail string paired with what it IS. Constructed only through `expression()` and
+ * `prose()` below, so every mint point has to say which it is — a semantic source, not
+ * a shape guess over the rendered text.
+ */
+interface LogDetail {
+  text: string;
+  kind: RunLogDetailKind;
+}
+
+/** A machine/solver expression: `key=value` forms, codes, cursors, filenames. */
+function expression(text: string): LogDetail {
+  return { text, kind: "expression" };
+}
+
+/** Free-form human text, effectively always a backend-authored message. */
+function prose(text: string): LogDetail {
+  return { text, kind: "prose" };
+}
+
 // Every log entry is minted here, so this is the single choke point that bounds
 // each retained display string (label, event name, cursor, detail, occurredAt,
 // and the typed payload mirrors). Structural values retained elsewhere (jobId,
@@ -501,7 +541,7 @@ function appendLog(
   view: OptimizeRunView,
   kind: RunLogKind,
   label: string,
-  detail: string | null = null,
+  detail: LogDetail | null = null,
   elapsedSeconds: number | null = null,
   event: string | null = null,
   cursor: string | null = null,
@@ -522,7 +562,8 @@ function appendLog(
         event: event === null ? null : truncateUtf8(event, MAX_DISPLAY_LABEL_BYTES),
         cursor: cursor === null ? null : truncateUtf8(cursor, MAX_CURSOR_BYTES),
         payload: boundLogPayload(payload),
-        detail: detail === null ? null : truncateUtf8(detail, MAX_DISPLAY_MESSAGE_BYTES),
+        detail: detail === null ? null : truncateUtf8(detail.text, MAX_DISPLAY_MESSAGE_BYTES),
+        detailKind: detail === null ? null : detail.kind,
         elapsedSeconds,
         occurredAt: occurredAt === null ? null : truncateUtf8(occurredAt, MAX_DISPLAY_LABEL_BYTES),
         eventTime: null,
@@ -576,13 +617,14 @@ export function reduceRunView(view: OptimizeRunView, signal: RunSignal): Optimiz
         anonymized: signal.anonymized,
         peopleCount: signal.peopleCount,
       });
-      const detail = `anonymized=${signal.anonymized}, people=${signal.peopleCount}`;
+      const detail = expression(`anonymized=${signal.anonymized}, people=${signal.peopleCount}`);
       const { log, seq } = appendLog(started, "lifecycle", "submitting", detail);
       return { ...started, log, seq };
     }
 
     case "submit-blocked": {
-      const { log, seq } = appendLog(view, "error", "submit-blocked", signal.code);
+      // A CODE, not a sentence.
+      const { log, seq } = appendLog(view, "error", "submit-blocked", expression(signal.code));
       return {
         ...view,
         lifecycle: "submit-blocked",
@@ -598,7 +640,7 @@ export function reduceRunView(view: OptimizeRunView, signal: RunSignal): Optimiz
 
     case "submit-rejected": {
       const code = signal.code ?? "unknown";
-      const { log, seq } = appendLog(view, "error", "submit-rejected", code);
+      const { log, seq } = appendLog(view, "error", "submit-rejected", expression(code));
       return {
         ...view,
         lifecycle: "submit-rejected",
@@ -615,7 +657,7 @@ export function reduceRunView(view: OptimizeRunView, signal: RunSignal): Optimiz
 
     case "submit-unknown": {
       const code = signal.code ?? "unknown";
-      const { log, seq } = appendLog(view, "error", "submit-unknown", code);
+      const { log, seq } = appendLog(view, "error", "submit-unknown", expression(code));
       return {
         ...view,
         lifecycle: "submit-unknown",
@@ -638,7 +680,10 @@ export function reduceRunView(view: OptimizeRunView, signal: RunSignal): Optimiz
         signal.reason === null || signal.reason === undefined
           ? null
           : truncateUtf8(signal.reason, MAX_DISPLAY_LABEL_BYTES);
-      const detail = reason ?? (signal.reloadRecoveryAvailable ? "durable" : "volatile");
+      // A short fixed reason token or the recovery mode — machine either way.
+      const detail = expression(
+        reason ?? (signal.reloadRecoveryAvailable ? "durable" : "volatile"),
+      );
       const { log, seq } = appendLog(view, "lifecycle", `activated:${signal.jobId}`, detail);
       return {
         ...view,
@@ -728,7 +773,7 @@ export function reduceRunView(view: OptimizeRunView, signal: RunSignal): Optimiz
         view,
         "progress",
         "progress",
-        parts.join(", "),
+        expression(parts.join(", ")),
         p.elapsedSeconds,
         "job.progressed",
         signal.cursor ?? null,
@@ -753,7 +798,11 @@ export function reduceRunView(view: OptimizeRunView, signal: RunSignal): Optimiz
         code: truncateUtf8(signal.entry.code, MAX_DISPLAY_LABEL_BYTES),
         message: truncateUtf8(signal.entry.message, MAX_DISPLAY_MESSAGE_BYTES),
       };
-      const detail = e.message ? `${e.code}: ${e.message}` : e.code;
+      // MIXED, so it is classified by what dominates: with a backend message the line
+      // is a prose sentence prefixed by its code (`solve: Solving`) and stays on the
+      // body face; the bare code alone is a machine token. The code is separately
+      // available on the typed payload for anything that needs it on its own.
+      const detail = e.message ? prose(`${e.code}: ${e.message}`) : expression(e.code);
       const payload: RunLogPayload = {
         kind: "phase",
         source: e.source,
@@ -791,7 +840,10 @@ export function reduceRunView(view: OptimizeRunView, signal: RunSignal): Optimiz
         view,
         signal.payload.kind,
         signal.event,
-        signal.detail,
+        // Every form `buildDurablePayloadAndDetail` (`submission.ts`) can produce is a
+        // machine expression — `state=running, queue=2`, `early_completion=true`,
+        // `outcome=optimal, score=42` — so the wire lane is uniformly an expression.
+        signal.detail === null ? null : expression(signal.detail),
         null,
         signal.event,
         signal.cursor,
@@ -808,7 +860,13 @@ export function reduceRunView(view: OptimizeRunView, signal: RunSignal): Optimiz
         signal.oldestEventId === null || signal.oldestEventId === undefined
           ? null
           : truncateUtf8(signal.oldestEventId, MAX_CURSOR_BYTES);
-      const { log, seq } = appendLog(view, "recovery", `cursor-${signal.reason}`, oldestEventId);
+      // An opaque cursor — machine, and null when the body carried none.
+      const { log, seq } = appendLog(
+        view,
+        "recovery",
+        `cursor-${signal.reason}`,
+        oldestEventId === null ? null : expression(oldestEventId),
+      );
       // Earlier progress/phase history is no longer trustworthy after a cursor
       // recovery — clear the ephemeral chart/log data (reconciled spec) but keep the
       // audit log and the authoritative job fields.
@@ -830,7 +888,7 @@ export function reduceRunView(view: OptimizeRunView, signal: RunSignal): Optimiz
     case "job-gone":
     case "control-job-gone": {
       const code = signal.code ?? "unknown";
-      const { log, seq } = appendLog(view, "terminal", "job-gone", code);
+      const { log, seq } = appendLog(view, "terminal", "job-gone", expression(code));
       // The job expired/deleted/never existed — a recovery surfaced via
       // error.code, NOT a solver failure. Detach the obsolete job id so
       // poll/stream stop. Download is unavailable; T16b/T16e separately inspect
@@ -855,7 +913,8 @@ export function reduceRunView(view: OptimizeRunView, signal: RunSignal): Optimiz
       // server job may still be running. Record it without changing lifecycle so the
       // UI can show a disconnect notice (reconciled spec: transport disconnect is
       // not itself a run failure).
-      const { log, seq } = appendLog(view, "error", "stream-disconnected", signal.message);
+      // A backend-authored MESSAGE: prose, so it stays on the body face.
+      const { log, seq } = appendLog(view, "error", "stream-disconnected", prose(signal.message));
       return {
         ...view,
         error: boundError("stream", null, signal.message),
@@ -868,7 +927,12 @@ export function reduceRunView(view: OptimizeRunView, signal: RunSignal): Optimiz
       // A cancel/finish-now request failed. The server remains authoritative for
       // lifecycle/controls, so record the error without altering them — the next
       // authoritative snapshot still governs.
-      const { log, seq } = appendLog(view, "error", "control-error", signal.code ?? "unknown");
+      const { log, seq } = appendLog(
+        view,
+        "error",
+        "control-error",
+        expression(signal.code ?? "unknown"),
+      );
       return {
         ...view,
         error: boundError("control", signal.code, signal.message),
@@ -889,7 +953,15 @@ export function reduceRunView(view: OptimizeRunView, signal: RunSignal): Optimiz
         signal.filename === null
           ? view.download.filename
           : truncateUtf8(signal.filename, MAX_DISPLAY_FILENAME_BYTES);
-      const { log, seq } = appendLog(view, "result", "download-succeeded", filename);
+      // A FILENAME: an artifact token, never a sentence, so it reads as data. The kind
+      // follows the EFFECTIVE filename above, not `signal.filename` — a signal carrying
+      // no filename still logs the retained one, and that is data too.
+      const { log, seq } = appendLog(
+        view,
+        "result",
+        "download-succeeded",
+        filename === null ? null : expression(filename),
+      );
       return {
         ...view,
         download: {
@@ -913,7 +985,7 @@ export function reduceRunView(view: OptimizeRunView, signal: RunSignal): Optimiz
     }
 
     case "download-failed": {
-      const { log, seq } = appendLog(view, "error", "download-failed", signal.message);
+      const { log, seq } = appendLog(view, "error", "download-failed", prose(signal.message));
       return {
         ...view,
         error: boundError("job", null, signal.message),

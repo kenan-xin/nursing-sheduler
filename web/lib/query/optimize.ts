@@ -28,6 +28,11 @@ export { OptimizeApiError } from "@/lib/bff/errors";
 // ("Scheduling YAML is too large"). Never treat this as the enforcement boundary.
 export const OPTIMIZE_MAX_YAML_BYTES = 2 * 1024 * 1024;
 
+/** The exact root-relative product URL used for an Optimize event stream. */
+export function buildOptimizeEventsUrl(jobId: string): string {
+  return `/api/optimize/${encodeURIComponent(jobId)}/events`;
+}
+
 async function requestOptimizeJob(
   input: string,
   init?: RequestInit,
@@ -342,7 +347,7 @@ export function useOptimizeEventStream(
       });
       cb().onCursorReset?.();
     }
-    const eventsUrl = `/api/optimize/${encodeURIComponent(jobId)}/events`;
+    const eventsUrl = buildOptimizeEventsUrl(jobId);
     const pollUrl = `/api/optimize/${encodeURIComponent(jobId)}`;
 
     // Authoritative poll + cache replacement, reused by the loop's recovery and by

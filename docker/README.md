@@ -230,7 +230,8 @@ path. It has two phases:
    response, live-stream liveness, opaque cursor persistence, strictly-after
    replay on reload, browser-disconnect → BFF upstream-body abort propagation
    (via a bounded BFF log seam in `lib/bff/stream.ts`), terminal artifact
-   auto-download, and cleanup DELETE.
+   auto-download, and the product's own auto-delete proved by an exact `GET 404`
+   on the accepted job id.
 
 2. **curl phase (SUPPORTING diagnostics)**: protocol-level checks that submit
    returns HTTP 202 + parsed JSON, the stream delivers `text/event-stream` with
@@ -253,8 +254,8 @@ exit and asserts zero residue.
 | browser: liveness | the observed raw SSE body contains a genuine `: keepalive` comment from FastAPI; repeated job frames or rendered controls do not count |
 | browser: cursor persistence | the controller writes `lastCursor` to the durable session record |
 | browser: replay | an atomic pre-reload snapshot preserves the exact persisted cursor and raw ID set; the first reconnect sends that exact `Last-Event-ID`, no old ID reappears, and at least one new raw ID is durably committed |
-| browser: abort | the same isolated test first fails as a no-navigation negative control; logs are then re-baselined, and only a passing `/about` navigation plus a new BFF upstream-abort log passes |
-| browser: terminal | tiny job: completion → auto-download → cleanup DELETE → submit re-enabled |
+| browser: abort | one isolated test proves the outcome directly: the BFF log is baselined immediately before the run, the committed main-frame response is same-origin `/about` with no query or fragment, `page.url()` settles on that exact URL, the old durable fixture root is gone, and only a NEW post-baseline `downstream cancelled; propagating to upstream body` entry passes; the shell then audits that evidence before releasing the ids-only accepted-slot handoff to final `GET 404` |
+| browser: terminal | tiny job: completion → auto-download → the PRODUCT's own auto-delete, proved by an exact `GET 404` on the accepted job id before the page-close fence → submit re-enabled. The hook's later lifecycle finds the job already absent, so its cancel returns `404`, it skips DELETE, and it only re-confirms final absence |
 | curl: submit | `POST /api/optimize` returns HTTP 202 + valid JSON with a non-empty `id` |
 | curl: streaming | `text/event-stream` + `x-accel-buffering: no` + `cache-control: no-cache` + real `id:` cursors + `job.*` events |
 | curl: live cancel | confirmed nonterminal state before cancel → POST cancel → terminal state |

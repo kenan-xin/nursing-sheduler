@@ -20,13 +20,18 @@ export function ReadinessBanner({ issues }: ReadinessBannerProps) {
       data-testid="optimize-readiness"
       title="Finish setting up your schedule before optimizing"
     >
-      <ul className="list-disc space-y-1 pl-[18px]">
+      <ul className="list-disc space-y-1 pl-5">
         {issues.map((issue) => (
           <li key={issue.kind}>
             {issue.before}
+            {/* D10 coarse-pointer floor. An inline `<a>` is measured height-only by
+                F4's target battery, and a bare inline box is one line tall, so the
+                link becomes an inline-flex box that can carry `min-h-touch` on a
+                coarse pointer. Width stays intrinsic so the sentence still reads as
+                prose (the R3 P4 backlog owns any precise-pointer change). */}
             <GuardedLink
               href={issue.href}
-              className="font-semibold text-brandink underline underline-offset-2 hover:no-underline"
+              className="inline-flex items-center font-semibold text-brandink underline underline-offset-2 pointer-coarse:min-h-touch hover:no-underline"
             >
               {issue.linkLabel}
             </GuardedLink>
