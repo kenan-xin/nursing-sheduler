@@ -8,8 +8,9 @@
 //   2. route marker  — the row's OWN existing screen/fixture marker is visible
 //   3. fonts         — `document.fonts.ready` has resolved
 //   4. portals       — no Base UI popup is mid-open or mid-close
-//   5. stable frames — two consecutive animation frames agree on layout, and no
-//                      finite animation is still running
+//   5. stable frames — a bounded run of consecutive animation frames in which
+//                      layout agrees, the DOM does not change, and no finite
+//                      animation is in flight
 //
 // A fixed sleep is never a correctness signal anywhere in this file. The one
 // timing primitive used is `requestAnimationFrame`, which is a real paint event,
@@ -27,6 +28,63 @@ export const READINESS_TIMEOUT_MS = 15_000;
 
 /** The test-only root attribute that suppresses motion for screenshot capture. */
 export const SCREENSHOT_ATTRIBUTE = "data-v2-screenshot";
+
+/**
+ * Consecutive animation frames of observable quiet a settle pass must see before
+ * it calls the page settled.
+ *
+ * A paint-only transition changes no layout box, so layout equality cannot see
+ * it — and a transition that has not STARTED yet is invisible to every signal
+ * there is. The only defence against a change that is still coming is to keep
+ * watching for a bounded window and let the change itself reset the count: the
+ * React commit that starts a late transition is a DOM mutation, and the
+ * transition it creates is then an animation in flight for as long as it runs.
+ *
+ * Six frames is roughly 100ms of paint at 60Hz, but the unit is frames, not
+ * milliseconds — under CI load the frames stretch and the window stretches with
+ * them, which is exactly the behaviour a wall-clock sleep cannot give.
+ */
+export const STABLE_QUIET_FRAMES = 6;
+
+/**
+ * The page-global key a settle pass publishes its own state under.
+ *
+ * This is observability, not a second readiness framework: the pass already has
+ * to carry state across frames (see `awaitStableFrames`), and publishing it lets
+ * a failure say WHAT kept the page busy, and lets the F4 proof establish
+ * ordering against the pass rather than against the clock.
+ */
+export const SETTLE_STATE_KEY = "__v2Settle";
+
+/** The observable half of a settle pass. Serializable; read with `readSettleState`. */
+export interface V2SettleState {
+  /** Incremented once per settle pass, at the frame the pass starts. */
+  epoch: number;
+  /** Frames observed across the page's lifetime. Only advances during a pass. */
+  frame: number;
+  /** `frame` when the current pass started. */
+  startFrame: number;
+  /** Consecutive quiet frames the pass currently holds. */
+  quiet: number;
+  /** DOM mutations the pass has observed. */
+  mutations: number;
+  /** The first few mutations, for failure text. */
+  samples: string[];
+  /** Finite animations in flight at the last observed frame. */
+  inFlight: number;
+  /** The layout signature at the last observed frame. */
+  layout: string;
+  /** Whether a pass is currently running. */
+  running: boolean;
+  /** `frame` at which the pass resolved, or null while it is still running. */
+  resolvedFrame: number | null;
+}
+
+/** The full in-page pass record. The extra fields are not serializable. */
+interface SettlePass extends V2SettleState {
+  seenMutations: number;
+  observer: MutationObserver | null;
+}
 
 interface ReadinessWindow {
   __nsStore?: {
@@ -165,8 +223,33 @@ export async function awaitPortals(page: Page): Promise<void> {
 // ---------------------------------------------------------------------------
 
 /**
- * Wait until two consecutive animation frames agree on the document's layout box
- * AND no FINITE animation is still running.
+ * Wait until the page holds `STABLE_QUIET_FRAMES` consecutive animation frames in
+ * which the document's layout box agrees with the previous frame, the DOM has
+ * not changed, and no FINITE animation is in flight.
+ *
+ * Three things this has to get right, each of which it got wrong before:
+ *
+ * 1. **The predicate must be synchronous.** `page.waitForFunction` compares the
+ *    value the predicate RETURNS against `false` to decide whether to keep
+ *    polling. A predicate that returns a Promise is never `=== false`, so it is
+ *    accepted on its first call and its eventual verdict is discarded. The old
+ *    body returned `new Promise(...)`, which means this helper had never waited
+ *    for anything: it resolved after one poll no matter what it measured.
+ *    Measured directly against the pinned Chromium — a predicate resolving
+ *    `false` after 400ms returned in 424ms, while a synchronous `false` polled
+ *    until its timeout. So the state that has to survive between frames lives on
+ *    the page, not in a closure, and each call advances it by exactly one frame.
+ *
+ * 2. **Layout equality cannot see paint.** A `color` / `background-color` /
+ *    `box-shadow` transition changes no box, so a layout comparison is blind to
+ *    it and an audit downstream samples an interpolated colour. Animation state
+ *    is what sees those, and it is checked every frame.
+ *
+ * 3. **A transition that has not started yet is invisible to both.** The seeded
+ *    React update that starts one commits a DOM change first, so mutations are
+ *    observed too and any of them resets the quiet run. The window is what turns
+ *    "nothing is happening right now" into "nothing has happened for a bounded
+ *    run of real frames", which is the claim an audit actually needs.
  *
  * Infinite animations are excluded on purpose: the skeleton shimmer and the
  * spinner never finish, so waiting for `getAnimations()` to empty would hang on
@@ -175,29 +258,147 @@ export async function awaitPortals(page: Page): Promise<void> {
  * suppressing them at the source.
  */
 export async function awaitStableFrames(page: Page): Promise<void> {
-  await page.waitForFunction(
-    () =>
-      new Promise<boolean>((resolve) => {
+  try {
+    await page.waitForFunction(
+      ({ key, quietFrames, sampleCap }) => {
+        const store = window as unknown as Record<string, SettlePass | undefined>;
+
         const measure = () => {
           const el = document.documentElement;
           return `${el.scrollWidth}x${el.scrollHeight}x${document.body.scrollHeight}`;
         };
-        const running = () =>
-          document
-            .getAnimations()
-            .filter(
-              (a) =>
-                a.playState === "running" && a.effect?.getComputedTiming().iterations !== Infinity,
-            ).length;
+        // `pending` counts as in flight. A transition created moments ago has no
+        // start time yet, and dropping it here would reopen the very gap the
+        // quiet window exists to close.
+        const inFlight = () =>
+          document.getAnimations().filter((a) => {
+            if (a.effect?.getComputedTiming().iterations === Infinity) return false;
+            return a.playState === "running" || a.pending;
+          }).length;
 
-        const first = measure();
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => resolve(measure() === first && running() === 0));
-        });
-      }),
-    undefined,
-    { timeout: READINESS_TIMEOUT_MS },
-  );
+        const previous = store[key];
+        if (!previous || !previous.running) {
+          const pass: SettlePass = {
+            epoch: (previous?.epoch ?? 0) + 1,
+            frame: previous?.frame ?? 0,
+            startFrame: previous?.frame ?? 0,
+            quiet: 0,
+            mutations: 0,
+            seenMutations: 0,
+            samples: [],
+            inFlight: inFlight(),
+            layout: measure(),
+            running: true,
+            resolvedFrame: null,
+            observer: null,
+          };
+
+          // Attributes and nodes only. A text change cannot create a transition,
+          // and a page with a ticking label would otherwise never go quiet.
+          const observer = new MutationObserver((records) => {
+            pass.mutations += records.length;
+            for (const record of records) {
+              if (pass.samples.length >= sampleCap) break;
+              const node = record.target;
+              const el = node.nodeType === 1 ? (node as Element) : node.parentElement;
+              const testid = el?.getAttribute("data-testid");
+              const name = el
+                ? `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ""}` +
+                  (testid ? `[data-testid="${testid}"]` : "")
+                : "(detached)";
+              pass.samples.push(
+                `${record.type}${record.attributeName ? `:${record.attributeName}` : ""} on ${name}`,
+              );
+            }
+          });
+          observer.observe(document.documentElement, {
+            subtree: true,
+            childList: true,
+            attributes: true,
+          });
+          pass.observer = observer;
+          store[key] = pass;
+          // The opening frame only establishes the baseline. It can never be a
+          // quiet frame, because nothing has been compared against anything yet.
+          return false;
+        }
+
+        const pass = previous;
+        pass.frame += 1;
+        const layout = measure();
+        const flight = inFlight();
+        const mutated = pass.mutations !== pass.seenMutations;
+        pass.seenMutations = pass.mutations;
+        pass.inFlight = flight;
+        const stable = layout === pass.layout;
+        pass.layout = layout;
+
+        pass.quiet = stable && flight === 0 && !mutated ? pass.quiet + 1 : 0;
+        if (pass.quiet < quietFrames) return false;
+
+        pass.resolvedFrame = pass.frame;
+        pass.running = false;
+        pass.observer?.disconnect();
+        pass.observer = null;
+        return true;
+      },
+      { key: SETTLE_STATE_KEY, quietFrames: STABLE_QUIET_FRAMES, sampleCap: 6 },
+      { timeout: READINESS_TIMEOUT_MS },
+    );
+  } catch (err) {
+    // Read the pass's own account of what it saw before abandoning it. Without
+    // this the failure is a bare timeout, which says nothing about whether the
+    // page was animating, mutating or resizing.
+    const state = await readSettleState(page).catch(() => null);
+    await abandonSettlePass(page).catch(() => undefined);
+    throw new Error(
+      `stable frames: the page never held ${STABLE_QUIET_FRAMES} consecutive quiet animation ` +
+        `frames within ${READINESS_TIMEOUT_MS}ms.` +
+        (state
+          ? ` Over ${state.frame - state.startFrame} frame(s) it observed ${state.mutations} DOM ` +
+            `mutation(s), ended on ${state.inFlight} finite animation(s) in flight at layout ` +
+            `${state.layout}, and reached a quiet run of ${state.quiet}. ` +
+            `First mutations: ${state.samples.join("; ") || "(none)"}.`
+          : "") +
+        `\nOriginal: ${(err as Error).message}`,
+    );
+  }
+}
+
+/** The current settle pass's published state, or null if none has ever run. */
+export async function readSettleState(page: Page): Promise<V2SettleState | null> {
+  return page.evaluate((key) => {
+    const pass = (window as unknown as Record<string, V2SettleState | undefined>)[key];
+    if (!pass) return null;
+    // Hand back only the serializable half — the pass also holds a live
+    // MutationObserver, which cannot cross the boundary.
+    return {
+      epoch: pass.epoch,
+      frame: pass.frame,
+      startFrame: pass.startFrame,
+      quiet: pass.quiet,
+      mutations: pass.mutations,
+      samples: [...pass.samples],
+      inFlight: pass.inFlight,
+      layout: pass.layout,
+      running: pass.running,
+      resolvedFrame: pass.resolvedFrame,
+    };
+  }, SETTLE_STATE_KEY);
+}
+
+/**
+ * Tear down a pass that timed out. Its observer would otherwise stay attached,
+ * and the next pass would resume the abandoned one instead of starting clean.
+ */
+async function abandonSettlePass(page: Page): Promise<void> {
+  await page.evaluate((key) => {
+    const pass = (window as unknown as Record<string, SettlePass | undefined>)[key];
+    if (!pass) return;
+    pass.observer?.disconnect();
+    pass.observer = null;
+    pass.running = false;
+  }, SETTLE_STATE_KEY);
 }
 
 // ---------------------------------------------------------------------------
