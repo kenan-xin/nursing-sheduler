@@ -560,46 +560,6 @@ export async function cleanupKnownJobs(
 // Compact effective-request and replay judgment
 // ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// Persisted-session facts, read through the product's own inspector
-// ---------------------------------------------------------------------------
-
-export interface ActiveSessionFacts {
-  jobId: string | null;
-  cursor: string | null;
-}
-
-/**
- * Interpret raw persisted-session bytes through the PRODUCT authority
- * (`inspectPersistedSession`) rather than a second schema parser. The browser task
- * captures bytes only; every judgement about phase, job id and cursor is made here
- * against the real versioned, closed contract, so replay evidence cannot drift from
- * a permissive local subset.
- *
- * Only a `resumable` (active) record yields facts. Absent, interrupted (provisional),
- * unreadable and version-mismatched records all read as null/null. An otherwise-valid
- * active record whose ONLY defect is an oversized cursor comes back from the product
- * inspector with that cursor stripped, so this reports its job id with a null cursor
- * rather than resuming from a cursor the product itself refuses.
- *
- * The adapter is deliberately read-only and key-checked: it answers only for the exact
- * product storage key the browser read, and any write attempt is a hard error rather
- * than a silent no-op, so a future inspector that mutated storage could not slip past.
- */
-export function activeSessionFacts(raw: string | null): ActiveSessionFacts {
-  const inspected = inspectPersistedSession({
-    getItem: (key: string) => (key === OPTIMIZE_SESSION_STORAGE_KEY ? raw : null),
-    setItem: () => {
-      throw new Error("read-only session adapter: setItem must not be called");
-    },
-    removeItem: () => {
-      throw new Error("read-only session adapter: removeItem must not be called");
-    },
-  });
-  if (inspected.kind !== "resumable") return { jobId: null, cursor: null };
-  return { jobId: inspected.record.jobId, cursor: inspected.record.lastCursor ?? null };
-}
-
 export const CURSOR_VERSION = "v1";
 const CURSOR_SEGMENT_PATTERN = /^[A-Za-z0-9_-]+$/;
 
@@ -752,6 +712,46 @@ export function judgeReplayEvidence(evidence: ReplayEvidence): ReplayJudgement {
       failures.push("post-reload cursor was absent from replay ids");
   }
   return { ok: failures.length === 0, failures };
+}
+
+// ---------------------------------------------------------------------------
+// Persisted-session facts, read through the product's own inspector
+// ---------------------------------------------------------------------------
+
+export interface ActiveSessionFacts {
+  jobId: string | null;
+  cursor: string | null;
+}
+
+/**
+ * Interpret raw persisted-session bytes through the PRODUCT authority
+ * (`inspectPersistedSession`) rather than a second schema parser. The browser task
+ * captures bytes only; every judgement about phase, job id and cursor is made here
+ * against the real versioned, closed contract, so replay evidence cannot drift from
+ * a permissive local subset.
+ *
+ * Only a `resumable` (active) record yields facts. Absent, interrupted (provisional),
+ * unreadable and version-mismatched records all read as null/null. An otherwise-valid
+ * active record whose ONLY defect is an oversized cursor comes back from the product
+ * inspector with that cursor stripped, so this reports its job id with a null cursor
+ * rather than resuming from a cursor the product itself refuses.
+ *
+ * The adapter is deliberately read-only and key-checked: it answers only for the exact
+ * product storage key the browser read, and any write attempt is a hard error rather
+ * than a silent no-op, so a future inspector that mutated storage could not slip past.
+ */
+export function activeSessionFacts(raw: string | null): ActiveSessionFacts {
+  const inspected = inspectPersistedSession({
+    getItem: (key: string) => (key === OPTIMIZE_SESSION_STORAGE_KEY ? raw : null),
+    setItem: () => {
+      throw new Error("read-only session adapter: setItem must not be called");
+    },
+    removeItem: () => {
+      throw new Error("read-only session adapter: removeItem must not be called");
+    },
+  });
+  if (inspected.kind !== "resumable") return { jobId: null, cursor: null };
+  return { jobId: inspected.record.jobId, cursor: inspected.record.lastCursor ?? null };
 }
 
 // ---------------------------------------------------------------------------
