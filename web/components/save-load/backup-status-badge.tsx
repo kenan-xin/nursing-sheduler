@@ -14,10 +14,16 @@
 // recorded backup diverge. Like `PersistenceBadge` it is deliberately NOT a live
 // region: announcing "Backup out of date" on every keystroke would flood assistive
 // tech, so it is static explanatory copy that happens to re-render on change.
+//
+// R7 v2: the hand-rolled span is replaced by the shared `Badge`, which pairs each
+// tint with its MATCHING semantic ink AND a border in the base hue — v1 painted a
+// neutral `--surface` chip and carried state in the text colour alone, which the
+// Redundant Signal Rule (DESIGN.md §2) forbids. The leading status glyphs are gone
+// with it: §5 retires decorative ornament on status ("no check glyphs"), so the
+// label carries the state and the badge's text content is unchanged.
 
 import { selectBackupStatus, useScenarioStore, type BackupStatus } from "@/lib/store";
-import { cn } from "@/lib/utils";
-import { FaFloppyDisk, FaCircleCheck, FaTriangleExclamation } from "@/components/icons";
+import { Badge, type BadgeProps } from "@/components/ui/badge";
 
 const LABEL: Record<BackupStatus, string> = {
   none: "No backup",
@@ -25,21 +31,16 @@ const LABEL: Record<BackupStatus, string> = {
   stale: "Backup out of date",
 };
 
-function toneClass(status: BackupStatus): string {
-  if (status === "stale") return "text-warn";
-  if (status === "current") return "text-success";
-  return "text-ink3";
-}
-
-function StatusMark({ status }: { status: BackupStatus }) {
-  if (status === "stale") {
-    return <FaTriangleExclamation className="size-3 text-warn" aria-hidden />;
-  }
-  if (status === "current") {
-    return <FaCircleCheck className="size-3 text-success" aria-hidden />;
-  }
-  return <FaFloppyDisk className="size-3 text-ink3" aria-hidden />;
-}
+/**
+ * The semantic tier each state reads at. `stale` is the only actionable one, so it
+ * takes `warn`; `current` is a settled good state on the quieter success tier; and
+ * `none` is genuinely neutral — nothing has gone wrong before a first Download.
+ */
+const VARIANT: Record<BackupStatus, NonNullable<BadgeProps["variant"]>> = {
+  none: "neutral",
+  current: "success",
+  stale: "warn",
+};
 
 /**
  * Tri-state backup-freshness badge for the Scenario-file card header. Subscribes
@@ -51,16 +52,8 @@ function StatusMark({ status }: { status: BackupStatus }) {
 export function BackupStatusBadge() {
   const status = useScenarioStore(selectBackupStatus);
   return (
-    <span
-      data-testid="backup-status"
-      data-status={status}
-      className={cn(
-        "inline-flex items-center gap-2 border border-line bg-surface px-3 py-1.5 text-label uppercase tracking-[0.03em]",
-        toneClass(status),
-      )}
-    >
-      <StatusMark status={status} />
+    <Badge data-testid="backup-status" data-status={status} variant={VARIANT[status]}>
       {LABEL[status]}
-    </span>
+    </Badge>
   );
 }

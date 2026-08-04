@@ -86,3 +86,35 @@ describe("ScenarioYamlPreview — editing mode", () => {
     );
   });
 });
+
+// R7 v2 — the editing branch and the invalid-export branch are CONDITIONAL, so the
+// browser matrix (which only loads the route's default read-only state) never
+// measures either. These assert the two v2 rules that apply to them.
+describe("ScenarioYamlPreview — v2 surface roles on the conditional branches", () => {
+  it("puts the editor textarea on the canonical field contract, not the L0 page plane", () => {
+    renderPreview({ editing: true, draft: "text" });
+    const textarea = screen.getByTestId("scenario-yaml-textarea");
+
+    // DESIGN.md §5: textareas take `--r-ctl` and the `--surface` field fill. The
+    // prototype's `background:var(--bg)` is the L0 plane, which §4 gives no role as
+    // a child of an L1 card — see the component header for the recorded deviation.
+    expect(textarea.className).toContain("rounded-control");
+    expect(textarea.className).toContain("bg-surface");
+    expect(textarea.className).toContain("border-line");
+    expect(textarea.className).not.toContain("bg-bg");
+  });
+
+  it("renders the invalid-export issue list as a rounded inset island on paired error tokens", () => {
+    renderPreview({
+      exportResult: { ok: false, issues: [{ path: "dates", message: "Invalid ISO date" }] },
+    });
+    const issues = screen.getByTestId("scenario-export-issues");
+
+    // An inner bordered box inside an L1 card → `--r-ctl` (§5), with the errortint
+    // paired to `--errorink` so the tier never rests on colour alone (§2).
+    expect(issues.className).toContain("rounded-control");
+    expect(issues.className).toContain("bg-errortint");
+    expect(issues.className).toContain("border-error");
+    expect(issues.className).toContain("text-errorink");
+  });
+});

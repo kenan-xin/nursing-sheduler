@@ -8,12 +8,19 @@
 // by the core's dependency shapes. Upload and Edit YAML are triggers only — the
 // workspace container owns the upload modal, the edit draft, and the single
 // shared `useScenarioImport` pipeline they feed.
+//
+// R7 v2: an L1 card through the shared surface authority, with the prototype's
+// hairline-separated head band (ScreenSaveLoad.dc.html:41). The three non-primary
+// actions are `secondary`, not `outline`: the prototype edges them with `--line`
+// (`:43-45`), and DESIGN.md §5 reserves `outline` for the heavier `--rule` edge.
 
 import { useState } from "react";
 import { toast } from "sonner";
 import { useScenarioStore } from "@/lib/store";
 import type { ScenarioUiState, ScenarioValidationIssue } from "@/lib/scenario";
 import { Button } from "@/components/ui/button";
+import { surfaceVariants } from "@/components/ui/surface";
+import { cn } from "@/lib/utils";
 import { FaCheck, FaCopy, FaDownload, FaPen, FaUpload } from "@/components/icons";
 import { BackupStatusBadge } from "./backup-status-badge";
 import { performCopy, performDownload, SCENARIO_DOWNLOAD_FILENAME } from "./scenario-file-export";
@@ -95,47 +102,49 @@ export function ScenarioFileCard({
   };
 
   return (
-    <section className="border border-line bg-surface" data-testid="scenario-file-card">
-      <div className="flex items-center justify-between gap-3 border-b border-line2 px-[18px] py-4">
-        <h2 className="font-heading text-cardhead font-extrabold tracking-tight">Scenario file</h2>
+    <section
+      className={cn("flex flex-col", surfaceVariants({ role: "surface", geometry: "card" }))}
+      data-testid="scenario-file-card"
+    >
+      {/* Head band — a single bottom edge, so it stays square inside the rounded card. */}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line2 px-5 py-4">
+        <h2 className="font-heading text-cardhead font-semibold tracking-[-0.015em] text-ink">
+          Scenario file
+        </h2>
         <BackupStatusBadge />
       </div>
-      <div className="flex flex-col gap-3 p-[18px]">
+      <div className="flex flex-col gap-3 px-5 py-4">
         <div className="flex flex-wrap gap-2.5">
           <Button type="button" onClick={handleDownload} data-testid="scenario-download-button">
-            <FaDownload className="size-4" aria-hidden />
+            <FaDownload aria-hidden />
             Download
           </Button>
           <Button
             type="button"
-            variant="outline"
+            variant="secondary"
             onClick={onUpload}
             data-testid="scenario-upload-button"
           >
-            <FaUpload className="size-4" aria-hidden />
+            <FaUpload aria-hidden />
             Upload
           </Button>
           <Button
             type="button"
-            variant="outline"
+            variant="secondary"
             onClick={handleCopy}
             data-testid="scenario-copy-button"
           >
-            {copied ? (
-              <FaCheck className="size-4" aria-hidden />
-            ) : (
-              <FaCopy className="size-4" aria-hidden />
-            )}
+            {copied ? <FaCheck aria-hidden /> : <FaCopy aria-hidden />}
             {copied ? "Copied!" : "Copy"}
           </Button>
           <Button
             type="button"
-            variant="outline"
+            variant="secondary"
             onClick={onStartEdit}
             disabled={!canEditYaml || editing}
             data-testid="scenario-edit-yaml-button"
           >
-            <FaPen className="size-4" aria-hidden />
+            <FaPen aria-hidden />
             Edit YAML
           </Button>
         </div>
