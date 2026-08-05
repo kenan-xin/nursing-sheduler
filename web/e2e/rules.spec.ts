@@ -135,6 +135,12 @@ test.describe("Rules screen — Advanced -> Rules -> source-record mutation roun
     await waitForStore(page);
 
     await expect(page.getByText("Day cap")).toBeVisible();
+    const seeded = (await storeState(page)) as unknown as {
+      cardsByKind: { requirements: { uid: string; requiredNumPeople: number }[] };
+    };
+    const seededR1 = seeded.cardsByKind.requirements.find((r) => r.uid === "r1");
+    expect(seededR1).toBeDefined();
+    expect(seededR1?.requiredNumPeople).toBe(2);
 
     const before = await pastCount(page);
     await page.getByTestId("rule-toggle-requirements:r1").click();
