@@ -9,7 +9,13 @@ jinja2 # For prettifying output
 # For CI
 pytest
 pytest-cov
-ruff
+# Ruff is intentionally pinned: the same `pyproject.toml` selection stays
+# clean across versions, but Ruff's *default* rule set expands between
+# releases (e.g. 0.15.x → 0.16.x widened it materially), so an unpinned
+# `ruff` turns a fresh `pip install -r` into a red gate. This pin is the
+# authoritative version; the explicit `tool.ruff.lint.select` below keeps
+# the contract honest even if this pin is later bumped.
+ruff==0.15.22
 # For web backend
 fastapi[standard]
 # Diagnostic HTTP client for the public production diagnostic runner (U30a).

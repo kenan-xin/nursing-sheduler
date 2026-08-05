@@ -421,3 +421,123 @@ root. The source manifest was advanced to `d63519b` only after the rebuild sourc
 Installed boundary versions unchanged: `pydantic 2.13.4`, `ruamel.yaml 0.19.1`,
 `redis 8.x`, `fakeredis 2.x`. No new runtime dependency was introduced by the
 `d63519b` refresh.
+
+## B1 — `scheduler.py` additive `on_roster` day-state callback
+
+Governed by the in-app roster viewer tech plan (Backend §1) and ticket B1
+(`nursing-sheduler-cjr.1.1`). This is the only adaptation to the vendored solver
+core outside the `server/` package.
+
+| File | Origin | Adaptation from upstream |
+| --- | --- | --- |
+| `core/nurse_scheduling/scheduler.py` | adapted | Added an **optional keyword-only** `on_roster` callback alongside the existing `progress_callback` / `should_stop` / `model_build_stats_callback` seams, plus the module-private `_build_roster_payload(ctx, prettify)` that assembles its payload. |
+| `core/tests/test_scheduler_on_roster.py` | net-new | Day-state, FEASIBLE, skipped-callback, return-shape, typed-axes, history/prettify coordinate, and real-scenario callback-to-container coordinate-parity coverage. |
+
+What the adaptation does, and deliberately does not do:
+
+- **Return arity is unchanged.** `schedule` still returns the five-value
+  `(df, solution, score, status, cell_export_info)` tuple, so none of the ~25
+  five-tuple call sites (`server/jobs/runner.py`, `cli.py`, the test helpers,
+  `tests/test_exporter.py`, `tests/test_scheduler.py`) needed migration.
+  `on_roster` is keyword-only, so every existing positional parameter keeps its
+  position.
+- **No model-building or solve-logic change.** The callback is invoked exactly
+  once, after the final dataframe is built and while `ctx` is still alive, and
+  only on the `OPTIMAL` / `FEASIBLE` path — an infeasible or no-solution run
+  never fires it.
+- **Payload** (index-aligned ordered records only, never id-keyed maps): ordered
+  `people[{id}]` from `ctx.people.items` with the authored `number | string` id
+  type preserved; expanded ordered `dates[{iso}]` from `ctx.dates.items`;
+  `solvedDays[personIdx][dateIdx]` as a single-state
+  `{kind: "shift", shiftId} | {kind: "off"} | {kind: "leave"}` derived from
+  `ctx.shifts` / `ctx.offs` / `ctx.leaves`; and a `coordinateMap` of explicit
+  1-based `peopleRows[]` / `dateColumns[]` plus `firstPeopleRow`, `leadingCols`,
+  `historyCols`, and `prettify`.
+- **The exclusivity constraint `offs + Σshifts + leaves == 1`** guarantees
+  exactly one state per cell and makes a worked day exactly one shift, so
+  `shiftId` is a scalar rather than a list. A cell that somehow resolves to a
+  different number of worked shifts raises rather than silently degrading.
+- **`historyCols` is computed, not read off `ctx`.** `Context` carries no
+  worksheet-layout fields. `_build_roster_payload` mirrors the exporter's exact
+  existing rule — 2 leading rows, 1 leading column, and history columns equal to
+  the globally longest person history and only under `prettify`. `exporter.py`
+  stays **untouched**; the callback-to-workbook coordinate-parity test is what
+  keeps the two in step, and it fails visibly on exporter drift.
+
+The container/artifact and the `/roster` route are B2's; B1 exercises the
+handoff through a test-local container-shaped JSON roundtrip only.
+
+## B2 — roster container artifact, `/xlsx` extract and `/roster` route
+
+Governed by the same tech plan (Backend §§2–3) and ticket B2
+(`nursing-sheduler-cjr.1.2`). Entirely inside the `server/` package: the vendored
+solver core, `exporter.py`, `models.py`, both stores, the Redis Lua fence, the
+controller and `api/schemas.py` are **untouched**.
+
+| File | Origin | Adaptation from upstream |
+| --- | --- | --- |
+| `core/nurse_scheduling/server/roster_container.py` | net-new | Deterministic `roster-container/1` build/parse, one shared strict contract validator, the two frozen size caps, and the synthesized workbook download name/media type. |
+| `core/nurse_scheduling/server/jobs/runner.py` | adapted | Passes B1's `on_roster` callback, and stores the roster container (media type `application/json`) as the job's single `StoredArtifact` instead of the raw workbook. Termination classification is unchanged. |
+| `core/nurse_scheduling/server/api/optimize.py` | adapted | `GET /optimize/{id}/xlsx` now parses the container and streams the decoded workbook; net-new `GET /optimize/{id}/roster` returns the container minus `xlsx.base64`. |
+| `core/tests/test_roster_container.py` | net-new | Hash parity with the exporter bytes, real-scenario coordinate parity with/without prettify, both cap boundaries, the two child-pipe proofs, and the adversarial field-by-field / cross-field contract cases on both directions. |
+| `core/tests/test_roster_routes.py` | net-new | Byte-identical `/xlsx`, synthesized header safety, `/roster` projection, 404/409 surfaces, unreadable-container 500 on both routes, and the rejected-output no-commit proofs. |
+| `core/tests/test_runner_termination.py` | adapted | The scheduler stub now drives `on_roster`, and the artifact assertions moved to the container; adds handoff-missing and cap regressions. |
+
+What the adaptation does, and deliberately does not do:
+
+- **The container is assembled from the callback payload verbatim.** Ordered
+  index-aligned `people` / `dates`, the immutable complete single-state
+  `solvedDays` grid, and the explicit 1-based `coordinateMap` are copied from
+  B1's handoff. B2 never reparses the canonical scenario and never re-derives
+  exporter coordinates. There are no id-keyed maps anywhere in the document.
+- **Encoding is deterministic:** UTF-8 JSON with sorted object keys, no
+  insignificant whitespace, `allow_nan=False`, and array order preserved, so the
+  same logical container always produces the same bytes.
+- **One shared strict validator governs both directions** (added by fixup
+  `nursing-sheduler-cjr.1.2.1` after the B2 cold review found the parser accepted
+  malformed documents). It requires the exact frozen field set at every level and
+  enforces the realistic cross-field invariants: finite typed scalar person/shift
+  ids (number or string, never boolean), `YYYY-MM-DD` calendar dates, a
+  rectangular `solvedDays` grid whose cardinality matches `people` × `dates`,
+  exact day-state unions (a worked day carries exactly one scalar `shiftId`),
+  strictly increasing positive 1-based axes matching the people/date counts and
+  anchored on `firstPeopleRow` and `leadingCols + historyCols + 1`, `historyCols`
+  zero unless `prettify`, a finite numeric `score`, a solved-run `solverStatus`
+  (`OPTIMAL` or `FEASIBLE`), and exact workbook metadata with strictly decodable
+  base64. Reads additionally reject Python's non-standard `NaN` / `Infinity` JSON
+  extensions via `parse_constant`. The explicit B1 axis arrays remain the
+  authority: the validator checks their declared types, cardinality, and internal
+  consistency, and still never reparses the scenario or reconstructs exporter
+  geometry. Because the payload is validated at parse time, `/xlsx` and `/roster`
+  fail together on a corrupt artifact — neither serves half of one.
+- **Frozen v1 size caps, no new config surface.** `MAX_RAW_XLSX_BYTES`
+  (33,554,432) is checked on the exported workbook before base64 and
+  `MAX_ROSTER_CONTAINER_BYTES` (50,331,648) on the final encoded document before
+  `RunOutput` is constructed. Both fail with the stable terminal code
+  `roster_output_too_large`, so oversized output never crosses the child result
+  pipe and no artifact is committed. The limits are injectable arguments for
+  boundary tests only; production always uses the module constants.
+- **`/xlsx` output is byte-identical**, proved by base64/SHA-256 parity against
+  the exporter's own bytes. The `Content-Disposition` filename and the media
+  type are **synthesized** — path segments, quotes, and control characters are
+  stripped from the stored name, and any media type other than the workbook one
+  is replaced rather than echoed.
+- **`/roster` is reached by URL convention.** `JobResponse.links` gains no
+  roster field, so `api/schemas.py` stays verbatim relative to its T19 state.
+- **New stable codes.** Three terminal job-failure codes are raised through the
+  existing `OptimizationExecutionError` path, all before `RunOutput` exists, so
+  none of them can cross the child result pipe or reach a store commit:
+  `roster_output_too_large` (either size cap), `roster_handoff_missing` (a
+  schedule produced without exactly one callback handoff), and
+  `roster_output_invalid` (the assembled container fails the shared contract — an
+  internal handoff regression). On the read side, `roster_container_invalid` is a
+  `ServerApplicationError` for an unreadable stored artifact, which the existing
+  app handler maps to 500. `errors.py` is unchanged — the new application error
+  subclasses `ServerApplicationError` inside the net-new module.
+- **Ordering is deliberate:** the raw size cap is checked first, then the
+  contract, then the encoded size cap. An oversized workbook is reported as too
+  large even when its handoff is also malformed.
+- **The stored artifact name changed** from `nurse-scheduling-<ts>.xlsx` to
+  `nurse-scheduling-<ts>.roster.json`, because the stored bytes are now the
+  container. The workbook's real name and MIME live inside `xlsx.name` /
+  `xlsx.mime` and drive the download header. `links.schedule` is name-independent.

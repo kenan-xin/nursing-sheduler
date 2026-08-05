@@ -20,12 +20,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Installs the tools pinned in .mise.toml / .python-version at the repo root:
-      # Python 3.12.13 (so validate_origin.py's 3.10+ guard passes — verify-deploy.test.ts
-      # shells out to `python3`) and node 24.14.0. Single source of truth with local dev.
+      # Installs the project toolchain pinned in .mise.toml / .python-version at the
+      # repo root: Python 3.12.13 and node 24.14.0. Python 3.12.13 is the project
+      # requirement that the web gates and the deploy guards depend on; the
+      # validator's separate 3.10 PEP 604 syntax minimum is a subsumed
+      # implementation detail of validate_origin.py and does NOT reduce the
+      # project toolchain floor. Single source of truth with local dev.
       - uses: jdx/mise-action@v2
 
-      - name: Confirm pinned Python (validator guard needs 3.10+)
+      - name: Confirm pinned Python (project toolchain: Python 3.12.13)
         run: python3 --version
 
       - name: Enable pnpm (pinned via package.json packageManager)
@@ -44,7 +47,8 @@ jobs:
         run: pnpm exec oxfmt --check .
 
       # Includes verify-deploy.test.ts, which runs docker/validate_origin.py via the
-      # pinned python3 — the guard passes because mise provides 3.12.13.
+      # pinned python3 — the script's 3.10 PEP 604 guard AND the project's 3.12
+      # requirement both pass because mise provides 3.12.13.
       - name: Unit tests
         run: pnpm test
 

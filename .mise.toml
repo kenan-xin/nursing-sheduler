@@ -1,7 +1,16 @@
-# Pins the host Python for the deploy guards (make up / verify-deploy.sh) and the
-# vitest verify-deploy differential, which shell out to `python3`. Matches the
-# runtime image (docker/Dockerfile.backend: python:3.12-slim). validate_origin.py
-# requires Python 3.10+ (PEP 604 unions); this keeps host/CI aligned with Docker.
+# Project support floor and CI pin: Python 3.12.13, matching the runtime
+# image (docker/Dockerfile.backend: python:3.12-slim). This is the project
+# requirement that the deploy guards (make up / verify-deploy.sh) and the
+# vitest verify-deploy differential rely on when they shell out to `python3`.
+# All host/CI tooling must provide a Python on this toolchain so the local
+# gates reproduce CI.
+#
+# Implementation note (NOT a project version): validate_origin.py additionally
+# needs Python 3.10+ at the language level because it uses PEP 604 unions
+# (`str | None`) that are evaluated at import time. That 3.10 syntax minimum
+# is SUBSUMED by the project pin and is not, on its own, sufficient project
+# guidance — a setup supplying 3.10 or 3.11 would pass the validator's
+# language check while failing the project's 3.12 contract.
 [tools]
 # node matches local dev + web/package.json engines (>=20.9.0); pins CI to the same.
 node = "24.14.0"

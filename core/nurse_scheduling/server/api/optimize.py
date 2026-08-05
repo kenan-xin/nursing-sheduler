@@ -30,6 +30,13 @@ from ..config import ServerSettings
 from ..event_cursor import EventCursorExpired, EventCursorInvalid, encode_cursor
 from ..jobs.controller import JobController
 from ..jobs.models import JobEvent, JobState, solver_supports_stop
+from ..roster_container import (
+    decode_workbook,
+    parse_roster_container,
+    roster_view,
+    workbook_download_name,
+    workbook_media_type,
+)
 from ..scheduling_input import SUPPORTED_SOLVER, MalformedInputError, canonicalize_submission, parse_solver
 from .schemas import JobResponse
 from .sse import format_sse_event
@@ -257,13 +264,45 @@ def finish_job_now(request: Request, job_id: str):
     return JobResponse.from_job(_controller(request).request_early_completion(job_id))
 
 
+def _roster_container(request: Request, job_id: str) -> dict:
+    """Load and parse the job's single roster-container artifact.
+
+    Raises:
+        JobNotFoundError: If the job does not exist.
+        JobArtifactNotReadyError: If the job produced no artifact.
+        RosterContainerInvalidError: If the stored artifact is unreadable.
+    """
+    controller = _controller(request)
+    job = controller.get_job(job_id)
+    artifact = controller.get_artifact(job_id, job.artifact_name or "roster.json")
+    return parse_roster_container(artifact.content)
+
+
 @router.get("/optimize/{job_id}/xlsx")
 def download_xlsx(request: Request, job_id: str):
-    """Download the XLSX artifact produced by a completed job."""
-    job = _controller(request).get_job(job_id)
-    artifact = _controller(request).get_artifact(job_id, job.artifact_name or "schedule.xlsx")
-    headers = {"Content-Disposition": f'attachment; filename="{artifact.name}"'}
-    return StreamingResponse(BytesIO(artifact.content), media_type=artifact.media_type, headers=headers)
+    """Stream the workbook embedded in a completed job's roster container.
+
+    The bytes are byte-identical to what the exporter produced; the filename and
+    media type are synthesized from the container rather than echoed verbatim.
+    """
+    container = _roster_container(request, job_id)
+    filename = workbook_download_name(container)
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    return StreamingResponse(
+        BytesIO(decode_workbook(container)),
+        media_type=workbook_media_type(container),
+        headers=headers,
+    )
+
+
+@router.get("/optimize/{job_id}/roster")
+def get_roster(request: Request, job_id: str):
+    """Return the structured roster container without the embedded workbook bytes.
+
+    Reached by URL convention: `JobResponse.links` intentionally carries no
+    roster field, so the public job schema stays unchanged.
+    """
+    return JSONResponse(content=roster_view(_roster_container(request, job_id)))
 
 
 @router.delete("/optimize/{job_id}", status_code=204)

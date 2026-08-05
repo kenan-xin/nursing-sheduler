@@ -25,8 +25,17 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { expect } from "vitest";
 
+import { PROJECT_PYTHON } from "@/lib/python";
+
 export const ORACLE = resolve(dirname(fileURLToPath(import.meta.url)), "oracle.py");
-export const PYTHON = process.env.PYTHON ?? "python3";
+
+// Resolved by `@/lib/python`: an explicit `PYTHON` env override is honored when
+// set (the differential self-tests substitute a Node child for the harness
+// coverage, but a real venv / wrapper script is the contractually supported
+// override path). With no override, the project mise pin is used so callers
+// outside an activated `mise exec` shell — e.g. a plain `pnpm test:differential`
+// — do not silently pick up a too-old or too-thin system Python.
+export const PYTHON = PROJECT_PYTHON;
 
 /** The differential suites are opt-in: `pnpm test:differential` sets this, so the
  *  default `pnpm test` never shells out to Python. */

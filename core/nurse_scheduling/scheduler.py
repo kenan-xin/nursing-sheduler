@@ -51,6 +51,63 @@ def _emit_phase_progress(
     )
 
 
+def _build_roster_payload(ctx: Context, prettify: bool) -> dict:
+    """Build the ``on_roster`` handoff payload from the solved context.
+
+    The payload is index-aligned: ``people[i]`` / ``dates[j]`` name the axes
+    of ``solvedDays[i][j]``, and ``coordinateMap.peopleRows[i]`` /
+    ``.dateColumns[j]`` give the 1-based worksheet coordinates of that same
+    cell in the exported workbook.
+
+    The coordinate math mirrors ``exporter.get_people_versus_date_dataframe``
+    exactly (2 leading rows, 1 leading column, history columns only under
+    prettify); it is not read off ``ctx``, which carries no such fields. The
+    callback-to-workbook parity test is what keeps the two in step.
+    """
+    solver = ctx.solver
+
+    # Same rule as the exporter: history columns exist only under prettify,
+    # and there are as many as the globally longest person history.
+    n_leading_rows, n_leading_cols = 2, 1
+    n_history_cols = 0
+    if prettify:
+        n_history_cols = max((len(person.history) for person in ctx.people.items if person.history), default=0)
+
+    solved_days = []
+    for p in range(ctx.n_people):
+        person_days = []
+        for d in range(ctx.n_days):
+            # offs + sum(shifts) + leaves == 1 makes these branches exhaustive
+            # and mutually exclusive, with a worked day being exactly one
+            # shift type.
+            if solver.get_value(ctx.leaves[(d, p)]) == 1:
+                person_days.append({"kind": "leave"})
+                continue
+            if solver.get_value(ctx.offs[(d, p)]) == 1:
+                person_days.append({"kind": "off"})
+                continue
+            worked = [s for s in range(ctx.n_shift_types) if solver.get_value(ctx.shifts[(d, s, p)]) == 1]
+            if len(worked) != 1:
+                raise AssertionError(f"Expected exactly one worked shift for (d={d}, p={p}), got {worked}")
+            person_days.append({"kind": "shift", "shiftId": ctx.shiftTypes.items[worked[0]].id})
+        solved_days.append(person_days)
+
+    return {
+        # Person ids keep their authored number|string type.
+        "people": [{"id": person.id} for person in ctx.people.items],
+        "dates": [{"iso": str(date_obj)} for date_obj in ctx.dates.items],
+        "solvedDays": solved_days,
+        "coordinateMap": {
+            "peopleRows": [n_leading_rows + p + 1 for p in range(ctx.n_people)],
+            "dateColumns": [n_leading_cols + n_history_cols + d + 1 for d in range(ctx.n_days)],
+            "firstPeopleRow": n_leading_rows + 1,
+            "leadingCols": n_leading_cols,
+            "historyCols": n_history_cols,
+            "prettify": prettify,
+        },
+    }
+
+
 def schedule(
     file_content: bytes,
     deterministic=False,
@@ -60,6 +117,8 @@ def schedule(
     progress_callback: Callable[[ScheduleProgress], None] | None = None,
     should_stop: Callable[[], bool] | None = None,
     model_build_stats_callback: Callable[[ModelBuildStats], None] | None = None,
+    *,
+    on_roster: Callable[[dict], None] | None = None,
 ):
     progress_started_at = time.monotonic()
     _emit_phase_progress(
@@ -344,6 +403,11 @@ def schedule(
 
     _emit_phase_progress(progress_callback, "exporting", "Preparing schedule output", progress_started_at)
     df, cell_export_info = exporter.get_people_versus_date_dataframe(ctx, prettify=prettify)
+    # Hand the structured roster over while ctx is still alive. This is
+    # reached only for OPTIMAL/FEASIBLE, so an infeasible or no-solution run
+    # never fires the callback. The return contract below is unchanged.
+    if on_roster is not None:
+        on_roster(_build_roster_payload(ctx, prettify))
     solution = {}
     for d, s, p in ctx.shifts:
         solution[(d, s, p)] = ctx.solver.get_value(ctx.shifts[(d, s, p)])

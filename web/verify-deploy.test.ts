@@ -4,6 +4,8 @@ import { performance } from "node:perf_hooks";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { PROJECT_PYTHON } from "@/lib/python";
+
 // Static guard for the completion-audit P0 (2026-07-18): verify-deploy.sh started
 // the production Compose stack without PUBLIC_ORIGIN, compose.yml injected it as
 // a present-but-blank value, and the web runtime correctly refused to boot — so
@@ -124,7 +126,16 @@ describe("verify-deploy PUBLIC_ORIGIN contract", () => {
 // Node WHATWG `URL.origin` differential (closure review F5). This corpus lives in
 // the test rather than the validator so production and oracle inputs cannot drift
 // together. Each case invokes the same CLI used by the Make guards.
-const PYTHON = process.env.PYTHON ?? "python3";
+//
+// The interpreter comes from `@/lib/python` (PROJECT_PYTHON), which honors an
+// explicit `PYTHON` env override when set and otherwise resolves the project
+// mise pin (`mise which --cd <repo> python3`). The previous `?? "python3"`
+// fallback silently picked up the ambient system interpreter — Python 3.9 on
+// macOS hosts, which fails `validate_origin.py`'s 3.10+ import guard and
+// therefore turns this corpus green by exiting 1 on EVERY case. PROJECT_PYTHON
+// is resolved at module load, so a missing toolchain surfaces as a loud
+// collection-time failure instead of a per-case validator divergence.
+const PYTHON = PROJECT_PYTHON;
 const VALIDATOR = join(repoRoot, "docker", "validate_origin.py");
 type OriginMode = "direct" | "cloudflare";
 type OriginCase = readonly [value: string, mode: OriginMode];
