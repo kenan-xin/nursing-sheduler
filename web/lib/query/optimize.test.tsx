@@ -140,7 +140,7 @@ describe("useSubmitOptimize", () => {
     mockJsonOnce(422, {
       error: {
         code: "workspace_not_ready",
-        message: "Workspace is not ready to optimize.",
+        message: "Workspace is not ready to optimise.",
         issues: [],
       },
     });
@@ -152,6 +152,10 @@ describe("useSubmitOptimize", () => {
     });
     expect(caught).toBeInstanceOf(OptimizeApiError);
     expect((caught as OptimizeApiError).info.kind).toBe("validation");
+    // The backend envelope's prose is what the run surface renders, so the UK-English
+    // wording is asserted where it crosses into the client, not just at its source.
+    expect((caught as OptimizeApiError).info.code).toBe("workspace_not_ready");
+    expect((caught as OptimizeApiError).message).toBe("Workspace is not ready to optimise.");
   });
 });
 

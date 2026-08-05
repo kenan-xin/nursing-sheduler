@@ -32,7 +32,7 @@ CODE_UNSUPPORTED_WORKSPACE_VERSION = "unsupported_workspace_version"
 CODE_UNSUPPORTED_SOLVER = "unsupported_solver"
 
 # Human-readable envelope messages fixed by the technical plan.
-MESSAGE_WORKSPACE_NOT_READY = "Workspace is not ready to optimize."
+MESSAGE_WORKSPACE_NOT_READY = "Workspace is not ready to optimise."
 MESSAGE_INVALID_SCHEDULING_DATA = "Scheduling data is invalid."
 MESSAGE_UNSUPPORTED_SOLVER = "Unsupported solver. Only ortools/cp-sat is available."
 

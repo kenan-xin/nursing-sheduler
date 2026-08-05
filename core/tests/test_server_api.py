@@ -121,7 +121,12 @@ def test_workspace_broken_reference_is_pre_job_422_without_consuming_capacity(id
     # slot stays free for the next valid submission.
     rejected = idle_client.post("/optimize", data={"yaml_content": WORKSPACE_BROKEN_REFERENCE})
     assert rejected.status_code == 422
-    assert rejected.json()["error"]["code"] == "workspace_not_ready"
+    envelope = rejected.json()["error"]
+    assert envelope["code"] == "workspace_not_ready"
+    # The envelope message is shipped prose the browser renders, so its UK-English
+    # wording is asserted at the public response boundary. The machine code above
+    # stays US-spelled on purpose: it is a contract value, not copy.
+    assert envelope["message"] == "Workspace is not ready to optimise."
     assert idle_client.post("/optimize", data={"yaml_content": MINIMAL_SCENARIO}).status_code == 202
 
 
