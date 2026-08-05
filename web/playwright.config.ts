@@ -31,7 +31,11 @@ export default defineConfig({
   // stack (no route interception, real backend). Exclude it from the base
   // suite — it runs only under `playwright.assembled.config.ts` via
   // `make verify-stream`.
-  testIgnore: /optimize-assembled-stream\.spec\.ts/,
+  // The public-roster-dispatch spec requires a stub backend on a private port
+  // (8765), so it runs only under `playwright.public-roster-dispatch.config.ts`
+  // — the base config's webServer points BACKEND_API_URL at 127.0.0.1:8000,
+  // where a developer's real FastAPI may already be bound.
+  testIgnore: /optimize-assembled-stream\.spec\.ts|optimize-public-roster-dispatch\.spec\.ts/,
   fullyParallel: true,
   workers,
   forbidOnly: !!process.env.CI,

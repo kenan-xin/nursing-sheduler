@@ -42,7 +42,14 @@ export type OptimizeErrorKind =
 
 // The C2 endpoint a response came from — retained for callers that key recovery on
 // the originating call (e.g. an events cursor error vs a poll not-found).
-export type OptimizeEndpoint = "submit" | "poll" | "events" | "cancel" | "finish-now" | "xlsx";
+export type OptimizeEndpoint =
+  | "submit"
+  | "poll"
+  | "events"
+  | "cancel"
+  | "finish-now"
+  | "xlsx"
+  | "roster";
 
 export interface OptimizeErrorInfo {
   kind: OptimizeErrorKind;

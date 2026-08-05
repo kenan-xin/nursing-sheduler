@@ -3,6 +3,7 @@ import type { AddressInfo } from "node:net";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { DELETE as deleteJob, GET as poll } from "@/app/api/optimize/[id]/route";
 import { GET as events } from "@/app/api/optimize/[id]/events/route";
+import { GET as downloadRoster } from "@/app/api/optimize/[id]/roster/route";
 import { POST as submit } from "@/app/api/optimize/route";
 
 // Real-transport integration: the actual Route Handlers run against a real local
@@ -12,6 +13,8 @@ import { POST as submit } from "@/app/api/optimize/route";
 // socket.
 
 const MIB = 1024 * 1024;
+
+const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
 let server: Server;
 let handler: (req: IncomingMessage, res: ServerResponse) => void = () => {};
@@ -286,5 +289,167 @@ describe("SSE over real transport", () => {
       error: { code: "backend_unreachable", message: "The scheduling service is unreachable." },
     });
     expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+});
+
+// Real-transport roster coverage (B3 fixup). The cold review found that the
+// mocked `fetch` cases in `optimize.route.test.ts` and the generic readiness
+// hit-counts in `readiness.integration.test.ts` together miss the
+// route-specific wiring — a wrong path string, a missing cookie policy, or a
+// 404 vs framework-404 swap is invisible until a real upstream socket is
+// involved. These cases invoke the public `/api/optimize/[id]/roster` route
+// over the local upstream server and assert the exact encoded path, the
+// client-id-only cookie, the 200 body/header relay, and the structured 404 /
+// 409 error envelopes — proving the response is a routed BFF outcome, not a
+// framework default 404.
+describe("GET /api/optimize/{id}/roster over real transport", () => {
+  // A complete v1 container projection, minus `xlsx.base64` (the backend strips
+  // it before serving `roster_view`).
+  const rosterContainer = {
+    schemaVersion: "roster-container/1",
+    people: [{ id: 1 }, { id: 2 }],
+    dates: [{ iso: "2026-07-01" }, { iso: "2026-07-02" }],
+    solvedDays: [
+      [{ kind: "shift", shiftId: "N" }, { kind: "off" }],
+      [{ kind: "off" }, { kind: "leave" }],
+    ],
+    score: 7,
+    solverStatus: "OPTIMAL",
+    coordinateMap: {
+      peopleRows: [3, 4],
+      dateColumns: [2, 3],
+      firstPeopleRow: 3,
+      leadingCols: 1,
+      historyCols: 0,
+      prettify: true,
+    },
+    xlsx: { name: "nurse-scheduling-opt_int.xlsx", mime: XLSX_MIME },
+  };
+
+  it("relays a 200 roster container with the exact encoded upstream path and client-id-only cookie", async () => {
+    const captured: { url: string | undefined; cookie: string | null } = {
+      url: undefined,
+      cookie: null,
+    };
+    handler = (req, res) => {
+      captured.url = req.url;
+      captured.cookie = req.headers.cookie ?? null;
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(rosterContainer));
+    };
+
+    const response = await downloadRoster(
+      new Request("http://localhost/api/optimize/opt_int/roster", {
+        headers: { cookie: "theme=dark; nurse_scheduling_client_id=abc; noise=1" },
+      }),
+      params("opt_int"),
+    );
+
+    // The public BFF endpoint must reach the exact backend-relative path
+    // (URL-encoded id, ready-to-forward as written by `proxyJsonRequest`).
+    expect(captured.url).toBe("/optimize/opt_int/roster");
+    // The full inbound cookie jar is NEVER forwarded: only the diagnostic
+    // client-id cookie survives the BFF boundary (DL11 / same-origin policy).
+    expect(captured.cookie).toBe("nurse_scheduling_client_id=abc");
+    // Body, content-type, and cache policy are byte-exact and strict.
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/json");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual(rosterContainer);
+  });
+
+  it("encodes a path-unsafe id (RFC 3986) so an upstream segment mismatch is impossible", async () => {
+    // Mirrors the public BFF contract: an id with characters that would
+    // re-segment a naive path join MUST arrive as a single segment at the
+    // backend, otherwise the upstream route would 404. The fixup proves the
+    // `encodeURIComponent` in `proxyJsonRequest` is wired end-to-end.
+    const captured: { url: string | undefined } = { url: undefined };
+    handler = (req, res) => {
+      captured.url = req.url;
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(rosterContainer));
+    };
+
+    const unsafeId = "opt with spaces/and?query&slashes/extra";
+    const response = await downloadRoster(
+      new Request(`http://localhost/api/optimize/${encodeURIComponent(unsafeId)}/roster`),
+      params(unsafeId),
+    );
+
+    expect(response.status).toBe(200);
+    // The captured upstream path is a single segment per encoded id.
+    expect(captured.url).toBe(`/optimize/${encodeURIComponent(unsafeId)}/roster`);
+    expect(captured.url?.split("/").filter(Boolean)).toEqual([
+      "optimize",
+      encodeURIComponent(unsafeId),
+      "roster",
+    ]);
+  });
+
+  it("relays a structured 404 (job_not_found) envelope verbatim, proving the public endpoint is a routed BFF response", async () => {
+    const captured: { url: string | undefined; cookie: string | null } = {
+      url: undefined,
+      cookie: null,
+    };
+    handler = (req, res) => {
+      captured.url = req.url;
+      captured.cookie = req.headers.cookie ?? null;
+      res.writeHead(404, { "content-type": "application/json" });
+      res.end(
+        JSON.stringify({ error: { code: "job_not_found", message: "Optimisation job not found" } }),
+      );
+    };
+
+    const response = await downloadRoster(
+      new Request("http://localhost/api/optimize/opt_int/roster", {
+        headers: { cookie: "nurse_scheduling_client_id=abc" },
+      }),
+      params("opt_int"),
+    );
+
+    // The framework 404 (a default Next response with no body) is the
+    // pre-B3 regression. A 404 with a code-first envelope + `application/json`
+    // + `no-store` is a routed BFF outcome — it MUST round-trip unchanged so
+    // the client can classify it as `job-not-found` recovery.
+    expect(captured.url).toBe("/optimize/opt_int/roster");
+    expect(captured.cookie).toBe("nurse_scheduling_client_id=abc");
+    expect(response.status).toBe(404);
+    expect(response.headers.get("content-type")).toBe("application/json");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({
+      error: { code: "job_not_found", message: "Optimisation job not found" },
+    });
+  });
+
+  it("relays a structured 409 (job_artifact_not_ready) envelope verbatim — the no-artifact state", async () => {
+    const captured: { url: string | undefined } = { url: undefined };
+    handler = (req, res) => {
+      captured.url = req.url;
+      res.writeHead(409, { "content-type": "application/json" });
+      res.end(
+        JSON.stringify({
+          error: {
+            code: "job_artifact_not_ready",
+            message: "The job has not produced a downloadable artifact.",
+          },
+        }),
+      );
+    };
+
+    const response = await downloadRoster(
+      new Request("http://localhost/api/optimize/opt_int/roster"),
+      params("opt_int"),
+    );
+
+    expect(captured.url).toBe("/optimize/opt_int/roster");
+    expect(response.status).toBe(409);
+    expect(response.headers.get("content-type")).toBe("application/json");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({
+      error: {
+        code: "job_artifact_not_ready",
+        message: "The job has not produced a downloadable artifact.",
+      },
+    });
   });
 });

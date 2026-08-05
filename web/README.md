@@ -25,6 +25,7 @@ This project uses [`next/font`](https://nextjs.org/docs/app/building-your-applic
 ```bash
 pnpm test:e2e          # required release gate — deterministic, bounded workers
 pnpm test:e2e:stress   # fixed high-parallelism lane (32 workers)
+pnpm test:e2e:public-roster-dispatch # public-Next /roster BFF dispatch (focused config)
 ```
 
 `test:e2e` builds a production bundle and runs Playwright with a **bounded,
@@ -37,6 +38,13 @@ the high-parallelism path — always well above the bounded release default, but
 not a guaranteed oversubscription: whether 32 workers exceed a host's capacity
 depends on its logical-CPU count and load (on a host with 32 or more logical
 cores it runs at or below one worker per core). It is **not** the release gate.
+`test:e2e:public-roster-dispatch` runs the focused
+`playwright.public-roster-dispatch.config.ts`, which reuses the same `pnpm
+build && pnpm start` launcher but points the BFF at a private stub backend port
+(default 8765, env-overridable via `PUBLIC_ROSTER_TEST_BACKEND_PORT`), so the
+three public-Next-dispatch cases for `/api/optimize/[id]/roster` exercise real
+App-Router registration through the live public URL. It is also run in CI right
+after the base gate (sequential, non-overlapping).
 
 ## Learn More
 

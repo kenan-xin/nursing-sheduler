@@ -28,7 +28,7 @@ jobs:
       # project toolchain floor. Single source of truth with local dev.
       - uses: jdx/mise-action@v2
 
-      - name: Confirm pinned Python (project toolchain: Python 3.12.13)
+      - name: "Confirm pinned Python (project toolchain: Python 3.12.13)"
         run: python3 --version
 
       - name: Enable pnpm (pinned via package.json packageManager)
@@ -84,3 +84,12 @@ jobs:
       # playwright.config.ts webServer runs `pnpm build && pnpm start`.
       - name: Run e2e
         run: pnpm exec playwright test
+      # Focused public-Next-dispatch gate for the /roster BFF route (B3 fixup). The
+      # base config excludes this spec because its `webServer` placeholder
+      # `BACKEND_API_URL=http://127.0.0.1:8000` would collide with the CI runner's
+      # real services; the focused config reuses the same `pnpm build && pnpm start`
+      # launcher but points the BFF at a private stub port (default 8765). Runs
+      # AFTER the base gate so the two production builds cannot overlap; if this
+      # lane fails, the job fails (mirroring the verification artifact requirement).
+      - name: Run public-roster-dispatch e2e
+        run: pnpm test:e2e:public-roster-dispatch

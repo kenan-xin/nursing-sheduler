@@ -9,6 +9,7 @@ import {
   applyFrameToCache,
   applyFrameWithReconcile,
   buildOptimizeEventsUrl,
+  fetchOptimizeRoster,
   fetchOptimizeXlsx,
   OptimizeApiError,
   useCancelOptimize,
@@ -22,6 +23,8 @@ import { MAX_CURSOR_BYTES } from "@/lib/query/sse-limits";
 
 const originalFetch = globalThis.fetch;
 let client: QueryClient;
+
+const XLSX_MIME_FOR_TEST = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
 function wrapper({ children }: { children: ReactNode }) {
   return createElement(QueryClientProvider, { client }, children);
@@ -374,6 +377,62 @@ describe("fetchOptimizeXlsx", () => {
     mockJsonOnce(404, { error: { code: "job_artifact_not_found", message: "No schedule." } });
     await expect(fetchOptimizeXlsx("opt_1")).rejects.toMatchObject({
       info: { kind: "no-artifact" },
+    });
+  });
+});
+
+describe("fetchOptimizeRoster", () => {
+  it("GETs /api/optimize/{id}/roster and returns the parsed JSON container verbatim", async () => {
+    const container = {
+      schemaVersion: "roster-container/1",
+      people: [{ id: 1 }, { id: 2 }],
+      dates: [{ iso: "2026-07-01" }],
+      solvedDays: [[{ kind: "shift", shiftId: "N" }], [{ kind: "off" }]],
+      score: 7,
+      solverStatus: "OPTIMAL",
+      coordinateMap: {
+        peopleRows: [3, 4],
+        dateColumns: [2],
+        firstPeopleRow: 3,
+        leadingCols: 1,
+        historyCols: 0,
+        prettify: true,
+      },
+      xlsx: { name: "nurse-scheduling-opt_1.xlsx", mime: XLSX_MIME_FOR_TEST },
+    };
+    mockJsonOnce(200, container);
+    const body = await fetchOptimizeRoster("opt_1");
+    expect(body).toEqual(container);
+    const [url, init] = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(url).toBe("/api/optimize/opt_1/roster");
+    expect((init as RequestInit).cache).toBe("no-store");
+  });
+
+  it("classifies a code-first 404 (job_not_found) as a recoverable job-not-found", async () => {
+    mockJsonOnce(404, { error: { code: "job_not_found", message: "Optimisation job not found" } });
+    await expect(fetchOptimizeRoster("opt_1")).rejects.toMatchObject({
+      info: { kind: "job-not-found", code: "job_not_found" },
+    });
+  });
+
+  it("classifies a code-first 409 (job_artifact_not_ready) as the shared no-artifact state", async () => {
+    mockJsonOnce(409, {
+      error: { code: "job_artifact_not_ready", message: "The job has no artifact." },
+    });
+    await expect(fetchOptimizeRoster("opt_1")).rejects.toMatchObject({
+      info: { kind: "no-artifact", code: "job_artifact_not_ready" },
+    });
+  });
+
+  it("classifies a code-first 500 (roster_container_invalid) as a server error", async () => {
+    mockJsonOnce(500, {
+      error: {
+        code: "roster_container_invalid",
+        message: "The stored roster container is not valid UTF-8 JSON",
+      },
+    });
+    await expect(fetchOptimizeRoster("opt_1")).rejects.toMatchObject({
+      info: { kind: "server-error", code: "roster_container_invalid" },
     });
   });
 });

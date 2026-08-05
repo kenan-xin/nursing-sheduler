@@ -433,6 +433,26 @@ export async function fetchOptimizeXlsx(jobId: string): Promise<{ blob: Blob; fi
   return { blob, filename };
 }
 
+// Fetch the structured roster container (B2/B3). The BFF relays the backend's
+// `application/json` body verbatim — the container is the authoritative v1
+// shape minus `xlsx.base64` (tech-plan §2). Returned as the raw parsed JSON;
+// F2 owns the typed contract and validation. Throws an OptimizeApiError
+// classified with the `roster` endpoint on any non-ok status, so the same
+// `job-not-found` / `no-artifact` / `server-error` taxonomy already drives
+// recovery (a 404 `job_not_found` ⇒ the job is gone, a 409
+// `job_artifact_not_ready` ⇒ a no-capture no-artifact state, a 5xx
+// `roster_container_invalid` ⇒ the captured artifact is unreadable).
+export async function fetchOptimizeRoster(jobId: string): Promise<unknown> {
+  const response = await fetch(`/api/optimize/${encodeURIComponent(jobId)}/roster`, {
+    cache: "no-store",
+  });
+  const body = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new OptimizeApiError(response.status, body, "roster");
+  }
+  return body;
+}
+
 // The durable events whose payload MUST update the retained JobResponse. A malformed
 // or parser-rejected payload on one of these cannot be treated as a successful no-op:
 // the cursor must not advance past a transition the cache never received.
