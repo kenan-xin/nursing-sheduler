@@ -473,7 +473,7 @@ test.describe("Optimize & Export — durable-stream acceptance journeys", () => 
     await installOptimizeRoutes(page, {
       onSubmit: (route) =>
         json(route, 429, {
-          error: { code: "job_capacity_exceeded", message: "The optimization queue is full." },
+          error: { code: "job_capacity_exceeded", message: "The optimisation queue is full." },
         }),
     });
     await seedAndOpen(page);

@@ -160,7 +160,7 @@ def test_complete_cancellation_is_lease_fenced_across_stores(store):
 
     cancelled = controller.complete_cancellation(running.id, worker_id="worker")
     assert cancelled.state == JobState.CANCELLED
-    assert cancelled.failure == JobFailure("cancelled", "Optimization cancelled.")
+    assert cancelled.failure == JobFailure("cancelled", "Optimisation cancelled.")
 
     # Re-finalizing a terminal job is a no-op.
     assert controller.complete_cancellation(running.id, worker_id="worker").state == JobState.CANCELLED
@@ -293,7 +293,7 @@ def test_expired_worker_claim_fails_job_and_releases_capacity(store):
     assert recovery.expire_worker_claims() == [abandoned.id]
     failed = recovery.get_job(abandoned.id)
     assert failed.state == JobState.FAILED
-    assert failed.failure == JobFailure("worker_lost", "The optimization worker stopped before the job completed.")
+    assert failed.failure == JobFailure("worker_lost", "The optimisation worker stopped before the job completed.")
     # Capacity is released: the replacement controller can queue a fresh job.
     assert _create(recovery).state == JobState.QUEUED
 

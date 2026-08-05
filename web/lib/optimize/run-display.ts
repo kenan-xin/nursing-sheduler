@@ -86,12 +86,12 @@ function latestProgress(view: OptimizeRunView): RunProgressPoint | null {
  */
 export function jobDetailLine(view: OptimizeRunView, submitting: boolean): string {
   if (view.jobId === null && !submitting && view.lifecycle === "idle") {
-    return "No optimization has been started.";
+    return "No optimisation has been started.";
   }
   if (view.lifecycle === "submitting" || view.lifecycle === "queued") {
     return view.queuePosition !== null
-      ? `Waiting in optimization queue at position ${view.queuePosition}.`
-      : "Waiting in optimization queue.";
+      ? `Waiting in optimisation queue at position ${view.queuePosition}.`
+      : "Waiting in optimisation queue.";
   }
   if (
     (view.lifecycle === "running" || view.lifecycle === "cancelling") &&
@@ -110,7 +110,7 @@ export function jobDetailLine(view: OptimizeRunView, submitting: boolean): strin
     return parts.join(" · ");
   }
   if (view.jobId !== null) return `Job ${view.jobId}`;
-  return "No optimization has been started.";
+  return "No optimisation has been started.";
 }
 
 /**

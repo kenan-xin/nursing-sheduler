@@ -65,7 +65,7 @@ test.describe("Optimize & Export screen — browser coverage", () => {
 
     // Recovery notices.
     await expect(page.getByTestId("optimize-interrupted")).toContainText(
-      "An unknown backend optimization may still be running",
+      "An unknown backend optimisation may still be running",
     );
     await expect(page.getByTestId("optimize-unreadable")).toBeVisible();
     await expect(page.getByTestId("optimize-degraded")).toContainText(

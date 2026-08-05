@@ -44,13 +44,13 @@ function entry(over: Partial<RunLogEntry>): RunLogEntry {
 describe("RunEventLog", () => {
   it("shows the active empty state while running", () => {
     render(<RunEventLog log={[]} active />);
-    expect(screen.getByText("Waiting for optimization events…")).toBeInTheDocument();
+    expect(screen.getByText("Waiting for optimisation events…")).toBeInTheDocument();
     expect(screen.getByTestId("optimize-event-log")).toHaveTextContent("0 events");
   });
 
   it("shows the idle empty state", () => {
     render(<RunEventLog log={[]} active={false} />);
-    expect(screen.getByText("No optimization events yet.")).toBeInTheDocument();
+    expect(screen.getByText("No optimisation events yet.")).toBeInTheDocument();
   });
 
   it("renders entries with their kind badge and detail", () => {

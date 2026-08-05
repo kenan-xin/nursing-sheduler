@@ -55,7 +55,7 @@ function submitErrorFields(error: unknown): { code: string | null; message: stri
     return { code: error.info.code ?? error.info.kind, message: error.message };
   }
   if (error instanceof Error) return { code: null, message: error.message };
-  return { code: null, message: "Optimize submission failed." };
+  return { code: null, message: "Optimise submission failed." };
 }
 
 // ---------------------------------------------------------------------------
@@ -117,17 +117,17 @@ export function outcomeToSignals(outcome: SubmissionTransactionOutcome): RunSign
 function blockedMessage(reason: string): string {
   switch (reason) {
     case "session-conflict":
-      return "Another optimize run is already staged in this browser session. Discard it before starting a new run.";
+      return "Another optimise run is already staged in this browser session. Discard it before starting a new run.";
     case "storage-unavailable":
       return "Browser session storage is unavailable, so this run cannot be safely recovered.";
     case "quota-exceeded":
       return "Browser session storage is full, so this run cannot be safely recovered.";
     case "invalid-record":
-      return "The optimize run could not be prepared for recovery.";
+      return "The optimise run could not be prepared for recovery.";
     case "read-back-failed":
-      return "The optimize run could not be durably staged before submission.";
+      return "The optimise run could not be durably staged before submission.";
     default:
-      return "The optimize run could not be started.";
+      return "The optimise run could not be started.";
   }
 }
 
@@ -446,7 +446,7 @@ export function buildStreamCallbacks(
     onError: (error) =>
       dispatch({
         type: "stream-error",
-        message: error instanceof Error ? error.message : "Optimization stream disconnected.",
+        message: error instanceof Error ? error.message : "Optimisation stream disconnected.",
       }),
   };
 }

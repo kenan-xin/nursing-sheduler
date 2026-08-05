@@ -176,7 +176,7 @@ describe("OptimizeApiError", () => {
   });
 
   it("synthesizes a message when the body carries none", () => {
-    expect(new OptimizeApiError(500, null).message).toBe("Optimize request failed (500)");
+    expect(new OptimizeApiError(500, null).message).toBe("Optimise request failed (500)");
   });
 });
 

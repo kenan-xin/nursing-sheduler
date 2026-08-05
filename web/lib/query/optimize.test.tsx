@@ -62,7 +62,7 @@ const baseJob = (over: Partial<JobResponse>): JobResponse => {
           : state === "cancelled"
             ? {
                 finished_at: "2026-07-20T00:01:00+00:00",
-                error: { code: "cancelled", message: "Optimization cancelled." },
+                error: { code: "cancelled", message: "Optimisation cancelled." },
                 controls: { cancellable: false, early_completion_available: false },
               }
             : state === "failed"
@@ -140,7 +140,7 @@ describe("useSubmitOptimize", () => {
     mockJsonOnce(422, {
       error: {
         code: "workspace_not_ready",
-        message: "Workspace is not ready to optimize.",
+        message: "Workspace is not ready to optimise.",
         issues: [],
       },
     });
@@ -152,6 +152,10 @@ describe("useSubmitOptimize", () => {
     });
     expect(caught).toBeInstanceOf(OptimizeApiError);
     expect((caught as OptimizeApiError).info.kind).toBe("validation");
+    // The backend envelope's prose is what the run surface renders, so the UK-English
+    // wording is asserted where it crosses into the client, not just at its source.
+    expect((caught as OptimizeApiError).info.code).toBe("workspace_not_ready");
+    expect((caught as OptimizeApiError).message).toBe("Workspace is not ready to optimise.");
   });
 });
 
@@ -445,7 +449,7 @@ describe("applyFrameToCache (exact backend-wire fixtures)", () => {
     applyFrameToCache(client, "opt_1", {
       id: "v1.j.2",
       event: "job.state_changed",
-      data: '{"occurred_at":"2026-07-20T00:00:00+00:00","state":"failed","queue_position":null,"cancel_requested":false,"early_completion_requested":false,"terminal":true,"controls":{"cancellable":false,"early_completion_available":false},"error":{"code":"worker_lost","message":"The optimization worker stopped before the job completed."}}',
+      data: '{"occurred_at":"2026-07-20T00:00:00+00:00","state":"failed","queue_position":null,"cancel_requested":false,"early_completion_requested":false,"terminal":true,"controls":{"cancellable":false,"early_completion_available":false},"error":{"code":"worker_lost","message":"The optimisation worker stopped before the job completed."}}',
     });
     expect(cached()?.state).toBe("failed");
     expect(cached()?.error?.code).toBe("worker_lost");
@@ -455,7 +459,7 @@ describe("applyFrameToCache (exact backend-wire fixtures)", () => {
     applyFrameToCache(client, "opt_1", {
       id: "v1.j.2b",
       event: "job.state_changed",
-      data: '{"occurred_at":"2026-07-20T00:00:00+00:00","state":"failed","queue_position":null,"cancel_requested":false,"early_completion_requested":false,"terminal":true,"controls":{"cancellable":false,"early_completion_available":false},"error":{"code":"process_timeout","message":"The optimization exceeded its timeout and was force-terminated."}}',
+      data: '{"occurred_at":"2026-07-20T00:00:00+00:00","state":"failed","queue_position":null,"cancel_requested":false,"early_completion_requested":false,"terminal":true,"controls":{"cancellable":false,"early_completion_available":false},"error":{"code":"process_timeout","message":"The optimisation exceeded its timeout and was force-terminated."}}',
     });
     expect(cached()?.state).toBe("failed");
     expect(cached()?.error?.code).toBe("process_timeout");

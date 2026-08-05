@@ -280,7 +280,7 @@ describe("reduceRunView — authoritative job snapshots", () => {
       job: terminalJob("failed", {
         error: {
           code: "worker_lost",
-          message: "The optimization worker stopped before the job completed.",
+          message: "The optimisation worker stopped before the job completed.",
         },
       }),
     });
@@ -295,7 +295,7 @@ describe("reduceRunView — authoritative job snapshots", () => {
       job: terminalJob("failed", {
         error: {
           code: "process_timeout",
-          message: "The optimization exceeded its timeout and was force-terminated.",
+          message: "The optimisation exceeded its timeout and was force-terminated.",
         },
       }),
     });
@@ -303,7 +303,7 @@ describe("reduceRunView — authoritative job snapshots", () => {
     expect(next.error).toEqual({
       source: "job",
       code: "process_timeout",
-      message: "The optimization exceeded its timeout and was force-terminated.",
+      message: "The optimisation exceeded its timeout and was force-terminated.",
     });
     expect(next.resubmittable).toBe(false);
   });

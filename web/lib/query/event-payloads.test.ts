@@ -57,7 +57,7 @@ describe("parseStateChangedPayload", () => {
       terminal: true,
       cancel_requested: true,
       controls: { cancellable: false, early_completion_available: false },
-      error: { code: "cancelled", message: "Optimization cancelled." },
+      error: { code: "cancelled", message: "Optimisation cancelled." },
     }),
     failed: running({
       state: "failed",
@@ -111,7 +111,7 @@ describe("parseStateChangedPayload", () => {
     ["failed without error", { ...stateFrames.failed, error: undefined }],
     [
       "failed with cancel error",
-      { ...stateFrames.failed, error: { code: "cancelled", message: "Optimization cancelled." } },
+      { ...stateFrames.failed, error: { code: "cancelled", message: "Optimisation cancelled." } },
     ],
     ["zero queue position", { ...stateFrames.queued, queue_position: 0 }],
     ["fractional queue position", { ...stateFrames.queued, queue_position: 1.5 }],
@@ -343,7 +343,7 @@ function validStateResponse(state: JobResponse["state"]): JobResponse {
       terminal: true,
       started_at: null,
       finished_at: "2026-07-20T00:01:00+00:00",
-      error: { code: "cancelled", message: "Optimization cancelled." },
+      error: { code: "cancelled", message: "Optimisation cancelled." },
       controls: { cancellable: false, early_completion_available: false },
     };
   }

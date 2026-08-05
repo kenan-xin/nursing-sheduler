@@ -170,7 +170,7 @@ describe("RunStatusPanel — terminal outcomes", () => {
       { canDownloadAgain: true, downloadAgainFilename: "schedule.xlsx" },
     );
     expect(screen.getByTestId("optimize-completed-artifact")).toHaveTextContent(
-      "Schedule optimized and downloaded successfully!",
+      "Schedule optimised and downloaded successfully!",
     );
     expect(screen.getByTestId("optimize-download-again")).toHaveTextContent("schedule.xlsx");
   });
@@ -280,14 +280,14 @@ describe("RunStatusPanel — terminal outcomes", () => {
       view({
         lifecycle: "cancelled",
         jobId: "opt_1",
-        error: { source: "job", code: "cancelled", message: "Optimization cancelled." },
+        error: { source: "job", code: "cancelled", message: "Optimisation cancelled." },
         resubmittable: false,
       }),
     );
     // Cancel always settles Cancelled (never routed to Failed) — heading present.
     expect(screen.getByRole("heading")).toHaveTextContent("Run cancelled");
     expect(screen.getByTestId("optimize-terminal-error")).toHaveTextContent(
-      "Optimization cancelled.",
+      "Optimisation cancelled.",
     );
     expect(screen.queryByTestId("optimize-resubmit")).not.toBeInTheDocument();
     await userEvent.click(screen.getByTestId("optimize-dismiss"));

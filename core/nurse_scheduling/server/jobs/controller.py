@@ -309,7 +309,7 @@ class JobController:
                     job,
                     state=JobState.CANCELLED,
                     finished_at=now,
-                    failure=JobFailure(code="cancelled", message="Optimization cancelled."),
+                    failure=JobFailure(code="cancelled", message="Optimisation cancelled."),
                     queue_position=None,
                     claim_expires_at=None,
                 )
@@ -350,7 +350,7 @@ class JobController:
                 failed = replace(
                     job,
                     state=JobState.CANCELLED,
-                    failure=JobFailure(code="cancelled", message="Optimization cancelled."),
+                    failure=JobFailure(code="cancelled", message="Optimisation cancelled."),
                     finished_at=now,
                     queue_position=None,
                     claim_expires_at=None,
@@ -390,7 +390,7 @@ class JobController:
                     job,
                     state=JobState.CANCELLED,
                     cancel_requested=True,
-                    failure=JobFailure(code="cancelled", message="Optimization cancelled."),
+                    failure=JobFailure(code="cancelled", message="Optimisation cancelled."),
                     finished_at=now,
                     queue_position=None,
                 )
@@ -435,7 +435,7 @@ class JobController:
             cancelled = replace(
                 job,
                 state=JobState.CANCELLED,
-                failure=JobFailure(code="cancelled", message="Optimization cancelled."),
+                failure=JobFailure(code="cancelled", message="Optimisation cancelled."),
                 finished_at=now,
                 queue_position=None,
                 claim_expires_at=None,
@@ -590,7 +590,7 @@ class JobController:
                     failed = replace(
                         job,
                         state=JobState.CANCELLED,
-                        failure=JobFailure(code="cancelled", message="Optimization cancelled."),
+                        failure=JobFailure(code="cancelled", message="Optimisation cancelled."),
                         finished_at=transition_time,
                         queue_position=None,
                         claim_expires_at=None,
@@ -601,7 +601,7 @@ class JobController:
                         state=JobState.FAILED,
                         failure=JobFailure(
                             code="worker_lost",
-                            message="The optimization worker stopped before the job completed.",
+                            message="The optimisation worker stopped before the job completed.",
                         ),
                         finished_at=transition_time,
                         queue_position=None,

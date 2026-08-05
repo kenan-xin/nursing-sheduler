@@ -18,7 +18,7 @@ export function ReadinessBanner({ issues }: ReadinessBannerProps) {
     <Callout
       tone="warn"
       data-testid="optimize-readiness"
-      title="Finish setting up your schedule before optimizing"
+      title="Finish setting up your schedule before optimising"
     >
       <ul className="list-disc space-y-1 pl-5">
         {issues.map((issue) => (

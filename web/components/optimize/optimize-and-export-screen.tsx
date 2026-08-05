@@ -319,7 +319,7 @@ export function OptimizeAndExportScreen({
       description: recovery.forgetWarning,
       variant: "destructive",
       consequences: [
-        "An unknown backend optimization may keep running until it finishes or the server releases it.",
+        "An unknown backend optimisation may keep running until it finishes or the server releases it.",
         "This browser will forget the run and can start a new one.",
       ],
     });
@@ -351,13 +351,13 @@ export function OptimizeAndExportScreen({
     !recoveryBlocking &&
     !cleanupBlocking;
   const disabledReason = recoveryBooting
-    ? "Checking for a previous optimization run…"
+    ? "Checking for a previous optimisation run…"
     : recoveryBlocking
       ? "Resolve the recovered run above (Forget it) before starting a new one."
       : cleanupBlocking
         ? "Release the finished run above (Retry cleanup or Abandon) before starting a new one."
         : !readiness.ready
-          ? "Complete the missing schedule configuration before optimizing."
+          ? "Complete the missing schedule configuration before optimising."
           : serverInfo.status !== "online"
             ? "Backend unavailable. Check that the configured backend is running."
             : null;
@@ -376,10 +376,10 @@ export function OptimizeAndExportScreen({
           this screen at Title weight behind an icon tile the prototype does not have. */}
       <header className="flex flex-col gap-2">
         <div className="text-label font-semibold uppercase tracking-[0.03em] text-brandink">
-          Output · Optimize &amp; Export
+          Output · Optimise &amp; Export
         </div>
         <h1 className="font-heading text-display font-bold leading-[1.15] tracking-[-0.015em] text-ink">
-          Optimize and Export
+          Optimise and Export
         </h1>
         <p className="max-w-[66ch] text-ink2">
           Send the current schedule to the backend and download the generated XLSX result.

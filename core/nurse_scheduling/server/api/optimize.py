@@ -125,7 +125,7 @@ async def create_job(
     if timeout_seconds <= 0 or timeout_seconds > settings.max_timeout_seconds:
         raise HTTPException(
             status_code=400,
-            detail=f"Optimization timeout must be between 1 and {settings.max_timeout_seconds} seconds",
+            detail=f"Optimisation timeout must be between 1 and {settings.max_timeout_seconds} seconds",
         )
     canonical_solver = parse_solver(solver)
     try:

@@ -47,7 +47,7 @@ async function requestOptimizeJob(
   }
   const job = parseJobResponse(body, expectedId);
   if (job === null) {
-    throw new Error("Optimize API returned an invalid JobResponse.");
+    throw new Error("Optimise API returned an invalid JobResponse.");
   }
   return job;
 }

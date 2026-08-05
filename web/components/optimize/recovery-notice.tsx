@@ -59,13 +59,13 @@ export function RecoveryNotice({
 
       {state.kind === "resumable" && resume?.status === "attached" ? (
         <Callout tone="info" placement="page" data-testid="optimize-resumed">
-          Resumed your previous optimization run.
+          Resumed your previous optimisation run.
         </Callout>
       ) : null}
 
       {state.kind === "resumable" && resume !== null && resume.status !== "attached" ? (
         <Callout tone="error" placement="page" data-testid="optimize-resume-failed" alert>
-          A previous optimization run could not be resumed. {resume.reason}
+          A previous optimisation run could not be resumed. {resume.reason}
         </Callout>
       ) : null}
 
@@ -74,12 +74,12 @@ export function RecoveryNotice({
           tone="warn"
           placement="page"
           data-testid="optimize-interrupted"
-          title="A previous optimize run was interrupted"
+          title="A previous optimise run was interrupted"
           actions={forgetButton}
           alert
         >
           A submission was interrupted before its job could be recorded, so it cannot be resumed. An
-          unknown backend optimization may still be running until it reaches a terminal state or the
+          unknown backend optimisation may still be running until it reaches a terminal state or the
           server releases it.
         </Callout>
       ) : null}
@@ -94,7 +94,7 @@ export function RecoveryNotice({
           alert
         >
           The saved recovery record could not be read. It will not be resumed or deleted
-          automatically. An unknown backend optimization may still be running until it reaches a
+          automatically. An unknown backend optimisation may still be running until it reaches a
           terminal state or the server releases it.
         </Callout>
       ) : null}

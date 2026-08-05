@@ -74,9 +74,9 @@ describe("RunOptionsForm", () => {
     );
   });
 
-  it("shows the optimizing state while submitting", () => {
+  it("shows the optimising state while submitting", () => {
     setup({ submitting: true });
-    expect(screen.getByTestId("optimize-submit")).toHaveTextContent("Optimizing…");
+    expect(screen.getByTestId("optimize-submit")).toHaveTextContent("Optimising…");
     expect(screen.getByTestId("optimize-submit")).toBeDisabled();
   });
 

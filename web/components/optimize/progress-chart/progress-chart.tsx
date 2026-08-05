@@ -523,11 +523,11 @@ export function ProgressChart({ points, isActive = false, className }: ProgressC
   const figureLabel = useMemo(() => {
     const count = points.length;
     if (count === 0) {
-      return "Optimization progress chart, waiting for the first progress frame.";
+      return "Optimisation progress chart, waiting for the first progress frame.";
     }
     const scoreText = formatScore(latestPoint?.currentBestScore ?? 0);
     const elapsedText = formatElapsedSeconds(latestPoint?.elapsedSeconds ?? 0);
-    return `Optimization progress chart, ${count} progress ${
+    return `Optimisation progress chart, ${count} progress ${
       count === 1 ? "frame" : "frames"
     }. Latest incumbent score ${scoreText} at ${elapsedText} elapsed.`;
   }, [points.length, latestPoint]);

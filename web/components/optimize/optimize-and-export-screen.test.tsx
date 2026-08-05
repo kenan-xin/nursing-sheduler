@@ -171,7 +171,7 @@ describe("OptimizeAndExportScreen — gating", () => {
     await waitFor(() => expect(screen.getByText("Online")).toBeInTheDocument());
     expect(screen.getByTestId("optimize-readiness")).toBeInTheDocument();
     expect(screen.getByTestId("optimize-disabled-reason")).toHaveTextContent(
-      "Complete the missing schedule configuration before optimizing.",
+      "Complete the missing schedule configuration before optimising.",
     );
     expect(screen.getByTestId("optimize-submit")).toBeDisabled();
   });
@@ -270,7 +270,7 @@ describe("OptimizeAndExportScreen — terminal success path", () => {
 
     await waitFor(() =>
       expect(screen.getByTestId("optimize-completed-artifact")).toHaveTextContent(
-        "Schedule optimized and downloaded successfully!",
+        "Schedule optimised and downloaded successfully!",
       ),
     );
     expect(saveBlob).toHaveBeenCalledWith(expect.any(Blob), "schedule.xlsx");
@@ -292,7 +292,7 @@ describe("OptimizeAndExportScreen — queue and cancellation observability", () 
       started_at: "2026-07-20T00:00:01+00:00",
       finished_at: "2026-07-20T00:01:00+00:00",
       queue_position: null,
-      error: { code: "cancelled", message: "Optimization cancelled." },
+      error: { code: "cancelled", message: "Optimisation cancelled." },
       controls: { cancellable: false, early_completion_available: false },
     });
     routeFetch((u, init) => {
@@ -583,7 +583,7 @@ describe("OptimizeAndExportScreen — terminal release", () => {
       started_at: "2026-07-20T00:00:01+00:00",
       finished_at: "2026-07-20T00:01:00+00:00",
       queue_position: null,
-      error: { code: "cancelled", message: "Optimization cancelled." },
+      error: { code: "cancelled", message: "Optimisation cancelled." },
       controls: { cancellable: false, early_completion_available: false },
     });
     routeFetch((u, init) => {

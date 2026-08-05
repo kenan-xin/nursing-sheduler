@@ -178,7 +178,7 @@ const LAYOUT_LADDER = [
   { variant: "panes2:", px: "600px", from: ".ns-panes2 — two-pane transfer list" },
   { variant: "formgrid:", px: "720px", from: ".ns-formgrid — form two-up" },
   { variant: "wizgrid:", px: "760px", from: ".ns-wizgrid — wizard two-up" },
-  { variant: "grid2:", px: "900px", from: ".ns-grid2 — Dates / Save-Load / Optimize" },
+  { variant: "grid2:", px: "900px", from: ".ns-grid2 — Dates / Save-Load / Optimise" },
   { variant: "grid3:", px: "1100px", from: ".ns-grid3 — three-up card grid" },
   { variant: "wizgrid3:", px: "1200px", from: ".ns-wizgrid3 — wizard three-up" },
 ] as const;
