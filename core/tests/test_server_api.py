@@ -157,6 +157,14 @@ def test_workspace_invalid_date_is_pre_job_422_without_consuming_capacity(idle_c
     assert idle_client.post("/optimize", data={"yaml_content": MINIMAL_SCENARIO}).status_code == 202
 
 
+def test_out_of_range_timeout_is_400_with_uk_english_detail(client):
+    # The rejection detail reaches the user through the shipped error path, so the
+    # product's UK-English convention is asserted directly.
+    response = client.post("/optimize", data={"yaml_content": MINIMAL_SCENARIO, "timeout": 0})
+    assert response.status_code == 400
+    assert response.json()["detail"].startswith("Optimisation timeout must be between 1 and ")
+
+
 def test_unquoted_invalid_date_is_400_not_500(client):
     response = client.post("/optimize", data={"yaml_content": "apiVersion: alpha\ndate: 2025-99-99\n"})
     assert response.status_code == 400

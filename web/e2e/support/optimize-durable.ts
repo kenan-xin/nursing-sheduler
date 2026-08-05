@@ -873,7 +873,7 @@ export function cancelledJob(id = JOB_ID): JobResponse {
     finished_at: FINISHED_AT,
     request: REQUEST,
     result: null,
-    error: { code: "cancelled", message: "Optimization cancelled." },
+    error: { code: "cancelled", message: "Optimisation cancelled." },
     controls: { cancellable: false, early_completion_available: false },
     links: links(id, null),
   };
@@ -882,7 +882,7 @@ export function cancelledJob(id = JOB_ID): JobResponse {
 export function failedJob(
   id = JOB_ID,
   code = "worker_lost",
-  message = "The optimization worker stopped before the job completed.",
+  message = "The optimisation worker stopped before the job completed.",
 ): JobResponse {
   return {
     id,
@@ -952,7 +952,7 @@ export function phaseChangedFrame(
   id: string,
   source = "solver",
   code = "solve",
-  message = "Optimizing schedule",
+  message = "Optimising schedule",
   elapsedSeconds = 0.5,
 ): SseFrameInput {
   return {
@@ -1004,8 +1004,8 @@ export function terminalFrame(id: string, state: JobState): SseFrameInput {
   const code = state === "cancelled" ? "cancelled" : "worker_lost";
   const message =
     state === "cancelled"
-      ? "Optimization cancelled."
-      : "The optimization worker stopped before the job completed.";
+      ? "Optimisation cancelled."
+      : "The optimisation worker stopped before the job completed.";
   return {
     id,
     event: "job.state_changed",

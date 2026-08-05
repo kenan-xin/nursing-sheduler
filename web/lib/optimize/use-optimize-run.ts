@@ -266,7 +266,7 @@ function defaultAttemptId(): string {
 function describeIssues(issues: ScenarioValidationIssue[]): string {
   const first = issues[0]?.message;
   const suffix = issues.length > 1 ? ` (+${issues.length - 1} more)` : "";
-  return first ? `${first}${suffix}` : "The schedule is not ready to optimize.";
+  return first ? `${first}${suffix}` : "The schedule is not ready to optimise.";
 }
 
 function controlErrorCode(error: unknown): string | null {
@@ -675,7 +675,7 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
         if (currentToken.jobId !== input.jobId) {
           return {
             status: "conflict",
-            reason: `A different optimize run (${currentToken.jobId}) is already attached.`,
+            reason: `A different optimise run (${currentToken.jobId}) is already attached.`,
           };
         }
         // Same job. Different cursor → visible conflict (never silent swap).
@@ -694,7 +694,7 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
       if (submitAttemptRef.current !== null) {
         return {
           status: "conflict",
-          reason: "An optimize submission is already in progress.",
+          reason: "An optimise submission is already in progress.",
         };
       }
 
@@ -838,7 +838,7 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
           {
             type: "control-error",
             code: controlErrorCode(error),
-            message: controlErrorMessage(error, "Unable to cancel optimization."),
+            message: controlErrorMessage(error, "Unable to cancel optimisation."),
           },
           token,
         );

@@ -113,7 +113,7 @@ export function RunEventLog({ log, active }: RunEventLogProps) {
       >
         {count === 0 ? (
           <p className="px-4 py-3 text-meta text-ink3">
-            {active ? "Waiting for optimization events…" : "No optimization events yet."}
+            {active ? "Waiting for optimisation events…" : "No optimisation events yet."}
           </p>
         ) : (
           <ul className="divide-y divide-line2">

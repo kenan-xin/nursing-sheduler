@@ -836,7 +836,7 @@ describe("forgetInspectedSession — confirmed unchanged-record removal", () => 
 
   it("exports the unknown-backend retention warning", () => {
     expect(FORGET_OPTIMIZE_SESSION_WARNING).toContain(
-      "unknown backend optimization may continue until terminal state or server retention",
+      "unknown backend optimisation may continue until terminal state or server retention",
     );
   });
 });

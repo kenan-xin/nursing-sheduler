@@ -150,7 +150,7 @@ export default function ProgressChartFixtureClient() {
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex flex-col gap-1">
           <h1 className="font-heading text-display font-bold leading-[1.15] tracking-[-0.015em] text-ink">
-            Optimization progress chart fixture
+            Optimisation progress chart fixture
           </h1>
           <p className="text-meta text-ink2">
             T16d browser fixture — responsive, dark-mode, and a11y coverage.

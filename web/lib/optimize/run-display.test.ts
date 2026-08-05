@@ -94,13 +94,13 @@ describe("scoreLabel", () => {
 describe("jobDetailLine", () => {
   it("reports no run when idle", () => {
     expect(jobDetailLine(INITIAL_OPTIMIZE_RUN_VIEW, false)).toBe(
-      "No optimization has been started.",
+      "No optimisation has been started.",
     );
   });
   it("reports the queue wait with a position", () => {
     expect(
       jobDetailLine(view({ lifecycle: "queued", jobId: "opt_1", queuePosition: 2 }), false),
-    ).toBe("Waiting in optimization queue at position 2.");
+    ).toBe("Waiting in optimisation queue at position 2.");
   });
   it("waits for the first solution while running with no incumbent", () => {
     expect(

@@ -156,7 +156,7 @@ export function RunStatusPanel({
           </p>
           {onStartRun ? (
             <Button onClick={onStartRun} className="mt-5" data-testid="optimize-start">
-              <FaBolt aria-hidden /> Optimize roster
+              <FaBolt aria-hidden /> Optimise roster
             </Button>
           ) : null}
         </div>
@@ -359,7 +359,7 @@ export function RunStatusPanel({
         <div className="space-y-2" data-testid="optimize-completed-artifact">
           {download.status === "downloaded" ? (
             <Callout tone="success" icon={FaCircleCheck}>
-              Schedule optimized and downloaded successfully!
+              Schedule optimised and downloaded successfully!
             </Callout>
           ) : download.status === "downloading" ? (
             <Callout tone="info" icon={FaSpinner}>
@@ -412,7 +412,7 @@ export function RunStatusPanel({
           actions={terminalActions}
           alert
         >
-          {view.error?.message ?? "The optimization did not complete."}
+          {view.error?.message ?? "The optimisation did not complete."}
         </Callout>
       ) : null}
 

@@ -176,7 +176,7 @@ describe("POST /api/optimize (multipart submit)", () => {
 
 describe("GET /api/optimize/{id} (poll)", () => {
   it("relays a code-first job_not_found verbatim for the client to classify", async () => {
-    const body = { error: { code: "job_not_found", message: "Optimization job not found" } };
+    const body = { error: { code: "job_not_found", message: "Optimisation job not found" } };
     mockUpstream(() => new Response(JSON.stringify(body), { status: 404 }));
     const response = await poll(
       new Request("http://localhost/api/optimize/opt_x"),

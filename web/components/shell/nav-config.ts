@@ -167,7 +167,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Output",
     items: [
       {
-        label: "Optimize & Export",
+        label: "Optimise & Export",
         path: "/optimize-and-export",
         icon: FaWandMagicSparkles,
         blurb: "Run the optimiser & export",

@@ -53,7 +53,7 @@ describe("RecoveryNotice", () => {
   it("offers a destructive Forget for an interrupted record and warns about the unknown job", async () => {
     const props = setup({ state: { kind: "interrupted", anonymized: true, peopleCount: 3 } });
     const notice = screen.getByTestId("optimize-interrupted");
-    expect(notice).toHaveTextContent("An unknown backend optimization may still be running");
+    expect(notice).toHaveTextContent("An unknown backend optimisation may still be running");
     await userEvent.click(screen.getByTestId("optimize-forget"));
     expect(props.onForget).toHaveBeenCalled();
   });

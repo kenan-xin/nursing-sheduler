@@ -67,7 +67,7 @@ test.describe("Optimization progress chart — browser coverage", () => {
     const label = await page
       .locator('figure[data-testid="progress-chart"] [role="img"]')
       .getAttribute("aria-label");
-    expect(label?.toLowerCase()).toContain("optimization progress chart");
+    expect(label?.toLowerCase()).toContain("optimisation progress chart");
     expect(label?.toLowerCase()).toContain("frames");
   });
 

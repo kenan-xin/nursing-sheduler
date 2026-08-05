@@ -594,7 +594,7 @@ describe("useOptimizeSessionRecovery — Forget (interrupted/unreadable)", () =>
 
     expect(c.attach).not.toHaveBeenCalled();
     expect(result.current.state).toEqual({ kind: "interrupted", anonymized: true, peopleCount: 2 });
-    expect(result.current.forgetWarning).toContain("unknown backend optimization may continue");
+    expect(result.current.forgetWarning).toContain("unknown backend optimisation may continue");
 
     let outcome: ReturnType<typeof result.current.forget> | undefined;
     act(() => {

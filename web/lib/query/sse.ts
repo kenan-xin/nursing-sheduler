@@ -28,7 +28,7 @@ function checkCursor(value: string): string | null {
 // The backend never emits one; the throw takes the loop's ordinary recovery path.
 export class SseCursorOverflowError extends Error {
   constructor(public readonly bytes: number) {
-    super(`Optimize SSE cursor exceeded MAX_CURSOR_BYTES=${MAX_CURSOR_BYTES} (got ${bytes}).`);
+    super(`Optimise SSE cursor exceeded MAX_CURSOR_BYTES=${MAX_CURSOR_BYTES} (got ${bytes}).`);
     this.name = "SseCursorOverflowError";
   }
 }

@@ -6,7 +6,7 @@ product
 
 ## Users
 
-Ward/nurse schedulers and managers who model a ward (people, shift types, calendar), express scheduling rules, run a fixed OR-Tools CP-SAT optimization core, and export the solved roster as a styled XLSX. Skill level ranges widely: some are power users who want full constraint control (Advanced mode), others just need a correct roster with minimal training (Guided mode). Both must be served by the same data model, never a stripped-down subset.
+Ward/nurse schedulers and managers who model a ward (people, shift types, calendar), express scheduling rules, run a fixed OR-Tools CP-SAT optimisation core, and export the solved roster as a styled XLSX. Skill level ranges widely: some are power users who want full constraint control (Advanced mode), others just need a correct roster with minimal training (Guided mode). Both must be served by the same data model, never a stripped-down subset.
 
 A secondary, strictly optional path: users who choose to enable AI features (BYO LLM API key, client-side direct to provider) get a Tier-2 AI infeasibility diagnostician on top of the always-on, deterministic Tier-1 static conflict validation. AI is never assumed present in copy or flow.
 

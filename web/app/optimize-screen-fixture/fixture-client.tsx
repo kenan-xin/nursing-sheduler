@@ -183,7 +183,7 @@ export default function OptimizeScreenFixtureClient() {
     >
       <header className="flex items-center justify-between gap-4">
         <h1 className="font-heading text-title font-semibold tracking-[-0.015em] text-ink">
-          Optimize screen fixture
+          Optimise screen fixture
         </h1>
         <ThemeToggle />
       </header>

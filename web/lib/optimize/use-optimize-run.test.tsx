@@ -81,7 +81,7 @@ const job = (over: Partial<JobResponse> = {}): JobResponse => {
           : state === "cancelled"
             ? {
                 finished_at: "2026-07-20T00:01:00+00:00",
-                error: { code: "cancelled", message: "Optimization cancelled." },
+                error: { code: "cancelled", message: "Optimisation cancelled." },
                 controls: { cancellable: false, early_completion_available: false },
               }
             : state === "failed"

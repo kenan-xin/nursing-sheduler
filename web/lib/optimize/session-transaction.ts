@@ -782,7 +782,7 @@ export async function runSubmissionTransaction(
   if (!isValidJobId(result.jobId)) {
     return {
       status: "acceptance-unknown",
-      error: new Error("Optimize submission accepted without a usable job id."),
+      error: new Error("Optimise submission accepted without a usable job id."),
     };
   }
 
@@ -821,7 +821,7 @@ export interface SessionRecordIdentity {
 }
 
 export const FORGET_OPTIMIZE_SESSION_WARNING =
-  "Forgetting this recovery record does not cancel the backend job. An unknown backend optimization may continue until terminal state or server retention.";
+  "Forgetting this recovery record does not cancel the backend job. An unknown backend optimisation may continue until terminal state or server retention.";
 
 export type InspectedSession =
   | { kind: "none" }

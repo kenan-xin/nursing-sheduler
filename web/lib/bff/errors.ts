@@ -148,7 +148,7 @@ export class OptimizeApiError extends Error {
 
   constructor(status: number, body: unknown, endpoint?: OptimizeEndpoint) {
     const info = classifyOptimizeError(status, body, endpoint);
-    super(info.message || `Optimize request failed (${status})`);
+    super(info.message || `Optimise request failed (${status})`);
     this.name = "OptimizeApiError";
     this.status = status;
     this.info = info;

@@ -681,7 +681,7 @@ describe("ProgressChart — accessibility", () => {
     const img = container.querySelector('[role="img"]');
     expect(img).not.toBeNull();
     const label = img?.getAttribute("aria-label") ?? "";
-    expect(label.toLowerCase()).toContain("optimization progress chart");
+    expect(label.toLowerCase()).toContain("optimisation progress chart");
     expect(label.toLowerCase()).toContain("frames");
   });
 

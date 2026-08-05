@@ -236,7 +236,7 @@ This is the complete known boundary for the v2 bundle. New mismatches must be ad
 | Prototype attribute-substring compatibility CSS | Production uses explicit component/recipe contracts. | Never port selectors such as `[style*="border: 1px solid var(--line)"]`. |
 | Prototype body can inherit UA black | Violates the No-Black Rule. | Keep the app shell's explicit `color: var(--ink)`. |
 
-Everything else in the current navigation matches down to the group headings. Minor copy deviation: v2 spells it "Optimise"; the product ships "Optimize".
+Everything else in the current navigation matches down to the group headings, spelling included: the product ships UK English, so "Optimise & Export" now matches v2. UK English is the product-wide copy convention for the whole optimise/optimised/optimising/optimisation/optimiser family; only technical contracts (the `/optimize` routes and API paths, identifiers, test ids, storage keys, event names) keep their US spelling.
 
 ## 2. Colors
 
