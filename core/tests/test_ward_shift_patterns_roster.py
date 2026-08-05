@@ -76,6 +76,17 @@ SENIOR_PREFIX, JUNIOR_PREFIX = "SSN-", "SN-"
 SENIOR_LABEL, JUNIOR_LABEL = "Senior Staff Nurse", "Staff Nurse"
 EXPECTED_PATTERNS = {"am1", "am2", "am3", "pm1", "pm2", "pm3", "long", "night"}
 
+# A senior is in charge of a PART OF THE DAY, not of each individual pattern:
+# one across the whole morning, one across the whole afternoon, one on the long
+# day and one on the night. Pinned because reverting to one-per-pattern would
+# still solve -- it would just quietly need half the ward to be senior.
+EXPECTED_SENIOR_UNITS = {
+    frozenset({"am1", "am2", "am3"}),
+    frozenset({"pm1", "pm2", "pm3"}),
+    frozenset({"long"}),
+    frozenset({"night"}),
+}
+
 
 def _clock(value: str) -> dt.time:
     return dt.time.fromisoformat(value)
@@ -137,6 +148,49 @@ def _requests(scenario) -> tuple[dict, dict, list]:
     return leave, hard_off, soft_off
 
 
+def _expand(scenario, selector) -> set[str]:
+    """The concrete shift-type ids a requirement selector covers.
+
+    A group id resolves to ONE aggregate equation across its members, which is
+    exactly what lets a single senior cover the whole morning rather than one
+    per pattern.
+    """
+    assert isinstance(selector, str), (
+        f"a top-level list means one equation PER element, not an aggregate; "
+        f"this fixture uses scalar selectors only, got {selector!r}"
+    )
+    items = {s.id for s in scenario.shiftTypes.items}
+    groups = {g.id: list(g.members) for g in scenario.shiftTypes.groups}
+    out: set[str] = set()
+    todo = [selector]
+    while todo:
+        x = todo.pop()
+        if x in items:
+            out.add(x)
+        elif x in groups:
+            todo += groups[x]
+        else:
+            raise AssertionError(f"unknown shift type selector: {x!r}")
+    return out
+
+
+def _senior_cover_units(scenario) -> list[tuple[str, set[str]]]:
+    """(label, shift ids) for each senior-in-charge requirement.
+
+    Derived from whichever requirements carry `qualifiedPeople`, so regrouping
+    the ward -- one senior for the whole morning instead of one per pattern --
+    moves these checks with it instead of leaving them asserting the old shape.
+    """
+    units = []
+    for pref in scenario.preferences:
+        if pref.type == SHIFT_TYPE_REQUIREMENT and pref.qualifiedPeople:
+            slots = _expand(scenario, pref.shiftType)
+            # A senior counts as covering the part of the day if they are on any
+            # of its shifts, senior slot or open slot alike.
+            units.append((str(pref.shiftType), slots | {s.rstrip(SENIOR_SUFFIX) for s in slots}))
+    return units
+
+
 def _staffing_violations(scenario, grid) -> list[str]:
     """Per-day headcount, and the senior-only slots, against the fixture itself."""
     people = [p.id for p in scenario.people.items]
@@ -149,13 +203,14 @@ def _staffing_violations(scenario, grid) -> list[str]:
         # Every requirement in this fixture is ward-wide and all-dates; a scoped
         # one would need date expansion, so fail loudly rather than check less.
         assert pref.date in (None, "ALL", ["ALL"]), f"unsupported date scope: {pref.date!r}"
+        covered = _expand(scenario, pref.shiftType)
         for d in range(n_days):
-            on_it = [people[p] for p in range(len(people)) if grid[p][d] == pref.shiftType]
+            on_it = [people[p] for p in range(len(people)) if grid[p][d] in covered]
             if len(on_it) != pref.requiredNumPeople:
                 out.append(f"day {d + 1}: {pref.shiftType} has {len(on_it)}, needs {pref.requiredNumPeople}")
             # A senior-only slot must hold a senior. This is what qualifiedPeople
             # buys, and the check is here so removing it does not go unnoticed.
-            if pref.shiftType.endswith(SENIOR_SUFFIX):
+            if pref.qualifiedPeople:
                 for who in on_it:
                     if who not in seniors:
                         out.append(f"day {d + 1}: senior-only slot {pref.shiftType} filled by {who}")
@@ -163,20 +218,21 @@ def _staffing_violations(scenario, grid) -> list[str]:
 
 
 def _senior_cover_violations(scenario, grid) -> list[str]:
-    """The outcome the '+' slots exist to produce: a senior on every shift.
+    """The outcome the '+' slots exist to produce: a senior in charge of each
+    part of the day -- the morning as a whole, the afternoon as a whole, the long
+    day and the night.
 
     Checked separately from the slots themselves, so the guarantee survives even
     if the mechanism behind it is ever rebuilt some other way.
     """
     people = [p.id for p in scenario.people.items]
     seniors = _senior_group(scenario)
-    patterns = sorted({s.id.rstrip(SENIOR_SUFFIX) for s in scenario.shiftTypes.items})
     out: list[str] = []
     for d in range(len(grid[0])):
-        for base in patterns:
-            on_duty = [people[p] for p in range(len(people)) if grid[p][d] in (base, base + SENIOR_SUFFIX)]
+        for label, ids in _senior_cover_units(scenario):
+            on_duty = [people[p] for p in range(len(people)) if grid[p][d] in ids]
             if on_duty and not any(w in seniors for w in on_duty):
-                out.append(f"day {d + 1}: {base} has no Senior Staff Nurse on duty ({on_duty})")
+                out.append(f"day {d + 1}: {label} has no Senior Staff Nurse on duty ({on_duty})")
     return out
 
 
@@ -307,6 +363,17 @@ def test_fixture_shape_is_what_these_checks_assume(scenario):
     assert all(p.history for p in scenario.people.items), "history guards the roster boundary"
 
 
+def test_seniors_are_in_charge_of_a_part_of_the_day_not_each_shift(scenario):
+    """The morning is am1+am2+am3 and takes ONE senior between them, not three.
+
+    This is the difference between needing 4 seniors on duty a day and needing 8,
+    which is the difference between a ward that is 37% senior and one that is 56%
+    senior. Both solve, so nothing else here would notice the change.
+    """
+    units = {frozenset(s.rstrip(SENIOR_SUFFIX) for s in ids) for _label, ids in _senior_cover_units(scenario)}
+    assert units == EXPECTED_SENIOR_UNITS, f"senior cover is grouped as {sorted(map(sorted, units))}"
+
+
 def test_grade_prefix_and_senior_group_agree(scenario):
     """The `SSN-` prefix is cosmetic; only the group makes a nurse senior.
 
@@ -337,11 +404,20 @@ def test_leave_stays_inside_the_budget_the_contract_allows(scenario):
     """
     n_days = (scenario.dates.range.endDate - scenario.dates.range.startDate).days + 1
     shifts = {s.id: s for s in scenario.shiftTypes.items}
-    worked_h = n_days * sum(
-        pref.requiredNumPeople * shifts[pref.shiftType].durationMinutes / 60
-        for pref in scenario.preferences
-        if pref.type == SHIFT_TYPE_REQUIREMENT
-    )
+
+    # Only the open-headcount requirements are summed. The senior-in-charge ones
+    # carry qualifiedPeople and sit INSIDE those headcounts (the senior on am1+
+    # is one of Am1All's two), so counting them as well would double-book the
+    # ward. Total hours are unaffected by which pattern the senior takes, because
+    # each pattern's headcount is fixed either way.
+    per_day = 0.0
+    for pref in scenario.preferences:
+        if pref.type != SHIFT_TYPE_REQUIREMENT or pref.qualifiedPeople:
+            continue
+        durations = {shifts[s].durationMinutes for s in _expand(scenario, pref.shiftType)}
+        assert len(durations) == 1, f"{pref.shiftType} mixes shift lengths {durations}"
+        per_day += pref.requiredNumPeople * durations.pop() / 60
+    worked_h = n_days * per_day
     leave, _hard, _soft = _requests(scenario)
     leave_days = sum(len(v) for v in leave.values())
     n = len(scenario.people.items)

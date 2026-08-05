@@ -3,8 +3,8 @@
 #
 # GRADES
 # ------
-#   SSN-<name>  Senior Staff Nurse - may fill a senior-only (+) slot   (18 of 32)
-#   SN-<name>   Staff Nurse                                            (14 of 32)
+#   SSN-<name>  Senior Staff Nurse - may fill a senior-only (+) slot   (12 of 32)
+#   SN-<name>   Staff Nurse                                            (20 of 32)
 # The prefix on a nurse's id IS the grade; nothing else marks it, and the
 # SeniorStaffNurses group must list every SSN or the senior rule silently covers
 # fewer people than it looks like it does.
@@ -12,18 +12,26 @@
 # HOW THE SENIOR RULE IS BUILT
 # ----------------------------
 # Each of the eight patterns is declared TWICE: `am1` is open to anyone, `am1+`
-# is the same hours reserved for a Senior Staff Nurse via `qualifiedPeople`.
-# Staffing then asks for N on the open slot and exactly 1 on the `+` slot, so
-# "every shift has a senior on it" holds by construction and the senior is
-# visible in the roster rather than being something you audit for afterwards.
-# (`qualifiedPeople` cannot express "at least one of these" -- it EXCLUDES
-# everyone else -- which is why the senior needs its own slot. The same `+`
-# convention is used by large-ward-with-87-people-2025-11.yaml.)
+# is the same hours reserved for a Senior Staff Nurse via `qualifiedPeople`. The
+# senior is then a real slot in the roster rather than something you audit for
+# afterwards. (`qualifiedPeople` cannot express "at least one of these" -- it
+# EXCLUDES everyone else -- which is why the senior needs its own slot. The same
+# `+` convention is used by large-ward-with-87-people-2025-11.yaml.)
 #
-# This has a consequence worth seeing: a senior is needed on 8 patterns every
-# day, and a nurse works about 9 days in 14, so the ward needs at least 12
-# seniors and comfortably more. That is why 18 of the 32 nurses are SSN. It falls
-# out of the rule, it was not chosen for flavour.
+# THE SENIOR REQUIREMENT IS PER PART OF THE DAY, NOT PER SHIFT. The morning is
+# am1, am2 and am3 together and needs ONE senior in charge across all three, not
+# one on each; likewise the afternoon. The long day and the night are single
+# patterns, so they take one each. Four seniors on duty a day, not eight.
+#
+# That is what makes the establishment realistic. At one senior per pattern the
+# ward needed 8 seniors on duty daily and, since a nurse works about 17 days in
+# 28, that forced 18 of 32 to be SSN -- over half the ward. Per part of the day
+# it needs 4, and 12 of 32 (37%) is comfortable.
+#
+# Staffing is written against the `XxxAll` groups (pattern + its senior twin) so
+# a shift's headcount stays fixed wherever the senior in charge happens to land.
+# A group selector makes ONE aggregate equation across its members, which is what
+# both layers depend on.
 #
 # WHY THE CLOCK TIMES MATTER
 # --------------------------
@@ -217,6 +225,42 @@ shiftTypes:
     - id: AnyDayShift
       description: Every shift that is not a night
       members: [AllMornings, AllAfternoons, AllLongDays]
+    # One pattern and its senior-only twin taken together. Staffing is written
+    # against these so a shift's headcount does not change depending on whether
+    # the senior in charge happens to be on it that day.
+    - id: Am1All
+      description: Early morning am1, both slots
+      members: [am1, am1+]
+    - id: Am2All
+      description: Morning am2, both slots
+      members: [am2, am2+]
+    - id: Am3All
+      description: Extended morning am3, both slots
+      members: [am3, am3+]
+    - id: Pm1All
+      description: Early afternoon pm1, both slots
+      members: [pm1, pm1+]
+    - id: Pm2All
+      description: Afternoon pm2, both slots
+      members: [pm2, pm2+]
+    - id: Pm3All
+      description: Late afternoon pm3, both slots
+      members: [pm3, pm3+]
+    - id: LongAll
+      description: Long day, both slots
+      members: [long, long+]
+    - id: NightAll
+      description: Night, both slots
+      members: [night, night+]
+    # The senior-in-charge slots for a whole part of the day. One requirement
+    # across the group means one senior for the morning as a whole, not one on
+    # each of am1, am2 and am3.
+    - id: MorningSeniorSlots
+      description: The senior-in-charge slot for the morning (am1, am2 or am3)
+      members: [am1+, am2+, am3+]
+    - id: AfternoonSeniorSlots
+      description: The senior-in-charge slot for the afternoon (pm1, pm2 or pm3)
+      members: [pm1+, pm2+, pm3+]
 
 people:
   # `history` is the nurse's last five days from the previous fortnight. It is
@@ -253,8 +297,8 @@ people:
     - id: SSN-Farah
       description: Senior Staff Nurse (finished on afternoon)
       history: [am2, am2, OFF, pm2, pm2]
-    - id: SSN-HuiMin
-      description: Senior Staff Nurse (owes one recovery day)
+    - id: SN-HuiMin
+      description: Staff Nurse (owes one recovery day)
       history: [OFF, night, night, night, OFF]
     - id: SSN-Lakshmi
       description: Senior Staff Nurse (rested yesterday)
@@ -262,20 +306,20 @@ people:
     - id: SSN-Rohana
       description: Senior Staff Nurse (finished on morning)
       history: [OFF, am1, am2, OFF, am3]
-    - id: SSN-XiuMei
-      description: Senior Staff Nurse (rested yesterday)
+    - id: SN-XiuMei
+      description: Staff Nurse (rested yesterday)
       history: [long, OFF, OFF, am2, OFF]
-    - id: SSN-Zainab
-      description: Senior Staff Nurse (finished on afternoon)
+    - id: SN-Zainab
+      description: Staff Nurse (finished on afternoon)
       history: [am2, am2, OFF, pm2, pm2]
-    - id: SSN-Anitha
-      description: Senior Staff Nurse (mid night block)
+    - id: SN-Anitha
+      description: Staff Nurse (mid night block)
       history: [OFF, OFF, night, night, OFF]
-    - id: SSN-Suhaila
-      description: Senior Staff Nurse (finished on morning)
+    - id: SN-Suhaila
+      description: Staff Nurse (finished on morning)
       history: [OFF, am1, am2, OFF, am3]
-    - id: SSN-Ramani
-      description: Senior Staff Nurse (rested yesterday)
+    - id: SN-Ramani
+      description: Staff Nurse (rested yesterday)
       history: [long, OFF, OFF, am2, OFF]
     - id: SN-YanLing
       description: Staff Nurse (finished on afternoon)
@@ -322,7 +366,7 @@ people:
   groups:
     - id: SeniorStaffNurses
       description: Nurses who may fill a senior-only (+) slot
-      members: [SSN-Siti, SSN-MeiLing, SSN-Priya, SSN-Nurul, SSN-JiaHui, SSN-Kavitha, SSN-Aishah, SSN-WeiLing, SSN-Devi, SSN-Farah, SSN-HuiMin, SSN-Lakshmi, SSN-Rohana, SSN-XiuMei, SSN-Zainab, SSN-Anitha, SSN-Suhaila, SSN-Ramani]
+      members: [SSN-Siti, SSN-MeiLing, SSN-Priya, SSN-Nurul, SSN-JiaHui, SSN-Kavitha, SSN-Aishah, SSN-WeiLing, SSN-Devi, SSN-Farah, SSN-Lakshmi, SSN-Rohana]
 
 preferences:
   - type: at most one shift per day
@@ -334,96 +378,80 @@ preferences:
   # true by construction, rather than something the finished roster has to be
   # checked for.
   - type: shift type requirement
-    description: Early morning am1 (08:00-15:00) needs 1 nurse of any grade
-    shiftType: am1
-    requiredNumPeople: 1
+    description: Early morning am1 (08:00-15:00) is staffed by 2 nurses in total
+    shiftType: Am1All
+    requiredNumPeople: 2
     date: ALL
+
   - type: shift type requirement
-    description: Early morning am1 (08:00-15:00) also needs exactly 1 Senior Staff Nurse
-    shiftType: am1+
+    description: Morning am2 (08:00-16:00) is staffed by 3 nurses in total
+    shiftType: Am2All
+    requiredNumPeople: 3
+    date: ALL
+
+  - type: shift type requirement
+    description: Extended morning am3 (08:00-17:00) is staffed by 2 nurses in total
+    shiftType: Am3All
+    requiredNumPeople: 2
+    date: ALL
+
+  - type: shift type requirement
+    description: >-
+      One Senior Staff Nurse is in charge of the morning. They work am1, am2 or
+      am3 - whichever suits the rest of the roster - but exactly one across all
+      three, not one on each.
+    shiftType: MorningSeniorSlots
     requiredNumPeople: 1
     qualifiedPeople: [SeniorStaffNurses]
     date: ALL
 
   - type: shift type requirement
-    description: Morning am2 (08:00-16:00) needs 2 nurses of any grade
-    shiftType: am2
+    description: Early afternoon pm1 (12:00-21:00) is staffed by 2 nurses in total
+    shiftType: Pm1All
+    requiredNumPeople: 2
+    date: ALL
+
+  - type: shift type requirement
+    description: Afternoon pm2 (13:00-21:00) is staffed by 3 nurses in total
+    shiftType: Pm2All
+    requiredNumPeople: 3
+    date: ALL
+
+  - type: shift type requirement
+    description: Late afternoon pm3 (14:00-21:00) is staffed by 2 nurses in total
+    shiftType: Pm3All
+    requiredNumPeople: 2
+    date: ALL
+
+  - type: shift type requirement
+    description: >-
+      One Senior Staff Nurse is in charge of the afternoon. They work pm1, pm2 or
+      pm3 - whichever suits the rest of the roster - but exactly one across all
+      three, not one on each.
+    shiftType: AfternoonSeniorSlots
+    requiredNumPeople: 1
+    qualifiedPeople: [SeniorStaffNurses]
+    date: ALL
+
+  - type: shift type requirement
+    description: Long day (08:00-20:30) is staffed by 2 nurses in total
+    shiftType: LongAll
     requiredNumPeople: 2
     date: ALL
   - type: shift type requirement
-    description: Morning am2 (08:00-16:00) also needs exactly 1 Senior Staff Nurse
-    shiftType: am2+
-    requiredNumPeople: 1
-    qualifiedPeople: [SeniorStaffNurses]
-    date: ALL
-
-  - type: shift type requirement
-    description: Extended morning am3 (08:00-17:00) needs 1 nurse of any grade
-    shiftType: am3
-    requiredNumPeople: 1
-    date: ALL
-  - type: shift type requirement
-    description: Extended morning am3 (08:00-17:00) also needs exactly 1 Senior Staff Nurse
-    shiftType: am3+
-    requiredNumPeople: 1
-    qualifiedPeople: [SeniorStaffNurses]
-    date: ALL
-
-  - type: shift type requirement
-    description: Early afternoon pm1 (12:00-21:00) needs 1 nurse of any grade
-    shiftType: pm1
-    requiredNumPeople: 1
-    date: ALL
-  - type: shift type requirement
-    description: Early afternoon pm1 (12:00-21:00) also needs exactly 1 Senior Staff Nurse
-    shiftType: pm1+
-    requiredNumPeople: 1
-    qualifiedPeople: [SeniorStaffNurses]
-    date: ALL
-
-  - type: shift type requirement
-    description: Afternoon pm2 (13:00-21:00) needs 2 nurses of any grade
-    shiftType: pm2
-    requiredNumPeople: 2
-    date: ALL
-  - type: shift type requirement
-    description: Afternoon pm2 (13:00-21:00) also needs exactly 1 Senior Staff Nurse
-    shiftType: pm2+
-    requiredNumPeople: 1
-    qualifiedPeople: [SeniorStaffNurses]
-    date: ALL
-
-  - type: shift type requirement
-    description: Late afternoon pm3 (14:00-21:00) needs 1 nurse of any grade
-    shiftType: pm3
-    requiredNumPeople: 1
-    date: ALL
-  - type: shift type requirement
-    description: Late afternoon pm3 (14:00-21:00) also needs exactly 1 Senior Staff Nurse
-    shiftType: pm3+
-    requiredNumPeople: 1
-    qualifiedPeople: [SeniorStaffNurses]
-    date: ALL
-
-  - type: shift type requirement
-    description: Long day (08:00-20:30) needs 1 nurse of any grade
-    shiftType: long
-    requiredNumPeople: 1
-    date: ALL
-  - type: shift type requirement
-    description: Long day (08:00-20:30) also needs exactly 1 Senior Staff Nurse
+    description: One of the two long-day nurses is a Senior Staff Nurse
     shiftType: long+
     requiredNumPeople: 1
     qualifiedPeople: [SeniorStaffNurses]
     date: ALL
 
   - type: shift type requirement
-    description: Night (20:00-08:30) needs 3 nurses of any grade
-    shiftType: night
-    requiredNumPeople: 3
+    description: Night (20:00-08:30) is staffed by 4 nurses in total
+    shiftType: NightAll
+    requiredNumPeople: 4
     date: ALL
   - type: shift type requirement
-    description: Night (20:00-08:30) also needs exactly 1 Senior Staff Nurse
+    description: One of the four night nurses is a Senior Staff Nurse
     shiftType: night+
     requiredNumPeople: 1
     qualifiedPeople: [SeniorStaffNurses]
