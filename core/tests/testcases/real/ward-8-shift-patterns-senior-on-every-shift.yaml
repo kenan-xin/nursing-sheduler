@@ -1,0 +1,724 @@
+# Four-week ward roster over eight shift patterns, with a Senior Staff Nurse on
+# every shift, and a realistic sheet of leave and day-off requests.
+#
+# GRADES
+# ------
+#   SSN-<name>  Senior Staff Nurse - may fill a senior-only (+) slot   (18 of 32)
+#   SN-<name>   Staff Nurse                                            (14 of 32)
+# The prefix on a nurse's id IS the grade; nothing else marks it, and the
+# SeniorStaffNurses group must list every SSN or the senior rule silently covers
+# fewer people than it looks like it does.
+#
+# HOW THE SENIOR RULE IS BUILT
+# ----------------------------
+# Each of the eight patterns is declared TWICE: `am1` is open to anyone, `am1+`
+# is the same hours reserved for a Senior Staff Nurse via `qualifiedPeople`.
+# Staffing then asks for N on the open slot and exactly 1 on the `+` slot, so
+# "every shift has a senior on it" holds by construction and the senior is
+# visible in the roster rather than being something you audit for afterwards.
+# (`qualifiedPeople` cannot express "at least one of these" -- it EXCLUDES
+# everyone else -- which is why the senior needs its own slot. The same `+`
+# convention is used by large-ward-with-87-people-2025-11.yaml.)
+#
+# This has a consequence worth seeing: a senior is needed on 8 patterns every
+# day, and a nurse works about 9 days in 14, so the ward needs at least 12
+# seniors and comfortably more. That is why 18 of the 32 nurses are SSN. It falls
+# out of the rule, it was not chosen for flavour.
+#
+# WHY THE CLOCK TIMES MATTER
+# --------------------------
+# The solver works in whole days. `startTime`/`endTime`/`restMinutes` are
+# authoring-only and it never reads them (see models.ShiftType), so every
+# hours-based rest rule below was worked out from these times by hand and then
+# written as a banned run of days. Change a start or end time and the rules stop
+# meaning what they say.
+#
+# Gaps from one day to the next (the rules exist to remove the starred ones):
+#
+#              -> 08:00   12:00   13:00   14:00   20:00
+#   am1  15:00     17.0    21.0    22.0    23.0    29.0
+#   am2  16:00     16.0    20.0    21.0    22.0    28.0
+#   am3  17:00     15.0    19.0    20.0    21.0    27.0
+#   pm1  21:00    *11.0    15.0    16.0    17.0    23.0
+#   pm2  21:00    *11.0    15.0    16.0    17.0    23.0
+#   pm3  21:00    *11.0    15.0    16.0    17.0    23.0
+#   long 20:30    *11.5    15.5    16.5    17.5    23.5
+#   night 08:30   *-0.5    *3.5    *4.5    *5.5    11.5   (finishes NEXT morning)
+#
+# Two consequences that are easy to miss:
+#   * A 21:00 finish into an 08:00 start is exactly 11.0 h. That clears the legal
+#     floor, so no interval rule catches it -- it is banned separately.
+#   * A night finishes 08:30, so two clear days then an 08:00 start is only
+#     47.5 h, half an hour short of the 48 h a night run needs. The third day
+#     therefore bans 08:00 starts as well; an afternoon start is 51.5 h and fine.
+#
+# THE NUMBERS
+# -----------
+#   20 shifts a day (8 of them senior-only) = 172 paid hours a day
+#   x 28 days = 4816 paid hours of work to place
+#   + 40 approved leave days credited at 8 h = 5136 h credited in total
+#   over 32 nurses = 160.5 h each, inside the 152-168 h band (avg 40 h a week)
+#
+#   The band is a range rather than a fixed figure because the eight patterns run
+#   from 6.5 h to 11.5 h, so an exact total would only be reachable for certain
+#   combinations of shifts.
+#
+#   LEAVE IS BUDGETED, NOT FREE. Credited hours = 4816 + 8 x (leave days), and
+#   that must land inside 32 x 152-168 h = 4864-5376 h, so leave has to sit
+#   between 6 and 70 days across the ward. Below 6 the ward cannot reach its
+#   minimum hours; above 70 it cannot stay under the maximum. Either way the
+#   solver just returns INFEASIBLE with nothing pointing at leave as the cause,
+#   so change headcount and leave together. The 40 days rostered here sit
+#   mid-band, leaving room to add or move leave without re-planning the ward.
+#
+# EDITABLE IN THE WEB APP
+# -----------------------
+# No pattern uses a multi-value position, because the successions pattern builder
+# appends exactly one token per position. Groups do the work instead. Keep it that
+# way: a nested position still solves, but the card becomes read-only in the UI.
+#
+# Lives in testcases/real/ so it is excluded from the CSV-exact regression sweep
+# (schedule_test_helper.EXCLUDED_TESTCASE_DIRS): a ward this size has no unique
+# optimal roster, which that sweep requires.
+
+apiVersion: alpha
+description: >-
+  Four-week ward roster over eight shift patterns (three morning, three afternoon,
+  a long day and a night), where every shift on every day must include at least
+  one Senior Staff Nurse. Enforces an 11-hour minimum break between shifts, a
+  ban on early starts straight after a late finish, a 48-hour recovery window
+  after a run of nights, and one rest day of at least 30 unbroken hours a week.
+country: SG
+
+dates:
+  range:
+    startDate: 2026-10-01
+    endDate: 2026-10-28
+
+shiftTypes:
+  items:
+    - id: am1
+      description: Early morning 08:00-15:00, 30 min unpaid break, 6h30 paid (open to any nurse)
+      startTime: "08:00"
+      endTime: "15:00"
+      restMinutes: 30
+      durationMinutes: 390
+    - id: am1+
+      description: Early morning 08:00-15:00, 30 min unpaid break, 6h30 paid (reserved for a Senior Staff Nurse)
+      startTime: "08:00"
+      endTime: "15:00"
+      restMinutes: 30
+      durationMinutes: 390
+    - id: am2
+      description: Morning 08:00-16:00, 30 min unpaid break, 7h30 paid (open to any nurse)
+      startTime: "08:00"
+      endTime: "16:00"
+      restMinutes: 30
+      durationMinutes: 450
+    - id: am2+
+      description: Morning 08:00-16:00, 30 min unpaid break, 7h30 paid (reserved for a Senior Staff Nurse)
+      startTime: "08:00"
+      endTime: "16:00"
+      restMinutes: 30
+      durationMinutes: 450
+    - id: am3
+      description: Extended morning 08:00-17:00, 60 min unpaid break, 8h paid (open to any nurse)
+      startTime: "08:00"
+      endTime: "17:00"
+      restMinutes: 60
+      durationMinutes: 480
+    - id: am3+
+      description: Extended morning 08:00-17:00, 60 min unpaid break, 8h paid (reserved for a Senior Staff Nurse)
+      startTime: "08:00"
+      endTime: "17:00"
+      restMinutes: 60
+      durationMinutes: 480
+    - id: pm1
+      description: Early afternoon 12:00-21:00, 60 min unpaid break, 8h paid (open to any nurse)
+      startTime: "12:00"
+      endTime: "21:00"
+      restMinutes: 60
+      durationMinutes: 480
+    - id: pm1+
+      description: Early afternoon 12:00-21:00, 60 min unpaid break, 8h paid (reserved for a Senior Staff Nurse)
+      startTime: "12:00"
+      endTime: "21:00"
+      restMinutes: 60
+      durationMinutes: 480
+    - id: pm2
+      description: Afternoon 13:00-21:00, 30 min unpaid break, 7h30 paid (open to any nurse)
+      startTime: "13:00"
+      endTime: "21:00"
+      restMinutes: 30
+      durationMinutes: 450
+    - id: pm2+
+      description: Afternoon 13:00-21:00, 30 min unpaid break, 7h30 paid (reserved for a Senior Staff Nurse)
+      startTime: "13:00"
+      endTime: "21:00"
+      restMinutes: 30
+      durationMinutes: 450
+    - id: pm3
+      description: Late afternoon 14:00-21:00, 30 min unpaid break, 6h30 paid (open to any nurse)
+      startTime: "14:00"
+      endTime: "21:00"
+      restMinutes: 30
+      durationMinutes: 390
+    - id: pm3+
+      description: Late afternoon 14:00-21:00, 30 min unpaid break, 6h30 paid (reserved for a Senior Staff Nurse)
+      startTime: "14:00"
+      endTime: "21:00"
+      restMinutes: 30
+      durationMinutes: 390
+    - id: long
+      description: Long day 08:00-20:30, 60 min unpaid break, 11h30 paid (open to any nurse)
+      startTime: "08:00"
+      endTime: "20:30"
+      restMinutes: 60
+      durationMinutes: 690
+    - id: long+
+      description: Long day 08:00-20:30, 60 min unpaid break, 11h30 paid (reserved for a Senior Staff Nurse)
+      startTime: "08:00"
+      endTime: "20:30"
+      restMinutes: 60
+      durationMinutes: 690
+    - id: night
+      description: Night 20:00-08:30, 60 min unpaid break, 11h30 paid (open to any nurse)
+      startTime: "20:00"
+      endTime: "08:30"
+      restMinutes: 60
+      durationMinutes: 690
+    - id: night+
+      description: Night 20:00-08:30, 60 min unpaid break, 11h30 paid (reserved for a Senior Staff Nurse)
+      startTime: "20:00"
+      endTime: "08:30"
+      restMinutes: 60
+      durationMinutes: 690
+  groups:
+    # Each group covers a shift pattern AND its senior-only twin, so a rule
+    # written against the group applies to both.
+    - id: AllMornings
+      description: Every morning shift
+      members: [am1, am1+, am2, am2+, am3, am3+]
+    - id: AllAfternoons
+      description: Every afternoon shift
+      members: [pm1, pm1+, pm2, pm2+, pm3, pm3+]
+    - id: AllLongDays
+      description: Every long day shift
+      members: [long, long+]
+    - id: AllNights
+      description: Every night shift
+      members: [night, night+]
+    - id: StartsAt0800
+      description: Every shift that starts at 08:00
+      members: [AllMornings, AllLongDays]
+    - id: FinishesLate
+      description: Every shift that finishes at 20:30 or 21:00
+      members: [AllAfternoons, AllLongDays]
+    - id: AnyDayShift
+      description: Every shift that is not a night
+      members: [AllMornings, AllAfternoons, AllLongDays]
+
+people:
+  # `history` is the nurse's last five days from the previous fortnight. It is
+  # required, not decorative: without it the rest rules cannot see backwards
+  # past day 1 and the start of every roster would be unprotected.
+  items:
+    - id: SSN-Siti
+      description: Senior Staff Nurse (finished on morning)
+      history: [OFF, am1, am2, OFF, am3]
+    - id: SSN-MeiLing
+      description: Senior Staff Nurse (rested yesterday)
+      history: [long, OFF, OFF, am2, OFF]
+    - id: SSN-Priya
+      description: Senior Staff Nurse (finished on afternoon)
+      history: [am2, am2, OFF, pm2, pm2]
+    - id: SSN-Nurul
+      description: Senior Staff Nurse (recovered from nights)
+      history: [night, night, night, OFF, OFF]
+    - id: SSN-JiaHui
+      description: Senior Staff Nurse (finished on morning)
+      history: [OFF, am1, am2, OFF, am3]
+    - id: SSN-Kavitha
+      description: Senior Staff Nurse (rested yesterday)
+      history: [long, OFF, OFF, am2, OFF]
+    - id: SSN-Aishah
+      description: Senior Staff Nurse (finished on afternoon)
+      history: [am2, am2, OFF, pm2, pm2]
+    - id: SSN-WeiLing
+      description: Senior Staff Nurse (finished on morning)
+      history: [OFF, am1, am2, OFF, am3]
+    - id: SSN-Devi
+      description: Senior Staff Nurse (rested yesterday)
+      history: [long, OFF, OFF, am2, OFF]
+    - id: SSN-Farah
+      description: Senior Staff Nurse (finished on afternoon)
+      history: [am2, am2, OFF, pm2, pm2]
+    - id: SSN-HuiMin
+      description: Senior Staff Nurse (owes one recovery day)
+      history: [OFF, night, night, night, OFF]
+    - id: SSN-Lakshmi
+      description: Senior Staff Nurse (rested yesterday)
+      history: [long, OFF, OFF, am2, OFF]
+    - id: SSN-Rohana
+      description: Senior Staff Nurse (finished on morning)
+      history: [OFF, am1, am2, OFF, am3]
+    - id: SSN-XiuMei
+      description: Senior Staff Nurse (rested yesterday)
+      history: [long, OFF, OFF, am2, OFF]
+    - id: SSN-Zainab
+      description: Senior Staff Nurse (finished on afternoon)
+      history: [am2, am2, OFF, pm2, pm2]
+    - id: SSN-Anitha
+      description: Senior Staff Nurse (mid night block)
+      history: [OFF, OFF, night, night, OFF]
+    - id: SSN-Suhaila
+      description: Senior Staff Nurse (finished on morning)
+      history: [OFF, am1, am2, OFF, am3]
+    - id: SSN-Ramani
+      description: Senior Staff Nurse (rested yesterday)
+      history: [long, OFF, OFF, am2, OFF]
+    - id: SN-YanLing
+      description: Staff Nurse (finished on afternoon)
+      history: [am2, am2, OFF, pm2, pm2]
+    - id: SN-Noraini
+      description: Staff Nurse (finished on morning)
+      history: [OFF, am1, am2, OFF, am3]
+    - id: SN-ShuFen
+      description: Staff Nurse (rested yesterday)
+      history: [long, OFF, OFF, am2, OFF]
+    - id: SN-Kamala
+      description: Staff Nurse (finished on afternoon)
+      history: [am2, am2, OFF, pm2, pm2]
+    - id: SN-Halimah
+      description: Staff Nurse (recovered from nights)
+      history: [night, night, night, OFF, OFF]
+    - id: SN-PeiShan
+      description: Staff Nurse (owes one recovery day)
+      history: [OFF, night, night, night, OFF]
+    - id: SN-Vimala
+      description: Staff Nurse (finished on morning)
+      history: [OFF, am1, am2, OFF, am3]
+    - id: SN-Sabariah
+      description: Staff Nurse (rested yesterday)
+      history: [long, OFF, OFF, am2, OFF]
+    - id: SN-LiPing
+      description: Staff Nurse (finished on afternoon)
+      history: [am2, am2, OFF, pm2, pm2]
+    - id: SN-Geetha
+      description: Staff Nurse (recovered from nights)
+      history: [night, night, night, OFF, OFF]
+    - id: SN-Junaidah
+      description: Staff Nurse (finished on morning)
+      history: [OFF, am1, am2, OFF, am3]
+    - id: SN-XinYi
+      description: Staff Nurse (mid night block)
+      history: [OFF, OFF, night, night, OFF]
+    - id: SN-Suriani
+      description: Staff Nurse (finished on afternoon)
+      history: [am2, am2, OFF, pm2, pm2]
+    - id: SN-Nadia
+      description: Staff Nurse (finished on morning)
+      history: [OFF, am1, am2, OFF, am3]
+  groups:
+    - id: SeniorStaffNurses
+      description: Nurses who may fill a senior-only (+) slot
+      members: [SSN-Siti, SSN-MeiLing, SSN-Priya, SSN-Nurul, SSN-JiaHui, SSN-Kavitha, SSN-Aishah, SSN-WeiLing, SSN-Devi, SSN-Farah, SSN-HuiMin, SSN-Lakshmi, SSN-Rohana, SSN-XiuMei, SSN-Zainab, SSN-Anitha, SSN-Suhaila, SSN-Ramani]
+
+preferences:
+  - type: at most one shift per day
+
+  # ----------------------------------------------------------------- staffing --
+  # Two requirements per shift pattern. The first fills the open slots; the second
+  # reserves one slot for a Senior Staff Nurse, using qualifiedPeople so only an
+  # SSN can take it. Splitting it this way makes "every shift has a senior on it"
+  # true by construction, rather than something the finished roster has to be
+  # checked for.
+  - type: shift type requirement
+    description: Early morning am1 (08:00-15:00) needs 1 nurse of any grade
+    shiftType: am1
+    requiredNumPeople: 1
+    date: ALL
+  - type: shift type requirement
+    description: Early morning am1 (08:00-15:00) also needs exactly 1 Senior Staff Nurse
+    shiftType: am1+
+    requiredNumPeople: 1
+    qualifiedPeople: [SeniorStaffNurses]
+    date: ALL
+
+  - type: shift type requirement
+    description: Morning am2 (08:00-16:00) needs 2 nurses of any grade
+    shiftType: am2
+    requiredNumPeople: 2
+    date: ALL
+  - type: shift type requirement
+    description: Morning am2 (08:00-16:00) also needs exactly 1 Senior Staff Nurse
+    shiftType: am2+
+    requiredNumPeople: 1
+    qualifiedPeople: [SeniorStaffNurses]
+    date: ALL
+
+  - type: shift type requirement
+    description: Extended morning am3 (08:00-17:00) needs 1 nurse of any grade
+    shiftType: am3
+    requiredNumPeople: 1
+    date: ALL
+  - type: shift type requirement
+    description: Extended morning am3 (08:00-17:00) also needs exactly 1 Senior Staff Nurse
+    shiftType: am3+
+    requiredNumPeople: 1
+    qualifiedPeople: [SeniorStaffNurses]
+    date: ALL
+
+  - type: shift type requirement
+    description: Early afternoon pm1 (12:00-21:00) needs 1 nurse of any grade
+    shiftType: pm1
+    requiredNumPeople: 1
+    date: ALL
+  - type: shift type requirement
+    description: Early afternoon pm1 (12:00-21:00) also needs exactly 1 Senior Staff Nurse
+    shiftType: pm1+
+    requiredNumPeople: 1
+    qualifiedPeople: [SeniorStaffNurses]
+    date: ALL
+
+  - type: shift type requirement
+    description: Afternoon pm2 (13:00-21:00) needs 2 nurses of any grade
+    shiftType: pm2
+    requiredNumPeople: 2
+    date: ALL
+  - type: shift type requirement
+    description: Afternoon pm2 (13:00-21:00) also needs exactly 1 Senior Staff Nurse
+    shiftType: pm2+
+    requiredNumPeople: 1
+    qualifiedPeople: [SeniorStaffNurses]
+    date: ALL
+
+  - type: shift type requirement
+    description: Late afternoon pm3 (14:00-21:00) needs 1 nurse of any grade
+    shiftType: pm3
+    requiredNumPeople: 1
+    date: ALL
+  - type: shift type requirement
+    description: Late afternoon pm3 (14:00-21:00) also needs exactly 1 Senior Staff Nurse
+    shiftType: pm3+
+    requiredNumPeople: 1
+    qualifiedPeople: [SeniorStaffNurses]
+    date: ALL
+
+  - type: shift type requirement
+    description: Long day (08:00-20:30) needs 1 nurse of any grade
+    shiftType: long
+    requiredNumPeople: 1
+    date: ALL
+  - type: shift type requirement
+    description: Long day (08:00-20:30) also needs exactly 1 Senior Staff Nurse
+    shiftType: long+
+    requiredNumPeople: 1
+    qualifiedPeople: [SeniorStaffNurses]
+    date: ALL
+
+  - type: shift type requirement
+    description: Night (20:00-08:30) needs 3 nurses of any grade
+    shiftType: night
+    requiredNumPeople: 3
+    date: ALL
+  - type: shift type requirement
+    description: Night (20:00-08:30) also needs exactly 1 Senior Staff Nurse
+    shiftType: night+
+    requiredNumPeople: 1
+    qualifiedPeople: [SeniorStaffNurses]
+    date: ALL
+
+  # -------------------------------------------- 11-hour break between shifts --
+  # The solver works in whole days and ignores the clock times declared above, so
+  # every hours-based rule has to be restated as "this run of days is banned".
+  # The gaps below were worked out from those clock times; change a start or end
+  # time and these rules stop meaning what they say.
+  - type: shift type successions
+    description: >-
+      A nurse who finishes at 20:30 or 21:00 must not start again at 08:00 the
+      next morning. That leaves exactly 11 hours off - the bare legal floor, and
+      too little once travel, sleep and handover are taken out of it.
+    person: ALL
+    date: ALL
+    pattern: [FinishesLate, StartsAt0800]
+    weight: -.inf
+
+  - type: shift type successions
+    description: >-
+      The day after a night shift must be another night or a day off. A night
+      finishes at 08:30, so any day shift on that same date would start before
+      the nurse has even left (08:00) or give only 3 to 5 hours off.
+    person: ALL
+    date: ALL
+    pattern: [AllNights, AnyDayShift]
+    weight: -.inf
+
+  # --------------------------------------- 48-hour recovery after night duty --
+  # The rule above already keeps the first day after a run of nights clear. These
+  # keep the second day clear too, and then stop the nurse from taking an 08:00
+  # start on the third day: measured from the 08:30 night finish that would be
+  # 47.5 hours, half an hour short of the 48 a night run requires. An afternoon
+  # start on the third day is 51.5 hours and is allowed.
+  #
+  # There is no "not a night" token, so each rule below spells out one of the two
+  # ways a nurse can be non-working: a rest day (OFF) or annual leave (LEAVE).
+  - type: shift type successions
+    description: A run of nights is followed by a second clear day - rest-day case
+    person: ALL
+    date: ALL
+    pattern: [AllNights, OFF, ALL]
+    weight: -.inf
+  - type: shift type successions
+    description: A run of nights is followed by a second clear day - annual-leave case
+    person: ALL
+    date: ALL
+    pattern: [AllNights, LEAVE, ALL]
+    weight: -.inf
+
+  - type: shift type successions
+    description: No 08:00 start on the third day after nights (47.5 h) - rest, rest
+    person: ALL
+    date: ALL
+    pattern: [AllNights, OFF, OFF, StartsAt0800]
+    weight: -.inf
+  - type: shift type successions
+    description: No 08:00 start on the third day after nights (47.5 h) - rest, leave
+    person: ALL
+    date: ALL
+    pattern: [AllNights, OFF, LEAVE, StartsAt0800]
+    weight: -.inf
+  - type: shift type successions
+    description: No 08:00 start on the third day after nights (47.5 h) - leave, rest
+    person: ALL
+    date: ALL
+    pattern: [AllNights, LEAVE, OFF, StartsAt0800]
+    weight: -.inf
+  - type: shift type successions
+    description: No 08:00 start on the third day after nights (47.5 h) - leave, leave
+    person: ALL
+    date: ALL
+    pattern: [AllNights, LEAVE, LEAVE, StartsAt0800]
+    weight: -.inf
+
+  # ------------------------------------------------- weekly rest and workload --
+  - type: shift type successions
+    description: >-
+      Never seven days of work in a row, so every nurse gets a rest day in any
+      seven-day stretch. Because nothing finishes later than 21:00 and nothing
+      starts earlier than 08:00, a single rest day is always worth at least 35
+      unbroken hours - comfortably over the 30 hours a statutory rest day needs.
+    person: ALL
+    date: ALL
+    pattern: [ALL, ALL, ALL, ALL, ALL, ALL, ALL]
+    weight: -.inf
+
+  - type: shift type successions
+    description: At most three nights in a row
+    person: ALL
+    date: ALL
+    pattern: [AllNights, AllNights, AllNights, AllNights]
+    weight: -.inf
+
+  # ------------------------------------------------------- contracted hours --
+  # Counted in half-hours, so 304 to 336 means 152 to 168 paid hours over the
+  # four weeks - 38 to 42 hours a week, averaging the contracted 40. A range
+  # rather than a fixed number because the eight shift patterns are different
+  # lengths (6.5 to 11.5 hours), so an exact total would only be reachable for
+  # certain combinations of shifts.
+  #
+  # Approved leave is credited here too, at 16 half-hours (8 h) a day, which is
+  # how a nurse on leave still meets contract without working.
+  - type: shift count
+    description: Each nurse is credited 152 to 168 paid hours over the four weeks
+    person: ALL
+    countDates: ALL
+    countShiftTypes: [am1, am1+, am2, am2+, am3, am3+, pm1, pm1+, pm2, pm2+, pm3, pm3+, long, long+, night, night+, LEAVE]
+    countShiftTypeCoefficients:
+      - [am1, 13]
+      - [am1+, 13]
+      - [am2, 15]
+      - [am2+, 15]
+      - [am3, 16]
+      - [am3+, 16]
+      - [pm1, 16]
+      - [pm1+, 16]
+      - [pm2, 15]
+      - [pm2+, 15]
+      - [pm3, 13]
+      - [pm3+, 13]
+      - [long, 23]
+      - [long+, 23]
+      - [night, 23]
+      - [night+, 23]
+      - [LEAVE, 16]
+    expression: ["x >= T", "x <= T"]
+    target: [304, 336]
+    weight: .inf
+    hoursContract:
+      unit: half-hour
+      policy: range
+
+  # ================================================================ requests ==
+  # What the ward actually receives before a roster is written: approved annual
+  # leave, a few days people genuinely cannot work, and softer preferences the
+  # roster honours where it can.
+  #
+  # Three different strengths are in use here, and the difference matters:
+  #
+  #   LEAVE            always a hard pin, whatever weight is given. The nurse is
+  #                    on paid leave that day and cannot be rostered.
+  #   OFF, weight .inf a hard day off. Not leave: it earns no hours, so the nurse
+  #                    must still reach 152 h from fewer available days.
+  #   OFF, weight 30.. a preference. The solver gives the day off when it can and
+  #                    overrides it when the ward cannot be staffed otherwise.
+  #                    Nothing at a finite weight can make the roster infeasible.
+  #
+  # Leave is budgeted (see the header): 40 days across the ward puts credited
+  # hours mid-band. Blocks run 2-7 days, which is what a real request sheet looks
+  # like over four weeks - nobody takes the whole roster off.
+
+  # -------------------------------------------------- approved annual leave --
+  - type: shift request
+    description: SSN-Priya - annual leave, first week
+    person: SSN-Priya
+    date: [2026-10-01, 2026-10-02, 2026-10-03, 2026-10-04, 2026-10-05]
+    shiftType: LEAVE
+  - type: shift request
+    description: SSN-Farah - annual leave
+    person: SSN-Farah
+    date: [2026-10-03, 2026-10-04, 2026-10-05, 2026-10-06, 2026-10-07]
+    shiftType: LEAVE
+  - type: shift request
+    description: SN-Geetha - two days annual leave
+    person: SN-Geetha
+    date: [2026-10-06, 2026-10-07]
+    shiftType: LEAVE
+  - type: shift request
+    description: SN-Kamala - annual leave, second week
+    person: SN-Kamala
+    date: [2026-10-08, 2026-10-09, 2026-10-10, 2026-10-11, 2026-10-12]
+    shiftType: LEAVE
+  - type: shift request
+    description: SN-LiPing - annual leave
+    person: SN-LiPing
+    date: [2026-10-10, 2026-10-11, 2026-10-12, 2026-10-13, 2026-10-14]
+    shiftType: LEAVE
+  - type: shift request
+    description: SSN-Nurul - a full week of annual leave
+    person: SSN-Nurul
+    date: [2026-10-15, 2026-10-16, 2026-10-17, 2026-10-18, 2026-10-19, 2026-10-20, 2026-10-21]
+    shiftType: LEAVE
+  - type: shift request
+    description: SSN-Rohana - two days annual leave
+    person: SSN-Rohana
+    date: [2026-10-16, 2026-10-17]
+    shiftType: LEAVE
+  - type: shift request
+    description: SN-ShuFen - annual leave, final week
+    person: SN-ShuFen
+    date: [2026-10-20, 2026-10-21, 2026-10-22, 2026-10-23, 2026-10-24]
+    shiftType: LEAVE
+  - type: shift request
+    description: SSN-JiaHui - four days annual leave
+    person: SSN-JiaHui
+    date: [2026-10-23, 2026-10-24, 2026-10-25, 2026-10-26]
+    shiftType: LEAVE
+
+  # ------------------------------------ days that genuinely cannot be worked --
+  # Hard, but unpaid: unlike leave these earn no contracted hours.
+  - type: shift request
+    description: SN-XinYi - no childcare on these two days
+    person: SN-XinYi
+    date: [2026-10-02, 2026-10-03]
+    shiftType: OFF
+    weight: .inf
+  - type: shift request
+    description: SN-Vimala - family wedding, cannot work
+    person: SN-Vimala
+    date: 2026-10-11
+    shiftType: OFF
+    weight: .inf
+  - type: shift request
+    description: SN-Nadia - court appearance, cannot work
+    person: SN-Nadia
+    date: 2026-10-19
+    shiftType: OFF
+    weight: .inf
+  - type: shift request
+    description: SSN-Devi - sitting a professional exam, cannot work
+    person: SSN-Devi
+    date: 2026-10-28
+    shiftType: OFF
+    weight: .inf
+
+  # ---------------------------------------------------- preferred days off --
+  # Honoured where possible, overridden if the ward cannot be staffed otherwise.
+  - type: shift request
+    description: SN-PeiShan - would prefer this day off
+    person: SN-PeiShan
+    date: 2026-10-06
+    shiftType: OFF
+    weight: 30
+  - type: shift request
+    description: SN-Noraini - would prefer this day off
+    person: SN-Noraini
+    date: 2026-10-08
+    shiftType: OFF
+    weight: 40
+  - type: shift request
+    description: SSN-Kavitha - would prefer this day off
+    person: SSN-Kavitha
+    date: 2026-10-10
+    shiftType: OFF
+    weight: 30
+  - type: shift request
+    description: SSN-MeiLing - would prefer this day off
+    person: SSN-MeiLing
+    date: 2026-10-13
+    shiftType: OFF
+    weight: 40
+  - type: shift request
+    description: SN-Junaidah - would prefer this day off
+    person: SN-Junaidah
+    date: 2026-10-18
+    shiftType: OFF
+    weight: 30
+  - type: shift request
+    description: SSN-Aishah - would prefer this day off
+    person: SSN-Aishah
+    date: 2026-10-22
+    shiftType: OFF
+    weight: 30
+  - type: shift request
+    description: SSN-Siti - would like this weekend off
+    person: SSN-Siti
+    date: [2026-10-25, 2026-10-26]
+    shiftType: OFF
+    weight: 60
+  - type: shift request
+    description: SN-Halimah - would like the last two days off
+    person: SN-Halimah
+    date: [2026-10-27, 2026-10-28]
+    shiftType: OFF
+    weight: 50
+
+  # ----------------------------------------------- shift-pattern preferences --
+  - type: shift request
+    description: SSN-WeiLing - prefers night duty
+    person: SSN-WeiLing
+    date: ALL
+    shiftType: AllNights
+    weight: 8
+  - type: shift request
+    description: SN-Sabariah - prefers mornings
+    person: SN-Sabariah
+    date: ALL
+    shiftType: AllMornings
+    weight: 8
+  - type: shift request
+    description: SSN-Lakshmi - would rather avoid nights
+    person: SSN-Lakshmi
+    date: ALL
+    shiftType: AllNights
+    weight: -8
