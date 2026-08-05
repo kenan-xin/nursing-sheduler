@@ -1,0 +1,393 @@
+# 28-day / 160-contracted-hour ward roster with Singapore EA rest rules plus an
+# NHS-style night-recovery block.
+#
+# WHY THE CLOCK TIMES MATTER
+# --------------------------
+# The solver is day-granular: one column per date, at most one day-state per
+# person per day. `startTime`/`endTime`/`restMinutes`/`durationMinutes` are
+# authoring-only and are IGNORED by the solver (see models.ShiftType). Every
+# hours-based rest rule below is therefore pre-computed from these clock times
+# into day-adjacency patterns. Change a clock time and the succession
+# preferences below stop being a correct encoding of the rules.
+#
+# Resulting inter-shift gaps (this table IS the compliance argument):
+#
+#   M 15:30 -> M 07:00 (+1)          15.5 h   ok
+#   M 15:30 -> A 15:00 (+1)          23.5 h   ok
+#   M 15:30 -> N 22:30 (+1)          31.0 h   ok
+#   A 23:30 -> M 07:00 (+1)           7.5 h   BANNED (interval + quick-return)
+#   A 23:30 -> A 15:00 (+1)          15.5 h   ok
+#   A 23:30 -> N 22:30 (+1)          23.0 h   ok
+#   N 07:00 -> M 07:00 (same day)     0.0 h   BANNED (a new calendar day, so
+#                                             "at most one shift per day" does
+#                                             NOT catch this)
+#   N 07:00 -> A 15:00 (same day)     8.0 h   BANNED (interval)
+#   N 07:00 -> N 22:30 (same day)    15.5 h   ok (block continuation)
+#   N 07:00, two clear days, M 07:00 48.0 h   night recovery satisfied exactly
+#   any non-N, one rest day, M 07:00 31.5 h   30-h statutory rest satisfied
+#
+# Two load-bearing coincidences:
+#   1. The 48 h lands EXACTLY because M's start (07:00) is not earlier than N's
+#      end (07:00). Move Morning to 06:30 and two clear days becomes 47.5 h.
+#   2. The 30-hour rule needs no separate encoding: the worst single-rest-day
+#      sandwich (A -> rest -> M) is 31.5 h. This only holds because nights are
+#      already excluded by the recovery rule -- N -> rest -> M is just 24 h.
+#
+# FEASIBILITY IDENTITY
+# --------------------
+# `requiredNumPeople` without `preferredNumPeople` is a hard EQUALITY, and the
+# contracted-hours count pins every nurse to exactly 320 half-hours = 20 shifts.
+# So headcount x 20 must equal 28 x sum(requiredNumPeople):
+#     14 x 20 = 280 = 28 x (4 + 3 + 3)
+# Any establishment that does not divide cleanly by 20 is infeasible outright.
+# Paid leave also breaks this identity (it pays hours but supplies no cover), so
+# this scenario carries none; add relief headcount or `preferredNumPeople`
+# before introducing leave.
+#
+# WEB UI EDITABILITY
+# ------------------
+# Every preference here is authorable through the web app with no YAML editing,
+# and the scenario imports through Save & Load with zero warnings. That is a
+# deliberate constraint on how the rules are written, not a coincidence: the
+# successions pattern builder appends exactly one token per position, so no
+# pattern may use a multi-value (nested) position. See the night-block section
+# for the one rule where that costs real compactness.
+#
+# Lives in testcases/real/ because it is excluded from the CSV-exact regression
+# suite (schedule_test_helper.EXCLUDED_TESTCASE_DIRS): a 14-nurse roster of this
+# shape has an enormous set of equally optimal solutions, so byte-exact output
+# comparison and the suite's uniqueness check do not apply.
+
+apiVersion: alpha
+description: >-
+  28-day ward roster for 14 nurses on a 160-hour contract (40-hour weekly
+  average), enforcing the Singapore 30-hour statutory rest day, the quick-return
+  ban, a 48-hour night-shift recovery block, and an 11-hour minimum inter-shift
+  interval.
+country: SG
+
+dates:
+  range:
+    startDate: 2026-09-01
+    endDate: 2026-09-28
+
+shiftTypes:
+  items:
+    - id: M
+      description: Morning 07:00-15:30 (30 min unpaid break, 8 h paid)
+      startTime: "07:00"
+      endTime: "15:30"
+      restMinutes: 30
+      durationMinutes: 480
+    - id: A
+      description: Afternoon 15:00-23:30 (30 min unpaid break, 8 h paid)
+      startTime: "15:00"
+      endTime: "23:30"
+      restMinutes: 30
+      durationMinutes: 480
+    - id: N
+      description: Night 22:30-07:00 (+1) (30 min unpaid break, 8 h paid)
+      startTime: "22:30"
+      endTime: "07:00"
+      restMinutes: 30
+      durationMinutes: 480
+  groups:
+    # Lets the night rules below name "a worked shift that is not a Night" as a
+    # single pattern token. Members are authored shift types only, which is all
+    # the web UI's group member picker offers.
+    - id: DayOrAfternoon
+      description: Any worked shift that is not a Night
+      members: [M, A]
+
+people:
+  # `history` carries the last five day-states of the previous cycle (Aug 27-31).
+  # This is MANDATORY, not decorative: succession windows are only evaluated
+  # where they fit inside the horizon, so without history every cycle boundary
+  # is an unguarded compliance hole. The engine matches a history suffix against
+  # each pattern's prefix and injects the residual pattern at day 0.
+  items:
+    # Mid night-block: two nights done. Day 1 must be N or a rest day, and the
+    # three-night cap forbids nights on both day 1 and day 2.
+    - id: N01
+      description: Staff Nurse 01
+      history: [OFF, OFF, M, N, N]
+    - id: N02
+      description: Staff Nurse 02
+      history: [OFF, OFF, M, N, N]
+    - id: N03
+      description: Staff Nurse 03
+      history: [OFF, OFF, M, N, N]
+    # Night block finished and both recovery days already taken: free on day 1.
+    - id: N04
+      description: Staff Nurse 04
+      history: [N, N, N, OFF, OFF]
+    - id: N05
+      description: Staff Nurse 05
+      history: [N, N, N, OFF, OFF]
+    # Night block finished with only one recovery day taken: day 1 is forced
+    # non-worked by the [N, OFF, ALL] rule reaching across the boundary.
+    - id: N06
+      description: Staff Nurse 06
+      history: [OFF, N, N, N, OFF]
+    - id: N07
+      description: Staff Nurse 07
+      history: [OFF, N, N, N, OFF]
+    # Afternoon tail: day 1 cannot be a Morning (quick-return ban).
+    - id: N08
+      description: Staff Nurse 08
+      history: [M, OFF, A, A, A]
+    - id: N09
+      description: Staff Nurse 09
+      history: [M, OFF, A, A, A]
+    - id: N10
+      description: Staff Nurse 10
+      history: [M, OFF, A, A, A]
+    # Morning tail: unrestricted on day 1.
+    - id: N11
+      description: Staff Nurse 11
+      history: [OFF, M, M, OFF, M]
+    - id: N12
+      description: Staff Nurse 12
+      history: [OFF, M, M, OFF, M]
+    - id: N13
+      description: Staff Nurse 13
+      history: [OFF, M, M, OFF, M]
+    - id: N14
+      description: Staff Nurse 14
+      history: [OFF, M, M, OFF, M]
+
+preferences:
+  - type: at most one shift per day
+
+  # ---------------------------------------------------------------- coverage --
+  # One preference per shift type: a list selector applies the SAME
+  # requiredNumPeople to each member, which is not what a mixed establishment
+  # needs. Total 10 nurse-shifts per day x 28 days = 280 = 14 nurses x 20.
+  - type: shift type requirement
+    description: Morning establishment
+    shiftType: M
+    requiredNumPeople: 4
+    date: ALL
+  - type: shift type requirement
+    description: Afternoon establishment
+    shiftType: A
+    requiredNumPeople: 3
+    date: ALL
+  - type: shift type requirement
+    description: Night establishment
+    shiftType: N
+    requiredNumPeople: 3
+    date: ALL
+
+  # ------------------------------ minimum interval + quick-return ban (11 h) --
+  - type: shift type successions
+    description: No Morning the day after an Afternoon (7.5 h gap)
+    person: ALL
+    date: ALL
+    pattern: [A, M]
+    weight: -.inf
+
+  - type: shift type successions
+    description: >-
+      A night may only be followed by another night or a rest day. Covers both
+      N -> M (0 h, quick-return) and N -> A (8 h, interval) in one rule.
+    person: ALL
+    date: ALL
+    pattern: [N, DayOrAfternoon]
+    weight: -.inf
+
+  # -------------------------------------- 48-hour night-shift recovery block --
+  # The rule above already restricts the day after a night to {N, OFF, LEAVE}.
+  # These two rules cover the "block has ended" branches and forbid work on the
+  # second day as well, giving exactly 48 h from the 07:00 night finish to the
+  # earliest 07:00 Morning start two clear days later. There is no negation
+  # operator, hence one rule per non-N day-state.
+  - type: shift type successions
+    description: No work on the second day after a night block (rest-day branch)
+    person: ALL
+    date: ALL
+    pattern: [N, OFF, ALL]
+    weight: -.inf
+
+  - type: shift type successions
+    description: No work on the second day after a night block (leave branch)
+    person: ALL
+    date: ALL
+    pattern: [N, LEAVE, ALL]
+    weight: -.inf
+
+  # ------------------------------------------- 30-hour statutory rest period --
+  # `ALL` in a succession pattern expands to worked shift types only -- it
+  # excludes both OFF and LEAVE -- so this forbids seven consecutive WORKED
+  # days, guaranteeing at least one non-worked day in every rolling 7-day
+  # window. That is stricter than the Employment Act's calendar-week rule.
+  # Combined with the night-recovery block above, every such rest day is worth
+  # at least 31.5 continuous hours.
+  - type: shift type successions
+    description: Never seven consecutive worked days (rolling weekly rest day)
+    person: ALL
+    date: ALL
+    pattern: [ALL, ALL, ALL, ALL, ALL, ALL, ALL]
+    weight: -.inf
+
+  # ------------------------------------------------------- night-block length --
+  # Blocks run 2-3 nights. The lower bound matters because an isolated single
+  # night still costs the full 48-hour recovery block, so a 1-night block burns
+  # two rest days to buy one shift.
+  #
+  # "No isolated night" is the shape (not-N, N, not-N), and there is no negation
+  # operator. The compact spelling is one rule with multi-value positions --
+  # `[[M, A, OFF, LEAVE], N, [M, A, OFF, LEAVE]]` -- and the solver accepts it,
+  # but the web UI cannot author it: the pattern builder appends exactly one
+  # token per position, and a group cannot stand in for the whole set either
+  # because the group member picker offers authored shift types only, never OFF
+  # or LEAVE. So "not a Night" is enumerated over the three tokens the pattern
+  # builder DOES offer -- DayOrAfternoon, OFF, LEAVE -- giving the 3x3 cross
+  # product below. The DayOrAfternoon group is what keeps this at 9 rules
+  # rather than 16.
+  #
+  # Trade-off, recorded deliberately: the one-rule form is unmaintainable but
+  # tamper-proof (the UI shows it read-only); these 9 are editable but fragile,
+  # since deleting any one of them silently re-legalises isolated nights. That
+  # is acceptable here because this is a rostering-quality rule, not a statutory
+  # one -- do NOT flatten the 48-hour recovery rules on the same reasoning.
+  - type: shift type successions
+    description: At most three consecutive nights
+    person: ALL
+    date: ALL
+    pattern: [N, N, N, N]
+    weight: -.inf
+
+  - type: shift type successions
+    description: No isolated single night (worked before, worked after)
+    person: ALL
+    date: ALL
+    pattern: [DayOrAfternoon, N, DayOrAfternoon]
+    weight: -.inf
+
+  - type: shift type successions
+    description: No isolated single night (worked before, rest after)
+    person: ALL
+    date: ALL
+    pattern: [DayOrAfternoon, N, OFF]
+    weight: -.inf
+
+  - type: shift type successions
+    description: No isolated single night (worked before, leave after)
+    person: ALL
+    date: ALL
+    pattern: [DayOrAfternoon, N, LEAVE]
+    weight: -.inf
+
+  - type: shift type successions
+    description: No isolated single night (rest before, worked after)
+    person: ALL
+    date: ALL
+    pattern: [OFF, N, DayOrAfternoon]
+    weight: -.inf
+
+  - type: shift type successions
+    description: No isolated single night (rest before, rest after)
+    person: ALL
+    date: ALL
+    pattern: [OFF, N, OFF]
+    weight: -.inf
+
+  - type: shift type successions
+    description: No isolated single night (rest before, leave after)
+    person: ALL
+    date: ALL
+    pattern: [OFF, N, LEAVE]
+    weight: -.inf
+
+  - type: shift type successions
+    description: No isolated single night (leave before, worked after)
+    person: ALL
+    date: ALL
+    pattern: [LEAVE, N, DayOrAfternoon]
+    weight: -.inf
+
+  - type: shift type successions
+    description: No isolated single night (leave before, rest after)
+    person: ALL
+    date: ALL
+    pattern: [LEAVE, N, OFF]
+    weight: -.inf
+
+  - type: shift type successions
+    description: No isolated single night (leave before, leave after)
+    person: ALL
+    date: ALL
+    pattern: [LEAVE, N, LEAVE]
+    weight: -.inf
+
+  # ------------------------------------------------------ night-load fairness --
+  # 84 night shifts (3 x 28) over 14 nurses divides exactly, so the fair share
+  # is a hard 6 each rather than a band. Without this the solver has no reason
+  # to prefer an even split: the objective is constant, so it returns the first
+  # feasible point, which ranged from 2 to 10 nights per nurse.
+  #
+  # This is why the minimum block is 2 and not 3. Max-3 plus min-3 forces every
+  # interior block to be exactly 3, so a nurse's in-horizon night count is a
+  # multiple of 3 -- except N01-N03, whose history carries a 2-night block
+  # contributing exactly 1 more, and except a block straddling the horizon tail.
+  # min-3 is not merely slower -- it makes any tight fairness band INFEASIBLE,
+  # for a structural reason. With blocks pinned to exactly 3 days and exactly 3
+  # nights required every day, the coverage recurrence
+  #     n_j + n_{j-1} + n_{j-2} = 3      (n_d = blocks starting on day d)
+  # has a UNIQUE non-negative solution, so the horizon is tiled rigidly: blocks
+  # start only on days 2, 5, 8, ... 26. That yields 27 full blocks plus 3 stray
+  # nights (the day-1 carry-in), so every nurse's night count is 3a + b with
+  # sum(a) = 27 and sum(b) = 3 across 14 nurses. A [5, 7] band admits only
+  # a = 2 for every nurse, forcing sum(a) = 28. Infeasible by exactly one block.
+  #
+  # Measured (solver) against that argument (theory):
+  #   band     theory        solver
+  #   [6, 6]   infeasible    INFEASIBLE   12 s
+  #   [5, 7]   infeasible    UNKNOWN     >30 min   <- true answer, unprovable
+  #   [5, 8]   infeasible    UNKNOWN     240 s
+  #   [4, 6]   infeasible    INFEASIBLE   28 s
+  #   [4, 7]   FEASIBLE      OPTIMAL     6.5 s     <- lowering the FLOOR fixes it
+  #   [4, 8]   FEASIBLE      OPTIMAL      28 s
+  # Widening the ceiling does nothing; only a floor of 4 admits the a = 1 nurse
+  # that makes sum(a) reach 27. min-2 avoids the whole trap because 2- and
+  # 3-blocks tile the horizon flexibly, leaving counts unquantised.
+  # With min-2, 6 is reachable as 3+3 or 2+2+2 for an unencumbered nurse and as
+  # 1+2+3 across the boundary for N01-N03.
+  #
+  # Unmarked shift count (no `hoursContract`), so no coefficients are needed and
+  # the marked-contract policy validation does not apply; `.inf` still makes the
+  # comparison a hard constraint.
+  - type: shift count
+    description: Night-load fairness - exactly six nights per nurse per cycle
+    person: ALL
+    countDates: ALL
+    countShiftTypes: [N]
+    expression: x = T
+    target: 6
+    weight: .inf
+
+  # ------------------------------------------------ 160 contracted hours/cycle --
+  # Coefficients are in half-hours (the fixed unit for a marked contract), so
+  # 16 = 8 paid hours per shift and the target 320 = 160 h = 20 shifts.
+  # LEAVE is selected and given a coefficient so that paid leave would count
+  # toward the contract; the marked-contract validator requires an explicit
+  # coefficient for every selected day-state. No leave is pinned in this
+  # scenario, so the solver forces every leave variable to 0 and the term
+  # contributes nothing.
+  - type: shift count
+    description: 160 contracted hours (320 half-hours) per 28-day cycle
+    person: ALL
+    countDates: ALL
+    countShiftTypes: [M, A, N, LEAVE]
+    countShiftTypeCoefficients:
+      - [M, 16]
+      - [A, 16]
+      - [N, 16]
+      - [LEAVE, 16]
+    expression: x = T
+    target: 320
+    weight: .inf
+    hoursContract:
+      unit: half-hour
+      policy: exact
