@@ -16,14 +16,18 @@
 // happened, not a guess -- and any send racing it is refused by the persisted read
 // anyway.
 //
-// IT ONLY FIRES WHEN THERE IS LIVE WORK. With no active turn there are no callbacks
-// to fence and no stream to abort, and announcing a settlement the user never started
-// would be noise. Read-only rendering after a takeover is the panel's job and happens
-// regardless.
+// IT ONLY FIRES WHEN THERE IS LIVE WORK -- and a turn being PREPARED is live work.
+// With nothing in flight there are no callbacks to fence and no stream to abort, and
+// announcing a settlement the user never started would be noise. But a send that has
+// claimed its epoch and written its `preparing` turn is one await away from the
+// provider, so an ownership or identity change during preparation is exactly the case
+// this hook must catch: ignoring it would let the prepared send launch under a lease
+// or a document that is no longer this tab's. Read-only rendering after a takeover is
+// the panel's job and happens regardless.
 
 import { useEffect } from "react";
 import { useAuthorityStore, type ScenarioOwnership } from "@/lib/store";
-import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
+import { assistantActions, hasLiveAssistantWork } from "@/lib/ai/assistant/store";
 import type { InterruptionTrigger } from "@/lib/ai/assistant/lifecycle";
 
 /**
@@ -52,8 +56,9 @@ export function useInterruptionWatch(): void {
       previous = next;
 
       // Nothing in flight means nothing to interrupt. Checked against the live store
-      // rather than captured, because a turn may have started since subscribing.
-      if (useAssistantStore.getState().activeTurnId === null) return;
+      // rather than captured, because a turn may have started -- or begun preparing --
+      // since subscribing.
+      if (!hasLiveAssistantWork()) return;
 
       if (before.scenarioId !== null && next.scenarioId !== before.scenarioId) {
         // Scoped to the PREVIOUS identity: the work being interrupted belongs to the

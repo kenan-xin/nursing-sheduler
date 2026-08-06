@@ -2,7 +2,16 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createEmptyScenarioUiState } from "@/lib/scenario";
 import { emptyAssistantSettings, type AssistantSettingsV1 } from "./records";
-import { describeRefusal, prepareSend, type PrepareSendDeps } from "./send-gate";
+import {
+  authorizeLaunchAuthority,
+  authorizeLaunchIdentity,
+  describeRefusal,
+  prepareSend,
+  type LaunchAuthorityDeps,
+  type LaunchIdentityInput,
+  type PrepareSendDeps,
+  type SendPlan,
+} from "./send-gate";
 import type { WriterContext } from "./writer-context";
 import { SENTINEL_KEY, TEST_MODEL } from "./test-support";
 
@@ -142,6 +151,7 @@ describe("the send gate refuses before it prepares", () => {
       "empty_message",
       "interrupting",
       "cleared",
+      "revoked",
     ] as const) {
       const text = describeRefusal(reason);
       expect(text.length).toBeGreaterThan(10);
@@ -233,5 +243,179 @@ describe("a prepared send", () => {
     );
 
     expect(result.ok && result.plan.turn.runtimeInstanceId).toBeNull();
+  });
+
+  it("captures the configuration identity it was prepared against", async () => {
+    const result = await prepareSend(
+      { text: "hello", turnEpoch: 1, busy: false, interrupting: false },
+      deps(),
+    );
+
+    // Non-secret by construction: model, probe time and row revision, never the key.
+    expect(result.ok && result.plan.configurationIdentity).toContain(TEST_MODEL);
+    expect(result.ok && result.plan.configurationIdentity).not.toContain(SENTINEL_KEY);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The final launch authorization
+// ---------------------------------------------------------------------------
+
+async function planFor(overrides: Partial<PrepareSendDeps> = {}): Promise<SendPlan> {
+  const result = await prepareSend(
+    { text: "why is this infeasible?", turnEpoch: 9, busy: false, interrupting: false },
+    deps(overrides),
+  );
+  if (!result.ok) throw new Error(`expected a plan, got ${result.reason}`);
+  return result.plan;
+}
+
+function identity(plan: SendPlan, overrides: Partial<LaunchIdentityInput> = {}) {
+  return {
+    plan,
+    boundThreadId: plan.threadId,
+    liveTurnEpoch: plan.turnEpoch,
+    interrupting: false,
+    busy: false,
+    activeRunId: null,
+    ...overrides,
+  } satisfies LaunchIdentityInput;
+}
+
+function authorityDeps(
+  plan: SendPlan,
+  overrides: Partial<LaunchAuthorityDeps> = {},
+): LaunchAuthorityDeps {
+  return {
+    readSettings: async () => READY,
+    readWriterContext: async () => WRITER,
+    readThread: async () => ({
+      threadId: plan.threadId,
+      schemaVersion: 1 as const,
+      scenarioId: plan.scenarioId,
+      state: "active" as const,
+      globalGeneration: plan.globalGeneration,
+      scenarioGeneration: plan.scenarioGeneration,
+      createdAt: "2026-08-06T00:00:00.000Z",
+      updatedAt: "2026-08-06T00:00:00.000Z",
+    }),
+    readTurn: async () => plan.turn,
+    ...overrides,
+  };
+}
+
+describe("the synchronous half of the launch authorization", () => {
+  it("authorises a turn that is still the live one", async () => {
+    const plan = await planFor();
+    expect(authorizeLaunchIdentity(identity(plan))).toEqual({ ok: true });
+  });
+
+  it.each([
+    [
+      "an interruption that has been requested but not settled",
+      { interrupting: true },
+      "interrupting",
+    ],
+    ["an epoch that moved during preparation", { liveTurnEpoch: 10 }, "revoked"],
+    ["a run already in flight", { busy: true }, "busy"],
+    ["another send that won the race to launch", { activeRunId: "run-other" }, "busy"],
+    ["a panel bound to a different thread", { boundThreadId: "thread-other" }, "not_writer"],
+  ] as const)("refuses %s", async (_label, overrides, reason) => {
+    const plan = await planFor();
+    expect(authorizeLaunchIdentity(identity(plan, overrides))).toEqual({ ok: false, reason });
+  });
+
+  it("accepts the run it published for itself", async () => {
+    const plan = await planFor();
+    expect(authorizeLaunchIdentity(identity(plan, { activeRunId: plan.runId }))).toEqual({
+      ok: true,
+    });
+  });
+});
+
+describe("the durable half of the launch authorization", () => {
+  it("authorises a turn whose whole basis is unchanged", async () => {
+    const plan = await planFor();
+    await expect(authorizeLaunchAuthority(identity(plan), authorityDeps(plan))).resolves.toEqual({
+      ok: true,
+    });
+  });
+
+  const settingsAs = (change: Partial<AssistantSettingsV1>): Partial<LaunchAuthorityDeps> => ({
+    readSettings: async (): Promise<AssistantSettingsV1> => ({ ...READY, ...change }),
+  });
+  const writerAs = (change: Partial<WriterContext> | null): Partial<LaunchAuthorityDeps> => ({
+    readWriterContext: async (): Promise<WriterContext | null> =>
+      change === null ? null : { ...WRITER, ...change },
+  });
+
+  it.each([
+    ["AI turned off", settingsAs({ enabled: false }), "not_ready"],
+    ["the key removed", settingsAs({ apiKey: null }), "not_ready"],
+    ["the model replaced", settingsAs({ modelId: "vendor/other" }), "revoked"],
+    [
+      "the key replaced under the same model",
+      settingsAs({ probedAt: "2026-08-06T00:00:01.000Z" }),
+      "revoked",
+    ],
+    ["ownership lost", writerAs(null), "not_writer"],
+    ["the scenario switched", writerAs({ scenarioId: "scenario-b" }), "not_writer"],
+    ["the lease reissued under a new epoch", writerAs({ leaseEpoch: 5 }), "not_writer"],
+    ["the document committed under it", writerAs({ documentRevision: 13 }), "revoked"],
+    [
+      "the thread deleted",
+      { readThread: async (): Promise<null> => null } satisfies Partial<LaunchAuthorityDeps>,
+      "cleared",
+    ],
+    [
+      "the turn deleted by a clear",
+      { readTurn: async (): Promise<null> => null } satisfies Partial<LaunchAuthorityDeps>,
+      "cleared",
+    ],
+  ] as const)(
+    "refuses after %s, before any provider contact",
+    async (_label, overrides, reason) => {
+      const plan = await planFor();
+
+      await expect(
+        authorizeLaunchAuthority(identity(plan), authorityDeps(plan, overrides)),
+      ).resolves.toEqual({ ok: false, reason });
+    },
+  );
+
+  it.each(["cleared", "historical"] as const)(
+    "refuses when the thread became %s during preparation",
+    async (state) => {
+      const plan = await planFor();
+      const thread = await authorityDeps(plan).readThread(plan.threadId);
+
+      await expect(
+        authorizeLaunchAuthority(
+          identity(plan),
+          authorityDeps(plan, { readThread: async () => ({ ...thread!, state }) }),
+        ),
+      ).resolves.toEqual({ ok: false, reason: "cleared" });
+    },
+  );
+
+  it("refuses a turn an interruption already settled", async () => {
+    const plan = await planFor();
+
+    await expect(
+      authorizeLaunchAuthority(
+        identity(plan),
+        authorityDeps(plan, {
+          readTurn: async () => ({ ...plan.turn, state: "detached" as const }),
+        }),
+      ),
+    ).resolves.toEqual({ ok: false, reason: "revoked" });
+  });
+
+  it("still applies the synchronous checks after the durable rereads", async () => {
+    const plan = await planFor();
+
+    await expect(
+      authorizeLaunchAuthority(identity(plan, { liveTurnEpoch: 99 }), authorityDeps(plan)),
+    ).resolves.toEqual({ ok: false, reason: "revoked" });
   });
 });

@@ -2,7 +2,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { AI_KEY_HEADER, AI_MODEL_HEADER, AI_SETUP_CODES } from "@/lib/ai/protocol";
@@ -16,6 +16,7 @@ import {
 } from "@/lib/ai/assistant/test-support";
 import { readAssistantSettings } from "@/lib/ai/assistant/settings-repo";
 import { selectActiveThread } from "@/lib/ai/assistant/history-repo";
+import { readLifecycleLog, resetLifecycleLog } from "@/lib/ai/assistant/lifecycle";
 import { useAuthorityStore } from "@/lib/store";
 import { AiAssistantCard } from "./ai-assistant-card";
 
@@ -59,6 +60,56 @@ function installFetch(options: { probe?: () => Response; catalog?: () => Respons
     throw new Error(`unexpected fetch: ${url}`);
   });
   globalThis.fetch = fetchMock as unknown as typeof fetch;
+}
+
+/**
+ * A probe held open until the test releases it, so a destructive action can land
+ * while the request is genuinely in flight.
+ *
+ * This is the whole shape of the race the cold review found: the probe carries a
+ * captured key, and activation happens several awaits after the user was told the
+ * credential was gone.
+ */
+function installHeldProbe() {
+  let answer!: (ok: boolean) => void;
+  let probeInit: RequestInit | undefined;
+  const answered = new Promise<boolean>((resolve) => {
+    answer = resolve;
+  });
+
+  fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.includes("/api/ai/openrouter/models")) return catalogResponse();
+    if (url.includes("/stop/"))
+      return new Response(JSON.stringify({ stopped: true }), {
+        status: 200,
+      });
+    if (url.includes("/api/ai/openrouter/test")) {
+      probeInit = init;
+      const ok = await answered;
+      return new Response(
+        JSON.stringify(ok ? { ok: true } : { ok: false, code: AI_SETUP_CODES.credentialsRejected }),
+        { status: 200 },
+      );
+    }
+    throw new Error(`unexpected fetch: ${url}`);
+  });
+  globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+  return {
+    /** Resolves once the probe request has actually been issued. */
+    inFlight: () =>
+      waitFor(() => {
+        expect(probeInit).toBeDefined();
+      }),
+    signal: () => probeInit?.signal,
+    release: async (ok: boolean) => {
+      await act(async () => {
+        answer(ok);
+        await Promise.resolve();
+      });
+    },
+  };
 }
 
 function renderCard() {
@@ -459,6 +510,89 @@ describe("replace and remove", () => {
     expect(stored.modelId).toBe(TEST_MODEL);
   });
 
+  it("interrupts the previous configuration's work BEFORE the replacement is tested", async () => {
+    const logAtProbe: string[] = [];
+    installFetch({
+      probe: () => {
+        logAtProbe.push(...readLifecycleLog().map((event) => `${event.trigger}:${event.phase}`));
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      },
+    });
+    // Forget the activation the setup itself performed, so this asserts only the
+    // interruption THIS replacement caused.
+    resetLifecycleLog();
+    const user = userEvent.setup();
+    renderCard();
+
+    await user.click(screen.getByRole("button", { name: "Replace" }));
+    await user.type(screen.getByTestId("ai-key-input"), "sk-or-REPLACEMENT-0002");
+    await user.click(screen.getByTestId("ai-test"));
+    await waitFor(() => expect(screen.getByTestId("ai-key-mask")).toHaveTextContent("0002"));
+
+    // The settled order: the work belonging to the configuration being replaced is
+    // closed BEFORE the new pair reaches OpenRouter, not after it passes.
+    expect(logAtProbe).toContain("replace_configuration:settled");
+  });
+
+  it.each([
+    [
+      "Remove key",
+      async () => {
+        await assistantActions.removeKey();
+      },
+    ],
+    [
+      "Disable",
+      async () => {
+        await assistantActions.setEnabled(false);
+      },
+    ],
+  ])(
+    "cannot re-persist the credential from a probe in flight during %s",
+    async (_label, revoke) => {
+      const probe = installHeldProbe();
+      const user = userEvent.setup();
+      renderCard();
+
+      await user.click(screen.getByRole("button", { name: "Replace" }));
+      await user.type(screen.getByTestId("ai-key-input"), "sk-or-REPLACEMENT-0002");
+      await user.click(screen.getByTestId("ai-test"));
+      await probe.inFlight();
+
+      await act(async () => {
+        await revoke();
+      });
+      // A SUCCESSFUL late probe -- the case that actually writes.
+      await probe.release(true);
+
+      const stored = await readAssistantSettings(harness.config);
+      expect(stored.apiKey).not.toBe("sk-or-REPLACEMENT-0002");
+      // The request itself is abandoned, not merely ignored on arrival.
+      expect(probe.signal()?.aborted).toBe(true);
+    },
+  );
+
+  it("reports nothing when a FAILED probe answers after Remove key", async () => {
+    const probe = installHeldProbe();
+    const user = userEvent.setup();
+    renderCard();
+
+    await user.click(screen.getByTestId("ai-test"));
+    await probe.inFlight();
+
+    await act(async () => {
+      await assistantActions.removeKey();
+    });
+    await probe.release(false);
+
+    // A failure about a configuration that no longer exists is not news the user can
+    // act on, and rendering it would invite a retry of a key they just deleted.
+    const status = screen.getByTestId("ai-probe-status");
+    expect(status.textContent ?? "").not.toMatch(/did not accept/i);
+    expect(status).toHaveTextContent(/Not tested yet/i);
+    expect((await readAssistantSettings(harness.config)).apiKey).toBeNull();
+  });
+
   it("keeps the credential out of every table but the settings row", async () => {
     renderCard();
     await waitFor(() => expect(screen.getByTestId("ai-key-mask")).toBeInTheDocument());
@@ -540,6 +674,30 @@ describe("clearing local AI data", () => {
     // recreating this data after a reload.
     expect((await harness.db.assistantGenerations.get("global"))?.generation).toBe(1);
     await waitFor(() => expect(screen.getByTestId("ai-readiness")).toHaveTextContent("Off"));
+  });
+
+  it("cannot recreate a cleared configuration from a probe that was in flight", async () => {
+    const probe = installHeldProbe();
+    const user = userEvent.setup();
+    renderCard();
+
+    // Re-test the stored pair; the key stays stored, so the probe carries it.
+    await user.click(screen.getByTestId("ai-test"));
+    await probe.inFlight();
+
+    await user.click(screen.getByTestId("ai-clear-all"));
+    await user.click(screen.getByTestId("ai-clear-confirm-yes"));
+    await waitFor(async () => {
+      expect(await harness.db.assistantSettings.count()).toBe(0);
+    });
+
+    await probe.release(true);
+
+    // The row the user was told was deleted stays deleted. Its late activation would
+    // not be fenced by any generation: the settings row belongs to no turn.
+    expect(await harness.db.assistantSettings.count()).toBe(0);
+    expect(await readAssistantSettings(harness.config)).toMatchObject({ apiKey: null });
+    expect(probe.signal()?.aborted).toBe(true);
   });
 
   it("Clear history keeps the key and the model choice", async () => {

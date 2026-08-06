@@ -20,8 +20,11 @@ import { useAgent, UseAgentUpdate } from "@copilotkit/react-core/v2";
 import type { AgentSubscriber, Message } from "@ag-ui/client";
 import { AI_AGENT_ID } from "@/lib/ai/protocol";
 import {
+  UNSETTLED_TURN_STATES,
   persistThreadMessages,
+  readThread,
   readThreadMessages,
+  readTurn,
   recordPreparingTurn,
   selectActiveThread,
   setTurnState,
@@ -29,13 +32,20 @@ import {
 import { toTransportThread } from "@/lib/ai/assistant/messages";
 import { readAssistantSettings } from "@/lib/ai/assistant/settings-repo";
 import { buildAssistantContext } from "@/lib/ai/assistant/scenario-context";
-import { prepareSend, type SendRefusal } from "@/lib/ai/assistant/send-gate";
+import {
+  authorizeLaunchAuthority,
+  authorizeLaunchIdentity,
+  prepareSend,
+  type LaunchIdentityInput,
+  type SendRefusal,
+} from "@/lib/ai/assistant/send-gate";
 import {
   peekRuntimeInstanceId,
   primeRuntimeInstanceId,
+  readActiveRunHandle,
   setActiveRunHandle,
 } from "@/lib/ai/assistant/runtime-stop";
-import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
+import { assistantActions, isInterrupting, useAssistantStore } from "@/lib/ai/assistant/store";
 import { readWriterContext } from "@/lib/ai/assistant/writer-context";
 import { useAuthorityStore } from "@/lib/store";
 import { useContextTools } from "./use-context-tools";
@@ -122,13 +132,18 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
   // `abortRun` on an unmounted agent is harmless: it aborts that run's fetch and
   // nothing else.
 
-  const send = useCallback(
-    async (text: string) => {
-      if (input.historical) {
-        assistantActions.refuse("not_writer");
-        return;
-      }
+  // SINGLE FLIGHT over the whole prepare-to-settle window.
+  //
+  // `agent.isRunning` only covers the RUN, and preparation is the gap it cannot see.
+  // Two submits landing in that gap would both claim a turn epoch -- and because
+  // claiming one drops `authorizedTurnEpoch` (see the two-epoch note in the store),
+  // the second claim would de-authorise the first turn's own tools the moment it
+  // started preparing. Refusing before anything is claimed is what makes "at most one
+  // run per panel" true rather than merely likely.
+  const sending = useRef(false);
 
+  const runSend = useCallback(
+    async (text: string) => {
       // The first moment anything needs the runtime's launch identity, and therefore
       // the first moment this app makes the same-origin `/info` request. Cached, so a
       // second send costs nothing.
@@ -140,7 +155,7 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
           text,
           turnEpoch: turnEpochForSend,
           busy: agent.isRunning,
-          interrupting: useAssistantStore.getState().interruption !== null,
+          interrupting: isInterrupting(),
         },
         {
           readSettings: () => readAssistantSettings(),
@@ -157,17 +172,45 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
       );
 
       if (!preparation.ok) {
+        assistantActions.abandonPreparing(turnEpochForSend);
         assistantActions.refuse(preparation.reason satisfies SendRefusal);
         return;
       }
       const { plan } = preparation;
+
+      /**
+       * Give up a prepared turn without contacting the provider.
+       *
+       * The turn row is a durable fact -- it was written before anything could run --
+       * so it is SETTLED rather than forgotten, and settled as `revoked`: nothing was
+       * ever sent, so calling it a detachment would overstate what is unknown. A turn
+       * an interruption already settled keeps that interruption's terminal story;
+       * relabelling it here would erase which trigger closed it.
+       */
+      const quarantine = async (reason: SendRefusal): Promise<void> => {
+        assistantActions.abandonPreparing(turnEpochForSend);
+        assistantActions.refuse(reason);
+        const current = await readTurn(plan.turn.turnId);
+        if (!current || !UNSETTLED_TURN_STATES.includes(current.state)) return;
+        await setTurnState(plan.turn.turnId, { state: "terminal", settlement: "revoked" });
+      };
+
+      /** The live half of the launch check, sampled at the moment it is asked. */
+      const identityNow = (): LaunchIdentityInput => ({
+        plan,
+        boundThreadId: input.threadId,
+        liveTurnEpoch: useAssistantStore.getState().turnEpoch,
+        interrupting: isInterrupting(),
+        busy: agent.isRunning,
+        activeRunId: readActiveRunHandle()?.runId ?? null,
+      });
 
       // The thread the gate selected may not be the one this component is bound to
       // — the scenario can have changed under an open panel. Refuse rather than send
       // this document's question into the previous document's conversation; the
       // panel re-mounts on the new thread and the user can resend.
       if (plan.threadId !== input.threadId) {
-        assistantActions.refuse("not_writer");
+        await quarantine("not_writer");
         return;
       }
 
@@ -192,6 +235,42 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
         createdAt: new Date().toISOString(),
       });
 
+      // THE FINAL AUTHORIZATION. Everything above this line is preparation, and every
+      // await in it is a window in which Stop, Disable, Remove key, Clear, a scenario
+      // switch, a lease loss or a takeover could have closed this turn's authority.
+      // A generation fence cannot help here: it drops later local writes, but it
+      // cannot recall a request already sent to the provider.
+      const authority = await authorizeLaunchAuthority(identityNow(), {
+        readSettings: () => readAssistantSettings(),
+        readWriterContext: () => readWriterContext(),
+        readThread: (threadId) => readThread(threadId),
+        readTurn: (turnId) => readTurn(turnId),
+      });
+      if (!authority.ok) {
+        await quarantine(authority.reason);
+        return;
+      }
+
+      // Marked streaming BEFORE the last check rather than after it, so this fenced
+      // durable write is the last `await` in the send. Anything other than `accepted`
+      // means a Clear moved the generation during preparation, and the conversation
+      // this turn belongs to is already being deleted.
+      if ((await setTurnState(plan.turn.turnId, { state: "streaming" })) !== "accepted") {
+        await quarantine("cleared");
+        return;
+      }
+
+      // NO `await` BETWEEN HERE AND `runAgent`, deliberately. The interruption
+      // controller closes the gate synchronously, so a check with no microtask
+      // boundary after it cannot be overtaken by a closure that has already been
+      // requested -- which is the only sense in which "atomic" is available to a
+      // browser turn.
+      const launch = authorizeLaunchIdentity(identityNow());
+      if (!launch.ok) {
+        await quarantine(launch.reason);
+        return;
+      }
+
       // Published BEFORE the run so an interruption arriving in the same tick as the
       // first byte has something to abort. Cleared in `finally`, and by the controller
       // itself when it aborts -- whichever happens first.
@@ -201,7 +280,6 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
         abort: () => agent.abortRun(),
       });
       assistantActions.beginTurn(plan.turn.turnId, turnEpochForSend);
-      await setTurnState(plan.turn.turnId, { state: "streaming" });
 
       const persist = () =>
         persistThreadMessages(agent.messages, {
@@ -249,7 +327,27 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
         await persist();
       }
     },
-    [agent, input.historical, input.threadId, input.routePath, input.routeLabel],
+    [agent, input.threadId, input.routePath, input.routeLabel],
+  );
+
+  const send = useCallback(
+    async (text: string) => {
+      if (input.historical) {
+        assistantActions.refuse("not_writer");
+        return;
+      }
+      if (sending.current) {
+        assistantActions.refuse("busy");
+        return;
+      }
+      sending.current = true;
+      try {
+        await runSend(text);
+      } finally {
+        sending.current = false;
+      }
+    },
+    [input.historical, runSend],
   );
 
   // Stop is the interruption controller and nothing else. T04's inline

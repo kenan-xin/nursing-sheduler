@@ -77,6 +77,19 @@ export function isAssistantReady(
   return Boolean(settings?.enabled && settings.apiKey && settings.modelId);
 }
 
+/**
+ * A non-secret identity for the configuration a turn was authorised under.
+ *
+ * Every durable write to the settings row moves `updatedAt`, and an activation also
+ * moves `probedAt`, so comparing this string is how a prepared send notices that the
+ * configuration it read at the top of the gate is no longer the one that exists --
+ * without the credential ever leaving the row. Enable/disable, replace, and remove
+ * all change it; nothing else writes the row.
+ */
+export function configurationIdentity(settings: AssistantSettingsV1): string {
+  return `${settings.modelId ?? ""}|${settings.probedAt ?? ""}|${settings.updatedAt}`;
+}
+
 /** What Settings may display about a stored credential. Never the credential. */
 export function maskCredential(apiKey: string | null): string | null {
   if (!apiKey) return null;

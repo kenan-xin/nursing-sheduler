@@ -74,22 +74,53 @@ export function setAssistantEnabled(
   return update(config, (current) => ({ ...current, enabled }));
 }
 
+export interface ActivateConfig extends SettingsRepoConfig {
+  /**
+   * Whether the probe that produced this draft is still the live one, evaluated
+   * INSIDE the write transaction.
+   *
+   * The same rule the content fence follows (see `./fence`): a check made before the
+   * transaction opened is an optimisation and never an authorisation. A probe that
+   * started before Remove key or Clear all and succeeded afterwards would otherwise
+   * write the captured credential back into a row the user was promised was gone.
+   */
+  authorize?: () => boolean;
+}
+
 /**
  * Promote a probe-passed draft to the active configuration. The ONLY writer of
  * `apiKey`/`modelId`, and they are always written together -- a row with a key
  * from one probe and a model from another is unrepresentable.
+ *
+ * `null` means the operation was superseded and nothing was written. That is a
+ * designed outcome, not a failure: the configuration the caller probed no longer
+ * exists, and recreating it is precisely the bug.
  */
 export function activateProbedConfiguration(
   draft: { apiKey: string; modelId: string; modelSource: AssistantModelSource },
-  config: SettingsRepoConfig = {},
-): Promise<AssistantSettingsV1> {
-  return update(config, (current, at) => ({
-    ...current,
-    apiKey: draft.apiKey,
-    modelId: draft.modelId,
-    modelSource: draft.modelSource,
-    probedAt: at.toISOString(),
-  }));
+  config: ActivateConfig = {},
+): Promise<AssistantSettingsV1 | null> {
+  const { db, now } = resolve(config);
+  return db.transaction("rw", "assistantSettings", async () => {
+    if (config.authorize && !config.authorize()) return null;
+    const at = now();
+    const current = (await db.assistantSettings.get(ASSISTANT_SETTINGS_KEY)) ?? {
+      ...emptyAssistantSettings(at),
+    };
+    // Rechecked after the read for the same reason the fence rechecks: the read is
+    // an `await`, and a revocation that landed during it must still win.
+    if (config.authorize && !config.authorize()) return null;
+    const next: AssistantSettingsV1 = {
+      ...current,
+      apiKey: draft.apiKey,
+      modelId: draft.modelId,
+      modelSource: draft.modelSource,
+      probedAt: at.toISOString(),
+      updatedAt: at.toISOString(),
+    };
+    await db.assistantSettings.put(next);
+    return next;
+  });
 }
 
 /**
