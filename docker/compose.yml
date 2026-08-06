@@ -107,6 +107,17 @@ services:
       # is "1"/"true". Empty in production; `make verify-stream` sets it to expose
       # the durable-stream fixture for the assembled browser phase.
       NS_ENABLE_DEV_FIXTURES: ${NS_ENABLE_DEV_FIXTURES:-}
+      # Phase-1 AI runtime containment (T01): EXACTLY ONE web instance. This is a
+      # correctness bound, not a capacity knob — active CopilotKit run replay/abort
+      # state is process-local, so a second replica cannot serve connect/stop for a
+      # run it never started. `instrumentation.ts` refuses to boot on any other
+      # value. Do not add `deploy.replicas`/`scale` to this service. The Python
+      # optimizer scales independently under its own Redis claim fencing.
+      NS_WEB_REPLICAS: "1"
+      # Complete opt-out for CopilotKit runtime + Inspector telemetry. The web
+      # runtime also forces this in-process; setting it here makes the deployed
+      # contract legible without reading code.
+      COPILOTKIT_TELEMETRY_DISABLED: "true"
     networks:
       - ingress
       - app

@@ -11,6 +11,9 @@
 #   - Last-Event-ID replay returns only events after the cursor
 #   - a SIGKILLed claim-holding worker becomes retained `worker_lost` (test-only lease)
 #   - a Redis outage makes backend /ready, /health and the BFF /api/health fail closed (bounded)
+#   - exactly one web instance runs; the mounted CopilotKit runtime is contained
+#     (telemetry off, no-store, no cookie, launch instance id, no thread history);
+#     and a web container told it is one of many REFUSES to start (T01)
 #   - a deliberately mismatched web stamp makes the equality assertion FAIL as expected
 #   - the PUBLIC_ORIGIN validator's fixture matrix is correct
 # Exits non-zero on any failed assertion. The production named-tunnel streaming
@@ -40,6 +43,8 @@ GATE_PREFIX_BASE="nurse_test:vd:$$"
 MIS_VER="9.9.9-mismatch"
 MIS_IMAGE="nsvd-web-mismatch-$$:test"
 MIS_NAME="nsvd-web-mismatch-$$"
+# Throwaway web container used to prove the Phase-1 AI single-instance refusal (T01).
+AI_MULTI_NAME="nsvd-web-ai-multi-$$"
 # After segmentation there is no default network. The mismatch probe needs only to
 # reach backend, so it joins ONLY the application network.
 APP_NETWORK="${PROJECT}_app"
@@ -69,6 +74,7 @@ cleanup() {
   cleanup_probes
   driver "$GATE_PREFIX_BASE" cleanup >/dev/null 2>&1 || true
   docker rm -f "$MIS_NAME" >/dev/null 2>&1 || true
+  docker rm -f "$AI_MULTI_NAME" >/dev/null 2>&1 || true
   docker image rm -f "$MIS_IMAGE" >/dev/null 2>&1 || true
   # -v removes the throwaway redis volume; --rmi local removes this project's built
   # web/backend images (pinned redis/cloudflared have registry names and are kept).
@@ -224,6 +230,45 @@ if $COMPOSE exec -T web sh -c "grep -rq \"$APP_VERSION\" .next/static 2>/dev/nul
   ok "client bundle contains NEXT_PUBLIC_APP_VERSION=$APP_VERSION"
 else
   bad "client bundle does not contain the stamped version"
+fi
+
+echo "== Phase-1 AI runtime containment + single-instance bound (T01) =="
+# The transient CopilotKit runner keeps active run replay/abort state in process
+# memory, so "exactly one web instance" is a correctness bound. Prove it three ways:
+# the deployed topology really runs one web container, the mounted runtime is
+# contained, and a container told it is part of a multi-instance web tier refuses
+# to serve rather than silently detaching browser turns in production.
+web_count="$($COMPOSE ps -q web 2>/dev/null | grep -c . || true)"
+[ "$web_count" = 1 ] \
+  && ok "exactly one web instance is running" \
+  || bad "web instance count=$web_count (Phase-1 AI containment requires exactly 1)"
+
+# `wget -S` writes the response headers to stderr; merge so one capture has both.
+ai_info="$($COMPOSE exec -T web wget -q -S -O - http://127.0.0.1:3000/api/copilotkit/info 2>&1 || true)"
+printf '%s' "$ai_info" | grep -q '"telemetryDisabled":true' \
+  && ok "CopilotKit telemetry is disabled in the deployed runtime" \
+  || bad "/api/copilotkit/info did not report telemetryDisabled (body: $ai_info)"
+printf '%s' "$ai_info" | grep -qi 'Cache-Control: no-store' \
+  && ok "AI runtime responses are no-store" || bad "AI runtime response was not no-store"
+printf '%s' "$ai_info" | grep -qi 'Set-Cookie' \
+  && bad "AI runtime set a cookie" || ok "AI runtime sets no cookie"
+printf '%s' "$ai_info" | grep -q '"runtimeInstanceId"' \
+  && ok "AI runtime exposes its launch instance id" || bad "AI runtime exposed no launch instance id"
+printf '%s' "$ai_info" | grep -q '"list":false' \
+  && ok "AI runtime advertises no server-side thread history" \
+  || bad "AI runtime advertised server-side thread endpoints"
+
+docker rm -f "$AI_MULTI_NAME" >/dev/null 2>&1 || true
+ai_multi_out="$(timeout --foreground --kill-after="${PROBE_KILL_GRACE_SECONDS}s" 20s \
+  docker run --rm --name "$AI_MULTI_NAME" --network "$APP_NETWORK" \
+  -e BACKEND_API_URL="http://backend:8000" -e PUBLIC_ORIGIN="$PUBLIC_ORIGIN" \
+  -e NS_WEB_REPLICAS=2 "${PROJECT}-web" 2>&1)"
+ai_multi_rc=$?
+docker rm -f "$AI_MULTI_NAME" >/dev/null 2>&1 || true
+if [ "$ai_multi_rc" -ne 0 ] && printf '%s' "$ai_multi_out" | grep -q 'NS_WEB_REPLICAS=2'; then
+  ok "web refuses to start when the deployment claims multi-instance AI continuity"
+else
+  bad "web did not fail closed on NS_WEB_REPLICAS=2 (rc=$ai_multi_rc, output: $ai_multi_out)"
 fi
 
 echo "== non-root images + one worker =="
