@@ -41,6 +41,23 @@ class JobState(str, Enum):
         return self in {self.COMPLETED, self.CANCELLED, self.FAILED}
 
 
+class JobPurpose(str, Enum):
+    """Why a job exists, fixed at admission and never rewritten (T09).
+
+    The purpose decides which priority queue a job joins and whether the reserved
+    ordinary admission slots are available to it. It is IMMUTABLE for a reason: if
+    a purpose could change after admission, the pending count it was admitted
+    against would no longer describe the queue it now belongs to, and a diagnostic
+    could be promoted into the reserve it was explicitly refused.
+
+    `ORDINARY` is the default so every existing caller, stored record, and
+    non-assistant submission keeps working unchanged.
+    """
+
+    ORDINARY = "ordinary"
+    ASSISTANT_DIAGNOSTIC = "assistant_diagnostic"
+
+
 class OptimizationOutcome(str, Enum):
     """Normalized outcome produced by a successful optimization run.
 
@@ -71,6 +88,14 @@ class JobRequest:
     """Optional schedule-prettification preference."""
     timeout_seconds: int
     """Maximum duration supplied to the scheduling engine."""
+    purpose: JobPurpose = JobPurpose.ORDINARY
+    """Immutable reason this job exists, deciding its queue and admission (T09).
+
+    Defaults to ordinary, so a submission that says nothing about purpose is
+    ordinary work with full access to pending capacity. Lives on the immutable
+    `JobRequest` rather than on `Job` precisely so no lifecycle transition can
+    reach it.
+    """
     basis: OptimizeBasisV2 | None = None
     """Immutable submission identity, when the client claimed one (T08).
 
@@ -208,6 +233,30 @@ class StoreLimits:
     """Maximum queued, running, or cancelling jobs accepted by the store."""
     max_retained: int
     """Maximum total jobs retained, including terminal history."""
+    ordinary_reserved_slots: int = 1
+    """Pending slots only ordinary work may be admitted into (T09).
+
+    Validated as `0 <= reserve < max_pending`, defaulting to one.
+
+    `reserve >= max_pending` is REFUSED: it would leave no slot any diagnostic
+    could ever occupy, silently disabling diagnostics through a capacity setting
+    instead of a visible decision. That is the failure this bound exists to stop.
+
+    An explicit zero is permitted and means "no reserve", which is the pre-T09
+    behaviour. It is not the default and no deployment reaches it by accident, but
+    it must be expressible: a single-pending-slot store has no room for a reserve
+    at all, and refusing to construct one would make total capacity of one an
+    unrepresentable configuration rather than a small one.
+    """
+
+    def __post_init__(self) -> None:
+        """Validate the reserve against total pending capacity.
+
+        Raises:
+            ValueError: If the reserve would leave no slot for diagnostics.
+        """
+        if not 0 <= self.ordinary_reserved_slots < self.max_pending:
+            raise ValueError("ordinary_reserved_slots must satisfy 0 <= reserve < max_pending")
 
 
 STOPPABLE_SOLVERS = frozenset({"ortools/cp-sat"})

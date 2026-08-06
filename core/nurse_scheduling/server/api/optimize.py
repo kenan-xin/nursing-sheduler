@@ -30,7 +30,7 @@ from ..basis_admission import BasisClaim, verify_basis_claim
 from ..config import ServerSettings
 from ..event_cursor import EventCursorExpired, EventCursorInvalid, encode_cursor
 from ..jobs.controller import JobController
-from ..jobs.models import JobEvent, JobState, solver_supports_stop
+from ..jobs.models import JobEvent, JobPurpose, JobState, solver_supports_stop
 from ..roster_container import (
     decode_workbook,
     parse_roster_container,
@@ -119,6 +119,10 @@ async def create_job(
     prettify: bool | None = Form(None),
     timeout: int | None = Form(None),
     solver: str = Form(SUPPORTED_SOLVER, description="Only ortools/cp-sat is available."),
+    purpose: str = Form(
+        JobPurpose.ORDINARY.value,
+        description="Job purpose deciding queue priority and admission (T09).",
+    ),
     basis_id: str | None = Form(None, description="Claimed OptimizeBasisV2 identity (T08)."),
     input_sha256: str | None = Form(None, description="Claimed SHA-256 of the exact submitted bytes."),
     submission_contract_version: str | None = Form(None),
@@ -150,6 +154,13 @@ async def create_job(
             detail=f"Optimisation timeout must be between 1 and {settings.max_timeout_seconds} seconds",
         )
     canonical_solver = parse_solver(solver)
+    # Validated BEFORE the job exists, like every other admission check, so an
+    # unrecognized purpose is a request error rather than a job silently admitted
+    # as ordinary and given capacity a diagnostic was never entitled to.
+    try:
+        job_purpose = JobPurpose(purpose.strip().lower())
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail="Unsupported job purpose") from error
     try:
         canonical_bytes = await run_in_threadpool(canonicalize_submission, content)
     except MalformedInputError as error:
@@ -187,6 +198,7 @@ async def create_job(
         timeout_seconds=timeout_seconds,
         input_bytes=canonical_bytes,
         basis=verified_basis,
+        purpose=job_purpose,
     )
     response.headers["Location"] = f"/optimize/{job.id}"
     response.headers["Retry-After"] = "1"

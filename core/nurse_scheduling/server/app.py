@@ -42,6 +42,7 @@ from .errors import (
     JobNotFoundError,
     JobOperationContentionError,
     JobOperationNotAllowedError,
+    QueueInvariantError,
     ServerApplicationError,
 )
 from .job_store import JobStore
@@ -189,6 +190,7 @@ def create_app(
         limits=StoreLimits(
             max_pending=settings.max_pending_jobs,
             max_retained=settings.max_retained_jobs,
+            ordinary_reserved_slots=settings.ordinary_reserved_slots,
         ),
         retention_seconds=settings.job_retention_seconds,
         claim_lease_seconds=settings.claim_lease_seconds,
@@ -249,7 +251,15 @@ def create_app(
             status_code = 404
         elif isinstance(exc, JobCapacityError):
             status_code = 429
-        elif isinstance(exc, (JobOperationNotAllowedError, JobOperationContentionError, JobArtifactNotReadyError)):
+        elif isinstance(
+            exc,
+            (
+                JobOperationNotAllowedError,
+                JobOperationContentionError,
+                JobArtifactNotReadyError,
+                QueueInvariantError,
+            ),
+        ):
             # Internal store write conflicts are consumed by the controller, not mapped here.
             status_code = 409
         else:

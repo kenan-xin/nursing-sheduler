@@ -22,18 +22,20 @@ import math
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, overload
 from uuid import uuid4
 
 import redis
 
 from ..errors import (
+    DiagnosticCapacityError,
     JobArtifactNotFoundError,
     JobCapacityError,
     JobInputNotFoundError,
     JobNotFoundError,
     JobOperationContentionError,
+    QueueInvariantError,
     StoreWriteConflictError,
 )
 from ..event_cursor import EventCursorExpired, EventCursorInvalid, decode_cursor, encode_cursor
@@ -46,11 +48,49 @@ from ..jobs.models import (
     JobRequest,
     JobState,
     OptimizationOutcome,
+    JobPurpose,
     OptimizationResult,
     StoredArtifact,
     StoreLimits,
 )
+from ..queue_state import (
+    ADMISSION_OK,
+    ADMISSION_ORDINARY_RESERVED,
+    DIAGNOSTIC_CAPACITY_MESSAGE,
+    INVARIANT_ERROR_ORPHAN_QUEUE_MEMBER,
+    INVARIANT_ERROR_STALE_PENDING_MEMBER,
+    INVARIANT_ERROR_STALE_QUEUE_MEMBER,
+    MAX_RETAINED_INVARIANT_ERRORS,
+    EffectivePosition,
+    JobQueueFacts,
+    QueueMember,
+    QueueStateSnapshot,
+    admission_decision,
+    fifo_sorted,
+)
 from ..retry import retry_with_backoff
+from .queue_script import (
+    OPERATION_ADMIT,
+    OPERATION_CLAIM,
+    OPERATION_COMMIT,
+    OPERATION_DELETE,
+    OPERATION_DESCRIBE,
+    OPERATION_POSITIONS,
+    OPERATION_REPAIR,
+    QUEUE_KEY_HASH_TAG,
+    QUEUE_STATE_MACHINE_SCRIPT,
+    STATUS_CLAIM_LOST,
+    STATUS_CONFLICT,
+    STATUS_EMPTY,
+    STATUS_EXISTS,
+    STATUS_INVALID_TRANSITION,
+    STATUS_MISSING,
+    STATUS_OK,
+    STATUS_ORDINARY_RESERVED,
+    STATUS_PENDING_EXHAUSTED,
+    STATUS_RESIDUE,
+    STATUS_RETAINED_EXHAUSTED,
+)
 
 
 SOCKET_TIMEOUT_MARGIN_SECONDS = 5.0
@@ -115,40 +155,14 @@ REPLAY_SNAPSHOT_MAX_ATTEMPTS = 50
 """Bound on retrying-atomic-read attempts before reporting store contention."""
 
 
-LEASE_COMMIT_SCRIPT = """
-local raw = redis.call('GET', KEYS[1])
-if not raw then return 1 end
-local current = cjson.decode(raw)
-if tonumber(current.revision) ~= tonumber(ARGV[2]) then return 2 end
-if current.worker_id ~= ARGV[3] or current.claim_expires_at ~= ARGV[4] then return 3 end
-local redis_time = redis.call('TIME')
-local now_ms = tonumber(redis_time[1]) * 1000 + math.floor(tonumber(redis_time[2]) / 1000)
-if now_ms >= tonumber(ARGV[5]) then return 3 end
-local lease_token = ARGV[3] .. '|' .. ARGV[2] .. '|' .. ARGV[4]
-if redis.call('GET', KEYS[7]) ~= lease_token then return 3 end
-if tonumber(ARGV[6]) > 0 and tonumber(ARGV[6]) <= now_ms then return 3 end
-redis.call('SET', KEYS[1], ARGV[1])
-if ARGV[7] == '1' then
-  redis.call('SREM', KEYS[6], current.id)
-  redis.call('DEL', KEYS[7])
-elseif tonumber(ARGV[6]) > 0 then
-  local updated = cjson.decode(ARGV[1])
-  local next_token = ARGV[3] .. '|' .. tostring(updated.revision) .. '|' .. updated.claim_expires_at
-  redis.call('SET', KEYS[7], next_token, 'PXAT', ARGV[6])
-end
-if ARGV[8] == '1' then
-  redis.call('SET', KEYS[2], ARGV[9])
-  redis.call('HSET', KEYS[3], 'name', ARGV[10], 'media_type', ARGV[11])
-end
-local index = 13
-local count = tonumber(ARGV[index])
-for _ = 1, count do
-  index = index + 1
-  redis.call('XADD', KEYS[4], 'MAXLEN', '=', ARGV[12], '*', 'type', ARGV[index], 'data', ARGV[index + 1], 'occurred_at', ARGV[index + 2])
-  index = index + 2
-end
-return 0
-"""
+def _now_iso() -> str:
+    """Return the current UTC instant as the isoformat the state machine records.
+
+    Used only to stamp operational repair records. Every LIFECYCLE timestamp still
+    comes from the controller's injected clock, so tests keep deterministic control
+    of job timing.
+    """
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _parse_stream_id(native_id: str) -> tuple[int, int]:
@@ -244,7 +258,18 @@ class RedisJobStore:
         """Binary-safe Redis client for bounded ordinary operations."""
         self._redis.ping()
         self._use_test_lease_commit_path = client is not None and client.__class__.__module__.startswith("fakeredis")
-        """fakeredis lacks Lua; its isolated test client uses the explicit Python test path."""
+        """fakeredis lacks Lua; its isolated test client uses the explicit Python test path.
+
+        This is the ONLY reason a second code path exists. It is confined to the
+        injected in-memory test double, never reachable from a deployed store, and
+        release evidence must additionally run against real Redis, because a suite
+        that only ever proved the fallback would have proved nothing about the
+        state machine that actually ships (T09).
+        """
+        self._supports_lua = not self._use_test_lease_commit_path
+        """Whether this client can execute the versioned Lua state-machine module."""
+        self._queue_script = self._redis.register_script(QUEUE_STATE_MACHINE_SCRIPT) if self._supports_lua else None
+        """The registered state machine, invoked by digest with an EVAL fallback."""
         self._test_lease_commit_boundary = test_lease_commit_boundary
         """Test-store critical section shared with fakeredis command execution."""
         self._store_id_key = self._key("metadata:store_id")
@@ -255,8 +280,17 @@ class RedisJobStore:
         """Sorted-set key (`ZADD`) of retained job IDs scored by creation time."""
         self._pending_key = self._key("pending")
         """Set key (`SADD`) of non-terminal job IDs used for pending-capacity checks."""
-        self._queue_key = self._key("queue")
-        """Sorted-set key (`ZADD`) of queued job IDs scored by creation time for FIFO claims."""
+        self._queue_keys = {purpose: self._key("queue", purpose.value) for purpose in JobPurpose}
+        """One sorted-set key (`ZADD`) per purpose, scored by creation time for FIFO claims.
+
+        Two indexes rather than one index plus a stored priority: the ordinary head
+        must be findable without reading any job record, or "ordinary first" would
+        need a scan whose result could change before the claim committed.
+        """
+        self._invariant_errors_key = self._key("metadata", "invariant_errors")
+        """Bounded stream (`XADD MAXLEN`) recording defensive queue repairs."""
+        self._state_machine_namespace = f"{self._prefix}:{QUEUE_KEY_HASH_TAG}"
+        """Hash-tagged base from which the Lua module derives per-job keys."""
 
     @property
     def store_id(self) -> str:
@@ -282,6 +316,68 @@ class RedisJobStore:
             return value
         raise redis.RedisError("Redis job store identity could not be initialized")
 
+    def _run_state_machine(self, operation: str, payload: dict[str, Any], blob: bytes = b"") -> dict[str, Any]:
+        """Execute one atomic queue transition and decode its JSON reply.
+
+        Raises:
+            redis.RedisError: If the script cannot execute or replies unusably.
+        """
+        assert self._queue_script is not None
+        complete = {
+            "max_events": self._max_events_per_job,
+            "max_invariant_errors": MAX_RETAINED_INVARIANT_ERRORS,
+            **payload,
+        }
+        raw = self._queue_script(
+            keys=[
+                self._jobs_key,
+                self._pending_key,
+                self._queue_keys[JobPurpose.ORDINARY],
+                self._queue_keys[JobPurpose.ASSISTANT_DIAGNOSTIC],
+                self._invariant_errors_key,
+            ],
+            args=[operation, self._state_machine_namespace, json.dumps(complete, separators=(",", ":")), blob],
+        )
+        decoded = json.loads(_decode(raw))
+        if not isinstance(decoded, dict) or "status" not in decoded:
+            raise redis.RedisError("Queue state machine returned an unusable reply")
+        if decoded["status"] == STATUS_INVALID_TRANSITION:
+            raise QueueInvariantError(f"Queue transition rejected: {decoded.get('reason', 'unspecified')}")
+        return decoded
+
+    @staticmethod
+    def _positions(reply: Mapping[str, Any]) -> list[EffectivePosition]:
+        """Decode the authoritative effective-position snapshot from a script reply.
+
+        Lua encodes an empty table as `{}`, not `[]`, so an empty snapshot is
+        normalized here rather than being mistaken for a malformed reply.
+        """
+        raw = reply.get("positions")
+        if not isinstance(raw, list):
+            return []
+        return [EffectivePosition(job_id=entry["job_id"], position=int(entry["position"])) for entry in raw]
+
+    @staticmethod
+    def _event_payloads(events: Sequence[JobEvent], *, mark_queued_state: bool = False) -> list[dict[str, Any]]:
+        """Serialize events for the script, flagging those needing a queue position.
+
+        The flag is computed HERE rather than by matching state strings in Lua so
+        the two implementations cannot disagree about which event carries a position.
+        """
+        payloads = []
+        for event in events:
+            entry: dict[str, Any] = {
+                "type": event.type,
+                "data": json.dumps(event.data, separators=(",", ":")),
+                "occurred_at": event.occurred_at.isoformat(),
+            }
+            if mark_queued_state:
+                entry["queued_state"] = (
+                    event.type == "job.state_changed" and event.data.get("state") == JobState.QUEUED.value
+                )
+            payloads.append(entry)
+        return payloads
+
     def create(
         self,
         job: Job,
@@ -289,25 +385,89 @@ class RedisJobStore:
         limits: StoreLimits,
         events: Sequence[JobEvent],
     ) -> Job:
-        """Atomically create a job while enforcing pending and retained limits.
+        """Atomically admit a job, enforcing pending, reserve, and retained limits.
 
         The oldest finished jobs are removed when retained capacity is needed.
 
         Raises:
             StoreWriteConflictError: If the job ID already exists.
             JobCapacityError: If pending or retained capacity is exhausted.
+            DiagnosticCapacityError: If only the reserved ordinary slots remain.
+            QueueInvariantError: If the job is not admissible as a queued job.
             redis.RedisError: If a Redis operation fails.
         """
+        if job.state != JobState.QUEUED:
+            raise QueueInvariantError("A job may only be admitted in the queued state")
+        if not self._supports_lua:
+            return self._create_via_transaction(job, input_bytes, limits, events)
+        reply = self._run_state_machine(
+            OPERATION_ADMIT,
+            {
+                "job_id": job.id,
+                "purpose": job.request.purpose.value,
+                "score": job.created_at.timestamp(),
+                "job": self._serialize_job(replace(job, revision=1, queue_position=None)),
+                "max_pending": limits.max_pending,
+                "max_retained": limits.max_retained,
+                "reserve": limits.ordinary_reserved_slots,
+                "occurred_at": job.created_at.isoformat(),
+                "events": self._event_payloads(events, mark_queued_state=True),
+            },
+            input_bytes,
+        )
+        status = reply["status"]
+        if status == STATUS_EXISTS:
+            raise StoreWriteConflictError(f"Job already exists: {job.id}")
+        if status == STATUS_ORDINARY_RESERVED:
+            raise DiagnosticCapacityError(DIAGNOSTIC_CAPACITY_MESSAGE)
+        if status == STATUS_PENDING_EXHAUSTED:
+            raise JobCapacityError("Too many jobs are queued or running")
+        if status == STATUS_RETAINED_EXHAUSTED:
+            raise JobCapacityError("Too many jobs are retained")
+        if status != STATUS_OK:
+            raise redis.RedisError(f"Unexpected admission status: {status}")
+        position = reply.get("position")
+        return replace(job, revision=1, queue_position=int(position) if isinstance(position, int) else None)
+
+    def _create_via_transaction(
+        self,
+        job: Job,
+        input_bytes: bytes,
+        limits: StoreLimits,
+        events: Sequence[JobEvent],
+    ) -> Job:
+        """Mirror `create` for the injected fakeredis test client, which has no Lua.
+
+        Raises:
+            StoreWriteConflictError: If the job ID already exists.
+            JobCapacityError: If pending or retained capacity is exhausted.
+            DiagnosticCapacityError: If only the reserved ordinary slots remain.
+            redis.RedisError: If a Redis operation fails.
+        """
+        # Repair BEFORE counting, matching the script's ordering, so stale index
+        # entries cannot make a free slot look occupied. Unlike the script this is a
+        # separate transaction, which is one more reason the fallback is confined to
+        # the test double and real Redis carries the release evidence.
+        self._repair_via_transaction(datetime.now(timezone.utc))
         while True:
             try:
                 with self._redis.pipeline() as transaction:
                     job_key = self._job_key(job.id)
-                    transaction.watch(self._jobs_key, self._pending_key, self._queue_key, job_key)
+                    transaction.watch(self._jobs_key, self._pending_key, *self._queue_keys.values(), job_key)
                     if transaction.exists(job_key):
                         transaction.unwatch()
                         raise StoreWriteConflictError(f"Job already exists: {job.id}")
                     pending_count = transaction.scard(self._pending_key)
-                    if pending_count >= limits.max_pending:
+                    decision = admission_decision(
+                        job.request.purpose,
+                        pending_count=pending_count,
+                        max_pending=limits.max_pending,
+                        ordinary_reserved_slots=limits.ordinary_reserved_slots,
+                    )
+                    if decision == ADMISSION_ORDINARY_RESERVED:
+                        transaction.unwatch()
+                        raise DiagnosticCapacityError(DIAGNOSTIC_CAPACITY_MESSAGE)
+                    if decision != ADMISSION_OK:
                         transaction.unwatch()
                         raise JobCapacityError("Too many jobs are queued or running")
 
@@ -324,14 +484,12 @@ class RedisJobStore:
                             raise JobCapacityError("Too many jobs are retained")
                         prune_ids = [candidate.id for candidate in terminal[:prune_count]]
 
-                    queued_entries = transaction.zrange(self._queue_key, 0, -1, withscores=True)
-                    queue_order = [(_decode(raw_id), score) for raw_id, score in queued_entries]
-                    # can bisect to insert but just sort for simplicity
-                    queue_order.append((job.id, job.created_at.timestamp()))
-                    queue_order.sort(key=lambda entry: (entry[1], entry[0]))
-                    queue_position = next(
-                        index for index, (queued_id, _score) in enumerate(queue_order, start=1) if queued_id == job.id
+                    members = self._read_queue_members(transaction)
+                    members[job.request.purpose].append(
+                        QueueMember(job_id=job.id, created_at=job.created_at.timestamp())
                     )
+                    queue_order = [entry.job_id for entry in self._effective_order(members)]
+                    queue_position = queue_order.index(job.id) + 1
 
                     saved = replace(job, revision=1, queue_position=None)
                     transaction.multi()
@@ -340,14 +498,14 @@ class RedisJobStore:
                     transaction.set(job_key, self._serialize_job(saved))
                     transaction.set(self._input_key(job.id), input_bytes)
                     transaction.zadd(self._jobs_key, {job.id: job.created_at.timestamp()})
-                    transaction.zadd(self._queue_key, {job.id: job.created_at.timestamp()})
+                    transaction.zadd(self._queue_keys[job.request.purpose], {job.id: job.created_at.timestamp()})
                     transaction.sadd(self._pending_key, job.id)
                     self._stage_event_appends(
                         transaction,
                         job.id,
                         self._with_initial_queue_position(events, queue_position),
                     )
-                    for position, (queued_id, _score) in enumerate(queue_order, start=1):
+                    for position, queued_id in enumerate(queue_order, start=1):
                         if queued_id != job.id:
                             self._stage_queue_position_event(transaction, queued_id, position, job.created_at)
                     transaction.execute()
@@ -408,9 +566,61 @@ class RedisJobStore:
         claim_expires_at: datetime,
         runtime_identity: Mapping[str, str] | None = None,
     ) -> Job | None:
-        """Atomically assign the oldest queued job to a worker.
+        """Atomically assign the effective head of the priority queues to a worker.
 
-        Return the claimed running job, or `None` when the queue is empty.
+        The ordinary queue is drained before any diagnostic is considered, so
+        ordinary work overtakes queued diagnostics. Only a QUEUED member is ever
+        removed and no other job is touched, which is precisely why a RUNNING solve
+        — diagnostic or ordinary — is never pre-empted by a new claim.
+
+        Return the claimed running job, or `None` when both queues are empty.
+
+        Raises:
+            redis.RedisError: If a Redis operation fails.
+        """
+        if not self._supports_lua:
+            return self._claim_next_via_transaction(worker_id, started_at, claim_expires_at, runtime_identity)
+        claim_event_data = {
+            "state": JobState.RUNNING.value,
+            "queue_position": None,
+            "cancel_requested": False,
+            "early_completion_requested": False,
+            "worker_id": worker_id,
+            **({"runtime": dict(runtime_identity)} if runtime_identity is not None else {}),
+        }
+        # A residue reply means the head could not be justified by its record and was
+        # removed instead of claimed. Retrying lets the next real head be claimed in
+        # the same poll; the bound stops a pathologically corrupt index from spinning.
+        for _attempt in range(REPLAY_SNAPSHOT_MAX_ATTEMPTS):
+            reply = self._run_state_machine(
+                OPERATION_CLAIM,
+                {
+                    "worker_id": worker_id,
+                    "started_at": started_at.isoformat(),
+                    "claim_expires_at": claim_expires_at.isoformat(),
+                    "claim_expires_ms": self._timestamp_milliseconds(claim_expires_at),
+                    "claim_event_data": json.dumps(claim_event_data, separators=(",", ":")),
+                    "occurred_at": started_at.isoformat(),
+                },
+            )
+            status = reply["status"]
+            if status == STATUS_EMPTY:
+                return None
+            if status == STATUS_RESIDUE:
+                continue
+            if status != STATUS_OK:
+                raise redis.RedisError(f"Unexpected claim status: {status}")
+            return replace(self._deserialize_job(reply["job"]), queue_position=None)
+        raise JobOperationContentionError("Queue head did not stabilize for claiming")
+
+    def _claim_next_via_transaction(
+        self,
+        worker_id: str,
+        started_at: datetime,
+        claim_expires_at: datetime,
+        runtime_identity: Mapping[str, str] | None = None,
+    ) -> Job | None:
+        """Mirror `claim_next` for the injected fakeredis test client, which has no Lua.
 
         Raises:
             redis.RedisError: If a Redis operation fails.
@@ -418,8 +628,9 @@ class RedisJobStore:
         while True:
             try:
                 with self._redis.pipeline() as transaction:
-                    transaction.watch(self._queue_key)
-                    queued = transaction.zrange(self._queue_key, 0, 0)
+                    transaction.watch(*self._queue_keys.values())
+                    order = self._effective_order(self._read_queue_members(transaction))
+                    queued = [order[0].job_id] if order else []
                     if not queued:
                         transaction.unwatch()
                         return None
@@ -432,7 +643,10 @@ class RedisJobStore:
                         # Remove the orphan defensively in case the stored data is inconsistent,
                         # so it cannot block later claims.
                         transaction.multi()
-                        transaction.zrem(self._queue_key, job_id)
+                        self._stage_queue_removal(transaction, job_id)
+                        self._stage_invariant_error(
+                            transaction, INVARIANT_ERROR_ORPHAN_QUEUE_MEMBER, job_id, started_at
+                        )
                         transaction.execute()
                         continue
                     current = self._deserialize_job(raw)
@@ -442,7 +656,8 @@ class RedisJobStore:
                         # defensively if its state and queue index are inconsistent, so it cannot
                         # block later claims.
                         transaction.multi()
-                        transaction.zrem(self._queue_key, job_id)
+                        self._stage_queue_removal(transaction, job_id)
+                        self._stage_invariant_error(transaction, INVARIANT_ERROR_STALE_QUEUE_MEMBER, job_id, started_at)
                         transaction.execute()
                         continue
                     claimed = replace(
@@ -466,7 +681,7 @@ class RedisJobStore:
                         },
                         occurred_at=started_at,
                     )
-                    remaining_ids = [_decode(raw_id) for raw_id in transaction.zrange(self._queue_key, 1, -1)]
+                    remaining_ids = [entry.job_id for entry in order[1:]]
                     transaction.multi()
                     transaction.set(job_key, self._serialize_job(claimed))
                     transaction.set(
@@ -474,7 +689,7 @@ class RedisJobStore:
                         self._lease_token(claimed.worker_id, claimed.revision, claimed.claim_expires_at),
                         pxat=self._timestamp_milliseconds(claimed.claim_expires_at),
                     )
-                    transaction.zrem(self._queue_key, job_id)
+                    transaction.zrem(self._queue_keys[claimed.request.purpose], job_id)
                     self._stage_event_appends(transaction, job_id, [event])
                     self._stage_queue_position_events(transaction, remaining_ids, started_at)
                     transaction.execute()
@@ -499,21 +714,13 @@ class RedisJobStore:
             StoreWriteConflictError: If the stored revision no longer matches.
             redis.RedisError: If a Redis operation fails.
         """
-        if worker_id is not None:
-            if expected_claim_expires_at is None:
-                raise StoreWriteConflictError(f"Worker claim is no longer active: {job.id}")
-            if self._use_test_lease_commit_path:
-                if self._test_lease_commit_boundary is None:
-                    raise redis.RedisError("fakeredis worker commits require an atomic test commit boundary")
-                return self._save_fenced_for_fakeredis(
-                    job,
-                    expected_revision,
-                    events,
-                    artifact,
-                    worker_id,
-                    expected_claim_expires_at,
-                )
-            return self._save_fenced_with_redis_time(
+        if worker_id is not None and expected_claim_expires_at is None:
+            raise StoreWriteConflictError(f"Worker claim is no longer active: {job.id}")
+        if self._supports_lua:
+            # EVERY transition — worker-fenced or not — goes through the one state
+            # machine, so cancel, completion, cancellation completion, and claim
+            # expiry cannot disagree about membership, leases, or positions.
+            return self._commit_via_script(
                 job,
                 expected_revision,
                 events,
@@ -521,7 +728,99 @@ class RedisJobStore:
                 worker_id,
                 expected_claim_expires_at,
             )
+        if worker_id is not None:
+            if self._test_lease_commit_boundary is None:
+                raise redis.RedisError("fakeredis worker commits require an atomic test commit boundary")
+            return self._save_fenced_for_fakeredis(
+                job,
+                expected_revision,
+                events,
+                artifact,
+                worker_id,
+                expected_claim_expires_at,
+            )
+        return self._save_via_transaction(job, expected_revision, events, artifact)
 
+    def _commit_via_script(
+        self,
+        job: Job,
+        expected_revision: int,
+        events: Sequence[JobEvent],
+        artifact: StoredArtifact | None,
+        worker_id: str | None,
+        expected_claim_expires_at: datetime | None,
+    ) -> Job:
+        """Commit one job transition, its membership, lease, events, and positions.
+
+        Raises:
+            JobNotFoundError: If the job does not exist.
+            StoreWriteConflictError: If the revision or the worker claim no longer holds.
+            QueueInvariantError: If the transition is not one the state machine defines.
+            redis.RedisError: If a Redis operation fails.
+        """
+        updated = replace(job, revision=expected_revision + 1, queue_position=None)
+        active = updated.state in {JobState.RUNNING, JobState.CANCELLING}
+        deadline = updated.claim_expires_at if active else None
+        reply = self._run_state_machine(
+            OPERATION_COMMIT,
+            {
+                "job_id": job.id,
+                "expected_revision": expected_revision,
+                "job": self._serialize_job(updated),
+                "purpose": job.request.purpose.value,
+                "new_state": updated.state.value,
+                "new_worker_id": updated.worker_id,
+                "worker_id": worker_id,
+                "expected_claim_expires_at": (
+                    expected_claim_expires_at.isoformat() if expected_claim_expires_at is not None else None
+                ),
+                "expected_claim_expires_ms": (
+                    self._timestamp_milliseconds(expected_claim_expires_at)
+                    if expected_claim_expires_at is not None
+                    else 0
+                ),
+                "next_claim_expires_ms": self._timestamp_milliseconds(deadline) if deadline is not None else 0,
+                "next_lease_token": (
+                    self._lease_token(updated.worker_id, updated.revision, deadline)
+                    if deadline is not None and updated.worker_id is not None
+                    else ""
+                ),
+                "artifact_present": artifact is not None,
+                "artifact_name": artifact.name if artifact is not None else "",
+                "artifact_media_type": artifact.media_type if artifact is not None else "",
+                "events": self._event_payloads(events),
+                "occurred_at": (
+                    events[-1].occurred_at if events else datetime.now(updated.created_at.tzinfo)
+                ).isoformat(),
+            },
+            artifact.content if artifact is not None else b"",
+        )
+        status = reply["status"]
+        if status == STATUS_MISSING:
+            raise JobNotFoundError("Job was not found")
+        if status == STATUS_CONFLICT:
+            raise StoreWriteConflictError(f"Job revision changed: {job.id}")
+        if status == STATUS_CLAIM_LOST:
+            raise StoreWriteConflictError(f"Worker claim is no longer active: {job.id}")
+        if status != STATUS_OK:
+            raise redis.RedisError(f"Unexpected commit status: {status}")
+        position = reply.get("position")
+        return replace(updated, queue_position=position if isinstance(position, int) else None)
+
+    def _save_via_transaction(
+        self,
+        job: Job,
+        expected_revision: int,
+        events: Sequence[JobEvent],
+        artifact: StoredArtifact | None,
+    ) -> Job:
+        """Mirror an unfenced `save` for the fakeredis test client, which has no Lua.
+
+        Raises:
+            JobNotFoundError: If the job does not exist.
+            StoreWriteConflictError: If the stored revision no longer matches.
+            redis.RedisError: If a Redis operation fails.
+        """
         job_key = self._job_key(job.id)
         while True:
             try:
@@ -536,18 +835,19 @@ class RedisJobStore:
                         transaction.unwatch()
                         raise StoreWriteConflictError(f"Job revision changed: {job.id}")
                     updated_job = replace(job, revision=expected_revision + 1, queue_position=None)
+                    self._validate_transition(current, job)
                     remaining_queue_ids: list[str] = []
                     if current.state == JobState.QUEUED and updated_job.state != JobState.QUEUED:
-                        transaction.watch(self._queue_key)
+                        transaction.watch(*self._queue_keys.values())
                         remaining_queue_ids = [
-                            queued_id
-                            for raw_id in transaction.zrange(self._queue_key, 0, -1)
-                            if (queued_id := _decode(raw_id)) != updated_job.id
+                            entry.job_id
+                            for entry in self._effective_order(self._read_queue_members(transaction))
+                            if entry.job_id != updated_job.id
                         ]
                     transaction.multi()
                     transaction.set(job_key, self._serialize_job(updated_job))
                     if updated_job.state != JobState.QUEUED:
-                        transaction.zrem(self._queue_key, updated_job.id)
+                        self._stage_queue_removal(transaction, updated_job.id)
                     if updated_job.state.terminal:
                         transaction.srem(self._pending_key, updated_job.id)
                         transaction.delete(self._lease_key(updated_job.id))
@@ -575,60 +875,6 @@ class RedisJobStore:
                 return self.get(updated_job.id)
             except redis.WatchError:
                 continue
-
-    def _save_fenced_with_redis_time(
-        self,
-        job: Job,
-        expected_revision: int,
-        events: Sequence[JobEvent],
-        artifact: StoredArtifact | None,
-        worker_id: str,
-        expected_claim_expires_at: datetime,
-    ) -> Job:
-        """Commit a worker write only while Redis still considers its lease active."""
-        updated_job = replace(job, revision=expected_revision + 1, queue_position=None)
-        artifact_present = artifact is not None
-        deadline = updated_job.claim_expires_at
-        result = self._redis.eval(
-            LEASE_COMMIT_SCRIPT,
-            7,
-            self._job_key(job.id),
-            self._artifact_key(job.id),
-            self._artifact_metadata_key(job.id),
-            self._events_key(job.id),
-            self._queue_key,
-            self._pending_key,
-            self._lease_key(job.id),
-            self._serialize_job(updated_job),
-            expected_revision,
-            worker_id,
-            expected_claim_expires_at.isoformat(),
-            self._timestamp_milliseconds(expected_claim_expires_at),
-            self._timestamp_milliseconds(deadline) if deadline is not None else 0,
-            "1" if updated_job.state.terminal else "0",
-            "1" if artifact_present else "0",
-            artifact.content if artifact is not None else b"",
-            artifact.name if artifact is not None else "",
-            artifact.media_type if artifact is not None else "",
-            self._max_events_per_job,
-            len(events),
-            *(
-                value
-                for event in events
-                for value in (
-                    event.type,
-                    json.dumps(event.data, separators=(",", ":")),
-                    event.occurred_at.isoformat(),
-                )
-            ),
-        )
-        if result == 1:
-            raise JobNotFoundError("Job was not found")
-        if result in {2, 3}:
-            raise StoreWriteConflictError(f"Worker claim is no longer active: {job.id}")
-        if result != 0:
-            raise redis.RedisError(f"Unexpected lease commit result: {result}")
-        return self.get(job.id)
 
     def _save_fenced_for_fakeredis(
         self,
@@ -688,6 +934,7 @@ class RedisJobStore:
                         if updated_job.state.terminal:
                             transaction.srem(self._pending_key, updated_job.id)
                             transaction.delete(lease_key)
+                            self._stage_queue_removal(transaction, updated_job.id)
                         elif updated_job.claim_expires_at is not None:
                             transaction.set(
                                 lease_key,
@@ -858,6 +1105,137 @@ class RedisJobStore:
             and job.claim_expires_at <= cutoff
         ]
 
+    def describe_queue_state(self) -> QueueStateSnapshot:
+        """Return one atomic snapshot of the complete queue state.
+
+        Atomic by construction: the script reads every index in one execution, and
+        the fallback reads them inside one watched transaction. Assembling this from
+        separate reads would let a concurrent transition fabricate an apparent
+        invariant violation, or hide a real one.
+
+        Raises:
+            redis.RedisError: If a Redis operation fails.
+        """
+        if self._supports_lua:
+            reply = self._run_state_machine(OPERATION_DESCRIBE, {"occurred_at": _now_iso()})
+            jobs = {
+                entry["job_id"]: JobQueueFacts(
+                    state=JobState(entry["state"]),
+                    purpose=JobPurpose(entry["purpose"]),
+                    created_at=datetime.fromisoformat(entry["created_at"]),
+                    has_claim_lease=bool(entry["has_claim_lease"]),
+                )
+                for entry in (reply.get("jobs") if isinstance(reply.get("jobs"), list) else [])
+            }
+            return QueueStateSnapshot(
+                jobs=jobs,
+                pending_ids=frozenset(reply.get("pending") if isinstance(reply.get("pending"), list) else []),
+                ordinary_members=self._members_from_flat(reply.get("ordinary")),
+                diagnostic_members=self._members_from_flat(reply.get("diagnostic")),
+            )
+        while True:
+            try:
+                with self._redis.pipeline() as transaction:
+                    transaction.watch(self._jobs_key, self._pending_key, *self._queue_keys.values())
+                    members = self._read_queue_members(transaction)
+                    pending = {_decode(raw_id) for raw_id in transaction.smembers(self._pending_key)}
+                    job_ids = [_decode(raw_id) for raw_id in transaction.zrange(self._jobs_key, 0, -1)]
+                    facts: dict[str, JobQueueFacts] = {}
+                    for job_id in job_ids:
+                        raw = transaction.get(self._job_key(job_id))
+                        if raw is None:
+                            continue
+                        job = self._deserialize_job(raw)
+                        facts[job_id] = JobQueueFacts(
+                            state=job.state,
+                            purpose=job.request.purpose,
+                            created_at=job.created_at,
+                            has_claim_lease=bool(transaction.exists(self._lease_key(job_id))),
+                        )
+                    transaction.unwatch()
+                return QueueStateSnapshot(
+                    jobs=facts,
+                    pending_ids=frozenset(pending),
+                    ordinary_members=tuple(members[JobPurpose.ORDINARY]),
+                    diagnostic_members=tuple(members[JobPurpose.ASSISTANT_DIAGNOSTIC]),
+                )
+            except redis.WatchError:
+                continue
+
+    @staticmethod
+    def _members_from_flat(raw: Any) -> tuple[QueueMember, ...]:
+        """Rebuild queue members from a Lua `ZRANGE ... WITHSCORES` flat reply."""
+        if not isinstance(raw, list):
+            return ()
+        pairs = zip(raw[0::2], raw[1::2])
+        return tuple(QueueMember(job_id=str(job_id), created_at=float(score)) for job_id, score in pairs)
+
+    def recent_invariant_errors(self) -> list[dict[str, str]]:
+        """Return the bounded record of defensive repairs, oldest first.
+
+        Raises:
+            redis.RedisError: If a Redis operation fails.
+        """
+        entries = self._redis.xrange(self._invariant_errors_key)
+        return [
+            {
+                "kind": _decode(fields.get(b"kind")) or "",
+                "job_id": _decode(fields.get(b"job_id")) or "",
+                "occurred_at": _decode(fields.get(b"occurred_at")) or "",
+            }
+            for _raw_id, fields in entries
+        ]
+
+    def repair_queue_residue(self, occurred_at: datetime | None = None) -> list[str]:
+        """Remove inconsistent index entries and report the repairs performed.
+
+        Raises:
+            redis.RedisError: If a Redis operation fails.
+        """
+        stamp = (occurred_at or datetime.now(timezone.utc)).isoformat()
+        if self._supports_lua:
+            reply = self._run_state_machine(OPERATION_REPAIR, {"occurred_at": stamp})
+            repaired = reply.get("repaired")
+            return [str(kind) for kind in repaired] if isinstance(repaired, list) else []
+        return self._repair_via_transaction(datetime.fromisoformat(stamp))
+
+    def _repair_via_transaction(self, occurred_at: datetime) -> list[str]:
+        """Mirror `repair_queue_residue` for the fakeredis client, which has no Lua."""
+        while True:
+            try:
+                with self._redis.pipeline() as transaction:
+                    transaction.watch(self._pending_key, *self._queue_keys.values())
+                    repairs: list[tuple[str, str, JobPurpose | None]] = []
+                    for purpose, queue_members in self._read_queue_members(transaction).items():
+                        for member in queue_members:
+                            raw = transaction.get(self._job_key(member.job_id))
+                            if raw is None:
+                                repairs.append((INVARIANT_ERROR_ORPHAN_QUEUE_MEMBER, member.job_id, purpose))
+                                continue
+                            job = self._deserialize_job(raw)
+                            if job.state != JobState.QUEUED or job.request.purpose != purpose:
+                                repairs.append((INVARIANT_ERROR_STALE_QUEUE_MEMBER, member.job_id, purpose))
+                    for raw_id in transaction.smembers(self._pending_key):
+                        job_id = _decode(raw_id)
+                        raw = transaction.get(self._job_key(job_id))
+                        job = self._deserialize_job(raw) if raw is not None else None
+                        if job is None or job.state.terminal:
+                            repairs.append((INVARIANT_ERROR_STALE_PENDING_MEMBER, job_id, None))
+                    if not repairs:
+                        transaction.unwatch()
+                        return []
+                    transaction.multi()
+                    for kind, job_id, purpose in repairs:
+                        if purpose is None:
+                            transaction.srem(self._pending_key, job_id)
+                        else:
+                            transaction.zrem(self._queue_keys[purpose], job_id)
+                        self._stage_invariant_error(transaction, kind, job_id, occurred_at)
+                    transaction.execute()
+                return [kind for kind, _job_id, _purpose in repairs]
+            except redis.WatchError:
+                continue
+
     def check_health(self) -> None:
         """Raise an error when Redis is unavailable or its identity changed.
 
@@ -873,11 +1251,31 @@ class RedisJobStore:
     def delete(self, job_id: str, expected_revision: int) -> None:
         """Delete a job and its Redis data if its revision still matches.
 
+        Serves both explicit delete and retention cleanup. Every index the job
+        occupied is released in the SAME atomic step as the job and its child
+        material, so neither path can leave a queue member or a pending slot behind
+        for work that no longer exists. Whether a job is deletable at all is
+        lifecycle policy and stays with the controller, which admits only terminal
+        jobs from the public delete and the retention reaper.
+
         Raises:
             JobNotFoundError: If the job does not exist.
             StoreWriteConflictError: If the stored revision no longer matches.
             redis.RedisError: If a Redis operation fails.
         """
+        if self._supports_lua:
+            reply = self._run_state_machine(
+                OPERATION_DELETE,
+                {"job_id": job_id, "expected_revision": expected_revision, "occurred_at": _now_iso()},
+            )
+            status = reply["status"]
+            if status == STATUS_MISSING:
+                raise JobNotFoundError("Job was not found")
+            if status == STATUS_CONFLICT:
+                raise StoreWriteConflictError(f"Job revision changed: {job_id}")
+            if status != STATUS_OK:
+                raise redis.RedisError(f"Unexpected delete status: {status}")
+            return
         job_key = self._job_key(job_id)
         while True:
             try:
@@ -912,15 +1310,93 @@ class RedisJobStore:
         return [self._deserialize_job(raw) for raw in raw_jobs if raw is not None]
 
     def _with_queue_position(self, job: Job) -> Job:
-        """Return a job copy with its position derived from the Redis queue.
+        """Return a job copy carrying its authoritative effective queue position.
+
+        The whole order comes from ONE snapshot — an atomic script reply, or a
+        single watched transaction on the fallback. A rank read from one queue key
+        would be meaningless here: a diagnostic's position depends on the ordinary
+        queue's size, so two independent reads could report a position that never
+        actually held.
 
         Raises:
-            redis.RedisError: If the queue rank cannot be read.
+            redis.RedisError: If the queue order cannot be read.
         """
         if job.state != JobState.QUEUED:
             return replace(job, queue_position=None)
-        rank = self._redis.zrank(self._queue_key, job.id)
-        return replace(job, queue_position=rank + 1 if rank is not None else None)
+        for entry in self._effective_position_snapshot():
+            if entry.job_id == job.id:
+                return replace(job, queue_position=entry.position)
+        return replace(job, queue_position=None)
+
+    def _effective_position_snapshot(self) -> list[EffectivePosition]:
+        """Return one consistent effective-position snapshot across both queues."""
+        if self._supports_lua:
+            return self._positions(self._run_state_machine(OPERATION_POSITIONS, {"occurred_at": _now_iso()}))
+        while True:
+            try:
+                with self._redis.pipeline() as transaction:
+                    transaction.watch(*self._queue_keys.values())
+                    order = self._effective_order(self._read_queue_members(transaction))
+                    transaction.unwatch()
+                return order
+            except redis.WatchError:
+                continue
+
+    def _read_queue_members(self, reader) -> dict[JobPurpose, list[QueueMember]]:
+        """Read both purpose queues with their FIFO scores through one reader."""
+        return {
+            purpose: [
+                QueueMember(job_id=_decode(raw_id), created_at=score)
+                for raw_id, score in reader.zrange(self._queue_keys[purpose], 0, -1, withscores=True)
+            ]
+            for purpose in JobPurpose
+        }
+
+    @staticmethod
+    def _effective_order(members: Mapping[JobPurpose, list[QueueMember]]) -> list[EffectivePosition]:
+        """Return the effective order: all ordinary work in FIFO, then diagnostics."""
+        ordered = fifo_sorted(members[JobPurpose.ORDINARY]) + fifo_sorted(members[JobPurpose.ASSISTANT_DIAGNOSTIC])
+        return [
+            EffectivePosition(job_id=member.job_id, position=index) for index, member in enumerate(ordered, start=1)
+        ]
+
+    def _stage_queue_removal(self, transaction, job_id: str) -> None:
+        """Stage removal of a job from BOTH purpose queues.
+
+        Both, not just the one its purpose names: a removal that trusted the purpose
+        would leave residue behind if a record were ever inconsistent, and residue
+        is exactly what must not survive a transition.
+        """
+        for queue_key in self._queue_keys.values():
+            transaction.zrem(queue_key, job_id)
+
+    def _stage_invariant_error(self, transaction, kind: str, job_id: str, occurred_at: datetime) -> None:
+        """Stage one bounded repair record carrying no submitted content."""
+        transaction.xadd(
+            self._invariant_errors_key,
+            {"kind": kind, "job_id": job_id, "occurred_at": occurred_at.isoformat()},
+            maxlen=MAX_RETAINED_INVARIANT_ERRORS,
+            approximate=False,
+        )
+
+    @staticmethod
+    def _validate_transition(current: Job, replacement: Job) -> None:
+        """Reject a saved transition the queue state machine does not define.
+
+        Mirrors the guards inside the Lua module so the fallback adapter cannot
+        accept a transition real Redis would refuse.
+
+        Raises:
+            QueueInvariantError: If the transition would break an invariant.
+        """
+        if current.state.terminal and replacement.state != current.state:
+            raise QueueInvariantError("A terminal job cannot change state")
+        if replacement.request.purpose != current.request.purpose:
+            raise QueueInvariantError("A job purpose is immutable")
+        if replacement.state in {JobState.RUNNING, JobState.CANCELLING} and replacement.worker_id is None:
+            raise QueueInvariantError("An active job must name the worker holding its claim")
+        if replacement.state == JobState.QUEUED and current.state != JobState.QUEUED:
+            raise QueueInvariantError("A job cannot return to the queue")
 
     def _stage_event_appends(self, transaction, job_id: str, events: Sequence[JobEvent]) -> None:
         """Stage event-stream appends in an active Redis transaction."""
@@ -955,7 +1431,7 @@ class RedisJobStore:
         )
         transaction.delete(self._job_key(job_id))
         transaction.zrem(self._jobs_key, job_id)
-        transaction.zrem(self._queue_key, job_id)
+        self._stage_queue_removal(transaction, job_id)
         transaction.srem(self._pending_key, job_id)
 
     @staticmethod
@@ -970,6 +1446,10 @@ class RedisJobStore:
                 "solver": job.request.solver,
                 "prettify": job.request.prettify,
                 "timeout_seconds": job.request.timeout_seconds,
+                # Purpose is written INSIDE request because it is immutable request
+                # data, and mirrored at the top level because the Lua state machine
+                # reads it on every transition and must not depend on nesting.
+                "purpose": job.request.purpose.value,
                 "basis": _serialize_basis(job.request.basis),
                 "basis_id": job.request.basis_id,
                 "parent_basis_id": job.request.parent_basis_id,
@@ -995,6 +1475,7 @@ class RedisJobStore:
             "failure": (
                 {"code": job.failure.code, "message": job.failure.message} if job.failure is not None else None
             ),
+            "purpose": job.request.purpose.value,
             "cancel_requested": job.cancel_requested,
             "early_completion_requested": job.early_completion_requested,
             "artifact_name": job.artifact_name,
@@ -1017,6 +1498,10 @@ class RedisJobStore:
                 solver=request["solver"],
                 prettify=request.get("prettify"),
                 timeout_seconds=request["timeout_seconds"],
+                # A record written before purpose existed reads as ordinary, which is
+                # what it semantically was; guessing diagnostic would move existing
+                # work into the wrong queue and the wrong admission class.
+                purpose=JobPurpose(request.get("purpose", JobPurpose.ORDINARY.value)),
                 basis=_deserialize_basis(request.get("basis")),
                 basis_id=request.get("basis_id"),
                 parent_basis_id=request.get("parent_basis_id"),
@@ -1048,8 +1533,15 @@ class RedisJobStore:
         )
 
     def _key(self, *parts: str) -> str:
-        """Build a Redis key beneath the configured namespace."""
-        return ":".join((self._prefix, *parts))
+        """Build a Redis key beneath the configured hash-tagged namespace.
+
+        EVERY key goes through here, so every key this store touches carries the
+        same hash tag and lands in one Redis slot. Phase 1 is not a cluster
+        topology; this keeps that boundary honest rather than silently unsafe, so a
+        later clustered deployment cannot quietly turn the atomic state machine
+        into a cross-slot, non-atomic protocol (T09).
+        """
+        return ":".join((self._prefix, QUEUE_KEY_HASH_TAG, *parts))
 
     def _job_key(self, job_id: str) -> str:
         """Return the string key (`SET`) containing serialized job metadata."""

@@ -21,7 +21,7 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
-from ..jobs.models import Job, JobState, OptimizationOutcome, solver_supports_stop
+from ..jobs.models import Job, JobPurpose, JobState, OptimizationOutcome, solver_supports_stop
 
 
 class NormalizedOptionsResponse(BaseModel):
@@ -80,6 +80,8 @@ class JobRequestResponse(BaseModel):
     """Requested schedule-prettification preference."""
     timeout_seconds: int
     """Configured optimization timeout."""
+    purpose: JobPurpose
+    """Immutable purpose deciding this job's queue priority and admission (T09)."""
     basis: JobBasisResponse | None
     """Immutable submission identity, or `None` when the client claimed none."""
 
@@ -171,7 +173,13 @@ class JobResponse(BaseModel):
     terminal: bool
     """Whether the lifecycle has ended."""
     queue_position: int | None
-    """Current one-based position while queued."""
+    """Authoritative effective position while queued; position 1 is the next claim.
+
+    Ordinary work occupies the leading positions; a diagnostic's position counts
+    the whole ordinary queue ahead of it. Supplied by the store transition that
+    produced this snapshot, so a client must never recombine separate queue reads
+    to compute it (T09).
+    """
     created_at: datetime
     """Time the job entered the store."""
     expires_at: datetime | None
@@ -209,6 +217,7 @@ class JobResponse(BaseModel):
                 solver=job.request.solver,
                 prettify=job.request.prettify,
                 timeout_seconds=job.request.timeout_seconds,
+                purpose=job.request.purpose,
                 basis=_basis_response(job),
             ),
             result=(

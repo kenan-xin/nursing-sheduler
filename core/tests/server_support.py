@@ -26,7 +26,8 @@ from uuid import uuid4
 
 import pytest
 
-from nurse_scheduling.server.jobs.models import Job, JobRequest, JobState
+from nurse_scheduling.server.jobs.models import Job, JobPurpose, JobRequest, JobState
+from nurse_scheduling.server.queue_state import QueueStateSnapshot, check_queue_invariants
 from nurse_scheduling.server.stores.memory import MemoryJobStore
 from nurse_scheduling.server.stores.redis import RedisJobStore
 
@@ -58,14 +59,41 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def make_job(job_id: str = "job_test", *, solver: str = "ortools/cp-sat", created_at: datetime | None = None) -> Job:
+def make_job(
+    job_id: str = "job_test",
+    *,
+    solver: str = "ortools/cp-sat",
+    created_at: datetime | None = None,
+    purpose: JobPurpose = JobPurpose.ORDINARY,
+) -> Job:
     """Build a queued job for direct store tests."""
     return Job(
         id=job_id,
         state=JobState.QUEUED,
-        request=JobRequest(input_name="in.yaml", client_id="client", solver=solver, prettify=None, timeout_seconds=300),
+        request=JobRequest(
+            input_name="in.yaml",
+            client_id="client",
+            solver=solver,
+            prettify=None,
+            timeout_seconds=300,
+            purpose=purpose,
+        ),
         created_at=created_at or utc_now(),
     )
+
+
+def assert_queue_invariants(store, *, context: str = "") -> QueueStateSnapshot:
+    """Assert all six queue invariants against what the store actually persisted.
+
+    Reads ONE atomic snapshot from the store rather than trusting what a transition
+    reported about itself, so a transition that returned a plausible answer while
+    leaving the indexes inconsistent still fails here. Returns the snapshot so a
+    caller can make further assertions against the same consistent view.
+    """
+    snapshot = store.describe_queue_state()
+    violations = check_queue_invariants(snapshot)
+    assert not violations, f"queue invariants violated{' after ' + context if context else ''}: {violations}"
+    return snapshot
 
 
 def _make_memory_store(*, max_events_per_job: int = 1_000) -> MemoryJobStore:
