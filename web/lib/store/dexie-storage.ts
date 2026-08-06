@@ -5,35 +5,27 @@
 // never runs during SSR (the store uses `skipHydration` and hydrates from a
 // client effect).
 
-import { Dexie, type Table } from "dexie";
 import type { StateStorage } from "zustand/middleware";
+import { NURSE_SCHEDULER_DB_NAME, NurseSchedulerDb } from "@/lib/repository/schema";
 
-/** One key/value row — the persisted scenario payload lives under a single key. */
-interface KeyValueRow {
-  key: string;
-  value: string;
-}
-
-/** The IndexedDB database backing durable persistence. */
-class ScenarioPersistenceDb extends Dexie {
-  keyval!: Table<KeyValueRow, string>;
-
-  constructor(databaseName: string) {
-    super(databaseName);
-    this.version(1).stores({ keyval: "key" });
-    this.keyval = this.table("keyval");
-  }
-}
-
-/** Default IndexedDB database name. */
-export const SCENARIO_DB_NAME = "nurse-scheduler";
+/**
+ * Default IndexedDB database name. Re-exported from the shared schema module so
+ * this adapter and the transactional repository can never name two databases.
+ */
+export const SCENARIO_DB_NAME = NURSE_SCHEDULER_DB_NAME;
 
 /**
  * Create the Dexie-backed `StateStorage`. Wrap with `createRevisionGuardedStorage`
  * before handing to `persist`. Each op is a single-row `keyval` read/write.
+ *
+ * The database class is the SHARED one (T02): the repository added tables in
+ * schema version 2, and both openers must declare the same version or the lower
+ * one fails to open. This adapter's behaviour is otherwise unchanged — it still
+ * reads and writes exactly the one `keyval` row it always did, and remains the
+ * live persistence authority until T03 performs the cutover.
  */
 export function createDexieStorage(databaseName: string = SCENARIO_DB_NAME): StateStorage {
-  const db = new ScenarioPersistenceDb(databaseName);
+  const db = new NurseSchedulerDb(databaseName);
   return {
     async getItem(key) {
       const row = await db.keyval.get(key);
