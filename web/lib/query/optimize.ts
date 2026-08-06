@@ -9,6 +9,7 @@ import {
   type OptimizeErrorInfo,
 } from "@/lib/bff/errors";
 import type { JobResponse } from "@/lib/bff/types";
+import type { BasisSubmissionFields } from "@/lib/optimize/basis/basis-record";
 import {
   parseControlChangedPayload,
   parseJobResponse,
@@ -58,6 +59,18 @@ export interface SubmitOptimizeInput {
   yamlContent?: string;
   prettify?: boolean;
   timeout?: number;
+  /**
+   * The T08 immutable-basis claim, when one could be built (a readable semantic
+   * profile and available Web Crypto). Omitted for an ordinary run submitted
+   * without one — Optimize stays fully usable either way.
+   *
+   * The backend recomputes every field from the bytes it receives and its own live
+   * profile and RESOLVED options, so sending a claim can only ever cause a
+   * rejection, never a false acceptance. That is why `prettify`/`timeout` must be
+   * sent EXPLICITLY alongside a claim: a guessed default changes the recomputed
+   * identity and fails the comparison.
+   */
+  basis?: BasisSubmissionFields;
 }
 
 // POST /api/optimize (multipart). FormData lets the browser set the boundary; the
@@ -75,6 +88,14 @@ export function useSubmitOptimize() {
       }
       if (input.prettify !== undefined) form.set("prettify", String(input.prettify));
       if (input.timeout !== undefined) form.set("timeout", String(input.timeout));
+      if (input.basis !== undefined) {
+        // Sent as flat form fields matching api/optimize.py::create_job. Written
+        // field by field so an added basis field that is not forwarded is a
+        // compile error here rather than a silent identity mismatch at the server.
+        for (const [key, value] of Object.entries(input.basis)) {
+          if (value !== undefined) form.set(key, value);
+        }
+      }
 
       return requestOptimizeJob("/api/optimize", { method: "POST", body: form }, "submit");
     },

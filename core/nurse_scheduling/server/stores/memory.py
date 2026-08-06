@@ -18,20 +18,50 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import threading
+from collections import deque
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from uuid import uuid4
 
 from ..errors import (
+    DiagnosticCapacityError,
     JobArtifactNotFoundError,
     JobCapacityError,
     JobInputNotFoundError,
     JobNotFoundError,
+    QueueInvariantError,
     StoreWriteConflictError,
 )
 from ..event_cursor import EventCursorExpired, EventCursorInvalid, decode_cursor, encode_cursor
-from ..jobs.models import EventReplayWindow, Job, JobEvent, JobState, StoredArtifact, StoreLimits
+from ..jobs.models import (
+    EventReplayWindow,
+    Job,
+    JobEvent,
+    JobPurpose,
+    JobState,
+    StoredArtifact,
+    StoreLimits,
+)
+from ..queue_state import (
+    ADMISSION_OK,
+    ADMISSION_ORDINARY_RESERVED,
+    INVARIANT_ERROR_ORPHAN_QUEUE_MEMBER,
+    INVARIANT_ERROR_STALE_PENDING_MEMBER,
+    INVARIANT_ERROR_STALE_QUEUE_MEMBER,
+    MAX_RETAINED_INVARIANT_ERRORS,
+    EffectivePosition,
+    JobQueueFacts,
+    QueueMember,
+    DIAGNOSTIC_CAPACITY_MESSAGE,
+    QueueStateSnapshot,
+    admission_decision,
+    effective_positions,
+)
+
+
+PENDING_STATES = frozenset({JobState.QUEUED, JobState.RUNNING, JobState.CANCELLING})
+"""States that occupy one pending-capacity slot."""
 
 
 @dataclass
@@ -63,6 +93,21 @@ class MemoryJobStore:
             raise ValueError("store_id must not be empty")
         self._records: dict[str, _MemoryJobRecord] = {}
         """Job records indexed by job ID."""
+        self._pending: set[str] = set()
+        """Explicit pending-capacity index (T09 invariant 1).
+
+        Kept EXPLICITLY rather than recomputed from `_records` on demand, even
+        though one lock would make derivation safe here. The Redis backend has no
+        choice but to keep real index keys, and an index that cannot desync is an
+        index whose repair path is never exercised. Mirroring the structure keeps
+        both backends honest under the same invariants and the same repair tests.
+        """
+        self._queues: dict[JobPurpose, dict[str, datetime]] = {purpose: {} for purpose in JobPurpose}
+        """One queue per purpose, mapping queued job ID to its FIFO score."""
+        self._leases: dict[str, str] = {}
+        """Fenced claim tokens for jobs a worker currently owns, indexed by job ID."""
+        self._invariant_errors: deque[dict[str, str]] = deque(maxlen=MAX_RETAINED_INVARIANT_ERRORS)
+        """Bounded record of defensive repairs, holding stable codes and IDs only."""
         self._max_events_per_job = max_events_per_job
         """Maximum replayable events retained for any one job."""
         self._lock = threading.RLock()
@@ -89,12 +134,26 @@ class MemoryJobStore:
         Raises:
             StoreWriteConflictError: If the job ID already exists.
             JobCapacityError: If pending or retained capacity is exhausted.
+            DiagnosticCapacityError: If only the reserved ordinary slots remain.
+            QueueInvariantError: If the job is not admissible as a queued job.
         """
         with self._changed:
             if job.id in self._records:
                 raise StoreWriteConflictError(f"Job already exists: {job.id}")
-            pending_count = sum(not record.job.state.terminal for record in self._records.values())
-            if pending_count >= limits.max_pending:
+            if job.state != JobState.QUEUED:
+                raise QueueInvariantError("A job may only be admitted in the queued state")
+            # Repair first, so a stale index entry can never make a genuinely free
+            # slot look occupied and refuse admission that the invariants allow.
+            self._repair_residue(job.created_at)
+            decision = admission_decision(
+                job.request.purpose,
+                pending_count=len(self._pending),
+                max_pending=limits.max_pending,
+                ordinary_reserved_slots=limits.ordinary_reserved_slots,
+            )
+            if decision == ADMISSION_ORDINARY_RESERVED:
+                raise DiagnosticCapacityError(DIAGNOSTIC_CAPACITY_MESSAGE)
+            if decision != ADMISSION_OK:
                 raise JobCapacityError("Too many jobs are queued or running")
 
             while len(self._records) >= limits.max_retained:
@@ -104,10 +163,14 @@ class MemoryJobStore:
                 )
                 if not terminal:
                     raise JobCapacityError("Too many jobs are retained")
-                del self._records[terminal[0].id]
+                # Only terminal jobs are eligible, so retained eviction can never
+                # reclaim a slot by deleting live pending work.
+                self._forget(terminal[0].id)
 
             record = _MemoryJobRecord(job=replace(job, revision=1, queue_position=None), input_bytes=input_bytes)
             self._records[job.id] = record
+            self._pending.add(job.id)
+            self._queues[job.request.purpose][job.id] = job.created_at
             created = self._with_queue_position(record.job)
             self._append_events(record, self._with_initial_queue_position(events, created.queue_position))
             self._append_queue_position_events_for_queued_jobs(job.created_at, exclude_job_id=job.id)
@@ -157,18 +220,21 @@ class MemoryJobStore:
         claim_expires_at: datetime,
         runtime_identity: Mapping[str, str] | None = None,
     ) -> Job | None:
-        """Atomically assign the oldest queued job to a worker.
+        """Atomically assign the effective head of the priority queues to a worker.
 
-        Return the claimed running job, or `None` when the queue is empty.
+        The ordinary queue is drained before any diagnostic is considered, so
+        ordinary work overtakes queued diagnostics. A RUNNING diagnostic is never
+        touched here: claiming is the only thing this does, and it only ever removes
+        a QUEUED member, which is what makes running work non-pre-emptive.
+
+        Return the claimed running job, or `None` when both queues are empty.
         """
         with self._changed:
-            queued = sorted(
-                (record for record in self._records.values() if record.job.state == JobState.QUEUED),
-                key=lambda record: (record.job.created_at, record.job.id),
-            )
-            if not queued:
+            self._repair_residue(started_at)
+            ordered = self._effective_positions()
+            if not ordered:
                 return None
-            record = queued[0]
+            record = self._records[ordered[0].job_id]
             claimed = replace(
                 record.job,
                 state=JobState.RUNNING,
@@ -179,6 +245,10 @@ class MemoryJobStore:
                 revision=record.job.revision + 1,
             )
             record.job = claimed
+            # Exactly the claimed member leaves its queue; pending is retained
+            # because a running job still occupies one capacity slot.
+            self._queues[claimed.request.purpose].pop(claimed.id, None)
+            self._leases[claimed.id] = self._lease_token(claimed)
             self._append_events(
                 record,
                 [
@@ -231,8 +301,10 @@ class MemoryJobStore:
                 ):
                     raise StoreWriteConflictError(f"Worker claim is no longer active: {job.id}")
             was_queued = record.job.state == JobState.QUEUED
+            self._validate_transition(record.job, job)
             updated_job = replace(job, revision=expected_revision + 1, queue_position=None)
             record.job = updated_job
+            self._apply_membership(updated_job)
             if artifact is not None:
                 record.artifacts[artifact.name] = artifact
             self._append_events(record, events)
@@ -381,7 +453,12 @@ class MemoryJobStore:
             record = self._record(job_id)
             if record.job.revision != expected_revision:
                 raise StoreWriteConflictError(f"Job revision changed: {job_id}")
-            del self._records[job_id]
+            # Deletion releases the job's OWN indexes together with the job in one
+            # locked step, so it can never leave a queue member or a pending slot
+            # behind for work that no longer exists. Whether a job is deletable at
+            # all is lifecycle policy and stays with the controller, which admits
+            # only terminal jobs from the public delete and the retention reaper.
+            self._forget(job_id)
             # notify() may wake an unrelated stream; extra notify_all() wake-ups are acceptable because pending jobs are bounded.
             self._changed.notify_all()
 
@@ -397,17 +474,157 @@ class MemoryJobStore:
         return record
 
     def _with_queue_position(self, job: Job) -> Job:
-        """Return a job copy with its queue position derived from current state."""
+        """Return a job copy carrying its authoritative effective queue position.
+
+        Derived from one snapshot of both queues under the store lock, so a caller
+        never has to combine separate queue reads to learn where a job stands.
+        """
         if job.state != JobState.QUEUED:
             return replace(job, queue_position=None)
-        queued_ids = [
-            candidate.id
-            for candidate in sorted(
-                (record.job for record in self._records.values() if record.job.state == JobState.QUEUED),
-                key=lambda candidate: (candidate.created_at, candidate.id),
-            )
-        ]
-        return replace(job, queue_position=queued_ids.index(job.id) + 1)
+        for entry in self._effective_positions():
+            if entry.job_id == job.id:
+                return replace(job, queue_position=entry.position)
+        return replace(job, queue_position=None)
+
+    def _effective_positions(self) -> list[EffectivePosition]:
+        """Return the authoritative effective queue order under the store lock."""
+        return effective_positions(self._snapshot())
+
+    def _snapshot(self) -> QueueStateSnapshot:
+        """Capture one consistent queue-state view; callers must hold the lock."""
+        return QueueStateSnapshot(
+            jobs={
+                job_id: JobQueueFacts(
+                    state=record.job.state,
+                    purpose=record.job.request.purpose,
+                    created_at=record.job.created_at,
+                    has_claim_lease=job_id in self._leases,
+                )
+                for job_id, record in self._records.items()
+            },
+            pending_ids=frozenset(self._pending),
+            ordinary_members=tuple(
+                QueueMember(job_id=job_id, created_at=score)
+                for job_id, score in self._queues[JobPurpose.ORDINARY].items()
+            ),
+            diagnostic_members=tuple(
+                QueueMember(job_id=job_id, created_at=score)
+                for job_id, score in self._queues[JobPurpose.ASSISTANT_DIAGNOSTIC].items()
+            ),
+        )
+
+    def describe_queue_state(self) -> QueueStateSnapshot:
+        """Return one atomic snapshot of the complete queue state."""
+        with self._lock:
+            return self._snapshot()
+
+    def recent_invariant_errors(self) -> list[dict[str, str]]:
+        """Return the bounded record of defensive repairs, oldest first."""
+        with self._lock:
+            return list(self._invariant_errors)
+
+    def repair_queue_residue(self, occurred_at: datetime | None = None) -> list[str]:
+        """Remove inconsistent index entries and report the repairs performed."""
+        with self._changed:
+            repaired = self._repair_residue(occurred_at or datetime.now(timezone.utc))
+            if repaired:
+                self._changed.notify_all()
+            return repaired
+
+    @staticmethod
+    def _lease_token(job: Job) -> str:
+        """Build the fenced claim token identifying one worker's active claim."""
+        deadline = job.claim_expires_at.isoformat() if job.claim_expires_at is not None else ""
+        return f"{job.worker_id}|{job.revision}|{deadline}"
+
+    @staticmethod
+    def _validate_transition(current: Job, replacement: Job) -> None:
+        """Reject a saved transition the queue state machine does not define.
+
+        This is not defensive noise: without it a terminal job could be walked back
+        into a pending state, re-entering a queue whose capacity was already
+        released, and an active state could be persisted with no owner to fence it.
+
+        Raises:
+            QueueInvariantError: If the transition would break an invariant.
+        """
+        if current.state.terminal and replacement.state != current.state:
+            raise QueueInvariantError("A terminal job cannot change state")
+        if replacement.request.purpose != current.request.purpose:
+            raise QueueInvariantError("A job purpose is immutable")
+        if replacement.state in {JobState.RUNNING, JobState.CANCELLING} and replacement.worker_id is None:
+            raise QueueInvariantError("An active job must name the worker holding its claim")
+        if replacement.state == JobState.QUEUED and current.state != JobState.QUEUED:
+            raise QueueInvariantError("A job cannot return to the queue")
+
+    def _apply_membership(self, job: Job) -> None:
+        """Reconcile pending, queue, and lease membership with a job's new state.
+
+        One place decides membership for EVERY transition, so cancel, completion,
+        cancellation completion, and claim expiry cannot each drift into their own
+        slightly different idea of which indexes to release.
+        """
+        if job.state.terminal:
+            self._pending.discard(job.id)
+            self._leases.pop(job.id, None)
+            for queue in self._queues.values():
+                queue.pop(job.id, None)
+            return
+        self._pending.add(job.id)
+        if job.state != JobState.QUEUED:
+            for queue in self._queues.values():
+                queue.pop(job.id, None)
+        if job.state in {JobState.RUNNING, JobState.CANCELLING} and job.claim_expires_at is not None:
+            self._leases[job.id] = self._lease_token(job)
+        else:
+            self._leases.pop(job.id, None)
+
+    def _forget(self, job_id: str) -> None:
+        """Remove every trace of one job.
+
+        Child material (input, artifacts, events) lives inside the record, so
+        dropping the record removes it together with the job shell under one lock
+        — the memory equivalent of the Redis child-before-parent deletion order.
+        """
+        self._records.pop(job_id, None)
+        self._pending.discard(job_id)
+        self._leases.pop(job_id, None)
+        for queue in self._queues.values():
+            queue.pop(job_id, None)
+
+    def _repair_residue(self, occurred_at: datetime) -> list[str]:
+        """Remove index entries that contradict the job records they reference.
+
+        Residue is REMOVED, never claimed and never counted as capacity: an entry
+        the store cannot justify must not be able to start work or to keep a slot
+        occupied. Each removal is recorded as a bounded stable code, so repeated
+        repair cannot grow memory or leak anything about a submission.
+        """
+        repaired: list[str] = []
+        for purpose, queue in self._queues.items():
+            for job_id in list(queue):
+                record = self._records.get(job_id)
+                if record is None:
+                    kind = INVARIANT_ERROR_ORPHAN_QUEUE_MEMBER
+                elif record.job.state != JobState.QUEUED or record.job.request.purpose != purpose:
+                    kind = INVARIANT_ERROR_STALE_QUEUE_MEMBER
+                else:
+                    continue
+                del queue[job_id]
+                repaired.append(kind)
+                self._record_invariant_error(kind, job_id, occurred_at)
+        for job_id in list(self._pending):
+            record = self._records.get(job_id)
+            if record is not None and record.job.state in PENDING_STATES:
+                continue
+            self._pending.discard(job_id)
+            repaired.append(INVARIANT_ERROR_STALE_PENDING_MEMBER)
+            self._record_invariant_error(INVARIANT_ERROR_STALE_PENDING_MEMBER, job_id, occurred_at)
+        return repaired
+
+    def _record_invariant_error(self, kind: str, job_id: str, occurred_at: datetime) -> None:
+        """Record one bounded repair fact carrying no submitted content."""
+        self._invariant_errors.append({"kind": kind, "job_id": job_id, "occurred_at": occurred_at.isoformat()})
 
     def _append_events(self, record: _MemoryJobRecord, events: Sequence[JobEvent]) -> None:
         """Append events with monotonic IDs and discard the oldest overflow."""
@@ -436,14 +653,17 @@ class MemoryJobStore:
         occurred_at: datetime,
         exclude_job_id: str | None = None,
     ) -> None:
-        """Append current position events for queued jobs except the excluded job."""
-        queued = sorted(
-            (record for record in self._records.values() if record.job.state == JobState.QUEUED),
-            key=lambda record: (record.job.created_at, record.job.id),
-        )
-        for position, record in enumerate(queued, start=1):
-            if record.job.id == exclude_job_id:
+        """Append effective position events for queued jobs except the excluded job.
+
+        Every affected position changes in the same locked transition that moved the
+        queue, so a subscriber never sees a position that was true only between two
+        halves of one transition.
+        """
+        for entry in self._effective_positions():
+            if entry.job_id == exclude_job_id:
                 continue
+            position = entry.position
+            record = self._records[entry.job_id]
             self._append_events(
                 record,
                 [

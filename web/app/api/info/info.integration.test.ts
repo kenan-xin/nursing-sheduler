@@ -28,6 +28,12 @@ let realOrigin: string;
 let deadOrigin: string; // a bound-then-closed port: connections are refused
 let infoMode: InfoMode = "ready";
 
+const SEMANTIC_PROFILE = {
+  submission_contract_version: "optimize-yaml-v1",
+  solver_semantic_version: "ortools/cp-sat@1",
+  backend_capability_version: "nurse-scheduling-backend@1",
+};
+
 const READY_IDENTITY = {
   status: "ready",
   service_name: "nurse-scheduling-api",
@@ -38,6 +44,7 @@ const READY_IDENTITY = {
   started_at: "2026-07-19T00:00:00+00:00",
   job_backend: "memory",
   job_store_id: "inst-int",
+  semantic_profile: SEMANTIC_PROFILE,
 };
 
 const UNAVAILABLE_IDENTITY = {
@@ -51,6 +58,7 @@ const UNAVAILABLE_IDENTITY = {
   started_at: "2026-07-19T00:00:00+00:00",
   job_backend: "memory",
   job_store_id: "inst-int",
+  semantic_profile: SEMANTIC_PROFILE,
 };
 
 beforeAll(async () => {

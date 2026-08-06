@@ -15,7 +15,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { currentAppVersion } from "@/lib/scenario/app-version";
 import { classifyVersionCompatibility, type CompatibilityTier } from "@/lib/version/version-compat";
-import type { InfoIdentity } from "@/app/api/info/types";
+import type { InfoIdentity, InfoSemanticProfile } from "@/app/api/info/types";
 
 export type OptimizeServerStatus = "checking" | "online" | "offline";
 
@@ -31,6 +31,14 @@ export interface OptimizeServerInfo {
    * is not-applicable — the offline state, not a version note, owns that case.
    */
   versionTier: CompatibilityTier | null;
+  /**
+   * The backend's SCHEDULING SEMANTICS profile (T08), or `null` when the payload
+   * did not carry a trustworthy one. A submission binds this into its basis and
+   * the backend rejects a submission prepared under a profile it has since left,
+   * so a `null` here means no submission identity can be claimed — an ordinary
+   * run still proceeds, it simply carries no basis.
+   */
+  semanticProfile: InfoSemanticProfile | null;
   /** The `unavailable` reason when offline with a reason, else null. */
   unavailableReason: string | null;
   /** Re-fetch `/api/info`, aborting any in-flight check. */
@@ -49,6 +57,32 @@ function readIdentityVersions(
   const appVersion = body.app_version;
   if (typeof apiVersion !== "string" || typeof appVersion !== "string") return null;
   return { api_version: apiVersion, app_version: appVersion };
+}
+
+/**
+ * Read the semantic profile, requiring ALL THREE non-empty fields. A partial
+ * profile is treated as no profile: submitting under a half-known set of
+ * semantics is exactly the ambiguity the basis exists to prevent.
+ */
+function readSemanticProfile(body: unknown): InfoSemanticProfile | null {
+  if (!isRecord(body) || !isRecord(body.semantic_profile)) return null;
+  const { submission_contract_version, solver_semantic_version, backend_capability_version } =
+    body.semantic_profile;
+  if (
+    typeof submission_contract_version !== "string" ||
+    submission_contract_version === "" ||
+    typeof solver_semantic_version !== "string" ||
+    solver_semantic_version === "" ||
+    typeof backend_capability_version !== "string" ||
+    backend_capability_version === ""
+  ) {
+    return null;
+  }
+  return {
+    submission_contract_version,
+    solver_semantic_version,
+    backend_capability_version,
+  };
 }
 
 /**
@@ -76,6 +110,10 @@ export function classifyOptimizeServerInfo(
     clientVersion,
     versionTier:
       backendVersion !== null ? classifyVersionCompatibility(backendVersion, clientVersion) : null,
+    // Read even when offline: a `503` identity report still tells the truth about
+    // which semantics the backend WOULD solve under, and a run is not submitted
+    // while offline anyway.
+    semanticProfile: readSemanticProfile(body),
     unavailableReason: status === "offline" ? reason : null,
   };
 }
@@ -100,6 +138,7 @@ const CHECKING: Omit<OptimizeServerInfo, "recheck"> = {
   backendVersion: null,
   clientVersion: "",
   versionTier: null,
+  semanticProfile: null,
   unavailableReason: null,
 };
 

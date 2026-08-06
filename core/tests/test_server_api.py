@@ -39,7 +39,10 @@ def client():
 @pytest.fixture
 def idle_client():
     """A client with background threads disabled so queued jobs stay queued."""
-    settings = ServerSettings(job_backend="memory", max_pending_jobs=1)
+    # A single pending slot cannot also hold an ordinary reserve, so the reserve is
+    # explicitly waived rather than defaulted (T09): these tests are about capacity
+    # not being consumed at all, not about priority between purposes.
+    settings = ServerSettings(job_backend="memory", max_pending_jobs=1, ordinary_reserved_slots=0)
     app = create_app(settings=settings, start_background=False)
     with TestClient(app) as test_client:
         yield test_client

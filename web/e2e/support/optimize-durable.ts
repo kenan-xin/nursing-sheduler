@@ -781,7 +781,12 @@ const REQUEST: JobResponse["request"] = {
   solver: "ortools/cp-sat",
   prettify: null,
   timeout_seconds: 300,
+  // These fixtures cover the ordinary run path, which submits no basis claim.
+  basis: null,
 };
+
+/** Advertised retention expiry, a day after `CREATED_AT`. */
+const EXPIRES_AT = "2026-07-21T00:00:00Z";
 
 export function queuedJob(id = JOB_ID, queuePosition = 1): JobResponse {
   return {
@@ -790,6 +795,7 @@ export function queuedJob(id = JOB_ID, queuePosition = 1): JobResponse {
     terminal: false,
     queue_position: queuePosition,
     created_at: CREATED_AT,
+    expires_at: EXPIRES_AT,
     started_at: null,
     finished_at: null,
     request: REQUEST,
@@ -807,6 +813,7 @@ export function runningJob(id = JOB_ID): JobResponse {
     terminal: false,
     queue_position: null,
     created_at: CREATED_AT,
+    expires_at: EXPIRES_AT,
     started_at: STARTED_AT,
     finished_at: null,
     request: REQUEST,
@@ -852,6 +859,7 @@ export function completedJob(id = JOB_ID, options: CompletedOptions = {}): JobRe
     terminal: true,
     queue_position: null,
     created_at: CREATED_AT,
+    expires_at: EXPIRES_AT,
     started_at: STARTED_AT,
     finished_at: FINISHED_AT,
     request: REQUEST,
@@ -869,6 +877,7 @@ export function cancelledJob(id = JOB_ID): JobResponse {
     terminal: true,
     queue_position: null,
     created_at: CREATED_AT,
+    expires_at: EXPIRES_AT,
     started_at: STARTED_AT,
     finished_at: FINISHED_AT,
     request: REQUEST,
@@ -890,6 +899,7 @@ export function failedJob(
     terminal: true,
     queue_position: null,
     created_at: CREATED_AT,
+    expires_at: EXPIRES_AT,
     started_at: STARTED_AT,
     finished_at: FINISHED_AT,
     request: REQUEST,

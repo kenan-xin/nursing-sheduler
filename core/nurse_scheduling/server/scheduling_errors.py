@@ -30,6 +30,12 @@ CODE_WORKSPACE_NOT_READY = "workspace_not_ready"
 CODE_INVALID_SCHEDULING_DATA = "invalid_scheduling_data"
 CODE_UNSUPPORTED_WORKSPACE_VERSION = "unsupported_workspace_version"
 CODE_UNSUPPORTED_SOLVER = "unsupported_solver"
+# T08 immutable-basis admission failures. All are pre-job: a rejected claim never
+# consumes pending or retained capacity and never becomes evidence.
+CODE_BASIS_CLAIM_INCOMPLETE = "basis_claim_incomplete"
+CODE_BASIS_INPUT_DIGEST_MISMATCH = "basis_input_digest_mismatch"
+CODE_SEMANTIC_PROFILE_MISMATCH = "semantic_profile_mismatch"
+CODE_BASIS_ID_MISMATCH = "basis_id_mismatch"
 
 # Human-readable envelope messages fixed by the technical plan.
 MESSAGE_WORKSPACE_NOT_READY = "Workspace is not ready to optimise."

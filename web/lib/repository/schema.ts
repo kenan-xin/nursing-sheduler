@@ -34,7 +34,7 @@ import type {
   AssistantWriteFenceV1,
   HistoryLinkV1,
   KeyValueRow,
-  OptimizeBasisV1,
+  OptimizeBasisRecordV2,
   RepositoryMetaRow,
   ScenarioCommitV1,
   ScenarioEnvelopeV3,
@@ -63,7 +63,7 @@ export class NurseSchedulerDb extends Dexie {
   assistantGenerations!: Table<AssistantWriteFenceV1, string>;
   assistantProposals!: Table<AssistantProposalV1, string>;
   assistantReceipts!: Table<AssistantReceiptV1, string>;
-  optimizeBases!: Table<OptimizeBasisV1, string>;
+  optimizeBases!: Table<OptimizeBasisRecordV2, string>;
   repositoryMeta!: Table<RepositoryMetaRow, string>;
   /** T04 -- the single browser-local assistant configuration row. */
   assistantSettings!: Table<AssistantSettingsV1, string>;

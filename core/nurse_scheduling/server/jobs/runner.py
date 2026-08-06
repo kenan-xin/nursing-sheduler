@@ -38,6 +38,31 @@ from .models import Job, OptimizationOutcome, OptimizationResult, StoredArtifact
 EventCallback = Callable[[str, dict[str, Any], int | None], None]
 StopCallback = Callable[[], bool]
 
+INCONCLUSIVE_SOLVER_TIMEOUT = "solver_timeout_no_solution"
+"""The native timeout expired before the solver found any schedule or proof."""
+INCONCLUSIVE_NO_PROOF = "no_proof"
+"""A cooperative stop arrived before the solver reached either proof."""
+INCONCLUSIVE_SOLVER_UNKNOWN = "solver_unknown"
+"""A terminal solver status outside the known set; no proof either way."""
+
+INCONCLUSIVE_TERMINATION_REASONS = frozenset(
+    {INCONCLUSIVE_SOLVER_TIMEOUT, INCONCLUSIVE_NO_PROOF, INCONCLUSIVE_SOLVER_UNKNOWN}
+)
+"""The closed set of reasons an INCONCLUSIVE result may carry."""
+
+
+def _inconclusive_reason(solver_status: str, stop_requested: bool) -> str:
+    """Classify WHY a terminal run produced no proof, without inventing evidence.
+
+    A stop request that beat the solver to a proof is reported as such rather than
+    as a timeout, so the UI can offer a deliberate retry instead of implying the
+    budget was too small. A status outside CP-SAT's known terminal set is never
+    guessed at — it fails closed to `solver_unknown`.
+    """
+    if solver_status != "UNKNOWN":
+        return INCONCLUSIVE_SOLVER_UNKNOWN
+    return INCONCLUSIVE_NO_PROOF if stop_requested else INCONCLUSIVE_SOLVER_TIMEOUT
+
 
 @dataclass(frozen=True)
 class RunOutput:
@@ -113,7 +138,27 @@ class OptimizationRunner:
             )
         if normalized_status == "MODEL_INVALID":
             raise OptimizationExecutionError("invalid_model", "The generated solver model is invalid")
-        if normalized_status not in {"OPTIMAL", "FEASIBLE"} or dataframe is None:
+        if normalized_status not in {"OPTIMAL", "FEASIBLE"}:
+            # The solver reached a terminal state without proving either side. That
+            # is a NORMAL completion carrying "no proof", not an execution failure
+            # (T08): reporting it as FAILED would erase the difference between "we
+            # have no answer" and "the run broke", and reporting it as INFEASIBLE
+            # would manufacture infeasibility evidence the solver never produced.
+            return RunOutput(
+                result=OptimizationResult(
+                    outcome=OptimizationOutcome.INCONCLUSIVE,
+                    score=None,
+                    solver_status=normalized_status,
+                    termination_reason=_inconclusive_reason(
+                        normalized_status,
+                        stop_requested_when_solver_returned,
+                    ),
+                ),
+                artifact=None,
+            )
+        if dataframe is None:
+            # OPTIMAL/FEASIBLE promises a schedule. Its absence is a broken
+            # contract, not a no-proof outcome, so it stays a hard failure.
             raise OptimizationExecutionError(
                 "no_solution_found",
                 f"No schedule was produced. Solver status: {normalized_status}",

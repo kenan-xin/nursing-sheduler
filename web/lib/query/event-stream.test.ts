@@ -13,11 +13,13 @@ const job = (over: Partial<JobResponse> = {}): JobResponse => ({
   created_at: "2026-07-20T00:00:00Z",
   started_at: "2026-07-20T00:00:01Z",
   finished_at: null,
+  expires_at: "2026-07-21T00:00:00Z",
   request: {
     input_name: "scenario.yaml",
     solver: "ortools/cp-sat",
     prettify: null,
     timeout_seconds: 60,
+    basis: null,
   },
   result: null,
   error: null,

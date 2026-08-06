@@ -172,6 +172,7 @@ const SERVER_INFO: OptimizeServerInfo = {
   backendVersion: "1.0.0",
   clientVersion: "1.0.0",
   versionTier: "identical",
+  semanticProfile: null,
   unavailableReason: null,
   recheck: noop,
 };

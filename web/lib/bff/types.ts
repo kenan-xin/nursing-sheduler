@@ -20,7 +20,43 @@ export const LAST_EVENT_ID_HEADER = "last-event-id";
 export type JobState = "queued" | "running" | "cancelling" | "completed" | "cancelled" | "failed";
 
 // jobs/models.py::OptimizationOutcome. The solver verdict, distinct from lifecycle.
-export type OptimizationOutcome = "optimal" | "feasible" | "infeasible";
+//
+// `inconclusive` is a NORMAL completion (T08): the solver reached a terminal state
+// and proved neither side. It is deliberately not folded into `failed` (which
+// would lose "we have no proof" vs "the run broke") nor into `infeasible` (which
+// would manufacture evidence the solver never produced).
+export type OptimizationOutcome = "optimal" | "feasible" | "infeasible" | "inconclusive";
+
+// jobs/runner.py — the closed set of reasons an `inconclusive` result may carry.
+export type InconclusiveReason = "solver_timeout_no_solution" | "no_proof" | "solver_unknown";
+
+export const INCONCLUSIVE_REASONS: ReadonlySet<string> = new Set<InconclusiveReason>([
+  "solver_timeout_no_solution",
+  "no_proof",
+  "solver_unknown",
+]);
+
+// optimize_basis.py::OptimizeBasisV2, projected by schemas.py::JobBasisResponse.
+// IDENTIFIERS ONLY — the submitted document is never carried on a job response or
+// event, so no client can read another submission out of the job API.
+export interface JobBasis {
+  basis_id: string;
+  schema_version: number;
+  submission_contract_version: string;
+  workspace_schema_version: string;
+  serializer_version: string;
+  anonymization_mode: string;
+  input_sha256: string;
+  normalized_options: {
+    solver: string;
+    prettify: boolean;
+    timeout_seconds: number;
+  };
+  solver_semantic_version: string;
+  backend_capability_version: string;
+  parent_basis_id: string | null;
+  transform_digest: string | null;
+}
 
 // Terminal lifecycle states. The server also sends `terminal: boolean` on every
 // response and event; prefer that flag when it is present.
@@ -43,6 +79,10 @@ export interface JobResponse {
   terminal: boolean;
   queue_position: number | null;
   created_at: string;
+  // The advertised time from which this job's evidence may no longer exist.
+  // Derived server-side from `created_at`, so it is never LATER than the earliest
+  // possible deletion: evidence validity must not outlive what was advertised.
+  expires_at: string | null;
   started_at: string | null;
   finished_at: string | null;
   request: {
@@ -50,6 +90,9 @@ export interface JobResponse {
     solver: string;
     prettify: boolean | null;
     timeout_seconds: number;
+    // The immutable submission identity, or `null` when the client claimed none
+    // (an ordinary run submitted without the assistant).
+    basis: JobBasis | null;
   };
   result: {
     outcome: OptimizationOutcome;

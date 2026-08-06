@@ -271,7 +271,7 @@ def test_expired_worker_claim_fails_job_and_releases_capacity(store):
     now = datetime.now(timezone.utc)
     controller = JobController(
         store,
-        limits=StoreLimits(max_pending=1, max_retained=2),
+        limits=StoreLimits(max_pending=1, max_retained=2, ordinary_reserved_slots=0),
         retention_seconds=60,
         claim_lease_seconds=10,
         clock=lambda: now,
@@ -282,7 +282,7 @@ def test_expired_worker_claim_fails_job_and_releases_capacity(store):
 
     recovery = JobController(
         store,
-        limits=StoreLimits(max_pending=1, max_retained=2),
+        limits=StoreLimits(max_pending=1, max_retained=2, ordinary_reserved_slots=0),
         retention_seconds=60,
         claim_lease_seconds=10,
         clock=lambda: now + timedelta(seconds=11),
