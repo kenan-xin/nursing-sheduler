@@ -171,6 +171,82 @@ describe("canonical message persistence", () => {
     expect(records[1].createdAt).toBe("2026-08-06T00:00:00.000Z");
   });
 
+  it("keeps every earlier message's turn, model and generations when a later turn persists", async () => {
+    const harness = createAssistantHarness();
+    const thread = await selectActiveThread("scenario-a", harness.config);
+    const firstTurn = {
+      ...context(harness, thread.threadId, "scenario-a"),
+      modelId: "vendor/one",
+      turnId: "turn-1",
+    };
+
+    await persistThreadMessages(
+      [userMessage("m1", "why is the 15th short?"), assistantMessage("m2", "because of leave")],
+      firstTurn,
+      harness.config,
+    );
+    const before = await readThreadMessages(thread.threadId, harness.config);
+
+    // Any fence movement -- a Clear that landed between the two turns -- leaves this
+    // scenario's stored generation behind, so the second turn writes under a
+    // different pair. Moved directly rather than through `beginClear`, which would
+    // also mark the thread doomed and delete the very rows under test.
+    const fenceRow = await harness.db.assistantGenerations.get("scenario:scenario-a");
+    if (!fenceRow) throw new Error("expected a fence row for the new thread");
+    await harness.db.assistantGenerations.put({
+      ...fenceRow,
+      generation: fenceRow.generation + 1,
+    });
+    harness.advance(60_000);
+
+    // A second turn under a DIFFERENT model. Every settled boundary persists the WHOLE
+    // hydrated thread, so the two older messages arrive again in this turn's context.
+    const secondTurn = {
+      ...context(harness, thread.threadId, "scenario-a"),
+      modelId: "vendor/two",
+      turnId: "turn-2",
+      scenarioGeneration: 1,
+      createdAt: harness.now().toISOString(),
+    };
+    await persistThreadMessages(
+      [
+        userMessage("m1", "why is the 15th short?"),
+        assistantMessage("m2", "because of leave"),
+        userMessage("m3", "and the 16th?"),
+        assistantMessage("m4", "partial"),
+      ],
+      secondTurn,
+      harness.config,
+    );
+    // ...and the second turn's own answer is still streaming.
+    await persistThreadMessages(
+      [
+        userMessage("m1", "why is the 15th short?"),
+        assistantMessage("m2", "because of leave"),
+        userMessage("m3", "and the 16th?"),
+        assistantMessage("m4", "partial and then the rest"),
+      ],
+      secondTurn,
+      harness.config,
+    );
+
+    const after = await readThreadMessages(thread.threadId, harness.config);
+    // BYTE-STABLE. A later turn relabelling these would destroy the per-turn model
+    // record the setup, privacy and thread contracts promise.
+    expect(after.slice(0, 2)).toEqual(before);
+    expect(after.slice(0, 2).map((r) => [r.modelId, r.turnId, r.scenarioGeneration])).toEqual([
+      ["vendor/one", "turn-1", 0],
+      ["vendor/one", "turn-1", 0],
+    ]);
+    // The new turn's own records carry the new provenance, and its answer still grew.
+    expect(
+      after.slice(2).map((r) => [r.modelId, r.turnId, r.scenarioGeneration, r.content]),
+    ).toEqual([
+      ["vendor/two", "turn-2", 1, "and the 16th?"],
+      ["vendor/two", "turn-2", 1, "partial and then the rest"],
+    ]);
+  });
+
   it("persists tool calls and their results, and replays them to the transport", async () => {
     const harness = createAssistantHarness();
     const thread = await selectActiveThread("scenario-a", harness.config);

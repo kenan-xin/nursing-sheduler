@@ -33,6 +33,7 @@ import type { ModelCatalog } from "@/lib/ai/openrouter/catalog";
 import { describeSetupFailure } from "@/lib/ai/openrouter/messages";
 import { describeInterruptionPhase } from "@/lib/ai/assistant/lifecycle";
 import { maskCredential, type AssistantModelSource } from "@/lib/ai/assistant/records";
+import { isProbeOperationCurrent } from "@/lib/ai/assistant/probe-authority";
 import { assistantActions, selectReady, useAssistantStore } from "@/lib/ai/assistant/store";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -134,39 +135,81 @@ export function AiAssistantCard() {
     settings.enabled &&
     effectiveKey.length > 0 &&
     draftModelId.length > 0 &&
-    probe.kind !== "testing";
+    probe.kind !== "testing" &&
+    // A probe started mid-interruption would be testing a configuration whose live
+    // work is still being closed, and its activation would race that closure.
+    interruption === null;
 
+  /**
+   * Test a draft pair and, only on success, promote it.
+   *
+   * THE PROBE IS AN OPERATION, NOT A FETCH (`lib/ai/assistant/probe-authority.ts`).
+   * A user can Remove the key, Clear all, or turn AI off while this request is in
+   * flight -- each of which promises the credential is gone -- so the operation is
+   * checked after every await and compared again INSIDE the activation transaction.
+   * Without that, a probe that succeeds after a deletion writes the captured
+   * credential straight back into the row the user was told was empty.
+   *
+   * The draft is captured up front for the same reason: what is tested and what is
+   * activated must be one pair, not whatever the form holds several awaits later.
+   */
   async function saveAndTest() {
+    const draft = {
+      apiKey: effectiveKey,
+      modelId: draftModelId,
+      modelSource: draftModelSource,
+    };
+    // Any stored configuration makes this a REPLACEMENT, which closes the previous
+    // configuration's live work before the new pair is tested rather than after --
+    // the settled order, and the reverse of testing first.
+    const replaces = Boolean(settings.apiKey) || Boolean(settings.modelId);
+
     setProbe({ kind: "testing" });
+    const operation = await assistantActions.beginProbe({ replaces }, scope);
+    if (!isProbeOperationCurrent(operation)) {
+      setProbe({ kind: "idle" });
+      return;
+    }
+
     try {
       const response = await fetch(AI_PROBE_URL, {
         method: "POST",
         headers: {
-          [AI_KEY_HEADER]: effectiveKey,
-          [AI_MODEL_HEADER]: draftModelId,
+          [AI_KEY_HEADER]: draft.apiKey,
+          [AI_MODEL_HEADER]: draft.modelId,
         },
+        // Revoked operations abort the request itself, so a hanging probe does not
+        // outlive the configuration it was testing.
+        signal: operation.signal,
       });
       const result = (await response.json()) as { ok: boolean; code?: string };
+      // A late answer -- successful or failed -- belonging to a superseded operation
+      // says nothing about the configuration that exists now, so it is reported as
+      // nothing rather than as a failure the user is invited to retry.
+      if (!isProbeOperationCurrent(operation)) {
+        setProbe({ kind: "idle" });
+        return;
+      }
       if (!result.ok) {
         setProbe({ kind: "failed", code: result.code ?? AI_SETUP_CODES.probeFailed });
         return;
       }
 
-      // Only here does anything durable change. `activate` interrupts the previous
-      // configuration's work before promoting the new pair.
-      await assistantActions.activate(
-        {
-          apiKey: effectiveKey,
-          modelId: draftModelId,
-          modelSource: draftModelSource,
-        },
-        scope,
-      );
+      // Only here does anything durable change, and only if this operation is still
+      // the live one when the write transaction opens.
+      if (!(await assistantActions.activate(draft, scope, operation))) {
+        setProbe({ kind: "idle" });
+        return;
+      }
       setProbe({ kind: "passed" });
       setKeyDraft("");
       setReplacing(false);
       toast.success("Assistant ready");
     } catch {
+      if (!isProbeOperationCurrent(operation)) {
+        setProbe({ kind: "idle" });
+        return;
+      }
       setProbe({ kind: "failed", code: AI_SETUP_CODES.providerUnreachable });
     }
   }

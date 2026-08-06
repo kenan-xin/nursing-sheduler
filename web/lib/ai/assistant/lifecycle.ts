@@ -93,7 +93,17 @@ export type AssistantSettlement =
   /** Runtime restart, unknown thread, missing stop target, or instance mismatch. */
   | "detached_runtime"
   /** A previous page lifetime left this turn mid-flight. */
-  | "detached_reload";
+  | "detached_reload"
+  /**
+   * Authority for the turn was revoked before the provider was ever contacted.
+   *
+   * Deliberately NOT a `detached_*` member: a detachment means "we cannot say what
+   * happened", while this one is fully known -- an interruption, an ownership or
+   * identity change, or a competing submit closed this turn's authority during
+   * preparation and nothing was ever sent. See the final launch authorization in
+   * `./send-gate`.
+   */
+  | "revoked";
 
 /** Whether a settlement class is a detachment rather than a confirmed outcome. */
 export function isDetachedSettlement(settlement: AssistantSettlement): boolean {
@@ -180,6 +190,11 @@ export function describeSettlement(
       return `That reply stopped when the page reloaded. ${kept} Send again to retry.`;
     case "run_failed":
       return `That reply could not be completed. ${kept} Send again to retry.`;
+    case "revoked":
+      return (
+        "That message was not sent: the assistant's setup, this schedule, or this tab's " +
+        `editing access changed while it was being prepared. ${kept} Send again to retry.`
+      );
   }
 }
 

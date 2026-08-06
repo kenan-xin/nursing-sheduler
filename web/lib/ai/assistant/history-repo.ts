@@ -181,6 +181,14 @@ export async function readThreadMessages(
  * Existing rows are updated in place, keeping their original `seq`, so a message
  * whose content grew during streaming does not jump position.
  *
+ * PROVENANCE IS WRITTEN ONCE, BY THE TURN THAT CREATED THE MESSAGE. The transport
+ * publishes the WHOLE hydrated thread at every settled boundary, so a later turn's
+ * persist re-canonicalises every earlier message under the CURRENT turn's model,
+ * turn id and generations. Taking those would relabel every previous answer as the
+ * newest model's -- destroying the per-turn model record the setup, privacy and
+ * thread contracts promise. So an existing row keeps its own ownership fields and
+ * only what a stream can legitimately grow is taken from the new projection.
+ *
  * THE LATE-CALLBACK CASE this returns `"fenced"` for is the whole reason the fence
  * exists: a stream that flushes one last message list after Clear must not recreate
  * the conversation the user just deleted.
@@ -210,13 +218,21 @@ export async function persistThreadMessages(
       const canonical = toCanonical(message, { ...context, createdAt: at.toISOString() });
       if (!canonical) continue;
       const prior = byId.get(canonical.messageId);
-      await db.assistantMessages.put({
-        ...canonical,
-        // A known message keeps its slot AND its original timestamp; only its
-        // content and tool calls may have grown.
-        seq: prior ? prior.seq : nextSeq++,
-        createdAt: prior ? prior.createdAt : canonical.createdAt,
-      });
+      await db.assistantMessages.put(
+        prior
+          ? {
+              // Slot, timestamp, turn, model and generation pair all belong to the
+              // turn that first wrote this message. See the note above.
+              ...prior,
+              // The three fields a stream grows. Each falls back to the stored value
+              // when the new projection has nothing, so a re-canonicalised older
+              // message can never blank content it already had.
+              content: canonical.content || prior.content,
+              toolCalls: canonical.toolCalls ?? prior.toolCalls,
+              toolCallId: canonical.toolCallId ?? prior.toolCallId,
+            }
+          : { ...canonical, seq: nextSeq++ },
+      );
     }
     return "accepted" as const;
   });
@@ -370,6 +386,28 @@ export async function detachStaleTurns(config: HistoryRepoConfig = {}): Promise<
     if (outcome === "accepted") detached += 1;
   }
   return detached;
+}
+
+/**
+ * One turn row, or `null`. The durable half of the final launch authorization: a
+ * prepared turn that a clear deleted, or that an interruption already settled, is no
+ * longer a turn anything may run (see `./send-gate`).
+ */
+export async function readTurn(
+  turnId: string,
+  config: HistoryRepoConfig = {},
+): Promise<AssistantTurnV1 | null> {
+  const { db } = resolve(config);
+  return (await db.assistantTurns.get(turnId)) ?? null;
+}
+
+/** One thread row, or `null`. `active` is the only state a send may append to. */
+export async function readThread(
+  threadId: string,
+  config: HistoryRepoConfig = {},
+): Promise<AssistantThreadV1 | null> {
+  const { db } = resolve(config);
+  return (await db.assistantThreads.get(threadId)) ?? null;
 }
 
 /** The most recent turn on a thread, or `null`. Drives the lifecycle notice. */

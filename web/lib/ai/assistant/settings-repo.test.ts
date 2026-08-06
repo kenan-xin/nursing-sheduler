@@ -42,7 +42,7 @@ describe("assistant settings", () => {
     );
 
     expect(isAssistantReady(settings)).toBe(true);
-    expect(settings.probedAt).toBe(harness.now().toISOString());
+    expect(settings?.probedAt).toBe(harness.now().toISOString());
   });
 
   it("writes the key and model together, so a mixed pair cannot exist", async () => {
@@ -58,9 +58,9 @@ describe("assistant settings", () => {
       harness.config,
     );
 
-    expect(replaced.apiKey).toBe("key-two");
-    expect(replaced.modelId).toBe("vendor/two");
-    expect(replaced.modelSource).toBe("custom");
+    expect(replaced?.apiKey).toBe("key-two");
+    expect(replaced?.modelId).toBe("vendor/two");
+    expect(replaced?.modelSource).toBe("custom");
   });
 
   it("leaves a working configuration untouched when a later probe is never activated", async () => {

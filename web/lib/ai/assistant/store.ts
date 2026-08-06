@@ -32,6 +32,13 @@ import {
   setAssistantEnabled,
 } from "./settings-repo";
 import { beginClear, finishClear, resumePendingClears } from "./clear-repo";
+import {
+  beginProbeOperation,
+  isProbeOperationCurrent,
+  resetProbeAuthorityForTest,
+  revokeProbeOperations,
+  type ProbeOperation,
+} from "./probe-authority";
 import { readDiagnosticCanceller } from "./diagnostic-cancellation";
 import { detachStaleTurns, readUnsettledTurns, setTurnState } from "./history-repo";
 import {
@@ -87,12 +94,32 @@ export interface AssistantUiState {
   turnEpoch: number;
   /** The epoch a live turn is authorised under, or `null`. See the module note. */
   authorizedTurnEpoch: number | null;
+  /**
+   * The epoch of a turn being PREPARED -- claimed, not yet authorised to run.
+   *
+   * Preparation is live work even though no run exists yet: it holds a durable
+   * `preparing` turn row and it is about to contact the provider. Without this the
+   * ownership watch would ignore a takeover, a lease loss or a scenario switch that
+   * landed mid-preparation (it only fires when there is something to interrupt), and
+   * the prepared send would then launch under authority the user had already revoked.
+   */
+  preparingTurnEpoch: number | null;
   activeTurnId: string | null;
   streaming: boolean;
   interruption: ActiveInterruption | null;
   lastSettlement: LastSettlement | null;
   /** The most recent refused send, so the panel can explain the refusal. */
   lastRefusal: SendRefusal | null;
+  /**
+   * Interruptions requested but not yet settled, incremented SYNCHRONOUSLY at the
+   * request.
+   *
+   * The controller's own work starts a microtask later (it is serialised, and the
+   * clear triggers fence durably before closing the gate), so `interruption` alone
+   * would be null for a closure that has already been asked for. Counting requests
+   * is what lets a send refuse in the same tick the user pressed the control.
+   */
+  pendingInterruptions: number;
 }
 
 const INITIAL: AssistantUiState = {
@@ -104,11 +131,13 @@ const INITIAL: AssistantUiState = {
   panelOpen: false,
   turnEpoch: 0,
   authorizedTurnEpoch: null,
+  preparingTurnEpoch: null,
   activeTurnId: null,
   streaming: false,
   interruption: null,
   lastSettlement: null,
   lastRefusal: null,
+  pendingInterruptions: 0,
 };
 
 export const useAssistantStore = create<AssistantUiState>()(() => ({ ...INITIAL }));
@@ -116,6 +145,29 @@ export const useAssistantStore = create<AssistantUiState>()(() => ({ ...INITIAL 
 /** Whether every gate for a live assistant surface is currently satisfied. */
 export function selectReady(state: AssistantUiState): boolean {
   return state.hydrated && isAssistantReady(state.settings);
+}
+
+/**
+ * Whether this tab holds assistant work an interruption would have to close.
+ *
+ * A turn being PREPARED counts. It has no run yet, but it holds a durable turn row
+ * and it is one await away from the provider -- so an ownership or identity change
+ * during preparation is exactly the case that must interrupt.
+ */
+export function hasLiveAssistantWork(
+  state: AssistantUiState = useAssistantStore.getState(),
+): boolean {
+  return state.activeTurnId !== null || state.preparingTurnEpoch !== null;
+}
+
+/**
+ * Whether an interruption has been REQUESTED and not finished settling.
+ *
+ * Broader than `interruption !== null` by one tick: a request counts from the moment
+ * it is made, before the controller has reached its own synchronous closure.
+ */
+export function isInterrupting(state: AssistantUiState = useAssistantStore.getState()): boolean {
+  return state.interruption !== null || state.pendingInterruptions > 0;
 }
 
 /**
@@ -187,49 +239,79 @@ function closeGate(trigger: InterruptionTrigger): number {
     // Dropping this is what closes tool handlers permanently rather than until the
     // next re-render. See the module note on the two epochs.
     authorizedTurnEpoch: null,
+    // A send still preparing under the old epoch is no longer live work here. Its own
+    // final authorization notices the epoch moved and quarantines the prepared turn.
+    preparingTurnEpoch: null,
     interruption: { trigger, phase: "closing" },
     lastRefusal: null,
   });
   return turnEpoch;
 }
 
-async function runInterruption(request: InterruptionRequest): Promise<InterruptionResult> {
-  const result = await interrupt(request, {
-    now: () => new Date(),
-    closeGate,
-    publishPhase: (phase, trigger) => {
-      useAssistantStore.setState({ interruption: { trigger, phase } });
-    },
-    readUnsettledTurns: (scope) => readUnsettledTurns(scope),
-    setTurnState: (turnId, input) => setTurnState(turnId, input),
-    abortLocalRun: () => {
-      const handle = readActiveRunHandle();
-      if (!handle) return null;
-      handle.abort();
-      setActiveRunHandle(null);
-      return handle;
-    },
-    requestRuntimeStop: ({ threadId, signal }) =>
-      requestRuntimeStop({
-        threadId,
-        // The instance the runtime reported at handshake. Unknown (`null`) omits the
-        // header, and an unknown instance detaches rather than being guessed at.
-        runtimeInstanceId: peekRuntimeInstanceId(),
-        signal,
-      }),
-    cancelDiagnostics: (input) => readDiagnosticCanceller().cancelOwnedJobs(input),
-    beginClear: (scope, scenarioId) => beginClear(scope, scenarioId),
-    finishClear: (fence) => finishClear(fence),
-    settlementWindow: (ms, signal) => settlementWindow(ms, signal),
+/**
+ * Release one pending-interruption slot, keeping the gate visibly closed while
+ * another request is still queued.
+ */
+function releaseInterruptionSlot(settled: InterruptionResult | null): void {
+  useAssistantStore.setState((state) => {
+    const pendingInterruptions = Math.max(0, state.pendingInterruptions - 1);
+    return {
+      pendingInterruptions,
+      // Clearing this while another interruption is still queued would open a window
+      // in which a send could pass a gate that has already been asked to close.
+      interruption: pendingInterruptions > 0 ? state.interruption : null,
+      ...(settled
+        ? {
+            lastSettlement: { trigger: settled.trigger, settlement: settled.settlement },
+            activeTurnId: null,
+            preparingTurnEpoch: null,
+            streaming: false,
+            authorizedTurnEpoch: null,
+          }
+        : {}),
+    };
   });
+}
 
-  useAssistantStore.setState({
-    interruption: null,
-    lastSettlement: { trigger: result.trigger, settlement: result.settlement },
-    activeTurnId: null,
-    streaming: false,
-    authorizedTurnEpoch: null,
-  });
+async function runInterruption(request: InterruptionRequest): Promise<InterruptionResult> {
+  let result: InterruptionResult;
+  try {
+    result = await interrupt(request, {
+      now: () => new Date(),
+      closeGate,
+      publishPhase: (phase, trigger) => {
+        useAssistantStore.setState({ interruption: { trigger, phase } });
+      },
+      readUnsettledTurns: (scope) => readUnsettledTurns(scope),
+      setTurnState: (turnId, input) => setTurnState(turnId, input),
+      abortLocalRun: () => {
+        const handle = readActiveRunHandle();
+        if (!handle) return null;
+        handle.abort();
+        setActiveRunHandle(null);
+        return handle;
+      },
+      requestRuntimeStop: ({ threadId, signal }) =>
+        requestRuntimeStop({
+          threadId,
+          // The instance the runtime reported at handshake. Unknown (`null`) omits the
+          // header, and an unknown instance detaches rather than being guessed at.
+          runtimeInstanceId: peekRuntimeInstanceId(),
+          signal,
+        }),
+      cancelDiagnostics: (input) => readDiagnosticCanceller().cancelOwnedJobs(input),
+      beginClear: (scope, scenarioId) => beginClear(scope, scenarioId),
+      finishClear: (fence) => finishClear(fence),
+      settlementWindow: (ms, signal) => settlementWindow(ms, signal),
+    });
+  } catch (error) {
+    // A storage failure is not an expected condition, so it keeps propagating -- but
+    // the slot must be released either way, or the gate would stay shut forever.
+    releaseInterruptionSlot(null);
+    throw error;
+  }
+
+  releaseInterruptionSlot(result);
   return result;
 }
 
@@ -252,6 +334,16 @@ export const assistantActions = {
    * the Settings actions below all come through here.
    */
   interrupt(request: InterruptionRequest): Promise<InterruptionResult> {
+    // Counted SYNCHRONOUSLY, before anything is queued. The controller's own closure
+    // is one microtask away at best (and, for the clear triggers, a durable fence
+    // away), so this is what makes "an interruption has been asked for" true to every
+    // gate in the same tick the user asked for it.
+    useAssistantStore.setState((state) => ({
+      pendingInterruptions: state.pendingInterruptions + 1,
+      // An interruption already in progress keeps its own phase: it is the truthful
+      // thing to show, and the queued one publishes its own when it starts.
+      interruption: state.interruption ?? { trigger: request.trigger, phase: "closing" },
+    }));
     const next = chain.then(() => runInterruption(request));
     chain = next.catch(() => {});
     return next;
@@ -275,6 +367,9 @@ export const assistantActions = {
     },
   ): Promise<void> {
     if (!enabled) {
+      // Before the interruption's first await: a probe still in flight must not be
+      // able to activate a configuration into an app the user has just turned off.
+      revokeProbeOperations();
       await assistantActions.interrupt({ trigger: "disable", ...scope });
     }
     const settings = await setAssistantEnabled(enabled);
@@ -300,10 +395,44 @@ export const assistantActions = {
       threadId: null,
       scenarioId: null,
     },
-  ): Promise<void> {
+    operation?: ProbeOperation,
+  ): Promise<boolean> {
     await assistantActions.interrupt({ trigger: "replace_configuration", ...scope });
-    const settings = await activateProbedConfiguration(draft);
+    const settings = await activateProbedConfiguration(draft, {
+      // Compared inside the write transaction. Remove key, Clear all, Disable and a
+      // newer replacement all revoke the operation synchronously, so a probe that
+      // succeeds after one of them cannot write the captured credential back.
+      authorize: operation ? () => isProbeOperationCurrent(operation) : undefined,
+    });
+    if (!settings) return false;
     useAssistantStore.setState({ settings });
+    return true;
+  },
+
+  /**
+   * Claim a revocable identity for a Settings probe.
+   *
+   * A REPLACEMENT interrupts the previous configuration's live work BEFORE the new
+   * pair is tested. That order is the settled one: the work in flight belongs to a
+   * configuration the user has already decided to change, and testing first would
+   * leave it running against the old key while the new one is being probed.
+   *
+   * The operation is minted before the interruption so that anything landing during
+   * it -- Remove key, Clear all, Disable -- revokes THIS probe rather than an earlier
+   * one, and the caller's post-await check catches it.
+   */
+  async beginProbe(
+    options: { replaces: boolean },
+    scope: { threadId: string | null; scenarioId: string | null } = {
+      threadId: null,
+      scenarioId: null,
+    },
+  ): Promise<ProbeOperation> {
+    const operation = beginProbeOperation();
+    if (options.replaces) {
+      await assistantActions.interrupt({ trigger: "replace_configuration", ...scope });
+    }
+    return operation;
   },
 
   /**
@@ -319,6 +448,9 @@ export const assistantActions = {
       scenarioId: null,
     },
   ): Promise<void> {
+    // Synchronously, ahead of the deletion itself: a probe that completes after this
+    // point must not be able to re-persist the credential being removed.
+    revokeProbeOperations();
     const settings = await removeAssistantKey();
     useAssistantStore.setState({ settings });
     await assistantActions.interrupt({ trigger: "remove_key", ...scope });
@@ -340,6 +472,7 @@ export const assistantActions = {
       scenarioId: null,
     },
   ): Promise<InterruptionResult> {
+    revokeProbeOperations();
     const result = await assistantActions.interrupt({ trigger: "clear_all", ...scope });
     // The configuration row is gone, so the projection must agree immediately rather
     // than waiting for the next hydration to notice.
@@ -352,11 +485,34 @@ export const assistantActions = {
     return result;
   },
 
-  /** Claim the next turn epoch. Callers must use the returned value, not read it. */
+  /**
+   * Claim the next turn epoch and publish the claim as live PREPARING work.
+   *
+   * Callers must use the returned value and never re-read it: the point of the claim
+   * is to hold one epoch across the whole preparation, and a later read would follow
+   * whatever superseded it.
+   */
   nextTurnEpoch(): number {
     const turnEpoch = useAssistantStore.getState().turnEpoch + 1;
-    useAssistantStore.setState({ turnEpoch, authorizedTurnEpoch: null });
+    useAssistantStore.setState({
+      turnEpoch,
+      authorizedTurnEpoch: null,
+      preparingTurnEpoch: turnEpoch,
+    });
     return turnEpoch;
+  },
+
+  /**
+   * Give up a claimed epoch whose send was refused before it ever ran.
+   *
+   * Scoped to the claim: an interruption or a newer claim has already replaced
+   * `preparingTurnEpoch`, and clearing that one here would forget work that is still
+   * live.
+   */
+  abandonPreparing(turnEpoch: number): void {
+    useAssistantStore.setState((state) =>
+      state.preparingTurnEpoch === turnEpoch ? { preparingTurnEpoch: null } : {},
+    );
   },
 
   /** Authorise the turn that is about to run under `turnEpoch`. */
@@ -364,6 +520,7 @@ export const assistantActions = {
     useAssistantStore.setState({
       activeTurnId: turnId,
       authorizedTurnEpoch: turnEpoch,
+      preparingTurnEpoch: null,
       streaming: true,
       lastSettlement: null,
       lastRefusal: null,
@@ -375,6 +532,7 @@ export const assistantActions = {
     useAssistantStore.setState({
       activeTurnId: null,
       authorizedTurnEpoch: null,
+      preparingTurnEpoch: null,
       streaming: false,
       lastSettlement: settlement === "completed" ? null : { trigger: null, settlement },
     });
@@ -390,5 +548,6 @@ export const assistantActions = {
     chain = Promise.resolve();
     settlementWindow = realSettlementWindow;
     setActiveRunHandle(null);
+    resetProbeAuthorityForTest();
   },
 } as const;
