@@ -37,6 +37,7 @@ from ..errors import (
     StoreWriteConflictError,
 )
 from ..event_cursor import EventCursorExpired, EventCursorInvalid, decode_cursor, encode_cursor
+from ..optimize_basis import NormalizedOptions, OptimizeBasisV2
 from ..jobs.models import (
     EventReplayWindow,
     Job,
@@ -57,6 +58,55 @@ SOCKET_TIMEOUT_MARGIN_SECONDS = 5.0
 
 REDIS_OPERATION_TIMEOUT_SECONDS = 2.0
 """Short timeout for ordinary Redis operations and deployment probes."""
+
+
+def _serialize_basis(basis: OptimizeBasisV2 | None) -> dict[str, Any] | None:
+    """Serialize an immutable submission basis for the stored job record (T08).
+
+    Written field by field rather than by reflection: a field added to the basis
+    without a matching line here is a persistence bug that must surface, not a
+    value that silently stops round-tripping and changes a recomputed identity.
+    """
+    if basis is None:
+        return None
+    return {
+        "schema_version": basis.schema_version,
+        "submission_contract_version": basis.submission_contract_version,
+        "workspace_schema_version": basis.workspace_schema_version,
+        "serializer_version": basis.serializer_version,
+        "anonymization_mode": basis.anonymization_mode,
+        "input_sha256": basis.input_sha256,
+        "normalized_options": {
+            "solver": basis.normalized_options.solver,
+            "prettify": basis.normalized_options.prettify,
+            "timeout_seconds": basis.normalized_options.timeout_seconds,
+        },
+        "solver_semantic_version": basis.solver_semantic_version,
+        "backend_capability_version": basis.backend_capability_version,
+    }
+
+
+def _deserialize_basis(data: Any) -> OptimizeBasisV2 | None:
+    """Rebuild an immutable submission basis from a stored job record."""
+    if not isinstance(data, dict):
+        return None
+    options = data["normalized_options"]
+    return OptimizeBasisV2(
+        schema_version=data["schema_version"],
+        submission_contract_version=data["submission_contract_version"],
+        workspace_schema_version=data["workspace_schema_version"],
+        serializer_version=data["serializer_version"],
+        anonymization_mode=data["anonymization_mode"],
+        input_sha256=data["input_sha256"],
+        normalized_options=NormalizedOptions(
+            solver=options["solver"],
+            prettify=options["prettify"],
+            timeout_seconds=options["timeout_seconds"],
+        ),
+        solver_semantic_version=data["solver_semantic_version"],
+        backend_capability_version=data["backend_capability_version"],
+    )
+
 
 REPLAY_INITIAL_BATCH_COUNT = 1_000
 """Maximum events returned in one prepared replay batch."""
@@ -887,15 +937,23 @@ class RedisJobStore:
             )
 
     def _stage_job_deletion(self, transaction, job_id: str) -> None:
-        """Stage deletion of all job data and indexes in an active Redis transaction."""
+        """Stage deletion of all job data and indexes in an active Redis transaction.
+
+        CHILD MATERIAL BEFORE THE JOB SHELL (T08 retention ordering). The whole
+        MULTI is atomic, so no reader observes a partial state, but the ordering
+        is still the durable statement of the invariant: the raw submitted input
+        and generated artifact must never outlive the job record that governs
+        their retention. Should this ever be split across commands, or replayed
+        by a later Lua state machine, the safe order is already the written one.
+        """
         transaction.delete(
-            self._job_key(job_id),
             self._input_key(job_id),
             self._artifact_key(job_id),
             self._artifact_metadata_key(job_id),
             self._events_key(job_id),
             self._lease_key(job_id),
         )
+        transaction.delete(self._job_key(job_id))
         transaction.zrem(self._jobs_key, job_id)
         transaction.zrem(self._queue_key, job_id)
         transaction.srem(self._pending_key, job_id)
@@ -912,8 +970,13 @@ class RedisJobStore:
                 "solver": job.request.solver,
                 "prettify": job.request.prettify,
                 "timeout_seconds": job.request.timeout_seconds,
+                "basis": _serialize_basis(job.request.basis),
+                "basis_id": job.request.basis_id,
+                "parent_basis_id": job.request.parent_basis_id,
+                "transform_digest": job.request.transform_digest,
             },
             "created_at": job.created_at.isoformat(),
+            "expires_at": job.expires_at.isoformat() if job.expires_at is not None else None,
             "revision": job.revision,
             "started_at": job.started_at.isoformat() if job.started_at is not None else None,
             "finished_at": job.finished_at.isoformat() if job.finished_at is not None else None,
@@ -954,8 +1017,13 @@ class RedisJobStore:
                 solver=request["solver"],
                 prettify=request.get("prettify"),
                 timeout_seconds=request["timeout_seconds"],
+                basis=_deserialize_basis(request.get("basis")),
+                basis_id=request.get("basis_id"),
+                parent_basis_id=request.get("parent_basis_id"),
+                transform_digest=request.get("transform_digest"),
             ),
             created_at=datetime.fromisoformat(data["created_at"]),
+            expires_at=datetime.fromisoformat(data["expires_at"]) if data.get("expires_at") else None,
             revision=data["revision"],
             started_at=datetime.fromisoformat(data["started_at"]) if data.get("started_at") else None,
             finished_at=datetime.fromisoformat(data["finished_at"]) if data.get("finished_at") else None,

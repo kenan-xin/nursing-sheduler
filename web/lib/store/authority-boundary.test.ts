@@ -40,6 +40,10 @@ const REPOSITORY_ALLOWED = new Set([
   "lib/store/authority.test.ts",
   "lib/store/authority-fencing.test.ts",
   "lib/store/authority-boundary.test.ts",
+  // Also a test OF the adapter (its Optimize basis reaping, T08). It opens the
+  // database directly to seed rows BEFORE the authority boots, which is the only
+  // way to prove the boot sweep runs rather than that a sweep function works.
+  "lib/store/optimize-basis-reaping.test.ts",
   // Pins the database-name literal the Playwright helper duplicates.
   "e2e/support/v2-seed.test.ts",
 ]);

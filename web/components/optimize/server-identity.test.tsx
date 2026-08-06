@@ -14,6 +14,7 @@ function info(over: Partial<OptimizeServerInfo> = {}): OptimizeServerInfo {
     backendVersion: "1.2.3",
     clientVersion: "1.2.3",
     versionTier: "identical",
+    semanticProfile: null,
     unavailableReason: null,
     recheck: vi.fn(),
     ...over,

@@ -52,6 +52,7 @@ from .jobs.worker import JobWorker
 from .maintenance import JobMaintenance
 from .runtime_identity import get_deployment_id
 from .scheduling_errors import SchedulingContentError
+from .semantic_profile import semantic_profile
 from .stores.memory import MemoryJobStore
 
 
@@ -312,8 +313,15 @@ def create_app(
         }
 
     def info_payload(status: str):
-        """Build public service identity and job-store metadata."""
-        return {"status": status, **runtime_identity}
+        """Build public service identity, semantic profile, and job-store metadata.
+
+        The semantic profile is a SEPARATE nested object rather than more keys in
+        `runtime_identity`: that dict is also embedded verbatim in `job.state_changed`
+        events, whose consumers validate it as a closed key set. Keeping the profile
+        out of it means advertising scheduling semantics never changes the event
+        contract (T08).
+        """
+        return {"status": status, **runtime_identity, "semantic_profile": semantic_profile()}
 
     def check_readiness() -> str | None:
         """Return the first unavailable dependency reason, or `None` when ready."""

@@ -9,6 +9,7 @@
 // populated beside it by an idempotent migration (see `migration.ts`).
 
 import type { ScenarioUiState } from "@/lib/scenario";
+import type { OptimizeBasisRecordV2 } from "@/lib/optimize/basis/basis-row";
 
 // ---------------------------------------------------------------------------
 // Scenario envelope
@@ -255,23 +256,22 @@ export interface AssistantReceiptV1 {
   createdAt: string;
 }
 
+// The Optimize basis row is DEFINED in `@/lib/optimize/basis/basis-row` and
+// re-exported here. T02 owns the durable table so a basis row can be written in
+// the same transaction as a commit; T08 owns the shape and its semantics, and the
+// authority boundary forbids T08's modules from importing this graph — so the
+// dependency points outward, not inward.
+export type {
+  OptimizeBasisOwnerKind,
+  OptimizeBasisRecordFields,
+  OptimizeBasisRecordV2,
+} from "@/lib/optimize/basis/basis-row";
+
 /**
- * An immutable Optimize submission basis. T08 owns semantics; T02 owns the durable
- * table so basis rows can be written in the same transaction as a commit.
+ * @deprecated The pre-T08 placeholder name for the basis row. Retained as an alias
+ * so nothing that imported it breaks; new code uses `OptimizeBasisRecordV2`.
  */
-export interface OptimizeBasisV1 {
-  basisId: string;
-  schemaVersion: 1;
-  scenarioId: string;
-  documentRevision: number;
-  /** SHA-256 of the exact submitted bytes (computed by the T08 caller). */
-  submissionDigest: string;
-  /** Versioned semantic-basis digest binding serializer/option normalization. */
-  semanticBasisDigest: string;
-  createdAt: string;
-  /** Advertised retention expiry of the associated job, if any. */
-  expiresAt: string | null;
-}
+export type OptimizeBasisV1 = OptimizeBasisRecordV2;
 
 // ---------------------------------------------------------------------------
 // Repository metadata

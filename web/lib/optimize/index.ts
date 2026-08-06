@@ -58,6 +58,7 @@ export {
   type CursorPersistenceProvider,
   type OptimizeRunController,
   type OptimizeRunSubmitInput,
+  type OptimizeBasisStore,
   type OptimizeRunSubmitOutcome,
   type OptimizeRunResubmitOutcome,
   type PreparedRecoveryAttachment,
@@ -136,6 +137,72 @@ export {
   type OptimizeObservabilitySink,
   type OptimizeObservation,
 } from "./optimize-observability";
+
+// T08 — immutable submission basis, closed recovery, retention, and the product
+// outcome model. The canonical encoder is paired byte-for-byte with the Python
+// half through `contracts/optimize-basis-v2.golden.json`.
+export {
+  ANONYMIZATION_MODES,
+  BASIS_ENCODING_VERSION,
+  BASIS_SCHEMA_VERSION,
+  computeBasisId,
+  encodeOptimizeBasisV2,
+  encodeOptimizeBasisV2Bytes,
+  OptimizeBasisError,
+  sha256Hex,
+  sha256HexOfUtf8,
+  type AnonymizationMode,
+  type NormalizedOptimizeOptions,
+  type OptimizeBasisV2,
+} from "./basis/optimize-basis";
+
+export type {
+  OptimizeBasisOwnerKind,
+  OptimizeBasisRecordFields,
+  OptimizeBasisRecordV2,
+} from "./basis/basis-row";
+
+export {
+  BasisOwnershipError,
+  bindAcceptedJob,
+  buildOptimizeBasis,
+  OPTIMIZE_SERIALIZER_VERSION,
+  OPTIMIZE_SOLVER,
+  type AcceptedJobIdentity,
+  type BasisSubmissionFields,
+  type BuildBasisInput,
+  type BuiltBasis,
+} from "./basis/basis-record";
+
+export {
+  classifyRecovery,
+  isBasisCurrent,
+  type RecoveryClassification,
+  type RecoveryInput,
+  type RecoveryState,
+  type ServerJobFacts,
+} from "./basis/recovery";
+
+export {
+  mayRetainPayload,
+  planReap,
+  type ReapAction,
+  type ReapInput,
+  type ReapReason,
+} from "./basis/reaper";
+
+export {
+  isEvidenceBearing,
+  mapJobToProductOutcome,
+  notStarted,
+  provesFeasible,
+  UNCLASSIFIED_FAILURE,
+  type NotStartedReason,
+  type OutcomeEvidence,
+  type OutcomeInput,
+  type ProductOutcome,
+  type ProductOutcomeView,
+} from "./outcome-mapping";
 
 export {
   classifyOptimizeServerInfo,

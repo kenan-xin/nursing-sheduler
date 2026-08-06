@@ -26,6 +26,7 @@ from fastapi import APIRouter, File, Form, Header, HTTPException, Request, Respo
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
+from ..basis_admission import BasisClaim, verify_basis_claim
 from ..config import ServerSettings
 from ..event_cursor import EventCursorExpired, EventCursorInvalid, encode_cursor
 from ..jobs.controller import JobController
@@ -118,13 +119,27 @@ async def create_job(
     prettify: bool | None = Form(None),
     timeout: int | None = Form(None),
     solver: str = Form(SUPPORTED_SOLVER, description="Only ortools/cp-sat is available."),
+    basis_id: str | None = Form(None, description="Claimed OptimizeBasisV2 identity (T08)."),
+    input_sha256: str | None = Form(None, description="Claimed SHA-256 of the exact submitted bytes."),
+    submission_contract_version: str | None = Form(None),
+    workspace_schema_version: str | None = Form(None),
+    serializer_version: str | None = Form(None),
+    anonymization_mode: str | None = Form(None, description="Which anonymization transform produced the bytes."),
+    expected_solver_semantic_version: str | None = Form(None),
+    expected_backend_capability_version: str | None = Form(None),
+    parent_basis_id: str | None = Form(None, description="Ordinary parent basis a candidate derives from."),
+    transform_digest: str | None = Form(None, description="Digest of the validated transform for a candidate."),
 ):
     """Validate an optimization request and enqueue a durable job.
 
-    All content validation, the CP-SAT-only solver check, and canonical strict
-    conversion happen before `create_job`, so a rejected request never consumes
-    pending or retained capacity. The stored input is the canonical strict YAML,
-    which the worker later reparses and revalidates.
+    All content validation, the CP-SAT-only solver check, canonical strict
+    conversion, and immutable-basis verification happen before `create_job`, so a
+    rejected request never consumes pending or retained capacity. The stored input
+    is the canonical strict YAML, which the worker later reparses and revalidates.
+
+    A basis claim is optional. When present it is recomputed here from the bytes
+    actually received and the server's own live semantic profile and RESOLVED
+    options; a disagreement is rejected before the job exists (T08).
     """
     settings = _settings(request)
     content, input_name = await _read_input(file, yaml_content, settings.max_yaml_bytes)
@@ -139,6 +154,27 @@ async def create_job(
         canonical_bytes = await run_in_threadpool(canonicalize_submission, content)
     except MalformedInputError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
+    # Verified against `content` — the EXACT bytes the client sent — not against
+    # `canonical_bytes`. The client's evidence is bound to what it submitted; the
+    # canonical form is an internal execution detail it never digested.
+    verified_basis = verify_basis_claim(
+        BasisClaim(
+            basis_id=basis_id,
+            input_sha256=input_sha256,
+            submission_contract_version=submission_contract_version,
+            workspace_schema_version=workspace_schema_version,
+            serializer_version=serializer_version,
+            anonymization_mode=anonymization_mode,
+            expected_solver_semantic_version=expected_solver_semantic_version,
+            expected_backend_capability_version=expected_backend_capability_version,
+            parent_basis_id=parent_basis_id,
+            transform_digest=transform_digest,
+        ),
+        received_bytes=content,
+        resolved_solver=canonical_solver,
+        resolved_prettify=prettify,
+        resolved_timeout_seconds=timeout_seconds,
+    )
     # Unlike the synchronous endpoints below, create_job must remain async for
     # upload reading. Offload its synchronous controller/store write so it cannot
     # block the ASGI event loop.
@@ -150,6 +186,7 @@ async def create_job(
         prettify=prettify,
         timeout_seconds=timeout_seconds,
         input_bytes=canonical_bytes,
+        basis=verified_basis,
     )
     response.headers["Location"] = f"/optimize/{job.id}"
     response.headers["Retry-After"] = "1"

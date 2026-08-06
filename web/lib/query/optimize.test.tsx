@@ -86,6 +86,7 @@ const baseJob = (over: Partial<JobResponse>): JobResponse => {
     terminal: false,
     queue_position: null,
     created_at: "2026-07-20T00:00:00+00:00",
+    expires_at: "2026-07-21T00:00:00+00:00",
     started_at: "2026-07-20T00:00:01+00:00",
     finished_at: null,
     result: null,
@@ -98,6 +99,7 @@ const baseJob = (over: Partial<JobResponse>): JobResponse => {
       solver: "ortools/cp-sat",
       prettify: null,
       timeout_seconds: 300,
+      basis: null,
       ...over.request,
     },
     links: {

@@ -63,6 +63,9 @@ export function formatRunStatus(view: OptimizeRunView, submitting: boolean): Run
       return { label: "Cancelling", tone: "warn" };
     case "completed":
       if (view.result?.outcome === "infeasible") return { label: "Infeasible", tone: "warn" };
+      // A run that settled without proving either side is NOT a success badge: it
+      // produced no roster and no proof, so it reads as a warning, not a result.
+      if (view.result?.outcome === "inconclusive") return { label: "Inconclusive", tone: "warn" };
       return { label: view.result?.solverStatus ?? "Completed", tone: "success" };
     case "cancelled":
       return { label: "Cancelled", tone: "warn" };
@@ -168,6 +171,10 @@ export function terminalHeading(view: OptimizeRunView): string | null {
         return "A feasible roster was found";
       case "infeasible":
         return "This roster can't be built";
+      case "inconclusive":
+        // Deliberately not "can't be built" — the solver proved nothing either way,
+        // and implying infeasibility would state evidence that does not exist.
+        return "No answer either way";
       default:
         return null;
     }

@@ -49,6 +49,13 @@ import {
   type ScenarioRepository,
 } from "@/lib/repository";
 import type { ScenarioUiState, UiRequestCell } from "@/lib/scenario";
+// `planReap` is imported by its DEEP path, never through the `@/lib/optimize`
+// barrel: the barrel pulls in the run controller, which imports `@/lib/store`, and
+// that would close a require cycle. `basis/reaper` and `basis/basis-row` are pure
+// leaves — no runtime imports at all — so this direction is safe.
+import { planReap } from "@/lib/optimize/basis/reaper";
+import type { OptimizeBasisRecordV2 } from "@/lib/optimize/basis/basis-row";
+import type { ReapAction as OptimizeBasisReapAction } from "@/lib/optimize/basis/reaper";
 import { pickScenario } from "./fingerprint";
 import type { HotStore } from "./hot-store";
 import type { ScenarioStore } from "./scenario-store";
@@ -585,6 +592,56 @@ export class ScenarioAuthority {
         : { undo: false, redo: false },
     );
     this.settleWriteStatus();
+
+    // The Optimize basis reaper's lifecycle caller (T08). Boot is the one moment
+    // where the live reference set is empty BY CONSTRUCTION: no Preview is open,
+    // no diagnostic candidate is in flight, and no receipt reconciliation is
+    // running, because none of those survive a page load. That makes the sweep
+    // deterministic rather than dependent on a timer nobody owns.
+    //
+    // Deliberately AFTER publish and NOT awaited into the boot path: retention
+    // hygiene must never delay — or fail — bringing the tab up against durable
+    // truth. `sweepOptimizeBases` swallows its own errors for the same reason.
+    this.basisSweepSettled = this.sweepOptimizeBases();
+  }
+
+  /**
+   * The boot sweep's settlement.
+   *
+   * Boot deliberately does not await the sweep, which would otherwise make it
+   * unobservable. Exposing the promise lets a caller (and a test) await the pass
+   * without turning retention hygiene into a boot dependency.
+   */
+  basisSweepSettled: Promise<OptimizeBasisReapAction[]> = Promise.resolve([]);
+
+  /**
+   * Run one expiry-indexed reaping pass over the retained basis rows.
+   *
+   * `referencedBasisIds` names rows something still needs (a non-terminal
+   * candidate, an open Preview, a receipt reconciliation). A reference protects
+   * only the RAW PAYLOAD, and only up to the advertised expiry — `planReap`
+   * deletes an expired row regardless, so nothing here can extend the validity of
+   * evidence the server has already released.
+   *
+   * Returns the actions applied, so a caller (and a test) can see what a pass did
+   * rather than inferring it from surviving rows.
+   */
+  async sweepOptimizeBases(
+    referencedBasisIds: ReadonlySet<string> = new Set(),
+    now: Date = new Date(),
+  ): Promise<OptimizeBasisReapAction[]> {
+    try {
+      const rows = await this.listOptimizeBases();
+      if (rows.length === 0) return [];
+      const actions = planReap({ rows, referencedBasisIds, now });
+      await this.applyOptimizeBasisReap(actions);
+      return actions;
+    } catch {
+      // Retention hygiene is never worth failing a boot over. The rows stay, and
+      // the next pass re-evaluates them; an unreaped row is still classified as
+      // expired by `classifyRecovery`, so nothing becomes trustworthy by surviving.
+      return [];
+    }
   }
 
   /**
@@ -1229,5 +1286,81 @@ export class ScenarioAuthority {
     } catch {
       return null;
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Optimize basis rows (T08)
+  // -------------------------------------------------------------------------
+  //
+  // These live on the adapter because it is the ONE module allowed to reach the
+  // durable repository graph (`authority-boundary.test.ts`). They are deliberately
+  // thin: the basis SEMANTICS — what a valid basis is, when a row may be reaped,
+  // whether a recovery is trusted — live in `@/lib/optimize/basis`, which imports
+  // only erased types from here, so there is no runtime cycle between the store and
+  // the Optimize feature.
+
+  /** Write a newly built, not-yet-accepted basis row. */
+  async putOptimizeBasis(record: OptimizeBasisRecordV2): Promise<void> {
+    await this.db.optimizeBases.put(record);
+  }
+
+  /** Read one basis row, or `null` when it was never written or has been reaped. */
+  async readOptimizeBasis(basisId: string): Promise<OptimizeBasisRecordV2 | null> {
+    return (await this.db.optimizeBases.get(basisId)) ?? null;
+  }
+
+  /** Every retained basis row, for an expiry pass. */
+  async listOptimizeBases(): Promise<OptimizeBasisRecordV2[]> {
+    return this.db.optimizeBases.toArray();
+  }
+
+  /**
+   * Bind an accepted job to a basis row inside ONE transaction.
+   *
+   * `verify` is the caller's identity check (`bindAcceptedJob`), applied to the
+   * row as re-read INSIDE the transaction rather than to whatever the caller held
+   * beforehand. That is what makes the binding safe against a concurrent write:
+   * a row that changed under the caller fails verification here instead of being
+   * overwritten with a decision made about a stale snapshot.
+   *
+   * Returns the bound row, or `null` when the row is gone or verification refuses.
+   */
+  async bindOptimizeBasisJob(
+    basisId: string,
+    verify: (row: OptimizeBasisRecordV2) => OptimizeBasisRecordV2 | null,
+  ): Promise<OptimizeBasisRecordV2 | null> {
+    return this.db.transaction("rw", this.db.optimizeBases, async () => {
+      const current = await this.db.optimizeBases.get(basisId);
+      if (current === undefined) return null;
+      const bound = verify(current);
+      if (bound === null) return null;
+      await this.db.optimizeBases.put(bound);
+      return bound;
+    });
+  }
+
+  /**
+   * Apply an ORDERED reap plan (`planReap`) in one transaction.
+   *
+   * The order is the correctness property, so the actions are applied strictly in
+   * sequence rather than partitioned and batched: payload clears before deletes,
+   * children before parents. Running them inside one transaction additionally means
+   * a failure mid-plan leaves the previous consistent state rather than a half-reaped
+   * set where a parent outlived its child's removal.
+   */
+  async applyOptimizeBasisReap(actions: readonly OptimizeBasisReapAction[]): Promise<void> {
+    if (actions.length === 0) return;
+    await this.db.transaction("rw", this.db.optimizeBases, async () => {
+      for (const action of actions) {
+        if (action.kind === "delete-row") {
+          await this.db.optimizeBases.delete(action.basisId);
+          continue;
+        }
+        const row = await this.db.optimizeBases.get(action.basisId);
+        // Clearing the raw payload while KEEPING the row is what lets history stay
+        // readable after the submitted document itself is gone.
+        if (row !== undefined) await this.db.optimizeBases.put({ ...row, submittedYaml: null });
+      }
+    });
   }
 }

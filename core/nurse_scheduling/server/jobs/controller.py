@@ -31,6 +31,7 @@ from ..errors import (
     JobOperationNotAllowedError,
     StoreWriteConflictError,
 )
+from ..basis_admission import VerifiedBasis
 from ..job_store import JobStore
 from ..retry import retry_with_backoff
 from .models import (
@@ -103,8 +104,13 @@ class JobController:
         prettify: bool | None,
         timeout_seconds: int,
         input_bytes: bytes,
+        basis: VerifiedBasis | None = None,
     ) -> Job:
         """Create and enqueue a job with its submitted input.
+
+        A supplied `basis` has ALREADY been independently verified against the
+        received bytes and the live semantic profile (T08). It is written once,
+        here, into the immutable request, and no later transition rewrites it.
 
         ID collisions are retried before reporting an application conflict.
 
@@ -125,8 +131,13 @@ class JobController:
                     solver=solver,
                     prettify=prettify,
                     timeout_seconds=timeout_seconds,
+                    basis=basis.basis if basis is not None else None,
+                    basis_id=basis.basis_id if basis is not None else None,
+                    parent_basis_id=basis.parent_basis_id if basis is not None else None,
+                    transform_digest=basis.transform_digest if basis is not None else None,
                 ),
                 created_at=now,
+                expires_at=now + timedelta(seconds=self._retention_seconds),
             )
             initial_event = self._state_event(job, now)
             if self._runtime_identity is not None:

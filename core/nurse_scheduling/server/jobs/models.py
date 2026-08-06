@@ -22,6 +22,8 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
+from ..optimize_basis import OptimizeBasisV2
+
 
 class JobState(str, Enum):
     """Execution lifecycle for an asynchronous job."""
@@ -40,11 +42,19 @@ class JobState(str, Enum):
 
 
 class OptimizationOutcome(str, Enum):
-    """Normalized outcome produced by a successful optimization run."""
+    """Normalized outcome produced by a successful optimization run.
+
+    `INCONCLUSIVE` is a NORMAL completion, not an infrastructure failure: the
+    solver ran to a terminal state and proved neither feasibility nor
+    infeasibility (T08). Classifying it as `FAILED` would lose the distinction
+    between "we have no proof" and "the run broke", and classifying it as
+    `INFEASIBLE` would manufacture evidence that does not exist.
+    """
 
     OPTIMAL = "optimal"
     FEASIBLE = "feasible"
     INFEASIBLE = "infeasible"
+    INCONCLUSIVE = "inconclusive"
 
 
 @dataclass(frozen=True)
@@ -61,6 +71,20 @@ class JobRequest:
     """Optional schedule-prettification preference."""
     timeout_seconds: int
     """Maximum duration supplied to the scheduling engine."""
+    basis: OptimizeBasisV2 | None = None
+    """Immutable submission identity, when the client claimed one (T08).
+
+    `None` for a submission that carried no basis claim — the ordinary Optimize
+    path stays fully usable without one. A basis is only ever set at creation,
+    after the server independently recomputed and matched it, and is never
+    rewritten afterwards, so a job cannot be rebound to different evidence.
+    """
+    basis_id: str | None = None
+    """SHA-256 of the canonical encoding of `basis`, or `None` when absent."""
+    parent_basis_id: str | None = None
+    """Ordinary parent basis this job's candidate was derived from (T10 creates these)."""
+    transform_digest: str | None = None
+    """Digest over the validated command set and host diff that produced a candidate."""
 
 
 @dataclass(frozen=True)
@@ -99,6 +123,16 @@ class Job:
     """Normalized immutable execution inputs."""
     created_at: datetime
     """UTC time at which the job entered the store."""
+    expires_at: datetime | None = None
+    """Advertised UTC time from which this job's evidence may no longer exist (T08).
+
+    Deliberately derived from `created_at`, not `finished_at`, even though
+    retention maintenance deletes on `finished_at`: `created_at <= finished_at`,
+    so the advertised expiry is never LATER than the earliest possible deletion.
+    Evidence validity must never outlive what was advertised, so the conservative
+    direction is the only safe one. Retained-capacity eviction can still delete a
+    job sooner, which is why a client must re-check rather than assume liveness.
+    """
     revision: int = 0
     """Optimistic-concurrency version incremented by each stored update."""
     started_at: datetime | None = None

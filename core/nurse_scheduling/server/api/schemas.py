@@ -24,6 +24,51 @@ from pydantic import BaseModel
 from ..jobs.models import Job, JobState, OptimizationOutcome, solver_supports_stop
 
 
+class NormalizedOptionsResponse(BaseModel):
+    """The resolved solver options bound into a job's basis identity."""
+
+    solver: str
+    """Canonical solver selector actually used."""
+    prettify: bool
+    """Resolved prettification preference (never the request's absent default)."""
+    timeout_seconds: int
+    """Resolved optimization timeout in seconds."""
+
+
+class JobBasisResponse(BaseModel):
+    """The immutable submission identity of a job (T08).
+
+    IDENTIFIERS ONLY. The submitted document itself is never exposed here or on
+    any event: a client that needs the bytes already has them, and a client that
+    does not must not be able to read another submission out of a job response.
+    """
+
+    basis_id: str
+    """SHA-256 of the canonical encoding of the basis."""
+    schema_version: int
+    """Basis schema version."""
+    submission_contract_version: str
+    """Submission wire-contract version."""
+    workspace_schema_version: str
+    """Workspace document schema version the client projected from."""
+    serializer_version: str
+    """Serializer version that produced the submitted bytes."""
+    anonymization_mode: str
+    """Anonymization transform applied before serialization."""
+    input_sha256: str
+    """SHA-256 of the exact submitted bytes, recomputed by the server."""
+    normalized_options: NormalizedOptionsResponse
+    """Resolved solver options bound into the identity."""
+    solver_semantic_version: str
+    """Solver scheduling-semantics version this job ran under."""
+    backend_capability_version: str
+    """Backend capability version this job ran under."""
+    parent_basis_id: str | None
+    """Ordinary parent basis a candidate derives from, or `None` for an ordinary run."""
+    transform_digest: str | None
+    """Digest of the validated transform that produced a candidate, or `None`."""
+
+
 class JobRequestResponse(BaseModel):
     """Public execution inputs retained with a job."""
 
@@ -35,6 +80,8 @@ class JobRequestResponse(BaseModel):
     """Requested schedule-prettification preference."""
     timeout_seconds: int
     """Configured optimization timeout."""
+    basis: JobBasisResponse | None
+    """Immutable submission identity, or `None` when the client claimed none."""
 
 
 class OptimizationResultResponse(BaseModel):
@@ -83,6 +130,37 @@ class JobLinksResponse(BaseModel):
     """Download endpoint, available only after an artifact is produced."""
 
 
+def _basis_response(job: Job) -> JobBasisResponse | None:
+    """Project a job's immutable basis into its identifier-only public shape.
+
+    `basis` and `basis_id` are written together at creation or not at all, so an
+    incomplete pair means the record is corrupt; it is reported as absent rather
+    than partially exposed, and a caller relying on the basis then correctly
+    treats the run as having no trustworthy identity.
+    """
+    basis = job.request.basis
+    if basis is None or job.request.basis_id is None:
+        return None
+    return JobBasisResponse(
+        basis_id=job.request.basis_id,
+        schema_version=basis.schema_version,
+        submission_contract_version=basis.submission_contract_version,
+        workspace_schema_version=basis.workspace_schema_version,
+        serializer_version=basis.serializer_version,
+        anonymization_mode=basis.anonymization_mode,
+        input_sha256=basis.input_sha256,
+        normalized_options=NormalizedOptionsResponse(
+            solver=basis.normalized_options.solver,
+            prettify=basis.normalized_options.prettify,
+            timeout_seconds=basis.normalized_options.timeout_seconds,
+        ),
+        solver_semantic_version=basis.solver_semantic_version,
+        backend_capability_version=basis.backend_capability_version,
+        parent_basis_id=job.request.parent_basis_id,
+        transform_digest=job.request.transform_digest,
+    )
+
+
 class JobResponse(BaseModel):
     """Complete public representation of one optimization job."""
 
@@ -96,6 +174,8 @@ class JobResponse(BaseModel):
     """Current one-based position while queued."""
     created_at: datetime
     """Time the job entered the store."""
+    expires_at: datetime | None
+    """Advertised time from which this job's evidence may no longer exist."""
     started_at: datetime | None
     """Time a worker claimed the job."""
     finished_at: datetime | None
@@ -121,6 +201,7 @@ class JobResponse(BaseModel):
             terminal=job.state.terminal,
             queue_position=job.queue_position,
             created_at=job.created_at,
+            expires_at=job.expires_at,
             started_at=job.started_at,
             finished_at=job.finished_at,
             request=JobRequestResponse(
@@ -128,6 +209,7 @@ class JobResponse(BaseModel):
                 solver=job.request.solver,
                 prettify=job.request.prettify,
                 timeout_seconds=job.request.timeout_seconds,
+                basis=_basis_response(job),
             ),
             result=(
                 OptimizationResultResponse(
