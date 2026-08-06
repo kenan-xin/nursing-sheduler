@@ -574,6 +574,33 @@ describe("permanent assistant generations", () => {
     expect((await db.assistantGenerations.get(scoped))?.generation).toBe(2);
   });
 
+  it("a clear deletes diagnostic searches, scoped and global alike", async () => {
+    // A diagnostic search names the conversation that opened it and holds the
+    // candidate changes the model proposed, so it is assistant content. Leaving it
+    // behind would let cleared work reappear afterwards as "what we tested".
+    const { repo, db } = createHarness();
+    const a = await repo.selectOrSwitchScenario({ tabId: "tab-1", target: { kind: "new" } });
+    const b = await repo.selectOrSwitchScenario({ tabId: "tab-2", target: { kind: "new" } });
+
+    const search = (searchId: string, scenarioId: string) =>
+      db.diagnosticSearches.put({
+        searchId,
+        scenarioId,
+        status: "completed",
+      } as never);
+    await search("search-a", a.envelope.scenarioId);
+    await search("search-b", b.envelope.scenarioId);
+
+    // Scoped: only the named scenario's search goes.
+    await repo.clearAssistantContent({ scenarioId: a.envelope.scenarioId });
+    expect(await db.diagnosticSearches.get("search-a")).toBeUndefined();
+    expect(await db.diagnosticSearches.get("search-b")).toBeDefined();
+
+    // Global: everything goes.
+    await repo.clearAssistantContent({});
+    expect(await db.diagnosticSearches.count()).toBe(0);
+  });
+
   it("a guarded write with a stale captured generation is refused inside the transaction", async () => {
     const { repo } = createHarness();
     const a = await repo.selectOrSwitchScenario({ tabId: "tab-1", target: { kind: "new" } });

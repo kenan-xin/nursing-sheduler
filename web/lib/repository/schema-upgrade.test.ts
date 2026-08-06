@@ -74,8 +74,8 @@ async function seedShippedV2Database(
   db.close();
 }
 
-describe("Dexie 2 -> 3 upgrade from a really-shipped version 2 database", () => {
-  it("upgrades to 3, keeps optimizeBases, and adds the four assistant stores", async () => {
+describe("Dexie 2 -> current upgrade from a really-shipped version 2 database", () => {
+  it("upgrades, keeps optimizeBases, and adds the assistant and diagnostic stores", async () => {
     const dbName = freshDbName();
     await seedShippedV2Database(dbName);
 
@@ -83,9 +83,17 @@ describe("Dexie 2 -> 3 upgrade from a really-shipped version 2 database", () => 
     await db.open();
     try {
       expect(db.verno).toBe(REPOSITORY_SCHEMA_VERSION);
-      expect(REPOSITORY_SCHEMA_VERSION).toBe(3);
+      // Pinned so a version bump has to come here and say what it added. T10 moved
+      // this to 4 by declaring `diagnosticSearches` in a NEW version block; the
+      // hazard the second test guards is doing it in an already-installed one.
+      expect(REPOSITORY_SCHEMA_VERSION).toBe(4);
 
       const tableNames = db.tables.map((t) => t.name);
+      // The v4 store, created by the same upgrade rather than left for a later bump.
+      expect(tableNames, "the v4 diagnostic-search store must be created").toContain(
+        "diagnosticSearches",
+      );
+      expect(await db.diagnosticSearches.count()).toBe(0);
       // The v2 store carried forward, not recreated empty or dropped.
       expect(tableNames).toContain("optimizeBases");
       expect(tableNames).toContain("keyval");

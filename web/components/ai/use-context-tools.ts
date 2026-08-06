@@ -25,6 +25,7 @@ import { summarizeScenario } from "@/lib/ai/assistant/scenario-context";
 import { useAssistantStore } from "@/lib/ai/assistant/store";
 import { useHelpTools } from "./use-help-tools";
 import { useProposalTools } from "./use-proposal-tools";
+import { useDiagnosticTools } from "./use-diagnostic-tools";
 
 /**
  * What a handler answers when its turn is no longer the current one. A refusal
@@ -63,6 +64,11 @@ export function useContextTools(agentId: string, turnEpoch: number): void {
   // plan's table, and the only one that writes anything. It writes a PROPOSAL, never
   // the scenario: there is still no Apply tool, and there never will be one.
   useProposalTools(agentId, turnEpoch);
+  // T10's bounded diagnostics tool. It reads no scenario state the read tools do not
+  // already expose and writes no scenario state at all: its only durable effects are
+  // a diagnostic-search row and — when a candidate genuinely tested feasible — the
+  // same T07 proposal row `useProposalTools` writes, under the same fences.
+  useDiagnosticTools(agentId, turnEpoch);
 
   const guard = (signal: AbortSignal | undefined): string | null => {
     if (signal?.aborted) return SUPERSEDED;

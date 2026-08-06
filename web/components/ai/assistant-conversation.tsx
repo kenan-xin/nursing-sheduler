@@ -25,6 +25,7 @@ import { useAssistantStore } from "@/lib/ai/assistant/store";
 import { useAssistantSession } from "./use-assistant-session";
 import { useAssistantProposals } from "./use-assistant-proposals";
 import { ProposalPreviewCard } from "./proposal-preview-card";
+import { DiagnosticSearchCard } from "./diagnostic-search-card";
 import { AssistantReceipts } from "./assistant-receipts";
 import { Surface } from "@/components/ui/surface";
 
@@ -121,6 +122,7 @@ export function AssistantLiveConversation({
       {session.messages.length === 0 && <WelcomeState />}
       <RefusalNotice />
       <LifecycleNotice />
+      <DiagnosticSearchCard />
       <ProposalPreviewCard controller={proposals} />
       <AssistantReceipts controller={proposals} />
       <CopilotChatView

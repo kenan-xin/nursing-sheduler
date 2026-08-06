@@ -32,6 +32,7 @@ import type {
   AssistantProposalV1,
   AssistantReceiptV1,
   AssistantWriteFenceV1,
+  DiagnosticSearchRecordV1,
   HistoryLinkV1,
   KeyValueRow,
   RepositoryMetaRow,
@@ -46,10 +47,13 @@ import type {
 export const NURSE_SCHEDULER_DB_NAME = "nurse-scheduler";
 
 /** Current declared Dexie schema version. */
-export const REPOSITORY_SCHEMA_VERSION = 3;
+export const REPOSITORY_SCHEMA_VERSION = 4;
 
 /** The version that introduced the scenario-repository tables. */
 export const REPOSITORY_TABLES_VERSION = 2;
+
+/** The version that introduced the T10 diagnostic-search ownership table. */
+export const DIAGNOSTIC_TABLES_VERSION = 4;
 
 /** The browser database: the legacy key/value store plus the repository tables. */
 export class NurseSchedulerDb extends Dexie {
@@ -74,6 +78,8 @@ export class NurseSchedulerDb extends Dexie {
   assistantThreads!: Table<AssistantThreadV1, string>;
   assistantTurns!: Table<AssistantTurnV1, string>;
   assistantMessages!: Table<AssistantMessageV1, string>;
+  /** T10 -- durable ownership of one bounded infeasibility diagnostic search. */
+  diagnosticSearches!: Table<DiagnosticSearchRecordV1, string>;
 
   constructor(databaseName: string = NURSE_SCHEDULER_DB_NAME) {
     super(databaseName);
@@ -113,6 +119,16 @@ export class NurseSchedulerDb extends Dexie {
       assistantMessages: "messageId, threadId, [threadId+seq], turnId",
     });
 
+    // Version 4 (T10) ADDS the diagnostic-search ownership table. Purely additive:
+    // no existing store is mentioned, so every prior table carries forward
+    // unchanged. The indices serve the hot reads: by scenario for the current
+    // search, by parent basis for recovery, by status for the open-search sweep,
+    // and by expiry for the reaper.
+    this.version(DIAGNOSTIC_TABLES_VERSION).stores({
+      diagnosticSearches:
+        "searchId, scenarioId, threadId, turnEpoch, parent.basisId, status, expiresAt",
+    });
+
     this.keyval = this.table("keyval");
     this.scenarioEnvelopes = this.table("scenarioEnvelopes");
     this.tabSelections = this.table("tabSelections");
@@ -128,6 +144,7 @@ export class NurseSchedulerDb extends Dexie {
     this.assistantThreads = this.table("assistantThreads");
     this.assistantTurns = this.table("assistantTurns");
     this.assistantMessages = this.table("assistantMessages");
+    this.diagnosticSearches = this.table("diagnosticSearches");
   }
 }
 
@@ -159,5 +176,6 @@ export const SCENARIO_WRITE_TABLES = [
   "assistantProposals",
   "assistantReceipts",
   "optimizeBases",
+  "diagnosticSearches",
   "repositoryMeta",
 ] as const;

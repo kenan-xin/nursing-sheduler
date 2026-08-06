@@ -40,6 +40,8 @@ import {
   type ProbeOperation,
 } from "./probe-authority";
 import { readDiagnosticCanceller } from "./diagnostic-cancellation";
+import { installDiagnosticCanceller } from "@/lib/ai/diagnostic/install";
+import type { DiagnosticSearchRecordV1 } from "@/lib/ai/diagnostic/search-record";
 import { detachStaleTurns, readUnsettledTurns, setTurnState } from "./history-repo";
 import {
   interrupt,
@@ -123,6 +125,17 @@ export interface AssistantUiState {
    */
   activeProposal: { proposalId: string; turnEpoch: number } | null;
   /**
+   * The live diagnostic search snapshot, stamped with the turn that authorised it
+   * (T10). Same shape of authority as `activeProposal`, for the same reason: the
+   * card must read as "this was stopped" after an interruption rather than as live
+   * work, and a page lifetime cannot inherit a search's in-flight polling.
+   *
+   * The RECORD itself is held, not just its id, because the orchestrator publishes
+   * a new snapshot on every durable write — which is what lets the card follow a
+   * running search without polling IndexedDB.
+   */
+  activeDiagnostic: { search: DiagnosticSearchRecordV1; turnEpoch: number } | null;
+  /**
    * Interruptions requested but not yet settled, incremented SYNCHRONOUSLY at the
    * request.
    *
@@ -150,6 +163,7 @@ const INITIAL: AssistantUiState = {
   lastSettlement: null,
   lastRefusal: null,
   activeProposal: null,
+  activeDiagnostic: null,
   pendingInterruptions: 0,
 };
 
@@ -206,6 +220,11 @@ export function isTurnAuthorized(
  * and therefore recreate -- a turn row belonging to data the user deleted.
  */
 export async function hydrateAssistant(): Promise<AssistantSettingsV1> {
+  // T10's real cancellation ownership replaces the no-op default (T05 shipped the
+  // contract and a stub). Installed at bring-up rather than at panel mount: an
+  // interruption trigger — a takeover, a scenario switch, Clear — must be able to
+  // cancel a running diagnostic even if the panel was closed while it ran.
+  installDiagnosticCanceller();
   await resumePendingClears();
   await detachStaleTurns();
   const settings = await readAssistantSettings();
@@ -568,6 +587,23 @@ export const assistantActions = {
   /** Dismiss the live Preview — Cancel, or a change that has been applied. */
   clearProposal(): void {
     useAssistantStore.setState({ activeProposal: null });
+  },
+
+  /**
+   * Publish the current state of a diagnostic search (T10).
+   *
+   * Called on every durable write the search makes, so the card follows a running
+   * search live. Stamped with the authorising turn epoch for the same reason
+   * `showProposal` is: after an interruption the card must say the search was
+   * stopped, not keep animating as though it were still running.
+   */
+  publishDiagnostic(search: DiagnosticSearchRecordV1, turnEpoch: number): void {
+    useAssistantStore.setState({ activeDiagnostic: { search, turnEpoch } });
+  },
+
+  /** Dismiss the diagnostic card. */
+  clearDiagnostic(): void {
+    useAssistantStore.setState({ activeDiagnostic: null });
   },
 
   /** Test seam: return the store to its never-hydrated state. */

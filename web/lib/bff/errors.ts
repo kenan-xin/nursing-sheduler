@@ -71,6 +71,11 @@ const CODE_TO_KIND: Record<string, OptimizeErrorKind> = {
   job_artifact_not_found: "no-artifact",
   job_artifact_not_ready: "no-artifact",
   job_capacity_exceeded: "queue-full",
+  // T09's reserved-ordinary refusal is a capacity rejection too, so it classifies as
+  // a definite rejection rather than falling through to `unknown`. The distinct CODE
+  // survives on `OptimizeErrorInfo.code`, which is what T10 keys its truthful
+  // "capacity is reserved for your official run" wording off.
+  diagnostic_capacity_reserved: "queue-full",
   job_operation_not_allowed: "conflict",
   job_operation_contention: "conflict",
   job_input_not_found: "conflict",

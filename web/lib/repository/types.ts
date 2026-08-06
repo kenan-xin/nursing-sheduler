@@ -282,6 +282,13 @@ export type {
   StoredOptimizeBasisRow,
 } from "@/lib/optimize/basis/basis-row";
 
+// The DiagnosticSearch row is DEFINED in `@/lib/ai/diagnostic/search-record` and
+// re-exported here. T02 owns the durable table so a search row can be written in a
+// generation-fenced transaction alongside its evidence basis; T10 owns the shape
+// and its semantics. The authority boundary forbids T10's modules from importing
+// this graph, so the dependency points outward.
+export type { DiagnosticSearchRecordV1 } from "@/lib/ai/diagnostic/search-record";
+
 // ---------------------------------------------------------------------------
 // Repository metadata
 // ---------------------------------------------------------------------------

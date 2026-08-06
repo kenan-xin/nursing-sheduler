@@ -41,7 +41,15 @@ const PERMITTED_REFERENCES: Record<string, string> = {
   // TYPE-ONLY, and asserted as such below: the Dexie schema declares the assistant
   // tables, so it needs their row shapes at compile time and nothing at runtime.
   "lib/repository/schema.ts": "declares the assistant tables (type-only)",
+  // Same allowance, same reason (T10). The diagnostic-search row is a Dexie table
+  // the repository declares and the projection adapter writes, but its SHAPE and
+  // semantics belong to the assistant, so the type is defined there and re-exported
+  // here. `export type ... from` is erased, so this creates no runtime edge.
+  "lib/repository/types.ts": "re-exports the diagnostic-search row (type-only)",
 };
+
+/** The files above that reference assistant modules for TYPES ONLY. */
+const TYPE_ONLY_REFERENCES = ["lib/repository/schema.ts", "lib/repository/types.ts"];
 
 const SKIP_DIRS = new Set(["node_modules", ".next", "public", "test-results", "playwright-report"]);
 
@@ -78,19 +86,33 @@ describe("the assistant is a leaf, not a dependency", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("lets the Dexie schema know the assistant's row shapes WITHOUT a runtime edge", () => {
-    const schema = sources.find(({ path }) => path === "lib/repository/schema.ts");
-    expect(schema).toBeDefined();
+  it("lets the repository know the assistant's row shapes WITHOUT a runtime edge", () => {
+    for (const path of TYPE_ONLY_REFERENCES) {
+      const module = sources.find((source) => source.path === path);
+      expect(module, `${path} is missing`).toBeDefined();
 
-    const imports = (schema?.text ?? "").split("\n").filter((line) => line.includes("@/lib/ai/"));
-    expect(imports.length).toBeGreaterThan(0);
-    // `import type` is erased by the compiler, so the scenario repository carries no
-    // runtime dependency on assistant code -- which is what keeps a broken or
-    // disabled assistant from being able to break the durable store.
-    for (const line of imports) {
-      expect(line, `${line} is not type-only`).toMatch(/^import type|^} from|^\s*\w/);
+      // Matched as STATEMENTS, not lines: these imports span several lines, and a
+      // line-wise check would judge a continuation line (`} from "@/lib/ai/..."`)
+      // on its own and see no `type` keyword that is really there on line one.
+      const statements = [
+        ...(module?.text ?? "").matchAll(
+          /(?:^|\n)(import|export)\b([^;]*?)\bfrom\s+["'](@\/lib\/ai\/[^"']+)["']/g,
+        ),
+      ];
+      expect(statements.length, `${path} references no assistant module`).toBeGreaterThan(0);
+      // `import type` / `export type ... from` are erased WHOLE by the compiler, so
+      // the scenario repository carries no runtime dependency on assistant code --
+      // which is what keeps a broken or disabled assistant from being able to break
+      // the durable store. The keyword must be on the STATEMENT, not on individual
+      // bindings: `import { type X } from ...` still emits the module specifier and
+      // so still creates the edge this rule exists to forbid.
+      for (const [, keyword, bindings, specifier] of statements) {
+        expect(
+          `${keyword} ${bindings.trimStart()}`,
+          `${path}: ${keyword} from ${specifier} is not a type-only statement`,
+        ).toMatch(/^(import|export) type\b/);
+      }
     }
-    expect(schema?.text).toContain("import type {");
   });
 
   it("keeps assistant modules out of the scheduling and optimize surfaces entirely", () => {

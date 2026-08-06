@@ -46,6 +46,8 @@ import {
   type AssistantProposalV1,
   type AssistantReceiptV1,
   type CapturedGeneration,
+  type DiagnosticSearchRecordV1,
+  type GenerationScopeKey,
   type LeaseOwner,
   type ReceiptStanding,
   type RepositoryErrorCode,
@@ -1862,5 +1864,105 @@ export class ScenarioAuthority {
         }
       }
     });
+  }
+
+  // -------------------------------------------------------------------------
+  // T10 — diagnostic search ownership
+  // -------------------------------------------------------------------------
+  //
+  // The diagnostic search row is scenario-bound assistant state, like a proposal.
+  // It is written through the SAME generation fence so a Clear that lands while
+  // the orchestrator is settling a candidate cannot resurrect a search for a
+  // conversation the user just deleted.
+
+  /**
+   * Capture the current generation fence for a scenario (T10 diagnostic runtime).
+   *
+   * Delegates to the repository's `captureGenerations`, which reads both the global
+   * and the scenario generation rows. The diagnostic runtime threads this guard
+   * through to `putDiagnosticSearch` so a Clear that lands mid-search cannot
+   * resurrect the search row.
+   */
+  async captureGenerationsForDiagnostics(
+    scenarioId: string,
+  ): Promise<readonly CapturedGeneration[]> {
+    return this.repository.captureGenerations(scenarioId);
+  }
+
+  /**
+   * Narrow a caller-supplied guard back to the repository's scope-key union.
+   *
+   * The diagnostic orchestrator declares its guard structurally (a plain
+   * `{ scopeKey: string }`) so it never has to import the repository graph. This
+   * adapter is the boundary, so it is where the string is checked rather than
+   * asserted: a scope key that is neither `global` nor `scenario:<id>` names no fence
+   * this repository keeps, and a write guarded by it would be guarded by nothing.
+   */
+  private narrowGuard(
+    guard: readonly { scopeKey: string; generation: number }[],
+  ): readonly CapturedGeneration[] {
+    return guard.map((entry) => {
+      if (entry.scopeKey !== GLOBAL_GENERATION_SCOPE && !entry.scopeKey.startsWith("scenario:")) {
+        throw new Error(`unknown generation scope: ${entry.scopeKey}`);
+      }
+      return { scopeKey: entry.scopeKey as GenerationScopeKey, generation: entry.generation };
+    });
+  }
+
+  /**
+   * Write a diagnostic search row inside the generation fence.
+   *
+   * `guard` is the captured generation pair the orchestrator took when it opened
+   * the search. `runGuarded` rereads both rows inside the transaction and drops
+   * the write when either moved — so a Clear-all → detach → late-orchestrator-write
+   * cannot recreate the search row.
+   */
+  async putDiagnosticSearch(
+    record: DiagnosticSearchRecordV1,
+    guard: readonly { scopeKey: string; generation: number }[],
+  ): Promise<void> {
+    await this.repository.runGuarded(this.narrowGuard(guard), async (db) => {
+      await db.diagnosticSearches.put(record);
+    });
+  }
+
+  /**
+   * The most recent ORDINARY basis this browser submitted for a scenario revision.
+   *
+   * This is how a diagnostic search finds its parent: from the browser's own durable
+   * record of what it submitted, never from anything the model said. A search that
+   * had to be told which run to diagnose could be pointed at someone else's run, or
+   * at a run that never happened.
+   *
+   * Candidate rows are excluded by `ownerKind`, and an unbound row (no accepted job)
+   * is excluded because there is no server-side run to recover against.
+   */
+  async readLatestOrdinaryBasis(
+    scenarioId: string,
+    documentRevision: number,
+  ): Promise<OptimizeBasisRecordV2 | null> {
+    const rows = await this.db.optimizeBases
+      .where("[scenarioId+documentRevision]")
+      .equals([scenarioId, documentRevision])
+      .toArray();
+    const ordinary = rows
+      .filter(isOptimizeBasisRecordV2)
+      .filter((row) => row.ownerKind === "ordinary" && row.jobId !== null)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    return ordinary.length > 0 ? ordinary[ordinary.length - 1]! : null;
+  }
+
+  /** Read one diagnostic search row, or `null`. */
+  async readDiagnosticSearch(searchId: string): Promise<DiagnosticSearchRecordV1 | null> {
+    return (await this.db.diagnosticSearches.get(searchId)) ?? null;
+  }
+
+  /** The most recent search for a scenario (open or settled), for the panel card. */
+  async readLatestDiagnosticSearch(scenarioId: string): Promise<DiagnosticSearchRecordV1 | null> {
+    const rows = await this.db.diagnosticSearches
+      .where("scenarioId")
+      .equals(scenarioId)
+      .sortBy("createdAt");
+    return rows.length > 0 ? rows[rows.length - 1] : null;
   }
 }

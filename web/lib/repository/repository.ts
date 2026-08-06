@@ -1093,7 +1093,12 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
     async clearAssistantContent({ scenarioId }) {
       return db.transaction(
         "rw",
-        [db.assistantGenerations, db.assistantProposals, db.assistantReceipts],
+        [
+          db.assistantGenerations,
+          db.assistantProposals,
+          db.assistantReceipts,
+          db.diagnosticSearches,
+        ],
         async () => {
           const at = now();
           const iso = at.toISOString();
@@ -1107,6 +1112,10 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
             // detached late callback from recreating the data just deleted here.
             await db.assistantProposals.clear();
             await db.assistantReceipts.clear();
+            // A diagnostic search is assistant content: it names the conversation
+            // that opened it and holds the candidate changes the model proposed.
+            // Leaving it would let cleared work reappear as "what we tested".
+            await db.diagnosticSearches.clear();
             await ensureGeneration(db, GLOBAL_GENERATION_SCOPE, at);
             const all = await db.assistantGenerations.toArray();
             let globalGeneration = 0;
@@ -1122,6 +1131,7 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
           const scopeKey: GenerationScopeKey = scenarioGenerationScope(scenarioId);
           await db.assistantProposals.where("scenarioId").equals(scenarioId).delete();
           await db.assistantReceipts.where("scenarioId").equals(scenarioId).delete();
+          await db.diagnosticSearches.where("scenarioId").equals(scenarioId).delete();
           const fence = await ensureGeneration(db, scopeKey, at);
           const generation = fence.generation + 1;
           await db.assistantGenerations.put({

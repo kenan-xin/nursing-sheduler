@@ -64,6 +64,7 @@ export {
   type AssistantReceiptV1,
   type AssistantWriteFenceV1,
   type CapturedGeneration,
+  type DiagnosticSearchRecordV1,
   type GenerationScopeKey,
   type HistoryLinkV1,
   type LeaseOwner,
