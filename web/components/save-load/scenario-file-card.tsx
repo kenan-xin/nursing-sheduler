@@ -22,6 +22,8 @@ import { Button } from "@/components/ui/button";
 import { surfaceVariants } from "@/components/ui/surface";
 import { cn } from "@/lib/utils";
 import { FaCheck, FaCopy, FaDownload, FaPen, FaUpload } from "@/components/icons";
+import { capabilityAnchorProps } from "@/lib/capability/anchor-contract";
+import { SAVE_LOAD_DOWNLOAD_ANCHOR } from "./capability-anchors";
 import { BackupStatusBadge } from "./backup-status-badge";
 import { performCopy, performDownload, SCENARIO_DOWNLOAD_FILENAME } from "./scenario-file-export";
 import { ScenarioIssuesList } from "./scenario-issues-list";
@@ -123,7 +125,12 @@ export function ScenarioFileCard({
       </div>
       <div className="flex flex-col gap-3 px-5 py-4">
         <div className="flex flex-wrap gap-2.5">
-          <Button type="button" onClick={handleDownload} data-testid="scenario-download-button">
+          <Button
+            type="button"
+            onClick={handleDownload}
+            data-testid="scenario-download-button"
+            {...capabilityAnchorProps(SAVE_LOAD_DOWNLOAD_ANCHOR)}
+          >
             <FaDownload aria-hidden />
             Download
           </Button>

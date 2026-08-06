@@ -232,6 +232,30 @@ else
   bad "client bundle does not contain the stamped version"
 fi
 
+echo "== deployed capability manifest identity (T06) =="
+# The help/capability registry is bound to BOTH the client build stamp (asserted
+# above) and a generated content hash. The unit gate proves the committed hash matches
+# the typed sources; this proves the DEPLOYED client actually carries that hash, so a
+# bundle built from a stale generated manifest cannot ship silently and then ground a
+# help answer in content nothing validated.
+CAP_SHA="$(sed -n 's/.*manifestSha256: "\([0-9a-f]*\)".*/\1/p' web/lib/capability/registry.generated.ts | head -n1)"
+if [ -z "$CAP_SHA" ]; then
+  bad "could not read manifestSha256 from web/lib/capability/registry.generated.ts"
+else
+  if $COMPOSE exec -T web sh -c "grep -rq \"$CAP_SHA\" .next/static 2>/dev/null"; then
+    ok "client bundle carries capability manifestSha256=${CAP_SHA:0:12}…"
+  else
+    bad "client bundle does not carry the generated capability manifest hash"
+  fi
+  # Sensitivity: without this, a grep that matched nothing for an unrelated reason
+  # (a moved output directory, say) would be indistinguishable from a pass.
+  if $COMPOSE exec -T web sh -c "grep -rq \"${CAP_SHA%??}zz\" .next/static 2>/dev/null"; then
+    bad "bundle search matched a deliberately wrong manifest hash"
+  else
+    ok "a wrong manifest hash is correctly absent from the bundle"
+  fi
+fi
+
 echo "== Phase-1 AI runtime containment + single-instance bound (T01) =="
 # The transient CopilotKit runner keeps active run replay/abort state in process
 # memory, so "exactly one web instance" is a correctness bound. Prove it three ways:

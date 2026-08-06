@@ -23,6 +23,7 @@ import {
   useCardEditorStaleGuard,
 } from "@/components/card-editor/card-editor-shell";
 import type { SuccessionCard } from "@/lib/scenario";
+import { SUCCESSIONS_ADD_ANCHOR } from "./capability-anchors";
 import { SuccessionForm } from "./succession-form";
 import { SuccessionCardList } from "./succession-card-list";
 import { useSuccessions } from "./use-successions";
@@ -175,6 +176,7 @@ export function SuccessionsEditor() {
         formOpen={!!draft}
         onAdd={openAdd}
         instructions={<CardEditorInstructions items={INSTRUCTIONS} />}
+        capabilityAnchor={SUCCESSIONS_ADD_ANCHOR}
       />
       <CardEditorInfoStrip />
 

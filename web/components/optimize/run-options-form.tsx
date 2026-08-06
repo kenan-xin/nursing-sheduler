@@ -24,6 +24,8 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { OPTIMIZE_TIMEOUT_MAX_SECONDS, OPTIMIZE_TIMEOUT_MIN_SECONDS } from "@/lib/optimize";
 import { cn } from "@/lib/utils";
+import { capabilityAnchorProps } from "@/lib/capability/anchor-contract";
+import { OPTIMIZE_RUN_OPTIONS_ANCHOR } from "./capability-anchors";
 
 /** The scenario-at-a-glance counts rendered above the run fields. */
 export interface RunOptionsScenarioStats {
@@ -124,6 +126,7 @@ export function RunOptionsForm({
   return (
     <form
       data-testid="optimize-run-options"
+      {...capabilityAnchorProps(OPTIMIZE_RUN_OPTIONS_ANCHOR)}
       onSubmit={(event) => {
         event.preventDefault();
         onSubmit();

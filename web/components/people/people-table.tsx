@@ -38,6 +38,8 @@
 
 import * as React from "react";
 import { toast } from "sonner";
+import { capabilityAnchorProps } from "@/lib/capability/anchor-contract";
+import { PEOPLE_ADD_PERSON_ANCHOR } from "./capability-anchors";
 import { useScenarioStore, scenarioCommands } from "@/lib/store";
 import { useLosableDraft } from "@/components/shell/use-losable-draft";
 import { GuardedLink } from "@/components/shell/guarded-link";
@@ -273,6 +275,7 @@ export function PeopleTable() {
           onClick={() => setSel((cur) => (cur?.t === "add-item" ? null : { t: "add-item" }))}
           aria-pressed={addOpen}
           data-testid="people-add"
+          {...capabilityAnchorProps(PEOPLE_ADD_PERSON_ANCHOR)}
         >
           <FaPlus />
           Add nurse

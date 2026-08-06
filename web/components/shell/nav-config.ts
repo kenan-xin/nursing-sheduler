@@ -56,8 +56,26 @@ import {
 } from "@/components/icons";
 import type { IconType } from "@/components/icons";
 import type { AppMode } from "@/lib/mode/mode";
+import { NAV_ROUTE_PATHS, type NavRouteId } from "./nav-route-paths";
+
+// The STABLE route ids and their paths live in `./nav-route-paths` — a
+// dependency-free module, so build tooling and the Playwright suite can learn the
+// id↔path binding without importing the icon barrel (and React with it). Each entry
+// below takes its `path` from that map rather than restating the string, so the two
+// cannot disagree. Re-exported here because this file remains the registry's public
+// face for every existing consumer.
+//
+// WHY IDS AT ALL. A route's path is a URL and its label is display text; both are
+// allowed to change. The help/capability registry needs a name for a screen that
+// survives either change, so it references screens by id alone — never by a
+// duplicated path string, and never by a raw URL the model could invent.
+// `nav-route-ids.test.ts` proves the id map and `ALL_NAV_ITEMS` are in exact
+// bijection, so neither can grow an entry the other lacks.
+export { NAV_ROUTE_IDS, NAV_ROUTE_PATHS, navRoutePath, type NavRouteId } from "./nav-route-paths";
 
 export interface NavItem {
+  /** Stable identity for this destination. Survives a path or label change. */
+  id: NavRouteId;
   label: string;
   path: string;
   icon: IconType;
@@ -79,43 +97,56 @@ export interface NavGroup {
 export const NAV_GROUPS: NavGroup[] = [
   {
     id: "home",
-    items: [{ label: "Home", path: "/", icon: FaHouse, blurb: "Workflow overview & progress" }],
+    items: [
+      {
+        id: "home",
+        label: "Home",
+        path: NAV_ROUTE_PATHS.home,
+        icon: FaHouse,
+        blurb: "Workflow overview & progress",
+      },
+    ],
   },
   {
     id: "setup",
     label: "Set up",
     items: [
       {
+        id: "dates",
         label: "Dates",
-        path: "/dates",
+        path: NAV_ROUTE_PATHS.dates,
         icon: FaCalendarDays,
         blurb: "Roster range, holidays, date groups",
         guidedStep: 1,
       },
       {
+        id: "people",
         label: "Staff",
-        path: "/people",
+        path: NAV_ROUTE_PATHS.people,
         icon: FaUserNurse,
         blurb: "Nurses and people groups",
         guidedStep: 2,
       },
       {
+        id: "shift-types",
         label: "Shifts",
-        path: "/shift-types",
+        path: NAV_ROUTE_PATHS["shift-types"],
         icon: FaLayerGroup,
         blurb: "Shifts and shift-type groups",
         guidedStep: 3,
       },
       {
+        id: "rules",
         label: "Rules",
-        path: "/rules",
+        path: NAV_ROUTE_PATHS.rules,
         icon: FaListCheck,
         blurb: "Plain-English constraint library",
         guidedStep: 4,
       },
       {
+        id: "shift-requests",
         label: "Requests & Leave",
-        path: "/shift-requests",
+        path: NAV_ROUTE_PATHS["shift-requests"],
         icon: FaTableCells,
         blurb: "Person × date preferences & leave",
         guidedStep: 5,
@@ -127,36 +158,41 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Constraints",
     items: [
       {
+        id: "shift-type-requirements",
         label: "Staffing Requirements",
-        path: "/shift-type-requirements",
+        path: NAV_ROUTE_PATHS["shift-type-requirements"],
         icon: FaClipboardList,
         blurb: "Min nurses & skill mix per shift",
         advancedOnly: true,
       },
       {
+        id: "shift-type-successions",
         label: "Shift Successions",
-        path: "/shift-type-successions",
+        path: NAV_ROUTE_PATHS["shift-type-successions"],
         icon: FaArrowRightLong,
         blurb: "Forbid / encourage shift sequences",
         advancedOnly: true,
       },
       {
+        id: "shift-counts",
         label: "Shift Counts",
-        path: "/shift-counts",
+        path: NAV_ROUTE_PATHS["shift-counts"],
         icon: FaCalculator,
         blurb: "Rest days, night caps, hours balance",
         advancedOnly: true,
       },
       {
+        id: "shift-affinities",
         label: "Affinities",
-        path: "/shift-affinities",
+        path: NAV_ROUTE_PATHS["shift-affinities"],
         icon: FaPeopleArrows,
         blurb: "Keep people together or apart",
         advancedOnly: true,
       },
       {
+        id: "shift-type-coverings",
         label: "Shift Type Coverings",
-        path: "/shift-type-coverings",
+        path: NAV_ROUTE_PATHS["shift-type-coverings"],
         icon: FaUserShield,
         blurb: "Preceptor supervision constraint",
         advancedOnly: true,
@@ -168,8 +204,9 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Output",
     items: [
       {
+        id: "optimize-and-export",
         label: "Optimise & Export",
-        path: "/optimize-and-export",
+        path: NAV_ROUTE_PATHS["optimize-and-export"],
         icon: FaWandMagicSparkles,
         blurb: "Run the optimiser & export",
         guidedStep: 6,
@@ -181,8 +218,9 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "System",
     items: [
       {
+        id: "save-and-load",
         label: "Save & Load",
-        path: "/save-and-load",
+        path: NAV_ROUTE_PATHS["save-and-load"],
         icon: FaFloppyDisk,
         blurb: "Download, upload, anonymise, start over",
       },
@@ -191,8 +229,9 @@ export const NAV_GROUPS: NavGroup[] = [
       // exactly the user that feature is for. It carries no `guidedStep` because it
       // is not part of the six-step workflow.
       {
+        id: "settings",
         label: "Settings",
-        path: "/settings",
+        path: NAV_ROUTE_PATHS.settings,
         icon: FaGear,
         blurb: "Optional AI assistant and its OpenRouter key",
       },
@@ -239,4 +278,35 @@ export function getNavItemForMode(path: string, mode: AppMode): NavItem | undefi
   return getNavGroupsForMode(mode)
     .flatMap((group) => group.items)
     .find((item) => item.path === path);
+}
+
+/**
+ * Look up a destination by its STABLE id (T06). Total over `NavRouteId` — the
+ * bijection test guarantees every id in the tuple is registered — so the
+ * capability registry can resolve a screen without carrying a path string of its
+ * own, and a renamed path stays a one-line change here.
+ */
+export function findNavItemById(id: NavRouteId): NavItem {
+  const item = ALL_NAV_ITEMS.find((candidate) => candidate.id === id);
+  // Unreachable while the bijection test passes. Throwing rather than returning
+  // undefined keeps every caller free of a branch that cannot happen, and turns a
+  // hand-edited registry that broke the invariant into an immediate, loud failure
+  // instead of a silently missing help target.
+  if (!item) throw new Error(`nav-config: no navigation entry for route id "${id}"`);
+  return item;
+}
+
+/** The stable id for a path, or undefined for an unlisted route. */
+export function navRouteIdForPath(path: string): NavRouteId | undefined {
+  return findNavItem(path)?.id;
+}
+
+/**
+ * Whether a destination is reachable in `mode`, addressed by stable id. The
+ * capability registry's mode check reads THIS rather than re-deriving
+ * `advancedOnly`, for the same reason `isRouteValidForMode` does: one filtered
+ * projection, so a help answer can never offer a screen the sidebar hides.
+ */
+export function isRouteIdVisibleInMode(id: NavRouteId, mode: AppMode): boolean {
+  return getNavItemForMode(findNavItemById(id).path, mode) != null;
 }
