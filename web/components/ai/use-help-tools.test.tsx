@@ -29,10 +29,25 @@ vi.mock("@copilotkit/react-core/v2", () => ({
   },
 }));
 
-const push = vi.fn();
+// The router mock COMMITS THE URL LATE, because that is what the App Router does: a
+// push starts a client transition and the pathname changes when it commits. A stub
+// that never moved the URL would make every cross-route help answer look like a
+// failure to arrive, which is exactly the bug C2F2 fixed.
+let onPush: (path: string) => void = () => {};
+const push = vi.fn((path: string) => onPush(path));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push, replace: vi.fn() }),
 }));
+
+const pendingTimers: ReturnType<typeof setTimeout>[] = [];
+
+function commitsToPushedPath(path: string): void {
+  pendingTimers.push(
+    setTimeout(() => {
+      window.history.replaceState({}, "", path);
+    }, 5),
+  );
+}
 
 const TURN = 7;
 
@@ -57,6 +72,7 @@ function mountAnchor(anchorId: string): void {
 beforeEach(() => {
   captured.length = 0;
   push.mockClear();
+  onPush = commitsToPushedPath;
   document.body.innerHTML = "";
   window.history.replaceState({}, "", "/");
   useAssistantStore.setState({ turnEpoch: TURN });
@@ -65,6 +81,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  for (const timer of pendingTimers.splice(0)) clearTimeout(timer);
   cleanup();
   assistantActions.resetForTest();
   useModeStore.setState({ mode: "guided", adoption: "unhydrated" });
@@ -234,10 +251,11 @@ describe("open_app_screen", () => {
   });
 
   it("does not report a route it never reached", async () => {
-    // The mocked router does not actually change the location, which is exactly the
-    // shape of a push that fails: arrival is a claim, and an unreached route must not
-    // be reported as reached.
+    // A push the router never honours: the transition stalls or is rejected and the
+    // URL never commits. Arrival is a claim, so waiting must time out into a refusal
+    // rather than eventually reporting the screen it was aiming at.
     useModeStore.setState({ mode: "advanced" });
+    onPush = () => {};
     const result = await tool("open_app_screen").handler({ capabilityId: "shift-counts" }, {});
     expect(result).toMatchObject({
       status: CAPABILITY_UNAVAILABLE,
