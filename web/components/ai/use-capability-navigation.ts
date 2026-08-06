@@ -8,6 +8,12 @@
 // it reports anything as done. A URL is constructed here and nowhere else, and it is
 // never returned to the model.
 //
+// ARRIVAL IS AWAITED, NOT ASSUMED. `router.push` starts a client transition and
+// returns; the URL commits later. So the sequence is push → wait boundedly for the
+// exact target pathname → re-resolve → confirm the anchor. Sampling the pathname
+// straight after the push reads the screen being LEFT, which is the healthy state of
+// an in-flight navigation and must never be reported as a failure to arrive.
+//
 // WHY RE-RESOLVE AFTER THE PUSH. Between resolving and arriving, the user may have
 // switched mode (which can hide the destination outright), the assistant may have been
 // turned off, or a redeploy may have changed the client. Confirming the answer once,
@@ -25,11 +31,13 @@ import {
   waitForLiveAnchor,
   type LiveAnchorLookup,
 } from "@/lib/capability/live-anchor";
+import { capabilityRegistryStamp } from "@/lib/capability/registry";
 import {
   CAPABILITY_UNAVAILABLE,
   resolveNavigationTarget,
   type CapabilityUnavailableReason,
 } from "@/lib/capability/resolve";
+import { isAtRoutePath, waitForRouteArrival } from "@/lib/capability/route-arrival";
 import type { CapabilityRegistryStamp } from "@/lib/capability/types";
 import { readCapabilityContext } from "./capability-context";
 
@@ -71,6 +79,8 @@ export type CapabilityNavigationOutcome =
 export interface NavigateToCapabilityOptions {
   /** The registry identity the answer being acted on was produced under. */
   readonly stamp?: CapabilityRegistryStamp;
+  /** How long to wait for the client transition to commit the target pathname. */
+  readonly routeTimeoutMs?: number;
   /** How long to wait for a lazily-mounted route's anchor. */
   readonly anchorTimeoutMs?: number;
 }
@@ -95,13 +105,33 @@ export function useCapabilityNavigation(): NavigateToCapability {
       }
 
       const target = before.value;
-      if (window.location.pathname !== target.path) {
+      if (!isAtRoutePath(window.location, target.path)) {
         router.push(target.path);
+        // AWAITED, not sampled. The push starts a client transition and returns, so the
+        // pathname on the next line is still the screen being left -- the normal state
+        // of a healthy navigation, and previously read as failure for every route-only
+        // capability invoked from anywhere else.
+        const arrival = await waitForRouteArrival(window.location, target.path, {
+          timeoutMs: options.routeTimeoutMs,
+        });
+        if (arrival.status !== "arrived") {
+          // A redirect, a route that bounced, a rejected transition and one that is
+          // merely still pending are one refusal here. They are NOT told apart: after a
+          // bounded wait the pathname alone cannot distinguish "somewhere else" from
+          // "not yet", and a guess between them would put an invented cause into a
+          // refusal. Either way the user is not on the screen we would be claiming.
+          return {
+            status: CAPABILITY_UNAVAILABLE,
+            reason: "route_not_reached",
+            registry: capabilityRegistryStamp(),
+          };
+        }
       }
 
-      // Re-resolve under the context that is true AFTER the navigation, not the one
-      // that authorized it. A mode change mid-flight makes the destination hidden,
-      // and the refusal must reflect that rather than the earlier decision.
+      // Re-resolve under the context that is true AFTER arrival, not the one that
+      // authorized the push. A mode change, a closed gate or a redeployed build
+      // mid-flight makes the destination hidden, and the refusal must reflect that
+      // rather than the earlier decision.
       const after = resolveNavigationTarget(capabilityId, readCapabilityContext(options.stamp));
       if (after.status !== "ok") {
         return { status: CAPABILITY_UNAVAILABLE, reason: after.reason, registry: after.stamp };
@@ -116,17 +146,20 @@ export function useCapabilityNavigation(): NavigateToCapability {
         };
       }
 
+      // Arrival was true a moment ago; a guard that bounces on mount can move the user
+      // between then and now. Re-checked so every outcome below describes where the
+      // user actually IS, never where the push was aimed.
+      if (!isAtRoutePath(window.location, after.value.path)) {
+        return {
+          status: CAPABILITY_UNAVAILABLE,
+          reason: "route_not_reached",
+          registry: after.stamp,
+        };
+      }
+
       const anchorId = after.value.anchorId;
       if (anchorId === null) {
-        // No control was claimed, so arrival is the whole claim -- but it is still a
-        // claim, and an unreached route must not be reported as reached.
-        if (window.location.pathname !== target.path) {
-          return {
-            status: CAPABILITY_UNAVAILABLE,
-            reason: "route_not_reached",
-            registry: after.stamp,
-          };
-        }
+        // No control was claimed, so confirmed arrival is the whole claim.
         return {
           status: "navigated",
           capabilityId,
