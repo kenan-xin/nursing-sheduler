@@ -178,24 +178,24 @@ def _validate_day_state(day: Any, person_index: int, date_index: int) -> None:
     _fail(f"{label}.kind is not one of off, leave, shift: {kind!r}")
 
 
-def _validate_axis(axis: Any, expected_length: int, label: str) -> None:
-    """Require an ordered 1-based worksheet axis of the expected cardinality.
+def _validate_axis(axis: Any, expected_length: int, start: int, label: str) -> None:
+    """Require an ordered 1-based worksheet axis matching the exporter's formula.
 
-    The axis arrays are the scheduler's authority on worksheet geometry, so this
-    checks only their declared type, cardinality, and ordering; it never rebuilds
-    the exporter's layout to compare against.
+    The exporter lays out each axis as one contiguous run of worksheet
+    coordinates beginning at `start`, so every entry must equal `start + index`.
+    Checking the exact formula — not just strict increase — rejects a later gap
+    the exporter itself could never produce, such as `[3, 5]` for two rows.
     """
     if not isinstance(axis, list):
         _fail(f"{label} is not an array")
     if len(axis) != expected_length:
         _fail(f"{label} has {len(axis)} entries for {expected_length} records")
-    previous = 0
     for index, value in enumerate(axis):
         if not _is_index(value, minimum=1):
             _fail(f"{label}[{index}] is not a 1-based worksheet index")
-        if value <= previous:
-            _fail(f"{label} is not strictly increasing at index {index}")
-        previous = value
+        expected = start + index
+        if value != expected:
+            _fail(f"{label}[{index}] is {value}, not the contiguous coordinate {expected}")
 
 
 def _validate_coordinate_map(coordinate_map: Any, people_count: int, dates_count: int) -> None:
@@ -209,15 +209,11 @@ def _validate_coordinate_map(coordinate_map: Any, people_count: int, dates_count
     if not coordinate_map["prettify"] and coordinate_map["historyCols"] != 0:
         _fail("coordinateMap.historyCols is non-zero without prettify")
 
-    people_rows = coordinate_map["peopleRows"]
-    date_columns = coordinate_map["dateColumns"]
-    _validate_axis(people_rows, people_count, "coordinateMap.peopleRows")
-    _validate_axis(date_columns, dates_count, "coordinateMap.dateColumns")
-    if people_rows and people_rows[0] != coordinate_map["firstPeopleRow"]:
-        _fail("coordinateMap.peopleRows does not start at firstPeopleRow")
     expected_first_column = coordinate_map["leadingCols"] + coordinate_map["historyCols"] + 1
-    if date_columns and date_columns[0] != expected_first_column:
-        _fail("coordinateMap.dateColumns does not start after the leading and history columns")
+    _validate_axis(
+        coordinate_map["peopleRows"], people_count, coordinate_map["firstPeopleRow"], "coordinateMap.peopleRows"
+    )
+    _validate_axis(coordinate_map["dateColumns"], dates_count, expected_first_column, "coordinateMap.dateColumns")
 
 
 def _validate_workbook(workbook: Any) -> None:

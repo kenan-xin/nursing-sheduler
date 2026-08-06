@@ -53,7 +53,7 @@ const INSTRUCTIONS = [
 ] as const;
 
 export function CoveringsEditor() {
-  const { state, coverings, add, update, remove, duplicate, move, reorder, setDisabled, getCards } =
+  const { state, coverings, add, update, remove, duplicate, reorder, setDisabled, getCards } =
     useCoverings();
   const [draft, setDraft] = useState<Draft | null>(null);
   useCardEditorDraftGuard("coverings", !!draft);
@@ -156,7 +156,6 @@ export function CoveringsEditor() {
           onEdit={openEdit}
           onDuplicate={(uid) => withDraftDismissed(() => duplicate(uid))}
           onDelete={(uid) => withDraftDismissed(() => remove(uid))}
-          onMove={(uid, direction) => withDraftDismissed(() => move(uid, direction))}
           onReorder={(fromUid, toUid, position) =>
             withDraftDismissed(() => reorder(fromUid, toUid, position))
           }

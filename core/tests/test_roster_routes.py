@@ -36,6 +36,8 @@ from tests.server_support import MINIMAL_SCENARIO
 from tests.test_roster_container import (
     REAL_SCENARIO,
     ROSTER_PAYLOAD,
+    GappedAxisRunner,
+    GappedDateColumnsAxisRunner,
     InvalidHandoffRunner,
     OversizedRosterRunner,
     run_with_export_spy,
@@ -222,6 +224,34 @@ def _corrupted(**mutations) -> bytes:
         # Both routes must reject an undecodable workbook: the structured document
         # and the bytes it describes are one artifact, so neither is served alone.
         pytest.param(_corrupted(xlsx={"base64": "not base64!"}), id="invalid-base64"),
+        # Strictly increasing but not contiguous: the exporter can never skip a
+        # row/column, so a non-first gap must fail closed on both routes too.
+        pytest.param(
+            _corrupted(
+                coordinateMap={
+                    "peopleRows": [3, 5],
+                    "dateColumns": [2, 3],
+                    "firstPeopleRow": 3,
+                    "leadingCols": 1,
+                    "historyCols": 0,
+                    "prettify": False,
+                }
+            ),
+            id="people-rows-non-first-gap",
+        ),
+        pytest.param(
+            _corrupted(
+                coordinateMap={
+                    "peopleRows": [3, 4],
+                    "dateColumns": [2, 4],
+                    "firstPeopleRow": 3,
+                    "leadingCols": 1,
+                    "historyCols": 0,
+                    "prettify": False,
+                }
+            ),
+            id="date-columns-non-first-gap",
+        ),
     ],
 )
 def test_both_routes_fail_closed_on_an_unreadable_container(suffix, stored):
@@ -238,6 +268,12 @@ def test_both_routes_fail_closed_on_an_unreadable_container(suffix, stored):
     [
         pytest.param(OversizedRosterRunner(), "roster_output_too_large", id="output-too-large"),
         pytest.param(InvalidHandoffRunner(), INVALID_OUTPUT_CODE, id="invalid-handoff"),
+        # Strictly increasing but not contiguous: proved at the direct process
+        # level in test_roster_container.py, and here again through the real
+        # worker so a regression in its own handling of the stable code cannot
+        # slip past a green direct-process test.
+        pytest.param(GappedAxisRunner(), INVALID_OUTPUT_CODE, id="people-rows-non-first-gap"),
+        pytest.param(GappedDateColumnsAxisRunner(), INVALID_OUTPUT_CODE, id="date-columns-non-first-gap"),
     ],
 )
 def test_a_rejected_container_fails_the_job_and_commits_no_artifact(runner, expected_code):

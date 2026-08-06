@@ -953,9 +953,7 @@ export function reduceRunView(view: OptimizeRunView, signal: RunSignal): Optimiz
         signal.filename === null
           ? view.download.filename
           : truncateUtf8(signal.filename, MAX_DISPLAY_FILENAME_BYTES);
-      // A FILENAME: an artifact token, never a sentence, so it reads as data. The kind
-      // follows the EFFECTIVE filename above, not `signal.filename` — a signal carrying
-      // no filename still logs the retained one, and that is data too.
+      // A FILENAME: an artifact token, never a sentence, so it reads as data.
       const { log, seq } = appendLog(
         view,
         "result",

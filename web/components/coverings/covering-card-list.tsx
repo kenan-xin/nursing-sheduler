@@ -11,9 +11,13 @@
 
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
-import { FaPowerOff, FaPen, FaCopy, FaTrash, FaChevronUp, FaChevronDown } from "@/components/icons";
+import { FaPowerOff, FaPen, FaCopy, FaTrash } from "@/components/icons";
 import type { CoveringCard } from "@/lib/scenario";
-import { CardActionButton, CardListItem } from "@/components/card-editor/card-editor-shell";
+import {
+  CardActionButton,
+  CardListItem,
+  CardMoveActions,
+} from "@/components/card-editor/card-editor-shell";
 import { isAdvancedCoveringCard, summarizeRefs } from "./coverings-model";
 import type { DropPosition } from "@/components/card-editor/card-editor-shell";
 
@@ -22,7 +26,6 @@ interface CoveringCardListProps {
   onEdit: (uid: string) => void;
   onDuplicate: (uid: string) => void;
   onDelete: (uid: string) => void;
-  onMove: (uid: string, direction: -1 | 1) => void;
   onSetDisabled: (uid: string, value: boolean) => void;
   /** Primary DnD reorder (M4 "shared card-list reorder interaction"). */
   onReorder: (fromUid: string, toUid: string, position: DropPosition) => void;
@@ -33,12 +36,10 @@ export function CoveringCardList({
   onEdit,
   onDuplicate,
   onDelete,
-  onMove,
   onSetDisabled,
   onReorder,
 }: CoveringCardListProps) {
-  // HTML5 DnD state for the shared card-list reorder (the primary control; the
-  // keyboard Up/Down buttons below are the accessibility supplement — audit M4).
+  // HTML5 DnD state for the shared card-list reorder.
   const [dragUid, setDragUid] = useState<string | null>(null);
   const [overUid, setOverUid] = useState<string | null>(null);
 
@@ -127,23 +128,13 @@ export function CoveringCardList({
                 >
                   Delete
                 </CardActionButton>
-                {/* Supplementary keyboard reorder (FR-CV-21) — sanctioned by M4. */}
-                <CardActionButton
-                  icon={<FaChevronUp className="size-3" />}
-                  onClick={() => onMove(card.uid, -1)}
-                  testId={`covering-up-${index}`}
-                  ariaLabel="Move covering up"
-                >
-                  Up
-                </CardActionButton>
-                <CardActionButton
-                  icon={<FaChevronDown className="size-3" />}
-                  onClick={() => onMove(card.uid, 1)}
-                  testId={`covering-down-${index}`}
-                  ariaLabel="Move covering down"
-                >
-                  Down
-                </CardActionButton>
+                <CardMoveActions
+                  cards={coverings}
+                  index={index}
+                  onReorder={onReorder}
+                  testIdPrefix="covering"
+                  subject="covering"
+                />
               </>
             }
           />

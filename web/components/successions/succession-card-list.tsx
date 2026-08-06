@@ -4,7 +4,7 @@
 // card frame: each succession is a numbered card with its description, the
 // shared weight pill, a People/Pattern/Dates field grid (Pattern rendered as
 // `→`-joined chips, matching the prototype's ordered-sequence display), and the
-// labelled Disable/Enable · Edit · Duplicate · Delete · Up/Down action row
+// labelled Disable/Enable · Edit · Duplicate · Delete action row
 // (mirrors `count-card-list.tsx`).
 //
 // A card with a nested-aggregate pattern position (`isAdvancedSuccessionCard`)
@@ -16,20 +16,13 @@
 
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
-import {
-  FaArrowRightLong,
-  FaPowerOff,
-  FaPen,
-  FaCopy,
-  FaTrash,
-  FaChevronUp,
-  FaChevronDown,
-} from "@/components/icons";
+import { FaArrowRightLong, FaPowerOff, FaPen, FaCopy, FaTrash } from "@/components/icons";
 import { WeightPill } from "@/components/card-editor/weight-field";
 import type { SuccessionCard } from "@/lib/scenario";
 import {
   CardActionButton,
   CardListItem,
+  CardMoveActions,
   type DropPosition,
 } from "@/components/card-editor/card-editor-shell";
 import {
@@ -43,7 +36,6 @@ interface SuccessionCardListProps {
   onEdit: (uid: string) => void;
   onDuplicate: (uid: string) => void;
   onDelete: (uid: string) => void;
-  onMove: (uid: string, direction: -1 | 1) => void;
   onSetDisabled: (uid: string, value: boolean) => void;
   /** Primary DnD reorder (the shared card-list reorder interaction). `position` is
    *  the pointer half of the drop target (insert before/after — FR-PR-12). */
@@ -74,12 +66,10 @@ export function SuccessionCardList({
   onEdit,
   onDuplicate,
   onDelete,
-  onMove,
   onSetDisabled,
   onReorder,
 }: SuccessionCardListProps) {
-  // HTML5 DnD state for the shared card-list reorder (the primary control; the
-  // keyboard Up/Down buttons below are the accessibility supplement).
+  // HTML5 DnD state for the shared card-list reorder.
   const [dragUid, setDragUid] = useState<string | null>(null);
   const [overUid, setOverUid] = useState<string | null>(null);
 
@@ -175,22 +165,13 @@ export function SuccessionCardList({
                 >
                   Delete
                 </CardActionButton>
-                <CardActionButton
-                  icon={<FaChevronUp className="size-3" />}
-                  onClick={() => onMove(card.uid, -1)}
-                  testId={`succession-up-${index}`}
-                  ariaLabel="Move succession up"
-                >
-                  Up
-                </CardActionButton>
-                <CardActionButton
-                  icon={<FaChevronDown className="size-3" />}
-                  onClick={() => onMove(card.uid, 1)}
-                  testId={`succession-down-${index}`}
-                  ariaLabel="Move succession down"
-                >
-                  Down
-                </CardActionButton>
+                <CardMoveActions
+                  cards={successions}
+                  index={index}
+                  onReorder={onReorder}
+                  testIdPrefix="succession"
+                  subject="succession"
+                />
               </>
             }
           />

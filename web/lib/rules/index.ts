@@ -9,6 +9,7 @@ export {
   type DerivedGroupLike,
   flattenShiftTypeRefs,
   expandDateRefs,
+  expandPersonRefs,
   expandShiftTypeRefs,
 } from "./expansion";
 

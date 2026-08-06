@@ -204,10 +204,16 @@ def _staffing_violations(scenario, grid) -> list[str]:
         # one would need date expansion, so fail loudly rather than check less.
         assert pref.date in (None, "ALL", ["ALL"]), f"unsupported date scope: {pref.date!r}"
         covered = _expand(scenario, pref.shiftType)
+        # `requiredNumPeople` alone means exactly that many; paired with
+        # `preferredNumPeople` it becomes a floor, with the preferred count as
+        # the target the solver is pushed toward.
+        low = pref.requiredNumPeople
+        high = pref.preferredNumPeople if pref.preferredNumPeople is not None else low
         for d in range(n_days):
             on_it = [people[p] for p in range(len(people)) if grid[p][d] in covered]
-            if len(on_it) != pref.requiredNumPeople:
-                out.append(f"day {d + 1}: {pref.shiftType} has {len(on_it)}, needs {pref.requiredNumPeople}")
+            if not (low <= len(on_it) <= high):
+                want = f"{low}" if low == high else f"{low}..{high}"
+                out.append(f"day {d + 1}: {pref.shiftType} has {len(on_it)}, needs {want}")
             # A senior-only slot must hold a senior. This is what qualifiedPeople
             # buys, and the check is here so removing it does not go unnoticed.
             if pref.qualifiedPeople:
@@ -407,26 +413,35 @@ def test_leave_stays_inside_the_budget_the_contract_allows(scenario):
 
     # Only the open-headcount requirements are summed. The senior-in-charge ones
     # carry qualifiedPeople and sit INSIDE those headcounts (the senior on am1+
-    # is one of Am1All's two), so counting them as well would double-book the
-    # ward. Total hours are unaffected by which pattern the senior takes, because
-    # each pattern's headcount is fixed either way.
-    per_day = 0.0
+    # is one of the morning's seven), so counting them too would double-book the
+    # ward.
+    #
+    # Staffing is set per part of the day and the patterns within one differ in
+    # length (the morning runs 6.5 h to 8 h), so worked hours are a RANGE, not a
+    # figure: fewest nurses all on the shortest pattern, up to the target all on
+    # the longest. The band only has to be reachable, not exact.
+    low_h = high_h = 0.0
     for pref in scenario.preferences:
         if pref.type != SHIFT_TYPE_REQUIREMENT or pref.qualifiedPeople:
             continue
-        durations = {shifts[s].durationMinutes for s in _expand(scenario, pref.shiftType)}
-        assert len(durations) == 1, f"{pref.shiftType} mixes shift lengths {durations}"
-        per_day += pref.requiredNumPeople * durations.pop() / 60
-    worked_h = n_days * per_day
+        durations = [shifts[s].durationMinutes / 60 for s in _expand(scenario, pref.shiftType)]
+        target = pref.preferredNumPeople if pref.preferredNumPeople is not None else pref.requiredNumPeople
+        low_h += pref.requiredNumPeople * min(durations)
+        high_h += target * max(durations)
+    low_h *= n_days
+    high_h *= n_days
     leave, _hard, _soft = _requests(scenario)
     leave_days = sum(len(v) for v in leave.values())
     n = len(scenario.people.items)
-    credited = worked_h + LEAVE_CREDIT_H * leave_days
+    leave_h = LEAVE_CREDIT_H * leave_days
+    reachable = (low_h + leave_h, high_h + leave_h)
+    band = (CONTRACT_MIN_H * n, CONTRACT_MAX_H * n)
 
-    assert CONTRACT_MIN_H * n <= credited <= CONTRACT_MAX_H * n, (
-        f"{leave_days} leave days puts credited hours at {credited} h, outside "
-        f"{n} nurses x [{CONTRACT_MIN_H}, {CONTRACT_MAX_H}] = "
-        f"[{CONTRACT_MIN_H * n}, {CONTRACT_MAX_H * n}] h. Move headcount and leave together."
+    assert reachable[0] <= band[1] and band[0] <= reachable[1], (
+        f"{leave_days} leave days makes credited hours reachable only in "
+        f"[{reachable[0]:.0f}, {reachable[1]:.0f}] h, which does not meet "
+        f"{n} nurses x [{CONTRACT_MIN_H:.0f}, {CONTRACT_MAX_H:.0f}] = "
+        f"[{band[0]:.0f}, {band[1]:.0f}] h. Move headcount and leave together."
     )
 
 

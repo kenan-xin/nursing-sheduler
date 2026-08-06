@@ -14,7 +14,6 @@ const NOOP_PROPS = {
   onEdit: () => {},
   onDuplicate: () => {},
   onDelete: () => {},
-  onMove: () => {},
   onSetDisabled: () => {},
   onReorder: () => {},
   onConvertToContracted: () => {},

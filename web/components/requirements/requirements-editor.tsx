@@ -103,18 +103,8 @@ function CoverageWarningBanner({
 }
 
 export function RequirementsEditor() {
-  const {
-    state,
-    requirements,
-    add,
-    update,
-    remove,
-    duplicate,
-    move,
-    reorder,
-    setDisabled,
-    getCards,
-  } = useRequirements();
+  const { state, requirements, add, update, remove, duplicate, reorder, setDisabled, getCards } =
+    useRequirements();
   const [draft, setDraft] = useState<Draft | null>(null);
   // FR-PR-06: arm the shared open-draft navigation guard while a form is visible.
   useCardEditorDraftGuard("requirements", !!draft);
@@ -231,7 +221,6 @@ export function RequirementsEditor() {
           onEdit={openEdit}
           onDuplicate={(uid) => withDraftDismissed(() => duplicate(uid))}
           onDelete={(uid) => withDraftDismissed(() => remove(uid))}
-          onMove={(uid, direction) => withDraftDismissed(() => move(uid, direction))}
           onReorder={(fromUid, toUid, position) =>
             withDraftDismissed(() => reorder(fromUid, toUid, position))
           }

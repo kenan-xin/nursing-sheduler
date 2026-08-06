@@ -1,22 +1,351 @@
-// Shared durable Optimize fixtures plus the small assembled-browser proof core.
+// T16f — deterministic BFF/SSE fixtures + a browser-side route stubber for the
+// durable Optimize & Export acceptance journeys. The Playwright specs drive the
+// REAL screen (`/optimize-durable-fixture`, which mounts the real controller +
+// SSE parser + reconnect + terminal + cleanup pipeline) and intercept the
+// same-origin `/api/**` boundary here, so nothing hand-rolls the protocol: the
+// journeys prove the assembled client against fixed, contract-valid wire bytes.
+//
+// Every JobResponse / SSE payload below is byte-shaped to pass the strict T19
+// parsers (`lib/query/event-payloads.ts`) — an off-contract field would make the
+// client reconcile or reject, so these fixtures double as a living contract.
 
 import type { Page, Route } from "@playwright/test";
 import type { JobResponse, JobState, OptimizationOutcome } from "@/lib/bff/types";
 import {
   inspectPersistedSession,
+  OPTIMIZE_SESSION_SCHEMA_VERSION as PRODUCT_SESSION_SCHEMA_VERSION,
   OPTIMIZE_SESSION_STORAGE_KEY,
+  type SessionTransactionStorage,
 } from "@/lib/optimize/session-transaction";
 
-// ---------------------------------------------------------------------------
-// Explicit assembled-lane budgets
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// Replay-oracle judge (R6 combined-cold-review P2)
+// ===========================================================================
+//
+// The assembled gate's release proof for "what the browser recorded after
+// reload" used to assert only: at least one raw id, none of them pre-reload, and
+// the durable cursor present somewhere among them. That predicate accepted three
+// false greens the cold review demonstrated by mutation — a DUPLICATED new id
+// (`[c, c]` with cursor `c`), a single FOREIGN-job id, and a valid id MIXED with
+// a foreign-job id. None of them is a legal replay, and runtime server-side
+// validation does not make this browser oracle stronger: the oracle is precisely
+// the proof of what the browser saw.
+//
+// The judge below is pure, so its whole truth table — valid / duplicate /
+// foreign / mixed / stale / missing / malformed — is provable in a unit test
+// beside it, deterministically, without the Compose stack. The Playwright spec
+// supplies one atomic snapshot and this decides.
+//
+// Job binding is derived through the CANONICAL cursor contract
+// (`core/nurse_scheduling/server/event_cursor.py`), not by string prefix matching,
+// and the job it is compared AGAINST comes from the pre-reload session rather than
+// from any cursor — see `ReplayEvidence.expectedJobId`. The public cursor is
+//
+//     v1.<unpadded base64url(job_id)>.<unpadded base64url(native_id)>
+//
+// and a segment is canonical only when its decoded UTF-8 text re-encodes to
+// exactly the submitted spelling. Base64 has multiple spellings for the same
+// bytes (`MR` and `MQ` both decode to `"1"`), so the round trip is what rejects
+// aliases the server never emitted — mirroring `_decode_segment` exactly.
+//
+// Deliberately NOT asserted: anything about native-id increments. The native id
+// is an opaque store token (a decimal int in the memory backend, a `<ms>-<seq>`
+// Redis stream id in production); constraining its arithmetic would bind this
+// oracle to a storage detail it must not own.
 
-export const OBSERVATION_EVALUATE_BOUND = 5_000;
-export const PRODUCT_SOLVE_LIMIT = 300_000;
+// ===========================================================================
+// Exact canonical events-request URL contract
+// ===========================================================================
+//
+// The client builds exactly one shape (`lib/query/optimize.ts:345`):
+//
+//     /api/optimize/${encodeURIComponent(jobId)}/events
+//
+// Root-relative, one path segment for the job, no query and no hash. So the
+// contract below is ANCHORED to precisely that and nothing else. The previous
+// unanchored `/\/optimize\/([^/?#]+)\/events/` matched a legacy path's tail, a
+// suffixed path, and extra segments, and the caller then silently DISCARDED
+// whatever failed to match — so the authority check judged a filtered projection
+// of the evidence instead of the evidence.
+//
+// Everything here is total: a URL either yields a job id or yields a REASON, and
+// the caller must treat a reason as a failure rather than as an absence.
 
+/** The one canonical events path shape, anchored end to end. */
+const EVENTS_PATH_PATTERN = /^\/api\/optimize\/([^/]+)\/events$/;
+
+export type EventsUrlParse =
+  | { ok: true; jobId: string }
+  | { ok: false; url: string; reason: string };
+
+/**
+ * Normalise an expected origin, or return `null` when it is unusable.
+ *
+ * The origin must be supplied by the caller from an INDEPENDENT capture — the
+ * page's own `location.origin`, read in the same snapshot as the evidence — never
+ * derived from the URL under test. A missing or unparseable origin fails closed:
+ * with nothing to compare against, every absolute URL would otherwise be accepted.
+ */
+export function normalizeExpectedOrigin(origin: string | null | undefined): string | null {
+  if (typeof origin !== "string" || origin.length === 0) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(origin);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+  if (parsed.username.length > 0 || parsed.password.length > 0) return null;
+  // `URL.origin` is the canonical scheme://host[:port] form, with the default port
+  // elided — so comparing origins never turns on a `:80` spelling difference.
+  return parsed.origin;
+}
+
+/**
+ * Whether a RAW absolute authority (`scheme://host[:port]`, no trailing slash) is
+ * the canonical spelling of `origin`.
+ *
+ * `origin` is already `URL.origin`, i.e. canonical scheme + lowercase host with the
+ * default port elided. The only accepted variation is that same origin with its
+ * DEFAULT port spelled out, which is the documented equivalence a `Request` may
+ * produce. Everything else — any host-case, host-encoding, port-padding,
+ * alternate-IP-literal, credential-delimiter or separator difference — is a
+ * different byte string and is therefore rejected without needing to be enumerated.
+ */
+export function isCanonicalRawAuthority(rawAuthority: string, origin: string): boolean {
+  if (rawAuthority === origin) return true;
+  // The one documented equivalence: `http://host` <-> `http://host:80`, and the
+  // https/443 pair. Only when the canonical origin itself elides the port.
+  const defaultPort = origin.startsWith("https://") ? ":443" : ":80";
+  const originHasExplicitPort = /:\d+$/.test(origin);
+  if (!originHasExplicitPort && rawAuthority === `${origin}${defaultPort}`) return true;
+  return false;
+}
+
+/**
+ * Parse one recorded events-request URL against the exact canonical contract.
+ *
+ * Accepts exactly two RAW spellings and nothing else:
+ *
+ *   1. the canonical root-relative form the client emits, and
+ *   2. the canonical same-origin absolute form a `Request` object exposes.
+ *
+ * The raw string is validated BEFORE any `URL` normalization, because WHATWG
+ * parsing silently rewrites the very spellings this contract exists to reject.
+ * Normalizing first made all four of these same-origin aliases green:
+ *
+ *   api/optimize/job-A/events                   (path-relative, no leading slash)
+ *   //localhost:51236/api/optimize/job-A/events  (protocol-relative)
+ *   /api/optimize/old/../job-A/events            (dot-segment alias)
+ *   "  /api/optimize/job-A/events  "             (whitespace alias)
+ *
+ * `URL` erased each one into the canonical pathname before the exact path check
+ * ever ran, so a real client-side URL regression could still reach the same server
+ * route while this gate stayed green.
+ *
+ * Also rejects a non-canonical percent-encoding of the job segment by requiring
+ * `encodeURIComponent(decodeURIComponent(seg)) === seg` — the same
+ * canonical-spelling discipline the cursor codec applies. `URL` is still used, but
+ * only for the ORIGIN comparison, and only after the raw form has been accepted.
+ */
+export function parseEventsRequestUrl(url: string, expectedOrigin: string | null): EventsUrlParse {
+  const fail = (reason: string): EventsUrlParse => ({ ok: false, url, reason });
+  if (typeof url !== "string" || url.length === 0) return fail("empty URL");
+
+  // ORIGIN AUTHORITY. Without an expected origin there is nothing to bind an
+  // absolute URL to, so this fails closed rather than falling back to "any host".
+  const origin = normalizeExpectedOrigin(expectedOrigin);
+  if (origin === null) {
+    return fail(`no valid expected origin was captured (got ${String(expectedOrigin)})`);
+  }
+
+  // ---- RAW-FORM VALIDATION, before any normalization ----------------------
+  if (url !== url.trim()) return fail("leading or trailing whitespace is not canonical");
+  if (/\s/.test(url)) return fail("whitespace inside the URL is not canonical");
+  if (url.includes("\\")) return fail("backslashes are not canonical");
+  if (url.includes("?")) return fail("query string is not part of the contract");
+  if (url.includes("#")) return fail("hash is not part of the contract");
+
+  let rawPath: string;
+  if (url.startsWith("//")) {
+    // Protocol-relative. Normalization would resolve it onto the base scheme and,
+    // for a same-origin host, produce an indistinguishable result.
+    return fail("protocol-relative URLs are not part of the contract");
+  } else if (url.startsWith("/")) {
+    rawPath = url;
+  } else if (/^https?:\/\//.test(url)) {
+    // Absolute `Request` form. Split the raw string at the first `/` after the
+    // scheme so BOTH halves are judged as written: the authority against the
+    // canonical origin byte-for-byte, and the path against the anchored shape.
+    const authorityEnd = url.indexOf("/", url.indexOf("://") + 3);
+    if (authorityEnd === -1) return fail("absolute URL has no path");
+    const rawAuthority = url.slice(0, authorityEnd);
+    // ---- RAW AUTHORITY VALIDATION ----------------------------------------
+    //
+    // Validating only the raw PATH was not enough: `new URL()` still normalized
+    // the authority, so every one of these same-origin aliases was accepted for
+    // expected origin `http://localhost:51236`:
+    //
+    //   http://LOCALHOST:51236/...       host case
+    //   http://%6cocalhost:51236/...     percent-encoded host
+    //   http://@localhost:51236/...      empty credential delimiter
+    //   http://localhost:051236/...      zero-padded port
+    //   http://2130706433/...            integer IPv4 (for 127.0.0.1)
+    //
+    // None of them is the spelling a `Request` exposes; they become
+    // indistinguishable only after WHATWG canonicalization. So rather than
+    // enumerating alias classes (host case, encoding, padded ports, integer/hex/
+    // octal IPv4, IPv6 bracket forms, stray separators...) and hoping the list is
+    // complete, the raw authority must equal the canonical origin BYTE FOR BYTE.
+    // That admits exactly one spelling and therefore closes the whole class.
+    //
+    // The single documented exception is the explicit default port, because
+    // `URL.origin` elides it while a `Request` may spell it out.
+    if (!isCanonicalRawAuthority(rawAuthority, origin)) {
+      return fail(`raw authority ${rawAuthority} is not the canonical origin ${origin}`);
+    }
+    rawPath = url.slice(authorityEnd);
+  } else if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(url)) {
+    return fail("only http(s) URLs are part of the contract");
+  } else {
+    return fail("path-relative URLs are not part of the contract");
+  }
+
+  // The raw path must match the canonical shape exactly. This is what rejects dot
+  // segments, empty segments, suffixes and extra segments as WRITTEN rather than as
+  // normalized: `/api/optimize/old/../job-A/events` has five raw segments here.
+  const matched = EVENTS_PATH_PATTERN.exec(rawPath);
+  if (matched === null) {
+    return fail(`raw path does not match /api/optimize/<jobId>/events: ${rawPath}`);
+  }
+
+  // ---- ORIGIN COMPARISON, only now, and only for the origin ---------------
+  let parsed: URL;
+  try {
+    parsed = new URL(url, origin);
+  } catch {
+    return fail("unparseable URL");
+  }
+  if (parsed.username.length > 0 || parsed.password.length > 0) {
+    return fail("credentials are not part of the contract");
+  }
+  if (parsed.origin !== origin) {
+    return fail(`origin ${parsed.origin} is not the page origin ${origin}`);
+  }
+
+  const segment = matched[1];
+  let jobId: string;
+  try {
+    jobId = decodeURIComponent(segment);
+  } catch {
+    return fail(`job segment is not valid percent-encoding: ${segment}`);
+  }
+  if (jobId.length === 0) return fail("job segment decodes to an empty id");
+  if (encodeURIComponent(jobId) !== segment) {
+    return fail(`job segment is not a canonical encodeURIComponent spelling: ${segment}`);
+  }
+  return { ok: true, jobId };
+}
+
+export interface EventsAuthorityVerdict {
+  ok: boolean;
+  failures: string[];
+  /** Every distinct job id parsed out, in first-seen order. */
+  jobIds: string[];
+}
+
+/**
+ * Judge EVERY captured events-related URL against `expectedJobId`, failing closed
+ * on any that is malformed or foreign. Nothing is filtered or deduplicated away
+ * before judging: a URL the wrapper classified as events-related is evidence, and
+ * unparseable evidence is a failure rather than a non-event.
+ */
+export function judgeEventsAuthority(
+  urls: readonly string[],
+  expectedJobId: string | null,
+  expectedOrigin: string | null,
+): EventsAuthorityVerdict {
+  const failures: string[] = [];
+  const jobIds: string[] = [];
+
+  if (expectedJobId === null || expectedJobId.length === 0) {
+    return {
+      ok: false,
+      failures: ["no independent job authority to compare events paths against"],
+      jobIds,
+    };
+  }
+  if (normalizeExpectedOrigin(expectedOrigin) === null) {
+    return {
+      ok: false,
+      failures: [`no valid expected origin was captured (got ${String(expectedOrigin)})`],
+      jobIds,
+    };
+  }
+  if (urls.length === 0) {
+    return { ok: false, failures: ["no events request was observed at all"], jobIds };
+  }
+
+  for (const url of urls) {
+    const parsed = parseEventsRequestUrl(url, expectedOrigin);
+    if (!parsed.ok) {
+      failures.push(`events URL rejected (${parsed.reason})`);
+      continue;
+    }
+    if (!jobIds.includes(parsed.jobId)) jobIds.push(parsed.jobId);
+    if (parsed.jobId !== expectedJobId) {
+      failures.push(
+        `events URL targets job "${parsed.jobId}", not the active "${expectedJobId}": ${url}`,
+      );
+    }
+  }
+
+  return { ok: failures.length === 0, failures, jobIds };
+}
+
+// ===========================================================================
+// The live replay test's phase bounds and total budget
+// ===========================================================================
+//
+// These live here, beside the judge, for two reasons: they are a single source of
+// truth for the spec that consumes them, and `e2e/support/**` is unit-testable
+// (Playwright specs are excluded from vitest by filename), so the derivation below
+// is guarded by assertions rather than by a comment.
+//
+// The live replay test is intentionally multi-phase and every phase already carries
+// an explicit bound. Playwright's DEFAULT per-test budget is smaller than the sum of
+// those bounds, so a run in which each phase merely behaved legitimately-slowly
+// could exhaust the test while no phase had exhausted itself. That is what the cold
+// review observed: run 4 of 6 hit the default while still inside its own phase
+// bounds, and the abandoned 87-person solve then starved the following abort test's
+// fixture mount — one under-specified budget, two failures.
+
+/** Playwright's default per-test timeout, kept for the sufficiency comparison. */
+export const PLAYWRIGHT_DEFAULT_TEST_TIMEOUT = 30_000;
+
+/**
+ * EVERY sequential bound on the live replay test's positive path, one named entry
+ * each. The total is computed by summing this object's values, so a bound that is
+ * added here is automatically inside the cap and a bound that exists in the test
+ * but is MISSING here is caught by the unit suite's key-set assertion — the budget
+ * cannot silently drift away from the work it covers.
+ *
+ * The previous cap summed only the five stream phases (72s) and then added an
+ * unproved 48s "margin". That was incomplete by construction: `page.goto` alone
+ * permits 30s, the reload navigation another 30s, and four web-first expectations
+ * 5s each, so a schedule in which every operation stayed inside its own bound
+ * could reach ~152s and still blow a 120s cap. Every one of those is now an
+ * EXPLICIT local timeout passed at the call site, which is what makes this sum a
+ * real ceiling rather than an estimate of defaults.
+ */
 export const REPLAY_BOUNDS = {
+  // --- initialization: TWO sequential addInitScript calls -------------------
+  // One key each, both `withBound`-enforced. A single shared entry could not tell
+  // an omitted call from a fast one, and the replay budget previously had no
+  // initialization entry at all even though it calls the same helper.
   injectObservationScript: 5_000,
   injectFixtureYaml: 5_000,
+  // --- gotoFixture, all explicit at the call site ---------------------------
   gotoFixtureNavigation: 20_000,
   fixtureRootVisible: 5_000,
   screenVisible: 5_000,
@@ -24,345 +353,232 @@ export const REPLAY_BOUNDS = {
   anonymizeToggleClick: 5_000,
   anonymizeCheckedAssertion: 5_000,
   submitEnabledAssertion: 5_000,
+  // --- submission + early ownership ----------------------------------------
   submitClick: 5_000,
   acceptedJobIdPoll: 10_000,
+  // --- the five named stream phases ----------------------------------------
   firstResponsePoll: 15_000,
   keepaliveWindow: 12_000,
   resumedScreenVisible: 10_000,
   resumedHeaderPoll: 15_000,
   judgePoll: 20_000,
+  // --- evaluate/navigation work with no Playwright timeout parameter --------
+  // `page.evaluate` takes no per-call timeout, so each of these is enforced by
+  // `withBound()` in the spec rather than merely budgeted for here.
+  //
+  // `observationEvaluates` covers the STANDALONE observation reads — the ones
+  // outside any poll, since a poll's own bound already covers the evaluates it
+  // repeats. In the replay test there are exactly four: `readSseObs` for the
+  // accepted-id check and again after the keepalive window, and
+  // `readReplayObservation` for the first resumed request and for the final
+  // snapshot. At `OBSERVATION_EVALUATE_BOUND` each, that is 4 x 5s. (This replaced
+  // a single 5s `finalObservationEvaluate` entry, which accounted for one of the
+  // four — found while applying the same enumeration method to the tiny test.)
+  // Calibrated against measurement, not guessed. Under a deliberately extreme
+  // synthetic overload (loadavg ~24 on 10 cores) this in-page evaluate — freeze,
+  // a <=200ms stabilisation loop, a regex over the recorded chunks, one
+  // sessionStorage write — exceeded 15s and `withBound` correctly named it. The
+  // work is ~1s unloaded, so 30s remains a tight, meaningful ceiling on something
+  // that must never hang, while no longer failing on host saturation alone.
   freezeAndSnapshotEvaluate: 30_000,
   reloadNavigation: 20_000,
   snapshotReadEvaluate: 5_000,
+  observationEvaluates: 20_000,
+  // --- one small named allowance, AFTER the full sum ------------------------
+  // Worker startup, fixture teardown and OS scheduling jitter between steps.
+  schedulerAllowance: 8_000,
 } as const;
 
+// Totals: 10s initialization + 50s fixture setup + 15s submit/arm
+// + 72s stream phases + 75s evaluate/navigation + 8s scheduler allowance = 230s,
+// comfortably above the ~152s worst-case legitimate schedule the review constructed
+// and comfortably below the product's 300s solve limit.
+
+/** One standalone observation `page.evaluate`, enforced by `withBound()`. */
+export const OBSERVATION_EVALUATE_BOUND = 5_000;
+
+/**
+ * The bounds `gotoFixture` spends, shared by BOTH assembled tests. Named as a key
+ * list rather than a literal so the two budgets cannot drift apart from each other
+ * or from the helper's actual call sites.
+ */
+export const GOTO_FIXTURE_BOUND_KEYS = [
+  "gotoFixtureNavigation",
+  "fixtureRootVisible",
+  "screenVisible",
+  "anonymizeAttributeRead",
+  "anonymizeToggleClick",
+  "anonymizeCheckedAssertion",
+  "submitEnabledAssertion",
+] as const;
+
+/** The total `gotoFixture` may spend (50s). */
+export const GOTO_FIXTURE_BOUNDS_TOTAL = GOTO_FIXTURE_BOUND_KEYS.reduce(
+  (total, key) => total + REPLAY_BOUNDS[key],
+  0,
+);
+
+/**
+ * EVERY sequential bound on the TINY assembled test's positive path.
+ *
+ * Same defect shape the review blocked on for the replay test, in its sibling: an
+ * internal 90s completion poll cannot be governed by Playwright's 30s default, so
+ * the assertion could never have reached its own bound. Same repair method — one
+ * named entry per sequential bound, total computed by summing the object, key set
+ * pinned by the unit suite so an omission fails loudly.
+ *
+ * `fixtureSetup` reuses the shared `gotoFixture` total rather than restating the
+ * seven literals, so a change there follows into both budgets.
+ */
 export const TINY_BOUNDS = {
+  /** One key per `addInitScript` call, both `withBound`-enforced. */
+  injectObservationScript: REPLAY_BOUNDS.injectObservationScript,
+  injectFixtureYaml: REPLAY_BOUNDS.injectFixtureYaml,
+  fixtureSetup: GOTO_FIXTURE_BOUNDS_TOTAL,
+  /** Explicit: the default action timeout is 0, i.e. bounded only by the total. */
   submitClick: 5_000,
+  /**
+   * TWO sequential polls, counted separately. A single shared 15s key covered both
+   * call sites with one entry, so the advertised ceiling was 15s short of the
+   * schedule the test can actually run.
+   */
   acceptedIdPoll: 15_000,
   sseResponsePoll: 15_000,
+  /** One standalone `readSseObs` after the polls. */
+  observationEvaluates: OBSERVATION_EVALUATE_BOUND,
+  /**
+   * The terminal auto-chain: artifact fetch, people-id restore, download, DELETE.
+   * Unchanged at 90s — the completion poll is the point of this test and is not
+   * weakened to fit a cap.
+   */
   completionPoll: 90_000,
-  // The PRODUCT's terminal auto-delete must be proved before the page-close fence, so
-  // the `afterEach` lifecycle can never be the thing that produced the only 404.
-  autoDeletePoll: 30_000,
+  /** The DELETE freed the single slot, so a new run is permitted again. */
   slotFreedAssertion: 30_000,
+  /** Worker startup and OS scheduling jitter between steps. */
+  schedulerAllowance: 8_000,
 } as const;
 
+/** The exact key set of `TINY_BOUNDS`, pinned so an omission fails loudly. */
+export const TINY_BOUND_KEYS = Object.keys(TINY_BOUNDS) as ReadonlyArray<keyof typeof TINY_BOUNDS>;
+
+/** 5 + 5 + 50 + 5 + 15 + 15 + 5 + 90 + 30 + 8 = 228s. */
+export const TINY_TEST_TIMEOUT = Object.values(TINY_BOUNDS).reduce(
+  (total, bound) => total + bound,
+  0,
+);
+
+/**
+ * EVERY sequential bound on the ISOLATED ABORT test's positive path.
+ *
+ * The third instance of the same incomplete-budget class. That test had no
+ * `test.setTimeout` and the assembled config declares no suite timeout, so
+ * Playwright's 30s default governed a schedule whose own local bounds already
+ * summed past 137s — and its submit click had no explicit action timeout at all,
+ * where the default is 0 (bounded only by the total).
+ *
+ * `abortUrlSettle` is the 30s window the round-4 investigation established: under
+ * host saturation the main-frame URL lags a COMMITTED navigation, and that window
+ * is what makes the wait bounded rather than a weaker claim.
+ */
 export const ABORT_BOUNDS = {
+  injectObservationScript: REPLAY_BOUNDS.injectObservationScript,
+  injectFixtureYaml: REPLAY_BOUNDS.injectFixtureYaml,
+  fixtureSetup: GOTO_FIXTURE_BOUNDS_TOTAL,
+  /** Explicit: the default action timeout is 0, i.e. bounded only by the total. */
   submitClick: 5_000,
   firstResponsePoll: 15_000,
+  /** One standalone `readSseObs` backing the first-response poll's final read. */
+  observationEvaluates: OBSERVATION_EVALUATE_BOUND,
+  /** The intentional navigate-away, explicit at the callsite. */
   abortNavigation: 30_000,
+  /** Main-frame URL settle after a committed navigation. */
   abortUrlSettle: 30_000,
+  /** The tail wait that lets the BFF observe and log the upstream cancel. */
   bffObservationTail: 2_000,
+  schedulerAllowance: 8_000,
 } as const;
 
-export const TINY_TEST_TIMEOUT = 240_000;
-export const REPLAY_TEST_TIMEOUT = 240_000;
-export const ABORT_TEST_TIMEOUT = 180_000;
+/** The exact key set of `ABORT_BOUNDS`, pinned so an omission fails loudly. */
+export const ABORT_BOUND_KEYS = Object.keys(ABORT_BOUNDS) as ReadonlyArray<
+  keyof typeof ABORT_BOUNDS
+>;
+
+/** 5 + 5 + 50 + 5 + 15 + 5 + 30 + 30 + 2 + 8 = 155s. */
+export const ABORT_TEST_TIMEOUT = Object.values(ABORT_BOUNDS).reduce(
+  (total, bound) => total + bound,
+  0,
+);
+
+/** The exact key set of `REPLAY_BOUNDS`, pinned so an omission fails loudly. */
+export const REPLAY_BOUND_KEYS = Object.keys(REPLAY_BOUNDS) as ReadonlyArray<
+  keyof typeof REPLAY_BOUNDS
+>;
+
+/** The complete cap: the sum of every enumerated bound. */
+export const REPLAY_TEST_TIMEOUT = Object.values(REPLAY_BOUNDS).reduce(
+  (total, bound) => total + bound,
+  0,
+);
+
+/** The five named stream phases, kept as a subtotal for the review's comparison. */
+export const REPLAY_PHASE_BOUNDS =
+  REPLAY_BOUNDS.firstResponsePoll +
+  REPLAY_BOUNDS.keepaliveWindow +
+  REPLAY_BOUNDS.resumedScreenVisible +
+  REPLAY_BOUNDS.resumedHeaderPoll +
+  REPLAY_BOUNDS.judgePoll;
+
+/** The product's own solve ceiling; the cap must stay meaningfully inside it. */
+export const PRODUCT_SOLVE_LIMIT = 300_000;
+
+// Individual re-exports for the spec's call sites, so no literal is duplicated.
 export const FIRST_BYTE_TIMEOUT = REPLAY_BOUNDS.firstResponsePoll;
 export const KEEPALIVE_WINDOW = REPLAY_BOUNDS.keepaliveWindow;
 export const RESUMED_SCREEN_TIMEOUT = REPLAY_BOUNDS.resumedScreenVisible;
 export const RESUMED_HEADER_TIMEOUT = REPLAY_BOUNDS.resumedHeaderPoll;
 export const JUDGE_POLL_TIMEOUT = REPLAY_BOUNDS.judgePoll;
 
-// ---------------------------------------------------------------------------
-// Page-fenced accepted-submit observation
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// Anti-contamination cleanup lifecycle
+// ===========================================================================
+//
+// A failed or timed-out replay test must not leave the 87-person solve running:
+// the fixture submits at the form's 300s default, and an orphaned solver starves
+// the next lane's fixture mount (that is how one 30s timeout produced 29/2).
+//
+// The backend contract this follows, read from source rather than assumed:
+//
+//   * `POST /optimize/{id}/cancel` → **202** (`api/optimize.py:212`). A QUEUED job
+//     goes straight to terminal CANCELLED; a RUNNING one enters **CANCELLING**,
+//     which is NOT terminal (`jobs/controller.py:373-401`). Re-cancelling a
+//     terminal or already-cancelling job returns it unchanged, so cancel is
+//     idempotent.
+//   * `DELETE /optimize/{id}` → **204** (`api/optimize.py:255`), and
+//     `delete_job` raises `JobOperationNotAllowedError` unless the job is already
+//     terminal (`jobs/controller.py:522-536`), which `app.py:250` maps to **409**.
+//   * A missing job is **404**.
+//
+// So DELETE must never be fired while the job is still `cancelling` — the previous
+// implementation did exactly that, ignored every status, and treated only a
+// transport exception as failure, which is why it could "succeed" while leaving
+// the solve alive. This lifecycle cancels, POLLS to terminal within an explicit
+// bound, and only then deletes.
 
-export interface SubmitRequest {
-  method(): string;
-  url(): string;
-}
-
-export interface SubmitResponse {
-  status(): number;
-  request(): SubmitRequest;
-  json(): Promise<unknown>;
-}
-
-export interface SubmitEvents {
-  request: SubmitRequest;
-  requestfailed: SubmitRequest;
-  response: SubmitResponse;
-}
-
-export interface SubmitSource {
-  on<K extends keyof SubmitEvents>(event: K, handler: (value: SubmitEvents[K]) => void): void;
-  off<K extends keyof SubmitEvents>(event: K, handler: (value: SubmitEvents[K]) => void): void;
-}
-
-export type AcceptedSlot =
-  | { kind: "id"; jobId: string }
-  | { kind: "invalid"; detail: string }
-  | { kind: "unreadable"; detail: string }
-  | { kind: "unresolved" };
-
-export interface SubmitObservation {
-  matchingRequests: number;
-  acceptedSlots: AcceptedSlot[];
-  knownIds: string[];
-  failures: string[];
-  lostAuthority: boolean;
-}
-
-interface RequestRecord {
-  request: SubmitRequest;
-  settled: boolean;
-  acceptedSlot: number | null;
-}
-
-export interface SubmitObserver {
-  knownIds(): string[];
-  result(): SubmitObservation | null;
-  settleAfterPageClose(deadline: number, closeFailure?: string | null): Promise<SubmitObservation>;
-}
-
-export const SUBMIT_FENCE_MS = 5_000;
-
-// Shared by the existing RunStatusPanel DOM contract test. The assembled gate no
-// longer reads this selector or treats DOM state as accepted-job authority.
-export const VOLATILE_JOB_ID_SELECTOR = '[data-testid="optimize-job-id"]';
-
-export function judgeVolatileJobIdTexts(
-  values: readonly (string | null | undefined)[],
-): { ok: true; ids: string[] } | { ok: false; reason: string } {
-  if (values.length === 0) return { ok: true, ids: [] };
-  if (values.length !== 1 || typeof values[0] !== "string") {
-    return { ok: false, reason: "the rendered job-id hook was ambiguous or unreadable" };
-  }
-  const id = values[0].trim();
-  if (id.length === 0 || /\s/.test(id)) {
-    return { ok: false, reason: "the rendered job-id hook did not contain one bare id" };
-  }
-  return { ok: true, ids: [id] };
-}
-
-/** Match only the exact authored Optimize submit request. */
-export function isOptimizeSubmitRequest(request: SubmitRequest): boolean {
-  if (request.method().toUpperCase() !== "POST") return false;
-  try {
-    const url = new URL(request.url(), "http://submit.invalid");
-    return url.pathname === "/api/optimize" && url.search === "" && url.hash === "";
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Observe every matching POST from attachment until the caller closes the page.
- * Response arrival and accepted-body reads are independent of the click promise.
- */
-export function observeOptimizeSubmit(
-  source: SubmitSource,
-  options: { now?: () => number; sleep?: (ms: number) => Promise<void> } = {},
-): SubmitObserver {
-  const now = options.now ?? (() => Date.now());
-  const sleep =
-    options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
-  const records: RequestRecord[] = [];
-  const byRequest = new Map<SubmitRequest, RequestRecord>();
-  const slots: Array<AcceptedSlot | undefined> = [];
-  const reads = new Set<Promise<void>>();
-  let sealed = false;
-  let finalResult: SubmitObservation | null = null;
-
-  const recordRequest = (request: SubmitRequest): RequestRecord | null => {
-    if (!isOptimizeSubmitRequest(request)) return null;
-    const existing = byRequest.get(request);
-    if (existing) return existing;
-    const record = { request, settled: false, acceptedSlot: null };
-    records.push(record);
-    byRequest.set(request, record);
-    return record;
-  };
-
-  const onRequest = (request: SubmitRequest): void => {
-    if (!sealed) recordRequest(request);
-  };
-  const onRequestFailed = (request: SubmitRequest): void => {
-    if (sealed) return;
-    const record = recordRequest(request);
-    if (record) record.settled = true;
-  };
-  const onResponse = (response: SubmitResponse): void => {
-    if (sealed) return;
-    const record = recordRequest(response.request());
-    if (!record) return;
-    record.settled = true;
-    if (response.status() !== 202) return;
-
-    const index = slots.length;
-    record.acceptedSlot = index;
-    slots.push(undefined);
-    const read = response
-      .json()
-      .then((body) => {
-        const id = (body as { id?: unknown } | null)?.id;
-        if (typeof id !== "string") {
-          slots[index] = {
-            kind: "invalid",
-            detail: `accepted body id was ${id === undefined ? "absent" : typeof id}`,
-          };
-        } else if (id.length === 0) {
-          slots[index] = { kind: "invalid", detail: "accepted body id was empty" };
-        } else {
-          slots[index] = { kind: "id", jobId: id };
-        }
-      })
-      .catch((error: unknown) => {
-        slots[index] = {
-          kind: "unreadable",
-          detail: error instanceof Error ? error.message : String(error),
-        };
-      })
-      .finally(() => reads.delete(read));
-    reads.add(read);
-  };
-
-  source.on("request", onRequest);
-  source.on("requestfailed", onRequestFailed);
-  source.on("response", onResponse);
-
-  const buildResult = (): SubmitObservation => {
-    const acceptedSlots = slots.map((slot) => slot ?? ({ kind: "unresolved" } as const));
-    const knownIds: string[] = [];
-    for (const slot of acceptedSlots) {
-      if (slot.kind === "id" && !knownIds.includes(slot.jobId)) knownIds.push(slot.jobId);
-    }
-    const unresolvedRequests = records.filter((record) => !record.settled).length;
-    const failures: string[] = [];
-    if (records.length !== 1) {
-      failures.push(`expected exactly one matching submit request, observed ${records.length}`);
-    }
-    if (acceptedSlots.length !== 1) {
-      failures.push(`expected exactly one accepted 202, observed ${acceptedSlots.length}`);
-    }
-    if (unresolvedRequests > 0) {
-      failures.push(
-        `${unresolvedRequests} matching submit request(s) remained unresolved at the page-close fence`,
-      );
-    }
-    for (const [index, slot] of acceptedSlots.entries()) {
-      if (slot.kind === "invalid")
-        failures.push(`accepted slot ${index + 1} was malformed: ${slot.detail}`);
-      if (slot.kind === "unreadable")
-        failures.push(`accepted slot ${index + 1} was unreadable: ${slot.detail}`);
-      if (slot.kind === "unresolved")
-        failures.push(`accepted slot ${index + 1} body remained unresolved`);
-    }
-    const lostAuthority =
-      records.length > 2 ||
-      acceptedSlots.length > 2 ||
-      unresolvedRequests > 0 ||
-      acceptedSlots.some((slot) => slot.kind !== "id");
-    return {
-      matchingRequests: records.length,
-      acceptedSlots,
-      knownIds,
-      failures,
-      lostAuthority,
-    };
-  };
-
-  return {
-    knownIds: () => {
-      const ids: string[] = [];
-      for (const slot of slots) {
-        if (slot?.kind === "id" && !ids.includes(slot.jobId)) ids.push(slot.jobId);
-      }
-      return ids;
-    },
-    result: () => finalResult,
-    settleAfterPageClose: async (
-      deadline: number,
-      closeFailure: string | null = null,
-    ): Promise<SubmitObservation> => {
-      if (finalResult) return finalResult;
-      sealed = true;
-      source.off("request", onRequest);
-      source.off("requestfailed", onRequestFailed);
-      source.off("response", onResponse);
-      while (reads.size > 0 && now() < deadline) {
-        await sleep(Math.min(10, Math.max(1, deadline - now())));
-      }
-      const settled = buildResult();
-      finalResult =
-        closeFailure === null
-          ? settled
-          : {
-              ...settled,
-              failures: [`page-close fence failed: ${closeFailure}`, ...settled.failures],
-              lostAuthority: true,
-            };
-      return finalResult;
-    },
-  };
-}
-
-async function boundedFence(work: Promise<void>, ms: number): Promise<string | null> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    await Promise.race([
-      work,
-      new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => reject(new Error(`page close exceeded ${ms}ms`)), ms);
-      }),
-    ]);
-    return null;
-  } catch (error) {
-    return error instanceof Error ? error.message : String(error);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-
-/** Close the page first, then settle every request/body observed before that fence. */
-export async function finishSubmitObservation(
-  observer: SubmitObserver,
-  closePage: () => Promise<void>,
-  options: { now?: () => number; fenceMs?: number } = {},
-): Promise<SubmitObservation> {
-  const existing = observer.result();
-  if (existing) return existing;
-  const now = options.now ?? (() => Date.now());
-  const fenceMs = options.fenceMs ?? SUBMIT_FENCE_MS;
-  const deadline = now() + fenceMs;
-  const closeFailure = await boundedFence(closePage(), Math.max(1, deadline - now()));
-  return observer.settleAfterPageClose(deadline, closeFailure);
-}
-
-/**
- * Run the click without letting a rejection cancel accepted-response observation.
- * On rejection the page is fenced and all readable ids are registered first, then
- * the original click error is rethrown unchanged.
- */
-export async function runObservedSubmitAction(
-  observer: SubmitObserver,
-  action: () => Promise<void>,
-  closePage: () => Promise<void>,
-): Promise<void> {
-  try {
-    await action();
-  } catch (primaryError) {
-    await finishSubmitObservation(observer, closePage);
-    throw primaryError;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Known-id cleanup lifecycle
-// ---------------------------------------------------------------------------
-
+/** Bounds for the cleanup lifecycle. Independent of the test's own cap. */
 export const CLEANUP_BOUNDS = {
-  closeAndSettle: 5_000,
-  lifecycle: 65_000,
-  report: 3_000,
-  hook: 75_000,
-  cancel: 8_000,
-  terminal: 37_000,
-  delete: 8_000,
-  transitionReserve: 4_000,
-  finalGet: 8_000,
-  pollInterval: 500,
+  cancelRequest: 10_000,
+  terminalPoll: 30_000,
+  terminalPollInterval: 500,
+  deleteRequest: 10_000,
+  statusRequest: 10_000,
+} as const;
+
+/** The documented statuses each cleanup step may return. */
+export const CLEANUP_ACCEPTED_STATUS = {
+  /** 202 documented; 404 when a prior attempt already deleted the job. */
+  cancel: [202, 404] as readonly number[],
+  /** 204 documented; 404 is the idempotent already-deleted outcome. */
+  delete: [204, 404] as readonly number[],
 } as const;
 
 export interface CleanupHttp {
@@ -374,389 +590,1144 @@ export interface CleanupHttp {
 }
 
 export interface CleanupOutcome {
+  /**
+   * Ids the backend turned out not to have (the documented idempotent 404 branch).
+   * Populated by `releaseLiveJobs`; consumed by `auditCoverageAfterRelease`.
+   */
+  absent?: string[];
   ok: boolean;
-  ids: string[];
-  removedIds: string[];
+  /** Ordered, human-readable trace of every step and its status. */
   steps: string[];
   failures: string[];
 }
 
+/** Whether a job payload reports a terminal state. */
 export function isTerminalJobBody(body: string): boolean {
-  return classifyJobBody(body) === "terminal";
-}
-
-function classifyJobBody(body: string): "terminal" | "nonterminal" | "invalid" {
   try {
     const parsed = JSON.parse(body) as { terminal?: unknown; state?: unknown };
-    if (typeof parsed !== "object" || parsed === null) return "invalid";
-    if (parsed.terminal === true) return "terminal";
-    if (typeof parsed.state !== "string") return "invalid";
-    if (["completed", "cancelled", "failed"].includes(parsed.state)) return "terminal";
-    if (["queued", "running", "cancelling"].includes(parsed.state)) return "nonterminal";
-    return "invalid";
+    if (parsed.terminal === true) return true;
+    return (
+      typeof parsed.state === "string" &&
+      ["completed", "cancelled", "failed"].includes(parsed.state)
+    );
   } catch {
-    return "invalid";
+    return false;
   }
 }
 
-type HttpAttempt = { ok: true; status: number; body: string } | { ok: false; detail: string };
-
-async function attemptHttp(
-  label: string,
-  call: () => Promise<{ status: number; body: string }>,
-  steps: string[],
-  failures: string[],
-): Promise<HttpAttempt> {
-  try {
-    const response = await call();
-    steps.push(`${label} -> ${response.status}`);
-    return { ok: true, ...response };
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    steps.push(`${label} -> transport error`);
-    failures.push(`${label} transport failed: ${detail}`);
-    return { ok: false, detail };
-  }
-}
-
-function phaseTimeout(http: CleanupHttp, deadline: number, ceiling: number): number | null {
-  const remaining = deadline - http.now();
-  if (remaining <= 0) return null;
-  return Math.max(1, Math.min(ceiling, remaining));
-}
-
-/** Cancel, prove terminality, safely delete, and always attempt the reserved final GET. */
-export async function cleanupKnownJob(jobId: string, http: CleanupHttp): Promise<CleanupOutcome> {
-  const ids = [jobId];
-  const removedIds: string[] = [];
+/**
+ * Cancel → poll to terminal → delete, asserting the documented status at every
+ * step. Pure with respect to Playwright: `http` is injected, so the whole
+ * lifecycle (including the 409-if-you-delete-too-early hazard) is unit-testable.
+ */
+export async function releaseLiveJob(jobId: string, http: CleanupHttp): Promise<CleanupOutcome> {
   const steps: string[] = [];
   const failures: string[] = [];
-  const base = `/api/optimize/${encodeURIComponent(jobId)}`;
-  const startedAt = http.now();
-  const finalDeadline = startedAt + CLEANUP_BOUNDS.lifecycle;
-  const mutationDeadline = finalDeadline - CLEANUP_BOUNDS.finalGet;
-  let terminal = false;
-  let absent = false;
+  const path = `/api/optimize/${encodeURIComponent(jobId)}`;
 
-  const cancelTimeout = phaseTimeout(http, mutationDeadline, CLEANUP_BOUNDS.cancel);
-  if (cancelTimeout === null) {
-    failures.push("cancel phase had no time before the reserved final GET");
-  } else {
-    const cancel = await attemptHttp(
-      "cancel",
-      () => http.post(`${base}/cancel`, cancelTimeout),
-      steps,
-      failures,
-    );
-    if (cancel.ok) {
-      if (cancel.status === 404) absent = true;
-      else if (cancel.status !== 202)
-        failures.push(`cancel returned ${cancel.status}; expected 202 or 404`);
+  // TRANSPORT SAFETY. Every injected call is wrapped, because a timeout or socket
+  // rejection used to propagate out of this helper — which meant the hook never
+  // reached the line that builds and attaches the diagnostic, and an already-failed
+  // primary test could be replaced by an unstructured cleanup throw. A rejection is
+  // now just another named failure in the outcome.
+  type Attempt = { ok: true; status: number; body: string } | { ok: false; error: string };
+  const attempt = async (
+    label: string,
+    call: () => Promise<{ status: number; body: string }>,
+  ): Promise<Attempt> => {
+    try {
+      return { ok: true, ...(await call()) };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      steps.push(`${label} -> transport error`);
+      failures.push(`${label} request failed at the transport level: ${message}`);
+      return { ok: false, error: message };
     }
+  };
+
+  const cancelAttempt = await attempt("cancel", () =>
+    http.post(`${path}/cancel`, CLEANUP_BOUNDS.cancelRequest),
+  );
+  if (!cancelAttempt.ok) return { ok: false, steps, failures };
+  const cancel = cancelAttempt;
+  steps.push(`cancel -> ${cancel.status}`);
+  if (!CLEANUP_ACCEPTED_STATUS.cancel.includes(cancel.status)) {
+    failures.push(
+      `cancel returned ${cancel.status}; documented outcomes are ${CLEANUP_ACCEPTED_STATUS.cancel.join(" or ")}`,
+    );
+    return { ok: false, steps, failures };
+  }
+  if (cancel.status === 404) {
+    steps.push("job already absent; nothing to delete");
+    return { ok: true, steps, failures };
   }
 
-  if (!absent && failures.length === 0) {
-    const terminalDeadline = Math.min(http.now() + CLEANUP_BOUNDS.terminal, mutationDeadline);
-    while (http.now() < terminalDeadline) {
-      const timeout = phaseTimeout(http, terminalDeadline, CLEANUP_BOUNDS.terminal);
-      if (timeout === null) break;
-      const status = await attemptHttp("status", () => http.get(base, timeout), steps, failures);
-      if (!status.ok) break;
-      if (status.status === 404) {
-        absent = true;
-        break;
-      }
-      if (status.status !== 200) {
-        failures.push(`status returned ${status.status}; expected 200 or 404`);
-        break;
-      }
-      const state = classifyJobBody(status.body);
-      if (state === "invalid") {
-        failures.push("status returned a malformed job body");
-        break;
-      }
-      if (state === "nonterminal") {
-        const sleepFor = Math.min(CLEANUP_BOUNDS.pollInterval, terminalDeadline - http.now());
-        if (sleepFor > 0) await http.sleep(sleepFor);
-        continue;
-      }
+  // Poll to terminal. A RUNNING job first enters `cancelling`, and DELETE before
+  // terminal is the documented 409 — so this wait is the whole point.
+  const deadline = http.now() + CLEANUP_BOUNDS.terminalPoll;
+  let terminal = false;
+  let lastStatus = 0;
+  let lastBody = "";
+  while (http.now() <= deadline) {
+    const stateAttempt = await attempt("status poll", () =>
+      http.get(path, CLEANUP_BOUNDS.statusRequest),
+    );
+    if (!stateAttempt.ok) return { ok: false, steps, failures };
+    const state = stateAttempt;
+    lastStatus = state.status;
+    lastBody = state.body;
+    if (state.status === 404) {
+      steps.push("job disappeared while polling; nothing to delete");
+      return { ok: true, steps, failures };
+    }
+    if (state.status !== 200) {
+      failures.push(`status poll returned ${state.status}; expected 200 or 404`);
+      return { ok: false, steps, failures };
+    }
+    if (isTerminalJobBody(state.body)) {
       terminal = true;
-      steps.push("terminal state proved");
       break;
     }
-    if (!terminal && !absent && failures.length === 0) {
-      failures.push(`job did not reach terminal within ${CLEANUP_BOUNDS.terminal}ms`);
-    }
+    await http.sleep(CLEANUP_BOUNDS.terminalPollInterval);
   }
-
-  if (terminal) {
-    const deleteTimeout = phaseTimeout(http, mutationDeadline, CLEANUP_BOUNDS.delete);
-    if (deleteTimeout === null) {
-      failures.push("delete phase had no time before the reserved final GET");
-    } else {
-      const deleted = await attemptHttp(
-        "delete",
-        () => http.delete(base, deleteTimeout),
-        steps,
-        failures,
-      );
-      if (deleted.ok && deleted.status !== 204 && deleted.status !== 404) {
-        failures.push(`delete returned ${deleted.status}; expected 204 or 404`);
-      }
-    }
+  if (!terminal) {
+    steps.push(
+      `still nonterminal after ${CLEANUP_BOUNDS.terminalPoll}ms (last status ${lastStatus})`,
+    );
+    failures.push(
+      `job did not reach a terminal state within ${CLEANUP_BOUNDS.terminalPoll}ms; last body ${lastBody.slice(0, 200)}`,
+    );
+    return { ok: false, steps, failures };
   }
+  steps.push("reached terminal");
 
-  // This call is unconditional. Earlier failure may suppress unsafe DELETE, never absence proof.
-  const finalTimeout = Math.max(1, Math.min(CLEANUP_BOUNDS.finalGet, finalDeadline - http.now()));
-  const finalGet = await attemptHttp(
-    "final GET",
-    () => http.get(base, finalTimeout),
-    steps,
-    failures,
+  const deleteAttempt = await attempt("delete", () =>
+    http.delete(path, CLEANUP_BOUNDS.deleteRequest),
   );
-  if (finalGet.ok && finalGet.status === 404) {
-    removedIds.push(jobId);
-    steps.push(`cleanup success ${jobId}: final GET 404`);
-  } else if (finalGet.ok) {
-    failures.push(`final GET returned ${finalGet.status}; expected exact 404`);
+  if (!deleteAttempt.ok) return { ok: false, steps, failures };
+  const deleted = deleteAttempt;
+  steps.push(`delete -> ${deleted.status}`);
+  if (!CLEANUP_ACCEPTED_STATUS.delete.includes(deleted.status)) {
+    failures.push(
+      `delete returned ${deleted.status}; documented outcomes are ${CLEANUP_ACCEPTED_STATUS.delete.join(" or ")}`,
+    );
+    return { ok: false, steps, failures };
   }
-
-  return { ok: failures.length === 0, ids, removedIds, steps, failures };
+  return { ok: true, steps, failures };
 }
 
-/** Clean one or two distinct ids concurrently; all branches settle even when one fails. */
-export async function cleanupKnownJobs(
+// ===========================================================================
+// Node-side accepted-job ownership tracker
+// ===========================================================================
+//
+// Ownership USED to be assigned from inside an `expect.poll` callback. That is the
+// right seam on a successful callback, but Playwright races the callback against
+// the poll deadline without cancelling or awaiting the loser, so a callback could
+// observe and arm an accepted 202 AFTER the failed test had entered `afterEach` and
+// after the hook had already copied an empty array. A read-only probe of the
+// installed runtime showed exactly that: `hookSnapshot: []` at timeout, then
+// `armed: ["job-timeout-race"]` 121ms later. The late assignment orphaned that job
+// and leaked ownership into the next test.
+//
+// So ownership is no longer a test-body side effect at all. It is a Node-side
+// tracker registered BEFORE submit, fed by the response event, with an explicit
+// lifecycle: every body read it starts is recorded, and `drain()` awaits all of
+// them. The hook drains before it snapshots, so no ownership mutation can outlive
+// the snapshot. There is no second abandonable callback anywhere in the design.
+//
+// `AcceptedJobSource` is the tiny slice of `Page` this needs, so the lifecycle is
+// unit-testable without a browser.
+export interface AcceptedJobRequest {
+  method(): string;
+  url(): string;
+}
+
+export interface AcceptedJobResponse {
+  status(): number;
+  url(): string;
+  request(): AcceptedJobRequest;
+  json(): Promise<unknown>;
+}
+
+export interface AcceptedJobEvents {
+  response: AcceptedJobResponse;
+  request: AcceptedJobRequest;
+  requestfailed: AcceptedJobRequest;
+}
+
+export interface AcceptedJobSource {
+  on<K extends keyof AcceptedJobEvents>(
+    event: K,
+    handler: (arg: AcceptedJobEvents[K]) => void,
+  ): void;
+  off<K extends keyof AcceptedJobEvents>(
+    event: K,
+    handler: (arg: AcceptedJobEvents[K]) => void,
+  ): void;
+}
+
+/**
+ * How long `drain()` waits for a submission POST that is still IN FLIGHT to be
+ * answered before giving up on it.
+ *
+ * This exists because draining only the body reads was not enough: a test that times
+ * out while the POST is still on the wire would reach the hook with nothing recorded
+ * at all, and the response event would fire after the snapshot. The hook therefore
+ * waits for the request to land first, so the id is owned rather than missed.
+ */
+export const ACCEPTED_PENDING_SETTLE_MS = 5_000;
+
+/**
+ * The structured, AUTHORITATIVE result of a drain.
+ *
+ * `drain()` used to return `void`, and the hook then snapshotted `ids()` and
+ * reported success regardless of whether anything was left unresolved. Two exact
+ * probes showed what that cost:
+ *
+ *   late accepted after the drain bound:
+ *     before  = { ids: [], stats: { started: 0, failed: 0, pending: 1 } }
+ *     cleanup = { ok: true, steps: ["no accepted job was armed; nothing to release"] }
+ *
+ *   accepted response body rejection:
+ *     state   = { ids: [], stats: { started: 1, failed: 1, pending: 0 } }
+ *     cleanup = { ok: true, steps: ["no accepted job was armed; nothing to release"] }
+ *
+ * In both, a real solver job could exist while the hook reported success. So the
+ * drain now says so: `resolved` is false whenever a submission is still pending or
+ * an acceptance is otherwise unaccounted for, and the caller must either RECOVER the
+ * identity from an authoritative product source or fail the gate.
+ */
+
+/**
+ * What became of ONE accepted 202. The tracker's contract is that every accepted
+ * submission ends as exactly one of these — there is no "nothing happened" outcome.
+ */
+export type AcceptedSlotOutcome =
+  /** A valid, canonical, not-previously-seen job id. The only accounted outcome. */
+  | { kind: "id"; jobId: string }
+  /** The body READ fine but carried no usable id (missing / empty / non-string). */
+  | { kind: "invalid-body"; detail: string }
+  /** The body read rejected. */
+  | { kind: "unreadable"; detail: string }
+  /** The body read had not settled when the bounded drain expired. */
+  | { kind: "unfinished" }
+  /** A valid id we had ALREADY seen — so this acceptance is not separately accounted. */
+  | { kind: "duplicate"; jobId: string };
+
+export interface AcceptedDrainOutcome {
+  /** Unique valid ids, in acceptance order. */
+  ids: string[];
+  /** Every accepted 202 observed, in acceptance order, with its outcome. */
+  slots: AcceptedSlotOutcome[];
+  /** How many accepted 202s were seen at all. */
+  acceptedCount: number;
+  /**
+   * Accepted 202s that did NOT yield a unique valid id — invalid body, unreadable
+   * body, unfinished read, or a duplicate of an id already owned.
+   *
+   * The invalid-body case is why this replaced a plain `failed` counter: a 202 whose
+   * body read SUCCEEDED but carried `{}` or `{id:""}` left a null slot and incremented
+   * nothing, so the drain reported `resolved: true` with no id and the hook released an
+   * empty set and went green over a job that may well have been running.
+   */
+  unaccountedSlots: number;
+  /** Submissions still on the wire when the bounded settle expired. */
+  pending: number;
+  /** True only when every acceptance is accounted for and nothing is still pending. */
+  resolved: boolean;
+}
+
+export interface AcceptedJobTracker {
+  /** Every accepted job id, in acceptance order, deduplicated. */
+  ids(): string[];
+  /**
+   * Await in-flight submissions and body reads, then report authoritatively.
+   * The hook calls this BEFORE snapshotting and BEFORE disposing.
+   */
+  drain(): Promise<AcceptedDrainOutcome>;
+  /**
+   * Stop listening, and REPORT what detaching the listeners just orphaned.
+   *
+   * Disposal is the moment ownership can be lost silently: any submission still on
+   * the wire, or any body read still in flight, will now complete with nobody
+   * watching. So disposal is not allowed to be a `void` side effect — it returns
+   * the count it stranded, and the caller must treat a nonzero count as unresolved
+   * ownership rather than as a clean finish. Safe to call more than once; repeat
+   * calls report zero because the first call already detached.
+   *
+   * DISJOINT FROM THE DRAIN. Work the preceding `drain()` already declared unresolved
+   * (as `pending`, or as an unaccounted slot) is NOT reported again — the caller sums
+   * both views, so counting one physical submission twice would demand two distinct
+   * recovered identities for one job. A caller that never drained still gets the full
+   * count.
+   */
+  dispose(): AcceptedDisposal;
+  /** Diagnostics for a report: acceptances seen, acceptances unaccounted, pending. */
+  stats(): { started: number; unaccounted: number; pending: number };
+}
+
+/** What detaching the listeners stranded. `orphaned` must be zero for a clean finish. */
+export interface AcceptedDisposal {
+  /**
+   * Submissions on the wire plus body reads in flight when listeners detached, counted
+   * by physical submission and EXCLUDING anything the preceding drain already reported.
+   */
+  orphaned: number;
+}
+
+/** Whether a request is a submission POST to `/api/optimize`. */
+export function isSubmissionRequest(request: AcceptedJobRequest): boolean {
+  if (request.method().toUpperCase() !== "POST") return false;
+  const path = String(request.url()).split("?")[0];
+  return path === "/api/optimize" || path.endsWith("/api/optimize");
+}
+
+/** Whether a response is an accepted (202) submission POST to `/api/optimize`. */
+export function isAcceptedSubmission(response: AcceptedJobResponse): boolean {
+  if (response.status() !== 202) return false;
+  if (response.request().method().toUpperCase() !== "POST") return false;
+  const path = String(response.url()).split("?")[0];
+  return path === "/api/optimize" || path.endsWith("/api/optimize");
+}
+
+/**
+ * Track every accepted submission on the Node side. Register before submit; the
+ * hook drains and disposes.
+ */
+export function trackAcceptedJobs(
+  source: AcceptedJobSource,
+  options: { pendingSettleMs?: number; sleep?: (ms: number) => Promise<void> } = {},
+): AcceptedJobTracker {
+  const pendingSettleMs = options.pendingSettleMs ?? ACCEPTED_PENDING_SETTLE_MS;
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  // Slot-indexed by ACCEPTANCE order, not by body-read completion order. A nested or
+  // faster read must not reorder ownership, because release order is part of the
+  // determinism this promises.
+  const slots: Array<AcceptedSlotOutcome | undefined> = [];
+  // Each read removes itself on settle — so after a bounded drain the remaining size is
+  // exactly the number of reads that never landed. A MAP, not a set, because disposal
+  // has to say WHICH acceptance each unlanded read belongs to (see `units` below).
+  const inflight = new Map<Promise<void>, number>();
+  let started = 0;
+  let disposed = false;
+
+  // ---------------------------------------------------------------------------
+  // OWNERSHIP UNITS — one physical submission, from the wire to its released id
+  // ---------------------------------------------------------------------------
+  //
+  // `pending` used to be a bare counter and disposal reported `pending + inflight.size`,
+  // so ONE physical submission could be counted twice: as `drained.pending` (or as an
+  // `unfinished` slot) and AGAIN as `disposal.orphaned`. `settleAcceptedOwnership` sums
+  // all three, so a single unnamed job demanded TWO distinct recovered identities and a
+  // correct one-id recovery went false-red at the timeout boundary.
+  //
+  // So each submission gets a UNIT id when its POST is seen, and that unit TRANSFERS to
+  // the acceptance slot the response creates — a submission and the acceptance it turns
+  // into are the same physical thing, never two. `reportedUnits` records what the drain
+  // already declared unresolved, and disposal reports only units the drain did NOT.
+  // Ownership therefore transfers exactly once, and cardinality counts real slots.
+  let nextUnit = 0;
+  /** FIFO of units whose POST is still on the wire. Length is the old `pending`. */
+  const pendingUnits: number[] = [];
+  /** slot index -> the unit that submission became. */
+  const slotUnits: number[] = [];
+  /** Units the drain already reported as unresolved (pending, or an unaccounted slot). */
+  const reportedUnits = new Set<number>();
+
+  const onRequest = (request: AcceptedJobRequest): void => {
+    if (disposed) return;
+    if (isSubmissionRequest(request)) pendingUnits.push(nextUnit++);
+  };
+  const onRequestFailed = (request: AcceptedJobRequest): void => {
+    // A submission whose TRANSPORT failed is genuinely resolved — no job can exist — so
+    // its unit leaves without ever being reported. FIFO, matching the counter it
+    // replaced: responses and failures retire the oldest submission still on the wire.
+    if (isSubmissionRequest(request)) pendingUnits.shift();
+  };
+
+  const handler = (response: AcceptedJobResponse): void => {
+    if (disposed) return;
+    // Retire the unit of the submission this response answers.
+    const retired = isSubmissionRequest(response.request()) ? pendingUnits.shift() : undefined;
+    if (!isAcceptedSubmission(response)) return;
+    started += 1;
+    const slot = slots.length;
+    // TRANSFER that unit to the acceptance slot: the POST and the 202 it produced are
+    // one physical submission. A 202 whose `request` event was never observed
+    // (registration raced the POST) still gets its own unit rather than none.
+    slotUnits[slot] = retired ?? nextUnit++;
+    // `undefined` means "this read has not settled yet"; the drain converts any slot
+    // still undefined at its bound into an explicit `unfinished` outcome.
+    slots.push(undefined);
+    const read: Promise<void> = response
+      .json()
+      .then((body) => {
+        const id = (body as { id?: unknown } | null)?.id;
+        if (typeof id !== "string") {
+          // FAIL CLOSED on a readable body with no usable id. This used to leave the
+          // slot null and increment nothing, so the drain called it resolved and the
+          // hook released an empty set — green over a possibly-live job.
+          slots[slot] = {
+            kind: "invalid-body",
+            detail: `accepted body id was ${id === undefined ? "absent" : typeof id}`,
+          };
+          return;
+        }
+        if (id.length === 0) {
+          slots[slot] = { kind: "invalid-body", detail: "accepted body id was empty" };
+          return;
+        }
+        slots[slot] = { kind: "id", jobId: id };
+      })
+      .catch((error: unknown) => {
+        // A body that cannot be read is recorded, not thrown: the hook must still be
+        // able to drain and report.
+        slots[slot] = {
+          kind: "unreadable",
+          detail: error instanceof Error ? error.message : String(error),
+        };
+      })
+      .finally(() => {
+        inflight.delete(read);
+      });
+    inflight.set(read, slot);
+  };
+
+  source.on("request", onRequest);
+  source.on("requestfailed", onRequestFailed);
+  source.on("response", handler);
+
+  return {
+    ids: () => {
+      const seen: string[] = [];
+      for (const slot of slots) {
+        if (slot?.kind === "id" && !seen.includes(slot.jobId)) seen.push(slot.jobId);
+      }
+      return seen;
+    },
+    drain: async (): Promise<AcceptedDrainOutcome> => {
+      // 1. Wait, bounded, for a submission POST that is still on the wire. Without
+      //    this a test that times out mid-POST reaches the hook with nothing
+      //    recorded and the response fires after the snapshot.
+      const deadline = Date.now() + pendingSettleMs;
+      while (pendingUnits.length > 0 && Date.now() < deadline) {
+        await sleep(25);
+      }
+      // 2. Then drain the body reads, repeatedly — awaiting one batch can allow
+      //    another response's read to be registered, and the hook must not snapshot
+      //    until the set is quiet. BOUNDED, because awaiting these unconditionally
+      //    would hang the fail-closed hook itself on a read that never settles, which
+      //    is the defect class this whole path exists to close. Its OWN window, not
+      //    the remainder of phase 1's: a slow POST must not starve a healthy body read
+      //    into being counted as unobtainable.
+      const readDeadline = Date.now() + pendingSettleMs;
+      for (let pass = 0; pass < 5; pass += 1) {
+        if (inflight.size === 0) break;
+        const remaining = readDeadline - Date.now();
+        if (remaining <= 0) break;
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          await Promise.race([
+            // The Map is iterated SYNCHRONOUSLY here, and entries remove themselves
+            // only in a later microtask, so passing it directly cannot miss one.
+            Promise.allSettled(inflight.keys()),
+            new Promise<void>((resolve) => {
+              timer = setTimeout(resolve, remaining);
+            }),
+          ]);
+        } finally {
+          if (timer !== undefined) clearTimeout(timer);
+        }
+      }
+      // Resolve every slot to an explicit outcome. A read that never settled becomes
+      // `unfinished` rather than silently vanishing, and a repeat of an id we already
+      // own becomes `duplicate` — because "exactly one unique valid id per acceptance"
+      // is the invariant, so a second slot reporting the same id leaves that ACCEPTANCE
+      // unaccounted for even though the id itself is known.
+      const resolvedSlots: AcceptedSlotOutcome[] = [];
+      const observed: string[] = [];
+      for (const [index, slot] of slots.entries()) {
+        const outcome: AcceptedSlotOutcome = slot ?? { kind: "unfinished" };
+        if (outcome.kind === "id") {
+          if (observed.includes(outcome.jobId)) {
+            resolvedSlots.push({ kind: "duplicate", jobId: outcome.jobId });
+            // A duplicate is unaccounted, so its unit is being REPORTED here — disposal
+            // must not report it a second time.
+            reportedUnits.add(slotUnits[index]);
+            continue;
+          }
+          observed.push(outcome.jobId);
+          resolvedSlots.push(outcome);
+          continue;
+        }
+        resolvedSlots.push(outcome);
+        reportedUnits.add(slotUnits[index]);
+      }
+      // Every submission still on the wire is reported as `pending` right here, so it
+      // too has now transferred out of disposal's reach.
+      for (const unit of pendingUnits) reportedUnits.add(unit);
+      const unaccountedSlots = resolvedSlots.filter((slot) => slot.kind !== "id").length;
+      const pending = pendingUnits.length;
+      // FAIL CLOSED. A pending submission may have created a job we cannot name, and an
+      // unaccounted acceptance definitely names one we failed to capture.
+      return {
+        ids: observed,
+        slots: resolvedSlots,
+        acceptedCount: resolvedSlots.length,
+        unaccountedSlots,
+        pending,
+        resolved: pending === 0 && unaccountedSlots === 0,
+      };
+    },
+    dispose: (): AcceptedDisposal => {
+      if (disposed) return { orphaned: 0 };
+      disposed = true;
+      source.off("request", onRequest);
+      source.off("requestfailed", onRequestFailed);
+      source.off("response", handler);
+      // Anything unfinished at this instant will now land unobserved — but only what the
+      // drain has NOT already declared unresolved. Reporting a unit in both views made
+      // one physical submission demand two recovered identities
+      // (`settleAcceptedOwnership` sums drain and disposal), so ownership transfers
+      // exactly once: by UNIT, deduped, covering both a POST still on the wire and a
+      // body read still in flight.
+      //
+      // A caller that never drained has reported nothing, so it still gets the full
+      // count — skipping the drain cannot buy a clean disposal.
+      const stranded = new Set<number>();
+      for (const unit of pendingUnits) {
+        if (!reportedUnits.has(unit)) stranded.add(unit);
+      }
+      for (const slot of inflight.values()) {
+        const unit = slotUnits[slot];
+        if (!reportedUnits.has(unit)) stranded.add(unit);
+      }
+      return { orphaned: stranded.size };
+    },
+    stats: () => {
+      let unaccounted = 0;
+      const seen: string[] = [];
+      for (const slot of slots) {
+        if (slot?.kind === "id" && !seen.includes(slot.jobId)) {
+          seen.push(slot.jobId);
+          continue;
+        }
+        unaccounted += 1;
+      }
+      return { started, unaccounted, pending: pendingUnits.length };
+    },
+  };
+}
+
+/**
+ * Release EVERY accepted job, deterministically and in the order they were
+ * accepted. A test may observe more than one accepted submission (a resubmit path,
+ * or a retry the product performs); arming only the first and then throwing would
+ * leave the rest orphaned, which is the contamination class this exists to close.
+ * Every job is attempted even if an earlier one fails, so one bad release cannot
+ * hide the others.
+ */
+export async function releaseLiveJobs(
   jobIds: readonly string[],
   http: CleanupHttp,
 ): Promise<CleanupOutcome> {
-  const ids = [...new Set(jobIds)];
-  if (ids.length > 2) {
+  if (jobIds.length === 0) {
     return {
-      ok: false,
-      ids,
-      removedIds: [],
-      steps: [],
-      failures: [`normal cleanup accepts at most two distinct known ids, got ${ids.length}`],
+      ok: true,
+      steps: ["no accepted job was armed; nothing to release"],
+      failures: [],
+      absent: [],
     };
   }
-  const settled = await Promise.allSettled(ids.map((id) => cleanupKnownJob(id, http)));
-  const removedIds: string[] = [];
   const steps: string[] = [];
   const failures: string[] = [];
-  for (const [index, result] of settled.entries()) {
-    const id = ids[index];
-    if (result.status === "rejected") {
-      failures.push(`job ${id} cleanup rejected: ${String(result.reason)}`);
-      continue;
+  const absent: string[] = [];
+  for (const jobId of jobIds) {
+    const outcome = await releaseLiveJob(jobId, http);
+    steps.push(`job ${jobId}: ${outcome.steps.join(" | ")}`);
+    for (const failure of outcome.failures) failures.push(`job ${jobId}: ${failure}`);
+    // A job the backend never had cannot be evidence that anything was cleaned up.
+    if (outcome.steps.some((step) => step.includes("already absent") || step.includes("404"))) {
+      absent.push(jobId);
     }
-    steps.push(...result.value.steps.map((step) => `job ${id}: ${step}`));
-    failures.push(...result.value.failures.map((failure) => `job ${id}: ${failure}`));
-    removedIds.push(...result.value.removedIds);
   }
-  return { ok: failures.length === 0, ids, removedIds, steps, failures };
+  return { ok: failures.length === 0, steps, failures, absent };
+}
+
+/**
+ * Confirm, AFTER release, that every id counted as coverage actually existed.
+ *
+ * Closes the release-404 laundering path: a stale or invented id satisfies the
+ * cardinality check (it is new and distinct) and then releases "successfully" via the
+ * documented idempotent 404 branch — so an unaccounted acceptance would look covered by
+ * a job that was never there. Coverage only counts if the backend actually had it.
+ *
+ * Tracker-observed ids are deliberately exempt: on the success path the product's own
+ * terminal auto-chain DELETEs the job, so the hook legitimately finds it already gone.
+ * Only ids standing in for something we could not name have to prove they existed.
+ */
+export function auditCoverageAfterRelease(
+  settlement: OwnershipSettlement,
+  released: CleanupOutcome,
+): { ok: boolean; failures: string[] } {
+  const failures: string[] = [];
+  for (const jobId of settlement.coverage) {
+    if ((released.absent ?? []).includes(jobId)) {
+      failures.push(
+        `recovered job ${jobId} was counted as coverage but the backend never had it; ` +
+          `the acceptance it was meant to account for is still unnamed`,
+      );
+    }
+  }
+  return { ok: failures.length === 0, failures };
+}
+
+// ===========================================================================
+// Ownership recovery + the fail-closed settlement decision
+// ===========================================================================
+//
+// When the Node-side tracker cannot name a job (submission still pending at the
+// settle bound, or an accepted 202 whose body would not read), the id is not gone —
+// it is written elsewhere. The product's submission transaction persists the
+// ACTIVE session record, job id included, as part of accepting the 202
+// (`lib/optimize/session-transaction.ts`, key `nurse.optimize.session`). That record
+// is an INDEPENDENT authority: it is produced by the page, not by the CDP response
+// stream, so it survives exactly the failures that defeat the tracker.
+//
+// So the hook's order is: drain → if unresolved, recover from the page record →
+// settle → dispose → release every id. And if settlement still cannot account for
+// the ownership, the hook FAILS — it does not report cleanup success.
+
+/**
+ * sessionStorage key of the product's single in-flight submission record — the
+ * product's own constant, re-exported rather than restated, so the harness cannot read
+ * a key the product stopped writing.
+ */
+export const OPTIMIZE_SESSION_RECORD_KEY = OPTIMIZE_SESSION_STORAGE_KEY;
+
+/** The product's session schema version, likewise its own constant. */
+export const OPTIMIZE_SESSION_SCHEMA_VERSION = PRODUCT_SESSION_SCHEMA_VERSION;
+
+/** Bound for the page-side recovery read. One `evaluate`, so it is small. */
+export const OWNERSHIP_RECOVERY_BOUND = 5_000;
+
+/**
+ * A read-only storage view over ONE raw record, so the product's own inspector can be
+ * asked about it. Writing is a programming error here, not a fallback: recovery reads
+ * the page's record and must never mutate it.
+ */
+function frozenSessionStorage(raw: string | null): SessionTransactionStorage {
+  const refuse = (): never => {
+    throw new Error("ownership recovery must not mutate the page's session record");
+  };
+  return { getItem: () => raw, setItem: refuse, removeItem: refuse };
+}
+
+/**
+ * Best-effort description of WHY the product codec rejected a record. Diagnostics only:
+ * it never decides anything, so it cannot become a second, weaker schema. Anything it
+ * cannot name specifically is reported as a codec rejection.
+ */
+function describeRejectedSessionRecord(raw: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return "session record is not JSON";
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return "session record is not an object";
+  }
+  const record = parsed as Record<string, unknown>;
+  if (record.schemaVersion !== OPTIMIZE_SESSION_SCHEMA_VERSION) {
+    return `session record schemaVersion ${String(record.schemaVersion)} is not ${OPTIMIZE_SESSION_SCHEMA_VERSION}`;
+  }
+  if (typeof record.ownerId !== "string" || record.ownerId.length === 0) {
+    return "session record has no owner id";
+  }
+  if (record.phase === "provisional") {
+    return "jobId" in record
+      ? "provisional session record carries a jobId; not valid"
+      : "provisional session record was rejected by the product session codec";
+  }
+  if (record.phase !== "active") {
+    return `session record phase ${String(record.phase)} is not active`;
+  }
+  if (typeof record.jobId !== "string" || record.jobId.length === 0) {
+    return "active session record has no valid jobId";
+  }
+  return "session record was rejected by the product session codec";
+}
+
+/**
+ * Extract the job id from a raw session record, treating anything unexpected as a
+ * REASON rather than as an absence.
+ *
+ * THE PRODUCT'S CODEC DECIDES, not a copy of it. This helper used to re-implement a
+ * REDUCED version of the schema — version, owner id, phase, job id — and called itself
+ * parity with `lib/optimize/session-transaction.ts`. It was not: that codec also
+ * requires `anonymized`, `runOptions` (closed, within the settled timeout bounds),
+ * `peopleCount`, a `reverseMap` whose cardinality matches the anonymization flag, an
+ * EXACT key set per variant, and a within-cap `lastCursor` when one is present. So
+ * `{"schemaVersion":1,"ownerId":"owner-1","phase":"active","jobId":"job-foreign"}` — a
+ * value the product would refuse to reload — was accepted as authority for a live job,
+ * and a stale or foreign id could then satisfy cardinality and launder an unnamed
+ * acceptance through the idempotent-404 release path.
+ *
+ * `inspectPersistedSession` IS the product's reload authority, so what counts as "a
+ * record that names a live job" is now exactly what the product itself would resume:
+ *
+ *   resumable   -> an ACTIVE record; its job id is the recovered identity
+ *   interrupted -> a valid PROVISIONAL record: no job id ever existed to recover, so
+ *                  `jobId: null`, and the volatile authority in
+ *                  `recoverAcceptedOwnership` is what covers the real
+ *                  `activation-persistence-failed` path
+ *   unreadable  -> corrupt / stale / foreign / incomplete: a REASON, never an absence
+ *
+ * ONE deliberate inheritance: an otherwise-valid active record whose ONLY defect is an
+ * oversized saved cursor is `resumable` with the cursor stripped, so its job id is
+ * recovered here too. That is not leniency — the product resumes exactly that record,
+ * the identity and anonymization map are fully valid, and the id names a job that must
+ * be released. Holding a stricter line here would be maintaining the second authority
+ * this change exists to remove.
+ */
+export function recoverJobIdFromSessionRecord(
+  raw: string | null,
+): { ok: true; jobId: string | null } | { ok: false; reason: string } {
+  if (raw === null) return { ok: true, jobId: null };
+  const inspected = inspectPersistedSession(frozenSessionStorage(raw));
+  switch (inspected.kind) {
+    case "resumable":
+      return { ok: true, jobId: inspected.record.jobId };
+    // `none` is unreachable with a non-null raw value, but it is an absence either way.
+    case "none":
+    case "interrupted":
+      return { ok: true, jobId: null };
+    case "unreadable":
+      return { ok: false, reason: describeRejectedSessionRecord(raw) };
+  }
 }
 
 // ---------------------------------------------------------------------------
-// Compact effective-request and replay judgment
+// The volatile (DOM) authority's selector contract
 // ---------------------------------------------------------------------------
+//
+// The volatile read used to scan every `<p>` for the PROSE `Job ID: <id>`. That
+// coupled a fail-closed ownership gate to user-visible copy: a wording change, a
+// translation, or a wrapper element would make recovery silently find nothing, and
+// the acceptance it was meant to cover would be reported unnamed. Worse, the regex
+// was `^Job ID:\s*(\S+)$` over `textContent`, so it could equally match any other
+// paragraph that happened to start that way.
+//
+// So the product now renders a stable, narrow hook on the job-id VALUE
+// (`components/optimize/run-status-panel.tsx`), and everything below judges what
+// that hook yields. The pair is pinned by a DOM test in
+// `components/optimize/run-status-panel.test.tsx`, which imports the constant from
+// here — so the selector and the markup cannot drift apart silently.
 
+/** The `data-testid` on the rendered live job-id VALUE. */
+export const VOLATILE_JOB_ID_TESTID = "optimize-job-id";
+
+/** The exact query the page-side read runs. */
+export const VOLATILE_JOB_ID_SELECTOR = `[data-testid="${VOLATILE_JOB_ID_TESTID}"]`;
+
+/** Job-id texts the page yielded, or a REASON the page's answer is unusable. */
+export type VolatileJobIdsVerdict = { ok: true; ids: string[] } | { ok: false; reason: string };
+
+/**
+ * Judge the raw texts the volatile selector matched.
+ *
+ * Total and fail-closed, because this is an ownership authority: an answer this
+ * cannot vouch for becomes a REASON, which `recoverAcceptedOwnership` turns into a
+ * failed recovery and `settleAcceptedOwnership` turns into a red gate. The one
+ * benign outcome is ABSENCE — no node at all means the page holds no live job id,
+ * which is reported as an empty set and then fails closed at the CARDINALITY check
+ * if an acceptance actually needed covering. Nothing here may invent an id.
+ *
+ * Rejected, each for its own reason:
+ *
+ *   * MULTIPLE nodes — the panel renders at most one in-flight submission, so two
+ *     hooks mean a stale panel or a duplicated mount and neither can be shown to
+ *     name the live job. Picking one would be a guess.
+ *   * a node with NO text, or text that is empty/whitespace once trimmed.
+ *   * text containing INNER whitespace — which is exactly what a hook moved from the
+ *     value onto the whole line would produce (`Job ID: opt_1`), so a regression of
+ *     that shape is named rather than silently parsed back out.
+ *
+ * STALENESS is deliberately NOT judged here: a DOM string carries no evidence of
+ * whether the backend still has that job. It is caught downstream instead — a
+ * recovered id counted as coverage that the backend never had 404s on release and
+ * `auditCoverageAfterRelease` fails the gate.
+ */
+export function judgeVolatileJobIdTexts(
+  texts: readonly (string | null | undefined)[],
+): VolatileJobIdsVerdict {
+  if (!Array.isArray(texts)) {
+    return { ok: false, reason: "page did not report a list of volatile job-id nodes" };
+  }
+  if (texts.length === 0) return { ok: true, ids: [] };
+  if (texts.length > 1) {
+    return {
+      ok: false,
+      reason:
+        `page rendered ${texts.length} "${VOLATILE_JOB_ID_TESTID}" nodes ` +
+        `(${texts.map((text) => JSON.stringify(text)).join(", ")}); ` +
+        `the live job authority is ambiguous`,
+    };
+  }
+  const raw = texts[0];
+  if (typeof raw !== "string") {
+    return {
+      ok: false,
+      reason: `"${VOLATILE_JOB_ID_TESTID}" node carried no text (${String(raw)})`,
+    };
+  }
+  const jobId = raw.trim();
+  if (jobId.length === 0) {
+    return { ok: false, reason: `"${VOLATILE_JOB_ID_TESTID}" node text was empty` };
+  }
+  if (/\s/.test(jobId)) {
+    return {
+      ok: false,
+      reason:
+        `"${VOLATILE_JOB_ID_TESTID}" node text ${JSON.stringify(raw)} is not a bare job id; ` +
+        `the hook must sit on the id VALUE, not on the whole line`,
+    };
+  }
+  return { ok: true, ids: [jobId] };
+}
+
+/** The page-side seams, so settlement is testable without a browser. */
+export interface OwnershipRecoverySource {
+  /** Read the raw durable session record from the page. Rejects if the page is gone. */
+  readSessionRecord(): Promise<string | null>;
+  /**
+   * Read every job id the page currently holds in VOLATILE state.
+   *
+   * Required because the durable record is not always sufficient. `activateSession`
+   * can return `activation-persistence-failed`: the 202 WAS accepted, a real job IS
+   * running, and the durable record deliberately stays PROVISIONAL — the accepted id
+   * exists only in volatile controller state. Recovering from the durable record alone
+   * would report "no job id" over a live solver, which is the exact fail-open shape
+   * this whole path exists to prevent.
+   */
+  readVolatileJobIds(): Promise<string[]>;
+}
+
+/** The outcome of a recovery attempt — total, like every other judge here. */
+export type OwnershipRecovery =
+  | { ok: true; ids: string[]; note: string }
+  | { ok: false; reason: string };
+
+/** Attempt page-side recovery. A rejection is a reason, never a throw. */
+export async function recoverAcceptedOwnership(
+  source: OwnershipRecoverySource,
+): Promise<OwnershipRecovery> {
+  let raw: string | null;
+  try {
+    raw = await source.readSessionRecord();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { ok: false, reason: `page-side session record was unreadable: ${message}` };
+  }
+  const parsed = recoverJobIdFromSessionRecord(raw);
+  if (!parsed.ok) return { ok: false, reason: parsed.reason };
+
+  const notes: string[] = [];
+  const ids: string[] = [];
+  if (parsed.jobId === null) {
+    notes.push("durable record holds no active job id");
+  } else {
+    ids.push(parsed.jobId);
+    notes.push(`durable active record names job ${parsed.jobId}`);
+  }
+
+  // AUTHORITY 2 — volatile controller state, the ONLY place an accepted id lives when
+  // activation persistence failed after a real 202.
+  let volatileIds: string[];
+  try {
+    volatileIds = await source.readVolatileJobIds();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { ok: false, reason: `page-side volatile job ids were unreadable: ${message}` };
+  }
+  for (const id of volatileIds) {
+    if (typeof id !== "string" || id.length === 0) {
+      return { ok: false, reason: "page reported an invalid volatile job id" };
+    }
+    if (!ids.includes(id)) ids.push(id);
+  }
+  notes.push(
+    volatileIds.length === 0
+      ? "page holds no volatile accepted job id"
+      : `volatile state names ${volatileIds.length} job id(s): ${volatileIds.join(", ")}`,
+  );
+
+  return { ok: true, ids, note: notes.join("; ") };
+}
+
+/** The settled ownership set plus whether it may be trusted as complete. */
+export interface OwnershipSettlement {
+  /** Every id to release, tracker-observed first, then recovered, deduplicated. */
+  ids: string[];
+  /**
+   * The RECOVERED ids being counted as coverage for unaccounted acceptances. These
+   * must still be confirmed to have existed — see `auditCoverageAfterRelease`. A stale
+   * id that 404s covers nothing, and counting it would launder the missing job.
+   */
+  coverage: string[];
+  /** True only when nothing is left unaccounted for. */
+  ok: boolean;
+  /** Human-readable trail for the attachment. */
+  notes: string[];
+  /** Why ownership is not settled. Empty exactly when `ok`. */
+  failures: string[];
+}
+
+/**
+ * Decide, purely, whether accepted-job ownership is fully accounted for.
+ *
+ * This is the whole fail-closed rule in one testable function:
+ *
+ *   drain resolved                  -> settled, release the drained ids
+ *   drain unresolved, recovery adds  -> settled, release drained + recovered
+ *   drain unresolved, recovery empty -> NOT settled; a job may exist unnamed
+ *   drain unresolved, recovery error  -> NOT settled
+ *   disposal orphaned anything        -> NOT settled, regardless of the above
+ *
+ * The one deliberate asymmetry: a submission whose transport FAILED already
+ * decrements `pending` in the tracker, so a genuinely aborted POST does not reach
+ * here as unresolved. Only a submission that is still open at the bound does.
+ */
+export function settleAcceptedOwnership(
+  drained: AcceptedDrainOutcome,
+  recovery: OwnershipRecovery | null,
+  disposal: AcceptedDisposal,
+): OwnershipSettlement {
+  const ids = [...drained.ids];
+  const notes: string[] = [];
+  const failures: string[] = [];
+
+  notes.push(
+    `drain: ${drained.acceptedCount} acceptance(s), ${drained.ids.length} known id(s), ` +
+      `${drained.unaccountedSlots} unaccounted, ${drained.pending} pending, ` +
+      `${disposal.orphaned} stranded by disposal`,
+  );
+
+  // CARDINALITY, not mere non-emptiness. Checking only "recovery returned something"
+  // let ONE id — possibly a duplicate of one already owned, or a stale id — stand in for
+  // ANY number of missing jobs. Coverage must be one-to-one: every unaccounted
+  // acceptance needs its own distinct, NEW identity from an authoritative source.
+  const unresolvedCount = drained.unaccountedSlots + drained.pending + disposal.orphaned;
+  const coverage: string[] = [];
+  if (unresolvedCount > 0) {
+    const unresolved: string[] = [];
+    if (drained.unaccountedSlots > 0) {
+      unresolved.push(`${drained.unaccountedSlots} acceptance(s) unaccounted for`);
+    }
+    if (drained.pending > 0) unresolved.push(`${drained.pending} submission(s) still pending`);
+    if (disposal.orphaned > 0) unresolved.push(`${disposal.orphaned} stranded by disposal`);
+    const summary = unresolved.join(" and ");
+    if (recovery === null) {
+      failures.push(`accepted ownership unresolved (${summary}) and no recovery was attempted`);
+    } else if (!recovery.ok) {
+      failures.push(
+        `accepted ownership unresolved (${summary}); recovery failed: ${recovery.reason}`,
+      );
+    } else {
+      notes.push(`recovery: ${recovery.note}`);
+      // NEW and DISTINCT. An id we already own launders nothing, and a repeated id
+      // cannot cover two different missing jobs.
+      const recovered: string[] = [];
+      for (const id of recovery.ids) {
+        if (ids.includes(id) || recovered.includes(id)) continue;
+        recovered.push(id);
+      }
+      ids.push(...recovered);
+      coverage.push(...recovered);
+      notes.push(
+        `coverage: ${recovered.length} new distinct id(s) for ${unresolvedCount} unresolved acceptance(s)`,
+      );
+      if (recovered.length < unresolvedCount) {
+        failures.push(
+          `accepted ownership unresolved (${summary}): authority produced ${recovered.length} new distinct job id(s) for ${unresolvedCount} unresolved acceptance(s); a solver job may exist unnamed`,
+        );
+      }
+    }
+  }
+
+  return { ids, coverage, ok: failures.length === 0, notes, failures };
+}
+
+/** Wire version prefix of the public event cursor (`CURSOR_VERSION`). */
 export const CURSOR_VERSION = "v1";
+
+/** Unpadded base64url: URL-safe alphabet only, no `=` padding, non-empty. */
 const CURSOR_SEGMENT_PATTERN = /^[A-Za-z0-9_-]+$/;
 
+/** One decoded public cursor. */
 export interface DecodedCursor {
   jobId: string;
   nativeEventId: string;
 }
 
+/**
+ * Decode one canonical segment, or return `null` when it is not a canonical
+ * unpadded base64url UTF-8 spelling. Mirrors `event_cursor.py::_decode_segment`,
+ * including the byte-for-byte re-encode that rejects non-canonical aliases.
+ */
 function decodeCursorSegment(segment: string): string | null {
   if (!CURSOR_SEGMENT_PATTERN.test(segment)) return null;
   const decoded = Buffer.from(segment, "base64url").toString("utf8");
-  return Buffer.from(decoded, "utf8").toString("base64url") === segment ? decoded : null;
+  // `Buffer` is lenient about both base64 aliases and invalid UTF-8 (it
+  // substitutes U+FFFD rather than throwing), so the round trip carries the
+  // whole rejection: a non-canonical spelling or a bad byte sequence re-encodes
+  // to something other than `segment`.
+  if (Buffer.from(decoded, "utf8").toString("base64url") !== segment) return null;
+  return decoded;
 }
 
+/**
+ * Decode a public cursor, or return `null` when it is malformed. Shape and
+ * version are checked exactly as `event_cursor.py::decode_cursor` does; the job
+ * binding itself is compared by the caller.
+ */
 export function decodePublicCursor(token: string): DecodedCursor | null {
   const parts = token.split(".");
   if (parts.length !== 3 || parts[0] !== CURSOR_VERSION) return null;
   const jobId = decodeCursorSegment(parts[1]);
   const nativeEventId = decodeCursorSegment(parts[2]);
-  return jobId === null || nativeEventId === null ? null : { jobId, nativeEventId };
-}
-
-export interface ResumedRequest {
-  url: string;
-  lastEventId: string | null;
+  if (jobId === null || nativeEventId === null) return null;
+  return { jobId, nativeEventId };
 }
 
 export interface ReplayEvidence {
-  acceptedJobId: string | null;
-  expectedOrigin: string | null;
-  cursorBefore: string | null;
-  preReloadIds: readonly string[];
-  preReloadRequests: readonly ResumedRequest[];
-  firstResumedRequest: ResumedRequest | null;
-  postReloadRequests: readonly ResumedRequest[];
-  replayIds: readonly string[];
+  /**
+   * THE SOLE JOB AUTHORITY, and it must not come from a cursor.
+   *
+   * Deriving the expected job by decoding `cursorBefore` was circular: a foreign
+   * cursor named its own expected job, and foreign raw ids plus a foreign
+   * `cursorAfter` then agreed with it, so a fully self-consistent foreign envelope
+   * passed. The caller supplies the job the PRE-RELOAD session was actually
+   * running, captured independently of any cursor in the same causal snapshot, and
+   * `cursorBefore` is now something this judge CHECKS rather than something it
+   * trusts.
+   */
+  expectedJobId: string | null;
+  /** Raw `id:` values recorded from the post-reload SSE body, in wire order. */
+  rawIds: readonly string[];
+  /** The durably persisted cursor read in the SAME atomic snapshot as `rawIds`. */
   cursorAfter: string | null;
+  /** The exact cursor captured before reload and replayed as `Last-Event-ID`. */
+  cursorBefore: string | null;
+  /** Every raw id observed BEFORE the reload. */
+  preReloadIds: readonly string[];
 }
 
 export interface ReplayJudgement {
   ok: boolean;
+  /** Every violated rule, named. Empty exactly when `ok`. */
   failures: string[];
 }
 
-function judgeRequestSet(
-  label: string,
-  requests: readonly ResumedRequest[],
-  acceptedJobId: string,
-  expectedOrigin: string,
-): string[] {
-  const failures: string[] = [];
-  if (requests.length === 0) return [`no ${label} events request was observed`];
-  let origin: string;
-  try {
-    origin = new URL(expectedOrigin).origin;
-  } catch {
-    return [`captured page origin was invalid: ${expectedOrigin}`];
-  }
-  if (origin !== expectedOrigin)
-    failures.push(`captured page origin was not canonical: ${expectedOrigin}`);
-  const expectedPath = `/api/optimize/${encodeURIComponent(acceptedJobId)}/events`;
-  for (const [index, request] of requests.entries()) {
-    let url: URL;
-    try {
-      url = new URL(request.url, origin);
-    } catch {
-      failures.push(`${label} request ${index + 1} URL was unparseable: ${request.url}`);
-      continue;
-    }
-    if (url.origin !== origin)
-      failures.push(`${label} request ${index + 1} origin ${url.origin} was not ${origin}`);
-    if (url.pathname !== expectedPath)
-      failures.push(`${label} request ${index + 1} path ${url.pathname} was not ${expectedPath}`);
-    if (url.search !== "")
-      failures.push(`${label} request ${index + 1} carried query ${url.search}`);
-    if (url.hash !== "")
-      failures.push(`${label} request ${index + 1} carried fragment ${url.hash}`);
-  }
-  return failures;
-}
-
+/**
+ * Judge one atomic post-reload snapshot against the strictly-after replay
+ * contract.
+ *
+ * Retained: non-empty evidence, no pre-reload id re-sent, raw-id UNIQUENESS, and
+ * the durable cursor both new and present among the recorded frames.
+ *
+ * The job authority is now `evidence.expectedJobId` — supplied by the caller from
+ * the pre-reload session, never decoded out of a cursor. Everything cursor-shaped
+ * is bound TO it: `cursorBefore`, every raw id, and `cursorAfter`. Because the
+ * spec separately asserts that the first post-reload `Last-Event-ID` equals
+ * `cursorBefore`, binding `cursorBefore` here transitively binds the resumed
+ * request too.
+ *
+ * On the `cursorAfter` job-binding rule: it is a DIAGNOSTIC REFINEMENT, not an
+ * independently protected gate, and this file does not claim otherwise. Because
+ * `cursorAfter` must also appear among `rawIds` and every raw id is bound, an `ok`
+ * result already entails the cursor is bound — so removing this rule cannot flip
+ * any judgement from red to green. It is kept because it names the CURSOR in the
+ * failure list instead of leaving a reader to infer which id was foreign, and the
+ * unit suite asserts that exact cursor-specific message alongside the per-id one.
+ */
 export function judgeReplayEvidence(evidence: ReplayEvidence): ReplayJudgement {
   const failures: string[] = [];
-  const {
-    acceptedJobId,
-    expectedOrigin,
-    cursorBefore,
-    preReloadIds,
-    preReloadRequests,
-    firstResumedRequest,
-    postReloadRequests,
-    replayIds,
-    cursorAfter,
-  } = evidence;
-  if (!acceptedJobId)
-    return { ok: false, failures: ["no accepted POST job authority was captured"] };
-  if (!expectedOrigin) return { ok: false, failures: ["no page origin was captured"] };
+  const { expectedJobId, rawIds, cursorAfter, cursorBefore, preReloadIds } = evidence;
 
-  failures.push(...judgeRequestSet("pre-reload", preReloadRequests, acceptedJobId, expectedOrigin));
-  failures.push(
-    ...judgeRequestSet("post-reload", postReloadRequests, acceptedJobId, expectedOrigin),
-  );
-
-  if (!cursorBefore) failures.push("no pre-reload cursor was captured");
-  else {
-    const decoded = decodePublicCursor(cursorBefore);
-    if (!decoded) failures.push(`pre-reload cursor was malformed: ${cursorBefore}`);
-    else if (decoded.jobId !== acceptedJobId)
-      failures.push(`pre-reload cursor targeted ${decoded.jobId}, not ${acceptedJobId}`);
+  // Fail closed: with no independent authority there is nothing to bind against,
+  // and falling back to a cursor is exactly the circularity this replaced.
+  if (expectedJobId === null || expectedJobId.length === 0) {
+    return { ok: false, failures: ["no independent pre-reload job authority was captured"] };
   }
-  if (preReloadIds.length === 0) failures.push("no pre-reload frame ids were recorded");
-  if (cursorBefore && !preReloadIds.includes(cursorBefore))
-    failures.push("pre-reload cursor was absent from pre-reload ids");
+  const expectedJob = expectedJobId;
 
-  if (!firstResumedRequest) failures.push("no first resumed request was captured");
-  else {
-    if (firstResumedRequest.lastEventId !== cursorBefore) {
-      failures.push("first resumed Last-Event-ID did not equal the pre-reload cursor");
-    }
-    const firstRecorded = postReloadRequests[0];
-    if (
-      !firstRecorded ||
-      firstRecorded.url !== firstResumedRequest.url ||
-      firstRecorded.lastEventId !== firstResumedRequest.lastEventId
-    ) {
-      failures.push("first resumed request was not the same-index first post-reload request");
+  if (cursorBefore === null || cursorBefore.length === 0) {
+    failures.push("no pre-reload cursor was captured");
+  } else {
+    const before = decodePublicCursor(cursorBefore);
+    if (before === null) {
+      failures.push(`pre-reload cursor is not a canonical public cursor: ${cursorBefore}`);
+    } else if (before.jobId !== expectedJob) {
+      failures.push(
+        `pre-reload cursor is bound to job "${before.jobId}", not the active "${expectedJob}"`,
+      );
     }
   }
 
-  if (replayIds.length === 0) failures.push("no post-reload frame ids were recorded");
-  const duplicates = replayIds.filter((id, index) => replayIds.indexOf(id) !== index);
-  if (duplicates.length > 0)
-    failures.push(`post-reload frame ids were duplicated: ${[...new Set(duplicates)].join(", ")}`);
-  const stale = replayIds.filter((id) => preReloadIds.includes(id));
-  if (stale.length > 0) failures.push(`replay re-sent pre-reload id(s): ${stale.join(", ")}`);
-  for (const id of replayIds) {
+  if (rawIds.length === 0) failures.push("no post-reload frame ids were recorded");
+
+  const preReloadSet = new Set(preReloadIds);
+  const stale = rawIds.filter((id) => preReloadSet.has(id));
+  if (stale.length > 0) {
+    failures.push(`replay re-sent ${stale.length} already-seen id(s): ${stale.join(", ")}`);
+  }
+
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+  for (const id of rawIds) {
+    if (seen.has(id)) duplicates.add(id);
+    seen.add(id);
+  }
+  if (duplicates.size > 0) {
+    failures.push(`post-reload frame ids are not unique: ${[...duplicates].join(", ")}`);
+  }
+
+  for (const id of rawIds) {
     const decoded = decodePublicCursor(id);
-    if (!decoded) failures.push(`replay id was malformed: ${id}`);
-    else if (decoded.jobId !== acceptedJobId)
-      failures.push(`replay id targeted ${decoded.jobId}, not ${acceptedJobId}: ${id}`);
+    if (decoded === null) {
+      failures.push(`recorded id is not a canonical public cursor: ${id}`);
+      continue;
+    }
+    if (decoded.jobId !== expectedJob) {
+      failures.push(
+        `recorded id is bound to job "${decoded.jobId}", not the active "${expectedJob}": ${id}`,
+      );
+    }
   }
 
-  if (!cursorAfter) failures.push("no post-reload cursor was persisted");
-  else {
-    const decoded = decodePublicCursor(cursorAfter);
-    if (!decoded) failures.push(`post-reload cursor was malformed: ${cursorAfter}`);
-    else if (decoded.jobId !== acceptedJobId)
-      failures.push(`post-reload cursor targeted ${decoded.jobId}, not ${acceptedJobId}`);
-    if (!replayIds.includes(cursorAfter))
-      failures.push("post-reload cursor was absent from replay ids");
+  if (cursorAfter === null) {
+    failures.push("no durable cursor was persisted after reload");
+  } else {
+    if (preReloadSet.has(cursorAfter)) {
+      failures.push(`durable cursor is an already-seen id: ${cursorAfter}`);
+    }
+    const after = decodePublicCursor(cursorAfter);
+    if (after === null) {
+      failures.push(`durable cursor is not a canonical public cursor: ${cursorAfter}`);
+    } else if (after.jobId !== expectedJob) {
+      failures.push(
+        `durable cursor is bound to job "${after.jobId}", not the active "${expectedJob}"`,
+      );
+    }
+    if (!rawIds.includes(cursorAfter)) {
+      failures.push(`durable cursor ${cursorAfter} is absent from the recorded frames`);
+    }
   }
+
   return { ok: failures.length === 0, failures };
 }
-
-// ---------------------------------------------------------------------------
-// Persisted-session facts, read through the product's own inspector
-// ---------------------------------------------------------------------------
-
-export interface ActiveSessionFacts {
-  jobId: string | null;
-  cursor: string | null;
-}
-
-/**
- * Interpret raw persisted-session bytes through the PRODUCT authority
- * (`inspectPersistedSession`) rather than a second schema parser. The browser task
- * captures bytes only; every judgement about phase, job id and cursor is made here
- * against the real versioned, closed contract, so replay evidence cannot drift from
- * a permissive local subset.
- *
- * Only a `resumable` (active) record yields facts. Absent, interrupted (provisional),
- * unreadable and version-mismatched records all read as null/null. An otherwise-valid
- * active record whose ONLY defect is an oversized cursor comes back from the product
- * inspector with that cursor stripped, so this reports its job id with a null cursor
- * rather than resuming from a cursor the product itself refuses.
- *
- * The adapter is deliberately read-only and key-checked: it answers only for the exact
- * product storage key the browser read, and any write attempt is a hard error rather
- * than a silent no-op, so a future inspector that mutated storage could not slip past.
- */
-export function activeSessionFacts(raw: string | null): ActiveSessionFacts {
-  const inspected = inspectPersistedSession({
-    getItem: (key: string) => (key === OPTIMIZE_SESSION_STORAGE_KEY ? raw : null),
-    setItem: () => {
-      throw new Error("read-only session adapter: setItem must not be called");
-    },
-    removeItem: () => {
-      throw new Error("read-only session adapter: removeItem must not be called");
-    },
-  });
-  if (inspected.kind !== "resumable") return { jobId: null, cursor: null };
-  return { jobId: inspected.record.jobId, cursor: inspected.record.lastCursor ?? null };
-}
-
-// ---------------------------------------------------------------------------
-// Durable fixture data and route helpers (shared by deterministic R6 suites)
-// ---------------------------------------------------------------------------
 
 export const DURABLE_FIXTURE_URL = "/optimize-durable-fixture";
 export const JOB_ID = "opt_e2e_1";
@@ -783,6 +1754,7 @@ const REQUEST: JobResponse["request"] = {
   timeout_seconds: 300,
 };
 
+/** A contract-valid queued JobResponse. */
 export function queuedJob(id = JOB_ID, queuePosition = 1): JobResponse {
   return {
     id,
@@ -800,6 +1772,7 @@ export function queuedJob(id = JOB_ID, queuePosition = 1): JobResponse {
   };
 }
 
+/** A contract-valid running JobResponse (server controls both available). */
 export function runningJob(id = JOB_ID): JobResponse {
   return {
     id,
@@ -817,6 +1790,7 @@ export function runningJob(id = JOB_ID): JobResponse {
   };
 }
 
+/** A contract-valid cancelling JobResponse (no controls). */
 export function cancellingJob(id = JOB_ID): JobResponse {
   return {
     ...runningJob(id),
@@ -830,6 +1804,8 @@ interface CompletedOptions {
   score?: number | null;
 }
 
+/** A contract-valid completed JobResponse. Optimal/feasible expose a schedule
+ *  link; infeasible carries no artifact. */
 export function completedJob(id = JOB_ID, options: CompletedOptions = {}): JobResponse {
   const outcome = options.outcome ?? "optimal";
   const infeasible = outcome === "infeasible";
@@ -862,6 +1838,7 @@ export function completedJob(id = JOB_ID, options: CompletedOptions = {}): JobRe
   };
 }
 
+/** A contract-valid cancelled JobResponse. */
 export function cancelledJob(id = JOB_ID): JobResponse {
   return {
     id,
@@ -873,16 +1850,17 @@ export function cancelledJob(id = JOB_ID): JobResponse {
     finished_at: FINISHED_AT,
     request: REQUEST,
     result: null,
-    error: { code: "cancelled", message: "Optimisation cancelled." },
+    error: { code: "cancelled", message: "Optimization cancelled." },
     controls: { cancellable: false, early_completion_available: false },
     links: links(id, null),
   };
 }
 
+/** A contract-valid failed JobResponse. `worker_lost` is server-resubmittable. */
 export function failedJob(
   id = JOB_ID,
   code = "worker_lost",
-  message = "The optimisation worker stopped before the job completed.",
+  message = "The optimization worker stopped before the job completed.",
 ): JobResponse {
   return {
     id,
@@ -900,19 +1878,20 @@ export function failedJob(
   };
 }
 
+// --- SSE frames (flat wire payloads, contract-valid) -----------------------
+
 export interface SseFrameInput {
   id: string;
   event: string;
   data: Record<string, unknown>;
 }
 
+/** Serialize frames into one `text/event-stream` body (LF blank-line framing,
+ *  matching the backend producer). */
 export function sseBody(frames: SseFrameInput[]): string {
   return (
     frames
-      .map(
-        (frame) =>
-          `id: ${frame.id}\nevent: ${frame.event}\ndata: ${JSON.stringify(frame.data)}\n\n`,
-      )
+      .map((f) => `id: ${f.id}\nevent: ${f.event}\ndata: ${JSON.stringify(f.data)}\n\n`)
       .join("") + ": keep-alive\n\n"
   );
 }
@@ -948,11 +1927,14 @@ export function progressedFrame(id: string, score: number, elapsedSeconds: numbe
   };
 }
 
+/** A `job.phase_changed` frame (ephemeral solver phase report). Shapes match
+ *  `frameToSignal`: valid `occurred_at`, non-empty source/code/message, and a
+ *  finite elapsedSeconds. */
 export function phaseChangedFrame(
   id: string,
   source = "solver",
   code = "solve",
-  message = "Optimising schedule",
+  message = "Optimizing schedule",
   elapsedSeconds = 0.5,
 ): SseFrameInput {
   return {
@@ -990,6 +1972,8 @@ export function resultAvailableFrame(
   };
 }
 
+/** A strict terminal `job.state_changed` frame for a completed/cancelled/failed
+ *  job. Shapes match `parseStrictTerminalFrame`. */
 export function terminalFrame(id: string, state: JobState): SseFrameInput {
   const base = {
     occurred_at: FINISHED_AT,
@@ -1004,8 +1988,8 @@ export function terminalFrame(id: string, state: JobState): SseFrameInput {
   const code = state === "cancelled" ? "cancelled" : "worker_lost";
   const message =
     state === "cancelled"
-      ? "Optimisation cancelled."
-      : "The optimisation worker stopped before the job completed.";
+      ? "Optimization cancelled."
+      : "The optimization worker stopped before the job completed.";
   return {
     id,
     event: "job.state_changed",
@@ -1013,22 +1997,38 @@ export function terminalFrame(id: string, state: JobState): SseFrameInput {
   };
 }
 
+// --- route stubbing --------------------------------------------------------
+
+/** A minimal valid `.xlsx` (empty ZIP with the local-file `PK\x03\x04` magic is
+ *  enough for the download to succeed; restore is a no-op with an empty map). */
 const XLSX_EMPTY_ZIP_BASE64 =
   "UEsDBBQAAAAAAAAAIQAAAAAAAAAAAAAAAAAJAAAAdGVzdC50eHRQSwECFAAUAAAAAAAAACEAAAAAAAAAAAAAAAAACQAAAAAAAAAAAAAAAAAAAAAAdGVzdC50eHRQSwUGAAAAAAEAAQA3AAAAJwAAAAAA";
 
 export interface OptimizeRouteConfig {
+  /** `/api/info` identity. Defaults to an online, version-matched backend. */
   info?: () => { status: number; body: unknown };
+  /** `POST /api/optimize`. Defaults to a 202 running job. */
   onSubmit?: (route: Route) => Promise<void> | void;
+  /** `GET /api/optimize/{id}` poll. Defaults to a completed job. */
   onPoll?: (route: Route) => Promise<void> | void;
+  /** `GET /api/optimize/{id}/events` SSE. Defaults to a full happy-path stream. */
   onEvents?: (route: Route) => Promise<void> | void;
+  /** `GET /api/optimize/{id}/xlsx`. Defaults to a valid empty workbook. */
   onXlsx?: (route: Route) => Promise<void> | void;
+  /** `DELETE /api/optimize/{id}` cleanup. Defaults to 204. */
   onDelete?: (route: Route) => Promise<void> | void;
+  /** `POST /api/optimize/{id}/cancel`. Defaults to a cancelled job. */
   onCancel?: (route: Route) => Promise<void> | void;
+  /** `POST /api/optimize/{id}/finish-now`. Defaults to a completed feasible job. */
   onFinishNow?: (route: Route) => Promise<void> | void;
 }
 
 export function json(route: Route, status: number, body: unknown): Promise<void> {
-  return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
+  return route.fulfill({
+    status,
+    contentType: "application/json",
+    body: JSON.stringify(body),
+  });
 }
 
 export function sse(route: Route, frames: SseFrameInput[]): Promise<void> {
@@ -1054,6 +2054,11 @@ export function xlsx(route: Route): Promise<void> {
   });
 }
 
+/**
+ * Install the deterministic `/api/**` boundary for one journey. Unhandled `/api`
+ * calls are aborted so a missing stub fails loudly rather than hitting the dead
+ * backend. Everything else (page assets) continues.
+ */
 export async function installOptimizeRoutes(
   page: Page,
   config: OptimizeRouteConfig = {},
@@ -1068,13 +2073,16 @@ export async function installOptimizeRoutes(
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const method = request.method();
-    const path = new URL(request.url()).pathname;
+    const url = new URL(request.url());
+    const path = url.pathname;
 
     if (path === "/api/info") {
       const { status, body } = info();
       return json(route, status, body);
     }
-    if (path === "/api/health") return json(route, 200, { status: "ok", appVersion: "0.1.0" });
+    if (path === "/api/health") {
+      return json(route, 200, { status: "ok", appVersion: "0.1.0" });
+    }
     if (path === "/api/optimize" && method === "POST") {
       return config.onSubmit ? config.onSubmit(route) : json(route, 202, runningJob());
     }
@@ -1093,7 +2101,9 @@ export async function installOptimizeRoutes(
               terminalFrame("c5", "completed"),
             ]);
       }
-      if (sub === "/xlsx") return config.onXlsx ? config.onXlsx(route) : xlsx(route);
+      if (sub === "/xlsx") {
+        return config.onXlsx ? config.onXlsx(route) : xlsx(route);
+      }
       if (sub === "/cancel") {
         return config.onCancel ? config.onCancel(route) : json(route, 200, cancelledJob());
       }
@@ -1109,10 +2119,12 @@ export async function installOptimizeRoutes(
         return config.onPoll ? config.onPoll(route) : json(route, 200, completedJob());
       }
     }
+
     return route.abort();
   });
 }
 
+/** Navigate to the durable fixture and wait for the seeded, hydrated screen. */
 export async function gotoDurableFixture(page: Page): Promise<void> {
   await page.addInitScript(() => {
     (window as unknown as { __NS_ENABLE_TEST_BRIDGE?: boolean }).__NS_ENABLE_TEST_BRIDGE = true;

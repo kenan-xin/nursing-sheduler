@@ -524,6 +524,76 @@ describe("computeCoverageWarnings (FR-PR-28/40..42)", () => {
     expect(hasCoverageWarnings(computeCoverageWarnings(onlyDayStates, []))).toBe(false);
   });
 
+  // A requirement's `shiftType` selector is ONE aggregate equation across its
+  // members (core/nurse_scheduling/preference_types.shift_type_requirements), and
+  // `qualifiedPeople` picks which people that equation counts. Two requirements
+  // therefore only DUPLICATE one another when they constrain the same equation —
+  // layering an aggregate over a narrower slot is the documented pattern, not a
+  // clash.
+  describe("layered aggregate requirements are not duplicates", () => {
+    const layered = scenario({
+      rangeStart: "2026-01-01",
+      rangeEnd: "2026-01-02",
+      staff: [{ id: "Anna" }, { id: "Lil" }],
+      staffGroups: [{ id: "Seniors", members: ["Anna"] }],
+      shifts: [{ id: "am1" }, { id: "am1+" }, { id: "am2" }, { id: "am2+" }],
+      shiftGroups: [
+        { id: "AllMornings", members: ["am1", "am1+", "am2", "am2+"] },
+        { id: "MorningSeniorSlots", members: ["am1+", "am2+"] },
+      ],
+    });
+
+    it("does not flag a senior-slot requirement layered under its part-of-the-day group", () => {
+      const warnings = computeCoverageWarnings(layered, [
+        req({ shiftType: ["AllMornings"], date: ["ALL"], requiredNumPeople: 6 }),
+        req({ shiftType: ["MorningSeniorSlots"], date: ["ALL"], qualifiedPeople: ["Seniors"] }),
+      ]);
+      expect(warnings.duplicateSection).toBeNull();
+    });
+
+    it("does not flag a concrete shift layered under a group covering it", () => {
+      const warnings = computeCoverageWarnings(layered, [
+        req({ shiftType: ["AllMornings"], date: ["ALL"], requiredNumPeople: 6 }),
+        req({ shiftType: ["am1"], date: ["ALL"] }),
+      ]);
+      expect(warnings.duplicateSection).toBeNull();
+    });
+
+    it("does not flag the same shift set constrained over different people", () => {
+      const warnings = computeCoverageWarnings(layered, [
+        req({ shiftType: ["AllMornings"], date: ["ALL"], qualifiedPeople: ["ALL"] }),
+        req({ shiftType: ["AllMornings"], date: ["ALL"], qualifiedPeople: ["Seniors"] }),
+      ]);
+      expect(warnings.duplicateSection).toBeNull();
+    });
+
+    it("STILL flags two requirements on the same group over the same people", () => {
+      const warnings = computeCoverageWarnings(layered, [
+        req({ shiftType: ["AllMornings"], date: ["ALL"], requiredNumPeople: 6 }),
+        req({ shiftType: ["AllMornings"], date: ["ALL"], requiredNumPeople: 4 }),
+      ]);
+      expect(warnings.duplicateSection?.count).toBe(8); // 4 shift types * 2 dates
+      expect(warnings.duplicateSection?.items[0]).toMatch(/requirements 1 and 2/);
+    });
+
+    it("compares people by EXPANSION, so a group and its explicit members clash", () => {
+      const warnings = computeCoverageWarnings(layered, [
+        req({ shiftType: ["am1"], date: ["ALL"], qualifiedPeople: ["Seniors"] }),
+        req({ shiftType: ["am1"], date: ["ALL"], qualifiedPeople: ["Anna"] }),
+      ]);
+      expect(warnings.duplicateSection?.count).toBe(2); // 1 shift type * 2 dates
+      expect(warnings.duplicateSection?.items[0]).toMatch(/requirements 1 and 2/);
+    });
+
+    it("treats an omitted qualifiedPeople as ALL when comparing equations", () => {
+      const warnings = computeCoverageWarnings(layered, [
+        req({ shiftType: ["am1"], date: ["ALL"] }), // qualifiedPeople omitted
+        req({ shiftType: ["am1"], date: ["ALL"], qualifiedPeople: ["ALL"] }),
+      ]);
+      expect(warnings.duplicateSection?.count).toBe(2);
+    });
+  });
+
   it("does not truncate a shift-type id containing a space in duplicate messages (m2)", () => {
     const spaceState = scenario({
       rangeStart: "2026-01-01",

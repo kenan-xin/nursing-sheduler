@@ -62,14 +62,15 @@
 #
 # THE NUMBERS
 # -----------
-#   20 shifts a day (8 of them senior-only) = 172 paid hours a day
-#   x 28 days = 4816 paid hours of work to place
-#   + 40 approved leave days credited at 8 h = 5136 h credited in total
-#   over 32 nurses = 160.5 h each, inside the 152-168 h band (avg 40 h a week)
+#   Staffing is set per part of the day: morning 6-7 nurses, afternoon 6-7,
+#   long day 1-2, night 3-4, each with one senior in charge. That is a floor of
+#   16 a day and a target of 20.
 #
-#   The band is a range rather than a fixed figure because the eight patterns run
-#   from 6.5 h to 11.5 h, so an exact total would only be reachable for certain
-#   combinations of shifts.
+#   Hours are therefore a RANGE, not a figure. The patterns inside one part of
+#   the day differ in length (the morning runs 6.5 h to 8 h), so the total moves
+#   with how the roster spreads people across them. This scenario solves to 4752
+#   worked hours; plus 40 approved leave days at 8 h = 5072 h credited, over 32
+#   nurses = 158.5 h each, inside the 152-168 h band (about 40 h a week).
 #
 #   LEAVE IS BUDGETED, NOT FREE. Credited hours = 4816 + 8 x (leave days), and
 #   that must land inside 32 x 152-168 h = 4864-5376 h, so leave has to sit
@@ -225,33 +226,6 @@ shiftTypes:
     - id: AnyDayShift
       description: Every shift that is not a night
       members: [AllMornings, AllAfternoons, AllLongDays]
-    # One pattern and its senior-only twin taken together. Staffing is written
-    # against these so a shift's headcount does not change depending on whether
-    # the senior in charge happens to be on it that day.
-    - id: Am1All
-      description: Early morning am1, both slots
-      members: [am1, am1+]
-    - id: Am2All
-      description: Morning am2, both slots
-      members: [am2, am2+]
-    - id: Am3All
-      description: Extended morning am3, both slots
-      members: [am3, am3+]
-    - id: Pm1All
-      description: Early afternoon pm1, both slots
-      members: [pm1, pm1+]
-    - id: Pm2All
-      description: Afternoon pm2, both slots
-      members: [pm2, pm2+]
-    - id: Pm3All
-      description: Late afternoon pm3, both slots
-      members: [pm3, pm3+]
-    - id: LongAll
-      description: Long day, both slots
-      members: [long, long+]
-    - id: NightAll
-      description: Night, both slots
-      members: [night, night+]
     # The senior-in-charge slots for a whole part of the day. One requirement
     # across the group means one senior for the morning as a whole, not one on
     # each of am1, am2 and am3.
@@ -372,27 +346,27 @@ preferences:
   - type: at most one shift per day
 
   # ----------------------------------------------------------------- staffing --
-  # Two requirements per shift pattern. The first fills the open slots; the second
-  # reserves one slot for a Senior Staff Nurse, using qualifiedPeople so only an
-  # SSN can take it. Splitting it this way makes "every shift has a senior on it"
-  # true by construction, rather than something the finished roster has to be
-  # checked for.
+  # Staffing is set for a PART OF THE DAY, not for each individual pattern. The
+  # morning needs at least 6 nurses and ideally 7; whether they come in on am1,
+  # am2 or am3 is the roster's business, not the rule's. A ward cares that the
+  # morning is covered, not that exactly two people started at 08:00 and finished
+  # at 15:00.
+  #
+  # `requiredNumPeople` on its own means EXACTLY that many. "At least 6, ideally
+  # 7" therefore needs both numbers: `requiredNumPeople` is the hard floor and
+  # `preferredNumPeople` the target the solver is pushed toward by the weight.
+  # The weight has to be finite - an infinite one is rejected for a requirement
+  # that carries a preferred count - and is set far above the request weights
+  # below so staffing is never traded away to grant someone a day off.
+  #
+  # A group id makes ONE aggregate equation across its members, which is what
+  # lets a single requirement cover all three morning patterns at once.
   - type: shift type requirement
-    description: Early morning am1 (08:00-15:00) is staffed by 2 nurses in total
-    shiftType: Am1All
-    requiredNumPeople: 2
-    date: ALL
-
-  - type: shift type requirement
-    description: Morning am2 (08:00-16:00) is staffed by 3 nurses in total
-    shiftType: Am2All
-    requiredNumPeople: 3
-    date: ALL
-
-  - type: shift type requirement
-    description: Extended morning am3 (08:00-17:00) is staffed by 2 nurses in total
-    shiftType: Am3All
-    requiredNumPeople: 2
+    description: The morning (am1, am2 and am3 together) needs at least 6 nurses, ideally 7
+    shiftType: AllMornings
+    requiredNumPeople: 6
+    preferredNumPeople: 7
+    weight: -100000
     date: ALL
 
   - type: shift type requirement
@@ -406,21 +380,11 @@ preferences:
     date: ALL
 
   - type: shift type requirement
-    description: Early afternoon pm1 (12:00-21:00) is staffed by 2 nurses in total
-    shiftType: Pm1All
-    requiredNumPeople: 2
-    date: ALL
-
-  - type: shift type requirement
-    description: Afternoon pm2 (13:00-21:00) is staffed by 3 nurses in total
-    shiftType: Pm2All
-    requiredNumPeople: 3
-    date: ALL
-
-  - type: shift type requirement
-    description: Late afternoon pm3 (14:00-21:00) is staffed by 2 nurses in total
-    shiftType: Pm3All
-    requiredNumPeople: 2
+    description: The afternoon (pm1, pm2 and pm3 together) needs at least 6 nurses, ideally 7
+    shiftType: AllAfternoons
+    requiredNumPeople: 6
+    preferredNumPeople: 7
+    weight: -100000
     date: ALL
 
   - type: shift type requirement
@@ -434,9 +398,11 @@ preferences:
     date: ALL
 
   - type: shift type requirement
-    description: Long day (08:00-20:30) is staffed by 2 nurses in total
-    shiftType: LongAll
-    requiredNumPeople: 2
+    description: The long day needs at least 1 nurse, ideally 2
+    shiftType: AllLongDays
+    requiredNumPeople: 1
+    preferredNumPeople: 2
+    weight: -100000
     date: ALL
   - type: shift type requirement
     description: One of the two long-day nurses is a Senior Staff Nurse
@@ -446,9 +412,11 @@ preferences:
     date: ALL
 
   - type: shift type requirement
-    description: Night (20:00-08:30) is staffed by 4 nurses in total
-    shiftType: NightAll
-    requiredNumPeople: 4
+    description: The night needs at least 3 nurses, ideally 4
+    shiftType: AllNights
+    requiredNumPeople: 3
+    preferredNumPeople: 4
+    weight: -100000
     date: ALL
   - type: shift type requirement
     description: One of the four night nurses is a Senior Staff Nurse

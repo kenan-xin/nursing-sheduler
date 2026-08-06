@@ -22,8 +22,6 @@ import {
   FaPen,
   FaCopy,
   FaTrash,
-  FaChevronUp,
-  FaChevronDown,
   FaArrowRightArrowLeft,
   FaTriangleExclamation,
 } from "@/components/icons";
@@ -32,6 +30,7 @@ import type { CountCard } from "@/lib/scenario";
 import {
   CardActionButton,
   CardListItem,
+  CardMoveActions,
   type DropPosition,
 } from "@/components/card-editor/card-editor-shell";
 import {
@@ -53,7 +52,6 @@ interface CountCardListProps {
   onEdit: (uid: string) => void;
   onDuplicate: (uid: string) => void;
   onDelete: (uid: string) => void;
-  onMove: (uid: string, direction: -1 | 1) => void;
   onSetDisabled: (uid: string, value: boolean) => void;
   /** Primary DnD reorder (the shared card-list reorder interaction). `position` is
    *  the pointer half of the drop target (insert before/after — FR-PR-12). */
@@ -160,7 +158,6 @@ export function CountCardList({
   onEdit,
   onDuplicate,
   onDelete,
-  onMove,
   onSetDisabled,
   onReorder,
   onConvertToContracted,
@@ -171,7 +168,7 @@ export function CountCardList({
   leaveGuardUids,
 }: CountCardListProps) {
   // HTML5 DnD state for the shared card-list reorder (the primary control; the
-  // keyboard Up/Down buttons below are the accessibility supplement).
+  // shared Up/Down buttons below are its keyboard path).
   const [dragUid, setDragUid] = useState<string | null>(null);
   const [overUid, setOverUid] = useState<string | null>(null);
 
@@ -318,22 +315,13 @@ export function CountCardList({
                 >
                   Delete
                 </CardActionButton>
-                <CardActionButton
-                  icon={<FaChevronUp className="size-3" />}
-                  onClick={() => onMove(card.uid, -1)}
-                  testId={`count-up-${index}`}
-                  ariaLabel="Move shift count up"
-                >
-                  Up
-                </CardActionButton>
-                <CardActionButton
-                  icon={<FaChevronDown className="size-3" />}
-                  onClick={() => onMove(card.uid, 1)}
-                  testId={`count-down-${index}`}
-                  ariaLabel="Move shift count down"
-                >
-                  Down
-                </CardActionButton>
+                <CardMoveActions
+                  cards={counts}
+                  index={index}
+                  onReorder={onReorder}
+                  testIdPrefix="count"
+                  subject="shift count"
+                />
               </>
             }
             footer={

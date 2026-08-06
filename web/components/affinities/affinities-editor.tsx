@@ -53,18 +53,8 @@ const INSTRUCTIONS = [
 ] as const;
 
 export function AffinitiesEditor() {
-  const {
-    state,
-    affinities,
-    add,
-    update,
-    remove,
-    duplicate,
-    move,
-    reorder,
-    setDisabled,
-    getCards,
-  } = useAffinities();
+  const { state, affinities, add, update, remove, duplicate, reorder, setDisabled, getCards } =
+    useAffinities();
   const [draft, setDraft] = useState<Draft | null>(null);
   // FR-PR-06: arm the shared open-draft navigation guard while a form is visible.
   useCardEditorDraftGuard("affinities", !!draft);
@@ -189,7 +179,6 @@ export function AffinitiesEditor() {
           onEdit={openEdit}
           onDuplicate={(uid) => withDraftDismissed(() => duplicate(uid))}
           onDelete={(uid) => withDraftDismissed(() => remove(uid))}
-          onMove={(uid, direction) => withDraftDismissed(() => move(uid, direction))}
           onReorder={(fromUid, toUid, position) =>
             withDraftDismissed(() => reorder(fromUid, toUid, position))
           }

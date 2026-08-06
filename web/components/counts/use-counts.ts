@@ -46,8 +46,6 @@ export interface CountsController {
   replaceCard: (uid: string, nextCard: CountCard) => void;
   remove: (uid: string) => void;
   duplicate: (uid: string) => void;
-  /** Swap a card one slot up (-1) or down (+1) — the keyboard-supplement control. */
-  move: (uid: string, direction: -1 | 1) => void;
   /** Move the `from` card relative to the `to` card, honoring the pointer half
    *  (`"before"`/`"after"`) — the primary DnD control (FR-PR-12). */
   reorder: (fromUid: string, toUid: string, position: DropPosition) => void;
@@ -133,14 +131,6 @@ export function useCounts(): CountsController {
         description,
       };
       commitCounts([...counts.slice(0, index + 1), clone, ...counts.slice(index + 1)]);
-    },
-    move(uid, direction) {
-      const index = counts.findIndex((card) => card.uid === uid);
-      const target = index + direction;
-      if (index === -1 || target < 0 || target >= counts.length) return;
-      const next = [...counts];
-      [next[index], next[target]] = [next[target], next[index]];
-      commitCounts(next);
     },
     reorder(fromUid, toUid, position) {
       const next = reorderByDrop(counts, fromUid, toUid, position);

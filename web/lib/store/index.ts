@@ -10,6 +10,9 @@
 //                       `resetToNewScenario`, `registerPagehideFlush`
 //   • paint gesture   — `commitPaintGesture` (+ hot-store `beginPaint` /
 //                       `stagePaintDayState` / `stagePaintRequestDelta` / `stagePaintErase`)
+//   • roster storage  — `rosterStorage` (F1): typed, transactional Dexie v2
+//                       repositories for submission snapshots, candidates, and
+//                       the working roster. See `roster-storage.ts`.
 
 export {
   createStateSpine,
@@ -65,7 +68,38 @@ export {
   type MemoryStateStorage,
 } from "./persistence";
 
-export { createDexieStorage, SCENARIO_DB_NAME } from "./dexie-storage";
+export {
+  createDexieStorage,
+  forgetRosterDb,
+  getRosterDb,
+  IndexedDbUnavailableError,
+  isIndexedDbAvailable,
+  ScenarioPersistenceDb,
+  SCENARIO_DB_NAME,
+  type MetaRow,
+  type RosterRow,
+  type SnapshotRow,
+} from "./dexie-storage";
+
+export {
+  candidateRosterKey,
+  createRosterStorage,
+  createRosterStorageForDb,
+  rosterStorage,
+  submissionSnapshotKey,
+  WORKING_ROSTER_KEY,
+  type CandidateCommitOutcome,
+  type CandidateDismissalOutcome,
+  type ClearOutcome,
+  type CurrentCandidatePointer,
+  type RosterDocumentValidator,
+  type RosterStorage,
+  type SnapshotAllocationOutcome,
+  type SnapshotDeletionOutcome,
+  type StaleEpochOutcome,
+  type WorkingPromotionOutcome,
+  type WorkingWriteOutcome,
+} from "./roster-storage";
 
 export {
   paintCellKey,

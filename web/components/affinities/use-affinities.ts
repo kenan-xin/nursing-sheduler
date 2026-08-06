@@ -35,8 +35,6 @@ export interface AffinitiesController {
   update: (uid: string, form: AffinityFormState) => void;
   remove: (uid: string) => void;
   duplicate: (uid: string) => void;
-  /** Swap a card one slot up (-1) or down (+1) — the keyboard-supplement control. */
-  move: (uid: string, direction: -1 | 1) => void;
   /** Move the `from` card relative to the `to` card, honoring the pointer half
    *  (`"before"`/`"after"`) — the primary DnD control (FR-PR-12). */
   reorder: (fromUid: string, toUid: string, position: DropPosition) => void;
@@ -89,14 +87,6 @@ export function useAffinities(): AffinitiesController {
         description,
       };
       commitAffinities([...affinities.slice(0, index + 1), clone, ...affinities.slice(index + 1)]);
-    },
-    move(uid, direction) {
-      const index = affinities.findIndex((card) => card.uid === uid);
-      const target = index + direction;
-      if (index === -1 || target < 0 || target >= affinities.length) return;
-      const next = [...affinities];
-      [next[index], next[target]] = [next[target], next[index]];
-      commitAffinities(next);
     },
     reorder(fromUid, toUid, position) {
       const next = reorderByDrop(affinities, fromUid, toUid, position);

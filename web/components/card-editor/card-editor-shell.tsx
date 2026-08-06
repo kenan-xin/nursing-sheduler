@@ -16,7 +16,16 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Surface, surfaceVariants } from "@/components/ui/surface";
-import { FaPlus, FaXmark, FaCircleInfo, FaCheck, FaLock, FaGripVertical } from "@/components/icons";
+import {
+  FaPlus,
+  FaXmark,
+  FaCircleInfo,
+  FaCheck,
+  FaLock,
+  FaGripVertical,
+  FaChevronUp,
+  FaChevronDown,
+} from "@/components/icons";
 import { useLosableDraft } from "@/components/shell/use-losable-draft";
 
 /** Outer screen wrapper — the L0 app plane for every card editor, with the standard
@@ -590,5 +599,61 @@ export function CardActionButton({
         {disabledReason}
       </span>
     </span>
+  );
+}
+
+/** The KEYBOARD half of the shared card-list reorder, for the action row of a
+ *  `draggable` `CardListItem`.
+ *
+ *  Native HTML5 drag has no keyboard equivalent, so a card list whose only
+ *  reorder path is `onDrop` is unusable without a pointer. This is the same
+ *  drag + Up/Down pairing `people-table` and `shift-type-grid` already ship, kept
+ *  in ONE place so all five card editors cannot drift apart on it.
+ *
+ *  It drives the SAME `onReorder(from, to, position)` the drop handler does —
+ *  "up" is `before` the previous card, "down" is `after` the next one — so a
+ *  keyboard move and a drag are byte-identical commits (one undo entry), and no
+ *  consumer needs a second index-swapping mutation on its controller. Both ends
+ *  are `disabled` rather than silently no-op, so the boundary is visible. */
+export function CardMoveActions<TCard extends { uid: string }>({
+  cards,
+  index,
+  onReorder,
+  testIdPrefix,
+  subject,
+}: {
+  /** The rendered list, in current order. */
+  cards: readonly TCard[];
+  index: number;
+  onReorder: (fromUid: string, toUid: string, position: DropPosition) => void;
+  /** Card-kind test-id prefix, e.g. `"count"` ⇒ `count-up-0` / `count-down-0`. */
+  testIdPrefix: string;
+  /** Singular noun for the accessible name, e.g. `"shift count"`. */
+  subject: string;
+}) {
+  const card = cards[index];
+  const previous = cards[index - 1];
+  const next = cards[index + 1];
+  return (
+    <>
+      <CardActionButton
+        icon={<FaChevronUp className="size-3" />}
+        onClick={() => previous && onReorder(card.uid, previous.uid, "before")}
+        testId={`${testIdPrefix}-up-${index}`}
+        ariaLabel={`Move ${subject} up`}
+        disabled={previous === undefined}
+      >
+        Up
+      </CardActionButton>
+      <CardActionButton
+        icon={<FaChevronDown className="size-3" />}
+        onClick={() => next && onReorder(card.uid, next.uid, "after")}
+        testId={`${testIdPrefix}-down-${index}`}
+        ariaLabel={`Move ${subject} down`}
+        disabled={next === undefined}
+      >
+        Down
+      </CardActionButton>
+    </>
   );
 }

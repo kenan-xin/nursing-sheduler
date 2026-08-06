@@ -35,8 +35,6 @@ export interface SuccessionsController {
   update: (uid: string, form: SuccessionFormState) => void;
   remove: (uid: string) => void;
   duplicate: (uid: string) => void;
-  /** Swap a card one slot up (-1) or down (+1) — the keyboard-supplement control. */
-  move: (uid: string, direction: -1 | 1) => void;
   /** Move the `from` card relative to the `to` card, honoring the pointer half
    *  (`"before"`/`"after"`) — the primary DnD control (FR-PR-12). */
   reorder: (fromUid: string, toUid: string, position: DropPosition) => void;
@@ -93,14 +91,6 @@ export function useSuccessions(): SuccessionsController {
         clone,
         ...successions.slice(index + 1),
       ]);
-    },
-    move(uid, direction) {
-      const index = successions.findIndex((card) => card.uid === uid);
-      const target = index + direction;
-      if (index === -1 || target < 0 || target >= successions.length) return;
-      const next = [...successions];
-      [next[index], next[target]] = [next[target], next[index]];
-      commitSuccessions(next);
     },
     reorder(fromUid, toUid, position) {
       const next = reorderByDrop(successions, fromUid, toUid, position);

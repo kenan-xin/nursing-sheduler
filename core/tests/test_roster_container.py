@@ -299,11 +299,76 @@ class InvalidHandoffRunner:
         raise AssertionError("the invalid container must not be built")
 
 
+class GappedAxisRunner:
+    """Mimics a regressed scheduler handoff: a non-first row-axis gap.
+
+    Defined at module level so the spawn-based executor can pickle it.
+    """
+
+    def run(self, job, input_bytes, *, event_callback, should_stop):
+        payload = _valid_handoff()
+        payload["coordinateMap"]["peopleRows"] = [
+            payload["coordinateMap"]["firstPeopleRow"],
+            payload["coordinateMap"]["firstPeopleRow"] + 2,
+        ]
+        build_roster_container(
+            payload,
+            xlsx_bytes=b"workbook",
+            xlsx_name="nurse-scheduling-20260201T000000Z.xlsx",
+            xlsx_mime=XLSX_MEDIA_TYPE,
+            score=42,
+            solver_status="OPTIMAL",
+        )
+        raise AssertionError("the gapped container must not be built")
+
+
+class GappedDateColumnsAxisRunner:
+    """Mimics a regressed scheduler handoff: a non-first date-column-axis gap.
+
+    Defined at module level so the spawn-based executor can pickle it.
+    """
+
+    def run(self, job, input_bytes, *, event_callback, should_stop):
+        payload = _valid_handoff()
+        coordinate_map = payload["coordinateMap"]
+        first_column = coordinate_map["leadingCols"] + coordinate_map["historyCols"] + 1
+        coordinate_map["dateColumns"] = [first_column, first_column + 2]
+        build_roster_container(
+            payload,
+            xlsx_bytes=b"workbook",
+            xlsx_name="nurse-scheduling-20260201T000000Z.xlsx",
+            xlsx_mime=XLSX_MEDIA_TYPE,
+            score=42,
+            solver_status="OPTIMAL",
+        )
+        raise AssertionError("the gapped container must not be built")
+
+
 def test_an_invalid_handoff_never_crosses_the_child_result_pipe():
     # A contract violation terminates the child with the stable code and no
     # output, so an unusable container cannot be pickled to the supervisor.
     result = run_optimization_process(
         InvalidHandoffRunner(),
+        _job(prettify=False),
+        b"apiVersion: alpha\n",
+        event_callback=lambda *_args: None,
+        control=lambda: None,
+        hard_timeout_seconds=61,
+        finish_now_enabled=False,
+    )
+
+    assert result.status is ProcessStatus.FAILED
+    assert result.output is None
+    assert result.failure is not None
+    assert result.failure.code == INVALID_OUTPUT_CODE
+
+
+def test_a_non_first_axis_gap_never_crosses_the_child_result_pipe():
+    # A strictly-increasing-but-gapped axis is just as much an internal
+    # regression as a ragged grid: it must fail before any output exists rather
+    # than pickling an unusable container to the supervisor.
+    result = run_optimization_process(
+        GappedAxisRunner(),
         _job(prettify=False),
         b"apiVersion: alpha\n",
         event_callback=lambda *_args: None,
@@ -444,6 +509,11 @@ STRUCTURAL_VIOLATIONS = [
     ("date-columns-not-increasing", lambda c: c["coordinateMap"].update({"dateColumns": [3, 2]})),
     ("people-rows-off-anchor", lambda c: c["coordinateMap"].update({"peopleRows": [5, 6]})),
     ("date-columns-off-anchor", lambda c: c["coordinateMap"].update({"dateColumns": [4, 5]})),
+    # Strictly increasing but not contiguous: the real exporter can never skip a
+    # row/column, so a non-first gap must be rejected even though the anchor and
+    # ordering checks alone would let it through.
+    ("people-rows-non-first-gap", lambda c: c["coordinateMap"].update({"peopleRows": [3, 5]})),
+    ("date-columns-non-first-gap", lambda c: c["coordinateMap"].update({"dateColumns": [2, 4]})),
     ("first-people-row-zero", lambda c: c["coordinateMap"].update({"firstPeopleRow": 0})),
     ("first-people-row-not-an-integer", lambda c: c["coordinateMap"].update({"firstPeopleRow": "3"})),
     ("leading-cols-float", lambda c: c["coordinateMap"].update({"leadingCols": 1.0})),

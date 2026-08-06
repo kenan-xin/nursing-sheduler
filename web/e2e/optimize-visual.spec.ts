@@ -395,6 +395,21 @@ test.describe("R6 Optimize & Export — data-bearing values resolve the mono fac
       { label: "event time", locator: log.getByTestId("optimize-event-time").first() },
     ];
 
+    // THE LOG DETAIL LINES. The product generates `state=`, `queue=`,
+    // `early_completion=`, `outcome=`, `score=`, codes and filenames here — machine
+    // expressions per DESIGN.md §3 — and classifies each one where it is minted
+    // (`run-view.ts` `detailKind`), which is what the harness carries. Every expression
+    // detail on the page is swept, so a new form cannot be added unfaced.
+    const expressionDetails = log.locator(
+      '[data-testid="optimize-event-detail"][data-detail-kind="expression"]',
+    );
+    const expressionCount = await expressionDetails.count();
+    expect(expressionCount, "the harness renders machine-expression details").toBeGreaterThan(0);
+    for (let index = 0; index < expressionCount; index += 1) {
+      const detail = expressionDetails.nth(index);
+      targets.push({ label: `event detail ${await detail.innerText()}`, locator: detail });
+    }
+
     for (const target of targets) {
       await expect(target.locator, `${target.label} is rendered`).toBeVisible();
       const resolved = await target.locator.evaluate((el) => getComputedStyle(el).fontFamily);
@@ -411,6 +426,18 @@ test.describe("R6 Optimize & Export — data-bearing values resolve the mono fac
       },
       { label: "job detail line", locator: running.getByTestId("optimize-job-detail") },
     ];
+
+    // ...including the log's own PROSE detail — a phase line carrying a backend message.
+    // This is the case a blanket mono on the detail element would silently break.
+    const proseDetails = log.locator(
+      '[data-testid="optimize-event-detail"][data-detail-kind="prose"]',
+    );
+    const proseCount = await proseDetails.count();
+    expect(proseCount, "the harness renders a prose detail as the control").toBeGreaterThan(0);
+    for (let index = 0; index < proseCount; index += 1) {
+      const detail = proseDetails.nth(index);
+      prose.push({ label: `event detail ${await detail.innerText()}`, locator: detail });
+    }
     for (const control of prose) {
       await expect(control.locator, `${control.label} is rendered`).toBeVisible();
       const resolved = await control.locator.evaluate((el) => getComputedStyle(el).fontFamily);
@@ -419,7 +446,7 @@ test.describe("R6 Optimize & Export — data-bearing values resolve the mono fac
     }
   });
 
-  test("the chart tooltip's four values resolve mono while its captions do not", async ({
+  test("the chart tooltip's values and solver source resolve mono while its captions do not", async ({
     page,
   }) => {
     await gotoReady(page, "/optimize-screen-fixture", "light");
@@ -440,6 +467,9 @@ test.describe("R6 Optimize & Export — data-bearing values resolve the mono fac
       "progress-chart-tooltip-score",
       "progress-chart-tooltip-comments",
       "progress-chart-tooltip-solution",
+      // The frame's SOLVER SOURCE — §3 names solver expressions explicitly, and this is
+      // a machine identifier (`ortools/cp-sat:solution-callback` on the real route).
+      "progress-chart-tooltip-source",
     ]) {
       const value = tooltip.getByTestId(testId);
       await expect(value, `${testId} is rendered`).toBeVisible();

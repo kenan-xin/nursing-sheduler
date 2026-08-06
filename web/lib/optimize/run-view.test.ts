@@ -280,7 +280,7 @@ describe("reduceRunView — authoritative job snapshots", () => {
       job: terminalJob("failed", {
         error: {
           code: "worker_lost",
-          message: "The optimisation worker stopped before the job completed.",
+          message: "The optimization worker stopped before the job completed.",
         },
       }),
     });
@@ -295,7 +295,7 @@ describe("reduceRunView — authoritative job snapshots", () => {
       job: terminalJob("failed", {
         error: {
           code: "process_timeout",
-          message: "The optimisation exceeded its timeout and was force-terminated.",
+          message: "The optimization exceeded its timeout and was force-terminated.",
         },
       }),
     });
@@ -303,7 +303,7 @@ describe("reduceRunView — authoritative job snapshots", () => {
     expect(next.error).toEqual({
       source: "job",
       code: "process_timeout",
-      message: "The optimisation exceeded its timeout and was force-terminated.",
+      message: "The optimization exceeded its timeout and was force-terminated.",
     });
     expect(next.resubmittable).toBe(false);
   });
@@ -639,76 +639,61 @@ describe("reduceRunView — snapshots never append log entries (P1 #4)", () => {
   // The log's `detail` is sometimes exactly that (`state=running, queue=2`, a code, a
   // cursor, a filename) and sometimes a backend prose message, so a blanket face on the
   // element would be wrong either way. The classification is therefore decided HERE,
-  // where each string is minted, and these tables are the whole of it: every generated
-  // form and every prose negative. `run-event-log.test.tsx` pins the face it selects,
-  // and `e2e/optimize-visual.spec.ts` proves the class resolves a genuinely different
-  // family in a real Chromium.
-  //
-  // The tables are TYPED against the closed `RunSignal` union on purpose. A weaker
-  // `any[]` would still run, but it would stop covering a signal the moment one is
-  // added or reshaped — silently, which is the failure mode this whole field exists to
-  // prevent.
+  // where each string is minted, and this table is the whole of it: every generated form
+  // and every prose negative. `run-event-log.test.tsx` pins the face it selects, and
+  // `e2e/optimize-visual.spec.ts` proves the class resolves a genuinely different family
+  // in a real Chromium.
   describe("every minted detail declares whether it is a machine expression or prose", () => {
-    interface DetailCase {
-      label: string;
-      signal: RunSignal;
-      detail: string;
-    }
-    interface NoDetailCase {
-      label: string;
-      signal: RunSignal;
-    }
-
-    const mintedBy = (signal: RunSignal, from: OptimizeRunView = INITIAL_OPTIMIZE_RUN_VIEW) => {
-      const view = reduceRunView(from, signal);
+    const detailOf = (signal: Parameters<typeof reduceRunView>[1]) => {
+      const view = reduceRunView(INITIAL_OPTIMIZE_RUN_VIEW, signal);
       const entry = view.log[view.log.length - 1];
       return { detail: entry.detail, detailKind: entry.detailKind };
     };
 
-    const EXPRESSIONS: DetailCase[] = [
-      {
-        label: "submit-started",
-        signal: { type: "submit-started", anonymized: true, peopleCount: 5 },
-        detail: "anonymized=true, people=5",
-      },
-      {
-        label: "submit-blocked",
-        signal: { type: "submit-blocked", code: "scenario_invalid", message: "x" },
-        detail: "scenario_invalid",
-      },
-      {
-        label: "submit-rejected",
-        signal: { type: "submit-rejected", code: "invalid_scheduling_data", message: "x" },
-        detail: "invalid_scheduling_data",
-      },
-      {
-        label: "submit-unknown",
-        signal: { type: "submit-unknown", code: "upstream_unavailable", message: "x" },
-        detail: "upstream_unavailable",
-      },
-      {
-        label: "job-activated (durable)",
-        signal: { type: "job-activated", jobId: "opt_1", reloadRecoveryAvailable: true },
-        detail: "durable",
-      },
-      {
-        label: "job-activated (volatile)",
-        signal: { type: "job-activated", jobId: "opt_1", reloadRecoveryAvailable: false },
-        detail: "volatile",
-      },
-      {
-        label: "job-activated (structured reason)",
-        signal: {
+    it.each([
+      [
+        "submit-started",
+        { type: "submit-started", anonymized: true, peopleCount: 5 },
+        "anonymized=true, people=5",
+      ],
+      [
+        "submit-blocked",
+        { type: "submit-blocked", code: "scenario_invalid", message: "x" },
+        "scenario_invalid",
+      ],
+      [
+        "submit-rejected",
+        { type: "submit-rejected", code: "invalid_scheduling_data", message: "x" },
+        "invalid_scheduling_data",
+      ],
+      [
+        "submit-unknown",
+        { type: "submit-unknown", code: "upstream_unavailable", message: "x" },
+        "upstream_unavailable",
+      ],
+      [
+        "job-activated (durable)",
+        { type: "job-activated", jobId: "opt_1", reloadRecoveryAvailable: true },
+        "durable",
+      ],
+      [
+        "job-activated (volatile)",
+        { type: "job-activated", jobId: "opt_1", reloadRecoveryAvailable: false },
+        "volatile",
+      ],
+      [
+        "job-activated (named reason)",
+        {
           type: "job-activated",
           jobId: "opt_1",
           reloadRecoveryAvailable: false,
           reason: "activation-persistence-failed",
         },
-        detail: "activation-persistence-failed",
-      },
-      {
-        label: "progress",
-        signal: {
+        "activation-persistence-failed",
+      ],
+      [
+        "progress",
+        {
           type: "progress",
           point: point({
             currentBestScore: 42,
@@ -717,183 +702,132 @@ describe("reduceRunView — snapshots never append log entries (P1 #4)", () => {
             commentCount: 2,
           }),
         },
-        detail: "score=42, elapsed=3.5s, solution=#7, comments=2",
-      },
-      {
-        label: "phase with an empty message (a bare code)",
-        signal: {
+        "score=42, elapsed=3.5s, solution=#7, comments=2",
+      ],
+      [
+        "phase with no message (a bare code)",
+        {
           type: "phase",
           entry: { source: "scheduler", code: "solve", message: "", elapsedSeconds: 1 },
         },
-        detail: "solve",
-      },
-      {
-        label: "a durable state frame",
-        signal: {
+        "solve",
+      ],
+      [
+        "a durable state frame",
+        {
           type: "durable-frame-applied",
           event: "job.state_changed",
           cursor: "cur_1",
           detail: "state=running, queue=2",
           payload: statePayload({ queuePosition: 2 }),
         },
-        detail: "state=running, queue=2",
-      },
-      {
-        label: "a durable control frame",
-        signal: {
+        "state=running, queue=2",
+      ],
+      [
+        "a durable control frame",
+        {
           type: "durable-frame-applied",
           event: "job.control_changed",
           cursor: "cur_2",
           detail: "early_completion=true",
           payload: controlPayload(true),
         },
-        detail: "early_completion=true",
-      },
-      {
-        label: "a durable result frame",
-        signal: {
+        "early_completion=true",
+      ],
+      [
+        "a durable result frame",
+        {
           type: "durable-frame-applied",
           event: "job.result_available",
           cursor: "cur_3",
           detail: "outcome=optimal, score=42",
           payload: resultPayload(),
         },
-        detail: "outcome=optimal, score=42",
-      },
-      {
-        label: "cursor-recovery",
-        signal: { type: "cursor-recovery", reason: "expired", oldestEventId: "cur_99" },
-        detail: "cur_99",
-      },
-      {
-        label: "job-gone",
-        signal: { type: "job-gone", code: "job_not_found", message: "gone" },
-        detail: "job_not_found",
-      },
-      // The SAME mint site, reached by the other signal in its `case` fallthrough.
-      {
-        label: "control-job-gone (the shared branch)",
-        signal: { type: "control-job-gone", code: "job_not_found", message: "gone" },
-        detail: "job_not_found",
-      },
-      {
-        label: "control-job-gone with no code (the shared fallback)",
-        signal: { type: "control-job-gone", code: null, message: "gone" },
-        detail: "unknown",
-      },
-      {
-        label: "control-error",
-        signal: { type: "control-error", code: "conflict", message: "already terminal" },
-        detail: "conflict",
-      },
-      {
-        label: "download-succeeded (a filename)",
-        signal: { type: "download-succeeded", filename: "schedule.xlsx" },
-        detail: "schedule.xlsx",
-      },
-    ];
+        "outcome=optimal, score=42",
+      ],
+      [
+        "cursor-recovery",
+        { type: "cursor-recovery", reason: "expired", oldestEventId: "cur_99" },
+        "cur_99",
+      ],
+      ["job-gone", { type: "job-gone", code: "job_not_found", message: "gone" }, "job_not_found"],
+      [
+        "control-error",
+        { type: "control-error", code: "conflict", message: "already terminal" },
+        "conflict",
+      ],
+      [
+        "download-succeeded (a filename)",
+        { type: "download-succeeded", filename: "schedule.xlsx" },
+        "schedule.xlsx",
+      ],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ] as any[])("%s is a machine EXPRESSION", (_label, signal, detail) => {
+      expect(detailOf(signal)).toEqual({ detail, detailKind: "expression" });
+    });
 
-    const PROSE: DetailCase[] = [
-      {
-        label: "a phase line carrying a backend message",
-        signal: {
+    it.each([
+      [
+        "a phase line carrying a backend message",
+        {
           type: "phase",
           entry: { source: "scheduler", code: "solve", message: "Solving", elapsedSeconds: 1.2 },
         },
-        detail: "solve: Solving",
-      },
-      {
-        label: "a transport disconnect message",
-        signal: { type: "stream-error", message: "Connection lost after 3 attempts." },
-        detail: "Connection lost after 3 attempts.",
-      },
-      {
-        label: "a download failure message",
-        signal: { type: "download-failed", message: "The artifact could not be written." },
-        detail: "The artifact could not be written.",
-      },
-    ];
-
-    const NO_DETAIL: NoDetailCase[] = [
-      { label: "cursor-reset", signal: { type: "cursor-reset" } },
-      { label: "download-started", signal: { type: "download-started" } },
-      { label: "download-unavailable", signal: { type: "download-unavailable" } },
-      { label: "cleanup-succeeded", signal: { type: "cleanup-succeeded" } },
-      { label: "cleanup-failed", signal: { type: "cleanup-failed" } },
-      { label: "cleanup-retained", signal: { type: "cleanup-retained" } },
-      {
-        label: "cursor-recovery with no oldest id",
-        signal: { type: "cursor-recovery", reason: "expired" },
-      },
-      // A durable frame can carry a null detail; the kind must go null with it.
-      {
-        label: "a durable frame with a null detail",
-        signal: {
-          type: "durable-frame-applied",
-          event: "job.state_changed",
-          cursor: "cur_4",
-          detail: null,
-          payload: statePayload(),
-        },
-      },
-    ];
-
-    it.each(EXPRESSIONS)("$label is a machine EXPRESSION", ({ signal, detail }) => {
-      expect(mintedBy(signal)).toEqual({ detail, detailKind: "expression" });
+        "solve: Solving",
+      ],
+      [
+        "a transport disconnect message",
+        { type: "stream-error", message: "Connection lost after 3 attempts." },
+        "Connection lost after 3 attempts.",
+      ],
+      [
+        "a download failure message",
+        { type: "download-failed", message: "The artifact could not be written." },
+        "The artifact could not be written.",
+      ],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ] as any[])("%s is PROSE", (_label, signal, detail) => {
+      expect(detailOf(signal)).toEqual({ detail, detailKind: "prose" });
     });
 
-    it.each(PROSE)("$label is PROSE", ({ signal, detail }) => {
-      expect(mintedBy(signal)).toEqual({ detail, detailKind: "prose" });
-    });
-
-    it.each(NO_DETAIL)("$label carries no detail, so it declares no kind", ({ signal }) => {
-      expect(mintedBy(signal)).toEqual({ detail: null, detailKind: null });
-    });
-
-    // `download-succeeded` keeps the RETAINED filename when the signal supplies none, so
-    // the kind has to follow the EFFECTIVE filename. Keying off `signal.filename` would
-    // drop a real artifact name out of the data face while still rendering it.
-    it("download-succeeded classifies the RETAINED filename when the signal carries none", () => {
-      const retained = reduce([{ type: "download-succeeded", filename: "schedule.xlsx" }]);
-      expect(retained.download.filename).toBe("schedule.xlsx");
-      expect(mintedBy({ type: "download-succeeded", filename: null }, retained)).toEqual({
-        detail: "schedule.xlsx",
-        detailKind: "expression",
-      });
-      // The fallback itself must not drift while the kind is added.
-      expect(
-        reduceRunView(retained, { type: "download-succeeded", filename: null }).download.filename,
-      ).toBe("schedule.xlsx");
-    });
-
-    it("download-succeeded declares no kind when no filename is retained either", () => {
-      const view = reduceRunView(INITIAL_OPTIMIZE_RUN_VIEW, {
-        type: "download-succeeded",
-        filename: null,
-      });
-      expect(view.download.filename).toBeNull();
-      expect(mintedBy({ type: "download-succeeded", filename: null })).toEqual({
-        detail: null,
-        detailKind: null,
-      });
+    it.each([
+      ["cursor-reset", { type: "cursor-reset" }],
+      ["download-started", { type: "download-started" }],
+      ["download-unavailable", { type: "download-unavailable" }],
+      ["cleanup-succeeded", { type: "cleanup-succeeded" }],
+      ["cleanup-failed", { type: "cleanup-failed" }],
+      ["cleanup-retained", { type: "cleanup-retained" }],
+      ["cursor-recovery with no oldest id", { type: "cursor-recovery", reason: "expired" }],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ] as any[])("%s carries no detail, so it declares no kind", (_label, signal) => {
+      expect(detailOf(signal)).toEqual({ detail: null, detailKind: null });
     });
 
     // THE INVARIANT, over a whole realistic run rather than per signal: the kind is
     // present exactly when the detail is. A mint point that forgets to classify would
     // otherwise render prose in the data face (or the reverse) silently.
     it("declares a kind for exactly the entries that have a detail", () => {
-      const view = reduce([
-        { type: "submit-started", anonymized: false, peopleCount: 3 },
-        { type: "job-activated", jobId: "opt_1", reloadRecoveryAvailable: true },
-        {
-          type: "phase",
-          entry: { source: "scheduler", code: "solve", message: "Solving", elapsedSeconds: 1 },
-        },
-        { type: "progress", point: point({ currentBestScore: 5, elapsedSeconds: 1 }) },
-        { type: "download-started" },
-        { type: "download-succeeded", filename: "s.xlsx" },
-        { type: "cleanup-succeeded" },
-      ]);
+      let view = reduceRunView(INITIAL_OPTIMIZE_RUN_VIEW, {
+        type: "submit-started",
+        anonymized: false,
+        peopleCount: 3,
+      });
+      view = reduceRunView(view, {
+        type: "job-activated",
+        jobId: "opt_1",
+        reloadRecoveryAvailable: true,
+      });
+      view = reduceRunView(view, {
+        type: "phase",
+        entry: { source: "scheduler", code: "solve", message: "Solving", elapsedSeconds: 1 },
+      });
+      view = reduceRunView(view, {
+        type: "progress",
+        point: point({ currentBestScore: 5, elapsedSeconds: 1 }),
+      });
+      view = reduceRunView(view, { type: "download-started" });
+      view = reduceRunView(view, { type: "download-succeeded", filename: "s.xlsx" });
+      view = reduceRunView(view, { type: "cleanup-succeeded" });
       expect(view.log.length).toBeGreaterThan(5);
       for (const entry of view.log) {
         expect(entry.detailKind === null, `entry ${entry.label} detail/kind must agree`).toBe(

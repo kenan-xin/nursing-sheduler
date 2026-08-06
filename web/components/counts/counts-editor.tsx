@@ -88,7 +88,6 @@ export function CountsEditor() {
     replaceCard,
     remove,
     duplicate,
-    move,
     reorder,
     setDisabled,
     getCards,
@@ -350,7 +349,6 @@ export function CountsEditor() {
           onEdit={openEdit}
           onDuplicate={(uid) => withDraftDismissed(() => duplicate(uid))}
           onDelete={(uid) => withDraftDismissed(() => remove(uid))}
-          onMove={(uid, direction) => withDraftDismissed(() => move(uid, direction))}
           onReorder={(fromUid, toUid, position) =>
             withDraftDismissed(() => reorder(fromUid, toUid, position))
           }

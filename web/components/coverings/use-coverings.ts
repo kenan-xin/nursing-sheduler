@@ -34,8 +34,6 @@ export interface CoveringsController {
   update: (uid: string, form: CoveringFormState) => void;
   remove: (uid: string) => void;
   duplicate: (uid: string) => void;
-  /** Swap a card one slot up (-1) or down (+1) — the keyboard-supplement control. */
-  move: (uid: string, direction: -1 | 1) => void;
   /** Move the `from` card relative to the `to` card, honoring the pointer half. */
   reorder: (fromUid: string, toUid: string, position: DropPosition) => void;
   /** Set the UI-only `disabled` marker (M4). A disabled covering is excluded from
@@ -85,14 +83,6 @@ export function useCoverings(): CoveringsController {
         description: getUniqueCopyLabel(source.description ?? "", descriptions),
       };
       commitCoverings([...coverings.slice(0, index + 1), clone, ...coverings.slice(index + 1)]);
-    },
-    move(uid, direction) {
-      const index = coverings.findIndex((card) => card.uid === uid);
-      const target = index + direction;
-      if (index === -1 || target < 0 || target >= coverings.length) return;
-      const next = [...coverings];
-      [next[index], next[target]] = [next[target], next[index]];
-      commitCoverings(next);
     },
     reorder(fromUid, toUid, position) {
       const next = reorderByDrop(coverings, fromUid, toUid, position);

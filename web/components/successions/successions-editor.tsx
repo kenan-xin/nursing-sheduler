@@ -53,18 +53,8 @@ const INSTRUCTIONS = [
 ] as const;
 
 export function SuccessionsEditor() {
-  const {
-    state,
-    successions,
-    add,
-    update,
-    remove,
-    duplicate,
-    move,
-    reorder,
-    setDisabled,
-    getCards,
-  } = useSuccessions();
+  const { state, successions, add, update, remove, duplicate, reorder, setDisabled, getCards } =
+    useSuccessions();
   const [draft, setDraft] = useState<Draft | null>(null);
   // FR-PR-06: arm the shared open-draft navigation guard while a form is visible.
   useCardEditorDraftGuard("successions", !!draft);
@@ -189,7 +179,6 @@ export function SuccessionsEditor() {
           onEdit={openEdit}
           onDuplicate={(uid) => withDraftDismissed(() => duplicate(uid))}
           onDelete={(uid) => withDraftDismissed(() => remove(uid))}
-          onMove={(uid, direction) => withDraftDismissed(() => move(uid, direction))}
           onReorder={(fromUid, toUid, position) =>
             withDraftDismissed(() => reorder(fromUid, toUid, position))
           }
