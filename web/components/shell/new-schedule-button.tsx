@@ -16,7 +16,7 @@
 // Reset confirmation, the store call and `onResetComplete` are unchanged.
 
 import { useState } from "react";
-import { useScenarioStore, useHotStore, resetToNewScenario } from "@/lib/store";
+import { resetToNewScenario } from "@/lib/store";
 import { ConfirmDialog } from "./confirm-dialog";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -30,11 +30,24 @@ export interface StartOverCardProps {
 
 export function StartOverCard({ onResetComplete }: StartOverCardProps) {
   const [open, setOpen] = useState(false);
-  const scenario = useScenarioStore;
-  const hot = useHotStore;
 
   const handleConfirm = async () => {
-    await resetToNewScenario(scenario, hot);
+    // One atomic scenario switch: the fresh identity is created, acquired, and
+    // selected in a single transaction, and the old lease is released only once
+    // that succeeds.
+    //
+    // The outcome is BRANCHED ON, not merely awaited: a refused switch previously
+    // still reported "New schedule created" and ran the completion callback, so the
+    // user was told their workspace had been replaced when it had not.
+    const outcome = await resetToNewScenario();
+    if (!outcome.ok) {
+      toast.error(
+        outcome.reason === "not-owner"
+          ? "This schedule is being edited in another tab. Take over editing, then start over."
+          : "Could not start a new schedule — nothing was changed.",
+      );
+      return;
+    }
     onResetComplete?.();
     toast.success("New schedule created");
   };

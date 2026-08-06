@@ -76,9 +76,19 @@ export interface SaveShiftTypeCardResult {
   preferredCollapsed: boolean;
 }
 
-export type MutateScenario = (
+/**
+ * The durable write this module is handed — in the app, `scenarioCommands.mutate`.
+ *
+ * T03: it is ASYNC because the write is now a repository transaction, and the
+ * updater runs when the command reaches the head of the command queue. That is
+ * load-bearing here rather than incidental: this module signals a stale baseline,
+ * a validation failure, or a rename collision by THROWING from inside the updater,
+ * and reports its outcome from the same closure. Both only become observable once
+ * the command has actually run, so the caller must await.
+ */
+export type CommitScenarioPatch = (
   updater: (state: ScenarioUiState) => Partial<ScenarioUiState>,
-) => void;
+) => Promise<{ ok: boolean; reason?: string }>;
 
 export class ReservedShiftTypeError extends Error {
   constructor(id: EntityId) {
@@ -91,6 +101,22 @@ export class NumericShiftTypeStaffingError extends Error {
   constructor() {
     super("Give this shift a text code to set staffing here.");
     this.name = "NumericShiftTypeStaffingError";
+  }
+}
+
+/**
+ * The durable command was REFUSED (this tab is read-only, was taken over, or the
+ * document must be reloaded). Distinct from the validation errors above because
+ * nothing about the form is wrong — the tab simply may not write.
+ */
+export class ShiftSaveRefusedError extends Error {
+  constructor(reason: string) {
+    super(
+      reason === "not-owner"
+        ? "This schedule is being edited in another tab. Take over editing, then save again."
+        : "This shift could not be saved. Reload the page and try again.",
+    );
+    this.name = "ShiftSaveRefusedError";
   }
 }
 
@@ -322,14 +348,17 @@ function assertFormOpenIdentity(
 }
 
 /**
- * Save shift fields and the inline staffing baseline in exactly ONE live-state
- * mutation. Rename order is load-bearing: cascade first, then resolve and rebuild
+ * Save shift fields and the inline staffing baseline in exactly ONE durable
+ * commit. Rename order is load-bearing: cascade first, then resolve and rebuild
  * the requirement with the post-rename id.
+ *
+ * Rejects (rather than returning a result) when the updater refuses the save, so
+ * the caller's existing on-card error handling is unchanged apart from awaiting.
  */
-export function saveShiftTypeCard(
-  mutateScenario: MutateScenario,
+export async function saveShiftTypeCard(
+  commit: CommitScenarioPatch,
   input: SaveShiftTypeCardInput,
-): SaveShiftTypeCardResult {
+): Promise<SaveShiftTypeCardResult> {
   const originalId: EntityId = input.mode === "edit" ? input.shiftTypeId : input.fields.code;
   if (isDayStateSelector(String(originalId).toUpperCase())) {
     throw new ReservedShiftTypeError(originalId);
@@ -358,7 +387,7 @@ export function saveShiftTypeCard(
     preferredCollapsed: false,
   };
 
-  mutateScenario((live) => {
+  const outcome = await commit((live) => {
     if (input.mode === "edit" && input.staffing.type === "editable") {
       assertFormOpenIdentity(live, input.shiftTypeId, input.staffing.token);
     }
@@ -446,6 +475,11 @@ export function saveShiftTypeCard(
     };
     return applyRequirementPatch(next, patch);
   });
+
+  // A REFUSED command resolves rather than throwing, so the outcome has to be
+  // inspected. Without this the caller closed the form and reported a save that the
+  // repository had declined — the user's edit was gone and they were told it landed.
+  if (!outcome.ok) throw new ShiftSaveRefusedError(outcome.reason ?? "unknown");
 
   return result;
 }

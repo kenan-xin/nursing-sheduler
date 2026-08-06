@@ -20,7 +20,7 @@
 import { useEffect, useState } from "react";
 import { OptimizeAndExportScreen } from "@/components/optimize/optimize-and-export-screen";
 import { Surface } from "@/components/ui/surface";
-import { useScenarioStore } from "@/lib/store";
+import { scenarioCommands } from "@/lib/store";
 import type {
   PrepareOptimizeSubmissionOptions,
   PrepareOptimizeSubmissionResult,
@@ -62,24 +62,36 @@ export default function OptimizeDurableFixtureClient() {
   const [seeded, setSeeded] = useState(false);
 
   useEffect(() => {
-    // Merge the readiness fields onto the already fully-initialized store so the
-    // required-data gate passes; every other slice keeps its valid initial shape.
-    useScenarioStore.getState().mutateScenario({
-      rangeStart: "2026-01-01",
-      rangeEnd: "2026-01-07",
-      staff: [{ id: "P1", description: "", history: [] }],
-      shifts: [
-        {
-          id: "Day",
-          description: "",
-          startTime: "08:00",
-          endTime: "16:00",
-          restMinutes: 0,
-          durationMinutes: 480,
-        },
-      ],
-    });
-    setSeeded(true);
+    // Merge the readiness fields onto the committed scenario so the required-data
+    // gate passes; every other slice keeps its valid initial shape.
+    //
+    // AWAITED before the screen mounts: T03 makes this a durable repository
+    // command, so flipping `seeded` first would mount the Optimize screen against
+    // a scenario the commit had not reached yet — which is precisely the
+    // "seeding…" gate's job to prevent.
+    let cancelled = false;
+    void scenarioCommands
+      .mutate({
+        rangeStart: "2026-01-01",
+        rangeEnd: "2026-01-07",
+        staff: [{ id: "P1", description: "", history: [] }],
+        shifts: [
+          {
+            id: "Day",
+            description: "",
+            startTime: "08:00",
+            endTime: "16:00",
+            restMinutes: 0,
+            durationMinutes: 480,
+          },
+        ],
+      })
+      .then(() => {
+        if (!cancelled) setSeeded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   if (!seeded) {

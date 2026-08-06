@@ -284,7 +284,7 @@ describe("CellPreferenceEditor — implicit dismissal discards the draft", () =>
       target: { value: "5" },
     });
     await userEvent.keyboard("{Escape}");
-    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    await waitFor(async () => expect(onClose).toHaveBeenCalledOnce());
     expect(onSave).not.toHaveBeenCalled();
     expect(onClear).not.toHaveBeenCalled();
   });
@@ -294,7 +294,7 @@ describe("CellPreferenceEditor — implicit dismissal discards the draft", () =>
     fireEvent.click(screen.getByTestId("cell-editor-tab-leave"));
     const overlay = document.querySelector("[data-slot='dialog-overlay']") as HTMLElement;
     await userEvent.click(overlay);
-    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    await waitFor(async () => expect(onClose).toHaveBeenCalled());
     expect(onSave).not.toHaveBeenCalled();
     expect(onClear).not.toHaveBeenCalled();
   });

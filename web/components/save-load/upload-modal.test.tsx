@@ -31,7 +31,7 @@ describe("UploadModal — extension validation (FR-SL-10 / V1)", () => {
   it("accepts a dropped .yaml file", async () => {
     const { onFile } = renderModal();
     dropFile("scenario.yaml");
-    await waitFor(() => expect(onFile).toHaveBeenCalledTimes(1));
+    await waitFor(async () => expect(onFile).toHaveBeenCalledTimes(1));
     expect(alertSpy).not.toHaveBeenCalled();
   });
 
@@ -114,7 +114,7 @@ describe("UploadModal — each action delegates exactly once", () => {
     const file = new File(["meta: {}"], "scenario.yaml", { type: "text/yaml" });
     Object.defineProperty(file, "text", { value: () => Promise.resolve("meta: {}") });
     await userEvent.upload(screen.getByTestId("upload-file-input"), file);
-    await waitFor(() => expect(onFile).toHaveBeenCalledExactlyOnceWith("meta: {}"));
+    await waitFor(async () => expect(onFile).toHaveBeenCalledExactlyOnceWith("meta: {}"));
   });
 
   it("the sample affordance delegates once and reads no file", async () => {
@@ -127,13 +127,13 @@ describe("UploadModal — each action delegates exactly once", () => {
   it("Escape, a backdrop press and the close control each emit one close", async () => {
     const escape = renderOverlay();
     await userEvent.keyboard("{Escape}");
-    await waitFor(() => expect(escape.onOpenChange).toHaveBeenCalledOnce());
+    await waitFor(async () => expect(escape.onOpenChange).toHaveBeenCalledOnce());
     expect(escape.onOpenChange.mock.calls[0][0]).toBe(false);
     cleanup();
 
     const backdrop = renderOverlay();
     await userEvent.click(document.querySelector("[data-slot='dialog-overlay']") as HTMLElement);
-    await waitFor(() => expect(backdrop.onOpenChange).toHaveBeenCalledOnce());
+    await waitFor(async () => expect(backdrop.onOpenChange).toHaveBeenCalledOnce());
     cleanup();
 
     const closed = renderOverlay();

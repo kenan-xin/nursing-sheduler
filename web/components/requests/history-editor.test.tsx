@@ -151,7 +151,7 @@ describe("HistoryEditor — dismissal closes without mutating", () => {
   it("Escape closes without a new mutation", async () => {
     const { onSet, onClear, onClose } = renderEditor();
     await userEvent.keyboard("{Escape}");
-    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    await waitFor(async () => expect(onClose).toHaveBeenCalledOnce());
     expect(onSet).not.toHaveBeenCalled();
     expect(onClear).not.toHaveBeenCalled();
   });
@@ -160,7 +160,7 @@ describe("HistoryEditor — dismissal closes without mutating", () => {
     const { onSet, onClear, onClose } = renderEditor();
     const overlay = document.querySelector("[data-slot='dialog-overlay']") as HTMLElement;
     await userEvent.click(overlay);
-    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    await waitFor(async () => expect(onClose).toHaveBeenCalled());
     expect(onSet).not.toHaveBeenCalled();
     expect(onClear).not.toHaveBeenCalled();
   });

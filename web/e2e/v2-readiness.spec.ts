@@ -41,11 +41,11 @@ async function readScenario(page: import("@playwright/test").Page) {
   return page.evaluate(() => {
     const store = (
       window as unknown as {
-        __nsStore?: { scenario: { getState(): Record<string, unknown> } };
+        __nsStore?: { scenario(): Record<string, unknown> };
       }
     ).__nsStore;
     if (!store) return null;
-    const state = store.scenario.getState();
+    const state = store.scenario();
     return {
       staff: (state.staff as unknown[] | undefined)?.length ?? 0,
       shifts: (state.shifts as unknown[] | undefined)?.length ?? 0,

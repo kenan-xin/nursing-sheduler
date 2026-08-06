@@ -27,12 +27,12 @@
 
 import { createEmptyScenarioUiState, type ScenarioUiState } from "@/lib/scenario";
 import {
+  decodeNonFiniteNumbers,
   migrateScenarioState,
   sanitizePersistedScenario,
   SCENARIO_PERSIST_KEY,
   SCENARIO_PERSIST_VERSION,
 } from "@/lib/store/persistence";
-import { decodeNonFiniteNumbers } from "@/lib/store/scenario-store";
 import { commandDigest } from "./digest";
 import { ensureGeneration, generationScopesFor } from "./generations";
 import type { NurseSchedulerDb } from "./schema";
@@ -53,13 +53,30 @@ export type LegacyMigrationStatus =
   | "migrated"
   /** A previous attempt was interrupted; its partial work was discarded and redone. */
   | "recovered"
-  /** The legacy record could not be decoded. A fresh scenario was minted instead. */
+  /**
+   * The legacy record could not be decoded. NOTHING is minted: the bytes are left
+   * intact and the caller routes the user to the existing recoverable-error/reset
+   * surface.
+   */
   | "corrupt";
 
 export interface LegacyMigrationOutcome {
   status: LegacyMigrationStatus;
-  scenarioId: string;
-  envelope: ScenarioEnvelopeV3;
+  /**
+   * The migrated scenario identity, or `null` for `corrupt` — corruption mints no
+   * scenario, so there is no identity to hand out.
+   */
+  scenarioId: string | null;
+  /**
+   * The migrated envelope, or `null` for `corrupt`.
+   *
+   * Publishing an empty envelope on corruption was actively harmful: the user saw a
+   * healthy blank workspace, edited it, and the NEXT boot — still finding a `failed`
+   * marker — discarded that scenario as "partial work" before minting another. The
+   * honest outcome is no authority at all, so the shell shows its recovery surface
+   * and nothing is editable until the user resets.
+   */
+  envelope: ScenarioEnvelopeV3 | null;
   /** Populated for `corrupt`; the legacy row is left intact for the legacy path. */
   reason: string | null;
 }
@@ -119,44 +136,17 @@ export async function migrateLegacyScenarioRecord(
   const newId = config.newId ?? (() => crypto.randomUUID());
   const legacyKey = config.legacyKey ?? SCENARIO_PERSIST_KEY;
 
-  const existing = await readLegacyMigrationRecord(db);
-
-  if (existing?.state === "complete" && existing.scenarioId) {
-    const envelope = await db.scenarioEnvelopes.get(existing.scenarioId);
-    if (envelope) {
-      return {
-        status: "already-complete",
-        scenarioId: existing.scenarioId,
-        envelope,
-        reason: null,
-      };
-    }
-    // The marker claims completion but the envelope is gone (a manual wipe, a
-    // partially cleared profile). Treat it as interrupted rather than trusting the
-    // marker: the marker describes work, not truth.
-  }
-
-  // Any surviving marker at this point means a previous attempt did not finish
-  // cleanly — the clean-completion case returned above.
-  const recovering = existing !== undefined;
-
-  // Step 1 — claim the attempt in its OWN transaction, so an interruption before
-  // or during step 2 is detectable on the next run.
-  const startedAt = now().toISOString();
-  await db.repositoryMeta.put({
-    key: LEGACY_MIGRATION_KEY,
-    state: "in-progress",
-    scenarioId: null,
-    sourceKey: legacyKey,
-    attempts: (existing?.attempts ?? 0) + 1,
-    reason: null,
-    startedAt,
-    finishedAt: null,
-  });
-
-  // Step 2 — discard any partial work from an interrupted attempt, then migrate.
-  // One transaction: either a complete envelope + genesis commit + marker lands,
-  // or nothing does.
+  // ONE transaction covers claim, RE-CHECK, and mint.
+  //
+  // Reading and claiming the marker outside the data transaction split authority on
+  // a concurrent first boot: two tabs (two IndexedDB connections) both observed no
+  // marker, then each serialized mint minted a DIFFERENT scenario, the last marker
+  // won, and the two tabs came up on different identities — neither of them
+  // read-only, because they were not contending for the same lease at all.
+  //
+  // IndexedDB serializes overlapping readwrite transactions over the same stores
+  // ACROSS connections, so re-reading the marker inside the transaction is what
+  // makes the loser observe the winner's work and adopt it instead of minting.
   return db.transaction(
     "rw",
     [
@@ -169,6 +159,56 @@ export async function migrateLegacyScenarioRecord(
     async (): Promise<LegacyMigrationOutcome> => {
       const at = now();
       const iso = at.toISOString();
+      const startedAt = iso;
+
+      // Re-read INSIDE the transaction. This is the recheck: a concurrent boot that
+      // completed while we queued is observed here, and adopted.
+      const existing = await readLegacyMigrationRecord(db);
+
+      if (existing?.state === "complete" && existing.scenarioId) {
+        const envelope = await db.scenarioEnvelopes.get(existing.scenarioId);
+        if (envelope) {
+          return {
+            status: "already-complete",
+            scenarioId: existing.scenarioId,
+            envelope,
+            reason: null,
+          };
+        }
+        // The marker claims completion but the envelope is gone (a manual wipe, a
+        // partially cleared profile). Treat it as interrupted rather than trusting
+        // the marker: the marker describes work, not truth.
+      }
+
+      // A `failed` marker whose corruption has not been resolved must NOT be retried
+      // into a fresh empty scenario — that is the path that used to discard the
+      // user's post-"recovery" edits. Report the corruption again, unchanged.
+      if (existing?.state === "failed" && existing.scenarioId === null) {
+        return {
+          status: "corrupt",
+          scenarioId: null,
+          envelope: null,
+          reason: existing.reason,
+        };
+      }
+
+      // Any surviving marker at this point means a previous attempt did not finish
+      // cleanly — the clean-completion case returned above.
+      const recovering = existing !== undefined;
+
+      // Claim the attempt. Inside the transaction it is still a durable claim: a
+      // crash mid-transaction aborts it whole, and a crash after it commits leaves
+      // `in-progress` for the next run to recover from.
+      await db.repositoryMeta.put({
+        key: LEGACY_MIGRATION_KEY,
+        state: "in-progress",
+        scenarioId: null,
+        sourceKey: legacyKey,
+        attempts: (existing?.attempts ?? 0) + 1,
+        reason: null,
+        startedAt,
+        finishedAt: null,
+      });
 
       if (existing?.scenarioId) {
         await db.scenarioEnvelopes.delete(existing.scenarioId);
@@ -190,13 +230,31 @@ export async function migrateLegacyScenarioRecord(
           snapshot = decodeLegacyRecord(raw.value);
           status = recovering ? "recovered" : "migrated";
         } catch (error) {
-          // Fail SOFT, not closed: the legacy row is untouched, so the live legacy
-          // path still reaches its own `recoverable-error` recovery and can offer
-          // the user a reset. Blocking the repository behind a corrupt legacy
-          // record would turn one recoverable failure into two.
-          snapshot = { scenario: createEmptyScenarioUiState(), backupFingerprint: null };
-          status = "corrupt";
-          reason = error instanceof Error ? error.message : String(error);
+          // CORRUPT: record the failure and mint NOTHING.
+          //
+          // The legacy bytes are left byte-for-byte intact, so a future build can
+          // still recover them and the user's data is never destroyed by a decoder
+          // bug. What we must not do is publish an empty envelope: that presented
+          // corruption as a healthy blank workspace, invited edits into it, and let
+          // the next boot delete those edits as "partial migration work". Returning
+          // no authority routes the shell to its existing recoverable-error/reset
+          // surface, which is the one place that can honestly offer a choice.
+          await db.repositoryMeta.put({
+            key: LEGACY_MIGRATION_KEY,
+            state: "failed",
+            scenarioId: null,
+            sourceKey: legacyKey,
+            attempts: (existing?.attempts ?? 0) + 1,
+            reason: error instanceof Error ? error.message : String(error),
+            startedAt,
+            finishedAt: iso,
+          });
+          return {
+            status: "corrupt",
+            scenarioId: null,
+            envelope: null,
+            reason: error instanceof Error ? error.message : String(error),
+          };
         }
       }
 
@@ -242,9 +300,7 @@ export async function migrateLegacyScenarioRecord(
       }
       await db.repositoryMeta.put({
         key: LEGACY_MIGRATION_KEY,
-        // `corrupt` is recorded as `failed` so a later build can find and retry it;
-        // the repository is still usable in the meantime.
-        state: status === "corrupt" ? "failed" : "complete",
+        state: "complete",
         scenarioId,
         sourceKey: legacyKey,
         attempts: (existing?.attempts ?? 0) + 1,

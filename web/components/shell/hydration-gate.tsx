@@ -1,23 +1,31 @@
 "use client";
 
-// Hydration gate + continuity (T08). On client mount this runs the T04
-// hydration lifecycle (hydrateScenarioStore), registers the pagehide flush so
-// pending writes survive a tab-close, and drives the undo/redo shortcuts. Until
-// the store reports `ready` (or `recoverable-error`) the shell shows a skeleton
-// so the user never sees the empty default before the persisted record loads
-// (tech-plan §4 hydration protocol).
+// Hydration gate + continuity (T08, rebased onto repository authority in T03). On
+// client mount this brings the authority up (`initializeScenarioAuthority`),
+// registers the page-lifecycle listeners that keep this tab's ownership honest
+// across BFCache/visibility/reconnect, mounts the lease heartbeat, and drives the
+// undo/redo shortcuts. Until the store reports `ready` (or `recoverable-error`) the
+// shell shows a skeleton so the user never sees the empty default before the
+// committed scenario is read (tech-plan §4 hydration protocol).
 //
-// `recoverable-error` (corrupt IndexedDB record) surfaces a reset affordance via
-// resetToNewScenario — the same T04 recovery path the New button uses.
+// The pre-T03 gate also registered a `pagehide` flush, because `persist` wrote
+// behind every `set` and a tab-close could strand a pending write. There is no
+// write-behind any more — a command's own transaction is the write — so `pagehide`
+// now does the opposite job: it RELEASES the lease so a peer tab need not wait out
+// the expiry (`lifecycle.ts`).
+//
+// `recoverable-error` (an unreadable durable record) surfaces a reset affordance
+// via resetToNewScenario — the same recovery path the New button uses.
 
 import { useEffect, useState } from "react";
 import {
-  useScenarioStore,
   useHotStore,
-  hydrateScenarioStore,
-  registerPagehideFlush,
+  initializeScenarioAuthority,
+  registerScenarioLifecycle,
   resetToNewScenario,
+  useOwnershipController,
 } from "@/lib/store";
+import { OwnershipBanner } from "./ownership-banner";
 import { SkeletonCard } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "./confirm-dialog";
@@ -28,18 +36,20 @@ import { useRouteValidityGate } from "./use-route-validity-gate";
 import { toast } from "sonner";
 
 export function HydrationGate({ children }: { children: React.ReactNode }) {
-  const scenario = useScenarioStore;
   const hot = useHotStore;
   const status = useHotStore((s) => s.hydrationStatus);
   const [resetOpen, setResetOpen] = useState(false);
 
-  // One-shot: hydrate, register pagehide flush, persist mode.
+  // One-shot bring-up: migrate the legacy record, reread this tab's persisted
+  // selection and lease, acquire when free, and register the page-lifecycle
+  // listeners that keep this tab's authority honest across BFCache, visibility
+  // restore, and reconnect.
   useEffect(() => {
-    void hydrateScenarioStore(scenario, hot);
-    const unreg = registerPagehideFlush(scenario);
-    return unreg;
-  }, [scenario, hot]);
+    void initializeScenarioAuthority(hot);
+    return registerScenarioLifecycle();
+  }, [hot]);
 
+  useOwnershipController();
   useUndoRedoShortcuts();
   usePersistenceStatusController();
   useSyncModePersistence();
@@ -88,7 +98,14 @@ export function HydrationGate({ children }: { children: React.ReactNode }) {
           confirmLabel="Reset Data"
           variant="destructive"
           onConfirm={async () => {
-            await resetToNewScenario(scenario, hot);
+            const outcome = await resetToNewScenario();
+            if (!outcome.ok) {
+              toast.error("Could not start a new schedule — the stored data is unchanged.");
+              return;
+            }
+            // The gate is showing because bring-up found no usable authority, so a
+            // successful reset has to re-run it before the app can be used.
+            await initializeScenarioAuthority(hot);
             toast.success("New schedule created");
           }}
         />
@@ -96,5 +113,13 @@ export function HydrationGate({ children }: { children: React.ReactNode }) {
     );
   }
 
-  return <>{children}</>;
+  // The ownership banner sits INSIDE the gate, above the app, so a read-only tab
+  // still renders the whole application (inspection stays available) with the one
+  // surface that explains why nothing can be changed.
+  return (
+    <>
+      <OwnershipBanner />
+      {children}
+    </>
+  );
 }

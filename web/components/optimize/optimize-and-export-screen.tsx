@@ -13,7 +13,15 @@ import { cn } from "@/lib/utils";
 import { rangeDayCount } from "@/lib/dates";
 import { toCanonicalScenarioDocument } from "@/lib/scenario/canonical";
 import type { CardsByKind } from "@/lib/scenario";
-import { useScenarioStore } from "@/lib/store";
+import {
+  canMutateScenario,
+  drainScenarioCommands,
+  readAuthoritativeScenarioOwnership,
+  scenarioCommands,
+  useAuthorityStore,
+  useScenarioStore,
+} from "@/lib/store";
+import { toast } from "sonner";
 import { confirmDialog } from "@/components/shell/confirm-store";
 import {
   OPTIMIZE_TIMEOUT_MAX_SECONDS,
@@ -249,19 +257,75 @@ export function OptimizeAndExportScreen({
   }, [view.lifecycle, view.jobId, view.error, observability]);
 
   // --- actions ---------------------------------------------------------------
-  const buildSubmitInput = useCallback((): OptimizeRunSubmitInput | null => {
+  /**
+   * Bind the ordinary run to durable truth before its payload is built (T03).
+   *
+   * Two things the projection alone cannot supply:
+   *
+   *   • a scenario command is committed asynchronously, so a durable edit issued a
+   *     moment before Optimize was clicked — an Adjust blur, a paint gesture's
+   *     mouse-up — may still be in the queue. Draining first means the submitted
+   *     document is the COMMITTED one rather than whichever frame the click landed
+   *     on;
+   *   • ownership is read from the PERSISTED lease, not from this tab's projected
+   *     `ownership`. A peer takeover that changed nothing but the lease (and whose
+   *     BroadcastChannel hint was delayed or missed) leaves the projection
+   *     believing it is still the owner; the persisted lease disagrees, and this
+   *     read is what catches it. An unchanged envelope revision is NOT a licence —
+   *     ownership is the condition.
+   *
+   * Deliberately not a GATE: Optimize's readiness rules, payload shape, error copy,
+   * outcomes and run semantics are unchanged. Attaching a semantic basis to a run
+   * is T08's, not this ticket's.
+   */
+  const preflightAuthority = useCallback(async (): Promise<boolean> => {
+    // Drain so the committed document — not an in-flight frame — is what the
+    // payload is built from.
+    await drainScenarioCommands();
+    // Read the persisted lease: the live owner, the exact selected scenario, and
+    // the envelope revision — NOT the projection. This is the final pre-submit
+    // gate: if another tab took over without writing content and its hint was
+    // missed, the projection still says "owner" but the persisted lease names the
+    // peer. An unchanged revision does not reconcile this away.
+    const ownership = await readAuthoritativeScenarioOwnership();
+    if (ownership === null || !ownership.isOwner) return false;
+    // Bind the persisted revision to payload preparation: if the projection is
+    // behind durable truth, refresh it FIRST so the document is built from the
+    // committed state, not a stale frame.
+    if (ownership.documentRevision !== useAuthorityStore.getState().documentRevision) {
+      await scenarioCommands.reconcile();
+      // Re-check the persisted owner after reconcile. A queued transition may have
+      // changed ownership between the first read and now; reconciling is itself a
+      // lifecycle operation that could discover a takeover. The projection's
+      // `canMutateScenario` is an honest signal here ONLY because the reconcile
+      // just refreshed it from durable truth.
+      const reread = await readAuthoritativeScenarioOwnership();
+      if (reread === null || !reread.isOwner) return false;
+    }
+    return true;
+  }, []);
+
+  const buildSubmitInput = useCallback(async (): Promise<OptimizeRunSubmitInput | null> => {
     const parsed = parseTimeoutInput(timeoutValue);
     if (!parsed.ok) {
       setTimeoutError(TIMEOUT_ERROR);
       return null;
     }
     setTimeoutError(null);
+    // Validation stays FIRST, so an invalid timeout still reports itself without
+    // touching the repository or the run.
+    if (!(await preflightAuthority())) {
+      toast.error(
+        "This schedule is being edited in another tab. Take over editing before optimising.",
+      );
+      return null;
+    }
     const document = toCanonicalScenarioDocument(useScenarioStore.getState());
     return { document, anonymize, prettify, timeout: parsed.value };
-  }, [anonymize, prettify, timeoutValue]);
+  }, [anonymize, prettify, timeoutValue, preflightAuthority]);
 
   const onSubmit = useCallback(async () => {
-    const input = buildSubmitInput();
+    const input = await buildSubmitInput();
     if (input === null) return;
     runStartRef.current = Date.now();
     emittedTerminalRef.current = null;
@@ -276,7 +340,7 @@ export function OptimizeAndExportScreen({
     // overwriting the real (e.g. worker_lost) result.
     const released = await terminal.cleanup();
     if (released !== "cleaned") return;
-    const input = buildSubmitInput();
+    const input = await buildSubmitInput();
     if (input === null) return;
     runStartRef.current = Date.now();
     emittedTerminalRef.current = null;
@@ -343,24 +407,32 @@ export function OptimizeAndExportScreen({
     recovery.state.kind === "interrupted" || recovery.state.kind === "unreadable";
   const cleanupBlocking =
     terminal.cleanupPhase === "cleaning" || terminal.cleanupPhase === "failed";
+  // A non-owner may inspect everything and change nothing, and an ordinary run is a
+  // scenario-bound operation on a document another tab is editing. The gate is the
+  // SAME predicate every durable command uses, so "can I edit?" and "can I run?"
+  // cannot drift apart.
+  const canWrite = useAuthorityStore(canMutateScenario);
   const submitEnabled =
     readiness.ready &&
+    canWrite &&
     serverInfo.status === "online" &&
     !active &&
     !recoveryBooting &&
     !recoveryBlocking &&
     !cleanupBlocking;
-  const disabledReason = recoveryBooting
-    ? "Checking for a previous optimisation run…"
-    : recoveryBlocking
-      ? "Resolve the recovered run above (Forget it) before starting a new one."
-      : cleanupBlocking
-        ? "Release the finished run above (Retry cleanup or Abandon) before starting a new one."
-        : !readiness.ready
-          ? "Complete the missing schedule configuration before optimising."
-          : serverInfo.status !== "online"
-            ? "Backend unavailable. Check that the configured backend is running."
-            : null;
+  const disabledReason = !canWrite
+    ? "This schedule is being edited in another tab. Take over editing to optimise here."
+    : recoveryBooting
+      ? "Checking for a previous optimisation run…"
+      : recoveryBlocking
+        ? "Resolve the recovered run above (Forget it) before starting a new one."
+        : cleanupBlocking
+          ? "Release the finished run above (Retry cleanup or Abandon) before starting a new one."
+          : !readiness.ready
+            ? "Complete the missing schedule configuration before optimising."
+            : serverInfo.status !== "online"
+              ? "Backend unavailable. Check that the configured backend is running."
+              : null;
   const reloadRecoveryUnavailable = controller.activation?.reloadRecoveryAvailable === false;
 
   return (

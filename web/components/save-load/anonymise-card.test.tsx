@@ -4,35 +4,30 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { prepareScenarioLoad, serializeScenario } from "@/lib/scenario";
 import { makeValidUiState } from "@/lib/scenario/test-fixtures";
-import {
-  drainScenarioPersist,
-  loadScenario,
-  resetToNewScenario,
-  useHotStore,
-  useScenarioStore,
-} from "@/lib/store";
+import { loadScenario } from "@/lib/store";
 import { AnonymiseCard } from "./anonymise-card";
+import { resetScenarioForTest, drainScenarioCommands } from "@/lib/store/test-authority";
 
 async function seedValidScenario() {
-  await resetToNewScenario(useScenarioStore, useHotStore);
-  await drainScenarioPersist(useScenarioStore);
+  await resetScenarioForTest();
+  await drainScenarioCommands();
   const result = prepareScenarioLoad(serializeScenario(makeValidUiState()));
   if (!result.target) throw new Error("fixture must normalize cleanly");
-  loadScenario(useScenarioStore, useHotStore, result.target);
+  loadScenario(result.target);
 }
 
 beforeEach(async () => {
   await seedValidScenario();
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
 });
 
 describe("AnonymiseCard — render (no infinite-loop regression)", () => {
   // Same latent `useScenarioStore(pickScenario)` loop guard as the other
   // save-load store consumers — a render loop would throw and fail this test.
-  it("mounts without a render loop", () => {
+  it("mounts without a render loop", async () => {
     render(<AnonymiseCard />);
     expect(screen.getByTestId("anonymise-card")).toBeInTheDocument();
   });
@@ -42,7 +37,7 @@ describe("AnonymiseCard — scatter fallback warning (FR-SL-38 / V20 / AC-SL-24)
   // The fixture's only date group is "FirstTwo" — neither WORKDAY nor
   // NON-WORKDAY is present, so turning Scatter on should surface the fallback
   // warning with both group ids named.
-  it("shows the fallback warning once Scatter is toggled on", () => {
+  it("shows the fallback warning once Scatter is toggled on", async () => {
     render(<AnonymiseCard />);
     expect(screen.queryByTestId("anonymise-scatter-fallback-warning")).not.toBeInTheDocument();
 
@@ -53,7 +48,7 @@ describe("AnonymiseCard — scatter fallback warning (FR-SL-38 / V20 / AC-SL-24)
     );
   });
 
-  it("hides the warning again when Scatter is toggled back off", () => {
+  it("hides the warning again when Scatter is toggled back off", async () => {
     render(<AnonymiseCard />);
     fireEvent.click(screen.getByTestId("anonymise-toggle-scatter"));
     expect(screen.getByTestId("anonymise-scatter-fallback-warning")).toBeInTheDocument();

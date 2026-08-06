@@ -105,8 +105,12 @@ import {
 } from "./core";
 import { TransferList } from "./transfer-list";
 
-type Commit = (next: ScenarioUiState) => void;
-type CurrentState = () => ScenarioUiState;
+/**
+ * Apply an operation to the durable scenario. The callback runs AT THE QUEUE HEAD,
+ * against the state the previous command committed — so rapid actions compose
+ * instead of overwriting each other. Returning `null` withdraws the write.
+ */
+type Commit = (transform: (live: ScenarioUiState) => ScenarioUiState | null) => void;
 
 // ---------------------------------------------------------------------------
 // Public config — copy + explicit flags. Every field is optional and defaults to
@@ -253,7 +257,6 @@ export interface GroupsSectionProps<TItem extends EditorItemBase> {
   items: TItem[];
   groups: EditorGroup[];
   commit: Commit;
-  currentState: CurrentState;
   /** True if the relevant item/group slice changed since the open form's form-open
    *  token — the parent's synchronous stale-Save guard, shared with its close effect. */
   isStale: () => boolean;
@@ -277,7 +280,6 @@ export function GroupsSection<TItem extends EditorItemBase>({
   items,
   groups,
   commit,
-  currentState,
   isStale,
   editing,
   addOpen,
@@ -298,7 +300,7 @@ export function GroupsSection<TItem extends EditorItemBase>({
     setDragId(null);
     setOverId(null);
     if (from !== -1 && to !== -1 && from !== to) {
-      commit(reorderGroups(currentState(), descriptor, from, to));
+      commit((live) => reorderGroups(live, descriptor, from, to));
     }
   };
 
@@ -306,7 +308,7 @@ export function GroupsSection<TItem extends EditorItemBase>({
   // `reorderGroups` commit ⇒ one undo entry, exactly like a drop.
   const move = (from: number, to: number) => {
     if (to < 0 || to >= groups.length || from === to) return;
-    commit(reorderGroups(currentState(), descriptor, from, to));
+    commit((live) => reorderGroups(live, descriptor, from, to));
   };
 
   // The canonical empty state (`ScreenStaff.dc.html:126-136`,
@@ -388,7 +390,6 @@ export function GroupsSection<TItem extends EditorItemBase>({
             items={items}
             groups={groups}
             commit={commit}
-            currentState={currentState}
             isStale={isStale}
             onDone={onCloseForm}
             cfg={cfg}
@@ -413,7 +414,6 @@ export function GroupsSection<TItem extends EditorItemBase>({
             items={items}
             groups={groups}
             commit={commit}
-            currentState={currentState}
             isEditing={editingGroupId === group.id}
             onEdit={() => onEditGroup(group.id)}
             onCloseForm={onCloseForm}
@@ -485,7 +485,6 @@ function GroupRow<TItem extends EditorItemBase>({
   items,
   groups,
   commit,
-  currentState,
   isEditing,
   onEdit,
   onCloseForm,
@@ -509,7 +508,6 @@ function GroupRow<TItem extends EditorItemBase>({
   items: TItem[];
   groups: EditorGroup[];
   commit: Commit;
-  currentState: CurrentState;
   isEditing: boolean;
   onEdit: () => void;
   onCloseForm: () => void;
@@ -541,7 +539,6 @@ function GroupRow<TItem extends EditorItemBase>({
           items={items}
           groups={groups}
           commit={commit}
-          currentState={currentState}
           isStale={isStale}
           onDone={onCloseForm}
           cfg={cfg}
@@ -671,7 +668,7 @@ function GroupRow<TItem extends EditorItemBase>({
             variant="outline"
             aria-label="Duplicate group"
             data-testid={`group-dup-${group.id}`}
-            onClick={() => commit(duplicateGroup(currentState(), descriptor, group.id))}
+            onClick={() => commit((live) => duplicateGroup(live, descriptor, group.id))}
           >
             <FaCopy />
           </Button>
@@ -682,7 +679,7 @@ function GroupRow<TItem extends EditorItemBase>({
             data-testid={`group-delete-${group.id}`}
             onClick={() => {
               onCloseForm();
-              commit(deleteGroup(currentState(), descriptor, group.id));
+              commit((live) => deleteGroup(live, descriptor, group.id));
             }}
           >
             <FaTrash />
@@ -713,7 +710,6 @@ function GroupForm<TItem extends EditorItemBase>({
   items,
   groups,
   commit,
-  currentState,
   isStale,
   onDone,
   cfg,
@@ -724,7 +720,6 @@ function GroupForm<TItem extends EditorItemBase>({
   items: TItem[];
   groups: EditorGroup[];
   commit: Commit;
-  currentState: CurrentState;
   isStale: () => boolean;
   onDone: () => void;
   cfg: ResolvedConfig;
@@ -773,26 +768,30 @@ function GroupForm<TItem extends EditorItemBase>({
       return;
     }
     try {
-      let next = currentState();
-      let gid: string;
-      if (mode === "add") {
-        next = addGroup(next, descriptor, {
-          id: idCheck.id,
-          description: description.trim() || undefined,
-        });
-        gid = idCheck.id;
-      } else {
-        gid = group!.id;
-        if (idChanged) {
-          next = renameGroup(next, descriptor, group!.id, idCheck.id);
+      // The whole compound save — add-or-rename, fields, membership — is ONE
+      // queue-head transform, so every step applies to the committed groups rather
+      // than to the snapshot this form was rendered from.
+      commit((live) => {
+        let next = live;
+        let gid: string;
+        if (mode === "add") {
+          next = addGroup(next, descriptor, {
+            id: idCheck.id,
+            description: description.trim() || undefined,
+          });
           gid = idCheck.id;
+        } else {
+          gid = group!.id;
+          if (idChanged) {
+            next = renameGroup(next, descriptor, group!.id, idCheck.id);
+            gid = idCheck.id;
+          }
+          next = updateGroupFields(next, descriptor, gid, {
+            description: description.trim() || undefined,
+          });
         }
-        next = updateGroupFields(next, descriptor, gid, {
-          description: description.trim() || undefined,
-        });
-      }
-      next = writeGroupMembers(next, descriptor, gid, draftMembers);
-      commit(next);
+        return writeGroupMembers(next, descriptor, gid, draftMembers);
+      });
       toast.success(`Group “${idCheck.id}” ${mode === "add" ? "added" : "saved"}.`);
       onDone();
     } catch (err) {

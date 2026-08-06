@@ -39,13 +39,7 @@ import { convertWorkspaceForOptimize, serializeWorkspace } from "../workspace";
 import { prepareScenarioLoad } from "../prepare-scenario-load";
 import { makeValidUiState } from "../test-fixtures";
 import type { ScenarioUiState } from "../types";
-import {
-  drainScenarioPersist,
-  loadScenario,
-  resetToNewScenario,
-  useHotStore,
-  useScenarioStore,
-} from "@/lib/store";
+import { loadScenario, useScenarioStore } from "@/lib/store";
 
 import {
   callOracleRaw,
@@ -54,6 +48,7 @@ import {
   probeBackend,
   probeFailureReason,
 } from "./oracle-client";
+import { resetScenarioForTest, drainScenarioCommands } from "@/lib/store/test-authority";
 
 interface OracleResponse {
   ok: boolean;
@@ -195,7 +190,7 @@ appVersion: 2.0.0
 };
 
 describe.skipIf(!GATED)("workspace differential — backend availability (fail-closed)", () => {
-  it("Python + vendored server boundary are importable", () => {
+  it("Python + vendored server boundary are importable", async () => {
     // The probe's reason rides along, so an unreachable backend names WHY rather
     // than only asserting `false === true`.
     expect(AVAILABLE, probeFailureReason(PROBE)).toBe(true);
@@ -451,8 +446,8 @@ async function hydrateThroughStore(fixture: string) {
   const prepared = prepareScenarioLoad(fixture);
   expect(prepared.issues).toEqual([]);
   expect(prepared.target).not.toBeNull();
-  await resetToNewScenario(useScenarioStore, useHotStore);
-  loadScenario(useScenarioStore, useHotStore, prepared.target!);
+  await resetScenarioForTest();
+  loadScenario(prepared.target!);
   return useScenarioStore.getState();
 }
 
@@ -460,8 +455,8 @@ describe.skipIf(!AVAILABLE)(
   "workspace differential — full authoring state hydrates through the real load path",
   () => {
     afterEach(async () => {
-      await resetToNewScenario(useScenarioStore, useHotStore);
-      await drainScenarioPersist(useScenarioStore);
+      await resetScenarioForTest();
+      await drainScenarioCommands();
     });
 
     it(
@@ -897,27 +892,30 @@ function hasIssueAtPath(
   return (issues ?? []).some((issue) => JSON.stringify(issue.path) === target);
 }
 
-describe.skipIf(!AVAILABLE)("workspace differential — Workspace identity rejection parity", () => {
-  for (const { label, preferences, tsStatus, pyErrorCode, path } of IDENTITY_CASES) {
-    it(
-      `${label} is rejected in the same category AND at the same path by both sides, never hydrating`,
-      { timeout: oracleBudget(1) },
-      () => {
-        const fixture = `${IDENTITY_HEAD}\npreferences:${preferences}\n`;
-        // Optimize path: TS and Python agree on the normative rejection category…
-        const converted = convertWorkspaceForOptimize(fixture);
-        expect(converted.status).toBe(tsStatus);
-        const oracle = callOracle({ op: "workspace_canonical", yaml: fixture }, label);
-        expect(oracle.errorCode).toBe(pyErrorCode);
-        // …and on the exact issue path.
-        const tsIssues = "issues" in converted ? converted.issues : undefined;
-        expect(hasIssueAtPath(tsIssues, path)).toBe(true);
-        expect(hasIssueAtPath(oracle.issues, path)).toBe(true);
-        // Load path: the production dispatcher rejects before hydration — no import
-        // target is produced, so `loadScenario` is never reached and no replacement
-        // identity (empty-string → minted UUID) is created.
-        expect(prepareScenarioLoad(fixture).target).toBeNull();
-      },
-    );
-  }
-});
+describe.skipIf(!AVAILABLE)(
+  "workspace differential — Workspace identity rejection parity",
+  async () => {
+    for (const { label, preferences, tsStatus, pyErrorCode, path } of IDENTITY_CASES) {
+      it(
+        `${label} is rejected in the same category AND at the same path by both sides, never hydrating`,
+        { timeout: oracleBudget(1) },
+        () => {
+          const fixture = `${IDENTITY_HEAD}\npreferences:${preferences}\n`;
+          // Optimize path: TS and Python agree on the normative rejection category…
+          const converted = convertWorkspaceForOptimize(fixture);
+          expect(converted.status).toBe(tsStatus);
+          const oracle = callOracle({ op: "workspace_canonical", yaml: fixture }, label);
+          expect(oracle.errorCode).toBe(pyErrorCode);
+          // …and on the exact issue path.
+          const tsIssues = "issues" in converted ? converted.issues : undefined;
+          expect(hasIssueAtPath(tsIssues, path)).toBe(true);
+          expect(hasIssueAtPath(oracle.issues, path)).toBe(true);
+          // Load path: the production dispatcher rejects before hydration — no import
+          // target is produced, so `loadScenario` is never reached and no replacement
+          // identity (empty-string → minted UUID) is created.
+          expect(prepareScenarioLoad(fixture).target).toBeNull();
+        },
+      );
+    }
+  },
+);

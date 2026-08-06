@@ -26,7 +26,9 @@ export type RepositoryErrorCode =
   /** The same idempotency key was replayed with different input. */
   | "idempotency_conflict"
   /** The legacy persisted record could not be parsed or sanitized. */
-  | "migration_corrupt";
+  | "migration_corrupt"
+  /** The command's RESULT is not a structurally valid scenario document. */
+  | "invalid_document";
 
 /** A repository operation that failed a durable precondition or fence. */
 export class RepositoryError extends Error {

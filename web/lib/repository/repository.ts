@@ -30,7 +30,12 @@
 // The clock and id minter are injected for exactly this reason: they must be
 // synchronous, and tests must be able to make expiry deterministic.
 
-import { applyScenarioCommand, isContentCommand, type ScenarioCommandV1 } from "./commands";
+import {
+  applyScenarioCommand,
+  isContentCommand,
+  isSemanticNoOpCommand,
+  type ScenarioCommandV1,
+} from "./commands";
 import { commandDigest } from "./digest";
 import { RepositoryError } from "./errors";
 import { assertGenerationsUnchanged, ensureGeneration, generationScopesFor } from "./generations";
@@ -44,6 +49,7 @@ import {
   readSessionCommits,
 } from "./history";
 import { assertLeaseOwnership, isLeaseLive, LEASE_TTL_MS, renewedLease } from "./leases";
+import { assertValidScenarioSnapshot } from "./validate";
 import { NurseSchedulerDb, SCENARIO_WRITE_TABLES } from "./schema";
 import {
   type AssistantProposalV1,
@@ -111,6 +117,12 @@ export interface ScenarioSwitch {
   currentOwner?: LeaseOwner;
   /** Acquire the target's lease as part of the switch. Defaults to `true`. */
   acquire?: boolean;
+  /**
+   * Start a fresh Undo session as part of the (fenced) acquisition. Only honoured
+   * when the switch actually acquires — a read-only selection has no authority to
+   * expire anybody's reversal material.
+   */
+  rollHistorySession?: boolean;
 }
 
 export interface ScenarioSelection {
@@ -118,8 +130,12 @@ export interface ScenarioSelection {
   envelope: ScenarioEnvelopeV3;
   lease: WriterLeaseV2 | null;
   owner: LeaseOwner | null;
-  /** The durable fact recording the switch (or the target's genesis commit). */
-  commit: ScenarioCommitV1;
+  /**
+   * The durable fact recording the switch (or the target's genesis commit), or
+   * `null` when the selection acquired nothing — a read-only tab selecting a
+   * scenario writes no scenario-scoped fact at all.
+   */
+  commit: ScenarioCommitV1 | null;
 }
 
 export interface CommitInput {
@@ -159,15 +175,20 @@ export interface ScenarioRepository {
   /** Reread everything a tab must not trust process memory for. */
   readTabContext(tabId: string): Promise<TabContext>;
   /**
-   * Start a fresh Undo session for a scenario — called once per page load. Prior
+   * Start a fresh Undo session for a scenario this owner already holds. Prior
    * reversal payloads are invalidated; commits, links, and receipts are kept.
+   *
+   * FENCED on the exact owner. Prefer `rollHistorySession` on
+   * acquisition/switch, which rolls inside the transaction that earned the lease.
    */
-  beginHistorySession(scenarioId: string): Promise<ScenarioEnvelopeV3>;
+  beginHistorySession(owner: LeaseOwner): Promise<ScenarioEnvelopeV3>;
   selectOrSwitchScenario(input: ScenarioSwitch): Promise<ScenarioSelection>;
   acquireOrTakeover(input: {
     scenarioId: string;
     tabId: string;
     mode?: "acquire" | "takeover";
+    /** Roll the Undo session inside this same fenced transaction. */
+    rollHistorySession?: boolean;
   }): Promise<LeaseResult>;
   heartbeat(owner: LeaseOwner): Promise<LeaseResult>;
   release(owner: LeaseOwner): Promise<void>;
@@ -283,11 +304,12 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
    * never cooperate, and that is the case takeover exists for.
    */
   async function acquireLeaseInTx(
-    scenarioId: string,
+    envelope: ScenarioEnvelopeV3,
     tabId: string,
     mode: "acquire" | "takeover",
     at: Date,
   ): Promise<{ lease: WriterLeaseV2; tookOver: boolean }> {
+    const scenarioId = envelope.scenarioId;
     const existing = await db.writerLeases.get(scenarioId);
     const live = isLeaseLive(existing, at);
     const heldByOther = live && existing.ownerTabId !== tabId;
@@ -304,19 +326,37 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
     // captured it stays valid. Every other path bumps, which is what fences the
     // previous holder — including a lease that merely expired.
     const renewInPlace = live && existing.ownerTabId === tabId;
-    const epoch = renewInPlace ? existing.epoch : (existing?.epoch ?? 0) + 1;
+    // THE EPOCH IS A FENCING TOKEN, so it must never repeat within a scenario's
+    // lifetime. Deriving it from the lease row alone did repeat: a clean release
+    // DELETES that row, so epoch 1 → takeover 2 → release → reacquire handed out
+    // epoch 1 again, and an epoch-1 callback the takeover had already fenced became
+    // valid a second time whenever the document revision had not moved.
+    //
+    // `acceptedLeaseEpoch` is the durable high-water mark: it lives on the envelope,
+    // survives every lease deletion, and (below) only ever rises. Taking the max of
+    // the two is what makes the next epoch strictly greater than every epoch this
+    // scenario has ever issued.
+    const highWater = Math.max(existing?.epoch ?? 0, envelope.acceptedLeaseEpoch);
+    const epoch = renewInPlace ? existing.epoch : highWater + 1;
     const lease = renewedLease({ scenarioId, ownerTabId: tabId, epoch }, at, leaseTtlMs);
     await db.writerLeases.put(lease);
     return { lease, tookOver: !renewInPlace && existing !== undefined };
   }
 
-  /** Persist the envelope's acceptance of a lease epoch (a metadata-only write). */
+  /**
+   * Persist the envelope's acceptance of a lease epoch (a metadata-only write).
+   *
+   * MONOTONIC BY CONSTRUCTION: it raises the accepted epoch and never lowers it.
+   * Lowering was the other half of the epoch-rewind defect — it reopened the door
+   * for a superseded owner even after the lease itself had moved on, because
+   * `assertLeaseOwnership` compares the presented epoch against this field.
+   */
   async function acceptLeaseEpoch(
     envelope: ScenarioEnvelopeV3,
     epoch: number,
     at: Date,
   ): Promise<ScenarioEnvelopeV3> {
-    if (envelope.acceptedLeaseEpoch === epoch) return envelope;
+    if (envelope.acceptedLeaseEpoch >= epoch) return envelope;
     const next: ScenarioEnvelopeV3 = {
       ...envelope,
       acceptedLeaseEpoch: epoch,
@@ -350,8 +390,20 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
       // Committing while undone branches history. The superseded commits stay as
       // durable facts (a receipt may still reference one); they simply leave the
       // cursor list, which is what makes Redo unavailable after a new edit.
+      //
+      // Their PAYLOADS go, though. A superseded commit can never be undone or
+      // redone again — it is off the cursor list for good — so retaining its
+      // before/after snapshots keeps two full scenario documents alive per branch,
+      // outside the session bound (which only counts live entries). Undo→edit cycles
+      // therefore grew storage without limit. Dropping the payload while keeping the
+      // fact is exactly the `pruned` contract: "this happened, and it can no longer
+      // be reversed".
       for (const superseded of content.slice(envelope.historyCursor)) {
-        await db.scenarioCommits.update(superseded.commitId, { supersededAt: iso });
+        await db.scenarioCommits.update(superseded.commitId, {
+          supersededAt: iso,
+          reversiblePayload: null,
+          payloadState: "pruned",
+        });
       }
       content = content.slice(0, envelope.historyCursor);
     }
@@ -366,7 +418,12 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
       kind,
       isContent,
       commandDigest: input.commandDigestValue,
-      reversiblePayload: { before, after: next },
+      // Only a CURSOR ENTRY carries reversal material. An Undo/Redo commit is
+      // navigation: nothing reverses it (the cursor moves instead), so a payload on
+      // it is a full scenario document retained for no reader — and, since pruning
+      // only walks content commits, one that nothing would ever bound. Repeated
+      // Undo/Redo was the unbounded case this closes.
+      reversiblePayload: isContent ? { before, after: next } : null,
       payloadState: "live",
       supersededAt: null,
       ...(input.idempotencyKey === undefined ? {} : { idempotencyKey: input.idempotencyKey }),
@@ -390,6 +447,43 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
       await pruneSessionPayloads(db, [...content, commit], historyLimit);
     }
     return { envelope: nextEnvelope, commit };
+  }
+
+  /**
+   * Start a fresh history session for an envelope the CALLER HAS ALREADY FENCED.
+   *
+   * Private on purpose: rolling the session invalidates every surviving reversal
+   * payload, which is destructive enough that it must never run as an unfenced
+   * write. Every caller reaches it from inside a transaction that has already
+   * asserted the acting owner.
+   */
+  async function rollHistorySessionInTx(
+    envelope: ScenarioEnvelopeV3,
+    at: Date,
+  ): Promise<ScenarioEnvelopeV3> {
+    // Invalidate every surviving reversal payload for this scenario. The commit
+    // rows, their history links, and every receipt remain: "you can no longer undo
+    // this" must never be recorded as "this never happened".
+    const stale = await db.scenarioCommits
+      .where("scenarioId")
+      .equals(envelope.scenarioId)
+      .filter((commit) => commit.payloadState === "live" && commit.reversiblePayload !== null)
+      .toArray();
+    for (const commit of stale) {
+      await db.scenarioCommits.update(commit.commitId, {
+        reversiblePayload: null,
+        payloadState: "expired-session",
+      });
+    }
+    const next: ScenarioEnvelopeV3 = {
+      ...envelope,
+      historySessionId: newId(),
+      historyCursor: 0,
+      recordRevision: envelope.recordRevision + 1,
+      updatedAt: at.toISOString(),
+    };
+    await db.scenarioEnvelopes.put(next);
+    return next;
   }
 
   /** Recompute availability after a write, from the freshly persisted facts. */
@@ -453,34 +547,24 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
       );
     },
 
-    async beginHistorySession(scenarioId) {
-      return db.transaction("rw", [db.scenarioEnvelopes, db.scenarioCommits], async () => {
-        const at = now();
-        const envelope = await requireEnvelope(scenarioId);
-        // Invalidate every surviving reversal payload for this scenario. The commit
-        // rows, their history links, and every receipt remain: "you can no longer
-        // undo this" must never be recorded as "this never happened".
-        const stale = await db.scenarioCommits
-          .where("scenarioId")
-          .equals(scenarioId)
-          .filter((commit) => commit.payloadState === "live")
-          .toArray();
-        for (const commit of stale) {
-          await db.scenarioCommits.update(commit.commitId, {
-            reversiblePayload: null,
-            payloadState: "expired-session",
-          });
-        }
-        const next: ScenarioEnvelopeV3 = {
-          ...envelope,
-          historySessionId: newId(),
-          historyCursor: 0,
-          recordRevision: envelope.recordRevision + 1,
-          updatedAt: at.toISOString(),
-        };
-        await db.scenarioEnvelopes.put(next);
-        return next;
-      });
+    async beginHistorySession(owner) {
+      return db.transaction(
+        "rw",
+        [db.scenarioEnvelopes, db.scenarioCommits, db.writerLeases],
+        async () => {
+          const at = now();
+          const envelope = await requireEnvelope(owner.scenarioId);
+          const lease = await db.writerLeases.get(owner.scenarioId);
+          // FENCED, and by the EXACT owner. Rolling the session expires every
+          // reversal payload, so a stale continuation reaching this unfenced could
+          // destroy the reversal material of a newer owner that had already taken
+          // over. Prefer the `rollHistorySession` option on acquisition/switch, which
+          // does this in the same transaction that earned the lease; this entry point
+          // exists for the callers that legitimately roll a session they already own.
+          assertLeaseOwnership(lease, envelope, owner, at);
+          return rollHistorySessionInTx(envelope, at);
+        },
+      );
     },
 
     async selectOrSwitchScenario(input) {
@@ -502,10 +586,18 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
 
         // Step 2 — resolve or mint the target.
         let envelope: ScenarioEnvelopeV3;
-        let commit: ScenarioCommitV1;
+        let commit: ScenarioCommitV1 | null = null;
+        /** Built after acquisition, so a read-only selection writes no scenario fact. */
+        let pendingSwitchFact: ScenarioCommitV1 | null = null;
         if (input.target.kind === "existing") {
           envelope = await requireEnvelope(input.target.scenarioId);
-          commit = {
+          // NOT written yet. A non-acquiring selection is a read-only tab pointing at
+          // a scenario it may not write — appending a scenario-scoped `switch` commit
+          // there had the non-owner mutating commit history, and because the
+          // envelope's `topCommitId`/`recordRevision` were left alone the fact was
+          // orphaned from the chain as well. The write moves below the acquisition,
+          // so the owner's switch fact and its envelope linkage land together.
+          pendingSwitchFact = {
             commitId: newId(),
             scenarioId: envelope.scenarioId,
             parentCommitId: envelope.topCommitId,
@@ -525,7 +617,6 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
             supersededAt: null,
             createdAt: at.toISOString(),
           };
-          await db.scenarioCommits.put(commit);
         } else {
           const snapshot =
             input.target.kind === "new"
@@ -544,10 +635,26 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
         let lease: WriterLeaseV2 | null = null;
         let owner: LeaseOwner | null = null;
         if (acquire) {
-          const acquired = await acquireLeaseInTx(envelope.scenarioId, input.tabId, "acquire", at);
+          const acquired = await acquireLeaseInTx(envelope, input.tabId, "acquire", at);
           lease = acquired.lease;
           owner = { scenarioId: envelope.scenarioId, tabId: input.tabId, epoch: lease.epoch };
           envelope = await acceptLeaseEpoch(envelope, lease.epoch, at);
+          // The switch fact is an OWNER's fact, and it is linked into the chain in the
+          // same transaction that earned the lease — no orphaned commit rows.
+          if (pendingSwitchFact) {
+            commit = pendingSwitchFact;
+            await db.scenarioCommits.put(commit);
+            envelope = {
+              ...envelope,
+              topCommitId: commit.commitId,
+              recordRevision: envelope.recordRevision + 1,
+              updatedAt: at.toISOString(),
+            };
+            await db.scenarioEnvelopes.put(envelope);
+          }
+          if (input.rollHistorySession) {
+            envelope = await rollHistorySessionInTx(envelope, at);
+          }
         }
 
         // Step 4 — record the tab's selection.
@@ -568,15 +675,24 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
       });
     },
 
-    async acquireOrTakeover({ scenarioId, tabId, mode = "acquire" }) {
+    async acquireOrTakeover({ scenarioId, tabId, mode = "acquire", rollHistorySession = false }) {
       return db.transaction(
         "rw",
-        [db.scenarioEnvelopes, db.writerLeases, db.assistantGenerations],
+        [db.scenarioEnvelopes, db.writerLeases, db.scenarioCommits, db.assistantGenerations],
         async (): Promise<LeaseResult> => {
           const at = now();
           const envelope = await requireEnvelope(scenarioId);
-          const { lease, tookOver } = await acquireLeaseInTx(scenarioId, tabId, mode, at);
-          const accepted = await acceptLeaseEpoch(envelope, lease.epoch, at);
+          const { lease, tookOver } = await acquireLeaseInTx(envelope, tabId, mode, at);
+          let accepted = await acceptLeaseEpoch(envelope, lease.epoch, at);
+          // History-session rollover happens HERE, inside the fenced acquisition, not
+          // in a second transaction afterwards. Split across two transactions it was
+          // an unfenced scenario write, so the interleaving B-acquire → C-takeover →
+          // B-rollover let a stale B expire C's reversal material and replace C's
+          // session. Folded in, the rollover either lands with the acquisition that
+          // earned it or does not happen at all.
+          if (rollHistorySession) {
+            accepted = await rollHistorySessionInTx(accepted, at);
+          }
           return {
             owner: { scenarioId, tabId, epoch: lease.epoch },
             lease,
@@ -689,6 +805,13 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
           backupFingerprint: envelope.backupFingerprint,
         };
         const next = applyScenarioCommand(before, input.command);
+        // Validate the RESULT, inside the transaction, before anything is written.
+        // A refusal here aborts the whole commit and leaves the committed content
+        // exactly as it was (see `validate.ts`).
+        assertValidScenarioSnapshot(next, {
+          scenarioId: envelope.scenarioId,
+          command: input.command.type,
+        });
 
         if (!isContentCommand(input.command)) {
           // Metadata only: `recordRevision` moves, `documentRevision` does not, and
@@ -704,6 +827,22 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
             envelope: updated,
             commit: null,
             history: await historyOf(updated),
+            replayed: false,
+          };
+        }
+
+        // A content command whose RESULT equals the committed content is not a
+        // change. Committing it anyway spent a revision and an Undo entry on
+        // nothing — a Clear over an already-empty matrix, or a paint gesture that
+        // folded back to the same cells. The comparison is SEMANTIC because the
+        // matrix arms are rebuilt objects: reference equality would call every one of
+        // them a change. `patch_scenario` keeps its cheap per-key reference test at
+        // the command bus; this catches the arms that cannot use one.
+        if (isSemanticNoOpCommand(before, next, input.command)) {
+          return {
+            envelope,
+            commit: null,
+            history: await historyOf(envelope),
             replayed: false,
           };
         }

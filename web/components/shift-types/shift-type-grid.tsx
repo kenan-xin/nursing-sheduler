@@ -16,7 +16,7 @@
 // unchanged. Cross-references to the staff screen say "Staff".
 //
 // Store discipline (T04): every user action feeds ONE composed `ScenarioUiState`
-// to one `mutateScenario` call (one patch ⇒ one zundo entry). Rename/delete route
+// to one `scenarioCommands.mutate` call (one patch ⇒ one undo entry). Rename/delete route
 // through the core cascade so requirement `shiftType` refs follow a rename and empty
 // requirements drop on delete. A `RenameCollisionError` surfaces as a field error.
 //
@@ -39,7 +39,7 @@
 
 import * as React from "react";
 import { toast } from "sonner";
-import { useScenarioStore } from "@/lib/store";
+import { useScenarioStore, scenarioCommands } from "@/lib/store";
 import { useLosableDraft } from "@/components/shell/use-losable-draft";
 import type { ScenarioUiState, UiShiftType } from "@/lib/scenario";
 import { RenameCollisionError } from "@/lib/cascade";
@@ -86,11 +86,17 @@ import {
   resolveStaffingCardState,
   saveShiftTypeCard,
   ShiftRequirementValidationError,
+  ShiftSaveRefusedError,
   StaleShiftRequirementError,
   type StaffingCardState,
 } from "./save-shift-card";
 
-type Commit = (next: ScenarioUiState) => void;
+/**
+ * Apply an operation to the durable scenario. The callback runs AT THE QUEUE HEAD,
+ * against the state the previous command committed — so rapid actions compose
+ * instead of overwriting each other. Returning `null` withdraws the write.
+ */
+type Commit = (transform: (live: ScenarioUiState) => ScenarioUiState | null) => void;
 type CurrentState = () => ScenarioUiState;
 
 // ---------------------------------------------------------------------------
@@ -181,9 +187,29 @@ export function ShiftTypeGrid() {
   const scenario = useScenarioStore((state) => state as ScenarioUiState);
   const items = descriptor.readItems(scenario);
   const groups = descriptor.readGroups(scenario);
-  const commit = React.useCallback<Commit>((next) => {
-    useScenarioStore.getState().mutateScenario(next);
-  }, []);
+  // The form-open token (captured on the closed⇌open transition below). Declared
+  // here because `commit` has to read it at CALL time.
+  const openToken = React.useRef<{ items: UiShiftType[]; groups: EditorGroup[] } | null>(null);
+
+  const commit = React.useCallback<Commit>(
+    (transform) => {
+      // T03F1: same reasoning as `people-table.tsx` — the OPERATION is applied at the
+      // queue head so rapid actions compose, and the form-open token is snapshotted
+      // at the click rather than read after a newer commit has already cleared it.
+      const token = openToken.current;
+      void scenarioCommands.mutate((live) => {
+        if (
+          token !== null &&
+          (descriptor.readItems(live) !== token.items ||
+            descriptor.readGroups(live) !== token.groups)
+        ) {
+          return null;
+        }
+        return transform(live as ScenarioUiState);
+      });
+    },
+    [descriptor],
+  );
   const currentState = React.useCallback<CurrentState>(
     () => useScenarioStore.getState() as ScenarioUiState,
     [],
@@ -200,7 +226,6 @@ export function ShiftTypeGrid() {
   // against ("form-open token"); `isStale` re-reads the live store and reports
   // whether that relevant slice changed (undo/redo temporal travel or a cascade
   // from elsewhere). It gates BOTH the visible-close effect and every submit path.
-  const openToken = React.useRef<{ items: UiShiftType[]; groups: EditorGroup[] } | null>(null);
   const wasEditing = React.useRef(false);
   if (editing !== wasEditing.current) {
     wasEditing.current = editing;
@@ -230,7 +255,7 @@ export function ShiftTypeGrid() {
     setDragIndex(null);
     setOverIndex(null);
     if (from != null && from !== to) {
-      commit(reorderItems(currentState(), descriptor, from, to));
+      commit((live) => reorderItems(live, descriptor, from, to));
     }
   };
 
@@ -238,7 +263,7 @@ export function ShiftTypeGrid() {
   // `reorderItems` commit ⇒ one undo entry, exactly like a drop.
   const move = (from: number, to: number) => {
     if (to < 0 || to >= items.length || from === to) return;
-    commit(reorderItems(currentState(), descriptor, from, to));
+    commit((live) => reorderItems(live, descriptor, from, to));
   };
 
   return (
@@ -364,7 +389,7 @@ export function ShiftTypeGrid() {
               onEdit={() => setSel({ t: "edit-shift", key })}
               onDelete={() => {
                 setSel(null);
-                commit(deleteItem(currentState(), descriptor, item.id));
+                commit((live) => deleteItem(live, descriptor, item.id));
               }}
               onDragStart={() => setDragIndex(index)}
               onDragOver={() => setOverIndex(index)}
@@ -387,7 +412,6 @@ export function ShiftTypeGrid() {
         items={items}
         groups={groups}
         commit={commit}
-        currentState={currentState}
         isStale={isStale}
         editing={editing}
         addOpen={sel?.t === "add-group"}
@@ -1018,8 +1042,8 @@ function ShiftCardEditor({
     setDraft((d) => ({ ...d, preferred }));
   };
 
-  /** Commit code/name/time + staffing through one live-state updater. */
-  const commitShiftDraft = () => {
+  /** Commit code/name/time + staffing as one durable repository command. */
+  const commitShiftDraft = async () => {
     if (!idCheck.ok) return;
     const staffingDraft =
       staffing.kind === "editable"
@@ -1030,8 +1054,8 @@ function ShiftCardEditor({
             preferred: draft.preferred,
           }
         : ({ type: "none" } as const);
-    const result = saveShiftTypeCard(
-      (updater) => useScenarioStore.getState().mutateScenario(updater),
+    const result = await saveShiftTypeCard(
+      (updater) => scenarioCommands.mutate(updater),
       mode === "add"
         ? {
             mode,
@@ -1061,7 +1085,7 @@ function ShiftCardEditor({
     );
   };
 
-  const save = () => {
+  const save = async () => {
     // Synchronous stale-Save guard: abort if the item/group slice changed since the
     // form opened (temporal travel / external cascade) — no commit, no history entry.
     if (isStale()) {
@@ -1083,13 +1107,18 @@ function ShiftCardEditor({
       return;
     }
     try {
-      commitShiftDraft();
+      // Awaited: the commit's stale-baseline, validation and rename-collision
+      // refusals now surface as a rejection from the queued repository command,
+      // so closing the form before it settles would drop the on-card notice and
+      // report a save that never happened.
+      await commitShiftDraft();
       onDone();
     } catch (err) {
       const message =
         err instanceof RenameCollisionError ||
         err instanceof ShiftRequirementValidationError ||
-        err instanceof StaleShiftRequirementError
+        err instanceof StaleShiftRequirementError ||
+        err instanceof ShiftSaveRefusedError
           ? err.message
           : "Save failed.";
       setSaveError(message);

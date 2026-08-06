@@ -8,7 +8,17 @@ export { NurseSchedulerDb, NURSE_SCHEDULER_DB_NAME, REPOSITORY_SCHEMA_VERSION } 
 
 export { RepositoryError, isRepositoryError, type RepositoryErrorCode } from "./errors";
 
-export { applyScenarioCommand, isContentCommand, type ScenarioCommandV1 } from "./commands";
+export {
+  applyScenarioCommand,
+  isContentCommand,
+  isSemanticNoOpCommand,
+  type ScenarioCommandV1,
+} from "./commands";
+// `assertValidScenarioSnapshot` is deliberately NOT re-exported: it is the
+// repository's own in-transaction guard, and the structural contract it delegates to
+// is `sanitizePersistedScenario`, which callers outside the durable authority use
+// directly. Publishing it here would invite a caller to "pre-validate" and then write
+// through some other path.
 
 export { assertLeaseOwnership, isLeaseLive, LEASE_HEARTBEAT_MS, LEASE_TTL_MS } from "./leases";
 

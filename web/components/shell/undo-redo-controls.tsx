@@ -1,37 +1,44 @@
 "use client";
 
-// Undo/redo UX surface (T08, acceptance row 4). Two pieces:
+// Undo/redo UX surface (T08, acceptance row 4; migrated to repository authority
+// in T03). Three pieces:
 //
-// 1. useUndoRedo — subscribes to zundo's temporal store (pastStates /
-//    futureStates) so the buttons reflect availability (disabled at the ends).
-// 2. UndoRedoControls — icon buttons wired to undo()/redo().
+// 1. useUndoRedo — reads availability from the session-authority projection.
+// 2. UndoRedoControls — icon buttons wired to the repository undo/redo commands.
 // 3. useUndoRedoShortcuts — a document-level keydown listener for Ctrl/Cmd+Z
 //    (undo) and Ctrl/Cmd+Y (redo), app-wide. Modifier-gated per spec FR-ST-21:
 //    Alt or Shift additionally held disables both shortcuts. Not suppressed
 //    while typing (FR-ST-22).
+//
+// The USER-FACING behaviour is unchanged — same controls, same shortcuts, same
+// disabled-at-the-ends semantics, and no new keyboard feature. What changed is
+// what backs them. zundo kept its stack in this tab's process memory, so it could
+// offer a reversal after a reload that no durable record could perform, and it
+// could not be checked against a revision another tab had moved.
+//
+// Availability now comes from persisted commit facts: a reversal is offered only
+// when the commit at the history cursor still carries live reversal material in
+// the CURRENT session. After a reload, or once the 50-entry session bound has
+// evicted a payload, the control is disabled — truthfully, rather than inviting a
+// restore that would fail.
 
 import { useEffect } from "react";
-import { useStore } from "zustand";
-import { useScenarioStore } from "@/lib/store";
+import { canMutateScenario, scenarioCommands, useAuthorityStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { FaRotateLeft, FaArrowRotateRight } from "@/components/icons";
 
-// `store.temporal` is a vanilla zundo StoreApi — reading `pastStates` /
-// `futureStates` off it directly is NOT reactive (zundo docs). Subscribe through
-// zustand's `useStore(api, selector)` so the buttons re-render as history grows
-// and shrinks. The imperative undo()/redo() go through `.getState()`.
 function useUndoRedo() {
-  const pastLength = useStore(useScenarioStore.temporal, (s) => s.pastStates.length);
-  const futureLength = useStore(useScenarioStore.temporal, (s) => s.futureStates.length);
-
-  const undo = () => useScenarioStore.temporal.getState().undo();
-  const redo = () => useScenarioStore.temporal.getState().redo();
+  const canUndo = useAuthorityStore((s) => s.canUndo && canMutateScenario(s));
+  const canRedo = useAuthorityStore((s) => s.canRedo && canMutateScenario(s));
 
   return {
-    canUndo: pastLength > 0,
-    canRedo: futureLength > 0,
-    undo,
-    redo,
+    canUndo,
+    canRedo,
+    // Fire-and-forget: the projection changes when the commit lands, and a refused
+    // reversal (lost lease, evicted payload) settles availability from durable
+    // truth rather than leaving the button lying.
+    undo: () => void scenarioCommands.undo(),
+    redo: () => void scenarioCommands.redo(),
   };
 }
 
@@ -103,8 +110,6 @@ export function UndoRedoControls() {
 // App-wide Ctrl/Cmd-Z / Ctrl/Cmd-Y shortcuts. Per spec FR-ST-21: ignored when
 // Alt or Shift is additionally held. Not suppressed inside form fields (FR-ST-22).
 export function useUndoRedoShortcuts(): void {
-  const scenarioStore = useScenarioStore;
-
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
@@ -115,14 +120,14 @@ export function useUndoRedoShortcuts(): void {
       const key = e.key.toLowerCase();
       if (key === "z") {
         e.preventDefault();
-        scenarioStore.temporal.getState().undo();
+        void scenarioCommands.undo();
       } else if (key === "y") {
         e.preventDefault();
-        scenarioStore.temporal.getState().redo();
+        void scenarioCommands.redo();
       }
     };
 
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [scenarioStore]);
+  }, []);
 }

@@ -37,20 +37,37 @@ type StoreState = Record<string, unknown> & {
 
 type NsWindow = {
   __nsStore: {
-    scenario: {
-      getState: () => StoreState & { mutateScenario: (patch: Record<string, unknown>) => void };
-      temporal: {
-        getState: () => { pastStates: unknown[]; futureStates: unknown[] };
-      };
+    /** The repository command bus — the product's only durable write path. */
+    commands: {
+      mutate(patch: Record<string, unknown>): Promise<{ ok: boolean }>;
+      recordBackup(): Promise<{ ok: boolean }>;
+      undo(): Promise<{ ok: boolean }>;
+      redo(): Promise<{ ok: boolean }>;
+      takeover(): Promise<{ ok: boolean }>;
     };
+    drain(): Promise<void>;
+    historyDepth(): Promise<number>;
+    authority(): {
+      scenarioId: string | null;
+      documentRevision: number;
+      ownership: string;
+      canUndo: boolean;
+      canRedo: boolean;
+    };
+    scenario(): StoreState;
   };
 };
 
 /** Type-tagged presentation key (mirror core `entityKey`) for building test ids. */
 const sk = (id: string) => `string:${id}`;
 
+/** The COMMITTED projection — drained, so a read never outruns the command that wrote. */
 function readState(page: Page) {
-  return page.evaluate(() => (window as unknown as NsWindow).__nsStore.scenario.getState());
+  return page.evaluate(async () => {
+    const store = (window as unknown as NsWindow).__nsStore;
+    await store.drain();
+    return store.scenario();
+  });
 }
 async function readShifts(page: Page) {
   return (await readState(page)).shifts ?? [];
@@ -62,15 +79,13 @@ async function readRequirements(page: Page) {
   return (await readState(page)).cardsByKind?.requirements ?? [];
 }
 async function readHistoryLength(page: Page) {
-  return page.evaluate(
-    () => (window as unknown as NsWindow).__nsStore.scenario.temporal.getState().pastStates.length,
-  );
+  return page.evaluate(() => (window as unknown as NsWindow).__nsStore.historyDepth());
 }
 
 /** Seed the durable store directly (the grid's store is the same singleton). */
 async function seed(page: Page, patch: Record<string, unknown>) {
-  await page.evaluate((p) => {
-    (window as unknown as NsWindow).__nsStore.scenario.getState().mutateScenario(p);
+  await page.evaluate(async (p) => {
+    await (window as unknown as NsWindow).__nsStore.commands.mutate(p);
   }, patch);
 }
 

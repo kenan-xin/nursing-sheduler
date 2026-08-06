@@ -46,6 +46,16 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   projects: [
+    // NO BFCache launch flags here, deliberately.
+    //
+    // `e2e/scenario-ownership.spec.ts` drives a real back/forward navigation journey,
+    // and forcing `--enable-features=BackForwardCache` was tried: it did NOT produce a
+    // restore, because this app holds an IndexedDB connection and a BroadcastChannel
+    // open for each page's whole lifetime and both are documented Chromium eligibility
+    // blockers. Overriding `--disable-features` wholesale also replaced Playwright's
+    // own list and broke the unrelated middle-click/new-tab case. The spec asserts the
+    // durable outcome on either path and reports which one ran, so the evidence stands
+    // without changing how the browser is launched.
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },
     // F4's coarse-pointer lane. Scoped by `testMatch` to the ONE spec that
     // measures real touch targets, so it adds a single extra run rather than
@@ -83,6 +93,11 @@ export default defineConfig({
       // Exposes the dev-only `/progress-chart-fixture` harness (gated off in a
       // normal production deploy) so the T16d chart e2e coverage can drive it.
       NS_ENABLE_DEV_FIXTURES: "1",
+      // COMPILES IN the read-only store bridge (`components/shell/test-bridge.tsx`).
+      // An ordinary `pnpm build` leaves this unset, so the bridge is dead code there
+      // and no runtime flag can resurrect it; the suite still opts in per page via
+      // `addInitScript`, so both the build and the page must agree.
+      NEXT_PUBLIC_NS_TEST_BRIDGE: "1",
     },
     timeout: 120_000,
     reuseExistingServer: !process.env.CI,

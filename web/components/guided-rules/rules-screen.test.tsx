@@ -1,9 +1,22 @@
 // @vitest-environment jsdom
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { drainScenarioPersist, newScenario, useHotStore, useScenarioStore } from "@/lib/store";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { useScenarioStore, scenarioCommands } from "@/lib/store";
 import { RulesScreen } from "./rules-screen";
+import { drainScenarioCommands, resetScenarioForTest, undoDepth } from "@/lib/store/test-authority";
+
+/**
+ * Let a fired interaction's durable command settle. T03: a row's toggle, Adjust
+ * blur and rename all issue a repository command, so the committed projection and
+ * the re-render land a microtask after the event — draining inside `act` is the
+ * deterministic seam, not a timeout.
+ */
+async function settle() {
+  await act(async () => {
+    await drainScenarioCommands();
+  });
+}
 
 function classesOf(element: Element | null): string {
   return element?.getAttribute("class") ?? "";
@@ -17,16 +30,15 @@ vi.mock("next/navigation", () => ({
 
 beforeEach(async () => {
   pushMock.mockClear();
-  newScenario(useScenarioStore, useHotStore);
-  await drainScenarioPersist(useScenarioStore);
+  await resetScenarioForTest();
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
 });
 
-function seedRequirement() {
-  useScenarioStore.getState().mutateScenario((state) => ({
+async function seedRequirement() {
+  await scenarioCommands.mutate((state) => ({
     cardsByKind: {
       ...state.cardsByKind,
       requirements: [
@@ -37,98 +49,106 @@ function seedRequirement() {
 }
 
 describe("RulesScreen — empty scenario", () => {
-  it("always shows the built-in structural rule, locked and enabled", () => {
+  it("always shows the built-in structural rule, locked and enabled", async () => {
     render(<RulesScreen />);
     expect(screen.getByText("At most one shift per day")).toBeInTheDocument();
     const row = screen.getByTestId(/rule-row-builtin/);
     expect(within(row).getByText(/built-in/i)).toBeInTheDocument();
   });
 
-  it("shows the empty state when no advanced constraints exist", () => {
+  it("shows the empty state when no advanced constraints exist", async () => {
     render(<RulesScreen />);
     expect(screen.getByTestId("rules-empty-state")).toBeInTheDocument();
   });
 });
 
 describe("RulesScreen — a linked (auto-derived) rule row", () => {
-  beforeEach(() => {
-    seedRequirement();
+  beforeEach(async () => {
+    await seedRequirement();
   });
 
-  it("derives a row from the card with its own description as title", () => {
+  it("derives a row from the card with its own description as title", async () => {
     render(<RulesScreen />);
     expect(screen.getByText("Day cap")).toBeInTheDocument();
   });
 
-  it("toggling the switch off writes the card's disabled marker", () => {
+  it("toggling the switch off writes the card's disabled marker", async () => {
     render(<RulesScreen />);
     const toggle = screen.getByTestId("rule-toggle-requirements:r1");
     fireEvent.click(toggle);
+    await settle();
     expect(useScenarioStore.getState().cardsByKind.requirements[0].disabled).toBe(true);
   });
 
-  it("Adjust opens the quick-edit panel and commits a valid value on blur", () => {
+  it("Adjust opens the quick-edit panel and commits a valid value on blur", async () => {
     render(<RulesScreen />);
     fireEvent.click(screen.getByTestId("rule-adjust-toggle-requirements:r1"));
     const input = screen.getByTestId("rule-adjust-input-requirements:r1-requiredNumPeople");
     fireEvent.change(input, { target: { value: "5" } });
     // Typing alone must not write the store — the commit happens on blur.
+    await settle();
     expect(useScenarioStore.getState().cardsByKind.requirements[0].requiredNumPeople).toBe(2);
     fireEvent.blur(input, { target: { value: "5" } });
+    await settle();
     expect(useScenarioStore.getState().cardsByKind.requirements[0].requiredNumPeople).toBe(5);
   });
 
-  it("commits a multi-digit Adjust value as exactly one undo entry (no per-keystroke commit)", () => {
+  it("commits a multi-digit Adjust value as exactly one undo entry (no per-keystroke commit)", async () => {
     render(<RulesScreen />);
     fireEvent.click(screen.getByTestId("rule-adjust-toggle-requirements:r1"));
     const input = screen.getByTestId("rule-adjust-input-requirements:r1-requiredNumPeople");
-    const before = useScenarioStore.temporal.getState().pastStates.length;
+    const before = await undoDepth();
     // Type "15" over "2": intermediate "1" must never reach the store or history.
     fireEvent.change(input, { target: { value: "1" } });
     fireEvent.change(input, { target: { value: "15" } });
-    expect(useScenarioStore.temporal.getState().pastStates.length).toBe(before);
+    await settle();
+    expect(await undoDepth()).toBe(before);
     expect(useScenarioStore.getState().cardsByKind.requirements[0].requiredNumPeople).toBe(2);
     fireEvent.blur(input, { target: { value: "15" } });
+    await settle();
     expect(useScenarioStore.getState().cardsByKind.requirements[0].requiredNumPeople).toBe(15);
-    expect(useScenarioStore.temporal.getState().pastStates.length).toBe(before + 1);
+    expect(await undoDepth()).toBe(before + 1);
     // A single Undo returns to the pre-edit value (2), never an intermediate "1".
-    useScenarioStore.temporal.getState().undo();
+    await scenarioCommands.undo();
     expect(useScenarioStore.getState().cardsByKind.requirements[0].requiredNumPeople).toBe(2);
   });
 
-  it("shows a live error while typing an invalid value but does not commit until valid", () => {
+  it("shows a live error while typing an invalid value but does not commit until valid", async () => {
     render(<RulesScreen />);
     fireEvent.click(screen.getByTestId("rule-adjust-toggle-requirements:r1"));
     const input = screen.getByTestId("rule-adjust-input-requirements:r1-requiredNumPeople");
-    const before = useScenarioStore.temporal.getState().pastStates.length;
+    const before = await undoDepth();
     fireEvent.change(input, { target: { value: "-1" } });
     expect(screen.getByRole("alert")).toBeInTheDocument();
     fireEvent.blur(input, { target: { value: "-1" } });
+    await settle();
     // An invalid draft never commits, on change or blur.
     expect(useScenarioStore.getState().cardsByKind.requirements[0].requiredNumPeople).toBe(2);
-    expect(useScenarioStore.temporal.getState().pastStates.length).toBe(before);
+    expect(await undoDepth()).toBe(before);
   });
 
-  it("Adjust shows a validation error for an invalid value and does not commit it", () => {
+  it("Adjust shows a validation error for an invalid value and does not commit it", async () => {
     render(<RulesScreen />);
     fireEvent.click(screen.getByTestId("rule-adjust-toggle-requirements:r1"));
     const input = screen.getByTestId("rule-adjust-input-requirements:r1-requiredNumPeople");
     fireEvent.change(input, { target: { value: "-1" } });
     expect(screen.getByRole("alert")).toBeInTheDocument();
+    await settle();
     expect(useScenarioStore.getState().cardsByKind.requirements[0].requiredNumPeople).toBe(2);
   });
 
-  it("records the toggle/adjust as tracked mutations (undo restores)", () => {
+  it("records the toggle/adjust as tracked mutations (undo restores)", async () => {
     render(<RulesScreen />);
-    const before = useScenarioStore.temporal.getState().pastStates.length;
+    const before = await undoDepth();
     fireEvent.click(screen.getByTestId("rule-toggle-requirements:r1"));
-    expect(useScenarioStore.temporal.getState().pastStates.length).toBe(before + 1);
+    await settle();
+    expect(await undoDepth()).toBe(before + 1);
   });
 });
 
 describe("RulesScreen — a hard-weight (±Infinity) Adjust control", () => {
-  function seedSuccession(weight: number) {
-    useScenarioStore.getState().mutateScenario((state) => ({
+  async function seedSuccession(weight: number) {
+    await scenarioCommands.mutate((state) => ({
       cardsByKind: {
         ...state.cardsByKind,
         successions: [
@@ -138,8 +158,8 @@ describe("RulesScreen — a hard-weight (±Infinity) Adjust control", () => {
     }));
   }
 
-  it("renders a hard (-Infinity) weight legibly rather than as a blank box", () => {
-    seedSuccession(-Infinity);
+  it("renders a hard (-Infinity) weight legibly rather than as a blank box", async () => {
+    await seedSuccession(-Infinity);
     render(<RulesScreen />);
     fireEvent.click(screen.getByTestId("rule-adjust-toggle-successions:s1"));
     const input = screen.getByTestId("rule-adjust-input-successions:s1-weight") as HTMLInputElement;
@@ -147,42 +167,46 @@ describe("RulesScreen — a hard-weight (±Infinity) Adjust control", () => {
     expect(input.value).not.toBe("");
   });
 
-  it("keeps a hard weight on blur without downgrading it to a finite value", () => {
-    seedSuccession(-Infinity);
+  it("keeps a hard weight on blur without downgrading it to a finite value", async () => {
+    await seedSuccession(-Infinity);
     render(<RulesScreen />);
     fireEvent.click(screen.getByTestId("rule-adjust-toggle-successions:s1"));
     const input = screen.getByTestId("rule-adjust-input-successions:s1-weight");
     // Blur with the untouched draft — the hard weight must survive, not become 0/NaN.
     fireEvent.blur(input, { target: { value: (input as HTMLInputElement).value } });
+    await settle();
     expect(useScenarioStore.getState().cardsByKind.successions[0].weight).toBe(-Infinity);
   });
 
-  it("switches soft→hard and preserves the Infinity sign", () => {
-    seedSuccession(-2);
+  it("switches soft→hard and preserves the Infinity sign", async () => {
+    await seedSuccession(-2);
     render(<RulesScreen />);
     fireEvent.click(screen.getByTestId("rule-adjust-toggle-successions:s1"));
     fireEvent.click(screen.getByTestId("rule-adjust-minus-inf-successions:s1-weight"));
+    await settle();
     expect(useScenarioStore.getState().cardsByKind.successions[0].weight).toBe(-Infinity);
     fireEvent.click(screen.getByTestId("rule-adjust-plus-inf-successions:s1-weight"));
+    await settle();
     expect(useScenarioStore.getState().cardsByKind.successions[0].weight).toBe(Infinity);
   });
 
-  it("switches hard→soft by typing a finite weight, as one undo entry", () => {
-    seedSuccession(Infinity);
+  it("switches hard→soft by typing a finite weight, as one undo entry", async () => {
+    await seedSuccession(Infinity);
     render(<RulesScreen />);
     fireEvent.click(screen.getByTestId("rule-adjust-toggle-successions:s1"));
     const input = screen.getByTestId("rule-adjust-input-successions:s1-weight");
-    const before = useScenarioStore.temporal.getState().pastStates.length;
+    const before = await undoDepth();
     fireEvent.change(input, { target: { value: "25" } });
     fireEvent.blur(input, { target: { value: "25" } });
+    await settle();
     expect(useScenarioStore.getState().cardsByKind.successions[0].weight).toBe(25);
-    expect(useScenarioStore.temporal.getState().pastStates.length).toBe(before + 1);
+    expect(await undoDepth()).toBe(before + 1);
   });
 });
 
 describe("RulesScreen — categories", () => {
-  it("renders the six plain-English headings in order when every kind is present", () => {
-    useScenarioStore.getState().mutateScenario({
+  it("renders the six plain-English headings in order when every kind is present", async () => {
+    await scenarioCommands.mutate({
       cardsByKind: {
         requirements: [{ uid: "r1", shiftType: "D", requiredNumPeople: 2, weight: -1 }],
         successions: [{ uid: "s1", person: ["P1"], pattern: ["N", "D"], weight: -1 }],
@@ -226,8 +250,8 @@ describe("RulesScreen — categories", () => {
     ]);
   });
 
-  it("has no Customise library affordance left anywhere on the screen", () => {
-    seedRequirement();
+  it("has no Customise library affordance left anywhere on the screen", async () => {
+    await seedRequirement();
     render(<RulesScreen />);
     expect(screen.queryByTestId("rules-admin-toggle")).not.toBeInTheDocument();
     expect(screen.queryByTestId("rules-new-pin")).not.toBeInTheDocument();
@@ -238,19 +262,20 @@ describe("RulesScreen — categories", () => {
 });
 
 describe("RulesScreen — renaming a rule", () => {
-  /** Open the rename input on `rowId`, type `title` and save. */
-  function renameRow(rowId: string, title: string) {
+  /** Open the rename input on `rowId`, type `title`, save, and let it settle. */
+  async function renameRow(rowId: string, title: string) {
     fireEvent.click(screen.getByTestId(`rule-rename-${rowId}`));
     fireEvent.change(screen.getByTestId(`rule-rename-input-${rowId}`), {
       target: { value: title },
     });
     fireEvent.click(screen.getByTestId(`rule-rename-save-${rowId}`));
+    await settle();
   }
 
-  it("renames a card row by writing the source constraint's own description", () => {
-    seedRequirement();
+  it("renames a card row by writing the source constraint's own description", async () => {
+    await seedRequirement();
     render(<RulesScreen />);
-    renameRow("requirements:r1", "Day shift cover");
+    await renameRow("requirements:r1", "Day shift cover");
 
     expect(useScenarioStore.getState().cardsByKind.requirements[0].description).toBe(
       "Day shift cover",
@@ -258,25 +283,25 @@ describe("RulesScreen — renaming a rule", () => {
     expect(screen.getByText("Day shift cover")).toBeInTheDocument();
   });
 
-  it("renames the locked built-in row, which cannot be switched off but can be relabelled", () => {
+  it("renames the locked built-in row, which cannot be switched off but can be relabelled", async () => {
     render(<RulesScreen />);
     const rowId = "builtin:max-one-shift-per-day";
     expect(screen.getByTestId(`rule-toggle-${rowId}`)).toHaveAttribute("aria-disabled", "true");
-    renameRow(rowId, "One shift a day");
+    await renameRow(rowId, "One shift a day");
 
     expect(useScenarioStore.getState().maxOneShiftPerDay?.description).toBe("One shift a day");
     expect(screen.getByText("One shift a day")).toBeInTheDocument();
   });
 
-  it("renames a read-only 'Set in Advanced only' row, whose shape it cannot affect", () => {
-    useScenarioStore.getState().mutateScenario((state) => ({
+  it("renames a read-only 'Set in Advanced only' row, whose shape it cannot affect", async () => {
+    await scenarioCommands.mutate((state) => ({
       cardsByKind: {
         ...state.cardsByKind,
         requirements: [{ uid: "r2", shiftType: ["D", "N"], requiredNumPeople: 1, weight: -1 }],
       },
     }));
     render(<RulesScreen />);
-    renameRow("requirements:r2", "Day and night cover");
+    await renameRow("requirements:r2", "Day and night cover");
 
     const card = useScenarioStore.getState().cardsByKind.requirements[0];
     expect(card.description).toBe("Day and night cover");
@@ -285,38 +310,39 @@ describe("RulesScreen — renaming a rule", () => {
     expect(screen.queryByTestId("rule-adjust-toggle-requirements:r2")).not.toBeInTheDocument();
   });
 
-  it("an unchanged title writes nothing at all", () => {
-    seedRequirement();
+  it("an unchanged title writes nothing at all", async () => {
+    await seedRequirement();
     render(<RulesScreen />);
-    const before = useScenarioStore.temporal.getState().pastStates.length;
+    const before = await undoDepth();
     const stateBefore = useScenarioStore.getState().cardsByKind;
 
-    renameRow("requirements:r1", "Day cap");
+    await renameRow("requirements:r1", "Day cap");
 
-    expect(useScenarioStore.temporal.getState().pastStates.length).toBe(before);
+    expect(await undoDepth()).toBe(before);
     expect(useScenarioStore.getState().cardsByKind).toBe(stateBefore);
   });
 
-  it("a rename is exactly one undo entry, and Undo restores the previous title", () => {
-    seedRequirement();
+  it("a rename is exactly one undo entry, and Undo restores the previous title", async () => {
+    await seedRequirement();
     render(<RulesScreen />);
-    const before = useScenarioStore.temporal.getState().pastStates.length;
+    const before = await undoDepth();
 
-    renameRow("requirements:r1", "Day shift cover");
+    await renameRow("requirements:r1", "Day shift cover");
 
-    expect(useScenarioStore.temporal.getState().pastStates.length).toBe(before + 1);
-    useScenarioStore.temporal.getState().undo();
+    expect(await undoDepth()).toBe(before + 1);
+    await scenarioCommands.undo();
     expect(useScenarioStore.getState().cardsByKind.requirements[0].description).toBe("Day cap");
   });
 
-  it("cancelling leaves the title untouched", () => {
-    seedRequirement();
+  it("cancelling leaves the title untouched", async () => {
+    await seedRequirement();
     render(<RulesScreen />);
     fireEvent.click(screen.getByTestId("rule-rename-requirements:r1"));
     fireEvent.change(screen.getByTestId("rule-rename-input-requirements:r1"), {
       target: { value: "Never saved" },
     });
     fireEvent.click(screen.getByTestId("rule-rename-cancel-requirements:r1"));
+    await settle();
 
     expect(useScenarioStore.getState().cardsByKind.requirements[0].description).toBe("Day cap");
     expect(screen.getByText("Day cap")).toBeInTheDocument();
@@ -324,8 +350,8 @@ describe("RulesScreen — renaming a rule", () => {
 });
 
 describe("RulesScreen — unsupported (advanced-shaped) records", () => {
-  it("shows a locked read-only fallback instead of hiding or flattening the record", () => {
-    useScenarioStore.getState().mutateScenario((state) => ({
+  it("shows a locked read-only fallback instead of hiding or flattening the record", async () => {
+    await scenarioCommands.mutate((state) => ({
       cardsByKind: {
         ...state.cardsByKind,
         requirements: [{ uid: "r2", shiftType: ["D", "N"], requiredNumPeople: 1, weight: -1 }],
@@ -351,7 +377,7 @@ describe("RulesScreen — unsupported (advanced-shaped) records", () => {
 // ---------------------------------------------------------------------------
 
 describe("RulesScreen — v2 surface ladder", () => {
-  it("paints the screen root as the L0 page plane through the shared recipe", () => {
+  it("paints the screen root as the L0 page plane through the shared recipe", async () => {
     render(<RulesScreen />);
     const root = screen.getByTestId("screen");
     // F4's R3 row declares this element `role: page`, which resolves to --bg with
@@ -363,7 +389,7 @@ describe("RulesScreen — v2 surface ladder", () => {
     expect(classesOf(root)).not.toMatch(/\bshadow-[123]\b/);
   });
 
-  it("rests the on-count summary on L1 at the control radius, not as a well", () => {
+  it("rests the on-count summary on L1 at the control radius, not as a well", async () => {
     render(<RulesScreen />);
     const chip = screen.getByText(/OF \d+ RULES ON/).parentElement!;
     // DESIGN.md §4 puts wells INSIDE an L1 card; this island sits on the page.
@@ -374,8 +400,8 @@ describe("RulesScreen — v2 surface ladder", () => {
     expect(classesOf(chip)).not.toContain("shadow-well");
   });
 
-  it("gives the advanced-records strip the inset well role, never an outer shadow", () => {
-    seedRequirement();
+  it("gives the advanced-records strip the inset well role, never an outer shadow", async () => {
+    await seedRequirement();
     render(<RulesScreen />);
     const strip = screen.getByTestId("rules-open-advanced-banner").parentElement!;
     expect(strip.getAttribute("data-level")).toBe("well");
@@ -385,8 +411,8 @@ describe("RulesScreen — v2 surface ladder", () => {
     expect(classesOf(strip)).not.toMatch(/\bshadow-[123]\b/);
   });
 
-  it("makes each category list one resting L1 card that clips its square rows", () => {
-    seedRequirement();
+  it("makes each category list one resting L1 card that clips its square rows", async () => {
+    await seedRequirement();
     render(<RulesScreen />);
     const list = classesOf(screen.getByTestId("rule-category-Staffing levels"));
     expect(list).toContain("rounded-card");
@@ -397,7 +423,7 @@ describe("RulesScreen — v2 surface ladder", () => {
     expect(list).toContain("overflow-hidden");
   });
 
-  it("rounds the empty state as a card while keeping dashed as the zero-data edge", () => {
+  it("rounds the empty state as a card while keeping dashed as the zero-data edge", async () => {
     render(<RulesScreen />);
     const empty = classesOf(screen.getByTestId("rules-empty-state"));
     expect(empty).toContain("rounded-card");
@@ -407,7 +433,7 @@ describe("RulesScreen — v2 surface ladder", () => {
     expect(empty).not.toContain("border-[1.5px]");
   });
 
-  it("tracks R3-owned headings at the v2 -0.015em rather than a globals default", () => {
+  it("tracks R3-owned headings at the v2 -0.015em rather than a globals default", async () => {
     render(<RulesScreen />);
     const heading = classesOf(screen.getByRole("heading", { level: 1 }));
     expect(heading).toContain("tracking-[-0.015em]");
@@ -417,8 +443,8 @@ describe("RulesScreen — v2 surface ladder", () => {
 });
 
 describe("RulesScreen — rule-row state and status pairs", () => {
-  function seedDisabledRequirement() {
-    useScenarioStore.getState().mutateScenario((state) => ({
+  async function seedDisabledRequirement() {
+    await scenarioCommands.mutate((state) => ({
       cardsByKind: {
         ...state.cardsByKind,
         requirements: [
@@ -435,8 +461,8 @@ describe("RulesScreen — rule-row state and status pairs", () => {
     }));
   }
 
-  it("keeps a row's divider a square single edge, never a rounded box", () => {
-    seedRequirement();
+  it("keeps a row's divider a square single edge, never a rounded box", async () => {
+    await seedRequirement();
     render(<RulesScreen />);
     const row = classesOf(screen.getByTestId("rule-row-requirements:r1"));
     expect(row).toContain("border-t");
@@ -445,8 +471,8 @@ describe("RulesScreen — rule-row state and status pairs", () => {
     expect(row).not.toMatch(/\brounded-(card|control|chip|pill)\b/);
   });
 
-  it("recedes a switched-off row in TONE instead of fading it with opacity", () => {
-    seedDisabledRequirement();
+  it("recedes a switched-off row in TONE instead of fading it with opacity", async () => {
+    await seedDisabledRequirement();
     render(<RulesScreen />);
     const row = screen.getByTestId("rule-row-requirements:r1");
     expect(row.getAttribute("data-disabled")).toBe("true");
@@ -456,14 +482,14 @@ describe("RulesScreen — rule-row state and status pairs", () => {
     expect(classesOf(row)).not.toMatch(/\bopacity-\d+\b/);
   });
 
-  it("leaves an enabled row on the card's own L1 plane", () => {
-    seedRequirement();
+  it("leaves an enabled row on the card's own L1 plane", async () => {
+    await seedRequirement();
     render(<RulesScreen />);
     expect(classesOf(screen.getByTestId("rule-row-requirements:r1"))).not.toContain("bg-panel");
   });
 
-  it("pairs the ON/OFF chip on chip geometry with a neutral hairline, not the selection language", () => {
-    seedRequirement();
+  it("pairs the ON/OFF chip on chip geometry with a neutral hairline, not the selection language", async () => {
+    await seedRequirement();
     render(<RulesScreen />);
     const on = classesOf(within(screen.getByTestId("rule-row-requirements:r1")).getByText("ON"));
     expect(on).toContain("rounded-chip");
@@ -475,7 +501,7 @@ describe("RulesScreen — rule-row state and status pairs", () => {
     expect(on).not.toContain("border-brand");
 
     cleanup();
-    seedDisabledRequirement();
+    await seedDisabledRequirement();
     render(<RulesScreen />);
     const off = classesOf(within(screen.getByTestId("rule-row-requirements:r1")).getByText("OFF"));
     expect(off).toContain("rounded-chip");
@@ -485,7 +511,7 @@ describe("RulesScreen — rule-row state and status pairs", () => {
     expect(off).toContain("text-ink2");
   });
 
-  it("marks a built-in through the shared Badge recipe and drops the padlock ornament", () => {
+  it("marks a built-in through the shared Badge recipe and drops the padlock ornament", async () => {
     render(<RulesScreen />);
     const row = screen.getByTestId("rule-row-builtin:max-one-shift-per-day");
     const badge = within(row).getByText("Built-in");
@@ -501,9 +527,9 @@ describe("RulesScreen — rule-row state and status pairs", () => {
 });
 
 describe("RulesScreen — the adjustment band", () => {
-  beforeEach(() => seedRequirement());
+  beforeEach(async () => await seedRequirement());
 
-  it("is a full-bleed square band on the --panel tone with a dashed top edge", () => {
+  it("is a full-bleed square band on the --panel tone with a dashed top edge", async () => {
     render(<RulesScreen />);
     fireEvent.click(screen.getByTestId("rule-adjust-toggle-requirements:r1"));
     const band = classesOf(screen.getByTestId("rule-adjust-panel-requirements:r1"));
@@ -515,7 +541,7 @@ describe("RulesScreen — the adjustment band", () => {
     expect(band).toContain("rounded-none");
   });
 
-  it("exposes the Adjust toggle as a real disclosure over the band", () => {
+  it("exposes the Adjust toggle as a real disclosure over the band", async () => {
     render(<RulesScreen />);
     const toggle = screen.getByTestId("rule-adjust-toggle-requirements:r1");
     expect(toggle).toHaveAttribute("aria-expanded", "false");
@@ -527,7 +553,7 @@ describe("RulesScreen — the adjustment band", () => {
     expect(toggle.getAttribute("aria-controls")).toBe(band.id);
   });
 
-  it("reports a validation error in the semantic ink tier, not the base hue", () => {
+  it("reports a validation error in the semantic ink tier, not the base hue", async () => {
     render(<RulesScreen />);
     fireEvent.click(screen.getByTestId("rule-adjust-toggle-requirements:r1"));
     fireEvent.change(screen.getByTestId("rule-adjust-input-requirements:r1-requiredNumPeople"), {
@@ -542,8 +568,8 @@ describe("RulesScreen — the adjustment band", () => {
 });
 
 describe("RulesScreen — real controls at the coarse-pointer floor", () => {
-  it("builds the ±∞ weight affordances from the shared Button contract", () => {
-    useScenarioStore.getState().mutateScenario((state) => ({
+  it("builds the ±∞ weight affordances from the shared Button contract", async () => {
+    await scenarioCommands.mutate((state) => ({
       cardsByKind: {
         ...state.cardsByKind,
         successions: [{ uid: "s1", person: ["P1"], pattern: ["N", "D"], weight: -2 }],
@@ -567,8 +593,8 @@ describe("RulesScreen — real controls at the coarse-pointer floor", () => {
     }
   });
 
-  it("gives the inline text affordances the 44px floor without a pseudo-element hitbox", () => {
-    seedRequirement();
+  it("gives the inline text affordances the 44px floor without a pseudo-element hitbox", async () => {
+    await seedRequirement();
     render(<RulesScreen />);
     for (const testId of ["rule-rename-requirements:r1", "rule-open-advanced-requirements:r1"]) {
       const classes = classesOf(screen.getByTestId(testId));
@@ -579,8 +605,8 @@ describe("RulesScreen — real controls at the coarse-pointer floor", () => {
     }
   });
 
-  it("leaves the rename field on its own absolute control height", () => {
-    seedRequirement();
+  it("leaves the rename field on its own absolute control height", async () => {
+    await seedRequirement();
     render(<RulesScreen />);
     fireEvent.click(screen.getByTestId("rule-rename-requirements:r1"));
     const input = screen.getByTestId("rule-rename-input-requirements:r1");
@@ -591,8 +617,8 @@ describe("RulesScreen — real controls at the coarse-pointer floor", () => {
     expect(classesOf(input)).toContain("pointer-coarse:min-h-touch");
   });
 
-  it("hands an unsupported record off through a real control below its reason", () => {
-    useScenarioStore.getState().mutateScenario((state) => ({
+  it("hands an unsupported record off through a real control below its reason", async () => {
+    await scenarioCommands.mutate((state) => ({
       cardsByKind: {
         ...state.cardsByKind,
         requirements: [{ uid: "r2", shiftType: ["D", "N"], requiredNumPeople: 1, weight: -1 }],

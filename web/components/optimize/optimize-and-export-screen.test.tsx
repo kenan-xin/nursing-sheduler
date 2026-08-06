@@ -5,15 +5,22 @@
 // gates, the end-to-end submit → download → cleanup terminal path with bounded
 // observability, and the confirmed Forget of an interrupted recovery record.
 
+import "fake-indexeddb/auto";
 import { createElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { JobResponse } from "@/lib/bff/types";
-import { useHotStore, useScenarioStore } from "@/lib/store";
-import { createEmptyScenarioUiState } from "@/lib/scenario/canonical";
-import type { PrepareOptimizeSubmissionResult } from "@/lib/scenario";
+import { scenarioCommands, useHotStore } from "@/lib/store";
+import {
+  drainScenarioCommands,
+  installTestAuthority,
+  resetScenarioForTest,
+} from "@/lib/store/test-authority";
+import { toast } from "sonner";
+
+import type { CanonicalScenarioDocument, PrepareOptimizeSubmissionResult } from "@/lib/scenario";
 import {
   buildProvisionalSession,
   createOptimizeObservability,
@@ -28,8 +35,18 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/optimize-and-export",
 }));
 
+vi.mock("sonner", () => ({
+  toast: {
+    error: vi.fn(),
+    success: vi.fn(),
+    info: vi.fn(),
+  },
+}));
+
 const originalFetch = globalThis.fetch;
 let client: QueryClient;
+/** The installed test authority — exposed so a peer tab can share its database. */
+let authorityDbName: string;
 
 function wrapper({ children }: { children: ReactNode }) {
   return createElement(QueryClientProvider, { client }, children);
@@ -111,9 +128,16 @@ const okPrep: PrepareOptimizeSubmissionResult = {
   prep: { yaml: "scenario: {}", peopleCount: 0, reverseMap: [], anonymized: false },
 };
 
-function readyStore() {
-  useScenarioStore.setState({
-    ...createEmptyScenarioUiState(),
+/**
+ * Satisfy the route's required-data gate through the product's own write path.
+ *
+ * T03: this used to `setState` the projection directly. It commits now, because
+ * the screen's submit preflight reads PERSISTED identity/revision — a
+ * projection-only seed would leave the two disagreeing and the preflight would
+ * reconcile the seed straight back out.
+ */
+async function readyStore() {
+  await scenarioCommands.mutate({
     staff: [{ id: "p1" }],
     shifts: [{ id: "day" }],
     rangeStart: "2026-07-01",
@@ -141,12 +165,16 @@ function onlineInfo() {
   };
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
+  // A fresh repository-backed authority per test: the screen's preflight reads
+  // durable state, so an empty projection over someone else's database would not
+  // be an empty scenario.
+  const harness = await resetScenarioForTest();
+  authorityDbName = harness.databaseName;
   useHotStore.getState().resetRunView();
-  useScenarioStore.setState(createEmptyScenarioUiState());
 });
 
 afterEach(() => {
@@ -168,7 +196,7 @@ describe("OptimizeAndExportScreen — gating", () => {
         wrapper,
       },
     );
-    await waitFor(() => expect(screen.getByText("Online")).toBeInTheDocument());
+    await waitFor(async () => expect(screen.getByText("Online")).toBeInTheDocument());
     expect(screen.getByTestId("optimize-readiness")).toBeInTheDocument();
     expect(screen.getByTestId("optimize-disabled-reason")).toHaveTextContent(
       "Complete the missing schedule configuration before optimising.",
@@ -177,7 +205,7 @@ describe("OptimizeAndExportScreen — gating", () => {
   });
 
   it("blocks submission when the backend is offline", async () => {
-    readyStore();
+    await readyStore();
     routeFetch(() => json(200, baseJob()));
     render(
       <OptimizeAndExportScreen
@@ -192,7 +220,7 @@ describe("OptimizeAndExportScreen — gating", () => {
       />,
       { wrapper },
     );
-    await waitFor(() => expect(screen.getByText("Offline")).toBeInTheDocument());
+    await waitFor(async () => expect(screen.getByText("Offline")).toBeInTheDocument());
     expect(screen.getByTestId("optimize-disabled-reason")).toHaveTextContent(
       "Backend unavailable.",
     );
@@ -203,8 +231,46 @@ describe("OptimizeAndExportScreen — gating", () => {
     expect(screen.queryByTestId("optimize-start")).not.toBeInTheDocument();
   });
 
+  it("submits the COMMITTED document, not whichever frame the click landed on", async () => {
+    // T03's authoritative preflight. A durable edit issued a moment before Optimize
+    // is clicked is still in the command queue: pre-cutover the payload was read
+    // straight off the projection, so that edit would have been silently left out
+    // of the run. The preflight drains first, so the submitted document is the one
+    // that actually committed.
+    await readyStore();
+    routeFetch(() => json(200, baseJob()));
+    let submitted: CanonicalScenarioDocument | null = null;
+    render(
+      <OptimizeAndExportScreen
+        serverInfoDeps={onlineInfo()}
+        controllerDeps={{
+          prepare: (document: CanonicalScenarioDocument) => {
+            submitted = document;
+            return okPrep;
+          },
+          storage: memStorage(),
+        }}
+      />,
+      { wrapper },
+    );
+    await waitFor(async () => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
+
+    // Issued WITHOUT awaiting — exactly the shape of an Adjust blur or a paint
+    // mouse-up landing in the same tick as the click.
+    void scenarioCommands.mutate({ staff: [{ id: "p1" }, { id: "p2" }] });
+    await userEvent.click(screen.getByTestId("optimize-submit"));
+
+    await waitFor(() => expect(submitted).not.toBeNull());
+    expect(submitted!.people.items.map((person: { id: unknown }) => person.id)).toEqual([
+      "p1",
+      "p2",
+    ]);
+    // ...and the run itself is unchanged: same payload shape, same outcome path.
+    await drainScenarioCommands();
+  });
+
   it("offers the idle-panel CTA only when a run is permitted", async () => {
-    readyStore();
+    await readyStore();
     routeFetch(() => json(200, baseJob()));
     render(
       <OptimizeAndExportScreen
@@ -213,14 +279,14 @@ describe("OptimizeAndExportScreen — gating", () => {
       />,
       { wrapper },
     );
-    await waitFor(() => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
+    await waitFor(async () => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
     // Ready + online + idle → the idle empty state offers the in-panel Optimize CTA.
     expect(screen.getByTestId("optimize-idle")).toBeInTheDocument();
     expect(screen.getByTestId("optimize-start")).toBeInTheDocument();
   });
 
   it("warns on a frontend/backend version mismatch", async () => {
-    readyStore();
+    await readyStore();
     routeFetch(() => json(200, baseJob()));
     render(
       <OptimizeAndExportScreen
@@ -233,11 +299,64 @@ describe("OptimizeAndExportScreen — gating", () => {
       expect(screen.getByTestId("optimize-version-mismatch")).toBeInTheDocument(),
     );
   });
+
+  it("refuses submission after a peer takeover that wrote NO content, even with a missed hint", async () => {
+    // T03F1 round-2, finding 1: the final pre-submit gate must read the PERSISTED
+    // lease, not the projected `ownership`. A peer that takes over without writing
+    // content leaves the envelope revision unchanged; if its BroadcastChannel hint
+    // is delayed or missed, the projection still believes it is the owner. The
+    // persisted lease disagrees, and the preflight must catch it — zero server
+    // submission and a truthful UI refusal.
+    await readyStore();
+    const fetchHandler = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
+      json(200, baseJob()),
+    );
+    routeFetch(fetchHandler);
+    let submitted: CanonicalScenarioDocument | null = null;
+    render(
+      <OptimizeAndExportScreen
+        serverInfoDeps={onlineInfo()}
+        controllerDeps={{
+          prepare: (document: CanonicalScenarioDocument) => {
+            submitted = document;
+            return okPrep;
+          },
+          storage: memStorage(),
+        }}
+      />,
+      { wrapper },
+    );
+    await waitFor(async () => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
+
+    // A peer tab seizes the lease. It writes NOTHING — the envelope revision is
+    // unchanged — so only the lease row moved. Its hint is NOT delivered (missed /
+    // suppressed BroadcastChannel), so the projection still says "owner".
+    const peer = await installTestAuthority({ databaseName: authorityDbName, install: false });
+    await peer.authority.initialize();
+    await peer.authority.takeover();
+
+    // The projection is stale: the button is still enabled because the reactive
+    // gate still reads the projected ownership.
+    await userEvent.click(screen.getByTestId("optimize-submit"));
+
+    // Zero server submissions: the POST handler was never reached.
+    expect(submitted).toBeNull();
+    const posts = fetchHandler.mock.calls.filter(
+      ([url, init]) => String(url).endsWith("/api/optimize") && (init?.method ?? "GET") === "POST",
+    );
+    expect(posts).toHaveLength(0);
+    // Truthful UI refusal: the preflight surfaced the read-only message.
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(
+        expect.stringMatching(/being edited in another tab/i),
+      );
+    });
+  });
 });
 
 describe("OptimizeAndExportScreen — terminal success path", () => {
   it("submits, downloads the restored artifact, cleans up, and emits observability", async () => {
-    readyStore();
+    await readyStore();
     routeFetch((u, init) => {
       const method = init?.method ?? "GET";
       if (u.endsWith("/api/optimize") && method === "POST") return json(202, baseJob());
@@ -265,7 +384,7 @@ describe("OptimizeAndExportScreen — terminal success path", () => {
       { wrapper },
     );
 
-    await waitFor(() => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
+    await waitFor(async () => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
     await userEvent.click(screen.getByTestId("optimize-submit"));
 
     await waitFor(() =>
@@ -285,7 +404,7 @@ describe("OptimizeAndExportScreen — terminal success path", () => {
 
 describe("OptimizeAndExportScreen — queue and cancellation observability", () => {
   it("emits queue depth and cancellation for a queued run", async () => {
-    readyStore();
+    await readyStore();
     const cancelledJob = baseJob({
       state: "cancelled",
       terminal: true,
@@ -314,7 +433,7 @@ describe("OptimizeAndExportScreen — queue and cancellation observability", () 
       { wrapper },
     );
 
-    await waitFor(() => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
+    await waitFor(async () => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
     await userEvent.click(screen.getByTestId("optimize-submit"));
     await waitFor(() =>
       expect(screen.getByTestId("optimize-status")).toHaveTextContent("Queued, position 2"),
@@ -351,7 +470,9 @@ describe("OptimizeAndExportScreen — recovery forget", () => {
       { wrapper },
     );
 
-    await waitFor(() => expect(screen.getByTestId("optimize-interrupted")).toBeInTheDocument());
+    await waitFor(async () =>
+      expect(screen.getByTestId("optimize-interrupted")).toBeInTheDocument(),
+    );
     await userEvent.click(screen.getByTestId("optimize-forget"));
     expect(confirm).toHaveBeenCalled();
     await waitFor(() =>
@@ -361,7 +482,7 @@ describe("OptimizeAndExportScreen — recovery forget", () => {
   });
 
   it("blocks submission while an interrupted record still requires Forget", async () => {
-    readyStore();
+    await readyStore();
     const provisional = buildProvisionalSession({
       ownerId: "owner-y",
       anonymized: false,
@@ -379,7 +500,9 @@ describe("OptimizeAndExportScreen — recovery forget", () => {
       />,
       { wrapper },
     );
-    await waitFor(() => expect(screen.getByTestId("optimize-interrupted")).toBeInTheDocument());
+    await waitFor(async () =>
+      expect(screen.getByTestId("optimize-interrupted")).toBeInTheDocument(),
+    );
     expect(screen.getByTestId("optimize-submit")).toBeDisabled();
     expect(screen.getByTestId("optimize-disabled-reason")).toHaveTextContent(
       "Resolve the recovered run above",
@@ -387,7 +510,7 @@ describe("OptimizeAndExportScreen — recovery forget", () => {
   });
 
   it("surfaces an unreadable record and blocks submission", async () => {
-    readyStore();
+    await readyStore();
     const storage = memStorage("{ not json");
     routeFetch(() => json(200, baseJob()));
     render(
@@ -398,7 +521,9 @@ describe("OptimizeAndExportScreen — recovery forget", () => {
       />,
       { wrapper },
     );
-    await waitFor(() => expect(screen.getByTestId("optimize-unreadable")).toBeInTheDocument());
+    await waitFor(async () =>
+      expect(screen.getByTestId("optimize-unreadable")).toBeInTheDocument(),
+    );
     expect(screen.getByTestId("optimize-submit")).toBeDisabled();
   });
 });
@@ -463,7 +588,7 @@ describe("OptimizeAndExportScreen — terminal release", () => {
   }
 
   it("row 2: infeasible shows the dedicated panel and auto-cleans", async () => {
-    readyStore();
+    await readyStore();
     routeTerminal(infeasibleJob);
     const deleteJob = vi.fn(async (): Promise<CleanupCallOutcome> => ({ status: "confirmed" }));
     const storage = memStorage();
@@ -476,18 +601,20 @@ describe("OptimizeAndExportScreen — terminal release", () => {
       />,
       { wrapper },
     );
-    await waitFor(() => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
+    await waitFor(async () => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
     await userEvent.click(screen.getByTestId("optimize-submit"));
     // B2-1: infeasible renders its dedicated panel (heading + verdict + CTAs), not the
     // generic no-artifact callout.
-    await waitFor(() => expect(screen.getByTestId("optimize-infeasible")).toBeInTheDocument());
+    await waitFor(async () =>
+      expect(screen.getByTestId("optimize-infeasible")).toBeInTheDocument(),
+    );
     expect(screen.getByTestId("optimize-infeasible")).toHaveTextContent("infeasibility_proven");
     expect(screen.getByTestId("optimize-adjust-rules")).toHaveAttribute("href", "/rules");
-    await waitFor(() => expect(deleteJob).toHaveBeenCalledWith("opt_1"));
+    await waitFor(async () => expect(deleteJob).toHaveBeenCalledWith("opt_1"));
   });
 
   it("U31 solver_timeout (feasible) downloads its artifact then cleans up", async () => {
-    readyStore();
+    await readyStore();
     routeTerminal(solverTimeoutJob);
     const saveBlob = vi.fn();
     const deleteJob = vi.fn(async (): Promise<CleanupCallOutcome> => ({ status: "confirmed" }));
@@ -502,7 +629,7 @@ describe("OptimizeAndExportScreen — terminal release", () => {
       />,
       { wrapper },
     );
-    await waitFor(() => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
+    await waitFor(async () => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
     await userEvent.click(screen.getByTestId("optimize-submit"));
     await waitFor(() =>
       expect(screen.getByTestId("optimize-completed-artifact")).toHaveTextContent(
@@ -510,11 +637,11 @@ describe("OptimizeAndExportScreen — terminal release", () => {
       ),
     );
     expect(saveBlob).toHaveBeenCalledWith(expect.any(Blob), "schedule.xlsx");
-    await waitFor(() => expect(deleteJob).toHaveBeenCalledWith("opt_1"));
+    await waitFor(async () => expect(deleteJob).toHaveBeenCalledWith("opt_1"));
   });
 
   it("row 3: process_timeout can be dismissed (cleaned) back to idle", async () => {
-    readyStore();
+    await readyStore();
     routeTerminal(processTimeoutJob);
     const deleteJob = vi.fn(async (): Promise<CleanupCallOutcome> => ({ status: "confirmed" }));
     const storage = memStorage();
@@ -527,20 +654,20 @@ describe("OptimizeAndExportScreen — terminal release", () => {
       />,
       { wrapper },
     );
-    await waitFor(() => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
+    await waitFor(async () => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
     await userEvent.click(screen.getByTestId("optimize-submit"));
     await waitFor(() =>
       expect(screen.getByTestId("optimize-terminal-error")).toHaveTextContent("timed out"),
     );
     expect(screen.queryByTestId("optimize-resubmit")).not.toBeInTheDocument();
     await userEvent.click(screen.getByTestId("optimize-dismiss"));
-    await waitFor(() => expect(deleteJob).toHaveBeenCalledWith("opt_1"));
+    await waitFor(async () => expect(deleteJob).toHaveBeenCalledWith("opt_1"));
     // Dismissed → the B2-1 idle empty state (not a bare status badge).
-    await waitFor(() => expect(screen.getByTestId("optimize-idle")).toBeInTheDocument());
+    await waitFor(async () => expect(screen.getByTestId("optimize-idle")).toBeInTheDocument());
   });
 
   it("worker_lost: a failed cleanup does NOT resubmit and preserves the terminal result", async () => {
-    readyStore();
+    await readyStore();
     routeTerminal(workerLostJob);
     const deleteJob = vi.fn(
       async (): Promise<CleanupCallOutcome> => ({ status: "failed", reason: "409" }),
@@ -557,13 +684,15 @@ describe("OptimizeAndExportScreen — terminal release", () => {
       />,
       { wrapper },
     );
-    await waitFor(() => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
+    await waitFor(async () => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
     await userEvent.click(screen.getByTestId("optimize-submit"));
-    await waitFor(() => expect(screen.getByTestId("optimize-resubmit")).toBeInTheDocument());
+    await waitFor(async () => expect(screen.getByTestId("optimize-resubmit")).toBeInTheDocument());
 
     await userEvent.click(screen.getByTestId("optimize-resubmit"));
     // Cleanup failed → the worker_lost result is preserved and the cleanup surface appears.
-    await waitFor(() => expect(screen.getByTestId("optimize-cleanup-failed")).toBeInTheDocument());
+    await waitFor(async () =>
+      expect(screen.getByTestId("optimize-cleanup-failed")).toBeInTheDocument(),
+    );
     expect(screen.getByTestId("optimize-terminal-error")).toHaveTextContent("Worker lost.");
     expect(screen.getByTestId("optimize-status")).toHaveTextContent("Worker lost");
 
@@ -576,7 +705,7 @@ describe("OptimizeAndExportScreen — terminal release", () => {
   });
 
   it("cleans up via the exact code-first job-not-found DELETE (real classifier)", async () => {
-    readyStore();
+    await readyStore();
     const cancelledJob = baseJob({
       state: "cancelled",
       terminal: true,
@@ -604,12 +733,12 @@ describe("OptimizeAndExportScreen — terminal release", () => {
       />,
       { wrapper },
     );
-    await waitFor(() => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
+    await waitFor(async () => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
     await userEvent.click(screen.getByTestId("optimize-submit"));
-    await waitFor(() => expect(screen.getByTestId("optimize-dismiss")).toBeInTheDocument());
+    await waitFor(async () => expect(screen.getByTestId("optimize-dismiss")).toBeInTheDocument());
     await userEvent.click(screen.getByTestId("optimize-dismiss"));
     // Exact job-not-found is a confirmed cleanup → back to idle.
-    await waitFor(() => expect(screen.getByTestId("optimize-idle")).toBeInTheDocument());
+    await waitFor(async () => expect(screen.getByTestId("optimize-idle")).toBeInTheDocument());
   });
 });
 
@@ -716,7 +845,7 @@ describe("OptimizeAndExportScreen — primary submit gate after cleanup failure"
     { name: "unverified", apply: (s: ReturnType<typeof controllableStorage>) => s.throwOnRead() },
   ] as const) {
     it(`server-confirmed + local ${scenario.name} disables the primary submit and preserves the terminal result`, async () => {
-      readyStore();
+      await readyStore();
       routeCompletedWithArtifact();
       const control = controllableStorage();
       const saveBlob = vi.fn();
@@ -741,7 +870,7 @@ describe("OptimizeAndExportScreen — primary submit gate after cleanup failure"
         { wrapper },
       );
 
-      await waitFor(() => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
+      await waitFor(async () => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
       await userEvent.click(screen.getByTestId("optimize-submit"));
 
       // Completed + downloaded, then auto-cleanup fails the local release.
@@ -768,7 +897,7 @@ describe("OptimizeAndExportScreen — primary submit gate after cleanup failure"
   }
 
   it("retry cleanup that proves local release re-enables the primary submit", async () => {
-    readyStore();
+    await readyStore();
     routeCompletedWithArtifact();
     const control = controllableStorage();
     const saveBlob = vi.fn();
@@ -800,9 +929,11 @@ describe("OptimizeAndExportScreen — primary submit gate after cleanup failure"
       { wrapper },
     );
 
-    await waitFor(() => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
+    await waitFor(async () => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
     await userEvent.click(screen.getByTestId("optimize-submit"));
-    await waitFor(() => expect(screen.getByTestId("optimize-cleanup-failed")).toBeInTheDocument());
+    await waitFor(async () =>
+      expect(screen.getByTestId("optimize-cleanup-failed")).toBeInTheDocument(),
+    );
     expect(screen.getByTestId("optimize-submit")).toBeDisabled();
 
     // Retry cleanup: the local record now matches, so recovery.cleanup returns removed.
@@ -812,11 +943,11 @@ describe("OptimizeAndExportScreen — primary submit gate after cleanup failure"
     );
 
     // Primary submit re-enabled — only a proven release may start a new run.
-    await waitFor(() => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
+    await waitFor(async () => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
   });
 
   it("confirmed abandon that proves local release re-enables the primary submit", async () => {
-    readyStore();
+    await readyStore();
     routeCompletedWithArtifact();
     const storage = memStorage();
     const saveBlob = vi.fn();
@@ -838,9 +969,11 @@ describe("OptimizeAndExportScreen — primary submit gate after cleanup failure"
       { wrapper },
     );
 
-    await waitFor(() => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
+    await waitFor(async () => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
     await userEvent.click(screen.getByTestId("optimize-submit"));
-    await waitFor(() => expect(screen.getByTestId("optimize-cleanup-failed")).toBeInTheDocument());
+    await waitFor(async () =>
+      expect(screen.getByTestId("optimize-cleanup-failed")).toBeInTheDocument(),
+    );
     expect(screen.getByTestId("optimize-submit")).toBeDisabled();
 
     // Abandon requires destructive confirmation, then frees the local slot. The
@@ -853,6 +986,6 @@ describe("OptimizeAndExportScreen — primary submit gate after cleanup failure"
     );
 
     // Primary submit re-enabled — only a proven release may start a new run.
-    await waitFor(() => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
+    await waitFor(async () => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
   });
 });

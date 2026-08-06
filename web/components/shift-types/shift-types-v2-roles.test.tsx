@@ -5,16 +5,12 @@ import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { RequirementCard, ScenarioUiState } from "@/lib/scenario";
-import {
-  drainScenarioPersist,
-  resetToNewScenario,
-  useHotStore,
-  useScenarioStore,
-} from "@/lib/store";
+import { useScenarioStore, scenarioCommands } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { surfaceVariants } from "@/components/ui/surface";
 import { buttonVariants } from "@/components/ui/button";
 import { ShiftTypeGrid } from "./shift-type-grid";
+import { resetScenarioForTest, drainScenarioCommands } from "@/lib/store/test-authority";
 
 // R2c — which CONTRACT authored each surface on /shift-types.
 //
@@ -82,14 +78,14 @@ function expectNotRole(element: Element, ...args: Parameters<typeof surfaceVaria
   ).toBe(false);
 }
 
-function seed(patch: Partial<ScenarioUiState>) {
-  act(() => {
-    useScenarioStore.getState().mutateScenario(patch);
+async function seed(patch: Partial<ScenarioUiState>) {
+  await act(async () => {
+    await scenarioCommands.mutate(patch);
   });
 }
 
-function seedRequirements(cards: RequirementCard[], patch: Partial<ScenarioUiState> = {}) {
-  seed({
+async function seedRequirements(cards: RequirementCard[], patch: Partial<ScenarioUiState> = {}) {
+  await seed({
     ...patch,
     cardsByKind: { ...useScenarioStore.getState().cardsByKind, requirements: cards },
   });
@@ -112,17 +108,17 @@ const NIGHT = "string:Night";
 
 beforeEach(async () => {
   vi.clearAllMocks();
-  await resetToNewScenario(useScenarioStore, useHotStore);
-  await drainScenarioPersist(useScenarioStore);
-  seed({ shifts: [], shiftGroups: [] });
+  await resetScenarioForTest();
+  await drainScenarioCommands();
+  await seed({ shifts: [], shiftGroups: [] });
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
 });
 
 describe("R2c surface ladder — authored by the shared recipe, not by hand", () => {
-  it("puts the screen root on the L0 page plane through the Surface adapter", () => {
+  it("puts the screen root on the L0 page plane through the Surface adapter", async () => {
     render(<ShiftTypeGrid />);
     const root = screen.getByTestId("screen");
 
@@ -138,8 +134,10 @@ describe("R2c surface ladder — authored by the shared recipe, not by hand", ()
     expect(root).toHaveAttribute("data-screen", "Shifts");
   });
 
-  it("renders a resting shift card as an L1 surface at the card radius", () => {
-    seed({ shifts: [{ id: "Day", startTime: "08:00", endTime: "16:00", durationMinutes: 480 }] });
+  it("renders a resting shift card as an L1 surface at the card radius", async () => {
+    await seed({
+      shifts: [{ id: "Day", startTime: "08:00", endTime: "16:00", durationMinutes: 480 }],
+    });
     render(<ShiftTypeGrid />);
 
     const card = screen.getByTestId(`shift-card-${DAY}`);
@@ -158,7 +156,7 @@ describe("R2c surface ladder — authored by the shared recipe, not by hand", ()
     });
   });
 
-  it("renders the reserved OFF/LEAVE tiles as a QUIET L1 — line2 hairline, no elevation", () => {
+  it("renders the reserved OFF/LEAVE tiles as a QUIET L1 — line2 hairline, no elevation", async () => {
     render(<ShiftTypeGrid />);
 
     for (const id of ["OFF", "LEAVE"]) {
@@ -181,8 +179,8 @@ describe("R2c surface ladder — authored by the shared recipe, not by hand", ()
     }
   });
 
-  it("renders every icon tile through the shared well/control/hairline tuple at 42px", () => {
-    seed({ shifts: [{ id: "Day" }] });
+  it("renders every icon tile through the shared well/control/hairline tuple at 42px", async () => {
+    await seed({ shifts: [{ id: "Day" }] });
     render(<ShiftTypeGrid />);
 
     const tiles = Array.from(
@@ -209,8 +207,8 @@ describe("R2c surface ladder — authored by the shared recipe, not by hand", ()
     }
   });
 
-  it("lifts the open editor to the `selected` role instead of washing it in brandtint", () => {
-    seed({ shifts: [{ id: "Day" }] });
+  it("lifts the open editor to the `selected` role instead of washing it in brandtint", async () => {
+    await seed({ shifts: [{ id: "Day" }] });
     render(<ShiftTypeGrid />);
     fireEvent.click(screen.getByTestId(`shift-edit-${DAY}`));
 
@@ -226,8 +224,8 @@ describe("R2c surface ladder — authored by the shared recipe, not by hand", ()
     });
   });
 
-  it("marks a drop candidate with the shared drop-target role, never a raw inset shadow", () => {
-    seed({ shifts: [{ id: "Day" }, { id: "Night" }] });
+  it("marks a drop candidate with the shared drop-target role, never a raw inset shadow", async () => {
+    await seed({ shifts: [{ id: "Day" }, { id: "Night" }] });
     render(<ShiftTypeGrid />);
 
     const source = screen.getByTestId(`shift-card-${DAY}`);
@@ -243,8 +241,8 @@ describe("R2c surface ladder — authored by the shared recipe, not by hand", ()
     expect(document.body.innerHTML).not.toContain("shadow-[inset");
   });
 
-  it("renders the read-only and numeric staffing boxes as inset wells", () => {
-    seedRequirements([baseline({ qualifiedPeople: ["Seniors"] })], {
+  it("renders the read-only and numeric staffing boxes as inset wells", async () => {
+    await seedRequirements([baseline({ qualifiedPeople: ["Seniors"] })], {
       shifts: [{ id: "Day" }],
       rangeStart: "2026-07-01",
       rangeEnd: "2026-07-07",
@@ -258,8 +256,8 @@ describe("R2c surface ladder — authored by the shared recipe, not by hand", ()
     });
   });
 
-  it("renders the numeric-code staffing note as an inset well", () => {
-    seed({ shifts: [{ id: 7 }] });
+  it("renders the numeric-code staffing note as an inset well", async () => {
+    await seed({ shifts: [{ id: 7 }] });
     render(<ShiftTypeGrid />);
     fireEvent.click(screen.getByTestId("shift-edit-number:7"));
 
@@ -271,8 +269,8 @@ describe("R2c surface ladder — authored by the shared recipe, not by hand", ()
 });
 
 describe("R2c primitive adoption — shared components, not caller-side overrides", () => {
-  it("uses the shared destructive-outline Button for Delete", () => {
-    seed({ shifts: [{ id: "Day" }] });
+  it("uses the shared destructive-outline Button for Delete", async () => {
+    await seed({ shifts: [{ id: "Day" }] });
     render(<ShiftTypeGrid />);
 
     const del = screen.getByTestId(`shift-delete-${DAY}`);
@@ -285,8 +283,8 @@ describe("R2c primitive adoption — shared components, not caller-side override
     expect(del.className).not.toMatch(/hover:bg-errortint\b.*\btext-error\b|\btext-error\b/);
   });
 
-  it("renders the duration readout through the shared Badge on the chip radius", () => {
-    seed({ shifts: [{ id: "Day", durationMinutes: 510 }] });
+  it("renders the duration readout through the shared Badge on the chip radius", async () => {
+    await seed({ shifts: [{ id: "Day", durationMinutes: 510 }] });
     render(<ShiftTypeGrid />);
 
     const badge = screen.getByTestId(`shift-dur-${DAY}`);
@@ -297,7 +295,7 @@ describe("R2c primitive adoption — shared components, not caller-side override
     expect(badge).toHaveTextContent("8h 30m");
   });
 
-  it("renders Continue to rules as a real guarded anchor wearing the Button recipe", () => {
+  it("renders Continue to rules as a real guarded anchor wearing the Button recipe", async () => {
     render(<ShiftTypeGrid />);
 
     const cta = screen.getByTestId("shift-types-continue");
@@ -316,7 +314,7 @@ describe("R2c primitive adoption — shared components, not caller-side override
     expect(cta.className).toBe(cn(buttonVariants({ size: "lg" }), "font-bold"));
   });
 
-  it("leaves the Save button's visuals entirely to the Button recipe", () => {
+  it("leaves the Save button's visuals entirely to the Button recipe", async () => {
     render(<ShiftTypeGrid />);
     fireEvent.click(screen.getByTestId("add-shift-toggle"));
 
@@ -330,7 +328,7 @@ describe("R2c primitive adoption — shared components, not caller-side override
 });
 
 describe("R2c typography and status — the named rules", () => {
-  it("runs the page heading at the display step with the negative-tracking rule", () => {
+  it("runs the page heading at the display step with the negative-tracking rule", async () => {
     render(<ShiftTypeGrid />);
     const heading = screen.getByRole("heading", { level: 1 });
     const classes = heading.className.split(/\s+/);
@@ -342,8 +340,8 @@ describe("R2c typography and status — the named rules", () => {
     expect(classes).not.toContain("tracking-tight");
   });
 
-  it("tracks every uppercase label at +0.03em and never at a bespoke value", () => {
-    seed({ shifts: [{ id: "Day" }] });
+  it("tracks every uppercase label at +0.03em and never at a bespoke value", async () => {
+    await seed({ shifts: [{ id: "Day" }] });
     render(<ShiftTypeGrid />);
     fireEvent.click(screen.getByTestId(`shift-edit-${DAY}`));
 
@@ -360,8 +358,8 @@ describe("R2c typography and status — the named rules", () => {
     }
   });
 
-  it("pairs the preferred-collapse warning's tint with its matching ink and border", () => {
-    seedRequirements([baseline({ preferredNumPeople: 3 })], {
+  it("pairs the preferred-collapse warning's tint with its matching ink and border", async () => {
+    await seedRequirements([baseline({ preferredNumPeople: 3 })], {
       shifts: [{ id: "Day" }],
       rangeStart: "2026-07-01",
       rangeEnd: "2026-07-07",
@@ -383,8 +381,8 @@ describe("R2c typography and status — the named rules", () => {
     expect(notice).toHaveTextContent(/cleared/i);
   });
 
-  it("pairs the save-failure notice's tint with its matching ink and border", () => {
-    seedRequirements([baseline()], {
+  it("pairs the save-failure notice's tint with its matching ink and border", async () => {
+    await seedRequirements([baseline()], {
       shifts: [{ id: "Day" }],
       rangeStart: "2026-07-01",
       rangeEnd: "2026-07-07",
@@ -395,6 +393,11 @@ describe("R2c typography and status — the named rules", () => {
     // on-card (the button stays enabled, so this is the notice's real route).
     fireEvent.change(screen.getByTestId(`shift-edit-${DAY}-required`), { target: { value: "-1" } });
     fireEvent.click(screen.getByTestId(`shift-edit-${DAY}-save`));
+    // T03: Save awaits a queued repository command, so the on-card refusal notice
+    // lands once the command settles.
+    await act(async () => {
+      await drainScenarioCommands();
+    });
 
     const alert = screen.getByTestId(`shift-edit-${DAY}-save-error`);
     const classes = alert.className.split(/\s+/);
@@ -405,8 +408,8 @@ describe("R2c typography and status — the named rules", () => {
     expect(alert).toHaveAttribute("role", "alert");
   });
 
-  it("never leaves functional copy on --faint, and never authors a v1 escape", () => {
-    seed({
+  it("never leaves functional copy on --faint, and never authors a v1 escape", async () => {
+    await seed({
       shifts: [{ id: "Day", startTime: "19:00", endTime: "07:00", durationMinutes: 720 }],
       shiftGroups: [{ id: "Working", members: ["Day"] }],
     });
@@ -476,8 +479,8 @@ const SHIFT_PALETTE = [
 ];
 
 describe("R2c accessibility — the bounded quick wins, per the ratified priority", () => {
-  it("exposes the card grid as a NAMED region", () => {
-    seed({ shifts: [{ id: "Day" }] });
+  it("exposes the card grid as a NAMED region", async () => {
+    await seed({ shifts: [{ id: "Day" }] });
     render(<ShiftTypeGrid />);
 
     // An unnamed <section> is not a region at all, so the grid was unreachable by
@@ -487,8 +490,8 @@ describe("R2c accessibility — the bounded quick wins, per the ratified priorit
     );
   });
 
-  it("names the per-card actions by the shift they act on, keeping the visible label", () => {
-    seed({ shifts: [{ id: "Day" }, { id: "Night" }] });
+  it("names the per-card actions by the shift they act on, keeping the visible label", async () => {
+    await seed({ shifts: [{ id: "Day" }, { id: "Night" }] });
     render(<ShiftTypeGrid />);
 
     for (const id of ["Day", "Night"]) {
@@ -515,7 +518,7 @@ describe("the fixed shift data palette stays out of the token authority", () => 
   const webRoot = resolve(__dirname, "..", "..");
   const read = (relPath: string) => readFileSync(resolve(webRoot, relPath), "utf8").toLowerCase();
 
-  it("registers none of the eight entries as a CSS custom property", () => {
+  it("registers none of the eight entries as a CSS custom property", async () => {
     const css = read("app/globals.css");
     // Guard the premise: a path that silently read the wrong file would report a
     // clean palette for exactly the wrong reason.
@@ -524,7 +527,7 @@ describe("the fixed shift data palette stays out of the token authority", () => 
     expect(leaked, "a shift data-mark colour has become a theme token").toEqual([]);
   });
 
-  it("is not authored anywhere in the R2c-owned sources", () => {
+  it("is not authored anywhere in the R2c-owned sources", async () => {
     const sources = [
       "app/(app)/shift-types/page.tsx",
       "components/shift-types/shift-type-grid.tsx",

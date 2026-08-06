@@ -47,7 +47,7 @@ describe("scenario creation and selection", () => {
 
     // A brand-new scenario has nothing to undo: its genesis is a durable fact,
     // not a cursor entry.
-    expect(selected.commit.isContent).toBe(false);
+    expect(selected.commit!.isContent).toBe(false);
     const history = await repo.describeHistory(selected.envelope.scenarioId);
     expect(history).toMatchObject({ undoAvailable: false, redoAvailable: false, contentCount: 0 });
   });
@@ -88,9 +88,9 @@ describe("atomic scenario switch", () => {
       currentOwner: a.owner ?? undefined,
     });
 
-    expect(switched.commit.kind).toBe("switch");
+    expect(switched.commit!.kind).toBe("switch");
     // A switch is not an edit of the scenario it selects.
-    expect(switched.commit.isContent).toBe(false);
+    expect(switched.commit!.isContent).toBe(false);
     expect(switched.envelope.documentRevision).toBe(b.envelope.documentRevision);
     expect((await db.tabSelections.get("tab-1"))?.scenarioId).toBe(b.envelope.scenarioId);
     expect(await db.writerLeases.get(a.envelope.scenarioId)).toBeUndefined();
@@ -453,7 +453,9 @@ describe("bounded history session", () => {
     expect((await repo.describeHistory(a.envelope.scenarioId)).undoAvailable).toBe(true);
     const commitsBefore = await db.scenarioCommits.count();
 
-    const reloaded = await repo.beginHistorySession(a.envelope.scenarioId);
+    // Owner-fenced now: rolling a session expires reversal material, so it takes
+    // the acting owner rather than a bare scenario id.
+    const reloaded = await repo.beginHistorySession(a.owner!);
 
     expect(reloaded.historySessionId).not.toBe(a.envelope.historySessionId);
     expect(reloaded.historyCursor).toBe(0);

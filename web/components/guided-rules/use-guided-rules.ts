@@ -4,14 +4,14 @@
 // slice, projects it into `GuidedRuleRow`s via the T14b registry, and exposes
 // toggle/adjust/rename as operations that each apply exactly one
 // `mutateScenario` patch — so a Guided edit is exactly as tracked as its Advanced
-// equivalent (one zundo entry, one persisted revision), mirroring every other
+// equivalent (one undo entry, one persisted revision), mirroring every other
 // card hook's `commitX` discipline (`components/counts/use-counts.ts`).
 //
 // `rename` writes the source constraint's OWN `description` (the built-in row's
 // `maxOneShiftPerDay.description`), exactly as an Advanced edit does — so the
 // Rules screen never becomes a second source of truth for a rule's label.
 
-import { useScenarioStore } from "@/lib/store";
+import { useScenarioStore, scenarioCommands } from "@/lib/store";
 import type {
   AffinityCard,
   CardsByKind,
@@ -44,16 +44,6 @@ import {
 } from "./mutations";
 import type { GuidedMutationOutcome, GuidedRuleRow } from "./types";
 
-/** Replace one card kind's array in a single tracked mutation — identical shape to
- *  every existing per-kind hook's `commitX`. Every caller pairs `kind` with that
- *  exact kind's own card array by construction (the per-kind switch branches
- *  below), so the internal cast is safe. */
-function commitCards(kind: GuidedRuleConstraintKind, next: readonly { uid: string }[]) {
-  useScenarioStore.getState().mutateScenario((state) => ({
-    cardsByKind: { ...state.cardsByKind, [kind]: next } as CardsByKind,
-  }));
-}
-
 function replaceInPlace<TCard extends { uid: string }>(
   cards: readonly TCard[],
   constraintId: string,
@@ -62,15 +52,43 @@ function replaceInPlace<TCard extends { uid: string }>(
   return cards.map((card) => (card.uid === constraintId ? next : card));
 }
 
+/**
+ * Apply one guided rule operation: answer the UI now, and write it as a QUEUE-HEAD
+ * TRANSFORM.
+ *
+ * The operation used to be resolved once against the render snapshot and the whole
+ * resulting per-kind array handed to the command bus. Two rapid toggles then both
+ * carried a full array built from the SAME pre-first-toggle snapshot, so the second
+ * write replaced the first instead of building on it — the first toggle simply
+ * vanished, with both reporting success.
+ *
+ * So the pure operation is re-run at the queue head, against the array the previous
+ * command committed. `operate` is a pure function of the card list, which is what
+ * makes running it twice safe: the first run is only used to answer the caller (so
+ * an inline validation error still renders without a round trip), and the second is
+ * the one that decides what is written. A card that has since been deleted, or an
+ * operation the live state now rejects, withdraws the write instead of resurrecting
+ * a stale list.
+ */
 function commitOutcome<TCard extends { uid: string }>(
   kind: GuidedRuleConstraintKind,
   cards: readonly TCard[],
   constraintId: string,
-  outcome: GuidedMutationOutcome<TCard>,
+  operate: (cards: readonly TCard[]) => GuidedMutationOutcome<TCard>,
 ): GuidedMutationOutcome<TCard> {
-  if (outcome.kind === "applied") {
-    commitCards(kind, replaceInPlace(cards, constraintId, outcome.card));
-  }
+  const outcome = operate(cards);
+  if (outcome.kind !== "applied") return outcome;
+  void scenarioCommands.mutate((live) => {
+    const liveCards = live.cardsByKind[kind] as unknown as readonly TCard[];
+    const settled = operate(liveCards);
+    if (settled.kind !== "applied") return null;
+    return {
+      cardsByKind: {
+        ...live.cardsByKind,
+        [kind]: replaceInPlace(liveCards, constraintId, settled.card),
+      } as CardsByKind,
+    };
+  });
   return outcome;
 }
 
@@ -178,43 +196,28 @@ export function useGuidedRules(): GuidedRulesController {
     toggle(kind, constraintId, enabled) {
       switch (kind) {
         case "requirements":
-          commitOutcome(
-            kind,
-            state.cardsByKind.requirements,
-            constraintId,
-            toggleRequirementRule(state.cardsByKind.requirements, constraintId, enabled),
+          commitOutcome(kind, state.cardsByKind.requirements, constraintId, (cards) =>
+            toggleRequirementRule(cards, constraintId, enabled),
           );
           return;
         case "successions":
-          commitOutcome(
-            kind,
-            state.cardsByKind.successions,
-            constraintId,
-            toggleSuccessionRule(state.cardsByKind.successions, constraintId, enabled),
+          commitOutcome(kind, state.cardsByKind.successions, constraintId, (cards) =>
+            toggleSuccessionRule(cards, constraintId, enabled),
           );
           return;
         case "counts":
-          commitOutcome(
-            kind,
-            state.cardsByKind.counts,
-            constraintId,
-            toggleCountRule(state.cardsByKind.counts, constraintId, enabled),
+          commitOutcome(kind, state.cardsByKind.counts, constraintId, (cards) =>
+            toggleCountRule(cards, constraintId, enabled),
           );
           return;
         case "affinities":
-          commitOutcome(
-            kind,
-            state.cardsByKind.affinities,
-            constraintId,
-            toggleAffinityRule(state.cardsByKind.affinities, constraintId, enabled),
+          commitOutcome(kind, state.cardsByKind.affinities, constraintId, (cards) =>
+            toggleAffinityRule(cards, constraintId, enabled),
           );
           return;
         case "coverings":
-          commitOutcome(
-            kind,
-            state.cardsByKind.coverings,
-            constraintId,
-            toggleCoveringRule(state.cardsByKind.coverings, constraintId, enabled),
+          commitOutcome(kind, state.cardsByKind.coverings, constraintId, (cards) =>
+            toggleCoveringRule(cards, constraintId, enabled),
           );
           return;
       }
@@ -226,45 +229,32 @@ export function useGuidedRules(): GuidedRulesController {
             kind,
             state.cardsByKind.requirements,
             constraintId,
-            applyRequirementQuickEdit(
-              state.cardsByKind.requirements,
-              constraintId,
-              fieldKey,
-              rawValue,
-            ),
+            (cards) => applyRequirementQuickEdit(cards, constraintId, fieldKey, rawValue),
           );
         case "successions":
           return commitOutcome<SuccessionCard>(
             kind,
             state.cardsByKind.successions,
             constraintId,
-            applySuccessionQuickEdit(
-              state.cardsByKind.successions,
-              constraintId,
-              fieldKey,
-              rawValue,
-            ),
+            (cards) => applySuccessionQuickEdit(cards, constraintId, fieldKey, rawValue),
           );
         case "counts":
-          return commitOutcome<CountCard>(
-            kind,
-            state.cardsByKind.counts,
-            constraintId,
-            applyCountQuickEdit(state.cardsByKind.counts, constraintId, fieldKey, rawValue),
+          return commitOutcome<CountCard>(kind, state.cardsByKind.counts, constraintId, (cards) =>
+            applyCountQuickEdit(cards, constraintId, fieldKey, rawValue),
           );
         case "affinities":
           return commitOutcome<AffinityCard>(
             kind,
             state.cardsByKind.affinities,
             constraintId,
-            applyAffinityQuickEdit(state.cardsByKind.affinities, constraintId, fieldKey, rawValue),
+            (cards) => applyAffinityQuickEdit(cards, constraintId, fieldKey, rawValue),
           );
         case "coverings":
           return commitOutcome<CoveringCard>(
             kind,
             state.cardsByKind.coverings,
             constraintId,
-            applyCoveringQuickEdit(state.cardsByKind.coverings, constraintId, fieldKey, rawValue),
+            (cards) => applyCoveringQuickEdit(cards, constraintId, fieldKey, rawValue),
           );
       }
     },
@@ -275,15 +265,22 @@ export function useGuidedRules(): GuidedRulesController {
       if (!next || next === row.title) return;
 
       if (row.source === "builtin") {
-        useScenarioStore.getState().mutateScenario((s) => ({
+        scenarioCommands.mutate((s) => ({
           maxOneShiftPerDay: { ...s.maxOneShiftPerDay, description: next },
         }));
         return;
       }
       if (!row.kind || !row.constraintId) return;
-      const cardsByKind = renamedCardsByKind(state.cardsByKind, row.kind, row.constraintId, next);
-      if (!cardsByKind) return;
-      commitCards(row.kind, cardsByKind[row.kind]);
+      const kind = row.kind;
+      const constraintId = row.constraintId;
+      // Nothing to rename in the snapshot — answer without touching the queue.
+      if (!renamedCardsByKind(state.cardsByKind, kind, constraintId, next)) return;
+      // The rename is re-derived at the queue head so it lands on the card as the
+      // previous command left it, rather than restoring a stale per-kind array.
+      void scenarioCommands.mutate((live) => {
+        const renamed = renamedCardsByKind(live.cardsByKind, kind, constraintId, next);
+        return renamed ? { cardsByKind: renamed } : null;
+      });
     },
   };
 }

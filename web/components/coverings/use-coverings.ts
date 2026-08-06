@@ -2,11 +2,13 @@
 
 // Store binding for the coverings editor (T13). Reads the covering cards from the
 // durable scenario slice and exposes CRUD + reorder as operations that each apply
-// exactly one `mutateScenario` patch — so every op is one zundo/undo entry and one
+// exactly one `scenarioCommands.mutate` patch — so every op is one undo entry and one
 // persisted revision (T04 store discipline). All logic lives in `coverings-model`;
 // this hook is only the store glue.
 
 import { useScenarioStore } from "@/lib/store";
+import type { CommandOutcome } from "@/lib/store";
+import { commitCardsSlice, commitCardsTransform } from "@/components/card-editor/commit-cards";
 import type { CoveringCard, ScenarioUiState } from "@/lib/scenario";
 import { getUniqueCopyLabel } from "@/components/entity-editor/core";
 import type { DropPosition } from "@/components/card-editor/card-editor-shell";
@@ -18,11 +20,6 @@ import {
 } from "./coverings-model";
 
 /** Replace the coverings list in one tracked mutation (fresh refs for history). */
-function commitCoverings(next: CoveringCard[]) {
-  useScenarioStore.getState().mutateScenario((state) => ({
-    cardsByKind: { ...state.cardsByKind, coverings: next },
-  }));
-}
 
 export interface CoveringsController {
   state: ScenarioUiState;
@@ -31,7 +28,9 @@ export interface CoveringsController {
    *  stale guard keys on its ref-identity change since the draft opened. */
   getCards: () => CoveringCard[];
   add: (form: CoveringFormState) => void;
-  update: (uid: string, form: CoveringFormState) => void;
+  /** Edit-save. Awaits the baseline-guarded commit so the caller can surface a
+   *  `superseded` refusal WITHOUT closing the draft. */
+  update: (uid: string, form: CoveringFormState) => Promise<CommandOutcome>;
   remove: (uid: string) => void;
   duplicate: (uid: string) => void;
   /** Swap a card one slot up (-1) or down (+1) — the keyboard-supplement control. */
@@ -40,7 +39,7 @@ export interface CoveringsController {
   reorder: (fromUid: string, toUid: string, position: DropPosition) => void;
   /** Set the UI-only `disabled` marker (M4). A disabled covering is excluded from
    *  the canonical doc (canonical.ts drops `card.disabled`), so this is one tracked
-   *  mutation — one zundo entry, one persisted revision. */
+   *  mutation — one undo entry, one persisted revision. */
   setDisabled: (uid: string, value: boolean) => void;
 }
 
@@ -55,7 +54,9 @@ export function useCoverings(): CoveringsController {
     coverings,
     getCards: () => useScenarioStore.getState().cardsByKind.coverings,
     add(form) {
-      commitCoverings([...coverings, buildCoveringCard(form)]);
+      // Queue-head transform: appends against the list the previous command
+      // committed, so two rapid adds both land (T03F1 round-2).
+      void commitCardsTransform("coverings", (current) => [...current, buildCoveringCard(form)]);
     },
     update(uid, form) {
       // Preserve the card's identity (uid) so it stays the same row on replace,
@@ -69,38 +70,54 @@ export function useCoverings(): CoveringsController {
       if (source?.disabled) markers.disabled = true;
       if (source?.applied) markers.applied = true;
       const next = markers.disabled || markers.applied ? { ...rebuilt, ...markers } : rebuilt;
-      commitCoverings(coverings.map((card) => (card.uid === uid ? next : card)));
+      // Edit-save: baseline-guarded so a moved list refuses (`superseded`) and the
+      // caller can keep the draft open. Awaits and returns the outcome.
+      return commitCardsSlice(
+        "coverings",
+        coverings,
+        coverings.map((card) => (card.uid === uid ? next : card)),
+      );
     },
     remove(uid) {
-      commitCoverings(coverings.filter((card) => card.uid !== uid));
+      void commitCardsTransform("coverings", (current) =>
+        current.filter((card) => card.uid !== uid),
+      );
     },
     duplicate(uid) {
-      const index = coverings.findIndex((card) => card.uid === uid);
-      if (index === -1) return;
-      const source = coverings[index];
-      const descriptions = coverings.map((card) => card.description ?? "");
-      const clone: CoveringCard = {
-        ...structuredClone(source),
-        uid: crypto.randomUUID(),
-        description: getUniqueCopyLabel(source.description ?? "", descriptions),
-      };
-      commitCoverings([...coverings.slice(0, index + 1), clone, ...coverings.slice(index + 1)]);
+      void commitCardsTransform("coverings", (current) => {
+        const index = current.findIndex((card) => card.uid === uid);
+        if (index === -1) return current;
+        const source = current[index];
+        const descriptions = current.map((card) => card.description ?? "");
+        const clone: CoveringCard = {
+          ...structuredClone(source),
+          uid: crypto.randomUUID(),
+          description: getUniqueCopyLabel(source.description ?? "", descriptions),
+        };
+        return [...current.slice(0, index + 1), clone, ...current.slice(index + 1)];
+      });
     },
     move(uid, direction) {
-      const index = coverings.findIndex((card) => card.uid === uid);
-      const target = index + direction;
-      if (index === -1 || target < 0 || target >= coverings.length) return;
-      const next = [...coverings];
-      [next[index], next[target]] = [next[target], next[index]];
-      commitCoverings(next);
+      void commitCardsTransform("coverings", (current) => {
+        const index = current.findIndex((card) => card.uid === uid);
+        const target = index + direction;
+        if (index === -1 || target < 0 || target >= current.length) return current;
+        const next = [...current];
+        [next[index], next[target]] = [next[target], next[index]];
+        return next;
+      });
     },
     reorder(fromUid, toUid, position) {
-      const next = reorderByDrop(coverings, fromUid, toUid, position);
-      if (next.some((card, index) => card.uid !== coverings[index].uid)) commitCoverings(next);
+      // Queue-head transform: re-derives the order from the list the previous
+      // command committed. A no-op returns the same reference (no commit).
+      void commitCardsTransform("coverings", (current) => {
+        const next = reorderByDrop(current, fromUid, toUid, position);
+        return next.some((card, index) => card.uid !== current[index].uid) ? next : current;
+      });
     },
     setDisabled(uid, value) {
-      commitCoverings(
-        coverings.map((card) => (card.uid === uid ? withCardDisabled(card, value) : card)),
+      void commitCardsTransform("coverings", (current) =>
+        current.map((card) => (card.uid === uid ? withCardDisabled(card, value) : card)),
       );
     },
   };

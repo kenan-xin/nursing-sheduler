@@ -23,17 +23,24 @@ type StoreState = Record<string, unknown> & {
 
 type NsWindow = {
   __nsStore: {
-    scenario: {
-      getState: () => StoreState & { mutateScenario: (patch: Record<string, unknown>) => void };
-      temporal: {
-        getState: () => {
-          pastStates: unknown[];
-          futureStates: unknown[];
-          undo: () => void;
-          redo: () => void;
-        };
-      };
+    /** The repository command bus — the product's only durable write path. */
+    commands: {
+      mutate(patch: Record<string, unknown>): Promise<{ ok: boolean }>;
+      recordBackup(): Promise<{ ok: boolean }>;
+      undo(): Promise<{ ok: boolean }>;
+      redo(): Promise<{ ok: boolean }>;
+      takeover(): Promise<{ ok: boolean }>;
     };
+    drain(): Promise<void>;
+    historyDepth(): Promise<number>;
+    authority(): {
+      scenarioId: string | null;
+      documentRevision: number;
+      ownership: string;
+      canUndo: boolean;
+      canRedo: boolean;
+    };
+    scenario(): StoreState;
   };
 };
 
@@ -41,8 +48,13 @@ type NsWindow = {
 const sk = (id: string) => `string:${id}`;
 const nk = (n: number) => `number:${n}`;
 
+/** The COMMITTED projection — drained, so a read never outruns the command that wrote. */
 function readState(page: Page) {
-  return page.evaluate(() => (window as unknown as NsWindow).__nsStore.scenario.getState());
+  return page.evaluate(async () => {
+    const store = (window as unknown as NsWindow).__nsStore;
+    await store.drain();
+    return store.scenario();
+  });
 }
 async function readStaff(page: Page) {
   return (await readState(page)).staff ?? [];
@@ -51,15 +63,21 @@ async function readStaffGroups(page: Page) {
   return (await readState(page)).staffGroups ?? [];
 }
 function pastCount(page: Page) {
-  return page.evaluate(
-    () => (window as unknown as NsWindow).__nsStore.scenario.temporal.getState().pastStates.length,
-  );
+  return page.evaluate(() => (window as unknown as NsWindow).__nsStore.historyDepth());
 }
-function futureCount(page: Page) {
-  return page.evaluate(
-    () =>
-      (window as unknown as NsWindow).__nsStore.scenario.temporal.getState().futureStates.length,
-  );
+/**
+ * Whether anything remains to REDO. The durable bridge exposes an Undo depth, not a
+ * future depth, and this helper used to return that same Undo depth — so a "the
+ * future shrank by one" assertion was really re-reading the past and could pass for
+ * the wrong reason. Availability is what the repository actually derives from
+ * persisted commit facts, and what the UI acts on.
+ */
+function canRedo(page: Page) {
+  return page.evaluate(async () => {
+    const store = (window as unknown as NsWindow).__nsStore;
+    await store.drain();
+    return store.authority().canRedo;
+  });
 }
 /**
  * Race a real Redo against an IMMEDIATE stale Save in ONE task, before React can flush
@@ -70,7 +88,7 @@ function futureCount(page: Page) {
 function redoThenClick(page: Page, saveTestId: string) {
   return page.evaluate((testId) => {
     const w = window as unknown as NsWindow;
-    w.__nsStore.scenario.temporal.getState().redo();
+    w.__nsStore.commands.redo();
     document
       .querySelector(`[data-testid="${testId}"]`)
       ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -78,19 +96,15 @@ function redoThenClick(page: Page, saveTestId: string) {
 }
 
 async function seed(page: Page, patch: Record<string, unknown>) {
-  await page.evaluate((p) => {
-    (window as unknown as NsWindow).__nsStore.scenario.getState().mutateScenario(p);
+  await page.evaluate(async (p) => {
+    await (window as unknown as NsWindow).__nsStore.commands.mutate(p);
   }, patch);
 }
 function undo(page: Page) {
-  return page.evaluate(() =>
-    (window as unknown as NsWindow).__nsStore.scenario.temporal.getState().undo(),
-  );
+  return page.evaluate(() => (window as unknown as NsWindow).__nsStore.commands.undo());
 }
 function redo(page: Page) {
-  return page.evaluate(() =>
-    (window as unknown as NsWindow).__nsStore.scenario.temporal.getState().redo(),
-  );
+  return page.evaluate(() => (window as unknown as NsWindow).__nsStore.commands.redo());
 }
 
 /** Reorder via native HTML5 drag (rows are draggable `<tr>`, drag identity is index). */
@@ -514,7 +528,7 @@ test.describe.serial("DR-2 Staff table", () => {
     });
     await undo(page); // H back to []
     const past = await pastCount(page);
-    const future = await futureCount(page);
+    expect(await canRedo(page)).toBe(true);
 
     await page.getByTestId(`people-edit-${sk("P1")}`).click();
     await page.getByTestId(`people-group-${sk("P1")}-G`).click();
@@ -527,7 +541,8 @@ test.describe.serial("DR-2 Staff table", () => {
     expect((await readStaffGroups(page)).find((g) => g.id === "G")?.members).toEqual([]);
     expect((await readStaffGroups(page)).find((g) => g.id === "H")?.members).toEqual(["P1"]);
     expect(await pastCount(page)).toBe(past + 1);
-    expect(await futureCount(page)).toBe(future - 1);
+    // The Redo consumed the only reapplyable commit, so nothing remains to redo.
+    expect(await canRedo(page)).toBe(false);
   });
 
   test("staff — EDIT-ITEM immediate stale Save racing Redo is a no-op (close-gate)", async ({
@@ -669,7 +684,7 @@ test.describe.serial("DR-2 Staff table", () => {
     });
     await expect(page.getByTestId("upload-dialog")).toHaveCount(0);
     expect((await readStaff(page)).map((p) => p.id)).toEqual(["A", "B"]);
-    expect(await pastCount(page)).toBe(before); // no spurious zundo entry
+    expect(await pastCount(page)).toBe(before); // no spurious undo entry
   });
 });
 

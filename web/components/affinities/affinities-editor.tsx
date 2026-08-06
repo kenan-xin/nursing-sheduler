@@ -10,6 +10,7 @@
 // mutation each).
 
 import { useLayoutEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import {
   CardEditorScreen,
   CardEditorHeader,
@@ -131,15 +132,25 @@ export function AffinitiesEditor() {
     setDraft({ mode: "edit", uid, form: affinityToForm(card) });
   }
 
-  function save(form: AffinityFormState) {
+  // Edit-save AWAITS the baseline-guarded commit. A `superseded` refusal means
+  // the list moved under the draft: the write was withdrawn and the draft MUST
+  // stay open with the error surfaced rather than closing over a dropped save.
+  async function save(form: AffinityFormState) {
     if (isStale()) {
       setDraft(null);
       return;
     }
     // Closing the draft triggers the layout-effect restore (no synchronous restore —
     // the form must unmount first so the list collapses back to its edit-time height).
-    if (draft?.mode === "edit") update(draft.uid, form);
-    else add(form);
+    if (draft?.mode === "edit") {
+      const outcome = await update(draft.uid, form);
+      if (!outcome.ok && outcome.reason === "superseded") {
+        toast.error("This affinity changed elsewhere. Reopen it and try again.");
+        return;
+      }
+    } else {
+      add(form);
+    }
     setDraft(null);
   }
 

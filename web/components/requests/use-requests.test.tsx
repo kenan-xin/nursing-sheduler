@@ -4,14 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, renderHook } from "@testing-library/react";
 import { toast } from "sonner";
 import type { ScenarioUiState } from "@/lib/scenario";
-import {
-  drainScenarioPersist,
-  resetToNewScenario,
-  useHotStore,
-  useScenarioStore,
-} from "@/lib/store";
+import { useScenarioStore, scenarioCommands } from "@/lib/store";
 import type { ShiftRequestDelta } from "./requests-csv";
 import { useRequests } from "./use-requests";
+import { resetScenarioForTest, drainScenarioCommands, undoDepth } from "@/lib/store/test-authority";
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
@@ -23,34 +19,35 @@ const BASE_SEED: Partial<ScenarioUiState> = {
   shiftGroups: [{ id: "AnyDay", members: ["AM", "PM"] }],
 };
 
-function seed(patch: Partial<ScenarioUiState>) {
-  act(() => {
-    useScenarioStore.getState().mutateScenario(patch);
+async function seed(patch: Partial<ScenarioUiState>) {
+  await act(async () => {
+    await scenarioCommands.mutate(patch);
   });
 }
 
-function staffHistory(personId: string): string[] {
+async function staffHistory(personId: string): Promise<string[]> {
+  await drainScenarioCommands();
   return useScenarioStore.getState().staff.find((p) => p.id === personId)?.history ?? [];
 }
 
 beforeEach(async () => {
   vi.clearAllMocks();
-  await resetToNewScenario(useScenarioStore, useHotStore);
-  await drainScenarioPersist(useScenarioStore);
-  seed(BASE_SEED);
+  await resetScenarioForTest();
+  await drainScenarioCommands();
+  await seed(BASE_SEED);
 });
 
 afterEach(() => cleanup());
 
 describe("useRequests — quick-paint history gesture", () => {
-  it("flushes a deferred CLEAR against LIVE staff, not the mount-time snapshot (P1)", () => {
+  it("flushes a deferred CLEAR against LIVE staff, not the mount-time snapshot (P1)", async () => {
     // Mount while history is EMPTY — the mouse-up listener is registered by an
     // empty-dep effect and closes over this first render.
     const { result } = renderHook(() =>
       useRequests({ quickPaintSelectedIds: [], quickPaintWeightText: "0" }),
     );
     // History is written AFTER mount (simulating any post-mount edit).
-    seed({ staff: [{ id: "Aisha", history: ["AM", "PM"] }] });
+    await seed({ staff: [{ id: "Aisha", history: ["AM", "PM"] }] });
 
     // historyCount = 2 + 1 = 3; Aisha's offset = 1, so rendered column 1 maps to
     // real position 0 (the NEWEST entry — a NON-deepest slot). A stale flush
@@ -58,10 +55,10 @@ describe("useRequests — quick-paint history gesture", () => {
     act(() => result.current.onHistoryPointerDown("Aisha", 1));
     fireEvent.mouseUp(window);
 
-    expect(staffHistory("Aisha")).toEqual(["PM"]);
+    expect(await staffHistory("Aisha")).toEqual(["PM"]);
   });
 
-  it("accepts the reserved OFF and LEAVE as history values", () => {
+  it("accepts the reserved OFF and LEAVE as history values", async () => {
     const { result, rerender } = renderHook(
       ({ ids }: { ids: string[] }) =>
         useRequests({ quickPaintSelectedIds: ids, quickPaintWeightText: "0" }),
@@ -71,44 +68,44 @@ describe("useRequests — quick-paint history gesture", () => {
     // Column 0 is the clickable append-padding slot (historyCount = 1, offset = 1).
     act(() => result.current.onHistoryPointerDown("Aisha", 0));
     fireEvent.mouseUp(window);
-    expect(staffHistory("Aisha")).toEqual(["OFF"]);
+    expect(await staffHistory("Aisha")).toEqual(["OFF"]);
 
     rerender({ ids: ["LEAVE"] });
     act(() => result.current.onHistoryPointerDown("Aisha", 0));
     fireEvent.mouseUp(window);
-    expect(staffHistory("Aisha")).toEqual(["LEAVE", "OFF"]);
+    expect(await staffHistory("Aisha")).toEqual(["LEAVE", "OFF"]);
   });
 
-  it("skips a shift-type GROUP silently (a history slot cannot hold a group)", () => {
+  it("skips a shift-type GROUP silently (a history slot cannot hold a group)", async () => {
     const { result } = renderHook(() =>
       useRequests({ quickPaintSelectedIds: ["AnyDay"], quickPaintWeightText: "0" }),
     );
     act(() => result.current.onHistoryPointerDown("Aisha", 0));
     fireEvent.mouseUp(window);
-    expect(staffHistory("Aisha")).toEqual([]);
+    expect(await staffHistory("Aisha")).toEqual([]);
     expect(toast.error).not.toHaveBeenCalled();
   });
 
-  it("surfaces the verbatim multi-select error as a toast (and mutates nothing)", () => {
+  it("surfaces the verbatim multi-select error as a toast (and mutates nothing)", async () => {
     const { result } = renderHook(() =>
       useRequests({ quickPaintSelectedIds: ["AM", "PM"], quickPaintWeightText: "0" }),
     );
     act(() => result.current.onHistoryPointerDown("Aisha", 0));
     expect(toast.error).toHaveBeenCalledWith("Cannot set history to multiple shift types.");
     fireEvent.mouseUp(window);
-    expect(staffHistory("Aisha")).toEqual([]);
+    expect(await staffHistory("Aisha")).toEqual([]);
   });
 
-  it("a set-drag across two slots still commits exactly once", () => {
+  it("a set-drag across two slots still commits exactly once", async () => {
     const { result } = renderHook(() =>
       useRequests({ quickPaintSelectedIds: ["AM"], quickPaintWeightText: "0" }),
     );
-    const before = useScenarioStore.temporal.getState().pastStates.length;
+    const before = await undoDepth();
     act(() => result.current.onHistoryPointerDown("Aisha", 0));
     act(() => result.current.onHistoryPointerEnter("Aisha", 1));
     fireEvent.mouseUp(window);
-    expect(staffHistory("Aisha")).toEqual(["AM"]);
-    expect(useScenarioStore.temporal.getState().pastStates.length - before).toBe(1);
+    expect(await staffHistory("Aisha")).toEqual(["AM"]);
+    expect((await undoDepth()) - before).toBe(1);
   });
 });
 
@@ -125,17 +122,23 @@ describe("useRequests — Requests-CSV import preserves typed person identity (P
     { personId: String(NUMERIC_ID), dateId: "01", shiftType: "AM" },
   ];
 
-  beforeEach(() => {
-    seed({ staff: [{ id: NUMERIC_ID, history: [] }] });
+  beforeEach(async () => {
+    await seed({ staff: [{ id: NUMERIC_ID, history: [] }] });
   });
 
-  function reqCellsAt(person: number, date: string) {
+  /**
+   * The committed cells at one coordinate. Drains first: T03 routes the staged
+   * write through a queued repository command, so the projection carries it only
+   * once that command has settled.
+   */
+  async function reqCellsAt(person: number, date: string) {
+    await drainScenarioCommands();
     return useScenarioStore
       .getState()
       .reqData.filter((c) => c.person === person && c.date === date);
   }
 
-  it("stages the imported cell under the TYPED numeric id, so it resolves in the matrix", () => {
+  it("stages the imported cell under the TYPED numeric id, so it resolves in the matrix", async () => {
     const { result } = renderHook(() =>
       useRequests({ quickPaintSelectedIds: [], quickPaintWeightText: "0" }),
     );
@@ -144,7 +147,7 @@ describe("useRequests — Requests-CSV import preserves typed person identity (P
     // The bug staged the STRING "0" (a coordinate the matrix, keyed by the typed
     // number 0 under `===`, never resolves). Assert both the strict identity and
     // the runtime type so a regression to the stringified id is caught.
-    const cells = reqCellsAt(NUMERIC_ID, "01");
+    const cells = await reqCellsAt(NUMERIC_ID, "01");
     expect(cells).toHaveLength(1);
     expect(cells[0]).toMatchObject({ kind: "request", shiftType: "AM", weight: 5 });
     expect(typeof cells[0].person).toBe("number");
@@ -154,7 +157,7 @@ describe("useRequests — Requests-CSV import preserves typed person identity (P
     );
   });
 
-  it("merges the imported cell with a later manual quick-paint on the same person/date", () => {
+  it("merges the imported cell with a later manual quick-paint on the same person/date", async () => {
     const { result, rerender } = renderHook(
       ({ ids }: { ids: string[] }) =>
         useRequests({ quickPaintSelectedIds: ids, quickPaintWeightText: "3" }),
@@ -170,24 +173,24 @@ describe("useRequests — Requests-CSV import preserves typed person identity (P
     act(() => result.current.onCellPointerDown(NUMERIC_ID, "01"));
     fireEvent.mouseUp(window);
 
-    const cells = reqCellsAt(NUMERIC_ID, "01");
+    const cells = await reqCellsAt(NUMERIC_ID, "01");
     expect(cells.map((c) => (c.kind === "request" ? c.shiftType : c.kind)).sort()).toEqual([
       "AM",
       "PM",
     ]);
   });
 
-  it("removes the imported cell via an INDIVIDUAL-scoped clear (not only a group clear)", () => {
+  it("removes the imported cell via an INDIVIDUAL-scoped clear (not only a group clear)", async () => {
     const { result } = renderHook(() =>
       useRequests({ quickPaintSelectedIds: [], quickPaintWeightText: "0" }),
     );
     act(() => result.current.applyRequestsCsv(csvDeltas, 5));
-    expect(reqCellsAt(NUMERIC_ID, "01")).toHaveLength(1);
+    expect(await reqCellsAt(NUMERIC_ID, "01")).toHaveLength(1);
 
     // individual-person + individual-date is the scope that classifies the cell by
     // typed-id membership. Under the bug the string "0" was absent from the typed
     // `individualPersonIds` set, so the cell was misread as a group and survived.
     act(() => result.current.clearRequestsByShape("individual", "individual"));
-    expect(reqCellsAt(NUMERIC_ID, "01")).toHaveLength(0);
+    expect(await reqCellsAt(NUMERIC_ID, "01")).toHaveLength(0);
   });
 });

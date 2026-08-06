@@ -3,7 +3,8 @@ import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { CoveringsEditor } from "./coverings-editor";
-import { drainScenarioPersist, newScenario, useHotStore, useScenarioStore } from "@/lib/store";
+import { newScenario } from "@/lib/store";
+import { drainScenarioCommands } from "@/lib/store/test-authority";
 
 // T13 cold-audit regression (completion audit 2026-07-18, P1 finding): the editor
 // instructions panel once told authors to set Weight to 1 for a soft preference or
@@ -14,11 +15,11 @@ import { drainScenarioPersist, newScenario, useHotStore, useScenarioStore } from
 // stale soft-weight instruction fails loudly if it ever resurfaces.
 
 beforeEach(async () => {
-  newScenario(useScenarioStore, useHotStore);
-  await drainScenarioPersist(useScenarioStore);
+  newScenario();
+  await drainScenarioCommands();
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
 });
 
@@ -29,7 +30,7 @@ function openHelpAndReadInstructions(): string {
 }
 
 describe("CoveringsEditor instructions — hard/inert copy (T13 audit)", () => {
-  it("renders the always-enforced sentence and tells the author the solver ignores weight", () => {
+  it("renders the always-enforced sentence and tells the author the solver ignores weight", async () => {
     render(<CoveringsEditor />);
     const text = openHelpAndReadInstructions();
     expect(text).toMatch(/always enforced as a hard rule/i);
@@ -37,19 +38,19 @@ describe("CoveringsEditor instructions — hard/inert copy (T13 audit)", () => {
     expect(text).toMatch(/no soft\/hard dial/i);
   });
 
-  it("does not tell authors to set Weight to 1 for a soft preference", () => {
+  it("does not tell authors to set Weight to 1 for a soft preference", async () => {
     render(<CoveringsEditor />);
     const text = openHelpAndReadInstructions();
     expect(text.toLowerCase()).not.toContain("soft preference");
   });
 
-  it("does not instruct setting Weight to +Infinity for a hard rule", () => {
+  it("does not instruct setting Weight to +Infinity for a hard rule", async () => {
     render(<CoveringsEditor />);
     const text = openHelpAndReadInstructions();
     expect(text).not.toMatch(/\+infinity/i);
   });
 
-  it("does not expose any editable 'Set the Weight' instruction", () => {
+  it("does not expose any editable 'Set the Weight' instruction", async () => {
     render(<CoveringsEditor />);
     const text = openHelpAndReadInstructions();
     expect(text.toLowerCase()).not.toContain("set the weight");

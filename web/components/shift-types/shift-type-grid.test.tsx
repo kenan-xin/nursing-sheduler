@@ -3,16 +3,12 @@ import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { RequirementCard, ScenarioUiState } from "@/lib/scenario";
-import {
-  drainScenarioPersist,
-  resetToNewScenario,
-  useHotStore,
-  useScenarioStore,
-} from "@/lib/store";
+import { useScenarioStore, scenarioCommands } from "@/lib/store";
 import { ShiftTypeGrid } from "./shift-type-grid";
+import { resetScenarioForTest, drainScenarioCommands, undoDepth } from "@/lib/store/test-authority";
 
 // DR-3 presentation contract for the bespoke Shifts card-grid. Everything commits
-// through the real scenario store (one composed state ⇒ one zundo entry). The
+// through the real repository authority (one composed state ⇒ one undo entry). The
 // Min/Preferred staffing tie-in is DR-4 and is deliberately absent here — this suite
 // proves the card SHELL: reserved OFF/LEAVE locked, working-time reuse + derivation,
 // bare-duration preservation, clear-working-time, rename cascade, drag/keyboard
@@ -24,21 +20,36 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/shift-types",
 }));
 
-function seed(patch: Partial<ScenarioUiState>) {
-  act(() => {
-    useScenarioStore.getState().mutateScenario(patch);
+async function seed(patch: Partial<ScenarioUiState>) {
+  await act(async () => {
+    await scenarioCommands.mutate(patch);
   });
 }
-function shifts() {
+async function shifts() {
+  await drainScenarioCommands();
   return useScenarioStore.getState().shifts;
 }
-function shiftGroups() {
+async function shiftGroups() {
+  await drainScenarioCommands();
   return useScenarioStore.getState().shiftGroups;
 }
-function historyLength() {
-  return useScenarioStore.temporal.getState().pastStates.length;
+async function historyLength(): Promise<number> {
+  await drainScenarioCommands();
+  return undoDepth();
 }
-function requirements() {
+/**
+ * Let a clicked Save settle. T03: the card's Save awaits a queued repository
+ * command, so its success toast, its on-card refusal notice, and the committed
+ * projection all land a microtask later — draining inside `act` is the
+ * deterministic seam for that, not a timeout.
+ */
+async function settleSave() {
+  await act(async () => {
+    await drainScenarioCommands();
+  });
+}
+async function requirements() {
+  await drainScenarioCommands();
   return useScenarioStore.getState().cardsByKind.requirements;
 }
 function requirement(overrides: Partial<RequirementCard> = {}): RequirementCard {
@@ -52,8 +63,8 @@ function requirement(overrides: Partial<RequirementCard> = {}): RequirementCard 
     ...overrides,
   };
 }
-function seedRequirements(cards: RequirementCard[], patch: Partial<ScenarioUiState> = {}) {
-  seed({
+async function seedRequirements(cards: RequirementCard[], patch: Partial<ScenarioUiState> = {}) {
+  await seed({
     ...patch,
     cardsByKind: {
       ...useScenarioStore.getState().cardsByKind,
@@ -64,17 +75,17 @@ function seedRequirements(cards: RequirementCard[], patch: Partial<ScenarioUiSta
 
 beforeEach(async () => {
   vi.clearAllMocks();
-  await resetToNewScenario(useScenarioStore, useHotStore);
-  await drainScenarioPersist(useScenarioStore);
-  seed({ shifts: [], shiftGroups: [] });
+  await resetScenarioForTest();
+  await drainScenarioCommands();
+  await seed({ shifts: [], shiftGroups: [] });
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
 });
 
 describe("ShiftTypeGrid — reserved day-states", () => {
-  it("renders OFF/LEAVE locked (AUTO) with a reason and no edit control", () => {
+  it("renders OFF/LEAVE locked (AUTO) with a reason and no edit control", async () => {
     render(<ShiftTypeGrid />);
 
     const off = screen.getByTestId("synthetic-OFF");
@@ -93,7 +104,7 @@ describe("ShiftTypeGrid — reserved day-states", () => {
 });
 
 describe("ShiftTypeGrid — add + working-time reuse", () => {
-  it("adds a clock shift, shows the derivation, and persists working time", () => {
+  it("adds a clock shift, shows the derivation, and persists working time", async () => {
     render(<ShiftTypeGrid />);
 
     fireEvent.click(screen.getByTestId("add-shift-toggle"));
@@ -110,7 +121,7 @@ describe("ShiftTypeGrid — add + working-time reuse", () => {
 
     fireEvent.click(screen.getByTestId("shift-add-save"));
 
-    expect(shifts().find((s) => s.id === "Day")).toMatchObject({
+    expect((await shifts()).find((s) => s.id === "Day")).toMatchObject({
       id: "Day",
       description: "Day shift",
       startTime: "08:00",
@@ -119,7 +130,7 @@ describe("ShiftTypeGrid — add + working-time reuse", () => {
     });
   });
 
-  it("reads a half-hour shift in decimal hours with a compact rest caption", () => {
+  it("reads a half-hour shift in decimal hours with a compact rest caption", async () => {
     render(<ShiftTypeGrid />);
 
     fireEvent.click(screen.getByTestId("add-shift-toggle"));
@@ -140,7 +151,7 @@ describe("ShiftTypeGrid — add + working-time reuse", () => {
     expect(duration).toHaveAttribute("title", "11.5h working = 12h on floor − 30m rest");
   });
 
-  it("shows the +1 day overnight badge for a wrap-around clock", () => {
+  it("shows the +1 day overnight badge for a wrap-around clock", async () => {
     render(<ShiftTypeGrid />);
 
     fireEvent.click(screen.getByTestId("add-shift-toggle"));
@@ -151,7 +162,7 @@ describe("ShiftTypeGrid — add + working-time reuse", () => {
     expect(screen.getByTestId("shift-add-duration")).toHaveTextContent("8h");
   });
 
-  it("blocks save on an equal start/end and surfaces the working-time error", () => {
+  it("blocks save on an equal start/end and surfaces the working-time error", async () => {
     render(<ShiftTypeGrid />);
 
     fireEvent.click(screen.getByTestId("add-shift-toggle"));
@@ -165,8 +176,8 @@ describe("ShiftTypeGrid — add + working-time reuse", () => {
 });
 
 describe("ShiftTypeGrid — edit", () => {
-  it("preserves a bare durationMinutes through an unrelated edit (no clocks injected)", () => {
-    seed({ shifts: [{ id: "Flex", durationMinutes: 480 }], shiftGroups: [] });
+  it("preserves a bare durationMinutes through an unrelated edit (no clocks injected)", async () => {
+    await seed({ shifts: [{ id: "Flex", durationMinutes: 480 }], shiftGroups: [] });
     render(<ShiftTypeGrid />);
 
     expect(screen.getByTestId("shift-code-string:Flex")).toHaveClass("uppercase");
@@ -176,15 +187,15 @@ describe("ShiftTypeGrid — edit", () => {
     });
     fireEvent.click(screen.getByTestId("shift-edit-string:Flex-save"));
 
-    const flex = shifts().find((s) => s.id === "Flex");
+    const flex = (await shifts()).find((s) => s.id === "Flex");
     expect(flex?.durationMinutes).toBe(480);
     expect(flex?.startTime ?? null).toBeNull();
     expect(flex?.endTime ?? null).toBeNull();
     expect(flex?.description).toBe("Flexible shift");
   });
 
-  it("clears working time on edit and persists it as removal", () => {
-    seed({
+  it("clears working time on edit and persists it as removal", async () => {
+    await seed({
       shifts: [{ id: "Day", startTime: "08:00", endTime: "16:00", durationMinutes: 480 }],
       shiftGroups: [],
     });
@@ -195,37 +206,37 @@ describe("ShiftTypeGrid — edit", () => {
     fireEvent.change(screen.getByTestId("shift-edit-string:Day-end"), { target: { value: "" } });
     fireEvent.click(screen.getByTestId("shift-edit-string:Day-save"));
 
-    const day = shifts().find((s) => s.id === "Day");
+    const day = (await shifts()).find((s) => s.id === "Day");
     expect(day?.startTime ?? null).toBeNull();
     expect(day?.endTime ?? null).toBeNull();
     expect(day?.durationMinutes ?? null).toBeNull();
     expect(day?.restMinutes ?? null).toBeNull();
   });
 
-  it("renames the code in one Save and cascades the group membership", () => {
-    seed({
+  it("renames the code in one Save and cascades the group membership", async () => {
+    await seed({
       shifts: [{ id: "Day" }],
       shiftGroups: [{ id: "Working", members: ["Day"] }],
     });
     render(<ShiftTypeGrid />);
 
-    const before = historyLength();
+    const before = await historyLength();
     fireEvent.click(screen.getByTestId("shift-edit-string:Day"));
     fireEvent.change(screen.getByTestId("shift-edit-string:Day-code"), {
       target: { value: "AM" },
     });
     fireEvent.click(screen.getByTestId("shift-edit-string:Day-save"));
 
-    expect(shifts().map((s) => s.id)).toEqual(["AM"]);
-    expect(shiftGroups().find((g) => g.id === "Working")?.members).toEqual(["AM"]);
-    expect(historyLength()).toBe(before + 1);
+    expect((await shifts()).map((s) => s.id)).toEqual(["AM"]);
+    expect((await shiftGroups()).find((g) => g.id === "Working")?.members).toEqual(["AM"]);
+    expect(await historyLength()).toBe(before + 1);
   });
 });
 
 describe("ShiftTypeGrid — staffing states", () => {
-  it("distinguishes no requirement (—) from a real zero and offers safe creation", () => {
-    seed({ shifts: [{ id: "Day" }, { id: "Night" }], shiftGroups: [] });
-    seedRequirements([requirement({ shiftType: ["Night"], requiredNumPeople: 0 })]);
+  it("distinguishes no requirement (—) from a real zero and offers safe creation", async () => {
+    await seed({ shifts: [{ id: "Day" }, { id: "Night" }], shiftGroups: [] });
+    await seedRequirements([requirement({ shiftType: ["Night"], requiredNumPeople: 0 })]);
     render(<ShiftTypeGrid />);
 
     expect(screen.getByTestId("staffing-min-string:Day")).toHaveTextContent("—");
@@ -240,8 +251,8 @@ describe("ShiftTypeGrid — staffing states", () => {
     });
     fireEvent.click(screen.getByTestId("shift-edit-string:Day-save"));
 
-    expect(requirements()).toHaveLength(2);
-    expect(requirements()[1]).toMatchObject({
+    expect(await requirements()).toHaveLength(2);
+    expect((await requirements())[1]).toMatchObject({
       shiftType: ["Day"],
       qualifiedPeople: ["ALL"],
       date: ["ALL"],
@@ -250,10 +261,10 @@ describe("ShiftTypeGrid — staffing states", () => {
     });
   });
 
-  it("treats a disabled baseline as no coverage and never edits the inactive card", () => {
+  it("treats a disabled baseline as no coverage and never edits the inactive card", async () => {
     const disabled = requirement({ disabled: true });
-    seed({ shifts: [{ id: "Day" }], shiftGroups: [] });
-    seedRequirements([disabled]);
+    await seed({ shifts: [{ id: "Day" }], shiftGroups: [] });
+    await seedRequirements([disabled]);
     render(<ShiftTypeGrid />);
 
     expect(screen.getByTestId("staffing-min-string:Day")).toHaveTextContent("—");
@@ -264,14 +275,14 @@ describe("ShiftTypeGrid — staffing states", () => {
     });
     fireEvent.click(screen.getByTestId("shift-edit-string:Day-save"));
 
-    expect(requirements()).toHaveLength(2);
-    expect(requirements()[0]).toBe(disabled);
-    expect(requirements()[1].requiredNumPeople).toBe(4);
+    expect(await requirements()).toHaveLength(2);
+    expect((await requirements())[0]).toBe(disabled);
+    expect((await requirements())[1].requiredNumPeople).toBe(4);
   });
 
-  it("renders an editable baseline with linked qualifier/date context chips", () => {
-    seed({ shifts: [{ id: "Day" }], shiftGroups: [] });
-    seedRequirements(
+  it("renders an editable baseline with linked qualifier/date context chips", async () => {
+    await seed({ shifts: [{ id: "Day" }], shiftGroups: [] });
+    await seedRequirements(
       [
         requirement(),
         requirement({ uid: "qualified", qualifiedPeople: ["Seniors"] }),
@@ -297,9 +308,9 @@ describe("ShiftTypeGrid — staffing states", () => {
     expect(screen.queryByTestId("requirement-delete")).not.toBeInTheDocument();
   });
 
-  it("surfaces duplicate baselines while editing the first one", () => {
-    seed({ shifts: [{ id: "Day" }], shiftGroups: [] });
-    seedRequirements([
+  it("surfaces duplicate baselines while editing the first one", async () => {
+    await seed({ shifts: [{ id: "Day" }], shiftGroups: [] });
+    await seedRequirements([
       requirement({ uid: "first" }),
       requirement({ uid: "second", requiredNumPeople: 8 }),
     ]);
@@ -316,7 +327,7 @@ describe("ShiftTypeGrid — staffing states", () => {
       target: { value: "5" },
     });
     fireEvent.click(screen.getByTestId("shift-edit-string:Day-save"));
-    expect(requirements().map((card) => card.requiredNumPeople)).toEqual([5, 8]);
+    expect((await requirements()).map((card) => card.requiredNumPeople)).toEqual([5, 8]);
   });
 
   it.each([
@@ -346,9 +357,9 @@ describe("ShiftTypeGrid — staffing states", () => {
     },
   ])(
     "renders $name-only coverage read-only with value, reason, and deep-link",
-    ({ card, patch, rule }) => {
-      seed({ shifts: [{ id: "Day" }], shiftGroups: [], ...patch });
-      seedRequirements([card]);
+    async ({ card, patch, rule }) => {
+      await seed({ shifts: [{ id: "Day" }], shiftGroups: [], ...patch });
+      await seedRequirements([card]);
       render(<ShiftTypeGrid />);
 
       const region = screen.getByTestId("staffing-readonly-string:Day");
@@ -361,13 +372,13 @@ describe("ShiftTypeGrid — staffing states", () => {
       expect(screen.getByTestId("shift-edit-string:Day-staffing-readonly")).toBeInTheDocument();
       expect(screen.queryByTestId("shift-edit-string:Day-required")).not.toBeInTheDocument();
       fireEvent.click(screen.getByTestId("shift-edit-string:Day-save"));
-      expect(requirements()).toHaveLength(1);
-      expect(requirements()[0].uid).toBe(card.uid);
+      expect(await requirements()).toHaveLength(1);
+      expect((await requirements())[0].uid).toBe(card.uid);
     },
   );
 
-  it("gates numeric IDs with an explanation and never renders numeric staffing inputs", () => {
-    seed({ shifts: [{ id: 7 }], shiftGroups: [] });
+  it("gates numeric IDs with an explanation and never renders numeric staffing inputs", async () => {
+    await seed({ shifts: [{ id: 7 }], shiftGroups: [] });
     render(<ShiftTypeGrid />);
 
     expect(screen.getByTestId("staffing-numeric-number:7")).toHaveTextContent(
@@ -377,10 +388,10 @@ describe("ShiftTypeGrid — staffing states", () => {
     expect(screen.getByTestId("shift-edit-number:7-staffing-numeric")).toBeInTheDocument();
     expect(screen.queryByTestId("shift-edit-number:7-required")).not.toBeInTheDocument();
     fireEvent.click(screen.getByTestId("shift-edit-number:7-save"));
-    expect(requirements()).toHaveLength(0);
+    expect(await requirements()).toHaveLength(0);
   });
 
-  it("forbids a new numeric-only code with an inline error and blocks save", () => {
+  it("forbids a new numeric-only code with an inline error and blocks save", async () => {
     render(<ShiftTypeGrid />);
     fireEvent.click(screen.getByTestId("add-shift-toggle"));
     fireEvent.change(screen.getByTestId("shift-add-code"), { target: { value: "1" } });
@@ -391,7 +402,7 @@ describe("ShiftTypeGrid — staffing states", () => {
     expect(screen.getByTestId("shift-add-save")).not.toBeDisabled();
   });
 
-  it("blocks Enter from bypassing the numeric-only-code guard (button-disabled is not the only gate)", () => {
+  it("blocks Enter from bypassing the numeric-only-code guard (button-disabled is not the only gate)", async () => {
     render(<ShiftTypeGrid />);
     fireEvent.click(screen.getByTestId("add-shift-toggle"));
     fireEvent.change(screen.getByTestId("shift-add-code"), { target: { value: "1" } });
@@ -400,22 +411,22 @@ describe("ShiftTypeGrid — staffing states", () => {
     // disabled button enforces — committing neither the shift nor a numeric selector.
     fireEvent.keyDown(screen.getByTestId("shift-add-code"), { key: "Enter" });
 
-    expect(shifts()).toHaveLength(0);
-    expect(requirements()).toHaveLength(0);
+    expect(await shifts()).toHaveLength(0);
+    expect(await requirements()).toHaveLength(0);
     expect(screen.getByTestId("shift-add-form")).toBeInTheDocument();
   });
 });
 
 describe("ShiftTypeGrid — atomic staffing save", () => {
-  it("keeps rename cascades and post-rename refs in one real-store undo entry", () => {
-    seed({
+  it("keeps rename cascades and post-rename refs in one real-store undo entry", async () => {
+    await seed({
       shifts: [{ id: "Day" }],
       shiftGroups: [{ id: "WORKING", members: ["Day"] }],
     });
-    seedRequirements([requirement()]);
+    await seedRequirements([requirement()]);
     render(<ShiftTypeGrid />);
 
-    const before = historyLength();
+    const before = await historyLength();
     fireEvent.click(screen.getByTestId("shift-edit-string:Day"));
     fireEvent.change(screen.getByTestId("shift-edit-string:Day-code"), {
       target: { value: "AM" },
@@ -424,67 +435,70 @@ describe("ShiftTypeGrid — atomic staffing save", () => {
       target: { value: "4" },
     });
     fireEvent.click(screen.getByTestId("shift-edit-string:Day-save"));
+    await settleSave();
 
-    expect(historyLength()).toBe(before + 1);
-    expect(shifts().map((shift) => shift.id)).toEqual(["AM"]);
-    expect(shiftGroups()[0].members).toEqual(["AM"]);
-    expect(requirements()[0]).toMatchObject({
+    expect(await historyLength()).toBe(before + 1);
+    expect((await shifts()).map((shift) => shift.id)).toEqual(["AM"]);
+    expect((await shiftGroups())[0].members).toEqual(["AM"]);
+    expect((await requirements())[0]).toMatchObject({
       shiftType: ["AM"],
       requiredNumPeople: 4,
     });
   });
 
-  it("aborts a stale baseline with an on-card notice and zero additional writes", () => {
+  it("aborts a stale baseline with an on-card notice and zero additional writes", async () => {
     const original = requirement();
-    seed({ shifts: [{ id: "Day" }], shiftGroups: [] });
-    seedRequirements([original]);
+    await seed({ shifts: [{ id: "Day" }], shiftGroups: [] });
+    await seedRequirements([original]);
     render(<ShiftTypeGrid />);
 
     fireEvent.click(screen.getByTestId("shift-edit-string:Day"));
-    seedRequirements([{ ...original, requiredNumPeople: 7 }]);
-    const beforeSave = historyLength();
-    const liveBefore = requirements()[0];
+    await seedRequirements([{ ...original, requiredNumPeople: 7 }]);
+    const beforeSave = await historyLength();
+    const liveBefore = (await requirements())[0];
 
     fireEvent.change(screen.getByTestId("shift-edit-string:Day-required"), {
       target: { value: "4" },
     });
     fireEvent.click(screen.getByTestId("shift-edit-string:Day-save"));
+    await settleSave();
 
     expect(screen.getByTestId("shift-edit-string:Day-save-error")).toHaveTextContent(
       /changed elsewhere.*reopen/i,
     );
-    expect(historyLength()).toBe(beforeSave);
-    expect(requirements()[0]).toBe(liveBefore);
-    expect(shifts()[0].id).toBe("Day");
+    expect(await historyLength()).toBe(beforeSave);
+    expect((await requirements())[0]).toBe(liveBefore);
+    expect((await shifts())[0].id).toBe("Day");
   });
 
-  it("surfaces validation and rename-collision failures on-card with zero writes", () => {
-    seed({ shifts: [{ id: "Day" }, { id: "Night" }], shiftGroups: [] });
-    seedRequirements([requirement()]);
+  it("surfaces validation and rename-collision failures on-card with zero writes", async () => {
+    await seed({ shifts: [{ id: "Day" }, { id: "Night" }], shiftGroups: [] });
+    await seedRequirements([requirement()]);
     render(<ShiftTypeGrid />);
 
     fireEvent.click(screen.getByTestId("shift-edit-string:Day"));
-    const beforeInvalid = historyLength();
+    const beforeInvalid = await historyLength();
     fireEvent.change(screen.getByTestId("shift-edit-string:Day-required"), {
       target: { value: "-1" },
     });
     fireEvent.click(screen.getByTestId("shift-edit-string:Day-save"));
+    await settleSave();
     expect(screen.getByTestId("shift-edit-string:Day-save-error")).toHaveTextContent(
       "Required number of people must be at least 0",
     );
-    expect(historyLength()).toBe(beforeInvalid);
+    expect(await historyLength()).toBe(beforeInvalid);
 
     fireEvent.change(screen.getByTestId("shift-edit-string:Day-code"), {
       target: { value: "Night" },
     });
     expect(screen.getByText(/already used/i)).toHaveAttribute("role", "alert");
     expect(screen.getByTestId("shift-edit-string:Day-save")).toBeDisabled();
-    expect(historyLength()).toBe(beforeInvalid);
+    expect(await historyLength()).toBe(beforeInvalid);
   });
 
-  it("shows EDGE-PR-03 before save, then persists preferred/weight collapse", () => {
-    seed({ shifts: [{ id: "Day" }], shiftGroups: [] });
-    seedRequirements([requirement({ preferredNumPeople: 3, weight: -25 })]);
+  it("shows EDGE-PR-03 before save, then persists preferred/weight collapse", async () => {
+    await seed({ shifts: [{ id: "Day" }], shiftGroups: [] });
+    await seedRequirements([requirement({ preferredNumPeople: 3, weight: -25 })]);
     render(<ShiftTypeGrid />);
 
     fireEvent.click(screen.getByTestId("shift-edit-string:Day"));
@@ -495,38 +509,39 @@ describe("ShiftTypeGrid — atomic staffing save", () => {
       "weight reset from -25 to -1",
     );
     fireEvent.click(screen.getByTestId("shift-edit-string:Day-save"));
+    await settleSave();
 
-    expect(requirements()[0].preferredNumPeople).toBeUndefined();
-    expect(requirements()[0].weight).toBe(-1);
+    expect((await requirements())[0].preferredNumPeople).toBeUndefined();
+    expect((await requirements())[0].weight).toBe(-1);
     expect(screen.getByTestId("staffing-editable-string:Day")).toHaveTextContent("Preferred—");
   });
 });
 
 describe("ShiftTypeGrid — reorder", () => {
-  it("reorders cards by keyboard (Up/Down) — one commit / one undo entry", () => {
-    seed({ shifts: [{ id: "A" }, { id: "B" }, { id: "C" }], shiftGroups: [] });
+  it("reorders cards by keyboard (Up/Down) — one commit / one undo entry", async () => {
+    await seed({ shifts: [{ id: "A" }, { id: "B" }, { id: "C" }], shiftGroups: [] });
     render(<ShiftTypeGrid />);
 
     // Boundary controls are disabled (self-explanatory, never write).
     expect(screen.getByTestId("shift-move-up-string:A")).toBeDisabled();
     expect(screen.getByTestId("shift-move-down-string:C")).toBeDisabled();
 
-    const before = historyLength();
+    const before = await historyLength();
     fireEvent.click(screen.getByTestId("shift-move-down-string:A"));
 
-    expect(shifts().map((s) => s.id)).toEqual(["B", "A", "C"]);
-    expect(historyLength()).toBe(before + 1);
+    expect((await shifts()).map((s) => s.id)).toEqual(["B", "A", "C"]);
+    expect(await historyLength()).toBe(before + 1);
 
-    act(() => {
-      useScenarioStore.temporal.getState().undo();
+    await act(async () => {
+      await scenarioCommands.undo();
     });
-    expect(shifts().map((s) => s.id)).toEqual(["A", "B", "C"]);
+    expect((await shifts()).map((s) => s.id)).toEqual(["A", "B", "C"]);
   });
 });
 
 describe("ShiftTypeGrid — Shift groups (shared GroupsSection, Shift config)", () => {
-  it("uses the 'N TYPES' count noun and duplicates a group keeping members", () => {
-    seed({
+  it("uses the 'N TYPES' count noun and duplicates a group keeping members", async () => {
+    await seed({
       shifts: [{ id: "Day" }, { id: "Night" }],
       shiftGroups: [{ id: "Working", members: ["Day", "Night"] }],
     });
@@ -539,11 +554,14 @@ describe("ShiftTypeGrid — Shift groups (shared GroupsSection, Shift config)", 
 
     fireEvent.click(screen.getByTestId("group-dup-Working"));
 
-    expect(shiftGroups().find((g) => g.id === "Working copy")?.members).toEqual(["Day", "Night"]);
+    expect((await shiftGroups()).find((g) => g.id === "Working copy")?.members).toEqual([
+      "Day",
+      "Night",
+    ]);
   });
 
-  it("hides the member search box (Shift config) in the group editor", () => {
-    seed({ shifts: [{ id: "Day" }], shiftGroups: [{ id: "Working", members: [] }] });
+  it("hides the member search box (Shift config) in the group editor", async () => {
+    await seed({ shifts: [{ id: "Day" }], shiftGroups: [{ id: "Working", members: [] }] });
     render(<ShiftTypeGrid />);
 
     fireEvent.click(screen.getByTestId("group-edit-Working"));

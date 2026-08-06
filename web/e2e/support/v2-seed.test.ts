@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SCENARIO_DB_NAME as APP_DB_NAME } from "@/lib/store/dexie-storage";
+import { NURSE_SCHEDULER_DB_NAME as APP_DB_NAME } from "@/lib/repository";
 import { MODE_STORAGE_KEY as APP_MODE_KEY } from "@/lib/mode/mode";
 import {
   buildOptimizeReady,

@@ -28,7 +28,7 @@
 // structure stays square throughout: the table, its rows and its cells never round.
 //
 // Store discipline (T04): every action feeds ONE produced `ScenarioUiState` to one
-// `mutateScenario` (one patch ⇒ one zundo entry). A compound inline edit (rename +
+// `scenarioCommands.mutate` (one patch ⇒ one undo entry). A compound inline edit (rename +
 // membership) composes the pure core transforms and commits once. Rename/delete
 // route through the T07 cascade so group refs follow; a `RenameCollisionError`
 // surfaces as a toast. A single active selection (`sel`) spans the row table and the
@@ -38,7 +38,7 @@
 
 import * as React from "react";
 import { toast } from "sonner";
-import { useScenarioStore } from "@/lib/store";
+import { useScenarioStore, scenarioCommands } from "@/lib/store";
 import { useLosableDraft } from "@/components/shell/use-losable-draft";
 import { GuardedLink } from "@/components/shell/guarded-link";
 import type { ScenarioUiState, UiPerson } from "@/lib/scenario";
@@ -80,7 +80,12 @@ import { GroupsSection, type GroupsSectionConfig } from "@/components/entity-edi
 import { peopleDescriptor } from "./people-descriptor";
 import { UploadDialog } from "./upload-dialog";
 
-type Commit = (next: ScenarioUiState) => void;
+/**
+ * Apply an operation to the durable scenario. The callback runs AT THE QUEUE HEAD,
+ * against the state the previous command committed — so rapid actions compose
+ * instead of overwriting each other. Returning `null` withdraws the write.
+ */
+type Commit = (transform: (live: ScenarioUiState) => ScenarioUiState | null) => void;
 type CurrentState = () => ScenarioUiState;
 
 const descriptor: EntityDescriptor<UiPerson> = peopleDescriptor;
@@ -128,9 +133,39 @@ function initialsOf(id: EntityId): string {
 export function PeopleTable() {
   const items = useScenarioStore(descriptor.readItems);
   const groups = useScenarioStore(descriptor.readGroups);
-  const commit = React.useCallback<Commit>((next) => {
-    useScenarioStore.getState().mutateScenario(next);
+  // The form-open token (captured on the closed⇌open transition below). Declared
+  // here because `commit` has to read it at CALL time.
+  const openToken = React.useRef<{ items: UiPerson[]; groups: EditorGroup[] } | null>(null);
+
+  const commit = React.useCallback<Commit>((transform) => {
+    // T03F1: `transform` is applied AT THE QUEUE HEAD, against the state the
+    // previous command committed.
+    //
+    // Callers used to compute a whole replacement durable state from the render
+    // snapshot and hand that over. Two rapid actions then both derived from the same
+    // pre-first-action snapshot, so the second silently reverted the first — a
+    // delete followed quickly by a reorder lost the delete, and both reported
+    // success. Passing the OPERATION instead of its result is what preserves intent:
+    // the reorder is computed over the list the delete produced.
+    //
+    // The form-open token is still snapshotted HERE, at the click, not read inside
+    // the updater: a newer commit re-renders and the close-on-external effect clears
+    // the token, so by the time the updater ran there would be nothing left to
+    // compare against and a stale Save would sail through.
+    const token = openToken.current;
+    void scenarioCommands.mutate((live) => {
+      if (
+        token !== null &&
+        (descriptor.readItems(live) !== token.items || descriptor.readGroups(live) !== token.groups)
+      ) {
+        return null;
+      }
+      return transform(live as ScenarioUiState);
+    });
   }, []);
+  // Read-only live snapshot, threaded to the children that need to VALIDATE against
+  // current state before asking for a write (the upload dialog's name checks). Not a
+  // write path: every write goes through `commit`'s queue-head transform.
   const currentState = React.useCallback<CurrentState>(
     () => useScenarioStore.getState() as ScenarioUiState,
     [],
@@ -152,7 +187,6 @@ export function PeopleTable() {
   // ACROSS rerenders. `isStale` re-reads live and reports whether that slice moved
   // (undo/redo travel or an external cascade). Shared by the close-on-external effect
   // AND every submit handler, so "what closes the form" == "what blocks a stale Save".
-  const openToken = React.useRef<{ items: UiPerson[]; groups: EditorGroup[] } | null>(null);
   const wasEditing = React.useRef(false);
   if (editing !== wasEditing.current) {
     wasEditing.current = editing;
@@ -187,7 +221,7 @@ export function PeopleTable() {
     const from = dragIndex;
     setDragIndex(null);
     setOverIndex(null);
-    if (from != null && from !== to) commit(reorderItems(currentState(), descriptor, from, to));
+    if (from != null && from !== to) commit((live) => reorderItems(live, descriptor, from, to));
   };
 
   // Live result count for the search (a11y): "N nurses" or "N of M nurses match".
@@ -339,7 +373,6 @@ export function PeopleTable() {
                 items={items}
                 groups={groups}
                 commit={commit}
-                currentState={currentState}
                 isStale={isStale}
                 onDone={() => setSel(null)}
               />
@@ -356,7 +389,6 @@ export function PeopleTable() {
                     items={items}
                     groups={groups}
                     commit={commit}
-                    currentState={currentState}
                     isStale={isStale}
                     onDone={() => setSel(null)}
                   />
@@ -370,21 +402,20 @@ export function PeopleTable() {
                   ordinal={index + 1}
                   groups={groups}
                   commit={commit}
-                  currentState={currentState}
                   canDrag={canDrag}
                   canReorder={canDrag && filtered.length > 1}
                   isFirst={index === 0}
                   isLast={index === filtered.length - 1}
                   onEdit={() => setSel({ t: "edit-item", key })}
                   onMoveUp={() =>
-                    commit(reorderItems(currentState(), descriptor, index, index - 1))
+                    commit((live) => reorderItems(live, descriptor, index, index - 1))
                   }
                   onMoveDown={() =>
-                    commit(reorderItems(currentState(), descriptor, index, index + 1))
+                    commit((live) => reorderItems(live, descriptor, index, index + 1))
                   }
                   onDelete={() => {
                     setSel(null);
-                    commit(deleteItem(currentState(), descriptor, item.id));
+                    commit((live) => deleteItem(live, descriptor, item.id));
                   }}
                   isOver={overIndex === index}
                   isDragging={dragIndex === index}
@@ -441,7 +472,6 @@ export function PeopleTable() {
         items={items}
         groups={groups}
         commit={commit}
-        currentState={currentState}
         isStale={isStale}
         editing={editing}
         addOpen={sel?.t === "add-group"}
@@ -474,7 +504,6 @@ function ReadRow({
   ordinal,
   groups,
   commit,
-  currentState,
   canDrag,
   canReorder,
   isFirst,
@@ -495,7 +524,6 @@ function ReadRow({
   ordinal: number;
   groups: EditorGroup[];
   commit: Commit;
-  currentState: CurrentState;
   canDrag: boolean;
   canReorder: boolean;
   isFirst: boolean;
@@ -625,7 +653,7 @@ function ReadRow({
             variant="outline"
             aria-label={`Duplicate ${item.id}`}
             data-testid={`people-dup-${itemKey}`}
-            onClick={() => commit(duplicateItem(currentState(), descriptor, item.id))}
+            onClick={() => commit((live) => duplicateItem(live, descriptor, item.id))}
           >
             <FaCopy />
           </Button>
@@ -659,7 +687,6 @@ function RowEditor({
   items,
   groups,
   commit,
-  currentState,
   isStale,
   onDone,
 }: {
@@ -669,7 +696,6 @@ function RowEditor({
   items: UiPerson[];
   groups: EditorGroup[];
   commit: Commit;
-  currentState: CurrentState;
   isStale: () => boolean;
   onDone: () => void;
 }) {
@@ -709,21 +735,21 @@ function RowEditor({
     try {
       if (mode === "add") {
         // New nurse: name → id, no description authored here. history:[] via descriptor.
-        let next = addItem(currentState(), descriptor, { id: check.id });
-        next = writeGroups(next, check.id, draftGroups);
-        commit(next);
+        commit((live) =>
+          writeGroups(addItem(live, descriptor, { id: check.id }), check.id, draftGroups),
+        );
         toast.success(`Nurse “${String(check.id)}” added.`);
       } else {
-        let next = currentState();
-        let effectiveId: EntityId = item!.id;
-        // Rename cascade only when the name actually changed. Description is PRESERVED
-        // (never written from the table), so an inline name/group edit keeps it intact.
-        if (nameChanged) {
-          next = renameItem(next, descriptor, item!.id, check.id);
-          effectiveId = check.id;
-        }
-        next = writeGroups(next, effectiveId, draftGroups);
-        commit(next);
+        const effectiveId: EntityId = nameChanged ? check.id : item!.id;
+        // The whole compound edit is ONE queue-head transform, so the rename cascade
+        // and the group write both apply to the committed roster.
+        commit((live) => {
+          // Rename cascade only when the name actually changed. Description is
+          // PRESERVED (never written from the table), so an inline name/group edit
+          // keeps it intact.
+          const renamed = nameChanged ? renameItem(live, descriptor, item!.id, check.id) : live;
+          return writeGroups(renamed, effectiveId, draftGroups);
+        });
         toast.success(`Nurse “${String(effectiveId)}” saved.`);
       }
       onDone();

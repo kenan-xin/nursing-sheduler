@@ -107,7 +107,7 @@ describe("ClearConfirmDialog — no implicit dismissal can clear data", () => {
   it("Escape routes to onCancel only", async () => {
     const { onConfirm, onCancel } = renderConfirm();
     await userEvent.keyboard("{Escape}");
-    await waitFor(() => expect(onCancel).toHaveBeenCalledOnce());
+    await waitFor(async () => expect(onCancel).toHaveBeenCalledOnce());
     expect(onConfirm).not.toHaveBeenCalled();
   });
 

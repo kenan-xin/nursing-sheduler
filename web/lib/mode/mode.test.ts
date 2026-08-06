@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { createModeStore } from "./mode";
 import { createEmptyScenarioUiState, type ScenarioUiState } from "@/lib/scenario";
-import { createStateSpine, pickScenario, selectBackupStatus } from "@/lib/store";
+import {
+  computeScenarioFingerprint,
+  pickScenario,
+  selectBackupStatus,
+  scenarioCommands,
+  useScenarioStore,
+} from "@/lib/store";
 import type { ScenarioStoreState } from "@/lib/store/scenario-store";
-import { createMemoryStorage } from "@/lib/store/persistence";
-import { hydrateScenarioStore } from "@/lib/store/lifecycle";
+import { resetScenarioForTest } from "@/lib/store/test-authority";
 
 // Acceptance matrix row 1 — toggle Guided↔Advanced must leave the scenario store
 // byte-identical (no reserialize, no flatten, no dropped Advanced-only detail).
@@ -62,32 +67,37 @@ function scenarioWithAdvancedDetail(): ScenarioUiState {
       extraColumns: [],
       extraRows: [],
     },
+    // Every durable matrix cell carries a `uid`: Workspace emission (and hence the
+    // backup fingerprint this test records) refuses a positional fallback.
     reqData: [
-      { person: 1, date: "2026-03-01", kind: "request", shiftType: "D", weight: 1 },
-      { person: 2, date: "2026-03-02", kind: "leave" },
+      { uid: "cell-1", person: 1, date: "2026-03-01", kind: "request", shiftType: "D", weight: 1 },
+      { uid: "cell-2", person: 2, date: "2026-03-02", kind: "leave" },
     ],
   };
 }
 
 describe("mode lens — non-mutating", () => {
   it("toggling Guided↔Advanced leaves the scenario store byte-identical", async () => {
-    const spine = createStateSpine({ createStorage: () => createMemoryStorage() });
-    await hydrateScenarioStore(spine.scenario, spine.hot);
+    await resetScenarioForTest();
 
-    const advanced = scenarioWithAdvancedDetail();
-    // Seed a real backup fingerprint so the persisted partial (scenario slice +
-    // backup fingerprint) is meaningful for the comparison.
-    spine.scenario.setState({ ...advanced, backupFingerprint: "backup-xyz" }, false);
+    // Seeded and backed up through the real command bus — T03 leaves no projection
+    // setter to poke, and the durable path is the honest baseline anyway.
+    await scenarioCommands.mutate(scenarioWithAdvancedDetail());
+    await scenarioCommands.recordBackup(
+      computeScenarioFingerprint(pickScenario(useScenarioStore.getState())),
+    );
+    const recordedBackup = useScenarioStore.getState().backupFingerprint;
+    expect(recordedBackup).not.toBeNull();
 
-    // The exact partial `persist` would serialize: the scenario slice plus the
-    // backup fingerprint. structuredClone preserves non-JSON numbers (Infinity),
-    // so — unlike JSON.stringify — a lossy flatten of the Advanced weight or a
-    // dropped backup fingerprint cannot masquerade as byte-identical.
+    // The committed durable slice plus the backup fingerprint. structuredClone
+    // preserves non-JSON numbers (Infinity), so — unlike JSON.stringify — a lossy
+    // flatten of the Advanced weight or a dropped backup fingerprint cannot
+    // masquerade as byte-identical.
     const persistedPartial = (state: ScenarioStoreState) => ({
       ...pickScenario(state),
       backupFingerprint: state.backupFingerprint,
     });
-    const before = structuredClone(persistedPartial(spine.scenario.getState()));
+    const before = structuredClone(persistedPartial(useScenarioStore.getState()));
 
     // Toggle mode back and forth — this must not touch the scenario store.
     const mode = createModeStore("guided");
@@ -97,17 +107,17 @@ describe("mode lens — non-mutating", () => {
     mode.getState().setMode("guided");
     mode.getState().toggleMode(); // → advanced
 
-    const after = persistedPartial(spine.scenario.getState());
+    const after = persistedPartial(useScenarioStore.getState());
 
     // Deep structural equality (Object.is-based → Infinity === Infinity), covering
     // every persisted field plus the backup fingerprint.
     expect(after).toEqual(before);
     // Explicitly guard the load-bearing non-JSON value and the backup fingerprint.
     expect(after.cardsByKind.requirements[0].weight).toBe(Infinity);
-    expect(after.backupFingerprint).toBe("backup-xyz");
+    expect(after.backupFingerprint).toBe(recordedBackup);
   });
 
-  it("mode store is independent — no import path reaches the scenario store", () => {
+  it("mode store is independent — no import path reaches the scenario store", async () => {
     const mode = createModeStore("guided");
     const before = mode.getState().mode;
     expect(before).toBe("guided");
@@ -120,21 +130,22 @@ describe("mode lens — non-mutating", () => {
   });
 
   it("backup currentness is unaffected by mode toggles", async () => {
-    const spine = createStateSpine({ createStorage: () => createMemoryStorage() });
-    await hydrateScenarioStore(spine.scenario, spine.hot);
+    await resetScenarioForTest();
 
     // Hydration no longer invents a backup fingerprint (T17r review P0), so record
     // one (as a plain Download would) before editing, then make a change so the
     // scenario is genuinely stale against that backup.
-    spine.scenario.getState().recordBackup();
-    spine.scenario.getState().mutateScenario({ rangeStart: "2026-05-01" });
-    expect(selectBackupStatus(spine.scenario.getState())).toBe("stale");
+    await scenarioCommands.recordBackup(
+      computeScenarioFingerprint(pickScenario(useScenarioStore.getState())),
+    );
+    await scenarioCommands.mutate({ rangeStart: "2026-05-01" });
+    expect(selectBackupStatus(useScenarioStore.getState())).toBe("stale");
 
     const mode = createModeStore("guided");
     mode.getState().toggleMode();
     mode.getState().toggleMode();
 
-    expect(selectBackupStatus(spine.scenario.getState())).toBe("stale");
+    expect(selectBackupStatus(useScenarioStore.getState())).toBe("stale");
   });
 });
 
@@ -143,8 +154,8 @@ describe("mode lens — non-mutating", () => {
 // reconciliation has run — otherwise a direct visit to an Advanced-only URL
 // could be redirected during the initial server-default Guided render even
 // though the stored preference is Advanced.
-describe("mode adoption lifecycle", () => {
-  it("starts unhydrated and flips to ready exactly once marked", () => {
+describe("mode adoption lifecycle", async () => {
+  it("starts unhydrated and flips to ready exactly once marked", async () => {
     const mode = createModeStore("guided");
     expect(mode.getState().adoption).toBe("unhydrated");
 
@@ -152,7 +163,7 @@ describe("mode adoption lifecycle", () => {
     expect(mode.getState().adoption).toBe("ready");
   });
 
-  it("marking adopted does not change the mode value itself", () => {
+  it("marking adopted does not change the mode value itself", async () => {
     const mode = createModeStore("guided");
     mode.getState().setMode("advanced");
     mode.getState().markAdopted();

@@ -16,7 +16,7 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { useScenarioStore } from "@/lib/store";
+import { scenarioCommands } from "@/lib/store";
 import type { ScenarioUiState, ScenarioValidationIssue } from "@/lib/scenario";
 import { Button } from "@/components/ui/button";
 import { surfaceVariants } from "@/components/ui/surface";
@@ -62,7 +62,15 @@ export function ScenarioFileCard({
   onUpload,
   onStartEdit,
 }: ScenarioFileCardProps) {
-  const recordBackup = useScenarioStore((s) => s.recordBackup);
+  // Download records the emitted Workspace backup as a METADATA-only repository
+  // command: it advances the envelope's record revision, writes no commit fact,
+  // and so can neither become an undoable edit nor stale a content-bound read.
+  //
+  // The fingerprint comes from the export core, computed over the exact snapshot it
+  // serialized — not recomputed here or at the queue head, either of which could
+  // name a revision the user never downloaded.
+  const recordBackup = (backupFingerprint: string) =>
+    void scenarioCommands.recordBackup(backupFingerprint);
   const [copied, setCopied] = useState(false);
   const [issues, setIssues] = useState<ScenarioValidationIssue[] | null>(null);
 

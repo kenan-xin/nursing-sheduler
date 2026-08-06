@@ -114,7 +114,9 @@ describe("MobileNav — coarse-pointer contract", () => {
 describe("MobileNav — modal behaviour and every dismissal route", () => {
   it("traps focus inside the drawer and locks page scroll while open", async () => {
     const drawer = await openDrawer();
-    await waitFor(() => expect(drawer).toContainElement(document.activeElement as HTMLElement));
+    await waitFor(async () =>
+      expect(drawer).toContainElement(document.activeElement as HTMLElement),
+    );
     // Base UI's modal scroll lock pins the document while the drawer is open.
     expect(document.body.style.overflow || document.documentElement.style.overflow).not.toBe("");
   });
@@ -122,26 +124,34 @@ describe("MobileNav — modal behaviour and every dismissal route", () => {
   it("closes on Escape", async () => {
     await openDrawer();
     await userEvent.keyboard("{Escape}");
-    await waitFor(() => expect(screen.queryByTestId("mobile-nav-drawer")).not.toBeInTheDocument());
+    await waitFor(async () =>
+      expect(screen.queryByTestId("mobile-nav-drawer")).not.toBeInTheDocument(),
+    );
   });
 
   it("closes on a backdrop press", async () => {
     await openDrawer();
     const overlay = document.querySelector("[data-slot='dialog-overlay']") as HTMLElement;
     await userEvent.click(overlay);
-    await waitFor(() => expect(screen.queryByTestId("mobile-nav-drawer")).not.toBeInTheDocument());
+    await waitFor(async () =>
+      expect(screen.queryByTestId("mobile-nav-drawer")).not.toBeInTheDocument(),
+    );
   });
 
   it("closes on the close control", async () => {
     await openDrawer();
     await userEvent.click(screen.getByTestId("mobile-nav-close"));
-    await waitFor(() => expect(screen.queryByTestId("mobile-nav-drawer")).not.toBeInTheDocument());
+    await waitFor(async () =>
+      expect(screen.queryByTestId("mobile-nav-drawer")).not.toBeInTheDocument(),
+    );
   });
 
   it("closes after a successful navigation", async () => {
     await openDrawer();
     await userEvent.click(screen.getByTestId("side-nav-link"));
-    await waitFor(() => expect(screen.queryByTestId("mobile-nav-drawer")).not.toBeInTheDocument());
+    await waitFor(async () =>
+      expect(screen.queryByTestId("mobile-nav-drawer")).not.toBeInTheDocument(),
+    );
   });
 
   it("restores focus to the menu trigger after closing", async () => {

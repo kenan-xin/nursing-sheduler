@@ -11,7 +11,7 @@
 // and every card on it is a resting L1 `surface`. Wells, bands and the selection
 // language live inside those cards, in their own components.
 //
-// Every mutation is ONE tracked patch (one zundo entry): a range commit runs the
+// Every mutation is ONE tracked patch (one undo entry): a range commit runs the
 // pure range cascade (`applyRangeChange`, which wraps the T07 delete cascade for
 // removed ids); group create/rename/set-members/delete route through the SHARED
 // entity-editor core via the Dates descriptor (fs7) — a create composes
@@ -27,7 +27,7 @@ import {
   renameGroup,
   setGroupMembers,
 } from "@/components/entity-editor/core";
-import { useScenarioStore } from "@/lib/store";
+import { useScenarioStore, scenarioCommands } from "@/lib/store";
 import {
   applyRangeChange,
   hasCompleteRange,
@@ -76,31 +76,27 @@ export function DatesScreen() {
   );
 
   const handleCommit = (newRange: DateRange, importHolidays: boolean) => {
-    useScenarioStore
-      .getState()
-      .mutateScenario((state) =>
-        applyRangeChange(state, newRange, { importSingaporeHolidays: importHolidays }),
-      );
+    scenarioCommands.mutate((state) =>
+      applyRangeChange(state, newRange, { importSingaporeHolidays: importHolidays }),
+    );
   };
 
   const handleCreateGroup = (name: string, memberIds: string[]) => {
     // Reserved keyword OR concrete date-literal shape — never authorable (producer/T07).
     if (isReservedDateGroupId(name)) return;
-    useScenarioStore
-      .getState()
-      .mutateScenario((state) =>
-        setGroupMembers(
-          addGroup(state, datesDescriptor, { id: name }),
-          datesDescriptor,
-          name,
-          memberIds,
-        ),
-      );
+    scenarioCommands.mutate((state) =>
+      setGroupMembers(
+        addGroup(state, datesDescriptor, { id: name }),
+        datesDescriptor,
+        name,
+        memberIds,
+      ),
+    );
   };
 
   const handleSaveGroup = (oldId: string, name: string, memberIds: string[]) => {
     if (isDerivedDateGroupId(oldId) || isReservedDateGroupId(name)) return;
-    useScenarioStore.getState().mutateScenario((state) => {
+    scenarioCommands.mutate((state) => {
       const renamed = name === oldId ? state : renameGroup(state, datesDescriptor, oldId, name);
       return setGroupMembers(renamed, datesDescriptor, name, memberIds);
     });
@@ -108,7 +104,7 @@ export function DatesScreen() {
 
   const handleDeleteGroup = (id: string) => {
     if (isDerivedDateGroupId(id)) return; // reserved ids are never deletable
-    useScenarioStore.getState().mutateScenario((state) => deleteGroup(state, datesDescriptor, id));
+    scenarioCommands.mutate((state) => deleteGroup(state, datesDescriptor, id));
   };
 
   return (

@@ -33,6 +33,53 @@ export function isContentCommand(command: ScenarioCommandV1): boolean {
   return command.type !== "record_backup";
 }
 
+/** Deep structural equality over JSON-shaped scenario data (±Infinity included). */
+function sameValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    return a.every((item, index) => sameValue(item, b[index]));
+  }
+  if (typeof a === "object" && typeof b === "object" && a !== null && b !== null) {
+    const left = a as Record<string, unknown>;
+    const right = b as Record<string, unknown>;
+    const keys = Object.keys(left);
+    if (keys.length !== Object.keys(right).length) return false;
+    return keys.every((key) => key in right && sameValue(left[key], right[key]));
+  }
+  return false;
+}
+
+/**
+ * Whether a CONTENT command's result is semantically identical to what is already
+ * committed — in which case it must not spend a revision or an Undo entry.
+ *
+ * Scoped to the arms that genuinely need it. `set_req_data` and `replace_scenario`
+ * hand over freshly-built object graphs (a paint fold, a Clear, a re-imported
+ * document), so their "nothing changed" case is invisible to a reference test; the
+ * only honest answer is a value comparison of the field each one writes.
+ * `patch_scenario` is left alone here because the command bus already refuses an
+ * unchanged patch by per-key reference, which is both cheaper and the exact rule the
+ * editor transforms are written against.
+ */
+export function isSemanticNoOpCommand(
+  before: ScenarioSnapshot,
+  after: ScenarioSnapshot,
+  command: ScenarioCommandV1,
+): boolean {
+  switch (command.type) {
+    case "set_req_data":
+      return sameValue(before.scenario.reqData, after.scenario.reqData);
+    case "replace_scenario":
+      return (
+        before.backupFingerprint === after.backupFingerprint &&
+        sameValue(before.scenario, after.scenario)
+      );
+    default:
+      return false;
+  }
+}
+
 /**
  * Apply a command to a persisted snapshot, returning the next snapshot. Pure: it
  * neither reads nor writes storage, so the repository can apply it against the

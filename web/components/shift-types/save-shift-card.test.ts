@@ -13,6 +13,7 @@ import {
   resolveStaffingCardState,
   saveShiftTypeCard,
   type SaveShiftTypeCardInput,
+  type SaveShiftTypeCardResult,
 } from "./save-shift-card";
 
 function scenario(overrides: Partial<ScenarioUiState> = {}): ScenarioUiState {
@@ -66,22 +67,32 @@ function editInput(
   };
 }
 
-function apply(
+/**
+ * Drive the save against an in-memory document. T03: the commit seam is async (a
+ * queued repository command), so the outcome and any refusal are only observable
+ * after awaiting — the updater itself still runs synchronously inside it.
+ */
+async function apply(
   live: ScenarioUiState,
   input: SaveShiftTypeCardInput,
-): { next: ScenarioUiState; calls: number; result: ReturnType<typeof saveShiftTypeCard> } {
+): Promise<{
+  next: ScenarioUiState;
+  calls: number;
+  result: SaveShiftTypeCardResult;
+}> {
   let next = live;
   let calls = 0;
-  const result = saveShiftTypeCard((updater) => {
+  const result = await saveShiftTypeCard(async (updater) => {
     calls += 1;
     const patch = updater(next);
     next = { ...next, ...patch };
+    return { ok: true };
   }, input);
   return { next, calls, result };
 }
 
 describe("saveShiftTypeCard", () => {
-  it("updates a simple baseline without clobbering description, coefficients, markers, or weight", () => {
+  it("updates a simple baseline without clobbering description, coefficients, markers, or weight", async () => {
     const card = baseline();
     const opened = scenario({
       cardsByKind: {
@@ -90,7 +101,7 @@ describe("saveShiftTypeCard", () => {
       },
     });
 
-    const { next, calls } = apply(opened, editInput(opened));
+    const { next, calls } = await apply(opened, editInput(opened));
 
     expect(calls).toBe(1);
     expect(next.cardsByKind.requirements[0]).toEqual({
@@ -100,10 +111,10 @@ describe("saveShiftTypeCard", () => {
     });
   });
 
-  it("creates a validated all-nurses/all-dates baseline with post-shift string selector", () => {
+  it("creates a validated all-nurses/all-dates baseline with post-shift string selector", async () => {
     const opened = scenario({ shifts: [{ id: "Day" }] });
     const input = editInput(opened);
-    const { next, result } = apply(opened, input);
+    const { next, result } = await apply(opened, input);
 
     expect(result.requirement).toBe("created");
     expect(next.cardsByKind.requirements).toHaveLength(1);
@@ -117,7 +128,7 @@ describe("saveShiftTypeCard", () => {
     });
   });
 
-  it("treats a disabled baseline as no active coverage and creates without editing it", () => {
+  it("treats a disabled baseline as no active coverage and creates without editing it", async () => {
     const disabled = baseline({ disabled: true });
     const opened = scenario({
       cardsByKind: {
@@ -126,7 +137,7 @@ describe("saveShiftTypeCard", () => {
       },
     });
 
-    const { next } = apply(opened, editInput(opened));
+    const { next } = await apply(opened, editInput(opened));
 
     expect(next.cardsByKind.requirements).toHaveLength(2);
     expect(next.cardsByKind.requirements[0]).toBe(disabled);
@@ -136,7 +147,7 @@ describe("saveShiftTypeCard", () => {
     });
   });
 
-  it("edits the first duplicate all-scope baseline in array order", () => {
+  it("edits the first duplicate all-scope baseline in array order", async () => {
     const first = baseline({ uid: "first" });
     const second = baseline({ uid: "second", requiredNumPeople: 8, preferredNumPeople: 9 });
     const opened = scenario({
@@ -146,13 +157,13 @@ describe("saveShiftTypeCard", () => {
       },
     });
 
-    const { next } = apply(opened, editInput(opened));
+    const { next } = await apply(opened, editInput(opened));
 
     expect(next.cardsByKind.requirements[0].requiredNumPeople).toBe(4);
     expect(next.cardsByKind.requirements[1]).toBe(second);
   });
 
-  it("renames first, keeps the cascade, and patches the post-rename requirement ref", () => {
+  it("renames first, keeps the cascade, and patches the post-rename requirement ref", async () => {
     const card = baseline();
     const opened = scenario({
       shiftGroups: [{ id: "WORKING", members: ["Day"] }],
@@ -165,7 +176,7 @@ describe("saveShiftTypeCard", () => {
     if (input.mode !== "edit") throw new Error("unreachable");
     input.fields.code = "AM";
 
-    const { next } = apply(opened, input);
+    const { next } = await apply(opened, input);
 
     expect(next.shifts.map((shift) => shift.id)).toEqual(["AM", "Night"]);
     expect(next.shiftGroups[0].members).toEqual(["AM"]);
@@ -173,7 +184,7 @@ describe("saveShiftTypeCard", () => {
     expect(next.cardsByKind.requirements[0].requiredNumPeople).toBe(4);
   });
 
-  it("aborts changed and deleted baseline identities without committing a write", () => {
+  it("aborts changed and deleted baseline identities without committing a write", async () => {
     const card = baseline();
     const opened = scenario({
       cardsByKind: {
@@ -194,17 +205,18 @@ describe("saveShiftTypeCard", () => {
 
     for (const live of [changed, deleted]) {
       let committed = false;
-      expect(() =>
-        saveShiftTypeCard((updater) => {
+      await expect(
+        saveShiftTypeCard(async (updater) => {
           updater(live);
           committed = true;
+          return { ok: true };
         }, input),
-      ).toThrow(StaleShiftRequirementError);
+      ).rejects.toThrow(StaleShiftRequirementError);
       expect(committed).toBe(false);
     }
   });
 
-  it("rejects validation and rename collisions with zero committed writes", () => {
+  it("rejects validation and rename collisions with zero committed writes", async () => {
     const card = baseline();
     const opened = scenario({
       cardsByKind: {
@@ -217,38 +229,40 @@ describe("saveShiftTypeCard", () => {
     invalid.staffing.required = -1;
 
     let committed = false;
-    expect(() =>
-      saveShiftTypeCard((updater) => {
+    await expect(
+      saveShiftTypeCard(async (updater) => {
         updater(opened);
         committed = true;
+        return { ok: true };
       }, invalid),
-    ).toThrow(ShiftRequirementValidationError);
+    ).rejects.toThrow(ShiftRequirementValidationError);
     expect(committed).toBe(false);
 
     const collision = editInput(opened);
     collision.fields.code = "Night";
-    expect(() =>
-      saveShiftTypeCard((updater) => {
+    await expect(
+      saveShiftTypeCard(async (updater) => {
         updater(opened);
         committed = true;
+        return { ok: true };
       }, collision),
-    ).toThrow(RenameCollisionError);
+    ).rejects.toThrow(RenameCollisionError);
     expect(committed).toBe(false);
   });
 
-  it("rejects reserved and numeric selector writes before invoking the mutation", () => {
+  it("rejects reserved and numeric selector writes before invoking the mutation", async () => {
     const mutate = () => {
       throw new Error("must not run");
     };
-    expect(() =>
+    await expect(
       saveShiftTypeCard(mutate, {
         mode: "edit",
         shiftTypeId: "OFF",
         fields: { code: "OFF", name: "", workingTime: {} },
         staffing: { type: "none" },
       }),
-    ).toThrow(ReservedShiftTypeError);
-    expect(() =>
+    ).rejects.toThrow(ReservedShiftTypeError);
+    await expect(
       saveShiftTypeCard(mutate, {
         mode: "edit",
         shiftTypeId: 1,
@@ -260,9 +274,9 @@ describe("saveShiftTypeCard", () => {
           preferred: "",
         },
       }),
-    ).toThrow(NumericShiftTypeStaffingError);
+    ).rejects.toThrow(NumericShiftTypeStaffingError);
     // Add-mode defense in depth: a numbers-only code can't build a valid selector.
-    expect(() =>
+    await expect(
       saveShiftTypeCard(mutate, {
         mode: "add",
         fields: { code: "1", name: "", workingTime: {} },
@@ -273,10 +287,10 @@ describe("saveShiftTypeCard", () => {
           preferred: "",
         },
       }),
-    ).toThrow(NumericShiftTypeStaffingError);
+    ).rejects.toThrow(NumericShiftTypeStaffingError);
   });
 
-  it("makes EDGE-PR-03 explicit in the result and writes the forced collapse", () => {
+  it("makes EDGE-PR-03 explicit in the result and writes the forced collapse", async () => {
     const card = baseline();
     const opened = scenario({
       cardsByKind: {
@@ -289,7 +303,7 @@ describe("saveShiftTypeCard", () => {
     input.staffing.required = 2;
     input.staffing.preferred = 2;
 
-    const { next, result } = apply(opened, input);
+    const { next, result } = await apply(opened, input);
 
     expect(result.preferredCollapsed).toBe(true);
     expect(next.cardsByKind.requirements[0].preferredNumPeople).toBeUndefined();

@@ -65,7 +65,9 @@ describe("ConfirmDialog — shared alert-dialog contract", () => {
     const popup = screen.getByTestId("confirm-dialog");
     expect(popup).toHaveAccessibleName("Start over?");
     expect(popup).toHaveAccessibleDescription("This clears the current schedule.");
-    await waitFor(() => expect(popup).toContainElement(document.activeElement as HTMLElement));
+    await waitFor(async () =>
+      expect(popup).toContainElement(document.activeElement as HTMLElement),
+    );
   });
 
   it("keeps the destructive and default variants distinct", () => {
@@ -136,7 +138,7 @@ describe("ConfirmDialog — exactly-once signals", () => {
   it("Escape closes without ever reaching the domain action", async () => {
     const { onConfirm, onOpenChange } = renderConfirm();
     await userEvent.keyboard("{Escape}");
-    await waitFor(() => expect(onOpenChange).toHaveBeenCalledOnce());
+    await waitFor(async () => expect(onOpenChange).toHaveBeenCalledOnce());
     expect(onOpenChange.mock.calls[0][0]).toBe(false);
     expect(onConfirm).not.toHaveBeenCalled();
   });

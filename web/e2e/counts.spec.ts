@@ -35,33 +35,42 @@ type CountCard = {
 
 type NsWindow = {
   __nsStore: {
-    scenario: {
-      getState: () => Record<string, unknown> & {
-        cardsByKind: { counts: CountCard[] };
-        mutateScenario: (patch: Record<string, unknown>) => void;
-        recordBackup: () => void;
-      };
-      temporal: {
-        getState: () => {
-          pastStates: unknown[];
-          futureStates: unknown[];
-          undo: () => void;
-          redo: () => void;
-        };
-      };
+    /** The repository command bus — the product's only durable write path. */
+    commands: {
+      mutate(patch: Record<string, unknown>): Promise<{ ok: boolean }>;
+      recordBackup(backupFingerprint: string): Promise<{ ok: boolean }>;
+      undo(): Promise<{ ok: boolean }>;
+      redo(): Promise<{ ok: boolean }>;
+      takeover(): Promise<{ ok: boolean }>;
     };
+    drain(): Promise<void>;
+    historyDepth(): Promise<number>;
+    authority(): {
+      scenarioId: string | null;
+      documentRevision: number;
+      ownership: string;
+      canUndo: boolean;
+      canRedo: boolean;
+    };
+    scenario(): Record<string, unknown> & { cardsByKind: { counts: CountCard[] } };
     backupStatus: () => "none" | "current" | "stale";
+    backupFingerprint: () => string;
   };
 };
 
+/** Bridge mounted AND authority bring-up resolved — a command before that has no
+ *  lease to present and is refused, so a seed would silently write nothing. */
 async function waitForStore(page: Page) {
-  await page.waitForFunction(() => Boolean((window as unknown as NsWindow).__nsStore));
+  await page.waitForFunction(() => {
+    const store = (window as unknown as NsWindow).__nsStore;
+    return Boolean(store) && store.authority().scenarioId !== null;
+  });
 }
 
 async function seed(page: Page, patch: Record<string, unknown>) {
   await waitForStore(page);
-  await page.evaluate((p) => {
-    (window as unknown as NsWindow).__nsStore.scenario.getState().mutateScenario(p);
+  await page.evaluate(async (p) => {
+    await (window as unknown as NsWindow).__nsStore.commands.mutate(p);
   }, patch);
 }
 
@@ -75,16 +84,21 @@ async function gotoReady(page: Page) {
   await expect(page.getByTestId("add-card-toggle")).toBeVisible();
 }
 
+/**
+ * The COMMITTED cards. Drains first: a durable command settles asynchronously, so
+ * reading the projection straight after the click that issued it can outrun the
+ * commit — the deterministic seam for that is the drain, not a timeout.
+ */
 function readCounts(page: Page) {
-  return page.evaluate(
-    () => (window as unknown as NsWindow).__nsStore.scenario.getState().cardsByKind.counts,
-  );
+  return page.evaluate(async () => {
+    const store = (window as unknown as NsWindow).__nsStore;
+    await store.drain();
+    return store.scenario().cardsByKind.counts;
+  });
 }
 
 function pastCount(page: Page) {
-  return page.evaluate(
-    () => (window as unknown as NsWindow).__nsStore.scenario.temporal.getState().pastStates.length,
-  );
+  return page.evaluate(() => (window as unknown as NsWindow).__nsStore.historyDepth());
 }
 
 const BASE_SEED = {
@@ -1094,18 +1108,18 @@ test.describe.serial("T12 Coverings regression — default allValue keeps ALL em
     await page.getByTestId("card-editor-submit").click();
 
     await expect(page.getByTestId("covering-card-0")).toBeVisible();
-    const coverings = await page.evaluate(
-      () =>
-        (
-          window as unknown as {
-            __nsStore: {
-              scenario: {
-                getState: () => { cardsByKind: { coverings: { date?: unknown }[] } };
-              };
-            };
-          }
-        ).__nsStore.scenario.getState().cardsByKind.coverings,
-    );
+    const coverings = await page.evaluate(async () => {
+      const store = (
+        window as unknown as {
+          __nsStore: {
+            drain(): Promise<void>;
+            scenario(): { cardsByKind: { coverings: { date?: unknown }[] } };
+          };
+        }
+      ).__nsStore;
+      await store.drain();
+      return store.scenario().cardsByKind.coverings;
+    });
     // Coverings' ALL chip clears to [] ⇒ buildCoveringCard OMITS date entirely.
     expect(coverings[0].date).toBeUndefined();
   });
@@ -1177,9 +1191,10 @@ test.describe.serial("T12 cold-review fixes (Major)", () => {
     await seed(page, BASE_SEED);
     // Record a backup so the scenario's backup is CURRENT — isolates draftOpen as
     // the only reason the guard can fire.
-    await page.evaluate(() =>
-      (window as unknown as NsWindow).__nsStore.scenario.getState().recordBackup(),
-    );
+    await page.evaluate(async () => {
+      const store = (window as unknown as NsWindow).__nsStore;
+      await store.commands.recordBackup(store.backupFingerprint());
+    });
     expect(
       await page.evaluate(() => (window as unknown as NsWindow).__nsStore.backupStatus()),
     ).toBe("current");
@@ -1462,9 +1477,7 @@ test.describe.serial("T12 cold-review fixes (Minor)", () => {
         counts: [redone],
       },
     });
-    await page.evaluate(() =>
-      (window as unknown as NsWindow).__nsStore.scenario.temporal.getState().undo(),
-    );
+    await page.evaluate(() => (window as unknown as NsWindow).__nsStore.commands.undo());
     await expect(page.getByTestId("count-card-0")).toContainText("Original");
 
     const before = await pastCount(page);
@@ -1476,8 +1489,10 @@ test.describe.serial("T12 cold-review fixes (Minor)", () => {
     // were missing, letting the passive stale-close alone satisfy the assertions
     // below and mask a broken synchronous guard (a false green).
     await page.evaluate(() => {
-      const store = (window as unknown as NsWindow).__nsStore.scenario;
-      store.temporal.getState().redo();
+      const store = (window as unknown as NsWindow).__nsStore;
+      // Deliberately NOT awaited: the point is to fire Redo and Submit inside one
+      // task, before React can passively close the stale draft.
+      void store.commands.redo();
       const submit = document.querySelector<HTMLElement>('[data-testid="card-editor-submit"]');
       if (!submit)
         throw new Error("card-editor-submit not found — cannot exercise the stale Save race");

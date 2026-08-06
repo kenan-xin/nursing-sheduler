@@ -3,11 +3,13 @@
 // Store binding for the Shift Affinities editor (T12 M1 clone). Reads the
 // affinity cards from the durable scenario slice and exposes CRUD + reorder as
 // operations that each apply exactly one `mutateScenario` patch — so every op is
-// one zundo/undo entry and one persisted revision (T04 store discipline). All
+// one undo entry and one persisted revision (T04 store discipline). All
 // logic lives in `affinities-model`; this hook is only the store glue (mirrors
 // `use-counts.ts`'s `reorderByDrop` + `getUniqueCopyLabel` pattern).
 
 import { useScenarioStore } from "@/lib/store";
+import type { CommandOutcome } from "@/lib/store";
+import { commitCardsSlice, commitCardsTransform } from "@/components/card-editor/commit-cards";
 import type { AffinityCard, ScenarioUiState } from "@/lib/scenario";
 import { getUniqueCopyLabel } from "@/components/entity-editor/core";
 import type { DropPosition } from "@/components/card-editor/card-editor-shell";
@@ -19,11 +21,6 @@ import {
 } from "./affinities-model";
 
 /** Replace the affinities list in one tracked mutation (fresh refs for history). */
-function commitAffinities(next: AffinityCard[]) {
-  useScenarioStore.getState().mutateScenario((state) => ({
-    cardsByKind: { ...state.cardsByKind, affinities: next },
-  }));
-}
 
 export interface AffinitiesController {
   state: ScenarioUiState;
@@ -32,7 +29,9 @@ export interface AffinitiesController {
    *  stale guard keys on its ref-identity change since the draft opened. */
   getCards: () => AffinityCard[];
   add: (form: AffinityFormState) => void;
-  update: (uid: string, form: AffinityFormState) => void;
+  /** Edit-save. Awaits the baseline-guarded commit so the caller can surface a
+   *  `superseded` refusal WITHOUT closing the draft. */
+  update: (uid: string, form: AffinityFormState) => Promise<CommandOutcome>;
   remove: (uid: string) => void;
   duplicate: (uid: string) => void;
   /** Swap a card one slot up (-1) or down (+1) — the keyboard-supplement control. */
@@ -41,7 +40,7 @@ export interface AffinitiesController {
    *  (`"before"`/`"after"`) — the primary DnD control (FR-PR-12). */
   reorder: (fromUid: string, toUid: string, position: DropPosition) => void;
   /** Set the UI-only `disabled` marker. A disabled affinity is excluded from the
-   *  canonical doc, so this is one tracked mutation — one zundo entry. */
+   * canonical doc, so this is one tracked mutation — one undo entry. */
   setDisabled: (uid: string, value: boolean) => void;
 }
 
@@ -56,7 +55,9 @@ export function useAffinities(): AffinitiesController {
     affinities,
     getCards: () => useScenarioStore.getState().cardsByKind.affinities,
     add(form) {
-      commitAffinities([...affinities, buildAffinityCard(form)]);
+      // Queue-head transform: appends against the list the previous command
+      // committed, so two rapid adds both land (T03F1 round-2).
+      void commitCardsTransform("affinities", (current) => [...current, buildAffinityCard(form)]);
     },
     update(uid, form) {
       // Preserve the card's identity (uid) so it stays the same row on replace,
@@ -69,44 +70,58 @@ export function useAffinities(): AffinitiesController {
       if (source?.disabled) markers.disabled = true;
       if (source?.applied) markers.applied = true;
       const next = markers.disabled || markers.applied ? { ...rebuilt, ...markers } : rebuilt;
-      commitAffinities(affinities.map((card) => (card.uid === uid ? next : card)));
+      // Edit-save: baseline-guarded so a moved list refuses (`superseded`) and the
+      // caller can keep the draft open. Awaits and returns the outcome.
+      return commitCardsSlice(
+        "affinities",
+        affinities,
+        affinities.map((card) => (card.uid === uid ? next : card)),
+      );
     },
     remove(uid) {
-      commitAffinities(affinities.filter((card) => card.uid !== uid));
+      void commitCardsTransform("affinities", (current) =>
+        current.filter((card) => card.uid !== uid),
+      );
     },
     duplicate(uid) {
-      const index = affinities.findIndex((card) => card.uid === uid);
-      if (index === -1) return;
-      const source = affinities[index];
-      // FR-PR-13: derive a unique "… copy" description via the shared helper —
-      // strip any trailing copy/copy N suffix, append " copy", dedupe with 2/3/…,
-      // and fall back to "Copy" for an undescribed source.
-      const descriptions = affinities.map((card) => card.description ?? "");
-      const description = getUniqueCopyLabel(source.description ?? "", descriptions);
-      const clone: AffinityCard = {
-        ...structuredClone(source),
-        uid: crypto.randomUUID(),
-        description,
-      };
-      commitAffinities([...affinities.slice(0, index + 1), clone, ...affinities.slice(index + 1)]);
+      void commitCardsTransform("affinities", (current) => {
+        const index = current.findIndex((card) => card.uid === uid);
+        if (index === -1) return current;
+        const source = current[index];
+        // FR-PR-13: derive a unique "… copy" description via the shared helper —
+        // strip any trailing copy/copy N suffix, append " copy", dedupe with 2/3/…,
+        // and fall back to "Copy" for an undescribed source.
+        const descriptions = current.map((card) => card.description ?? "");
+        const description = getUniqueCopyLabel(source.description ?? "", descriptions);
+        const clone: AffinityCard = {
+          ...structuredClone(source),
+          uid: crypto.randomUUID(),
+          description,
+        };
+        return [...current.slice(0, index + 1), clone, ...current.slice(index + 1)];
+      });
     },
     move(uid, direction) {
-      const index = affinities.findIndex((card) => card.uid === uid);
-      const target = index + direction;
-      if (index === -1 || target < 0 || target >= affinities.length) return;
-      const next = [...affinities];
-      [next[index], next[target]] = [next[target], next[index]];
-      commitAffinities(next);
+      void commitCardsTransform("affinities", (current) => {
+        const index = current.findIndex((card) => card.uid === uid);
+        const target = index + direction;
+        if (index === -1 || target < 0 || target >= current.length) return current;
+        const next = [...current];
+        [next[index], next[target]] = [next[target], next[index]];
+        return next;
+      });
     },
     reorder(fromUid, toUid, position) {
-      const next = reorderByDrop(affinities, fromUid, toUid, position);
-      // A no-op reorder (same card / not found) returns an identical order — skip
-      // the write so a stray drop never spends an undo entry.
-      if (next.some((card, i) => card.uid !== affinities[i].uid)) commitAffinities(next);
+      // Queue-head transform: re-derives the order from the list the previous
+      // command committed. A no-op returns the same reference (no commit).
+      void commitCardsTransform("affinities", (current) => {
+        const next = reorderByDrop(current, fromUid, toUid, position);
+        return next.some((card, i) => card.uid !== current[i].uid) ? next : current;
+      });
     },
     setDisabled(uid, value) {
-      commitAffinities(
-        affinities.map((card) => (card.uid === uid ? withCardDisabled(card, value) : card)),
+      void commitCardsTransform("affinities", (current) =>
+        current.map((card) => (card.uid === uid ? withCardDisabled(card, value) : card)),
       );
     },
   };

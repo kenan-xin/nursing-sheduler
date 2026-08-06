@@ -3,23 +3,19 @@
 // Store binding for the Staffing Requirements editor (T12 M1 clone). Reads the
 // requirement cards from the durable scenario slice and exposes CRUD + reorder as
 // operations that each apply exactly one `mutateScenario` patch — so every op is
-// one zundo/undo entry and one persisted revision (T04 store discipline). All
+// one undo entry and one persisted revision (T04 store discipline). All
 // logic lives in `requirements-model`; this hook is only the store glue (mirrors
 // `use-counts.ts`).
 
-import { useScenarioStore } from "@/lib/store";
+import { useScenarioStore, scenarioCommands } from "@/lib/store";
 import type { RequirementCard, ScenarioUiState } from "@/lib/scenario";
 import { getUniqueCopyLabel } from "@/components/entity-editor/core";
 import type { DropPosition } from "@/components/card-editor/card-editor-shell";
 import { reorderByDrop, withCardDisabled, type RequirementFormState } from "./requirements-model";
 import { applyRequirementPatch } from "./requirement-patch";
+import { commitCardsTransform } from "@/components/card-editor/commit-cards";
 
 /** Replace the requirements list in one tracked mutation (fresh refs for history). */
-function commitRequirements(next: RequirementCard[]) {
-  useScenarioStore.getState().mutateScenario((state) => ({
-    cardsByKind: { ...state.cardsByKind, requirements: next },
-  }));
-}
 
 export interface RequirementsController {
   state: ScenarioUiState;
@@ -37,7 +33,7 @@ export interface RequirementsController {
    *  (`"before"`/`"after"`) — the primary DnD control (FR-PR-12). */
   reorder: (fromUid: string, toUid: string, position: DropPosition) => void;
   /** Set the UI-only `disabled` marker (M1). A disabled requirement is excluded
-   *  from the canonical doc, so this is one tracked mutation — one zundo entry. */
+   *  from the canonical doc, so this is one tracked mutation — one undo entry. */
   setDisabled: (uid: string, value: boolean) => void;
 }
 
@@ -52,55 +48,57 @@ export function useRequirements(): RequirementsController {
     requirements,
     getCards: () => useScenarioStore.getState().cardsByKind.requirements,
     add(form) {
-      useScenarioStore
-        .getState()
-        .mutateScenario((live) => applyRequirementPatch(live, { type: "add", form }));
+      scenarioCommands.mutate((live) => applyRequirementPatch(live, { type: "add", form }));
     },
     update(uid, form) {
-      useScenarioStore
-        .getState()
-        .mutateScenario((live) => applyRequirementPatch(live, { type: "update", uid, form }));
+      scenarioCommands.mutate((live) => applyRequirementPatch(live, { type: "update", uid, form }));
     },
     remove(uid) {
-      commitRequirements(requirements.filter((card) => card.uid !== uid));
+      // Queue-head transform: filters against the list the previous command
+      // committed, so two rapid removes both land (T03F1 round-2).
+      void commitCardsTransform("requirements", (current) =>
+        current.filter((card) => card.uid !== uid),
+      );
     },
     duplicate(uid) {
-      const index = requirements.findIndex((card) => card.uid === uid);
-      if (index === -1) return;
-      const source = requirements[index];
-      // FR-PR-13: derive a unique "… copy" description via the shared helper —
-      // strip any trailing copy/copy N suffix, append " copy", dedupe with 2/3/…,
-      // and fall back to "Copy" for an undescribed source.
-      const descriptions = requirements.map((card) => card.description ?? "");
-      const description = getUniqueCopyLabel(source.description ?? "", descriptions);
-      const clone: RequirementCard = {
-        ...structuredClone(source),
-        uid: crypto.randomUUID(),
-        description,
-      };
-      commitRequirements([
-        ...requirements.slice(0, index + 1),
-        clone,
-        ...requirements.slice(index + 1),
-      ]);
+      void commitCardsTransform("requirements", (current) => {
+        const index = current.findIndex((card) => card.uid === uid);
+        if (index === -1) return current;
+        const source = current[index];
+        // FR-PR-13: derive a unique "… copy" description via the shared helper —
+        // strip any trailing copy/copy N suffix, append " copy", dedupe with 2/3/…,
+        // and fall back to "Copy" for an undescribed source.
+        const descriptions = current.map((card) => card.description ?? "");
+        const description = getUniqueCopyLabel(source.description ?? "", descriptions);
+        const clone: RequirementCard = {
+          ...structuredClone(source),
+          uid: crypto.randomUUID(),
+          description,
+        };
+        return [...current.slice(0, index + 1), clone, ...current.slice(index + 1)];
+      });
     },
     move(uid, direction) {
-      const index = requirements.findIndex((card) => card.uid === uid);
-      const target = index + direction;
-      if (index === -1 || target < 0 || target >= requirements.length) return;
-      const next = [...requirements];
-      [next[index], next[target]] = [next[target], next[index]];
-      commitRequirements(next);
+      void commitCardsTransform("requirements", (current) => {
+        const index = current.findIndex((card) => card.uid === uid);
+        const target = index + direction;
+        if (index === -1 || target < 0 || target >= current.length) return current;
+        const next = [...current];
+        [next[index], next[target]] = [next[target], next[index]];
+        return next;
+      });
     },
     reorder(fromUid, toUid, position) {
-      const next = reorderByDrop(requirements, fromUid, toUid, position);
-      // A no-op reorder (same card / not found) returns an identical order — skip
-      // the write so a stray drop never spends an undo entry.
-      if (next.some((card, i) => card.uid !== requirements[i].uid)) commitRequirements(next);
+      // Queue-head transform: re-derives the order from the list the previous
+      // command committed. A no-op returns the same reference (no commit).
+      void commitCardsTransform("requirements", (current) => {
+        const next = reorderByDrop(current, fromUid, toUid, position);
+        return next.some((card, i) => card.uid !== current[i].uid) ? next : current;
+      });
     },
     setDisabled(uid, value) {
-      commitRequirements(
-        requirements.map((card) => (card.uid === uid ? withCardDisabled(card, value) : card)),
+      void commitCardsTransform("requirements", (current) =>
+        current.map((card) => (card.uid === uid ? withCardDisabled(card, value) : card)),
       );
     },
   };

@@ -2,11 +2,13 @@
 
 // Store binding for the Shift Counts editor (T12 seed). Reads the count cards from
 // the durable scenario slice and exposes CRUD + reorder as operations that each
-// apply exactly one `mutateScenario` patch — so every op is one zundo/undo entry
+// apply exactly one `scenarioCommands.mutate` patch — so every op is one undo entry
 // and one persisted revision (T04 store discipline). All logic lives in
 // `counts-model`; this hook is only the store glue.
 
 import { useScenarioStore } from "@/lib/store";
+import type { CommandOutcome } from "@/lib/store";
+import { commitCardsSlice, commitCardsTransform } from "@/components/card-editor/commit-cards";
 import type { CountCard, ScenarioUiState } from "@/lib/scenario";
 import { getUniqueCopyLabel } from "@/components/entity-editor/core";
 import type { DropPosition } from "@/components/card-editor/card-editor-shell";
@@ -19,13 +21,6 @@ import {
 } from "./counts-model";
 import { buildContractedCard, type ContractedFormState } from "./contracted-model";
 
-/** Replace the counts list in one tracked mutation (fresh refs for history). */
-function commitCounts(next: CountCard[]) {
-  useScenarioStore.getState().mutateScenario((state) => ({
-    cardsByKind: { ...state.cardsByKind, counts: next },
-  }));
-}
-
 export interface CountsController {
   state: ScenarioUiState;
   counts: CountCard[];
@@ -33,12 +28,15 @@ export interface CountsController {
    *  guard keys on its ref-identity change since the draft opened. */
   getCards: () => CountCard[];
   add: (form: CountFormState) => void;
-  update: (uid: string, form: CountFormState) => void;
+  /** Edit-save. Awaits the baseline-guarded commit so the caller can surface a
+   *  `superseded` refusal WITHOUT closing the draft. Returns the outcome. */
+  update: (uid: string, form: CountFormState) => Promise<CommandOutcome>;
   /** Author a MARKED contracted-hours card (M2a-2) — one tracked mutation. */
   addContracted: (form: ContractedFormState) => void;
   /** Replace a contracted-hours card, preserving its uid + `disabled`/`applied`
-   *  markers exactly like the ordinary {@link CountsController.update} path. */
-  updateContracted: (uid: string, form: ContractedFormState) => void;
+   *  markers exactly like the ordinary {@link CountsController.update} path.
+   *  Awaits so the caller can surface a refusal. */
+  updateContracted: (uid: string, form: ContractedFormState) => Promise<CommandOutcome>;
   /** Swap a card for an already-built one in place — same uid + list index, with
    *  `disabled`/`applied` carried forward (mirrors {@link CountsController.updateContracted}'s
    *  marker discipline). The Convert ↔ generic entry point (M2a-4); one tracked
@@ -52,7 +50,7 @@ export interface CountsController {
    *  (`"before"`/`"after"`) — the primary DnD control (FR-PR-12). */
   reorder: (fromUid: string, toUid: string, position: DropPosition) => void;
   /** Set the UI-only `disabled` marker (M4). A disabled count is excluded from the
-   *  canonical doc, so this is one tracked mutation — one zundo entry. */
+   * canonical doc, so this is one tracked mutation — one undo entry. */
   setDisabled: (uid: string, value: boolean) => void;
 }
 
@@ -68,7 +66,9 @@ export function useCounts(): CountsController {
     getCards: () => useScenarioStore.getState().cardsByKind.counts,
     add(form) {
       const domain = buildCountShiftTypeDomain(state);
-      commitCounts([...counts, buildCountCard(form, domain)]);
+      // Queue-head transform: appends against the list the previous command
+      // committed, so two rapid adds both land (T03F1 round-2).
+      void commitCardsTransform("counts", (current) => [...current, buildCountCard(form, domain)]);
     },
     update(uid, form) {
       // Preserve the card's identity (uid) so it stays the same row on replace,
@@ -82,10 +82,19 @@ export function useCounts(): CountsController {
       if (source?.disabled) markers.disabled = true;
       if (source?.applied) markers.applied = true;
       const next = markers.disabled || markers.applied ? { ...rebuilt, ...markers } : rebuilt;
-      commitCounts(counts.map((card) => (card.uid === uid ? next : card)));
+      // Edit-save: baseline-guarded so a moved list refuses (`superseded`) and the
+      // caller can keep the draft open. Awaits and returns the outcome.
+      return commitCardsSlice(
+        "counts",
+        counts,
+        counts.map((card) => (card.uid === uid ? next : card)),
+      );
     },
     addContracted(form) {
-      commitCounts([...counts, buildContractedCard(form, state)]);
+      void commitCardsTransform("counts", (current) => [
+        ...current,
+        buildContractedCard(form, state),
+      ]);
     },
     updateContracted(uid, form) {
       // Same identity/marker discipline as the ordinary update: preserve the uid so
@@ -97,59 +106,74 @@ export function useCounts(): CountsController {
       if (source?.disabled) markers.disabled = true;
       if (source?.applied) markers.applied = true;
       const next = markers.disabled || markers.applied ? { ...rebuilt, ...markers } : rebuilt;
-      commitCounts(counts.map((card) => (card.uid === uid ? next : card)));
+      return commitCardsSlice(
+        "counts",
+        counts,
+        counts.map((card) => (card.uid === uid ? next : card)),
+      );
     },
     replaceCard(uid, nextCard) {
       // Swap the card in place: keep the uid + list index, and carry forward the UI
       // markers so a convert never silently re-enables a card the user turned off —
       // the same discipline as update/updateContracted.
-      const source = counts.find((card) => card.uid === uid);
-      if (!source) return;
-      const markers: Pick<CountCard, "disabled" | "applied"> = {};
-      if (source.disabled) markers.disabled = true;
-      if (source.applied) markers.applied = true;
-      const rebuilt = { ...nextCard, uid } as CountCard;
-      const next = markers.disabled || markers.applied ? { ...rebuilt, ...markers } : rebuilt;
-      commitCounts(counts.map((card) => (card.uid === uid ? next : card)));
+      void commitCardsTransform("counts", (current) => {
+        const source = current.find((card) => card.uid === uid);
+        if (!source) return current;
+        const markers: Pick<CountCard, "disabled" | "applied"> = {};
+        if (source.disabled) markers.disabled = true;
+        if (source.applied) markers.applied = true;
+        const rebuilt = { ...nextCard, uid } as CountCard;
+        const next = markers.disabled || markers.applied ? { ...rebuilt, ...markers } : rebuilt;
+        return current.map((card) => (card.uid === uid ? next : card));
+      });
     },
     remove(uid) {
-      commitCounts(counts.filter((card) => card.uid !== uid));
+      void commitCardsTransform("counts", (current) => current.filter((card) => card.uid !== uid));
     },
     duplicate(uid) {
       // A deep clone preserves ANY card shape verbatim — ordinary, contracted-
       // hours, or the unmarked generic-array fallback (FR-PR-55a) — since this
       // never routes through `buildCountCard`.
-      const index = counts.findIndex((card) => card.uid === uid);
-      if (index === -1) return;
-      const source = counts[index];
-      // FR-PR-13: derive a unique "… copy" description via the shared helper —
-      // strip any trailing copy/copy N suffix, append " copy", dedupe with 2/3/…,
-      // and fall back to "Copy" for an undescribed source.
-      const descriptions = counts.map((card) => card.description ?? "");
-      const description = getUniqueCopyLabel(source.description ?? "", descriptions);
-      const clone: CountCard = {
-        ...structuredClone(source),
-        uid: crypto.randomUUID(),
-        description,
-      };
-      commitCounts([...counts.slice(0, index + 1), clone, ...counts.slice(index + 1)]);
+      void commitCardsTransform("counts", (current) => {
+        const index = current.findIndex((card) => card.uid === uid);
+        if (index === -1) return current;
+        const source = current[index];
+        // FR-PR-13: derive a unique "… copy" description via the shared helper —
+        // strip any trailing copy/copy N suffix, append " copy", dedupe with 2/3/…,
+        // and fall back to "Copy" for an undescribed source.
+        const descriptions = current.map((card) => card.description ?? "");
+        const description = getUniqueCopyLabel(source.description ?? "", descriptions);
+        const clone: CountCard = {
+          ...structuredClone(source),
+          uid: crypto.randomUUID(),
+          description,
+        };
+        return [...current.slice(0, index + 1), clone, ...current.slice(index + 1)];
+      });
     },
     move(uid, direction) {
-      const index = counts.findIndex((card) => card.uid === uid);
-      const target = index + direction;
-      if (index === -1 || target < 0 || target >= counts.length) return;
-      const next = [...counts];
-      [next[index], next[target]] = [next[target], next[index]];
-      commitCounts(next);
+      void commitCardsTransform("counts", (current) => {
+        const index = current.findIndex((card) => card.uid === uid);
+        const target = index + direction;
+        if (index === -1 || target < 0 || target >= current.length) return current;
+        const next = [...current];
+        [next[index], next[target]] = [next[target], next[index]];
+        return next;
+      });
     },
     reorder(fromUid, toUid, position) {
-      const next = reorderByDrop(counts, fromUid, toUid, position);
-      // A no-op reorder (same card / not found) returns an identical order — skip
-      // the write so a stray drop never spends an undo entry.
-      if (next.some((card, i) => card.uid !== counts[i].uid)) commitCounts(next);
+      // Queue-head transform: re-derives the order from the list the previous
+      // command committed. A no-op (same card / not found) returns the same
+      // reference so the write is suppressed.
+      void commitCardsTransform("counts", (current) => {
+        const next = reorderByDrop(current, fromUid, toUid, position);
+        return next.some((card, i) => card.uid !== current[i].uid) ? next : current;
+      });
     },
     setDisabled(uid, value) {
-      commitCounts(counts.map((card) => (card.uid === uid ? withCardDisabled(card, value) : card)));
+      void commitCardsTransform("counts", (current) =>
+        current.map((card) => (card.uid === uid ? withCardDisabled(card, value) : card)),
+      );
     },
   };
 }

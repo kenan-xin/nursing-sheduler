@@ -1,28 +1,28 @@
-import { describe, expect, it, vi } from "vitest";
-import type { StateStorage } from "zustand/middleware";
+import { describe, expect, it } from "vitest";
 import { INITIAL_OPTIMIZE_RUN_VIEW, reduceRunView } from "@/lib/optimize/run-view";
-import { createMemoryStorage } from "./persistence";
-import { createScenarioStore } from "./scenario-store";
 import { createHotStore } from "./hot-store";
+import { installTestAuthority } from "./test-authority";
 
-/** In-memory durable storage with a spied `setItem` to count persist writes. */
-function spyStorage(): StateStorage & { writes: () => number } {
-  const mem = createMemoryStorage();
-  const setItem = vi.fn((name: string, value: string) => mem.setItem(name, value));
-  return {
-    getItem: (name) => mem.getItem(name),
-    setItem,
-    removeItem: (name) => mem.removeItem(name),
-    writes: () => setItem.mock.calls.length,
-  };
-}
+// The hot store's contract is that ephemeral churn — SSE frames, run-view updates,
+// UI scratch, drafts, an in-flight paint — costs ZERO durable writes.
+//
+// Post-T03 that is measured against the repository rather than against the persist
+// middleware's `setItem`: a durable write is a COMMIT now, so the assertion is
+// "no commit row appeared", which is both stronger and no longer coupled to a
+// storage seam that has been deleted.
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+/** Durable commits recorded for the currently selected scenario. */
+async function commitCount(harness: Awaited<ReturnType<typeof installTestAuthority>>) {
+  const scenarioId = harness.authorityStore.getState().scenarioId!;
+  return harness.db.scenarioCommits.where("scenarioId").equals(scenarioId).count();
+}
+
 describe("hot store never triggers a durable write", () => {
-  it("100 SSE progress updates cause 0 scenario persist writes", async () => {
-    const storage = spyStorage();
-    createScenarioStore({ createStorage: () => storage });
+  it("100 SSE progress updates cause 0 durable scenario commits", async () => {
+    const harness = await installTestAuthority();
+    const baseline = await commitCount(harness);
     const hot = createHotStore();
 
     for (let i = 0; i < 100; i++) {
@@ -32,7 +32,7 @@ describe("hot store never triggers a durable write", () => {
     await flush();
 
     expect(hot.getState().progress).toHaveLength(100);
-    expect(storage.writes()).toBe(0);
+    expect(await commitCount(harness)).toBe(baseline);
   });
 
   it("run/ui/draft churn stays in the hot store", () => {
@@ -78,9 +78,9 @@ describe("hot store never triggers a durable write", () => {
     expect(hot.getState().hydrationStatus).toBe("ready");
   });
 
-  it("run view churn stays in the hot store and triggers zero durable writes", () => {
-    const storage = spyStorage();
-    createScenarioStore({ createStorage: () => storage });
+  it("run view churn stays in the hot store and triggers zero durable commits", async () => {
+    const harness = await installTestAuthority();
+    const baseline = await commitCount(harness);
     const hot = createHotStore();
 
     let view = INITIAL_OPTIMIZE_RUN_VIEW;
@@ -101,7 +101,7 @@ describe("hot store never triggers a durable write", () => {
 
     expect(hot.getState().runView.progress).toHaveLength(50);
     expect(hot.getState().runView.latestScore).toBe(49);
-    expect(storage.writes()).toBe(0);
+    expect(await commitCount(harness)).toBe(baseline);
   });
 
   it("resetRun and resetRunView both restore the zero run view", () => {

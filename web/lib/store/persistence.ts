@@ -1,15 +1,17 @@
-// Persistence plumbing (T04): the persist key/version, the forward migration, the
-// persisted-payload sanitizer, the serialized/awaitable storage queue, and an
-// in-memory `StateStorage` double.
+// LEGACY persisted-record decoding (was T04's live persistence plumbing).
 //
-// The storage seam is Zustand's `StateStorage` (async get/set/remove of a string).
-// Dexie is one concrete adapter (`dexie-storage.ts`); tests inject the in-memory
-// double. Every adapter is wrapped by the guard, which serializes writes AND
-// removes through one FIFO queue so a slow/older op can never land after a newer
-// one, exposes an awaitable `drain()` (for `pagehide` and reset), and never
-// strands the newest value when an inner op rejects.
+// T03 retired Zustand `persist` write-behind: the transactional repository is now
+// the only durable scenario writer, so the storage seam, its serialized write
+// queue, its in-memory double, and the Dexie key/value adapter are all gone.
+//
+// What survives is exactly what is still needed to READ the one legacy record a
+// pre-T03 build left behind: its key, its payload version, the forward migration,
+// the sanitizer, and the non-finite-number codec. The repository's one-time
+// migration (`lib/repository/migration.ts`) is now the only caller — it decodes
+// through this exact chain rather than a re-implementation, which is what makes a
+// migrated envelope produce a byte-identical Workspace document and an identical
+// backup fingerprint.
 
-import type { StateStorage } from "zustand/middleware";
 import type { ScenarioUiState } from "@/lib/scenario";
 import { SCENARIO_KEYS } from "./fingerprint";
 
@@ -693,118 +695,154 @@ export function sanitizePersistedScenario(persisted: unknown): Partial<Persisted
 }
 
 // ---------------------------------------------------------------------------
-// Guarded storage (serialized queue + drain + failure resilience)
+// Non-finite weight codec — the legacy JSON boundary
 // ---------------------------------------------------------------------------
+//
+// `Weight` is "an integer, or ±Infinity for a hard constraint" (lib/scenario/types.ts),
+// and the product exposes both signs as real actions — the Guided Rules ±∞
+// controls, and `LEAVE_PIN_WEIGHT`. Native `JSON.stringify` has no representation
+// for a non-finite number and silently emits `null`, so every hard weight written
+// to IndexedDB came back as `null` and the sanitizer rejected the whole record.
+//
+// The codec now has ONE caller: decoding the legacy record during the repository
+// migration. The repository stores structured values through IndexedDB's
+// structured clone, which represents ±Infinity natively — so nothing written
+// after T03 is ever encoded. The ENCODER is retained because the decoder's
+// contract is only meaningful against it, and tests pin the round trip.
+//
+// The representation is a single-key tagged OBJECT rather than a sentinel string,
+// which is what makes it unambiguous in both directions:
+//   • encoding only ever wraps a number, so an authored string that happens to
+//     read `"Infinity"` — or even the envelope's own JSON text — round-trips as
+//     exactly that string;
+//   • decoding only ever unwraps an object carrying the reserved key, and the
+//     durable scenario shape has no free-form record that could produce one.
+//
+// The codec is also SCOPED BY FIELD, because "a non-finite number" is not a
+// property of the payload — it is a property of the DOMAIN a value sits in. A
+// global codec revived a forged tag under `requiredNumPeople` into numeric
+// `Infinity`, and the sanitizer's generic `typeof value === "number"` check
+// happily accepted it, so a foreign record could hydrate in a state the producer
+// schema forbids. The approved positions below were derived by auditing the
+// persisted slice (`SCENARIO_KEYS`) against the producer/import schemas:
+//
+//   • `weight` — every `Weight`-typed field in the durable slice is spelled
+//     exactly this: the five card kinds and the `off`/`request` matrix cells.
+//   • `weightRange` — `exportLayout.formatting[].when.preference.weightRange` is
+//     an ARRAY of `zLooseNumber`, documented as "unlike a preference weight —
+//     unrestricted", and reachable today through a Workspace Load.
+//
+// Every other numeric field — `requiredNumPeople`, `preferredNumPeople`, `target`,
+// `durationMinutes`, `restMinutes`, ids, coefficients — is finite-only, and a tag
+// there is refused rather than decoded.
+//
+// Three deliberate non-goals: `NaN` is NOT encoded (it is not a representable
+// `Weight`, so it keeps failing closed at the sanitizer); an already-corrupted
+// `null` is left alone (its sign is unrecoverable, and guessing one would silently
+// invent a hard constraint in a ward's roster); and nothing here tries to
+// out-validate the sanitizer on FOREIGN keys.
 
-/** A `StateStorage` whose writes/removes are serialized, with an awaitable drain. */
-export interface GuardedStorage extends StateStorage {
-  /** Resolve once the current write/remove queue has fully settled. */
-  drain(): Promise<void>;
-  /** The last inner write/remove error, if any (cleared by `consumeWriteError`). */
-  consumeWriteError(): unknown;
+/** The reserved key tagging a non-finite number in the legacy JSON payload. */
+export const NON_FINITE_PERSIST_TAG = "$nsNonFinite";
+
+const POSITIVE_INFINITY_TAG = "Infinity";
+const NEGATIVE_INFINITY_TAG = "-Infinity";
+
+/** Scalar properties whose domain admits a signed infinity (see the audit above). */
+const SIGNED_INFINITY_SCALAR_KEYS: ReadonlySet<string> = new Set(["weight"]);
+
+/** Properties holding an ARRAY of numbers whose domain admits signed infinities. */
+const SIGNED_INFINITY_LIST_KEYS: ReadonlySet<string> = new Set(["weightRange"]);
+
+/** Whether `value` is an object carrying the reserved tag — well-formed or not. */
+function isTagged(value: unknown): value is Record<string, unknown> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.prototype.hasOwnProperty.call(value, NON_FINITE_PERSIST_TAG)
+  );
+}
+
+/** Wrap `±Infinity`; leave everything else (including `NaN`) exactly as it is. */
+function encodeIfInfinite(value: unknown): unknown {
+  // Only a number can be equal to an infinity, so no `typeof` guard is needed.
+  if (value === Number.POSITIVE_INFINITY) {
+    return { [NON_FINITE_PERSIST_TAG]: POSITIVE_INFINITY_TAG };
+  }
+  if (value === Number.NEGATIVE_INFINITY) {
+    return { [NON_FINITE_PERSIST_TAG]: NEGATIVE_INFINITY_TAG };
+  }
+  return value;
+}
+
+/** Unwrap a well-formed envelope; THROW on a tagged-but-malformed one. */
+function decodeEnvelope(value: unknown): unknown {
+  if (!isTagged(value)) return value;
+  const tag = value[NON_FINITE_PERSIST_TAG];
+  // Exactly one key: a tag carrying passengers is malformed, not a hard weight.
+  if (Object.keys(value).length === 1) {
+    if (tag === POSITIVE_INFINITY_TAG) return Number.POSITIVE_INFINITY;
+    if (tag === NEGATIVE_INFINITY_TAG) return Number.NEGATIVE_INFINITY;
+  }
+  throw new Error(
+    `Persisted scenario carries a malformed ${NON_FINITE_PERSIST_TAG} envelope ` +
+      `(${JSON.stringify(value).slice(0, 120)}); refusing to guess a value.`,
+  );
 }
 
 /**
- * Wrap a lazily-constructed `StateStorage` in a single FIFO queue so writes and
- * removes never overlap and always apply in submission order — an older/slow op
- * can never land after a newer one. Each op is enqueued as its own task, so a
- * failed op never strands later values (the newest queued value still flushes).
- * Inner errors are recorded (not thrown to the caller, which would be an unhandled
- * rejection since `persist` ignores the returned promise) and surfaced via
- * `consumeWriteError`. `getItem` reads directly (reads need no ordering).
+ * `JSON.stringify` replacer for the legacy payload. `stringify` applies the
+ * replacer BEFORE it would coerce a non-finite number to `null`, so the tagged
+ * envelope is what reaches storage.
  *
- * Newest-wins applies to errors too: a later `setItem` revision that succeeds
- * clears any error left by an earlier one (the queue is strict FIFO, so an
- * older revision always fully settles — success or failure — before a newer
- * one starts; a newer success can therefore only ever supersede, never race,
- * an older failure). Without this, a transient failure on an old revision
- * would keep reporting `error` forever after a later write actually succeeded.
- *
- * The inner adapter is created on first use, so the browser Dexie default is only
- * constructed on the client at first read/write — never during SSR.
+ * The replacer visits a holder BEFORE its children, which is why an
+ * infinity-tolerant LIST is rewritten here at its own key rather than element by
+ * element: an array element's own visit knows only its index, never which array it
+ * belongs to. The rewritten array is walked afterwards, where each envelope is
+ * already an object and passes straight through — so there is no recursion.
  */
-export function createGuardedStorage(createInner: () => StateStorage): GuardedStorage {
-  let inner: StateStorage | null = null;
-  const getInner = () => (inner ??= createInner());
-
-  let chain: Promise<void> = Promise.resolve();
-  let revisionCounter = 0;
-  let lastWrittenRevision = 0;
-  let writeError: unknown = null;
-
-  // Run `task` after the queue settles regardless of the previous op's outcome,
-  // then swallow rejection on the stored chain so one failure never stalls the
-  // queue (and never becomes an unhandled rejection). The returned promise is the
-  // swallowed one, so callers (and `drain`) never see a rejection.
-  const enqueue = (task: () => Promise<void>): Promise<void> => {
-    chain = chain.then(task, task).catch(() => {});
-    return chain;
-  };
-
-  return {
-    getItem: (name) => getInner().getItem(name),
-    setItem: (name, value) => {
-      const revision = ++revisionCounter;
-      return enqueue(async () => {
-        // Monotonic guard: never write a revision older than one already written.
-        if (revision <= lastWrittenRevision) return;
-        try {
-          await getInner().setItem(name, value);
-          lastWrittenRevision = revision;
-          writeError = null; // this revision is newer than any prior error
-        } catch (error) {
-          writeError = error;
-          throw error;
-        }
-      });
-    },
-    removeItem: (name) =>
-      enqueue(async () => {
-        try {
-          await getInner().removeItem(name);
-        } catch (error) {
-          writeError = error;
-          throw error;
-        }
-      }),
-    drain: () => chain.then(() => {}),
-    consumeWriteError: () => {
-      const error = writeError;
-      writeError = null;
-      return error;
-    },
-  };
-}
-
-// ---------------------------------------------------------------------------
-// In-memory double (tests)
-// ---------------------------------------------------------------------------
-
-/** An in-memory `StateStorage` double with a readable snapshot, for tests. */
-export interface MemoryStateStorage extends StateStorage {
-  /** The underlying key → serialized-value map, as a plain object. */
-  snapshot(): Record<string, string>;
+export function encodeNonFiniteNumbers(key: string, value: unknown): unknown {
+  if (SIGNED_INFINITY_SCALAR_KEYS.has(key)) return encodeIfInfinite(value);
+  if (SIGNED_INFINITY_LIST_KEYS.has(key) && Array.isArray(value)) {
+    return value.map((element) => encodeIfInfinite(element));
+  }
+  return value;
 }
 
 /**
- * Build an async in-memory `StateStorage`. Operations resolve asynchronously so
- * they exercise the same async paths as Dexie; seed with `initial` to simulate a
- * previously-persisted record (e.g. migration/corrupt-record fixtures).
+ * `JSON.parse` reviver for the legacy payload — the matching decode, which runs
+ * strictly BEFORE `migrateScenarioState` and `sanitizePersistedScenario`. The
+ * migration therefore sees real numeric infinities at the positions whose domain
+ * admits them, exactly as the binding types say it should.
+ *
+ * Three outcomes, and every one of them is closed:
+ *   • an approved position with a well-formed envelope decodes to the signed
+ *     numeric infinity;
+ *   • an approved position with a tagged-but-malformed envelope THROWS;
+ *   • a FINITE-ONLY position carrying a tag THROWS — the value is refused rather
+ *     than revived into a domain the schema forbids.
+ *
+ * A throw is caught by the migration and recorded as a `corrupt` outcome, leaving
+ * the legacy row intact rather than half-migrated.
+ *
+ * `JSON.parse` walks bottom-up and binds `this` to the holder, so an ARRAY element
+ * is passed over here and judged by its parent on the next visit — that is what
+ * lets an infinity-tolerant list decode while an element of any other numeric
+ * array is left as an object for the sanitizer to reject.
  */
-export function createMemoryStorage(initial?: Record<string, string>): MemoryStateStorage {
-  const map = new Map<string, string>(Object.entries(initial ?? {}));
-  return {
-    async getItem(name) {
-      return map.has(name) ? (map.get(name) as string) : null;
-    },
-    async setItem(name, value) {
-      map.set(name, value);
-    },
-    async removeItem(name) {
-      map.delete(name);
-    },
-    snapshot() {
-      return Object.fromEntries(map);
-    },
-  };
+export function decodeNonFiniteNumbers(this: unknown, key: string, value: unknown): unknown {
+  if (SIGNED_INFINITY_SCALAR_KEYS.has(key)) return decodeEnvelope(value);
+  if (SIGNED_INFINITY_LIST_KEYS.has(key) && Array.isArray(value)) {
+    return value.map((element) => decodeEnvelope(element));
+  }
+  // An array element is decided by its parent, which is visited next.
+  if (Array.isArray(this)) return value;
+  if (isTagged(value)) {
+    throw new Error(
+      `Persisted scenario carries a ${NON_FINITE_PERSIST_TAG} envelope at the finite-only ` +
+        `field "${key}"; a signed infinity is only valid for a weight.`,
+    );
+  }
+  return value;
 }
