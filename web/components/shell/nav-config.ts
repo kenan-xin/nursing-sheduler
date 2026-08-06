@@ -52,6 +52,7 @@ import {
   FaUserShield,
   FaWandMagicSparkles,
   FaFloppyDisk,
+  FaGear,
 } from "@/components/icons";
 import type { IconType } from "@/components/icons";
 import type { AppMode } from "@/lib/mode/mode";
@@ -184,6 +185,16 @@ export const NAV_GROUPS: NavGroup[] = [
         path: "/save-and-load",
         icon: FaFloppyDisk,
         blurb: "Download, upload, anonymise, start over",
+      },
+      // T04. Visible in BOTH modes and not `advancedOnly`: it is the only place the
+      // optional AI assistant can be discovered or turned off, and a Guided user is
+      // exactly the user that feature is for. It carries no `guidedStep` because it
+      // is not part of the six-step workflow.
+      {
+        label: "Settings",
+        path: "/settings",
+        icon: FaGear,
+        blurb: "Optional AI assistant and its OpenRouter key",
       },
     ],
   },

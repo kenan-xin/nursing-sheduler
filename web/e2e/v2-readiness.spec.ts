@@ -152,7 +152,8 @@ for (const row of V2_SURFACE_MATRIX satisfies readonly V2Row[]) {
 test("the smoke covers every manifest row", () => {
   // The loop above is what registers the rows, so this guards the loop itself:
   // a filter accidentally introduced there would shrink the smoke silently.
-  expect(V2_SURFACE_MATRIX).toHaveLength(17);
+  // 17 v2 re-skin rows plus `/settings`, added by T04 with the optional assistant.
+  expect(V2_SURFACE_MATRIX).toHaveLength(18);
 });
 
 // ---------------------------------------------------------------------------

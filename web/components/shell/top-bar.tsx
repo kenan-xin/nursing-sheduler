@@ -15,6 +15,7 @@ import { usePathname } from "next/navigation";
 import { useScenarioStore } from "@/lib/store";
 import { useAppMode } from "@/lib/mode/use-mode";
 import { getNavGroupsForMode, getNavItemForMode } from "./nav-config";
+import { AssistantLauncher } from "@/components/ai/assistant-launcher";
 import { UndoRedoControls } from "./undo-redo-controls";
 import { PersistenceStatus } from "./persistence-status";
 import { MobileNav } from "./mobile-nav";
@@ -97,6 +98,8 @@ export function TopBar() {
           {scenarioName || "Untitled schedule"}
         </span>
         <PersistenceStatus />
+        {/* Renders nothing until AI is enabled and Ready (T04). */}
+        <AssistantLauncher />
         <UndoRedoControls />
       </div>
     </header>

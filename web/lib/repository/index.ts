@@ -4,7 +4,12 @@
 // bounded history. NOT yet wired into components: the legacy Zustand/`persist`
 // path stays live as the projection until T03 performs the cutover.
 
-export { NurseSchedulerDb, NURSE_SCHEDULER_DB_NAME, REPOSITORY_SCHEMA_VERSION } from "./schema";
+export {
+  ASSISTANT_WRITE_TABLES,
+  NurseSchedulerDb,
+  NURSE_SCHEDULER_DB_NAME,
+  REPOSITORY_SCHEMA_VERSION,
+} from "./schema";
 
 export { RepositoryError, isRepositoryError, type RepositoryErrorCode } from "./errors";
 

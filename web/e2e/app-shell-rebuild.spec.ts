@@ -101,9 +101,14 @@ test.describe("T08 rebuild — two-mode Home (BLOCKER 2)", () => {
     await expect(page.getByTestId("home-advanced")).toBeVisible();
     await expect(page.getByTestId("home-wizard-grid")).toHaveCount(0);
     // Every Advanced-visible destination except Home is a direct entry point
-    // (12 of 13 — DL12 §2: Guided's five Set up entries incl. Rules, plus the
-    // five raw Constraints editors).
-    await expect(page.locator('[data-testid^="home-adv-"]')).toHaveCount(12);
+    // (13 of 14 — DL12 §2: Guided's five Set up entries incl. Rules, the five raw
+    // Constraints editors, Optimise & Export, Save & Load, and T04's Settings).
+    //
+    // Settings is included for the same reason Save & Load is: the grid's rule is
+    // "every Advanced destination except Home", not "every scenario editor", and a
+    // destination the sidebar lists but the grid omits would be the drift this
+    // count exists to catch.
+    await expect(page.locator('[data-testid^="home-adv-"]')).toHaveCount(13);
     // Reachability preserved: still routes.
     await page.getByTestId("home-adv-/dates").click();
     await expect(page).toHaveURL(/\/dates$/);

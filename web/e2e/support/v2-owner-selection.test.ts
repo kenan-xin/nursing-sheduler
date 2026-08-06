@@ -95,8 +95,9 @@ describe("selectRows", () => {
     expect(selectRows(owner).map((r) => r.route)).toEqual(routes);
   });
 
-  it("registers all 17 rows for G1", () => {
-    expect(selectRows("all")).toHaveLength(17);
+  // 17 v2 re-skin rows plus `/settings`, added by T04 with the optional assistant.
+  it("registers all 18 rows for G1", () => {
+    expect(selectRows("all")).toHaveLength(18);
     expect(selectRows("all").map((r) => r.route)).toEqual(V2_SURFACE_MATRIX.map((r) => r.route));
   });
 
@@ -327,9 +328,13 @@ describe("the working-time-fields owner exception", () => {
   });
 
   it("changes no route row — this is a STATIC-ownership fix only", () => {
-    // The manifest's browser half is frozen for the epic. A style-owner edit that
+    // The manifest's browser half is frozen for the v2 epic. A style-owner edit that
     // also moved a row would change what each ticket's matrices verify.
-    expect(V2_SURFACE_MATRIX).toHaveLength(17);
+    //
+    // T04 APPENDED one row (`/settings`, owner T04) rather than moving any: every
+    // pre-existing row and every pre-existing owner's selection is byte-identical,
+    // which is what the two assertions below still pin.
+    expect(V2_SURFACE_MATRIX).toHaveLength(18);
     expect(selectRows("R2c").map((r) => r.route)).toEqual(["/shift-types"]);
     expect(selectRows("foundation").map((r) => r.route)).toEqual(["/design-system"]);
   });

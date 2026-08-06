@@ -42,6 +42,22 @@ const REPOSITORY_ALLOWED = new Set([
   "lib/store/authority-boundary.test.ts",
   // Pins the database-name literal the Playwright helper duplicates.
   "e2e/support/v2-seed.test.ts",
+  // T04 — the assistant. It owns its OWN tables in the same database, so it needs
+  // `NurseSchedulerDb`, the clear-fence helpers, and the lease predicates. It is
+  // admitted here rather than routed through the command bus because the bus is the
+  // SCENARIO mutation surface, and the assistant never mutates scenario content:
+  // it reads the envelope and the lease, and writes only assistant rows.
+  //
+  // That distinction is not left to this list to imply — `lib/ai/independence.test.ts`
+  // asserts the assistant writes no scenario-authority table and holds no repository
+  // commit path, which is the property this allowance depends on.
+  "lib/ai/assistant/db.ts",
+  "lib/ai/assistant/records.ts",
+  "lib/ai/assistant/settings-repo.ts",
+  "lib/ai/assistant/history-repo.ts",
+  "lib/ai/assistant/writer-context.ts",
+  "lib/ai/assistant/writer-context.test.ts",
+  "lib/ai/assistant/test-support.ts",
 ]);
 
 /** Modules that may publish into the scenario projection. */

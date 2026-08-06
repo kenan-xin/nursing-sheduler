@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 import { ALL_NAV_ITEMS } from "@/components/shell/nav-config";
 import {
   HARNESS_NO_PROTOTYPE,
+  PRODUCT_NO_CANONICAL_PROTOTYPE,
+  ROUTES_WITHOUT_CANONICAL_PROTOTYPE,
   manifestInventory,
   rowForRoute,
   rowsForOwner,
@@ -30,10 +32,12 @@ import {
 const REPO_ROOT = resolve(__dirname, "..", "..", "..");
 
 describe("inventory", () => {
-  it("holds exactly 13 product routes and 4 harness routes", () => {
-    expect(V2_PRODUCT_ROUTES).toHaveLength(13);
+  // 13 v2 re-skin routes plus `/settings`, which T04 added as the optional AI
+  // assistant's only discovery surface.
+  it("holds exactly 14 product routes and 4 harness routes", () => {
+    expect(V2_PRODUCT_ROUTES).toHaveLength(14);
     expect(V2_HARNESS_ROUTES).toHaveLength(4);
-    expect(V2_SURFACE_MATRIX).toHaveLength(17);
+    expect(V2_SURFACE_MATRIX).toHaveLength(18);
   });
 
   it("gives every route exactly one row", () => {
@@ -131,10 +135,21 @@ describe("prototypes", () => {
   it("every product row names a canonical prototype that exists", () => {
     for (const row of V2_SURFACE_MATRIX.filter((r) => r.kind === "product")) {
       expect(row.prototype, row.route).not.toBe(HARNESS_NO_PROTOTYPE);
+      if (row.prototype === PRODUCT_NO_CANONICAL_PROTOTYPE) continue;
       expect(existsSync(join(REPO_ROOT, row.prototype)), `${row.route} → ${row.prototype}`).toBe(
         true,
       );
     }
+  });
+
+  it("lets only the listed routes declare that they have no canonical prototype", () => {
+    // The escape hatch cannot spread: a new screen that skips visual parity has to
+    // be named here, and naming it is a reviewable act.
+    const declared = V2_SURFACE_MATRIX.filter(
+      (row) => row.prototype === PRODUCT_NO_CANONICAL_PROTOTYPE,
+    ).map((row) => row.route);
+
+    expect(declared).toEqual([...ROUTES_WITHOUT_CANONICAL_PROTOTYPE]);
   });
 
   it("every harness row records that it has no product prototype", () => {
