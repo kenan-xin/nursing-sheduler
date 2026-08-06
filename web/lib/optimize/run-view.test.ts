@@ -63,6 +63,7 @@ function job(over: Partial<JobResponse> = {}): JobResponse {
       solver: "cp-sat",
       prettify: null,
       timeout_seconds: 300,
+      purpose: "ordinary",
       basis: null,
     },
     result: null,

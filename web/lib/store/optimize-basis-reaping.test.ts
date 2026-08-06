@@ -9,7 +9,11 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { NurseSchedulerDb } from "@/lib/repository";
-import type { OptimizeBasisRecordV2 } from "@/lib/optimize/basis/basis-row";
+import {
+  isOptimizeBasisRecordV2,
+  type OptimizeBasisRecordV2,
+  type StoredOptimizeBasisRow,
+} from "@/lib/optimize/basis/basis-row";
 import {
   clearTestAuthority,
   freshAuthorityDbName,
@@ -71,7 +75,7 @@ async function bootWithRows(rows: OptimizeBasisRecordV2[]): Promise<TestAuthorit
   return harness;
 }
 
-async function remaining(harness: TestAuthority): Promise<OptimizeBasisRecordV2[]> {
+async function remaining(harness: TestAuthority): Promise<StoredOptimizeBasisRow[]> {
   const rows = await harness.db.optimizeBases.toArray();
   return rows.sort((a, b) => a.basisId.localeCompare(b.basisId));
 }
@@ -101,6 +105,10 @@ describe("Optimize basis reaping runs on authority initialization (T08)", () => 
     harness = await bootWithRows([basisRow({ basisId: "live" })]);
 
     const [row] = await remaining(harness);
+    // Still a discriminable V2 record after the clear — compaction must not damage
+    // the identity it exists to preserve.
+    expect(isOptimizeBasisRecordV2(row)).toBe(true);
+    if (!isOptimizeBasisRecordV2(row)) return;
     // The submitted document is gone…
     expect(row.submittedYaml).toBeNull();
     // …but everything history needs to describe the run survives.

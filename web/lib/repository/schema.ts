@@ -34,10 +34,10 @@ import type {
   AssistantWriteFenceV1,
   HistoryLinkV1,
   KeyValueRow,
-  OptimizeBasisRecordV2,
   RepositoryMetaRow,
   ScenarioCommitV1,
   ScenarioEnvelopeV3,
+  StoredOptimizeBasisRow,
   TabWorkspaceSelectionV1,
   WriterLeaseV2,
 } from "./types";
@@ -63,7 +63,11 @@ export class NurseSchedulerDb extends Dexie {
   assistantGenerations!: Table<AssistantWriteFenceV1, string>;
   assistantProposals!: Table<AssistantProposalV1, string>;
   assistantReceipts!: Table<AssistantReceiptV1, string>;
-  optimizeBases!: Table<OptimizeBasisRecordV2, string>;
+  // The DURABLE UNION, not the current record alone: this store has existed since
+  // version 2 and its rows are never rewritten, so a browser that ran a pre-T08
+  // build still holds `schemaVersion: 1` rows here. Declaring the table as V2 made
+  // every read an unchecked cast (see `basis-row.ts`).
+  optimizeBases!: Table<StoredOptimizeBasisRow, string>;
   repositoryMeta!: Table<RepositoryMetaRow, string>;
   /** T04 -- the single browser-local assistant configuration row. */
   assistantSettings!: Table<AssistantSettingsV1, string>;

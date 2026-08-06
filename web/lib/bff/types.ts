@@ -27,6 +27,26 @@ export type JobState = "queued" | "running" | "cancelling" | "completed" | "canc
 // would manufacture evidence the solver never produced).
 export type OptimizationOutcome = "optimal" | "feasible" | "infeasible" | "inconclusive";
 
+// jobs/models.py::JobPurpose. WHY a job exists, fixed at admission and never
+// rewritten (T09). It decides which priority queue the job joins and whether the
+// reserved ordinary admission slots are available to it.
+//
+// The backend ALWAYS emits it — `JobRequestResponse.purpose` is required, and an
+// unqualified submission is admitted as `ordinary` — so it is a required field
+// here too, never optional. A closed union: an unrecognized value is a contract
+// the client does not understand, and the strict parser rejects the whole
+// response rather than guessing which queue the job is in.
+export type JobPurpose = "ordinary" | "assistant_diagnostic";
+
+export const JOB_PURPOSES: ReadonlySet<string> = new Set<JobPurpose>([
+  "ordinary",
+  "assistant_diagnostic",
+]);
+
+export function isJobPurpose(value: unknown): value is JobPurpose {
+  return typeof value === "string" && JOB_PURPOSES.has(value);
+}
+
 // jobs/runner.py — the closed set of reasons an `inconclusive` result may carry.
 export type InconclusiveReason = "solver_timeout_no_solution" | "no_proof" | "solver_unknown";
 
@@ -90,6 +110,9 @@ export interface JobResponse {
     solver: string;
     prettify: boolean | null;
     timeout_seconds: number;
+    // Immutable, always present, and never `null`: an unqualified submission is
+    // admitted as `ordinary` rather than as a job with no purpose (T09).
+    purpose: JobPurpose;
     // The immutable submission identity, or `null` when the client claimed none
     // (an ordinary run submitted without the assistant).
     basis: JobBasis | null;

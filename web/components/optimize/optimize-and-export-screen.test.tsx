@@ -83,6 +83,7 @@ const baseJob = (over: Partial<JobResponse> = {}): JobResponse => ({
     solver: "ortools/cp-sat",
     prettify: null,
     timeout_seconds: 300,
+    purpose: "ordinary",
     basis: null,
   },
   result: null,
