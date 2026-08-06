@@ -156,10 +156,15 @@ export {
   type OptimizeBasisV2,
 } from "./basis/optimize-basis";
 
-export type {
-  OptimizeBasisOwnerKind,
-  OptimizeBasisRecordFields,
-  OptimizeBasisRecordV2,
+export {
+  basisRowPayload,
+  isOptimizeBasisRecordV2,
+  withClearedBasisPayload,
+  type OptimizeBasisOwnerKind,
+  type OptimizeBasisRecordFields,
+  type OptimizeBasisRecordV1,
+  type OptimizeBasisRecordV2,
+  type StoredOptimizeBasisRow,
 } from "./basis/basis-row";
 
 export {

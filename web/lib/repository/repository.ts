@@ -59,7 +59,8 @@ import {
   type GenerationScopeKey,
   type LeaseOwner,
   type LeaseResult,
-  type OptimizeBasisV1,
+  type OptimizeBasisRecordV2,
+  type StoredOptimizeBasisRow,
   type ScenarioCommitKind,
   type ScenarioCommitV1,
   type ScenarioEnvelopeV3,
@@ -214,8 +215,10 @@ export interface ScenarioRepository {
   putProposal(proposal: AssistantProposalV1): Promise<void>;
   getProposal(proposalId: string): Promise<AssistantProposalV1 | undefined>;
   getReceipt(receiptId: string): Promise<AssistantReceiptV1 | undefined>;
-  putOptimizeBasis(basis: OptimizeBasisV1): Promise<void>;
-  getOptimizeBasis(basisId: string): Promise<OptimizeBasisV1 | undefined>;
+  /** Only a CURRENT record may be written; legacy rows are read-only history. */
+  putOptimizeBasis(basis: OptimizeBasisRecordV2): Promise<void>;
+  /** Returns the durable union — a pre-T08 browser still holds schema-V1 rows. */
+  getOptimizeBasis(basisId: string): Promise<StoredOptimizeBasisRow | undefined>;
 }
 
 // ---------------------------------------------------------------------------

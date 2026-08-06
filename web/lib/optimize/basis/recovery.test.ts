@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import type { JobBasis } from "@/lib/bff/types";
 import type { InfoSemanticProfile } from "@/app/api/info/types";
-import type { OptimizeBasisRecordV2 } from "./basis-row";
+import type { OptimizeBasisRecordV1, OptimizeBasisRecordV2 } from "./basis-row";
 import { classifyRecovery, isBasisCurrent, type ServerJobFacts } from "./recovery";
 
 const NOW = new Date("2026-07-20T12:00:00Z");
@@ -71,6 +71,65 @@ function serverBasis(over: Partial<JobBasis> = {}): JobBasis {
 function present(over: Partial<JobBasis> = {}, expiresAt: string | null = FUTURE): ServerJobFacts {
   return { kind: "present", basis: serverBasis(over), expiresAt };
 }
+
+/** A pre-T08 row: its digest came from an encoder this build no longer has. */
+function legacyRow(over: Partial<OptimizeBasisRecordV1> = {}): OptimizeBasisRecordV1 {
+  return {
+    basisId: BASIS_ID,
+    schemaVersion: 1,
+    scenarioId: "scenario-1",
+    documentRevision: 7,
+    submissionDigest: INPUT_SHA,
+    semanticBasisDigest: "sha256:legacy-semantic-basis",
+    createdAt: PAST,
+    expiresAt: FUTURE,
+    ...over,
+  };
+}
+
+describe("classifyRecovery on a legacy schema-V1 row (C2F3)", () => {
+  it("quarantines it even against the most favourable server facts", () => {
+    // Id, digest, ownership, profile, and expiry all line up. Nothing about a V1
+    // row can actually be VERIFIED, so agreement here is coincidence, not evidence.
+    expect(
+      classifyRecovery({
+        local: legacyRow(),
+        server: present(),
+        liveProfile: PROFILE,
+        now: NOW,
+      }),
+    ).toEqual({
+      state: "integrity-mismatch",
+      diagnosisEnabled: false,
+      reason: "legacy_basis_schema",
+    });
+  });
+
+  it("refuses before presence, so a missing server job cannot soften it", () => {
+    // Order matters: reporting `local-only` would read as "retry and it works",
+    // which is not what an unverifiable row means.
+    expect(
+      classifyRecovery({
+        local: legacyRow(),
+        server: { kind: "missing" },
+        liveProfile: PROFILE,
+        now: NOW,
+      }).reason,
+    ).toBe("legacy_basis_schema");
+  });
+
+  it("refuses a row that merely CLAIMS to be V2 without the fields to prove it", () => {
+    const { ownerKind: _dropped, ...malformed } = localRow();
+    expect(
+      classifyRecovery({
+        local: malformed as OptimizeBasisRecordV2,
+        server: present(),
+        liveProfile: PROFILE,
+        now: NOW,
+      }).state,
+    ).toBe("integrity-mismatch");
+  });
+});
 
 describe("classifyRecovery", () => {
   it("trusts a run only when local, server, and live semantics all agree", () => {

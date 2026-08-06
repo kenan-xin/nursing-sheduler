@@ -781,7 +781,8 @@ const REQUEST: JobResponse["request"] = {
   solver: "ortools/cp-sat",
   prettify: null,
   timeout_seconds: 300,
-  // These fixtures cover the ordinary run path, which submits no basis claim.
+  // These fixtures cover the ordinary run path: `ordinary` purpose, no basis claim.
+  purpose: "ordinary",
   basis: null,
 };
 

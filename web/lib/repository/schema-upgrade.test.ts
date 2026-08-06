@@ -4,11 +4,15 @@
 // WHY THIS CANNOT USE `NurseSchedulerDb` TO SEED. That class declares version 3
 // today, so opening it creates a v3 database outright and the upgrade never runs.
 // A test built that way proves only that the current declaration is
-// self-consistent — exactly the thing that cannot fail. So the v1+v2 schema below
-// is a LITERAL, frozen transcript of what commit c283b72 shipped, and the
-// database under test is opened with it first. That is what makes this an
-// upgrade test: the browser really was at 2, and then the integrated code opens
-// it at 3.
+// self-consistent — exactly the thing that cannot fail. So the database under test
+// is opened first at the LITERAL, frozen transcript of what commit c283b72 shipped
+// (`shipped-v2-support.ts`, shared with the store-level upgrade suite). That is
+// what makes this an upgrade test: the browser really was at 2, and then the
+// integrated code opens it at 3.
+//
+// This file stops at RAW DEXIE ACCESS on purpose. That the upgraded rows are then
+// read correctly by the real authority boot sweep and the recovery classifier is
+// proven in `lib/store/optimize-basis-legacy.test.ts`, which owns those readers.
 //
 // WHAT IS ACTUALLY AT RISK. T04 added the four assistant stores in a NEW version
 // 3, which is the safe, additive shape. T08 changed the `optimizeBases` ROW TYPE
@@ -19,25 +23,10 @@
 // real behaviour for that case so the assumption is measured, not believed.
 
 import "fake-indexeddb/auto";
-import { Dexie } from "dexie";
 import { describe, expect, it } from "vitest";
 import { NurseSchedulerDb, REPOSITORY_SCHEMA_VERSION } from "./schema";
+import { SHIPPED_V2_STORES, openShippedV2Database, shippedV1BasisRow } from "./shipped-v2-support";
 import { freshDbName } from "./test-support";
-
-/** Verbatim transcript of the shipped v2 store declaration (commit c283b72). */
-const SHIPPED_V2_STORES: Readonly<Record<string, string>> = {
-  scenarioEnvelopes: "scenarioId, updatedAt",
-  tabSelections: "tabId, scenarioId",
-  writerLeases: "scenarioId, ownerTabId, expiresAt",
-  scenarioCommits:
-    "commitId, scenarioId, [scenarioId+historySessionId+sessionSeq], [scenarioId+documentRevision], &idempotencyKey",
-  historyLinks: "++seq, scenarioId, sourceCommitId, linkCommitId",
-  assistantGenerations: "scopeKey",
-  assistantProposals: "proposalId, scenarioId, status",
-  assistantReceipts: "receiptId, scenarioId, proposalId, commitId",
-  optimizeBases: "basisId, scenarioId, [scenarioId+documentRevision], expiresAt",
-  repositoryMeta: "key",
-};
 
 /** The stores version 3 adds on top of version 2 (T04). */
 const ASSISTANT_STORES = [
@@ -48,20 +37,10 @@ const ASSISTANT_STORES = [
 ] as const;
 
 /**
- * A basis row exactly as a pre-T08 build wrote it: `schemaVersion: 1`, carrying
- * `semanticBasisDigest` and none of the V2 fields. Seeded through the historical
+ * A basis row exactly as a pre-T08 build wrote it. Seeded through the historical
  * schema so the row in the database is a real legacy row, not a V2 row in disguise.
  */
-const LEGACY_BASIS_ROW = {
-  basisId: "basis-legacy-1",
-  schemaVersion: 1,
-  scenarioId: "scenario-1",
-  documentRevision: 7,
-  submissionDigest: "a".repeat(64),
-  semanticBasisDigest: "sha256:legacy-semantic-basis",
-  createdAt: "2026-08-01T00:00:00.000Z",
-  expiresAt: "2026-09-01T00:00:00.000Z",
-} as const;
+const LEGACY_BASIS_ROW = shippedV1BasisRow({ basisId: "basis-legacy-1" });
 
 const LEGACY_ENVELOPE_ROW = {
   scenarioId: "scenario-1",
@@ -83,10 +62,7 @@ async function seedShippedV2Database(
   dbName: string,
   stores: Readonly<Record<string, string>> = SHIPPED_V2_STORES,
 ): Promise<void> {
-  const db = new Dexie(dbName);
-  db.version(1).stores({ keyval: "key" });
-  db.version(2).stores({ ...stores });
-  await db.open();
+  const db = await openShippedV2Database(dbName, stores);
 
   expect(db.verno, "seeded database must really be at version 2").toBe(2);
 

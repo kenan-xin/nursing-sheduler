@@ -10,7 +10,11 @@
 // history and nothing more. There is no "probably fine" middle.
 
 import type { JobBasis } from "@/lib/bff/types";
-import type { OptimizeBasisRecordV2 as OptimizeBasisRow } from "./basis-row";
+import {
+  isOptimizeBasisRecordV2,
+  type OptimizeBasisRecordV2,
+  type StoredOptimizeBasisRow as OptimizeBasisRow,
+} from "./basis-row";
 import type { InfoSemanticProfile } from "@/app/api/info/types";
 
 /**
@@ -42,7 +46,13 @@ export type ServerJobFacts =
   | { kind: "missing" };
 
 export interface RecoveryInput {
-  /** The immutable local row, or `null` when it was never written or was reaped. */
+  /**
+   * The immutable local row, or `null` when it was never written or was reaped.
+   *
+   * Deliberately the DURABLE UNION, not the V2 record: the table really can hand
+   * back a pre-T08 row, and a signature that pretended otherwise would push the
+   * unchecked cast one caller further out instead of removing it.
+   */
   local: OptimizeBasisRow | null;
   server: ServerJobFacts;
   /** The profile the backend advertises RIGHT NOW, or `null` when unknown. */
@@ -83,6 +93,14 @@ export function classifyRecovery(input: RecoveryInput): RecoveryClassification {
     return server.kind === "present"
       ? classification("server-only", "local_basis_missing")
       : classification("local-only", "nothing_retained");
+  }
+  // A pre-T08 row carries a `semanticBasisDigest` produced by an encoder this
+  // build no longer has, so NOTHING about it can be compared: not the identity,
+  // not the bytes, not the ownership. That is an unresolvable disagreement about
+  // what was submitted, so it quarantines exactly like any other integrity
+  // failure rather than degrading to a softer state that reads as retryable.
+  if (!isOptimizeBasisRecordV2(local)) {
+    return classification("integrity-mismatch", "legacy_basis_schema");
   }
   if (server.kind === "missing") {
     return classification("local-only", "server_job_missing");
@@ -148,7 +166,7 @@ export function classifyRecovery(input: RecoveryInput): RecoveryClassification {
  * not edited since, which is a separate "Out of date" state in the product.
  */
 export function isBasisCurrent(
-  local: OptimizeBasisRow,
+  local: OptimizeBasisRecordV2,
   current: { scenarioId: string; documentRevision: number },
 ): boolean {
   return (

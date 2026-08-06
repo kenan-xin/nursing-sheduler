@@ -44,6 +44,11 @@ const REPOSITORY_ALLOWED = new Set([
   // database directly to seed rows BEFORE the authority boots, which is the only
   // way to prove the boot sweep runs rather than that a sweep function works.
   "lib/store/optimize-basis-reaping.test.ts",
+  // Same allowance, same reason (C2F3): it seeds a genuinely-shipped VERSION 2
+  // database through the historical Dexie declaration and then lets the authority
+  // perform the real 2 -> 3 upgrade on it. Neither the upgrade nor the boot sweep
+  // can be observed from the command bus.
+  "lib/store/optimize-basis-legacy.test.ts",
   // Pins the database-name literal the Playwright helper duplicates.
   "e2e/support/v2-seed.test.ts",
   // T04 — the assistant. It owns its OWN tables in the same database, so it needs

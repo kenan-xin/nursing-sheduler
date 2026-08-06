@@ -1,4 +1,4 @@
-import { INCONCLUSIVE_REASONS } from "@/lib/bff/types";
+import { INCONCLUSIVE_REASONS, isJobPurpose } from "@/lib/bff/types";
 import type { JobBasis, JobResponse, JobState, OptimizationOutcome } from "@/lib/bff/types";
 import type { SseFrame } from "@/lib/query/sse";
 import { compareIsoDateTimes, isIsoDateTime } from "@/lib/time/iso-date-time";
@@ -408,7 +408,17 @@ const JOB_RESPONSE_KEYS = new Set([
   "controls",
   "links",
 ]);
-const REQUEST_KEYS = new Set(["input_name", "solver", "prettify", "timeout_seconds", "basis"]);
+// `purpose` is REQUIRED, not optional: the backend emits it on every response
+// (`schemas.py::JobRequestResponse`), and because this parser rejects any key it
+// did not declare, omitting it here rejected every real 202 and every later poll.
+const REQUEST_KEYS = new Set([
+  "input_name",
+  "solver",
+  "prettify",
+  "timeout_seconds",
+  "purpose",
+  "basis",
+]);
 const BASIS_KEYS = new Set([
   "basis_id",
   "schema_version",
@@ -594,6 +604,9 @@ export function parseJobResponse(value: unknown, expectedId?: string): JobRespon
     typeof value.request.timeout_seconds !== "number" ||
     !Number.isInteger(value.request.timeout_seconds) ||
     value.request.timeout_seconds <= 0 ||
+    // A purpose outside the closed union means this client cannot tell which queue
+    // the job is in, so the response is rejected rather than read as ordinary.
+    !isJobPurpose(value.request.purpose) ||
     !isJobBasis(value.request.basis)
   ) {
     return null;

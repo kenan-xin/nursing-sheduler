@@ -9,7 +9,6 @@
 // populated beside it by an idempotent migration (see `migration.ts`).
 
 import type { ScenarioUiState } from "@/lib/scenario";
-import type { OptimizeBasisRecordV2 } from "@/lib/optimize/basis/basis-row";
 
 // ---------------------------------------------------------------------------
 // Scenario envelope
@@ -264,14 +263,10 @@ export interface AssistantReceiptV1 {
 export type {
   OptimizeBasisOwnerKind,
   OptimizeBasisRecordFields,
+  OptimizeBasisRecordV1,
   OptimizeBasisRecordV2,
+  StoredOptimizeBasisRow,
 } from "@/lib/optimize/basis/basis-row";
-
-/**
- * @deprecated The pre-T08 placeholder name for the basis row. Retained as an alias
- * so nothing that imported it breaks; new code uses `OptimizeBasisRecordV2`.
- */
-export type OptimizeBasisV1 = OptimizeBasisRecordV2;
 
 // ---------------------------------------------------------------------------
 // Repository metadata

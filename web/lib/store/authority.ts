@@ -54,7 +54,13 @@ import type { ScenarioUiState, UiRequestCell } from "@/lib/scenario";
 // that would close a require cycle. `basis/reaper` and `basis/basis-row` are pure
 // leaves — no runtime imports at all — so this direction is safe.
 import { planReap } from "@/lib/optimize/basis/reaper";
-import type { OptimizeBasisRecordV2 } from "@/lib/optimize/basis/basis-row";
+import {
+  basisRowPayload,
+  isOptimizeBasisRecordV2,
+  withClearedBasisPayload,
+  type OptimizeBasisRecordV2,
+  type StoredOptimizeBasisRow,
+} from "@/lib/optimize/basis/basis-row";
 import type { ReapAction as OptimizeBasisReapAction } from "@/lib/optimize/basis/reaper";
 import { pickScenario } from "./fingerprint";
 import type { HotStore } from "./hot-store";
@@ -1304,13 +1310,21 @@ export class ScenarioAuthority {
     await this.db.optimizeBases.put(record);
   }
 
-  /** Read one basis row, or `null` when it was never written or has been reaped. */
-  async readOptimizeBasis(basisId: string): Promise<OptimizeBasisRecordV2 | null> {
+  /**
+   * Read one basis row, or `null` when it was never written or has been reaped.
+   *
+   * Returns the DURABLE UNION. A browser that ran a pre-T08 build still holds
+   * schema-V1 rows, and handing one back as an `OptimizeBasisRecordV2` was an
+   * unchecked cast that let a row with no `ownerKind` reach readers that partition
+   * on it. The caller discriminates with `isOptimizeBasisRecordV2` and fails
+   * closed — `classifyRecovery` does exactly that.
+   */
+  async readOptimizeBasis(basisId: string): Promise<StoredOptimizeBasisRow | null> {
     return (await this.db.optimizeBases.get(basisId)) ?? null;
   }
 
-  /** Every retained basis row, for an expiry pass. */
-  async listOptimizeBases(): Promise<OptimizeBasisRecordV2[]> {
+  /** Every retained basis row, for an expiry pass. Both schema versions. */
+  async listOptimizeBases(): Promise<StoredOptimizeBasisRow[]> {
     return this.db.optimizeBases.toArray();
   }
 
@@ -1332,6 +1346,10 @@ export class ScenarioAuthority {
     return this.db.transaction("rw", this.db.optimizeBases, async () => {
       const current = await this.db.optimizeBases.get(basisId);
       if (current === undefined) return null;
+      // A legacy row can never be bound to an accepted job: nothing about it can be
+      // verified against the response, so binding would attribute a real run's
+      // evidence to a submission this build cannot describe.
+      if (!isOptimizeBasisRecordV2(current)) return null;
       const bound = verify(current);
       if (bound === null) return null;
       await this.db.optimizeBases.put(bound);
@@ -1358,8 +1376,12 @@ export class ScenarioAuthority {
         }
         const row = await this.db.optimizeBases.get(action.basisId);
         // Clearing the raw payload while KEEPING the row is what lets history stay
-        // readable after the submitted document itself is gone.
-        if (row !== undefined) await this.db.optimizeBases.put({ ...row, submittedYaml: null });
+        // readable after the submitted document itself is gone. Guarded on the row
+        // ACTUALLY holding material, so a legacy row that never had a
+        // `submittedYaml` field is not rewritten to grow one.
+        if (row !== undefined && basisRowPayload(row) !== null) {
+          await this.db.optimizeBases.put(withClearedBasisPayload(row));
+        }
       }
     });
   }
