@@ -1,0 +1,169 @@
+"use client";
+
+// The HOST's navigation action for a capability (T06).
+//
+// The model never navigates. It names a capability id; this hook resolves that id
+// against the live registry, mode and gates, performs the route change itself, and
+// then — crucially — RE-RESOLVES and confirms the exact element in the live DOM before
+// it reports anything as done. A URL is constructed here and nowhere else, and it is
+// never returned to the model.
+//
+// WHY RE-RESOLVE AFTER THE PUSH. Between resolving and arriving, the user may have
+// switched mode (which can hide the destination outright), the assistant may have been
+// turned off, or a redeploy may have changed the client. Confirming the answer once,
+// at the start, would let any of those produce a success report for a screen the user
+// is not looking at.
+//
+// EVERY FAILURE IS `capability_unavailable` WITH NO SUBSTITUTE. Not the parent screen,
+// not the nearest relative, not a route-only jump when a control was asked for.
+
+import { useCallback } from "react";
+import { useRouter } from "next/navigation";
+import {
+  findLiveAnchor,
+  revealAnchor,
+  waitForLiveAnchor,
+  type LiveAnchorLookup,
+} from "@/lib/capability/live-anchor";
+import {
+  CAPABILITY_UNAVAILABLE,
+  resolveNavigationTarget,
+  type CapabilityUnavailableReason,
+} from "@/lib/capability/resolve";
+import type { CapabilityRegistryStamp } from "@/lib/capability/types";
+import { readCapabilityContext } from "./capability-context";
+
+export type CapabilityNavigationOutcome =
+  | {
+      /** Arrived, confirmed the anchor, and moved focus to a focusable control. */
+      readonly status: "focused";
+      readonly capabilityId: string;
+      readonly routeId: string;
+      readonly screenName: string;
+      readonly controlLabel: string;
+      readonly registry: CapabilityRegistryStamp;
+    }
+  | {
+      /** Arrived and confirmed the anchor, but it is a container with nothing
+       *  focusable inside it, so it was scrolled into view instead. An honest
+       *  weaker claim than `focused`. */
+      readonly status: "revealed";
+      readonly capabilityId: string;
+      readonly routeId: string;
+      readonly screenName: string;
+      readonly controlLabel: string;
+      readonly registry: CapabilityRegistryStamp;
+    }
+  | {
+      /** Arrived at a screen that declares no anchored control. */
+      readonly status: "navigated";
+      readonly capabilityId: string;
+      readonly routeId: string;
+      readonly screenName: string;
+      readonly registry: CapabilityRegistryStamp;
+    }
+  | {
+      readonly status: typeof CAPABILITY_UNAVAILABLE;
+      readonly reason: CapabilityUnavailableReason | "route_not_reached";
+      readonly registry: CapabilityRegistryStamp;
+    };
+
+export interface NavigateToCapabilityOptions {
+  /** The registry identity the answer being acted on was produced under. */
+  readonly stamp?: CapabilityRegistryStamp;
+  /** How long to wait for a lazily-mounted route's anchor. */
+  readonly anchorTimeoutMs?: number;
+}
+
+function anchorRefusal(lookup: LiveAnchorLookup): CapabilityUnavailableReason {
+  return lookup.status === "ambiguous" ? "anchor_ambiguous" : "anchor_missing";
+}
+
+export type NavigateToCapability = (
+  capabilityId: string,
+  options?: NavigateToCapabilityOptions,
+) => Promise<CapabilityNavigationOutcome>;
+
+export function useCapabilityNavigation(): NavigateToCapability {
+  const router = useRouter();
+
+  return useCallback(
+    async (capabilityId, options = {}) => {
+      const before = resolveNavigationTarget(capabilityId, readCapabilityContext(options.stamp));
+      if (before.status !== "ok") {
+        return { status: CAPABILITY_UNAVAILABLE, reason: before.reason, registry: before.stamp };
+      }
+
+      const target = before.value;
+      if (window.location.pathname !== target.path) {
+        router.push(target.path);
+      }
+
+      // Re-resolve under the context that is true AFTER the navigation, not the one
+      // that authorized it. A mode change mid-flight makes the destination hidden,
+      // and the refusal must reflect that rather than the earlier decision.
+      const after = resolveNavigationTarget(capabilityId, readCapabilityContext(options.stamp));
+      if (after.status !== "ok") {
+        return { status: CAPABILITY_UNAVAILABLE, reason: after.reason, registry: after.stamp };
+      }
+      if (after.value.path !== target.path || after.value.anchorId !== target.anchorId) {
+        // The registry resolved to a different place than the one just navigated to.
+        // Reporting either would be wrong, so report neither.
+        return {
+          status: CAPABILITY_UNAVAILABLE,
+          reason: "registry_version_changed",
+          registry: after.stamp,
+        };
+      }
+
+      const anchorId = after.value.anchorId;
+      if (anchorId === null) {
+        // No control was claimed, so arrival is the whole claim -- but it is still a
+        // claim, and an unreached route must not be reported as reached.
+        if (window.location.pathname !== target.path) {
+          return {
+            status: CAPABILITY_UNAVAILABLE,
+            reason: "route_not_reached",
+            registry: after.stamp,
+          };
+        }
+        return {
+          status: "navigated",
+          capabilityId,
+          routeId: after.value.routeId,
+          screenName: after.value.screenName,
+          registry: after.stamp,
+        };
+      }
+
+      // One synchronous look first: when the user is already on the screen there is
+      // nothing to wait for, and the poll's first interval would be dead latency.
+      const immediate = findLiveAnchor(document, anchorId);
+      const lookup =
+        immediate.status === "missing"
+          ? await waitForLiveAnchor(document, anchorId, {
+              timeoutMs: options.anchorTimeoutMs,
+            })
+          : immediate;
+
+      if (lookup.status !== "ok") {
+        return {
+          status: CAPABILITY_UNAVAILABLE,
+          reason: anchorRefusal(lookup),
+          registry: after.stamp,
+        };
+      }
+
+      const reveal = revealAnchor(lookup.element);
+      return {
+        status: reveal,
+        capabilityId,
+        routeId: after.value.routeId,
+        screenName: after.value.screenName,
+        controlLabel: after.value.controlLabel ?? anchorId,
+        registry: after.stamp,
+      };
+    },
+    [router],
+  );
+}

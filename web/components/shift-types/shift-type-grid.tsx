@@ -38,6 +38,8 @@
 // staffing tie-in and every `data-testid` are untouched.
 
 import * as React from "react";
+import { capabilityAnchorProps } from "@/lib/capability/anchor-contract";
+import { SHIFT_TYPES_ADD_ANCHOR } from "./capability-anchors";
 import { toast } from "sonner";
 import { useScenarioStore, scenarioCommands } from "@/lib/store";
 import { useLosableDraft } from "@/components/shell/use-losable-draft";
@@ -326,6 +328,7 @@ export function ShiftTypeGrid() {
           onClick={() => setSel((cur) => (cur?.t === "add-shift" ? null : { t: "add-shift" }))}
           aria-pressed={sel?.t === "add-shift"}
           data-testid="add-shift-toggle"
+          {...capabilityAnchorProps(SHIFT_TYPES_ADD_ANCHOR)}
         >
           <FaPlus />
           Add shift

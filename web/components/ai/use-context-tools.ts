@@ -2,11 +2,12 @@
 
 // The assistant's tool surface (T04) -- READ-ONLY, and that is the whole design.
 //
-// The authority table in the technical plan admits exactly one tool class at this
-// stage: scenario/context READ. There is deliberately no prepare-proposal tool, no
-// Apply, no help-target lookup and no diagnostic submit -- those arrive with T06,
-// T07 and T10, each behind its own gate. Registering a placeholder now would let a
-// model announce a capability the app cannot honour.
+// The authority table in the technical plan admits two READ classes at this stage:
+// scenario/context read (below) and capability/help lookup (T06, registered from
+// `use-help-tools` at the top of the hook). There is deliberately no prepare-proposal
+// tool, no Apply and no diagnostic submit -- those arrive with T07 and T10, each
+// behind its own gate. Registering a placeholder now would let a model announce a
+// capability the app cannot honour.
 //
 // TOOL EXECUTION IS UNTRUSTED INPUT, not authorization. Even for reads that change
 // nothing, a handler that completes after its turn was superseded must return
@@ -21,6 +22,7 @@ import { useScenarioStore, useAuthorityStore } from "@/lib/store";
 import { pickScenario } from "@/lib/store";
 import { summarizeScenario } from "@/lib/ai/assistant/scenario-context";
 import { useAssistantStore } from "@/lib/ai/assistant/store";
+import { useHelpTools } from "./use-help-tools";
 
 /**
  * What a handler answers when its turn is no longer the current one. A refusal
@@ -50,6 +52,12 @@ const sliceParameters = z.object({
  * agent, so another agent mounted in the same page could never invoke them.
  */
 export function useContextTools(agentId: string, turnEpoch: number): void {
+  // T06's read-only help/rule-guidance group, registered against the same agent and
+  // the same authorized turn epoch. Kept in its own module so the capability registry,
+  // its resolver and the host navigation action stay out of this file entirely; these
+  // two lines are the whole integration.
+  useHelpTools(agentId, turnEpoch);
+
   const guard = (signal: AbortSignal | undefined): string | null => {
     if (signal?.aborted) return SUPERSEDED;
     // Compared against the LIVE epoch rather than a captured copy: the point is to

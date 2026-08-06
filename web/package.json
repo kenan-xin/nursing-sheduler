@@ -11,6 +11,7 @@
     "format:check": "oxfmt --check",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "capability:generate": "UPDATE_CAPABILITY_REGISTRY=1 vitest run lib/capability/registry.generated",
     "test:differential": "RUN_DIFFERENTIAL=1 vitest run lib/scenario/differential",
     "test:e2e": "playwright test",
     "test:e2e:stress": "playwright test --workers=32",
