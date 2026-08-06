@@ -23,6 +23,7 @@
 // Splitting there is what makes the refusal matrix unit-testable.
 
 import type { ScenarioUiState } from "@/lib/scenario";
+import type { AssistantGenerationPair } from "./fence";
 import { isAssistantReady, type AssistantSettingsV1, type AssistantThreadV1 } from "./records";
 import type { AssistantMessageV1, AssistantTurnV1 } from "./records";
 import type { WriterContext } from "./writer-context";
@@ -36,9 +37,13 @@ export type SendRefusal =
   /** The typed text was empty or whitespace. */
   | "empty_message"
   /** A turn is already in flight on this thread. */
-  | "busy";
+  | "busy"
+  /** An interruption has closed the gate and has not finished settling. */
+  | "interrupting"
+  /** The thread this send would append to has been cleared. */
+  | "cleared";
 
-export interface SendPlan {
+export interface SendPlan extends AssistantGenerationPair {
   threadId: string;
   scenarioId: string;
   documentRevision: number;
@@ -71,7 +76,7 @@ export interface PrepareSendDeps {
     runId: string;
     turnEpoch: number;
     runtimeInstanceId: string | null;
-  }): Promise<AssistantTurnV1>;
+  }): Promise<AssistantTurnV1 | null>;
   newRunId(): string;
   /** The launch-scoped runtime instance, when `/info` has already reported one. */
   runtimeInstanceId(): string | null;
@@ -83,6 +88,15 @@ export interface PrepareSendInput {
   turnEpoch: number;
   /** Whether a turn is already streaming on this thread. */
   busy: boolean;
+  /**
+   * Whether an interruption has closed the gate and not yet settled.
+   *
+   * Checked HERE rather than left to readiness, because the two most important
+   * interruptions -- Stop and Clear history -- leave a perfectly Ready configuration
+   * behind. Without this a user could re-send into a thread that is mid-settlement or
+   * mid-deletion.
+   */
+  interrupting: boolean;
 }
 
 /**
@@ -96,6 +110,7 @@ export async function prepareSend(
   const text = input.text.trim();
   if (text.length === 0) return { ok: false, reason: "empty_message" };
   if (input.busy) return { ok: false, reason: "busy" };
+  if (input.interrupting) return { ok: false, reason: "interrupting" };
 
   const settings = await deps.readSettings();
   if (!isAssistantReady(settings)) return { ok: false, reason: "not_ready" };
@@ -120,6 +135,10 @@ export async function prepareSend(
     turnEpoch: input.turnEpoch,
     runtimeInstanceId: deps.runtimeInstanceId(),
   });
+  // `null` means the thread was cleared between selection and the turn write. The
+  // send is refused rather than resurrecting a doomed thread -- and, critically, no
+  // provider contact has happened yet at this point in the order.
+  if (!turn) return { ok: false, reason: "cleared" };
 
   return {
     ok: true,
@@ -134,6 +153,11 @@ export async function prepareSend(
       turn,
       history,
       scenario: writer.scenario,
+      // Taken from the TURN row, which captured them inside its own write
+      // transaction. Every message and turn-state write for this send carries these
+      // exact values, so a clear that lands mid-turn fences all of them.
+      globalGeneration: turn.globalGeneration,
+      scenarioGeneration: turn.scenarioGeneration,
       text,
     },
   };
@@ -148,6 +172,10 @@ export function describeRefusal(reason: SendRefusal): string {
       return "This tab is not editing the schedule. Take over editing in this tab to use the assistant.";
     case "busy":
       return "The assistant is still answering. Stop the current reply before sending another message.";
+    case "interrupting":
+      return "The assistant is still stopping the previous reply. Wait for it to settle, then send again.";
+    case "cleared":
+      return "This conversation was cleared. Reopen the assistant to start a new one.";
     case "empty_message":
       return "Type a message first.";
   }

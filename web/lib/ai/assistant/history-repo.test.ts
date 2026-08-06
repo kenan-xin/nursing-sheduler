@@ -20,8 +20,22 @@ function context(harness: AssistantHarness, threadId: string, scenarioId: string
     scenarioId,
     modelId: TEST_MODEL,
     turnId: "turn-1",
+    // The generations a fresh database is at. `fence.test.ts` owns the cases where
+    // these disagree with the stored fence.
+    globalGeneration: 0,
+    scenarioGeneration: 0,
     createdAt: harness.now().toISOString(),
   };
+}
+
+/** `recordPreparingTurn` refuses a cleared thread with `null`; these threads are live. */
+async function prepareTurn(
+  input: Parameters<typeof recordPreparingTurn>[0],
+  harness: AssistantHarness,
+) {
+  const turn = await recordPreparingTurn(input, harness.config);
+  if (!turn) throw new Error("expected a live thread to accept a preparing turn");
+  return turn;
 }
 
 function userMessage(id: string, content: string): Message {
@@ -238,23 +252,32 @@ describe("turn lifecycle", () => {
     const harness = createAssistantHarness();
     const thread = await selectActiveThread("scenario-a", harness.config);
 
-    const turn = await recordPreparingTurn(turnInput(thread.threadId), harness.config);
+    const turn = await prepareTurn(turnInput(thread.threadId), harness);
 
     expect(turn.state).toBe("preparing");
     expect(turn.basisDocumentRevision).toBe(7);
     expect(turn.leaseEpoch).toBe(3);
     expect(turn.runtimeInstanceId).toBe("instance-1");
+    // Captured inside the turn's own write transaction, so the value cannot have
+    // gone stale between the read and the row landing.
+    expect(turn.globalGeneration).toBe(0);
+    expect(turn.scenarioGeneration).toBe(0);
+    expect(turn.interruptionTrigger).toBeNull();
   });
 
   it("settles every unfinished turn as detached on the next page lifetime", async () => {
     const harness = createAssistantHarness();
     const thread = await selectActiveThread("scenario-a", harness.config);
-    const streaming = await recordPreparingTurn(turnInput(thread.threadId), harness.config);
-    await setTurnState(streaming.turnId, "streaming", null, harness.config);
-    const finished = await recordPreparingTurn(turnInput(thread.threadId), harness.config);
-    await setTurnState(finished.turnId, "terminal", "completed", harness.config);
+    const streaming = await prepareTurn(turnInput(thread.threadId), harness);
+    await setTurnState(streaming.turnId, { state: "streaming" }, harness.config);
+    const finished = await prepareTurn(turnInput(thread.threadId), harness);
+    await setTurnState(
+      finished.turnId,
+      { state: "terminal", settlement: "completed" },
+      harness.config,
+    );
 
-    const settled = await detachStaleTurns("runtime_lost_on_reload", harness.config);
+    const settled = await detachStaleTurns(harness.config);
 
     expect(settled).toBe(1);
     expect((await harness.db.assistantTurns.get(streaming.turnId))?.state).toBe("detached");
@@ -267,16 +290,27 @@ describe("turn lifecycle", () => {
   it("reads the latest turn on a thread", async () => {
     const harness = createAssistantHarness();
     const thread = await selectActiveThread("scenario-a", harness.config);
-    await recordPreparingTurn(turnInput(thread.threadId), harness.config);
+    await prepareTurn(turnInput(thread.threadId), harness);
     harness.advance(1_000);
-    const latest = await recordPreparingTurn(turnInput(thread.threadId), harness.config);
+    const latest = await prepareTurn(turnInput(thread.threadId), harness);
 
     expect((await readLatestTurn(thread.threadId, harness.config))?.turnId).toBe(latest.turnId);
   });
 
-  it("treats a missing turn as a no-op rather than a throw", async () => {
+  it("treats a missing turn as an idempotent no-op rather than a throw", async () => {
     const harness = createAssistantHarness();
-    await expect(setTurnState("nope", "terminal", null, harness.config)).resolves.toBeUndefined();
+    // A stop aimed at a turn a clear already deleted must be ordinary and quiet.
+    await expect(setTurnState("nope", { state: "terminal" }, harness.config)).resolves.toBe(
+      "missing",
+    );
     expect(await readLatestTurn("nope", harness.config)).toBeNull();
+  });
+
+  it("refuses to prepare a turn on a thread a clear has marked for deletion", async () => {
+    const harness = createAssistantHarness();
+    const thread = await selectActiveThread("scenario-a", harness.config);
+    await harness.db.assistantThreads.put({ ...thread, state: "cleared" });
+
+    expect(await recordPreparingTurn(turnInput(thread.threadId), harness.config)).toBeNull();
   });
 });

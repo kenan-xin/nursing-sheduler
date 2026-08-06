@@ -15,6 +15,8 @@ import {
   type AssistantHarness,
 } from "@/lib/ai/assistant/test-support";
 import { readAssistantSettings } from "@/lib/ai/assistant/settings-repo";
+import { selectActiveThread } from "@/lib/ai/assistant/history-repo";
+import { useAuthorityStore } from "@/lib/store";
 import { AiAssistantCard } from "./ai-assistant-card";
 
 // The sentinel is a string that must reach exactly one place: the probe request's
@@ -174,7 +176,13 @@ describe("draft → testing → Ready", () => {
 
     expect(screen.getByTestId("ai-test")).toHaveTextContent("Testing…");
     expect(screen.getByTestId("ai-probe-status")).toHaveTextContent("Checking the key");
+
     release?.();
+    // Awaited deliberately. A passing probe activates the configuration, and
+    // activation is an INTERRUPTION followed by a durable write -- several async hops.
+    // Leaving them in flight would let them land in the next test's freshly reset
+    // store and hand it a configuration it never set up.
+    await waitFor(() => expect(screen.getByTestId("ai-readiness")).toHaveTextContent("Ready"));
   });
 });
 
@@ -462,5 +470,92 @@ describe("replace and remove", () => {
     }
     expect(consoleOutput.join("\n")).not.toContain(SENTINEL_KEY);
     expect(document.cookie).not.toContain(SENTINEL_KEY);
+  });
+});
+
+describe("clearing local AI data", () => {
+  beforeEach(async () => {
+    await assistantActions.setEnabled(true);
+    await assistantActions.activate({
+      apiKey: SENTINEL_KEY,
+      modelId: TEST_MODEL,
+      modelSource: "catalog",
+    });
+    useAuthorityStore.setState({ scenarioId: "scenario-a", documentRevision: 1 });
+    await selectActiveThread("scenario-a", harness.config);
+  });
+
+  it("offers both clears even while AI is off, so the data is reachable after disabling", async () => {
+    await assistantActions.setEnabled(false);
+    renderCard();
+
+    // A user who has just switched AI off is exactly the person who wants to delete
+    // what it stored; hiding the control would make them turn it back on to do so.
+    expect(screen.getByTestId("ai-clear-section")).toBeInTheDocument();
+    expect(screen.getByTestId("ai-clear-all")).toBeEnabled();
+  });
+
+  it("cannot clear one schedule's conversation with no schedule selected", async () => {
+    useAuthorityStore.setState({ scenarioId: null });
+    renderCard();
+
+    expect(screen.getByTestId("ai-clear-history")).toBeDisabled();
+    expect(screen.getByTestId("ai-clear-all")).toBeEnabled();
+  });
+
+  it("asks before deleting, and deletes nothing when the user backs out", async () => {
+    const user = userEvent.setup();
+    renderCard();
+
+    await user.click(screen.getByTestId("ai-clear-all"));
+    expect(screen.getByTestId("ai-clear-confirm")).toHaveTextContent(/Delete every local AI/i);
+
+    await user.click(screen.getByTestId("ai-clear-confirm-no"));
+
+    expect(screen.queryByTestId("ai-clear-confirm")).not.toBeInTheDocument();
+    expect(await readAssistantSettings(harness.config)).toMatchObject({ apiKey: SENTINEL_KEY });
+    expect(await harness.db.assistantThreads.count()).toBe(1);
+  });
+
+  it("states plainly that a local clear cannot recall what was already sent", () => {
+    renderCard();
+
+    const copy = screen.getByTestId("ai-clear-section").textContent ?? "";
+    expect(copy).toMatch(/cannot recall anything already\s+sent/i);
+    expect(copy).toMatch(/schedule and roster are\s+never affected/i);
+  });
+
+  it("Clear all deletes the credential, the conversations, and nothing else", async () => {
+    const user = userEvent.setup();
+    renderCard();
+
+    await user.click(screen.getByTestId("ai-clear-all"));
+    await user.click(screen.getByTestId("ai-clear-confirm-yes"));
+
+    await waitFor(async () => {
+      expect(await harness.db.assistantSettings.count()).toBe(0);
+    });
+    expect(await harness.db.assistantThreads.count()).toBe(0);
+    // The permanent non-content fences survive, which is what stops a late callback
+    // recreating this data after a reload.
+    expect((await harness.db.assistantGenerations.get("global"))?.generation).toBe(1);
+    await waitFor(() => expect(screen.getByTestId("ai-readiness")).toHaveTextContent("Off"));
+  });
+
+  it("Clear history keeps the key and the model choice", async () => {
+    const user = userEvent.setup();
+    renderCard();
+
+    await user.click(screen.getByTestId("ai-clear-history"));
+    expect(screen.getByTestId("ai-clear-confirm")).toHaveTextContent(/key, model choice/i);
+    await user.click(screen.getByTestId("ai-clear-confirm-yes"));
+
+    await waitFor(async () => {
+      expect(await harness.db.assistantThreads.count()).toBe(0);
+    });
+    expect(await readAssistantSettings(harness.config)).toMatchObject({
+      apiKey: SENTINEL_KEY,
+      modelId: TEST_MODEL,
+    });
   });
 });

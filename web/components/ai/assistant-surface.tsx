@@ -23,16 +23,23 @@ import { CopilotKitProvider } from "@copilotkit/react-core/v2";
 import { AI_KEY_HEADER, AI_MODEL_HEADER, COPILOT_RUNTIME_URL } from "@/lib/ai/protocol";
 import { hydrateAssistant, selectReady, useAssistantStore } from "@/lib/ai/assistant/store";
 import { AssistantPanel } from "./assistant-panel";
+import { useInterruptionWatch } from "./use-interruption-watch";
 
 /**
- * Read the durable settings row once per page lifetime and settle any turn left
- * mid-flight by the previous one. Mounted in the app shell, above the panel, so it
- * runs whether or not the user ever opens the assistant.
+ * Read the durable settings row once per page lifetime, finish any interrupted clear,
+ * settle any turn left mid-flight by the previous lifetime, and watch for the
+ * ownership/identity interruption triggers.
+ *
+ * Mounted in the app shell, ABOVE the panel, so all of it runs whether or not the user
+ * ever opens the assistant. The watch in particular has to live here rather than in
+ * the panel: a takeover must interrupt a turn even if the panel was closed while it
+ * was still streaming.
  */
 export function useAssistantHydration(): void {
   useEffect(() => {
     void hydrateAssistant();
   }, []);
+  useInterruptionWatch();
 }
 
 export function AssistantSurface() {

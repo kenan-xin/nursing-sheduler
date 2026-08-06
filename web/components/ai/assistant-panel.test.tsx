@@ -258,6 +258,8 @@ describe("reload restores local history", () => {
         scenarioId: SCENARIO_ID,
         modelId: TEST_MODEL,
         turnId: null,
+        globalGeneration: 0,
+        scenarioGeneration: 0,
         createdAt: harness.now().toISOString(),
       },
       harness.config,
@@ -307,7 +309,10 @@ describe("reload restores local history", () => {
 
     await hydrateAssistant();
 
-    expect((await harness.db.assistantTurns.get(turn.turnId))?.state).toBe("detached");
+    const settled = await harness.db.assistantTurns.get(turn?.turnId ?? "");
+    expect(settled?.state).toBe("detached");
+    // A LOCAL settlement class, never a synthesised provider completion.
+    expect(settled?.terminalReason).toBe("detached_reload");
   });
 });
 
@@ -322,6 +327,8 @@ describe("a read-only tab", () => {
         scenarioId: SCENARIO_ID,
         modelId: TEST_MODEL,
         turnId: null,
+        globalGeneration: 0,
+        scenarioGeneration: 0,
         createdAt: harness.now().toISOString(),
       },
       harness.config,

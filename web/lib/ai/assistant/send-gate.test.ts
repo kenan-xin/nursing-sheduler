@@ -43,6 +43,9 @@ function deps(overrides: Partial<PrepareSendDeps> = {}): PrepareSendDeps {
       schemaVersion: 1 as const,
       state: "preparing" as const,
       terminalReason: null,
+      interruptionTrigger: null,
+      globalGeneration: 2,
+      scenarioGeneration: 5,
       createdAt: "2026-08-06T00:00:00.000Z",
       updatedAt: "2026-08-06T00:00:00.000Z",
     })),
@@ -57,7 +60,9 @@ describe("the send gate refuses before it prepares", () => {
     const d = deps();
 
     for (const text of ["", "   ", "\n\t"]) {
-      expect(await prepareSend({ text, turnEpoch: 1, busy: false }, d)).toEqual({
+      expect(
+        await prepareSend({ text, turnEpoch: 1, busy: false, interrupting: false }, d),
+      ).toEqual({
         ok: false,
         reason: "empty_message",
       });
@@ -68,7 +73,9 @@ describe("the send gate refuses before it prepares", () => {
 
   it("refuses a second concurrent turn on the same thread", async () => {
     const d = deps();
-    expect(await prepareSend({ text: "hello", turnEpoch: 1, busy: true }, d)).toEqual({
+    expect(
+      await prepareSend({ text: "hello", turnEpoch: 1, busy: true, interrupting: false }, d),
+    ).toEqual({
       ok: false,
       reason: "busy",
     });
@@ -82,7 +89,9 @@ describe("the send gate refuses before it prepares", () => {
   ])("refuses when not ready (%s) and never touches ownership", async (_label, settings) => {
     const d = deps({ readSettings: vi.fn(async () => settings as AssistantSettingsV1) });
 
-    expect(await prepareSend({ text: "hello", turnEpoch: 1, busy: false }, d)).toEqual({
+    expect(
+      await prepareSend({ text: "hello", turnEpoch: 1, busy: false, interrupting: false }, d),
+    ).toEqual({
       ok: false,
       reason: "not_ready",
     });
@@ -95,7 +104,9 @@ describe("the send gate refuses before it prepares", () => {
   it("refuses when this tab does not own scenario editing, and records no turn", async () => {
     const d = deps({ readWriterContext: vi.fn(async () => null) });
 
-    expect(await prepareSend({ text: "hello", turnEpoch: 1, busy: false }, d)).toEqual({
+    expect(
+      await prepareSend({ text: "hello", turnEpoch: 1, busy: false, interrupting: false }, d),
+    ).toEqual({
       ok: false,
       reason: "not_writer",
     });
@@ -103,8 +114,35 @@ describe("the send gate refuses before it prepares", () => {
     expect(d.recordPreparingTurn).not.toHaveBeenCalled();
   });
 
+  it("refuses while an interruption is still settling, before any provider contact", async () => {
+    const d = deps();
+
+    expect(
+      await prepareSend({ text: "hello", turnEpoch: 1, busy: false, interrupting: true }, d),
+    ).toEqual({ ok: false, reason: "interrupting" });
+    // Stop and Clear history both leave a Ready configuration behind, so readiness
+    // cannot be what closes this door.
+    expect(d.readSettings).not.toHaveBeenCalled();
+    expect(d.recordPreparingTurn).not.toHaveBeenCalled();
+  });
+
+  it("refuses when the thread was cleared between selection and the turn write", async () => {
+    const d = deps({ recordPreparingTurn: vi.fn(async () => null) });
+
+    expect(
+      await prepareSend({ text: "hello", turnEpoch: 1, busy: false, interrupting: false }, d),
+    ).toEqual({ ok: false, reason: "cleared" });
+  });
+
   it("has user-facing guidance for every refusal", () => {
-    for (const reason of ["not_ready", "not_writer", "busy", "empty_message"] as const) {
+    for (const reason of [
+      "not_ready",
+      "not_writer",
+      "busy",
+      "empty_message",
+      "interrupting",
+      "cleared",
+    ] as const) {
       const text = describeRefusal(reason);
       expect(text.length).toBeGreaterThan(10);
       // No refusal message may hint at the credential's contents.
@@ -118,7 +156,7 @@ describe("a prepared send", () => {
     const d = deps();
 
     const result = await prepareSend(
-      { text: "  why is this infeasible?  ", turnEpoch: 9, busy: false },
+      { text: "  why is this infeasible?  ", turnEpoch: 9, busy: false, interrupting: false },
       d,
     );
 
@@ -133,6 +171,10 @@ describe("a prepared send", () => {
       runId: "run-1",
       turnEpoch: 9,
       text: "why is this infeasible?",
+      // Carried from the turn row, so every write for this send is fenced on the
+      // exact generations the turn was authorised under.
+      globalGeneration: 2,
+      scenarioGeneration: 5,
     });
     expect(result.plan.turn.state).toBe("preparing");
     // The context is built from the PERSISTED document, not the live projection.
@@ -144,7 +186,10 @@ describe("a prepared send", () => {
       readWriterContext: vi.fn(async () => ({ ...WRITER, scenarioId: "scenario-switched" })),
     });
 
-    const result = await prepareSend({ text: "hello", turnEpoch: 1, busy: false }, d);
+    const result = await prepareSend(
+      { text: "hello", turnEpoch: 1, busy: false, interrupting: false },
+      d,
+    );
 
     expect(d.selectActiveThread).toHaveBeenCalledWith("scenario-switched");
     expect(result.ok && result.plan.scenarioId).toBe("scenario-switched");
@@ -165,13 +210,16 @@ describe("a prepared send", () => {
           schemaVersion: 1 as const,
           state: "preparing" as const,
           terminalReason: null,
+          interruptionTrigger: null,
+          globalGeneration: 0,
+          scenarioGeneration: 0,
           createdAt: "2026-08-06T00:00:00.000Z",
           updatedAt: "2026-08-06T00:00:00.000Z",
         };
       }),
     });
 
-    await prepareSend({ text: "hello", turnEpoch: 1, busy: false }, d);
+    await prepareSend({ text: "hello", turnEpoch: 1, busy: false, interrupting: false }, d);
 
     expect(order).toEqual(["hydrate", "turn"]);
   });
@@ -179,7 +227,10 @@ describe("a prepared send", () => {
   it("stamps the runtime instance so a restart detaches instead of reattaching", async () => {
     const d = deps({ runtimeInstanceId: () => null });
 
-    const result = await prepareSend({ text: "hello", turnEpoch: 1, busy: false }, d);
+    const result = await prepareSend(
+      { text: "hello", turnEpoch: 1, busy: false, interrupting: false },
+      d,
+    );
 
     expect(result.ok && result.plan.turn.runtimeInstanceId).toBeNull();
   });

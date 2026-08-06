@@ -30,8 +30,14 @@ import { toTransportThread } from "@/lib/ai/assistant/messages";
 import { readAssistantSettings } from "@/lib/ai/assistant/settings-repo";
 import { buildAssistantContext } from "@/lib/ai/assistant/scenario-context";
 import { prepareSend, type SendRefusal } from "@/lib/ai/assistant/send-gate";
+import {
+  peekRuntimeInstanceId,
+  primeRuntimeInstanceId,
+  setActiveRunHandle,
+} from "@/lib/ai/assistant/runtime-stop";
 import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
 import { readWriterContext } from "@/lib/ai/assistant/writer-context";
+import { useAuthorityStore } from "@/lib/store";
 import { useContextTools } from "./use-context-tools";
 
 /** The local registry id for this thread's private proxied agent. */
@@ -56,6 +62,8 @@ export interface AssistantSession {
   isRunning: boolean;
   /** True until the agent instance is the real runtime-synced one. */
   connecting: boolean;
+  /** True while an interruption has closed the gate and has not settled. */
+  interrupting: boolean;
   send(text: string): Promise<void>;
   stop(): void;
 }
@@ -72,8 +80,15 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
     throttleMs: 60,
   });
 
-  const turnEpoch = useAssistantStore((state) => state.turnEpoch);
-  useContextTools(agentId, turnEpoch);
+  // The AUTHORISED epoch, not the live one -- see the two-epoch note in
+  // `lib/ai/assistant/store.ts`. Registering tools against the live epoch would let
+  // the guard re-equalise (live === registered) on the first re-render after an
+  // interruption bumped it, quietly reopening the tool gate. `-1` can never equal a
+  // live epoch, so an unauthorised state stays closed however often this re-renders.
+  const authorizedTurnEpoch = useAssistantStore((state) => state.authorizedTurnEpoch);
+  useContextTools(agentId, authorizedTurnEpoch ?? -1);
+
+  const interrupting = useAssistantStore((state) => state.interruption !== null);
 
   // Hydration. Runs per (real) agent instance: `useAgent` swaps `agent` for the
   // runtime-synced instance once `/info` resolves, and a provisional instance that
@@ -97,6 +112,16 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
     };
   }, [agent, isReady, input.threadId]);
 
+  // NO unmount cleanup of the active run handle, deliberately.
+  //
+  // A takeover or a scenario switch re-renders this panel into its read-only form in
+  // the SAME synchronous update that notifies the interruption watch, so an unmount
+  // that dropped the handle would win the race and leave the browser's stream running
+  // with nothing to abort it. The handle is cleared by the run's own `finally` and by
+  // the controller once it has aborted -- both of which outlive the component. Calling
+  // `abortRun` on an unmounted agent is harmless: it aborts that run's fetch and
+  // nothing else.
+
   const send = useCallback(
     async (text: string) => {
       if (input.historical) {
@@ -104,9 +129,19 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
         return;
       }
 
+      // The first moment anything needs the runtime's launch identity, and therefore
+      // the first moment this app makes the same-origin `/info` request. Cached, so a
+      // second send costs nothing.
+      await primeRuntimeInstanceId();
+
       const turnEpochForSend = assistantActions.nextTurnEpoch();
       const preparation = await prepareSend(
-        { text, turnEpoch: turnEpochForSend, busy: agent.isRunning },
+        {
+          text,
+          turnEpoch: turnEpochForSend,
+          busy: agent.isRunning,
+          interrupting: useAssistantStore.getState().interruption !== null,
+        },
         {
           readSettings: () => readAssistantSettings(),
           readWriterContext: () => readWriterContext(),
@@ -117,7 +152,7 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
           // The launch instance is stamped on every runtime response and reported by
           // `/info`; before the handshake resolves it is simply unknown, and an
           // unknown instance detaches rather than guessing.
-          runtimeInstanceId: () => null,
+          runtimeInstanceId: () => peekRuntimeInstanceId(),
         },
       );
 
@@ -136,27 +171,41 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
         return;
       }
 
+      // Every write for this turn carries the generations the TURN captured, so a
+      // Clear landing mid-answer fences the user message, every streamed message, and
+      // every turn-state transition alike.
+      const writeContext = {
+        threadId: plan.threadId,
+        scenarioId: plan.scenarioId,
+        modelId: plan.modelId,
+        turnId: plan.turn.turnId,
+        globalGeneration: plan.globalGeneration,
+        scenarioGeneration: plan.scenarioGeneration,
+      };
+
       // Local first, so the user's own words survive a failed start.
       agent.setMessages(toTransportThread(plan.history));
       const userMessage: Message = { id: crypto.randomUUID(), role: "user", content: plan.text };
       agent.addMessage(userMessage);
       await persistThreadMessages([userMessage], {
-        threadId: plan.threadId,
-        scenarioId: plan.scenarioId,
-        modelId: plan.modelId,
-        turnId: plan.turn.turnId,
+        ...writeContext,
         createdAt: new Date().toISOString(),
       });
 
-      assistantActions.beginTurn(plan.turn.turnId);
-      await setTurnState(plan.turn.turnId, "streaming");
+      // Published BEFORE the run so an interruption arriving in the same tick as the
+      // first byte has something to abort. Cleared in `finally`, and by the controller
+      // itself when it aborts -- whichever happens first.
+      setActiveRunHandle({
+        threadId: plan.threadId,
+        runId: plan.runId,
+        abort: () => agent.abortRun(),
+      });
+      assistantActions.beginTurn(plan.turn.turnId, turnEpochForSend);
+      await setTurnState(plan.turn.turnId, { state: "streaming" });
 
       const persist = () =>
         persistThreadMessages(agent.messages, {
-          threadId: plan.threadId,
-          scenarioId: plan.scenarioId,
-          modelId: plan.modelId,
-          turnId: plan.turn.turnId,
+          ...writeContext,
           createdAt: new Date().toISOString(),
         });
 
@@ -183,36 +232,43 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
           },
           subscriber,
         );
-        await setTurnState(plan.turn.turnId, "terminal", "completed");
-        assistantActions.endTurn();
+        await setTurnState(plan.turn.turnId, { state: "terminal", settlement: "completed" });
+        assistantActions.endTurn("completed");
       } catch {
         // The failure detail is deliberately dropped: a provider or transport error
         // object may carry request content, and the panel's message is the same in
         // every case — nothing was changed, and the user may retry.
-        await setTurnState(plan.turn.turnId, "detached", "run_failed");
+        //
+        // An abort raised by an interruption lands here too, and that is harmless: the
+        // controller owns this turn's terminal state and its own write comes after,
+        // while a fenced write here is dropped rather than applied.
+        await setTurnState(plan.turn.turnId, { state: "detached", settlement: "run_failed" });
         assistantActions.endTurn("run_failed");
       } finally {
+        setActiveRunHandle(null);
         await persist();
       }
     },
     [agent, input.historical, input.threadId, input.routePath, input.routeLabel],
   );
 
+  // Stop is the interruption controller and nothing else. T04's inline
+  // epoch-bump-plus-abort is deliberately gone: a second partial cancellation path is
+  // exactly what the tech plan forbids, and this one also stops the SERVER-side run,
+  // cancels owned diagnostic jobs, and settles or detaches within 15 seconds.
   const stop = useCallback(() => {
-    const activeTurnId = useAssistantStore.getState().activeTurnId;
-    // Bumping the epoch is what closes the LOCAL gate: any tool handler still
-    // running sees a changed epoch and returns nothing to the model. The abort then
-    // stops the stream. T05 owns the full settlement contract around this.
-    assistantActions.nextTurnEpoch();
-    agent.abortRun();
-    if (activeTurnId) void setTurnState(activeTurnId, "terminal", "stopped");
-    assistantActions.endTurn();
-  }, [agent]);
+    void assistantActions.interrupt({
+      trigger: "stop",
+      threadId: input.threadId,
+      scenarioId: useAuthorityStore.getState().scenarioId,
+    });
+  }, [input.threadId]);
 
   return {
     messages: agent.messages,
     isRunning: agent.isRunning,
     connecting: !isReady,
+    interrupting,
     send,
     stop,
   };

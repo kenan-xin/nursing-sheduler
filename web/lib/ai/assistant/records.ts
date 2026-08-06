@@ -12,6 +12,8 @@
 // two tickets contending for one type module.
 
 import type { GenerationScopeKey } from "@/lib/repository";
+import type { AssistantGenerationPair } from "./fence";
+import type { AssistantSettlement, InterruptionTrigger } from "./lifecycle";
 
 /** The assistant-settings table holds exactly one row, under this key. */
 export const ASSISTANT_SETTINGS_KEY = "local" as const;
@@ -86,15 +88,17 @@ export function maskCredential(apiKey: string | null): string | null {
  *
  * `active` is the live thread for its scenario (at most one). `historical` is a
  * thread whose scenario was replaced or reloaded away: it renders read-only and
- * never regains live tool or action handlers. `cleared` is reserved for T05's
- * clear paths so a cleared thread stays distinguishable from a suspended one.
+ * never regains live tool or action handlers. `cleared` is the state a clear path
+ * marks a thread with in its FIRST transaction, before any content is deleted -- so
+ * a thread awaiting deletion during settlement is already distinguishable from a
+ * merely suspended one, and cannot be reselected as the active thread.
  */
 export interface AssistantThreadV1 {
   threadId: string;
   schemaVersion: 1;
   scenarioId: string;
   state: "active" | "historical" | "cleared";
-  /** Generation fences captured at creation; T05 checks them on every write. */
+  /** Generation fences captured at creation; every write rechecks them. */
   globalGeneration: number;
   scenarioGeneration: number;
   createdAt: string;
@@ -121,7 +125,7 @@ export type AssistantTurnState =
  * the output already accepted locally; it never synthesises a terminal provider
  * result.
  */
-export interface AssistantTurnV1 {
+export interface AssistantTurnV1 extends AssistantGenerationPair {
   turnId: string;
   schemaVersion: 1;
   threadId: string;
@@ -134,7 +138,14 @@ export interface AssistantTurnV1 {
   turnEpoch: number;
   runtimeInstanceId: string | null;
   state: AssistantTurnState;
-  terminalReason: string | null;
+  /**
+   * How the turn ended, as a bounded class. Never a provider or transport error
+   * detail: those may carry request content, so they are classified and discarded
+   * at the boundary that produced them.
+   */
+  terminalReason: AssistantSettlement | null;
+  /** Which interruption closed this turn, when one did. */
+  interruptionTrigger: InterruptionTrigger | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -154,7 +165,7 @@ export type AssistantMessageRole = "user" | "assistant" | "tool" | "reasoning";
  * survives a reload, and `./messages` is the only place that knows how to turn it
  * into the transport's message type.
  */
-export interface AssistantMessageV1 {
+export interface AssistantMessageV1 extends AssistantGenerationPair {
   messageId: string;
   schemaVersion: 1;
   threadId: string;

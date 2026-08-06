@@ -15,6 +15,7 @@ import { CopilotChatMessageView, CopilotChatView } from "@copilotkit/react-core/
 import type { Message } from "@ag-ui/client";
 import { readThreadMessages } from "@/lib/ai/assistant/history-repo";
 import { toTransportThread } from "@/lib/ai/assistant/messages";
+import { describeInterruptionPhase, describeSettlement } from "@/lib/ai/assistant/lifecycle";
 import { describeRefusal } from "@/lib/ai/assistant/send-gate";
 import { useAssistantStore } from "@/lib/ai/assistant/store";
 import { useAssistantSession } from "./use-assistant-session";
@@ -50,13 +51,44 @@ function RefusalNotice() {
   );
 }
 
-function DetachedNotice() {
-  const reason = useAssistantStore((state) => state.detachedReason);
-  if (!reason) return null;
+/**
+ * The one truthful lifecycle line: Stopping, Settling, Stopped, Cancelled, Detached.
+ *
+ * ONE component for all of them rather than a notice per state, because they are
+ * mutually exclusive faces of the same fact and the reader must never see two at once
+ * ("Stopping…" above "Stopped." reads as a contradiction). The wording itself lives in
+ * `lifecycle.ts` beside the classes it describes, so a new settlement class cannot
+ * ship without wording.
+ */
+function LifecycleNotice() {
+  const interruption = useAssistantStore((state) => state.interruption);
+  const settlement = useAssistantStore((state) => state.lastSettlement);
+
+  if (interruption) {
+    return (
+      <p
+        className="px-4 pb-2 text-meta text-ink2"
+        role="status"
+        aria-live="polite"
+        data-testid="assistant-interrupting"
+        data-phase={interruption.phase}
+        data-trigger={interruption.trigger}
+      >
+        {describeInterruptionPhase(interruption.phase)}
+      </p>
+    );
+  }
+
+  if (!settlement) return null;
   return (
-    <p className="px-4 pb-2 text-meta text-ink2" role="status" data-testid="assistant-detached">
-      That reply stopped before it finished. Anything already shown is kept; nothing in your
-      schedule was changed. Send again to retry.
+    <p
+      className="px-4 pb-2 text-meta text-ink2"
+      role="status"
+      aria-live="polite"
+      data-testid="assistant-settlement"
+      data-settlement={settlement.settlement}
+    >
+      {describeSettlement(settlement.settlement, settlement.trigger)}
     </p>
   );
 }
@@ -78,11 +110,14 @@ export function AssistantLiveConversation({
     <div className="flex min-h-0 flex-1 flex-col" data-testid="assistant-live-conversation">
       {session.messages.length === 0 && <WelcomeState />}
       <RefusalNotice />
-      <DetachedNotice />
+      <LifecycleNotice />
       <CopilotChatView
         className="min-h-0 flex-1"
         messages={session.messages}
-        isRunning={session.isRunning}
+        // Still "running" while an interruption settles: the input must stay closed
+        // until the gate reopens, and Stop must stay reachable rather than flipping
+        // back to a send control that would be refused.
+        isRunning={session.isRunning || session.interrupting}
         // Suppresses the library's generic greeting: this panel is bound to one
         // explicit scenario thread, and the welcome content above is the app's.
         hasExplicitThreadId

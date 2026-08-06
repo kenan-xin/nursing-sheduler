@@ -55,6 +55,15 @@ const REPOSITORY_ALLOWED = new Set([
   "lib/ai/assistant/records.ts",
   "lib/ai/assistant/settings-repo.ts",
   "lib/ai/assistant/history-repo.ts",
+  // T05 — the write fence and the clear paths. They exist precisely BECAUSE of this
+  // boundary: the fence rows are the repository's own durable guard against a
+  // detached assistant callback recreating deleted data, so the two modules that
+  // capture, assert and increment them must reach the repository's helpers directly.
+  // Routing that through the command bus would make a clear a scenario mutation,
+  // which is exactly what it must not be.
+  "lib/ai/assistant/fence.ts",
+  "lib/ai/assistant/fence.test.ts",
+  "lib/ai/assistant/clear-repo.ts",
   "lib/ai/assistant/writer-context.ts",
   "lib/ai/assistant/writer-context.test.ts",
   "lib/ai/assistant/test-support.ts",

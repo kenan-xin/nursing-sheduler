@@ -15,6 +15,7 @@
 //     alone, so hydration can never depend on something only a live run had.
 
 import type { Message } from "@ag-ui/client";
+import type { AssistantGenerationPair } from "./fence";
 import type { AssistantMessageRole, AssistantMessageV1, AssistantToolCallV1 } from "./records";
 
 /** The transport roles this app persists. Anything else is dropped on capture. */
@@ -50,7 +51,7 @@ function readToolCalls(message: Message): AssistantToolCallV1[] | null {
   });
 }
 
-export interface CanonicalizeContext {
+export interface CanonicalizeContext extends AssistantGenerationPair {
   threadId: string;
   scenarioId: string;
   /** The model that produced the turn, recorded per message. */
@@ -83,6 +84,11 @@ export function toCanonical(
     toolCallId: (message as { toolCallId?: string }).toolCallId ?? null,
     modelId: context.modelId,
     turnId: context.turnId,
+    // Stamped from the turn's capture, not reread here: the point of the fence is
+    // that a record carries the generations its TURN was authorised under, so a
+    // late write cannot re-capture a generation a clear has since moved.
+    globalGeneration: context.globalGeneration,
+    scenarioGeneration: context.scenarioGeneration,
     createdAt: context.createdAt,
   };
 }

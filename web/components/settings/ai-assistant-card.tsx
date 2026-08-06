@@ -20,6 +20,7 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useAuthorityStore } from "@/lib/store";
 import { toast } from "sonner";
 import {
   AI_KEY_HEADER,
@@ -30,6 +31,7 @@ import {
 } from "@/lib/ai/protocol";
 import type { ModelCatalog } from "@/lib/ai/openrouter/catalog";
 import { describeSetupFailure } from "@/lib/ai/openrouter/messages";
+import { describeInterruptionPhase } from "@/lib/ai/assistant/lifecycle";
 import { maskCredential, type AssistantModelSource } from "@/lib/ai/assistant/records";
 import { assistantActions, selectReady, useAssistantStore } from "@/lib/ai/assistant/store";
 import { Button } from "@/components/ui/button";
@@ -55,10 +57,28 @@ async function fetchCatalog(): Promise<ModelCatalog> {
   return (await response.json()) as ModelCatalog;
 }
 
+/**
+ * The destructive controls are two-step rather than modal.
+ *
+ * A confirmation DIALOG would mean adding a third overlay geometry to the shared
+ * surface recipe (see the panel's note on the same trade), and an inline "are you
+ * sure?" is stronger here anyway: the consequence text renders in place, right under
+ * the control, instead of in a box that covers the settings the user is reasoning
+ * about.
+ */
+type PendingClear = null | "history" | "all";
+
 export function AiAssistantCard() {
   const settings = useAssistantStore((state) => state.settings);
   const hydrated = useAssistantStore((state) => state.hydrated);
   const ready = useAssistantStore(selectReady);
+  const interruption = useAssistantStore((state) => state.interruption);
+  const scenarioId = useAuthorityStore((state) => state.scenarioId);
+  // Every configuration action is an interruption first (see
+  // `lib/ai/assistant/store.ts`), and each one needs to know which scenario's live
+  // work it is closing.
+  const scope = { threadId: null, scenarioId };
+  const [pendingClear, setPendingClear] = useState<PendingClear>(null);
 
   const [keyDraft, setKeyDraft] = useState("");
   const [replacing, setReplacing] = useState(false);
@@ -132,12 +152,16 @@ export function AiAssistantCard() {
         return;
       }
 
-      // Only here does anything durable change.
-      await assistantActions.activate({
-        apiKey: effectiveKey,
-        modelId: draftModelId,
-        modelSource: draftModelSource,
-      });
+      // Only here does anything durable change. `activate` interrupts the previous
+      // configuration's work before promoting the new pair.
+      await assistantActions.activate(
+        {
+          apiKey: effectiveKey,
+          modelId: draftModelId,
+          modelSource: draftModelSource,
+        },
+        scope,
+      );
       setProbe({ kind: "passed" });
       setKeyDraft("");
       setReplacing(false);
@@ -165,8 +189,8 @@ export function AiAssistantCard() {
           <label className="flex items-center gap-3">
             <Switch
               checked={settings.enabled}
-              onCheckedChange={(checked) => void assistantActions.setEnabled(checked)}
-              disabled={!hydrated}
+              onCheckedChange={(checked) => void assistantActions.setEnabled(checked, scope)}
+              disabled={!hydrated || interruption !== null}
               data-testid="ai-enabled-switch"
             />
             <span className="text-body text-ink">AI features</span>
@@ -202,7 +226,8 @@ export function AiAssistantCard() {
                   <Button
                     variant="destructive-outline"
                     size="sm"
-                    onClick={() => void assistantActions.removeKey()}
+                    onClick={() => void assistantActions.removeKey(scope)}
+                    disabled={interruption !== null}
                     data-testid="ai-remove-key"
                   >
                     Remove key
@@ -323,6 +348,89 @@ export function AiAssistantCard() {
             </div>
           </>
         )}
+
+        {/* Deliberately OUTSIDE the `enabled` gate: a user who has just switched AI
+            off is exactly the person who wants to delete what it stored, and hiding
+            the control behind the switch would make them turn the feature back on to
+            get rid of it. */}
+        <Surface
+          level="well"
+          geometry="control"
+          className="flex flex-col gap-3 p-3"
+          data-testid="ai-clear-section"
+        >
+          <div className="flex flex-col gap-1">
+            <h3 className="text-body font-semibold text-ink">Local AI data</h3>
+            <p className="text-meta text-ink2">
+              Clearing removes what is stored in this browser. It cannot recall anything already
+              sent to OpenRouter, or delete records the provider keeps. Your schedule and roster are
+              never affected.
+            </p>
+          </div>
+
+          {interruption !== null && (
+            <p className="text-meta text-ink2" role="status" data-testid="ai-clear-settling">
+              {describeInterruptionPhase(interruption.phase)}
+            </p>
+          )}
+
+          {pendingClear === null ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPendingClear("history")}
+                disabled={!scenarioId || interruption !== null}
+                data-testid="ai-clear-history"
+              >
+                Clear this schedule&apos;s conversation
+              </Button>
+              <Button
+                variant="destructive-outline"
+                size="sm"
+                onClick={() => setPendingClear("all")}
+                disabled={interruption !== null}
+                data-testid="ai-clear-all"
+              >
+                Clear all AI data
+              </Button>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2" data-testid="ai-clear-confirm">
+              <p className="text-meta text-ink">
+                {pendingClear === "history"
+                  ? "Delete this schedule's conversation? Your key, model choice and other schedules' conversations are kept."
+                  : "Delete every local AI setting, the stored key, and all conversations? You will need to enter a key again to use the assistant."}
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => {
+                    const target = pendingClear;
+                    setPendingClear(null);
+                    if (target === "all") {
+                      void assistantActions.clearAll(scope);
+                    } else if (scenarioId) {
+                      void assistantActions.clearHistory({ threadId: null, scenarioId });
+                    }
+                  }}
+                  data-testid="ai-clear-confirm-yes"
+                >
+                  {pendingClear === "history" ? "Delete conversation" : "Delete all AI data"}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPendingClear(null)}
+                  data-testid="ai-clear-confirm-no"
+                >
+                  Keep it
+                </Button>
+              </div>
+            </div>
+          )}
+        </Surface>
       </CardContent>
     </Card>
   );

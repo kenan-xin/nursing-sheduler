@@ -3,6 +3,11 @@
 
 import { NurseSchedulerDb } from "@/lib/repository";
 import { setAssistantDb } from "./db";
+import type {
+  DiagnosticCanceller,
+  DiagnosticCancellationAck,
+  DiagnosticCancellationRequest,
+} from "./diagnostic-cancellation";
 
 /** The one string that must never appear outside the assistant-settings row. */
 export const SENTINEL_KEY = "sk-or-SENTINEL-DO-NOT-LOG-0001";
@@ -49,6 +54,50 @@ export function createAssistantHarness(): AssistantHarness {
     },
     newId,
     config: { db, now, newId },
+  };
+}
+
+/**
+ * A stand-in for T10's diagnostic cancellation owner (T05).
+ *
+ * Published here, beside the harness, because T10 needs the SAME fixture: this ticket
+ * owns the interface and its settlement semantics, and a second fixture written later
+ * against a remembered reading of them is how the two drift apart.
+ *
+ * The three shapes that matter to the controller:
+ *   * `acks` alone -- an immediate answer, confirmed or not;
+ *   * `delayMs` -- a slow but eventually-answering owner;
+ *   * `hang` -- an owner that never answers, which must detach at 15 seconds and must
+ *     observe the aborted signal rather than leaking a pending promise.
+ */
+export interface DiagnosticFixtureOptions {
+  acks?: DiagnosticCancellationAck[];
+  /** Answer after this many milliseconds instead of immediately. */
+  delayMs?: number;
+  /** Never answer. The controller must detach, and `aborted` must become true. */
+  hang?: boolean;
+}
+
+export interface DiagnosticFixture extends DiagnosticCanceller {
+  /** Every request the controller made. Bounded metadata, as the interface promises. */
+  requests: DiagnosticCancellationRequest[];
+  /** Whether the last request's settlement window was aborted. */
+  aborted(): boolean;
+}
+
+export function createDiagnosticFixture(options: DiagnosticFixtureOptions = {}): DiagnosticFixture {
+  const requests: DiagnosticCancellationRequest[] = [];
+
+  return {
+    requests,
+    aborted: () => requests.at(-1)?.signal.aborted ?? false,
+    cancelOwnedJobs(request) {
+      requests.push(request);
+      if (options.hang) return new Promise<DiagnosticCancellationAck[]>(() => {});
+      const acks = options.acks ?? [];
+      if (options.delayMs === undefined) return Promise.resolve(acks);
+      return new Promise((resolve) => setTimeout(() => resolve(acks), options.delayMs));
+    },
   };
 }
 

@@ -119,6 +119,9 @@ describe("the assistant is a leaf, not a dependency", () => {
   // module graph; these two rules are what make the admission narrow, by pinning
   // exactly what the assistant is allowed to do once inside it.
   it("writes only assistant tables -- never a scenario-authority table", () => {
+    // AUTHORSHIP is forbidden everywhere on this list: the assistant may never create
+    // or modify a row in any of these tables. A read is fine and necessary (the lease
+    // and the envelope).
     const scenarioTables = [
       "scenarioEnvelopes",
       "scenarioCommits",
@@ -130,14 +133,28 @@ describe("the assistant is a leaf, not a dependency", () => {
       "optimizeBases",
     ];
 
+    // DELETION is forbidden only for the scenario authority's OWN records. The two
+    // assistant-owned tables are excluded because the retention contract requires the
+    // clear paths to remove them: "delete local messages, tool displays, receipts, and
+    // diagnostic UI state after detachment". Deleting an AI record the user asked to
+    // have deleted is the opposite of authoring scenario state, and no scenario,
+    // commit, lease or history row is reachable this way.
+    const undeletableTables = scenarioTables.filter(
+      (table) => table !== "assistantProposals" && table !== "assistantReceipts",
+    );
+
     const offenders: string[] = [];
     for (const { path, text } of sources) {
       if (!path.startsWith("lib/ai/") && !path.startsWith("components/ai/")) continue;
       if (/\.(test|spec)\.tsx?$/.test(path)) continue;
       for (const table of scenarioTables) {
-        // A read is fine and necessary (the lease and the envelope); a WRITE is not.
-        if (new RegExp(`\\.${table}\\.(put|add|update|delete|clear|bulk\\w+)\\b`).test(text)) {
+        if (new RegExp(`\\.${table}\\.(put|add|update|bulk\\w+)\\b`).test(text)) {
           offenders.push(`${path} writes ${table}`);
+        }
+      }
+      for (const table of undeletableTables) {
+        if (new RegExp(`\\.${table}\\.(delete|clear)\\b`).test(text)) {
+          offenders.push(`${path} deletes ${table}`);
         }
       }
     }
