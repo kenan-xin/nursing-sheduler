@@ -506,12 +506,15 @@ describe("a prepared send whose authority closed while it was preparing", () => 
     await expectNoLaunch(inFlight);
   });
 
-  // Only the boundaries BETWEEN the gate's ownership read and the launch check's
-  // reread. Suspending before the first read means the turn is simply prepared
-  // against the newer revision, and suspending after the reread is past the point
-  // where a commit could still invalidate the basis this turn captured -- neither is
-  // a stale send.
-  it.each(BOUNDARIES.slice(1, 6))(
+  // Every boundary after the gate's ownership read. Suspending before that read means
+  // the turn is simply prepared against the newer revision, which is correct rather
+  // than stale; everything after it is a window in which the basis this turn captured
+  // can move under it.
+  //
+  // The three LAST boundaries are the point: a document commit or a lease advance
+  // there moves no turn epoch, invalidates no turn row and needs no interruption, so
+  // nothing but a claim taken after the streaming-state write can see them.
+  it.each(BOUNDARIES.slice(1))(
     "makes no provider call when the schedule is committed under it at %s",
     async (boundary) => {
       const inFlight = await suspendSendAt(boundary);
@@ -521,6 +524,74 @@ describe("a prepared send whose authority closed while it was preparing", () => 
       writerContext = { ...BASE_WRITER, documentRevision: 13 };
 
       await expectNoLaunch(inFlight);
+    },
+  );
+});
+
+// ---------------------------------------------------------------------------
+// The launch claim
+// ---------------------------------------------------------------------------
+//
+// These are the changes that arrive with NO local evidence at all: an ordinary
+// same-tab commit, a lease reissued under a new epoch, a peer takeover whose
+// BroadcastChannel hint has not landed yet. None of them interrupts anything, and the
+// thread and turn rows stay perfectly valid -- so a send suspended at the thread read,
+// the turn read or the streaming-state write would launch against a schedule that has
+// already moved unless the persisted authority is claimed again afterwards.
+
+/** The boundaries after the durable rereads have already happened. */
+const LATE_BOUNDARIES = BOUNDARIES.slice(6);
+
+const LATE_AUTHORITY_CHANGES: readonly [string, WriterContext | null][] = [
+  ["the schedule is committed under it", { ...BASE_WRITER, documentRevision: 13 }],
+  ["the lease is reissued under a new epoch", { ...BASE_WRITER, leaseEpoch: 5 }],
+  ["another tab takes over before its hint arrives", null],
+];
+
+/**
+ * A refused launch must leave its turn SETTLED as revoked -- nothing was sent, and
+ * saying so durably is what keeps a reload from adopting it as unfinished work.
+ */
+async function expectRevokedTurns(): Promise<void> {
+  const turns = await harness.db.assistantTurns.toArray();
+  expect(turns.length).toBeGreaterThan(0);
+  expect(turns.map((turn) => [turn.state, turn.terminalReason])).toEqual(
+    turns.map(() => ["terminal", "revoked"]),
+  );
+}
+
+describe("a send whose document or lease authority moved after its durable rereads", () => {
+  it.each(
+    LATE_BOUNDARIES.flatMap((boundary) =>
+      LATE_AUTHORITY_CHANGES.map(
+        ([label, writer]) => [boundary, label, writer] as [string, string, WriterContext | null],
+      ),
+    ),
+  )("makes no provider call at %s when %s", async (boundary, _label, writer) => {
+    const inFlight = await suspendSendAt(boundary);
+
+    // Persisted only: no interruption, no epoch movement, no projection hint.
+    writerContext = writer;
+
+    await expectNoLaunch(inFlight);
+    await expectRevokedTurns();
+  });
+
+  // The claim is a durable read, and a durable read is a moment in the PAST by the
+  // time its promise resolves. This is the case only the synchronous comparison can
+  // catch: the persisted read still answers revision 12 while the commit has already
+  // published 13 to the projection.
+  it.each(LATE_BOUNDARIES)(
+    "makes no provider call when a commit publishes to the projection at %s",
+    async (boundary) => {
+      const inFlight = await suspendSendAt(boundary);
+
+      act(() => {
+        useAuthorityStore.setState({ documentRevision: 13 });
+      });
+
+      await expectNoLaunch(inFlight);
+      await expectRevokedTurns();
     },
   );
 });

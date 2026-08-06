@@ -218,19 +218,46 @@ export function describeRefusal(reason: SendRefusal): string {
 // another tab. A gate that only ran at the top would therefore let a revoked turn
 // reach the provider, and no generation fence can recall a request already sent.
 //
-// So the launch is re-authorised against everything the turn CAPTURED, in two parts:
+// So the launch is re-authorised against everything the turn CAPTURED, in three
+// parts:
 //
 //   * {@link authorizeLaunchAuthority} rereads the durable facts -- configuration,
 //     ownership, thread, turn -- and compares them to the plan;
+//   * {@link claimLaunchAuthority} takes the actual LAUNCH CLAIM: the persisted
+//     writer, lease epoch and revision, reread after the send's last durable write
+//     so that write is not itself a window;
 //   * {@link authorizeLaunchIdentity} is PURE and SYNCHRONOUS, so the caller can run
-//     it as the last thing before `runAgent` with no `await` in between. That is the
-//     atomicity that matters: the interruption controller closes the gate
-//     synchronously, so a check with no microtask boundary after it cannot be
-//     overtaken by a closure that has already been requested.
+//     it as the last thing before `runAgent` with no `await` in between. It compares
+//     BOTH that claim and the live authority projection. That is the atomicity that
+//     matters: the interruption controller closes the gate synchronously and a
+//     same-tab commit publishes to the projection synchronously, so a check with no
+//     microtask boundary after it cannot be overtaken by either.
+//
+// The division is not decorative. A durable read is a moment in the PAST by the time
+// its promise resolves, so a claim on its own can only say the basis was current when
+// it was read; only the synchronous projection comparison can say it has not moved
+// since. Neither half is sufficient: the projection is published by this tab, so a
+// lease that advanced in another tab is visible only to the persisted claim.
 
 export type LaunchAuthorization = { ok: true } | { ok: false; reason: SendRefusal };
 
-export interface LaunchIdentityInput {
+/**
+ * The authority facts the app can read WITHOUT an `await`.
+ *
+ * Deliberately structural rather than the store's own state shape: this module is
+ * pure and injected, and what it needs is three comparisons, not a projection.
+ */
+export interface LiveAuthorityProjection {
+  /** The scenario the projection currently describes, or `null` before selection. */
+  scenarioId: string | null;
+  /** That projection's committed document revision. */
+  documentRevision: number;
+  /** Whether the projection still reports this tab as the scenario's writer. */
+  isOwner: boolean;
+}
+
+/** Everything about a launch that is sampled live, in one expression. */
+export interface LaunchLiveInput {
   plan: SendPlan;
   /** The thread the panel making this send is bound to. */
   boundThreadId: string;
@@ -242,6 +269,16 @@ export interface LaunchIdentityInput {
   busy: boolean;
   /** The run currently published for interruption to target, or `null`. */
   activeRunId: string | null;
+  /** Scenario, revision and ownership as the app projects them right now. */
+  live: LiveAuthorityProjection;
+}
+
+export interface LaunchIdentityInput extends LaunchLiveInput {
+  /**
+   * The persisted writer authority this launch claims under -- the result of the
+   * final {@link claimLaunchAuthority}, never a remembered earlier read.
+   */
+  claim: WriterContext | null;
 }
 
 export interface LaunchAuthorityDeps {
@@ -251,17 +288,73 @@ export interface LaunchAuthorityDeps {
   readTurn(turnId: string): Promise<AssistantTurnV1 | null>;
 }
 
+export interface LaunchClaimDeps {
+  readWriterContext(): Promise<WriterContext | null>;
+}
+
+export type LaunchClaim = { ok: true; writer: WriterContext } | { ok: false; reason: SendRefusal };
+
+/** Compare persisted writer authority to the authority the turn was prepared under. */
+function matchWriterAuthority(plan: SendPlan, writer: WriterContext | null): LaunchAuthorization {
+  if (!writer) return { ok: false, reason: "not_writer" };
+  if (writer.scenarioId !== plan.scenarioId) return { ok: false, reason: "not_writer" };
+  // The lease EPOCH, not just ownership: a takeover followed by a takeover back would
+  // leave this tab owning the scenario again under a fencing token the turn never saw.
+  if (writer.leaseEpoch !== plan.leaseEpoch) return { ok: false, reason: "not_writer" };
+  // The context this turn is about to send describes the document at the revision it
+  // was read at. A commit landing during preparation makes that description stale.
+  if (writer.documentRevision !== plan.documentRevision) return { ok: false, reason: "revoked" };
+  return { ok: true };
+}
+
+/**
+ * Take the launch claim: reread the persisted writer authority AFTER the send's last
+ * durable write, and return it for the synchronous check to compare.
+ *
+ * Separate from {@link authorizeLaunchAuthority} because of WHEN it runs, not what it
+ * checks. That function's writer read is followed by the thread read, the turn read
+ * and the streaming-state write -- three awaits in which an ordinary same-tab commit
+ * can publish a new revision or a peer's takeover can advance the lease, neither of
+ * which disturbs the turn, the epoch or any interruption state. This is the reread
+ * with nothing durable left after it.
+ */
+export async function claimLaunchAuthority(
+  plan: SendPlan,
+  deps: LaunchClaimDeps,
+): Promise<LaunchClaim> {
+  const writer = await deps.readWriterContext();
+  if (!writer) return { ok: false, reason: "not_writer" };
+  const matched = matchWriterAuthority(plan, writer);
+  return matched.ok ? { ok: true, writer } : matched;
+}
+
 /**
  * The synchronous half of the final authorization. No `await`, by contract.
  */
 export function authorizeLaunchIdentity(input: LaunchIdentityInput): LaunchAuthorization {
-  const { plan } = input;
+  const { plan, live } = input;
 
   // The scenario can have changed under an open panel, in which case the gate
   // selected a different thread than this component is bound to. Sending this
   // document's question into the previous document's conversation is the one thing
   // the scenario boundary exists to prevent.
   if (plan.threadId !== input.boundThreadId) return { ok: false, reason: "not_writer" };
+
+  // The claim is re-compared HERE rather than trusted from where it was read. This
+  // function is the last thing that happens before the provider, so every durable fact
+  // the run depends on has to be one of its own comparisons -- otherwise "the claim
+  // passed" and "the launch is authorised" are two separate statements with an await
+  // between them, which is exactly the window this exists to remove.
+  const claimed = matchWriterAuthority(plan, input.claim);
+  if (!claimed.ok) return claimed;
+
+  // The same facts as the app projects them RIGHT NOW. A same-tab commit publishes
+  // here the moment it lands, so this is the only comparison that can see a document
+  // that moved after the claim's read resolved.
+  if (!live.isOwner) return { ok: false, reason: "not_writer" };
+  if (live.scenarioId !== plan.scenarioId) return { ok: false, reason: "not_writer" };
+  if (live.documentRevision !== plan.documentRevision) return { ok: false, reason: "revoked" };
+
   if (input.interrupting) return { ok: false, reason: "interrupting" };
   // Any epoch movement -- an interruption that has already settled, or a competing
   // claim -- means this turn is no longer the live one.
@@ -282,7 +375,7 @@ export function authorizeLaunchIdentity(input: LaunchIdentityInput): LaunchAutho
  * because these rereads are themselves awaits.
  */
 export async function authorizeLaunchAuthority(
-  input: LaunchIdentityInput,
+  input: LaunchLiveInput,
   deps: LaunchAuthorityDeps,
 ): Promise<LaunchAuthorization> {
   const { plan } = input;
@@ -297,14 +390,8 @@ export async function authorizeLaunchAuthority(
   }
 
   const writer = await deps.readWriterContext();
-  if (!writer) return { ok: false, reason: "not_writer" };
-  if (writer.scenarioId !== plan.scenarioId) return { ok: false, reason: "not_writer" };
-  // The lease EPOCH, not just ownership: a takeover followed by a takeover back would
-  // leave this tab owning the scenario again under a fencing token the turn never saw.
-  if (writer.leaseEpoch !== plan.leaseEpoch) return { ok: false, reason: "not_writer" };
-  // The context this turn is about to send describes the document at the revision it
-  // was read at. A commit landing during preparation makes that description stale.
-  if (writer.documentRevision !== plan.documentRevision) return { ok: false, reason: "revoked" };
+  const claimed = matchWriterAuthority(plan, writer);
+  if (!claimed.ok) return claimed;
 
   const thread = await deps.readThread(plan.threadId);
   if (!thread || thread.state !== "active") return { ok: false, reason: "cleared" };
@@ -316,5 +403,5 @@ export async function authorizeLaunchAuthority(
   if (turn.state !== "preparing") return { ok: false, reason: "revoked" };
   if (turn.turnEpoch !== plan.turnEpoch) return { ok: false, reason: "revoked" };
 
-  return authorizeLaunchIdentity(input);
+  return authorizeLaunchIdentity({ ...input, claim: writer });
 }

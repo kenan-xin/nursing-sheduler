@@ -35,8 +35,9 @@ import { buildAssistantContext } from "@/lib/ai/assistant/scenario-context";
 import {
   authorizeLaunchAuthority,
   authorizeLaunchIdentity,
+  claimLaunchAuthority,
   prepareSend,
-  type LaunchIdentityInput,
+  type LaunchLiveInput,
   type SendRefusal,
 } from "@/lib/ai/assistant/send-gate";
 import {
@@ -195,15 +196,32 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
         await setTurnState(plan.turn.turnId, { state: "terminal", settlement: "revoked" });
       };
 
-      /** The live half of the launch check, sampled at the moment it is asked. */
-      const identityNow = (): LaunchIdentityInput => ({
-        plan,
-        boundThreadId: input.threadId,
-        liveTurnEpoch: useAssistantStore.getState().turnEpoch,
-        interrupting: isInterrupting(),
-        busy: agent.isRunning,
-        activeRunId: readActiveRunHandle()?.runId ?? null,
-      });
+      /**
+       * The live half of the launch check, sampled at the moment it is asked.
+       *
+       * The authority projection is read here rather than awaited from the repository
+       * because being synchronous is the whole point: a same-tab commit publishes it
+       * in the same task that lands the write, so a comparison against it cannot be
+       * overtaken the way a durable reread can. Ownership is the projection's own
+       * word, and a projection that disagrees with the persisted claim -- a commit
+       * that could not be published, a hint still in flight -- fails the send closed.
+       */
+      const liveNow = (): LaunchLiveInput => {
+        const authority = useAuthorityStore.getState();
+        return {
+          plan,
+          boundThreadId: input.threadId,
+          liveTurnEpoch: useAssistantStore.getState().turnEpoch,
+          interrupting: isInterrupting(),
+          busy: agent.isRunning,
+          activeRunId: readActiveRunHandle()?.runId ?? null,
+          live: {
+            scenarioId: authority.scenarioId,
+            documentRevision: authority.documentRevision,
+            isOwner: authority.ownership === "owner",
+          },
+        };
+      };
 
       // The thread the gate selected may not be the one this component is bound to
       // — the scenario can have changed under an open panel. Refuse rather than send
@@ -240,7 +258,7 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
       // switch, a lease loss or a takeover could have closed this turn's authority.
       // A generation fence cannot help here: it drops later local writes, but it
       // cannot recall a request already sent to the provider.
-      const authority = await authorizeLaunchAuthority(identityNow(), {
+      const authority = await authorizeLaunchAuthority(liveNow(), {
         readSettings: () => readAssistantSettings(),
         readWriterContext: () => readWriterContext(),
         readThread: (threadId) => readThread(threadId),
@@ -251,8 +269,8 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
         return;
       }
 
-      // Marked streaming BEFORE the last check rather than after it, so this fenced
-      // durable write is the last `await` in the send. Anything other than `accepted`
+      // Marked streaming BEFORE the launch claim rather than after it, so the turn row
+      // never says `preparing` while a run is live. Anything other than `accepted`
       // means a Clear moved the generation during preparation, and the conversation
       // this turn belongs to is already being deleted.
       if ((await setTurnState(plan.turn.turnId, { state: "streaming" })) !== "accepted") {
@@ -260,12 +278,29 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
         return;
       }
 
+      // THE LAUNCH CLAIM, and the last `await` in the send.
+      //
+      // The authority reread above is separated from the provider by three more
+      // awaits -- the thread read, the turn read and the streaming-state write -- and
+      // an ordinary same-tab commit or a peer's lease advance needs no interruption,
+      // moves no turn epoch and invalidates no turn row. Nothing before this point
+      // would notice either, so the run would carry a document snapshot the schedule
+      // has already moved past. Claimed here, and compared again below with no await
+      // in between.
+      const claim = await claimLaunchAuthority(plan, {
+        readWriterContext: () => readWriterContext(),
+      });
+      if (!claim.ok) {
+        await quarantine(claim.reason);
+        return;
+      }
+
       // NO `await` BETWEEN HERE AND `runAgent`, deliberately. The interruption
-      // controller closes the gate synchronously, so a check with no microtask
-      // boundary after it cannot be overtaken by a closure that has already been
-      // requested -- which is the only sense in which "atomic" is available to a
-      // browser turn.
-      const launch = authorizeLaunchIdentity(identityNow());
+      // controller closes the gate synchronously and a commit publishes to the
+      // authority projection synchronously, so a check with no microtask boundary
+      // after it cannot be overtaken by either -- which is the only sense in which
+      // "atomic" is available to a browser turn.
+      const launch = authorizeLaunchIdentity({ ...liveNow(), claim: claim.writer });
       if (!launch.ok) {
         await quarantine(launch.reason);
         return;

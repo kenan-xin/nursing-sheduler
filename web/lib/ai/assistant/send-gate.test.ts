@@ -5,12 +5,16 @@ import { emptyAssistantSettings, type AssistantSettingsV1 } from "./records";
 import {
   authorizeLaunchAuthority,
   authorizeLaunchIdentity,
+  claimLaunchAuthority,
   describeRefusal,
   prepareSend,
   type LaunchAuthorityDeps,
   type LaunchIdentityInput,
+  type LaunchLiveInput,
+  type LiveAuthorityProjection,
   type PrepareSendDeps,
   type SendPlan,
+  type SendRefusal,
 } from "./send-gate";
 import type { WriterContext } from "./writer-context";
 import { SENTINEL_KEY, TEST_MODEL } from "./test-support";
@@ -270,7 +274,14 @@ async function planFor(overrides: Partial<PrepareSendDeps> = {}): Promise<SendPl
   return result.plan;
 }
 
-function identity(plan: SendPlan, overrides: Partial<LaunchIdentityInput> = {}) {
+/** The authority projection as it stands while the turn's basis is still current. */
+const LIVE: LiveAuthorityProjection = {
+  scenarioId: WRITER.scenarioId,
+  documentRevision: WRITER.documentRevision,
+  isOwner: true,
+};
+
+function live(plan: SendPlan, overrides: Partial<LaunchLiveInput> = {}): LaunchLiveInput {
   return {
     plan,
     boundThreadId: plan.threadId,
@@ -278,8 +289,17 @@ function identity(plan: SendPlan, overrides: Partial<LaunchIdentityInput> = {}) 
     interrupting: false,
     busy: false,
     activeRunId: null,
+    live: LIVE,
     ...overrides,
-  } satisfies LaunchIdentityInput;
+  };
+}
+
+function identity(
+  plan: SendPlan,
+  overrides: Partial<LaunchIdentityInput> = {},
+): LaunchIdentityInput {
+  // The claim a launch that has just reread its persisted authority would carry.
+  return { ...live(plan), claim: WRITER, ...overrides };
 }
 
 function authorityDeps(
@@ -333,10 +353,85 @@ describe("the synchronous half of the launch authorization", () => {
   });
 });
 
+// The window this closes: the durable rereads are followed by the streaming-state
+// write, and an ordinary same-tab commit or a peer's lease advance in that gap moves
+// no turn epoch, invalidates no turn row and requires no interruption. So the
+// synchronous check has to compare document authority itself -- from the claim that
+// was reread after the last durable write, and from the projection as it stands with
+// no await in between.
+describe("document and lease authority in the synchronous check", () => {
+  const claimAs = (change: Partial<WriterContext> | null): Partial<LaunchIdentityInput> => ({
+    claim: change === null ? null : { ...WRITER, ...change },
+  });
+  const liveAs = (change: Partial<LiveAuthorityProjection>): Partial<LaunchIdentityInput> => ({
+    live: { ...LIVE, ...change },
+  });
+
+  const CASES: readonly [string, Partial<LaunchIdentityInput>, SendRefusal][] = [
+    ["a launch carrying no persisted claim at all", claimAs(null), "not_writer"],
+    [
+      "a claim whose scenario is not the prepared one",
+      claimAs({ scenarioId: "scenario-b" }),
+      "not_writer",
+    ],
+    ["a claim under a lease epoch the turn never saw", claimAs({ leaseEpoch: 5 }), "not_writer"],
+    [
+      "a claim at a revision the turn was not prepared against",
+      claimAs({ documentRevision: 13 }),
+      "revoked",
+    ],
+    ["a commit published after the claim was taken", liveAs({ documentRevision: 13 }), "revoked"],
+    ["ownership lost after the claim was taken", liveAs({ isOwner: false }), "not_writer"],
+    [
+      "a scenario switched after the claim was taken",
+      liveAs({ scenarioId: "scenario-b" }),
+      "not_writer",
+    ],
+  ];
+
+  it.each(CASES)("refuses %s", async (_label, overrides, reason) => {
+    const plan = await planFor();
+    expect(authorizeLaunchIdentity(identity(plan, overrides))).toEqual({ ok: false, reason });
+  });
+});
+
+describe("the launch claim", () => {
+  it("returns the persisted authority a launch may run under", async () => {
+    const plan = await planFor();
+
+    await expect(
+      claimLaunchAuthority(plan, { readWriterContext: async () => WRITER }),
+    ).resolves.toEqual({ ok: true, writer: WRITER });
+  });
+
+  const CLAIM_CASES: readonly [string, WriterContext | null, SendRefusal][] = [
+    ["ownership was lost after the durable rereads", null, "not_writer"],
+    [
+      "the scenario switched after the durable rereads",
+      { ...WRITER, scenarioId: "scenario-b" },
+      "not_writer",
+    ],
+    ["the lease advanced after the durable rereads", { ...WRITER, leaseEpoch: 5 }, "not_writer"],
+    [
+      "the schedule was committed after the durable rereads",
+      { ...WRITER, documentRevision: 13 },
+      "revoked",
+    ],
+  ];
+
+  it.each(CLAIM_CASES)("refuses when %s", async (_label, writer, reason) => {
+    const plan = await planFor();
+
+    await expect(
+      claimLaunchAuthority(plan, { readWriterContext: async () => writer }),
+    ).resolves.toEqual({ ok: false, reason });
+  });
+});
+
 describe("the durable half of the launch authorization", () => {
   it("authorises a turn whose whole basis is unchanged", async () => {
     const plan = await planFor();
-    await expect(authorizeLaunchAuthority(identity(plan), authorityDeps(plan))).resolves.toEqual({
+    await expect(authorizeLaunchAuthority(live(plan), authorityDeps(plan))).resolves.toEqual({
       ok: true,
     });
   });
@@ -378,7 +473,7 @@ describe("the durable half of the launch authorization", () => {
       const plan = await planFor();
 
       await expect(
-        authorizeLaunchAuthority(identity(plan), authorityDeps(plan, overrides)),
+        authorizeLaunchAuthority(live(plan), authorityDeps(plan, overrides)),
       ).resolves.toEqual({ ok: false, reason });
     },
   );
@@ -391,7 +486,7 @@ describe("the durable half of the launch authorization", () => {
 
       await expect(
         authorizeLaunchAuthority(
-          identity(plan),
+          live(plan),
           authorityDeps(plan, { readThread: async () => ({ ...thread!, state }) }),
         ),
       ).resolves.toEqual({ ok: false, reason: "cleared" });
@@ -403,7 +498,7 @@ describe("the durable half of the launch authorization", () => {
 
     await expect(
       authorizeLaunchAuthority(
-        identity(plan),
+        live(plan),
         authorityDeps(plan, {
           readTurn: async () => ({ ...plan.turn, state: "detached" as const }),
         }),
@@ -415,7 +510,7 @@ describe("the durable half of the launch authorization", () => {
     const plan = await planFor();
 
     await expect(
-      authorizeLaunchAuthority(identity(plan, { liveTurnEpoch: 99 }), authorityDeps(plan)),
+      authorizeLaunchAuthority(live(plan, { liveTurnEpoch: 99 }), authorityDeps(plan)),
     ).resolves.toEqual({ ok: false, reason: "revoked" });
   });
 });
