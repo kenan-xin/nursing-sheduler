@@ -33,8 +33,12 @@ export { assertGenerationsUnchanged, ensureGeneration, generationScopesFor } fro
 
 export {
   createScenarioRepository,
+  type AtomicAssistantApply,
   type CommitInput,
   type CommitResult,
+  type CommittedAssistantApply,
+  type ReceiptStanding,
+  type ReceiptUndoState,
   type ScenarioRepository,
   type ScenarioRepositoryConfig,
   type ScenarioSelection,
@@ -55,6 +59,7 @@ export {
   GLOBAL_GENERATION_SCOPE,
   LEGACY_MIGRATION_KEY,
   scenarioGenerationScope,
+  type AssistantProposalStatus,
   type AssistantProposalV1,
   type AssistantReceiptV1,
   type AssistantWriteFenceV1,

@@ -111,6 +111,18 @@ export interface AssistantUiState {
   /** The most recent refused send, so the panel can explain the refusal. */
   lastRefusal: SendRefusal | null;
   /**
+   * The proposal whose host Preview is currently live, and the turn epoch it was
+   * prepared under.
+   *
+   * IN MEMORY ON PURPOSE, and the epoch with it. The proposal ROW is durable, but a
+   * live Preview is in-flight work: a reload has none, and restoring one would hand
+   * a live Apply control to a page lifetime that never saw the conversation it came
+   * from -- the same reason a reloaded turn is detached rather than resumed. The
+   * epoch is what makes an interruption or takeover show "this was stopped, prepare
+   * it again" instead of a live Apply button.
+   */
+  activeProposal: { proposalId: string; turnEpoch: number } | null;
+  /**
    * Interruptions requested but not yet settled, incremented SYNCHRONOUSLY at the
    * request.
    *
@@ -137,6 +149,7 @@ const INITIAL: AssistantUiState = {
   interruption: null,
   lastSettlement: null,
   lastRefusal: null,
+  activeProposal: null,
   pendingInterruptions: 0,
 };
 
@@ -540,6 +553,21 @@ export const assistantActions = {
 
   refuse(reason: SendRefusal): void {
     useAssistantStore.setState({ lastRefusal: reason });
+  },
+
+  /**
+   * Publish the host Preview for a proposal the current turn just prepared.
+   *
+   * Stamped with the turn epoch that authorised it, so a later interruption or
+   * takeover makes the card truthfully unavailable rather than silently still live.
+   */
+  showProposal(proposalId: string, turnEpoch: number): void {
+    useAssistantStore.setState({ activeProposal: { proposalId, turnEpoch } });
+  },
+
+  /** Dismiss the live Preview — Cancel, or a change that has been applied. */
+  clearProposal(): void {
+    useAssistantStore.setState({ activeProposal: null });
   },
 
   /** Test seam: return the store to its never-hydrated state. */

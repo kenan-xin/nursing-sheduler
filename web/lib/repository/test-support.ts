@@ -7,8 +7,14 @@
 // instead. Sequential ids make a failure message name the commit that broke.
 
 import { createEmptyScenarioUiState, type ScenarioUiState } from "@/lib/scenario";
+import {
+  prepareProposal,
+  type AssistantCommandV1,
+  type OperationalConfirmationV1,
+} from "@/lib/proposal";
 import { createScenarioRepository, type ScenarioRepository } from "./repository";
 import { NurseSchedulerDb } from "./schema";
+import type { AssistantProposalV1 } from "./types";
 
 let databaseCounter = 0;
 
@@ -79,6 +85,60 @@ export function sampleScenario(rangeStart = "2026-04-01"): ScenarioUiState {
         weight: Number.POSITIVE_INFINITY,
       },
     ],
+  };
+}
+
+/** The registry stamp a fixture proposal is prepared under. */
+export const TEST_REGISTRY_STAMP = {
+  appBuildVersion: "test-build",
+  manifestSha256: "test-manifest",
+} as const;
+
+/**
+ * A durable proposal row built the way the app builds one -- through
+ * `prepareProposal` -- so a fixture can never carry a digest, diff or assumption set
+ * the real preparation would not have produced. A hand-written row would let a
+ * repository test pass against a proposal the host could never make.
+ */
+export function buildProposalRow(input: {
+  proposalId: string;
+  scenarioId: string;
+  document: ScenarioUiState;
+  baseDocumentRevision: number;
+  baseCommitId: string | null;
+  leaseEpoch: number;
+  commands: readonly AssistantCommandV1[];
+  revision?: number;
+  confirmations?: readonly OperationalConfirmationV1[];
+}): AssistantProposalV1 {
+  const prepared = prepareProposal({
+    proposalId: input.proposalId,
+    revision: input.revision ?? 1,
+    scenarioId: input.scenarioId,
+    threadId: null,
+    turnId: null,
+    document: input.document,
+    baseDocumentRevision: input.baseDocumentRevision,
+    baseCommitId: input.baseCommitId,
+    leaseEpoch: input.leaseEpoch,
+    registryStamp: TEST_REGISTRY_STAMP,
+    commands: input.commands,
+    rationale: null,
+    evidence: [],
+    outcome: "untested",
+    globalGeneration: 0,
+    scenarioGeneration: 0,
+    now: new Date("2026-08-06T00:00:00.000Z"),
+  });
+  if (!prepared.ok) {
+    throw new Error(`fixture proposal was refused: ${prepared.rejection.message}`);
+  }
+  return {
+    ...prepared.proposal,
+    confirmations: [...(input.confirmations ?? [])],
+    appliedCommitId: null,
+    receiptId: null,
+    idempotencyKey: null,
   };
 }
 

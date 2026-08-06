@@ -38,16 +38,31 @@
 import { create } from "zustand";
 import {
   createScenarioRepository,
+  GLOBAL_GENERATION_SCOPE,
   isRepositoryError,
   migrateLegacyScenarioRecord,
   NurseSchedulerDb,
   RepositoryError,
+  type AssistantProposalV1,
+  type AssistantReceiptV1,
+  type CapturedGeneration,
   type LeaseOwner,
+  type ReceiptStanding,
   type RepositoryErrorCode,
   type ScenarioCommandV1,
   type ScenarioEnvelopeV3,
   type ScenarioRepository,
 } from "@/lib/repository";
+import {
+  deriveIdempotencyKey,
+  prepareProposal,
+  type AssistantCommandV1,
+  type CommandRejection,
+  type EvidenceReference,
+  type OperationalConfirmationV1,
+  type ProposalOutcome,
+} from "@/lib/proposal";
+import type { CapabilityRegistryStamp } from "@/lib/capability/types";
 import type { ScenarioUiState, UiRequestCell } from "@/lib/scenario";
 // `planReap` is imported by its DEEP path, never through the `@/lib/optimize`
 // barrel: the barrel pulls in the run controller, which imports `@/lib/store`, and
@@ -170,6 +185,12 @@ export type CommandFailureReason =
   | "superseded"
   /** The command's result was not a valid scenario document. */
   | "invalid"
+  /** The persisted proposal is missing, settled, or not the one being applied. */
+  | "proposal-conflict"
+  /** An operational assumption has no confirmation for this proposal revision. */
+  | "confirmation-missing"
+  /** An assistant clear fenced the write. Not an error — the designed outcome. */
+  | "fenced"
   /** The transaction itself failed (IndexedDB, quota). */
   | "write-failed";
 
@@ -193,6 +214,82 @@ export type CommandOutcome =
     }
   | { ok: false; reason: CommandFailureReason; code: RepositoryErrorCode | "unknown" };
 
+// ---------------------------------------------------------------------------
+// Assistant proposal surface (T07)
+// ---------------------------------------------------------------------------
+
+// Re-exported through the adapter so the command bus and the assistant surface can
+// name these durable shapes without importing `@/lib/repository` themselves — which
+// the authority boundary reserves for this module alone. A type-only re-export
+// grants no runtime path to the repository.
+export type { AssistantProposalV1, AssistantReceiptV1, ReceiptStanding };
+
+/** The persisted basis a Preview binds to. Read from the envelope and the lease. */
+export interface AssistantScenarioBasis {
+  scenarioId: string;
+  documentRevision: number;
+  topCommitId: string | null;
+  /** `null` when this tab does not currently own the scenario. */
+  leaseEpoch: number | null;
+  isOwner: boolean;
+  scenario: ScenarioUiState;
+}
+
+export interface PrepareAssistantProposalInput {
+  /** Used only for a first preparation; a revision keeps the previous identity. */
+  proposalId: string;
+  /** Set to re-prepare an existing proposal (Revise, regenerate, recover). */
+  previousProposalId?: string;
+  threadId: string | null;
+  turnId: string | null;
+  /**
+   * The deployed registry's stamp, supplied by the caller.
+   *
+   * The adapter deliberately does not read the registry itself: `lib/capability`
+   * reaches component modules, and pulling those into the scenario authority's graph
+   * would put React in the durable path for no benefit. The stamp is opaque here --
+   * it is stored, and later compared for equality.
+   */
+  registryStamp: CapabilityRegistryStamp;
+  commands: readonly AssistantCommandV1[];
+  rationale: string | null;
+  evidence: readonly EvidenceReference[];
+  outcome: ProposalOutcome;
+}
+
+export type PrepareAssistantProposalOutcome =
+  | { ok: true; proposal: AssistantProposalV1 }
+  /** The commands do not validate against the current document. A product answer. */
+  | { ok: false; reason: "rejected"; rejection: CommandRejection }
+  | { ok: false; reason: CommandFailureReason; code: RepositoryErrorCode | "unknown" };
+
+export type ApplyAssistantProposalOutcome =
+  | {
+      ok: true;
+      receipt: AssistantReceiptV1;
+      proposal: AssistantProposalV1;
+      commitId: string;
+      documentRevision: number;
+      /** True when this key had already been consumed; no second commit was written. */
+      replayed: boolean;
+      /** The commit landed but the view did not. Saved, and only a reload clears it. */
+      reloadRequired: boolean;
+    }
+  | { ok: false; reason: CommandFailureReason; code: RepositoryErrorCode | "unknown" };
+
+/** The captured fences in the shape a durable proposal row stores them. */
+function generationPair(captured: readonly CapturedGeneration[]): {
+  globalGeneration: number;
+  scenarioGeneration: number;
+} {
+  const global = captured.find((entry) => entry.scopeKey === GLOBAL_GENERATION_SCOPE);
+  const scenario = captured.find((entry) => entry.scopeKey !== GLOBAL_GENERATION_SCOPE);
+  return {
+    globalGeneration: global?.generation ?? 0,
+    scenarioGeneration: scenario?.generation ?? 0,
+  };
+}
+
 function classify(error: unknown): {
   reason: CommandFailureReason;
   code: RepositoryErrorCode | "unknown";
@@ -210,9 +307,18 @@ function classify(error: unknown): {
         return { reason: "stale", code: error.code };
       case "nothing_to_undo":
       case "nothing_to_redo":
+      case "receipt_not_undoable":
         return { reason: "history-unavailable", code: error.code };
       case "invalid_document":
+      case "proposal_rejected":
         return { reason: "invalid", code: error.code };
+      case "proposal_conflict":
+      case "idempotency_conflict":
+        return { reason: "proposal-conflict", code: error.code };
+      case "confirmation_missing":
+        return { reason: "confirmation-missing", code: error.code };
+      case "generation_fenced":
+        return { reason: "fenced", code: error.code };
       default:
         return { reason: "write-failed", code: error.code };
     }
@@ -1304,6 +1410,378 @@ export class ScenarioAuthority {
   // whether a recovery is trusted — live in `@/lib/optimize/basis`, which imports
   // only erased types from here, so there is no runtime cycle between the store and
   // the Optimize feature.
+
+  // -------------------------------------------------------------------------
+  // Assistant proposals, Apply, receipts and Undo (T07)
+  // -------------------------------------------------------------------------
+  //
+  // WHY THESE LIVE ON THE ADAPTER. The assistant may not reach the repository (the
+  // authority boundary) and may not write a scenario table (`independence.test.ts`).
+  // It is also the wrong place for these: publishing a committed document into the
+  // projection, and recording "committed, reload required" when that publication
+  // fails, is exactly this adapter's job and nobody else's. So the assistant names a
+  // proposal and the host does the rest -- which is also what makes "Apply is not a
+  // model tool" structurally true rather than a convention.
+  //
+  // EVERY ONE IS QUEUED on the same serial queue as manual edits, so a Preview
+  // cannot be prepared against a document a queued manual commit is about to move.
+
+  /**
+   * The PERSISTED basis a Preview binds to and Apply is re-checked against.
+   *
+   * Read from the envelope and the lease rather than the projection, for the reason
+   * the Optimize preflight reads them: a takeover whose BroadcastChannel hint was
+   * delayed leaves the projection still claiming ownership, and only the lease row
+   * disagrees.
+   */
+  async readAssistantScenarioBasis(): Promise<AssistantScenarioBasis | null> {
+    const context = await this.repository.readTabContext(this.tabId);
+    if (!context.envelope) return null;
+    return {
+      scenarioId: context.envelope.scenarioId,
+      documentRevision: context.envelope.documentRevision,
+      topCommitId: context.envelope.topCommitId,
+      leaseEpoch: context.owner?.epoch ?? null,
+      isOwner: context.isOwner,
+      scenario: context.envelope.scenario,
+    };
+  }
+
+  /**
+   * Validate typed commands against the PERSISTED document and persist the result
+   * as a proposal.
+   *
+   * Preparing is not mutating: nothing about the scenario changes here. What it does
+   * is bind the change to a basis, so that everything afterwards -- the Preview's
+   * staleness, the confirmations, the idempotency key, the Apply fences -- has one
+   * agreed thing to compare against.
+   */
+  prepareAssistantProposal(
+    input: PrepareAssistantProposalInput,
+  ): Promise<PrepareAssistantProposalOutcome> {
+    return this.enqueue(async () => {
+      const owner = this.owner;
+      if (this.authority.getState().reloadRequired) {
+        return { ok: false as const, reason: "reload-required" as const, code: "unknown" as const };
+      }
+      if (!owner) {
+        return { ok: false as const, reason: "not-owner" as const, code: "not_owner" as const };
+      }
+
+      try {
+        // OWNERSHIP IS REREAD, not taken from `this.owner`. A peer takeover whose
+        // BroadcastChannel hint has not landed leaves this tab's in-memory owner
+        // token intact, and preparing under it would render a Preview -- with an
+        // enabled Apply -- for a document this tab no longer owns. The Apply
+        // transaction would refuse it, but only after the user pressed the button.
+        const context = await this.repository.readTabContext(this.tabId);
+        if (!context.isOwner || !context.owner || context.owner.epoch !== owner.epoch) {
+          this.loseOwnership(
+            context.lease && context.lease.ownerTabId !== this.tabId ? "taken-over" : "expired",
+            context.lease?.ownerTabId,
+          );
+          return { ok: false as const, reason: "not-owner" as const, code: "not_owner" as const };
+        }
+
+        const envelope = await this.repository.read(owner.scenarioId);
+        // A re-preparation of a LIVE proposal keeps its identity and moves its
+        // revision. A settled one is deliberately not revised: bumping an applied or
+        // cancelled row would rewrite the record of something that already happened,
+        // and the receipt would then point at a proposal that no longer describes it.
+        const candidate = input.previousProposalId
+          ? ((await this.repository.getProposal(input.previousProposalId)) ?? null)
+          : null;
+        const previous =
+          candidate && candidate.status !== "applied" && candidate.status !== "cancelled"
+            ? candidate
+            : null;
+        const captured = await this.repository.captureGenerations(owner.scenarioId);
+        const pair = generationPair(captured);
+
+        const prepared = prepareProposal({
+          proposalId: previous?.proposalId ?? input.proposalId,
+          // A re-preparation keeps the identity and moves the revision, which is what
+          // makes every confirmation and every idempotency key from the previous one
+          // stop matching -- without anything having to remember to clear them.
+          revision: (previous?.revision ?? 0) + 1,
+          scenarioId: envelope.scenarioId,
+          threadId: input.threadId,
+          turnId: input.turnId,
+          document: envelope.scenario,
+          baseDocumentRevision: envelope.documentRevision,
+          baseCommitId: envelope.topCommitId,
+          leaseEpoch: owner.epoch,
+          registryStamp: input.registryStamp,
+          commands: input.commands,
+          rationale: input.rationale,
+          evidence: input.evidence,
+          outcome: input.outcome,
+          globalGeneration: pair.globalGeneration,
+          scenarioGeneration: pair.scenarioGeneration,
+          now: new Date(),
+        });
+        if (!prepared.ok) {
+          return { ok: false as const, reason: "rejected" as const, rejection: prepared.rejection };
+        }
+
+        const row: AssistantProposalV1 = {
+          ...prepared.proposal,
+          appliedCommitId: null,
+          receiptId: null,
+          idempotencyKey: null,
+        };
+        // FENCED. A Clear that landed while the model was composing must not be able
+        // to resurrect a proposal for a conversation the user just deleted.
+        await this.repository.runGuarded(captured, async (db) => {
+          await db.assistantProposals.put(row);
+        });
+        return { ok: true as const, proposal: row };
+      } catch (error) {
+        const classified = classify(error);
+        this.authority.setState({ lastErrorCode: classified.code });
+        return { ok: false as const, ...classified };
+      }
+    });
+  }
+
+  /**
+   * Record one structured operational confirmation against the exact proposal
+   * revision it answers.
+   *
+   * The assumption is re-derived from the STORED proposal rather than taken from the
+   * caller: a confirmation for a question this proposal does not ask is not a
+   * confirmation, and accepting one would be the mechanism by which an agreement
+   * about a different change became authorisation for this one.
+   */
+  recordAssistantConfirmation(input: {
+    proposalId: string;
+    assumptionId: string;
+    confirmedAt?: Date;
+  }): Promise<PrepareAssistantProposalOutcome> {
+    return this.updateProposal(input.proposalId, (proposal) => {
+      const assumption = proposal.assumptions.find(
+        (entry) => entry.assumptionId === input.assumptionId,
+      );
+      if (!assumption) return null;
+      const confirmation: OperationalConfirmationV1 = {
+        assumptionId: assumption.assumptionId,
+        type: assumption.type,
+        person: assumption.person,
+        date: assumption.date,
+        toDate: assumption.toDate,
+        proposalRevision: proposal.revision,
+        confirmedAt: (input.confirmedAt ?? new Date()).toISOString(),
+      };
+      const confirmations = [
+        ...proposal.confirmations.filter(
+          (entry) =>
+            entry.assumptionId !== confirmation.assumptionId ||
+            entry.proposalRevision !== proposal.revision,
+        ),
+        confirmation,
+      ];
+      return { ...proposal, confirmations };
+    });
+  }
+
+  /** Withdraw a confirmation. Apply closes again immediately; nothing is “almost” agreed. */
+  withdrawAssistantConfirmation(input: {
+    proposalId: string;
+    assumptionId: string;
+  }): Promise<PrepareAssistantProposalOutcome> {
+    return this.updateProposal(input.proposalId, (proposal) => ({
+      ...proposal,
+      confirmations: proposal.confirmations.filter(
+        (entry) =>
+          entry.assumptionId !== input.assumptionId || entry.proposalRevision !== proposal.revision,
+      ),
+    }));
+  }
+
+  /** Cancel a proposal. Terminal: a cancelled proposal can never be applied. */
+  cancelAssistantProposal(proposalId: string): Promise<PrepareAssistantProposalOutcome> {
+    return this.updateProposal(proposalId, (proposal) =>
+      proposal.status === "applied" ? null : { ...proposal, status: "cancelled" },
+    );
+  }
+
+  /** Mark a proposal out of date, so a reopened panel never shows it as live. */
+  markAssistantProposalStale(proposalId: string): Promise<PrepareAssistantProposalOutcome> {
+    return this.updateProposal(proposalId, (proposal) =>
+      proposal.status === "applied" || proposal.status === "cancelled"
+        ? null
+        : { ...proposal, status: "stale" },
+    );
+  }
+
+  /** The fenced read-modify-write every non-Apply proposal transition shares. */
+  private updateProposal(
+    proposalId: string,
+    transform: (proposal: AssistantProposalV1) => AssistantProposalV1 | null,
+  ): Promise<PrepareAssistantProposalOutcome> {
+    return this.enqueue(async () => {
+      const scenarioId = this.authority.getState().scenarioId;
+      if (!scenarioId) {
+        return { ok: false as const, reason: "not-ready" as const, code: "unknown" as const };
+      }
+      try {
+        const captured = await this.repository.captureGenerations(scenarioId);
+        const updated = await this.repository.runGuarded(captured, async (db) => {
+          const current = await db.assistantProposals.get(proposalId);
+          if (!current) return null;
+          const next = transform(current);
+          if (!next) return null;
+          const row: AssistantProposalV1 = { ...next, updatedAt: new Date().toISOString() };
+          await db.assistantProposals.put(row);
+          return row;
+        });
+        if (!updated) {
+          return {
+            ok: false as const,
+            reason: "proposal-conflict" as const,
+            code: "proposal_conflict" as const,
+          };
+        }
+        return { ok: true as const, proposal: updated };
+      } catch (error) {
+        return { ok: false as const, ...classify(error) };
+      }
+    });
+  }
+
+  /**
+   * THE Apply. One durable transaction, then — and only then — publication.
+   *
+   * Success is never rendered before durability, and a publication failure is
+   * reported as `committed, reload required` rather than as a failed Apply: the
+   * change IS saved, and telling the user otherwise would invite them to do it twice.
+   */
+  applyAssistantProposal(input: {
+    proposalId: string;
+    receiptId: string;
+  }): Promise<ApplyAssistantProposalOutcome> {
+    return this.enqueue(async () => {
+      const owner = this.owner;
+      const state = this.authority.getState();
+      if (state.reloadRequired) {
+        return { ok: false as const, reason: "reload-required" as const, code: "unknown" as const };
+      }
+      if (!owner || !state.scenarioId) {
+        return { ok: false as const, reason: "not-owner" as const, code: "not_owner" as const };
+      }
+
+      try {
+        const proposal = await this.repository.getProposal(input.proposalId);
+        if (!proposal) {
+          return {
+            ok: false as const,
+            reason: "proposal-conflict" as const,
+            code: "proposal_conflict" as const,
+          };
+        }
+        const captured = await this.repository.captureGenerations(proposal.scenarioId);
+        const committed = await this.repository.commitAssistantProposal({
+          owner,
+          proposal,
+          // Derived from the STORED proposal, so a retry after a lost acknowledgement
+          // reproduces the same key and replays the same commit.
+          idempotencyKey: deriveIdempotencyKey(proposal),
+          receiptId: proposal.receiptId ?? input.receiptId,
+          guardGenerations: captured,
+        });
+
+        this.publish(committed.envelope, {
+          undo: committed.history.undoAvailable,
+          redo: committed.history.redoAvailable,
+        });
+        this.authority.setState({ lastErrorCode: null });
+        this.broadcast({
+          kind: "committed",
+          scenarioId: proposal.scenarioId,
+          tabId: this.tabId,
+          epoch: owner.epoch,
+        });
+        this.settleWriteStatus("saved");
+        return {
+          ok: true as const,
+          receipt: committed.receipt,
+          proposal: committed.proposal,
+          commitId: committed.commit.commitId,
+          documentRevision: committed.envelope.documentRevision,
+          replayed: committed.replayed,
+          // A durable commit whose publication threw is still a durable commit.
+          reloadRequired: this.authority.getState().reloadRequired,
+        };
+      } catch (error) {
+        const failure = await this.handleCommandFailure(error, state.scenarioId);
+        return failure as ApplyAssistantProposalOutcome;
+      }
+    });
+  }
+
+  /**
+   * Undo one receipt's change, as a new atomic commit.
+   *
+   * Availability is decided by the REPOSITORY inside the transaction, never by the
+   * receipt's existence and never by an in-memory stack: a receipt is a durable
+   * record that something happened, which is a different fact from whether it can
+   * still be reversed.
+   */
+  undoAssistantReceipt(receiptId: string): Promise<CommandOutcome> {
+    return this.enqueue(async () => {
+      const owner = this.owner;
+      const scenarioId = this.authority.getState().scenarioId;
+      if (this.authority.getState().reloadRequired) {
+        return { ok: false as const, reason: "reload-required" as const, code: "unknown" as const };
+      }
+      if (!owner || !scenarioId) {
+        return { ok: false as const, reason: "not-owner" as const, code: "not_owner" as const };
+      }
+      try {
+        const result = await this.repository.undoAssistantReceipt({ owner, receiptId });
+        this.publish(result.envelope, {
+          undo: result.history.undoAvailable,
+          redo: result.history.redoAvailable,
+        });
+        this.broadcast({
+          kind: "committed",
+          scenarioId,
+          tabId: this.tabId,
+          epoch: owner.epoch,
+        });
+        this.settleWriteStatus("saved");
+        return {
+          ok: true as const,
+          committed: true,
+          documentRevision: result.envelope.documentRevision,
+          commitId: result.commit?.commitId ?? null,
+        };
+      } catch (error) {
+        return this.handleCommandFailure(error, scenarioId);
+      }
+    });
+  }
+
+  /** One proposal, as persisted. */
+  async readAssistantProposal(proposalId: string): Promise<AssistantProposalV1 | null> {
+    return (await this.repository.getProposal(proposalId)) ?? null;
+  }
+
+  /** This scenario's receipts, newest first, each with its CURRENT Undo standing. */
+  async describeAssistantReceipts(): Promise<ReceiptStanding[]> {
+    const scenarioId = this.authority.getState().scenarioId;
+    if (!scenarioId) return [];
+    try {
+      return await this.repository.describeReceipts(scenarioId);
+    } catch (error) {
+      // A scenario the repository has never seen simply has no receipts. The
+      // repository is right to fail closed on a missing envelope -- every WRITE
+      // depends on that -- but a panel asking "what has been applied here?" during
+      // bring-up, before the envelope exists, is asking an answerable question.
+      if (isRepositoryError(error, "scenario_not_found")) return [];
+      throw error;
+    }
+  }
 
   /** Write a newly built, not-yet-accepted basis row. */
   async putOptimizeBasis(record: OptimizeBasisRecordV2): Promise<void> {

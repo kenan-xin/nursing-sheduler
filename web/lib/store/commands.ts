@@ -14,8 +14,20 @@
 // therefore never both read the same revision and race their compare-and-swap.
 
 import type { ScenarioUiState, UiRequestCell } from "@/lib/scenario";
-import type { CommandOutcome } from "./authority";
-import { getScenarioAuthority } from "./spine";
+// The durable DTO types come through the ADAPTER, not from `@/lib/repository`:
+// only the adapter may name that module (`authority-boundary.test.ts`), and a
+// type-only re-export through it keeps the command bus on the right side of the
+// boundary without anybody having to widen the allow-list.
+import type {
+  ApplyAssistantProposalOutcome,
+  AssistantProposalV1,
+  AssistantScenarioBasis,
+  CommandOutcome,
+  PrepareAssistantProposalInput,
+  PrepareAssistantProposalOutcome,
+  ReceiptStanding,
+} from "./authority";
+import { getScenarioAuthority, useHotStore } from "./spine";
 
 /**
  * The typed scenario command surface. Named for the manual operations they
@@ -80,6 +92,86 @@ export const scenarioCommands = {
     return getScenarioAuthority().reconcile();
   },
 } as const;
+
+/**
+ * The assistant's ENTIRE durable surface (T07).
+ *
+ * Deliberately separate from `scenarioCommands`, and deliberately not a superset of
+ * it: there is no `mutate`, no `setReqData`, no generic `undo`/`redo` here, so an
+ * assistant module cannot reach the arbitrary mutation primitives even by accident.
+ * `lib/ai/independence.test.ts` pins that -- it forbids the assistant from naming
+ * `scenarioCommands.mutate|setReqData|undo|redo`, and these named operations are
+ * what it may use instead.
+ *
+ * Every one goes through the same adapter, the same serial queue and the same
+ * fences as a manual edit. Apply is on this list because it is a HOST action the
+ * user takes; it is not, and cannot become, a model tool.
+ */
+export const assistantProposalCommands = {
+  /** The persisted basis a Preview binds to and Apply is re-checked against. */
+  readScenarioBasis(): Promise<AssistantScenarioBasis | null> {
+    return getScenarioAuthority().readAssistantScenarioBasis();
+  },
+
+  /** Validate typed commands against the persisted document and persist a proposal. */
+  prepare(input: PrepareAssistantProposalInput): Promise<PrepareAssistantProposalOutcome> {
+    return getScenarioAuthority().prepareAssistantProposal(input);
+  },
+
+  confirm(input: {
+    proposalId: string;
+    assumptionId: string;
+  }): Promise<PrepareAssistantProposalOutcome> {
+    return getScenarioAuthority().recordAssistantConfirmation(input);
+  },
+
+  withdrawConfirmation(input: {
+    proposalId: string;
+    assumptionId: string;
+  }): Promise<PrepareAssistantProposalOutcome> {
+    return getScenarioAuthority().withdrawAssistantConfirmation(input);
+  },
+
+  cancel(proposalId: string): Promise<PrepareAssistantProposalOutcome> {
+    return getScenarioAuthority().cancelAssistantProposal(proposalId);
+  },
+
+  markStale(proposalId: string): Promise<PrepareAssistantProposalOutcome> {
+    return getScenarioAuthority().markAssistantProposalStale(proposalId);
+  },
+
+  /** THE Apply. One durable transaction; publication only after it commits. */
+  apply(input: { proposalId: string; receiptId: string }): Promise<ApplyAssistantProposalOutcome> {
+    return getScenarioAuthority().applyAssistantProposal(input);
+  },
+
+  /** Undo one receipt's change, as a new atomic commit. */
+  undoReceipt(receiptId: string): Promise<CommandOutcome> {
+    return getScenarioAuthority().undoAssistantReceipt(receiptId);
+  },
+
+  read(proposalId: string): Promise<AssistantProposalV1 | null> {
+    return getScenarioAuthority().readAssistantProposal(proposalId);
+  },
+
+  /** Receipts for the selected scenario, newest first, with current Undo standing. */
+  describeReceipts(): Promise<ReceiptStanding[]> {
+    return getScenarioAuthority().describeAssistantReceipts();
+  },
+} as const;
+
+/**
+ * The open editor draft that blocks Apply, or `null`.
+ *
+ * An unsaved form draft over the same document is a change the user has started and
+ * not committed; applying over it would either lose it or produce a document neither
+ * the form nor the Preview describes. The panel names it and asks for a decision --
+ * which is why this returns the draft's key rather than a boolean.
+ */
+export function readConflictingEditorDraft(): string | null {
+  const drafts = Object.keys(useHotStore.getState().drafts);
+  return drafts.length > 0 ? drafts[0] : null;
+}
 
 /** Resolve once every queued command has settled. */
 export function drainScenarioCommands(): Promise<void> {

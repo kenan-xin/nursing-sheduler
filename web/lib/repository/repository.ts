@@ -50,6 +50,14 @@ import {
 } from "./history";
 import { assertLeaseOwnership, isLeaseLive, LEASE_TTL_MS, renewedLease } from "./leases";
 import { assertValidScenarioSnapshot } from "./validate";
+import {
+  applyAssistantCommands,
+  commandsDigest,
+  deriveAssumptions,
+  deriveProposalDiff,
+  confirmationsDigest,
+  outstandingAssumptions,
+} from "@/lib/proposal";
 import { NurseSchedulerDb, SCENARIO_WRITE_TABLES } from "./schema";
 import {
   type AssistantProposalV1,
@@ -152,10 +160,45 @@ export interface CommitInput {
   idempotencyKey?: string;
   /** Assistant generations captured before the operation started (T05 adopts this). */
   guardGenerations?: readonly CapturedGeneration[];
-  /** Written in the SAME transaction as the commit — never as a follow-up write. */
-  receipt?: Omit<AssistantReceiptV1, "commitId" | "documentRevision" | "historySessionId">;
-  /** Proposal status transition to apply atomically with the commit. */
-  proposalUpdate?: { proposalId: string; status: AssistantProposalV1["status"] };
+}
+
+/**
+ * One assistant Apply, presented whole.
+ *
+ * There is exactly ONE way an assistant change becomes durable, and this is its
+ * input. `commit` deliberately no longer accepts a receipt or a proposal transition:
+ * two code paths able to write "this proposal was applied" would be two definitions
+ * of what an Apply is, and only one of them would have all the checks.
+ */
+export interface AtomicAssistantApply {
+  owner: LeaseOwner;
+  /** The reviewed proposal, exactly as the Preview rendered it. */
+  proposal: AssistantProposalV1;
+  /** Derived from proposal identity, revision, commands, confirmations and basis. */
+  idempotencyKey: string;
+  receiptId: string;
+  /** Fences the write against a Clear that landed while the user was reading. */
+  guardGenerations?: readonly CapturedGeneration[];
+}
+
+export interface CommittedAssistantApply {
+  envelope: ScenarioEnvelopeV3;
+  commit: ScenarioCommitV1;
+  receipt: AssistantReceiptV1;
+  proposal: AssistantProposalV1;
+  history: HistoryAvailability;
+  /** True when this key had already been consumed and the original result was returned. */
+  replayed: boolean;
+}
+
+/** How a receipt's Undo currently stands. Derived from facts, never stored. */
+export type ReceiptUndoState = "available" | "unavailable" | "superseded";
+
+export interface ReceiptStanding {
+  receipt: AssistantReceiptV1;
+  undo: ReceiptUndoState;
+  /** Why Undo is not available, in the user's terms. `null` when it is. */
+  reason: string | null;
 }
 
 export interface CommitResult {
@@ -215,6 +258,15 @@ export interface ScenarioRepository {
   putProposal(proposal: AssistantProposalV1): Promise<void>;
   getProposal(proposalId: string): Promise<AssistantProposalV1 | undefined>;
   getReceipt(receiptId: string): Promise<AssistantReceiptV1 | undefined>;
+  /**
+   * THE assistant Apply. One transaction across the scenario envelope, the commit
+   * log, its reversal payload, the proposal row and the receipt.
+   */
+  commitAssistantProposal(input: AtomicAssistantApply): Promise<CommittedAssistantApply>;
+  /** Undo one receipt's commit — also atomic, also fenced, also a new commit. */
+  undoAssistantReceipt(input: { owner: LeaseOwner; receiptId: string }): Promise<CommitResult>;
+  /** A scenario's receipts, newest first, each with its CURRENT Undo standing. */
+  describeReceipts(scenarioId: string): Promise<ReceiptStanding[]>;
   /** Only a CURRENT record may be written; legacy rows are read-only history. */
   putOptimizeBasis(basis: OptimizeBasisRecordV2): Promise<void>;
   /** Returns the durable union — a pre-T08 browser still holds schema-V1 rows. */
@@ -866,23 +918,6 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
           sessionCommits,
         });
 
-        // Receipt and proposal transition share this transaction, so "applied" and
-        // "there is a receipt proving it" can never disagree after a partial write.
-        if (input.receipt) {
-          await db.assistantReceipts.put({
-            ...input.receipt,
-            commitId: written.commit.commitId,
-            documentRevision: written.commit.documentRevision,
-            historySessionId: written.commit.historySessionId,
-          });
-        }
-        if (input.proposalUpdate) {
-          await db.assistantProposals.update(input.proposalUpdate.proposalId, {
-            status: input.proposalUpdate.status,
-            updatedAt: at.toISOString(),
-          });
-        }
-
         return {
           envelope: written.envelope,
           commit: written.commit,
@@ -1111,6 +1146,343 @@ export function createScenarioRepository(config: ScenarioRepositoryConfig): Scen
 
     async putProposal(proposal) {
       await db.assistantProposals.put(proposal);
+    },
+
+    async commitAssistantProposal(input) {
+      return db.transaction(
+        "rw",
+        SCENARIO_WRITE_TABLES,
+        async (): Promise<CommittedAssistantApply> => {
+          const at = now();
+          const iso = at.toISOString();
+          const { proposal, owner } = input;
+
+          const envelope = await requireEnvelope(proposal.scenarioId);
+          const lease = await db.writerLeases.get(proposal.scenarioId);
+          assertLeaseOwnership(lease, envelope, owner, at);
+
+          if (input.guardGenerations?.length) {
+            await assertGenerationsUnchanged(db, input.guardGenerations);
+          }
+
+          // IDEMPOTENT REPLAY, checked before every basis comparison. A retry after a
+          // successful-but-unacknowledged Apply must succeed, and by definition its
+          // basis no longer matches -- the commit it is retrying moved it.
+          const prior = await db.scenarioCommits
+            .where("idempotencyKey")
+            .equals(input.idempotencyKey)
+            .first();
+          if (prior) {
+            const priorReceipt = await db.assistantReceipts
+              .where("commitId")
+              .equals(prior.commitId)
+              .first();
+            if (
+              prior.scenarioId !== proposal.scenarioId ||
+              !priorReceipt ||
+              priorReceipt.proposalId !== proposal.proposalId ||
+              priorReceipt.proposalRevision !== proposal.revision ||
+              priorReceipt.commandDigest !== proposal.commandsDigest
+            ) {
+              // The same key standing for different input would double-apply on the
+              // next retry. There is no safe answer but refusal.
+              throw new RepositoryError(
+                "idempotency_conflict",
+                "this Apply key was already consumed by a different change",
+                { idempotencyKey: input.idempotencyKey, priorCommitId: prior.commitId },
+              );
+            }
+            const stored = (await db.assistantProposals.get(proposal.proposalId)) ?? proposal;
+            return {
+              envelope,
+              commit: prior,
+              receipt: priorReceipt,
+              proposal: stored,
+              history: await historyOf(envelope),
+              replayed: true,
+            };
+          }
+
+          // THE PERSISTED PROPOSAL IS THE AUTHORITY, not the object handed in. A
+          // caller holding a stale copy (an older revision, a settled proposal, a
+          // different change under the same id) is exactly the reuse that must fail
+          // closed rather than commit whatever it was given.
+          const stored = await db.assistantProposals.get(proposal.proposalId);
+          if (
+            !stored ||
+            stored.revision !== proposal.revision ||
+            stored.commandsDigest !== proposal.commandsDigest ||
+            stored.scenarioId !== proposal.scenarioId
+          ) {
+            throw new RepositoryError(
+              "proposal_conflict",
+              "this proposal is not the one currently prepared for this schedule",
+              { proposalId: proposal.proposalId, revision: proposal.revision },
+            );
+          }
+          if (stored.status === "applied" || stored.status === "cancelled") {
+            throw new RepositoryError(
+              "proposal_conflict",
+              `this change was already ${stored.status}`,
+              { proposalId: proposal.proposalId, status: stored.status },
+            );
+          }
+
+          // THE BASIS. All four, from persisted state, inside the transaction.
+          if (envelope.documentRevision !== stored.baseDocumentRevision) {
+            throw new RepositoryError(
+              "stale_revision",
+              "the schedule changed after this change was prepared",
+              {
+                expected: stored.baseDocumentRevision,
+                persisted: envelope.documentRevision,
+              },
+            );
+          }
+          if (stored.baseCommitId !== null && envelope.topCommitId !== stored.baseCommitId) {
+            throw new RepositoryError(
+              "stale_revision",
+              "the schedule's top commit is not the one this change was prepared against",
+              { expected: stored.baseCommitId, persisted: envelope.topCommitId },
+            );
+          }
+          if (stored.leaseEpoch !== owner.epoch) {
+            throw new RepositoryError(
+              "lease_epoch_stale",
+              "editing was taken over after this change was prepared",
+              { expected: stored.leaseEpoch, presented: owner.epoch },
+            );
+          }
+          if (commandsDigest(stored.commands) !== stored.commandsDigest) {
+            throw new RepositoryError(
+              "proposal_conflict",
+              "the stored change does not match its own digest",
+              { proposalId: stored.proposalId },
+            );
+          }
+
+          // RE-RUN THE OPERATIONS against the snapshot read INSIDE this transaction,
+          // never against whatever the Preview was looking at.
+          const before: ScenarioSnapshot = {
+            scenario: envelope.scenario,
+            backupFingerprint: envelope.backupFingerprint,
+          };
+          const applied = applyAssistantCommands(before.scenario, stored.commands);
+          if (!applied.ok) {
+            throw new RepositoryError("proposal_rejected", applied.rejection.message, {
+              code: applied.rejection.code,
+              index: applied.rejection.index,
+            });
+          }
+          const next: ScenarioSnapshot = {
+            scenario: applied.next,
+            backupFingerprint: before.backupFingerprint,
+          };
+
+          // CONFIRMATIONS are re-derived too. An assumption that only appears once the
+          // command runs against current state (a leave pin the cascade now destroys
+          // that it did not before) has no answer, and Apply must refuse rather than
+          // silently do it.
+          const assumptions = deriveAssumptions(before.scenario, applied.next, stored.commands);
+          const missing = outstandingAssumptions(
+            assumptions,
+            stored.confirmations,
+            stored.revision,
+          );
+          if (missing.length > 0) {
+            throw new RepositoryError(
+              "confirmation_missing",
+              "this change still needs a real-world confirmation",
+              { assumptionIds: missing.map((assumption) => assumption.assumptionId) },
+            );
+          }
+
+          assertValidScenarioSnapshot(next, { scenarioId: envelope.scenarioId, kind: "assistant" });
+
+          const sessionCommits = await readSessionCommits(
+            db,
+            envelope.scenarioId,
+            envelope.historySessionId,
+          );
+          const written = await writeContentCommit({
+            envelope,
+            next,
+            kind: "assistant_apply",
+            isContent: true,
+            commandDigestValue: stored.commandsDigest,
+            idempotencyKey: input.idempotencyKey,
+            at,
+            sessionCommits,
+          });
+
+          // The receipt is derived from the COMMITTED before/after, so it can never
+          // describe the preview rather than the change.
+          const committedDiff = deriveProposalDiff(before.scenario, next.scenario, stored.commands);
+          const receipt: AssistantReceiptV1 = {
+            receiptId: input.receiptId,
+            schemaVersion: 1,
+            proposalId: stored.proposalId,
+            proposalRevision: stored.revision,
+            scenarioId: envelope.scenarioId,
+            commitId: written.commit.commitId,
+            documentRevision: written.commit.documentRevision,
+            historySessionId: written.commit.historySessionId,
+            idempotencyKey: input.idempotencyKey,
+            commandDigest: stored.commandsDigest,
+            confirmationDigest: confirmationsDigest(
+              stored.confirmations.filter(
+                (confirmation) => confirmation.proposalRevision === stored.revision,
+              ),
+            ),
+            registryStamp: stored.registryStamp,
+            summary: [...committedDiff.direct, ...committedDiff.cascade],
+            capabilityIds: committedDiff.capabilityIds,
+            createdAt: iso,
+          };
+          await db.assistantReceipts.put(receipt);
+
+          const appliedProposal: AssistantProposalV1 = {
+            ...stored,
+            status: "applied",
+            appliedCommitId: written.commit.commitId,
+            receiptId: receipt.receiptId,
+            idempotencyKey: input.idempotencyKey,
+            updatedAt: iso,
+          };
+          await db.assistantProposals.put(appliedProposal);
+
+          return {
+            envelope: written.envelope,
+            commit: written.commit,
+            receipt,
+            proposal: appliedProposal,
+            history: await historyOf(written.envelope),
+            replayed: false,
+          };
+        },
+      );
+    },
+
+    async undoAssistantReceipt(input) {
+      return db.transaction("rw", SCENARIO_WRITE_TABLES, async (): Promise<CommitResult> => {
+        const at = now();
+        const receipt = await db.assistantReceipts.get(input.receiptId);
+        if (!receipt) {
+          throw new RepositoryError("receipt_not_undoable", "that receipt no longer exists", {
+            receiptId: input.receiptId,
+          });
+        }
+        const envelope = await requireEnvelope(receipt.scenarioId);
+        const lease = await db.writerLeases.get(receipt.scenarioId);
+        assertLeaseOwnership(lease, envelope, input.owner, at);
+
+        const sessionCommits = await readSessionCommits(
+          db,
+          envelope.scenarioId,
+          envelope.historySessionId,
+        );
+        const content = contentCommits(sessionCommits);
+        const target = envelope.historyCursor > 0 ? content[envelope.historyCursor - 1] : undefined;
+
+        // AUTHORITY COMES FROM THE REPOSITORY, not from the receipt's existence. The
+        // receipt's commit must BE the current reversible top of the current session:
+        // a reload (new session), an eviction (pruned payload), a Load, or any later
+        // commit all move that, and each one truthfully removes the reversal path.
+        if (
+          !target ||
+          target.commitId !== receipt.commitId ||
+          target.historySessionId !== receipt.historySessionId ||
+          target.payloadState !== "live" ||
+          !target.reversiblePayload
+        ) {
+          throw new RepositoryError("receipt_not_undoable", "this change can no longer be undone", {
+            receiptId: receipt.receiptId,
+            expectedCommitId: receipt.commitId,
+            topCommitId: target?.commitId ?? null,
+            payloadState: target?.payloadState ?? null,
+          });
+        }
+
+        const written = await writeContentCommit({
+          envelope,
+          next: target.reversiblePayload.before,
+          kind: "undo",
+          isContent: false,
+          commandDigestValue: commandDigest({ kind: "undo", source: target.commitId }),
+          at,
+          sessionCommits,
+        });
+        const moved: ScenarioEnvelopeV3 = {
+          ...written.envelope,
+          historyCursor: envelope.historyCursor - 1,
+        };
+        await db.scenarioEnvelopes.put(moved);
+        await db.historyLinks.add({
+          scenarioId: envelope.scenarioId,
+          historySessionId: envelope.historySessionId,
+          kind: "undo",
+          sourceCommitId: target.commitId,
+          linkCommitId: written.commit.commitId,
+          createdAt: at.toISOString(),
+        });
+
+        return {
+          envelope: moved,
+          commit: written.commit,
+          history: await historyOf(moved),
+          replayed: false,
+        };
+      });
+    },
+
+    async describeReceipts(scenarioId) {
+      return db.transaction(
+        "r",
+        [db.assistantReceipts, db.scenarioEnvelopes, db.scenarioCommits],
+        async (): Promise<ReceiptStanding[]> => {
+          const envelope = await requireEnvelope(scenarioId);
+          const receipts = await db.assistantReceipts
+            .where("scenarioId")
+            .equals(scenarioId)
+            .toArray();
+          const sessionCommits = await readSessionCommits(
+            db,
+            scenarioId,
+            envelope.historySessionId,
+          );
+          const content = contentCommits(sessionCommits);
+          const top = envelope.historyCursor > 0 ? content[envelope.historyCursor - 1] : undefined;
+
+          return receipts
+            .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+            .map((receipt): ReceiptStanding => {
+              // DERIVED EVERY TIME, in this order, because the three states answer
+              // different questions and only one of them may be shown.
+              if (
+                top &&
+                top.commitId === receipt.commitId &&
+                top.historySessionId === receipt.historySessionId &&
+                top.payloadState === "live" &&
+                envelope.documentRevision === receipt.documentRevision
+              ) {
+                return { receipt, undo: "available", reason: null };
+              }
+              if (envelope.documentRevision !== receipt.documentRevision) {
+                return {
+                  receipt,
+                  undo: "superseded",
+                  reason: "The schedule has changed since this was applied.",
+                };
+              }
+              return {
+                receipt,
+                undo: "unavailable",
+                reason:
+                  "Undo is no longer available for this change — the page was reloaded, the schedule was replaced, or the step has been evicted.",
+              };
+            });
+        },
+      );
     },
 
     async getProposal(proposalId) {

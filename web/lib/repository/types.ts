@@ -8,7 +8,9 @@
 // `persist`-backed key/value record stays live and untouched; the repository is
 // populated beside it by an idempotent migration (see `migration.ts`).
 
+import type { CapabilityRegistryStamp } from "@/lib/capability/types";
 import type { ScenarioUiState } from "@/lib/scenario";
+import type { PreparedProposalV1, ProposalDiffEntry, ProposalStatus } from "@/lib/proposal";
 
 // ---------------------------------------------------------------------------
 // Scenario envelope
@@ -210,48 +212,60 @@ export interface CapturedGeneration {
 // Proposal / receipt / basis (durable schema only — T07/T08 own the behaviour)
 // ---------------------------------------------------------------------------
 
-export type AssistantProposalStatus =
-  | "prepared"
-  | "needs_input"
-  | "preview_ready"
-  | "confirmation_required"
-  | "stale"
-  | "applied"
-  | "cancelled"
-  | "failed";
+/**
+ * The proposal lifecycle, named by the layer that decides it.
+ *
+ * T02 minted its own copy of these literals because `lib/proposal` did not exist
+ * yet. It does now, and a second definition of "what states may a proposal be in"
+ * could only ever drift from the one the Preview actually renders.
+ */
+export type AssistantProposalStatus = ProposalStatus;
 
 /**
  * A typed change proposal bound to the exact scenario basis it was prepared
- * against. T02 only owns the durable shape and its fences; Preview/Confirm/Apply
- * behaviour is T07.
+ * against, as it is persisted.
+ *
+ * The row IS the prepared proposal -- its commands, digest, host-derived diff,
+ * operational assumptions and recorded confirmations -- plus the three fields only
+ * a completed Apply can fill. Storing a projection of it instead would mean the
+ * durable record and the reviewed change were two different things, and Apply would
+ * have to trust whichever one it happened to read.
  */
-export interface AssistantProposalV1 {
-  proposalId: string;
-  schemaVersion: 1;
-  scenarioId: string;
-  threadId: string | null;
-  baseDocumentRevision: number;
-  leaseEpoch: number;
-  commandDigest: string;
-  /** Non-authoritative model text; never a source of authority. */
-  rationale: string | null;
-  status: AssistantProposalStatus;
-  globalGeneration: number;
-  scenarioGeneration: number;
-  createdAt: string;
-  updatedAt: string;
+export interface AssistantProposalV1 extends PreparedProposalV1 {
+  /** The commit this proposal produced, once one exists. */
+  appliedCommitId: string | null;
+  receiptId: string | null;
+  /** The key the Apply transaction consumed. A different key may never reuse it. */
+  idempotencyKey: string | null;
 }
 
-/** The durable proof of an applied proposal, written in the Apply transaction. */
+/**
+ * The durable proof of an applied proposal, written in the Apply transaction.
+ *
+ * Everything on it is derived from COMMITTED state: the summary is the diff between
+ * the document the transaction read and the document it wrote, not the preview the
+ * user was shown. If those two ever disagreed, the receipt would be describing a
+ * change that did not happen.
+ */
 export interface AssistantReceiptV1 {
   receiptId: string;
   schemaVersion: 1;
   proposalId: string;
+  /** The exact proposal revision that was applied. */
+  proposalRevision: number;
   scenarioId: string;
   commitId: string;
+  /** The revision the commit PRODUCED. Equality with the live one is the Superseded test. */
   documentRevision: number;
   historySessionId: string;
   idempotencyKey: string;
+  commandDigest: string;
+  confirmationDigest: string;
+  registryStamp: CapabilityRegistryStamp;
+  /** Host-derived, from committed before/after. What the receipt shows the user. */
+  summary: ProposalDiffEntry[];
+  /** The screens the change reached, as capability ids. */
+  capabilityIds: string[];
   createdAt: string;
 }
 

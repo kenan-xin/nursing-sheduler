@@ -5,15 +5,10 @@
 
 import "fake-indexeddb/auto";
 import { describe, expect, it } from "vitest";
-import { commandDigest } from "./digest";
 import { isRepositoryError } from "./errors";
 import { LEASE_TTL_MS } from "./leases";
-import { createHarness, sampleScenario } from "./test-support";
-import {
-  type AssistantProposalV1,
-  GLOBAL_GENERATION_SCOPE,
-  scenarioGenerationScope,
-} from "./types";
+import { buildProposalRow, createHarness, sampleScenario } from "./test-support";
+import { GLOBAL_GENERATION_SCOPE, scenarioGenerationScope } from "./types";
 
 /** Commit a content patch as the scenario owner, returning the result. */
 async function patch(
@@ -545,21 +540,24 @@ describe("permanent assistant generations", () => {
     expect((await db.assistantGenerations.get(GLOBAL_GENERATION_SCOPE))?.generation).toBe(0);
     expect((await db.assistantGenerations.get(scoped))?.generation).toBe(0);
 
-    await repo.putProposal({
-      proposalId: "p1",
-      schemaVersion: 1,
-      scenarioId,
-      threadId: null,
-      baseDocumentRevision: 1,
-      leaseEpoch: a.owner!.epoch,
-      commandDigest: commandDigest({ id: "p1" }),
-      rationale: null,
-      status: "preview_ready",
-      globalGeneration: 0,
-      scenarioGeneration: 0,
-      createdAt: "2026-08-06T00:00:00.000Z",
-      updatedAt: "2026-08-06T00:00:00.000Z",
-    });
+    await repo.putProposal(
+      buildProposalRow({
+        proposalId: "p1",
+        scenarioId,
+        document: a.envelope.scenario,
+        baseDocumentRevision: a.envelope.documentRevision,
+        baseCommitId: a.envelope.topCommitId,
+        leaseEpoch: a.owner!.epoch,
+        commands: [
+          {
+            type: "set_roster_range",
+            start: "2026-05-01",
+            end: "2026-05-31",
+            importPublicHolidays: false,
+          },
+        ],
+      }),
+    );
 
     // Clearing the scenario's content deletes its proposals but BUMPS the fence,
     // never deletes it.
@@ -586,21 +584,24 @@ describe("permanent assistant generations", () => {
 
     await expect(
       repo.runGuarded(captured, async (database) => {
-        await database.assistantProposals.put({
-          proposalId: "late",
-          schemaVersion: 1,
-          scenarioId: a.envelope.scenarioId,
-          threadId: null,
-          baseDocumentRevision: 1,
-          leaseEpoch: 0,
-          commandDigest: "x",
-          rationale: null,
-          status: "prepared",
-          globalGeneration: 0,
-          scenarioGeneration: 0,
-          createdAt: "2026-08-06T00:00:00.000Z",
-          updatedAt: "2026-08-06T00:00:00.000Z",
-        });
+        await database.assistantProposals.put(
+          buildProposalRow({
+            proposalId: "late",
+            scenarioId: a.envelope.scenarioId,
+            document: a.envelope.scenario,
+            baseDocumentRevision: a.envelope.documentRevision,
+            baseCommitId: a.envelope.topCommitId,
+            leaseEpoch: 0,
+            commands: [
+              {
+                type: "set_roster_range",
+                start: "2026-05-01",
+                end: "2026-05-31",
+                importPublicHolidays: false,
+              },
+            ],
+          }),
+        );
       }),
     ).rejects.toSatisfy((error) => isRepositoryError(error, "generation_fenced"));
 
@@ -650,57 +651,7 @@ describe("idempotent apply", () => {
   });
 });
 
-describe("atomic apply receipt and proposal", () => {
-  it("writes the receipt and flips the proposal in the SAME transaction as the commit", async () => {
-    const { repo, db } = createHarness();
-    const a = await repo.selectOrSwitchScenario({ tabId: "tab-1", target: { kind: "new" } });
-    const proposalId = "prop-apply";
-    const nowIso = "2026-08-06T00:00:00.000Z";
-
-    const seed: AssistantProposalV1 = {
-      proposalId,
-      schemaVersion: 1,
-      scenarioId: a.envelope.scenarioId,
-      threadId: null,
-      baseDocumentRevision: a.envelope.documentRevision,
-      leaseEpoch: a.owner!.epoch,
-      commandDigest: commandDigest({ id: proposalId }),
-      rationale: null,
-      status: "confirmation_required",
-      globalGeneration: 0,
-      scenarioGeneration: 0,
-      createdAt: nowIso,
-      updatedAt: nowIso,
-    };
-    await repo.putProposal(seed);
-
-    const result = await repo.commit({
-      owner: a.owner!,
-      expectedScenarioId: a.envelope.scenarioId,
-      expectedDocumentRevision: a.envelope.documentRevision,
-      command: { type: "patch_scenario", patch: { rangeStart: "2026-05-01" } },
-      kind: "assistant_apply",
-      idempotencyKey: "apply-key",
-      receipt: {
-        receiptId: "rec-1",
-        schemaVersion: 1,
-        proposalId,
-        scenarioId: a.envelope.scenarioId,
-        idempotencyKey: "apply-key",
-        createdAt: nowIso,
-      },
-      proposalUpdate: { proposalId, status: "applied" },
-    });
-
-    // The receipt binds to the commit identity the transaction just wrote.
-    const receipt = await db.assistantReceipts.get("rec-1");
-    expect(receipt?.commitId).toBe(result.commit?.commitId);
-    expect(receipt?.documentRevision).toBe(result.commit?.documentRevision);
-    expect(receipt?.historySessionId).toBe(result.commit?.historySessionId);
-
-    // The proposal flipped to applied atomically — "applied" and "there is a
-    // receipt" can never disagree after a partial write.
-    const proposal = await db.assistantProposals.get(proposalId);
-    expect(proposal?.status).toBe("applied");
-  });
-});
+// The assistant Apply transaction -- its basis fences, idempotency, failure
+// atomicity, receipt derivation and Undo -- has its own suite in
+// `assistant-apply.test.ts`. `commit` deliberately no longer has a receipt or
+// proposal-transition parameter, so there is exactly one way an Apply is written.

@@ -5,10 +5,14 @@
 // They are SEPARATE COMPONENTS, not one component with a flag, and that is the
 // point: a historical thread must have no live tool or action handlers, and the
 // most reliable way to guarantee that is for the historical rendering never to
-// construct an agent at all. `AssistantLiveConversation` mounts the turn controller
-// and the read-only tools; `AssistantHistoricalConversation` renders messages read
-// straight from IndexedDB through the message view, which has no input and no
-// handler surface to regain.
+// construct an agent at all. `AssistantLiveConversation` mounts the turn controller,
+// the tools, and the host Preview/receipt surface; `AssistantHistoricalConversation`
+// renders messages read straight from IndexedDB through the message view, which has
+// no input and no handler surface to regain.
+//
+// T07 keeps that property rather than weakening it. The Preview card and the Apply
+// control are mounted HERE, in the live rendering only, so a read-only or historical
+// thread has no Apply handler to regain -- not a disabled one, none at all.
 
 import { useEffect, useState } from "react";
 import { CopilotChatMessageView, CopilotChatView } from "@copilotkit/react-core/v2";
@@ -19,6 +23,9 @@ import { describeInterruptionPhase, describeSettlement } from "@/lib/ai/assistan
 import { describeRefusal } from "@/lib/ai/assistant/send-gate";
 import { useAssistantStore } from "@/lib/ai/assistant/store";
 import { useAssistantSession } from "./use-assistant-session";
+import { useAssistantProposals } from "./use-assistant-proposals";
+import { ProposalPreviewCard } from "./proposal-preview-card";
+import { AssistantReceipts } from "./assistant-receipts";
 import { Surface } from "@/components/ui/surface";
 
 /** The app's own welcome content. Local text; no provider request produces it. */
@@ -105,12 +112,17 @@ export function AssistantLiveConversation({
   routeLabel,
 }: AssistantLiveConversationProps) {
   const session = useAssistantSession({ threadId, routePath, routeLabel, historical: false });
+  // HOST STATE, HOST HANDLERS. The Preview and the receipts are siblings of the
+  // transcript, not entries in it -- see the note in `proposal-preview-card.tsx`.
+  const proposals = useAssistantProposals();
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="assistant-live-conversation">
       {session.messages.length === 0 && <WelcomeState />}
       <RefusalNotice />
       <LifecycleNotice />
+      <ProposalPreviewCard controller={proposals} />
+      <AssistantReceipts controller={proposals} />
       <CopilotChatView
         className="min-h-0 flex-1"
         messages={session.messages}

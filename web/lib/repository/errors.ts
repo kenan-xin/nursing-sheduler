@@ -28,7 +28,15 @@ export type RepositoryErrorCode =
   /** The legacy persisted record could not be parsed or sanitized. */
   | "migration_corrupt"
   /** The command's RESULT is not a structurally valid scenario document. */
-  | "invalid_document";
+  | "invalid_document"
+  /** A proposal's own commands no longer validate against the persisted document. */
+  | "proposal_rejected"
+  /** The persisted proposal is missing, settled, or not the one being applied. */
+  | "proposal_conflict"
+  /** An operational assumption has no matching confirmation for this revision. */
+  | "confirmation_missing"
+  /** The receipt's commit is not the current reversible top of this session. */
+  | "receipt_not_undoable";
 
 /** A repository operation that failed a durable precondition or fence. */
 export class RepositoryError extends Error {

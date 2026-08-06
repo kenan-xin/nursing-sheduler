@@ -31,19 +31,28 @@ export {
   resolveTabId,
   ScenarioAuthority,
   useAuthorityStore,
+  type ApplyAssistantProposalOutcome,
+  type AssistantProposalV1,
+  type AssistantReceiptV1,
+  type AssistantScenarioBasis,
   type AuthorityState,
   type CommandFailureReason,
   type CommandOutcome,
   type OwnershipHint,
+  type PrepareAssistantProposalInput,
+  type PrepareAssistantProposalOutcome,
+  type ReceiptStanding,
   type ScenarioAuthorityConfig,
   type ScenarioOwnership,
   type WriteStatus,
 } from "./authority";
 
 export {
+  assistantProposalCommands,
   drainScenarioCommands,
   readAuthoritativeScenarioIdentity,
   readAuthoritativeScenarioOwnership,
+  readConflictingEditorDraft,
   readScenarioHistoryDepth,
   scenarioCommands,
 } from "./commands";

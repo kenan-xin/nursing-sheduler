@@ -27,9 +27,11 @@
 
 import { useEffect } from "react";
 import {
+  assistantProposalCommands,
   computeScenarioFingerprint,
   drainScenarioCommands,
   pickScenario,
+  readConflictingEditorDraft,
   readScenarioHistoryDepth,
   scenarioCommands,
   selectBackupStatus,
@@ -41,6 +43,8 @@ import {
   type HotStoreState,
   type ScenarioStoreState,
 } from "@/lib/store";
+import { capabilityRegistryStamp } from "@/lib/capability/registry";
+import type { CapabilityRegistryStamp } from "@/lib/capability/types";
 import { useNavGuardStore } from "./nav-guard-store";
 import { getPersistenceStatus, type PersistenceStatus } from "./persistence-status";
 
@@ -102,6 +106,22 @@ declare global {
       // durable authority behind it, and there is no repository command for it to
       // bypass.
       navGuard: typeof useNavGuardStore;
+      /**
+       * T07 — the assistant proposal/Apply command surface.
+       *
+       * Exposed for the same reason and on the same terms as `commands`: these are
+       * host-validated, fenced OPERATIONS, not setters. A spec driving them exercises
+       * the genuine Preview/confirm/Apply/Undo path -- real Dexie transactions, real
+       * cascade, real projection -- in a real browser, which is the half a
+       * fake-IndexedDB unit test cannot reach. Nothing here can publish a change the
+       * repository did not commit, and Apply still refuses everything the product
+       * refuses.
+       */
+      assistantProposal: typeof assistantProposalCommands;
+      /** The deployed registry stamp a proposal must be prepared under. */
+      capabilityStamp: () => CapabilityRegistryStamp;
+      /** The open editor draft that would block Apply, or `null`. */
+      conflictingDraft: () => string | null;
     };
   }
 }
@@ -138,6 +158,9 @@ export function TestBridge() {
         computeScenarioFingerprint(pickScenario(useScenarioStore.getState())),
       persistenceStatus: () => getPersistenceStatus(),
       navGuard: useNavGuardStore,
+      assistantProposal: assistantProposalCommands,
+      capabilityStamp: () => capabilityRegistryStamp(),
+      conflictingDraft: readConflictingEditorDraft,
     };
     return () => {
       delete window.__nsStore;

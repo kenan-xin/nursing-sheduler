@@ -1,13 +1,14 @@
 "use client";
 
-// The assistant's tool surface (T04) -- READ-ONLY, and that is the whole design.
+// The assistant's tool surface (T04 reads, T06 help, T07 prepare).
 //
-// The authority table in the technical plan admits two READ classes at this stage:
-// scenario/context read (below) and capability/help lookup (T06, registered from
-// `use-help-tools` at the top of the hook). There is deliberately no prepare-proposal
-// tool, no Apply and no diagnostic submit -- those arrive with T07 and T10, each
-// behind its own gate. Registering a placeholder now would let a model announce a
-// capability the app cannot honour.
+// THE AUTHORITY TABLE, in registration order: scenario/context read (below),
+// capability/help lookup (`use-help-tools`), and prepare-proposal
+// (`use-proposal-tools`). All three are non-mutating. There is deliberately no Apply
+// tool and no diagnostic submit: Apply is a HOST action the user takes on a rendered
+// card, and diagnostics arrive with T10 behind their own gate. Registering a
+// placeholder for either would let a model announce a capability the app cannot
+// honour.
 //
 // TOOL EXECUTION IS UNTRUSTED INPUT, not authorization. Even for reads that change
 // nothing, a handler that completes after its turn was superseded must return
@@ -23,6 +24,7 @@ import { pickScenario } from "@/lib/store";
 import { summarizeScenario } from "@/lib/ai/assistant/scenario-context";
 import { useAssistantStore } from "@/lib/ai/assistant/store";
 import { useHelpTools } from "./use-help-tools";
+import { useProposalTools } from "./use-proposal-tools";
 
 /**
  * What a handler answers when its turn is no longer the current one. A refusal
@@ -57,6 +59,10 @@ export function useContextTools(agentId: string, turnEpoch: number): void {
   // its resolver and the host navigation action stay out of this file entirely; these
   // two lines are the whole integration.
   useHelpTools(agentId, turnEpoch);
+  // T07's prepare-proposal tool -- the third authority class in the technical
+  // plan's table, and the only one that writes anything. It writes a PROPOSAL, never
+  // the scenario: there is still no Apply tool, and there never will be one.
+  useProposalTools(agentId, turnEpoch);
 
   const guard = (signal: AbortSignal | undefined): string | null => {
     if (signal?.aborted) return SUPERSEDED;

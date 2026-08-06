@@ -173,9 +173,58 @@ describe("the assistant is a leaf, not a dependency", () => {
       )
       .map(({ path }) => path);
 
-    // T04 explains and discusses; it cannot mutate. The Preview/Confirm/Apply
-    // authority arrives with T07, behind its own gate.
+    // T07 gave the assistant a durable path, and this rule is what keeps it NARROW.
+    // The generic mutation primitives -- an arbitrary patch, a whole-matrix write,
+    // a bare Undo/Redo -- stay unreachable from assistant code, as does the Apply
+    // transaction itself. What the assistant may name instead is
+    // `assistantProposalCommands`, whose every member is a typed, host-validated,
+    // fenced operation (see the rule below).
     expect(offenders).toEqual([]);
+  });
+
+  it("reaches durable state only through the named assistant proposal commands", () => {
+    // The positive half of the rule above. Preparing, confirming, applying, undoing
+    // and reading a proposal all go through the projection adapter's serial queue and
+    // its fences; nothing in the assistant opens a Dexie transaction on a scenario
+    // table or derives its own commit.
+    const permitted = new Set([
+      "readScenarioBasis",
+      "prepare",
+      "confirm",
+      "withdrawConfirmation",
+      "cancel",
+      "markStale",
+      "apply",
+      "undoReceipt",
+      "read",
+      "describeReceipts",
+    ]);
+
+    const offenders: string[] = [];
+    for (const { path, text } of sources) {
+      if (!path.startsWith("lib/ai/") && !path.startsWith("components/ai/")) continue;
+      if (/\.(test|spec)\.tsx?$/.test(path)) continue;
+      for (const [, member] of text.matchAll(/assistantProposalCommands\.(\w+)/g)) {
+        if (!permitted.has(member)) offenders.push(`${path} calls ${member}`);
+      }
+    }
+
+    expect(offenders).toEqual([]);
+  });
+
+  it("registers no tool that could apply a change", () => {
+    // Apply is a HOST action on a rendered card. A tool named for it -- however it
+    // were implemented -- would let the model announce that it can make the change
+    // itself, which is the one thing the whole Preview contract exists to prevent.
+    const toolNames = sources
+      .filter(({ path }) => path.startsWith("components/ai/") || path.startsWith("lib/ai/"))
+      .filter(({ path }) => !/\.(test|spec)\.tsx?$/.test(path))
+      .flatMap(({ text }) => [...text.matchAll(/name:\s*"([a-z_]+)"/g)].map((match) => match[1]));
+
+    const applyish = toolNames.filter((name) => /apply|commit|save|write|undo|delete/.test(name));
+    expect(applyish).toEqual([]);
+    // The one write-adjacent tool there IS prepares a proposal and nothing else.
+    expect(toolNames).toContain("prepare_scenario_change");
   });
 
   it("reaches OpenRouter from exactly one place -- the same-origin server modules", () => {
