@@ -58,6 +58,18 @@ export {
 } from "./overlay";
 
 export {
+  applyCellEditToSession,
+  applyCellSwapToSession,
+  canUndoSession,
+  emptyEditSession,
+  resetSession,
+  swapRosterCells,
+  undoSessionEdit,
+  type EditCoordinate,
+  type EditSession,
+} from "./editing";
+
+export {
   checkCoordinateMap,
   checkSolvedDays,
   parseRosterContainer,
@@ -135,4 +147,36 @@ export {
   type ImportRejected,
   type PromotionFence,
   type RosterImportOutcome,
+  type WorkingPromotionOutcome,
 } from "./promote";
+
+export {
+  buildEditedCellPatches,
+  EditedXlsxError,
+  patchFrozenXlsxWithEdits,
+  tryPatchFrozenXlsxWithEdits,
+  type EditedCellPatch,
+  type EditedCoordinateAddress,
+  type EditedXlsxPatchInput,
+  type EditedXlsxProvenanceView,
+  type PatchEditedXlsxResult,
+} from "./edited-xlsx";
+
+export {
+  AUTOSAVE_MESSAGES,
+  createAutosaveQueue,
+  type AutosaveDeps,
+  type AutosaveFailure,
+  type AutosaveFailureReason,
+  type AutosaveQueue,
+  type AutosaveSnapshot,
+  type AutosaveStatus,
+  type EnqueueOutcome,
+} from "./autosave";
+
+export {
+  clearRosterDataAndNotify,
+  clearViewPreferenceLive,
+  type RosterClearDeps,
+  type RosterClearOutcome,
+} from "./roster-clear";

@@ -10,13 +10,16 @@
 // are unchanged by the flag; they declare it so the mount point is stated once
 // for the whole component rather than inferred per notice.
 //
-// T16e — session recovery surface. Renders the interpreted T16b recovery state:
-// an auto-resumed run, an interrupted/unreadable record with a destructive Forget,
-// a storage-unavailable notice, and the degraded (reload-recovery-unavailable)
-// warning for a post-202 activation that could not be durably staged. T16e owns
-// only confirmation and rendering; it calls T16b's inspected recovery actions.
+// T16e — run-status notices for the current run. Renders an auto-resumed run, a
+// failed resume, a storage-unavailable notice, and the degraded
+// (reload-recovery-unavailable) warning for a post-202 activation that could not be
+// durably staged.
+//
+// It renders NO prior-run recovery workflow. An interrupted record from a previous
+// attempt is retired invisibly by `prepareForOptimize` when the user next clicks
+// Optimize, and an unreadable record simply blocks that submit — neither is a
+// concept the user is asked to hold, so neither gets a notice or an action here.
 
-import { Button } from "@/components/ui/button";
 import type { OptimizeRecovery, OptimizeResumeOutcome } from "@/lib/optimize";
 import { Callout } from "./callout";
 
@@ -25,29 +28,9 @@ export interface RecoveryNoticeProps {
   resume: OptimizeResumeOutcome | null;
   /** A live run whose post-202 activation could not be durably recorded. */
   reloadRecoveryUnavailable: boolean;
-  onForget(): void;
-  forgetPending: boolean;
 }
 
-export function RecoveryNotice({
-  state,
-  resume,
-  reloadRecoveryUnavailable,
-  onForget,
-  forgetPending,
-}: RecoveryNoticeProps) {
-  const forgetButton = (
-    <Button
-      variant="destructive"
-      size="sm"
-      onClick={onForget}
-      disabled={forgetPending}
-      data-testid="optimize-forget"
-    >
-      Forget this run and start over
-    </Button>
-  );
-
+export function RecoveryNotice({ state, resume, reloadRecoveryUnavailable }: RecoveryNoticeProps) {
   return (
     <>
       {reloadRecoveryUnavailable ? (
@@ -66,36 +49,6 @@ export function RecoveryNotice({
       {state.kind === "resumable" && resume !== null && resume.status !== "attached" ? (
         <Callout tone="error" placement="page" data-testid="optimize-resume-failed" alert>
           A previous optimisation run could not be resumed. {resume.reason}
-        </Callout>
-      ) : null}
-
-      {state.kind === "interrupted" ? (
-        <Callout
-          tone="warn"
-          placement="page"
-          data-testid="optimize-interrupted"
-          title="A previous optimise run was interrupted"
-          actions={forgetButton}
-          alert
-        >
-          A submission was interrupted before its job could be recorded, so it cannot be resumed. An
-          unknown backend optimisation may still be running until it reaches a terminal state or the
-          server releases it.
-        </Callout>
-      ) : null}
-
-      {state.kind === "unreadable" ? (
-        <Callout
-          tone="warn"
-          placement="page"
-          data-testid="optimize-unreadable"
-          title="Recovery data for a previous run is unreadable"
-          actions={forgetButton}
-          alert
-        >
-          The saved recovery record could not be read. It will not be resumed or deleted
-          automatically. An unknown backend optimisation may still be running until it reaches a
-          terminal state or the server releases it.
         </Callout>
       ) : null}
 

@@ -127,7 +127,6 @@ const STATUS_HANDLERS = {
   onDownloadArtifact: noop,
   onDownloadAgain: noop,
   onRetryCleanup: noop,
-  onAbandonCleanup: noop,
 };
 
 function renderStatus(over: Partial<OptimizeRunView>, cleanupPhase: "idle" | "failed" = "idle") {
@@ -356,8 +355,6 @@ describe("RecoveryNotice declares the page plane it is actually mounted on", () 
     state: { kind: "none" },
     resume: null,
     reloadRecoveryUnavailable: false,
-    onForget: noop,
-    forgetPending: false,
   };
 
   const RESUMABLE = {
@@ -383,12 +380,6 @@ describe("RecoveryNotice declares the page plane it is actually mounted on", () 
       tone: "error",
       over: { state: RESUMABLE, resume: { status: "conflict", reason: "already attached" } },
     },
-    {
-      testId: "optimize-interrupted",
-      tone: "warn",
-      over: { state: { kind: "interrupted", anonymized: true, peopleCount: 3 } },
-    },
-    { testId: "optimize-unreadable", tone: "warn", over: { state: { kind: "unreadable" } } },
     { testId: "optimize-storage-error", tone: "info", over: { state: { kind: "storage-error" } } },
   ];
 

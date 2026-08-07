@@ -144,6 +144,11 @@ export type WorkingPromotionOutcome =
   | { status: "source-missing" }
   | { status: "source-changed" }
   /**
+   * A DIFFERENT candidate version is stored for this job, so the caller's
+   * decision does not transfer. Nothing was validated and nothing was written.
+   */
+  | { status: "version-conflict"; currentVersion: number }
+  /**
    * The working roster moved (typically an autosave) while validation was
    * running. Both the newer working document and the source are preserved; the
    * caller re-reads and decides (F5's "discard unsaved edits and replace").
@@ -290,9 +295,17 @@ export interface RosterStorage {
    * `expectedWorkingRevision` is the revision the caller read BEFORE starting
    * validation (`null` when it observed no working roster); promotion is a
    * participant in the same CAS as autosave, not an override of it.
+   *
+   * `expectedCandidateVersion` names the EXACT version the caller decided about.
+   * It is required, not optional: a job id alone selects "whatever is stored for
+   * this job right now", so a same-job retry landing between render and click
+   * would be promoted under a decision the user made about a different roster.
+   * This is the same non-reusable identity `dismissCandidate` demands, and it is
+   * checked BEFORE validation or any working-roster write.
    */
   promoteCandidateToWorking<TDocument>(input: {
     jobId: string;
+    expectedCandidateVersion: number;
     validate: RosterDocumentValidator<TDocument>;
     expectedWorkingRevision: number | null;
     expectedClearEpoch: number;
@@ -591,6 +604,7 @@ export function createRosterStorageForDb(resolveDb: () => ScenarioPersistenceDb)
 
     async promoteCandidateToWorking<TDocument>(input: {
       jobId: string;
+      expectedCandidateVersion: number;
       validate: RosterDocumentValidator<TDocument>;
       expectedWorkingRevision: number | null;
       expectedClearEpoch: number;
@@ -598,6 +612,22 @@ export function createRosterStorageForDb(resolveDb: () => ScenarioPersistenceDb)
       const key = candidateRosterKey(input.jobId);
       const staged = await db().roster.get(key);
       if (!staged) return { status: "source-missing" };
+
+      // THE EXACT-VERSION FENCE, before validation and before any write.
+      //
+      // The `source` fence below only detects the candidate row CHANGING while
+      // validation runs; it adopts whatever revision was read here as its
+      // baseline. So a retry that replaced this job's candidate BEFORE the read
+      // slipped through entirely: the user decided about version 1 and version 2
+      // was promoted, with every later check passing honestly.
+      //
+      // The candidate row's `revision` IS its `candidateVersion` (see
+      // `commitCandidate`), and versions are allocated from a monotonic counter,
+      // so this comparison is exact and non-reusable.
+      if (staged.revision !== input.expectedCandidateVersion) {
+        return { status: "version-conflict" as const, currentVersion: staged.revision };
+      }
+
       return commitWorkingDocument({
         document: staged.document,
         validate: input.validate,

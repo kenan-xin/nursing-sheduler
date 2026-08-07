@@ -52,7 +52,6 @@ const statusHandlers = {
   onDownloadArtifact: noop,
   onDownloadAgain: noop,
   onRetryCleanup: noop,
-  onAbandonCleanup: noop,
 };
 
 const logEntry = (over: Partial<RunLogEntry>): RunLogEntry => ({
@@ -285,32 +284,8 @@ export default function OptimizeScreenFixtureClient() {
         />
       </Panel>
 
-      <Panel id="fx-recovery-interrupted" title="Recovery — interrupted (Forget)">
-        <RecoveryNotice
-          state={{ kind: "interrupted", anonymized: true, peopleCount: 3 }}
-          resume={null}
-          reloadRecoveryUnavailable={false}
-          onForget={noop}
-          forgetPending={false}
-        />
-      </Panel>
-      <Panel id="fx-recovery-unreadable" title="Recovery — unreadable">
-        <RecoveryNotice
-          state={{ kind: "unreadable" }}
-          resume={null}
-          reloadRecoveryUnavailable={false}
-          onForget={noop}
-          forgetPending={false}
-        />
-      </Panel>
       <Panel id="fx-recovery-degraded" title="Recovery — reload unavailable (degraded)">
-        <RecoveryNotice
-          state={{ kind: "none" }}
-          resume={null}
-          reloadRecoveryUnavailable
-          onForget={noop}
-          forgetPending={false}
-        />
+        <RecoveryNotice state={{ kind: "none" }} resume={null} reloadRecoveryUnavailable />
       </Panel>
 
       {/* NOT Panels — the same reason the event log below is not one. These are the
@@ -329,8 +304,6 @@ export default function OptimizeScreenFixtureClient() {
           state={{ kind: "resumable", jobId: "opt_1", anonymized: false, peopleCount: 2 }}
           resume={{ status: "attached", jobId: "opt_1" }}
           reloadRecoveryUnavailable={false}
-          onForget={noop}
-          forgetPending={false}
         />
       </section>
       <section data-testid="fx-recovery-storage-error" className="flex flex-col gap-4">
@@ -341,8 +314,6 @@ export default function OptimizeScreenFixtureClient() {
           state={{ kind: "storage-error" }}
           resume={null}
           reloadRecoveryUnavailable={false}
-          onForget={noop}
-          forgetPending={false}
         />
       </section>
 

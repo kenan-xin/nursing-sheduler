@@ -145,7 +145,7 @@ function memStorage(
 
 function activeSeed(jobId = "opt_1"): string {
   const record: ActiveOptimizeSession = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     ownerId: "owner-seed",
     phase: "active",
     jobId,
@@ -153,6 +153,7 @@ function activeSeed(jobId = "opt_1"): string {
     runOptions: {},
     peopleCount: 0,
     reverseMap: [],
+    capture: { status: "staged", snapshotRef: "owner-seed", submissionOrdinal: 1 },
   };
   return JSON.stringify(record);
 }
@@ -477,6 +478,7 @@ describe("T16b integration — StrictMode and cleanup lifecycle", () => {
           peopleCount: 0,
           reverseMap: [],
           reloadRecoveryAvailable: true,
+          capture: { status: "staged", snapshotRef: "owner-B", submissionOrdinal: 1 },
         },
         initialCursor: null,
       });

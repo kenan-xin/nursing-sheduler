@@ -25,13 +25,14 @@ function apiError(status: number, body: unknown): OptimizeApiError {
 }
 
 const activeRecord = (jobId: string): ActiveOptimizeSession => ({
-  schemaVersion: 1,
+  schemaVersion: 2,
   ownerId: "own_1",
   phase: "active",
   anonymized: false,
   runOptions: {},
   peopleCount: 0,
   reverseMap: [],
+  capture: { status: "staged", snapshotRef: "own_1", submissionOrdinal: 1 },
   jobId,
 });
 

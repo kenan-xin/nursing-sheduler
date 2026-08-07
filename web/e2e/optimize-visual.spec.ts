@@ -627,6 +627,11 @@ async function seedAttachedSession(page: Page) {
     runOptions: { prettify: false, timeout: 300 },
     peopleCount: 0,
     reverseMap: [],
+    capture: {
+      status: "staged",
+      snapshotRef: "owner-r6-visual-attached",
+      submissionOrdinal: 1,
+    },
     lastCursor: "c0",
   };
   await page.addInitScript(({ key, value }) => sessionStorage.setItem(key, value), {

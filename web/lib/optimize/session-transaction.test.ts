@@ -4,9 +4,8 @@ import {
   activateSession,
   buildProvisionalSession,
   clearInvalidActiveCursor,
-  forgetInspectedSession,
+  removeInspectedSession,
   inspectPersistedSession,
-  FORGET_OPTIMIZE_SESSION_WARNING,
   OPTIMIZE_SESSION_SCHEMA_VERSION,
   OPTIMIZE_SESSION_STORAGE_KEY,
   runSubmissionTransaction,
@@ -19,6 +18,159 @@ import {
 } from "./session-transaction";
 
 const KEY = OPTIMIZE_SESSION_STORAGE_KEY;
+
+// ---------------------------------------------------------------------------
+// F2 — the roster-capture authority on the record.
+// ---------------------------------------------------------------------------
+
+describe("session record — F2 capture authority", () => {
+  const base = () => ({
+    schemaVersion: OPTIMIZE_SESSION_SCHEMA_VERSION,
+    ownerId: "own-1",
+    phase: "active" as const,
+    jobId: "job-1",
+    anonymized: false,
+    runOptions: {},
+    peopleCount: 0,
+    reverseMap: [] as PeopleReverseMap,
+  });
+
+  function inspectRaw(value: unknown) {
+    const storage = new FakeStorage();
+    storage.seed(JSON.stringify(value));
+    return inspectPersistedSession(storage);
+  }
+
+  it("a pre-capture v1 record is unreadable, never silently migrated", () => {
+    // Roster capture authority cannot be invented after the fact: a v1 record has
+    // no proof about whether a snapshot was staged, so it fails closed.
+    const v1 = { ...base(), schemaVersion: 1 };
+    expect(inspectRaw(v1).kind).toBe("unreadable");
+  });
+
+  it("rejects every malformed capture authority", () => {
+    const malformed = [
+      undefined,
+      null,
+      { status: "staged", snapshotRef: "own-1" }, // no ordinal
+      { status: "staged", submissionOrdinal: 1 }, // no ref
+      { status: "staged", snapshotRef: "", submissionOrdinal: 1 }, // empty ref
+      { status: "staged", snapshotRef: "own-1", submissionOrdinal: 0 }, // F1 starts at 1
+      { status: "staged", snapshotRef: "own-1", submissionOrdinal: 1.5 },
+      { status: "staged", snapshotRef: "own-1", submissionOrdinal: 1, extra: true },
+      { status: "unavailable" }, // no reason
+      { status: "unavailable", reason: "because" }, // unknown reason
+      { status: "unavailable", reason: "snapshot_persist_failed", snapshotRef: "o" },
+      { status: "whatever" },
+    ];
+    for (const capture of malformed) {
+      expect(inspectRaw({ ...base(), capture }).kind).toBe("unreadable");
+    }
+  });
+
+  it("AUTHORITY BINDING: a staged ref that is not the owner id is unreadable", () => {
+    // `snapshotRef` IS the transaction owner id, and that identity is the only
+    // reason an owner-scoped snapshot deletion is as narrowly scoped as the record
+    // authorizing it. Accept a record naming a FOREIGN owner and removing record B
+    // would authorize deleting owner A's snapshot — potentially another tab's live
+    // accepted run. It fails closed instead.
+    const foreign = inspectRaw({
+      ...base(),
+      capture: { status: "staged", snapshotRef: "own-SOMEONE-ELSE", submissionOrdinal: 1 },
+    });
+    expect(foreign.kind).toBe("unreadable");
+  });
+
+  it("AUTHORITY BINDING is enforced writer-side too, so unbound bytes never reach storage", () => {
+    // The same rule on the pre-write round-trip: a caller cannot stage a record
+    // whose capture points at somebody else's snapshot.
+    const storage = new FakeStorage();
+    const outcome = stageProvisionalSession(
+      storage,
+      buildProvisionalSession({
+        ownerId: "own-1",
+        anonymized: false,
+        peopleCount: 2,
+        reverseMap: [],
+        runOptions: {},
+        capture: { status: "staged", snapshotRef: "own-SOMEONE-ELSE", submissionOrdinal: 1 },
+      }),
+    );
+    expect(outcome).toEqual({ status: "blocked", reason: "invalid-record" });
+    expect(storage.raw(KEY)).toBeNull();
+  });
+
+  it("negative control: both well-formed variants are resumable", () => {
+    const staged = inspectRaw({
+      ...base(),
+      capture: { status: "staged", snapshotRef: "own-1", submissionOrdinal: 3 },
+    });
+    expect(staged.kind).toBe("resumable");
+    const degraded = inspectRaw({
+      ...base(),
+      capture: { status: "unavailable", reason: "snapshot_persist_failed" },
+    });
+    expect(degraded.kind).toBe("resumable");
+  });
+
+  it("survives activation and cursor persistence verbatim", () => {
+    const storage = new FakeStorage();
+    const capture = { status: "staged" as const, snapshotRef: "own-1", submissionOrdinal: 9 };
+    const provisional = buildProvisionalSession({
+      ownerId: "own-1",
+      anonymized: false,
+      peopleCount: 0,
+      reverseMap: [],
+      runOptions: {},
+      capture,
+    });
+    expect(stageProvisionalSession(storage, provisional).status).toBe("staged");
+
+    const activated = activateSession(storage, provisional, "job-1");
+    expect(activated.status).toBe("activated");
+    if (activated.status !== "activated") throw new Error("unreachable");
+    expect(activated.record.capture).toEqual(capture);
+
+    // The cursor rewrite rebuilds the record from the CURRENT durable one, so the
+    // capture authority must not be dropped on the way through.
+    const updated = updateActiveCursor(storage, "job-1", "c-1");
+    expect(updated.status).toBe("updated");
+    const inspected = inspectPersistedSession(storage);
+    expect(inspected.kind).toBe("resumable");
+    if (inspected.kind !== "resumable") throw new Error("unreachable");
+    expect(inspected.record.capture).toEqual(capture);
+    expect(inspected.record.lastCursor).toBe("c-1");
+  });
+
+  it("a codec that rewrites the capture authority is refused before any setItem", () => {
+    // Writer validation must reject a lossy/lying codec on the capture field for the
+    // same reason as every other load-bearing field: an ordinal that is not the one
+    // F1 allocated would corrupt candidate ordering across tabs.
+    const storage = new FakeStorage();
+    const codec: SessionCodec = {
+      serialize: (record) =>
+        JSON.stringify({
+          ...record,
+          capture: { status: "staged", snapshotRef: "own-1", submissionOrdinal: 99 },
+        }),
+      deserialize: (raw) => JSON.parse(raw) as unknown,
+    };
+    const provisional = buildProvisionalSession({
+      ownerId: "own-1",
+      anonymized: false,
+      peopleCount: 0,
+      reverseMap: [],
+      runOptions: {},
+      capture: { status: "staged", snapshotRef: "own-1", submissionOrdinal: 1 },
+    });
+
+    expect(stageProvisionalSession(storage, provisional, codec)).toMatchObject({
+      status: "blocked",
+      reason: "invalid-record",
+    });
+    expect(storage.getItem(KEY)).toBeNull();
+  });
+});
 
 /** An injectable Storage subset with per-operation overrides for the adversarial
  *  matrix (throwing / no-op / partial / write-then-throw / wipe-then-throw). */
@@ -76,6 +228,7 @@ function anonymizedProvisional(ownerId = "owner-A"): ProvisionalOptimizeSession 
     peopleCount: 2,
     reverseMap: REVERSE_MAP,
     runOptions: { prettify: true, timeout: 300 },
+    capture: { status: "staged", snapshotRef: ownerId, submissionOrdinal: 1 },
   });
 }
 function plainProvisional(ownerId = "owner-P"): ProvisionalOptimizeSession {
@@ -85,6 +238,7 @@ function plainProvisional(ownerId = "owner-P"): ProvisionalOptimizeSession {
     peopleCount: 2,
     reverseMap: [],
     runOptions: {},
+    capture: { status: "staged", snapshotRef: ownerId, submissionOrdinal: 1 },
   });
 }
 
@@ -98,6 +252,7 @@ function validActiveJson(jobId = "job-seed", ownerId = "owner-seed"): string {
     runOptions: { prettify: true, timeout: 300 },
     peopleCount: 2,
     reverseMap: REVERSE_MAP,
+    capture: { status: "staged", snapshotRef: ownerId, submissionOrdinal: 1 },
   };
   return JSON.stringify(active);
 }
@@ -214,6 +369,7 @@ describe("stageProvisionalSession — durable, verified, validated write before 
         peopleCount: 2,
         reverseMap: REVERSE_MAP,
         runOptions: {},
+        capture: { status: "staged", snapshotRef: "o", submissionOrdinal: 1 },
       }),
       buildProvisionalSession({
         ownerId: "o",
@@ -221,6 +377,7 @@ describe("stageProvisionalSession — durable, verified, validated write before 
         peopleCount: -1,
         reverseMap: [],
         runOptions: {},
+        capture: { status: "staged", snapshotRef: "o", submissionOrdinal: 1 },
       }),
       buildProvisionalSession({
         ownerId: "o",
@@ -228,6 +385,7 @@ describe("stageProvisionalSession — durable, verified, validated write before 
         peopleCount: 2,
         reverseMap: [], // anonymized but empty map ⇒ inconsistent
         runOptions: {},
+        capture: { status: "staged", snapshotRef: "o", submissionOrdinal: 1 },
       }),
       buildProvisionalSession({
         ownerId: "o",
@@ -235,6 +393,17 @@ describe("stageProvisionalSession — durable, verified, validated write before 
         peopleCount: 2,
         reverseMap: REVERSE_MAP,
         runOptions: { timeout: 999_999 }, // out of bounds
+        capture: { status: "staged", snapshotRef: "o", submissionOrdinal: 1 },
+      }),
+      buildProvisionalSession({
+        ownerId: "o",
+        anonymized: true,
+        peopleCount: 2,
+        reverseMap: REVERSE_MAP,
+        runOptions: {},
+        // A staged capture with a zero ordinal: F1 hands out 1, 2, 3 … so this is a
+        // corrupted ordering authority and must never become durable.
+        capture: { status: "staged", snapshotRef: "o", submissionOrdinal: 0 },
       }),
     ];
     for (const record of cases) {
@@ -778,7 +947,7 @@ describe("inspectPersistedSession — strict reload classification", () => {
   });
 });
 
-describe("forgetInspectedSession — confirmed unchanged-record removal", () => {
+describe("removeInspectedSession — confirmed unchanged-record removal", () => {
   it.each([
     ["provisional", JSON.stringify(anonymizedProvisional())],
     ["active", validActiveJson("job-forget")],
@@ -792,7 +961,7 @@ describe("forgetInspectedSession — confirmed unchanged-record removal", () => 
     if (inspected.kind === "none" || inspected.identity === null)
       throw new Error("identity missing");
 
-    expect(forgetInspectedSession(storage, inspected.identity)).toEqual({ status: "removed" });
+    expect(removeInspectedSession(storage, inspected.identity)).toEqual({ status: "removed" });
     expect(storage.raw(KEY)).toBeNull();
   });
 
@@ -803,7 +972,7 @@ describe("forgetInspectedSession — confirmed unchanged-record removal", () => 
     if (inspected.kind !== "resumable") throw new Error("expected resumable");
 
     storage.seed(validActiveJson("job-B"));
-    expect(forgetInspectedSession(storage, inspected.identity)).toEqual({ status: "changed" });
+    expect(removeInspectedSession(storage, inspected.identity)).toEqual({ status: "changed" });
     expect(storage.raw(KEY)).toContain("job-B");
   });
 
@@ -816,7 +985,7 @@ describe("forgetInspectedSession — confirmed unchanged-record removal", () => 
         throw new Error("expected unreadable identity");
       }
       storage.onRemove = mode === "throw" ? securityError : () => {};
-      expect(forgetInspectedSession(storage, inspected.identity)).toEqual({
+      expect(removeInspectedSession(storage, inspected.identity)).toEqual({
         status: "unverified",
       });
       expect(storage.raw(KEY)).toBe("{broken");
@@ -831,13 +1000,7 @@ describe("forgetInspectedSession — confirmed unchanged-record removal", () => 
       throw new Error("expected unreadable identity");
     }
     storage.removeItem(KEY);
-    expect(forgetInspectedSession(storage, inspected.identity)).toEqual({ status: "removed" });
-  });
-
-  it("exports the unknown-backend retention warning", () => {
-    expect(FORGET_OPTIMIZE_SESSION_WARNING).toContain(
-      "unknown backend optimisation may continue until terminal state or server retention",
-    );
+    expect(removeInspectedSession(storage, inspected.identity)).toEqual({ status: "removed" });
   });
 });
 
@@ -959,7 +1122,7 @@ describe("updateActiveCursor — job-scoped, validated, verified cursor persiste
   // Persisted-recovery classification (`cursor-seam-and-feed-order` P1 #2): an
   // otherwise-valid active session whose ONLY defect is an oversized saved cursor
   // must enter explicit invalid-cursor RECOVERY (resumable, cursor stripped) rather
-  // than the generic unreadable/Forget flow — while every other corruption stays
+  // than the generic unreadable flow — while every other corruption stays
   // unreadable.
   it("classifies an oversized-cursor active record as resumable+cursorReset with the cursor stripped", () => {
     const oversized = "c".repeat(4096 + 1);

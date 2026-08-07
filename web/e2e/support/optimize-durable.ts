@@ -495,6 +495,18 @@ export const ABORT_BOUNDS = {
   abortUrlSettle: 30_000,
   /** The tail wait that lets the BFF observe and log the upstream cancel. */
   bffObservationTail: 2_000,
+  /**
+   * Draining the lane's accepted-job tracker and writing the shell's ids-only abort
+   * handoff. Enumerated rather than left implicit because it runs INSIDE the test body
+   * (in a `finally`, so a failed lane still hands over what it owns), which means the
+   * test total is its only ceiling.
+   *
+   * Derived, not picked: `drain()` spends up to `ACCEPTED_PENDING_SETTLE_MS` waiting for
+   * a POST still on the wire and then a SECOND, independent window of the same size on
+   * the body reads, so 2x that plus a small allowance for one temp-write and rename.
+   * `abort-handoff.test.ts` pins the relation rather than the literal.
+   */
+  abortHandoffPublish: 12_000,
   schedulerAllowance: 8_000,
 } as const;
 
@@ -503,7 +515,7 @@ export const ABORT_BOUND_KEYS = Object.keys(ABORT_BOUNDS) as ReadonlyArray<
   keyof typeof ABORT_BOUNDS
 >;
 
-/** 5 + 5 + 50 + 5 + 15 + 5 + 30 + 30 + 2 + 8 = 155s. */
+/** 5 + 5 + 50 + 5 + 15 + 5 + 30 + 30 + 2 + 12 + 8 = 167s. */
 export const ABORT_TEST_TIMEOUT = Object.values(ABORT_BOUNDS).reduce(
   (total, bound) => total + bound,
   0,
@@ -2015,12 +2027,47 @@ export interface OptimizeRouteConfig {
   onEvents?: (route: Route) => Promise<void> | void;
   /** `GET /api/optimize/{id}/xlsx`. Defaults to a valid empty workbook. */
   onXlsx?: (route: Route) => Promise<void> | void;
+  /** `GET /api/optimize/{id}/roster`. Defaults to a contract-valid container. */
+  onRoster?: (route: Route) => Promise<void> | void;
   /** `DELETE /api/optimize/{id}` cleanup. Defaults to 204. */
   onDelete?: (route: Route) => Promise<void> | void;
   /** `POST /api/optimize/{id}/cancel`. Defaults to a cancelled job. */
   onCancel?: (route: Route) => Promise<void> | void;
   /** `POST /api/optimize/{id}/finish-now`. Defaults to a completed feasible job. */
   onFinishNow?: (route: Route) => Promise<void> | void;
+}
+
+/**
+ * A contract-valid `/roster` container for the durable journeys.
+ *
+ * Roster capture now runs on the real terminal path, so a route map without this
+ * handler falls through to `route.abort()` and every completed run parks in
+ * `fetch-failed` — which withholds the cleanup token and stops the DELETE these
+ * journeys exist to assert. The container is served for real, F3's real assembler
+ * runs against the real staged submission, and the capture reaches a real terminal
+ * token; only the branch it lands on depends on whether the two align.
+ */
+export function rosterContainer(): unknown {
+  return {
+    schemaVersion: "roster-container/1",
+    people: [{ id: "P1" }],
+    dates: [{ iso: "2026-01-01" }],
+    solvedDays: [[{ kind: "shift", shiftId: "Day" }]],
+    score: -1,
+    solverStatus: "OPTIMAL",
+    coordinateMap: {
+      peopleRows: [3],
+      dateColumns: [2],
+      firstPeopleRow: 3,
+      leadingCols: 1,
+      historyCols: 0,
+      prettify: false,
+    },
+    xlsx: {
+      name: "schedule.xlsx",
+      mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    },
+  };
 }
 
 export function json(route: Route, status: number, body: unknown): Promise<void> {
@@ -2103,6 +2150,9 @@ export async function installOptimizeRoutes(
       }
       if (sub === "/xlsx") {
         return config.onXlsx ? config.onXlsx(route) : xlsx(route);
+      }
+      if (sub === "/roster") {
+        return config.onRoster ? config.onRoster(route) : json(route, 200, rosterContainer());
       }
       if (sub === "/cancel") {
         return config.onCancel ? config.onCancel(route) : json(route, 200, cancelledJob());

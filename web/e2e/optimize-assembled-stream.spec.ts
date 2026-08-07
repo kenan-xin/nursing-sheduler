@@ -53,6 +53,7 @@ import {
   auditTerminalExpect,
   guardTerminalExpect,
 } from "./support/abort-control-reporter";
+import { ABORT_HANDOFF_ENV, publishAbortHandoff } from "./support/abort-handoff";
 
 const REPO_ROOT = resolve(__dirname, "../..");
 const TINY_YAML = readFileSync(
@@ -946,7 +947,18 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
   test("abort propagation: browser disconnect cancels upstream SSE body", async ({
     page,
   }, testInfo) => {
-    await auditTerminalExpect(testInfo, async () => {
+    // THE ABORT AUTHORITY HANDOFF PRODUCER, armed before anything can submit.
+    //
+    // This lane is the one that walks away from a live job on purpose, so nothing
+    // downstream of it — no terminal state, no artifact, no BFF log line — carries the
+    // accepted id. `docker/verify-stream.sh` audits the BFF log first and only then
+    // releases that job, and it refuses to guess which one it is: the accepted ids have
+    // to come from the attempt itself. This tracker is that causal source, and it is a
+    // LOCAL binding on purpose — assigning the shared `acceptedTracker` would enlist the
+    // suite's release hook, which would cancel the very job the shell must audit and
+    // then own.
+    const abortTracker = trackAcceptedJobs(page);
+    const audited = auditTerminalExpect(testInfo, async () => {
       // This lane's own complete budget, derived in `ABORT_BOUNDS`. It had NO
       // `test.setTimeout` and the assembled config declares no suite timeout, so
       // Playwright's 30s default governed a schedule whose local bounds already summed
@@ -1030,5 +1042,49 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
       // Let the BFF observe and log the upstream cancel before the gate reads its logs.
       await page.waitForTimeout(ABORT_BOUNDS.bffObservationTail);
     });
+
+    // Settle the body WITHOUT catching-and-rethrowing a copy: this rejection handler
+    // captures the escaped error OBJECT, and the rethrow below is that same object. The
+    // audit wrapper has already written its mark by then, so the negative control's
+    // object-identity binding is untouched.
+    const bodyFailure = await audited.then(
+      () => null,
+      (error: unknown) => ({ error }),
+    );
+
+    // THE HANDOFF, published on BOTH paths. The gate is explicit that a valid handoff is
+    // still cleaned up when Playwright failed — containment must not leak a live job —
+    // so a red body is exactly when the shell most needs to know which job to release.
+    // Bounded, because `drain()` spends its own internal windows and this runs inside
+    // the test body's budget (`ABORT_BOUNDS.abortHandoffPublish`).
+    let publishFailure: unknown = null;
+    let publishNote = "";
+    try {
+      const drained = await withBound(
+        "abort handoff drain",
+        ABORT_BOUNDS.abortHandoffPublish,
+        abortTracker.drain(),
+      );
+      // Dispose AFTER the drain and take its own report: detaching the listeners is the
+      // instant an acceptance can be lost silently, and `judgeAbortOwnership` refuses to
+      // publish anything at all when disposal stranded work.
+      const disposal = abortTracker.dispose();
+      publishNote = publishAbortHandoff({
+        target: process.env[ABORT_HANDOFF_ENV],
+        drained,
+        disposal,
+      }).note;
+    } catch (error) {
+      abortTracker.dispose();
+      publishFailure = error;
+      publishNote = error instanceof Error ? error.message : String(error);
+    }
+    await testInfo.attach("abort-handoff", { body: publishNote, contentType: "text/plain" });
+
+    // The body's failure always wins; a publish failure only surfaces on an otherwise
+    // green lane, where it is the difference between the shell owning this job and the
+    // shell losing authority over it.
+    if (bodyFailure !== null) throw bodyFailure.error;
+    if (publishFailure !== null) throw publishFailure;
   });
 });

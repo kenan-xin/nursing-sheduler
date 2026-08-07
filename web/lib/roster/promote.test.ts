@@ -202,7 +202,10 @@ describe("promoting a captured candidate", () => {
     });
     expect(committed.status).toBe("committed");
 
-    const outcome = await promoteCandidateRosterToWorking("job-1", await fenceFor(storage));
+    const outcome = await promoteCandidateRosterToWorking(
+      { jobId: "job-1", candidateVersion: 1 },
+      await fenceFor(storage),
+    );
     expect(outcome).toEqual({ status: "promoted", revision: 1 });
     expect((await readWorkingDocument(storage))?.frozenXlsx.size).toBe(31);
     // Promotion is a copy, not a move: Load can be repeated after an edit.
@@ -214,7 +217,10 @@ describe("promoting a captured candidate", () => {
     const current = await fixtureRosterDocument({ frozenXlsx: fixtureFrozenXlsx(11) });
     await importRosterBytesToWorking(await encodedBytes(current), await fenceFor(storage));
 
-    const outcome = await promoteCandidateRosterToWorking("job-absent", await fenceFor(storage));
+    const outcome = await promoteCandidateRosterToWorking(
+      { jobId: "job-absent", candidateVersion: 1 },
+      await fenceFor(storage),
+    );
     expect(outcome).toEqual({ status: "source-missing" });
     expect((await readWorkingDocument(storage))?.frozenXlsx.size).toBe(11);
   });
@@ -237,8 +243,112 @@ describe("promoting a captured candidate", () => {
       expectedClearEpoch: await storage.getClearEpoch(),
     });
 
-    const outcome = await promoteCandidateRosterToWorking("job-2", await fenceFor(storage));
+    const outcome = await promoteCandidateRosterToWorking(
+      { jobId: "job-2", candidateVersion: 1 },
+      await fenceFor(storage),
+    );
     expect(outcome.status).toBe("rejected");
     expect((await readWorkingDocument(storage))?.frozenXlsx.size).toBe(11);
+  });
+
+  // THE SAME-JOB RETRY RACE. The promotion used to be named by job id alone,
+  // which means "promote whatever this job has stored right now". A retry that
+  // re-captured the SAME job between render and click therefore had its result
+  // promoted under the user's decision about the earlier one — silently, with
+  // every later check (source fence, working CAS, epoch) passing honestly,
+  // because they only detect change AFTER the storage read.
+  it("cannot promote a newer same-job candidate under an older version's decision", async () => {
+    const storage = openStorage();
+    const epoch = await storage.getClearEpoch();
+
+    // v1 is what the user sees and decides about.
+    const v1 = await fixtureRosterDocument({ frozenXlsx: fixtureFrozenXlsx(31) });
+    const first = await storage.commitCandidate({
+      jobId: "job-1",
+      submissionOrdinal: 1,
+      document: v1,
+      expectedClearEpoch: epoch,
+    });
+    if (first.status !== "committed") throw new Error("fixture failed to commit v1");
+
+    // A retry replaces the same job's candidate BEFORE the click lands.
+    const v2 = await fixtureRosterDocument({ frozenXlsx: fixtureFrozenXlsx(77) });
+    const second = await storage.commitCandidate({
+      jobId: "job-1",
+      submissionOrdinal: 2,
+      document: v2,
+      expectedClearEpoch: epoch,
+    });
+    if (second.status !== "committed") throw new Error("fixture failed to commit v2");
+    expect(second.pointer.candidateVersion).not.toBe(first.pointer.candidateVersion);
+
+    const outcome = await promoteCandidateRosterToWorking(
+      { jobId: "job-1", candidateVersion: first.pointer.candidateVersion },
+      await fenceFor(storage),
+    );
+
+    expect(outcome).toEqual({
+      status: "version-conflict",
+      currentVersion: second.pointer.candidateVersion,
+    });
+    // The load-bearing assertion: NOTHING was promoted. The old code wrote v2
+    // here (a 77-byte workbook) under a decision made about v1.
+    expect(await readWorkingDocument(storage)).toBeNull();
+    // And v2 itself is untouched — a refusal is not a deletion.
+    expect(await storage.readCandidate("job-1")).not.toBeNull();
+  });
+
+  // NEGATIVE CONTROL: the identical call with the version that IS stored still
+  // promotes, so the refusal above is the version fence and not a broken path.
+  it("still promotes when the displayed version is the one stored", async () => {
+    const storage = openStorage();
+    const epoch = await storage.getClearEpoch();
+    const document = await fixtureRosterDocument({ frozenXlsx: fixtureFrozenXlsx(31) });
+    const committed = await storage.commitCandidate({
+      jobId: "job-1",
+      submissionOrdinal: 1,
+      document,
+      expectedClearEpoch: epoch,
+    });
+    if (committed.status !== "committed") throw new Error("fixture failed to commit");
+
+    const outcome = await promoteCandidateRosterToWorking(
+      { jobId: "job-1", candidateVersion: committed.pointer.candidateVersion },
+      await fenceFor(storage),
+    );
+
+    expect(outcome).toEqual({ status: "promoted", revision: 1 });
+    expect((await readWorkingDocument(storage))?.frozenXlsx.size).toBe(31);
+  });
+
+  // The refusal must happen BEFORE validation, not after it. A validator that
+  // runs at all has already been handed a document the user never asked about.
+  it("refuses a version mismatch without ever running validation", async () => {
+    const storage = openStorage();
+    const epoch = await storage.getClearEpoch();
+    const document = await fixtureRosterDocument();
+    const committed = await storage.commitCandidate({
+      jobId: "job-1",
+      submissionOrdinal: 1,
+      document,
+      expectedClearEpoch: epoch,
+    });
+    if (committed.status !== "committed") throw new Error("fixture failed to commit");
+
+    let validated = 0;
+    const outcome = await storage.promoteCandidateToWorking({
+      jobId: "job-1",
+      expectedCandidateVersion: committed.pointer.candidateVersion + 5,
+      validate: (value) => {
+        validated += 1;
+        return { ok: true as const, document: value };
+      },
+      expectedWorkingRevision: null,
+      expectedClearEpoch: epoch,
+    });
+
+    expect(outcome.status).toBe("version-conflict");
+    expect(validated).toBe(0);
+    expect(await readWorkingDocument(storage)).toBeNull();
   });
 });

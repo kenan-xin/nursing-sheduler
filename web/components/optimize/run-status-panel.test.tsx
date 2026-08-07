@@ -23,7 +23,6 @@ const handlers = {
   onDownloadArtifact: vi.fn(),
   onDownloadAgain: vi.fn(),
   onRetryCleanup: vi.fn(),
-  onAbandonCleanup: vi.fn(),
 };
 
 /**
@@ -324,8 +323,8 @@ describe("RunStatusPanel — terminal outcomes", () => {
   });
 });
 
-describe("RunStatusPanel — cleanup retry/abandon", () => {
-  it("offers retry and abandon on a failed cleanup without hiding the success view", async () => {
+describe("RunStatusPanel — cleanup retry", () => {
+  it("offers retry ONLY on a failed cleanup, without hiding the success view", async () => {
     const props = setup(
       view({
         lifecycle: "completed",
@@ -338,13 +337,12 @@ describe("RunStatusPanel — cleanup retry/abandon", () => {
     expect(screen.getByTestId("optimize-download-again")).toBeInTheDocument();
     await userEvent.click(screen.getByTestId("optimize-cleanup-retry"));
     expect(props.onRetryCleanup).toHaveBeenCalled();
-    await userEvent.click(screen.getByTestId("optimize-cleanup-abandon"));
-    expect(props.onAbandonCleanup).toHaveBeenCalled();
-  });
-
-  it("notes an abandoned cleanup", () => {
-    setup(view({ lifecycle: "completed", jobId: "opt_1" }), { cleanupPhase: "abandoned" });
-    expect(screen.getByTestId("optimize-cleanup-abandoned")).toBeInTheDocument();
+    // The retired public escape hatch is gone: Retry is the only offered action,
+    // and the copy carries no backend-retention explanation.
+    expect(screen.queryByTestId("optimize-cleanup-abandon")).not.toBeInTheDocument();
+    expect(screen.getByTestId("optimize-cleanup-failed").textContent ?? "").not.toMatch(
+      /retention|server job|abandon/i,
+    );
   });
 });
 

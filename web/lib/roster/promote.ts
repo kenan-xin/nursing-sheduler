@@ -17,6 +17,9 @@ import type { RosterVersionPolicy } from "./schema-version";
 import { validateRosterDocument } from "./validate";
 import type { RosterDocument } from "./types";
 
+/** Re-exported so the roster barrel can surface the promotion outcome type. */
+export type { WorkingPromotionOutcome };
+
 /** The compare-and-swap expectations a promotion must carry (see F1's contract). */
 export interface PromotionFence {
   storage: RosterStorage;
@@ -80,16 +83,34 @@ export async function importRosterBytesToWorking(
 }
 
 /**
+ * The exact candidate a caller decided to promote.
+ *
+ * Taken as one object rather than two positional arguments so the job and the
+ * version cannot drift apart at a call site — callers hold a
+ * `CurrentCandidatePointer` and pass it straight through.
+ */
+export interface CandidatePromotionRef {
+  jobId: string;
+  candidateVersion: number;
+}
+
+/**
  * Promote a captured candidate to the working roster. The candidate was validated
  * when it was assembled; it is validated again here because the value has since
  * crossed a structured-clone boundary and F1 treats stored documents as opaque.
+ *
+ * `ref` names the EXACT version the caller decided about. Passing only a job id
+ * would mean "promote whatever this job has stored now", which a same-job retry
+ * landing between render and click silently turns into promoting a roster the
+ * user never saw.
  */
 export function promoteCandidateRosterToWorking(
-  jobId: string,
+  ref: CandidatePromotionRef,
   fence: PromotionFence,
 ): Promise<WorkingPromotionOutcome> {
   return fence.storage.promoteCandidateToWorking<RosterDocument>({
-    jobId,
+    jobId: ref.jobId,
+    expectedCandidateVersion: ref.candidateVersion,
     validate: validateRosterDocument,
     expectedWorkingRevision: fence.expectedWorkingRevision,
     expectedClearEpoch: fence.expectedClearEpoch,

@@ -14,7 +14,6 @@ import { rangeDayCount } from "@/lib/dates";
 import { toCanonicalScenarioDocument } from "@/lib/scenario/canonical";
 import type { CardsByKind } from "@/lib/scenario";
 import { useScenarioStore } from "@/lib/store";
-import { confirmDialog } from "@/components/shell/confirm-store";
 import {
   OPTIMIZE_TIMEOUT_MAX_SECONDS,
   OPTIMIZE_TIMEOUT_MIN_SECONDS,
@@ -26,7 +25,9 @@ import {
   useOptimizeServerInfo,
   useOptimizeSessionRecovery,
   useOptimizeTerminal,
+  useRosterCapture,
   type OptimizeObservability,
+  type UseRosterCaptureDeps,
   type OptimizeRunSubmitInput,
   type OptimizeRunView,
   type UseOptimizeRunDeps,
@@ -34,6 +35,9 @@ import {
   type UseOptimizeSessionRecoveryDeps,
   type UseOptimizeTerminalDeps,
 } from "@/lib/optimize";
+import { CaptureNotice } from "./capture-notice";
+import { Callout } from "./callout";
+import { RosterSection } from "@/components/roster-viewer/roster-section";
 import { ReadinessBanner } from "./readiness-banner";
 import { RecoveryNotice } from "./recovery-notice";
 import { RunEventLog } from "./run-event-log";
@@ -85,13 +89,14 @@ export interface OptimizeAndExportScreenProps {
   terminalDeps?: Partial<
     Omit<UseOptimizeTerminalDeps, "controller" | "recovery" | "observability">
   >;
+  /**
+   * Seams for the roster capture gate's three collaborators (F1 storage, the B3
+   * `/roster` client, F3's assembler). The gate ITSELF is always created here —
+   * there is no way to run this screen without a real capture gate wired into the
+   * real terminal chain, which is what makes the production path the tested path.
+   */
+  captureDeps?: UseRosterCaptureDeps;
   observability?: OptimizeObservability;
-  confirm?: (request: {
-    title: string;
-    description: string;
-    variant?: "default" | "destructive";
-    consequences?: string[];
-  }) => Promise<boolean>;
 }
 
 /**
@@ -136,8 +141,8 @@ export function OptimizeAndExportScreen({
   recoveryDeps,
   serverInfoDeps,
   terminalDeps,
+  captureDeps,
   observability: observabilityProp,
-  confirm = confirmDialog,
 }: OptimizeAndExportScreenProps) {
   const controller = useOptimizeRun(controllerDeps);
   const recovery = useOptimizeSessionRecovery(controller, recoveryDeps);
@@ -149,10 +154,16 @@ export function OptimizeAndExportScreen({
   }
   const observability = observabilityRef.current;
 
+  // The one app-lifetime capture gate. It is created BEFORE the terminal hook and
+  // passed in, so the default production path fetches `/roster`, assembles and
+  // commits a candidate, and gates the terminal DELETE on the resulting token.
+  const capture = useRosterCapture(captureDeps);
+
   const terminal = useOptimizeTerminal({
     controller,
     recovery,
     observability,
+    capture: capture.gate,
     ...terminalDeps,
   });
 
@@ -186,7 +197,11 @@ export function OptimizeAndExportScreen({
   const [anonymize, setAnonymize] = useState(true);
   const [timeoutValue, setTimeoutValue] = useState("300");
   const [timeoutError, setTimeoutError] = useState<string | null>(null);
-  const [forgetPending, setForgetPending] = useState(false);
+  const [capturePending, setCapturePending] = useState(false);
+  // The one plain-language failure the hidden pre-submit step can produce. It is a
+  // boolean, not a message from the protocol: the copy is settled and must never
+  // vary with the internal reason.
+  const [startFailed, setStartFailed] = useState(false);
 
   const view = controller.view;
   const active = isActiveLifecycle(view.lifecycle);
@@ -263,11 +278,23 @@ export function OptimizeAndExportScreen({
   const onSubmit = useCallback(async () => {
     const input = buildSubmitInput();
     if (input === null) return;
-    runStartRef.current = Date.now();
-    emittedTerminalRef.current = null;
-    lastQueueRef.current = null;
-    await controller.submit(input);
-  }, [buildSubmitInput, controller]);
+    setStartFailed(false);
+    // ONE attempt per tab, spanning the hidden pre-submit housekeeping AND the
+    // request. The gate cannot be mount-local: between the POST leaving and the job
+    // activating, this run's own durable record is still provisional, so a route
+    // remount in that window would read it as a prior interrupted attempt, retire it,
+    // and send a second POST. Joining the tab's in-flight attempt is what prevents
+    // that; a genuinely new run is gated by the record itself (active ⇒ blocked).
+    const prepared = await recovery.runOptimizeAttempt(async () => {
+      runStartRef.current = Date.now();
+      emittedTerminalRef.current = null;
+      lastQueueRef.current = null;
+      await controller.submit(input);
+    });
+    // A prior attempt this click joined has already reported its own outcome; showing
+    // the failure again here is still correct, because nothing was submitted either way.
+    if (prepared.status !== "ready") setStartFailed(true);
+  }, [buildSubmitInput, controller, recovery]);
 
   const onResubmit = useCallback(async () => {
     // Release the occupied slot FIRST and resubmit only if cleanup actually
@@ -291,56 +318,36 @@ export function OptimizeAndExportScreen({
     if (released === "cleaned") controller.reset();
   }, [controller, terminal]);
 
-  // Explicit abandon: destructive confirmation with the server-retention warning,
-  // then free the local slot (leaving the server job to retention).
-  const onAbandonCleanup = useCallback(async () => {
-    const confirmed = await confirm({
-      title: "Abandon cleanup and free this browser?",
-      description:
-        "The finished run could not be released on the server. Abandoning lets you start a new run here, but the server job and any result may remain until the server releases them.",
-      variant: "destructive",
-      consequences: [
-        "The server job/artifact may remain until it finishes or the server releases it.",
-        "This browser will stop tracking the run and can start a new one.",
-      ],
-    });
-    if (!confirmed) return;
-    terminal.abandonCleanup();
-  }, [confirm, terminal]);
+  // Discard the saved roster for the run in view. The gate proves the local removal
+  // before any server cleanup is authorized, so a failure here leaves both the
+  // candidate and the job alone and surfaces a retry.
+  const onDismissCapture = useCallback(async () => {
+    setCapturePending(true);
+    try {
+      await terminal.dismissCapture();
+    } finally {
+      setCapturePending(false);
+    }
+  }, [terminal]);
 
   const onCancel = useCallback(async () => {
     if (view.jobId !== null) observability.emit({ kind: "cancellation", jobId: view.jobId });
     await controller.cancel();
   }, [controller, observability, view.jobId]);
 
-  const onForget = useCallback(async () => {
-    const confirmed = await confirm({
-      title: "Forget this run and start over?",
-      description: recovery.forgetWarning,
-      variant: "destructive",
-      consequences: [
-        "An unknown backend optimisation may keep running until it finishes or the server releases it.",
-        "This browser will forget the run and can start a new one.",
-      ],
-    });
-    if (!confirmed) return;
-    setForgetPending(true);
-    try {
-      recovery.forget();
-    } finally {
-      setForgetPending(false);
-    }
-  }, [confirm, recovery]);
-
   // --- derived UI state ------------------------------------------------------
-  // A booting recovery inspection, a blocking interrupted/unreadable record that
-  // still requires Forget, OR a terminal cleanup that is still cleaning or has
-  // failed to prove local record release must each block a new submission —
-  // otherwise Optimize is enabled only to predictably fail with `submit-blocked`
-  // from T16q's occupied slot, overwriting the authoritative terminal view.
+  // A booting inspection, a still-running previous run, OR a terminal cleanup that is
+  // still cleaning or has failed to prove local record release must each block a new
+  // submission — otherwise Optimize is enabled only to predictably fail with
+  // `submit-blocked` from T16q's occupied slot, overwriting the authoritative
+  // terminal view.
+  //
+  // An INTERRUPTED record is deliberately NOT blocking any more: Optimize retires it
+  // invisibly. An UNREADABLE one is not blocking either — the button stays live and
+  // the click reports plainly that optimisation could not start, rather than the
+  // screen explaining a recovery record the user was never meant to know about.
   const recoveryBooting = !recovery.ready;
-  const recoveryBlocking =
-    recovery.state.kind === "interrupted" || recovery.state.kind === "unreadable";
+  const recoveryBlocking = recovery.state.kind === "resumable";
   const cleanupBlocking =
     terminal.cleanupPhase === "cleaning" || terminal.cleanupPhase === "failed";
   const submitEnabled =
@@ -350,12 +357,16 @@ export function OptimizeAndExportScreen({
     !recoveryBooting &&
     !recoveryBlocking &&
     !cleanupBlocking;
+  // `cleanupBlocking` is checked BEFORE `recoveryBlocking`: a terminal run whose
+  // local release failed still occupies the record slot, so both are true at once,
+  // and the actionable one — the retry/abandon surface already on screen — is the
+  // one worth naming.
   const disabledReason = recoveryBooting
     ? "Checking for a previous optimisation run…"
-    : recoveryBlocking
-      ? "Resolve the recovered run above (Forget it) before starting a new one."
-      : cleanupBlocking
-        ? "Release the finished run above (Retry cleanup or Abandon) before starting a new one."
+    : cleanupBlocking
+      ? "Finish tidying up the last run above before starting a new one."
+      : recoveryBlocking
+        ? "An optimisation from this browser is still running. Wait for it to finish before starting another."
         : !readiness.ready
           ? "Complete the missing schedule configuration before optimising."
           : serverInfo.status !== "online"
@@ -396,12 +407,22 @@ export function OptimizeAndExportScreen({
       </div>
 
       <ReadinessBanner issues={readiness.issues} />
+      {startFailed ? (
+        <Callout tone="error" placement="page" data-testid="optimize-start-failed" alert>
+          Optimisation could not start. Click Optimize to try again. If it keeps happening, start a
+          New schedule.
+        </Callout>
+      ) : null}
       <RecoveryNotice
         state={recovery.state}
         resume={recovery.resume}
         reloadRecoveryUnavailable={reloadRecoveryUnavailable}
-        onForget={onForget}
-        forgetPending={forgetPending}
+      />
+      <CaptureNotice
+        state={capture.stateFor(view.jobId)}
+        onRetry={terminal.retryCapture}
+        onDismiss={onDismissCapture}
+        dismissPending={capturePending}
       />
 
       {/* `.ns-grid2` — an even two-up at 900px with a `--space-4` gap, items-start
@@ -441,7 +462,6 @@ export function OptimizeAndExportScreen({
             onDownloadArtifact={terminal.downloadArtifact}
             onDownloadAgain={terminal.downloadAgain}
             onRetryCleanup={terminal.retryCleanup}
-            onAbandonCleanup={onAbandonCleanup}
             // The idle-panel CTA must respect the SAME submission gates as the
             // settings-form Optimize button — wire it only when a run is actually
             // permitted, so an offline / not-ready / recovery- or cleanup-blocked
@@ -455,6 +475,14 @@ export function OptimizeAndExportScreen({
       </div>
 
       <RunEventLog log={view.log} active={active || controller.isSubmitting} />
+
+      {/* F4 — the read-only roster surface. Renders the working roster in the
+          three lenses, or the empty/candidate states. Candidate Load/Retry/
+          Dismiss are roster-result actions wired through the F2 capture gate. */}
+      {/* The section's candidate actions are keyed to the DURABLE pointer's
+          `{jobId, candidateVersion}`, not to whatever run is in the panel above.
+          It therefore does not receive this screen's current-run callbacks. */}
+      <RosterSection capture={capture} />
     </Surface>
   );
 }

@@ -4,6 +4,8 @@
 //   • run controller        — the orchestration hook wiring T16q + T06 (T16a)
 //   • submission glue       — pure classification / normalization helpers (T16a)
 //   • session transaction   — the durable pre/post-POST recovery record (T16q)
+//   • roster capture        — the write-ahead submission snapshot and the terminal
+//                             capture state machine that gates cleanup (F2)
 //
 // The T04 hot store imports `./run-view` DIRECTLY (a pure, React-free module) so it
 // never pulls the controller hook into the store bundle.
@@ -68,7 +70,7 @@ export {
 export {
   activateSession,
   buildProvisionalSession,
-  forgetInspectedSession,
+  removeInspectedSession,
   inspectPersistedSession,
   runSubmissionTransaction,
   stageProvisionalSession,
@@ -77,12 +79,13 @@ export {
   type DegradedCleanupOutcome,
   OPTIMIZE_SESSION_SCHEMA_VERSION,
   OPTIMIZE_SESSION_STORAGE_KEY,
+  OPTIMIZE_RETIRE_PENDING_STORAGE_KEY,
+  clearRetirementPending,
   OPTIMIZE_TIMEOUT_MAX_SECONDS,
   OPTIMIZE_TIMEOUT_MIN_SECONDS,
-  FORGET_OPTIMIZE_SESSION_WARNING,
   type ActivateOutcome,
   type ActiveOptimizeSession,
-  type ForgetInspectedSessionOutcome,
+  type RemoveInspectedSessionOutcome,
   type InspectedSession,
   type OptimizeRunOptions,
   type OptimizeSessionRecord,
@@ -90,6 +93,8 @@ export {
   type SessionRecordIdentity,
   type SessionCodec,
   type SessionTransactionStorage,
+  type CaptureUnavailableReason,
+  type SessionCaptureState,
   type StageProvisionalOutcome,
   type SubmissionTransactionOutcome,
   type SubmitResult,
@@ -113,7 +118,7 @@ export {
   useOptimizeSessionRecovery,
   type CursorPersistenceState,
   type OptimizeCleanupOutcome,
-  type OptimizeForgetOutcome,
+  type OptimizePrepareOutcome,
   type OptimizeRecovery,
   type OptimizeResumeOutcome,
   type OptimizeSessionRecovery,
@@ -153,6 +158,61 @@ export {
   type OptimizeTerminal,
   type UseOptimizeTerminalDeps,
 } from "./use-optimize-terminal";
+
+export {
+  buildStagedSubmission,
+  isStagedSubmission,
+  purgeSubmissionSnapshot,
+  readStagedSubmissionSnapshot,
+  stageSubmissionSnapshot,
+  type SnapshotPurgeAuthority,
+  type SnapshotReadOutcome,
+  type SnapshotPurgeResult,
+  type StagedSubmission,
+  type StagedSubmissionSnapshot,
+  type SubmissionSnapshotStore,
+} from "./submission-snapshot";
+
+export {
+  createRosterCapture,
+  TERMINAL_UNAVAILABLE_CAUSES,
+  type BuildCandidateDocument,
+  type CandidateBuildInput,
+  type CandidateBuildResult,
+  type CaptureCleanupToken,
+  type CaptureDismissalReason,
+  type CaptureOutcome,
+  type CaptureRequest,
+  type CaptureUnavailableCause,
+  type DismissOutcome,
+  type DurableCandidateRef,
+  type DurableDismissOutcome,
+  type PreFetchUnavailableCause,
+  type RosterCaptureDeps,
+  type RosterCaptureGate,
+  type RosterCaptureState,
+} from "./roster-capture";
+
+export {
+  getCleanupCoordinator,
+  getRosterCaptureGate,
+  notifyRosterCaptureCleared,
+  resetRosterCaptureGate,
+  type CleanupCoordinator,
+  type RosterCaptureGateDeps,
+} from "./roster-capture-app";
+
+export {
+  ROSTER_SUBMISSION_VERSION,
+  productionCandidateBuilder,
+  rosterAppBuild,
+} from "./roster-candidate-builder";
+
+export {
+  useRosterCapture,
+  type RosterCaptureSurface,
+  type UseRosterCaptureDeps,
+} from "./use-roster-capture";
 
 export {
   elapsedLabel,

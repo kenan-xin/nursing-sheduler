@@ -56,18 +56,19 @@ test.describe("Optimize & Export screen — browser coverage", () => {
     );
     await expect(infeasible.getByTestId("optimize-adjust-rules")).toHaveAttribute("href", "/rules");
 
-    // Worker-lost: resubmit + dismiss + cleanup failed retry/abandon.
+    // Worker-lost: resubmit + dismiss + cleanup failed retry (no abandon).
     const workerLost = page.getByTestId("fx-worker-lost");
     await expect(workerLost.getByTestId("optimize-resubmit")).toBeVisible();
     await expect(workerLost.getByTestId("optimize-dismiss")).toBeVisible();
     await expect(workerLost.getByTestId("optimize-cleanup-retry")).toBeVisible();
-    await expect(workerLost.getByTestId("optimize-cleanup-abandon")).toBeVisible();
+    await expect(workerLost.getByTestId("optimize-cleanup-abandon")).toHaveCount(0);
 
-    // Recovery notices.
-    await expect(page.getByTestId("optimize-interrupted")).toContainText(
-      "An unknown backend optimisation may still be running",
-    );
-    await expect(page.getByTestId("optimize-unreadable")).toBeVisible();
+    // Current-run notices. There is deliberately no prior-run recovery surface: an
+    // interrupted record is retired invisibly by the next Optimize click and an
+    // unreadable one only blocks that click, so neither renders anything.
+    await expect(page.getByTestId("optimize-interrupted")).toHaveCount(0);
+    await expect(page.getByTestId("optimize-unreadable")).toHaveCount(0);
+    await expect(page.getByTestId("optimize-forget")).toHaveCount(0);
     await expect(page.getByTestId("optimize-degraded")).toContainText(
       "Reload recovery is unavailable",
     );

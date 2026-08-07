@@ -635,7 +635,11 @@ export const V2_STYLE_OWNER_FILES: Readonly<Record<V2Owner, readonly string[]>> 
     "app/(app)/optimize-durable-fixture/**/*.tsx",
     "app/optimize-screen-fixture/**/*.tsx",
     "app/progress-chart-fixture/**/*.tsx",
+    "app/roster-viewer-fixture/**/*.tsx",
     "components/optimize/**/*.tsx",
+    // The read-only roster viewer (F4) is a surface OF the optimize route: it
+    // renders below the run panel on the same page and shares its visual owner.
+    "components/roster-viewer/**/*.tsx",
   ]),
   R7: Object.freeze(["app/(app)/save-and-load/page.tsx", "components/save-load/**/*.tsx"]),
 });

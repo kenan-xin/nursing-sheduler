@@ -33,7 +33,7 @@
 //   worker-lost              | "worker-lost release" (dismiss executed)              | —
 //   reload/resume            | "anonymized reload"                                  | assembled: live replay
 //   cleanup retry            | "cleanup-failure retry"                              | assembled: tiny DELETE
-//   cleanup abandon          | "cleanup abandon"                                    | —
+//   failed cleanup (no abandon) | "a failed cleanup stays the current run"          | —
 //   cancelled dismiss        | "cancelled dismiss"                                  | —
 //   degraded activation      | —                                                    | session-recovery.integration.test.tsx:527
 //   anonymized restore       | "anonymized reload"                                  | restore-people-ids.test.ts
@@ -52,6 +52,7 @@ import {
   failedJob,
   gotoDurableFixture,
   installOptimizeRoutes,
+  rosterContainer,
   json,
   JOB_ID,
   phaseChangedFrame,
@@ -122,6 +123,11 @@ async function seedActiveRecovery(page: Page, cursor: string): Promise<void> {
     runOptions: { prettify: false, timeout: 300 },
     peopleCount: 0,
     reverseMap: [],
+    capture: {
+      status: "staged",
+      snapshotRef: "owner-e2e-cursor-recovery",
+      submissionOrdinal: 1,
+    },
     lastCursor: cursor,
   };
   await page.addInitScript(({ key, value }) => sessionStorage.setItem(key, value), {
@@ -548,11 +554,20 @@ test.describe("Optimize & Export — durable-stream acceptance journeys", () => 
     expect(xlsxAttempts).toBe(1);
   });
 
-  test("cleanup failure surfaces retry and abandon; retry releases the slot", async ({ page }) => {
+  test("cleanup failure surfaces retry only; retry releases the slot", async ({ page }) => {
     let deleteAttempts = 0;
+    let rosterAttempts = 0;
+    let rosterSeenBeforeFirstDelete: number | null = null;
     await installOptimizeRoutes(page, {
+      onRoster: (route) => {
+        rosterAttempts += 1;
+        return json(route, 200, rosterContainer());
+      },
       onDelete: (route) => {
         deleteAttempts += 1;
+        // Sampled INSIDE the first DELETE, so the ordering claim is made by the
+        // pipeline itself rather than by whichever read happens to run first.
+        rosterSeenBeforeFirstDelete ??= rosterAttempts;
         if (deleteAttempts === 1) return json(route, 500, { detail: "cleanup failed" });
         return route.fulfill({ status: 204, body: "" });
       },
@@ -565,14 +580,24 @@ test.describe("Optimize & Export — durable-stream acceptance journeys", () => 
     await expect(page.getByTestId("optimize-completed-artifact")).toContainText(
       "downloaded successfully",
     );
+    // Download success is EARLIER in the pipeline than the capture fetch, so reading
+    // the counter here would be a race. The cleanup-failed state is downstream of the
+    // token gate, so it is the honest trigger: reaching it proves capture settled.
     await expect(page.getByTestId("optimize-cleanup-failed")).toBeVisible();
-    await expect(page.getByTestId("optimize-cleanup-abandon")).toBeVisible();
+    expect(rosterAttempts).toBe(1);
+    // Capture ran for real BEFORE any DELETE could be authorized — the token gate is
+    // what lets this journey reach cleanup at all.
+    expect(rosterSeenBeforeFirstDelete).toBe(1);
+    expect(deleteAttempts).toBe(1);
+    // The retired public escape hatch is gone: retrying is the only offered action.
+    await expect(page.getByTestId("optimize-cleanup-abandon")).toHaveCount(0);
 
     await page.getByTestId("optimize-cleanup-retry").click();
 
-    // A successful retry clears the reserved-slot warning.
+    // A successful retry clears the warning — and spends no second `/roster` call.
     await expect(page.getByTestId("optimize-cleanup-failed")).toHaveCount(0);
     expect(deleteAttempts).toBeGreaterThanOrEqual(2);
+    expect(rosterAttempts).toBe(1);
   });
 
   test("missing-job recovery surfaces a terminal error when the job vanishes mid-stream", async ({
@@ -599,9 +624,13 @@ test.describe("Optimize & Export — durable-stream acceptance journeys", () => 
     await expect(page.getByTestId("optimize-dismiss")).toBeVisible();
   });
 
-  test("cleanup abandon frees the local slot, leaving the server job to retention", async ({
+  test("a failed cleanup stays the current run — no abandon escape, no confirmation", async ({
     page,
   }) => {
+    // The retired workflow, asserted absent. A cleanup that cannot be released used
+    // to offer Abandon behind a destructive confirmation that explained backend
+    // retention; the settled product has no such action or vocabulary. The run stays
+    // current, Retry is the only way forward, and a new one cannot start behind it.
     await installOptimizeRoutes(page, {
       onDelete: (route) => json(route, 500, { detail: "cleanup failed" }),
     });
@@ -612,15 +641,17 @@ test.describe("Optimize & Export — durable-stream acceptance journeys", () => 
     await expect(page.getByTestId("optimize-completed-artifact")).toContainText(
       "downloaded successfully",
     );
-    await expect(page.getByTestId("optimize-cleanup-failed")).toBeVisible();
+    const failed = page.getByTestId("optimize-cleanup-failed");
+    await expect(failed).toBeVisible();
 
-    // Abandon: destructive confirmation dialog → free the LOCAL slot.
-    await page.getByTestId("optimize-cleanup-abandon").click();
-    await page.getByTestId("confirm-dialog-confirm").click();
+    await expect(page.getByTestId("optimize-cleanup-abandon")).toHaveCount(0);
+    await expect(page.getByTestId("optimize-cleanup-abandoned")).toHaveCount(0);
+    await expect(page.getByTestId("confirm-dialog-confirm")).toHaveCount(0);
+    await expect(failed).not.toContainText(/retention|server job|abandon/i);
+    await expect(page.getByTestId("optimize-cleanup-retry")).toBeVisible();
 
-    await expect(page.getByTestId("optimize-cleanup-abandoned")).toBeVisible();
-    // The local slot is freed — a new run is allowed.
-    await expect(page.getByTestId("optimize-submit")).toBeEnabled({ timeout: 10_000 });
+    // Unreleased means still current: no new run may start behind it.
+    await expect(page.getByTestId("optimize-submit")).toBeDisabled();
   });
 
   test("cancelled dismiss releases the terminal slot and returns to idle", async ({ page }) => {

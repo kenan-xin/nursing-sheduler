@@ -220,7 +220,7 @@ export function RunOptionsForm({
             </>
           ) : (
             <>
-              <FaDownload aria-hidden /> Optimise and Download
+              <FaDownload aria-hidden /> Optimize
             </>
           )}
         </Button>

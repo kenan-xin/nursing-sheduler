@@ -79,7 +79,6 @@ export interface RunStatusPanelProps {
   onDownloadArtifact(): void;
   onDownloadAgain(): void;
   onRetryCleanup(): void;
-  onAbandonCleanup(): void;
   /**
    * Start a fresh run from the idle empty state (and as the in-panel Optimize CTA).
    * Optional so this component stays file-disjoint from the screen wiring — when
@@ -126,7 +125,6 @@ export function RunStatusPanel({
   onDownloadArtifact,
   onDownloadAgain,
   onRetryCleanup,
-  onAbandonCleanup,
   onStartRun,
 }: RunStatusPanelProps) {
   const status = formatRunStatus(view, submitting);
@@ -156,7 +154,7 @@ export function RunStatusPanel({
           </p>
           {onStartRun ? (
             <Button onClick={onStartRun} className="mt-5" data-testid="optimize-start">
-              <FaBolt aria-hidden /> Optimise roster
+              <FaBolt aria-hidden /> Optimize
             </Button>
           ) : null}
         </div>
@@ -420,37 +418,20 @@ export function RunStatusPanel({
         <Callout
           tone="warn"
           data-testid="optimize-cleanup-failed"
-          title="Couldn't release the finished run on the server"
+          title="Couldn't finish tidying up the last run"
           actions={
-            <>
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={onRetryCleanup}
-                data-testid="optimize-cleanup-retry"
-              >
-                Retry cleanup
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={onAbandonCleanup}
-                data-testid="optimize-cleanup-abandon"
-              >
-                Abandon
-              </Button>
-            </>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={onRetryCleanup}
+              data-testid="optimize-cleanup-retry"
+            >
+              Retry
+            </Button>
           }
           alert
         >
-          This run stays reserved until cleanup succeeds or you abandon it. Abandoning frees this
-          browser to start a new run; the server job remains until it is released by retention.
-        </Callout>
-      ) : null}
-
-      {cleanupPhase === "abandoned" ? (
-        <Callout tone="info" data-testid="optimize-cleanup-abandoned">
-          Cleanup abandoned. The server job will be released by retention.
+          Try again. If it keeps happening, start a New schedule.
         </Callout>
       ) : null}
     </div>

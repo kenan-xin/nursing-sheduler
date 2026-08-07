@@ -35,8 +35,12 @@
 import { validatePeopleReverseMap, type PeopleReverseMap } from "@/lib/scenario";
 import { MAX_CURSOR_BYTES, isNonEmptyStringWithin, withinUtf8Bytes } from "@/lib/query/sse-limits";
 
-/** Bump when the record shape changes; a mismatched version is not resumable. */
-export const OPTIMIZE_SESSION_SCHEMA_VERSION = 1;
+/** Bump when the record shape changes; a mismatched version is not resumable.
+ *  v2 adds the F2 `capture` authority (the roster submission-snapshot ref and its
+ *  origin-wide ordinal, or the reason capture is unavailable for this run). A v1
+ *  record predates roster capture and is deliberately NOT migrated: it is read as
+ *  unreadable, exactly like any other unknown shape. */
+export const OPTIMIZE_SESSION_SCHEMA_VERSION = 2;
 
 /** The sessionStorage key the single in-flight submission record lives under. */
 export const OPTIMIZE_SESSION_STORAGE_KEY = "nurse.optimize.session";
@@ -52,6 +56,24 @@ export interface OptimizeRunOptions {
   timeout?: number;
 }
 
+/** Why a run has no durable exact-submission authority, and so no roster capture. */
+export type CaptureUnavailableReason = "snapshot_persist_failed";
+
+/**
+ * The F2 roster-capture authority carried by the session record. Modelled as a
+ * discriminated union rather than a bag of nullable fields so a "staged" record
+ * without an ordinal, or an "unavailable" record that still claims a snapshot,
+ * is not representable at all.
+ *
+ * `snapshotRef` is the transaction's `ownerId` — stable, known before the POST,
+ * and the key F1 stores the immutable snapshot under. It is stored explicitly
+ * rather than re-derived from `ownerId` so the record states plainly whether a
+ * snapshot was ever durably staged for this run.
+ */
+export type SessionCaptureState =
+  | { status: "staged"; snapshotRef: string; submissionOrdinal: number }
+  | { status: "unavailable"; reason: CaptureUnavailableReason };
+
 interface OptimizeSessionCommon {
   schemaVersion: typeof OPTIMIZE_SESSION_SCHEMA_VERSION;
   /** Unique per transaction; proves a read-back record is ours before we mutate. */
@@ -61,6 +83,13 @@ interface OptimizeSessionCommon {
   peopleCount: number;
   /** Ordered `[anonymizedId, originalId]` tuples; empty for a plain run. */
   reverseMap: PeopleReverseMap;
+  /**
+   * Whether this run staged a durable exact-submission snapshot before its POST.
+   * Written once, before staging, and never mutated afterwards — activation and
+   * cursor updates rebuild the record from the CURRENT durable one, so this field
+   * survives them verbatim.
+   */
+  capture: SessionCaptureState;
 }
 
 /** Written before `POST`; a reload finding this means an interrupted submission. */
@@ -189,6 +218,8 @@ export function buildProvisionalSession(input: {
   peopleCount: number;
   reverseMap: PeopleReverseMap;
   runOptions: OptimizeRunOptions;
+  /** The outcome of the write-ahead snapshot transaction (F2). */
+  capture: SessionCaptureState;
 }): ProvisionalOptimizeSession {
   return {
     schemaVersion: OPTIMIZE_SESSION_SCHEMA_VERSION,
@@ -198,6 +229,7 @@ export function buildProvisionalSession(input: {
     runOptions: input.runOptions,
     peopleCount: input.peopleCount,
     reverseMap: input.reverseMap,
+    capture: input.capture,
   };
 }
 
@@ -229,6 +261,16 @@ function reverseMapsEqual(a: PeopleReverseMap, b: PeopleReverseMap): boolean {
   return true;
 }
 
+/** Closed capture equality across every field of both variants. */
+function captureEqual(a: SessionCaptureState, b: SessionCaptureState): boolean {
+  if (a.status !== b.status) return false;
+  if (a.status === "staged" && b.status === "staged") {
+    return a.snapshotRef === b.snapshotRef && a.submissionOrdinal === b.submissionOrdinal;
+  }
+  if (a.status === "unavailable" && b.status === "unavailable") return a.reason === b.reason;
+  return false;
+}
+
 /** Closed run-options equality (both keys optional; `undefined === undefined`). */
 function runOptionsEqual(a: OptimizeRunOptions, b: OptimizeRunOptions): boolean {
   return a.prettify === b.prettify && a.timeout === b.timeout;
@@ -243,6 +285,7 @@ function recordsEqual(a: OptimizeSessionRecord, b: OptimizeSessionRecord): boole
   if (a.peopleCount !== b.peopleCount) return false;
   if (!runOptionsEqual(a.runOptions, b.runOptions)) return false;
   if (!reverseMapsEqual(a.reverseMap, b.reverseMap)) return false;
+  if (!captureEqual(a.capture, b.capture)) return false;
   if (a.phase === "active" && b.phase === "active") {
     if (a.jobId !== b.jobId) return false;
     // `undefined === undefined` treats an absent cursor as equal on both sides.
@@ -288,7 +331,7 @@ export type StageProvisionalOutcome =
  * by another (possibly still in-flight) transaction, OR unreadable bytes — is a
  * `session-conflict` that blocks with zero `setItem`/`removeItem`, so a second
  * submission can never erase a first submission's only durable recovery map.
- * Clearing an inspected reload record uses `forgetInspectedSession`; transaction
+ * Clearing an inspected reload record uses `removeInspectedSession`; transaction
  * rollback remains owner-and-variant scoped internally.
  *
  * Anonymized runs must end durable: any validation/storage/read-back failure
@@ -820,9 +863,6 @@ export interface SessionRecordIdentity {
   readonly [SESSION_RECORD_IDENTITY]: string;
 }
 
-export const FORGET_OPTIMIZE_SESSION_WARNING =
-  "Forgetting this recovery record does not cancel the backend job. An unknown backend optimisation may continue until terminal state or server retention.";
-
 export type InspectedSession =
   | { kind: "none" }
   // An orphan provisional record: an interrupted submission. Not resumable; the
@@ -836,7 +876,7 @@ export type InspectedSession =
   // An active record with an accepted job id — a resumable session. `cursorReset` is
   // true when the otherwise-valid record carried an oversized saved cursor: the
   // record here has that cursor stripped, so recovery resumes from the retained floor
-  // and enters explicit invalid-cursor recovery rather than the Forget flow.
+  // and enters explicit invalid-cursor recovery rather than the retirement flow.
   | {
       kind: "resumable";
       record: ActiveOptimizeSession;
@@ -846,7 +886,7 @@ export type InspectedSession =
   // A corrupt, incomplete, or version-mismatched record; discardable, never resumable.
   | { kind: "unreadable"; identity: SessionRecordIdentity | null };
 
-export type ForgetInspectedSessionOutcome =
+export type RemoveInspectedSessionOutcome =
   | { status: "removed" }
   | { status: "changed" }
   | { status: "unverified" };
@@ -863,6 +903,7 @@ const COMMON_KEYS = [
   "runOptions",
   "peopleCount",
   "reverseMap",
+  "capture",
 ] as const;
 const PROVISIONAL_KEYS = new Set<string>(COMMON_KEYS);
 // The active variant requires the provisional keys plus `jobId`, and optionally
@@ -870,6 +911,8 @@ const PROVISIONAL_KEYS = new Set<string>(COMMON_KEYS);
 const ACTIVE_REQUIRED_KEYS = new Set<string>([...COMMON_KEYS, "jobId"]);
 const ACTIVE_ALLOWED_KEYS = new Set<string>([...COMMON_KEYS, "jobId", "lastCursor"]);
 const RUN_OPTION_KEYS = new Set<string>(["prettify", "timeout"]);
+const CAPTURE_STAGED_KEYS = new Set<string>(["status", "snapshotRef", "submissionOrdinal"]);
+const CAPTURE_UNAVAILABLE_KEYS = new Set<string>(["status", "reason"]);
 
 function hasExactKeys(record: Record<string, unknown>, allowed: Set<string>): boolean {
   const keys = Object.keys(record);
@@ -892,6 +935,31 @@ function hasAllowedKeys(
 
 function isNonNegativeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
+/**
+ * Closed capture validation: exact keys per variant, a non-empty snapshot ref,
+ * and a POSITIVE integer ordinal (F1 hands out 1, 2, 3 … and never 0), so a
+ * corrupted or hand-written record cannot present a bogus ordering authority that
+ * would let an old submission outrank a newer captured candidate.
+ */
+function isValidCapture(value: unknown): value is SessionCaptureState {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const capture = value as Record<string, unknown>;
+  if (capture.status === "staged") {
+    if (!hasExactKeys(capture, CAPTURE_STAGED_KEYS)) return false;
+    if (!isNonEmptyString(capture.snapshotRef)) return false;
+    return (
+      typeof capture.submissionOrdinal === "number" &&
+      Number.isInteger(capture.submissionOrdinal) &&
+      capture.submissionOrdinal > 0
+    );
+  }
+  if (capture.status === "unavailable") {
+    if (!hasExactKeys(capture, CAPTURE_UNAVAILABLE_KEYS)) return false;
+    return capture.reason === "snapshot_persist_failed";
+  }
+  return false;
 }
 
 function isValidRunOptions(value: unknown): value is OptimizeRunOptions {
@@ -917,7 +985,9 @@ function isValidRunOptions(value: unknown): value is OptimizeRunOptions {
  * Strictly validate an untrusted value as a session record, returning the typed
  * record or `null`. Closed schema: exact keys per variant, current schema version
  * only (future/unknown versions are unreadable), non-empty owner id, non-negative
- * integer people count, closed run options within the settled timeout bounds, and
+ * integer people count, closed run options within the settled timeout bounds, a
+ * closed F2 capture authority (a staged snapshot ref plus a positive origin-wide
+ * ordinal, or an explicit unavailable reason), and
  * a consistent anonymized/reverse-map invariant validated as a strict people-only
  * tuple map (unique well-formed `P#` ids, unique typed finite-integer/string
  * originals, cardinality equal to the people count). Shared by the reload reader
@@ -932,6 +1002,18 @@ function parseSession(value: unknown): OptimizeSessionRecord | null {
   if (typeof candidate.anonymized !== "boolean") return null;
   if (!isNonNegativeInteger(candidate.peopleCount)) return null;
   if (!isValidRunOptions(candidate.runOptions)) return null;
+  if (!isValidCapture(candidate.capture)) return null;
+
+  // AUTHORITY BINDING. `snapshotRef` IS the transaction owner id — that identity is
+  // the whole reason the exact-owner snapshot deletion is as narrowly scoped
+  // as the record authorizing it. Without this check a schema-valid record could
+  // name ANY origin-wide owner, so removing record B would authorize deleting
+  // owner A's snapshot, including a live accepted run belonging to another tab.
+  // Enforced here rather than in `isValidCapture` because only this level sees
+  // both halves, and enforced on the SHARED parser so the writer round-trip, the
+  // reload decode, and the oversized-cursor recovery all fail closed identically.
+  const capture = candidate.capture as SessionCaptureState;
+  if (capture.status === "staged" && capture.snapshotRef !== candidate.ownerId) return null;
 
   // The reverse map must be a valid tuple map whose cardinality matches: exactly
   // the people count for an anonymized run, and empty for a plain run.
@@ -1012,7 +1094,7 @@ export function inspectPersistedSession(
     // Distinguish an otherwise-valid active session whose ONLY defect is an oversized
     // saved cursor from generic corruption: it stays resumable (cursor stripped, so it
     // resumes from the retained floor) and enters explicit invalid-cursor recovery.
-    // Every other unreadable record keeps the confirmed Forget flow.
+    // Every other unreadable record stays unreadable and is never retired.
     const recovered = decodeActiveWithInvalidCursor(read.raw, codec);
     if (recovered !== null)
       return { kind: "resumable", record: recovered, identity, cursorReset: true };
@@ -1023,15 +1105,168 @@ export function inspectPersistedSession(
     : { kind: "resumable", record, identity };
 }
 
+// --- pending prior-run retirement marker ------------------------------------
+//
+// Retirement has to settle TWO stores that cannot transact together: this record and
+// the F1 snapshot its `capture.snapshotRef` names. Removing the record first is
+// mandatory (only the exact-bytes check can tell a still-provisional record from
+// one that concurrently became `active`), but that removal is also what destroys
+// the only handle to the snapshot. This marker is what survives the gap.
+//
+// It holds the opaque owner id and NOTHING else: no canonical YAML, no reverse
+// map, no job id. It is written BEFORE the record is removed, so a crash or a
+// failed deletion between the halves leaves an owner-scoped, already-authorized
+// retry rather than an unreachable snapshot. It is not a sweep and can never name
+// another tab's owner.
+
+export const OPTIMIZE_RETIRE_PENDING_STORAGE_KEY = "nurse.optimize.retire-pending";
+
+/** The marker is a persisted DESTRUCTIVE capability, so it gets the same closed,
+ *  versioned discipline as the session record rather than an open bag. */
+export const OPTIMIZE_RETIRE_PENDING_SCHEMA_VERSION = 1;
+const RETIRE_PENDING_KEYS = new Set(["schemaVersion", "ownerId"]);
+/** Owner ids are generated identifiers; anything longer is not one of ours. */
+const MAX_RETIRE_PENDING_OWNER_LENGTH = 256;
+
+/** The closed marker payload. Deliberately carries NOTHING sensitive: no canonical
+ *  YAML, no reverse map, no job id — only the opaque transaction owner. */
+interface RetirementPendingMarker {
+  schemaVersion: typeof OPTIMIZE_RETIRE_PENDING_SCHEMA_VERSION;
+  ownerId: string;
+}
+
+/** Strictly validate untrusted marker bytes: exact keys, the current version only,
+ *  and a bounded non-empty owner. Anything else is NOT authority. */
+function parseRetirementPending(raw: string): RetirementPendingMarker | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  if (!hasExactKeys(candidate, RETIRE_PENDING_KEYS)) return null;
+  if (candidate.schemaVersion !== OPTIMIZE_RETIRE_PENDING_SCHEMA_VERSION) return null;
+  if (!isNonEmptyString(candidate.ownerId)) return null;
+  if (candidate.ownerId.length > MAX_RETIRE_PENDING_OWNER_LENGTH) return null;
+  return { schemaVersion: OPTIMIZE_RETIRE_PENDING_SCHEMA_VERSION, ownerId: candidate.ownerId };
+}
+
+/** The closed result of creating the marker. */
+export type MarkRetirementPendingOutcome =
+  /** Durably written AND read back as exactly the expected marker. */
+  | { status: "marked" }
+  /** Not proven durable. The caller MUST NOT remove the session record. */
+  | { status: "unverified" };
+
+/**
+ * Record that `ownerId`'s snapshot deletion is owed, VERIFIED by read-back.
+ *
+ * A best-effort write is not good enough here. The caller is about to destroy the
+ * only other handle to that snapshot, so if the marker is not provably readable
+ * afterwards there would be nothing left to resume from: a retry would find no
+ * marker and no record, and the exact canonical YAML plus real-identity reverse
+ * map would stay in IndexedDB with no way to name them again.
+ */
+export function markRetirementPending(
+  storage: SessionTransactionStorage,
+  ownerId: string,
+): MarkRetirementPendingOutcome {
+  const marker: RetirementPendingMarker = {
+    schemaVersion: OPTIMIZE_RETIRE_PENDING_SCHEMA_VERSION,
+    ownerId,
+  };
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(marker);
+  } catch {
+    return { status: "unverified" };
+  }
+  try {
+    storage.setItem(OPTIMIZE_RETIRE_PENDING_STORAGE_KEY, serialized);
+  } catch {
+    return { status: "unverified" };
+  }
+  // Read back through the SAME closed parser a boot would use, so a storage that
+  // silently refused the write, truncated it, or stored something else is caught
+  // here rather than discovered after the record is already gone.
+  const read = readRetirementPending(storage);
+  return read.status === "pending" && read.ownerId === ownerId
+    ? { status: "marked" }
+    : { status: "unverified" };
+}
+
+/** The closed result of reading the marker. */
+export type RetirementPendingRead =
+  /** No marker: nothing is owed. */
+  | { status: "none" }
+  /** Authoritative: exactly this owner's snapshot deletion is owed. */
+  | { status: "pending"; ownerId: string }
+  /**
+   * A marker is present but is not authority — malformed, foreign, or a version
+   * this build does not understand. NOTHING may be deleted from it: the owner it
+   * would have named cannot be trusted, and guessing would destroy a row belonging
+   * to some other run.
+   */
+  | { status: "unreadable" };
+
+export function readRetirementPending(storage: SessionTransactionStorage): RetirementPendingRead {
+  let raw: string | null;
+  try {
+    raw = storage.getItem(OPTIMIZE_RETIRE_PENDING_STORAGE_KEY);
+  } catch {
+    // A read that threw proves NOTHING — least of all absence. Collapsing it to
+    // `none` would let a failed read-back pass for a verified clear, and would let a
+    // pre-submit read throw while an owed marker sat there unseen. It costs nothing
+    // to fail closed: a storage this broken also fails `inspectPersistedSession`,
+    // which blocks the attempt anyway, so no tab is stranded that was not already.
+    return { status: "unreadable" };
+  }
+  if (raw === null) return { status: "none" };
+  const marker = parseRetirementPending(raw);
+  return marker === null
+    ? { status: "unreadable" }
+    : { status: "pending", ownerId: marker.ownerId };
+}
+
+/** The closed result of retiring the marker. */
+export type ClearRetirementPendingOutcome =
+  /** Removed AND read back absent. */
+  | { status: "cleared" }
+  /** The removal threw, was silently ignored, or the key survived it. */
+  | { status: "unverified" };
+
+/**
+ * Retire the marker once the snapshot is PROVEN absent, VERIFIED by read-back.
+ *
+ * Not best-effort. The marker is a persisted destructive capability: a removal that
+ * silently no-ops leaves it replaying on every boot and every later attempt, so
+ * "the retirement is complete" would be a claim nothing checked. Read-back is what
+ * makes the completion provable rather than assumed.
+ */
+export function clearRetirementPending(
+  storage: SessionTransactionStorage,
+): ClearRetirementPendingOutcome {
+  try {
+    storage.removeItem(OPTIMIZE_RETIRE_PENDING_STORAGE_KEY);
+  } catch {
+    return { status: "unverified" };
+  }
+  return readRetirementPending(storage).status === "none"
+    ? { status: "cleared" }
+    : { status: "unverified" };
+}
+
 /**
  * Remove the exact record returned by `inspectPersistedSession`, without treating
  * its stored owner id as caller authorization. A changed record is preserved.
  * Success is returned only after the slot is synchronously verified absent.
  */
-export function forgetInspectedSession(
+export function removeInspectedSession(
   storage: SessionTransactionStorage,
   identity: SessionRecordIdentity,
-): ForgetInspectedSessionOutcome {
+): RemoveInspectedSessionOutcome {
   const expectedRaw = identity[SESSION_RECORD_IDENTITY];
   const current = guardedGet(storage);
   if (!current.ok) return { status: "unverified" };

@@ -27,7 +27,7 @@ export type OptimizeObservation =
   // The run failed because its worker/process was lost or restarted.
   | { kind: "worker-loss"; jobId: string }
   // A terminal cleanup attempt settled.
-  | { kind: "cleanup"; jobId: string; result: "cleaned" | "failed" | "abandoned" };
+  | { kind: "cleanup"; jobId: string; result: "cleaned" | "failed" };
 
 /** One emitted observation, stamped with the client wall-clock at emit time. */
 export interface ObservedOptimizeEvent {

@@ -494,6 +494,7 @@ describe("working roster promotion", () => {
 
     const promoted = await storage.promoteCandidateToWorking({
       jobId: "job-1",
+      expectedCandidateVersion: 1,
       validate: acceptAll,
       expectedWorkingRevision: null,
       expectedClearEpoch: 0,
@@ -569,6 +570,7 @@ describe("working roster promotion", () => {
     await expect(
       storage.promoteCandidateToWorking({
         jobId: "job-1",
+        expectedCandidateVersion: 1,
         validate: acceptAll,
         expectedWorkingRevision: 1,
         expectedClearEpoch: 0,
@@ -589,6 +591,7 @@ describe("working roster promotion", () => {
     expect(
       await storage.promoteCandidateToWorking({
         jobId: "job-1",
+        expectedCandidateVersion: 1,
         validate: acceptAll,
         expectedWorkingRevision: 1,
         expectedClearEpoch: 0,
@@ -603,6 +606,7 @@ describe("working roster promotion", () => {
     expect(
       await storage.promoteCandidateToWorking({
         jobId: "absent",
+        expectedCandidateVersion: 1,
         validate: acceptAll,
         expectedWorkingRevision: null,
         expectedClearEpoch: 0,
@@ -618,6 +622,7 @@ describe("working roster promotion", () => {
     // The candidate is re-captured (revision bumps) while validation is running.
     const promoted = await storage.promoteCandidateToWorking({
       jobId: "job-1",
+      expectedCandidateVersion: 1,
       validate: async (document) => {
         await db.roster.put({
           key: candidateRosterKey("job-1"),
@@ -707,6 +712,7 @@ describe("barrier-controlled two-instance races", () => {
     const barrier = createBarrier();
     const promotion = tabA.storage.promoteCandidateToWorking({
       jobId: "job-1",
+      expectedCandidateVersion: 1,
       validate: async (document) => {
         await barrier.wait();
         return { ok: true as const, document };
@@ -742,6 +748,7 @@ describe("barrier-controlled two-instance races", () => {
     expect(
       await tabA.storage.promoteCandidateToWorking({
         jobId: "job-1",
+        expectedCandidateVersion: 1,
         validate: acceptAll,
         expectedWorkingRevision: 2,
         expectedClearEpoch: 0,
@@ -765,6 +772,7 @@ describe("barrier-controlled two-instance races", () => {
     const barrier = createBarrier();
     const promotion = tabA.storage.promoteCandidateToWorking({
       jobId: "job-1",
+      expectedCandidateVersion: 1,
       validate: async (document) => {
         await barrier.wait();
         return { ok: true as const, document };
@@ -801,10 +809,13 @@ describe("barrier-controlled two-instance races", () => {
     expect((await tabB.storage.readCandidate<{ tag: string }>("job-1"))?.document.tag).toBe("B");
 
     // Negative control: promoting what is actually stored now succeeds, and it
-    // is the recreated document that lands.
+    // is the recreated document that lands. The version named is the RECREATED
+    // one — under the exact-version fence, asking for the original version here
+    // would (correctly) be refused rather than silently promoting the new row.
     expect(
       await tabA.storage.promoteCandidateToWorking({
         jobId: "job-1",
+        expectedCandidateVersion: recreated.pointer.candidateVersion,
         validate: acceptAll,
         expectedWorkingRevision: null,
         expectedClearEpoch: 0,
@@ -828,6 +839,7 @@ describe("barrier-controlled two-instance races", () => {
     const barrier = createBarrier();
     const promotion = tabA.storage.promoteCandidateToWorking({
       jobId: "job-1",
+      expectedCandidateVersion: 1,
       validate: async (document) => {
         await barrier.wait();
         return { ok: true as const, document };

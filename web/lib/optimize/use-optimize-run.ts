@@ -50,8 +50,16 @@ import {
   runSubmissionTransaction,
   type OptimizeRunOptions,
   type PreparedDegradedCleanup,
+  type SessionCaptureState,
   type SessionTransactionStorage,
 } from "./session-transaction";
+import {
+  buildStagedSubmission,
+  purgeSubmissionSnapshot,
+  stageSubmissionSnapshot,
+} from "./submission-snapshot";
+import { ROSTER_SUBMISSION_VERSION } from "./roster-candidate-builder";
+import { rosterStorage } from "@/lib/store";
 import { acquireSessionStorage } from "./session-storage";
 import type { PeopleReverseMap } from "@/lib/scenario";
 import { isExactJobGoneError, type OptimizeErrorInfo } from "@/lib/bff/errors";
@@ -189,6 +197,13 @@ export interface RunActivation {
   reverseMap: PeopleReverseMap;
   /** Whether a reload could resume this run (false for a degraded post-202 stage). */
   reloadRecoveryAvailable: boolean;
+  /**
+   * The F2 roster-capture authority staged before the POST. `unavailable` runs
+   * still optimize and download identically — they simply expose no roster
+   * Load/Retry, because no durable exact-submission authority exists to
+   * de-anonymize a result against.
+   */
+  capture: SessionCaptureState;
 }
 
 /** Injectable seams (dependency injection for testability). */
@@ -202,6 +217,24 @@ export interface UseOptimizeRunDeps {
     document: CanonicalScenarioDocument,
     options: PrepareOptimizeSubmissionOptions,
   ) => PrepareOptimizeSubmissionResult;
+  /**
+   * The F2 write-ahead snapshot seam. Defaults to `stageSubmissionSnapshot` over
+   * the real Dexie repositories. It is REQUIRED to be total: any rejection would
+   * gate the POST, which the non-gating contract forbids — the default implements
+   * that by returning a degraded capture state instead of throwing.
+   */
+  stageSnapshot?: (input: {
+    ownerId: string;
+    canonicalYaml: string;
+    reverseMap: PeopleReverseMap;
+  }) => Promise<SessionCaptureState>;
+  /**
+   * Retire a staged snapshot once this submission is LOCALLY PROVEN to have
+   * created no server job. Total like the staging seam — a failed purge is
+   * reported by the helper, never thrown, because it can only leave a harmless
+   * retained row.
+   */
+  purgeSnapshot?: (ownerId: string) => Promise<void>;
 }
 
 /** The controller surface consumed by the screen (T16e) and recovery UI (T16b/c). */
@@ -252,6 +285,42 @@ export interface OptimizeRunController {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** The real write-ahead snapshot seam (F2). Total: it never rejects. */
+function defaultStageSnapshot(input: {
+  ownerId: string;
+  canonicalYaml: string;
+  reverseMap: PeopleReverseMap;
+}): Promise<SessionCaptureState> {
+  return stageSubmissionSnapshot({
+    ownerId: input.ownerId,
+    payload: buildStagedSubmission({
+      canonicalYaml: input.canonicalYaml,
+      reverseMap: input.reverseMap,
+      // The envelope version is F3's contract, supplied by the one composition
+      // module. F2 never stamps a version it invented.
+      schemaVersion: ROSTER_SUBMISSION_VERSION,
+    }),
+  });
+}
+
+/**
+ * The real proven-no-job purge seam (F2). Reads the CURRENT clear epoch so the
+ * delete is fenced against a Clear that landed while the POST was in flight.
+ */
+async function defaultPurgeSnapshot(ownerId: string): Promise<void> {
+  try {
+    const expectedClearEpoch = await rosterStorage.getClearEpoch();
+    await purgeSubmissionSnapshot({
+      ownerId,
+      expectedClearEpoch,
+      authority: "submit-rejected",
+    });
+  } catch {
+    // Storage is unreachable. A retained snapshot is harmless and Clear reclaims
+    // it; failing the submission flow over it would be strictly worse.
+  }
+}
 
 function defaultOwnerId(): string {
   const cryptoObj = globalThis.crypto;
@@ -521,19 +590,36 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
       if (typeof input.prettify === "boolean") runOptions.prettify = input.prettify;
       if (typeof input.timeout === "number") runOptions.timeout = input.timeout;
 
-      const record = buildProvisionalSession({
-        ownerId: createOwnerId(),
-        anonymized: prep.anonymized,
-        peopleCount: prep.peopleCount,
-        reverseMap: prep.reverseMap,
-        runOptions,
-      });
+      const ownerId = createOwnerId();
 
       setIsSubmitting(true);
       dispatch({
         type: "submit-started",
         anonymized: prep.anonymized,
         peopleCount: prep.peopleCount,
+      });
+
+      // F2 write-ahead: allocate the origin-wide submission ordinal and write the
+      // immutable exact-submission snapshot BEFORE the session record is staged, so
+      // the document that gets solved is durably recoverable from the moment it is
+      // sent. This seam is total by contract — a denied or quota-limited IndexedDB
+      // yields a degraded `unavailable` capture state and the POST and the original
+      // XLSX download proceed byte-identically. `prep.yaml` is the exact bytes the
+      // submit closure below sends, so the snapshot cannot drift from the request.
+      const stageSnapshot = depsRef.current?.stageSnapshot ?? defaultStageSnapshot;
+      const capture = await stageSnapshot({
+        ownerId,
+        canonicalYaml: prep.yaml,
+        reverseMap: prep.reverseMap,
+      });
+
+      const record = buildProvisionalSession({
+        ownerId,
+        anonymized: prep.anonymized,
+        peopleCount: prep.peopleCount,
+        reverseMap: prep.reverseMap,
+        runOptions,
+        capture,
       });
 
       const outcome = await runSubmissionTransaction(record, {
@@ -550,6 +636,13 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
           }
         },
       });
+
+      // Only a snapshot this transaction actually staged may be purged, and only by
+      // its exact owner id.
+      const purgeSnapshot = async (owner: string, staged: SessionCaptureState): Promise<void> => {
+        if (staged.status !== "staged") return;
+        await (depsRef.current?.purgeSnapshot ?? defaultPurgeSnapshot)(owner);
+      };
 
       const attempt = submitAttemptRef.current;
       const stale =
@@ -571,6 +664,12 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
           outcome.status === "activation-unverified"
         ) {
           return { status: "stale-accepted", jobId: outcome.volatile.jobId };
+        }
+        // A superseded attempt does not change what the SERVER did: a blocked or
+        // definitively rejected POST still proves no job exists, so its snapshot is
+        // retired here too rather than being orphaned by the reset that raced it.
+        if (outcome.status === "blocked-before-post" || outcome.status === "submit-rejected") {
+          await purgeSnapshot(ownerId, capture);
         }
         return outcomeToStaleOutcome(outcome);
       }
@@ -596,6 +695,7 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
           peopleCount: prep.peopleCount,
           reverseMap: prep.reverseMap,
           reloadRecoveryAvailable,
+          capture,
         });
         setJobId(id);
         setAttachmentIdentity(token);
@@ -627,12 +727,21 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
           reason: outcome.reason,
         };
       }
+      // LOCALLY PROVEN no-job outcomes retire the write-ahead snapshot. The whole
+      // point of the no-GC/no-expiry policy is that only proof may delete a
+      // snapshot — and "the POST was blocked before it was sent" and "the server
+      // definitively rejected it" are exactly that proof. Without this the canonical
+      // YAML and the real reverse map would sit in IndexedDB until a global Clear.
       if (outcome.status === "blocked-before-post") {
+        await purgeSnapshot(ownerId, capture);
         return { status: "blocked-before-post", reason: outcome.reason };
       }
       if (outcome.status === "submit-rejected") {
+        await purgeSnapshot(ownerId, capture);
         return { status: "submit-rejected" };
       }
+      // `acceptance-unknown` deliberately RETAINS: a server job may exist, and its
+      // capture would be impossible without the exact submission.
       return { status: "acceptance-unknown" };
     },
     [currentProvider, dispatch, revokePersistenceAuthority, submitMutation],

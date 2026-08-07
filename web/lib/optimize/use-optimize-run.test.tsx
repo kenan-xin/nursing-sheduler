@@ -173,13 +173,14 @@ function deps(over: Partial<UseOptimizeRunDeps> = {}): UseOptimizeRunDeps {
 
 function activeRecord(jobId: string, ownerId: string): ActiveOptimizeSession {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     ownerId,
     phase: "active",
     anonymized: false,
     runOptions: {},
     peopleCount: 0,
     reverseMap: [],
+    capture: { status: "staged", snapshotRef: ownerId, submissionOrdinal: 1 },
     jobId,
   };
 }
@@ -196,6 +197,7 @@ function preparedAttachment(
       peopleCount: 0,
       reverseMap: [],
       reloadRecoveryAvailable: true,
+      capture: { status: "staged", snapshotRef: "owner-test", submissionOrdinal: 1 },
       ...activation,
     },
     initialCursor: null,
@@ -319,6 +321,229 @@ describe("useOptimizeRun — happy path", () => {
     expect(requested.some((u) => u.includes("heartbeat"))).toBe(false);
     // The active record was durably staged under the single session key.
     expect(d.storage?.getItem("nurse.optimize.session")).not.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F2 — the write-ahead submission snapshot.
+// ---------------------------------------------------------------------------
+
+describe("useOptimizeRun — write-ahead submission snapshot", () => {
+  function routeSubmit(onPost?: () => void) {
+    routeFetch((u, init) => {
+      const method = init?.method ?? "GET";
+      if (u.endsWith("/api/optimize") && method === "POST") {
+        onPost?.();
+        return json(202, job());
+      }
+      if (u.endsWith("/events")) return streamResponse("");
+      if (/\/api\/optimize\/[^/]+$/.test(u)) return json(200, job());
+      throw new Error(`unexpected request: ${u}`);
+    });
+  }
+
+  it("stages the EXACT submitted YAML before the POST and carries the authority forward", async () => {
+    const order: string[] = [];
+    routeSubmit(() => order.push("post"));
+    const stageSnapshot = vi.fn(async (input: { ownerId: string; canonicalYaml: string }) => {
+      order.push("snapshot");
+      return {
+        status: "staged" as const,
+        snapshotRef: input.ownerId,
+        submissionOrdinal: 4,
+      };
+    });
+
+    const d = deps({ stageSnapshot });
+    const { result } = renderHook(() => useOptimizeRun(d), { wrapper });
+    await act(async () => {
+      await result.current.submit({ document: doc, anonymize: false });
+    });
+
+    // Write-ahead: the snapshot is durable before the request can create a job.
+    expect(order).toEqual(["snapshot", "post"]);
+    // It captured the EXACT bytes the submit closure sends — not a re-derivation.
+    expect(stageSnapshot.mock.calls[0][0]).toMatchObject({
+      ownerId: "owner-test",
+      canonicalYaml: okPrep.ok ? okPrep.prep.yaml : "",
+    });
+
+    const expected = { status: "staged", snapshotRef: "owner-test", submissionOrdinal: 4 };
+    expect(result.current.activation?.capture).toEqual(expected);
+    const record = JSON.parse(d.storage!.getItem("nurse.optimize.session")!);
+    expect(record.capture).toEqual(expected);
+  });
+
+  it("a DENIED snapshot never gates the POST: the run activates, degraded", async () => {
+    let posted = false;
+    routeSubmit(() => {
+      posted = true;
+    });
+    const stageSnapshot = vi.fn(async () => ({
+      status: "unavailable" as const,
+      reason: "snapshot_persist_failed" as const,
+    }));
+
+    const d = deps({ stageSnapshot });
+    const { result } = renderHook(() => useOptimizeRun(d), { wrapper });
+    let outcome!: Awaited<ReturnType<typeof result.current.submit>>;
+    await act(async () => {
+      outcome = await result.current.submit({ document: doc, anonymize: false });
+    });
+
+    expect(outcome).toEqual({ status: "activated", jobId: "opt_1" });
+    expect(posted).toBe(true);
+    // The run is fully normal apart from roster capture.
+    expect(result.current.activation?.reloadRecoveryAvailable).toBe(true);
+    expect(result.current.activation?.capture).toEqual({
+      status: "unavailable",
+      reason: "snapshot_persist_failed",
+    });
+    const record = JSON.parse(d.storage!.getItem("nurse.optimize.session")!);
+    expect(record.phase).toBe("active");
+    expect(record.capture).toEqual({ status: "unavailable", reason: "snapshot_persist_failed" });
+  });
+
+  it("an anonymized degraded run still stages its reverse map durably", async () => {
+    routeSubmit();
+    const anonymizedPrep: PrepareOptimizeSubmissionResult = {
+      ok: true,
+      prep: {
+        yaml: "scenario: {}",
+        peopleCount: 1,
+        reverseMap: [["P1", "Alice"]],
+        anonymized: true,
+      },
+    };
+    const d = deps({
+      prepare: () => anonymizedPrep,
+      stageSnapshot: async () => ({
+        status: "unavailable" as const,
+        reason: "snapshot_persist_failed" as const,
+      }),
+    });
+    const { result } = renderHook(() => useOptimizeRun(d), { wrapper });
+    await act(async () => {
+      await result.current.submit({ document: doc, anonymize: true });
+    });
+
+    // The T16q recovery map is a separate concern from roster capture and must
+    // still be durable — a degraded snapshot cannot cost the user their XLSX names.
+    const record = JSON.parse(d.storage!.getItem("nurse.optimize.session")!);
+    expect(record.reverseMap).toEqual([["P1", "Alice"]]);
+    expect(record.capture.status).toBe("unavailable");
+  });
+});
+
+describe("useOptimizeRun — proven-no-job snapshot purge", () => {
+  // The snapshot holds the canonical YAML AND the real reverse map, and the
+  // no-GC/no-expiry policy means only PROOF may delete it. "The POST never went"
+  // and "the server definitively rejected it" are exactly that proof; without
+  // purging on them the identities sit in IndexedDB until a global Clear.
+  function stagedDeps(over: Partial<UseOptimizeRunDeps> = {}) {
+    const purgeSnapshot = vi.fn(async () => undefined);
+    const stageSnapshot = vi.fn(async (input: { ownerId: string }) => ({
+      status: "staged" as const,
+      snapshotRef: input.ownerId,
+      submissionOrdinal: 1,
+    }));
+    return { purgeSnapshot, stageSnapshot, d: deps({ purgeSnapshot, stageSnapshot, ...over }) };
+  }
+
+  it("purges when the POST is blocked before it is ever sent", async () => {
+    routeFetch(() => {
+      throw new Error("no request should be made");
+    });
+    const { purgeSnapshot, d } = stagedDeps({ storage: memStorage("occupied") });
+    const { result } = renderHook(() => useOptimizeRun(d), { wrapper });
+
+    let outcome!: Awaited<ReturnType<typeof result.current.submit>>;
+    await act(async () => {
+      outcome = await result.current.submit({ document: doc, anonymize: false });
+    });
+
+    expect(outcome).toEqual({ status: "blocked-before-post", reason: "session-conflict" });
+    expect(requested).toEqual([]);
+    expect(purgeSnapshot).toHaveBeenCalledWith("owner-test");
+  });
+
+  it("purges on a DEFINITE server rejection", async () => {
+    routeFetch((u, init) => {
+      if (u.endsWith("/api/optimize") && (init?.method ?? "GET") === "POST") {
+        return json(422, {
+          error: { code: "invalid_scheduling_data", message: "nope", issues: [] },
+        });
+      }
+      throw new Error(`unexpected: ${u}`);
+    });
+    const { purgeSnapshot, d } = stagedDeps();
+    const { result } = renderHook(() => useOptimizeRun(d), { wrapper });
+
+    await act(async () => {
+      await result.current.submit({ document: doc, anonymize: false });
+    });
+
+    expect(result.current.view.lifecycle).toBe("submit-rejected");
+    expect(purgeSnapshot).toHaveBeenCalledWith("owner-test");
+  });
+
+  it("RETAINS on acceptance-unknown — a server job may exist and would need its submission", async () => {
+    routeFetch((u, init) => {
+      if (u.endsWith("/api/optimize") && (init?.method ?? "GET") === "POST") {
+        return json(500, { detail: "boom" });
+      }
+      throw new Error(`unexpected: ${u}`);
+    });
+    const { purgeSnapshot, d } = stagedDeps();
+    const { result } = renderHook(() => useOptimizeRun(d), { wrapper });
+
+    await act(async () => {
+      await result.current.submit({ document: doc, anonymize: false });
+    });
+
+    expect(result.current.view.lifecycle).toBe("submit-unknown");
+    expect(purgeSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("RETAINS on an accepted run — capture consumes the snapshot later", async () => {
+    routeFetch((u, init) => {
+      const method = init?.method ?? "GET";
+      if (u.endsWith("/api/optimize") && method === "POST") return json(202, job());
+      if (u.endsWith("/events")) return streamResponse("");
+      if (/\/api\/optimize\/[^/]+$/.test(u)) return json(200, job());
+      throw new Error(`unexpected: ${u}`);
+    });
+    const { purgeSnapshot, d } = stagedDeps();
+    const { result } = renderHook(() => useOptimizeRun(d), { wrapper });
+
+    await act(async () => {
+      await result.current.submit({ document: doc, anonymize: false });
+    });
+
+    expect(result.current.activation?.capture.status).toBe("staged");
+    expect(purgeSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("never purges a snapshot that was never staged", async () => {
+    routeFetch(() => {
+      throw new Error("no request should be made");
+    });
+    const purgeSnapshot = vi.fn(async () => undefined);
+    const d = deps({
+      storage: memStorage("occupied"),
+      purgeSnapshot,
+      stageSnapshot: async () => ({
+        status: "unavailable" as const,
+        reason: "snapshot_persist_failed" as const,
+      }),
+    });
+    const { result } = renderHook(() => useOptimizeRun(d), { wrapper });
+
+    await act(async () => {
+      await result.current.submit({ document: doc, anonymize: false });
+    });
+
+    expect(purgeSnapshot).not.toHaveBeenCalled();
   });
 });
 
@@ -757,6 +982,7 @@ describe("useOptimizeRun — attachRecoveredSession (P1 #2)", () => {
             peopleCount: 2,
             reverseMap,
             reloadRecoveryAvailable: true,
+            capture: { status: "staged", snapshotRef: "owner-recovered", submissionOrdinal: 1 },
           },
         }),
         initialCursor: "cursor-from-reload",
@@ -1112,6 +1338,7 @@ describe("useOptimizeRun — prepared recovery transport", () => {
             peopleCount: 3,
             reverseMap: [["P1", 1]],
             reloadRecoveryAvailable: true,
+            capture: { status: "staged", snapshotRef: "owner-same", submissionOrdinal: 1 },
           },
           initialCursor: "cursor-A",
         }),

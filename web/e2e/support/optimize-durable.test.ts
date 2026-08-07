@@ -11,8 +11,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-// The PRODUCT's reload authority, imported here for the parity assertions: the schema
-// half of this suite proves the harness agrees with it rather than restating it.
 import { inspectPersistedSession } from "@/lib/optimize/session-transaction";
 import {
   ABORT_BOUND_KEYS,
@@ -88,6 +86,13 @@ const PRE_RELOAD = [cursor(JOB, N_OLD)];
 /** The fixture/page origin the assembled harness actually serves from. */
 const ORIGIN = "http://localhost:51236";
 
+/**
+ * The product's CURRENT session schema version, so version-sensitive fixtures follow
+ * it rather than restating a number. F2's `capture` authority bumped it, and a table
+ * that spelled `1` would have been asserting a schema the product no longer writes.
+ */
+const V = OPTIMIZE_SESSION_SCHEMA_VERSION;
+
 // ---------------------------------------------------------------------------
 // Session-record fixtures — the PRODUCT'S CLOSED SCHEMA, field by field
 // ---------------------------------------------------------------------------
@@ -104,6 +109,10 @@ const VALID_ACTIVE_SESSION: Record<string, unknown> = {
   runOptions: { prettify: false, timeout: 30 },
   peopleCount: 0,
   reverseMap: [],
+  // F2's roster-capture authority. `snapshotRef` IS the transaction owner id — the
+  // product's closed schema binds them, so a fixture that named a different owner
+  // would be unreadable rather than merely unusual.
+  capture: { status: "staged", snapshotRef: "owner-1", submissionOrdinal: 1 },
   jobId: "job-from-page",
 };
 
@@ -1350,46 +1359,46 @@ describe("accepted-job ownership fails closed and recovers", () => {
       [
         "the shape the old judge accepted — a bare jobId",
         '{"jobId":"job-x"}',
-        "session record schemaVersion undefined is not 1",
+        `session record schemaVersion undefined is not ${V}`,
       ],
       [
         "a FUTURE schema version",
-        JSON.stringify({ schemaVersion: 2, ownerId: "o", phase: "active", jobId: "job-x" }),
-        "session record schemaVersion 2 is not 1",
+        JSON.stringify({ schemaVersion: V + 1, ownerId: "o", phase: "active", jobId: "job-x" }),
+        `session record schemaVersion ${V + 1} is not ${V}`,
       ],
       [
         "a stale schema version",
-        JSON.stringify({ schemaVersion: 0, ownerId: "o", phase: "active", jobId: "job-x" }),
-        "session record schemaVersion 0 is not 1",
+        JSON.stringify({ schemaVersion: V - 1, ownerId: "o", phase: "active", jobId: "job-x" }),
+        `session record schemaVersion ${V - 1} is not ${V}`,
       ],
       [
         "missing an owner id",
-        JSON.stringify({ schemaVersion: 1, phase: "active", jobId: "job-x" }),
+        JSON.stringify({ schemaVersion: V, phase: "active", jobId: "job-x" }),
         "session record has no owner id",
       ],
       [
         "PROVISIONAL but carrying a jobId",
-        JSON.stringify({ schemaVersion: 1, ownerId: "o", phase: "provisional", jobId: "job-x" }),
+        JSON.stringify({ schemaVersion: V, ownerId: "o", phase: "provisional", jobId: "job-x" }),
         "provisional session record carries a jobId; not valid",
       ],
       [
         "an unknown phase",
-        JSON.stringify({ schemaVersion: 1, ownerId: "o", phase: "zombie", jobId: "job-x" }),
+        JSON.stringify({ schemaVersion: V, ownerId: "o", phase: "zombie", jobId: "job-x" }),
         "session record phase zombie is not active",
       ],
       [
         "missing a phase entirely",
-        JSON.stringify({ schemaVersion: 1, ownerId: "o", jobId: "job-x" }),
+        JSON.stringify({ schemaVersion: V, ownerId: "o", jobId: "job-x" }),
         "session record phase undefined is not active",
       ],
       [
         "ACTIVE with a non-string jobId",
-        JSON.stringify({ schemaVersion: 1, ownerId: "o", phase: "active", jobId: 7 }),
+        JSON.stringify({ schemaVersion: V, ownerId: "o", phase: "active", jobId: 7 }),
         "active session record has no valid jobId",
       ],
       [
         "ACTIVE with an empty jobId",
-        JSON.stringify({ schemaVersion: 1, ownerId: "o", phase: "active", jobId: "" }),
+        JSON.stringify({ schemaVersion: V, ownerId: "o", phase: "active", jobId: "" }),
         "active session record has no valid jobId",
       ],
     ])("fails closed on a record that is %s", (_label, raw, reason) => {
@@ -1413,7 +1422,7 @@ describe("accepted-job ownership fails closed and recovers", () => {
       [
         "the review's active-looking record with no payload at all",
         JSON.stringify({
-          schemaVersion: 1,
+          schemaVersion: V,
           ownerId: "owner-1",
           phase: "active",
           jobId: "job-foreign",
@@ -1424,6 +1433,7 @@ describe("accepted-job ownership fails closed and recovers", () => {
       ["missing `runOptions`", activeSessionRecordWithout("runOptions")],
       ["missing `peopleCount`", activeSessionRecordWithout("peopleCount")],
       ["missing `reverseMap`", activeSessionRecordWithout("reverseMap")],
+      ["missing `capture`", activeSessionRecordWithout("capture")],
       // A CLOSED key set: an unknown key makes the record unreadable, so a foreign or
       // future writer's record cannot be mined for an id.
       ["carrying an unknown key", activeSessionRecord("job-x", { surprise: 1 })],
@@ -1603,7 +1613,12 @@ describe("accepted-job ownership fails closed and recovers", () => {
         activeSessionRecord("job-live", { surprise: 1 }),
         provisionalSessionRecord(),
         provisionalSessionRecord({ jobId: "job-x" }),
-        JSON.stringify({ schemaVersion: 1, ownerId: "owner-1", phase: "active", jobId: "job-f" }),
+        JSON.stringify({
+          schemaVersion: OPTIMIZE_SESSION_SCHEMA_VERSION,
+          ownerId: "owner-1",
+          phase: "active",
+          jobId: "job-f",
+        }),
       ];
       for (const raw of corpus) {
         const inspected = inspectPersistedSession(frozenStorage(raw));
@@ -1624,7 +1639,9 @@ describe("accepted-job ownership fails closed and recovers", () => {
       const recovery = await recoverAcceptedOwnership({
         readSessionRecord: async () =>
           JSON.stringify({
-            schemaVersion: 1,
+            // Version-CORRECT and well-owned, but with no payload — which is the shape
+            // this proof needs: rejected by the codec, not merely by a stale version.
+            schemaVersion: V,
             ownerId: "owner-1",
             phase: "active",
             jobId: "job-foreign",
@@ -1919,7 +1936,7 @@ describe("accepted-job ownership fails closed and recovers", () => {
 
     it("reads the exact key and schema version the product writes", () => {
       expect(OPTIMIZE_SESSION_RECORD_KEY).toBe("nurse.optimize.session");
-      expect(OPTIMIZE_SESSION_SCHEMA_VERSION).toBe(1);
+      expect(OPTIMIZE_SESSION_SCHEMA_VERSION).toBe(2);
     });
   });
 
@@ -2030,6 +2047,7 @@ describe("the abort lane's total budget enumerates EVERY sequential bound", () =
     "abortNavigation",
     "abortUrlSettle",
     "bffObservationTail",
+    "abortHandoffPublish",
     "schedulerAllowance",
   ];
 
@@ -2044,8 +2062,8 @@ describe("the abort lane's total budget enumerates EVERY sequential bound", () =
     );
     expect(ABORT_TEST_TIMEOUT).toBe(manual);
     // 5 + 5 init + 50 fixture + 5 submit + 15 first response + 5 observation
-    // + 30 navigation + 30 URL settle + 2 BFF tail + 8 scheduler = 155s.
-    expect(ABORT_TEST_TIMEOUT).toBe(155_000);
+    // + 30 navigation + 30 URL settle + 2 BFF tail + 12 handoff + 8 scheduler = 167s.
+    expect(ABORT_TEST_TIMEOUT).toBe(167_000);
   });
 
   it("every bound is a positive finite number", () => {
