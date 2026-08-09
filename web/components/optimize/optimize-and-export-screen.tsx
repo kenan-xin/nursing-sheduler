@@ -6,6 +6,12 @@
 // bounded client observability into the old application's run experience, adapted
 // to the same-origin durable BFF. It owns no protocol machinery: it projects the
 // controller's authoritative view and drives server-authoritative controls.
+//
+// G4 closure — the roster viewer moved to its own `/roster` route. This screen
+// no longer mounts the F4 surface; the prototype-faithful `Open & adjust roster`
+// CTA surfaces the result and routes through the shared guarded navigation
+// boundary to the dedicated page. The capture gate itself still lives here
+// (it is app-lifetime and shared with the /roster screen).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Surface, surfaceVariants } from "@/components/ui/surface";
@@ -37,7 +43,6 @@ import {
 } from "@/lib/optimize";
 import { CaptureNotice } from "./capture-notice";
 import { Callout } from "./callout";
-import { RosterSection } from "@/components/roster-viewer/roster-section";
 import { ReadinessBanner } from "./readiness-banner";
 import { RecoveryNotice } from "./recovery-notice";
 import { RunEventLog } from "./run-event-log";
@@ -92,8 +97,10 @@ export interface OptimizeAndExportScreenProps {
   /**
    * Seams for the roster capture gate's three collaborators (F1 storage, the B3
    * `/roster` client, F3's assembler). The gate ITSELF is always created here —
-   * there is no way to run this screen without a real capture gate wired into the
-   * real terminal chain, which is what makes the production path the tested path.
+   * the app-lifetime singleton survives navigation to /roster (the dedicated
+   * screen reaches the SAME gate through `useRosterCapture`), so there is no
+   * way to run Optimize without a real capture gate wired into the real
+   * terminal chain, which is what makes the production path the tested path.
    */
   captureDeps?: UseRosterCaptureDeps;
   observability?: OptimizeObservability;
@@ -205,6 +212,18 @@ export function OptimizeAndExportScreen({
 
   const view = controller.view;
   const active = isActiveLifecycle(view.lifecycle);
+
+  // G4 — the prototype's `Open & adjust roster` CTA. Only a completed run
+  // whose F2 capture committed a loadable candidate may claim a roster
+  // exists. `stateFor(view.jobId)` is the in-memory capture outcome for the
+  // run in view; a fresh app process has no entries, so this is honest only
+  // for the run the screen currently sees — a separately persisted durable
+  // candidate is reached from the /roster screen directly. Idle, running,
+  // failed, infeasible-without-incumbent, capture-failed and dismissed
+  // outcomes all stay silent.
+  const captureStateForView = capture.stateFor(view.jobId);
+  const hasLoadableRoster =
+    view.lifecycle === "completed" && captureStateForView.status === "committed";
 
   // --- observability emissions (bounded, client-only) ------------------------
   const runStartRef = useRef<number | null>(null);
@@ -470,19 +489,15 @@ export function OptimizeAndExportScreen({
             // the idle panel shows the explainer only; the settings button carries
             // the disabled reason.
             onStartRun={submitEnabled ? onSubmit : undefined}
+            // G4 — drives the `Open & adjust roster` CTA inside the
+            // completed artifact block. True only for a completed run whose
+            // capture committed a loadable candidate.
+            loadableRoster={hasLoadableRoster}
           />
         </Section>
       </div>
 
       <RunEventLog log={view.log} active={active || controller.isSubmitting} />
-
-      {/* F4 — the read-only roster surface. Renders the working roster in the
-          three lenses, or the empty/candidate states. Candidate Load/Retry/
-          Dismiss are roster-result actions wired through the F2 capture gate. */}
-      {/* The section's candidate actions are keyed to the DURABLE pointer's
-          `{jobId, candidateVersion}`, not to whatever run is in the panel above.
-          It therefore does not receive this screen's current-run callbacks. */}
-      <RosterSection capture={capture} />
     </Surface>
   );
 }

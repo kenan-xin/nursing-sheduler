@@ -229,7 +229,7 @@ This is the complete known boundary for the v2 bundle. New mismatches must be ad
 | Semantic categories such as Rest & recovery / Skill mix / Fairness / Preferences | Not derivable from arbitrary constraint cards. Guided Rules groups by constraint kind; semantic categories belong only to future guided templates with baked-in meaning. | Do not add the prototype taxonomy to existing Rules records or UI. |
 | Live Compact / Comfortable / Spacious density selector | Removed. The product uses a permanent 0.9 multiplier for spacing and type; radius and shadow remain absolute. | Keep the fixed baseline and omit the control. |
 | Collapsible desktop sidebar and `ns-side-collapsed` persistence | Separate, low-priority feature. | Excluded from the re-skin. |
-| **Roster** route and grid | Planned but unbuilt (`cjr` / `f4-roster-viewer`). | The grid specification is future design input, not current re-skin scope. |
+| **Roster** route and grid | Built and shipped (`cjr`). `/roster` is a production route, with `Roster` under the `Output` navigation group after `Optimise & Export` and a Roster card on Advanced Home; Guided keeps its six workflow steps. | In scope. The grid specification below is the shipped contract, not future input. |
 | **Export Layout** route | Separate, low-priority, user-gated feature (`qq0.15`). Its placeholder/nav entry stay absent until the user explicitly commissions the real editor. | Excluded from the re-skin. When built, restore its own route and nav item; preview is a client-side schematic, not WYSIWYG XLSX. |
 | **AI Assistant** nav item | AI is optional, off by default, BYO-key, and client-direct. | No phantom destination while disabled; show it only inside the eventual enabled AI experience. |
 | Page-level **neutral note strip** authored as `--panel` + a `--line` border directly on the page plane (`ScreenCards.dc.html:28`, `ScreenRequests.dc.html:80`, `ScreenRules.dc.html:101`) | §4 gives L0 no free-floating children and seats a well *inside* an L1 card, so a `--panel` plane on L0 is recessed into nothing. A page-mounted neutral notice takes the **L1** role instead — `--surface`, a `--line` edge, `--sh-1`, card radius. | Keep the well for a neutral note nested in an L1 card; use L1 for a page-mounted one. **Status-tinted** page banners are unchanged — tint plus a matching semantic border, which is what the prototype itself authors (`ScreenSaveLoad.dc.html:19`, `ScreenExport.dc.html:20`, `ScreenRequests.dc.html:21`). |
@@ -438,9 +438,9 @@ Avatars are `50%`.
 - `--r-chip` (9px), tinted background matched to its semantic role, uppercase label at +0.03em.
 - Always pairs its tint with the matching semantic **ink** and border. **No decorative ornament** — status reads `DONE` / `CURRENT` / `TO DO` as text; no check glyphs, no coloured leader dots on eyebrows. Colour and weight carry state.
 
-### Roster grid (target — not yet built)
+### Roster grid
 
-The densest surface in the system, and the one with the most specific rules. It has no implementation yet; this is the spec for when it is built.
+The densest surface in the system, and the one with the most specific rules. It ships at `/roster`; this is the contract that implementation follows.
 
 - Container is `--r-card` with `overflow:auto` and `max-height:66vh` — **the container is the scroller**, so sticky offsets resolve against it, not the page.
 - **Sticky z-order is load-bearing:** day/summary headers `z:3`, body first column `z:2`, top-left corner `z:5`. Headers below the first column makes nurse names paint over the date row while scrolling. Both sticky edges carry `--sh-edge` so content visibly passes *under* them.

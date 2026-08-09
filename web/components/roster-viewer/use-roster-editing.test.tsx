@@ -23,12 +23,15 @@ let dbSeq = 0;
 async function seedWorking(): Promise<{ document: RosterDocument; revision: number }> {
   const document = await fixtureRosterDocument();
   const epoch = await rosterStorage.getClearEpoch();
-  const outcome = await rosterStorage.writeWorking({
+  // A whole document is a replacement, so it goes through promotion; the edit
+  // operation is for later revisions of this same roster.
+  const outcome = await rosterStorage.promoteDocumentToWorking({
     document,
-    expectedRevision: null,
+    validate: (value) => ({ ok: true as const, document: value as RosterDocument }),
+    expectedWorkingRevision: null,
     expectedClearEpoch: epoch,
   });
-  if (outcome.status !== "written") throw new Error("seed failed");
+  if (outcome.status !== "promoted") throw new Error("seed failed");
   return { document, revision: outcome.revision };
 }
 

@@ -3,9 +3,11 @@
 // Start-over card (T08, acceptance row 3 / MINOR 8). The primary reset affordance
 // lives in Save & Load — not the top bar — inside a "Start over" section with
 // explanatory backup copy and a destructive (error-outline) treatment, matching
-// the prototype (ScreenSaveLoad.dc.html:50-58). On confirm it calls
-// resetToNewScenario (T04): drop the persisted record, replace every scenario
-// slice with the empty default, clear undo history, and reset the hot store.
+// the prototype (ScreenSaveLoad.dc.html:50-58). On confirm it calls the verified
+// full reset, `resetToNewSchedule`: the roster/candidate/snapshot/session/marker
+// and capture cleanup first, and only once that is proven, the T04 scenario reset
+// (drop the persisted record, replace every scenario slice with the empty default,
+// clear undo history, reset the hot store).
 //
 // F2 owns this file's PRESENTATION only, and is its sole visual owner before F4 —
 // R1 and R7 consume it without editing it. v2 reading (ScreenSaveLoad.dc.html:50-58):
@@ -13,10 +15,17 @@
 // ACTION rather than by an error border drawn around the whole card. The button is
 // the shared `destructive-outline` Button variant, so its error tone and its 44px
 // coarse-pointer target come from the primitive instead of a local class override.
-// Reset confirmation, the store call and `onResetComplete` are unchanged.
+//
+// G4 closure — the confirmed reset now goes through `resetToNewSchedule`, which
+// runs the existing verified roster/stored-data cut BEFORE the scenario reset. So
+// `New schedule` genuinely leaves the previous run behind (no surviving roster,
+// candidate, capture state or session record, and therefore no stale capture
+// notice on Optimize), and it fails closed: an unverified cut changes nothing and
+// reports plainly instead of claiming `New schedule created`. `onResetComplete` is
+// called only on a real reset.
 
 import { useState } from "react";
-import { useScenarioStore, useHotStore, resetToNewScenario } from "@/lib/store";
+import { NEW_SCHEDULE_FAILED_MESSAGE, resetToNewSchedule } from "@/lib/roster";
 import { ConfirmDialog } from "./confirm-dialog";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -26,15 +35,25 @@ import { FaFileCirclePlus } from "@/components/icons";
 
 export interface StartOverCardProps {
   onResetComplete?: () => void;
+  /**
+   * Test seam for the reset authority. Production uses the real one; a proof can
+   * drive the failed-cleanup branch without breaking the browser's storage.
+   */
+  resetNewSchedule?: typeof resetToNewSchedule;
 }
 
-export function StartOverCard({ onResetComplete }: StartOverCardProps) {
+export function StartOverCard({ onResetComplete, resetNewSchedule }: StartOverCardProps) {
   const [open, setOpen] = useState(false);
-  const scenario = useScenarioStore;
-  const hot = useHotStore;
+  const reset = resetNewSchedule ?? resetToNewSchedule;
 
   const handleConfirm = async () => {
-    await resetToNewScenario(scenario, hot);
+    const outcome = await reset();
+    if (outcome.status !== "reset") {
+      // Nothing was changed, so nothing is announced as done. The retry path is
+      // the same button — the card is still on screen and still armed.
+      toast.error(NEW_SCHEDULE_FAILED_MESSAGE);
+      return;
+    }
     onResetComplete?.();
     toast.success("New schedule created");
   };
@@ -77,6 +96,7 @@ export function StartOverCard({ onResetComplete }: StartOverCardProps) {
           "All people, shift types and dates",
           "Every rule and request",
           "Your export layout",
+          "The saved roster and the last run's result",
         ]}
         onConfirm={handleConfirm}
       />

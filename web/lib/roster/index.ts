@@ -180,3 +180,11 @@ export {
   type RosterClearDeps,
   type RosterClearOutcome,
 } from "./roster-clear";
+
+export {
+  NEW_SCHEDULE_FAILED_MESSAGE,
+  resetToNewSchedule,
+  type NewScheduleFailure,
+  type NewScheduleResetDeps,
+  type NewScheduleResetOutcome,
+} from "./new-schedule-reset";

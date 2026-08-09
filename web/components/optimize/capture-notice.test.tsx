@@ -130,6 +130,10 @@ describe("CaptureNotice — actionable states still offer their action", () => {
     const committed = show({
       status: "committed",
       pointer: { jobId: "opt_1", candidateVersion: 1, submissionOrdinal: 1 },
+      // The notice is disposition-blind on purpose: "saved in this browser" is
+      // true whether the commit filled an empty viewer or left a candidate
+      // awaiting a choice, so it must not vary with this.
+      working: { kind: "awaiting-choice", reason: "working-present" },
     });
     await userEvent.click(screen.getByTestId("optimize-capture-dismiss"));
     expect(committed.onDismiss).toHaveBeenCalled();

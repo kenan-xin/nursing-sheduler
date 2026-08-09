@@ -33,6 +33,7 @@ import {
   importRosterFileToWorking,
   promoteCandidateRosterToWorking,
 } from "@/lib/roster";
+import { isWorkingRosterFromCandidate } from "@/lib/store";
 import type { CurrentCandidatePointer } from "@/lib/store";
 import type { RosterCaptureSurface } from "@/lib/optimize";
 import { Callout } from "@/components/optimize/callout";
@@ -78,10 +79,38 @@ export function RosterSection({ capture }: RosterSectionProps) {
    * loadable result exists; the gate's opinion is about this process, not the
    * data.
    */
-  const loadable =
+  const candidateOnHand =
     roster.candidate !== null && roster.candidateDocument !== null
       ? { pointer: roster.candidate, document: roster.candidateDocument }
       : null;
+
+  /**
+   * ...unless the roster on screen was promoted from EXACTLY this candidate.
+   *
+   * A completed run whose working slot was empty is promoted into it by the same
+   * transaction that stores the candidate (F1's fill-empty CAS), so the durable
+   * candidate and the working roster are then the same result. Offering to “load”
+   * or “replace” it would be offering the roster the user is looking at — and,
+   * once they had edited it, an unlabelled discard-my-edits action, which v1
+   * deliberately does not have.
+   *
+   * Identity is the storage row's recorded `{jobId, candidateVersion}` against the
+   * current pointer, and nothing else. Comparing DOCUMENT content instead — the
+   * solved-baseline id, say — answers a different question: that hash covers only
+   * the ordered people, dates and solved day-states, so an independent run with
+   * its own submission, score, coordinate map and frozen workbook shares it
+   * whenever the assignments coincide. Suppressing on that made a genuinely
+   * distinct latest result invisible and unloadable. A newer capture for the same
+   * job moves `candidateVersion`, so it stops matching too and becomes visible.
+   * A row with no recorded source (an import, or one written before this metadata
+   * existed) never matches, so it never hides anything by inference.
+   */
+  const loadable = isWorkingRosterFromCandidate(
+    roster.candidateSource ?? undefined,
+    candidateOnHand?.pointer ?? null,
+  )
+    ? null
+    : candidateOnHand;
 
   /**
    * Promote a candidate in the EMPTY state (no working roster, so no editing

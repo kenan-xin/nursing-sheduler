@@ -40,6 +40,7 @@ import {
   FaArrowRotateRight,
   FaBan,
   FaBolt,
+  FaCalendarCheck,
   FaCircleCheck,
   FaDownload,
   FaSliders,
@@ -86,6 +87,15 @@ export interface RunStatusPanelProps {
    * (the settings column already owns the primary Optimize action).
    */
   onStartRun?: () => void;
+  /**
+   * Whether a loadable roster was captured for the run in view. Drives the
+   * `Open & adjust roster` CTA inside the completed artifact block (G4). The
+   * flag is owned by the screen, which is the only place that can prove a
+   * roster exists — `capture.stateFor(view.jobId).status === "committed"` —
+   * so this panel renders the CTA exactly when the screen says a loadable
+   * roster is on hand, and is silent for every other terminal outcome.
+   */
+  loadableRoster?: boolean;
 }
 
 /**
@@ -126,6 +136,7 @@ export function RunStatusPanel({
   onDownloadAgain,
   onRetryCleanup,
   onStartRun,
+  loadableRoster,
 }: RunStatusPanelProps) {
   const status = formatRunStatus(view, submitting);
   const active = isActiveLifecycle(view.lifecycle);
@@ -385,6 +396,21 @@ export function RunStatusPanel({
                   <span className="text-ink3">· {downloadAgainFilename}</span>
                 ) : null}
               </Button>
+            ) : null}
+            {/* G4 — the prototype's "Open & adjust roster" CTA. The flag is
+                supplied by the screen so the panel cannot claim a roster exists
+                for a non-loadable run outcome — idle, running, failed,
+                infeasible-without-incumbent, capture-failed, dismissed, etc.
+                The CTA targets the dedicated /roster route through the same
+                guarded navigation boundary the rest of the panel uses. */}
+            {loadableRoster === true ? (
+              <GuardedLink
+                href="/roster"
+                className={cn(buttonVariants({ variant: "default", size: "default" }))}
+                data-testid="optimize-open-roster"
+              >
+                <FaCalendarCheck className="size-4" aria-hidden /> Open &amp; adjust roster
+              </GuardedLink>
             ) : null}
           </div>
         </div>

@@ -45,7 +45,7 @@ describe("parseSelector", () => {
     }
   });
 
-  it.each(["r1", "R1 ", " R1", "R2A", "FOUNDATION", "ALL", "R8", "R2", "foundation,R1"])(
+  it.each(["r1", "R1 ", " R1", "R2A", "FOUNDATION", "ALL", "R2", "foundation,R1"])(
     "rejects %s without quietly repairing it",
     (value) => {
       expect(() => parseSelector(value, MATRIX_OWNER_ENV)).toThrow(V2OwnerSelectionError);
@@ -53,9 +53,11 @@ describe("parseSelector", () => {
   );
 
   it("names the accepted values and the manifest inventory when it fails", () => {
+    // G4 — R8 is now a valid owner, so the rejection probe uses a known-bad
+    // value (e.g. an unknown owner) to exercise the failure path.
     let message = "";
     try {
-      parseSelector("R8", MATRIX_OWNER_ENV);
+      parseSelector("R99", MATRIX_OWNER_ENV);
     } catch (err) {
       message = (err as Error).message;
     }
@@ -91,12 +93,13 @@ describe("selectRows", () => {
     ["R3", ["/rules"]],
     ["R5", ["/shift-requests"]],
     ["R7", ["/save-and-load"]],
+    ["R8", ["/roster"]],
   ])("registers exactly %s's rows", (owner, routes) => {
     expect(selectRows(owner).map((r) => r.route)).toEqual(routes);
   });
 
-  it("registers all 17 rows for G1", () => {
-    expect(selectRows("all")).toHaveLength(17);
+  it("registers all 18 rows for G1", () => {
+    expect(selectRows("all")).toHaveLength(18);
     expect(selectRows("all").map((r) => r.route)).toEqual(V2_SURFACE_MATRIX.map((r) => r.route));
   });
 
@@ -140,7 +143,8 @@ describe("selectStyleOwnerPatterns", () => {
   });
 
   it("shares one vocabulary with the browser selector", () => {
-    expect(() => selectStyleOwnerPatterns("R8", STYLE_OWNER_ENV)).toThrow(V2OwnerSelectionError);
+    // R8 is now a valid owner (G4 closure).
+    expect(() => selectStyleOwnerPatterns("R8", STYLE_OWNER_ENV)).not.toThrow();
     expect(() => selectStyleOwnerPatterns("", STYLE_OWNER_ENV)).toThrow(V2OwnerSelectionError);
   });
 });
@@ -229,6 +233,10 @@ describe("ownerForPath", () => {
     ["components/optimize/progress-chart/progress-chart.tsx", "R6"],
     ["app/progress-chart-fixture/fixture-client.tsx", "R6"],
     ["components/save-load/save-load-workspace.tsx", "R7"],
+    ["components/roster-viewer/roster-screen.tsx", "R8"],
+    ["components/roster-viewer/roster-section.tsx", "R8"],
+    ["components/roster-viewer/working-roster-panel.tsx", "R8"],
+    ["app/(app)/roster/page.tsx", "R8"],
   ])("%s belongs to %s", (path, owner) => {
     expect(ownerForPath(path)).toBe(owner);
   });
@@ -328,16 +336,18 @@ describe("the working-time-fields owner exception", () => {
 
   it("changes no route row — this is a STATIC-ownership fix only", () => {
     // The manifest's browser half is frozen for the epic. A style-owner edit that
-    // also moved a row would change what each ticket's matrices verify.
-    expect(V2_SURFACE_MATRIX).toHaveLength(17);
+    // also moved a row would change what each ticket's matrices verify. The
+    // G4 closure added R8 + the /roster row, so the count is now 18, not 17.
+    expect(V2_SURFACE_MATRIX).toHaveLength(18);
     expect(selectRows("R2c").map((r) => r.route)).toEqual(["/shift-types"]);
     expect(selectRows("foundation").map((r) => r.route)).toEqual(["/design-system"]);
   });
 
   it("still fails closed on an invalid or empty style selector", () => {
     // The exception must not have introduced a widening fallback anywhere on the
-    // style path.
-    for (const bad of ["", "   ", "r2c", "R2C", "R2c ", "R8", "foundation,R2c"]) {
+    // style path. R8 is now a valid owner (G4), so the rejection list no longer
+    // includes it.
+    for (const bad of ["", "   ", "r2c", "R2C", "R2c ", "foundation,R2c"]) {
       expect(() => selectStyleOwnerPatterns(bad, STYLE_OWNER_ENV), bad).toThrow(
         V2OwnerSelectionError,
       );

@@ -30,10 +30,10 @@ import {
 const REPO_ROOT = resolve(__dirname, "..", "..", "..");
 
 describe("inventory", () => {
-  it("holds exactly 13 product routes and 4 harness routes", () => {
-    expect(V2_PRODUCT_ROUTES).toHaveLength(13);
+  it("holds exactly 14 product routes and 4 harness routes", () => {
+    expect(V2_PRODUCT_ROUTES).toHaveLength(14);
     expect(V2_HARNESS_ROUTES).toHaveLength(4);
-    expect(V2_SURFACE_MATRIX).toHaveLength(17);
+    expect(V2_SURFACE_MATRIX).toHaveLength(18);
   });
 
   it("gives every route exactly one row", () => {
@@ -82,17 +82,20 @@ describe("inventory", () => {
   });
 
   it("excludes the features the adoption record put outside this epic", () => {
-    // Export Layout, Roster and the gated AI destination have no shipped screen.
-    // A row for one would be a route ticket verifying something that is not there.
+    // Export Layout, the deprecated `/schedule` alias and the gated AI destination
+    // have no shipped screen. A row for one would be a route ticket verifying
+    // something that is not there. `/roster` IS shipped (R8); the legacy alias
+    // `/schedule` is not — leaving both in the matrix would duplicate the
+    // destination.
     const routes = V2_SURFACE_MATRIX.map((r) => r.route);
-    for (const absent of ["/export-layout", "/roster", "/schedule", "/ai", "/assistant"]) {
+    for (const absent of ["/export-layout", "/schedule", "/ai", "/assistant"]) {
       expect(routes).not.toContain(absent);
     }
   });
 });
 
 describe("consistency with the shipped route registry", () => {
-  it("the product rows are exactly the app's 13 navigable routes", () => {
+  it("the product rows are exactly the app's 14 navigable routes", () => {
     // Read from `nav-config` rather than a second hand-written list: a route
     // added to the product must fail HERE, not go silently unverified.
     expect([...V2_PRODUCT_ROUTES].sort()).toEqual(ALL_NAV_ITEMS.map((i) => i.path).sort());
@@ -125,6 +128,14 @@ describe("consistency with the shipped route registry", () => {
       ).toBe(true);
     }
   });
+
+  it("R8 owns exactly one product row — the /roster route", () => {
+    // The G4 closure split the surface ownership: R8 is the dedicated roster
+    // route + its viewer, R6 keeps Optimize. Pinning the rows here so a future
+    // edit that adds a second row under R8 fails here, not as an off-by-one
+    // elsewhere.
+    expect(rowsForOwner("R8").map((r) => r.route)).toEqual(["/roster"]);
+  });
 });
 
 describe("prototypes", () => {
@@ -144,8 +155,13 @@ describe("prototypes", () => {
   });
 
   it("names no prototype for a screen this epic deliberately excludes", () => {
+    // Export Layout and the gated AI destination have no shipped screen — a
+    // prototype name for either would be a route ticket verifying something
+    // that is not there. `ScreenSchedule.dc.html` is the prototype the
+    // dedicated /roster route (R8) IS judged against, so it is no longer in
+    // the exclusion list.
     const named = V2_SURFACE_MATRIX.map((r) => r.prototype);
-    for (const excluded of ["ScreenExport", "ScreenSchedule", "ScreenAppendixAI"]) {
+    for (const excluded of ["ScreenExport", "ScreenAppendixAI"]) {
       expect(named.filter((p) => p.includes(excluded))).toEqual([]);
     }
   });

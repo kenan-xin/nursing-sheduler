@@ -292,6 +292,86 @@ describe("roster capture — retry by failure mode", () => {
   });
 });
 
+describe("roster capture — the working-slot disposition", () => {
+  it("reports loaded-empty and populates the viewer when no working roster exists", async () => {
+    const store = freshStore();
+    const capture = await stage(store, "own-1");
+    const { gate } = harness(store);
+
+    const outcome = await gate.capture(request("job-1", capture));
+
+    expect(outcome.state).toMatchObject({
+      status: "committed",
+      working: { kind: "loaded-empty", workingRevision: 1 },
+    });
+    // The CTA's promise: `Open & adjust roster` opens a POPULATED viewer, with no
+    // Load click in between.
+    expect(await store.readWorking()).toMatchObject({ revision: 1 });
+    // Filling the slot changes nothing about cleanup authority.
+    expect(outcome.token).toMatchObject({ kind: "committed", jobId: "job-1" });
+  });
+
+  it("reports awaiting-choice and preserves an existing roster and its edits", async () => {
+    const store = freshStore();
+    // Through promotion, not the edit operation: seeding a whole document IS a
+    // replacement, and this stands in for a roster the user imported — which
+    // carries no candidate source.
+    await store.promoteDocumentToWorking({
+      document: { tag: "hand-edited" },
+      validate: (value) => ({ ok: true as const, document: value }),
+      expectedWorkingRevision: null,
+      expectedClearEpoch: await store.getClearEpoch(),
+    });
+    const capture = await stage(store, "own-1");
+    const { gate } = harness(store);
+
+    const outcome = await gate.capture(request("job-1", capture));
+
+    expect(outcome.state).toMatchObject({
+      status: "committed",
+      working: { kind: "awaiting-choice", reason: "working-present" },
+    });
+    expect(await store.readWorking()).toMatchObject({
+      document: { tag: "hand-edited" },
+      revision: 1,
+    });
+    // The exact new result is still the durable latest candidate, awaiting Load.
+    expect((await store.readCurrentCandidate())?.jobId).toBe("job-1");
+  });
+
+  it("a RESUMED settle reports what the original commit decided, not the slot's state now", async () => {
+    // The commit succeeded and filled the empty slot, but its staging purge could
+    // not be proven, so the settle is withheld and retried. By then the slot is
+    // populated — so a disposition re-derived at settle time would read
+    // `awaiting-choice` and the CTA would stop promising a populated viewer for the
+    // very run that populated it.
+    const store = freshStore();
+    const capture = await stage(store, "own-1");
+    let failDelete = true;
+    const fragile: RosterStorage = {
+      ...store,
+      async deleteSubmissionSnapshot(input) {
+        if (failDelete) throw new Error("snapshot delete failed");
+        return store.deleteSubmissionSnapshot(input);
+      },
+    };
+    const { gate } = harness(fragile);
+
+    const blocked = await gate.capture(request("job-1", capture));
+    expect(blocked.token).toBeNull();
+    expect(await store.readWorking()).toMatchObject({ revision: 1 });
+
+    failDelete = false;
+    const resumed = await gate.retry(request("job-1", capture));
+
+    expect(resumed.state).toMatchObject({
+      status: "committed",
+      working: { kind: "loaded-empty", workingRevision: 1 },
+    });
+    expect(resumed.token).toMatchObject({ kind: "committed", jobId: "job-1" });
+  });
+});
+
 describe("roster capture — ordering authority", () => {
   it("an OLDER late completion becomes a proven superseded dismissal, never a committed token", async () => {
     const store = freshStore();

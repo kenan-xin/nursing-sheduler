@@ -146,6 +146,7 @@ const GUIDED_VISIBLE_PATHS = [
   "/rules",
   "/shift-requests",
   "/optimize-and-export",
+  "/roster",
   "/save-and-load",
 ];
 const ADVANCED_ONLY_PATHS = [

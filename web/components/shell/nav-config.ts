@@ -1,4 +1,4 @@
-// Navigation configuration (T08/T08d). The fixed 13-tab set from spec 07
+// Navigation configuration (T08/T08d). The fixed 14-tab set from spec 07
 // FR-ST-28, grouped by workflow phase per the user-approved nav-config mapping
 // that came out of the prototype-conformance audit. The taxonomy is the
 // prototype's phase language — Home (headerless, top-level) → SET UP →
@@ -51,6 +51,7 @@ import {
   FaPeopleArrows,
   FaUserShield,
   FaWandMagicSparkles,
+  FaCalendarCheck,
   FaFloppyDisk,
 } from "@/components/icons";
 import type { IconType } from "@/components/icons";
@@ -172,6 +173,18 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: FaWandMagicSparkles,
         blurb: "Run the optimiser & export",
         guidedStep: 6,
+      },
+      // G4 — the Roster destination is the second Output entry (prototype
+      // SideNav.dc.html / Nurse Scheduling v2.dc.html, group:out). It sits
+      // alongside Optimise & Export, is reachable in BOTH modes, and carries
+      // NO `guidedStep` — keeping `GUIDED_STEP_COUNT` at six. Persistent
+      // shell navigation is its entry in both modes; Advanced Home gains
+      // the prototype-aligned editor card with the same blurb.
+      {
+        label: "Roster",
+        path: "/roster",
+        icon: FaCalendarCheck,
+        blurb: "View & manually adjust results",
       },
     ],
   },

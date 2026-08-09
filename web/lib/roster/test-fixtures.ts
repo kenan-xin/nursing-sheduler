@@ -148,6 +148,24 @@ export function fixtureContainer(): RosterContainerView {
 }
 
 /**
+ * A container whose solved grid differs from `fixtureContainer()` by one cell, so
+ * the document assembled from it has a DIFFERENT `solvedBaselineId` — a genuinely
+ * different RESULT rather than a second copy of the same one.
+ *
+ * Needed wherever a test stages “an existing roster with a new result beside it”.
+ * The viewer suppresses the candidate offer for a result the roster already IS
+ * (F1's fill-empty CAS makes that the normal state after a run), so two copies of
+ * the default fixture would stage the wrong scenario and quietly prove nothing.
+ */
+export function fixtureAlternateContainer(): RosterContainerView {
+  const base = fixtureContainer();
+  const solvedDays = base.solvedDays.map((row) => [...row]);
+  // Person 0, date 1: OFF in the default grid, Leave here.
+  solvedDays[0][1] = LEAVE;
+  return { ...base, solvedDays };
+}
+
+/**
  * Stand-in frozen workbook bytes. The roster document treats the workbook as
  * opaque bytes it must carry losslessly; patching a REAL C5 workbook is F5's
  * edited-XLSX path, so a byte pattern is the honest fixture here — it makes
@@ -176,6 +194,17 @@ export async function fixtureRosterDocument(
   });
   if (!result.ok) throw new Error(`fixture roster document is invalid: ${result.reason}`);
   return result.document;
+}
+
+/**
+ * The default fixture document's sibling: a valid document that is a DIFFERENT
+ * solved result (see `fixtureAlternateContainer`). Use it for the candidate
+ * whenever a working roster is also staged.
+ */
+export function fixtureAlternateRosterDocument(
+  overrides: { frozenXlsx?: Blob } = {},
+): Promise<RosterDocument> {
+  return fixtureRosterDocument({ container: fixtureAlternateContainer(), ...overrides });
 }
 
 /** Structured-clone a document the way IndexedDB would, Blob included. */

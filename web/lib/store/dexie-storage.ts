@@ -43,6 +43,17 @@ export interface RosterRow<TDocument = unknown> {
   revision: number;
   /** The clear epoch this row was written under (see `roster-storage.ts`). */
   clearEpoch: number;
+  /**
+   * On the `working` row only: the EXACT candidate this roster was promoted from,
+   * or absent when it came from an import or any other non-candidate source.
+   *
+   * Storage metadata, deliberately NOT part of the roster document: it is about
+   * where this browser's row came from, so it has no place in the shareable roster
+   * file or in the solved-baseline hash. It needs no Dexie index (nothing queries
+   * by it) and no schema version bump — an optional field on an out-of-line-keyed
+   * store, so rows written before it existed read back with it simply absent.
+   */
+  candidateSource?: { jobId: string; candidateVersion: number };
 }
 
 /** An immutable submission snapshot row, keyed and authorized by `ownerId`. */

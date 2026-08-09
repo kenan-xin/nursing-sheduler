@@ -389,7 +389,7 @@ describe("F5 proof · Clear leaves no residue and invalidates authority first", 
     expect(epochAfter).toBe(epochBefore + 1);
 
     // A write that still carries the OLD epoch is fenced — it cannot repopulate.
-    const stale = await storage.writeWorking({
+    const stale = await storage.writeWorkingEdit({
       document: { ...document, edits: [{ personIdx: 0, dateIdx: 0, day: SHIFT_N }] },
       expectedRevision: revision,
       expectedClearEpoch: epochBefore,

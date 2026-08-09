@@ -10,6 +10,7 @@ import { ScenarioPersistenceDb } from "./dexie-storage";
 import {
   candidateRosterKey,
   createRosterStorageForDb,
+  isWorkingRosterFromCandidate,
   WORKING_ROSTER_KEY,
   type CandidateCommitOutcome,
   type RosterStorage,
@@ -482,25 +483,538 @@ describe("candidate supersession", () => {
   });
 });
 
-describe("working roster promotion", () => {
-  it("promotes a candidate, keeping the candidate as the durable latest result", async () => {
+describe("fill empty, never overwrite (the working-slot CAS inside candidate commit)", () => {
+  it("fills a PROVEN-empty working slot from the same transaction and says so", async () => {
     const { storage } = openTab(freshDbName());
-    await storage.commitCandidate({
+
+    const outcome = await storage.commitCandidate({
       jobId: "job-1",
       submissionOrdinal: 1,
-      document: { tag: "candidate" },
+      document: { tag: "solved" },
       expectedClearEpoch: 0,
     });
 
-    const promoted = await storage.promoteCandidateToWorking({
-      jobId: "job-1",
-      expectedCandidateVersion: 1,
+    expect(outcome).toMatchObject({
+      status: "committed",
+      working: { kind: "loaded-empty", workingRevision: 1 },
+    });
+    // No Load click, no second transaction: the viewer is populated already.
+    expect(await storage.readWorking()).toMatchObject({
+      document: { tag: "solved" },
+      revision: 1,
+      clearEpoch: 0,
+    });
+    // And the candidate is still the durable latest result, as ever.
+    expect((await storage.readCandidate<{ tag: string }>("job-1"))?.document.tag).toBe("solved");
+    expect((await storage.readCurrentCandidate())?.jobId).toBe("job-1");
+  });
+
+  it("preserves an existing working roster BYTE-FOR-BYTE and leaves the candidate awaiting a choice", async () => {
+    const { storage } = openTab(freshDbName());
+    const existingBytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x07, 0x00, 0xff]);
+    await storage.promoteDocumentToWorking({
+      document: { tag: "hand-edited", frozenXlsx: new Blob([existingBytes]) },
       validate: acceptAll,
       expectedWorkingRevision: null,
       expectedClearEpoch: 0,
     });
 
-    expect(promoted).toEqual({ status: "promoted", revision: 1 });
+    const outcome = await storage.commitCandidate({
+      jobId: "job-1",
+      submissionOrdinal: 1,
+      document: { tag: "new-result" },
+      expectedClearEpoch: 0,
+    });
+
+    expect(outcome).toMatchObject({
+      status: "committed",
+      working: { kind: "awaiting-choice", reason: "working-present" },
+    });
+    // Byte-for-byte, not merely "still a roster": the row was not rewritten (the
+    // revision is untouched) and its embedded blob round-trips unchanged.
+    const kept = await storage.readWorking<{ tag: string; frozenXlsx: Blob }>();
+    expect(kept?.revision).toBe(1);
+    expect(kept?.document.tag).toBe("hand-edited");
+    expect(new Uint8Array(await kept!.document.frozenXlsx.arrayBuffer())).toEqual(existingBytes);
+    // The exact new result is durable and reachable for an explicit Load/Replace.
+    expect((await storage.readCandidate<{ tag: string }>("job-1"))?.document.tag).toBe(
+      "new-result",
+    );
+  });
+
+  it("never treats an UNREADABLE working slot as empty, and still commits the candidate", async () => {
+    const { db, storage } = openTab(freshDbName());
+    const realGet = db.roster.get.bind(db.roster);
+    // Throws synchronously on purpose: awaiting a foreign rejected promise inside
+    // a Dexie transaction would leave its zone and commit it early, which would be
+    // testing the harness rather than the fence.
+    db.roster.get = ((key: string) => {
+      if (key === WORKING_ROSTER_KEY) throw new Error("the working row could not be read");
+      return realGet(key);
+    }) as typeof db.roster.get;
+
+    const outcome = await storage.commitCandidate({
+      jobId: "job-1",
+      submissionOrdinal: 1,
+      document: { tag: "new-result" },
+      expectedClearEpoch: 0,
+    });
+
+    db.roster.get = realGet as typeof db.roster.get;
+
+    // Fail closed on the PROMOTION only. "Empty" means proven absent, and a failed
+    // read proves nothing — but the candidate's own durability is not collateral.
+    expect(outcome).toMatchObject({
+      status: "committed",
+      working: { kind: "awaiting-choice", reason: "working-unreadable" },
+    });
+    expect(await storage.readWorking()).toBeNull();
+    expect((await storage.readCandidate<{ tag: string }>("job-1"))?.document.tag).toBe(
+      "new-result",
+    );
+
+    // Negative control: with the read working again, the SAME call fills the slot.
+    // Without this the test would pass just as well if promotion were removed.
+    const retry = await storage.commitCandidate({
+      jobId: "job-2",
+      submissionOrdinal: 2,
+      document: { tag: "later-result" },
+      expectedClearEpoch: 0,
+    });
+    expect(retry).toMatchObject({ status: "committed", working: { kind: "loaded-empty" } });
+  });
+
+  it("does not fill the slot for a SUPERSEDED (older) completion", async () => {
+    const { storage } = openTab(freshDbName());
+    await storage.commitCandidate({
+      jobId: "job-new",
+      submissionOrdinal: 5,
+      document: { tag: "newer" },
+      expectedClearEpoch: 0,
+    });
+    // The newer run already filled the empty slot; put an unrelated document there
+    // so the only reason the late run could fail to promote is supersession itself.
+    // Through PROMOTION, because that is what replacing the whole document is — and
+    // it clears the fill-empty row's candidate source, so the replacement cannot
+    // inherit an identity it has nothing to do with.
+    const replaced = await storage.promoteDocumentToWorking({
+      document: { tag: "whatever" },
+      validate: acceptAll,
+      expectedWorkingRevision: 1,
+      expectedClearEpoch: 0,
+    });
+    expect(replaced).toEqual({ status: "promoted", revision: 2 });
+    expect((await storage.readWorking())?.candidateSource).toBeUndefined();
+
+    const late = await storage.commitCandidate({
+      jobId: "job-old",
+      submissionOrdinal: 4,
+      document: { tag: "older" },
+      expectedClearEpoch: 0,
+    });
+
+    expect(late.status).toBe("superseded");
+    expect(await storage.readWorking()).toMatchObject({
+      document: { tag: "whatever" },
+      revision: 2,
+    });
+    expect(await storage.readCandidate("job-old")).toBeNull();
+  });
+
+  it("rolls the WHOLE commit back when the working write fails — no candidate, no pointer, no roster", async () => {
+    const { db, storage } = openTab(freshDbName());
+    const realPut = db.roster.put.bind(db.roster);
+    db.roster.put = ((row: { key: string }) => {
+      if (row.key === WORKING_ROSTER_KEY) throw new Error("quota exceeded");
+      return realPut(row as never);
+    }) as typeof db.roster.put;
+
+    await expect(
+      storage.commitCandidate({
+        jobId: "job-1",
+        submissionOrdinal: 1,
+        document: { tag: "solved" },
+        expectedClearEpoch: 0,
+      }),
+    ).rejects.toThrow(/quota exceeded/);
+
+    db.roster.put = realPut as typeof db.roster.put;
+
+    // One transaction means one outcome. A check-then-write would have left the
+    // candidate and its pointer behind, reporting a durable capture that is not.
+    expect(await storage.readWorking()).toBeNull();
+    expect(await storage.readCandidate("job-1")).toBeNull();
+    expect(await storage.readCurrentCandidate()).toBeNull();
+
+    // Negative control: the retry, unobstructed, commits and fills.
+    expect(
+      await storage.commitCandidate({
+        jobId: "job-1",
+        submissionOrdinal: 1,
+        document: { tag: "solved" },
+        expectedClearEpoch: 0,
+      }),
+    ).toMatchObject({ status: "committed", working: { kind: "loaded-empty" } });
+  });
+
+  it("lets only ONE of two concurrent tabs fill the empty slot", async () => {
+    const dbName = freshDbName();
+    const tabA = openTab(dbName);
+    const tabB = openTab(dbName);
+
+    // Both start while the slot is empty and overlap in IndexedDB. A check-then-write
+    // would let both observe "empty" and the second would clobber the first.
+    const [first, second] = await Promise.all([
+      tabA.storage.commitCandidate({
+        jobId: "job-a",
+        submissionOrdinal: 1,
+        document: { tag: "A" },
+        expectedClearEpoch: 0,
+      }),
+      tabB.storage.commitCandidate({
+        jobId: "job-b",
+        submissionOrdinal: 2,
+        document: { tag: "B" },
+        expectedClearEpoch: 0,
+      }),
+    ]);
+
+    const filled = [first, second].filter(
+      (outcome) => outcome.status === "committed" && outcome.working.kind === "loaded-empty",
+    );
+    expect(filled).toHaveLength(1);
+
+    // Exactly one write ever reached the slot, so it is still at its first revision.
+    const working = await tabA.storage.readWorking<{ tag: string }>();
+    expect(working?.revision).toBe(1);
+    // And the slot holds the document of the commit that CLAIMED the fill — not
+    // whichever tab happened to run last.
+    const winner = filled[0];
+    if (winner.status !== "committed") throw new Error("unreachable");
+    expect(working?.document.tag).toBe(winner.pointer.jobId === "job-a" ? "A" : "B");
+
+    // IndexedDB decides which of the two above ran first, so one of them may have
+    // been refused for SUPERSESSION rather than by the slot fence. This third
+    // commit removes that ambiguity deterministically: it is strictly newer than
+    // both, so nothing but the filled slot can stop it — and it must not overwrite.
+    const newer = await tabB.storage.commitCandidate({
+      jobId: "job-c",
+      submissionOrdinal: 3,
+      document: { tag: "C" },
+      expectedClearEpoch: 0,
+    });
+    expect(newer).toMatchObject({
+      status: "committed",
+      working: { kind: "awaiting-choice", reason: "working-present" },
+    });
+    expect(await tabA.storage.readWorking()).toMatchObject({ ...working, revision: 1 });
+  });
+});
+
+describe("exact candidate provenance on the working row", () => {
+  it("records the EXACT candidate a fill-empty promotion came from", async () => {
+    const { storage } = openTab(freshDbName());
+
+    const outcome = await storage.commitCandidate({
+      jobId: "job-1",
+      submissionOrdinal: 1,
+      document: { tag: "solved" },
+      expectedClearEpoch: 0,
+    });
+    if (outcome.status !== "committed") throw new Error("unreachable");
+
+    const working = await storage.readWorking();
+    expect(working?.candidateSource).toEqual({
+      jobId: "job-1",
+      candidateVersion: outcome.pointer.candidateVersion,
+    });
+    // The recorded source IS the pointer, which is what makes the comparison exact
+    // rather than a guess from document content.
+    expect(isWorkingRosterFromCandidate(working?.candidateSource, outcome.pointer)).toBe(true);
+  });
+
+  it("records the exact promoted version on an explicit Load, replacing any earlier source", async () => {
+    const { storage } = openTab(freshDbName());
+    // A first run fills the empty slot and stamps its own source.
+    const first = await storage.commitCandidate({
+      jobId: "job-1",
+      submissionOrdinal: 1,
+      document: { tag: "first" },
+      expectedClearEpoch: 0,
+    });
+    if (first.status !== "committed") throw new Error("unreachable");
+
+    // A second, newer run only becomes a candidate — the slot is occupied.
+    const second = await storage.commitCandidate({
+      jobId: "job-2",
+      submissionOrdinal: 2,
+      document: { tag: "second" },
+      expectedClearEpoch: 0,
+    });
+    if (second.status !== "committed") throw new Error("unreachable");
+
+    const promoted = await storage.promoteCandidateToWorking({
+      jobId: "job-2",
+      expectedCandidateVersion: second.pointer.candidateVersion,
+      validate: acceptAll,
+      expectedWorkingRevision: 1,
+      expectedClearEpoch: 0,
+    });
+    expect(promoted).toEqual({ status: "promoted", revision: 2 });
+
+    // Replaced wholesale, not merged: the first run's source must not survive.
+    const working = await storage.readWorking();
+    expect(working?.candidateSource).toEqual({
+      jobId: "job-2",
+      candidateVersion: second.pointer.candidateVersion,
+    });
+    expect(isWorkingRosterFromCandidate(working?.candidateSource, first.pointer)).toBe(false);
+    expect(isWorkingRosterFromCandidate(working?.candidateSource, second.pointer)).toBe(true);
+  });
+
+  it("records NO source for an imported or otherwise manual document", async () => {
+    const { storage } = openTab(freshDbName());
+    // Start from a candidate-promoted row so the absence below is a real removal,
+    // not just a field that was never written.
+    const commit = await storage.commitCandidate({
+      jobId: "job-1",
+      submissionOrdinal: 1,
+      document: { tag: "from-run" },
+      expectedClearEpoch: 0,
+    });
+    if (commit.status !== "committed") throw new Error("unreachable");
+    expect((await storage.readWorking())?.candidateSource).toBeDefined();
+
+    const imported = await storage.promoteDocumentToWorking({
+      document: { tag: "imported" },
+      validate: acceptAll,
+      expectedWorkingRevision: 1,
+      expectedClearEpoch: 0,
+    });
+    expect(imported).toEqual({ status: "promoted", revision: 2 });
+
+    const working = await storage.readWorking();
+    expect(working?.candidateSource).toBeUndefined();
+    // So an import can never be mistaken for the candidate whose grid it matches.
+    expect(isWorkingRosterFromCandidate(working?.candidateSource, commit.pointer)).toBe(false);
+  });
+
+  it("carries the source forward across autosave revisions", async () => {
+    const { storage } = openTab(freshDbName());
+    const commit = await storage.commitCandidate({
+      jobId: "job-1",
+      submissionOrdinal: 1,
+      document: { tag: "solved", edits: [] },
+      expectedClearEpoch: 0,
+    });
+    if (commit.status !== "committed") throw new Error("unreachable");
+
+    // Two autosaves, as editing produces. An edited roster is still the SAME
+    // result, so dropping the source here would make every edit look imported.
+    const first = await storage.writeWorkingEdit({
+      document: { tag: "solved", edits: [{ personIdx: 0 }] },
+      expectedRevision: 1,
+      expectedClearEpoch: 0,
+    });
+    expect(first).toEqual({ status: "written", revision: 2 });
+    await storage.writeWorkingEdit({
+      document: { tag: "solved", edits: [{ personIdx: 0 }, { personIdx: 1 }] },
+      expectedRevision: 2,
+      expectedClearEpoch: 0,
+    });
+
+    const working = await storage.readWorking();
+    expect(working?.revision).toBe(3);
+    expect(isWorkingRosterFromCandidate(working?.candidateSource, commit.pointer)).toBe(true);
+  });
+
+  it("leaves a row with no source alone, and Clear removes the source with the row", async () => {
+    const { storage } = openTab(freshDbName());
+    // COMPATIBILITY: a row written without the field — as every row predating it
+    // was — reads back normally and simply carries no source.
+    await storage.promoteDocumentToWorking({
+      document: { tag: "legacy" },
+      validate: acceptAll,
+      expectedWorkingRevision: null,
+      expectedClearEpoch: 0,
+    });
+    const legacy = await storage.readWorking();
+    expect(legacy).toMatchObject({ document: { tag: "legacy" }, revision: 1 });
+    expect(legacy?.candidateSource).toBeUndefined();
+    // An edit of that row stays sourceless rather than inventing one.
+    await storage.writeWorkingEdit({
+      document: { tag: "legacy-edited" },
+      expectedRevision: 1,
+      expectedClearEpoch: 0,
+    });
+    expect((await storage.readWorking())?.candidateSource).toBeUndefined();
+
+    // Clear takes the row, and with it the source — there is no orphan provenance.
+    const commit = await storage.commitCandidate({
+      jobId: "job-1",
+      submissionOrdinal: 1,
+      document: { tag: "solved" },
+      expectedClearEpoch: 0,
+    });
+    expect(commit.status).toBe("committed");
+    expect(await storage.clearRosterData()).toMatchObject({ status: "cleared" });
+    expect(await storage.readWorking()).toBeNull();
+  });
+
+  it("the equality rule is exact: same job, newer version does not match", async () => {
+    // The whole point of carrying `candidateVersion`. A same-job re-capture is a
+    // different result the user has not decided about.
+    const source = { jobId: "job-1", candidateVersion: 1 };
+    expect(
+      isWorkingRosterFromCandidate(source, {
+        jobId: "job-1",
+        candidateVersion: 1,
+        submissionOrdinal: 9,
+      }),
+    ).toBe(true);
+    expect(
+      isWorkingRosterFromCandidate(source, {
+        jobId: "job-1",
+        candidateVersion: 2,
+        submissionOrdinal: 9,
+      }),
+    ).toBe(false);
+    expect(
+      isWorkingRosterFromCandidate(source, {
+        jobId: "job-2",
+        candidateVersion: 1,
+        submissionOrdinal: 9,
+      }),
+    ).toBe(false);
+    // Absent source, or no candidate at all: never a match, so neither can hide
+    // anything by inference.
+    expect(isWorkingRosterFromCandidate(undefined, { ...source, submissionOrdinal: 1 })).toBe(
+      false,
+    );
+    expect(isWorkingRosterFromCandidate(source, null)).toBe(false);
+  });
+});
+
+describe("the working-write boundary: edits preserve, replacements decide", () => {
+  /** The source recorded on the current working row, if any. */
+  async function sourceOf(storage: RosterStorage) {
+    return (await storage.readWorking())?.candidateSource;
+  }
+
+  it("exposes NO general working write — only the edit operation and the two promotions", () => {
+    // DEAD SURFACE. A general `writeWorking` always carried the row's
+    // `candidateSource` into whatever document it was handed, so one
+    // replacement-shaped caller was enough to give a roster the PREVIOUS roster's
+    // exact candidate identity — after which the UI hid the Load/Replace action for
+    // a candidate the working roster never came from. Removing that surface is the
+    // fix, so its absence is the assertion.
+    const surface = openTab(freshDbName()).storage as unknown as Record<string, unknown>;
+    expect("writeWorking" in surface).toBe(false);
+    expect(typeof surface.writeWorkingEdit).toBe("function");
+    expect(typeof surface.promoteCandidateToWorking).toBe("function");
+    expect(typeof surface.promoteDocumentToWorking).toBe("function");
+  });
+
+  it("transitions the source correctly across edit, candidate replacement, and import", async () => {
+    const { storage } = openTab(freshDbName());
+
+    // 1. AUTO-PROMOTED. The fill-empty CAS stamps its own exact source.
+    const first = await storage.commitCandidate({
+      jobId: "job-1",
+      submissionOrdinal: 1,
+      document: { tag: "run-1" },
+      expectedClearEpoch: 0,
+    });
+    if (first.status !== "committed") throw new Error("unreachable");
+    expect(isWorkingRosterFromCandidate(await sourceOf(storage), first.pointer)).toBe(true);
+
+    // 2. AN EDIT keeps it — a new revision of the same roster.
+    expect(
+      await storage.writeWorkingEdit({
+        document: { tag: "run-1", edits: [1] },
+        expectedRevision: 1,
+        expectedClearEpoch: 0,
+      }),
+    ).toEqual({ status: "written", revision: 2 });
+    expect(isWorkingRosterFromCandidate(await sourceOf(storage), first.pointer)).toBe(true);
+
+    // 3. A CANDIDATE REPLACEMENT moves it to the exact version promoted.
+    const second = await storage.commitCandidate({
+      jobId: "job-2",
+      submissionOrdinal: 2,
+      document: { tag: "run-2" },
+      expectedClearEpoch: 0,
+    });
+    if (second.status !== "committed") throw new Error("unreachable");
+    expect(
+      await storage.promoteCandidateToWorking({
+        jobId: "job-2",
+        expectedCandidateVersion: second.pointer.candidateVersion,
+        validate: acceptAll,
+        expectedWorkingRevision: 2,
+        expectedClearEpoch: 0,
+      }),
+    ).toEqual({ status: "promoted", revision: 3 });
+    expect(isWorkingRosterFromCandidate(await sourceOf(storage), first.pointer)).toBe(false);
+    expect(isWorkingRosterFromCandidate(await sourceOf(storage), second.pointer)).toBe(true);
+
+    // 4. AN IMPORT clears it — so the current candidate stays something the user
+    //    can choose to load, whatever its assignments happen to look like. This is
+    //    the transition the old general write could silently skip.
+    expect(
+      await storage.promoteDocumentToWorking({
+        document: { tag: "imported" },
+        validate: acceptAll,
+        expectedWorkingRevision: 3,
+        expectedClearEpoch: 0,
+      }),
+    ).toEqual({ status: "promoted", revision: 4 });
+    expect(await sourceOf(storage)).toBeUndefined();
+    expect(isWorkingRosterFromCandidate(await sourceOf(storage), second.pointer)).toBe(false);
+
+    // 5. AND AN EDIT OF THAT IMPORT stays sourceless — it cannot acquire one.
+    await storage.writeWorkingEdit({
+      document: { tag: "imported", edits: [1] },
+      expectedRevision: 4,
+      expectedClearEpoch: 0,
+    });
+    expect(await sourceOf(storage)).toBeUndefined();
+  });
+});
+
+describe("working roster promotion", () => {
+  it("promotes a candidate over an existing roster, keeping the candidate as the durable latest result", async () => {
+    const { storage } = openTab(freshDbName());
+    // A working roster already exists, so the commit itself cannot fill the slot.
+    // This is precisely the path explicit promotion exists for — with an EMPTY
+    // slot the commit fills it and no Load click is involved at all.
+    await storage.promoteDocumentToWorking({
+      document: { tag: "existing" },
+      validate: acceptAll,
+      expectedWorkingRevision: null,
+      expectedClearEpoch: 0,
+    });
+    const commit = await storage.commitCandidate({
+      jobId: "job-1",
+      submissionOrdinal: 1,
+      document: { tag: "candidate" },
+      expectedClearEpoch: 0,
+    });
+    expect(commit).toMatchObject({
+      status: "committed",
+      working: { kind: "awaiting-choice", reason: "working-present" },
+    });
+    expect((await storage.readWorking<{ tag: string }>())?.document.tag).toBe("existing");
+
+    const promoted = await storage.promoteCandidateToWorking({
+      jobId: "job-1",
+      expectedCandidateVersion: 1,
+      validate: acceptAll,
+      expectedWorkingRevision: 1,
+      expectedClearEpoch: 0,
+    });
+
+    expect(promoted).toEqual({ status: "promoted", revision: 2 });
     expect((await storage.readWorking<{ tag: string }>())?.document.tag).toBe("candidate");
     // Promotion is a copy, not a move: the candidate stays loadable.
     expect(await storage.readCandidate("job-1")).not.toBeNull();
@@ -637,7 +1151,10 @@ describe("working roster promotion", () => {
     });
 
     expect(promoted).toEqual({ status: "source-changed" });
-    expect(await storage.readWorking()).toBeNull();
+    // The commit's own fill-empty put `v1` in the slot. The re-captured `v2` the
+    // validator planted never reached it, and no second write happened at all —
+    // which the unchanged revision proves, not the document alone.
+    expect(await storage.readWorking()).toMatchObject({ document: { tag: "v1" }, revision: 1 });
   });
 });
 
@@ -645,14 +1162,14 @@ describe("revisioned compare-and-swap working writes", () => {
   it("accepts the expected revision and rejects a stale one", async () => {
     const { storage } = openTab(freshDbName());
 
-    const created = await storage.writeWorking({
+    const created = await storage.writeWorkingEdit({
       document: { edits: [] },
       expectedRevision: null,
       expectedClearEpoch: 0,
     });
     expect(created).toEqual({ status: "written", revision: 1 });
 
-    const updated = await storage.writeWorking({
+    const updated = await storage.writeWorkingEdit({
       document: { edits: [1] },
       expectedRevision: 1,
       expectedClearEpoch: 0,
@@ -660,7 +1177,7 @@ describe("revisioned compare-and-swap working writes", () => {
     expect(updated).toEqual({ status: "written", revision: 2 });
 
     // A writer still holding revision 1 loses; the stored document is untouched.
-    const conflicted = await storage.writeWorking({
+    const conflicted = await storage.writeWorkingEdit({
       document: { edits: ["stale"] },
       expectedRevision: 1,
       expectedClearEpoch: 0,
@@ -671,14 +1188,14 @@ describe("revisioned compare-and-swap working writes", () => {
 
   it("a first write expecting no row loses to a row that already exists", async () => {
     const { storage } = openTab(freshDbName());
-    await storage.writeWorking({
+    await storage.writeWorkingEdit({
       document: { tag: "a" },
       expectedRevision: null,
       expectedClearEpoch: 0,
     });
 
     expect(
-      await storage.writeWorking({
+      await storage.writeWorkingEdit({
         document: { tag: "b" },
         expectedRevision: null,
         expectedClearEpoch: 0,
@@ -693,9 +1210,10 @@ describe("barrier-controlled two-instance races", () => {
     const tabA = openTab(dbName);
     const tabB = openTab(dbName);
 
-    await tabA.storage.writeWorking({
+    await tabA.storage.promoteDocumentToWorking({
       document: { edits: ["existing"] },
-      expectedRevision: null,
+      validate: acceptAll,
+      expectedWorkingRevision: null,
       expectedClearEpoch: 0,
     });
     await tabA.storage.commitCandidate({
@@ -724,7 +1242,7 @@ describe("barrier-controlled two-instance races", () => {
     // Tab B autosaves an edit into the overlap window.
     await barrier.reached;
     expect(
-      await tabB.storage.writeWorking({
+      await tabB.storage.writeWorkingEdit({
         document: { edits: ["existing", "autosaved"] },
         expectedRevision: 1,
         expectedClearEpoch: 0,
@@ -804,8 +1322,10 @@ describe("barrier-controlled two-instance races", () => {
     barrier.release();
 
     expect(await promotion).toEqual({ status: "source-changed" });
-    // Crucially, the STALE document was not written to working.
-    expect(await tabB.storage.readWorking()).toBeNull();
+    // Crucially, the STALE promotion did not write. The slot holds tab A's own
+    // fill-empty row from its commit; since that row's document is also `A`, the
+    // REVISION is what discriminates — a stale write would have bumped it to 2.
+    expect(await tabB.storage.readWorking()).toMatchObject({ document: { tag: "A" }, revision: 1 });
     expect((await tabB.storage.readCandidate<{ tag: string }>("job-1"))?.document.tag).toBe("B");
 
     // Negative control: promoting what is actually stored now succeeds, and it
@@ -817,10 +1337,10 @@ describe("barrier-controlled two-instance races", () => {
         jobId: "job-1",
         expectedCandidateVersion: recreated.pointer.candidateVersion,
         validate: acceptAll,
-        expectedWorkingRevision: null,
+        expectedWorkingRevision: 1,
         expectedClearEpoch: 0,
       }),
-    ).toEqual({ status: "promoted", revision: 1 });
+    ).toEqual({ status: "promoted", revision: 2 });
     expect((await tabA.storage.readWorking<{ tag: string }>())?.document.tag).toBe("B");
   });
 
@@ -1032,9 +1552,10 @@ describe("clear epoch fencing", () => {
       document: { tag: "candidate" },
       expectedClearEpoch: 0,
     });
-    await storage.writeWorking({
+    await storage.promoteDocumentToWorking({
       document: { tag: "working" },
-      expectedRevision: null,
+      validate: acceptAll,
+      expectedWorkingRevision: 1,
       expectedClearEpoch: 0,
     });
 
@@ -1062,7 +1583,7 @@ describe("clear epoch fencing", () => {
     const tabA = openTab(dbName);
     const tabB = openTab(dbName);
 
-    await tabA.storage.writeWorking({
+    await tabA.storage.writeWorkingEdit({
       document: { tag: "pre-clear" },
       expectedRevision: null,
       expectedClearEpoch: 0,
@@ -1078,7 +1599,7 @@ describe("clear epoch fencing", () => {
       for (let attempt = 0; attempt < 1000; attempt++) {
         const epoch = await tabA.storage.getClearEpoch();
         if (epoch === 0) continue;
-        return tabA.storage.writeWorking({
+        return tabA.storage.writeWorkingEdit({
           document: { tag: "post-clear" },
           expectedRevision: null,
           expectedClearEpoch: epoch,
@@ -1098,7 +1619,7 @@ describe("clear epoch fencing", () => {
     const tabA = openTab(dbName);
     const tabB = openTab(dbName);
 
-    await tabA.storage.writeWorking({
+    await tabA.storage.writeWorkingEdit({
       document: { tag: "working" },
       expectedRevision: null,
       expectedClearEpoch: 0,
@@ -1112,7 +1633,7 @@ describe("clear epoch fencing", () => {
     // Every mutating entry point is fenced by the epoch, so none of them can put
     // sensitive data back after the verified purge.
     expect(
-      await tabA.storage.writeWorking({
+      await tabA.storage.writeWorkingEdit({
         document: { tag: "stale autosave" },
         expectedRevision: 1,
         expectedClearEpoch: capturedEpoch,
@@ -1152,7 +1673,7 @@ describe("clear epoch fencing", () => {
     // Negative control: the same writes re-issued under the CURRENT epoch land,
     // so the rejections above were the epoch fence, not a broken write path.
     expect(
-      await tabA.storage.writeWorking({
+      await tabA.storage.writeWorkingEdit({
         document: { tag: "fresh" },
         expectedRevision: null,
         expectedClearEpoch: 1,

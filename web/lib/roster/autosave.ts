@@ -1,15 +1,20 @@
 // Edit autosave + loss authority (F5). One serialized, revisioned compare-and-swap
-// queue over F1's `writeWorking`, with the global Saving/saved/failed feedback and
-// the browser-unload loss guard Core Flows and the Tech Plan require.
+// queue over F1's `writeWorkingEdit`, with the global Saving/saved/failed feedback
+// and the browser-unload loss guard Core Flows and the Tech Plan require.
 //
-// F5 owns the BEHAVIOR; F1 supplies the PRIMITIVE (`writeWorking`'s revisioned CAS
-// + clear-epoch fence). This module never touches Dexie directly and never owns
+// F5 owns the BEHAVIOR; F1 supplies the PRIMITIVE (`writeWorkingEdit`'s revisioned
+// CAS + clear-epoch fence). This module never touches Dexie directly and never owns
 // document shape — it hands F1 the document the editor just produced and tracks
 // the revision F1 returns.
 //
+// This queue is the edit operation's only production caller, which is exactly what
+// its contract assumes: every document that reaches it is a new revision of the
+// SAME working roster, so F1 keeps the row's candidate provenance. Load and Import
+// replace the whole document and go through F1's promotion authorities instead.
+//
 // The load-bearing guarantees:
 //
-//   • SERIALIZED. At most one `writeWorking` is in flight. A set/swap/undo that
+//   • SERIALIZED. At most one `writeWorkingEdit` is in flight. A set/swap/undo that
 //     arrives while a write is pending COALESCES behind it: when the in-flight
 //     write settles, the queue writes the LATEST document, not each intermediate
 //     one. Intermediate revisions are skipped by design — they were superseded
@@ -39,7 +44,7 @@
 //     no longer exists, so the queue drops it without a Retry offer — the Clear
 //     flow owns the resulting empty state.
 
-import type { RosterStorage, WorkingWriteOutcome } from "@/lib/store";
+import type { RosterStorage, WorkingEditOutcome } from "@/lib/store";
 
 /** The global save state the UI surfaces. */
 export type AutosaveStatus = "idle" | "saving" | "saved" | "failed";
@@ -70,7 +75,7 @@ export interface AutosaveSnapshot {
 }
 
 /** A write outcome extended with the local "threw" case (storage unreachable). */
-type EnqueueOutcome = WorkingWriteOutcome | { status: "threw" };
+type EnqueueOutcome = WorkingEditOutcome | { status: "threw" };
 
 /** The dependencies the queue needs (injectable for tests). */
 export interface AutosaveDeps {
@@ -158,7 +163,7 @@ export function createAutosaveQueue(deps: AutosaveDeps): AutosaveQueue {
 
   async function writeOnce(document: unknown): Promise<EnqueueOutcome> {
     try {
-      return await deps.storage.writeWorking({
+      return await deps.storage.writeWorkingEdit({
         document,
         expectedRevision,
         expectedClearEpoch: deps.clearEpoch,

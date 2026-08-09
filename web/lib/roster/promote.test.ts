@@ -166,7 +166,7 @@ describe("promotion runs through F1's real gate, not around it", () => {
     const document = await fixtureRosterDocument({ frozenXlsx: fixtureFrozenXlsx(11) });
     const fence = await fenceFor(storage);
     // An autosave lands between reading the revision and promoting.
-    await storage.writeWorking({
+    await storage.writeWorkingEdit({
       document: await fixtureRosterDocument({ frozenXlsx: fixtureFrozenXlsx(99) }),
       expectedRevision: null,
       expectedClearEpoch: fence.expectedClearEpoch,
@@ -206,7 +206,9 @@ describe("promoting a captured candidate", () => {
       { jobId: "job-1", candidateVersion: 1 },
       await fenceFor(storage),
     );
-    expect(outcome).toEqual({ status: "promoted", revision: 1 });
+    // Revision 2, not 1: the commit's own fill-empty CAS already wrote revision 1,
+    // so an explicit Load is always a REPLACEMENT of something.
+    expect(outcome).toEqual({ status: "promoted", revision: 2 });
     expect((await readWorkingDocument(storage))?.frozenXlsx.size).toBe(31);
     // Promotion is a copy, not a move: Load can be repeated after an edit.
     expect(await storage.readCandidate("job-1")).not.toBeNull();
@@ -292,8 +294,11 @@ describe("promoting a captured candidate", () => {
       currentVersion: second.pointer.candidateVersion,
     });
     // The load-bearing assertion: NOTHING was promoted. The old code wrote v2
-    // here (a 77-byte workbook) under a decision made about v1.
-    expect(await readWorkingDocument(storage)).toBeNull();
+    // here (a 77-byte workbook) under a decision made about v1. The slot holds the
+    // row v1's own commit filled at revision 1, so the REVISION discriminates:
+    // any promotion at all — v1's or v2's — would have made it 2.
+    expect((await storage.readWorking())?.revision).toBe(1);
+    expect((await readWorkingDocument(storage))?.frozenXlsx.size).toBe(31);
     // And v2 itself is untouched — a refusal is not a deletion.
     expect(await storage.readCandidate("job-1")).not.toBeNull();
   });
@@ -317,7 +322,7 @@ describe("promoting a captured candidate", () => {
       await fenceFor(storage),
     );
 
-    expect(outcome).toEqual({ status: "promoted", revision: 1 });
+    expect(outcome).toEqual({ status: "promoted", revision: 2 });
     expect((await readWorkingDocument(storage))?.frozenXlsx.size).toBe(31);
   });
 
@@ -349,6 +354,7 @@ describe("promoting a captured candidate", () => {
 
     expect(outcome.status).toBe("version-conflict");
     expect(validated).toBe(0);
-    expect(await readWorkingDocument(storage)).toBeNull();
+    // Untouched at the revision the commit's fill wrote — no second write happened.
+    expect((await storage.readWorking())?.revision).toBe(1);
   });
 });

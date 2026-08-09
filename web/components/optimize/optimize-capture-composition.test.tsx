@@ -16,7 +16,7 @@
 import "fake-indexeddb/auto";
 import { createElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { JobResponse } from "@/lib/bff/types";
@@ -47,6 +47,7 @@ import {
   fixtureSubmission,
 } from "@/lib/roster/test-fixtures";
 import type { RosterDocument } from "@/lib/roster";
+import { clearRosterDataAndNotify, resetToNewSchedule } from "@/lib/roster";
 import { OptimizeAndExportScreen } from "./optimize-and-export-screen";
 
 vi.mock("next/navigation", () => ({
@@ -530,6 +531,76 @@ describe("OptimizeAndExportScreen — production roster capture", () => {
   );
 
   it(
+    "a confirmed New schedule leaves no stale capture notice behind on this screen",
+    async () => {
+      // The reported defect, end to end on the real screen: after New schedule,
+      // Optimize kept showing `The roster for this run could not be saved — Not
+      // Found … Your downloaded XLSX is unaffected.` The notice is a projection of
+      // the capture gate plus the stored run state, so the fix has to remove that
+      // state — which is what this asserts, rather than that some copy is hidden.
+      readyStore();
+      const store = freshStore();
+      routeFetch((u, init) => {
+        const method = init?.method ?? "GET";
+        if (u.endsWith("/api/optimize") && method === "POST") return json(202, baseJob());
+        if (u.endsWith("/events")) return streamResponse("");
+        if (u.endsWith("/xlsx")) return xlsxResponse();
+        // A 404 on the roster fetch is exactly the reported `Not Found`.
+        if (u.endsWith("/roster")) {
+          return json(404, { error: { code: "not_found", message: "Not Found" } });
+        }
+        if (/\/api\/optimize\/[^/]+$/.test(u) && method === "DELETE") {
+          return new Response(null, { status: 204 });
+        }
+        if (/\/api\/optimize\/[^/]+$/.test(u)) return json(200, completedJob);
+        throw new Error(`unexpected request: ${u}`);
+      });
+
+      render(
+        <OptimizeAndExportScreen
+          serverInfoDeps={onlineInfo()}
+          recoveryDeps={{ storage: memStorage() }}
+          {...captureWiring(store)}
+        />,
+        { wrapper },
+      );
+
+      await submitAndSettle();
+
+      // ACCEPTING PRE-STATE — the exact notice the user reported is on screen.
+      const notice = await waitFor(() => screen.getByTestId("optimize-capture-fetch-failed"), {
+        timeout: CAPTURE_TIMEOUT,
+      });
+      expect(notice).toHaveTextContent(/could not be saved/i);
+      expect(notice).toHaveTextContent(/Your downloaded XLSX is unaffected/i);
+
+      // The PRODUCTION reset. Only the storage the run was wired to is substituted;
+      // capture invalidation is Clear's own default, so the app-lifetime gate this
+      // screen is rendering is the one that gets settled.
+      let outcome;
+      await act(async () => {
+        outcome = await resetToNewSchedule({
+          clearStoredData: () =>
+            clearRosterDataAndNotify({
+              rosterStorage: store,
+              sessionStorage: memStorage(),
+              clearViewMetadata: () => true,
+            }),
+        });
+      });
+      expect(outcome).toMatchObject({ status: "reset" });
+
+      // No stale notice, and no result state behind it either.
+      await waitFor(() =>
+        expect(screen.queryByTestId("optimize-capture-fetch-failed")).not.toBeInTheDocument(),
+      );
+      expect(screen.queryByTestId("optimize-capture-retry")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("optimize-open-roster")).not.toBeInTheDocument();
+    },
+    TEST_TIMEOUT,
+  );
+
+  it(
     "discarding the saved roster removes the candidate through the real screen action",
     async () => {
       readyStore();
@@ -996,6 +1067,104 @@ describe("OptimizeAndExportScreen — production roster capture", () => {
       // The staged snapshot was consumed by the commit, not orphaned by a false
       // snapshot_missing.
       expect(await store.listSubmissionOrdinals()).toEqual([]);
+    },
+    TEST_TIMEOUT,
+  );
+});
+
+describe("OptimizeAndExportScreen — G4 dedicated /roster route", () => {
+  // G4 closure — the full F4 RosterSection was removed from this screen.
+  // The dedicated /roster page owns it; this screen surfaces the prototype's
+  // `Open & adjust roster` CTA only when the capture gate committed a
+  // loadable candidate for the run in view. With real IndexedDB the capture
+  // gate can actually advance, so the CTA's negative + positive controls
+  // are discriminable here (the IndexedDB-free file can only assert absence).
+
+  it(
+    "renders no embedded F4 RosterSection anywhere on the screen",
+    async () => {
+      readyStore();
+      routeFetch((u, init) => {
+        const method = init?.method ?? "GET";
+        if (u.endsWith("/api/optimize") && method === "POST") return json(202, baseJob());
+        if (u.endsWith("/events")) return streamResponse(": keepalive\n\n");
+        if (u.endsWith("/roster")) return json(200, fixtureContainer());
+        if (/\/api\/optimize\/[^/]+$/.test(u)) return json(200, completedJob);
+        throw new Error(`unexpected request: ${u}`);
+      });
+      render(
+        <OptimizeAndExportScreen
+          serverInfoDeps={onlineInfo()}
+          controllerDeps={{
+            prepare: () => okPrep,
+            storage: memStorage(),
+            createOwnerId: () => "o-g4",
+          }}
+          recoveryDeps={{ storage: memStorage() }}
+          terminalDeps={{
+            fetchXlsx: vi.fn(async () => ({ blob: new Blob(["x"]), filename: "schedule.xlsx" })),
+          }}
+        />,
+        { wrapper },
+      );
+      await waitFor(() => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
+      await userEvent.click(screen.getByTestId("optimize-submit"));
+      await waitFor(
+        () => expect(screen.getByTestId("optimize-completed-artifact")).toBeInTheDocument(),
+        { timeout: CAPTURE_TIMEOUT },
+      );
+      // The dedicated /roster route owns the viewer; this screen mounts NONE
+      // of the four roster-section testids, neither loaded nor empty.
+      expect(screen.queryByTestId("roster-section")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("roster-section-empty")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("roster-section-loading")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("roster-section-unavailable")).not.toBeInTheDocument();
+    },
+    TEST_TIMEOUT,
+  );
+
+  it(
+    "renders the `Open & adjust roster` CTA ONLY when the capture gate committed for the run in view",
+    async () => {
+      readyStore();
+      routeFetch((u, init) => {
+        const method = init?.method ?? "GET";
+        if (u.endsWith("/api/optimize") && method === "POST") return json(202, baseJob());
+        if (u.endsWith("/events")) return streamResponse(": keepalive\n\n");
+        if (u.endsWith("/roster")) return json(200, fixtureContainer());
+        if (/\/api\/optimize\/[^/]+$/.test(u)) return json(200, completedJob);
+        throw new Error(`unexpected request: ${u}`);
+      });
+      render(
+        <OptimizeAndExportScreen
+          serverInfoDeps={onlineInfo()}
+          controllerDeps={{
+            prepare: () => okPrep,
+            storage: memStorage(),
+            createOwnerId: () => "o-g4-cta",
+          }}
+          recoveryDeps={{ storage: memStorage() }}
+          terminalDeps={{
+            fetchXlsx: vi.fn(async () => ({ blob: new Blob(["x"]), filename: "schedule.xlsx" })),
+          }}
+        />,
+        { wrapper },
+      );
+      await waitFor(() => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
+      // Before any run lands, no CTA: the screen refuses to claim a roster exists.
+      expect(screen.queryByTestId("optimize-open-roster")).not.toBeInTheDocument();
+
+      await userEvent.click(screen.getByTestId("optimize-submit"));
+      await waitFor(
+        () => expect(screen.getByTestId("optimize-completed-artifact")).toBeInTheDocument(),
+        { timeout: CAPTURE_TIMEOUT },
+      );
+      // Once the capture gate commits a loadable candidate for opt_1, the CTA
+      // appears, anchored to /roster and routing through the shared guarded
+      // boundary the rest of the panel uses.
+      const cta = await screen.findByTestId("optimize-open-roster");
+      expect(cta).toHaveAttribute("href", "/roster");
+      expect(cta).toHaveTextContent("Open & adjust roster");
     },
     TEST_TIMEOUT,
   );

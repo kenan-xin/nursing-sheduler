@@ -22,15 +22,15 @@ import {
   useRosterCapture,
 } from "@/lib/optimize";
 import { ROSTER_VIEW_PREFERENCE_KEY } from "@/lib/roster-viewer";
-import { rosterStorage, type RosterStorage } from "@/lib/store";
-import { fixtureRosterDocument } from "@/lib/roster/test-fixtures";
+import { getRosterDb, rosterStorage, WORKING_ROSTER_KEY, type RosterStorage } from "@/lib/store";
+import { fixtureAlternateRosterDocument, fixtureRosterDocument } from "@/lib/roster/test-fixtures";
 
 const JOB_A = "opt_fixture_a";
 /** The owner id the seeded submission snapshot is stored under. */
 const SNAPSHOT_OWNER = "owner_fixture_residue";
 
-/** The real `writeWorking`, held while a failure-injection control is active. */
-let realWriteWorking: RosterStorage["writeWorking"] | null = null;
+/** The real `writeWorkingEdit`, held while a failure-injection control is active. */
+let realWriteEdit: RosterStorage["writeWorkingEdit"] | null = null;
 /** Releases a stalled write (set by the stall control, called by the release control). */
 let releaseStalledWrite: (() => void) | null = null;
 
@@ -47,9 +47,20 @@ export default function RosterViewerFixtureClient() {
   // can never read a stale "everything absent" that was simply never measured.
   const [residue, setResidue] = useState("unknown");
 
+  /**
+   * A durable candidate with NO working roster — the state the empty viewer's
+   * Load offer exists for.
+   *
+   * `commitCandidate` fills a proven-empty working slot itself, so reaching this
+   * state means dropping the row the commit wrote. That is a direct store poke, as
+   * every control here is; it is not a second candidate protocol. Only the row THIS
+   * commit created is removed, so a working roster seeded first survives.
+   */
   const seedCandidate = useCallback(async () => {
     setStatus("seeding");
-    const document = await fixtureRosterDocument();
+    // A DIFFERENT solved result from `fx-seed-working`'s, so staging both gives the
+    // viewer a genuine choice to offer rather than the roster it already shows.
+    const document = await fixtureAlternateRosterDocument();
     const epoch = await rosterStorage.getClearEpoch();
     const outcome = await rosterStorage.commitCandidate({
       jobId: JOB_A,
@@ -57,20 +68,56 @@ export default function RosterViewerFixtureClient() {
       document,
       expectedClearEpoch: epoch,
     });
+    if (outcome.status === "committed" && outcome.working.kind === "loaded-empty") {
+      await getRosterDb().roster.delete(WORKING_ROSTER_KEY);
+    }
     setStatus(outcome.status === "committed" ? "candidate-seeded" : `failed:${outcome.status}`);
     remount();
   }, []);
 
+  /**
+   * A completed run, left exactly as production leaves it — including the
+   * fill-empty promotion the candidate commit performs when the working slot is
+   * proven absent. The status reports F1's own disposition, so a browser test
+   * asserts what the transaction decided rather than inferring it from the DOM.
+   */
+  const completeRun = useCallback(async () => {
+    setStatus("seeding");
+    const document = await fixtureAlternateRosterDocument();
+    const epoch = await rosterStorage.getClearEpoch();
+    const outcome = await rosterStorage.commitCandidate({
+      jobId: JOB_A,
+      submissionOrdinal: 1,
+      document,
+      expectedClearEpoch: epoch,
+    });
+    setStatus(
+      outcome.status === "committed"
+        ? `run-completed:${outcome.working.kind}`
+        : `failed:${outcome.status}`,
+    );
+    remount();
+  }, []);
+
+  /**
+   * A working roster with no candidate behind it — the shape a roster the user
+   * imported (or was sent) has.
+   *
+   * It goes through document promotion, not the edit operation: seeding a whole
+   * document is a replacement, and replacement is what promotion is for. Promotion
+   * also records the honest provenance for this row, which is none.
+   */
   const seedWorking = useCallback(async () => {
     setStatus("seeding");
     const document = await fixtureRosterDocument();
     const epoch = await rosterStorage.getClearEpoch();
-    const outcome = await rosterStorage.writeWorking({
+    const outcome = await rosterStorage.promoteDocumentToWorking({
       document,
-      expectedRevision: null,
+      validate: (value) => ({ ok: true as const, document: value }),
+      expectedWorkingRevision: null,
       expectedClearEpoch: epoch,
     });
-    setStatus(outcome.status === "written" ? "working-seeded" : `failed:${outcome.status}`);
+    setStatus(outcome.status === "promoted" ? "working-seeded" : `failed:${outcome.status}`);
     remount();
   }, []);
 
@@ -91,7 +138,7 @@ export default function RosterViewerFixtureClient() {
 
   const seedResidue = useCallback(async () => {
     setStatus("seeding");
-    const document = await fixtureRosterDocument();
+    const document = await fixtureAlternateRosterDocument();
     const epoch = await rosterStorage.getClearEpoch();
     const committed = await rosterStorage.commitCandidate({
       jobId: JOB_A,
@@ -99,6 +146,11 @@ export default function RosterViewerFixtureClient() {
       document,
       expectedClearEpoch: epoch,
     });
+    // No working row: this control's whole point is that an ABSENT working roster
+    // is not an empty browser, so the fill-empty row the commit wrote is dropped.
+    if (committed.status === "committed" && committed.working.kind === "loaded-empty") {
+      await getRosterDb().roster.delete(WORKING_ROSTER_KEY);
+    }
     const allocated = await rosterStorage.allocateSubmissionSnapshot({
       ownerId: SNAPSHOT_OWNER,
       payload: { canonicalYaml: "people: [Alice Ng]" },
@@ -146,31 +198,33 @@ export default function RosterViewerFixtureClient() {
   // when the user asks to replace the roster, and another writer winning the CAS.
   // None of those can be provoked from the UI, and none can be proven in jsdom
   // (fake-indexeddb cannot round-trip the document's `Blob`). So the fixture
-  // swaps `rosterStorage.writeWorking` for the duration of a test. Everything
-  // above it — the autosave queue, the loss guard, the replacement coordinator,
-  // the banners — stays production code reacting to a real failed write.
+  // swaps `rosterStorage.writeWorkingEdit` — the autosave primitive — for the
+  // duration of a test. Everything above it — the autosave queue, the loss guard,
+  // the replacement coordinator, the banners — stays production code reacting to a
+  // real failed write.
   // ---------------------------------------------------------------------
 
   const failWrites = () => {
-    if (realWriteWorking === null) realWriteWorking = rosterStorage.writeWorking;
-    rosterStorage.writeWorking = () => Promise.reject(new Error("fixture: storage unavailable"));
+    if (realWriteEdit === null) realWriteEdit = rosterStorage.writeWorkingEdit;
+    rosterStorage.writeWorkingEdit = () =>
+      Promise.reject(new Error("fixture: storage unavailable"));
     setStatus("writes-failing");
   };
 
   const stallWrites = () => {
-    if (realWriteWorking === null) realWriteWorking = rosterStorage.writeWorking;
-    const real = realWriteWorking;
-    rosterStorage.writeWorking = ((input: Parameters<typeof real>[0]) =>
+    if (realWriteEdit === null) realWriteEdit = rosterStorage.writeWorkingEdit;
+    const real = realWriteEdit;
+    rosterStorage.writeWorkingEdit = ((input: Parameters<typeof real>[0]) =>
       new Promise((resolve) => {
         releaseStalledWrite = () => resolve(real.call(rosterStorage, input));
-      })) as typeof rosterStorage.writeWorking;
+      })) as typeof rosterStorage.writeWorkingEdit;
     setStatus("writes-stalled");
   };
 
   const healWrites = () => {
-    if (realWriteWorking !== null) {
-      rosterStorage.writeWorking = realWriteWorking;
-      realWriteWorking = null;
+    if (realWriteEdit !== null) {
+      rosterStorage.writeWorkingEdit = realWriteEdit;
+      realWriteEdit = null;
     }
   };
 
@@ -188,9 +242,13 @@ export default function RosterViewerFixtureClient() {
   };
 
   /**
-   * Commit a rival working-roster document at the CURRENT revision — what another
-   * tab (or a Load/Import promotion) does. The mounted panel's autosave queue is
-   * left holding a stale revision, so its next write must lose the CAS.
+   * A rival writer commits the SAME roster at the CURRENT revision — what another
+   * tab's autosave does. The mounted panel's queue is left holding a stale
+   * revision, so its next write must lose the CAS.
+   *
+   * It writes back the row's own document on purpose: this control exists to move
+   * the revision, not to replace the roster, so the edit operation is the right
+   * authority and its provenance-preserving contract holds.
    */
   const rivalWrite = async () => {
     const row =
@@ -200,7 +258,7 @@ export default function RosterViewerFixtureClient() {
       return;
     }
     const epoch = await rosterStorage.getClearEpoch();
-    const outcome = await (realWriteWorking ?? rosterStorage.writeWorking).call(rosterStorage, {
+    const outcome = await (realWriteEdit ?? rosterStorage.writeWorkingEdit).call(rosterStorage, {
       document: row.document,
       expectedRevision: row.revision,
       expectedClearEpoch: epoch,
@@ -213,6 +271,9 @@ export default function RosterViewerFixtureClient() {
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
         <Button size="sm" data-testid="fx-seed-candidate" onClick={() => void seedCandidate()}>
           Seed candidate
+        </Button>
+        <Button size="sm" data-testid="fx-complete-run" onClick={() => void completeRun()}>
+          Complete a run
         </Button>
         <Button size="sm" data-testid="fx-seed-working" onClick={() => void seedWorking()}>
           Seed working roster

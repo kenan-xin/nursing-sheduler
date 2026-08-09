@@ -14,13 +14,18 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { rosterStorage } from "@/lib/store";
+import { getRosterDb, rosterStorage, WORKING_ROSTER_KEY } from "@/lib/store";
 import type { CurrentCandidatePointer } from "@/lib/store";
 import type { RosterDocument } from "@/lib/roster";
 import { encodeRosterFile } from "@/lib/roster";
 import { ROSTER_VIEW_PREFERENCE_KEY } from "@/lib/roster-viewer";
 import { OPTIMIZE_RETIRE_PENDING_STORAGE_KEY, OPTIMIZE_SESSION_STORAGE_KEY } from "@/lib/optimize";
-import { fixtureRosterDocument } from "@/lib/roster/test-fixtures";
+import {
+  fixtureAlternateRosterDocument,
+  fixtureFrozenXlsx,
+  fixtureRosterDocument,
+  withEdits,
+} from "@/lib/roster/test-fixtures";
 import type {
   DurableCandidateRef,
   DurableDismissOutcome,
@@ -33,6 +38,8 @@ import { RosterSection } from "./roster-section";
 // ---------------------------------------------------------------------------
 
 const JOB_A = "opt_candidate_a";
+/** A second job id, for the equal-grid-but-different-run negative control. */
+const JOB_B = "opt_candidate_b";
 
 function installResizeObserver() {
   globalThis.ResizeObserver = class {
@@ -88,8 +95,23 @@ function unreachable(name: string): () => never {
   };
 }
 
+/**
+ * Seed a durable candidate, leaving the working slot exactly as it was.
+ *
+ * `commitCandidate` fills a PROVEN-empty working slot itself (F1's fill-empty CAS),
+ * which is right in production but is not the state these proofs are about: they
+ * exercise the empty viewer's durable-candidate recovery — a pointer that survived
+ * without a working roster ever being written (an unreadable slot at commit time,
+ * or a candidate awaiting an explicit choice after a Clear-and-reload). Dropping
+ * only the row THIS commit created reaches that state without reimplementing F1's
+ * candidate protocol — and leaves a working roster seeded beforehand untouched, so
+ * the replacement-confirmation proofs still get the state they ask for.
+ */
 async function seedCandidate(jobId = JOB_A, ordinal = 1): Promise<CurrentCandidatePointer> {
-  const document = await fixtureRosterDocument();
+  // A DIFFERENT solved result from `seedWorking`'s, so staging both leaves the
+  // viewer a real choice: the candidate offer is suppressed for a result the roster
+  // already IS (see the section's `alreadyLoaded` rule).
+  const document = await fixtureAlternateRosterDocument();
   const epoch = await rosterStorage.getClearEpoch();
   const outcome = await rosterStorage.commitCandidate({
     jobId,
@@ -98,18 +120,29 @@ async function seedCandidate(jobId = JOB_A, ordinal = 1): Promise<CurrentCandida
     expectedClearEpoch: epoch,
   });
   if (outcome.status !== "committed") throw new Error(`seed failed: ${outcome.status}`);
+  if (outcome.working.kind === "loaded-empty") {
+    await getRosterDb().roster.delete(WORKING_ROSTER_KEY);
+  }
   return outcome.pointer;
 }
 
+/**
+ * A working roster with NO candidate behind it — the shape an imported roster has.
+ *
+ * Through document promotion, because seeding a whole document is a replacement.
+ * The edit operation is for later revisions of this same roster and would carry
+ * any existing row's candidate source forward, which a seed must not do.
+ */
 async function seedWorking(): Promise<void> {
   const document = await fixtureRosterDocument();
   const epoch = await rosterStorage.getClearEpoch();
-  const outcome = await rosterStorage.writeWorking({
+  const outcome = await rosterStorage.promoteDocumentToWorking({
     document,
-    expectedRevision: null,
+    validate: (value) => ({ ok: true as const, document: value as RosterDocument }),
+    expectedWorkingRevision: null,
     expectedClearEpoch: epoch,
   });
-  if (outcome.status !== "written") throw new Error(`seed failed: ${outcome.status}`);
+  if (outcome.status !== "promoted") throw new Error(`seed failed: ${outcome.status}`);
 }
 
 /** A genuine `.nurse-roster.json` produced by the production encoder. */
@@ -198,13 +231,27 @@ function stubPromotion(): { calls: number; versions: number[] } {
     if (row.revision !== input.expectedCandidateVersion) {
       return { status: "version-conflict", currentVersion: row.revision };
     }
-    const written = await rosterStorage.writeWorking({
+    // Writes the row DIRECTLY, including the exact candidate source F1's real
+    // promotion records. Reaching for the edit operation here would be the very
+    // misuse the narrowed API exists to prevent — it would silently carry the
+    // PREVIOUS row's source into a genuine replacement, and this stub would then
+    // disagree with production about the one thing the suppression rule reads.
+    const existing = await rosterStorage.readWorking();
+    // The working CAS is honoured too, so the stub cannot pass a test that
+    // production's promotion would refuse.
+    const currentRevision = existing?.revision ?? null;
+    if (currentRevision !== input.expectedWorkingRevision) {
+      return { status: "working-conflict", currentRevision };
+    }
+    const revision = (currentRevision ?? 0) + 1;
+    await getRosterDb().roster.put({
+      key: WORKING_ROSTER_KEY,
       document: row.document,
-      expectedRevision: input.expectedWorkingRevision,
-      expectedClearEpoch: input.expectedClearEpoch,
+      revision,
+      clearEpoch: input.expectedClearEpoch,
+      candidateSource: { jobId: input.jobId, candidateVersion: row.revision },
     });
-    if (written.status !== "written") throw new Error(`stub promotion: ${written.status}`);
-    return { status: "promoted", revision: written.revision };
+    return { status: "promoted", revision };
   });
   return counter;
 }
@@ -291,6 +338,201 @@ describe("RosterSection — durable Load authority", () => {
     await waitFor(() => expect(screen.getByTestId("roster-candidate-available")).toBeDefined());
     expect(screen.getByTestId("roster-candidate-load")).toBeDefined();
     expect(screen.getByTestId("roster-candidate-dismiss")).toBeDefined();
+  });
+
+  it("offers nothing when the row records EXACTLY this candidate as its source (auto-load)", async () => {
+    // The state F1's fill-empty CAS makes normal after every run: the candidate and
+    // the working roster are one result, and the row says so. Offering “Replace
+    // roster” there would offer the roster the user is looking at — and once they
+    // had edited it, an unlabelled discard-my-edits action this version does not
+    // have. The suppression reads the ROW's recorded source, never the document.
+    const document = await fixtureRosterDocument();
+    const epoch = await rosterStorage.getClearEpoch();
+    const committed = await rosterStorage.commitCandidate({
+      jobId: JOB_A,
+      submissionOrdinal: 1,
+      document,
+      expectedClearEpoch: epoch,
+    });
+    // The commit itself filled the empty slot — no separate seeding step.
+    expect(committed).toMatchObject({ working: { kind: "loaded-empty" } });
+
+    renderSection();
+    await waitFor(() => expect(screen.getByTestId("roster-section")).toBeDefined());
+    expect(screen.queryByTestId("roster-candidate-available")).toBeNull();
+    expect(screen.queryByTestId("roster-candidate-load")).toBeNull();
+  });
+
+  it("keeps suppressing that candidate across autosave revisions and a re-read", async () => {
+    // Editing writes new revisions of the SAME result, so the offer must not come
+    // back mid-edit — which is what would happen if the source were dropped by the
+    // autosave primitive, or re-derived per render from something transient.
+    const document = await fixtureRosterDocument();
+    const epoch = await rosterStorage.getClearEpoch();
+    await rosterStorage.commitCandidate({
+      jobId: JOB_A,
+      submissionOrdinal: 1,
+      document,
+      expectedClearEpoch: epoch,
+    });
+    await rosterStorage.writeWorkingEdit({
+      document: withEdits(document, [{ personIdx: 0, dateIdx: 1, day: { kind: "leave" } }]),
+      expectedRevision: 1,
+      expectedClearEpoch: epoch,
+    });
+
+    // A fresh mount is the re-read: the section reads the row back from storage.
+    renderSection();
+    await waitFor(() => expect(screen.getByTestId("roster-section")).toBeDefined());
+    expect((await rosterStorage.readWorking())?.revision).toBe(2);
+    expect(screen.queryByTestId("roster-candidate-available")).toBeNull();
+  });
+
+  it("offers nothing after an EXPLICIT Load of the pointed candidate", async () => {
+    // Same rule, other promotion path: an explicit Load records the exact version it
+    // promoted, so its own result stops being offered back.
+    await seedWorking();
+    const pointer = await seedCandidate();
+    const promoted = await rosterStorage.promoteCandidateToWorking({
+      jobId: pointer.jobId,
+      expectedCandidateVersion: pointer.candidateVersion,
+      validate: (value) => ({ ok: true as const, document: value as RosterDocument }),
+      expectedWorkingRevision: 1,
+      expectedClearEpoch: await rosterStorage.getClearEpoch(),
+    });
+    expect(promoted.status).toBe("promoted");
+
+    renderSection();
+    await waitFor(() => expect(screen.getByTestId("roster-section")).toBeDefined());
+    expect(screen.queryByTestId("roster-candidate-available")).toBeNull();
+  });
+
+  it("NEGATIVE CONTROL: an equal-grid candidate from a DIFFERENT run is still offered", async () => {
+    // THE FINDING THIS CLOSES. Suppression used to compare `solvedBaselineId`, which
+    // covers only the ordered people, dates and solved day-states. Two independent
+    // runs can share that grid while differing in everything else that matters —
+    // exact submission, score/status, coordinate map, frozen workbook — and the
+    // later one was then invisible and impossible to load. Here the two documents
+    // have the SAME baseline id and different frozen bytes, and the newer result is
+    // offered with an explicit Replace.
+    const loaded = await fixtureRosterDocument({ frozenXlsx: fixtureFrozenXlsx(61) });
+    const epoch = await rosterStorage.getClearEpoch();
+    await rosterStorage.commitCandidate({
+      jobId: JOB_A,
+      submissionOrdinal: 1,
+      document: loaded,
+      expectedClearEpoch: epoch,
+    });
+    const rival = await fixtureRosterDocument({ frozenXlsx: fixtureFrozenXlsx(31) });
+    expect(rival.provenance.solvedBaselineId).toBe(loaded.provenance.solvedBaselineId);
+    expect(rival.frozenXlsx.size).not.toBe(loaded.frozenXlsx.size);
+    await rosterStorage.commitCandidate({
+      jobId: JOB_B,
+      submissionOrdinal: 2,
+      document: rival,
+      expectedClearEpoch: epoch,
+    });
+
+    renderSection();
+    await waitFor(() => expect(screen.getByTestId("roster-candidate-available")).toBeDefined());
+    expect(screen.getByTestId("roster-candidate-load")).toHaveTextContent("Replace roster");
+  });
+
+  it("NEGATIVE CONTROL: a NEWER capture of the SAME job is offered again", async () => {
+    // Exactness in the version, not just the job. A re-capture is a result the user
+    // has not decided about, even though the job id is unchanged.
+    const document = await fixtureRosterDocument();
+    const epoch = await rosterStorage.getClearEpoch();
+    const first = await rosterStorage.commitCandidate({
+      jobId: JOB_A,
+      submissionOrdinal: 1,
+      document,
+      expectedClearEpoch: epoch,
+    });
+    if (first.status !== "committed") throw new Error("unreachable");
+    const second = await rosterStorage.commitCandidate({
+      jobId: JOB_A,
+      submissionOrdinal: 1,
+      document: await fixtureRosterDocument({ frozenXlsx: fixtureFrozenXlsx(31) }),
+      expectedClearEpoch: epoch,
+    });
+    if (second.status !== "committed") throw new Error("unreachable");
+    expect(second.pointer.candidateVersion).not.toBe(first.pointer.candidateVersion);
+
+    renderSection();
+    await waitFor(() => expect(screen.getByTestId("roster-candidate-available")).toBeDefined());
+  });
+
+  it("NEGATIVE CONTROL: replacing an auto-loaded roster makes its candidate visible again", async () => {
+    // The transition the narrowed write boundary guarantees. The row starts with an
+    // auto-promoted source; a whole-document replacement goes through promotion,
+    // which CLEARS it — so the current pointer stops matching and its Load/Replace
+    // action comes back. Under the old general write the replacement inherited the
+    // source and the action stayed hidden for a roster it no longer described.
+    const document = await fixtureRosterDocument();
+    const epoch = await rosterStorage.getClearEpoch();
+    await rosterStorage.commitCandidate({
+      jobId: JOB_A,
+      submissionOrdinal: 1,
+      document,
+      expectedClearEpoch: epoch,
+    });
+    expect((await rosterStorage.readWorking())?.candidateSource).toBeDefined();
+
+    // An equal-grid replacement, so nothing about the DOCUMENT could distinguish it.
+    const replaced = await rosterStorage.promoteDocumentToWorking({
+      document: await fixtureRosterDocument({ frozenXlsx: fixtureFrozenXlsx(31) }),
+      validate: (value) => ({ ok: true as const, document: value as RosterDocument }),
+      expectedWorkingRevision: 1,
+      expectedClearEpoch: epoch,
+    });
+    expect(replaced.status).toBe("promoted");
+
+    renderSection();
+    await waitFor(() => expect(screen.getByTestId("roster-candidate-available")).toBeDefined());
+    expect(screen.getByTestId("roster-candidate-load")).toHaveTextContent("Replace roster");
+  });
+
+  it("NEGATIVE CONTROL: an IMPORTED roster never suppresses a matching candidate", async () => {
+    // An import carries no candidate source at all, so no candidate can be “already
+    // loaded” because of it — even when its assignments match exactly.
+    const document = await fixtureRosterDocument();
+    const epoch = await rosterStorage.getClearEpoch();
+    await rosterStorage.commitCandidate({
+      jobId: JOB_A,
+      submissionOrdinal: 1,
+      document,
+      expectedClearEpoch: epoch,
+    });
+    const imported = await rosterStorage.promoteDocumentToWorking({
+      document,
+      validate: (value) => ({ ok: true as const, document: value as RosterDocument }),
+      expectedWorkingRevision: 1,
+      expectedClearEpoch: epoch,
+    });
+    expect(imported.status).toBe("promoted");
+
+    renderSection();
+    await waitFor(() => expect(screen.getByTestId("roster-candidate-available")).toBeDefined());
+  });
+
+  it("COMPATIBILITY: a working row with no recorded source hides nothing", async () => {
+    // A row from before this metadata existed, written with the field genuinely
+    // ABSENT rather than through a current code path that happens to omit it. It
+    // must read normally and must not be treated as “probably that candidate” by
+    // inference.
+    await getRosterDb().roster.put({
+      key: WORKING_ROSTER_KEY,
+      document: await fixtureRosterDocument(),
+      revision: 1,
+      clearEpoch: await rosterStorage.getClearEpoch(),
+    });
+    expect((await rosterStorage.readWorking())?.candidateSource).toBeUndefined();
+    await seedCandidate();
+
+    renderSection();
+    await waitFor(() => expect(screen.getByTestId("roster-candidate-available")).toBeDefined());
+    expect(screen.getByTestId("roster-candidate-load")).toHaveTextContent("Replace roster");
   });
 
   it("offers nothing when the pointer exists but its candidate payload does not", async () => {

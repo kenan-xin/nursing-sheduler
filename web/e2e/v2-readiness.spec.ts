@@ -152,7 +152,8 @@ for (const row of V2_SURFACE_MATRIX satisfies readonly V2Row[]) {
 test("the smoke covers every manifest row", () => {
   // The loop above is what registers the rows, so this guards the loop itself:
   // a filter accidentally introduced there would shrink the smoke silently.
-  expect(V2_SURFACE_MATRIX).toHaveLength(17);
+  // 18 since G4 added the `/roster` product row (owner R8).
+  expect(V2_SURFACE_MATRIX).toHaveLength(18);
 });
 
 // ---------------------------------------------------------------------------

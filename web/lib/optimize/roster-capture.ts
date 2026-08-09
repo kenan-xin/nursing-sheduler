@@ -22,6 +22,12 @@
 //   • NEVER A FALSE COMMIT. An older submission completing late makes F1 return
 //     `superseded` — nothing stored, pointer unmoved. That locally proven outcome
 //     becomes `dismissed(reason: "superseded")`, never a `committed` token.
+//   • THE WORKING SLOT IS F1'S CALL, ONCE. A commit either filled a PROVEN-empty
+//     working slot or preserved what was there; F1 decides that inside the same
+//     transaction and returns a closed disposition, which is passed through on the
+//     `committed` state verbatim. F2 never re-reads `working` to infer it — that
+//     read races every other tab and cannot attribute the slot's contents to THIS
+//     commit.
 //   • RETRY BY FAILURE MODE. `fetch-failed` retries the SERVER fetch (the job must
 //     still exist); `commit-failed` retries the LOCAL write with the container and
 //     bytes already in hand and never refetches.
@@ -38,7 +44,12 @@
 
 import { isExactJobGoneError } from "@/lib/bff/errors";
 import { fetchOptimizeRoster } from "@/lib/query/optimize";
-import { rosterStorage, type CurrentCandidatePointer, type RosterStorage } from "@/lib/store";
+import {
+  rosterStorage,
+  type CandidateWorkingDisposition,
+  type CurrentCandidatePointer,
+  type RosterStorage,
+} from "@/lib/store";
 import type { SessionCaptureState } from "./session-transaction";
 import {
   purgeSubmissionSnapshot,
@@ -161,7 +172,17 @@ export type RosterCaptureState =
   | { status: "unavailable"; cause: CaptureUnavailableCause }
   | { status: "fetching-roster" }
   | { status: "committing" }
-  | { status: "committed"; pointer: CurrentCandidatePointer }
+  | {
+      status: "committed";
+      pointer: CurrentCandidatePointer;
+      /**
+       * What the SAME commit transaction did with the working slot — F1's closed
+       * disposition, passed through verbatim. Callers read this instead of doing
+       * their own follow-up read of `working`: that read races every other tab
+       * and cannot say whether THIS commit filled the slot.
+       */
+      working: CandidateWorkingDisposition;
+    }
   | {
       status: "fetch-failed";
       message: string;
@@ -410,11 +431,20 @@ interface JobEntry {
    */
   rosterAttempted: boolean;
   /**
-   * The pointer a successful commit produced, retained across a failed dismissal
-   * so the retry can present the SAME exact version rather than re-reading a
-   * pointer that may since have moved.
+   * What a successful commit produced, retained across a failed dismissal so the
+   * retry can present the SAME exact version rather than re-reading a pointer
+   * that may since have moved — and so a resumed settle reports the working-slot
+   * disposition THAT transaction decided rather than one re-derived from a later
+   * read (which would describe the slot's state now, after another tab or an
+   * import may have filled it).
+   *
+   * One field, not two: the pointer and the disposition are one commit's result,
+   * so a state where only one of them is known is not representable.
    */
-  committedPointer: CurrentCandidatePointer | null;
+  committed: {
+    pointer: CurrentCandidatePointer;
+    working: CandidateWorkingDisposition;
+  } | null;
 }
 
 function errorMessage(error: unknown, fallback: string): string {
@@ -445,7 +475,7 @@ export function createRosterCapture(deps: RosterCaptureDeps): RosterCaptureGate 
       epoch: -1,
       ownerId: null,
       rosterAttempted: false,
-      committedPointer: null,
+      committed: null,
     };
     entries.set(jobId, entry);
     return entry;
@@ -665,13 +695,13 @@ export function createRosterCapture(deps: RosterCaptureDeps): RosterCaptureGate 
     // so the only work left is the staging purge; re-assembling and re-committing
     // would spend a second candidate version to reach the same place. This is what
     // makes withholding the token above safe rather than terminal.
-    if (entry.committedPointer !== null) {
+    if (entry.committed !== null) {
       const purged = await purge(entry, ownerId, "candidate-committed");
       if (!purged.proven) return settleUnproven(entry, purged.message);
-      const pointer = entry.committedPointer;
+      const { pointer, working } = entry.committed;
       return settle(
         entry,
-        { status: "committed", pointer },
+        { status: "committed", pointer, working },
         {
           kind: "committed",
           jobId: entry.jobId,
@@ -814,12 +844,12 @@ export function createRosterCapture(deps: RosterCaptureDeps): RosterCaptureGate 
       // `snapshot:<ownerId>` — the pointer records job/version/ordinal, not the
       // owner. Issuing the token before the purge is proven would leave a reload
       // with a loadable candidate it can never finish retiring.
-      entry.committedPointer = outcome.pointer;
+      entry.committed = { pointer: outcome.pointer, working: outcome.working };
       const purged = await purge(entry, ownerId, "candidate-committed");
       if (!purged.proven) return settleUnproven(entry, purged.message);
       return settle(
         entry,
-        { status: "committed", pointer: outcome.pointer },
+        { status: "committed", pointer: outcome.pointer, working: outcome.working },
         {
           kind: "committed",
           jobId: entry.jobId,
@@ -1053,7 +1083,7 @@ export function createRosterCapture(deps: RosterCaptureDeps): RosterCaptureGate 
         return { status: "failed", message };
       }
 
-      const pointer = entry.committedPointer;
+      const pointer = entry.committed?.pointer ?? null;
       if (pointer !== null) {
         // The dismissal lost the race to the commit (or a previous dismissal failed
         // locally and is being retried). Apply it against the EXACT
@@ -1097,7 +1127,7 @@ export function createRosterCapture(deps: RosterCaptureDeps): RosterCaptureGate 
       // A mismatch means the surface is displaying a capture this gate has since
       // replaced, so the decision does not transfer — refuse rather than delete
       // the newer one.
-      const pointer = entry.committedPointer;
+      const pointer = entry.committed?.pointer ?? null;
       if (pointer !== null && pointer.candidateVersion !== candidateVersion) {
         return {
           status: "failed",
@@ -1179,7 +1209,7 @@ export function createRosterCapture(deps: RosterCaptureDeps): RosterCaptureGate 
         // the exact-version pointer is forgotten because that candidate is gone.
         if (entry.token !== null) {
           if (entry.state.status === "committed") {
-            entry.committedPointer = null;
+            entry.committed = null;
             settle(
               entry,
               { status: "dismissed", reason: "cleared" },

@@ -15,13 +15,22 @@
 import { useCallback, useEffect, useState } from "react";
 import { rosterStorage } from "@/lib/store";
 import type { RosterDocument } from "@/lib/roster";
-import type { CurrentCandidatePointer } from "@/lib/store";
+import type { CurrentCandidatePointer, WorkingCandidateSource } from "@/lib/store";
 
 export interface WorkingRosterState {
   /** The working roster document, or null when none has been loaded. */
   document: RosterDocument | null;
   /** The F1 working-row revision (the CAS baseline for F5 autosave), or null. */
   revision: number | null;
+  /**
+   * The EXACT candidate the working row was promoted from, or null when it came
+   * from an import (or from a row written before this metadata existed).
+   *
+   * Read from the storage ROW, never derived from the document: two genuinely
+   * different results can share an assignment grid, so document content cannot
+   * answer “is the roster on screen this candidate?” and the row can.
+   */
+  candidateSource: WorkingCandidateSource | null;
   /** The durable candidate pointer, or null when no candidate exists. */
   candidate: CurrentCandidatePointer | null;
   /** The candidate's document, or null when not yet read / absent. */
@@ -49,6 +58,7 @@ export interface WorkingRosterState {
 export function useWorkingRoster(): WorkingRosterState {
   const [document, setDocument] = useState<RosterDocument | null>(null);
   const [revision, setRevision] = useState<number | null>(null);
+  const [candidateSource, setCandidateSource] = useState<WorkingCandidateSource | null>(null);
   const [candidate, setCandidate] = useState<CurrentCandidatePointer | null>(null);
   const [candidateDocument, setCandidateDocument] = useState<RosterDocument | null>(null);
   const [loading, setLoading] = useState(true);
@@ -61,6 +71,7 @@ export function useWorkingRoster(): WorkingRosterState {
     ]);
     setDocument(workingRow?.document ?? null);
     setRevision(workingRow?.revision ?? null);
+    setCandidateSource(workingRow?.candidateSource ?? null);
     setCandidate(pointer);
     if (pointer !== null) {
       const row = await rosterStorage.readCandidate<RosterDocument>(pointer.jobId);
@@ -93,6 +104,7 @@ export function useWorkingRoster(): WorkingRosterState {
   return {
     document,
     revision,
+    candidateSource,
     candidate,
     candidateDocument,
     loading,

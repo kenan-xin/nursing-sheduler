@@ -27,15 +27,19 @@ export default defineConfig({
   // tests that now sit beside the shared support modules in `e2e/support/` and
   // fail them for calling `describe()` outside a Playwright runner.
   testMatch: /\.spec\.ts$/,
-  // The assembled Browser→Next→FastAPI spec requires the live direct Compose
-  // stack (no route interception, real backend). Exclude it from the base
-  // suite — it runs only under `playwright.assembled.config.ts` via
-  // `make verify-stream`.
+  // The two assembled Browser→Next→FastAPI specs require the live direct Compose
+  // stack (no route interception, real backend): `optimize-assembled-stream`
+  // (the run protocol) and `roster-real-ward-assembled` (the G5 real Ward 8
+  // roster journey). Exclude both from the base suite — they run only under
+  // `playwright.assembled.config.ts` via `make verify-stream`. The base config's
+  // webServer has no FastAPI behind it, so a swept-up assembled spec would fail
+  // for the wrong reason.
   // The public-roster-dispatch spec requires a stub backend on a private port
   // (8765), so it runs only under `playwright.public-roster-dispatch.config.ts`
   // — the base config's webServer points BACKEND_API_URL at 127.0.0.1:8000,
   // where a developer's real FastAPI may already be bound.
-  testIgnore: /optimize-assembled-stream\.spec\.ts|optimize-public-roster-dispatch\.spec\.ts/,
+  testIgnore:
+    /optimize-assembled-stream\.spec\.ts|roster-real-ward-assembled\.spec\.ts|optimize-public-roster-dispatch\.spec\.ts/,
   fullyParallel: true,
   workers,
   forbidOnly: !!process.env.CI,

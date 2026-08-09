@@ -85,11 +85,14 @@ export {
   candidateRosterKey,
   createRosterStorage,
   createRosterStorageForDb,
+  isWorkingRosterFromCandidate,
   rosterStorage,
   submissionSnapshotKey,
   WORKING_ROSTER_KEY,
+  type AwaitingChoiceReason,
   type CandidateCommitOutcome,
   type CandidateDismissalOutcome,
+  type CandidateWorkingDisposition,
   type ClearOutcome,
   type CurrentCandidatePointer,
   type RosterDocumentValidator,
@@ -97,8 +100,9 @@ export {
   type SnapshotAllocationOutcome,
   type SnapshotDeletionOutcome,
   type StaleEpochOutcome,
+  type WorkingCandidateSource,
+  type WorkingEditOutcome,
   type WorkingPromotionOutcome,
-  type WorkingWriteOutcome,
 } from "./roster-storage";
 
 export {

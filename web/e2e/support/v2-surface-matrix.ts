@@ -2,7 +2,7 @@
 //
 // This module is the single, immutable inventory the foundation, all nine
 // parallel route tickets (R1…R7) and G1 verify against. It is COMPLETE the
-// moment F4 lands: seventeen rows — thirteen shipped product routes and four
+// moment F4 lands: eighteen rows — fourteen shipped product routes and four
 // harness routes — each naming its ticket owner, canonical prototype,
 // deterministic seed strategy, readiness descriptor, semantic checks, axe
 // exceptions and immutable static file-owner set.
@@ -34,6 +34,7 @@ export const V2_OWNERS = [
   "R5",
   "R6",
   "R7",
+  "R8",
 ] as const;
 
 export type V2Owner = (typeof V2_OWNERS)[number];
@@ -243,13 +244,13 @@ function bare(marker: string): V2ReadinessDescriptor {
 }
 
 /**
- * The seventeen rows.
+ * The eighteen rows.
  *
  * Scope of `semanticChecks`: each row declares only what its OWN owner's
  * contract fixes today. The universal battery — No-Black, horizontal overflow,
  * coarse-pointer target size, axe AA, square data surfaces, scrim provenance and
  * status pairing — is applied by the shared runner to every registered row and
- * is deliberately NOT restated seventeen times here. Route-specific internals
+ * is deliberately NOT restated eighteen times here. Route-specific internals
  * beyond the declarations below belong in each ticket's own route-local spec,
  * which is the one file that ticket owns.
  */
@@ -523,6 +524,29 @@ const ROWS: readonly V2Row[] = [
     semanticChecks: [{ label: "Save & Load screen root", selector: SCREEN_MARKER, role: "page" }],
     axeExceptions: [],
   },
+
+  // --- R8 — Roster viewer (the dedicated /roster route) -------------------
+  // G4 closure: the F4/F5 roster surface moved off the Optimize route. The
+  // dedicated /roster page composes the existing roster-viewer, F1/F2/F3
+  // authorities, and the three lenses. Available in BOTH modes — the
+  // `readiness.mode` is `guided` because the route itself does not require a
+  // mode policy, but the registry drives both modes (no `advancedOnly`).
+  {
+    route: "/roster",
+    kind: "product",
+    owner: "R8",
+    prototype: `${PROTOTYPE_DIR}/ScreenSchedule.dc.html`,
+    seed: "optimize-ready",
+    readiness: appShell('[data-testid="screen"][data-screen="Roster"]', "guided"),
+    semanticChecks: [
+      {
+        label: "Roster screen root",
+        selector: '[data-testid="screen"][data-screen="Roster"]',
+        role: "page",
+      },
+    ],
+    axeExceptions: [],
+  },
 ];
 
 /** The frozen manifest. Deep-frozen so a spec cannot mutate a row in place. */
@@ -537,7 +561,7 @@ export const V2_SURFACE_MATRIX: readonly V2Row[] = Object.freeze(
   ),
 );
 
-/** The thirteen shipped product routes, in manifest order. */
+/** The fourteen shipped product routes, in manifest order. */
 export const V2_PRODUCT_ROUTES: readonly string[] = Object.freeze(
   V2_SURFACE_MATRIX.filter((r) => r.kind === "product").map((r) => r.route),
 );
@@ -637,11 +661,16 @@ export const V2_STYLE_OWNER_FILES: Readonly<Record<V2Owner, readonly string[]>> 
     "app/progress-chart-fixture/**/*.tsx",
     "app/roster-viewer-fixture/**/*.tsx",
     "components/optimize/**/*.tsx",
-    // The read-only roster viewer (F4) is a surface OF the optimize route: it
-    // renders below the run panel on the same page and shares its visual owner.
-    "components/roster-viewer/**/*.tsx",
+    // The roster viewer is no longer a surface OF the optimize route: it
+    // renders at the dedicated /roster page (R8), so R8 owns the viewer.
   ]),
   R7: Object.freeze(["app/(app)/save-and-load/page.tsx", "components/save-load/**/*.tsx"]),
+  // G4 closure: the dedicated /roster page owns the roster viewer. The
+  // viewer, its hooks, the working-roster panel and the replacement
+  // outcome helpers all live here — every place the durable roster
+  // document and its capture/dismiss authorities are reached from the
+  // surface the user navigates to.
+  R8: Object.freeze(["app/(app)/roster/page.tsx", "components/roster-viewer/**/*.tsx"]),
 });
 
 // ---------------------------------------------------------------------------

@@ -346,6 +346,90 @@ describe("RunStatusPanel — cleanup retry", () => {
   });
 });
 
+describe("RunStatusPanel — G4 Open & adjust roster CTA", () => {
+  // G4 closure: the prototype's `Open & adjust roster` CTA appears inside the
+  // completed artifact block ONLY when `loadableRoster` is true. Every other
+  // terminal outcome must stay silent — idle, running, failed,
+  // infeasible-without-incumbent, dismissed — so the panel cannot claim a
+  // roster exists for a non-loadable run.
+
+  const completedWithArtifact = view({
+    lifecycle: "completed",
+    jobId: "opt_1",
+    result: { outcome: "optimal", score: 42, solverStatus: "OPTIMAL", terminationReason: null },
+    latestScore: 42,
+    download: { status: "downloaded", artifactAvailable: true, filename: "schedule.xlsx" },
+  });
+
+  it("renders the CTA with calendar-check icon when loadableRoster is true", () => {
+    setup(completedWithArtifact, { loadableRoster: true });
+    const cta = screen.getByTestId("optimize-open-roster");
+    expect(cta).toHaveAttribute("href", "/roster");
+    expect(cta).toHaveTextContent("Open & adjust roster");
+  });
+
+  it("omits the CTA on a completed run that has no loadable roster", () => {
+    setup(completedWithArtifact, { loadableRoster: false });
+    expect(screen.queryByTestId("optimize-open-roster")).not.toBeInTheDocument();
+    // The success download affordance remains intact — the "downloaded"
+    // status still surfaces the success callout.
+    expect(screen.getByTestId("optimize-completed-artifact")).toHaveTextContent(
+      "Schedule optimised and downloaded successfully!",
+    );
+  });
+
+  it("omits the CTA by default (the prop is opt-in)", () => {
+    setup(completedWithArtifact);
+    expect(screen.queryByTestId("optimize-open-roster")).not.toBeInTheDocument();
+  });
+
+  it("never renders the CTA for a non-completed lifecycle", () => {
+    for (const lifecycle of [
+      "idle",
+      "queued",
+      "running",
+      "cancelling",
+      "cancelled",
+      "failed",
+    ] as const) {
+      setup(
+        view({
+          lifecycle,
+          jobId: lifecycle === "idle" ? null : "opt_1",
+          // artifactAvailable is irrelevant — the CTA must not render unless
+          // lifecycle is "completed".
+          download: { status: "downloaded", artifactAvailable: true, filename: null },
+        }),
+        { loadableRoster: true },
+      );
+      expect(
+        screen.queryByTestId("optimize-open-roster"),
+        `CTA rendered for lifecycle=${lifecycle}`,
+      ).not.toBeInTheDocument();
+      cleanup();
+    }
+  });
+
+  it("never renders the CTA on a completed run with no downloadable artifact", () => {
+    setup(
+      view({
+        lifecycle: "completed",
+        jobId: "opt_1",
+        result: {
+          outcome: "infeasible",
+          score: null,
+          solverStatus: "INFEASIBLE",
+          terminationReason: "infeasibility_proven",
+        },
+        download: { status: "unavailable", artifactAvailable: false, filename: null },
+      }),
+      { loadableRoster: true },
+    );
+    // The infeasible panel owns the success view; the CTA must not appear.
+    expect(screen.queryByTestId("optimize-open-roster")).not.toBeInTheDocument();
+  });
+});
+
 describe("RunStatusPanel — transient error", () => {
   it("shows a non-terminal control/stream error while active", () => {
     setup(

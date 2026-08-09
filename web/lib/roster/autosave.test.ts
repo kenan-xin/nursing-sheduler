@@ -1,26 +1,26 @@
 // Autosave queue tests (F5): serialization, coalescing, CAS conflict, failure +
 // retry + rescue, drain gating, and the Clear (stale-epoch) terminal.
 //
-// The queue is exercised through a controllable mock `RosterStorage.writeWorking`
+// The queue is exercised through a controllable mock `RosterStorage.writeWorkingEdit`
 // so every authority/race cut in the proof matrix has a discriminating assertion
 // without touching real IndexedDB.
 
 import { describe, expect, it, vi } from "vitest";
 import { createAutosaveQueue, type AutosaveDeps } from "./autosave";
-import type { RosterStorage, WorkingWriteOutcome } from "@/lib/store";
+import type { RosterStorage, WorkingEditOutcome } from "@/lib/store";
 
-/** A minimal RosterStorage whose `writeWorking` is a controllable spy. */
+/** A minimal RosterStorage whose `writeWorkingEdit` is a controllable spy. */
 function mockStorage(
   responder: (input: {
     document: unknown;
     expectedRevision: number | null;
     expectedClearEpoch: number;
-  }) => WorkingWriteOutcome | Promise<WorkingWriteOutcome>,
+  }) => WorkingEditOutcome | Promise<WorkingEditOutcome>,
 ): RosterStorage & { writeSpy: ReturnType<typeof vi.fn> } {
   const writeSpy = vi.fn(responder);
   // Keep `writeSpy` on the object itself (not just in the cast) so the test can
   // read it back after the `as unknown` widening.
-  return { writeWorking: writeSpy, writeSpy } as unknown as RosterStorage & {
+  return { writeWorkingEdit: writeSpy, writeSpy } as unknown as RosterStorage & {
     writeSpy: typeof writeSpy;
   };
 }
@@ -36,7 +36,7 @@ function deps(storage: RosterStorage, opts: Partial<AutosaveDeps> = {}): Autosav
   };
 }
 
-const WRITTEN = (revision: number): WorkingWriteOutcome => ({ status: "written", revision });
+const WRITTEN = (revision: number): WorkingEditOutcome => ({ status: "written", revision });
 
 describe("createAutosaveQueue — happy path", () => {
   it("writes the enqueued document and reaches 'saved'", async () => {
@@ -57,7 +57,7 @@ describe("createAutosaveQueue — happy path", () => {
     let releaseWrite: () => void = () => {};
     const storage = mockStorage(
       () =>
-        new Promise<WorkingWriteOutcome>((resolve) => (releaseWrite = () => resolve(WRITTEN(2)))),
+        new Promise<WorkingEditOutcome>((resolve) => (releaseWrite = () => resolve(WRITTEN(2)))),
     );
     const queue = createAutosaveQueue(deps(storage));
     expect(queue.snapshot().status).toBe("idle");
@@ -110,7 +110,7 @@ describe("createAutosaveQueue — serialization + coalescing", () => {
     const storage = mockStorage(() => {
       callCount += 1;
       if (callCount === 1) {
-        return new Promise<WorkingWriteOutcome>(
+        return new Promise<WorkingEditOutcome>(
           (resolve) => (releaseFirst = () => resolve(WRITTEN(2))),
         );
       }
@@ -139,7 +139,7 @@ describe("createAutosaveQueue — CAS conflict", () => {
     // the edit stays visible for rescue/retry/discard, and the ORIGINAL expected
     // revision is retained so Retry can never silently rebase onto the rival.
     const storage = mockStorage(
-      () => ({ status: "conflict", currentRevision: 5 }) as WorkingWriteOutcome,
+      () => ({ status: "conflict", currentRevision: 5 }) as WorkingEditOutcome,
     );
     const queue = createAutosaveQueue(deps(storage, { initialRevision: 1 }));
     const outcome = await queue.enqueue({ a: 1 });
@@ -158,7 +158,7 @@ describe("createAutosaveQueue — CAS conflict", () => {
     // The rival is still there (still conflicts). Retry must not adopt its
     // revision and succeed by overwriting it; it must keep failing.
     const storage = mockStorage(
-      () => ({ status: "conflict", currentRevision: 5 }) as WorkingWriteOutcome,
+      () => ({ status: "conflict", currentRevision: 5 }) as WorkingEditOutcome,
     );
     const queue = createAutosaveQueue(deps(storage, { initialRevision: 1 }));
     await queue.enqueue({ a: 1 });
@@ -189,7 +189,7 @@ describe("createAutosaveQueue — CAS conflict", () => {
     const storage = mockStorage(() => {
       attempt += 1;
       return attempt === 1
-        ? ({ status: "conflict", currentRevision: 5 } as WorkingWriteOutcome)
+        ? ({ status: "conflict", currentRevision: 5 } as WorkingEditOutcome)
         : WRITTEN(2);
     });
     const queue = createAutosaveQueue(deps(storage, { initialRevision: 1 }));
@@ -287,7 +287,7 @@ describe("createAutosaveQueue — drain (replacement gating)", () => {
   it("waits for an in-flight write to settle before resolving", async () => {
     let release: () => void = () => {};
     const storage = mockStorage(
-      () => new Promise<WorkingWriteOutcome>((resolve) => (release = () => resolve(WRITTEN(2)))),
+      () => new Promise<WorkingEditOutcome>((resolve) => (release = () => resolve(WRITTEN(2)))),
     );
     const queue = createAutosaveQueue(deps(storage));
     const firstWrite = queue.enqueue({ a: 1 });
@@ -346,7 +346,7 @@ describe("createAutosaveQueue — drain (replacement gating)", () => {
   it("settle() resolves with 'saved' when an in-flight write commits", async () => {
     let release: () => void = () => {};
     const storage = mockStorage(
-      () => new Promise<WorkingWriteOutcome>((resolve) => (release = () => resolve(WRITTEN(2)))),
+      () => new Promise<WorkingEditOutcome>((resolve) => (release = () => resolve(WRITTEN(2)))),
     );
     const queue = createAutosaveQueue(deps(storage));
     const write = queue.enqueue({ a: 1 });
@@ -362,7 +362,7 @@ describe("createAutosaveQueue — drain (replacement gating)", () => {
 describe("createAutosaveQueue — Clear (stale-epoch)", () => {
   it("treats a stale-epoch outcome as terminal: no retry, no failed banner", async () => {
     const storage = mockStorage(
-      () => ({ status: "stale-epoch", currentEpoch: 1 }) as WorkingWriteOutcome,
+      () => ({ status: "stale-epoch", currentEpoch: 1 }) as WorkingEditOutcome,
     );
     const queue = createAutosaveQueue(deps(storage, { clearEpoch: 0 }));
     const outcome = await queue.enqueue({ a: 1 });
@@ -393,7 +393,7 @@ describe("createAutosaveQueue — loss guard", () => {
   it("isDirty is true while a write is pending and false once it commits", async () => {
     let release: () => void = () => {};
     const storage = mockStorage(
-      () => new Promise<WorkingWriteOutcome>((resolve) => (release = () => resolve(WRITTEN(2)))),
+      () => new Promise<WorkingEditOutcome>((resolve) => (release = () => resolve(WRITTEN(2)))),
     );
     const queue = createAutosaveQueue(deps(storage));
     const write = queue.enqueue({ a: 1 });

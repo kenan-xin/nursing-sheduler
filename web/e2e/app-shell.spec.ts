@@ -28,6 +28,10 @@ import { expect, test, type Page } from "@playwright/test";
 // Requests; Advanced adds the raw Constraints group. Every route still exists —
 // the two lists below just record which mode each is reachable in DIRECTLY from
 // the sidebar.
+//
+// G4 — /roster is reachable in BOTH modes (it carries no `advancedOnly` flag in
+// the registry) and is therefore listed in GUIDED_NAV_PATHS alongside the
+// other Output destinations.
 const GUIDED_NAV_PATHS = [
   "/",
   "/dates",
@@ -36,6 +40,7 @@ const GUIDED_NAV_PATHS = [
   "/rules",
   "/shift-requests",
   "/optimize-and-export",
+  "/roster",
   "/save-and-load",
 ];
 

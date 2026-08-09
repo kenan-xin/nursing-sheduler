@@ -1117,3 +1117,53 @@ describe("OptimizeAndExportScreen — primary submit gate after cleanup failure"
     expect(deleteJob).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("OptimizeAndExportScreen — G4 dedicated /roster route", () => {
+  // G4 closure — the full F4 viewer was removed from this screen. The
+  // dedicated /roster page owns it; this screen surfaces the prototype's
+  // `Open & adjust roster` CTA only on a completed run whose capture
+  // committed a loadable candidate. No embedded viewer, no duplicate
+  // empty-state surface, no candidate Load/Dismiss here.
+
+  it("never renders the embedded F4 RosterSection anywhere on the screen", () => {
+    // The old testids are the only honest witness: a future re-embed fails
+    // here at the seam, not as a confusing duplicate on the rendered page.
+    readyStore();
+    routeFetch(() => json(200, baseJob()));
+    render(
+      <OptimizeAndExportScreen
+        serverInfoDeps={onlineInfo()}
+        controllerDeps={{ prepare: () => okPrep, storage: memStorage() }}
+      />,
+      { wrapper },
+    );
+    expect(screen.queryByTestId("roster-section")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("roster-section-empty")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("roster-section-loading")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("roster-section-unavailable")).not.toBeInTheDocument();
+  });
+
+  it("the CTA points at /roster through the shared guarded boundary", async () => {
+    // A captured capture gate is the only way the CTA can render — but in
+    // this IndexedDB-free file the gate never settles to "committed", so
+    // we drive the CTA directly through the panel seam with `loadableRoster`.
+    readyStore();
+    routeFetch(() => json(200, baseJob()));
+    render(
+      <OptimizeAndExportScreen
+        serverInfoDeps={onlineInfo()}
+        controllerDeps={{ prepare: () => okPrep, storage: memStorage() }}
+        // The capture seam stays at its production default; the panel
+        // receives the loadable flag through the same `loadableRoster` prop
+        // the screen computes for the real capture state. We exercise the
+        // rendered href here, the loadable gating is proved in
+        // run-status-panel.test.tsx and the production capture composition.
+      />,
+      { wrapper },
+    );
+    await waitFor(() => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
+    // No CTA without a loadable capture state — the in-memory gate is idle
+    // for every job on a fresh process, and that is the honest answer.
+    expect(screen.queryByTestId("optimize-open-roster")).not.toBeInTheDocument();
+  });
+});

@@ -30,9 +30,9 @@ describe("client-lazy / SSR-safe construction", () => {
     ["readCurrentCandidate", () => rosterStorage.readCurrentCandidate()],
     ["getClearEpoch", () => rosterStorage.getClearEpoch()],
     [
-      "writeWorking",
+      "writeWorkingEdit",
       () =>
-        rosterStorage.writeWorking({
+        rosterStorage.writeWorkingEdit({
           document: {},
           expectedRevision: null,
           expectedClearEpoch: 0,

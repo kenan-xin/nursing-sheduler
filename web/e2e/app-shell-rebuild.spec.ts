@@ -84,9 +84,9 @@ test.describe("T08 rebuild — two-mode Home (BLOCKER 2)", () => {
     await expect(page.getByTestId("home-advanced")).toBeVisible();
     await expect(page.getByTestId("home-wizard-grid")).toHaveCount(0);
     // Every Advanced-visible destination except Home is a direct entry point
-    // (12 of 13 — DL12 §2: Guided's five Set up entries incl. Rules, plus the
-    // five raw Constraints editors).
-    await expect(page.locator('[data-testid^="home-adv-"]')).toHaveCount(12);
+    // (13 of 14 — DL12 §2: Guided's five Set up entries incl. Rules, the five raw
+    // Constraints editors, Optimise & Export, Save & Load, and — since G4 — Roster).
+    await expect(page.locator('[data-testid^="home-adv-"]')).toHaveCount(13);
     // Reachability preserved: still routes.
     await page.getByTestId("home-adv-/dates").click();
     await expect(page).toHaveURL(/\/dates$/);

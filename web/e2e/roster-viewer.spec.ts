@@ -129,6 +129,19 @@ test.describe("F4 roster viewer — durable candidate through production storage
 //
 // A is a genuine committed candidate in the SAME production IndexedDB, seeded
 // through the roster fixture on the same origin with a real `Blob`.
+//
+// G4 closure changed the STAGING, not the claim. The roster surface no longer sits
+// below the Optimize event log: A's actions live on the dedicated `/roster` route
+// and B's Retry on the Optimize route. So the two are reached by CLIENT-side
+// navigation (a nav click, then `goBack`), which keeps one JS context — the
+// app-lifetime capture gate holding B's `fetch-failed` state is exactly what a
+// full reload would destroy, and it is what the claim is about.
+
+/** Soft-navigate to /roster through the shell, keeping this JS context alive. */
+async function navigateToRoster(page: Page) {
+  await page.getByTestId("nav-link-/roster").click();
+  await expect(page.getByTestId("screen")).toHaveAttribute("data-screen", "Roster");
+}
 
 test.describe("F4 roster viewer — durable A beside a current failed run B", () => {
   test("A stays loadable and dismissible while B owns its Retry", async ({ page }) => {
@@ -162,7 +175,13 @@ test.describe("F4 roster viewer — durable A beside a current failed run B", ()
     const bNotice = page.getByTestId("optimize-capture-fetch-failed");
     await expect(bNotice.getByRole("button", { name: /retry/i })).toBeVisible();
 
-    // 4. A IS STILL INDEPENDENTLY ACTIONABLE, at the same time.
+    // 3b. G4 — and the Optimize route carries NO roster surface of its own, so B's
+    //     notice is the only capture affordance on this screen.
+    await expect(page.getByTestId("roster-candidate-available")).toHaveCount(0);
+    await expect(page.getByTestId("roster-section-empty")).toHaveCount(0);
+
+    // 4. A IS STILL INDEPENDENTLY ACTIONABLE, on its own route, at the same time.
+    await navigateToRoster(page);
     await expect(page.getByTestId("roster-candidate-available")).toBeVisible();
     await expect(page.getByTestId("roster-candidate-load")).toBeVisible();
     await expect(page.getByTestId("roster-candidate-dismiss")).toBeVisible();
@@ -179,10 +198,12 @@ test.describe("F4 roster viewer — durable A beside a current failed run B", ()
     expect(aCopy.toLowerCase()).not.toContain("last optimization");
 
     // 6. DISMISSING A DOES NOT TOUCH B. The old unkeyed action resolved the
-    //    CURRENT run here, which would have settled B and taken its Retry away.
+    //    CURRENT run, which would have settled B and taken its Retry away.
     await page.getByTestId("roster-candidate-dismiss").click();
     await expect(page.getByTestId("roster-candidate-available")).toBeHidden();
 
+    // Back to B, client-side, so the gate that holds its state is the same one.
+    await page.goBack();
     await expect(page.getByTestId("optimize-capture-fetch-failed")).toBeVisible();
     await expect(bNotice.getByRole("button", { name: /retry/i })).toBeVisible();
   });
@@ -201,10 +222,12 @@ test.describe("F4 roster viewer — durable A beside a current failed run B", ()
     await expect(page.getByTestId("optimize-capture-fetch-failed")).toBeVisible();
 
     // Real F1 promotion of A, including Blob re-validation, while B is current.
+    await navigateToRoster(page);
     await page.getByTestId("roster-candidate-load").click();
     await expect(page.getByTestId("roster-viewer")).toBeVisible();
 
     // B is exactly where it was.
+    await page.goBack();
     await expect(page.getByTestId("optimize-capture-fetch-failed")).toBeVisible();
     await expect(
       page.getByTestId("optimize-capture-fetch-failed").getByRole("button", { name: /retry/i }),
@@ -681,7 +704,7 @@ test.describe("F5 roster documents — real downloads and real imports", () => {
 // F5 — save authority: pending, failed, retry, discard, and the loss guard.
 //
 // These are the cuts the closure review found unproven. The fixture injects a
-// failing or stalled `writeWorking`; everything reacting to it — the autosave
+// failing or stalled `writeWorkingEdit`; everything reacting to it — the autosave
 // queue, the banners, the replacement coordinator, the `beforeunload` guard — is
 // production code.
 // ---------------------------------------------------------------------------
@@ -1064,5 +1087,57 @@ test.describe("F5 Clear — verified purge with no residue", () => {
     await expect(page.getByTestId("roster-section-empty")).toBeVisible();
     await page.reload();
     await expect(page.getByTestId("roster-section-empty")).toBeVisible();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// G4 — a completed run fills an EMPTY viewer, and never overwrites a full one.
+//
+// The unit proofs cover the transaction (`lib/store/roster-storage.test.ts`).
+// What only a browser can add is the same behaviour through PRODUCTION storage
+// with the document's real `Blob` in it — fake-indexeddb cannot round-trip one, so
+// jsdom can never show that the promoted row is genuinely renderable afterwards.
+// ---------------------------------------------------------------------------
+
+test.describe("G4 roster viewer — a completed run fills an empty viewer", () => {
+  test("a completed run renders the roster with no Load click, and survives a reload", async ({
+    page,
+  }) => {
+    await freshFixture(page);
+    await expect(page.getByTestId("roster-section-empty")).toBeVisible();
+
+    await page.getByTestId("fx-complete-run").click();
+    // F1's own disposition, not an inference from the DOM.
+    await expect(page.getByTestId("fx-status")).toHaveText("run-completed:loaded-empty");
+
+    // Populated, with no Load offer to click — the whole point of the change.
+    await expect(page.getByTestId("roster-viewer")).toBeVisible();
+    await expect(page.getByTestId("roster-grid")).toBeVisible();
+    await expect(page.getByTestId("roster-candidate-load")).toHaveCount(0);
+    await expect(page.getByTestId("roster-section-empty")).toHaveCount(0);
+
+    // Durable, and the promoted document's Blob really did survive the round trip:
+    // the grid re-renders from storage in a brand-new app process.
+    await page.reload();
+    await expect(page.getByTestId("roster-viewer")).toBeVisible();
+    await expect(page.getByTestId("roster-grid")).toBeVisible();
+  });
+
+  test("a completed run leaves an EXISTING roster untouched and waits to be loaded", async ({
+    page,
+  }) => {
+    await freshFixture(page);
+    await page.getByTestId("fx-seed-working").click();
+    await expect(page.getByTestId("fx-status")).toHaveText("working-seeded");
+    await expect(page.getByTestId("roster-viewer")).toBeVisible();
+
+    await page.getByTestId("fx-complete-run").click();
+    await expect(page.getByTestId("fx-status")).toHaveText("run-completed:awaiting-choice");
+
+    // The existing roster still owns the viewer, and the new result waits for an
+    // explicit choice rather than having replaced it.
+    await expect(page.getByTestId("roster-viewer")).toBeVisible();
+    await expect(page.getByTestId("roster-candidate-available")).toBeVisible();
+    await expect(page.getByTestId("roster-candidate-load")).toBeVisible();
   });
 });

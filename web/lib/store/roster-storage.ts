@@ -21,6 +21,26 @@
 //     transaction. An older submission completing late returns `superseded`
 //     without storing anything or moving the pointer, regardless of completion
 //     order. Any abort leaves the prior pointer and its candidate intact.
+//   • FILL EMPTY, NEVER OVERWRITE. The working slot is decided INSIDE that same
+//     candidate transaction, as a compare-and-set from `working = absent` only —
+//     never a check-then-write and never a replacement. A working roster that
+//     exists, or whose absence cannot be PROVEN, is preserved byte-for-byte and
+//     the candidate is left awaiting an explicit Load/Replace. Two tabs
+//     completing at once cannot both see the slot as empty: IndexedDB serializes
+//     the two readwrite transactions, so the second observes the first's row.
+//   • EXACT PROVENANCE ON THE ROW. A working roster promoted from a candidate —
+//     by that fill-empty CAS or by an explicit Load — records the exact
+//     `{jobId, candidateVersion}` it came from. An import records none. Autosave
+//     carries it forward, because an edited roster is still the same result.
+//     `isWorkingRosterFromCandidate` is the only place that comparison lives, so
+//     no surface has to infer provenance from document content — which is what
+//     made a distinct run sharing an assignment grid look like the same result.
+//   • TWO WRITE AUTHORITIES, NOT ONE. `writeWorkingEdit` writes a new revision of
+//     the SAME roster and preserves that provenance; the two promotion entry
+//     points are the ONLY way a different document reaches `working`, and each
+//     sets provenance explicitly. There is deliberately no general working write:
+//     one would let a replacement inherit the previous row's exact candidate
+//     identity, which is the same defect in a new caller.
 //   • ATOMIC PROMOTION. Validation runs OUTSIDE the transaction (it is caller
 //     code and may be async); the transaction re-checks BOTH the source identity
 //     and the expected working revision before committing the new `working` row
@@ -80,6 +100,36 @@ const FIRST_CANDIDATE_VERSION = 1;
 // ---------------------------------------------------------------------------
 
 /**
+ * The exact candidate a working roster was promoted from.
+ *
+ * `candidateVersion` comes from the origin-wide, never-reused counter, so this
+ * names one specific capture and nothing else — not “this job”, and not “a result
+ * whose assignments look like this one”. That exactness is the point: it is what
+ * lets a surface tell “the roster on screen IS this candidate” apart from “a
+ * different run that happened to solve to the same grid”.
+ */
+export interface WorkingCandidateSource {
+  jobId: string;
+  candidateVersion: number;
+}
+
+/**
+ * Whether a working row was promoted from EXACTLY the candidate a pointer names.
+ *
+ * The one authority for that comparison, so the UI and the tests cannot drift into
+ * two different notions of “already loaded”. Both fields must match: a newer
+ * capture for the same job moves `candidateVersion`, and a working roster promoted
+ * from the older one is then provably not the pointed candidate.
+ */
+export function isWorkingRosterFromCandidate(
+  source: WorkingCandidateSource | undefined,
+  pointer: CurrentCandidatePointer | null,
+): boolean {
+  if (source === undefined || pointer === null) return false;
+  return source.jobId === pointer.jobId && source.candidateVersion === pointer.candidateVersion;
+}
+
+/**
  * The durable pointer to the one latest loadable candidate. Versioned so a
  * capture can prove which commit it observed; `submissionOrdinal` is the
  * origin-wide ordering authority that decides supersession.
@@ -120,6 +170,33 @@ export type SnapshotAllocationOutcome<TPayload> =
   | { status: "conflict"; snapshot: SnapshotRow<TPayload> }
   | StaleEpochOutcome;
 
+/**
+ * Why an empty working slot could not be proven, so the candidate awaits an
+ * explicit choice. Both cases preserve whatever is in the slot untouched; they
+ * are distinguished because only `working-present` is a normal outcome the user
+ * acts on, while `working-unreadable` means the slot could not be read at all.
+ */
+export type AwaitingChoiceReason = "working-present" | "working-unreadable";
+
+/**
+ * The CLOSED disposition of the working slot, decided inside the candidate
+ * transaction. Callers (and tests) read this instead of doing a second racing
+ * read to infer what happened — that read could observe a slot another tab filled
+ * a moment later and report the wrong story about this commit.
+ */
+export type CandidateWorkingDisposition =
+  | {
+      /** The slot was PROVEN absent and this candidate now fills it. */
+      kind: "loaded-empty";
+      /** The revision of the working row this commit created (always 1). */
+      workingRevision: number;
+    }
+  | {
+      /** The slot was preserved; the candidate awaits explicit Load/Replace. */
+      kind: "awaiting-choice";
+      reason: AwaitingChoiceReason;
+    };
+
 /** Candidate commit: either it becomes the pointed candidate, or it is older. */
 export type CandidateCommitOutcome =
   | {
@@ -127,12 +204,14 @@ export type CandidateCommitOutcome =
       pointer: CurrentCandidatePointer;
       /** The pointer this commit replaced (its candidate row was deleted). */
       replaced: CurrentCandidatePointer | null;
+      /** What the SAME transaction did with the working slot. */
+      working: CandidateWorkingDisposition;
     }
   | { status: "superseded"; current: CurrentCandidatePointer }
   | StaleEpochOutcome;
 
-/** A revisioned compare-and-swap write of the working roster. */
-export type WorkingWriteOutcome =
+/** A revisioned compare-and-swap write of an EDIT to the working roster. */
+export type WorkingEditOutcome =
   | { status: "written"; revision: number }
   | { status: "conflict"; currentRevision: number | null }
   | StaleEpochOutcome;
@@ -252,9 +331,18 @@ export interface RosterStorage {
 
   /**
    * Commit a captured candidate: write `candidate:<jobId>`, move
-   * `currentCandidate`, and delete the previously pointed candidate — all in one
-   * transaction. A submission older than the current pointer returns
-   * `superseded` and writes nothing at all.
+   * `currentCandidate`, delete the previously pointed candidate, AND decide the
+   * working slot — all in one transaction. A submission older than the current
+   * pointer returns `superseded` and writes nothing at all.
+   *
+   * The working slot is a compare-and-set from absent only. `document` is written
+   * to `working` when — and only when — no working row exists; the returned
+   * `working` disposition states which happened. Unlike
+   * `promoteCandidateToWorking`, no validator is taken: this path stores the
+   * caller's own freshly built in-memory value, which has not crossed a
+   * structured-clone boundary and which F3 validates as the last step of
+   * assembly. The reload path reads a stored document back and therefore does
+   * re-validate.
    */
   commitCandidate<TDocument>(input: {
     jobId: string;
@@ -281,14 +369,34 @@ export interface RosterStorage {
   readWorking<TDocument>(): Promise<RosterRow<TDocument> | null>;
 
   /**
-   * Revisioned compare-and-swap write of the working roster. `expectedRevision`
-   * is `null` when the caller expects no row to exist yet.
+   * Revisioned compare-and-swap write of an EDIT to the working roster — F5's
+   * autosave primitive, and deliberately nothing more general than that.
+   *
+   * THE CONTRACT: `document` is a new revision of the SAME logical working roster
+   * (a set/swap/undo the editor just produced). Because of that, the row's
+   * `candidateSource` is carried forward: an edited roster still came from
+   * wherever it came from.
+   *
+   * That is why this is not a general `writeWorking`. A general write would let a
+   * caller commit a DIFFERENT document at the current revision and silently
+   * inherit the previous row's exact `{jobId, candidateVersion}` — after which
+   * `RosterSection` would treat the current candidate as already loaded and hide
+   * its Load/Replace action for a roster that never came from it. Naming the
+   * operation after its contract is what keeps that one caller away from existing;
+   * a `preserveSource` flag would just move the same mistake into an argument.
+   *
+   * Whole-document replacement therefore has no path through here. It goes to
+   * `promoteCandidateToWorking` (records the exact candidate source) or
+   * `promoteDocumentToWorking` (clears it).
+   *
+   * `expectedRevision` is `null` when the caller expects no row to exist yet;
+   * creating the first row can inherit nothing, so the invariant holds there too.
    */
-  writeWorking<TDocument>(input: {
+  writeWorkingEdit<TDocument>(input: {
     document: TDocument;
     expectedRevision: number | null;
     expectedClearEpoch: number;
-  }): Promise<WorkingWriteOutcome>;
+  }): Promise<WorkingEditOutcome>;
 
   /**
    * Promote a stored candidate to the working roster, keeping the candidate.
@@ -354,6 +462,13 @@ export function createRosterStorageForDb(resolveDb: () => ScenarioPersistenceDb)
      * change rather than matching a recycled number.
      */
     source: { key: string; revision: number } | null;
+    /**
+     * Recorded on the new `working` row. Present for a candidate promotion,
+     * absent for an import or any other manual document — which is exactly the
+     * distinction a surface needs: an imported roster has no candidate behind it,
+     * so no candidate is ever “already loaded” because of one.
+     */
+    candidateSource?: WorkingCandidateSource;
   }): Promise<WorkingPromotionOutcome> {
     // Validation is caller code and may be async, so it runs BEFORE the
     // transaction opens — awaiting a non-Dexie promise inside a transaction
@@ -391,6 +506,10 @@ export function createRosterStorageForDb(resolveDb: () => ScenarioPersistenceDb)
         document: verdict.document,
         revision,
         clearEpoch: input.expectedClearEpoch,
+        // Replaced wholesale, not merged: this row's provenance is the source it
+        // was promoted from now, so any previous candidate source must not survive
+        // an import that overwrote it.
+        ...(input.candidateSource === undefined ? {} : { candidateSource: input.candidateSource }),
       });
       return { status: "promoted" as const, revision };
     });
@@ -523,7 +642,50 @@ export function createRosterStorageForDb(resolveDb: () => ScenarioPersistenceDb)
         if (pointer !== null && pointer.jobId !== input.jobId) {
           await handle.roster.delete(candidateRosterKey(pointer.jobId));
         }
-        return { status: "committed" as const, pointer: next, replaced: pointer };
+
+        // THE WORKING-SLOT CAS. Same transaction, so this is a compare-and-set
+        // from absent rather than a check followed by a separate write: no tab,
+        // autosave or import can slip a roster in between the read and the put.
+        //
+        // The read is guarded because a failure to READ is not evidence of
+        // absence. Catching keeps the candidate commit above durable (Dexie only
+        // aborts on an unhandled failure) while still refusing to promote — the
+        // fail-closed half of "empty means PROVEN absent".
+        let existingWorking: RosterRow | undefined;
+        let absenceProven = true;
+        try {
+          existingWorking = await handle.roster.get(WORKING_ROSTER_KEY);
+        } catch {
+          absenceProven = false;
+        }
+
+        let working: CandidateWorkingDisposition;
+        if (!absenceProven) {
+          working = { kind: "awaiting-choice", reason: "working-unreadable" };
+        } else if (existingWorking !== undefined) {
+          // Preserved byte-for-byte: the row is not read, rewritten or touched.
+          // A stored document that is itself corrupt is still a roster the user
+          // may have edits in, so it blocks promotion exactly like a valid one.
+          working = { kind: "awaiting-choice", reason: "working-present" };
+        } else {
+          // First working roster for this origin, so its revision starts where a
+          // `writeWorkingEdit({ expectedRevision: null })` would put it.
+          const workingRevision = 1;
+          await handle.roster.put({
+            key: WORKING_ROSTER_KEY,
+            document: input.document,
+            revision: workingRevision,
+            clearEpoch: input.expectedClearEpoch,
+            // The EXACT candidate this row came from, recorded in the same commit
+            // that created both. Without it a surface could only guess, and the
+            // only thing available to guess from — matching assignments — is shared
+            // by genuinely different results.
+            candidateSource: { jobId: input.jobId, candidateVersion },
+          });
+          working = { kind: "loaded-empty", workingRevision };
+        }
+
+        return { status: "committed" as const, pointer: next, replaced: pointer, working };
       });
     },
 
@@ -575,11 +737,11 @@ export function createRosterStorageForDb(resolveDb: () => ScenarioPersistenceDb)
       return row ?? null;
     },
 
-    async writeWorking<TDocument>(input: {
+    async writeWorkingEdit<TDocument>(input: {
       document: TDocument;
       expectedRevision: number | null;
       expectedClearEpoch: number;
-    }): Promise<WorkingWriteOutcome> {
+    }): Promise<WorkingEditOutcome> {
       const handle = db();
       return handle.transaction("rw", handle.roster, handle.meta, async () => {
         const stale = await fenceEpoch(handle, input.expectedClearEpoch);
@@ -597,6 +759,14 @@ export function createRosterStorageForDb(resolveDb: () => ScenarioPersistenceDb)
           document: input.document,
           revision,
           clearEpoch: input.expectedClearEpoch,
+          // CARRIED FORWARD, which is sound only because of this operation's
+          // contract: the document is a new revision of the SAME roster, so the
+          // candidate it was promoted from is still where it came from. Dropping it
+          // would make every edit look like an imported roster and resurrect the
+          // candidate offer for the result already on screen.
+          ...(existing?.candidateSource === undefined
+            ? {}
+            : { candidateSource: existing.candidateSource }),
         });
         return { status: "written" as const, revision };
       });
@@ -634,6 +804,9 @@ export function createRosterStorageForDb(resolveDb: () => ScenarioPersistenceDb)
         expectedWorkingRevision: input.expectedWorkingRevision,
         expectedClearEpoch: input.expectedClearEpoch,
         source: { key, revision: staged.revision },
+        // The version fence above proved this is the exact candidate the caller
+        // decided about, so it is the exact source to record.
+        candidateSource: { jobId: input.jobId, candidateVersion: staged.revision },
       });
     },
 

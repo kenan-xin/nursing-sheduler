@@ -14,6 +14,8 @@
 #   curl tiny     completion, real XLSX, content-disposition, DELETE, final 404
 #   browser t/r   real Chromium tiny + replay against the published port, no interception
 #   browser abort real `/about` navigation, baselined BFF audit, ids-only handoff cleanup
+#   ward roster   the G5 real-Ward-8 roster journey through the PRODUCTION routes,
+#                 twice consecutively, plus an owned-Redis-residue audit
 #
 # At every stage boundary, ANY assertion, command, authority or cleanup failure
 # releases every id it can safely release, tears Compose down, runs all five residue
@@ -63,6 +65,10 @@ WEB_BIND_ADDRESS="127.0.0.1"
 MAX_PORT_ATTEMPTS=5
 # Compose names built images `<project>-<service>`; remove them on exit.
 PROJECT_IMAGES="${PROJECT}-web ${PROJECT}-backend"
+
+# The durable job store's key namespace, mirroring JOB_REDIS_KEY_PREFIX in
+# docker/compose.yml. Used by the ward stage's owned-residue audit.
+JOB_KEY_PATTERN="nurse_scheduling:jobs:v0*"
 
 # Deterministic solver inputs (see docker/README.md streaming-gate section):
 #   TINY  — 1 nurse / 1 shift / 1 day: feasible, solves ~instantly to optimal.
@@ -377,6 +383,38 @@ submit_job() {
   rm -f "$hdr" "$body"
   [ -n "$id" ] || return 1
   printf '%s' "$id"
+}
+
+# scan_job_keys <snapshot_path>
+#
+# Snapshot the durable job-store keyspace into <snapshot_path>, sorted. Returns
+# NON-ZERO on any failure of the scan or the sort.
+#
+# This exists because the script runs with `set -uo pipefail` but deliberately NOT
+# `-e`. The previous form discarded both stderr and the exit status, so two FAILED
+# scans each produced an empty string, compared equal, and printed the clean-residue
+# PASS off evidence nobody had actually collected. A keyspace that cannot be read is
+# residue UNKNOWN, never residue zero. stderr is preserved so a failure can be
+# diagnosed rather than merely announced.
+scan_job_keys() {
+  local snapshot="$1" status
+  $COMPOSE exec -T redis redis-cli --scan --pattern "$JOB_KEY_PATTERN" \
+    >"$snapshot.raw" 2>"$snapshot.err"
+  status=$?
+  if [ "$status" -ne 0 ]; then
+    echo "    durable job-store scan failed (exit $status): $(tr -d '\r' < "$snapshot.err" | head -n 2)"
+    return 1
+  fi
+  if ! sort "$snapshot.raw" >"$snapshot"; then
+    echo "    durable job-store snapshot could not be sorted"
+    return 1
+  fi
+  return 0
+}
+
+# Count lines in a snapshot file (0 when empty; `grep -c` exits 1 on no match).
+count_job_keys() {
+  grep -c . <"$1" 2>/dev/null || true
 }
 
 # Echo the job's current state (empty on failure).
@@ -836,6 +874,93 @@ case "$HANDOFF_HEAD" in
     boundary
     ;;
 esac
+boundary
+
+# ---------------------------------------------------------------------------
+# Stage: browser ward roster (G5) - the real Ward 8 production journey
+# ---------------------------------------------------------------------------
+# The stages above prove the RUN PROTOCOL, and they use the durable fixture page
+# because the protocol is what they are about. This stage proves the PRODUCT: the
+# exact unchanged Ward 8 scenario imported through the real Save & Load picker,
+# optimised through the real Optimize action, opened at the production /roster
+# route, edited, exported, optimised a SECOND time without disturbing the roster
+# on screen, and finally cleared by New schedule. No fixture page, no route
+# interception, no seeded storage, no fabricated roster container.
+#
+# IT RUNS TWICE, CONSECUTIVELY. That is the ticket's stability contract encoded in
+# the gate rather than left to whoever remembers to repeat it: two independent
+# invocations, each starting from a clean browser origin, and `retries: 0` in
+# playwright.assembled.config.ts means a failed attempt is never retried away.
+# The second attempt only starts if the first passed, so "passes twice" cannot be
+# satisfied by one pass and one silent retry.
+#
+# Placed last among the job-owning stages: it is the longest, it owns two real
+# solves, and putting it after the abort lane keeps that lane's baselined BFF log
+# audit untouched by this journey's traffic.
+
+stage "assembled browser ward roster: real Ward 8 production journey (x2)"
+if ! command -v pnpm >/dev/null 2>&1; then
+  bad "pnpm not found - the ward roster journey is REQUIRED (not optional). Gate fails."
+else
+  # Owned-residue baseline for the durable job store. The journey's own jobs are
+  # released by the product's terminal chain (and the spec fails if they are not),
+  # so the Redis keyspace has to come back to exactly where it started.
+  #
+  # FAIL CLOSED. A baseline that cannot be taken means the journeys about to run
+  # could not be audited, so they are not started at all — the same principle as the
+  # setup stage refusing to submit before health is proved.
+  REDIS_BASELINE="$WORKDIR/redis-ward-before"
+  REDIS_FINAL="$WORKDIR/redis-ward-after"
+  WARD_SCANS_OK=1
+  WARD_CAN_RUN=1
+  if scan_job_keys "$REDIS_BASELINE"; then
+    echo "  durable job-store baseline: $(count_job_keys "$REDIS_BASELINE") key(s)"
+  else
+    bad "could not baseline the durable job-store keyspace - owned residue UNKNOWN, not zero"
+    WARD_SCANS_OK=0
+    WARD_CAN_RUN=0
+  fi
+
+  WARD_RUNS_PASSED=0
+  [ "$WARD_CAN_RUN" -eq 1 ] \
+    || echo "  -- ward roster journeys skipped: the keyspace baseline could not be taken"
+  for WARD_ATTEMPT in 1 2; do
+    [ "$WARD_CAN_RUN" -eq 1 ] || break
+    echo "  -- ward roster journey attempt $WARD_ATTEMPT of 2"
+    if (cd "$ROOT/web" && \
+        ASSEMBLED_BASE_URL="$BASE" \
+        CI=1 \
+        pnpm exec playwright test --config playwright.assembled.config.ts \
+          --reporter=line --grep "real Ward 8" 2>&1); then
+      WARD_RUNS_PASSED=$((WARD_RUNS_PASSED + 1))
+      ok "ward roster journey attempt $WARD_ATTEMPT passed"
+    else
+      bad "ward roster journey attempt $WARD_ATTEMPT FAILED - deterministic failures are product defects, not flakes"
+      break
+    fi
+  done
+  [ "$WARD_RUNS_PASSED" -eq 2 ] \
+    && ok "ward roster journey passed twice consecutively with no retry" \
+    || bad "ward roster journey did not pass twice consecutively ($WARD_RUNS_PASSED/2)"
+
+  # The final snapshot is attempted UNCONDITIONALLY, so a failure at either end is
+  # reported rather than inferred from the other.
+  echo "  -- owned durable-job-store residue"
+  if ! scan_job_keys "$REDIS_FINAL"; then
+    bad "could not re-read the durable job-store keyspace - owned residue UNKNOWN, not zero"
+    WARD_SCANS_OK=0
+  fi
+  if [ "$WARD_SCANS_OK" -ne 1 ]; then
+    # Guarded, not compared. Two unreadable keyspaces are two empty files, and
+    # comparing them would announce a clean audit that never happened.
+    echo "    residue comparison skipped: at least one keyspace snapshot is missing"
+  elif cmp -s "$REDIS_BASELINE" "$REDIS_FINAL"; then
+    ok "no job keys owned by the ward journey remain ($(count_job_keys "$REDIS_BASELINE") before, $(count_job_keys "$REDIS_FINAL") after)"
+  else
+    bad "the ward journey left durable job-store residue ($(count_job_keys "$REDIS_BASELINE") before, $(count_job_keys "$REDIS_FINAL") after)"
+    diff "$REDIS_BASELINE" "$REDIS_FINAL" | head -n 20
+  fi
+fi
 boundary
 
 # ---------------------------------------------------------------------------
