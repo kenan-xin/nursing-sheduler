@@ -6,6 +6,7 @@
 
 import "fake-indexeddb/auto";
 import { describe, expect, it } from "vitest";
+import { Dexie } from "dexie";
 import { ScenarioPersistenceDb } from "./dexie-storage";
 import {
   candidateRosterKey,
@@ -1689,5 +1690,203 @@ describe("clear epoch fencing", () => {
         })
       ).status,
     ).toBe("committed");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The visit fence, INSIDE the transaction
+// ---------------------------------------------------------------------------
+//
+// A caller checking "am I still wanted?" before calling `commitCandidate` is not
+// the same as the transaction checking it. The method invocation and the write are
+// two different moments, and a route exit landing between them used to still move
+// the pointer and auto-fill a proven-empty working slot for a user who had gone.
+// `isAbandoned` is evaluated inside the transaction, immediately before the first
+// write, which is the only place the answer cannot go stale.
+
+describe("commitCandidate — the caller's visit fence", () => {
+  it("writes NOTHING when the predicate answers true inside the transaction", async () => {
+    const { storage } = openTab(freshDbName());
+
+    const outcome = await storage.commitCandidate({
+      jobId: "job-abandoned",
+      submissionOrdinal: 1,
+      document: { tag: "abandoned" },
+      expectedClearEpoch: await storage.getClearEpoch(),
+      isAbandoned: () => true,
+    });
+
+    expect(outcome).toEqual({ status: "abandoned" });
+    // Every write the transaction would have made, proven absent one at a time.
+    expect(await storage.readCandidate("job-abandoned")).toBeNull();
+    expect(await storage.readCurrentCandidate()).toBeNull();
+    expect(await storage.readWorking()).toBeNull();
+  });
+
+  it("NEGATIVE CONTROL: the same call commits when the predicate answers false", async () => {
+    const { storage } = openTab(freshDbName());
+
+    const outcome = await storage.commitCandidate({
+      jobId: "job-wanted",
+      submissionOrdinal: 1,
+      document: { tag: "wanted" },
+      expectedClearEpoch: await storage.getClearEpoch(),
+      isAbandoned: () => false,
+    });
+
+    expect(outcome.status).toBe("committed");
+    expect(await storage.readCurrentCandidate()).toMatchObject({ jobId: "job-wanted" });
+    // ...and the proven-empty working slot was filled, which is exactly the write
+    // an abandoned commit must not perform.
+    expect(await storage.readWorking()).not.toBeNull();
+  });
+
+  it("an ABANDONED commit spends no candidate version, so a later real one is not skipped", async () => {
+    // The ordinal/version allocation sits after the fence on purpose: a refusal
+    // must cost nothing, exactly like a superseded commit.
+    const { storage } = openTab(freshDbName());
+    const epoch = await storage.getClearEpoch();
+
+    await storage.commitCandidate({
+      jobId: "job-abandoned",
+      submissionOrdinal: 1,
+      document: { tag: "x" },
+      expectedClearEpoch: epoch,
+      isAbandoned: () => true,
+    });
+    const real = await storage.commitCandidate({
+      jobId: "job-real",
+      submissionOrdinal: 1,
+      document: { tag: "y" },
+      expectedClearEpoch: epoch,
+      isAbandoned: () => false,
+    });
+
+    expect(real.status).toBe("committed");
+    if (real.status !== "committed") throw new Error("unreachable");
+    expect(real.pointer.candidateVersion).toBe(1);
+  });
+
+  // THE ADJACENCY, not merely the presence, of the fence.
+  //
+  // Every case above answers the predicate the same way for the whole call, so any
+  // of them would pass with the check sitting anywhere in the transaction. That is
+  // how the fence shipped one line too high: above the awaited
+  // `nextCandidateVersion` read, leaving exactly one suspension in which a
+  // revocation could land after the predicate had already said "still wanted".
+  //
+  // These two park that read for real — `Dexie.waitFor` is the supported way to
+  // await a non-Dexie promise inside a transaction, so the transaction stays alive
+  // and this is a genuine suspension rather than a simulated one — and differ only
+  // in whether the visit ends while it is parked.
+  function parkVersionRead(db: ScenarioPersistenceDb) {
+    const gate = Promise.withResolvers<void>();
+    const realGet = db.meta.get.bind(db.meta);
+    let entered = false;
+    const table = db.meta as unknown as { get: (key: string) => Promise<unknown> };
+    table.get = async (key: string) => {
+      if (key === "nextCandidateVersion" && !entered) {
+        entered = true;
+        await Dexie.waitFor(gate.promise);
+      }
+      return realGet(key);
+    };
+    return {
+      release: () => gate.resolve(),
+      restore: () => {
+        table.get = realGet;
+      },
+      async entered() {
+        for (let i = 0; i < 200 && !entered; i += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+        expect(entered, "the version read was never reached").toBe(true);
+      },
+    };
+  }
+
+  it("a revocation landing DURING the post-predicate version read still writes nothing", async () => {
+    const { db, storage } = openTab(freshDbName());
+    const epoch = await storage.getClearEpoch();
+    const park = parkVersionRead(db);
+
+    // Still wanted when the commit starts. Nothing about this call is abandoned
+    // until the park below, which is the whole point: a predicate that answers
+    // `true` from the outset cannot tell a fence at the write from a fence three
+    // awaits earlier.
+    let abandoned = false;
+    const commit = storage.commitCandidate({
+      jobId: "job-parked",
+      submissionOrdinal: 1,
+      document: { tag: "parked" },
+      expectedClearEpoch: epoch,
+      isAbandoned: () => abandoned,
+    });
+
+    await park.entered();
+    // The user leaves while the read is in flight, then it completes.
+    abandoned = true;
+    park.release();
+
+    expect(await commit).toEqual({ status: "abandoned" });
+    park.restore();
+
+    // Every write the transaction would have made, proven absent one at a time.
+    expect(await storage.readCandidate("job-parked")).toBeNull();
+    expect(await storage.readCurrentCandidate()).toBeNull();
+    expect(await storage.readWorking()).toBeNull();
+    // ...including the counter: an aborted commit spends no version, so the next
+    // real one still gets the first.
+    const later = await storage.commitCandidate({
+      jobId: "job-after",
+      submissionOrdinal: 2,
+      document: { tag: "after" },
+      expectedClearEpoch: epoch,
+      isAbandoned: () => false,
+    });
+    expect(later.status).toBe("committed");
+    if (later.status !== "committed") throw new Error("unreachable");
+    expect(later.pointer.candidateVersion).toBe(1);
+  });
+
+  it("NEGATIVE CONTROL: the same parked read commits in full when the visit never ends", async () => {
+    // Without this, the test above would pass just as well against a commit that
+    // aborts whenever its version read is slow.
+    const { db, storage } = openTab(freshDbName());
+    const park = parkVersionRead(db);
+
+    const commit = storage.commitCandidate({
+      jobId: "job-stayed",
+      submissionOrdinal: 1,
+      document: { tag: "stayed" },
+      expectedClearEpoch: await storage.getClearEpoch(),
+      isAbandoned: () => false,
+    });
+
+    await park.entered();
+    park.release();
+
+    const outcome = await commit;
+    park.restore();
+
+    expect(outcome.status).toBe("committed");
+    expect(await storage.readCurrentCandidate()).toMatchObject({
+      jobId: "job-stayed",
+      candidateVersion: 1,
+    });
+    expect(await storage.readWorking()).not.toBeNull();
+  });
+
+  it("omitting the predicate leaves the commit exactly as it was", async () => {
+    // Optional by design: the many callers that have no visit to speak of must not
+    // have to opt out of a fence they cannot answer.
+    const { storage } = openTab(freshDbName());
+    const outcome = await storage.commitCandidate({
+      jobId: "job-plain",
+      submissionOrdinal: 1,
+      document: { tag: "plain" },
+      expectedClearEpoch: await storage.getClearEpoch(),
+    });
+    expect(outcome.status).toBe("committed");
   });
 });

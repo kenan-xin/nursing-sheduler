@@ -27,7 +27,7 @@ import { rosterStorage, type RosterStorage } from "@/lib/store";
 import { notifyRosterCaptureCleared } from "@/lib/optimize";
 import { ROSTER_VIEW_PREFERENCE_KEY } from "@/lib/roster-viewer";
 import {
-  OPTIMIZE_SESSION_STORAGE_KEY,
+  clearAllOptimizeSessions,
   clearRetirementPending,
   type SessionTransactionStorage,
 } from "@/lib/optimize";
@@ -35,8 +35,11 @@ import { acquireSessionStorage } from "@/lib/optimize/session-storage";
 
 /** The residue report for the session-storage cut. */
 export interface SessionResidueReport {
-  /** The optimize session key (`nurse.optimize.session`) was provably absent. */
+  /** Every optimize session key — the legacy `nurse.optimize.session` slot and
+   *  every `nurse.optimize.session.<ownerId>` record — was provably absent. */
   readonly sessionCleared: boolean;
+  /** Optimize keys that survived the sweep (empty when `sessionCleared`). */
+  readonly sessionRemaining: readonly string[];
   /** The retirement-marker key (`nurse.optimize.retire-pending`) was provably absent. */
   readonly retireMarkerCleared: boolean;
 }
@@ -158,19 +161,23 @@ export async function clearRosterDataAndNotify(
 }
 
 /**
- * Remove the optimize session record and the retirement marker with verified
- * read-back. The retirement marker uses the existing `clearRetirementPending`
- * (which verifies absence on read-back); the session key is removed and its
- * absence verified directly, because Clear must remove it regardless of content
- * (a privacy action, not an identity-scoped retirement).
+ * Remove every optimize session record and the retirement marker, with verified
+ * read-back.
+ *
+ * Records are keyed per owner now, so Clear can no longer name the one key it has
+ * to remove. It enumerates the optimize keys and removes exactly those — never
+ * `sessionStorage.clear()`, which would destroy unrelated keys this tab's other
+ * features own. A store that cannot be enumerated is residue UNKNOWN, and
+ * reported as not-cleared: a privacy action must not claim a purge it could not
+ * observe.
  */
 function clearSessionResidue(storage: SessionTransactionStorage): SessionResidueReport {
-  // Session record: remove + verify absent. A read/write that throws proves
-  // nothing, so it is treated as not-cleared (fail closed).
   let sessionCleared = false;
+  let sessionRemaining: readonly string[] = [];
   try {
-    storage.removeItem(OPTIMIZE_SESSION_STORAGE_KEY);
-    sessionCleared = storage.getItem(OPTIMIZE_SESSION_STORAGE_KEY) === null;
+    const swept = clearAllOptimizeSessions(storage);
+    sessionCleared = swept.status === "cleared";
+    sessionRemaining = swept.remaining;
   } catch {
     sessionCleared = false;
   }
@@ -183,7 +190,7 @@ function clearSessionResidue(storage: SessionTransactionStorage): SessionResidue
     retireMarkerCleared = false;
   }
 
-  return { sessionCleared, retireMarkerCleared };
+  return { sessionCleared, sessionRemaining, retireMarkerCleared };
 }
 
 /**

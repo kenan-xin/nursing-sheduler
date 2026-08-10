@@ -130,12 +130,22 @@ test.describe("F4 roster viewer — durable candidate through production storage
 // A is a genuine committed candidate in the SAME production IndexedDB, seeded
 // through the roster fixture on the same origin with a real `Blob`.
 //
-// G4 closure changed the STAGING, not the claim. The roster surface no longer sits
-// below the Optimize event log: A's actions live on the dedicated `/roster` route
-// and B's Retry on the Optimize route. So the two are reached by CLIENT-side
-// navigation (a nav click, then `goBack`), which keeps one JS context — the
-// app-lifetime capture gate holding B's `fetch-failed` state is exactly what a
-// full reload would destroy, and it is what the claim is about.
+// G4 closure changed the STAGING, and G6.2 changed the OBSERVATION POINT.
+//
+// A's actions live on the dedicated `/roster` route and B's Retry on the Optimize
+// route, so reaching A means LEAVING Optimize — which now abandons B's visit. The
+// old form of this claim (“B's notice is still there when you come back”) is
+// therefore no longer true, and it was never the interesting half anyway: what it
+// was defending against is an UNKEYED action on A resolving the CURRENT run, which
+// would settle B's capture and authorize deleting B's job.
+//
+// So the claim is now checked where it actually lives — on B's JOB. If dismissing
+// or loading A had resolved B, B's gate entry would have minted a token and the
+// terminal chain would have issued a DELETE against B's job. Zero DELETEs is the
+// evidence, and it survives the visit boundary the notice does not.
+//
+// Returning to Optimize is then asserted to be FRESH, which is the new contract
+// and the direct inverse of what this test used to require.
 
 /** Soft-navigate to /roster through the shell, keeping this JS context alive. */
 async function navigateToRoster(page: Page) {
@@ -151,10 +161,15 @@ test.describe("F4 roster viewer — durable A beside a current failed run B", ()
 
     // 2. A real later run B whose `/roster` genuinely fails.
     let rosterAttempts = 0;
+    let bDeletes = 0;
     await installOptimizeRoutes(page, {
       onRoster: (route) => {
         rosterAttempts += 1;
         return json(route, 500, { detail: "roster unavailable" });
+      },
+      onDelete: (route) => {
+        bDeletes += 1;
+        return route.fulfill({ status: 204, body: "" });
       },
     });
 
@@ -198,22 +213,38 @@ test.describe("F4 roster viewer — durable A beside a current failed run B", ()
     expect(aCopy.toLowerCase()).not.toContain("last optimization");
 
     // 6. DISMISSING A DOES NOT TOUCH B. The old unkeyed action resolved the
-    //    CURRENT run, which would have settled B and taken its Retry away.
+    //    CURRENT run — which would have minted a token for B and let the terminal
+    //    chain destroy B's job. Zero DELETEs is what says it did not.
     await page.getByTestId("roster-candidate-dismiss").click();
     await expect(page.getByTestId("roster-candidate-available")).toBeHidden();
+    expect(bDeletes, "dismissing A must not authorize deleting B's job").toBe(0);
 
-    // Back to B, client-side, so the gate that holds its state is the same one.
+    // 7. Back to Optimize, client-side. G6.2: leaving the route abandoned B, so
+    //    the visit that owned its notice is over and the screen is FRESH. This is
+    //    the exact inverse of what this step used to assert, and it is the point:
+    //    B's surface is gone because the VISIT ended, not because dismissing A
+    //    resolved it — which the zero-DELETE evidence above independently rules out.
     await page.goBack();
-    await expect(page.getByTestId("optimize-capture-fetch-failed")).toBeVisible();
-    await expect(bNotice.getByRole("button", { name: /retry/i })).toBeVisible();
+    await expect(page.getByTestId("screen")).toHaveAttribute("data-screen", "Optimize and Export");
+    await expect(page.getByTestId("optimize-capture-fetch-failed")).toHaveCount(0);
+    await expect(page.getByText(/still running/i)).toHaveCount(0);
+    await expect(page.getByTestId("optimize-submit")).toBeEnabled();
+    expect(bDeletes, "returning to a fresh Optimize deletes nothing either").toBe(0);
   });
 
-  test("Loading A does not disturb B's failed state or its Retry", async ({ page }) => {
+  test("Loading A resolves only A: B's job is never deleted, and returning is fresh", async ({
+    page,
+  }) => {
     await freshFixture(page);
     await seedCandidate(page);
 
+    let bDeletes = 0;
     await installOptimizeRoutes(page, {
       onRoster: (route) => json(route, 500, { detail: "roster unavailable" }),
+      onDelete: (route) => {
+        bDeletes += 1;
+        return route.fulfill({ status: 204, body: "" });
+      },
     });
     await gotoDurableFixture(page);
     await disableAnonymize(page);
@@ -226,12 +257,15 @@ test.describe("F4 roster viewer — durable A beside a current failed run B", ()
     await page.getByTestId("roster-candidate-load").click();
     await expect(page.getByTestId("roster-viewer")).toBeVisible();
 
-    // B is exactly where it was.
+    // Promoting A resolved A. It did not resolve B — an unkeyed load would have
+    // settled B's capture and let the chain destroy its job.
+    expect(bDeletes, "loading A must not authorize deleting B's job").toBe(0);
+
+    // And returning to Optimize is a fresh visit, not B's old screen.
     await page.goBack();
-    await expect(page.getByTestId("optimize-capture-fetch-failed")).toBeVisible();
-    await expect(
-      page.getByTestId("optimize-capture-fetch-failed").getByRole("button", { name: /retry/i }),
-    ).toBeVisible();
+    await expect(page.getByTestId("optimize-capture-fetch-failed")).toHaveCount(0);
+    await expect(page.getByTestId("optimize-submit")).toBeEnabled();
+    expect(bDeletes).toBe(0);
   });
 });
 
@@ -1139,5 +1173,101 @@ test.describe("G4 roster viewer — a completed run fills an empty viewer", () =
     await expect(page.getByTestId("roster-viewer")).toBeVisible();
     await expect(page.getByTestId("roster-candidate-available")).toBeVisible();
     await expect(page.getByTestId("roster-candidate-load")).toBeVisible();
+  });
+
+  // The version of the rule that actually matters to a user: the roster that must
+  // not be overwritten is one they have EDITED. The test above seeds a pristine
+  // roster, so a promotion that silently discarded manual work could still pass
+  // it. Here the roster carries a real edit and a bumped save revision, and the
+  // only thing allowed to replace it is a confirmed `Replace roster`.
+  test("a completed run never overwrites an EDITED roster; only a confirmed Replace promotes it", async ({
+    page,
+  }) => {
+    await seedWorkingRoster(page);
+    await setCell(page, 0, "N");
+    await expect(page.getByTestId("roster-save-saved")).toBeVisible();
+    const edited = (await editableCells(page).nth(0).innerText()).trim();
+
+    await page.getByTestId("fx-complete-run").click();
+    // F1's own disposition: the transaction PROVED the slot occupied and kept it.
+    await expect(page.getByTestId("fx-status")).toHaveText("run-completed:awaiting-choice");
+
+    // The edit is still on screen — the completed run took nothing.
+    await expect(page.getByTestId("roster-viewer")).toBeVisible();
+    await expect(editableCells(page).nth(0)).toHaveText(edited);
+    await expect(page.getByTestId("roster-candidate-available")).toBeVisible();
+
+    // Declining the offer is also a decision: the edit survives it, and the
+    // candidate is still there to accept later.
+    await page.getByTestId("roster-candidate-load").click();
+    await expect(page.getByTestId("confirm-dialog")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("confirm-dialog")).toHaveCount(0);
+    await expect(editableCells(page).nth(0)).toHaveText(edited);
+    await expect(page.getByTestId("roster-candidate-available")).toBeVisible();
+
+    // ...and the edit is durable across the decline, not merely still rendered.
+    await page.reload();
+    await expect(editableCells(page).first()).toBeVisible();
+    await expect(editableCells(page).nth(0)).toHaveText(edited);
+
+    // ONLY the confirmed replacement promotes it.
+    await page.getByTestId("roster-candidate-load").click();
+    await page.getByRole("button", { name: /^replace roster$/i }).click();
+    await expect(page.getByTestId("roster-viewer")).toBeVisible();
+    await expect(page.getByTestId("roster-candidate-available")).toHaveCount(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The viewer stands on its own. `Save roster file` + Import are a closed loop
+// that never touches Optimize — which is what lets someone open a roster they
+// were sent, edit it, and keep it, on a machine that has never run a solve.
+// ---------------------------------------------------------------------------
+
+test.describe("roster documents — save, clear, import round trip without Optimize", () => {
+  test("a saved roster file restores the editable roster after a full Clear", async ({ page }) => {
+    await seedWorkingRoster(page);
+    await setCell(page, 0, "N");
+    await expect(page.getByTestId("roster-save-saved")).toBeVisible();
+    const edited = (await editableCells(page).nth(0).innerText()).trim();
+
+    // SAVE — the portable document, as a real browser download.
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      page.getByTestId("roster-export-file").click(),
+    ]);
+    expect(download.suggestedFilename()).toMatch(/\.nurse-roster\.json$/);
+    const saved = join(mkdtempSync(join(tmpdir(), "roster-e2e-")), download.suggestedFilename());
+    await download.saveAs(saved);
+
+    // CLEAR — the confirmed privacy purge. Nothing local survives it, so the
+    // import below can only be restoring the file itself.
+    await page.getByTestId("roster-clear").click();
+    await page.getByRole("button", { name: "Clear all roster data" }).click();
+    await expect(page.getByTestId("roster-section-empty")).toBeVisible();
+    await page.reload();
+    await expect(page.getByTestId("roster-section-empty")).toBeVisible();
+
+    // IMPORT — from the empty state, with no candidate and no run in play.
+    await expect(page.getByTestId("roster-candidate-available")).toHaveCount(0);
+    await page.locator('input[type="file"]').setInputFiles(saved);
+    const replace = page.getByRole("button", { name: "Replace roster" });
+    if (await replace.isVisible()) await replace.click();
+
+    // Back to an EDITABLE roster carrying the exact edit that was saved.
+    await expect(page.getByTestId("roster-viewer")).toBeVisible();
+    await expect(editableCells(page).nth(0)).toHaveText(edited);
+    await expect(page.getByTestId("roster-action-error")).toHaveCount(0);
+
+    // Editing works on the restored document, and survives a reload — so this is
+    // a working roster, not a read-only rendering of a file.
+    await setCell(page, 1, "OFF");
+    await expect(page.getByTestId("roster-save-saved")).toBeVisible();
+    const second = (await editableCells(page).nth(1).innerText()).trim();
+    await page.reload();
+    await expect(editableCells(page).first()).toBeVisible();
+    await expect(editableCells(page).nth(0)).toHaveText(edited);
+    await expect(editableCells(page).nth(1)).toHaveText(second);
   });
 });

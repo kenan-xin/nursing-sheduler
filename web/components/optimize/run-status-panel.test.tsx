@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { INITIAL_OPTIMIZE_RUN_VIEW, type CleanupPhase, type OptimizeRunView } from "@/lib/optimize";
+import { INITIAL_OPTIMIZE_RUN_VIEW, type OptimizeRunView } from "@/lib/optimize";
 import { judgeVolatileJobIdTexts, VOLATILE_JOB_ID_SELECTOR } from "@/e2e/support/optimize-durable";
 import { RunStatusPanel, type RunStatusPanelProps } from "./run-status-panel";
 
@@ -18,11 +18,8 @@ afterEach(() => cleanup());
 const handlers = {
   onCancel: vi.fn(),
   onFinishNow: vi.fn(),
-  onResubmit: vi.fn(),
-  onDismiss: vi.fn(),
   onDownloadArtifact: vi.fn(),
   onDownloadAgain: vi.fn(),
-  onRetryCleanup: vi.fn(),
 };
 
 /**
@@ -45,7 +42,6 @@ function setup(v: OptimizeRunView, over: Partial<RunStatusPanelProps> = {}) {
   const props: RunStatusPanelProps = {
     view: v,
     submitting: false,
-    cleanupPhase: "idle" as CleanupPhase,
     canDownloadAgain: false,
     downloadAgainFilename: null,
     ...handlers,
@@ -229,8 +225,8 @@ describe("RunStatusPanel — terminal outcomes", () => {
     expect(props.onDownloadArtifact).toHaveBeenCalled();
   });
 
-  it("infeasible: dedicated panel with heading, verdict label, and Adjust rules + Try again", async () => {
-    const props = setup(
+  it("infeasible: dedicated panel with heading, verdict label, and Adjust rules only", () => {
+    setup(
       view({
         lifecycle: "completed",
         jobId: "opt_1",
@@ -252,97 +248,81 @@ describe("RunStatusPanel — terminal outcomes", () => {
     const adjust = screen.getByTestId("optimize-adjust-rules");
     expect(adjust).toHaveAttribute("href", "/rules");
     expect(adjust).toHaveTextContent("Adjust rules");
-    // Try again drives the run-start path.
-    const tryAgain = screen.getByTestId("optimize-try-again");
-    await userEvent.click(tryAgain);
-    expect(props.onResubmit).toHaveBeenCalled();
+    // NO `Try again`. On an infeasible result it was the least useful button on
+    // the screen — the solver proved no roster satisfies the rules, so re-running
+    // the same scenario proves it again. `Adjust rules` is the actionable move,
+    // and the exact `Optimize` action is the way back.
+    expect(screen.queryByTestId("optimize-try-again")).not.toBeInTheDocument();
   });
 
-  it("row 3: worker-lost failure shows the error and Resubmit", async () => {
-    const props = setup(
+  // G6.2a RETIRED THE TERMINAL ACTIONS. `Resubmit` / `Try again`, `Dismiss` and the
+  // cleanup `Retry` all existed to serve the single-slot design: a terminal run
+  // OCCUPIED the one session record, so the user needed a way to release it, and a
+  // second run had to wait for that release. Records are owner-keyed now, nothing
+  // occupies anything, and a second run is simply the exact `Optimize` action.
+  //
+  // Enumerated one test id at a time rather than as a group, so bringing any single
+  // one back fails here.
+  it.each([
+    [
+      "worker-lost",
       view({
         lifecycle: "failed",
         jobId: "opt_1",
         error: { source: "job", code: "worker_lost", message: "Worker lost." },
-        resubmittable: true,
       }),
-    );
-    expect(screen.getByTestId("optimize-terminal-error")).toHaveTextContent("Worker lost.");
-    const resubmit = screen.getByTestId("optimize-resubmit");
-    expect(resubmit).toHaveTextContent("Resubmit");
-    await userEvent.click(resubmit);
-    expect(props.onResubmit).toHaveBeenCalled();
-  });
-
-  it("row 3: a cancelled run offers Dismiss (release) but no Resubmit", async () => {
-    const props = setup(
+      "Worker lost.",
+    ],
+    [
+      "cancelled",
       view({
         lifecycle: "cancelled",
         jobId: "opt_1",
         error: { source: "job", code: "cancelled", message: "Optimisation cancelled." },
-        resubmittable: false,
       }),
-    );
-    // Cancel always settles Cancelled (never routed to Failed) — heading present.
-    expect(screen.getByRole("heading")).toHaveTextContent("Run cancelled");
-    expect(screen.getByTestId("optimize-terminal-error")).toHaveTextContent(
       "Optimisation cancelled.",
-    );
-    expect(screen.queryByTestId("optimize-resubmit")).not.toBeInTheDocument();
-    await userEvent.click(screen.getByTestId("optimize-dismiss"));
-    expect(props.onDismiss).toHaveBeenCalled();
-  });
-
-  it("row 3: a non-resubmittable process_timeout failure still has a Dismiss release path", () => {
-    setup(
+    ],
+    [
+      "process_timeout",
       view({
         lifecycle: "failed",
         jobId: "opt_1",
         error: { source: "job", code: "process_timeout", message: "Solver process timed out." },
-        resubmittable: false,
       }),
-    );
-    expect(screen.getByTestId("optimize-terminal-error")).toHaveTextContent(
       "Solver process timed out.",
-    );
-    expect(screen.getByTestId("optimize-dismiss")).toBeInTheDocument();
-    expect(screen.queryByTestId("optimize-resubmit")).not.toBeInTheDocument();
-  });
-
-  it("row 3: worker_lost offers BOTH Resubmit and Dismiss", () => {
-    setup(
-      view({
-        lifecycle: "failed",
-        jobId: "opt_1",
-        error: { source: "job", code: "worker_lost", message: "Worker lost." },
-        resubmittable: true,
-      }),
-    );
-    expect(screen.getByTestId("optimize-resubmit")).toHaveTextContent("Resubmit");
-    expect(screen.getByTestId("optimize-dismiss")).toBeInTheDocument();
+    ],
+  ])("row 3: a %s run reports honestly and offers nothing to press", (_label, runView, message) => {
+    setup(runView);
+    // The report survives — what is gone is asking the user to act on it.
+    expect(screen.getByTestId("optimize-terminal-error")).toHaveTextContent(message);
+    for (const retired of [
+      "optimize-resubmit",
+      "optimize-dismiss",
+      "optimize-try-again",
+      "optimize-cleanup-retry",
+      "optimize-cleanup-abandon",
+    ]) {
+      expect(screen.queryByTestId(retired), retired).not.toBeInTheDocument();
+    }
   });
 });
 
-describe("RunStatusPanel — cleanup retry", () => {
-  it("offers retry ONLY on a failed cleanup, without hiding the success view", async () => {
-    const props = setup(
+describe("RunStatusPanel — no cleanup surface at all", () => {
+  it("a completed run shows its result and never a tidying-up notice", () => {
+    setup(
       view({
         lifecycle: "completed",
         jobId: "opt_1",
         download: { status: "downloaded", artifactAvailable: true, filename: "schedule.xlsx" },
       }),
-      { cleanupPhase: "failed", canDownloadAgain: true, downloadAgainFilename: "schedule.xlsx" },
+      { canDownloadAgain: true, downloadAgainFilename: "schedule.xlsx" },
     );
-    // The successful terminal view is preserved alongside the cleanup failure.
+    // The successful terminal view is intact.
     expect(screen.getByTestId("optimize-download-again")).toBeInTheDocument();
-    await userEvent.click(screen.getByTestId("optimize-cleanup-retry"));
-    expect(props.onRetryCleanup).toHaveBeenCalled();
-    // The retired public escape hatch is gone: Retry is the only offered action,
-    // and the copy carries no backend-retention explanation.
-    expect(screen.queryByTestId("optimize-cleanup-abandon")).not.toBeInTheDocument();
-    expect(screen.getByTestId("optimize-cleanup-failed").textContent ?? "").not.toMatch(
-      /retention|server job|abandon/i,
-    );
+    // And cleanup is invisible: it cannot stand in a new run's way, so there is
+    // nothing here for a user to decide.
+    expect(screen.queryByTestId("optimize-cleanup-failed")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("optimize-cleanup-retry")).not.toBeInTheDocument();
   });
 });
 

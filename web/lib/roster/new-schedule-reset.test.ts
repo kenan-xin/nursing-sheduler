@@ -46,6 +46,11 @@ function fakeSessionStorage(seed: Record<string, string> = {}): SessionTransacti
     getItem: (key) => map.get(key) ?? null,
     setItem: (key, value) => void map.set(key, value),
     removeItem: (key) => void map.delete(key),
+    // Enumerable: Clear sweeps every optimize key by prefix now, not one named key.
+    get length() {
+      return map.size;
+    },
+    key: (index) => [...map.keys()][index] ?? null,
   };
 }
 
@@ -151,6 +156,8 @@ describe("New schedule — a confirmed reset leaves the previous run behind", ()
       getItem: () => "survives",
       setItem: () => {},
       removeItem: () => {},
+      length: 1,
+      key: (index) => (index === 0 ? OPTIMIZE_SESSION_STORAGE_KEY : null),
     };
     const resetScenario = vi.fn(async () => {});
 

@@ -254,10 +254,23 @@ describe("roster capture — retry by failure mode", () => {
     expect(retried.token?.kind).toBe("committed");
   });
 
-  it("a pruned job is reported as permanently gone (retention is best-effort)", async () => {
+  it("a pruned job releases cleanup authority ONLY once its staging snapshot is proven purged", async () => {
+    // G6: a provable job-gone (`job_not_found`) is terminal for capture — the
+    // server's sole artifact is already destroyed, the roster-attempt fence has
+    // run, and no retry could ever succeed. The gate therefore issues a
+    // dismissal token so the terminal chain can settle (release the record,
+    // re-enable Optimize) instead of stranding the run as `resumable` forever.
+    // The honest `fetch-failed` (`jobGone: true`) STATE stays visible; only the
+    // cleanup AUTHORITY is granted.
+    //
+    // G6.1: that token consumes the session record, which is the only durable
+    // handle to the staging snapshot — so the row must be PROVEN gone first, the
+    // same precondition every other post-fence dismissal carries. Asserted on the
+    // real store, not inferred.
     const store = freshStore();
     const capture = await stage(store, "own-1");
-    const { gate } = harness(store, {
+    expect(await store.readSubmissionSnapshot("own-1")).not.toBeNull();
+    const { gate, fetchRoster } = harness(store, {
       fetchRoster: async () => {
         throw jobGoneError();
       },
@@ -265,7 +278,161 @@ describe("roster capture — retry by failure mode", () => {
 
     const outcome = await gate.capture(request("job-1", capture));
     expect(outcome.state).toMatchObject({ status: "fetch-failed", jobGone: true });
+    expect(outcome.token).toEqual({
+      kind: "dismissed",
+      jobId: "job-1",
+      reason: "job-gone",
+      rosterAttempted: true,
+    });
+    // The staged canonical YAML and reverse-identity map are gone BEFORE the token
+    // that authorizes discarding their only handle.
+    expect(await store.readSubmissionSnapshot("own-1")).toBeNull();
+    // No candidate, no pointer, and no ordinal residue: nothing was ever stored.
+    expect(await store.readCandidate("job-1")).toBeNull();
+    expect(await store.readCurrentCandidate()).toBeNull();
+    // A settled entry never re-runs: the token is durable, so an effect replay
+    // or a retry returns the same settled outcome with no second fetch.
+    const replayed = await gate.capture(request("job-1", capture));
+    expect(replayed.token).toEqual(outcome.token);
+    await gate.retry(request("job-1", capture));
+    expect(fetchRoster).toHaveBeenCalledTimes(1);
+  });
+
+  it("a provable job-gone whose snapshot purge is UNPROVEN stays tokenless and retryable", async () => {
+    // G6.1 negative control for the case above. The job really is gone, but the
+    // staging row could not be proven removed — so no DELETE is authorized and the
+    // session record (its only handle) is not consumed. Anything else would leave
+    // the canonical YAML and real-identity map reachable only through a full Clear.
+    const store = freshStore();
+    const capture = await stage(store, "own-1");
+    let failDelete = true;
+    const fragile: RosterStorage = {
+      ...store,
+      async deleteSubmissionSnapshot(input) {
+        if (failDelete) throw new Error("snapshot delete failed");
+        return store.deleteSubmissionSnapshot(input);
+      },
+    };
+    const { gate } = harness(fragile, {
+      fetchRoster: async () => {
+        throw jobGoneError();
+      },
+    });
+
+    const blocked = await gate.capture(request("job-1", capture));
+    expect(blocked.token).toBeNull();
+    // The retryable local-failure surface, exactly as every other unproven purge
+    // settles — not a claim that the roster was saved.
+    expect(blocked.state.status).toBe("commit-failed");
+    // The row survives, so nothing is stranded.
+    expect(await store.readSubmissionSnapshot("own-1")).not.toBeNull();
+    expect(await store.readCurrentCandidate()).toBeNull();
+
+    // Negative control: once storage recovers the SAME retry proves the purge and
+    // only then releases the run.
+    failDelete = false;
+    const repaired = await gate.retry(request("job-1", capture));
+    expect(repaired.state).toMatchObject({ status: "fetch-failed", jobGone: true });
+    expect(repaired.token).toMatchObject({ kind: "dismissed", reason: "job-gone" });
+    expect(await store.readSubmissionSnapshot("own-1")).toBeNull();
+  });
+
+  it("a GENERIC 404 is never job-gone: no token, snapshot retained, still retryable", async () => {
+    // G6.1 — the user's actual production shape. An upstream that does not route
+    // `/roster` answers with the framework's own `404 {detail:"Not Found"}`, the
+    // same status a real `job_not_found` uses. It proves nothing about the job, so
+    // it must NOT purge the snapshot, must NOT authorize a DELETE, and must stay
+    // retryable — the run is still genuinely unresolved.
+    const store = freshStore();
+    const capture = await stage(store, "own-1");
+    let broken = true;
+    const { gate, fetchRoster } = harness(store, {
+      fetchRoster: async () => {
+        if (broken) throw new OptimizeApiError(404, { detail: "Not Found" }, "roster");
+        return { solvedDays: [["N"]] };
+      },
+    });
+
+    const outcome = await gate.capture(request("job-1", capture));
+    expect(outcome.state).toMatchObject({ status: "fetch-failed", jobGone: false });
     expect(outcome.token).toBeNull();
+    // Nothing was purged and nothing was stored: the run's authority is intact.
+    expect(await store.readSubmissionSnapshot("own-1")).not.toBeNull();
+    expect(await store.readCurrentCandidate()).toBeNull();
+
+    // Negative control: point the app at a backend that DOES serve the route and
+    // the very same retry captures normally — proving the failure was transport,
+    // and that the tokenless verdict preserved everything needed to recover.
+    broken = false;
+    const repaired = await gate.retry(request("job-1", capture));
+    expect(fetchRoster).toHaveBeenCalledTimes(2);
+    expect(repaired.token).toMatchObject({ kind: "committed", jobId: "job-1" });
+    expect(await store.readCurrentCandidate()).toMatchObject({ jobId: "job-1" });
+  });
+
+  it("the BFF's backend_route_unsupported 502 is non-gone, non-destructive, and NOT retryable", async () => {
+    // The same deployment mismatch after the BFF relabels it. The status moves out
+    // of 404-space so it can never be read as job-gone anywhere downstream, and the
+    // message the user sees names the real problem instead of "Not Found".
+    //
+    // G6.2: it is also permanently unretryable, and that verdict lives HERE rather
+    // than in the button's render condition. A service with no roster route will
+    // not acquire one because the request was repeated, so `retry()` must refuse
+    // outright — otherwise the screenshot's futile Retry loop is one caller away
+    // from coming back.
+    const store = freshStore();
+    const capture = await stage(store, "own-1");
+    const message =
+      "The scheduling service this app is connected to does not support saving rosters, so it needs to be updated before rosters can be saved here.";
+    const { gate, fetchRoster } = harness(store, {
+      fetchRoster: async () => {
+        throw new OptimizeApiError(
+          502,
+          { error: { code: "backend_route_unsupported", message } },
+          "roster",
+        );
+      },
+    });
+
+    const outcome = await gate.capture(request("job-1", capture));
+
+    expect(outcome.state).toEqual({
+      status: "fetch-failed",
+      message,
+      jobGone: false,
+      retryable: false,
+    });
+    expect(outcome.token).toBeNull();
+    expect(await store.readSubmissionSnapshot("own-1")).not.toBeNull();
+
+    // ZERO second `/roster` request, even when a caller asks for one directly.
+    const retried = await gate.retry(request("job-1", capture));
+    expect(fetchRoster).toHaveBeenCalledTimes(1);
+    expect(retried.state).toEqual(outcome.state);
+    expect(retried.token).toBeNull();
+  });
+
+  it("negative control: a TRANSIENT fetch failure stays retryable and does refetch", async () => {
+    // The discrimination. Same tokenless, snapshot-preserving verdict — but the
+    // job and the route both still exist, so repeating the request is exactly the
+    // right thing to offer, and it must actually happen.
+    const store = freshStore();
+    const capture = await stage(store, "own-1");
+    let broken = true;
+    const { gate, fetchRoster } = harness(store, {
+      fetchRoster: async () => {
+        if (broken) throw new OptimizeApiError(503, { detail: "upstream busy" }, "roster");
+        return { solvedDays: [["N"]] };
+      },
+    });
+
+    const outcome = await gate.capture(request("job-1", capture));
+    expect(outcome.state).toMatchObject({ status: "fetch-failed", retryable: true });
+
+    broken = false;
+    const retried = await gate.retry(request("job-1", capture));
+    expect(fetchRoster).toHaveBeenCalledTimes(2);
+    expect(retried.token).toMatchObject({ kind: "committed" });
   });
 
   it("a commit failure retries with the container and bytes IN HAND — no second /roster fetch", async () => {
@@ -369,6 +536,93 @@ describe("roster capture — the working-slot disposition", () => {
       working: { kind: "loaded-empty", workingRevision: 1 },
     });
     expect(resumed.token).toMatchObject({ kind: "committed", jobId: "job-1" });
+  });
+});
+
+describe("roster capture — abandonment is not a decision", () => {
+  it("stops further capture work and issues NO cleanup token", async () => {
+    // G6.2: leaving the route abandons the run from the user's point of view. It
+    // must NOT become destructive authority — walking away is not a decision to
+    // delete the server job or discard the staged submission.
+    const store = freshStore();
+    const capture = await stage(store, "own-1");
+    const { gate, fetchRoster } = harness(store);
+
+    gate.abandon("job-1");
+    expect(gate.isAbandoned("job-1")).toBe(true);
+
+    const outcome = await gate.capture(request("job-1", capture));
+    expect(outcome.token).toBeNull();
+    // No `/roster` request at all: there is nobody left to show the result to.
+    expect(fetchRoster).not.toHaveBeenCalled();
+    // Nothing was destroyed either — the snapshot is still there for retirement or
+    // for verified Clear to deal with.
+    expect(await store.readSubmissionSnapshot("own-1")).not.toBeNull();
+    expect(await store.readCurrentCandidate()).toBeNull();
+
+    // Retry is a user action, and the user has left.
+    await gate.retry(request("job-1", capture));
+    expect(fetchRoster).not.toHaveBeenCalled();
+  });
+
+  it("abandons a job it has never seen, so exit can never lose the race", async () => {
+    // Route exit can happen while the solve is still running — long before the
+    // terminal chain reaches this job. Recording it on a fresh entry is what makes
+    // the later `capture()` a no-op rather than a race the fence already lost.
+    const store = freshStore();
+    const capture = await stage(store, "own-1");
+    const { gate, fetchRoster } = harness(store);
+
+    gate.abandon("job-unseen");
+    const outcome = await gate.capture(request("job-unseen", capture));
+
+    expect(outcome.token).toBeNull();
+    expect(fetchRoster).not.toHaveBeenCalled();
+  });
+
+  it("stops an IN-FLIGHT capture before it commits, without a token", async () => {
+    // The exit race that matters: the `/roster` fetch has already returned and the
+    // commit is next. Abandonment must land before the write, and must still not
+    // authorize a delete.
+    const store = freshStore();
+    const capture = await stage(store, "own-1");
+    const fetchGate = deferred<unknown>();
+    const { gate } = harness(store, {
+      fetchRoster: () => fetchGate.promise,
+    });
+
+    const flight = gate.capture(request("job-1", capture));
+    // Leave the route while the fetch is still open.
+    gate.abandon("job-1");
+    fetchGate.resolve({ solvedDays: [["N"]] });
+    const outcome = await flight;
+
+    expect(outcome.token).toBeNull();
+    // No candidate was published, and the staging row survives for retirement.
+    expect(await store.readCurrentCandidate()).toBeNull();
+    expect(await store.readCandidate("job-1")).toBeNull();
+    expect(await store.readSubmissionSnapshot("own-1")).not.toBeNull();
+  });
+
+  it("NEGATIVE CONTROL: a candidate that committed before revocation is kept", async () => {
+    // Candidates are origin-wide product data visible to other tabs. The route
+    // that happened to produce one unmounting is no reason to delete it — only the
+    // late UI callback is suppressed.
+    const store = freshStore();
+    const capture = await stage(store, "own-1");
+    const { gate } = harness(store);
+
+    const outcome = await gate.capture(request("job-1", capture));
+    expect(outcome.token).toMatchObject({ kind: "committed" });
+    const pointer = await store.readCurrentCandidate();
+    expect(pointer).toMatchObject({ jobId: "job-1" });
+
+    gate.abandon("job-1");
+
+    expect(await store.readCurrentCandidate()).toEqual(pointer);
+    expect(await store.readCandidate("job-1")).not.toBeNull();
+    // The already-issued token stands: that DELETE was authorized by a real commit.
+    expect(gate.getToken("job-1")).toMatchObject({ kind: "committed" });
   });
 });
 
@@ -1731,5 +1985,83 @@ describe("roster capture — dismissDurableCandidate", () => {
 
     expect(first.status).toBe("dismissed");
     expect(second.status).toBe("dismissed");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Abandonment landing at the transaction, not before it
+// ---------------------------------------------------------------------------
+//
+// The gate checks `entry.abandoned` immediately before calling `commitCandidate`.
+// That check is necessary and NOT sufficient: the write linearizes inside F1's
+// transaction, which is a later moment. These two tests park the race in exactly
+// that window — the store wrapper abandons on the way in, so the outer check has
+// already passed by the time the transaction runs — and prove the two possible
+// outcomes are the right ones.
+
+describe("roster capture — the visit fence at the commit linearization point", () => {
+  it("an exit landing AFTER the outer check still commits nothing", async () => {
+    const store = freshStore();
+    const captureState = await stage(store, "owner-race");
+    let gate!: RosterCaptureGate;
+
+    const racingStore: RosterStorage = {
+      ...store,
+      async commitCandidate(input) {
+        // The user leaves in the gap the outer check cannot cover.
+        gate.abandon("job-race");
+        return store.commitCandidate(input);
+      },
+    };
+
+    gate = createRosterCapture({
+      store: racingStore,
+      fetchRoster: async () => ({ solvedDays: [["N"]] }),
+      buildCandidate: ({ container }) => ({ ok: true, document: { container } }),
+    });
+
+    const outcome = await gate.capture(request("job-race", captureState));
+
+    // No candidate, no pointer, no auto-filled working slot for a visit that ended.
+    expect(await store.readCurrentCandidate()).toBeNull();
+    expect(await store.readCandidate("job-race")).toBeNull();
+    expect(await store.readWorking()).toBeNull();
+    // ...and no DELETE authority either: abandonment is the loss of an audience,
+    // never a decision about the candidate.
+    expect(outcome.token).toBeNull();
+    expect(gate.getToken("job-race")).toBeNull();
+    expect(outcome.state.status).not.toBe("committed");
+  });
+
+  it("NEGATIVE CONTROL: a commit that linearized BEFORE the exit is kept", async () => {
+    // The other half of the contract, and the one that makes the fence a fence
+    // rather than a blunt refusal: product data that genuinely got written is the
+    // user's, and route exit has no business discarding it.
+    const store = freshStore();
+    const captureState = await stage(store, "owner-kept");
+    let gate!: RosterCaptureGate;
+
+    const racingStore: RosterStorage = {
+      ...store,
+      async commitCandidate(input) {
+        const result = await store.commitCandidate(input);
+        // Abandoned only once the transaction has already committed.
+        gate.abandon("job-kept");
+        return result;
+      },
+    };
+
+    gate = createRosterCapture({
+      store: racingStore,
+      fetchRoster: async () => ({ solvedDays: [["N"]] }),
+      buildCandidate: ({ container }) => ({ ok: true, document: { container } }),
+    });
+
+    await gate.capture(request("job-kept", captureState));
+
+    expect(await store.readCurrentCandidate()).toMatchObject({ jobId: "job-kept" });
+    expect(await store.readCandidate("job-kept")).not.toBeNull();
+    // The empty working slot was filled, because this candidate is real.
+    expect(await store.readWorking()).not.toBeNull();
   });
 });

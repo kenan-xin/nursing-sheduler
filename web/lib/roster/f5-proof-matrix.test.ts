@@ -210,7 +210,10 @@ describe("F5 proof · autosave CAS conflict never silently overwrites the rival"
 // 3. Clear: no sensitive residue anywhere, capture invalidated first, fail-closed
 // ---------------------------------------------------------------------------
 
-/** A minimal in-memory SessionTransactionStorage for deterministic Clear proofs. */
+/** A minimal in-memory SessionTransactionStorage for deterministic Clear proofs.
+ *  Enumerable, because Clear now removes exactly the optimize keys (the legacy
+ *  slot plus every `nurse.optimize.session.<ownerId>` record) rather than one
+ *  named key — and a store it cannot enumerate is residue UNKNOWN, not zero. */
 function fakeSessionStorage(initial: Record<string, string> = {}): SessionTransactionStorage {
   const store = new Map<string, string>(Object.entries(initial));
   return {
@@ -221,6 +224,10 @@ function fakeSessionStorage(initial: Record<string, string> = {}): SessionTransa
     removeItem: (key) => {
       store.delete(key);
     },
+    get length() {
+      return store.size;
+    },
+    key: (index) => [...store.keys()][index] ?? null,
   };
 }
 
@@ -365,6 +372,8 @@ describe("F5 proof · Clear leaves no residue and invalidates authority first", 
       getItem: () => "survives",
       setItem: () => {},
       removeItem: () => {},
+      length: 1,
+      key: (index) => (index === 0 ? OPTIMIZE_SESSION_STORAGE_KEY : null),
     };
 
     const outcome = await clearRosterDataAndNotifyStorage(storage, {
@@ -666,6 +675,20 @@ async function clearRosterDataAndNotifyStorage(
 
 /** The live default sessionStorage (jsdom), guarded for envs without it. */
 const defaultSessionStorage: SessionTransactionStorage = {
+  get length() {
+    try {
+      return globalThis.sessionStorage.length;
+    } catch {
+      return 0;
+    }
+  },
+  key: (index) => {
+    try {
+      return globalThis.sessionStorage.key(index);
+    } catch {
+      return null;
+    }
+  },
   getItem: (key) => {
     try {
       return globalThis.sessionStorage.getItem(key);

@@ -56,22 +56,32 @@ test.describe("Optimize & Export screen — browser coverage", () => {
     );
     await expect(infeasible.getByTestId("optimize-adjust-rules")).toHaveAttribute("href", "/rules");
 
-    // Worker-lost: resubmit + dismiss + cleanup failed retry (no abandon).
+    // Worker-lost: the error, and nothing to press. G6.2a retired Resubmit /
+    // Dismiss / cleanup Retry — all three served the single-slot design, where a
+    // terminal run occupied the one record and had to be released before another
+    // could start. A second run is now the exact `Optimize` action.
     const workerLost = page.getByTestId("fx-worker-lost");
-    await expect(workerLost.getByTestId("optimize-resubmit")).toBeVisible();
-    await expect(workerLost.getByTestId("optimize-dismiss")).toBeVisible();
-    await expect(workerLost.getByTestId("optimize-cleanup-retry")).toBeVisible();
-    await expect(workerLost.getByTestId("optimize-cleanup-abandon")).toHaveCount(0);
+    await expect(workerLost.getByTestId("optimize-terminal-error")).toBeVisible();
+    for (const retired of ["optimize-resubmit", "optimize-dismiss", "optimize-cleanup-retry"]) {
+      await expect(workerLost.getByTestId(retired), retired).toHaveCount(0);
+    }
 
-    // Current-run notices. There is deliberately no prior-run recovery surface: an
-    // interrupted record is retired invisibly by the next Optimize click and an
-    // unreadable one only blocks that click, so neither renders anything.
-    await expect(page.getByTestId("optimize-interrupted")).toHaveCount(0);
-    await expect(page.getByTestId("optimize-unreadable")).toHaveCount(0);
-    await expect(page.getByTestId("optimize-forget")).toHaveCount(0);
-    await expect(page.getByTestId("optimize-degraded")).toContainText(
-      "Reload recovery is unavailable",
-    );
+    // NO PRIOR-RUN SURFACE OF ANY KIND. G6.2 deleted the recovery notice outright
+    // — entering the route inspects nothing, so there is no resumed, degraded,
+    // interrupted, unreadable or storage-error state left to render. Each retired
+    // test id is named individually rather than checked as a group, so bringing any
+    // one of them back fails here.
+    for (const retired of [
+      "optimize-resumed",
+      "optimize-resume-failed",
+      "optimize-degraded",
+      "optimize-storage-error",
+      "optimize-interrupted",
+      "optimize-unreadable",
+      "optimize-forget",
+    ]) {
+      await expect(page.getByTestId(retired), retired).toHaveCount(0);
+    }
   });
 
   test("running state renders server controls and the progress chart", async ({ page }) => {

@@ -55,6 +55,10 @@ export function CaptureNotice({ state, onRetry, onDismiss, dismissPending }: Cap
   }
 
   if (state.status === "fetch-failed") {
+    // Retry is offered strictly on the state machine's CLOSED verdict. It used to
+    // be inferred from `jobGone` alone, so every other failure got a button —
+    // including a backend with no `/roster` route, where pressing it re-sent a
+    // request that could only fail the same way. The gate decides; this renders.
     return (
       <Callout
         tone="warn"
@@ -62,7 +66,7 @@ export function CaptureNotice({ state, onRetry, onDismiss, dismissPending }: Cap
         data-testid="optimize-capture-fetch-failed"
         title="The roster for this run could not be saved"
         actions={
-          state.jobGone ? null : (
+          state.retryable ? (
             <Button
               variant="secondary"
               size="sm"
@@ -71,7 +75,7 @@ export function CaptureNotice({ state, onRetry, onDismiss, dismissPending }: Cap
             >
               Retry saving the roster
             </Button>
-          )
+          ) : null
         }
         alert
       >

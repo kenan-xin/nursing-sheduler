@@ -42,7 +42,7 @@
 //     candidate to lose, so standard parity cleanup stays authorized while roster
 //     Load/Retry stays hidden.
 
-import { isExactJobGoneError } from "@/lib/bff/errors";
+import { isExactJobGoneError, isRouteUnsupportedError } from "@/lib/bff/errors";
 import { fetchOptimizeRoster } from "@/lib/query/optimize";
 import {
   rosterStorage,
@@ -165,7 +165,20 @@ export type CaptureDismissalReason =
   /** A verified Clear invalidated the epoch this capture started under. */
   | "cleared"
   /** The fetched roster could not be assembled into a loadable document. */
-  | "assembly-rejected";
+  | "assembly-rejected"
+  /**
+   * The `/roster` fetch provably failed because the job is already gone (exact
+   * `job_not_found`), AND the staging snapshot it would otherwise strand is
+   * proven purged. The roster-attempt fence has run and the server's sole
+   * artifact is already destroyed, so there is no candidate to preserve and no
+   * retry that could ever succeed — issuing this token lets the terminal chain
+   * settle (release the record, re-enable Optimize) while the honest
+   * `fetch-failed` (`jobGone: true`) notice stays visible.
+   *
+   * The purge is a precondition, not a side effect: this token consumes the
+   * session record, which is the only durable handle to the snapshot row.
+   */
+  | "job-gone";
 
 export type RosterCaptureState =
   | { status: "idle" }
@@ -192,6 +205,19 @@ export type RosterCaptureState =
        * unavailable for this run.
        */
       jobGone: boolean;
+      /**
+       * Whether repeating the SAME `/roster` request could ever succeed.
+       *
+       * Closed and decided here, at the boundary that holds the typed error —
+       * never re-derived downstream from message text. Two failures are
+       * permanently unretryable and they are unretryable for opposite reasons:
+       * a provably gone job (the artifact no longer exists) and a backend that
+       * does not route `/roster` at all (the service cannot produce one). The
+       * UI showed a Retry button for the latter, and pressing it re-sent a
+       * request that could only fail the same way — the exact futile loop in
+       * the user's screenshot. Transient transport failures stay retryable.
+       */
+      retryable: boolean;
     }
   | { status: "commit-failed"; message: string }
   /**
@@ -313,6 +339,16 @@ export interface CaptureRequest {
    * the workbook — it reuses exactly the bytes the user downloaded.
    */
   frozenXlsx: Blob | null;
+  /**
+   * The requesting visit's abort signal, when it has one.
+   *
+   * Threaded so leaving the route actually STOPS the `/roster` transfer rather
+   * than ignoring it on arrival. It is a transport courtesy, not the fence —
+   * `abandon` is the fence, and it is checked at every suspension point below,
+   * because a request that has already returned cannot be aborted and must still
+   * not commit or publish anything.
+   */
+  signal?: AbortSignal;
 }
 
 const IDLE: RosterCaptureState = { status: "idle" };
@@ -387,6 +423,22 @@ export interface RosterCaptureGate {
    * that did already consumed its cleanup authority at commit time.
    */
   dismissDurableCandidate(request: DurableCandidateRef): Promise<DurableDismissOutcome>;
+  /**
+   * The visit that owned this job's capture has ended (route exit, or a later
+   * deliberate Optimize click superseding it).
+   *
+   * Deliberately NOT a dismissal. Walking away from a run is not a decision to
+   * destroy it, so this issues NO token and therefore authorizes no DELETE: it
+   * only stops the capture from doing further user-facing work. A commit that has
+   * already linearized is left alone — that candidate is durable product data,
+   * origin-wide and visible to other tabs, and the route it happened to be
+   * produced by unmounting is no reason to delete it.
+   *
+   * Idempotent, and safe to call for a job this gate has never seen.
+   */
+  abandon(jobId: string): void;
+  /** Whether `abandon` has been called for this job (retirement lane only). */
+  isAbandoned(jobId: string): boolean;
   /** A verified Clear happened: invalidate every entry it could still affect. */
   notifyCleared(): Promise<void>;
   subscribe(listener: () => void): () => void;
@@ -404,7 +456,7 @@ export interface RosterCaptureDeps {
   /** Defaults to the app-wide F1 repositories. */
   store?: CaptureStore;
   /** Defaults to the B3 `/roster` proxy client. */
-  fetchRoster?: (jobId: string) => Promise<unknown>;
+  fetchRoster?: (jobId: string, signal?: AbortSignal) => Promise<unknown>;
 }
 
 interface JobEntry {
@@ -421,6 +473,13 @@ interface JobEntry {
   inFlight: Promise<CaptureOutcome> | null;
   /** Set by dismiss/Clear; checked at every suspension boundary before commit. */
   invalidated: CaptureDismissalReason | null;
+  /**
+   * The owning visit ended. Distinct from `invalidated` on purpose: an
+   * invalidation is a DECISION about the candidate and ends in a token, whereas
+   * abandonment is merely the loss of an audience. It must stop further work
+   * without ever authorizing a delete.
+   */
+  abandoned: boolean;
   /** The clear epoch the current flight started under; -1 until one is read. */
   epoch: number;
   /** The staging snapshot owner, remembered so a later dismissal can purge it. */
@@ -472,6 +531,7 @@ export function createRosterCapture(deps: RosterCaptureDeps): RosterCaptureGate 
       container: null,
       inFlight: null,
       invalidated: null,
+      abandoned: false,
       epoch: -1,
       ownerId: null,
       rosterAttempted: false,
@@ -631,6 +691,19 @@ export function createRosterCapture(deps: RosterCaptureDeps): RosterCaptureGate 
     return settle(entry, { status: "dismissed", reason }, dismissalToken(entry, reason));
   }
 
+  /**
+   * The owning visit ended while this capture was in flight.
+   *
+   * No token, and no attempt to undo anything: abandonment is the loss of an
+   * audience, not a decision about the candidate. The retained container is
+   * released because nothing will read it, and the state is left where it stood —
+   * there is nobody left to show a transition to.
+   */
+  function settleAbandoned(entry: JobEntry): CaptureOutcome {
+    releaseContainer(entry);
+    return outcomeOf(entry);
+  }
+
   async function runCapture(entry: JobEntry, request: CaptureRequest): Promise<CaptureOutcome> {
     const authority = request.capture;
 
@@ -754,20 +827,71 @@ export function createRosterCapture(deps: RosterCaptureDeps): RosterCaptureGate 
       setState(entry, { status: "fetching-roster" });
       entry.rosterAttempted = true;
       try {
-        entry.container = await fetchRoster(entry.jobId);
+        entry.container = await fetchRoster(entry.jobId, request.signal);
         entry.hasFetched = true;
       } catch (error) {
+        // The visit aborted the transfer. That is not a capture failure to report:
+        // there is nobody left to report it to, and `abandoned` is already set.
+        if (entry.abandoned) return settleAbandoned(entry);
+        const message = errorMessage(error, "Unable to fetch the roster for this run.");
+
+        // A backend that does not route `/roster` cannot start routing it
+        // because the user pressed a button. Closed here so no caller has to
+        // guess from the message, and so `retry()` below can refuse outright
+        // rather than spending a second request that must fail identically.
+        const routeUnsupported = isRouteUnsupportedError(error);
+
+        if (!isExactJobGoneError(error)) {
+          // Anything that is not the EXACT job-gone envelope issues NO token: the
+          // job may well still exist, a Retry could still fetch its roster, and the
+          // record must stay retained for that retry.
+          //
+          // That deliberately includes a bare `404 {detail}`. An upstream that does
+          // not route `/roster` at all answers with the framework's own not-found
+          // body, which says nothing whatsoever about the job — the SAME status the
+          // application uses when a job really is gone. Reading it as gone would
+          // DELETE a live job and release the run on the strength of a deployment
+          // mismatch. The BFF now relabels that shape as `backend_route_unsupported`
+          // so the notice can say what is actually wrong, but the authority verdict
+          // here does not depend on that: an unrecognized failure is not proof.
+          return settle(
+            entry,
+            { status: "fetch-failed", message, jobGone: false, retryable: !routeUnsupported },
+            null,
+          );
+        }
+
+        // A PROVABLE job-gone is terminal for capture: the server's sole artifact
+        // is already destroyed, the roster-attempt fence has run, and no retry can
+        // ever succeed. Settling it lets the terminal chain finish (the DELETE
+        // confirms through the same exact-job-gone path, the record is released,
+        // Optimize re-enables) instead of stranding the run as `resumable` forever.
+        // The honest `fetch-failed` (`jobGone: true`) notice stays visible — this
+        // authorizes cleanup, it does not hide the failure.
+        //
+        // The token is withheld until the staging purge is PROVEN, for the same
+        // reason every other post-fence dismissal withholds it: the token consumes
+        // the session record, and that record is the only durable handle to
+        // `snapshot:<ownerId>` — the row holding the canonical YAML and the
+        // real-identity reverse map. No candidate exists here to carry a second
+        // copy, so issuing it first would leave those identity bytes unreachable by
+        // anything but a full Clear. An unproven purge stays tokenless and
+        // retryable instead.
+        const purged = await purge(entry, ownerId, "candidate-dismissed");
+        if (!purged.proven) return settleUnproven(entry, purged.message);
+
         return settle(
           entry,
-          {
-            status: "fetch-failed",
-            message: errorMessage(error, "Unable to fetch the roster for this run."),
-            jobGone: isExactJobGoneError(error),
-          },
-          null,
+          { status: "fetch-failed", message, jobGone: true, retryable: false },
+          dismissalToken(entry, "job-gone"),
         );
       }
     }
+
+    // Checked at the same suspension boundary as an invalidation, and before it:
+    // if the visit is gone there is no user-facing work left to do, and a commit
+    // from here would publish a candidate nobody asked for.
+    if (entry.abandoned) return settleAbandoned(entry);
 
     if (entry.invalidated !== null) {
       return finalizeInvalidated(entry, ownerId, entry.invalidated);
@@ -816,6 +940,13 @@ export function createRosterCapture(deps: RosterCaptureDeps): RosterCaptureGate 
       return settle(entry, { status: "commit-failed", message: built.reason }, null);
     }
 
+    // The last boundary this CODE controls. It is necessary and not sufficient:
+    // the write linearizes inside F1's transaction, which is a later moment, so
+    // the same question is asked again in there via `isAbandoned` below. A
+    // candidate that genuinely got past that point is durable product data that
+    // route exit has no business discarding.
+    if (entry.abandoned) return settleAbandoned(entry);
+
     if (entry.invalidated !== null) {
       return finalizeInvalidated(entry, ownerId, entry.invalidated);
     }
@@ -828,6 +959,10 @@ export function createRosterCapture(deps: RosterCaptureDeps): RosterCaptureGate 
         submissionOrdinal: snapshot.submissionOrdinal,
         document: built.document,
         expectedClearEpoch: epoch,
+        // Re-read at the write, not captured now: `entry.abandoned` is set
+        // synchronously by `abandon()`, so reading it inside the transaction is
+        // what makes an exit landing in the gap decisive.
+        isAbandoned: () => entry.abandoned,
       });
     } catch (error) {
       return settle(
@@ -836,6 +971,11 @@ export function createRosterCapture(deps: RosterCaptureDeps): RosterCaptureGate 
         null,
       );
     }
+
+    // The transaction refused at its own linearization point: nothing was
+    // written, so there is no candidate, no pointer move and no auto-filled
+    // working slot for a visit that ended.
+    if (outcome.status === "abandoned") return settleAbandoned(entry);
 
     if (outcome.status === "committed") {
       // The candidate is durable now, so it is kept whatever happens next. But the
@@ -975,6 +1115,9 @@ export function createRosterCapture(deps: RosterCaptureDeps): RosterCaptureGate 
 
     capture(request) {
       const entry = ensure(request.jobId);
+      // The owning visit is gone: no new flight, and no state change anyone is
+      // left to see. Whatever is already in flight settles on its own terms.
+      if (entry.abandoned) return Promise.resolve(outcomeOf(entry));
       // A settled job (token issued) or a failed one never re-runs implicitly: the
       // auto effect replaying must not spend a second fetch, and a failure needs an
       // explicit `retry` so the once-guard is re-armed deliberately.
@@ -992,6 +1135,8 @@ export function createRosterCapture(deps: RosterCaptureDeps): RosterCaptureGate 
 
     retry(request) {
       const entry = ensure(request.jobId);
+      // Retry is a user action, and the user who would have pressed it has left.
+      if (entry.abandoned) return Promise.resolve(outcomeOf(entry));
       if (entry.token !== null) return Promise.resolve(outcomeOf(entry));
       if (entry.inFlight !== null) return entry.inFlight;
       // A failed DISMISSAL is retried through `dismiss`, not by re-running capture:
@@ -1002,6 +1147,11 @@ export function createRosterCapture(deps: RosterCaptureDeps): RosterCaptureGate 
       // so an authority-less retry cannot discard a retained container either.
       if (request.capture === null) return Promise.resolve(outcomeOf(entry));
       if (entry.state.status === "fetch-failed") {
+        // A closed non-retryable verdict is honoured HERE, not only in the UI. A
+        // hidden button is a presentation detail; this is the authority. Without
+        // it, any caller holding the gate could still spend a second `/roster`
+        // request that is guaranteed to fail exactly as the first one did.
+        if (!entry.state.retryable) return Promise.resolve(outcomeOf(entry));
         // The server fetch is what failed; discard the (absent) container and refetch.
         entry.hasFetched = false;
         entry.container = null;
@@ -1188,6 +1338,18 @@ export function createRosterCapture(deps: RosterCaptureDeps): RosterCaptureGate 
       const token = entry.rosterAttempted ? dismissalToken(entry, "user") : null;
       settle(entry, { status: "dismissed", reason: "user" }, token);
       return { status: "dismissed", token };
+    },
+
+    abandon(jobId) {
+      // `ensure` rather than a lookup: abandonment can arrive BEFORE the terminal
+      // chain reaches this job (leaving the route while the solve is still
+      // running). Recording it on a fresh entry is what makes a later `capture()`
+      // for that job a no-op instead of a race the fence has already lost.
+      ensure(jobId).abandoned = true;
+    },
+
+    isAbandoned(jobId) {
+      return entries.get(jobId)?.abandoned ?? false;
     },
 
     async notifyCleared() {

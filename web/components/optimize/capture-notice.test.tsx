@@ -107,16 +107,43 @@ describe("CaptureNotice — terminal unavailable guidance", () => {
 
 describe("CaptureNotice — actionable states still offer their action", () => {
   it("offers Retry for a transient fetch failure but not for a pruned job", async () => {
-    const transient = show({ status: "fetch-failed", message: "network down", jobGone: false });
+    const transient = show({
+      status: "fetch-failed",
+      message: "network down",
+      jobGone: false,
+      retryable: true,
+    });
     await userEvent.click(screen.getByTestId("optimize-capture-retry"));
     expect(transient.onRetry).toHaveBeenCalled();
     cleanup();
 
     // A job the server has pruned can never be refetched, so no Retry.
-    show({ status: "fetch-failed", message: "gone", jobGone: true });
+    show({ status: "fetch-failed", message: "gone", jobGone: true, retryable: false });
     expect(screen.getByTestId("optimize-capture-fetch-failed")).toHaveTextContent(
       /no longer available on the server/i,
     );
+    expect(screen.queryByTestId("optimize-capture-retry")).not.toBeInTheDocument();
+  });
+
+  it("offers NO Retry for a backend that cannot serve rosters, and states why", () => {
+    // The user's 2026-08-10 screenshot: an old capture card reading
+    // "could not be saved — Not Found" with a Retry button that re-sent the same
+    // unsupported request forever. The job is NOT gone — the service simply has
+    // no roster route — so `jobGone` cannot be what decides this. The closed
+    // `retryable` verdict is.
+    show({
+      status: "fetch-failed",
+      message:
+        "The scheduling service this app is connected to does not support saving rosters, so it needs to be updated before rosters can be saved here.",
+      jobGone: false,
+      retryable: false,
+    });
+
+    const notice = screen.getByTestId("optimize-capture-fetch-failed");
+    expect(notice).toHaveTextContent(/does not support saving rosters/i);
+    expect(notice).toHaveTextContent(/needs to be updated/i);
+    // Not the pruned-job wording: nothing here says the run vanished.
+    expect(notice).not.toHaveTextContent(/no longer available on the server/i);
     expect(screen.queryByTestId("optimize-capture-retry")).not.toBeInTheDocument();
   });
 

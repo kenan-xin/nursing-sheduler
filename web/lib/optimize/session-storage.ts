@@ -13,7 +13,18 @@ function throwingStorage(): SessionTransactionStorage {
   const throwing = (): never => {
     throw new Error("sessionStorage is unavailable.");
   };
-  return { getItem: throwing, setItem: throwing, removeItem: throwing };
+  return {
+    getItem: throwing,
+    setItem: throwing,
+    removeItem: throwing,
+    key: throwing,
+    // A getter, not `0`: enumeration must THROW here rather than report an empty
+    // store. A denied `sessionStorage` knows nothing about what it holds, and a
+    // zero length would let Clear report a verified purge of a store it never read.
+    get length(): number {
+      return throwing();
+    },
+  };
 }
 
 /** The real `sessionStorage`, or a throwing stand-in when the browser denies it. */

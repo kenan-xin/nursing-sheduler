@@ -421,6 +421,72 @@ describe("GET /api/optimize/{id}/roster over real transport", () => {
     });
   });
 
+  // G6.1 — the user's reproduced production environment, over a real socket.
+  //
+  // Captured 2026-08-09 from the running dev stack: the browser's Next server was
+  // proxying to a uvicorn process started from a DIFFERENT checkout, whose route
+  // table predates the roster endpoint. `/optimize/{id}/xlsx` existed (so the
+  // download succeeded) while `/optimize/{id}/roster` did not, and FastAPI answered
+  // the unrouted path with its own `404 {"detail":"Not Found"}` — byte-for-byte the
+  // fixture below. Every completed run therefore downloaded fine and then reported
+  // "The roster for this run could not be saved — Not Found".
+  it("relabels a stale backend's unrouted-path 404 as backend_route_unsupported (reproduced shape)", async () => {
+    const captured: { paths: string[] } = { paths: [] };
+    handler = (req, res) => {
+      captured.paths.push(req.url ?? "");
+      // Exactly what the captured uvicorn answered for a path it does not route.
+      if (req.url === "/optimize/opt_int/roster") {
+        const payload = JSON.stringify({ detail: "Not Found" });
+        res.writeHead(404, {
+          "content-type": "application/json",
+          "content-length": String(Buffer.byteLength(payload)),
+        });
+        res.end(payload);
+        return;
+      }
+      // The same stale backend DOES route the older endpoints, code-first — which
+      // is why only the roster call failed.
+      res.writeHead(404, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: { code: "job_not_found", message: "Job was not found" } }));
+    };
+
+    const response = await downloadRoster(
+      new Request("http://localhost/api/optimize/opt_int/roster"),
+      params("opt_int"),
+    );
+
+    expect(captured.paths).toContain("/optimize/opt_int/roster");
+    // Out of 404-space: a deployment mismatch can never become job-gone authority.
+    expect(response.status).toBe(502);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const body = await response.json();
+    expect(body.error.code).toBe("backend_route_unsupported");
+    expect(body.error.message).toMatch(/does not support saving rosters/);
+    expect(JSON.stringify(body)).not.toContain("Not Found");
+  });
+
+  it("a SUPPORTED backend is unaffected: the same route still returns the container verbatim", async () => {
+    // The discriminator. The guard must fire on an unrouted path and nowhere else,
+    // so the ordinary success path is asserted against the identical harness.
+    handler = (req, res) => {
+      if (req.url === "/optimize/opt_int/roster") {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify(rosterContainer));
+        return;
+      }
+      res.writeHead(500);
+      res.end();
+    };
+
+    const response = await downloadRoster(
+      new Request("http://localhost/api/optimize/opt_int/roster"),
+      params("opt_int"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(rosterContainer);
+  });
+
   it("relays a structured 409 (job_artifact_not_ready) envelope verbatim — the no-artifact state", async () => {
     const captured: { url: string | undefined } = { url: undefined };
     handler = (req, res) => {

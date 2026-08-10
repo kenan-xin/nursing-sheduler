@@ -12,7 +12,6 @@ import { Surface, surfaceVariants } from "@/components/ui/surface";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { ReadinessBanner } from "@/components/optimize/readiness-banner";
-import { RecoveryNotice } from "@/components/optimize/recovery-notice";
 import { RunEventLog } from "@/components/optimize/run-event-log";
 import { RunOptionsForm } from "@/components/optimize/run-options-form";
 import { RunStatusPanel } from "@/components/optimize/run-status-panel";
@@ -47,11 +46,8 @@ function serverInfo(over: Partial<OptimizeServerInfo>): OptimizeServerInfo {
 const statusHandlers = {
   onCancel: noop,
   onFinishNow: noop,
-  onResubmit: noop,
-  onDismiss: noop,
   onDownloadArtifact: noop,
   onDownloadAgain: noop,
-  onRetryCleanup: noop,
 };
 
 const logEntry = (over: Partial<RunLogEntry>): RunLogEntry => ({
@@ -140,7 +136,6 @@ const workerLostView = view({
   lifecycle: "failed",
   jobId: "opt_1",
   error: { source: "job", code: "worker_lost", message: "Worker lost." },
-  resubmittable: true,
 });
 
 const readiness = deriveOptimizeReadiness({
@@ -233,7 +228,6 @@ export default function OptimizeScreenFixtureClient() {
         <RunStatusPanel
           view={runningView}
           submitting={false}
-          cleanupPhase="idle"
           canDownloadAgain={false}
           downloadAgainFilename={null}
           {...statusHandlers}
@@ -244,7 +238,6 @@ export default function OptimizeScreenFixtureClient() {
         <RunStatusPanel
           view={completedView}
           submitting={false}
-          cleanupPhase="idle"
           canDownloadAgain
           downloadAgainFilename="schedule.xlsx"
           {...statusHandlers}
@@ -255,7 +248,6 @@ export default function OptimizeScreenFixtureClient() {
         <RunStatusPanel
           view={noArtifactView}
           submitting={false}
-          cleanupPhase="idle"
           canDownloadAgain={false}
           downloadAgainFilename={null}
           {...statusHandlers}
@@ -266,56 +258,29 @@ export default function OptimizeScreenFixtureClient() {
         <RunStatusPanel
           view={infeasibleView}
           submitting={false}
-          cleanupPhase="idle"
           canDownloadAgain={false}
           downloadAgainFilename={null}
           {...statusHandlers}
         />
       </Panel>
 
-      <Panel id="fx-worker-lost" title="Worker lost — resubmit + dismiss + cleanup failed">
+      {/* G6.2a: was “Worker lost — resubmit + dismiss + cleanup failed”. All three
+          actions are gone; what a worker-lost run shows now is the honest error and
+          nothing to press. */}
+      <Panel id="fx-worker-lost" title="Worker lost">
         <RunStatusPanel
           view={workerLostView}
           submitting={false}
-          cleanupPhase="failed"
           canDownloadAgain={false}
           downloadAgainFilename={null}
           {...statusHandlers}
         />
       </Panel>
 
-      <Panel id="fx-recovery-degraded" title="Recovery — reload unavailable (degraded)">
-        <RecoveryNotice state={{ kind: "none" }} resume={null} reloadRecoveryUnavailable />
-      </Panel>
-
-      {/* NOT Panels — the same reason the event log below is not one. These are the
-          two NEUTRAL recovery states, and `RecoveryNotice` declares them at page
-          placement, where DESIGN.md §4 puts a page-level neutral notice at L1. Inside
-          the harness Panel they would be an L1 card inside an L1 card (§4 rule 5), and
-          the harness would then be proving a ladder the real route never renders. The
-          real product route carries the authoritative light/dark proof for both states
-          (`e2e/optimize-visual.spec.ts`); these rows make them clickable and give the
-          deterministic harness the coverage the Round 8 review found missing. */}
-      <section data-testid="fx-recovery-resumed" className="flex flex-col gap-4">
-        <h2 className="font-heading text-cardhead font-semibold tracking-[-0.015em] text-ink">
-          Recovery — resumed (attached)
-        </h2>
-        <RecoveryNotice
-          state={{ kind: "resumable", jobId: "opt_1", anonymized: false, peopleCount: 2 }}
-          resume={{ status: "attached", jobId: "opt_1" }}
-          reloadRecoveryUnavailable={false}
-        />
-      </section>
-      <section data-testid="fx-recovery-storage-error" className="flex flex-col gap-4">
-        <h2 className="font-heading text-cardhead font-semibold tracking-[-0.015em] text-ink">
-          Recovery — storage unavailable
-        </h2>
-        <RecoveryNotice
-          state={{ kind: "storage-error" }}
-          resume={null}
-          reloadRecoveryUnavailable={false}
-        />
-      </section>
+      {/* G6.2 removed the three recovery panels that stood here. They rendered the
+          resumed / degraded / storage-error notices, and none of those states exists
+          any more: entering the route is fresh, so there is nothing to resume, nothing
+          to report as unresumable, and no boot read of storage to fail. */}
 
       {/* NOT a Panel. `RunEventLog` is itself an L1 card (it is a top-level sibling
           on the real route), and DESIGN.md §4 rule 5 forbids stacking two surfaces of

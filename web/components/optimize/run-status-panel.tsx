@@ -8,11 +8,18 @@
 //                     and the server-authoritative cancel / get-results-now controls.
 //   • success      — terminal outcome heading + a SOLVER STATUS / FINAL SCORE /
 //                     ELAPSED summary grid, then the download affordance.
-//   • infeasible   — dedicated panel: heading, plain explanation, the solver-verdict
-//                     reason as a compact label (never a diagnosis), and Adjust rules
-//                     (a self-contained GuardedLink) + Try again CTAs. No conflict list.
-//   • cancelled    — "Run cancelled" heading + the release affordance (Dismiss).
-//   • failed       — structured error callout; worker_lost additionally offers Resubmit.
+//   • infeasible   — dedicated panel: heading, plain explanation, and the
+//                     solver-verdict reason as a compact label (never a diagnosis),
+//                     plus Adjust rules (a self-contained GuardedLink). No conflict list.
+//   • cancelled    — "Run cancelled" heading.
+//   • failed       — structured error callout.
+//
+// G6.2a: the terminal ACTIONS are gone — Resubmit / Try again, Dismiss, and the
+// cleanup Retry. Every one of them existed to serve the single-slot design, where a
+// terminal run occupied the one session record and had to be released before another
+// could start. Records are owner-keyed now; nothing occupies anything, and a second
+// run is simply the exact `Optimize` action again. A second button offering to do
+// the same thing would contradict the settled single-action contract.
 //
 // R6 v2: the terminal eyebrow lost its leading ● — DESIGN.md §5 retires decorative
 // ornament on status ("no coloured leader dots on eyebrows"); the uppercase label
@@ -37,7 +44,6 @@
 // the run-settings/event-log work).
 
 import {
-  FaArrowRotateRight,
   FaBan,
   FaBolt,
   FaCalendarCheck,
@@ -58,8 +64,6 @@ import {
   jobDetailLine,
   scoreLabel,
   terminalHeading,
-  WORKER_LOST_CODE,
-  type CleanupPhase,
   type OptimizeRunView,
   type RunStatusTone,
 } from "@/lib/optimize";
@@ -69,17 +73,12 @@ import { Callout } from "./callout";
 export interface RunStatusPanelProps {
   view: OptimizeRunView;
   submitting: boolean;
-  cleanupPhase: CleanupPhase;
   canDownloadAgain: boolean;
   downloadAgainFilename: string | null;
   onCancel(): void;
   onFinishNow(): void;
-  onResubmit(): void;
-  /** Clean up (release) a terminal run and return to idle. */
-  onDismiss(): void;
   onDownloadArtifact(): void;
   onDownloadAgain(): void;
-  onRetryCleanup(): void;
   /**
    * Start a fresh run from the idle empty state (and as the in-panel Optimize CTA).
    * Optional so this component stays file-disjoint from the screen wiring — when
@@ -125,16 +124,12 @@ function toneTextClass(tone: RunStatusTone): string {
 export function RunStatusPanel({
   view,
   submitting,
-  cleanupPhase,
   canDownloadAgain,
   downloadAgainFilename,
   onCancel,
   onFinishNow,
-  onResubmit,
-  onDismiss,
   onDownloadArtifact,
   onDownloadAgain,
-  onRetryCleanup,
   onStartRun,
   loadableRoster,
 }: RunStatusPanelProps) {
@@ -186,29 +181,19 @@ export function RunStatusPanel({
   // dedicated outcome block instead.
   const showLiveHeader = !isSuccess && !isInfeasible;
   const heading = terminalHeading(view);
-  const workerLost = view.error?.code === WORKER_LOST_CODE;
-  // Every cancelled/failed run (including non-resubmittable ordinary cancel and
-  // process_timeout) must have a safe release path — a Dismiss that cleans up the
-  // occupied slot and returns to idle. Resubmit is offered additionally when the
-  // server marked the run resubmittable (worker_lost / a clean submit rejection).
-  const canDismiss = view.lifecycle === "cancelled" || view.lifecycle === "failed";
   const isTerminalError =
     view.lifecycle === "failed" || view.lifecycle === "cancelled" || isSubmitPre;
-  const terminalActions =
-    view.resubmittable || canDismiss ? (
-      <>
-        {view.resubmittable ? (
-          <Button size="sm" onClick={onResubmit} data-testid="optimize-resubmit">
-            {workerLost ? "Resubmit" : "Try again"}
-          </Button>
-        ) : null}
-        {canDismiss ? (
-          <Button size="sm" variant="outline" onClick={onDismiss} data-testid="optimize-dismiss">
-            Dismiss
-          </Button>
-        ) : null}
-      </>
-    ) : undefined;
+  // NO TERMINAL ACTIONS. `Resubmit` / `Try again` and `Dismiss` used to live here.
+  //
+  // Both existed to serve the single-slot design: a terminal run OCCUPIED the one
+  // record, so the user needed a way to release it before starting another, and
+  // `Resubmit` had to wait on that release before it could submit. Records are
+  // owner-keyed now and nothing occupies anything, so a second run is just the
+  // exact `Optimize` action again — which is the settled contract, and which a
+  // second button beside it would quietly contradict.
+  //
+  // The error message stays. It is the honest report of what happened to the run
+  // the user is looking at; what is gone is asking them to do something about it.
 
   return (
     <div className="space-y-4" data-testid="optimize-run-status">
@@ -267,6 +252,11 @@ export function RunStatusPanel({
               verdict: {view.result.terminationReason}
             </div>
           ) : null}
+          {/* Adjust rules only. `Try again` stood beside it, and on an INFEASIBLE
+              result it was the least useful button on the screen: the solver proved
+              no roster satisfies the rules, so re-running the same scenario proves
+              it again. The actionable move is the one that is left — change a rule,
+              then use the exact `Optimize` action. */}
           <div className="flex flex-wrap gap-2">
             <GuardedLink
               href="/rules"
@@ -275,9 +265,6 @@ export function RunStatusPanel({
             >
               <FaSliders className="size-4" aria-hidden /> Adjust rules
             </GuardedLink>
-            <Button variant="outline" onClick={onResubmit} data-testid="optimize-try-again">
-              <FaArrowRotateRight aria-hidden /> Try again
-            </Button>
           </div>
         </div>
       ) : null}
@@ -433,33 +420,18 @@ export function RunStatusPanel({
         <Callout
           tone={view.lifecycle === "cancelled" ? "warn" : "error"}
           data-testid="optimize-terminal-error"
-          actions={terminalActions}
           alert
         >
           {view.error?.message ?? "The optimisation did not complete."}
         </Callout>
       ) : null}
 
-      {cleanupPhase === "failed" ? (
-        <Callout
-          tone="warn"
-          data-testid="optimize-cleanup-failed"
-          title="Couldn't finish tidying up the last run"
-          actions={
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={onRetryCleanup}
-              data-testid="optimize-cleanup-retry"
-            >
-              Retry
-            </Button>
-          }
-          alert
-        >
-          Try again. If it keeps happening, start a New schedule.
-        </Callout>
-      ) : null}
+      {/* NO CLEANUP SURFACE. “Couldn't finish tidying up the last run” with a Retry
+          stood here, and it was the clearest statement of the retired model: it
+          named an internal housekeeping step, asked the user to drive it, and
+          (because cleanup gated submission) made finishing it a prerequisite for
+          optimising again. Cleanup is owner-keyed and invisible now — it cannot
+          stand in a new run's way, so there is nothing here for a user to decide. */}
     </div>
   );
 }

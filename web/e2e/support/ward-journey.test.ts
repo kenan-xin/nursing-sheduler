@@ -25,7 +25,9 @@ import {
 } from "@/lib/store/roster-storage";
 import {
   OPTIMIZE_RETIRE_PENDING_STORAGE_KEY,
+  OPTIMIZE_SESSION_KEY_PREFIX,
   OPTIMIZE_SESSION_STORAGE_KEY,
+  optimizeSessionKeyFor,
 } from "@/lib/optimize/session-transaction";
 import { ROSTER_VIEW_PREFERENCE_KEY } from "@/lib/roster-viewer/view-preference";
 import {
@@ -35,6 +37,8 @@ import {
   judgeResidue,
   judgeReplacement,
   judgeResiduePresent,
+  judgeVisitAbandoned,
+  resumingCallsFor,
   judgeWardDocument,
   judgeWardWorkbook,
   readWardDocumentFacts,
@@ -117,6 +121,13 @@ describe("the storage keys the residue probe reads", () => {
     expect(submissionSnapshotKey("owner-x")).toBe(`${STORAGE_KEYS.snapshotKeyPrefix}owner-x`);
     expect(STORAGE_KEYS.scenarioPersistKey).toBe(SCENARIO_PERSIST_KEY);
     expect(STORAGE_KEYS.optimizeSessionKey).toBe(OPTIMIZE_SESSION_STORAGE_KEY);
+    // The owner-keyed prefix is the seam a residue probe now depends on. Pinned to
+    // the production constant AND to a real key the production helper builds, so a
+    // rename cannot leave the probe enumerating a namespace nothing writes.
+    expect(STORAGE_KEYS.optimizeSessionKeyPrefix).toBe(OPTIMIZE_SESSION_KEY_PREFIX);
+    expect(optimizeSessionKeyFor("owner-x")).toBe(
+      `${STORAGE_KEYS.optimizeSessionKeyPrefix}owner-x`,
+    );
     expect(STORAGE_KEYS.optimizeRetirePendingKey).toBe(OPTIMIZE_RETIRE_PENDING_STORAGE_KEY);
     expect(STORAGE_KEYS.rosterViewPreferenceKey).toBe(ROSTER_VIEW_PREFERENCE_KEY);
   });
@@ -206,7 +217,7 @@ const EMPTY_PROBE: RosterResidueProbe = {
   candidateRowKeys: [],
   snapshotRowKeys: [],
   scenarioRecordPresent: true,
-  optimizeSessionPresent: false,
+  optimizeSessionKeys: [],
   retireMarkerPresent: false,
   viewMetadataPresent: false,
 };
@@ -226,7 +237,7 @@ const FULL_PROBE: RosterResidueProbe = {
   candidateRowKeys: ["candidate:job-b"],
   snapshotRowKeys: ["snapshot:owner-1"],
   scenarioRecordPresent: true,
-  optimizeSessionPresent: true,
+  optimizeSessionKeys: ["nurse.optimize.session.owner-1"],
   retireMarkerPresent: true,
   viewMetadataPresent: true,
 };
@@ -248,7 +259,11 @@ describe("judgeResidue", () => {
     ["pointer", { candidatePointer: FULL_PROBE.candidatePointer }, "the latest-result pointer"],
     ["candidate row", { candidateRowKeys: ["candidate:job-b"] }, "1 saved result row(s)"],
     ["snapshot row", { snapshotRowKeys: ["snapshot:o"] }, "1 submission snapshot row(s)"],
-    ["session", { optimizeSessionPresent: true }, "the optimisation session record"],
+    [
+      "session record",
+      { optimizeSessionKeys: ["nurse.optimize.session.owner-1"] },
+      "1 optimisation session record(s)",
+    ],
     ["retire marker", { retireMarkerPresent: true }, "the retirement marker"],
     ["view metadata", { viewMetadataPresent: true }, "the roster view metadata"],
   ])("fails and NAMES a surviving %s", (_label, override, expected) => {
@@ -259,7 +274,7 @@ describe("judgeResidue", () => {
 });
 
 describe("judgeResiduePresent", () => {
-  it("accepts an origin that genuinely holds everything the reset will remove", () => {
+  it("accepts an origin that genuinely holds the committed data the reset will remove", () => {
     expect(judgeResiduePresent(FULL_PROBE)).toEqual({ ok: true, remaining: [] });
   });
 
@@ -271,27 +286,67 @@ describe("judgeResiduePresent", () => {
       "the latest-result pointer",
       "a saved result row",
       "the roster view metadata",
-      "the optimisation session record",
-      "a submission snapshot row",
     ]);
   });
 
   it.each([
-    ["the optimisation session record", { optimizeSessionPresent: false }],
+    ["the optimisation session record", { optimizeSessionKeys: [] }],
     ["a submission snapshot row", { snapshotRowKeys: [] }],
-  ])("refuses a pre-state missing %s — the tidy-path gap the review found", (name, override) => {
-    // Runs that tidy themselves away release both, so on the all-succeeding path
-    // they are gone BEFORE the reset. Requiring them is what forces the journey to
-    // leave a run in flight instead of claiming the reset cleared nothing.
-    const verdict = judgeResiduePresent({ ...FULL_PROBE, ...override });
-    expect(verdict.ok).toBe(false);
-    expect(verdict.remaining).toEqual([name]);
+  ])("no longer requires %s in the pre-state", (_name, override) => {
+    // G6.2 INVERTED THIS. It used to REFUSE a pre-state missing either, which is
+    // what forced the journey to leave a run in flight so both would survive. That
+    // survival is the defect the ticket removed: leaving now abandons the run and
+    // the retirement lane takes both with it. Requiring them here would demand a
+    // state the product no longer produces. `judgeVisitAbandoned` proves the
+    // abandonment removes them, which names the cause rather than the absence.
+    expect(judgeResiduePresent({ ...FULL_PROBE, ...override })).toEqual({
+      ok: true,
+      remaining: [],
+    });
   });
 
   it("does not require the retirement marker it cannot honestly establish", () => {
     expect(judgeResiduePresent({ ...FULL_PROBE, retireMarkerPresent: false }).ok).toBe(true);
     // ...but the post-reset judgement still refuses to let one survive.
     expect(judgeResidue({ ...EMPTY_PROBE, retireMarkerPresent: true }).ok).toBe(false);
+  });
+});
+
+describe("judgeVisitAbandoned", () => {
+  it("accepts an origin holding nothing that existed only to serve the abandoned run", () => {
+    expect(judgeVisitAbandoned(EMPTY_PROBE)).toEqual({ ok: true, remaining: [] });
+  });
+
+  it.each([
+    [
+      "a surviving session record",
+      { optimizeSessionKeys: ["nurse.optimize.session.owner-1"] },
+      "1 optimisation session record(s)",
+    ],
+    [
+      "a surviving snapshot row",
+      { snapshotRowKeys: ["snapshot:owner-1"] },
+      "1 submission snapshot row(s)",
+    ],
+    ["a surviving retirement marker", { retireMarkerPresent: true }, "the retirement marker"],
+  ])("fails and NAMES %s", (_label, override, expected) => {
+    const verdict = judgeVisitAbandoned({ ...EMPTY_PROBE, ...override });
+    expect(verdict.ok).toBe(false);
+    expect(verdict.remaining).toContain(expected);
+  });
+
+  it("does NOT treat committed product data as something abandonment should remove", () => {
+    // The boundary that matters. A run that got far enough to commit a candidate
+    // produced something the user owns; walking away from the route is not a
+    // decision to destroy it. Only New schedule and verified Clear do that.
+    const verdict = judgeVisitAbandoned({
+      ...EMPTY_PROBE,
+      working: SOME_WORKING,
+      candidatePointer: { jobId: "job-b", candidateVersion: 2 },
+      candidateRowKeys: ["candidate:job-b"],
+      viewMetadataPresent: true,
+    });
+    expect(verdict).toEqual({ ok: true, remaining: [] });
   });
 });
 
@@ -935,4 +990,47 @@ describe("isLoadableSolverStatus", () => {
       expect(isLoadableSolverStatus(text)).toBe(false);
     },
   );
+});
+
+describe("resumingCallsFor", () => {
+  const JOB = "job_abc";
+
+  it.each([
+    ["the authoritative poll", `GET /api/optimize/${JOB} 200`],
+    ["the events stream", `GET /api/optimize/${JOB}/events 200`],
+    ["the workbook", `GET /api/optimize/${JOB}/xlsx 200`],
+    ["the roster capture", `GET /api/optimize/${JOB}/roster 200`],
+    ["the terminal DELETE", `DELETE /api/optimize/${JOB} 204`],
+    ["finish-now", `POST /api/optimize/${JOB}/finish-now 200`],
+  ])("names %s as a resume", (_label, line) => {
+    expect(resumingCallsFor([line], JOB)).toEqual([line]);
+  });
+
+  it("does NOT name the abandonment's own best-effort cancel", () => {
+    // The false positive this helper exists for. The cancel is fired unawaited by
+    // the retirement lane, so its response can land after the next navigation has
+    // begun — and it is the one call that lane is contractually allowed to make.
+    const cancel = `POST /api/optimize/${JOB}/cancel 202`;
+    expect(resumingCallsFor([cancel], JOB)).toEqual([]);
+  });
+
+  it("ignores calls about a DIFFERENT job", () => {
+    // Job ids are opaque and one is not a prefix of another by construction, but
+    // the filter must be exact rather than substring-lucky.
+    expect(resumingCallsFor([`GET /api/optimize/job_other 200`], JOB)).toEqual([]);
+    expect(resumingCallsFor(["POST /api/optimize 202", "GET /api/info 200"], JOB)).toEqual([]);
+  });
+
+  it("returns every offending line, not just the first", () => {
+    const lines = [
+      `POST /api/optimize/${JOB}/cancel 202`,
+      `GET /api/optimize/${JOB} 200`,
+      "GET /api/info 200",
+      `GET /api/optimize/${JOB}/events 200`,
+    ];
+    expect(resumingCallsFor(lines, JOB)).toEqual([
+      `GET /api/optimize/${JOB} 200`,
+      `GET /api/optimize/${JOB}/events 200`,
+    ]);
+  });
 });

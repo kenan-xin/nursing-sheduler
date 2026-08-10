@@ -446,6 +446,75 @@ describe("GET /api/optimize/{id}/roster", () => {
     expect(businessCalls()[0].url).toBe("http://backend:8000/optimize/opt_x/roster");
   });
 
+  // G6.1 — the reproduced production shape. A backend that predates the roster
+  // route answers with FastAPI's own unmatched-path body, on the SAME 404 status
+  // the application uses for `job_not_found`. Relayed verbatim it reaches the user
+  // as a bare "Not Found" that looks like a vanished job. It must be relabelled
+  // here — the only boundary that knows which path it asked for.
+  it("relabels a generic 404 {detail:'Not Found'} as a code-first 502 backend_route_unsupported", async () => {
+    mockUpstream(
+      () =>
+        new Response(JSON.stringify({ detail: "Not Found" }), {
+          status: 404,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+
+    const response = await downloadRoster(
+      new Request("http://localhost/api/optimize/opt_x/roster"),
+      params("opt_x"),
+    );
+
+    // NOT a 404: `isExactJobGoneResponse` requires one, so moving the status makes
+    // it structurally impossible for a deployment mismatch to become job-gone (and
+    // therefore DELETE) authority downstream.
+    expect(response.status).toBe(502);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const body = await response.json();
+    expect(body.error.code).toBe("backend_route_unsupported");
+    // Plain, actionable, and honest: it never claims the roster was saved.
+    expect(body.error.message).toMatch(/does not support saving rosters/);
+    // Honest: it must not read as though anything was kept.
+    expect(body.error.message).not.toMatch(/roster (was|has been) saved/i);
+    // The bare framework wording never reaches the client.
+    expect(JSON.stringify(body)).not.toContain("Not Found");
+    // The upstream was still asked exactly once, at the exact path.
+    expect(businessCalls()).toHaveLength(1);
+    expect(businessCalls()[0].url).toBe("http://backend:8000/optimize/opt_x/roster");
+  });
+
+  it("relabels a 404 with an empty or non-JSON body too (an intermediary's own page)", async () => {
+    mockUpstream(() => new Response("<html>404</html>", { status: 404 }));
+
+    const response = await downloadRoster(
+      new Request("http://localhost/api/optimize/opt_x/roster"),
+      params("opt_x"),
+    );
+
+    expect(response.status).toBe(502);
+    expect((await response.json()).error.code).toBe("backend_route_unsupported");
+  });
+
+  it("leaves every OTHER status untouched, including a non-code-first 500", async () => {
+    // The guard is scoped to 404 alone. A 5xx already classifies as `server-error`
+    // and says nothing about routing, so reshaping it would only lose information.
+    mockUpstream(
+      () =>
+        new Response(JSON.stringify({ detail: "Internal Server Error" }), {
+          status: 500,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+
+    const response = await downloadRoster(
+      new Request("http://localhost/api/optimize/opt_x/roster"),
+      params("opt_x"),
+    );
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ detail: "Internal Server Error" });
+  });
+
   it("relays a code-first 409 (job_artifact_not_ready) verbatim — the no-artifact state", async () => {
     const body = {
       error: {

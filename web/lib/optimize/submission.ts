@@ -66,8 +66,9 @@ function submitErrorFields(error: unknown): { code: string | null; message: stri
  * Translate a completed T16q submission transaction into the ordered run signals
  * the reducer applies. `activated`, `activation-persistence-failed`, and
  * `activation-unverified` all yield a live `job-activated` (a job exists) but differ
- * on whether reload recovery is available. The definite-rejection / ambiguous /
- * blocked branches never produce a job id.
+ * on how much durable state stands behind it. The definite-rejection / ambiguous /
+ * blocked branches never produce a job id, and `activation-retired` produces
+ * nothing at all.
  */
 export function outcomeToSignals(outcome: SubmissionTransactionOutcome): RunSignal[] {
   switch (outcome.status) {
@@ -87,29 +88,27 @@ export function outcomeToSignals(outcome: SubmissionTransactionOutcome): RunSign
     }
 
     case "activated":
-      return [
-        { type: "job-activated", jobId: outcome.record.jobId, reloadRecoveryAvailable: true },
-      ];
+      return [{ type: "job-activated", jobId: outcome.record.jobId }];
 
     case "activation-persistence-failed":
       return [
         {
           type: "job-activated",
           jobId: outcome.volatile.jobId,
-          reloadRecoveryAvailable: false,
           reason: "activation-persistence-failed",
         },
       ];
 
     case "activation-unverified":
-      return [
-        {
-          type: "job-activated",
-          jobId: outcome.volatile.jobId,
-          reloadRecoveryAvailable: false,
-          reason: outcome.reason,
-        },
-      ];
+      return [{ type: "job-activated", jobId: outcome.volatile.jobId, reason: outcome.reason }];
+
+    // NO SIGNALS. The record this transaction staged was removed while the POST
+    // was in flight, which only a retirement does — so there is no visit for a
+    // job to be activated into. The controller returns before reaching here in
+    // production; the empty list is what makes that non-negotiable rather than a
+    // property of call order.
+    case "activation-retired":
+      return [];
   }
 }
 

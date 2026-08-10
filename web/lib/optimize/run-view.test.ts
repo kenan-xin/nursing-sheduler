@@ -113,7 +113,7 @@ describe("reduceRunView — submission lifecycle", () => {
     expect(next.seq).toBeGreaterThan(dirty.seq);
   });
 
-  it("submit-blocked records a session error and never marks resubmittable", () => {
+  it("submit-blocked records a session error", () => {
     const next = reduce([
       { type: "submit-started", anonymized: true, peopleCount: 2 },
       { type: "submit-blocked", code: "session-conflict", message: "A run is already staged." },
@@ -125,11 +125,9 @@ describe("reduceRunView — submission lifecycle", () => {
       message: "A run is already staged.",
     });
     expect(next.jobId).toBeNull();
-    expect(next.resubmittable).toBe(false);
-    expect(next.sessionRecovery.reloadRecoveryAvailable).toBe(false);
   });
 
-  it("submit-rejected is resubmittable (no job was created)", () => {
+  it("submit-rejected records a submit error (no job was created)", () => {
     const next = reduce([
       { type: "submit-started", anonymized: false, peopleCount: 2 },
       { type: "submit-rejected", code: "invalid_scheduling_data", message: "bad" },
@@ -140,45 +138,44 @@ describe("reduceRunView — submission lifecycle", () => {
       code: "invalid_scheduling_data",
       message: "bad",
     });
-    expect(next.resubmittable).toBe(true);
   });
 
-  it("submit-unknown is NOT resubmittable (a job may exist)", () => {
+  it("submit-unknown records a submit error (a job may exist)", () => {
     const next = reduce([
       { type: "submit-started", anonymized: false, peopleCount: 2 },
       { type: "submit-unknown", code: null, message: "network" },
     ]);
     expect(next.lifecycle).toBe("submit-unknown");
     expect(next.error).toEqual({ source: "submit", code: null, message: "network" });
-    expect(next.resubmittable).toBe(false);
   });
 });
 
-describe("reduceRunView — activation + reload recovery", () => {
-  it("job-activated with a durable record marks reload recovery available", () => {
+// WAS “activation + reload recovery”. G6.2a deleted `SessionRecoveryState`: it
+// carried whether a RELOAD could resume the run, and a reload is now a fresh visit
+// that resumes nothing. What activation still owes is the job id and — for a
+// degraded activation — a reason in the run log, which is diagnostics about the run
+// in front of the user rather than a capability claim about a later visit.
+describe("reduceRunView — activation", () => {
+  it("job-activated adopts the job id and carries no recovery projection", () => {
     const next = reduce([
       { type: "submit-started", anonymized: true, peopleCount: 2 },
-      { type: "job-activated", jobId: "opt_9", reloadRecoveryAvailable: true },
+      { type: "job-activated", jobId: "opt_9" },
     ]);
     expect(next.jobId).toBe("opt_9");
-    expect(next.sessionRecovery).toEqual({ reloadRecoveryAvailable: true, reason: null });
+    expect(next).not.toHaveProperty("sessionRecovery");
+    // No reason, so nothing is claimed in the log detail either.
+    expect(next.log[next.log.length - 1].detail).toBeNull();
   });
 
-  it("a degraded post-202 activation keeps the job but denies reload recovery", () => {
+  it("a degraded post-202 activation keeps the job and records its reason in the log", () => {
     const next = reduce([
       { type: "submit-started", anonymized: true, peopleCount: 2 },
-      {
-        type: "job-activated",
-        jobId: "opt_9",
-        reloadRecoveryAvailable: false,
-        reason: "owner-conflict",
-      },
+      { type: "job-activated", jobId: "opt_9", reason: "owner-conflict" },
     ]);
     expect(next.jobId).toBe("opt_9");
-    expect(next.sessionRecovery).toEqual({
-      reloadRecoveryAvailable: false,
-      reason: "owner-conflict",
-    });
+    const entry = next.log[next.log.length - 1];
+    expect(entry.label).toBe("activated:opt_9");
+    expect(entry.detail).toBe("owner-conflict");
   });
 });
 
@@ -252,7 +249,6 @@ describe("reduceRunView — authoritative job snapshots", () => {
     expect(next.outcome).toBe("infeasible");
     expect(next.download.status).toBe("unavailable");
     expect(next.download.artifactAvailable).toBe(false);
-    expect(next.resubmittable).toBe(false);
   });
 
   it("cancelled is terminal with controls cleared", () => {
@@ -264,17 +260,16 @@ describe("reduceRunView — authoritative job snapshots", () => {
     expect(next.controls).toEqual({ cancellable: false, earlyCompletionAvailable: false });
   });
 
-  it("failed carries the structured error; a generic failure is not resubmittable", () => {
+  it("failed carries the structured error", () => {
     const next = reduceRunView(INITIAL_OPTIMIZE_RUN_VIEW, {
       type: "job-snapshot",
       job: terminalJob("failed", { error: { code: "solver_error", message: "boom" } }),
     });
     expect(next.lifecycle).toBe("failed");
     expect(next.error).toEqual({ source: "job", code: "solver_error", message: "boom" });
-    expect(next.resubmittable).toBe(false);
   });
 
-  it("worker_lost is a failed job that offers Resubmit, keyed on error.code only", () => {
+  it("worker_lost is a failed job identified by error.code alone", () => {
     const next = reduceRunView(INITIAL_OPTIMIZE_RUN_VIEW, {
       type: "job-snapshot",
       job: terminalJob("failed", {
@@ -286,10 +281,9 @@ describe("reduceRunView — authoritative job snapshots", () => {
     });
     expect(next.lifecycle).toBe("failed");
     expect(next.error?.code).toBe("worker_lost");
-    expect(next.resubmittable).toBe(true);
   });
 
-  it("process_timeout is a structured terminal failure but does NOT offer Resubmit", () => {
+  it("process_timeout is a structured terminal failure", () => {
     const next = reduceRunView(INITIAL_OPTIMIZE_RUN_VIEW, {
       type: "job-snapshot",
       job: terminalJob("failed", {
@@ -305,7 +299,6 @@ describe("reduceRunView — authoritative job snapshots", () => {
       code: "process_timeout",
       message: "The optimization exceeded its timeout and was force-terminated.",
     });
-    expect(next.resubmittable).toBe(false);
   });
 
   it("a later snapshot without an error clears a prior job error authoritatively", () => {
@@ -434,13 +427,12 @@ describe("reduceRunView — cursor recovery + transport", () => {
     });
   });
 
-  it("job-gone becomes a failed recovery, clears download, and is resubmittable", () => {
+  it("job-gone becomes a failed recovery and clears download", () => {
     const next = reduce([
       { type: "submit-started", anonymized: false, peopleCount: 1 },
       {
         type: "job-activated",
         jobId: "opt_1",
-        reloadRecoveryAvailable: true,
       },
       { type: "job-snapshot", job: job({ state: "running" }) },
       { type: "job-gone", code: "job_not_found", message: "gone" },
@@ -449,14 +441,14 @@ describe("reduceRunView — cursor recovery + transport", () => {
     expect(next.jobId).toBeNull();
     expect(next.error).toEqual({ source: "job", code: "job_not_found", message: "gone" });
     expect(next.download.artifactAvailable).toBe(false);
-    // cleanup status is NOT "cleaned" — T16q removal hasn't run yet.
-    expect(next.cleanup.status).toBe("idle");
-    expect(next.resubmittable).toBe(true);
-    expect(next.sessionRecovery.reloadRecoveryAvailable).toBe(false);
+    // Nothing claims the record was cleaned up — the retirement lane has not run.
+    // Asserted on the run LOG since G6.2c, which is where cleanup is now recorded
+    // and the only place it was ever shown.
+    expect(next.log.some((entry) => entry.label.startsWith("cleanup"))).toBe(false);
   });
 });
 
-describe("reduceRunView — download + cleanup progression", () => {
+describe("reduceRunView — download progression + cleanup log", () => {
   it("walks download from available through downloaded", () => {
     const next = reduce([
       {
@@ -487,16 +479,26 @@ describe("reduceRunView — download + cleanup progression", () => {
     expect(next.error?.message).toBe("network");
   });
 
-  it("cleanup can succeed, fail, or be retained", () => {
-    expect(
-      reduceRunView(INITIAL_OPTIMIZE_RUN_VIEW, { type: "cleanup-succeeded" }).cleanup.status,
-    ).toBe("cleaned");
-    expect(
-      reduceRunView(INITIAL_OPTIMIZE_RUN_VIEW, { type: "cleanup-failed" }).cleanup.status,
-    ).toBe("failed");
-    expect(
-      reduceRunView(INITIAL_OPTIMIZE_RUN_VIEW, { type: "cleanup-retained" }).cleanup.status,
-    ).toBe("retained");
+  // LOG-ONLY since G6.2c. These three signals used to maintain a `cleanup: {status}`
+  // field as well, which nothing in the product read — cleanup is invisible, so
+  // there was no surface for it to drive. The log entry survives because the run
+  // event log genuinely shows it.
+  it.each([
+    ["cleanup-succeeded", "result"],
+    ["cleanup-failed", "error"],
+    ["cleanup-retained", "result"],
+  ] as const)("%s is recorded in the run log and changes nothing else", (type, kind) => {
+    const next = reduceRunView(INITIAL_OPTIMIZE_RUN_VIEW, { type });
+
+    expect(next.log.at(-1)).toMatchObject({ kind, label: type });
+    expect(next.seq).toBe(INITIAL_OPTIMIZE_RUN_VIEW.seq + 1);
+    // The whole rest of the view is byte-identical: no lifecycle, download, error
+    // or control moved because a DELETE landed.
+    expect({ ...next, log: [], seq: 0 }).toEqual({
+      ...INITIAL_OPTIMIZE_RUN_VIEW,
+      log: [],
+      seq: 0,
+    });
   });
 });
 
@@ -573,7 +575,6 @@ describe("reduceRunView — snapshots never append log entries (P1 #4)", () => {
     view = reduceRunView(view, {
       type: "job-activated",
       jobId: "opt_2",
-      reloadRecoveryAvailable: true,
     });
     // job-activated logged; a subsequent snapshot still does not append.
     expect(view.log).toHaveLength(2);
@@ -672,21 +673,10 @@ describe("reduceRunView — snapshots never append log entries (P1 #4)", () => {
         "upstream_unavailable",
       ],
       [
-        "job-activated (durable)",
-        { type: "job-activated", jobId: "opt_1", reloadRecoveryAvailable: true },
-        "durable",
-      ],
-      [
-        "job-activated (volatile)",
-        { type: "job-activated", jobId: "opt_1", reloadRecoveryAvailable: false },
-        "volatile",
-      ],
-      [
         "job-activated (named reason)",
         {
           type: "job-activated",
           jobId: "opt_1",
-          reloadRecoveryAvailable: false,
           reason: "activation-persistence-failed",
         },
         "activation-persistence-failed",
@@ -798,6 +788,11 @@ describe("reduceRunView — snapshots never append log entries (P1 #4)", () => {
       ["cleanup-failed", { type: "cleanup-failed" }],
       ["cleanup-retained", { type: "cleanup-retained" }],
       ["cursor-recovery with no oldest id", { type: "cursor-recovery", reason: "expired" }],
+      // Moved here from the EXPRESSION list, where it was two rows: `durable` and
+      // `volatile`, which were the reload-recovery flag rendered as a log token.
+      // The flag is gone, and an activation with nothing to report now mints no
+      // detail rather than inventing one.
+      ["job-activated with no reason", { type: "job-activated", jobId: "opt_1" }],
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ] as any[])("%s carries no detail, so it declares no kind", (_label, signal) => {
       expect(detailOf(signal)).toEqual({ detail: null, detailKind: null });
@@ -815,7 +810,6 @@ describe("reduceRunView — snapshots never append log entries (P1 #4)", () => {
       view = reduceRunView(view, {
         type: "job-activated",
         jobId: "opt_1",
-        reloadRecoveryAvailable: true,
       });
       view = reduceRunView(view, {
         type: "phase",
@@ -847,13 +841,12 @@ describe("reduceRunView — snapshots never append log entries (P1 #4)", () => {
 });
 
 describe("reduceRunView — control-job-gone", () => {
-  it("control-job-gone detaches the job and is resubmittable", () => {
+  it("control-job-gone detaches the job", () => {
     const withJob = reduce([
       { type: "submit-started", anonymized: false, peopleCount: 1 },
       {
         type: "job-activated",
         jobId: "opt_1",
-        reloadRecoveryAvailable: true,
       },
       { type: "job-snapshot", job: job({ state: "running" }) },
     ]);
@@ -867,9 +860,8 @@ describe("reduceRunView — control-job-gone", () => {
     expect(next.lifecycle).toBe("failed");
     expect(next.jobId).toBeNull();
     expect(next.error).toEqual({ source: "job", code: "job_not_found", message: "gone" });
-    expect(next.resubmittable).toBe(true);
     expect(next.download.artifactAvailable).toBe(false);
-    expect(next.cleanup.status).toBe("idle");
+    expect(next.log.some((entry) => entry.label.startsWith("cleanup"))).toBe(false);
   });
 
   it("control-error preserves lifecycle, controls, and jobId", () => {
@@ -1129,14 +1121,12 @@ describe("reduceRunView — retained display byte bound (P1 #5)", () => {
     });
   });
 
-  it("bounds a job-activated recovery reason in BOTH sessionRecovery.reason and its log detail mirror", () => {
+  it("bounds a job-activated reason in the log detail it now lives in", () => {
     const view = reduceRunView(INITIAL_OPTIMIZE_RUN_VIEW, {
       type: "job-activated",
       jobId: "opt_9",
-      reloadRecoveryAvailable: true,
       reason: HUGE,
     });
-    expect(utf8(view.sessionRecovery.reason!)).toBe(LABEL_CAP);
     const entry = view.log[view.log.length - 1];
     expect(utf8(entry.detail!)).toBe(LABEL_CAP);
   });

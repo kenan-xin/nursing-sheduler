@@ -33,7 +33,6 @@
 //     accepted the job.
 
 import { validatePeopleReverseMap, type PeopleReverseMap } from "@/lib/scenario";
-import { MAX_CURSOR_BYTES, isNonEmptyStringWithin, withinUtf8Bytes } from "@/lib/query/sse-limits";
 
 /** Bump when the record shape changes; a mismatched version is not resumable.
  *  v2 adds the F2 `capture` authority (the roster submission-snapshot ref and its
@@ -42,8 +41,33 @@ import { MAX_CURSOR_BYTES, isNonEmptyStringWithin, withinUtf8Bytes } from "@/lib
  *  unreadable, exactly like any other unknown shape. */
 export const OPTIMIZE_SESSION_SCHEMA_VERSION = 2;
 
-/** The sessionStorage key the single in-flight submission record lives under. */
+/**
+ * The LEGACY single-slot key.
+ *
+ * One key meant one run at a time, and that was load-bearing in the worst way:
+ * `stageProvisionalSession` refuses an occupied slot, so an older run that had
+ * not finished proving its cleanup literally occupied the next submission. That
+ * is why `Optimize` could be disabled by a run the user had already walked away
+ * from. Records are now keyed per owner (below); this constant remains because a
+ * record written by an earlier build can still be sitting here, and because
+ * Clear must keep removing it.
+ */
 export const OPTIMIZE_SESSION_STORAGE_KEY = "nurse.optimize.session";
+
+/**
+ * The prefix each owner-keyed record lives under: `nurse.optimize.session.<ownerId>`.
+ *
+ * Deliberately a child of the legacy key's namespace so one prefix sweep covers
+ * both shapes, and deliberately keyed by the SAME opaque `ownerId` the immutable
+ * submission snapshot uses — so a record and the snapshot it points at are
+ * addressable by one identity, and cleanup for one owner can never name another's.
+ */
+export const OPTIMIZE_SESSION_KEY_PREFIX = `${OPTIMIZE_SESSION_STORAGE_KEY}.`;
+
+/** The storage key holding the record for exactly this owner. */
+export function optimizeSessionKeyFor(ownerId: string): string {
+  return `${OPTIMIZE_SESSION_KEY_PREFIX}${ownerId}`;
+}
 
 // Settled Optimize timeout bounds (backend: `optimize.py` rejects `<= 0` or
 // `> max_timeout_seconds`, whose default is `60 * 60`).
@@ -97,17 +121,18 @@ export interface ProvisionalOptimizeSession extends OptimizeSessionCommon {
   phase: "provisional";
 }
 
-/** The provisional payload plus the accepted job id; the only resumable variant. */
+/**
+ * The provisional payload plus the accepted job id.
+ *
+ * G6.2 removed the persisted resume cursor. It existed for exactly one purpose —
+ * seeding a reloaded page's `Last-Event-ID` so a run could be resumed across a
+ * reload — and reload-resume is gone: a fresh route entry never reattaches to an
+ * older run. The in-visit stream still tracks its cursor, in memory, where it
+ * belongs; nothing durable needs to survive the visit that owns it.
+ */
 export interface ActiveOptimizeSession extends OptimizeSessionCommon {
   phase: "active";
   jobId: string;
-  /**
-   * The last opaque event cursor T16p reported committed (post-apply). Absent
-   * until the resumed stream commits its first frame; a reload seeds it as the
-   * stream's initial `Last-Event-ID`. Opaque — stored verbatim, never parsed.
-   * T16b persists it through `updateActiveCursor` and clears it on cursor reset.
-   */
-  lastCursor?: string;
 }
 
 export type OptimizeSessionRecord = ProvisionalOptimizeSession | ActiveOptimizeSession;
@@ -117,6 +142,22 @@ export interface SessionTransactionStorage {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
   removeItem(key: string): void;
+  /**
+   * Enumeration, as the real `Storage` provides it.
+   *
+   * Owner-keyed records mean Clear can no longer name every key it must remove.
+   * The tempting alternative — `sessionStorage.clear()` — is not open to us: this
+   * is a shared tab-scoped store, and a roster privacy action has no business
+   * destroying keys other features own. So Clear enumerates and removes exactly
+   * the optimize keys.
+   *
+   * Optional only so the many single-key test doubles that predate owner-keying
+   * need not all grow an enumeration they never exercise. A store that cannot be
+   * enumerated is treated as residue UNKNOWN — never as an empty one — so the
+   * looser type cannot turn into a false purge claim.
+   */
+  readonly length?: number;
+  key?(index: number): string | null;
 }
 
 /** Injectable (de)serialization; defaults to JSON. A throwing/lossy `serialize`
@@ -141,24 +182,31 @@ export type StageFailureReason =
   // The slot is occupied or cannot be proven empty.
   | "session-conflict";
 
-/** The in-tab state retained when the durable map cannot become resumable. Reload
- *  recovery is unavailable, but the accepted job and its map remain usable for the
- *  lifetime of the current tab. */
+/**
+ * The in-tab state retained when the accepted job has no durable record behind it.
+ * The job and its reverse map stay usable for the lifetime of the current visit.
+ *
+ * G6.2d dropped `reloadRecoveryUnavailable: true`. It was a hard-coded flag naming
+ * a capability that no longer exists in either direction — no activation makes a
+ * run resumable across a reload, so none of them needs to say it does not.
+ */
 export interface VolatileActivation {
   jobId: string;
   anonymized: boolean;
   peopleCount: number;
   reverseMap: PeopleReverseMap;
-  reloadRecoveryUnavailable: true;
 }
 
 // --- guarded storage primitives -------------------------------------------
 
 type GuardedRead = { ok: true; raw: string | null } | { ok: false };
 
-function guardedGet(storage: SessionTransactionStorage): GuardedRead {
+// `key` is REQUIRED. It used to default to the legacy single slot, which is
+// precisely how a caller could silently keep writing the one blocking record
+// after records became owner-keyed. Every call now names the key it means.
+function guardedGet(storage: SessionTransactionStorage, key: string): GuardedRead {
   try {
-    return { ok: true, raw: storage.getItem(OPTIMIZE_SESSION_STORAGE_KEY) };
+    return { ok: true, raw: storage.getItem(key) };
   } catch {
     return { ok: false };
   }
@@ -176,18 +224,18 @@ function classifyWriteFailure(error: unknown): WriteFailureReason {
   return "storage-unavailable";
 }
 
-function guardedSet(storage: SessionTransactionStorage, value: string): GuardedWrite {
+function guardedSet(storage: SessionTransactionStorage, value: string, key: string): GuardedWrite {
   try {
-    storage.setItem(OPTIMIZE_SESSION_STORAGE_KEY, value);
+    storage.setItem(key, value);
     return { ok: true };
   } catch (error) {
     return { ok: false, reason: classifyWriteFailure(error) };
   }
 }
 
-function guardedRemove(storage: SessionTransactionStorage): boolean {
+function guardedRemove(storage: SessionTransactionStorage, key: string): boolean {
   try {
-    storage.removeItem(OPTIMIZE_SESSION_STORAGE_KEY);
+    storage.removeItem(key);
     return true;
   } catch {
     return false;
@@ -200,11 +248,212 @@ type CurrentSnapshot =
   | { ok: false }
   | { ok: true; raw: string | null; record: OptimizeSessionRecord | null };
 
-function readCurrent(storage: SessionTransactionStorage, codec: SessionCodec): CurrentSnapshot {
-  const read = guardedGet(storage);
+function readCurrent(
+  storage: SessionTransactionStorage,
+  codec: SessionCodec,
+  key: string,
+): CurrentSnapshot {
+  const read = guardedGet(storage, key);
   if (!read.ok) return { ok: false };
   if (read.raw === null) return { ok: true, raw: null, record: null };
   return { ok: true, raw: read.raw, record: decodeRecord(read.raw, codec) };
+}
+
+// ---------------------------------------------------------------------------
+// Owner-keyed records
+// ---------------------------------------------------------------------------
+//
+// Everything below addresses a record by its opaque owner instead of by "the"
+// slot. The point is not tidiness: it is that a run the user abandoned must be
+// able to finish its cleanup WITHOUT standing between them and the next click.
+// With one slot those two things were the same storage cell, so "cleanup not yet
+// proven" and "you may not submit" were indistinguishable.
+//
+// Enumeration is only ever used for invisible exact-owner cleanup and for Clear.
+// `sessionStorage` is tab-scoped, so this is not an origin-wide queue and never
+// speaks for another tab.
+
+/** Every optimize session key currently present: the legacy slot first (when
+ *  present), then each owner-keyed record. `ok: false` when the store could not
+ *  be enumerated — which proves nothing, least of all emptiness. */
+export type SessionKeyListing = { ok: true; keys: string[] } | { ok: false };
+
+export function listOptimizeSessionKeys(storage: SessionTransactionStorage): SessionKeyListing {
+  const keys: string[] = [];
+  try {
+    const count = storage.length;
+    const readKey = storage.key;
+    // No enumeration surface at all is exactly the same situation as a throwing
+    // one: nothing was observed, so nothing may be concluded.
+    if (typeof count !== "number" || typeof readKey !== "function") return { ok: false };
+    for (let index = 0; index < count; index += 1) {
+      const key = readKey.call(storage, index);
+      if (key === null) continue;
+      if (key === OPTIMIZE_SESSION_STORAGE_KEY || key.startsWith(OPTIMIZE_SESSION_KEY_PREFIX)) {
+        keys.push(key);
+      }
+    }
+  } catch {
+    return { ok: false };
+  }
+  return { ok: true, keys };
+}
+
+/** The decoded record stored for one owner, with unreadable kept distinct from
+ *  absent — an unreadable record names no trustworthy owner and is Clear-only. */
+export type OwnerSessionRead =
+  | { status: "found"; record: OptimizeSessionRecord; raw: string }
+  | { status: "absent" }
+  | { status: "unreadable"; raw: string }
+  | { status: "unavailable" };
+
+export function readOwnerSession(
+  storage: SessionTransactionStorage,
+  ownerId: string,
+  codec: SessionCodec = defaultCodec,
+): OwnerSessionRead {
+  const snapshot = readCurrent(storage, codec, optimizeSessionKeyFor(ownerId));
+  if (!snapshot.ok) return { status: "unavailable" };
+  if (snapshot.raw === null) return { status: "absent" };
+  if (snapshot.record === null) return { status: "unreadable", raw: snapshot.raw };
+  return { status: "found", record: snapshot.record, raw: snapshot.raw };
+}
+
+/**
+ * Remove exactly one owner's record, verified absent by read-back.
+ *
+ * Owner-scoped by construction: the key names the owner, so this cannot reach
+ * another run's record even if the caller is confused about which run it is
+ * retiring. That is the property that lets abandonment cleanup run concurrently
+ * with a brand-new submission.
+ */
+export type RemoveOwnerSessionOutcome =
+  | { status: "removed" }
+  | { status: "absent" }
+  | { status: "unverified" };
+
+export function removeOwnerSession(
+  storage: SessionTransactionStorage,
+  ownerId: string,
+): RemoveOwnerSessionOutcome {
+  const key = optimizeSessionKeyFor(ownerId);
+  const before = guardedGet(storage, key);
+  if (!before.ok) return { status: "unverified" };
+  if (before.raw === null) return { status: "absent" };
+  if (!guardedRemove(storage, key)) return { status: "unverified" };
+  const after = guardedGet(storage, key);
+  if (!after.ok || after.raw !== null) return { status: "unverified" };
+  return { status: "removed" };
+}
+
+/**
+ * Move a readable legacy single-slot record to its own owner key.
+ *
+ * Idempotent and read-back verified, because it runs on route entry and may be
+ * interrupted at any point:
+ *
+ *   • An EXISTING owner key always wins. It was written by the owner-keyed path
+ *     and is therefore at least as current as the legacy bytes; overwriting it
+ *     could replace a live run's record with a stale copy of itself.
+ *   • The legacy key is removed ONLY after the target is read back and decodes to
+ *     a semantically identical record. A half-done migration therefore leaves the
+ *     legacy bytes in place and is simply re-run.
+ *   • UNREADABLE legacy bytes name no trustworthy owner, so there is nowhere to
+ *     move them and nothing that may be inferred from them. They are left for
+ *     verified Clear rather than deleted here — deleting bytes we could not read
+ *     is exactly how a real-identity reverse map would be lost silently.
+ */
+export type LegacyMigrationOutcome =
+  /** Legacy bytes were copied to the owner key and the legacy key is proven gone. */
+  | { status: "migrated"; ownerId: string }
+  /** The owner key already held this owner's record; the legacy duplicate is gone. */
+  | { status: "already-migrated"; ownerId: string }
+  /** No legacy record present. */
+  | { status: "none" }
+  /** Present but undecodable: left untouched for verified Clear. */
+  | { status: "unreadable" }
+  /** Nothing was proven; both keys are left exactly as they were. */
+  | { status: "unverified" };
+
+export function migrateLegacySession(
+  storage: SessionTransactionStorage,
+  codec: SessionCodec = defaultCodec,
+): LegacyMigrationOutcome {
+  const legacy = readCurrent(storage, codec, OPTIMIZE_SESSION_STORAGE_KEY);
+  if (!legacy.ok) return { status: "unverified" };
+  if (legacy.raw === null) return { status: "none" };
+  if (legacy.record === null) return { status: "unreadable" };
+
+  const ownerId = legacy.record.ownerId;
+  const target = optimizeSessionKeyFor(ownerId);
+  const existing = readCurrent(storage, codec, target);
+  if (!existing.ok) return { status: "unverified" };
+
+  if (existing.raw !== null) {
+    // PRESERVE, never overwrite. Only drop the legacy duplicate once the target is
+    // proven to be a readable record for the same owner.
+    if (existing.record === null || existing.record.ownerId !== ownerId) {
+      return { status: "unverified" };
+    }
+    if (!guardedRemove(storage, OPTIMIZE_SESSION_STORAGE_KEY)) return { status: "unverified" };
+    const after = guardedGet(storage, OPTIMIZE_SESSION_STORAGE_KEY);
+    if (!after.ok || after.raw !== null) return { status: "unverified" };
+    return { status: "already-migrated", ownerId };
+  }
+
+  // Re-serialize through the writer path rather than copying raw bytes, so the
+  // migrated record is held to the same closed-schema and codec round-trip rules
+  // every other write is.
+  const serialized = serializeOwnedRecord(legacy.record, codec);
+  if (serialized === null) return { status: "unverified" };
+  if (!guardedSet(storage, serialized, target).ok) return { status: "unverified" };
+
+  const written = readCurrent(storage, codec, target);
+  if (!written.ok || written.record === null || !recordsEqual(written.record, legacy.record)) {
+    // The copy is not proven. Leave the legacy key alone; re-running repairs it.
+    return { status: "unverified" };
+  }
+
+  if (!guardedRemove(storage, OPTIMIZE_SESSION_STORAGE_KEY)) return { status: "unverified" };
+  const legacyAfter = guardedGet(storage, OPTIMIZE_SESSION_STORAGE_KEY);
+  if (!legacyAfter.ok || legacyAfter.raw !== null) return { status: "unverified" };
+  return { status: "migrated", ownerId };
+}
+
+/**
+ * Remove EVERY optimize session key — the legacy slot and every owner-keyed
+ * record — verifying each absence. This is Clear's cut.
+ *
+ * Explicitly not `storage.clear()`: the tab's `sessionStorage` is shared, and a
+ * roster privacy action has no authority over anything else in it. `cleared` is
+ * returned only when the store could be enumerated AND every optimize key is
+ * proven gone; anything else is honest failure with what remains.
+ */
+export interface ClearAllSessionsOutcome {
+  status: "cleared" | "failed";
+  /** Keys still present (or empty when the store could not be enumerated). */
+  remaining: string[];
+  /** False when enumeration itself failed — residue is UNKNOWN, not zero. */
+  enumerated: boolean;
+}
+
+export function clearAllOptimizeSessions(
+  storage: SessionTransactionStorage,
+): ClearAllSessionsOutcome {
+  const listing = listOptimizeSessionKeys(storage);
+  if (!listing.ok) return { status: "failed", remaining: [], enumerated: false };
+
+  for (const key of listing.keys) guardedRemove(storage, key);
+
+  // Re-enumerate rather than trusting the removals: a store that silently no-ops
+  // a `removeItem` must not be able to report a verified purge.
+  const after = listOptimizeSessionKeys(storage);
+  if (!after.ok) return { status: "failed", remaining: [], enumerated: false };
+  return {
+    status: after.keys.length === 0 ? "cleared" : "failed",
+    remaining: after.keys,
+    enumerated: true,
+  };
 }
 
 // --- construction + validation --------------------------------------------
@@ -288,8 +537,6 @@ function recordsEqual(a: OptimizeSessionRecord, b: OptimizeSessionRecord): boole
   if (!captureEqual(a.capture, b.capture)) return false;
   if (a.phase === "active" && b.phase === "active") {
     if (a.jobId !== b.jobId) return false;
-    // `undefined === undefined` treats an absent cursor as equal on both sides.
-    if (a.lastCursor !== b.lastCursor) return false;
   }
   return true;
 }
@@ -348,19 +595,24 @@ export function stageProvisionalSession(
   const serialized = serializeOwnedRecord(record, codec);
   if (serialized === null) return { status: "blocked", reason: "invalid-record" };
 
+  const key = optimizeSessionKeyFor(record.ownerId);
+
   const blockOrProceed = (reason: StageFailureReason): StageProvisionalOutcome =>
     record.anonymized
       ? { status: "blocked", reason }
       : { status: "proceed-without-recovery", reason };
 
-  // Non-destructive occupancy check: the slot must be genuinely empty. A present
-  // record (valid or unreadable) is a conflict — never removed, never overwritten.
-  const pre = readCurrent(storage, codec);
+  // Non-destructive occupancy check. It reads THIS OWNER'S key, which is what
+  // makes an older run's unfinished cleanup stop being the next click's problem:
+  // the two runs no longer contend for one cell, so `session-conflict` is now
+  // reachable only by an owner-id collision — kept as a fail-closed guard, not as
+  // a queue. A present record (valid or unreadable) is never removed or overwritten.
+  const pre = readCurrent(storage, codec, key);
   if (!pre.ok || pre.raw !== null) {
     return { status: "blocked", reason: "session-conflict" };
   }
 
-  const write = guardedSet(storage, serialized);
+  const write = guardedSet(storage, serialized, key);
   if (!write.ok) {
     // The key is proven absent (reconciled above); a plain run may proceed.
     return blockOrProceed(write.reason);
@@ -368,7 +620,7 @@ export function stageProvisionalSession(
 
   // Classify one post-write snapshot. Exact bytes succeed; proven empty is a
   // durability failure; every non-empty or unreadable mismatch is a conflict.
-  const afterWrite = readCurrent(storage, codec);
+  const afterWrite = readCurrent(storage, codec, key);
   if (afterWrite.ok && afterWrite.raw === serialized) {
     return { status: "staged", record };
   }
@@ -386,14 +638,27 @@ export type ActivationUnverifiedReason = "owner-conflict" | "storage-unknown";
 
 export type ActivateOutcome =
   | { status: "activated"; record: ActiveOptimizeSession }
-  // Our provisional record is proven durable: degraded in-tab, reload=interrupted.
+  // Our provisional record is proven durable: degraded in-tab.
   | { status: "activation-persistence-failed"; volatile: VolatileActivation }
-  // The durable state could not be proven ours: never claimed resumable/interrupted.
+  // The durable state could not be proven ours: never claimed as this run's.
   | {
       status: "activation-unverified";
       volatile: VolatileActivation;
       reason: ActivationUnverifiedReason;
-    };
+    }
+  /**
+   * The exact record this transaction staged is GONE, so nothing was written.
+   *
+   * An empty owner key is not free space, it is EVIDENCE. Nothing empties one
+   * except a retirement (route exit, `pagehide`, a superseding click) or a
+   * verified Clear — all of which mean the visit that staged this submission has
+   * ended. Writing the active record here would recreate the identity-bearing
+   * record the exit had just cut, and on the hard-exit path there is no second
+   * chance to remove it again.
+   *
+   * The job id travels so the caller can still cancel the exact job best-effort.
+   */
+  | { status: "activation-retired"; jobId: string };
 
 function volatileFrom(provisional: ProvisionalOptimizeSession, jobId: string): VolatileActivation {
   return {
@@ -401,7 +666,6 @@ function volatileFrom(provisional: ProvisionalOptimizeSession, jobId: string): V
     anonymized: provisional.anonymized,
     peopleCount: provisional.peopleCount,
     reverseMap: provisional.reverseMap,
-    reloadRecoveryUnavailable: true,
   };
 }
 
@@ -414,12 +678,16 @@ function ownsProvisional(record: OptimizeSessionRecord | null, ownerId: string):
  * active job-id record — compare-and-act on the exact owned provisional so a
  * concurrent transaction that superseded the key is never overwritten.
  *
+ * STAGED ACTIVATION ONLY. This function requires the record its transaction
+ * staged to still be there. Call it only after `stageProvisionalSession` returned
+ * `staged`; a plain run that proceeded without durable staging has no provisional
+ * to replace and must stay volatile (see `runSubmissionTransaction`).
+ *
  * The write is verified by read-back. A throwing/partial active write is
  * reconciled by reading the key back: our exact active bytes ⇒ activated (the
- * write landed before the throw); our provisional still present ⇒ degraded
- * (reload=interrupted); the key missing ⇒ restore the provisional only with a
- * verified write, else report the state unknown; a foreign/unreadable value is
- * left untouched and reported as a conflict — never as a resumable job.
+ * write landed before the throw); our provisional still present ⇒ degraded; the
+ * key missing ⇒ retired; a foreign/unreadable value is left untouched and
+ * reported as a conflict — never as a resumable job.
  */
 export function activateSession(
   storage: SessionTransactionStorage,
@@ -439,8 +707,14 @@ export function activateSession(
     return { status: "activation-persistence-failed", volatile };
   }
 
+  // Owner-keyed: a late 202 writes its job id onto ITS OWN record and nowhere
+  // else, so an activation that lands after the user has already started a newer
+  // run cannot touch the newer run's record. Whether anyone is still watching is
+  // the caller's question (the visit attempt), not this transaction's.
+  const key = optimizeSessionKeyFor(provisional.ownerId);
+
   // Replace only our provisional record, or a slot still proven empty.
-  const cur = readCurrent(storage, codec);
+  const cur = readCurrent(storage, codec, key);
   if (!cur.ok) {
     return {
       status: "activation-unverified",
@@ -471,12 +745,23 @@ export function activateSession(
       volatile,
       reason: "owner-conflict",
     };
+  } else {
+    // GENUINELY EMPTY — and that is the answer, not permission.
+    //
+    // This branch used to fall through and write the active record, on the
+    // reading that an empty key is free. It is not: this transaction staged its
+    // provisional here before the POST, so the only things that could have
+    // emptied it are a retirement or a verified Clear. Writing now would put the
+    // identity-bearing record back into the key a route exit had just removed —
+    // and on the `pagehide` path, where the retirement lane's snapshot purge may
+    // never resume, nothing would ever remove it again.
+    return { status: "activation-retired", jobId };
   }
 
-  // We own the provisional, or the key is genuinely empty: write the active record.
-  guardedSet(storage, serializedActive);
+  // We own the provisional: replace it with the active record.
+  guardedSet(storage, serializedActive, key);
   // Reconcile one post-write snapshot against what is actually durable.
-  const after = readCurrent(storage, codec);
+  const after = readCurrent(storage, codec, key);
   if (!after.ok) {
     return {
       status: "activation-unverified",
@@ -493,20 +778,12 @@ export function activateSession(
     return { status: "activation-persistence-failed", volatile };
   }
   if (after.raw === null) {
-    // Missing: restore the provisional ONLY with a verified write/read-back.
-    const serializedProvisional = serializeOwnedRecord(provisional, codec);
-    if (serializedProvisional !== null) {
-      const restoreWrite = guardedSet(storage, serializedProvisional);
-      const restoreRead = readCurrent(storage, codec);
-      if (restoreWrite.ok && restoreRead.ok && restoreRead.raw === serializedProvisional) {
-        return { status: "activation-persistence-failed", volatile };
-      }
-    }
-    return {
-      status: "activation-unverified",
-      volatile,
-      reason: "storage-unknown",
-    };
+    // Missing AFTER our write — the same evidence, one step later. This used to
+    // restore the provisional, which is the identical repopulation the empty-key
+    // branch above was doing: a key that goes from ours to absent across a single
+    // synchronous write was emptied by a retirement, and putting anything back is
+    // exactly what must not happen.
+    return { status: "activation-retired", jobId };
   }
   // A foreign/unreadable value now holds the key — never overwrite or claim it.
   return {
@@ -516,114 +793,13 @@ export function activateSession(
   };
 }
 
-// --- active cursor persistence (during a resumed run) ----------------------
-
-/** The closed result of persisting (or clearing) an active record's resume cursor. */
-export type UpdateActiveCursorOutcome =
-  | { status: "updated"; record: ActiveOptimizeSession }
-  // The slot no longer holds an active record for this job (gone / superseded /
-  // a different job / unreadable). Non-fatal: the next commit retries.
-  | { status: "stale" }
-  // Storage could not be read, or the write could not be proven durable.
-  | { status: "unverified" }
-  // The cursor violated the structural byte cap and was refused (never written).
-  // Distinct from `stale` (record gone) and `unverified` (I/O): the record is
-  // healthy, only the cursor was rejected. Non-fatal — durability is not claimed.
-  | { status: "rejected" };
-
-/** Return the active record with its cursor removed (no `lastCursor: undefined` key). */
-function withoutCursor(record: ActiveOptimizeSession): ActiveOptimizeSession {
-  if (record.lastCursor === undefined) return record;
-  const { lastCursor: _omit, ...rest } = record;
-  return rest;
-}
-
-/**
- * Persist the last committed opaque cursor onto the durable ACTIVE record for
- * `jobId`, or clear it when `cursor` is null (an expired/invalid cursor reset).
- * Job-scoped, not owner-scoped: the cursor belongs to the resumed job, and the
- * stored owner id is deliberately not treated as caller authorization after a
- * reload. The record is re-read immediately before the write (no `await` in the
- * critical section), rebuilt from the CURRENT durable record so a concurrent
- * field change is never clobbered, writer-validated, and verified by read-back —
- * so a stale/foreign/unreadable slot is never overwritten and a partial write is
- * never reported as durable.
- */
-export function updateActiveCursor(
-  storage: SessionTransactionStorage,
-  jobId: string,
-  cursor: string | null,
-  codec: SessionCodec = defaultCodec,
-): UpdateActiveCursorOutcome {
-  const cur = readCurrent(storage, codec);
-  if (!cur.ok) return { status: "unverified" };
-  const record = cur.record;
-  if (record === null || record.phase !== "active" || record.jobId !== jobId) {
-    return { status: "stale" };
-  }
-
-  // Never persist an oversized opaque cursor. Unreachable on the real path (only a
-  // cursor validated by the stream's `checkCursor` boundary before application ever
-  // reaches `onCursorCommit`), this is a defense-in-depth seam:
-  // a poison cursor is never written, so a later reload cannot re-send it as a
-  // `Last-Event-ID` header. Surfaced as `rejected` (the record is healthy, only
-  // the cursor was refused) — NOT `stale`, which would wrongly imply the slot is
-  // gone and trigger a refresh. Non-fatal: durability is simply not claimed.
-  if (cursor !== null && !withinUtf8Bytes(cursor, MAX_CURSOR_BYTES)) return { status: "rejected" };
-
-  const nextCursor = isNonEmptyString(cursor) ? cursor : undefined;
-  // No-op fast path: the durable cursor already matches; skip a redundant write.
-  if (record.lastCursor === nextCursor) return { status: "updated", record };
-
-  const updated: ActiveOptimizeSession =
-    nextCursor === undefined ? withoutCursor(record) : { ...record, lastCursor: nextCursor };
-  const serialized = serializeOwnedRecord(updated, codec);
-  if (serialized === null) return { status: "unverified" };
-
-  const write = guardedSet(storage, serialized);
-  if (!write.ok) return { status: "unverified" };
-  const after = readCurrent(storage, codec);
-  if (after.ok && after.raw === serialized) return { status: "updated", record: updated };
-  return { status: "unverified" };
-}
-
-export type ClearInvalidCursorOutcome =
-  | { status: "cleared"; record: ActiveOptimizeSession }
-  // Nothing to clear: no record, a different job, or not this recoverable case
-  // (already clean, or other corruption that stays unreadable).
-  | { status: "none" }
-  // Storage could not be read, or the rewrite could not be proven durable.
-  | { status: "unverified" };
-
-/**
- * Durably drop an oversized saved cursor from the persisted ACTIVE record for
- * `jobId`, verified by read-back. This is the verified persistence seam for the
- * invalid-cursor recovery: only when the on-disk record's SOLE defect is an oversized
- * cursor (via `decodeActiveWithInvalidCursor`) and it belongs to `jobId` does it
- * rewrite the record cursor-less, so a later reload sees a clean resumable session
- * instead of re-entering recovery. Job-scoped, not owner-authorized. `none` when
- * there is nothing to clear; `unverified` when the write could not be proven.
- */
-export function clearInvalidActiveCursor(
-  storage: SessionTransactionStorage,
-  jobId: string,
-  codec: SessionCodec = defaultCodec,
-): ClearInvalidCursorOutcome {
-  const read = guardedGet(storage);
-  if (!read.ok) return { status: "unverified" };
-  if (read.raw === null) return { status: "none" };
-  const recovered = decodeActiveWithInvalidCursor(read.raw, codec);
-  if (recovered === null || recovered.jobId !== jobId) return { status: "none" };
-
-  const serialized = serializeOwnedRecord(recovered, codec);
-  if (serialized === null) return { status: "unverified" };
-  const write = guardedSet(storage, serialized);
-  if (!write.ok) return { status: "unverified" };
-  const after = readCurrent(storage, codec);
-  return after.ok && after.raw === serialized
-    ? { status: "cleared", record: recovered }
-    : { status: "unverified" };
-}
+// --- REMOVED: active cursor persistence ------------------------------------
+//
+// `updateActiveCursor` / `clearInvalidActiveCursor` wrote and repaired the durable
+// resume cursor. Both existed only to make a RELOAD resume a run. G6.2 retired
+// that: a fresh route entry never reattaches, so nothing reads a persisted cursor,
+// and a writer with no reader is not a feature — it is a store of the user's run
+// state that outlives the visit they were willing to have it for.
 
 /** A record we expect to own before removing it: exact owner AND variant. */
 interface ExpectedRecord {
@@ -643,58 +819,17 @@ type RemovalOutcome =
   // throwing remove) — absence is NOT proven.
   | { status: "unverified" };
 
-/** Closed evidence returned by the in-tab degraded cleanup authority. */
-export type DegradedCleanupOutcome =
-  | { status: "removed"; variant: "provisional" | "active" }
-  | { status: "absent" }
-  | {
-      status: "conflict";
-      evidence: "foreign-provisional" | "foreign-active" | "owned-active-other-job" | "unreadable";
-    }
-  | { status: "unverified"; operation: "read" | "remove-or-verify" };
-
-/**
- * An OPAQUE, in-tab authority to remove the exact record a degraded post-202
- * activation may have left behind. It captures only the transaction owner and the
- * accepted job id. That is enough to authorize either the owned provisional or the
- * owned active record when the active write landed but its read-back was unavailable.
- * A foreign record is never authorized by job id alone. This is not reload authority:
- * it is never persisted or reconstructed.
- */
-export type PreparedDegradedCleanup = () => DegradedCleanupOutcome;
-
-function removeDegradedRecord(
-  storage: SessionTransactionStorage,
-  expected: { ownerId: string; jobId: string },
-  codec: SessionCodec,
-): DegradedCleanupOutcome {
-  const current = readCurrent(storage, codec);
-  if (!current.ok) return { status: "unverified", operation: "read" };
-  if (current.raw === null) return { status: "absent" };
-  const record = current.record;
-  if (record === null) return { status: "conflict", evidence: "unreadable" };
-
-  if (record.ownerId !== expected.ownerId) {
-    return {
-      status: "conflict",
-      evidence: record.phase === "active" ? "foreign-active" : "foreign-provisional",
-    };
-  }
-
-  let variant: "provisional" | "active";
-  if (record.phase === "provisional") {
-    variant = "provisional";
-  } else if (record.jobId === expected.jobId) {
-    variant = "active";
-  } else {
-    return { status: "conflict", evidence: "owned-active-other-job" };
-  }
-
-  guardedRemove(storage);
-  const after = readCurrent(storage, codec);
-  if (after.ok && after.raw === null) return { status: "removed", variant };
-  return { status: "unverified", operation: "remove-or-verify" };
-}
+// REMOVED (G6.2d): `DegradedCleanupOutcome`, `PreparedDegradedCleanup` and
+// `removeDegradedRecord`.
+//
+// They were an in-tab authority to remove whichever owned variant a degraded
+// post-202 activation had left behind, handed to the controller's
+// `prepareDegradedCleanup`. That controller method went with boot recovery in
+// G6.2, and nothing took its place: the live authority is the owner-scoped
+// `removeOwnedRecord` / `retireSessionRecord` pair plus verified Clear, both of
+// which name the exact key rather than reasoning about variants. A second,
+// unused cleanup capability is a second lifecycle vocabulary for a reader to
+// mistake for the current one.
 
 /**
  * Remove the key ONLY when it currently holds the exact expected owner + variant,
@@ -708,7 +843,8 @@ function removeOwnedRecord(
   expected: ExpectedRecord,
   codec: SessionCodec,
 ): RemovalOutcome {
-  const cur = readCurrent(storage, codec);
+  const key = optimizeSessionKeyFor(expected.ownerId);
+  const cur = readCurrent(storage, codec, key);
   if (!cur.ok) return { status: "unverified" };
   if (cur.raw === null) return { status: "absent" };
   const record = cur.record;
@@ -717,8 +853,8 @@ function removeOwnedRecord(
   }
   // Attempt removal, then PROVE absence (a throwing/no-op/partial remove leaves
   // the record behind and must not be reported as clean).
-  guardedRemove(storage);
-  const after = readCurrent(storage, codec);
+  guardedRemove(storage, key);
+  const after = readCurrent(storage, codec, key);
   if (after.ok && after.raw === null) return { status: "removed" };
   return { status: "unverified" };
 }
@@ -755,23 +891,22 @@ export type SubmissionTransactionOutcome =
   // The POST outcome is ambiguous: the map is retained, recovery is interrupted/
   // retention — a server job may exist and the pre-202 rollback must not run.
   | { status: "acceptance-unknown"; error: unknown }
-  // 202 accepted and the active record persisted; the session is resumable.
+  // 202 accepted and the active record persisted.
   | { status: "activated"; record: ActiveOptimizeSession }
-  // 202 accepted but the active write failed; degraded in-tab-only recovery. The
-  // The durable slot may hold this transaction's provisional or an active write whose
-  // verification failed; `cleanupDegraded` classifies both through exact authority.
-  | {
-      status: "activation-persistence-failed";
-      volatile: VolatileActivation;
-      cleanupDegraded: PreparedDegradedCleanup;
-    }
+  // 202 accepted but no durable active record stands behind it — either the write
+  // failed, or the run never staged one (a plain run whose staging write failed).
+  // The job and its map remain usable for this visit.
+  | { status: "activation-persistence-failed"; volatile: VolatileActivation }
   // 202 accepted but durable state could not be proven ours (superseded/unknown).
   | {
       status: "activation-unverified";
       volatile: VolatileActivation;
       reason: ActivationUnverifiedReason;
-      cleanupDegraded: PreparedDegradedCleanup;
-    };
+    }
+  // 202 accepted, and the record this transaction staged is gone: the visit was
+  // retired while the request was in flight. Nothing was written. The job id
+  // travels so the caller can cancel the exact job best-effort.
+  | { status: "activation-retired"; jobId: string };
 
 /**
  * Run the full stage → submit → activate transaction. The `submit` closure owns
@@ -829,71 +964,50 @@ export async function runSubmissionTransaction(
     };
   }
 
+  // NO DURABLE STAGING, NO ACTIVATION.
+  //
+  // `proceed-without-recovery` is a plain run whose provisional write failed: the
+  // key is proven empty and stays that way. There is no provisional for activation
+  // to replace, and an empty key is not this transaction's to fill — filling it is
+  // exactly the repopulation `activateSession` now refuses. So the accepted job
+  // stays volatile instead, which is what "no durable record behind it" means.
+  //
+  // Expressed as "don't call it" rather than as a second activation mode: an
+  // activation that writes into an empty key should not exist at all, and a mode
+  // flag is something a later caller can pass.
+  if (staged.status !== "staged") {
+    return {
+      status: "activation-persistence-failed",
+      volatile: volatileFrom(record, result.jobId),
+    };
+  }
+
   const activated = activateSession(deps.storage, record, result.jobId, codec);
   if (activated.status === "activated") {
     return { status: "activated", record: activated.record };
   }
-  // Degraded: verification could have failed before or after the active write landed.
-  // Bind cleanup to the exact owner + accepted job so it can safely remove either
-  // legitimate owned variant while preserving every foreign/wrong/unreadable record.
-  const cleanupDegraded: PreparedDegradedCleanup = () =>
-    removeDegradedRecord(deps.storage, { ownerId: record.ownerId, jobId: result.jobId }, codec);
+  if (activated.status === "activation-retired") {
+    return { status: "activation-retired", jobId: activated.jobId };
+  }
   if (activated.status === "activation-persistence-failed") {
-    return {
-      status: "activation-persistence-failed",
-      volatile: activated.volatile,
-      cleanupDegraded,
-    };
+    return { status: "activation-persistence-failed", volatile: activated.volatile };
   }
   return {
     status: "activation-unverified",
     volatile: activated.volatile,
     reason: activated.reason,
-    cleanupDegraded,
   };
 }
 
-// --- reload classification -------------------------------------------------
-
-const SESSION_RECORD_IDENTITY = Symbol("optimize-session-record-identity");
-
-/** Opaque identity for the exact bytes observed during inspection. Callers may
- * retain and return it, but only T16q can read or construct it. */
-export interface SessionRecordIdentity {
-  readonly [SESSION_RECORD_IDENTITY]: string;
-}
-
-export type InspectedSession =
-  | { kind: "none" }
-  // An orphan provisional record: an interrupted submission. Not resumable; the
-  // only safe action is to discard it (server retention handles any accepted job
-  // from the unknowable after-202/before-id-write crash window).
-  | {
-      kind: "interrupted";
-      record: ProvisionalOptimizeSession;
-      identity: SessionRecordIdentity;
-    }
-  // An active record with an accepted job id — a resumable session. `cursorReset` is
-  // true when the otherwise-valid record carried an oversized saved cursor: the
-  // record here has that cursor stripped, so recovery resumes from the retained floor
-  // and enters explicit invalid-cursor recovery rather than the retirement flow.
-  | {
-      kind: "resumable";
-      record: ActiveOptimizeSession;
-      identity: SessionRecordIdentity;
-      cursorReset?: boolean;
-    }
-  // A corrupt, incomplete, or version-mismatched record; discardable, never resumable.
-  | { kind: "unreadable"; identity: SessionRecordIdentity | null };
-
-export type RemoveInspectedSessionOutcome =
-  | { status: "removed" }
-  | { status: "changed" }
-  | { status: "unverified" };
-
-function recordIdentity(raw: string): SessionRecordIdentity {
-  return Object.freeze({ [SESSION_RECORD_IDENTITY]: raw });
-}
+// --- record validation -----------------------------------------------------
+//
+// G6.2 REMOVED the reload classifier. `inspectPersistedSession` answered "what
+// should this page do about the record it found on boot?", and the answer is now
+// always "nothing": a route entry is fresh. The opaque `SessionRecordIdentity`
+// went with it — it existed so a boot-time removal could prove it was deleting
+// the exact bytes it had classified, and owner-keyed records make the key itself
+// that proof. What remains below is the closed schema, which is still needed to
+// write, read back, and verify a record for the run that owns it.
 
 const COMMON_KEYS = [
   "schemaVersion",
@@ -906,10 +1020,10 @@ const COMMON_KEYS = [
   "capture",
 ] as const;
 const PROVISIONAL_KEYS = new Set<string>(COMMON_KEYS);
-// The active variant requires the provisional keys plus `jobId`, and optionally
-// carries `lastCursor` (absent until the resumed stream commits its first frame).
-const ACTIVE_REQUIRED_KEYS = new Set<string>([...COMMON_KEYS, "jobId"]);
-const ACTIVE_ALLOWED_KEYS = new Set<string>([...COMMON_KEYS, "jobId", "lastCursor"]);
+// The active variant is exactly the provisional keys plus `jobId`. It used to
+// also allow an optional `lastCursor`; with reload-resume gone, a record carrying
+// one was written by an older build and is not a shape this build understands.
+const ACTIVE_KEYS = new Set<string>([...COMMON_KEYS, "jobId"]);
 const RUN_OPTION_KEYS = new Set<string>(["prettify", "timeout"]);
 const CAPTURE_STAGED_KEYS = new Set<string>(["status", "snapshotRef", "submissionOrdinal"]);
 const CAPTURE_UNAVAILABLE_KEYS = new Set<string>(["status", "reason"]);
@@ -917,20 +1031,6 @@ const CAPTURE_UNAVAILABLE_KEYS = new Set<string>(["status", "reason"]);
 function hasExactKeys(record: Record<string, unknown>, allowed: Set<string>): boolean {
   const keys = Object.keys(record);
   return keys.length === allowed.size && keys.every((key) => allowed.has(key));
-}
-
-/** Every present key is allowed AND every required key is present (allows optionals). */
-function hasAllowedKeys(
-  record: Record<string, unknown>,
-  required: Set<string>,
-  allowed: Set<string>,
-): boolean {
-  const keys = Object.keys(record);
-  if (!keys.every((key) => allowed.has(key))) return false;
-  for (const key of required) {
-    if (!(key in record)) return false;
-  }
-  return true;
 }
 
 function isNonNegativeInteger(value: unknown): value is number {
@@ -1026,224 +1126,57 @@ function parseSession(value: unknown): OptimizeSessionRecord | null {
     return { ...(candidate as unknown as ProvisionalOptimizeSession), reverseMap };
   }
   if (candidate.phase === "active") {
-    if (!hasAllowedKeys(candidate, ACTIVE_REQUIRED_KEYS, ACTIVE_ALLOWED_KEYS)) return null;
+    if (!hasExactKeys(candidate, ACTIVE_KEYS)) return null;
     if (!isValidJobId(candidate.jobId)) return null;
-    // A present cursor must be a non-empty string WITHIN the opaque-cursor byte
-    // cap; a persisted record never stores `undefined` (JSON drops it), so the key
-    // is either absent or a real cursor. An oversized persisted cursor (corrupted
-    // or foreign) makes the whole record unreadable — fail closed rather than
-    // reload it and re-send it as a `Last-Event-ID` header.
-    if (
-      "lastCursor" in candidate &&
-      !isNonEmptyStringWithin(candidate.lastCursor, MAX_CURSOR_BYTES)
-    )
-      return null;
     return { ...(candidate as unknown as ActiveOptimizeSession), reverseMap };
   }
   return null;
 }
 
 /**
- * Decode a raw record whose ONLY invalidity is an oversized saved cursor: an
- * otherwise fully valid ACTIVE session (identity, anonymization map, run options)
- * carrying a `lastCursor` that is a non-empty string past the byte cap. Returns that
- * active record with the cursor STRIPPED, or `null` for anything else (a within-cap
- * cursor, a structurally garbage cursor, or any other corruption — all of which stay
- * generically unreadable). The rest is validated by the strict `parseSession` on a
- * cursor-less copy, so a second defect never masquerades as this recoverable case.
+ * Decode raw record bytes with the PRODUCT's closed schema.
+ *
+ * Exported for out-of-process readers (the browser-test harness that has to name
+ * the job a page accepted without re-implementing — and therefore weakening — the
+ * schema). It answers only "what, if anything, do these bytes say"; it grants no
+ * authority and reads no storage.
  */
-function decodeActiveWithInvalidCursor(
+export function decodeSessionRecord(
   raw: string,
-  codec: SessionCodec,
-): ActiveOptimizeSession | null {
-  let value: unknown;
-  try {
-    value = codec.deserialize(raw);
-  } catch {
-    return null;
-  }
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
-  const candidate = value as Record<string, unknown>;
-  // The distinguishing defect: a present, non-empty-string cursor OVER the cap.
-  if (typeof candidate.lastCursor !== "string" || candidate.lastCursor.length === 0) return null;
-  if (isNonEmptyStringWithin(candidate.lastCursor, MAX_CURSOR_BYTES)) return null;
-  // Everything else must be a valid active record. Strip the cursor and re-validate.
-  const { lastCursor: _oversized, ...rest } = candidate;
-  const parsed = parseSession(rest);
-  return parsed !== null && parsed.phase === "active" ? parsed : null;
+  codec: SessionCodec = defaultCodec,
+): OptimizeSessionRecord | null {
+  return decodeRecord(raw, codec);
 }
+
+// --- REMOVED: pending prior-run retirement marker ---------------------------
+//
+// The marker existed to bridge two stores across a HIDDEN PRE-SUBMIT RETIREMENT:
+// the Optimize click first had to retire the previous run's record and the
+// snapshot it named, and the marker survived the gap between those two deletions.
+// G6.2 deleted the retirement itself — a new run stages under its own owner key
+// and never touches an older run's record — so the gap it bridged no longer
+// exists. What is still owed to an abandoned run is done by its own owner-scoped
+// cleanup, and whatever that cannot prove is left for verified Clear.
 
 /**
- * Classify whatever the current tab's storage holds on load. A missing key is
- * `none`; a well-formed provisional record is an `interrupted` submission (never
- * resumed — it may hide an accepted job the server owns); a well-formed active
- * record is `resumable`; anything unparseable, incomplete, or version-mismatched
- * is `unreadable` and can be safely discarded. A read that throws is unreadable.
+ * The legacy retirement-marker key.
+ *
+ * The mechanism is gone; the KEY is not, because a tab that ran an earlier build
+ * may still be holding one. Clear removes it — an opaque owner id is small, but a
+ * privacy action that leaves a key behind because the feature that wrote it was
+ * deleted is still leaving a key behind.
  */
-export function inspectPersistedSession(
-  storage: SessionTransactionStorage,
-  codec: SessionCodec = defaultCodec,
-): InspectedSession {
-  const read = guardedGet(storage);
-  if (!read.ok) return { kind: "unreadable", identity: null };
-  if (read.raw === null) return { kind: "none" };
-
-  const record = decodeRecord(read.raw, codec);
-  const identity = recordIdentity(read.raw);
-  if (record === null) {
-    // Distinguish an otherwise-valid active session whose ONLY defect is an oversized
-    // saved cursor from generic corruption: it stays resumable (cursor stripped, so it
-    // resumes from the retained floor) and enters explicit invalid-cursor recovery.
-    // Every other unreadable record stays unreadable and is never retired.
-    const recovered = decodeActiveWithInvalidCursor(read.raw, codec);
-    if (recovered !== null)
-      return { kind: "resumable", record: recovered, identity, cursorReset: true };
-    return { kind: "unreadable", identity };
-  }
-  return record.phase === "provisional"
-    ? { kind: "interrupted", record, identity }
-    : { kind: "resumable", record, identity };
-}
-
-// --- pending prior-run retirement marker ------------------------------------
-//
-// Retirement has to settle TWO stores that cannot transact together: this record and
-// the F1 snapshot its `capture.snapshotRef` names. Removing the record first is
-// mandatory (only the exact-bytes check can tell a still-provisional record from
-// one that concurrently became `active`), but that removal is also what destroys
-// the only handle to the snapshot. This marker is what survives the gap.
-//
-// It holds the opaque owner id and NOTHING else: no canonical YAML, no reverse
-// map, no job id. It is written BEFORE the record is removed, so a crash or a
-// failed deletion between the halves leaves an owner-scoped, already-authorized
-// retry rather than an unreachable snapshot. It is not a sweep and can never name
-// another tab's owner.
-
 export const OPTIMIZE_RETIRE_PENDING_STORAGE_KEY = "nurse.optimize.retire-pending";
 
-/** The marker is a persisted DESTRUCTIVE capability, so it gets the same closed,
- *  versioned discipline as the session record rather than an open bag. */
-export const OPTIMIZE_RETIRE_PENDING_SCHEMA_VERSION = 1;
-const RETIRE_PENDING_KEYS = new Set(["schemaVersion", "ownerId"]);
-/** Owner ids are generated identifiers; anything longer is not one of ours. */
-const MAX_RETIRE_PENDING_OWNER_LENGTH = 256;
-
-/** The closed marker payload. Deliberately carries NOTHING sensitive: no canonical
- *  YAML, no reverse map, no job id — only the opaque transaction owner. */
-interface RetirementPendingMarker {
-  schemaVersion: typeof OPTIMIZE_RETIRE_PENDING_SCHEMA_VERSION;
-  ownerId: string;
-}
-
-/** Strictly validate untrusted marker bytes: exact keys, the current version only,
- *  and a bounded non-empty owner. Anything else is NOT authority. */
-function parseRetirementPending(raw: string): RetirementPendingMarker | null {
-  let value: unknown;
-  try {
-    value = JSON.parse(raw);
-  } catch {
-    return null;
-  }
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
-  const candidate = value as Record<string, unknown>;
-  if (!hasExactKeys(candidate, RETIRE_PENDING_KEYS)) return null;
-  if (candidate.schemaVersion !== OPTIMIZE_RETIRE_PENDING_SCHEMA_VERSION) return null;
-  if (!isNonEmptyString(candidate.ownerId)) return null;
-  if (candidate.ownerId.length > MAX_RETIRE_PENDING_OWNER_LENGTH) return null;
-  return { schemaVersion: OPTIMIZE_RETIRE_PENDING_SCHEMA_VERSION, ownerId: candidate.ownerId };
-}
-
-/** The closed result of creating the marker. */
-export type MarkRetirementPendingOutcome =
-  /** Durably written AND read back as exactly the expected marker. */
-  | { status: "marked" }
-  /** Not proven durable. The caller MUST NOT remove the session record. */
-  | { status: "unverified" };
+/** The closed result of removing the legacy retirement marker, verified by read-back. */
+export type ClearRetirementPendingOutcome = { status: "cleared" } | { status: "unverified" };
 
 /**
- * Record that `ownerId`'s snapshot deletion is owed, VERIFIED by read-back.
+ * Remove the legacy retirement marker, VERIFIED by read-back.
  *
- * A best-effort write is not good enough here. The caller is about to destroy the
- * only other handle to that snapshot, so if the marker is not provably readable
- * afterwards there would be nothing left to resume from: a retry would find no
- * marker and no record, and the exact canonical YAML plus real-identity reverse
- * map would stay in IndexedDB with no way to name them again.
- */
-export function markRetirementPending(
-  storage: SessionTransactionStorage,
-  ownerId: string,
-): MarkRetirementPendingOutcome {
-  const marker: RetirementPendingMarker = {
-    schemaVersion: OPTIMIZE_RETIRE_PENDING_SCHEMA_VERSION,
-    ownerId,
-  };
-  let serialized: string;
-  try {
-    serialized = JSON.stringify(marker);
-  } catch {
-    return { status: "unverified" };
-  }
-  try {
-    storage.setItem(OPTIMIZE_RETIRE_PENDING_STORAGE_KEY, serialized);
-  } catch {
-    return { status: "unverified" };
-  }
-  // Read back through the SAME closed parser a boot would use, so a storage that
-  // silently refused the write, truncated it, or stored something else is caught
-  // here rather than discovered after the record is already gone.
-  const read = readRetirementPending(storage);
-  return read.status === "pending" && read.ownerId === ownerId
-    ? { status: "marked" }
-    : { status: "unverified" };
-}
-
-/** The closed result of reading the marker. */
-export type RetirementPendingRead =
-  /** No marker: nothing is owed. */
-  | { status: "none" }
-  /** Authoritative: exactly this owner's snapshot deletion is owed. */
-  | { status: "pending"; ownerId: string }
-  /**
-   * A marker is present but is not authority — malformed, foreign, or a version
-   * this build does not understand. NOTHING may be deleted from it: the owner it
-   * would have named cannot be trusted, and guessing would destroy a row belonging
-   * to some other run.
-   */
-  | { status: "unreadable" };
-
-export function readRetirementPending(storage: SessionTransactionStorage): RetirementPendingRead {
-  let raw: string | null;
-  try {
-    raw = storage.getItem(OPTIMIZE_RETIRE_PENDING_STORAGE_KEY);
-  } catch {
-    // A read that threw proves NOTHING — least of all absence. Collapsing it to
-    // `none` would let a failed read-back pass for a verified clear, and would let a
-    // pre-submit read throw while an owed marker sat there unseen. It costs nothing
-    // to fail closed: a storage this broken also fails `inspectPersistedSession`,
-    // which blocks the attempt anyway, so no tab is stranded that was not already.
-    return { status: "unreadable" };
-  }
-  if (raw === null) return { status: "none" };
-  const marker = parseRetirementPending(raw);
-  return marker === null
-    ? { status: "unreadable" }
-    : { status: "pending", ownerId: marker.ownerId };
-}
-
-/** The closed result of retiring the marker. */
-export type ClearRetirementPendingOutcome =
-  /** Removed AND read back absent. */
-  | { status: "cleared" }
-  /** The removal threw, was silently ignored, or the key survived it. */
-  | { status: "unverified" };
-
-/**
- * Retire the marker once the snapshot is PROVEN absent, VERIFIED by read-back.
- *
- * Not best-effort. The marker is a persisted destructive capability: a removal that
- * silently no-ops leaves it replaying on every boot and every later attempt, so
- * "the retirement is complete" would be a claim nothing checked. Read-back is what
- * makes the completion provable rather than assumed.
+ * All that survives of the marker mechanism, and only for Clear: a privacy action
+ * has to be able to say the key is gone, and "gone" means read back absent, not
+ * `removeItem` returned.
  */
 export function clearRetirementPending(
   storage: SessionTransactionStorage,
@@ -1253,29 +1186,11 @@ export function clearRetirementPending(
   } catch {
     return { status: "unverified" };
   }
-  return readRetirementPending(storage).status === "none"
-    ? { status: "cleared" }
-    : { status: "unverified" };
-}
-
-/**
- * Remove the exact record returned by `inspectPersistedSession`, without treating
- * its stored owner id as caller authorization. A changed record is preserved.
- * Success is returned only after the slot is synchronously verified absent.
- */
-export function removeInspectedSession(
-  storage: SessionTransactionStorage,
-  identity: SessionRecordIdentity,
-): RemoveInspectedSessionOutcome {
-  const expectedRaw = identity[SESSION_RECORD_IDENTITY];
-  const current = guardedGet(storage);
-  if (!current.ok) return { status: "unverified" };
-  if (current.raw === null) return { status: "removed" };
-  if (current.raw !== expectedRaw) return { status: "changed" };
-
-  guardedRemove(storage);
-  const after = guardedGet(storage);
-  if (!after.ok) return { status: "unverified" };
-  if (after.raw === null) return { status: "removed" };
-  return { status: after.raw === expectedRaw ? "unverified" : "changed" };
+  try {
+    return storage.getItem(OPTIMIZE_RETIRE_PENDING_STORAGE_KEY) === null
+      ? { status: "cleared" }
+      : { status: "unverified" };
+  } catch {
+    return { status: "unverified" };
+  }
 }

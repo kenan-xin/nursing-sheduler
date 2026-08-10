@@ -44,6 +44,8 @@ import {
   isLoadableSolverStatus,
   judgeResidue,
   judgeResiduePresent,
+  judgeVisitAbandoned,
+  resumingCallsFor,
   judgeReplacement,
   judgeWardDocument,
   judgeWardWorkbook,
@@ -84,7 +86,21 @@ async function probeRosterStorage(page: Page): Promise<RosterResidueProbe> {
       candidateRowKeys: [] as string[],
       snapshotRowKeys: [] as string[],
       scenarioRecordPresent: false,
-      optimizeSessionPresent: window.sessionStorage.getItem(keys.optimizeSessionKey) !== null,
+      // Owner-keyed: ENUMERATE, never read one named key. A probe still reading
+      // only `nurse.optimize.session` would report "nothing found" for every
+      // record the product now writes, and every residue claim below would be
+      // vacuously true.
+      optimizeSessionKeys: (() => {
+        const found: string[] = [];
+        for (let index = 0; index < window.sessionStorage.length; index += 1) {
+          const key = window.sessionStorage.key(index);
+          if (key === null) continue;
+          if (key === keys.optimizeSessionKey || key.startsWith(keys.optimizeSessionKeyPrefix)) {
+            found.push(key);
+          }
+        }
+        return found.sort();
+      })(),
       retireMarkerPresent: window.sessionStorage.getItem(keys.optimizeRetirePendingKey) !== null,
       viewMetadataPresent: window.localStorage.getItem(keys.rosterViewPreferenceKey) !== null,
     };
@@ -625,12 +641,14 @@ test.describe("G5 assembled real Ward 8 roster journey", () => {
       // The capture committed, so the product may claim a roster exists.
       await expect(page.getByTestId("optimize-capture-committed")).toBeVisible();
       await expect(page.getByTestId("optimize-open-roster")).toBeVisible();
-      // The release DELETE freed the single slot: a second run is permitted.
       await expect(page.getByTestId("optimize-submit")).toBeEnabled({
         timeout: WARD_BOUNDS.slotFreedAssertion,
       });
       // Still exactly one acceptance — one click produced one job.
       expect(acceptedTracker!.ids()).toEqual([jobA]);
+      // ...and exactly one POST crossed the wire, counted on the real socket
+      // rather than inferred from the tracker that watches it.
+      expect(apiCalls.filter((call) => call.line === "POST /api/optimize 202")).toHaveLength(1);
     });
 
     await test.step("the browser really talked to the assembled backend", async () => {
@@ -917,8 +935,76 @@ test.describe("G5 assembled real Ward 8 roster journey", () => {
     let candidateB: { jobId: string; candidateVersion: number } | null = null;
     /** ...and the content digest of the payload that pointer names. */
     let candidateBDigest = "";
-    await test.step("run the same real optimisation again", async () => {
+    // G6.2 — RETURNING TO OPTIMIZE IS A FRESH VISIT.
+    //
+    // Everything below is measured across the navigation itself: what the route
+    // requests on arrival, what it downloads on arrival, and what it says about
+    // the run that just finished. The old contract projected that run as “still
+    // running” with the button disabled; the new one owes the user a clean screen
+    // and a live action.
+    const apiCallsBeforeReentry = apiCalls.length;
+    const downloadsBeforeReentry = downloads.length;
+
+    await test.step("returning to Optimize is fresh: nothing resumes, nothing downloads", async () => {
       await gotoArmedOptimize(page);
+
+      // No resumed/blocking projection of run A or run B, and no leftover capture
+      // surface — asserted by name, so hiding one would not satisfy the others.
+      await expect(page.getByText(/still running/i)).toHaveCount(0);
+      await expect(page.getByTestId("optimize-disabled-reason")).toHaveCount(0);
+      await expect(page.getByTestId("optimize-completed-artifact")).toHaveCount(0);
+      await expect(page.getByTestId("optimize-capture-committed")).toHaveCount(0);
+      await expect(page.getByTestId("optimize-capture-retry")).toHaveCount(0);
+      // The exact primary action, live, with its settled label unchanged.
+      const submit = page.getByTestId("optimize-submit");
+      await expect(submit).toHaveText("Optimize");
+      await expect(submit).toBeEnabled();
+
+      // NOTHING was requested about the finished job. This is the assertion a
+      // boot-time resume, poll, capture retry or auto-download would fail — and it
+      // reads the real wire, not the screen.
+      const onArrival = apiCalls.slice(apiCallsBeforeReentry).map((call) => call.line);
+      expect(
+        resumingCallsFor(onArrival, jobA),
+        `arriving at Optimize resumed run A: ${onArrival.join(" | ")}`,
+      ).toEqual([]);
+      // ...and no file arrived because of a previous run.
+      expect(downloads.length, "no automatic download on re-entry").toBe(downloadsBeforeReentry);
+    });
+
+    // THE DISCRIMINATING CONTROL the ticket names. Run A's terminal cleanup, the
+    // capture, the DELETE and two route navigations have all happened by now. If
+    // any of them cleared or corrupted the scenario, the readiness gate would
+    // render `Complete the missing schedule configuration before optimising.` and
+    // the second submit would be impossible — so the scenario is re-read from the
+    // screen against the SAME Ward 8 facts the first run was judged on.
+    await test.step("the scenario survived the first run's cleanup, cell for cell", async () => {
+      const bound = WARD_BOUNDS.scenarioFacts;
+      const statValue = (testId: string) => page.getByTestId(testId).locator("div").first();
+      await expect(statValue("optimize-stat-nurses")).toHaveText(
+        String(WARD_EXPECTED.peopleCount),
+        { timeout: bound },
+      );
+      await expect(statValue("optimize-stat-days")).toHaveText(String(WARD_EXPECTED.dayCount), {
+        timeout: bound,
+      });
+      await expect(statValue("optimize-stat-shifts")).toHaveText(
+        String(WARD_EXPECTED.shiftTypeIds.length),
+        { timeout: bound },
+      );
+      // The exact sentence, named. A scenario cleared by cleanup produces it, and
+      // nothing else on this screen does.
+      await expect(
+        page.getByText("Complete the missing schedule configuration before optimising."),
+      ).toHaveCount(0);
+      await expect(page.getByTestId("optimize-readiness")).toHaveCount(0);
+    });
+
+    const postsBeforeSecondClick = apiCalls.filter(
+      (call) => call.line === "POST /api/optimize 202",
+    ).length;
+
+    await test.step("run the same real optimisation again", async () => {
       await page.locator("#optimize-timeout").fill(String(WARD_SOLVER_TIMEOUT_SECONDS));
       await page.getByTestId("optimize-submit").click({ timeout: WARD_BOUNDS.secondSubmitClick });
       // The previous run's terminal panel must be GONE before the completion wait,
@@ -941,6 +1027,11 @@ test.describe("G5 assembled real Ward 8 roster journey", () => {
       );
       runBArtifact = await nextDownload(WARD_BOUNDS.secondCompletionPoll);
       await expect(page.getByTestId("optimize-capture-committed")).toBeVisible();
+
+      // EXACTLY ONE second POST for the one deliberate click, counted on the wire.
+      const postsAfter = apiCalls.filter((call) => call.line === "POST /api/optimize 202").length;
+      expect(postsAfter - postsBeforeSecondClick).toBe(1);
+      expect(postsAfter).toBe(2);
     });
 
     await test.step("the working roster and its edit are untouched by the new result", async () => {
@@ -1050,18 +1141,20 @@ test.describe("G5 assembled real Ward 8 roster journey", () => {
     });
 
     // -------------------------------------------------------------------
-    // 9. Leave a run IN FLIGHT, so the reset has something left to clear.
+    // 9. Leave a run IN FLIGHT — and prove that leaving ABANDONS it.
     // -------------------------------------------------------------------
-    // Runs A and B tidied themselves away: their terminal chain released the
-    // session record and the submission snapshot. On that tidy path both surfaces
-    // are already gone before New schedule, so asserting the reset "cleared" them
-    // would prove nothing at all.
+    // THIS STEP USED TO ASSERT THE OPPOSITE. It left a run in flight so that its
+    // session record and submission snapshot would SURVIVE, and then used their
+    // survival as the pre-state for the reset's absence proof. That survival was
+    // the defect: the record is exactly what let a walked-away run come back as
+    // “An optimisation from this browser is still running” with the button disabled.
     //
-    // A user walking away from a running optimisation is the ordinary production
-    // way both survive — the record is precisely what lets the run be found again.
-    // Nothing is seeded: a real solve is submitted and simply not waited for.
+    // Under G6.2 the same user action means the opposite. Leaving revokes the
+    // run's audience, and the retirement lane then removes precisely the two things
+    // that existed only to serve it. Nothing is seeded: a real solve is submitted
+    // to the assembled backend and simply walked away from.
     let jobC = "";
-    await test.step("a run left in flight keeps its session record and submission snapshot", async () => {
+    await test.step("leaving an in-flight run abandons it: no record, no snapshot", async () => {
       await gotoArmedOptimize(page);
       await page.locator("#optimize-timeout").fill(String(WARD_SOLVER_TIMEOUT_SECONDS));
       await page.getByTestId("optimize-submit").click({ timeout: WARD_BOUNDS.thirdSubmitClick });
@@ -1074,29 +1167,76 @@ test.describe("G5 assembled real Ward 8 roster journey", () => {
       expect(jobC).not.toBe(jobA);
       expect(jobC).not.toBe(jobB);
 
-      // Walk away mid-solve. The `afterEach` ownership hook releases this job, and
-      // the gate's durable-store audit proves it left nothing behind.
-      await page.goto("/save-and-load", { timeout: WARD_BOUNDS.inFlightHandoff });
+      // ACCEPTING PRE-STATE for the absence below: while the visit is still on the
+      // route, the live run genuinely HAS a record. Without this, “no record
+      // afterwards” would be compatible with a run that never wrote one.
+      await expect
+        .poll(async () => (await probeRosterStorage(page)).optimizeSessionKeys.length, {
+          timeout: WARD_BOUNDS.thirdAcceptedIdPoll,
+        })
+        .toBeGreaterThan(0);
+
+      // Walk away mid-solve, THROUGH THE APP'S OWN NAVIGATION. The sidebar link is
+      // how a user actually leaves the route: a client-side transition that
+      // unmounts the screen with the page still alive, so the whole retirement —
+      // including the asynchronous snapshot purge — can finish. A `page.goto` here
+      // would be a DOCUMENT navigation, which destroys the page instead; the
+      // product handles that too (`pagehide` still cuts the session record), but
+      // the IndexedDB purge cannot complete inside a teardown and that residue is
+      // verified Clear's to own. Asserting the full contract against the path that
+      // structurally cannot deliver it would be asserting the wrong thing.
+      await page
+        .getByTestId("nav-link-/save-and-load")
+        .click({ timeout: WARD_BOUNDS.inFlightHandoff });
+      await expect(page).toHaveURL(/\/save-and-load$/, {
+        timeout: WARD_BOUNDS.inFlightHandoff,
+      });
       await expect(page.getByTestId("start-over-card")).toBeVisible({
         timeout: WARD_BOUNDS.inFlightHandoff,
       });
-      const inFlight = await probeRosterStorage(page);
-      expect(inFlight.optimizeSessionPresent, "the in-flight run left its session record").toBe(
-        true,
-      );
+      // The `afterEach` ownership hook still releases the job server-side; what is
+      // asserted below is what the ORIGIN is left holding.
+
+      await expect
+        .poll(async () => judgeVisitAbandoned(await probeRosterStorage(page)).remaining, {
+          timeout: WARD_BOUNDS.inFlightHandoff,
+        })
+        .toEqual([]);
+    });
+
+    await test.step("and returning to Optimize finds nothing of it", async () => {
+      const downloadsBeforeReturn = downloads.length;
+      const callsBeforeReturn = apiCalls.length;
+      await gotoArmedOptimize(page);
+
+      await expect(page.getByText(/still running/i)).toHaveCount(0);
+      await expect(page.getByTestId("optimize-disabled-reason")).toHaveCount(0);
+      await expect(page.getByTestId("optimize-idle")).toBeVisible();
+      await expect(page.getByTestId("optimize-submit")).toBeEnabled();
+
+      const onArrival = apiCalls.slice(callsBeforeReturn).map((call) => call.line);
       expect(
-        inFlight.snapshotRowKeys.length,
-        "the in-flight run left its submission snapshot",
-      ).toBeGreaterThan(0);
+        resumingCallsFor(onArrival, jobC),
+        `arriving at Optimize resumed the abandoned run: ${onArrival.join(" | ")}`,
+      ).toEqual([]);
+      expect(downloads.length, "no automatic download for the abandoned run").toBe(
+        downloadsBeforeReturn,
+      );
     });
 
     const beforeReset = await probeRosterStorage(page);
-    // ACCEPTING PRE-STATE. Six surfaces, each established by production behaviour
-    // and each proved present here — an absence proof is worth exactly as much as
-    // the presence that preceded it. `judgeResiduePresent` documents why the
-    // retirement marker is not among them and where its clearing IS proved.
+    // ACCEPTING PRE-STATE for the reset. FOUR surfaces now, not six: the session
+    // record and the submission snapshot are no longer establishable, because the
+    // only production sequence that used to leave them standing is the one the step
+    // above just proved removes them. What remains is committed product data — the
+    // working roster, the pointer, a candidate row, the view metadata — which is
+    // exactly what New schedule promises to clear and what abandonment must not.
     expect(judgeResiduePresent(beforeReset).remaining).toEqual([]);
     expect(beforeReset.working!.editCount).toBe(0);
+    // The abandoned run left neither behind, so their absence after the reset is
+    // reported honestly rather than claimed as something the reset achieved.
+    expect(beforeReset.optimizeSessionKeys).toEqual([]);
+    expect(beforeReset.snapshotRowKeys).toEqual([]);
 
     // -------------------------------------------------------------------
     // 10. New schedule leaves the previous run behind.
@@ -1122,12 +1262,16 @@ test.describe("G5 assembled real Ward 8 roster journey", () => {
     await test.step("Optimize and /roster both start genuinely fresh", async () => {
       const bound = WARD_BOUNDS.freshStartAssertions;
       await page.goto("/optimize-and-export", { timeout: bound });
-      // THE DISCRIMINATING ONE. A surviving session record is what makes Optimize
-      // resume the previous run on mount and re-announce it; the run left in flight
-      // above is exactly such a record, and the reset removed it. So an idle screen
-      // here is a real consequence of the cut, not the default of a page that never
-      // had a run behind it.
+      // WHAT THIS STILL DISCRIMINATES, honestly stated. It is no longer a claim
+      // about a surviving session record — abandonment already removed that, and
+      // step 9 proves it. What the reset owns here is the COMMITTED product data:
+      // this origin held a working roster, a pointer and a candidate row a moment
+      // ago, so an idle Optimize and an empty /roster below are consequences of the
+      // cut rather than the default of a page that never had a run behind it.
       await expect(page.getByTestId("optimize-idle")).toBeVisible({ timeout: bound });
+      // The retired recovery surfaces, kept as a standing regression: these test
+      // ids no longer exist anywhere in the product, and if one ever returns this
+      // is where it is caught.
       await expect(page.getByTestId("optimize-resumed")).toHaveCount(0);
       await expect(page.getByTestId("optimize-resume-failed")).toHaveCount(0);
       // No capture notice of ANY kind, and none of the reported stale copy. The

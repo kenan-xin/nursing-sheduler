@@ -32,7 +32,6 @@ import {
 } from "@/lib/optimize";
 import { Callout, type CalloutTone } from "./callout";
 import { ReadinessBanner } from "./readiness-banner";
-import { RecoveryNotice } from "./recovery-notice";
 import { RunEventLog } from "./run-event-log";
 import { RunOptionsForm } from "./run-options-form";
 import { RunStatusPanel } from "./run-status-panel";
@@ -122,19 +121,15 @@ function view(over: Partial<OptimizeRunView>): OptimizeRunView {
 const STATUS_HANDLERS = {
   onCancel: noop,
   onFinishNow: noop,
-  onResubmit: noop,
-  onDismiss: noop,
   onDownloadArtifact: noop,
   onDownloadAgain: noop,
-  onRetryCleanup: noop,
 };
 
-function renderStatus(over: Partial<OptimizeRunView>, cleanupPhase: "idle" | "failed" = "idle") {
+function renderStatus(over: Partial<OptimizeRunView>) {
   return render(
     <RunStatusPanel
       view={view(over)}
       submitting={false}
-      cleanupPhase={cleanupPhase}
       canDownloadAgain={false}
       downloadAgainFilename={null}
       {...STATUS_HANDLERS}
@@ -344,81 +339,10 @@ describe("ReadinessBanner", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Recovery notices — the route's only page-plane callouts
-// ---------------------------------------------------------------------------
-
-describe("RecoveryNotice declares the page plane it is actually mounted on", () => {
-  type RecoveryProps = React.ComponentProps<typeof RecoveryNotice>;
-
-  const BASE: RecoveryProps = {
-    state: { kind: "none" },
-    resume: null,
-    reloadRecoveryUnavailable: false,
-  };
-
-  const RESUMABLE = {
-    kind: "resumable",
-    jobId: "opt_1",
-    anonymized: false,
-    peopleCount: 2,
-  } as const;
-
-  // Every notice this component can render, with the tone it is authored at.
-  // Enumerated rather than sampled: the defect was in two states, but the
-  // placement declaration is a property of the component's MOUNT POINT, so a
-  // notice added later without it is the same bug returning.
-  const NOTICES: Array<{ testId: string; tone: string; over: Partial<RecoveryProps> }> = [
-    { testId: "optimize-degraded", tone: "warn", over: { reloadRecoveryUnavailable: true } },
-    {
-      testId: "optimize-resumed",
-      tone: "info",
-      over: { state: RESUMABLE, resume: { status: "attached", jobId: "opt_1" } },
-    },
-    {
-      testId: "optimize-resume-failed",
-      tone: "error",
-      over: { state: RESUMABLE, resume: { status: "conflict", reason: "already attached" } },
-    },
-    { testId: "optimize-storage-error", tone: "info", over: { state: { kind: "storage-error" } } },
-  ];
-
-  it.each(NOTICES)("$testId is declared at page placement", ({ testId, tone, over }) => {
-    render(<RecoveryNotice {...BASE} {...over} />);
-    const notice = screen.getByTestId(testId);
-    expect(notice.getAttribute("data-tone"), testId).toBe(tone);
-    expect(notice.getAttribute("data-placement"), testId).toBe("page");
-  });
-
-  // The two the review actually faulted: a `--panel` well with an inset cast,
-  // rendered directly onto the L0 route root.
-  it.each(NOTICES.filter((n) => n.tone === "info"))(
-    "$testId resolves the L1 page treatment instead of an unhosted well",
-    ({ testId, over }) => {
-      render(<RecoveryNotice {...BASE} {...over} />);
-      const notice = screen.getByTestId(testId);
-      expectRole(notice, { role: "surface", geometry: "card" });
-      expect(classesOf(notice), "a well needs a host plane").not.toContain("shadow-well");
-      expect(classesOf(notice), "a well needs a host plane").not.toContain("bg-panel");
-    },
-  );
-
-  // No nested L1: the notices are siblings of the route cards, and each renders
-  // exactly one container — the component adds no wrapper of its own.
-  it("adds no container around the notices it renders", () => {
-    const { container } = render(
-      <RecoveryNotice {...BASE} state={{ kind: "storage-error" }} reloadRecoveryUnavailable />,
-    );
-    const roots = Array.from(container.children);
-    expect(roots.map((el) => el.getAttribute("data-testid"))).toEqual([
-      "optimize-degraded",
-      "optimize-storage-error",
-    ]);
-    for (const root of roots) {
-      expect(root.getAttribute("data-slot"), "each notice IS the callout").toBe("callout");
-    }
-  });
-});
+// G6.2 removed the `RecoveryNotice` placement battery that stood here along with
+// the component itself. The rule it proved — a neutral callout on the page plane
+// resolves the L1 role rather than an unhosted well — is proved directly on
+// `Callout` above, which is where it actually lives.
 
 // ---------------------------------------------------------------------------
 // Run options form
@@ -555,7 +479,6 @@ describe("RunStatusPanel", () => {
           download: { status: "unavailable", artifactAvailable: false, filename: null },
         })}
         submitting={false}
-        cleanupPhase="idle"
         canDownloadAgain={false}
         downloadAgainFilename={null}
         {...STATUS_HANDLERS}

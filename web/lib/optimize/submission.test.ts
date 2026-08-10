@@ -44,7 +44,6 @@ const volatile = (jobId: string): VolatileActivation => ({
     ["P1", 1],
     ["P2", 2],
   ],
-  reloadRecoveryUnavailable: true,
 });
 
 const frame = (event: string, data: string): SseFrame => ({ id: "cur_1", event, data });
@@ -112,27 +111,23 @@ describe("outcomeToSignals", () => {
     ]);
   });
 
-  it("activated yields a durable job-activated", () => {
+  it("activated yields a plain job-activated with no recovery claim", () => {
     const outcome: SubmissionTransactionOutcome = {
       status: "activated",
       record: activeRecord("opt_7"),
     };
-    expect(outcomeToSignals(outcome)).toEqual([
-      { type: "job-activated", jobId: "opt_7", reloadRecoveryAvailable: true },
-    ]);
+    expect(outcomeToSignals(outcome)).toEqual([{ type: "job-activated", jobId: "opt_7" }]);
   });
 
-  it("activation-persistence-failed yields a volatile job-activated with reload recovery off", () => {
+  it("activation-persistence-failed names its reason for the run log", () => {
     const outcome: SubmissionTransactionOutcome = {
       status: "activation-persistence-failed",
       volatile: volatile("opt_8"),
-      cleanupDegraded: () => ({ status: "absent" }),
     };
     expect(outcomeToSignals(outcome)).toEqual([
       {
         type: "job-activated",
         jobId: "opt_8",
-        reloadRecoveryAvailable: false,
         reason: "activation-persistence-failed",
       },
     ]);
@@ -143,16 +138,22 @@ describe("outcomeToSignals", () => {
       status: "activation-unverified",
       volatile: volatile("opt_9"),
       reason: "owner-conflict",
-      cleanupDegraded: () => ({ status: "absent" }),
     };
     expect(outcomeToSignals(outcome)).toEqual([
       {
         type: "job-activated",
         jobId: "opt_9",
-        reloadRecoveryAvailable: false,
         reason: "owner-conflict",
       },
     ]);
+  });
+
+  it("activation-retired yields NO signals at all", () => {
+    // The record this transaction staged was removed while the POST was in flight,
+    // which only a retirement does — so there is no visit for a job to be
+    // activated into. A `job-activated` here would put a run on a screen the user
+    // has left and start the poll/download/capture chain behind it.
+    expect(outcomeToSignals({ status: "activation-retired", jobId: "opt_10" })).toEqual([]);
   });
 });
 

@@ -1,11 +1,21 @@
 "use client";
 
-// T16e — the Optimize & Export screen. Composes the T16a run controller, T16b
-// session recovery, the T16c/T16e terminal download+cleanup orchestration, the
-// T16d progress chart, backend version identity, required-data readiness, and the
-// bounded client observability into the old application's run experience, adapted
-// to the same-origin durable BFF. It owns no protocol machinery: it projects the
+// T16e — the Optimize & Export screen. Composes the T16a run controller, the
+// T16c/T16e terminal download+cleanup orchestration, the T16d progress chart,
+// backend version identity, required-data readiness, and the bounded client
+// observability into the old application's run experience, adapted to the
+// same-origin durable BFF. It owns no protocol machinery: it projects the
 // controller's authoritative view and drives server-authoritative controls.
+//
+// G6.2 — THE VISIT IS THE UNIT. Arriving here is always a fresh start: nothing is
+// inspected, resumed, polled, downloaded or captured because of a previous run,
+// and no previous run can disable `Optimize`. Leaving abandons the current run
+// from the user's point of view immediately — the attempt is revoked
+// synchronously, so no late callback can download a file, publish a notice, or
+// mutate a later mount — and hands the exact job and owner to an invisible
+// retirement lane. The recovery hook, the “still running” notice, the pre-submit
+// retirement and the boot auto-download that used to live here are gone, not
+// hidden; what replaced them is the attempt registry below.
 //
 // G4 closure — the roster viewer moved to its own `/roster` route. This screen
 // no longer mounts the F4 surface; the prototype-faithful `Open & adjust roster`
@@ -23,28 +33,32 @@ import { useScenarioStore } from "@/lib/store";
 import {
   OPTIMIZE_TIMEOUT_MAX_SECONDS,
   OPTIMIZE_TIMEOUT_MIN_SECONDS,
+  acquireSessionStorage,
+  createAttemptRegistry,
   createOptimizeObservability,
   deriveOptimizeReadiness,
   isActiveLifecycle,
   isSettledLifecycle,
+  migrateLegacySession,
+  retireAbandonedRun,
+  retireOnDocumentExit,
   useOptimizeRun,
   useOptimizeServerInfo,
-  useOptimizeSessionRecovery,
   useOptimizeTerminal,
   useRosterCapture,
+  type AttemptRegistry,
   type OptimizeObservability,
+  type RetireAbandonedRunDeps,
   type UseRosterCaptureDeps,
   type OptimizeRunSubmitInput,
   type OptimizeRunView,
   type UseOptimizeRunDeps,
   type UseOptimizeServerInfoDeps,
-  type UseOptimizeSessionRecoveryDeps,
   type UseOptimizeTerminalDeps,
 } from "@/lib/optimize";
 import { CaptureNotice } from "./capture-notice";
 import { Callout } from "./callout";
 import { ReadinessBanner } from "./readiness-banner";
-import { RecoveryNotice } from "./recovery-notice";
 import { RunEventLog } from "./run-event-log";
 import { RunOptionsForm } from "./run-options-form";
 import { RunStatusPanel } from "./run-status-panel";
@@ -89,11 +103,12 @@ function parseTimeoutInput(raw: string): { ok: true; value: number } | { ok: fal
 export interface OptimizeAndExportScreenProps {
   /** Test seams — all optional; production uses the real hooks/transport. */
   controllerDeps?: UseOptimizeRunDeps;
-  recoveryDeps?: UseOptimizeSessionRecoveryDeps;
   serverInfoDeps?: UseOptimizeServerInfoDeps;
   terminalDeps?: Partial<
-    Omit<UseOptimizeTerminalDeps, "controller" | "recovery" | "observability">
+    Omit<UseOptimizeTerminalDeps, "controller" | "attempts" | "observability">
   >;
+  /** Seams for the invisible retirement lane a route exit / new click enqueues. */
+  retirementDeps?: Partial<RetireAbandonedRunDeps>;
   /**
    * Seams for the roster capture gate's three collaborators (F1 storage, the B3
    * `/roster` client, F3's assembler). The gate ITSELF is always created here —
@@ -145,15 +160,23 @@ function Section({
 
 export function OptimizeAndExportScreen({
   controllerDeps,
-  recoveryDeps,
   serverInfoDeps,
   terminalDeps,
   captureDeps,
+  retirementDeps,
   observability: observabilityProp,
 }: OptimizeAndExportScreenProps) {
   const controller = useOptimizeRun(controllerDeps);
-  const recovery = useOptimizeSessionRecovery(controller, recoveryDeps);
   const serverInfo = useOptimizeServerInfo(serverInfoDeps);
+
+  // The visit's attempt registry. Mount-scoped ON PURPOSE: this is the authority
+  // that says "the user is still here for this run", and a route unmount is
+  // exactly the event that ends it. (The capture gate below is app-lifetime for
+  // the opposite reason — its tokens must outlive a remount so a second DELETE is
+  // never authorized. The two lifetimes encode the two-lane split.)
+  const attemptsRef = useRef<AttemptRegistry | null>(null);
+  if (attemptsRef.current === null) attemptsRef.current = createAttemptRegistry();
+  const attempts = attemptsRef.current;
 
   const observabilityRef = useRef<OptimizeObservability | null>(null);
   if (observabilityRef.current === null) {
@@ -168,11 +191,124 @@ export function OptimizeAndExportScreen({
 
   const terminal = useOptimizeTerminal({
     controller,
-    recovery,
+    attempts,
     observability,
     capture: capture.gate,
     ...terminalDeps,
   });
+
+  // --- abandonment ----------------------------------------------------------
+  //
+  // One function for both events that end a run's audience: navigating away, and
+  // clicking Optimize again. They differ only in what happens next.
+  //
+  // The ordering is the contract. Revocation is FIRST and synchronous, so by the
+  // time anything else runs there is already no path by which a late callback can
+  // download, dispatch, or publish. The gate fence is second, for the same reason
+  // one level down. Only then is the invisible retirement enqueued, and it is
+  // never awaited by anything the user is waiting on.
+  const retirementRef = useRef(retirementDeps);
+  retirementRef.current = retirementDeps;
+  const controllerRef = useRef(controller);
+  controllerRef.current = controller;
+  const captureRef = useRef(capture);
+  captureRef.current = capture;
+
+  /**
+   * End the current attempt's audience.
+   *
+   * `exit` names WHICH teardown this is, and it is not cosmetic: the two orderings
+   * are opposites. An SPA unmount leaves the page alive, so retirement purges the
+   * snapshot first and removes the record second — the record is the only durable
+   * handle to that row, so losing it first would strand the reverse map. A DOCUMENT
+   * teardown has no "second": an awaited IndexedDB purge may simply never resume,
+   * so the record must be cut synchronously first and the snapshot left to Clear.
+   */
+  const abandonCurrentAttempt = useCallback(
+    (exit: "spa" | "document"): void => {
+      const ctrl = controllerRef.current;
+      const prior = attempts.current();
+      if (prior === null) return;
+      // Read the identities BEFORE revoking — afterwards `getLiveJobId` is null by
+      // design, and an owner we cannot name is an owner we cannot clean up.
+      const jobId = ctrl.getLiveJobId() ?? ctrl.activation?.jobId ?? null;
+      const ownerId = prior.ownerId() ?? (jobId !== null ? ctrl.ownerFor(jobId) : null);
+      const stillRunning = isActiveLifecycle(ctrl.view.lifecycle);
+
+      attempts.revoke();
+      if (jobId !== null) captureRef.current.gate.abandon(jobId);
+
+      // Drop the run view too. It lives in the app-lifetime hot store, which is what
+      // makes the live route survive a rerender — but it also means it survives
+      // NAVIGATION, and a returning visit would otherwise find the previous run's
+      // completed result, its capture notice and its CTA still on screen. "Leaving
+      // abandons the run" has to include what the user can see when they come back.
+      ctrl.reset();
+
+      if (jobId === null && ownerId === null) return;
+
+      const retirementDepsNow = {
+        storage: retirementRef.current?.storage ?? acquireSessionStorage(),
+        cancelJob: retirementRef.current?.cancelJob,
+        purgeSnapshot: retirementRef.current?.purgeSnapshot,
+      };
+      if (exit === "document") {
+        // Synchronous, and its result is not a promise on purpose: nothing here may
+        // depend on a continuation the browser is not obliged to run.
+        retireOnDocumentExit({ jobId, ownerId, stillRunning }, retirementDepsNow);
+        return;
+      }
+      void retireAbandonedRun({ jobId, ownerId, stillRunning }, retirementDepsNow);
+    },
+    [attempts],
+  );
+
+  // Route exit, both ways it can happen.
+  //
+  // In-app navigation unmounts this component, and the cleanup below runs
+  // synchronously during that unmount — which is what makes “leaving abandons the
+  // run” true at the instant the user leaves rather than whenever a microtask
+  // happens to run. That is the path a user actually takes, and the only one where
+  // the whole retirement (including the async snapshot purge) can finish.
+  //
+  // A DOCUMENT navigation — typing a URL, a reload, closing the tab — destroys the
+  // page instead, and React cleanup is not guaranteed to run at all. `pagehide` is
+  // the reliable hook for it, and it takes the `document` ordering: the owner-keyed
+  // record (which carries the real-identity reverse map) is cut synchronously, and
+  // the IndexedDB snapshot is left as the residue verified Clear is documented to
+  // reclaim. Awaiting the purge first would mean neither happened.
+  useEffect(() => {
+    const onPageHide = () => abandonCurrentAttempt("document");
+    window.addEventListener("pagehide", onPageHide);
+    return () => {
+      window.removeEventListener("pagehide", onPageHide);
+      abandonCurrentAttempt("spa");
+    };
+  }, [abandonCurrentAttempt]);
+
+  // --- fresh-entry cleanup lane ---------------------------------------------
+  //
+  // The ONLY thing route entry does about a previous run, and it is deliberately
+  // invisible: a readable record left in the legacy single slot by an earlier build
+  // is moved to its owner key. Nothing is rendered, polled, downloaded, captured or
+  // gated from it — the migration exists so exact-owner retirement and prefix-scoped
+  // Clear can REACH that record at all. Without this, identity-bearing legacy state
+  // would sit in a key nothing owner-scoped can name.
+  //
+  // Idempotent and read-back verified, so a StrictMode double-invoke is a no-op and
+  // an interrupted run simply repeats. Unreadable bytes name no owner, so they are
+  // left exactly where they are for verified Clear.
+  const migrateRef = useRef(false);
+  useEffect(() => {
+    if (migrateRef.current) return;
+    migrateRef.current = true;
+    try {
+      migrateLegacySession(retirementRef.current?.storage ?? acquireSessionStorage());
+    } catch {
+      // A storage that cannot be read leaves the legacy bytes exactly as they were,
+      // which is the same outcome as an unreadable record: Clear's to reclaim.
+    }
+  }, []);
 
   // Required-data readiness derived from the durable scenario state. Each field is
   // selected by stable reference (never a fresh object) so zustand's
@@ -294,48 +430,85 @@ export function OptimizeAndExportScreen({
     return { document, anonymize, prettify, timeout: parsed.value };
   }, [anonymize, prettify, timeoutValue]);
 
+  // The click boundary. One click owns one attempt until its POST settles.
+  //
+  // Repeated events belonging to that ONE click — StrictMode replay, a double
+  // click, a stray second handler call — join this promise and produce exactly one
+  // request. Once it settles the promise is cleared, so a LATER deliberate click
+  // is a new attempt with a new owner and a new POST, and it never waits on the
+  // previous run's cleanup to finish.
+  //
+  // The ref is claimed SYNCHRONOUSLY, before the first `await` in the handler.
+  // That is what makes the coalescing a property of the code rather than of how
+  // fast the machine is: two events dispatched in the same task cannot both see it
+  // empty, whatever the scheduler does afterwards.
+  const inFlightSubmitRef = useRef<Promise<void> | null>(null);
+  const [submitInFlight, setSubmitInFlight] = useState(false);
+
   const onSubmit = useCallback(async () => {
+    const joined = inFlightSubmitRef.current;
+    if (joined !== null) {
+      await joined;
+      return;
+    }
     const input = buildSubmitInput();
     if (input === null) return;
     setStartFailed(false);
-    // ONE attempt per tab, spanning the hidden pre-submit housekeeping AND the
-    // request. The gate cannot be mount-local: between the POST leaving and the job
-    // activating, this run's own durable record is still provisional, so a route
-    // remount in that window would read it as a prior interrupted attempt, retire it,
-    // and send a second POST. Joining the tab's in-flight attempt is what prevents
-    // that; a genuinely new run is gated by the record itself (active ⇒ blocked).
-    const prepared = await recovery.runOptimizeAttempt(async () => {
-      runStartRef.current = Date.now();
-      emittedTerminalRef.current = null;
-      lastQueueRef.current = null;
-      await controller.submit(input);
-    });
-    // A prior attempt this click joined has already reported its own outcome; showing
-    // the failure again here is still correct, because nothing was submitted either way.
-    if (prepared.status !== "ready") setStartFailed(true);
-  }, [buildSubmitInput, controller, recovery]);
 
-  const onResubmit = useCallback(async () => {
-    // Release the occupied slot FIRST and resubmit only if cleanup actually
-    // succeeded. A failed/unproven cleanup leaves the authoritative terminal result
-    // in place and surfaces retry/abandon — never an occupied-record `submit-blocked`
-    // overwriting the real (e.g. worker_lost) result.
-    const released = await terminal.cleanup();
-    if (released !== "cleaned") return;
-    const input = buildSubmitInput();
-    if (input === null) return;
+    // A deliberate new click supersedes whatever came before it, invisibly. This
+    // is the same revocation route exit performs, and it happens BEFORE the new
+    // attempt exists, so the old run can never observe itself as current again.
+    abandonCurrentAttempt("spa");
+    const attempt = attempts.start();
+
     runStartRef.current = Date.now();
     emittedTerminalRef.current = null;
     lastQueueRef.current = null;
-    await controller.resubmit(input);
-  }, [buildSubmitInput, controller, terminal]);
 
-  // Dismiss a terminal run: release the occupied slot and return to idle. A failed
-  // cleanup keeps the terminal result and shows the retry/abandon surface.
-  const onDismiss = useCallback(async () => {
-    const released = await terminal.cleanup();
-    if (released === "cleaned") controller.reset();
-  }, [controller, terminal]);
+    const flight = (async () => {
+      const outcome = await controller.submit(input, {
+        onOwnerId: (ownerId) => attempt.claimOwner(ownerId),
+        isCurrent: () => attempt.isCurrent(),
+      });
+      // A `202` that landed after this attempt was revoked. Its record activated
+      // under its own owner key — which is exactly what makes the exact job
+      // nameable — and it goes straight to the retirement lane: never polled,
+      // never rendered, never downloaded.
+      if (outcome.status === "stale-accepted") {
+        captureRef.current.gate.abandon(outcome.jobId);
+        void retireAbandonedRun(
+          {
+            jobId: outcome.jobId,
+            ownerId: attempt.ownerId(),
+            stillRunning: true,
+          },
+          {
+            storage: retirementRef.current?.storage ?? acquireSessionStorage(),
+            cancelJob: retirementRef.current?.cancelJob,
+            purgeSnapshot: retirementRef.current?.purgeSnapshot,
+          },
+        );
+        return;
+      }
+      // The one plain-language start failure. Only reported for the attempt that
+      // is still current — an abandoned attempt has no screen to report to.
+      // `revoked-before-post` is deliberately silent: the user left.
+      if (attempt.isCurrent() && outcome.status === "blocked-before-post") {
+        setStartFailed(true);
+      }
+    })();
+
+    inFlightSubmitRef.current = flight;
+    setSubmitInFlight(true);
+    try {
+      await flight;
+    } finally {
+      if (inFlightSubmitRef.current === flight) {
+        inFlightSubmitRef.current = null;
+        setSubmitInFlight(false);
+      }
+    }
+  }, [abandonCurrentAttempt, attempts, buildSubmitInput, controller]);
 
   // Discard the saved roster for the run in view. The gate proves the local removal
   // before any server cleanup is authorized, so a failure here leaves both the
@@ -355,43 +528,28 @@ export function OptimizeAndExportScreen({
   }, [controller, observability, view.jobId]);
 
   // --- derived UI state ------------------------------------------------------
-  // A booting inspection, a still-running previous run, OR a terminal cleanup that is
-  // still cleaning or has failed to prove local record release must each block a new
-  // submission — otherwise Optimize is enabled only to predictably fail with
-  // `submit-blocked` from T16q's occupied slot, overwriting the authoritative
-  // terminal view.
   //
-  // An INTERRUPTED record is deliberately NOT blocking any more: Optimize retires it
-  // invisibly. An UNREADABLE one is not blocking either — the button stays live and
-  // the click reports plainly that optimisation could not start, rather than the
-  // screen explaining a recovery record the user was never meant to know about.
-  const recoveryBooting = !recovery.ready;
-  const recoveryBlocking = recovery.state.kind === "resumable";
-  const cleanupBlocking =
-    terminal.cleanupPhase === "cleaning" || terminal.cleanupPhase === "failed";
-  const submitEnabled =
-    readiness.ready &&
-    serverInfo.status === "online" &&
-    !active &&
-    !recoveryBooting &&
-    !recoveryBlocking &&
-    !cleanupBlocking;
-  // `cleanupBlocking` is checked BEFORE `recoveryBlocking`: a terminal run whose
-  // local release failed still occupies the record slot, so both are true at once,
-  // and the actionable one — the retry/abandon surface already on screen — is the
-  // one worth naming.
-  const disabledReason = recoveryBooting
-    ? "Checking for a previous optimisation run…"
-    : cleanupBlocking
-      ? "Finish tidying up the last run above before starting a new one."
-      : recoveryBlocking
-        ? "An optimisation from this browser is still running. Wait for it to finish before starting another."
-        : !readiness.ready
-          ? "Complete the missing schedule configuration before optimising."
-          : serverInfo.status !== "online"
-            ? "Backend unavailable. Check that the configured backend is running."
-            : null;
-  const reloadRecoveryUnavailable = controller.activation?.reloadRecoveryAvailable === false;
+  // `Optimize` is ALWAYS CLICKABLE except for two facts about the present: the form
+  // is not ready, or the backend is not there. Nothing about any run — previous or
+  // current — participates.
+  //
+  // Four gates have been deleted here, each of which was a way a run could hold the
+  // button down: `recoveryBooting` (a boot inspection that no longer happens),
+  // `recoveryBlocking` (the “still running” state this ticket exists for),
+  // `cleanupBlocking` (an old run's unproven cleanup), and now `!active` — which
+  // disabled the button for every queued/running/cancelling lifecycle and so made
+  // “a later deliberate click supersedes the current run” unreachable in the product
+  // even though the contract describes it.
+  //
+  // What remains is `submitInFlight`, and it is a different thing entirely: not a
+  // RUN in progress but a REQUEST in flight. It exists so the settled promise, not
+  // the wall clock, decides when a second gesture becomes a second attempt.
+  const submitEnabled = readiness.ready && serverInfo.status === "online" && !submitInFlight;
+  const disabledReason = !readiness.ready
+    ? "Complete the missing schedule configuration before optimising."
+    : serverInfo.status !== "online"
+      ? "Backend unavailable. Check that the configured backend is running."
+      : null;
 
   return (
     <Surface
@@ -432,11 +590,6 @@ export function OptimizeAndExportScreen({
           New schedule.
         </Callout>
       ) : null}
-      <RecoveryNotice
-        state={recovery.state}
-        resume={recovery.resume}
-        reloadRecoveryUnavailable={reloadRecoveryUnavailable}
-      />
       <CaptureNotice
         state={capture.stateFor(view.jobId)}
         onRetry={terminal.retryCapture}
@@ -456,9 +609,11 @@ export function OptimizeAndExportScreen({
             anonymize={anonymize}
             timeout={timeoutValue}
             timeoutError={timeoutError}
-            optionsDisabled={active || controller.isSubmitting}
+            // Editable whenever a new run could be started, so the options a later
+            // deliberate click sends are the ones the user can actually change.
+            optionsDisabled={submitInFlight}
             submitEnabled={submitEnabled}
-            submitting={controller.isSubmitting}
+            submitting={submitInFlight}
             disabledReason={disabledReason}
             onPrettifyChange={setPrettify}
             onAnonymizeChange={setAnonymize}
@@ -471,16 +626,12 @@ export function OptimizeAndExportScreen({
           <RunStatusPanel
             view={view}
             submitting={controller.isSubmitting}
-            cleanupPhase={terminal.cleanupPhase}
             canDownloadAgain={terminal.canDownloadAgain}
             downloadAgainFilename={terminal.downloadAgainFilename}
             onCancel={onCancel}
             onFinishNow={controller.finishNow}
-            onResubmit={onResubmit}
-            onDismiss={onDismiss}
             onDownloadArtifact={terminal.downloadArtifact}
             onDownloadAgain={terminal.downloadAgain}
-            onRetryCleanup={terminal.retryCleanup}
             // The idle-panel CTA must respect the SAME submission gates as the
             // settings-form Optimize button — wire it only when a run is actually
             // permitted, so an offline / not-ready / recovery- or cleanup-blocked

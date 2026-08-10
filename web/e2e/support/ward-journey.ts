@@ -205,7 +205,12 @@ export const STORAGE_KEYS = {
   snapshotKeyPrefix: "snapshot:",
   currentCandidateMetaKey: "currentCandidate",
   scenarioPersistKey: "nurse-scheduler/scenario",
+  /** The LEGACY single slot. Still swept by Clear, so still observed. */
   optimizeSessionKey: "nurse.optimize.session",
+  /** G6.2: records are `nurse.optimize.session.<ownerId>`, so the probe reads a
+   *  PREFIX. A probe that kept reading the one legacy key would report "nothing
+   *  found" for every owner-keyed record and turn every residue claim vacuous. */
+  optimizeSessionKeyPrefix: "nurse.optimize.session.",
   optimizeRetirePendingKey: "nurse.optimize.retire-pending",
   rosterViewPreferenceKey: "nursing-scheduler.roster-view",
 } as const;
@@ -745,7 +750,8 @@ export interface RosterResidueProbe {
   candidateRowKeys: string[];
   snapshotRowKeys: string[];
   scenarioRecordPresent: boolean;
-  optimizeSessionPresent: boolean;
+  /** Every optimize session key present: the legacy slot and every owner record. */
+  optimizeSessionKeys: string[];
   retireMarkerPresent: boolean;
   viewMetadataPresent: boolean;
 }
@@ -764,6 +770,38 @@ export interface ResidueVerdict {
   remaining: string[];
 }
 
+/**
+ * The calls that would mean a route entry RESUMED `jobId`, drawn from a window of
+ * observed `METHOD /path STATUS` lines.
+ *
+ * WHY THIS IS NOT “any line mentioning the job”, which is what the journey asserted
+ * first: leaving abandons the run, and abandonment fires a best-effort exact-job
+ * `cancel` WITHOUT awaiting it — deliberately, so the local privacy cuts never wait
+ * on the network. Its RESPONSE can therefore be recorded after the next navigation
+ * has begun, and a “mentions the job” filter reads the abandonment's own request as
+ * evidence that arriving resumed something.
+ *
+ * That is a false positive, and a racy one: the journey passed it twice in a row on
+ * one run of this machine and failed it on the next. Pure and unit-tested here for
+ * exactly the reason this module exists — a judgement buried in an assertion that
+ * only runs behind Docker is a judgement nothing can check.
+ *
+ * The forbidden shapes are ENUMERATED rather than expressed as “everything except
+ * cancel”, so a resuming call added later is caught instead of quietly tolerated.
+ * `cancel` is the one call the retirement lane is contractually allowed to make.
+ */
+export function resumingCallsFor(lines: readonly string[], jobId: string): string[] {
+  const forbidden = [
+    `GET /api/optimize/${jobId} `, // the authoritative poll
+    `GET /api/optimize/${jobId}/events`,
+    `GET /api/optimize/${jobId}/xlsx`,
+    `GET /api/optimize/${jobId}/roster`,
+    `DELETE /api/optimize/${jobId} `,
+    `POST /api/optimize/${jobId}/finish-now`,
+  ];
+  return lines.filter((line) => forbidden.some((shape) => line.includes(shape)));
+}
+
 /** Judge a post-reset probe. Anything still present is named, never summarised away. */
 export function judgeResidue(probe: RosterResidueProbe): ResidueVerdict {
   const remaining: string[] = [];
@@ -775,9 +813,37 @@ export function judgeResidue(probe: RosterResidueProbe): ResidueVerdict {
   if (probe.snapshotRowKeys.length > 0) {
     remaining.push(`${probe.snapshotRowKeys.length} submission snapshot row(s)`);
   }
-  if (probe.optimizeSessionPresent) remaining.push("the optimisation session record");
+  if (probe.optimizeSessionKeys.length > 0) {
+    remaining.push(`${probe.optimizeSessionKeys.length} optimisation session record(s)`);
+  }
   if (probe.retireMarkerPresent) remaining.push("the retirement marker");
   if (probe.viewMetadataPresent) remaining.push("the roster view metadata");
+  return { ok: remaining.length === 0, remaining };
+}
+
+/**
+ * Judge what a visit left behind after the user navigated away from a live run.
+ *
+ * G6.2's abandonment contract, stated as evidence rather than as copy: leaving
+ * revokes the run's audience, and the retirement lane then removes the exact
+ * things that only existed to serve it — this owner's session record and the
+ * submission snapshot it named. Nothing here looks at the screen, because the
+ * claim is about what the origin is still holding, not about what it renders.
+ *
+ * Deliberately NOT in this set: the working roster, the candidate pointer and the
+ * candidate rows. Those are committed product data. A run that got far enough to
+ * commit a candidate produced something the user owns, and walking away from the
+ * route is not a decision to destroy it.
+ */
+export function judgeVisitAbandoned(probe: RosterResidueProbe): ResidueVerdict {
+  const remaining: string[] = [];
+  if (probe.optimizeSessionKeys.length > 0) {
+    remaining.push(`${probe.optimizeSessionKeys.length} optimisation session record(s)`);
+  }
+  if (probe.snapshotRowKeys.length > 0) {
+    remaining.push(`${probe.snapshotRowKeys.length} submission snapshot row(s)`);
+  }
+  if (probe.retireMarkerPresent) remaining.push("the retirement marker");
   return { ok: remaining.length === 0, remaining };
 }
 
@@ -785,22 +851,26 @@ export function judgeResidue(probe: RosterResidueProbe): ResidueVerdict {
  * Judge the pre-reset probe that makes the absence assertions non-vacuous.
  *
  * WHAT THIS DOES AND DOES NOT CLAIM. An absence proof is worth exactly as much as the
- * presence that preceded it, so this requires the six surfaces the successful journey
+ * presence that preceded it, so this requires the four surfaces the successful journey
  * can genuinely establish through production behaviour: the working roster, the
- * latest-result pointer, a saved candidate row, the roster view metadata, the
- * optimisation session record, and a submission snapshot.
+ * latest-result pointer, a saved candidate row, and the roster view metadata.
  *
- * The last two are why the journey leaves a third run IN FLIGHT rather than letting
- * every run tidy itself away: a completed run releases both, so on the tidy path they
- * would already be absent before the reset and “cleared” would mean nothing.
+ * G6.2 REMOVED TWO. It used to also require the optimisation session record and a
+ * submission snapshot, and the journey earned them by leaving a third run in flight —
+ * because a run that finished released both, so on the tidy path they were already
+ * gone. That is no longer a way to earn them: leaving abandons the run, and the
+ * retirement lane removes the record and purges the snapshot precisely BECAUSE the
+ * user walked away. There is now no honest production sequence that leaves either
+ * standing until an unrelated reset, so requiring them here would force the journey
+ * to fabricate a state the product does not produce.
  *
- * The RETIREMENT MARKER is deliberately not required. It exists only for the instant
- * one submission retires a previous interrupted record, and no production sequence
- * both creates it and leaves it standing until an unrelated reset. Its clearing stays
- * covered where it can be driven honestly — G4's `new-schedule-reset.spec.ts`, which
- * establishes it through the production storage authority and proves the confirmed
- * reset removes it. `judgeResidue` still requires it absent afterwards; it is simply
- * not counted as something THIS journey proved was there.
+ * Both are still proved, in the place that can drive them honestly: `judgeResidue`
+ * still refuses to let either survive a reset, and `judgeVisitAbandoned` proves the
+ * ABANDONMENT is what removes them — which is the stronger claim, since it names the
+ * cause rather than only the eventual absence.
+ *
+ * The RETIREMENT MARKER is likewise not required. Its mechanism is deleted; only the
+ * key survives, for Clear to remove.
  */
 export function judgeResiduePresent(probe: RosterResidueProbe): ResidueVerdict {
   const remaining: string[] = [];
@@ -808,8 +878,6 @@ export function judgeResiduePresent(probe: RosterResidueProbe): ResidueVerdict {
   if (probe.candidatePointer === null) remaining.push("the latest-result pointer");
   if (probe.candidateRowKeys.length === 0) remaining.push("a saved result row");
   if (!probe.viewMetadataPresent) remaining.push("the roster view metadata");
-  if (!probe.optimizeSessionPresent) remaining.push("the optimisation session record");
-  if (probe.snapshotRowKeys.length === 0) remaining.push("a submission snapshot row");
   return { ok: remaining.length === 0, remaining };
 }
 

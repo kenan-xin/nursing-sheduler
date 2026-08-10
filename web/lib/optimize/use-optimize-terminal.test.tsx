@@ -12,12 +12,12 @@ import {
   type CleanupCallOutcome,
   type UseOptimizeTerminalDeps,
 } from "./use-optimize-terminal";
-import type { OptimizeCleanupOutcome, OptimizeRecovery } from "./session-recovery";
+import type { RemoveOwnerSessionOutcome } from "./session-transaction";
 import type { RunActivation } from "./use-optimize-run";
 import { MAX_DISPLAY_FILENAME_BYTES } from "@/lib/query/sse-limits";
 import { ScenarioPersistenceDb } from "@/lib/store/dexie-storage";
 import { createRosterStorageForDb, type RosterStorage } from "@/lib/store/roster-storage";
-import { createRosterCapture, type CaptureRequest, type RosterCaptureGate } from "./roster-capture";
+import { createRosterCapture } from "./roster-capture";
 import { resetRosterCaptureGate } from "./roster-capture-app";
 import { buildStagedSubmission, stageSubmissionSnapshot } from "./submission-snapshot";
 import { ROSTER_SUBMISSION_VERSION } from "./roster-candidate-builder";
@@ -31,7 +31,11 @@ const notify = {
   failed: vi.fn(),
   cleanup: vi.fn(),
 };
-const recoveryCleanup = vi.fn((): OptimizeCleanupOutcome => ({ status: "removed" }));
+// The owner-keyed record removal the terminal chain drives. Named for what it is
+// now: the controller's exact-owner retirement, not a recovery cleanup.
+const retireRecord = vi.fn((): RemoveOwnerSessionOutcome | { status: "unknown-owner" } => ({
+  status: "removed",
+}));
 
 beforeEach(() => {
   // Cleanup coalescing is app-lifetime (it must outlive a route unmount so a
@@ -39,16 +43,17 @@ beforeEach(() => {
   // without this reset one test's confirmed cleanup would be replayed by the next.
   resetRosterCaptureGate();
   for (const fn of Object.values(notify)) fn.mockClear();
-  recoveryCleanup.mockClear();
+  retireRecord.mockClear();
+  retireRecord.mockReturnValue({ status: "removed" });
 });
 
 function activation(over: Partial<RunActivation> = {}): RunActivation {
   return {
     jobId: "opt_1",
+    ownerId: "owner-1",
     anonymized: false,
     peopleCount: 2,
     reverseMap: [],
-    reloadRecoveryAvailable: true,
     capture: { status: "staged", snapshotRef: "owner-1", submissionOrdinal: 1 },
     ...over,
   };
@@ -58,6 +63,7 @@ function controllerWith(view: OptimizeRunView, act: RunActivation | null) {
   return {
     view,
     activation: act,
+    retireSessionRecord: retireRecord,
     notifyDownloadStarted: notify.started,
     notifyDownloadSucceeded: notify.succeeded,
     notifyDownloadUnavailable: notify.unavailable,
@@ -81,52 +87,19 @@ function completedView(jobId: string, artifactAvailable: boolean): OptimizeRunVi
 
 const xlsxBlob = new Blob(["plain"], { type: "application/octet-stream" });
 
-/** Wrap a REAL gate so a test can assert exactly which authorities reached it.
- *  The defect this closes is invisible in the outcome — it is about WHICH request
- *  the chain issued — so the calls themselves have to be observable. */
-function spyGate(inner: RosterCaptureGate) {
-  const captureCalls: CaptureRequest["capture"][] = [];
-  const gate: RosterCaptureGate = {
-    ...inner,
-    capture(request) {
-      captureCalls.push(request.capture);
-      return inner.capture(request);
-    },
-  };
-  return { gate, captureCalls };
-}
-
-/** Recovery holding a durable ACTIVE record for `jobId` whose activation has not
- *  been attached to the controller yet — the real remount handoff window. */
-function resumable(jobId = "opt_1"): OptimizeRecovery {
-  return { kind: "resumable", jobId, anonymized: false, peopleCount: 2 };
-}
-
 function render(
-  deps: Omit<UseOptimizeTerminalDeps, "recovery">,
+  deps: Omit<UseOptimizeTerminalDeps, "controller">,
   view: OptimizeRunView,
   act: RunActivation | null,
-  recoveryReady = true,
-  recoveryState: OptimizeRecovery = { kind: "none" },
 ) {
-  type Props = {
-    view: OptimizeRunView;
-    act: RunActivation | null;
-    ready?: boolean;
-    state?: OptimizeRecovery;
-  };
+  type Props = { view: OptimizeRunView; act: RunActivation | null };
   return renderHook(
     (props: Props) =>
       useOptimizeTerminal({
         ...deps,
         controller: controllerWith(props.view, props.act),
-        recovery: {
-          cleanup: recoveryCleanup,
-          ready: props.ready ?? true,
-          state: props.state ?? { kind: "none" },
-        },
       }),
-    { initialProps: { view, act, ready: recoveryReady, state: recoveryState } as Props },
+    { initialProps: { view, act } as Props },
   );
 }
 
@@ -140,7 +113,7 @@ describe("useOptimizeTerminal — completed with artifact", () => {
 
     const view = INITIAL_OPTIMIZE_RUN_VIEW;
     const { result, rerender } = render(
-      { controller: undefined as never, fetchXlsx, restore, saveBlob, deleteJob },
+      { fetchXlsx, restore, saveBlob, deleteJob },
       view,
       activation({ anonymized: true, reverseMap: [["P1", 1]], peopleCount: 1 }),
     );
@@ -150,7 +123,7 @@ describe("useOptimizeTerminal — completed with artifact", () => {
       act: activation({ anonymized: true, reverseMap: [["P1", 1]], peopleCount: 1 }),
     });
 
-    await waitFor(() => expect(result.current.cleanupPhase).toBe("cleaned"));
+    await waitFor(() => expect(notify.cleanup).toHaveBeenLastCalledWith("cleaned"));
     expect(notify.started).toHaveBeenCalled();
     expect(restore).toHaveBeenCalledWith(xlsxBlob, {
       anonymized: true,
@@ -160,7 +133,7 @@ describe("useOptimizeTerminal — completed with artifact", () => {
     expect(saveBlob).toHaveBeenCalledWith(restored, "schedule.xlsx");
     expect(notify.succeeded).toHaveBeenCalledWith("schedule.xlsx");
     expect(deleteJob).toHaveBeenCalledWith("opt_1");
-    expect(recoveryCleanup).toHaveBeenCalledWith("opt_1");
+    expect(retireRecord).toHaveBeenCalledWith("opt_1");
     expect(notify.cleanup).toHaveBeenCalledWith("cleaned");
     expect(result.current.canDownloadAgain).toBe(true);
     expect(result.current.downloadAgainFilename).toBe("schedule.xlsx");
@@ -179,7 +152,7 @@ describe("useOptimizeTerminal — completed with artifact", () => {
     const deleteJob = vi.fn(async (): Promise<CleanupCallOutcome> => ({ status: "confirmed" }));
 
     const { result, rerender } = render(
-      { controller: undefined as never, fetchXlsx, restore, saveBlob, deleteJob },
+      { fetchXlsx, restore, saveBlob, deleteJob },
       INITIAL_OPTIMIZE_RUN_VIEW,
       activation({ anonymized: true, reverseMap: [["P1", 1]], peopleCount: 1 }),
     );
@@ -188,7 +161,7 @@ describe("useOptimizeTerminal — completed with artifact", () => {
       act: activation({ anonymized: true, reverseMap: [["P1", 1]], peopleCount: 1 }),
     });
 
-    await waitFor(() => expect(result.current.cleanupPhase).toBe("cleaned"));
+    await waitFor(() => expect(notify.cleanup).toHaveBeenLastCalledWith("cleaned"));
     // Immediate download: exact authoritative filename (never truncated).
     expect(saveBlob).toHaveBeenCalledWith(restored, huge);
     // Retained display + run-view notification: bounded UTF-8-safe copy only.
@@ -202,14 +175,14 @@ describe("useOptimizeTerminal — completed with artifact", () => {
     const saveBlob = vi.fn();
     const deleteJob = vi.fn(async (): Promise<CleanupCallOutcome> => ({ status: "confirmed" }));
 
-    const { result, rerender } = render(
-      { controller: undefined as never, fetchXlsx, saveBlob, deleteJob },
+    const { rerender } = render(
+      { fetchXlsx, saveBlob, deleteJob },
       INITIAL_OPTIMIZE_RUN_VIEW,
       activation(),
     );
     rerender({ view: completedView("opt_1", true), act: activation() });
 
-    await waitFor(() => expect(result.current.cleanupPhase).toBe("cleaned"));
+    await waitFor(() => expect(notify.cleanup).toHaveBeenLastCalledWith("cleaned"));
     // Default restore bypass: the exact fetched blob is saved, never re-serialized.
     expect(saveBlob).toHaveBeenCalledWith(xlsxBlob, "schedule.xlsx");
   });
@@ -225,7 +198,7 @@ describe("useOptimizeTerminal — completed with artifact", () => {
     const deleteJob = vi.fn(async (): Promise<CleanupCallOutcome> => ({ status: "confirmed" }));
 
     const { result, rerender } = render(
-      { controller: undefined as never, fetchXlsx, saveBlob, deleteJob },
+      { fetchXlsx, saveBlob, deleteJob },
       INITIAL_OPTIMIZE_RUN_VIEW,
       activation(),
     );
@@ -233,10 +206,10 @@ describe("useOptimizeTerminal — completed with artifact", () => {
 
     await waitFor(() => expect(notify.failed).toHaveBeenCalled());
     expect(deleteJob).not.toHaveBeenCalled();
-    expect(result.current.cleanupPhase).toBe("idle");
+    expect(notify.cleanup).not.toHaveBeenCalled();
 
     act(() => result.current.downloadArtifact());
-    await waitFor(() => expect(result.current.cleanupPhase).toBe("cleaned"));
+    await waitFor(() => expect(notify.cleanup).toHaveBeenLastCalledWith("cleaned"));
     expect(saveBlob).toHaveBeenCalledWith(xlsxBlob, "schedule.xlsx");
   });
 
@@ -245,7 +218,7 @@ describe("useOptimizeTerminal — completed with artifact", () => {
     const saveBlob = vi.fn();
     const deleteJob = vi.fn(async (): Promise<CleanupCallOutcome> => ({ status: "confirmed" }));
     const { result, rerender } = render(
-      { controller: undefined as never, fetchXlsx, saveBlob, deleteJob },
+      { fetchXlsx, saveBlob, deleteJob },
       INITIAL_OPTIMIZE_RUN_VIEW,
       activation(),
     );
@@ -260,31 +233,29 @@ describe("useOptimizeTerminal — completed with artifact", () => {
   });
 });
 
+// G6.2b re-pointed the entry: these drive `attemptCleanup` through the SURVIVING
+// public action rather than the retired generic `cleanup()`. With no capture gate
+// wired `dismissCapture()` reaches the identical code path, so the invariants below
+// are unchanged — only the door they come through is.
 describe("useOptimizeTerminal — cleanup requires BOTH server and local removal", () => {
   it("reports failed when the DELETE is confirmed but T16b cannot prove local removal", async () => {
     const deleteJob = vi.fn(async (): Promise<CleanupCallOutcome> => ({ status: "confirmed" }));
-    recoveryCleanup.mockReturnValueOnce({ status: "unverified" });
+    retireRecord.mockReturnValueOnce({ status: "unverified" });
     const failedView: OptimizeRunView = {
       ...INITIAL_OPTIMIZE_RUN_VIEW,
       lifecycle: "failed",
       jobId: "opt_1",
-      resubmittable: true,
     };
-    const { result } = render(
-      { controller: undefined as never, deleteJob },
-      failedView,
-      activation(),
-    );
+    const { result } = render({ deleteJob }, failedView, activation());
     let outcome: string | undefined;
     await act(async () => {
-      outcome = await result.current.cleanup();
+      outcome = await result.current.dismissCapture();
     });
     // Server confirmed but local removal unproven → NOT a false "cleaned".
     expect(outcome).toBe("failed");
     expect(deleteJob).toHaveBeenCalledWith("opt_1");
-    expect(recoveryCleanup).toHaveBeenCalledWith("opt_1");
+    expect(retireRecord).toHaveBeenCalledWith("opt_1");
     expect(notify.cleanup).toHaveBeenLastCalledWith("failed");
-    expect(result.current.cleanupPhase).toBe("failed");
   });
 
   it("reports failed and does NOT remove the local record when the DELETE is unconfirmed", async () => {
@@ -296,17 +267,13 @@ describe("useOptimizeTerminal — cleanup requires BOTH server and local removal
       lifecycle: "failed",
       jobId: "opt_1",
     };
-    const { result } = render(
-      { controller: undefined as never, deleteJob },
-      failedView,
-      activation(),
-    );
+    const { result } = render({ deleteJob }, failedView, activation());
     await act(async () => {
-      await result.current.cleanup();
+      await result.current.dismissCapture();
     });
     // An unconfirmed server DELETE must not orphan the job by removing the local record.
-    expect(recoveryCleanup).not.toHaveBeenCalled();
-    expect(result.current.cleanupPhase).toBe("failed");
+    expect(retireRecord).not.toHaveBeenCalled();
+    expect(notify.cleanup).toHaveBeenLastCalledWith("failed");
   });
 });
 
@@ -316,7 +283,7 @@ describe("useOptimizeTerminal — Download Again is job-scoped", () => {
     const saveBlob = vi.fn();
     const deleteJob = vi.fn(async (): Promise<CleanupCallOutcome> => ({ status: "confirmed" }));
     const { result, rerender } = render(
-      { controller: undefined as never, fetchXlsx, saveBlob, deleteJob },
+      { fetchXlsx, saveBlob, deleteJob },
       INITIAL_OPTIMIZE_RUN_VIEW,
       activation({ jobId: "opt_A" }),
     );
@@ -341,39 +308,30 @@ describe("useOptimizeTerminal — job-gone cleanup", () => {
       ...INITIAL_OPTIMIZE_RUN_VIEW,
       lifecycle: "failed",
       jobId: "opt_1",
-      resubmittable: true,
     };
-    const { result, rerender } = render(
-      { controller: undefined as never, deleteJob },
-      failedView,
-      activation(),
-    );
+    const { result, rerender } = render({ deleteJob }, failedView, activation());
     // job-gone detaches the id (view.jobId → null, activation cleared) but the record persists.
     rerender({
-      view: { ...INITIAL_OPTIMIZE_RUN_VIEW, lifecycle: "failed", jobId: null, resubmittable: true },
+      view: { ...INITIAL_OPTIMIZE_RUN_VIEW, lifecycle: "failed", jobId: null },
       act: null,
     });
     let outcome: string | undefined;
     await act(async () => {
-      outcome = await result.current.cleanup();
+      outcome = await result.current.dismissCapture();
     });
     expect(outcome).toBe("cleaned");
     expect(deleteJob).toHaveBeenCalledWith("opt_1");
-    expect(recoveryCleanup).toHaveBeenCalledWith("opt_1");
+    expect(retireRecord).toHaveBeenCalledWith("opt_1");
   });
 });
 
 describe("useOptimizeTerminal — completed with no artifact", () => {
   it("marks the download unavailable and attempts cleanup", async () => {
     const deleteJob = vi.fn(async (): Promise<CleanupCallOutcome> => ({ status: "confirmed" }));
-    const { result, rerender } = render(
-      { controller: undefined as never, deleteJob },
-      INITIAL_OPTIMIZE_RUN_VIEW,
-      activation(),
-    );
+    const { rerender } = render({ deleteJob }, INITIAL_OPTIMIZE_RUN_VIEW, activation());
     rerender({ view: completedView("opt_1", false), act: activation() });
 
-    await waitFor(() => expect(result.current.cleanupPhase).toBe("cleaned"));
+    await waitFor(() => expect(notify.cleanup).toHaveBeenLastCalledWith("cleaned"));
     expect(notify.unavailable).toHaveBeenCalled();
     expect(deleteJob).toHaveBeenCalledWith("opt_1");
   });
@@ -388,39 +346,34 @@ describe("useOptimizeTerminal — cleanup failure and retry", () => {
         ? { status: "failed", reason: "delete-http-409" }
         : { status: "confirmed" };
     });
-    const { result, rerender } = render(
-      { controller: undefined as never, deleteJob },
-      INITIAL_OPTIMIZE_RUN_VIEW,
-      activation(),
-    );
+    const { result, rerender } = render({ deleteJob }, INITIAL_OPTIMIZE_RUN_VIEW, activation());
     rerender({ view: completedView("opt_1", false), act: activation() });
 
-    await waitFor(() => expect(result.current.cleanupPhase).toBe("failed"));
+    await waitFor(() => expect(notify.cleanup).toHaveBeenLastCalledWith("failed"));
     expect(notify.cleanup).toHaveBeenLastCalledWith("failed");
 
-    act(() => result.current.retryCleanup());
-    await waitFor(() => expect(result.current.cleanupPhase).toBe("cleaned"));
+    // The retry is the same surviving action: the coordinator remembers the failure
+    // as retryable and did NOT mark the server deleted, so this re-runs both halves.
+    await act(async () => {
+      await result.current.dismissCapture();
+    });
+    await waitFor(() => expect(notify.cleanup).toHaveBeenLastCalledWith("cleaned"));
   });
 });
 
 describe("useOptimizeTerminal — cancelled/failed dismiss cleanup", () => {
-  it("cleans up on the exposed cleanup() action", async () => {
+  it("cleans up a failed run on dismissal without ever auto-downloading", async () => {
     const deleteJob = vi.fn(async (): Promise<CleanupCallOutcome> => ({ status: "confirmed" }));
     const failedView: OptimizeRunView = {
       ...INITIAL_OPTIMIZE_RUN_VIEW,
       lifecycle: "failed",
       jobId: "opt_1",
       error: { source: "job", code: "worker_lost", message: "worker lost" },
-      resubmittable: true,
     };
-    const { result } = render(
-      { controller: undefined as never, deleteJob },
-      failedView,
-      activation(),
-    );
+    const { result } = render({ deleteJob }, failedView, activation());
     let outcome: string | undefined;
     await act(async () => {
-      outcome = await result.current.cleanup();
+      outcome = await result.current.dismissCapture();
     });
     expect(outcome).toBe("cleaned");
     expect(deleteJob).toHaveBeenCalledWith("opt_1");
@@ -490,13 +443,13 @@ describe("useOptimizeTerminal — roster capture gates cleanup", () => {
     });
 
     const { result, rerender } = render(
-      { controller: undefined as never, ...seams, capture: gate },
+      { ...seams, capture: gate },
       INITIAL_OPTIMIZE_RUN_VIEW,
       act0,
     );
     rerender({ view: completedView("opt_1", true), act: act0 });
 
-    await waitFor(() => expect(result.current.cleanupPhase).toBe("cleaned"));
+    await waitFor(() => expect(notify.cleanup).toHaveBeenLastCalledWith("cleaned"));
     expect(order).toEqual(["roster", "delete"]);
     expect(seams.deleteJob).toHaveBeenCalledTimes(1);
     expect(result.current.captureState.status).toBe("committed");
@@ -521,7 +474,7 @@ describe("useOptimizeTerminal — roster capture gates cleanup", () => {
     });
 
     const { result, rerender } = render(
-      { controller: undefined as never, ...seams, capture: gate },
+      { ...seams, capture: gate },
       INITIAL_OPTIMIZE_RUN_VIEW,
       act0,
     );
@@ -533,10 +486,10 @@ describe("useOptimizeTerminal — roster capture gates cleanup", () => {
     expect(notify.succeeded).toHaveBeenCalledWith("schedule.xlsx");
     // … and the sole server artifact survives for the retry.
     expect(seams.deleteJob).not.toHaveBeenCalled();
-    expect(result.current.cleanupPhase).toBe("idle");
+    expect(notify.cleanup).not.toHaveBeenCalled();
 
     act(() => result.current.retryCapture());
-    await waitFor(() => expect(result.current.cleanupPhase).toBe("cleaned"));
+    await waitFor(() => expect(notify.cleanup).toHaveBeenLastCalledWith("cleaned"));
     expect(seams.deleteJob).toHaveBeenCalledTimes(1);
   });
 
@@ -558,7 +511,7 @@ describe("useOptimizeTerminal — roster capture gates cleanup", () => {
     });
 
     const { result, rerender } = render(
-      { controller: undefined as never, ...seams, capture: gate },
+      { ...seams, capture: gate },
       INITIAL_OPTIMIZE_RUN_VIEW,
       act0,
     );
@@ -569,7 +522,7 @@ describe("useOptimizeTerminal — roster capture gates cleanup", () => {
     expect(seams.saveBlob).toHaveBeenCalledTimes(1);
 
     act(() => result.current.retryCapture());
-    await waitFor(() => expect(result.current.cleanupPhase).toBe("cleaned"));
+    await waitFor(() => expect(notify.cleanup).toHaveBeenLastCalledWith("cleaned"));
     expect(fetchRoster).toHaveBeenCalledTimes(1);
   });
 
@@ -587,13 +540,13 @@ describe("useOptimizeTerminal — roster capture gates cleanup", () => {
     });
 
     const { result, rerender } = render(
-      { controller: undefined as never, ...seams, capture: gate },
+      { ...seams, capture: gate },
       INITIAL_OPTIMIZE_RUN_VIEW,
       degraded,
     );
     rerender({ view: completedView("opt_1", true), act: degraded });
 
-    await waitFor(() => expect(result.current.cleanupPhase).toBe("cleaned"));
+    await waitFor(() => expect(notify.cleanup).toHaveBeenLastCalledWith("cleaned"));
     expect(seams.saveBlob).toHaveBeenCalledWith(seams.restored, "schedule.xlsx");
     expect(fetchRoster).not.toHaveBeenCalled();
     expect(result.current.captureState).toEqual({
@@ -616,7 +569,7 @@ describe("useOptimizeTerminal — roster capture gates cleanup", () => {
     });
 
     const { result, rerender } = render(
-      { controller: undefined as never, ...seams, capture: gate },
+      { ...seams, capture: gate },
       INITIAL_OPTIMIZE_RUN_VIEW,
       act0,
     );
@@ -627,7 +580,7 @@ describe("useOptimizeTerminal — roster capture gates cleanup", () => {
     act(() => result.current.downloadArtifact());
     rosterGate.resolve({ solvedDays: [] });
 
-    await waitFor(() => expect(result.current.cleanupPhase).toBe("cleaned"));
+    await waitFor(() => expect(notify.cleanup).toHaveBeenLastCalledWith("cleaned"));
     expect(fetchRoster).toHaveBeenCalledTimes(1);
     expect(seams.deleteJob).toHaveBeenCalledTimes(1);
     expect((await store.readCurrentCandidate())?.candidateVersion).toBe(1);
@@ -644,12 +597,12 @@ describe("useOptimizeTerminal — roster capture gates cleanup", () => {
     });
 
     const { result, rerender } = render(
-      { controller: undefined as never, ...seams, capture: gate },
+      { ...seams, capture: gate },
       INITIAL_OPTIMIZE_RUN_VIEW,
       act0,
     );
     rerender({ view: completedView("opt_1", true), act: act0 });
-    await waitFor(() => expect(result.current.cleanupPhase).toBe("cleaned"));
+    await waitFor(() => expect(notify.cleanup).toHaveBeenLastCalledWith("cleaned"));
 
     await act(async () => {
       await result.current.dismissCapture();
@@ -661,7 +614,7 @@ describe("useOptimizeTerminal — roster capture gates cleanup", () => {
     expect(seams.deleteJob).toHaveBeenCalledTimes(1);
   });
 
-  it("the dismiss/resubmit cleanup() path obtains a dismissal token before deleting", async () => {
+  it("dismissing a run that was never capture-capable still obtains a token before deleting", async () => {
     const store = freshStore();
     const act0 = await stagedActivation(store);
     const seams = downloadSeams();
@@ -676,18 +629,13 @@ describe("useOptimizeTerminal — roster capture gates cleanup", () => {
       lifecycle: "failed",
       jobId: "opt_1",
       error: { source: "job", code: "worker_lost", message: "worker lost" },
-      resubmittable: true,
     };
 
-    const { result } = render(
-      { controller: undefined as never, ...seams, capture: gate },
-      failedView,
-      act0,
-    );
+    const { result } = render({ ...seams, capture: gate }, failedView, act0);
 
     let outcome: string | undefined;
     await act(async () => {
-      outcome = await result.current.cleanup();
+      outcome = await result.current.dismissCapture();
     });
 
     expect(outcome).toBe("cleaned");
@@ -705,23 +653,11 @@ describe("useOptimizeTerminal — roster capture gates cleanup", () => {
   });
 });
 
-describe("useOptimizeTerminal — remount activation authority handoff", () => {
+describe("useOptimizeTerminal — capture authority with no attached activation", () => {
   let dbCounter = 0;
   function freshStore(): RosterStorage {
-    const db = new ScenarioPersistenceDb(`terminal-handoff-test-${dbCounter++}`);
+    const db = new ScenarioPersistenceDb(`terminal-authority-test-${dbCounter++}`);
     return createRosterStorageForDb(() => db);
-  }
-  async function stagedActivation(store: RosterStorage, ownerId = "owner-1") {
-    const capture = await stageSubmissionSnapshot({
-      ownerId,
-      payload: buildStagedSubmission({
-        canonicalYaml: "people: [P1]",
-        reverseMap: [],
-        schemaVersion: ROSTER_SUBMISSION_VERSION,
-      }),
-      store,
-    });
-    return activation({ capture });
   }
   function downloadSeams() {
     const restored = new Blob(["restored"], { type: "x" });
@@ -734,304 +670,13 @@ describe("useOptimizeTerminal — remount activation authority handoff", () => {
     };
   }
 
-  it("a completed no-artifact run remounted before recovery attaches DEFERS capture (no false snapshot_missing)", async () => {
-    // The exact race the fixup closes. A remount's completed-job effect starts
-    // before recovery has attached the activation; the OLD behaviour reached
-    // capture with a null authority and the gate returned snapshot_missing +
-    // DELETE. The fix defers the whole chain until recovery resolves, so the
-    // intact snapshot stays usable and the server job is not destroyed early.
-    const store = freshStore();
-    const act0 = await stagedActivation(store);
-    const seams = downloadSeams();
-    const fetchRoster = vi.fn();
-    const gate = createRosterCapture({
-      store,
-      fetchRoster,
-      buildCandidate: ({ container }) => ({ ok: true, document: { container } }),
-    });
-    const noArtifactView = completedView("opt_1", false);
-
-    // Remount state: completed run in view, activation null, recovery NOT ready.
-    const { result, rerender } = render(
-      { controller: undefined as never, ...seams, capture: gate },
-      noArtifactView,
-      null,
-      false,
-    );
-
-    // The handoff window. The OLD behaviour would settle the gate as
-    // snapshot_missing and delete; the fix leaves everything untouched.
-    await waitFor(() => expect(result.current.cleanupPhase).toBe("idle"));
-    expect(fetchRoster).not.toHaveBeenCalled();
-    expect(seams.deleteJob).not.toHaveBeenCalled();
-    expect(gate.getState("opt_1")).toEqual({ status: "idle" });
-    expect(gate.getToken("opt_1")).toBeNull();
-    // NEGATIVE CONTROL: explicitly NOT the old false snapshot_missing.
-    expect(gate.getState("opt_1")).not.toEqual({
-      status: "unavailable",
-      cause: "snapshot_missing",
-    });
-
-    // Recovery attaches the durable activation. The completed-job effect re-runs
-    // and the intact snapshot drives capture to its real outcome.
-    rerender({ view: noArtifactView, act: act0, ready: true, state: resumable() });
-
-    await waitFor(() => expect(result.current.cleanupPhase).toBe("cleaned"));
-    expect(fetchRoster).not.toHaveBeenCalled();
-    expect(seams.deleteJob).toHaveBeenCalledTimes(1);
-    // A no-artifact run with a staged snapshot resolves to no-artifact, proving
-    // the snapshot was read (not falsely declared missing).
-    expect(gate.getToken("opt_1")).toMatchObject({
-      kind: "unavailable",
-      cause: "no-artifact",
-    });
-  });
-
-  it("a completed artifact run remounted before recovery attaches defers the download too", async () => {
-    // The download chain also reads activation; without the deferral it would
-    // fail spuriously during the handoff. With the fix the whole terminal chain
-    // waits, then runs cleanly once recovery attaches: one fetch, one commit,
-    // one DELETE.
-    const store = freshStore();
-    const act0 = await stagedActivation(store);
-    const seams = downloadSeams();
-    const fetchRoster = vi.fn(async () => ({ solvedDays: [] }));
-    const gate = createRosterCapture({
-      store,
-      fetchRoster,
-      buildCandidate: ({ container }) => ({ ok: true, document: { container } }),
-    });
-    const completed = completedView("opt_1", true);
-
-    const { result, rerender } = render(
-      { controller: undefined as never, ...seams, capture: gate },
-      completed,
-      null,
-      false,
-    );
-
-    // Handoff: no download attempt, no spurious failure, no capture, no DELETE.
-    await waitFor(() => expect(result.current.cleanupPhase).toBe("idle"));
-    expect(seams.fetchXlsx).not.toHaveBeenCalled();
-    expect(notify.failed).not.toHaveBeenCalled();
-    expect(fetchRoster).not.toHaveBeenCalled();
-    expect(seams.deleteJob).not.toHaveBeenCalled();
-
-    // Recovery attaches: exactly one download, one roster fetch, one commit.
-    rerender({ view: completed, act: act0, ready: true, state: resumable() });
-
-    await waitFor(() => expect(result.current.cleanupPhase).toBe("cleaned"));
-    expect(seams.fetchXlsx).toHaveBeenCalledTimes(1);
-    expect(fetchRoster).toHaveBeenCalledTimes(1);
-    expect(seams.deleteJob).toHaveBeenCalledTimes(1);
-    expect(result.current.captureState.status).toBe("committed");
-  });
-
-  it("RESTART: no-artifact, ready:true + null activation → exact activation re-enters the chain", async () => {
-    // The once-guard defect: generic ready is not job-specific authority. With the
-    // old behaviour the effect armed autoDoneRef on ready-alone, the gate deferred
-    // the null authority, and the chain exited — so when the exact activation
-    // arrived the once-guard blocked the restart and the run was stranded. The fix
-    // leaves the guard open until capture is authorized, so the exact-activation
-    // dep change re-enters and the chain runs to completion.
-    const store = freshStore();
-    const act0 = await stagedActivation(store);
-    const seams = downloadSeams();
-    const fetchRoster = vi.fn();
-    const gate = createRosterCapture({
-      store,
-      fetchRoster,
-      buildCandidate: ({ container }) => ({ ok: true, document: { container } }),
-    });
-    const noArtifactView = completedView("opt_1", false);
-
-    // The intermediate state the prior tests never exercised: ready is TRUE but
-    // activation is still null. Recovery holds this job's durable record, so the
-    // classification is `pending` and the gate is not touched at all.
-    const { result, rerender } = render(
-      { controller: undefined as never, ...seams, capture: gate },
-      noArtifactView,
-      null,
-      true,
-      resumable(),
-    );
-
-    await waitFor(() => expect(result.current.cleanupPhase).toBe("idle"));
-    expect(seams.deleteJob).not.toHaveBeenCalled();
-    expect(gate.getState("opt_1")).toEqual({ status: "idle" });
-    expect(gate.getToken("opt_1")).toBeNull();
-
-    // The exact activation arrives while ready stays true. The authority dep moved
-    // `pending` → `exact`, so the effect re-runs and the chain runs to completion.
-    rerender({ view: noArtifactView, act: act0, ready: true, state: resumable() });
-
-    await waitFor(() => expect(result.current.cleanupPhase).toBe("cleaned"));
-    expect(seams.deleteJob).toHaveBeenCalledTimes(1);
-    expect(gate.getToken("opt_1")).toMatchObject({
-      kind: "unavailable",
-      cause: "no-artifact",
-    });
-  });
-
-  it("RESTART: artifact, ready:true + null activation → exact activation downloads and captures once", async () => {
-    // The same restart, for an artifact run. Without exact authority the download
-    // is skipped (it reads the activation's reverse map and would fail spuriously),
-    // leaving the guard open. The exact activation then drives exactly one
-    // download, one /roster fetch, one commit, and one DELETE.
-    const store = freshStore();
-    const act0 = await stagedActivation(store);
-    const seams = downloadSeams();
-    const fetchRoster = vi.fn(async () => ({ solvedDays: [] }));
-    const gate = createRosterCapture({
-      store,
-      fetchRoster,
-      buildCandidate: ({ container }) => ({ ok: true, document: { container } }),
-    });
-    const completed = completedView("opt_1", true);
-
-    // ready:true + null activation: the download is skipped, no spurious failure.
-    const { result, rerender } = render(
-      { controller: undefined as never, ...seams, capture: gate },
-      completed,
-      null,
-      true,
-      resumable(),
-    );
-
-    await waitFor(() => expect(result.current.cleanupPhase).toBe("idle"));
-    expect(seams.fetchXlsx).not.toHaveBeenCalled();
-    expect(notify.failed).not.toHaveBeenCalled();
-    expect(fetchRoster).not.toHaveBeenCalled();
-    expect(seams.deleteJob).not.toHaveBeenCalled();
-
-    // Exact activation arrives: the chain restarts and runs exactly once.
-    rerender({ view: completed, act: act0, ready: true, state: resumable() });
-
-    await waitFor(() => expect(result.current.cleanupPhase).toBe("cleaned"));
-    expect(seams.fetchXlsx).toHaveBeenCalledTimes(1);
-    expect(fetchRoster).toHaveBeenCalledTimes(1);
-    expect(seams.deleteJob).toHaveBeenCalledTimes(1);
-    expect(result.current.captureState.status).toBe("committed");
-  });
-
-  it.each([
-    ["null", (): RunActivation | null => null],
-    ["mismatched", (): RunActivation | null => activation({ jobId: "opt_other" })],
-  ])(
-    "OVERLAP (%s activation): a ready recovery never opens a tokenless flight the exact activation joins",
-    async (_label, initialActivation) => {
-      // The defect this closes. `recovery.ready` is TRUE while the activation is
-      // still null/mismatched, so the OLD code proceeded on generic readiness and
-      // called capture with a null authority — which the gate turned into an
-      // app-lifetime `inFlight` promise. An exact activation arriving before that
-      // promise cleared would arm its once-guard and then JOIN the tokenless
-      // request, exit without a token, and never run again.
-      //
-      // Readiness is not authority for THIS job: recovery's durable record names
-      // opt_1 and its activation simply has not attached yet. Nothing may touch
-      // the gate in that window.
-      const store = freshStore();
-      const act0 = await stagedActivation(store);
-      const seams = downloadSeams();
-      const fetchRoster = vi.fn();
-      const real = createRosterCapture({
-        store,
-        fetchRoster,
-        buildCandidate: ({ container }) => ({ ok: true, document: { container } }),
-      });
-      const { gate, captureCalls } = spyGate(real);
-      const noArtifactView = completedView("opt_1", false);
-
-      const { result, rerender } = render(
-        { controller: undefined as never, ...seams, capture: gate },
-        noArtifactView,
-        initialActivation(),
-        true,
-        resumable(),
-      );
-
-      await waitFor(() => expect(result.current.cleanupPhase).toBe("idle"));
-      // THE discriminating assertion: the old code recorded a `null` here, and the
-      // tokenless flight that call opened is what stranded the run.
-      expect(captureCalls).toEqual([]);
-      expect(fetchRoster).not.toHaveBeenCalled();
-      expect(seams.fetchXlsx).not.toHaveBeenCalled();
-      expect(seams.deleteJob).not.toHaveBeenCalled();
-      expect(real.getState("opt_1")).toEqual({ status: "idle" });
-      expect(real.getToken("opt_1")).toBeNull();
-
-      // The exact activation attaches. The authority dep moves `pending` → `exact`,
-      // so the chain enters ONCE and carries the real staged authority.
-      rerender({ view: noArtifactView, act: act0, ready: true, state: resumable() });
-
-      await waitFor(() => expect(result.current.cleanupPhase).toBe("cleaned"));
-      expect(captureCalls).toEqual([act0.capture]);
-      // A no-artifact run has no roster to fetch; its cleanup is authorized by the
-      // vacuous-fence token, not by a `/roster` attempt.
-      expect(fetchRoster).not.toHaveBeenCalled();
-      expect(seams.deleteJob).toHaveBeenCalledTimes(1);
-      expect(real.getToken("opt_1")).toMatchObject({
-        kind: "unavailable",
-        cause: "no-artifact",
-      });
-    },
-  );
-
-  it("OVERLAP (artifact): nothing early, then exactly one download, /roster, commit and DELETE", async () => {
-    // The same window for an artifact run, with `/roster` PARKED so the capture
-    // flight is genuinely open across the assertions rather than already settled.
-    const store = freshStore();
-    const act0 = await stagedActivation(store);
-    const seams = downloadSeams();
-    const roster = Promise.withResolvers<unknown>();
-    const fetchRoster = vi.fn(() => roster.promise);
-    const real = createRosterCapture({
-      store,
-      fetchRoster,
-      buildCandidate: ({ container }) => ({ ok: true, document: { container } }),
-    });
-    const { gate, captureCalls } = spyGate(real);
-    const completed = completedView("opt_1", true);
-
-    const { result, rerender } = render(
-      { controller: undefined as never, ...seams, capture: gate },
-      completed,
-      null,
-      true,
-      resumable(),
-    );
-
-    await waitFor(() => expect(result.current.cleanupPhase).toBe("idle"));
-    expect(captureCalls).toEqual([]);
-    expect(seams.fetchXlsx).not.toHaveBeenCalled();
-    expect(notify.failed).not.toHaveBeenCalled();
-    expect(fetchRoster).not.toHaveBeenCalled();
-    expect(seams.deleteJob).not.toHaveBeenCalled();
-
-    rerender({ view: completed, act: act0, ready: true, state: resumable() });
-
-    // Mid-flight: the download has run and `/roster` is in flight but parked. No
-    // token exists yet, so the sole server artifact must still be intact.
-    await waitFor(() => expect(fetchRoster).toHaveBeenCalledTimes(1));
-    expect(seams.fetchXlsx).toHaveBeenCalledTimes(1);
-    expect(real.getToken("opt_1")).toBeNull();
-    expect(seams.deleteJob).not.toHaveBeenCalled();
-
-    roster.resolve({ solvedDays: [] });
-
-    await waitFor(() => expect(result.current.cleanupPhase).toBe("cleaned"));
-    expect(captureCalls).toEqual([act0.capture]);
-    expect(seams.fetchXlsx).toHaveBeenCalledTimes(1);
-    expect(fetchRoster).toHaveBeenCalledTimes(1);
-    expect(seams.deleteJob).toHaveBeenCalledTimes(1);
-    expect(result.current.captureState.status).toBe("committed");
-  });
-
-  it("PROVEN absence: a completed no-artifact run with no durable record settles and cleans up", async () => {
-    // The other side of the classification, and why `pending` and `proven-absent`
-    // must be distinct. Recovery finished and its slot is EMPTY, so no activation
-    // can ever attach for this job. Deferring here would strand the run with no
-    // token and no cleanup forever; it settles instead and releases the server job.
+  // G6.2 REPLACED the remount-handoff battery that stood here. Those tests drove a
+  // three-valued authority whose middle state, `pending`, existed for exactly one
+  // situation: a remount whose activation was null NOW but would be attached LATER
+  // by recovery's passive effect. Nothing attaches later any more, so `pending` is
+  // unreachable and the deferral it caused would be a permanent stall rather than a
+  // wait. What remains is the case that is still real and still needs proving.
+  it("no activation for the job in view is a PROVEN absence: it settles and cleans up", async () => {
     const store = freshStore();
     const seams = downloadSeams();
     const fetchRoster = vi.fn();
@@ -1041,15 +686,9 @@ describe("useOptimizeTerminal — remount activation authority handoff", () => {
       buildCandidate: ({ container }) => ({ ok: true, document: { container } }),
     });
 
-    const { result } = render(
-      { controller: undefined as never, ...seams, capture: gate },
-      completedView("opt_1", false),
-      null,
-      true,
-      { kind: "none" },
-    );
+    render({ ...seams, capture: gate }, completedView("opt_1", false), null);
 
-    await waitFor(() => expect(result.current.cleanupPhase).toBe("cleaned"));
+    await waitFor(() => expect(notify.cleanup).toHaveBeenLastCalledWith("cleaned"));
     expect(gate.getToken("opt_1")).toEqual({
       kind: "unavailable",
       jobId: "opt_1",
@@ -1061,151 +700,26 @@ describe("useOptimizeTerminal — remount activation authority handoff", () => {
     expect(seams.deleteJob).toHaveBeenCalledTimes(1);
   });
 
-  // Every recovery state that is NOT an empty slot. `none` is the only one that
-  // proves all three things a DELETE token needs at once — no record can attach, no
-  // retained provisional's owner id could still name a staged snapshot, and
-  // `recovery.cleanup(jobId)` answers `absent` so the LOCAL half can finish. Minting
-  // a token from any of these confirms a server deletion whose local half can never
-  // complete, leaving the terminal permanently `failed`.
-  const NOT_ABSENCE: [string, OptimizeRecovery][] = [
-    ["interrupted", { kind: "interrupted", anonymized: false, peopleCount: 2 }],
-    ["resumable for ANOTHER job", resumable("opt_other")],
-    ["unreadable", { kind: "unreadable" }],
-    ["storage-error", { kind: "storage-error" }],
-  ];
-
-  it.each(NOT_ABSENCE)(
-    "NOT absence (%s): nothing settles, no token is minted, and no DELETE is authorized",
-    async (_label, state) => {
-      const store = freshStore();
-      const seams = downloadSeams();
-      const fetchRoster = vi.fn();
-      const real = createRosterCapture({
-        store,
-        fetchRoster,
-        buildCandidate: ({ container }) => ({ ok: true, document: { container } }),
-      });
-      const { gate, captureCalls } = spyGate(real);
-
-      const { result } = render(
-        { controller: undefined as never, ...seams, capture: gate },
-        completedView("opt_1", false),
-        null,
-        true,
-        state,
-      );
-
-      await waitFor(() => expect(result.current.cleanupPhase).toBe("idle"));
-      expect(captureCalls).toEqual([]);
-      expect(real.getState("opt_1")).toEqual({ status: "idle" });
-      expect(real.getToken("opt_1")).toBeNull();
-      expect(seams.deleteJob).not.toHaveBeenCalled();
-      // Explicitly not the absence this used to be mistaken for.
-      expect(real.getState("opt_1")).not.toEqual({
-        status: "unavailable",
-        cause: "session_record_absent",
-      });
-    },
-  );
-
-  it("an INTERRUPTED record may be this job's retained provisional — and its retirement reflows to cleanup", async () => {
-    // The dangerous case, in full. `activation-persistence-failed` leaves the
-    // provisional in the slot still carrying the owner id that names a staged
-    // snapshot; after a remount the opaque degraded-cleanup capability is gone, so
-    // it cannot be matched to the displayed job by job id. Minting a DELETE here
-    // would destroy the server artifact for a run whose snapshot is sitting right
-    // there, and `recovery.cleanup` would then answer `not-current` — leaving the
-    // terminal `failed` with the provisional still blocking submission.
+  it("an activation for a DIFFERENT job is not this job's authority", async () => {
     const store = freshStore();
-    await stagedActivation(store); // stages owner-1's snapshot, activation NOT attached
     const seams = downloadSeams();
     const fetchRoster = vi.fn();
-    const real = createRosterCapture({
+    const gate = createRosterCapture({
       store,
       fetchRoster,
       buildCandidate: ({ container }) => ({ ok: true, document: { container } }),
     });
-    const { gate } = spyGate(real);
-    const noArtifactView = completedView("opt_1", false);
 
-    const { result, rerender } = render(
-      { controller: undefined as never, ...seams, capture: gate },
-      noArtifactView,
-      null,
-      true,
-      { kind: "interrupted", anonymized: false, peopleCount: 2 },
+    render(
+      { ...seams, capture: gate },
+      completedView("opt_1", false),
+      activation({ jobId: "opt_other", ownerId: "owner-other" }),
     );
 
-    await waitFor(() => expect(result.current.cleanupPhase).toBe("idle"));
-    expect(real.getToken("opt_1")).toBeNull();
-    expect(seams.deleteJob).not.toHaveBeenCalled();
-    // The staged snapshot that provisional still points at is untouched.
-    expect(await store.readSubmissionSnapshot("owner-1")).not.toBeNull();
-    expect(await store.listSubmissionOrdinals()).toEqual([1]);
-
-    // THE ESCAPE, and why this is inertness rather than deadlock. Retiring it empties
-    // the slot; `none` is the one provable absence, the classification is an effect
-    // dependency, so the chain re-runs and cleanup completes — no second user
-    // action on the terminal, no new UI.
-    rerender({ view: noArtifactView, act: null, ready: true, state: { kind: "none" } });
-
-    await waitFor(() => expect(result.current.cleanupPhase).toBe("cleaned"));
-    expect(seams.deleteJob).toHaveBeenCalledTimes(1);
-    expect(real.getToken("opt_1")).toMatchObject({
-      kind: "unavailable",
-      cause: "session_record_absent",
-    });
+    await waitFor(() => expect(notify.cleanup).toHaveBeenLastCalledWith("cleaned"));
+    // Settled from ABSENCE, not from the other job's staged snapshot: a
+    // superseded attachment must never de-anonymize another job's roster.
+    expect(gate.getToken("opt_1")).toMatchObject({ cause: "session_record_absent" });
+    expect(fetchRoster).not.toHaveBeenCalled();
   });
-
-  it.each([
-    ["null", (): RunActivation | null => null],
-    ["mismatched", (): RunActivation | null => activation({ jobId: "opt_other" })],
-  ])(
-    "OVERLAP (%s activation): a DISMISSAL during the handoff opens no flight and deletes exactly once",
-    async (_label, initialActivation) => {
-      // The same joinable-flight defect reached through Dismiss / cleanup() rather
-      // than the automatic effect: the old `dismiss()` called `start()` with a null
-      // authority, and the exact activation's capture joined that tokenless flight.
-      const store = freshStore();
-      const act0 = await stagedActivation(store);
-      const seams = downloadSeams();
-      const fetchRoster = vi.fn(async () => ({ solvedDays: [] }));
-      const real = createRosterCapture({
-        store,
-        fetchRoster,
-        buildCandidate: ({ container }) => ({ ok: true, document: { container } }),
-      });
-      const { gate } = spyGate(real);
-      const completed = completedView("opt_1", true);
-
-      const { result, rerender } = render(
-        { controller: undefined as never, ...seams, capture: gate },
-        completed,
-        initialActivation(),
-        true,
-        resumable(),
-      );
-
-      // The user dismisses inside the handoff window.
-      let phase: string | undefined;
-      await act(async () => {
-        phase = await result.current.dismissCapture();
-      });
-      expect(phase).toBe("idle");
-      expect(real.getState("opt_1")).toEqual({ status: "idle" });
-      expect(real.getToken("opt_1")).toBeNull();
-      expect(fetchRoster).not.toHaveBeenCalled();
-      expect(seams.deleteJob).not.toHaveBeenCalled();
-
-      // Exact activation attaches. The recorded intent is honoured by the flight
-      // that has authority: one roster fence, one dismissal, one DELETE.
-      rerender({ view: completed, act: act0, ready: true, state: resumable() });
-
-      await waitFor(() => expect(result.current.cleanupPhase).toBe("cleaned"));
-      expect(fetchRoster).toHaveBeenCalledTimes(1);
-      expect(seams.deleteJob).toHaveBeenCalledTimes(1);
-      expect(real.getToken("opt_1")).toMatchObject({ kind: "dismissed", reason: "user" });
-      expect(await store.readCurrentCandidate()).toBeNull();
-    },
-  );
 });

@@ -36,6 +36,10 @@ export type OptimizeErrorKind =
   | "too-large" // 413 request body over the byte limit (detail form)
   | "request-invalid" // FastAPI 400/422 request-schema or parse/source failure (detail form)
   | "backend-unreachable" // BFF-synthesized 502 — upstream connection failed
+  // BFF-synthesized 502 — the upstream connected but does not route the path this
+  // app asked for, i.e. a backend too old (or too foreign) to serve the feature.
+  // Distinct from every 404 kind on purpose: it says nothing about the job.
+  | "backend-route-unsupported"
   | "backend-unready" // BFF-synthesized 503 — readiness gate failed closed
   | "server-error" // 5xx
   | "unknown"; // anything not otherwise recognized
@@ -79,6 +83,7 @@ const CODE_TO_KIND: Record<string, OptimizeErrorKind> = {
   unsupported_workspace_version: "validation",
   unsupported_solver: "validation",
   backend_unreachable: "backend-unreachable",
+  backend_route_unsupported: "backend-route-unsupported",
   backend_unready: "backend-unready",
 };
 
@@ -187,4 +192,12 @@ export function isExactJobGoneResponse(status: number, body: unknown): boolean {
 
 export function isExactJobGoneError(error: unknown): error is OptimizeApiError {
   return error instanceof OptimizeApiError && isExactJobGoneResponse(error.status, error.body);
+}
+
+/** The upstream connected but does not route the path we asked for — a backend
+ * too old (or too foreign) to serve the feature. Repeating the request cannot
+ * change that, so callers use this to close their retry disposition rather than
+ * inferring "is this worth retrying?" from message text. */
+export function isRouteUnsupportedError(error: unknown): error is OptimizeApiError {
+  return error instanceof OptimizeApiError && error.info.kind === "backend-route-unsupported";
 }

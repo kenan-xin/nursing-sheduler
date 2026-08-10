@@ -419,9 +419,16 @@ export function useOptimizeEventStream(
 // Download the workbook (T16 owns the browser save gesture). Throws OptimizeApiError
 // on a code-first `no-artifact` (no schedule) error; score/status come from the
 // retained JobResponse.result, not from response headers.
-export async function fetchOptimizeXlsx(jobId: string): Promise<{ blob: Blob; filename: string }> {
+export async function fetchOptimizeXlsx(
+  jobId: string,
+  // G6.2: threaded so leaving the route can actually stop the transfer rather
+  // than merely ignoring it on arrival. An abort surfaces as the platform's
+  // `AbortError`, which callers treat as silence, not as a download failure.
+  signal?: AbortSignal,
+): Promise<{ blob: Blob; filename: string }> {
   const response = await fetch(`/api/optimize/${encodeURIComponent(jobId)}/xlsx`, {
     cache: "no-store",
+    signal,
   });
   if (!response.ok) {
     const body = await response.json().catch(() => null);
@@ -442,9 +449,10 @@ export async function fetchOptimizeXlsx(jobId: string): Promise<{ blob: Blob; fi
 // recovery (a 404 `job_not_found` ⇒ the job is gone, a 409
 // `job_artifact_not_ready` ⇒ a no-capture no-artifact state, a 5xx
 // `roster_container_invalid` ⇒ the captured artifact is unreadable).
-export async function fetchOptimizeRoster(jobId: string): Promise<unknown> {
+export async function fetchOptimizeRoster(jobId: string, signal?: AbortSignal): Promise<unknown> {
   const response = await fetch(`/api/optimize/${encodeURIComponent(jobId)}/roster`, {
     cache: "no-store",
+    signal,
   });
   const body = await response.json().catch(() => null);
   if (!response.ok) {

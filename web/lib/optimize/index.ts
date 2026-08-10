@@ -20,8 +20,6 @@ export {
   isSettledLifecycle,
   reduceRunView,
   reduceRunViewAll,
-  type CleanupState,
-  type CleanupStatus,
   type CursorRecoveryReason,
   type CursorRecoveryState,
   type DownloadState,
@@ -37,8 +35,9 @@ export {
   type RunProgressPoint,
   type RunResult,
   type RunSignal,
-  type SessionRecoveryState,
 } from "./run-view";
+
+export { purgeRetiredSubmissionSnapshot, type RetiredSnapshotOutcome } from "./submission-snapshot";
 
 export {
   buildStreamCallbacks,
@@ -57,40 +56,60 @@ export {
   OPTIMIZE_POLL_INTERVAL_MS,
   useOptimizeRun,
   type AttachmentToken,
-  type CursorPersistenceProvider,
   type OptimizeRunController,
   type OptimizeRunSubmitInput,
   type OptimizeRunSubmitOutcome,
-  type OptimizeRunResubmitOutcome,
-  type PreparedRecoveryAttachment,
+  type OptimizeSubmitOptions,
   type RunActivation,
   type UseOptimizeRunDeps,
 } from "./use-optimize-run";
 
+// G6.2 — the visit fence and the invisible retirement lane that replaced the
+// cross-visit recovery machinery.
+export {
+  createAttemptRegistry,
+  isAbortError,
+  type AttemptRegistry,
+  type VisitAttempt,
+} from "./visit-attempt";
+
+export {
+  retireAbandonedRun,
+  retireOnDocumentExit,
+  type RetireAbandonedRunDeps,
+  type RetireAbandonedRunInput,
+  type RetirementReport,
+} from "./visit-retirement";
+
 export {
   activateSession,
   buildProvisionalSession,
-  removeInspectedSession,
-  inspectPersistedSession,
+  decodeSessionRecord,
   runSubmissionTransaction,
   stageProvisionalSession,
-  updateActiveCursor,
-  type PreparedDegradedCleanup,
-  type DegradedCleanupOutcome,
   OPTIMIZE_SESSION_SCHEMA_VERSION,
   OPTIMIZE_SESSION_STORAGE_KEY,
+  OPTIMIZE_SESSION_KEY_PREFIX,
+  optimizeSessionKeyFor,
+  listOptimizeSessionKeys,
+  readOwnerSession,
+  removeOwnerSession,
+  migrateLegacySession,
+  clearAllOptimizeSessions,
+  type SessionKeyListing,
+  type OwnerSessionRead,
+  type RemoveOwnerSessionOutcome,
+  type LegacyMigrationOutcome,
+  type ClearAllSessionsOutcome,
   OPTIMIZE_RETIRE_PENDING_STORAGE_KEY,
   clearRetirementPending,
   OPTIMIZE_TIMEOUT_MAX_SECONDS,
   OPTIMIZE_TIMEOUT_MIN_SECONDS,
   type ActivateOutcome,
   type ActiveOptimizeSession,
-  type RemoveInspectedSessionOutcome,
-  type InspectedSession,
   type OptimizeRunOptions,
   type OptimizeSessionRecord,
   type ProvisionalOptimizeSession,
-  type SessionRecordIdentity,
   type SessionCodec,
   type SessionTransactionStorage,
   type CaptureUnavailableReason,
@@ -98,7 +117,6 @@ export {
   type StageProvisionalOutcome,
   type SubmissionTransactionOutcome,
   type SubmitResult,
-  type UpdateActiveCursorOutcome,
   type VolatileActivation,
 } from "./session-transaction";
 
@@ -111,19 +129,6 @@ export {
   restorePeopleIdsInXlsx,
   type PeopleIdRestorationInput,
 } from "./restore-people-ids-in-xlsx";
-
-export {
-  buildRecoveryAttachment,
-  interpretInspectedSession,
-  useOptimizeSessionRecovery,
-  type CursorPersistenceState,
-  type OptimizeCleanupOutcome,
-  type OptimizePrepareOutcome,
-  type OptimizeRecovery,
-  type OptimizeResumeOutcome,
-  type OptimizeSessionRecovery,
-  type UseOptimizeSessionRecoveryDeps,
-} from "./session-recovery";
 
 export {
   deriveOptimizeReadiness,
@@ -152,9 +157,11 @@ export {
 } from "./optimize-server-info";
 
 export {
+  classifyJobCaptureAuthority,
   useOptimizeTerminal,
   type CleanupCallOutcome,
   type CleanupPhase,
+  type JobCaptureAuthority,
   type OptimizeTerminal,
   type UseOptimizeTerminalDeps,
 } from "./use-optimize-terminal";

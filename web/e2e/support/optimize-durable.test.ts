@@ -11,7 +11,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { inspectPersistedSession } from "@/lib/optimize/session-transaction";
+import { decodeSessionRecord } from "@/lib/optimize/session-transaction";
 import {
   ABORT_BOUND_KEYS,
   ABORT_BOUNDS,
@@ -133,12 +133,12 @@ const provisionalSessionRecord = (over: Record<string, unknown> = {}): string =>
   return JSON.stringify({ ...common, phase: "provisional", ...over });
 };
 
-/** A read-only storage view the product's own inspector can be asked about. */
-const frozenStorage = (raw: string | null) => ({
-  getItem: () => raw,
-  setItem: () => {},
-  removeItem: () => {},
-});
+/** What the product's own decoder makes of raw record bytes. */
+const productReads = (raw: string | null): "active" | "provisional" | "unreadable" | "none" => {
+  if (raw === null) return "none";
+  const record = decodeSessionRecord(raw);
+  return record === null ? "unreadable" : record.phase;
+};
 
 /**
  * Normalize a diagnostic array so exact comparison is readable: substitute the
@@ -1409,11 +1409,9 @@ describe("accepted-job ownership fails closed and recovers", () => {
     // ACCEPTED, because this helper re-implemented a REDUCED schema (version, owner,
     // phase, job id) and stopped there. The product's codec also requires `anonymized`,
     // closed `runOptions` within the settled timeout bounds, `peopleCount`, a
-    // `reverseMap` consistent with the anonymization flag, an EXACT key set, and a
-    // within-cap `lastCursor` when present. The decision is now the product's, so these
-    // are provable rather than aspirational.
+    // `reverseMap` consistent with the anonymization flag, and an EXACT key set. The
+    // decision is now the product's, so these are provable rather than aspirational.
     const CODEC = "session record was rejected by the product session codec";
-    const OVERSIZED_CURSOR = "c".repeat(4_097);
 
     it.each([
       // The EXACT value the review named: active-looking, well-owned, and a record the
@@ -1521,8 +1519,11 @@ describe("accepted-job ownership fails closed and recovers", () => {
           reverseMap: [["P1", "Ann", "extra"]],
         }),
       ],
-      // A persisted cursor is either absent or a real cursor: JSON drops `undefined`,
-      // so an empty or non-string value is corruption.
+      // G6.2 removed the persisted resume cursor entirely. `lastCursor` in ANY form
+      // — a well-formed one included — is now an unknown key on a closed schema, so
+      // a record written by an older build is unreadable rather than resumable.
+      // That is the intended reading: it names a run this build will never resume.
+      ["a well-formed legacy `lastCursor`", activeSessionRecord("job-x", { lastCursor: "v1.a.b" })],
       ["an EMPTY `lastCursor`", activeSessionRecord("job-x", { lastCursor: "" })],
       ["a non-string `lastCursor`", activeSessionRecord("job-x", { lastCursor: 7 })],
       ["a null `lastCursor`", activeSessionRecord("job-x", { lastCursor: null })],
@@ -1541,7 +1542,7 @@ describe("accepted-job ownership fails closed and recovers", () => {
         reason: expect.any(String),
       });
       // And the product agrees, by construction rather than by coincidence.
-      expect(inspectPersistedSession(frozenStorage(raw)).kind).toBe("unreadable");
+      expect(productReads(raw)).toBe("unreadable");
     });
 
     it("names a payload defect it cannot attribute as a codec rejection", () => {
@@ -1555,11 +1556,9 @@ describe("accepted-job ownership fails closed and recovers", () => {
       });
     });
 
-    // ACCEPTED SHAPES, pinned so the delegation cannot quietly tighten either: a
-    // within-cap cursor is a normal resumable record, and an ANONYMIZED run with a
-    // well-formed map of matching cardinality is perfectly valid.
+    // ACCEPTED SHAPES, pinned so the delegation cannot quietly tighten: an ANONYMIZED
+    // run with a well-formed map of matching cardinality is perfectly valid.
     it.each([
-      ["a within-cap saved cursor", activeSessionRecord("job-live", { lastCursor: "v1.abc.def" })],
       [
         "an anonymized run with a well-formed map",
         activeSessionRecord("job-live", {
@@ -1579,30 +1578,9 @@ describe("accepted-job ownership fails closed and recovers", () => {
       expect(recoverJobIdFromSessionRecord(raw)).toEqual({ ok: true, jobId: "job-live" });
     });
 
-    // THE ONE INHERITED SALVAGE, stated explicitly rather than left to be discovered:
-    // the product treats an otherwise-valid active record whose ONLY defect is an
-    // oversized cursor as RESUMABLE with the cursor stripped. The identity and the
-    // anonymization map are fully valid, and the id names a job that must be released,
-    // so recovery inherits that reading instead of holding a stricter second line.
-    it("still recovers the id when the ONLY defect is an oversized saved cursor", () => {
-      const raw = activeSessionRecord("job-live", { lastCursor: OVERSIZED_CURSOR });
-      expect(inspectPersistedSession(frozenStorage(raw)).kind).toBe("resumable");
-      expect(recoverJobIdFromSessionRecord(raw)).toEqual({ ok: true, jobId: "job-live" });
-    });
-
-    // ...but an oversized cursor on a record with a SECOND defect stays unreadable, so
-    // the salvage cannot be used as a way in.
-    it("does not salvage an oversized cursor on an otherwise-invalid record", () => {
-      expect(
-        recoverJobIdFromSessionRecord(
-          activeSessionRecord("job-live", { lastCursor: OVERSIZED_CURSOR, surprise: 1 }),
-        ).ok,
-      ).toBe(false);
-    });
-
     // EXECUTABLE PARITY. One authority, asserted over the whole corpus: whatever the
-    // product's inspector says about a record is what recovery reports about it.
-    it("agrees with the product's inspector on every fixture", () => {
+    // product's decoder makes of a record is what recovery reports about it.
+    it("agrees with the product's decoder on every fixture", () => {
       const corpus = [
         null,
         "{oops",
@@ -1621,11 +1599,11 @@ describe("accepted-job ownership fails closed and recovers", () => {
         }),
       ];
       for (const raw of corpus) {
-        const inspected = inspectPersistedSession(frozenStorage(raw));
+        const read = productReads(raw);
         const expected =
-          inspected.kind === "resumable"
-            ? { ok: true, jobId: inspected.record.jobId }
-            : inspected.kind === "unreadable"
+          read === "active"
+            ? { ok: true, jobId: "job-live" }
+            : read === "unreadable"
               ? { ok: false, reason: expect.any(String) }
               : { ok: true, jobId: null };
         expect(recoverJobIdFromSessionRecord(raw), `raw: ${String(raw)}`).toEqual(expected);

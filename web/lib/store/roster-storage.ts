@@ -208,6 +208,15 @@ export type CandidateCommitOutcome =
       working: CandidateWorkingDisposition;
     }
   | { status: "superseded"; current: CurrentCandidatePointer }
+  /**
+   * The caller's `isAbandoned` predicate answered true INSIDE the transaction,
+   * immediately before the first write. Nothing was written at all.
+   *
+   * Distinct from `superseded` (a real rival won on ordinal) and from
+   * `stale-epoch` (a verified Clear moved under us): here the CALLER's audience
+   * is gone, which only the caller can know.
+   */
+  | { status: "abandoned" }
   | StaleEpochOutcome;
 
 /** A revisioned compare-and-swap write of an EDIT to the working roster. */
@@ -349,6 +358,22 @@ export interface RosterStorage {
     submissionOrdinal: number;
     document: TDocument;
     expectedClearEpoch: number;
+    /**
+     * A SYNCHRONOUS predicate, evaluated inside the transaction after the last
+     * awaited read and immediately before the first write, with no suspension
+     * between the two.
+     *
+     * The caller checking "am I still wanted?" before calling this method is not
+     * enough, and the difference is the whole reason this parameter exists: the
+     * transaction is the linearization point, not the method invocation. A route
+     * exit landing between the caller's check and the first write would otherwise
+     * still move the pointer and auto-fill a proven-empty working slot for a user
+     * who has already left.
+     *
+     * Synchronous by contract — an `await` here would reopen the very window it
+     * closes, and in Dexie would also risk the transaction going inactive.
+     */
+    isAbandoned?: () => boolean;
   }): Promise<CandidateCommitOutcome>;
 
   readCurrentCandidate(): Promise<CurrentCandidatePointer | null>;
@@ -586,6 +611,7 @@ export function createRosterStorageForDb(resolveDb: () => ScenarioPersistenceDb)
       submissionOrdinal: number;
       document: TDocument;
       expectedClearEpoch: number;
+      isAbandoned?: () => boolean;
     }): Promise<CandidateCommitOutcome> {
       const handle = db();
       return handle.transaction("rw", handle.roster, handle.meta, async () => {
@@ -613,13 +639,37 @@ export function createRosterStorageForDb(resolveDb: () => ScenarioPersistenceDb)
 
         // Origin-wide and never reused, so no later delete/recreate of this job
         // can produce this number again (the ABA that a per-key counter admits).
-        // Allocated only once the commit is known to win, mirroring the ordinal
-        // policy: a superseded commit spends nothing.
+        //
+        // READ here, WRITTEN below the fence. Reading allocates nothing — the
+        // counter only moves when `candidateVersion + 1` is stored — so an
+        // abandoned or superseded commit still spends nothing, while this being
+        // the LAST awaited read is what lets the fence below be the last thing
+        // that happens before the first write.
         const candidateVersion = await readMeta(
           handle,
           META_NEXT_CANDIDATE_VERSION,
           FIRST_CANDIDATE_VERSION,
         );
+
+        // THE VISIT FENCE, at the linearization point rather than near it.
+        //
+        // Everything below this line writes, and there is no `await` between this
+        // predicate and the first of those writes — that adjacency IS the fence.
+        // It used to sit one line higher, above the awaited version read, which
+        // left exactly one suspension in which a revocation could land unseen: the
+        // predicate had already answered `false`, and the transaction resumed and
+        // published a candidate, moved the pointer and filled the working slot for
+        // a user who had gone. A fence checked NEAR the linearization point is not
+        // checked AT it.
+        //
+        // Synchronous by contract for the same reason: an `await` here would
+        // reopen the window it exists to close.
+        //
+        // Deliberately AFTER the epoch fence and the ordinal decision, so an
+        // abandoned commit is reported as abandoned rather than mislabelled as
+        // superseded.
+        if (input.isAbandoned?.() === true) return { status: "abandoned" as const };
+
         await writeMeta(handle, META_NEXT_CANDIDATE_VERSION, candidateVersion + 1);
 
         const key = candidateRosterKey(input.jobId);

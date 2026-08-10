@@ -12,10 +12,9 @@
 import type { Page, Route } from "@playwright/test";
 import type { JobResponse, JobState, OptimizationOutcome } from "@/lib/bff/types";
 import {
-  inspectPersistedSession,
+  decodeSessionRecord,
   OPTIMIZE_SESSION_SCHEMA_VERSION as PRODUCT_SESSION_SCHEMA_VERSION,
   OPTIMIZE_SESSION_STORAGE_KEY,
-  type SessionTransactionStorage,
 } from "@/lib/optimize/session-transaction";
 
 // ===========================================================================
@@ -1133,8 +1132,9 @@ export function trackAcceptedJobs(
 
 /**
  * Release EVERY accepted job, deterministically and in the order they were
- * accepted. A test may observe more than one accepted submission (a resubmit path,
- * or a retry the product performs); arming only the first and then throwing would
+ * accepted. A test may observe more than one accepted submission (a second
+ * deliberate click, or a retry the product performs); arming only the first and
+ * then throwing would
  * leave the rest orphaned, which is the contamination class this exists to close.
  * Every job is attempted even if an earlier one fails, so one bad release cannot
  * hide the others.
@@ -1223,17 +1223,9 @@ export const OPTIMIZE_SESSION_SCHEMA_VERSION = PRODUCT_SESSION_SCHEMA_VERSION;
 /** Bound for the page-side recovery read. One `evaluate`, so it is small. */
 export const OWNERSHIP_RECOVERY_BOUND = 5_000;
 
-/**
- * A read-only storage view over ONE raw record, so the product's own inspector can be
- * asked about it. Writing is a programming error here, not a fallback: recovery reads
- * the page's record and must never mutate it.
- */
-function frozenSessionStorage(raw: string | null): SessionTransactionStorage {
-  const refuse = (): never => {
-    throw new Error("ownership recovery must not mutate the page's session record");
-  };
-  return { getItem: () => raw, setItem: refuse, removeItem: refuse };
-}
+// (The read-only storage view that used to live here went with
+// `inspectPersistedSession`: the shared authority is now a pure decoder that takes
+// the raw bytes directly, so there is no storage to wrap and nothing to freeze.)
 
 /**
  * Best-effort description of WHY the product codec rejected a record. Diagnostics only:
@@ -1280,44 +1272,25 @@ function describeRejectedSessionRecord(raw: string): string {
  * parity with `lib/optimize/session-transaction.ts`. It was not: that codec also
  * requires `anonymized`, `runOptions` (closed, within the settled timeout bounds),
  * `peopleCount`, a `reverseMap` whose cardinality matches the anonymization flag, an
- * EXACT key set per variant, and a within-cap `lastCursor` when one is present. So
+ * EXACT key set per variant. So
  * `{"schemaVersion":1,"ownerId":"owner-1","phase":"active","jobId":"job-foreign"}` — a
- * value the product would refuse to reload — was accepted as authority for a live job,
- * and a stale or foreign id could then satisfy cardinality and launder an unnamed
+ * value the product would refuse — was accepted as authority for a live job, and a
+ * stale or foreign id could then satisfy cardinality and launder an unnamed
  * acceptance through the idempotent-404 release path.
  *
- * `inspectPersistedSession` IS the product's reload authority, so what counts as "a
- * record that names a live job" is now exactly what the product itself would resume:
- *
- *   resumable   -> an ACTIVE record; its job id is the recovered identity
- *   interrupted -> a valid PROVISIONAL record: no job id ever existed to recover, so
- *                  `jobId: null`, and the volatile authority in
- *                  `recoverAcceptedOwnership` is what covers the real
- *                  `activation-persistence-failed` path
- *   unreadable  -> corrupt / stale / foreign / incomplete: a REASON, never an absence
- *
- * ONE deliberate inheritance: an otherwise-valid active record whose ONLY defect is an
- * oversized saved cursor is `resumable` with the cursor stripped, so its job id is
- * recovered here too. That is not leniency — the product resumes exactly that record,
- * the identity and anonymization map are fully valid, and the id names a job that must
- * be released. Holding a stricter line here would be maintaining the second authority
- * this change exists to remove.
+ * G6.2 note: the product no longer HAS a reload classifier — nothing resumes — so the
+ * shared authority is now the closed decoder itself (`decodeSessionRecord`). The
+ * mapping is unchanged in substance: an ACTIVE record names a job, a PROVISIONAL one
+ * never had an id to name, and bytes the product would refuse are a REASON, never an
+ * absence.
  */
 export function recoverJobIdFromSessionRecord(
   raw: string | null,
 ): { ok: true; jobId: string | null } | { ok: false; reason: string } {
   if (raw === null) return { ok: true, jobId: null };
-  const inspected = inspectPersistedSession(frozenSessionStorage(raw));
-  switch (inspected.kind) {
-    case "resumable":
-      return { ok: true, jobId: inspected.record.jobId };
-    // `none` is unreachable with a non-null raw value, but it is an absence either way.
-    case "none":
-    case "interrupted":
-      return { ok: true, jobId: null };
-    case "unreadable":
-      return { ok: false, reason: describeRejectedSessionRecord(raw) };
-  }
+  const record = decodeSessionRecord(raw);
+  if (record === null) return { ok: false, reason: describeRejectedSessionRecord(raw) };
+  return { ok: true, jobId: record.phase === "active" ? record.jobId : null };
 }
 
 // ---------------------------------------------------------------------------
@@ -1868,7 +1841,8 @@ export function cancelledJob(id = JOB_ID): JobResponse {
   };
 }
 
-/** A contract-valid failed JobResponse. `worker_lost` is server-resubmittable. */
+/** A contract-valid failed JobResponse. `worker_lost` is the structured code the
+ *  view titles "Worker lost". */
 export function failedJob(
   id = JOB_ID,
   code = "worker_lost",

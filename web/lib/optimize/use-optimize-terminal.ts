@@ -4,9 +4,10 @@
 // download, tab-lifetime Download Again, and deterministic best-effort cleanup.
 //
 // This hook owns the ticket's terminal-outcome table. It never reads or writes the
-// durable session record directly (that is T16b/T16q); it drives the controller's
-// notify* signals and calls T16b's `cleanup(jobId)` for record removal. The exact
-// ordering it guarantees for a completed job with a downloadable artifact:
+// durable session record directly; it drives the controller's notify* signals and
+// calls the controller's owner-keyed `retireSessionRecord(jobId)` for record
+// removal. The exact ordering it guarantees for a completed job with a
+// downloadable artifact:
 //
 //   fetch artifact → restore original ids when anonymized → complete the FIRST
 //   browser download → retain a tab-lifetime blob for Download Again → attempt a
@@ -15,9 +16,15 @@
 // The only server artifact is NEVER deleted before a successful local
 // restoration/download: a failed download leaves the artifact available to retry
 // and does not attempt cleanup. Cleanup is confirmed only on a DELETE 204 or an
-// exact code-first job-not-found; any other outcome retains the record (the slot
-// stays occupied and blocks repeat) and offers explicit retry or abandon — without
-// ever resetting the successful terminal view or the Download Again blob.
+// exact code-first job-not-found; any other outcome leaves the record in place and
+// reports `failed` rather than a false `cleaned`.
+//
+// G6.2b — cleanup is INVISIBLE. It used to end at a user-facing retry/abandon
+// surface, because records were single-slot and an uncleaned one blocked the next
+// run. Records are owner-keyed now, so a retained record blocks nothing: the next
+// run simply starts, and a record cleanup could not remove stays for verified
+// Clear. Nothing here ever resets the successful terminal view or the Download
+// Again blob.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchOptimizeXlsx } from "@/lib/query/optimize";
@@ -28,15 +35,24 @@ import {
   type PeopleIdRestorationInput,
 } from "./restore-people-ids-in-xlsx";
 import type { OptimizeRunController } from "./use-optimize-run";
-import type { OptimizeSessionRecovery } from "./session-recovery";
 import type { OptimizeObservability } from "./optimize-observability";
 import type { CaptureRequest, RosterCaptureGate, RosterCaptureState } from "./roster-capture";
 import { getCleanupCoordinator, type CleanupCoordinator } from "./roster-capture-app";
+import { isAbortError, type AttemptRegistry, type VisitAttempt } from "./visit-attempt";
 
 /** Best-effort terminal DELETE result. `confirmed` ⇒ 204 or exact job-not-found. */
 export type CleanupCallOutcome = { status: "confirmed" } | { status: "failed"; reason: string };
 
-/** The terminal cleanup progression the screen renders. */
+/**
+ * The terminal cleanup progression.
+ *
+ * NOT a rendered state. G6.2c removed the `cleanupPhase` field this used to
+ * publish: cleanup is invisible — owner-keyed records block nothing, so there is
+ * no phase for a user to act on — and the only readers left were tests, which is
+ * not a reason to keep public product state or the re-renders it causes. What the
+ * type still names is the ANSWER `dismissCapture()` returns to the caller that
+ * asked for it, and the internal ref the async chains serialize on.
+ */
 export type CleanupPhase = "idle" | "cleaning" | "cleaned" | "failed";
 
 /** The controller surface the terminal orchestration drives. */
@@ -44,6 +60,7 @@ type TerminalController = Pick<
   OptimizeRunController,
   | "view"
   | "activation"
+  | "retireSessionRecord"
   | "notifyDownloadStarted"
   | "notifyDownloadSucceeded"
   | "notifyDownloadUnavailable"
@@ -54,77 +71,46 @@ type TerminalController = Pick<
 /**
  * What this tab can prove about the capture authority for ONE completed job.
  *
- * Generic `recovery.ready` is deliberately NOT a member of this type. Readiness
- * says the boot inspection finished, not what it found for THIS job, and starting
- * the chain on it opens a tokenless capture flight that a later exact activation
- * JOINS — the joined result carries no token, so the exact pass exits with its own
- * once-guard armed and no dependency left to change, stranding the run.
+ * G6.2 COLLAPSED this from three states to two. The third — `pending` — existed
+ * solely because a remount used to start with activation null and have a durable
+ * record attach from a LATER passive effect, so "no activation yet" and "no
+ * activation ever" were indistinguishable and the chain had to wait. Nothing
+ * attaches after the fact any more: a job in view with no matching activation is a
+ * job whose authority will never arrive, which is a proven absence, not a wait.
  */
-export type JobCaptureAuthority = "exact" | "proven-absent" | "pending";
+export type JobCaptureAuthority = "exact" | "proven-absent";
 
 /**
- * Classify the capture authority for `jobId` from the attached activation and
- * recovery's boot inspection. Pure, so the completed-job effect can hold its
- * result as a primitive dependency and observe every transition into it.
+ * Classify the capture authority for `jobId` from the attached activation. Pure,
+ * so the completed-job effect can hold its result as a primitive dependency.
  */
 export function classifyJobCaptureAuthority(
   jobId: string,
   activationJobId: string | null,
-  recovery: Pick<OptimizeSessionRecovery, "ready" | "state">,
 ): JobCaptureAuthority {
-  if (activationJobId === jobId) return "exact";
-  if (!recovery.ready) return "pending";
-  switch (recovery.state.kind) {
-    case "none":
-      // The ONLY safe absence, because an empty slot proves all three things a
-      // DELETE token needs at once: no active record can attach, no retained
-      // provisional's owner id could still name a staged snapshot, and there is
-      // nothing for `recovery.cleanup(jobId)` to preserve — it answers `absent`,
-      // so the LOCAL half of cleanup can actually finish. Every other state below
-      // fails at least one of those, and a token that only completes its server
-      // half leaves the terminal permanently `failed` with the local record intact.
-      return "proven-absent";
-    case "resumable":
-    case "interrupted":
-    case "unreadable":
-    case "storage-error":
-      // Everything else is inert — no token, no DELETE, the server artifact intact:
-      //
-      //   • `resumable` naming THIS job — its activation is still in flight;
-      //     recovery attaches it from a passive effect that runs after this hook's.
-      //   • `resumable` naming ANOTHER job — this job has no record, but that one
-      //     must be PRESERVED, and `cleanup(jobId)` answers `not-current`.
-      //   • `interrupted` — may be THIS accepted job's retained provisional after an
-      //     `activation-persistence-failed` write, still carrying the owner id that
-      //     names a staged snapshot. After a remount the opaque degraded-cleanup
-      //     capability is gone, so it cannot be matched to this job by job id and
-      //     its absence is simply not provable.
-      //   • `unreadable` / `storage-error` — a read that failed proves nothing.
-      //
-      // None of these deadlocks. Each has an EXISTING escape — the next Optimize
-      // click retires an interrupted record, or the other job resolves — that empties the
-      // slot; `recovery.state` then becomes `none`, this classification flips, and
-      // because it is an effect dependency the chain re-runs and cleanup completes
-      // with no second user action and no new UI.
-      return "pending";
-  }
+  return activationJobId === jobId ? "exact" : "proven-absent";
 }
 
 export interface UseOptimizeTerminalDeps {
   controller: TerminalController;
   /**
-   * `cleanup` drives the durable record removal after a confirmed server DELETE;
-   * `ready` and `state` together give this hook a JOB-SPECIFIC classification of
-   * the capture authority (see `classifyJobCaptureAuthority`). A remount starts
-   * with component-local activation null and recovery attaches the durable record
-   * from a passive effect that runs AFTER this hook's completed-job effect, so the
-   * chain waits for exact activation or a proven absence — never for readiness
-   * alone, which says nothing about this job.
+   * The visit's attempt authority.
+   *
+   * Every user-facing effect below — `saveBlob`, the roster fetch, the candidate
+   * commit, each state dispatch — is checked against the attempt that started the
+   * chain, at every awaited boundary. `mountedRef` alone was never enough: it
+   * suppresses React state after unmount and nothing else, so the asynchronous
+   * chain carried on and could still hand the user a download for a run they had
+   * walked away from.
+   *
+   * Optional so a test that is not exercising abandonment need not wire one; when
+   * absent the chain behaves as it did before the fence existed. Production always
+   * wires it.
    */
-  recovery: Pick<OptimizeSessionRecovery, "cleanup" | "ready" | "state">;
+  attempts?: AttemptRegistry;
   observability?: OptimizeObservability;
   /** Defaults to `fetchOptimizeXlsx`. */
-  fetchXlsx?: (jobId: string) => Promise<{ blob: Blob; filename: string }>;
+  fetchXlsx?: (jobId: string, signal?: AbortSignal) => Promise<{ blob: Blob; filename: string }>;
   /** Defaults to a same-origin `DELETE /api/optimize/{id}`. */
   deleteJob?: (jobId: string) => Promise<CleanupCallOutcome>;
   /** Defaults to a throwaway anchor-click browser download. */
@@ -144,7 +130,6 @@ export interface UseOptimizeTerminalDeps {
 
 /** The terminal surface consumed by the screen. */
 export interface OptimizeTerminal {
-  cleanupPhase: CleanupPhase;
   /** Whether the tab retains a restored blob for a re-download without re-fetch. */
   canDownloadAgain: boolean;
   downloadAgainFilename: string | null;
@@ -165,11 +150,6 @@ export interface OptimizeTerminal {
   downloadAgain(): void;
   /** (Re)attempt the completed-artifact download flow, then cleanup on success. */
   downloadArtifact(): void;
-  /** Best-effort terminal cleanup for the current job (dismiss/resubmit path):
-   *  server DELETE AND T16b local record removal. Resolves `cleaned` ONLY when the
-   *  server confirmed and T16b proved local removal (`removed`/`absent`). */
-  cleanup(): Promise<CleanupPhase>;
-  retryCleanup(): void;
 }
 
 async function defaultDeleteJob(jobId: string): Promise<CleanupCallOutcome> {
@@ -214,9 +194,9 @@ interface RetainedDownload {
 /**
  * Drive the terminal-outcome table. A completed job with a downloadable artifact
  * runs the download→restore→first-download→retain→cleanup chain exactly once; a
- * completed job with no artifact attempts cleanup only. Cancelled/failed runs
- * defer cleanup to the dismiss/resubmit path (`cleanup()`), matching the ticket's
- * row semantics. Retry/abandon never reset the successful terminal view.
+ * completed job with no artifact attempts cleanup only. A cancelled/failed run has
+ * no artifact to release, so its record is retired by the visit's retirement lane
+ * rather than by anything the user presses.
  */
 export function useOptimizeTerminal(deps: UseOptimizeTerminalDeps): OptimizeTerminal {
   // Everything the callbacks need is read through refs so the callbacks stay stable
@@ -230,9 +210,10 @@ export function useOptimizeTerminal(deps: UseOptimizeTerminalDeps): OptimizeTerm
   const seams = useRef({ fetchXlsx, deleteJob, saveBlob, restore });
   seams.current = { fetchXlsx, deleteJob, saveBlob, restore };
 
-  const [cleanupPhase, setCleanupPhase] = useState<CleanupPhase>("idle");
-  // The phase is also mirrored in a ref so the stable async callbacks can report the
-  // CURRENT phase without re-creating themselves on every phase change.
+  // The cleanup phase lives in a ref and NOWHERE else. It is read by the stable
+  // async callbacks (so they never re-create themselves on a phase change) and
+  // returned by `dismissCapture`; it is not React state, because nothing renders
+  // it and a setState nothing reads is a re-render nothing needed.
   const phaseRef = useRef<CleanupPhase>("idle");
   const [captureState, setCaptureState] = useState<RosterCaptureState>({ status: "idle" });
   const [retained, setRetained] = useState<{ jobId: string; filename: string } | null>(null);
@@ -240,9 +221,10 @@ export function useOptimizeTerminal(deps: UseOptimizeTerminalDeps): OptimizeTerm
   // Jobs whose terminal auto-chain has already fired (download+cleanup runs once).
   const autoDoneRef = useRef<Set<string>>(new Set());
   // The last non-null job id seen. `job-gone`/`control-job-gone` detach the job id
-  // (view.jobId → null, activation cleared) while the durable record still occupies
-  // the slot; cleanup/resubmit must still target that id so a DELETE returns
-  // job-not-found (confirmed cleanup) and frees the record. Cleared on a fresh run.
+  // (view.jobId → null, activation cleared) while the durable record still exists;
+  // a capture retry, a dismissal or a manual download must still target that id so
+  // a DELETE returns job-not-found (confirmed cleanup) and frees the record.
+  // Cleared on a fresh run.
   const lastJobIdRef = useRef<string | null>(null);
   const mountedRef = useRef(true);
   // Cleanup coalescing lives at APP lifetime, alongside the capture tokens it
@@ -253,8 +235,23 @@ export function useOptimizeTerminal(deps: UseOptimizeTerminalDeps): OptimizeTerm
 
   const applyPhase = useCallback((phase: CleanupPhase): CleanupPhase => {
     phaseRef.current = phase;
-    if (mountedRef.current) setCleanupPhase(phase);
     return phase;
+  }, []);
+
+  // --- the visit fence ------------------------------------------------------
+  //
+  // `beginAttempt` is called ONCE at the head of each async chain and returns the
+  // attempt that owns it; `stillOwned` is re-checked after every await. With no
+  // registry wired, both degrade to "always live", which is the pre-fence
+  // behaviour tests without abandonment expect.
+  const beginAttempt = useCallback((): VisitAttempt | null => {
+    return ref.current.attempts?.current() ?? null;
+  }, []);
+
+  const stillOwned = useCallback((attempt: VisitAttempt | null): boolean => {
+    // No registry ⇒ no visit fence to fail.
+    if (ref.current.attempts === undefined) return true;
+    return attempt !== null && attempt.isCurrent();
   }, []);
 
   useEffect(() => {
@@ -270,40 +267,54 @@ export function useOptimizeTerminal(deps: UseOptimizeTerminalDeps): OptimizeTerm
   }, []);
 
   // Fetch → restore → first browser download → retain. Returns whether it succeeded.
-  const runDownload = useCallback(async (jobId: string): Promise<boolean> => {
-    const { controller } = ref.current;
-    const activation = controller.activation;
-    if (!activation || activation.jobId !== jobId) {
-      // Without the retained reverse map we cannot safely restore/deliver the file.
-      controller.notifyDownloadFailed("The restoration data for this run is unavailable.");
-      return false;
-    }
-    controller.notifyDownloadStarted();
-    try {
-      const { blob, filename } = await seams.current.fetchXlsx(jobId);
-      const restored = await seams.current.restore(blob, {
-        anonymized: activation.anonymized,
-        reverseMap: activation.reverseMap,
-        peopleCount: activation.peopleCount,
-      });
-      // The immediate browser download uses the AUTHORITATIVE server filename
-      // (backend stores upload names verbatim, uncapped). Everything RETAINED —
-      // the tab-lifetime Download Again copy and the React display state — stores
-      // only the UTF-8-safe bounded copy so a pathological filename cannot pin
-      // unbounded memory. The run view bounds its own copy from this same value.
-      seams.current.saveBlob(restored, filename);
-      const displayFilename = truncateUtf8(filename, MAX_DISPLAY_FILENAME_BYTES);
-      retainRef.current = { jobId, blob: restored, filename: displayFilename };
-      if (mountedRef.current) setRetained({ jobId, filename: displayFilename });
-      controller.notifyDownloadSucceeded(displayFilename);
-      return true;
-    } catch (error) {
-      controller.notifyDownloadFailed(
-        error instanceof Error ? error.message : "Unable to download the schedule.",
-      );
-      return false;
-    }
-  }, []);
+  const runDownload = useCallback(
+    async (jobId: string, attempt: VisitAttempt | null): Promise<boolean> => {
+      const { controller } = ref.current;
+      const activation = controller.activation;
+      if (!activation || activation.jobId !== jobId) {
+        // Without the retained reverse map we cannot safely restore/deliver the file.
+        controller.notifyDownloadFailed("The restoration data for this run is unavailable.");
+        return false;
+      }
+      if (!stillOwned(attempt)) return false;
+      controller.notifyDownloadStarted();
+      try {
+        const { blob, filename } = await seams.current.fetchXlsx(jobId, attempt?.signal);
+        if (!stillOwned(attempt)) return false;
+        const restored = await seams.current.restore(blob, {
+          anonymized: activation.anonymized,
+          reverseMap: activation.reverseMap,
+          peopleCount: activation.peopleCount,
+        });
+        // THE LAST CHECK BEFORE THE DOWNLOAD PRIMITIVE. No browser API can retract a
+        // download once `saveBlob` has been called, so the contract is stated at the
+        // only place it can be kept: a call already made is not undone, and no call
+        // is made after revocation linearizes.
+        if (!stillOwned(attempt)) return false;
+        // The immediate browser download uses the AUTHORITATIVE server filename
+        // (backend stores upload names verbatim, uncapped). Everything RETAINED —
+        // the tab-lifetime Download Again copy and the React display state — stores
+        // only the UTF-8-safe bounded copy so a pathological filename cannot pin
+        // unbounded memory. The run view bounds its own copy from this same value.
+        seams.current.saveBlob(restored, filename);
+        const displayFilename = truncateUtf8(filename, MAX_DISPLAY_FILENAME_BYTES);
+        retainRef.current = { jobId, blob: restored, filename: displayFilename };
+        if (mountedRef.current) setRetained({ jobId, filename: displayFilename });
+        controller.notifyDownloadSucceeded(displayFilename);
+        return true;
+      } catch (error) {
+        // A stale attempt's abort is SILENCE. The user walked away; an error card
+        // about a download they abandoned is noise, and reporting it would also be
+        // a user-facing effect after revocation, which is exactly what is forbidden.
+        if (isAbortError(error) || !stillOwned(attempt)) return false;
+        controller.notifyDownloadFailed(
+          error instanceof Error ? error.message : "Unable to download the schedule.",
+        );
+        return false;
+      }
+    },
+    [stillOwned],
+  );
 
   const markCleanupFailed = useCallback(
     (jobId: string): CleanupPhase => {
@@ -323,36 +334,44 @@ export function useOptimizeTerminal(deps: UseOptimizeTerminalDeps): OptimizeTerm
   // Without an exact activation the authority is whatever recovery can PROVE:
   // a proven absence settles the gate, while an unresolved classification stays
   // null so the gate defers without opening a joinable flight.
-  const captureRequest = useCallback((jobId: string): CaptureRequest => {
-    const { controller, recovery } = ref.current;
-    const activation = controller.activation;
-    const entry = retainRef.current;
-    let capture: CaptureRequest["capture"] = null;
-    if (activation !== null && activation.jobId === jobId) {
-      capture = activation.capture;
-    } else if (
-      classifyJobCaptureAuthority(jobId, activation?.jobId ?? null, recovery) === "proven-absent"
-    ) {
-      capture = { status: "absent" };
-    }
-    return {
-      jobId,
-      capture,
-      frozenXlsx: entry !== null && entry.jobId === jobId ? entry.blob : null,
-    };
-  }, []);
+  const captureRequest = useCallback(
+    (jobId: string, attempt: VisitAttempt | null): CaptureRequest => {
+      const { controller } = ref.current;
+      const activation = controller.activation;
+      const entry = retainRef.current;
+      const capture: CaptureRequest["capture"] =
+        activation !== null && activation.jobId === jobId
+          ? activation.capture
+          : // No exact activation, and none can arrive later now that nothing
+            // attaches after the fact. That is a PROVEN absence, so the gate settles
+            // it honestly rather than deferring forever.
+            { status: "absent" };
+      return {
+        jobId,
+        capture,
+        frozenXlsx: entry !== null && entry.jobId === jobId ? entry.blob : null,
+        signal: attempt?.signal,
+      };
+    },
+    [],
+  );
 
   // Run (or join) capture and report whether a terminal DELETE is now authorized.
   // With no gate wired this is vacuously true, preserving the pre-capture chain.
   const runCapture = useCallback(
-    async (jobId: string): Promise<boolean> => {
+    async (jobId: string, attempt: VisitAttempt | null): Promise<boolean> => {
       const gate = ref.current.capture;
       if (!gate) return true;
-      const outcome = await gate.capture(captureRequest(jobId));
+      if (!stillOwned(attempt)) return false;
+      const outcome = await gate.capture(captureRequest(jobId, attempt));
+      // A capture that resolved after the visit ended may still have committed a
+      // candidate — that is durable product data and is deliberately kept. What it
+      // may NOT do is publish a notice or authorize the terminal DELETE from here.
+      if (!stillOwned(attempt)) return false;
       if (mountedRef.current) setCaptureState(outcome.state);
       return outcome.token !== null;
     },
-    [captureRequest],
+    [captureRequest, stillOwned],
   );
 
   // Cleanup is TWO distinct required steps: an exact server DELETE confirmation
@@ -376,7 +395,7 @@ export function useOptimizeTerminal(deps: UseOptimizeTerminalDeps): OptimizeTerm
       const phase = await cleanupCoordinator.run(
         jobId,
         async (): Promise<CleanupPhase> => {
-          const { controller, recovery, observability } = ref.current;
+          const { controller, observability } = ref.current;
           applyPhase("cleaning");
           // Only the SERVER half is idempotently remembered here. A cleanup whose
           // DELETE was confirmed but whose local removal could not be proven stays
@@ -388,7 +407,10 @@ export function useOptimizeTerminal(deps: UseOptimizeTerminalDeps): OptimizeTerm
             if (server.status !== "confirmed") return markCleanupFailed(jobId);
             cleanupCoordinator.markServerDeleted(jobId);
           }
-          const local = recovery.cleanup(jobId);
+          // Owner-keyed record removal. `unknown-owner` is a genuine failure, not a
+          // shrug: it means this controller cannot name the key, and inventing one
+          // is how another run's record gets deleted.
+          const local = controller.retireSessionRecord(jobId);
           if (local.status !== "removed" && local.status !== "absent") {
             return markCleanupFailed(jobId);
           }
@@ -411,32 +433,25 @@ export function useOptimizeTerminal(deps: UseOptimizeTerminalDeps): OptimizeTerm
   const viewJobId = deps.controller.view.jobId;
   const artifactAvailable = deps.controller.view.download.artifactAvailable;
 
-  // Authority handoff. A remount starts with component-local activation null,
-  // and recovery attaches the durable record from a passive effect that runs
-  // AFTER this hook's completed-job effect. Running the chain before authority
-  // resolves would pass `capture: null` to the gate — which defers, but ALSO
-  // opened a joinable app-lifetime flight that the exact activation would then
-  // join, taking its tokenless outcome while arming its own once-guard.
-  //
-  // So the proceed condition is JOB-SPECIFIC, never generic readiness: either the
-  // exact activation is attached, or recovery has PROVEN no record can attach for
-  // this job. `authority` is a plain string, so every transition into it (and any
-  // change of attached job) is an observable dependency that restarts the chain.
+  // Job-specific capture authority. `authority` is a plain string, so every
+  // transition into it (and any change of attached job) is an observable
+  // dependency of the chain below.
   const activationJobId = deps.controller.activation?.jobId ?? null;
-  const authority: JobCaptureAuthority =
-    viewJobId === null
-      ? "pending"
-      : classifyJobCaptureAuthority(viewJobId, activationJobId, deps.recovery);
+  const authority: JobCaptureAuthority | null =
+    viewJobId === null ? null : classifyJobCaptureAuthority(viewJobId, activationJobId);
 
   // Remember the last non-null job id (survives a `job-gone` detach) and clear it
   // on a fresh run so cleanup never targets a superseded job.
   if (viewJobId !== null) lastJobIdRef.current = viewJobId;
   else if (lifecycle === "submitting" || lifecycle === "idle") lastJobIdRef.current = null;
   useEffect(() => {
-    if (viewJobId === null || lifecycle !== "completed") return;
+    if (viewJobId === null || lifecycle !== "completed" || authority === null) return;
     if (autoDoneRef.current.has(viewJobId)) return;
-    // Nothing is proven about this job yet — do not touch the gate at all.
-    if (authority === "pending") return;
+    // The visit that started this run is over. The terminal chain is entirely
+    // user-facing — a download, a capture notice, a CTA — so there is nothing here
+    // to do for an abandoned run. Its retirement lane runs elsewhere.
+    const attempt = beginAttempt();
+    if (!stillOwned(attempt)) return;
     const jobId = viewJobId;
     const exactAuthority = authority === "exact";
     // Arm the once-guard SYNCHRONOUSLY only for exact activation: the download
@@ -450,18 +465,21 @@ export function useOptimizeTerminal(deps: UseOptimizeTerminalDeps): OptimizeTerm
         // needs will never exist. The failed-download path preserves the artifact
         // for a manual retry and authorizes no DELETE, so the only server copy
         // still outlives a run whose restoration data is gone.
-        const ok = await runDownload(jobId);
+        const ok = await runDownload(jobId, attempt);
         if (!ok) return;
       } else {
+        if (!stillOwned(attempt)) return;
         ref.current.controller.notifyDownloadUnavailable();
       }
       // Capture runs BEFORE any DELETE and is the gate on it. A `fetch-failed` /
       // `commit-failed` capture issues no token, so the job survives for Retry — and
       // the once-guard is armed only once capture is authorized, so an unauthorized
       // outcome leaves the guard open for an explicit retry.
-      const authorized = await runCapture(jobId);
+      const authorized = await runCapture(jobId, attempt);
       if (!authorized) return;
       autoDoneRef.current.add(jobId);
+      // Cleanup is the retirement half and is allowed to finish either way: it is
+      // invisible, and the token that authorizes it was issued to THIS job.
       await attemptCleanup(jobId);
     })();
   }, [
@@ -470,6 +488,8 @@ export function useOptimizeTerminal(deps: UseOptimizeTerminalDeps): OptimizeTerm
     artifactAvailable,
     authority,
     activationJobId,
+    beginAttempt,
+    stillOwned,
     runDownload,
     runCapture,
     attemptCleanup,
@@ -480,7 +500,6 @@ export function useOptimizeTerminal(deps: UseOptimizeTerminalDeps): OptimizeTerm
   useEffect(() => {
     if (lifecycle === "submitting" || lifecycle === "idle") {
       phaseRef.current = "idle";
-      setCleanupPhase("idle");
       setCaptureState({ status: "idle" });
     }
   }, [lifecycle]);
@@ -488,44 +507,50 @@ export function useOptimizeTerminal(deps: UseOptimizeTerminalDeps): OptimizeTerm
   const downloadArtifact = useCallback(() => {
     const jobId = currentJobId();
     if (jobId === null) return;
+    const attempt = beginAttempt();
+    if (!stillOwned(attempt)) return;
     void (async () => {
-      const ok = await runDownload(jobId);
+      const ok = await runDownload(jobId, attempt);
       if (!ok) return;
       // Shares the auto effect's coalesced per-job capture promise: entering here
       // while the auto chain is mid-capture joins it rather than starting a second
       // `/roster` fetch or a rival commit.
-      const authorized = await runCapture(jobId);
+      const authorized = await runCapture(jobId, attempt);
       if (authorized) await attemptCleanup(jobId);
     })();
-  }, [attemptCleanup, currentJobId, runCapture, runDownload]);
+  }, [attemptCleanup, beginAttempt, currentJobId, runCapture, runDownload, stillOwned]);
 
   const retryCapture = useCallback(() => {
     const jobId = currentJobId();
     if (jobId === null) return;
     const gate = ref.current.capture;
     if (!gate) return;
+    const attempt = beginAttempt();
+    if (!stillOwned(attempt)) return;
     void (async () => {
-      const outcome = await gate.retry(captureRequest(jobId));
+      const outcome = await gate.retry(captureRequest(jobId, attempt));
+      if (!stillOwned(attempt)) return;
       if (mountedRef.current) setCaptureState(outcome.state);
       if (outcome.token !== null) await attemptCleanup(jobId);
     })();
-  }, [attemptCleanup, captureRequest, currentJobId]);
+  }, [attemptCleanup, beginAttempt, captureRequest, currentJobId, stillOwned]);
 
   const dismissCapture = useCallback(async (): Promise<CleanupPhase> => {
     const jobId = currentJobId();
     if (jobId === null) return "idle";
     const gate = ref.current.capture;
     if (gate) {
+      const attempt = beginAttempt();
       // Serializes with any in-flight capture inside the gate AND enforces the
       // roster-attempt fence for a capture-capable job that has not captured yet.
-      const outcome = await gate.dismiss(captureRequest(jobId));
+      const outcome = await gate.dismiss(captureRequest(jobId, attempt));
       if (mountedRef.current) setCaptureState(gate.getState(jobId));
       // No proven local removal ⇒ no token ⇒ no DELETE. Deleting the server job
       // while the real-identity candidate is still durable would strand it.
       if (outcome.status !== "dismissed") return phaseRef.current;
     }
     return attemptCleanup(jobId);
-  }, [attemptCleanup, captureRequest, currentJobId]);
+  }, [attemptCleanup, beginAttempt, captureRequest, currentJobId]);
 
   const downloadAgain = useCallback(() => {
     const entry = retainRef.current;
@@ -533,29 +558,12 @@ export function useOptimizeTerminal(deps: UseOptimizeTerminalDeps): OptimizeTerm
     seams.current.saveBlob(entry.blob, entry.filename);
   }, []);
 
-  // The dismiss/resubmit path. With capture wired this IS an explicit decline of the
-  // candidate, so it goes through the gate to obtain a dismissal token rather than
-  // deleting on no authority at all (the pre-capture behaviour).
-  const cleanup = useCallback(async (): Promise<CleanupPhase> => {
-    const jobId = currentJobId();
-    if (jobId === null) return "idle";
-    if (ref.current.capture) return dismissCapture();
-    return attemptCleanup(jobId);
-  }, [attemptCleanup, currentJobId, dismissCapture]);
-
-  const retryCleanup = useCallback(() => {
-    const jobId = currentJobId();
-    if (jobId === null) return;
-    void attemptCleanup(jobId);
-  }, [attemptCleanup, currentJobId]);
-
   // Download Again is offered ONLY for the run currently in view: a prior run's
   // retained blob must never be handed out under a later job's terminal result.
   const liveJobId = viewJobId ?? deps.controller.activation?.jobId ?? null;
   const downloadAgainForLiveJob = retained !== null && retained.jobId === liveJobId;
 
   return {
-    cleanupPhase,
     captureState,
     retryCapture,
     dismissCapture,
@@ -563,7 +571,5 @@ export function useOptimizeTerminal(deps: UseOptimizeTerminalDeps): OptimizeTerm
     downloadAgainFilename: downloadAgainForLiveJob ? retained.filename : null,
     downloadAgain,
     downloadArtifact,
-    cleanup,
-    retryCleanup,
   };
 }

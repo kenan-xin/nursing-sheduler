@@ -10,7 +10,17 @@
 // never disturb the Grid's internal scroller or sticky geometry.
 //
 // The save-status feedback is global (Core Flows: "a small global Saving state").
-// On failure it offers Retry and keeps Export roster file available as rescue.
+// On failure it offers Retry and keeps `Save roster file` available as rescue.
+//
+// `Save roster file` writes the portable `.nurse-roster.json` document and is the
+// counterpart to Import: together they move a roster between devices and people,
+// and they are what makes the viewer usable on its own without ever running an
+// optimization. It is deliberately NOT the same idea as `Export XLSX`, which
+// produces a spreadsheet for humans and cannot be read back in. It is also
+// distinct from the browser autosave behind the Saving/Saved status, which keeps
+// this device's copy durable but never leaves the browser — hence "Save… file"
+// rather than the older "Export roster file", which read as a sibling of Export
+// XLSX and buried the round-trip.
 //
 // G3: Import and Clear are extracted as standalone controls and re-composed into
 // `EmptyRosterActions`, because both remain meaningful with no working roster —
@@ -107,7 +117,7 @@ export function RosterActions({
         onClick={() => void onExportRosterFile()}
         data-testid="roster-export-file"
       >
-        <FaFileCirclePlus className="size-3.5" aria-hidden /> Export roster file
+        <FaFileCirclePlus className="size-3.5" aria-hidden /> Save roster file
       </Button>
       <Button
         variant="ghost"
@@ -195,7 +205,7 @@ export interface EmptyRosterActionsProps {
  * The document actions that mean something with NO working roster: the file
  * ingestion path, and the always-available privacy purge.
  *
- * Deliberately NOT `RosterActions` with things hidden. Save status, Export roster
+ * Deliberately NOT `RosterActions` with things hidden. Save status, Save roster
  * file and Export XLSX all describe a roster that is on screen; offering them
  * here would advertise actions with no subject. What the empty state does owe the
  * user is the two controls that still have one: a roster file they were sent, and

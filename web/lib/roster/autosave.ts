@@ -37,7 +37,7 @@
 //     can await the pending work without hanging on a failure the way `drain()`
 //     (which only resolves when clean) would.
 //   • FAILED KEEPS THE EDIT. A failed write does NOT revert the in-memory roster;
-//     the user's edit stays visible, `Export roster file` stays available as a
+//     the user's edit stays visible, `Save roster file` stays available as a
 //     rescue, and Retry re-attempts the retained document against a fresh revision.
 //   • CLEAR INVALIDATES. A `stale-epoch` outcome (Clear bumped the epoch while a
 //     write was pending) is terminal for that document: the storage it targeted

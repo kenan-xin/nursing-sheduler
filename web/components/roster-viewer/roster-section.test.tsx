@@ -825,6 +825,24 @@ describe("RosterSection — empty-state document actions", () => {
     expect(screen.queryByTestId("roster-empty-actions")).toBeNull();
   });
 
+  // The roster file is what makes the viewer usable on its own — it is the only
+  // way a roster leaves this browser and comes back editable. Labelling it
+  // "Export roster file" read as a sibling of "Export XLSX" (a one-way,
+  // human-readable spreadsheet) and buried that round-trip, so it is now
+  // "Save roster file", paired with Import.
+  it("labels the portable document action Save roster file, distinct from Export XLSX", async () => {
+    await seedWorking();
+    renderSection();
+    await waitFor(() => expect(screen.getByTestId("roster-section")).toBeDefined());
+
+    expect(screen.getByTestId("roster-export-file")).toHaveTextContent(/^Save roster file$/);
+    // The three concepts stay visibly separate: the portable file, the
+    // spreadsheet, and this browser's own autosave status.
+    expect(screen.getByTestId("roster-export-xlsx")).toHaveTextContent(/Export XLSX/);
+    expect(screen.getByTestId("roster-export-file")).not.toHaveTextContent(/XLSX/);
+    expect(screen.getByTestId("roster-import")).toBeDefined();
+  });
+
   // An unreadable store is still not an empty one: we never learned what is
   // there, so neither action has a subject and neither is offered.
   it("offers no document actions when the store could not be read at all", async () => {
