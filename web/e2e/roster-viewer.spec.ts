@@ -395,14 +395,25 @@ test.describe("F4 roster viewer — real layout", () => {
     expect(layers.rowHeader).toEqual({ zIndex: "2", position: "sticky" });
   });
 
-  test("a worked shift chip measures 34×28", async ({ page }) => {
+  test("a short-id chip still measures exactly 34×28 with a 6px inline inset", async ({ page }) => {
     await page.getByTestId("roster-lens-grid").click();
     const chip = page.getByTestId("roster-grid").locator("[data-shift-chip]").first();
     await expect(chip).toBeVisible();
     const box = await chip.boundingBox();
     expect(box).not.toBeNull();
+    // 34 is the MINIMUM. `D` is far narrower than 34 − 12, so border-box keeps
+    // the inset inside the minimum and the column does not widen (G8).
     expect(box?.width).toBeCloseTo(34, 0);
     expect(box?.height).toBeCloseTo(28, 0);
+    const style = await chip.evaluate((el) => {
+      const s = getComputedStyle(el);
+      return {
+        left: s.paddingLeft,
+        right: s.paddingRight,
+        box: s.boxSizing,
+      };
+    });
+    expect(style).toEqual({ left: "6px", right: "6px", box: "border-box" });
   });
 
   test("the day strip is one tab stop with working Arrow/Home/End keys", async ({ page }) => {
@@ -504,40 +515,190 @@ test.describe("F4 roster viewer — real layout", () => {
     await expect(header).toHaveAttribute("title", /Public holiday$/);
   });
 
-  test("the Grid legend scrolls internally at 390px and at a 759px docked host", async ({
-    page,
-  }) => {
-    await page.getByTestId("roster-lens-grid").click();
+  // G8 — the legend is NO LONGER a scroller at any width.
+  //
+  // The strip it replaces measured clientWidth 1124 against scrollWidth 2321 at
+  // 1440px: more than half the key was hidden on a wide desktop, with no
+  // persistent scroll affordance on macOS Chromium and, on the reporter's
+  // platform, a native scrollbar that overlaid and clipped the labels. Axe
+  // reported it as a serious keyboard-inaccessible scroll region. These tests
+  // pin the replacement in the only place the claim is real: measured layout.
+  test("the Grid legend never scrolls sideways at any audited width", async ({ page }) => {
+    // Each case states WHICH layout it expects, rather than branching on
+    // whatever happens to be mounted. `setViewportSize` returns before the
+    // container-width observer has fired, so a "whichever is there" branch reads
+    // the OLD layout, skips opening the disclosure, and then fails against the
+    // new one — a real race that made this test flaky before it was pinned.
+    const cases: Array<{ name: string; setup: () => Promise<void>; disclosed: boolean }> = [
+      {
+        name: "1440 viewport, auto host",
+        setup: async () => {
+          await page.getByTestId("fx-host-auto").click();
+          await page.setViewportSize({ width: 1440, height: 900 });
+        },
+        disclosed: false,
+      },
+      {
+        name: "1280 viewport, auto host",
+        setup: async () => {
+          await page.setViewportSize({ width: 1280, height: 900 });
+        },
+        disclosed: false,
+      },
+      {
+        name: "759 docked host in a 1400 window",
+        setup: async () => {
+          await page.setViewportSize({ width: 1400, height: 900 });
+          await page.getByTestId("fx-host-759").click();
+        },
+        disclosed: true,
+      },
+      {
+        name: "390 viewport, auto host",
+        setup: async () => {
+          await page.getByTestId("fx-host-auto").click();
+          await page.setViewportSize({ width: 390, height: 844 });
+        },
+        disclosed: true,
+      },
+    ];
 
-    for (const setup of [
-      async () => {
-        await page.getByTestId("fx-host-auto").click();
-        await page.setViewportSize({ width: 390, height: 844 });
-      },
-      async () => {
-        await page.setViewportSize({ width: 1400, height: 900 });
-        await page.getByTestId("fx-host-759").click();
-      },
-    ]) {
+    for (const { name, setup, disclosed } of cases) {
       await setup();
       await page.getByTestId("roster-lens-grid").click();
+
+      // Wait for the observer to settle on the expected layout...
+      await expect
+        .poll(async () => (await page.getByTestId("roster-grid-legend-disclosure").count()) > 0, {
+          message: `legend layout at ${name}`,
+        })
+        .toBe(disclosed);
+
+      // ...then make sure the disclosure is OPEN, so the key is MEASURED laid
+      // out rather than measured collapsed (which would contain trivially).
+      //
+      // `open` is uncontrolled DOM state, and React reuses the same <details>
+      // element when one narrow width replaces another — so it can still be open
+      // from the previous case, and a blind click would toggle it SHUT. Read the
+      // state, then click only when it needs opening.
+      if (disclosed) {
+        const details = page.getByTestId("roster-grid-legend-disclosure");
+        if (!(await details.evaluate((el) => (el as HTMLDetailsElement).open))) {
+          await page.getByTestId("roster-grid-legend-summary").click();
+        }
+        await expect(details, `disclosure open at ${name}`).toHaveAttribute("open", "");
+      }
+
       const legend = page.getByTestId("roster-grid-legend");
       await expect(legend).toBeVisible();
-      // The strip owns its own overflow...
       const box = await legend.evaluate((el) => ({
         overflowX: getComputedStyle(el).overflowX,
-        contained: el.scrollWidth <= el.clientWidth + 1 || el.clientWidth > 0,
+        scrollWidth: el.scrollWidth,
+        clientWidth: el.clientWidth,
+        flexWrap: getComputedStyle(el).flexWrap,
       }));
-      expect(box.overflowX).toBe("auto");
-      expect(box.contained).toBe(true);
-      // ...and the DOCUMENT never scrolls sideways because of it.
+      // Not a scroller, and not merely a scroller that happens to fit.
+      expect(box.overflowX, `overflow at ${name}`).toBe("visible");
+      expect(box.flexWrap, `wrap at ${name}`).toBe("wrap");
+      expect(box.clientWidth, `laid out at ${name}`).toBeGreaterThan(0);
+      expect(box.scrollWidth, `contained at ${name}`).toBeLessThanOrEqual(box.clientWidth + 1);
+
+      // The DOCUMENT never scrolls sideways either.
       const overflows = await page.evaluate(
         () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
       );
-      expect(overflows).toBe(false);
+      expect(overflows, `no document overflow at ${name}`).toBe(false);
     }
 
     await page.setViewportSize({ width: 1400, height: 900 });
+    await page.getByTestId("fx-host-auto").click();
+  });
+
+  // The P1 that started G8 was an AXE finding — `scrollable-region-focusable`,
+  // serious, one node — and the suite never saw it: the v2 surface matrix scans
+  // `/roster` on the `optimize-ready` seed, where there is no working roster, so
+  // the legend that carried the violation was never rendered under axe at all.
+  // This scans the route with a roster actually LOADED, at both legend layouts.
+  test("axe finds no scrollable region and no violation on a LOADED roster", async ({ page }) => {
+    const { runAxe } = await import("./support/v2-visual-audit");
+
+    for (const { name, width, disclosed } of [
+      { name: "wide", width: 1440, disclosed: false },
+      { name: "docked", width: 759, disclosed: true },
+    ]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.getByTestId("roster-lens-grid").click();
+      await expect
+        .poll(async () => (await page.getByTestId("roster-grid-legend-disclosure").count()) > 0, {
+          message: `legend layout at ${name}`,
+        })
+        .toBe(disclosed);
+      if (disclosed) {
+        const details = page.getByTestId("roster-grid-legend-disclosure");
+        if (!(await details.evaluate((el) => (el as HTMLDetailsElement).open))) {
+          await page.getByTestId("roster-grid-legend-summary").click();
+        }
+        await expect(details).toHaveAttribute("open", "");
+      }
+
+      const results = await runAxe(page);
+      const scrollable = results.violations.filter((v) => v.id === "scrollable-region-focusable");
+      expect(scrollable, `no keyboard-inaccessible scroll region at ${name}`).toEqual([]);
+      expect(
+        results.violations.map((v) => `${v.id} × ${v.nodes.length}`),
+        `axe AA on a loaded roster at ${name}`,
+      ).toEqual([]);
+    }
+    await page.setViewportSize({ width: 1400, height: 900 });
+  });
+
+  test("a wide roster content box shows the whole key inline; a docked one discloses it", async ({
+    page,
+  }) => {
+    await page.getByTestId("fx-host-auto").click();
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.getByTestId("roster-lens-grid").click();
+
+    // The measured box must actually be on the wide side of the 900px threshold,
+    // or this test would pass for the wrong reason.
+    const wideWidth = await page
+      .getByTestId("roster-content")
+      .evaluate((el) => el.getBoundingClientRect().width);
+    expect(wideWidth).toBeGreaterThanOrEqual(900);
+    await expect(page.getByTestId("roster-grid-legend-disclosure")).toHaveCount(0);
+    await expect(page.getByTestId("roster-grid-legend")).toBeVisible();
+    const wideItems = await page
+      .getByTestId("roster-grid-legend-item")
+      .evaluateAll((els) => els.map((el) => `${el.getAttribute("data-shift")}|${el.textContent}`));
+    expect(wideItems.length).toBeGreaterThan(0);
+
+    // Now dock the host below 900 — keyed to roster CONTENT width, not the
+    // window, which stays wide throughout.
+    await page.getByTestId("fx-host-759").click();
+    await page.getByTestId("roster-lens-grid").click();
+    const summary = page.getByTestId("roster-grid-legend-summary");
+    await expect(summary).toBeVisible();
+    await expect(summary).toContainText("Shift key");
+    // It arrives CLOSED — the whole point is that a docked host is not made to
+    // carry the full key until it is asked for.
+    await expect(page.getByTestId("roster-grid-legend-disclosure")).not.toHaveAttribute("open", "");
+
+    // Keyboard operable, as a disclosure and nothing more exotic.
+    await summary.focus();
+    await expect(summary).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("roster-grid-legend-disclosure")).toHaveAttribute("open", "");
+
+    // The SAME complete key — every authored id, its hours, Leave and Off/rest.
+    const narrowItems = await page
+      .getByTestId("roster-grid-legend-item")
+      .evaluateAll((els) => els.map((el) => `${el.getAttribute("data-shift")}|${el.textContent}`));
+    expect(narrowItems).toEqual(wideItems);
+    await expect(page.getByTestId("roster-grid-legend-item").first()).toBeVisible();
+
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("roster-grid-legend-disclosure")).not.toHaveAttribute("open", "");
+
     await page.getByTestId("fx-host-auto").click();
   });
 
@@ -820,6 +981,172 @@ test.describe("F4 roster viewer — real layout", () => {
     await expect(page.getByTestId("roster-day")).toBeVisible();
     const restored = page.getByRole("tablist").getByRole("tab");
     await expect(restored.nth(count - 1)).toHaveAttribute("aria-selected", "true");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// G8 — real Ward 8 authored labels inside the chip.
+//
+// The default fixture's one-letter `D`/`N` sit far inside a 34px box, so every
+// prior geometry assertion passed while `long`, `long+`, `night` and `night+`
+// ran glyph-to-edge against the colour boundary. This seeds the exact ids the
+// assembled ward authors and measures the box those labels actually get.
+// ---------------------------------------------------------------------------
+
+test.describe("G8 chip geometry — Ward 8's long authored labels", () => {
+  test.beforeEach(async ({ page }) => {
+    await freshFixture(page);
+    await page.getByTestId("fx-seed-ward-labels").click();
+    await expect(page.getByTestId("fx-status")).toHaveText("ward-labels-seeded");
+    await expect(page.getByTestId("roster-section")).toBeVisible();
+    await page.getByTestId("roster-lens-grid").click();
+    await expect(page.getByTestId("roster-grid")).toBeVisible();
+  });
+
+  test("every long label fits its chip with a real 6px inset on both sides", async ({ page }) => {
+    for (const label of ["long", "long+", "night", "night+"]) {
+      const chip = page
+        .getByTestId("roster-grid")
+        .locator(`[data-shift-chip][aria-label="${label}"]`)
+        .first();
+      await expect(chip).toBeVisible();
+
+      const measured = await chip.evaluate((el) => {
+        const s = getComputedStyle(el);
+        const rect = el.getBoundingClientRect();
+        return {
+          width: rect.width,
+          height: rect.height,
+          paddingLeft: Number.parseFloat(s.paddingLeft),
+          paddingRight: Number.parseFloat(s.paddingRight),
+          boxSizing: s.boxSizing,
+          scrollWidth: el.scrollWidth,
+          clientWidth: el.clientWidth,
+        };
+      });
+
+      // The box keeps its fixed height and its inset...
+      expect(measured.height).toBeCloseTo(28, 0);
+      expect(measured.paddingLeft).toBeCloseTo(6, 1);
+      expect(measured.paddingRight).toBeCloseTo(6, 1);
+      expect(measured.boxSizing).toBe("border-box");
+      // ...and GROWS past the 34px minimum for its own content instead of
+      // clipping it. The glyphs never touch the fill boundary.
+      expect(measured.width).toBeGreaterThan(34);
+      expect(measured.scrollWidth).toBeLessThanOrEqual(measured.clientWidth + 1);
+    }
+  });
+
+  test("adjacent long chips keep the cell's 8px column-to-column separation", async ({ page }) => {
+    // Row 0 is all long labels, so this is the tight case rather than a long id
+    // sitting comfortably beside a 34px short one.
+    const row = page.getByTestId("roster-grid").locator("tbody tr").first();
+    const chips = row.locator("[data-shift-chip]");
+    await expect(chips.nth(1)).toBeVisible();
+
+    const rects = await chips.evaluateAll((els) =>
+      els.map((el) => {
+        const r = el.getBoundingClientRect();
+        return { left: r.left, right: r.right };
+      }),
+    );
+    expect(rects.length).toBeGreaterThan(1);
+    for (let i = 1; i < rects.length; i++) {
+      // 4px of cell padding on each side of the boundary. Nothing overlaps and
+      // nothing is closer than the authored gap.
+      expect(rects[i].left - rects[i - 1].right).toBeGreaterThanOrEqual(7.5);
+    }
+
+    // Cell padding itself is UNCHANGED — the separation comes from the cell, not
+    // from having widened every chip.
+    const padding = await row
+      .locator("td")
+      .first()
+      .evaluate((el) => getComputedStyle(el).padding);
+    expect(padding).toBe("4px");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// G8 — Undo and the lens selector as ONE aligned control group.
+//
+// Before this, Undo measured 32px against the segmented control's 43.19px, its
+// top sat 11.19px lower and its visual centre 5.59px lower, and at 759/820px the
+// two independent flex children could split across rows. Every claim below is a
+// measured box, at every audited width.
+// ---------------------------------------------------------------------------
+
+test.describe("G8 control group — Undo aligned to the lens selector", () => {
+  test.beforeEach(async ({ page }) => {
+    // The same helper the F5 suite uses: it waits for the editing AUTHORITY to
+    // be live, not merely for the panel to render, so Undo actually exists.
+    await seedWorkingRoster(page);
+  });
+
+  test("Undo matches the segmented control's exact height and centre at every width", async ({
+    page,
+  }) => {
+    for (const width of [1440, 1280, 820, 759, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      const undo = page.getByTestId("roster-undo");
+      const lens = page.getByTestId("roster-lens-toggle");
+      await expect(undo).toBeVisible();
+      await expect(lens).toBeVisible();
+
+      const [u, l] = await Promise.all([undo.boundingBox(), lens.boundingBox()]);
+      expect(u, `undo box at ${width}`).not.toBeNull();
+      expect(l, `lens box at ${width}`).not.toBeNull();
+      if (u === null || l === null) continue;
+
+      // Exact height, not merely "close": `items-stretch` makes this identity,
+      // and a fixed `h-control-sm` creeping back would break it immediately.
+      expect(u.height, `height at ${width}`).toBeCloseTo(l.height, 1);
+      expect(u.y, `top at ${width}`).toBeCloseTo(l.y, 1);
+      expect(u.y + u.height / 2, `centre at ${width}`).toBeCloseTo(l.y + l.height / 2, 1);
+    }
+    await page.setViewportSize({ width: 1400, height: 900 });
+  });
+
+  test("the pair wraps atomically at the docked widths, never onto separate rows", async ({
+    page,
+  }) => {
+    for (const width of [820, 759]) {
+      await page.setViewportSize({ width, height: 900 });
+      const [u, l] = await Promise.all([
+        page.getByTestId("roster-undo").boundingBox(),
+        page.getByTestId("roster-lens-toggle").boundingBox(),
+      ]);
+      if (u === null || l === null) throw new Error(`missing control box at ${width}`);
+      // Same row: identical top. A split would put Undo at the right edge of one
+      // line and the lens at the left edge of the next.
+      expect(u.y, `same row at ${width}`).toBeCloseTo(l.y, 1);
+      // ...and in reading order, Undo before the lens.
+      expect(u.x).toBeLessThan(l.x);
+      // The document still never scrolls sideways.
+      const overflows = await page.evaluate(
+        () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      );
+      expect(overflows, `no document overflow at ${width}`).toBe(false);
+    }
+    await page.setViewportSize({ width: 1400, height: 900 });
+  });
+
+  test("keeps Undo's disabled and focus semantics", async ({ page }) => {
+    const undo = page.getByTestId("roster-undo");
+    // Nothing edited yet: disabled, and it says why.
+    await expect(undo).toBeDisabled();
+    await expect(undo).toHaveAttribute("title", "Nothing to undo");
+
+    // Make one edit so Undo becomes live, then prove it is still focusable and
+    // still paints a visible focus ring.
+    await setCell(page, 0, "OFF");
+    await expect(undo).toBeEnabled();
+    await expect(undo).toHaveAttribute("title", "Undo last edit");
+
+    await undo.focus();
+    await expect(undo).toBeFocused();
+    const outline = await undo.evaluate((el) => getComputedStyle(el).outlineWidth);
+    expect(Number.parseFloat(outline)).toBeGreaterThan(0);
   });
 });
 

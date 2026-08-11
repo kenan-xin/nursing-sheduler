@@ -169,6 +169,12 @@ describe("core token contract — light theme", () => {
   it("keeps the 280px sidebar width", () => {
     expect(root).toContain("--sidebar-w: 280px;");
   });
+  // G8: the ratified desktop collapse pair. 280 stays the expanded production
+  // width — narrowing it would have been a separate shell re-layout — and 60 is
+  // the prototype's literal icon-rail width.
+  it("adds the 60px compact sidebar width", () => {
+    expect(root).toContain("--sidebar-w-compact: 60px;");
+  });
   it("--chrome aliases the live accent rather than restating a hex", () => {
     expect(root).toContain("--chrome: var(--brand);");
   });
@@ -492,6 +498,27 @@ describe("breakpoint ladder", () => {
       expect(globals).toContain(`(min-width: ${bp})`);
     });
   }
+});
+
+// G8 — the desktop rail's collapse contract, in the one place that decides the
+// rendered width. The React store owns the rail's CONTENT; the attribute below
+// owns its WIDTH, so a reload paints the compact rail directly instead of
+// rendering 280px and snapping. If these two ever drift apart, the pre-paint
+// script becomes a no-op and the flash comes back silently.
+describe("desktop sidebar collapse", () => {
+  it("maps the pre-paint attribute onto the compact width", () => {
+    expect(globals).toContain('html[data-side-collapsed="1"]');
+    expect(globals).toContain("--sidebar-w: var(--sidebar-w-compact);");
+  });
+
+  it("holds a collapsed rail's interior until React marks the preference adopted", () => {
+    // `visibility`, never `display:none`: hiding the interior must not reflow
+    // the rail it is inside.
+    expect(globals).toContain(
+      'html[data-side-collapsed="1"]:not([data-side-ready="1"]) [data-side-nav] > *',
+    );
+    expect(globals).toContain("visibility: hidden;");
+  });
 });
 
 describe("density is gone, 0.9 baseline preserved", () => {

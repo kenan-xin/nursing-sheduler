@@ -24,20 +24,33 @@ import { TestBridge } from "./test-bridge";
 import { useBrowserBackGuard, useDirtyBeforeUnload } from "./use-guarded-navigation";
 import { useNavGuardStore } from "./nav-guard-store";
 import { useConfirmStore } from "./confirm-store";
+import { useSideCollapsed, useSyncSideCollapse } from "./use-side-collapse";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { theme } = useTheme();
   useDirtyBeforeUnload();
   useBrowserBackGuard();
+  // G8: adopt the persisted desktop collapse preference once, post-mount. The
+  // pre-paint script has already put the matching width on <html>.
+  useSyncSideCollapse();
+  const collapsed = useSideCollapsed();
 
   return (
     <div className="flex h-dvh overflow-hidden">
-      {/* Desktop rail — full-height from the top edge; hidden below 920px. */}
+      {/* Desktop rail — full-height from the top edge; hidden below 920px.
+          G8: `--sidebar-w` resolves to 280px expanded and 60px compact, driven by
+          the `data-side-collapsed` attribute on <html> (globals.css), so the rail
+          is already the right size on the very first paint after a reload. The
+          width transition is for the user's own toggle; a load-time value is set
+          before the element exists, so it never animates. */}
       <aside
+        id="app-side-nav"
+        data-side-nav=""
         data-testid="desktop-sidebar"
-        className="hidden w-[var(--sidebar-w)] shrink-0 border-r border-line bg-sidebar nav:block"
+        data-collapsed={collapsed ? "true" : "false"}
+        className="hidden w-[var(--sidebar-w)] shrink-0 border-r border-line bg-sidebar transition-[width] duration-base nav:block"
       >
-        <AppSideNav />
+        <AppSideNav collapsed={collapsed} />
       </aside>
 
       {/* Main column — contextual top bar + scrollable content. */}

@@ -18,9 +18,11 @@ import { getNavGroupsForMode, getNavItemForMode } from "./nav-config";
 import { UndoRedoControls } from "./undo-redo-controls";
 import { PersistenceStatus } from "./persistence-status";
 import { MobileNav } from "./mobile-nav";
+import { Button } from "@/components/ui/button";
 import { surfaceVariants } from "@/components/ui/surface";
 import { cn } from "@/lib/utils";
-import { FaDiagramProject } from "@/components/icons";
+import { FaAnglesLeft, FaAnglesRight, FaDiagramProject } from "@/components/icons";
+import { useSideCollapsed, useSideCollapseActions } from "./use-side-collapse";
 
 // T08d repair (P2): resolves through `getNavItemForMode` — the same
 // `getNavGroupsForMode` projection the sidebar/Home/mobile drawer render —
@@ -68,6 +70,12 @@ export function TopBar() {
         surfaceVariants({ role: "sticky", geometry: "square" }),
       )}
     >
+      {/* Desktop sidebar collapse — the far-left control, at and above the 920px
+          nav breakpoint only (G8). Below that the rail does not exist and the
+          drawer is always expanded, so a collapse control there would toggle a
+          preference with nothing to show for it. */}
+      <SideCollapseToggle />
+
       {/* Mobile hamburger — visible below the 920px nav breakpoint only. */}
       <span className="shrink-0 nav:hidden">
         <MobileNav />
@@ -100,5 +108,40 @@ export function TopBar() {
         <UndoRedoControls />
       </div>
     </header>
+  );
+}
+
+/**
+ * The desktop rail's collapse/expand control (G8).
+ *
+ * Rendered through the shared `Button` (`ghost` / `icon`) rather than a one-off:
+ * that is the system's 36px square control token, it already carries the
+ * coarse-pointer 44px floor on the real control, and it is the same L1
+ * surface + hairline + `--sh-1` treatment every other icon control in the shell
+ * uses. `aria-expanded` + `aria-controls` point at the rail itself, so the
+ * control announces what it operates on rather than just naming itself, and the
+ * label states the ACTION (what pressing it will do) in both `title` and
+ * `aria-label`.
+ */
+function SideCollapseToggle() {
+  const collapsed = useSideCollapsed();
+  const { toggleCollapsed } = useSideCollapseActions();
+  const label = collapsed ? "Expand sidebar" : "Collapse sidebar";
+  const Icon = collapsed ? FaAnglesRight : FaAnglesLeft;
+
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      data-testid="side-collapse-toggle"
+      onClick={toggleCollapsed}
+      aria-label={label}
+      aria-expanded={!collapsed}
+      aria-controls="app-side-nav"
+      title={label}
+      className="hidden shrink-0 text-ink2 nav:inline-flex [&_svg]:size-3.5"
+    >
+      <Icon aria-hidden />
+    </Button>
   );
 }

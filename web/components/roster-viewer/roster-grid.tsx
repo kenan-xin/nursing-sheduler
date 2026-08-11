@@ -17,8 +17,9 @@
 //     `1px --line` left edge every 7th column.
 //   • Rows hover to `--panel-alt`; cell padding 4px.
 
-import { useCallback, useState, type DragEvent, type KeyboardEvent } from "react";
+import { useCallback, useMemo, useState, type DragEvent, type KeyboardEvent } from "react";
 import { cn } from "@/lib/utils";
+import { FaChevronDown } from "@/components/icons";
 import { typedIdKey, type EditCoordinate } from "@/lib/roster";
 import type { RosterContext, RosterDayGrid, RosterDayState, RosterCalendarDay } from "@/lib/roster";
 import {
@@ -34,6 +35,8 @@ import {
   type Tallies,
 } from "@/lib/roster-viewer";
 import { ShiftChip } from "./shift-chip";
+import { useRosterContentWidth } from "./roster-content-width";
+import { LEGEND_WRAP_THRESHOLD } from "./use-container-width";
 
 /** Editing hooks the grid consumes when editing is enabled (F5). */
 export interface RosterGridEditing {
@@ -471,6 +474,17 @@ function GridToolbar({
   ramp: Map<string, ShiftRampEntry>;
   isEditing: boolean;
 }) {
+  const { width } = useRosterContentWidth();
+  const entries = useMemo(() => buildLegendEntries(context, ramp), [context, ramp]);
+  // A width of null (pre-mount) or 0 (an unlaid-out box: jsdom, `display:none`)
+  // is not a MEASUREMENT, so it must never drive the layout choice. Both fall
+  // back to the wide key, matching the roster-content provider's own
+  // conservative desktop pre-mount guess. In a real browser the observer's
+  // mount-time read lands during the same commit, before paint, so a narrow host
+  // never flashes the wide key first.
+  const measured = width ?? 0;
+  const wide = measured <= 0 || measured >= LEGEND_WRAP_THRESHOLD;
+
   return (
     <div data-testid="roster-grid-toolbar" className="flex min-w-0 flex-col gap-2">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
@@ -487,70 +501,137 @@ function GridToolbar({
           </span>
         ) : null}
       </div>
-      {/* One internally scrolling strip. At 390px sixteen Ward keys would
-          otherwise wrap into a wall that pushes the roster off screen, and a
-          non-wrapping row inside a default `min-width:auto` flex item would push
-          the DOCUMENT into horizontal scroll instead of scrolling itself — hence
-          `min-w-0` on this element and its ancestors. */}
-      <div
-        data-testid="roster-grid-legend"
-        className="flex min-w-0 gap-x-3 gap-y-2 overflow-x-auto pb-1"
-      >
-        {context.shiftTypes.map((shift) => {
-          const entry = ramp.get(typedIdKey(shift.id));
-          const time = shiftTimeRange(shift);
-          return (
-            <span
-              key={typedIdKey(shift.id)}
-              data-testid="roster-grid-legend-item"
-              data-shift={String(shift.id)}
-              title={shiftContextLabel(shift)}
-              aria-label={shiftContextLabel(shift)}
-              className="inline-flex shrink-0 items-center gap-1.5 text-label font-medium text-ink2"
-            >
-              <span
-                className="inline-flex h-5 min-w-[26px] items-center justify-center rounded-chip px-1.5 font-mono text-label font-bold"
-                style={{
-                  backgroundColor: entry?.fill ?? "var(--panel)",
-                  color: entry?.ink ?? "var(--ink2)",
-                }}
-                aria-hidden
-              >
-                {String(shift.id)}
-              </span>
-              {time !== null ? <span className="whitespace-nowrap font-mono">{time}</span> : null}
-            </span>
-          );
-        })}
-        <span
-          data-testid="roster-grid-legend-item"
-          data-shift="LV"
-          className="inline-flex shrink-0 items-center gap-1.5 text-label font-medium text-ink2"
-        >
-          <span
-            className="inline-flex h-5 min-w-[26px] items-center justify-center rounded-chip bg-panel px-1.5 font-mono text-label font-bold text-ink3"
-            aria-hidden
+      {wide ? (
+        <GridLegend entries={entries} />
+      ) : (
+        // Constrained hosts get progressive disclosure, not a second horizontal
+        // scroller. `<details>` is the standard element for exactly this: it is
+        // keyboard operable and announced as a disclosure with no ARIA of our
+        // own, and its panel holds the SAME complete key the wide layout renders
+        // — every authored id, its hours, Leave and Off/rest.
+        <details data-testid="roster-grid-legend-disclosure" className="group min-w-0">
+          <summary
+            data-testid="roster-grid-legend-summary"
+            className={cn(
+              "inline-flex h-control-sm w-fit cursor-pointer list-none items-center gap-2 rounded-pill",
+              "border border-line bg-surface px-3 text-meta font-medium text-ink shadow-1",
+              "transition-[background-color,box-shadow,color] duration-fast outline-none",
+              "pointer-coarse:min-h-touch hover:bg-panel-alt",
+              "focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-brand",
+              "[&::-webkit-details-marker]:hidden",
+            )}
           >
-            LV
-          </span>
-          Leave
-        </span>
-        <span
-          data-testid="roster-grid-legend-item"
-          data-shift="OFF"
-          className="inline-flex shrink-0 items-center gap-1.5 text-label font-medium text-ink2"
-        >
-          <span
-            className="inline-flex h-5 min-w-[26px] items-center justify-center font-mono text-label text-ink3"
-            aria-hidden
-          >
-            ·
-          </span>
-          Off / rest
-        </span>
-      </div>
+            <FaChevronDown
+              className="size-3 text-ink3 transition-transform duration-fast group-open:rotate-180"
+              aria-hidden
+            />
+            Shift key
+          </summary>
+          <GridLegend entries={entries} className="mt-2" />
+        </details>
+      )}
     </div>
   );
+}
+
+/** One legend row, wrapping. Never a scroller — at either width (G8). */
+function GridLegend({ entries, className }: { entries: LegendEntry[]; className?: string }) {
+  return (
+    <div
+      data-testid="roster-grid-legend"
+      // `min-w-0` stays load-bearing: a non-wrapping row inside a default
+      // `min-width:auto` flex item pushes the DOCUMENT into horizontal scroll
+      // instead of containing itself (DESIGN.md §6 rule 6).
+      className={cn("flex min-w-0 flex-wrap gap-x-3 gap-y-2", className)}
+    >
+      {entries.map((entry) => (
+        <span
+          key={entry.key}
+          data-testid="roster-grid-legend-item"
+          data-shift={entry.shift}
+          title={entry.title}
+          aria-label={entry.title}
+          className="inline-flex shrink-0 items-center gap-1.5 text-label font-medium text-ink2"
+        >
+          <span
+            className={cn(
+              "inline-flex h-5 min-w-[26px] items-center justify-center px-1.5 font-mono text-label",
+              entry.bare ? "text-ink3" : "rounded-chip font-bold",
+            )}
+            style={entry.bare ? undefined : { backgroundColor: entry.fill, color: entry.ink }}
+            aria-hidden
+          >
+            {entry.glyph}
+          </span>
+          {entry.text !== null ? (
+            <span className="whitespace-nowrap font-mono">{entry.text}</span>
+          ) : null}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** One legend entry, in the exact order the key reads. */
+interface LegendEntry {
+  key: string;
+  /** `data-shift` — the authored id, or `LV` / `OFF`. */
+  shift: string;
+  /** The chip glyph. */
+  glyph: string;
+  /** The text beside the chip: the authored hours, `Leave`, or `Off / rest`. */
+  text: string | null;
+  /** The whole entry's accessible name and tooltip. */
+  title: string;
+  fill: string;
+  ink: string;
+  /** Rest is a bare dot with no chip fill, mirroring its cell. */
+  bare: boolean;
+}
+
+/**
+ * The ONE legend-item builder (G8). Both the wide wrapped key and the `Shift
+ * key` disclosure render this same list, so a constrained host can never be
+ * served a shortened, regrouped, or differently coloured version of the key.
+ */
+function buildLegendEntries(
+  context: RosterContext,
+  ramp: Map<string, ShiftRampEntry>,
+): LegendEntry[] {
+  const entries: LegendEntry[] = context.shiftTypes.map((shift) => {
+    const entry = ramp.get(typedIdKey(shift.id));
+    return {
+      key: typedIdKey(shift.id),
+      shift: String(shift.id),
+      glyph: String(shift.id),
+      text: shiftTimeRange(shift),
+      title: shiftContextLabel(shift),
+      fill: entry?.fill ?? "var(--panel)",
+      ink: entry?.ink ?? "var(--ink2)",
+      bare: false,
+    };
+  });
+  entries.push({
+    key: "legend:LV",
+    shift: "LV",
+    glyph: "LV",
+    text: "Leave",
+    title: "Leave",
+    fill: "var(--panel)",
+    ink: "var(--ink3)",
+    bare: false,
+  });
+  entries.push({
+    key: "legend:OFF",
+    shift: "OFF",
+    glyph: "·",
+    text: "Off / rest",
+    title: "Off / rest",
+    fill: "transparent",
+    ink: "var(--ink3)",
+    bare: true,
+  });
+  return entries;
 }
 
 /** Column background: weekend → panel, holiday → striped, ordinary → transparent. */

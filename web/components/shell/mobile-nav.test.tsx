@@ -19,11 +19,13 @@ vi.mock("./app-side-nav", () => ({
   AppSideNav: ({
     onAfterNavigate,
     headerActions,
+    collapsed,
   }: {
     onAfterNavigate?: () => void;
     headerActions?: React.ReactNode;
+    collapsed?: boolean;
   }) => (
-    <div data-testid="side-nav-stub">
+    <div data-testid="side-nav-stub" data-collapsed={String(collapsed)}>
       {headerActions}
       <button type="button" data-testid="side-nav-link" onClick={() => onAfterNavigate?.()}>
         Dates
@@ -94,6 +96,14 @@ describe("MobileNav — drawer geometry and surface role", () => {
     await openDrawer();
     const stub = screen.getByTestId("side-nav-stub");
     expect(stub).toContainElement(screen.getByTestId("mobile-nav-close"));
+  });
+
+  it("renders the nav EXPANDED, independent of the desktop collapse preference (G8)", async () => {
+    // Passed literally rather than left to the prop default: the desktop rail's
+    // 60px preference must never reach a 250px drawer someone opened on purpose,
+    // and a future flip of `AppSideNav`'s default must not silently narrow it.
+    await openDrawer();
+    expect(screen.getByTestId("side-nav-stub")).toHaveAttribute("data-collapsed", "false");
   });
 });
 

@@ -948,17 +948,75 @@ test.describe("G5 assembled real Ward 8 roster journey", () => {
       await expect(page.getByTestId("roster-grid-guidance")).toHaveText(
         "Select a cell to change · drag to swap",
       );
-      // The legend scrolls itself; the document never scrolls sideways for it.
+
+      // G8: the legend is NO LONGER a scroller — at Ward scale least of all.
+      // The internally scrolling strip this replaces measured clientWidth 1124
+      // against scrollWidth 2321 here, so more than half of these eighteen keys
+      // were hidden on a wide desktop with no reliable affordance, and axe
+      // reported it as a serious keyboard-inaccessible scroll region. At this
+      // window the roster content is wide, so the whole key wraps inline.
+      await expect(page.getByTestId("roster-grid-legend-disclosure")).toHaveCount(0);
+      const legendBox = await legend.evaluate((el) => ({
+        overflowX: getComputedStyle(el).overflowX,
+        flexWrap: getComputedStyle(el).flexWrap,
+        scrollWidth: el.scrollWidth,
+        clientWidth: el.clientWidth,
+      }));
+      expect(legendBox.overflowX, "the Ward-scale legend is not a second scroller").toBe("visible");
+      expect(legendBox.flexWrap, "the Ward-scale legend wraps").toBe("wrap");
       expect(
-        await legend.evaluate((el) => getComputedStyle(el).overflowX),
-        "the Ward-scale legend owns its own overflow",
-      ).toBe("auto");
+        legendBox.scrollWidth,
+        "all eighteen Ward keys are laid out, none hidden past an edge",
+      ).toBeLessThanOrEqual(legendBox.clientWidth + 1);
+
       expect(
         await page.evaluate(
           () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
         ),
         "sixteen Ward legend keys pushed the document sideways",
       ).toBe(false);
+
+      // G8: every one of the real ward's authored labels fits its chip with the
+      // 6px inset. `night+` is the longest and the one the user reported as
+      // squeezed; before this it computed padding 0 on both sides and its glyphs
+      // ran to the colour boundary.
+      const chipGeometry = await grid.locator("[data-shift-chip]").evaluateAll((els) =>
+        els.map((el) => {
+          const s = getComputedStyle(el);
+          return {
+            label: el.getAttribute("aria-label") ?? "",
+            height: el.getBoundingClientRect().height,
+            padLeft: Number.parseFloat(s.paddingLeft),
+            padRight: Number.parseFloat(s.paddingRight),
+            boxSizing: s.boxSizing,
+            clipped: el.scrollWidth > el.clientWidth + 1,
+          };
+        }),
+      );
+      expect(chipGeometry.length, "the Ward grid rendered worked chips").toBeGreaterThan(0);
+      for (const chip of chipGeometry) {
+        expect(chip.padLeft, `left inset on ${chip.label}`).toBeCloseTo(6, 1);
+        expect(chip.padRight, `right inset on ${chip.label}`).toBeCloseTo(6, 1);
+        expect(chip.boxSizing, `border-box on ${chip.label}`).toBe("border-box");
+        expect(chip.height, `height of ${chip.label}`).toBeCloseTo(28, 0);
+        expect(chip.clipped, `${chip.label} is not clipped`).toBe(false);
+      }
+
+      // G8: Undo and the lens selector are one aligned group at Ward scale too.
+      const [undoBox, lensBox] = await Promise.all([
+        page.getByTestId("roster-undo").boundingBox(),
+        page.getByTestId("roster-lens-toggle").boundingBox(),
+      ]);
+      expect(undoBox, "Undo is rendered on the editable Ward roster").not.toBeNull();
+      expect(lensBox).not.toBeNull();
+      expect(undoBox!.height, "Undo matches the lens control's height").toBeCloseTo(
+        lensBox!.height,
+        1,
+      );
+      expect(undoBox!.y, "Undo shares the lens control's row and top edge").toBeCloseTo(
+        lensBox!.y,
+        1,
+      );
     });
 
     // -------------------------------------------------------------------

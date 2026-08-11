@@ -67,6 +67,7 @@
   --sidebar: #f7faf8;
   --scrim: rgb(17 24 22 / 0.52);
   --sidebar-w: 280px;
+  --sidebar-w-compact: 60px;
 
   /* Accent — the teal fallback that holds BEFORE data-accent exists on <html>.
      The explicit per-accent selectors further down own the four pairs; the
@@ -645,6 +646,31 @@ html.dark[data-accent="plum"] {
     outline: 2px solid var(--brand);
     outline-offset: -1px;
   }
+}
+
+/* Desktop sidebar collapse (G8). The attribute is the rail's WIDTH authority: a
+   pre-paint inline script (side-collapse-script.tsx) writes it from
+   `ns-side-collapsed` before the first frame, and the React store rewrites it on
+   every toggle. Driving the width from CSS rather than from React state is what
+   makes a reload paint the compact rail directly instead of rendering 280px and
+   snapping. Only the desktop rail consumes `--sidebar-w`; the mobile drawer is a
+   fixed 250px and is never affected.
+
+   UNLAYERED, deliberately, and it must stay that way. `:root` above is unlayered
+   too, and an unlayered declaration beats ANY layered one regardless of
+   specificity — so the same rule inside `@layer base` lost to `:root` and the
+   rail silently stayed 280px while every React attribute said "collapsed". */
+html[data-side-collapsed="1"] {
+  --sidebar-w: var(--sidebar-w-compact);
+}
+
+/* Between that first paint and React's post-mount adoption, a collapsed rail
+   still holds server-rendered EXPANDED markup, which would read as clipped
+   content rather than as a rail. Hold its interior invisible — not
+   `display:none`, so nothing reflows — until the store marks itself adopted.
+   Expanded is the default, so this never delays the ordinary case. */
+html[data-side-collapsed="1"]:not([data-side-ready="1"]) [data-side-nav] > * {
+  visibility: hidden;
 }
 
 /* --------------------------------------------------------------------------

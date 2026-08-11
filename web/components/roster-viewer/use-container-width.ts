@@ -18,6 +18,18 @@ import { useCallback, useEffect, useRef, useState } from "react";
 /** The roster-content width below which Coverage stacks into per-day cards. */
 export const COVERAGE_STACK_THRESHOLD = 760;
 
+/**
+ * The roster-content width at and above which the Grid legend renders its full
+ * wrapped key inline; below it the same complete key moves behind a `Shift key`
+ * disclosure (G8).
+ *
+ * 900 is a LAYOUT-ladder step (DESIGN.md §1: 600/720/760/900/1100/1200), not a
+ * type-ladder one. Ward 8's sixteen authored ids plus Leave and Off/rest need
+ * roughly two wrapped rows at 900px and four or more below it, which is the
+ * point at which an always-open key starts pushing the roster off screen.
+ */
+export const LEGEND_WRAP_THRESHOLD = 900;
+
 /** The viewport width below which mobile defaults to the Day lens. */
 export const MOBILE_DEFAULT_LENS_VIEWPORT = 760;
 

@@ -19,8 +19,18 @@ import type { ShiftRampEntry } from "@/lib/roster-viewer";
 
 // The fixed chip geometry from DESIGN.md §5. Absolute px, NOT multiplied by the
 // 0.9 baseline — only spacing and type ride the multiplier.
+//
+// 34 is a MINIMUM, not a fixed width (G8). Ward 8 authors `long`, `long+`,
+// `night` and `night+`, and with zero inline padding those glyphs ran edge to
+// edge of the colour box: the label touched the fill boundary and, with only the
+// cell's own 4px padding beyond it, read as colliding with the next column. The
+// box now carries `padding-inline: 6px` with `box-sizing: border-box`, so a short
+// id still measures exactly 34px (its content is far narrower than 34 − 12) while
+// a long id grows by its own content plus the inset. The 4px table-cell padding
+// is unchanged, so adjacent chips keep 8px of column-to-column separation.
 const CHIP_W = 34;
 const CHIP_H = 28;
+const CHIP_PAD_X = 6;
 
 export interface ShiftChipProps {
   day: RosterDayState;
@@ -29,19 +39,29 @@ export interface ShiftChipProps {
 }
 
 /**
- * One roster chip: a 34×28 box, borderless, at `--r-chip` radius. Worked shifts
- * take their ramp `fill`/`ink`; leave is neutral `--panel`/`--ink3`; rest is a
- * bare dot at the same box size.
+ * One roster chip: a minimum-34 × 28 box, borderless, at `--r-chip` radius.
+ * Worked shifts take their ramp `fill`/`ink`; leave is neutral
+ * `--panel`/`--ink3`; rest is a bare dot at the same box size.
  *
  * The colours for worked shifts are the LITERAL ramp hexes (inline styles) —
  * DESIGN.md §2 states they are data marks, not theme tokens, and do not change
  * in dark mode. Leave and rest use semantic Tailwind tokens so they re-tint per
  * theme.
+ *
+ * Every variant — worked, leave and rest — takes the SAME box, including the
+ * inline inset. A rest dot narrower than its neighbours would let columns jitter
+ * between rows, which is the whole reason the bare `·` was given the chip box in
+ * the first place.
  */
 export function ShiftChip({ day, ramp }: ShiftChipProps) {
   const style: React.CSSProperties = {
     minWidth: CHIP_W,
     height: CHIP_H,
+    // Border-box is load-bearing: without it the 6px inset would ADD to the 34px
+    // minimum and every short id would render 46px wide, widening all 28 columns
+    // for nothing.
+    boxSizing: "border-box",
+    paddingInline: CHIP_PAD_X,
   };
 
   if (day.kind === "off") {

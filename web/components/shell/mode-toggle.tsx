@@ -29,10 +29,19 @@ const OPTIONS: { value: AppMode; label: string }[] = [
   { value: "advanced", label: "Advanced" },
 ];
 
-export function ModeToggle() {
+// COMPACT (G8): the 60px rail has no room for a two-segment track, so the
+// prototype folds the control into one GUI/ADV pill that TOGGLES the mode
+// (SideNav.dc.html `toggleMode`). It routes through the same
+// `requestModeChange` transaction as the segmented control — a compact rail must
+// not be a second, unguarded way to change mode — and states both the current
+// mode and what pressing it does in one title/accessible name, since the
+// abbreviation alone would not say which direction it moves.
+
+export function ModeToggle({ compact = false }: { compact?: boolean }) {
   const mode = useAppMode();
   const { requestModeChange } = useModeTransition();
   const tabsRef = useRef<Array<HTMLButtonElement | null>>([]);
+  const compactRef = useRef<HTMLButtonElement | null>(null);
 
   // Automatic-activation tabs: select `value` and move focus onto its tab. The
   // selected tab reclaims tabIndex=0 after the re-render; programmatic .focus()
@@ -79,6 +88,33 @@ export function ModeToggle() {
       activate(OPTIONS[last].value);
     }
   };
+
+  if (compact) {
+    const next: AppMode = mode === "guided" ? "advanced" : "guided";
+    const label =
+      mode === "guided" ? "Guided mode — switch to Advanced" : "Advanced mode — switch to Guided";
+    return (
+      <button
+        ref={compactRef}
+        type="button"
+        data-testid="mode-toggle"
+        data-compact="true"
+        data-mode={mode}
+        onClick={() =>
+          requestModeChange(
+            next,
+            () => compactRef.current?.focus(),
+            () => compactRef.current?.focus(),
+          )
+        }
+        title={label}
+        aria-label={label}
+        className="inline-flex h-8 w-10 shrink-0 items-center justify-center rounded-pill border border-line bg-surface font-ui text-label font-bold uppercase tracking-[0.03em] text-ink2 shadow-1 transition-[background-color,box-shadow,color] outline-none pointer-coarse:min-h-touch pointer-coarse:min-w-touch hover:bg-panel-alt hover:text-ink focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-brand"
+      >
+        {mode === "guided" ? "GUI" : "ADV"}
+      </button>
+    );
+  }
 
   return (
     <div

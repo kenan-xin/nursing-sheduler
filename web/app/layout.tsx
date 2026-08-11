@@ -3,6 +3,7 @@ import { Figtree, Hanken_Grotesk, Spline_Sans_Mono } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
 import { ThemeScript } from "@/components/theme/theme-script";
+import { SideCollapseScript } from "@/components/shell/side-collapse-script";
 
 // Design-system fonts (docs/design_prototype/README.md): Hanken Grotesk drives
 // body/UI, Figtree drives display/headings, Spline Sans Mono drives codes/data.
@@ -46,6 +47,7 @@ export default function RootLayout({
     >
       <head>
         <ThemeScript />
+        <SideCollapseScript />
       </head>
       <body className="min-h-full flex flex-col">
         <Providers>{children}</Providers>

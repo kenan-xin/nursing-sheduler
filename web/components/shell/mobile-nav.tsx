@@ -50,6 +50,13 @@ export function MobileNav() {
         <DialogTitle className="sr-only">Navigation</DialogTitle>
         <DialogDescription className="sr-only">Application navigation</DialogDescription>
         <AppSideNav
+          // ALWAYS expanded (G8). The desktop collapse preference is a rail
+          // preference; a 250px drawer that someone opened deliberately has no
+          // reason to be an icon rail, and the prototype's contract says the
+          // drawer renders expanded regardless of the collapsed state. Passed
+          // literally rather than left to the prop default so a future default
+          // flip cannot silently narrow the drawer.
+          collapsed={false}
           onAfterNavigate={() => setOpen(false)}
           headerActions={
             <DialogClose

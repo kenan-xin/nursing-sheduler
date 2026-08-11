@@ -26,6 +26,7 @@ import { getRosterDb, rosterStorage, WORKING_ROSTER_KEY, type RosterStorage } fr
 import {
   fixtureAlternateRosterDocument,
   fixtureCanonicalDocument,
+  fixtureContainer,
   fixtureRosterDocument,
 } from "@/lib/roster/test-fixtures";
 import { PREFERENCE_TYPE, type CanonicalPreference } from "@/lib/scenario";
@@ -236,6 +237,72 @@ export default function RosterViewerFixtureClient() {
     [seedWithPreferences],
   );
 
+  /**
+   * A roster whose shift ids are Ward 8's REAL long authored labels — `long`,
+   * `long+`, `night`, `night+` — rather than the default fixture's one-letter
+   * `D`/`N` (G8).
+   *
+   * The chip's 34px minimum let a short id pass every geometry assertion while
+   * the real ward's labels ran glyph-to-edge inside the colour box. A fixture
+   * that only ever renders `D` cannot catch that, so the failing case is seeded
+   * here with the exact ids the assembled ward authors, and measured in the
+   * browser. Everything after the seed is the production path.
+   */
+  const seedWardLabels = useCallback(async () => {
+    setStatus("seeding");
+    const scenario = fixtureCanonicalDocument();
+    scenario.shiftTypes = {
+      items: [
+        { id: "long", startTime: "07:00", endTime: "19:00", durationMinutes: 720 },
+        { id: "long+", startTime: "07:30", endTime: "20:00", durationMinutes: 750 },
+        { id: "night", startTime: "19:00", endTime: "07:00", durationMinutes: 720 },
+        { id: "night+", startTime: "19:30", endTime: "08:00", durationMinutes: 750 },
+      ],
+    };
+    scenario.people = { items: [{ id: "P1", history: ["long"] }, { id: "P2" }] };
+    scenario.preferences = [
+      { type: PREFERENCE_TYPE.maxOneShiftPerDay },
+      {
+        type: PREFERENCE_TYPE.shiftTypeRequirement,
+        shiftType: "long",
+        requiredNumPeople: 1,
+        qualifiedPeople: "ALL",
+        date: "ALL",
+        weight: -1,
+      },
+    ];
+    // Every long label sits beside another long label, so the measured gap
+    // between adjacent chips is the real column-to-column separation rather than
+    // a generous one next to a 34px `D`.
+    const container = {
+      ...fixtureContainer(),
+      solvedDays: [
+        [
+          { kind: "shift" as const, shiftId: "night" },
+          { kind: "shift" as const, shiftId: "night+" },
+          { kind: "shift" as const, shiftId: "long" },
+          { kind: "shift" as const, shiftId: "long+" },
+        ],
+        [
+          { kind: "shift" as const, shiftId: "long+" },
+          { kind: "shift" as const, shiftId: "long" },
+          { kind: "leave" as const },
+          { kind: "off" as const },
+        ],
+      ],
+    };
+    const document = await fixtureRosterDocument({ document: scenario, container });
+    const epoch = await rosterStorage.getClearEpoch();
+    const outcome = await rosterStorage.promoteDocumentToWorking({
+      document,
+      validate: (value) => ({ ok: true as const, document: value }),
+      expectedWorkingRevision: null,
+      expectedClearEpoch: epoch,
+    });
+    setStatus(outcome.status === "promoted" ? "ward-labels-seeded" : `failed:${outcome.status}`);
+    remount();
+  }, []);
+
   const clearAll = useCallback(async () => {
     await rosterStorage.clearRosterData();
     setStatus("cleared");
@@ -405,6 +472,9 @@ export default function RosterViewerFixtureClient() {
           onClick={() => void seedScopedUnavailable()}
         >
           Seed scoped unavailable
+        </Button>
+        <Button size="sm" data-testid="fx-seed-ward-labels" onClick={() => void seedWardLabels()}>
+          Seed Ward labels
         </Button>
         <Button size="sm" data-testid="fx-clear" onClick={() => void clearAll()}>
           Clear

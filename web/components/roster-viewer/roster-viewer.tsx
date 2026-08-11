@@ -190,20 +190,32 @@ export function RosterViewer({ document, editing }: RosterViewerProps) {
         <div className="min-w-0 flex-1" style={{ flexBasis: "440px" }}>
           <ProvenanceBanner provenance={provenance} summary={summary} />
         </div>
-        {editing !== undefined ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="border border-line"
-            onClick={editing.undo}
-            disabled={!editing.canUndo}
-            title={editing.canUndo ? "Undo last edit" : "Nothing to undo"}
-            data-testid="roster-undo"
-          >
-            <FaRotateLeft className="size-3.5" aria-hidden /> Undo
-          </Button>
-        ) : null}
-        <LensToggle lens={lens} onLensChange={onLensChange} />
+        {/* Undo and the lens selector are ONE control group (G8), not two
+            independent flex children. As siblings they measured 32px against the
+            segmented control's 43.2px — Undo's centre sat 5.6px low — and at
+            759/820px the parent could wrap them onto separate rows, stranding
+            Undo at the right edge of one line and the lens at the left edge of
+            the next. `shrink-0` makes the pair wrap atomically; `items-stretch`
+            plus `h-auto` on Undo (which overrides `size="sm"`'s fixed
+            `h-control-sm`) matches the segmented group's exact rendered height
+            at every width and pointer type, including the coarse-pointer 44px
+            floor both controls already carry. */}
+        <div data-testid="roster-control-group" className="flex shrink-0 items-stretch gap-2">
+          {editing !== undefined ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-auto border border-line"
+              onClick={editing.undo}
+              disabled={!editing.canUndo}
+              title={editing.canUndo ? "Undo last edit" : "Nothing to undo"}
+              data-testid="roster-undo"
+            >
+              <FaRotateLeft className="size-3.5" aria-hidden /> Undo
+            </Button>
+          ) : null}
+          <LensToggle lens={lens} onLensChange={onLensChange} />
+        </div>
       </div>
 
       {/* Edit bar: only in the Grid lens when a cell is selected. */}

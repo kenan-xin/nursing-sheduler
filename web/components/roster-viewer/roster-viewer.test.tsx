@@ -559,7 +559,7 @@ describe("RosterDay", () => {
 // ---------------------------------------------------------------------------
 
 describe("ShiftChip", () => {
-  it("a worked shift renders a 34×28 chip with the ramp fill colour", () => {
+  it("a worked shift renders a min-34×28 chip with the ramp fill colour", () => {
     const shift: RosterDayState = { kind: "shift", shiftId: "D" };
     const ramp = new Map([["s:D", SHIFT_RAMP[0]]]);
     const { container } = render(<ShiftChip day={shift} ramp={ramp.get("s:D") ?? null} />);
@@ -570,6 +570,32 @@ describe("ShiftChip", () => {
     expect(chip?.style.backgroundColor).toBe(normaliseColour(SHIFT_RAMP[0].fill));
     // No border on a worked chip (DESIGN.md §5: "no border").
     expect(chip?.style.border).toBe("");
+  });
+
+  // G8: Ward 8's `long`, `long+`, `night` and `night+` ran glyph-to-edge inside
+  // the colour box. The MEASURED fit and separation claims need a layout engine
+  // and live in e2e/roster-viewer.spec.ts; what jsdom pins is the geometry
+  // contract those measurements depend on.
+  it("gives every chip variant a 6px inline inset inside a border-box 34-minimum", () => {
+    const cases: Array<{ day: RosterDayState; ramp: (typeof SHIFT_RAMP)[number] | null }> = [
+      { day: { kind: "shift", shiftId: "night+" }, ramp: SHIFT_RAMP[0] },
+      { day: { kind: "leave" }, ramp: null },
+      { day: { kind: "off" }, ramp: null },
+    ];
+    for (const { day, ramp } of cases) {
+      const { container, unmount } = render(<ShiftChip day={day} ramp={ramp} />);
+      const chip = container.querySelector("span");
+      expect(chip?.style.paddingInline).toBe("6px");
+      // Border-box is what keeps the inset INSIDE the 34px minimum, so a short
+      // id still measures 34 rather than 46 and 28 columns do not all widen.
+      expect(chip?.style.boxSizing).toBe("border-box");
+      expect(chip?.style.minWidth).toBe("34px");
+      expect(chip?.style.height).toBe("28px");
+      // A MINIMUM, never a fixed width: a long authored label must be free to
+      // grow to its own content rather than clip.
+      expect(chip?.style.width).toBe("");
+      unmount();
+    }
   });
 
   it("leave is neutral (no brand tint/border)", () => {
@@ -795,8 +821,102 @@ describe("page overflow containment", () => {
     const document = await makeDocument();
     render(<Viewer document={document} />);
     const toggle = screen.getByTestId("roster-lens-toggle");
-    const header = toggle.parentElement;
-    expect(header?.className).toContain("flex-wrap");
+    // G8: the lens toggle's parent is now the atomic Undo+lens control GROUP;
+    // the WRAPPING row is that group's parent.
+    const group = toggle.parentElement;
+    expect(group?.dataset.testid ?? group?.getAttribute("data-testid")).toBe(
+      "roster-control-group",
+    );
+    expect(group?.parentElement?.className).toContain("flex-wrap");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Undo + lens as ONE aligned control group (G8)
+//
+// The MEASURED alignment claim (equal heights, equal centres, stable wrapping at
+// 759/820) can only be made in a browser and lives in e2e/roster-viewer.spec.ts.
+// What jsdom can prove is the STRUCTURE that alignment depends on: one atomic
+// flex parent, stretch alignment, `shrink-0` so the pair wraps together, and an
+// Undo that no longer pins its own fixed height.
+// ---------------------------------------------------------------------------
+
+describe("Undo + lens control group", () => {
+  beforeEach(() => {
+    installResizeObserver();
+    setViewportWidth(1400);
+    mockContainerWidth(1200);
+  });
+
+  it("wraps Undo and the lens selector in one shrink-0 stretch group", async () => {
+    const document = await makeDocument();
+    render(
+      <Viewer
+        document={document}
+        editing={{
+          selectedCell: null,
+          selectCell: () => {},
+          setCell: () => {},
+          swapCells: () => {},
+          undo: () => {},
+          canUndo: true,
+        }}
+      />,
+    );
+    const group = screen.getByTestId("roster-control-group");
+    expect(group.className).toContain("items-stretch");
+    // `shrink-0` is what makes the parent wrap the PAIR rather than splitting
+    // Undo onto one row and the lens onto the next at 759/820px.
+    expect(group.className).toContain("shrink-0");
+    // Both controls are children of that one group, in reading order.
+    expect(group.contains(screen.getByTestId("roster-undo"))).toBe(true);
+    expect(group.contains(screen.getByTestId("roster-lens-toggle"))).toBe(true);
+  });
+
+  it("lets Undo stretch to the segmented control's height instead of pinning 32px", async () => {
+    const document = await makeDocument();
+    render(
+      <Viewer
+        document={document}
+        editing={{
+          selectedCell: null,
+          selectCell: () => {},
+          setCell: () => {},
+          swapCells: () => {},
+          undo: () => {},
+          canUndo: true,
+        }}
+      />,
+    );
+    const undo = screen.getByTestId("roster-undo");
+    // `h-auto` MERGED AWAY the size="sm" `h-control-sm`; if tailwind-merge ever
+    // stopped classifying the custom control token both would survive and the
+    // emitted CSS order would silently decide, which is the exact trap
+    // lib/utils.ts registers against.
+    expect(undo.className).toContain("h-auto");
+    expect(undo.className).not.toContain("h-control-sm");
+    // The coarse-pointer floor is NOT mergeable away by a height override.
+    expect(undo.className).toContain("pointer-coarse:min-h-touch");
+  });
+
+  it("keeps Undo's disabled semantics unchanged", async () => {
+    const document = await makeDocument();
+    render(
+      <Viewer
+        document={document}
+        editing={{
+          selectedCell: null,
+          selectCell: () => {},
+          setCell: () => {},
+          swapCells: () => {},
+          undo: () => {},
+          canUndo: false,
+        }}
+      />,
+    );
+    const undo = screen.getByTestId("roster-undo");
+    expect(undo).toBeDisabled();
+    expect(undo).toHaveAttribute("title", "Nothing to undo");
   });
 });
 
@@ -1206,14 +1326,85 @@ describe("Grid toolbar", () => {
     }
   });
 
-  it("scrolls the legend internally and keeps it outside the dense table scroller", async () => {
+  it("NEVER makes the legend a second horizontal scroller, at either width", async () => {
+    // G8 replaces the internally scrolling strip. The strip hid more than half
+    // the key even at 1440px, was reported by Axe as a keyboard-inaccessible
+    // scroll region, and on the user's platform the native scrollbar overlaid
+    // and clipped the labels. Both layouts below wrap; neither scrolls.
     const document = await makeDocument();
-    render(<Viewer document={document} />);
-    const legend = screen.getByTestId("roster-grid-legend");
-    expect(legend.className).toContain("overflow-x-auto");
-    expect(legend.className).toContain("min-w-0");
+    const view = render(<Viewer document={document} />);
+
+    const wide = screen.getByTestId("roster-grid-legend");
+    expect(wide.className).toContain("flex-wrap");
+    expect(wide.className).not.toContain("overflow-x-auto");
+    expect(wide.className).not.toContain("overflow-x-scroll");
+    // `min-w-0` stays load-bearing: without it a non-wrapping row inside a
+    // default `min-width:auto` flex item pushes the DOCUMENT sideways.
+    expect(wide.className).toContain("min-w-0");
     // The toolbar is a sibling of the scroller, never inside it.
-    expect(screen.getByTestId("roster-grid").contains(legend)).toBe(false);
+    expect(screen.getByTestId("roster-grid").contains(wide)).toBe(false);
+    view.unmount();
+
+    mockContainerWidth(500);
+    render(<Viewer document={document} />);
+    const narrow = screen.getByTestId("roster-grid-legend");
+    expect(narrow.className).toContain("flex-wrap");
+    expect(narrow.className).not.toContain("overflow-x-auto");
+    expect(screen.getByTestId("roster-grid").contains(narrow)).toBe(false);
+  });
+
+  it("wraps the FULL key inline at or above 900px of roster content", async () => {
+    const document = await makeDocument();
+    mockContainerWidth(900);
+    render(<Viewer document={document} />);
+    // No disclosure to open: the whole key is already on the page.
+    expect(screen.queryByTestId("roster-grid-legend-disclosure")).toBeNull();
+    expect(screen.getByTestId("roster-grid-legend")).toBeVisible();
+  });
+
+  it("moves the SAME complete key behind a keyboard-operable Shift key disclosure below 900px", async () => {
+    const document = await makeDocument();
+
+    // Measure the wide key first, so the narrow one is compared against the
+    // real authored list rather than against a hard-coded count that would
+    // drift with the fixture.
+    const wideView = render(<Viewer document={document} />);
+    const wideItems = screen
+      .getAllByTestId("roster-grid-legend-item")
+      .map((el) => `${el.getAttribute("data-shift")}|${el.textContent}`);
+    expect(wideItems.length).toBeGreaterThan(0);
+    wideView.unmount();
+
+    mockContainerWidth(899);
+    render(<Viewer document={document} />);
+
+    const disclosure = screen.getByTestId("roster-grid-legend-disclosure");
+    expect(disclosure.tagName).toBe("DETAILS");
+    const summary = screen.getByTestId("roster-grid-legend-summary");
+    expect(summary.tagName).toBe("SUMMARY");
+    expect(summary.textContent).toContain("Shift key");
+
+    // The panel holds the IDENTICAL list — same ids, same time ranges, same
+    // Leave and Off/rest, in the same order. A shortened or regrouped narrow
+    // key is the failure this whole change exists to prevent.
+    const narrowItems = screen
+      .getAllByTestId("roster-grid-legend-item")
+      .map((el) => `${el.getAttribute("data-shift")}|${el.textContent}`);
+    expect(narrowItems).toEqual(wideItems);
+    expect(narrowItems.some((entry) => entry.startsWith("LV|"))).toBe(true);
+    expect(narrowItems.some((entry) => entry.startsWith("OFF|"))).toBe(true);
+  });
+
+  it("switches back to the inline key when the container grows past 900px", async () => {
+    const document = await makeDocument();
+    mockContainerWidth(500);
+    render(<Viewer document={document} />);
+    expect(screen.getByTestId("roster-grid-legend-disclosure")).toBeTruthy();
+
+    // A real resize, through the same observer production uses.
+    act(() => resizeObservedElements(1100));
+    expect(screen.queryByTestId("roster-grid-legend-disclosure")).toBeNull();
+    expect(screen.getByTestId("roster-grid-legend")).toBeVisible();
   });
 
   it("shows device-neutral editing guidance only while editing is available", async () => {
