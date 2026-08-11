@@ -14,6 +14,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { getRosterDb, rosterStorage, WORKING_ROSTER_KEY } from "@/lib/store";
 import type { CurrentCandidatePointer } from "@/lib/store";
 import type { RosterDocument } from "@/lib/roster";
@@ -1017,6 +1018,96 @@ describe("RosterSection — empty-state Clear", () => {
 // ---------------------------------------------------------------------------
 // Forbidden copy — the settled non-technical surface (F2 decision)
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Narrow-layout document actions (G7 hierarchy closure)
+// ---------------------------------------------------------------------------
+
+describe("RosterSection — narrow document actions", () => {
+  /**
+   * Open a Base UI popup.
+   *
+   * jsdom has no real `PointerEvent`, so `userEvent.click` alone does not
+   * satisfy the primitive's pointer sequence and the popup silently stays shut.
+   * Driving the explicit sequence is what a real pointer produces.
+   */
+  function openPopup(trigger: HTMLElement) {
+    fireEvent.pointerDown(trigger);
+    fireEvent.mouseDown(trigger);
+    fireEvent.pointerUp(trigger);
+    fireEvent.click(trigger);
+  }
+
+  /** Re-measure every element at a roster-content width below the threshold. */
+  function narrowLayout() {
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({
+      width: 600,
+      height: 600,
+      top: 0,
+      left: 0,
+      bottom: 600,
+      right: 600,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect);
+  }
+
+  it("keeps ONE roster heading — the route header owns it, the section adds none", async () => {
+    await seedWorking();
+    renderSection();
+    await waitFor(() => expect(screen.getByTestId("roster-section")).toBeDefined());
+    // THE DEFECT THIS REPLACES: a second display-size "Review the roster" here
+    // implied two levels that do not exist and, at 390px, pushed the first
+    // roster data roughly 450px down the page.
+    const section = screen.getByTestId("roster-section");
+    expect(section.textContent).not.toContain("Review the roster");
+    expect(section.querySelectorAll("h1, h2").length).toBe(0);
+  });
+
+  it("groups Save/Import/Clear behind one labelled Roster file control, Export XLSX still visible", async () => {
+    narrowLayout();
+    await seedWorking();
+    renderSection();
+    await waitFor(() => expect(screen.getByTestId("roster-actions")).toBeDefined());
+
+    // Export XLSX stays the primary visible document action.
+    expect(screen.getByTestId("roster-export-xlsx")).toBeDefined();
+    // The three file-management actions are behind one control, not on screen.
+    const menu = screen.getByTestId("roster-file-menu");
+    expect(menu.textContent).toContain("Roster file");
+    expect(screen.queryByTestId("roster-clear")).toBeNull();
+
+    // ...and all three remain directly discoverable inside it.
+    openPopup(menu);
+    expect(screen.getByTestId("roster-export-file")).toBeDefined();
+    expect(screen.getByTestId("roster-import")).toBeDefined();
+    expect(screen.getByTestId("roster-clear")).toBeDefined();
+  });
+
+  it("still confirms the destructive Clear when it is reached through the menu", async () => {
+    narrowLayout();
+    await seedWorking();
+    const purge = vi.spyOn(rosterStorage, "clearRosterData");
+    renderSection();
+    await waitFor(() => expect(screen.getByTestId("roster-file-menu")).toBeDefined());
+
+    openPopup(screen.getByTestId("roster-file-menu"));
+    await userEvent.click(screen.getByTestId("roster-clear"));
+    // The confirmation is the gate; nothing is purged on the click alone.
+    expect(purge).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByText("Clear roster & stored data?")).toBeDefined());
+  });
+
+  it("keeps Clear directly reachable with NO working roster, without a menu", async () => {
+    narrowLayout();
+    renderSection();
+    await waitFor(() => expect(screen.getByTestId("roster-section-empty")).toBeDefined());
+    expect(screen.getByTestId("roster-clear")).toBeDefined();
+    expect(screen.getByTestId("roster-import")).toBeDefined();
+    expect(screen.queryByTestId("roster-file-menu")).toBeNull();
+  });
+});
 
 describe("RosterSection — settled copy contract", () => {
   const FORBIDDEN = [

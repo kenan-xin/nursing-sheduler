@@ -42,12 +42,17 @@ export function dateLabel(calendar: readonly RosterCalendarDay[], dateIdx: numbe
 }
 
 /**
- * A human-readable title for one day's header cell: the full ISO date plus the
- * weekday, e.g. "2026-07-03 · Fri". Used for `title` attributes and screen
- * readers so a bare "03" always has its full context one hover/announcement away.
+ * A human-readable title for one day's header cell: the full ISO date, the
+ * weekday, and the day's own calendar status — e.g. "2026-07-03 · Fri · Public
+ * holiday". Used for `title` attributes and screen readers so a bare "03" always
+ * has its full context one hover/announcement away, and so the holiday stripe and
+ * its small marker are never the only carriers of that state.
  */
 export function dateTitle(day: RosterCalendarDay): string {
-  return `${day.iso} · ${day.weekday}`;
+  const parts = [day.iso, day.weekday];
+  if (day.holiday) parts.push("Public holiday");
+  else if (day.weekend) parts.push("Weekend");
+  return parts.join(" · ");
 }
 
 /**
@@ -60,6 +65,36 @@ export function rosterSpanTitle(calendar: readonly RosterCalendarDay[]): string 
   const first = calendar[0].iso;
   const last = calendar[calendar.length - 1].iso;
   return `${first} → ${last}`;
+}
+
+/**
+ * The bare day-of-month (`01`), for compact date controls where the surrounding
+ * chrome already states the month. `dateLabel` deliberately expands at range,
+ * month and year boundaries; a fixed-width tab strip needs the stable two-digit
+ * form plus its own month marker instead.
+ */
+export function dayOfMonth(calendar: readonly RosterCalendarDay[], dateIdx: number): string {
+  return calendar[dateIdx].iso.slice(8, 10);
+}
+
+/** The three-letter month name for a day, used to mark a month boundary. */
+export function monthLabel(calendar: readonly RosterCalendarDay[], dateIdx: number): string {
+  const MONTHS = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+  ] as const;
+  const month = Number.parseInt(calendar[dateIdx].iso.slice(5, 7), 10);
+  return MONTHS[month - 1] ?? "";
 }
 
 function splitIso(iso: string): [year: string, month: string, day: string] {

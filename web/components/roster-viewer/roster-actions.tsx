@@ -30,12 +30,21 @@
 import { useRef } from "react";
 import {
   FaArrowRotateRight,
+  FaChevronDown,
   FaDownload,
   FaFileArrowUp,
   FaFileCirclePlus,
   FaTrash,
 } from "@/components/icons";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { useRosterContentWidth } from "./roster-content-width";
 import { cn } from "@/lib/utils";
 import { encodeRosterFile, type RosterDocument } from "@/lib/roster";
 import type { AutosaveSnapshot } from "@/lib/roster";
@@ -102,6 +111,11 @@ export function RosterActions({
     }
   };
 
+  // ONE shared width authority (see `roster-content-width.tsx`), so the action
+  // row and the roster data below it can never disagree about how narrow the
+  // surface is.
+  const { stacked } = useRosterContentWidth();
+
   return (
     <div data-testid="roster-actions" className="flex flex-wrap items-center gap-2">
       {/* Save status feedback (global). */}
@@ -109,16 +123,8 @@ export function RosterActions({
 
       <span className="flex-1" />
 
-      {/* Export actions. */}
-      <Button
-        variant="ghost"
-        size="sm"
-        className="border border-line"
-        onClick={() => void onExportRosterFile()}
-        data-testid="roster-export-file"
-      >
-        <FaFileCirclePlus className="size-3.5" aria-hidden /> Save roster file
-      </Button>
+      {/* Export XLSX stays the primary VISIBLE document action in both layouts:
+          it is the artefact people actually hand around a ward. */}
       <Button
         variant="ghost"
         size="sm"
@@ -129,12 +135,101 @@ export function RosterActions({
         <FaDownload className="size-3.5" aria-hidden /> Export XLSX
       </Button>
 
-      {/* Import and Clear — the two controls the empty state shares. */}
-      <RosterImportControl onImportFile={onImportFile} />
-      <RosterClearControl onClear={onClear} />
+      {stacked ? (
+        // Narrow: the three file-management actions are one labelled control, so
+        // the roster itself is not pushed below four equal-weight buttons. All
+        // three remain directly discoverable — grouped, not removed.
+        <RosterFileMenu
+          onImportFile={onImportFile}
+          onClear={onClear}
+          onSaveFile={onExportRosterFile}
+        />
+      ) : (
+        <>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="border border-line"
+            onClick={() => void onExportRosterFile()}
+            data-testid="roster-export-file"
+          >
+            <FaFileCirclePlus className="size-3.5" aria-hidden /> Save roster file
+          </Button>
+          <RosterImportControl onImportFile={onImportFile} />
+          <RosterClearControl onClear={onClear} />
+        </>
+      )}
     </div>
   );
 }
+
+/**
+ * The narrow-layout `Roster file` control.
+ *
+ * It owns no policy: Save, Import and Clear all call the SAME handlers the wide
+ * row calls, so the discard gate, the promotion fence and the confirmed
+ * destructive Clear stay single-owned by the caller. This is a layout grouping,
+ * not a second document-action protocol.
+ */
+function RosterFileMenu({
+  onImportFile,
+  onClear,
+  onSaveFile,
+}: {
+  onImportFile: (file: File) => void;
+  onClear: () => void;
+  onSaveFile: () => Promise<void>;
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  return (
+    <>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept={ROSTER_FILE_ACCEPT}
+        className="hidden"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file !== undefined) onImportFile(file);
+          event.target.value = "";
+        }}
+      />
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              variant="ghost"
+              size="sm"
+              className="border border-line"
+              data-testid="roster-file-menu"
+            >
+              <FaFileCirclePlus className="size-3.5" aria-hidden /> Roster file
+              <FaChevronDown className="size-3" aria-hidden />
+            </Button>
+          }
+        />
+        <DropdownMenuContent aria-label="Roster file actions">
+          <DropdownMenuItem onClick={() => void onSaveFile()} data-testid="roster-export-file">
+            <FaFileCirclePlus aria-hidden /> Save roster file
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onClick={() => fileInputRef.current?.click()}
+            data-testid="roster-import"
+          >
+            <FaFileArrowUp aria-hidden /> Import roster file
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem variant="destructive" onClick={onClear} data-testid="roster-clear">
+            <FaTrash aria-hidden /> Clear roster &amp; stored data
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </>
+  );
+}
+
+/** The one accept list for a roster file, shared by every import trigger. */
+const ROSTER_FILE_ACCEPT = ".nurse-roster.json,application/x-nurse-roster+json,application/json";
 
 /**
  * The Import trigger and its hidden file input.
@@ -151,7 +246,7 @@ export function RosterImportControl({ onImportFile }: { onImportFile: (file: Fil
       <input
         ref={fileInputRef}
         type="file"
-        accept=".nurse-roster.json,application/x-nurse-roster+json,application/json"
+        accept={ROSTER_FILE_ACCEPT}
         className="hidden"
         onChange={(event) => {
           const file = event.target.files?.[0];

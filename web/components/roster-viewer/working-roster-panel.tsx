@@ -31,6 +31,7 @@ import type { RosterImportOutcome, WorkingPromotionOutcome } from "@/lib/roster"
 import { Callout } from "@/components/optimize/callout";
 import { ConfirmDialog } from "@/components/shell/confirm-dialog";
 import { RosterActions } from "./roster-actions";
+import { RosterContentWidthProvider } from "./roster-content-width";
 import { describeReplacementFailure, ROSTER_CLEAR_PARTIAL_MESSAGE } from "./replacement-outcome";
 import { RosterViewer } from "./roster-viewer";
 import { useRosterEditing } from "./use-roster-editing";
@@ -192,28 +193,34 @@ export const WorkingRosterPanel = forwardRef<WorkingRosterPanelHandle, WorkingRo
 
     return (
       <>
-        <RosterActions
-          document={editing.editedDocument}
-          save={editing.save}
-          onRetrySave={() => void editing.retrySave()}
-          onImportFile={(file) => void onImportFile(file)}
-          onClear={onClear}
-          onExportError={(message) => setActionError(message)}
-        />
-        {actionError !== null ? (
-          <Callout tone="error" placement="page" data-testid="roster-action-error" alert>
-            {actionError}
-          </Callout>
-        ) : null}
-        {clearReport !== null && clearReport.status === "failed" ? (
-          <Callout tone="error" placement="page" data-testid="roster-clear-failed" alert>
-            The roster could not be fully cleared — some data remains in this browser.
-          </Callout>
-        ) : null}
-        <RosterViewer
-          document={editing.editedDocument}
-          editing={editing.ready ? editing : undefined}
-        />
+        {/* ONE measured roster-content box wraps the action row AND the lens/data
+            surface, so the two can never disagree about how narrow the roster is
+            (G7). `min-w-0` keeps the internal scrollers inside it from pushing
+            the document into horizontal overflow. */}
+        <RosterContentWidthProvider className="flex min-w-0 flex-col gap-3">
+          <RosterActions
+            document={editing.editedDocument}
+            save={editing.save}
+            onRetrySave={() => void editing.retrySave()}
+            onImportFile={(file) => void onImportFile(file)}
+            onClear={onClear}
+            onExportError={(message) => setActionError(message)}
+          />
+          {actionError !== null ? (
+            <Callout tone="error" placement="page" data-testid="roster-action-error" alert>
+              {actionError}
+            </Callout>
+          ) : null}
+          {clearReport !== null && clearReport.status === "failed" ? (
+            <Callout tone="error" placement="page" data-testid="roster-clear-failed" alert>
+              The roster could not be fully cleared — some data remains in this browser.
+            </Callout>
+          ) : null}
+          <RosterViewer
+            document={editing.editedDocument}
+            editing={editing.ready ? editing : undefined}
+          />
+        </RosterContentWidthProvider>
 
         <ConfirmDialog
           open={confirmClear}

@@ -17,11 +17,17 @@ const N: RosterDayState = { kind: "shift", shiftId: "N" };
 const OFF: RosterDayState = { kind: "off" };
 const LEAVE: RosterDayState = { kind: "leave" };
 
+/** Four days: Wed, Thu, then a Sat/Sun weekend pair. */
 function ctx(): RosterContext {
   return {
     people: [{ id: "Alice" }, { id: "Bob" }],
     shiftTypes: [{ id: "D" }, { id: "N" }],
-    calendar: [],
+    calendar: [
+      { iso: "2026-07-01", weekday: "Wed", weekend: false, holiday: false },
+      { iso: "2026-07-02", weekday: "Thu", weekend: false, holiday: false },
+      { iso: "2026-07-04", weekday: "Sat", weekend: true, holiday: false },
+      { iso: "2026-07-05", weekday: "Sun", weekend: true, holiday: false },
+    ],
     baselineMinimums: [
       { shiftId: "D", required: 1, source: "p[0]" },
       { shiftId: "N", required: 1, source: "p[1]" },
@@ -42,24 +48,44 @@ describe("computeTallies", () => {
       shiftCounts: [1, 1],
       off: 1,
       leave: 1,
+      // Alice's only OFF is a Thursday, so she has no weekend rest at all.
+      weekendRest: 0,
     });
     expect(tallies[1]).toEqual({
       personIdx: 1,
       shiftCounts: [2, 1],
       off: 1,
       leave: 0,
+      // Bob's OFF lands on the Saturday.
+      weekendRest: 1,
     });
+  });
+
+  it("counts weekend rest ONLY from OFF days that fall on a weekend day", () => {
+    const grid: RosterDayGrid = [
+      // Works both weekend days, rests midweek — zero weekend rest.
+      [OFF, OFF, D, N],
+      // Paid LEAVE on a weekend day is not rest; only the Sunday OFF counts.
+      [D, D, LEAVE, OFF],
+    ];
+    const tallies = computeTallies(ctx(), grid);
+    expect(tallies[0].off).toBe(2);
+    expect(tallies[0].weekendRest).toBe(0);
+    expect(tallies[1].off).toBe(1);
+    expect(tallies[1].leave).toBe(1);
+    expect(tallies[1].weekendRest).toBe(1);
   });
 
   it("returns zero counts for a nurse with no worked shifts", () => {
     const grid: RosterDayGrid = [
-      [OFF, OFF],
-      [OFF, OFF],
+      [OFF, OFF, OFF, OFF],
+      [OFF, OFF, OFF, OFF],
     ];
     const tallies = computeTallies(ctx(), grid);
     expect(tallies[0].shiftCounts).toEqual([0, 0]);
-    expect(tallies[0].off).toBe(2);
+    expect(tallies[0].off).toBe(4);
     expect(tallies[0].leave).toBe(0);
+    expect(tallies[0].weekendRest).toBe(2);
   });
 });
 

@@ -23,6 +23,40 @@ import { gotoDurableFixture, installOptimizeRoutes, json } from "./support/optim
 
 const FIXTURE_URL = "/roster-viewer-fixture";
 
+// WCAG 2.2 SC 1.4.3 relative-luminance contrast, computed from RENDERED colours.
+// https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum
+function contrastRatio(foreground: string, background: string): number {
+  const luminance = (value: string): number => {
+    // Chromium reports a `color-mix()` result as `color(srgb r g b)` with 0..1
+    // components, and a plain hex token as `rgb(r, g, b)` with 0..255. Both are
+    // real rendered colours; a parser that knew only one silently threw on the
+    // derived tokens — which is exactly where the contrast question lives.
+    const srgb = value.match(/color\(srgb\s+([^)]+)\)/);
+    const channels =
+      srgb !== null
+        ? srgb[1]
+            .split(/[\s/]+/)
+            .slice(0, 3)
+            .map((part) => Number.parseFloat(part))
+        : (() => {
+            const match = value.match(/rgba?\(([^)]+)\)/);
+            if (match === null) throw new Error(`unparseable colour: ${value}`);
+            return match[1]
+              .split(/[,\s/]+/)
+              .slice(0, 3)
+              .map((part) => Number.parseFloat(part) / 255);
+          })();
+    const channel = (s: number) => (s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4);
+    return (
+      0.2126 * channel(channels[0]) + 0.7152 * channel(channels[1]) + 0.0722 * channel(channels[2])
+    );
+  };
+  const a = luminance(foreground);
+  const b = luminance(background);
+  const [hi, lo] = a > b ? [a, b] : [b, a];
+  return (hi + 0.05) / (lo + 0.05);
+}
+
 /** A wide window throughout: container width, not viewport, is what is under test. */
 test.use({ viewport: { width: 1400, height: 900 } });
 
@@ -418,6 +452,362 @@ test.describe("F4 roster viewer — real layout", () => {
     }
   });
 
+  // -------------------------------------------------------------------------
+  // G7 — the Grid toolbar the prototype has and the shipped Grid was missing.
+  // -------------------------------------------------------------------------
+
+  test("the Grid keys every authored shift with its id, hours and own cell colour", async ({
+    page,
+  }) => {
+    await page.getByTestId("roster-lens-grid").click();
+
+    // The roster period is visible without the toolbar becoming a heading.
+    await expect(page.getByTestId("roster-grid-span")).toHaveText(/→/);
+    await expect(page.getByTestId("roster-viewer").locator("h1, h2")).toHaveCount(0);
+
+    const items = page.getByTestId("roster-grid-legend-item");
+    // Every scenario shift, plus the two day-states — no invented categories.
+    await expect(items).toHaveCount(4);
+    await expect(items.nth(0)).toContainText("09:00–17:00");
+    await expect(items.nth(1)).toContainText("21:00–07:00");
+    await expect(items.nth(2)).toContainText("Leave");
+    await expect(items.nth(3)).toContainText("Off / rest");
+
+    const legend = page.getByTestId("roster-grid-legend");
+    for (const category of ["Morning", "Evening", "Night", "Long day"]) {
+      await expect(legend).not.toContainText(category);
+    }
+
+    // ONE ramp: the legend key paints exactly what the grid cell paints.
+    const keyColour = await items
+      .nth(0)
+      .locator("span")
+      .first()
+      .evaluate((el) => getComputedStyle(el).backgroundColor);
+    const cellColour = await page
+      .getByTestId("roster-grid")
+      .locator('tbody td span[aria-label="D"]')
+      .first()
+      .evaluate((el) => getComputedStyle(el).backgroundColor);
+    expect(keyColour).toBe(cellColour);
+  });
+
+  test("the Grid marks a public holiday with a marker AND a complete accessible label", async ({
+    page,
+  }) => {
+    await page.getByTestId("roster-lens-grid").click();
+    const marker = page.getByTestId("roster-grid-holiday");
+    await expect(marker).toHaveCount(1);
+    // The stripe and the marker are supplements; the text is the real signal.
+    const header = page.getByTestId("roster-grid").locator("thead th", { has: marker });
+    await expect(header).toContainText("Public holiday");
+    await expect(header).toHaveAttribute("title", /Public holiday$/);
+  });
+
+  test("the Grid legend scrolls internally at 390px and at a 759px docked host", async ({
+    page,
+  }) => {
+    await page.getByTestId("roster-lens-grid").click();
+
+    for (const setup of [
+      async () => {
+        await page.getByTestId("fx-host-auto").click();
+        await page.setViewportSize({ width: 390, height: 844 });
+      },
+      async () => {
+        await page.setViewportSize({ width: 1400, height: 900 });
+        await page.getByTestId("fx-host-759").click();
+      },
+    ]) {
+      await setup();
+      await page.getByTestId("roster-lens-grid").click();
+      const legend = page.getByTestId("roster-grid-legend");
+      await expect(legend).toBeVisible();
+      // The strip owns its own overflow...
+      const box = await legend.evaluate((el) => ({
+        overflowX: getComputedStyle(el).overflowX,
+        contained: el.scrollWidth <= el.clientWidth + 1 || el.clientWidth > 0,
+      }));
+      expect(box.overflowX).toBe("auto");
+      expect(box.contained).toBe(true);
+      // ...and the DOCUMENT never scrolls sideways because of it.
+      const overflows = await page.evaluate(
+        () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      );
+      expect(overflows).toBe(false);
+    }
+
+    await page.setViewportSize({ width: 1400, height: 900 });
+    await page.getByTestId("fx-host-auto").click();
+  });
+
+  test("Coverage renders both planes, names people in full, and invents no per-shift quota", async ({
+    page,
+  }) => {
+    await page.getByTestId("roster-lens-coverage").click();
+    await expect(page.getByTestId("roster-coverage-declared")).toBeVisible();
+    await expect(page.getByTestId("roster-coverage-exact")).toBeVisible();
+
+    // Each concrete shift appears exactly once in the Exact shifts plane.
+    const exact = page.getByTestId("roster-exact-shift-row");
+    await expect(exact).toHaveCount(2);
+    await expect(exact.nth(0)).toHaveAttribute("data-shift", "D");
+    await expect(exact.nth(1)).toHaveAttribute("data-shift", "N");
+
+    // The 212 / 128 geometry, measured.
+    const columns = await exact
+      .nth(0)
+      .evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(" "));
+    expect(columns[0]).toBe("212px");
+    expect(new Set(columns.slice(1))).toEqual(new Set(["128px"]));
+
+    // Full authored ids, never initials.
+    const people = page.getByTestId("roster-coverage-person");
+    expect(await people.count()).toBeGreaterThan(0);
+    const first = people.first();
+    expect((await first.textContent())?.trim()).toBe(await first.getAttribute("data-person"));
+
+    // The `N` lane has no declared target, so it must show a count and no quota.
+    const nLane = exact.nth(1);
+    await expect(nLane).not.toContainText("Short");
+    await expect(nLane.locator('[data-short="true"]')).toHaveCount(0);
+  });
+
+  test("the SELECTED lens label meets WCAG AA in dark mode as well as light", async ({ page }) => {
+    // The fidelity audit measured the dark selected pair at 3.64:1 — normal-size
+    // text on the one control that says which lens you are looking at. Colour is
+    // the only thing that distinguishes it from its neighbours, so it has to be
+    // readable, not merely tinted.
+    for (const theme of ["light", "dark"] as const) {
+      await page.evaluate((mode) => {
+        document.documentElement.classList.toggle("dark", mode === "dark");
+      }, theme);
+      const selected = page.getByTestId("roster-lens-grid");
+      await selected.click();
+      await expect(selected).toHaveAttribute("aria-pressed", "true");
+      // Park the pointer away from the control: a click leaves it hovering, and
+      // the hover tone is not the resting selected state under test.
+      await page.mouse.move(0, 0);
+      // WAIT FOR THE COLOURS TO SETTLE. The control transitions its background
+      // and text over `duration-fast`, and Chromium reports an in-flight
+      // interpolated colour as `oklab(...)` — a value that is neither the old nor
+      // the new pair. Sampling mid-transition measures a colour that exists for
+      // 150ms and asserts nothing about the resting selected state.
+      const readPair = () =>
+        selected.evaluate((el) => {
+          const style = getComputedStyle(el);
+          return `${style.color}|${style.backgroundColor}`;
+        });
+      let previous = "";
+      await expect
+        .poll(
+          async () => {
+            const current = await readPair();
+            const settled = current === previous;
+            previous = current;
+            return settled;
+          },
+          { message: `${theme} selected lens colours never settled` },
+        )
+        .toBe(true);
+
+      // Resolve to real 8-bit sRGB in the page. A computed value can come back
+      // as `rgb()` or `color(srgb ...)` depending on how the token was derived,
+      // and only the rasterised pixel is the colour a person sees.
+      const pair = await selected.evaluate((el) => {
+        const canvas = document.createElement("canvas");
+        canvas.width = 1;
+        canvas.height = 1;
+        const ctx = canvas.getContext("2d");
+        if (ctx === null) throw new Error("no 2d context");
+        const raster = (value: string): string => {
+          ctx.clearRect(0, 0, 1, 1);
+          ctx.fillStyle = value;
+          ctx.fillRect(0, 0, 1, 1);
+          const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
+          return `rgb(${r}, ${g}, ${b})`;
+        };
+        const style = getComputedStyle(el);
+        return {
+          fg: raster(style.color),
+          bg: raster(style.backgroundColor),
+          rawFg: style.color,
+          rawBg: style.backgroundColor,
+          dark: document.documentElement.classList.contains("dark"),
+        };
+      });
+      expect(pair.dark, `${theme}: the theme class did not apply`).toBe(theme === "dark");
+      const ratio = contrastRatio(pair.fg, pair.bg);
+      expect(
+        ratio,
+        `${theme} selected lens: ${pair.fg} on ${pair.bg} (raw ${pair.rawFg} on ${pair.rawBg})`,
+      ).toBeGreaterThanOrEqual(4.5);
+    }
+    await page.evaluate(() => document.documentElement.classList.remove("dark"));
+  });
+
+  // -------------------------------------------------------------------------
+  // Cold-review P1 #1 — an exact-shift target belongs to a (shift, DAY).
+  // -------------------------------------------------------------------------
+
+  test("a DATE-SCOPED target appears on its own date in every lens, and nowhere else", async ({
+    page,
+  }) => {
+    await freshFixture(page);
+    await page.getByTestId("fx-seed-scoped").click();
+    await expect(page.getByTestId("fx-status")).toHaveText("scoped-seeded");
+    await expect(page.getByTestId("roster-viewer")).toBeVisible();
+
+    // GRID — 2026-07-04 is index 1 and asks for 2 against 1 staffed.
+    await page.getByTestId("roster-lens-grid").click();
+    const footerCells = page
+      .getByTestId("roster-grid")
+      .locator("tfoot tr")
+      .first()
+      .locator("td[data-short]");
+    await expect(footerCells).toHaveCount(4);
+    await expect(footerCells.nth(1)).toHaveAttribute("aria-label", "Short: staffed 1, required 2");
+    await expect(footerCells.nth(1)).toHaveAttribute("data-short", "true");
+    // No other date inherits that quota — including the ones equally staffed.
+    for (const dateIdx of [0, 2, 3]) {
+      await expect(footerCells.nth(dateIdx)).toHaveAttribute(
+        "aria-label",
+        /no target declared for this shift$/,
+      );
+      await expect(footerCells.nth(dateIdx)).toHaveAttribute("data-short", "false");
+    }
+
+    // DAY — the same cell, through the compact lens.
+    await page.getByTestId("roster-lens-day").click();
+    const tabs = page.getByTestId("roster-day").getByRole("tab");
+    await tabs.nth(1).click();
+    const scopedPanel = page.locator('[data-testid="roster-day-shift-panel"][data-shift="D"]');
+    await expect(scopedPanel).toHaveAttribute("data-short", "true");
+    await expect(scopedPanel).toContainText("min 2");
+    await tabs.nth(0).click();
+    await expect(scopedPanel).toHaveAttribute("data-short", "false");
+    await expect(scopedPanel).not.toContainText("min ");
+
+    // COVERAGE — the detailed lens agrees with both compact ones.
+    await page.getByTestId("roster-lens-coverage").click();
+    const exactCells = page
+      .locator('[data-testid="roster-exact-shift-row"][data-shift="D"]')
+      .locator("[data-staffed]");
+    await expect(exactCells.nth(1)).toHaveAttribute("data-short", "true");
+    await expect(exactCells.nth(0)).toHaveAttribute("data-short", "false");
+    // ...and the Declared plane carries the requirement on its date only.
+    const declared = page
+      .locator('[data-testid="roster-requirement-row"][data-scope="D"]')
+      .locator("[data-status]");
+    await expect(declared.nth(1)).toHaveAttribute("data-status", "checked");
+    await expect(declared.nth(0)).toHaveAttribute("data-status", "not-applicable");
+  });
+
+  // -------------------------------------------------------------------------
+  // Cold-review P1 #2 — Day health fails closed on a mixed unavailable state.
+  // -------------------------------------------------------------------------
+
+  test("a day carrying one unavailable requirement never reads as staffed", async ({ page }) => {
+    await freshFixture(page);
+    await page.getByTestId("fx-seed-mixed").click();
+    await expect(page.getByTestId("fx-status")).toHaveText("mixed-seeded");
+    await expect(page.getByTestId("roster-viewer")).toBeVisible();
+
+    await page.getByTestId("roster-lens-day").click();
+    const tabs = page.getByTestId("roster-day").getByRole("tab");
+    await expect(tabs).toHaveCount(4);
+
+    // Days 0, 1 and 3 satisfy the valid `D = 1` requirement, so the old
+    // implementation painted them green while an applicable sibling was
+    // unresolvable. Day 2 has nobody on D and is genuinely short, which keeps
+    // the mismatch branch live in the same fixture.
+    const health = await tabs.evaluateAll((nodes) =>
+      nodes.map((node) => node.querySelector("[data-health]")?.getAttribute("data-health") ?? ""),
+    );
+    expect(health).toEqual(["unknown", "unknown", "under", "unknown"]);
+
+    const names = await tabs.evaluateAll((nodes) =>
+      nodes.map((node) => node.getAttribute("aria-label") ?? ""),
+    );
+    for (const name of names) expect(name).not.toContain("staffed");
+    for (const dateIdx of [0, 1, 3]) {
+      expect(names[dateIdx]).toContain("not fully checkable");
+    }
+    expect(names[2]).toContain("requirement not met");
+
+    // The satisfied half genuinely is satisfied, so the dot is not `unknown`
+    // because everything failed.
+    await page.getByTestId("roster-lens-coverage").click();
+    await expect(
+      page
+        .locator('[data-testid="roster-requirement-row"][data-scope="D"]')
+        .locator("[data-status]")
+        .first(),
+    ).toHaveAttribute("data-mismatch", "false");
+    await expect(
+      page
+        .locator('[data-testid="roster-requirement-row"][data-scope="NoSuchShift"]')
+        .locator("[data-status]")
+        .first(),
+    ).toHaveAttribute("data-status", "unavailable");
+  });
+
+  // -------------------------------------------------------------------------
+  // Closure re-review P1 — a scoped unavailable rule stays off the days it does
+  // not govern.
+  // -------------------------------------------------------------------------
+
+  test("a DATE-SCOPED unavailable requirement fails closed only on its own date", async ({
+    page,
+  }) => {
+    await freshFixture(page);
+    await page.getByTestId("fx-seed-scoped-unavailable").click();
+    await expect(page.getByTestId("fx-status")).toHaveText("scoped-unavailable-seeded");
+    await expect(page.getByTestId("roster-viewer")).toBeVisible();
+
+    await page.getByTestId("roster-lens-day").click();
+    const tabs = page.getByTestId("roster-day").getByRole("tab");
+    await expect(tabs).toHaveCount(4);
+
+    // THE DEFECT THIS REPLACES. The unresolvable rule is scoped to 2026-07-03
+    // alone, but was returned unavailable before the dates were consulted, so
+    // every day went `unknown`. Day 2 has nobody on `D` and is genuinely short,
+    // which keeps the mismatch branch live rather than testing one state four
+    // times.
+    const health = await tabs.evaluateAll((nodes) =>
+      nodes.map((node) => node.querySelector("[data-health]")?.getAttribute("data-health") ?? ""),
+    );
+    expect(health).toEqual(["unknown", "ok", "under", "ok"]);
+
+    const names = await tabs.evaluateAll((nodes) =>
+      nodes.map((node) => node.getAttribute("aria-label") ?? ""),
+    );
+    expect(names[0]).toContain("not fully checkable");
+    expect(names[1]).toContain("staffed");
+    expect(names[3]).toContain("staffed");
+
+    // Coverage: unavailable on its own date, plain `n/a` everywhere else — no
+    // warning cell for a rule that does not apply there.
+    await page.getByTestId("roster-lens-coverage").click();
+    const brokenCells = page
+      .locator('[data-testid="roster-requirement-row"][data-scope="NoSuchShift"]')
+      .locator("[data-status]");
+    await expect(brokenCells).toHaveCount(4);
+    await expect(brokenCells.nth(0)).toHaveAttribute("data-status", "unavailable");
+    for (const dateIdx of [1, 2, 3]) {
+      await expect(brokenCells.nth(dateIdx)).toHaveAttribute("data-status", "not-applicable");
+      await expect(brokenCells.nth(dateIdx)).toContainText("n/a");
+    }
+    // ...and the satisfied rule really is satisfied off-scope, so the healthy
+    // days above are not healthy by accident.
+    await expect(
+      page
+        .locator('[data-testid="roster-requirement-row"][data-scope="D"]')
+        .locator("[data-status]")
+        .nth(1),
+    ).toHaveAttribute("data-mismatch", "false");
+  });
+
   test("the lens and focused day survive a reload", async ({ page }) => {
     await page.getByTestId("roster-lens-day").click();
     const tabs = page.getByRole("tablist").getByRole("tab");
@@ -472,7 +862,23 @@ async function setCell(page: Page, index: number, label: string) {
   await cell.click();
   if (!(await bar.isVisible())) await cell.click();
   await expect(bar).toBeVisible();
-  await page.getByTestId(`roster-edit-option-${label}`).click();
+  await chooseEditOption(page, label);
+}
+
+/**
+ * Choose a value in the open edit bar.
+ *
+ * OFF and Leave are day-STATES and stay explicit quick buttons; every worked
+ * shift goes through the searchable chooser, because Ward 8 authors sixteen of
+ * them and a flat row of sixteen was the finding this closure fixes.
+ */
+async function chooseEditOption(page: Page, label: string) {
+  if (label === "OFF" || label === "LV") {
+    await page.getByTestId(`roster-edit-option-${label}`).click();
+    return;
+  }
+  await page.getByTestId("roster-shift-picker").click();
+  await page.getByTestId(`roster-shift-option-${label}`).click();
 }
 
 /**
@@ -500,18 +906,31 @@ test.describe("F5 roster editing — editing + actions + layout", () => {
     await firstCell.click();
     await expect(page.getByTestId("roster-edit-bar")).toBeVisible();
 
-    // The edit bar offers the fixture's shift types (D, N) plus OFF and LV.
-    await expect(page.getByTestId("roster-edit-option-D")).toBeVisible();
-    await expect(page.getByTestId("roster-edit-option-N")).toBeVisible();
+    // OFF and Leave stay explicit; the worked shifts live behind one searchable
+    // chooser rather than a wall of buttons.
     await expect(page.getByTestId("roster-edit-option-OFF")).toBeVisible();
     await expect(page.getByTestId("roster-edit-option-LV")).toBeVisible();
+    await expect(page.getByTestId("roster-shift-picker")).toBeVisible();
+    await expect(page.getByTestId("roster-edit-option-D")).toHaveCount(0);
+    await expect(page.getByTestId("roster-edit-option-N")).toHaveCount(0);
+
+    // The chooser lists every scenario shift with its hours.
+    await page.getByTestId("roster-shift-picker").click();
+    await expect(page.getByTestId("roster-shift-option-D")).toContainText("09:00–17:00");
+    await expect(page.getByTestId("roster-shift-option-N")).toContainText("21:00–07:00");
+
+    // Its own trigger opens it too, for someone who would rather not type.
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("roster-shift-option-D")).toBeHidden();
+    await page.getByRole("button", { name: "Show shifts" }).click();
+    await expect(page.getByTestId("roster-shift-option-D")).toBeVisible();
 
     // Undo starts disabled (no edit yet).
     const undo = page.getByTestId("roster-undo");
     await expect(undo).toBeDisabled();
 
     // Choosing N fires the edit; undo becomes enabled.
-    await page.getByTestId("roster-edit-option-N").click();
+    await page.getByTestId("roster-shift-option-N").click();
     await expect(undo).toBeEnabled();
     // The save feedback appears.
     await expect(page.getByTestId(/roster-save-(saving|saved)/)).toBeVisible();
@@ -520,7 +939,7 @@ test.describe("F5 roster editing — editing + actions + layout", () => {
   test("undo reverts the last edit", async ({ page }) => {
     await seedWorkingRoster(page);
     await editableCells(page).first().click();
-    await page.getByTestId("roster-edit-option-N").click();
+    await chooseEditOption(page, "N");
     await expect(page.getByTestId("roster-undo")).toBeEnabled();
 
     await page.getByTestId("roster-undo").click();
@@ -534,7 +953,7 @@ test.describe("F5 roster editing — editing + actions + layout", () => {
     await seedWorkingRoster(page);
     // Edit something so there is unsaved/autosaving state in flight.
     await editableCells(page).first().click();
-    await page.getByTestId("roster-edit-option-N").click();
+    await chooseEditOption(page, "N");
 
     // Clear (confirmed). The working roster must be gone.
     await page.getByTestId("roster-clear").click();
@@ -583,17 +1002,20 @@ test.describe("F5 roster editing — the universal edit path", () => {
     await page.keyboard.press("Enter");
     await expect(page.getByTestId("roster-edit-bar")).toBeVisible();
 
-    // Tab into the bar and activate an option by keyboard.
-    const option = page.getByTestId("roster-edit-option-N");
-    await option.focus();
-    await page.keyboard.press("Enter");
+    // Reach the chooser by keyboard and pick a shift with Enter — no pointer.
+    const picker = page.getByTestId("roster-shift-picker");
+    await picker.focus();
+    await picker.press("ArrowDown");
+    await page.getByTestId("roster-shift-option-N").waitFor();
+    await picker.press("ArrowDown");
+    await picker.press("Enter");
 
     // The edit landed and was saved — no pointer was used at any point.
     await expect(page.getByTestId("roster-undo")).toBeEnabled();
     await expect(page.getByTestId("roster-save-saved")).toBeVisible();
   });
 
-  test("every edit option meets the 44px coarse-pointer floor, measured", async ({ page }) => {
+  test("every day-state option meets the 44px coarse-pointer floor, measured", async ({ page }) => {
     await seedWorkingRoster(page);
     await editableCells(page).first().click();
     await expect(page.getByTestId("roster-edit-bar")).toBeVisible();
@@ -763,6 +1185,28 @@ async function residue(page: Page): Promise<Record<string, boolean>> {
   return JSON.parse(raw) as Record<string, boolean>;
 }
 
+/**
+ * Assert the residue set REACHES an exact state, re-probing until it does.
+ *
+ * THE RACE THIS REPLACES. `clearRosterDataAndNotify()` finishes several durable
+ * removals; the empty state can paint from the first of them while a later one is
+ * still settling. A single probe taken the moment the empty state appears was
+ * therefore reading a state the product had not finished producing, and the
+ * assertion failed on a purge that genuinely completed a beat later.
+ *
+ * The fix is to observe the SETTLED state, not to weaken the claim: the expected
+ * set is still exact and every key is still named, and a purge that never
+ * completes still fails on the poll timeout. No sleep is the authority here —
+ * the product's own observable storage state is.
+ */
+async function expectResidue(page: Page, expected: Record<string, boolean>): Promise<void> {
+  await expect
+    .poll(() => residue(page), {
+      message: `residue never settled to ${JSON.stringify(expected)}`,
+    })
+    .toEqual(expected);
+}
+
 test.describe("G3 empty roster — Import and the privacy Clear", () => {
   test("the empty state offers Import and Clear, and no loaded-roster save/export", async ({
     page,
@@ -889,7 +1333,7 @@ test.describe("G3 empty roster — Import and the privacy Clear", () => {
     await expect(page.getByTestId("roster-clear-failed")).toHaveCount(0);
     await expect(page.getByTestId("roster-section-empty")).toBeVisible();
 
-    expect(await residue(page)).toEqual({
+    const PURGED = {
       working: false,
       pointer: false,
       candidate: false,
@@ -897,20 +1341,13 @@ test.describe("G3 empty roster — Import and the privacy Clear", () => {
       session: false,
       retireMarker: false,
       viewMetadata: false,
-    });
+    };
+    await expectResidue(page, PURGED);
 
     // And it is durable: a reload does not resurrect any of it.
     await page.reload();
     await expect(page.getByTestId("roster-section-empty")).toBeVisible();
-    expect(await residue(page)).toEqual({
-      working: false,
-      pointer: false,
-      candidate: false,
-      snapshot: false,
-      session: false,
-      retireMarker: false,
-      viewMetadata: false,
-    });
+    await expectResidue(page, PURGED);
   });
 });
 

@@ -33,19 +33,23 @@ import {
 } from "@/lib/roster";
 import {
   assignShiftRamp,
+  buildAssignmentIndex,
   buildProvenanceView,
   computeCoverage,
+  computeRequirementGrid,
   computeTallies,
+  deriveRequirementModel,
   readViewPreference,
   resolveFocusedDay,
-  summariseCoverage,
+  summariseRequirements,
   writeViewPreference,
 } from "@/lib/roster-viewer";
 import { RosterGrid } from "./roster-grid";
 import { RosterCoverage } from "./roster-coverage";
 import { RosterDay } from "./roster-day";
 import { RosterEditBar } from "./roster-edit-bar";
-import { MOBILE_DEFAULT_LENS_VIEWPORT, useContainerWidth } from "./use-container-width";
+import { useRosterContentWidth } from "./roster-content-width";
+import { MOBILE_DEFAULT_LENS_VIEWPORT } from "./use-container-width";
 
 export type RosterLens = "grid" | "coverage" | "day";
 
@@ -85,7 +89,7 @@ export function RosterViewer({ document, editing }: RosterViewerProps) {
   const [focusedDay, setFocusedDay] = useState(() =>
     resolveFocusedDay(document.context.calendar, restored),
   );
-  const { ref: containerRef, width } = useContainerWidth();
+  const width = useRosterContentWidth();
 
   const currentDays = useMemo(
     () => deriveCurrentDays(document.solvedDays, document.edits),
@@ -95,9 +99,21 @@ export function RosterViewer({ document, editing }: RosterViewerProps) {
     () => assignShiftRamp(document.context.shiftTypes),
     [document.context.shiftTypes],
   );
-  const coverage = useMemo(
-    () => computeCoverage(document.context, currentDays),
+  // The ephemeral staffing-equation projection. Keyed on the IMMUTABLE
+  // submission, so it survives every edit without being recomputed, and nothing
+  // about it is ever written back into the persisted document.
+  const model = useMemo(() => deriveRequirementModel(document.submission), [document.submission]);
+  const assignments = useMemo(
+    () => buildAssignmentIndex(document.context, currentDays),
     [document.context, currentDays],
+  );
+  const coverage = useMemo(
+    () => computeCoverage(document.context, assignments, model),
+    [document.context, assignments, model],
+  );
+  const requirements = useMemo(
+    () => computeRequirementGrid(model, assignments, document.context.calendar.length),
+    [model, assignments, document.context.calendar.length],
   );
   const tallies = useMemo(
     () => computeTallies(document.context, currentDays),
@@ -107,7 +123,9 @@ export function RosterViewer({ document, editing }: RosterViewerProps) {
     () => buildProvenanceView(document.provenance, deriveEditedSinceSolve(document.edits)),
     [document.provenance, document.edits],
   );
-  const summary = useMemo(() => summariseCoverage(coverage), [coverage]);
+  // The roster-level claim comes from DECLARED equation health, never from how
+  // many exact lanes happened to carry a cached baseline.
+  const summary = useMemo(() => summariseRequirements(requirements), [requirements]);
 
   const calendar = document.context.calendar;
 
@@ -166,7 +184,7 @@ export function RosterViewer({ document, editing }: RosterViewerProps) {
   );
 
   return (
-    <div ref={containerRef} className="flex flex-col gap-3" data-testid="roster-viewer">
+    <div className="flex min-w-0 flex-col gap-3" data-testid="roster-viewer">
       {/* Header: lens toggle + provenance + undo (editing only). */}
       <div className="flex flex-wrap items-end gap-4">
         <div className="min-w-0 flex-1" style={{ flexBasis: "440px" }}>
@@ -193,6 +211,7 @@ export function RosterViewer({ document, editing }: RosterViewerProps) {
         <RosterEditBar
           context={document.context}
           selected={editing.selectedCell}
+          current={currentDays[editing.selectedCell.personIdx]?.[editing.selectedCell.dateIdx]}
           onSetCell={editing.setCell}
           onCancel={() => editing.selectCell(null)}
         />
@@ -212,9 +231,10 @@ export function RosterViewer({ document, editing }: RosterViewerProps) {
       {lens === "coverage" ? (
         <RosterCoverage
           context={document.context}
-          currentDays={currentDays}
           ramp={ramp}
           coverage={coverage}
+          model={model}
+          requirements={requirements}
           width={width}
         />
       ) : null}
@@ -224,6 +244,8 @@ export function RosterViewer({ document, editing }: RosterViewerProps) {
           currentDays={currentDays}
           ramp={ramp}
           coverage={coverage}
+          model={model}
+          requirements={requirements}
           focusedDay={focusedDay}
           onFocusDay={onFocusDay}
         />
@@ -241,7 +263,7 @@ function ProvenanceBanner({
   summary,
 }: {
   provenance: ReturnType<typeof buildProvenanceView>;
-  summary: ReturnType<typeof summariseCoverage>;
+  summary: ReturnType<typeof summariseRequirements>;
 }) {
   const statusTone = provenance.solverStatus === "OPTIMAL" ? "text-successink" : "text-warnink";
   return (
@@ -273,23 +295,23 @@ function ProvenanceBanner({
 }
 
 /**
- * The roster-level coverage sentence.
+ * The roster-level coverage sentence, stated against the schedule's own DECLARED
+ * requirements.
  *
- * The claim is always scoped to what the baseline predicate could actually
- * check. "All shifts staffed" over a roster with unavailable lanes would read as
- * an all-clear the predicate never issued, so unavailable lanes are named rather
- * than absorbed, and a roster with nothing checkable makes no staffing claim.
+ * The claim is always scoped to what could actually be evaluated. "All
+ * requirements met" over a roster with unresolvable equations would read as an
+ * all-clear nothing issued, so unavailable equations are named rather than
+ * absorbed, and a roster with nothing checkable makes no staffing claim at all.
  */
-function coverageSummaryText(summary: ReturnType<typeof summariseCoverage>): string {
+function coverageSummaryText(summary: ReturnType<typeof summariseRequirements>): string {
   if (!summary.anyCheckable) return "Coverage unavailable";
-  const unavailable =
-    summary.totalUnavailable > 0 ? ` · ${summary.totalUnavailable} unavailable` : "";
-  if (summary.allCheckableStaffed) {
-    return summary.totalUnavailable > 0
-      ? `All checkable shifts staffed${unavailable}`
-      : "All shifts staffed";
+  const unavailable = summary.unavailable > 0 ? ` · ${summary.unavailable} unavailable` : "";
+  if (summary.mismatched === 0) {
+    return summary.unavailable > 0
+      ? `All checkable requirements met${unavailable}`
+      : "All requirements met";
   }
-  return `${summary.underMinimum} under minimum${unavailable}`;
+  return `${summary.mismatched} requirement${summary.mismatched === 1 ? "" : "s"} not met${unavailable}`;
 }
 
 // ---------------------------------------------------------------------------

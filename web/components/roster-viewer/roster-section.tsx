@@ -408,17 +408,11 @@ export function RosterSection({ capture }: RosterSectionProps) {
   // save/replacement authority.
   if (hasWorkingRoster && roster.document !== null) {
     return (
-      <section className="flex flex-col gap-3" data-testid="roster-section">
-        <div className="flex items-end gap-4">
-          <div className="min-w-0 flex-1">
-            <div className="text-label font-semibold uppercase tracking-[0.03em] text-brandink">
-              Roster
-            </div>
-            <h2 className="font-heading text-display font-bold leading-[1.15] tracking-[-0.015em] text-ink">
-              Review the roster
-            </h2>
-          </div>
-        </div>
+      // ONE roster heading. The route header already says "Review & adjust the
+      // roster"; a second display-size "Review the roster" here implied two
+      // levels that do not exist and, at 390px, pushed the first roster data
+      // roughly 450px down the page (G7 hierarchy closure).
+      <section className="flex min-w-0 flex-col gap-3" data-testid="roster-section">
         {candidateCallout}
         {loadErrorCallout}
         <WorkingRosterPanel

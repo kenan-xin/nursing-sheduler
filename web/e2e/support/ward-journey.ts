@@ -119,6 +119,151 @@ export const WARD_EXPECTED = {
 /** Editable grid cells: one per person per day. */
 export const WARD_EXPECTED_CELL_COUNT = WARD_EXPECTED.peopleCount * WARD_EXPECTED.dayCount;
 
+/**
+ * The `SeniorStaffNurses` people group, stated explicitly.
+ *
+ * Deliberately NOT derived from the `SSN-` prefix: that would be an inference
+ * about the naming convention rather than a statement of what the scenario
+ * declares, and a scenario edit that moved one nurse in or out of the group
+ * would silently move the expectation with it.
+ */
+export const WARD_SENIOR_STAFF_NURSES: readonly string[] = [
+  "SSN-Siti",
+  "SSN-MeiLing",
+  "SSN-Priya",
+  "SSN-Nurul",
+  "SSN-JiaHui",
+  "SSN-Kavitha",
+  "SSN-Aishah",
+  "SSN-WeiLing",
+  "SSN-Devi",
+  "SSN-Farah",
+  "SSN-Lakshmi",
+  "SSN-Rohana",
+];
+
+/**
+ * Ward 8's EIGHT staffing equations, exactly as the scenario authors them.
+ *
+ * Six are shift-type GROUPS and two name a single `+` pattern under a
+ * qualification scope; not one of them is a per-shift headcount. Stated here as
+ * an independent restatement of the YAML so the browser oracle can check the
+ * displayed numbers against the scenario rather than against the app's own
+ * derivation of it.
+ *
+ * `shifts` is the resolved member set; `qualified` marks the two shapes that
+ * BOTH filter the numerator and forbid every unqualified assignment on their
+ * selected shifts.
+ */
+export const WARD_REQUIREMENTS: readonly {
+  scope: string;
+  shifts: readonly string[];
+  required: number;
+  preferred: number | null;
+  qualified: boolean;
+}[] = [
+  {
+    scope: "AllMornings",
+    shifts: ["am1", "am1+", "am2", "am2+", "am3", "am3+"],
+    required: 6,
+    preferred: 7,
+    qualified: false,
+  },
+  {
+    scope: "MorningSeniorSlots",
+    shifts: ["am1+", "am2+", "am3+"],
+    required: 1,
+    preferred: null,
+    qualified: true,
+  },
+  {
+    scope: "AllAfternoons",
+    shifts: ["pm1", "pm1+", "pm2", "pm2+", "pm3", "pm3+"],
+    required: 6,
+    preferred: 7,
+    qualified: false,
+  },
+  {
+    scope: "AfternoonSeniorSlots",
+    shifts: ["pm1+", "pm2+", "pm3+"],
+    required: 1,
+    preferred: null,
+    qualified: true,
+  },
+  {
+    scope: "AllLongDays",
+    shifts: ["long", "long+"],
+    required: 1,
+    preferred: 2,
+    qualified: false,
+  },
+  { scope: "long+", shifts: ["long+"], required: 1, preferred: null, qualified: true },
+  {
+    scope: "AllNights",
+    shifts: ["night", "night+"],
+    required: 3,
+    preferred: 4,
+    qualified: false,
+  },
+  { scope: "night+", shifts: ["night+"], required: 1, preferred: null, qualified: true },
+];
+
+/** One equation's expected verdict on one day, computed from the roster itself. */
+export interface WardEquationVerdict {
+  units: number;
+  required: number;
+  short: number;
+  over: number;
+  unqualified: number;
+}
+
+/**
+ * Evaluate one Ward equation on one day directly from the assignment matrix.
+ *
+ * This is the INDEPENDENT half of the oracle: it re-derives the backend's own
+ * arithmetic — the qualified numerator, the separate `unqualified_n_people == 0`
+ * exclusion, the lower bound and the `preferredNumPeople` upper bound — from the
+ * roster and the scenario constants above, with no reference to the app's model.
+ */
+export function evaluateWardEquation(
+  requirement: (typeof WARD_REQUIREMENTS)[number],
+  currentMatrix: readonly (readonly string[])[],
+  dateIdx: number,
+): WardEquationVerdict {
+  const seniors = new Set(WARD_SENIOR_STAFF_NURSES);
+  const selected = new Set(requirement.shifts);
+  let units = 0;
+  let unqualified = 0;
+  WARD_EXPECTED.peopleIds.forEach((personId, personIdx) => {
+    const assigned = currentMatrix[personIdx]?.[dateIdx];
+    if (assigned === undefined || !selected.has(assigned)) return;
+    if (requirement.qualified && !seniors.has(personId)) {
+      unqualified += 1;
+      return;
+    }
+    units += 1;
+  });
+  const upper = requirement.preferred ?? requirement.required;
+  return {
+    units,
+    required: requirement.required,
+    short: Math.max(0, requirement.required - units),
+    over: Math.max(0, units - upper),
+    unqualified,
+  };
+}
+
+/** The authored ids on one exact shift for one day, in people-axis order. */
+export function wardPeopleOnShift(
+  currentMatrix: readonly (readonly string[])[],
+  shiftId: string,
+  dateIdx: number,
+): string[] {
+  return WARD_EXPECTED.peopleIds.filter(
+    (_personId, personIdx) => currentMatrix[personIdx]?.[dateIdx] === shiftId,
+  );
+}
+
 /** Inclusive UTC day sequence between two ISO dates. Independent of app code. */
 function isoSequence(startDate: string, endDate: string): string[] {
   const out: string[] = [];

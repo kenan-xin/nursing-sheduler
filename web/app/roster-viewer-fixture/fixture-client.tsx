@@ -23,7 +23,12 @@ import {
 } from "@/lib/optimize";
 import { ROSTER_VIEW_PREFERENCE_KEY } from "@/lib/roster-viewer";
 import { getRosterDb, rosterStorage, WORKING_ROSTER_KEY, type RosterStorage } from "@/lib/store";
-import { fixtureAlternateRosterDocument, fixtureRosterDocument } from "@/lib/roster/test-fixtures";
+import {
+  fixtureAlternateRosterDocument,
+  fixtureCanonicalDocument,
+  fixtureRosterDocument,
+} from "@/lib/roster/test-fixtures";
+import { PREFERENCE_TYPE, type CanonicalPreference } from "@/lib/scenario";
 
 const JOB_A = "opt_fixture_a";
 /** The owner id the seeded submission snapshot is stored under. */
@@ -120,6 +125,116 @@ export default function RosterViewerFixtureClient() {
     setStatus(outcome.status === "promoted" ? "working-seeded" : `failed:${outcome.status}`);
     remount();
   }, []);
+
+  /**
+   * Seed a working roster whose SCENARIO differs from the default fixture's.
+   *
+   * The two controls below need a submission the default fixture cannot express,
+   * and the requirement model is projected from `submission.canonicalYaml` — so
+   * the only honest way to stage these states in a browser is to seed a document
+   * carrying the real YAML. Everything after that is the production path.
+   */
+  const seedWithPreferences = useCallback(
+    async (preferences: CanonicalPreference[], label: string) => {
+      setStatus("seeding");
+      const scenario = fixtureCanonicalDocument();
+      scenario.preferences = preferences;
+      const document = await fixtureRosterDocument({ document: scenario });
+      const epoch = await rosterStorage.getClearEpoch();
+      const outcome = await rosterStorage.promoteDocumentToWorking({
+        document,
+        validate: (value) => ({ ok: true as const, document: value }),
+        expectedWorkingRevision: null,
+        expectedClearEpoch: epoch,
+      });
+      setStatus(outcome.status === "promoted" ? label : `failed:${outcome.status}`);
+      remount();
+    },
+    [],
+  );
+
+  /**
+   * One requirement, scoped to a SINGLE date, asking for more people than the
+   * roster puts on `D` there. Grid, Day and Coverage must show `staffed/required`
+   * on 2026-07-04 and no target at all on the other three days.
+   */
+  const seedScoped = useCallback(
+    () =>
+      seedWithPreferences(
+        [
+          { type: PREFERENCE_TYPE.maxOneShiftPerDay },
+          {
+            type: PREFERENCE_TYPE.shiftTypeRequirement,
+            shiftType: "D",
+            requiredNumPeople: 2,
+            date: "2026-07-04",
+            weight: -1,
+          },
+        ],
+        "scoped-seeded",
+      ),
+    [seedWithPreferences],
+  );
+
+  /**
+   * One satisfiable requirement beside one whose selector cannot be resolved.
+   * The Day dot must fail closed to `unknown` rather than reporting the
+   * satisfied half as health.
+   */
+  const seedMixedUnavailable = useCallback(
+    () =>
+      seedWithPreferences(
+        [
+          { type: PREFERENCE_TYPE.maxOneShiftPerDay },
+          {
+            type: PREFERENCE_TYPE.shiftTypeRequirement,
+            shiftType: "D",
+            requiredNumPeople: 1,
+            date: "ALL",
+            weight: -1,
+          },
+          {
+            type: PREFERENCE_TYPE.shiftTypeRequirement,
+            shiftType: "NoSuchShift",
+            requiredNumPeople: 1,
+            date: "ALL",
+            weight: -1,
+          },
+        ],
+        "mixed-seeded",
+      ),
+    [seedWithPreferences],
+  );
+
+  /**
+   * A satisfiable requirement on every day, beside an unresolvable one scoped to
+   * the FIRST date only. The malformed rule must fail closed on 2026-07-03 and
+   * be `not applicable` — not a warning — on every other date.
+   */
+  const seedScopedUnavailable = useCallback(
+    () =>
+      seedWithPreferences(
+        [
+          { type: PREFERENCE_TYPE.maxOneShiftPerDay },
+          {
+            type: PREFERENCE_TYPE.shiftTypeRequirement,
+            shiftType: "D",
+            requiredNumPeople: 1,
+            date: "ALL",
+            weight: -1,
+          },
+          {
+            type: PREFERENCE_TYPE.shiftTypeRequirement,
+            shiftType: "NoSuchShift",
+            requiredNumPeople: 1,
+            date: "2026-07-03",
+            weight: -1,
+          },
+        ],
+        "scoped-unavailable-seeded",
+      ),
+    [seedWithPreferences],
+  );
 
   const clearAll = useCallback(async () => {
     await rosterStorage.clearRosterData();
@@ -277,6 +392,19 @@ export default function RosterViewerFixtureClient() {
         </Button>
         <Button size="sm" data-testid="fx-seed-working" onClick={() => void seedWorking()}>
           Seed working roster
+        </Button>
+        <Button size="sm" data-testid="fx-seed-scoped" onClick={() => void seedScoped()}>
+          Seed date-scoped requirement
+        </Button>
+        <Button size="sm" data-testid="fx-seed-mixed" onClick={() => void seedMixedUnavailable()}>
+          Seed mixed unavailable
+        </Button>
+        <Button
+          size="sm"
+          data-testid="fx-seed-scoped-unavailable"
+          onClick={() => void seedScopedUnavailable()}
+        >
+          Seed scoped unavailable
         </Button>
         <Button size="sm" data-testid="fx-clear" onClick={() => void clearAll()}>
           Clear

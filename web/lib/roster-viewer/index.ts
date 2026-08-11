@@ -9,12 +9,14 @@
 // The contracts this module enforces (tech plan → Coverage & tallies; core
 // flows → Flow 4):
 //
-//   • COVERAGE IS EXECUTABLE. A shift is `available` iff F3's baseline rule
-//     found exactly one unique simple requirement; zero/multiple/scoped/grouped/
-//     qualified/coefficient cases are `unavailable` and never show a fabricated
-//     number. "Short" = staffed < required. Recomputed live on edits.
-//   • TALLIES ARE INFORMATIONAL. Per-nurse shift-type counts + OFF/leave days.
-//     No red/error semantics, no fairness column, no hours metric.
+//   • COVERAGE HAS TWO PLANES. `requirements` projects the scenario's real
+//     staffing EQUATIONS from the immutable submission, mirroring the backend's
+//     grouping, dates, qualification and coefficients; `coverage` reports who is
+//     actually on each EXACT shift. A group minimum is never divided across its
+//     members, and an exact lane carries a target only where the scenario
+//     declares one for that single shift. Both recompute live on edits.
+//   • TALLIES ARE INFORMATIONAL. Per-nurse shift-type counts, OFF/leave days and
+//     weekend rest. No red/error semantics and no hours metric.
 //   • PROVENANCE IS FROZEN. Solver status + score are labeled "as solved" and
 //     never recomputed after edits. "edited since solve" is derived from the
 //     overlay, never independently mutable.
@@ -28,17 +30,43 @@ export { SHIFT_RAMP, assignShiftRamp, type ShiftRampEntry } from "./shift-ramp";
 
 export {
   computeCoverage,
-  dayHealth,
-  summariseCoverage,
+  uniformShiftRequirement,
   type CoverageGrid,
-  type CoverageSummary,
   type DayCoverage,
   type ShiftCoverage,
 } from "./coverage";
 
+export {
+  buildAssignmentIndex,
+  buildEquations,
+  computeRequirementGrid,
+  deriveRequirementModel,
+  evaluateRequirementCell,
+  exactShiftRequirement,
+  requirementDayHealth,
+  summariseRequirements,
+  type RequirementCell,
+  type RequirementEquation,
+  type RequirementGrid,
+  type RequirementHealth,
+  type RequirementModel,
+  type RequirementSummary,
+  type RosterAssignmentIndex,
+} from "./requirements";
+
 export { computeTallies, type NurseTally, type Tallies } from "./tallies";
 
-export { dateLabel, dateTitle, isNewMonth, isNewYear, rosterSpanTitle } from "./date-span";
+export {
+  dateLabel,
+  dateTitle,
+  dayOfMonth,
+  isNewMonth,
+  isNewYear,
+  monthLabel,
+  rosterSpanTitle,
+} from "./date-span";
+
+export { shiftContextLabel, shiftTimeRange } from "./shift-label";
 
 export { buildProvenanceView, type ProvenanceView } from "./provenance";
 

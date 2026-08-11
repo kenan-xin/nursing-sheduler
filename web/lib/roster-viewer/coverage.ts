@@ -1,176 +1,103 @@
-// Coverage warnings (F4) — the executable baseline predicate.
+// The Exact shifts plane (F4, rewritten for G7).
 //
-// The ONLY warnings in v1 are per-day, per-shift staffed-count-vs-minimum. The
-// baseline is decided by F3's `context.baselineMinimums`, which already encodes
-// the unique-simple-requirement rule from the tech plan: a shift with exactly
-// one unscoped, uncoefficiented, scalar-ALL requirement is `available`; zero or
-// many qualifying requirements are `unavailable`.
+// One lane per concrete shift type: who is on it each day, how many that is,
+// and — only where the scenario actually declares one — the target for that exact
+// shift. Ward 8 declares staffing for shift GROUPS, so most of its lanes
+// truthfully carry a headcount and no target at all. That is not a gap to be
+// filled: dividing `AllMornings: 6` across `am1/am2/am3` would report a shift as
+// short against a number the scenario never stated.
 //
-// This module CONSUMES that derivation and computes live coverage from the
-// current (possibly edited) day grid. It never re-derives the baseline and never
-// fabricates a number for an `unavailable` shift — that is the load-bearing
-// contract from Core Flows Flow 4 and the F4 ticket.
-//
-// "Short" = staffed < required. Overstaffing is not flagged. No night→morning
-// rest, no fairness, no hours-on-160h, no role/seniority — all deliberately out.
+// ONE TARGET AUTHORITY. The required value comes from the ephemeral requirement
+// model's `exactShiftRequirement` rule and nowhere else. The persisted
+// `context.baselineMinimums` cache is left exactly as F3 writes it (the roster
+// schema is unchanged) but is no longer read by presentation, so there is one
+// derivation of "does this exact shift have a declared target", not two that can
+// drift apart.
 
-import { typedIdKey } from "@/lib/roster";
-import type {
-  RosterBaselineMinimum,
-  RosterCalendarDay,
-  RosterContext,
-  RosterDayGrid,
-  RosterDayState,
-} from "@/lib/roster";
+import type { RosterCalendarDay, RosterContext, RosterDayState } from "@/lib/roster";
+import {
+  exactShiftRequirement,
+  type RequirementModel,
+  type RosterAssignmentIndex,
+} from "./requirements";
 
-/**
- * One shift's coverage for one day.
- *
- * `available` carries a live count and the Short flag; `unavailable` carries no
- * number at all, because inventing one would contradict the baseline rule.
- */
-export type ShiftCoverage =
-  | { status: "available"; staffed: number; required: number; short: boolean }
-  | { status: "unavailable" };
-
-/** One day's coverage across every worked shift lane. */
-export interface DayCoverage {
-  /** ISO date string, for labelling and the Day strip. */
-  iso: string;
-  /** One entry per `context.shiftTypes` item, in the same order. */
-  shifts: readonly ShiftCoverage[];
-  /** Whether ANY available shift on this day is Short. */
-  anyShort: boolean;
+/** One concrete shift's staffing on one day. */
+export interface ShiftCoverage {
+  /** The people on this shift, as person-axis indices in ascending order. */
+  readonly people: readonly number[];
+  /** How many people are on it. Always a real, stated number. */
+  readonly staffed: number;
+  /**
+   * The declared target for THIS exact shift, or null when the scenario states
+   * none. Null is not "zero" and not "fine" — it means no per-shift claim exists.
+   */
+  readonly required: number | null;
+  /** Under a declared exact-shift target. Always false when `required` is null. */
+  readonly short: boolean;
 }
 
-/** The full coverage grid: one `DayCoverage` per calendar day. */
+/** One day's exact-shift lanes, aligned to `context.shiftTypes`. */
+export interface DayCoverage {
+  readonly iso: string;
+  readonly shifts: readonly ShiftCoverage[];
+  /** Whether any exact-shift lane with a declared target is under it. */
+  readonly anyShort: boolean;
+}
+
+/** The full exact-shift plane: one `DayCoverage` per calendar day. */
 export type CoverageGrid = readonly DayCoverage[];
 
 /**
- * Count how many people are working a given shift on a given day.
+ * Compute the exact-shift plane from the current assignments.
  *
- * `day` is the per-person column for one date index: `currentDays[personIdx]` is
- * that person's row, and `day[personIdx]` is their assignment for this date. A
- * worked shift counts if the day-state is `shift` with exactly this `shiftId`.
+ * Pure: the caller passes an index built from `deriveCurrentDays(...)`, so an
+ * edit recomputes both planes in the same render.
  */
-function countStaffed(grid: RosterDayGrid, dateIdx: number, shiftKey: string): number {
-  let count = 0;
-  for (let personIdx = 0; personIdx < grid.length; personIdx++) {
-    const cell = grid[personIdx][dateIdx];
-    if (cell.kind === "shift" && typedIdKey(cell.shiftId) === shiftKey) count++;
-  }
-  return count;
-}
-
-/**
- * Compute the live coverage grid from the current assignments and the derived
- * baseline minimums.
- *
- * Recomputed on every edit by the caller (this is a pure function); the viewer
- * passes `deriveCurrentDays(solvedDays, edits)` so edits are reflected
- * immediately.
- */
-export function computeCoverage(context: RosterContext, currentDays: RosterDayGrid): CoverageGrid {
-  const calendar = context.calendar;
-  const minimums = context.baselineMinimums;
-
-  return calendar.map((day, dateIdx) => {
-    const shifts: ShiftCoverage[] = minimums.map((minimum) => {
-      if ("unavailable" in minimum) return { status: "unavailable" as const };
-      const shiftKey = typedIdKey(minimum.shiftId);
-      const staffed = countStaffed(currentDays, dateIdx, shiftKey);
+export function computeCoverage(
+  context: RosterContext,
+  index: RosterAssignmentIndex,
+  model: RequirementModel,
+): CoverageGrid {
+  return context.calendar.map((day, dateIdx) => {
+    const lane = index.byDateShift[dateIdx] ?? [];
+    const shifts = context.shiftTypes.map((_shift, shiftIdx): ShiftCoverage => {
+      const people = lane[shiftIdx] ?? [];
+      // PER DAY, not once per shift. A requirement may be scoped to particular
+      // dates, so the same lane can legitimately carry a target on one date and
+      // none on the next; resolving it once and copying it across the calendar
+      // both invented a target off-scope and deleted one on-scope.
+      const target = exactShiftRequirement(model, shiftIdx, dateIdx);
       return {
-        status: "available" as const,
-        staffed,
-        required: minimum.required,
-        short: staffed < minimum.required,
+        people,
+        staffed: people.length,
+        required: target,
+        short: target !== null && people.length < target,
       };
     });
     return {
       iso: day.iso,
       shifts,
-      anyShort: shifts.some((shift) => shift.status === "available" && shift.short),
+      anyShort: shifts.some((shift) => shift.short),
     };
   });
 }
 
 /**
- * A roster-level summary of coverage.
+ * The target for a shift's LANE LABEL, where one number has to stand for the
+ * whole row.
  *
- * UNKNOWN IS NOT GOOD NEWS. An `unavailable` lane means the baseline predicate
- * found nothing it could check — it is the absence of evidence, not evidence of
- * sufficiency. So the summary counts unavailable slots explicitly and the
- * "everything is fine" claim is scoped to what was actually checkable, with a
- * separate flag for whether anything was checkable at all.
+ * Only a target every day agrees on can be stated there. A date-scoped
+ * requirement makes the row's target vary, and printing any one day's number as
+ * the lane's `min N` would state a quota the other days do not have — so the
+ * label falls back to the shift's own context and the per-day cells carry the
+ * truth.
  */
-export interface CoverageSummary {
-  /** How many (shift, day) slots are staffed below their minimum. */
-  underMinimum: number;
-  /** How many (shift, day) slots have a usable baseline (available). */
-  totalAvailable: number;
-  /** How many (shift, day) slots have NO usable baseline. */
-  totalUnavailable: number;
-  /**
-   * Whether every CHECKABLE slot is staffed at or above minimum.
-   *
-   * False when nothing is checkable: with no baseline at all there is no claim
-   * to make, and `true` here would be read as an all-clear. Callers that need to
-   * distinguish "nothing short" from "nothing checked" read `anyCheckable`.
-   */
-  allCheckableStaffed: boolean;
-  /** Whether ANY slot had a usable baseline. False = nothing was verifiable. */
-  anyCheckable: boolean;
+export function uniformShiftRequirement(coverage: CoverageGrid, shiftIdx: number): number | null {
+  if (coverage.length === 0) return null;
+  const first = coverage[0].shifts[shiftIdx]?.required ?? null;
+  if (first === null) return null;
+  return coverage.every((day) => day.shifts[shiftIdx]?.required === first) ? first : null;
 }
 
-/** Summarise a coverage grid into a single roster-level statement. */
-export function summariseCoverage(grid: CoverageGrid): CoverageSummary {
-  let underMinimum = 0;
-  let totalAvailable = 0;
-  let totalUnavailable = 0;
-  for (const day of grid) {
-    for (const shift of day.shifts) {
-      if (shift.status !== "available") {
-        totalUnavailable++;
-        continue;
-      }
-      totalAvailable++;
-      if (shift.short) underMinimum++;
-    }
-  }
-  return {
-    underMinimum,
-    totalAvailable,
-    totalUnavailable,
-    anyCheckable: totalAvailable > 0,
-    allCheckableStaffed: totalAvailable > 0 && underMinimum === 0,
-  };
-}
-
-/**
- * The worst coverage state for one day, for the Day-strip health dot.
- *
- * `under` = at least one available shift is Short; `at` = none Short but at
- * least one exactly at minimum; `ok` = every checkable shift is above minimum;
- * `unknown` = NOTHING on this day was checkable.
- *
- * `unknown` exists because the previous collapse of "no baseline" into `ok`
- * painted a green dot over a day the predicate never evaluated — a positive
- * staffing claim with nothing behind it. A day with a mix of checkable and
- * unavailable lanes still reports on what it could check; only a day with no
- * checkable lane at all is `unknown`.
- */
-export function dayHealth(day: DayCoverage): "under" | "at" | "ok" | "unknown" {
-  let hasAt = false;
-  let checkable = 0;
-  for (const shift of day.shifts) {
-    if (shift.status !== "available") continue;
-    checkable++;
-    if (shift.short) return "under";
-    if (shift.staffed === shift.required) hasAt = true;
-  }
-  if (checkable === 0) return "unknown";
-  return hasAt ? "at" : "ok";
-}
-
-/** Re-exported so coverage consumers can read a baseline without reaching into F3. */
-export type { RosterBaselineMinimum, RosterCalendarDay, RosterDayState };
+/** Re-exported so coverage consumers can read a calendar day without reaching into F3. */
+export type { RosterCalendarDay, RosterDayState };

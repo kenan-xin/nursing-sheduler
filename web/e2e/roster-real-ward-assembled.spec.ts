@@ -49,15 +49,19 @@ import {
   judgeReplacement,
   judgeWardDocument,
   judgeWardWorkbook,
+  evaluateWardEquation,
   readWardDocumentFacts,
   readWardDocumentMatrices,
   readWardWorkbook,
+  wardPeopleOnShift,
   STORAGE_KEYS,
   wardDocumentDigest,
   WARD_BOUNDS,
   WARD_EXPECTED,
   WARD_EXPECTED_CALENDAR,
   WARD_EXPECTED_CELL_COUNT,
+  WARD_REQUIREMENTS,
+  WARD_SENIOR_STAFF_NURSES,
   WARD_SOLVER_TIMEOUT_SECONDS,
   WARD_TEST_TIMEOUT,
   WARD_YAML_PATH,
@@ -321,6 +325,24 @@ async function readCellState(page: Page, cellIndex: number): Promise<string> {
     .getAttribute("aria-label");
   if (label === null) throw new Error(`roster cell ${cellIndex} rendered no chip`);
   return label;
+}
+
+/**
+ * Choose a value in the open edit bar.
+ *
+ * OFF and Leave are day-STATES and stay explicit quick buttons; every worked
+ * shift goes through the searchable chooser. At Ward scale that is the whole
+ * point: sixteen authored shifts plus two day-states was eighteen
+ * undifferentiated monospace values on screen at once, several of them one
+ * character apart.
+ */
+async function chooseEditOption(page: Page, label: string, timeout: number): Promise<void> {
+  if (label === "OFF" || label === "LV") {
+    await page.getByTestId(`roster-edit-option-${label}`).click({ timeout });
+    return;
+  }
+  await page.getByTestId("roster-shift-picker").click({ timeout });
+  await page.getByTestId(`roster-shift-option-${label}`).click({ timeout });
 }
 
 /** Open the edit bar on one grid cell. */
@@ -725,6 +747,51 @@ test.describe("G5 assembled real Ward 8 roster journey", () => {
       // no Load control was clicked, and none is presented.
       await expect(page.getByTestId("roster-candidate-available")).toHaveCount(0);
       await expect(page.getByTestId("roster-section-empty")).toHaveCount(0);
+
+      // ONE roster heading. The loaded state used to add a second display-size
+      // "Review the roster" under the route's own header, implying two levels
+      // that do not exist and pushing the roster itself down the page.
+      await expect(page.getByTestId("screen").locator("h1")).toHaveCount(1);
+      await expect(page.getByTestId("roster-section")).not.toContainText("Review the roster");
+    });
+
+    // -------------------------------------------------------------------
+    // 4b. The same roster at phone width: one heading, every document action
+    //     still reachable, and no page-level horizontal overflow.
+    // -------------------------------------------------------------------
+    await test.step("at 390px the roster keeps one heading and all its document actions", async () => {
+      await page.setViewportSize({ width: 390, height: 844 });
+      await expect(page.getByTestId("roster-viewer")).toBeVisible({
+        timeout: WARD_BOUNDS.rosterLoaded,
+      });
+      await expect(page.getByTestId("screen").locator("h1")).toHaveCount(1);
+
+      // Export XLSX stays visible; the three file actions are one labelled
+      // control — grouped, never removed, and Clear still confirmed.
+      await expect(page.getByTestId("roster-export-xlsx")).toBeVisible();
+      const fileMenu = page.getByTestId("roster-file-menu");
+      await expect(fileMenu).toBeVisible();
+      await fileMenu.click();
+      await expect(page.getByTestId("roster-export-file")).toBeVisible();
+      await expect(page.getByTestId("roster-import")).toBeVisible();
+      await expect(page.getByTestId("roster-clear")).toBeVisible();
+      await page.keyboard.press("Escape");
+
+      // Sixteen legend keys at phone width scroll themselves, not the document.
+      for (const lens of ["grid", "coverage", "day"]) {
+        await page.getByTestId(`roster-lens-${lens}`).click();
+        await expect(page.getByTestId("roster-viewer")).toBeVisible();
+        expect(
+          await page.evaluate(
+            () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+          ),
+          `the page overflows horizontally in the ${lens} lens at 390px`,
+        ).toBe(false);
+      }
+
+      await page.setViewportSize({ width: 1400, height: 900 });
+      await page.getByTestId("roster-lens-grid").click();
+      await expect(page.getByTestId("roster-grid")).toBeVisible();
     });
 
     // -------------------------------------------------------------------
@@ -757,33 +824,100 @@ test.describe("G5 assembled real Ward 8 roster journey", () => {
 
       // COVERAGE AS THIS SCENARIO DEFINES IT — which is not per shift type.
       //
-      // Ward 8 sets staffing for a PART OF THE DAY: every headcount requirement is
-      // scoped to a shift-type GROUP (`AllMornings`, `AllNights`, ...), and the two
-      // that do name a single pattern (`long+`, `night+`) are scoped to
-      // `qualifiedPeople: [SeniorStaffNurses]`. `buildBaselineMinimums` excludes
-      // both shapes by design — a group requirement is one aggregate equation
-      // across its members, and a qualification-scoped one counts only qualified
-      // people — so neither is a per-shift headcount minimum.
+      // Ward 8 sets staffing for a PART OF THE DAY: six of its eight requirements
+      // are scoped to a shift-type GROUP (`AllMornings`, `AllNights`, ...), and the
+      // two that name a single pattern (`long+`, `night+`) are scoped to
+      // `qualifiedPeople: [SeniorStaffNurses]`. Neither shape is a per-shift
+      // headcount, so the lens states the equations the scenario actually wrote,
+      // and separately states who is on each concrete shift.
       //
-      // So the honest answer here is that there is no baseline to check against,
-      // and the summary says exactly that instead of claiming an all-clear it
-      // cannot support. Asserting the EXACT string is the discriminating half: if
-      // the derivation ever started inventing per-shift minimums out of group
-      // requirements, this fails and the claim gets re-examined rather than
-      // silently widening.
-      await expect(page.getByTestId("roster-coverage-summary")).toHaveText("Coverage unavailable");
+      // THE CLAIM THIS REPLACES: the lens used to render `Coverage unavailable`
+      // for this entire ward — honest, and useless.
+      await expect(page.getByTestId("roster-coverage-summary")).not.toHaveText(
+        "Coverage unavailable",
+      );
 
       await page.getByTestId("roster-lens-coverage").click({ timeout: bound });
-      const coverage = page
-        .getByTestId("roster-coverage-wide")
-        .or(page.getByTestId("roster-coverage-stacked"));
-      await expect(coverage).toBeVisible({ timeout: bound });
-      // The lens still renders the real document: one lane per Ward 8 pattern.
-      for (const shiftId of WARD_EXPECTED.shiftTypeIds) {
-        await expect(coverage.getByText(shiftId, { exact: true }).first()).toBeVisible({
-          timeout: bound,
-        });
+      await expect(page.getByTestId("roster-coverage-declared")).toBeVisible({ timeout: bound });
+      await expect(page.getByTestId("roster-coverage-exact")).toBeVisible({ timeout: bound });
+
+      // THE FULL ORACLE. Every one of the 16 x 28 exact-shift cells, and every one
+      // of the eight declared equations on every day, compared against the stored
+      // current document and the scenario's own arithmetic.
+      const currentMatrix = readWardDocumentMatrices(
+        JSON.parse(afterFirstRun.working!.documentJson),
+      ).current;
+
+      const exactRows = await page.getByTestId("roster-exact-shift-row").evaluateAll((rows) =>
+        rows.map((row) => ({
+          shift: row.getAttribute("data-shift") ?? "",
+          days: [...row.querySelectorAll("[data-staffed]")].map((cell) => ({
+            staffed: Number(cell.getAttribute("data-staffed")),
+            people: cell.getAttribute("data-people") ?? "",
+            short: cell.getAttribute("data-short") === "true",
+          })),
+        })),
+      );
+      // Each concrete shift appears ONCE, even though several feed more than one
+      // declared equation.
+      expect(exactRows.map((row) => row.shift)).toEqual([...WARD_EXPECTED.shiftTypeIds]);
+      for (const row of exactRows) {
+        expect(row.days).toHaveLength(WARD_EXPECTED.dayCount);
+        for (let dateIdx = 0; dateIdx < WARD_EXPECTED.dayCount; dateIdx += 1) {
+          const expectedPeople = wardPeopleOnShift(currentMatrix, row.shift, dateIdx);
+          expect(
+            row.days[dateIdx],
+            `exact shift ${row.shift} on ${WARD_EXPECTED_CALENDAR[dateIdx]}`,
+          ).toEqual({
+            staffed: expectedPeople.length,
+            people: expectedPeople.join(","),
+            // NO INVENTED QUOTA: not one Ward shift declares a per-shift target,
+            // so not one exact lane may ever read Short.
+            short: false,
+          });
+        }
       }
+
+      const declaredRows = await page.getByTestId("roster-requirement-row").evaluateAll((rows) =>
+        rows.map((row) => ({
+          scope: row.getAttribute("data-scope") ?? "",
+          days: [...row.querySelectorAll("[data-status]")].map((cell) => ({
+            status: cell.getAttribute("data-status") ?? "",
+            mismatch: cell.getAttribute("data-mismatch") === "true",
+            units: Number(cell.getAttribute("data-units")),
+            required: Number(cell.getAttribute("data-required")),
+            short: Number(cell.getAttribute("data-shortfall")),
+            over: Number(cell.getAttribute("data-over")),
+            unqualified: Number(cell.getAttribute("data-unqualified")),
+          })),
+        })),
+      );
+      expect(declaredRows.map((row) => row.scope)).toEqual(
+        WARD_REQUIREMENTS.map((requirement) => requirement.scope),
+      );
+      WARD_REQUIREMENTS.forEach((requirement, index) => {
+        const row = declaredRows[index];
+        expect(row.days).toHaveLength(WARD_EXPECTED.dayCount);
+        for (let dateIdx = 0; dateIdx < WARD_EXPECTED.dayCount; dateIdx += 1) {
+          const verdict = evaluateWardEquation(requirement, currentMatrix, dateIdx);
+          expect(
+            row.days[dateIdx],
+            `${requirement.scope} on ${WARD_EXPECTED_CALENDAR[dateIdx]}`,
+          ).toEqual({
+            status: "checked",
+            mismatch: verdict.short > 0 || verdict.over > 0 || verdict.unqualified > 0,
+            units: verdict.units,
+            required: verdict.required,
+            short: verdict.short,
+            over: verdict.over,
+            unqualified: verdict.unqualified,
+          });
+        }
+      });
+      // A solved Ward roster satisfies every hard constraint, so the error
+      // treatment must appear NOWHERE before the mutation below deliberately
+      // creates a shortage. That is what makes the red-state proof non-vacuous.
+      await expect(page.getByTestId("roster-requirement-mismatch")).toHaveCount(0);
 
       await page.getByTestId("roster-lens-day").click({ timeout: bound });
       await expect(page.getByTestId("roster-day")).toBeVisible({ timeout: bound });
@@ -797,6 +931,233 @@ test.describe("G5 assembled real Ward 8 roster journey", () => {
 
       await page.getByTestId("roster-lens-grid").click({ timeout: bound });
       await expect(grid).toBeVisible({ timeout: bound });
+
+      // The Grid keys all sixteen authored patterns with their own cell colour
+      // and hours, plus the two day-states, and never invents a category.
+      const legendShifts = await page
+        .getByTestId("roster-grid-legend-item")
+        .evaluateAll((items) => items.map((item) => item.getAttribute("data-shift") ?? ""));
+      expect(legendShifts).toEqual([...WARD_EXPECTED.shiftTypeIds, "LV", "OFF"]);
+      const legend = page.getByTestId("roster-grid-legend");
+      for (const category of ["Morning", "Evening", "Night", "Long day"]) {
+        await expect(legend).not.toContainText(category);
+      }
+      await expect(page.getByTestId("roster-grid-span")).toHaveText(
+        `${WARD_EXPECTED.startDate} → ${WARD_EXPECTED.endDate}`,
+      );
+      await expect(page.getByTestId("roster-grid-guidance")).toHaveText(
+        "Select a cell to change · drag to swap",
+      );
+      // The legend scrolls itself; the document never scrolls sideways for it.
+      expect(
+        await legend.evaluate((el) => getComputedStyle(el).overflowX),
+        "the Ward-scale legend owns its own overflow",
+      ).toBe("auto");
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+        ),
+        "sixteen Ward legend keys pushed the document sideways",
+      ).toBe(false);
+    });
+
+    // -------------------------------------------------------------------
+    // 5b. THE DETERMINISTIC RED-STATE PROOF.
+    //
+    // A generic "edit a cell and look for red" is vacuous on this ward: the
+    // broad `6..7` targets absorb most single edits, so the assertion can pass
+    // with nothing red anywhere. This picks a day whose `MorningSeniorSlots`
+    // has exactly one qualified assignee AND whose `AllMornings` sits at the
+    // preferred 7, then removes that one senior. Exactly one equation must go
+    // red, `AllMornings` must remain satisfied at its floor, and Undo must put
+    // both planes back.
+    // -------------------------------------------------------------------
+    await test.step("removing the one morning senior turns exactly that equation red", async () => {
+      const bound = WARD_BOUNDS.editAndSave;
+      const matrix = readWardDocumentMatrices(
+        JSON.parse(afterFirstRun.working!.documentJson),
+      ).current;
+      const seniorSlots = WARD_REQUIREMENTS.find(
+        (requirement) => requirement.scope === "MorningSeniorSlots",
+      )!;
+      const allMornings = WARD_REQUIREMENTS.find(
+        (requirement) => requirement.scope === "AllMornings",
+      )!;
+
+      // The pre-state is asserted, not assumed: without a day that actually
+      // matches, the proof below would be about some other roster.
+      let target: { dateIdx: number; personIdx: number; personId: string; shift: string } | null =
+        null;
+      for (let dateIdx = 0; dateIdx < WARD_EXPECTED.dayCount; dateIdx += 1) {
+        const senior = evaluateWardEquation(seniorSlots, matrix, dateIdx);
+        const mornings = evaluateWardEquation(allMornings, matrix, dateIdx);
+        if (senior.units !== 1 || senior.unqualified !== 0) continue;
+        if (mornings.units !== 7) continue;
+        const personIdx = WARD_EXPECTED.peopleIds.findIndex(
+          (personId, index) =>
+            WARD_SENIOR_STAFF_NURSES.includes(personId) &&
+            seniorSlots.shifts.includes(matrix[index]?.[dateIdx] ?? ""),
+        );
+        if (personIdx < 0) continue;
+        target = {
+          dateIdx,
+          personIdx,
+          personId: WARD_EXPECTED.peopleIds[personIdx],
+          shift: matrix[personIdx][dateIdx],
+        };
+        break;
+      }
+      expect(
+        target,
+        "no Ward day has one morning senior and a 7-strong morning to mutate",
+      ).not.toBeNull();
+      const { dateIdx, personIdx, personId, shift } = target!;
+
+      await page.getByTestId("roster-lens-coverage").click({ timeout: bound });
+      const seniorCell = page
+        .locator('[data-testid="roster-requirement-row"][data-scope="MorningSeniorSlots"]')
+        .locator("[data-status]")
+        .nth(dateIdx);
+      const morningCell = page
+        .locator('[data-testid="roster-requirement-row"][data-scope="AllMornings"]')
+        .locator("[data-status]")
+        .nth(dateIdx);
+      const plusLane = page
+        .locator(`[data-testid="roster-exact-shift-row"][data-shift="${shift}"]`)
+        .locator("[data-staffed]")
+        .nth(dateIdx);
+
+      // PRE-STATE, accepted explicitly.
+      await expect(seniorCell).toHaveAttribute("data-units", "1");
+      await expect(seniorCell).toHaveAttribute("data-mismatch", "false");
+      await expect(morningCell).toHaveAttribute("data-units", "7");
+      await expect(plusLane).toContainText(personId);
+
+      // THE MUTATION, through the real UI.
+      await page.getByTestId("roster-lens-grid").click({ timeout: bound });
+      await selectCell(page, personIdx * WARD_EXPECTED.dayCount + dateIdx, bound);
+      await chooseEditOption(page, "OFF", bound);
+      await expect(page.getByTestId("roster-save-saved")).toBeVisible({ timeout: bound });
+
+      await page.getByTestId("roster-lens-coverage").click({ timeout: bound });
+      // The exact `+` lane lost that authored id...
+      await expect(plusLane).not.toContainText(personId);
+      // ...the senior equation is Short 1 in the error treatment...
+      await expect(seniorCell).toHaveAttribute("data-units", "0");
+      await expect(seniorCell).toHaveAttribute("data-shortfall", "1");
+      await expect(seniorCell).toHaveAttribute("data-mismatch", "true");
+      await expect(seniorCell.getByTestId("roster-requirement-mismatch")).toHaveText("Short 1");
+      // ...the broad morning is still satisfied at its floor...
+      await expect(morningCell).toHaveAttribute("data-units", "6");
+      await expect(morningCell).toHaveAttribute("data-required", "6");
+      await expect(morningCell).toHaveAttribute("data-mismatch", "false");
+      // ...and NOTHING else went red.
+      await expect(page.getByTestId("roster-requirement-mismatch")).toHaveCount(1);
+
+      // UNDO restores the exact person and clears the shortage on both planes.
+      await page.getByTestId("roster-undo").click({ timeout: bound });
+      await expect(page.getByTestId("roster-requirement-mismatch")).toHaveCount(0);
+      await expect(seniorCell).toHaveAttribute("data-units", "1");
+      await expect(morningCell).toHaveAttribute("data-units", "7");
+      await expect(plusLane).toContainText(personId);
+      await expect(page.getByTestId("roster-undo")).toBeDisabled({ timeout: bound });
+      await page.getByTestId("roster-lens-grid").click({ timeout: bound });
+    });
+
+    // -------------------------------------------------------------------
+    // 5c. THE QUALIFICATION BRANCH, driven on its own.
+    //
+    // The backend adds `unqualified_n_people == 0` per selected shift, SEPARATELY
+    // from the staffing sum — so a qualified row can read a satisfied `1/1` and
+    // still be violated. Proving that needs its own controlled mutation: the
+    // shortage proof above would happily pass with the exclusion unimplemented.
+    // -------------------------------------------------------------------
+    await test.step("an ordinary nurse in a senior-only slot is Unqualified even at 1 of 1", async () => {
+      const bound = WARD_BOUNDS.editAndSave;
+      const matrix = readWardDocumentMatrices(
+        JSON.parse(afterFirstRun.working!.documentJson),
+      ).current;
+      const seniorSlots = WARD_REQUIREMENTS.find(
+        (requirement) => requirement.scope === "MorningSeniorSlots",
+      )!;
+      const allMornings = WARD_REQUIREMENTS.find(
+        (requirement) => requirement.scope === "AllMornings",
+      )!;
+
+      // A SWAP, not an addition. Moving an ordinary nurse from a plain morning
+      // onto its senior-only twin leaves `AllMornings` numerically untouched
+      // (both are members of the group) while putting an unqualified person on a
+      // `MorningSeniorSlots` shift. That isolates the qualification verdict as
+      // the only thing that can change — and, unlike adding a nurse, it does not
+      // depend on the morning having spare headroom, which this solver never
+      // leaves: the -100000 weight pins every morning to the preferred 7.
+      const PLAIN_MORNINGS = ["am1", "am2", "am3"] as const;
+      let target: {
+        dateIdx: number;
+        personIdx: number;
+        personId: string;
+        from: string;
+        to: string;
+      } | null = null;
+      for (let dateIdx = 0; dateIdx < WARD_EXPECTED.dayCount && target === null; dateIdx += 1) {
+        const senior = evaluateWardEquation(seniorSlots, matrix, dateIdx);
+        if (senior.units !== 1 || senior.unqualified !== 0) continue;
+        for (let personIdx = 0; personIdx < WARD_EXPECTED.peopleIds.length; personIdx += 1) {
+          const personId = WARD_EXPECTED.peopleIds[personIdx];
+          if (WARD_SENIOR_STAFF_NURSES.includes(personId)) continue;
+          const assigned = matrix[personIdx]?.[dateIdx] ?? "";
+          if (!PLAIN_MORNINGS.includes(assigned as (typeof PLAIN_MORNINGS)[number])) continue;
+          target = { dateIdx, personIdx, personId, from: assigned, to: `${assigned}+` };
+          break;
+        }
+      }
+      expect(
+        target,
+        "no Ward day has an ordinary nurse on a plain morning to promote into its senior twin",
+      ).not.toBeNull();
+      const { dateIdx, personIdx, personId, to } = target!;
+      expect(seniorSlots.shifts, `${to} is a MorningSeniorSlots member`).toContain(to);
+
+      const morningsBefore = evaluateWardEquation(allMornings, matrix, dateIdx).units;
+
+      await selectCell(page, personIdx * WARD_EXPECTED.dayCount + dateIdx, bound);
+      await chooseEditOption(page, to, bound);
+      await expect(page.getByTestId("roster-save-saved")).toBeVisible({ timeout: bound });
+
+      await page.getByTestId("roster-lens-coverage").click({ timeout: bound });
+      const seniorCell = page
+        .locator('[data-testid="roster-requirement-row"][data-scope="MorningSeniorSlots"]')
+        .locator("[data-status]")
+        .nth(dateIdx);
+      const morningCell = page
+        .locator('[data-testid="roster-requirement-row"][data-scope="AllMornings"]')
+        .locator("[data-status]")
+        .nth(dateIdx);
+
+      // THE POINT: the numerator is still met, and the row is still red.
+      await expect(seniorCell).toHaveAttribute("data-units", "1");
+      await expect(seniorCell).toHaveAttribute("data-shortfall", "0");
+      await expect(seniorCell).toHaveAttribute("data-unqualified", "1");
+      await expect(seniorCell).toHaveAttribute("data-mismatch", "true");
+      await expect(seniorCell.getByTestId("roster-requirement-mismatch")).toHaveText(
+        "Unqualified 1",
+      );
+      // The broad morning is numerically untouched and stays satisfied — which
+      // is what makes the red state above attributable to qualification alone.
+      await expect(morningCell).toHaveAttribute("data-units", String(morningsBefore));
+      await expect(morningCell).toHaveAttribute("data-mismatch", "false");
+      // The invalid assignment is SHOWN, not hidden.
+      await expect(
+        page
+          .locator(`[data-testid="roster-exact-shift-row"][data-shift="${to}"]`)
+          .locator("[data-staffed]")
+          .nth(dateIdx),
+      ).toContainText(personId);
+      await expect(page.getByTestId("roster-requirement-mismatch")).toHaveCount(1);
+
+      await page.getByTestId("roster-undo").click({ timeout: bound });
+      await expect(page.getByTestId("roster-requirement-mismatch")).toHaveCount(0);
+      await page.getByTestId("roster-lens-grid").click({ timeout: bound });
     });
 
     // -------------------------------------------------------------------
@@ -817,11 +1178,22 @@ test.describe("G5 assembled real Ward 8 roster journey", () => {
         .getByTestId("roster-edit-bar")
         .locator("button[data-testid^=roster-edit-option-]")
         .allTextContents();
-      expect(options.map((label) => label.trim()).sort()).toEqual(
-        [...WARD_EXPECTED.shiftTypeIds, "OFF", "LV"].sort(),
-      );
+      expect(options.map((label) => label.trim()).sort()).toEqual(["LV", "OFF"]);
 
-      await page.getByTestId(`roster-edit-option-${editedOption}`).click({ timeout: bound });
+      // ...and every worked shift is in the chooser, each labelled with its hours
+      // so `am1` and `am1+` are told apart by more than one character.
+      await page.getByTestId("roster-shift-picker").click({ timeout: bound });
+      for (const shiftId of WARD_EXPECTED.shiftTypeIds) {
+        await expect(page.getByTestId(`roster-shift-option-${shiftId}`)).toContainText(
+          /\d{2}:\d{2}/,
+          {
+            timeout: bound,
+          },
+        );
+      }
+      await page.keyboard.press("Escape");
+
+      await chooseEditOption(page, editedOption, bound);
       await expect.poll(() => readCellState(page, 0), { timeout: bound }).toBe(editedState);
       await expect(page.getByTestId("roster-save-saved")).toBeVisible({ timeout: bound });
       await expect(page.getByTestId("roster-provenance")).toContainText("edited since solve");
@@ -842,7 +1214,7 @@ test.describe("G5 assembled real Ward 8 roster journey", () => {
       const secondOption = editedState === "Off" ? WARD_EXPECTED.shiftTypeIds[1] : "OFF";
       const secondState = secondOption === "OFF" ? "Off" : secondOption;
       await selectCell(page, 0, bound);
-      await page.getByTestId(`roster-edit-option-${secondOption}`).click({ timeout: bound });
+      await chooseEditOption(page, secondOption, bound);
       await expect.poll(() => readCellState(page, 0), { timeout: bound }).toBe(secondState);
 
       const undo = page.getByTestId("roster-undo");
