@@ -177,7 +177,7 @@ export function RosterGrid({
                   title={dateTitle(day)}
                   className={cn(
                     "sticky top-0 z-[3] border-b-[2px] border-line text-center",
-                    columnBackground(day),
+                    headerColumnBackground(day),
                     dateIdx > 0 && isNewMonth(calendar, dateIdx) && "border-l border-l-line",
                   )}
                   style={{ minWidth: 40, padding: "8px 4px" }}
@@ -639,6 +639,12 @@ function columnBackground(day: RosterCalendarDay): string {
   if (day.holiday) return HOLIDAY_STRIPE;
   if (day.weekend) return "bg-panel";
   return "bg-transparent";
+}
+
+function headerColumnBackground(day: RosterCalendarDay): string {
+  if (day.holiday) return HOLIDAY_STRIPE;
+  if (day.weekend) return "bg-panel";
+  return "bg-surface";
 }
 
 /**

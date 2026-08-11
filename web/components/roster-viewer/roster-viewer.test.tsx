@@ -438,6 +438,17 @@ describe("RosterGrid geometry", () => {
     const corner = grid.querySelector("th");
     expect(corner?.className).toContain("border-b-[2px]");
   });
+
+  it("keeps ordinary sticky date headers opaque while body cells stay transparent", async () => {
+    const document = await makeDocument();
+    render(<Viewer document={document} />);
+    const grid = screen.getByTestId("roster-grid");
+    const dateHeader = grid.querySelector("thead th:nth-child(2)");
+    const bodyCell = grid.querySelector("tbody tr td:nth-child(2)");
+    expect(dateHeader?.className).toContain("bg-surface");
+    expect(dateHeader?.className).not.toContain("bg-transparent");
+    expect(bodyCell?.className).toContain("bg-transparent");
+  });
 });
 
 // ---------------------------------------------------------------------------
