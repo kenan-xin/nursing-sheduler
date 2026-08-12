@@ -26,7 +26,17 @@
 //     so summaries scope their claim to what was checkable and day health has a
 //     distinct `unknown` state. Nothing turns "we could not check" into "fine".
 
-export { SHIFT_RAMP, assignShiftRamp, type ShiftRampEntry } from "./shift-ramp";
+export {
+  assignShiftRamp,
+  classifyShiftFamily,
+  SHIFT_FAMILY_GLYPH,
+  SHIFT_FAMILY_LABEL,
+  SHIFT_FAMILY_ORDER,
+  SHIFT_FAMILY_RAMP,
+  SHIFT_RAMP,
+  type ShiftFamily,
+  type ShiftRampEntry,
+} from "./shift-ramp";
 
 export {
   computeCoverage,
