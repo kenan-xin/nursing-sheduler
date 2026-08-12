@@ -27,11 +27,20 @@ describe("classifyShiftFamily", () => {
   });
 
   it("classifies Ward-8's long pattern as long day, not morning, despite an 08:00 start", () => {
-    expect(classifyShiftFamily({ startTime: "08:00", endTime: "20:30" })).toBe("long");
+    // 690 = 11.5h paid, net of a 60-min unpaid break on this 12.5h clock span —
+    // real scenario shift types always carry `durationMinutes` alongside
+    // `startTime`/`endTime` (core/nurse_scheduling/models.py requires it), so
+    // this exercises the paid-minutes branch of `resolveDurationMinutes`, not
+    // just its elapsed-time-span fallback.
+    expect(
+      classifyShiftFamily({ startTime: "08:00", endTime: "20:30", durationMinutes: 690 }),
+    ).toBe("long");
   });
 
   it("classifies Ward-8's night pattern as night, not long day, despite a 12.5h duration", () => {
-    expect(classifyShiftFamily({ startTime: "20:00", endTime: "08:30" })).toBe("night");
+    expect(
+      classifyShiftFamily({ startTime: "20:00", endTime: "08:30", durationMinutes: 690 }),
+    ).toBe("night");
   });
 
   // The real Ward 2 paper roster printout, same shift shapes under different names.

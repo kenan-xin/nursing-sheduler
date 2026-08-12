@@ -467,7 +467,7 @@ test.describe("F4 roster viewer — real layout", () => {
   // G7 — the Grid toolbar the prototype has and the shipped Grid was missing.
   // -------------------------------------------------------------------------
 
-  test("the Grid keys every authored shift with its id, hours and own cell colour", async ({
+  test("the Grid groups every authored shift by its colour family, not id or hours", async ({
     page,
   }) => {
     await page.getByTestId("roster-lens-grid").click();
@@ -477,17 +477,24 @@ test.describe("F4 roster viewer — real layout", () => {
     await expect(page.getByTestId("roster-viewer").locator("h1, h2")).toHaveCount(0);
 
     const items = page.getByTestId("roster-grid-legend-item");
-    // Every scenario shift, plus the two day-states — no invented categories.
+    // Fixture shift D is 09:00–17:00 (Morning); N is 21:00–07:00 (Night — its
+    // start hour falls in the night window). One row per FAMILY present, plus
+    // the two day-states — no invented categories, and no per-id row.
     await expect(items).toHaveCount(4);
-    await expect(items.nth(0)).toContainText("09:00–17:00");
-    await expect(items.nth(1)).toContainText("21:00–07:00");
+    await expect(items.nth(0)).toContainText("Morning");
+    await expect(items.nth(1)).toContainText("Night");
     await expect(items.nth(2)).toContainText("Leave");
     await expect(items.nth(3)).toContainText("Off / rest");
 
+    // POSITIVE CONTROL (inverts the prior per-id decision): family colour
+    // sharing is now intentional, so the legend names the family instead of
+    // listing each id's exact hours. The "N" family glyph below is coincidence
+    // — it is keyed off the classifier, not off the fixture's raw "N" id.
     const legend = page.getByTestId("roster-grid-legend");
-    for (const category of ["Morning", "Evening", "Night", "Long day"]) {
-      await expect(legend).not.toContainText(category);
-    }
+    await expect(legend).toContainText("Morning");
+    await expect(legend).toContainText("Night");
+    await expect(legend).not.toContainText("09:00–17:00");
+    await expect(legend).not.toContainText("21:00–07:00");
 
     // ONE ramp: the legend key paints exactly what the grid cell paints.
     const keyColour = await items
@@ -497,7 +504,7 @@ test.describe("F4 roster viewer — real layout", () => {
       .evaluate((el) => getComputedStyle(el).backgroundColor);
     const cellColour = await page
       .getByTestId("roster-grid")
-      .locator('tbody td span[aria-label="D"]')
+      .locator('tbody td span[data-shift-id="D"]')
       .first()
       .evaluate((el) => getComputedStyle(el).backgroundColor);
     expect(keyColour).toBe(cellColour);
@@ -1005,9 +1012,12 @@ test.describe("G8 chip geometry — Ward 8's long authored labels", () => {
 
   test("every long label fits its chip with a real 6px inset on both sides", async ({ page }) => {
     for (const label of ["long", "long+", "night", "night+"]) {
+      // `data-shift-id`, not `aria-label`: the aria-label now carries the
+      // shift's hours too, so `long` and `long+` are no longer distinguishable
+      // by an aria-label attribute selector alone.
       const chip = page
         .getByTestId("roster-grid")
-        .locator(`[data-shift-chip][aria-label="${label}"]`)
+        .locator(`[data-shift-chip][data-shift-id="${label}"]`)
         .first();
       await expect(chip).toBeVisible();
 

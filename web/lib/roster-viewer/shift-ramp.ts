@@ -50,6 +50,10 @@ export const SHIFT_FAMILY_LABEL: Record<ShiftFamily, string> = {
 export const SHIFT_FAMILY_GLYPH: Record<ShiftFamily, string> = {
   morning: "AM",
   evening: "PM",
+  // "N" can coincidentally match a ward-authored shift literally named "N"
+  // (the default fixture does exactly this). The two are unrelated after this
+  // change: this is the FAMILY glyph, keyed off the classifier, never off the
+  // authored id string.
   night: "N",
   long: "LD",
   other: "?",

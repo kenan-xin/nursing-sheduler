@@ -932,15 +932,21 @@ test.describe("G5 assembled real Ward 8 roster journey", () => {
       await page.getByTestId("roster-lens-grid").click({ timeout: bound });
       await expect(grid).toBeVisible({ timeout: bound });
 
-      // The Grid keys all sixteen authored patterns with their own cell colour
-      // and hours, plus the two day-states, and never invents a category.
+      // The Grid groups all sixteen authored patterns into their computed
+      // colour families — Ward 8's am1-3/pm1-3/long/night patterns (each
+      // declared twice, open + senior `+`) resolve to exactly the four real
+      // families, so the legend reads one row per family, in Morning/Evening/
+      // Night/Long day order, plus the two day-states — never one row per id.
       const legendShifts = await page
         .getByTestId("roster-grid-legend-item")
         .evaluateAll((items) => items.map((item) => item.getAttribute("data-shift") ?? ""));
-      expect(legendShifts).toEqual([...WARD_EXPECTED.shiftTypeIds, "LV", "OFF"]);
+      expect(legendShifts).toEqual(["AM", "PM", "N", "LD", "LV", "OFF"]);
       const legend = page.getByTestId("roster-grid-legend");
+      // POSITIVE CONTROL (inverts the prior per-id decision): family colour
+      // sharing is intentional at Ward scale too, so the legend NAMES every
+      // family actually present rather than omitting the category words.
       for (const category of ["Morning", "Evening", "Night", "Long day"]) {
-        await expect(legend).not.toContainText(category);
+        await expect(legend).toContainText(category);
       }
       await expect(page.getByTestId("roster-grid-span")).toHaveText(
         `${WARD_EXPECTED.startDate} → ${WARD_EXPECTED.endDate}`,
@@ -949,12 +955,25 @@ test.describe("G5 assembled real Ward 8 roster journey", () => {
         "Select a cell to change · drag to swap",
       );
 
-      // G8: the legend is NO LONGER a scroller — at Ward scale least of all.
-      // The internally scrolling strip this replaces measured clientWidth 1124
-      // against scrollWidth 2321 here, so more than half of these eighteen keys
-      // were hidden on a wide desktop with no reliable affordance, and axe
-      // reported it as a serious keyboard-inaccessible scroll region. At this
-      // window the roster content is wide, so the whole key wraps inline.
+      // G8 (historical scale note): before family grouping, this legend
+      // rendered one row per authored id — eighteen for this real Ward-8
+      // catalog (16 shift ids + LV + OFF) — and the internally scrolling strip
+      // it replaced measured clientWidth 1124 against scrollWidth 2321 here,
+      // hiding more than half the key with no reliable affordance; axe flagged
+      // it as a serious keyboard-inaccessible scroll region.
+      //
+      // DISCLOSED TRADE-OFF: family grouping (this branch) reduced the key to
+      // six rows — four families plus Leave and Off/rest — regardless of how
+      // many ids the ward authors. Six short rows fit on one line at every
+      // width where this "wide" layout renders at all, so the scrollWidth
+      // check below can no longer reproduce the eighteen-id overflow this test
+      // originally caught: it is now a lighter regression guard (it still
+      // fails if the legend's wrap CSS regresses or a scroller is
+      // reintroduced), not a density stress test. The original "none of the
+      // ward's ~18 ids is ever hidden past an edge" guarantee has no
+      // equivalent e2e assertion after this change — the closest remaining
+      // proof is the per-CHIP `clipped: false` check further below, which
+      // covers the grid's worked-shift chips, not the legend.
       await expect(page.getByTestId("roster-grid-legend-disclosure")).toHaveCount(0);
       const legendBox = await legend.evaluate((el) => ({
         overflowX: getComputedStyle(el).overflowX,
@@ -966,14 +985,14 @@ test.describe("G5 assembled real Ward 8 roster journey", () => {
       expect(legendBox.flexWrap, "the Ward-scale legend wraps").toBe("wrap");
       expect(
         legendBox.scrollWidth,
-        "all eighteen Ward keys are laid out, none hidden past an edge",
+        "the six family/state legend rows are laid out, none hidden past an edge",
       ).toBeLessThanOrEqual(legendBox.clientWidth + 1);
 
       expect(
         await page.evaluate(
           () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
         ),
-        "sixteen Ward legend keys pushed the document sideways",
+        "the six Ward legend rows do not push the document sideways",
       ).toBe(false);
 
       // G8: every one of the real ward's authored labels fits its chip with the

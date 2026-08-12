@@ -21,7 +21,13 @@ import { useCallback, useMemo, useState, type DragEvent, type KeyboardEvent } fr
 import { cn } from "@/lib/utils";
 import { FaChevronDown } from "@/components/icons";
 import { typedIdKey, type EditCoordinate } from "@/lib/roster";
-import type { RosterContext, RosterDayGrid, RosterDayState, RosterCalendarDay } from "@/lib/roster";
+import type {
+  RosterContext,
+  RosterContextShiftType,
+  RosterDayGrid,
+  RosterDayState,
+  RosterCalendarDay,
+} from "@/lib/roster";
 import {
   classifyShiftFamily,
   dateLabel,
@@ -79,6 +85,16 @@ export function RosterGrid({
   const calendar = context.calendar;
   const shiftTypes = context.shiftTypes;
   const isEditing = editing !== undefined;
+
+  // Keyed the same way `ramp` is, so a cell's chip can carry its shift's own
+  // hours on its `aria-label` even though the legend only names the family.
+  const shiftById = useMemo(() => {
+    const map = new Map<string, RosterContextShiftType>();
+    for (const shift of shiftTypes) {
+      map.set(typedIdKey(shift.id), shift);
+    }
+    return map;
+  }, [shiftTypes]);
 
   // Drag-swap tracks the cell a drag started on. HTML5 drag-and-drop is a
   // pointer/desktop enhancement (Core Flows Flow 3); tap-to-set remains the
@@ -330,6 +346,11 @@ export function RosterGrid({
                             ? (ramp.get(typedIdKey(cellDay.shiftId)) ?? null)
                             : null
                         }
+                        shift={
+                          cellDay.kind === "shift"
+                            ? shiftById.get(typedIdKey(cellDay.shiftId))
+                            : undefined
+                        }
                       />
                     </td>
                   );
@@ -507,7 +528,7 @@ function GridToolbar({ context, isEditing }: { context: RosterContext; isEditing
         // scroller. `<details>` is the standard element for exactly this: it is
         // keyboard operable and announced as a disclosure with no ARIA of our
         // own, and its panel holds the SAME complete key the wide layout renders
-        // — every authored id, its hours, Leave and Off/rest.
+        // — one row per colour family present, plus Leave and Off/rest.
         <details data-testid="roster-grid-legend-disclosure" className="group min-w-0">
           <summary
             data-testid="roster-grid-legend-summary"

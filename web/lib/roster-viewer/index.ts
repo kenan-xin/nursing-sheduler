@@ -20,8 +20,11 @@
 //   • PROVENANCE IS FROZEN. Solver status + score are labeled "as solved" and
 //     never recomputed after edits. "edited since solve" is derived from the
 //     overlay, never independently mutable.
-//   • THE RAMP IS FIXED. Eight entries by start time; mornings warm, nights
-//     cool. Leave is neutral; rest is a bare dot. Literal hexes, not tokens.
+//   • THE RAMP IS A 4-FAMILY CLASSIFIER. Every worked shift is assigned to one
+//     of Morning/Evening/Night/Long day by its own `startTime` and duration
+//     (`classifyShiftFamily`), never by its position or its id string; two ids
+//     sharing a family colour is intentional. Leave is neutral; rest is a bare
+//     dot. Literal hexes, not tokens.
 //   • UNKNOWN IS NOT HEALTHY. An `unavailable` lane is the absence of evidence,
 //     so summaries scope their claim to what was checkable and day health has a
 //     distinct `unknown` state. Nothing turns "we could not check" into "fine".
