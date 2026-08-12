@@ -317,20 +317,17 @@ The canvas is a desaturated mint-black and the ink ramp stays warm, exactly as i
 
 ### Shift colour palette
 
-Worked shifts are coloured **by start time**, from a fixed 8-entry ramp so mornings read warm and nights read cool. The one hard constraint: **adjacent entries must differ in hue, not just lightness** — two near-identical sands in a row made AM/PM/LD unreadable at chip size.
+Worked shifts are coloured **by colour family** — Morning, Evening, Night, Long day — derived from each shift's own `startTime` and duration, never from its id. A ward's naming convention (`am1+`, `A18`, `D+`, or anything else) is never inspected; two ids in the same family intentionally share a colour.
 
-| # | Fill | Ink | Bar | Reads as |
+| Family | Fill | Ink | Bar | Rule |
 |---|---|---|---|---|
-| 1 | `#f8e2b8` | `#7a5310` | `#d4a038` | morning — amber |
-| 2 | `#f6dbcd` | `#9a4726` | `#cf7049` | afternoon/evening — clay |
-| 3 | `#e4ecd0` | `#586a22` | `#8fa243` | long day — olive |
-| 4 | `#d8e0f2` | `#374777` | `#6274ad` | night — cool slate |
-| 5 | `#e9dbf0` | `#653f8e` | `#9670bd` | plum |
-| 6 | `#d3e9e3` | `#1b6a5d` | `#3d9587` | teal |
-| 7 | `#f7dae2` | `#9a3153` | `#c66184` | rose |
-| 8 | `#2b2733` | `#ece6f2` | `#5c5468` | dark (overflow) |
+| Morning | `#f8e2b8` | `#7a5310` | `#d4a038` | start hour <12:00, and not Night or Long day |
+| Evening | `#f6dbcd` | `#9a4726` | `#cf7049` | start hour ≥12:00, and not Night or Long day |
+| Long day | `#e4ecd0` | `#586a22` | `#8fa243` | duration ≥10h, and start hour not in the Night window |
+| Night | `#d8e0f2` | `#374777` | `#6274ad` | start hour ≥18:00 or <06:00 |
+| Other | `#2b2733` | `#ece6f2` | `#5c5468` | fallback: a shift with no parseable start time |
 
-`fill`+`ink` are the chip; `bar` is the legend dot and day-view tag. These are **literal hexes, not theme tokens, and do not change in dark mode** — they are data marks and must stay comparable across themes. Reserved and never drawn from this ramp: leave (`--panel`) and rest (a `--faint` dot).
+Night is checked before Long day, so a 12.5h overnight shift lands in Night rather than Long day. `fill`+`ink` are the chip; `bar` is the legend dot and day-view tag. These are **literal hexes, not theme tokens, and do not change in dark mode** — they are data marks and must stay comparable across themes. Reserved and never drawn from this ramp: leave (`--panel`) and rest (a `--faint` dot).
 
 ### Named rules
 
@@ -447,7 +444,7 @@ The densest surface in the system, and the one with the most specific rules. It 
 - Header bottom rule is `2px solid --line` on **every** header cell including the corner; mismatched weights leave a visible step.
 - **Chips:** one builder, one box — **`min-width:34px` × `28px`**, `box-sizing:border-box`, `padding-inline:6px`, `--r-chip`, **no border**. 34 is a *minimum*, not a fixed width: with zero inset, Ward 8's real authored ids (`long`, `long+`, `night`, `night+`) ran glyph-to-edge against the colour boundary, and border-box keeps the 6px inset *inside* the minimum so a short id still measures exactly 34 and no column widens for nothing. A long id grows to its own content rather than clipping. Every variant — worked, leave and rest — takes the same box, or columns jitter between rows. Worked shifts take their palette `fill`/`ink`; leave is a neutral `--panel`/`--ink3` chip; rest is a bare `·` in `--ink3`. Leave must **not** use `--brandtint` + `--brand` border — that is the selection language. States are inset shadows, never a `1px transparent` border on every chip (which makes one variant a pixel larger than its neighbours).
 - **Columns:** weekends `--panel`; ordinary columns `transparent` so row-hover reads through; holidays a 135° `--warntint`/`--surface` stripe; a `1px --line` left edge every 7th column. Rows hover to `--panel-alt`. Cell padding `4px` → ~36px rows, and 8px of column-to-column separation between adjacent chips.
-- **Legend:** one item builder, two layouts, **never a scroller**. At `≥900px` of measured roster-CONTENT width (the layout ladder's own step, not the viewport) the complete key wraps inline; below it the same complete list moves into a native `<details>` disclosure labelled `Shift key`. Both render every authored id with its hours plus Leave and Off/rest, from the same builder and the same ramp — a constrained host is never served a shortened, regrouped or recoloured key. A second horizontal scroller is forbidden: the roster table is the only dense horizontal scroller on the route, and an `overflow-x:auto` strip here hid over half the key at 1440px and reported as a serious `scrollable-region-focusable` under axe. A custom ornamental scrollbar is not an alternative. Colour repeats past the ramp's eight entries, so **no inferred AM/PM or Morning/Evening/Night grouping** may be added — the id and its hours are the authority, colour is a scan aid.
+- **Legend:** one item builder, two layouts, **never a scroller**. At `≥900px` of measured roster-CONTENT width (the layout ladder's own step, not the viewport) the complete key wraps inline; below it the same complete list moves into a native `<details>` disclosure labelled `Shift key`. Both render the same list, from the same builder — a constrained host is never served a shortened or differently coloured version of the key. A second horizontal scroller is forbidden: the roster table is the only dense horizontal scroller on the route, and an `overflow-x:auto` strip here hid over half the key at 1440px and reported as a serious `scrollable-region-focusable` under axe. A custom ornamental scrollbar is not an alternative. The key lists one row per colour **family** actually present in the scenario (Morning/Evening/Night/Long day), plus Leave and Off/rest — not one row per authored id. A family absent from the scenario is omitted; a specific id's exact hours live on its chip and `aria-label`, not the legend.
 - **Undo and the lens selector are one control group**, not two flex siblings: one `shrink-0` `items-stretch` parent so they wrap atomically at docked widths, with Undo stretching to the segmented control's exact rendered height rather than pinning its own.
 - All semantic colour comes from tokens. **No hardcoded `rgba(200,40,40,.08)`.**
 
