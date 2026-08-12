@@ -17,7 +17,7 @@ import { RosterContentWidthProvider } from "./roster-content-width";
 import { ShiftChip } from "./shift-chip";
 import { COVERAGE_STACK_THRESHOLD, MOBILE_DEFAULT_LENS_VIEWPORT } from "./use-container-width";
 import type { RosterDocument, RosterDayState } from "@/lib/roster";
-import { ROSTER_VIEW_PREFERENCE_KEY, SHIFT_RAMP } from "@/lib/roster-viewer";
+import { ROSTER_VIEW_PREFERENCE_KEY, SHIFT_FAMILY_RAMP, SHIFT_RAMP } from "@/lib/roster-viewer";
 import {
   fixtureCanonicalDocument,
   fixtureContainer,
@@ -1306,35 +1306,37 @@ describe("Grid toolbar", () => {
     expect(viewer.querySelectorAll("h1, h2").length).toBe(0);
   });
 
-  it("keys EVERY authored shift with its id, its hours and the SAME ramp entry its cells use", async () => {
+  it("groups shifts by their computed colour family, not by id", async () => {
+    // Fixture shift D is 09:00–17:00 (Morning); N is 21:00–07:00 (Night —
+    // its start hour falls in the night window). The "N" glyph below is the
+    // FAMILY glyph for Night, coincidentally identical to the fixture's raw
+    // id of the same name — the two are unrelated after this change.
     const document = await makeDocument();
     render(<Viewer document={document} />);
     const items = [...screen.getAllByTestId("roster-grid-legend-item")];
     const shifts = items.map((item) => item.getAttribute("data-shift"));
-    // Every scenario shift, plus the two day-states.
-    expect(shifts).toEqual(["D", "N", "LV", "OFF"]);
-    expect(items[0].textContent).toContain("09:00–17:00");
-    expect(items[1].textContent).toContain("21:00–07:00");
+    expect(shifts).toEqual(["AM", "N", "LV", "OFF"]);
+    expect(items[0].textContent).toContain("Morning");
+    expect(items[1].textContent).toContain("Night");
     expect(items[2].textContent).toContain("Leave");
     expect(items[3].textContent).toContain("Off / rest");
 
     // The legend swatch paints the same colour the grid cell does — one ramp,
     // not a second colour table that can drift.
-    const rampD = SHIFT_RAMP[0];
     const swatch = items[0].querySelector("span");
-    expect(swatch?.style.backgroundColor).toBe(normaliseColour(rampD.fill));
+    expect(swatch?.style.backgroundColor).toBe(normaliseColour(SHIFT_FAMILY_RAMP.morning.fill));
   });
 
-  it("NEGATIVE CONTROL: invents no Morning/Evening/Night category labels", async () => {
-    // The ramp has eight entries and Ward 8 authors sixteen shifts, so colour
-    // repeats. Naming a family from colour would be a claim the scenario never
-    // made; the id and its hours are the only authority.
+  it("POSITIVE CONTROL: names the shift's colour family instead of listing its exact hours", async () => {
+    // This inverts the prior decision (DESIGN.md §5): family colour sharing is
+    // now intentional, so the legend names the family rather than each id's hours.
     const document = await makeDocument();
     render(<Viewer document={document} />);
     const legend = screen.getByTestId("roster-grid-legend");
-    for (const category of ["Morning", "Evening", "Night", "Long day", "AM", "PM"]) {
-      expect(legend.textContent).not.toContain(category);
-    }
+    expect(legend.textContent).toContain("Morning");
+    expect(legend.textContent).toContain("Night");
+    expect(legend.textContent).not.toContain("09:00–17:00");
+    expect(legend.textContent).not.toContain("21:00–07:00");
   });
 
   it("NEVER makes the legend a second horizontal scroller, at either width", async () => {

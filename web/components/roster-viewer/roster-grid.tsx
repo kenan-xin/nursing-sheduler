@@ -23,14 +23,19 @@ import { FaChevronDown } from "@/components/icons";
 import { typedIdKey, type EditCoordinate } from "@/lib/roster";
 import type { RosterContext, RosterDayGrid, RosterDayState, RosterCalendarDay } from "@/lib/roster";
 import {
+  classifyShiftFamily,
   dateLabel,
   dateTitle,
   isNewMonth,
   rosterSpanTitle,
-  shiftContextLabel,
+  SHIFT_FAMILY_GLYPH,
+  SHIFT_FAMILY_LABEL,
+  SHIFT_FAMILY_ORDER,
+  SHIFT_FAMILY_RAMP,
   shiftTimeRange,
   uniformShiftRequirement,
   type CoverageGrid,
+  type ShiftFamily,
   type ShiftRampEntry,
   type Tallies,
 } from "@/lib/roster-viewer";
@@ -148,7 +153,7 @@ export function RosterGrid({
 
   return (
     <div className="flex min-w-0 flex-col gap-3">
-      <GridToolbar context={context} ramp={ramp} isEditing={isEditing} />
+      <GridToolbar context={context} isEditing={isEditing} />
       <div
         data-testid="roster-grid"
         className={cn(
@@ -459,23 +464,17 @@ export function RosterGrid({
  * heading: the route already owns the page heading, and competing display-size
  * headings were the fidelity review's strongest hierarchy finding.
  *
- * The legend keys every AUTHORED shift with the exact ramp entry its cells use.
- * It does not group Ward 8's sixteen shifts into Morning/Evening/Night families:
- * the ramp has eight entries, so overflow colours repeat, and an inferred
- * category label would be a claim the scenario never made. The id and its hours
- * are the authority; colour is a scan aid.
+ * The legend groups every AUTHORED shift into its computed colour family
+ * (Morning/Evening/Night/Long day) rather than keying each id individually.
+ * Family is derived from each shift's own startTime/duration
+ * (`classifyShiftFamily`), never from its id string — a ward's naming
+ * convention (a `+` senior twin, or anything else) is never inspected, and two
+ * ids sharing a family colour is intentional, not overflow (DESIGN.md §2
+ * "Shift colour palette").
  */
-function GridToolbar({
-  context,
-  ramp,
-  isEditing,
-}: {
-  context: RosterContext;
-  ramp: Map<string, ShiftRampEntry>;
-  isEditing: boolean;
-}) {
+function GridToolbar({ context, isEditing }: { context: RosterContext; isEditing: boolean }) {
   const { width } = useRosterContentWidth();
-  const entries = useMemo(() => buildLegendEntries(context, ramp), [context, ramp]);
+  const entries = useMemo(() => buildLegendEntries(context), [context]);
   // A width of null (pre-mount) or 0 (an unlaid-out box: jsdom, `display:none`)
   // is not a MEASUREMENT, so it must never drive the layout choice. Both fall
   // back to the wide key, matching the roster-content provider's own
@@ -575,11 +574,11 @@ function GridLegend({ entries, className }: { entries: LegendEntry[]; className?
 /** One legend entry, in the exact order the key reads. */
 interface LegendEntry {
   key: string;
-  /** `data-shift` — the authored id, or `LV` / `OFF`. */
+  /** `data-shift` — the family glyph (`AM`/`PM`/`N`/`LD`), or `LV` / `OFF`. */
   shift: string;
   /** The chip glyph. */
   glyph: string;
-  /** The text beside the chip: the authored hours, `Leave`, or `Off / rest`. */
+  /** The text beside the chip: the family name, `Leave`, or `Off / rest`. */
   text: string | null;
   /** The whole entry's accessible name and tooltip. */
   title: string;
@@ -590,27 +589,33 @@ interface LegendEntry {
 }
 
 /**
- * The ONE legend-item builder (G8). Both the wide wrapped key and the `Shift
- * key` disclosure render this same list, so a constrained host can never be
- * served a shortened, regrouped, or differently coloured version of the key.
+ * The ONE legend-item builder (G8, revised). Both the wide wrapped key and the
+ * `Shift key` disclosure render this same list, so a constrained host can
+ * never be served a shortened, regrouped, or differently coloured version of
+ * the key. The key lists one row per colour FAMILY present in this scenario's
+ * shift catalog, not one row per authored id — colour is shared across a
+ * family on purpose (DESIGN.md §5).
  */
-function buildLegendEntries(
-  context: RosterContext,
-  ramp: Map<string, ShiftRampEntry>,
-): LegendEntry[] {
-  const entries: LegendEntry[] = context.shiftTypes.map((shift) => {
-    const entry = ramp.get(typedIdKey(shift.id));
-    return {
-      key: typedIdKey(shift.id),
-      shift: String(shift.id),
-      glyph: String(shift.id),
-      text: shiftTimeRange(shift),
-      title: shiftContextLabel(shift),
-      fill: entry?.fill ?? "var(--panel)",
-      ink: entry?.ink ?? "var(--ink2)",
-      bare: false,
-    };
-  });
+function buildLegendEntries(context: RosterContext): LegendEntry[] {
+  const present = new Set<ShiftFamily>();
+  for (const shift of context.shiftTypes) {
+    present.add(classifyShiftFamily(shift));
+  }
+  const entries: LegendEntry[] = SHIFT_FAMILY_ORDER.filter((family) => present.has(family)).map(
+    (family) => {
+      const entry = SHIFT_FAMILY_RAMP[family];
+      return {
+        key: `legend:${family}`,
+        shift: SHIFT_FAMILY_GLYPH[family],
+        glyph: SHIFT_FAMILY_GLYPH[family],
+        text: SHIFT_FAMILY_LABEL[family],
+        title: SHIFT_FAMILY_LABEL[family],
+        fill: entry.fill,
+        ink: entry.ink,
+        bare: false,
+      };
+    },
+  );
   entries.push({
     key: "legend:LV",
     shift: "LV",
