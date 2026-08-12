@@ -173,7 +173,7 @@ export function CellPreferenceEditor({
           </DialogDescription>
         </div>
 
-        <div className="p-4.5">
+        <div className="max-h-[60vh] overflow-y-auto p-4.5">
           <div className="mb-2 text-label font-semibold uppercase tracking-[0.03em] text-ink2">
             Day state
           </div>
