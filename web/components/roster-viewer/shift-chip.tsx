@@ -16,8 +16,7 @@
 import { cn } from "@/lib/utils";
 import { typedIdKey } from "@/lib/roster";
 import { dayStateDisplay } from "@/lib/roster";
-import type { RosterContextShiftType, RosterDayState } from "@/lib/roster";
-import { shiftContextLabel } from "@/lib/roster-viewer";
+import type { RosterDayState } from "@/lib/roster";
 import type { ShiftRampEntry } from "@/lib/roster-viewer";
 
 // The fixed chip geometry from DESIGN.md §5. Absolute px, NOT multiplied by the
@@ -39,14 +38,6 @@ export interface ShiftChipProps {
   day: RosterDayState;
   /** The ramp entry for this shift, from `assignShiftRamp`. Null for leave/rest. */
   ramp: ShiftRampEntry | null;
-  /**
-   * The full shift-type record for `day.shiftId`, so the chip's `aria-label`
-   * can carry the shift's hours (DESIGN.md §5: "a specific id's exact hours
-   * live on its chip and `aria-label`") even though the legend now names only
-   * its colour family. Undefined for leave/rest, and defensively falls back to
-   * the bare id if a caller omits it for a worked shift.
-   */
-  shift?: RosterContextShiftType;
 }
 
 /**
@@ -64,7 +55,7 @@ export interface ShiftChipProps {
  * between rows, which is the whole reason the bare `·` was given the chip box in
  * the first place.
  */
-export function ShiftChip({ day, ramp, shift }: ShiftChipProps) {
+export function ShiftChip({ day, ramp }: ShiftChipProps) {
   const style: React.CSSProperties = {
     minWidth: CHIP_W,
     height: CHIP_H,
@@ -106,12 +97,6 @@ export function ShiftChip({ day, ramp, shift }: ShiftChipProps) {
 
   // Worked shift: the literal ramp fill/ink.
   const entry = ramp ?? SHIFT_RAMP_FALLBACK;
-  // The legend only names the shift's colour FAMILY now, so the chip's own
-  // aria-label carries the one thing the legend no longer states: this id's
-  // exact hours (DESIGN.md §5). `shiftContextLabel` is the same "id + hours"
-  // accessible-name builder every other shift-naming surface in the viewer
-  // uses; a missing `shift` record falls back to the bare id.
-  const label = shift !== undefined ? shiftContextLabel(shift) : String(day.shiftId);
   return (
     <span
       // A stable hook for the browser gate that MEASURES the 34×28 box. jsdom can
@@ -119,13 +104,11 @@ export function ShiftChip({ day, ramp, shift }: ShiftChipProps) {
       // needs a layout engine and something to point it at.
       data-shift-chip="worked"
       // A stable, content-independent hook for tests that need to find a chip
-      // by its EXACT authored id — `aria-label` now carries hours too, so
-      // `long` and `long+` are no longer distinguishable by an aria-label
-      // attribute selector alone.
+      // by its exact authored id, kept alongside the (now bare-id) aria-label.
       data-shift-id={String(day.shiftId)}
       className="inline-flex items-center justify-center rounded-chip font-mono text-meta font-bold"
       style={{ ...style, backgroundColor: entry.fill, color: entry.ink }}
-      aria-label={label}
+      aria-label={String(day.shiftId)}
     >
       {dayStateDisplay(day)}
     </span>

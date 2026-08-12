@@ -21,13 +21,7 @@ import { useCallback, useMemo, useState, type DragEvent, type KeyboardEvent } fr
 import { cn } from "@/lib/utils";
 import { FaChevronDown } from "@/components/icons";
 import { typedIdKey, type EditCoordinate } from "@/lib/roster";
-import type {
-  RosterContext,
-  RosterContextShiftType,
-  RosterDayGrid,
-  RosterDayState,
-  RosterCalendarDay,
-} from "@/lib/roster";
+import type { RosterContext, RosterDayGrid, RosterDayState, RosterCalendarDay } from "@/lib/roster";
 import {
   classifyShiftFamily,
   dateLabel,
@@ -85,16 +79,6 @@ export function RosterGrid({
   const calendar = context.calendar;
   const shiftTypes = context.shiftTypes;
   const isEditing = editing !== undefined;
-
-  // Keyed the same way `ramp` is, so a cell's chip can carry its shift's own
-  // hours on its `aria-label` even though the legend only names the family.
-  const shiftById = useMemo(() => {
-    const map = new Map<string, RosterContextShiftType>();
-    for (const shift of shiftTypes) {
-      map.set(typedIdKey(shift.id), shift);
-    }
-    return map;
-  }, [shiftTypes]);
 
   // Drag-swap tracks the cell a drag started on. HTML5 drag-and-drop is a
   // pointer/desktop enhancement (Core Flows Flow 3); tap-to-set remains the
@@ -346,11 +330,6 @@ export function RosterGrid({
                             ? (ramp.get(typedIdKey(cellDay.shiftId)) ?? null)
                             : null
                         }
-                        shift={
-                          cellDay.kind === "shift"
-                            ? shiftById.get(typedIdKey(cellDay.shiftId))
-                            : undefined
-                        }
                       />
                     </td>
                   );
@@ -601,7 +580,15 @@ interface LegendEntry {
   glyph: string;
   /** The text beside the chip: the family name, `Leave`, or `Off / rest`. */
   text: string | null;
-  /** The whole entry's accessible name and tooltip. */
+  /**
+   * The whole entry's accessible name and hover tooltip. For a colour-family
+   * entry this is NOT the plain family name — it's `"<Family> — <id> (<hours>),
+   * …"` for every authored shift id `classifyShiftFamily` resolves to this
+   * family, since the per-cell chip's own `aria-label` stays the bare id
+   * (DESIGN.md §5) and this is now the only surface that states a specific
+   * id's exact hours. `Leave` and `Off / rest` keep their plain label — there
+   * is only one id-less concept behind each.
+   */
   title: string;
   fill: string;
   ink: string;
@@ -615,7 +602,10 @@ interface LegendEntry {
  * never be served a shortened, regrouped, or differently coloured version of
  * the key. The key lists one row per colour FAMILY present in this scenario's
  * shift catalog, not one row per authored id — colour is shared across a
- * family on purpose (DESIGN.md §5).
+ * family on purpose (DESIGN.md §5). Each family row's visible glyph/text stays
+ * the family name, but its `title`/`aria-label` carries the full breakdown —
+ * every constituent id and its hours — via `familyLegendTitle`, since that
+ * per-id detail no longer lives anywhere else once ids are grouped by colour.
  */
 function buildLegendEntries(context: RosterContext): LegendEntry[] {
   const present = new Set<ShiftFamily>();
@@ -630,7 +620,7 @@ function buildLegendEntries(context: RosterContext): LegendEntry[] {
         shift: SHIFT_FAMILY_GLYPH[family],
         glyph: SHIFT_FAMILY_GLYPH[family],
         text: SHIFT_FAMILY_LABEL[family],
-        title: SHIFT_FAMILY_LABEL[family],
+        title: familyLegendTitle(family, context.shiftTypes),
         fill: entry.fill,
         ink: entry.ink,
         bare: false,
@@ -658,6 +648,23 @@ function buildLegendEntries(context: RosterContext): LegendEntry[] {
     bare: true,
   });
   return entries;
+}
+
+/**
+ * The hover tooltip for one family's legend swatch: `"<Family> — <id>
+ * (<hours>), <id> (<hours>), …"` for every authored shift id
+ * `classifyShiftFamily` resolves to this family, in catalog order. A shift
+ * with unknown hours (`shiftTimeRange` returns null) contributes its bare id
+ * with no parenthetical, rather than dropping it from the list.
+ */
+function familyLegendTitle(family: ShiftFamily, shiftTypes: RosterContext["shiftTypes"]): string {
+  const parts = shiftTypes
+    .filter((shift) => classifyShiftFamily(shift) === family)
+    .map((shift) => {
+      const time = shiftTimeRange(shift);
+      return time !== null ? `${String(shift.id)} (${time})` : String(shift.id);
+    });
+  return `${SHIFT_FAMILY_LABEL[family]} — ${parts.join(", ")}`;
 }
 
 /** Column background: weekend → panel, holiday → striped, ordinary → transparent. */
