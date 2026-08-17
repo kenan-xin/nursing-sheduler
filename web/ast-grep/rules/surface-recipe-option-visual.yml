@@ -1,0 +1,73 @@
+id: surface-recipe-option-visual
+language: Tsx
+severity: error
+message: >-
+  A class outside the legal layout vocabulary is authored inside a `surfaceVariants({...})`
+  options object on the `className` or `class` channel. The recipe owns tone, border,
+  elevation, radius, motion, drag and width; passing anything but layout/position/
+  overflow/sizing through its options silently defeats the role the recipe was asked for.
+  Use the appropriate recipe axis (`role`, `geometry`, `emphasis`, `motion`,
+  `interaction`, `width`), or put the class on a child element that is not a surface
+  consumer.
+note: >-
+  Migrated from the recipe-options sweep in `components/ui/surface-contract.test.ts`.
+  FAIL CLOSED: the channel is checked against the shared `surface-legal-class-vocabulary`
+  allowlist, so a token is rejected because it is absent from the legal layout vocabulary
+  rather than because a denylist named it.
+  KEY SPELLINGS COVERED. The key is matched as a `pair` key, so the shorthand-free
+  spellings all reach the same check: `className: "..."`, `"className": "..."` and the
+  static computed key `["className"]: "..."`. Bounded review round 1 found the previous
+  pattern list missed the computed-key form, which the Ticket 4 ledger had claimed as a
+  verified family-E mutation.
+  The `class` channel is also matched even though `class?: never` on `SurfaceVariantProps`
+  makes it a compile error in typed code: a caller can still spell it through `as any` or
+  an untyped re-export, and the dev-mode runtime assertion in `surfaceVariants` covers
+  the bypass at runtime rather than statically. This rule is the residual authored-syntax
+  half.
+  NARROWING RECORDED: ast-grep matches the call shape `surfaceVariants({...})` by name,
+  so a renamed import (`import { surfaceVariants as sv }`) is not followed, and a value
+  assembled out of non-literal parts has no authored literal to inspect. The runtime
+  assertion catches the behavioral bypass regardless of import alias. Same shape as the
+  `surface-consumer-classname` narrowing and ticket 3's
+  `assistant-scenario-table-authorship`.
+files:
+  - "app/**"
+  - "components/**"
+  - "lib/**"
+ignores:
+  - "**/*.test.ts"
+  - "**/*.test.tsx"
+  - "**/*.test-d.ts"
+  - "**/*.spec.ts"
+  - "**/*.spec.tsx"
+rule:
+  all:
+    - kind: string_fragment
+    - not:
+        matches: surface-legal-class-vocabulary
+    # The fragment must be the VALUE of a className/class pair, never the key itself --
+    # otherwise the `["className"]` key fragment would report against the vocabulary.
+    - inside:
+        any:
+          - kind: string
+          - kind: template_string
+        inside:
+          kind: pair
+          field: value
+          has:
+            field: key
+            any:
+              - kind: property_identifier
+                regex: ^(className|class)$
+              - kind: string
+                has:
+                  kind: string_fragment
+                  regex: ^(className|class)$
+              - kind: computed_property_name
+                has:
+                  stopBy: end
+                  kind: string_fragment
+                  regex: ^(className|class)$
+    - inside:
+        stopBy: end
+        pattern: surfaceVariants($$$RECIPE_ARGS)

@@ -1,20 +1,14 @@
 // @vitest-environment jsdom
 import "fake-indexeddb/auto";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { RequirementCard, ScenarioUiState } from "@/lib/scenario";
-import {
-  drainScenarioPersist,
-  resetToNewScenario,
-  useHotStore,
-  useScenarioStore,
-} from "@/lib/store";
+import { useScenarioStore, scenarioCommands } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { surfaceVariants } from "@/components/ui/surface";
 import { buttonVariants } from "@/components/ui/button";
 import { ShiftTypeGrid } from "./shift-type-grid";
+import { resetScenarioForTest, drainScenarioCommands } from "@/lib/store/test-authority";
 
 // R2c — which CONTRACT authored each surface on /shift-types.
 //
@@ -29,6 +23,16 @@ import { ShiftTypeGrid } from "./shift-type-grid";
 // Assertions never restate a token. They ask the recipe what it emits, so if the
 // ladder's definition of a role changes, this suite follows it rather than
 // pinning yesterday's class list.
+//
+// WHAT CHANGED (custom-AST ticket 3). This file reads NO files. It used to end with a
+// six-read block that checked the fixed shift data palette against `app/globals.css` and
+// against five named production sources. The reader ledger grants this file no filesystem
+// exception, and both halves had better homes: the CSS half moved to `app/design-system.test.ts`,
+// which owns the token authority and keeps the audited `globals.css` reader; the five
+// production-source scans are the `authored-color-literal(-tsx)` ast-grep rule, which
+// rejects ANY authored colour across `app/**` and `components/**` -- strictly more than
+// twenty-four specific hexes in five specific files, and enforced on every lint run rather
+// than only when this suite happens to execute.
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 vi.mock("next/navigation", () => ({
@@ -82,14 +86,14 @@ function expectNotRole(element: Element, ...args: Parameters<typeof surfaceVaria
   ).toBe(false);
 }
 
-function seed(patch: Partial<ScenarioUiState>) {
-  act(() => {
-    useScenarioStore.getState().mutateScenario(patch);
+async function seed(patch: Partial<ScenarioUiState>) {
+  await act(async () => {
+    await scenarioCommands.mutate(patch);
   });
 }
 
-function seedRequirements(cards: RequirementCard[], patch: Partial<ScenarioUiState> = {}) {
-  seed({
+async function seedRequirements(cards: RequirementCard[], patch: Partial<ScenarioUiState> = {}) {
+  await seed({
     ...patch,
     cardsByKind: { ...useScenarioStore.getState().cardsByKind, requirements: cards },
   });
@@ -112,17 +116,17 @@ const NIGHT = "string:Night";
 
 beforeEach(async () => {
   vi.clearAllMocks();
-  await resetToNewScenario(useScenarioStore, useHotStore);
-  await drainScenarioPersist(useScenarioStore);
-  seed({ shifts: [], shiftGroups: [] });
+  await resetScenarioForTest();
+  await drainScenarioCommands();
+  await seed({ shifts: [], shiftGroups: [] });
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
 });
 
 describe("R2c surface ladder — authored by the shared recipe, not by hand", () => {
-  it("puts the screen root on the L0 page plane through the Surface adapter", () => {
+  it("puts the screen root on the L0 page plane through the Surface adapter", async () => {
     render(<ShiftTypeGrid />);
     const root = screen.getByTestId("screen");
 
@@ -138,8 +142,10 @@ describe("R2c surface ladder — authored by the shared recipe, not by hand", ()
     expect(root).toHaveAttribute("data-screen", "Shifts");
   });
 
-  it("renders a resting shift card as an L1 surface at the card radius", () => {
-    seed({ shifts: [{ id: "Day", startTime: "08:00", endTime: "16:00", durationMinutes: 480 }] });
+  it("renders a resting shift card as an L1 surface at the card radius", async () => {
+    await seed({
+      shifts: [{ id: "Day", startTime: "08:00", endTime: "16:00", durationMinutes: 480 }],
+    });
     render(<ShiftTypeGrid />);
 
     const card = screen.getByTestId(`shift-card-${DAY}`);
@@ -158,7 +164,7 @@ describe("R2c surface ladder — authored by the shared recipe, not by hand", ()
     });
   });
 
-  it("renders the reserved OFF/LEAVE tiles as a QUIET L1 — line2 hairline, no elevation", () => {
+  it("renders the reserved OFF/LEAVE tiles as a QUIET L1 — line2 hairline, no elevation", async () => {
     render(<ShiftTypeGrid />);
 
     for (const id of ["OFF", "LEAVE"]) {
@@ -176,13 +182,22 @@ describe("R2c surface ladder — authored by the shared recipe, not by hand", ()
       // And deliberately NOT the shared `surface` role, whose `--line` border and
       // `--sh-1` are fixed and would make it identical to an editable card.
       expectNotRole(tile, { role: "surface", geometry: "card" });
+      // Nor the inset-hairline tuple its own icon tile wears. The cold review of
+      // `57ce7b6` adjudicated this composition as deliberately OFF the recipe —
+      // no role emits `--surface` + a `--line2` hairline + no elevation — and the
+      // deleted analyzer pinned it so a later reader would not "finish the job".
+      expectNotRole(tile, { role: "well", geometry: "control", emphasis: "hairline" });
+      // It may not smuggle the composition back in through inline style either:
+      // React's `style` outranks every class, so an empty style attribute is the
+      // whole claim rather than a per-property denylist.
+      expect(tile.getAttribute("style"), "the reserved tile owns nothing inline").toBeNull();
       expect(within(tile).getByText("Auto")).toBeInTheDocument();
       expect(within(tile).queryByRole("button")).toBeNull();
     }
   });
 
-  it("renders every icon tile through the shared well/control/hairline tuple at 42px", () => {
-    seed({ shifts: [{ id: "Day" }] });
+  it("renders every icon tile through the shared well/control/hairline tuple at 42px", async () => {
+    await seed({ shifts: [{ id: "Day" }] });
     render(<ShiftTypeGrid />);
 
     const tiles = Array.from(
@@ -209,8 +224,71 @@ describe("R2c surface ladder — authored by the shared recipe, not by hand", ()
     }
   });
 
-  it("lifts the open editor to the `selected` role instead of washing it in brandtint", () => {
-    seed({ shifts: [{ id: "Day" }] });
+  // -------------------------------------------------------------------------
+  // THE GOVERNED-NODE CENSUS (custom-AST ticket 5).
+  //
+  // The deleted `inset-hairline-ownership.test.ts` analyzer opened with a PREMISE
+  // GUARD — "exactly 3 nodes carry `data-slot="shift-tile"` in shift-type-grid.tsx,
+  // exactly 1 carries `-duration` in working-time-fields.tsx" — so that a renamed
+  // attribute or a dropped tile failed loudly instead of letting the per-node
+  // assertions pass over an empty set. `components/ui/inset-hairline-box.test.tsx`
+  // proves what the two components EMIT; this proves they are actually MOUNTED, at
+  // every governed site, in the states that render them.
+  // -------------------------------------------------------------------------
+  it("mounts an inset-hairline box at every governed site, in the state that renders it", async () => {
+    await seed({ shifts: [{ id: "Day" }] });
+    render(<ShiftTypeGrid />);
+
+    // Resting state: a tile inside each reserved day-state card, and one inside
+    // the authorable shift card.
+    for (const testId of ["synthetic-OFF", "synthetic-LEAVE", `shift-card-${DAY}`]) {
+      const host = screen.getByTestId(testId);
+      expect(
+        host.querySelectorAll('[data-slot="shift-tile"]'),
+        `${testId} must mount exactly one icon tile`,
+      ).toHaveLength(1);
+    }
+    expect(document.querySelectorAll('[data-slot="shift-tile"]')).toHaveLength(3);
+
+    // Editing state: the open editor's own header tile, plus the working-time
+    // readout — the fourth governed site, and the one that lives in a different
+    // file. Neither exists until the editor is open, which is why the resting
+    // census above cannot stand in for it.
+    fireEvent.click(screen.getByTestId(`shift-edit-${DAY}`));
+    const form = screen.getByTestId(`shift-edit-form-${DAY}`);
+    expect(form.querySelectorAll('[data-slot="shift-tile"]')).toHaveLength(1);
+
+    const readout = screen.getByTestId(`shift-edit-${DAY}-duration`);
+    expect(readout).toHaveAttribute("data-slot", "inset-hairline-readout");
+    expectClosedClassList(
+      readout,
+      [
+        "flex",
+        "items-center",
+        "gap-1.5",
+        "overflow-hidden",
+        "px-2.5",
+        "pointer-coarse:min-h-touch",
+      ],
+      { role: "well", geometry: "control", emphasis: "hairline" },
+    );
+    expect(readout.style.height).toBe("var(--ctl)");
+  });
+
+  // A CONVERSE was deliberately NOT added here: "no other element on this route
+  // may wear the tuple". It is not one of the deleted analyzer's families — that
+  // analyzer governed four named nodes and said nothing about a fifth surface —
+  // and it is false of correct code: `synthetic-ALL` and every custom group row
+  // in the shared groups section are legitimate `well/control/hairline` surfaces
+  // reached through the same authority. A rendered check cannot separate a
+  // legitimate direct `surfaceVariants(...)` consumer from a raw reimplementation
+  // (both emit the same bytes), so the honest owner of that direction is the
+  // static half: `inset-hairline-box-authority` inside the owner file, and
+  // ticket 4's `surface-consumer-classname` / `surface-recipe-*-visual` rules
+  // everywhere else.
+
+  it("lifts the open editor to the `selected` role instead of washing it in brandtint", async () => {
+    await seed({ shifts: [{ id: "Day" }] });
     render(<ShiftTypeGrid />);
     fireEvent.click(screen.getByTestId(`shift-edit-${DAY}`));
 
@@ -226,8 +304,8 @@ describe("R2c surface ladder — authored by the shared recipe, not by hand", ()
     });
   });
 
-  it("marks a drop candidate with the shared drop-target role, never a raw inset shadow", () => {
-    seed({ shifts: [{ id: "Day" }, { id: "Night" }] });
+  it("marks a drop candidate with the shared drop-target role, never a raw inset shadow", async () => {
+    await seed({ shifts: [{ id: "Day" }, { id: "Night" }] });
     render(<ShiftTypeGrid />);
 
     const source = screen.getByTestId(`shift-card-${DAY}`);
@@ -243,8 +321,8 @@ describe("R2c surface ladder — authored by the shared recipe, not by hand", ()
     expect(document.body.innerHTML).not.toContain("shadow-[inset");
   });
 
-  it("renders the read-only and numeric staffing boxes as inset wells", () => {
-    seedRequirements([baseline({ qualifiedPeople: ["Seniors"] })], {
+  it("renders the read-only and numeric staffing boxes as inset wells", async () => {
+    await seedRequirements([baseline({ qualifiedPeople: ["Seniors"] })], {
       shifts: [{ id: "Day" }],
       rangeStart: "2026-07-01",
       rangeEnd: "2026-07-07",
@@ -258,8 +336,8 @@ describe("R2c surface ladder — authored by the shared recipe, not by hand", ()
     });
   });
 
-  it("renders the numeric-code staffing note as an inset well", () => {
-    seed({ shifts: [{ id: 7 }] });
+  it("renders the numeric-code staffing note as an inset well", async () => {
+    await seed({ shifts: [{ id: 7 }] });
     render(<ShiftTypeGrid />);
     fireEvent.click(screen.getByTestId("shift-edit-number:7"));
 
@@ -271,8 +349,8 @@ describe("R2c surface ladder — authored by the shared recipe, not by hand", ()
 });
 
 describe("R2c primitive adoption — shared components, not caller-side overrides", () => {
-  it("uses the shared destructive-outline Button for Delete", () => {
-    seed({ shifts: [{ id: "Day" }] });
+  it("uses the shared destructive-outline Button for Delete", async () => {
+    await seed({ shifts: [{ id: "Day" }] });
     render(<ShiftTypeGrid />);
 
     const del = screen.getByTestId(`shift-delete-${DAY}`);
@@ -285,8 +363,8 @@ describe("R2c primitive adoption — shared components, not caller-side override
     expect(del.className).not.toMatch(/hover:bg-errortint\b.*\btext-error\b|\btext-error\b/);
   });
 
-  it("renders the duration readout through the shared Badge on the chip radius", () => {
-    seed({ shifts: [{ id: "Day", durationMinutes: 510 }] });
+  it("renders the duration readout through the shared Badge on the chip radius", async () => {
+    await seed({ shifts: [{ id: "Day", durationMinutes: 510 }] });
     render(<ShiftTypeGrid />);
 
     const badge = screen.getByTestId(`shift-dur-${DAY}`);
@@ -297,7 +375,7 @@ describe("R2c primitive adoption — shared components, not caller-side override
     expect(badge).toHaveTextContent("8h 30m");
   });
 
-  it("renders Continue to rules as a real guarded anchor wearing the Button recipe", () => {
+  it("renders Continue to rules as a real guarded anchor wearing the Button recipe", async () => {
     render(<ShiftTypeGrid />);
 
     const cta = screen.getByTestId("shift-types-continue");
@@ -316,7 +394,7 @@ describe("R2c primitive adoption — shared components, not caller-side override
     expect(cta.className).toBe(cn(buttonVariants({ size: "lg" }), "font-bold"));
   });
 
-  it("leaves the Save button's visuals entirely to the Button recipe", () => {
+  it("leaves the Save button's visuals entirely to the Button recipe", async () => {
     render(<ShiftTypeGrid />);
     fireEvent.click(screen.getByTestId("add-shift-toggle"));
 
@@ -330,7 +408,7 @@ describe("R2c primitive adoption — shared components, not caller-side override
 });
 
 describe("R2c typography and status — the named rules", () => {
-  it("runs the page heading at the display step with the negative-tracking rule", () => {
+  it("runs the page heading at the display step with the negative-tracking rule", async () => {
     render(<ShiftTypeGrid />);
     const heading = screen.getByRole("heading", { level: 1 });
     const classes = heading.className.split(/\s+/);
@@ -342,8 +420,8 @@ describe("R2c typography and status — the named rules", () => {
     expect(classes).not.toContain("tracking-tight");
   });
 
-  it("tracks every uppercase label at +0.03em and never at a bespoke value", () => {
-    seed({ shifts: [{ id: "Day" }] });
+  it("tracks every uppercase label at +0.03em and never at a bespoke value", async () => {
+    await seed({ shifts: [{ id: "Day" }] });
     render(<ShiftTypeGrid />);
     fireEvent.click(screen.getByTestId(`shift-edit-${DAY}`));
 
@@ -360,8 +438,8 @@ describe("R2c typography and status — the named rules", () => {
     }
   });
 
-  it("pairs the preferred-collapse warning's tint with its matching ink and border", () => {
-    seedRequirements([baseline({ preferredNumPeople: 3 })], {
+  it("pairs the preferred-collapse warning's tint with its matching ink and border", async () => {
+    await seedRequirements([baseline({ preferredNumPeople: 3 })], {
       shifts: [{ id: "Day" }],
       rangeStart: "2026-07-01",
       rangeEnd: "2026-07-07",
@@ -383,8 +461,8 @@ describe("R2c typography and status — the named rules", () => {
     expect(notice).toHaveTextContent(/cleared/i);
   });
 
-  it("pairs the save-failure notice's tint with its matching ink and border", () => {
-    seedRequirements([baseline()], {
+  it("pairs the save-failure notice's tint with its matching ink and border", async () => {
+    await seedRequirements([baseline()], {
       shifts: [{ id: "Day" }],
       rangeStart: "2026-07-01",
       rangeEnd: "2026-07-07",
@@ -395,6 +473,11 @@ describe("R2c typography and status — the named rules", () => {
     // on-card (the button stays enabled, so this is the notice's real route).
     fireEvent.change(screen.getByTestId(`shift-edit-${DAY}-required`), { target: { value: "-1" } });
     fireEvent.click(screen.getByTestId(`shift-edit-${DAY}-save`));
+    // T03: Save awaits a queued repository command, so the on-card refusal notice
+    // lands once the command settles.
+    await act(async () => {
+      await drainScenarioCommands();
+    });
 
     const alert = screen.getByTestId(`shift-edit-${DAY}-save-error`);
     const classes = alert.className.split(/\s+/);
@@ -405,8 +488,8 @@ describe("R2c typography and status — the named rules", () => {
     expect(alert).toHaveAttribute("role", "alert");
   });
 
-  it("never leaves functional copy on --faint, and never authors a v1 escape", () => {
-    seed({
+  it("never leaves functional copy on --faint, and never authors a v1 escape", async () => {
+    await seed({
       shifts: [{ id: "Day", startTime: "19:00", endTime: "07:00", durationMinutes: 720 }],
       shiftGroups: [{ id: "Working", members: ["Day"] }],
     });
@@ -440,44 +523,9 @@ describe("R2c typography and status — the named rules", () => {
   });
 });
 
-// The fixed eight-entry shift ramp (DESIGN.md §2 "Shift colour palette"). Its
-// contract is negative on this route: it stays LITERAL data-mark colour in
-// whatever screen eventually draws roster chips, never becomes a theme-token
-// family, and never varies by theme. Nothing in the shipped app owns it yet, so
-// the only truthful coverage is that it has not started leaking into the token
-// authority or into this route's sources — which is exactly the first move of
-// the drift the decision forbids. `e2e/shift-types.spec.ts` completes the pair
-// by proving no element on the route PAINTS one of these in either theme.
-const SHIFT_PALETTE = [
-  "#f8e2b8",
-  "#7a5310",
-  "#d4a038",
-  "#f6dbcd",
-  "#9a4726",
-  "#cf7049",
-  "#e4ecd0",
-  "#586a22",
-  "#8fa243",
-  "#d8e0f2",
-  "#374777",
-  "#6274ad",
-  "#e9dbf0",
-  "#653f8e",
-  "#9670bd",
-  "#d3e9e3",
-  "#1b6a5d",
-  "#3d9587",
-  "#f7dae2",
-  "#9a3153",
-  "#c66184",
-  "#2b2733",
-  "#ece6f2",
-  "#5c5468",
-];
-
 describe("R2c accessibility — the bounded quick wins, per the ratified priority", () => {
-  it("exposes the card grid as a NAMED region", () => {
-    seed({ shifts: [{ id: "Day" }] });
+  it("exposes the card grid as a NAMED region", async () => {
+    await seed({ shifts: [{ id: "Day" }] });
     render(<ShiftTypeGrid />);
 
     // An unnamed <section> is not a region at all, so the grid was unreachable by
@@ -487,8 +535,8 @@ describe("R2c accessibility — the bounded quick wins, per the ratified priorit
     );
   });
 
-  it("names the per-card actions by the shift they act on, keeping the visible label", () => {
-    seed({ shifts: [{ id: "Day" }, { id: "Night" }] });
+  it("names the per-card actions by the shift they act on, keeping the visible label", async () => {
+    await seed({ shifts: [{ id: "Day" }, { id: "Night" }] });
     render(<ShiftTypeGrid />);
 
     for (const id of ["Day", "Night"]) {
@@ -506,36 +554,26 @@ describe("R2c accessibility — the bounded quick wins, per the ratified priorit
   });
 });
 
-// Recipe OWNERSHIP of the inset-hairline surfaces is proven per NODE, by an AST
-// oracle, in `inset-hairline-ownership.test.ts`. It deliberately does not live
-// here: a file-wide predicate cannot tell "every governed tile calls the tuple"
-// from "one tile was raw-reimplemented and a sibling still calls it".
-
-describe("the fixed shift data palette stays out of the token authority", () => {
-  const webRoot = resolve(__dirname, "..", "..");
-  const read = (relPath: string) => readFileSync(resolve(webRoot, relPath), "utf8").toLowerCase();
-
-  it("registers none of the eight entries as a CSS custom property", () => {
-    const css = read("app/globals.css");
-    // Guard the premise: a path that silently read the wrong file would report a
-    // clean palette for exactly the wrong reason.
-    expect(css).toContain("--r-card");
-    const leaked = SHIFT_PALETTE.filter((hex) => css.includes(hex));
-    expect(leaked, "a shift data-mark colour has become a theme token").toEqual([]);
-  });
-
-  it("is not authored anywhere in the R2c-owned sources", () => {
-    const sources = [
-      "app/(app)/shift-types/page.tsx",
-      "components/shift-types/shift-type-grid.tsx",
-      "components/shift-types/shift-types-descriptor.ts",
-      "components/shift-types/save-shift-card.ts",
-      "components/entity-editor/working-time-fields.tsx",
-    ].map(read);
-    expect(sources).toHaveLength(5);
-    for (const source of sources) {
-      const leaked = SHIFT_PALETTE.filter((hex) => source.includes(hex));
-      expect(leaked, "a shift data-mark colour is authored on the route").toEqual([]);
-    }
-  });
-});
+// Recipe OWNERSHIP of the inset-hairline surfaces is no longer proven by an AST
+// oracle here or anywhere. `inset-hairline-ownership.test.ts` -- which resolved
+// each governed node's className per NODE, because a file-wide predicate cannot
+// tell "every governed tile calls the tuple" from "one tile was raw-reimplemented
+// and a sibling still calls it" -- was deleted by custom-AST ticket 5, after the
+// distinction it existed to draw was made unrepresentable rather than detected.
+//
+// Ownership now has three owners, none of them a source analyzer:
+//
+//   • `components/ui/inset-hairline-box.tsx` — every governed node is one of two
+//     components whose `className` and `style` props are `never`, so there is no
+//     per-node className to resolve and no sibling that can diverge from another;
+//   • `components/ui/inset-hairline-box.test.tsx` — the emitted class list is
+//     CLOSED over the recipe's own output, plus exact inline style and the
+//     cast-away-caller refusal;
+//   • `inset-hairline-box-authority` (ast-grep) — the owner file may author only
+//     `<Surface>`, by any spelling, and bind only an allowlisted React surface.
+//     This is the half no rendered check can own, because a hand-authored raw
+//     element paints byte-identically to the recipe.
+//
+// The census above is what replaced the deleted analyzer's premise guard: it
+// proves the components are MOUNTED at every governed site, in the state that
+// renders each one.

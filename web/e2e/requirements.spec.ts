@@ -36,28 +36,42 @@ type RequirementCard = {
 
 type NsWindow = {
   __nsStore: {
-    scenario: {
-      getState: () => Record<string, unknown> & {
-        cardsByKind: { requirements: RequirementCard[] };
-        mutateScenario: (patch: Record<string, unknown>) => void;
-        recordBackup: () => void;
-      };
-      temporal: {
-        getState: () => { pastStates: unknown[]; futureStates: unknown[] };
-      };
+    /** The repository command bus — the product's only durable write path. */
+    commands: {
+      mutate(patch: Record<string, unknown>): Promise<{ ok: boolean; reason?: string }>;
+      recordBackup(backupFingerprint: string): Promise<{ ok: boolean }>;
+      undo(): Promise<{ ok: boolean }>;
+      redo(): Promise<{ ok: boolean }>;
+      takeover(): Promise<{ ok: boolean }>;
     };
+    drain(): Promise<void>;
+    historyDepth(): Promise<number>;
+    authority(): {
+      scenarioId: string | null;
+      documentRevision: number;
+      ownership: string;
+      canUndo: boolean;
+      canRedo: boolean;
+    };
+    scenario(): Record<string, unknown> & { cardsByKind: { requirements: RequirementCard[] } };
     backupStatus: () => "none" | "current" | "stale";
+    backupFingerprint: () => string;
   };
 };
 
+/** Bridge mounted AND authority bring-up resolved — a command before that has no
+ *  lease to present and is refused, so a seed would silently write nothing. */
 async function waitForStore(page: Page) {
-  await page.waitForFunction(() => Boolean((window as unknown as NsWindow).__nsStore));
+  await page.waitForFunction(() => {
+    const store = (window as unknown as NsWindow).__nsStore;
+    return Boolean(store) && store.authority().scenarioId !== null;
+  });
 }
 
 async function seed(page: Page, patch: Record<string, unknown>) {
   await waitForStore(page);
-  await page.evaluate((p) => {
-    (window as unknown as NsWindow).__nsStore.scenario.getState().mutateScenario(p);
+  await page.evaluate(async (p) => {
+    await (window as unknown as NsWindow).__nsStore.commands.mutate(p);
   }, patch);
 }
 
@@ -71,16 +85,17 @@ async function gotoReady(page: Page) {
   await expect(page.getByTestId("add-card-toggle")).toBeVisible();
 }
 
+/** The COMMITTED cards — drained, so a read never outruns the command that wrote. */
 function readRequirements(page: Page) {
-  return page.evaluate(
-    () => (window as unknown as NsWindow).__nsStore.scenario.getState().cardsByKind.requirements,
-  );
+  return page.evaluate(async () => {
+    const store = (window as unknown as NsWindow).__nsStore;
+    await store.drain();
+    return store.scenario().cardsByKind.requirements;
+  });
 }
 
 function pastCount(page: Page) {
-  return page.evaluate(
-    () => (window as unknown as NsWindow).__nsStore.scenario.temporal.getState().pastStates.length,
-  );
+  return page.evaluate(() => (window as unknown as NsWindow).__nsStore.historyDepth());
 }
 
 const BASE_SEED = {
@@ -288,9 +303,24 @@ test.describe.serial("T12 staffing requirements editor (M1 clone)", () => {
     expect(cards[0].qualifiedPeople).toEqual(["ALL"]);
   });
 
-  test("an explicit null qualified/date scope loads as [ALL] and saves it back (M3)", async ({
+  test("an OMITTED qualified/date scope loads as [ALL] and saves it back (M3)", async ({
     page,
   }) => {
+    // The post-import shape, which is what the editor actually meets.
+    //
+    // A file may spell these selectors `null` (the backend's null-as-all form), but
+    // the import normalizer drops null-valued keys before anything is written
+    // (`clean()` in `lib/scenario/import-scenario.ts`), so what reaches the durable
+    // store — and therefore this editor — has the keys ABSENT. T03F1 made durable
+    // writes strict about that: an explicit `null` selector is not valid durable
+    // content, so seeding one through the command bus would be asserting against a
+    // document the product cannot persist. The two boundaries that DO tolerate null are
+    // covered where they live: the reader in
+    // `components/requirements/requirements-model.test.ts` ("normalizes an EXPLICIT
+    // null…", which also proves its normalized output is a valid durable write), and
+    // the importer in `lib/scenario/import-scenario.test.ts` ("normalizes an
+    // explicit-null selector AWAY…"). The strict rejection itself is asserted in the
+    // browser by the test below.
     await gotoReady(page);
     await seed(page, BASE_SEED);
     await seed(page, {
@@ -298,12 +328,10 @@ test.describe.serial("T12 staffing requirements editor (M1 clone)", () => {
         requirements: [
           {
             uid: "req-null",
-            description: "Null scope",
+            description: "Omitted scope",
             shiftType: ["D"],
             requiredNumPeople: 1,
             weight: -1,
-            qualifiedPeople: null,
-            date: null,
           },
         ],
         successions: [],
@@ -319,11 +347,48 @@ test.describe.serial("T12 staffing requirements editor (M1 clone)", () => {
     // The null scope loads as ALL — not an unknown `null` token.
     await expect(page.getByTestId("transfer-qualified-qualified")).toContainText("ALL");
 
-    // Update without changing either scope — the null must NOT round-trip as [null].
+    // Update without changing either scope — the omitted scope must round-trip as an
+    // explicit [ALL], never as `[null]` or back to absent.
     await page.getByTestId("card-editor-submit").click();
     const cards = await readRequirements(page);
     expect(cards[0].qualifiedPeople).toEqual(["ALL"]);
     expect(cards[0].date).toEqual(["ALL"]);
+  });
+
+  test("a durable write carrying an explicit null selector is REFUSED (T03F1)", async ({
+    page,
+  }) => {
+    // The strict half of the same contract, proved in a real browser against real
+    // IndexedDB: the repository validates a command's RESULT inside its transaction, so
+    // an invalid document is refused and the committed content is untouched. Nothing
+    // invalid is persisted by this test — that is the assertion.
+    await gotoReady(page);
+    await seed(page, BASE_SEED);
+    const before = await readRequirements(page);
+
+    const outcome = await page.evaluate(async () => {
+      const store = (window as unknown as NsWindow).__nsStore;
+      const live = store.scenario();
+      return store.commands.mutate({
+        cardsByKind: {
+          ...(live.cardsByKind as Record<string, unknown>),
+          requirements: [
+            {
+              uid: "req-null",
+              shiftType: ["D"],
+              requiredNumPeople: 1,
+              weight: -1,
+              qualifiedPeople: null,
+              date: null,
+            },
+          ],
+        },
+      });
+    });
+
+    expect(outcome).toMatchObject({ ok: false, reason: "invalid" });
+    // The committed document is exactly as it was — the transaction aborted whole.
+    expect(await readRequirements(page)).toEqual(before);
   });
 
   test("delete removes the card with no confirmation; one undo entry", async ({ page }) => {
@@ -590,9 +655,10 @@ test.describe.serial("T12 staffing requirements editor (M1 clone)", () => {
   test("an open draft arms the navigation guard on a clean scenario", async ({ page }) => {
     await gotoReady(page);
     await seed(page, BASE_SEED);
-    await page.evaluate(() =>
-      (window as unknown as NsWindow).__nsStore.scenario.getState().recordBackup(),
-    );
+    await page.evaluate(async () => {
+      const store = (window as unknown as NsWindow).__nsStore;
+      await store.commands.recordBackup(store.backupFingerprint());
+    });
     expect(
       await page.evaluate(() => (window as unknown as NsWindow).__nsStore.backupStatus()),
     ).toBe("current");

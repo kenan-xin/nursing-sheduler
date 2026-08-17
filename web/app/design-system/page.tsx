@@ -1097,12 +1097,16 @@ export default function StyleReferencePage() {
             <span className="font-mono">0px</span> as the square compatibility fallback, so an
             unmigrated component fails square rather than guessing a radius.
           </Rule>
-          <Rule term="Surfaces" guard="vitest — surface-contract.test.ts (TypeScript AST)">
+          <Rule
+            term="Surfaces"
+            guard="typecheck + ast-grep — surface-consumer-classname, surface-recipe-option-visual"
+          >
             One CVA recipe (<span className="font-mono">surfaceVariants</span>) owns tone, border
             and elevation for every level; <span className="font-mono">&lt;Surface&gt;</span> is the
             ordinary-container adapter and its level/geometry tuples are type-enforced. A consumer's{" "}
             <span className="font-mono">className</span> is layout only — colour, border, shadow,
-            radius and arbitrary-property utilities there are rejected by the AST guard.
+            radius and arbitrary-property utilities there are rejected by the typed recipe boundary,
+            the dev-mode runtime assertion, and the residual ast-grep rules.
           </Rule>
           <Rule term="Elevation" guard="vitest — tailwind-contract.test.ts">
             Level is expressed by tone first, shadow second. Five general levels plus{" "}

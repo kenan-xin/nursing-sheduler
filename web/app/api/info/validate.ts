@@ -1,4 +1,4 @@
-import type { InfoIdentity, InfoResponse } from "@/app/api/info/types";
+import type { InfoIdentity, InfoResponse, InfoSemanticProfile } from "@/app/api/info/types";
 
 // Strict, closed parser for the authoritative core `/info` payload
 // (core/nurse_scheduling/server/app.py::info_payload / info). Rejects anything
@@ -18,8 +18,20 @@ const IDENTITY_FIELDS = [
   "job_store_id",
 ] as const;
 
-const READY_KEYS = new Set<string>(["status", ...IDENTITY_FIELDS]);
-const UNAVAILABLE_KEYS = new Set<string>(["status", "reason", ...IDENTITY_FIELDS]);
+const SEMANTIC_PROFILE_FIELDS = [
+  "submission_contract_version",
+  "solver_semantic_version",
+  "backend_capability_version",
+] as const;
+
+const READY_KEYS = new Set<string>(["status", "semantic_profile", ...IDENTITY_FIELDS]);
+const UNAVAILABLE_KEYS = new Set<string>([
+  "status",
+  "reason",
+  "semantic_profile",
+  ...IDENTITY_FIELDS,
+]);
+const SEMANTIC_PROFILE_KEYS = new Set<string>(SEMANTIC_PROFILE_FIELDS);
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -29,6 +41,20 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 function hasExactKeySet(body: Record<string, unknown>, allowed: ReadonlySet<string>): boolean {
   const keys = Object.keys(body);
   return keys.length === allowed.size && keys.every((key) => allowed.has(key));
+}
+
+// The profile decides whether retained evidence may still be compared, so it is
+// validated as strictly as the identity: an unknown/missing/mistyped field makes
+// the whole payload untrusted rather than yielding a partially-known profile.
+function readSemanticProfile(value: unknown): InfoSemanticProfile | null {
+  if (!isPlainObject(value) || !hasExactKeySet(value, SEMANTIC_PROFILE_KEYS)) return null;
+  const profile = {} as Record<(typeof SEMANTIC_PROFILE_FIELDS)[number], string>;
+  for (const field of SEMANTIC_PROFILE_FIELDS) {
+    const entry = value[field];
+    if (typeof entry !== "string" || entry === "") return null;
+    profile[field] = entry;
+  }
+  return profile;
 }
 
 function readIdentity(body: Record<string, unknown>): InfoIdentity | null {
@@ -56,16 +82,20 @@ export function parseInfoPayload(body: unknown, httpStatus: number): InfoRespons
     if (!hasExactKeySet(body, READY_KEYS)) return null;
     const identity = readIdentity(body);
     if (identity === null) return null;
-    return { status: "ready", ...identity };
+    const semanticProfile = readSemanticProfile(body.semantic_profile);
+    if (semanticProfile === null) return null;
+    return { status: "ready", ...identity, semantic_profile: semanticProfile };
   }
 
   if (httpStatus !== 503) return null;
   if (!hasExactKeySet(body, UNAVAILABLE_KEYS)) return null;
   const identity = readIdentity(body);
   if (identity === null) return null;
+  const semanticProfile = readSemanticProfile(body.semantic_profile);
+  if (semanticProfile === null) return null;
   const reason = body.reason;
   if (typeof reason !== "string") return null;
-  return { status: "unavailable", reason, ...identity };
+  return { status: "unavailable", reason, ...identity, semantic_profile: semanticProfile };
 }
 
 // Reconstruct the wire body from validated fields only, in a stable field order
@@ -85,6 +115,7 @@ export function serializeInfoPayload(info: InfoResponse): string {
           started_at: info.started_at,
           job_backend: info.job_backend,
           job_store_id: info.job_store_id,
+          semantic_profile: orderedProfile(info.semantic_profile),
         }
       : {
           status: info.status,
@@ -96,7 +127,18 @@ export function serializeInfoPayload(info: InfoResponse): string {
           started_at: info.started_at,
           job_backend: info.job_backend,
           job_store_id: info.job_store_id,
+          semantic_profile: orderedProfile(info.semantic_profile),
           reason: info.reason,
         };
   return JSON.stringify(ordered);
+}
+
+// Reconstructed field by field in core's own order, like every other field here —
+// never a passthrough of the upstream object.
+function orderedProfile(profile: InfoSemanticProfile): InfoSemanticProfile {
+  return {
+    submission_contract_version: profile.submission_contract_version,
+    solver_semantic_version: profile.solver_semantic_version,
+    backend_capability_version: profile.backend_capability_version,
+  };
 }

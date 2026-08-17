@@ -8,8 +8,6 @@
 // `judgeReplayEvidence` rejects it. If someone ever weakens the judge back
 // toward the old shape, these tests go red and name which rule was lost.
 
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { decodeSessionRecord } from "@/lib/optimize/session-transaction";
 import {
@@ -31,6 +29,7 @@ import {
   CURSOR_VERSION,
   decodePublicCursor,
   isTerminalJobBody,
+  judgeAssembledCleanup,
   judgeEventsAuthority,
   judgeReplayEvidence,
   judgeVolatileJobIdTexts,
@@ -1784,46 +1783,70 @@ describe("accepted-job ownership fails closed and recovers", () => {
   // D3. WIRING. Every judge above is pure and provable, which is exactly why it can
   // also be pure and UNCALLED: this round's audit found `auditCoverageAfterRelease`
   // fully unit-tested and never invoked by the hook, so the release-404 laundering path
-  // it exists to close was still open in the real gate. A pure function nobody calls is
-  // indistinguishable, from the outside, from one that does not exist.
+  // it exists to close was still open in the real gate.
   //
-  // These are source scans — deliberately narrow, and anchored on the identifiers and
-  // the decision expression rather than on prose, so a rename that keeps the behaviour
-  // is a one-line update while a silent REMOVAL is red.
-  describe("the assembled hook actually wires the judges it depends on", () => {
-    const SPEC = readFileSync(resolve(__dirname, "../optimize-assembled-stream.spec.ts"), "utf8");
+  // THE SOURCE SCAN IS GONE. It read `optimize-assembled-stream.spec.ts` as text and
+  // matched the hook's success condition character for character. The concern was real —
+  // a pure judge nobody calls is indistinguishable from one that does not exist — but a
+  // substring match is the wrong instrument: it cannot tell an INVERTED condition from a
+  // correct one, and it goes red for a reformat that changed nothing.
+  //
+  // The conjunction is now `judgeAssembledCleanup`, which the hook calls and these
+  // exercise directly. A judge dropped from it fails here by OUTCOME.
+  describe("judgeAssembledCleanup requires all three verdicts", () => {
+    const GREEN = {
+      released: { ok: true, failures: [] as string[] },
+      settlementFailures: [] as string[],
+      coverage: { ok: true, failures: [] as string[] },
+    };
 
-    it.each([
-      ["the DOM authority's selector", "VOLATILE_JOB_ID_SELECTOR"],
-      ["the DOM authority's judge", "judgeVolatileJobIdTexts("],
-      ["the post-release coverage audit", "auditCoverageAfterRelease("],
-      ["the fail-closed settlement", "settleAcceptedOwnership("],
-      ["the two-authority recovery", "recoverAcceptedOwnership("],
-    ])("calls %s", (_label, token) => {
-      expect(SPEC).toContain(token);
+    // ACCEPTING CONTROL: without this the refusals below could pass against a judge that
+    // refuses everything.
+    it("is successful when release, settlement and coverage all converged", () => {
+      expect(judgeAssembledCleanup(GREEN)).toEqual({ ok: true, failures: [] });
     });
 
-    // The volatile read must not scrape the `Job ID:` copy again. That coupling is the
-    // whole reason the product now renders a stable hook.
-    it("does not scrape the job-id PROSE any more", () => {
-      expect(SPEC).not.toMatch(/\/\^Job ID:/);
-      expect(SPEC).not.toMatch(/querySelectorAll\("p"\)/);
+    // Each arm removes exactly ONE verdict, so a judge that stopped consulting that
+    // input goes green here and fails. That is the wiring claim, made by behaviour.
+    it("refuses when the release did not converge, and carries its failures", () => {
+      const verdict = judgeAssembledCleanup({
+        ...GREEN,
+        released: { ok: false, failures: ["cancel returned 500"] },
+      });
+      expect(verdict.ok).toBe(false);
+      expect(verdict.failures).toContain("cancel returned 500");
     });
 
-    // A judge whose verdict does not reach the verdict changes nothing, so the success
-    // condition itself is pinned: release converged AND ownership settled AND coverage
-    // proved real.
-    it("requires all three verdicts before calling cleanup successful", () => {
-      expect(SPEC).toContain(
-        "if (outcome.ok && settlementFailures.length === 0 && coverageAudit.ok) return;",
-      );
+    it("refuses when ownership did not settle, and carries its failures", () => {
+      const verdict = judgeAssembledCleanup({
+        ...GREEN,
+        settlementFailures: ["1 accepted submission(s) were unaccounted for"],
+      });
+      expect(verdict.ok).toBe(false);
+      expect(verdict.failures).toContain("1 accepted submission(s) were unaccounted for");
     });
 
-    // The hook must never REPLACE a primary failure with a cleanup failure, and must
-    // clear the tracker so nothing leaks into the next test.
-    it("preserves the primary failure and cannot contaminate the next test", () => {
-      expect(SPEC).toContain("if (testInfo.status === testInfo.expectedStatus) {");
-      expect(SPEC).toContain("acceptedTracker = null;");
+    // The release-404 laundering path: a stale id releases "successfully" down the
+    // idempotent 404 branch, so coverage must be judged independently of the release.
+    it("refuses when a counted coverage id never existed, even though release was ok", () => {
+      const verdict = judgeAssembledCleanup({
+        ...GREEN,
+        coverage: { ok: false, failures: ["recovered job opt_x was counted as coverage"] },
+      });
+      expect(verdict.ok).toBe(false);
+      expect(verdict.failures).toContain("recovered job opt_x was counted as coverage");
+    });
+
+    // A red verdict must report EVERY reason, not the first: the hook attaches this list
+    // as the operator's whole diagnostic.
+    it("reports every reason at once rather than short-circuiting", () => {
+      const verdict = judgeAssembledCleanup({
+        released: { ok: false, failures: ["release"] },
+        settlementFailures: ["settlement"],
+        coverage: { ok: false, failures: ["coverage"] },
+      });
+      expect(verdict.ok).toBe(false);
+      expect(verdict.failures).toEqual(["settlement", "release", "coverage"]);
     });
   });
 

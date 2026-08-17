@@ -1,0 +1,30 @@
+id: retired-mutate-scenario-tsx
+language: Tsx
+severity: error
+message: >-
+  `mutateScenario` is the retired "patch live state and let persist catch up" action.
+  Nothing replaces it under that name: durable scenario changes go through
+  `scenarioCommands`, and the projection is written only by the adapter, after the commit.
+note: >-
+  The `.tsx` twin of `retired-mutate-scenario`. ast-grep resolves a rule's language from the
+  file EXTENSION and `TypeScript` claims `.ts`/`.mts`/`.cts` only, so a rule whose scope
+  includes `app/**` and `components/**` needs this twin or every component silently escapes
+  it. Same rule body, same alternatives-rejected reasoning.
+  SCOPE (bounded-review round 1). `e2e/**` was missing from this list while the base rule
+  had it, so a `.tsx` helper anywhere under the already-governed E2E tree could use the
+  retired name with normal lint green. The rule runner's fixtures are PATHLESS and cannot
+  see a `files:` list at all, which is why `ast-grep-rule-pairs.test.ts` now compares every
+  twin's scope against its partner's -- fixtures cannot catch this class of drift.
+files:
+  - "app/**"
+  - "components/**"
+  - "lib/**"
+  - "e2e/**"
+rule:
+  any:
+    - kind: identifier
+      regex: ^mutateScenario$
+    - kind: property_identifier
+      regex: ^mutateScenario$
+    - kind: string_fragment
+      regex: ^mutateScenario$

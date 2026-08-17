@@ -1,0 +1,56 @@
+id: surface-recipe-option-visual-ts
+language: TypeScript
+severity: error
+message: >-
+  A class outside the legal layout vocabulary is authored inside a `surfaceVariants({...})`
+  options object on the `className` or `class` channel. The recipe owns tone, border,
+  elevation, radius, motion, drag and width; passing anything but layout/position/
+  overflow/sizing through its options silently defeats the role the recipe was asked for.
+  Use the appropriate recipe axis (`role`, `geometry`, `emphasis`, `motion`,
+  `interaction`, `width`), or put the class on a child element that is not a surface
+  consumer.
+note: >-
+  The `.ts` twin of `surface-recipe-option-visual`. ast-grep resolves a rule's language
+  from the file EXTENSION, and `TypeScript` claims `.ts`/`.mts`/`.cts` only, so a non-JSX
+  module that calls the recipe (a class-name helper in `lib/`, a headless owner) needs
+  this twin. Body, vocabulary util and narrowings are identical to the base rule; see it
+  for the full note.
+files:
+  - "app/**"
+  - "components/**"
+  - "lib/**"
+ignores:
+  - "**/*.test.ts"
+  - "**/*.test.tsx"
+  - "**/*.test-d.ts"
+  - "**/*.spec.ts"
+  - "**/*.spec.tsx"
+rule:
+  all:
+    - kind: string_fragment
+    - not:
+        matches: surface-legal-class-vocabulary-ts
+    - inside:
+        any:
+          - kind: string
+          - kind: template_string
+        inside:
+          kind: pair
+          field: value
+          has:
+            field: key
+            any:
+              - kind: property_identifier
+                regex: ^(className|class)$
+              - kind: string
+                has:
+                  kind: string_fragment
+                  regex: ^(className|class)$
+              - kind: computed_property_name
+                has:
+                  stopBy: end
+                  kind: string_fragment
+                  regex: ^(className|class)$
+    - inside:
+        stopBy: end
+        pattern: surfaceVariants($$$RECIPE_ARGS)

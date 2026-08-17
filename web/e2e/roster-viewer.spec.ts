@@ -15,10 +15,7 @@
 // Runs against `/roster-viewer-fixture`, which drives production `rosterStorage`,
 // the real F2 gate, and the real F1 promotion path.
 
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Download, type Page } from "@playwright/test";
 import { gotoDurableFixture, installOptimizeRoutes, json } from "./support/optimize-durable";
 
 const FIXTURE_URL = "/roster-viewer-fixture";
@@ -59,6 +56,29 @@ function contrastRatio(foreground: string, background: string): number {
 
 /** A wide window throughout: container width, not viewport, is what is under test. */
 test.use({ viewport: { width: 1400, height: 900 } });
+
+/**
+ * Collect a real browser download into the exact file payload a user would then
+ * choose back, without the spec ever holding a filesystem capability.
+ *
+ * The bytes are Playwright's own stream, and the name is the browser's own
+ * suggested filename — so the round trip below still re-imports the very artifact
+ * the export produced, not a re-serialized stand-in. Buffering rather than saving
+ * also removes the temp-directory residue the old path left behind on every run.
+ */
+async function captureDownloadedFile(
+  download: Download,
+): Promise<{ name: string; mimeType: string; buffer: Buffer }> {
+  const stream = await download.createReadStream();
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(chunk as Buffer);
+  await download.delete();
+  return {
+    name: download.suggestedFilename(),
+    mimeType: "application/json",
+    buffer: Buffer.concat(chunks),
+  };
+}
 
 async function freshFixture(page: Page) {
   await page.goto(FIXTURE_URL);
@@ -1417,8 +1437,7 @@ test.describe("F5 roster documents — real downloads and real imports", () => {
       page.getByTestId("roster-export-file").click(),
     ]);
     expect(download.suggestedFilename()).toMatch(/\.nurse-roster\.json$/);
-    const saved = join(mkdtempSync(join(tmpdir(), "roster-e2e-")), download.suggestedFilename());
-    await download.saveAs(saved);
+    const saved = await captureDownloadedFile(download);
 
     // Take the roster somewhere else so the import is observably a replacement.
     await setCell(page, 0, "OFF");
@@ -1575,8 +1594,7 @@ test.describe("G3 empty roster — Import and the privacy Clear", () => {
       page.waitForEvent("download"),
       page.getByTestId("roster-export-file").click(),
     ]);
-    const saved = join(mkdtempSync(join(tmpdir(), "roster-e2e-")), download.suggestedFilename());
-    await download.saveAs(saved);
+    const saved = await captureDownloadedFile(download);
 
     // Now genuinely empty the database — this is the first-ingestion state.
     await page.getByTestId("fx-clear").click();
@@ -2012,8 +2030,7 @@ test.describe("roster documents — save, clear, import round trip without Optim
       page.getByTestId("roster-export-file").click(),
     ]);
     expect(download.suggestedFilename()).toMatch(/\.nurse-roster\.json$/);
-    const saved = join(mkdtempSync(join(tmpdir(), "roster-e2e-")), download.suggestedFilename());
-    await download.saveAs(saved);
+    const saved = await captureDownloadedFile(download);
 
     // CLEAR — the confirmed privacy purge. Nothing local survives it, so the
     // import below can only be restoring the file itself.

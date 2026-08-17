@@ -16,12 +16,14 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { useScenarioStore } from "@/lib/store";
+import { scenarioCommands } from "@/lib/store";
 import type { ScenarioUiState, ScenarioValidationIssue } from "@/lib/scenario";
 import { Button } from "@/components/ui/button";
 import { surfaceVariants } from "@/components/ui/surface";
 import { cn } from "@/lib/utils";
 import { FaCheck, FaCopy, FaDownload, FaPen, FaUpload } from "@/components/icons";
+import { capabilityAnchorProps } from "@/lib/capability/anchor-contract";
+import { SAVE_LOAD_DOWNLOAD_ANCHOR } from "./capability-anchors";
 import { BackupStatusBadge } from "./backup-status-badge";
 import { performCopy, performDownload, SCENARIO_DOWNLOAD_FILENAME } from "./scenario-file-export";
 import { ScenarioIssuesList } from "./scenario-issues-list";
@@ -62,7 +64,15 @@ export function ScenarioFileCard({
   onUpload,
   onStartEdit,
 }: ScenarioFileCardProps) {
-  const recordBackup = useScenarioStore((s) => s.recordBackup);
+  // Download records the emitted Workspace backup as a METADATA-only repository
+  // command: it advances the envelope's record revision, writes no commit fact,
+  // and so can neither become an undoable edit nor stale a content-bound read.
+  //
+  // The fingerprint comes from the export core, computed over the exact snapshot it
+  // serialized — not recomputed here or at the queue head, either of which could
+  // name a revision the user never downloaded.
+  const recordBackup = (backupFingerprint: string) =>
+    void scenarioCommands.recordBackup(backupFingerprint);
   const [copied, setCopied] = useState(false);
   const [issues, setIssues] = useState<ScenarioValidationIssue[] | null>(null);
 
@@ -115,7 +125,12 @@ export function ScenarioFileCard({
       </div>
       <div className="flex flex-col gap-3 px-5 py-4">
         <div className="flex flex-wrap gap-2.5">
-          <Button type="button" onClick={handleDownload} data-testid="scenario-download-button">
+          <Button
+            type="button"
+            onClick={handleDownload}
+            data-testid="scenario-download-button"
+            {...capabilityAnchorProps(SAVE_LOAD_DOWNLOAD_ANCHOR)}
+          >
             <FaDownload aria-hidden />
             Download
           </Button>

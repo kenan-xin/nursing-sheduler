@@ -11,7 +11,12 @@
 // performs the version check, container parse, axis alignment, baseline hash, and
 // whole-document validation itself.
 
-import { assembleRosterDocument, ROSTER_SUBMISSION_SCHEMA_VERSION } from "@/lib/roster";
+// DIRECT LEAF IMPORTS, not the `@/lib/roster` barrel. The barrel's export surface
+// reaches back into this module (via roster-clear → @/lib/optimize), so importing it
+// here closed a real ESM cycle. The owners are unchanged — F3 still owns assembly and
+// the submission version — this only stops loading F3's unrelated public exports.
+import { assembleRosterDocument } from "@/lib/roster/assemble";
+import { ROSTER_SUBMISSION_SCHEMA_VERSION } from "@/lib/roster/types";
 import type { BuildCandidateDocument } from "./roster-capture";
 
 /**

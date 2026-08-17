@@ -1,0 +1,91 @@
+// Transactional per-scenario repository (T02) — public surface.
+//
+// The durable authority for scenario content, writer ownership, revisions, and
+// bounded history. NOT yet wired into components: the legacy Zustand/`persist`
+// path stays live as the projection until T03 performs the cutover.
+
+export {
+  ASSISTANT_WRITE_TABLES,
+  MERGED_LADDER_VERSION,
+  NurseSchedulerDb,
+  NURSE_SCHEDULER_DB_NAME,
+  REPOSITORY_SCHEMA_VERSION,
+  ROSTER_STORAGE_TABLES_VERSION,
+  SCENARIO_WRITE_TABLES,
+} from "./schema";
+
+export { RepositoryError, isRepositoryError, type RepositoryErrorCode } from "./errors";
+
+export {
+  applyScenarioCommand,
+  isContentCommand,
+  isSemanticNoOpCommand,
+  type ScenarioCommandV1,
+} from "./commands";
+// `assertValidScenarioSnapshot` is deliberately NOT re-exported: it is the
+// repository's own in-transaction guard, and the structural contract it delegates to
+// is `sanitizePersistedScenario`, which callers outside the durable authority use
+// directly. Publishing it here would invite a caller to "pre-validate" and then write
+// through some other path.
+
+export { assertLeaseOwnership, isLeaseLive, LEASE_HEARTBEAT_MS, LEASE_TTL_MS } from "./leases";
+
+export { describeHistory, HISTORY_LIMIT, type HistoryAvailability } from "./history";
+
+export { assertGenerationsUnchanged, ensureGeneration, generationScopesFor } from "./generations";
+
+export {
+  createScenarioRepository,
+  type AtomicAssistantApply,
+  type CommitInput,
+  type CommitResult,
+  type CommittedAssistantApply,
+  type ReceiptStanding,
+  type ReceiptUndoState,
+  type ScenarioRepository,
+  type ScenarioRepositoryConfig,
+  type ScenarioSelection,
+  type ScenarioSwitch,
+  type ScenarioSwitchTarget,
+  type TabContext,
+} from "./repository";
+
+export {
+  migrateLegacyScenarioRecord,
+  readLegacyMigrationRecord,
+  type LegacyMigrationOutcome,
+} from "./migration";
+
+export { commandDigest, stableStringify } from "./digest";
+
+export {
+  GLOBAL_GENERATION_SCOPE,
+  LEGACY_MIGRATION_KEY,
+  scenarioGenerationScope,
+  type AssistantProposalStatus,
+  type AssistantProposalV1,
+  type AssistantReceiptV1,
+  type AssistantWriteFenceV1,
+  type CapturedGeneration,
+  type DiagnosticSearchRecordV1,
+  type GenerationScopeKey,
+  type HistoryLinkV1,
+  type LeaseOwner,
+  type LeaseResult,
+  type LegacyMigrationRecord,
+  type MetaRow,
+  type OptimizeBasisOwnerKind,
+  type OptimizeBasisRecordFields,
+  type OptimizeBasisRecordV1,
+  type OptimizeBasisRecordV2,
+  type ReversibleScenarioPayload,
+  type RosterRow,
+  type ScenarioCommitKind,
+  type ScenarioCommitV1,
+  type ScenarioEnvelopeV3,
+  type ScenarioSnapshot,
+  type SnapshotRow,
+  type StoredOptimizeBasisRow,
+  type TabWorkspaceSelectionV1,
+  type WriterLeaseV2,
+} from "./types";

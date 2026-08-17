@@ -7,7 +7,24 @@ import { expect, test, type Page } from "@playwright/test";
 
 type NsWindow = {
   __nsStore: {
-    scenario: { getState(): Record<string, unknown> & { mutateScenario(x: unknown): void } };
+    /** The repository command bus — the product's only durable write path. */
+    commands: {
+      mutate(patch: Record<string, unknown>): Promise<{ ok: boolean }>;
+      recordBackup(): Promise<{ ok: boolean }>;
+      undo(): Promise<{ ok: boolean }>;
+      redo(): Promise<{ ok: boolean }>;
+      takeover(): Promise<{ ok: boolean }>;
+    };
+    drain(): Promise<void>;
+    historyDepth(): Promise<number>;
+    authority(): {
+      scenarioId: string | null;
+      documentRevision: number;
+      ownership: string;
+      canUndo: boolean;
+      canRedo: boolean;
+    };
+    scenario(): Record<string, unknown>;
     backupStatus(): "none" | "current" | "stale";
   };
 };
@@ -21,8 +38,8 @@ async function gotoReadyHome(page: Page) {
 }
 
 async function mutate(page: Page, patch: Record<string, unknown>) {
-  await page.evaluate((p) => {
-    (window as unknown as NsWindow).__nsStore.scenario.getState().mutateScenario(p);
+  await page.evaluate(async (p) => {
+    await (window as unknown as NsWindow).__nsStore.commands.mutate(p);
   }, patch);
 }
 
@@ -84,9 +101,19 @@ test.describe("T08 rebuild — two-mode Home (BLOCKER 2)", () => {
     await expect(page.getByTestId("home-advanced")).toBeVisible();
     await expect(page.getByTestId("home-wizard-grid")).toHaveCount(0);
     // Every Advanced-visible destination except Home is a direct entry point
-    // (13 of 14 — DL12 §2: Guided's five Set up entries incl. Rules, the five raw
-    // Constraints editors, Optimise & Export, Save & Load, and — since G4 — Roster).
-    await expect(page.locator('[data-testid^="home-adv-"]')).toHaveCount(13);
+    // (14 of 15 — DL12 §2: Guided's five Set up entries incl. Rules, the five raw
+    // Constraints editors, Optimise & Export, Save & Load, — since G4 — Roster, and
+    // T04's Settings).
+    //
+    // Settings is included for the same reason Save & Load is: the grid's rule is
+    // "every Advanced destination except Home", not "every scenario editor", and a
+    // destination the sidebar lists but the grid omits would be the drift this
+    // count exists to catch.
+    //
+    // INTEGRATION: each side independently reached 13 of 14 from a shared 12 of 13 —
+    // main by adding Roster, the assistant branch by adding Settings. Both are in the
+    // merged nav, so the grid is 14 of 15.
+    await expect(page.locator('[data-testid^="home-adv-"]')).toHaveCount(14);
     // Reachability preserved: still routes.
     await page.getByTestId("home-adv-/dates").click();
     await expect(page).toHaveURL(/\/dates$/);

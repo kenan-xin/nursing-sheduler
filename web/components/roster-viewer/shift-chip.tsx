@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 import { typedIdKey } from "@/lib/roster";
 import { dayStateDisplay } from "@/lib/roster";
 import type { RosterDayState } from "@/lib/roster";
-import type { ShiftRampEntry } from "@/lib/roster-viewer";
+import { SHIFT_FAMILY_RAMP, type ShiftRampEntry } from "@/lib/roster-viewer";
 
 // The fixed chip geometry from DESIGN.md §5. Absolute px, NOT multiplied by the
 // 0.9 baseline — only spacing and type ride the multiplier.
@@ -96,7 +96,7 @@ export function ShiftChip({ day, ramp }: ShiftChipProps) {
   }
 
   // Worked shift: the literal ramp fill/ink.
-  const entry = ramp ?? SHIFT_RAMP_FALLBACK;
+  const entry = ramp ?? SHIFT_FAMILY_RAMP.other;
   return (
     <span
       // A stable hook for the browser gate that MEASURES the 34×28 box. jsdom can
@@ -114,17 +114,6 @@ export function ShiftChip({ day, ramp }: ShiftChipProps) {
     </span>
   );
 }
-
-/**
- * The "other" family's fallback entry, for a shift whose start time could not
- * be classified. In practice `assignShiftRamp` covers every shift id, but the
- * fallback keeps the chip total even if a caller forgets to pass the ramp.
- */
-const SHIFT_RAMP_FALLBACK: ShiftRampEntry = {
-  fill: "#2b2733",
-  ink: "#ece6f2",
-  bar: "#5c5468",
-};
 
 /** Re-export so callers can build a ramp-keyed lookup from the context. */
 export { typedKeyForShiftId };

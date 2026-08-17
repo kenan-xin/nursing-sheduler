@@ -1,0 +1,20 @@
+id: production-source-text-read-tsx
+valid:
+  - |
+    const css = readFileSync(join(ROOT, "app/globals.css"), "utf8");
+    const el = <div />;
+  - |
+    const entries = readdirSync(join(ROOT, "components/ui"));
+    const el = <div />;
+  - |
+    const present = existsSync(join(ROOT, "components/ui/surface.tsx"));
+    const el = <div />;
+invalid:
+  # The shape `primitives-v2.test.tsx` and `theme-toggle.test.tsx` used before ticket 3.
+  - |
+    const source = readFileSync(join(UI, "button.tsx"), "utf8");
+    const el = <div />;
+  - |
+    const self = readFileSync("components/theme/theme-toggle.tsx", "utf8");
+    const hexes = self.match(/#[0-9a-f]{6}/gi);
+    const el = <div />;

@@ -31,6 +31,7 @@ from ..errors import (
     JobOperationNotAllowedError,
     StoreWriteConflictError,
 )
+from ..basis_admission import VerifiedBasis
 from ..job_store import JobStore
 from ..retry import retry_with_backoff
 from .models import (
@@ -38,6 +39,7 @@ from .models import (
     Job,
     JobEvent,
     JobFailure,
+    JobPurpose,
     JobRequest,
     JobState,
     OptimizationResult,
@@ -103,13 +105,25 @@ class JobController:
         prettify: bool | None,
         timeout_seconds: int,
         input_bytes: bytes,
+        basis: VerifiedBasis | None = None,
+        purpose: JobPurpose = JobPurpose.ORDINARY,
     ) -> Job:
         """Create and enqueue a job with its submitted input.
 
+        A supplied `basis` has ALREADY been independently verified against the
+        received bytes and the live semantic profile (T08). It is written once,
+        here, into the immutable request, and no later transition rewrites it.
+
         ID collisions are retried before reporting an application conflict.
+
+        `purpose` is fixed here and never rewritten (T09). It decides which priority
+        queue the job joins and whether the reserved ordinary admission slots are
+        available to it; it defaults to ordinary so an unqualified submission keeps
+        full access to pending capacity.
 
         Raises:
             JobCapacityError: If pending or retained capacity is exhausted.
+            DiagnosticCapacityError: If only the reserved ordinary slots remain.
             JobOperationContentionError: If a unique job ID cannot be allocated.
         """
         now = self._clock()
@@ -125,8 +139,14 @@ class JobController:
                     solver=solver,
                     prettify=prettify,
                     timeout_seconds=timeout_seconds,
+                    purpose=purpose,
+                    basis=basis.basis if basis is not None else None,
+                    basis_id=basis.basis_id if basis is not None else None,
+                    parent_basis_id=basis.parent_basis_id if basis is not None else None,
+                    transform_digest=basis.transform_digest if basis is not None else None,
                 ),
                 created_at=now,
+                expires_at=now + timedelta(seconds=self._retention_seconds),
             )
             initial_event = self._state_event(job, now)
             if self._runtime_identity is not None:
@@ -141,8 +161,10 @@ class JobController:
             failure_message="Unable to allocate a unique job identifier",
         )
         server_logger.info(
-            "[server:job] queued job_id=%s solver=%s timeout=%s input_name=%s queue_position=%s client_id=%s",
+            "[server:job] queued job_id=%s purpose=%s solver=%s timeout=%s input_name=%s "
+            "queue_position=%s client_id=%s",
             created.id,
+            created.request.purpose.value,
             created.request.solver,
             created.request.timeout_seconds,
             created.request.input_name,
@@ -615,6 +637,18 @@ class JobController:
                 expired_ids.append(expired.id)
                 self._log_terminal_job(expired)
         return expired_ids
+
+    def repair_queue_residue(self) -> list[str]:
+        """Remove queue index entries no job record justifies (T09).
+
+        Return the stable kind of each repair performed. Residue is removed, never
+        claimed and never counted as capacity.
+        """
+        repaired = self._store.repair_queue_residue(self._clock())
+        for kind in repaired:
+            # Bounded and content-free: a stable code only, never job input.
+            server_logger.warning("[server:job] queue-residue-removed kind=%s", kind)
+        return repaired
 
     def _update_job_with_retry(
         self,

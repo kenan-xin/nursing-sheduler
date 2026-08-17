@@ -16,7 +16,7 @@
 // unchanged. Cross-references to the staff screen say "Staff".
 //
 // Store discipline (T04): every user action feeds ONE composed `ScenarioUiState`
-// to one `mutateScenario` call (one patch ⇒ one zundo entry). Rename/delete route
+// to one `scenarioCommands.mutate` call (one patch ⇒ one undo entry). Rename/delete route
 // through the core cascade so requirement `shiftType` refs follow a rename and empty
 // requirements drop on delete. A `RenameCollisionError` surfaces as a field error.
 //
@@ -38,8 +38,10 @@
 // staffing tie-in and every `data-testid` are untouched.
 
 import * as React from "react";
+import { capabilityAnchorProps } from "@/lib/capability/anchor-contract";
+import { SHIFT_TYPES_ADD_ANCHOR } from "./capability-anchors";
 import { toast } from "sonner";
-import { useScenarioStore } from "@/lib/store";
+import { useScenarioStore, scenarioCommands } from "@/lib/store";
 import { useLosableDraft } from "@/components/shell/use-losable-draft";
 import type { ScenarioUiState, UiShiftType } from "@/lib/scenario";
 import { RenameCollisionError } from "@/lib/cascade";
@@ -50,6 +52,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Surface, surfaceVariants } from "@/components/ui/surface";
+import { InsetHairlineTile } from "@/components/ui/inset-hairline-box";
 import {
   FaPlus,
   FaArrowRight,
@@ -86,11 +89,17 @@ import {
   resolveStaffingCardState,
   saveShiftTypeCard,
   ShiftRequirementValidationError,
+  ShiftSaveRefusedError,
   StaleShiftRequirementError,
   type StaffingCardState,
 } from "./save-shift-card";
 
-type Commit = (next: ScenarioUiState) => void;
+/**
+ * Apply an operation to the durable scenario. The callback runs AT THE QUEUE HEAD,
+ * against the state the previous command committed — so rapid actions compose
+ * instead of overwriting each other. Returning `null` withdraws the write.
+ */
+type Commit = (transform: (live: ScenarioUiState) => ScenarioUiState | null) => void;
 type CurrentState = () => ScenarioUiState;
 
 // ---------------------------------------------------------------------------
@@ -181,9 +190,29 @@ export function ShiftTypeGrid() {
   const scenario = useScenarioStore((state) => state as ScenarioUiState);
   const items = descriptor.readItems(scenario);
   const groups = descriptor.readGroups(scenario);
-  const commit = React.useCallback<Commit>((next) => {
-    useScenarioStore.getState().mutateScenario(next);
-  }, []);
+  // The form-open token (captured on the closed⇌open transition below). Declared
+  // here because `commit` has to read it at CALL time.
+  const openToken = React.useRef<{ items: UiShiftType[]; groups: EditorGroup[] } | null>(null);
+
+  const commit = React.useCallback<Commit>(
+    (transform) => {
+      // T03F1: same reasoning as `people-table.tsx` — the OPERATION is applied at the
+      // queue head so rapid actions compose, and the form-open token is snapshotted
+      // at the click rather than read after a newer commit has already cleared it.
+      const token = openToken.current;
+      void scenarioCommands.mutate((live) => {
+        if (
+          token !== null &&
+          (descriptor.readItems(live) !== token.items ||
+            descriptor.readGroups(live) !== token.groups)
+        ) {
+          return null;
+        }
+        return transform(live as ScenarioUiState);
+      });
+    },
+    [descriptor],
+  );
   const currentState = React.useCallback<CurrentState>(
     () => useScenarioStore.getState() as ScenarioUiState,
     [],
@@ -200,7 +229,6 @@ export function ShiftTypeGrid() {
   // against ("form-open token"); `isStale` re-reads the live store and reports
   // whether that relevant slice changed (undo/redo temporal travel or a cascade
   // from elsewhere). It gates BOTH the visible-close effect and every submit path.
-  const openToken = React.useRef<{ items: UiShiftType[]; groups: EditorGroup[] } | null>(null);
   const wasEditing = React.useRef(false);
   if (editing !== wasEditing.current) {
     wasEditing.current = editing;
@@ -230,7 +258,7 @@ export function ShiftTypeGrid() {
     setDragIndex(null);
     setOverIndex(null);
     if (from != null && from !== to) {
-      commit(reorderItems(currentState(), descriptor, from, to));
+      commit((live) => reorderItems(live, descriptor, from, to));
     }
   };
 
@@ -238,7 +266,7 @@ export function ShiftTypeGrid() {
   // `reorderItems` commit ⇒ one undo entry, exactly like a drop.
   const move = (from: number, to: number) => {
     if (to < 0 || to >= items.length || from === to) return;
-    commit(reorderItems(currentState(), descriptor, from, to));
+    commit((live) => reorderItems(live, descriptor, from, to));
   };
 
   return (
@@ -301,6 +329,7 @@ export function ShiftTypeGrid() {
           onClick={() => setSel((cur) => (cur?.t === "add-shift" ? null : { t: "add-shift" }))}
           aria-pressed={sel?.t === "add-shift"}
           data-testid="add-shift-toggle"
+          {...capabilityAnchorProps(SHIFT_TYPES_ADD_ANCHOR)}
         >
           <FaPlus />
           Add shift
@@ -364,7 +393,7 @@ export function ShiftTypeGrid() {
               onEdit={() => setSel({ t: "edit-shift", key })}
               onDelete={() => {
                 setSel(null);
-                commit(deleteItem(currentState(), descriptor, item.id));
+                commit((live) => deleteItem(live, descriptor, item.id));
               }}
               onDragStart={() => setDragIndex(index)}
               onDragOver={() => setOverIndex(index)}
@@ -387,7 +416,6 @@ export function ShiftTypeGrid() {
         items={items}
         groups={groups}
         commit={commit}
-        currentState={currentState}
         isStale={isStale}
         editing={editing}
         addOpen={sel?.t === "add-group"}
@@ -422,32 +450,14 @@ export function ShiftTypeGrid() {
  */
 const RESERVED_CARD_SURFACE = "rounded-card border border-line2 bg-surface";
 
-/**
- * The icon tile and the working-time readout are the SAME visual contract:
- * `--panel` behind a `--line2` hairline at the control radius, with the inset
- * cast. F2's `ii7.8.5` added the `emphasis` axis, so the shared recipe now emits
- * exactly that — this is the public authority (technical plan T5), not a local
- * reimplementation with canonical tokens.
- *
- * DESIGN.md §5 files "inner bordered boxes" under `--r-ctl`, which is what both
- * of these are.
- */
-const INSET_HAIRLINE_BOX = surfaceVariants({
-  role: "well",
-  geometry: "control",
-  emphasis: "hairline",
-});
-
-/**
- * The tile's box is the prototype's 42px, which has no token and cannot be a
- * `size-[42px]` utility beside the recipe: a recipe consumer's className is held
- * to layout utilities with VALIDATED values, and every arbitrary value is
- * rejected. `size-control-lg` would be 44px and `size-11.6667` is not a size
- * anyone should read. So the one dimension that has no token is set as a style,
- * the same mechanism `Select` uses for its caret gutter — and, unlike a class, it
- * cannot be defeated by a caller.
- */
-const ICON_TILE_BOX = { width: 42, height: 42 } as const;
+// The icon tile and the working-time readout are the SAME visual contract, and
+// `InsetHairlineTile` / `InsetHairlineReadout` own it — the tuple, the 42px box
+// and the `--ctl` height all live in `components/ui/inset-hairline-box`.
+//
+// This route used to hold a stored `surfaceVariants(...)` result and a style
+// constant here and spread both onto three raw `<div>`s; ownership then had to
+// be PROVEN by resolving each className through `cn` and its aliases. It is now
+// a property of the element that is written, so there is nothing left to resolve.
 
 const RESERVED_META: Record<string, { icon: IconType; reason: string }> = {
   OFF: {
@@ -477,13 +487,9 @@ function ReservedCard({ id, description }: { id: string; description?: string })
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-3">
-          <div
-            data-slot="shift-tile"
-            style={ICON_TILE_BOX}
-            className={cn("flex flex-none items-center justify-center", INSET_HAIRLINE_BOX)}
-          >
+          <InsetHairlineTile>
             <Icon aria-hidden className="text-ink2" />
-          </div>
+          </InsetHairlineTile>
           <div className="min-w-0">
             <div className="font-heading text-title font-bold leading-none tracking-[-0.015em]">
               {id}
@@ -589,13 +595,9 @@ function ShiftCard({
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex min-w-0 items-center gap-3">
-          <div
-            data-slot="shift-tile"
-            style={ICON_TILE_BOX}
-            className={cn("flex flex-none items-center justify-center", INSET_HAIRLINE_BOX)}
-          >
+          <InsetHairlineTile>
             <FaClock aria-hidden className="text-ink2" />
-          </div>
+          </InsetHairlineTile>
           <div className="min-w-0">
             <div
               data-testid={`shift-code-${cardKey}`}
@@ -1018,8 +1020,8 @@ function ShiftCardEditor({
     setDraft((d) => ({ ...d, preferred }));
   };
 
-  /** Commit code/name/time + staffing through one live-state updater. */
-  const commitShiftDraft = () => {
+  /** Commit code/name/time + staffing as one durable repository command. */
+  const commitShiftDraft = async () => {
     if (!idCheck.ok) return;
     const staffingDraft =
       staffing.kind === "editable"
@@ -1030,8 +1032,8 @@ function ShiftCardEditor({
             preferred: draft.preferred,
           }
         : ({ type: "none" } as const);
-    const result = saveShiftTypeCard(
-      (updater) => useScenarioStore.getState().mutateScenario(updater),
+    const result = await saveShiftTypeCard(
+      (updater) => scenarioCommands.mutate(updater),
       mode === "add"
         ? {
             mode,
@@ -1061,7 +1063,7 @@ function ShiftCardEditor({
     );
   };
 
-  const save = () => {
+  const save = async () => {
     // Synchronous stale-Save guard: abort if the item/group slice changed since the
     // form opened (temporal travel / external cascade) — no commit, no history entry.
     if (isStale()) {
@@ -1083,13 +1085,18 @@ function ShiftCardEditor({
       return;
     }
     try {
-      commitShiftDraft();
+      // Awaited: the commit's stale-baseline, validation and rename-collision
+      // refusals now surface as a rejection from the queued repository command,
+      // so closing the form before it settles would drop the on-card notice and
+      // report a save that never happened.
+      await commitShiftDraft();
       onDone();
     } catch (err) {
       const message =
         err instanceof RenameCollisionError ||
         err instanceof ShiftRequirementValidationError ||
-        err instanceof StaleShiftRequirementError
+        err instanceof StaleShiftRequirementError ||
+        err instanceof ShiftSaveRefusedError
           ? err.message
           : "Save failed.";
       setSaveError(message);
@@ -1116,13 +1123,9 @@ function ShiftCardEditor({
       }}
     >
       <div className="flex items-center gap-3 border-b border-line2 pb-4">
-        <div
-          data-slot="shift-tile"
-          style={ICON_TILE_BOX}
-          className={cn("flex flex-none items-center justify-center", INSET_HAIRLINE_BOX)}
-        >
+        <InsetHairlineTile>
           <FaClock aria-hidden className="text-ink2" />
-        </div>
+        </InsetHairlineTile>
         <div className="min-w-0">
           {/* Uppercase labels carry +0.03em, never a bespoke tracking value
               (DESIGN.md §3 Negative-Tracking Rule). v1 ran this one at 0.06em. */}

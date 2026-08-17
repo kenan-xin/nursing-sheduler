@@ -1,0 +1,22 @@
+id: pseudo-element-hitbox
+valid:
+  # The minimum is on the real control.
+  - |
+    export const A = () => <button className="pointer-coarse:min-h-touch" />;
+  - |
+    export const B = () => <button className="pointer-coarse:size-touch" />;
+  # A pseudo-element that is not a hitbox.
+  - |
+    export const C = () => <span className="after:content-['']" />;
+  - |
+    export const C2 = () => <span className="hover:after:opacity-100" />;
+invalid:
+  - |
+    export const D = () => <button className="relative after:-inset-2 after:absolute" />;
+  - |
+    export const E = () => <button className="before:inset-0 before:absolute" />;
+  # BOUNDED-REVIEW ROUND 1: a variant before the pseudo-element used to pass.
+  - |
+    export const F = () => <button className="relative hover:after:-inset-2" />;
+  - |
+    export const G = () => <button className="data-[pressed]:before:inset-0" />;

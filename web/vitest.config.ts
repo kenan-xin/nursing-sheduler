@@ -23,5 +23,15 @@ export default defineConfig({
     // ordinary node code whose focused unit tests belong beside them. Every
     // browser suite is a `*.spec.ts`, so the two never collide.
     exclude: ["node_modules/**", ".next/**", "e2e/**/*.spec.ts"],
+    server: {
+      deps: {
+        // `@copilotkit/react-core/v2` imports its own stylesheet from inside the
+        // package (`dist/v2/index.mjs` -> `./index.css`). Externalized, that reaches
+        // Node's ESM loader, which cannot load `.css`; inlined, Vite transforms the
+        // module and handles the import. Without this the assistant's component
+        // suite cannot import the library at all.
+        inline: [/@copilotkit\/react-core/],
+      },
+    },
   },
 });

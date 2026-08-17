@@ -24,13 +24,17 @@
 // Forget/Abandon/Optimize-again terminology or a technical recovery copy.
 
 import { rosterStorage, type RosterStorage } from "@/lib/store";
-import { notifyRosterCaptureCleared } from "@/lib/optimize";
-import { ROSTER_VIEW_PREFERENCE_KEY } from "@/lib/roster-viewer";
+// DIRECT LEAF IMPORTS, not the `@/lib/optimize` and `@/lib/roster-viewer` barrels.
+// Both barrels' export surfaces reach back into `@/lib/roster`, so importing them from
+// inside the roster domain closed two real ESM cycles. Ownership is unchanged: F2 still
+// owns capture and session authority, F4 still owns the view key.
+import { notifyRosterCaptureCleared } from "@/lib/optimize/roster-capture-app";
+import { ROSTER_VIEW_PREFERENCE_KEY } from "@/lib/roster-viewer/view-preference";
 import {
   clearAllOptimizeSessions,
   clearRetirementPending,
   type SessionTransactionStorage,
-} from "@/lib/optimize";
+} from "@/lib/optimize/session-transaction";
 import { acquireSessionStorage } from "@/lib/optimize/session-storage";
 
 /** The residue report for the session-storage cut. */

@@ -29,7 +29,14 @@ import { cn } from "@/lib/utils";
 import { rangeDayCount } from "@/lib/dates";
 import { toCanonicalScenarioDocument } from "@/lib/scenario/canonical";
 import type { CardsByKind } from "@/lib/scenario";
-import { useScenarioStore } from "@/lib/store";
+import {
+  drainScenarioCommands,
+  readAuthoritativeScenarioOwnership,
+  scenarioCommands,
+  useAuthorityStore,
+  useScenarioStore,
+} from "@/lib/store";
+import { toast } from "sonner";
 import {
   OPTIMIZE_TIMEOUT_MAX_SECONDS,
   OPTIMIZE_TIMEOUT_MIN_SECONDS,
@@ -166,7 +173,17 @@ export function OptimizeAndExportScreen({
   retirementDeps,
   observability: observabilityProp,
 }: OptimizeAndExportScreenProps) {
-  const controller = useOptimizeRun(controllerDeps);
+  // INTENT 5 — the observability instance is built BEFORE the controller so the
+  // controller can report basis degradations into the SAME bounded buffer the
+  // terminal orchestration and the run emissions below use. An explicitly injected
+  // `controllerDeps.observability` still wins.
+  const observabilityRef = useRef<OptimizeObservability | null>(null);
+  if (observabilityRef.current === null) {
+    observabilityRef.current = observabilityProp ?? createOptimizeObservability();
+  }
+  const observability = observabilityRef.current;
+
+  const controller = useOptimizeRun({ observability, ...controllerDeps });
   const serverInfo = useOptimizeServerInfo(serverInfoDeps);
 
   // The visit's attempt registry. Mount-scoped ON PURPOSE: this is the authority
@@ -177,12 +194,6 @@ export function OptimizeAndExportScreen({
   const attemptsRef = useRef<AttemptRegistry | null>(null);
   if (attemptsRef.current === null) attemptsRef.current = createAttemptRegistry();
   const attempts = attemptsRef.current;
-
-  const observabilityRef = useRef<OptimizeObservability | null>(null);
-  if (observabilityRef.current === null) {
-    observabilityRef.current = observabilityProp ?? createOptimizeObservability();
-  }
-  const observability = observabilityRef.current;
 
   // The one app-lifetime capture gate. It is created BEFORE the terminal hook and
   // passed in, so the default production path fetches `/roster`, assembles and
@@ -419,16 +430,63 @@ export function OptimizeAndExportScreen({
   }, [view.lifecycle, view.jobId, view.error, observability]);
 
   // --- actions ---------------------------------------------------------------
-  const buildSubmitInput = useCallback((): OptimizeRunSubmitInput | null => {
+  /**
+   * The final pre-submit AUTHORITY check (T03), preserved through the integration.
+   *
+   * Not a readiness gate — Optimize's readiness rules, payload shape, error copy and
+   * run semantics are unchanged. What it guarantees is that the bytes submitted are
+   * the COMMITTED document, sent by the tab that actually holds the lease. The
+   * projection can say "owner" while the persisted lease names a peer that took over
+   * without writing content, and an unchanged revision does not reconcile that away.
+   */
+  const preflightAuthority = useCallback(async (): Promise<boolean> => {
+    // Drain so the committed document — not an in-flight frame — is what the payload
+    // is built from.
+    await drainScenarioCommands();
+    const ownership = await readAuthoritativeScenarioOwnership();
+    if (ownership === null || !ownership.isOwner) return false;
+    // Bind the persisted revision to payload preparation: if the projection is behind
+    // durable truth, refresh it FIRST so the document is built from committed state.
+    if (ownership.documentRevision !== useAuthorityStore.getState().documentRevision) {
+      await scenarioCommands.reconcile();
+      // Re-check the persisted owner after reconcile: reconciling is itself a
+      // lifecycle operation that can discover a takeover.
+      const reread = await readAuthoritativeScenarioOwnership();
+      if (reread === null || !reread.isOwner) return false;
+    }
+    return true;
+  }, []);
+
+  const buildSubmitInput = useCallback(async (): Promise<OptimizeRunSubmitInput | null> => {
     const parsed = parseTimeoutInput(timeoutValue);
     if (!parsed.ok) {
       setTimeoutError(TIMEOUT_ERROR);
       return null;
     }
     setTimeoutError(null);
+    // Validation stays FIRST, so an invalid timeout still reports itself without
+    // touching the repository or the run.
+    if (!(await preflightAuthority())) {
+      toast.error(
+        "This schedule is being edited in another tab. Take over editing before optimising.",
+      );
+      return null;
+    }
     const document = toCanonicalScenarioDocument(useScenarioStore.getState());
-    return { document, anonymize, prettify, timeout: parsed.value };
-  }, [anonymize, prettify, timeoutValue]);
+    return {
+      document,
+      anonymize,
+      prettify,
+      timeout: parsed.value,
+      // INTENT 1 — the backend semantic profile from the SAME `/api/info` read the
+      // status bar renders. Omitting it is what a run does when the profile is
+      // unreadable, and the controller degrades to an ordinary un-claimed run — which
+      // is precisely why leaving it out was invisible: every run looked healthy and
+      // every run silently recorded no submission basis, so T10's bounded diagnostic
+      // had no parent to diagnose.
+      semanticProfile: serverInfo.semanticProfile,
+    };
+  }, [anonymize, prettify, timeoutValue, preflightAuthority, serverInfo.semanticProfile]);
 
   // The click boundary. One click owns one attempt until its POST settles.
   //
@@ -451,7 +509,7 @@ export function OptimizeAndExportScreen({
       await joined;
       return;
     }
-    const input = buildSubmitInput();
+    const input = await buildSubmitInput();
     if (input === null) return;
     setStartFailed(false);
 

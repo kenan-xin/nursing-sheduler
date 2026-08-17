@@ -44,6 +44,22 @@ def _positive_int(name: str, default: int) -> int:
     return value
 
 
+def _non_negative_int(name: str, default: int) -> int:
+    """Read a non-negative integer environment setting.
+
+    Separate from `_positive_int` because zero is a MEANINGFUL value for the
+    ordinary reserve (an operator explicitly choosing not to reserve a slot),
+    while zero is meaningless for a capacity or timeout.
+
+    Raises:
+        ValueError: If the configured value is negative.
+    """
+    value = int(os.getenv(name, default))
+    if value < 0:
+        raise ValueError(f"{name} must not be negative")
+    return value
+
+
 def _positive_float(name: str, default: float) -> float:
     """Read a positive floating-point environment setting.
 
@@ -64,10 +80,25 @@ class ServerSettings:
     """Persistence backend selected for this process: `memory` or `redis`."""
     redis_url: str = "redis://localhost:6379/0"
     """Connection URL used by the Redis job store."""
-    redis_key_prefix: str = "nurse_scheduling:jobs:v0"
-    """Namespace and schema version prepended to every Redis key."""
+    redis_key_prefix: str = "nurse_scheduling:jobs:v1"
+    """Namespace and schema version prepended to every Redis key.
+
+    Bumped v0 to v1 by T09: the single queue index was replaced by one index per
+    job purpose, and every key moved beneath a shared hash tag. A v0 namespace's
+    queued entries would be invisible to the new state machine, so the version
+    bump is what makes that incompatibility explicit instead of silent. Jobs are
+    transient computation state, so no migration of in-flight work is implied.
+    """
     max_pending_jobs: int = 8
     """Maximum number of queued, running, or cancelling jobs."""
+    ordinary_reserved_slots: int = 1
+    """Pending slots only ordinary work may be admitted into (T09).
+
+    With the default of eight pending jobs and a reserve of one: ordinary admission
+    succeeds while total pending is below eight, and diagnostic admission succeeds
+    only while total pending is below seven. Retained-terminal limits and cleanup
+    stay shared between purposes.
+    """
     max_retained_jobs: int = DEFAULT_MAX_RETAINED_JOBS
     """Maximum total jobs retained, including terminal history."""
     job_retention_seconds: int = DEFAULT_JOB_RETENTION_SECONDS
@@ -121,6 +152,8 @@ class ServerSettings:
                 raise ValueError(f"{name} must be positive")
         if self.max_retained_jobs < self.max_pending_jobs:
             raise ValueError("max_retained_jobs must be at least max_pending_jobs")
+        if not 0 <= self.ordinary_reserved_slots < self.max_pending_jobs:
+            raise ValueError("ordinary_reserved_slots must satisfy 0 <= reserve < max_pending_jobs")
         if self.default_timeout_seconds > self.max_timeout_seconds:
             raise ValueError("default_timeout_seconds must not exceed max_timeout_seconds")
 
@@ -134,8 +167,9 @@ class ServerSettings:
         return cls(
             job_backend=os.getenv("JOB_BACKEND", "memory").strip().lower(),
             redis_url=os.getenv("JOB_REDIS_URL", "redis://localhost:6379/0"),
-            redis_key_prefix=os.getenv("JOB_REDIS_KEY_PREFIX", "nurse_scheduling:jobs:v0"),
+            redis_key_prefix=os.getenv("JOB_REDIS_KEY_PREFIX", "nurse_scheduling:jobs:v1"),
             max_pending_jobs=_positive_int("JOB_MAX_PENDING", 8),
+            ordinary_reserved_slots=_non_negative_int("JOB_ORDINARY_RESERVED_SLOTS", 1),
             max_retained_jobs=_positive_int("JOB_MAX_RETAINED", DEFAULT_MAX_RETAINED_JOBS),
             job_retention_seconds=_positive_int("JOB_RETENTION_SECONDS", DEFAULT_JOB_RETENTION_SECONDS),
             max_events_per_job=_positive_int("JOB_MAX_EVENTS_PER_JOB", DEFAULT_MAX_EVENTS_PER_JOB),

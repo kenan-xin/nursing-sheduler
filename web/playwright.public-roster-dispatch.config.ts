@@ -43,6 +43,9 @@ export default defineConfig({
       BACKEND_API_URL: `http://127.0.0.1:${BACKEND_PORT}`,
       PUBLIC_ORIGIN: baseURL,
       NS_ENABLE_DEV_FIXTURES: "1",
+      // Same as the base config: compiles the read-only store bridge in for the
+      // browser suite only. An ordinary production build leaves it out entirely.
+      NEXT_PUBLIC_NS_TEST_BRIDGE: "1",
     },
     timeout: 120_000,
     // Force a fresh build so a stale server (without the roster route) never

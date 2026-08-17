@@ -88,7 +88,7 @@ interface SettlePass extends V2SettleState {
 
 interface ReadinessWindow {
   __nsStore?: {
-    hot: { getState(): { hydrationStatus: string } };
+    hot(): { hydrationStatus: string };
   };
 }
 
@@ -140,7 +140,7 @@ export async function awaitHydration(page: Page, row: V2Row): Promise<void> {
   const status = await page.waitForFunction(
     () => {
       const store = (window as unknown as ReadinessWindow).__nsStore;
-      const state = store?.hot.getState().hydrationStatus;
+      const state = store?.hot().hydrationStatus;
       return state === "ready" || state === "recoverable-error" ? state : null;
     },
     undefined,

@@ -24,7 +24,7 @@ describe("RequestsCsvModal", () => {
     fireEvent.change(screen.getByTestId("requests-csv-file-input"), {
       target: { files: [file] },
     });
-    await waitFor(() => expect(onFileText).toHaveBeenCalledWith("a,b,c"));
+    await waitFor(async () => expect(onFileText).toHaveBeenCalledWith("a,b,c"));
   });
 
   it("calls onClose when the close button is clicked", () => {
@@ -84,7 +84,7 @@ describe("RequestsCsvModal — exactly-once callbacks", () => {
     const file = new File(["a,b,c"], "data.csv", { type: "text/csv" });
     Object.defineProperty(file, "text", { value: () => Promise.resolve("a,b,c") });
     await userEvent.upload(screen.getByTestId("requests-csv-file-input"), file);
-    await waitFor(() => expect(onFileText).toHaveBeenCalledExactlyOnceWith("a,b,c"));
+    await waitFor(async () => expect(onFileText).toHaveBeenCalledExactlyOnceWith("a,b,c"));
     // Closing is the container's decision after it parses, not this modal's.
     expect(onClose).not.toHaveBeenCalled();
   });
@@ -99,12 +99,12 @@ describe("RequestsCsvModal — exactly-once callbacks", () => {
   it("Escape and a backdrop press each close once", async () => {
     const escape = renderModal();
     await userEvent.keyboard("{Escape}");
-    await waitFor(() => expect(escape.onClose).toHaveBeenCalledOnce());
+    await waitFor(async () => expect(escape.onClose).toHaveBeenCalledOnce());
     cleanup();
 
     const backdrop = renderModal();
     const overlay = document.querySelector("[data-slot='dialog-overlay']") as HTMLElement;
     await userEvent.click(overlay);
-    await waitFor(() => expect(backdrop.onClose).toHaveBeenCalledOnce());
+    await waitFor(async () => expect(backdrop.onClose).toHaveBeenCalledOnce());
   });
 });

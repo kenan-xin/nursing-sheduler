@@ -40,44 +40,53 @@ async function setRange(page: Page, start: string, end: string) {
     ([s, e]) => {
       const st = (
         window as unknown as {
-          __nsStore: { scenario: { getState(): { rangeStart: string; rangeEnd: string } } };
+          __nsStore: { scenario(): { rangeStart: string; rangeEnd: string } };
         }
-      ).__nsStore.scenario.getState();
+      ).__nsStore.scenario();
       return st.rangeStart === s && st.rangeEnd === e;
     },
     [start, end] as const,
   );
 }
 
-/** Read a scenario field from the live store via the e2e seam. */
+/**
+ * Read a COMMITTED scenario field via the e2e seam. Drained first: a durable
+ * command settles asynchronously, so reading straight after the interaction that
+ * issued it can outrun the commit.
+ */
 async function readField<T = unknown>(page: Page, key: string): Promise<T> {
-  return page.evaluate(
-    (k) =>
-      (
-        window as unknown as {
-          __nsStore: { scenario: { getState(): Record<string, unknown> } };
-        }
-      ).__nsStore.scenario.getState()[k] as T,
-    key,
-  );
+  return page.evaluate(async (k) => {
+    const store = (
+      window as unknown as {
+        __nsStore: {
+          drain(): Promise<void>;
+          scenario(): Record<string, unknown>;
+        };
+      }
+    ).__nsStore;
+    await store.drain();
+    return store.scenario()[k] as T;
+  }, key);
 }
 
 /** Directly patch the store (seed groups, inject reserved ids). */
 async function patchStore(page: Page, groups: { id: string; members: (string | number)[] }[]) {
-  await page.evaluate((g) => {
+  await page.evaluate(async (g) => {
     const store = (
       window as unknown as {
         __nsStore: {
-          scenario: {
-            getState(): {
-              dateGroups: { id: string; members: (string | number)[] }[];
-              mutateScenario(patch: Record<string, unknown>): void;
-            };
+          scenario(): {
+            dateGroups: { id: string; members: (string | number)[] }[];
           };
+          commands: { mutate(patch: Record<string, unknown>): Promise<{ ok: boolean }> };
         };
       }
-    ).__nsStore.scenario;
-    store.getState().mutateScenario({ dateGroups: [...store.getState().dateGroups, ...g] });
+    ).__nsStore;
+    // Seeded through the real command bus and awaited, so the durable commit has
+    // landed before the assertion (or a reload) that follows.
+    await store.commands.mutate({
+      dateGroups: [...store.scenario().dateGroups, ...g],
+    });
   }, groups);
 }
 
@@ -197,9 +206,9 @@ test.describe("T10 Dates & Calendar", () => {
     await page.waitForFunction(() => {
       const st = (
         window as unknown as {
-          __nsStore: { scenario: { getState(): { rangeEnd: string } } };
+          __nsStore: { scenario(): { rangeEnd: string } };
         }
-      ).__nsStore.scenario.getState();
+      ).__nsStore.scenario();
       return st.rangeEnd === "2026-08-11";
     });
 
@@ -218,9 +227,9 @@ test.describe("T10 Dates & Calendar", () => {
     await page.waitForFunction(() => {
       const st = (
         window as unknown as {
-          __nsStore: { scenario: { getState(): { rangeEnd: string } } };
+          __nsStore: { scenario(): { rangeEnd: string } };
         }
-      ).__nsStore.scenario.getState();
+      ).__nsStore.scenario();
       return st.rangeEnd === "2026-08-10";
     });
 

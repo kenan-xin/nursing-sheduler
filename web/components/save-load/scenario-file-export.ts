@@ -15,6 +15,7 @@ import {
   type PrepareExportResult,
   type ScenarioUiState,
 } from "@/lib/scenario";
+import { computeScenarioFingerprint, pickScenario } from "@/lib/store";
 
 /** The filename stamped on every plain (non-anonymised) scenario download. */
 export const SCENARIO_DOWNLOAD_FILENAME = "scenario.yaml";
@@ -22,8 +23,16 @@ export const SCENARIO_DOWNLOAD_FILENAME = "scenario.yaml";
 export interface PerformDownloadDeps {
   /** Write the validated YAML to a file download. Never called on an invalid draft. */
   writeFile: (yaml: string, filename: string) => void;
-  /** Record the emitted Workspace backup (`recordBackup`). Called ONLY after a successful write. */
-  recordBackup: () => void;
+  /**
+   * Record the emitted Workspace backup. Called ONLY after a successful write, and
+   * given the fingerprint OF THE BYTES JUST WRITTEN.
+   *
+   * Passing the fingerprint rather than letting the recorder compute one is the
+   * whole point: the durable write is queued, so a recorder that fingerprinted
+   * "current state" resolved against a later revision and marked a document
+   * current that had never been downloaded.
+   */
+  recordBackup: (backupFingerprint: string) => void;
 }
 
 export interface PerformCopyDeps {
@@ -34,6 +43,9 @@ export interface PerformCopyDeps {
 /**
  * Download: validate via `prepareExport`, write the file, then record the backup.
  * An invalid draft writes nothing and never touches `recordBackup` (FR-SL-02b).
+ *
+ * The fingerprint is computed from the SAME `state` that produced `result.yaml`, so
+ * "backup current" describes the bytes the user actually received.
  */
 export function performDownload(
   state: ScenarioUiState,
@@ -42,7 +54,7 @@ export function performDownload(
   const result = prepareWorkspaceExport(state);
   if (!result.ok) return result;
   deps.writeFile(result.yaml, SCENARIO_DOWNLOAD_FILENAME);
-  deps.recordBackup();
+  deps.recordBackup(computeScenarioFingerprint(pickScenario(state)));
   return result;
 }
 

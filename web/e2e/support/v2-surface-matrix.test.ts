@@ -1,9 +1,11 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ALL_NAV_ITEMS } from "@/components/shell/nav-config";
 import {
   HARNESS_NO_PROTOTYPE,
+  PRODUCT_NO_CANONICAL_PROTOTYPE,
+  ROUTES_WITHOUT_CANONICAL_PROTOTYPE,
   manifestInventory,
   rowForRoute,
   rowsForOwner,
@@ -26,14 +28,39 @@ import {
 // may edit it. These are the properties that make that safe: it is COMPLETE (no
 // route missing), CONSISTENT with the real route registry (no descriptor that
 // contradicts the shipped app), and DISJOINT (no two tickets owning one file).
+//
+// WHAT CHANGED (custom-AST ticket 3). This file used to READ nine sibling test/support
+// sources and regex them for skip annotations. It no longer reads any source. That
+// guarantee is now owned by the `frozen-v2-conditional-registration` ast-grep rule, scoped
+// to exactly those nine paths.
+//
+// Oxlint was the expected owner and is NOT sufficient here, which a probe established
+// rather than assumed: `vitest/no-disabled-tests`, `vitest/no-focused-tests` and
+// `vitest/no-commented-out-tests` are active repository-wide at `error` and do own test
+// hygiene everywhere they apply -- but they do not fire at all when `test` comes from
+// `@playwright/test`, and three of the nine files are Playwright specs. Oxlint also has no
+// rule for `skipIf`/`runIf`, which are legitimate elsewhere in this repository and forbidden
+// only in these nine. So the rule owns the whole nine-file contract, Oxlint remains the
+// repository-wide default for everything else, and the overlap on the single Vitest file
+// among the nine is deliberate.
+//
+// What remains below is `existsSync` only: prototype `.html` artifacts and Next.js
+// `page.tsx` presence. Neither reads a byte of any file.
 
 const REPO_ROOT = resolve(__dirname, "..", "..", "..");
 
 describe("inventory", () => {
-  it("holds exactly 14 product routes and 4 harness routes", () => {
-    expect(V2_PRODUCT_ROUTES).toHaveLength(14);
+  // 13 v2 re-skin routes, plus `/roster` (R8, the G4 closure) and `/settings`
+  // (T04, the optional AI assistant's only discovery surface).
+  //
+  // INTEGRATION: both sides independently reached 18 from a shared base of 17 — main
+  // by adding `/roster`, the assistant branch by adding `/settings`. Merged, both rows
+  // exist, so the manifest is 19 and the product count is 15. A textual merge would
+  // have silently kept 18 and lost one of them.
+  it("holds exactly 15 product routes and 4 harness routes", () => {
+    expect(V2_PRODUCT_ROUTES).toHaveLength(15);
     expect(V2_HARNESS_ROUTES).toHaveLength(4);
-    expect(V2_SURFACE_MATRIX).toHaveLength(18);
+    expect(V2_SURFACE_MATRIX).toHaveLength(19);
   });
 
   it("gives every route exactly one row", () => {
@@ -142,10 +169,21 @@ describe("prototypes", () => {
   it("every product row names a canonical prototype that exists", () => {
     for (const row of V2_SURFACE_MATRIX.filter((r) => r.kind === "product")) {
       expect(row.prototype, row.route).not.toBe(HARNESS_NO_PROTOTYPE);
+      if (row.prototype === PRODUCT_NO_CANONICAL_PROTOTYPE) continue;
       expect(existsSync(join(REPO_ROOT, row.prototype)), `${row.route} → ${row.prototype}`).toBe(
         true,
       );
     }
+  });
+
+  it("lets only the listed routes declare that they have no canonical prototype", () => {
+    // The escape hatch cannot spread: a new screen that skips visual parity has to
+    // be named here, and naming it is a reviewable act.
+    const declared = V2_SURFACE_MATRIX.filter(
+      (row) => row.prototype === PRODUCT_NO_CANONICAL_PROTOTYPE,
+    ).map((row) => row.route);
+
+    expect(declared).toEqual([...ROUTES_WITHOUT_CANONICAL_PROTOTYPE]);
   });
 
   it("every harness row records that it has no product prototype", () => {
@@ -315,37 +353,6 @@ describe("immutability", () => {
       (V2_SURFACE_MATRIX[0] as { route: string }).route = "/hijacked";
     }).toThrow();
     expect(V2_SURFACE_MATRIX[0].route).toBe("/design-system");
-  });
-});
-
-describe("selection is registration-time, never a skip", () => {
-  // The contract is that a row is not REGISTERED unless its owner is selected.
-  // A `test.skip` would produce the same green run while leaving a growing pile
-  // of unverified routes visible only in the reporter's skip count.
-  const files = [
-    "v2-surface-matrix.ts",
-    "v2-owner-selection.ts",
-    "v2-seed.ts",
-    "v2-readiness.ts",
-    "v2-visual-audit.ts",
-    "../v2-readiness.spec.ts",
-    "../v2-visual-system.spec.ts",
-    "../v2-visual-regression.spec.ts",
-    "../../app/v2-style-contract.test.ts",
-  ];
-
-  it.each(files)("%s contains no skip, fixme or conditional-skip annotation", (file) => {
-    const source = readFileSync(join(__dirname, file), "utf8");
-    // Matched as a CALL, and never when preceded by a backtick, so these files'
-    // own prose ABOUT not skipping does not trip the guard that enforces it.
-    //
-    // `runIf` is listed alongside `skipIf` deliberately: it is the inverse
-    // spelling of the same behaviour — the block is still REGISTERED and still
-    // reported as skipped. Out-of-scope work is filtered before registration, so
-    // a reporter's skip count stays at zero and cannot quietly become a backlog.
-    expect(source, `${file} uses a skip annotation`).not.toMatch(
-      /(?:^|[^`\w.])(?:test|it|describe)(?:\.\w+)*\.(?:skip|fixme|todo)\s*\(|\b(?:skipIf|runIf)\s*\(/m,
-    );
   });
 });
 

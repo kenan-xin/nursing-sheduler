@@ -1,0 +1,34 @@
+id: test-module-loader-call-tsx
+language: Tsx
+severity: error
+message: >-
+  `createRequire` builds a generic module loader: the value it returns resolves and loads
+  arbitrary paths, which is the same capability as `fs` reached by another route. It is
+  available only to the exact package-resolution exceptions in the reader ledger, which may
+  resolve DECLARED package ids and must not hand a generic loader back to their callers.
+note: >-
+  The `Tsx` twin of `test-module-loader-call`, covering the `.tsx` suites. Its `files:` list is
+  identical to its partner's -- the language, not the glob, is what splits them -- and
+  `ast-grep-rule-pairs.test.ts` asserts that equality. The three ignored paths are `.ts` files,
+  so this twin excuses nothing in practice; they are kept rather than trimmed so the family's
+  exception list reads identically wherever a reviewer opens it, and
+  `ast-grep-substrate.test.ts` asserts each path still exists.
+files:
+  - "**/*.test.*"
+  - "**/*.spec.*"
+  - "**/*.test-d.*"
+  - "e2e/**"
+  - "**/__tests__/**"
+  - "**/support/**"
+  - "**/test-support/**"
+  - "**/test-support.*"
+  - "**/*.test-support.*"
+  - "lib/store/test-authority.ts"
+ignores:
+  - "components/ai/assistant-styles.test.ts"
+  - "lib/ai/runtime/model-visible-tools.test.ts"
+  - "lib/ai/runtime/package-family.test.ts"
+rule:
+  any:
+    - pattern: createRequire($$$)
+    - pattern: $MOD.createRequire($$$)

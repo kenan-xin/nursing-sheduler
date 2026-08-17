@@ -1,0 +1,188 @@
+id: inset-hairline-box-authority
+valid:
+  # The three imports the owner is allowed to make. Each is a NAMED import: the
+  # namespace form is refused below, because it binds every element factory React
+  # publishes.
+  - |
+    import { forwardRef } from "react";
+  - |
+    import type { HTMLAttributes } from "react";
+  - |
+    import { Surface } from "@/components/ui/surface";
+  # `forwardRef` is a call, and an ordinary one -- the factory clause below must not
+  # catch the legitimate React API the owner actually needs.
+  - |
+    const C = forwardRef(function C() { return null; });
+  # The two elements the owner actually authors.
+  - |
+    const X = <Surface level="well" geometry="control" emphasis="hairline" />;
+  - |
+    const X = (
+      <Surface level="well" geometry="control" emphasis="hairline" className="flex">
+        {children}
+      </Surface>
+    );
+  # A spread and a data attribute on the sanctioned element are still the sanctioned
+  # element -- the rule is about the TAG, not about what it carries.
+  - |
+    const X = <Surface {...domProps} data-slot="shift-tile" style={{ width: 42 }} />;
+invalid:
+  # THE HEADLINE BYPASS. Canonical tokens hand-authored on a raw div paint
+  # byte-identically to the recipe, which is exactly why the deleted analyzer existed.
+  - |
+    const X = <div className="flex bg-panel shadow-well rounded-control border border-line2" />;
+  # ---------------------------------------------------------------------------
+  # THE COLD REVIEW'S EXACT BYPASS, reproduced verbatim. A raw intrinsic element with
+  # byte-identical classes, markers, slot, ref and children -- no JSX node, no forbidden
+  # import source. It passed typecheck, lint, both Vitest suites and the frozen browser
+  # proofs against the first draft of this rule.
+  #
+  # Two independent clauses fire on this shape now -- the namespace import and the
+  # `React.createElement` call. Because a fixture only has to match ONCE, neither can be
+  # verified through this composite alone, so every route is ALSO pinned by its own
+  # minimal fixture below. A future edit that removed one clause would still see this
+  # fixture pass; it would not see the minimal ones pass.
+  # ---------------------------------------------------------------------------
+  - |
+    import * as React from "react";
+    const X = React.createElement(
+      "div",
+      {
+        ...domProps,
+        ref,
+        "data-level": "well",
+        "data-geometry": "control",
+        "data-emphasis": "hairline",
+        "data-slot": "shift-tile",
+        className:
+          "flex flex-none items-center justify-center bg-panel shadow-well rounded-control border border-line2",
+        style: { width: 42, height: 42 },
+      },
+      children,
+    );
+  # 1. the namespace import itself, with no call at all.
+  - |
+    import * as React from "react";
+  # An ALIASED namespace is the same binding under another name.
+  - |
+    import * as Rx from "react";
+  # A DEFAULT import binds the module object too, under esModuleInterop.
+  - |
+    import React from "react";
+  # ...including alongside a legal named import.
+  - |
+    import React, { forwardRef } from "react";
+  # 2. a NAMED factory import, which the fail-closed allowlist refuses by absence.
+  - |
+    import { createElement } from "react";
+  # ...under an alias, and the other element APIs the allowlist does not name.
+  - |
+    import { createElement as h } from "react";
+  - |
+    import { cloneElement, isValidElement } from "react";
+  # `react/jsx-runtime` is a different SOURCE, so the source allowlist refuses it before
+  # the factory names matter.
+  - |
+    import { jsx, jsxs } from "react/jsx-runtime";
+  # 3. the call spelling, however the binding arrived -- including the aliasing case the
+  #    name allowlist admits, since `forwardRef` is a legal NAME.
+  - |
+    import { forwardRef as createElement } from "react";
+    const X = createElement("div", { className: "bg-panel" }, children);
+  - |
+    const X = h.createElement("div", { className: "bg-panel shadow-well" });
+  - |
+    const X = cloneElement(child, { className: "bg-panel" });
+  # ---------------------------------------------------------------------------
+  # ROUND 2's TWO BYPASSES, reproduced verbatim.
+  #
+  # The clauses above constrain static import STATEMENTS and callee SPELLINGS. These
+  # defeat both at once: the module arrives through a CALL, and the factory is
+  # destructured to `h`, so nothing is spelled `createElement` anywhere. Both passed
+  # typecheck, lint and the 32 focused tests; the `require` form also passed the build.
+  #
+  # They are caught at ACQUISITION now, which is why the alias no longer matters. As
+  # before, a composite fixture cannot verify WHICH clause caught it, so the bare
+  # acquisitions are pinned separately below.
+  # ---------------------------------------------------------------------------
+  - |
+    const { createElement: h } = require("react");
+    const X = h(
+      "div",
+      {
+        ...domProps,
+        ref,
+        "data-level": "well",
+        "data-geometry": "control",
+        "data-emphasis": "hairline",
+        "data-slot": "shift-tile",
+        className:
+          "flex flex-none items-center justify-center bg-panel shadow-well rounded-control border border-line2",
+        style: { width: 42, height: 42 },
+      },
+      children,
+    );
+  - |
+    async function build() {
+      const { createElement: h } = await import("react");
+      return h(
+        "div",
+        {
+          ...domProps,
+          ref,
+          "data-level": "well",
+          "data-geometry": "control",
+          "data-emphasis": "hairline",
+          "data-slot": "shift-tile",
+          className:
+            "flex flex-none items-center justify-center bg-panel shadow-well rounded-control border border-line2",
+          style: { width: 42, height: 42 },
+        },
+        children,
+      );
+    }
+  # The bare acquisitions, each on its own, so every clause is independently causal.
+  - |
+    const R = require("react");
+  - |
+    const R = await import("react");
+  # The JSX runtime, whose `jsx`/`jsxs` are element factories, by both dynamic shapes.
+  - |
+    const { jsx } = require("react/jsx-runtime");
+  - |
+    const { jsxs } = await import("react/jsx-runtime");
+  # A `createRequire` handle bound to a LOCAL name -- the shape ticket 4's bounded review
+  # added by dropping the callee-name constraint. `node:module` is not an allowlisted
+  # import source either, so this is refused twice over.
+  - |
+    const req = createRequire(import.meta.url);
+    const R = req("react");
+  # A template-literal specifier is the same acquisition.
+  - |
+    const R = require(`react`);
+  # And acquisition of ANY other module, since the clause is deliberately not scoped to
+  # react -- this owner must acquire nothing at runtime.
+  - |
+    const U = await import("@/lib/utils");
+  # The same reimplementation reached through an inline style, which outranks every class.
+  - |
+    const X = <div style={{ backgroundColor: "var(--color-panel)", boxShadow: "inset 0 1px 2px" }} />;
+  # A raw element nested INSIDE the sanctioned one is still a raw element.
+  - |
+    const X = (
+      <Surface level="well">
+        <div className="bg-panel" />
+      </Surface>
+    );
+  # A different shared primitive is not the surface authority either.
+  - |
+    const X = <Card className="bg-panel" />;
+  # An import from any other module, including a same-named impostor...
+  - |
+    import { Surface } from "@/components/ui/impostor-surface";
+  # ...a relative spelling of the real authority, which the allowlist does not name...
+  - |
+    import { Surface } from "./surface";
+  # ...and an ordinary utility import, which would let paint be composed here.
+  - |
+    import { cn } from "@/lib/utils";

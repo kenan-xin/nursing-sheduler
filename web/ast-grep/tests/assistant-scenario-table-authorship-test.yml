@@ -1,0 +1,53 @@
+id: assistant-scenario-table-authorship
+valid:
+  # Reading the envelope and the lease is the whole point of the allowance.
+  - |
+    const envelope = await db.scenarioEnvelopes.get(scenarioId);
+  - |
+    const lease = await this.db.writerLeases.get(scenarioId);
+  - |
+    const rows = await db.scenarioCommits.where("scenarioId").equals(id).toArray();
+  # The assistant's OWN tables are not on the list; it may write them freely. All nine are
+  # listed, because the forbidden set is now "every non-assistant table" and a mistake in
+  # either direction has to fail.
+  - |
+    await db.assistantMessages.put(record);
+  - |
+    await db.assistantProposals.put(proposal);
+  - |
+    await db.assistantSettings.put(settings);
+  - |
+    await db.assistantThreads.put(thread);
+  - |
+    await db.assistantTurns.update(turnId, { state });
+  - |
+    await db.assistantReceipts.put(receipt);
+  - |
+    await db.assistantGenerations.put(fence);
+  - |
+    await db.diagnosticSearches.put(search);
+  - |
+    await db.assistantClearOperations.put(operation);
+  # And the durable path it is supposed to use.
+  - |
+    await assistantProposalCommands.apply({ proposalId, receiptId });
+invalid:
+  - |
+    await db.scenarioEnvelopes.put(envelope);
+  # The two-level receiver Oxlint cannot bind to.
+  - |
+    await this.db.writerLeases.update(scenarioId, { epoch });
+  - |
+    await db.scenarioCommits.bulkAdd(commits);
+  - |
+    await db.optimizeBases.delete(basisId);
+  - |
+    await db.historyLinks.clear();
+  # BOUNDED-REVIEW ROUND 1. Both produced zero diagnostics. `keyval` is the LEGACY
+  # serialized scenario record and `repositoryMeta` is the repository's own bookkeeping;
+  # neither is assistant-owned, and the repository exception hands assistant modules a real
+  # `NurseSchedulerDb`, so both were live write routes.
+  - |
+    await db.keyval.put({ key: "scenario", value });
+  - |
+    await db.repositoryMeta.put({ key: "migration", value });

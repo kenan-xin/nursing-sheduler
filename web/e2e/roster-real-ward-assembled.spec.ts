@@ -27,7 +27,6 @@
 //          --config playwright.assembled.config.ts --grep "real Ward 8"
 
 import { expect, test, type Download, type Page } from "@playwright/test";
-import { readFileSync } from "node:fs";
 import {
   auditCoverageAfterRelease,
   OPTIMIZE_SESSION_RECORD_KEY,
@@ -272,14 +271,21 @@ interface CapturedDownload {
 /**
  * Read a download to bytes and remove the artifact.
  *
+ * The bytes come from Playwright's own `createReadStream()`, which is the reader
+ * the browser already owns — the spec acquires no filesystem capability to prove
+ * a real file was produced. It is also the same fail-closed signal the old
+ * on-disk path check gave: the stream throws for a failed or cancelled download,
+ * so an empty artifact can still never be mistaken for a real one.
+ *
  * The delete is not tidiness — the gate's residue audit counts leftover download
  * artifacts, and a journey that produces four real files must not be the reason
  * the audit fails.
  */
 async function consumeDownload(download: Download): Promise<CapturedDownload> {
-  const path = await download.path();
-  if (path === null) throw new Error("the browser download produced no file on disk");
-  const bytes = readFileSync(path);
+  const stream = await download.createReadStream();
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(chunk as Buffer);
+  const bytes = Buffer.concat(chunks);
   const filename = download.suggestedFilename();
   await download.delete();
   return { filename, bytes };

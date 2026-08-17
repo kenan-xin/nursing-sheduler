@@ -26,7 +26,7 @@
 // already depends on the store), so the composition belongs here, next to the
 // Clear authority it drives.
 
-import { resetToNewScenario, useHotStore, useScenarioStore } from "@/lib/store";
+import { resetToNewScenario, type CommandFailureReason, type CommandOutcome } from "@/lib/store";
 import { clearRosterDataAndNotify, type RosterClearOutcome } from "./roster-clear";
 
 /**
@@ -63,14 +63,30 @@ export type NewScheduleResetOutcome =
       failure: NewScheduleFailure;
       /** Present unless the Clear itself threw before producing a report. */
       storedData: RosterClearOutcome | null;
+      /**
+       * INTEGRATION (T03): why the scenario half refused, when it did.
+       *
+       * The pre-T03 reset signalled refusal by THROWING, so this wrapper only had to
+       * catch. The repository-authority reset does not throw — it RESOLVES
+       * `{ ok: false, reason }`, and the commonest reason is `not-owner` (another tab
+       * holds the lease). Carrying it lets the button say which of those happened
+       * instead of collapsing every refusal into one message.
+       */
+      scenarioReason?: CommandFailureReason;
     };
 
 /** Injectable seams. Production passes nothing and gets the live authorities. */
 export interface NewScheduleResetDeps {
   /** The verified roster/browser-data cut. Defaults to the live F5 authority. */
   readonly clearStoredData?: () => Promise<RosterClearOutcome>;
-  /** The scenario reset. Defaults to the live T04 reset over the app stores. */
-  readonly resetScenario?: () => Promise<void>;
+  /**
+   * The scenario reset. Defaults to the live T03 repository-authority reset.
+   *
+   * Returns a {@link CommandOutcome} rather than `void`: a refusal is a resolved
+   * `ok: false`, not a throw, so a seam typed `Promise<void>` would make every
+   * refused reset look like a success.
+   */
+  readonly resetScenario?: () => Promise<CommandOutcome>;
 }
 
 /**
@@ -96,12 +112,20 @@ export async function resetToNewSchedule(
   }
 
   // 2. THE SCENARIO RESET, only now that the browser data is provably gone.
-  const resetScenario =
-    deps.resetScenario ?? (() => resetToNewScenario(useScenarioStore, useHotStore));
+  //
+  // INTEGRATION (T03): the reset is now a repository command over the scenario
+  // authority, so it takes no stores and REPORTS refusal instead of throwing. Both
+  // shapes are handled — a throw and a resolved `ok: false` are the same answer here:
+  // the scenario was not reset, so this must not claim it was.
+  const resetScenario = deps.resetScenario ?? (() => resetToNewScenario());
+  let outcome: CommandOutcome;
   try {
-    await resetScenario();
+    outcome = await resetScenario();
   } catch {
     return { status: "failed", failure: "scenario", storedData };
+  }
+  if (!outcome.ok) {
+    return { status: "failed", failure: "scenario", storedData, scenarioReason: outcome.reason };
   }
 
   return { status: "reset", storedData };

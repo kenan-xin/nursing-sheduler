@@ -1167,6 +1167,36 @@ export async function releaseLiveJobs(
 }
 
 /**
+ * The assembled hook's CLEANUP VERDICT, as one callable decision.
+ *
+ * WHY THIS IS A FUNCTION. The conjunction below used to be an inline `if` in
+ * `optimize-assembled-stream.spec.ts`, and the only thing asserting the hook still
+ * consulted all three judges was a Vitest block that read THAT SPEC AS TEXT and matched
+ * the expression character for character. A pure judge nobody calls is indistinguishable
+ * from one that does not exist — which is the exact defect that block was written for —
+ * but a source scan is the wrong instrument: it cannot tell an inverted condition from a
+ * correct one, and it goes red for a reformat that changed nothing.
+ *
+ * ALL THREE VERDICTS ARE REQUIRED. Releasing an empty set is not success when the reason
+ * the set is empty is that we could not NAME the job, and releasing a job the backend
+ * never had accounts for nothing. So the release must have converged, ownership must be
+ * fully settled, and every id counted as coverage must have turned out to exist.
+ */
+export function judgeAssembledCleanup(input: {
+  released: { ok: boolean; failures: readonly string[] };
+  settlementFailures: readonly string[];
+  coverage: { ok: boolean; failures: readonly string[] };
+}): { ok: boolean; failures: string[] } {
+  const failures = [
+    ...input.settlementFailures,
+    ...input.released.failures,
+    ...input.coverage.failures,
+  ];
+  const ok = input.released.ok && input.settlementFailures.length === 0 && input.coverage.ok;
+  return { ok, failures };
+}
+
+/**
  * Confirm, AFTER release, that every id counted as coverage actually existed.
  *
  * Closes the release-404 laundering path: a stale or invented id satisfies the
@@ -1737,7 +1767,13 @@ const REQUEST: JobResponse["request"] = {
   solver: "ortools/cp-sat",
   prettify: null,
   timeout_seconds: 300,
+  // These fixtures cover the ordinary run path: `ordinary` purpose, no basis claim.
+  purpose: "ordinary",
+  basis: null,
 };
+
+/** Advertised retention expiry, a day after `CREATED_AT`. */
+const EXPIRES_AT = "2026-07-21T00:00:00Z";
 
 /** A contract-valid queued JobResponse. */
 export function queuedJob(id = JOB_ID, queuePosition = 1): JobResponse {
@@ -1747,6 +1783,7 @@ export function queuedJob(id = JOB_ID, queuePosition = 1): JobResponse {
     terminal: false,
     queue_position: queuePosition,
     created_at: CREATED_AT,
+    expires_at: EXPIRES_AT,
     started_at: null,
     finished_at: null,
     request: REQUEST,
@@ -1765,6 +1802,7 @@ export function runningJob(id = JOB_ID): JobResponse {
     terminal: false,
     queue_position: null,
     created_at: CREATED_AT,
+    expires_at: EXPIRES_AT,
     started_at: STARTED_AT,
     finished_at: null,
     request: REQUEST,
@@ -1813,6 +1851,7 @@ export function completedJob(id = JOB_ID, options: CompletedOptions = {}): JobRe
     terminal: true,
     queue_position: null,
     created_at: CREATED_AT,
+    expires_at: EXPIRES_AT,
     started_at: STARTED_AT,
     finished_at: FINISHED_AT,
     request: REQUEST,
@@ -1831,6 +1870,7 @@ export function cancelledJob(id = JOB_ID): JobResponse {
     terminal: true,
     queue_position: null,
     created_at: CREATED_AT,
+    expires_at: EXPIRES_AT,
     started_at: STARTED_AT,
     finished_at: FINISHED_AT,
     request: REQUEST,
@@ -1854,6 +1894,7 @@ export function failedJob(
     terminal: true,
     queue_position: null,
     created_at: CREATED_AT,
+    expires_at: EXPIRES_AT,
     started_at: STARTED_AT,
     finished_at: FINISHED_AT,
     request: REQUEST,

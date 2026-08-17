@@ -1,0 +1,23 @@
+id: retired-mutate-scenario
+valid:
+  # The replacement vocabulary, and prose that merely mentions the retired name.
+  - |
+    scenarioCommands.mutate({ rangeStart: "2026-04-01" });
+  - |
+    // `mutateScenario` was retired in T03; this comment is not a call site.
+    const patch = { rangeStart: "2026-04-01" };
+  - |
+    const mutateScenarioLike = 1;
+invalid:
+  # A call site.
+  - |
+    mutateScenario({ rangeStart: "2026-04-01" });
+  # A local binding of it.
+  - |
+    const patch = mutateScenario;
+  # A member access, which no import rule would see.
+  - |
+    store.mutateScenario({});
+  # And the string form, which is how a half-migrated action name survives.
+  - |
+    const action = "mutateScenario";

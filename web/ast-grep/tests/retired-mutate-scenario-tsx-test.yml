@@ -1,0 +1,17 @@
+id: retired-mutate-scenario-tsx
+valid:
+  - |
+    export const A = () => <button onClick={() => scenarioCommands.mutate({})} />;
+  - |
+    // `mutateScenario` was retired in T03; this comment is not a call site.
+    export const B = () => <div />;
+invalid:
+  # NOTE: these fixtures are PATHLESS. They cannot prove the rule's `files:` scope, which is
+  # how `e2e/**` went missing from this twin unnoticed. `ast-grep-rule-pairs.test.ts` is what
+  # holds the scope equal to the base rule's; a path probe is recorded in the fixup artifact.
+  - |
+    export const C = () => <button onClick={() => mutateScenario({})} />;
+  - |
+    export const D = () => <button onClick={() => store.mutateScenario({})} />;
+  - |
+    const action = "mutateScenario";

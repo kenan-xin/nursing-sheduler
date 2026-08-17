@@ -436,44 +436,13 @@ poll_until() {
 
 # Read the browser's ids-only abort handoff as a TOTAL function over the file.
 #
-# Prints `ok <slots> <distinct>` followed by one distinct id per line, or a single
-# `lost <reason>` line. Missing, unreadable, malformed, non-array, empty, or
-# non-string/empty/unsafe id evidence is lost authority — never a guessed id.
+# The reader itself lives in `docker/read_abort_handoff.py` rather than in a heredoc
+# here, so it is RUNNABLE and can be judged by what it prints for a real file. Its
+# fail-closed outcomes are proved directly in `web/e2e/support/abort-handoff.test.ts`,
+# which used to assert them by reading THIS SCRIPT as text -- a check that passed on
+# spelling rather than on behaviour.
 read_abort_handoff() {
-  python3 - "$1" <<'PY'
-import json
-import re
-import sys
-
-path = sys.argv[1]
-try:
-    with open(path, "r", encoding="utf-8") as handle:
-        payload = json.load(handle)
-except FileNotFoundError:
-    print("lost the handoff file was missing")
-    raise SystemExit(0)
-except (OSError, ValueError, UnicodeDecodeError):
-    print("lost the handoff file was unreadable or not valid JSON")
-    raise SystemExit(0)
-
-if not isinstance(payload, list):
-    print("lost the handoff payload was not a JSON array")
-    raise SystemExit(0)
-if not payload:
-    print("lost the handoff array carried no accepted slot")
-    raise SystemExit(0)
-
-unsafe = re.compile(r"[\s\x00-\x1f\x7f]")
-for slot in payload:
-    if not isinstance(slot, str) or not slot or unsafe.search(slot):
-        print("lost the handoff array carried a non-string, empty or unsafe id")
-        raise SystemExit(0)
-
-distinct = list(dict.fromkeys(payload))
-print("ok %d %d" % (len(payload), len(distinct)))
-for value in distinct:
-    print(value)
-PY
+  python3 "$ROOT/docker/read_abort_handoff.py" "$1"
 }
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-import { readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
 import * as React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
@@ -513,21 +511,12 @@ describe("Surface / surfaceVariants — the single visual authority", () => {
     expect(drop).not.toContain("border-line2");
   });
 
-  it("rejects every illegal (role, emphasis) tuple at the TYPE boundary", () => {
-    // @ts-expect-error — the page plane is never a bordered box.
-    surfaceVariants({ role: "page", geometry: "square", emphasis: "hairline" });
-    // @ts-expect-error — a raised surface is never a recessed row.
-    surfaceVariants({ role: "raised", geometry: "card", emphasis: "drop-candidate" });
-    // @ts-expect-error — an L1 card is not a recessed row either.
-    surfaceVariants({ role: "surface", geometry: "card", emphasis: "hairline" });
-    // @ts-expect-error — `emphasis` without a role falls back to `surface`.
-    surfaceVariants({ geometry: "control", emphasis: "hairline" });
-    // @ts-expect-error — the retired loose axes are gone, not merely unused.
-    surfaceVariants({ role: "well", geometry: "control", edge: "hairline" });
-    // @ts-expect-error — ditto.
-    surfaceVariants({ role: "well", geometry: "control", drop: "candidate" });
-
-    // ...and the two sanctioned tuples still compile and still paint.
+  // TYPE-boundary rejection of the illegal (role, emphasis) tuples, the retired
+  // `edge`/`drop` axes, and the second CVA `class` channel is pinned in
+  // `surface.negative.test-d.ts`. This file owns the runtime half alone: the
+  // sanctioned tuples still paint, and the runtime assertion in `surfaceVariants`
+  // catches the `as any` / `__proto__`-poisoned cases the type boundary cannot.
+  it("still paints the two sanctioned recessed-row tuples", () => {
     expect(surfaceVariants({ role: "well", geometry: "control", emphasis: "hairline" })).toContain(
       "bg-panel",
     );
@@ -536,16 +525,11 @@ describe("Surface / surfaceVariants — the single visual authority", () => {
     ).toContain("bg-panel");
   });
 
-  it("rejects an illegal Surface level/emphasis tuple at the TYPE boundary", () => {
-    // @ts-expect-error — only `level="well"` carries an emphasis.
-    expect(<Surface level="page" geometry="square" emphasis="hairline" />).toBeTruthy();
-    // @ts-expect-error — ditto for a raised container.
-    expect(<Surface level="raised" geometry="card" emphasis="drop-candidate" />).toBeTruthy();
-  });
-
-  // ii7.8.5.5 — RUNTIME discrimination. These record what CVA actually does, and
-  // are the reason the static analyzer has to fail closed on the same shapes.
-  it("drops an unknown emphasis value SILENTLY, which is why unknown must fail closed", () => {
+  // ii7.8.5.5 — RUNTIME discrimination. CVA drops an unknown variant value
+  // silently, so an `as any` cast on `emphasis` would render a row with no edge
+  // while looking clean to a role-only check. The dev-mode runtime assertion in
+  // `surfaceVariants` catches that; this test pins it.
+  it("drops an unknown emphasis value SILENTLY in production, and refuses it in dev", () => {
     const bare = surfaceVariants({ role: "well", geometry: "control" });
 
     for (const value of ["hairline", "drop-candidate"] as const) {
@@ -554,23 +538,65 @@ describe("Surface / surfaceVariants — the single visual authority", () => {
       expect(out, value).not.toBe(bare);
     }
 
-    // An unrecognised value is not an error and not a fallback — the edge simply
-    // never renders, so a role-only check would pass a row with no border.
-    const bogus = surfaceVariants({
-      role: "well",
-      geometry: "control",
-      emphasis: "bogus",
-    } as unknown as Parameters<typeof surfaceVariants>[0]);
-    expect(bogus).toBe(bare);
-    expect(bogus).not.toContain("border");
+    // In dev (where vitest runs), the assertion refuses the bogus value rather
+    // than letting CVA drop it silently. The bypass that USED to slip through
+    // `as any` is now caught at the runtime boundary the type cannot reach.
+    expect(() =>
+      surfaceVariants({
+        role: "well",
+        geometry: "control",
+        emphasis: "bogus",
+      } as unknown as Parameters<typeof surfaceVariants>[0]),
+    ).toThrow(/not a public SurfaceEmphasis/);
   });
 
-  it("emits BOTH `class` and `className`, in either written order", () => {
+  it("refuses an illegal (role, emphasis) tuple cast through `as any`", () => {
+    // The typed boundary is pinned in surface.negative.test-d.ts; the runtime
+    // assertion covers the bypass the type cannot see.
+    expect(() =>
+      surfaceVariants({
+        role: "page",
+        geometry: "square",
+        emphasis: "hairline",
+      } as unknown as Parameters<typeof surfaceVariants>[0]),
+    ).toThrow(/legal only on role="well"/);
+  });
+
+  it("refuses an `emphasis` whose role defaults to `surface`", () => {
+    // No `role` -> recipe default (`surface`), which is not `well`.
+    expect(() =>
+      surfaceVariants({
+        geometry: "control",
+        emphasis: "hairline",
+      } as unknown as Parameters<typeof surfaceVariants>[0]),
+    ).toThrow(/legal only on role="well"/);
+  });
+
+  it("refuses an `__proto__`-poisoned options bag, whose keys a syntactic walk cannot see", () => {
+    // The exact shape the runtime assertion must refuse: `Object.keys` is empty,
+    // so a syntactic walk finds nothing, yet CVA resolves both fields through
+    // the prototype chain and would emit the forbidden page tone plus a row
+    // edge. The runtime assertion refuses the whole bag rather than modelling
+    // prototype-chain lookup.
+    const poisoned = {
+      __proto__: { role: "page", emphasis: "hairline" },
+    } as unknown as Parameters<typeof surfaceVariants>[0];
+
+    expect(Object.keys(poisoned as object)).toEqual([]);
+
+    expect(() => surfaceVariants(poisoned)).toThrow(/prototype is not Object\.prototype/);
+  });
+
+  it("refuses a `class` channel cast through `as any`, even though CVA's plumbing still honours it", () => {
     // class-variance-authority@0.7.1 ends in
     // `cx(base, variants, compound, props.class, props.className)`, so the two
-    // are independent channels that BOTH always contribute — not two spellings
-    // of one slot. This is why the analyzer folds them separately: a safe value
-    // in one must never be able to hide an invalid value in the other.
+    // are independent channels that BOTH always contribute. The public type
+    // makes the `class` channel unspeltable (`class?: never`, pinned in
+    // surface.negative.test-d.ts); the runtime assertion does not re-check it,
+    // because the type boundary already owns that half. This test exists to
+    // document the plumbing the type boundary protects against: with the type
+    // bypassed via `as unknown as`, CVA still appends `class`, which is the
+    // reason `class?: never` is load-bearing rather than decorative.
     const asOptions = (o: Record<string, string>) =>
       o as unknown as Parameters<typeof surfaceVariants>[0];
 
@@ -589,21 +615,6 @@ describe("Surface / surfaceVariants — the single visual authority", () => {
     // Fixed emission order, independent of the written order.
     expect(classFirst.indexOf("bg-error")).toBeLessThan(classFirst.indexOf("flex"));
     expect(classNameFirst.indexOf("flex")).toBeLessThan(classNameFirst.indexOf("bg-error"));
-  });
-
-  it("consumes INHERITED `__proto__` options, which a syntactic walk cannot see", () => {
-    // The exact shape the analyzer must refuse: `Object.keys` is empty, so a
-    // property walk finds nothing, yet CVA resolves both fields through the
-    // prototype chain and emits the forbidden page tone plus a row edge.
-    const poisoned = {
-      __proto__: { role: "page", emphasis: "hairline" },
-    } as unknown as Parameters<typeof surfaceVariants>[0];
-
-    expect(Object.keys(poisoned as object)).toEqual([]);
-
-    const out = surfaceVariants(poisoned);
-    expect(out).toContain("bg-bg");
-    expect(out).toContain("border-line2");
   });
 
   it("leaves every pre-existing role byte-identical — the new axes are additive", () => {
@@ -675,47 +686,18 @@ describe("Surface / surfaceVariants — the single visual authority", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Source-level guards. Both of these are contract facts about the whole owned
-// layer, so a per-component render assertion could not express them.
+// WHAT CHANGED (custom-AST ticket 3). Two whole-layer guards used to live here, behind a
+// `readdirSync` of this directory and a hand-rolled comment stripper: "no pseudo-element
+// hitbox" and "every shadow utility aliases a canonical elevation token". They are both
+// facts about AUTHORED SOURCE across the layer, which a per-component render assertion
+// genuinely cannot express -- and that is exactly the residue ast-grep exists for. They are
+// now the `pseudo-element-hitbox` and `untokened-shadow-utility(-tsx)` rules, each with its
+// own valid/invalid fixtures, and each running on every file in the layer on every `pnpm
+// lint` rather than only when this suite happens to run. The comment stripper went with
+// them: a rule matches string literals, so a comment that names a retired utility in order
+// to explain why it was retired is never inspected in the first place.
+//
+// The removed `it("scans the authored primitives")` non-vacuity check has a direct
+// counterpart: `ast-grep test` fails if a rule stops matching its invalid fixtures, which
+// is the same guarantee stated about the rule rather than about the file list.
 // ---------------------------------------------------------------------------
-
-describe("the owned primitive layer as a whole", () => {
-  const uiDir = __dirname;
-  // Comments are stripped before scanning: these guards are about what the layer
-  // AUTHORS, and a comment that names a retired utility in order to explain why it
-  // was retired must not read as a violation of the thing it documents.
-  const stripComments = (text: string) =>
-    text.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|\n)\s*\/\/[^\n]*/g, "$1");
-
-  const sources = readdirSync(uiDir)
-    .filter((name) => name.endsWith(".tsx") && !name.includes(".test."))
-    .map((name) => ({
-      name,
-      text: stripComments(readFileSync(join(uiDir, name), "utf8")),
-    }));
-
-  it("scans the authored primitives", () => {
-    expect(sources.length).toBeGreaterThanOrEqual(12);
-  });
-
-  it("uses no pseudo-element hitbox to fake a touch target", () => {
-    // T8: the coarse-pointer minimum must be on the real control. An
-    // `after:-inset-*` overlay (the shadcn preset's Switch) moves the pointer
-    // target off the element that paints focus and overlaps its neighbours.
-    const offenders = sources.filter(({ text }) =>
-      /className[^\n]*\b(?:after|before):-?inset/.test(text),
-    );
-    expect(offenders.map((f) => f.name)).toEqual([]);
-  });
-
-  it("aliases every shadow utility to a canonical elevation token", () => {
-    const CANONICAL = new Set(["1", "2", "3", "edge", "well", "dialog", "toast", "side", "none"]);
-    const offenders: string[] = [];
-    for (const { name, text } of sources) {
-      for (const match of text.matchAll(/(?:^|[\s"'`:])shadow-([\w[\]-]+)/g)) {
-        if (!CANONICAL.has(match[1])) offenders.push(`${name}: shadow-${match[1]}`);
-      }
-    }
-    expect(offenders, offenders.join(", ")).toEqual([]);
-  });
-});

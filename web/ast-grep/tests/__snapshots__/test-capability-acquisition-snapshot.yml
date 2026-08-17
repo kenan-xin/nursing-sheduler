@@ -1,0 +1,100 @@
+id: test-capability-acquisition
+snapshots:
+  ? |
+    const acorn = require("acorn");
+  : labels:
+      - source: require("acorn")
+        style: primary
+        start: 14
+        end: 30
+  ? |
+    const babel = require("@babel/parser");
+  : labels:
+      - source: require("@babel/parser")
+        style: primary
+        start: 14
+        end: 38
+  ? |
+    const fs = await import("fs/promises");
+  : labels:
+      - source: import("fs/promises")
+        style: primary
+        start: 17
+        end: 38
+  ? |
+    const fs = await import("node:fs");
+  : labels:
+      - source: import("node:fs")
+        style: primary
+        start: 17
+        end: 34
+  ? |
+    const fs = globalThis.process.getBuiltinModule("node:fs");
+  : labels:
+      - source: globalThis.process.getBuiltinModule("node:fs")
+        style: primary
+        start: 11
+        end: 57
+  ? |
+    const fs = process.getBuiltinModule("fs");
+  : labels:
+      - source: process.getBuiltinModule("fs")
+        style: primary
+        start: 11
+        end: 41
+  ? |
+    const fs = require("fs");
+  : labels:
+      - source: require("fs")
+        style: primary
+        start: 11
+        end: 24
+  ? |
+    const fs = require("node:fs/promises");
+  : labels:
+      - source: require("node:fs/promises")
+        style: primary
+        start: 11
+        end: 38
+  ? |
+    const mod = await import("node:module");
+  : labels:
+      - source: import("node:module")
+        style: primary
+        start: 18
+        end: 39
+  ? |
+    const parser = await import("@babel/parser");
+  : labels:
+      - source: import("@babel/parser")
+        style: primary
+        start: 21
+        end: 44
+  ? |
+    const sg = await import("@ast-grep/napi");
+  : labels:
+      - source: import("@ast-grep/napi")
+        style: primary
+        start: 17
+        end: 41
+  ? |
+    const ts = await import("typescript");
+  : labels:
+      - source: import("typescript")
+        style: primary
+        start: 17
+        end: 37
+  ? |
+    const { Project } = require("ts-morph");
+  : labels:
+      - source: require("ts-morph")
+        style: primary
+        start: 20
+        end: 39
+  ? |
+    const { createRequire } = require("module");
+  : labels:
+      - source: require("module")
+        style: primary
+        start: 26
+        end: 43

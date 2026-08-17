@@ -10,10 +10,24 @@ import { expect, test, type Page } from "@playwright/test";
 
 type NsWindow = {
   __nsStore: {
-    scenario: {
-      getState(): Record<string, unknown> & { mutateScenario(x: unknown): void };
-      temporal: { getState(): { pastStates: unknown[] } };
+    /** The repository command bus — the product's only durable write path. */
+    commands: {
+      mutate(patch: Record<string, unknown>): Promise<{ ok: boolean }>;
+      recordBackup(): Promise<{ ok: boolean }>;
+      undo(): Promise<{ ok: boolean }>;
+      redo(): Promise<{ ok: boolean }>;
+      takeover(): Promise<{ ok: boolean }>;
     };
+    drain(): Promise<void>;
+    historyDepth(): Promise<number>;
+    authority(): {
+      scenarioId: string | null;
+      documentRevision: number;
+      ownership: string;
+      canUndo: boolean;
+      canRedo: boolean;
+    };
+    scenario(): Record<string, unknown>;
     backupStatus(): "none" | "current" | "stale";
   };
 };
@@ -26,16 +40,17 @@ async function gotoReadySaveAndLoad(page: Page) {
   );
 }
 
+/** The COMMITTED range — drained, so a read never outruns the command that wrote. */
 function rangeStart(page: Page): Promise<unknown> {
-  return page.evaluate(
-    () => (window as unknown as NsWindow).__nsStore.scenario.getState().rangeStart,
-  );
+  return page.evaluate(async () => {
+    const store = (window as unknown as NsWindow).__nsStore;
+    await store.drain();
+    return store.scenario().rangeStart;
+  });
 }
 
 function pastStatesLength(page: Page): Promise<number> {
-  return page.evaluate(
-    () => (window as unknown as NsWindow).__nsStore.scenario.temporal.getState().pastStates.length,
-  );
+  return page.evaluate(() => (window as unknown as NsWindow).__nsStore.historyDepth());
 }
 
 function backupStatus(page: Page): Promise<string> {
@@ -93,15 +108,16 @@ test.describe("T17b-2 — Load flow UI", () => {
     await expect(page.getByTestId("upload-load-sample-button")).toBeVisible();
   });
 
-  test("Load a sample scenario replaces state as one undoable transaction", async ({ page }) => {
+  test("Load a sample scenario switches to a fresh scenario identity", async ({ page }) => {
     await gotoReadySaveAndLoad(page);
     await page.getByTestId("scenario-upload-button").click();
     await page.getByTestId("upload-load-sample-button").click();
 
     await expect.poll(() => rangeStart(page)).not.toBe(null);
-    // Load is one tracked full-slice mutation (Undo restores the prior workspace),
-    // not a history-clearing replace (T17r P0).
-    expect(await pastStatesLength(page)).toBeGreaterThan(0);
+    // T03: a Load is an atomic scenario SWITCH to a fresh `scenarioId`, so the
+    // loaded document starts on its own empty Undo history — Undo does not reach
+    // back across a Load into a document this identity never contained.
+    expect(await pastStatesLength(page)).toBe(0);
     // An imported file is not a fresh local backup: backup stays unknown (none).
     expect(await backupStatus(page)).toBe("none");
   });
@@ -192,7 +208,7 @@ test.describe("T17b-2 — Load flow UI", () => {
     await page.getByTestId("confirm-dialog-confirm").click();
 
     await expect.poll(() => rangeStart(page)).toBe("2026-06-01");
-    // Confirmed Load is one tracked, undoable transaction (T17r P0).
-    expect(await pastStatesLength(page)).toBeGreaterThan(0);
+    // A confirmed Load is the same atomic switch as an unconfirmed one.
+    expect(await pastStatesLength(page)).toBe(0);
   });
 });

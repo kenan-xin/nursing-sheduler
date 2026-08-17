@@ -33,8 +33,10 @@ import {
   type ShiftTypeGroupMember,
   type ShiftTypeId,
 } from "@/lib/scenario";
-import { parseSubmissionDocument, typedIdKey } from "@/lib/roster";
-import type { RosterContext, RosterDayGrid, RosterSubmission } from "@/lib/roster";
+// DIRECT LEAF IMPORTS, not the `@/lib/roster` barrel (see `tallies.ts`).
+import { parseSubmissionDocument } from "@/lib/roster/context";
+import { typedIdKey } from "@/lib/roster/day-state";
+import type { RosterContext, RosterDayGrid, RosterSubmission } from "@/lib/roster/types";
 
 /**
  * One backend staffing equation: a single `sum(...) == / >= required` constraint

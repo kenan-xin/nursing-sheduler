@@ -27,6 +27,7 @@ import {
   FaChevronDown,
 } from "@/components/icons";
 import { useLosableDraft } from "@/components/shell/use-losable-draft";
+import { capabilityAnchorProps } from "@/lib/capability/anchor-contract";
 
 /** Outer screen wrapper — the L0 app plane for every card editor, with the standard
  *  screen gap. It sets no width, margin or page padding: the app shell owns those
@@ -151,6 +152,7 @@ export function CardEditorHeader({
   secondaryAction,
   instructions,
   helpLabel = "Help",
+  capabilityAnchor,
 }: {
   eyebrow: string;
   title: string;
@@ -171,6 +173,14 @@ export function CardEditorHeader({
    *  toggle is rendered beside the title; the panel is collapsed by default. */
   instructions?: React.ReactNode;
   helpLabel?: string;
+  /** Optional capability anchor for the primary Add button (T06).
+   *
+   *  PASSED IN RATHER THAN HARD-CODED because five Advanced editors mount this same
+   *  header: an anchor baked in here would render on all five routes, and the
+   *  registry's claim that an anchor belongs to exactly one screen would be false on
+   *  four of them. Each route that wants an anchored Add declares its own beside its
+   *  editor and passes it here; omitting it leaves the button byte-identical. */
+  capabilityAnchor?: string;
 }) {
   // Collapsed by default per FR-PR-02 / the ScreenCards prototype. The header
   // remounts per page, so local state is the right scope (no cross-editor leak).
@@ -213,6 +223,7 @@ export function CardEditorHeader({
             data-testid="add-card-toggle"
             aria-expanded={formOpen}
             onClick={onAdd}
+            {...(capabilityAnchor ? capabilityAnchorProps(capabilityAnchor) : {})}
           >
             {formOpen ? <FaXmark /> : <FaPlus />} {addLabel}
           </Button>

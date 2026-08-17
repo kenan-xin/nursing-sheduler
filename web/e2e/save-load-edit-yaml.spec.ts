@@ -13,10 +13,24 @@ import { expect, test, type Page } from "@playwright/test";
 
 type NsWindow = {
   __nsStore: {
-    scenario: {
-      getState(): Record<string, unknown> & { mutateScenario(x: unknown): void };
-      temporal: { getState(): { pastStates: unknown[] } };
+    /** The repository command bus — the product's only durable write path. */
+    commands: {
+      mutate(patch: Record<string, unknown>): Promise<{ ok: boolean }>;
+      recordBackup(): Promise<{ ok: boolean }>;
+      undo(): Promise<{ ok: boolean }>;
+      redo(): Promise<{ ok: boolean }>;
+      takeover(): Promise<{ ok: boolean }>;
     };
+    drain(): Promise<void>;
+    historyDepth(): Promise<number>;
+    authority(): {
+      scenarioId: string | null;
+      documentRevision: number;
+      ownership: string;
+      canUndo: boolean;
+      canRedo: boolean;
+    };
+    scenario(): Record<string, unknown>;
     backupStatus(): "none" | "current" | "stale";
   };
 };
@@ -30,21 +44,22 @@ async function gotoReadySaveAndLoad(page: Page) {
 }
 
 async function mutate(page: Page, patch: Record<string, unknown>) {
-  await page.evaluate((p) => {
-    (window as unknown as NsWindow).__nsStore.scenario.getState().mutateScenario(p);
+  await page.evaluate(async (p) => {
+    await (window as unknown as NsWindow).__nsStore.commands.mutate(p);
   }, patch);
 }
 
+/** The COMMITTED range — drained, so a read never outruns the command that wrote. */
 function rangeStart(page: Page): Promise<unknown> {
-  return page.evaluate(
-    () => (window as unknown as NsWindow).__nsStore.scenario.getState().rangeStart,
-  );
+  return page.evaluate(async () => {
+    const store = (window as unknown as NsWindow).__nsStore;
+    await store.drain();
+    return store.scenario().rangeStart;
+  });
 }
 
 function pastStatesLength(page: Page): Promise<number> {
-  return page.evaluate(
-    () => (window as unknown as NsWindow).__nsStore.scenario.temporal.getState().pastStates.length,
-  );
+  return page.evaluate(() => (window as unknown as NsWindow).__nsStore.historyDepth());
 }
 
 function backupStatus(page: Page): Promise<string> {
@@ -97,7 +112,7 @@ const VALID_SCENARIO_PATCH = {
   ],
   exportLayout: {
     formatting: [{ uid: "f1", type: "row", people: ["Alice"], backgroundColor: "#ff0000" }],
-    // mutateScenario shallow-merges exportLayout, and computeScenarioSummary (rendered
+    // A `mutate` patch shallow-merges exportLayout, and computeScenarioSummary (rendered
     // on every page via the sidebar) reads .length on all three arrays — so a partial
     // exportLayout leaves these undefined and crashes the tree, wiping __nsStore.
     extraColumns: [],
@@ -205,7 +220,7 @@ test.describe("T17b-3 — Edit-YAML mode", () => {
     await expect(preview.getByTestId("scenario-yaml-textarea")).toBeVisible();
   });
 
-  test("Apply on valid edited YAML runs the same block/gate/replace pipeline as Upload: undoable full-state replace", async ({
+  test("Apply on valid edited YAML runs the same block/gate/replace pipeline as Upload: fresh scenario identity", async ({
     page,
   }) => {
     await gotoReadySaveAndLoad(page);
@@ -222,9 +237,10 @@ test.describe("T17b-3 — Edit-YAML mode", () => {
     await page.getByTestId("confirm-dialog-confirm").click();
 
     await expect.poll(() => rangeStart(page)).toBe("2026-06-01");
-    // Confirmed Load is one tracked, undoable transaction, not a history-clearing
-    // replace; an imported file is not a fresh local backup (T17r P0).
-    expect(await pastStatesLength(page)).toBeGreaterThan(0);
+    // T03: an applied edit goes through the same atomic scenario SWITCH as Upload,
+    // so the new identity starts on its own empty Undo history; an imported file is
+    // still not a fresh local backup (T17r P0).
+    expect(await pastStatesLength(page)).toBe(0);
     expect(await backupStatus(page)).toBe("none");
 
     // Editing mode closes back to the read-only preview once the replace commits.

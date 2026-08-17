@@ -147,7 +147,24 @@ describe("the storage keys the residue probe reads", () => {
     expect(committed.status).toBe("committed");
 
     const storeNames = db.tables.map((table) => table.name).sort();
-    expect(storeNames).toEqual(["keyval", "meta", "roster", "snapshot"]);
+    // INTEGRATION — CONTAINMENT, not equality. This used to assert the database held
+    // exactly these four stores, which was true while the roster foundation owned its
+    // own Dexie class. `ScenarioPersistenceDb` is now an ALIAS of `NurseSchedulerDb`:
+    // the two version ladders were merged into a single owner, so the repository's
+    // tables are deliberately co-resident with the roster's. An equality pin would
+    // therefore fail for the reason the merge succeeded, and would fail again on every
+    // future additive schema version.
+    //
+    // What the probe actually needs from this test is that the four stores it reads are
+    // present under these exact names, so that is what is asserted — and the co-residency
+    // is asserted POSITIVELY beside it, so the single-owner decision is a stated fact
+    // here rather than the silent reason an equality assertion had to be loosened.
+    for (const store of ["keyval", "meta", "roster", "snapshot"]) {
+      expect(storeNames, store).toContain(store);
+    }
+    for (const store of ["scenarioEnvelopes", "scenarioCommits", "writerLeases"]) {
+      expect(storeNames, store).toContain(store);
+    }
 
     const pointerRow = await db.meta.get(STORAGE_KEYS.currentCandidateMetaKey);
     expect(pointerRow?.value).toMatchObject({ jobId: "job-pin" });

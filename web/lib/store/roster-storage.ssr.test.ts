@@ -1,10 +1,25 @@
-// SSR safety for the roster storage foundation. This file deliberately does NOT
-// import `fake-indexeddb/auto`, so it runs in an environment with no IndexedDB
-// at all — exactly what a server render sees. Importing the modules and building
-// the repositories must be free of side effects; only an actual operation may
-// reach IndexedDB, and there it must fail loudly.
+// SSR safety for the roster storage foundation. This file runs in an environment
+// with no IndexedDB at all — exactly what a server render sees. Importing the
+// modules and building the repositories must be free of side effects; only an
+// actual operation may reach IndexedDB, and there it must fail loudly.
+//
+// INTEGRATION — the absence is now ENFORCED here rather than inherited. It used to
+// rest on this file not importing `fake-indexeddb/auto`. The T02/T03 repository made
+// IndexedDB a GLOBAL test fixture (`vitest.setup.ts` registers it for the whole
+// suite), so every assertion below silently inverted: the environment had a working
+// IndexedDB, `getRosterDb` constructed instead of throwing, and each operation
+// RESOLVED where a server render must reject. Deleting the globals restores the real
+// condition, and the first test is the guard that proves the deletion took effect —
+// if a future setup reinstalls them some other way, that test fails first and says so.
 
 import { describe, expect, it } from "vitest";
+
+// Before any module below is exercised: unwind the global registration for THIS file.
+// `indexedDB` is what `isIndexedDbAvailable()` reads; `IDBKeyRange` is removed with it
+// so nothing here can reach a half-present API that a real server does not have.
+Reflect.deleteProperty(globalThis, "indexedDB");
+Reflect.deleteProperty(globalThis, "IDBKeyRange");
+
 import { getRosterDb, isIndexedDbAvailable, IndexedDbUnavailableError } from "./dexie-storage";
 import { createRosterStorage, rosterStorage } from "./roster-storage";
 

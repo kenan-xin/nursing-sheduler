@@ -18,8 +18,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { JobResponse } from "@/lib/bff/types";
-import { useHotStore, useScenarioStore } from "@/lib/store";
-import { createEmptyScenarioUiState } from "@/lib/scenario/canonical";
+import { scenarioCommands, useHotStore } from "@/lib/store";
+import { resetScenarioForTest } from "@/lib/store/test-authority";
 import type { PrepareOptimizeSubmissionResult } from "@/lib/scenario";
 import {
   isActiveLifecycle,
@@ -78,9 +78,21 @@ const baseJob = (over: Partial<JobResponse> = {}): JobResponse => ({
   terminal: false,
   queue_position: 2,
   created_at: "2026-07-20T00:00:00+00:00",
+  // Nullable server-side and read only by T10's diagnostic evidence window, which
+  // this suite does not exercise.
+  expires_at: null,
   started_at: null,
   finished_at: null,
-  request: { input_name: "s.yaml", solver: "ortools/cp-sat", prettify: null, timeout_seconds: 300 },
+  request: {
+    input_name: "s.yaml",
+    solver: "ortools/cp-sat",
+    prettify: null,
+    timeout_seconds: 300,
+    // T09 — an unqualified submission is admitted as `ordinary`, and an ordinary run
+    // echoes no claimed basis.
+    purpose: "ordinary",
+    basis: null,
+  },
   result: null,
   error: null,
   controls: { cancellable: true, early_completion_available: false },
@@ -149,9 +161,15 @@ const okPrep: PrepareOptimizeSubmissionResult = {
   prep: { yaml: "scenario: {}", peopleCount: 0, reverseMap: [], anonymized: false },
 };
 
-function readyStore() {
-  useScenarioStore.setState({
-    ...createEmptyScenarioUiState(),
+/**
+ * Make the scenario submit-ready THROUGH THE T03 AUTHORITY.
+ *
+ * The scenario store is a read-only projection now, so a test may not push state
+ * into it; `mutate` is the same repository command the editor issues, and it resolves
+ * only once the durable commit behind the projected snapshot has landed.
+ */
+async function readyStore() {
+  await scenarioCommands.mutate({
     staff: [{ id: "p1" }],
     shifts: [{ id: "day" }],
     rangeStart: "2026-07-01",
@@ -198,13 +216,16 @@ function priorRunRecord(ownerId = "owner-prior", jobId = "opt_prior"): string {
   });
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   resetRosterCaptureGate();
   client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
+  // A brand-new empty scenario on a brand-new database, owned by this tab — the
+  // durable authority is per-scenario, so resetting the projection alone would leak
+  // ownership and history between tests.
+  await resetScenarioForTest();
   useHotStore.getState().resetRunView();
-  useScenarioStore.setState(createEmptyScenarioUiState());
 });
 
 afterEach(() => {
@@ -220,7 +241,7 @@ afterEach(() => {
 
 describe("entering the Optimize route is fresh", () => {
   it("the screenshot state is inert: no resume, no request, no download, and Optimize is live", async () => {
-    readyStore();
+    await readyStore();
     const storage = memStorage();
     storage.seed(OPTIMIZE_SESSION_STORAGE_KEY, priorRunRecord());
 
@@ -254,7 +275,7 @@ describe("entering the Optimize route is fresh", () => {
   });
 
   it("a prior run's record does not disable Optimize, and a click sends exactly one POST", async () => {
-    readyStore();
+    await readyStore();
     const storage = memStorage();
     storage.seed(OPTIMIZE_SESSION_STORAGE_KEY, priorRunRecord());
 
@@ -317,7 +338,7 @@ describe("fresh entry migrates a legacy record without touching the old run", ()
   }
 
   it("moves a READABLE legacy record to its owner key, and requests nothing", async () => {
-    readyStore();
+    await readyStore();
     const storage = memStorage();
     const legacy = priorRunRecord("owner-legacy", "opt_legacy");
     storage.seed(OPTIMIZE_SESSION_STORAGE_KEY, legacy);
@@ -348,7 +369,7 @@ describe("fresh entry migrates a legacy record without touching the old run", ()
   });
 
   it("leaves UNREADABLE legacy bytes exactly where they are, for verified Clear", async () => {
-    readyStore();
+    await readyStore();
     const storage = memStorage();
     storage.seed(OPTIMIZE_SESSION_STORAGE_KEY, "{corrupt-from-an-older-build");
     routeFetch(() => json(200, baseJob()));
@@ -364,7 +385,7 @@ describe("fresh entry migrates a legacy record without touching the old run", ()
   });
 
   it("preserves an EXISTING owner key rather than overwriting it with legacy bytes", async () => {
-    readyStore();
+    await readyStore();
     const storage = memStorage();
     const current = priorRunRecord("owner-x", "opt_current");
     const stale = priorRunRecord("owner-x", "opt_stale");
@@ -383,7 +404,7 @@ describe("fresh entry migrates a legacy record without touching the old run", ()
   });
 
   it("is idempotent, so a StrictMode double-mount is a no-op", async () => {
-    readyStore();
+    await readyStore();
     const storage = memStorage();
     const legacy = priorRunRecord("owner-legacy", "opt_legacy");
     storage.seed(OPTIMIZE_SESSION_STORAGE_KEY, legacy);
@@ -407,7 +428,7 @@ describe("fresh entry migrates a legacy record without touching the old run", ()
 
 describe("one click owns one attempt", () => {
   it("repeated clicks while the POST is unresolved send exactly ONE request", async () => {
-    readyStore();
+    await readyStore();
     const storage = memStorage();
     const postGate = Promise.withResolvers<Response>();
     let posts = 0;
@@ -491,7 +512,7 @@ describe("one click owns one attempt", () => {
   });
 
   it("a later deliberate click supersedes a genuinely RUNNING run, cleanup parked", async () => {
-    readyStore();
+    await readyStore();
     const storage = memStorage();
     let posts = 0;
     const cancelled: string[] = [];
@@ -566,7 +587,7 @@ describe("one click owns one attempt", () => {
 
 describe("leaving the route abandons the run", () => {
   it("a terminal result that lands after the exit downloads nothing", async () => {
-    readyStore();
+    await readyStore();
     const storage = memStorage();
     let xlsxFetches = 0;
     const pollGate = Promise.withResolvers<Response>();
@@ -620,7 +641,7 @@ describe("leaving the route abandons the run", () => {
     // state is suppressed after unmount, but the asynchronous chain — the XLSX
     // fetch, the restore, `saveBlob` — carried on regardless, and the user got a
     // file for a run they had walked away from.
-    readyStore();
+    await readyStore();
     const storage = memStorage();
     const saveBlob = vi.fn();
     const xlsxGate = Promise.withResolvers<Response>();
@@ -672,7 +693,7 @@ describe("leaving the route abandons the run", () => {
   });
 
   it("returning after leaving shows a fresh screen and no automatic second POST", async () => {
-    readyStore();
+    await readyStore();
     const storage = memStorage();
     let posts = 0;
     routeFetch((u, init) => {
@@ -725,7 +746,7 @@ describe("leaving the route abandons the run", () => {
   });
 
   it("a LATE 202 activates its own record, is cancelled, and never attaches", async () => {
-    readyStore();
+    await readyStore();
     const storage = memStorage();
     const postGate = Promise.withResolvers<Response>();
     const cancelled: string[] = [];
@@ -788,7 +809,7 @@ describe("leaving the route abandons the run", () => {
 
 describe("revocation is decisive AT the submission linearization points", () => {
   it("exit while the snapshot is still staging sends ZERO requests", async () => {
-    readyStore();
+    await readyStore();
     const backing = memStorage();
     // THE DISCRIMINATOR between the two fences.
     //
@@ -883,7 +904,7 @@ describe("revocation is decisive AT the submission linearization points", () => 
     // that no ordinary scheduling gap separates them, which is exactly why a test
     // that cannot separate them proves only one of them exists. Mutating either
     // fence away must fail its own case, and this is the case for the second.
-    readyStore();
+    await readyStore();
     const backing = memStorage();
     let requests = 0;
     let recordWrites = 0;
@@ -946,7 +967,7 @@ describe("revocation is decisive AT the submission linearization points", () => 
 
 describe("pagehide cuts the owner record synchronously", () => {
   it("removes the exact owner key even when the snapshot purge never resolves", async () => {
-    readyStore();
+    await readyStore();
     const storage = memStorage();
     // Another tab's run, sitting in this store. It must not be touched.
     storage.seed(`${OPTIMIZE_SESSION_STORAGE_KEY}.owner-other`, priorRunRecord("owner-other"));
@@ -1008,7 +1029,7 @@ describe("pagehide cuts the owner record synchronously", () => {
   // before removing the record, and the hard-exit case this very test models is a
   // purge that never resumes. The reverse map would then outlive the visit.
   it("a 202 landing AFTER the document-exit cut never recreates the owner key", async () => {
-    readyStore();
+    await readyStore();
     const storage = memStorage();
     // Another tab's run, which nothing here may touch.
     storage.seed(`${OPTIMIZE_SESSION_STORAGE_KEY}.owner-other`, priorRunRecord("owner-other"));
@@ -1078,7 +1099,7 @@ describe("pagehide cuts the owner record synchronously", () => {
   it("CONTROL: with no exit, the same parked 202 activates and runs normally", async () => {
     // Without this the test above would pass equally against a build that simply
     // dropped every late 202 on the floor.
-    readyStore();
+    await readyStore();
     const storage = memStorage();
     const postGate = Promise.withResolvers<Response>();
     let posts = 0;
@@ -1125,7 +1146,7 @@ describe("pagehide cuts the owner record synchronously", () => {
 
 describe("one run's cleanup cannot reach another run's data", () => {
   it("two tabs submit independently and neither retires the other's record", async () => {
-    readyStore();
+    await readyStore();
     // `sessionStorage` is per TAB, so two tabs are two stores. The isolation being
     // proved is that the abandonment in tab A names only owners A staged — it
     // cannot enumerate its way into anything else, in this tab or any other.

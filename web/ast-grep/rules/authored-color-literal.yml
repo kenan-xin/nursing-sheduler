@@ -1,0 +1,36 @@
+id: authored-color-literal
+language: TypeScript
+severity: error
+message: >-
+  A colour is authored here as a literal. Every colour in this app comes from the token
+  authority in `app/globals.css` and is reached by name (`bg-brand`, `text-ink`,
+  `border-line`, `var(--scrim)`); a literal is a second source of truth for a value the
+  theme, the accent and the light/dark ladder are all supposed to re-resolve.
+note: >-
+  Migrated from four separate source scans: the TSX half of `app/v2-style-contract.test.ts`
+  (which hand-rolled a TypeScript compiler walk), the `components/ui/**` hex/rgb sweep and
+  the `/design-system` guide sweep in `app/design-system.test.ts`, and the self-source read
+  in `components/theme/theme-toggle.test.tsx`. Alternatives checked and rejected: a rendered
+  or computed-style test cannot see this at all, because a hand-typed `#0b7d68` and
+  `var(--brand)` resolve to the same paint -- that byte-identity is the whole reason a
+  static rule is needed; `no-restricted-imports` has no module specifier to bind to; and
+  `no-restricted-properties` needs an identifier receiver, while this is a bare literal.
+  This rule is STRICTER than the checks it replaces, which only rejected black and
+  translucent literals: no authored colour is legitimate in this scope at all.
+  LIMITATION RECORDED: a fragment identifier spelled entirely in hex digits (`href="#dead"`)
+  is indistinguishable from a three-to-eight-digit hex colour by syntax alone, exactly as it
+  was for the regex this replaces. No such anchor exists in the tree; one would be added
+  here as an exact exception.
+files:
+  - "app/**"
+  - "components/**"
+ignores:
+  - "**/*.test.ts"
+  - "**/*.test.tsx"
+  - "**/*.test-d.ts"
+  - "**/*.spec.ts"
+  - "**/*.spec.tsx"
+  - "**/test-support.ts"
+rule:
+  kind: string_fragment
+  regex: '(#[0-9a-fA-F]{3}\b|#[0-9a-fA-F]{4}\b|#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{8}\b)|(\b(rgb|rgba|hsl|hsla)\()'

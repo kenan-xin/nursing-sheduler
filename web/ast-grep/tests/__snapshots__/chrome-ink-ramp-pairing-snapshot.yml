@@ -1,0 +1,23 @@
+id: chrome-ink-ramp-pairing
+snapshots:
+  ? |
+    export const E = () => <span className="bg-chrome text-on-ink" />;
+  : labels:
+      - source: bg-chrome text-on-ink
+        style: primary
+        start: 40
+        end: 61
+  ? |
+    export const F = () => <span className="bg-ink text-on-ink" />;
+  : labels:
+      - source: bg-ink text-on-ink
+        style: primary
+        start: 40
+        end: 58
+  ? |
+    export const G = () => <span className="bg-chrome text-ink" />;
+  : labels:
+      - source: bg-chrome text-ink
+        style: primary
+        start: 40
+        end: 58

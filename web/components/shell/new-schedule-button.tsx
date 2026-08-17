@@ -47,11 +47,21 @@ export function StartOverCard({ onResetComplete, resetNewSchedule }: StartOverCa
   const reset = resetNewSchedule ?? resetToNewSchedule;
 
   const handleConfirm = async () => {
+    // The verified roster/stored-data cut FIRST, then the scenario reset — and the
+    // outcome is BRANCHED ON, not merely awaited. Both halves fail closed: nothing is
+    // announced as done unless both succeeded, and the retry path is this same button.
+    //
+    // INTEGRATION (T03): the scenario half is now a repository command, so a refusal
+    // arrives as a resolved outcome carrying a reason rather than as a throw.
+    // `not-owner` is the one a user can act on — another tab holds the lease — so it
+    // keeps its own message instead of being flattened into the generic one.
     const outcome = await reset();
     if (outcome.status !== "reset") {
-      // Nothing was changed, so nothing is announced as done. The retry path is
-      // the same button — the card is still on screen and still armed.
-      toast.error(NEW_SCHEDULE_FAILED_MESSAGE);
+      toast.error(
+        outcome.scenarioReason === "not-owner"
+          ? "This schedule is being edited in another tab. Take over editing, then start over."
+          : NEW_SCHEDULE_FAILED_MESSAGE,
+      );
       return;
     }
     onResetComplete?.();

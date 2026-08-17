@@ -1,0 +1,32 @@
+id: frozen-v2-conditional-registration
+valid:
+  # Registration-time selection: an out-of-scope block is never registered.
+  - |
+    if (FOUNDATION_SELECTED) {
+      describe("the emitted theme", () => {});
+    }
+  - |
+    for (const row of SELECTED_ROWS) {
+      test(row.route, async () => {});
+    }
+  # Prose about not skipping is not a call.
+  - |
+    // `runIf` registers the block and reports it as skipped, which this file refuses.
+    describe("selection", () => {});
+  # A `.skip` on something that is not a test runner.
+  - |
+    const remaining = rows.slice(1);
+    cursor.skip(2);
+invalid:
+  - |
+    describe.skipIf(!AVAILABLE)("the foundation owner", () => {});
+  - |
+    it.runIf(hasPrototype)("matches the canonical prototype", () => {});
+  # Oxlint cannot see these three at all in a Playwright spec, which is what the probe in
+  # this rule's note found.
+  - |
+    test.skip("the R6 harness route", async () => {});
+  - |
+    test.only("one accent while debugging", async () => {});
+  - |
+    describe.todo("the deferred export layout");

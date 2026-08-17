@@ -1,0 +1,9 @@
+id: test-module-loader-call-js
+valid:
+  - |
+    const { join } = require("node:path");
+invalid:
+  - |
+    const require = createRequire(import.meta.url);
+  - |
+    const require = mod.createRequire(import.meta.url);

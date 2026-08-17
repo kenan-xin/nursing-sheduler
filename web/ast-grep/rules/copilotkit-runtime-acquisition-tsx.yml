@@ -1,0 +1,30 @@
+id: copilotkit-runtime-acquisition-tsx
+language: Tsx
+severity: error
+message: >-
+  The CopilotKit runtime is reachable only through `lib/ai/runtime/copilotkit-runtime.ts`,
+  which applies the telemetry/analytics containment env before the package's telemetry
+  singleton snapshots it. Acquiring the package any other way boots an uncontained runtime.
+note: >-
+  The `.tsx` twin of `copilotkit-runtime-acquisition`. The dynamic-acquisition shapes it
+  rejects are most likely in a client component -- a lazily imported provider -- which is
+  precisely the extension the `TypeScript` language does not claim. Ticket 6 owns the
+  repository-wide version of this restriction.
+files:
+  - "app/**"
+  - "components/**"
+  - "lib/**"
+ignores:
+  - "**/*.test.tsx"
+rule:
+  any:
+    - pattern: require($SPEC)
+    - pattern: $F($SPEC)
+constraints:
+  SPEC:
+    regex: "@copilotkit/runtime"
+  # See the base rule: `import(...)` is a call whose callee is `import`, and the dynamic form
+  # belongs to Oxlint.
+  F:
+    not:
+      regex: ^import$

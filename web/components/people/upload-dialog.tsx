@@ -28,7 +28,8 @@ import {
   type EditorItemBase,
 } from "@/components/entity-editor/core";
 
-type Commit = (next: ScenarioUiState) => void;
+/** Applied at the queue head against the committed state (see `people-table.tsx`). */
+type Commit = (transform: (live: ScenarioUiState) => ScenarioUiState | null) => void;
 type CurrentState = () => ScenarioUiState;
 
 export function UploadDialog<TItem extends EditorItemBase>({
@@ -74,7 +75,13 @@ export function UploadDialog<TItem extends EditorItemBase>({
       toast.error(message);
       return;
     }
-    commit(result.state);
+    // Re-derived at the queue head so the reorder applies to the committed roster.
+    // A list that no longer validates there (a person deleted meanwhile) withdraws
+    // the write rather than restoring a stale roster.
+    commit((live) => {
+      const settled = reorderByUpload(live, descriptor, names);
+      return settled.ok ? settled.state : null;
+    });
     toast.success(
       `Successfully uploaded ${names.length} people: ${result.reordered} existing people ` +
         `reordered, ${result.added} new people added, ${result.movedToEnd} existing people moved to end.`,

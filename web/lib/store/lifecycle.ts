@@ -1,68 +1,36 @@
-// Durable-store lifecycle controller (T04, tech-plan §4; T17r review P0). Two
-// distinct replacement disciplines, by whether the transition is a user-visible
-// edit:
+// Scenario lifecycle (T03): bring-up, New, Load, and reset — all of them
+// repository transactions now.
 //
-//   • Initialization (hydration / New / user-reset) is NOT an authoring action,
-//     so it must stay OUT of undo history. It uses the paused-replace protocol:
-//       pause zundo → rehydrate/migrate or replace state → clear temporal history
-//       → resume. It never invents a backup baseline (only a real plain Download
-//       does that — DL12/T17r review P0); the baseline stays whatever was
-//       persisted, or `null` (unknown) for a fresh store.
+// WHAT CHANGED, AND WHY IT SIMPLIFIED. The pre-T03 controller had to run two
+// different replacement disciplines because zundo history and Zustand `persist`
+// were separate mechanisms with separate failure modes: initialization used a
+// paused-replace protocol so the replacement stayed out of undo history, while a
+// confirmed Load was a tracked full-slice `setState` so Undo could restore the
+// prior workspace.
 //
-//   • A confirmed Load IS a durable authoring action (DL12): it is one TRACKED
-//     full-slice transaction, so Undo restores the complete prior workspace, Redo
-//     restores the imported one, and older history is preserved. It resets the hot
-//     store after the commit and sets the backup baseline to `null` (unknown) —
-//     the imported file is not a fresh local backup.
+// Both collapse into repository semantics:
 //
-// The paused protocol is wrapped so zundo always resumes and the status always
-// settles (`ready` | `recoverable-error`) even if any step throws — a malformed
-// restored payload can make fingerprinting throw, and that must not strand the
-// store `hydrating` with tracking paused. Hydration is client-only (IndexedDB).
+//   • bring-up      — migrate the legacy record, reread this tab's persisted
+//                     selection, acquire the lease when free, start a fresh Undo
+//                     session, publish. Nothing is "replaced"; the projection is
+//                     written FROM durable truth, so there is no history to keep
+//                     it out of.
+//   • New and Load  — atomic scenario SWITCHES. Each mints a new identity in one
+//                     transaction that validates the old owner, acquires the
+//                     target, records the switch, and releases the old lease.
+//
+// Load minting a new identity is what makes a restored file's history, receipts,
+// and (later) threads its own rather than inherited — and it is why Undo does not
+// reach back across a Load into a document this identity never contained.
 
 import {
-  createEmptyScenarioUiState,
   type ImportNormalizationTarget,
   type ScenarioUiState,
   type UiRequestCell,
 } from "@/lib/scenario";
-import { pickScenario } from "./fingerprint";
+import type { CommandOutcome } from "./authority";
+import { getScenarioAuthority } from "./spine";
 import type { HotStore } from "./hot-store";
-import { SCENARIO_PERSIST_KEY } from "./persistence";
-import {
-  consumeHydrationError,
-  getScenarioStorage,
-  isScenarioReady,
-  type ScenarioStore,
-} from "./scenario-store";
-
-/**
- * Replace the durable scenario slice + backup fingerprint through the privileged
- * `store.setState` path (bypassing the mutation gate). Merge (not replace) so the
- * store's action functions are preserved.
- */
-function replaceScenarioState(
-  scenario: ScenarioStore,
-  next: ScenarioUiState,
-  backupFingerprint: string | null,
-): void {
-  scenario.setState({ ...pickScenario(next), backupFingerprint }, false);
-}
-
-/**
- * Run `apply` (which sets durable state) with zundo tracking paused, then clear
- * history — so the replacement never lands in undo/redo. `resume` runs in
- * `finally` so a throwing `apply` cannot leave tracking permanently paused.
- */
-function withPausedReplace(scenario: ScenarioStore, apply: () => void): void {
-  scenario.temporal.getState().pause();
-  try {
-    apply();
-    scenario.temporal.getState().clear();
-  } finally {
-    scenario.temporal.getState().resume();
-  }
-}
 
 /**
  * Give an imported card body durable store identity. A legacy import body has no
@@ -100,118 +68,98 @@ function hydrateImportTarget(target: ImportNormalizationTarget): ScenarioUiState
 }
 
 /**
- * Client-only durable-store hydration. Marks `hydrating`, then runs the manual
- * protocol under one try/catch/finally: pause → rehydrate (persistence `migrate`
- * + sanitizing `merge` run inside) → on a corrupt/failed read OR any throw
- * (including a fingerprint throw on a malformed restored payload), settle to
- * `recoverable-error` without crashing; otherwise clear history, restore or
- * compute the baseline fingerprint (a persisted baseline survives the rehydrate; a
- * fresh store gets the clean current fingerprint), and settle `ready`. zundo is
- * always resumed in `finally`.
+ * Client-only bring-up: run the one-time legacy migration, reread this tab's
+ * persisted selection and lease, acquire the lease when it is free, start a fresh
+ * Undo session, and publish the committed envelope.
+ *
+ * The hot store's `hydrationStatus` remains the shell's gate, so the existing
+ * skeleton/error surfaces are unchanged. A failure here settles
+ * `recoverable-error` rather than crashing, exactly as before — but the durable
+ * record is left intact for the next attempt instead of being written over.
  */
-export async function hydrateScenarioStore(scenario: ScenarioStore, hot: HotStore): Promise<void> {
+export async function initializeScenarioAuthority(hot: HotStore): Promise<void> {
   hot.getState().setHydrationStatus("hydrating");
-  scenario.temporal.getState().pause();
-
   try {
-    await scenario.persist.rehydrate();
-    const error = consumeHydrationError(scenario);
-    if (error !== null) throw error;
-
-    scenario.temporal.getState().clear();
-    // Hydration does NOT invent a backup baseline: a persisted baseline survives
-    // the rehydrate, and a fresh store keeps `null` (unknown). Only a real plain
-    // Download marks a backup fresh (DL12/T17r review P0).
+    await getScenarioAuthority().initialize();
     hot.getState().setHydrationStatus("ready");
   } catch {
     hot.getState().setHydrationStatus("recoverable-error");
-  } finally {
-    scenario.temporal.getState().resume();
   }
 }
 
 /**
- * Load a scenario from a keyless import target as ONE tracked full-slice
- * transaction (DL12/T17r review P0): assign card/cell identity, then replace the
- * durable scenario slice through the privileged `setState` WITHOUT pausing zundo,
- * so the replacement lands as a single undo entry — Undo restores the complete
- * prior workspace, Redo restores this import, and older history is preserved. The
- * backup baseline is set to `null` (unknown): an imported file is not a fresh
- * local backup. The hot store is reset AFTER the durable commit so scenario A's
+ * Load a scenario from a keyless import target: assign card/cell identity, then
+ * switch to a FRESH scenario identity holding the imported content in one
+ * transaction. The backup baseline is `null` (unknown) — an imported file is not a
+ * fresh local backup — and the hot store is reset after the commit so scenario A's
  * transient state cannot leak into B.
  */
-export function loadScenario(
-  scenario: ScenarioStore,
-  hot: HotStore,
-  target: ImportNormalizationTarget,
-): void {
-  const hydrated = hydrateImportTarget(target);
-  // Tracked (un-paused) full-slice set → exactly one zundo entry. Baseline is not
-  // part of the temporal slice, so Undo/Redo never touch it.
-  scenario.setState({ ...pickScenario(hydrated), backupFingerprint: null }, false);
-  hot.getState().resetEphemeral();
-  hot.getState().setHydrationStatus("ready");
+export function loadScenario(target: ImportNormalizationTarget): Promise<CommandOutcome> {
+  return getScenarioAuthority().loadScenario(hydrateImportTarget(target));
 }
 
 /**
- * New scenario: reset every scenario slice to empty, clear history, and reset the
- * hot store. Uses the paused-replace protocol (initialization, not an authoring
- * edit) and does NOT invent a backup baseline — the empty workspace has no fresh
- * local backup, so the baseline is `null` (unknown) (DL12/T17r review P0).
+ * New scenario: switch to a fresh identity holding the empty workspace. It does
+ * NOT invent a backup baseline — an empty workspace has no fresh local backup, so
+ * the baseline is `null` (unknown) (DL12/T17r review P0).
  */
-export function newScenario(scenario: ScenarioStore, hot: HotStore, apiVersion?: string): void {
-  const empty = createEmptyScenarioUiState(apiVersion);
-  withPausedReplace(scenario, () => replaceScenarioState(scenario, empty, null));
-  hot.getState().resetEphemeral();
-  hot.getState().setHydrationStatus("ready");
+export function newScenario(apiVersion?: string): Promise<CommandOutcome> {
+  return getScenarioAuthority().newScenario(apiVersion);
 }
 
 /**
- * User-reset recovery path (offered on `recoverable-error`): drop the corrupt
- * persisted record through the awaitable storage queue (so the remove is
- * serialized with any pending write and actually lands), then start a clean new
- * scenario without crashing.
+ * The user-facing reset (the New button, and the `recoverable-error` recovery
+ * affordance). Identical to {@link newScenario} now that there is no corrupt
+ * write-behind record to drop first: a legacy record that cannot be decoded is
+ * already handled softly by the repository migration, which leaves the legacy row
+ * intact and mints an empty scenario rather than blocking bring-up.
  */
-export async function resetToNewScenario(
-  scenario: ScenarioStore,
-  hot: HotStore,
-  apiVersion?: string,
-): Promise<void> {
-  const storage = getScenarioStorage(scenario);
-  if (storage) {
-    await storage.removeItem(SCENARIO_PERSIST_KEY);
-    await storage.drain();
-  }
-  newScenario(scenario, hot, apiVersion);
+export function resetToNewScenario(apiVersion?: string): Promise<CommandOutcome> {
+  return newScenario(apiVersion);
 }
 
 /**
- * Force `persist` to write the current durable state (a content-neutral set the
- * middleware still serializes; zundo skips it via the equality guard). No-op
- * unless the spine is `ready` — a pre-hydration or recoverable-error flush must
- * not serialize the empty/error store over a not-yet-read or deliberately
- * preserved saved record.
+ * Register the page-lifecycle listeners that keep this tab's authority honest, and
+ * return an unsubscribe. No-op (with a no-op cleanup) outside the browser.
+ *
+ * Two distinct jobs, and conflating them was the pre-T03 bug this replaces:
+ *
+ *   • `pagehide` with `persisted === false` is a real teardown — release the lease
+ *     so a peer tab need not wait out the 20-second expiry. With
+ *     `persisted === true` the page is going into BFCache and may come back, so
+ *     releasing would strand a tab that is about to resume; expiry is the correct
+ *     backstop there.
+ *   • `pageshow`, `visibilitychange`, and `online` are RESUMPTION points where
+ *     process memory may describe a world that no longer exists — each one
+ *     triggers an authoritative reread rather than trusting what this tab
+ *     remembers about its own ownership.
  */
-export function flushScenarioPersist(scenario: ScenarioStore): void {
-  if (!isScenarioReady(scenario)) return;
-  scenario.setState({}, false);
-}
-
-/** Resolve once the durable store's pending writes/removes have settled. */
-export async function drainScenarioPersist(scenario: ScenarioStore): Promise<void> {
-  await getScenarioStorage(scenario)?.drain();
-}
-
-/**
- * Register a `pagehide` flush + drain of the durable store, returning an
- * unsubscribe. No-op (and returns a no-op cleanup) outside the browser.
- */
-export function registerPagehideFlush(scenario: ScenarioStore): () => void {
+export function registerScenarioLifecycle(): () => void {
   if (typeof window === "undefined") return () => {};
-  const handler = () => {
-    flushScenarioPersist(scenario);
-    void drainScenarioPersist(scenario);
+  const authority = getScenarioAuthority();
+
+  const onPageHide = (event: PageTransitionEvent) => {
+    if (event.persisted) return; // BFCache: the tab may resume and still own it
+    void authority.release();
   };
-  window.addEventListener("pagehide", handler);
-  return () => window.removeEventListener("pagehide", handler);
+  const onPageShow = (event: PageTransitionEvent) => {
+    if (!event.persisted) return; // a fresh load already initialized
+    void authority.reconcile();
+  };
+  const onVisibility = () => {
+    if (document.visibilityState === "visible") void authority.reconcile();
+  };
+  const onOnline = () => void authority.reconcile();
+
+  window.addEventListener("pagehide", onPageHide);
+  window.addEventListener("pageshow", onPageShow);
+  document.addEventListener("visibilitychange", onVisibility);
+  window.addEventListener("online", onOnline);
+
+  return () => {
+    window.removeEventListener("pagehide", onPageHide);
+    window.removeEventListener("pageshow", onPageShow);
+    document.removeEventListener("visibilitychange", onVisibility);
+    window.removeEventListener("online", onOnline);
+  };
 }

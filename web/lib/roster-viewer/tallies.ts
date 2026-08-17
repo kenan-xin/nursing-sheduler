@@ -11,8 +11,10 @@
 // distinct scan flag, but nothing here calls it a violation, because no scenario
 // constraint says it is one.
 
-import { typedIdKey } from "@/lib/roster";
-import type { RosterContext, RosterDayGrid } from "@/lib/roster";
+// DIRECT LEAF IMPORTS, not the `@/lib/roster` barrel — that barrel reaches back into
+// `@/lib/roster-viewer` (roster-clear → view-preference), which closed a real ESM cycle.
+import { typedIdKey } from "@/lib/roster/day-state";
+import type { RosterContext, RosterDayGrid } from "@/lib/roster/types";
 
 /** One nurse's informational tallies across the roster range. */
 export interface NurseTally {

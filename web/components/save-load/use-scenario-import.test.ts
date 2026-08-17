@@ -30,10 +30,11 @@ vi.mock("@/lib/store", async (orig) => {
   };
 });
 
-vi.mock("sonner", () => ({ toast: { success: vi.fn() } }));
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 import { prepareScenarioLoad } from "@/lib/scenario";
 import { loadScenario, isScenarioSliceEmpty } from "@/lib/store";
+import { toast } from "sonner";
 import { useScenarioImport } from "./use-scenario-import";
 
 const prepareMock = prepareScenarioLoad as unknown as Mock;
@@ -76,10 +77,18 @@ function stageResult(target: ImportNormalizationTarget, warnings: string[] = [])
   } satisfies PrepareScenarioLoadResult);
 }
 
+/** The outcome a successful atomic scenario switch resolves with. */
+const LOADED = { ok: true, committed: true, documentRevision: 1, commitId: null } as const;
+
 beforeEach(() => {
   prepareMock.mockReset();
-  loadScenarioMock.mockReset();
+  // T03F1: the commit AWAITS and BRANCHES ON the switch outcome, so the spy has to
+  // resolve one. That is the point of the change — a refused switch must no longer be
+  // reported as a successful load (see the refusal test at the end).
+  loadScenarioMock.mockReset().mockResolvedValue(LOADED);
   isEmptyMock.mockReset().mockReturnValue(true);
+  (toast.success as unknown as Mock).mockReset();
+  (toast.error as unknown as Mock).mockReset();
 });
 
 afterEach(() => {
@@ -87,11 +96,11 @@ afterEach(() => {
 });
 
 describe("useScenarioImport — guard warnings computed before load", () => {
-  it("direct path: publishes the named guard warning from the pre-load target and loads exactly once", () => {
+  it("direct path: publishes the named guard warning from the pre-load target and loads exactly once", async () => {
     stageResult(targetWithCounts([MARKED_CONTRACT]));
     const { result } = renderHook(() => useScenarioImport());
 
-    act(() => result.current.handleFile("<yaml>"));
+    await act(async () => result.current.handleFile("<yaml>"));
 
     // No-op loadScenario ⇒ if the guard read post-load state it would see nothing.
     expect(result.current.warnings).toEqual([IMPORT_ALICE_WARNING]);
@@ -99,7 +108,7 @@ describe("useScenarioImport — guard warnings computed before load", () => {
     expect(result.current.confirm).toBeNull();
   });
 
-  it("keeps two unsafe counts for the same person distinguishable", () => {
+  it("keeps two unsafe counts for the same person distinguishable", async () => {
     stageResult(
       targetWithCounts([
         { ...MARKED_CONTRACT, description: "Night coverage" },
@@ -108,24 +117,24 @@ describe("useScenarioImport — guard warnings computed before load", () => {
     );
     const { result } = renderHook(() => useScenarioImport());
 
-    act(() => result.current.handleFile("<yaml>"));
+    await act(async () => result.current.handleFile("<yaml>"));
 
     expect(result.current.warnings).toEqual([
       `"Night coverage" (count 1): ${ALICE_WARNING}`,
       `"Night coverage" (count 2): ${ALICE_WARNING}`,
     ]);
   });
-  it("a disabled imported marked count produces no guard warning", () => {
+  it("a disabled imported marked count produces no guard warning", async () => {
     stageResult(targetWithCounts([{ ...MARKED_CONTRACT, disabled: true }]));
     const { result } = renderHook(() => useScenarioImport());
 
-    act(() => result.current.handleFile("<yaml>"));
+    await act(async () => result.current.handleFile("<yaml>"));
 
     expect(result.current.warnings).toBeNull();
     expect(loadScenarioMock).toHaveBeenCalledTimes(1);
   });
 
-  it("one unresolved count does not hide an independent valid finding", () => {
+  it("one unresolved count does not hide an independent valid finding", async () => {
     stageResult(
       targetWithCounts([
         { ...MARKED_CONTRACT, uid: "bad", countShiftTypes: "NOT_A_SHIFT" },
@@ -134,37 +143,59 @@ describe("useScenarioImport — guard warnings computed before load", () => {
     );
     const { result } = renderHook(() => useScenarioImport());
 
-    act(() => result.current.handleFile("<yaml>"));
+    await act(async () => result.current.handleFile("<yaml>"));
 
     expect(result.current.warnings).toEqual([`Count 2: ${ALICE_WARNING}`]);
   });
 
-  it("merges and deduplicates base warnings with guard warnings", () => {
+  it("merges and deduplicates base warnings with guard warnings", async () => {
     stageResult(targetWithCounts([MARKED_CONTRACT]), [
       "base advanced-syntax warning",
       IMPORT_ALICE_WARNING,
     ]);
     const { result } = renderHook(() => useScenarioImport());
 
-    act(() => result.current.handleFile("<yaml>"));
+    await act(async () => result.current.handleFile("<yaml>"));
 
     // base first, guard line appears once despite the base list already carrying it.
     expect(result.current.warnings).toEqual(["base advanced-syntax warning", IMPORT_ALICE_WARNING]);
   });
 
-  it("staged (confirm) path publishes the same list only after Continue, loading once", () => {
+  it("staged (confirm) path publishes the same list only after Continue, loading once", async () => {
     isEmptyMock.mockReturnValue(false); // non-empty workspace ⇒ combined confirm
     stageResult(targetWithCounts([MARKED_CONTRACT]));
     const { result } = renderHook(() => useScenarioImport());
 
-    act(() => result.current.handleFile("<yaml>"));
+    await act(async () => result.current.handleFile("<yaml>"));
     // Warnings are staged, not yet published; nothing has loaded.
     expect(result.current.warnings).toBeNull();
     expect(result.current.confirm).not.toBeNull();
     expect(loadScenarioMock).not.toHaveBeenCalled();
 
-    act(() => result.current.confirm!.onContinue());
+    await act(async () => result.current.confirm!.onContinue());
     expect(result.current.warnings).toEqual([IMPORT_ALICE_WARNING]);
     expect(loadScenarioMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("a REFUSED switch keeps the staged file and reports no success", async () => {
+    // T03F1 finding 5. The commit used to clear staging and toast "Scenario loaded"
+    // before the switch had settled — so a refusal (this tab is read-only, or was
+    // taken over mid-dialog) destroyed the user's staged upload and told them it had
+    // worked. The same file must remain retryable after taking editing back.
+    isEmptyMock.mockReturnValue(false); // stage the confirmation
+    loadScenarioMock.mockResolvedValue({ ok: false, reason: "not-owner", code: "not_owner" });
+    stageResult(targetWithCounts([MARKED_CONTRACT]));
+    const { result } = renderHook(() => useScenarioImport());
+
+    await act(async () => result.current.handleFile("<yaml>"));
+    expect(result.current.confirm).not.toBeNull();
+
+    await act(async () => result.current.confirm!.onContinue());
+
+    // The staged confirmation survives, and nothing claims to have loaded.
+    expect(result.current.confirm).not.toBeNull();
+    expect(result.current.warnings).toBeNull();
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalled();
   });
 });

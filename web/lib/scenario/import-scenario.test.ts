@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { sanitizePersistedScenario } from "@/lib/store/persistence";
 import { importScenarioYaml, importScenarioValue } from "./import-scenario";
 
 const BACKEND_YAML = `apiVersion: alpha
@@ -200,6 +201,43 @@ dates: {range: {startDate: 2026-05-14, endDate: 2026-05-14}}
 people: {items: [{id: P1}]}
 shiftTypes: {items: [{id: D}]}
 `;
+
+  it("normalizes an explicit-null selector AWAY, so the import is a valid durable write", () => {
+    // T03F1: durable writes are strict — an explicit `null` selector is not valid
+    // durable content. That contract is only workable because the tolerance for
+    // null-as-all lives BEFORE the transaction: `clean()` drops null-valued keys, so a
+    // file that spells `qualifiedPeople: null` (the backend's own null-as-all form)
+    // reaches the repository with the key ABSENT, which the reader then renders as ALL.
+    //
+    // The last assertion ties the two together: the normalized target is checked
+    // against `sanitizePersistedScenario`, the structural contract the repository's
+    // in-transaction validator delegates to — so "import normalizes before the write"
+    // is proven rather than assumed, without this module importing the durable
+    // authority (the module-boundary gate forbids that, correctly).
+    const r = importScenarioYaml(
+      `${BASE}preferences:\n  - type: shift type requirement\n    shiftType: D\n    requiredNumPeople: 1\n    qualifiedPeople: null\n    date: null\n    weight: -1\n`,
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+
+    const card = r.target.cardsByKind.requirements[0];
+    expect(card).toBeDefined();
+    expect("qualifiedPeople" in card).toBe(false);
+    expect("date" in card).toBe(false);
+
+    // Validate what actually REACHES the transaction. `loadScenario` hydrates durable
+    // identity onto an import target first (`hydrateImportTarget` in
+    // `lib/store/lifecycle.ts`), which is the only other thing standing between the
+    // file and the write, so the candidate is assembled the same way here.
+    const hydrated = {
+      ...r.target,
+      cardsByKind: {
+        ...r.target.cardsByKind,
+        requirements: r.target.cardsByKind.requirements.map((c) => ({ ...c, uid: "req-1" })),
+      },
+    };
+    expect(() => sanitizePersistedScenario(hydrated)).not.toThrow();
+  });
 
   it("rejects an unknown explicit preference type (never silently drops it)", () => {
     const r = importScenarioYaml(

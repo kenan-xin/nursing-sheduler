@@ -42,6 +42,7 @@ from .errors import (
     JobNotFoundError,
     JobOperationContentionError,
     JobOperationNotAllowedError,
+    QueueInvariantError,
     ServerApplicationError,
 )
 from .job_store import JobStore
@@ -52,6 +53,7 @@ from .jobs.worker import JobWorker
 from .maintenance import JobMaintenance
 from .runtime_identity import get_deployment_id
 from .scheduling_errors import SchedulingContentError
+from .semantic_profile import semantic_profile
 from .stores.memory import MemoryJobStore
 
 
@@ -188,6 +190,7 @@ def create_app(
         limits=StoreLimits(
             max_pending=settings.max_pending_jobs,
             max_retained=settings.max_retained_jobs,
+            ordinary_reserved_slots=settings.ordinary_reserved_slots,
         ),
         retention_seconds=settings.job_retention_seconds,
         claim_lease_seconds=settings.claim_lease_seconds,
@@ -248,7 +251,15 @@ def create_app(
             status_code = 404
         elif isinstance(exc, JobCapacityError):
             status_code = 429
-        elif isinstance(exc, (JobOperationNotAllowedError, JobOperationContentionError, JobArtifactNotReadyError)):
+        elif isinstance(
+            exc,
+            (
+                JobOperationNotAllowedError,
+                JobOperationContentionError,
+                JobArtifactNotReadyError,
+                QueueInvariantError,
+            ),
+        ):
             # Internal store write conflicts are consumed by the controller, not mapped here.
             status_code = 409
         else:
@@ -312,8 +323,15 @@ def create_app(
         }
 
     def info_payload(status: str):
-        """Build public service identity and job-store metadata."""
-        return {"status": status, **runtime_identity}
+        """Build public service identity, semantic profile, and job-store metadata.
+
+        The semantic profile is a SEPARATE nested object rather than more keys in
+        `runtime_identity`: that dict is also embedded verbatim in `job.state_changed`
+        events, whose consumers validate it as a closed key set. Keeping the profile
+        out of it means advertising scheduling semantics never changes the event
+        contract (T08).
+        """
+        return {"status": status, **runtime_identity, "semantic_profile": semantic_profile()}
 
     def check_readiness() -> str | None:
         """Return the first unavailable dependency reason, or `None` when ready."""

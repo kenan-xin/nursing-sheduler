@@ -1,0 +1,37 @@
+id: untokened-shadow-utility
+valid:
+  # The published set, plus the two semantic aliases and the explicit absence.
+  - |
+    const cls = "shadow-1 hover:shadow-2 active:shadow-none";
+  - |
+    const cls = "shadow-edge shadow-well shadow-side";
+  - |
+    const cls = "shadow-dialog";
+  - |
+    const cls = "shadow-toast";
+  # A partial fragment abutting an interpolation carries no complete utility.
+  - |
+    const cls = `border shadow-${level} p-2`;
+  # A bracketed variant on a PUBLISHED suffix must still be accepted.
+  - |
+    const cls = "group-data-[checked]/switch:shadow-1";
+  - |
+    const cls = "data-[pressed]:shadow-none";
+invalid:
+  - |
+    const cls = "shadow-md";
+  - |
+    const cls = "shadow-sm p-2";
+  - |
+    const cls = "dark:shadow-2xl";
+  # Rejected even though the value IS a canonical token: a duplicate stops tracking it.
+  - |
+    const cls = "shadow-[var(--sh-1)]";
+  - |
+    const cls = "shadow-[inset_0_2px_0_var(--color-brand)]";
+  # BOUNDED-REVIEW ROUND 1: this produced zero diagnostics, and the switch's neighbourhood
+  # really is where this variant is spelled.
+  - |
+    const cls = "group-data-[checked]/switch:shadow-lg";
+  - |
+    const cls = "data-[state=open]:shadow-md";

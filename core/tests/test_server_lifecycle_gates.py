@@ -253,7 +253,7 @@ def _claimed_running_job(store, clock):
     """Create and claim one running job under a frozen-clock controller."""
     controller = JobController(
         store,
-        limits=StoreLimits(max_pending=1, max_retained=2),
+        limits=StoreLimits(max_pending=1, max_retained=2, ordinary_reserved_slots=0),
         retention_seconds=60,
         claim_lease_seconds=30,
         clock=lambda: clock[0],
@@ -497,7 +497,7 @@ def test_cancellation_settles_when_cleanup_raises_after_shutdown(monkeypatch):
     store = MemoryJobStore()
     controller = JobController(
         store,
-        limits=StoreLimits(max_pending=1, max_retained=2),
+        limits=StoreLimits(max_pending=1, max_retained=2, ordinary_reserved_slots=0),
         retention_seconds=60,
         claim_lease_seconds=30,
     )
@@ -553,7 +553,7 @@ def test_worker_cancellation_takes_priority_over_concurrent_shutdown(monkeypatch
     store = MemoryJobStore()
     controller = JobController(
         store,
-        limits=StoreLimits(max_pending=1, max_retained=2),
+        limits=StoreLimits(max_pending=1, max_retained=2, ordinary_reserved_slots=0),
         retention_seconds=60,
         claim_lease_seconds=30,
     )
@@ -615,7 +615,7 @@ def test_worker_renews_claim_during_long_running_job(monkeypatch):
     store = MemoryJobStore()
     controller = JobController(
         store,
-        limits=StoreLimits(max_pending=1, max_retained=2),
+        limits=StoreLimits(max_pending=1, max_retained=2, ordinary_reserved_slots=0),
         retention_seconds=60,
         claim_lease_seconds=3.0,
     )

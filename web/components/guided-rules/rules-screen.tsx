@@ -35,6 +35,8 @@ import {
 import type { IconType } from "@/components/icons";
 import { useGuardedNavigation } from "@/components/shell/use-guarded-navigation";
 import { useCardEditorDraftGuard } from "@/components/card-editor/card-editor-shell";
+import { capabilityAnchorProps } from "@/lib/capability/anchor-contract";
+import { RULES_LIBRARY_ANCHOR } from "./capability-anchors";
 import { useGuidedRules } from "./use-guided-rules";
 import { RuleRow } from "./rule-row";
 import type { GuidedRuleRow } from "./types";
@@ -233,7 +235,11 @@ export function RulesScreen({ onOpenAdvanced }: RulesScreenProps) {
         </Surface>
       )}
 
-      <div className="flex flex-col gap-5">
+      {/* The rule library itself. Anchored (T06) so a help answer can send the user
+          to the library rather than to the screen's top: this container renders on
+          every visit — it holds the empty state when no constraint record exists — so
+          the anchor's presence is a property of the route, not of the scenario. */}
+      <div className="flex flex-col gap-5" {...capabilityAnchorProps(RULES_LIBRARY_ANCHOR)}>
         {groups.map((group) => {
           const Icon = categoryIcon(group.category);
           return (

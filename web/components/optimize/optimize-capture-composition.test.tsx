@@ -20,8 +20,8 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { JobResponse } from "@/lib/bff/types";
-import { useHotStore, useScenarioStore } from "@/lib/store";
-import { createEmptyScenarioUiState } from "@/lib/scenario/canonical";
+import { scenarioCommands, useHotStore } from "@/lib/store";
+import { resetScenarioForTest } from "@/lib/store/test-authority";
 import type { PrepareOptimizeSubmissionResult } from "@/lib/scenario";
 import {
   buildStagedSubmission,
@@ -121,9 +121,21 @@ const baseJob = (over: Partial<JobResponse> = {}): JobResponse => ({
   terminal: false,
   queue_position: 2,
   created_at: "2026-07-20T00:00:00+00:00",
+  // Nullable server-side and read only by T10's diagnostic evidence window, which
+  // this suite does not exercise.
+  expires_at: null,
   started_at: null,
   finished_at: null,
-  request: { input_name: "s.yaml", solver: "ortools/cp-sat", prettify: null, timeout_seconds: 300 },
+  request: {
+    input_name: "s.yaml",
+    solver: "ortools/cp-sat",
+    prettify: null,
+    timeout_seconds: 300,
+    // T09 — an unqualified submission is admitted as `ordinary`, and an ordinary run
+    // echoes no claimed basis.
+    purpose: "ordinary",
+    basis: null,
+  },
   result: null,
   error: null,
   controls: { cancellable: true, early_completion_available: false },
@@ -174,9 +186,18 @@ const okPrep: PrepareOptimizeSubmissionResult = {
   },
 };
 
-function readyStore() {
-  useScenarioStore.setState({
-    ...createEmptyScenarioUiState(),
+/**
+ * Make the scenario submit-ready THROUGH THE T03 AUTHORITY.
+ *
+ * This used to push a whole state object into the scenario store. That store is a
+ * read-only projection now — a component that wants to change a scenario issues a
+ * repository command — so a test that reached for `setState` would be asserting
+ * against a view the durable authority never agreed to. `mutate` is the same command
+ * the editor uses, and it resolves only once the commit that produced the projected
+ * snapshot has landed.
+ */
+async function readyStore() {
+  await scenarioCommands.mutate({
     staff: [{ id: "p1" }],
     shifts: [{ id: "day" }],
     rangeStart: "2026-07-01",
@@ -277,7 +298,7 @@ function xlsxResponse(): Response {
   } as unknown as Response;
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   // jsdom implements neither object-URL method, and the REAL `saveBlob` seam needs
   // both. Polyfilling the ENVIRONMENT (rather than injecting `terminalDeps.saveBlob`)
   // is what lets these tests keep the terminal chain completely un-injected while
@@ -294,8 +315,11 @@ beforeEach(() => {
   client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
+  // A brand-new empty scenario on a brand-new database, owned by this tab. The
+  // durable authority is per-scenario now (envelope + lease + commit log), so
+  // resetting the projection alone would leak ownership and history across tests.
+  await resetScenarioForTest();
   useHotStore.getState().resetRunView();
-  useScenarioStore.setState(createEmptyScenarioUiState());
 });
 
 afterEach(() => {
@@ -408,7 +432,7 @@ describe("OptimizeAndExportScreen — production roster capture", () => {
   it(
     "the DEFAULT screen fetches /roster once, commits one candidate, and gates the DELETE on it",
     async () => {
-      readyStore();
+      await readyStore();
       const store = freshStore();
       let rosterFetches = 0;
       let deletes = 0;
@@ -484,7 +508,7 @@ describe("OptimizeAndExportScreen — production roster capture", () => {
       // A container F3 refuses cannot be repaired by retrying, so the run resolves
       // instead of parking behind a dead Retry — and cleanup still happens only
       // AFTER the roster fetch, through an explicit dismissal token.
-      readyStore();
+      await readyStore();
       const store = freshStore();
       const order: string[] = [];
       routeFetch((u, init) => {
@@ -526,7 +550,7 @@ describe("OptimizeAndExportScreen — production roster capture", () => {
   it(
     "a capture failure blocks the DELETE and offers Retry on the real screen",
     async () => {
-      readyStore();
+      await readyStore();
       const store = freshStore();
       let deletes = 0;
       let attempt = 0;
@@ -582,7 +606,7 @@ describe("OptimizeAndExportScreen — production roster capture", () => {
       // Found … Your downloaded XLSX is unaffected.` The notice is a projection of
       // the capture gate plus the stored run state, so the fix has to remove that
       // state — which is what this asserts, rather than that some copy is hidden.
-      readyStore();
+      await readyStore();
       const store = freshStore();
       routeFetch((u, init) => {
         const method = init?.method ?? "GET";
@@ -642,7 +666,7 @@ describe("OptimizeAndExportScreen — production roster capture", () => {
   it(
     "discarding the saved roster removes the candidate through the real screen action",
     async () => {
-      readyStore();
+      await readyStore();
       const store = freshStore();
       routeTerminalRun({ onRoster: () => {}, onDelete: () => {} });
 
@@ -679,7 +703,7 @@ describe("OptimizeAndExportScreen — production roster capture", () => {
       // the same app-lifetime object across the unmount. That is what makes the
       // abandonment observable at all — and it is why a remount cannot re-authorize
       // a DELETE for a job it already settled.
-      readyStore();
+      await readyStore();
       const store = freshStore();
       const rosterGate = Promise.withResolvers<Response>();
       let rosterFetches = 0;
@@ -745,7 +769,7 @@ describe("OptimizeAndExportScreen — production roster capture", () => {
       // DELETE the first mount started, navigate away and back, then fire the
       // remounted route's own cleanup action: two coalescers that could not see each
       // other would each read the same still-valid token and each delete the job.
-      readyStore();
+      await readyStore();
       const store = freshStore();
       const deleteGate = Promise.withResolvers<Response>();
       let deletes = 0;
@@ -810,7 +834,7 @@ describe("OptimizeAndExportScreen — production roster capture", () => {
   it(
     "a verified Clear after a COMMIT removes the candidate and stops claiming it is saved",
     async () => {
-      readyStore();
+      await readyStore();
       const store = freshStore();
       routeTerminalRun({ onRoster: () => {}, onDelete: () => {} });
 
@@ -849,7 +873,7 @@ describe("OptimizeAndExportScreen — production roster capture", () => {
   it(
     "a verified Clear reaches the mounted gate through the F5 seam",
     async () => {
-      readyStore();
+      await readyStore();
       const store = freshStore();
       routeFetch((u, init) => {
         const method = init?.method ?? "GET";
@@ -908,7 +932,7 @@ describe("OptimizeAndExportScreen — production roster capture", () => {
       // and a remount after the chain re-runs boot to prove the release — the
       // same-session render alone cannot, because recovery.state is set by the
       // boot inspection that ran before the record existed.
-      readyStore();
+      await readyStore();
       const store = freshStore();
       const sessionStorage = memStorage();
       const owners: string[] = [];
@@ -1035,7 +1059,7 @@ describe("OptimizeAndExportScreen — production roster capture", () => {
       // still fetch its roster, and the record must stay retained for that retry.
       // Only a PROVEN job-gone (above) settles. A patch that force-released every
       // fetch failure would fail here.
-      readyStore();
+      await readyStore();
       const store = freshStore();
       const sessionStorage = memStorage();
       let deletes = 0;
@@ -1126,7 +1150,7 @@ describe("OptimizeAndExportScreen — production roster capture", () => {
     // roster route, so offering Retry would be the screenshot's futile loop.
     expectRetry: boolean,
   ) {
-    readyStore();
+    await readyStore();
     const store = freshStore();
     const sessionStorage = memStorage();
     const owners: string[] = [];
@@ -1255,7 +1279,7 @@ describe("OptimizeAndExportScreen — G4 dedicated /roster route", () => {
   it(
     "renders no embedded F4 RosterSection anywhere on the screen",
     async () => {
-      readyStore();
+      await readyStore();
       routeFetch((u, init) => {
         const method = init?.method ?? "GET";
         if (u.endsWith("/api/optimize") && method === "POST") return json(202, baseJob());
@@ -1297,7 +1321,7 @@ describe("OptimizeAndExportScreen — G4 dedicated /roster route", () => {
   it(
     "renders the `Open & adjust roster` CTA ONLY when the capture gate committed for the run in view",
     async () => {
-      readyStore();
+      await readyStore();
       routeFetch((u, init) => {
         const method = init?.method ?? "GET";
         if (u.endsWith("/api/optimize") && method === "POST") return json(202, baseJob());

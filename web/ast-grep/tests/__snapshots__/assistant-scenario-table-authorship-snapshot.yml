@@ -1,0 +1,51 @@
+id: assistant-scenario-table-authorship
+snapshots:
+  ? |
+    await db.historyLinks.clear();
+  : labels:
+      - source: db.historyLinks.clear()
+        style: primary
+        start: 6
+        end: 29
+  ? |
+    await db.keyval.put({ key: "scenario", value });
+  : labels:
+      - source: 'db.keyval.put({ key: "scenario", value })'
+        style: primary
+        start: 6
+        end: 47
+  ? |
+    await db.optimizeBases.delete(basisId);
+  : labels:
+      - source: db.optimizeBases.delete(basisId)
+        style: primary
+        start: 6
+        end: 38
+  ? |
+    await db.repositoryMeta.put({ key: "migration", value });
+  : labels:
+      - source: 'db.repositoryMeta.put({ key: "migration", value })'
+        style: primary
+        start: 6
+        end: 56
+  ? |
+    await db.scenarioCommits.bulkAdd(commits);
+  : labels:
+      - source: db.scenarioCommits.bulkAdd(commits)
+        style: primary
+        start: 6
+        end: 41
+  ? |
+    await db.scenarioEnvelopes.put(envelope);
+  : labels:
+      - source: db.scenarioEnvelopes.put(envelope)
+        style: primary
+        start: 6
+        end: 40
+  ? |
+    await this.db.writerLeases.update(scenarioId, { epoch });
+  : labels:
+      - source: this.db.writerLeases.update(scenarioId, { epoch })
+        style: primary
+        start: 6
+        end: 56

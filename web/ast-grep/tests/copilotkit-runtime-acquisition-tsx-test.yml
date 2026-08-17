@@ -1,0 +1,24 @@
+id: copilotkit-runtime-acquisition-tsx
+valid:
+  - |
+    import { CopilotRuntime } from "@/lib/ai/runtime/copilotkit-runtime";
+    export const A = () => <div />;
+  - |
+    const mod = await import("@/lib/ai/protocol");
+  # The CLIENT package is a different boundary, owned by Oxlint.
+  - |
+    const client = await import("@copilotkit/react-core/v2");
+  # Dynamic `import()` of the runtime is OXLINT's -- valid for this rule, still a lint failure.
+  - |
+    const runtime = await import("@copilotkit/runtime/v2");
+    const el = <div />;
+invalid:
+  - |
+    const runtime = require("@copilotkit/runtime");
+  - |
+    const runtime = createRequire("@copilotkit/runtime/package.json");
+  # The loader-handle shape, in a client component.
+  - |
+    const req = createRequire(import.meta.url);
+    const runtime = req("@copilotkit/runtime/v2");
+    const el = <div />;

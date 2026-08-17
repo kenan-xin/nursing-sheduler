@@ -1,0 +1,76 @@
+id: surface-recipe-combiner-visual
+language: Tsx
+severity: error
+message: >-
+  A class outside the legal layout vocabulary is combined with a `surfaceVariants(...)`
+  result. `cn(surfaceVariants({ ... }), "...")` is the sanctioned shape for a specialized
+  owner that calls the recipe directly instead of wrapping its DOM in `<Surface>`, and the
+  class it adds is layout, position, overflow and sizing ONLY -- exactly as for a
+  `<Surface className=...>` consumer. Paint, radius, elevation, motion and interaction
+  belong on a recipe axis; anything else belongs on a child element that is not a surface.
+note: >-
+  Bounded review round 1 found that the sanctioned direct shape
+  `cn(surfaceVariants(...), "...")` -- the one specialized owners actually author, e.g.
+  `components/optimize/optimize-and-export-screen.tsx` -- was governed by NEITHER of the
+  two original surface rules: `surface-consumer-classname` matched only JSX tagNames and
+  `surface-recipe-option-visual` matched only spelled `className:` / `class:` properties.
+  Changing that call's literal to `"bg-panel"` was invisible. This rule closes it.
+  SHAPE. A string literal fragment inside a `cn(...)` call that also contains a
+  `surfaceVariants(...)` argument, checked against the shared fail-closed
+  `surface-legal-class-vocabulary` allowlist. Fragments inside the `surfaceVariants(...)`
+  call itself are excluded -- those are recipe AXIS values (`role: "well"`), which the
+  recipe's own discriminated union and `surface-recipe-option-visual` govern; without the
+  exclusion every legal `role`/`geometry` value would report against a layout vocabulary
+  it was never meant to satisfy.
+  NARROWING RECORDED: matched by the combiner's spelling (`cn`) and the recipe's spelling
+  (`surfaceVariants`), so a renamed import of either defeats the static rule. A class
+  assembled out of non-literal parts has no authored literal to inspect. This rule governs
+  INLINE composition only -- a recipe result stored in a binding and concatenated later is
+  family L, whose whole-codebase data-flow guarantee the user explicitly retired on
+  2026-08-12; this rule neither restores nor depends on that retirement.
+files:
+  - "app/**"
+  - "components/**"
+  - "lib/**"
+ignores:
+  - "**/*.test.ts"
+  - "**/*.test.tsx"
+  - "**/*.test-d.ts"
+  - "**/*.spec.ts"
+  - "**/*.spec.tsx"
+rule:
+  all:
+    - kind: string_fragment
+    - not:
+        matches: surface-legal-class-vocabulary
+    - inside:
+        stopBy: end
+        all:
+          - pattern: cn($$$COMBINER_ARGS)
+          - has:
+              stopBy: end
+              pattern: surfaceVariants($$$RECIPE_ARGS)
+    # Recipe axis values are not layout classes and are governed elsewhere.
+    - not:
+        inside:
+          stopBy: end
+          pattern: surfaceVariants($$$OWN_ARGS)
+    # An EQUALITY OPERAND is never a rendered class: `variant === "side" ? a : b` tests a
+    # discriminator, it does not contribute a token. Only the ternary's BRANCHES reach the
+    # class string, and those are still checked. This mirrors the deleted analyzer, which
+    # folded the branches of a conditional and never classified its test.
+    #
+    # The four equality operators are spelled out rather than excluding
+    # `kind: binary_expression` wholesale, because `&&` and `||` are the SAME node kind
+    # and their right operand DOES reach the class string -- `cn("flex", isOpen &&
+    # "shadow-3")` is the common guarded-class idiom, and a kind-level exclusion would
+    # silently stop checking it.
+    - not:
+        inside:
+          kind: string
+          inside:
+            any:
+              - pattern: $LHS === $RHS
+              - pattern: $LHS !== $RHS
+              - pattern: $LHS == $RHS
+              - pattern: $LHS != $RHS

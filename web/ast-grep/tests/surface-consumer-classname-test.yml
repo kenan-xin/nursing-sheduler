@@ -1,0 +1,110 @@
+id: surface-consumer-classname
+valid:
+  # Layout-only className on each consumer.
+  - |
+    <Surface level="surface" geometry="card" className="flex flex-col gap-2 p-4" />
+  - |
+    <Surface level="page" geometry="square" className="relative" />
+  - |
+    <Card className="flex flex-col gap-4" />
+  - |
+    <SelectedCard className="flex flex-col gap-4" />
+  - |
+    <SkeletonCard className="w-full" />
+  # A visual class on a plain non-surface element is fine.
+  - |
+    <div className="bg-panel text-ink2 shadow-1 rounded-card" />
+  # A visual class on a similarly-named-but-not-the-authority element is fine.
+  - |
+    <SurfaceLink className="bg-panel" />
+  # A non-literal className (variable reference) has no authored literal to inspect;
+  # the runtime render layer in primitives-v2.test.tsx and the frozen Playwright
+  # surface matrix own the behavioural half. This narrowing is recorded in the
+  # rule's note.
+  - |
+    <Card className={someVar} />
+  # A visual class on a CHILD of a surface consumer is that child's business; the
+  # child's attributes are not inside the consumer's opening element.
+  - |
+    <Surface className="flex">
+      <div className="bg-panel" />
+    </Surface>
+  # ---------------------------------------------------------------------------
+  # THE ALLOWLIST FRONTIER. These are the exact boundary tokens the deleted
+  # analyzer's own `classifyToken` suite pinned. They are what makes this rule a
+  # fail-closed VOCABULARY rather than a denylist: each legal token below shares a
+  # prefix, a shape, or a name with an illegal one in the `invalid` list.
+  # ---------------------------------------------------------------------------
+  # `overflow-visible` is layout; bare `visible` is the visibility family (invalid).
+  - |
+    <Surface className="overflow-visible overflow-x-hidden" />
+  # `box-border` is box-sizing; `box-decoration-clone` is paint (invalid).
+  - |
+    <Surface className="box-border box-content" />
+  # `border-collapse` / `border-spacing-*` are table layout, not the border family.
+  - |
+    <Surface className="border-collapse border-spacing-2" />
+  # A bracketed VARIANT prefix is legal; a bracketed BASE value is not (invalid).
+  - |
+    <Surface className="data-[state=open]:flex hover:grid" />
+  # A leading negative sign and v3/v4 `!important` are stripped before lookup.
+  - |
+    <Surface className="-mt-2 flex! !grid" />
+  # Validated value slots: fractions, numeric steps, and span-N on col/row.
+  - |
+    <Surface className="w-1/2 gap-2.5 col-span-3 row-start-2 z-10" />
+  # `sticky` and `container` are position/layout utilities that look nothing like
+  # layout at a glance; they were in the analyzer's EXACT set and stay legal.
+  - |
+    <Surface className="sticky isolate container sr-only" />
+invalid:
+  # Literal form on each consumer.
+  - |
+    <Surface level="surface" geometry="card" className="bg-panel" />
+  - |
+    <Surface level="surface" geometry="card" className="flex shadow-1" />
+  - |
+    <Card className="border-brand" />
+  - |
+    <SelectedCard className="rounded-card" />
+  - |
+    <SkeletonCard className="opacity-50" />
+  # Expression form: a string literal inside the JSX expression container.
+  - |
+    <Surface level="surface" geometry="card" className={"bg-panel"} />
+  # Template-literal form.
+  - |
+    <Surface level="surface" geometry="card" className={`text-ink2 shadow-1`} />
+  # Open-close element with children.
+  - |
+    <Surface className="text-ink2">
+      children
+    </Surface>
+  # ---------------------------------------------------------------------------
+  # BOUNDED REVIEW ROUND 1. Every one of these passed the previous denylist rule.
+  # ---------------------------------------------------------------------------
+  # The visibility family: visual state, and absent from the layout vocabulary.
+  - |
+    <Surface level="surface" geometry="card" className="visible" />
+  - |
+    <Surface level="surface" geometry="card" className="invisible" />
+  - |
+    <Surface level="surface" geometry="card" className="collapse" />
+  # Fragmentation/paint, and a `box-` prefix whose value slot admits border|content only.
+  - |
+    <Surface level="surface" geometry="card" className="box-decoration-clone" />
+  # An arbitrary PROPERTY. No arbitrary value or property survives, on any family.
+  - |
+    <Surface level="surface" geometry="card" className="[mask-type:luminance]" />
+  # An arbitrary VALUE on an otherwise-legal family.
+  - |
+    <Surface level="surface" geometry="card" className="w-[calc(100%-2rem)]" />
+  # A literal reached through the combiner in a JSX expression container -- the
+  # `className={cn("bg-panel")}` shape the previous pattern list could not see.
+  - |
+    <Surface level="surface" geometry="card" className={cn("bg-panel")} />
+  - |
+    <Card className={cn("flex", isOpen && "shadow-3")} />
+  # A ternary BRANCH reaches the class string even though its test does not.
+  - |
+    <SkeletonCard className={flag ? "flex" : "animate-pulse"} />

@@ -1,0 +1,30 @@
+id: pseudo-element-hitbox
+snapshots:
+  ? |
+    export const D = () => <button className="relative after:-inset-2 after:absolute" />;
+  : labels:
+      - source: relative after:-inset-2 after:absolute
+        style: primary
+        start: 42
+        end: 80
+  ? |
+    export const E = () => <button className="before:inset-0 before:absolute" />;
+  : labels:
+      - source: before:inset-0 before:absolute
+        style: primary
+        start: 42
+        end: 72
+  ? |
+    export const F = () => <button className="relative hover:after:-inset-2" />;
+  : labels:
+      - source: relative hover:after:-inset-2
+        style: primary
+        start: 42
+        end: 71
+  ? |
+    export const G = () => <button className="data-[pressed]:before:inset-0" />;
+  : labels:
+      - source: data-[pressed]:before:inset-0
+        style: primary
+        start: 42
+        end: 71

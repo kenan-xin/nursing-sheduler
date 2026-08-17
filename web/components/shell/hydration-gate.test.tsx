@@ -12,16 +12,23 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 // assertion below stays: it pins the component contract, and this branch is
 // rare enough that a future drift would otherwise go unseen.
 //
-// `hydrateScenarioStore` is stubbed so the branch can be rendered at all: the
-// real one runs on mount and drives the status straight to `ready`, which is
-// why this state has never had a render test. The stub is created inside the
-// factory because `vi.mock` is hoisted above every top-level binding.
+// The bring-up seams are stubbed so the branch can be rendered at all: the real
+// `initializeScenarioAuthority` opens the repository and drives the status
+// straight to `ready`, which is why this state has never had a render test. The
+// stubs are created inside the factory because `vi.mock` is hoisted above every
+// top-level binding.
+//
+// T03: the stubbed names are `initializeScenarioAuthority` and
+// `registerScenarioLifecycle` (the gate's current mount effects), plus
+// `useOwnershipController` — its heartbeat would otherwise construct the app
+// authority singleton purely as a side effect of rendering an error surface.
 vi.mock("@/lib/store", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/store")>();
   return {
     ...actual,
-    hydrateScenarioStore: vi.fn(async () => {}),
-    registerPagehideFlush: () => () => {},
+    initializeScenarioAuthority: vi.fn(async () => {}),
+    registerScenarioLifecycle: () => () => {},
+    useOwnershipController: () => {},
   };
 });
 
@@ -43,7 +50,7 @@ function classesOf(element: Element | null): string {
   return element?.getAttribute("class") ?? "";
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks();
 });
 
@@ -59,7 +66,7 @@ describe("HydrationGate — recoverable-error state", () => {
     );
   }
 
-  it("renders the recovery surface instead of the gated children", () => {
+  it("renders the recovery surface instead of the gated children", async () => {
     renderRecoverable();
     // Guards the guard: if this branch stopped rendering, every typography
     // assertion below would vanish with it rather than fail.
@@ -68,7 +75,7 @@ describe("HydrationGate — recoverable-error state", () => {
     expect(screen.getByRole("button", { name: /reset to new schedule/i })).toBeTruthy();
   });
 
-  it("tracks its heading at the v2 -0.015em, not a Tailwind default", () => {
+  it("tracks its heading at the v2 -0.015em, not a Tailwind default", async () => {
     renderRecoverable();
     const heading = screen.getByTestId("hydration-error-heading");
 
@@ -80,7 +87,7 @@ describe("HydrationGate — recoverable-error state", () => {
     expect(classesOf(heading)).not.toContain("tracking-tight");
   });
 
-  it("leaves the loading state's own markup alone", () => {
+  it("leaves the loading state's own markup alone", async () => {
     // The sibling branch has no heading, so the fix must not have grown one.
     useHotStore.setState({ hydrationStatus: "hydrating" });
     render(

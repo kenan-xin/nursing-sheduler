@@ -628,6 +628,23 @@ describe("ShiftChip", () => {
     expect(chip?.style.height).toBe("28px");
     expect(chip?.textContent).toBe("·");
   });
+
+  it("a worked shift with NO ramp entry falls back to the `other` family", () => {
+    // The chip used to carry its own three-value copy of the `other` colours. Two
+    // authorities for one palette entry is how a ramp change silently stops applying
+    // to the unclassified case, so the fallback now reads the ramp module directly.
+    // Asserted against `SHIFT_FAMILY_RAMP.other` rather than against literals: a test
+    // that restated the hexes would be the third copy of the same defect.
+    const worked: RosterDayState = { kind: "shift", shiftId: "unclassifiable" };
+    const { container } = render(<ShiftChip day={worked} ramp={null} />);
+    const chip = container.querySelector("span");
+    expect(chip).not.toBeNull();
+    expect(chip?.style.backgroundColor).toBe(normaliseColour(SHIFT_FAMILY_RAMP.other.fill));
+    expect(chip?.style.color).toBe(normaliseColour(SHIFT_FAMILY_RAMP.other.ink));
+    // Non-vacuity: `other` must be a DIFFERENT entry from the classified families,
+    // so this cannot pass by the fallback happening to equal the first ramp colour.
+    expect(SHIFT_FAMILY_RAMP.other.fill).not.toBe(SHIFT_RAMP[0].fill);
+  });
 });
 
 // ---------------------------------------------------------------------------

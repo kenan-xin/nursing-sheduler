@@ -29,6 +29,7 @@ import {
   resetRosterCaptureGate,
   type SessionTransactionStorage,
 } from "@/lib/optimize";
+import type { CommandFailureReason, CommandOutcome } from "@/lib/store";
 import { clearRosterDataAndNotify } from "./roster-clear";
 import { resetToNewSchedule } from "./new-schedule-reset";
 import { fixtureRosterDocument } from "./test-fixtures";
@@ -102,6 +103,29 @@ function boundClear(storage: RosterStorage, session: SessionTransactionStorage) 
     });
 }
 
+/**
+ * The T03 scenario reset's SUCCESS answer.
+ *
+ * The pre-integration seam was typed `Promise<void>`, so "the scenario was reset" and
+ * "the scenario refused to reset" were the same value. The repository command reports
+ * refusal as a resolved `{ ok: false, reason }` rather than by throwing, which is
+ * exactly why the seam is typed {@link CommandOutcome} here: a stub that cannot say
+ * `ok: false` cannot prove the wrapper distinguishes them.
+ */
+const committed = (): CommandOutcome => ({
+  ok: true,
+  committed: true,
+  documentRevision: 1,
+  commitId: "commit-1",
+});
+
+/** A refusal: e.g. another tab holds the lease, so this tab's reset was declined. */
+const refused = (reason: CommandFailureReason): CommandOutcome => ({
+  ok: false,
+  reason,
+  code: "unknown",
+});
+
 beforeEach(() => {
   resetRosterCaptureGate();
   window.localStorage.clear();
@@ -128,7 +152,10 @@ describe("New schedule — a confirmed reset leaves the previous run behind", ()
         order.push("stored-data");
         return clearStoredData();
       },
-      resetScenario: async () => void order.push("scenario"),
+      resetScenario: async () => {
+        order.push("scenario");
+        return committed();
+      },
     });
 
     expect(outcome.status).toBe("reset");
@@ -159,7 +186,7 @@ describe("New schedule — a confirmed reset leaves the previous run behind", ()
       length: 1,
       key: (index) => (index === 0 ? OPTIMIZE_SESSION_STORAGE_KEY : null),
     };
-    const resetScenario = vi.fn(async () => {});
+    const resetScenario = vi.fn(async () => committed());
 
     const outcome = await resetToNewSchedule({
       clearStoredData: boundClear(storage, poisoned),
@@ -174,7 +201,7 @@ describe("New schedule — a confirmed reset leaves the previous run behind", ()
   });
 
   it("treats a THROWING cut as unverified rather than as done", async () => {
-    const resetScenario = vi.fn(async () => {});
+    const resetScenario = vi.fn(async () => committed());
 
     const outcome = await resetToNewSchedule({
       clearStoredData: async () => {
@@ -205,11 +232,35 @@ describe("New schedule — a confirmed reset leaves the previous run behind", ()
     expect(outcome.storedData?.status).toBe("cleared");
   });
 
+  it("reports a REFUSED scenario reset as a failure, carrying the reason", async () => {
+    // INTEGRATION (T03). The defect this exists for is a TYPE that could not express
+    // the truth: the pre-integration seam returned `Promise<void>`, so the commonest
+    // real refusal — `not-owner`, another tab holds the lease — resolved successfully
+    // and `resetToNewSchedule` announced `New schedule created` over a scenario it had
+    // not reset. A refusal is a resolved value here, never a throw, so the throwing
+    // case above cannot stand in for it.
+    const storage = openTab();
+    await seedPreviousRun(storage);
+
+    const outcome = await resetToNewSchedule({
+      clearStoredData: boundClear(storage, seededSession()),
+      resetScenario: async () => refused("not-owner"),
+    });
+
+    expect(outcome).toMatchObject({ status: "failed", failure: "scenario" });
+    if (outcome.status !== "failed") throw new Error("unreachable");
+    // The reason is CARRIED, not flattened: the button says which of the two things
+    // happened, and `not-owner` is the one the user can act on.
+    expect(outcome.scenarioReason).toBe("not-owner");
+    // The cut ran first and completed, exactly as on the throwing path.
+    expect(outcome.storedData?.status).toBe("cleared");
+  });
+
   it("ACCEPTING CONTROL: with nothing seeded the reset still completes", async () => {
     // Without this, the fail-closed cases above could be passing because the
     // orchestrator refuses everything.
     const storage = openTab();
-    const resetScenario = vi.fn(async () => {});
+    const resetScenario = vi.fn(async () => committed());
 
     const outcome = await resetToNewSchedule({
       clearStoredData: boundClear(storage, fakeSessionStorage()),

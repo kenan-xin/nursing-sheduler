@@ -22,14 +22,10 @@ import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { ScenarioUiState } from "@/lib/scenario";
-import {
-  drainScenarioPersist,
-  resetToNewScenario,
-  useHotStore,
-  useScenarioStore,
-} from "@/lib/store";
+import { scenarioCommands } from "@/lib/store";
 import { surfaceVariants } from "@/components/ui/surface";
 import { PeopleTable } from "./people-table";
+import { resetScenarioForTest, drainScenarioCommands } from "@/lib/store/test-authority";
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 vi.mock("next/navigation", () => ({
@@ -69,14 +65,14 @@ const RETIRED_V1_CLASSES = [
   "ns-derived-chip",
 ];
 
-function seed(patch: Partial<ScenarioUiState>) {
-  act(() => {
-    useScenarioStore.getState().mutateScenario(patch);
+async function seed(patch: Partial<ScenarioUiState>) {
+  await act(async () => {
+    await scenarioCommands.mutate(patch);
   });
 }
 
-function seedWard() {
-  seed({
+async function seedWard() {
+  await seed({
     staff: [
       { id: "Aisha Rahman", history: [] },
       { id: "Priya Nair", history: [] },
@@ -88,14 +84,14 @@ function seedWard() {
 
 beforeEach(async () => {
   vi.clearAllMocks();
-  await resetToNewScenario(useScenarioStore, useHotStore);
-  await drainScenarioPersist(useScenarioStore);
+  await resetScenarioForTest();
+  await drainScenarioCommands();
 });
 afterEach(() => cleanup());
 
 describe("R2b — People surface roles", () => {
-  it("seats the screen on the L0 page plane through the shared adapter", () => {
-    seedWard();
+  it("seats the screen on the L0 page plane through the shared adapter", async () => {
+    await seedWard();
     render(<PeopleTable />);
 
     const root = screen.getByTestId("screen");
@@ -109,8 +105,8 @@ describe("R2b — People surface roles", () => {
     expect(root.className).not.toContain("shadow-1");
   });
 
-  it("makes the table container a resting L1 card that clips its own scroll region", () => {
-    seedWard();
+  it("makes the table container a resting L1 card that clips its own scroll region", async () => {
+    await seedWard();
     render(<PeopleTable />);
 
     const wrap = screen.getByTestId("people-table-wrap");
@@ -122,8 +118,8 @@ describe("R2b — People surface roles", () => {
     expect(wrap.className).toContain("overflow-x-auto");
   });
 
-  it("renders the column header as a full-bleed square band, never a well", () => {
-    seedWard();
+  it("renders the column header as a full-bleed square band, never a well", async () => {
+    await seedWard();
     render(<PeopleTable />);
 
     const band = screen.getByRole("columnheader", { name: "Nurse" }).parentElement!;
@@ -134,8 +130,8 @@ describe("R2b — People surface roles", () => {
     expect(band.className).not.toContain("shadow-1");
   });
 
-  it("keeps every data surface explicitly square", () => {
-    seedWard();
+  it("keeps every data surface explicitly square", async () => {
+    await seedWard();
     render(<PeopleTable />);
 
     const table = screen.getByTestId("people-table");
@@ -151,8 +147,8 @@ describe("R2b — People surface roles", () => {
 });
 
 describe("R2b — row states", () => {
-  it("hovers rows to --panel-alt, not the band tone", () => {
-    seedWard();
+  it("hovers rows to --panel-alt, not the band tone", async () => {
+    await seedWard();
     render(<PeopleTable />);
 
     const row = screen.getByTestId(`people-row-${sk("Aisha Rahman")}`);
@@ -165,8 +161,8 @@ describe("R2b — row states", () => {
     expect(tokens).not.toContain("hover:bg-panel");
   });
 
-  it("marks the drop candidate with the shared drop-target LANGUAGE, not an arbitrary shadow", () => {
-    seedWard();
+  it("marks the drop candidate with the shared drop-target LANGUAGE, not an arbitrary shadow", async () => {
+    await seedWard();
     render(<PeopleTable />);
 
     const source = screen.getByTestId(`people-row-${sk("Aisha Rahman")}`);
@@ -189,8 +185,8 @@ describe("R2b — row states", () => {
     expect(source.className).toContain("opacity-50");
   });
 
-  it("promotes the open inline editor row to the shared selected role", () => {
-    seedWard();
+  it("promotes the open inline editor row to the shared selected role", async () => {
+    await seedWard();
     render(<PeopleTable />);
 
     fireEvent.click(screen.getByTestId(`people-edit-${sk("Aisha Rahman")}`));
@@ -206,8 +202,8 @@ describe("R2b — row states", () => {
 });
 
 describe("R2b — primitive adoption", () => {
-  it("wears the shared Button recipe on the Continue CTA, not the retired .ns-btn fork", () => {
-    seedWard();
+  it("wears the shared Button recipe on the Continue CTA, not the retired .ns-btn fork", async () => {
+    await seedWard();
     render(<PeopleTable />);
 
     const cta = screen.getByTestId("people-continue");
@@ -234,8 +230,8 @@ describe("R2b — primitive adoption", () => {
     expect(button.className, testId).toContain("pointer-coarse:min-w-touch");
   }
 
-  it("makes every resting-row action a shared Button with a real coarse floor", () => {
-    seedWard();
+  it("makes every resting-row action a shared Button with a real coarse floor", async () => {
+    await seedWard();
     render(<PeopleTable />);
 
     for (const testId of [
@@ -251,8 +247,8 @@ describe("R2b — primitive adoption", () => {
     }
   });
 
-  it("makes every inline-editor action a shared Button with a real coarse floor", () => {
-    seedWard();
+  it("makes every inline-editor action a shared Button with a real coarse floor", async () => {
+    await seedWard();
     render(<PeopleTable />);
 
     // Opening a row closes the reorder affordances (drag and keyboard alike), so
@@ -270,8 +266,8 @@ describe("R2b — primitive adoption", () => {
     }
   });
 
-  it("marks the row delete as a destructive OUTLINE, never a solid fill", () => {
-    seedWard();
+  it("marks the row delete as a destructive OUTLINE, never a solid fill", async () => {
+    await seedWard();
     render(<PeopleTable />);
 
     const del = screen.getByTestId(`people-delete-${sk("Aisha Rahman")}`);
@@ -281,8 +277,8 @@ describe("R2b — primitive adoption", () => {
     expect(del.className).not.toContain("bg-fill-error");
   });
 
-  it("toggles a group membership chip between the brand fill and L1, with aria-pressed", () => {
-    seedWard();
+  it("toggles a group membership chip between the brand fill and L1, with aria-pressed", async () => {
+    await seedWard();
     render(<PeopleTable />);
 
     fireEvent.click(screen.getByTestId(`people-edit-${sk("Priya Nair")}`));
@@ -300,8 +296,8 @@ describe("R2b — primitive adoption", () => {
     expect(chip().className).toContain("text-onbrand");
   });
 
-  it("renders group chips on a read row as authored-case badges", () => {
-    seedWard();
+  it("renders group chips on a read row as authored-case badges", async () => {
+    await seedWard();
     render(<PeopleTable />);
 
     const row = screen.getByTestId(`people-row-${sk("Aisha Rahman")}`);
@@ -314,8 +310,8 @@ describe("R2b — primitive adoption", () => {
     expect(badges[0].className).toContain("normal-case");
   });
 
-  it("gives the search clear a real 44px coarse box rather than a bare glyph", () => {
-    seedWard();
+  it("gives the search clear a real 44px coarse box rather than a bare glyph", async () => {
+    await seedWard();
     render(<PeopleTable />);
 
     fireEvent.change(screen.getByTestId("people-search"), { target: { value: "ai" } });
@@ -325,8 +321,8 @@ describe("R2b — primitive adoption", () => {
     expect(clear.className).toContain("pointer-coarse:size-touch");
   });
 
-  it("makes the empty state's Clear search a real control on the link variant", () => {
-    seed({ staff: [{ id: "Aisha Rahman", history: [] }], staffGroups: [] });
+  it("makes the empty state's Clear search a real control on the link variant", async () => {
+    await seed({ staff: [{ id: "Aisha Rahman", history: [] }], staffGroups: [] });
     render(<PeopleTable />);
 
     fireEvent.change(screen.getByTestId("people-search"), { target: { value: "zzz" } });
@@ -338,8 +334,8 @@ describe("R2b — primitive adoption", () => {
 });
 
 describe("R2b — no v1 residue", () => {
-  it("authors no retired v1 control class, editor and search state open", () => {
-    seedWard();
+  it("authors no retired v1 control class, editor and search state open", async () => {
+    await seedWard();
     const { container } = render(<PeopleTable />);
 
     fireEvent.click(screen.getByTestId(`people-edit-${sk("Aisha Rahman")}`));
@@ -348,8 +344,8 @@ describe("R2b — no v1 residue", () => {
     }
   });
 
-  it("reserves --faint for the genuinely non-functional empty-cell mark", () => {
-    seed({ staff: [{ id: "Aisha Rahman", history: [] }], staffGroups: [] });
+  it("reserves --faint for the genuinely non-functional empty-cell mark", async () => {
+    await seed({ staff: [{ id: "Aisha Rahman", history: [] }], staffGroups: [] });
     render(<PeopleTable />);
 
     // The em-dash standing in for "no groups" IS an empty-cell mark, which is

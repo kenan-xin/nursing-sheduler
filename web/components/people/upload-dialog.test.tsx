@@ -119,7 +119,7 @@ describe("UploadDialog — dismissal (Escape is ignored, everything else closes)
     const { onClose } = renderDialog();
     const overlay = document.querySelector("[data-slot='dialog-overlay']") as HTMLElement;
     await userEvent.click(overlay);
-    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    await waitFor(async () => expect(onClose).toHaveBeenCalled());
   });
 });
 
@@ -127,7 +127,7 @@ describe("UploadDialog — import outcomes are untouched by the migration", () =
   it("commits and closes on a successful upload", async () => {
     const { commit, onClose } = renderDialog();
     await userEvent.upload(screen.getByTestId("upload-file-input"), textFile("Aisha\nKevin Ong"));
-    await waitFor(() => expect(commit).toHaveBeenCalledOnce());
+    await waitFor(async () => expect(commit).toHaveBeenCalledOnce());
     expect(toast.success).toHaveBeenCalledOnce();
     expect(onClose).toHaveBeenCalledOnce();
   });
@@ -135,7 +135,7 @@ describe("UploadDialog — import outcomes are untouched by the migration", () =
   it("keeps the dialog open on a validation error — no commit, no close", async () => {
     const { commit, onClose } = renderDialog();
     await userEvent.upload(screen.getByTestId("upload-file-input"), textFile("Aisha\nAisha"));
-    await waitFor(() => expect(toast.error).toHaveBeenCalledOnce());
+    await waitFor(async () => expect(toast.error).toHaveBeenCalledOnce());
     expect(commit).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.getByTestId("upload-dialog")).toBeInTheDocument();

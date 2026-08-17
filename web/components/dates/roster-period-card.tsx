@@ -38,6 +38,8 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Surface, surfaceVariants } from "@/components/ui/surface";
+import { capabilityAnchorProps } from "@/lib/capability/anchor-contract";
+import { DATES_ROSTER_PERIOD_ANCHOR } from "./capability-anchors";
 import { Switch } from "@/components/ui/switch";
 import { rangeSpanLabel } from "./range-span-label";
 
@@ -154,6 +156,7 @@ export function RosterPeriodCard({
     <section
       className={cn(surfaceVariants({ role: "surface", geometry: "card" }))}
       data-testid="roster-period-card"
+      {...capabilityAnchorProps(DATES_ROSTER_PERIOD_ANCHOR)}
     >
       <div className="border-b border-line2 px-[18px] py-4">
         {/* Headline: Figtree 600 / -0.015em (DESIGN.md §3). v1 ran 800 at the

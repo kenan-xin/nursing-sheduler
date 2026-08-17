@@ -16,6 +16,7 @@
 // those shapes (so the scalar form is never opened on a card it cannot author).
 
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import {
   CardEditorScreen,
   CardEditorHeader,
@@ -261,25 +262,44 @@ export function CountsEditor() {
   // since this draft opened (temporal travel / external cascade), abort the write
   // entirely — no commit, no history entry — and let the close-on-external effect
   // dismiss the draft. Self-Save is never stale: drafts don't mutate the live slice.
-  function saveOrdinary(form: CountFormState) {
+  //
+  // Edit-save AWAITS the baseline-guarded commit. A `superseded` refusal means the
+  // list moved under the draft between the synchronous guard and the queue head:
+  // the write was withdrawn, the user's edit did not land, and the draft MUST stay
+  // open with the error surfaced rather than closing over a silently dropped save.
+  async function saveOrdinary(form: CountFormState) {
     if (isStale()) {
       setDraft(null);
       return;
     }
     // Closing the draft triggers the layout-effect restore (no synchronous restore —
     // the form must unmount first so the list collapses back to its edit-time height).
-    if (draft?.kind === "ordinary" && draft.mode === "edit") update(draft.uid, form);
-    else add(form);
+    if (draft?.kind === "ordinary" && draft.mode === "edit") {
+      const outcome = await update(draft.uid, form);
+      if (!outcome.ok && outcome.reason === "superseded") {
+        toast.error("This count changed elsewhere. Reopen it and try again.");
+        return;
+      }
+    } else {
+      add(form);
+    }
     setDraft(null);
   }
 
-  function saveContracted(form: ContractedFormState) {
+  async function saveContracted(form: ContractedFormState) {
     if (isStale()) {
       setDraft(null);
       return;
     }
-    if (draft?.kind === "contracted" && draft.mode === "edit") updateContracted(draft.uid, form);
-    else addContracted(form);
+    if (draft?.kind === "contracted" && draft.mode === "edit") {
+      const outcome = await updateContracted(draft.uid, form);
+      if (!outcome.ok && outcome.reason === "superseded") {
+        toast.error("This count changed elsewhere. Reopen it and try again.");
+        return;
+      }
+    } else {
+      addContracted(form);
+    }
     setDraft(null);
   }
 

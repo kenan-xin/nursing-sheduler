@@ -1,0 +1,26 @@
+id: authored-color-literal
+valid:
+  # Every colour is reached by name.
+  - |
+    const cls = "bg-surface text-ink border-line";
+  - |
+    const overlay = "var(--scrim)";
+  - |
+    const shadow = "var(--sh-1)";
+  # A hex-looking fragment identifier that is not all hex digits.
+  - |
+    const anchor = "#accents";
+  # Numbers that are not colours.
+  - |
+    const size = "26px";
+invalid:
+  - |
+    const brand = "#0b7d68";
+  - |
+    const scrim = "rgba(0, 0, 0, 0.4)";
+  - |
+    const shorthand = "#000";
+  - |
+    const withAlpha = "#000000cc";
+  - |
+    const zeroLightness = "hsl(210 80% 0%)";

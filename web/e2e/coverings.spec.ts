@@ -28,21 +28,34 @@ type CoveringCard = {
 
 type NsWindow = {
   __nsStore: {
-    scenario: {
-      getState: () => Record<string, unknown> & {
-        cardsByKind: { coverings: CoveringCard[] };
-        mutateScenario: (patch: Record<string, unknown>) => void;
-      };
-      temporal: {
-        getState: () => { pastStates: unknown[]; futureStates: unknown[] };
-      };
+    /** The repository command bus — the product's only durable write path. */
+    commands: {
+      mutate(patch: Record<string, unknown>): Promise<{ ok: boolean }>;
+      recordBackup(): Promise<{ ok: boolean }>;
+      undo(): Promise<{ ok: boolean }>;
+      redo(): Promise<{ ok: boolean }>;
+      takeover(): Promise<{ ok: boolean }>;
     };
+    drain(): Promise<void>;
+    historyDepth(): Promise<number>;
+    authority(): {
+      scenarioId: string | null;
+      documentRevision: number;
+      ownership: string;
+      canUndo: boolean;
+      canRedo: boolean;
+    };
+    scenario(): Record<string, unknown> & { cardsByKind: { coverings: CoveringCard[] } };
   };
 };
 
-/** Wait for the test bridge to expose the live store on `window`. */
+/** Bridge mounted AND authority bring-up resolved — a command before that has no
+ *  lease to present and is refused, so a seed would silently write nothing. */
 async function waitForStore(page: Page) {
-  await page.waitForFunction(() => Boolean((window as unknown as NsWindow).__nsStore));
+  await page.waitForFunction(() => {
+    const store = (window as unknown as NsWindow).__nsStore;
+    return Boolean(store) && store.authority().scenarioId !== null;
+  });
 }
 
 /** Seed the durable store directly (the editor's store is the same singleton).
@@ -51,8 +64,8 @@ async function waitForStore(page: Page) {
  *  read `__nsStore` as undefined. */
 async function seed(page: Page, patch: Record<string, unknown>) {
   await waitForStore(page);
-  await page.evaluate((p) => {
-    (window as unknown as NsWindow).__nsStore.scenario.getState().mutateScenario(p);
+  await page.evaluate(async (p) => {
+    await (window as unknown as NsWindow).__nsStore.commands.mutate(p);
   }, patch);
 }
 
@@ -69,16 +82,17 @@ async function gotoReady(page: Page) {
   await expect(page.getByTestId("add-card-toggle")).toBeVisible();
 }
 
+/** The COMMITTED cards — drained, so a read never outruns the command that wrote. */
 function readCoverings(page: Page) {
-  return page.evaluate(
-    () => (window as unknown as NsWindow).__nsStore.scenario.getState().cardsByKind.coverings,
-  );
+  return page.evaluate(async () => {
+    const store = (window as unknown as NsWindow).__nsStore;
+    await store.drain();
+    return store.scenario().cardsByKind.coverings;
+  });
 }
 /** store.temporal undo depth — how many tracked mutations are on the past stack. */
 function pastCount(page: Page) {
-  return page.evaluate(
-    () => (window as unknown as NsWindow).__nsStore.scenario.temporal.getState().pastStates.length,
-  );
+  return page.evaluate(() => (window as unknown as NsWindow).__nsStore.historyDepth());
 }
 
 const BASE_SEED = {
@@ -138,7 +152,7 @@ test.describe.serial("T13 shift-type coverings editor (rebuild)", () => {
     expect(cards[0].date).toEqual(["WEEKEND"]);
     expect(cards[0].weight).toBe(1); // inert enforced weight
     expect(cards[0].disabled).toBeUndefined();
-    // The compound add is exactly ONE tracked mutation (one zundo entry).
+    // The compound add is exactly ONE tracked mutation (one undo entry).
     expect((await pastCount(page)) - before).toBe(1);
   });
 

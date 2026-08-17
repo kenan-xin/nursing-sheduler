@@ -2,7 +2,7 @@
 //
 // This module is the single, immutable inventory the foundation, all nine
 // parallel route tickets (R1…R7) and G1 verify against. It is COMPLETE the
-// moment F4 lands: eighteen rows — fourteen shipped product routes and four
+// moment F4 lands: nineteen rows — fifteen shipped product routes and four
 // harness routes — each naming its ticket owner, canonical prototype,
 // deterministic seed strategy, readiness descriptor, semantic checks, axe
 // exceptions and immutable static file-owner set.
@@ -35,6 +35,10 @@ export const V2_OWNERS = [
   "R6",
   "R7",
   "R8",
+  // The CopilotKit assistant ticket (nursing-sheduler-t34.5). It owns the
+  // Settings route, its AI card, and the assistant panel -- surfaces that did not
+  // exist when the v2 owner set was drawn up.
+  "T04",
 ] as const;
 
 export type V2Owner = (typeof V2_OWNERS)[number];
@@ -230,6 +234,24 @@ export interface V2Row {
 /** The literal a harness row records instead of naming a prototype screen. */
 export const HARNESS_NO_PROTOTYPE = "harness/no product prototype";
 
+/**
+ * A shipped PRODUCT route with no canonical prototype.
+ *
+ * Distinct from `HARNESS_NO_PROTOTYPE`, which means "not a product surface at all".
+ * This means "a real product surface the committed prototype bundle never drew".
+ * Settings is the first: it exists to host the optional AI assistant, whose only
+ * prototype is the exploratory appendix that the fidelity audit deliberately
+ * EXCLUDED from the parity inventory. Naming the appendix here would re-admit it,
+ * so the row states the absence instead.
+ *
+ * `v2-surface-matrix.test.ts` pins the exact set of routes allowed to use this, so
+ * it cannot quietly become the way a new screen skips visual parity.
+ */
+export const PRODUCT_NO_CANONICAL_PROTOTYPE = "product/no canonical prototype";
+
+/** The only product routes that may declare {@link PRODUCT_NO_CANONICAL_PROTOTYPE}. */
+export const ROUTES_WITHOUT_CANONICAL_PROTOTYPE: readonly string[] = Object.freeze(["/settings"]);
+
 const PROTOTYPE_DIR = "docs/design_prototype/source";
 
 /** The `(app)`-group screen marker every product route already renders today. */
@@ -244,7 +266,12 @@ function bare(marker: string): V2ReadinessDescriptor {
 }
 
 /**
- * The eighteen rows.
+ * The nineteen rows.
+ *
+ * INTEGRATION: eighteen after the G4 closure added R8 + `/roster`, plus the T04
+ * `/settings` row the assistant ticket appended. Both sides independently reached
+ * eighteen from a shared seventeen, so the merged manifest is nineteen — fifteen
+ * product routes and four harness routes.
  *
  * Scope of `semanticChecks`: each row declares only what its OWN owner's
  * contract fixes today. The universal battery — No-Black, horizontal overflow,
@@ -547,6 +574,34 @@ const ROWS: readonly V2Row[] = [
     ],
     axeExceptions: [],
   },
+
+  // --- T04 — Settings (the optional AI assistant's only discovery surface) ---
+  //
+  // No canonical prototype: the assistant's only drawing is the exploratory
+  // appendix, which the fidelity audit excluded from the parity inventory. The
+  // appendix still governs the PANEL's hierarchy and responsive role (and its
+  // immediate-Apply fix list is overridden by the closed flows), but it is not a
+  // parity reference, so this row does not name it.
+  //
+  // The row's surface is the Settings card with AI OFF — the shipped default, and
+  // the only state a fresh visit can render: the panel requires a probe-passed
+  // OpenRouter key, so it is deliberately outside a static visual sweep.
+  {
+    route: "/settings",
+    kind: "product",
+    owner: "T04",
+    prototype: PRODUCT_NO_CANONICAL_PROTOTYPE,
+    seed: "empty",
+    readiness: appShell('[data-testid="settings-screen"]', "guided"),
+    semanticChecks: [
+      {
+        label: "AI assistant card is an L1 surface",
+        selector: '[data-testid="ai-assistant-card"]',
+        role: "surface",
+      },
+    ],
+    axeExceptions: [],
+  },
 ];
 
 /** The frozen manifest. Deep-frozen so a spec cannot mutate a row in place. */
@@ -561,7 +616,7 @@ export const V2_SURFACE_MATRIX: readonly V2Row[] = Object.freeze(
   ),
 );
 
-/** The fourteen shipped product routes, in manifest order. */
+/** The fifteen shipped product routes, in manifest order. */
 export const V2_PRODUCT_ROUTES: readonly string[] = Object.freeze(
   V2_SURFACE_MATRIX.filter((r) => r.kind === "product").map((r) => r.route),
 );
@@ -671,6 +726,14 @@ export const V2_STYLE_OWNER_FILES: Readonly<Record<V2Owner, readonly string[]>> 
   // document and its capture/dismiss authorities are reached from the
   // surface the user navigates to.
   R8: Object.freeze(["app/(app)/roster/page.tsx", "components/roster-viewer/**/*.tsx"]),
+  // The assistant is a self-contained addition: its own route host, its own
+  // Settings card, and its own panel. It authors no shared primitive, which is why
+  // it can own every presentation source it introduces.
+  T04: Object.freeze([
+    "app/(app)/settings/page.tsx",
+    "components/settings/**/*.tsx",
+    "components/ai/**/*.tsx",
+  ]),
 });
 
 // ---------------------------------------------------------------------------

@@ -21,6 +21,8 @@ import { TopBar } from "./top-bar";
 import { HydrationGate } from "./hydration-gate";
 import { ConfirmDialog } from "./confirm-dialog";
 import { TestBridge } from "./test-bridge";
+import { AssistantSurface, useAssistantHydration } from "@/components/ai/assistant-surface";
+import { AssistantTestBridge } from "@/components/ai/assistant-test-bridge";
 import { useBrowserBackGuard, useDirtyBeforeUnload } from "./use-guarded-navigation";
 import { useNavGuardStore } from "./nav-guard-store";
 import { useConfirmStore } from "./confirm-store";
@@ -34,6 +36,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // pre-paint script has already put the matching width on <html>.
   useSyncSideCollapse();
   const collapsed = useSideCollapsed();
+
+  // Reads the durable assistant settings row once and settles any turn stranded by
+  // the previous page lifetime. Unconditional: a turn left mid-flight has to be
+  // settled whether or not the user ever opens the panel again. Independent of the
+  // collapse preference above — both run on every mount.
+  useAssistantHydration();
 
   return (
     <div className="flex h-dvh overflow-hidden">
@@ -82,6 +90,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </main>
 
+      {/* The assistant DOCK is a sibling of the main column, so on a wide layout the
+          screen narrows beside it instead of being covered by it. Below the `nav`
+          breakpoint the same component renders its own sheet overlay. It returns
+          null entirely until AI is enabled and Ready, so no panel space is
+          reserved and no provider is mounted. */}
+      <AssistantSurface />
+
       <DirtyNavDialog />
       <GlobalConfirmDialog />
       <Toaster
@@ -91,6 +106,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         toastOptions={{ className: "ns-toast" }}
       />
       <TestBridge />
+      <AssistantTestBridge />
     </div>
   );
 }

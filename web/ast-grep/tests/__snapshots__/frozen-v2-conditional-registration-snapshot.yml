@@ -1,0 +1,37 @@
+id: frozen-v2-conditional-registration
+snapshots:
+  ? |
+    describe.skipIf(!AVAILABLE)("the foundation owner", () => {});
+  : labels:
+      - source: describe.skipIf(!AVAILABLE)
+        style: primary
+        start: 0
+        end: 27
+  ? |
+    describe.todo("the deferred export layout");
+  : labels:
+      - source: describe.todo("the deferred export layout")
+        style: primary
+        start: 0
+        end: 43
+  ? |
+    it.runIf(hasPrototype)("matches the canonical prototype", () => {});
+  : labels:
+      - source: it.runIf(hasPrototype)
+        style: primary
+        start: 0
+        end: 22
+  ? |
+    test.only("one accent while debugging", async () => {});
+  : labels:
+      - source: test.only("one accent while debugging", async () => {})
+        style: primary
+        start: 0
+        end: 55
+  ? |
+    test.skip("the R6 harness route", async () => {});
+  : labels:
+      - source: test.skip("the R6 harness route", async () => {})
+        style: primary
+        start: 0
+        end: 49

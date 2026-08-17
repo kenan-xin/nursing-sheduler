@@ -23,24 +23,42 @@ test.beforeEach(async ({ page }) => {
 
 type NsWindow = {
   __nsStore: {
-    scenario: {
-      getState: () => Record<string, unknown> & {
-        cardsByKind: Record<
-          string,
-          { uid: string; disabled?: boolean; description?: string; weight?: number }[]
-        >;
-        maxOneShiftPerDay?: { description?: string };
-        mutateScenario: (patch: Record<string, unknown>) => void;
-      };
-      temporal: { getState: () => { pastStates: unknown[]; undo: () => void } };
+    /** The repository command bus — the product's only durable write path. */
+    commands: {
+      mutate(patch: Record<string, unknown>): Promise<{ ok: boolean }>;
+      recordBackup(): Promise<{ ok: boolean }>;
+      undo(): Promise<{ ok: boolean }>;
+      redo(): Promise<{ ok: boolean }>;
+      takeover(): Promise<{ ok: boolean }>;
     };
-    hot: { getState: () => { hydrationStatus: string } };
+    drain(): Promise<void>;
+    historyDepth(): Promise<number>;
+    authority(): {
+      scenarioId: string | null;
+      documentRevision: number;
+      ownership: string;
+      canUndo: boolean;
+      canRedo: boolean;
+    };
+    scenario(): Record<string, unknown> & {
+      cardsByKind: Record<
+        string,
+        { uid: string; disabled?: boolean; description?: string; weight?: number }[]
+      >;
+      maxOneShiftPerDay?: { description?: string };
+    };
+    hot(): { hydrationStatus: string };
     persistenceStatus: () => string;
   };
 };
 
+/** Bridge mounted AND authority bring-up resolved — a command before that has no
+ *  lease to present and is refused, so a seed would silently write nothing. */
 async function waitForStore(page: Page) {
-  await page.waitForFunction(() => Boolean((window as unknown as NsWindow).__nsStore));
+  await page.waitForFunction(() => {
+    const store = (window as unknown as NsWindow).__nsStore;
+    return Boolean(store) && store.authority().scenarioId !== null;
+  });
 }
 
 /** Wait for the guarded durable write queue to report settled. */
@@ -64,25 +82,28 @@ async function waitForSaved(page: Page) {
  */
 async function seed(page: Page, patch: Record<string, unknown>) {
   await waitForStore(page);
-  await page.evaluate((p) => {
-    (window as unknown as NsWindow).__nsStore.scenario.getState().mutateScenario(p);
+  await page.evaluate(async (p) => {
+    await (window as unknown as NsWindow).__nsStore.commands.mutate(p);
   }, patch);
   await waitForSaved(page);
 }
 
+/** The COMMITTED projection — drained, so a read never outruns the command that wrote. */
 function storeState(page: Page) {
-  return page.evaluate(() => (window as unknown as NsWindow).__nsStore.scenario.getState());
+  return page.evaluate(async () => {
+    const store = (window as unknown as NsWindow).__nsStore;
+    await store.drain();
+    return store.scenario();
+  });
 }
 
 function pastCount(page: Page) {
-  return page.evaluate(
-    () => (window as unknown as NsWindow).__nsStore.scenario.temporal.getState().pastStates.length,
-  );
+  return page.evaluate(() => (window as unknown as NsWindow).__nsStore.historyDepth());
 }
 
 async function undo(page: Page) {
-  await page.evaluate(() => {
-    (window as unknown as NsWindow).__nsStore.scenario.temporal.getState().undo();
+  await page.evaluate(async () => {
+    await (window as unknown as NsWindow).__nsStore.commands.undo();
   });
 }
 
@@ -93,7 +114,7 @@ async function gotoReady(page: Page) {
   // Wait for the hydration COMMIT, not just the store's existence. The built-in
   // row is derived unconditionally, so its presence is the marker that the
   // rehydrate has finished; seeding before that point is silently overwritten by
-  // it (the known non-blocking `ii7.10.4` race). Without this the specs below
+  // by it (the known non-blocking `ii7.10.4` race). Without this the specs below
   // pass on an idle machine and fail under contention — reproduced at 3 failures
   // in 61 runs at 16 workers, including two tests that predate this ticket.
   await page.getByTestId("rule-row-builtin:max-one-shift-per-day").waitFor();
@@ -366,42 +387,72 @@ function styleOf(page: Page, selector: string, properties: readonly string[]) {
 // reads IndexedDB directly rather than trusting the store it just wrote.
 // ---------------------------------------------------------------------------
 
-/** The raw persisted record, read straight out of IndexedDB (not via the store). */
-function readPersistedRecord(page: Page): Promise<string | null> {
+/**
+ * The weight as it ACTUALLY SITS in IndexedDB, read from the durable envelope
+ * rather than through any projection.
+ *
+ * T03 changed the durable representation, and this helper is where that shows.
+ * Pre-cutover the record was a JSON STRING written by `JSON.stringify`, whose only
+ * representation for a non-finite number is `null` — which is exactly the bug this
+ * suite exists for, and why the legacy path needed a `$nsNonFinite` tag. The
+ * repository stores STRUCTURED values, and IndexedDB's structured clone carries
+ * ±Infinity natively, so the durable value is a real number and can be asserted as
+ * one. The product claim is unchanged and still the point: a hard weight survives a
+ * durable reload with its exact sign, and does not come back as `null`.
+ */
+function readDurableSuccessionWeight(page: Page): Promise<{
+  raw: unknown;
+  text: string;
+  isNumber: boolean;
+  isNull: boolean;
+} | null> {
   return page.evaluate(async () => {
+    const scenarioId = (window as unknown as NsWindow).__nsStore.authority().scenarioId;
+    if (scenarioId === null) return null;
+    const request = indexedDB.open("nurse-scheduler");
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open("nurse-scheduler");
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
     try {
-      if (!db.objectStoreNames.contains("keyval")) return null;
-      return await new Promise<string | null>((resolve, reject) => {
+      if (!db.objectStoreNames.contains("scenarioEnvelopes")) return null;
+      const envelope = await new Promise<
+        { scenario?: { cardsByKind?: { successions?: { weight?: unknown }[] } } } | undefined
+      >((resolve, reject) => {
         const get = db
-          .transaction("keyval", "readonly")
-          .objectStore("keyval")
-          .get("nurse-scheduler/scenario");
-        get.onsuccess = () =>
-          resolve((get.result as { value?: string } | undefined)?.value ?? null);
+          .transaction("scenarioEnvelopes", "readonly")
+          .objectStore("scenarioEnvelopes")
+          .get(scenarioId);
+        get.onsuccess = () => resolve(get.result);
         get.onerror = () => reject(get.error);
       });
+      const weight = envelope?.scenario?.cardsByKind?.successions?.[0]?.weight;
+      return {
+        raw: weight,
+        text: String(weight),
+        isNumber: typeof weight === "number",
+        isNull: weight === null,
+      };
     } finally {
       db.close();
     }
   });
 }
 
-/** The live succession weight, plus a string form so the sign is unambiguous. */
+/**
+ * The COMMITTED succession weight, plus a string form so the sign is unambiguous.
+ * Drained: the ±∞ control's write is a queued repository command.
+ */
 function readSuccessionWeight(page: Page) {
-  return page.evaluate(() => {
-    const card = (window as unknown as NsWindow).__nsStore.scenario.getState().cardsByKind
-      .successions[0];
+  return page.evaluate(async () => {
+    await (window as unknown as NsWindow).__nsStore.drain();
+    const card = (window as unknown as NsWindow).__nsStore.scenario().cardsByKind.successions[0];
     return {
       raw: card?.weight,
       text: String(card?.weight),
       isNumber: typeof card?.weight === "number",
       finite: Number.isFinite(card?.weight),
-      hydration: (window as unknown as NsWindow).__nsStore.hot.getState().hydrationStatus,
+      hydration: (window as unknown as NsWindow).__nsStore.hot().hydrationStatus,
     };
   });
 }
@@ -477,7 +528,7 @@ test.describe("Rules screen — a signed hard weight survives a durable reload",
       // Baseline: the FINITE weight is durable, so the assertions below isolate
       // the non-finite case rather than a broken seed.
       await waitForSaved(page);
-      expect(await readPersistedRecord(page)).toContain(`"weight":-2`);
+      expect(await readDurableSuccessionWeight(page)).toMatchObject({ raw: -2 });
 
       await page.getByTestId("rule-adjust-toggle-successions:s1").click();
       await page.getByTestId(`rule-adjust-${control}-successions:s1-weight`).click();
@@ -489,13 +540,14 @@ test.describe("Rules screen — a signed hard weight survives a durable reload",
 
       await waitForSaved(page);
 
-      // The bytes that actually reached IndexedDB. This is the assertion the old
-      // code failed: it stored `"weight":null` and lost the sign entirely.
-      const record = await readPersistedRecord(page);
-      expect(record).not.toBeNull();
-      expect(record).not.toContain(`"weight":null`);
-      expect(record).toContain("$nsNonFinite");
-      expect(record).toContain(`"$nsNonFinite":"${expected > 0 ? "Infinity" : "-Infinity"}"`);
+      // What actually reached IndexedDB. This is the assertion the old code
+      // failed: it stored `null` and lost the sign entirely.
+      const durable = await readDurableSuccessionWeight(page);
+      expect(durable).not.toBeNull();
+      expect(durable!.isNull).toBe(false);
+      expect(durable!.isNumber).toBe(true);
+      expect(durable!.raw).toBe(expected);
+      expect(durable!.text).toBe(expected > 0 ? "Infinity" : "-Infinity");
 
       await page.reload();
       await waitForStore(page);

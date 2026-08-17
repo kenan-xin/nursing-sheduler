@@ -19,6 +19,15 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+// The backend's SCHEDULING-SEMANTICS profile (T08), a sibling of the identity
+// rather than more identity keys: `runtime_identity` is embedded verbatim in job
+// events under a closed key set, so the profile must not live inside it.
+const SEMANTIC_PROFILE = {
+  submission_contract_version: "optimize-yaml-v1",
+  solver_semantic_version: "ortools/cp-sat@1",
+  backend_capability_version: "nurse-scheduling-backend@1",
+};
+
 const READY_IDENTITY = {
   status: "ready",
   service_name: "nurse-scheduling-api",
@@ -29,6 +38,7 @@ const READY_IDENTITY = {
   started_at: "2026-07-19T00:00:00+00:00",
   job_backend: "memory",
   job_store_id: "inst-1",
+  semantic_profile: SEMANTIC_PROFILE,
 };
 
 const UNAVAILABLE_IDENTITY = {
@@ -42,6 +52,7 @@ const UNAVAILABLE_IDENTITY = {
   started_at: "2026-07-19T00:00:00+00:00",
   job_backend: "memory",
   job_store_id: "inst-1",
+  semantic_profile: SEMANTIC_PROFILE,
 };
 
 async function expectRejectedAsInvalidUpstream(response: Response) {

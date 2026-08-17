@@ -1,0 +1,26 @@
+id: assistant-scenario-table-authorship-tsx
+language: Tsx
+severity: error
+message: >-
+  Assistant code may READ the scenario authority's tables, and must never author a row in
+  one. The assistant writes only its own tables; scenario content changes go through
+  `assistantProposalCommands`, whose every member is a typed, host-validated, fenced
+  operation.
+note: >-
+  The `.tsx` twin of `assistant-scenario-table-authorship`. `components/ai/**` is mostly
+  `.tsx`, so without this twin the rule covered only the `lib/ai/**` half of its own
+  declared scope. The table set is every non-assistant table in `NurseSchedulerDb`,
+  including `keyval` and `repositoryMeta`; see the base rule's note.
+files:
+  - "lib/ai/**"
+  - "components/ai/**"
+ignores:
+  - "**/*.test.tsx"
+rule:
+  any:
+    - pattern: $DB.$TABLE.$WRITE($$$)
+constraints:
+  TABLE:
+    regex: ^(keyval|scenarioEnvelopes|scenarioCommits|historyLinks|tabSelections|writerLeases|optimizeBases|repositoryMeta)$
+  WRITE:
+    regex: ^(put|add|update|delete|clear|bulkPut|bulkAdd|bulkDelete|bulkUpdate)$

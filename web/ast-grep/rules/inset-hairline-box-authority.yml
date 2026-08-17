@@ -1,0 +1,170 @@
+id: inset-hairline-box-authority
+language: Tsx
+severity: error
+message: >-
+  `components/ui/inset-hairline-box.tsx` is the sole owner of the inset-hairline visual
+  contract, and it may author ONLY `<Surface>` elements, by ANY spelling. Refused here:
+  a JSX element of any other tag; an import from any module other than `react` and
+  `@/components/ui/surface`; a NAMESPACE or DEFAULT import, which would hand this file
+  every element factory React publishes; a named import from outside the exact allowlist
+  (`forwardRef`, `HTMLAttributes`, `Surface`); ANY dynamic module acquisition
+  (`import("…")`, `require("…")`, or a `createRequire` handle), which would let a factory
+  be destructured under a harmless local name; and any `createElement` / `cloneElement`
+  call spelling. The recipe call and a hand-written `bg-panel shadow-well border-line2
+  rounded-control` div emit BYTE-IDENTICAL class lists, so no rendered assertion can
+  distinguish them -- this rule is the only thing standing between the two inside the
+  owner itself. Put the element on a child that is not this box, or change the shared
+  `surfaceVariants` recipe.
+note: >-
+  Migrated from `components/shift-types/inset-hairline-ownership.test.ts` (the 2,002-line
+  TypeScript Program analyzer). That analyzer located each governed node by attribute and
+  resolved its `className` through `cn`, const aliases and control flow to prove the
+  contributed tuple set was exactly `{ role: well, geometry: control, emphasis: hairline }`.
+  Ticket 5 replaced the resolution with STRUCTURE: the governed nodes are now two
+  components whose `className` and `style` props are `never`, so a call site has no channel
+  to resolve. What structure cannot own is a reimplementation spelled inside the OWNER --
+  the analyzer's own headline case, and the one bypass rendered output cannot attribute,
+  because canonical tokens hand-authored on a raw div paint identically to the recipe.
+  This rule owns exactly that residue and nothing else.
+
+  WHY A WHOLE-FILE SHAPE RULE AND NOT A CLASS RULE. A denylist of paint utilities is what
+  bounded review round 1 rejected on `surface-consumer-classname`, and the fail-closed
+  vocabulary that replaced it governs a surface consumer's className -- it cannot see a
+  raw `<div>`, which is not a consumer at all. Restricting the file to `<Surface>` makes
+  the raw element unavailable instead of policing what it may carry, which is the
+  migration plan's stated preference. The file authors exactly two elements, so the
+  constraint costs nothing it should not cost.
+
+  THE ELEMENT-FACTORY HOLE, AND WHY THE FIX IS AN IMPORT ALLOWLIST. The first draft of
+  this rule covered JSX nodes and import SOURCES only. The ticket-5 cold review defeated
+  it with `React.createElement("div", { className: "...bg-panel shadow-well...", style:
+  { width: 42, height: 42 }, ... }, children)` -- a raw intrinsic element carrying
+  byte-identical classes, markers, slot, ref and children, authored with no JSX node and
+  no forbidden import, because `import * as React from "react"` was allowed and hands the
+  file every factory React publishes. Typecheck, lint, both Vitest suites and the frozen
+  browser proofs all passed under it.
+
+  The repair is STRUCTURAL rather than a longer denylist of factory names. The owner now
+  uses named imports, so the rule can refuse namespace and default imports outright and
+  hold named imports to an exact allowlist -- a factory is unreachable because it cannot
+  be BOUND, not because this rule happened to name it. Static `react/jsx-runtime`
+  (`jsx`, `jsxs`) is already refused by the import-source allowlist. The `createElement`
+  / `cloneElement` call clause is defence in depth for the residual aliasing case
+  (`import { forwardRef as createElement }`), and is a syntactic callee-name match, not
+  binding resolution.
+
+  THE ACQUISITION HOLE, ROUND 2. The clauses above constrain STATIC `import_statement`
+  nodes and callee SPELLINGS. Round 2 of the cold review defeated them both at once with
+  `const { createElement: h } = require("react"); h("div", ...)` and its
+  `await import("react")` twin: the module arrives through a CALL rather than an import
+  statement, and the factory is destructured to `h`, so no callee ends in `createElement`.
+  Typecheck, lint, the 32 focused tests and the build all passed under it.
+
+  Aliasing is the point -- it is what makes callee-name matching structurally unable to
+  own this, and chasing the alias would be the binding resolution the migration plan
+  forbids. So the repair is at ACQUISITION, before a name can hide anything, reusing
+  ticket 3/4's maintained pattern verbatim: `import($SPEC)`, `require($SPEC)` and the
+  unconstrained-callee `$REQ($SPEC)` that ticket 4's bounded review added so a
+  `createRequire` handle bound to a local name is caught too.
+
+  `$SPEC` is ANY string literal, deliberately broader than the react specifiers that
+  produced the finding. Scoping it to `react(/...)` would require this rule to know which
+  packages export an element factory -- exactly the enumerate-what-you-thought-of shape
+  that has now been defeated twice here, and once on `surface-consumer-classname` in
+  ticket 4. This file is a presentational component that must acquire NOTHING at runtime,
+  so "no dynamic acquisition at all" is both simpler to state and impossible to
+  under-enumerate. `createRequire` cannot even be imported here: `node:module` is not in
+  the import-source allowlist.
+
+  NARROWING RECORDED. ast-grep matches by tag SPELLING and by literal text; it resolves
+  no aliases. A `Surface` imported from elsewhere is caught by the import-source half,
+  and the acquisition shapes (`await import(...)`, `require(...)`, `createRequire`, a
+  namespace import of the authority) are caught by ticket 4's
+  `surface-module-acquisition(-tsx)` pair, which runs on this file too. What remains
+  outside every static gate is the same residue ticket 4 recorded: a class assembled at
+  runtime out of non-literal parts. The behavioural guards are
+  `components/ui/inset-hairline-box.test.tsx` and the frozen `e2e/shift-types.spec.ts`
+  route matrix.
+
+  The named-import allowlist is data that must track the owner: adding a legitimate React
+  API to this file means adding its name below, which is a reviewable change rather than
+  a silent widening. That is the intended cost of a fail-closed list.
+files:
+  - "components/ui/inset-hairline-box.tsx"
+rule:
+  any:
+    # A JSX element whose tag is anything other than `Surface`. Closing tags are a
+    # different node kind, so `</Surface>` is not double-reported.
+    - all:
+        - any:
+            - kind: jsx_opening_element
+            - kind: jsx_self_closing_element
+        - not:
+            has:
+              field: name
+              regex: ^Surface$
+    # An import from any module outside the exact two-entry allowlist. Spelled as an
+    # allowlist, not a denylist: a new module is refused because it is ABSENT, which is
+    # the same fail-closed shape as `surface-legal-class-vocabulary`. This also refuses
+    # `react/jsx-runtime`, whose `jsx`/`jsxs` are element factories.
+    - all:
+        - kind: import_statement
+        - not:
+            has:
+              field: source
+              regex: ^["'](react|@/components/ui/surface)["']$
+    # A NAMESPACE (`import * as React`) or DEFAULT (`import React`) import, from any
+    # module. Either one binds the whole module object, so every element factory it
+    # exports becomes reachable through a member access this rule would have no reason to
+    # refuse -- which is exactly the `React.createElement("div", ...)` bypass the cold
+    # review used. `named_imports` is a different node kind, so `import { forwardRef }`
+    # and `import type { HTMLAttributes }` do not match here.
+    - all:
+        - kind: import_clause
+        - has:
+            any:
+              - kind: identifier
+              - kind: namespace_import
+    # A named import outside the exact allowlist. With namespace and default imports
+    # refused above, this is what makes the reachable React surface finite: a factory
+    # cannot be BOUND, rather than being caught after the fact by name.
+    - all:
+        - kind: import_specifier
+        - not:
+            has:
+              field: name
+              regex: ^(forwardRef|HTMLAttributes|Surface)$
+    # Any `createElement` / `cloneElement` call spelling. Defence in depth for the one
+    # residual shape the allowlist admits -- an ALIAS of a legal import
+    # (`import { forwardRef as createElement }`), whose `name` field is legal while its
+    # binding is spelled like a factory. A syntactic callee-name match, not binding
+    # resolution.
+    - all:
+        - kind: call_expression
+        - has:
+            field: function
+            regex: (^|\.)(createElement|cloneElement)$
+    # DYNAMIC ACQUISITION of any module, by the three shapes ticket 3 and ticket 4 already
+    # own. This is the round-2 repair, and it fires on the ACQUISITION -- so it does not
+    # matter what the factory is destructured or aliased to afterwards.
+    #
+    #   `require("react")`       -- the round-2 finding
+    #   `await import("react")`  -- its dynamic-import twin
+    #   `req("react")`           -- a `createRequire` handle under a local name, the shape
+    #                               ticket 4's bounded review added by dropping the
+    #                               callee-name constraint
+    #
+    # `$REQ($SPEC)` subsumes the first two, but all three are spelled out so a future edit
+    # cannot drop the general form and silently stop covering the two named findings.
+    - pattern: import($SPEC)
+    - pattern: require($SPEC)
+    - pattern: $REQ($SPEC)
+constraints:
+  # Any string-literal specifier, template literals included. NOT scoped to `react`: see
+  # the note above for why enumerating factory-exporting packages is the wrong shape here.
+  # The owner authors no single-argument string call of any kind, so this cannot
+  # false-positive on it -- `forwardRef(function …)` takes a function, not a string.
+  SPEC:
+    any:
+      - kind: string
+      - kind: template_string

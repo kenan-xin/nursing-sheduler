@@ -1,0 +1,35 @@
+id: untokened-shadow-utility
+language: TypeScript
+severity: error
+message: >-
+  Elevation is authored here instead of aliased. Every shadow in the system goes through one
+  of the six canonical `--sh-*` tokens, published as `shadow-1/2/3/edge/well/side` plus the
+  `shadow-dialog`/`shadow-toast` aliases of `--sh-3`. An arbitrary `shadow-[...]` is
+  rejected EVEN WHEN its value is byte-identical to a token, because a duplicate stops
+  tracking the value it was copied from the moment either is retuned.
+note: >-
+  Migrated from the arbitrary-elevation and untokened-suffix checks in the TSX half of
+  `app/v2-style-contract.test.ts` and the `components/ui/**` shadow sweep in
+  `components/ui/primitives-v2.test.tsx`. Alternatives checked and rejected: a computed
+  `box-shadow` is exactly what a copied literal reproduces, so the browser audit cannot
+  tell the two apart; and Oxlint cannot read inside a class-list string. NARROWING RECORDED:
+  the retired checks rejected any suffix outside the published set, while this rule
+  enumerates the arbitrary form plus Tailwind's own default scale. An unpublished
+  non-Tailwind suffix such as `shadow-soft` emits no CSS at all and therefore paints
+  nothing, so what is enumerated is the complete set of spellings that can actually put an
+  untokened shadow on screen.
+  VARIANT PREFIXES (bounded-review round 1). The prefix segment is `[^[:space:]]*:`, not
+  `[-a-z0-9]+:`, which silently accepted `group-data-[checked]/switch:shadow-lg` -- and that
+  is a real spelling in `components/ui/switch.tsx`'s neighbourhood, not a hypothetical one.
+files:
+  - "app/**"
+  - "components/**"
+ignores:
+  - "**/*.test.ts"
+  - "**/*.test.tsx"
+  - "**/*.test-d.ts"
+  - "**/*.spec.ts"
+  - "**/*.spec.tsx"
+rule:
+  kind: string_fragment
+  regex: '(^|[[:space:]])([^[:space:]]*:)?!?shadow-(\[|2xs\b|xs\b|sm\b|md\b|lg\b|2xl\b|3xl\b|xl\b|inner\b)'

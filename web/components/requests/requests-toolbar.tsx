@@ -20,6 +20,8 @@ import { FaFileArrowUp } from "@/components/icons";
 // edited ticket) — imported directly per the project's react-icons/fa6
 // convention (see upload-modal.tsx).
 import { FaArrowPointer, FaBrush, FaClockRotateLeft, FaEraser } from "react-icons/fa6";
+import { capabilityAnchorProps } from "@/lib/capability/anchor-contract";
+import { REQUESTS_TOOLBAR_ANCHOR } from "./capability-anchors";
 
 export interface RequestsToolbarProps {
   mode: "normal" | "quick";
@@ -45,7 +47,11 @@ export function RequestsToolbar({
   requestsCsvDisabledReason,
 }: RequestsToolbarProps) {
   return (
-    <div className="mb-3 flex flex-wrap items-center gap-3" data-testid="requests-toolbar">
+    <div
+      className="mb-3 flex flex-wrap items-center gap-3"
+      data-testid="requests-toolbar"
+      {...capabilityAnchorProps(REQUESTS_TOOLBAR_ANCHOR)}
+    >
       {/* Pill track (DESIGN.md §5 assigns --r-pill to segmented controls; the
           canonical ScreenRequests track measures border-radius:999px with
           overflow:hidden). The square F3-owned Cell Preference tablist is a

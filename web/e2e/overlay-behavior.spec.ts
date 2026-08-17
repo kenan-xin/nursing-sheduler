@@ -31,9 +31,24 @@ const CARD_RADIUS = "16px";
 
 type NsWindow = {
   __nsStore: {
-    scenario: {
-      getState(): Record<string, unknown> & { mutateScenario(patch: unknown): void };
+    /** The repository command bus — the product's only durable write path. */
+    commands: {
+      mutate(patch: Record<string, unknown>): Promise<{ ok: boolean }>;
+      recordBackup(): Promise<{ ok: boolean }>;
+      undo(): Promise<{ ok: boolean }>;
+      redo(): Promise<{ ok: boolean }>;
+      takeover(): Promise<{ ok: boolean }>;
     };
+    drain(): Promise<void>;
+    historyDepth(): Promise<number>;
+    authority(): {
+      scenarioId: string | null;
+      documentRevision: number;
+      ownership: string;
+      canUndo: boolean;
+      canRedo: boolean;
+    };
+    scenario(): Record<string, unknown>;
   };
 };
 
@@ -52,8 +67,8 @@ async function gotoReady(page: Page, path: string) {
 }
 
 function seed(page: Page, patch: Record<string, unknown>) {
-  return page.evaluate((p) => {
-    (window as unknown as NsWindow).__nsStore.scenario.getState().mutateScenario(p);
+  return page.evaluate(async (p) => {
+    await (window as unknown as NsWindow).__nsStore.commands.mutate(p);
   }, patch);
 }
 

@@ -37,7 +37,11 @@ import {
   useSubmitOptimize,
 } from "@/lib/query/optimize";
 import { optimizeKeys } from "@/lib/query/keys";
-import { useHotStore } from "@/lib/store";
+import { getScenarioAuthority, readAuthoritativeScenarioIdentity, useHotStore } from "@/lib/store";
+import type { OptimizeBasisDegradation, OptimizeObservability } from "./optimize-observability";
+import { bindAcceptedJob, buildOptimizeBasis, type BuiltBasis } from "./basis/basis-record";
+import type { OptimizeBasisRecordV2 } from "./basis/basis-row";
+import type { InfoSemanticProfile } from "@/app/api/info/types";
 import {
   prepareOptimizeSubmission,
   type PrepareOptimizeSubmissionOptions,
@@ -125,6 +129,16 @@ export interface OptimizeRunSubmitInput {
   anonymize: boolean;
   prettify?: boolean;
   timeout?: number;
+  /**
+   * The backend semantic profile just read from `/api/info` (T08).
+   *
+   * Supplying it makes the run claim an immutable submission basis. OMITTING it is
+   * a fully supported ordinary run: the app must stay usable when the profile is
+   * unreadable, Web Crypto is unavailable (an insecure origin), or the scenario
+   * identity is unknown — the run simply carries no basis and cannot later be
+   * diagnosed against.
+   */
+  semanticProfile?: InfoSemanticProfile | null;
 }
 
 /** The closed result of a `submit()` call. */
@@ -197,6 +211,124 @@ export interface RunActivation {
   capture: SessionCaptureState;
 }
 
+/**
+ * Build the immutable basis for a submission, or return `null` when a verifiable
+ * one cannot be produced.
+ *
+ * Every `null` here is a DEGRADATION TO AN ORDINARY RUN, never a rejection: a run
+ * without a basis is a supported first-class case (the assistant is off by
+ * default), so an unreadable profile, an insecure origin without Web Crypto, an
+ * unknown scenario identity, or implicit options must not block Optimize.
+ */
+async function buildBasisForSubmission(
+  input: OptimizeRunSubmitInput,
+  prep: { yaml: string; anonymized: boolean },
+  basisStore: OptimizeBasisStore | null,
+  note: (reason: OptimizeBasisDegradation, jobId?: string | null) => void,
+): Promise<BuiltBasis | null> {
+  // Each guard reports the FIRST condition that stopped the claim, so the reason names
+  // the layer that actually broke. Ordering is therefore load-bearing: an absent
+  // profile is reported as `profile-unavailable` even when the store is also missing.
+  const profile = input.semanticProfile ?? null;
+  if (profile === null) {
+    note("profile-unavailable");
+    return null;
+  }
+  if (basisStore === null) {
+    note("authority-unavailable");
+    return null;
+  }
+  // Both options must be EXPLICIT: the backend binds its RESOLVED values, so a
+  // guessed default would fail verification and reject an otherwise valid run.
+  if (typeof input.prettify !== "boolean" || typeof input.timeout !== "number") {
+    note("options-implicit");
+    return null;
+  }
+
+  // A REJECTION IS THE SAME DEGRADATION AS A NULL, and this read can genuinely reject:
+  // it reaches Dexie-backed repository authority, which throws outright when IndexedDB
+  // is unavailable. Awaiting it OUTSIDE the boundary let that rejection escape
+  // `buildBasisForSubmission` entirely -- no reason was emitted, the ordinary POST never
+  // happened, and `submitAttemptRef` stayed occupied so the very next submit was refused
+  // as `submission-in-progress`. Losing a basis claim is diagnostic degradation, never
+  // enforcement, so the rejection is folded into the same `null` the guard below already
+  // handles. The exception value is deliberately NOT recorded: the finite reason code is
+  // the entire payload this surface may carry.
+  const identity = await readAuthoritativeScenarioIdentity().catch(() => null);
+  if (identity === null) {
+    note("scenario-identity-unavailable");
+    return null;
+  }
+
+  // BUILD and WRITE are separated so the reason can tell them apart. One try around
+  // both would have to report a single combined code, which would leave "Web Crypto is
+  // missing" and "IndexedDB refused the write" indistinguishable -- the two most
+  // different causes on this path.
+  let built: BuiltBasis;
+  try {
+    built = await buildOptimizeBasis({
+      yaml: prep.yaml,
+      anonymized: prep.anonymized,
+      profile,
+      options: { prettify: input.prettify, timeoutSeconds: input.timeout },
+      scenarioId: identity.scenarioId,
+      documentRevision: identity.documentRevision,
+      // T08 submits ordinary runs only; T10 owns candidate submission.
+      ownerKind: "ordinary",
+      attemptId: crypto.randomUUID(),
+      now: new Date(),
+    });
+  } catch {
+    // Web Crypto absent (an insecure origin), or the encoder refused. Not a reason to
+    // block an ordinary run; it proceeds without a basis claim.
+    note("basis-build-failed");
+    return null;
+  }
+
+  try {
+    // Persisted BEFORE the POST, so an accepted job whose response never reaches
+    // us still has a durable local row to recover against.
+    await basisStore.putOptimizeBasis(built.record);
+  } catch {
+    note("basis-write-failed");
+    return null;
+  }
+  return built;
+}
+
+/**
+ * Bind an accepted job to its basis row, or leave the row unbound.
+ *
+ * Verification runs INSIDE the store transaction against the row as re-read there,
+ * so a row that changed underneath cannot be overwritten from a stale snapshot.
+ */
+async function bindBasisToAcceptedJob(
+  built: BuiltBasis,
+  job: JobResponse,
+  basisStore: OptimizeBasisStore,
+  note: (reason: OptimizeBasisDegradation, jobId?: string | null) => void,
+): Promise<void> {
+  try {
+    // A REFUSAL IS NOT A THROW. `bindOptimizeBasisJob` resolves `null` when the row is
+    // gone or the echoed identity disagrees -- which is the likelier failure and was
+    // just as silent as the exception path.
+    const bound = await basisStore.bindOptimizeBasisJob(built.basisId, (row) =>
+      bindAcceptedJob(row, {
+        jobId: job.id,
+        basisId: job.request.basis?.basis_id ?? null,
+        inputSha256: job.request.basis?.input_sha256 ?? null,
+        expiresAt: job.expires_at,
+      }),
+    );
+    if (bound === null) note("basis-bind-failed", job.id);
+  } catch {
+    // A failed binding leaves the row unbound, which the recovery classifier
+    // already reads as "no trustworthy identity" — the safe direction. The job DOES
+    // exist here, unlike every other degradation, so its id is reportable.
+    note("basis-bind-failed", job.id);
+  }
+}
+
 /** Injectable seams (dependency injection for testability). */
 export interface UseOptimizeRunDeps {
   /** Defaults to the real `sessionStorage` (acquired through a guarded seam). */
@@ -226,6 +358,40 @@ export interface UseOptimizeRunDeps {
    * retained row.
    */
   purgeSnapshot?: (ownerId: string) => Promise<void>;
+  /**
+   * The durable basis seam (T08). Defaults to the authority adapter, which is the
+   * only module allowed to reach the repository graph. Injectable so the basis path
+   * is testable without IndexedDB.
+   *
+   * OMITTED IS NOT THE SAME AS `null`. Leaving this out selects the real adapter;
+   * only an explicit injection replaces it. For a long time this doc described a
+   * default the code did not have (`depsRef.current?.basisStore ?? null`), so every
+   * production mount ran with no store at all and silently recorded no basis --
+   * see `resolveBasisStore` below.
+   *
+   * `null` is therefore a MEANINGFUL injection, not a type-level accident: it says
+   * "this run has no basis authority", which is what a test needs to reach the
+   * `authority-unavailable` degradation without breaking IndexedDB globally.
+   */
+  basisStore?: OptimizeBasisStore | null;
+  /**
+   * The bounded observability surface degradations are reported through.
+   *
+   * Optional, and absence is silent by design: this hook has non-screen callers, and
+   * observability is a diagnostic surface, never a precondition for running. The
+   * screen passes the same instance it gives the terminal orchestration, so a run's
+   * basis, queue, duration and cleanup events share one bounded buffer.
+   */
+  observability?: OptimizeObservability;
+}
+
+/** The durable operations the basis path needs from the authority adapter. */
+export interface OptimizeBasisStore {
+  putOptimizeBasis(record: OptimizeBasisRecordV2): Promise<void>;
+  bindOptimizeBasisJob(
+    basisId: string,
+    verify: (row: OptimizeBasisRecordV2) => OptimizeBasisRecordV2 | null,
+  ): Promise<OptimizeBasisRecordV2 | null>;
 }
 
 /** The controller surface consumed by the screen (T16e). */
@@ -478,6 +644,54 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
     [dispatchIfAttached],
   );
 
+  /**
+   * Report one basis degradation, if anyone is listening.
+   *
+   * Reads the sink from the deps ref rather than closing over it, so a screen that
+   * mounts its observability after this hook still receives events. Never throws into
+   * the submit path: a diagnostic surface must not be able to fail a run.
+   */
+  const noteBasisDegradation = useCallback(
+    (reason: OptimizeBasisDegradation, jobId: string | null = null): void => {
+      try {
+        depsRef.current?.observability?.emit({ kind: "basis-degraded", jobId, reason });
+      } catch {
+        // An observability sink that throws is the sink's problem, not the run's.
+      }
+    },
+    [],
+  );
+
+  /**
+   * The basis store this run should use: the injected one, or the real projection
+   * adapter.
+   *
+   * THIS USED TO BE `depsRef.current?.basisStore ?? null`, which is how T08's whole
+   * durable basis path came to be dead in the shipped app. The only mount that passes
+   * `controllerDeps` is a dev fixture, so on the real route the store was ALWAYS null,
+   * `buildBasisForSubmission` returned at its first guard, and no `optimizeBases` row
+   * was ever written. Nothing surfaced, because a basis-less run is a supported
+   * degradation -- and with no basis row, T10's bounded infeasibility diagnostic has no
+   * parent to diagnose and truthfully refuses on every infeasible run.
+   *
+   * Resolved LAZILY, inside `submit`, and never during render: `getScenarioAuthority()`
+   * constructs the Dexie handle on first use, and this hook renders on the server for
+   * the initial HTML, where IndexedDB does not exist. It is not cached here either --
+   * the accessor already memoises the singleton, and caching would pin a stale
+   * authority when one is rebound.
+   *
+   * A throw still degrades to an ordinary un-claimed run rather than blocking Optimize.
+   */
+  const resolveBasisStore = useCallback((): OptimizeBasisStore | null => {
+    const injected = depsRef.current?.basisStore;
+    if (injected !== undefined) return injected;
+    try {
+      return getScenarioAuthority();
+    } catch {
+      return null;
+    }
+  }, []);
+
   // --- submit ---------------------------------------------------------------
   const submit = useCallback(
     async (
@@ -515,6 +729,24 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
       // Reported BEFORE anything can fail: the caller's retirement lane needs the
       // owner even for a submission that never reaches a job id.
       options?.onOwnerId?.(ownerId);
+
+      const basisStore = resolveBasisStore();
+
+      // --- immutable submission basis (T08), best-effort ---------------------
+      //
+      // A basis is claimed ONLY when every input for a verifiable one is present:
+      // a readable semantic profile, an authoritative scenario identity, and
+      // EXPLICIT prettify/timeout. The last condition matters: the backend binds
+      // its RESOLVED options into the identity, so claiming a basis while letting
+      // the server pick a default we guessed would fail verification and reject an
+      // otherwise valid run. Any missing input therefore degrades to an ordinary
+      // un-claimed submission rather than to a rejected one.
+      //
+      // INTEGRATION: built here, BEFORE the F2 write-ahead staging and the POST, so
+      // the durable basis row exists before any job can. The provisional session
+      // record itself is built further down from main's `ownerId` — this path adds a
+      // basis claim to that submission, it does not own the record.
+      const built = await buildBasisForSubmission(input, prep, basisStore, noteBasisDegradation);
 
       setIsSubmitting(true);
       dispatch({
@@ -594,7 +826,15 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
             const job = await submitMutation.mutateAsync({
               yamlContent: prep.yaml,
               ...runOptions,
+              ...(built !== null ? { basis: built.fields } : {}),
             });
+            // Bind only on an EXACTLY matching echoed identity. A disagreement is a
+            // transport-integrity failure, so the row is left unbound rather than
+            // pointing at a job whose evidence would be misattributed. The run
+            // itself still proceeds — it simply cannot be diagnosed against later.
+            if (built !== null && basisStore !== null) {
+              await bindBasisToAcceptedJob(built, job, basisStore, noteBasisDegradation);
+            }
             return { status: "accepted", jobId: job.id };
           } catch (error) {
             return classifySubmitError(error);
@@ -712,7 +952,7 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
       // capture would be impossible without the exact submission.
       return { status: "acceptance-unknown" };
     },
-    [dispatch, submitMutation],
+    [dispatch, noteBasisDegradation, resolveBasisStore, submitMutation],
   );
 
   // --- attachment identity + owner-keyed retirement -------------------------

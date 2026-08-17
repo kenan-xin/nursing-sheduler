@@ -1,0 +1,23 @@
+id: retired-accent-swatch-table
+snapshots:
+  ? |
+    const ACCENT_SWATCHES = { teal: "var(--brand)" };
+  : labels:
+      - source: ACCENT_SWATCHES
+        style: primary
+        start: 6
+        end: 21
+  ? |
+    const key = "ACCENT_SWATCHES";
+  : labels:
+      - source: ACCENT_SWATCHES
+        style: primary
+        start: 13
+        end: 28
+  ? |
+    const paint = theme.ACCENT_SWATCHES;
+  : labels:
+      - source: ACCENT_SWATCHES
+        style: primary
+        start: 20
+        end: 35

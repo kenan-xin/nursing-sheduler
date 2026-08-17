@@ -7,6 +7,12 @@
 // so the user never sees the empty default before the persisted record loads
 // (tech-plan §4 hydration protocol).
 //
+// INTEGRATION: the T03 cutover replaced the persist bring-up with repository
+// authority (`initializeScenarioAuthority` + `registerScenarioLifecycle` +
+// `useOwnershipController`/`OwnershipBanner`), while G4.1's roster-aware reset stays
+// the recovery affordance. Both survive: the lifecycle below is T03's, and the reset
+// it offers is still the full `resetToNewSchedule`, not the scenario-only one.
+//
 // `recoverable-error` (corrupt IndexedDB record) surfaces a reset affordance.
 //
 // G4.1 — that affordance goes through the SAME production `resetToNewSchedule` the
@@ -22,11 +28,12 @@
 
 import { useEffect, useState } from "react";
 import {
-  useScenarioStore,
+  initializeScenarioAuthority,
+  registerScenarioLifecycle,
   useHotStore,
-  hydrateScenarioStore,
-  registerPagehideFlush,
+  useOwnershipController,
 } from "@/lib/store";
+import { OwnershipBanner } from "./ownership-banner";
 import { NEW_SCHEDULE_FAILED_MESSAGE, resetToNewSchedule } from "@/lib/roster";
 import { SkeletonCard } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -48,19 +55,26 @@ export interface HydrationGateProps {
 }
 
 export function HydrationGate({ children, resetNewSchedule }: HydrationGateProps) {
-  const scenario = useScenarioStore;
   const hot = useHotStore;
   const status = useHotStore((s) => s.hydrationStatus);
   const [resetOpen, setResetOpen] = useState(false);
   const reset = resetNewSchedule ?? resetToNewSchedule;
 
-  // One-shot: hydrate, register pagehide flush, persist mode.
+  // One-shot bring-up (T03): migrate the legacy record, reread this tab's persisted
+  // selection and lease, acquire when free, and register the page-lifecycle listeners
+  // that keep this tab's authority honest across BFCache, visibility restore, and
+  // reconnect.
+  //
+  // INTEGRATION: this replaces the pre-T03 `hydrateScenarioStore` + `pagehide` flush.
+  // There is no write-behind to flush any more — a command's own transaction IS the
+  // write — so `pagehide` now RELEASES the lease instead, which is what
+  // `registerScenarioLifecycle` owns.
   useEffect(() => {
-    void hydrateScenarioStore(scenario, hot);
-    const unreg = registerPagehideFlush(scenario);
-    return unreg;
-  }, [scenario, hot]);
+    void initializeScenarioAuthority(hot);
+    return registerScenarioLifecycle();
+  }, [hot]);
 
+  useOwnershipController();
   useUndoRedoShortcuts();
   usePersistenceStatusController();
   useSyncModePersistence();
@@ -124,5 +138,13 @@ export function HydrationGate({ children, resetNewSchedule }: HydrationGateProps
     );
   }
 
-  return <>{children}</>;
+  // The ownership banner sits INSIDE the gate, above the app, so a read-only tab
+  // still renders the whole application (inspection stays available) with the one
+  // surface that explains why nothing can be changed.
+  return (
+    <>
+      <OwnershipBanner />
+      {children}
+    </>
+  );
 }

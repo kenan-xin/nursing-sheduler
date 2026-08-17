@@ -1,0 +1,23 @@
+id: authored-color-literal-tsx
+snapshots:
+  ? |
+    export const D = () => <span style={{ background: "#0b7d68" }} />;
+  : labels:
+      - source: "#0b7d68"
+        style: primary
+        start: 51
+        end: 58
+  ? |
+    export const E = () => <div className="bg-[rgba(0,0,0,0.4)]" />;
+  : labels:
+      - source: bg-[rgba(0,0,0,0.4)]
+        style: primary
+        start: 39
+        end: 59
+  ? |
+    export const F = () => <div style={{ boxShadow: `0 0 4px #000` }} />;
+  : labels:
+      - source: "0 0 4px #000"
+        style: primary
+        start: 49
+        end: 61

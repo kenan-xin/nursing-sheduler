@@ -14,7 +14,8 @@
 // derivation of "does this exact shift have a declared target", not two that can
 // drift apart.
 
-import type { RosterCalendarDay, RosterContext, RosterDayState } from "@/lib/roster";
+// DIRECT LEAF IMPORT, not the `@/lib/roster` barrel (see `tallies.ts`).
+import type { RosterCalendarDay, RosterContext, RosterDayState } from "@/lib/roster/types";
 import {
   exactShiftRequirement,
   type RequirementModel,

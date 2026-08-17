@@ -23,6 +23,7 @@ import {
   ABORT_BOUNDS,
   ABORT_TEST_TIMEOUT,
   auditCoverageAfterRelease,
+  judgeAssembledCleanup,
   FIRST_BYTE_TIMEOUT,
   judgeEventsAuthority,
   judgeVolatileJobIdTexts,
@@ -48,7 +49,7 @@ import {
   auditTerminalExpect,
   guardTerminalExpect,
 } from "./support/abort-control-reporter";
-import { ABORT_HANDOFF_ENV, publishAbortHandoff } from "./support/abort-handoff";
+import { runAbortHandoffLane } from "./support/abort-handoff";
 
 const REPO_ROOT = resolve(__dirname, "../..");
 const TINY_YAML = readFileSync(
@@ -623,10 +624,18 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
     });
 
     // Cleanup is successful only when the release converged, ownership was fully
-    // accounted for, AND every id counted as coverage turned out to exist. Releasing an
-    // empty set is not success when the reason the set is empty is that we could not
-    // name the job, and releasing a job the backend never had accounts for nothing.
-    if (outcome.ok && settlementFailures.length === 0 && coverageAudit.ok) return;
+    // accounted for, AND every id counted as coverage turned out to exist. The
+    // conjunction is `judgeAssembledCleanup`, proved directly in `optimize-durable.test.ts`
+    // — it used to be inline here, asserted only by a test that read this file as text.
+    if (
+      judgeAssembledCleanup({
+        released: outcome,
+        settlementFailures,
+        coverage: coverageAudit,
+      }).ok
+    ) {
+      return;
+    }
     // Never replace the primary failure: if the test already failed, the cleanup
     // trace is attached above and that is all. But a cleanup failure on an
     // otherwise PASSING test means the next lane may be starved, so it must fail
@@ -920,27 +929,16 @@ test.describe("T16f assembled Browser → Next → FastAPI stream gate", () => {
     // Bounded, because `drain()` spends its own internal windows and this runs inside
     // the test body's budget (`ABORT_BOUNDS.abortHandoffPublish`).
     let publishFailure: unknown = null;
-    let publishNote = "";
-    try {
-      const drained = await withBound(
-        "abort handoff drain",
-        ABORT_BOUNDS.abortHandoffPublish,
-        abortTracker.drain(),
-      );
-      // Dispose AFTER the drain and take its own report: detaching the listeners is the
-      // instant an acceptance can be lost silently, and `judgeAbortOwnership` refuses to
-      // publish anything at all when disposal stranded work.
-      const disposal = abortTracker.dispose();
-      publishNote = publishAbortHandoff({
-        target: process.env[ABORT_HANDOFF_ENV],
-        drained,
-        disposal,
-      }).note;
-    } catch (error) {
-      abortTracker.dispose();
-      publishFailure = error;
-      publishNote = error instanceof Error ? error.message : String(error);
-    }
+    // The drain → dispose → publish order (and its dispose-on-throw) is owned by
+    // `runAbortHandoffLane` and proved directly in `support/abort-handoff.test.ts`. It
+    // used to be inline here, asserted only by a test that read this file as text.
+    const laneOutcome = await runAbortHandoffLane({
+      tracker: abortTracker,
+      bound: (promise) =>
+        withBound("abort handoff drain", ABORT_BOUNDS.abortHandoffPublish, promise),
+    });
+    const publishNote = laneOutcome.note;
+    publishFailure = laneOutcome.failure;
     await testInfo.attach("abort-handoff", { body: publishNote, contentType: "text/plain" });
 
     // The body's failure always wins; a publish failure only surfaces on an otherwise

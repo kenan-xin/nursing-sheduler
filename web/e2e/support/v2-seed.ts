@@ -6,10 +6,9 @@
 // any worker, and produce the same DOM. That property is what lets the parallel
 // route wave trust a screenshot taken in someone else's shard.
 //
-// The seam is the real one: `window.__nsStore.scenario.getState().mutateScenario`
-// from `components/shell/test-bridge.tsx`, i.e. a genuine tracked T04 mutation
-// through the durable store — not a fixture prop, not a mock, not a hand-written
-// IndexedDB record.
+// The seam is the real one: `window.__nsStore.commands.mutate` from
+// `components/shell/test-bridge.tsx`, i.e. a genuine durable repository commit —
+// not a fixture prop, not a mock, not a hand-written IndexedDB record.
 //
 // Playwright is imported for TYPES only, so the pure builders below stay
 // importable from the node vitest environment.
@@ -23,7 +22,7 @@ import type { V2Row, V2SeedKey } from "./v2-surface-matrix";
  *
  * The reason is the runtime, not taste: this module is loaded by Playwright's
  * own transform, and pulling the durable store's module graph (Dexie, zustand,
- * zundo) into an e2e helper to read two strings would be a large amount of
+ * the repository) into an e2e helper to read two strings would be a large amount of
  * browser-shaped code evaluated in node for no benefit. `v2-seed.test.ts`
  * imports both real modules and asserts these literals still equal them, so the
  * duplication is pinned rather than trusted.
@@ -63,7 +62,7 @@ export const SEED_SHIFT_IDS = ["D", "E", "N"] as const;
 // Pure builders
 // ---------------------------------------------------------------------------
 
-/** A durable-store patch: the exact object handed to `mutateScenario`. */
+/** A durable patch: the exact object handed to `commands.mutate`. */
 export type SeedPatch = Record<string, unknown>;
 
 /** Range + staff + staff group + shift types + shift group + date group. */
@@ -272,12 +271,13 @@ export function seedRecordsBackup(key: V2SeedKey): boolean {
 interface SeedWindow {
   __NS_ENABLE_TEST_BRIDGE?: boolean;
   __nsStore?: {
-    scenario: {
-      getState(): {
-        mutateScenario(patch: Record<string, unknown>): void;
-        recordBackup(): void;
-      };
+    /** The repository command bus — seeding uses the product's own write path. */
+    commands: {
+      mutate(patch: Record<string, unknown>): Promise<{ ok: boolean }>;
+      recordBackup(backupFingerprint: string): Promise<{ ok: boolean }>;
     };
+    /** The fingerprint a Download of the current document would record. */
+    backupFingerprint(): string;
   };
 }
 
@@ -333,9 +333,9 @@ export async function prepareRow(page: Page, row: V2Row): Promise<void> {
 }
 
 /**
- * Apply the row's seed through the real tracked mutation. Call AFTER readiness:
- * `mutateScenario` no-ops until the durable store reports `ready`, so seeding a
- * still-hydrating store would silently write nothing.
+ * Apply the row's seed through the real durable command. Call AFTER readiness: a
+ * command issued before the authority has acquired this scenario's writer lease is
+ * refused by the repository, so seeding a still-hydrating tab would write nothing.
  */
 export async function seedRow(page: Page, row: V2Row): Promise<void> {
   const patch = buildSeedPatch(row.seed);
@@ -349,13 +349,16 @@ export async function seedRow(page: Page, row: V2Row): Promise<void> {
     );
   }
 
-  await page.evaluate((p) => {
-    (window as unknown as SeedWindow).__nsStore!.scenario.getState().mutateScenario(p);
+  // Awaited, so the durable commit has landed before the row's assertions run.
+  // A fire-and-forget seed could be outrun by a navigation and simply vanish.
+  await page.evaluate(async (p) => {
+    await (window as unknown as SeedWindow).__nsStore!.commands.mutate(p);
   }, patch);
 
   if (seedRecordsBackup(row.seed)) {
-    await page.evaluate(() => {
-      (window as unknown as SeedWindow).__nsStore!.scenario.getState().recordBackup();
+    await page.evaluate(async () => {
+      const store = (window as unknown as SeedWindow).__nsStore!;
+      await store.commands.recordBackup(store.backupFingerprint());
     });
   }
 }

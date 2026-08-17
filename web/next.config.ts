@@ -34,6 +34,14 @@ const nextConfig: NextConfig = {
     // assignment would override the Docker stamp. In `pnpm dev` the env var is
     // unset, so getGitVersion() runs and self-stamps the version.
     NEXT_PUBLIC_APP_VERSION: process.env.NEXT_PUBLIC_APP_VERSION?.trim() || getGitVersion(),
+    // The read-only e2e store bridge (`components/shell/test-bridge.tsx`) is gated on
+    // this at BUILD time. It is declared here with an explicit `"0"` default because
+    // Next only INLINES a `NEXT_PUBLIC_*` value it can see at build time: left
+    // undefined, the reference compiles to a runtime `process.env` lookup instead, the
+    // gate stays live, and the bridge ships in ordinary production after all — which
+    // is exactly the bypass it exists to remove. Declared, it folds to a literal and
+    // the whole branch is eliminated.
+    NEXT_PUBLIC_NS_TEST_BRIDGE: process.env.NEXT_PUBLIC_NS_TEST_BRIDGE === "1" ? "1" : "0",
   },
 };
 

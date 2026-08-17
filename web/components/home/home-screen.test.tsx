@@ -5,7 +5,8 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { HomeScreen } from "./home-screen";
 import { useModeStore } from "@/lib/mode/mode";
 import { useNavGuardStore } from "@/components/shell/nav-guard-store";
-import { useHotStore, useScenarioStore, resetToNewScenario } from "@/lib/store";
+import { scenarioCommands } from "@/lib/store";
+import { resetScenarioForTest } from "@/lib/store/test-authority";
 
 // R1 — the v2 re-skin of Home. These are the facts the re-skin can silently
 // break and that no other suite holds:
@@ -45,13 +46,13 @@ beforeEach(async () => {
   vi.clearAllMocks();
   useModeStore.setState({ mode: "guided" });
   useNavGuardStore.setState({ drafts: new Map(), pendingIntent: null, open: false });
-  await resetToNewScenario(useScenarioStore, useHotStore);
+  await resetScenarioForTest();
 });
 
 afterEach(() => cleanup());
 
 describe("HomeScreen — two-mode composition", () => {
-  it("renders the guided body, and the header and stat strip in BOTH modes", () => {
+  it("renders the guided body, and the header and stat strip in BOTH modes", async () => {
     render(<HomeScreen />);
     expect(root().getAttribute("data-mode")).toBe("guided");
     expect(screen.getByTestId("home-wizard-grid")).toBeTruthy();
@@ -61,7 +62,7 @@ describe("HomeScreen — two-mode composition", () => {
     expect(screen.queryByTestId("home-advanced")).toBeNull();
   });
 
-  it("swaps only the body when the mode lens flips to advanced", () => {
+  it("swaps only the body when the mode lens flips to advanced", async () => {
     render(<HomeScreen />);
     act(() => {
       useModeStore.setState({ mode: "advanced" });
@@ -77,7 +78,7 @@ describe("HomeScreen — two-mode composition", () => {
 });
 
 describe("HomeScreen — v2 surface and geometry contract", () => {
-  it("paints the Home root as the L0 page plane", () => {
+  it("paints the Home root as the L0 page plane", async () => {
     render(<HomeScreen />);
     // F4's R1 row declares this element `role: page`, which resolves to --bg with
     // no elevation. An unpainted root inherits its ancestor and computes
@@ -87,7 +88,7 @@ describe("HomeScreen — v2 surface and geometry contract", () => {
     expect(classesOf(root())).not.toMatch(/\bshadow-[123]\b/);
   });
 
-  it("gives the stat strip the deterministic 2→3→5 ladder with no stranded fifth card", () => {
+  it("gives the stat strip the deterministic 2→3→5 ladder with no stranded fifth card", async () => {
     render(<HomeScreen />);
     const classes = classesOf(screen.getByTestId("home-stat-strip"));
     expect(classes).toContain("grid-cols-2");
@@ -98,7 +99,7 @@ describe("HomeScreen — v2 surface and geometry contract", () => {
     expect(classes).not.toContain("sm:grid-cols-5");
   });
 
-  it("rounds the stat strip as one L1 card and clips its square cells into it", () => {
+  it("rounds the stat strip as one L1 card and clips its square cells into it", async () => {
     render(<HomeScreen />);
     const classes = classesOf(screen.getByTestId("home-stat-strip"));
     expect(classes).toContain("rounded-card");
@@ -109,7 +110,7 @@ describe("HomeScreen — v2 surface and geometry contract", () => {
 });
 
 describe("HomeScreen — typography and copy", () => {
-  it("keeps the product eyebrow copy and drops the v1 leader-dot ornament", () => {
+  it("keeps the product eyebrow copy and drops the v1 leader-dot ornament", async () => {
     render(<HomeScreen />);
     // DESIGN.md §5 retires decorative ornament on labels; the deviation matrix
     // keeps product copy above the prototype's own example wording.
@@ -117,7 +118,7 @@ describe("HomeScreen — typography and copy", () => {
     expect(root().textContent).not.toContain("●");
   });
 
-  it("tracks R1-owned headings at the v2 -0.015em, not a Tailwind default", () => {
+  it("tracks R1-owned headings at the v2 -0.015em, not a Tailwind default", async () => {
     render(<HomeScreen />);
     const heading = screen.getByRole("heading", { level: 1 });
     // The heading states the v2 value itself as a component contract; the global
@@ -130,16 +131,14 @@ describe("HomeScreen — typography and copy", () => {
 
 describe("HomeScreen — guided wizard cards", () => {
   /** Make step 1 (Dates) genuinely done, so Done/Current/To do all render. */
-  function completeDates() {
-    act(() => {
-      useScenarioStore
-        .getState()
-        .mutateScenario({ rangeStart: "2026-02-01", rangeEnd: "2026-02-28" });
+  async function completeDates() {
+    await act(async () => {
+      await scenarioCommands.mutate({ rangeStart: "2026-02-01", rangeEnd: "2026-02-28" });
     });
   }
 
-  it("carries status on the shared Badge recipe, so every tint has its semantic ink AND border", () => {
-    completeDates();
+  it("carries status on the shared Badge recipe, so every tint has its semantic ink AND border", async () => {
+    await completeDates();
     render(<HomeScreen />);
 
     const done = screen.getByTestId("home-badge-/dates");
@@ -164,8 +163,8 @@ describe("HomeScreen — guided wizard cards", () => {
     expect(screen.getByTestId("home-wizard-grid").textContent).not.toContain("✓");
   });
 
-  it("gives only the current step the `selected` surface role", () => {
-    completeDates();
+  it("gives only the current step the `selected` surface role", async () => {
+    await completeDates();
     render(<HomeScreen />);
 
     const current = classesOf(screen.getByTestId("home-card-/people"));
@@ -180,8 +179,8 @@ describe("HomeScreen — guided wizard cards", () => {
     expect(resting).not.toContain("border-brand");
   });
 
-  it("builds the step CTAs from the shared Button recipe at the absolute control height", () => {
-    completeDates();
+  it("builds the step CTAs from the shared Button recipe at the absolute control height", async () => {
+    await completeDates();
     render(<HomeScreen />);
 
     const currentCta = classesOf(screen.getByTestId("home-cta-/people"));
@@ -199,8 +198,8 @@ describe("HomeScreen — guided wizard cards", () => {
     expect(restingCta).toContain("pointer-coarse:min-h-touch");
   });
 
-  it("labels each CTA from its own step status", () => {
-    completeDates();
+  it("labels each CTA from its own step status", async () => {
+    await completeDates();
     render(<HomeScreen />);
     expect(screen.getByTestId("home-cta-/dates").textContent).toContain("Review");
     expect(screen.getByTestId("home-cta-/people").textContent).toContain("Continue");
@@ -209,14 +208,14 @@ describe("HomeScreen — guided wizard cards", () => {
 });
 
 describe("HomeScreen — guarded navigation from the header CTA", () => {
-  it("routes the Generate CTA through the guard when nothing is dirty", () => {
+  it("routes the Generate CTA through the guard when nothing is dirty", async () => {
     render(<HomeScreen />);
     fireEvent.click(screen.getByTestId("home-generate"));
     expect(push).toHaveBeenCalledWith("/optimize-and-export");
     expect(useNavGuardStore.getState().open).toBe(false);
   });
 
-  it("stages the confirm instead of navigating while a losable draft is open", () => {
+  it("stages the confirm instead of navigating while a losable draft is open", async () => {
     render(<HomeScreen />);
     act(() => {
       useNavGuardStore.getState().registerDraft({ id: "d", label: "Draft" });

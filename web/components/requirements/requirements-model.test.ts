@@ -4,6 +4,7 @@ import {
   type RequirementCard,
   type ScenarioUiState,
 } from "@/lib/scenario";
+import { sanitizePersistedScenario } from "@/lib/store/persistence";
 import {
   REQUIREMENT_MESSAGES,
   buildQualifiedPeopleTransferOptions,
@@ -374,6 +375,42 @@ describe("requirementToForm (FR-PR-26 load — null/undefined → [ALL])", () =>
     const rebuilt = buildRequirementCard(loaded, domain, "u");
     expect(rebuilt.qualifiedPeople).toEqual(["ALL"]);
     expect(rebuilt.date).toEqual(["ALL"]);
+  });
+
+  it("the normalized round trip satisfies the durable contract; the raw null shape does not", () => {
+    // T03F1: durable writes are strict — an explicit `null` selector is not valid
+    // durable content, and the repository refuses it inside its transaction. That is
+    // only coherent because the tolerance above NORMALIZES the null away BEFORE any
+    // write, so both halves are pinned here.
+    //
+    // Checked against `sanitizePersistedScenario`, which is the structural contract the
+    // repository's validator delegates to — not against the repository itself, because
+    // a UI model has no business importing the durable authority (the module-boundary
+    // gate enforces that). The repository-level REFUSAL is proven where it belongs, in
+    // `lib/repository/history-bounds.test.ts` and in `e2e/requirements.spec.ts`.
+    const nullScoped = {
+      uid: "u",
+      shiftType: ["D"],
+      requiredNumPeople: 1,
+      weight: -1,
+      qualifiedPeople: null,
+      date: null,
+    } as unknown as RequirementCard;
+
+    const normalized = buildRequirementCard(requirementToForm(nullScoped, domain), domain, "u");
+    expect(() =>
+      sanitizePersistedScenario({
+        ...BASE,
+        cardsByKind: { ...BASE.cardsByKind, requirements: [normalized] },
+      }),
+    ).not.toThrow();
+
+    expect(() =>
+      sanitizePersistedScenario({
+        ...BASE,
+        cardsByKind: { ...BASE.cardsByKind, requirements: [nullScoped] },
+      }),
+    ).toThrow(/qualifiedPeople/);
   });
 });
 

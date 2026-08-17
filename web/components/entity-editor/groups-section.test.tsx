@@ -4,18 +4,14 @@ import * as React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { ScenarioUiState } from "@/lib/scenario";
-import {
-  drainScenarioPersist,
-  resetToNewScenario,
-  useHotStore,
-  useScenarioStore,
-} from "@/lib/store";
+import { useScenarioStore, scenarioCommands } from "@/lib/store";
 import { peopleDescriptor } from "@/components/people/people-descriptor";
 import type { EntityId } from "./core";
 import { GroupsSection, type GroupsSectionConfig } from "./groups-section";
+import { resetScenarioForTest, drainScenarioCommands, undoDepth } from "@/lib/store/test-authority";
 
 // The extracted GroupsSection is behavior-preserving: it commits every change through
-// the same `mutateScenario` path (one composed state ⇒ one zundo entry) and relies on
+// the same `scenarioCommands.mutate` path (one composed state ⇒ one undo entry) and relies on
 // the parent's stale-token guard. This harness mirrors EntityEditor's group-scoped
 // selection + form-open token + close-on-external effect exactly, so the extraction
 // contract is tested against the real scenario store. The suite runs in BOTH configs
@@ -29,11 +25,14 @@ function GroupsHarness({ config }: { config?: GroupsSectionConfig }) {
   const descriptor = peopleDescriptor;
   const items = useScenarioStore(descriptor.readItems);
   const groups = useScenarioStore(descriptor.readGroups);
-  const commit = React.useCallback((next: ScenarioUiState) => {
-    useScenarioStore.getState().mutateScenario(next);
-  }, []);
-  const currentState = React.useCallback(() => useScenarioStore.getState() as ScenarioUiState, []);
-
+  // Mirrors the real owners' `commit`: the operation is applied at the queue head,
+  // against the state the previous command committed.
+  const commit = React.useCallback(
+    (transform: (live: ScenarioUiState) => ScenarioUiState | null) => {
+      void scenarioCommands.mutate((live) => transform(live as ScenarioUiState));
+    },
+    [],
+  );
   const [sel, setSel] = React.useState<GroupSel>(null);
   const editing = sel !== null;
 
@@ -61,7 +60,6 @@ function GroupsHarness({ config }: { config?: GroupsSectionConfig }) {
       items={items}
       groups={groups}
       commit={commit}
-      currentState={currentState}
       isStale={isStale}
       editing={editing}
       addOpen={sel?.t === "add-group"}
@@ -74,31 +72,33 @@ function GroupsHarness({ config }: { config?: GroupsSectionConfig }) {
   );
 }
 
-function seed(patch: Partial<ScenarioUiState>) {
-  act(() => {
-    useScenarioStore.getState().mutateScenario(patch);
+async function seed(patch: Partial<ScenarioUiState>) {
+  await act(async () => {
+    await scenarioCommands.mutate(patch);
   });
 }
 
-function membersOf(groupId: string): EntityId[] {
+async function membersOf(groupId: string): Promise<EntityId[]> {
+  await drainScenarioCommands();
   return useScenarioStore.getState().staffGroups.find((g) => g.id === groupId)?.members ?? [];
 }
 
-function groupOrder(): string[] {
+async function groupOrder(): Promise<string[]> {
+  await drainScenarioCommands();
   return useScenarioStore.getState().staffGroups.map((g) => g.id);
 }
 
-function historyLength(): number {
-  return useScenarioStore.temporal.getState().pastStates.length;
+async function historyLength(): Promise<number> {
+  return undoDepth();
 }
 
 beforeEach(async () => {
   vi.clearAllMocks();
-  await resetToNewScenario(useScenarioStore, useHotStore);
-  await drainScenarioPersist(useScenarioStore);
+  await resetScenarioForTest();
+  await drainScenarioCommands();
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
 });
 
@@ -115,8 +115,8 @@ describe.each([
   ["Staff config (defaults)", undefined],
   ["Shift config", shiftConfig],
 ])("GroupsSection extraction contract — %s", (_name, config) => {
-  it("atomic Save composes one commit / one undo entry", () => {
-    seed({
+  it("atomic Save composes one commit / one undo entry", async () => {
+    await seed({
       staff: [
         { id: "Aisha", history: [] },
         { id: "Chloe", history: [] },
@@ -129,35 +129,35 @@ describe.each([
     fireEvent.change(screen.getByTestId("add-group-id"), { target: { value: "Nurses" } });
     fireEvent.click(screen.getByRole("button", { name: "Add Aisha to group" }));
 
-    const before = historyLength();
+    const before = await historyLength();
     fireEvent.click(screen.getByTestId("group-save-__new__"));
 
-    expect(membersOf("Nurses")).toEqual(["Aisha"]);
-    expect(historyLength()).toBe(before + 1);
+    expect(await membersOf("Nurses")).toEqual(["Aisha"]);
+    expect(await historyLength()).toBe(before + 1);
 
-    act(() => {
-      useScenarioStore.temporal.getState().undo();
+    await act(async () => {
+      await scenarioCommands.undo();
     });
-    expect(groupOrder()).not.toContain("Nurses");
+    expect(await groupOrder()).not.toContain("Nurses");
   });
 
-  it("Cancel discards the draft with no commit", () => {
-    seed({ staff: [{ id: "Aisha", history: [] }], staffGroups: [] });
+  it("Cancel discards the draft with no commit", async () => {
+    await seed({ staff: [{ id: "Aisha", history: [] }], staffGroups: [] });
     render(<GroupsHarness config={config} />);
 
     fireEvent.click(screen.getByTestId("add-group-toggle"));
     fireEvent.change(screen.getByTestId("add-group-id"), { target: { value: "Nurses" } });
     fireEvent.click(screen.getByRole("button", { name: "Add Aisha to group" }));
 
-    const before = historyLength();
+    const before = await historyLength();
     fireEvent.click(screen.getByTestId("group-cancel-__new__"));
 
-    expect(groupOrder()).not.toContain("Nurses");
-    expect(historyLength()).toBe(before);
+    expect(await groupOrder()).not.toContain("Nurses");
+    expect(await historyLength()).toBe(before);
   });
 
-  it("rejects a stale Save — an external change closes the draft with no write-back", () => {
-    seed({
+  it("rejects a stale Save — an external change closes the draft with no write-back", async () => {
+    await seed({
       staff: [
         { id: "Aisha", history: [] },
         { id: "Chloe", history: [] },
@@ -171,7 +171,7 @@ describe.each([
     fireEvent.click(screen.getByRole("button", { name: "Add Chloe to group" }));
 
     // An external change to the group slice while editing (undo/redo or a cascade).
-    seed({
+    await seed({
       staffGroups: [
         { id: "G", members: ["Aisha"] },
         { id: "H", members: [] },
@@ -180,12 +180,12 @@ describe.each([
 
     // The form closes and the draft's Chloe is never committed.
     expect(screen.queryByTestId("group-edit-form-G")).not.toBeInTheDocument();
-    expect(membersOf("G")).toEqual(["Aisha"]);
-    expect(groupOrder()).toContain("H");
+    expect(await membersOf("G")).toEqual(["Aisha"]);
+    expect(await groupOrder()).toContain("H");
   });
 
-  it("preserves unknown / nested members through an edit Save", () => {
-    seed({
+  it("preserves unknown / nested members through an edit Save", async () => {
+    await seed({
       staff: [{ id: "Aisha", history: [] }],
       // "ghost" is not a live item — the SET writer carries it through untouched.
       staffGroups: [{ id: "G", members: ["Aisha", "ghost"] }],
@@ -195,11 +195,11 @@ describe.each([
     fireEvent.click(screen.getByTestId("group-edit-G"));
     fireEvent.click(screen.getByTestId("group-save-G"));
 
-    expect(membersOf("G")).toEqual(["Aisha", "ghost"]);
+    expect(await membersOf("G")).toEqual(["Aisha", "ghost"]);
   });
 
-  it('respects exact typed identity — removing numeric 1 in the draft leaves string "1"', () => {
-    seed({
+  it('respects exact typed identity — removing numeric 1 in the draft leaves string "1"', async () => {
+    await seed({
       staff: [{ id: 1, history: [] }],
       // Numeric 1 is a live item; string "1" is a distinct unknown/nested member.
       staffGroups: [{ id: "Nums", members: [1, "1"] }],
@@ -211,11 +211,11 @@ describe.each([
     fireEvent.click(screen.getByRole("button", { name: "Remove 1 from group" }));
     fireEvent.click(screen.getByTestId("group-save-Nums"));
 
-    expect(membersOf("Nums")).toEqual(["1"]);
+    expect(await membersOf("Nums")).toEqual(["1"]);
   });
 
-  it("reorders groups by keyboard (Up/Down) — one commit / one undo entry", () => {
-    seed({
+  it("reorders groups by keyboard (Up/Down) — one commit / one undo entry", async () => {
+    await seed({
       staff: [],
       staffGroups: [
         { id: "A", members: [] },
@@ -229,22 +229,22 @@ describe.each([
     expect(screen.getByTestId("group-move-up-A")).toBeDisabled();
     expect(screen.getByTestId("group-move-down-C")).toBeDisabled();
 
-    const before = historyLength();
+    const before = await historyLength();
     fireEvent.click(screen.getByTestId("group-move-down-A"));
 
-    expect(groupOrder()).toEqual(["B", "A", "C"]);
-    expect(historyLength()).toBe(before + 1);
+    expect(await groupOrder()).toEqual(["B", "A", "C"]);
+    expect(await historyLength()).toBe(before + 1);
 
-    act(() => {
-      useScenarioStore.temporal.getState().undo();
+    await act(async () => {
+      await scenarioCommands.undo();
     });
-    expect(groupOrder()).toEqual(["A", "B", "C"]);
+    expect(await groupOrder()).toEqual(["A", "B", "C"]);
   });
 });
 
 describe("GroupsSection — drag-over is its own state, not selection", () => {
-  function seedThree() {
-    seed({
+  async function seedThree() {
+    await seed({
       staff: [],
       staffGroups: [
         { id: "A", members: [] },
@@ -253,8 +253,8 @@ describe("GroupsSection — drag-over is its own state, not selection", () => {
     });
   }
 
-  it("marks the row under the pointer as a drop target, never as selected", () => {
-    seedThree();
+  it("marks the row under the pointer as a drop target, never as selected", async () => {
+    await seedThree();
     render(<GroupsHarness />);
     const target = screen.getByTestId("group-row-B");
     expect(target.className).not.toContain("border-dashed");
@@ -281,8 +281,8 @@ describe("GroupsSection — drag-over is its own state, not selection", () => {
     expect(screen.getByTestId("group-row-A").className).toContain("opacity-50");
   });
 
-  it("uses the selected role for the open editor, which the drop state never borrows", () => {
-    seedThree();
+  it("uses the selected role for the open editor, which the drop state never borrows", async () => {
+    await seedThree();
     render(<GroupsHarness />);
     fireEvent.click(screen.getByTestId("group-edit-A"));
     const form = screen.getByTestId("group-edit-form-A");
@@ -290,17 +290,17 @@ describe("GroupsSection — drag-over is its own state, not selection", () => {
     expect(form.className).not.toContain("border-dashed");
   });
 
-  it("still reorders on drop, unchanged", () => {
-    seedThree();
+  it("still reorders on drop, unchanged", async () => {
+    await seedThree();
     render(<GroupsHarness />);
-    const before = historyLength();
+    const before = await historyLength();
 
     fireEvent.dragStart(screen.getByTestId("group-row-A"));
     fireEvent.dragOver(screen.getByTestId("group-row-B"));
     fireEvent.drop(screen.getByTestId("group-row-B"));
 
-    expect(groupOrder()).toEqual(["B", "A"]);
-    expect(historyLength()).toBe(before + 1);
+    expect(await groupOrder()).toEqual(["B", "A"]);
+    expect(await historyLength()).toBe(before + 1);
   });
 });
 
@@ -320,8 +320,8 @@ describe.each([
   ["Staff config (defaults)", undefined],
   ["Shift config", shiftConfig],
 ])("GroupsSection surface hierarchy — %s", (_name, config) => {
-  function seedTwo() {
-    seed({
+  async function seedTwo() {
+    await seed({
       staff: [
         { id: "P1", history: [] },
         { id: "P2", history: [] },
@@ -333,8 +333,8 @@ describe.each([
     });
   }
 
-  it("the section IS the single L1 containing card — not a transparent wrapper", () => {
-    seedTwo();
+  it("the section IS the single L1 containing card — not a transparent wrapper", async () => {
+    await seedTwo();
     render(<GroupsHarness config={config} />);
 
     const section = screen.getByTestId("groups-section");
@@ -349,8 +349,8 @@ describe.each([
     expect(section.className).not.toMatch(/(?:^|\s)p-\d/);
   });
 
-  it("carries a full-bleed header band with a single bottom hairline, and stays square", () => {
-    seedTwo();
+  it("carries a full-bleed header band with a single bottom hairline, and stays square", async () => {
+    await seedTwo();
     render(<GroupsHarness config={config} />);
 
     const header = screen.getByTestId("groups-header");
@@ -367,8 +367,8 @@ describe.each([
     expect(within(header).getByTestId("add-group-toggle")).toBeInTheDocument();
   });
 
-  it("nests every group row as a WELL inside that card, never as a second L1 card", () => {
-    seedTwo();
+  it("nests every group row as a WELL inside that card, never as a second L1 card", async () => {
+    await seedTwo();
     render(<GroupsHarness config={config} />);
 
     for (const id of ["Team", "Squad"]) {
@@ -399,8 +399,8 @@ describe.each([
     expect(auto.getAttribute("data-emphasis")).toBe("hairline");
   });
 
-  it("gives BOTH the add and the edit form the active-editor `selected` role", () => {
-    seedTwo();
+  it("gives BOTH the add and the edit form the active-editor `selected` role", async () => {
+    await seedTwo();
     render(<GroupsHarness config={config} />);
 
     fireEvent.click(screen.getByTestId("add-group-toggle"));
@@ -423,8 +423,8 @@ describe.each([
     expect(edit.className).toBe(add.className);
   });
 
-  it("shows the empty state beside the auto group whenever no CUSTOM group exists", () => {
-    seed({ staff: [{ id: "P1", history: [] }], staffGroups: [] });
+  it("shows the empty state beside the auto group whenever no CUSTOM group exists", async () => {
+    await seed({ staff: [{ id: "P1", history: [] }], staffGroups: [] });
     render(<GroupsHarness config={config} />);
 
     // Both live routes always publish a synthetic group, so gating the empty
@@ -438,14 +438,14 @@ describe.each([
     expect(empty.className).toContain("rounded-control");
 
     // ...and it goes away as soon as one exists.
-    act(() => {
-      useScenarioStore.getState().mutateScenario({ staffGroups: [{ id: "Team", members: [] }] });
+    await act(async () => {
+      await scenarioCommands.mutate({ staffGroups: [{ id: "Team", members: [] }] });
     });
     expect(screen.queryByTestId("groups-empty")).not.toBeInTheDocument();
   });
 
-  it("renders the canonical four-part empty hierarchy, not one flattened sentence", () => {
-    seed({ staff: [{ id: "P1", history: [] }], staffGroups: [] });
+  it("renders the canonical four-part empty hierarchy, not one flattened sentence", async () => {
+    await seed({ staff: [{ id: "P1", history: [] }], staffGroups: [] });
     render(
       <GroupsHarness
         config={{
@@ -470,8 +470,8 @@ describe.each([
     expect(cta).toHaveAccessibleName(/New group/);
   });
 
-  it("drives the empty-state CTA through the EXISTING add-group toggle", () => {
-    seed({ staff: [{ id: "P1", history: [] }], staffGroups: [] });
+  it("drives the empty-state CTA through the EXISTING add-group toggle", async () => {
+    await seed({ staff: [{ id: "P1", history: [] }], staffGroups: [] });
     render(<GroupsHarness config={config} />);
 
     expect(screen.queryByTestId("add-group-form")).not.toBeInTheDocument();
@@ -485,13 +485,13 @@ describe.each([
     // And it still saves through the one existing path.
     fireEvent.change(screen.getByTestId("add-group-id"), { target: { value: "Nurses" } });
     fireEvent.click(screen.getByTestId("group-save-__new__"));
-    expect(groupOrder()).toContain("Nurses");
+    expect(await groupOrder()).toContain("Nurses");
     // The prompt is gone now that a custom group exists.
     expect(screen.queryByTestId("groups-empty")).not.toBeInTheDocument();
   });
 
-  it("honours each screen's authored order relative to the reserved ALL row", () => {
-    seed({ staff: [{ id: "P1", history: [] }], staffGroups: [] });
+  it("honours each screen's authored order relative to the reserved ALL row", async () => {
+    await seed({ staff: [{ id: "P1", history: [] }], staffGroups: [] });
 
     // Staff authors the prompt BEFORE ALL (ScreenStaff.dc.html:126).
     const before = render(<GroupsHarness config={{ ...config, emptyPlacement: "before-auto" }} />);
@@ -513,8 +513,8 @@ describe.each([
 });
 
 describe("GroupsSection parameterization — copy + flags", () => {
-  it("Staff config shows the member search, MEMBERS pane, and 'N members' count", () => {
-    seed({
+  it("Staff config shows the member search, MEMBERS pane, and 'N members' count", async () => {
+    await seed({
       staff: [
         { id: "Aisha", history: [] },
         { id: "Chloe", history: [] },
@@ -534,8 +534,8 @@ describe("GroupsSection parameterization — copy + flags", () => {
     expect(screen.getByText("MEMBERS")).toBeInTheDocument();
   });
 
-  it("Shift config hides the member search, uses IN GROUP pane, and 'N TYPES' count", () => {
-    seed({
+  it("Shift config hides the member search, uses IN GROUP pane, and 'N TYPES' count", async () => {
+    await seed({
       staff: [
         { id: "Aisha", history: [] },
         { id: "Chloe", history: [] },
@@ -551,8 +551,8 @@ describe("GroupsSection parameterization — copy + flags", () => {
     expect(screen.getByText("IN GROUP")).toBeInTheDocument();
   });
 
-  it("renders the optional header description inside the band, and omits it by default", () => {
-    seed({ staff: [], staffGroups: [] });
+  it("renders the optional header description inside the band, and omits it by default", async () => {
+    await seed({ staff: [], staffGroups: [] });
     const { unmount } = render(<GroupsHarness />);
     // Default: a single-line band, exactly as before this prop existed.
     expect(within(screen.getByTestId("groups-header")).queryByText(/Bundle nurses/)).toBeNull();
@@ -564,8 +564,8 @@ describe("GroupsSection parameterization — copy + flags", () => {
     ).toBeInTheDocument();
   });
 
-  it("renders the reserved auto-group locked with an accessible note", () => {
-    seed({ staff: [], staffGroups: [] });
+  it("renders the reserved auto-group locked with an accessible note", async () => {
+    await seed({ staff: [], staffGroups: [] });
     render(<GroupsHarness />);
 
     const auto = screen.getByTestId("synthetic-ALL");

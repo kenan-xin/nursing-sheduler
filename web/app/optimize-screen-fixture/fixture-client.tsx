@@ -37,6 +37,7 @@ function serverInfo(over: Partial<OptimizeServerInfo>): OptimizeServerInfo {
     backendVersion: "1.0.0",
     clientVersion: "1.0.0",
     versionTier: "identical",
+    semanticProfile: null,
     unavailableReason: null,
     recheck: noop,
     ...over,

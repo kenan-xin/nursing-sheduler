@@ -1,100 +1,44 @@
-// The browser-default concrete persistence adapter (T04) and the roster storage
-// schema (F1). This is the only module that declares the IndexedDB database, so
-// it is strictly client-only — every construction path is lazy and never runs
-// during SSR (the durable store uses `skipHydration` and hydrates from a client
-// effect; the roster repositories are reached through `getRosterDb()`).
+// The ROSTER STORAGE ACCESSOR (F1), over the one declared browser database.
 //
-// Schema history:
-//   v1 — `keyval`: the zustand `StateStorage` string facade for the scenario.
-//   v2 — adds the blob-capable roster stores. `keyval` is carried over verbatim
-//        (Dexie keeps prior stores unless a later version sets them to `null`),
-//        so an upgrade from a POPULATED v1 database preserves every scenario row.
+// This module used to declare its own Dexie class -- `ScenarioPersistenceDb`, with
+// its own version ladder -- against the database name `nurse-scheduler`. So did
+// `lib/repository/schema.ts`. Both claimed VERSION 2, with different store sets, so
+// whichever opened second hit IndexedDB's `VersionError` and its whole feature died.
+// A browser that had reached the repository ladder's version 5 could not open roster
+// storage at all.
+//
+// The declaration now lives in exactly one place. `NurseSchedulerDb` owns the name
+// and one monotonic ladder that is the union of both sides, and this module is
+// reduced to what F1 actually needs from it: a lazily constructed, per-name handle,
+// the client-only guard, and the row DTOs. Roster storage code imports the same
+// names from the same specifier and is otherwise untouched.
+//
+// `createDexieStorage` is deliberately GONE rather than re-exported. It fed the
+// zustand `persist` seam, and the T03 cutover removed that seam: durable scenario
+// writes go through the repository transaction and are PUBLISHED into a read-only
+// projection afterwards. Re-exporting a `StateStorage` factory here would advertise
+// a persistence path the app no longer has, and `.oxlintrc.json` closes the `persist`
+// import that was its only consumer.
 
-import { Dexie, type Table } from "dexie";
-import type { StateStorage } from "zustand/middleware";
+import { NurseSchedulerDb, NURSE_SCHEDULER_DB_NAME } from "@/lib/repository";
 
-/** One key/value row — the persisted scenario payload lives under a single key. */
-interface KeyValueRow {
-  key: string;
-  value: string;
-}
+// Re-exported at their original specifier so roster storage still names them here.
+// They are DEFINED in the repository's DTO module because the class this file hands
+// out is declared there: defining them here as well would make the import cycle real
+// rather than type-only.
+export type { MetaRow, RosterRow, SnapshotRow } from "@/lib/repository";
 
 /**
- * A stored roster document. F1 owns durability, not shape: the payload is an
- * opaque structured-cloneable value (it may embed a `Blob` such as `frozenXlsx`)
- * whose schema and validation belong to F3. `TDocument` defaults to `unknown` so
- * a caller that has a validated type can read it back typed without F1 inventing
- * one.
+ * The persistence database, under the name F1 knows it by.
+ *
+ * An ALIAS, not a second class. Anything that constructs it gets the single declared
+ * ladder, which is the entire point: two classes over one database name is the defect
+ * this replaced.
  */
-export interface RosterRow<TDocument = unknown> {
-  /** `working` or `candidate:<jobId>`. */
-  key: string;
-  document: TDocument;
-  /**
-   * The row's version token. Its allocation differs by row kind:
-   *
-   *   • `working` — a per-key compare-and-swap revision (1, 2, 3 …).
-   *   • `candidate:<jobId>` — the `candidateVersion`, drawn from an ORIGIN-WIDE
-   *     counter that is never reset and never reused. Deleting and recreating a
-   *     candidate for the same job therefore cannot resurrect a previous version
-   *     number, which is what makes it safe as a delete/promote authority (a
-   *     per-key counter would restart at 1 and admit ABA).
-   */
-  revision: number;
-  /** The clear epoch this row was written under (see `roster-storage.ts`). */
-  clearEpoch: number;
-  /**
-   * On the `working` row only: the EXACT candidate this roster was promoted from,
-   * or absent when it came from an import or any other non-candidate source.
-   *
-   * Storage metadata, deliberately NOT part of the roster document: it is about
-   * where this browser's row came from, so it has no place in the shareable roster
-   * file or in the solved-baseline hash. It needs no Dexie index (nothing queries
-   * by it) and no schema version bump — an optional field on an out-of-line-keyed
-   * store, so rows written before it existed read back with it simply absent.
-   */
-  candidateSource?: { jobId: string; candidateVersion: number };
-}
+export { NurseSchedulerDb as ScenarioPersistenceDb } from "@/lib/repository";
 
-/** An immutable submission snapshot row, keyed and authorized by `ownerId`. */
-export interface SnapshotRow<TPayload = unknown> {
-  /** `snapshot:<ownerId>`. */
-  key: string;
-  ownerId: string;
-  submissionOrdinal: number;
-  payload: TPayload;
-}
-
-/** One typed metadata row (origin-wide counters and pointers). */
-export interface MetaRow<TValue = unknown> {
-  key: string;
-  value: TValue;
-}
-
-/** The IndexedDB database backing durable persistence. */
-export class ScenarioPersistenceDb extends Dexie {
-  keyval!: Table<KeyValueRow, string>;
-  roster!: Table<RosterRow, string>;
-  snapshot!: Table<SnapshotRow, string>;
-  meta!: Table<MetaRow, string>;
-
-  constructor(databaseName: string) {
-    super(databaseName);
-    this.version(1).stores({ keyval: "key" });
-    // Only the NEW stores are declared: Dexie carries `keyval` forward untouched,
-    // so upgrading a populated v1 database never rewrites or drops its rows.
-    // Out-of-line primary key only — the documents are opaque to Dexie and
-    // nothing indexes into them.
-    this.version(2).stores({ roster: "key", snapshot: "key", meta: "key" });
-    this.keyval = this.table("keyval");
-    this.roster = this.table("roster");
-    this.snapshot = this.table("snapshot");
-    this.meta = this.table("meta");
-  }
-}
-
-/** Default IndexedDB database name. */
-export const SCENARIO_DB_NAME = "nurse-scheduler";
+/** Default IndexedDB database name. One name, one declaration. */
+export const SCENARIO_DB_NAME = NURSE_SCHEDULER_DB_NAME;
 
 /**
  * Thrown when a storage entry point is reached where IndexedDB does not exist —
@@ -117,7 +61,7 @@ export function isIndexedDbAvailable(): boolean {
 }
 
 /** Lazily constructed per-database-name handles — one Dexie instance per name. */
-const rosterDbCache = new Map<string, ScenarioPersistenceDb>();
+const rosterDbCache = new Map<string, NurseSchedulerDb>();
 
 /**
  * The lazily constructed roster database handle. Construction is deferred to the
@@ -125,11 +69,11 @@ const rosterDbCache = new Map<string, ScenarioPersistenceDb>();
  * constructing when IndexedDB is absent, so importing the storage modules from a
  * server component can never reach IndexedDB.
  */
-export function getRosterDb(databaseName: string = SCENARIO_DB_NAME): ScenarioPersistenceDb {
+export function getRosterDb(databaseName: string = SCENARIO_DB_NAME): NurseSchedulerDb {
   if (!isIndexedDbAvailable()) throw new IndexedDbUnavailableError();
   const cached = rosterDbCache.get(databaseName);
   if (cached) return cached;
-  const db = new ScenarioPersistenceDb(databaseName);
+  const db = new NurseSchedulerDb(databaseName);
   rosterDbCache.set(databaseName, db);
   return db;
 }
@@ -137,24 +81,4 @@ export function getRosterDb(databaseName: string = SCENARIO_DB_NAME): ScenarioPe
 /** Drop a cached handle (tests open independent "tabs" against one database). */
 export function forgetRosterDb(databaseName: string = SCENARIO_DB_NAME): void {
   rosterDbCache.delete(databaseName);
-}
-
-/**
- * Create the Dexie-backed `StateStorage`. Wrap with `createRevisionGuardedStorage`
- * before handing to `persist`. Each op is a single-row `keyval` read/write.
- */
-export function createDexieStorage(databaseName: string = SCENARIO_DB_NAME): StateStorage {
-  const db = new ScenarioPersistenceDb(databaseName);
-  return {
-    async getItem(key) {
-      const row = await db.keyval.get(key);
-      return row?.value ?? null;
-    },
-    async setItem(key, value) {
-      await db.keyval.put({ key, value });
-    },
-    async removeItem(key) {
-      await db.keyval.delete(key);
-    },
-  };
 }

@@ -41,11 +41,11 @@ async function readScenario(page: import("@playwright/test").Page) {
   return page.evaluate(() => {
     const store = (
       window as unknown as {
-        __nsStore?: { scenario: { getState(): Record<string, unknown> } };
+        __nsStore?: { scenario(): Record<string, unknown> };
       }
     ).__nsStore;
     if (!store) return null;
-    const state = store.scenario.getState();
+    const state = store.scenario();
     return {
       staff: (state.staff as unknown[] | undefined)?.length ?? 0,
       shifts: (state.shifts as unknown[] | undefined)?.length ?? 0,
@@ -152,8 +152,8 @@ for (const row of V2_SURFACE_MATRIX satisfies readonly V2Row[]) {
 test("the smoke covers every manifest row", () => {
   // The loop above is what registers the rows, so this guards the loop itself:
   // a filter accidentally introduced there would shrink the smoke silently.
-  // 18 since G4 added the `/roster` product row (owner R8).
-  expect(V2_SURFACE_MATRIX).toHaveLength(18);
+  // 19: the shared 17 v2 re-skin rows, plus `/roster` (R8, G4) and `/settings` (T04).
+  expect(V2_SURFACE_MATRIX).toHaveLength(19);
 });
 
 // ---------------------------------------------------------------------------

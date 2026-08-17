@@ -1,0 +1,65 @@
+id: production-source-text-read
+language: TypeScript
+severity: error
+message: >-
+  A literal `.ts`/`.tsx` path was handed to a file-reading API. Reading authored TypeScript
+  as TEXT is the pseudo-parser this migration exists to remove: whatever is done with the
+  bytes afterwards, the claim being built is about source provenance, and it belongs to a
+  production API, a type, an Oxlint restriction, a rendered test, or a declarative ast-grep
+  rule instead.
+note: >-
+  Custom-AST ticket 6, and the one rule here that no Oxlint restriction can express: the
+  subject is an argument, not a specifier. It is also the rule that applies to the AUDITED
+  READERS themselves -- ledger rule 2 says a file that opens a production `.ts`/`.tsx` for its
+  contents receives no filesystem exception, and this is where that sentence becomes a gate
+  rather than a paragraph.
+  .
+  WHAT IT MATCHES. A read call whose argument text CONTAINS a `.ts`/`.tsx` string literal, so
+  `readFileSync(join(ROOT, "app", "layout.tsx"), "utf8")` is caught even though the argument
+  is a `join(...)` call rather than a bare literal. A path assembled entirely from variables
+  is NOT caught, and that limit is the honest one: the boundary is declared literals, not
+  constructed paths.
+  .
+  WHAT IT DELIBERATELY DOES NOT MATCH. `readdirSync`/`statSync`/`existsSync`: a directory
+  LISTING and a path-existence check infer nothing about TypeScript program structure, and
+  ticket 3 established that distinction for reader rows 3 and 13, which keep exactly those
+  and nothing more. `.css`, `.json`, `.yml`, `.xlsx`, `.sh`, `.html` and generated artefacts
+  are all legitimate and are not TypeScript.
+  .
+  IT DOES NOT MATCH "AND THEN RAN A REGEX OVER IT". Following the bytes to a `.match()` would
+  be dataflow, which is the semantic engine this substrate is forbidden to become. So the
+  rule is stricter and simpler than the family it replaces: the literal read is the
+  violation, regardless of what happens next.
+  .
+  THERE IS NO `ignores` LIST, AND THAT IS THE POINT. The first version of this rule carried
+  one entry -- `components/ai/assistant-styles.test.ts`, which read `app/layout.tsx` to assert
+  the CopilotKit stylesheet import was present -- recorded as a declared deviation from ledger
+  rule 2. The cold review was right that a declared deviation is still an analyzer, and that
+  the guarantee did not need one: a production-build browser proof already owned whether the
+  stylesheet is shipped and ACTIVE (strictly stronger, since the shipped defect was an import
+  that existed and was not processed), and Oxlint owns "nothing else imports it" by closing the
+  specifier everywhere except `app/layout.tsx`. Both landed, the source reads were deleted, and
+  this rule now has NO exception anywhere in the repository. If one is ever proposed again, the
+  question to answer first is which layer the guarantee actually belongs to.
+files:
+  - "**/*.test.*"
+  - "**/*.spec.*"
+  - "**/*.test-d.*"
+  - "e2e/**"
+  - "**/__tests__/**"
+  - "**/support/**"
+  - "**/test-support/**"
+  - "**/test-support.*"
+  - "**/*.test-support.*"
+  - "lib/store/test-authority.ts"
+rule:
+  any:
+    - pattern: $READ($PATH, $$$)
+    - pattern: $READ($PATH)
+constraints:
+  READ:
+    regex: |-
+      ^(readFileSync|readFile|openSync|open|createReadStream|readTextFile)$
+  PATH:
+    regex: |-
+      \.tsx?["']

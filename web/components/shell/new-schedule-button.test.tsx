@@ -3,18 +3,15 @@ import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createEmptyScenarioUiState } from "@/lib/scenario";
-import {
-  drainScenarioPersist,
-  pickScenario,
-  resetToNewScenario,
-  rosterStorage,
-  useHotStore,
-  useScenarioStore,
-} from "@/lib/store";
+// INTEGRATION: `drainScenarioPersist` and the direct `resetToNewScenario` import are
+// gone — the persist seam was retired by T03, and this suite drives the reset through
+// the product's `resetToNewSchedule` and the test authority instead.
+import { pickScenario, rosterStorage, scenarioCommands, useScenarioStore } from "@/lib/store";
 import { NEW_SCHEDULE_FAILED_MESSAGE } from "@/lib/roster";
 import type { RosterDocument } from "@/lib/roster";
 import { fixtureRosterDocument } from "@/lib/roster/test-fixtures";
 import { StartOverCard } from "./new-schedule-button";
+import { resetScenarioForTest, drainScenarioCommands } from "@/lib/store/test-authority";
 
 // Focused contract for the shared reset presenter. F2 is its sole VISUAL owner
 // before F4 — R1 and R7 render it without editing it — so this pins both halves:
@@ -36,16 +33,16 @@ function classesOf(element: Element | null): string {
 
 beforeEach(async () => {
   vi.clearAllMocks();
-  await resetToNewScenario(useScenarioStore, useHotStore);
-  await drainScenarioPersist(useScenarioStore);
+  await resetScenarioForTest();
+  await drainScenarioCommands();
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
 });
 
-function seedDirtyScenario() {
-  useScenarioStore.getState().mutateScenario({
+async function seedDirtyScenario() {
+  await scenarioCommands.mutate({
     rangeStart: "2026-03-01",
     rangeEnd: "2026-03-31",
     staff: [{ _k: "p1", id: 1, description: "Nurse A" }],
@@ -54,7 +51,7 @@ function seedDirtyScenario() {
 
 describe("StartOverCard — the confirmation gate", () => {
   it("does not touch the scenario until the destructive action is confirmed", async () => {
-    seedDirtyScenario();
+    await seedDirtyScenario();
     render(<StartOverCard />);
 
     fireEvent.click(screen.getByTestId("new-schedule-button"));
@@ -67,7 +64,7 @@ describe("StartOverCard — the confirmation gate", () => {
   });
 
   it("resets every scenario slice on confirm and reports completion", async () => {
-    seedDirtyScenario();
+    await seedDirtyScenario();
     const onResetComplete = vi.fn();
     render(<StartOverCard onResetComplete={onResetComplete} />);
 
@@ -79,7 +76,7 @@ describe("StartOverCard — the confirmation gate", () => {
         pickScenario(createEmptyScenarioUiState()),
       );
     });
-    await waitFor(() => expect(onResetComplete).toHaveBeenCalledOnce());
+    await waitFor(async () => expect(onResetComplete).toHaveBeenCalledOnce());
 
     const { toast } = await import("sonner");
     expect(toast.success).toHaveBeenCalledWith("New schedule created");
@@ -100,7 +97,10 @@ describe("StartOverCard — the confirmation gate", () => {
     expect(commit.status).toBe("committed");
     expect(await rosterStorage.readWorking<RosterDocument>()).not.toBeNull();
 
-    seedDirtyScenario();
+    // AWAITED. Pre-T03 this seed was a synchronous `mutateScenario`; it is a durable
+    // repository command now, so leaving the promise floating both races the assertion
+    // below and lets the commit land inside a LATER test.
+    await seedDirtyScenario();
     render(<StartOverCard />);
     fireEvent.click(screen.getByTestId("new-schedule-button"));
     fireEvent.click(await screen.findByTestId("confirm-dialog-confirm"));
@@ -113,7 +113,9 @@ describe("StartOverCard — the confirmation gate", () => {
   });
 
   it("never claims New schedule created when the stored-data cut is unverified", async () => {
-    seedDirtyScenario();
+    // AWAITED — see the note above; the `staff` assertion at the end reads the
+    // projection this command publishes.
+    await seedDirtyScenario();
     const onResetComplete = vi.fn();
     render(
       <StartOverCard
@@ -139,6 +141,43 @@ describe("StartOverCard — the confirmation gate", () => {
     expect(screen.getByTestId("new-schedule-button")).toBeInTheDocument();
   });
 
+  it("tells the user about the OTHER TAB when the scenario reset is refused", async () => {
+    // INTEGRATION (T03). The scenario half is a repository command over a leased
+    // authority now, so the commonest real refusal is `not-owner`: another tab holds
+    // the lease. That is the one refusal the user can actually act on, so it must not
+    // be flattened into the generic "some data may still be stored" message, which
+    // names a cause that did not happen and offers a retry that cannot succeed.
+    //
+    // The generic arm above is what makes this non-vacuous: both are failures, and the
+    // card tells them apart by `scenarioReason` rather than by status alone.
+    await seedDirtyScenario();
+    const onResetComplete = vi.fn();
+    render(
+      <StartOverCard
+        onResetComplete={onResetComplete}
+        resetNewSchedule={async () => ({
+          status: "failed",
+          failure: "scenario",
+          storedData: null,
+          scenarioReason: "not-owner",
+        })}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("new-schedule-button"));
+    fireEvent.click(await screen.findByTestId("confirm-dialog-confirm"));
+
+    const { toast } = await import("sonner");
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "This schedule is being edited in another tab. Take over editing, then start over.",
+      ),
+    );
+    expect(toast.error).not.toHaveBeenCalledWith(NEW_SCHEDULE_FAILED_MESSAGE);
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(onResetComplete).not.toHaveBeenCalled();
+  });
+
   it("names the consequences in the confirmation rather than only the verb", async () => {
     render(<StartOverCard />);
     fireEvent.click(screen.getByTestId("new-schedule-button"));
@@ -151,8 +190,8 @@ describe("StartOverCard — the confirmation gate", () => {
   });
 });
 
-describe("StartOverCard — v2 surface reading", () => {
-  it("is an ordinary L1 card, with the destructive signal on the ACTION", () => {
+describe("StartOverCard — v2 surface reading", async () => {
+  it("is an ordinary L1 card, with the destructive signal on the ACTION", async () => {
     render(<StartOverCard />);
     const card = classesOf(screen.getByTestId("start-over-card"));
     expect(card).toContain("bg-surface");
@@ -163,7 +202,7 @@ describe("StartOverCard — v2 surface reading", () => {
     expect(card).not.toContain("border-error");
   });
 
-  it("uses the shared destructive-outline Button, with no local colour override", () => {
+  it("uses the shared destructive-outline Button, with no local colour override", async () => {
     render(<StartOverCard />);
     const button = screen.getByTestId("new-schedule-button");
     expect(button).toHaveAttribute("data-slot", "button");

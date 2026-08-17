@@ -1,5 +1,3 @@
-import { existsSync } from "node:fs";
-import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   activeSelector,
@@ -18,9 +16,6 @@ import {
   V2OwnerSelectionError,
 } from "./v2-owner-selection";
 import { V2_OWNERS, V2_STYLE_OWNER_FILES, V2_SURFACE_MATRIX } from "./v2-surface-matrix";
-
-/** `web/`, for the on-disk premise guards in the owner-exception block below. */
-const WEB_ROOT = resolve(__dirname, "..", "..");
 
 // Selection is the mechanism that lets nine tickets share one immutable manifest
 // without a migration ledger. Everything below is about the two ways that could
@@ -98,8 +93,11 @@ describe("selectRows", () => {
     expect(selectRows(owner).map((r) => r.route)).toEqual(routes);
   });
 
-  it("registers all 18 rows for G1", () => {
-    expect(selectRows("all")).toHaveLength(18);
+  // 17 v2 re-skin rows, plus `/roster` (R8) and `/settings` (T04). See the count
+  // note in `v2-surface-matrix.test.ts`: both sides reached 18 independently, so the
+  // merged manifest is 19.
+  it("registers all 19 rows for G1", () => {
+    expect(selectRows("all")).toHaveLength(19);
     expect(selectRows("all").map((r) => r.route)).toEqual(V2_SURFACE_MATRIX.map((r) => r.route));
   });
 
@@ -271,6 +269,49 @@ const FOUNDATION_ENTITY_EDITOR = [
   "components/entity-editor/transfer-list.test.tsx",
 ];
 
+// ---------------------------------------------------------------------------
+// THE PREMISE GUARD, MOVED OFF THE FILESYSTEM (custom-AST ticket 6, reader row 12).
+//
+// Every ownership assertion below is about a PATH STRING. A path no file sits at would
+// satisfy the glob check and still never be scanned, because `app/v2-style-contract.test.ts`
+// walks the real tree -- so the ownership claims need a premise that the six paths named in
+// this block are real. Ticket 6's row 12 is `Migrate; no exception`, so that premise cannot
+// be seven `existsSync` calls any more.
+//
+// It is now the COMPILER's answer to the same question, and a better one. `existsSync` says
+// "something is at this path" -- true of an empty file, a stub, or a directory. A type-level
+// `typeof import(...)` says "this specifier resolves to a module", and naming an EXPORT off
+// it says "and that module still publishes the component this ownership row is about". Both
+// are checked by the ordinary `pnpm typecheck` gate.
+//
+// These are `import type` positions, so they are erased: nothing is loaded at runtime, which
+// matters twice over. The three presenters are React `.tsx` modules and this is a
+// node-environment `.ts` suite, and the three `*.test.tsx` paths are TEST files -- importing
+// either for real would drag jsdom-dependent modules into this suite or register another
+// file's tests inside it.
+// ---------------------------------------------------------------------------
+
+/** The presenter this file's exception is about, and the two that stay foundation's. */
+export type EntityEditorPresentersExist = [
+  typeof import("@/components/entity-editor/working-time-fields").WorkingTimeFields,
+  typeof import("@/components/entity-editor/groups-section").GroupsSection,
+  typeof import("@/components/entity-editor/transfer-list").TransferList,
+];
+
+/** Their focused tests, which the owner map assigns alongside each presenter. */
+export type EntityEditorFocusedTestsExist = [
+  typeof import("@/components/entity-editor/working-time-fields.test"),
+  typeof import("@/components/entity-editor/groups-section.test"),
+  typeof import("@/components/entity-editor/transfer-list.test"),
+];
+
+// Non-vacuity for the six above: the same construct against a path nothing sits at must
+// FAIL, or a change that made every specifier resolve would make this block prove nothing.
+// `@ts-expect-error` is a live claim -- if this ever starts resolving, TS2578 fails the
+// build rather than the line quietly passing.
+// @ts-expect-error TS2307 -- there is deliberately no such module.
+export type AbsentPathControl = typeof import("@/components/entity-editor/working-time-absent");
+
 describe("the working-time-fields owner exception", () => {
   it("assigns the presenter and its focused test to R2c, and nobody else", () => {
     expect(ownerForPath(WORKING_TIME_PRESENTER)).toBe("R2c");
@@ -294,10 +335,9 @@ describe("the working-time-fields owner exception", () => {
     const r2c = selectStyleOwnerPatterns("R2c", STYLE_OWNER_ENV);
     expect(matchesAnyGlob(WORKING_TIME_PRESENTER, r2c)).toBe(true);
 
-    // Guard the premise: a path that does not exist would satisfy the glob check
-    // and still never be scanned, because the scanner walks the real tree.
-    expect(existsSync(join(WEB_ROOT, WORKING_TIME_PRESENTER)), WORKING_TIME_PRESENTER).toBe(true);
-    expect(existsSync(join(WEB_ROOT, WORKING_TIME_TEST)), WORKING_TIME_TEST).toBe(true);
+    // The premise -- that both paths are real modules and not just strings that match a
+    // glob -- is `EntityEditorPresentersExist` / `EntityEditorFocusedTestsExist` above,
+    // proved by `pnpm typecheck` rather than by an `existsSync` here.
   });
 
   it("is claimed exactly once across every owner", () => {
@@ -313,9 +353,8 @@ describe("the working-time-fields owner exception", () => {
     // The carve-out must be a carve-out, not a handover of the directory.
     for (const path of FOUNDATION_ENTITY_EDITOR) {
       expect(ownerForPath(path), path).toBe("foundation");
-      expect(existsSync(join(WEB_ROOT, path)), `${path} must exist for this to mean anything`).toBe(
-        true,
-      );
+      // "must exist for this to mean anything" is `EntityEditorPresentersExist` /
+      // `EntityEditorFocusedTestsExist` above, which name all four of these paths.
       const claimants = V2_OWNERS.filter((owner) =>
         matchesAnyGlob(path, [...V2_STYLE_OWNER_FILES[owner]]),
       );
@@ -336,9 +375,13 @@ describe("the working-time-fields owner exception", () => {
 
   it("changes no route row — this is a STATIC-ownership fix only", () => {
     // The manifest's browser half is frozen for the epic. A style-owner edit that
-    // also moved a row would change what each ticket's matrices verify. The
-    // G4 closure added R8 + the /roster row, so the count is now 18, not 17.
-    expect(V2_SURFACE_MATRIX).toHaveLength(18);
+    // also moved a row would change what each ticket's matrices verify.
+    //
+    // Two rows were APPENDED, never moved: the G4 closure added R8 + `/roster`, and
+    // T04 added `/settings`. Every pre-existing row and every pre-existing owner's
+    // selection is byte-identical, which is what the two assertions below still pin.
+    // 17 -> 19 across the integration.
+    expect(V2_SURFACE_MATRIX).toHaveLength(19);
     expect(selectRows("R2c").map((r) => r.route)).toEqual(["/shift-types"]);
     expect(selectRows("foundation").map((r) => r.route)).toEqual(["/design-system"]);
   });

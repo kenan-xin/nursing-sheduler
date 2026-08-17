@@ -1,0 +1,46 @@
+id: production-source-text-read
+valid:
+  # Every legitimate retained reader class: CSS, JSON, YAML, shell, XLSX, generated
+  # artefacts, build output. None of these is TypeScript and none of them is affected.
+  - |
+    const css = readFileSync(join(ROOT, "app/globals.css"), "utf8");
+  - |
+    const config = JSON.parse(readFileSync(".oxlintrc.json", "utf8"));
+  - |
+    const compose = readFileSync(join(ROOT, "docker-compose.yml"), "utf8");
+  - |
+    const script = readFileSync(join(ROOT, "docker/verify-deploy.sh"), "utf8");
+  - |
+    const bytes = readFileSync(join(FIXTURES, "roster.xlsx"));
+  # A directory LISTING and a path-existence check are not source reads -- reader rows 3 and
+  # 13 keep exactly these, and ticket 3 recorded why.
+  - |
+    const entries = readdirSync(join(ROOT, "components"));
+  - |
+    const present = existsSync(join(ROOT, "app/(app)/dates/page.tsx"));
+  # A path assembled entirely from variables is outside the declared-literal boundary. This
+  # fixture records the LIMIT rather than pretending it is covered.
+  - |
+    const text = readFileSync(sourcePath, "utf8");
+  # `.tsv` is not `.ts`: the literal must end at the extension.
+  - |
+    const table = readFileSync(join(ROOT, "fixtures/rows.tsv"), "utf8");
+invalid:
+  # The retired family, in the two spellings it actually used.
+  - |
+    const text = readFileSync(join(ROOT, "components/ui/surface.tsx"), "utf8");
+  - |
+    const text = readFileSync("lib/store/authority.ts", "utf8");
+  # A literal read followed by regex/string structural inference -- the exact pseudo-parser
+  # shape the ticket names. The rule fires on the READ; the `.match()` is what the read was
+  # for, and is deliberately not part of the pattern.
+  - |
+    const source = readFileSync(join(ROOT, "app/layout.tsx"), "utf8");
+    const owners = source.match(/className="([^"]+)"/g);
+  # The promise API and the stream/handle routes to the same bytes.
+  - |
+    const text = await readFile(join(ROOT, "components/shell/top-bar.tsx"), "utf8");
+  - |
+    const handle = openSync(join(ROOT, "lib/store/spine.ts"));
+  - |
+    const stream = createReadStream("components/theme/theme-toggle.tsx");

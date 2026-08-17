@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createServer, type Server } from "node:http";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -22,7 +22,6 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const repoRoot = join(__dirname, "..");
 const devScript = join(repoRoot, "scripts", "dev.sh");
-const source = readFileSync(devScript, "utf8");
 
 interface Plan {
   backend_source: string;
@@ -92,19 +91,15 @@ describe("dev.sh backend selection — this repo is the implicit default", () =>
     expect(plan({ BACKEND_REPO: "" }).backend_source).toBe("repo-core");
   });
 
-  it("has no sibling-checkout fallback left in the script's own defaulting", () => {
-    // Static backstop for the exact shape of the old bug: a NON-EMPTY
-    // `${BACKEND_REPO:-…}` default. `${BACKEND_REPO:-}` itself is required — it
-    // is the `set -u` guard for reading a possibly-unset variable. The plan
-    // tests above prove behaviour; this pins the pattern so it cannot return
-    // under another variable name.
-    expect(source).not.toMatch(/BACKEND_REPO:-[^}]/);
-    // The sibling path may only survive in prose, never in executable code.
-    const executable = source
-      .split("\n")
-      .filter((line) => line.trim() !== "" && !line.trim().startsWith("#"));
-    expect(executable.join("\n")).not.toContain("../../nurse-scheduling");
-  });
+  // THE SOURCE-PATTERN BACKSTOP IS GONE. It read `scripts/dev.sh` as text and
+  // regex-matched it for `${BACKEND_REPO:-…}` and a literal sibling path — a
+  // repository-owned pseudo-parser over an implementation's spelling. What it claimed
+  // is already owned, more strongly, by BEHAVIOUR: the `--plan` cases above prove the
+  // resolved `backend_source` is `repo-core` for unset, blank and explicit selections,
+  // and the live-launch cases below prove the script really starts THIS repository's
+  // backend and refuses to adopt one it did not select. A sibling default reintroduced
+  // under any variable name changes `backend_source`, so it fails there — by outcome,
+  // not by spelling.
 
   it("honours BACKEND_API_URL and keeps the frontend pointed at web/", () => {
     const resolved = plan({ BACKEND_API_URL: "http://127.0.0.1:9123" });
