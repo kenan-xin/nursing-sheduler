@@ -29,6 +29,8 @@
 // two messages accepted in the same millisecond would have no defined order, and
 // the transport replays a thread positionally.
 
+import Dexie from "dexie";
+
 import {
   ASSISTANT_WRITE_TABLES,
   ensureGeneration,
@@ -45,7 +47,12 @@ import {
   type AssistantGenerationPair,
 } from "./fence";
 import type { AssistantSettlement, InterruptionTrigger } from "./lifecycle";
-import { toCanonical, type CanonicalizeContext } from "./messages";
+import {
+  completeToolPairs,
+  toCanonical,
+  toTransportThread,
+  type CanonicalizeContext,
+} from "./messages";
 import type {
   AssistantMessageV1,
   AssistantThreadV1,
@@ -64,6 +71,36 @@ export const UNSETTLED_TURN_STATES: readonly AssistantTurnState[] = [
 
 /** How a fenced write reports itself. `fenced` is a designed outcome, not a failure. */
 export type WriteOutcome = "accepted" | "fenced" | "missing";
+
+export interface PersistConfig extends HistoryRepoConfig {
+  /**
+   * Whether the caller may still write, evaluated at the COMMIT boundary.
+   *
+   * Returning `false` aborts before any row is touched and reports `"fenced"` -- the
+   * same vocabulary a generation mismatch uses, because it is the same kind of
+   * outcome: a write that was correctly refused, not one that failed.
+   */
+  authorizeCommit?: () => boolean;
+  /**
+   * The turn this write belongs to, compared DURABLY inside the transaction.
+   *
+   * Set only by turn-owned writes. A settled or deleted turn row aborts the write, and
+   * because interruption settles that row in its own transaction over the same tables,
+   * IndexedDB's serialisation -- not a hopeful pre-check -- is what orders the two.
+   */
+  requireUnsettledTurn?: string;
+  /**
+   * Test seam: awaited at each named point INSIDE the transaction.
+   *
+   * Here rather than around the call because the window that matters is the one after
+   * a TRUE authority check, which a wrapper outside the repository cannot enter. Unset
+   * in production, and the awaits it would introduce do not exist when it is unset.
+   */
+  barrier?: (point: PersistBarrier) => Promise<void> | void;
+}
+
+/** The points {@link PersistConfig.barrier} can suspend a write at. */
+export type PersistBarrier = "thread-read" | "turn-read" | "history-read" | "put" | "before-return";
 
 export interface HistoryRepoConfig {
   db?: NurseSchedulerDb;
@@ -171,6 +208,14 @@ export async function readThreadMessages(
 }
 
 /**
+ * Thrown to abort a write whose turn lost authority mid-transaction.
+ *
+ * A private sentinel rather than a subclass: it is caught by identity one frame up and
+ * turned into `"fenced"`, and nothing outside this module should be able to forge it.
+ */
+const REVOKED = Symbol("assistant-history-write-revoked");
+
+/**
  * Persist the transport's current view of a thread, subject to the fence.
  *
  * Called after each accepted lifecycle update rather than per streamed chunk: the
@@ -196,46 +241,111 @@ export async function readThreadMessages(
 export async function persistThreadMessages(
   messages: readonly Message[],
   context: CanonicalizeContext,
-  config: HistoryRepoConfig = {},
+  config: PersistConfig = {},
 ): Promise<WriteOutcome> {
   const { db, now } = resolve(config);
   if (messages.length === 0) return "accepted";
 
   const captured = fromGenerationPair(context.scenarioId, context);
-  const result = await runFenced(db, ASSISTANT_WRITE_TABLES, captured, async () => {
-    // The thread itself is rechecked: a thread marked `cleared` is awaiting
-    // deletion, and appending to it would leave orphaned messages behind after the
-    // deletion pass ran.
-    const thread = await db.assistantThreads.get(context.threadId);
-    if (!thread || thread.state === "cleared") return "missing" as const;
+  let result;
+  try {
+    result = await runFenced(db, ASSISTANT_WRITE_TABLES, captured, async () => {
+      // THE LINEARIZATION POINT, and it is this transaction's own commit.
+      //
+      // Authority is asked for again after EVERY await below, and a failed check throws
+      // rather than returning. That distinction is the fix: a `return` at that depth
+      // ends the callback normally, so Dexie commits whatever rows the loop had already
+      // put -- a partial prefix of a revoked turn's answer, which is worse than either
+      // outcome. A throw aborts the transaction, so the write is all or nothing.
+      //
+      // Two sources are compared, and they cover different failures:
+      //
+      //   * `authorizeCommit` is the in-memory gate. It is synchronous and immediate,
+      //     which is what makes it able to see a Stop that has not reached disk yet.
+      //     Optional, because most callers are the interruption controller settling its
+      //     own work -- which must write precisely when authority is gone.
+      //
+      //   * `requireUnsettledTurn` is the DURABLE one, and it is what makes revocation
+      //     transactionally comparable. Interruption settles the turn row in its own
+      //     `rw` transaction over these same tables, and IndexedDB serialises the two:
+      //     either this write commits first and its rows are legitimate pre-settlement
+      //     history, or the settlement commits first and this read sees it and rolls
+      //     the whole write back. There is no interleaving to lose, which is why the
+      //     callback-return-to-commit gap needs no provisional-write scheme -- the
+      //     store's own ordering already decides it. The settlement write runs over
+      //     the SAME table set as this one, so a write already open finishes before
+      //     settlement can begin, and one not yet open starts after the gate closed and
+      //     is refused here. There is no third case.
+      const check = () => {
+        if (config.authorizeCommit && !config.authorizeCommit()) throw REVOKED;
+      };
+      // `Dexie.waitFor` because awaiting a foreign promise inside a transaction would
+      // otherwise let Dexie's zone consider the transaction idle and commit it early --
+      // which would turn the barrier into the very partial-prefix bug it exists to catch.
+      const pause = async (point: PersistBarrier) => {
+        if (config.barrier) {
+          // The keep-alive request `waitFor` issues is itself abortable, and a revocation
+          // that lands while the barrier is held aborts the transaction underneath it.
+          // That rejection is the expected outcome, not a failure to report.
+          await Dexie.waitFor(config.barrier(point)).catch(() => {});
+        }
+        check();
+      };
+      check();
 
-    const at = now();
-    const existing = await readThreadMessages(context.threadId, { db, now });
-    const byId = new Map(existing.map((record) => [record.messageId, record]));
-    let nextSeq = existing.reduce((max, record) => Math.max(max, record.seq), -1) + 1;
+      // The thread itself is rechecked: a thread marked `cleared` is awaiting
+      // deletion, and appending to it would leave orphaned messages behind after the
+      // deletion pass ran.
+      const thread = await db.assistantThreads.get(context.threadId);
+      await pause("thread-read");
+      if (!thread || thread.state === "cleared") return "missing" as const;
 
-    for (const message of messages) {
-      const canonical = toCanonical(message, { ...context, createdAt: at.toISOString() });
-      if (!canonical) continue;
-      const prior = byId.get(canonical.messageId);
-      await db.assistantMessages.put(
-        prior
-          ? {
-              // Slot, timestamp, turn, model and generation pair all belong to the
-              // turn that first wrote this message. See the note above.
-              ...prior,
-              // The three fields a stream grows. Each falls back to the stored value
-              // when the new projection has nothing, so a re-canonicalised older
-              // message can never blank content it already had.
-              content: canonical.content || prior.content,
-              toolCalls: canonical.toolCalls ?? prior.toolCalls,
-              toolCallId: canonical.toolCallId ?? prior.toolCallId,
-            }
-          : { ...canonical, seq: nextSeq++ },
-      );
-    }
-    return "accepted" as const;
-  });
+      if (config.requireUnsettledTurn) {
+        const turn = await db.assistantTurns.get(config.requireUnsettledTurn);
+        await pause("turn-read");
+        // A missing row is a revocation too: Clear deletes the turn this write belongs
+        // to, and recreating history under it is the case the fence exists for.
+        if (!turn || turn.terminalReason !== null) throw REVOKED;
+      }
+
+      const at = now();
+      const existing = await readThreadMessages(context.threadId, { db, now });
+      await pause("history-read");
+      const byId = new Map(existing.map((record) => [record.messageId, record]));
+      let nextSeq = existing.reduce((max, record) => Math.max(max, record.seq), -1) + 1;
+
+      for (const message of messages) {
+        const canonical = toCanonical(message, { ...context, createdAt: at.toISOString() });
+        if (!canonical) continue;
+        const prior = byId.get(canonical.messageId);
+        await db.assistantMessages.put(
+          prior
+            ? {
+                // Slot, timestamp, turn, model and generation pair all belong to the
+                // turn that first wrote this message. See the note above.
+                ...prior,
+                // The three fields a stream grows. Each falls back to the stored value
+                // when the new projection has nothing, so a re-canonicalised older
+                // message can never blank content it already had.
+                content: canonical.content || prior.content,
+                toolCalls: canonical.toolCalls ?? prior.toolCalls,
+                toolCallId: canonical.toolCallId ?? prior.toolCallId,
+              }
+            : { ...canonical, seq: nextSeq++ },
+        );
+        // Per row, not per write: the loop is the only place a partial prefix could
+        // form, so the check that prevents one has to run inside it.
+        await pause("put");
+      }
+      // The last thing before the callback returns. From here Dexie owns the commit,
+      // and the durable comparison above is what covers that remaining step.
+      await pause("before-return");
+      return "accepted" as const;
+    });
+  } catch (error) {
+    if (error === REVOKED) return "fenced";
+    throw error;
+  }
 
   return result.outcome === "fenced" ? "fenced" : result.value;
 }
@@ -326,6 +436,84 @@ export async function setTurnState(
       updatedAt: now().toISOString(),
     });
     return "accepted" as const;
+  });
+
+  return result.outcome === "fenced" ? "fenced" : result.value;
+}
+
+/**
+ * Delete every message on a thread that a normalized history would not contain.
+ *
+ * WHY SKIPPING IS NOT ENOUGH. `persistThreadMessages` upserts what it is given and
+ * never removes what it omits, so a dangling call already on disk -- written by an
+ * older build, a crash, or a malformed import -- survives every sanitized write and is
+ * replayed into every later turn. Filtering publication stops NEW damage; only a
+ * delete repairs the old.
+ *
+ * Fenced and thread-scoped: it runs under the same generation capture as any other
+ * assistant write, and touches only rows whose `threadId` matches. A clear that moved
+ * the generation drops it, and no other thread's or scenario's rows are visible to it.
+ */
+export async function scrubThreadHistory(
+  threadId: string,
+  config: HistoryRepoConfig = {},
+): Promise<{ removed: number } | "fenced" | "missing"> {
+  const { db } = resolve(config);
+  const thread = await db.assistantThreads.get(threadId);
+  if (!thread) return "missing";
+
+  const captured = fromGenerationPair(thread.scenarioId, thread);
+  const result = await runFenced(db, ASSISTANT_WRITE_TABLES, captured, async () => {
+    const rows = await db.assistantMessages.where("threadId").equals(threadId).toArray();
+    const ordered = [...rows].sort((left, right) => left.seq - right.seq);
+    const keep = new Set(
+      completeToolPairs(toTransportThread(ordered)).map((message) => message.id),
+    );
+    const doomed = ordered.filter((row) => !keep.has(row.messageId));
+    if (doomed.length > 0) {
+      await db.assistantMessages.bulkDelete(doomed.map((row) => row.messageId));
+    }
+    return { removed: doomed.length };
+  });
+
+  return result.outcome === "fenced" ? "fenced" : result.value;
+}
+
+/**
+ * Settle a turn ONLY if it is still unsettled at the moment of the write.
+ *
+ * ONE TRANSACTION, and that is the whole point. The obvious shape -- read the row,
+ * see it is unsettled, then write -- has an await between the two halves, and Stop's
+ * own truthful settlement can land in it. The second write would then replace
+ * "detached, stopped by the user" with this function's weaker `revoked`, so the
+ * durable record would disagree with what the user was told.
+ *
+ * Used by a turn whose orphaned promise finally resolved long after an interruption
+ * settled it. If the interruption got there first, this is a no-op and reports so.
+ */
+export async function settleTurnIfUnsettled(
+  turnId: string,
+  settlement: AssistantSettlement,
+  config: HistoryRepoConfig = {},
+): Promise<"settled" | "already-settled" | "missing" | "fenced"> {
+  const { db, now } = resolve(config);
+  const turn = await db.assistantTurns.get(turnId);
+  if (!turn) return "missing";
+
+  const captured = fromGenerationPair(turn.scenarioId, turn);
+  const result = await runFenced(db, ASSISTANT_WRITE_TABLES, captured, async () => {
+    // The compare and the set are both INSIDE the transaction, so no interruption can
+    // interleave between them.
+    const current = await db.assistantTurns.get(turnId);
+    if (!current) return "missing" as const;
+    if (!UNSETTLED_TURN_STATES.includes(current.state)) return "already-settled" as const;
+    await db.assistantTurns.put({
+      ...current,
+      state: "terminal",
+      terminalReason: settlement,
+      updatedAt: now().toISOString(),
+    });
+    return "settled" as const;
   });
 
   return result.outcome === "fenced" ? "fenced" : result.value;

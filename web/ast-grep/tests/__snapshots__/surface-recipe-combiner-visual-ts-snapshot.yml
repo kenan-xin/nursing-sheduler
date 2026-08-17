@@ -1,0 +1,47 @@
+id: surface-recipe-combiner-visual-ts
+snapshots:
+  ? |
+    cn(surfaceVariants({ role: "surface", geometry: "card" }), "bg-panel");
+  : labels:
+      - source: bg-panel
+        style: primary
+        start: 60
+        end: 68
+      - source: 'surfaceVariants({ role: "surface", geometry: "card" })'
+        style: secondary
+        start: 3
+        end: 57
+      - source: 'cn(surfaceVariants({ role: "surface", geometry: "card" }), "bg-panel")'
+        style: secondary
+        start: 0
+        end: 70
+  ? |
+    cn(surfaceVariants({ role: "well" }), "flex rounded-card");
+  : labels:
+      - source: flex rounded-card
+        style: primary
+        start: 39
+        end: 56
+      - source: 'surfaceVariants({ role: "well" })'
+        style: secondary
+        start: 3
+        end: 36
+      - source: 'cn(surfaceVariants({ role: "well" }), "flex rounded-card")'
+        style: secondary
+        start: 0
+        end: 58
+  ? |
+    cn(surfaceVariants({ role: "well" }), "visible");
+  : labels:
+      - source: visible
+        style: primary
+        start: 39
+        end: 46
+      - source: 'surfaceVariants({ role: "well" })'
+        style: secondary
+        start: 3
+        end: 36
+      - source: 'cn(surfaceVariants({ role: "well" }), "visible")'
+        style: secondary
+        start: 0
+        end: 48

@@ -1,14 +1,14 @@
-// LOAD-BEARING: must precede the `@copilotkit/runtime` import (see containment.ts).
 import { RUNTIME_INSTANCE_HEADER } from "./containment";
 
 import type { BaseEvent } from "@ag-ui/client";
+// The contained entry point — see `copilotkit-runtime.ts`.
 import {
   AgentRunner,
   type AgentRunnerConnectRequest,
   type AgentRunnerIsRunningRequest,
   type AgentRunnerRunRequest,
   type AgentRunnerStopRequest,
-} from "@copilotkit/runtime/v2";
+} from "./copilotkit-runtime";
 import { Observable, type Subscriber, type Subscription } from "rxjs";
 
 // Transient AgentRunner (tech-plan "Runtime retention and observability").

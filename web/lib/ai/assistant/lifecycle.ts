@@ -105,6 +105,30 @@ export type AssistantSettlement =
    */
   | "revoked";
 
+/**
+ * Every settlement value, as data.
+ *
+ * The union above is erased at runtime, and a durable Clear fact record has to be able
+ * to REFUSE a settlement it does not recognise -- a parser that trusted whatever
+ * string a row carried would let a future or corrupted build's vocabulary through into
+ * bounded product state. One list, so the type and the guard cannot drift.
+ */
+export const ASSISTANT_SETTLEMENTS = [
+  "completed",
+  "run_failed",
+  "stopped",
+  "cancelled",
+  "detached_timeout",
+  "detached_runtime",
+  "detached_reload",
+  "revoked",
+] as const satisfies readonly AssistantSettlement[];
+
+/** Whether an arbitrary value is one of this build's settlement classes. */
+export function isAssistantSettlement(value: unknown): value is AssistantSettlement {
+  return (ASSISTANT_SETTLEMENTS as readonly unknown[]).includes(value);
+}
+
 /** Whether a settlement class is a detachment rather than a confirmed outcome. */
 export function isDetachedSettlement(settlement: AssistantSettlement): boolean {
   return settlement.startsWith("detached_");
@@ -113,19 +137,6 @@ export function isDetachedSettlement(settlement: AssistantSettlement): boolean {
 /** The clear triggers -- the two that bump a write generation and delete content. */
 export function isClearTrigger(trigger: InterruptionTrigger): boolean {
   return trigger === "clear_history" || trigger === "clear_all";
-}
-
-/**
- * Whether the trigger must leave the stored credential, model preference, and
- * conversation history intact.
- *
- * Only `clear_all` deletes configuration, and only the clear pair deletes history.
- * Disable, Remove key, Replace, takeover, lease loss and scenario switch are all
- * NON-DESTRUCTIVE by contract, which is why this is a function over the trigger
- * rather than a decision each call site makes for itself.
- */
-export function preservesHistory(trigger: InterruptionTrigger): boolean {
-  return !isClearTrigger(trigger);
 }
 
 // ---------------------------------------------------------------------------
@@ -212,7 +223,14 @@ export function describeSettlement(
 export interface AssistantLifecycleEvent {
   seq: number;
   at: string;
-  trigger: InterruptionTrigger;
+  /**
+   * The interruption that caused this, or `null` when nothing did.
+   *
+   * Nullable for the same reason `LastSettlement.trigger` is: a storage or transport
+   * failure ends work without any user action, and attributing it to Stop would
+   * misreport what happened.
+   */
+  trigger: InterruptionTrigger | null;
   phase: InterruptionPhase;
   settlement: AssistantSettlement | null;
   runtime: RuntimeStopOutcome | null;
@@ -229,7 +247,11 @@ export type AssistantErrorClass =
   | "generation_fenced"
   | "runtime_unreachable"
   | "storage_unavailable"
-  | "diagnostic_cancel_failed";
+  | "diagnostic_cancel_failed"
+  /** A queued conversation write was rejected. The class only -- never the error. */
+  | "persist_failed"
+  /** Clear stopped the work but refused to delete; the content is still on disk. */
+  | "clear_incomplete";
 
 /** How many entries the in-memory log retains. Oldest are dropped. */
 export const LIFECYCLE_LOG_LIMIT = 50;
@@ -238,7 +260,7 @@ let log: AssistantLifecycleEvent[] = [];
 let seq = 0;
 
 export interface RecordLifecycleInput {
-  trigger: InterruptionTrigger;
+  trigger: InterruptionTrigger | null;
   phase: InterruptionPhase;
   at: Date;
   settlement?: AssistantSettlement | null;

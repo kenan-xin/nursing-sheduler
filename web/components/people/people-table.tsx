@@ -574,7 +574,8 @@ function ReadRow({
       // recipe role itself: a `<tr>` in the collapsed-border model paints no
       // box-shadow, so the role's `--sh-2` would be a claim the browser never
       // honours, and the recipe cannot share a class list with the hover tone
-      // (`surface-contract.test.ts` holds a consumer's className to layout only).
+      // (the `surface-recipe-combiner-visual` ast-grep rule holds every literal
+      // authored inline with a recipe result to the layout-only vocabulary).
       // This replaces the v1 `shadow-[inset_0_2px_0_...]` arbitrary elevation.
       className={cn(
         "border-t border-line2 transition-colors duration-fast",

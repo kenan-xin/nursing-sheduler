@@ -327,12 +327,21 @@ describe("the panel states what is happening", () => {
       scenarioId: SCENARIO_ID,
     });
 
-    await waitFor(() => {
-      const notice = screen.getByTestId("assistant-interrupting");
-      expect(notice).toHaveAttribute("data-phase", "settling");
-      // Never "cancelled" before a terminal acknowledgement.
-      expect(notice.textContent ?? "").toMatch(/Stopping\. Waiting/);
-    });
+    // Explicit budget rather than the 1s default: `closing` -> `settling` is gated on
+    // a Dexie read of the unsettled turns plus one write per turn, and under the full
+    // parallel suite those transactions can take longer than a second on their own.
+    // The default made this assertion sample a still-`closing` panel reproducibly
+    // while passing in isolation. The PRODUCT budget under test is the 15-second
+    // settlement window asserted below, which is unchanged.
+    await waitFor(
+      () => {
+        const notice = screen.getByTestId("assistant-interrupting");
+        expect(notice).toHaveAttribute("data-phase", "settling");
+        // Never "cancelled" before a terminal acknowledgement.
+        expect(notice.textContent ?? "").toMatch(/Stopping\. Waiting/);
+      },
+      { timeout: 5_000 },
+    );
 
     // The window is armed a step AFTER the settling phase is published, so wait for it
     // rather than assuming the two happen in the same tick.
@@ -498,7 +507,8 @@ describe("Clear all from Settings", () => {
       scenarioId: SCENARIO_ID,
     });
 
-    expect(result.clear?.fence.configurationDeleted).toBe(true);
+    expect(result.status).toBe("deleted");
+    expect(result.scope).toBe("all");
     expect(await harness.db.assistantSettings.count()).toBe(0);
     expect(await harness.db.assistantMessages.count()).toBe(0);
     expect(await harness.db.assistantThreads.count()).toBe(0);

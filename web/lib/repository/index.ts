@@ -6,9 +6,12 @@
 
 export {
   ASSISTANT_WRITE_TABLES,
+  MERGED_LADDER_VERSION,
   NurseSchedulerDb,
   NURSE_SCHEDULER_DB_NAME,
   REPOSITORY_SCHEMA_VERSION,
+  ROSTER_STORAGE_TABLES_VERSION,
+  SCENARIO_WRITE_TABLES,
 } from "./schema";
 
 export { RepositoryError, isRepositoryError, type RepositoryErrorCode } from "./errors";
@@ -70,15 +73,18 @@ export {
   type LeaseOwner,
   type LeaseResult,
   type LegacyMigrationRecord,
+  type MetaRow,
   type OptimizeBasisOwnerKind,
   type OptimizeBasisRecordFields,
   type OptimizeBasisRecordV1,
   type OptimizeBasisRecordV2,
   type ReversibleScenarioPayload,
+  type RosterRow,
   type ScenarioCommitKind,
   type ScenarioCommitV1,
   type ScenarioEnvelopeV3,
   type ScenarioSnapshot,
+  type SnapshotRow,
   type StoredOptimizeBasisRow,
   type TabWorkspaceSelectionV1,
   type WriterLeaseV2,

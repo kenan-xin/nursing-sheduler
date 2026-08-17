@@ -1,0 +1,49 @@
+id: surface-module-acquisition-tsx
+language: Tsx
+severity: error
+message: >-
+  The Surface authority module is acquired dynamically. `@/components/ui/surface` is the
+  single source of the `Surface` component, the `surfaceVariants` recipe and the
+  `SurfaceVariantProps` / `SurfaceEmphasis` / `SurfaceRole` / `SurfaceGeometry` types.
+  Acquiring it through `import(...)` or `require(...)` defeats the static type boundary
+  (`class?: never`, the `(role, emphasis)` discriminated union) and the dev-mode runtime
+  assertion, which is exactly the shape this restriction exists to prevent. Import the
+  authority statically, or move the dynamic behaviour to a separate module that does not
+  carry the surface authority.
+note: >-
+  The `.tsx` twin of `surface-module-acquisition`. ast-grep resolves a rule's language
+  from the file EXTENSION, and `TypeScript` claims `.ts`/`.mts`/`.cts` only. A lazily
+  imported provider or a client component is most likely a `.tsx` file, which is
+  precisely the extension the `TypeScript` language does not claim.
+  Carries the same bounded-review round 1 repairs as its base partner: the callee-name
+  constraint is dropped so a `createRequire(import.meta.url)` result bound to a local name
+  is caught, and a NAMESPACE IMPORT of the authority is refused so `UI["Surface"]` has no
+  namespace to index. See the base rule's note for the full reasoning.
+files:
+  - "app/**"
+  - "components/**"
+  - "lib/**"
+ignores:
+  - "**/*.test.ts"
+  - "**/*.test.tsx"
+  - "**/*.test-d.ts"
+rule:
+  any:
+    - pattern: import($SPEC)
+    - pattern: require($SPEC)
+    # Any call taking the surface specifier -- covers a `createRequire(...)` result bound
+    # to a local name (`req("@/components/ui/surface")`), which the old callee-name
+    # constraint let through.
+    - pattern: $REQ($SPEC)
+    # A namespace import of the authority, so `UI["Surface"]` has no namespace to index.
+    - all:
+        - kind: import_statement
+        - has:
+            stopBy: end
+            kind: namespace_import
+        - has:
+            field: source
+            regex: ^["']@/components/ui/surface["']$
+constraints:
+  SPEC:
+    regex: ^["']@/components/ui/surface["']$

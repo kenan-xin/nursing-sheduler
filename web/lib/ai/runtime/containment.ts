@@ -4,12 +4,15 @@
 // singleton that snapshots `COPILOTKIT_TELEMETRY_DISABLED` at module-evaluation
 // time (node_modules/@copilotkit/runtime/dist/v2/runtime/telemetry/telemetry-client.mjs).
 // So the containment env has to be in place BEFORE that module is first evaluated.
-// This module imports nothing, applies the env as an import-time side effect, and
-// every module in this directory that touches `@copilotkit/runtime` imports it
-// FIRST. `containment.test.ts` pins that ordering at the source level, and the
-// `/info` route reports `telemetryDisabled` back so the wiring is proven, not
-// assumed. `instrumentation.ts` applies the same env at server start so a future
-// import path that skips this module still boots contained.
+// This module imports nothing and applies the env as an import-time side effect.
+//
+// Exactly ONE module depends on that ordering: `copilotkit-runtime.ts`, the single
+// production entry to the runtime package, which imports this module before it
+// re-exports anything. The old arrangement — every runtime module importing this one
+// first, with a source scan checking the order — is gone; there is nothing left to
+// order. The `/info` route reports `telemetryDisabled` back so the wiring is proven,
+// and `instrumentation.ts` applies the same env at server start so a future import
+// path that skips this module still boots contained.
 
 /** Same-origin catch-all mount for the CopilotKit v2 multi-route runtime. */
 export const COPILOT_RUNTIME_BASE_PATH = "/api/copilotkit";

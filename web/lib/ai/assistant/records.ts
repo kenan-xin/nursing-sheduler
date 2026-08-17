@@ -85,6 +85,15 @@ export function isAssistantReady(
  * configuration it read at the top of the gate is no longer the one that exists --
  * without the credential ever leaving the row. Enable/disable, replace, and remove
  * all change it; nothing else writes the row.
+ *
+ * SAME-TAB ORDERING IS WHAT THIS SERVES. A replacement in this tab interrupts first and
+ * completes a probe round trip before it writes, so its `probedAt`/`updatedAt` cannot
+ * coincide with the write it replaces. A credential fingerprint was briefly added here
+ * to distinguish two activations landing in the same millisecond, which only a second
+ * tab can produce -- and the assistant is supported in one tab (see the single-tab
+ * decision). It is out again: it was never exact authority, and carrying a piece of the
+ * credential in a comparison string for a case the product does not support is a worse
+ * trade than the collision it avoided.
  */
 export function configurationIdentity(settings: AssistantSettingsV1): string {
   return `${settings.modelId ?? ""}|${settings.probedAt ?? ""}|${settings.updatedAt}`;

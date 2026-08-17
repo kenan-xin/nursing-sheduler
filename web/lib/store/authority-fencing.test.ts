@@ -6,14 +6,12 @@
 // set a flag instead of fencing later writes, and a duplicated tab shared its
 // opener's identity.
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { createEmptyScenarioUiState } from "@/lib/scenario";
 import { useAuthorityStore } from "./authority";
 import { drainScenarioCommands, scenarioCommands } from "./commands";
-import { stateSpine } from "./spine";
+import { failScenarioPublish, useScenarioStore as scenario } from "./spine";
 import { installTestAuthority, type TestAuthority } from "./test-authority";
-
-const { scenario } = stateSpine;
 
 let harness: TestAuthority;
 
@@ -95,11 +93,9 @@ describe("a publish failure hard-fences every later write", () => {
     );
 
     // Force the publish step to fail on the next commit.
-    const setState = vi.spyOn(scenario, "setState").mockImplementation(() => {
-      throw new Error("projection publish failed");
-    });
+    const restorePublish = failScenarioPublish(new Error("projection publish failed"));
     await scenarioCommands.mutate({ rangeStart: "2026-05-01" });
-    setState.mockRestore();
+    restorePublish();
 
     expect(useAuthorityStore.getState().reloadRequired).toBe(true);
 

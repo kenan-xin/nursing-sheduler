@@ -18,6 +18,30 @@
 // exact code-first job-not-found; any other outcome retains the record (the slot
 // stays occupied and blocks repeat) and offers explicit retry or abandon — without
 // ever resetting the successful terminal view or the Download Again blob.
+//
+// ONE OUTCOME IS EXEMPT FROM THE SERVER DELETE: `infeasible`.
+//
+// An infeasible run produces no artifact, so the chain above used to read it as
+// "nothing to keep" and DELETE it the instant it settled. But that job IS the thing
+// worth keeping: it is the only server-side evidence T10's bounded infeasibility
+// diagnostic can diagnose against. `classifyRecovery` asks the server for the job,
+// got a 404, classified the run `local-only`, and `mayOpenSearch` refused — so the
+// diagnostic could never open a search for ANY run, on any deployment. The basis row
+// in the browser was intact the whole time; the server half had already been deleted
+// by this hook, seconds earlier.
+//
+// So for `infeasible` the chain takes the path `abandonCleanup` already established
+// and the product already supports: free the LOCAL slot (so the next run is not
+// blocked) and leave the server job to the backend's OWN retention. That retention is
+// already bounded and already authoritative — the controller stamps
+// `expires_at = now + retention_seconds` at admission, retention maintenance deletes
+// on `finished_at`, and `classifyRecovery` independently refuses evidence past
+// `server.expiresAt`. Nothing here extends a lifetime, adds a TTL, or stores more:
+// it stops ending one early.
+//
+// Narrow on purpose. `optimal` and `feasible` still download-then-delete, and
+// `inconclusive` still deletes — the diagnostic is defined only over a run the solver
+// PROVED infeasible, so only that outcome buys retention.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchOptimizeXlsx } from "@/lib/query/optimize";
@@ -234,8 +258,35 @@ export function useOptimizeTerminal(deps: UseOptimizeTerminalDeps): OptimizeTerm
     [markCleanupFailed],
   );
 
+  /**
+   * Free the LOCAL slot and deliberately leave the server job in place.
+   *
+   * The same two-step shape as `attemptCleanup` minus the DELETE, and it keeps the
+   * same proof obligation on the local half: an unproven local removal is still
+   * `failed`, because an occupied record that nobody can prove is gone must not read
+   * as success. The cleanup AFFORDANCE lands on `idle` rather than `abandoned` —
+   * there is nothing for the user to retry or abandon — while the run view records
+   * `retained`, which is the fact.
+   */
+  const retainForDiagnosis = useCallback(
+    (jobId: string): CleanupPhase => {
+      const { controller, recovery, observability } = ref.current;
+      const local = recovery.cleanup(jobId);
+      if (local.status !== "removed" && local.status !== "absent") {
+        return markCleanupFailed(jobId);
+      }
+      controller.notifyCleanup("retained");
+      observability?.emit({ kind: "cleanup", jobId, result: "retained" });
+      if (mountedRef.current) setCleanupPhase("idle");
+      return "idle";
+    },
+    [markCleanupFailed],
+  );
+
   // Auto terminal chain: a completed job downloads (when an artifact exists) then
-  // cleans up; a completed job with no artifact cleans up only. Runs once per job.
+  // cleans up; a completed job with no artifact cleans up only -- EXCEPT an
+  // `infeasible` one, whose server record is the diagnostic's only parent evidence
+  // (see the module note). Runs once per job.
   const lifecycle = deps.controller.view.lifecycle;
   const viewJobId = deps.controller.view.jobId;
   const artifactAvailable = deps.controller.view.download.artifactAvailable;
@@ -260,10 +311,17 @@ export function useOptimizeTerminal(deps: UseOptimizeTerminalDeps): OptimizeTerm
         await attemptCleanup(jobId);
       } else {
         ref.current.controller.notifyDownloadUnavailable();
-        await attemptCleanup(jobId);
+        // Read the outcome from the LIVE view rather than a captured value: the
+        // terminal frame that sets `lifecycle: "completed"` and the one carrying the
+        // solver result are not guaranteed to be the same render.
+        if (ref.current.controller.view.result?.outcome === "infeasible") {
+          retainForDiagnosis(jobId);
+        } else {
+          await attemptCleanup(jobId);
+        }
       }
     })();
-  }, [lifecycle, viewJobId, artifactAvailable, runDownload, attemptCleanup]);
+  }, [lifecycle, viewJobId, artifactAvailable, runDownload, attemptCleanup, retainForDiagnosis]);
 
   // A fresh submission resets the cleanup affordance; the Download Again blob is
   // deliberately tab-lifetime and is NOT cleared here.

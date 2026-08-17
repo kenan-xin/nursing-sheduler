@@ -1,0 +1,42 @@
+id: test-capability-acquisition-tsx
+snapshots:
+  ? |
+    const fs = await import("node:fs");
+    const el = <div>{fs}</div>;
+  : labels:
+      - source: import("node:fs")
+        style: primary
+        start: 17
+        end: 34
+  ? |
+    const fs = process.getBuiltinModule("fs");
+    const el = <div />;
+  : labels:
+      - source: process.getBuiltinModule("fs")
+        style: primary
+        start: 11
+        end: 41
+  ? |
+    const fs = require("fs/promises");
+    const el = <div />;
+  : labels:
+      - source: require("fs/promises")
+        style: primary
+        start: 11
+        end: 33
+  ? |
+    const ts = await import("typescript");
+    const el = <div />;
+  : labels:
+      - source: import("typescript")
+        style: primary
+        start: 17
+        end: 37
+  ? |
+    const ts = require("typescript");
+    const el = <div />;
+  : labels:
+      - source: require("typescript")
+        style: primary
+        start: 11
+        end: 32

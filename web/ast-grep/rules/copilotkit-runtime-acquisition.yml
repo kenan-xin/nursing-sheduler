@@ -1,0 +1,54 @@
+id: copilotkit-runtime-acquisition
+language: TypeScript
+severity: error
+message: >-
+  The CopilotKit runtime is reachable only through `lib/ai/runtime/copilotkit-runtime.ts`,
+  which applies the telemetry/analytics containment env before the package's telemetry
+  singleton snapshots it. Acquiring the package any other way boots an uncontained runtime.
+note: >-
+  Migrated from `lib/ai/runtime/containment.test.ts`, where ticket 2 had to RETAIN it.
+  Oxlint `no-restricted-imports` owns every SPECIFIER route and is the primary mechanism.
+  .
+  REVISED BY THE TICKET-6 FIXUP (cold-review P1 and P2), in two ways that pull in opposite
+  directions and both matter.
+  .
+  NARROWED: `import($SPEC)` was removed. A probe on the installed Oxlint 1.74 shows
+  `await import("@copilotkit/runtime/v2")` in a production `.mjs` reported by
+  `no-restricted-imports` directly, so the dynamic form was owned twice.
+  .
+  WIDENED, and this closed a real hole: the old body matched `$REQ($SPEC)` with `$REQ`
+  constrained to `^(require|createRequire)$`, which catches `createRequire("@copilotkit/runtime")`
+  but NOT the two-step shape a loader is actually used in --
+  `const req = createRequire(import.meta.url); req("@copilotkit/runtime/v2")`. The review built
+  exactly that in an MJS script and it passed both tools. Binding the callee name would need
+  alias resolution, which this substrate must not grow, so the rule now matches the SPECIFIER
+  wherever it appears as a call argument: `$F($SPEC)`. That is declarative, needs no symbol
+  table, and is strictly wider than the enumeration it replaces.
+  .
+  The cost is stated rather than hidden: any call whose argument names this package now
+  matches, so a helper that merely PASSES the specifier around is a violation too. In a
+  repository where the package has exactly one legal entry that is the correct reading, and the
+  `ignores` list is that entry plus the suites that drive the locked boundary.
+files:
+  - "app/**"
+  - "components/**"
+  - "lib/**"
+  - "scripts/**"
+ignores:
+  - "lib/ai/runtime/copilotkit-runtime.ts"
+  - "lib/ai/runtime/**/*.test.ts"
+  - "lib/ai/runtime/containment.test.ts"
+rule:
+  any:
+    - pattern: require($SPEC)
+    - pattern: $F($SPEC)
+constraints:
+  SPEC:
+    regex: "@copilotkit/runtime"
+  # `import(...)` parses as a call whose callee is `import`, so an unconstrained `$F` would
+  # silently re-acquire the dynamic form Oxlint owns -- which is exactly the duplication the
+  # fixup removed. Excluded declaratively; the Rust regex engine has no lookahead, so this is a
+  # `not` rule rather than a negative pattern in the regex itself.
+  F:
+    not:
+      regex: ^import$

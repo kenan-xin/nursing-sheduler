@@ -41,6 +41,18 @@ export function setActiveRunHandle(handle: ActiveRunHandle | null): void {
   activeRun = handle;
 }
 
+/**
+ * Clear the handle ONLY if `runId` still owns it.
+ *
+ * Compare-and-clear, because a turn's cleanup can run LATE. A suspended turn A that
+ * resumes after B has published its own handle would, with an unconditional clear,
+ * remove B's Stop target -- leaving a visibly running turn that no interruption can
+ * reach. The owner is the only thing allowed to retract its own publication.
+ */
+export function clearActiveRunHandle(runId: string): void {
+  if (activeRun?.runId === runId) activeRun = null;
+}
+
 export function readActiveRunHandle(): ActiveRunHandle | null {
   return activeRun;
 }

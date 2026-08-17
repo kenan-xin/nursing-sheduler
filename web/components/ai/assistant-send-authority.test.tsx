@@ -96,6 +96,43 @@ vi.mock("@copilotkit/react-core/v2", async (importOriginal) => {
     // Tool registration is T04/T06 behaviour with its own suites; this one is about
     // whether a run starts at all.
     useFrontendTool: () => {},
+    // The session builds its OWN core per turn (see the session's note on the shared
+    // `_runDepth`/`_runAbortController`), reading these public getters for its config.
+    useCopilotKit: () => ({
+      copilotkit: {
+        runtimeUrl: "http://localhost/api/copilotkit",
+        runtimeTransport: "sse",
+        headers: {},
+        credentials: undefined,
+        properties: {},
+        tools: [],
+        debug: undefined,
+      },
+    }),
+    // Stubbed so the per-turn core delegates straight to the fake agent: this suite is
+    // about WHETHER a run starts, and a real core cannot drive a non-AG-UI fake. What
+    // the real core does once it has an agent is proved in `session-real-core.test.tsx`
+    // and `tool-loop.test.ts`.
+    CopilotKitCore: class {
+      // The session preserves runtime tool-disable overrides and attaches its own error
+      // subscriber to the turn core; neither is what this suite is about.
+      isToolEnabled() {
+        return true;
+      }
+      setToolEnabled() {}
+      subscribe() {
+        return { unsubscribe: () => {} };
+      }
+      runAgent({
+        agent,
+        runId,
+      }: {
+        agent: { runAgent(i: { runId: string }): Promise<void> };
+        runId: string;
+      }) {
+        return agent.runAgent({ runId });
+      }
+    },
   };
 });
 
@@ -109,6 +146,7 @@ vi.mock("@/lib/ai/assistant/history-repo", async (importOriginal) => {
     "readThread",
     "readTurn",
     "setTurnState",
+    "scrubThreadHistory",
   ]);
 });
 
@@ -186,8 +224,22 @@ interface RunRecord {
 }
 
 let runs: RunRecord[] = [];
+/** When set, the next run reports a transport failure through the subscriber. */
+let failNextRun = false;
+/** Report that failure under a FOREIGN run id, to prove the latch is run-scoped. */
+let failWithRunId: string | null = null;
 let runAgent: ReturnType<typeof vi.fn>;
 let abortRun: ReturnType<typeof vi.fn>;
+
+/** The two session callbacks this fake delivers: a reply, and a run failure. */
+interface FakeSubscriber {
+  onRunFailed?: (params: { input: { runId: string } }) => void;
+  onTextMessageEndEvent?: (params: {
+    event: { type: string; messageId?: string };
+    textMessageBuffer: string;
+    input: { runId: string };
+  }) => void;
+}
 
 function createFakeAgent() {
   abortRun = vi.fn();
@@ -201,6 +253,26 @@ function createFakeAgent() {
     });
     agent.isRunning = true;
     await Promise.resolve();
+    // A RUN THAT REACHES THE PROVIDER REPLIES, always. The session calls a turn
+    // `completed` only when it produced assistant text, so a fake that stayed silent
+    // would model the live defect rather than an ordinary send -- and every case here
+    // is about WHETHER a run starts, not about what it said.
+    agent.subscriber?.onTextMessageEndEvent?.({
+      event: { type: "TEXT_MESSAGE_END", messageId: `${input.runId}-answer` },
+      // The COMPLETED buffer, as the locked contract hands it over. A boundary alone is
+      // not a reply: the session requires visible content in this exact field.
+      textMessageBuffer: "a real answer",
+      input: { runId: input.runId },
+    });
+    // A failing transport reports through the subscriber and still RESOLVES, which is
+    // the locked core's behaviour. Opt in per test. Delivered with the concrete run
+    // input, because the session filters callbacks on `input.runId` -- a failure it
+    // cannot attribute to its own run is ignored, which is what the foreign-run case
+    // asserts. It comes AFTER the reply so an ignored foreign failure still leaves an
+    // ordinary, productive turn behind.
+    if (failNextRun) {
+      agent.subscriber?.onRunFailed?.({ input: { runId: failWithRunId ?? input.runId } });
+    }
     agent.isRunning = false;
   });
 
@@ -216,6 +288,23 @@ function createFakeAgent() {
     },
     abortRun,
     runAgent,
+    // The session installs the provider-hop guard on the agent and subscribes for the
+    // whole turn. Neither is exercised here (the fake agent has no transport), but
+    // both must exist for the hook to run at all.
+    use: () => agent,
+    // The session runs each turn on a dedicated clone. This suite is about WHETHER a
+    // run starts, so the clone is the same object: every assertion below still observes
+    // the one `runAgent` spy. The isolation the clone buys is proved against real
+    // agents in `tool-loop.test.ts`.
+    clone: () => agent,
+    // The subscriber is CAPTURED, so a test can deliver the public run-failure signal
+    // the way the agent would. `runAgent` resolving without rejecting is the real
+    // contract; the failure arrives here instead.
+    subscribe: (subscriber: FakeSubscriber) => {
+      agent.subscriber = subscriber;
+      return { unsubscribe: () => {} };
+    },
+    subscriber: null as FakeSubscriber | null,
   };
   return agent;
 }
@@ -266,6 +355,8 @@ beforeEach(async () => {
   h.state.arrived = null;
   h.state.agent = createFakeAgent();
   runs = [];
+  failNextRun = false;
+  failWithRunId = null;
   writerContext = BASE_WRITER;
   writerCheckpoint = async () => {};
   installFetch();
@@ -406,6 +497,11 @@ const BOUNDARIES = [
   "readThread",
   "readTurn",
   "setTurnState",
+  // The scrub, and it is in this list because it once was not. It used to run AFTER
+  // the final identity check, so a send suspended in it could resume past a Stop and
+  // take the shared handle, binding and lifecycle from the turn that replaced it. It
+  // is an ordinary preparation await now, and this matrix is what keeps it one.
+  "scrubThreadHistory",
 ] as const;
 
 /**
@@ -458,6 +554,91 @@ async function expectNoLaunch(inFlight: { sent: Promise<void> }): Promise<void> 
 // Tests
 // ---------------------------------------------------------------------------
 
+describe("the final synchronous check, at its own race boundary", () => {
+  // THE WINDOW THIS CHECK EXISTS FOR, and nowhere else is it observable.
+  //
+  // Every await above the launch claim is covered by the boundary matrix, and the claim
+  // itself rereads the durable writer -- so a trigger landing before the claim is
+  // rejected by the claim. What the claim CANNOT see is a revocation that lands while
+  // its own read is in flight: it returns the writer it read, and by then the gate may
+  // have closed. The synchronous identity comparison that follows, with no await
+  // between it and `runAgent`, is the only thing standing there.
+  //
+  // So the pause is armed on the CLAIM'S read specifically -- the first
+  // `readWriterContext` after `setTurnState`, which the send performs only once -- and
+  // not on any earlier one, which a different mechanism would already have caught.
+
+  /** Suspend the send inside the launch claim's own durable read. */
+  async function suspendInsideClaim() {
+    const atStateWrite = await suspendSendAt("setTurnState");
+
+    let engaged = false;
+    const reached = new Promise<void>((resolve) => {
+      writerCheckpoint = () =>
+        new Promise<void>((release) => {
+          engaged = true;
+          h.state.release = release;
+          resolve();
+        });
+    });
+
+    // Let the state write finish; the very next writer read is the claim's.
+    await act(async () => {
+      h.state.release?.();
+      h.state.release = null;
+      await Promise.resolve();
+    });
+    await reached;
+    // Operation-specific engagement: the claim's own read is what is suspended.
+    expect(engaged).toBe(true);
+    writerCheckpoint = async () => {};
+    return atStateWrite;
+  }
+
+  it.each(["stop", "takeover", "scenario_switch"])(
+    "refuses a send whose authority died inside the claim (%s)",
+    async (name) => {
+      const inFlight = await suspendInsideClaim();
+      const trigger = TRIGGERS.find((entry) => entry.name === name)!;
+      await trigger.apply();
+
+      await expectNoLaunch(inFlight);
+    },
+  );
+
+  it("refuses one whose document moved under it inside the claim", async () => {
+    // Not an interruption: an ordinary same-tab commit moves the revision without
+    // disturbing the turn, so only the identity comparison can see it.
+    const inFlight = await suspendInsideClaim();
+    act(() => {
+      useAuthorityStore.setState({ documentRevision: 13 });
+    });
+
+    await expectNoLaunch(inFlight);
+  });
+
+  it("launches when only the lease advanced inside the claim, because nothing could see it", async () => {
+    // NOT A GAP, AND WORTH STATING. A peer's lease advance is a DURABLE fact: it moves
+    // no turn epoch, closes no gate and changes nothing the live projection carries, so
+    // the synchronous comparison has nothing to compare. The claim's own reread is its
+    // boundary -- and a lease that advanced while that read was in flight was not there
+    // to be read. The send therefore proceeds under the writer it legitimately claimed,
+    // and the hop guard, which rereads on every hop, is what catches the advance next.
+    //
+    // Asserting the launch rather than omitting the case: this is the one trigger the
+    // final check provably cannot cover, and a reader deserves to know that is by
+    // construction rather than by oversight.
+    const inFlight = await suspendInsideClaim();
+    writerContext = { ...BASE_WRITER, leaseEpoch: BASE_WRITER.leaseEpoch + 1 };
+
+    await resume();
+    await act(async () => {
+      await inFlight.sent;
+    });
+    expect(runAgent).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("an undisturbed send", () => {
   it("reaches the provider, authorised under its own epoch", async () => {
     await act(async () => {
@@ -469,6 +650,54 @@ describe("an undisturbed send", () => {
     expect(runs[0].authorized).toBe(true);
     expect(useAssistantStore.getState().lastRefusal).toBeNull();
     expect(await unsettledTurns()).toEqual([]);
+    // The success case, so the failure case below cannot pass vacuously.
+    expect(useAssistantStore.getState().lastSettlement).toBeNull();
+  });
+
+  it("settles a FAILED transport as run_failed, not completed", async () => {
+    // `copilotkit.runAgent` resolves even when the agent run fails -- the locked core
+    // catches the error and returns an empty result -- so a session relying on `catch`
+    // recorded `completed` for a turn whose transport died. The failure arrives on the
+    // agent subscriber instead, and this asserts the DURABLE turn and the UI, not the
+    // returned promise.
+    failNextRun = true;
+
+    await act(async () => {
+      await session.current!.send("why is the 15th short?");
+    });
+
+    expect(runAgent).toHaveBeenCalledTimes(1);
+
+    const turns = await harness.db.assistantTurns.toArray();
+    const settled = turns.at(-1);
+    expect(settled?.state).toBe("detached");
+    expect(settled?.terminalReason).toBe("run_failed");
+
+    expect(useAssistantStore.getState().lastSettlement).toMatchObject({
+      settlement: "run_failed",
+    });
+    // A transport failure is not an interruption, and must not be attributed to one.
+    expect(useAssistantStore.getState().lastSettlement?.trigger).toBeNull();
+    // Nor is it an authority refusal.
+    expect(useAssistantStore.getState().lastRefusal).toBeNull();
+  });
+
+  it("ignores a failure reported under a run it does not own", async () => {
+    // AG-UI hands the concrete `input` to every subscriber on an agent. A latch that
+    // ignored it would let an overlapping run's failure settle this turn -- the exact
+    // cross-wiring the run-scoped filter exists to prevent. The turn must complete.
+    failNextRun = true;
+    failWithRunId = "some-other-run";
+
+    await act(async () => {
+      await session.current!.send("why is the 15th short?");
+    });
+
+    const turns = await harness.db.assistantTurns.toArray();
+    const settled = turns.at(-1);
+    expect(settled?.state).toBe("terminal");
+    expect(settled?.terminalReason).toBe("completed");
+    expect(useAssistantStore.getState().lastSettlement).toBeNull();
   });
 });
 

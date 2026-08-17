@@ -31,7 +31,22 @@ import {
   removeAssistantKey,
   setAssistantEnabled,
 } from "./settings-repo";
-import { beginClear, finishClear, resumePendingClears } from "./clear-repo";
+import {
+  beginClear,
+  clearOutcomes,
+  finishClear,
+  persistClearFacts,
+  readClearOutcome,
+  readClearOutcomeIds,
+  resumePendingClears,
+  terminalizeRecoveryFailure,
+  type ClearConfigurationOutcome,
+  type ClearTerminalizeResult,
+  type PersistedClearOutcome,
+  type ClearFacts,
+  type ClearFailureReason,
+  type ClearScope,
+} from "./clear-repo";
 import {
   beginProbeOperation,
   isProbeOperationCurrent,
@@ -44,13 +59,16 @@ import { installDiagnosticCanceller } from "@/lib/ai/diagnostic/install";
 import type { DiagnosticSearchRecordV1 } from "@/lib/ai/diagnostic/search-record";
 import { detachStaleTurns, readUnsettledTurns, setTurnState } from "./history-repo";
 import {
+  emptyInterruptionProgress,
   interrupt,
   realSettlementWindow,
   type InterruptionDeps,
+  type InterruptionProgress,
   type InterruptionRequest,
   type InterruptionResult,
 } from "./interruption";
 import {
+  recordLifecycleEvent,
   resetLifecycleLog,
   type AssistantSettlement,
   type InterruptionPhase,
@@ -85,6 +103,64 @@ export interface ActiveInterruption {
 export interface LastSettlement {
   trigger: InterruptionTrigger | null;
   settlement: AssistantSettlement;
+}
+
+/**
+ * A bounded, secret-safe reason a Clear did not complete.
+ *
+ * DEFINED BY THE REPOSITORY, because the durable record carries it and the parser that
+ * reads that record has to own the vocabulary. Re-exported here so callers that think
+ * in terms of the store's result type do not have to know where it lives.
+ */
+export type { ClearFailureReason };
+
+/**
+ * The first-class result of ONE Clear invocation, returned by `clearAll`/`clearHistory`.
+ *
+ * ALWAYS present — never `null`, never a rejected promise. Each call mints its own
+ * `requestId` so repeated/queued calls can be distinguished even when the store's
+ * reactive `clearResult` changes later. The bridge serializes THIS object directly;
+ * Settings explicitly awaits and settles the promise that carries it.
+ */
+export type ClearActionResult = ClearFacts;
+
+/**
+ * The reactive store projection of the most recent clear outcome, carried so the
+ * Settings card can render an actionable notice. Set from `ClearActionResult` by the
+ * clear actions; `null` after a successful clear or on first load with no persisted
+ * outcome.
+ */
+export interface ClearResult {
+  status: "deleted" | "incomplete" | "failed";
+  /**
+   * The scope the notice belongs to, or `null` when a storage failure left even that
+   * unknown.
+   *
+   * `null` IS NOT A SCOPE, it is the absence of one, and the Settings card renders it
+   * as a non-destructive storage notice with no action. Defaulting an unknown scope to
+   * `all` would offer to delete everything on the strength of a failed read -- a wider
+   * deletion than the user ever authorized.
+   */
+  scope: ClearScope | null;
+  scenarioId: string | null;
+  reason?: ClearFailureReason;
+  /**
+   * What the failed invocation proved about the stored configuration.
+   *
+   * The Clear-all warning reads THIS, not the scope: "Your API key was removed" is a
+   * claim about what happened, and a global clear that failed before its fence
+   * committed removed nothing.
+   */
+  configurationOutcome: ClearConfigurationOutcome;
+  /**
+   * The operation identity this notice belongs to, or `null` when the failure was so
+   * early that no durable record exists.
+   *
+   * CARRIED SO THE RETRY IS CAUSAL. The Settings retry hands it back as
+   * `retryOfOperationId`, which is what lets the succeeding invocation retire exactly
+   * the tombstone the user was looking at -- and nothing newer.
+   */
+  operationId: string | null;
 }
 
 export interface AssistantUiState {
@@ -145,6 +221,12 @@ export interface AssistantUiState {
    * is what lets a send refuse in the same tick the user pressed the control.
    */
   pendingInterruptions: number;
+  /**
+   * The result of the most recent Clear all / Clear history, carried so the Settings
+   * card can show an actionable notice when deletion did not complete. `null` when no
+   * clear has run this page lifetime, or after a successful Clear all resets it.
+   */
+  clearResult: ClearResult | null;
 }
 
 const INITIAL: AssistantUiState = {
@@ -165,6 +247,7 @@ const INITIAL: AssistantUiState = {
   activeProposal: null,
   activeDiagnostic: null,
   pendingInterruptions: 0,
+  clearResult: null,
 };
 
 export const useAssistantStore = create<AssistantUiState>()(() => ({ ...INITIAL }));
@@ -220,19 +303,123 @@ export function isTurnAuthorized(
  * and therefore recreate -- a turn row belonging to data the user deleted.
  */
 export async function hydrateAssistant(): Promise<AssistantSettingsV1> {
-  // T10's real cancellation ownership replaces the no-op default (T05 shipped the
-  // contract and a stub). Installed at bring-up rather than at panel mount: an
-  // interruption trigger — a takeover, a scenario switch, Clear — must be able to
-  // cancel a running diagnostic even if the panel was closed while it ran.
   installDiagnosticCanceller();
-  await resumePendingClears();
-  await detachStaleTurns();
-  const settings = await readAssistantSettings();
-  useAssistantStore.setState({ settings, hydrated: true });
-  // The runtime instance id is deliberately NOT probed here. `/info` is same-origin
-  // and keyless, but it is still a request an off-by-default feature must not make on
-  // an ordinary page load -- so it is read lazily on the first explicit send, where it
-  // is also the first moment anything needs it.
+  // HYDRATION IS TOTAL: no repository failure may reject this promise. Every stage is
+  // guarded so the mount caller (which discards the promise) always gets a hydrated
+  // store with the best known settings truth and a visible retry notice when something
+  // went wrong.
+  const recovery = await resumePendingClears();
+  const terminalizeResults: ClearTerminalizeResult[] = [];
+  if (recovery.failed) {
+    recordLifecycleEvent({
+      trigger: null,
+      phase: "settled",
+      at: new Date(),
+      errorClass: "storage_unavailable",
+    });
+    // A PENDING IDENTITY IS WORTH TERMINALIZING, but only if it is still that identity.
+    // The candidate was observed before the failure; between then and now another tab
+    // may have completed the operation, a newer invocation may have written a terminal
+    // row at the same key, or the row may be gone. The compare-and-swap is what makes
+    // this a no-op in every one of those cases instead of a stale overwrite.
+    for (const candidate of recovery.candidates) {
+      const result = await terminalizeRecoveryFailure(candidate).catch(
+        () => "transaction_failed" as const,
+      );
+      terminalizeResults.push(result);
+    }
+  }
+  try {
+    await detachStaleTurns();
+  } catch {
+    // Stale-turn detachment is best-effort; a failure here must not block hydration.
+  }
+  // THE BEST KNOWN SETTINGS TRUTH SURVIVES A FAILED READ. On a first hydrate that is
+  // the conservative empty/off default the store starts with; on a later one it is
+  // whatever was last read successfully. Replacing a working key and model with
+  // `empty` because a read failed would claim a deletion no committed Clear-all begin
+  // ever performed -- and the user would be told their credential is gone while it sits
+  // on disk.
+  let settings = useAssistantStore.getState().settings;
+  let settingsReadFailed = false;
+  try {
+    settings = await readAssistantSettings();
+  } catch {
+    settingsReadFailed = true;
+  }
+  // RECONSTRUCT OUTCOME STATE FROM THE DURABLE CANONICAL RECORDS. Read AFTER the
+  // compare-and-swap above, so what publishes is the latest durable truth rather than
+  // the report recovery was holding.
+  //
+  // A FAILED READ PRESERVES THE KNOWN NOTICE. Publishing `null` here would erase an
+  // actionable warning the user was already looking at, on the strength of a read that
+  // did not work -- the notice would vanish and the unfinished clear behind it would
+  // not.
+  let clearResult: ClearResult | null = useAssistantStore.getState().clearResult;
+  let latestOutcome: PersistedClearOutcome | null = null;
+  let outcomeReadFailed = false;
+  try {
+    latestOutcome = await readClearOutcome();
+    clearResult = latestOutcome ? projectClearResult(latestOutcome) : null;
+  } catch {
+    outcomeReadFailed = true;
+  }
+  // A FAILURE WITH NO IDENTITY IS NOT A CLEAR-ALL. `scope: null` renders as a
+  // non-destructive storage notice; it offers nothing to delete, because nothing here
+  // knows what the user asked for.
+  //
+  // A NO-OP IS NOT A FAILURE AND MUST NOT RAISE ONE. If candidates were observed and
+  // every compare-and-swap declined, the world simply moved on -- the operation was
+  // consumed, completed by another tab, or replaced -- and the reread above has
+  // already published whatever presently exists. Treating `recovery.failed` alone as
+  // grounds for a warning is what put a scope-null storage notice on screen after a
+  // perfectly ordinary consumed-row no-op.
+  const casTransactionFailed = terminalizeResults.includes("transaction_failed");
+  const recoveryFailedWithoutIdentity = recovery.failed && recovery.candidates.length === 0;
+  if (
+    !clearResult &&
+    (recoveryFailedWithoutIdentity ||
+      casTransactionFailed ||
+      settingsReadFailed ||
+      outcomeReadFailed)
+  ) {
+    clearResult = {
+      status: "failed",
+      scope: null,
+      scenarioId: null,
+      reason: "storage",
+      configurationOutcome: "unknown",
+      operationId: null,
+    };
+  }
+
+  // A FAILED READ NEVER CHANGES THE CONFIGURATION PROJECTION.
+  //
+  // There is nothing to decide here, and that is the point. Deletion is reported by
+  // exactly two causal paths, neither of which is this one:
+  //
+  //   * the Clear action that commits it -- `beginClear` deletes the settings row
+  //     inside the transaction that commits its fence, and `runClearAction` projects
+  //     `empty` from that committed fence, in the tab that performed it;
+  //   * a SUCCESSFUL read here -- `readAssistantSettings` returns the off-by-default
+  //     shape for an absent row, so an ordinary successful hydrate already reports a
+  //     deleted configuration exactly and needs no proof at all.
+  //
+  // What used to live here tried to infer absence while storage was refusing to answer
+  // -- from a Clear operation's currency and a wall-clock comparison. Neither can
+  // exclude a settings write this tab never observed: the operation row proves only
+  // itself, another tab's write is invisible until it is read, and `Date` strings from
+  // two tabs are not a transaction clock. The consequence was a durable Ready
+  // configuration projected as absent, which hides a working assistant.
+  //
+  // Preserving instead can leave a key on screen for the rest of a storage outage that
+  // a Clear elsewhere has already removed. That is the safer direction and it is
+  // self-correcting: the next successful read is authoritative, and a send made against
+  // a credential that is gone fails and says so. The bounded storage notice below is
+  // already shown meanwhile, and it claims nothing about the key.
+  void settingsReadFailed;
+
+  useAssistantStore.setState({ settings, hydrated: true, clearResult });
   return settings;
 }
 
@@ -262,6 +449,111 @@ export function setSettlementWindowForTest(
   next: InterruptionDeps["settlementWindow"] | null,
 ): void {
   settlementWindow = next ?? realSettlementWindow;
+}
+
+/**
+ * Whether this clear actually deleted the row the visible diagnostic card describes.
+ *
+ * DECIDES FROM THE DELETION OUTCOME, not the fence scope. A Clear all that exhausted
+ * its recapture bound refused to delete, so the durable search row remains -- and
+ * dropping the card's projection anyway would put a deleted search back on screen for
+ * the rest of the session, which is the mirror image of the bug this scoping fixes.
+ *
+ * SCOPED, because the clear is. Clear all takes every search, so a successful deletion
+ * always takes the card. Clear history takes one scenario's searches -- and dismissing
+ * a card belonging to a different scenario would be deleting from the user's screen
+ * something still on disk.
+ */
+function clearRemovedActiveDiagnostic(result: InterruptionResult): boolean {
+  const clear = result.clear;
+  if (!clear || clear.deletion.outcome !== "deleted") return false;
+  if (clear.fence.scope === "all") return true;
+  const active = useAssistantStore.getState().activeDiagnostic;
+  return active !== null && active.search.scenarioId === clear.fence.scenarioId;
+}
+
+/**
+ * Assemble the canonical facts of one Clear invocation from what is actually known.
+ *
+ * THE ONLY PLACE A `ClearActionResult` IS BUILT, whether the invocation succeeded,
+ * was refused, or died at any stage. Every field comes from the accumulator or from
+ * the identity minted before the first await -- nothing is defaulted, and no stage
+ * overwrites a fact an earlier one established.
+ *
+ * SCOPE AND SCENARIO COME FROM THE FENCE once there is one. Clear all is
+ * `scenarioId: null` by definition; the scenario the caller happened to have selected
+ * is a UI fact, not an operation fact, and letting it reach the result is how a
+ * global result ends up claiming a scenario its durable row does not have.
+ */
+function assembleClearFacts(input: {
+  requestId: string;
+  operationId: string;
+  scope: ClearScope;
+  requestedScenarioId: string | null;
+  progress: InterruptionProgress;
+  /** Set when the invocation threw; the classified reason for it. */
+  failureReason?: ClearFailureReason;
+}): ClearActionResult {
+  const { progress } = input;
+  const fence = progress.fence;
+  const scope = fence?.scope ?? input.scope;
+  // A global clear has no scenario, at any stage. A scoped one keeps the identity it
+  // was invoked with even before the fence exists.
+  const scenarioId = fence ? fence.scenarioId : scope === "all" ? null : input.requestedScenarioId;
+  const deletionOutcome = progress.deletion?.outcome ?? null;
+
+  const status: ClearActionResult["status"] = input.failureReason
+    ? deletionOutcome === "deleted"
+      ? // THE DELETION COMMITTED and only post-processing failed. Reporting this as
+        // failed would invite a retry against data written after the deletion, so the
+        // committed truth wins and the cleanup failure is a log fact, not a user action.
+        "deleted"
+      : "failed"
+    : deletionOutcome === "deleted"
+      ? "deleted"
+      : "incomplete";
+
+  const reason: ClearFailureReason | null =
+    status === "deleted"
+      ? null
+      : (input.failureReason ?? (scope === "all" ? "recapture_exhausted" : "superseded"));
+
+  return {
+    requestId: input.requestId,
+    operationId: input.operationId,
+    scope,
+    scenarioId,
+    status,
+    reason,
+    settlement: progress.settlement,
+    deletionOutcome,
+    // THE CONFIGURATION FACT IS SET AT THE TRANSITION BOUNDARY, and the boundary is
+    // the fence: `beginClear` deletes the settings row inside the transaction that
+    // commits it. A history clear never touches configuration; a global clear that
+    // never got a fence never deleted anything. Neither is inferred from the scope the
+    // user asked for.
+    configurationOutcome: scope === "history" ? "retained" : fence ? "deleted" : "retained",
+  };
+}
+
+/** Project the reactive `clearResult` from any canonical fact record. */
+function projectClearResult(facts: {
+  status: ClearActionResult["status"];
+  scope: ClearScope;
+  scenarioId: string | null;
+  reason: ClearFailureReason | null;
+  configurationOutcome: ClearConfigurationOutcome;
+  operationId: string;
+}): ClearResult | null {
+  if (facts.status === "deleted") return null;
+  return {
+    status: facts.status,
+    scope: facts.scope,
+    scenarioId: facts.scenarioId,
+    reason: facts.reason ?? undefined,
+    configurationOutcome: facts.configurationOutcome,
+    operationId: facts.operationId,
+  };
 }
 
 function closeGate(trigger: InterruptionTrigger): number {
@@ -305,46 +597,186 @@ function releaseInterruptionSlot(settled: InterruptionResult | null): void {
   });
 }
 
-async function runInterruption(request: InterruptionRequest): Promise<InterruptionResult> {
+async function runInterruption(
+  request: InterruptionRequest,
+  /**
+   * Filled stage by stage by the controller. A clear invocation owns one of these and
+   * reads it after a throw, so a failure in the deletion transaction reports the real
+   * settlement class the controller had already computed rather than a fabricated one.
+   */
+  progress: InterruptionProgress = emptyInterruptionProgress(),
+  /** Minted before any I/O; carried into `beginClear` so the row is this invocation's. */
+  clearIdentity?: { operationId: string; requestId: string },
+): Promise<InterruptionResult> {
   let result: InterruptionResult;
   try {
-    result = await interrupt(request, {
-      now: () => new Date(),
-      closeGate,
-      publishPhase: (phase, trigger) => {
-        useAssistantStore.setState({ interruption: { trigger, phase } });
+    result = await interrupt(
+      request,
+      {
+        now: () => new Date(),
+        closeGate,
+        publishPhase: (phase, trigger) => {
+          useAssistantStore.setState({ interruption: { trigger, phase } });
+        },
+        readUnsettledTurns: (scope) => readUnsettledTurns(scope),
+        setTurnState: (turnId, input) => setTurnState(turnId, input),
+        abortLocalRun: () => {
+          const handle = readActiveRunHandle();
+          if (!handle) return null;
+          handle.abort();
+          setActiveRunHandle(null);
+          return handle;
+        },
+        requestRuntimeStop: ({ threadId, signal }) =>
+          requestRuntimeStop({
+            threadId,
+            runtimeInstanceId: peekRuntimeInstanceId(),
+            signal,
+          }),
+        cancelDiagnostics: (input) => readDiagnosticCanceller().cancelOwnedJobs(input),
+        beginClear: (scope, scenarioId) => beginClear(scope, scenarioId, clearIdentity),
+        finishClear: (fence) => finishClear(fence),
+        settlementWindow: (ms, signal) => settlementWindow(ms, signal),
       },
-      readUnsettledTurns: (scope) => readUnsettledTurns(scope),
-      setTurnState: (turnId, input) => setTurnState(turnId, input),
-      abortLocalRun: () => {
-        const handle = readActiveRunHandle();
-        if (!handle) return null;
-        handle.abort();
-        setActiveRunHandle(null);
-        return handle;
-      },
-      requestRuntimeStop: ({ threadId, signal }) =>
-        requestRuntimeStop({
-          threadId,
-          // The instance the runtime reported at handshake. Unknown (`null`) omits the
-          // header, and an unknown instance detaches rather than being guessed at.
-          runtimeInstanceId: peekRuntimeInstanceId(),
-          signal,
-        }),
-      cancelDiagnostics: (input) => readDiagnosticCanceller().cancelOwnedJobs(input),
-      beginClear: (scope, scenarioId) => beginClear(scope, scenarioId),
-      finishClear: (fence) => finishClear(fence),
-      settlementWindow: (ms, signal) => settlementWindow(ms, signal),
-    });
+      progress,
+    );
   } catch (error) {
-    // A storage failure is not an expected condition, so it keeps propagating -- but
-    // the slot must be released either way, or the gate would stay shut forever.
     releaseInterruptionSlot(null);
+    // THE PROGRESS OBJECT ALREADY HOLDS whatever the controller established, so a clear
+    // invocation reads its real facts from there. Rethrow: a caller that wants those
+    // facts owns the accumulator, and inventing a result here is what previously
+    // replaced a known settlement with `run_failed`.
     throw error;
+  }
+
+  if (request.trigger === "disable" || clearRemovedActiveDiagnostic(result)) {
+    useAssistantStore.setState({ activeDiagnostic: null });
   }
 
   releaseInterruptionSlot(result);
   return result;
+}
+
+/**
+ * THE entry point for every interruption, with the two seams a Clear invocation needs.
+ *
+ * The pending count is bumped SYNCHRONOUSLY, before anything is queued: the
+ * controller's own closure is one microtask away at best (and, for the clear triggers,
+ * a durable fence away), so this is what makes "an interruption has been asked for"
+ * true to every gate in the same tick the user asked for it.
+ */
+function queueInterruption(
+  request: InterruptionRequest,
+  progress?: InterruptionProgress,
+  clearIdentity?: { operationId: string; requestId: string },
+): Promise<InterruptionResult> {
+  useAssistantStore.setState((state) => ({
+    pendingInterruptions: state.pendingInterruptions + 1,
+    // An interruption already in progress keeps its own phase: it is the truthful
+    // thing to show, and the queued one publishes its own when it starts.
+    interruption: state.interruption ?? { trigger: request.trigger, phase: "closing" },
+  }));
+  const next = chain.then(() => runInterruption(request, progress, clearIdentity));
+  chain = next.catch(() => {});
+  return next;
+}
+
+/**
+ * Run ONE Clear invocation end to end and return its canonical facts.
+ *
+ * The single path for both scopes. Identity is minted before any I/O; the predecessor
+ * set is captured before the fence; the accumulator carries every stage's facts across
+ * a later failure; and the terminal record is written under the invocation's own
+ * operation id. The direct return value, the durable row and the reactive projection
+ * are therefore three views of one fact record rather than three reconstructions.
+ */
+async function runClearAction(input: {
+  scope: ClearScope;
+  threadId: string | null;
+  /** The scenario the caller asked about. Ignored for `all`, which is global. */
+  scenarioId: string | null;
+  retryOfOperationId?: string | null;
+}): Promise<ClearActionResult> {
+  const scope = input.scope;
+  const trigger = scope === "all" ? "clear_all" : "clear_history";
+  // BEFORE ANY I/O. A failure inside `beginClear` itself still has these.
+  const requestId = crypto.randomUUID();
+  const operationId = crypto.randomUUID();
+  const scenarioId = scope === "all" ? null : input.scenarioId;
+
+  // Captured before the fence, so the set is genuinely this invocation's predecessors.
+  const predecessors = new Set(
+    scope === "history" ? await readClearOutcomeIds("history", scenarioId).catch(() => []) : [],
+  );
+  if (input.retryOfOperationId) predecessors.add(input.retryOfOperationId);
+
+  const progress = emptyInterruptionProgress();
+  let failureReason: ClearFailureReason | undefined;
+  try {
+    await queueInterruption(
+      { trigger, threadId: input.threadId, scenarioId: input.scenarioId },
+      progress,
+      { operationId, requestId },
+    );
+  } catch {
+    // Bounded and enumerated. The stage that failed is visible in the accumulator.
+    failureReason = "storage";
+  }
+
+  const facts = assembleClearFacts({
+    requestId,
+    operationId,
+    scope,
+    requestedScenarioId: scenarioId,
+    progress,
+    failureReason,
+  });
+
+  if (facts.status === "deleted") {
+    // Retire ONLY the tombstones captured before this invocation fenced. A later or
+    // queued call's outcome is not in that set, so it survives untouched. A failure
+    // here is a cleanup failure over a COMMITTED deletion: it must not turn the
+    // reported status back into something the user would retry.
+    await clearOutcomes(scope, scenarioId, {
+      predecessorStartedAt: new Date().toISOString(),
+      predecessorOperationIds: [...predecessors],
+    }).catch(() => {
+      recordLifecycleEvent({
+        trigger,
+        phase: "cleared",
+        at: new Date(),
+        errorClass: "storage_unavailable",
+      });
+    });
+  } else {
+    // The terminal record carries THE SAME facts the caller is about to be handed.
+    await persistClearFacts({ ...facts, status: facts.status }).catch(() => null);
+  }
+
+  if (scope === "all") {
+    // THE CONFIGURATION ROW IS GONE IF, AND ONLY IF, THE BEGIN FENCE COMMITTED --
+    // `beginClear` deletes it inside that transaction, before any cancellation starts.
+    // The committed fence is the proof, and the only proof, this projection needs.
+    // Without it (a failure before or inside begin) the credential is still on disk,
+    // and projecting `empty` would tell the user it had been deleted when it had not.
+    const state = useAssistantStore.getState();
+    useAssistantStore.setState({
+      settings: progress.fence ? emptyAssistantSettings(new Date()) : state.settings,
+      panelOpen: progress.fence ? false : state.panelOpen,
+      lastRefusal: null,
+    });
+  }
+
+  useAssistantStore.setState({ clearResult: projectClearResult(facts) });
+  if (facts.status !== "deleted") {
+    recordLifecycleEvent({
+      trigger,
+      phase: "settled",
+      at: new Date(),
+      errorClass: facts.status === "failed" ? "storage_unavailable" : "clear_incomplete",
+    });
+  }
+  return facts;
 }
 
 export const assistantActions = {
@@ -366,19 +798,7 @@ export const assistantActions = {
    * the Settings actions below all come through here.
    */
   interrupt(request: InterruptionRequest): Promise<InterruptionResult> {
-    // Counted SYNCHRONOUSLY, before anything is queued. The controller's own closure
-    // is one microtask away at best (and, for the clear triggers, a durable fence
-    // away), so this is what makes "an interruption has been asked for" true to every
-    // gate in the same tick the user asked for it.
-    useAssistantStore.setState((state) => ({
-      pendingInterruptions: state.pendingInterruptions + 1,
-      // An interruption already in progress keeps its own phase: it is the truthful
-      // thing to show, and the queued one publishes its own when it starts.
-      interruption: state.interruption ?? { trigger: request.trigger, phase: "closing" },
-    }));
-    const next = chain.then(() => runInterruption(request));
-    chain = next.catch(() => {});
-    return next;
+    return queueInterruption(request);
   },
 
   /**
@@ -489,12 +909,28 @@ export const assistantActions = {
     useAssistantStore.setState({ panelOpen: false });
   },
 
-  /** Clear one scenario's conversation. Key, preferences and other scenarios survive. */
-  async clearHistory(scope: {
-    threadId: string | null;
-    scenarioId: string;
-  }): Promise<InterruptionResult> {
-    return assistantActions.interrupt({ trigger: "clear_history", ...scope });
+  /**
+   * Clear one scenario's conversation. Key, preferences and other scenarios survive.
+   *
+   * `retryOfOperationId` is the tombstone the user is retrying FROM -- the identity the
+   * Settings notice was rendered from. It is unioned into the predecessor set captured
+   * here so a success retires the notice the user acted on, and only that one. A retry
+   * cannot widen scope: the scenario comes from the caller's captured identity, never
+   * from the current selection.
+   */
+  async clearHistory(
+    scope: {
+      threadId: string | null;
+      scenarioId: string;
+    },
+    options: { retryOfOperationId?: string | null } = {},
+  ): Promise<ClearActionResult> {
+    return runClearAction({
+      scope: "history",
+      threadId: scope.threadId,
+      scenarioId: scope.scenarioId,
+      retryOfOperationId: options.retryOfOperationId,
+    });
   },
 
   /** Clear every local AI setting, credential and conversation. Scenario/roster survive. */
@@ -503,18 +939,17 @@ export const assistantActions = {
       threadId: null,
       scenarioId: null,
     },
-  ): Promise<InterruptionResult> {
+  ): Promise<ClearActionResult> {
+    // Synchronously, before the first await: a probe still in flight must not be able
+    // to write the captured credential back into a row this clear is about to delete.
     revokeProbeOperations();
-    const result = await assistantActions.interrupt({ trigger: "clear_all", ...scope });
-    // The configuration row is gone, so the projection must agree immediately rather
-    // than waiting for the next hydration to notice.
-    useAssistantStore.setState({
-      settings: emptyAssistantSettings(new Date()),
-      panelOpen: false,
-      lastRefusal: null,
+    const facts = await runClearAction({
+      scope: "all",
+      threadId: scope.threadId,
+      scenarioId: scope.scenarioId,
     });
-    resetLifecycleLog();
-    return result;
+    if (facts.status === "deleted") resetLifecycleLog();
+    return facts;
   },
 
   /**
@@ -559,8 +994,20 @@ export const assistantActions = {
     });
   },
 
-  /** Settle a turn that ended on its own -- completion or transport failure. */
-  endTurn(settlement: AssistantSettlement): void {
+  /**
+   * Settle a turn that ended on its own -- completion or transport failure.
+   *
+   * `turnId` makes this STRICT compare-and-clear: the caller must be the turn the
+   * store currently calls active, and `null` is not a match.
+   *
+   * A turn whose cleanup runs after a newer turn became the live one must not blank
+   * that newer turn's activity, epoch or streaming flag. Treating a `null` active id
+   * as "nobody owns it, go ahead" reopened exactly that gap: an already-settled turn
+   * would publish its ending into the cleared gap, so the last settlement a user saw
+   * belonged to a turn that finished long ago.
+   */
+  endTurn(settlement: AssistantSettlement, turnId?: string): void {
+    if (turnId !== undefined && useAssistantStore.getState().activeTurnId !== turnId) return;
     useAssistantStore.setState({
       activeTurnId: null,
       authorizedTurnEpoch: null,

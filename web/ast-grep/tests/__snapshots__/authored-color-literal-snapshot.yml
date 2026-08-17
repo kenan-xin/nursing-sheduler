@@ -1,0 +1,37 @@
+id: authored-color-literal
+snapshots:
+  ? |
+    const brand = "#0b7d68";
+  : labels:
+      - source: "#0b7d68"
+        style: primary
+        start: 15
+        end: 22
+  ? |
+    const scrim = "rgba(0, 0, 0, 0.4)";
+  : labels:
+      - source: rgba(0, 0, 0, 0.4)
+        style: primary
+        start: 15
+        end: 33
+  ? |
+    const shorthand = "#000";
+  : labels:
+      - source: "#000"
+        style: primary
+        start: 19
+        end: 23
+  ? |
+    const withAlpha = "#000000cc";
+  : labels:
+      - source: "#000000cc"
+        style: primary
+        start: 19
+        end: 28
+  ? |
+    const zeroLightness = "hsl(210 80% 0%)";
+  : labels:
+      - source: hsl(210 80% 0%)
+        style: primary
+        start: 23
+        end: 38

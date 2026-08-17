@@ -1,0 +1,37 @@
+id: test-capability-acquisition-tsx
+language: Tsx
+severity: error
+message: >-
+  Test/support code acquired a filesystem, module-loader or parser capability through a
+  DYNAMIC route. The acquisition boundary is the same whichever syntax reaches it: readers
+  are granted to an exact file and recorded in the reader ledger with their API, root/path
+  class, extension/format and write permission, and the parser family has no exception
+  anywhere.
+note: >-
+  The `Tsx` twin of `test-capability-acquisition`, which covers the `.tsx` component and
+  rendered-behaviour suites. ast-grep resolves a rule's language from the file EXTENSION and
+  `TypeScript` claims `.ts`/`.mts`/`.cts` only, so without this twin 89 of the repository's
+  326 test/spec files would be outside the rule's own declared scope. The `files:` list is
+  identical to its partner's by design -- the language, not the glob, is what splits them --
+  and `ast-grep-rule-pairs.test.ts` asserts that equality so the drift that once lost
+  `e2e/**` from a twin cannot recur. Dynamic `import()` is Oxlint's, not this family's -- see
+  the base rule's note.
+files:
+  - "**/*.test.*"
+  - "**/*.spec.*"
+  - "**/*.test-d.*"
+  - "e2e/**"
+  - "**/__tests__/**"
+  - "**/support/**"
+  - "**/test-support/**"
+  - "**/test-support.*"
+  - "**/*.test-support.*"
+  - "lib/store/test-authority.ts"
+rule:
+  any:
+    - pattern: require($SPEC)
+    - pattern: $OBJ.getBuiltinModule($$$)
+constraints:
+  SPEC:
+    regex: |-
+      ^["'](?:(?:node:)?fs(?:/promises)?|fs-extra(?:/.+)?|graceful-fs|memfs|(?:node:)?module|typescript(?:/.+)?|ts-morph(?:/.+)?|@babel/[^"']+|acorn(?:-walk)?(?:/.+)?|esprima|espree|meriyah|recast(?:/.+)?|jscodeshift(?:/.+)?|@swc/[^"']+|oxc-parser(?:/.+)?|@typescript-eslint/[^"']+|tree-sitter(?:-[^"']+)?|web-tree-sitter|@ast-grep/[^"']+)["']$

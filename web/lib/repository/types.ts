@@ -200,6 +200,146 @@ export interface AssistantWriteFenceV1 {
   generation: number;
   clearedAt: string | null;
   createdAt: string;
+  /**
+   * A clear that has fenced but not yet deleted, and the scenario it targets.
+   *
+   * THE ONLY DURABLE RECORD OF THE USER'S ACTUAL REQUEST. Clear history is asked for
+   * by scenario, and the deletion pass used to rediscover that scenario from whichever
+   * threads happened to be marked `cleared` -- so a scenario with content but no thread
+   * row had no scope at all, and its proposals, receipts and diagnostic searches
+   * survived a clear that promised to remove them. Recovery after a reload was worse:
+   * with no thread to find, there was nothing to recover from.
+   *
+   * Written by `beginClear` and removed by the deletion pass, so its presence means
+   * "this clear is unfinished". Non-content: a scope key, a scenario id and a
+   * timestamp.
+   */
+  /**
+   * LEGACY. Superseded by {@link AssistantClearOperationV1}.
+   *
+   * A clear used to record itself as one marker per fence row it bumped, which made
+   * its identity a set of fragments rather than one fact. A later clear could replace
+   * some of those fragments and leave others, and recovery reading a surviving
+   * fragment would authorise a deletion the operation no longer owned. Rows written by
+   * such a build may still carry this; it is READ BY NOTHING, so those operations fail
+   * closed rather than acting on partial authority.
+   */
+  pendingClear?: {
+    /**
+     * The immutable identity of ONE clear operation.
+     *
+     * Without it, "is this marker still mine?" could only be answered by scope and
+     * scenario -- and those repeat. A recovery continuation holding a marker for
+     * scenario S would then happily consume the marker of a NEWER clear of S, and
+     * delete content written after its own clear had already finished. The id is what
+     * makes a stale continuation recognise itself as stale.
+     */
+    operationId: string;
+    scope: "history" | "all";
+    /** The captured target. `null` only for `all`, which is global by definition. */
+    scenarioId: string | null;
+    /** The generation this clear bumped this scope to. A second fact to compare. */
+    generation: number;
+    at: string;
+  } | null;
+}
+
+/**
+ * ONE Clear operation, recorded once, keyed by its own identity.
+ *
+ * WHY THIS IS A SINGLE RECORD. Clear all bumps several generation scopes, and the
+ * previous design wrote a marker onto each of them. That made an operation's authority
+ * divisible: a newer scoped clear would replace the marker on one scope and leave the
+ * rest, so recovery could find a surviving fragment, validate only that fragment, and
+ * authorise a GLOBAL deletion for an operation whose world had already moved on --
+ * after a newer clear had completed and fresh content had landed.
+ *
+ * The captured set is therefore held here, whole. An operation may delete only if
+ * EVERY scope it captured still stands at the generation it captured. A subset proves
+ * nothing.
+ */
+export interface AssistantClearOperationV1 {
+  operationId: string;
+  /**
+   * Shape version. An unrecognised value fails closed rather than being guessed at.
+   *
+   * 2 replaced a version-1 commitment that hashed lossily: it dropped low surrogates
+   * and used ambiguous delimiters, so two different captured sets could commit to the
+   * same value. Version-1 records are rejected rather than migrated -- they cannot be
+   * trusted to name the set they claim.
+   *
+   * 3 existed because `outcome` was added to the version-2 shape in place. Two record
+   * layouts then shared one discriminator, which is precisely what a version is
+   * supposed to prevent: a reader had to guess from key presence rather than be told.
+   *
+   * 4 IS THE VERSION THIS BUILD WRITES. It carries the canonical Clear fact tail --
+   * `requestId`, `reason`, `settlement`, `deletionOutcome` -- so the durable record,
+   * the value returned to the caller, the browser bridge and the hydrated projection
+   * are the same facts rather than four reconstructions of them. Versions 3 and 2 are
+   * read only for compatibility, and only in their exact shipped shapes; their fact
+   * tail is reported as `null`, never guessed (see `clear-repo.ts`).
+   */
+  version: 2 | 3 | 4 | 5;
+  /**
+   * The UI invocation that minted this operation, so a caller can correlate a returned
+   * result with the row on disk even across repeats. Version 4 and later only.
+   */
+  requestId?: string;
+  scope: "history" | "all";
+  /** The captured target. `null` only for `all`, which is global by definition. */
+  scenarioId: string | null;
+  /** EVERY scope this operation bumped, with the generation it bumped it to. */
+  captured: readonly { scopeKey: GenerationScopeKey; generation: number }[];
+  /**
+   * An independently checkable commitment to the COMPLETE captured set.
+   *
+   * Count plus digest, computed over the normalized set at begin. Without it, a claim
+   * could only compare the entries the record happened to supply -- so a record whose
+   * set had been truncated or substituted proved whatever remained, and a malformed
+   * `history` record naming one scenario while capturing only `global` could delete
+   * that scenario on the strength of the global row. The count catches a dropped or
+   * added entry; the digest catches a swapped one.
+   */
+  commitment: { count: number; canonical: string };
+  startedAt: string;
+  /**
+   * The PRODUCT outcome of this operation, independent of its deletion authority.
+   *
+   * - `"pending"` — the operation is still live deletion authority. `claimOperation` may
+   *   prove ownership and delete from it.
+   * - `"incomplete"` — the operation was superseded or exhausted. It is NO LONGER
+   *   deletion authority (recovery ignores it), but it persists as a secret-safe
+   *   tombstone so hydration can show the user that their clear did not complete and
+   *   offer a retry. Cleared only after a verified successful Clear all or the matching
+   *   scoped retry.
+   * - `"failed"` — a storage or runtime failure prevented the deletion transaction from
+   *   committing. Same tombstone semantics as `"incomplete"`.
+   *
+   * OPTIONAL for backward compatibility: records written before the outcome field was
+   * added (pre-round-14 version-2 pending rows) do not carry it. The reader treats an
+   * absent `outcome` as `"pending"` so legacy authority can recover safely.
+   */
+  outcome?: "pending" | "incomplete" | "failed";
+  /**
+   * The bounded fact tail, version 4 and later. Present as explicit `null` on a
+   * pending row -- "not known yet" and "known to be nothing" are different facts and
+   * an absent key could not tell them apart.
+   */
+  reason?: "superseded" | "recapture_exhausted" | "storage" | null;
+  /** The real bounded settlement class, or `null` if settlement never ran. */
+  settlement?: string | null;
+  /** The real deletion outcome, or `null` if the deletion pass never ran. */
+  deletionOutcome?: "deleted" | "superseded" | null;
+  /**
+   * What this operation PROVED about the stored configuration, version 5 and later.
+   *
+   * Separate from the scope because the scope is what was asked for. `beginClear`
+   * deletes the settings row inside the transaction that writes a pending record, so a
+   * committed global begin proves `deleted`; a global failure before it proves
+   * `retained`; a failure that could not read anything proves `unknown`. Settings copy
+   * reads this instead of inferring deletion from the requested scope.
+   */
+  configurationOutcome?: "deleted" | "retained" | "unknown";
 }
 
 /** A generation captured before an interruptible operation, checked on write. */
@@ -318,4 +458,68 @@ export type RepositoryMetaRow = LegacyMigrationRecord;
 export interface KeyValueRow {
   key: string;
   value: string;
+}
+
+// ---------------------------------------------------------------------------
+// Roster storage rows (F1)
+// ---------------------------------------------------------------------------
+//
+// These DTOs belong to the ROSTER feature, not to the scenario repository, and
+// nothing in this graph reads them: the repository declares their tables and never
+// touches a row. They are DEFINED here rather than in `lib/store/dexie-storage.ts`
+// only to keep the dependency acyclic — that module needs the runtime
+// `NurseSchedulerDb` class, so it cannot also be the place the class imports its row
+// types from. It re-exports every one of them, so roster code still names them at
+// their original specifier.
+
+/**
+ * A stored roster document. F1 owns durability, not shape: the payload is an
+ * opaque structured-cloneable value (it may embed a `Blob` such as `frozenXlsx`)
+ * whose schema and validation belong to F3. `TDocument` defaults to `unknown` so
+ * a caller that has a validated type can read it back typed without F1 inventing
+ * one.
+ */
+export interface RosterRow<TDocument = unknown> {
+  /** `working` or `candidate:<jobId>`. */
+  key: string;
+  document: TDocument;
+  /**
+   * The row's version token. Its allocation differs by row kind:
+   *
+   *   • `working` — a per-key compare-and-swap revision (1, 2, 3 …).
+   *   • `candidate:<jobId>` — the `candidateVersion`, drawn from an ORIGIN-WIDE
+   *     counter that is never reset and never reused. Deleting and recreating a
+   *     candidate for the same job therefore cannot resurrect a previous version
+   *     number, which is what makes it safe as a delete/promote authority (a
+   *     per-key counter would restart at 1 and admit ABA).
+   */
+  revision: number;
+  /** The clear epoch this row was written under (see `roster-storage.ts`). */
+  clearEpoch: number;
+  /**
+   * On the `working` row only: the EXACT candidate this roster was promoted from,
+   * or absent when it came from an import or any other non-candidate source.
+   *
+   * Storage metadata, deliberately NOT part of the roster document: it is about
+   * where this browser's row came from, so it has no place in the shareable roster
+   * file or in the solved-baseline hash. It needs no Dexie index (nothing queries
+   * by it) and no schema version bump — an optional field on an out-of-line-keyed
+   * store, so rows written before it existed read back with it simply absent.
+   */
+  candidateSource?: { jobId: string; candidateVersion: number };
+}
+
+/** An immutable submission snapshot row, keyed and authorized by `ownerId`. */
+export interface SnapshotRow<TPayload = unknown> {
+  /** `snapshot:<ownerId>`. */
+  key: string;
+  ownerId: string;
+  submissionOrdinal: number;
+  payload: TPayload;
+}
+
+/** One typed metadata row (origin-wide counters and pointers). */
+export interface MetaRow<TValue = unknown> {
+  key: string;
+  value: TValue;
 }

@@ -1,0 +1,20 @@
+id: tailwind-default-palette-utility-tsx
+valid:
+  - |
+    export const A = () => <p className="bg-panel text-ink3">ok</p>;
+  - |
+    export const B = () => <p>bg-black is off-contract, as this sentence says.</p>;
+  - |
+    export const B2 = () => <div className="data-[pressed]:bg-brandtint" />;
+invalid:
+  - |
+    export const C = () => <div className="bg-black/40" />;
+  - |
+    export const D = () => <div className="text-gray-500" />;
+  - |
+    export const E = () => <div className="flex hover:border-black" />;
+  # BOUNDED-REVIEW ROUND 1: bracketed variants used to pass.
+  - |
+    export const F = () => <div className="data-[state=open]:bg-black" />;
+  - |
+    export const G = () => <div className="group-data-[checked]/switch:text-white" />;

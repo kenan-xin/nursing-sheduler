@@ -114,7 +114,7 @@ async function gotoReady(page: Page) {
   // Wait for the hydration COMMIT, not just the store's existence. The built-in
   // row is derived unconditionally, so its presence is the marker that the
   // rehydrate has finished; seeding before that point is silently overwritten by
-  // it (the known non-blocking `ii7.10.4` race). Without this the specs below
+  // by it (the known non-blocking `ii7.10.4` race). Without this the specs below
   // pass on an idle machine and fail under contention — reproduced at 3 failures
   // in 61 runs at 16 workers, including two tests that predate this ticket.
   await page.getByTestId("rule-row-builtin:max-one-shift-per-day").waitFor();

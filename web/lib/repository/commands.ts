@@ -28,6 +28,42 @@ export type ScenarioCommandV1 =
   /** Metadata only: record the emitted Workspace backup. Never a content change. */
   | { type: "record_backup"; backupFingerprint: string | null };
 
+/**
+ * The discriminants of {@link ScenarioCommandV1}, as a VALUE.
+ *
+ * `lib/capability` restates this list so a help answer can say truthfully which write
+ * paths a screen has. That restatement used to be kept honest by reading this file as
+ * source text, because the authority boundary forbids `lib/capability` importing the
+ * repository. The list is now exported instead, and the two type predicates below make
+ * it exhaustive in both directions: add an arm to the union without adding it here (or
+ * the reverse) and `tsc --noEmit` fails, before any test runs.
+ */
+export const SCENARIO_COMMAND_TYPES_V1 = [
+  "patch_scenario",
+  "set_req_data",
+  "replace_scenario",
+  "record_backup",
+] as const;
+
+/** Compile error unless every union arm is listed above. */
+type _EveryArmIsListed =
+  ScenarioCommandV1["type"] extends (typeof SCENARIO_COMMAND_TYPES_V1)[number]
+    ? true
+    : [
+        "missing from SCENARIO_COMMAND_TYPES_V1",
+        Exclude<ScenarioCommandV1["type"], (typeof SCENARIO_COMMAND_TYPES_V1)[number]>,
+      ];
+/** Compile error unless every listed name is a real union arm. */
+type _EveryListedIsAnArm =
+  (typeof SCENARIO_COMMAND_TYPES_V1)[number] extends ScenarioCommandV1["type"]
+    ? true
+    : [
+        "not a command",
+        Exclude<(typeof SCENARIO_COMMAND_TYPES_V1)[number], ScenarioCommandV1["type"]>,
+      ];
+const _exhaustive: [_EveryArmIsListed, _EveryListedIsAnArm] = [true, true];
+void _exhaustive;
+
 /** Whether a command changes scenario CONTENT (and so advances `documentRevision`). */
 export function isContentCommand(command: ScenarioCommandV1): boolean {
   return command.type !== "record_backup";

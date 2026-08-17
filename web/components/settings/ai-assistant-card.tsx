@@ -18,8 +18,9 @@
 // this browser profile can read the key and use the provider account, and the copy
 // below says exactly that.
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { FaTriangleExclamation } from "react-icons/fa6";
 import { useAuthorityStore } from "@/lib/store";
 import { toast } from "sonner";
 import {
@@ -66,20 +67,30 @@ async function fetchCatalog(): Promise<ModelCatalog> {
  * sure?" is stronger here anyway: the consequence text renders in place, right under
  * the control, instead of in a box that covers the settings the user is reasoning
  * about.
+ *
+ * `history` CAPTURES the scenario id at confirmation time so a later selection change
+ * cannot redirect the clear to a different scenario.
  */
-type PendingClear = null | "history" | "all";
+type PendingClear = null | { target: "history"; scenarioId: string } | { target: "all" };
 
 export function AiAssistantCard() {
   const settings = useAssistantStore((state) => state.settings);
   const hydrated = useAssistantStore((state) => state.hydrated);
   const ready = useAssistantStore(selectReady);
   const interruption = useAssistantStore((state) => state.interruption);
+  const clearResult = useAssistantStore((state) => state.clearResult);
   const scenarioId = useAuthorityStore((state) => state.scenarioId);
   // Every configuration action is an interruption first (see
   // `lib/ai/assistant/store.ts`), and each one needs to know which scenario's live
   // work it is closing.
   const scope = { threadId: null, scenarioId };
   const [pendingClear, setPendingClear] = useState<PendingClear>(null);
+  const [clearing, setClearing] = useState(false);
+  // A REF AS WELL AS STATE. `clearing` disables the controls, but only after React has
+  // re-rendered; two clicks dispatched inside one batch would both see an enabled
+  // button and start two deletions. The ref is true the instant the first click is
+  // handled, so the second is refused synchronously.
+  const clearingRef = useRef(false);
 
   const [keyDraft, setKeyDraft] = useState("");
   const [replacing, setReplacing] = useState(false);
@@ -213,6 +224,51 @@ export function AiAssistantCard() {
       setProbe({ kind: "failed", code: AI_SETUP_CODES.providerUnreachable });
     }
   }
+
+  /**
+   * Run a clear and AWAIT it through the FULL promise lifetime — including outcome
+   * persistence/retirement that happens after the interruption settles. The `clearing`
+   * state stays true until the returned promise resolves, preventing duplicate clicks
+   * and early re-enable. For history clears, uses the CAPTURED scenario id, not the
+   * component's current selection.
+   *
+   * `retryOfOperationId` carries the identity of the notice being retried, so a
+   * success retires exactly the tombstone the user acted on and nothing newer.
+   */
+  async function runClear(
+    target: "history" | "all",
+    capturedScenarioId?: string,
+    retryOfOperationId?: string,
+  ) {
+    if (clearingRef.current) return;
+    clearingRef.current = true;
+    setClearing(true);
+    try {
+      if (target === "all") {
+        await assistantActions.clearAll(scope);
+      } else if (capturedScenarioId) {
+        await assistantActions.clearHistory(
+          { threadId: null, scenarioId: capturedScenarioId },
+          { retryOfOperationId: retryOfOperationId ?? null },
+        );
+      }
+    } catch {
+      // The clear actions are total by contract and classify their own failures into
+      // `clearResult`. Containing anything that still escapes here is what keeps a
+      // discarded promise from becoming an unhandled rejection instead of a
+      // re-enabled button.
+    } finally {
+      clearingRef.current = false;
+      setClearing(false);
+    }
+  }
+
+  // The notice is shown when the most recent clear did not complete. `clearResult` is
+  // null after a successful clear and on first load, so this is truthy only for
+  // incomplete/failed — both of which need the same actionable warning.
+  const showClearNotice =
+    clearResult !== null &&
+    (clearResult.status === "incomplete" || clearResult.status === "failed");
 
   return (
     <Card data-testid="ai-assistant-card">
@@ -417,13 +473,105 @@ export function AiAssistantCard() {
             </p>
           )}
 
+          {showClearNotice && (
+            <div
+              className="flex items-start gap-2.5 rounded-card border border-warn bg-warntint p-3.5"
+              role="alert"
+              data-testid="ai-clear-incomplete"
+            >
+              <FaTriangleExclamation className="mt-0.5 size-4 shrink-0 text-warn" aria-hidden />
+              <div className="flex min-w-0 flex-col gap-2">
+                <div>
+                  {clearResult!.scope === "history" ? (
+                    <>
+                      <div className="mb-1 text-meta font-semibold text-warnink">
+                        History was not cleared
+                      </div>
+                      <p className="text-meta text-warnink">
+                        The assistant history changed before it could be cleared. Newer
+                        conversations were kept. Try clearing history again.
+                      </p>
+                    </>
+                  ) : clearResult!.scope === "all" &&
+                    clearResult!.configurationOutcome === "deleted" ? (
+                    <>
+                      <div className="mb-1 text-meta font-semibold text-warnink">
+                        Some AI data could not be cleared
+                      </div>
+                      <p className="text-meta text-warnink">
+                        Your API key was removed, but some assistant history or diagnostics may
+                        remain in this browser. Try clearing again.
+                      </p>
+                    </>
+                  ) : clearResult!.scope === "all" &&
+                    clearResult!.configurationOutcome === "retained" ? (
+                    /* THE CLEAR NEVER REACHED ITS FENCE, so the key is still here. Saying
+                       it was removed would be false, and would send the user off to
+                       re-enter a credential they still have. */
+                    <>
+                      <div className="mb-1 text-meta font-semibold text-warnink">
+                        Some AI data could not be cleared
+                      </div>
+                      <p className="text-meta text-warnink">
+                        Your API key and settings were kept, but the clear did not finish. Try
+                        clearing again.
+                      </p>
+                    </>
+                  ) : (
+                    /* NOTHING CAN BE CLAIMED EITHER WAY. Either no scope was ever read, or
+                       a global clear failed where storage cannot say which side of the
+                       fence it died on. Both offer no action: a retry would pick a scope on
+                       the user's behalf, and the only one wide enough to be safe is the one
+                       that deletes everything. */
+                    <>
+                      <div className="mb-1 text-meta font-semibold text-warnink">
+                        Local AI data could not be read
+                      </div>
+                      <p className="text-meta text-warnink">
+                        The browser could not confirm the current AI data state. Try again after
+                        local storage is available.
+                      </p>
+                    </>
+                  )}
+                </div>
+                {/* An unproven configuration outcome carries no action, exactly like an
+                    unknown scope: there is nothing here it would be safe to retry. */}
+                {clearResult!.scope !== null && clearResult!.configurationOutcome !== "unknown" && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={async () => {
+                      await runClear(
+                        clearResult!.scope === "history" ? "history" : "all",
+                        clearResult!.scope === "history"
+                          ? (clearResult!.scenarioId ?? undefined)
+                          : undefined,
+                        clearResult!.operationId ?? undefined,
+                      );
+                    }}
+                    disabled={
+                      interruption !== null ||
+                      clearing ||
+                      (clearResult!.scope === "history" && !clearResult!.scenarioId)
+                    }
+                    data-testid="ai-clear-retry"
+                  >
+                    {clearResult!.scope === "history"
+                      ? "Try clearing history again"
+                      : "Try clearing again"}
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+
           {pendingClear === null ? (
             <div className="flex flex-wrap items-center gap-2">
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => setPendingClear("history")}
-                disabled={!scenarioId || interruption !== null}
+                onClick={() => scenarioId && setPendingClear({ target: "history", scenarioId })}
+                disabled={!scenarioId || interruption !== null || clearing}
                 data-testid="ai-clear-history"
               >
                 Clear this schedule&apos;s conversation
@@ -431,8 +579,8 @@ export function AiAssistantCard() {
               <Button
                 variant="destructive-outline"
                 size="sm"
-                onClick={() => setPendingClear("all")}
-                disabled={interruption !== null}
+                onClick={() => setPendingClear({ target: "all" })}
+                disabled={interruption !== null || clearing}
                 data-testid="ai-clear-all"
               >
                 Clear all AI data
@@ -441,7 +589,7 @@ export function AiAssistantCard() {
           ) : (
             <div className="flex flex-col gap-2" data-testid="ai-clear-confirm">
               <p className="text-meta text-ink">
-                {pendingClear === "history"
+                {pendingClear.target === "history"
                   ? "Delete this schedule's conversation? Your key, model choice and other schedules' conversations are kept."
                   : "Delete every local AI setting, the stored key, and all conversations? You will need to enter a key again to use the assistant."}
               </p>
@@ -449,18 +597,22 @@ export function AiAssistantCard() {
                 <Button
                   variant="destructive"
                   size="sm"
-                  onClick={() => {
+                  onClick={async () => {
                     const target = pendingClear;
                     setPendingClear(null);
-                    if (target === "all") {
-                      void assistantActions.clearAll(scope);
-                    } else if (scenarioId) {
-                      void assistantActions.clearHistory({ threadId: null, scenarioId });
+                    // AWAITED, not discarded. `runClear` owns the pending state for the
+                    // whole promise; awaiting it here is what makes that ownership
+                    // legible at the call site rather than implied by a `void`.
+                    if (target.target === "all") {
+                      await runClear("all");
+                    } else {
+                      await runClear("history", target.scenarioId);
                     }
                   }}
+                  disabled={clearing}
                   data-testid="ai-clear-confirm-yes"
                 >
-                  {pendingClear === "history" ? "Delete conversation" : "Delete all AI data"}
+                  {pendingClear.target === "history" ? "Delete conversation" : "Delete all AI data"}
                 </Button>
                 <Button
                   variant="outline"

@@ -1,7 +1,6 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import postcss, { type ChildNode, type Container } from "postcss";
-import ts from "typescript";
 import { describe, expect, it } from "vitest";
 import { V2_OWNERS, V2_STYLE_OWNER_FILES, type V2Owner } from "../e2e/support/v2-surface-matrix";
 import {
@@ -13,7 +12,19 @@ import {
 } from "../e2e/support/v2-owner-selection";
 
 // ---------------------------------------------------------------------------
-// F4 — the STATIC half of the split No-Black enforcement.
+// F4 — the STATIC CSS half of the split No-Black enforcement.
+//
+// custom-AST ticket 3 SPLIT this file. It used to be both a PostCSS stylesheet scanner and
+// a hand-written TypeScript compiler walk over TS/TSX; the second is gone (see the note at
+// the "TS/TSX provenance — MIGRATED OUT" marker below), and what is left is the stylesheet
+// scanner, its adversarial fixtures, the owner-selection contract and the emitted-theme
+// alias table. The TSX guarantees now live in narrow declarative ast-grep rules that run on
+// every `pnpm lint` across all of `app/**` and `components/**`, with no owner scoping.
+//
+// The retained filesystem access is therefore: `readFileSync` of `.css` files only, plus a
+// `readdirSync` LISTING of `app/` and `components/` used for the ownership-coverage claim
+// below. That listing reads no file's contents — it is a path manifest, and "every
+// presentation source belongs to exactly one owner" is a claim about the manifest.
 //
 // `getComputedStyle()` discards where a value came from: a dark-mode shadow that
 // resolves to `rgba(0, 0, 0, 0.34)` looks identical whether it arrived through
@@ -307,169 +318,41 @@ export function scanCssSource(file: string, css: string): StyleFinding[] {
 }
 
 // ===========================================================================
-// TS/TSX provenance scanner
+// TS/TSX provenance — MIGRATED OUT (custom-AST ticket 3)
 // ===========================================================================
-
-/** Utility families whose `-black` form bypasses the ink ramp entirely. */
-const BLACK_UTILITY =
-  /^(?:bg|text|border|ring|fill|stroke|from|to|via|outline|decoration|caret|accent|divide|shadow|placeholder)-black(?:\/\d{1,3})?$/;
-
-/** The only shadow utility suffixes the emitted theme actually publishes. */
-const ALLOWED_SHADOW_SUFFIXES = new Set([
-  "1",
-  "2",
-  "3",
-  "edge",
-  "well",
-  "side",
-  "dialog",
-  "toast",
-  "none",
-  "inherit",
-  "initial",
-  "unset",
-]);
-
-/** Strip Tailwind variant prefixes (`hover:`, `dark:`, `pointer-coarse:`, `!`). */
-function bareUtility(token: string): string {
-  const last = token.lastIndexOf(":");
-  const bare = last === -1 ? token : token.slice(last + 1);
-  return bare.replace(/^!/, "");
-}
-
-/**
- * Judge one whitespace-delimited token from a class-list-shaped string literal.
- * Returns a reason, or null when the token is fine.
- */
-export function judgeSourceToken(token: string): string | null {
-  const bare = bareUtility(token);
-
-  if (BLACK_UTILITY.test(bare)) {
-    return `uses the Tailwind default-palette utility ${JSON.stringify(bare)}. The ink ramp is warm espresso; there is no black in it.`;
-  }
-
-  if (bare.startsWith("shadow-")) {
-    const suffix = bare.slice("shadow-".length);
-    if (suffix.startsWith("[")) {
-      return `hand-authors the arbitrary elevation ${JSON.stringify(bare)}. Every shadow must alias one of the six --sh-* tokens, even when the value happens to match.`;
-    }
-    if (!ALLOWED_SHADOW_SUFFIXES.has(suffix)) {
-      return `uses the untokened shadow utility ${JSON.stringify(bare)}. The published set is shadow-1/2/3/edge/well/side/dialog/toast.`;
-    }
-  }
-
-  // An arbitrary value on any colour-bearing family, inspected for its contents.
-  const arbitrary = bare.match(/^[\w-]+-\[(.+)\]$/);
-  if (arbitrary) {
-    const inner = arbitrary[1].replace(/_/g, " ");
-    for (const color of findColorLiterals(inner)) {
-      if (isBlackLiteral(color)) {
-        return `hides the black literal ${JSON.stringify(color.text)} inside the arbitrary value ${JSON.stringify(bare)}.`;
-      }
-      if (isTranslucentLiteral(color)) {
-        return `hides the translucent literal ${JSON.stringify(color.text)} inside the arbitrary value ${JSON.stringify(bare)} — a raw scrim. Use bg-scrim.`;
-      }
-    }
-  }
-
-  return null;
-}
-
-/** Judge a whole string literal's worth of tokens, plus any bare colour literal. */
-export function judgeSourceString(text: string): string[] {
-  const reasons: string[] = [];
-
-  for (const token of text.split(/\s+/)) {
-    if (token === "") continue;
-    const reason = judgeSourceToken(token);
-    if (reason) reasons.push(reason);
-  }
-
-  // A raw CSS colour anywhere in a source string — an inline style, a chart
-  // series, a `style={{ boxShadow: "..." }}`. The `black` KEYWORD is deliberately
-  // not matched here: unlike CSS, a source string is as likely to be prose as a
-  // value, and "never neutral grey or black" in a documentation blurb is not a
-  // contract violation. Every actual authoring form (#000, rgb(0 0 0), hsl with
-  // zero lightness) is still caught.
-  for (const color of findColorLiterals(text)) {
-    if (color.text.toLowerCase() === "black") continue;
-    if (isBlackLiteral(color)) {
-      reasons.push(`authors the black colour literal ${JSON.stringify(color.text)}.`);
-    }
-  }
-
-  return reasons;
-}
-
-/**
- * Scan a TS/TSX source's STRING and TEMPLATE literals.
- *
- * Deliberately AST-based rather than a regex over the raw text. `/design-system`
- * is a documentation page that talks about `shadow-[…]` and `bg-black/*` in
- * prose, and a text scan cannot tell a rule being described from a rule being
- * broken. JSX text and comments are not literals, so they are never inspected;
- * a class list always is.
- */
-export function scanTsSource(file: string, source: string): StyleFinding[] {
-  const findings: StyleFinding[] = [];
-  const sourceFile = ts.createSourceFile(
-    file,
-    source,
-    ts.ScriptTarget.ESNext,
-    true,
-    ts.ScriptKind.TSX,
-  );
-
-  const record = (node: ts.Node, text: string) => {
-    for (const reason of judgeSourceString(text)) {
-      findings.push({
-        file,
-        line: sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1,
-        snippet: text.length > 120 ? `${text.slice(0, 117)}…` : text,
-        reason,
-      });
-    }
-  };
-
-  /**
-   * A template chunk that abuts an interpolation carries a PARTIAL token:
-   * `` `shadow-${name}` `` has the head text `"shadow-"`, which is not a
-   * utility anyone wrote. The partial fragment is dropped, and only at a
-   * boundary the fragment actually touches — a chunk ending in whitespace ends
-   * on a complete token and keeps it.
-   *
-   * The cost is real and bounded: a class assembled as `` `bg-${x}` `` is
-   * invisible to this gate. That is the runtime scanner's half of the split —
-   * it judges the paint that reaches the screen, whatever built the string.
-   */
-  const recordChunk = (node: ts.Node, text: string, partialStart: boolean, partialEnd: boolean) => {
-    let out = text;
-    if (partialStart && !/^\s/.test(out)) out = out.replace(/^\S+/, "");
-    if (partialEnd && !/\s$/.test(out)) out = out.replace(/\S+$/, "");
-    record(node, out);
-  };
-
-  const visit = (node: ts.Node) => {
-    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
-      record(node, node.text);
-    } else if (ts.isTemplateExpression(node)) {
-      recordChunk(node.head, node.head.text, false, true);
-      const spans = node.templateSpans;
-      spans.forEach((span, i) =>
-        recordChunk(span.literal, span.literal.text, true, i < spans.length - 1),
-      );
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(sourceFile);
-
-  return findings;
-}
-
-/** Dispatch on extension. */
-export function scanSource(file: string, content: string): StyleFinding[] {
-  return file.endsWith(".css") ? scanCssSource(file, content) : scanTsSource(file, content);
-}
+//
+// This is where the hand-written TypeScript compiler walk used to live: an
+// `import ts from "typescript"`, a `ts.createSourceFile` per file, a visitor over string,
+// no-substitution-template and template-expression nodes, a partial-token trimmer for
+// chunks abutting an interpolation, and a token judge (`judgeSourceToken` /
+// `judgeSourceString`) with its own utility-family regex, allowed-shadow-suffix set and
+// variant-prefix stripper. Roughly 165 lines of owned parser, plus its own fixture suite.
+//
+// It is now three pairs of declarative ast-grep rules, each with valid/invalid fixtures and
+// a snapshot:
+//
+//   • `tailwind-default-palette-utility(-tsx)` — the `-black` family, widened to the whole
+//     Tailwind default palette, and still declining to fire on the guide's own prose about
+//     `bg-black/*` because a `/*` glob is not a `/40` opacity suffix;
+//   • `untokened-shadow-utility(-tsx)` — `shadow-[…]` and Tailwind's default shadow scale;
+//   • `authored-color-literal(-tsx)` — any authored hex / rgb() / hsl(), which is strictly
+//     more than the black-and-translucent subset the walk rejected.
+//
+// Three properties came along unchanged, and are worth naming because they were the reason
+// the walk was AST-based rather than a text grep in the first place:
+//
+//   1. JSX text and comments are never inspected — the rules match `string_fragment`, and
+//      JSX text is `jsx_text`, so the guide can keep describing the rules it embodies;
+//   2. a template literal's static chunks ARE inspected, because `string_fragment` covers
+//      them, while a fragment abutting an interpolation (`` `shadow-${x}` `` → `"shadow-"`)
+//      carries no complete utility and so matches nothing — the partial-token trimmer is
+//      unnecessary rather than reimplemented;
+//   3. the same limitation is retained and still declared: a class assembled at runtime is
+//      invisible to any syntax rule, which is the browser scanner's half of the split.
+//
+// The CSS scanner below is UNCHANGED and stays here. CSS is not TS/JS program analysis, it
+// is a PostCSS parse of a stylesheet, and `app/globals.css` plus the owner's stylesheets are
+// this file's audited format-specific read.
 
 // ===========================================================================
 // The owner-selected scan
@@ -499,6 +382,14 @@ const ALL_SOURCES = allPresentationSources();
 const SELECTED_PATTERNS = selectStyleOwnerPatternsFromEnv();
 const SELECTOR = activeSelector(STYLE_OWNER_ENV);
 const SELECTED_FILES = ALL_SOURCES.filter((f) => matchesAnyGlob(f, SELECTED_PATTERNS));
+
+/**
+ * The stylesheets among them — the only files whose CONTENTS this suite reads.
+ *
+ * The `.tsx` members of `SELECTED_FILES` are still enumerated, because ownership coverage is
+ * a claim about the whole presentation manifest, but they are never opened here.
+ */
+const SELECTED_CSS = SELECTED_FILES.filter((f) => f.endsWith(".css"));
 
 // ===========================================================================
 // Owner selection
@@ -620,103 +511,45 @@ describe("CSS scanner — provenance, not spelling", () => {
   });
 });
 
-describe("source scanner — class lists, never prose", () => {
-  it.each([
-    "bg-black",
-    "bg-black/40",
-    "text-black",
-    "border-black",
-    "shadow-black",
-    "hover:bg-black",
-    "dark:text-black",
-  ])("rejects the utility %s", (token) => {
-    expect(judgeSourceToken(token)).not.toBeNull();
-  });
-
-  it.each([
-    "shadow-1",
-    "shadow-2",
-    "shadow-3",
-    "shadow-edge",
-    "shadow-well",
-    "shadow-side",
-    "shadow-dialog",
-    "shadow-toast",
-    "shadow-none",
-    "hover:shadow-2",
-  ])("accepts the published utility %s", (token) => {
-    expect(judgeSourceToken(token)).toBeNull();
-  });
-
-  it.each(["shadow-sm", "shadow-md", "shadow-lg", "shadow-xl", "shadow-2xl"])(
-    "rejects the untokened Tailwind default %s",
-    (token) => {
-      expect(judgeSourceToken(token)).toMatch(/untokened/);
-    },
-  );
-
-  it("rejects an arbitrary shadow even when its value is a canonical token", () => {
-    expect(judgeSourceToken("shadow-[var(--sh-1)]")).toMatch(/arbitrary elevation/);
-    expect(judgeSourceToken("shadow-[inset_0_2px_0_var(--color-brand)]")).toMatch(
-      /arbitrary elevation/,
-    );
-  });
-
-  it("rejects a black hidden inside an arbitrary value", () => {
-    expect(judgeSourceToken("bg-[rgba(0,0,0,0.4)]")).toMatch(/black literal/);
-    expect(judgeSourceToken("bg-[#000000]")).toMatch(/black literal/);
-    expect(judgeSourceToken("bg-[rgba(17,24,22,0.52)]")).toMatch(/raw scrim/);
-  });
-
-  it("rejects a raw black literal in any source string", () => {
-    expect(judgeSourceString('{ boxShadow: "0 0 4px #000" }')).not.toEqual([]);
-    expect(judgeSourceString("rgba(0, 0, 0, 0.5)")).not.toEqual([]);
-  });
-
-  it("does not fire on documentation prose that NAMES the rule", () => {
-    // The design-system guide says these things out loud, and must be able to.
-    expect(
-      judgeSourceString(
-        "All are warm brown-tinted in light mode — never neutral grey or black — and all re-tint per theme.",
-      ),
-    ).toEqual([]);
-    expect(
-      judgeSourceString("Raw bg-black/* and fixed near-black RGBA overlays are off-contract."),
-    ).toEqual([]);
-  });
-
-  it("reads class lists but not JSX text or comments", () => {
-    const source = [
-      "// shadow-[inset_0_2px_0_red] in a comment is not authored style",
-      'export const A = () => <p className="text-ink">shadow-[inset_0_2px_0_red]</p>;',
-    ].join("\n");
-    expect(scanTsSource("fixture.tsx", source)).toEqual([]);
-  });
-
-  it("reads a template literal's static chunks", () => {
-    const source = "const cls = `border ${x ? 'shadow-[inset_0_2px_0_red]' : ''} p-2`;";
-    expect(scanTsSource("fixture.tsx", source).length).toBeGreaterThan(0);
-  });
-});
-
 // ===========================================================================
 // The real scan
 // ===========================================================================
 
-describe(`No-Black provenance — ${SELECTOR} sources`, () => {
-  it("selects at least one file to scan", () => {
+describe(`No-Black provenance — ${SELECTOR} stylesheets`, () => {
+  it("selects at least one presentation source", () => {
     // An empty selection and a clean selection produce the same empty findings
     // list, and those two outcomes must never be confused.
     expect(SELECTED_FILES, `patterns: ${SELECTED_PATTERNS.join(", ")}`).not.toEqual([]);
   });
 
-  it("no selected source authors black, a raw scrim, or a shadow literal", () => {
-    const findings = SELECTED_FILES.flatMap((file) =>
-      scanSource(file, readFileSync(join(WEB_ROOT, file), "utf8")),
+  it("the presentation manifest contains stylesheets at all", () => {
+    // Owner-INDEPENDENT non-vacuity, which is the honest shape after the split. A given
+    // selector may legitimately own no stylesheet -- `R2c` owns route components and the
+    // foundation owns `globals.css` -- and under that selector the scan below covers zero
+    // files and says so in its own message. What must never be true is that the manifest
+    // itself has stopped finding stylesheets, because then EVERY selector would scan
+    // nothing and every run would be green for the wrong reason.
+    //
+    // The `.tsx` half is no longer owner-scoped at all: `authored-color-literal(-tsx)`,
+    // `tailwind-default-palette-utility(-tsx)` and `untokened-shadow-utility(-tsx)` run on
+    // every file under `app/**` and `components/**` on every lint, whoever is selected.
+    expect(ALL_SOURCES.filter((file) => file.endsWith(".css"))).not.toEqual([]);
+  });
+
+  it("no selected stylesheet authors black, a raw scrim, or a shadow literal", () => {
+    // CSS ONLY. The `.tsx` half of this scan was a hand-written TypeScript compiler walk
+    // (`ts.createSourceFile` + a literal visitor) and is now four ast-grep rules --
+    // `authored-color-literal(-tsx)`, `tailwind-default-palette-utility(-tsx)` and
+    // `untokened-shadow-utility(-tsx)` -- which run on every file under `app/**` and
+    // `components/**` on every `pnpm lint`, with no owner scoping and no ordering
+    // dependency on this suite.
+    const findings = SELECTED_CSS.flatMap((file) =>
+      scanCssSource(file, readFileSync(join(WEB_ROOT, file), "utf8")),
     );
     expect(
       findings,
-      `${findings.length} provenance violation(s) in the ${SELECTOR} owner set:\n${formatFindings(findings)}`,
+      `${findings.length} provenance violation(s) across ${SELECTED_CSS.length} ` +
+        `stylesheet(s) in the ${SELECTOR} owner set:\n${formatFindings(findings)}`,
     ).toEqual([]);
   });
 });

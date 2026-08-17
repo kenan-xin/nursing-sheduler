@@ -98,6 +98,10 @@ driver() {
 
 driver_result() { sed -n 's/^GATE_RESULT://p' | tail -n1; }
 
+# The reserve probe is streamed the same way, but stands up its own worker-free app
+# rather than driving the store directly. See its module docstring.
+RESERVE_PROBE="docker/reserve_gate_probe.py"
+
 wait_healthy() {
   local svc="$1" cid st=none
   cid="$($COMPOSE ps -q "$svc" 2>/dev/null)"
@@ -154,6 +158,17 @@ expect_reach() {  # id net host port want-yes/no label
   local got; got="$(probe "$1" "$2" "$3" "$4")"
   [ "$got" = "$5" ] && ok "$6" || bad "$6 (network reachability = '$got', expected '$5')"
 }
+
+# Preflight: every bounded probe below shells out to GNU `timeout`, which macOS does
+# not ship. Without it each probe returns `probe-error` and the gate reports eight
+# confusing reachability failures instead of one actionable line -- a missing
+# toolchain that reads like a broken deployment. Fail loudly and name the fix.
+if ! command -v timeout >/dev/null 2>&1; then
+  echo "ERROR: GNU \`timeout\` is not on PATH, so the bounded probes cannot run." >&2
+  echo "       macOS: brew install coreutils, then prepend the gnubin directory:" >&2
+  echo "       PATH=\"/opt/homebrew/opt/coreutils/libexec/gnubin:\$PATH\" make verify-deploy" >&2
+  exit 1
+fi
 
 echo "== PUBLIC_ORIGIN validator fixture matrix =="
 if python3 docker/validate_origin.py selftest; then
@@ -282,6 +297,31 @@ printf '%s' "$ai_info" | grep -q '"list":false' \
   && ok "AI runtime advertises no server-side thread history" \
   || bad "AI runtime advertised server-side thread endpoints"
 
+# A stop aimed at a DIFFERENT launch instance must settle as detached, not as a
+# failure and not as a success. This is the assembled half of the restart contract:
+# the unit suite proves the handler's branch, and this proves the DEPLOYED runtime
+# behaves that way behind the real Next server, so a browser whose turn outlived a
+# restart closes its epoch instead of retrying against a 404 forever.
+ai_stop_mismatch="$($COMPOSE exec -T web wget -q -O - \
+  --header='x-nurse-ai-runtime-instance: not-this-launch' --post-data='' \
+  http://127.0.0.1:3000/api/copilotkit/agent/scheduler/stop/vd-unknown-thread 2>&1 || true)"
+if printf '%s' "$ai_stop_mismatch" | grep -q '"detached":true' \
+  && printf '%s' "$ai_stop_mismatch" | grep -q 'runtime_instance_mismatch'; then
+  ok "a stop aimed at another launch instance detaches"
+else
+  bad "instance-mismatch stop did not detach (body: $ai_stop_mismatch)"
+fi
+# Sensitivity: without the mismatched header the SAME unknown thread must answer
+# "nothing to stop" rather than "detached" -- otherwise the assertion above would
+# pass on any response that happened to mention detachment.
+ai_stop_unknown="$($COMPOSE exec -T web wget -q -O - --post-data='' \
+  http://127.0.0.1:3000/api/copilotkit/agent/scheduler/stop/vd-unknown-thread 2>&1 || true)"
+if printf '%s' "$ai_stop_unknown" | grep -q 'runtime_instance_mismatch'; then
+  bad "an ordinary unknown-thread stop was reported as an instance mismatch"
+else
+  ok "an unknown-thread stop is an idempotent no-op, not a detachment"
+fi
+
 docker rm -f "$AI_MULTI_NAME" >/dev/null 2>&1 || true
 ai_multi_out="$(timeout --foreground --kill-after="${PROBE_KILL_GRACE_SECONDS}s" 20s \
   docker run --rm --name "$AI_MULTI_NAME" --network "$APP_NETWORK" \
@@ -294,6 +334,86 @@ if [ "$ai_multi_rc" -ne 0 ] && printf '%s' "$ai_multi_out" | grep -q 'NS_WEB_REP
 else
   bad "web did not fail closed on NS_WEB_REPLICAS=2 (rc=$ai_multi_rc, output: $ai_multi_out)"
 fi
+
+echo "== diagnostic job purpose survives the deployed HTTP boundary (T09) =="
+# Two separate claims, proved separately below. FIRST, against the LIVE gate backend:
+# that the purpose enum genuinely crosses the real HTTP boundary in both directions --
+# a declared diagnostic is admitted AS a diagnostic, an undeclared job is ordinary,
+# and an unrecognised purpose fails closed instead of being silently admitted.
+purpose_probe="$(bounded_probe "${PROJECT}-probe-purpose" 30 "$APP_NETWORK" \
+"import json, urllib.error, urllib.parse, urllib.request
+yaml = '\n'.join([
+    'apiVersion: alpha',
+    'dates:',
+    '  range:',
+    '    startDate: 2025-01-01',
+    '    endDate: 2025-01-01',
+    'people:',
+    '  items:',
+    '    - id: alice',
+    'shiftTypes:',
+    '  items:',
+    '    - id: day',
+    'preferences:',
+    '  - type: at most one shift per day',
+    '  - type: shift type requirement',
+    '    shiftType: day',
+    '    requiredNumPeople: 1',
+])
+def submit(purpose):
+    fields = {'yaml_content': yaml}
+    if purpose is not None:
+        fields['purpose'] = purpose
+    request = urllib.request.Request(
+        'http://backend:8000/optimize', data=urllib.parse.urlencode(fields).encode()
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            return response.status, json.loads(response.read().decode())
+    except urllib.error.HTTPError as error:
+        return error.code, {}
+parts = []
+for label, purpose in (('diag', 'assistant_diagnostic'), ('ord', None), ('bogus', 'not_a_purpose')):
+    status, body = submit(purpose)
+    parts.append(label + '=' + str(status) + ':' + str(body.get('request', {}).get('purpose')))
+print('|'.join(parts))")"
+case "$purpose_probe" in
+  "diag=202:assistant_diagnostic|ord=202:ordinary|bogus=400:None")
+    ok "the deployed backend admits, defaults and fail-closes job purpose correctly" ;;
+  *)
+    bad "deployed job-purpose round trip was '$purpose_probe'" ;;
+esac
+
+echo "== seven diagnostics leave the ordinary slot, over real HTTP + real Redis (T09) =="
+# SECOND: the reserve arithmetic itself, in assembled form. The store-level parity
+# suite already proves it across memory, fakeredis and real Redis; what it cannot show
+# is the same boundary reached through a real ASGI server, real HTTP, form parsing and
+# purpose validation, against the private Compose Redis.
+#
+# It cannot run against the LIVE backend above, whose worker would claim the queue out
+# from under the assertions. So the probe stands up its own app with
+# `start_background=False` -- no worker, no maintenance, nothing solved, nothing timed
+# -- in its own Redis namespace on its own loopback port. The result is deterministic
+# rather than a race, and the live backend's keys are never touched.
+#
+# See docker/reserve_gate_probe.py: it fills the seven diagnostic slots, proves the
+# eighth diagnostic is refused as `diagnostic_capacity_reserved` (not as a full
+# queue), proves ordinary work still takes the reserved slot AND jumps to position 1,
+# then proves a further ordinary job is refused with the OTHER code -- the sensitivity
+# check without which the refusal would prove nothing about the reserve. It deletes
+# every job it created and asserts its namespace is empty.
+reserve_out="$($COMPOSE run --rm --no-deps -T \
+  -e GATE_PREFIX="$GATE_PREFIX_BASE:reserve" \
+  -e JOB_REDIS_URL="redis://redis:6379/0" \
+  --entrypoint python backend - < "$RESERVE_PROBE" 2>&1 || true)"
+reserve_result="$(printf '%s' "$reserve_out" | driver_result)"
+case "$reserve_result" in
+  "OK:7-diagnostics-then-reserved-slot")
+    ok "seven diagnostics fill the queue, the eighth is reserve-refused, ordinary still fits" ;;
+  *)
+    bad "reserve gate did not pass (result='$reserve_result')"
+    printf '%s\n' "$reserve_out" | tail -n 15 | sed 's/^/        /' ;;
+esac
 
 echo "== non-root images + one worker =="
 web_uid="$($COMPOSE exec -T web id -u 2>/dev/null | tr -d '\r' || echo '?')"

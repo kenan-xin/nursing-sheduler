@@ -1,0 +1,22 @@
+id: chrome-ink-ramp-pairing
+valid:
+  # The app mark: the accent plane with the accent's own paired ON-colour.
+  - |
+    export const A = () => <span className="rounded-chip bg-chrome text-onbrand" />;
+  # The mode toggle's active segment: the L1 plane with brand ink.
+  - |
+    export const B = () => <span className="bg-surface font-bold text-brandink shadow-1" />;
+  # The ordinary ink ramp steps are not this rule's business.
+  - |
+    export const C = () => <span className="text-ink2" />;
+  - |
+    export const D = () => <span className="text-ink3" />;
+invalid:
+  # The retired v1 pairing.
+  - |
+    export const E = () => <span className="bg-chrome text-on-ink" />;
+  - |
+    export const F = () => <span className="bg-ink text-on-ink" />;
+  # The ink ramp's base step on the accent plane: it inverts.
+  - |
+    export const G = () => <span className="bg-chrome text-ink" />;

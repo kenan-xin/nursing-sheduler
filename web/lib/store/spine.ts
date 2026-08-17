@@ -17,34 +17,100 @@
 // not exist during SSR — and the app renders the shell on the server.
 
 import { NurseSchedulerDb } from "@/lib/repository";
+import { createEmptyScenarioUiState } from "@/lib/scenario";
 import {
   resolveTabId,
   resolveTabIdentity,
   ScenarioAuthority,
   useAuthorityStore,
   type OwnershipHint,
+  type ScenarioAuthorityConfig,
 } from "./authority";
 import { createHotStore, type HotStore } from "./hot-store";
-import { createScenarioStore, type ScenarioStore } from "./scenario-store";
+import {
+  createScenarioProjection,
+  type ScenarioProjection,
+  type ScenarioProjectionHandle,
+  type ScenarioProjectionWriter,
+  type ScenarioStoreState,
+} from "./scenario-store";
 
 export interface StateSpine {
-  scenario: ScenarioStore;
+  scenario: ScenarioProjection;
   hot: HotStore;
 }
 
-/** Create a projection + hot store pair (the app singletons, or a test spine). */
-export function createStateSpine(): StateSpine {
-  return { scenario: createScenarioStore(), hot: createHotStore() };
-}
+// THE APP PROJECTION AND ITS WRITER. The handle is a module-local `const` and is
+// never exported, in any shape, so the write capability for the projection every
+// component reads is unforgeable outside this file: `createScenarioProjection()`
+// hands a caller a different, unwired store. What leaves this module is the read
+// face, plus the two NAMED commands below — not a mutator anyone can alias.
+const appScenario = createScenarioProjection();
+const appHot = createHotStore();
+
+let publishFault: Error | null = null;
+
+// The handle the authority actually receives. Identical to `appScenario` except for
+// the fault gate, which exists because "the durable commit landed and the view never
+// showed it" is a real, tested branch (`reloadRequired`) that cannot otherwise be
+// reached without a real IndexedDB failure.
+const appHandle: ScenarioProjectionHandle = Object.freeze({
+  read: appScenario.read,
+  write: Object.freeze({
+    replace(next: ScenarioStoreState): void {
+      if (publishFault) throw publishFault;
+      appScenario.write.replace(next);
+    },
+  }) satisfies ScenarioProjectionWriter,
+});
 
 /** The app-wide state spine singleton. */
-export const stateSpine = createStateSpine();
+export const stateSpine: StateSpine = Object.freeze({
+  scenario: appScenario.read,
+  hot: appHot,
+});
 
-/** The app-wide scenario projection (hook + vanilla api). Read-only by contract. */
-export const useScenarioStore = stateSpine.scenario;
+/** The app-wide scenario projection (hook + vanilla api). Read-only by construction. */
+export const useScenarioStore = appScenario.read;
 
 /** The app-wide hot ephemeral store (hook + vanilla api). */
-export const useHotStore = stateSpine.hot;
+export const useHotStore = appHot;
+
+/**
+ * Build an authority bound to the APP projection.
+ *
+ * This is the seam that lets the writer stay private: `ScenarioAuthority` is the one
+ * legitimate writer of scenario content, and it receives the handle here rather than
+ * from its caller. The test harness comes through the same door, so nothing needs a
+ * back channel that ordinary code could also walk through.
+ */
+export function createAppScenarioAuthority(
+  config: Omit<ScenarioAuthorityConfig, "scenario" | "hot">,
+): ScenarioAuthority {
+  return new ScenarioAuthority({ ...config, scenario: appHandle, hot: appHot });
+}
+
+/**
+ * Make every publish into the app projection throw until the returned restore runs.
+ *
+ * Test-only fault injection for the "committed durably, never shown" path. Note what
+ * it is NOT: it grants no ability to write the projection, only to make a write fail,
+ * so it is not a way back to the mutator this module exists to withhold.
+ */
+export function failScenarioPublish(error: Error): () => void {
+  publishFault = error;
+  return () => {
+    publishFault = null;
+  };
+}
+
+/**
+ * Empty the app projection. A named command with a fixed effect — the only write the
+ * test harness needs, and not a general setter it could aim anywhere else.
+ */
+export function resetScenarioProjection(): void {
+  appScenario.write.replace({ ...createEmptyScenarioUiState(), backupFingerprint: null });
+}
 
 // ---------------------------------------------------------------------------
 // Authority singleton
@@ -64,10 +130,8 @@ export function setOwnershipBroadcast(sink: (hint: OwnershipHint) => void): void
 
 /** The app-wide authority controller, constructed on first use (client-only). */
 export function getScenarioAuthority(): ScenarioAuthority {
-  controller ??= new ScenarioAuthority({
+  controller ??= createAppScenarioAuthority({
     db: new NurseSchedulerDb(),
-    scenario: stateSpine.scenario,
-    hot: stateSpine.hot,
     authority: useAuthorityStore,
     // The synchronous stored id is PROVISIONAL. `initialize()` settles it through the
     // collision probe below before presenting it to the repository — a duplicated tab

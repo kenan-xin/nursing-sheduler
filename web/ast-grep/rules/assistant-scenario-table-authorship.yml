@@ -1,0 +1,38 @@
+id: assistant-scenario-table-authorship
+language: TypeScript
+severity: error
+message: >-
+  Assistant code may READ the scenario authority's tables, and must never author a row in
+  one. The assistant writes only its own tables; scenario content changes go through
+  `assistantProposalCommands`, whose every member is a typed, host-validated, fenced
+  operation.
+note: >-
+  TABLE SET (bounded-review round 1). The constraint below lists every table in
+  `NurseSchedulerDb` that the assistant does NOT own, not just the six scenario-authority
+  ones. `keyval` (the legacy serialized scenario record) and `repositoryMeta` were missing,
+  and both are direct write routes: the repository Oxlint exception deliberately hands
+  assistant modules a real `NurseSchedulerDb`, so `db.keyval.put(...)` was a live bypass
+  with zero diagnostics. The assistant's own tables -- settings, threads, turns, messages,
+  generations, proposals, receipts, diagnostic searches, clear operations -- stay legal.
+  Migrated from `lib/ai/independence.test.ts`, where ticket 2 had to RETAIN it. Alternatives
+  checked and rejected: Oxlint `no-restricted-properties` matches a property on an
+  IDENTIFIER receiver, and the forbidden shape is `db.<table>.put(...)`, whose receiver is
+  itself a member expression; and the same `db.<table>` access with `.get(...)` is not
+  merely allowed but required, so the rule has to separate reads from writes on the same
+  table, which no import or property rule can do. This is a two-level syntax shape, which
+  is exactly what a declarative matcher is for.
+files:
+  - "lib/ai/**"
+  - "components/ai/**"
+ignores:
+  - "**/*.test.ts"
+  - "**/*.test.tsx"
+  - "lib/ai/independence.test.ts"
+rule:
+  any:
+    - pattern: $DB.$TABLE.$WRITE($$$)
+constraints:
+  TABLE:
+    regex: ^(keyval|scenarioEnvelopes|scenarioCommits|historyLinks|tabSelections|writerLeases|optimizeBases|repositoryMeta)$
+  WRITE:
+    regex: ^(put|add|update|delete|clear|bulkPut|bulkAdd|bulkDelete|bulkUpdate)$

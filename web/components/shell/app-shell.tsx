@@ -22,6 +22,7 @@ import { HydrationGate } from "./hydration-gate";
 import { ConfirmDialog } from "./confirm-dialog";
 import { TestBridge } from "./test-bridge";
 import { AssistantSurface, useAssistantHydration } from "@/components/ai/assistant-surface";
+import { AssistantTestBridge } from "@/components/ai/assistant-test-bridge";
 import { useBrowserBackGuard, useDirtyBeforeUnload } from "./use-guarded-navigation";
 import { useNavGuardStore } from "./nav-guard-store";
 import { useConfirmStore } from "./confirm-store";
@@ -90,6 +91,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         toastOptions={{ className: "ns-toast" }}
       />
       <TestBridge />
+      <AssistantTestBridge />
     </div>
   );
 }

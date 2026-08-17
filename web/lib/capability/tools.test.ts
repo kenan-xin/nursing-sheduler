@@ -1,43 +1,65 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import {
+  MODEL_VISIBLE_TOOL_SCHEMAS,
+  PARAMETERLESS_MODEL_VISIBLE_TOOLS,
+} from "@/components/ai/model-visible-tools";
 import { ASSISTANT_TOOL_NAMES, HELP_TOOL_NAMES } from "./tools";
 
-// A registry entry's `toolAccess` claims that certain tools may serve it. That claim
-// is worthless unless the names correspond to tools the app registers, so this reads
-// the two registration modules' SOURCE and checks the sets agree in both directions.
+// A registry entry's `toolAccess` claims that certain tools may serve it. That claim is
+// worthless unless the names correspond to tools the app registers.
 //
-// Reading source rather than importing them is deliberate: importing pulls in
-// CopilotKit, the scenario store and Next's router for what is a naming question, and
-// the registration call is a literal in both files.
-const REGISTRATION_MODULES = [
-  "../../components/ai/use-context-tools.ts",
-  "../../components/ai/use-help-tools.ts",
-];
+// WHAT CHANGED (custom-AST ticket 2). This test used to read the two registration
+// modules' SOURCE and regex `name: "…"` literals out of them. The canonical registry
+// ticket 1 introduced makes that unnecessary: `MODEL_VISIBLE_TOOL_SCHEMAS` plus
+// `PARAMETERLESS_MODEL_VISIBLE_TOOLS` IS the shipped model-visible set, and a tool can
+// only reach the model through `useModelVisibleTool`, which takes its schema from there.
+// So the comparison is now against values rather than against text, and it can no longer
+// pass because a registration was spelled in a way the regex did not anticipate.
+//
+// The mounted multiset — that the shipped session really registers these eight, under
+// this agent id, with these exact schema objects — is proved separately by
+// `components/ai/session-real-core.test.tsx` against a real `CopilotKitCore`.
 
-function registeredToolNames(): Set<string> {
-  const names = new Set<string>();
-  for (const relative of REGISTRATION_MODULES) {
-    const source = readFileSync(fileURLToPath(new URL(relative, import.meta.url)), "utf8");
-    for (const match of source.matchAll(/^\s*name:\s*"([a-z_]+)",$/gm)) {
-      names.add(match[1]);
-    }
-  }
-  return names;
-}
+const SHIPPED = [...Object.keys(MODEL_VISIBLE_TOOL_SCHEMAS), ...PARAMETERLESS_MODEL_VISIBLE_TOOLS];
+
+/**
+ * Shipped tools the capability registry deliberately does NOT govern, each with the
+ * reason it is out of scope. Listing them is what keeps the "nothing registered is
+ * undeclared" direction honest without silently widening it.
+ */
+const NOT_REGISTRY_GOVERNED: Record<string, string> = {
+  test_feasibility_candidates: "T10 diagnostics: bounded infeasibility search, not a help answer",
+  prepare_scenario_change: "T07 proposals: prepares a Preview the HOST applies",
+};
 
 describe("assistant tool names", () => {
+  it("is comparing against a real shipped set", () => {
+    expect(SHIPPED.length).toBeGreaterThan(0);
+    expect(new Set(SHIPPED).size).toBe(SHIPPED.length);
+  });
+
   it("every declared name is a tool the app registers", () => {
-    const registered = registeredToolNames();
     for (const name of ASSISTANT_TOOL_NAMES) {
-      expect(registered.has(name), `"${name}" is declared but never registered`).toBe(true);
+      expect(SHIPPED.includes(name), `"${name}" is declared but never registered`).toBe(true);
     }
   });
 
-  it("every registered tool is declared, so the registry governs all of them", () => {
+  it("every registered tool is declared, or is explicitly out of the registry's scope", () => {
     const declared = new Set<string>(ASSISTANT_TOOL_NAMES);
-    for (const name of registeredToolNames()) {
-      expect(declared.has(name), `"${name}" is registered but not declared in tools.ts`).toBe(true);
+    for (const name of SHIPPED) {
+      if (declared.has(name)) continue;
+      expect(
+        NOT_REGISTRY_GOVERNED[name],
+        `"${name}" is registered but neither declared in tools.ts nor listed as out of scope`,
+      ).toBeTypeOf("string");
+    }
+  });
+
+  it("and nothing is excused that is no longer shipped", () => {
+    // The other half of the excuse list: an entry that stops being registered has to
+    // leave, or the exemption quietly outlives the tool it was written for.
+    for (const name of Object.keys(NOT_REGISTRY_GOVERNED)) {
+      expect(SHIPPED.includes(name), `"${name}" is excused but no longer registered`).toBe(true);
     }
   });
 

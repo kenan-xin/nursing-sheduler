@@ -1,0 +1,12 @@
+id: test-module-loader-call-tsx
+valid:
+  - |
+    import { AssistantPanel } from "./assistant-panel";
+    const el = <AssistantPanel />;
+invalid:
+  - |
+    const require = createRequire(import.meta.url);
+    const el = <div />;
+  - |
+    const require = mod.createRequire(import.meta.url);
+    const el = <div />;

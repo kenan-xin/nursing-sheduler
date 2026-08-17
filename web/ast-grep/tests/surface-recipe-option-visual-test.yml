@@ -1,0 +1,45 @@
+id: surface-recipe-option-visual
+valid:
+  # Layout-only className in recipe options.
+  - |
+    surfaceVariants({ role: "well", className: "flex flex-col gap-2" });
+  # No className/class at all -- the recipe AXIS values are not layout classes and
+  # must not be checked against the layout vocabulary.
+  - |
+    surfaceVariants({ role: "well", geometry: "control", emphasis: "hairline" });
+  - |
+    surfaceVariants({ role: "drop-target", geometry: "square", motion: "overlay", width: "side" });
+  # A static computed key carrying a LEGAL layout string.
+  - |
+    surfaceVariants({ role: "well", ["className"]: "flex gap-2" });
+  # A quoted key carrying a legal layout string.
+  - |
+    surfaceVariants({ role: "well", "className": "relative overflow-hidden" });
+  # A non-literal value has no authored literal to inspect (recorded narrowing).
+  - |
+    surfaceVariants({ role: "well", className: layoutClasses });
+invalid:
+  - |
+    surfaceVariants({ role: "well", className: "bg-panel" });
+  - |
+    surfaceVariants({ role: "well", className: "flex shadow-1" });
+  - |
+    surfaceVariants({ role: "well", class: "border-brand" });
+  - |
+    surfaceVariants({ role: "well", className: `text-ink2` });
+  # ---------------------------------------------------------------------------
+  # BOUNDED REVIEW ROUND 1. The static computed key was claimed as a verified
+  # family-E mutation in the Ticket 4 ledger but produced no finding.
+  # ---------------------------------------------------------------------------
+  - |
+    surfaceVariants({ role: "well", ["className"]: "bg-panel" });
+  - |
+    surfaceVariants({ role: "well", ["class"]: "rounded-card" });
+  # A quoted (non-computed) key is the same channel under a third spelling.
+  - |
+    surfaceVariants({ role: "well", "className": "shadow-3" });
+  # The fail-closed vocabulary rejects visibility and arbitrary values here too.
+  - |
+    surfaceVariants({ role: "well", className: "visible" });
+  - |
+    surfaceVariants({ role: "well", className: "[mask-type:luminance]" });

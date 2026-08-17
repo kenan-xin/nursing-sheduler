@@ -1,264 +1,91 @@
-import { readFileSync, readdirSync } from "node:fs";
-import { join, relative } from "node:path";
-
 import { describe, expect, it } from "vitest";
 
-// AI INDEPENDENCE, as a source-level property rather than a hope.
+import {
+  MODEL_VISIBLE_TOOL_SCHEMAS,
+  PARAMETERLESS_MODEL_VISIBLE_TOOLS,
+} from "@/components/ai/model-visible-tools";
+
+// AI INDEPENDENCE — the residual after custom-AST ticket 2.
 //
-// The product promise is that AI is optional: with the feature off, no key stored,
-// or OpenRouter unreachable, every manual workflow and ordinary Optimize keeps
-// working. A functional test can only ever sample that; what actually guarantees it
-// is that no scheduling code DEPENDS on assistant code.
+// The product promise is that AI is optional: with the feature off, no key stored, or
+// OpenRouter unreachable, every manual workflow and ordinary Optimize keeps working. A
+// functional test can only ever sample that; what guarantees it is that no scheduling
+// code DEPENDS on assistant code.
 //
-// So the assistant's modules may be imported from exactly three places: itself, its
-// own UI, and the two shell surfaces that mount it -- both of which render nothing
-// while the assistant is not Ready. Anything else importing them would create a path
-// by which a broken or disabled assistant could break scheduling, which is the
-// failure this test exists to prevent.
-
-const webRoot = join(__dirname, "..", "..");
-
-/** Directories that legitimately own or mount the assistant. */
-const OWNERS = ["lib/ai/", "components/ai/", "components/settings/"];
-
-/**
- * The files outside those directories that may reference assistant modules, each for
- * a stated reason. A new entry here is a deliberate widening of the seam, which is
- * the point of listing them rather than pattern-matching them away.
- */
-const PERMITTED_REFERENCES: Record<string, string> = {
-  // Both render null until AI is Ready.
-  "components/shell/app-shell.tsx": "mounts the panel",
-  "components/shell/top-bar.tsx": "mounts the launcher",
-  // The Settings route host.
-  "app/(app)/settings/page.tsx": "hosts the settings card",
-  // The same-origin runtime and setup routes (T01/T04).
-  "app/api/copilotkit/[[...slug]]/route.ts": "mounts the CopilotKit runtime",
-  "app/api/ai/openrouter/models/route.ts": "the model catalog route",
-  "app/api/ai/openrouter/test/route.ts": "the credential probe route",
-  // Applies the runtime containment env at server start (T01).
-  "instrumentation-node.ts": "applies the runtime containment env at boot",
-  // TYPE-ONLY, and asserted as such below: the Dexie schema declares the assistant
-  // tables, so it needs their row shapes at compile time and nothing at runtime.
-  "lib/repository/schema.ts": "declares the assistant tables (type-only)",
-  // Same allowance, same reason (T10). The diagnostic-search row is a Dexie table
-  // the repository declares and the projection adapter writes, but its SHAPE and
-  // semantics belong to the assistant, so the type is defined there and re-exported
-  // here. `export type ... from` is erased, so this creates no runtime edge.
-  "lib/repository/types.ts": "re-exports the diagnostic-search row (type-only)",
-};
-
-/** The files above that reference assistant modules for TYPES ONLY. */
-const TYPE_ONLY_REFERENCES = ["lib/repository/schema.ts", "lib/repository/types.ts"];
-
-const SKIP_DIRS = new Set(["node_modules", ".next", "public", "test-results", "playwright-report"]);
-
-function walk(dir: string): string[] {
-  const found: string[] = [];
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name.startsWith(".") || SKIP_DIRS.has(entry.name)) continue;
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) found.push(...walk(full));
-    else if (/\.(ts|tsx)$/.test(entry.name)) found.push(full);
-  }
-  return found;
-}
-
-const sources = walk(webRoot).map((file) => ({
-  path: relative(webRoot, file).replaceAll("\\", "/"),
-  text: readFileSync(file, "utf8"),
-}));
+// FOUR OF THE SEVEN RULES THAT USED TO LIVE HERE HAVE MOVED, because Oxlint expresses
+// them on the resolved specifier rather than on a regular expression over file text:
+//
+//   • "referenced only by itself, its UI, and an explicit list of mount points" and
+//     "kept out of the scheduling and optimize surfaces entirely" → a
+//     `no-restricted-imports` pattern group over `@/lib/ai**` and `@/components/ai**`,
+//     plus a regex over relative paths into `ai/`, with the former PERMITTED_REFERENCES
+//     table encoded as the file list of one override. The old rules matched the string
+//     `"@/(lib/ai|components/ai)/"`, so a relative import was invisible to them; the
+//     replacement catches it.
+//   • "lets the repository know the row shapes WITHOUT a runtime edge" → the same rule
+//     with `allowTypeImports: true` scoped to `lib/repository/**`. This is a strictly
+//     better mechanism: the old version regexed import STATEMENTS and reasoned about
+//     where the `type` keyword sat, which is precisely the kind of hand-rolled parsing
+//     this migration exists to remove.
+//   • "holds no scenario commit path of its own" and "reaches durable state only
+//     through the named assistant proposal commands" → `no-restricted-properties` with
+//     `{ object: "assistantProposalCommands", allowProperties: […] }`, which is an
+//     ALLOW-list and therefore the same shape as the guarantee, plus
+//     `{ object: "scenarioCommands", allowProperties: [] }`. `createScenarioRepository`
+//     and `commitAssistantProposal` need no rule of their own: they live in
+//     `@/lib/repository`, which assistant code cannot import at all.
+//
+// WHAT IS LEFT, AND WHY. One family remains here, and it is not a source scan: it reads
+// the canonical tool registry. Nothing below claims Oxlint parity.
+//
+// THE READER IS GONE (custom-AST ticket 6, reader-ledger row 16). This file used to walk
+// the whole `web/` tree with `readdirSync` and read every `.ts`/`.tsx` file with
+// `readFileSync`. By the end of ticket 3 nothing consumed the TEXT any more -- the two
+// families that did had become `assistant-scenario-table-authorship` and
+// `openrouter-host-literal` (see the footer) -- and the walk survived feeding a single
+// "finds the sources it is guarding" premise test. That premise had become vacuous in the
+// strict sense: it guarded a scan that no longer existed, so it could not fail for any
+// reason connected to a real guarantee. Row 16 is classified `Migrate; no exception`, and
+// a dead reader is the clearest possible case of one. The non-vacuity it used to provide
+// now belongs to `ast-grep test`, which fails when a rule stops matching its own invalid
+// fixtures, and to the `toolNames.length` assertion below.
 
 describe("the assistant is a leaf, not a dependency", () => {
-  it("finds the sources it is guarding", () => {
-    expect(sources.length).toBeGreaterThan(100);
-    expect(sources.some((s) => s.path === "lib/ai/assistant/store.ts")).toBe(true);
-  });
-
-  it("is referenced only by itself, its UI, and an explicit list of mount points", () => {
-    const offenders = sources
-      .filter(({ path }) => !/\.(test|spec)\.tsx?$/.test(path))
-      .filter(({ path }) => !OWNERS.some((owner) => path.startsWith(owner)))
-      .filter(({ path }) => PERMITTED_REFERENCES[path] === undefined)
-      .filter(({ text }) => /"@\/(lib\/ai|components\/ai)\//.test(text))
-      .map(({ path }) => path);
-
-    expect(offenders).toEqual([]);
-  });
-
-  it("lets the repository know the assistant's row shapes WITHOUT a runtime edge", () => {
-    for (const path of TYPE_ONLY_REFERENCES) {
-      const module = sources.find((source) => source.path === path);
-      expect(module, `${path} is missing`).toBeDefined();
-
-      // Matched as STATEMENTS, not lines: these imports span several lines, and a
-      // line-wise check would judge a continuation line (`} from "@/lib/ai/..."`)
-      // on its own and see no `type` keyword that is really there on line one.
-      const statements = [
-        ...(module?.text ?? "").matchAll(
-          /(?:^|\n)(import|export)\b([^;]*?)\bfrom\s+["'](@\/lib\/ai\/[^"']+)["']/g,
-        ),
-      ];
-      expect(statements.length, `${path} references no assistant module`).toBeGreaterThan(0);
-      // `import type` / `export type ... from` are erased WHOLE by the compiler, so
-      // the scenario repository carries no runtime dependency on assistant code --
-      // which is what keeps a broken or disabled assistant from being able to break
-      // the durable store. The keyword must be on the STATEMENT, not on individual
-      // bindings: `import { type X } from ...` still emits the module specifier and
-      // so still creates the edge this rule exists to forbid.
-      for (const [, keyword, bindings, specifier] of statements) {
-        expect(
-          `${keyword} ${bindings.trimStart()}`,
-          `${path}: ${keyword} from ${specifier} is not a type-only statement`,
-        ).toMatch(/^(import|export) type\b/);
-      }
-    }
-  });
-
-  it("keeps assistant modules out of the scheduling and optimize surfaces entirely", () => {
-    const schedulingDirs = [
-      "lib/store/",
-      "lib/scenario/",
-      "lib/optimize/",
-      "lib/bff/",
-      "lib/cascade/",
-      "lib/rules/",
-      "components/optimize/",
-    ];
-
-    const offenders = sources
-      .filter(({ path }) => schedulingDirs.some((dir) => path.startsWith(dir)))
-      .filter(({ text }) => /@\/(lib\/ai|components\/ai)\//.test(text))
-      .map(({ path }) => path);
-
-    // The dependency runs the other way ONLY: the assistant reads the scenario
-    // authority, never the reverse.
-    expect(offenders).toEqual([]);
-  });
-
-  // The counterpart to the assistant's entry in `authority-boundary.test.ts`'s
-  // repository allow-list. That gate admits the assistant into the repository's
-  // module graph; these two rules are what make the admission narrow, by pinning
-  // exactly what the assistant is allowed to do once inside it.
-  it("writes only assistant tables -- never a scenario-authority table", () => {
-    // AUTHORSHIP is forbidden everywhere on this list: the assistant may never create
-    // or modify a row in any of these tables. A read is fine and necessary (the lease
-    // and the envelope).
-    const scenarioTables = [
-      "scenarioEnvelopes",
-      "scenarioCommits",
-      "historyLinks",
-      "tabSelections",
-      "writerLeases",
-      "assistantProposals",
-      "assistantReceipts",
-      "optimizeBases",
-    ];
-
-    // DELETION is forbidden only for the scenario authority's OWN records. The two
-    // assistant-owned tables are excluded because the retention contract requires the
-    // clear paths to remove them: "delete local messages, tool displays, receipts, and
-    // diagnostic UI state after detachment". Deleting an AI record the user asked to
-    // have deleted is the opposite of authoring scenario state, and no scenario,
-    // commit, lease or history row is reachable this way.
-    const undeletableTables = scenarioTables.filter(
-      (table) => table !== "assistantProposals" && table !== "assistantReceipts",
-    );
-
-    const offenders: string[] = [];
-    for (const { path, text } of sources) {
-      if (!path.startsWith("lib/ai/") && !path.startsWith("components/ai/")) continue;
-      if (/\.(test|spec)\.tsx?$/.test(path)) continue;
-      for (const table of scenarioTables) {
-        if (new RegExp(`\\.${table}\\.(put|add|update|bulk\\w+)\\b`).test(text)) {
-          offenders.push(`${path} writes ${table}`);
-        }
-      }
-      for (const table of undeletableTables) {
-        if (new RegExp(`\\.${table}\\.(delete|clear)\\b`).test(text)) {
-          offenders.push(`${path} deletes ${table}`);
-        }
-      }
-    }
-
-    expect(offenders).toEqual([]);
-  });
-
-  it("holds no scenario commit path of its own", () => {
-    const offenders = sources
-      .filter(({ path }) => path.startsWith("lib/ai/") || path.startsWith("components/ai/"))
-      .filter(({ path }) => !/\.(test|spec)\.tsx?$/.test(path))
-      .filter(({ text }) =>
-        /createScenarioRepository|commitAssistantProposal|scenarioCommands\.(mutate|setReqData|undo|redo)/.test(
-          text,
-        ),
-      )
-      .map(({ path }) => path);
-
-    // T07 gave the assistant a durable path, and this rule is what keeps it NARROW.
-    // The generic mutation primitives -- an arbitrary patch, a whole-matrix write,
-    // a bare Undo/Redo -- stay unreachable from assistant code, as does the Apply
-    // transaction itself. What the assistant may name instead is
-    // `assistantProposalCommands`, whose every member is a typed, host-validated,
-    // fenced operation (see the rule below).
-    expect(offenders).toEqual([]);
-  });
-
-  it("reaches durable state only through the named assistant proposal commands", () => {
-    // The positive half of the rule above. Preparing, confirming, applying, undoing
-    // and reading a proposal all go through the projection adapter's serial queue and
-    // its fences; nothing in the assistant opens a Dexie transaction on a scenario
-    // table or derives its own commit.
-    const permitted = new Set([
-      "readScenarioBasis",
-      "prepare",
-      "confirm",
-      "withdrawConfirmation",
-      "cancel",
-      "markStale",
-      "apply",
-      "undoReceipt",
-      "read",
-      "describeReceipts",
-    ]);
-
-    const offenders: string[] = [];
-    for (const { path, text } of sources) {
-      if (!path.startsWith("lib/ai/") && !path.startsWith("components/ai/")) continue;
-      if (/\.(test|spec)\.tsx?$/.test(path)) continue;
-      for (const [, member] of text.matchAll(/assistantProposalCommands\.(\w+)/g)) {
-        if (!permitted.has(member)) offenders.push(`${path} calls ${member}`);
-      }
-    }
-
-    expect(offenders).toEqual([]);
-  });
-
   it("registers no tool that could apply a change", () => {
     // Apply is a HOST action on a rendered card. A tool named for it -- however it
     // were implemented -- would let the model announce that it can make the change
     // itself, which is the one thing the whole Preview contract exists to prevent.
-    const toolNames = sources
-      .filter(({ path }) => path.startsWith("components/ai/") || path.startsWith("lib/ai/"))
-      .filter(({ path }) => !/\.(test|spec)\.tsx?$/.test(path))
-      .flatMap(({ text }) => [...text.matchAll(/name:\s*"([a-z_]+)"/g)].map((match) => match[1]));
+    //
+    // Read from the CANONICAL REGISTRY rather than by regexing `name: "…"` out of the
+    // registration modules. A tool can only reach the model through
+    // `useModelVisibleTool`, which takes its schema from that registry, so this is the
+    // shipped set rather than a set of literals that happened to match a pattern.
+    const toolNames = [
+      ...Object.keys(MODEL_VISIBLE_TOOL_SCHEMAS),
+      ...PARAMETERLESS_MODEL_VISIBLE_TOOLS,
+    ];
+    expect(toolNames.length).toBeGreaterThan(0);
 
     const applyish = toolNames.filter((name) => /apply|commit|save|write|undo|delete/.test(name));
     expect(applyish).toEqual([]);
     // The one write-adjacent tool there IS prepares a proposal and nothing else.
     expect(toolNames).toContain("prepare_scenario_change");
   });
-
-  it("reaches OpenRouter from exactly one place -- the same-origin server modules", () => {
-    const offenders = sources
-      .filter(({ path }) => !/\.(test|spec)\.tsx?$/.test(path))
-      .filter(({ text }) => text.includes("openrouter.ai"))
-      .map(({ path }) => path);
-
-    // The host appears as a literal in exactly two places -- the browser-safe
-    // protocol module and the runtime's own containment constants, which
-    // `protocol.test.ts` pins to each other. Every caller reads it from there, so no
-    // component or route can name a third-party host directly.
-    expect(offenders.sort()).toEqual(["lib/ai/protocol.ts", "lib/ai/runtime/containment.ts"]);
-  });
 });
+
+// MIGRATED IN TICKET 3. Two families that lived here are now declarative ast-grep rules,
+// because both are authored-source shapes that no production API, type or lint rule can
+// express:
+//
+//   • "writes only assistant tables, never a scenario-authority table" →
+//     `ast-grep/rules/assistant-scenario-table-authorship.yml`. The forbidden shape is
+//     `db.<table>.put(…)`, a two-level access whose receiver is itself a member
+//     expression, and the SAME access with `.get(…)` is required -- so the rule must
+//     separate reads from writes on one table, which `no-restricted-properties` cannot.
+//   • "reaches OpenRouter from exactly one place" →
+//     `ast-grep/rules/openrouter-host-literal.yml`. The subject is an authored literal,
+//     not a specifier, and a hard-coded host that equals the constant is byte-identical
+//     at runtime.
+//
+// Both rules carry valid/invalid fixtures and were mutation-proved against real
+// production files before this file stopped checking them.

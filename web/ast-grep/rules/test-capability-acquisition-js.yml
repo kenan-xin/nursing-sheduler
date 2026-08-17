@@ -1,0 +1,43 @@
+id: test-capability-acquisition-js
+language: JavaScript
+severity: error
+message: >-
+  Test/support code acquired a filesystem, module-loader or parser capability through a
+  DYNAMIC route. The acquisition boundary is the same whichever syntax reaches it: readers
+  are granted to an exact file and recorded in the reader ledger with their API, root/path
+  class, extension/format and write permission, and the parser family has no exception
+  anywhere.
+note: >-
+  The `JavaScript` twin of `test-capability-acquisition`, covering `.js`, `.jsx`, `.mjs` and
+  `.cjs`. NO SUCH TEST/SUPPORT FILE EXISTS TODAY -- the tree holds only `.ts` and `.tsx` test
+  files -- so this variant is PREVENTION, recorded as such rather than presented as covering
+  current files. It exists because the ticket's scope names those four extensions explicitly
+  and because `.cjs`/`.mjs` are where `require(...)` is most idiomatic: a `foo.test.cjs`
+  added tomorrow would otherwise be scanned by no language variant at all, while Oxlint's
+  static half already covers all eight extensions. A probe confirmed one `JavaScript` variant
+  variant claims all four (`.js`, `.jsx`, `.mjs`, `.cjs`), so no separate `-jsx` twin is needed.
+  .
+  It is the variant the cold review's support-subtree probe needed: a
+  `lib/ticket6-review.test-support.mjs` and a generic `support/**` MJS file both escaped the
+  first version, the first because Oxlint's helper globs were TS/TSX-only and the second
+  because no rule's `files:` list named a generic support subtree. Both are covered now.
+  Dynamic `import()` is Oxlint's, not this family's -- see the base rule's note.
+files:
+  - "**/*.test.*"
+  - "**/*.spec.*"
+  - "**/*.test-d.*"
+  - "e2e/**"
+  - "**/__tests__/**"
+  - "**/support/**"
+  - "**/test-support/**"
+  - "**/test-support.*"
+  - "**/*.test-support.*"
+  - "lib/store/test-authority.ts"
+rule:
+  any:
+    - pattern: require($SPEC)
+    - pattern: $OBJ.getBuiltinModule($$$)
+constraints:
+  SPEC:
+    regex: |-
+      ^["'](?:(?:node:)?fs(?:/promises)?|fs-extra(?:/.+)?|graceful-fs|memfs|(?:node:)?module|typescript(?:/.+)?|ts-morph(?:/.+)?|@babel/[^"']+|acorn(?:-walk)?(?:/.+)?|esprima|espree|meriyah|recast(?:/.+)?|jscodeshift(?:/.+)?|@swc/[^"']+|oxc-parser(?:/.+)?|@typescript-eslint/[^"']+|tree-sitter(?:-[^"']+)?|web-tree-sitter|@ast-grep/[^"']+)["']$

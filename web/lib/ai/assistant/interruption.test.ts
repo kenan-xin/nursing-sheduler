@@ -54,6 +54,8 @@ type Recorder = {
 
 const FENCE: ClearFence = {
   scope: "history",
+  scenarioId: "scenario-a",
+  operationId: "operation-1",
   captured: [{ scopeKey: "scenario:scenario-a", generation: 1 }],
   threadIds: ["thread-1"],
   configurationDeleted: false,
@@ -66,6 +68,7 @@ const DELETION: ClearDeletion = {
   turns: 1,
   proposals: 0,
   receipts: 0,
+  searches: 0,
 };
 
 interface FixtureOptions {

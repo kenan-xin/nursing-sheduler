@@ -86,7 +86,13 @@ describe("Dexie 2 -> current upgrade from a really-shipped version 2 database", 
       // Pinned so a version bump has to come here and say what it added. T10 moved
       // this to 4 by declaring `diagnosticSearches` in a NEW version block; the
       // hazard the second test guards is doing it in an already-installed one.
-      expect(REPOSITORY_SCHEMA_VERSION).toBe(4);
+      //
+      // 6 is the MERGE MARKER, and it is the one bump that deliberately declares no
+      // store: the roster ladder's version 2 was folded into this one's version 2, and
+      // 6 exists only so a browser already at 5 raises `upgradeneeded` at all. Why the
+      // roster stores could not simply be declared at 6 is measured in
+      // `merged-schema-upgrade.test.ts`.
+      expect(REPOSITORY_SCHEMA_VERSION).toBe(6);
 
       const tableNames = db.tables.map((t) => t.name);
       // The v4 store, created by the same upgrade rather than left for a later bump.

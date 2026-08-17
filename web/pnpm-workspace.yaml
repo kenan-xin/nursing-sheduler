@@ -13,6 +13,15 @@ allowBuilds:
   # SCARF_ANALYTICS in lib/ai/runtime/containment.ts). Declared explicitly so a
   # frozen-lockfile install is clean rather than emitting ERR_PNPM_IGNORED_BUILDS.
   "@scarf/scarf": false
+  # custom-AST ticket 3's static-rule engine. Its install script downloads/links the
+  # platform binary; refusing it keeps the repository's install-script policy exactly as
+  # it is -- nothing new executes at install time -- at the cost of a one-line runtime
+  # binary-resolution warning on each `ast-grep` invocation, which is accepted. Declared
+  # explicitly, like the three above, so an install is CLEAN rather than failing with
+  # ERR_PNPM_IGNORED_BUILDS. That failure is not cosmetic: pnpm runs a deps-status check
+  # before every `pnpm <script>`, so an undeclared ignored build makes `pnpm build`,
+  # `pnpm test`, `pnpm lint` and the Playwright `webServer` all exit 1.
+  "@ast-grep/cli": false
 
 # pnpm 11 reads `overrides` from this file, not from `package.json`'s `pnpm`
 # field (that field is silently ignored — see the warning emitted on every

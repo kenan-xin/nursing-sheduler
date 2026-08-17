@@ -147,15 +147,18 @@ export function OptimizeAndExportScreen({
   observability: observabilityProp,
   confirm = confirmDialog,
 }: OptimizeAndExportScreenProps) {
-  const controller = useOptimizeRun(controllerDeps);
-  const recovery = useOptimizeSessionRecovery(controller, recoveryDeps);
-  const serverInfo = useOptimizeServerInfo(serverInfoDeps);
-
+  // The observability instance is built BEFORE the controller so the controller can
+  // report basis degradations into the same bounded buffer the terminal orchestration
+  // uses. An explicitly injected `controllerDeps.observability` still wins.
   const observabilityRef = useRef<OptimizeObservability | null>(null);
   if (observabilityRef.current === null) {
     observabilityRef.current = observabilityProp ?? createOptimizeObservability();
   }
   const observability = observabilityRef.current;
+
+  const controller = useOptimizeRun({ observability, ...controllerDeps });
+  const recovery = useOptimizeSessionRecovery(controller, recoveryDeps);
+  const serverInfo = useOptimizeServerInfo(serverInfoDeps);
 
   const terminal = useOptimizeTerminal({
     controller,
@@ -321,8 +324,27 @@ export function OptimizeAndExportScreen({
       return null;
     }
     const document = toCanonicalScenarioDocument(useScenarioStore.getState());
-    return { document, anonymize, prettify, timeout: parsed.value };
-  }, [anonymize, prettify, timeoutValue, preflightAuthority]);
+    return {
+      document,
+      anonymize,
+      prettify,
+      timeout: parsed.value,
+      // The backend semantic profile from the SAME `/api/info` read the status bar
+      // above renders (T08). Omitting it is what a run does when the profile is
+      // unreadable, and the controller degrades to an ordinary un-claimed run --
+      // which is precisely why leaving it out here was invisible: every run looked
+      // healthy, and every run silently recorded no submission basis. With no basis
+      // row, the bounded infeasibility diagnostic has no parent to diagnose and
+      // truthfully refuses on every infeasible result, so T10's whole surface was
+      // unreachable in the shipped product.
+      //
+      // Submission is gated on `serverInfo.status === "online"`, so this is the live
+      // profile of the backend the run is about to be sent to. When the payload did
+      // not carry a trustworthy one it is `null`, and the ordinary-run degradation
+      // applies exactly as before.
+      semanticProfile: serverInfo.semanticProfile,
+    };
+  }, [anonymize, prettify, timeoutValue, preflightAuthority, serverInfo.semanticProfile]);
 
   const onSubmit = useCallback(async () => {
     const input = await buildSubmitInput();

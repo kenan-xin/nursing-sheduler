@@ -1,0 +1,24 @@
+id: chrome-ink-ramp-pairing
+language: Tsx
+severity: error
+message: >-
+  A chrome surface is reaching for the ink ramp. `--chrome` aliases the LIVE accent
+  (`var(--brand)`), so the app mark pairs with `--onbrand`; and the mode toggle's active
+  segment lifts to the L1 `--surface` plane with `--brandink` text. `bg-ink` and
+  `text-on-ink` here are the retired v1 dark-chrome bar coming back, and
+  `chrome-contrast.test.ts` audits AA for the CURRENT pairs only.
+note: >-
+  Migrated from the shell TSX source reads in `components/shell/chrome-contrast.test.ts`,
+  whose CSS/contrast half is retained there. Alternatives checked and rejected: this is a
+  NEGATIVE claim over the file, and a render test can only show that the pairs that are
+  there are right -- the positive halves are now asserted by rendering the shell in
+  `components/shell/chrome-pairing.test.tsx`, and this rule is the half rendering cannot
+  reach. `no-restricted-properties` needs an identifier receiver; these are class tokens
+  inside a string.
+files:
+  - "components/shell/top-bar.tsx"
+  - "components/shell/app-side-nav.tsx"
+  - "components/shell/mode-toggle.tsx"
+rule:
+  kind: string_fragment
+  regex: '((^|[[:space:]])!?([-a-z0-9]+:)*(text-on-ink|bg-ink)([[:space:]]|/|$))|(bg-chrome[^"]*[[:space:]]text-ink\b)|(text-ink[[:space:]][^"]*bg-chrome\b)'

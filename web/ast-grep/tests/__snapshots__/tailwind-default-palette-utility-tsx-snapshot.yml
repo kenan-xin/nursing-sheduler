@@ -1,0 +1,37 @@
+id: tailwind-default-palette-utility-tsx
+snapshots:
+  ? |
+    export const C = () => <div className="bg-black/40" />;
+  : labels:
+      - source: bg-black/40
+        style: primary
+        start: 39
+        end: 50
+  ? |
+    export const D = () => <div className="text-gray-500" />;
+  : labels:
+      - source: text-gray-500
+        style: primary
+        start: 39
+        end: 52
+  ? |
+    export const E = () => <div className="flex hover:border-black" />;
+  : labels:
+      - source: flex hover:border-black
+        style: primary
+        start: 39
+        end: 62
+  ? |
+    export const F = () => <div className="data-[state=open]:bg-black" />;
+  : labels:
+      - source: data-[state=open]:bg-black
+        style: primary
+        start: 39
+        end: 65
+  ? |
+    export const G = () => <div className="group-data-[checked]/switch:text-white" />;
+  : labels:
+      - source: group-data-[checked]/switch:text-white
+        style: primary
+        start: 39
+        end: 77

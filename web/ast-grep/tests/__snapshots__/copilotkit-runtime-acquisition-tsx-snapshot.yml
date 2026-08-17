@@ -1,0 +1,32 @@
+id: copilotkit-runtime-acquisition-tsx
+snapshots:
+  ? |
+    const req = createRequire(import.meta.url);
+    const runtime = req("@copilotkit/runtime/v2");
+    const el = <div />;
+  : labels:
+      - source: req("@copilotkit/runtime/v2")
+        style: primary
+        start: 60
+        end: 89
+  ? |
+    const runtime = await import("@copilotkit/runtime/v2");
+  : labels:
+      - source: import("@copilotkit/runtime/v2")
+        style: primary
+        start: 22
+        end: 54
+  ? |
+    const runtime = createRequire("@copilotkit/runtime/package.json");
+  : labels:
+      - source: createRequire("@copilotkit/runtime/package.json")
+        style: primary
+        start: 16
+        end: 65
+  ? |
+    const runtime = require("@copilotkit/runtime");
+  : labels:
+      - source: require("@copilotkit/runtime")
+        style: primary
+        start: 16
+        end: 46

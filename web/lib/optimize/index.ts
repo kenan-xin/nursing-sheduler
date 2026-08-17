@@ -130,9 +130,11 @@ export {
 
 export {
   createOptimizeObservability,
+  OPTIMIZE_BASIS_DEGRADATIONS,
   OPTIMIZE_OBSERVABILITY_MAX_EVENTS,
   OPTIMIZE_OBSERVABILITY_TAG,
   type ObservedOptimizeEvent,
+  type OptimizeBasisDegradation,
   type OptimizeObservability,
   type OptimizeObservabilitySink,
   type OptimizeObservation,

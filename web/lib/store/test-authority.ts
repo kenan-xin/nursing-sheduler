@@ -15,10 +15,14 @@
 
 import { NurseSchedulerDb } from "@/lib/repository";
 import { createAuthorityStore, ScenarioAuthority, useAuthorityStore } from "./authority";
-import { createEmptyScenarioUiState } from "@/lib/scenario";
 import { createHotStore, type HotStore } from "./hot-store";
-import { createScenarioStore, type ScenarioStore } from "./scenario-store";
-import { setScenarioAuthority, stateSpine } from "./spine";
+import { createScenarioProjection, type ScenarioProjection } from "./scenario-store";
+import {
+  createAppScenarioAuthority,
+  resetScenarioProjection,
+  setScenarioAuthority,
+  stateSpine,
+} from "./spine";
 
 let counter = 0;
 
@@ -43,7 +47,7 @@ export interface TestAuthority {
   databaseName: string;
   tabId: string;
   /** The projection this authority publishes into (the app one when installed). */
-  scenario: ScenarioStore;
+  scenario: ScenarioProjection;
   hot: HotStore;
   /** The session-authority projection (the app one when installed). */
   authorityStore: typeof useAuthorityStore;
@@ -72,19 +76,30 @@ export async function installTestAuthority(
   // an ownership assertion pass or fail for reasons that have nothing to do with
   // the lease.
   const installed = options.install !== false;
-  const scenario = installed ? stateSpine.scenario : createScenarioStore();
-  const hot = installed ? stateSpine.hot : createHotStore();
   const authorityStore = installed ? useAuthorityStore : createAuthorityStore();
-
-  const authority = new ScenarioAuthority({
-    db,
-    scenario,
-    hot,
-    authority: authorityStore,
-    tabId,
+  const clock = {
     ...(options.now ? { now: options.now } : {}),
     ...(options.leaseTtlMs === undefined ? {} : { leaseTtlMs: options.leaseTtlMs }),
-  });
+  };
+
+  // The APP projection's writer never leaves `spine.ts`, so the installed harness
+  // asks the spine to build the authority rather than being handed the capability.
+  // A simulated peer tab mints its OWN projection, which is a different store and
+  // therefore no route into the one under test.
+  const peer = installed ? null : createScenarioProjection();
+  const hot = installed ? stateSpine.hot : createHotStore();
+  const scenario = peer ? peer.read : stateSpine.scenario;
+
+  const authority = peer
+    ? new ScenarioAuthority({
+        db,
+        scenario: peer,
+        hot,
+        authority: authorityStore,
+        tabId,
+        ...clock,
+      })
+    : createAppScenarioAuthority({ db, authority: authorityStore, tabId, ...clock });
 
   if (installed) {
     setScenarioAuthority(authority);
@@ -133,7 +148,7 @@ export async function redoDepth(): Promise<number> {
 
 /** Reset the in-memory projections without touching any durable state. */
 export function resetProjection(): void {
-  stateSpine.scenario.setState({ ...createEmptyScenarioUiState(), backupFingerprint: null }, true);
+  resetScenarioProjection();
   stateSpine.hot.getState().resetEphemeral();
   useAuthorityStore.setState({
     scenarioId: null,

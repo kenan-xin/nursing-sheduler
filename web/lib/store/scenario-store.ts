@@ -41,18 +41,80 @@ export interface ScenarioStoreState extends ScenarioUiState {
   backupFingerprint: string | null;
 }
 
-/** Zustand store api for the scenario projection. */
-export type ScenarioStore = ReturnType<typeof createScenarioStore>;
+/**
+ * The READ face of the projection: the hook, plus the three non-mutating members of
+ * the zustand api. This is what every consumer receives.
+ *
+ * It is a distinct interface rather than a `Pick<>` of zustand's `StoreApi` because
+ * the guarantee is about what the value DOES NOT HAVE. A type that merely hides
+ * `setState` is recoverable — `store["setState"]`, `const { setState } = store`, or
+ * an alias with a wider annotation all reach it again, and every one of those was a
+ * documented evasion of the source scan this replaces.
+ */
+export interface ScenarioProjection {
+  (): ScenarioStoreState;
+  <T>(selector: (state: ScenarioStoreState) => T): T;
+  getState(): ScenarioStoreState;
+  getInitialState(): ScenarioStoreState;
+  subscribe(
+    listener: (state: ScenarioStoreState, previous: ScenarioStoreState) => void,
+  ): () => void;
+}
+
+/**
+ * The WRITE face — one named command, not a general mutator.
+ *
+ * `replace` is the whole write vocabulary of the projection because the projection
+ * only ever receives whole committed documents: the adapter publishes a snapshot
+ * AFTER its durable transaction returned. There is deliberately no partial patch,
+ * because a partial patch is how a component would express "change this one field
+ * in the view", which is the operation the command bus exists to own.
+ */
+export interface ScenarioProjectionWriter {
+  replace(next: ScenarioStoreState): void;
+}
+
+/**
+ * A projection and its writer. Handed out ONLY by {@link createScenarioProjection},
+ * so the writer for a given projection is unforgeable: a module that wants to write
+ * the app's projection cannot construct this handle for it, and constructing its own
+ * gets a different, unwired store.
+ */
+export interface ScenarioProjectionHandle {
+  readonly read: ScenarioProjection;
+  readonly write: ScenarioProjectionWriter;
+}
 
 /**
  * Create a scenario projection instance. A factory so tests can hold an isolated
- * projection; the app uses the {@link createStateSpine} singletons.
+ * projection; the app singleton lives in `spine.ts`, which keeps its writer in
+ * module scope and never exports it.
  */
-export function createScenarioStore() {
-  return create<ScenarioStoreState>()(() => ({
+export function createScenarioProjection(): ScenarioProjectionHandle {
+  const store = create<ScenarioStoreState>()(() => ({
     ...createEmptyScenarioUiState(),
     backupFingerprint: null,
   }));
+
+  // A WRAPPER, not the api. Narrowing the exported type alone would leave the real
+  // `setState` sitting on the value at runtime, one `Reflect.get` away; this copies
+  // across exactly the three read members, so the mutator is absent rather than
+  // merely unmentioned. `scenario-projection.test.ts` proves that at runtime and
+  // `scenario-projection.negative.test-d.ts` proves it at compile time.
+  const read = ((selector?: (state: ScenarioStoreState) => unknown) =>
+    selector ? store(selector) : store()) as unknown as ScenarioProjection;
+  read.getState = () => store.getState();
+  read.getInitialState = () => store.getInitialState();
+  read.subscribe = (listener) => store.subscribe(listener);
+  Object.freeze(read);
+
+  const write: ScenarioProjectionWriter = Object.freeze({
+    replace(next: ScenarioStoreState): void {
+      store.setState(next, true);
+    },
+  });
+
+  return Object.freeze({ read, write });
 }
 
 /**

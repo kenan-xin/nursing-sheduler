@@ -63,6 +63,22 @@ function completedView(jobId: string, artifactAvailable: boolean): OptimizeRunVi
   };
 }
 
+/** A completed run carrying a solver verdict, which is what decides retention. */
+function completedWithOutcome(
+  jobId: string,
+  outcome: "optimal" | "feasible" | "infeasible" | "inconclusive",
+): OptimizeRunView {
+  return {
+    ...completedView(jobId, false),
+    result: {
+      outcome,
+      score: null,
+      solverStatus: outcome === "infeasible" ? "INFEASIBLE" : "UNKNOWN",
+      terminationReason: outcome === "infeasible" ? "infeasibility_proven" : null,
+    },
+  };
+}
+
 const xlsxBlob = new Blob(["plain"], { type: "application/octet-stream" });
 
 function render(
@@ -208,6 +224,71 @@ describe("useOptimizeTerminal — completed with artifact", () => {
     act(() => result.current.downloadAgain());
     expect(saveBlob).toHaveBeenCalledWith(xlsxBlob, "schedule.xlsx");
     expect(fetchXlsx).not.toHaveBeenCalled();
+  });
+});
+
+describe("useOptimizeTerminal — an infeasible run's server evidence is retained", () => {
+  // WHAT THIS PROTECTS. An infeasible run has no artifact, so the auto terminal chain
+  // used to treat it as "nothing to keep" and DELETE it the moment it settled. That
+  // server record is the ONLY parent evidence T10's bounded diagnostic can classify
+  // against: with it gone, `classifyRecovery` sees a 404, returns `local-only`, and
+  // `mayOpenSearch` refuses — so the diagnostic could never open a search for any run,
+  // on any deployment, even though the browser's basis row was perfectly intact.
+  //
+  // Retention is NOT extended here. The backend already stamps `expires_at` at
+  // admission and reaps on `finished_at`; this only stops the client ending that
+  // window seconds after it opens.
+  it("does NOT delete the job, and frees only the local slot", async () => {
+    const deleteJob = vi.fn(async (): Promise<CleanupCallOutcome> => ({ status: "confirmed" }));
+    const { result, rerender } = render(
+      { controller: undefined as never, deleteJob },
+      INITIAL_OPTIMIZE_RUN_VIEW,
+      activation(),
+    );
+
+    rerender({ view: completedWithOutcome("opt_1", "infeasible"), act: activation() });
+
+    await waitFor(() => expect(notify.cleanup).toHaveBeenCalledWith("retained"));
+    // THE ASSERTION THE DEFECT WAS: the server record survives.
+    expect(deleteJob).not.toHaveBeenCalled();
+    // ...while the local slot is released, so the next run is not blocked.
+    expect(recoveryCleanup).toHaveBeenCalledWith("opt_1");
+    // Nothing for the user to retry or abandon.
+    expect(result.current.cleanupPhase).toBe("idle");
+  });
+
+  it("still reports failed when the local removal cannot be proven", async () => {
+    // The local half keeps its proof obligation: an occupied record nobody can prove
+    // is gone must not read as success just because the server half was skipped.
+    recoveryCleanup.mockReturnValueOnce({ status: "unverified" } as OptimizeCleanupOutcome);
+    const deleteJob = vi.fn(async (): Promise<CleanupCallOutcome> => ({ status: "confirmed" }));
+    const { result, rerender } = render(
+      { controller: undefined as never, deleteJob },
+      INITIAL_OPTIMIZE_RUN_VIEW,
+      activation(),
+    );
+
+    rerender({ view: completedWithOutcome("opt_1", "infeasible"), act: activation() });
+
+    await waitFor(() => expect(result.current.cleanupPhase).toBe("failed"));
+    expect(deleteJob).not.toHaveBeenCalled();
+    expect(notify.cleanup).toHaveBeenCalledWith("failed");
+  });
+
+  it("still deletes an inconclusive run — only a PROVED infeasibility buys retention", async () => {
+    // Narrowness. The diagnostic is defined only over a run the solver proved
+    // infeasible, so no other artifact-less outcome may hold a server record open.
+    const deleteJob = vi.fn(async (): Promise<CleanupCallOutcome> => ({ status: "confirmed" }));
+    const { result, rerender } = render(
+      { controller: undefined as never, deleteJob },
+      INITIAL_OPTIMIZE_RUN_VIEW,
+      activation(),
+    );
+
+    rerender({ view: completedWithOutcome("opt_1", "inconclusive"), act: activation() });
+
+    await waitFor(() => expect(result.current.cleanupPhase).toBe("cleaned"));
+    expect(deleteJob).toHaveBeenCalledWith("opt_1");
   });
 });
 

@@ -49,7 +49,7 @@ function WelcomeState() {
   );
 }
 
-function RefusalNotice() {
+export function RefusalNotice() {
   const refusal = useAssistantStore((state) => state.lastRefusal);
   if (!refusal) return null;
   return (
@@ -68,7 +68,7 @@ function RefusalNotice() {
  * `lifecycle.ts` beside the classes it describes, so a new settlement class cannot
  * ship without wording.
  */
-function LifecycleNotice() {
+export function LifecycleNotice() {
   const interruption = useAssistantStore((state) => state.interruption);
   const settlement = useAssistantStore((state) => state.lastSettlement);
 

@@ -1,0 +1,102 @@
+id: surface-recipe-option-visual-ts
+snapshots:
+  ? |
+    surfaceVariants({ role: "well", "className": "shadow-3" });
+  : labels:
+      - source: shadow-3
+        style: primary
+        start: 46
+        end: 54
+      - source: className
+        style: secondary
+        start: 33
+        end: 42
+      - source: '"className"'
+        style: secondary
+        start: 32
+        end: 43
+      - source: '"className": "shadow-3"'
+        style: secondary
+        start: 32
+        end: 55
+      - source: '"shadow-3"'
+        style: secondary
+        start: 45
+        end: 55
+      - source: 'surfaceVariants({ role: "well", "className": "shadow-3" })'
+        style: secondary
+        start: 0
+        end: 58
+  ? |
+    surfaceVariants({ role: "well", ["className"]: "bg-panel" });
+  : labels:
+      - source: bg-panel
+        style: primary
+        start: 48
+        end: 56
+      - source: className
+        style: secondary
+        start: 34
+        end: 43
+      - source: '["className"]'
+        style: secondary
+        start: 32
+        end: 45
+      - source: '["className"]: "bg-panel"'
+        style: secondary
+        start: 32
+        end: 57
+      - source: '"bg-panel"'
+        style: secondary
+        start: 47
+        end: 57
+      - source: 'surfaceVariants({ role: "well", ["className"]: "bg-panel" })'
+        style: secondary
+        start: 0
+        end: 60
+  ? |
+    surfaceVariants({ role: "well", className: "bg-panel" });
+  : labels:
+      - source: bg-panel
+        style: primary
+        start: 44
+        end: 52
+      - source: className
+        style: secondary
+        start: 32
+        end: 41
+      - source: 'className: "bg-panel"'
+        style: secondary
+        start: 32
+        end: 53
+      - source: '"bg-panel"'
+        style: secondary
+        start: 43
+        end: 53
+      - source: 'surfaceVariants({ role: "well", className: "bg-panel" })'
+        style: secondary
+        start: 0
+        end: 56
+  ? |
+    surfaceVariants({ role: "well", className: "visible" });
+  : labels:
+      - source: visible
+        style: primary
+        start: 44
+        end: 51
+      - source: className
+        style: secondary
+        start: 32
+        end: 41
+      - source: 'className: "visible"'
+        style: secondary
+        start: 32
+        end: 52
+      - source: '"visible"'
+        style: secondary
+        start: 43
+        end: 52
+      - source: 'surfaceVariants({ role: "well", className: "visible" })'
+        style: secondary
+        start: 0
+        end: 55

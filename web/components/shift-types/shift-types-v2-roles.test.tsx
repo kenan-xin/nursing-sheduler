@@ -1,7 +1,5 @@
 // @vitest-environment jsdom
 import "fake-indexeddb/auto";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { RequirementCard, ScenarioUiState } from "@/lib/scenario";
@@ -25,6 +23,16 @@ import { resetScenarioForTest, drainScenarioCommands } from "@/lib/store/test-au
 // Assertions never restate a token. They ask the recipe what it emits, so if the
 // ladder's definition of a role changes, this suite follows it rather than
 // pinning yesterday's class list.
+//
+// WHAT CHANGED (custom-AST ticket 3). This file reads NO files. It used to end with a
+// six-read block that checked the fixed shift data palette against `app/globals.css` and
+// against five named production sources. The reader ledger grants this file no filesystem
+// exception, and both halves had better homes: the CSS half moved to `app/design-system.test.ts`,
+// which owns the token authority and keeps the audited `globals.css` reader; the five
+// production-source scans are the `authored-color-literal(-tsx)` ast-grep rule, which
+// rejects ANY authored colour across `app/**` and `components/**` -- strictly more than
+// twenty-four specific hexes in five specific files, and enforced on every lint run rather
+// than only when this suite happens to execute.
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 vi.mock("next/navigation", () => ({
@@ -174,6 +182,15 @@ describe("R2c surface ladder — authored by the shared recipe, not by hand", ()
       // And deliberately NOT the shared `surface` role, whose `--line` border and
       // `--sh-1` are fixed and would make it identical to an editable card.
       expectNotRole(tile, { role: "surface", geometry: "card" });
+      // Nor the inset-hairline tuple its own icon tile wears. The cold review of
+      // `57ce7b6` adjudicated this composition as deliberately OFF the recipe —
+      // no role emits `--surface` + a `--line2` hairline + no elevation — and the
+      // deleted analyzer pinned it so a later reader would not "finish the job".
+      expectNotRole(tile, { role: "well", geometry: "control", emphasis: "hairline" });
+      // It may not smuggle the composition back in through inline style either:
+      // React's `style` outranks every class, so an empty style attribute is the
+      // whole claim rather than a per-property denylist.
+      expect(tile.getAttribute("style"), "the reserved tile owns nothing inline").toBeNull();
       expect(within(tile).getByText("Auto")).toBeInTheDocument();
       expect(within(tile).queryByRole("button")).toBeNull();
     }
@@ -206,6 +223,69 @@ describe("R2c surface ladder — authored by the shared recipe, not by hand", ()
       expect(tile.className).not.toMatch(/\bshadow-[123]\b/);
     }
   });
+
+  // -------------------------------------------------------------------------
+  // THE GOVERNED-NODE CENSUS (custom-AST ticket 5).
+  //
+  // The deleted `inset-hairline-ownership.test.ts` analyzer opened with a PREMISE
+  // GUARD — "exactly 3 nodes carry `data-slot="shift-tile"` in shift-type-grid.tsx,
+  // exactly 1 carries `-duration` in working-time-fields.tsx" — so that a renamed
+  // attribute or a dropped tile failed loudly instead of letting the per-node
+  // assertions pass over an empty set. `components/ui/inset-hairline-box.test.tsx`
+  // proves what the two components EMIT; this proves they are actually MOUNTED, at
+  // every governed site, in the states that render them.
+  // -------------------------------------------------------------------------
+  it("mounts an inset-hairline box at every governed site, in the state that renders it", async () => {
+    await seed({ shifts: [{ id: "Day" }] });
+    render(<ShiftTypeGrid />);
+
+    // Resting state: a tile inside each reserved day-state card, and one inside
+    // the authorable shift card.
+    for (const testId of ["synthetic-OFF", "synthetic-LEAVE", `shift-card-${DAY}`]) {
+      const host = screen.getByTestId(testId);
+      expect(
+        host.querySelectorAll('[data-slot="shift-tile"]'),
+        `${testId} must mount exactly one icon tile`,
+      ).toHaveLength(1);
+    }
+    expect(document.querySelectorAll('[data-slot="shift-tile"]')).toHaveLength(3);
+
+    // Editing state: the open editor's own header tile, plus the working-time
+    // readout — the fourth governed site, and the one that lives in a different
+    // file. Neither exists until the editor is open, which is why the resting
+    // census above cannot stand in for it.
+    fireEvent.click(screen.getByTestId(`shift-edit-${DAY}`));
+    const form = screen.getByTestId(`shift-edit-form-${DAY}`);
+    expect(form.querySelectorAll('[data-slot="shift-tile"]')).toHaveLength(1);
+
+    const readout = screen.getByTestId(`shift-edit-${DAY}-duration`);
+    expect(readout).toHaveAttribute("data-slot", "inset-hairline-readout");
+    expectClosedClassList(
+      readout,
+      [
+        "flex",
+        "items-center",
+        "gap-1.5",
+        "overflow-hidden",
+        "px-2.5",
+        "pointer-coarse:min-h-touch",
+      ],
+      { role: "well", geometry: "control", emphasis: "hairline" },
+    );
+    expect(readout.style.height).toBe("var(--ctl)");
+  });
+
+  // A CONVERSE was deliberately NOT added here: "no other element on this route
+  // may wear the tuple". It is not one of the deleted analyzer's families — that
+  // analyzer governed four named nodes and said nothing about a fifth surface —
+  // and it is false of correct code: `synthetic-ALL` and every custom group row
+  // in the shared groups section are legitimate `well/control/hairline` surfaces
+  // reached through the same authority. A rendered check cannot separate a
+  // legitimate direct `surfaceVariants(...)` consumer from a raw reimplementation
+  // (both emit the same bytes), so the honest owner of that direction is the
+  // static half: `inset-hairline-box-authority` inside the owner file, and
+  // ticket 4's `surface-consumer-classname` / `surface-recipe-*-visual` rules
+  // everywhere else.
 
   it("lifts the open editor to the `selected` role instead of washing it in brandtint", async () => {
     await seed({ shifts: [{ id: "Day" }] });
@@ -443,41 +523,6 @@ describe("R2c typography and status — the named rules", () => {
   });
 });
 
-// The fixed eight-entry shift ramp (DESIGN.md §2 "Shift colour palette"). Its
-// contract is negative on this route: it stays LITERAL data-mark colour in
-// whatever screen eventually draws roster chips, never becomes a theme-token
-// family, and never varies by theme. Nothing in the shipped app owns it yet, so
-// the only truthful coverage is that it has not started leaking into the token
-// authority or into this route's sources — which is exactly the first move of
-// the drift the decision forbids. `e2e/shift-types.spec.ts` completes the pair
-// by proving no element on the route PAINTS one of these in either theme.
-const SHIFT_PALETTE = [
-  "#f8e2b8",
-  "#7a5310",
-  "#d4a038",
-  "#f6dbcd",
-  "#9a4726",
-  "#cf7049",
-  "#e4ecd0",
-  "#586a22",
-  "#8fa243",
-  "#d8e0f2",
-  "#374777",
-  "#6274ad",
-  "#e9dbf0",
-  "#653f8e",
-  "#9670bd",
-  "#d3e9e3",
-  "#1b6a5d",
-  "#3d9587",
-  "#f7dae2",
-  "#9a3153",
-  "#c66184",
-  "#2b2733",
-  "#ece6f2",
-  "#5c5468",
-];
-
 describe("R2c accessibility — the bounded quick wins, per the ratified priority", () => {
   it("exposes the card grid as a NAMED region", async () => {
     await seed({ shifts: [{ id: "Day" }] });
@@ -509,36 +554,26 @@ describe("R2c accessibility — the bounded quick wins, per the ratified priorit
   });
 });
 
-// Recipe OWNERSHIP of the inset-hairline surfaces is proven per NODE, by an AST
-// oracle, in `inset-hairline-ownership.test.ts`. It deliberately does not live
-// here: a file-wide predicate cannot tell "every governed tile calls the tuple"
-// from "one tile was raw-reimplemented and a sibling still calls it".
-
-describe("the fixed shift data palette stays out of the token authority", () => {
-  const webRoot = resolve(__dirname, "..", "..");
-  const read = (relPath: string) => readFileSync(resolve(webRoot, relPath), "utf8").toLowerCase();
-
-  it("registers none of the eight entries as a CSS custom property", async () => {
-    const css = read("app/globals.css");
-    // Guard the premise: a path that silently read the wrong file would report a
-    // clean palette for exactly the wrong reason.
-    expect(css).toContain("--r-card");
-    const leaked = SHIFT_PALETTE.filter((hex) => css.includes(hex));
-    expect(leaked, "a shift data-mark colour has become a theme token").toEqual([]);
-  });
-
-  it("is not authored anywhere in the R2c-owned sources", async () => {
-    const sources = [
-      "app/(app)/shift-types/page.tsx",
-      "components/shift-types/shift-type-grid.tsx",
-      "components/shift-types/shift-types-descriptor.ts",
-      "components/shift-types/save-shift-card.ts",
-      "components/entity-editor/working-time-fields.tsx",
-    ].map(read);
-    expect(sources).toHaveLength(5);
-    for (const source of sources) {
-      const leaked = SHIFT_PALETTE.filter((hex) => source.includes(hex));
-      expect(leaked, "a shift data-mark colour is authored on the route").toEqual([]);
-    }
-  });
-});
+// Recipe OWNERSHIP of the inset-hairline surfaces is no longer proven by an AST
+// oracle here or anywhere. `inset-hairline-ownership.test.ts` -- which resolved
+// each governed node's className per NODE, because a file-wide predicate cannot
+// tell "every governed tile calls the tuple" from "one tile was raw-reimplemented
+// and a sibling still calls it" -- was deleted by custom-AST ticket 5, after the
+// distinction it existed to draw was made unrepresentable rather than detected.
+//
+// Ownership now has three owners, none of them a source analyzer:
+//
+//   • `components/ui/inset-hairline-box.tsx` — every governed node is one of two
+//     components whose `className` and `style` props are `never`, so there is no
+//     per-node className to resolve and no sibling that can diverge from another;
+//   • `components/ui/inset-hairline-box.test.tsx` — the emitted class list is
+//     CLOSED over the recipe's own output, plus exact inline style and the
+//     cast-away-caller refusal;
+//   • `inset-hairline-box-authority` (ast-grep) — the owner file may author only
+//     `<Surface>`, by any spelling, and bind only an allowlisted React surface.
+//     This is the half no rendered check can own, because a hand-authored raw
+//     element paints byte-identically to the recipe.
+//
+// The census above is what replaced the deleted analyzer's premise guard: it
+// proves the components are MOUNTED at every governed site, in the state that
+// renders each one.

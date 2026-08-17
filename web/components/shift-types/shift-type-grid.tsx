@@ -52,6 +52,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Surface, surfaceVariants } from "@/components/ui/surface";
+import { InsetHairlineTile } from "@/components/ui/inset-hairline-box";
 import {
   FaPlus,
   FaArrowRight,
@@ -449,32 +450,14 @@ export function ShiftTypeGrid() {
  */
 const RESERVED_CARD_SURFACE = "rounded-card border border-line2 bg-surface";
 
-/**
- * The icon tile and the working-time readout are the SAME visual contract:
- * `--panel` behind a `--line2` hairline at the control radius, with the inset
- * cast. F2's `ii7.8.5` added the `emphasis` axis, so the shared recipe now emits
- * exactly that — this is the public authority (technical plan T5), not a local
- * reimplementation with canonical tokens.
- *
- * DESIGN.md §5 files "inner bordered boxes" under `--r-ctl`, which is what both
- * of these are.
- */
-const INSET_HAIRLINE_BOX = surfaceVariants({
-  role: "well",
-  geometry: "control",
-  emphasis: "hairline",
-});
-
-/**
- * The tile's box is the prototype's 42px, which has no token and cannot be a
- * `size-[42px]` utility beside the recipe: a recipe consumer's className is held
- * to layout utilities with VALIDATED values, and every arbitrary value is
- * rejected. `size-control-lg` would be 44px and `size-11.6667` is not a size
- * anyone should read. So the one dimension that has no token is set as a style,
- * the same mechanism `Select` uses for its caret gutter — and, unlike a class, it
- * cannot be defeated by a caller.
- */
-const ICON_TILE_BOX = { width: 42, height: 42 } as const;
+// The icon tile and the working-time readout are the SAME visual contract, and
+// `InsetHairlineTile` / `InsetHairlineReadout` own it — the tuple, the 42px box
+// and the `--ctl` height all live in `components/ui/inset-hairline-box`.
+//
+// This route used to hold a stored `surfaceVariants(...)` result and a style
+// constant here and spread both onto three raw `<div>`s; ownership then had to
+// be PROVEN by resolving each className through `cn` and its aliases. It is now
+// a property of the element that is written, so there is nothing left to resolve.
 
 const RESERVED_META: Record<string, { icon: IconType; reason: string }> = {
   OFF: {
@@ -504,13 +487,9 @@ function ReservedCard({ id, description }: { id: string; description?: string })
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-3">
-          <div
-            data-slot="shift-tile"
-            style={ICON_TILE_BOX}
-            className={cn("flex flex-none items-center justify-center", INSET_HAIRLINE_BOX)}
-          >
+          <InsetHairlineTile>
             <Icon aria-hidden className="text-ink2" />
-          </div>
+          </InsetHairlineTile>
           <div className="min-w-0">
             <div className="font-heading text-title font-bold leading-none tracking-[-0.015em]">
               {id}
@@ -616,13 +595,9 @@ function ShiftCard({
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex min-w-0 items-center gap-3">
-          <div
-            data-slot="shift-tile"
-            style={ICON_TILE_BOX}
-            className={cn("flex flex-none items-center justify-center", INSET_HAIRLINE_BOX)}
-          >
+          <InsetHairlineTile>
             <FaClock aria-hidden className="text-ink2" />
-          </div>
+          </InsetHairlineTile>
           <div className="min-w-0">
             <div
               data-testid={`shift-code-${cardKey}`}
@@ -1148,13 +1123,9 @@ function ShiftCardEditor({
       }}
     >
       <div className="flex items-center gap-3 border-b border-line2 pb-4">
-        <div
-          data-slot="shift-tile"
-          style={ICON_TILE_BOX}
-          className={cn("flex flex-none items-center justify-center", INSET_HAIRLINE_BOX)}
-        >
+        <InsetHairlineTile>
           <FaClock aria-hidden className="text-ink2" />
-        </div>
+        </InsetHairlineTile>
         <div className="min-w-0">
           {/* Uppercase labels carry +0.03em, never a bespoke tracking value
               (DESIGN.md §3 Negative-Tracking Rule). v1 ran this one at 0.06em. */}

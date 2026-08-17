@@ -31,8 +31,10 @@
 // undo this" truthful after a reload or a history eviction.
 //
 // FORBIDDEN-SURFACE GATE. `forbidden-surface.test.ts` asserts that no module
-// outside this one imports `@/lib/repository`, calls `useScenarioStore.setState`,
-// or touches `.temporal`. That test is the enforcement; this comment is only its
+// outside this one imports `@/lib/repository` or can reach a projection mutator at
+// all: the exported projection carries no `setState`, and the writer handle for the
+// app projection never leaves `spine.ts`. `scenario-projection.negative.test-d.ts`
+// and `scenario-projection.test.ts` are the enforcement; this comment is its
 // rationale.
 
 import { create } from "zustand";
@@ -81,7 +83,7 @@ import {
 import type { ReapAction as OptimizeBasisReapAction } from "@/lib/optimize/basis/reaper";
 import { pickScenario } from "./fingerprint";
 import type { HotStore } from "./hot-store";
-import type { ScenarioStore } from "./scenario-store";
+import type { ScenarioProjectionHandle } from "./scenario-store";
 import { shareStructure } from "./structural-share";
 
 // ---------------------------------------------------------------------------
@@ -451,7 +453,7 @@ export type AuthorityStore = ReturnType<typeof createAuthorityStore>;
 
 export interface ScenarioAuthorityConfig {
   db: NurseSchedulerDb;
-  scenario: ScenarioStore;
+  scenario: ScenarioProjectionHandle;
   hot: HotStore;
   authority: AuthorityStore;
   tabId: string;
@@ -489,7 +491,7 @@ export class ScenarioAuthority {
   tabId: string;
 
   private readonly db: NurseSchedulerDb;
-  private readonly scenario: ScenarioStore;
+  private readonly scenario: ScenarioProjectionHandle;
   private readonly hot: HotStore;
   private readonly authority: AuthorityStore;
   private readonly broadcast: (message: OwnershipHint) => void;
@@ -549,12 +551,11 @@ export class ScenarioAuthority {
    */
   private publish(envelope: ScenarioEnvelopeV3, history?: { undo: boolean; redo: boolean }): void {
     try {
-      this.scenario.setState(
-        shareStructure(this.scenario.getState(), {
+      this.scenario.write.replace(
+        shareStructure(this.scenario.read.getState(), {
           ...pickScenario(envelope.scenario),
           backupFingerprint: envelope.backupFingerprint,
         }),
-        true,
       );
     } catch {
       this.authority.setState({ reloadRequired: true });
@@ -1035,7 +1036,7 @@ export class ScenarioAuthority {
       if (!owner || !scenarioId) {
         return { ok: false as const, reason: "not-owner" as const, code: "not_owner" as const };
       }
-      const built = build(this.scenario.getState());
+      const built = build(this.scenario.read.getState());
       if (built === "superseded") {
         return { ok: false as const, reason: "superseded" as const, code: "unknown" as const };
       }

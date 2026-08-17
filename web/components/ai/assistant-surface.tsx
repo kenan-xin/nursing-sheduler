@@ -19,7 +19,7 @@
 // rather than being captured once at mount.
 
 import { useEffect } from "react";
-import { CopilotKitProvider } from "@copilotkit/react-core/v2";
+import { AssistantCopilotProvider } from "./assistant-copilot-provider";
 import { AI_KEY_HEADER, AI_MODEL_HEADER, COPILOT_RUNTIME_URL } from "@/lib/ai/protocol";
 import { hydrateAssistant, selectReady, useAssistantStore } from "@/lib/ai/assistant/store";
 import { AssistantPanel } from "./assistant-panel";
@@ -49,7 +49,7 @@ export function AssistantSurface() {
   if (!ready || !panelOpen) return null;
 
   return (
-    <CopilotKitProvider
+    <AssistantCopilotProvider
       runtimeUrl={COPILOT_RUNTIME_URL}
       headers={(): Record<string, string> => {
         const settings = useAssistantStore.getState().settings;
@@ -68,10 +68,24 @@ export function AssistantSurface() {
     >
       {/* The v2 stylesheet's reset is scoped to `[data-copilotkit]`, so the library's
           own components only get their intended baseline inside this subtree -- and
-          the app's global typography and tokens are untouched everywhere else. */}
+          the app's global typography and tokens are untouched everywhere else.
+
+          THAT SHEET IS IMPORTED IN `app/layout.tsx`, and this comment used to be the
+          whole of the claim. It was not true: nothing imported
+          `@copilotkit/react-core/v2/styles.css`, a production build emitted zero
+          `[data-copilotkit]` rules, and every `cpk:*` class in the library's markup
+          was an inert string -- so the shipped panel had no scroll bound, no composer
+          row and no message bubbles. `components/ai/assistant-styles.test.ts` now
+          holds both halves of what this paragraph asserts: that the import exists, and
+          that the sheet cannot paint outside this subtree.
+
+          `contents` keeps the wrapper out of layout so the dock and sheet size against
+          the app shell. One consequence: the package's scoped
+          `background-color: var(--background)` on this element does not paint, and the
+          dock's own `Surface` supplies the same `--surface` tone instead. */}
       <div data-copilotkit className="contents">
         <AssistantPanel />
       </div>
-    </CopilotKitProvider>
+    </AssistantCopilotProvider>
   );
 }

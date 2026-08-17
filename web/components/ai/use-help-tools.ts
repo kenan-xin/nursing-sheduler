@@ -17,15 +17,19 @@
 // with each answer so the panel can display them and a later action can be re-checked
 // against the live build rather than trusted.
 //
-// TURN AUTHORIZATION IS THE CALLER'S, NOT OURS. `turnEpoch` is the authorization the
-// session hook hands down; this module compares the LIVE epoch against that captured
-// value and never re-reads the store to establish a baseline of its own. On
+// TURN AUTHORIZATION IS THE CALLER'S, NOT OURS. Every handler asks
+// `assertTurnAuthority` (see `./turn-authority`), which compares the whole bound
+// identity -- scenario, thread, turn and run, the turn epoch, the lease epoch and the
+// document revision -- rather than the turn epoch alone. `turnEpoch` remains a
+// re-registration dependency, not the check. On
 // interruption the caller passes a cleared value, so the comparison stays permanently
 // closed for the abandoned turn instead of re-arming itself.
 
-import { useFrontendTool } from "@copilotkit/react-core/v2";
+import {
+  useModelVisibleTool,
+  useParameterlessModelVisibleTool,
+} from "./register-model-visible-tool";
 import { z } from "zod";
-import { useAssistantStore } from "@/lib/ai/assistant/store";
 import { suggestRuleCandidates } from "@/lib/capability/guidance";
 import {
   CAPABILITY_UNAVAILABLE,
@@ -34,16 +38,9 @@ import {
 } from "@/lib/capability/resolve";
 import { readCapabilityContext } from "./capability-context";
 import { useCapabilityNavigation } from "./use-capability-navigation";
+import { assertTurnAuthority, isTurnAuthorized, SUPERSEDED } from "./turn-authority";
 
-/**
- * What a handler answers when its turn is no longer the authorized one. A refusal
- * string rather than a throw, matching the read tools next door: a thrown tool error
- * reads to the model as a failure worth retrying, while this says there is nothing to
- * say.
- */
-const SUPERSEDED = "superseded: this request belongs to an interrupted turn and was not answered.";
-
-const capabilityIdParameters = z.object({
+export const capabilityIdParameters = z.object({
   capabilityId: z
     .string()
     .describe(
@@ -52,7 +49,7 @@ const capabilityIdParameters = z.object({
     ),
 });
 
-const policyParameters = z.object({
+export const policyParameters = z.object({
   policy: z
     .string()
     .describe(
@@ -65,19 +62,13 @@ const policyParameters = z.object({
  * Register the read-only help tools against ONE agent instance.
  *
  * @param agentId Scopes the tools to this panel's private thread-scoped agent.
- * @param turnEpoch The authorized turn epoch handed down by the session. Compared
- *   against the live epoch on every invocation; never used to derive a new baseline.
+ * @param turnEpoch The authorized turn epoch handed down by the session. Re-registers
+ *   the tools when it moves; the per-invocation check is `assertTurnAuthority`.
  */
 export function useHelpTools(agentId: string, turnEpoch: number): void {
   const navigate = useCapabilityNavigation();
 
-  const guard = (signal: AbortSignal | undefined): string | null => {
-    if (signal?.aborted) return SUPERSEDED;
-    if (useAssistantStore.getState().turnEpoch !== turnEpoch) return SUPERSEDED;
-    return null;
-  };
-
-  useFrontendTool(
+  useParameterlessModelVisibleTool(
     {
       name: "list_app_capabilities",
       agentId,
@@ -87,9 +78,7 @@ export function useHelpTools(agentId: string, turnEpoch: number): void {
         "before answering any question about how the app works, which screen something is " +
         "on, or what a scheduling term means. Never describe a screen, field, rule kind or " +
         "capability that is not in this list.",
-      handler: async (_args, context) => {
-        const refusal = guard(context.signal);
-        if (refusal) return refusal;
+      handler: async () => {
         const listed = listCapabilities(readCapabilityContext());
         if (listed.status !== "ok") {
           return { status: CAPABILITY_UNAVAILABLE, reason: listed.reason, registry: listed.stamp };
@@ -100,7 +89,7 @@ export function useHelpTools(agentId: string, turnEpoch: number): void {
     [agentId, turnEpoch],
   );
 
-  useFrontendTool(
+  useModelVisibleTool(
     {
       name: "explain_app_capability",
       agentId,
@@ -110,9 +99,7 @@ export function useHelpTools(agentId: string, turnEpoch: number): void {
         "undoable. Use this to ground an explanation. It returns no link — call " +
         "open_app_screen if the user should be taken there.",
       parameters: capabilityIdParameters,
-      handler: async (args, context) => {
-        const refusal = guard(context.signal);
-        if (refusal) return refusal;
+      handler: async (args) => {
         const resolved = resolveCapability(args.capabilityId, readCapabilityContext());
         if (resolved.status !== "ok") {
           return {
@@ -141,7 +128,7 @@ export function useHelpTools(agentId: string, turnEpoch: number): void {
     [agentId, turnEpoch],
   );
 
-  useFrontendTool(
+  useModelVisibleTool(
     {
       name: "suggest_scheduling_rule",
       agentId,
@@ -151,9 +138,9 @@ export function useHelpTools(agentId: string, turnEpoch: number): void {
         "cannot express that policy — say so plainly instead of offering the closest rule. " +
         "This suggests only; it configures nothing.",
       parameters: policyParameters,
-      handler: async (args, context) => {
-        const refusal = guard(context.signal);
-        if (refusal) return refusal;
+      // `policy` is fed straight into text processing, so a non-string used to throw
+      // `text.toLowerCase is not a function` out of `guidance.ts`. It arrives a string.
+      handler: async (args) => {
         const suggested = suggestRuleCandidates(args.policy, readCapabilityContext());
         if (suggested.status !== "ok") {
           return {
@@ -177,7 +164,7 @@ export function useHelpTools(agentId: string, turnEpoch: number): void {
     [agentId, turnEpoch],
   );
 
-  useFrontendTool(
+  useModelVisibleTool(
     {
       name: "open_app_screen",
       agentId,
@@ -189,13 +176,19 @@ export function useHelpTools(agentId: string, turnEpoch: number): void {
         "describe another screen instead.",
       parameters: capabilityIdParameters,
       handler: async (args, context) => {
-        const refusal = guard(context.signal);
-        if (refusal) return refusal;
-        const outcome = await navigate(args.capabilityId);
-        // Re-checked AFTER the await: navigation is the one help action with real
-        // latency, so an interruption during it must not land the user on a screen and
-        // then report it to a turn that no longer exists.
-        const late = guard(context.signal);
+        // THE TOKEN CAPTURED AT ENTRY, handed to `navigate` so the authority check happens
+        // at each of its own effect boundaries -- before the route push, on arrival, and
+        // before the reveal/focus. Checking only on the way in would have proved the
+        // RESULT was withheld while the user had already been moved and a control focused
+        // under a turn that no longer existed.
+        const { token } = context;
+        const outcome = await navigate(args.capabilityId, {
+          authorize: () => isTurnAuthorized(token, context.signal),
+        });
+        if (outcome.status === CAPABILITY_UNAVAILABLE && outcome.reason === "authority_revoked") {
+          return SUPERSEDED;
+        }
+        const late = assertTurnAuthority(token, context.signal);
         if (late) return late;
         return outcome;
       },

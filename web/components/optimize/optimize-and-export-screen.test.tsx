@@ -12,7 +12,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { JobResponse } from "@/lib/bff/types";
-import { scenarioCommands, useHotStore } from "@/lib/store";
+import { getScenarioAuthority, scenarioCommands, useHotStore } from "@/lib/store";
 import {
   drainScenarioCommands,
   installTestAuthority,
@@ -26,6 +26,7 @@ import {
   createOptimizeObservability,
   OPTIMIZE_SESSION_STORAGE_KEY,
   type CleanupCallOutcome,
+  type OptimizeBasisStore,
   type SessionTransactionStorage,
 } from "@/lib/optimize";
 import { OptimizeAndExportScreen } from "./optimize-and-export-screen";
@@ -153,11 +154,27 @@ async function readyStore() {
   });
 }
 
-function onlineInfo() {
+/**
+ * The `semantic_profile` block a real backend advertises on `/info` (T08).
+ *
+ * `onlineInfo()` below deliberately does NOT carry one, because most of this suite is
+ * about the run lifecycle rather than the basis, and a backend may legitimately omit
+ * it. That omission is also exactly why this whole file missed the defect the last
+ * test in it now guards: with no profile in the fixture, a screen that drops the
+ * profile and a screen that forwards it behave identically.
+ */
+const ADVERTISED_SEMANTIC_PROFILE = {
+  submission_contract_version: "optimize-yaml-v1",
+  solver_semantic_version: "ortools/cp-sat@1",
+  backend_capability_version: "nurse-scheduling-backend@1",
+} as const;
+
+function onlineInfo(extra: Record<string, unknown> = {}) {
   return {
     fetchInfo: async () => ({
       status: 200,
       body: {
+        ...extra,
         status: "ready",
         service_name: "nurse",
         api_version: "alpha",
@@ -595,7 +612,7 @@ describe("OptimizeAndExportScreen — terminal release", () => {
     });
   }
 
-  it("row 2: infeasible shows the dedicated panel and auto-cleans", async () => {
+  it("row 2: infeasible shows the dedicated panel and RETAINS its server record", async () => {
     await readyStore();
     routeTerminal(infeasibleJob);
     const deleteJob = vi.fn(async (): Promise<CleanupCallOutcome> => ({ status: "confirmed" }));
@@ -618,7 +635,24 @@ describe("OptimizeAndExportScreen — terminal release", () => {
     );
     expect(screen.getByTestId("optimize-infeasible")).toHaveTextContent("infeasibility_proven");
     expect(screen.getByTestId("optimize-adjust-rules")).toHaveAttribute("href", "/rules");
-    await waitFor(async () => expect(deleteJob).toHaveBeenCalledWith("opt_1"));
+
+    // WHAT CHANGED, AND WHY THIS ROW HAD TO. This asserted `deleteJob` WAS called: an
+    // infeasible run has no artifact, so the terminal chain treated it as nothing to
+    // keep and deleted it the instant it settled.
+    //
+    // That deletion is what made T10's bounded diagnostic unreachable for every run on
+    // every deployment. `classifyRecovery` asks the server for the parent job, got a
+    // 404, answered `local-only`, and `mayOpenSearch` refused -- while the browser's
+    // basis row sat there intact. The row now asserts the opposite, because an
+    // infeasible run's server record IS the evidence the diagnostic exists to read.
+    //
+    // Retention is not extended: the backend already stamps `expires_at` at admission
+    // and reaps on `finished_at`, and `classifyRecovery` independently refuses evidence
+    // past that expiry. Only the client's premature delete is gone. The local slot is
+    // still released, so the next run is never blocked -- which is what the submit
+    // button being enabled below proves.
+    await waitFor(async () => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
+    expect(deleteJob).not.toHaveBeenCalled();
   });
 
   it("U31 solver_timeout (feasible) downloads its artifact then cleans up", async () => {
@@ -995,5 +1029,168 @@ describe("OptimizeAndExportScreen — primary submit gate after cleanup failure"
 
     // Primary submit re-enabled — only a proven release may start a new run.
     await waitFor(async () => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
+  });
+});
+
+describe("the submission basis is claimed from the live backend semantic profile", () => {
+  // THE DEFECT THIS PINS. `buildSubmitInput` assembled `{document, anonymize, prettify,
+  // timeout}` and stopped there. `semanticProfile` is an OPTIONAL field on
+  // `OptimizeRunSubmitInput`, and omitting it is a supported, first-class degradation —
+  // the controller's `buildBasisForSubmission` returns null at its first guard and the
+  // run proceeds as an ordinary un-claimed submission. So the screen never claimed a
+  // basis, on any backend, and every run still looked completely healthy.
+  //
+  // The cost was T10's whole surface. With no row in `optimizeBases`, an infeasible run
+  // has no parent basis, `readDiagnosticParent()` returns null, and the bounded
+  // infeasibility diagnostic truthfully answers "there is no retained Optimize run for
+  // the schedule as it stands now that this tab can diagnose" — for every user, on every
+  // infeasible result, permanently.
+  //
+  // It survived 5,000+ unit tests because no fixture advertised a `semantic_profile`:
+  // with none in the payload the forwarding and non-forwarding screens are
+  // indistinguishable. Both arms below are therefore required — the second is what makes
+  // the first non-vacuous.
+  function recordingBasisStore() {
+    const recorded: Parameters<OptimizeBasisStore["putOptimizeBasis"]>[0][] = [];
+    const store: OptimizeBasisStore = {
+      putOptimizeBasis: async (record) => void recorded.push(record),
+      bindOptimizeBasisJob: async (basisId, verify) => {
+        const row = recorded.find((candidate) => candidate.basisId === basisId);
+        return row === undefined ? null : verify(row);
+      },
+    };
+    return { recorded, store };
+  }
+
+  async function submitOnce(info: ReturnType<typeof onlineInfo>, store: OptimizeBasisStore) {
+    await readyStore();
+    routeFetch(() => json(200, baseJob()));
+    render(
+      <OptimizeAndExportScreen
+        serverInfoDeps={info}
+        controllerDeps={{ prepare: () => okPrep, storage: memStorage(), basisStore: store }}
+      />,
+      { wrapper },
+    );
+    await waitFor(async () => expect(screen.getByText("Online")).toBeInTheDocument());
+    await waitFor(async () => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
+    await userEvent.click(screen.getByTestId("optimize-submit"));
+  }
+
+  it("records a basis row carrying the profile the backend advertised", async () => {
+    const { recorded, store } = recordingBasisStore();
+
+    await submitOnce(onlineInfo({ semantic_profile: ADVERTISED_SEMANTIC_PROFILE }), store);
+
+    // A row is written BEFORE the POST, so an accepted job whose response never
+    // arrives still has something durable to recover against.
+    await waitFor(async () => expect(recorded).toHaveLength(1));
+    const row = recorded[0]!;
+    expect(row.ownerKind).toBe("ordinary");
+    expect(row.schemaVersion).toBe(2);
+    // The profile is carried through verbatim — not defaulted, not re-derived. If the
+    // screen ever forwards a stale or invented profile instead of the one the status
+    // bar read, these three fail.
+    expect(row.basis.submissionContractVersion).toBe(
+      ADVERTISED_SEMANTIC_PROFILE.submission_contract_version,
+    );
+    expect(row.basis.solverSemanticVersion).toBe(
+      ADVERTISED_SEMANTIC_PROFILE.solver_semantic_version,
+    );
+    expect(row.basis.backendCapabilityVersion).toBe(
+      ADVERTISED_SEMANTIC_PROFILE.backend_capability_version,
+    );
+    // The resolved run options are bound in too: the backend binds ITS resolved values,
+    // so a basis built from guessed defaults would fail admission.
+    expect(row.basis.normalizedOptions).toEqual({
+      solver: expect.any(String),
+      prettify: true,
+      timeoutSeconds: 300,
+    });
+  });
+
+  it("records the row through the REAL adapter when nothing is injected", async () => {
+    // THE ARM THAT MATTERS MOST, and the one whose absence let the second half of this
+    // defect ship. Every other test here injects a `basisStore`, which is exactly the
+    // condition that hid it: `UseOptimizeRunDeps.basisStore` documented a default to the
+    // authority adapter, but the controller read `depsRef.current?.basisStore ?? null`.
+    // The only mount in the app that passes `controllerDeps` is a dev fixture, so the
+    // real route always ran with a null store -- and an injected store made the tests
+    // pass regardless.
+    //
+    // So this arm injects NO basis store and reads the row back through the product's
+    // own adapter. It is the only test in the file that exercises the wiring the route
+    // actually uses.
+    await readyStore();
+    routeFetch(() => json(200, baseJob()));
+    render(
+      <OptimizeAndExportScreen
+        serverInfoDeps={onlineInfo({ semantic_profile: ADVERTISED_SEMANTIC_PROFILE })}
+        controllerDeps={{ prepare: () => okPrep, storage: memStorage() }}
+      />,
+      { wrapper },
+    );
+    await waitFor(async () => expect(screen.getByText("Online")).toBeInTheDocument());
+    await waitFor(async () => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
+    await userEvent.click(screen.getByTestId("optimize-submit"));
+
+    await waitFor(async () =>
+      expect(await getScenarioAuthority().listOptimizeBases()).toHaveLength(1),
+    );
+    const [row] = await getScenarioAuthority().listOptimizeBases();
+    expect(row).toMatchObject({ schemaVersion: 2, ownerKind: "ordinary" });
+
+    // JOB BINDING IS DELIBERATELY NOT ASSERTED HERE. `bindAcceptedJob` binds only on an
+    // EXACTLY matching echoed identity, and `baseJob()` returns `request.basis: null` --
+    // it does not echo what was posted -- so the correct outcome against this fixture is
+    // an unbound row. Asserting a bind would mean teaching the fixture to reflect the
+    // multipart basis fields back, which would prove the fixture echoes rather than that
+    // the backend does. The bind rule itself is owned by `lib/optimize/basis`, and the
+    // real echo is proven against the live backend in the T11 closure journey.
+    expect((row as { jobId: string | null }).jobId).toBeNull();
+  });
+
+  it("reports the degradation through the SCREEN's own observability instance", async () => {
+    // The reason taxonomy is proven exhaustively in `basis-observability.test.tsx`
+    // against the controller. What is unproven there, and is the whole point of this
+    // one, is that the SHIPPED SCREEN actually hands the controller an observability
+    // sink -- the same class of wiring gap as the two that made the basis path dead.
+    // `onlineInfo()` advertises no semantic profile, so this is a real degradation.
+    const observability = createOptimizeObservability();
+    await readyStore();
+    routeFetch(() => json(200, baseJob()));
+    render(
+      <OptimizeAndExportScreen
+        serverInfoDeps={onlineInfo()}
+        controllerDeps={{ prepare: () => okPrep, storage: memStorage() }}
+        observability={observability}
+      />,
+      { wrapper },
+    );
+    await waitFor(async () => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
+    await userEvent.click(screen.getByTestId("optimize-submit"));
+
+    await waitFor(async () =>
+      expect(
+        observability
+          .snapshot()
+          .map((e) => e.observation)
+          .filter((o) => o.kind === "basis-degraded"),
+      ).toEqual([{ kind: "basis-degraded", jobId: null, reason: "profile-unavailable" }]),
+    );
+  });
+
+  it("still degrades to an ordinary un-claimed run when the backend advertises none", async () => {
+    // The negative control, and the reason the assertion above means something: the
+    // pre-repair screen produced THIS outcome for both payloads.
+    const { recorded, store } = recordingBasisStore();
+
+    await submitOnce(onlineInfo(), store);
+
+    // The run itself is unaffected — no basis is not an error.
+    await waitFor(async () =>
+      expect(screen.getByTestId("optimize-run-status")).toBeInTheDocument(),
+    );
+    expect(recorded).toEqual([]);
   });
 });

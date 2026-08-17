@@ -65,6 +65,15 @@ import { isConfirmedStop, type ActiveRunHandle } from "./runtime-stop";
  */
 export const SETTLEMENT_WINDOW_MS = 15_000;
 
+/**
+ * How many times a clear may recapture the world before giving up and saying so.
+ *
+ * Three, because each attempt runs after the gate is closed and the settlement window
+ * has passed: one retry covers a write that landed in the same tick, and a clear that
+ * loses three times is contending with something this bound cannot fix.
+ */
+export const CLEAR_RECAPTURE_LIMIT = 3;
+
 export interface InterruptionRequest {
   trigger: InterruptionTrigger;
   /** The thread to scope to, or `null` for "every thread" (Clear all, Disable). */
@@ -104,6 +113,48 @@ export interface InterruptionDeps {
   settlementWindow(ms: number, signal: AbortSignal): Promise<void>;
 }
 
+/**
+ * The facts of ONE interruption, accumulated as each stage establishes them.
+ *
+ * WHY AN ACCUMULATOR AND NOT JUST A RETURN VALUE. `interrupt` throws only for genuine
+ * storage failures, and those land at a specific stage -- most often the deletion
+ * transaction, which runs AFTER the gate closed, after cancellation, and after the
+ * bounded settlement window has already produced a real settlement class. Reporting
+ * that failure as `{ closedTurnEpoch: 0, runtime: "not_attempted", settlement:
+ * "run_failed" }` would not be classifying an unknown; it would be discarding facts
+ * this controller had already established and replacing them with fiction.
+ *
+ * The caller owns the object and reads it after a throw. Every field is `null` until
+ * its stage completes, so "not known" and "known to be nothing" stay distinguishable.
+ */
+export interface InterruptionProgress {
+  /** The clear fence, once `beginClear` has committed. */
+  fence: ClearFence | null;
+  /** The epoch closed synchronously at step 2. */
+  closedTurnEpoch: number | null;
+  runtime: RuntimeStopOutcome | null;
+  diagnostics: DiagnosticCancellationSummary | null;
+  /** The real bounded settlement class from step 4. */
+  settlement: AssistantSettlement | null;
+  settledTurnIds: string[];
+  fencedTurnIds: string[];
+  /** The deletion result from step 5, once `finishClear` has returned. */
+  deletion: ClearDeletion | null;
+}
+
+export function emptyInterruptionProgress(): InterruptionProgress {
+  return {
+    fence: null,
+    closedTurnEpoch: null,
+    runtime: null,
+    diagnostics: null,
+    settlement: null,
+    settledTurnIds: [],
+    fencedTurnIds: [],
+    deletion: null,
+  };
+}
+
 export interface InterruptionResult {
   trigger: InterruptionTrigger;
   /** The epoch that was closed. Nothing authorised under it may publish again. */
@@ -132,6 +183,11 @@ export interface InterruptionResult {
 export async function interrupt(
   request: InterruptionRequest,
   deps: InterruptionDeps,
+  /**
+   * Filled in stage by stage, so a caller can read what was already established even
+   * when a later stage throws. See {@link InterruptionProgress}.
+   */
+  progress: InterruptionProgress = emptyInterruptionProgress(),
 ): Promise<InterruptionResult> {
   const { trigger } = request;
 
@@ -139,9 +195,11 @@ export async function interrupt(
   const fence = isClearTrigger(trigger)
     ? await deps.beginClear(trigger === "clear_all" ? "all" : "history", request.scenarioId)
     : null;
+  progress.fence = fence;
 
   // ---- 2. Local closure, synchronously -----------------------------------
   const closedTurnEpoch = deps.closeGate(trigger);
+  progress.closedTurnEpoch = closedTurnEpoch;
   deps.publishPhase("closing", trigger);
   recordLifecycleEvent({ trigger, phase: "closing", at: deps.now() });
 
@@ -156,7 +214,7 @@ export async function interrupt(
   const aborted = deps.abortLocalRun();
 
   const window = new AbortController();
-  const progress: { runtime: RuntimeStopOutcome; acks: DiagnosticCancellationAck[] } = {
+  const cancelled: { runtime: RuntimeStopOutcome; acks: DiagnosticCancellationAck[] } = {
     runtime: "not_attempted",
     acks: [],
   };
@@ -170,14 +228,20 @@ export async function interrupt(
       // No thread and no aborted run means no server-side run was ever started, so
       // there is nothing to stop -- which is `not_attempted`, not a failed stop.
       if (!threadId || (!aborted && unsettled.length === 0)) return;
-      progress.runtime = await deps.requestRuntimeStop({ threadId, signal: window.signal });
+      cancelled.runtime = await deps.requestRuntimeStop({ threadId, signal: window.signal });
     })(),
     (async () => {
       try {
-        progress.acks = await deps.cancelDiagnostics({
+        cancelled.acks = await deps.cancelDiagnostics({
           trigger,
           threadId: scope.kind === "thread" ? scope.threadId : null,
-          scenarioId: request.scenarioId,
+          // CANCELLATION SCOPE IS THE TURN SCOPE, derived from the trigger -- not the
+          // scenario the user happened to have selected. Clear all and Disable close
+          // every turn in the tab, so they must ask every owned diagnostic job to stop;
+          // passing the selected scenario made the canceller filter out every OTHER
+          // scenario's jobs, which then kept running after the user was told the
+          // assistant had been stopped. `null` is how this contract says "all".
+          scenarioId: scope.kind === "all" ? null : request.scenarioId,
           closedTurnEpoch,
           signal: window.signal,
         });
@@ -185,7 +249,7 @@ export async function interrupt(
         // A canceller that throws has told us nothing, which is exactly the
         // "cancellation could not be confirmed" case -- so it detaches rather than
         // failing the interruption. The gate is already closed either way.
-        progress.acks = [{ jobId: "unknown", state: "unconfirmed" }];
+        cancelled.acks = [{ jobId: "unknown", state: "unconfirmed" }];
         recordLifecycleEvent({
           trigger,
           phase: "cancelling",
@@ -211,13 +275,34 @@ export async function interrupt(
   // that finishes later may appear in ordinary job history and nothing more.
   window.abort();
 
-  const diagnostics = summarizeCancellations(progress.acks);
+  const diagnostics = summarizeCancellations(cancelled.acks);
   const settlement = classifySettlement({
     timedOut,
-    runtime: progress.runtime,
+    runtime: cancelled.runtime,
     diagnostics,
   });
+  // ESTABLISHED FACTS, recorded before the deletion transaction can throw.
+  progress.runtime = cancelled.runtime;
+  progress.diagnostics = diagnostics;
+  progress.settlement = settlement;
   const detached = isDetachedSettlement(settlement);
+
+  // NO EXPLICIT WAIT FOR IN-FLIGHT HISTORY WRITES, and that is a derivation rather
+  // than an omission.
+  //
+  // The terminal `setTurnState` below runs `runFenced` over ASSISTANT_WRITE_TABLES --
+  // the SAME four tables, on the same database, as every turn-owned history write. Two
+  // `readwrite` transactions with overlapping scope are serialised by IndexedDB in
+  // creation order, so a history write already open when we reach here necessarily
+  // finishes -- committing or rolling back -- before this settlement transaction can
+  // begin. A write that has NOT opened yet starts afterwards and is refused twice
+  // over: by the in-memory gate, which closed synchronously when the interruption was
+  // requested, and by the durable unsettled-turn comparison inside its own
+  // transaction. Clear is the same argument with a wider scope, since its table set is
+  // a superset of these.
+  //
+  // So there is no third case for a drain to cover, and an earlier one here was
+  // removed: a mechanism no test can distinguish is a claim, not a guarantee.
 
   const settledTurnIds: string[] = [];
   const fencedTurnIds: string[] = [];
@@ -230,21 +315,61 @@ export async function interrupt(
     if (outcome === "fenced") fencedTurnIds.push(turn.turnId);
     else if (outcome === "accepted") settledTurnIds.push(turn.turnId);
   }
+  progress.settledTurnIds = settledTurnIds;
+  progress.fencedTurnIds = fencedTurnIds;
 
   // ---- 5. Delete after settlement (clear triggers only) ------------------
   let clear: InterruptionResult["clear"] = null;
   if (fence) {
-    clear = { fence, deletion: await deps.finishClear(fence) };
+    // BOUNDED RECAPTURE, but ONLY FOR CLEAR ALL.
+    //
+    // The deletion pass refuses when a generation scope exists that the operation did
+    // not capture -- assistant data created after the clear was authorized, which a
+    // global wipe must not reach forward into. That refusal is correct, but it is not
+    // completion, and publishing it as `cleared` would tell the user their data was
+    // deleted while it sat on disk.
+    //
+    // For Clear all the honest response to a refused deletion is to look again: by
+    // this point the gate is closed and the settlement window has passed, so the world
+    // should be still. Capture it as it now is and delete that. Bounded, because a
+    // recapture that keeps losing the race is a system that is still writing, and
+    // looping forever would be worse than saying so.
+    //
+    // For Clear history a recapture would re-derive its scope from the CURRENT world,
+    // and that world may include a same-scenario thread created AFTER this request. The
+    // repository's no-reach-forward property promises a thread minted after a clear
+    // stays active -- re-fencing it here would break that promise. So a superseded
+    // scoped clear returns incomplete and waits for an explicit new click.
+    let deletion = await deps.finishClear(fence);
+    progress.deletion = deletion;
+    let recaptured = fence;
+    if (trigger === "clear_all") {
+      for (
+        let attempt = 0;
+        deletion.outcome === "superseded" && attempt < CLEAR_RECAPTURE_LIMIT;
+        attempt += 1
+      ) {
+        recaptured = await deps.beginClear("all", request.scenarioId);
+        progress.fence = recaptured;
+        deletion = await deps.finishClear(recaptured);
+        progress.deletion = deletion;
+      }
+    }
+    clear = { fence: recaptured, deletion };
   }
 
-  const phase: InterruptionPhase = fence ? "cleared" : detached ? "detached" : "settled";
+  // `cleared` ONLY IF THE CONTENT IS ACTUALLY GONE. A clear that was refused for
+  // safety stopped the work -- which is `settled` or `detached`, truthfully -- but it
+  // did not delete anything, and the surface must not say otherwise.
+  const deleted = clear?.deletion.outcome === "deleted";
+  const phase: InterruptionPhase = deleted ? "cleared" : detached ? "detached" : "settled";
   deps.publishPhase(phase, trigger);
   recordLifecycleEvent({
     trigger,
     phase,
     at: deps.now(),
     settlement,
-    runtime: progress.runtime,
+    runtime: cancelled.runtime,
     turns: settledTurnIds.length,
     diagnosticsRequested: diagnostics.requested,
     diagnosticsConfirmed: diagnostics.confirmed,
@@ -253,7 +378,7 @@ export async function interrupt(
   return {
     trigger,
     closedTurnEpoch,
-    runtime: progress.runtime,
+    runtime: cancelled.runtime,
     diagnostics,
     settlement,
     phase,

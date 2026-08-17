@@ -1,0 +1,67 @@
+id: test-capability-acquisition
+language: TypeScript
+severity: error
+message: >-
+  Test/support code acquired a filesystem, module-loader or parser capability through a
+  DYNAMIC route. The acquisition boundary is the same whichever syntax reaches it: readers
+  are granted to an exact file and recorded in the reader ledger with their API, root/path
+  class, extension/format and write permission, and the parser family has no exception
+  anywhere.
+note: >-
+  Custom-AST ticket 6. Oxlint `no-restricted-imports` is the PRIMARY mechanism for this
+  boundary and owns every static specifier -- including `import type`, aliases, namespace
+  imports and re-export chains -- across all eight test/support extensions.
+  .
+  DYNAMIC `import()` IS OXLINT'S, NOT THIS RULE'S (fixup, cold-review P2). The first version of
+  this rule matched `import($SPEC)` and the implementation report claimed Oxlint "sees static
+  specifiers only". That was wrong for the INSTALLED Oxlint: a probe on 1.74 shows
+  `await import("node:fs/promises")` in a `.test.mts` reported by `no-restricted-imports`
+  directly. The same syntax was therefore owned twice, against this ticket's own
+  non-duplication criterion, so the pattern was removed here and the dynamic form is a VALID
+  fixture below -- valid for THIS rule, and still rejected by lint, by its real owner.
+  .
+  What is left is the genuine residual, each verified in the same probe to produce no Oxlint
+  diagnostic: `require("fs")`, and `process.getBuiltinModule("fs")`, which has no specifier for
+  an import rule to see at all.
+  .
+  SCOPE OF THE CLAIM. These are DECLARED shapes. A specifier assembled at runtime, a
+  capability handed over by a helper, or bytes that reached `.match()` by some route nobody
+  enumerated are NOT covered, and no such claim is made -- the boundary is acquisition plus
+  an audited exception list, not proof of byte provenance.
+  .
+  WHY `getBuiltinModule` IS UNCONSTRAINED BY SPECIFIER. Unlike `import`/`require`, which the
+  whole repository uses legitimately for ordinary modules, `getBuiltinModule` has no
+  legitimate use here at all: its only purpose is to reach a Node builtin without an import
+  the linter can see. So the rule rejects the CALL rather than an argument list, and does
+  not have to keep a specifier enumeration in step with Node's builtins.
+  .
+  WHY THERE ARE NO `ignores`. Every audited reader in the ledger acquires its capability
+  STATICALLY, through the exact Oxlint override that admits it. None needs a dynamic route,
+  so granting one would widen the exception list past what any reader uses. A future reader
+  that genuinely needs a dynamic acquisition adds itself here with a justification, the same
+  way it adds itself to the Oxlint override.
+  .
+  Loader text inside a SPAWNED-SCRIPT STRING is deliberately not matched and this is a
+  property of the mechanism rather than a maintained exclusion: `instrumentation.subprocess.test.ts`
+  writes Node scripts containing `require('node:http')` into template literals, which parse
+  as `string_fragment`, not `call_expression`. The `spawned-script-loader-text` valid fixture
+  pins that distinction so it cannot regress into either a false positive or a silent hole.
+files:
+  - "**/*.test.*"
+  - "**/*.spec.*"
+  - "**/*.test-d.*"
+  - "e2e/**"
+  - "**/__tests__/**"
+  - "**/support/**"
+  - "**/test-support/**"
+  - "**/test-support.*"
+  - "**/*.test-support.*"
+  - "lib/store/test-authority.ts"
+rule:
+  any:
+    - pattern: require($SPEC)
+    - pattern: $OBJ.getBuiltinModule($$$)
+constraints:
+  SPEC:
+    regex: |-
+      ^["'](?:(?:node:)?fs(?:/promises)?|fs-extra(?:/.+)?|graceful-fs|memfs|(?:node:)?module|typescript(?:/.+)?|ts-morph(?:/.+)?|@babel/[^"']+|acorn(?:-walk)?(?:/.+)?|esprima|espree|meriyah|recast(?:/.+)?|jscodeshift(?:/.+)?|@swc/[^"']+|oxc-parser(?:/.+)?|@typescript-eslint/[^"']+|tree-sitter(?:-[^"']+)?|web-tree-sitter|@ast-grep/[^"']+)["']$

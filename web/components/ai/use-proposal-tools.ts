@@ -19,17 +19,29 @@
 // present it as a failure to retry, and retrying a rejected operation is exactly the
 // loop the closed flows forbid ("never approximate a materially different rule").
 
-import { useFrontendTool } from "@copilotkit/react-core/v2";
+import { useModelVisibleTool } from "./register-model-visible-tool";
 import { z } from "zod";
 import { assistantCommandListSchema, type AssistantCommandV1 } from "@/lib/proposal";
 import { capabilityRegistryStamp } from "@/lib/capability/registry";
 import { assistantProposalCommands } from "@/lib/store";
 import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
+import { assertTurnAuthority, SUPERSEDED } from "./turn-authority";
 
-/** What a handler answers once its turn is no longer the current one. */
-const SUPERSEDED = "superseded: this request belongs to an interrupted turn and was not answered.";
-
-const evidenceSchema = z.object({
+/**
+ * THE MODEL-VISIBLE SHAPE, and it is constrained by what the locked runtime can
+ * convert as much as by what the host will accept.
+ *
+ * `reference` was `z.string().nullable()`, which `zod-to-json-schema` serialises with a
+ * `{ "type": "null" }` branch. `@copilotkit/runtime@1.66.2`'s JSON-Schema-to-Zod
+ * converter handles object/string/number/integer/boolean/array and unions of those, and
+ * throws `Invalid JSON schema` on anything else -- BEFORE the provider tool loop runs.
+ * A live turn therefore issued one request, got no tools, and stopped with no answer.
+ *
+ * Optional says the same thing to the model without the unsupported branch: supply an
+ * app-owned id or leave it out. The host normalises a missing reference to the durable
+ * `null` (see the handler), so nothing downstream changes shape.
+ */
+export const evidenceSchema = z.object({
   kind: z
     .enum(["user_statement", "existing_scenario", "optimizer_basis", "capability"])
     .describe(
@@ -40,11 +52,14 @@ const evidenceSchema = z.object({
   label: z.string().min(1).describe("One short phrase the user will recognise."),
   reference: z
     .string()
-    .nullable()
-    .describe("An app-owned id when there is one (an Optimize basis id). Never a URL."),
+    .optional()
+    .describe(
+      "An app-owned id when there is one (an Optimize basis id). Omit it when there is " +
+        "none. Never a URL.",
+    ),
 });
 
-const prepareParameters = z.object({
+export const prepareParameters = z.object({
   summary: z
     .string()
     .min(1)
@@ -62,12 +77,13 @@ const prepareParameters = z.object({
 /**
  * Register the prepare-proposal tool against ONE agent instance.
  *
- * `turnEpoch` is the AUTHORISED epoch, exactly as the read tools take it: a handler
- * that finishes after an interruption must publish nothing, and a Preview is the
- * loudest possible thing to publish.
+ * `turnEpoch` is the AUTHORISED epoch. It is no longer the guard -- every handler
+ * asks `assertTurnAuthority` for the whole bound identity -- but it is still what a
+ * published Preview is STAMPED with, so a card produced by a turn the user has since
+ * stopped renders as stopped rather than as a live Apply control.
  */
 export function useProposalTools(agentId: string, turnEpoch: number): void {
-  useFrontendTool(
+  useModelVisibleTool(
     {
       name: "prepare_scenario_change",
       agentId,
@@ -80,8 +96,14 @@ export function useProposalTools(agentId: string, turnEpoch: number): void {
         "a number of people, or which rule they mean.",
       parameters: prepareParameters,
       handler: async (args, context) => {
-        if (context.signal?.aborted) return SUPERSEDED;
-        if (useAssistantStore.getState().turnEpoch !== turnEpoch) return SUPERSEDED;
+        // The token captured at entry, demanded again after the durable preparation below.
+        //
+        // `args` arrives parsed. That is what closed the live blocker: `evidence` carries
+        // `.default([])`, and a model that legally omitted it used to reach `.map()` on
+        // `undefined` -- which the locked core turned into an `Error: ...` tool result and
+        // fed back as a second hop. The user was told the app could not prepare the
+        // change, and no Preview appeared.
+        const { token } = context;
 
         // A change prepared while one is already on screen is a REVISION of it, not a
         // second change: there is at most one live Preview, and treating the second
@@ -97,7 +119,14 @@ export function useProposalTools(agentId: string, turnEpoch: number): void {
           registryStamp: capabilityRegistryStamp(),
           commands: args.operations as AssistantCommandV1[],
           rationale: args.summary,
-          evidence: args.evidence,
+          // NORMALISED BY TRUSTED HOST CODE. The wire shape omits an absent reference;
+          // the durable record has always carried `string | null`, and every reader
+          // downstream expects that. The model still cannot supply anything but an
+          // app-owned id string -- omission is the only new thing it can express.
+          evidence: args.evidence.map((item) => ({
+            ...item,
+            reference: item.reference ?? null,
+          })),
           // T07 accepts typed evidence references and works without diagnostics; a
           // solver-tested outcome is T10's to supply, and claiming one here would be
           // the assistant asserting a test that never ran.
@@ -107,8 +136,12 @@ export function useProposalTools(agentId: string, turnEpoch: number): void {
         // RE-CHECKED AFTER THE AWAIT. Preparation is durable work with a real gap in
         // it, and a Preview published into an interrupted turn is a live Apply
         // control for a conversation the user already stopped.
-        if (context.signal?.aborted) return SUPERSEDED;
-        if (useAssistantStore.getState().turnEpoch !== turnEpoch) return SUPERSEDED;
+        const late = assertTurnAuthority(token, context.signal);
+        if (late) return late;
+        // Narrowing only: `assertTurnAuthority` already refuses a null token, so this
+        // cannot be reached. It is what lets the stamp below read the token instead of
+        // the closure.
+        if (token === null) return SUPERSEDED;
 
         if (!outcome.ok) {
           if (outcome.reason === "rejected") {
@@ -127,7 +160,20 @@ export function useProposalTools(agentId: string, turnEpoch: number): void {
           return "The app could not prepare that change right now, and nothing was altered. Tell the user, and suggest they try again.";
         }
 
-        assistantActions.showProposal(outcome.proposal.proposalId, turnEpoch);
+        // STAMPED FROM THE TOKEN, not from the closure `turnEpoch`.
+        //
+        // The closure holds the epoch this tool was REGISTERED under -- `authorizedTurnEpoch
+        // ?? -1` at the last render its effect saw. The run happens on a per-turn clone that
+        // snapshots the tool registry as the turn launches, i.e. after `nextTurnEpoch()`
+        // cleared `authorizedTurnEpoch` and before `beginTurn` restored it, so the handler
+        // that actually executes carries `-1` while the live epoch is the turn's. The card
+        // compares stamp against live (`use-assistant-proposals`), so every live Preview was
+        // born "stopped" with Apply permanently disabled.
+        //
+        // The token is the SAME authority `assertTurnAuthority` validates above and carries
+        // the authorised turn's own epoch, so the stamp agrees with the live value during the
+        // turn and still diverges the moment an interruption bumps it.
+        assistantActions.showProposal(outcome.proposal.proposalId, token.turnEpoch);
         const waiting = outcome.proposal.assumptions.length;
         return (
           "A preview of this change is now shown to the user, with the exact before and " +

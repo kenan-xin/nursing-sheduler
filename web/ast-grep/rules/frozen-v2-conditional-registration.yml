@@ -1,0 +1,44 @@
+id: frozen-v2-conditional-registration
+language: TypeScript
+severity: error
+message: >-
+  The frozen F4 v2 suites select work at REGISTRATION time -- an owner that is out of scope
+  has no block registered at all. Every spelling of a skip still REGISTERS the block and
+  still reports it as skipped, which turns out-of-scope work into a growing skip count
+  nobody reads. Filter the manifest before calling `describe`/`test`.
+note: >-
+  Migrated from the nine-file source scan in `e2e/support/v2-surface-matrix.test.ts`.
+  Alternatives checked and rejected -- and this one needed a PROBE, because the obvious
+  answer is wrong. Oxlint's `vitest/no-disabled-tests`, `vitest/no-focused-tests` and
+  `vitest/no-commented-out-tests` are active repository-wide at `error` and are the primary
+  mechanism for test hygiene everywhere; but a mutation probe showed they do not fire at all
+  when `test` is imported from `@playwright/test`, and three of these nine files are
+  Playwright specs. Oxlint also has no rule for `skipIf`/`runIf`, which are legitimate
+  elsewhere in the repository (gated differential suites, the subprocess suite that needs a
+  build artifact) and forbidden only here. So this rule owns the guarantee over exactly the
+  nine paths the retired scan covered -- deliberately including the one Vitest file among
+  them, because splitting the list by which linter happens to recognise each file's runner
+  would leave the next reader with a rule whose scope no longer matches the contract.
+files:
+  - "e2e/support/v2-surface-matrix.ts"
+  - "e2e/support/v2-owner-selection.ts"
+  - "e2e/support/v2-seed.ts"
+  - "e2e/support/v2-readiness.ts"
+  - "e2e/support/v2-visual-audit.ts"
+  - "e2e/v2-readiness.spec.ts"
+  - "e2e/v2-visual-system.spec.ts"
+  - "e2e/v2-visual-regression.spec.ts"
+  - "app/v2-style-contract.test.ts"
+rule:
+  any:
+    - pattern: $RUNNER.skip($$$)
+    - pattern: $RUNNER.only($$$)
+    - pattern: $RUNNER.todo($$$)
+    - pattern: $RUNNER.fixme($$$)
+    - pattern: $RUNNER.skipIf($$$)
+    - pattern: $RUNNER.runIf($$$)
+constraints:
+  # Only the test runners. A `.skip(...)` on anything else -- a page object, a helper, an
+  # iterator -- is not a registration decision and is none of this rule's business.
+  RUNNER:
+    regex: ^(test|it|describe)\b

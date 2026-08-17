@@ -24,7 +24,6 @@
 // there is even one problem, so a broken registry cannot be a degraded registry.
 
 import {
-  ALL_NAV_ITEMS,
   findNavItemById,
   isRouteIdVisibleInMode,
   NAV_ROUTE_IDS,
@@ -272,13 +271,6 @@ export function buildCapabilityManifest(
   });
 
   return Object.freeze({ schemaVersion: CAPABILITY_SCHEMA_VERSION, entries, anchors, canonical });
-}
-
-/** Every navigation path a route-level fixture must mount, keyed by stable id. */
-export function declaredRoutePaths(): readonly { routeId: NavRouteId; path: string }[] {
-  return Object.freeze(
-    ALL_NAV_ITEMS.map((item) => Object.freeze({ routeId: item.id, path: item.path })),
-  );
 }
 
 /** The path for a stable route id. Re-exported so consumers never build one. */

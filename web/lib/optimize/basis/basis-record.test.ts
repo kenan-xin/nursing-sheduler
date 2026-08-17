@@ -9,9 +9,10 @@ import {
   BasisOwnershipError,
   buildOptimizeBasis,
   OPTIMIZE_SERIALIZER_VERSION,
+  toTransmittedYaml,
   type BuildBasisInput,
 } from "./basis-record";
-import { computeBasisId } from "./optimize-basis";
+import { computeBasisId, sha256HexOfUtf8 } from "./optimize-basis";
 
 const PROFILE: InfoSemanticProfile = {
   submission_contract_version: "optimize-yaml-v1",
@@ -81,7 +82,12 @@ describe("buildOptimizeBasis", () => {
     const built = await buildOptimizeBasis(input());
     expect(built.record.jobId).toBeNull();
     expect(built.record.expiresAt).toBeNull();
-    expect(built.record.submittedYaml).toBe(YAML);
+    // The TRANSMITTED bytes, not the string handed in. `submittedYaml` is the row's
+    // raw material for recovery, and it must reproduce the row's own
+    // `submissionDigest` -- which is taken over what the multipart serializer really
+    // sends. See "the claimed digest describes the bytes that are actually
+    // transmitted" below for why those two differ.
+    expect(built.record.submittedYaml).toBe(toTransmittedYaml(YAML));
     expect(built.record.createdAt).toBe(NOW.toISOString());
   });
 
@@ -166,5 +172,65 @@ describe("bindAcceptedJob", () => {
     const bound = bindAcceptedJob(row, accepted(row))!;
     // Rebinding would let one submission's evidence be attributed to another job.
     expect(bindAcceptedJob(bound, { ...accepted(row), jobId: "job_2" })).toBeNull();
+  });
+});
+
+describe("the claimed digest describes the bytes that are actually transmitted", () => {
+  // THE CONTRACT THIS PINS, and why it is worth a test that looks this indirect.
+  //
+  // `input_sha256` is verified server-side by re-hashing the bytes the request
+  // carried. Both basis-claiming paths post their YAML as a multipart STRING FIELD,
+  // and the `multipart/form-data` encoding algorithm normalizes every lone LF and CR
+  // in a string field's value to CRLF. So the client and the server hash different
+  // byte sequences for any multi-line document, and the backend answers with a
+  // pre-job 422 -- Optimize fails outright, for every real submission.
+  //
+  // Nothing caught this: the backend's own admission tests post through Python, which
+  // does not normalize, and in the browser no submission ever carried a claim at all.
+  //
+  // The test therefore refuses to restate the rule as "replace \n with \r\n". It runs
+  // the REAL FormData serializer, reads back what a server would parse, and hashes
+  // that. If the platform's normalization ever differs from what `toTransmittedYaml`
+  // assumes, this fails rather than agreeing with itself.
+  const MULTILINE = "workspaceVersion: 1\napiVersion: alpha\npeople:\n  items:\n    - id: a\n";
+
+  /** What a server parsing this multipart body actually receives for the field. */
+  async function transmittedFieldValue(yaml: string): Promise<string> {
+    const form = new FormData();
+    form.set("yaml_content", yaml);
+    const parsed = await new Request("http://localhost/optimize", {
+      method: "POST",
+      body: form,
+    }).formData();
+    return String(parsed.get("yaml_content"));
+  }
+
+  it("hashes what the multipart serializer really sends, not the string handed in", async () => {
+    const received = await transmittedFieldValue(MULTILINE);
+
+    // SENSITIVITY. If the platform stopped normalizing, the assertion below would hold
+    // trivially and prove nothing. This is the line that says the hazard is real.
+    expect(received).not.toBe(MULTILINE);
+    expect(received).toContain("\r\n");
+
+    const built = await buildOptimizeBasis(input({ yaml: MULTILINE }));
+    expect(built.fields.input_sha256).toBe(await sha256HexOfUtf8(received));
+  });
+
+  it("stores a row whose payload re-hashes to its own digest", async () => {
+    // Recovery re-reads `submittedYaml`. A row whose stored payload does not reproduce
+    // its own `submissionDigest` cannot be checked against anything.
+    const built = await buildOptimizeBasis(input({ yaml: MULTILINE }));
+    expect(await sha256HexOfUtf8(built.record.submittedYaml!)).toBe(built.record.submissionDigest);
+    expect(built.record.submissionDigest).toBe(built.fields.input_sha256);
+  });
+
+  it("is idempotent, so an already-CRLF document is not double-normalized", async () => {
+    const crlf = MULTILINE.replace(/\n/g, "\r\n");
+    expect(toTransmittedYaml(crlf)).toBe(crlf);
+    const fromLf = await buildOptimizeBasis(input({ yaml: MULTILINE }));
+    const fromCrlf = await buildOptimizeBasis(input({ yaml: crlf }));
+    // The same document submitted either way is the same submission on the wire.
+    expect(fromCrlf.fields.input_sha256).toBe(fromLf.fields.input_sha256);
   });
 });

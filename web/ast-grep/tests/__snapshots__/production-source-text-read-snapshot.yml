@@ -1,0 +1,45 @@
+id: production-source-text-read
+snapshots:
+  ? |
+    const handle = openSync(join(ROOT, "lib/store/spine.ts"));
+  : labels:
+      - source: openSync(join(ROOT, "lib/store/spine.ts"))
+        style: primary
+        start: 15
+        end: 57
+  ? |
+    const source = readFileSync(join(ROOT, "app/layout.tsx"), "utf8");
+    const owners = source.match(/className="([^"]+)"/g);
+  : labels:
+      - source: readFileSync(join(ROOT, "app/layout.tsx"), "utf8")
+        style: primary
+        start: 15
+        end: 65
+  ? |
+    const stream = createReadStream("components/theme/theme-toggle.tsx");
+  : labels:
+      - source: createReadStream("components/theme/theme-toggle.tsx")
+        style: primary
+        start: 15
+        end: 68
+  ? |
+    const text = await readFile(join(ROOT, "components/shell/top-bar.tsx"), "utf8");
+  : labels:
+      - source: readFile(join(ROOT, "components/shell/top-bar.tsx"), "utf8")
+        style: primary
+        start: 19
+        end: 79
+  ? |
+    const text = readFileSync("lib/store/authority.ts", "utf8");
+  : labels:
+      - source: readFileSync("lib/store/authority.ts", "utf8")
+        style: primary
+        start: 13
+        end: 59
+  ? |
+    const text = readFileSync(join(ROOT, "components/ui/surface.tsx"), "utf8");
+  : labels:
+      - source: readFileSync(join(ROOT, "components/ui/surface.tsx"), "utf8")
+        style: primary
+        start: 13
+        end: 74

@@ -1,4 +1,3 @@
-// LOAD-BEARING: must precede the `@copilotkit/runtime` import (see containment.ts).
 import {
   AI_DETACH_REASON_INSTANCE_MISMATCH,
   AI_ERROR_CREDENTIALS_REQUIRED,
@@ -7,12 +6,14 @@ import {
   RUNTIME_INSTANCE_HEADER,
 } from "./containment";
 
+// The contained entry point — the only module in the app that may name the runtime
+// package. Import order here no longer carries any meaning.
 import {
   CopilotRuntime,
   createCopilotRuntimeHandler,
   type CopilotRuntimeFetchHandler,
   type RouteInfo,
-} from "@copilotkit/runtime/v2";
+} from "./copilotkit-runtime";
 
 import { assertSingleWebInstance } from "./deployment";
 import { getRuntimeInstanceId } from "./instance-identity";

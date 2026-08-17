@@ -1,6 +1,8 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import * as Icons from "@/components/icons";
+import { FaDiagramProject } from "react-icons/fa6";
 
 // Static half of the v2 token contract (F1). Everything here is verifiable by
 // parsing globals.css: the canonical light/dark literals, the four accent pairs
@@ -9,8 +11,25 @@ import { describe, expect, it } from "vitest";
 // half — theme/accent lifecycle, the supported color-mix() computed path,
 // hydration — lives in e2e/design-system.spec.ts; the emitted-utility half lives
 // in app/tailwind-contract.test.ts.
+//
+// WHAT CHANGED (custom-AST ticket 3). This file is now a CSS reader and nothing else. It
+// used to also walk `app/` and `components/` recursively and read TS/TSX bytes for four
+// separate things; each moved to the layer that owns it:
+//
+//   • the `/design-system` guide's own CONTENT is rendered and read as text in
+//     `app/design-system-guide.test.tsx`, because what the guide says is a rendered fact;
+//   • `lucide-react` is an exact forbidden module specifier, so it is an Oxlint
+//     `no-restricted-imports` entry -- enforced on every file on every lint run, not only
+//     on the two directories this walk happened to cover;
+//   • "icons come from react-icons/fa6 via the barrel" is asserted below by IDENTITY
+//     against the package itself, which a text match on an import line could not do;
+//   • the `components/ui/**` hex / rgb() / palette-utility sweep is the
+//     `authored-color-literal(-tsx)` and `tailwind-default-palette-utility(-tsx)` ast-grep
+//     rules, which cover all of `app/**` and `components/**` rather than one directory.
+//
+// The retained read is `app/globals.css`, which is the audited exact CSS reader for this
+// file: one path, one format, never a byte of TypeScript.
 
-const webRoot = join(__dirname, "..");
 const globals = readFileSync(join(__dirname, "globals.css"), "utf8");
 
 // --- canonical runtime values (v2 technical plan, "Canonical emitted token and
@@ -552,56 +571,6 @@ describe("toast — the v2 treatment, with v1's stripe and square corner retired
   });
 });
 
-describe("the design-system guide publishes the v2 contract, not v1's", () => {
-  const page = readFileSync(join(webRoot, "app", "design-system", "page.tsx"), "utf8");
-
-  it("names exactly the four v2 accents", () => {
-    expect(page).toContain('const ACCENTS = ["teal", "sage", "rose", "plum"] as const');
-  });
-
-  it("publishes the accent derivation formulas rather than describing v1's", () => {
-    expect(page).toContain("var(--brand) 82%, black");
-    expect(page).toContain("var(--brand) 10%, var(--surface)");
-    expect(page).toContain("var(--brand) 60%, white");
-    expect(page).toContain("var(--brand) 26%, var(--surface)");
-    // And it must explain the ORDER, which is the part a reader gets wrong.
-    expect(page).toContain("static pair FIRST");
-  });
-
-  it("carries no retired accent name and no retired token", () => {
-    // `rose` is a live v2 accent, so the retired set is checked as accent NAMES in
-    // the guide's own vocabulary rather than as bare substrings.
-    for (const retired of ["magenta", "--accent-color", "--error-strong"]) {
-      expect(page, retired).not.toContain(retired);
-    }
-    expect(page).not.toMatch(/plus blue, magenta and slate|blue, magenta, slate/);
-  });
-
-  it("describes radius as a ROLE, not as 0 everywhere", () => {
-    expect(page).toContain("A semantic role, not a global step");
-    expect(page).not.toContain("0 everywhere");
-    expect(page).not.toMatch(/every control in &lt;main&gt; must compute 0px/);
-  });
-
-  it("describes the v2 toast, with the retired stripe called out as retired", () => {
-    expect(page).toContain("are both retired");
-    expect(page).not.toMatch(
-      /a 3px \{" "\}\s*<span className="font-mono">--success<\/span> left rule/,
-    );
-  });
-
-  it("authors no colour literal — every swatch references its token by name", () => {
-    expect(page).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
-    expect(page).not.toMatch(/\b(?:rgb|rgba|hsl|hsla)\(/);
-  });
-
-  it("documents the surface ladder and the className boundary it enforces", () => {
-    expect(page).toContain("surfaceVariants");
-    expect(page).toContain("layout only");
-    expect(page).toContain("surface-contract.test.ts");
-  });
-});
-
 describe("accent preview swatches are a preview, never a second source of truth", () => {
   it.each(ACCENTS)("the %s swatch equals that accent's own light --brand", (accent) => {
     const [brand] = ACCENT_CONTRACT[accent].light;
@@ -614,11 +583,12 @@ describe("accent preview swatches are a preview, never a second source of truth"
     expect([...new Set(declared)].sort()).toEqual([...ACCENTS].sort());
   });
 
-  it("keeps the swatch paint in CSS, not in the control", () => {
-    const control = readFileSync(join(webRoot, "components", "theme", "theme-toggle.tsx"), "utf8");
-    expect(control).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
-    expect(control).toContain("data-accent-swatch");
-  });
+  // The third assertion here read `components/theme/theme-toggle.tsx` for a hex literal and
+  // for the `data-accent-swatch` hook. Both moved: the literal is the
+  // `authored-color-literal-tsx` rule, and that the control really emits one
+  // `[data-accent-swatch]` per allowlisted accent, in order, is a RENDER assertion in
+  // `components/theme/theme-toggle.test.tsx` -- which also proves the element carries no
+  // inline background, i.e. that the paint is genuinely still CSS's.
 });
 
 describe("motion + skeleton", () => {
@@ -631,58 +601,70 @@ describe("motion + skeleton", () => {
   });
 });
 
-function walk(dir: string): string[] {
-  const out: string[] = [];
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name === "node_modules" || entry.name === ".next") continue;
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) out.push(...walk(full));
-    else if (/\.tsx?$/.test(entry.name)) out.push(full);
-  }
-  return out;
-}
-
 describe("icon convention (react-icons fa6, no Lucide)", () => {
-  const sources = [...walk(join(webRoot, "app")), ...walk(join(webRoot, "components"))];
+  it("the barrel re-exports react-icons/fa6 ITSELF, not a look-alike", () => {
+    // This used to read `components/icons.tsx` and check that the text
+    // `from "react-icons/fa6"` appeared in it, which a re-export chain, a local
+    // shim or a stale comment could all satisfy. Reference identity cannot be
+    // satisfied by anything except the barrel actually re-exporting the package.
+    expect(Icons.FaDiagramProject).toBe(FaDiagramProject);
 
-  it("no source file imports lucide-react", () => {
-    const offenders = sources.filter((f) =>
-      /from\s+["']lucide-react["']/.test(readFileSync(f, "utf8")),
-    );
-    expect(offenders, `lucide-react imported in: ${offenders.join(", ")}`).toEqual([]);
+    // Sensitivity: an empty or side-effect-only barrel would make the equality above
+    // `undefined === undefined` and pass for the wrong reason.
+    expect(typeof Icons.FaDiagramProject).not.toBe("undefined");
   });
 
-  it("icons come from react-icons/fa6 via the barrel", () => {
-    expect(readFileSync(join(webRoot, "components", "icons.tsx"), "utf8")).toContain(
-      'from "react-icons/fa6"',
-    );
-  });
+  // The other half -- "no source file imports lucide-react" -- is an Oxlint
+  // `no-restricted-imports` entry (the `retired-icon-library` family in
+  // `oxlint-boundary-config.test.ts`), which is what that rule is for and which covers the
+  // whole repository rather than the two directories the retired walk visited.
 });
 
-describe("no raw colors in components/ui/**", () => {
-  const uiFiles = walk(join(webRoot, "components", "ui")).filter((f) => f.endsWith(".tsx"));
+// The fixed eight-entry shift ramp (DESIGN.md §2 "Shift colour palette"). Its contract is
+// NEGATIVE: it stays literal data-mark colour in whatever screen eventually draws roster
+// chips, never becomes a theme-token family, and never varies by theme.
+//
+// custom-AST ticket 3 moved this here from `components/shift-types/shift-types-v2-roles.test.tsx`,
+// which was granted no filesystem exception. The five production-SOURCE scans that sat
+// beside it are now the `authored-color-literal(-tsx)` rule, which rejects any authored
+// colour anywhere under `app/**` and `components/**` -- a superset of "these 24 hexes in
+// these 5 named files". What could not move to a syntax rule is the CSS half, because
+// `globals.css` is where a data colour would become a token, and that is this file's
+// audited read.
+const SHIFT_PALETTE = [
+  "#f8e2b8",
+  "#7a5310",
+  "#d4a038",
+  "#f6dbcd",
+  "#9a4726",
+  "#cf7049",
+  "#e4ecd0",
+  "#586a22",
+  "#8fa243",
+  "#d8e0f2",
+  "#374777",
+  "#6274ad",
+  "#e9dbf0",
+  "#653f8e",
+  "#9670bd",
+  "#d3e9e3",
+  "#1b6a5d",
+  "#3d9587",
+  "#f7dae2",
+  "#9a3153",
+  "#c66184",
+  "#2b2733",
+  "#ece6f2",
+  "#5c5468",
+];
 
-  // Raw color literals (hex / rgb() / hsl()) and Tailwind default-palette color
-  // utilities — either would bypass the token layer. Components must reference
-  // only the design tokens (bg-brand, text-ink, border-line, …).
-  const HEX = /#[0-9a-fA-F]{3,8}\b/;
-  const FUNC = /\b(?:rgb|rgba|hsl|hsla)\(/;
-  const PALETTE =
-    /\b(?:bg|text|border|ring|fill|stroke|from|to|via|outline|decoration|shadow|caret|accent)-(?:white|black|slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)(?:-\d{2,3})?\b/;
-
-  it("scans at least the authored components", () => {
-    expect(uiFiles.length).toBeGreaterThanOrEqual(8);
-  });
-
-  it.each(
-    [HEX, FUNC, PALETTE].map(
-      (re, i) => [["hex", "color-function", "palette-utility"][i], re] as const,
-    ),
-  )("no %s color literal", (_label, re) => {
-    const offenders = uiFiles.filter((f) => re.test(readFileSync(f, "utf8")));
-    expect(
-      offenders,
-      `raw color in: ${offenders.map((f) => f.replace(webRoot, "")).join(", ")}`,
-    ).toEqual([]);
+describe("the fixed shift data palette stays out of the token authority", () => {
+  it("registers none of the eight entries as a CSS custom property", () => {
+    const css = globals.toLowerCase();
+    // Guard the premise: a path that silently read the wrong file would report a clean
+    // palette for exactly the wrong reason.
+    expect(css).toContain("--r-card");
+    const leaked = SHIFT_PALETTE.filter((hex) => css.includes(hex));
+    expect(leaked, "a shift data-mark colour has become a theme token").toEqual([]);
   });
 });

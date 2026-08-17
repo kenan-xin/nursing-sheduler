@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -12,6 +10,16 @@ import { ACCENTS, ACCENT_KEY, THEME_KEY, __resetForTests } from "./theme-store";
 // store. F2 owns the control itself: it is now a consumer of the shared Base UI
 // ToggleGroup shell, and its swatch paint lives in the single CSS authority in
 // globals.css rather than in an inline hex table here.
+//
+// WHAT CHANGED (custom-AST ticket 3). This file used to read its OWN source twice --
+// once for `#hex` / `rgb(` literals, once to check that it says `ACCENTS.map` and does not
+// say `ACCENT_SWATCHES`. Both are gone. The literal sweep is now the `authored-color-literal`
+// ast-grep rule, which rejects any authored colour across `app/**` and `components/**`
+// rather than in this one file. The `ACCENTS.map` half was the weaker statement of
+// something already proved below at RUNTIME: "renders one swatch per allowlisted accent, in
+// order" compares the rendered swatches against the store's own `ACCENTS`, which is what
+// the text match was standing in for. The absence of the retired local table is the
+// `retired-accent-swatch-table` rule.
 
 let setItem: ReturnType<typeof vi.fn>;
 
@@ -68,18 +76,6 @@ describe("AccentControl offers exactly the four v2 accents", () => {
     expect(swatch.getAttribute("style")).toBeNull();
     // Decorative — the accessible name lives on the real control around it.
     expect(swatch).toHaveAttribute("aria-hidden");
-  });
-
-  it("authors no colour literal in the component", () => {
-    const source = readFileSync(join(__dirname, "theme-toggle.tsx"), "utf8");
-    expect(source).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
-    expect(source).not.toMatch(/\b(?:rgb|rgba|hsl|hsla)\(/);
-  });
-
-  it("takes its membership and order from the store's allowlist, not a local table", () => {
-    const source = readFileSync(join(__dirname, "theme-toggle.tsx"), "utf8");
-    expect(source).toContain("ACCENTS.map");
-    expect(source).not.toContain("ACCENT_SWATCHES");
   });
 
   it.each(["blue", "magenta", "slate"])("offers no retired %s swatch", (retired) => {

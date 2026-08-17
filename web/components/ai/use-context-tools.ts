@@ -17,27 +17,22 @@
 // then be quoted back as current. So every handler re-checks the turn epoch and the
 // abort signal before it answers.
 
-import { useFrontendTool } from "@copilotkit/react-core/v2";
+import {
+  useModelVisibleTool,
+  useParameterlessModelVisibleTool,
+} from "./register-model-visible-tool";
 import { z } from "zod";
 import { useScenarioStore, useAuthorityStore } from "@/lib/store";
 import { pickScenario } from "@/lib/store";
 import { summarizeScenario } from "@/lib/ai/assistant/scenario-context";
-import { useAssistantStore } from "@/lib/ai/assistant/store";
 import { useHelpTools } from "./use-help-tools";
 import { useProposalTools } from "./use-proposal-tools";
 import { useDiagnosticTools } from "./use-diagnostic-tools";
 
-/**
- * What a handler answers when its turn is no longer the current one. A refusal
- * string rather than a throw: a thrown tool error is reported to the model as a
- * failure it may retry, while this states plainly that there is nothing to say.
- */
-const SUPERSEDED = "superseded: this request belongs to an interrupted turn and was not answered.";
-
 const DOMAINS = ["dates", "staff", "shifts", "rules", "requests"] as const;
 type Domain = (typeof DOMAINS)[number];
 
-const sliceParameters = z.object({
+export const sliceParameters = z.object({
   domain: z
     .enum(DOMAINS)
     .describe(
@@ -49,12 +44,18 @@ const sliceParameters = z.object({
 });
 
 /**
- * Register the read-only tools against ONE agent instance.
+ * THE REGISTRATION ROOT: every model-visible tool the assistant mounts, in one call.
  *
- * `agentId` scopes them: the tools belong to this panel's private thread-scoped
- * agent, so another agent mounted in the same page could never invoke them.
+ * `useAssistantSession` invokes exactly this and nothing else, so "what the shipped
+ * session registers" is a single named thing rather than a set of call sites a test has
+ * to go looking for. `session-real-core.test.tsx` proves it by rendering the SESSION
+ * under a real provider and enumerating the core's own tool registry -- removing this
+ * one invocation empties that registry, which is the whole point of naming it.
+ *
+ * `agentId` scopes the tools: they belong to this panel's private thread-scoped agent,
+ * so another agent mounted in the same page could never invoke them.
  */
-export function useContextTools(agentId: string, turnEpoch: number): void {
+export function useModelVisibleTools(agentId: string, turnEpoch: number): void {
   // T06's read-only help/rule-guidance group, registered against the same agent and
   // the same authorized turn epoch. Kept in its own module so the capability registry,
   // its resolver and the host navigation action stay out of this file entirely; these
@@ -70,15 +71,7 @@ export function useContextTools(agentId: string, turnEpoch: number): void {
   // same T07 proposal row `useProposalTools` writes, under the same fences.
   useDiagnosticTools(agentId, turnEpoch);
 
-  const guard = (signal: AbortSignal | undefined): string | null => {
-    if (signal?.aborted) return SUPERSEDED;
-    // Compared against the LIVE epoch rather than a captured copy: the point is to
-    // notice that something superseded this turn while the handler was running.
-    if (useAssistantStore.getState().turnEpoch !== turnEpoch) return SUPERSEDED;
-    return null;
-  };
-
-  useFrontendTool(
+  useParameterlessModelVisibleTool(
     {
       name: "get_schedule_overview",
       agentId,
@@ -86,9 +79,7 @@ export function useContextTools(agentId: string, turnEpoch: number): void {
         "Read a compact overview of the schedule the user is working on: its roster period, " +
         "how many people, shift types, groups and rules exist, and its current revision. " +
         "Use this before answering anything about size, completeness or scope.",
-      handler: async (_args, context) => {
-        const refusal = guard(context.signal);
-        if (refusal) return refusal;
+      handler: async () => {
         const authority = useAuthorityStore.getState();
         return summarizeScenario(pickScenario(useScenarioStore.getState()), {
           scenarioId: authority.scenarioId ?? "unknown",
@@ -99,7 +90,7 @@ export function useContextTools(agentId: string, turnEpoch: number): void {
     [agentId, turnEpoch],
   );
 
-  useFrontendTool(
+  useModelVisibleTool(
     {
       name: "get_schedule_section",
       agentId,
@@ -107,11 +98,11 @@ export function useContextTools(agentId: string, turnEpoch: number): void {
         "Read one section of the schedule in full. The complete schedule is already in your " +
         "context; use this only to re-read a section after the user says they changed something.",
       parameters: sliceParameters,
-      handler: async (args, context) => {
-        const refusal = guard(context.signal);
-        if (refusal) return refusal;
-        return readSection(args.domain);
-      },
+      // `domain` feeds an exhaustive switch. It arrives validated: a missing or
+      // wrong-typed one is refused by the wrapper, where it used to fall through the
+      // switch and return `undefined` -- which the locked core turns into an EMPTY tool
+      // result, and the model reads an empty result as an answer.
+      handler: async (args) => readSection(args.domain),
     },
     [agentId, turnEpoch],
   );

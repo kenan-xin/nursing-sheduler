@@ -68,10 +68,19 @@ const TONE: Record<CalloutTone, CalloutToneSpec> = {
     container: "rounded-control border-line2 bg-panel shadow-well",
     // The L1 role from DESIGN.md §4, on the card radius — the same rung every
     // other top-level container on this route sits at. Deliberately NOT the
-    // `surfaceVariants` recipe: `surface-contract.test.ts` treats every class
-    // string combined with a recipe result as a consumer className and admits
-    // only layout utilities there, so importing the recipe here would make this
-    // file's own tone table illegal. The tokens are the recipe's, verbatim.
+    // `surfaceVariants` recipe: the `surface-recipe-combiner-visual` ast-grep
+    // rule holds every literal composed INLINE with a recipe result
+    // (`cn(surfaceVariants(...), "...")`) to the layout-only vocabulary, so
+    // importing the recipe here and folding this tone table into the same
+    // `cn(...)` would make the table illegal. The tokens are the recipe's,
+    // verbatim.
+    //
+    // Stated precisely, because an earlier draft of this comment over-claimed
+    // and bounded review round 1 caught it: the rule governs literals authored
+    // inside the combiner call, not every class string that ever meets a recipe
+    // result at runtime. A result stored in a binding and concatenated later is
+    // family L, whose whole-codebase data-flow guarantee the user retired on
+    // 2026-08-12.
     pageContainer: "rounded-card border-line bg-surface shadow-1",
     icon: "text-ink3",
     title: "text-ink",

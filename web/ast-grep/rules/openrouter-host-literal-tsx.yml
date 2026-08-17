@@ -1,0 +1,24 @@
+id: openrouter-host-literal-tsx
+language: Tsx
+severity: error
+message: >-
+  The OpenRouter host is a literal in exactly two places -- the browser-safe protocol
+  module and the runtime's own containment constants, which `protocol.test.ts` pins to
+  each other. Every caller reads it from there, so no component or route names a
+  third-party host directly.
+note: >-
+  The `.tsx` twin of `openrouter-host-literal`; without it every component and route under
+  `app/**` and `components/**` -- exactly the callers the rule is aimed at -- escapes,
+  because ast-grep picks a rule's language from the file extension.
+files:
+  - "app/**"
+  - "components/**"
+  - "lib/**"
+ignores:
+  - "**/*.test.tsx"
+rule:
+  any:
+    - kind: string_fragment
+      regex: openrouter\.ai
+    - kind: template_string
+      regex: openrouter\.ai

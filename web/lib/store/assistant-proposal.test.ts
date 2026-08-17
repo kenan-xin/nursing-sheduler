@@ -13,7 +13,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { proposalScenario } from "@/lib/proposal/test-support";
-import { useScenarioStore } from "./spine";
+import { failScenarioPublish, useScenarioStore } from "./spine";
 import { useAuthorityStore } from "./authority";
 import { assistantProposalCommands, scenarioCommands } from "./commands";
 import { loadScenario } from "./lifecycle";
@@ -135,17 +135,13 @@ describe("apply", () => {
     // Break the projection write. The durable transaction is untouched, so the
     // change genuinely lands -- and telling the user it failed would invite them to
     // apply it a second time.
-    const store = harness.scenario;
-    const original = store.setState;
-    store.setState = (() => {
-      throw new Error("injected projection failure");
-    }) as typeof store.setState;
+    const restorePublish = failScenarioPublish(new Error("injected projection failure"));
 
     const result = await assistantProposalCommands.apply({
       proposalId: prepared.proposal.proposalId,
       receiptId: crypto.randomUUID(),
     });
-    store.setState = original;
+    restorePublish();
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;

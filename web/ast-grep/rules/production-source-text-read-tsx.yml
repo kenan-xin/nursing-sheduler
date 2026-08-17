@@ -1,0 +1,41 @@
+id: production-source-text-read-tsx
+language: Tsx
+severity: error
+message: >-
+  A literal `.ts`/`.tsx` path was handed to a file-reading API. Reading authored TypeScript
+  as TEXT is the pseudo-parser this migration exists to remove: whatever is done with the
+  bytes afterwards, the claim being built is about source provenance, and it belongs to a
+  production API, a type, an Oxlint restriction, a rendered test, or a declarative ast-grep
+  rule instead.
+note: >-
+  The `Tsx` twin of `production-source-text-read`. This is the variant that matters most in
+  practice: the source scans this migration retired were overwhelmingly `.tsx` suites reading
+  `.tsx` components -- `primitives-v2.test.tsx`, `theme-toggle.test.tsx`,
+  `shift-types-v2-roles.test.tsx`, `assistant-proposal.test.tsx` -- so a `TypeScript`-only
+  rule would have left the whole retired family's natural habitat unscanned.
+  .
+  Like its partner it carries no `ignores` list: the ticket-6 fixup removed the family's only
+  exception by moving that file's guarantees to a production-build browser proof and an Oxlint
+  specifier restriction.
+files:
+  - "**/*.test.*"
+  - "**/*.spec.*"
+  - "**/*.test-d.*"
+  - "e2e/**"
+  - "**/__tests__/**"
+  - "**/support/**"
+  - "**/test-support/**"
+  - "**/test-support.*"
+  - "**/*.test-support.*"
+  - "lib/store/test-authority.ts"
+rule:
+  any:
+    - pattern: $READ($PATH, $$$)
+    - pattern: $READ($PATH)
+constraints:
+  READ:
+    regex: |-
+      ^(readFileSync|readFile|openSync|open|createReadStream|readTextFile)$
+  PATH:
+    regex: |-
+      \.tsx?["']

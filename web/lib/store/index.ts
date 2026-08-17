@@ -3,7 +3,8 @@
 // The scenario projection, the hot ephemeral store, and the repository-backed
 // command bus that is now the only way to change durable scenario state.
 //
-//   • projection   — `useScenarioStore` (read-only: no setters are exported)
+//   • projection   — `useScenarioStore` (read-only: it HAS no setter, at the type
+//                    level and at runtime — see `scenario-store.ts`)
 //   • ephemeral    — `useHotStore`
 //   • authority    — `useAuthorityStore`, `canMutateScenario`
 //   • commands     — `scenarioCommands` (mutate / setReqData / recordBackup /
@@ -17,7 +18,6 @@
 // the durable store's mutating actions, and zundo's `temporal` handle.
 
 export {
-  createStateSpine,
   getScenarioAuthority,
   setScenarioAuthority,
   stateSpine,
@@ -59,15 +59,34 @@ export {
 
 export { useOwnershipController } from "./ownership";
 
+// `createScenarioProjection` and the writer types are deliberately NOT re-exported:
+// the barrel is the surface ordinary code imports, and a projection WRITER has no
+// business on it. `spine.ts` is the only module that holds the app projection's
+// writer, and it exports commands rather than the capability.
 export {
-  createScenarioStore,
   selectBackupStatus,
   type BackupStatus,
-  type ScenarioStore,
+  type ScenarioProjection,
   type ScenarioStoreState,
 } from "./scenario-store";
 
 export { createHotStore, type HotStore, type HotStoreState } from "./hot-store";
+
+// Roster storage's handle onto the ONE declared browser database (F1). The persist
+// seam that used to live in this module is not here and is not coming back: only the
+// accessor, the client-only guard and the row DTOs are surfaced. See
+// `dexie-storage.ts` for why the class it hands out is the repository's.
+export {
+  forgetRosterDb,
+  getRosterDb,
+  IndexedDbUnavailableError,
+  isIndexedDbAvailable,
+  ScenarioPersistenceDb,
+  SCENARIO_DB_NAME,
+  type MetaRow,
+  type RosterRow,
+  type SnapshotRow,
+} from "./dexie-storage";
 
 export { commitPaintGesture } from "./paint";
 

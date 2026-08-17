@@ -1,0 +1,16 @@
+id: authored-color-literal-tsx
+valid:
+  - |
+    export const A = () => <p className="bg-surface text-ink">ok</p>;
+  # JSX TEXT is not a literal, so prose that names a colour is never inspected.
+  - |
+    export const B = () => <p>Light shadows are warm brown, never #000 grey.</p>;
+  - |
+    export const C = () => <span style={{ background: "var(--brand)" }} />;
+invalid:
+  - |
+    export const D = () => <span style={{ background: "#0b7d68" }} />;
+  - |
+    export const E = () => <div className="bg-[rgba(0,0,0,0.4)]" />;
+  - |
+    export const F = () => <div style={{ boxShadow: `0 0 4px #000` }} />;

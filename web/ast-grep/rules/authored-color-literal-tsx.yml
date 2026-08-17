@@ -1,0 +1,27 @@
+id: authored-color-literal-tsx
+language: Tsx
+severity: error
+message: >-
+  A colour is authored here as a literal. Every colour in this app comes from the token
+  authority in `app/globals.css` and is reached by name (`bg-brand`, `text-ink`,
+  `border-line`, `var(--scrim)`); a literal is a second source of truth for a value the
+  theme, the accent and the light/dark ladder are all supposed to re-resolve.
+note: >-
+  The `.tsx` half of `authored-color-literal`. ast-grep resolves a rule's language from the
+  file EXTENSION, and `TypeScript` claims `.ts`/`.mts`/`.cts` only -- so a rule that must
+  cover components needs a `Tsx` twin. The two are deliberately byte-identical apart from
+  `language` and the scope: keeping them as two declarative rules is the cost of not
+  re-mapping `.ts` onto the TSX grammar, which parses `<T>(x) => x` as JSX and would
+  silently stop matching parts of the tree.
+files:
+  - "app/**"
+  - "components/**"
+ignores:
+  - "**/*.test.ts"
+  - "**/*.test.tsx"
+  - "**/*.test-d.ts"
+  - "**/*.spec.ts"
+  - "**/*.spec.tsx"
+rule:
+  kind: string_fragment
+  regex: '(#[0-9a-fA-F]{3}\b|#[0-9a-fA-F]{4}\b|#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{8}\b)|(\b(rgb|rgba|hsl|hsla)\()'

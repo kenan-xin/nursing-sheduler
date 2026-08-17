@@ -1,0 +1,53 @@
+id: surface-recipe-combiner-visual-ts
+language: TypeScript
+severity: error
+message: >-
+  A class outside the legal layout vocabulary is combined with a `surfaceVariants(...)`
+  result. `cn(surfaceVariants({ ... }), "...")` is the sanctioned shape for a specialized
+  owner that calls the recipe directly instead of wrapping its DOM in `<Surface>`, and the
+  class it adds is layout, position, overflow and sizing ONLY -- exactly as for a
+  `<Surface className=...>` consumer. Paint, radius, elevation, motion and interaction
+  belong on a recipe axis; anything else belongs on a child element that is not a surface.
+note: >-
+  The `.ts` twin of `surface-recipe-combiner-visual`. ast-grep resolves a rule's language
+  from the file EXTENSION, and `TypeScript` claims `.ts`/`.mts`/`.cts` only, so a non-JSX
+  module that composes a recipe result (a class-name helper in `lib/`, a headless owner)
+  needs this twin. Body, vocabulary util and narrowings are identical to the base rule;
+  see it for the full note.
+files:
+  - "app/**"
+  - "components/**"
+  - "lib/**"
+ignores:
+  - "**/*.test.ts"
+  - "**/*.test.tsx"
+  - "**/*.test-d.ts"
+  - "**/*.spec.ts"
+  - "**/*.spec.tsx"
+rule:
+  all:
+    - kind: string_fragment
+    - not:
+        matches: surface-legal-class-vocabulary-ts
+    - inside:
+        stopBy: end
+        all:
+          - pattern: cn($$$COMBINER_ARGS)
+          - has:
+              stopBy: end
+              pattern: surfaceVariants($$$RECIPE_ARGS)
+    - not:
+        inside:
+          stopBy: end
+          pattern: surfaceVariants($$$OWN_ARGS)
+    # An EQUALITY OPERAND is never a rendered class -- see the base rule's note for why
+    # the operators are spelled out instead of excluding `binary_expression` by kind.
+    - not:
+        inside:
+          kind: string
+          inside:
+            any:
+              - pattern: $LHS === $RHS
+              - pattern: $LHS !== $RHS
+              - pattern: $LHS == $RHS
+              - pattern: $LHS != $RHS

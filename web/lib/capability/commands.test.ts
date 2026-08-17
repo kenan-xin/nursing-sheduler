@@ -1,34 +1,29 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { SCENARIO_COMMAND_TYPES_V1 } from "@/lib/repository/commands";
 import { SCENARIO_COMMAND_TYPES } from "./commands";
 
-// The drift gate for the one list the capability registry restates rather than
-// imports. `lib/capability` may not import `lib/repository` -- the authority boundary
-// permits only the projection adapter to -- so agreement is proven by reading the
-// repository's command union as SOURCE TEXT. No import, no runtime coupling, and a new
-// or renamed command arm still fails a test rather than silently leaving the registry
-// describing a write path that no longer exists.
-
-const REPOSITORY_COMMANDS = fileURLToPath(new URL("../repository/commands.ts", import.meta.url));
-
-/** The `type: "..."` discriminants of `ScenarioCommandV1`, read from its source. */
-function repositoryCommandTypes(): string[] {
-  const source = readFileSync(REPOSITORY_COMMANDS, "utf8");
-  const union = source.match(/export type ScenarioCommandV1 =([\s\S]*?);\n/);
-  if (!union) throw new Error("could not locate the ScenarioCommandV1 union in its source");
-  return [...union[1].matchAll(/\btype:\s*"([a-z_]+)"/g)].map((match) => match[1]);
-}
+// The drift gate for the one list the capability registry restates rather than derives.
+//
+// WHAT CHANGED (custom-AST ticket 2). This test used to read `lib/repository/commands.ts`
+// as SOURCE TEXT and regex the `type: "…"` discriminants out of the union, because
+// `lib/capability` may not import the repository. Two things were wrong with that: it was
+// a hand-rolled parser over a type declaration, and a refactor that reshaped the union
+// made the extraction return nothing rather than fail — which is why the old file needed
+// a "finds the union it is asserting against" guard.
+//
+// The repository now EXPORTS its discriminants as a value, with two conditional-type
+// predicates beside the union that fail `tsc --noEmit` if the value and the type ever
+// disagree. So a new command arm is caught by the compiler, not by this file, and this
+// file is left with the question it actually owns: does the capability registry's
+// restatement still match?
+//
+// The import is a boundary crossing, and a deliberate one: this is a TEST, so it creates
+// no production dependency from `lib/capability` into the repository, and it is listed by
+// name in the Oxlint repository allow-list rather than admitted by a pattern.
 
 describe("capability command types track the repository's command union", () => {
-  it("finds the union it is asserting against", () => {
-    // Without this, a refactor that moved or reshaped the union would make the
-    // extraction return nothing and both directions below would pass vacuously.
-    expect(repositoryCommandTypes().length).toBeGreaterThan(0);
-  });
-
   it("lists every command the repository can apply", () => {
-    for (const type of repositoryCommandTypes()) {
+    for (const type of SCENARIO_COMMAND_TYPES_V1) {
       expect(
         (SCENARIO_COMMAND_TYPES as readonly string[]).includes(type),
         `"${type}" is a repository command but is missing from lib/capability/commands.ts`,
@@ -37,13 +32,15 @@ describe("capability command types track the repository's command union", () => 
   });
 
   it("lists nothing the repository cannot apply", () => {
-    const real = new Set(repositoryCommandTypes());
+    const real = new Set<string>(SCENARIO_COMMAND_TYPES_V1);
     for (const type of SCENARIO_COMMAND_TYPES) {
       expect(real.has(type), `"${type}" is not a repository command any more`).toBe(true);
     }
   });
 
-  it("is unique", () => {
+  it("is unique, and is not comparing two empty lists", () => {
+    expect(SCENARIO_COMMAND_TYPES.length).toBeGreaterThan(0);
+    expect(SCENARIO_COMMAND_TYPES_V1.length).toBeGreaterThan(0);
     expect(new Set(SCENARIO_COMMAND_TYPES).size).toBe(SCENARIO_COMMAND_TYPES.length);
   });
 });

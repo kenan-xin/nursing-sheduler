@@ -73,5 +73,9 @@ describe("locked CopilotKit package family", () => {
       "~standard"?: { version: number; vendor: string };
     };
     expect(schema["~standard"]).toMatchObject({ version: 1, vendor: "zod" });
-  });
+    // The dynamic import evaluates the whole `@copilotkit/runtime/v2` entrypoint --
+    // by far the heaviest module load in the suite. Under the full parallel run that
+    // cold load alone can exceed the 5s default, so this ONE test gets an explicit
+    // budget instead of the global `testTimeout` being raised for every test.
+  }, 30_000);
 });

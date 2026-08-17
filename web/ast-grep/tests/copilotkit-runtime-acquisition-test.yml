@@ -1,0 +1,25 @@
+id: copilotkit-runtime-acquisition
+valid:
+  # The one production entry, reached by name.
+  - |
+    import { CopilotRuntime } from "./copilotkit-runtime";
+  # A dynamic import of something else entirely.
+  - |
+    const mod = await import("@/lib/ai/protocol");
+  # The CLIENT package is a different boundary, owned by Oxlint.
+  - |
+    const client = await import("@copilotkit/react-core/v2");
+  # Dynamic `import()` of the runtime is OXLINT's: a probe on 1.74 rejects this in production
+  # `.mjs` through `no-restricted-imports`. Valid for THIS rule, still a lint failure.
+  - |
+    const runtime = await import("@copilotkit/runtime/v2");
+invalid:
+  - |
+    const runtime = require("@copilotkit/runtime");
+  - |
+    const runtime = createRequire("@copilotkit/runtime/package.json");
+  # THE LOADER-HANDLE SHAPE the cold review got through: a two-step acquisition whose callee
+  # name is local. Matched on the SPECIFIER as a call argument, not on the callee.
+  - |
+    const req = createRequire(import.meta.url);
+    const runtime = req("@copilotkit/runtime/v2");

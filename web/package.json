@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "node scripts/start-standalone.mjs",
-    "lint": "oxlint",
+    "lint": "oxlint && ast-grep scan",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "typecheck": "tsc --noEmit",
@@ -15,7 +15,10 @@
     "test:differential": "RUN_DIFFERENTIAL=1 vitest run lib/scenario/differential",
     "test:e2e": "playwright test",
     "test:e2e:stress": "playwright test --workers=32",
-    "test:e2e:public-roster-dispatch": "playwright test --config=playwright.public-roster-dispatch.config.ts"
+    "test:e2e:public-roster-dispatch": "playwright test --config=playwright.public-roster-dispatch.config.ts",
+    "lint:oxlint": "oxlint",
+    "lint:ast-grep": "ast-grep scan",
+    "test:ast-grep": "ast-grep test"
   },
   "dependencies": {
     "@ag-ui/client": "0.0.57",
@@ -34,7 +37,6 @@
     "dexie": "^4.4.4",
     "eventsource-parser": "3.1.0",
     "exceljs": "4.4.0",
-    "lucide-react": "^1.24.0",
     "next": "16.2.10",
     "react": "19.2.4",
     "react-dom": "19.2.4",
@@ -48,6 +50,7 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@ast-grep/cli": "0.45.1",
     "@axe-core/playwright": "^4.12.1",
     "@playwright/test": "^1.61.1",
     "@tailwindcss/postcss": "^4",

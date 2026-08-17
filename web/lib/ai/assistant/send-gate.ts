@@ -329,9 +329,17 @@ export async function claimLaunchAuthority(
 }
 
 /**
- * The synchronous half of the final authorization. No `await`, by contract.
+ * Every identity fact a turn is bound to, compared in one place. No `await`, by
+ * contract.
+ *
+ * SHARED BY THE LAUNCH AND EVERYTHING AFTER IT. The initial provider hop, each
+ * follow-up hop CopilotKit drives after a tool, and every tool handler before and
+ * after each of its awaits all ask the same question: "is this still the turn the app
+ * authorised?" Splitting that into per-call-site checks is how the epoch-only tool
+ * guards came to miss a lease takeover and a document revision, so there is exactly
+ * one implementation and the launch simply adds its own race checks on top.
  */
-export function authorizeLaunchIdentity(input: LaunchIdentityInput): LaunchAuthorization {
+export function authorizeBoundIdentity(input: LaunchIdentityInput): LaunchAuthorization {
   const { plan, live } = input;
 
   // The scenario can have changed under an open panel, in which case the gate
@@ -359,11 +367,28 @@ export function authorizeLaunchIdentity(input: LaunchIdentityInput): LaunchAutho
   // Any epoch movement -- an interruption that has already settled, or a competing
   // claim -- means this turn is no longer the live one.
   if (input.liveTurnEpoch !== plan.turnEpoch) return { ok: false, reason: "revoked" };
-  if (input.busy) return { ok: false, reason: "busy" };
-  // A published run that is not this one means another send won the race to launch.
+  // A published run that is not this one means another send won the race. True at
+  // launch and equally true mid-turn, so it belongs to the shared identity rather
+  // than to the launch-only checks below.
   if (input.activeRunId !== null && input.activeRunId !== plan.runId) {
     return { ok: false, reason: "busy" };
   }
+  return { ok: true };
+}
+
+/**
+ * The synchronous half of the FINAL LAUNCH authorization. No `await`, by contract.
+ *
+ * The bound identity plus the one check that is meaningful only before a run exists:
+ * `busy` asks whether the agent is already running, which is a launch race. Asking it
+ * of a follow-up hop or a tool handler would refuse every one of them, because by
+ * then the agent is running THIS turn -- and "is it ours?" is already answered by the
+ * `activeRunId` comparison above.
+ */
+export function authorizeLaunchIdentity(input: LaunchIdentityInput): LaunchAuthorization {
+  const bound = authorizeBoundIdentity(input);
+  if (!bound.ok) return bound;
+  if (input.busy) return { ok: false, reason: "busy" };
   return { ok: true };
 }
 

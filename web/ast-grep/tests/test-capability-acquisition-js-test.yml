@@ -1,0 +1,20 @@
+id: test-capability-acquisition-js
+valid:
+  - |
+    const { join } = require("node:path");
+  - |
+    const mod = await import("./helper.mjs");
+  - |
+    const script = `const fs = require('node:fs');`;
+  # Dynamic `import()` of a capability is OXLINT's, not this rule's -- still fails lint.
+  - |
+    const fs = await import("fs/promises");
+invalid:
+  - |
+    const fs = require("node:fs");
+  - |
+    const { createRequire } = require("node:module");
+  - |
+    const fs = process.getBuiltinModule("fs");
+  - |
+    const ts = require("typescript");

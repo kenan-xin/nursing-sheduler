@@ -59,9 +59,6 @@ importers:
       exceljs:
         specifier: 4.4.0
         version: 4.4.0
-      lucide-react:
-        specifier: ^1.24.0
-        version: 1.24.0(react@19.2.4)
       next:
         specifier: 16.2.10
         version: 16.2.10(@babel/core@7.29.7(supports-color@7.2.0))(@opentelemetry/api@1.9.0)(@playwright/test@1.61.1)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -96,6 +93,9 @@ importers:
         specifier: ^5.0.14
         version: 5.0.14(@types/react@19.2.17)(react@19.2.4)(use-sync-external-store@1.6.0(react@19.2.4))
     devDependencies:
+      '@ast-grep/cli':
+        specifier: 0.45.1
+        version: 0.45.1
       '@axe-core/playwright':
         specifier: ^4.12.1
         version: 4.12.1(playwright-core@1.61.1)
@@ -330,6 +330,55 @@ packages:
 
   '@asamuzakjp/nwsapi@2.3.9':
     resolution: {integrity: sha512-n8GuYSrI9bF7FFZ/SjhwevlHc8xaVlb/7HmHelnc/PZXBD2ZR49NnN9sMMuDdEGPeeRQ5d0hqlSlEpgCX3Wl0Q==}
+
+  '@ast-grep/cli-darwin-arm64@0.45.1':
+    resolution: {integrity: sha512-hN/TDTvfry106SWn0pxepxFpAOvibuZJ80J5xU80WmY97Vjdc0cSKd49GBz2F+V8bzqn0SXchnoPXKLSJHB9kA==}
+    engines: {node: '>= 10'}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@ast-grep/cli-darwin-x64@0.45.1':
+    resolution: {integrity: sha512-wyQ8hXqNwTC6+4KYf4LvmemNyq+iKXfimXVKS9ZDJ8mE7/3VOuynPVuCFB7h+C5rVErzDJ9tZWwLLpSLnpYuhQ==}
+    engines: {node: '>= 10'}
+    cpu: [x64]
+    os: [darwin]
+
+  '@ast-grep/cli-linux-arm64-gnu@0.45.1':
+    resolution: {integrity: sha512-yhIGIXDcvI7v4hLicA1dtvkf+QJ8WA8f/b/066gVhqhimiBgbdONkavrE3P5iOjwMLhfyTF0cQV9rkiKg93fvQ==}
+    engines: {node: '>= 10'}
+    cpu: [arm64]
+    os: [linux]
+    libc: [glibc]
+
+  '@ast-grep/cli-linux-x64-gnu@0.45.1':
+    resolution: {integrity: sha512-vL6zdHagU3znogJN5KuZWECdTw9dTUf6/e5G5k9bNpvI+0gcrfuJj8hH8o/Wqyb5Qd4tuNdgJMwbHDTFbhtYvg==}
+    engines: {node: '>= 10'}
+    cpu: [x64]
+    os: [linux]
+    libc: [glibc]
+
+  '@ast-grep/cli-win32-arm64-msvc@0.45.1':
+    resolution: {integrity: sha512-JzOFnMAk+Wd6ApnP96Fam7eJX5JiV5/V09akzc/p129Ko1tmym7w/1oALuyVMV+unRTepj9XRrtfrF3XZG64lQ==}
+    engines: {node: '>= 10'}
+    cpu: [arm64]
+    os: [win32]
+
+  '@ast-grep/cli-win32-ia32-msvc@0.45.1':
+    resolution: {integrity: sha512-uwgCUOq6B8//u+LhicTjg3CfA9mcpCgajfv5AWNxHE1Qw8F2wLRszDXK03+l/l8biaE13uHE2857mr6x6m/F+A==}
+    engines: {node: '>= 10'}
+    cpu: [ia32]
+    os: [win32]
+
+  '@ast-grep/cli-win32-x64-msvc@0.45.1':
+    resolution: {integrity: sha512-fDYXALDte7yt44Jmhu7kjPZFCmHOPN6SrtMAYqKlYgkxPtSC/UfTe2XpDNxyTgBV3rMLkw/61bj6KQkwXwuBNg==}
+    engines: {node: '>= 10'}
+    cpu: [x64]
+    os: [win32]
+
+  '@ast-grep/cli@0.45.1':
+    resolution: {integrity: sha512-Bt9Vuqd+gmtwERy1kzj5R9yq96Ws1d2ZukEXy0mzLcJ+S0pU9uaJhETUSTmaHro1LNu9G4GeJ3YOXL1gQRQySA==}
+    engines: {node: '>= 12.0.0'}
+    hasBin: true
 
   '@axe-core/playwright@4.12.1':
     resolution: {integrity: sha512-rMd7xriptqKpP+w5265i4Hdkv2X5kbu6uiBi/B2I7uf3hieRBM3qDCfaKPtxfiYb2mKXfF+yLODJwIx+Jv1GDw==}
@@ -4078,11 +4127,6 @@ packages:
     peerDependencies:
       react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0
 
-  lucide-react@1.24.0:
-    resolution: {integrity: sha512-YT6mBD8lGKkg4nM39enlm94/sfJIiW0YKUT60fBy4YK8tai31ylg1VhGNWxkpSKHo9UagfnZqwIff3HTDQwXeA==}
-    peerDependencies:
-      react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0
-
   lucide@0.525.0:
     resolution: {integrity: sha512-sfehWlaE/7NVkcEQ4T9JD3eID8RNMIGJBBUq9wF3UFiJIrcMKRbU3g1KGfDk4svcW7yw8BtDLXaXo02scDtUYQ==}
 
@@ -6059,6 +6103,39 @@ snapshots:
   '@asamuzakjp/generational-cache@1.0.1': {}
 
   '@asamuzakjp/nwsapi@2.3.9': {}
+
+  '@ast-grep/cli-darwin-arm64@0.45.1':
+    optional: true
+
+  '@ast-grep/cli-darwin-x64@0.45.1':
+    optional: true
+
+  '@ast-grep/cli-linux-arm64-gnu@0.45.1':
+    optional: true
+
+  '@ast-grep/cli-linux-x64-gnu@0.45.1':
+    optional: true
+
+  '@ast-grep/cli-win32-arm64-msvc@0.45.1':
+    optional: true
+
+  '@ast-grep/cli-win32-ia32-msvc@0.45.1':
+    optional: true
+
+  '@ast-grep/cli-win32-x64-msvc@0.45.1':
+    optional: true
+
+  '@ast-grep/cli@0.45.1':
+    dependencies:
+      detect-libc: 2.1.2
+    optionalDependencies:
+      '@ast-grep/cli-darwin-arm64': 0.45.1
+      '@ast-grep/cli-darwin-x64': 0.45.1
+      '@ast-grep/cli-linux-arm64-gnu': 0.45.1
+      '@ast-grep/cli-linux-x64-gnu': 0.45.1
+      '@ast-grep/cli-win32-arm64-msvc': 0.45.1
+      '@ast-grep/cli-win32-ia32-msvc': 0.45.1
+      '@ast-grep/cli-win32-x64-msvc': 0.45.1
 
   '@axe-core/playwright@4.12.1(playwright-core@1.61.1)':
     dependencies:
@@ -9982,10 +10059,6 @@ snapshots:
       react: 19.2.4
 
   lucide-react@0.542.0(react@19.2.4):
-    dependencies:
-      react: 19.2.4
-
-  lucide-react@1.24.0(react@19.2.4):
     dependencies:
       react: 19.2.4
 

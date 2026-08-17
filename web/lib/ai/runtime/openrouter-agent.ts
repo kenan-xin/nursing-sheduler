@@ -1,4 +1,3 @@
-// LOAD-BEARING: must precede the `@copilotkit/runtime` import (see containment.ts).
 import {
   AI_ERROR_CREDENTIALS_REQUIRED,
   AI_KEY_HEADER,
@@ -9,12 +8,13 @@ import {
 
 import { createOpenAI } from "@ai-sdk/openai";
 import type { AbstractAgent } from "@ag-ui/client";
+// The contained entry point — see `copilotkit-runtime.ts`.
 import {
   BuiltInAgent,
   convertMessagesToVercelAISDKMessages,
   convertToolsToVercelAITools,
   type AgentsFactory,
-} from "@copilotkit/runtime/v2";
+} from "./copilotkit-runtime";
 import { streamText, type ToolSet } from "ai";
 
 // Request-scoped BYO OpenRouter agent (tech-plan "Credential and model transport").

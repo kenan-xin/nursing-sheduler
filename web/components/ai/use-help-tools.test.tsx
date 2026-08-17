@@ -8,6 +8,10 @@ import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
 import { useModeStore } from "@/lib/mode/mode";
 import { HELP_TOOL_NAMES } from "@/lib/capability/tools";
 import { useHelpTools } from "./use-help-tools";
+import { bindTurnForTest, type TestTurnHandle } from "./turn-authority.test-support";
+
+/** The turn every handler below is checked against. See `./turn-authority`. */
+let boundTurn: TestTurnHandle;
 
 // The tools are exercised through their REGISTERED definitions rather than by
 // importing their handlers: what matters is the object the model is offered -- its
@@ -27,7 +31,14 @@ vi.mock("@copilotkit/react-core/v2", () => ({
   useFrontendTool: (definition: CapturedTool) => {
     if (!captured.some((tool) => tool.name === definition.name)) captured.push(definition);
   },
+  // The canonical wrapper keys its duplicate-identity ledger by the PROVIDER CORE, so it
+  // needs a scope even here. A stable object stands in for one: this suite has no
+  // provider, and the ledger only ever uses it as a `WeakMap` key.
+  useCopilotKit: () => ({ copilotkit: SCOPE }),
 }));
+
+/** One stand-in core identity for this suite. See the mock above. */
+const SCOPE = {};
 
 // The router mock COMMITS THE URL LATE, because that is what the App Router does: a
 // push starts a client transition and the pathname changes when it commits. A stub
@@ -77,11 +88,15 @@ beforeEach(() => {
   window.history.replaceState({}, "", "/");
   useAssistantStore.setState({ turnEpoch: TURN });
   useModeStore.setState({ mode: "guided", adoption: "ready" });
+  // A handler speaks only for a turn the app authorised, so the suite has to bind one
+  // -- exactly as the session does before a run.
+  boundTurn = bindTurnForTest({ turnEpoch: TURN });
   render(<Host />);
 });
 
 afterEach(() => {
   for (const timer of pendingTimers.splice(0)) clearTimeout(timer);
+  boundTurn.release();
   cleanup();
   assistantActions.resetForTest();
   useModeStore.setState({ mode: "guided", adoption: "unhydrated" });
@@ -266,9 +281,8 @@ describe("open_app_screen", () => {
 
 describe("turn authorization", () => {
   it("answers nothing once the live epoch has moved past the authorized one", async () => {
-    // The interruption case. The comparison is live-epoch against the epoch handed
-    // down by the session; this module never re-reads the store to re-arm a baseline.
-    useAssistantStore.setState({ turnEpoch: TURN + 1 });
+    // The interruption case.
+    boundTurn.live.liveTurnEpoch = TURN + 1;
     for (const { handler } of captured) {
       await expect(
         handler({ capabilityId: "roster-period", policy: "night" }, {}),
@@ -276,11 +290,31 @@ describe("turn authorization", () => {
     }
   });
 
-  it("stays closed for a cleared authorization rather than re-arming", async () => {
-    // T05 passes a cleared value on interruption. It must never match a live epoch.
-    cleanup();
-    captured.length = 0;
-    render(<Host turnEpoch={-1} />);
+  it("answers nothing when no turn is bound at all", async () => {
+    // The strongest form of the old "cleared authorization" case: a handler reached
+    // outside any authorised turn has no authority by construction, rather than by
+    // failing a comparison against a sentinel epoch.
+    boundTurn.release();
+    await expect(tool("list_app_capabilities").handler({}, {})).resolves.toMatch(/^superseded:/);
+  });
+
+  it("answers nothing after a lease takeover, which an epoch check could not see", async () => {
+    // The gap the shared guard exists to close: the turn epoch is untouched by a
+    // takeover, so the old epoch-only check would have answered normally.
+    boundTurn.turn.claim = {
+      ...boundTurn.turn.claim,
+      leaseEpoch: boundTurn.turn.claim.leaseEpoch + 1,
+    };
+    await expect(tool("list_app_capabilities").handler({}, {})).resolves.toMatch(/^superseded:/);
+  });
+
+  it("answers nothing after the document revision moves under the turn", async () => {
+    boundTurn.live.documentRevision += 1;
+    await expect(tool("list_app_capabilities").handler({}, {})).resolves.toMatch(/^superseded:/);
+  });
+
+  it("answers nothing once this tab stops owning the schedule", async () => {
+    boundTurn.live.isOwner = false;
     await expect(tool("list_app_capabilities").handler({}, {})).resolves.toMatch(/^superseded:/);
   });
 
@@ -301,5 +335,62 @@ describe("turn authorization", () => {
     );
     controller.abort();
     await expect(pending).resolves.toMatch(/^superseded:/);
+  });
+});
+
+describe("navigation is withheld as an EFFECT, not just as a result", () => {
+  // The distinction the previous suite missed. Asserting only that the returned value
+  // is superseded is compatible with the user having been moved to another screen and
+  // a control focused for a turn that no longer exists. These assert the push and the
+  // reveal never happened at all.
+
+  it.each([
+    ["the revision moved", () => void (boundTurn.live.documentRevision += 1)],
+    ["a takeover", () => void (boundTurn.turn.claim = { ...boundTurn.turn.claim, leaseEpoch: 99 })],
+    ["the lease was lost", () => void (boundTurn.live.isOwner = false)],
+    ["Stop", () => void (boundTurn.live.interrupting = true)],
+    ["Disable or Clear moved the epoch", () => void (boundTurn.live.liveTurnEpoch += 1)],
+  ])("performs no route push after %s", async (_label, revoke) => {
+    mountAnchor("dates.roster-period");
+    revoke();
+
+    const result = await tool("open_app_screen").handler({ capabilityId: "roster-period" }, {});
+
+    expect(result).toMatch(/^superseded:/);
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it("performs no reveal or focus when authority is lost during the transition", async () => {
+    // Revoked AT THE PUSH, so the loss lands inside the arrival wait -- the window the
+    // handler's own before/after checks cannot cover.
+    mountAnchor("dates.roster-period");
+    const anchor = document.querySelector("[data-capability-anchor]") as HTMLElement;
+    const focusSpy = vi.spyOn(anchor, "focus");
+    // jsdom implements no layout, so `scrollIntoView` does not exist to spy on.
+    // Assigning the mock is the only way to observe whether the reveal was attempted.
+    const scrollSpy = vi.fn();
+    anchor.scrollIntoView = scrollSpy;
+
+    onPush = (path) => {
+      boundTurn.live.interrupting = true;
+      commitsToPushedPath(path);
+    };
+
+    const result = await tool("open_app_screen").handler({ capabilityId: "roster-period" }, {});
+
+    expect(result).toMatch(/^superseded:/);
+    // The push already happened -- it was authorised when it was made, and nothing can
+    // recall it. What must NOT happen is the app then moving the user's focus for a
+    // turn that has since been stopped.
+    expect(focusSpy).not.toHaveBeenCalled();
+    expect(scrollSpy).not.toHaveBeenCalled();
+  });
+
+  it("is not vacuous: an authorised navigation does push", async () => {
+    mountAnchor("dates.roster-period");
+
+    await tool("open_app_screen").handler({ capabilityId: "roster-period" }, {});
+
+    expect(push).toHaveBeenCalled();
   });
 });

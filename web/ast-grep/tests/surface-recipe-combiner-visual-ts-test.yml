@@ -1,0 +1,16 @@
+id: surface-recipe-combiner-visual-ts
+valid:
+  - |
+    cn(surfaceVariants({ role: "surface", geometry: "card" }), "px-4 py-3");
+  - |
+    cn(surfaceVariants({ role: "drop-target", geometry: "square" }), "flex");
+  - |
+    cn("bg-panel", "shadow-3");
+invalid:
+  # Bounded review round 1: the sanctioned direct shape, in a non-JSX module.
+  - |
+    cn(surfaceVariants({ role: "surface", geometry: "card" }), "bg-panel");
+  - |
+    cn(surfaceVariants({ role: "well" }), "flex rounded-card");
+  - |
+    cn(surfaceVariants({ role: "well" }), "visible");

@@ -1,0 +1,14 @@
+id: retired-accent-swatch-table
+valid:
+  # The store's allowlist is the membership AND the order.
+  - |
+    export const A = () => <>{ACCENTS.map((accent) => <Swatch key={accent} accent={accent} />)}</>;
+  - |
+    const label = `${accent} accent`;
+invalid:
+  - |
+    const ACCENT_SWATCHES = { teal: "var(--brand)" };
+  - |
+    const paint = theme.ACCENT_SWATCHES;
+  - |
+    const key = "ACCENT_SWATCHES";

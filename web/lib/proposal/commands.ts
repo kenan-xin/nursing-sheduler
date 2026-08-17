@@ -76,6 +76,21 @@ export const ASSISTANT_COMMAND_TYPES = [
   "move_leave",
 ] as const satisfies readonly AssistantCommandType[];
 
+// EXHAUSTIVE IN BOTH DIRECTIONS. `satisfies` above proves every listed name is a real
+// arm; this proves every arm is listed. `phase-2-absence.test.ts` used to establish the
+// second direction by regexing `z.literal("...")` out of this file's source -- a
+// hand-rolled parser over a schema declaration, and one that would have returned nothing
+// (and passed vacuously) if the union were ever reshaped. Add an arm without listing it
+// here and `tsc --noEmit` fails, before any test runs.
+type _EveryArmIsListed = AssistantCommandType extends (typeof ASSISTANT_COMMAND_TYPES)[number]
+  ? true
+  : [
+      "missing from ASSISTANT_COMMAND_TYPES",
+      Exclude<AssistantCommandType, (typeof ASSISTANT_COMMAND_TYPES)[number]>,
+    ];
+const _exhaustive: _EveryArmIsListed = true;
+void _exhaustive;
+
 /**
  * A person/date reference as the backend models them (`int | str`).
  *

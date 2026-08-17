@@ -72,7 +72,7 @@ export type CapabilityNavigationOutcome =
     }
   | {
       readonly status: typeof CAPABILITY_UNAVAILABLE;
-      readonly reason: CapabilityUnavailableReason | "route_not_reached";
+      readonly reason: CapabilityUnavailableReason | "route_not_reached" | "authority_revoked";
       readonly registry: CapabilityRegistryStamp;
     };
 
@@ -83,6 +83,19 @@ export interface NavigateToCapabilityOptions {
   readonly routeTimeoutMs?: number;
   /** How long to wait for a lazily-mounted route's anchor. */
   readonly anchorTimeoutMs?: number;
+  /**
+   * Whether the turn that asked for this navigation may still act.
+   *
+   * Consulted immediately before EVERY effect below -- the route push, and the
+   * reveal/focus -- and again after every await. Navigation is the one help action
+   * that changes what the user is looking at, so a caller that only checked its own
+   * authority around the whole call would withhold the RESULT while the user had
+   * already been moved and a control focused for a turn that no longer exists.
+   *
+   * Omitted means unguarded, which is correct for the manual paths: a human pressing
+   * a control is their own authority.
+   */
+  readonly authorize?: () => boolean;
 }
 
 function anchorRefusal(lookup: LiveAnchorLookup): CapabilityUnavailableReason {
@@ -99,6 +112,14 @@ export function useCapabilityNavigation(): NavigateToCapability {
 
   return useCallback(
     async (capabilityId, options = {}) => {
+      const authorized = options.authorize ?? (() => true);
+      const revoked = (): CapabilityNavigationOutcome => ({
+        status: CAPABILITY_UNAVAILABLE,
+        reason: "authority_revoked",
+        registry: capabilityRegistryStamp(),
+      });
+
+      if (!authorized()) return revoked();
       const before = resolveNavigationTarget(capabilityId, readCapabilityContext(options.stamp));
       if (before.status !== "ok") {
         return { status: CAPABILITY_UNAVAILABLE, reason: before.reason, registry: before.stamp };
@@ -106,6 +127,9 @@ export function useCapabilityNavigation(): NavigateToCapability {
 
       const target = before.value;
       if (!isAtRoutePath(window.location, target.path)) {
+        // Immediately before the push, with no await since the check: this is the
+        // first irreversible thing the assistant does to the user's screen.
+        if (!authorized()) return revoked();
         router.push(target.path);
         // AWAITED, not sampled. The push starts a client transition and returns, so the
         // pathname on the next line is still the screen being left -- the normal state
@@ -114,6 +138,9 @@ export function useCapabilityNavigation(): NavigateToCapability {
         const arrival = await waitForRouteArrival(window.location, target.path, {
           timeoutMs: options.routeTimeoutMs,
         });
+        // The transition is a real wait, and it is the likeliest place for a Stop, a
+        // takeover or a commit to land.
+        if (!authorized()) return revoked();
         if (arrival.status !== "arrived") {
           // A redirect, a route that bounced, a rejected transition and one that is
           // merely still pending are one refusal here. They are NOT told apart: after a
@@ -187,6 +214,9 @@ export function useCapabilityNavigation(): NavigateToCapability {
         };
       }
 
+      // The anchor wait above is another await, and revealing scrolls the page and
+      // moves focus -- the second visible effect, so it gets its own check.
+      if (!authorized()) return revoked();
       const reveal = revealAnchor(lookup.element);
       return {
         status: reveal,

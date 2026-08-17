@@ -35,6 +35,35 @@ export const OPTIMIZE_SERIALIZER_VERSION = "canonical-strict-yaml-v1";
 /** The exact solver selector the backend accepts. */
 export const OPTIMIZE_SOLVER = "ortools/cp-sat";
 
+/**
+ * The exact YAML bytes a `multipart/form-data` STRING FIELD puts on the wire.
+ *
+ * WHY THIS EXISTS. Both basis-claiming submissions post their YAML as a string field
+ * (`form.set("yaml_content", yaml)`), and the HTML `multipart/form-data` encoding
+ * algorithm NORMALIZES NEWLINES in a string field's value: every lone LF and every
+ * lone CR becomes CRLF. The backend then digests the bytes it received. So a client
+ * that hashed its own LF-terminated string was claiming a digest of bytes that were
+ * never sent, and `verify_basis_claim` rejected every multi-line submission with
+ * "The submitted bytes do not match the claimed input digest" -- a pre-job 422, so
+ * Optimize itself failed.
+ *
+ * That was invisible for as long as no basis was ever claimed (the screen did not
+ * forward the semantic profile, and the controller had no basis store), and the
+ * backend's own admission tests post through Python, which does not normalize. The
+ * first submission to actually carry a claim hit it immediately.
+ *
+ * This changes NOTHING about the request: the transformation is exactly the one the
+ * FormData serializer already applies, and it is idempotent, so the bytes on the wire
+ * are identical either way. It only makes the digest describe them.
+ *
+ * NOT for a `file` part -- a File's bytes are transmitted verbatim, with no newline
+ * normalization. Neither basis-claiming path submits one; a future path that does
+ * must digest the file's own bytes instead.
+ */
+export function toTransmittedYaml(yaml: string): string {
+  return yaml.replace(/\r\n|\r|\n/g, "\r\n");
+}
+
 /** The form fields a submission carries so the backend can re-verify the claim. */
 export interface BasisSubmissionFields {
   basis_id: string;
@@ -126,7 +155,10 @@ export async function buildOptimizeBasis(input: BuildBasisInput): Promise<BuiltB
   }
 
   const anonymizationMode: AnonymizationMode = input.anonymized ? "people" : "none";
-  const inputSha256 = await sha256HexOfUtf8(input.yaml);
+  // The digest is over the bytes that ACTUALLY GO ON THE WIRE, which are not the
+  // bytes handed in here -- see `toTransmittedYaml`.
+  const transmittedYaml = toTransmittedYaml(input.yaml);
+  const inputSha256 = await sha256HexOfUtf8(transmittedYaml);
   const basis: OptimizeBasisV2 = {
     schemaVersion: BASIS_SCHEMA_VERSION,
     submissionContractVersion: input.profile.submission_contract_version,
@@ -175,7 +207,10 @@ export async function buildOptimizeBasis(input: BuildBasisInput): Promise<BuiltB
       jobId: null,
       parentBasisId,
       transformDigest,
-      submittedYaml: input.yaml,
+      // The TRANSMITTED bytes, so the row is self-consistent: re-hashing
+      // `submittedYaml` reproduces `submissionDigest`. Storing the pre-normalization
+      // string would make the row's own digest unverifiable against its own payload.
+      submittedYaml: transmittedYaml,
       createdAt: input.now.toISOString(),
       expiresAt: null,
     },

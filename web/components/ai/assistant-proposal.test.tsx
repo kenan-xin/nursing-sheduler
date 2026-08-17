@@ -13,9 +13,7 @@
 // and a read-only conversation has no Apply control at all -- not a disabled one.
 
 import "fake-indexeddb/auto";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
@@ -33,6 +31,30 @@ import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
 import { AssistantReceipts } from "./assistant-receipts";
 import { ProposalPreviewCard } from "./proposal-preview-card";
 import { useAssistantProposals } from "./use-assistant-proposals";
+import {
+  AssistantHistoricalConversation,
+  AssistantLiveConversation,
+} from "./assistant-conversation";
+
+// The two conversation renderings are mounted below to prove which of them carries the
+// Preview surface. The library's chat views and the turn session are stubbed for those two
+// cases ONLY: the claim under test is the composition -- which rendering mounts the host
+// Preview -- and a real transport would add a provider, a core and a network seam to a
+// question that has nothing to do with any of them. Every other suite in this file drives
+// the real repository, the real adapter and the real cards, untouched.
+vi.mock("@copilotkit/react-core/v2", () => ({
+  CopilotChatView: () => <div data-testid="chat-view-stub" />,
+  CopilotChatMessageView: () => <div data-testid="chat-message-view-stub" />,
+}));
+vi.mock("./use-assistant-session", () => ({
+  useAssistantSession: () => ({
+    messages: [],
+    isRunning: false,
+    interrupting: false,
+    send: vi.fn(),
+    stop: vi.fn(),
+  }),
+}));
 
 /** The two host surfaces, bound to one controller exactly as the panel binds them. */
 function HostSurface() {
@@ -163,8 +185,17 @@ describe("Apply", () => {
     await waitFor(() => expect(useScenarioStore.getState().rangeEnd).toBe("2026-04-30"));
 
     // The receipt is KEPT, with an honest state and no Undo affordance.
-    const settled = await screen.findByTestId("assistant-receipt");
-    expect(settled.getAttribute("data-undo")).not.toBe("available");
+    //
+    // Waited for, not read once. The store's `rangeEnd` above reverts as soon as the
+    // reversal commits, but the receipt's `data-undo` is derived from a SEPARATE
+    // repository read of the reversible top commit, which lands a render later. A
+    // one-shot `getAttribute` right after `findByTestId` therefore sampled the
+    // pre-reversal attribute whenever that second read had not yet published --
+    // reproducibly so under the full parallel suite, and never in isolation.
+    await waitFor(async () => {
+      const settled = await screen.findByTestId("assistant-receipt");
+      expect(settled.getAttribute("data-undo")).not.toBe("available");
+    });
     expect(screen.queryByTestId("receipt-undo")).toBeNull();
     expect(await screen.findByTestId("receipt-undo-reason")).toBeInTheDocument();
   });
@@ -227,35 +258,50 @@ describe("Apply", () => {
 });
 
 describe("historical conversations never regain live Apply", () => {
-  // Asserted at the SOURCE rather than by rendering, and that is the stronger claim:
-  // rendering shows that one historical thread had no Apply button, while this shows
-  // that the read-only component has no Apply control to re-enable under any
-  // circumstances -- it does not mount the host Preview surface, does not construct
-  // the proposal controller, and does not register the prepare tool.
-  const source = readFileSync(join(__dirname, "assistant-conversation.tsx"), "utf8");
-
-  it("mounts the Preview surface in the LIVE rendering only", () => {
-    const historical = source.slice(
-      source.indexOf("export function AssistantHistoricalConversation"),
+  // WHAT CHANGED (custom-AST ticket 3). This pair used to be asserted by reading
+  // `assistant-conversation.tsx` as text, slicing it at `indexOf("export function ...")`
+  // and checking which identifiers appeared in each half -- a hand-rolled parser whose
+  // slice boundary was a string literal, and which would have reported a clean historical
+  // rendering the moment a function was reordered, renamed, or the sentinel comment moved.
+  //
+  // It is now a DIFFERENTIAL render: both renderings are mounted over the SAME store
+  // state, one with a live, preview-ready, applicable proposal sitting in it. The
+  // historical rendering shows nothing; the live one shows the Preview and an Apply
+  // control. That is causal in the way the text slice was not -- it holds the state fixed
+  // and varies only the component, so the difference cannot be an artefact of the fixture.
+  it("shows no Preview and no Apply control, with a live proposal in the store", async () => {
+    await showProposal(SHRINK);
+    render(
+      <AssistantHistoricalConversation
+        threadId="thread-1"
+        reason="This conversation belongs to an earlier schedule."
+      />,
     );
-    expect(historical).not.toContain("ProposalPreviewCard");
-    expect(historical).not.toContain("AssistantReceipts");
-    expect(historical).not.toContain("useAssistantProposals");
+    await screen.findByTestId("assistant-historical-conversation");
 
-    const live = source.slice(
-      source.indexOf("export function AssistantLiveConversation"),
-      source.indexOf("export interface AssistantHistoricalConversationProps"),
-    );
-    expect(live).toContain("ProposalPreviewCard");
-    expect(live).toContain("useAssistantProposals");
+    // ABSENT, not disabled. There is no control to re-enable.
+    expect(screen.queryByTestId("assistant-proposal")).toBeNull();
+    expect(screen.queryByTestId("proposal-apply")).toBeNull();
+    expect(screen.queryByTestId("assistant-receipt")).toBeNull();
   });
 
-  it("keeps the Preview out of the message transcript entirely", () => {
-    // A message is a record of something that was said. If the card were rendered
-    // as one, a reloaded transcript would carry a live control back with it.
-    const cards = readFileSync(join(__dirname, "proposal-preview-card.tsx"), "utf8");
-    expect(cards).not.toContain("useFrontendTool");
-    expect(cards).not.toContain("renderCustomMessage");
-    expect(cards).not.toContain("@copilotkit");
+  it("mounts the Preview surface in the LIVE rendering, under that same state", async () => {
+    await showProposal(SHRINK);
+    render(<AssistantLiveConversation threadId="thread-1" routePath="/dates" routeLabel="Dates" />);
+
+    // The other half of the differential: the state above IS enough to produce a Preview,
+    // so the historical rendering's emptiness is a property of the component.
+    expect(await screen.findByTestId("assistant-proposal")).toBeInTheDocument();
+    expect(await screen.findByTestId("proposal-apply")).toBeInTheDocument();
   });
+
+  // The second source read here -- `proposal-preview-card.tsx` must not contain
+  // `useFrontendTool`, `renderCustomMessage` or `@copilotkit` -- is retired into mechanisms
+  // that make it UNAVAILABLE rather than merely unspelled. Oxlint `no-restricted-imports`
+  // closes `@copilotkit/react-core` and `@copilotkit/react-core/v2/headless` whole and
+  // restricts every registrant on `@copilotkit/react-core/v2` (including `useFrontendTool`)
+  // to three named modules, of which this card is not one -- so it cannot acquire a
+  // renderer to register itself as a message. The provider's own prop surface is pinned
+  // negatively at COMPILE time in `assistant-copilot-provider.negative.test-d.ts`, which
+  // asserts `renderCustomMessages` is absent from its props.
 });

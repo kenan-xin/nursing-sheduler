@@ -6,7 +6,7 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { AI_KEY_HEADER, AI_MODEL_HEADER, AI_SETUP_CODES } from "@/lib/ai/protocol";
-import { assistantActions, hydrateAssistant } from "@/lib/ai/assistant/store";
+import { assistantActions, hydrateAssistant, useAssistantStore } from "@/lib/ai/assistant/store";
 import {
   SENTINEL_KEY,
   TEST_MODEL,
@@ -185,7 +185,6 @@ describe("draft → testing → Ready", () => {
     expect(await readAssistantSettings(harness.config)).toMatchObject({
       apiKey: SENTINEL_KEY,
       modelId: TEST_MODEL,
-      modelSource: "catalog",
     });
   });
 
@@ -710,6 +709,105 @@ describe("clearing local AI data", () => {
 
     await waitFor(async () => {
       expect(await harness.db.assistantThreads.count()).toBe(0);
+    });
+    expect(await readAssistantSettings(harness.config)).toMatchObject({
+      apiKey: SENTINEL_KEY,
+      modelId: TEST_MODEL,
+    });
+  });
+});
+
+describe("Clear result notices and captured-scenario retry", () => {
+  const SCENARIO_A = "scenario-a";
+  const SCENARIO_B = "scenario-b";
+
+  beforeEach(async () => {
+    await assistantActions.setEnabled(true);
+    await assistantActions.activate({
+      apiKey: SENTINEL_KEY,
+      modelId: TEST_MODEL,
+      modelSource: "catalog",
+    });
+  });
+
+  it("renders the Clear-all incomplete notice with correct copy", async () => {
+    useAssistantStore.setState({
+      clearResult: {
+        status: "incomplete",
+        scope: "all",
+        scenarioId: null,
+        reason: "recapture_exhausted",
+        configurationOutcome: "deleted",
+        operationId: "op-all",
+      },
+    });
+    renderCard();
+    const notice = screen.getByTestId("ai-clear-incomplete");
+    expect(notice).toHaveTextContent("Some AI data could not be cleared");
+    expect(notice).toHaveTextContent("Try clearing again");
+    expect(notice.getAttribute("role")).toBe("alert");
+  });
+
+  it("renders the Clear-history incomplete notice with correct copy", async () => {
+    useAssistantStore.setState({
+      clearResult: {
+        status: "incomplete",
+        scope: "history",
+        scenarioId: SCENARIO_A,
+        reason: "superseded",
+        configurationOutcome: "retained",
+        operationId: "op-history",
+      },
+    });
+    renderCard();
+    const notice = screen.getByTestId("ai-clear-incomplete");
+    expect(notice).toHaveTextContent("History was not cleared");
+    expect(notice).toHaveTextContent("Try clearing history again");
+  });
+
+  it("shows no notice when clearResult is null (success)", async () => {
+    useAssistantStore.setState({ clearResult: null });
+    renderCard();
+    expect(screen.queryByTestId("ai-clear-incomplete")).not.toBeInTheDocument();
+  });
+
+  it("captures the scenario at confirmation time, not at click time", async () => {
+    useAuthorityStore.setState({ scenarioId: SCENARIO_A });
+    const user = userEvent.setup();
+    renderCard();
+    await user.click(screen.getByTestId("ai-clear-history"));
+    useAuthorityStore.setState({ scenarioId: SCENARIO_B });
+    await user.click(screen.getByTestId("ai-clear-confirm-yes"));
+    await waitFor(async () => {
+      expect(await harness.db.assistantThreads.count()).toBe(0);
+    });
+    expect(await readAssistantSettings(harness.config)).toMatchObject({
+      apiKey: SENTINEL_KEY,
+      modelId: TEST_MODEL,
+    });
+  });
+
+  it("history retry uses the captured scenario, not the current selection", async () => {
+    useAuthorityStore.setState({ scenarioId: SCENARIO_A });
+    await selectActiveThread(SCENARIO_A);
+    useAssistantStore.setState({
+      clearResult: {
+        status: "incomplete",
+        scope: "history",
+        scenarioId: SCENARIO_A,
+        reason: "superseded",
+        configurationOutcome: "retained",
+        operationId: "op-history",
+      },
+    });
+    useAuthorityStore.setState({ scenarioId: SCENARIO_B });
+    const user = userEvent.setup();
+    renderCard();
+    const retry = screen.getByTestId("ai-clear-retry");
+    expect(retry).not.toBeDisabled();
+    await user.click(retry);
+    await waitFor(() => {
+      expect(useAssistantStore.getState().clearResult).toBeNull();
     });
     expect(await readAssistantSettings(harness.config)).toMatchObject({
       apiKey: SENTINEL_KEY,

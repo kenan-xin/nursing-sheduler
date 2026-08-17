@@ -20,7 +20,7 @@
 // reference. It is still the USER who applies it, still under the current lease and
 // revision, and a successful Apply still never starts an official Optimize run.
 
-import { useFrontendTool } from "@copilotkit/react-core/v2";
+import { useModelVisibleTool } from "./register-model-visible-tool";
 import { z } from "zod";
 import { assistantCommandListSchema, type AssistantCommandV1 } from "@/lib/proposal";
 import { capabilityRegistryStamp } from "@/lib/capability/registry";
@@ -33,9 +33,8 @@ import {
   explainSearchSummary,
 } from "@/lib/ai/diagnostic";
 import { runDiagnosticSearchForTurn } from "@/lib/ai/diagnostic/diagnostic-runtime";
-
-/** What a handler answers once its turn is no longer the current one. */
-const SUPERSEDED = "superseded: this request belongs to an interrupted turn and was not answered.";
+import { assertTurnAuthority, isTurnAuthorized, SUPERSEDED } from "./turn-authority";
+import { DiagnosticAuthorityRevokedError } from "@/lib/ai/diagnostic/diagnostic-runtime";
 
 const candidateSchema = z.object({
   summary: z
@@ -50,7 +49,7 @@ const candidateSchema = z.object({
   ),
 });
 
-const diagnosticParameters = z.object({
+export const diagnosticParameters = z.object({
   candidates: z
     .array(candidateSchema)
     .min(1)
@@ -71,14 +70,15 @@ const diagnosticParameters = z.object({
 /**
  * Register the diagnostics tool against ONE agent instance.
  *
- * `turnEpoch` is the AUTHORISED epoch, exactly as the other tools take it. A search
- * is long-running work with many awaits in it, so the epoch is re-checked before the
- * search opens, inside it (via `isTurnActive`), and again before anything is
+ * `turnEpoch` is the AUTHORISED epoch, and stamps what this tool publishes. A search
+ * is long-running work with many awaits in it, so the full bound identity is checked
+ * (via `assertTurnAuthority`) before the search opens, the epoch is re-checked inside
+ * it (via `isTurnActive`), and the identity again before anything is
  * published — a Preview raised into an interrupted turn would be a live Apply
  * control for a conversation the user already stopped.
  */
 export function useDiagnosticTools(agentId: string, turnEpoch: number): void {
-  useFrontendTool(
+  useModelVisibleTool(
     {
       name: "test_feasibility_candidates",
       agentId,
@@ -92,8 +92,17 @@ export function useDiagnosticTools(agentId: string, turnEpoch: number): void {
         "original failed, and you must not present it as a cause.",
       parameters: diagnosticParameters,
       handler: async (args, context) => {
-        if (context.signal?.aborted) return SUPERSEDED;
-        if (useAssistantStore.getState().turnEpoch !== turnEpoch) return SUPERSEDED;
+        // THE TOKEN CAPTURED ONCE, at entry. Every check below -- including the ones
+        // inside the search's own effect boundaries -- demands this same token, so a turn
+        // that resumes after a newer one took the binding refuses instead of acting under
+        // it.
+        //
+        // `args` arrives parsed, before the durable parent read below. Two live-reachable
+        // defects met at that boundary: `compare` carries `.default(false)`, and a legal
+        // omission used to arrive as `undefined` and be copied into the search record's
+        // REQUIRED boolean; and a malformed `candidates` used to reach `.map()` and throw,
+        // after a real parent had already been found.
+        const { token } = context;
 
         const parent = await readDiagnosticParent();
         if (parent === null) {
@@ -105,37 +114,55 @@ export function useDiagnosticTools(agentId: string, turnEpoch: number): void {
           );
         }
 
-        if (context.signal?.aborted) return SUPERSEDED;
-        if (useAssistantStore.getState().turnEpoch !== turnEpoch) return SUPERSEDED;
+        const beforeSearch = assertTurnAuthority(token, context.signal);
+        if (beforeSearch) return beforeSearch;
+        // Narrowing only; the guard above already refuses a null token. See the stamping
+        // note in `use-proposal-tools.ts`: everything this tool publishes is stamped from
+        // the token's epoch, never from the registration-time closure.
+        if (token === null) return SUPERSEDED;
+        const authorizedEpoch = token.turnEpoch;
 
-        const result = await runDiagnosticSearchForTurn({
-          searchId: crypto.randomUUID(),
-          threadId: null,
-          turnId: useAssistantStore.getState().activeTurnId,
-          turnEpoch,
-          leaseEpoch: parent.leaseEpoch,
-          compare: args.compare,
-          parent: {
-            basisId: parent.basisId,
-            jobId: parent.jobId,
+        // The search's own effect boundaries throw once authority is gone, which is
+        // how a POST, a durable write or a card publication is stopped rather than
+        // merely having its result withheld afterwards.
+        let result: Awaited<ReturnType<typeof runDiagnosticSearchForTurn>>;
+        try {
+          result = await runDiagnosticSearchForTurn({
+            searchId: crypto.randomUUID(),
+            threadId: null,
+            turnId: useAssistantStore.getState().activeTurnId,
+            turnEpoch: authorizedEpoch,
+            leaseEpoch: parent.leaseEpoch,
+            compare: args.compare,
+            parent: {
+              basisId: parent.basisId,
+              jobId: parent.jobId,
+              scenarioId: parent.scenarioId,
+              documentRevision: parent.documentRevision,
+            },
+            parentExpiresAt: parent.expiresAt,
             scenarioId: parent.scenarioId,
-            documentRevision: parent.documentRevision,
-          },
-          parentExpiresAt: parent.expiresAt,
-          scenarioId: parent.scenarioId,
-          proposed: args.candidates.map((candidate, index) => ({
-            candidateId: `${index}-${crypto.randomUUID()}`,
-            commands: candidate.operations as AssistantCommandV1[],
-            rationale: candidate.summary,
-          })),
-          isTurnActive: (epoch) => useAssistantStore.getState().turnEpoch === epoch,
-          publish: (search) => assistantActions.publishDiagnostic(search, turnEpoch),
-        });
+            proposed: args.candidates.map((candidate, index) => ({
+              candidateId: `${index}-${crypto.randomUUID()}`,
+              commands: candidate.operations as AssistantCommandV1[],
+              rationale: candidate.summary,
+            })),
+            // Both hooks now answer the SAME question. `isTurnActive` keeps its epoch
+            // signature because the orchestrator owns it, but the answer is the full
+            // bound identity -- so the orchestrator's internal checks upgrade too.
+            isTurnActive: () => isTurnAuthorized(token, context.signal),
+            authorize: () => isTurnAuthorized(token, context.signal),
+            publish: (search) => assistantActions.publishDiagnostic(search, authorizedEpoch),
+          });
+        } catch (error) {
+          if (error instanceof DiagnosticAuthorityRevokedError) return SUPERSEDED;
+          throw error;
+        }
 
         // RE-CHECKED AFTER THE SEARCH. It is the longest-running thing the assistant
         // does, so this is the await that most needs the gate.
-        if (context.signal?.aborted) return SUPERSEDED;
-        if (useAssistantStore.getState().turnEpoch !== turnEpoch) return SUPERSEDED;
+        const afterSearch = assertTurnAuthority(token, context.signal);
+        if (afterSearch) return afterSearch;
 
         const summary = explainSearchSummary(result.search);
         const candidate = result.previewCandidate;
@@ -162,8 +189,8 @@ export function useDiagnosticTools(agentId: string, turnEpoch: number): void {
           outcome: "optimizer_tested",
         });
 
-        if (context.signal?.aborted) return SUPERSEDED;
-        if (useAssistantStore.getState().turnEpoch !== turnEpoch) return SUPERSEDED;
+        const afterPreview = assertTurnAuthority(token, context.signal);
+        if (afterPreview) return afterPreview;
 
         if (!outcome.ok) {
           return (
@@ -172,7 +199,7 @@ export function useDiagnosticTools(agentId: string, turnEpoch: number): void {
           );
         }
 
-        assistantActions.showProposal(outcome.proposal.proposalId, turnEpoch);
+        assistantActions.showProposal(outcome.proposal.proposalId, authorizedEpoch);
         return (
           `${summary} The tested change is now shown to the user as a preview, labelled with ` +
           "the copied run that proved it. Nothing has changed yet, and you cannot apply it — " +

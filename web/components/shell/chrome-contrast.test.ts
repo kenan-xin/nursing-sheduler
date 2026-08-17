@@ -19,6 +19,18 @@ import { describe, expect, it } from "vitest";
 //      --surface fill + --brandink text, SideNav.dc.html:81);
 //   3) a chrome shell control repointed away from the paired ON-colour its own
 //      fill declares.
+//
+// WHAT CHANGED (custom-AST ticket 3). Revert path (3) used to be three `readFileSync`
+// reads of shell TSX plus `toContain` on the class strings. It is now split, because it was
+// always two different claims: the POSITIVE pairing -- the app mark really does paint
+// `bg-chrome` with `text-onbrand`, and the active mode segment really does paint
+// `bg-surface` with `text-brandink` -- is asserted by RENDERING the shell in
+// `chrome-pairing.test.tsx`, which is a stronger statement than "the file mentions both
+// tokens somewhere"; and the NEGATIVE half, that the retired v1 ink-ramp pairing has not
+// come back anywhere in those three files, is the `chrome-ink-ramp-pairing` ast-grep rule,
+// which is the half rendering cannot reach. This file keeps its `app/globals.css` reader
+// and nothing else: contrast is a CSS-value contract, and that is a retained format-specific
+// read, not source analysis.
 
 const shellDir = __dirname;
 const webRoot = join(shellDir, "..", "..");
@@ -168,42 +180,5 @@ describe("ink surfaces — --on-ink vs --ink", () => {
     const ink = tokenHex(block, "ink");
     const ratio = contrastRatio(onInk, ink);
     expect(ratio, `${onInk} on ${ink} = ${ratio}:1`).toBeGreaterThanOrEqual(4.5);
-  });
-});
-
-// Each chrome fill must carry the ON-colour its own token declares. This used to
-// assert `text-on-ink` on all three files, which was true only while the app
-// marks were read as dark INK tiles and the mode toggle's active segment was a
-// `bg-ink` fill. In v2 neither holds: `--chrome` aliases `--brand`, so the app
-// marks pair with `--onbrand`; and the active mode segment lifts to the L1
-// `--surface` plane with `--brandink` text (SideNav.dc.html:81). The guard is
-// re-pointed at the pairs that are now correct rather than dropped — both the
-// positive pairing and the retired v1 pairing are pinned, so a revert in either
-// direction trips.
-describe("chrome fills carry their own paired ON-colour", () => {
-  const read = (name: string) => readFileSync(join(shellDir, name), "utf8");
-
-  it.each(["top-bar.tsx", "app-side-nav.tsx"])(
-    "%s pairs the bg-chrome app mark with text-onbrand, not the ink ramp",
-    (name) => {
-      const src = read(name);
-      expect(src).toContain("bg-chrome");
-      expect(src).toContain("text-onbrand");
-      // `--chrome` is the accent, so BOTH ink-ramp foregrounds are wrong on it:
-      // `text-ink` inverts, and `text-on-ink` is the ON-colour of a different
-      // fill that merely happened to look close in light mode.
-      expect(src).not.toContain("text-on-ink");
-      expect(src).not.toMatch(/bg-chrome[^"]*text-ink\b/);
-    },
-  );
-
-  it("mode-toggle.tsx lifts the active segment to bg-surface + text-brandink", () => {
-    const src = read("mode-toggle.tsx");
-    expect(src).toContain("bg-surface");
-    expect(src).toContain("text-brandink");
-    // The retired v1 pair. `bg-ink`/`text-on-ink` here would be the dark-chrome
-    // segment coming back, which is the exact revert this guard exists for.
-    expect(src).not.toContain("bg-ink");
-    expect(src).not.toContain("text-on-ink");
   });
 });

@@ -1,0 +1,30 @@
+id: test-module-loader-call
+snapshots:
+  ? |
+    const require = createRequire(import.meta.url);
+  : labels:
+      - source: createRequire(import.meta.url)
+        style: primary
+        start: 16
+        end: 46
+  ? |
+    const require = createRequire(join(WEB_ROOT, "package.json"));
+  : labels:
+      - source: createRequire(join(WEB_ROOT, "package.json"))
+        style: primary
+        start: 16
+        end: 61
+  ? |
+    const require = mod.createRequire(import.meta.url);
+  : labels:
+      - source: mod.createRequire(import.meta.url)
+        style: primary
+        start: 16
+        end: 50
+  ? |
+    const require = nodeModule.createRequire(baseUrl);
+  : labels:
+      - source: nodeModule.createRequire(baseUrl)
+        style: primary
+        start: 16
+        end: 49
