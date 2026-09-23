@@ -364,7 +364,7 @@ describe("the command arms the provider is actually shown", () => {
       },
       add_staffing_requirement: {
         type: "add_staffing_requirement",
-        description: "At least 2 RNs on every night shift",
+        description: "Two RNs on every night shift",
         shiftType: "Night",
         qualifiedPeople: ["RN"],
         dates: ["ALL"],
@@ -373,7 +373,7 @@ describe("the command arms the provider is actually shown", () => {
       edit_staffing_requirement: {
         type: "edit_staffing_requirement",
         ruleId: "r1",
-        description: "At least 2 RNs on every night shift",
+        description: "Two RNs on every night shift",
         shiftType: "Night",
         qualifiedPeople: ["RN"],
         dates: ["WEEKEND"],

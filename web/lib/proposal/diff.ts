@@ -205,15 +205,27 @@ function renderStrength(weight: number): string {
   return "no effect (weight 0)";
 }
 
+/**
+ * Restates `shift_type_requirements` in core: no preferred count means EXACTLY n; a
+ * preferred count p means n to p, its weight (0 or less) pulling toward p; qualified
+ * people bans everyone else from those shifts. Each top-level entry is its own
+ * equation, a group or nested list one combined count.
+ */
 function describeRequirement(card: RequirementCard): string {
   const n = card.requiredNumPeople;
+  const p = card.preferredNumPeople;
+  const entries = Array.isArray(card.shiftType) ? card.shiftType : [card.shiftType];
+  const labels = entries.map((entry) => flattenRefs(entry).map(String).join(" + "));
+  const shifts = labels.length === 1 ? labels[0] : `each of ${labels.join(", ")}`;
+  const dates = renderDates(card.date);
   const who = renderPeople(card.qualifiedPeople, "");
-  const shifts = flattenRefs(card.shiftType).map(String).join(" + ");
-  const ideal =
-    card.preferredNumPeople != null
-      ? `; ideally ${card.preferredNumPeople} (${renderStrength(card.weight)})`
-      : "";
-  return `At least ${n} ${n === 1 ? "person" : "people"}${who ? ` from ${who}` : ""} on ${shifts}, ${renderDates(card.date)}${ideal}`;
+  const ban = who ? `; only ${who} may work ${labels.join(", ")}` : "";
+  if (p == null || p === n) {
+    return `Exactly ${n} ${n === 1 ? "person" : "people"} on ${shifts}, ${dates}${ban}`;
+  }
+  const lean =
+    card.weight < 0 ? `${p} preferred` : card.weight > 0 ? `${n} preferred` : "no preference";
+  return `${n} to ${p} people on ${shifts}, ${dates} (${lean}, weight ${card.weight})${ban}`;
 }
 
 function describeSuccession(card: SuccessionCard): string {
@@ -226,16 +238,34 @@ function describeSuccession(card: SuccessionCard): string {
   return `${pattern} on consecutive days for ${renderPeople(card.person, "everyone")}, ${renderDates(card.date)}: ${renderStrength(card.weight)}`;
 }
 
+/**
+ * A count's strength, per `shift_count` in core (the objective is maximised): a linear
+ * expression is a yes/no the weight REWARDS, so a negative weight pays for breaking it;
+ * `|x - T|^2` is a squared gap, so a negative weight pulls toward T.
+ */
+function renderCountStrength(squared: boolean, weight: number, target: number): string {
+  if (weight === 0) return "no effect (weight 0)";
+  if (squared) {
+    if (weight === -Infinity) return `must be exactly ${target}`;
+    if (weight < 0) return `pulled toward ${target} (weight ${weight})`;
+    return `refused by the solver (a positive weight is not allowed here)`;
+  }
+  if (weight === Infinity) return "must always hold";
+  if (weight === -Infinity) return "must never hold, the solver forces the opposite";
+  if (weight > 0) return `kept to where possible (weight ${weight})`;
+  return `worked against, the solver is rewarded for breaking it (weight ${weight})`;
+}
+
 /** `null` for a list-shaped or contracted-hours count: no single sentence says it honestly. */
 function describeCount(card: CountCard): string | null {
   if (typeof card.expression !== "string" || typeof card.target !== "number") return null;
   const op = EXPRESSION_OPS.find((candidate) => candidate.value === card.expression);
   if (!op) return null;
-  const amount = op.title.includes("T")
-    ? substituteTarget(op.title, card.target)
-    : `${op.title} ${card.target}`;
+  const squared = op.value === "|x - T|^2";
+  const amount = squared ? `Close to ${card.target}` : substituteTarget(op.title, card.target);
   const shifts = flattenRefs(card.countShiftTypes).map(String).join(" + ");
-  return `${amount} ${shifts} shifts for each of ${renderPeople(card.person, "everyone")}, across ${renderDates(card.countDates)}: ${renderStrength(card.weight)}`;
+  const people = renderPeople(card.person, "");
+  return `${amount} ${shifts} shifts for ${people ? `each of ${people}` : "everyone"}, across ${renderDates(card.countDates)}: ${renderCountStrength(squared, card.weight, card.target)}`;
 }
 
 /** The plain sentence for the families the assistant authors; `null` keeps the opaque form. */

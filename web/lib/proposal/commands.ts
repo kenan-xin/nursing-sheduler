@@ -292,7 +292,8 @@ function rulePeopleSchema() {
     .describe(
       "Who the rule is for: person ids and staff group ids exactly as in the schedule. " +
         '"ALL" is not accepted here -- for every nurse, list each person or use a staff ' +
-        "group that holds everyone.",
+        "group that holds everyone. An edit may keep the people the rule already names, " +
+        'including "ALL".',
     );
 }
 
@@ -316,6 +317,23 @@ function ruleWeightSchema() {
         "The schedule shows hard weights as .inf / -.inf: send them as infinity / " +
         "-infinity. Ask the user whether a new rule is a must or a preference when they " +
         "did not say.",
+    );
+}
+
+function countWeightSchema() {
+  return z
+    .string()
+    .describe(
+      "How strongly, written as you would type it in the Weight box. The solver is " +
+        "REWARDED for the expression holding, in proportion to the weight: " +
+        '"infinity" = must always hold (hard rule), a positive number such as "10" = keep ' +
+        "to it where possible. A negative number works against the expression (the solver " +
+        'is paid for breaking it) and "-infinity" forces the opposite, so a soft cap is ' +
+        '"x <= T" with a POSITIVE weight. For "|x - T|^2" only 0 or less is allowed: a ' +
+        'negative number such as "-5" pulls the count toward T, "-infinity" makes it ' +
+        "exactly T. The schedule shows hard weights as .inf / -.inf: send them as " +
+        "infinity / -infinity. Ask the user whether a new rule is a must or a preference " +
+        "when they did not say.",
     );
 }
 
@@ -353,7 +371,7 @@ function countFields() {
           'close to T as possible (needs a weight of 0 or less, never "infinity").',
       ),
     target: z.number().describe("The target T, a whole number of zero or more, e.g. 5."),
-    weight: ruleWeightSchema(),
+    weight: countWeightSchema(),
   };
 }
 
@@ -363,18 +381,27 @@ function requirementFields() {
     shiftType: z
       .string()
       .describe(
-        "ONE shift code or shift group id to staff. To cover every worked shift of a day, " +
-          "use a shift group that holds them all. OFF, LEAVE and ALL cannot be staffed.",
+        "ONE shift code or shift group id to staff. A shift group id is one combined " +
+          "count across all of its shifts on each date. OFF, LEAVE and ALL cannot be staffed.",
       ),
     qualifiedPeople: z
       .array(refSchema)
       .describe(
-        'Who counts towards the number: person ids, staff group ids, or ["ALL"] for anyone.',
+        "Only these people may work this shift; everyone else is banned from it (a hard " +
+          'rule). Person ids or staff group ids, or ["ALL"] for no restriction. For skill ' +
+          'mix such as "at least 2 RNs on every night", never put the group on the Night ' +
+          "requirement itself: add a reserved twin shift (e.g. Night+, same hours) in the " +
+          "same change and give THE TWIN a requirement of 2 for RNs; Night stays open to " +
+          "anyone, RNs included.",
       ),
     dates: ruleDatesSchema(),
     requiredNumPeople: z
       .number()
-      .describe("The minimum number of those people on that shift, e.g. 2. A hard rule."),
+      .describe(
+        "The exact number of people on that shift on each date, e.g. 2 (a hard rule), " +
+          "unless the requirement already has a preferred count, which makes it the lowest " +
+          "allowed.",
+      ),
   };
 }
 
@@ -428,7 +455,12 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
   z.strictObject({
     type: z.enum(["set_staffing_requirement_people"]),
     ruleId: z.string().min(1).describe("The staffing requirement's stable id."),
-    requiredNumPeople: z.number().describe("How many people that shift must have."),
+    requiredNumPeople: z
+      .number()
+      .describe(
+        "How many people that shift must have: exactly this many, or at least this many " +
+          "when the requirement has a preferred count.",
+      ),
   }),
   z.strictObject({
     type: z.enum(["move_leave"]),

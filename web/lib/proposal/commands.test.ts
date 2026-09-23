@@ -12,8 +12,45 @@ import {
   COUNT_EXPRESSIONS,
   RULE_KINDS,
   assistantCommandListSchema,
+  assistantCommandSchema,
   parseAssistantCommands,
 } from "./commands";
+import { CAPABILITY_ENTRIES } from "@/lib/capability/help-content";
+
+describe("the rule arms' text states what the solver enforces", () => {
+  // core/nurse_scheduling/preference_types.py: a requirement without a preferred count
+  // is `actual == required`, and qualifiedPeople adds `unqualified on the shift == 0`.
+  // A count's linear expression is a Boolean the solver is REWARDED for by its weight.
+  const arm = (type: string) => {
+    const found = assistantCommandSchema.options.find(
+      (option) => option.shape.type.options[0] === type,
+    );
+    if (!found) throw new Error(`no ${type} arm`);
+    return found.shape as unknown as Record<string, { description?: string }>;
+  };
+
+  it("a staffing requirement is an exact count and qualified people is a ban", () => {
+    const requirement = arm("add_staffing_requirement");
+    expect(requirement.qualifiedPeople.description).toContain("everyone else is banned");
+    expect(requirement.requiredNumPeople.description).toContain("exact number");
+    expect(requirement.requiredNumPeople.description).not.toContain("minimum");
+    const help = CAPABILITY_ENTRIES.find((entry) => entry.id === "staffing-requirements");
+    expect(help?.nurseFacingSummary).not.toMatch(/at least/i);
+    expect(help?.nurseFacingSummary).toContain("nobody else may work");
+  });
+
+  it("points skill mix at the app's reserved-twin idiom, not at a ban on the shift", () => {
+    expect(arm("add_staffing_requirement").qualifiedPeople.description).toContain("reserved twin");
+    const help = CAPABILITY_ENTRIES.find((entry) => entry.id === "staffing-requirements");
+    expect(help?.nurseFacingSummary).toContain("reserved twin");
+  });
+
+  it("a count's weight rewards the expression holding", () => {
+    const weight = arm("add_count_rule").weight.description ?? "";
+    expect(weight).toContain("works against");
+    expect(weight).not.toContain("discourages");
+  });
+});
 
 describe("parseAssistantCommands", () => {
   it("accepts every supported arm", () => {
@@ -326,7 +363,7 @@ describe("parseAssistantCommands", () => {
 
   it("accepts the staffing-requirement arms and refuses a shift list", () => {
     const fields = {
-      description: "At least 2 RNs on every night shift",
+      description: "Two RNs on every night shift",
       shiftType: "Night",
       qualifiedPeople: ["RN"],
       dates: ["ALL"],

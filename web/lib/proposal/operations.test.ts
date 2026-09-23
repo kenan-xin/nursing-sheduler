@@ -695,6 +695,19 @@ describe("add_succession_rule / edit_succession_rule", () => {
     expect(result.rejection.message).toContain("Name each person");
   });
 
+  it("edit keeps a rule scoped to ALL", () => {
+    const state = ruleWardScenario();
+    state.cardsByKind.successions[0] = { ...state.cardsByKind.successions[0], person: "ALL" };
+    const result = applyAssistantCommand(state, edit({ people: ["ALL"], weight: "-50" }));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.next.cardsByKind.successions[0]).toMatchObject({
+        person: ["ALL"],
+        weight: -50,
+      });
+    }
+  });
+
   it("refuses a shift that does not exist", () => {
     const result = applyAssistantCommand(ruleWardScenario(), {
       ...noDayAfterNight,
@@ -931,12 +944,28 @@ describe("add_count_rule / edit_count_rule", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.rejection.code).toBe("no_effect");
   });
+
+  it("edit keeps a rule scoped to ALL, as the form's loaded draft does", () => {
+    const state = ruleWardScenario();
+    state.cardsByKind.counts[0] = { ...state.cardsByKind.counts[0], person: "ALL", target: 5 };
+    const result = applyAssistantCommand(state, edit({ people: ["ALL"], target: 6 }));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.next.cardsByKind.counts[0]).toMatchObject({ person: ["ALL"], target: 6 });
+    }
+    // A new rule still names people: ALL is only kept, never introduced.
+    expect(applyAssistantCommand(state, { ...nightCap, people: ["ALL"] }).ok).toBe(false);
+  });
 });
 
 describe("add_staffing_requirement / edit_staffing_requirement", () => {
+  // A requirement is an EXACT head count (a range only with a preferred count), and
+  // qualifiedPeople bans everyone outside it from the shift. So skill mix ("at least 2
+  // RNs on every night") is not one requirement on Night: the app's idiom is a reserved
+  // twin shift with its own requirement (core/tests/testcases/real/ward-8-*.yaml).
   const twoRNs = {
     type: "add_staffing_requirement" as const,
-    description: "At least 2 RNs on every night shift",
+    description: "Exactly 2 nurses on every night shift, RNs only",
     shiftType: "Night",
     qualifiedPeople: ["RN"] as (string | number)[],
     dates: ["ALL"],
@@ -944,7 +973,7 @@ describe("add_staffing_requirement / edit_staffing_requirement", () => {
   };
   const seniorEveryDay = {
     ...twoRNs,
-    description: "Every day needs at least one senior nurse on",
+    description: "Exactly one nurse on across the working shifts each day, seniors only",
     shiftType: "Working shifts",
     qualifiedPeople: ["Senior"] as (string | number)[],
     requiredNumPeople: 1,
@@ -959,13 +988,13 @@ describe("add_staffing_requirement / edit_staffing_requirement", () => {
     ...overrides,
   });
 
-  it("expresses 'at least 2 RNs on every night shift'", () => {
+  it("expresses 'exactly 2 on every night shift, RNs only'", () => {
     const result = applyAssistantCommand(ruleWardScenario(), twoRNs);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.next.cardsByKind.requirements.at(-1)).toEqual({
       uid: expect.any(String),
-      description: "At least 2 RNs on every night shift",
+      description: "Exactly 2 nurses on every night shift, RNs only",
       shiftType: ["Night"],
       requiredNumPeople: 2,
       qualifiedPeople: ["RN"],
@@ -975,7 +1004,56 @@ describe("add_staffing_requirement / edit_staffing_requirement", () => {
     });
   });
 
-  it("expresses 'every day needs at least one senior nurse on' over the working-shifts group", () => {
+  const twin = (code: string, startTime: string, endTime: string) => ({
+    type: "add_shift_type" as const,
+    code,
+    name: `${code} (reserved slot)`,
+    startTime,
+    endTime,
+    restMinutes: 0,
+  });
+
+  it("expresses 'at least 2 RNs on every night shift' as a reserved RN twin of Night", () => {
+    const result = applyAssistantCommands(ruleWardScenario(), [
+      twin("Night+", "20:00", "08:00"),
+      { ...twoRNs, description: "At least 2 RNs on every night shift", shiftType: "Night+" },
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.next.shifts.at(-1)?.id).toBe("Night+");
+    expect(result.next.cardsByKind.requirements.at(-1)).toMatchObject({
+      shiftType: ["Night+"],
+      qualifiedPeople: ["RN"],
+      requiredNumPeople: 2,
+    });
+    // Only the twin is reserved: plain Night stays open to anyone, RNs included.
+    expect(result.next.cardsByKind.requirements.slice(0, -1)).toEqual(
+      ruleWardScenario().cardsByKind.requirements,
+    );
+  });
+
+  it("expresses 'every day needs at least one senior nurse on' as one senior slot a day", () => {
+    const result = applyAssistantCommands(ruleWardScenario(), [
+      twin("Day+", "08:00", "20:00"),
+      twin("Night+", "20:00", "08:00"),
+      { type: "add_shift_group", groupId: "Senior slots", members: ["Day+", "Night+"] },
+      {
+        ...seniorEveryDay,
+        description: "Every day needs at least one senior nurse on",
+        shiftType: "Senior slots",
+      },
+    ]);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.next.cardsByKind.requirements.at(-1)).toMatchObject({
+        shiftType: ["Senior slots"],
+        qualifiedPeople: ["Senior"],
+        requiredNumPeople: 1,
+      });
+    }
+  });
+
+  it("a shift group is one combined count per date over all its shifts", () => {
     const result = applyAssistantCommand(ruleWardScenario(), seniorEveryDay);
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -1008,7 +1086,7 @@ describe("add_staffing_requirement / edit_staffing_requirement", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.rejection.message).toContain(
-        'Staffing requirement "At least 2 RNs on every night shift"',
+        'Staffing requirement "Exactly 2 nurses on every night shift, RNs only"',
       );
       expect(result.rejection.message).toContain("Required number of people must be at least 0");
     }

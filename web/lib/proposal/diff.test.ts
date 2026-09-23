@@ -61,8 +61,8 @@ describe("deriveProposalDiff", () => {
     const diff = deriveProposalDiff(before, applied.next, commands);
     expect(diff.direct).toHaveLength(1);
     expect(diff.direct[0].label).toBe("Day cover");
-    expect(diff.direct[0].before).toBe("On · “Day cover” · At least 2 people on Day, every date");
-    expect(diff.direct[0].after).toBe("On · “Day cover” · At least 4 people on Day, every date");
+    expect(diff.direct[0].before).toBe("On · “Day cover” · Exactly 2 people on Day, every date");
+    expect(diff.direct[0].after).toBe("On · “Day cover” · Exactly 4 people on Day, every date");
     expect(diff.cascade).toEqual([]);
     expect(diff.needsReview).toEqual([]);
   });
@@ -287,7 +287,7 @@ describe("deriveProposalDiff", () => {
       },
       {
         type: "add_staffing_requirement" as const,
-        description: "At least 2 RNs on every night shift",
+        description: "Two RNs on every night shift",
         shiftType: "Night",
         qualifiedPeople: ["RN"],
         dates: ["ALL"],
@@ -302,7 +302,7 @@ describe("deriveProposalDiff", () => {
         dates: ["WEEKEND"],
         expression: "x <= T" as const,
         target: 4,
-        weight: "-50",
+        weight: "50",
       },
       { type: "remove_rule" as const, ruleKind: "requirements" as const, ruleId: "req-multi" },
     ];
@@ -334,7 +334,8 @@ describe("deriveProposalDiff", () => {
         (entry) => entry.key.startsWith("rule:requirements:") && entry.kind === "created",
       )?.after,
     ).toBe(
-      "On · “At least 2 RNs on every night shift” · At least 2 people from RN on Night, every date",
+      "On · “Two RNs on every night shift” · Exactly 2 people on Night, every date; " +
+        "only RN may work Night",
     );
 
     const edited = after("rule:counts:cnt-nights");
@@ -343,15 +344,79 @@ describe("deriveProposalDiff", () => {
       "On · “Night cap” · At most 6 Night shifts for each of ana, across every date: must always hold",
     );
     expect(edited?.after).toBe(
-      "On · “Night cap” · At most 4 Night shifts for each of ana, across weekends: discouraged (weight -50)",
+      "On · “Night cap” · At most 4 Night shifts for each of ana, across weekends: " +
+        "kept to where possible (weight 50)",
     );
 
     const removed = after("rule:requirements:req-multi");
     expect(removed?.kind).toBe("removed");
     expect(removed?.before).toBe(
-      "On · “Day or Night cover” · At least 3 people on Day + Night, every date",
+      "On · “Day or Night cover” · Exactly 3 people on each of Day, Night, every date",
     );
     expect(diff.needsReview).toEqual([]);
+  });
+});
+
+describe("rule sentences state what the solver enforces", () => {
+  // The Preview is what a ward manager trusts before Apply, so each sentence restates
+  // core/nurse_scheduling/preference_types.py, not the rule editor's labels.
+  const sentence = (kind: "requirements" | "counts", card: Record<string, unknown>) => {
+    const before = ruleWardScenario();
+    const after = {
+      ...before,
+      cardsByKind: { ...before.cardsByKind, [kind]: [...before.cardsByKind[kind], card] },
+    };
+    const diff = deriveProposalDiff(before, after, []);
+    return [...diff.direct, ...diff.cascade].find((entry) => entry.key === `rule:${kind}:x`)?.after;
+  };
+  const requirement = { uid: "x", shiftType: ["Night"], requiredNumPeople: 2, weight: -1 };
+  const count = {
+    uid: "x",
+    person: ["ALL"],
+    countDates: ["ALL"],
+    countShiftTypes: ["Night"],
+    expression: "x <= T",
+    target: 5,
+  };
+
+  it("a preferred count makes a range that leans toward it", () => {
+    expect(sentence("requirements", { ...requirement, preferredNumPeople: 3, weight: -50 })).toBe(
+      "On · 2 to 3 people on Night, every date (3 preferred, weight -50)",
+    );
+  });
+
+  it("an aggregate group is one combined count, and qualified people ban everyone else", () => {
+    expect(
+      sentence("requirements", {
+        ...requirement,
+        shiftType: ["Working shifts"],
+        requiredNumPeople: 1,
+        qualifiedPeople: ["Senior"],
+      }),
+    ).toBe(
+      "On · Exactly 1 person on Working shifts, every date; only Senior may work Working shifts",
+    );
+  });
+
+  it("a count's weight rewards the expression holding, so a negative one works against it", () => {
+    expect(sentence("counts", { ...count, weight: -50 })).toBe(
+      "On · At most 5 Night shifts for everyone, across every date: " +
+        "worked against, the solver is rewarded for breaking it (weight -50)",
+    );
+    expect(sentence("counts", { ...count, weight: Number.NEGATIVE_INFINITY })).toBe(
+      "On · At most 5 Night shifts for everyone, across every date: " +
+        "must never hold, the solver forces the opposite",
+    );
+  });
+
+  it("close to target pulls toward T with a negative weight", () => {
+    expect(sentence("counts", { ...count, expression: "|x - T|^2", weight: -5 })).toBe(
+      "On · Close to 5 Night shifts for everyone, across every date: " +
+        "pulled toward 5 (weight -5)",
+    );
+    expect(
+      sentence("counts", { ...count, expression: "|x - T|^2", weight: Number.NEGATIVE_INFINITY }),
+    ).toBe("On · Close to 5 Night shifts for everyone, across every date: must be exactly 5");
   });
 });
 

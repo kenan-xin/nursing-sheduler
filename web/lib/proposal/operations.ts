@@ -272,6 +272,23 @@ function firstUnoffered<T>(picked: readonly T[], offered: readonly PickerOption[
   );
 }
 
+/**
+ * The first person ref neither offered nor already on the edited card. An edit form
+ * loads the card's own refs (`successionToForm` / `countToForm`), so a rule scoped to
+ * ALL keeps ALL on Save although the picker never offers it.
+ */
+function firstUnofferedPerson(
+  picked: readonly PersonRef[],
+  offered: readonly PickerOption[],
+  held: unknown,
+): PersonRef | undefined {
+  const kept: unknown[] = held === undefined ? [] : [held].flat(Infinity);
+  return firstUnoffered(
+    picked.filter((ref) => !kept.some((own) => Object.is(own, ref))),
+    offered,
+  );
+}
+
 /** One editor's Dates-field option builders (each model exports its own three). */
 interface DateScopeBuilders {
   auto: (state: ScenarioUiState) => readonly { id: string }[];
@@ -341,9 +358,10 @@ function successionRejection(
   fields: SuccessionFields,
   name: string,
   index: number,
+  held?: unknown,
 ): OperationResult | undefined {
   const people = successionPeopleOptions(state);
-  const person = firstUnoffered(fields.people, [...people.items, ...people.groups]);
+  const person = firstUnofferedPerson(fields.people, [...people.items, ...people.groups], held);
   if (person !== undefined) {
     return reject(
       index,
@@ -408,7 +426,7 @@ function applyEditSuccessionRule(
       `${name}: one step of its pattern allows several shifts, so it has to be edited on the Shift sequences screen.`,
     );
   }
-  const refused = successionRejection(state, command, name, index);
+  const refused = successionRejection(state, command, name, index, source.person);
   if (refused) return refused;
   const next = keepMarkers(source, buildSuccessionCard(successionDraft(command), source.uid));
   if (stableStringify(next) === stableStringify(source)) {
@@ -458,9 +476,10 @@ function countRejection(
   draft: CountFormState,
   name: string,
   index: number,
+  held?: unknown,
 ): OperationResult | undefined {
   const people = countPeopleOptions(state);
-  const person = firstUnoffered(fields.people, [...people.items, ...people.groups]);
+  const person = firstUnofferedPerson(fields.people, [...people.items, ...people.groups], held);
   if (person !== undefined) {
     return reject(
       index,
@@ -526,7 +545,7 @@ function applyEditCountRule(
   }
   const domain = buildCountShiftTypeDomain(state);
   const draft = countDraft(command, countToForm(source, domain));
-  const refused = countRejection(state, command, draft, name, index);
+  const refused = countRejection(state, command, draft, name, index, source.person);
   if (refused) return refused;
   const next = keepMarkers(source, buildCountCard(draft, domain, source.uid));
   if (stableStringify(next) === stableStringify(source)) {

@@ -111,8 +111,10 @@ export const CAPABILITY_ENTRIES = [
     id: "staffing-requirements",
     title: "Staffing requirements",
     nurseFacingSummary:
-      "How many people a shift needs, and which kind of person counts towards that number. This " +
-      "is the record behind a rule such as 'at least two seniors on every night shift'.",
+      "How many people a shift needs: exactly that number, or a range when a preferred number " +
+      "is set. Naming who is qualified means nobody else may work that shift at all. For a " +
+      "skill mix such as two seniors on every night, add a reserved twin of the shift (for " +
+      "example N+, same hours) that only seniors may work, and give it its own requirement.",
     concepts: ["staffing requirement", "minimum staffing", "skill mix", "coverage", "headcount"],
     modes: ADVANCED_ONLY,
     featureGates: [],
