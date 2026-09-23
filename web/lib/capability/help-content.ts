@@ -65,8 +65,9 @@ export const CAPABILITY_ENTRIES = [
     id: "shift-types",
     title: "Shifts and shift groups",
     nurseFacingSummary:
-      "Define each kind of shift the ward runs — its code, name and clock times — and group " +
-      "related shifts together, such as all the night shifts.",
+      "Define each kind of shift the ward runs — its code, name, clock times and rest break — " +
+      "and group related shifts together, such as all the night shifts. The assistant can also " +
+      "prepare new shifts and shift groups for you to review and apply.",
     concepts: ["shift", "shift type", "shift group", "night shift", "clock times", "duration"],
     modes: BOTH_MODES,
     featureGates: [],
@@ -283,9 +284,11 @@ export const CAPABILITY_ENTRIES = [
     title: "What the assistant can and cannot do",
     nurseFacingSummary:
       "Once it is on, the assistant can read the set-up you have open, explain how the app " +
-      "works, and suggest which rule expresses a policy you describe. It cannot change the " +
-      "roster on its own: every change is something you review and apply yourself. It is not a " +
-      "source of employment, legal or clinical-safety authority.",
+      "works, and suggest which rule expresses a policy you describe. It can also prepare a few " +
+      "kinds of change — the roster period, turning a rule on or off, a staffing head count, " +
+      "moving leave, and adding new shifts and shift groups — which you review and apply " +
+      "yourself. It cannot change the roster on its own, and it cannot edit or delete existing " +
+      "shifts. It is not a source of employment, legal or clinical-safety authority.",
     concepts: ["assistant", "chat", "read-only", "suggestion", "apply", "limits"],
     modes: BOTH_MODES,
     featureGates: ["aiAssistant"],
