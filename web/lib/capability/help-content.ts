@@ -284,11 +284,13 @@ export const CAPABILITY_ENTRIES = [
     title: "What the assistant can and cannot do",
     nurseFacingSummary:
       "Once it is on, the assistant can read the set-up you have open, explain how the app " +
-      "works, and suggest which rule expresses a policy you describe. It can also prepare a few " +
-      "kinds of change — the roster period, turning a rule on or off, a staffing head count, " +
-      "moving leave, and adding new shifts and shift groups — which you review and apply " +
-      "yourself. It cannot change the roster on its own, and it cannot edit or delete existing " +
-      "shifts. It is not a source of employment, legal or clinical-safety authority.",
+      "works, and suggest which rule expresses a policy you describe. It can also prepare " +
+      "changes — the roster period, adding, editing, switching off or deleting staffing " +
+      "requirements, shift sequence rules and shift count rules, deleting any rule, moving " +
+      "leave, and adding new shifts and shift groups — which you review and apply yourself. " +
+      "It cannot change the roster on its own, it cannot yet create pairing or supervision " +
+      "rules, and it cannot edit or delete existing shifts. It is not a source of " +
+      "employment, legal or clinical-safety authority.",
     concepts: ["assistant", "chat", "read-only", "suggestion", "apply", "limits"],
     modes: BOTH_MODES,
     featureGates: ["aiAssistant"],
