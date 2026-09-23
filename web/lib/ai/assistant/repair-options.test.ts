@@ -755,6 +755,30 @@ describe("review fixes (2026-09-24)", () => {
     expect(rank(two).map((o) => o.repairId)).not.toContain("soften_hard_request");
   });
 
+  it("books a borrowed nurse only on the short dates, off on every day between them", () => {
+    const state = ward({
+      staff: people("ana", "ben", "cara"),
+      cardsByKind: cards({
+        requirements: [
+          requirement("day", "D", 1),
+          requirement("night", "N", 1, {
+            date: ["2026-11-01", "2026-11-03", "2026-11-04", "2026-11-05", "2026-11-07"],
+          }),
+          requirement("night-busy", "N", 3, { date: ["2026-11-02", "2026-11-06"] }),
+        ],
+      }),
+    });
+    const borrow = rank(state).find((o) => o.repairId === "borrow_temporary_nurse");
+    const off = borrow?.operations.filter((op) => op.type === "set_off_request");
+    expect(off?.map((op) => [op.startDate, op.endDate])).toEqual([
+      ["2026-11-01", "2026-11-01"],
+      ["2026-11-03", "2026-11-05"],
+      ["2026-11-07", "2026-11-07"],
+    ]);
+    expect(borrow?.title).toMatch(/Nov 2, 2026 and .*Nov 6, 2026$/);
+    expect(borrow?.confirmationQuestion).toMatch(/Nov 2, 2026 and .*Nov 6, 2026\?$/);
+  });
+
   it("offers no borrow when the gap is above MAX_BORROWED", () => {
     const state = ward({
       staff: people("ana"),

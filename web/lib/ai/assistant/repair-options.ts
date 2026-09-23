@@ -507,12 +507,10 @@ const borrowTemporaryNurse: Builder = (ctx, all) => {
   const narrowed = narrowedCounts(ctx, group);
   if (narrowed === null) return null;
 
-  // A loan is one block: from the first to the last short date, or the whole period.
-  const ids = ctx.items.map((i) => i.id);
+  // She is here on the short dates only (or the whole period) and must be off on every
+  // other date: a free day between two short dates would be a hire the caps no longer bind.
   const short = shortDates(ctx, dated);
-  const loanIds = short.length
-    ? ids.slice(ids.indexOf(short[0]), ids.indexOf(short[short.length - 1]) + 1)
-    : ids;
+  const loanIds = short.length ? short : ctx.items.map((i) => i.id);
   const offRuns = runsOf(ctx, (id) => (loanIds.includes(id) ? null : "off"));
   // On a date short on ONE shift, pin that shift, but only as many nurses as it is short
   // (counts are exact). A hard sequence rule she would inherit could clash with the pins.
@@ -553,10 +551,14 @@ const borrowTemporaryNurse: Builder = (ctx, all) => {
   operations.push(...narrowed);
   if (operations.length > MAX_ASSISTANT_OPERATIONS) return null;
 
-  const first = loanIds[0];
-  const last = loanIds[loanIds.length - 1];
-  const when =
-    first === last ? dateLabel(ctx, first) : `${dateLabel(ctx, first)} to ${dateLabel(ctx, last)}`;
+  const labels = loanIds.map((id) => dateLabel(ctx, id));
+  const when = !short.length
+    ? `${labels[0]} to ${labels[labels.length - 1]}`
+    : labels.length === 1
+      ? labels[0]
+      : labels.length <= 3
+        ? `${labels.slice(0, -1).join("; ")} and ${labels[labels.length - 1]}`
+        : `${labels.length} days from ${labels[0]} to ${labels[labels.length - 1]}`;
   const who = count === 1 ? "a nurse" : `${count} nurses`;
   const skill = group ? `, qualified as ${group}` : "";
   return makeOption("borrow_temporary_nurse", {
