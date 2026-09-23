@@ -29,6 +29,14 @@ them and so should any support answer:
   depends on a real-world agreement (“if Ana agrees to move her leave”), you confirm
   that agreement explicitly for that exact proposal before Apply becomes available.
 
+**Product decision (2026-09-23).** The assistant may propose anything the UI can do;
+every change goes through Preview and the user's Apply. Phase 1 limits (no solver
+runs, no roster edits, the fixed operation list) are to be lifted one operation
+family at a time; the locked-scope tests (`web/lib/ai/phase-2-absence.test.ts`)
+change with each family. The instruction sent with every turn tells the model to
+use `prepare_scenario_change` for supported changes rather than refuse, and never
+to claim a change was made before the user applies it.
+
 ## Turning it on
 
 1. Open **Settings → AI assistant**. While AI is off this card is the *only* place

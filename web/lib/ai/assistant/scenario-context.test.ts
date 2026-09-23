@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { createEmptyScenarioUiState, type ScenarioUiState } from "@/lib/scenario";
 import {
-  READ_ONLY_AUTHORITY_STATEMENT,
+  ASSISTANT_AUTHORITY_STATEMENT,
   buildAssistantContext,
   stringifyScenario,
   summarizeScenario,
@@ -59,12 +59,19 @@ describe("the attached turn context", () => {
 
   it("is exactly the authority statement, the document, and the current screen", () => {
     expect(context).toHaveLength(3);
-    expect(context[0].description).toBe(READ_ONLY_AUTHORITY_STATEMENT);
+    expect(context[0].description).toBe(ASSISTANT_AUTHORITY_STATEMENT);
   });
 
-  it("tells the model plainly that it cannot change anything", () => {
-    expect(READ_ONLY_AUTHORITY_STATEMENT).toMatch(/CANNOT change it/);
-    expect(READ_ONLY_AUTHORITY_STATEMENT).toMatch(/Never claim to have applied/);
+  it("tells the model to propose supported changes via Preview, never to apply them itself", () => {
+    // Regression: the old read-only text denied the propose-then-Apply path, so
+    // the model refused changes prepare_scenario_change supports.
+    expect(ASSISTANT_AUTHORITY_STATEMENT).not.toMatch(/no tool that edits/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/prepare_scenario_change/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/Preview/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/user .*Apply/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/instead of refusing/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/open_app_screen/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/Never claim .*applied/);
   });
 
   it("carries the route and the exact revision the document was read at", () => {
