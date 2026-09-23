@@ -230,6 +230,9 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
   }),
 ]);
 
+/** The most operations one change may hold. Also stated to the model, in its tool description -- see `use-proposal-tools.ts`. */
+export const MAX_ASSISTANT_OPERATIONS = 25;
+
 /**
  * A coherent batch — the unit the user reviews and applies.
  *
@@ -239,7 +242,7 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
 export const assistantCommandListSchema = z
   .array(assistantCommandSchema)
   .min(1, "a change must contain at least one operation")
-  .max(25, "that is too many operations for one reviewable change");
+  .max(MAX_ASSISTANT_OPERATIONS, "that is too many operations for one reviewable change");
 
 /** Parse an untrusted payload into typed commands, or report why it is not one. */
 export function parseAssistantCommands(

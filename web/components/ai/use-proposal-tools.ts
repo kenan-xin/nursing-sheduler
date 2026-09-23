@@ -21,7 +21,11 @@
 
 import { useModelVisibleTool } from "./register-model-visible-tool";
 import { z } from "zod";
-import { assistantCommandListSchema, type AssistantCommandV1 } from "@/lib/proposal";
+import {
+  MAX_ASSISTANT_OPERATIONS,
+  assistantCommandListSchema,
+  type AssistantCommandV1,
+} from "@/lib/proposal";
 import { capabilityRegistryStamp } from "@/lib/capability/registry";
 import { assistantProposalCommands } from "@/lib/store";
 import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
@@ -93,7 +97,9 @@ export function useProposalTools(agentId: string, turnEpoch: number): void {
         "and shows the user a preview with an Apply button only they can press. " +
         "Use it when the user has asked for a specific change and you know the exact " +
         "records and values. If anything is ambiguous, ask first — never guess a date, " +
-        "a number of people, or which rule they mean.",
+        "a number of people, or which rule they mean. " +
+        `At most ${MAX_ASSISTANT_OPERATIONS} operations per change — split a larger setup ` +
+        "into several changes.",
       parameters: prepareParameters,
       handler: async (args, context) => {
         // The token captured at entry, demanded again after the durable preparation below.

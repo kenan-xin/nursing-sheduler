@@ -46,6 +46,7 @@ import { bindTurnForTest, type TestTurnHandle } from "./turn-authority.test-supp
 
 interface CapturedTool {
   name: string;
+  description: string;
   parameters: unknown;
   handler: (args: unknown, context: { signal?: AbortSignal }) => Promise<unknown>;
 }
@@ -172,6 +173,16 @@ describe("the model's arguments, at the shipped tool boundary", () => {
     expect(authority.ownership).toBe("owner");
     // And the tool the model would be offered actually exists.
     expect(proposalTool().name).toBe("prepare_scenario_change");
+  });
+
+  it("tells the model the operations cap, so it splits a large setup instead of guessing why it was refused", async () => {
+    // The schema enforces MAX_ASSISTANT_OPERATIONS silently; the model only ever sees
+    // the refusal after the fact unless the tool's own description says the number up
+    // front. Referencing the real constant, not a copied digit, is what keeps this from
+    // drifting the moment the cap changes.
+    await mount();
+    const { MAX_ASSISTANT_OPERATIONS } = await import("@/lib/proposal");
+    expect(proposalTool().description).toContain(`${MAX_ASSISTANT_OPERATIONS} operations`);
   });
 
   it("prepares a real Preview from the exact live request, with evidence omitted", async () => {

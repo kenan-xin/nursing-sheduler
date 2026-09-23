@@ -12,6 +12,7 @@
 export {
   ASSISTANT_COMMAND_SCHEMA_VERSION,
   ASSISTANT_COMMAND_TYPES,
+  MAX_ASSISTANT_OPERATIONS,
   RULE_KINDS,
   assistantCommandListSchema,
   assistantCommandSchema,
