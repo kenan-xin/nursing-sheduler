@@ -33,11 +33,14 @@ import type { PrepareOptimizeSubmissionResult } from "@/lib/scenario";
 import {
   createOptimizeObservability,
   OPTIMIZE_SESSION_STORAGE_KEY,
+  requestOptimizeRun,
   resetRosterCaptureGate,
+  useRunRequestStore,
   type CleanupCallOutcome,
   type OptimizeBasisStore,
   type SessionCaptureState,
   type SessionTransactionStorage,
+  type UseOptimizeServerInfoDeps,
 } from "@/lib/optimize";
 import { OptimizeAndExportScreen } from "./optimize-and-export-screen";
 
@@ -764,6 +767,79 @@ describe("OptimizeAndExportScreen — G4 dedicated /roster route", () => {
     expect(screen.queryByTestId("optimize-open-roster")).not.toBeInTheDocument();
   });
 });
+describe("OptimizeAndExportScreen — assistant run request", () => {
+  beforeEach(() => {
+    useRunRequestStore.setState({ pending: null, last: null });
+  });
+
+  /** Routes the run's traffic and counts POSTs, the one fact these cases assert. */
+  function countPosts(): () => number {
+    let posts = 0;
+    routeFetch((u, init) => {
+      const method = init?.method ?? "GET";
+      if (u.endsWith("/api/optimize") && method === "POST") {
+        posts += 1;
+        return json(202, baseJob());
+      }
+      if (u.endsWith("/events")) return streamResponse(": keepalive\n\n");
+      // Unmount abandons a live run, and retirement cancels it.
+      if (u.endsWith("/cancel")) return json(200, baseJob({ state: "cancelled", terminal: true }));
+      if (/\/api\/optimize\/[^/]+$/.test(u)) return json(200, baseJob({ state: "running" }));
+      throw new Error(`unexpected request: ${u}`);
+    });
+    return () => posts;
+  }
+
+  function renderScreen(serverInfoDeps: UseOptimizeServerInfoDeps = onlineInfo()) {
+    render(
+      <OptimizeAndExportScreen
+        serverInfoDeps={serverInfoDeps}
+        controllerDeps={{
+          prepare: () => okPrep,
+          stageSnapshot: degradedCapture,
+          storage: memStorage(),
+        }}
+      />,
+      { wrapper },
+    );
+  }
+
+  it("starts the run through the Optimize path when the assistant card asks", async () => {
+    await readyStore();
+    const posts = countPosts();
+    requestOptimizeRun();
+    renderScreen();
+
+    await waitFor(() => expect(posts()).toBe(1));
+    expect(useRunRequestStore.getState()).toEqual({ pending: null, last: "started" });
+  });
+
+  it("reports not-ready and posts nothing when set-up is missing", async () => {
+    const posts = countPosts();
+    requestOptimizeRun();
+    renderScreen();
+
+    await waitFor(() => expect(useRunRequestStore.getState().last).toBe("not-ready"));
+    expect(posts()).toBe(0);
+  });
+
+  it("reports backend-offline and posts nothing when the backend is down", async () => {
+    await readyStore();
+    const posts = countPosts();
+    requestOptimizeRun();
+    renderScreen({
+      fetchInfo: async () => ({
+        status: 502,
+        body: { status: "unavailable", reason: "backend_unreachable" },
+      }),
+      clientVersion: "1.0.0",
+    });
+
+    await waitFor(() => expect(useRunRequestStore.getState().last).toBe("backend-offline"));
+    expect(posts()).toBe(0);
+  });
+});
+
 describe("the submission basis is claimed from the live backend semantic profile", () => {
   // THE DEFECT THIS PINS. `buildSubmitInput` assembled `{document, anonymize, prettify,
   // timeout}` and stopped there. `semanticProfile` is an OPTIONAL field on

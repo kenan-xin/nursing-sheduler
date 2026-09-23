@@ -47,12 +47,15 @@ import {
   isActiveLifecycle,
   isSettledLifecycle,
   migrateLegacySession,
+  reportOptimizeRunRequest,
   retireAbandonedRun,
   retireOnDocumentExit,
+  takeOptimizeRunRequest,
   useOptimizeRun,
   useOptimizeServerInfo,
   useOptimizeTerminal,
   useRosterCapture,
+  useRunRequestStore,
   type AttemptRegistry,
   type OptimizeObservability,
   type RetireAbandonedRunDeps,
@@ -608,6 +611,31 @@ export function OptimizeAndExportScreen({
     : serverInfo.status !== "online"
       ? "Backend unavailable. Check that the configured backend is running."
       : null;
+
+  // ASSISTANT RUN REQUEST. The assistant's confirm card asks for exactly the run the
+  // Optimize button starts, so this calls the SAME `onSubmit`: options, lease
+  // preflight, basis, capture, download and cleanup are the button's, not a copy.
+  // It waits while the backend check is still `checking`; the request itself
+  // expires (`run-request.ts`), so a late mount never starts a surprise run.
+  const runRequested = useRunRequestStore((state) => state.pending !== null);
+  useEffect(() => {
+    if (!runRequested || serverInfo.status === "checking") return;
+    if (!takeOptimizeRunRequest()) return;
+    if (!readiness.ready) {
+      reportOptimizeRunRequest("not-ready");
+      return;
+    }
+    if (serverInfo.status !== "online") {
+      reportOptimizeRunRequest("backend-offline");
+      return;
+    }
+    if (submitInFlight) {
+      reportOptimizeRunRequest("busy");
+      return;
+    }
+    reportOptimizeRunRequest("started");
+    void onSubmit();
+  }, [runRequested, serverInfo.status, readiness.ready, submitInFlight, onSubmit]);
 
   return (
     <Surface
