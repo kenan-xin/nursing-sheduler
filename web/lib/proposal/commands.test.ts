@@ -39,10 +39,10 @@ describe("the rule arms' text states what the solver enforces", () => {
     expect(help?.nurseFacingSummary).toContain("nobody else may work");
   });
 
-  it("points skill mix at the app's reserved-twin idiom, not at a ban on the shift", () => {
-    expect(arm("add_staffing_requirement").qualifiedPeople.description).toContain("reserved twin");
+  it("is honest that skill-mix ('at least k from a group') is not expressible here", () => {
+    expect(arm("add_staffing_requirement").qualifiedPeople.description).toContain("skill-mix");
     const help = CAPABILITY_ENTRIES.find((entry) => entry.id === "staffing-requirements");
-    expect(help?.nurseFacingSummary).toContain("reserved twin");
+    expect(help?.nurseFacingSummary).toContain("skill-mix");
   });
 
   it("a count's weight rewards the expression holding", () => {

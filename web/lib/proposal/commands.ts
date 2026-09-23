@@ -388,11 +388,9 @@ function requirementFields() {
       .array(refSchema)
       .describe(
         "Only these people may work this shift; everyone else is banned from it (a hard " +
-          'rule). Person ids or staff group ids, or ["ALL"] for no restriction. For skill ' +
-          'mix such as "at least 2 RNs on every night", never put the group on the Night ' +
-          "requirement itself: add a reserved twin shift (e.g. Night+, same hours) in the " +
-          "same change and give THE TWIN a requirement of 2 for RNs; Night stays open to " +
-          "anyone, RNs included.",
+          'rule). Person ids or staff group ids, or ["ALL"] for no restriction. Cannot ' +
+          "express group skill-mix rules (e.g. a minimum count of RNs on a shift with " +
+          "others allowed too); tell the user and point them to the Rules screen.",
       ),
     dates: ruleDatesSchema(),
     requiredNumPeople: z

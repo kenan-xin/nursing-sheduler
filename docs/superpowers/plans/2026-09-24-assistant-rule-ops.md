@@ -12,8 +12,7 @@
 
 - "no day shift straight after a night shift" → `add_succession_rule` (Task 2)
 - "at most 5 night shifts per nurse per month" → `add_count_rule` (Task 3)
-- "at least 2 RNs on every night shift" → `add_staffing_requirement` (Task 4)
-- "every day needs at least one senior nurse on" → `add_staffing_requirement` over a shift group that covers every worked shift (Task 4). This is **not** a covering: in this app a covering is supervision (preceptors with preceptees, see `help-content.ts` `shift-type-coverings`). A requirement over a group is one sum over all its shifts per date (`requirementEquationGroups` in `requirements-model.ts`). "At least 1 Senior on {Day + Night} each date" is therefore exactly this sentence.
+- "at least 2 RNs on every night shift" and "every day needs at least one senior nurse on" are "at least k from a group" skill-mix rules. A single `add_staffing_requirement` does NOT express them (`qualifiedPeople` bans everyone outside the named group from the shift, rather than reserving k slots within a larger shift); see follow-up bead for skill mix (nursing-sheduler-2ti).
 - `"Ana and Ben should not work the same night"` → affinity. **Out of scope** here. It goes to the follow-up plan (see Follow-ups).
 
 **Scope decision:** Five families take more than 8 tasks, so this plan covers staffing requirements, successions and counts for create and edit. Those are the three that the brief's examples use most and that `help-content.ts` names as the main rule records. Remove is here for **all five** families, because the UI's delete is the same filter-by-uid in every editor (`current.filter((card) => card.uid !== uid)` in each `use-*.ts`). One arm for all five kinds costs one function. Affinities and coverings, create and edit, are the follow-up plan `2026-09-2x-assistant-rule-ops-affinities-coverings`.

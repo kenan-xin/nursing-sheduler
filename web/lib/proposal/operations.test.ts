@@ -960,9 +960,8 @@ describe("add_count_rule / edit_count_rule", () => {
 
 describe("add_staffing_requirement / edit_staffing_requirement", () => {
   // A requirement is an EXACT head count (a range only with a preferred count), and
-  // qualifiedPeople bans everyone outside it from the shift. So skill mix ("at least 2
-  // RNs on every night") is not one requirement on Night: the app's idiom is a reserved
-  // twin shift with its own requirement (core/tests/testcases/real/ward-8-*.yaml).
+  // qualifiedPeople bans everyone outside it from the shift. "At least k from a group"
+  // skill-mix rules are not expressible through this arm (see nursing-sheduler-2ti).
   const twoRNs = {
     type: "add_staffing_requirement" as const,
     description: "Exactly 2 nurses on every night shift, RNs only",
@@ -1002,55 +1001,6 @@ describe("add_staffing_requirement / edit_staffing_requirement", () => {
       // No preferred count: the screen stamps the inert weight -1.
       weight: -1,
     });
-  });
-
-  const twin = (code: string, startTime: string, endTime: string) => ({
-    type: "add_shift_type" as const,
-    code,
-    name: `${code} (reserved slot)`,
-    startTime,
-    endTime,
-    restMinutes: 0,
-  });
-
-  it("expresses 'at least 2 RNs on every night shift' as a reserved RN twin of Night", () => {
-    const result = applyAssistantCommands(ruleWardScenario(), [
-      twin("Night+", "20:00", "08:00"),
-      { ...twoRNs, description: "At least 2 RNs on every night shift", shiftType: "Night+" },
-    ]);
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.next.shifts.at(-1)?.id).toBe("Night+");
-    expect(result.next.cardsByKind.requirements.at(-1)).toMatchObject({
-      shiftType: ["Night+"],
-      qualifiedPeople: ["RN"],
-      requiredNumPeople: 2,
-    });
-    // Only the twin is reserved: plain Night stays open to anyone, RNs included.
-    expect(result.next.cardsByKind.requirements.slice(0, -1)).toEqual(
-      ruleWardScenario().cardsByKind.requirements,
-    );
-  });
-
-  it("expresses 'every day needs at least one senior nurse on' as one senior slot a day", () => {
-    const result = applyAssistantCommands(ruleWardScenario(), [
-      twin("Day+", "08:00", "20:00"),
-      twin("Night+", "20:00", "08:00"),
-      { type: "add_shift_group", groupId: "Senior slots", members: ["Day+", "Night+"] },
-      {
-        ...seniorEveryDay,
-        description: "Every day needs at least one senior nurse on",
-        shiftType: "Senior slots",
-      },
-    ]);
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.next.cardsByKind.requirements.at(-1)).toMatchObject({
-        shiftType: ["Senior slots"],
-        qualifiedPeople: ["Senior"],
-        requiredNumPeople: 1,
-      });
-    }
   });
 
   it("a shift group is one combined count per date over all its shifts", () => {
