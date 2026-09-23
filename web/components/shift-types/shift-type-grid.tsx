@@ -1003,7 +1003,10 @@ function ShiftCardEditor({
 
   const setCode = (code: string) => {
     setSaveError(null);
-    setDraft((d) => ({ ...d, code }));
+    // A shift code is always stored uppercase, matching the input's own
+    // `uppercase` display styling — before this, that styling was a visual
+    // illusion with no effect on the actual saved id.
+    setDraft((d) => ({ ...d, code: code.toUpperCase() }));
   };
   const setName = (name: string) => {
     setSaveError(null);

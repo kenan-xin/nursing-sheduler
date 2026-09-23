@@ -121,8 +121,9 @@ describe("ShiftTypeGrid — add + working-time reuse", () => {
 
     fireEvent.click(screen.getByTestId("shift-add-save"));
 
-    expect((await shifts()).find((s) => s.id === "Day")).toMatchObject({
-      id: "Day",
+    // The code input now stores its value uppercase, so typing "Day" saves as "DAY".
+    expect((await shifts()).find((s) => s.id === "DAY")).toMatchObject({
+      id: "DAY",
       description: "Day shift",
       startTime: "08:00",
       endTime: "16:00",
@@ -472,7 +473,10 @@ describe("ShiftTypeGrid — atomic staffing save", () => {
   });
 
   it("surfaces validation and rename-collision failures on-card with zero writes", async () => {
-    await seed({ shifts: [{ id: "Day" }, { id: "Night" }], shiftGroups: [] });
+    // The second id is seeded uppercase ("NIGHT") so that typing any case below,
+    // once the code input's own uppercase transform runs, exactly collides with
+    // it — exact-identity duplicate detection (validation.ts) never case-folds.
+    await seed({ shifts: [{ id: "Day" }, { id: "NIGHT" }], shiftGroups: [] });
     await seedRequirements([requirement()]);
     render(<ShiftTypeGrid />);
 

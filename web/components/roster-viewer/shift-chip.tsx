@@ -70,7 +70,7 @@ export function ShiftChip({ day, ramp }: ShiftChipProps) {
     return (
       <span
         className={cn(
-          "inline-flex items-center justify-center font-mono text-meta font-medium text-ink3",
+          "inline-flex items-center justify-center font-mono text-[11px] font-medium text-ink3",
         )}
         style={style}
         aria-label="Off"
@@ -85,7 +85,7 @@ export function ShiftChip({ day, ramp }: ShiftChipProps) {
     return (
       <span
         className={cn(
-          "inline-flex items-center justify-center rounded-chip bg-panel font-mono text-meta font-bold text-ink3",
+          "inline-flex items-center justify-center rounded-chip bg-panel font-mono text-[11px] font-medium text-ink3",
         )}
         style={style}
         aria-label="Leave"
@@ -106,7 +106,7 @@ export function ShiftChip({ day, ramp }: ShiftChipProps) {
       // A stable, content-independent hook for tests that need to find a chip
       // by its exact authored id, kept alongside the (now bare-id) aria-label.
       data-shift-id={String(day.shiftId)}
-      className="inline-flex items-center justify-center rounded-chip font-mono text-meta font-bold"
+      className="inline-flex items-center justify-center rounded-chip font-mono text-[11px] font-medium uppercase"
       style={{ ...style, backgroundColor: entry.fill, color: entry.ink }}
       aria-label={String(day.shiftId)}
     >

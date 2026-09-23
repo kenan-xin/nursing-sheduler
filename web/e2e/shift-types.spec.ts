@@ -273,9 +273,11 @@ test.describe.serial("DR-3 Shifts card-grid", () => {
     await expect(page.getByTestId("shift-add-duration")).toContainText("8h");
     await page.getByTestId("shift-add-save").click();
 
-    await expect(page.getByTestId(`shift-card-${sk("Day")}`)).toBeVisible();
-    expect((await readShifts(page)).find((s) => s.id === "Day")).toMatchObject({
-      id: "Day",
+    // The Code input canonicalises to uppercase, so the lowercase fill above saves as DAY.
+    // The mixed-case fill is deliberate — it is what proves the canonicalisation happened.
+    await expect(page.getByTestId(`shift-card-${sk("DAY")}`)).toBeVisible();
+    expect((await readShifts(page)).find((s) => s.id === "DAY")).toMatchObject({
+      id: "DAY",
       startTime: "08:00",
       endTime: "16:00",
       durationMinutes: 480,
@@ -380,9 +382,11 @@ test.describe.serial("DR-3 Shifts card-grid", () => {
     await page.getByTestId("shift-add-preferred").fill("3");
     await page.getByTestId("shift-add-save").click();
 
-    await expect(page.getByTestId(`staffing-min-${sk("Day")}`)).toHaveText("2");
+    // Canonicalised to DAY on save (see the add journey above), so the shared rule the
+    // card creates carries the uppercase id too.
+    await expect(page.getByTestId(`staffing-min-${sk("DAY")}`)).toHaveText("2");
     expect((await readRequirements(page))[0]).toMatchObject({
-      shiftType: ["Day"],
+      shiftType: ["DAY"],
       qualifiedPeople: ["ALL"],
       date: ["ALL"],
       requiredNumPeople: 2,
@@ -391,14 +395,14 @@ test.describe.serial("DR-3 Shifts card-grid", () => {
     });
 
     const before = await readHistoryLength(page);
-    await page.getByTestId(`shift-edit-${sk("Day")}`).click();
-    await page.getByTestId(`shift-edit-${sk("Day")}-code`).fill("AM");
-    await page.getByTestId(`shift-edit-${sk("Day")}-required`).fill("4");
-    await page.getByTestId(`shift-edit-${sk("Day")}-preferred`).fill("4");
-    await expect(page.getByTestId(`shift-edit-${sk("Day")}-preferred-collapse`)).toContainText(
+    await page.getByTestId(`shift-edit-${sk("DAY")}`).click();
+    await page.getByTestId(`shift-edit-${sk("DAY")}-code`).fill("AM");
+    await page.getByTestId(`shift-edit-${sk("DAY")}-required`).fill("4");
+    await page.getByTestId(`shift-edit-${sk("DAY")}-preferred`).fill("4");
+    await expect(page.getByTestId(`shift-edit-${sk("DAY")}-preferred-collapse`)).toContainText(
       "weight reset from -50 to -1",
     );
-    await page.getByTestId(`shift-edit-${sk("Day")}-save`).click();
+    await page.getByTestId(`shift-edit-${sk("DAY")}-save`).click();
 
     expect(await readHistoryLength(page)).toBe(before + 1);
     expect((await readShifts(page)).map((shift) => shift.id)).toEqual(["AM"]);
