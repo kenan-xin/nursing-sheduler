@@ -297,6 +297,33 @@ describe("the command arms the provider is actually shown", () => {
         restMinutes: 60,
       },
       add_shift_group: { type: "add_shift_group", groupId: "Night shifts", members: ["N"] },
+      add_leave: {
+        type: "add_leave",
+        personId: "Ana",
+        startDate: "2026-10-10",
+        endDate: "2026-10-16",
+      },
+      set_off_request: {
+        type: "set_off_request",
+        personId: 7,
+        startDate: "2026-10-21",
+        endDate: "2026-10-21",
+        weight: 5,
+      },
+      set_shift_request: {
+        type: "set_shift_request",
+        personId: "Ben",
+        shiftType: "N",
+        startDate: "2026-10-19",
+        endDate: "2026-10-25",
+        weight: "never",
+      },
+      clear_requests: {
+        type: "clear_requests",
+        personId: "Ana",
+        startDate: "2026-10-14",
+        endDate: "2026-10-14",
+      },
     };
     expect(Object.keys(representative).sort()).toEqual([...ASSISTANT_COMMAND_TYPES].sort());
 
