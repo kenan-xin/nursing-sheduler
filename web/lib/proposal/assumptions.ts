@@ -75,6 +75,35 @@ function leavePins(state: ScenarioUiState): Map<string, UiRequestCell> {
 }
 
 /**
+ * Where each person or staff group a batch renames ends up, keyed as leave pins key a
+ * person. A rename cascade re-labels leave -- it does not cancel it -- so without this
+ * a plain rename would ask "has ana agreed to give up their leave". Same "changed text"
+ * rule as the Staff screen (`edit_person` / `edit_people_group` in `operations.ts`).
+ */
+function finalNames(commands: readonly AssistantCommandV1[]): (personKey: string) => string {
+  const step = new Map<string, string>();
+  for (const command of commands) {
+    if (command.type === "edit_person" && command.name !== String(command.personId)) {
+      step.set(stableStringify(command.personId), stableStringify(command.name.trim()));
+    }
+    if (command.type === "edit_people_group" && command.newGroupId !== command.groupId) {
+      step.set(stableStringify(command.groupId), stableStringify(command.newGroupId.trim()));
+    }
+  }
+  // ponytail: follows chains (a -> b -> c) but not a batch that reuses a freed name for
+  // someone else; such a batch may ask one extra, answerable question.
+  return (personKey) => {
+    let current = personKey;
+    for (let hops = 0; hops < step.size; hops += 1) {
+      const next = step.get(current);
+      if (next === undefined) break;
+      current = next;
+    }
+    return current;
+  };
+}
+
+/**
  * Every operational assumption this change carries.
  *
  * Both arguments are HOST documents -- the validated before and after -- because the
@@ -111,8 +140,10 @@ export function deriveAssumptions(
   // pin does not disappear, it relocates, and asking twice about one agreement would
   // read as two separate commitments.
   const surviving = leavePins(after);
+  const renamedTo = finalNames(commands);
   for (const [key, cell] of leavePins(before)) {
-    if (claimed.has(key) || surviving.has(key)) continue;
+    const followed = `${renamedTo(stableStringify(cell.person))}|${stableStringify(cell.date)}`;
+    if (claimed.has(key) || surviving.has(key) || surviving.has(followed)) continue;
     const person = ref(cell.person);
     const date = ref(cell.date);
     assumptions.push({

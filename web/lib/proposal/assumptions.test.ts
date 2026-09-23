@@ -14,7 +14,7 @@ import {
   type OperationalConfirmationV1,
 } from "./assumptions";
 import { applyAssistantCommands } from "./operations";
-import { octoberWard, proposalScenario } from "./test-support";
+import { octoberWard, peopleScenario, proposalScenario } from "./test-support";
 
 function assumptionsFor(commands: Parameters<typeof applyAssistantCommands>[1]) {
   const before = proposalScenario();
@@ -190,5 +190,53 @@ describe("leave and request arms", () => {
         { type: "clear_requests", personId: "Ben", startDate: "2026-10-21", endDate: "2026-10-22" },
       ]),
     ).toEqual([]);
+  });
+});
+
+describe("deriveAssumptions and the Staff-screen arms", () => {
+  function peopleAssumptions(commands: Parameters<typeof applyAssistantCommands>[1]) {
+    const before = peopleScenario();
+    const applied = applyAssistantCommands(before, commands);
+    if (!applied.ok) throw new Error(`fixture refused: ${applied.rejection.message}`);
+    return deriveAssumptions(before, applied.next, commands);
+  }
+
+  it("a rename relabels leave; it does not ask about giving it up", () => {
+    expect(
+      peopleAssumptions([
+        { type: "edit_person", personId: "ana", name: "Ana Lim", groups: ["RN"] },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("a rename chain inside one batch still asks nothing", () => {
+    expect(
+      peopleAssumptions([
+        { type: "edit_person", personId: "ana", name: "Ana Lim", groups: ["RN"] },
+        { type: "edit_person", personId: "Ana Lim", name: "Ana L.", groups: ["RN"] },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("removing a person asks about each leave day", () => {
+    const assumptions = peopleAssumptions([{ type: "remove_person", personId: "ana" }]);
+    expect(assumptions.map((a) => [a.type, a.person, a.date])).toEqual([
+      ["leave_cancelled", "ana", "02"],
+    ]);
+  });
+
+  it("marking a person off over their leave asks about it", () => {
+    const assumptions = peopleAssumptions([
+      {
+        type: "set_off_request",
+        personId: "ana",
+        startDate: "2026-10-02",
+        endDate: "2026-10-02",
+        weight: "must",
+      },
+    ]);
+    expect(assumptions.map((a) => [a.type, a.person, a.date])).toEqual([
+      ["leave_cancelled", "ana", "02"],
+    ]);
   });
 });

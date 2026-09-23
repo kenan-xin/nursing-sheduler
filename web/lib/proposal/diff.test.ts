@@ -369,50 +369,194 @@ describe("deriveProposalDiff", () => {
     expect(diff.needsReview).toEqual([]);
   });
 
-  it("shows the borrowed-nurse batch (add_person + set_off_request) as one direct change", () => {
+  it("shows a borrowed nurse as a person, a group change and two runs of days off", () => {
     // The new person's id (their trimmed name) is usable by a later command in the
-    // SAME batch -- the Preview must show both the new staff row and every day-off
-    // cell as direct (asked-for), never as a cascade the person didn't request.
+    // SAME batch; every entry is direct (asked-for), never a cascade.
     const before = peopleScenario();
     const float = "Float RN (Ward 5)";
+    const offRun = (startDate: string, endDate: string) => ({
+      type: "set_off_request" as const,
+      personId: float,
+      startDate,
+      endDate,
+      weight: "must" as const,
+    });
     const commands = [
       { type: "add_person" as const, name: float, groups: ["RN"] },
+      offRun("2026-10-01", "2026-10-11"),
+      offRun("2026-10-15", "2026-10-31"),
+    ];
+    const applied = applyAssistantCommands(before, commands);
+    if (!applied.ok) throw new Error("fixture should apply");
+    const diff = deriveProposalDiff(before, applied.next, commands);
+
+    expect(diff.direct.map((entry) => entry.key).sort()).toEqual([
+      `offrun:"${float}"|2026-10-01|2026-10-11`,
+      `offrun:"${float}"|2026-10-15|2026-10-31`,
+      "peoplegroup:RN",
+      `person:"${float}"`,
+    ]);
+    expect(diff.cascade).toEqual([]);
+    expect(diff.needsReview).toEqual([]);
+    const find = (key: string) => diff.direct.find((entry) => entry.key === key);
+    expect(find(`person:"${float}"`)).toMatchObject({ kind: "created", after: float });
+    expect(find("peoplegroup:RN")).toMatchObject({
+      label: "Staff group “RN”",
+      before: "ana, 7",
+      after: `ana, 7, ${float}`,
+    });
+    expect(find(`offrun:"${float}"|2026-10-01|2026-10-11`)).toMatchObject({
+      scope: "leave-and-requests",
+      label: `${float}: must be off`,
+      after: "11 days, 2026-10-01 to 2026-10-11",
+      kind: "created",
+    });
+    expect(find(`offrun:"${float}"|2026-10-15|2026-10-31`)?.after).toBe(
+      "17 days, 2026-10-15 to 2026-10-31",
+    );
+    expect(diff.capabilityIds).toEqual(
+      expect.arrayContaining(["staff-list", "leave-and-requests"]),
+    );
+  });
+
+  it("does not collapse a one-day must-be-off, or a run of softer requests", () => {
+    const before = peopleScenario();
+    const commands = [
       {
         type: "set_off_request" as const,
-        personId: float,
-        startDate: "2026-10-01",
-        endDate: "2026-10-11",
+        personId: 7,
+        startDate: "2026-10-04",
+        endDate: "2026-10-04",
         weight: "must" as const,
       },
       {
         type: "set_off_request" as const,
-        personId: float,
-        startDate: "2026-10-15",
-        endDate: "2026-10-31",
+        personId: 7,
+        startDate: "2026-10-10",
+        endDate: "2026-10-12",
+        weight: 3,
+      },
+    ];
+    const applied = applyAssistantCommands(before, commands);
+    if (!applied.ok) throw new Error("fixture should apply");
+    const diff = deriveProposalDiff(before, applied.next, commands);
+
+    expect(diff.direct.map((entry) => entry.key).sort()).toEqual([
+      'cell:7|"04"',
+      'cell:7|"10"',
+      'cell:7|"11"',
+      'cell:7|"12"',
+    ]);
+  });
+
+  it("shows a rename as one renamed entry, with the groups it touched", () => {
+    const before = peopleScenario();
+    const commands = [
+      { type: "edit_person" as const, personId: "ana", name: "Ana Lim", groups: ["RN"] },
+    ];
+    const applied = applyAssistantCommands(before, commands);
+    if (!applied.ok) throw new Error("fixture should apply");
+    const diff = deriveProposalDiff(before, applied.next, commands);
+
+    expect(diff.direct.find((entry) => entry.key === 'person:"ana"')).toBeUndefined();
+    expect(diff.direct.find((entry) => entry.key === 'person:"Ana Lim"')).toMatchObject({
+      label: "Renamed “ana” to “Ana Lim”",
+      before: "ana",
+      after: "Ana Lim",
+      kind: "changed",
+    });
+    expect(diff.direct.find((entry) => entry.key === "peoplegroup:RN")?.after).toBe("Ana Lim, 7");
+  });
+
+  it("shows a staff group rename as one renamed entry", () => {
+    const before = peopleScenario();
+    const commands = [
+      {
+        type: "edit_people_group" as const,
+        groupId: "Seniors",
+        newGroupId: "Band 6+",
+        description: "Band 6 and above",
+        members: ["bo", "ana"],
+      },
+    ];
+    const applied = applyAssistantCommands(before, commands);
+    if (!applied.ok) throw new Error("fixture should apply");
+    const diff = deriveProposalDiff(before, applied.next, commands);
+
+    expect(diff.direct.map((entry) => entry.key)).toEqual(["peoplegroup:Band 6+"]);
+    expect(diff.direct[0]).toMatchObject({
+      label: "Renamed staff group “Seniors” to “Band 6+”",
+      before: "bo · “Band 6 and above”",
+      after: "ana, bo · “Band 6 and above”",
+      kind: "changed",
+    });
+  });
+
+  it("removing a person lists what goes with them", () => {
+    const before = peopleScenario();
+    const commands = [{ type: "remove_person" as const, personId: "bo" }];
+    const applied = applyAssistantCommands(before, commands);
+    if (!applied.ok) throw new Error("fixture should apply");
+    const diff = deriveProposalDiff(before, applied.next, commands);
+
+    expect(diff.direct.map((entry) => entry.key)).toEqual(['person:"bo"']);
+    expect(diff.cascade.map((entry) => entry.key).sort()).toEqual([
+      'cell:"bo"|"29"',
+      "peoplegroup:Seniors",
+      "rule:counts:count-bo",
+    ]);
+    expect(diff.cascade.find((entry) => entry.key === "peoplegroup:Seniors")?.after).toBe(
+      "No members · “Band 6 and above”",
+    );
+    expect(diff.needsReview).toEqual(["rules", "requests"]);
+  });
+
+  it("adding and removing staff groups are direct", () => {
+    const before = peopleScenario();
+    const commands = [
+      {
+        type: "add_people_group" as const,
+        groupId: " Night team ",
+        description: "",
+        members: [7],
+      },
+      { type: "remove_people_group" as const, groupId: "Seniors" },
+    ];
+    const applied = applyAssistantCommands(before, commands);
+    if (!applied.ok) throw new Error("fixture should apply");
+    const diff = deriveProposalDiff(before, applied.next, commands);
+
+    expect(diff.direct.map((entry) => [entry.key, entry.kind]).sort()).toEqual([
+      ["peoplegroup:Night team", "created"],
+      ["peoplegroup:Seniors", "removed"],
+    ]);
+    expect(diff.direct.find((entry) => entry.key === "peoplegroup:Night team")?.after).toBe("7");
+  });
+
+  it("keeps a leave the run replaces as its own entry", () => {
+    const before = peopleScenario();
+    const commands = [
+      {
+        type: "set_off_request" as const,
+        personId: "ana",
+        startDate: "2026-10-01",
+        endDate: "2026-10-03",
         weight: "must" as const,
       },
     ];
     const applied = applyAssistantCommands(before, commands);
-    expect(applied.ok).toBe(true);
-    if (!applied.ok) return;
-
+    if (!applied.ok) throw new Error("fixture should apply");
     const diff = deriveProposalDiff(before, applied.next, commands);
-    expect(diff.cascade).toEqual([]);
 
-    const person = diff.direct.find((entry) => entry.key === `person:"${float}"`);
-    expect(person).toMatchObject({
-      scope: "staff-list",
-      kind: "created",
-      after: float,
-    });
-
-    const cellKeys = diff.direct.filter((entry) => entry.scope === "leave-and-requests");
-    expect(cellKeys).toHaveLength(28);
-    expect(cellKeys.every((entry) => entry.after === "Must have the day off")).toBe(true);
-
-    expect(diff.capabilityIds).toEqual(
-      expect.arrayContaining(["staff-list", "leave-and-requests"]),
+    expect(diff.direct.find((entry) => entry.key.startsWith("offrun:"))?.after).toBe(
+      "2 days, 2026-10-01 to 2026-10-03",
     );
+    expect(diff.direct.find((entry) => entry.key === 'cell:"ana"|"02"')).toMatchObject({
+      before: "On leave",
+      after: "Must have the day off",
+      kind: "changed",
+    });
+    expect(diff.direct).toHaveLength(2);
   });
 });
 
