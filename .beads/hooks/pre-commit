@@ -1,56 +1,83 @@
-#!/usr/bin/env sh
-# --- BEGIN BEADS INTEGRATION v1.1.0 ---
-# This section is managed by beads. Do not remove these markers.
-if command -v bd >/dev/null 2>&1; then
-  export BD_GIT_HOOK=1
-  _bd_timeout=${BEADS_HOOK_TIMEOUT:-300}
-  _bd_used_perl=0
-  if command -v timeout >/dev/null 2>&1; then
-    timeout "$_bd_timeout" bd hooks run pre-commit "$@"
-    _bd_exit=$?
-  elif command -v gtimeout >/dev/null 2>&1; then
-    gtimeout "$_bd_timeout" bd hooks run pre-commit "$@"
-    _bd_exit=$?
-  elif command -v perl >/dev/null 2>&1; then
-    _bd_used_perl=1
-    perl -e 'alarm shift; exec @ARGV' "$_bd_timeout" bd hooks run pre-commit "$@"
-    _bd_exit=$?
-  else
-    echo >&2 "beads: hook 'pre-commit' running without timeout; install coreutils or perl to enable BEADS_HOOK_TIMEOUT"
-    bd hooks run pre-commit "$@"
-    _bd_exit=$?
-  fi
-  if [ $_bd_exit -eq 124 ] || { [ $_bd_used_perl -eq 1 ] && [ $_bd_exit -eq 142 ]; }; then
-    echo >&2 "beads: hook 'pre-commit' timed out after ${_bd_timeout}s — continuing without beads"
-    _bd_exit=0
-  fi
-  if [ $_bd_exit -eq 3 ]; then
-    echo >&2 "beads: database not initialized — skipping hook 'pre-commit'"
-    _bd_exit=0
-  fi
-  if [ $_bd_exit -ne 0 ]; then exit $_bd_exit; fi
-fi
-# --- END BEADS INTEGRATION v1.1.0 ---
+#!/bin/sh
 
-# --- BEGIN LEFTHOOK (nurse-scheduler web toolchain) ---
-# Runs oxlint + oxfmt on staged web/ files (see repo-root lefthook.yml).
-# Appended after the beads-managed section above so both hooks run; beads only
-# rewrites content between its own markers, leaving this block intact.
-#
-# Fail CLOSED: if web/ code is staged but lefthook is missing (e.g. before
-# `pnpm install`), block the commit rather than skipping frontend checks. Skip
-# silently only when no matching frontend file is staged.
-_lh_staged_web=$(git diff --cached --name-only --diff-filter=ACMR 2>/dev/null \
-  | grep -E '^web/.*\.(js|jsx|ts|tsx|mjs|cjs|mts|cts|css)$' || true)
-if [ -n "$_lh_staged_web" ]; then
-  if [ -x web/node_modules/.bin/lefthook ]; then
-    web/node_modules/.bin/lefthook run pre-commit
-    _lh_exit=$?
-    if [ "$_lh_exit" -ne 0 ]; then exit "$_lh_exit"; fi
-  else
-    echo >&2 "ERROR: staged web/ code but lefthook is not installed — frontend pre-commit checks cannot run."
-    echo >&2 "       Run: cd web && pnpm install   (installs oxlint/oxfmt + lefthook)"
-    exit 1
-  fi
+if [ "$LEFTHOOK_VERBOSE" = "1" -o "$LEFTHOOK_VERBOSE" = "true" ]; then
+  set -x
 fi
-# --- END LEFTHOOK ---
+
+if [ "$LEFTHOOK" = "0" ]; then
+  exit 0
+fi
+
+call_lefthook()
+{
+  if test -n "$LEFTHOOK_BIN"
+  then
+    "$LEFTHOOK_BIN" "$@"
+  elif lefthook -h >/dev/null 2>&1
+  then
+    lefthook "$@"
+  elif /home/kenan/.local/share/mise/installs/npm-lefthook/2.1.14/node_modules/.mise/lefthook-linux-x64@2.1.14/node_modules/lefthook-linux-x64/bin/lefthook -h >/dev/null 2>&1
+  then
+    /home/kenan/.local/share/mise/installs/npm-lefthook/2.1.14/node_modules/.mise/lefthook-linux-x64@2.1.14/node_modules/lefthook-linux-x64/bin/lefthook "$@"
+  else
+    dir="$(git rev-parse --show-toplevel)"
+    osArch=$(uname | tr '[:upper:]' '[:lower:]')
+    cpuArch=$(uname -m | sed 's/aarch64/arm64/;s/x86_64/x64/')
+    if test -f "$dir/node_modules/lefthook-${osArch}-${cpuArch}/bin/lefthook"
+    then
+      "$dir/node_modules/lefthook-${osArch}-${cpuArch}/bin/lefthook" "$@"
+    elif test -f "$dir/node_modules/@evilmartians/lefthook/bin/lefthook-${osArch}-${cpuArch}/lefthook"
+    then
+      "$dir/node_modules/@evilmartians/lefthook/bin/lefthook-${osArch}-${cpuArch}/lefthook" "$@"
+    elif test -f "$dir/node_modules/@evilmartians/lefthook-installer/bin/lefthook"
+    then
+      "$dir/node_modules/@evilmartians/lefthook-installer/bin/lefthook" "$@"
+    elif test -f "$dir/node_modules/lefthook/bin/index.js"
+    then
+      "$dir/node_modules/lefthook/bin/index.js" "$@"
+    elif test -f "$dir/web/node_modules/lefthook-${osArch}-${cpuArch}/bin/lefthook"
+    then
+      "$dir/web/node_modules/lefthook-${osArch}-${cpuArch}/bin/lefthook" "$@"
+    elif test -f "$dir/web/node_modules/@evilmartians/lefthook/bin/lefthook-${osArch}-${cpuArch}/lefthook"
+    then
+      "$dir/web/node_modules/@evilmartians/lefthook/bin/lefthook-${osArch}-${cpuArch}/lefthook" "$@"
+    elif test -f "$dir/web/node_modules/@evilmartians/lefthook-installer/bin/lefthook"
+    then
+      "$dir/web/node_modules/@evilmartians/lefthook-installer/bin/lefthook" "$@"
+    elif test -f "$dir/web/node_modules/lefthook/bin/index.js"
+    then
+      "$dir/web/node_modules/lefthook/bin/index.js" "$@"
+    elif go tool lefthook -h >/dev/null 2>&1
+    then
+      go tool lefthook "$@"
+    elif bundle exec lefthook -h >/dev/null 2>&1
+    then
+      bundle exec lefthook "$@"
+    elif yarn lefthook -h >/dev/null 2>&1
+    then
+      yarn lefthook "$@"
+    elif pnpm lefthook -h >/dev/null 2>&1
+    then
+      pnpm lefthook "$@"
+    elif swift package lefthook >/dev/null 2>&1
+    then
+      swift package --build-path .build/lefthook --disable-sandbox lefthook "$@"
+    elif command -v mint >/dev/null 2>&1
+    then
+      mint run csjones/lefthook-plugin "$@"
+    elif uv run lefthook -h >/dev/null 2>&1
+    then
+      uv run lefthook "$@"
+    elif mise exec -- lefthook -h >/dev/null 2>&1
+    then
+      mise exec -- lefthook "$@"
+    elif devbox run lefthook -h >/dev/null 2>&1
+    then
+      devbox run lefthook "$@"
+    else
+      echo "Can't find lefthook in PATH"
+    fi
+  fi
+}
+
+call_lefthook run "pre-commit" "$@"
