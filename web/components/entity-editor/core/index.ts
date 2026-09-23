@@ -45,6 +45,8 @@ export {
   renameGroup,
   setGroupMembers,
   toggleGroupMembership,
+  writeItemGroups,
+  writeGroupMembers,
   reorderByUpload,
   type ReorderByUploadResult,
   type ReorderByUploadOk,

@@ -443,7 +443,11 @@ export function diffScenarioDocuments(
       keyPrefix: "peoplegroup",
       identity: (group) => group.id,
       label: (group) => `Staff group “${group.id}”`,
-      render: (group) => `${group.members.length} member${group.members.length === 1 ? "" : "s"}`,
+      render: (group) => {
+        const members = group.members.length ? group.members.map(String).join(", ") : "No members";
+        const described = group.description?.trim();
+        return described ? `${members} · “${described}”` : members;
+      },
     }),
     ...compareKeyed(before.shifts, after.shifts, {
       scope: "shift-types",
@@ -502,6 +506,87 @@ export function diffScenarioDocuments(
   return entries;
 }
 
+type PaintCommand = Extract<
+  AssistantCommandV1,
+  { type: "add_leave" | "set_off_request" | "set_shift_request" | "clear_requests" }
+>;
+
+/** The `cell:` keys a paint command covers, in the document that holds its cells. */
+function paintedCellKeys(command: PaintCommand, state: ScenarioUiState): string[] {
+  const span = rosterDatesBetween(state, command.startDate, command.endDate);
+  if (!span.ok) return [];
+  return span.ids.map(
+    (date) => `cell:${stableStringify(command.personId)}|${stableStringify(date)}`,
+  );
+}
+
+/**
+ * A rename is ONE change to a ward manager, but the structural comparison sees the old
+ * id removed and the new one created. Fold each such pair into one entry.
+ */
+function mergeRenames(entries: Entry[], commands: readonly AssistantCommandV1[]): Entry[] {
+  let merged = entries;
+  for (const command of commands) {
+    let rename: { from: string; to: string; label: string } | null = null;
+    // Same "changed text" rule as the arms in `operations.ts`.
+    if (command.type === "edit_person" && command.name !== String(command.personId)) {
+      rename = {
+        from: `person:${stableStringify(command.personId)}`,
+        to: `person:${stableStringify(command.name.trim())}`,
+        label: `Renamed “${String(command.personId)}” to “${command.name.trim()}”`,
+      };
+    } else if (command.type === "edit_people_group" && command.newGroupId !== command.groupId) {
+      rename = {
+        from: `peoplegroup:${command.groupId}`,
+        to: `peoplegroup:${command.newGroupId.trim()}`,
+        label: `Renamed staff group “${command.groupId}” to “${command.newGroupId.trim()}”`,
+      };
+    }
+    if (!rename) continue;
+    const { from, to, label } = rename;
+    const removed = merged.find((entry) => entry.key === from && entry.kind === "removed");
+    const created = merged.find((entry) => entry.key === to && entry.kind === "created");
+    if (!removed || !created) continue;
+    merged = [
+      ...merged.filter((entry) => entry !== removed && entry !== created),
+      { ...created, label, before: removed.before, kind: "changed" },
+    ];
+  }
+  return merged;
+}
+
+/**
+ * Twenty-eight "must have the day off" rows would hide the one that matters. Days a
+ * must-be-off run CREATES fold into one summary per command; a day that already held
+ * something (a leave, a request) stays its own entry, so the Preview never understates
+ * what is replaced.
+ */
+function collapseOffRuns(
+  entries: Entry[],
+  commands: readonly AssistantCommandV1[],
+  after: ScenarioUiState,
+): Entry[] {
+  let collapsed = entries;
+  for (const command of commands) {
+    if (command.type !== "set_off_request" || command.weight !== "must") continue;
+    const keys = new Set(paintedCellKeys(command, after));
+    const created = collapsed.filter((entry) => entry.kind === "created" && keys.has(entry.key));
+    if (created.length < 2) continue;
+    collapsed = [
+      ...collapsed.filter((entry) => !created.includes(entry)),
+      {
+        key: `offrun:${stableStringify(command.personId)}|${command.startDate}|${command.endDate}`,
+        scope: "leave-and-requests",
+        label: `${String(command.personId)}: must be off`,
+        before: null,
+        after: `${created.length} days, ${command.startDate} to ${command.endDate}`,
+        kind: "created",
+      },
+    ];
+  }
+  return collapsed;
+}
+
 /**
  * The keys a command NAMES, so a consequence is never mistaken for a request.
  *
@@ -548,15 +633,10 @@ function directKeys(
       case "add_leave":
       case "set_off_request":
       case "set_shift_request":
-      case "clear_requests": {
+      case "clear_requests":
         // Every painted date is asked-for, including a leave day a clear removes.
-        const span = rosterDatesBetween(after, command.startDate, command.endDate);
-        if (!span.ok) break;
-        for (const date of span.ids) {
-          keys.add(`cell:${stableStringify(command.personId)}|${stableStringify(date)}`);
-        }
+        for (const key of paintedCellKeys(command, after)) keys.add(key);
         break;
-      }
       case "add_succession_rule":
         created("successions");
         break;
@@ -578,6 +658,35 @@ function directKeys(
       case "remove_rule":
         keys.add(`rule:${command.ruleKind}:${command.ruleId}`);
         break;
+      case "add_person":
+        // The host trims names (Staff screen rule), so the keys must too.
+        keys.add(`person:${stableStringify(command.name.trim())}`);
+        for (const groupId of command.groups) keys.add(`peoplegroup:${groupId}`);
+        break;
+      case "edit_person":
+        keys.add(`person:${stableStringify(command.personId)}`);
+        keys.add(`person:${stableStringify(command.name.trim())}`);
+        for (const groupId of command.groups) keys.add(`peoplegroup:${groupId}`);
+        // Groups they LEAVE (or that follow their rename) were asked for too.
+        for (const group of before.staffGroups) {
+          if (group.members.some((member) => member === command.personId)) {
+            keys.add(`peoplegroup:${group.id}`);
+          }
+        }
+        break;
+      case "remove_person":
+        keys.add(`person:${stableStringify(command.personId)}`);
+        break;
+      case "add_people_group":
+        keys.add(`peoplegroup:${command.groupId.trim()}`);
+        break;
+      case "edit_people_group":
+        keys.add(`peoplegroup:${command.groupId}`);
+        keys.add(`peoplegroup:${command.newGroupId.trim()}`);
+        break;
+      case "remove_people_group":
+        keys.add(`peoplegroup:${command.groupId}`);
+        break;
     }
   }
   return keys;
@@ -591,7 +700,14 @@ export function deriveProposalDiff(
 ): ProposalDiff {
   const named = directKeys(commands, before, after);
   const all = diffScenarioDocuments(before, after);
-  const direct = all.filter((entry) => named.has(entry.key));
+  const direct = collapseOffRuns(
+    mergeRenames(
+      all.filter((entry) => named.has(entry.key)),
+      commands,
+    ),
+    commands,
+    after,
+  );
   const cascade = all.filter((entry) => !named.has(entry.key));
 
   const directDomains = new Set(direct.map((entry) => SCOPE_DOMAIN[entry.scope]));

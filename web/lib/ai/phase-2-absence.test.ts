@@ -73,6 +73,9 @@ const MODEL_VISIBLE_TOOLS = [
 // WIDENED DELIBERATELY (2026-09-24, plan assistant-rule-ops): creating and editing
 // rules is Phase-1 scenario authoring. Each arm fills a rule editor's own form draft
 // and runs its own validator/builder; none acts on a produced roster.
+// WIDENED AGAIN (2026-09-24, plan assistant-people-ops): the Staff screen's own
+// add/edit/remove for people and staff groups, plus the Requests quick-paint
+// "must be off" run. All address the scenario, none a produced roster.
 const PROPOSAL_OPERATIONS = [
   "set_roster_range",
   "set_rule_enabled",
@@ -91,6 +94,12 @@ const PROPOSAL_OPERATIONS = [
   "add_staffing_requirement",
   "edit_staffing_requirement",
   "remove_rule",
+  "add_person",
+  "edit_person",
+  "remove_person",
+  "add_people_group",
+  "edit_people_group",
+  "remove_people_group",
 ] as const;
 
 /**

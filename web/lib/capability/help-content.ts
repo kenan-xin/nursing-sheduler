@@ -52,8 +52,21 @@ export const CAPABILITY_ENTRIES = [
     title: "Staff and people groups",
     nurseFacingSummary:
       "List the nurses being rostered and put them into groups — for example seniors, or a " +
-      "team — so a rule can be written about the group instead of naming every person.",
-    concepts: ["staff", "nurse", "person", "people group", "seniors", "team"],
+      "team — so a rule can be written about the group instead of naming every person. A nurse " +
+      "borrowed from another ward for a few days is added like anyone else and marked off on " +
+      "the days they are not here. The assistant can prepare these changes for you to review " +
+      "and apply.",
+    concepts: [
+      "staff",
+      "nurse",
+      "person",
+      "people group",
+      "seniors",
+      "team",
+      "float nurse",
+      "agency nurse",
+      "borrowed staff",
+    ],
     modes: BOTH_MODES,
     featureGates: [],
     routeId: "people",
@@ -292,8 +305,9 @@ export const CAPABILITY_ENTRIES = [
       "works, and suggest which rule expresses a policy you describe. It can also prepare " +
       "changes — the roster period, turning any rule on or off, adding, editing or deleting " +
       "staffing requirements, shift sequence rules and shift count rules, deleting any rule, " +
-      "moving leave, adding new shifts and shift groups, and recording leave, day-off and " +
-      "shift requests — which you review and apply yourself. It can also offer to run the " +
+      "moving leave, adding new shifts and shift groups, adding, renaming or removing staff " +
+      "and staff groups, marking someone off for a run of days, and recording leave, day-off " +
+      "and shift requests — which you review and apply yourself. It can also offer to run the " +
       "optimiser — the run starts only when you press Run — and then tell you how it went. " +
       "It cannot change the roster on its own, it cannot yet create pairing or supervision " +
       "rules, and it cannot edit or delete existing shifts. It is not a source of employment, " +

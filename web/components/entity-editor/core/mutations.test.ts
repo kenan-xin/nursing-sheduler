@@ -24,6 +24,8 @@ import {
   toggleGroupMembership,
   updateGroupFields,
   updateItemFields,
+  writeGroupMembers,
+  writeItemGroups,
 } from "./mutations";
 
 // --- Test descriptors (mirror the real wrappers, kept inline for isolation) ---
@@ -474,6 +476,40 @@ describe("reorderByUpload (People bulk upload, FR-ED-31)", () => {
     // collapsing the duplicate numeric 1.
     expect(result.state.staff.map((p) => p.id)).toEqual(["B", "1", 1]);
     expect(result.state.staffGroups[0].members).toEqual(["B", "1", 1, 1]);
+  });
+});
+
+describe("writeItemGroups (the Staff row's group toggles)", () => {
+  it("sets one person's membership to exactly the desired groups", () => {
+    const state = fixture();
+    state.staffGroups = [
+      { id: "TeamA", members: ["P1", "P3"] },
+      { id: "TeamB", members: ["P2"] },
+    ];
+    const after = writeItemGroups(state, peopleDescriptor(), "P1", ["TeamB"]);
+    expect(after.staffGroups).toEqual([
+      { id: "TeamA", members: ["P3"] },
+      { id: "TeamB", members: ["P1", "P2"] },
+    ]);
+  });
+
+  it("ignores a group id that is not in the slice, and returns the same state when nothing moves", () => {
+    const state = fixture();
+    expect(writeItemGroups(state, peopleDescriptor(), "P1", ["TeamA", "Ghost"])).toBe(state);
+  });
+});
+
+describe("writeGroupMembers (the group form's SET write)", () => {
+  it("writes exactly the live items asked for, keeping the group's unknown members", () => {
+    const state = fixture();
+    state.staffGroups = [{ id: "TeamA", members: ["P3", "Nested"] }];
+    const after = writeGroupMembers(state, peopleDescriptor(), "TeamA", ["P2", "Ghost", "P1"]);
+    expect(after.staffGroups[0].members).toEqual(["P1", "P2", "Nested"]);
+  });
+
+  it("returns the same state for an unknown group", () => {
+    const state = fixture();
+    expect(writeGroupMembers(state, peopleDescriptor(), "Nope", ["P1"])).toBe(state);
   });
 });
 

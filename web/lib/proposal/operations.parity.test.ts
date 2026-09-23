@@ -31,17 +31,26 @@ import { saveShiftTypeCard } from "@/components/shift-types/save-shift-card";
 import { shiftTypesDescriptor } from "@/components/shift-types/shift-types-descriptor";
 import {
   addGroup,
+  addItem,
+  deleteGroup,
+  deleteItem,
   paidMinutesFor,
+  renameGroup,
+  renameItem,
   setGroupMembers,
+  updateGroupFields,
   validateFullEditId,
   validateWorkingTimeDraft,
+  writeGroupMembers,
+  writeItemGroups,
 } from "@/components/entity-editor/core";
 import type { CountCard, DateRef, PersonRef, SuccessionCard } from "@/lib/scenario";
+import { peopleDescriptor } from "@/components/people/people-descriptor";
 import { computeQuickPaintCellIntent } from "@/components/requests/requests-gestures";
 import { createHotStore } from "@/lib/store/hot-store";
 import { foldPaintIntents } from "@/lib/store/paint-fold";
 import { applyAssistantCommand, assistantCellUids } from "./operations";
-import { octoberWard, proposalScenario, ruleWardScenario } from "./test-support";
+import { octoberWard, peopleScenario, proposalScenario, ruleWardScenario } from "./test-support";
 import { parseWeightInput } from "@/components/card-editor/weight-value";
 import {
   buildSuccessionCard,
@@ -259,7 +268,10 @@ describe("add_shift_type is the Shifts page's Add shift save", () => {
     const d = shiftTypesDescriptor;
     const idCheck = validateFullEditId(d, d.readItems(state), d.readGroups(state), code);
     const timeCheck = validateWorkingTimeDraft(uiWorkingTime(startTime, endTime, rest));
-    return { ok: idCheck.ok && timeCheck.ok && !/^\d+$/.test(code.trim()), idCheck };
+    return {
+      ok: idCheck.ok && timeCheck.ok && !/^\d+$/.test(code.trim()),
+      idCheck,
+    };
   };
 
   /** Run the REAL manual save, capturing the document its single commit produces. */
@@ -279,7 +291,11 @@ describe("add_shift_type is the Shifts page's Add shift save", () => {
       },
       {
         mode: "add",
-        fields: { code, name, workingTime: uiWorkingTime(startTime, endTime, rest) },
+        fields: {
+          code,
+          name,
+          workingTime: uiWorkingTime(startTime, endTime, rest),
+        },
         staffing: { type: "none" },
       },
     );
@@ -325,6 +341,147 @@ describe("add_shift_type is the Shifts page's Add shift save", () => {
   });
 });
 
+describe("the Staff-screen arms are the Staff screen's saves", () => {
+  const d = peopleDescriptor;
+
+  // `people-table.tsx:723-745`: gate on validateFullEditId, then addItem + writeGroups.
+  function manualAddPerson(state: ScenarioUiState, name: string, groups: string[]) {
+    const check = validateFullEditId(d, d.readItems(state), d.readGroups(state), name);
+    if (!check.ok) return null;
+    return writeItemGroups(addItem(state, d, { id: check.id }), d, check.id, groups);
+  }
+
+  // `people-table.tsx:719-757`: rename only when the raw text changed, then writeGroups.
+  function manualEditPerson(
+    state: ScenarioUiState,
+    personId: string | number,
+    name: string,
+    groups: string[],
+  ) {
+    const nameChanged = name !== String(personId);
+    const check = nameChanged
+      ? validateFullEditId(d, d.readItems(state), d.readGroups(state), name, false, personId)
+      : ({ ok: true, id: name } as const);
+    if (!check.ok) return null;
+    const renamed = nameChanged ? renameItem(state, d, personId, check.id) : state;
+    return writeItemGroups(renamed, d, nameChanged ? check.id : personId, groups);
+  }
+
+  it("add_person accepts, refuses and writes what Add nurse does", () => {
+    const state = peopleScenario();
+    for (const name of ["Cara", "  Cara  ", "12", "ana", "RN", "ALL", "all", ""]) {
+      const manual = manualAddPerson(state, name, ["Seniors", "RN"]);
+      const assistant = applyAssistantCommand(state, {
+        type: "add_person",
+        name,
+        groups: ["Seniors", "RN"],
+      });
+      expect(assistant.ok, `"${name}"`).toBe(manual !== null);
+      if (manual && assistant.ok) expect(assistant.next).toEqual(manual);
+    }
+  });
+
+  it("edit_person accepts, refuses and writes what the row's Edit does", () => {
+    const state = peopleScenario();
+    const cases: [string | number, string, string[]][] = [
+      ["ana", "Ana Lim", ["RN"]],
+      ["ana", "ana", []],
+      ["ana", "  ana  ", ["RN", "Seniors"]],
+      [7, "7", ["Seniors"]],
+      [7, " 7 ", ["RN"]], // the row renames number 7 to text "7"
+      ["ana", "bo", ["RN"]],
+      ["ana", "Seniors", ["RN"]],
+      ["ana", "ALL", ["RN"]],
+      ["ana", "", ["RN"]],
+    ];
+    for (const [personId, name, groups] of cases) {
+      const manual = manualEditPerson(state, personId, name, groups);
+      const assistant = applyAssistantCommand(state, {
+        type: "edit_person",
+        personId,
+        name,
+        groups,
+      });
+      expect(assistant.ok, `${String(personId)} -> "${name}"`).toBe(manual !== null);
+      if (manual && assistant.ok) expect(assistant.next).toEqual(manual);
+    }
+  });
+
+  it("remove_person is the row's Delete", () => {
+    const state = peopleScenario();
+    for (const personId of ["ana", "bo", 7] as const) {
+      const assistant = applyAssistantCommand(state, {
+        type: "remove_person",
+        personId,
+      });
+      expect(assistant.ok).toBe(true);
+      if (assistant.ok) expect(assistant.next).toEqual(deleteItem(state, d, personId));
+    }
+  });
+
+  it("add_people_group accepts, refuses and writes what New group does", () => {
+    const state = peopleScenario();
+    // `groups-section.tsx:745-790` (add mode): addGroup(id, trimmed description) + writeGroupMembers.
+    for (const groupId of ["Night team", "  Night team  ", "RN", "ana", "ALL", ""]) {
+      const check = validateFullEditId(d, d.readItems(state), d.readGroups(state), groupId, true);
+      const assistant = applyAssistantCommand(state, {
+        type: "add_people_group",
+        groupId,
+        description: " Nights ",
+        members: [7, "bo"],
+      });
+      expect(assistant.ok, `"${groupId}"`).toBe(check.ok);
+      if (check.ok && assistant.ok) {
+        const manual = writeGroupMembers(
+          addGroup(state, d, { id: check.id, description: "Nights" }),
+          d,
+          check.id,
+          [7, "bo"],
+        );
+        expect(assistant.next).toEqual(manual);
+      }
+    }
+  });
+
+  it("edit_people_group accepts, refuses and writes what the group's Edit does", () => {
+    const state = peopleScenario();
+    // `groups-section.tsx:741-790` (edit mode): rename if the text changed, then
+    // updateGroupFields(trimmed description), then writeGroupMembers.
+    for (const newGroupId of ["Registered nurses", "RN", "Seniors", "bo", "ALL", ""]) {
+      const idChanged = newGroupId !== "RN";
+      const check = idChanged
+        ? validateFullEditId(d, d.readItems(state), d.readGroups(state), newGroupId, true, "RN")
+        : ({ ok: true, id: "RN" } as const);
+      const assistant = applyAssistantCommand(state, {
+        type: "edit_people_group",
+        groupId: "RN",
+        newGroupId,
+        description: " Registered ",
+        members: ["bo", "ana"],
+      });
+      expect(assistant.ok, `"${newGroupId}"`).toBe(check.ok);
+      if (check.ok && assistant.ok) {
+        let manual = idChanged ? renameGroup(state, d, "RN", check.id) : state;
+        manual = updateGroupFields(manual, d, check.id, {
+          description: "Registered",
+        });
+        manual = writeGroupMembers(manual, d, check.id, ["bo", "ana"]);
+        expect(assistant.next).toEqual(manual);
+      }
+    }
+  });
+
+  it("remove_people_group is the group's Delete", () => {
+    const state = peopleScenario();
+    const assistant = applyAssistantCommand(state, {
+      type: "remove_people_group",
+      groupId: "RN",
+    });
+    expect(assistant.ok).toBe(true);
+    if (assistant.ok) expect(assistant.next).toEqual(deleteGroup(state, d, "RN"));
+  });
+});
+
 describe("leave and request arms are the Requests page's quick paint", () => {
   /**
    * One real paint drag: the page's intent reducer per crossed cell, staged through
@@ -365,7 +522,12 @@ describe("leave and request arms are the Requests page's quick paint", () => {
   // [assistant command, the paint selection a user would make, its weight, dates dragged]
   const matrix: [Parameters<typeof applyAssistantCommand>[1], string[], number, DateRef[]][] = [
     [
-      { type: "add_leave", personId: "Ana", startDate: iso(10), endDate: iso(16) },
+      {
+        type: "add_leave",
+        personId: "Ana",
+        startDate: iso(10),
+        endDate: iso(16),
+      },
       ["LEAVE"],
       0,
       days(10, 16),
@@ -461,7 +623,12 @@ describe("leave and request arms are the Requests page's quick paint", () => {
       days(1, 3),
     ],
     [
-      { type: "clear_requests", personId: "Ben", startDate: iso(21), endDate: iso(22) },
+      {
+        type: "clear_requests",
+        personId: "Ben",
+        startDate: iso(21),
+        endDate: iso(22),
+      },
       [],
       0,
       days(21, 22),
@@ -529,19 +696,39 @@ function carryMarkers<T extends { disabled?: boolean; applied?: boolean }>(
 const valid = (errors: object) => Object.keys(errors).length === 0;
 
 describe("succession arms are the Shift sequences form's Save", () => {
-  const rows: { people: PersonRef[]; pattern: string[]; dates: string[]; weight: string }[] = [
+  const rows: {
+    people: PersonRef[];
+    pattern: string[];
+    dates: string[];
+    weight: string;
+  }[] = [
     {
       people: ["ana", "ben", "cai"],
       pattern: ["Night", "Day"],
       dates: ["ALL"],
       weight: "-infinity",
     },
-    { people: ["RN"], pattern: ["Night", "OFF", "Day"], dates: ["WEEKEND"], weight: "-50" },
-    { people: ["ana"], pattern: ["Day", "Day"], dates: ["2026-04-06", "2026-04-07"], weight: "1k" },
+    {
+      people: ["RN"],
+      pattern: ["Night", "OFF", "Day"],
+      dates: ["WEEKEND"],
+      weight: "-50",
+    },
+    {
+      people: ["ana"],
+      pattern: ["Day", "Day"],
+      dates: ["2026-04-06", "2026-04-07"],
+      weight: "1k",
+    },
     { people: ["ana"], pattern: ["Night"], dates: ["ALL"], weight: "-1" }, // one step
     { people: [], pattern: ["Night", "Day"], dates: ["ALL"], weight: "-1" }, // nobody
     { people: ["ana"], pattern: ["Night", "Day"], dates: [], weight: "-1" }, // no dates
-    { people: ["ana"], pattern: ["Night", "Day"], dates: ["ALL"], weight: "strong" }, // bad weight
+    {
+      people: ["ana"],
+      pattern: ["Night", "Day"],
+      dates: ["ALL"],
+      weight: "strong",
+    }, // bad weight
   ];
   const form = (row: (typeof rows)[number], description: string): SuccessionFormState => ({
     description,
@@ -576,7 +763,10 @@ describe("succession arms are the Shift sequences form's Save", () => {
 
   it("edit: rebuilds the card in place and keeps a switched-off rule off", () => {
     const state = ruleWardScenario();
-    const source: SuccessionCard = { ...state.cardsByKind.successions[0], disabled: true };
+    const source: SuccessionCard = {
+      ...state.cardsByKind.successions[0],
+      disabled: true,
+    };
     state.cardsByKind.successions = [source];
     for (const [i, row] of rows.entries()) {
       const draft = form(row, "No day after night");
@@ -601,10 +791,30 @@ describe("count arms are the Shift counts form's Save", () => {
     target: number;
     weight: string;
   }[] = [
-    { shiftTypes: ["Night"], expression: "x <= T", target: 5, weight: "infinity" },
-    { shiftTypes: ["Working shifts", "OFF"], expression: "x >= T", target: 3, weight: "10" },
-    { shiftTypes: ["Night"], expression: "|x - T|^2", target: 8, weight: "-10" },
-    { shiftTypes: ["Night"], expression: "|x - T|^2", target: 8, weight: "infinity" }, // squared + hard
+    {
+      shiftTypes: ["Night"],
+      expression: "x <= T",
+      target: 5,
+      weight: "infinity",
+    },
+    {
+      shiftTypes: ["Working shifts", "OFF"],
+      expression: "x >= T",
+      target: 3,
+      weight: "10",
+    },
+    {
+      shiftTypes: ["Night"],
+      expression: "|x - T|^2",
+      target: 8,
+      weight: "-10",
+    },
+    {
+      shiftTypes: ["Night"],
+      expression: "|x - T|^2",
+      target: 8,
+      weight: "infinity",
+    }, // squared + hard
     { shiftTypes: ["Night"], expression: "x <= T", target: 2.5, weight: "-1" }, // not whole
     { shiftTypes: [], expression: "x <= T", target: 5, weight: "-1" }, // nothing counted
   ];
@@ -676,17 +886,42 @@ describe("requirement arms are the Staffing requirements screen's commit", () =>
     dates: string[];
     requiredNumPeople: number;
   }[] = [
-    { shiftType: "Night", qualifiedPeople: ["RN"], dates: ["ALL"], requiredNumPeople: 2 },
+    {
+      shiftType: "Night",
+      qualifiedPeople: ["RN"],
+      dates: ["ALL"],
+      requiredNumPeople: 2,
+    },
     {
       shiftType: "Working shifts",
       qualifiedPeople: ["Senior"],
       dates: ["ALL"],
       requiredNumPeople: 1,
     },
-    { shiftType: "Day", qualifiedPeople: ["ALL"], dates: ["WEEKDAY"], requiredNumPeople: 0 },
-    { shiftType: "Day", qualifiedPeople: ["RN"], dates: ["ALL"], requiredNumPeople: -1 }, // negative
-    { shiftType: "Day", qualifiedPeople: [], dates: ["ALL"], requiredNumPeople: 1 }, // nobody
-    { shiftType: "Day", qualifiedPeople: ["RN"], dates: ["ALL"], requiredNumPeople: 4 }, // above preferred (edit)
+    {
+      shiftType: "Day",
+      qualifiedPeople: ["ALL"],
+      dates: ["WEEKDAY"],
+      requiredNumPeople: 0,
+    },
+    {
+      shiftType: "Day",
+      qualifiedPeople: ["RN"],
+      dates: ["ALL"],
+      requiredNumPeople: -1,
+    }, // negative
+    {
+      shiftType: "Day",
+      qualifiedPeople: [],
+      dates: ["ALL"],
+      requiredNumPeople: 1,
+    }, // nobody
+    {
+      shiftType: "Day",
+      qualifiedPeople: ["RN"],
+      dates: ["ALL"],
+      requiredNumPeople: 4,
+    }, // above preferred (edit)
   ];
 
   it("add: accepts and refuses what the form does, and commits the same document", () => {
@@ -741,7 +976,11 @@ describe("requirement arms are the Staffing requirements screen's commit", () =>
       expect(assistant.ok, `row ${i}`).toBe(valid(validateRequirementForm(form, domain)));
       if (assistant.ok) {
         expect(assistant.next).toEqual(
-          applyRequirementPatch(state, { type: "update", uid: "req-day", form }),
+          applyRequirementPatch(state, {
+            type: "update",
+            uid: "req-day",
+            form,
+          }),
         );
       }
     }
@@ -756,7 +995,11 @@ describe("remove_rule is every editor's Delete", () => {
       ["successions", "suc-nd"],
       ["counts", "cnt-nights"],
     ] as const) {
-      const assistant = applyAssistantCommand(state, { type: "remove_rule", ruleKind, ruleId });
+      const assistant = applyAssistantCommand(state, {
+        type: "remove_rule",
+        ruleKind,
+        ruleId,
+      });
       expect(assistant.ok, ruleKind).toBe(true);
       if (assistant.ok) {
         const cards = state.cardsByKind[ruleKind] as readonly { uid: string }[];

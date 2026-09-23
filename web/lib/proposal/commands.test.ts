@@ -61,8 +61,17 @@ describe("parseAssistantCommands", () => {
         end: "2026-04-30",
         importPublicHolidays: true,
       },
-      { type: "set_rule_enabled", ruleKind: "counts", ruleId: "c1", enabled: false },
-      { type: "set_staffing_requirement_people", ruleId: "r1", requiredNumPeople: 2 },
+      {
+        type: "set_rule_enabled",
+        ruleKind: "counts",
+        ruleId: "c1",
+        enabled: false,
+      },
+      {
+        type: "set_staffing_requirement_people",
+        ruleId: "r1",
+        requiredNumPeople: 2,
+      },
       { type: "move_leave", personId: 7, fromDate: "02", toDate: "03" },
     ]);
     expect(result.ok).toBe(true);
@@ -90,9 +99,24 @@ describe("parseAssistantCommands", () => {
       // A plausible-sounding operation the host has no transform for.
       [{ type: "add_person", person: { id: "new" } }],
       // A supported arm carrying content alongside its targets.
-      [{ type: "set_rule_enabled", ruleKind: "counts", ruleId: "c", enabled: true, card: {} }],
+      [
+        {
+          type: "set_rule_enabled",
+          ruleKind: "counts",
+          ruleId: "c",
+          enabled: true,
+          card: {},
+        },
+      ],
       // A rule family that does not exist.
-      [{ type: "set_rule_enabled", ruleKind: "holidays", ruleId: "c", enabled: true }],
+      [
+        {
+          type: "set_rule_enabled",
+          ruleKind: "holidays",
+          ruleId: "c",
+          enabled: true,
+        },
+      ],
       // A date in the wrong form.
       [
         {
@@ -175,7 +199,15 @@ describe("parseAssistantCommands", () => {
         },
       ],
       // Rest omitted: the model must send 0 for no break.
-      [{ type: "add_shift_type", code: "am1", name: "", startTime: "08:00", endTime: "15:00" }],
+      [
+        {
+          type: "add_shift_type",
+          code: "am1",
+          name: "",
+          startTime: "08:00",
+          endTime: "15:00",
+        },
+      ],
       // Rest that is not whole minutes.
       [
         {
@@ -209,7 +241,12 @@ describe("parseAssistantCommands", () => {
 
   it("accepts the leave and request arms with calendar dates", () => {
     const result = parseAssistantCommands([
-      { type: "add_leave", personId: "Ana", startDate: "2026-10-10", endDate: "2026-10-16" },
+      {
+        type: "add_leave",
+        personId: "Ana",
+        startDate: "2026-10-10",
+        endDate: "2026-10-16",
+      },
       {
         type: "set_shift_request",
         personId: "Ben",
@@ -233,7 +270,12 @@ describe("parseAssistantCommands", () => {
         endDate: "2026-10-21",
         weight: 0,
       },
-      { type: "clear_requests", personId: "Ana", startDate: "2026-10-14", endDate: "2026-10-14" },
+      {
+        type: "clear_requests",
+        personId: "Ana",
+        startDate: "2026-10-14",
+        endDate: "2026-10-14",
+      },
     ]);
     expect(result.ok).toBe(true);
   });
@@ -243,7 +285,14 @@ describe("parseAssistantCommands", () => {
       // A roster date id instead of a calendar date.
       [{ type: "add_leave", personId: "Ana", startDate: "14", endDate: "14" }],
       // Words instead of a date.
-      [{ type: "add_leave", personId: "Ana", startDate: "10 Oct", endDate: "16 Oct" }],
+      [
+        {
+          type: "add_leave",
+          personId: "Ana",
+          startDate: "10 Oct",
+          endDate: "16 Oct",
+        },
+      ],
       // An end date omitted.
       [{ type: "add_leave", personId: "Ana", startDate: "2026-10-10" }],
       // Infinity spelled as a string: the hard values are "must" / "never".
@@ -393,5 +442,62 @@ describe("parseAssistantCommands", () => {
     expect(
       parseAssistantCommands([{ type: "remove_rule", ruleKind: "rosters", ruleId: "x" }]).ok,
     ).toBe(false);
+  });
+
+  it("accepts the Staff-screen arms", () => {
+    const result = parseAssistantCommands([
+      { type: "add_person", name: "Float RN (Ward 5)", groups: ["RN"] },
+      { type: "edit_person", personId: 7, name: "7", groups: [] },
+      { type: "remove_person", personId: "bo" },
+      {
+        type: "add_people_group",
+        groupId: "Night team",
+        description: "",
+        members: ["ana", 7],
+      },
+      {
+        type: "edit_people_group",
+        groupId: "RN",
+        newGroupId: "Registered nurses",
+        description: "",
+        members: ["ana"],
+      },
+      { type: "remove_people_group", groupId: "Seniors" },
+    ]);
+    expect(result.ok).toBe(true);
+  });
+
+  it("refuses Staff-screen payloads the model must fix itself", () => {
+    const refused: unknown[] = [
+      // groups omitted: the model must send [] for "no groups".
+      [{ type: "add_person", name: "Cara" }],
+      // A description the Staff table cannot author.
+      [{ type: "add_person", name: "Cara", groups: [], description: "Agency" }],
+      // name omitted on an edit: send the current name to keep it.
+      [{ type: "edit_person", personId: "ana", groups: [] }],
+      // description omitted on a group: send "" for none.
+      [{ type: "add_people_group", groupId: "X", members: [] }],
+      // members not a list.
+      [
+        {
+          type: "add_people_group",
+          groupId: "X",
+          description: "",
+          members: "ana",
+        },
+      ],
+      // newGroupId omitted: send the current id to keep it.
+      [
+        {
+          type: "edit_people_group",
+          groupId: "RN",
+          description: "",
+          members: [],
+        },
+      ],
+    ];
+    for (const payload of refused) {
+      expect(parseAssistantCommands(payload).ok, JSON.stringify(payload)).toBe(false);
+    }
   });
 });

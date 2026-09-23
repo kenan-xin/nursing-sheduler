@@ -28,6 +28,11 @@
 // fold (`foldPaintIntents`, `lib/store/paint-fold.ts`, store- and React-free). The
 // only difference is the uid minter: the page mints random ids, the host mints
 // deterministic ones so Apply reproduces the Preview exactly.
+//
+// The Staff-screen arms call the same primitives the Staff table and the groups
+// section commit (`people-table.tsx`, `groups-section.tsx`) over `peopleDescriptor`,
+// behind the same `validateFullEditId` gate. Remove cascades exactly as the screen's
+// Delete does -- no block -- and `deriveAssumptions` asks about any leave it destroys.
 
 import {
   applyRangeChange,
@@ -50,11 +55,20 @@ import {
 import {
   addGroup,
   addItem,
+  deleteGroup,
+  deleteItem,
+  isReservedKeyword,
   paidMinutesFor,
+  renameGroup,
+  renameItem,
   setGroupMembers,
+  updateGroupFields,
   validateFullEditId,
   validateWorkingTimeDraft,
+  writeGroupMembers,
+  writeItemGroups,
 } from "@/components/entity-editor/core";
+import { peopleDescriptor } from "@/components/people/people-descriptor";
 import { shiftTypesDescriptor } from "@/components/shift-types/shift-types-descriptor";
 import { parseWeightInput } from "@/components/card-editor/weight-value";
 import {
@@ -95,6 +109,7 @@ import {
   type RequirementFormState,
 } from "@/components/requirements/requirements-model";
 import { applyRequirementPatch } from "@/components/requirements/requirement-patch";
+import { RenameCollisionError } from "@/lib/cascade";
 import { foldPaintIntents, type MintCellUid } from "@/lib/store/paint-fold";
 import { paintCellKey, type StagedCoordinate } from "@/lib/store/types";
 import type { AssistantCommandV1, RequestWeight } from "./commands";
@@ -253,7 +268,10 @@ function withCards(
   kind: RuleKind,
   cards: readonly { uid: string }[],
 ): ScenarioUiState {
-  return { ...state, cardsByKind: { ...state.cardsByKind, [kind]: cards } as CardsByKind };
+  return {
+    ...state,
+    cardsByKind: { ...state.cardsByKind, [kind]: cards } as CardsByKind,
+  };
 }
 
 /** One entry a picker offers; a disabled entry cannot be picked. */
@@ -519,7 +537,10 @@ function applyAddCountRule(
     buildCountShiftTypeDomain(state),
     newRuleUid(state, "counts", command),
   );
-  return { ok: true, next: withCards(state, "counts", [...state.cardsByKind.counts, card]) };
+  return {
+    ok: true,
+    next: withCards(state, "counts", [...state.cardsByKind.counts, card]),
+  };
 }
 
 function applyEditCountRule(
@@ -667,7 +688,11 @@ function applyEditStaffingRequirement(
   const refused = requirementRejection(state, command, draft, name, index);
   if (refused) return refused;
   // `applyRequirementPatch` update keeps the uid and the disabled/applied markers itself.
-  const next = applyRequirementPatch(state, { type: "update", uid: source.uid, form: draft });
+  const next = applyRequirementPatch(state, {
+    type: "update",
+    uid: source.uid,
+    form: draft,
+  });
   const after = next.cardsByKind.requirements.find((card) => card.uid === source.uid);
   if (stableStringify(after) === stableStringify(source)) {
     return reject(index, "no_effect", `${name} already says exactly that.`);
@@ -690,7 +715,9 @@ function applyRemoveRule(
     );
   }
   // Every editor's `remove`: `current.filter((card) => card.uid !== uid)`.
-  const cards = state.cardsByKind[command.ruleKind] as readonly { uid: string }[];
+  const cards = state.cardsByKind[command.ruleKind] as readonly {
+    uid: string;
+  }[];
   return {
     ok: true,
     next: withCards(
@@ -937,7 +964,11 @@ export function rosterDatesBetween(
   // The wire schema's regex only checks YYYY-MM-DD shape, so it lets impossible
   // dates like 2026-02-30 through; isValidIso catches those here.
   if (!isValidIso(start) || !isValidIso(end)) {
-    return { ok: false, code: "invalid_value", message: "Those are not real calendar dates." };
+    return {
+      ok: false,
+      code: "invalid_value",
+      message: "Those are not real calendar dates.",
+    };
   }
   if (end < start) {
     return {
@@ -981,7 +1012,9 @@ export function assistantCellUids(reqData: readonly UiRequestCell[]): MintCellUi
 
 type RequestPaintCommand = Extract<
   AssistantCommandV1,
-  { type: "add_leave" | "set_off_request" | "set_shift_request" | "clear_requests" }
+  {
+    type: "add_leave" | "set_off_request" | "set_shift_request" | "clear_requests";
+  }
 >;
 
 function toWeight(weight: RequestWeight): Weight {
@@ -1008,11 +1041,17 @@ function paintIntent(
 ): { ok: true; intent: StagedCoordinate } | { ok: false; refusal: OperationResult } {
   switch (command.type) {
     case "add_leave":
-      return { ok: true, intent: { mode: "day-state", dayState: { kind: "leave" } } };
+      return {
+        ok: true,
+        intent: { mode: "day-state", dayState: { kind: "leave" } },
+      };
     case "set_off_request":
       return {
         ok: true,
-        intent: { mode: "day-state", dayState: { kind: "off", weight: toWeight(command.weight) } },
+        intent: {
+          mode: "day-state",
+          dayState: { kind: "off", weight: toWeight(command.weight) },
+        },
       };
     case "clear_requests":
       return { ok: true, intent: { mode: "erase" } };
@@ -1046,7 +1085,10 @@ function paintIntent(
       }
       return {
         ok: true,
-        intent: { mode: "requests", deltas: new Map([[shiftType, toWeight(command.weight)]]) },
+        intent: {
+          mode: "requests",
+          deltas: new Map([[shiftType, toWeight(command.weight)]]),
+        },
       };
     }
   }
@@ -1094,6 +1136,256 @@ function applyRequestPaint(
   return { ok: true, next: { ...state, reqData } };
 }
 
+// ---------------------------------------------------------------------------
+// Staff screen: people and staff groups
+// ---------------------------------------------------------------------------
+
+const PERSON_ID_HINT = "Use the id exactly as the staff list shows it -- a number stays a number.";
+
+/** The person with exactly this id (`1` and `"1"` are different people). */
+function findPerson(state: ScenarioUiState, personId: PersonRef) {
+  return state.staff.find((person) => person.id === personId);
+}
+
+function unknownPersonMessage(personId: PersonRef): string {
+  return `Person "${String(personId)}": not on the staff list. ${PERSON_ID_HINT}`;
+}
+
+/** Refuse a group the Staff row's toggles could not have picked. */
+function missingStaffGroup(
+  state: ScenarioUiState,
+  label: string,
+  groups: readonly string[],
+  index: number,
+): OperationResult | null {
+  const missing = groups.find((id) => !state.staffGroups.some((group) => group.id === id));
+  if (missing === undefined) return null;
+  if (isReservedKeyword(peopleDescriptor.reservedKeywords, missing)) {
+    return reject(
+      index,
+      "unknown_target",
+      `${label}: everyone is in "${missing}" automatically -- leave it out of the groups.`,
+    );
+  }
+  return reject(
+    index,
+    "unknown_target",
+    `${label}: there is no staff group "${missing}". Add the group earlier in the same change, or use an existing group name.`,
+  );
+}
+
+/** Refuse a member the group form's picker could not have offered. */
+function missingMember(
+  state: ScenarioUiState,
+  label: string,
+  members: readonly PersonRef[],
+  index: number,
+): OperationResult | null {
+  const missing = members.find((member) => !findPerson(state, member));
+  if (missing === undefined) return null;
+  return reject(
+    index,
+    "unknown_target",
+    `${label}: there is no person "${String(missing)}". Add the person earlier in the same change. ${PERSON_ID_HINT}`,
+  );
+}
+
+/** An edit that leaves the document as it was would spend an Undo entry on nothing. */
+function unchanged(before: ScenarioUiState, after: ScenarioUiState): boolean {
+  return after === before || stableStringify(after) === stableStringify(before);
+}
+
+function applyAddPerson(
+  state: ScenarioUiState,
+  command: Extract<AssistantCommandV1, { type: "add_person" }>,
+  index: number,
+): OperationResult {
+  const d = peopleDescriptor;
+  const idCheck = validateFullEditId(d, d.readItems(state), d.readGroups(state), command.name);
+  if (!idCheck.ok) {
+    return reject(index, "invalid_value", `Person "${command.name.trim()}": ${idCheck.message}.`);
+  }
+  const groups = [...new Set(command.groups)];
+  const refused = missingStaffGroup(state, `Person "${idCheck.id}"`, groups, index);
+  if (refused) return refused;
+  return {
+    ok: true,
+    next: writeItemGroups(addItem(state, d, { id: idCheck.id }), d, idCheck.id, groups),
+  };
+}
+
+function applyEditPerson(
+  state: ScenarioUiState,
+  command: Extract<AssistantCommandV1, { type: "edit_person" }>,
+  index: number,
+): OperationResult {
+  const d = peopleDescriptor;
+  const person = findPerson(state, command.personId);
+  if (!person) return reject(index, "unknown_target", unknownPersonMessage(command.personId));
+  const label = `Person "${String(person.id)}"`;
+
+  // The Staff row's own rule (`people-table.tsx`, `nameChanged`): only changed name
+  // TEXT is a rename, so an unchanged numeric id stays numeric.
+  let renameTo: string | null = null;
+  if (command.name !== String(person.id)) {
+    const idCheck = validateFullEditId(
+      d,
+      d.readItems(state),
+      d.readGroups(state),
+      command.name,
+      false,
+      person.id,
+    );
+    if (!idCheck.ok) {
+      return reject(
+        index,
+        "invalid_value",
+        `${label}: cannot be renamed to "${command.name.trim()}": ${idCheck.message}.`,
+      );
+    }
+    renameTo = idCheck.id;
+  }
+  const groups = [...new Set(command.groups)];
+  const refused = missingStaffGroup(state, label, groups, index);
+  if (refused) return refused;
+
+  let next: ScenarioUiState;
+  try {
+    const renamed = renameTo === null ? state : renameItem(state, d, person.id, renameTo);
+    next = writeItemGroups(renamed, d, renameTo ?? person.id, groups);
+  } catch (error) {
+    // Backstop only: `validateFullEditId` above refuses every collision first.
+    if (!(error instanceof RenameCollisionError)) throw error;
+    return reject(index, "invalid_value", `${label}: ${error.message}`);
+  }
+  if (unchanged(state, next)) {
+    return reject(index, "no_effect", `${label}: already has that name and those groups.`);
+  }
+  return { ok: true, next };
+}
+
+function applyRemovePerson(
+  state: ScenarioUiState,
+  command: Extract<AssistantCommandV1, { type: "remove_person" }>,
+  index: number,
+): OperationResult {
+  const person = findPerson(state, command.personId);
+  if (!person) return reject(index, "unknown_target", unknownPersonMessage(command.personId));
+  return { ok: true, next: deleteItem(state, peopleDescriptor, person.id) };
+}
+
+function applyAddPeopleGroup(
+  state: ScenarioUiState,
+  command: Extract<AssistantCommandV1, { type: "add_people_group" }>,
+  index: number,
+): OperationResult {
+  const d = peopleDescriptor;
+  const idCheck = validateFullEditId(
+    d,
+    d.readItems(state),
+    d.readGroups(state),
+    command.groupId,
+    true,
+  );
+  if (!idCheck.ok) {
+    return reject(
+      index,
+      "invalid_value",
+      `Staff group "${command.groupId.trim()}": ${idCheck.message}.`,
+    );
+  }
+  const members = [...new Set(command.members)];
+  const refused = missingMember(state, `Staff group "${idCheck.id}"`, members, index);
+  if (refused) return refused;
+  const withGroup = addGroup(state, d, {
+    id: idCheck.id,
+    description: command.description.trim() || undefined,
+  });
+  return {
+    ok: true,
+    next: writeGroupMembers(withGroup, d, idCheck.id, members),
+  };
+}
+
+function applyEditPeopleGroup(
+  state: ScenarioUiState,
+  command: Extract<AssistantCommandV1, { type: "edit_people_group" }>,
+  index: number,
+): OperationResult {
+  const d = peopleDescriptor;
+  const group = state.staffGroups.find((g) => g.id === command.groupId);
+  if (!group) {
+    return reject(
+      index,
+      "unknown_target",
+      `Staff group "${command.groupId}": there is no such staff group.`,
+    );
+  }
+  const label = `Staff group "${group.id}"`;
+  // The group form's own rule: only changed id TEXT is a rename.
+  let gid = group.id;
+  const idChanged = command.newGroupId !== group.id;
+  if (idChanged) {
+    const idCheck = validateFullEditId(
+      d,
+      d.readItems(state),
+      d.readGroups(state),
+      command.newGroupId,
+      true,
+      group.id,
+    );
+    if (!idCheck.ok) {
+      return reject(
+        index,
+        "invalid_value",
+        `${label}: cannot be renamed to "${command.newGroupId.trim()}": ${idCheck.message}.`,
+      );
+    }
+    gid = idCheck.id;
+  }
+  const members = [...new Set(command.members)];
+  const refused = missingMember(state, label, members, index);
+  if (refused) return refused;
+
+  let next: ScenarioUiState;
+  try {
+    next = idChanged ? renameGroup(state, d, group.id, gid) : state;
+  } catch (error) {
+    if (!(error instanceof RenameCollisionError)) throw error;
+    return reject(index, "invalid_value", `${label}: ${error.message}`);
+  }
+  next = updateGroupFields(next, d, gid, {
+    description: command.description.trim() || undefined,
+  });
+  next = writeGroupMembers(next, d, gid, members);
+  if (unchanged(state, next)) {
+    return reject(
+      index,
+      "no_effect",
+      `${label}: already has that name, description and those members.`,
+    );
+  }
+  return { ok: true, next };
+}
+
+function applyRemovePeopleGroup(
+  state: ScenarioUiState,
+  command: Extract<AssistantCommandV1, { type: "remove_people_group" }>,
+  index: number,
+): OperationResult {
+  if (!state.staffGroups.some((group) => group.id === command.groupId)) {
+    return reject(
+      index,
+      "unknown_target",
+      `Staff group "${command.groupId}": there is no such staff group.`,
+    );
+  }
+  return {
+    ok: true,
+    next: deleteGroup(state, peopleDescriptor, command.groupId),
+  };
+}
+
 /** Validate and apply exactly one command against `state`. */
 export function applyAssistantCommand(
   state: ScenarioUiState,
@@ -1132,6 +1424,18 @@ export function applyAssistantCommand(
       return applyEditStaffingRequirement(state, command, index);
     case "remove_rule":
       return applyRemoveRule(state, command, index);
+    case "add_person":
+      return applyAddPerson(state, command, index);
+    case "edit_person":
+      return applyEditPerson(state, command, index);
+    case "remove_person":
+      return applyRemovePerson(state, command, index);
+    case "add_people_group":
+      return applyAddPeopleGroup(state, command, index);
+    case "edit_people_group":
+      return applyEditPeopleGroup(state, command, index);
+    case "remove_people_group":
+      return applyRemovePeopleGroup(state, command, index);
   }
 }
 
