@@ -30,6 +30,8 @@ const SHIPPED = [...Object.keys(MODEL_VISIBLE_TOOL_SCHEMAS), ...PARAMETERLESS_MO
 const NOT_REGISTRY_GOVERNED: Record<string, string> = {
   test_feasibility_candidates: "T10 diagnostics: bounded infeasibility search, not a help answer",
   prepare_scenario_change: "T07 proposals: prepares a Preview the HOST applies",
+  request_optimize_run: "Optimiser run: shows a host card; the USER starts the run",
+  get_optimize_result: "Optimiser run: reads the Optimise screen's run view",
 };
 
 describe("assistant tool names", () => {

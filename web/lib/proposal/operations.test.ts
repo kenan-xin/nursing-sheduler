@@ -9,7 +9,7 @@
 import { describe, expect, it } from "vitest";
 import type { ScenarioUiState } from "@/lib/scenario";
 import { applyAssistantCommand, applyAssistantCommands } from "./operations";
-import { octoberWard, peopleScenario, proposalScenario } from "./test-support";
+import { octoberWard, peopleScenario, proposalScenario, ruleWardScenario } from "./test-support";
 
 describe("set_roster_range", () => {
   it("purges references to dates that leave the range", () => {
@@ -362,7 +362,10 @@ describe("add_shift_type / add_shift_group", () => {
     const result = applyAssistantCommand(proposalScenario(), shift("N", "20:00", "08:30", "", 60));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.next.shifts.at(-1)).toMatchObject({ restMinutes: 60, durationMinutes: 690 });
+    expect(result.next.shifts.at(-1)).toMatchObject({
+      restMinutes: 60,
+      durationMinutes: 690,
+    });
   });
 
   it("refuses a rest the Shifts page cannot hold, naming the shift", () => {
@@ -426,14 +429,27 @@ describe("leave and request arms", () => {
     startDate: string,
     endDate: string,
     weight: number | "must" | "never",
-  ) => ({ type: "set_off_request" as const, personId, startDate, endDate, weight });
+  ) => ({
+    type: "set_off_request" as const,
+    personId,
+    startDate,
+    endDate,
+    weight,
+  });
   const wants = (
     personId: string | number,
     shiftType: string,
     startDate: string,
     endDate: string,
     weight: number | "must" | "never",
-  ) => ({ type: "set_shift_request" as const, personId, shiftType, startDate, endDate, weight });
+  ) => ({
+    type: "set_shift_request" as const,
+    personId,
+    shiftType,
+    startDate,
+    endDate,
+    weight,
+  });
   const clear = (personId: string | number, startDate: string, endDate = startDate) => ({
     type: "clear_requests" as const,
     personId,
@@ -498,8 +514,20 @@ describe("leave and request arms", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(at(result.next, "Chris", "20")).toEqual([
-      { kind: "request", person: "Chris", date: "20", shiftType: "D", weight: 2 },
-      { kind: "request", person: "Chris", date: "20", shiftType: "L", weight: 5 },
+      {
+        kind: "request",
+        person: "Chris",
+        date: "20",
+        shiftType: "D",
+        weight: 2,
+      },
+      {
+        kind: "request",
+        person: "Chris",
+        date: "20",
+        shiftType: "L",
+        weight: 5,
+      },
     ]);
   });
 
@@ -510,8 +538,12 @@ describe("leave and request arms", () => {
     ]);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(at(result.next, "Chris", "05")[0]).toMatchObject({ weight: Infinity });
-    expect(at(result.next, "Chris", "06")[0]).toMatchObject({ weight: -Infinity });
+    expect(at(result.next, "Chris", "05")[0]).toMatchObject({
+      weight: Infinity,
+    });
+    expect(at(result.next, "Chris", "06")[0]).toMatchObject({
+      weight: -Infinity,
+    });
   });
 
   it("cancels Ana's leave on 14 Oct and puts her on the night, in one change", () => {
@@ -522,7 +554,13 @@ describe("leave and request arms", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(at(result.next, "Ana", "14")).toEqual([
-      { kind: "request", person: "Ana", date: "14", shiftType: "N", weight: Infinity },
+      {
+        kind: "request",
+        person: "Ana",
+        date: "14",
+        shiftType: "N",
+        weight: Infinity,
+      },
     ]);
   });
 
@@ -614,6 +652,564 @@ describe("leave and request arms", () => {
     const empty = applyAssistantCommand(octoberWard(), clear("Ana", "2026-10-01"));
     expect(empty.ok).toBe(false);
     if (!empty.ok) expect(empty.rejection.message).toContain("nothing recorded");
+  });
+});
+
+describe("add_succession_rule / edit_succession_rule", () => {
+  const noDayAfterNight = {
+    type: "add_succession_rule" as const,
+    description: "No day shift straight after a night shift",
+    people: ["ana", "ben", "cai"] as (string | number)[],
+    pattern: ["Night", "Day"],
+    dates: ["ALL"],
+    weight: "-infinity",
+  };
+  // Defaults restate `suc-nd` exactly, so `edit()` with no overrides changes nothing.
+  const edit = (overrides: Partial<Omit<typeof noDayAfterNight, "type">> = {}) => ({
+    ...noDayAfterNight,
+    type: "edit_succession_rule" as const,
+    ruleId: "suc-nd",
+    description: "No day after night",
+    people: ["ana", "ben"] as (string | number)[],
+    ...overrides,
+  });
+
+  it("expresses 'no day shift straight after a night shift' as a hard rule", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), noDayAfterNight);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const created = result.next.cardsByKind.successions.at(-1);
+    expect(created).toEqual({
+      uid: expect.any(String),
+      description: "No day shift straight after a night shift",
+      person: ["ana", "ben", "cai"],
+      pattern: ["Night", "Day"],
+      date: ["ALL"],
+      weight: Number.NEGATIVE_INFINITY,
+    });
+    expect(created?.uid).not.toBe("suc-nd");
+  });
+
+  it("accepts a staff group, a soft weight and specific dates", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), {
+      ...noDayAfterNight,
+      people: ["RN"],
+      weight: "-50",
+      dates: ["2026-04-06", "2026-04-07"],
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.next.cardsByKind.successions.at(-1)).toMatchObject({
+        person: ["RN"],
+        date: ["2026-04-06", "2026-04-07"],
+        weight: -50,
+      });
+    }
+  });
+
+  it("gives two identical new rules different ids, the same on every run", () => {
+    const first = applyAssistantCommands(ruleWardScenario(), [noDayAfterNight, noDayAfterNight]);
+    const again = applyAssistantCommands(ruleWardScenario(), [noDayAfterNight, noDayAfterNight]);
+    expect(first.ok && again.ok).toBe(true);
+    if (!first.ok || !again.ok) return;
+    const [, a, b] = first.next.cardsByKind.successions.map((card) => card.uid);
+    expect(a).not.toBe(b);
+    // Apply re-derives the document; it must write the ids the Preview showed.
+    expect(again.next).toEqual(first.next);
+  });
+
+  it("refuses ALL as people, naming it", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), {
+      ...noDayAfterNight,
+      people: ["ALL"],
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.code).toBe("unknown_target");
+    expect(result.rejection.message).toContain(
+      'Shift sequence rule "No day shift straight after a night shift"',
+    );
+    expect(result.rejection.message).toContain('"ALL"');
+    expect(result.rejection.message).toContain("Name each person");
+  });
+
+  it("edit keeps a rule scoped to ALL", () => {
+    const state = ruleWardScenario();
+    state.cardsByKind.successions[0] = {
+      ...state.cardsByKind.successions[0],
+      person: "ALL",
+    };
+    const result = applyAssistantCommand(state, edit({ people: ["ALL"], weight: "-50" }));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.next.cardsByKind.successions[0]).toMatchObject({
+        person: ["ALL"],
+        weight: -50,
+      });
+    }
+  });
+
+  it("refuses a shift that does not exist", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), {
+      ...noDayAfterNight,
+      pattern: ["Night", "Evening"],
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.rejection.message).toContain('"Evening"');
+  });
+
+  it("refuses a matrix day id and accepts the ISO date", () => {
+    const refused = applyAssistantCommand(ruleWardScenario(), {
+      ...noDayAfterNight,
+      dates: ["02"],
+    });
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) {
+      expect(refused.rejection.code).toBe("unknown_target");
+      expect(refused.rejection.message).toContain("YYYY-MM-DD");
+    }
+    const accepted = applyAssistantCommand(ruleWardScenario(), {
+      ...noDayAfterNight,
+      dates: ["2026-04-02"],
+    });
+    expect(accepted.ok).toBe(true);
+  });
+
+  it("refuses a scope chip mixed with other dates, as the Dates field cannot hold it", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), {
+      ...noDayAfterNight,
+      dates: ["WEEKEND", "2026-04-06"],
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.code).toBe("invalid_value");
+    expect(result.rejection.message).toContain("must be the only date entry");
+  });
+
+  it("refuses what the form refuses, in the form's words", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), {
+      ...noDayAfterNight,
+      pattern: ["Night"],
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.code).toBe("invalid_value");
+    expect(result.rejection.message).toContain(
+      "At least 2 shift types must be selected for a succession pattern",
+    );
+  });
+
+  it("refuses a weight the Weight box would not accept", () => {
+    // `.inf` is how the context document spells a hard weight; the box does not accept it.
+    for (const weight of ["hard", ".inf", ""]) {
+      const result = applyAssistantCommand(ruleWardScenario(), edit({ weight }));
+      expect(result.ok, weight).toBe(false);
+      if (result.ok) continue;
+      expect(result.rejection.message).toContain('Shift sequence rule "No day after night"');
+      expect(result.rejection.message).toContain(
+        "Weight must be a valid number, Infinity, or -Infinity",
+      );
+    }
+  });
+
+  it("edit keeps the rule's id and keeps a switched-off rule off", () => {
+    const state = ruleWardScenario();
+    state.cardsByKind.successions[0] = {
+      ...state.cardsByKind.successions[0],
+      disabled: true,
+    };
+    const result = applyAssistantCommand(state, edit({ weight: "-50" }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.next.cardsByKind.successions).toEqual([
+      {
+        uid: "suc-nd",
+        description: "No day after night",
+        person: ["ana", "ben"],
+        pattern: ["Night", "Day"],
+        date: ["ALL"],
+        weight: -50,
+        disabled: true,
+      },
+    ]);
+  });
+
+  it("refuses an edit that changes nothing", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), edit());
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.rejection.code).toBe("no_effect");
+  });
+
+  it("refuses to edit a rule that is gone", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), edit({ ruleId: "nope" } as never));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.rejection.code).toBe("unknown_target");
+  });
+
+  it("refuses to edit a pattern the screen shows as read-only", () => {
+    const state = ruleWardScenario();
+    state.cardsByKind.successions[0] = {
+      ...state.cardsByKind.successions[0],
+      pattern: [["Night", "Day"], "OFF"],
+    };
+    const result = applyAssistantCommand(state, edit({ weight: "-5" }));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.rejection.code).toBe("unsupported_shape");
+  });
+});
+
+describe("add_count_rule / edit_count_rule", () => {
+  const nightCap = {
+    type: "add_count_rule" as const,
+    description: "At most 5 night shifts per nurse per month",
+    people: ["ana", "ben", "cai"] as (string | number)[],
+    shiftTypes: ["Night"],
+    dates: ["ALL"],
+    expression: "x <= T" as const,
+    target: 5,
+    weight: "infinity",
+  };
+  // Defaults restate `cnt-nights` exactly.
+  const edit = (overrides: Partial<Omit<typeof nightCap, "type">> = {}) => ({
+    ...nightCap,
+    type: "edit_count_rule" as const,
+    ruleId: "cnt-nights",
+    description: "Night cap",
+    people: ["ana"] as (string | number)[],
+    target: 6,
+    ...overrides,
+  });
+
+  it("expresses 'at most 5 night shifts per nurse per month' as a hard rule", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), nightCap);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.next.cardsByKind.counts.at(-1)).toEqual({
+      uid: expect.any(String),
+      description: "At most 5 night shifts per nurse per month",
+      person: ["ana", "ben", "cai"],
+      countDates: ["ALL"],
+      countShiftTypes: ["Night"],
+      expression: "x <= T",
+      target: 5,
+      weight: Number.POSITIVE_INFINITY,
+    });
+  });
+
+  it("stores the counted shifts in the Shifts page order, as the screen does", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), {
+      ...nightCap,
+      shiftTypes: ["Night", "Day"],
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok)
+      expect(result.next.cardsByKind.counts.at(-1)?.countShiftTypes).toEqual(["Day", "Night"]);
+  });
+
+  it("accepts OFF and a shift group, as the screen's picker offers them", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), {
+      ...nightCap,
+      description: "At least 8 days off",
+      shiftTypes: ["OFF"],
+      expression: "x >= T",
+      target: 8,
+    });
+    expect(result.ok).toBe(true);
+    const group = applyAssistantCommand(ruleWardScenario(), {
+      ...nightCap,
+      shiftTypes: ["Working shifts"],
+    });
+    expect(group.ok).toBe(true);
+  });
+
+  it("refuses 'close to target' with a hard weight, in the screen's words", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), {
+      ...nightCap,
+      expression: "|x - T|^2",
+      weight: "infinity",
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.message).toContain(
+      'Shift count rule "At most 5 night shifts per nurse per month"',
+    );
+    expect(result.rejection.message).toContain("Weight must be non-positive");
+  });
+
+  it("refuses a target that is not a whole number of zero or more", () => {
+    for (const target of [2.5, -1]) {
+      const result = applyAssistantCommand(ruleWardScenario(), {
+        ...nightCap,
+        target,
+      });
+      expect(result.ok, String(target)).toBe(false);
+      if (!result.ok)
+        expect(result.rejection.message).toContain("Target must be a non-negative integer");
+    }
+  });
+
+  it("edit keeps coefficients and the off marker", () => {
+    const state = ruleWardScenario();
+    state.cardsByKind.counts[0] = {
+      ...state.cardsByKind.counts[0],
+      countShiftTypeCoefficients: [["Night", 2]],
+      disabled: true,
+    };
+    const result = applyAssistantCommand(state, edit({ target: 4 }));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.next.cardsByKind.counts[0]).toEqual({
+        ...state.cardsByKind.counts[0],
+        target: 4,
+      });
+    }
+  });
+
+  it("refuses to edit a contracted-hours count", () => {
+    const state = ruleWardScenario();
+    state.cardsByKind.counts = [
+      {
+        uid: "cnt-hours",
+        description: "Contract",
+        person: ["ana"],
+        countDates: ["ALL"],
+        countShiftTypes: ["Day"],
+        expression: ["x >= T", "x <= T"],
+        target: [10, 12],
+        weight: -1,
+        tag: "contracted_hours",
+        policy: "range",
+      },
+    ];
+    const result = applyAssistantCommand(state, edit({ ruleId: "cnt-hours" } as never));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.rejection.code).toBe("unsupported_shape");
+  });
+
+  it("refuses an edit that changes nothing", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), edit());
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.rejection.code).toBe("no_effect");
+  });
+
+  it("edit keeps a rule scoped to ALL, as the form's loaded draft does", () => {
+    const state = ruleWardScenario();
+    state.cardsByKind.counts[0] = {
+      ...state.cardsByKind.counts[0],
+      person: "ALL",
+      target: 5,
+    };
+    const result = applyAssistantCommand(state, edit({ people: ["ALL"], target: 6 }));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.next.cardsByKind.counts[0]).toMatchObject({
+        person: ["ALL"],
+        target: 6,
+      });
+    }
+    // A new rule still names people: ALL is only kept, never introduced.
+    expect(applyAssistantCommand(state, { ...nightCap, people: ["ALL"] }).ok).toBe(false);
+  });
+});
+
+describe("add_staffing_requirement / edit_staffing_requirement", () => {
+  // A requirement is an EXACT head count (a range only with a preferred count), and
+  // qualifiedPeople bans everyone outside it from the shift. "At least k from a group"
+  // skill-mix rules are not expressible through this arm (see nursing-sheduler-2ti).
+  const twoRNs = {
+    type: "add_staffing_requirement" as const,
+    description: "Exactly 2 nurses on every night shift, RNs only",
+    shiftType: "Night",
+    qualifiedPeople: ["RN"] as (string | number)[],
+    dates: ["ALL"],
+    requiredNumPeople: 2,
+  };
+  const seniorEveryDay = {
+    ...twoRNs,
+    description: "Exactly one nurse on across the working shifts each day, seniors only",
+    shiftType: "Working shifts",
+    qualifiedPeople: ["Senior"] as (string | number)[],
+    requiredNumPeople: 1,
+  };
+  const edit = (overrides: Partial<Omit<typeof twoRNs, "type">> = {}) => ({
+    ...twoRNs,
+    type: "edit_staffing_requirement" as const,
+    ruleId: "req-day",
+    description: "Day cover",
+    shiftType: "Day",
+    qualifiedPeople: ["ALL"] as (string | number)[],
+    ...overrides,
+  });
+
+  it("expresses 'exactly 2 on every night shift, RNs only'", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), twoRNs);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.next.cardsByKind.requirements.at(-1)).toEqual({
+      uid: expect.any(String),
+      description: "Exactly 2 nurses on every night shift, RNs only",
+      shiftType: ["Night"],
+      requiredNumPeople: 2,
+      qualifiedPeople: ["RN"],
+      date: ["ALL"],
+      // No preferred count: the screen stamps the inert weight -1.
+      weight: -1,
+    });
+  });
+
+  it("a shift group is one combined count per date over all its shifts", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), seniorEveryDay);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.next.cardsByKind.requirements.at(-1)).toMatchObject({
+        shiftType: ["Working shifts"],
+        qualifiedPeople: ["Senior"],
+        requiredNumPeople: 1,
+      });
+    }
+  });
+
+  it("accepts ALL as the qualified people, as the screen offers it", () => {
+    expect(
+      applyAssistantCommand(ruleWardScenario(), {
+        ...twoRNs,
+        qualifiedPeople: ["ALL"],
+      }).ok,
+    ).toBe(true);
+  });
+
+  it("refuses a day state or ALL as the staffed shift, naming it", () => {
+    for (const shiftType of ["OFF", "ALL"]) {
+      const result = applyAssistantCommand(ruleWardScenario(), {
+        ...twoRNs,
+        shiftType,
+      });
+      expect(result.ok, shiftType).toBe(false);
+      if (result.ok) continue;
+      expect(result.rejection.code).toBe("unknown_target");
+      expect(result.rejection.message).toContain(`"${shiftType}"`);
+    }
+  });
+
+  it("refuses a negative head count in the screen's words", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), {
+      ...twoRNs,
+      requiredNumPeople: -1,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.rejection.message).toContain(
+        'Staffing requirement "Exactly 2 nurses on every night shift, RNs only"',
+      );
+      expect(result.rejection.message).toContain("Required number of people must be at least 0");
+    }
+  });
+
+  it("edit keeps the preferred count and its weight", () => {
+    const state = ruleWardScenario();
+    state.cardsByKind.requirements[0] = {
+      ...state.cardsByKind.requirements[0],
+      preferredNumPeople: 3,
+      weight: -50,
+    };
+    const result = applyAssistantCommand(state, edit({ qualifiedPeople: ["RN"] }));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.next.cardsByKind.requirements[0]).toMatchObject({
+        uid: "req-day",
+        qualifiedPeople: ["RN"],
+        preferredNumPeople: 3,
+        weight: -50,
+      });
+    }
+  });
+
+  it("edit refuses a head count above the preferred count, as the screen does", () => {
+    const state = ruleWardScenario();
+    state.cardsByKind.requirements[0] = {
+      ...state.cardsByKind.requirements[0],
+      preferredNumPeople: 3,
+      weight: -50,
+    };
+    const result = applyAssistantCommand(state, edit({ requiredNumPeople: 4 }));
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.rejection.message).toContain(
+        "Preferred number of people must be greater than required number of people",
+      );
+    }
+  });
+
+  it("edit may narrow a multi-shift requirement to one shift, as the screen's single-select does", () => {
+    const result = applyAssistantCommand(
+      ruleWardScenario(),
+      edit({
+        ruleId: "req-multi",
+        description: "Day or Night cover",
+        shiftType: "Night",
+      } as never),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.next.cardsByKind.requirements[1]).toMatchObject({
+        uid: "req-multi",
+        shiftType: ["Night"],
+      });
+    }
+  });
+
+  it("refuses to edit a requirement that is gone", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), edit({ ruleId: "nope" } as never));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.rejection.code).toBe("unknown_target");
+  });
+});
+
+describe("remove_rule", () => {
+  it("removes exactly that rule, leaving its neighbours in order", () => {
+    const state = ruleWardScenario();
+    const result = applyAssistantCommand(state, {
+      type: "remove_rule",
+      ruleKind: "requirements",
+      ruleId: "req-day",
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.next.cardsByKind.requirements.map((card) => card.uid)).toEqual(["req-multi"]);
+      expect(result.next.cardsByKind.successions).toBe(state.cardsByKind.successions);
+    }
+  });
+
+  it("removes a rule the same change just added", () => {
+    const add = {
+      type: "add_succession_rule" as const,
+      description: "Temp",
+      people: ["ana"],
+      pattern: ["Night", "Day"],
+      dates: ["ALL"],
+      weight: "-1",
+    };
+    const added = applyAssistantCommand(ruleWardScenario(), add);
+    if (!added.ok) throw new Error("fixture should apply");
+    const uid = added.next.cardsByKind.successions.at(-1)!.uid;
+    const result = applyAssistantCommands(ruleWardScenario(), [
+      add,
+      { type: "remove_rule", ruleKind: "successions", ruleId: uid },
+    ]);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.next).toEqual(ruleWardScenario());
+  });
+
+  it("refuses a rule that is not there, naming the family", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), {
+      type: "remove_rule",
+      ruleKind: "counts",
+      ruleId: "nope",
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.code).toBe("unknown_target");
+    expect(result.rejection.message).toContain("shift count rule");
   });
 });
 
@@ -798,7 +1394,10 @@ describe("Staff-screen arms", () => {
 
   it("edits a staff group like its Edit form: rename, description, members; keeps nested members", () => {
     const state = peopleScenario();
-    state.staffGroups[0] = { ...state.staffGroups[0], members: ["ana", 7, "Nested"] };
+    state.staffGroups[0] = {
+      ...state.staffGroups[0],
+      members: ["ana", 7, "Nested"],
+    };
     const result = applyAssistantCommand(state, {
       type: "edit_people_group",
       groupId: "RN",

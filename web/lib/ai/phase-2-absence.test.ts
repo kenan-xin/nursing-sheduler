@@ -51,6 +51,12 @@ const MODEL_VISIBLE_TOOLS = [
   "prepare_scenario_change",
   // T10 — submit bounded copied candidates to the optimizer.
   "test_feasibility_candidates",
+  // WIDENED DELIBERATELY (2026-09-24, plan assistant-optimize-run): solver runs are
+  // the next lifted family. request_optimize_run only shows a host card; the run
+  // starts from the user's Run click through the Optimize screen's own onSubmit.
+  // get_optimize_result reads that screen's run view. Neither names a roster verb.
+  "request_optimize_run",
+  "get_optimize_result",
 ] as const;
 
 /**
@@ -64,6 +70,9 @@ const MODEL_VISIBLE_TOOLS = [
 // WIDENED AGAIN (2026-09-24, plan assistant-leave-request-ops): leave, day-off and
 // shift requests are scenario INPUTS on the Requests page, compiled to its own paint
 // fold; none edits a produced roster.
+// WIDENED DELIBERATELY (2026-09-24, plan assistant-rule-ops): creating and editing
+// rules is Phase-1 scenario authoring. Each arm fills a rule editor's own form draft
+// and runs its own validator/builder; none acts on a produced roster.
 // WIDENED AGAIN (2026-09-24, plan assistant-people-ops): the Staff screen's own
 // add/edit/remove for people and staff groups, plus the Requests quick-paint
 // "must be off" run. All address the scenario, none a produced roster.
@@ -78,6 +87,13 @@ const PROPOSAL_OPERATIONS = [
   "set_off_request",
   "set_shift_request",
   "clear_requests",
+  "add_succession_rule",
+  "edit_succession_rule",
+  "add_count_rule",
+  "edit_count_rule",
+  "add_staffing_requirement",
+  "edit_staffing_requirement",
+  "remove_rule",
   "add_person",
   "edit_person",
   "remove_person",
@@ -137,25 +153,21 @@ describe("the model-visible surface cannot express a Phase-2 roster change", () 
     expect([...ASSISTANT_COMMAND_TYPES].sort()).toEqual([...PROPOSAL_OPERATIONS].sort());
   });
 
-  it("can point at roster generation, but has no way to start one", () => {
-    // The "could you generate the roster?" journey is deliberately a HELP answer plus
-    // a host navigation, not an action: `generate-roster` is a registry entry with a
-    // route and a control anchor and an EMPTY `supportedCommands`, so the assistant
-    // can explain it and take the user there while the run itself stays the user's.
-    // A non-empty command list here would be the first step toward the assistant
-    // starting official runs on its own.
+  it("can offer a roster run, but only the user can start one", () => {
+    // CHANGED DELIBERATELY (2026-09-24, plan assistant-optimize-run). This used to lock
+    // "can point at roster generation, but has no way to start one". Solver runs are
+    // now a lifted family: request_optimize_run shows a host card, and the run starts
+    // only from the user's Run click, through the Optimize screen's own onSubmit.
     //
-    // WHAT CHANGED (custom-AST ticket 3). This used to `indexOf` the entry's id in the
-    // help-content SOURCE and slice forward to the next `},` -- a hand-rolled object
-    // parser that a trailing comment, a nested object or a reordered field would have
-    // silently mis-sliced, producing a block that satisfied `toContain` for the wrong
-    // reason. The registry is an ordinary exported value; reading it is both simpler and
-    // exact.
+    // What stays locked: `generate-roster` still carries an EMPTY `supportedCommands`.
+    // That field lists SCENARIO writes, and a run writes none -- a non-empty list here
+    // would mean a run had started mutating the schedule.
     const entry = CAPABILITY_ENTRIES.find((candidate) => candidate.id === "generate-roster");
     expect(entry, "the generate-roster entry is missing").toBeDefined();
     expect(entry?.routeId).toBe("optimize-and-export");
     expect(entry?.controlAnchor).toBe("optimize.run-options");
     expect(entry?.supportedCommands).toEqual([]);
+    expect(entry?.nurseFacingSummary).toMatch(/only when you press Run/);
   });
 
   it("can reach no roster table from any transaction the assistant may start", () => {

@@ -4,11 +4,10 @@
 //
 // THE AUTHORITY TABLE, in registration order: scenario/context read (below),
 // capability/help lookup (`use-help-tools`), and prepare-proposal
-// (`use-proposal-tools`). All three are non-mutating. There is deliberately no Apply
-// tool and no diagnostic submit: Apply is a HOST action the user takes on a rendered
-// card, and diagnostics arrive with T10 behind their own gate. Registering a
-// placeholder for either would let a model announce a capability the app cannot
-// honour.
+// (`use-proposal-tools`). All of them are non-mutating. There is deliberately no Apply
+// tool and no run-start tool: a run starts only from the user's click on a host card.
+// Registering a placeholder for either would let a model announce a capability the
+// app cannot honour.
 //
 // TOOL EXECUTION IS UNTRUSTED INPUT, not authorization. Even for reads that change
 // nothing, a handler that completes after its turn was superseded must return
@@ -28,6 +27,7 @@ import { summarizeScenario } from "@/lib/ai/assistant/scenario-context";
 import { useHelpTools } from "./use-help-tools";
 import { useProposalTools } from "./use-proposal-tools";
 import { useDiagnosticTools } from "./use-diagnostic-tools";
+import { useOptimizeTools } from "./use-optimize-tools";
 
 const DOMAINS = ["dates", "staff", "shifts", "rules", "requests"] as const;
 type Domain = (typeof DOMAINS)[number];
@@ -70,6 +70,9 @@ export function useModelVisibleTools(agentId: string, turnEpoch: number): void {
   // a diagnostic-search row and — when a candidate genuinely tested feasible — the
   // same T07 proposal row `useProposalTools` writes, under the same fences.
   useDiagnosticTools(agentId, turnEpoch);
+  // The optimiser pair (plan 2026-09-24): offer a run the USER starts from a host
+  // card, and read the run view the Optimise screen renders. Neither starts a run.
+  useOptimizeTools(agentId, turnEpoch);
 
   useParameterlessModelVisibleTool(
     {

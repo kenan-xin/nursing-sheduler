@@ -230,7 +230,9 @@ async function providerToolDefinitions(): Promise<Map<string, JsonNode>> {
     ),
   );
 
-  const tools = provider.calls[0].body.tools as { function: { name: string } }[];
+  const tools = provider.calls[0].body.tools as {
+    function: { name: string };
+  }[];
   return new Map(tools.map((tool) => [tool.function.name, child(tool as JsonNode, "function")]));
 }
 
@@ -287,7 +289,12 @@ describe("the command arms the provider is actually shown", () => {
         ruleId: "r1",
         requiredNumPeople: 2,
       },
-      move_leave: { type: "move_leave", personId: 7, fromDate: "02", toDate: "03" },
+      move_leave: {
+        type: "move_leave",
+        personId: 7,
+        fromDate: "02",
+        toDate: "03",
+      },
       add_shift_type: {
         type: "add_shift_type",
         code: "N",
@@ -296,7 +303,11 @@ describe("the command arms the provider is actually shown", () => {
         endTime: "08:30",
         restMinutes: 60,
       },
-      add_shift_group: { type: "add_shift_group", groupId: "Night shifts", members: ["N"] },
+      add_shift_group: {
+        type: "add_shift_group",
+        groupId: "Night shifts",
+        members: ["N"],
+      },
       add_leave: {
         type: "add_leave",
         personId: "Ana",
@@ -324,8 +335,77 @@ describe("the command arms the provider is actually shown", () => {
         startDate: "2026-10-14",
         endDate: "2026-10-14",
       },
-      add_person: { type: "add_person", name: "Float RN (Ward 5)", groups: ["RN"] },
-      edit_person: { type: "edit_person", personId: "ana", name: "Ana Lim", groups: ["RN"] },
+      add_succession_rule: {
+        type: "add_succession_rule",
+        description: "No day shift straight after a night shift",
+        people: ["ana", "ben"],
+        pattern: ["Night", "Day"],
+        dates: ["ALL"],
+        weight: "-infinity",
+      },
+      edit_succession_rule: {
+        type: "edit_succession_rule",
+        ruleId: "s1",
+        description: "No day shift straight after a night shift",
+        people: ["ana", "ben"],
+        pattern: ["Night", "Day"],
+        dates: ["ALL"],
+        weight: "-50",
+      },
+      add_count_rule: {
+        type: "add_count_rule",
+        description: "At most 5 night shifts per nurse per month",
+        people: ["ana", "ben"],
+        shiftTypes: ["Night"],
+        dates: ["ALL"],
+        expression: "x <= T",
+        target: 5,
+        weight: "infinity",
+      },
+      edit_count_rule: {
+        type: "edit_count_rule",
+        ruleId: "c1",
+        description: "Night cap",
+        people: ["ana"],
+        shiftTypes: ["Night"],
+        dates: ["ALL"],
+        expression: "x <= T",
+        target: 4,
+        weight: "infinity",
+      },
+      add_staffing_requirement: {
+        type: "add_staffing_requirement",
+        description: "Two RNs on every night shift",
+        shiftType: "Night",
+        qualifiedPeople: ["RN"],
+        dates: ["ALL"],
+        requiredNumPeople: 2,
+      },
+      edit_staffing_requirement: {
+        type: "edit_staffing_requirement",
+        ruleId: "r1",
+        description: "Two RNs on every night shift",
+        shiftType: "Night",
+        qualifiedPeople: ["RN"],
+        dates: ["WEEKEND"],
+        requiredNumPeople: 3,
+      },
+      remove_rule: {
+        type: "remove_rule",
+        ruleKind: "affinities",
+        ruleId: "a1",
+      },
+      add_person: {
+        type: "add_person",
+        name: "Float RN (Ward 5)",
+        groups: ["RN"],
+      },
+      edit_person: {
+        type: "edit_person",
+        personId: "ana",
+        name: "Ana Lim",
+        groups: ["RN"],
+      },
       remove_person: { type: "remove_person", personId: 7 },
       add_people_group: {
         type: "add_people_group",

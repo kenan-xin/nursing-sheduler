@@ -230,11 +230,11 @@ describe("the responsive dock and sheet", () => {
     expect(screen.queryByRole("button", { name: /apply/i })).not.toBeInTheDocument();
   });
 
-  it("presents the app's own welcome content, and states that it cannot change anything", async () => {
+  it("presents the app's own welcome content, and states nothing changes without the user's say-so", async () => {
     render(<AssistantSurface />);
 
     const welcome = await screen.findAllByTestId("assistant-welcome");
-    expect(welcome[0]).toHaveTextContent(/cannot change anything yet/i);
+    expect(welcome[0]).toHaveTextContent(/nothing changes until you say so/i);
   });
 
   it("never renders the credential", async () => {

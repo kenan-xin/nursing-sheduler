@@ -72,6 +72,9 @@ describe("the attached turn context", () => {
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/instead of refusing/);
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/open_app_screen/);
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/Never claim .*applied/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/request_optimize_run/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/only when the user presses Run/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/get_optimize_result/);
   });
 
   it("carries the route and the exact revision the document was read at", () => {

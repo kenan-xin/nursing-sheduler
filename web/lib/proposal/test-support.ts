@@ -31,7 +31,14 @@ export function proposalScenario(): ScenarioUiState {
     reqData: [
       { uid: "cell-leave", person: "ana", date: "02", kind: "leave" },
       { uid: "cell-off", person: "bo", date: "29", kind: "off", weight: -5 },
-      { uid: "cell-req", person: "ana", date: "07", kind: "request", shiftType: "Day", weight: 3 },
+      {
+        uid: "cell-req",
+        person: "ana",
+        date: "07",
+        kind: "request",
+        shiftType: "Day",
+        weight: 3,
+      },
     ],
     cardsByKind: {
       requirements: [
@@ -86,7 +93,14 @@ export function octoberWard(): ScenarioUiState {
     reqData: [
       { uid: "ana-leave-14", person: "Ana", date: "14", kind: "leave" },
       { uid: "ben-off-21", person: "Ben", date: "21", kind: "off", weight: 5 },
-      { uid: "ben-req-22", person: "Ben", date: "22", kind: "request", shiftType: "D", weight: 3 },
+      {
+        uid: "ben-req-22",
+        person: "Ben",
+        date: "22",
+        kind: "request",
+        shiftType: "D",
+        weight: 3,
+      },
       {
         uid: "chris-req-20",
         person: "Chris",
@@ -96,6 +110,54 @@ export function octoberWard(): ScenarioUiState {
         weight: 2,
       },
     ],
+  };
+}
+
+/**
+ * The ward the rule examples need: RN and Senior staff groups, a "Working shifts" group
+ * spanning every worked shift, and one editable rule of each card-editor family. The
+ * request matrix is emptied so no cell names a person who is not on this staff list.
+ */
+export function ruleWardScenario(): ScenarioUiState {
+  const base = proposalScenario();
+  return {
+    ...base,
+    staff: [
+      { _k: "p1", id: "ana" },
+      { _k: "p2", id: "ben" },
+      { _k: "p3", id: "cai" },
+    ],
+    staffGroups: [
+      { _k: "pg1", id: "RN", members: ["ana", "ben"] },
+      { _k: "pg2", id: "Senior", members: ["cai"] },
+    ],
+    shiftGroups: [{ _k: "sg1", id: "Working shifts", members: ["Day", "Night"] }],
+    reqData: [],
+    cardsByKind: {
+      ...base.cardsByKind,
+      successions: [
+        {
+          uid: "suc-nd",
+          description: "No day after night",
+          person: ["ana", "ben"],
+          pattern: ["Night", "Day"],
+          date: ["ALL"],
+          weight: Number.NEGATIVE_INFINITY,
+        },
+      ],
+      counts: [
+        {
+          uid: "cnt-nights",
+          description: "Night cap",
+          person: ["ana"],
+          countDates: ["ALL"],
+          countShiftTypes: ["Night"],
+          expression: "x <= T",
+          target: 6,
+          weight: Number.POSITIVE_INFINITY,
+        },
+      ],
+    },
   };
 }
 
@@ -118,7 +180,12 @@ export function peopleScenario(): ScenarioUiState {
     staff: [...base.staff, { _k: "p3", id: 7 }],
     staffGroups: [
       { _k: "sg1", id: "RN", members: ["ana", 7] },
-      { _k: "sg2", id: "Seniors", description: "Band 6 and above", members: ["bo"] },
+      {
+        _k: "sg2",
+        id: "Seniors",
+        description: "Band 6 and above",
+        members: ["bo"],
+      },
     ],
     cardsByKind: {
       ...base.cardsByKind,

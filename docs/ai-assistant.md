@@ -14,6 +14,7 @@ behaves exactly as it always has.
 | Suggest a scheduling rule, grounded in what this build actually supports | Invent a screen or control that does not exist |
 | Take you to the right screen | Send you to a URL it made up |
 | Prepare a change for you to review, with every knock-on effect shown | Press Apply |
+| Offer to run the optimiser, then tell you how the run went | Start a run without your Run click |
 | Test bounded “what if” repairs for a failed Optimize run against the real optimizer | Prove *why* a run failed |
 | Hand a tested repair to the normal Preview → confirm → Apply flow | Repair a produced roster (that is a later phase, and is not built) |
 
@@ -36,6 +37,12 @@ family at a time; the locked-scope tests (`web/lib/ai/phase-2-absence.test.ts`)
 change with each family. The instruction sent with every turn tells the model to
 use `prepare_scenario_change` for supported changes rather than refuse, and never
 to claim a change was made before the user applies it.
+
+**(2026-09-24) Solver runs lifted.** The assistant can offer an Optimize run with a
+card; the run starts only when you press Run, and goes through the Optimise screen's
+own Optimize path, so it is an ordinary run in every respect (settings, download,
+saved roster, Cancel). The assistant then reads the result, and after an infeasible
+run it can test candidate fixes on copies.
 
 ## Turning it on
 
@@ -116,7 +123,9 @@ requested* — rather than claiming it is already cancelled. If a background
 diagnostic cannot be confirmed cancelled within 15 seconds, the app detaches and
 tells you the job may still finish on the server. It never invents a result.
 
-None of this touches an ordinary Optimize run you started yourself.
+None of this touches an ordinary Optimize run, including one you started from the
+assistant's card: Stop ends the answer, not the run. Cancel the run on the Optimise
+screen.
 
 ## When something goes wrong
 

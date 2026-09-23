@@ -46,6 +46,12 @@ vi.mock("@copilotkit/react-core/v2", () => ({
   CopilotChatView: () => <div data-testid="chat-view-stub" />,
   CopilotChatMessageView: () => <div data-testid="chat-message-view-stub" />,
 }));
+// The live rendering now also mounts OptimizeRunRequestCard, which reads the router
+// through useCapabilityNavigation even when no run was offered (its hook still runs).
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/dates",
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+}));
 vi.mock("./use-assistant-session", () => ({
   useAssistantSession: () => ({
     messages: [],

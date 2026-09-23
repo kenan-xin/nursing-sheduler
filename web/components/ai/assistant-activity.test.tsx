@@ -229,4 +229,12 @@ describe("AssistantActivityStatus", () => {
     const { container } = render(<AssistantActivityStatus activity={null} />);
     expect(container.textContent).toBe("");
   });
+
+  it("labels the optimiser tools without claiming a run", () => {
+    render(<AssistantActivityStatus activity={{ kind: "tool", name: "request_optimize_run" }} />);
+    expect(screen.getByRole("status").textContent).toContain("Offering an optimiser run…");
+    cleanup();
+    render(<AssistantActivityStatus activity={{ kind: "tool", name: "get_optimize_result" }} />);
+    expect(screen.getByRole("status").textContent).toContain("Checking the optimiser run…");
+  });
 });

@@ -41,18 +41,22 @@ import {
   OPTIMIZE_TIMEOUT_MAX_SECONDS,
   OPTIMIZE_TIMEOUT_MIN_SECONDS,
   acquireSessionStorage,
+  clearOptimizeRunRequestOutcome,
   createAttemptRegistry,
   createOptimizeObservability,
   deriveOptimizeReadiness,
   isActiveLifecycle,
   isSettledLifecycle,
   migrateLegacySession,
+  reportOptimizeRunRequest,
   retireAbandonedRun,
   retireOnDocumentExit,
+  takeOptimizeRunRequest,
   useOptimizeRun,
   useOptimizeServerInfo,
   useOptimizeTerminal,
   useRosterCapture,
+  useRunRequestStore,
   type AttemptRegistry,
   type OptimizeObservability,
   type RetireAbandonedRunDeps,
@@ -500,17 +504,17 @@ export function OptimizeAndExportScreen({
   // That is what makes the coalescing a property of the code rather than of how
   // fast the machine is: two events dispatched in the same task cannot both see it
   // empty, whatever the scheduler does afterwards.
-  const inFlightSubmitRef = useRef<Promise<void> | null>(null);
+  const inFlightSubmitRef = useRef<Promise<boolean> | null>(null);
   const [submitInFlight, setSubmitInFlight] = useState(false);
 
-  const onSubmit = useCallback(async () => {
+  // Resolves true when the attempt reached the server, false when it stopped short.
+  const onSubmit = useCallback(async (): Promise<boolean> => {
     const joined = inFlightSubmitRef.current;
     if (joined !== null) {
-      await joined;
-      return;
+      return joined;
     }
     const input = await buildSubmitInput();
-    if (input === null) return;
+    if (input === null) return false;
     setStartFailed(false);
 
     // A deliberate new click supersedes whatever came before it, invisibly. This
@@ -518,6 +522,7 @@ export function OptimizeAndExportScreen({
     // attempt exists, so the old run can never observe itself as current again.
     abandonCurrentAttempt("spa");
     const attempt = attempts.start();
+    clearOptimizeRunRequestOutcome();
 
     runStartRef.current = Date.now();
     emittedTerminalRef.current = null;
@@ -546,7 +551,7 @@ export function OptimizeAndExportScreen({
             purgeSnapshot: retirementRef.current?.purgeSnapshot,
           },
         );
-        return;
+        return false;
       }
       // The one plain-language start failure. Only reported for the attempt that
       // is still current — an abandoned attempt has no screen to report to.
@@ -554,12 +559,17 @@ export function OptimizeAndExportScreen({
       if (attempt.isCurrent() && outcome.status === "blocked-before-post") {
         setStartFailed(true);
       }
+      return (
+        outcome.status !== "invalid" &&
+        outcome.status !== "blocked-before-post" &&
+        outcome.status !== "revoked-before-post"
+      );
     })();
 
     inFlightSubmitRef.current = flight;
     setSubmitInFlight(true);
     try {
-      await flight;
+      return await flight;
     } finally {
       if (inFlightSubmitRef.current === flight) {
         inFlightSubmitRef.current = null;
@@ -608,6 +618,32 @@ export function OptimizeAndExportScreen({
     : serverInfo.status !== "online"
       ? "Backend unavailable. Check that the configured backend is running."
       : null;
+
+  // ASSISTANT RUN REQUEST. The assistant's confirm card asks for exactly the run the
+  // Optimize button starts, so this calls the SAME `onSubmit`: options, lease
+  // preflight, basis, capture, download and cleanup are the button's, not a copy.
+  // It waits while the backend check is still `checking`; the request itself
+  // expires (`run-request.ts`), so a late mount never starts a surprise run.
+  const runRequested = useRunRequestStore((state) => state.pending !== null);
+  useEffect(() => {
+    if (!runRequested || serverInfo.status === "checking") return;
+    if (!takeOptimizeRunRequest()) return;
+    if (!readiness.ready) {
+      reportOptimizeRunRequest("not-ready");
+      return;
+    }
+    if (serverInfo.status !== "online") {
+      reportOptimizeRunRequest("backend-offline");
+      return;
+    }
+    if (submitInFlight) {
+      reportOptimizeRunRequest("busy");
+      return;
+    }
+    // Reported only once `onSubmit` settles: it can still stop short of a POST (bad
+    // timeout, lost lease, blocked submit), and "started" would then be false.
+    void onSubmit().then((started) => reportOptimizeRunRequest(started ? "started" : "blocked"));
+  }, [runRequested, serverInfo.status, readiness.ready, submitInFlight, onSubmit]);
 
   return (
     <Surface
