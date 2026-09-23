@@ -4,9 +4,12 @@ import { DELETE as deleteJob, GET as poll } from "@/app/api/optimize/[id]/route"
 import { POST as cancel } from "@/app/api/optimize/[id]/cancel/route";
 import { POST as finishNow } from "@/app/api/optimize/[id]/finish-now/route";
 import { GET as downloadXlsx } from "@/app/api/optimize/[id]/xlsx/route";
+import { GET as downloadRoster } from "@/app/api/optimize/[id]/roster/route";
 import { GET as events } from "@/app/api/optimize/[id]/events/route";
 
 type FetchArgs = { url: string; init: (RequestInit & { duplex?: string }) | undefined };
+
+const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
 const originalFetch = globalThis.fetch;
 let calls: FetchArgs[];
@@ -176,7 +179,7 @@ describe("POST /api/optimize (multipart submit)", () => {
 
 describe("GET /api/optimize/{id} (poll)", () => {
   it("relays a code-first job_not_found verbatim for the client to classify", async () => {
-    const body = { error: { code: "job_not_found", message: "Optimization job not found" } };
+    const body = { error: { code: "job_not_found", message: "Optimisation job not found" } };
     mockUpstream(() => new Response(JSON.stringify(body), { status: 404 }));
     const response = await poll(
       new Request("http://localhost/api/optimize/opt_x"),
@@ -339,6 +342,248 @@ describe("GET /api/optimize/{id}/xlsx", () => {
     );
     expect(response.status).toBe(404);
     expect(await response.json()).toEqual(body);
+  });
+});
+
+// The roster container is the B2/B3 authoritative structured view of a
+// completed job (tech-plan §2). The BFF is a strict JSON relay: it forwards the
+// backend's `application/json` body verbatim on success, relays code-first
+// error envelopes verbatim on failure (the client classifies them via
+// `classifyOptimizeError`), and only forwards the client-id cookie upstream.
+describe("GET /api/optimize/{id}/roster", () => {
+  it("relays the roster container JSON body verbatim and forwards only the client-id cookie", async () => {
+    process.env.PUBLIC_ORIGIN = "https://nursescheduling.org";
+    const container = {
+      schemaVersion: "roster-container/1",
+      people: [{ id: 1 }, { id: 2 }],
+      dates: [{ iso: "2026-07-01" }, { iso: "2026-07-02" }],
+      solvedDays: [
+        [{ kind: "shift", shiftId: "N" }, { kind: "off" }],
+        [{ kind: "off" }, { kind: "leave" }],
+      ],
+      score: 7,
+      solverStatus: "OPTIMAL",
+      coordinateMap: {
+        peopleRows: [3, 4],
+        dateColumns: [2, 3],
+        firstPeopleRow: 3,
+        leadingCols: 1,
+        historyCols: 0,
+        prettify: true,
+      },
+      xlsx: { name: "nurse-scheduling-opt_x.xlsx", mime: XLSX_MIME },
+    };
+    mockUpstream(
+      () =>
+        new Response(JSON.stringify(container), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+
+    const response = await downloadRoster(
+      new Request("http://localhost/api/optimize/opt_x/roster", {
+        headers: { cookie: "theme=dark; nurse_scheduling_client_id=abc; noise=1" },
+      }),
+      params("opt_x"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/json");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const forwarded = await response.json();
+    expect(forwarded).toEqual(container);
+    // The container body must NOT carry `xlsx.base64` — the backend already strips
+    // it; the BFF is byte-exact on top of that.
+    expect(forwarded).not.toHaveProperty("xlsx.base64");
+
+    const { url, init } = businessCalls()[0];
+    expect(url).toBe("http://backend:8000/optimize/opt_x/roster");
+    expect(init?.method).toBe("GET");
+    const upstreamHeaders = init?.headers as Headers;
+    expect(upstreamHeaders.get("cookie")).toBe("nurse_scheduling_client_id=abc");
+  });
+
+  it("preserves a malformed JSON body verbatim so the client can diagnose it (no reshape)", async () => {
+    mockUpstream(
+      () =>
+        new Response("not json", {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+
+    const response = await downloadRoster(
+      new Request("http://localhost/api/optimize/opt_x/roster"),
+      params("opt_x"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("not json");
+  });
+
+  it("relays a code-first 404 (job_not_found) verbatim — regression: /roster no longer 404s at the BFF layer", async () => {
+    const body = { error: { code: "job_not_found", message: "Optimisation job not found" } };
+    mockUpstream(
+      () =>
+        new Response(JSON.stringify(body), {
+          status: 404,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+
+    const response = await downloadRoster(
+      new Request("http://localhost/api/optimize/opt_x/roster"),
+      params("opt_x"),
+    );
+
+    // 404 is preserved verbatim — the BFF is wired (the pre-B3 regression was the
+    // framework's default 404 for a missing route, which would not carry the
+    // structured envelope and would not be classifiable as `job-not-found`).
+    expect(response.status).toBe(404);
+    expect(response.headers.get("content-type")).toBe("application/json");
+    expect(await response.json()).toEqual(body);
+    expect(businessCalls()[0].url).toBe("http://backend:8000/optimize/opt_x/roster");
+  });
+
+  // G6.1 — the reproduced production shape. A backend that predates the roster
+  // route answers with FastAPI's own unmatched-path body, on the SAME 404 status
+  // the application uses for `job_not_found`. Relayed verbatim it reaches the user
+  // as a bare "Not Found" that looks like a vanished job. It must be relabelled
+  // here — the only boundary that knows which path it asked for.
+  it("relabels a generic 404 {detail:'Not Found'} as a code-first 502 backend_route_unsupported", async () => {
+    mockUpstream(
+      () =>
+        new Response(JSON.stringify({ detail: "Not Found" }), {
+          status: 404,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+
+    const response = await downloadRoster(
+      new Request("http://localhost/api/optimize/opt_x/roster"),
+      params("opt_x"),
+    );
+
+    // NOT a 404: `isExactJobGoneResponse` requires one, so moving the status makes
+    // it structurally impossible for a deployment mismatch to become job-gone (and
+    // therefore DELETE) authority downstream.
+    expect(response.status).toBe(502);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const body = await response.json();
+    expect(body.error.code).toBe("backend_route_unsupported");
+    // Plain, actionable, and honest: it never claims the roster was saved.
+    expect(body.error.message).toMatch(/does not support saving rosters/);
+    // Honest: it must not read as though anything was kept.
+    expect(body.error.message).not.toMatch(/roster (was|has been) saved/i);
+    // The bare framework wording never reaches the client.
+    expect(JSON.stringify(body)).not.toContain("Not Found");
+    // The upstream was still asked exactly once, at the exact path.
+    expect(businessCalls()).toHaveLength(1);
+    expect(businessCalls()[0].url).toBe("http://backend:8000/optimize/opt_x/roster");
+  });
+
+  it("relabels a 404 with an empty or non-JSON body too (an intermediary's own page)", async () => {
+    mockUpstream(() => new Response("<html>404</html>", { status: 404 }));
+
+    const response = await downloadRoster(
+      new Request("http://localhost/api/optimize/opt_x/roster"),
+      params("opt_x"),
+    );
+
+    expect(response.status).toBe(502);
+    expect((await response.json()).error.code).toBe("backend_route_unsupported");
+  });
+
+  it("leaves every OTHER status untouched, including a non-code-first 500", async () => {
+    // The guard is scoped to 404 alone. A 5xx already classifies as `server-error`
+    // and says nothing about routing, so reshaping it would only lose information.
+    mockUpstream(
+      () =>
+        new Response(JSON.stringify({ detail: "Internal Server Error" }), {
+          status: 500,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+
+    const response = await downloadRoster(
+      new Request("http://localhost/api/optimize/opt_x/roster"),
+      params("opt_x"),
+    );
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ detail: "Internal Server Error" });
+  });
+
+  it("relays a code-first 409 (job_artifact_not_ready) verbatim — the no-artifact state", async () => {
+    const body = {
+      error: {
+        code: "job_artifact_not_ready",
+        message: "The job has not produced a downloadable artifact.",
+      },
+    };
+    mockUpstream(
+      () =>
+        new Response(JSON.stringify(body), {
+          status: 409,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+
+    const response = await downloadRoster(
+      new Request("http://localhost/api/optimize/opt_x/roster"),
+      params("opt_x"),
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual(body);
+  });
+
+  it("relays a code-first 500 (roster_container_invalid) verbatim — a server fault, not a request fault", async () => {
+    const body = {
+      error: {
+        code: "roster_container_invalid",
+        message: "The stored roster container is not valid UTF-8 JSON",
+      },
+    };
+    mockUpstream(
+      () =>
+        new Response(JSON.stringify(body), {
+          status: 500,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+
+    const response = await downloadRoster(
+      new Request("http://localhost/api/optimize/opt_x/roster"),
+      params("opt_x"),
+    );
+
+    expect(response.status).toBe(500);
+    expect(response.headers.get("content-type")).toBe("application/json");
+    expect(await response.json()).toEqual(body);
+  });
+
+  it("returns 502 (never the upstream URL) when the backend is unreachable", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockUpstream(() => {
+      throw new TypeError("fetch failed");
+    });
+
+    const response = await downloadRoster(
+      new Request("http://localhost/api/optimize/opt_x/roster"),
+      params("opt_x"),
+    );
+
+    expect(response.status).toBe(502);
+    expect((await response.json()).error.code).toBe("backend_unreachable");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    for (const call of consoleError.mock.calls) {
+      for (const arg of call) {
+        if (typeof arg === "string") expect(arg).not.toContain(process.env.BACKEND_API_URL ?? "\0");
+      }
+    }
+    consoleError.mockRestore();
   });
 });
 
@@ -511,6 +756,11 @@ describe("readiness gate fails closed on every business route", () => {
     [
       "xlsx",
       () => downloadXlsx(new Request("http://localhost/api/optimize/opt_x/xlsx"), params("opt_x")),
+    ],
+    [
+      "roster",
+      () =>
+        downloadRoster(new Request("http://localhost/api/optimize/opt_x/roster"), params("opt_x")),
     ],
   ];
 

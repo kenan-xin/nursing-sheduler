@@ -1,0 +1,23 @@
+id: openrouter-host-literal
+snapshots:
+  ? |
+    const base = "https://openrouter.ai/api/v1";
+  : labels:
+      - source: https://openrouter.ai/api/v1
+        style: primary
+        start: 14
+        end: 42
+  ? |
+    const url = `https://openrouter.ai/api/v1/models`;
+  : labels:
+      - source: "`https://openrouter.ai/api/v1/models`"
+        style: primary
+        start: 12
+        end: 49
+  ? |
+    fetch("https://openrouter.ai/api/v1/chat/completions");
+  : labels:
+      - source: https://openrouter.ai/api/v1/chat/completions
+        style: primary
+        start: 7
+        end: 52

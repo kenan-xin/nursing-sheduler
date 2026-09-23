@@ -1,7 +1,8 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
-// Uppercase eyebrow label per the README (+.03em tracking on labels/eyebrows).
+// Uppercase eyebrow label. DESIGN.md's Negative-Tracking Rule: every uppercase
+// label carries +0.03em, never default tracking.
 export function Label({ className, ...props }: React.ComponentProps<"label">) {
   return (
     <label

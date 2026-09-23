@@ -1,0 +1,221 @@
+id: surface-recipe-option-visual
+snapshots:
+  ? |
+    surfaceVariants({ role: "well", "className": "shadow-3" });
+  : labels:
+      - source: shadow-3
+        style: primary
+        start: 46
+        end: 54
+      - source: className
+        style: secondary
+        start: 33
+        end: 42
+      - source: '"className"'
+        style: secondary
+        start: 32
+        end: 43
+      - source: '"className": "shadow-3"'
+        style: secondary
+        start: 32
+        end: 55
+      - source: '"shadow-3"'
+        style: secondary
+        start: 45
+        end: 55
+      - source: 'surfaceVariants({ role: "well", "className": "shadow-3" })'
+        style: secondary
+        start: 0
+        end: 58
+  ? |
+    surfaceVariants({ role: "well", ["class"]: "rounded-card" });
+  : labels:
+      - source: rounded-card
+        style: primary
+        start: 44
+        end: 56
+      - source: class
+        style: secondary
+        start: 34
+        end: 39
+      - source: '["class"]'
+        style: secondary
+        start: 32
+        end: 41
+      - source: '["class"]: "rounded-card"'
+        style: secondary
+        start: 32
+        end: 57
+      - source: '"rounded-card"'
+        style: secondary
+        start: 43
+        end: 57
+      - source: 'surfaceVariants({ role: "well", ["class"]: "rounded-card" })'
+        style: secondary
+        start: 0
+        end: 60
+  ? |
+    surfaceVariants({ role: "well", ["className"]: "bg-panel" });
+  : labels:
+      - source: bg-panel
+        style: primary
+        start: 48
+        end: 56
+      - source: className
+        style: secondary
+        start: 34
+        end: 43
+      - source: '["className"]'
+        style: secondary
+        start: 32
+        end: 45
+      - source: '["className"]: "bg-panel"'
+        style: secondary
+        start: 32
+        end: 57
+      - source: '"bg-panel"'
+        style: secondary
+        start: 47
+        end: 57
+      - source: 'surfaceVariants({ role: "well", ["className"]: "bg-panel" })'
+        style: secondary
+        start: 0
+        end: 60
+  ? |
+    surfaceVariants({ role: "well", class: "border-brand" });
+  : labels:
+      - source: border-brand
+        style: primary
+        start: 40
+        end: 52
+      - source: class
+        style: secondary
+        start: 32
+        end: 37
+      - source: 'class: "border-brand"'
+        style: secondary
+        start: 32
+        end: 53
+      - source: '"border-brand"'
+        style: secondary
+        start: 39
+        end: 53
+      - source: 'surfaceVariants({ role: "well", class: "border-brand" })'
+        style: secondary
+        start: 0
+        end: 56
+  ? |
+    surfaceVariants({ role: "well", className: "[mask-type:luminance]" });
+  : labels:
+      - source: "[mask-type:luminance]"
+        style: primary
+        start: 44
+        end: 65
+      - source: className
+        style: secondary
+        start: 32
+        end: 41
+      - source: 'className: "[mask-type:luminance]"'
+        style: secondary
+        start: 32
+        end: 66
+      - source: '"[mask-type:luminance]"'
+        style: secondary
+        start: 43
+        end: 66
+      - source: 'surfaceVariants({ role: "well", className: "[mask-type:luminance]" })'
+        style: secondary
+        start: 0
+        end: 69
+  ? |
+    surfaceVariants({ role: "well", className: "bg-panel" });
+  : labels:
+      - source: bg-panel
+        style: primary
+        start: 44
+        end: 52
+      - source: className
+        style: secondary
+        start: 32
+        end: 41
+      - source: 'className: "bg-panel"'
+        style: secondary
+        start: 32
+        end: 53
+      - source: '"bg-panel"'
+        style: secondary
+        start: 43
+        end: 53
+      - source: 'surfaceVariants({ role: "well", className: "bg-panel" })'
+        style: secondary
+        start: 0
+        end: 56
+  ? |
+    surfaceVariants({ role: "well", className: "flex shadow-1" });
+  : labels:
+      - source: flex shadow-1
+        style: primary
+        start: 44
+        end: 57
+      - source: className
+        style: secondary
+        start: 32
+        end: 41
+      - source: 'className: "flex shadow-1"'
+        style: secondary
+        start: 32
+        end: 58
+      - source: '"flex shadow-1"'
+        style: secondary
+        start: 43
+        end: 58
+      - source: 'surfaceVariants({ role: "well", className: "flex shadow-1" })'
+        style: secondary
+        start: 0
+        end: 61
+  ? |
+    surfaceVariants({ role: "well", className: "visible" });
+  : labels:
+      - source: visible
+        style: primary
+        start: 44
+        end: 51
+      - source: className
+        style: secondary
+        start: 32
+        end: 41
+      - source: 'className: "visible"'
+        style: secondary
+        start: 32
+        end: 52
+      - source: '"visible"'
+        style: secondary
+        start: 43
+        end: 52
+      - source: 'surfaceVariants({ role: "well", className: "visible" })'
+        style: secondary
+        start: 0
+        end: 55
+  ? |
+    surfaceVariants({ role: "well", className: `text-ink2` });
+  : labels:
+      - source: text-ink2
+        style: primary
+        start: 44
+        end: 53
+      - source: className
+        style: secondary
+        start: 32
+        end: 41
+      - source: "className: `text-ink2`"
+        style: secondary
+        start: 32
+        end: 54
+      - source: "`text-ink2`"
+        style: secondary
+        start: 43
+        end: 54
+      - source: 'surfaceVariants({ role: "well", className: `text-ink2` })'
+        style: secondary
+        start: 0
+        end: 57

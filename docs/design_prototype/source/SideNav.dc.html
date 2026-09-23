@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div style="display:flex;flex-direction:column;height:100%;overflow:hidden;background:var(--sidebar);">
+  <div style="{{ brandPad }}">
+    <div style="{{ brandRow }}">
+      <div style="width:32px;height:32px;border-radius:var(--r-chip);background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-size:16px;flex:none;" title="{{ brandTitle }}"><i class="fa-solid fa-heart-pulse"></i></div>
+      <sc-if value="{{ expanded }}" hint-placeholder-val="{{ true }}">
+        <div style="min-width:0;">
+          <div style="font:700 var(--t-title) var(--font-display);letter-spacing:-.01em;line-height:1;">Rota</div>
+          <div style="font:500 var(--m-sm) var(--font-ui);color:var(--ink3);margin-top:4px;">Nurse scheduling</div>
+        </div>
+      </sc-if>
+    </div>
+  </div>
+
+  <sc-if value="{{ expanded }}" hint-placeholder-val="{{ true }}">
+    <div style="padding:2px 18px 12px;">
+      <div role="tablist" style="display:flex;gap:4px;padding:4px;background:var(--panel);border-radius:999px;">
+        <button role="tab" onClick="{{ modeGuided }}" style="{{ guidedStyle }}" aria-pressed="{{ isGuided }}">Guided</button>
+        <button role="tab" onClick="{{ modeAdvanced }}" style="{{ advancedStyle }}" aria-pressed="{{ isAdvanced }}">Advanced</button>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ collapsed }}" hint-placeholder-val="{{ false }}">
+    <div style="padding:2px 10px 12px;display:flex;justify-content:center;">
+      <button onClick="{{ toggleMode }}" title="{{ modeTitle }}" aria-label="{{ modeTitle }}" style="width:40px;height:32px;display:inline-flex;align-items:center;justify-content:center;background:var(--surface);border:1px solid var(--line);border-radius:999px;font:700 var(--m-xs) var(--font-ui);color:var(--ink2);letter-spacing:.03em;">{{ modeAbbr }}</button>
+    </div>
+  </sc-if>
+
+  <nav style="{{ navPad }}">
+    <sc-for list="{{ groups }}" as="grp" hint-placeholder-count="3">
+      <div style="{{ grp.wrap }}">
+        <sc-if value="{{ grp.showTitle }}" hint-placeholder-val="{{ false }}">
+          <div style="font:600 var(--m-sm) var(--font-ui);color:var(--ink3);padding:8px 10px 4px;">{{ grp.title }}</div>
+        </sc-if>
+        <sc-if value="{{ grp.showRule }}" hint-placeholder-val="{{ false }}">
+          <div style="height:1px;background:var(--line2);margin:8px 6px;" role="separator" title="{{ grp.title }}"></div>
+        </sc-if>
+        <sc-for list="{{ grp.items }}" as="it" hint-placeholder-count="4">
+          <button onClick="{{ it.onClick }}" style="{{ it.style }}" style-hover="background:var(--panel)" title="{{ it.tip }}" aria-label="{{ it.label }}" aria-current="{{ it.current }}">
+            <span style="{{ it.iconStyle }}"><i class="fa-solid {{ it.icon }}"></i></span>
+            <sc-if value="{{ it.showLabel }}" hint-placeholder-val="{{ true }}">
+              <span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ it.label }}</span>
+            </sc-if>
+            <sc-if value="{{ it.showNum }}" hint-placeholder-val="{{ false }}">
+              <span style="font:600 var(--m-sm) var(--font-ui);color:var(--ink3);">{{ it.num }}</span>
+            </sc-if>
+          </button>
+        </sc-for>
+      </div>
+    </sc-for>
+  </nav>
+
+  <div style="{{ footStyle }}">
+    <sc-if value="{{ expanded }}" hint-placeholder-val="{{ true }}">
+      <div style="flex:1;min-width:0;display:flex;align-items:center;gap:8px;background:var(--panel);border-radius:999px;padding:8px 12px;">
+        <span style="width:8px;height:8px;border-radius:999px;background:var(--success);flex:none;"></span>
+        <span style="font:500 var(--m-md) var(--font-ui);color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Local draft · autosaved</span>
+      </div>
+    </sc-if>
+    <button onClick="{{ toggleTheme }}" aria-label="Toggle theme" title="{{ themeTitle }}" style="width:36px;height:36px;flex:none;display:inline-flex;align-items:center;justify-content:center;border-radius:999px;background:var(--panel);border:none;color:var(--ink2);" style-hover="color:var(--ink)"><i class="{{ themeIcon }}"></i></button>
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:260,&quot;height&quot;:760}}">
+class Component extends DCLogic {
+  renderVals(){
+    const mode=this.props.mode||'guided';
+    const theme=this.props.theme||'light';
+    const collapsed=!!this.props.collapsed;
+    const setMode=this.props.setMode||(()=>{});
+    const seg=(on)=>`flex:1;min-height:34px;padding:6px 10px;border-radius:999px;background:${on?'var(--surface)':'transparent'};color:${on?'var(--brandink)':'var(--ink2)'};border:none;font:${on?'700':'500'} var(--t-sm) var(--font-ui);box-shadow:${on?'var(--sh-1)':'none'};`;
+
+    const groups=(this.props.nav||[]).map(g=>{
+      const title=g.title?this.title(g.title):'';
+      return {
+        title,
+        showTitle: !collapsed && !!title,
+        showRule: collapsed && !!title,
+        wrap:`margin-top:${collapsed?'6px':'12px'};display:flex;flex-direction:column;gap:4px;${collapsed?'align-items:center;':''}`,
+        items:(g.items||[]).map(it=>({
+          ...it,
+          tip: collapsed ? (it.label + (it.num?(' · step '+it.num):'')) : '',
+          current: it.active?'page':'false',
+          showLabel: !collapsed,
+          showNum: !collapsed && !!it.num,
+          iconStyle:`width:20px;text-align:center;font-size:16px;flex:none;color:${it.active?'var(--brandink)':'var(--ink3)'};`,
+          style: collapsed
+            ? `display:flex;align-items:center;justify-content:center;width:40px;height:38px;border:none;border-radius:12px;cursor:pointer;background:${it.active?'var(--brandtint)':'transparent'};color:${it.active?'var(--brandink)':'var(--ink2)'};`
+            : `display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:10px 12px;border:none;border-radius:999px;cursor:pointer;background:${it.active?'var(--brandtint)':'transparent'};color:${it.active?'var(--brandink)':'var(--ink2)'};font:${it.active?'600':'500'} var(--t-body) var(--font-ui);`,
+        })),
+      };
+    });
+
+    return {
+      groups, collapsed, expanded:!collapsed,
+      brandPad: collapsed?'padding:18px 10px 12px;':'padding:20px 18px 16px;',
+      brandRow: collapsed?'display:flex;justify-content:center;':'display:flex;align-items:center;gap:12px;',
+      brandTitle: collapsed?'Rota · nurse scheduling':'',
+      navPad: `flex:1;overflow-y:auto;overflow-x:hidden;padding:${collapsed?'4px 10px 12px':'4px 12px 12px'};`,
+      footStyle:`padding:12px ${collapsed?'10px':'16px'} 16px;display:flex;${collapsed?'justify-content:center;':'align-items:center;'}gap:10px;`,
+      isGuided:mode==='guided', isAdvanced:mode==='advanced',
+      guidedStyle:seg(mode==='guided'), advancedStyle:seg(mode==='advanced'),
+      modeGuided:()=>setMode('guided'), modeAdvanced:()=>setMode('advanced'),
+      modeAbbr: mode==='guided'?'GUI':'ADV',
+      modeTitle: mode==='guided'?'Guided mode — switch to Advanced':'Advanced mode — switch to Guided',
+      toggleMode:()=>setMode(mode==='guided'?'advanced':'guided'),
+      toggleTheme:this.props.toggleTheme||(()=>{}),
+      themeIcon: theme==='light'?'fa-solid fa-moon':'fa-solid fa-sun',
+      themeTitle: theme==='light'?'Switch to dark':'Switch to light',
+    };
+  }
+  title(t){
+    return String(t).toLowerCase().replace(/(^|· )([a-z])/g,(m,a,b)=>a+b.toUpperCase());
+  }
+}
+
+</script>
+</body>
+</html>

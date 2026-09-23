@@ -3,22 +3,211 @@ import type { PeopleReverseMap } from "@/lib/scenario";
 import {
   activateSession,
   buildProvisionalSession,
-  clearInvalidActiveCursor,
-  forgetInspectedSession,
-  inspectPersistedSession,
-  FORGET_OPTIMIZE_SESSION_WARNING,
+  decodeSessionRecord,
+  OPTIMIZE_SESSION_KEY_PREFIX,
   OPTIMIZE_SESSION_SCHEMA_VERSION,
   OPTIMIZE_SESSION_STORAGE_KEY,
+  optimizeSessionKeyFor,
+  removeOwnerSession,
   runSubmissionTransaction,
   stageProvisionalSession,
-  updateActiveCursor,
   type ActiveOptimizeSession,
   type ProvisionalOptimizeSession,
   type SessionCodec,
   type SessionTransactionStorage,
 } from "./session-transaction";
 
+// The LEGACY single slot. Records are owner-keyed now; this constant survives
+// because the corrupt-bytes fixtures below deliberately seed it, and because
+// `FakeStorage.raw(KEY)` reads "the one record in this store" (see there).
 const KEY = OPTIMIZE_SESSION_STORAGE_KEY;
+
+/**
+ * Classify raw record bytes the way the deleted reload inspector used to.
+ *
+ * LOCAL to this suite on purpose. The product no longer classifies anything on
+ * load — that was the whole point of G6.2 — but the closed schema, the verified
+ * writes and the owner-scoped removals below still need a compact way to say what
+ * a set of bytes became, and re-deriving it inline in fifty assertions would be
+ * worse than naming it once.
+ */
+type Inspected =
+  | { kind: "none" }
+  | { kind: "interrupted"; record: ProvisionalOptimizeSession }
+  | { kind: "resumable"; record: ActiveOptimizeSession }
+  | { kind: "unreadable" };
+
+function classifyRecord(raw: string | null): Inspected {
+  if (raw === null) return { kind: "none" };
+  const record = decodeSessionRecord(raw);
+  if (record === null) return { kind: "unreadable" };
+  return record.phase === "provisional"
+    ? { kind: "interrupted", record }
+    : { kind: "resumable", record };
+}
+
+/** Classify whatever single optimize record a store is holding. */
+function inspectPersistedSession(storage: SessionTransactionStorage): Inspected {
+  let legacy: string | null;
+  try {
+    legacy = storage.getItem(KEY);
+  } catch {
+    return { kind: "unreadable" };
+  }
+  if (legacy !== null) return classifyRecord(legacy);
+  return classifyRecord(storage instanceof FakeStorage ? storage.soleRecord() : null);
+}
+
+// ---------------------------------------------------------------------------
+// F2 — the roster-capture authority on the record.
+// ---------------------------------------------------------------------------
+
+describe("session record — F2 capture authority survives the write path", () => {
+  const base = () => ({
+    schemaVersion: OPTIMIZE_SESSION_SCHEMA_VERSION,
+    ownerId: "own-1",
+    phase: "active" as const,
+    jobId: "job-1",
+    anonymized: false,
+    runOptions: {},
+    peopleCount: 0,
+    reverseMap: [] as PeopleReverseMap,
+  });
+
+  function inspectRaw(value: unknown) {
+    const storage = new FakeStorage();
+    storage.seed(JSON.stringify(value));
+    return inspectPersistedSession(storage);
+  }
+
+  it("a pre-capture v1 record is unreadable, never silently migrated", () => {
+    // Roster capture authority cannot be invented after the fact: a v1 record has
+    // no proof about whether a snapshot was staged, so it fails closed.
+    const v1 = { ...base(), schemaVersion: 1 };
+    expect(inspectRaw(v1).kind).toBe("unreadable");
+  });
+
+  it("rejects every malformed capture authority", () => {
+    const malformed = [
+      undefined,
+      null,
+      { status: "staged", snapshotRef: "own-1" }, // no ordinal
+      { status: "staged", submissionOrdinal: 1 }, // no ref
+      { status: "staged", snapshotRef: "", submissionOrdinal: 1 }, // empty ref
+      { status: "staged", snapshotRef: "own-1", submissionOrdinal: 0 }, // F1 starts at 1
+      { status: "staged", snapshotRef: "own-1", submissionOrdinal: 1.5 },
+      { status: "staged", snapshotRef: "own-1", submissionOrdinal: 1, extra: true },
+      { status: "unavailable" }, // no reason
+      { status: "unavailable", reason: "because" }, // unknown reason
+      { status: "unavailable", reason: "snapshot_persist_failed", snapshotRef: "o" },
+      { status: "whatever" },
+    ];
+    for (const capture of malformed) {
+      expect(inspectRaw({ ...base(), capture }).kind).toBe("unreadable");
+    }
+  });
+
+  it("AUTHORITY BINDING: a staged ref that is not the owner id is unreadable", () => {
+    // `snapshotRef` IS the transaction owner id, and that identity is the only
+    // reason an owner-scoped snapshot deletion is as narrowly scoped as the record
+    // authorizing it. Accept a record naming a FOREIGN owner and removing record B
+    // would authorize deleting owner A's snapshot — potentially another tab's live
+    // accepted run. It fails closed instead.
+    const foreign = inspectRaw({
+      ...base(),
+      capture: { status: "staged", snapshotRef: "own-SOMEONE-ELSE", submissionOrdinal: 1 },
+    });
+    expect(foreign.kind).toBe("unreadable");
+  });
+
+  it("AUTHORITY BINDING is enforced writer-side too, so unbound bytes never reach storage", () => {
+    // The same rule on the pre-write round-trip: a caller cannot stage a record
+    // whose capture points at somebody else's snapshot.
+    const storage = new FakeStorage();
+    const outcome = stageProvisionalSession(
+      storage,
+      buildProvisionalSession({
+        ownerId: "own-1",
+        anonymized: false,
+        peopleCount: 2,
+        reverseMap: [],
+        runOptions: {},
+        capture: { status: "staged", snapshotRef: "own-SOMEONE-ELSE", submissionOrdinal: 1 },
+      }),
+    );
+    expect(outcome).toEqual({ status: "blocked", reason: "invalid-record" });
+    expect(storage.raw(KEY)).toBeNull();
+  });
+
+  it("negative control: both well-formed variants are resumable", () => {
+    const staged = inspectRaw({
+      ...base(),
+      capture: { status: "staged", snapshotRef: "own-1", submissionOrdinal: 3 },
+    });
+    expect(staged.kind).toBe("resumable");
+    const degraded = inspectRaw({
+      ...base(),
+      capture: { status: "unavailable", reason: "snapshot_persist_failed" },
+    });
+    expect(degraded.kind).toBe("resumable");
+  });
+
+  it("survives activation and cursor persistence verbatim", () => {
+    const storage = new FakeStorage();
+    const capture = { status: "staged" as const, snapshotRef: "own-1", submissionOrdinal: 9 };
+    const provisional = buildProvisionalSession({
+      ownerId: "own-1",
+      anonymized: false,
+      peopleCount: 0,
+      reverseMap: [],
+      runOptions: {},
+      capture,
+    });
+    expect(stageProvisionalSession(storage, provisional).status).toBe("staged");
+
+    const activated = activateSession(storage, provisional, "job-1");
+    expect(activated.status).toBe("activated");
+    if (activated.status !== "activated") throw new Error("unreachable");
+    expect(activated.record.capture).toEqual(capture);
+
+    // Activation rebuilds the record from the provisional one, so the capture
+    // authority must survive that rewrite verbatim — it is the only durable handle
+    // to the staged snapshot.
+    const inspected = inspectPersistedSession(storage);
+    expect(inspected.kind).toBe("resumable");
+    if (inspected.kind !== "resumable") throw new Error("unreachable");
+    expect(inspected.record.capture).toEqual(capture);
+  });
+
+  it("a codec that rewrites the capture authority is refused before any setItem", () => {
+    // Writer validation must reject a lossy/lying codec on the capture field for the
+    // same reason as every other load-bearing field: an ordinal that is not the one
+    // F1 allocated would corrupt candidate ordering across tabs.
+    const storage = new FakeStorage();
+    const codec: SessionCodec = {
+      serialize: (record) =>
+        JSON.stringify({
+          ...record,
+          capture: { status: "staged", snapshotRef: "own-1", submissionOrdinal: 99 },
+        }),
+      deserialize: (raw) => JSON.parse(raw) as unknown,
+    };
+    const provisional = buildProvisionalSession({
+      ownerId: "own-1",
+      anonymized: false,
+      peopleCount: 0,
+      reverseMap: [],
+      runOptions: {},
+      capture: { status: "staged", snapshotRef: "own-1", submissionOrdinal: 1 },
+    });
+
+    expect(stageProvisionalSession(storage, provisional, codec)).toMatchObject({
+      status: "blocked",
+      reason: "invalid-record",
+    });
+    expect(storage.getItem(KEY)).toBeNull();
+  });
+});
 
 /** An injectable Storage subset with per-operation overrides for the adversarial
  *  matrix (throwing / no-op / partial / write-then-throw / wipe-then-throw). */
@@ -44,11 +233,51 @@ class FakeStorage implements SessionTransactionStorage {
     if (this.onRemove) return this.onRemove(key, this.store);
     this.store.delete(key);
   }
+  /**
+   * Read one key — except for the legacy slot, which now means "the record".
+   *
+   * Records moved to `nurse.optimize.session.<ownerId>`, and these fixtures drive
+   * ONE transaction at a time, so "the record" is unambiguous. Reading it this way
+   * keeps every `raw(KEY)` assertion below saying what it always said ("the
+   * durable record is / is not this") instead of restating the key layout fifty
+   * times — and the owner-keying itself is proved directly in
+   * `owner-keyed-session.test.ts`, which is where that belongs.
+   */
   raw(key: string): string | null {
+    if (key === KEY) {
+      const owned = this.ownedEntries();
+      if (owned.length === 1) return owned[0][1];
+    }
     return this.store.get(key) ?? null;
   }
+  /** The single owner-keyed record, or null when there is not exactly one. */
+  soleRecord(): string | null {
+    const owned = this.ownedEntries();
+    return owned.length === 1 ? owned[0][1] : null;
+  }
+  private ownedEntries(): Array<[string, string]> {
+    return [...this.store.entries()].filter(([k]) => k.startsWith(OPTIMIZE_SESSION_KEY_PREFIX));
+  }
+  /** Seed raw bytes at an EXACT key (used to occupy one owner's key). */
+  seedAt(key: string, value: string): void {
+    this.store.set(key, value);
+  }
+  /** Seed a record AT ITS OWN KEY, so the product finds it where it now looks. */
   seed(value: string): void {
-    this.store.set(KEY, value);
+    let ownerId: unknown;
+    try {
+      ownerId = (JSON.parse(value) as { ownerId?: unknown }).ownerId;
+    } catch {
+      ownerId = undefined;
+    }
+    // Undecodable bytes name no owner, so they go to the legacy slot — which is
+    // also exactly where a real tab would be holding them.
+    this.store.set(
+      typeof ownerId === "string" && ownerId.length > 0
+        ? optimizeSessionKeyFor(ownerId)
+        : OPTIMIZE_SESSION_STORAGE_KEY,
+      value,
+    );
   }
 }
 
@@ -76,6 +305,7 @@ function anonymizedProvisional(ownerId = "owner-A"): ProvisionalOptimizeSession 
     peopleCount: 2,
     reverseMap: REVERSE_MAP,
     runOptions: { prettify: true, timeout: 300 },
+    capture: { status: "staged", snapshotRef: ownerId, submissionOrdinal: 1 },
   });
 }
 function plainProvisional(ownerId = "owner-P"): ProvisionalOptimizeSession {
@@ -85,6 +315,7 @@ function plainProvisional(ownerId = "owner-P"): ProvisionalOptimizeSession {
     peopleCount: 2,
     reverseMap: [],
     runOptions: {},
+    capture: { status: "staged", snapshotRef: ownerId, submissionOrdinal: 1 },
   });
 }
 
@@ -98,6 +329,7 @@ function validActiveJson(jobId = "job-seed", ownerId = "owner-seed"): string {
     runOptions: { prettify: true, timeout: 300 },
     peopleCount: 2,
     reverseMap: REVERSE_MAP,
+    capture: { status: "staged", snapshotRef: ownerId, submissionOrdinal: 1 },
   };
   return JSON.stringify(active);
 }
@@ -137,7 +369,7 @@ describe("stageProvisionalSession — durable, verified, validated write before 
     });
 
     const partial = new FakeStorage();
-    partial.onSet = (_k, _v, store) => store.set(KEY, "trunc");
+    partial.onSet = (key, _v, store) => store.set(key, "trunc");
     expect(stageProvisionalSession(partial, anonymizedProvisional())).toEqual({
       status: "blocked",
       reason: "session-conflict",
@@ -146,8 +378,8 @@ describe("stageProvisionalSession — durable, verified, validated write before 
 
   it("classifies the actual foreign active slot after an anonymized write mismatch", () => {
     const storage = new FakeStorage();
-    storage.onSet = (_key, _value, store) => {
-      store.set(KEY, validActiveJson("job-B", "owner-B"));
+    storage.onSet = (key, _value, store) => {
+      store.set(key, validActiveJson("job-B", "owner-B"));
     };
     expect(stageProvisionalSession(storage, anonymizedProvisional("owner-A"))).toEqual({
       status: "blocked",
@@ -164,8 +396,12 @@ describe("stageProvisionalSession — durable, verified, validated write before 
     });
   });
 
-  it("NON-DESTRUCTIVE: any existing valid record blocks with session-conflict and is preserved (zero set/remove)", () => {
-    // A pre-existing record — of EITHER variant — is never cleared by a new stage.
+  // G6.2 CHANGED WHAT "EXISTING" MEANS. A record belonging to another run used to
+  // sit in the SAME cell, so it blocked — that is the defect the ticket exists for.
+  // Records are owner-keyed now, so the only thing that can occupy a submission's
+  // key is something already claiming to be that submission, and the guard below is
+  // what is left: fail closed rather than overwrite.
+  it("another run's record does not block a new submission at all", () => {
     for (const existing of [
       validActiveJson("job-EXISTING", "owner-OTHER"),
       JSON.stringify(anonymizedProvisional("owner-OTHER")),
@@ -173,26 +409,41 @@ describe("stageProvisionalSession — durable, verified, validated write before 
       for (const incoming of [anonymizedProvisional("owner-NEW"), plainProvisional("owner-NEW")]) {
         const storage = new FakeStorage();
         storage.seed(existing);
+        expect(stageProvisionalSession(storage, incoming)).toMatchObject({ status: "staged" });
+        // ...and the other run's record is byte-for-byte untouched. This is the
+        // property that lets an abandoned run's cleanup finish on its own time.
+        expect(storage.raw(optimizeSessionKeyFor("owner-OTHER"))).toBe(existing);
+      }
+    }
+  });
+
+  it("NON-DESTRUCTIVE: anything already at THIS owner's key blocks and is preserved (zero set/remove)", () => {
+    for (const existing of [
+      validActiveJson("job-EXISTING", "owner-NEW"),
+      JSON.stringify(anonymizedProvisional("owner-NEW")),
+    ]) {
+      for (const incoming of [anonymizedProvisional("owner-NEW"), plainProvisional("owner-NEW")]) {
+        const storage = new FakeStorage();
+        storage.seedAt(optimizeSessionKeyFor("owner-NEW"), existing);
         expect(stageProvisionalSession(storage, incoming)).toMatchObject({
           status: "blocked",
           reason: "session-conflict",
         });
-        // The other run's record is byte-for-byte preserved; nothing was written.
-        expect(storage.raw(KEY)).toBe(existing);
+        expect(storage.raw(optimizeSessionKeyFor("owner-NEW"))).toBe(existing);
         expect(storage.setCalls).toBe(0);
         expect(storage.removeCalls).toBe(0);
       }
     }
   });
 
-  it("NON-DESTRUCTIVE: unreadable existing bytes block with conflict and are preserved (never deleted)", () => {
+  it("NON-DESTRUCTIVE: unreadable bytes at this owner's key block and are preserved (never deleted)", () => {
     const storage = new FakeStorage();
-    storage.seed("{corrupt-other-tab");
+    storage.seedAt(optimizeSessionKeyFor("owner-NEW"), "{corrupt-other-tab");
     expect(stageProvisionalSession(storage, anonymizedProvisional("owner-NEW"))).toMatchObject({
       status: "blocked",
       reason: "session-conflict",
     });
-    expect(storage.raw(KEY)).toBe("{corrupt-other-tab");
+    expect(storage.raw(optimizeSessionKeyFor("owner-NEW"))).toBe("{corrupt-other-tab");
     expect(storage.setCalls).toBe(0);
     expect(storage.removeCalls).toBe(0);
   });
@@ -214,6 +465,7 @@ describe("stageProvisionalSession — durable, verified, validated write before 
         peopleCount: 2,
         reverseMap: REVERSE_MAP,
         runOptions: {},
+        capture: { status: "staged", snapshotRef: "o", submissionOrdinal: 1 },
       }),
       buildProvisionalSession({
         ownerId: "o",
@@ -221,6 +473,7 @@ describe("stageProvisionalSession — durable, verified, validated write before 
         peopleCount: -1,
         reverseMap: [],
         runOptions: {},
+        capture: { status: "staged", snapshotRef: "o", submissionOrdinal: 1 },
       }),
       buildProvisionalSession({
         ownerId: "o",
@@ -228,6 +481,7 @@ describe("stageProvisionalSession — durable, verified, validated write before 
         peopleCount: 2,
         reverseMap: [], // anonymized but empty map ⇒ inconsistent
         runOptions: {},
+        capture: { status: "staged", snapshotRef: "o", submissionOrdinal: 1 },
       }),
       buildProvisionalSession({
         ownerId: "o",
@@ -235,6 +489,17 @@ describe("stageProvisionalSession — durable, verified, validated write before 
         peopleCount: 2,
         reverseMap: REVERSE_MAP,
         runOptions: { timeout: 999_999 }, // out of bounds
+        capture: { status: "staged", snapshotRef: "o", submissionOrdinal: 1 },
+      }),
+      buildProvisionalSession({
+        ownerId: "o",
+        anonymized: true,
+        peopleCount: 2,
+        reverseMap: REVERSE_MAP,
+        runOptions: {},
+        // A staged capture with a zero ordinal: F1 hands out 1, 2, 3 … so this is a
+        // corrupted ordering authority and must never become durable.
+        capture: { status: "staged", snapshotRef: "o", submissionOrdinal: 0 },
       }),
     ];
     for (const record of cases) {
@@ -359,17 +624,23 @@ describe("activateSession — owner-scoped replacement + verified reconciliation
     expect(JSON.parse(storage.raw(KEY)!).phase).toBe("provisional");
   });
 
-  it("does NOT overwrite a foreign owner's record (owner conflict)", () => {
+  it("does NOT overwrite a foreign record occupying this owner's key (owner conflict)", () => {
     const storage = new FakeStorage();
     const provisional = anonymizedProvisional("owner-A");
-    storage.seed(validActiveJson("job-B", "owner-B")); // a different run owns the key
+    // Owner-keyed, so reaching this at all takes a foreign record already sitting
+    // at owner A's key. The guard stays anyway: the cost of being wrong here is
+    // destroying another run's only reverse map.
+    storage.seedAt(optimizeSessionKeyFor("owner-A"), validActiveJson("job-B", "owner-B"));
     const outcome = activateSession(storage, provisional, "job-A");
 
     expect(outcome.status).toBe("activation-unverified");
     if (outcome.status !== "activation-unverified") return;
     expect(outcome.reason).toBe("owner-conflict");
     // The foreign record is untouched.
-    expect(JSON.parse(storage.raw(KEY)!)).toMatchObject({ ownerId: "owner-B", jobId: "job-B" });
+    expect(JSON.parse(storage.raw(optimizeSessionKeyFor("owner-A"))!)).toMatchObject({
+      ownerId: "owner-B",
+      jobId: "job-B",
+    });
   });
 
   it("on a plain second-write failure retains our provisional and returns volatile job/map", () => {
@@ -386,7 +657,6 @@ describe("activateSession — owner-scoped replacement + verified reconciliation
       anonymized: true,
       peopleCount: 2,
       reverseMap: REVERSE_MAP,
-      reloadRecoveryUnavailable: true,
     });
     expect(JSON.parse(storage.raw(KEY)!).phase).toBe("provisional");
   });
@@ -396,8 +666,8 @@ describe("activateSession — owner-scoped replacement + verified reconciliation
     const provisional = anonymizedProvisional();
     stageProvisionalSession(storage, provisional);
 
-    storage.onSet = (_k, value, store) => {
-      store.set(KEY, value);
+    storage.onSet = (key, value, store) => {
+      store.set(key, value);
       quotaError();
     };
     expect(activateSession(storage, provisional, "job-123").status).toBe("activated");
@@ -418,22 +688,66 @@ describe("activateSession — owner-scoped replacement + verified reconciliation
     expect(inspectPersistedSession(storage).kind).toBe("interrupted");
   });
 
-  it("missing after write + unverifiable restore is storage-unknown, never a false resume", () => {
+  it("missing AFTER our write is retirement evidence too — nothing is restored", () => {
     const storage = new FakeStorage();
     const provisional = anonymizedProvisional();
     stageProvisionalSession(storage, provisional);
 
-    // Every write wipes the key and throws → active gone AND restore cannot land.
-    storage.onSet = (_k, _v, store) => {
-      store.delete(KEY);
+    // Every write wipes the key and throws → the key is absent after our write.
+    storage.onSet = (key, _v, store) => {
+      store.delete(key);
       quotaError();
     };
     const outcome = activateSession(storage, provisional, "job-123");
-    expect(outcome.status).toBe("activation-unverified");
-    if (outcome.status !== "activation-unverified") return;
-    expect(outcome.reason).toBe("storage-unknown");
+
+    // This used to RESTORE the provisional here, which is the same repopulation
+    // the empty-key branch was doing, one step later: a key that went from ours to
+    // absent across a single synchronous write was emptied by a retirement.
+    expect(outcome).toEqual({ status: "activation-retired", jobId: "job-123" });
     storage.onSet = null;
+    expect(storage.raw(KEY)).toBeNull();
     expect(inspectPersistedSession(storage).kind).toBe("none");
+  });
+
+  // THE P1 CUT. An empty owner key is not free space.
+  //
+  // This branch used to fall through and write the active record. Nothing empties
+  // an owner key except a retirement or a verified Clear, so a staged activation
+  // that finds its key gone has been told the visit ended — and writing would put
+  // the identity-bearing record back into the key a `pagehide` had just cut, where
+  // nothing is guaranteed to run again to remove it.
+  it("a GENUINELY EMPTY key is retirement evidence: no write, no activation", () => {
+    const storage = new FakeStorage();
+    const provisional = anonymizedProvisional();
+    expect(stageProvisionalSession(storage, provisional).status).toBe("staged");
+
+    // The retirement, exactly as `retireOnDocumentExit` performs it: the EXACT
+    // owner key, removed synchronously.
+    storage.removeItem(optimizeSessionKeyFor("owner-A"));
+    const writesBefore = storage.setCalls;
+
+    expect(activateSession(storage, provisional, "job-123")).toEqual({
+      status: "activation-retired",
+      jobId: "job-123",
+    });
+    expect(storage.setCalls, "a retired activation must not write at all").toBe(writesBefore);
+    expect(storage.raw(KEY)).toBeNull();
+  });
+
+  it("CONTROL: another owner's record is untouched by a retired activation", () => {
+    const storage = new FakeStorage();
+    const provisional = anonymizedProvisional("owner-A");
+    stageProvisionalSession(storage, provisional);
+    const otherKey = optimizeSessionKeyFor("owner-OTHER");
+    storage.seedAt(otherKey, validActiveJson("job-OTHER", "owner-OTHER"));
+
+    storage.removeItem(optimizeSessionKeyFor("owner-A"));
+    expect(activateSession(storage, provisional, "job-A").status).toBe("activation-retired");
+
+    expect(JSON.parse(storage.raw(otherKey)!)).toMatchObject({
+      ownerId: "owner-OTHER",
+      jobId: "job-OTHER",
+    });
   });
 });
 
@@ -555,69 +869,66 @@ describe("runSubmissionTransaction — closed submit seam + owner scoping", () =
     expect(inspectPersistedSession(storage).kind).toBe("interrupted");
   });
 
-  it("degraded cleanup classifies exact owned variants, absence, conflicts, and storage failures", async () => {
-    async function prepared(storage: FakeStorage) {
-      const provisional = anonymizedProvisional("owner-cleanup");
-      const outcome = await runSubmissionTransaction(provisional, {
-        storage,
-        submit: async () => {
-          storage.onSet = () => {};
-          return { status: "accepted", jobId: "job-cleanup" };
-        },
-      });
-      expect(outcome.status).toBe("activation-persistence-failed");
-      if (outcome.status !== "activation-persistence-failed") throw new Error("not degraded");
-      storage.onSet = null;
-      return outcome.cleanupDegraded;
-    }
+  // REMOVED (G6.2d): "degraded cleanup classifies exact owned variants, absence,
+  // conflicts, and storage failures". It was the only consumer of
+  // `cleanupDegraded` / `removeDegradedRecord`, which existed for the controller's
+  // `prepareDegradedCleanup` — deleted with boot recovery in G6.2. The live
+  // authority is owner-scoped `removeOwnedRecord` / `retireSessionRecord`, proved
+  // by `owner-scoped removal agrees with the transaction that wrote the record`
+  // below and by `owner-keyed-session.test.ts`.
 
-    const provisional = new FakeStorage();
-    const removeProvisional = await prepared(provisional);
-    expect(removeProvisional()).toEqual({ status: "removed", variant: "provisional" });
-
-    const active = new FakeStorage();
-    const removeActive = await prepared(active);
-    active.seed(validActiveJson("job-cleanup", "owner-cleanup"));
-    expect(removeActive()).toEqual({ status: "removed", variant: "active" });
-
-    const absent = new FakeStorage();
-    const classifyAbsent = await prepared(absent);
-    absent.removeItem(KEY);
-    expect(classifyAbsent()).toEqual({ status: "absent" });
-
-    const foreignProvisional = new FakeStorage();
-    const preserveForeignProvisional = await prepared(foreignProvisional);
-    foreignProvisional.seed(JSON.stringify(anonymizedProvisional("owner-foreign")));
-    expect(preserveForeignProvisional()).toEqual({
-      status: "conflict",
-      evidence: "foreign-provisional",
+  // THE RETIREMENT INTERLEAVING, at the transaction boundary.
+  it("a retirement during the POST leaves the key absent and activates nothing", async () => {
+    const storage = new FakeStorage();
+    const provisional = anonymizedProvisional("owner-A");
+    const outcome = await runSubmissionTransaction(provisional, {
+      storage,
+      submit: async () => {
+        // The record is durably staged at this point — assert it, so "absent at the
+        // end" cannot pass because nothing was ever written.
+        expect(storage.raw(optimizeSessionKeyFor("owner-A"))).not.toBeNull();
+        // The visit ends while the request is in flight.
+        storage.removeItem(optimizeSessionKeyFor("owner-A"));
+        return { status: "accepted", jobId: "job-late" };
+      },
     });
 
-    const foreignActive = new FakeStorage();
-    const preserveForeignActive = await prepared(foreignActive);
-    foreignActive.seed(validActiveJson("job-cleanup", "owner-foreign"));
-    expect(preserveForeignActive()).toEqual({
-      status: "conflict",
-      evidence: "foreign-active",
+    expect(outcome).toEqual({ status: "activation-retired", jobId: "job-late" });
+    expect(storage.raw(optimizeSessionKeyFor("owner-A"))).toBeNull();
+  });
+
+  it("NEGATIVE CONTROL: an untouched staged record still activates normally", async () => {
+    const storage = new FakeStorage();
+    const outcome = await runSubmissionTransaction(anonymizedProvisional("owner-A"), {
+      storage,
+      submit: async () => ({ status: "accepted", jobId: "job-live" }),
     });
 
-    const unreadable = new FakeStorage();
-    const preserveUnreadable = await prepared(unreadable);
-    unreadable.seed("{corrupt");
-    expect(preserveUnreadable()).toEqual({ status: "conflict", evidence: "unreadable" });
-
-    const readFailure = new FakeStorage();
-    const classifyReadFailure = await prepared(readFailure);
-    readFailure.onGet = securityError;
-    expect(classifyReadFailure()).toEqual({ status: "unverified", operation: "read" });
-
-    const removeFailure = new FakeStorage();
-    const classifyRemoveFailure = await prepared(removeFailure);
-    removeFailure.onRemove = () => {};
-    expect(classifyRemoveFailure()).toEqual({
-      status: "unverified",
-      operation: "remove-or-verify",
+    expect(outcome.status).toBe("activated");
+    expect(JSON.parse(storage.raw(optimizeSessionKeyFor("owner-A"))!)).toMatchObject({
+      phase: "active",
+      jobId: "job-live",
     });
+  });
+
+  it("an accepted PLAIN run that never staged stays volatile and writes no record", async () => {
+    // The only caller that could legitimately reach activation with no provisional.
+    // It no longer reaches it at all: activation requires the record it staged, so
+    // the transaction returns the volatile activation directly rather than
+    // manufacturing an active record in a key it never owned.
+    const storage = new FakeStorage();
+    storage.onSet = quotaError; // plain staging fails; the key stays proven empty
+    const outcome = await runSubmissionTransaction(plainProvisional("owner-P"), {
+      storage,
+      submit: async () => ({ status: "accepted", jobId: "job-plain" }),
+    });
+
+    expect(outcome.status).toBe("activation-persistence-failed");
+    if (outcome.status !== "activation-persistence-failed") return;
+    expect(outcome.volatile.jobId).toBe("job-plain");
+    expect(outcome.volatile.reverseMap).toEqual(plainProvisional("owner-P").reverseMap);
+    storage.onSet = null;
+    expect(storage.raw(optimizeSessionKeyFor("owner-P"))).toBeNull();
   });
 
   // --- interleaved A/B ownership -----------------------------------------
@@ -629,59 +940,58 @@ describe("runSubmissionTransaction — closed submit seam + owner scoping", () =
     async (_label, recB) => {
       const storage = new FakeStorage();
       const errA = new Error("A read timeout after send");
-      let bStage: ReturnType<typeof stageProvisionalSession> | undefined;
-      let setDuringB = 0;
       let removeDuringB = 0;
       const outA = await runSubmissionTransaction(anonymizedProvisional("owner-A"), {
         storage,
         submit: async () => {
-          // B tries to start while A is in flight: A already owns the slot, so B
-          // must see a conflict and touch storage zero times.
-          const setBefore = storage.setCalls;
+          // B starts while A is in flight. It now SUCCEEDS — that is the point of
+          // owner-keying — and the property that still matters is that it removes
+          // nothing of A's.
           const removeBefore = storage.removeCalls;
-          bStage = stageProvisionalSession(storage, recB);
-          setDuringB = storage.setCalls - setBefore;
+          expect(stageProvisionalSession(storage, recB)).toMatchObject({ status: "staged" });
           removeDuringB = storage.removeCalls - removeBefore;
           return { status: "acceptance-unknown", error: errA };
         },
       });
 
-      expect(bStage).toMatchObject({ status: "blocked", reason: "session-conflict" });
-      expect(setDuringB).toBe(0);
       expect(removeDuringB).toBe(0);
-      // A is ambiguous: its map is retained and it still owns the slot.
+      // A is ambiguous: its map is retained, under its own key, untouched by B.
       expect(outA).toEqual({ status: "acceptance-unknown", error: errA });
-      const stored = inspectPersistedSession(storage);
+      const stored = classifyRecord(storage.raw(optimizeSessionKeyFor("owner-A")));
       expect(stored.kind).toBe("interrupted");
       if (stored.kind === "interrupted") {
         expect(stored.record.ownerId).toBe("owner-A");
         expect(stored.record.reverseMap).toEqual(REVERSE_MAP);
       }
+      // ...and B's own record is durable beside it.
+      expect(classifyRecord(storage.raw(optimizeSessionKeyFor("owner-B"))).kind).toBe(
+        "interrupted",
+      );
     },
   );
 
-  it("plain unstaged A + B staged into the empty slot: A's rejection reports conflict and preserves B", async () => {
+  it("plain unstaged A rolling back reports `absent` and cannot touch a concurrent B", async () => {
     const storage = new FakeStorage();
     const recB = anonymizedProvisional("owner-B");
     const errA = new Error("A rejected");
-    // Plain A's provisional write fails, so A proceeds WITHOUT durable staging and
-    // legitimately leaves the slot empty — B can then stage into it.
+    // Plain A's provisional write fails, so A proceeds WITHOUT durable staging.
     storage.onSet = quotaError;
     const outA = await runSubmissionTransaction(plainProvisional("owner-A"), {
       storage,
       submit: async () => {
-        storage.onSet = null; // let B's write succeed into the empty slot
+        storage.onSet = null; // let B's write succeed
         expect(stageProvisionalSession(storage, recB).status).toBe("staged");
         return { status: "definitely-rejected", error: errA };
       },
     });
-    // A must NOT report a clean `absent` — B owns the slot now.
-    expect(outA).toMatchObject({
-      status: "submit-rejected",
-      error: errA,
-      rollback: "owner-or-variant-conflict",
+    // A's rollback looks at A's OWN key, which is genuinely empty — so `absent` is
+    // now the honest answer, where the single slot forced it to report a conflict
+    // with a run it had nothing to do with.
+    expect(outA).toMatchObject({ status: "submit-rejected", error: errA, rollback: "absent" });
+    // B is intact, and A's rollback never went near it.
+    expect(JSON.parse(storage.raw(optimizeSessionKeyFor("owner-B"))!)).toMatchObject({
+      ownerId: "owner-B",
     });
-    expect(JSON.parse(storage.raw(KEY)!)).toMatchObject({ ownerId: "owner-B" });
   });
 
   it("plain unstaged A with an empty slot reports rollback: absent on rejection", async () => {
@@ -699,7 +1009,11 @@ describe("runSubmissionTransaction — closed submit seam + owner scoping", () =
     expect(storage.raw(KEY)).toBeNull();
   });
 
-  it("a pre-existing session blocks a new submission before POST (explicit discard required)", async () => {
+  // THE HEADLINE PROPERTY. This test used to assert the opposite — that an existing
+  // session blocked the next submission until it was explicitly discarded — and
+  // that is exactly what put “An optimisation from this browser is still running”
+  // between the user and the Optimize button.
+  it("a run already in the tab does NOT block a new submission", async () => {
     const storage = new FakeStorage();
     storage.seed(validActiveJson("job-A", "owner-A"));
     let submitted = false;
@@ -710,12 +1024,16 @@ describe("runSubmissionTransaction — closed submit seam + owner scoping", () =
         return { status: "accepted", jobId: "job-B" };
       },
     });
-    expect(outcome).toMatchObject({ status: "blocked-before-post", reason: "session-conflict" });
-    expect(submitted).toBe(false);
-    // The existing session A is untouched and still resumable.
-    expect(inspectPersistedSession(storage)).toMatchObject({ kind: "resumable" });
-    expect(storage.setCalls).toBe(0);
-    expect(storage.removeCalls).toBe(0);
+    expect(outcome).toMatchObject({ status: "activated" });
+    expect(submitted).toBe(true);
+    // Both records coexist: the older run can still finish its cleanup, and the
+    // newer one never waited on it.
+    expect(classifyRecord(storage.raw(optimizeSessionKeyFor("owner-A")))).toMatchObject({
+      kind: "resumable",
+    });
+    expect(classifyRecord(storage.raw(optimizeSessionKeyFor("owner-B")))).toMatchObject({
+      kind: "resumable",
+    });
   });
 });
 
@@ -738,7 +1056,6 @@ describe("inspectPersistedSession — strict reload classification", () => {
     const corrupt = new FakeStorage();
     corrupt.seed("{not valid json");
     expect(inspectPersistedSession(corrupt)).toMatchObject({ kind: "unreadable" });
-    expect(inspectPersistedSession(corrupt)).toHaveProperty("identity");
 
     const future = new FakeStorage();
     future.seed(JSON.stringify({ ...JSON.parse(validActiveJson()), schemaVersion: 999 }));
@@ -746,7 +1063,7 @@ describe("inspectPersistedSession — strict reload classification", () => {
 
     const throwing = new FakeStorage();
     throwing.onGet = securityError;
-    expect(inspectPersistedSession(throwing)).toEqual({ kind: "unreadable", identity: null });
+    expect(inspectPersistedSession(throwing)).toEqual({ kind: "unreadable" });
   });
 
   it.each([
@@ -778,243 +1095,73 @@ describe("inspectPersistedSession — strict reload classification", () => {
   });
 });
 
-describe("forgetInspectedSession — confirmed unchanged-record removal", () => {
-  it.each([
-    ["provisional", JSON.stringify(anonymizedProvisional())],
-    ["active", validActiveJson("job-forget")],
-    ["corrupt", "{broken"],
-    ["future", JSON.stringify({ ...JSON.parse(validActiveJson()), schemaVersion: 999 })],
-  ])("removes an unchanged %s record and verifies absence", (_label, raw) => {
-    const storage = new FakeStorage();
-    storage.seed(raw);
-    const inspected = inspectPersistedSession(storage);
-    expect(inspected.kind).not.toBe("none");
-    if (inspected.kind === "none" || inspected.identity === null)
-      throw new Error("identity missing");
+// ---------------------------------------------------------------------------
+// Owner-scoped removal
+// ---------------------------------------------------------------------------
+//
+// REPLACED the \`removeInspectedSession\` and \`updateActiveCursor\` batteries.
+//
+// \`removeInspectedSession\` removed "the" record only if its exact bytes were
+// still the ones a boot inspection had classified. That exact-bytes check was the
+// only thing standing between a removal and somebody else's run, because one slot
+// held every run. The key names the owner now, so the scoping is structural and
+// the proof belongs with it, in \`owner-keyed-session.test.ts\`. What is worth
+// pinning HERE is that the transaction's own removal path agrees.
+//
+// \`updateActiveCursor\` is gone outright, along with the persisted resume cursor:
+// it existed so a RELOAD could resume, and a reload is now a fresh entry.
 
-    expect(forgetInspectedSession(storage, inspected.identity)).toEqual({ status: "removed" });
-    expect(storage.raw(KEY)).toBeNull();
+describe("owner-scoped removal agrees with the transaction that wrote the record", () => {
+  it("removes the record the transaction staged, and proves it absent", () => {
+    const storage = new FakeStorage();
+    const provisional = buildProvisionalSession({
+      ownerId: "own-1",
+      anonymized: false,
+      peopleCount: 0,
+      reverseMap: [],
+      runOptions: {},
+      capture: { status: "unavailable", reason: "snapshot_persist_failed" },
+    });
+    expect(stageProvisionalSession(storage, provisional).status).toBe("staged");
+    expect(activateSession(storage, provisional, "job-1").status).toBe("activated");
+
+    expect(removeOwnerSession(storage, "own-1")).toEqual({ status: "removed" });
+    expect(storage.raw(optimizeSessionKeyFor("own-1"))).toBeNull();
   });
 
-  it("preserves a record that changed after inspection", () => {
+  it("cannot reach another owner's record, even when asked to", () => {
     const storage = new FakeStorage();
-    storage.seed(validActiveJson("job-A"));
-    const inspected = inspectPersistedSession(storage);
-    if (inspected.kind !== "resumable") throw new Error("expected resumable");
-
-    storage.seed(validActiveJson("job-B"));
-    expect(forgetInspectedSession(storage, inspected.identity)).toEqual({ status: "changed" });
-    expect(storage.raw(KEY)).toContain("job-B");
-  });
-
-  it("returns unverified when removal throws or is a no-op", () => {
-    for (const mode of ["throw", "no-op"] as const) {
-      const storage = new FakeStorage();
-      storage.seed("{broken");
-      const inspected = inspectPersistedSession(storage);
-      if (inspected.kind !== "unreadable" || inspected.identity === null) {
-        throw new Error("expected unreadable identity");
-      }
-      storage.onRemove = mode === "throw" ? securityError : () => {};
-      expect(forgetInspectedSession(storage, inspected.identity)).toEqual({
-        status: "unverified",
+    for (const ownerId of ["own-1", "own-2"]) {
+      const record = buildProvisionalSession({
+        ownerId,
+        anonymized: false,
+        peopleCount: 0,
+        reverseMap: [],
+        runOptions: {},
+        capture: { status: "unavailable", reason: "snapshot_persist_failed" },
       });
-      expect(storage.raw(KEY)).toBe("{broken");
+      expect(stageProvisionalSession(storage, record).status).toBe("staged");
     }
+
+    expect(removeOwnerSession(storage, "own-1")).toEqual({ status: "removed" });
+    // The other run is untouched — the property that lets an abandoned run finish
+    // its cleanup while a brand-new submission is already staged.
+    expect(storage.raw(optimizeSessionKeyFor("own-2"))).not.toBeNull();
+    expect(classifyRecord(storage.raw(optimizeSessionKeyFor("own-2"))).kind).toBe("interrupted");
   });
 
-  it("treats an already absent inspected record as removed", () => {
+  it("reports an unproven removal rather than a false clean one", () => {
     const storage = new FakeStorage();
-    storage.seed("{broken");
-    const inspected = inspectPersistedSession(storage);
-    if (inspected.kind !== "unreadable" || inspected.identity === null) {
-      throw new Error("expected unreadable identity");
-    }
-    storage.removeItem(KEY);
-    expect(forgetInspectedSession(storage, inspected.identity)).toEqual({ status: "removed" });
-  });
-
-  it("exports the unknown-backend retention warning", () => {
-    expect(FORGET_OPTIMIZE_SESSION_WARNING).toContain(
-      "unknown backend optimization may continue until terminal state or server retention",
-    );
-  });
-});
-
-describe("updateActiveCursor — job-scoped, validated, verified cursor persistence", () => {
-  function seedActive(storage: FakeStorage, jobId = "job-1", ownerId = "owner-seed"): void {
-    storage.seed(validActiveJson(jobId, ownerId));
-  }
-
-  it("persists the last committed cursor onto the exact active record and read-back-verifies", () => {
-    const storage = new FakeStorage();
-    seedActive(storage);
-    const outcome = updateActiveCursor(storage, "job-1", "cursor-42");
-    expect(outcome.status).toBe("updated");
-    const stored = JSON.parse(storage.raw(KEY)!);
-    expect(stored).toMatchObject({ phase: "active", jobId: "job-1", lastCursor: "cursor-42" });
-    // The persisted record still round-trips as resumable with the cursor readable.
-    const inspected = inspectPersistedSession(storage);
-    expect(inspected.kind).toBe("resumable");
-    if (inspected.kind === "resumable") {
-      expect(inspected.record.lastCursor).toBe("cursor-42");
-    }
-  });
-
-  it("rebuilds from the CURRENT record (a concurrently changed field is not clobbered)", () => {
-    const storage = new FakeStorage();
-    seedActive(storage, "job-1", "owner-seed");
-    updateActiveCursor(storage, "job-1", "cursor-1");
-    // A later commit advances the cursor without touching the rest of the record.
-    updateActiveCursor(storage, "job-1", "cursor-2");
-    const stored = JSON.parse(storage.raw(KEY)!);
-    expect(stored.lastCursor).toBe("cursor-2");
-    expect(stored.ownerId).toBe("owner-seed");
-    expect(stored.reverseMap).toEqual(REVERSE_MAP);
-  });
-
-  it("clears the persisted cursor on reset (removes the key, not stores undefined)", () => {
-    const storage = new FakeStorage();
-    seedActive(storage);
-    updateActiveCursor(storage, "job-1", "cursor-42");
-    const cleared = updateActiveCursor(storage, "job-1", null);
-    expect(cleared.status).toBe("updated");
-    const stored = JSON.parse(storage.raw(KEY)!);
-    expect("lastCursor" in stored).toBe(false);
-    expect(inspectPersistedSession(storage).kind).toBe("resumable");
-  });
-
-  it("is a no-op fast path when the cursor already matches (no redundant write)", () => {
-    const storage = new FakeStorage();
-    seedActive(storage);
-    updateActiveCursor(storage, "job-1", "cursor-42");
-    const before = storage.setCalls;
-    const again = updateActiveCursor(storage, "job-1", "cursor-42");
-    expect(again.status).toBe("updated");
-    expect(storage.setCalls).toBe(before);
-  });
-
-  it("reports STALE for a different job, a provisional record, or an empty slot", () => {
-    const other = new FakeStorage();
-    seedActive(other, "job-1");
-    expect(updateActiveCursor(other, "job-2", "c").status).toBe("stale");
-
-    const provisional = new FakeStorage();
-    stageProvisionalSession(provisional, anonymizedProvisional());
-    expect(updateActiveCursor(provisional, "job-1", "c").status).toBe("stale");
-
-    const empty = new FakeStorage();
-    expect(updateActiveCursor(empty, "job-1", "c").status).toBe("stale");
-  });
-
-  it("reports STALE for unreadable bytes rather than overwriting them", () => {
-    const storage = new FakeStorage();
-    storage.seed("{corrupt");
-    expect(updateActiveCursor(storage, "job-1", "c").status).toBe("stale");
-    expect(storage.raw(KEY)).toBe("{corrupt");
-  });
-
-  it("reports UNVERIFIED when the read, the write, or the read-back cannot be proven", () => {
-    const readThrows = new FakeStorage();
-    readThrows.seed(validActiveJson("job-1"));
-    readThrows.onGet = securityError;
-    expect(updateActiveCursor(readThrows, "job-1", "c").status).toBe("unverified");
-
-    const writeThrows = new FakeStorage();
-    writeThrows.seed(validActiveJson("job-1"));
-    writeThrows.onSet = securityError;
-    expect(updateActiveCursor(writeThrows, "job-1", "c").status).toBe("unverified");
-
-    const noopWrite = new FakeStorage();
-    noopWrite.seed(validActiveJson("job-1"));
-    noopWrite.onSet = () => {};
-    expect(updateActiveCursor(noopWrite, "job-1", "c").status).toBe("unverified");
-  });
-
-  it("rejects a persisted active record whose lastCursor is not a non-empty string", () => {
-    const empty = new FakeStorage();
-    empty.seed(JSON.stringify({ ...JSON.parse(validActiveJson("job-1")), lastCursor: "" }));
-    expect(inspectPersistedSession(empty).kind).toBe("unreadable");
-
-    const typed = new FakeStorage();
-    typed.seed(JSON.stringify({ ...JSON.parse(validActiveJson("job-1")), lastCursor: 5 }));
-    expect(inspectPersistedSession(typed).kind).toBe("unreadable");
-  });
-
-  // Cursor byte invariant (`sse-record-byte-bounds` P1 #4): an oversized opaque
-  // cursor is a protocol violation at BOTH the durable write and the reload
-  // decode seams — never persisted, never reloaded and re-sent as a header.
-  it("refuses to persist an oversized cursor (write seam, defense-in-depth)", () => {
-    const storage = new FakeStorage();
-    seedActive(storage);
-    const oversized = "c".repeat(4096 + 1); // > MAX_CURSOR_BYTES
-    const outcome = updateActiveCursor(storage, "job-1", oversized);
-    // `rejected` (cursor refused, record healthy) — NOT `stale` (record gone),
-    // which would wrongly trigger a refresh. Coherent, visible, non-fatal.
-    expect(outcome.status).toBe("rejected"); // not written
-    const stored = JSON.parse(storage.raw(KEY)!);
-    expect("lastCursor" in stored).toBe(false); // the poison cursor never landed
-  });
-
-  // Persisted-recovery classification (`cursor-seam-and-feed-order` P1 #2): an
-  // otherwise-valid active session whose ONLY defect is an oversized saved cursor
-  // must enter explicit invalid-cursor RECOVERY (resumable, cursor stripped) rather
-  // than the generic unreadable/Forget flow — while every other corruption stays
-  // unreadable.
-  it("classifies an oversized-cursor active record as resumable+cursorReset with the cursor stripped", () => {
-    const oversized = "c".repeat(4096 + 1);
-    const storage = new FakeStorage();
-    storage.seed(
-      JSON.stringify({ ...JSON.parse(validActiveJson("job-1")), lastCursor: oversized }),
-    );
-    const inspected = inspectPersistedSession(storage);
-    expect(inspected.kind).toBe("resumable");
-    if (inspected.kind !== "resumable") throw new Error("unreachable");
-    expect(inspected.cursorReset).toBe(true);
-    expect(inspected.record.jobId).toBe("job-1"); // identity preserved
-    expect("lastCursor" in inspected.record).toBe(false); // the poison cursor is stripped
-  });
-
-  it("keeps a SECOND defect alongside an oversized cursor generically unreadable", () => {
-    const oversized = "c".repeat(4096 + 1);
-    const storage = new FakeStorage();
-    // Oversized cursor AND an invalid schema version: not the recoverable case.
-    storage.seed(
-      JSON.stringify({
-        ...JSON.parse(validActiveJson("job-1")),
-        schemaVersion: 999,
-        lastCursor: oversized,
-      }),
-    );
-    expect(inspectPersistedSession(storage).kind).toBe("unreadable");
-  });
-
-  it("clearInvalidActiveCursor durably rewrites the record cursor-less (verified), so a reload is clean", () => {
-    const oversized = "c".repeat(4096 + 1);
-    const storage = new FakeStorage();
-    storage.seed(
-      JSON.stringify({ ...JSON.parse(validActiveJson("job-1")), lastCursor: oversized }),
-    );
-    const outcome = clearInvalidActiveCursor(storage, "job-1");
-    expect(outcome.status).toBe("cleared");
-    const stored = JSON.parse(storage.raw(KEY)!);
-    expect("lastCursor" in stored).toBe(false); // durably dropped
-    // A subsequent reload now sees a clean resumable record (no re-recovery).
-    const reinspected = inspectPersistedSession(storage);
-    expect(reinspected.kind).toBe("resumable");
-    if (reinspected.kind !== "resumable") throw new Error("unreachable");
-    expect(reinspected.cursorReset ?? false).toBe(false);
-  });
-
-  it("clearInvalidActiveCursor is a no-op for a different job or a clean record", () => {
-    const oversized = "c".repeat(4096 + 1);
-    const storage = new FakeStorage();
-    storage.seed(
-      JSON.stringify({ ...JSON.parse(validActiveJson("job-1")), lastCursor: oversized }),
-    );
-    expect(clearInvalidActiveCursor(storage, "other-job").status).toBe("none"); // job-scoped
-    const clean = new FakeStorage();
-    clean.seed(validActiveJson("job-1"));
-    expect(clearInvalidActiveCursor(clean, "job-1").status).toBe("none"); // nothing to clear
+    const provisional = buildProvisionalSession({
+      ownerId: "own-1",
+      anonymized: false,
+      peopleCount: 0,
+      reverseMap: [],
+      runOptions: {},
+      capture: { status: "unavailable", reason: "snapshot_persist_failed" },
+    });
+    expect(stageProvisionalSession(storage, provisional).status).toBe("staged");
+    storage.onRemove = () => {}; // silently no-ops
+    expect(removeOwnerSession(storage, "own-1")).toEqual({ status: "unverified" });
   });
 });

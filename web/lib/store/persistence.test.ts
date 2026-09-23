@@ -1,118 +1,20 @@
+// LEGACY persisted-record decoding tests.
+//
+// T03 retired Zustand `persist`, so the serialized write queue and the in-memory
+// `StateStorage` double this file used to cover no longer exist. What remains is
+// the chain the repository migration still runs over a pre-T03 record: the
+// forward version migration, the payload sanitizer, and the non-finite-number
+// codec that makes a hard (infinite) weight survive JSON.
+
 import { describe, expect, it } from "vitest";
-import type { StateStorage } from "zustand/middleware";
 import {
-  createGuardedStorage,
-  createMemoryStorage,
+  decodeNonFiniteNumbers,
+  encodeNonFiniteNumbers,
   migrateScenarioState,
+  NON_FINITE_PERSIST_TAG,
   sanitizePersistedScenario,
   SCENARIO_PERSIST_VERSION,
 } from "./persistence";
-
-describe("guarded storage", () => {
-  it("passes reads through and serializes removes with writes", async () => {
-    const inner = createMemoryStorage({ k: "seed" });
-    const guard = createGuardedStorage(() => inner);
-    expect(await guard.getItem("k")).toBe("seed");
-    await guard.setItem("k", "next");
-    await guard.removeItem("k");
-    await guard.drain();
-    expect(await guard.getItem("k")).toBeNull();
-  });
-
-  it("a slow older write cannot clobber a newer one (FIFO, no overlap)", async () => {
-    const backing = new Map<string, string>();
-    let call = 0;
-    const inner: StateStorage = {
-      getItem: async (name) => backing.get(name) ?? null,
-      setItem: (name, value) => {
-        // First inner write is slow, second fast: a naive passthrough would land
-        // the slow v1 last and clobber v2. The queue serializes, so v2 wins.
-        const delay = call++ === 0 ? 30 : 1;
-        return new Promise<void>((resolve) => {
-          setTimeout(() => {
-            backing.set(name, value);
-            resolve();
-          }, delay);
-        });
-      },
-      removeItem: async (name) => {
-        backing.delete(name);
-      },
-    };
-    const guard = createGuardedStorage(() => inner);
-
-    guard.setItem("k", "v1");
-    guard.setItem("k", "v2");
-    await guard.drain();
-
-    expect(backing.get("k")).toBe("v2");
-  });
-
-  it("does not strand the newest value when an inner write rejects", async () => {
-    const backing = new Map<string, string>();
-    let call = 0;
-    const inner: StateStorage = {
-      getItem: async (name) => backing.get(name) ?? null,
-      setItem: async () => {
-        // Every write fails; the newest revision still leaves an error.
-        call++;
-        throw new Error("disk full");
-      },
-      removeItem: async (name) => {
-        backing.delete(name);
-      },
-    };
-    const guard = createGuardedStorage(() => inner);
-
-    guard.setItem("k", "v1"); // rejects internally
-    guard.setItem("k", "v2"); // newest — also rejects, so the error stands
-    await guard.drain();
-
-    expect(call).toBe(2);
-    expect(guard.consumeWriteError()).toBeInstanceOf(Error);
-    // The error is consumed once.
-    expect(guard.consumeWriteError()).toBeNull();
-  });
-
-  it("a newer successful write supersedes an older failure (newest-wins applies to errors)", async () => {
-    const backing = new Map<string, string>();
-    let call = 0;
-    const inner: StateStorage = {
-      getItem: async (name) => backing.get(name) ?? null,
-      setItem: async (name, value) => {
-        // v1 fails; v2 (newest) succeeds and must clear the stale v1 error —
-        // otherwise a transient failure would keep reporting `error` forever
-        // after a later write actually landed.
-        if (call++ === 0) throw new Error("disk full");
-        backing.set(name, value);
-      },
-      removeItem: async (name) => {
-        backing.delete(name);
-      },
-    };
-    const guard = createGuardedStorage(() => inner);
-
-    guard.setItem("k", "v1"); // rejects internally
-    guard.setItem("k", "v2"); // newest — succeeds, superseding v1's error
-    await guard.drain();
-
-    expect(backing.get("k")).toBe("v2");
-    expect(guard.consumeWriteError()).toBeNull();
-  });
-
-  it("never surfaces a rejection to the caller (no unhandled rejection)", async () => {
-    const inner: StateStorage = {
-      getItem: async () => null,
-      setItem: async () => {
-        throw new Error("boom");
-      },
-      removeItem: async () => {},
-    };
-    const guard = createGuardedStorage(() => inner);
-    await expect(guard.setItem("k", "v")).resolves.toBeUndefined();
-    await expect(guard.drain()).resolves.toBeUndefined();
-  });
-});
 
 describe("migrateScenarioState", () => {
   it("upgrades a v0 payload: requests → reqData, adds export layout", () => {
@@ -905,14 +807,40 @@ describe("sanitizePersistedScenario", () => {
   });
 });
 
-describe("in-memory storage double", () => {
-  it("round-trips and snapshots", async () => {
-    const mem = createMemoryStorage();
-    expect(await mem.getItem("x")).toBeNull();
-    await mem.setItem("x", "1");
-    expect(await mem.getItem("x")).toBe("1");
-    expect(mem.snapshot()).toEqual({ x: "1" });
-    await mem.removeItem("x");
-    expect(mem.snapshot()).toEqual({});
+describe("non-finite weight codec", () => {
+  const roundTrip = (value: unknown) =>
+    JSON.parse(JSON.stringify(value, encodeNonFiniteNumbers), decodeNonFiniteNumbers);
+
+  it("round-trips a signed infinity at an approved weight position", () => {
+    expect(roundTrip({ weight: Number.POSITIVE_INFINITY })).toEqual({
+      weight: Number.POSITIVE_INFINITY,
+    });
+    expect(roundTrip({ weight: Number.NEGATIVE_INFINITY })).toEqual({
+      weight: Number.NEGATIVE_INFINITY,
+    });
+  });
+
+  it("round-trips an infinity-tolerant weightRange list", () => {
+    expect(roundTrip({ weightRange: [Number.NEGATIVE_INFINITY, 3] })).toEqual({
+      weightRange: [Number.NEGATIVE_INFINITY, 3],
+    });
+  });
+
+  it("leaves NaN alone so it keeps failing closed at the sanitizer", () => {
+    expect(roundTrip({ weight: Number.NaN })).toEqual({ weight: null });
+  });
+
+  it("passes an authored string that merely reads like a tag through unchanged", () => {
+    expect(roundTrip({ label: "Infinity" })).toEqual({ label: "Infinity" });
+  });
+
+  it("REFUSES a forged tag at a finite-only field rather than reviving it", () => {
+    const forged = JSON.stringify({ requiredNumPeople: { [NON_FINITE_PERSIST_TAG]: "Infinity" } });
+    expect(() => JSON.parse(forged, decodeNonFiniteNumbers)).toThrow(/finite-only/);
+  });
+
+  it("REFUSES a tagged-but-malformed envelope rather than guessing a value", () => {
+    const malformed = JSON.stringify({ weight: { [NON_FINITE_PERSIST_TAG]: "Infinity", x: 1 } });
+    expect(() => JSON.parse(malformed, decodeNonFiniteNumbers)).toThrow(/malformed/);
   });
 });

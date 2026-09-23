@@ -18,9 +18,24 @@ import { expect, test, type Page } from "@playwright/test";
 
 type NsWindow = {
   __nsStore: {
-    scenario: {
-      getState(): Record<string, unknown> & { mutateScenario(x: unknown): void };
+    /** The repository command bus — the product's only durable write path. */
+    commands: {
+      mutate(patch: Record<string, unknown>): Promise<{ ok: boolean }>;
+      recordBackup(): Promise<{ ok: boolean }>;
+      undo(): Promise<{ ok: boolean }>;
+      redo(): Promise<{ ok: boolean }>;
+      takeover(): Promise<{ ok: boolean }>;
     };
+    drain(): Promise<void>;
+    historyDepth(): Promise<number>;
+    authority(): {
+      scenarioId: string | null;
+      documentRevision: number;
+      ownership: string;
+      canUndo: boolean;
+      canRedo: boolean;
+    };
+    scenario(): Record<string, unknown>;
     navGuard: {
       getState(): {
         registerDraft(reg: { id: string; label: string }): () => void;
@@ -45,15 +60,18 @@ async function gotoReadyHome(page: Page) {
 }
 
 async function mutate(page: Page, patch: Record<string, unknown>) {
-  await page.evaluate((p) => {
-    (window as unknown as NsWindow).__nsStore.scenario.getState().mutateScenario(p);
+  await page.evaluate(async (p) => {
+    await (window as unknown as NsWindow).__nsStore.commands.mutate(p);
   }, patch);
 }
 
+/** The COMMITTED projection — drained, so a read never outruns the command that wrote. */
 async function storeSnapshot(page: Page): Promise<string> {
-  return page.evaluate(() =>
-    JSON.stringify((window as unknown as NsWindow).__nsStore.scenario.getState()),
-  );
+  return page.evaluate(async () => {
+    const store = (window as unknown as NsWindow).__nsStore;
+    await store.drain();
+    return JSON.stringify(store.scenario());
+  });
 }
 
 async function openTestDraft(page: Page) {
@@ -146,6 +164,7 @@ const GUIDED_VISIBLE_PATHS = [
   "/rules",
   "/shift-requests",
   "/optimize-and-export",
+  "/roster",
   "/save-and-load",
 ];
 const ADVANCED_ONLY_PATHS = [

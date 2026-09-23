@@ -3,22 +3,40 @@
 // T16e screen integration: the real controller + recovery + terminal orchestration
 // wired through the screen, with mocked transport. Proves the readiness/version
 // gates, the end-to-end submit → download → cleanup terminal path with bounded
-// observability, and the confirmed Forget of an interrupted recovery record.
+// observability, and the hidden pre-submit retirement behind the Optimize button.
 
+// This file runs with the write-ahead snapshot DEGRADED, which is a real supported
+// browser condition: roster capture reports `unavailable`, and the terminal
+// download/cleanup chain behaves exactly as it did before capture existed. The
+// production capture pipeline with storage present is proved in
+// `optimize-capture-composition.test.tsx`.
+//
+// INTEGRATION — that premise is now STATED rather than inherited. It used to rest on
+// this module not importing `fake-indexeddb`, so no IndexedDB existed and staging
+// could not succeed. The T02/T03 repository made IndexedDB a GLOBAL test fixture
+// (`vitest.setup.ts` registers `fake-indexeddb/auto` for the whole suite), which
+// silently falsified it: capture began fetching `/roster`, this file's route handler
+// — which has no such case, because it was never reached — answered `unexpected
+// request`, the gate settled `fetch-failed`, and the last-line DELETE invariant
+// correctly refused every cleanup. Nothing about the product was wrong; the file's
+// ambient precondition had evaporated. It is reinstated below through the product's
+// own `stageSnapshot` seam, where it cannot evaporate again.
 import { createElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { JobResponse } from "@/lib/bff/types";
-import { useHotStore, useScenarioStore } from "@/lib/store";
-import { createEmptyScenarioUiState } from "@/lib/scenario/canonical";
+import { getScenarioAuthority, scenarioCommands, useHotStore } from "@/lib/store";
+import { resetScenarioForTest } from "@/lib/store/test-authority";
 import type { PrepareOptimizeSubmissionResult } from "@/lib/scenario";
 import {
-  buildProvisionalSession,
   createOptimizeObservability,
   OPTIMIZE_SESSION_STORAGE_KEY,
+  resetRosterCaptureGate,
   type CleanupCallOutcome,
+  type OptimizeBasisStore,
+  type SessionCaptureState,
   type SessionTransactionStorage,
 } from "@/lib/optimize";
 import { OptimizeAndExportScreen } from "./optimize-and-export-screen";
@@ -58,9 +76,24 @@ const baseJob = (over: Partial<JobResponse> = {}): JobResponse => ({
   terminal: false,
   queue_position: 2,
   created_at: "2026-07-20T00:00:00+00:00",
+  // Nullable server-side (`schemas.py`: `datetime | None`) and read only by T10's
+  // diagnostic evidence window, which nothing in this suite exercises — so `null`
+  // states the contract without moving any behaviour here.
+  expires_at: null,
   started_at: null,
   finished_at: null,
-  request: { input_name: "s.yaml", solver: "ortools/cp-sat", prettify: null, timeout_seconds: 300 },
+  request: {
+    input_name: "s.yaml",
+    solver: "ortools/cp-sat",
+    prettify: null,
+    timeout_seconds: 300,
+    // T09 — every admitted job carries a purpose, and an unqualified submission is
+    // admitted as `ordinary` rather than as a job with no purpose. `basis: null` is
+    // the ORDINARY run's echo: this fixture deliberately does not reflect a posted
+    // basis back, which is why the bind assertions below expect an unbound row.
+    purpose: "ordinary",
+    basis: null,
+  },
   result: null,
   error: null,
   controls: { cancellable: true, early_completion_available: false },
@@ -103,6 +136,10 @@ function memStorage(seed: string | null = null): SessionTransactionStorage {
     getItem: (key) => values.get(key) ?? null,
     setItem: (key, value) => void values.set(key, value),
     removeItem: (key) => void values.delete(key),
+    get length() {
+      return values.size;
+    },
+    key: (index) => [...values.keys()][index] ?? null,
   };
 }
 
@@ -111,9 +148,32 @@ const okPrep: PrepareOptimizeSubmissionResult = {
   prep: { yaml: "scenario: {}", peopleCount: 0, reverseMap: [], anonymized: false },
 };
 
-function readyStore() {
-  useScenarioStore.setState({
-    ...createEmptyScenarioUiState(),
+/**
+ * THIS FILE'S PREMISE, injected: the write-ahead snapshot could not be staged.
+ *
+ * The seam is required to be total — a rejection would gate the POST, which the
+ * non-gating contract forbids — so the real implementation reports failure by
+ * returning this degraded state rather than by throwing, and so does this. Capture
+ * then settles `unavailable` BEFORE any `/roster` fetch, which is the one class of
+ * cause that authorizes cleanup without a capture token. That is what lets every
+ * assertion below be about the terminal download/cleanup table and nothing else.
+ */
+const degradedCapture = async (): Promise<SessionCaptureState> => ({
+  status: "unavailable",
+  reason: "snapshot_persist_failed",
+});
+
+/**
+ * Satisfy the route's required-data gate through the product's own write path.
+ *
+ * INTEGRATION (T03): this used to `setState` the projection directly. The projection
+ * has no setter any more — at the type level and at runtime — so it COMMITS instead.
+ * That also matters for correctness here: the screen's submit preflight reads
+ * PERSISTED identity/revision, and a projection-only seed would leave the two
+ * disagreeing so the preflight would reconcile the seed straight back out.
+ */
+async function readyStore() {
+  await scenarioCommands.mutate({
     staff: [{ id: "p1" }],
     shifts: [{ id: "day" }],
     rangeStart: "2026-07-01",
@@ -121,11 +181,26 @@ function readyStore() {
   });
 }
 
-function onlineInfo() {
+/**
+ * The `semantic_profile` block a real backend advertises on `/info` (T08).
+ *
+ * `onlineInfo()` deliberately does NOT carry one by default: most of this suite is
+ * about the run lifecycle, and a backend may legitimately omit it. That omission is
+ * also why the basis defect hid here — with no profile in the fixture, a screen that
+ * drops the profile and one that forwards it behave identically.
+ */
+const ADVERTISED_SEMANTIC_PROFILE = {
+  submission_contract_version: "optimize-yaml-v1",
+  solver_semantic_version: "ortools/cp-sat@1",
+  backend_capability_version: "nurse-scheduling-backend@1",
+} as const;
+
+function onlineInfo(extra: Record<string, unknown> = {}) {
   return {
     fetchInfo: async () => ({
       status: 200,
       body: {
+        ...extra,
         status: "ready",
         service_name: "nurse",
         api_version: "alpha",
@@ -141,12 +216,22 @@ function onlineInfo() {
   };
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  // The capture gate is app-lifetime (module-owned) so it survives route
+  // unmount/remount in production. These tests all drive job `opt_1`, so without
+  // this reset one test's cleanup token would be visible to the next and capture
+  // would be skipped for the wrong reason.
+  resetRosterCaptureGate();
+
   client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
+  // INTEGRATION (T03): a fresh repository-backed authority per test. This replaces
+  // `useScenarioStore.setState(...)` — the projection has no setter — and it matters
+  // beyond compilation: the screen's preflight reads durable state, so an empty
+  // projection over someone else's database is not an empty scenario.
+  await resetScenarioForTest();
   useHotStore.getState().resetRunView();
-  useScenarioStore.setState(createEmptyScenarioUiState());
 });
 
 afterEach(() => {
@@ -162,7 +247,11 @@ describe("OptimizeAndExportScreen — gating", () => {
     render(
       <OptimizeAndExportScreen
         serverInfoDeps={onlineInfo()}
-        controllerDeps={{ prepare: () => okPrep, storage: memStorage() }}
+        controllerDeps={{
+          prepare: () => okPrep,
+          stageSnapshot: degradedCapture,
+          storage: memStorage(),
+        }}
       />,
       {
         wrapper,
@@ -171,13 +260,13 @@ describe("OptimizeAndExportScreen — gating", () => {
     await waitFor(() => expect(screen.getByText("Online")).toBeInTheDocument());
     expect(screen.getByTestId("optimize-readiness")).toBeInTheDocument();
     expect(screen.getByTestId("optimize-disabled-reason")).toHaveTextContent(
-      "Complete the missing schedule configuration before optimizing.",
+      "Complete the missing schedule configuration before optimising.",
     );
     expect(screen.getByTestId("optimize-submit")).toBeDisabled();
   });
 
   it("blocks submission when the backend is offline", async () => {
-    readyStore();
+    await readyStore();
     routeFetch(() => json(200, baseJob()));
     render(
       <OptimizeAndExportScreen
@@ -188,7 +277,11 @@ describe("OptimizeAndExportScreen — gating", () => {
           }),
           clientVersion: "1.0.0",
         }}
-        controllerDeps={{ prepare: () => okPrep, storage: memStorage() }}
+        controllerDeps={{
+          prepare: () => okPrep,
+          stageSnapshot: degradedCapture,
+          storage: memStorage(),
+        }}
       />,
       { wrapper },
     );
@@ -204,12 +297,16 @@ describe("OptimizeAndExportScreen — gating", () => {
   });
 
   it("offers the idle-panel CTA only when a run is permitted", async () => {
-    readyStore();
+    await readyStore();
     routeFetch(() => json(200, baseJob()));
     render(
       <OptimizeAndExportScreen
         serverInfoDeps={onlineInfo()}
-        controllerDeps={{ prepare: () => okPrep, storage: memStorage() }}
+        controllerDeps={{
+          prepare: () => okPrep,
+          stageSnapshot: degradedCapture,
+          storage: memStorage(),
+        }}
       />,
       { wrapper },
     );
@@ -220,12 +317,16 @@ describe("OptimizeAndExportScreen — gating", () => {
   });
 
   it("warns on a frontend/backend version mismatch", async () => {
-    readyStore();
+    await readyStore();
     routeFetch(() => json(200, baseJob()));
     render(
       <OptimizeAndExportScreen
         serverInfoDeps={{ ...onlineInfo(), clientVersion: "9.9.9" }}
-        controllerDeps={{ prepare: () => okPrep, storage: memStorage() }}
+        controllerDeps={{
+          prepare: () => okPrep,
+          stageSnapshot: degradedCapture,
+          storage: memStorage(),
+        }}
       />,
       { wrapper },
     );
@@ -237,7 +338,7 @@ describe("OptimizeAndExportScreen — gating", () => {
 
 describe("OptimizeAndExportScreen — terminal success path", () => {
   it("submits, downloads the restored artifact, cleans up, and emits observability", async () => {
-    readyStore();
+    await readyStore();
     routeFetch((u, init) => {
       const method = init?.method ?? "GET";
       if (u.endsWith("/api/optimize") && method === "POST") return json(202, baseJob());
@@ -256,6 +357,7 @@ describe("OptimizeAndExportScreen — terminal success path", () => {
         serverInfoDeps={onlineInfo()}
         controllerDeps={{
           prepare: () => okPrep,
+          stageSnapshot: degradedCapture,
           storage: memStorage(),
           createOwnerId: () => "owner-1",
         }}
@@ -270,7 +372,7 @@ describe("OptimizeAndExportScreen — terminal success path", () => {
 
     await waitFor(() =>
       expect(screen.getByTestId("optimize-completed-artifact")).toHaveTextContent(
-        "Schedule optimized and downloaded successfully!",
+        "Schedule optimised and downloaded successfully!",
       ),
     );
     expect(saveBlob).toHaveBeenCalledWith(expect.any(Blob), "schedule.xlsx");
@@ -285,14 +387,14 @@ describe("OptimizeAndExportScreen — terminal success path", () => {
 
 describe("OptimizeAndExportScreen — queue and cancellation observability", () => {
   it("emits queue depth and cancellation for a queued run", async () => {
-    readyStore();
+    await readyStore();
     const cancelledJob = baseJob({
       state: "cancelled",
       terminal: true,
       started_at: "2026-07-20T00:00:01+00:00",
       finished_at: "2026-07-20T00:01:00+00:00",
       queue_position: null,
-      error: { code: "cancelled", message: "Optimization cancelled." },
+      error: { code: "cancelled", message: "Optimisation cancelled." },
       controls: { cancellable: false, early_completion_available: false },
     });
     routeFetch((u, init) => {
@@ -308,7 +410,12 @@ describe("OptimizeAndExportScreen — queue and cancellation observability", () 
     render(
       <OptimizeAndExportScreen
         serverInfoDeps={onlineInfo()}
-        controllerDeps={{ prepare: () => okPrep, storage: memStorage(), createOwnerId: () => "o2" }}
+        controllerDeps={{
+          prepare: () => okPrep,
+          stageSnapshot: degradedCapture,
+          storage: memStorage(),
+          createOwnerId: () => "o2",
+        }}
         observability={observability}
       />,
       { wrapper },
@@ -325,81 +432,6 @@ describe("OptimizeAndExportScreen — queue and cancellation observability", () 
     await waitFor(() =>
       expect(observability.snapshot().map((e) => e.observation.kind)).toContain("cancellation"),
     );
-  });
-});
-
-describe("OptimizeAndExportScreen — recovery forget", () => {
-  it("confirms and forgets an interrupted record", async () => {
-    const provisional = buildProvisionalSession({
-      ownerId: "owner-x",
-      anonymized: false,
-      peopleCount: 2,
-      reverseMap: [],
-      runOptions: {},
-    });
-    const storage = memStorage(JSON.stringify(provisional));
-    const confirm = vi.fn(async () => true);
-    routeFetch(() => json(200, baseJob()));
-
-    render(
-      <OptimizeAndExportScreen
-        serverInfoDeps={onlineInfo()}
-        controllerDeps={{ prepare: () => okPrep, storage }}
-        recoveryDeps={{ storage }}
-        confirm={confirm}
-      />,
-      { wrapper },
-    );
-
-    await waitFor(() => expect(screen.getByTestId("optimize-interrupted")).toBeInTheDocument());
-    await userEvent.click(screen.getByTestId("optimize-forget"));
-    expect(confirm).toHaveBeenCalled();
-    await waitFor(() =>
-      expect(screen.queryByTestId("optimize-interrupted")).not.toBeInTheDocument(),
-    );
-    expect(storage.getItem(OPTIMIZE_SESSION_STORAGE_KEY)).toBeNull();
-  });
-
-  it("blocks submission while an interrupted record still requires Forget", async () => {
-    readyStore();
-    const provisional = buildProvisionalSession({
-      ownerId: "owner-y",
-      anonymized: false,
-      peopleCount: 2,
-      reverseMap: [],
-      runOptions: {},
-    });
-    const storage = memStorage(JSON.stringify(provisional));
-    routeFetch(() => json(200, baseJob()));
-    render(
-      <OptimizeAndExportScreen
-        serverInfoDeps={onlineInfo()}
-        controllerDeps={{ prepare: () => okPrep, storage }}
-        recoveryDeps={{ storage }}
-      />,
-      { wrapper },
-    );
-    await waitFor(() => expect(screen.getByTestId("optimize-interrupted")).toBeInTheDocument());
-    expect(screen.getByTestId("optimize-submit")).toBeDisabled();
-    expect(screen.getByTestId("optimize-disabled-reason")).toHaveTextContent(
-      "Resolve the recovered run above",
-    );
-  });
-
-  it("surfaces an unreadable record and blocks submission", async () => {
-    readyStore();
-    const storage = memStorage("{ not json");
-    routeFetch(() => json(200, baseJob()));
-    render(
-      <OptimizeAndExportScreen
-        serverInfoDeps={onlineInfo()}
-        controllerDeps={{ prepare: () => okPrep, storage }}
-        recoveryDeps={{ storage }}
-      />,
-      { wrapper },
-    );
-    await waitFor(() => expect(screen.getByTestId("optimize-unreadable")).toBeInTheDocument());
-    expect(screen.getByTestId("optimize-submit")).toBeDisabled();
   });
 });
 
@@ -462,16 +494,20 @@ describe("OptimizeAndExportScreen — terminal release", () => {
     });
   }
 
-  it("row 2: infeasible shows the dedicated panel and auto-cleans", async () => {
-    readyStore();
+  it("row 2: infeasible shows the dedicated panel and is RETAINED, not deleted", async () => {
+    await readyStore();
     routeTerminal(infeasibleJob);
     const deleteJob = vi.fn(async (): Promise<CleanupCallOutcome> => ({ status: "confirmed" }));
     const storage = memStorage();
     render(
       <OptimizeAndExportScreen
         serverInfoDeps={onlineInfo()}
-        controllerDeps={{ prepare: () => okPrep, storage, createOwnerId: () => "o3" }}
-        recoveryDeps={{ storage }}
+        controllerDeps={{
+          prepare: () => okPrep,
+          stageSnapshot: degradedCapture,
+          storage,
+          createOwnerId: () => "o3",
+        }}
         terminalDeps={{ deleteJob }}
       />,
       { wrapper },
@@ -483,11 +519,30 @@ describe("OptimizeAndExportScreen — terminal release", () => {
     await waitFor(() => expect(screen.getByTestId("optimize-infeasible")).toBeInTheDocument());
     expect(screen.getByTestId("optimize-infeasible")).toHaveTextContent("infeasibility_proven");
     expect(screen.getByTestId("optimize-adjust-rules")).toHaveAttribute("href", "/rules");
-    await waitFor(() => expect(deleteJob).toHaveBeenCalledWith("opt_1"));
+
+    // INTEGRATION — THIS ROW'S EXPECTATION INVERTED, and the inversion is the point.
+    //
+    // It used to assert the DELETE. That is precisely the defect T10 exists to fix: an
+    // infeasible run produces no artifact, so the chain read it as "nothing to keep" and
+    // destroyed the only server-side evidence the bounded infeasibility diagnostic can
+    // ever classify against — seconds after it was created, on every deployment. The
+    // browser's basis row survived; its server half did not, so `classifyRecovery` saw a
+    // 404, answered `local-only`, and the diagnostic could never open a search for ANY
+    // run. Retention is not extended here: the backend already stamps `expires_at` at
+    // admission and reaps on `finished_at`. The client simply stops ending that window
+    // early.
+    //
+    // The LOCAL retirement is the settle point, and it has to be: it is the same step
+    // that would immediately precede the DELETE, so reaching it proves the terminal chain
+    // ran to the decision rather than merely not having got there yet. `deleteJob` is
+    // wired and provably reachable through this exact screen path — the feasible row
+    // below calls it — so this absence is a real refusal, not a vacuous one.
+    await waitFor(() => expect(storage.length).toBe(0));
+    expect(deleteJob).not.toHaveBeenCalled();
   });
 
   it("U31 solver_timeout (feasible) downloads its artifact then cleans up", async () => {
-    readyStore();
+    await readyStore();
     routeTerminal(solverTimeoutJob);
     const saveBlob = vi.fn();
     const deleteJob = vi.fn(async (): Promise<CleanupCallOutcome> => ({ status: "confirmed" }));
@@ -496,8 +551,12 @@ describe("OptimizeAndExportScreen — terminal release", () => {
     render(
       <OptimizeAndExportScreen
         serverInfoDeps={onlineInfo()}
-        controllerDeps={{ prepare: () => okPrep, storage, createOwnerId: () => "o7" }}
-        recoveryDeps={{ storage }}
+        controllerDeps={{
+          prepare: () => okPrep,
+          stageSnapshot: degradedCapture,
+          storage,
+          createOwnerId: () => "o7",
+        }}
         terminalDeps={{ saveBlob, deleteJob, fetchXlsx }}
       />,
       { wrapper },
@@ -513,346 +572,370 @@ describe("OptimizeAndExportScreen — terminal release", () => {
     await waitFor(() => expect(deleteJob).toHaveBeenCalledWith("opt_1"));
   });
 
-  it("row 3: process_timeout can be dismissed (cleaned) back to idle", async () => {
-    readyStore();
-    routeTerminal(processTimeoutJob);
-    const deleteJob = vi.fn(async (): Promise<CleanupCallOutcome> => ({ status: "confirmed" }));
+  // G6.2a RETIRED DISMISS AND RESUBMIT. Both existed because a terminal run
+  // OCCUPIED the single session record: the user needed a way to release it, and a
+  // second run had to wait for that release. Records are owner-keyed now, so a
+  // terminal run occupies nothing and a second run is the exact `Optimize` action.
+  //
+  // These three cases previously drove those buttons. They now prove the property
+  // that replaced them: the result is reported honestly, nothing is offered to
+  // press, and the primary action is live.
+  it.each([
+    ["process_timeout", () => processTimeoutJob, "timed out"],
+    ["worker_lost", () => workerLostJob, "Worker lost."],
+  ])("row 3: a %s run reports honestly and leaves Optimize live", async (_label, job, message) => {
+    await readyStore();
+    routeTerminal(job());
     const storage = memStorage();
-    render(
-      <OptimizeAndExportScreen
-        serverInfoDeps={onlineInfo()}
-        controllerDeps={{ prepare: () => okPrep, storage, createOwnerId: () => "o4" }}
-        recoveryDeps={{ storage }}
-        terminalDeps={{ deleteJob }}
-      />,
-      { wrapper },
-    );
-    await waitFor(() => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
-    await userEvent.click(screen.getByTestId("optimize-submit"));
-    await waitFor(() =>
-      expect(screen.getByTestId("optimize-terminal-error")).toHaveTextContent("timed out"),
-    );
-    expect(screen.queryByTestId("optimize-resubmit")).not.toBeInTheDocument();
-    await userEvent.click(screen.getByTestId("optimize-dismiss"));
-    await waitFor(() => expect(deleteJob).toHaveBeenCalledWith("opt_1"));
-    // Dismissed → the B2-1 idle empty state (not a bare status badge).
-    await waitFor(() => expect(screen.getByTestId("optimize-idle")).toBeInTheDocument());
-  });
-
-  it("worker_lost: a failed cleanup does NOT resubmit and preserves the terminal result", async () => {
-    readyStore();
-    routeTerminal(workerLostJob);
-    const deleteJob = vi.fn(
-      async (): Promise<CleanupCallOutcome> => ({ status: "failed", reason: "409" }),
-    );
-    const confirm = vi.fn(async () => true);
-    const storage = memStorage();
-    render(
-      <OptimizeAndExportScreen
-        serverInfoDeps={onlineInfo()}
-        controllerDeps={{ prepare: () => okPrep, storage, createOwnerId: () => "o5" }}
-        recoveryDeps={{ storage }}
-        terminalDeps={{ deleteJob }}
-        confirm={confirm}
-      />,
-      { wrapper },
-    );
-    await waitFor(() => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
-    await userEvent.click(screen.getByTestId("optimize-submit"));
-    await waitFor(() => expect(screen.getByTestId("optimize-resubmit")).toBeInTheDocument());
-
-    await userEvent.click(screen.getByTestId("optimize-resubmit"));
-    // Cleanup failed → the worker_lost result is preserved and the cleanup surface appears.
-    await waitFor(() => expect(screen.getByTestId("optimize-cleanup-failed")).toBeInTheDocument());
-    expect(screen.getByTestId("optimize-terminal-error")).toHaveTextContent("Worker lost.");
-    expect(screen.getByTestId("optimize-status")).toHaveTextContent("Worker lost");
-
-    // Abandon requires destructive confirmation, then frees the local slot.
-    await userEvent.click(screen.getByTestId("optimize-cleanup-abandon"));
-    expect(confirm).toHaveBeenCalled();
-    await waitFor(() =>
-      expect(screen.getByTestId("optimize-cleanup-abandoned")).toBeInTheDocument(),
-    );
-  });
-
-  it("cleans up via the exact code-first job-not-found DELETE (real classifier)", async () => {
-    readyStore();
-    const cancelledJob = baseJob({
-      state: "cancelled",
-      terminal: true,
-      started_at: "2026-07-20T00:00:01+00:00",
-      finished_at: "2026-07-20T00:01:00+00:00",
-      queue_position: null,
-      error: { code: "cancelled", message: "Optimization cancelled." },
-      controls: { cancellable: false, early_completion_available: false },
-    });
-    routeFetch((u, init) => {
-      const method = init?.method ?? "GET";
-      if (u.endsWith("/api/optimize") && method === "POST") return json(202, baseJob());
-      if (method === "DELETE")
-        return json(404, { error: { code: "job_not_found", message: "gone" } });
-      if (u.endsWith("/events")) return streamResponse(": keepalive\n\n");
-      if (/\/api\/optimize\/[^/]+$/.test(u)) return json(200, cancelledJob);
-      throw new Error(`unexpected request: ${u}`);
-    });
-    const storage = memStorage();
-    render(
-      <OptimizeAndExportScreen
-        serverInfoDeps={onlineInfo()}
-        controllerDeps={{ prepare: () => okPrep, storage, createOwnerId: () => "o6" }}
-        recoveryDeps={{ storage }}
-      />,
-      { wrapper },
-    );
-    await waitFor(() => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
-    await userEvent.click(screen.getByTestId("optimize-submit"));
-    await waitFor(() => expect(screen.getByTestId("optimize-dismiss")).toBeInTheDocument());
-    await userEvent.click(screen.getByTestId("optimize-dismiss"));
-    // Exact job-not-found is a confirmed cleanup → back to idle.
-    await waitFor(() => expect(screen.getByTestId("optimize-idle")).toBeInTheDocument());
-  });
-});
-
-describe("OptimizeAndExportScreen — primary submit gate after cleanup failure", () => {
-  // The primary Optimize submit must stay disabled while terminal cleanup is
-  // cleaning or has failed to prove local record release — otherwise a click
-  // dispatches `submit-started`, then T16q rediscovers the occupied/unproven
-  // session slot and dispatches `submit-blocked`, overwriting the authoritative
-  // terminal result/blob binding. It re-enables only after cleanup returns
-  // `cleaned` or confirmed abandon proves the local slot was removed/absent.
-
-  const completedWithArtifact = baseJob({
-    state: "completed",
-    terminal: true,
-    started_at: "2026-07-20T00:00:01+00:00",
-    finished_at: "2026-07-20T00:01:00+00:00",
-    queue_position: null,
-    result: {
-      outcome: "feasible",
-      score: 7,
-      solver_status: "FEASIBLE",
-      termination_reason: "solver_timeout",
-    },
-    controls: { cancellable: false, early_completion_available: false },
-    links: { ...baseJob().links, schedule: "/optimize/opt_1/xlsx" },
-  });
-
-  function routeCompletedWithArtifact() {
-    routeFetch((u, init) => {
-      const method = init?.method ?? "GET";
-      if (u.endsWith("/api/optimize") && method === "POST") return json(202, baseJob());
-      if (u.endsWith("/events")) return streamResponse(": keepalive\n\n");
-      if (/\/api\/optimize\/[^/]+$/.test(u)) return json(200, completedWithArtifact);
-      throw new Error(`unexpected request: ${u}`);
-    });
-  }
-
-  // A controllable storage lets the deleteJob seam mutate the local slot between
-  // the server DELETE confirmation and the T16b local record inspection, so the
-  // three local cleanup outcomes can be produced deterministically.
-  type Mode = "normal" | "throw" | "mutate";
-  function controllableStorage() {
-    const values = new Map<string, string>();
-    let mode: Mode = "normal";
-    let foreignRaw: string | null = null;
-    const storage: SessionTransactionStorage = {
-      getItem: (key) => {
-        if (mode === "throw") throw new Error("storage read failed");
-        if (foreignRaw !== null && key === OPTIMIZE_SESSION_STORAGE_KEY) return foreignRaw;
-        const raw = values.get(key) ?? null;
-        if (mode === "mutate" && raw !== null) {
-          // A different ownerId per read makes the bytes differ between inspect
-          // and forget → `changed`.
-          const parsed = JSON.parse(raw) as { ownerId: string };
-          parsed.ownerId = `${parsed.ownerId}-${Math.random()}`;
-          return JSON.stringify(parsed);
-        }
-        return raw;
-      },
-      setItem: (key, value) => void values.set(key, value),
-      removeItem: (key) => void values.delete(key),
-    };
-    return {
-      storage,
-      throwOnRead: () => {
-        mode = "throw";
-      },
-      startMutating: () => {
-        mode = "mutate";
-      },
-      stopMutating: () => {
-        mode = "normal";
-      },
-      setForeign: (raw: string) => {
-        foreignRaw = raw;
-        mode = "normal";
-      },
-      clearForeign: () => {
-        foreignRaw = null;
-      },
-    };
-  }
-
-  function foreignActiveRecordRaw(jobId: string): string {
-    return JSON.stringify({
-      schemaVersion: 1,
-      ownerId: "foreign-owner",
-      phase: "active",
-      anonymized: false,
-      runOptions: {},
-      peopleCount: 0,
-      reverseMap: [],
-      jobId,
-    });
-  }
-
-  for (const scenario of [
-    {
-      name: "not-current",
-      apply: (s: ReturnType<typeof controllableStorage>) =>
-        s.setForeign(foreignActiveRecordRaw("opt_FOREIGN")),
-    },
-    { name: "changed", apply: (s: ReturnType<typeof controllableStorage>) => s.startMutating() },
-    { name: "unverified", apply: (s: ReturnType<typeof controllableStorage>) => s.throwOnRead() },
-  ] as const) {
-    it(`server-confirmed + local ${scenario.name} disables the primary submit and preserves the terminal result`, async () => {
-      readyStore();
-      routeCompletedWithArtifact();
-      const control = controllableStorage();
-      const saveBlob = vi.fn();
-      const fetchXlsx = vi.fn(async () => ({ blob: new Blob(["x"]), filename: "schedule.xlsx" }));
-      const deleteJob = vi.fn(async () => {
-        // Server confirmed, then the local slot presents the failing outcome.
-        scenario.apply(control);
-        return { status: "confirmed" } as const;
-      });
-
-      render(
-        <OptimizeAndExportScreen
-          serverInfoDeps={onlineInfo()}
-          controllerDeps={{
-            prepare: () => okPrep,
-            storage: control.storage,
-            createOwnerId: () => `o-${scenario.name}`,
-          }}
-          recoveryDeps={{ storage: control.storage }}
-          terminalDeps={{ saveBlob, deleteJob, fetchXlsx }}
-        />,
-        { wrapper },
-      );
-
-      await waitFor(() => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
-      await userEvent.click(screen.getByTestId("optimize-submit"));
-
-      // Completed + downloaded, then auto-cleanup fails the local release.
-      await waitFor(() =>
-        expect(screen.getByTestId("optimize-completed-artifact")).toHaveTextContent(
-          "downloaded successfully",
-        ),
-      );
-      await waitFor(() =>
-        expect(screen.getByTestId("optimize-cleanup-failed")).toBeInTheDocument(),
-      );
-      expect(deleteJob).toHaveBeenCalledWith("opt_1");
-
-      // Primary submit must be disabled: clicking it would `submit-blocked`
-      // overwrite the authoritative terminal view/blob binding.
-      expect(screen.getByTestId("optimize-submit")).toBeDisabled();
-      expect(screen.getByTestId("optimize-disabled-reason")).toHaveTextContent(
-        "Release the finished run above (Retry cleanup or Abandon)",
-      );
-
-      // The terminal success and Download Again affordance must remain visible.
-      expect(screen.getByTestId("optimize-download-again")).toBeInTheDocument();
-    });
-  }
-
-  it("retry cleanup that proves local release re-enables the primary submit", async () => {
-    readyStore();
-    routeCompletedWithArtifact();
-    const control = controllableStorage();
-    const saveBlob = vi.fn();
-    const fetchXlsx = vi.fn(async () => ({ blob: new Blob(["x"]), filename: "schedule.xlsx" }));
-    let attempt = 0;
-    const deleteJob = vi.fn(async () => {
-      attempt += 1;
-      if (attempt === 1) {
-        // First auto-cleanup: a foreign record lands in the slot (not-current).
-        control.setForeign(foreignActiveRecordRaw("opt_FOREIGN"));
-      } else {
-        // Retry: foreign record cleared, the original active record is restorable.
-        control.clearForeign();
-      }
-      return { status: "confirmed" } as const;
-    });
-
     render(
       <OptimizeAndExportScreen
         serverInfoDeps={onlineInfo()}
         controllerDeps={{
           prepare: () => okPrep,
-          storage: control.storage,
-          createOwnerId: () => "o-retry",
+          stageSnapshot: degradedCapture,
+          storage,
+          createOwnerId: () => "o4",
         }}
-        recoveryDeps={{ storage: control.storage }}
-        terminalDeps={{ saveBlob, deleteJob, fetchXlsx }}
       />,
       { wrapper },
     );
-
     await waitFor(() => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
     await userEvent.click(screen.getByTestId("optimize-submit"));
-    await waitFor(() => expect(screen.getByTestId("optimize-cleanup-failed")).toBeInTheDocument());
-    expect(screen.getByTestId("optimize-submit")).toBeDisabled();
-
-    // Retry cleanup: the local record now matches, so recovery.cleanup returns removed.
-    await userEvent.click(screen.getByTestId("optimize-cleanup-retry"));
     await waitFor(() =>
-      expect(screen.queryByTestId("optimize-cleanup-failed")).not.toBeInTheDocument(),
+      expect(screen.getByTestId("optimize-terminal-error")).toHaveTextContent(message),
     );
 
-    // Primary submit re-enabled — only a proven release may start a new run.
+    for (const retired of [
+      "optimize-resubmit",
+      "optimize-dismiss",
+      "optimize-try-again",
+      "optimize-cleanup-retry",
+      "optimize-cleanup-abandon",
+      "confirm-dialog-confirm",
+    ]) {
+      expect(screen.queryByTestId(retired), retired).not.toBeInTheDocument();
+    }
+    // The one action, live, with no explanation of a previous run beside it.
     await waitFor(() => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
+    expect(screen.queryByTestId("optimize-disabled-reason")).not.toBeInTheDocument();
   });
 
-  it("confirmed abandon that proves local release re-enables the primary submit", async () => {
-    readyStore();
-    routeCompletedWithArtifact();
-    const storage = memStorage();
-    const saveBlob = vi.fn();
-    const fetchXlsx = vi.fn(async () => ({ blob: new Blob(["x"]), filename: "schedule.xlsx" }));
-    // Server DELETE fails — abandon is the only release path.
+  it("a FAILED cleanup blocks nothing: the result stands and Optimize stays live", async () => {
+    await readyStore();
+    routeTerminal(solverTimeoutJob);
+    // The DELETE never confirms, so cleanup can never settle. Under the retired
+    // model that state disabled the button and demanded a Retry.
     const deleteJob = vi.fn(
-      async (): Promise<CleanupCallOutcome> => ({ status: "failed", reason: "delete-http-500" }),
+      async (): Promise<CleanupCallOutcome> => ({ status: "failed", reason: "409" }),
     );
-    const confirm = vi.fn(async () => true);
-
+    const fetchXlsx = vi.fn(async () => ({ blob: new Blob(["x"]), filename: "schedule.xlsx" }));
+    const storage = memStorage();
     render(
       <OptimizeAndExportScreen
         serverInfoDeps={onlineInfo()}
-        controllerDeps={{ prepare: () => okPrep, storage, createOwnerId: () => "o-abandon" }}
-        recoveryDeps={{ storage }}
-        terminalDeps={{ saveBlob, deleteJob, fetchXlsx }}
-        confirm={confirm}
+        controllerDeps={{
+          prepare: () => okPrep,
+          stageSnapshot: degradedCapture,
+          storage,
+          createOwnerId: () => "o5",
+        }}
+        terminalDeps={{ deleteJob, fetchXlsx, saveBlob: vi.fn() }}
       />,
       { wrapper },
     );
-
     await waitFor(() => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
     await userEvent.click(screen.getByTestId("optimize-submit"));
-    await waitFor(() => expect(screen.getByTestId("optimize-cleanup-failed")).toBeInTheDocument());
-    expect(screen.getByTestId("optimize-submit")).toBeDisabled();
-
-    // Abandon requires destructive confirmation, then frees the local slot. The
-    // active record persisted by the submission is still present and matches, so
-    // recovery.cleanup returns removed → abandonCleanup resolves "abandoned".
-    await userEvent.click(screen.getByTestId("optimize-cleanup-abandon"));
-    expect(confirm).toHaveBeenCalled();
     await waitFor(() =>
-      expect(screen.getByTestId("optimize-cleanup-abandoned")).toBeInTheDocument(),
+      expect(screen.getByTestId("optimize-completed-artifact")).toHaveTextContent(
+        "downloaded successfully",
+      ),
     );
+    await waitFor(() => expect(deleteJob).toHaveBeenCalledWith("opt_1"));
 
-    // Primary submit re-enabled — only a proven release may start a new run.
+    // The successful result is preserved...
+    expect(screen.getByTestId("optimize-completed-artifact")).toBeInTheDocument();
+    // ...cleanup is invisible...
+    expect(screen.queryByTestId("optimize-cleanup-failed")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("optimize-cleanup-retry")).not.toBeInTheDocument();
+    // ...and it is not in the next run's way.
+    expect(screen.getByTestId("optimize-submit")).toBeEnabled();
+    expect(screen.queryByTestId("optimize-disabled-reason")).not.toBeInTheDocument();
+  });
+
+  it("cleans up via the exact code-first job-not-found DELETE (real classifier)", async () => {
+    // The classifier still matters; what changed is who reaches it. It used to be
+    // Dismiss on a cancelled run — a user action. It is now the terminal auto-chain
+    // on a COMPLETED one, which is the only path that holds a capture authority and
+    // may therefore destroy the server's sole artifact.
+    await readyStore();
+    let deletes = 0;
+    routeFetch((u, init) => {
+      const method = init?.method ?? "GET";
+      if (u.endsWith("/api/optimize") && method === "POST") return json(202, baseJob());
+      if (method === "DELETE") {
+        deletes += 1;
+        return json(404, { error: { code: "job_not_found", message: "gone" } });
+      }
+      if (u.endsWith("/events")) return streamResponse(": keepalive\n\n");
+      if (u.endsWith("/xlsx")) return new Response("x", { status: 200 });
+      if (/\/api\/optimize\/[^/]+$/.test(u)) return json(200, solverTimeoutJob);
+      throw new Error(`unexpected request: ${u}`);
+    });
+    const storage = memStorage();
+    render(
+      <OptimizeAndExportScreen
+        serverInfoDeps={onlineInfo()}
+        controllerDeps={{
+          prepare: () => okPrep,
+          stageSnapshot: degradedCapture,
+          storage,
+          createOwnerId: () => "o6",
+        }}
+        terminalDeps={{
+          fetchXlsx: async () => ({ blob: new Blob(["x"]), filename: "schedule.xlsx" }),
+          saveBlob: vi.fn(),
+        }}
+      />,
+      { wrapper },
+    );
     await waitFor(() => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
+    await userEvent.click(screen.getByTestId("optimize-submit"));
+    // An exact job-not-found is a CONFIRMED cleanup, so the chain settles rather
+    // than parking on a retry surface that no longer exists.
+    await waitFor(() => expect(deletes).toBeGreaterThan(0));
+    expect(screen.queryByTestId("optimize-cleanup-failed")).not.toBeInTheDocument();
+  });
+});
+
+describe("OptimizeAndExportScreen — G4 dedicated /roster route", () => {
+  // G4 closure — the full F4 viewer was removed from this screen. The
+  // dedicated /roster page owns it; this screen surfaces the prototype's
+  // `Open & adjust roster` CTA only on a completed run whose capture
+  // committed a loadable candidate. No embedded viewer, no duplicate
+  // empty-state surface, no candidate Load/Dismiss here.
+
+  it("never renders the embedded F4 RosterSection anywhere on the screen", async () => {
+    // The old testids are the only honest witness: a future re-embed fails
+    // here at the seam, not as a confusing duplicate on the rendered page.
+    await readyStore();
+    routeFetch(() => json(200, baseJob()));
+    render(
+      <OptimizeAndExportScreen
+        serverInfoDeps={onlineInfo()}
+        controllerDeps={{
+          prepare: () => okPrep,
+          stageSnapshot: degradedCapture,
+          storage: memStorage(),
+        }}
+      />,
+      { wrapper },
+    );
+    expect(screen.queryByTestId("roster-section")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("roster-section-empty")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("roster-section-loading")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("roster-section-unavailable")).not.toBeInTheDocument();
+  });
+
+  it("the CTA points at /roster through the shared guarded boundary", async () => {
+    // A captured capture gate is the only way the CTA can render — but in
+    // this IndexedDB-free file the gate never settles to "committed", so
+    // we drive the CTA directly through the panel seam with `loadableRoster`.
+    await readyStore();
+    routeFetch(() => json(200, baseJob()));
+    render(
+      <OptimizeAndExportScreen
+        serverInfoDeps={onlineInfo()}
+        controllerDeps={{
+          prepare: () => okPrep,
+          stageSnapshot: degradedCapture,
+          storage: memStorage(),
+        }}
+        // The capture seam stays at its production default; the panel
+        // receives the loadable flag through the same `loadableRoster` prop
+        // the screen computes for the real capture state. We exercise the
+        // rendered href here, the loadable gating is proved in
+        // run-status-panel.test.tsx and the production capture composition.
+      />,
+      { wrapper },
+    );
+    await waitFor(() => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
+    // No CTA without a loadable capture state — the in-memory gate is idle
+    // for every job on a fresh process, and that is the honest answer.
+    expect(screen.queryByTestId("optimize-open-roster")).not.toBeInTheDocument();
+  });
+});
+describe("the submission basis is claimed from the live backend semantic profile", () => {
+  // THE DEFECT THIS PINS. `buildSubmitInput` assembled `{document, anonymize, prettify,
+  // timeout}` and stopped there. `semanticProfile` is an OPTIONAL field on
+  // `OptimizeRunSubmitInput`, and omitting it is a supported, first-class degradation —
+  // the controller's `buildBasisForSubmission` returns null at its first guard and the
+  // run proceeds as an ordinary un-claimed submission. So the screen never claimed a
+  // basis, on any backend, and every run still looked completely healthy.
+  //
+  // The cost was T10's whole surface. With no row in `optimizeBases`, an infeasible run
+  // has no parent basis, `readDiagnosticParent()` returns null, and the bounded
+  // infeasibility diagnostic truthfully answers "there is no retained Optimize run for
+  // the schedule as it stands now that this tab can diagnose" — for every user, on every
+  // infeasible result, permanently.
+  //
+  // It survived 5,000+ unit tests because no fixture advertised a `semantic_profile`:
+  // with none in the payload the forwarding and non-forwarding screens are
+  // indistinguishable. Both arms below are therefore required — the second is what makes
+  // the first non-vacuous.
+  function recordingBasisStore() {
+    const recorded: Parameters<OptimizeBasisStore["putOptimizeBasis"]>[0][] = [];
+    const store: OptimizeBasisStore = {
+      putOptimizeBasis: async (record) => void recorded.push(record),
+      bindOptimizeBasisJob: async (basisId, verify) => {
+        const row = recorded.find((candidate) => candidate.basisId === basisId);
+        return row === undefined ? null : verify(row);
+      },
+    };
+    return { recorded, store };
+  }
+
+  async function submitOnce(info: ReturnType<typeof onlineInfo>, store: OptimizeBasisStore) {
+    await readyStore();
+    routeFetch(() => json(200, baseJob()));
+    render(
+      <OptimizeAndExportScreen
+        serverInfoDeps={info}
+        controllerDeps={{
+          prepare: () => okPrep,
+          stageSnapshot: degradedCapture,
+          storage: memStorage(),
+          basisStore: store,
+        }}
+      />,
+      { wrapper },
+    );
+    await waitFor(async () => expect(screen.getByText("Online")).toBeInTheDocument());
+    await waitFor(async () => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
+    await userEvent.click(screen.getByTestId("optimize-submit"));
+  }
+
+  it("records a basis row carrying the profile the backend advertised", async () => {
+    const { recorded, store } = recordingBasisStore();
+
+    await submitOnce(onlineInfo({ semantic_profile: ADVERTISED_SEMANTIC_PROFILE }), store);
+
+    // A row is written BEFORE the POST, so an accepted job whose response never
+    // arrives still has something durable to recover against.
+    await waitFor(async () => expect(recorded).toHaveLength(1));
+    const row = recorded[0]!;
+    expect(row.ownerKind).toBe("ordinary");
+    expect(row.schemaVersion).toBe(2);
+    // The profile is carried through verbatim — not defaulted, not re-derived. If the
+    // screen ever forwards a stale or invented profile instead of the one the status
+    // bar read, these three fail.
+    expect(row.basis.submissionContractVersion).toBe(
+      ADVERTISED_SEMANTIC_PROFILE.submission_contract_version,
+    );
+    expect(row.basis.solverSemanticVersion).toBe(
+      ADVERTISED_SEMANTIC_PROFILE.solver_semantic_version,
+    );
+    expect(row.basis.backendCapabilityVersion).toBe(
+      ADVERTISED_SEMANTIC_PROFILE.backend_capability_version,
+    );
+    // The resolved run options are bound in too: the backend binds ITS resolved values,
+    // so a basis built from guessed defaults would fail admission.
+    expect(row.basis.normalizedOptions).toEqual({
+      solver: expect.any(String),
+      prettify: true,
+      timeoutSeconds: 300,
+    });
+  });
+
+  it("records the row through the REAL adapter when nothing is injected", async () => {
+    // THE ARM THAT MATTERS MOST, and the one whose absence let the second half of this
+    // defect ship. Every other test here injects a `basisStore`, which is exactly the
+    // condition that hid it: `UseOptimizeRunDeps.basisStore` documented a default to the
+    // authority adapter, but the controller read `depsRef.current?.basisStore ?? null`.
+    // The only mount in the app that passes `controllerDeps` is a dev fixture, so the
+    // real route always ran with a null store -- and an injected store made the tests
+    // pass regardless.
+    //
+    // So this arm injects NO basis store and reads the row back through the product's
+    // own adapter. It is the only test in the file that exercises the wiring the route
+    // actually uses.
+    await readyStore();
+    routeFetch(() => json(200, baseJob()));
+    render(
+      <OptimizeAndExportScreen
+        serverInfoDeps={onlineInfo({ semantic_profile: ADVERTISED_SEMANTIC_PROFILE })}
+        controllerDeps={{
+          prepare: () => okPrep,
+          stageSnapshot: degradedCapture,
+          storage: memStorage(),
+        }}
+      />,
+      { wrapper },
+    );
+    await waitFor(async () => expect(screen.getByText("Online")).toBeInTheDocument());
+    await waitFor(async () => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
+    await userEvent.click(screen.getByTestId("optimize-submit"));
+
+    await waitFor(async () =>
+      expect(await getScenarioAuthority().listOptimizeBases()).toHaveLength(1),
+    );
+    const [row] = await getScenarioAuthority().listOptimizeBases();
+    expect(row).toMatchObject({ schemaVersion: 2, ownerKind: "ordinary" });
+
+    // JOB BINDING IS DELIBERATELY NOT ASSERTED HERE. `bindAcceptedJob` binds only on an
+    // EXACTLY matching echoed identity, and `baseJob()` returns `request.basis: null` --
+    // it does not echo what was posted -- so the correct outcome against this fixture is
+    // an unbound row. Asserting a bind would mean teaching the fixture to reflect the
+    // multipart basis fields back, which would prove the fixture echoes rather than that
+    // the backend does. The bind rule itself is owned by `lib/optimize/basis`, and the
+    // real echo is proven against the live backend in the T11 closure journey.
+    expect((row as { jobId: string | null }).jobId).toBeNull();
+  });
+
+  it("reports the degradation through the SCREEN's own observability instance", async () => {
+    // The reason taxonomy is proven exhaustively in `basis-observability.test.tsx`
+    // against the controller. What is unproven there, and is the whole point of this
+    // one, is that the SHIPPED SCREEN actually hands the controller an observability
+    // sink -- the same class of wiring gap as the two that made the basis path dead.
+    // `onlineInfo()` advertises no semantic profile, so this is a real degradation.
+    const observability = createOptimizeObservability();
+    await readyStore();
+    routeFetch(() => json(200, baseJob()));
+    render(
+      <OptimizeAndExportScreen
+        serverInfoDeps={onlineInfo()}
+        controllerDeps={{
+          prepare: () => okPrep,
+          stageSnapshot: degradedCapture,
+          storage: memStorage(),
+        }}
+        observability={observability}
+      />,
+      { wrapper },
+    );
+    await waitFor(async () => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
+    await userEvent.click(screen.getByTestId("optimize-submit"));
+
+    await waitFor(async () =>
+      expect(
+        observability
+          .snapshot()
+          .map((e) => e.observation)
+          .filter((o) => o.kind === "basis-degraded"),
+      ).toEqual([{ kind: "basis-degraded", jobId: null, reason: "profile-unavailable" }]),
+    );
+  });
+
+  it("still degrades to an ordinary un-claimed run when the backend advertises none", async () => {
+    // The negative control, and the reason the assertion above means something: the
+    // pre-repair screen produced THIS outcome for both payloads.
+    const { recorded, store } = recordingBasisStore();
+
+    await submitOnce(onlineInfo(), store);
+
+    // The run itself is unaffected — no basis is not an error.
+    await waitFor(async () =>
+      expect(screen.getByTestId("optimize-run-status")).toBeInTheDocument(),
+    );
+    expect(recorded).toEqual([]);
   });
 });

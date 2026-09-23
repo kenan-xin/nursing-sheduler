@@ -104,7 +104,7 @@ class JobMaintenance:
         return (self._clock() - reference) <= self._liveness_timeout_seconds
 
     def _run(self) -> None:
-        """Apply claim expiry and retention cleanup at each interval.
+        """Apply claim expiry, retention cleanup, and queue repair at each interval.
 
         A fully successful pass records its completion time for liveness. Failures
         are logged without terminating future maintenance passes.
@@ -113,6 +113,12 @@ class JobMaintenance:
             try:
                 self._controller.expire_worker_claims()
                 self._controller.expire_jobs()
+                # Admission and claim already repair residue before they can be
+                # misled by it, so this is not what keeps the queue correct. It is
+                # here so a QUIET store still converges: with no traffic, nothing
+                # else would ever reach the repair path, and an operator would have
+                # no record that residue had existed at all.
+                self._controller.repair_queue_residue()
             except Exception:
                 server_logger.exception("[server:maintenance] job retention check failed")
             else:

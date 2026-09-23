@@ -1,0 +1,25 @@
+id: copilotkit-runtime-acquisition-js
+valid:
+  # Ordinary production script work: the standalone server assembling `.next` output.
+  - |
+    const { cpSync } = require("node:fs");
+    cpSync(from, to, { recursive: true });
+  # A loader built for something else entirely.
+  - |
+    const require2 = createRequire(import.meta.url);
+    const pkg = require2("next/package.json");
+  # Dynamic `import()` of the runtime is OXLINT's -- a probe on 1.74 rejects exactly this in a
+  # production `.mjs`. Valid for THIS rule, still a lint failure.
+  - |
+    const runtime = await import("@copilotkit/runtime/v2");
+invalid:
+  # THE COLD-REVIEW PROBE: a loader handle, then the specifier through it. This is the shape
+  # that passed both tools before the fixup.
+  - |
+    const req = createRequire(import.meta.url);
+    const runtime = req("@copilotkit/runtime/v2");
+  # The direct forms.
+  - |
+    const runtime = require("@copilotkit/runtime");
+  - |
+    const runtime = createRequire("@copilotkit/runtime/package.json");

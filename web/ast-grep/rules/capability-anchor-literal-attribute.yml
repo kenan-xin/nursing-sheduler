@@ -1,0 +1,34 @@
+id: capability-anchor-literal-attribute
+language: Tsx
+severity: error
+message: >-
+  A capability anchor is authored here as a raw attribute. `CAPABILITY_ANCHOR_ATTRIBUTE` has
+  exactly one definition, in `lib/capability/anchor-contract.ts`, and both the renderers and
+  the live-DOM resolver read it from there -- so an anchored control spreads
+  `capabilityAnchorProps(SOME_ANCHOR)` and never types the attribute out. A hand-typed
+  attribute satisfies the browser gate while being wired to no declaration at all.
+note: >-
+  custom-AST ticket 3. This is the residual left after retiring the source scan
+  `lib/capability/anchors.test.ts` used to run ("every declared anchor is rendered by a
+  component in its owner directory"). That scan's own guarantee did NOT move here, because
+  ast-grep answers "does this file contain a forbidden shape", not "does this directory
+  contain a required reference" -- a presence claim over a directory is not expressible as a
+  syntax rule, and pretending otherwise would be the exact overreach the migration plan
+  forbids. The guarantee moved to `e2e/capability-anchors.spec.ts`, which already asserts
+  every declaration renders exactly once, visibly, on its own route, in every mode that route
+  is reachable in, against a real production build. What that browser gate cannot see is
+  PROVENANCE: an element carrying a hand-typed `data-capability-anchor` passes it while being
+  connected to no registry entry. That is this rule.
+files:
+  - "app/**"
+  - "components/**"
+ignores:
+  - "**/*.test.ts"
+  - "**/*.test.tsx"
+  - "**/*.spec.ts"
+rule:
+  any:
+    - kind: jsx_attribute
+      regex: ^data-capability-anchor
+    - kind: string_fragment
+      regex: data-capability-anchor

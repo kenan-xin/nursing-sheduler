@@ -1,0 +1,23 @@
+id: surface-module-acquisition-tsx
+valid:
+  # The canonical static import.
+  - |
+    import { Surface, surfaceVariants } from "@/components/ui/surface";
+  # A dynamic import of an unrelated module.
+  - |
+    const mod = await import("@/lib/ai/protocol");
+  # A namespace import of a module that is NOT the surface authority.
+  - |
+    import * as Buttons from "@/components/ui/button";
+invalid:
+  - |
+    const surface = await import("@/components/ui/surface");
+  - |
+    const { Surface } = await import("@/components/ui/surface");
+  # Bounded review round 1: the local-name require handle and the namespace import.
+  - |
+    const req = createRequire(import.meta.url);
+    const UI = req("@/components/ui/surface");
+  - |
+    import * as UI from "@/components/ui/surface";
+    const Box = UI["Surface"];

@@ -67,6 +67,33 @@ class JobCapacityError(ServerApplicationError):
     code = "job_capacity_exceeded"
 
 
+class DiagnosticCapacityError(JobCapacityError):
+    """Only the reserved ordinary pending slots remain, so no diagnostic fits (T09).
+
+    A SUBCLASS of `JobCapacityError` so the existing 429 mapping and every existing
+    capacity-handling caller keep working, while the code stays distinguishable: a
+    client refused here must not retry as though the whole queue were full, because
+    ordinary work would still be accepted right now.
+
+    Its message is a fixed string. Nothing about the refused submission — bytes,
+    filename, basis, or client — may appear in it, so a capacity boundary cannot be
+    used to read back anything about what was submitted.
+    """
+
+    code = "diagnostic_capacity_reserved"
+
+
+class QueueInvariantError(ServerApplicationError):
+    """A requested transition would break a queue state-machine invariant (T09).
+
+    Distinct from `StoreWriteConflictError`: a conflict means "re-read and retry",
+    while this means the transition itself is not one the state machine defines.
+    Retrying it would loop forever, so it fails closed and surfaces instead.
+    """
+
+    code = "job_queue_invariant_violated"
+
+
 class StoreWriteConflictError(Exception):
     """Internal signal that an atomic store write precondition no longer holds.
 

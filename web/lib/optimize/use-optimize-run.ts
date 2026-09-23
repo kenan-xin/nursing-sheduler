@@ -37,7 +37,11 @@ import {
   useSubmitOptimize,
 } from "@/lib/query/optimize";
 import { optimizeKeys } from "@/lib/query/keys";
-import { useHotStore } from "@/lib/store";
+import { getScenarioAuthority, readAuthoritativeScenarioIdentity, useHotStore } from "@/lib/store";
+import type { OptimizeBasisDegradation, OptimizeObservability } from "./optimize-observability";
+import { bindAcceptedJob, buildOptimizeBasis, type BuiltBasis } from "./basis/basis-record";
+import type { OptimizeBasisRecordV2 } from "./basis/basis-row";
+import type { InfoSemanticProfile } from "@/app/api/info/types";
 import {
   prepareOptimizeSubmission,
   type PrepareOptimizeSubmissionOptions,
@@ -47,11 +51,20 @@ import {
 import type { CanonicalScenarioDocument } from "@/lib/scenario/types";
 import {
   buildProvisionalSession,
+  removeOwnerSession,
   runSubmissionTransaction,
   type OptimizeRunOptions,
-  type PreparedDegradedCleanup,
+  type RemoveOwnerSessionOutcome,
+  type SessionCaptureState,
   type SessionTransactionStorage,
 } from "./session-transaction";
+import {
+  buildStagedSubmission,
+  purgeSubmissionSnapshot,
+  stageSubmissionSnapshot,
+} from "./submission-snapshot";
+import { ROSTER_SUBMISSION_VERSION } from "./roster-candidate-builder";
+import { rosterStorage } from "@/lib/store";
 import { acquireSessionStorage } from "./session-storage";
 import type { PeopleReverseMap } from "@/lib/scenario";
 import { isExactJobGoneError, type OptimizeErrorInfo } from "@/lib/bff/errors";
@@ -108,7 +121,7 @@ function makeToken(generation: number, attemptId: string, jobId: string): Attach
 // Public types
 // ---------------------------------------------------------------------------
 
-/** What the caller passes to start (or resubmit) a run. */
+/** What the caller passes to start a run. */
 export interface OptimizeRunSubmitInput {
   /** The strict Workspace V1 projection to optimize (T17). */
   document: CanonicalScenarioDocument;
@@ -116,6 +129,16 @@ export interface OptimizeRunSubmitInput {
   anonymize: boolean;
   prettify?: boolean;
   timeout?: number;
+  /**
+   * The backend semantic profile just read from `/api/info` (T08).
+   *
+   * Supplying it makes the run claim an immutable submission basis. OMITTING it is
+   * a fully supported ordinary run: the app must stay usable when the profile is
+   * unreadable, Web Crypto is unavailable (an insecure origin), or the scenario
+   * identity is unknown — the run simply carries no basis and cannot later be
+   * diagnosed against.
+   */
+  semanticProfile?: InfoSemanticProfile | null;
 }
 
 /** The closed result of a `submit()` call. */
@@ -128,67 +151,182 @@ export type OptimizeRunSubmitOutcome =
   | { status: "activation-persistence-failed"; jobId: string }
   | { status: "activation-unverified"; jobId: string; reason: string }
   // The POST landed after reset/New/Load revoked its view attachment. Its one
-  // durable session record is deliberately retained for T16b recovery/cleanup.
-  | { status: "stale-accepted"; jobId: string };
-
-/** The closed result of a `resubmit()` call. An occupied recovery record remains
- * blocked until T16b/T16e confirms cleanup. */
-export type OptimizeRunResubmitOutcome =
-  | OptimizeRunSubmitOutcome
-  | { status: "resubmit-blocked"; reason: string };
-
-/** The closed result of attaching a prepared recovery transport. */
-export type RecoveredAttachOutcome =
-  | { status: "attached"; jobId: string }
-  | { status: "invalid"; reason: string }
-  | { status: "conflict"; reason: string };
-
-/**
- * The transport-ready attachment T16b constructs after it has inspected and
- * interpreted the persisted record. T16a deliberately does not receive record
- * bytes, schema/owner/options metadata, or any other persistence concern.
- */
-export interface PreparedRecoveryAttachment {
-  jobId: string;
-  /** Minimal hot-state data needed for download restoration and recovery copy. */
-  activation: Omit<RunActivation, "jobId">;
-  /** The opaque resume cursor to seed the stream's first `Last-Event-ID`. */
-  initialCursor: string | null;
+  // durable session record is deliberately retained for the retirement lane.
+  | { status: "stale-accepted"; jobId: string }
   /**
-   * The persisted resume cursor was oversized and has been cleared: this attach must
-   * resume from the retained floor (`initialCursor` is null) AND surface explicit
-   * invalid-cursor recovery so the run log records the reset. Defaults to false.
+   * The visit was revoked BEFORE the request was sent, so no job exists.
+   *
+   * Distinct from `stale-accepted` in the only way that matters: there is nothing
+   * on the server to cancel or retire. The exact snapshot this attempt staged is
+   * purged and its record (if one was written) is rolled back owner-scoped.
    */
-  invalidCursorReset?: boolean;
-}
+  | { status: "revoked-before-post" };
 
 /**
- * A T16b-owned cursor-persistence provider. The controller drives it by identity, not
- * by frozen closures, so the CURRENT mounted provider is always the observation sink:
- *   • `prepare(jobId, reloadRecoveryAvailable)` — a durable/degraded job became current;
- *     the provider resets its health to that job (degraded ⇒ reload recovery unavailable).
- *   • `onCommit(jobId, cursor)` / `onReset(jobId)` — the post-commit/reset opaque cursor
- *     for the live durable job; the provider persists/clears it and records durability.
- *   • `revoke(jobId)` — exact attachment authority ended; health becomes idle.
- * The controller resolves the CURRENT provider at call time, so a recovery-hook remount
- * over a still-live stream takes over persistence without stale frozen callbacks and
- * without restarting transport. T16a never parses or writes the record.
+ * How a visit tells the controller that its submission is still wanted.
+ *
+ * The controller already fences on the hot-store generation, which New/Load/reset
+ * bump. Visit revocation is a DIFFERENT event: the user navigated away, or clicked
+ * Optimize again. Nothing about the scenario changed, so no generation moves — and
+ * without this seam a POST that returns after the visit ended would still attach,
+ * dispatch, and start a terminal chain for a run nobody is watching.
  */
-export interface CursorPersistenceProvider {
-  prepare(jobId: string, reloadRecoveryAvailable: boolean): void;
-  onCommit(jobId: string, cursor: string): void;
-  onReset(jobId: string): void;
-  revoke(jobId: string): void;
+export interface OptimizeSubmitOptions {
+  /**
+   * The owner id this submission staged, reported as soon as it exists — BEFORE
+   * the POST, so a visit that is revoked mid-flight can still name the exact
+   * record and snapshot it has to retire.
+   */
+  onOwnerId?: (ownerId: string) => void;
+  /**
+   * Whether the visit that started this submission is still current. Consulted
+   * once, at the same point the generation fence is, so a late `202` is inert:
+   * its record still activates under its own owner key (the job id must be
+   * durable for the retirement lane to name it), but nothing attaches, dispatches,
+   * polls, downloads, or captures.
+   */
+  isCurrent?: () => boolean;
 }
 
-/** The job + people reverse map retained for T16c XLSX restoration and T16b/e. */
+/** The job + people reverse map retained for T16c XLSX restoration and T16e. */
 export interface RunActivation {
   jobId: string;
+  /**
+   * The transaction owner that staged this run's session record and snapshot.
+   *
+   * Exposed because owner-keyed cleanup needs it: "retire the record for job X"
+   * is only expressible as "remove the record at owner O's key", and O is knowable
+   * solely from the submission that created it.
+   */
+  ownerId: string;
   anonymized: boolean;
   peopleCount: number;
   reverseMap: PeopleReverseMap;
-  /** Whether a reload could resume this run (false for a degraded post-202 stage). */
-  reloadRecoveryAvailable: boolean;
+  /**
+   * The F2 roster-capture authority staged before the POST. `unavailable` runs
+   * still optimize and download identically — they simply expose no roster
+   * Load/Retry, because no durable exact-submission authority exists to
+   * de-anonymize a result against.
+   */
+  capture: SessionCaptureState;
+}
+
+/**
+ * Build the immutable basis for a submission, or return `null` when a verifiable
+ * one cannot be produced.
+ *
+ * Every `null` here is a DEGRADATION TO AN ORDINARY RUN, never a rejection: a run
+ * without a basis is a supported first-class case (the assistant is off by
+ * default), so an unreadable profile, an insecure origin without Web Crypto, an
+ * unknown scenario identity, or implicit options must not block Optimize.
+ */
+async function buildBasisForSubmission(
+  input: OptimizeRunSubmitInput,
+  prep: { yaml: string; anonymized: boolean },
+  basisStore: OptimizeBasisStore | null,
+  note: (reason: OptimizeBasisDegradation, jobId?: string | null) => void,
+): Promise<BuiltBasis | null> {
+  // Each guard reports the FIRST condition that stopped the claim, so the reason names
+  // the layer that actually broke. Ordering is therefore load-bearing: an absent
+  // profile is reported as `profile-unavailable` even when the store is also missing.
+  const profile = input.semanticProfile ?? null;
+  if (profile === null) {
+    note("profile-unavailable");
+    return null;
+  }
+  if (basisStore === null) {
+    note("authority-unavailable");
+    return null;
+  }
+  // Both options must be EXPLICIT: the backend binds its RESOLVED values, so a
+  // guessed default would fail verification and reject an otherwise valid run.
+  if (typeof input.prettify !== "boolean" || typeof input.timeout !== "number") {
+    note("options-implicit");
+    return null;
+  }
+
+  // A REJECTION IS THE SAME DEGRADATION AS A NULL, and this read can genuinely reject:
+  // it reaches Dexie-backed repository authority, which throws outright when IndexedDB
+  // is unavailable. Awaiting it OUTSIDE the boundary let that rejection escape
+  // `buildBasisForSubmission` entirely -- no reason was emitted, the ordinary POST never
+  // happened, and `submitAttemptRef` stayed occupied so the very next submit was refused
+  // as `submission-in-progress`. Losing a basis claim is diagnostic degradation, never
+  // enforcement, so the rejection is folded into the same `null` the guard below already
+  // handles. The exception value is deliberately NOT recorded: the finite reason code is
+  // the entire payload this surface may carry.
+  const identity = await readAuthoritativeScenarioIdentity().catch(() => null);
+  if (identity === null) {
+    note("scenario-identity-unavailable");
+    return null;
+  }
+
+  // BUILD and WRITE are separated so the reason can tell them apart. One try around
+  // both would have to report a single combined code, which would leave "Web Crypto is
+  // missing" and "IndexedDB refused the write" indistinguishable -- the two most
+  // different causes on this path.
+  let built: BuiltBasis;
+  try {
+    built = await buildOptimizeBasis({
+      yaml: prep.yaml,
+      anonymized: prep.anonymized,
+      profile,
+      options: { prettify: input.prettify, timeoutSeconds: input.timeout },
+      scenarioId: identity.scenarioId,
+      documentRevision: identity.documentRevision,
+      // T08 submits ordinary runs only; T10 owns candidate submission.
+      ownerKind: "ordinary",
+      attemptId: crypto.randomUUID(),
+      now: new Date(),
+    });
+  } catch {
+    // Web Crypto absent (an insecure origin), or the encoder refused. Not a reason to
+    // block an ordinary run; it proceeds without a basis claim.
+    note("basis-build-failed");
+    return null;
+  }
+
+  try {
+    // Persisted BEFORE the POST, so an accepted job whose response never reaches
+    // us still has a durable local row to recover against.
+    await basisStore.putOptimizeBasis(built.record);
+  } catch {
+    note("basis-write-failed");
+    return null;
+  }
+  return built;
+}
+
+/**
+ * Bind an accepted job to its basis row, or leave the row unbound.
+ *
+ * Verification runs INSIDE the store transaction against the row as re-read there,
+ * so a row that changed underneath cannot be overwritten from a stale snapshot.
+ */
+async function bindBasisToAcceptedJob(
+  built: BuiltBasis,
+  job: JobResponse,
+  basisStore: OptimizeBasisStore,
+  note: (reason: OptimizeBasisDegradation, jobId?: string | null) => void,
+): Promise<void> {
+  try {
+    // A REFUSAL IS NOT A THROW. `bindOptimizeBasisJob` resolves `null` when the row is
+    // gone or the echoed identity disagrees -- which is the likelier failure and was
+    // just as silent as the exception path.
+    const bound = await basisStore.bindOptimizeBasisJob(built.basisId, (row) =>
+      bindAcceptedJob(row, {
+        jobId: job.id,
+        basisId: job.request.basis?.basis_id ?? null,
+        inputSha256: job.request.basis?.input_sha256 ?? null,
+        expiresAt: job.expires_at,
+      }),
+    );
+    if (bound === null) note("basis-bind-failed", job.id);
+  } catch {
+    // A failed binding leaves the row unbound, which the recovery classifier
+    // already reads as "no trustworthy identity" — the safe direction. The job DOES
+    // exist here, unlike every other degradation, so its id is reportable.
+    note("basis-bind-failed", job.id);
+  }
 }
 
 /** Injectable seams (dependency injection for testability). */
@@ -202,9 +340,61 @@ export interface UseOptimizeRunDeps {
     document: CanonicalScenarioDocument,
     options: PrepareOptimizeSubmissionOptions,
   ) => PrepareOptimizeSubmissionResult;
+  /**
+   * The F2 write-ahead snapshot seam. Defaults to `stageSubmissionSnapshot` over
+   * the real Dexie repositories. It is REQUIRED to be total: any rejection would
+   * gate the POST, which the non-gating contract forbids — the default implements
+   * that by returning a degraded capture state instead of throwing.
+   */
+  stageSnapshot?: (input: {
+    ownerId: string;
+    canonicalYaml: string;
+    reverseMap: PeopleReverseMap;
+  }) => Promise<SessionCaptureState>;
+  /**
+   * Retire a staged snapshot once this submission is LOCALLY PROVEN to have
+   * created no server job. Total like the staging seam — a failed purge is
+   * reported by the helper, never thrown, because it can only leave a harmless
+   * retained row.
+   */
+  purgeSnapshot?: (ownerId: string) => Promise<void>;
+  /**
+   * The durable basis seam (T08). Defaults to the authority adapter, which is the
+   * only module allowed to reach the repository graph. Injectable so the basis path
+   * is testable without IndexedDB.
+   *
+   * OMITTED IS NOT THE SAME AS `null`. Leaving this out selects the real adapter;
+   * only an explicit injection replaces it. For a long time this doc described a
+   * default the code did not have (`depsRef.current?.basisStore ?? null`), so every
+   * production mount ran with no store at all and silently recorded no basis --
+   * see `resolveBasisStore` below.
+   *
+   * `null` is therefore a MEANINGFUL injection, not a type-level accident: it says
+   * "this run has no basis authority", which is what a test needs to reach the
+   * `authority-unavailable` degradation without breaking IndexedDB globally.
+   */
+  basisStore?: OptimizeBasisStore | null;
+  /**
+   * The bounded observability surface degradations are reported through.
+   *
+   * Optional, and absence is silent by design: this hook has non-screen callers, and
+   * observability is a diagnostic surface, never a precondition for running. The
+   * screen passes the same instance it gives the terminal orchestration, so a run's
+   * basis, queue, duration and cleanup events share one bounded buffer.
+   */
+  observability?: OptimizeObservability;
 }
 
-/** The controller surface consumed by the screen (T16e) and recovery UI (T16b/c). */
+/** The durable operations the basis path needs from the authority adapter. */
+export interface OptimizeBasisStore {
+  putOptimizeBasis(record: OptimizeBasisRecordV2): Promise<void>;
+  bindOptimizeBasisJob(
+    basisId: string,
+    verify: (row: OptimizeBasisRecordV2) => OptimizeBasisRecordV2 | null,
+  ): Promise<OptimizeBasisRecordV2 | null>;
+}
+
+/** The controller surface consumed by the screen (T16e). */
 export interface OptimizeRunController {
   /** The typed run view (read from the hot store; re-renders on change). */
   view: OptimizeRunView;
@@ -213,31 +403,23 @@ export interface OptimizeRunController {
   /** The active/volatile job + reverse map, or null before a job exists (masked by
    *  live authority so a superseded attachment never appears attached). */
   activation: RunActivation | null;
-  submit(input: OptimizeRunSubmitInput): Promise<OptimizeRunSubmitOutcome>;
-  resubmit(input: OptimizeRunSubmitInput): Promise<OptimizeRunResubmitOutcome>;
-  /** Attach transport-ready recovery data prepared by T16b. */
-  attachRecoveredSession(input: PreparedRecoveryAttachment): RecoveredAttachOutcome;
-  /** The job id of the CURRENT live attachment, or null when none is live. Lets T16b
-   *  boot idempotently against the actual live attachment (not a one-way flag), so a
-   *  StrictMode setup→cleanup→setup replay re-attaches instead of going silent. */
+  submit(
+    input: OptimizeRunSubmitInput,
+    options?: OptimizeSubmitOptions,
+  ): Promise<OptimizeRunSubmitOutcome>;
+  /** The job id of the CURRENT live attachment, or null when none is live. The
+   *  screen reads it when a visit ends, to name the exact job it is abandoning. */
   getLiveJobId(): string | null;
-  /** Register T16b's cursor-persistence provider. Returns an identity-scoped
-   *  unregister that clears the controller provider ONLY if this provider is still the
-   *  registration. The newest live registration is current; removing it restores the
-   *  previous survivor. If a durable/degraded job is already live, the provider is
-   *  immediately `prepare`d for it. */
-  registerCursorPersistence(provider: CursorPersistenceProvider): () => void;
-  /** The opaque authority to clean up a degraded (`activation-persistence-failed` /
-   *  `-unverified`) run's retained PROVISIONAL record, or null when the current live
-   *  attachment is not that degraded job. Forwarded verbatim; never interpreted here. */
-  prepareDegradedCleanup(jobId: string): PreparedDegradedCleanup | null;
-  /** End cursor-persistence authority for the exact current job without resetting the
-   * terminal view. Used after verified durable cleanup. */
-  revokeCursorPersistence(jobId: string): void;
-  /** Emit ONE invalid-cursor reset signal against the CURRENT live attachment for `jobId`
-   *  WITHOUT re-attaching — used after T16b verifies a durable poison-cursor clear on an
-   *  already-live job. Returns whether the exact job was live (no-op + false otherwise). */
-  notifyInvalidCursorReset(jobId: string): boolean;
+  /** The owner that staged `jobId`'s record in THIS controller, or null. */
+  ownerFor(jobId: string): string | null;
+  /**
+   * Remove the session record for `jobId`, by its owner key, verified by read-back.
+   *
+   * Owner-scoped by construction: the key names the owner, so this cannot reach a
+   * concurrent run's record. `unknown-owner` means this controller never staged
+   * that job — fail closed rather than guess a key.
+   */
+  retireSessionRecord(jobId: string): RemoveOwnerSessionOutcome | { status: "unknown-owner" };
   cancel(): Promise<void>;
   finishNow(): Promise<void>;
   /** Reset hot/controller state only. Durable cleanup belongs to T16b/T16e. */
@@ -253,6 +435,42 @@ export interface OptimizeRunController {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/** The real write-ahead snapshot seam (F2). Total: it never rejects. */
+function defaultStageSnapshot(input: {
+  ownerId: string;
+  canonicalYaml: string;
+  reverseMap: PeopleReverseMap;
+}): Promise<SessionCaptureState> {
+  return stageSubmissionSnapshot({
+    ownerId: input.ownerId,
+    payload: buildStagedSubmission({
+      canonicalYaml: input.canonicalYaml,
+      reverseMap: input.reverseMap,
+      // The envelope version is F3's contract, supplied by the one composition
+      // module. F2 never stamps a version it invented.
+      schemaVersion: ROSTER_SUBMISSION_VERSION,
+    }),
+  });
+}
+
+/**
+ * The real proven-no-job purge seam (F2). Reads the CURRENT clear epoch so the
+ * delete is fenced against a Clear that landed while the POST was in flight.
+ */
+async function defaultPurgeSnapshot(ownerId: string): Promise<void> {
+  try {
+    const expectedClearEpoch = await rosterStorage.getClearEpoch();
+    await purgeSubmissionSnapshot({
+      ownerId,
+      expectedClearEpoch,
+      authority: "submit-rejected",
+    });
+  } catch {
+    // Storage is unreachable. A retained snapshot is harmless and Clear reclaims
+    // it; failing the submission flow over it would be strictly worse.
+  }
+}
+
 function defaultOwnerId(): string {
   const cryptoObj = globalThis.crypto;
   if (cryptoObj && typeof cryptoObj.randomUUID === "function") return cryptoObj.randomUUID();
@@ -266,7 +484,7 @@ function defaultAttemptId(): string {
 function describeIssues(issues: ScenarioValidationIssue[]): string {
   const first = issues[0]?.message;
   const suffix = issues.length > 1 ? ` (+${issues.length - 1} more)` : "";
-  return first ? `${first}${suffix}` : "The schedule is not ready to optimize.";
+  return first ? `${first}${suffix}` : "The schedule is not ready to optimise.";
 }
 
 function controlErrorCode(error: unknown): string | null {
@@ -323,69 +541,23 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
   // outcome; it carries (generation, attemptId) only.
   const submitAttemptRef = useRef<{ generation: number; attemptId: string } | null>(null);
 
-  // T16b recovery seams. Stored in refs; read by the stream effect.
-  //   • `initialCursorRef` — the recovered resume cursor to seed the first request.
-  //   • `persistCtxRef` — the CURRENT durable/degraded persistence context (job +
-  //     whether reload recovery is available). Bound to the attachment token via the
-  //     stream fence so a revoked stream cannot persist/clear a later job's cursor.
-  //   • `providerRegistrationsRef` — ordered mounted T16b providers. The last entry is
-  //     resolved at call time; removing it restores the previous survivor.
-  //   • `degradedCleanupRef` — the opaque provisional-cleanup authority for the current
-  //     degraded run, scoped to its exact attachment token.
-  const initialCursorRef = useRef<string | null>(null);
-  const persistCtxRef = useRef<{ jobId: string; reloadRecoveryAvailable: boolean } | null>(null);
-  const providerRegistrationsRef = useRef<
-    Array<{ registration: symbol; provider: CursorPersistenceProvider }>
-  >([]);
-  const degradedCleanupRef = useRef<{
-    token: AttachmentToken;
-    jobId: string;
-    cleanup: PreparedDegradedCleanup;
-  } | null>(null);
-
-  const currentProvider = useCallback((): CursorPersistenceProvider | null => {
-    const registrations = providerRegistrationsRef.current;
-    return registrations.length > 0 ? registrations[registrations.length - 1].provider : null;
-  }, []);
-
-  const revokeRegisteredProviders = useCallback((jobId: string): void => {
-    for (const { provider } of providerRegistrationsRef.current) {
-      provider.revoke(jobId);
-    }
-  }, []);
-
-  const revokePersistenceAuthority = useCallback(
-    (expectedToken: AttachmentToken | null): void => {
-      if (expectedToken === null || tokenRef.current !== expectedToken) return;
-      const ctx = persistCtxRef.current;
-      if (ctx !== null && ctx.jobId === expectedToken.jobId) {
-        // Every mounted provider may have been prepared for this attachment before a
-        // newer registration shadowed it. Revoke the exact job across the ordered set
-        // so a later-restored survivor cannot expose stale health. Each provider guards
-        // by its own current job, so a provider already prepared for successor B ignores
-        // a revoke for A.
-        revokeRegisteredProviders(ctx.jobId);
-      }
-      initialCursorRef.current = null;
-      persistCtxRef.current = null;
-      degradedCleanupRef.current = null;
-    },
-    [revokeRegisteredProviders],
-  );
+  // Which owner staged which job, for THIS controller instance.
+  //
+  // Cleanup is owner-keyed, and a job id alone does not name a key. Nothing else
+  // in the process can supply the mapping: the owner is minted here, just before
+  // the POST, and the record it keys is written under it. Kept for the hook's
+  // lifetime rather than cleared on detach, because a `job-gone` detach still owes
+  // that job's record a removal.
+  const ownerByJobRef = useRef<Map<string, string>>(new Map());
 
   useEffect(() => {
     mountedRef.current = true;
     return () => {
-      revokePersistenceAuthority(tokenRef.current);
       tokenRef.current = null;
       submitAttemptRef.current = null;
-      initialCursorRef.current = null;
-      persistCtxRef.current = null;
-      degradedCleanupRef.current = null;
-      providerRegistrationsRef.current = [];
       mountedRef.current = false;
     };
-  }, [revokePersistenceAuthority]);
+  }, []);
 
   const view = useHotStore((state) => state.runView);
 
@@ -406,17 +578,13 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
       prevGenRef.current = genSnapshot;
       const tokenCurrent = tokenRef.current?.generation === genSnapshot;
       if (!tokenCurrent) {
-        revokePersistenceAuthority(tokenRef.current);
         tokenRef.current = null;
-        initialCursorRef.current = null;
-        persistCtxRef.current = null;
-        degradedCleanupRef.current = null;
         setJobId(null);
         setActivation(null);
         setAttachmentIdentity(null);
       }
     }
-  }, [genSnapshot, revokePersistenceAuthority]);
+  }, [genSnapshot]);
 
   // --- dispatch -------------------------------------------------------------
   // The unfenced dispatch — for synchronous, controller-initiated signals.
@@ -441,30 +609,15 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
     [],
   );
 
-  // Clear the T16b recovery bundle (resume cursor + persistence context + degraded
-  // cleanup) so a later attachment cannot inherit a prior recovery's cursor context or
-  // degraded-cleanup authority. The registered provider persists across attachments
-  // (it is per-hook, not per-run). Called on every detach and reset.
-  const clearRecoveryRefs = useCallback(() => {
-    initialCursorRef.current = null;
-    persistCtxRef.current = null;
-    degradedCleanupRef.current = null;
-  }, []);
-
   // Detach a server-confirmed-gone job from the current controller view.
-  const detachGoneJob = useCallback(
-    (goneJobId: string) => {
-      const token = tokenRef.current;
-      if (token === null || token.jobId !== goneJobId) return;
-      revokePersistenceAuthority(token);
-      setJobId(null);
-      setActivation(null);
-      tokenRef.current = null;
-      clearRecoveryRefs();
-      setAttachmentIdentity(null);
-    },
-    [clearRecoveryRefs, revokePersistenceAuthority],
-  );
+  const detachGoneJob = useCallback((goneJobId: string) => {
+    const token = tokenRef.current;
+    if (token === null || token.jobId !== goneJobId) return;
+    setJobId(null);
+    setActivation(null);
+    tokenRef.current = null;
+    setAttachmentIdentity(null);
+  }, []);
 
   // The token-fenced dispatch — for async completions (poll, stream, control).
   // Drops the signal when the captured creating token is no longer the live
@@ -491,9 +644,60 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
     [dispatchIfAttached],
   );
 
+  /**
+   * Report one basis degradation, if anyone is listening.
+   *
+   * Reads the sink from the deps ref rather than closing over it, so a screen that
+   * mounts its observability after this hook still receives events. Never throws into
+   * the submit path: a diagnostic surface must not be able to fail a run.
+   */
+  const noteBasisDegradation = useCallback(
+    (reason: OptimizeBasisDegradation, jobId: string | null = null): void => {
+      try {
+        depsRef.current?.observability?.emit({ kind: "basis-degraded", jobId, reason });
+      } catch {
+        // An observability sink that throws is the sink's problem, not the run's.
+      }
+    },
+    [],
+  );
+
+  /**
+   * The basis store this run should use: the injected one, or the real projection
+   * adapter.
+   *
+   * THIS USED TO BE `depsRef.current?.basisStore ?? null`, which is how T08's whole
+   * durable basis path came to be dead in the shipped app. The only mount that passes
+   * `controllerDeps` is a dev fixture, so on the real route the store was ALWAYS null,
+   * `buildBasisForSubmission` returned at its first guard, and no `optimizeBases` row
+   * was ever written. Nothing surfaced, because a basis-less run is a supported
+   * degradation -- and with no basis row, T10's bounded infeasibility diagnostic has no
+   * parent to diagnose and truthfully refuses on every infeasible run.
+   *
+   * Resolved LAZILY, inside `submit`, and never during render: `getScenarioAuthority()`
+   * constructs the Dexie handle on first use, and this hook renders on the server for
+   * the initial HTML, where IndexedDB does not exist. It is not cached here either --
+   * the accessor already memoises the singleton, and caching would pin a stale
+   * authority when one is rebound.
+   *
+   * A throw still degrades to an ordinary un-claimed run rather than blocking Optimize.
+   */
+  const resolveBasisStore = useCallback((): OptimizeBasisStore | null => {
+    const injected = depsRef.current?.basisStore;
+    if (injected !== undefined) return injected;
+    try {
+      return getScenarioAuthority();
+    } catch {
+      return null;
+    }
+  }, []);
+
   // --- submit ---------------------------------------------------------------
   const submit = useCallback(
-    async (input: OptimizeRunSubmitInput): Promise<OptimizeRunSubmitOutcome> => {
+    async (
+      input: OptimizeRunSubmitInput,
+      options?: OptimizeSubmitOptions,
+    ): Promise<OptimizeRunSubmitOutcome> => {
       if (submitAttemptRef.current !== null) {
         return { status: "blocked-before-post", reason: "submission-in-progress" };
       }
@@ -521,13 +725,28 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
       if (typeof input.prettify === "boolean") runOptions.prettify = input.prettify;
       if (typeof input.timeout === "number") runOptions.timeout = input.timeout;
 
-      const record = buildProvisionalSession({
-        ownerId: createOwnerId(),
-        anonymized: prep.anonymized,
-        peopleCount: prep.peopleCount,
-        reverseMap: prep.reverseMap,
-        runOptions,
-      });
+      const ownerId = createOwnerId();
+      // Reported BEFORE anything can fail: the caller's retirement lane needs the
+      // owner even for a submission that never reaches a job id.
+      options?.onOwnerId?.(ownerId);
+
+      const basisStore = resolveBasisStore();
+
+      // --- immutable submission basis (T08), best-effort ---------------------
+      //
+      // A basis is claimed ONLY when every input for a verifiable one is present:
+      // a readable semantic profile, an authoritative scenario identity, and
+      // EXPLICIT prettify/timeout. The last condition matters: the backend binds
+      // its RESOLVED options into the identity, so claiming a basis while letting
+      // the server pick a default we guessed would fail verification and reject an
+      // otherwise valid run. Any missing input therefore degrades to an ordinary
+      // un-claimed submission rather than to a rejected one.
+      //
+      // INTEGRATION: built here, BEFORE the F2 write-ahead staging and the POST, so
+      // the durable basis row exists before any job can. The provisional session
+      // record itself is built further down from main's `ownerId` — this path adds a
+      // basis claim to that submission, it does not own the record.
+      const built = await buildBasisForSubmission(input, prep, basisStore, noteBasisDegradation);
 
       setIsSubmitting(true);
       dispatch({
@@ -536,14 +755,86 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
         peopleCount: prep.peopleCount,
       });
 
+      // F2 write-ahead: allocate the origin-wide submission ordinal and write the
+      // immutable exact-submission snapshot BEFORE the session record is staged, so
+      // the document that gets solved is durably recoverable from the moment it is
+      // sent. This seam is total by contract — a denied or quota-limited IndexedDB
+      // yields a degraded `unavailable` capture state and the POST and the original
+      // XLSX download proceed byte-identically. `prep.yaml` is the exact bytes the
+      // submit closure below sends, so the snapshot cannot drift from the request.
+      const stageSnapshot = depsRef.current?.stageSnapshot ?? defaultStageSnapshot;
+      const capture = await stageSnapshot({
+        ownerId,
+        canonicalYaml: prep.yaml,
+        reverseMap: prep.reverseMap,
+      });
+
+      // Only a snapshot this transaction actually staged may be purged, and only
+      // by its exact owner id. Declared here because the fence immediately below
+      // needs it — it used to live after the transaction, which is precisely why
+      // there was nothing to clean up with at this point.
+      const purgeSnapshot = async (owner: string, staged: SessionCaptureState): Promise<void> => {
+        if (staged.status !== "staged") return;
+        await (depsRef.current?.purgeSnapshot ?? defaultPurgeSnapshot)(owner);
+      };
+
+      // FENCE 1 — immediately after the awaited staging.
+      //
+      // Staging is the first `await` in this function and it can take real time
+      // (IndexedDB, ordinal allocation). A visit revoked during it used to resume
+      // here unconditionally and go on to stage a record and send a POST, creating
+      // a server job for a user who had already left — and leaving the cleanup of
+      // that job dependent on a response nobody was waiting for.
+      //
+      // Purges exactly the snapshot this attempt just staged and nothing else. No
+      // record has been written yet, so there is nothing else to undo.
+      if (options?.isCurrent?.() === false) {
+        await purgeSnapshot(ownerId, capture);
+        if (submitAttemptRef.current?.attemptId === attemptId) {
+          submitAttemptRef.current = null;
+          setIsSubmitting(false);
+        }
+        return { status: "revoked-before-post" };
+      }
+
+      const record = buildProvisionalSession({
+        ownerId,
+        anonymized: prep.anonymized,
+        peopleCount: prep.peopleCount,
+        reverseMap: prep.reverseMap,
+        runOptions,
+        capture,
+      });
+
+      let revokedBeforePost = false;
       const outcome = await runSubmissionTransaction(record, {
         storage,
         submit: async () => {
+          // FENCE 2 — the last statement before the request leaves.
+          //
+          // Staging the record is synchronous, but it sits between fence 1 and
+          // here, and this closure is invoked by the transaction rather than
+          // inline. Reported as a DEFINITE rejection because that is exactly what
+          // it is: the server was never asked, so no job can exist — which lets
+          // the transaction roll its own provisional record back owner-scoped, and
+          // lets the snapshot be purged on proof rather than on a guess.
+          if (options?.isCurrent?.() === false) {
+            revokedBeforePost = true;
+            return { status: "definitely-rejected", error: new Error("visit revoked") };
+          }
           try {
             const job = await submitMutation.mutateAsync({
               yamlContent: prep.yaml,
               ...runOptions,
+              ...(built !== null ? { basis: built.fields } : {}),
             });
+            // Bind only on an EXACTLY matching echoed identity. A disagreement is a
+            // transport-integrity failure, so the row is left unbound rather than
+            // pointing at a job whose evidence would be misattributed. The run
+            // itself still proceeds — it simply cannot be diagnosed against later.
+            if (built !== null && basisStore !== null) {
+              await bindBasisToAcceptedJob(built, job, basisStore, noteBasisDegradation);
+            }
             return { status: "accepted", jobId: job.id };
           } catch (error) {
             return classifySubmitError(error);
@@ -555,7 +846,10 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
       const stale =
         attempt?.attemptId !== attemptId ||
         attempt.generation !== generation ||
-        generation !== useHotStore.getState().runGeneration;
+        generation !== useHotStore.getState().runGeneration ||
+        // The visit that asked for this run is over. Nothing here is user-facing
+        // any more; the accepted job (if any) belongs to the retirement lane.
+        options?.isCurrent?.() === false;
 
       if (attempt?.attemptId === attemptId) {
         submitAttemptRef.current = null;
@@ -563,250 +857,144 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
       }
 
       if (stale) {
+        // A superseded/abandoned acceptance still gets its job→owner mapping
+        // recorded. It is the only way the retirement lane can later name the exact
+        // record to remove, and it is deliberately NOT an attachment: no dispatch,
+        // no poll, no download, no capture.
         if (outcome.status === "activated") {
+          ownerByJobRef.current.set(outcome.record.jobId, ownerId);
           return { status: "stale-accepted", jobId: outcome.record.jobId };
         }
         if (
           outcome.status === "activation-persistence-failed" ||
           outcome.status === "activation-unverified"
         ) {
+          ownerByJobRef.current.set(outcome.volatile.jobId, ownerId);
           return { status: "stale-accepted", jobId: outcome.volatile.jobId };
         }
+        if (outcome.status === "activation-retired") {
+          ownerByJobRef.current.set(outcome.jobId, ownerId);
+          return { status: "stale-accepted", jobId: outcome.jobId };
+        }
+        // A superseded attempt does not change what the SERVER did: a blocked or
+        // definitively rejected POST still proves no job exists, so its snapshot is
+        // retired here too rather than being orphaned by the reset that raced it.
+        if (outcome.status === "blocked-before-post" || outcome.status === "submit-rejected") {
+          await purgeSnapshot(ownerId, capture);
+        }
+        // Fence 2 fired: name it for what it is rather than reporting a server
+        // rejection that never happened.
+        if (revokedBeforePost) return { status: "revoked-before-post" };
         return outcomeToStaleOutcome(outcome);
+      }
+
+      // BEFORE any signal is dispatched. `activation-retired` means the record
+      // this attempt staged was removed while the POST was in flight — a route
+      // exit, a `pagehide`, a superseding click or a verified Clear. The job
+      // exists on the server, but there is no visit left to project it into, so it
+      // must not reach the reducer: a `job-activated` here would put a run on a
+      // screen the user has left, and start the poll/download/capture chain behind
+      // it. Reported as `stale-accepted` so the screen's retirement lane cancels
+      // the exact job best-effort and nothing else.
+      if (outcome.status === "activation-retired") {
+        ownerByJobRef.current.set(outcome.jobId, ownerId);
+        return { status: "stale-accepted", jobId: outcome.jobId };
       }
 
       outcomeToSignals(outcome).forEach(dispatch);
 
-      const attach = (id: string, reloadRecoveryAvailable: boolean): void => {
-        revokePersistenceAuthority(tokenRef.current);
+      const attach = (id: string): void => {
         const token = makeToken(generation, attemptId, id);
         tokenRef.current = token;
-        // A fresh run always starts at the floor — no seeded resume cursor. Set the
-        // persistence context and `prepare` the current provider so its cursor writer
-        // is installed for a DURABLE run (and health resets to this job); a degraded
-        // (non-durable) activation reports reload recovery unavailable and keeps no
-        // writer. Any prior degraded-cleanup authority is dropped for a fresh attach.
-        initialCursorRef.current = null;
-        persistCtxRef.current = { jobId: id, reloadRecoveryAvailable };
-        degradedCleanupRef.current = null;
-        currentProvider()?.prepare(id, reloadRecoveryAvailable);
+        ownerByJobRef.current.set(id, ownerId);
         setActivation({
           jobId: id,
+          ownerId,
           anonymized: prep.anonymized,
           peopleCount: prep.peopleCount,
           reverseMap: prep.reverseMap,
-          reloadRecoveryAvailable,
+          capture,
         });
         setJobId(id);
         setAttachmentIdentity(token);
       };
 
-      // Capture the opaque degraded provisional-cleanup authority for the attachment
-      // just created (its retained record is the provisional this transaction staged).
-      const captureDegradedCleanup = (id: string, cleanup: PreparedDegradedCleanup): void => {
-        if (tokenRef.current) {
-          degradedCleanupRef.current = { token: tokenRef.current, jobId: id, cleanup };
-        }
-      };
-
       if (outcome.status === "activated") {
-        attach(outcome.record.jobId, true);
+        attach(outcome.record.jobId);
         return { status: "activated", jobId: outcome.record.jobId };
       }
       if (outcome.status === "activation-persistence-failed") {
-        attach(outcome.volatile.jobId, false);
-        captureDegradedCleanup(outcome.volatile.jobId, outcome.cleanupDegraded);
+        attach(outcome.volatile.jobId);
         return { status: "activation-persistence-failed", jobId: outcome.volatile.jobId };
       }
       if (outcome.status === "activation-unverified") {
-        attach(outcome.volatile.jobId, false);
-        captureDegradedCleanup(outcome.volatile.jobId, outcome.cleanupDegraded);
+        attach(outcome.volatile.jobId);
         return {
           status: "activation-unverified",
           jobId: outcome.volatile.jobId,
           reason: outcome.reason,
         };
       }
+      // LOCALLY PROVEN no-job outcomes retire the write-ahead snapshot. The whole
+      // point of the no-GC/no-expiry policy is that only proof may delete a
+      // snapshot — and "the POST was blocked before it was sent" and "the server
+      // definitively rejected it" are exactly that proof. Without this the canonical
+      // YAML and the real reverse map would sit in IndexedDB until a global Clear.
       if (outcome.status === "blocked-before-post") {
+        await purgeSnapshot(ownerId, capture);
         return { status: "blocked-before-post", reason: outcome.reason };
       }
       if (outcome.status === "submit-rejected") {
+        await purgeSnapshot(ownerId, capture);
         return { status: "submit-rejected" };
       }
+      // `acceptance-unknown` deliberately RETAINS: a server job may exist, and its
+      // capture would be impossible without the exact submission.
       return { status: "acceptance-unknown" };
     },
-    [currentProvider, dispatch, revokePersistenceAuthority, submitMutation],
+    [dispatch, noteBasisDegradation, resolveBasisStore, submitMutation],
   );
 
-  const resubmit = useCallback(
-    async (input: OptimizeRunSubmitInput): Promise<OptimizeRunResubmitOutcome> => {
-      const outcome = await submit(input);
-      return outcome.status === "blocked-before-post"
-        ? { status: "resubmit-blocked", reason: outcome.reason }
-        : outcome;
-    },
-    [submit],
-  );
-
-  // --- attach transport prepared by T16b -----------------------------------
-  const attachRecoveredSession = useCallback(
-    (input: PreparedRecoveryAttachment): RecoveredAttachOutcome => {
-      if (
-        typeof input.jobId !== "string" ||
-        input.jobId.length === 0 ||
-        input.jobId.length > 512 ||
-        !(input.initialCursor === null || typeof input.initialCursor === "string")
-      ) {
-        return {
-          status: "invalid",
-          reason: "The prepared recovery transport is invalid.",
-        };
-      }
-
-      // Same-job reattach must be a TRUE no-mutation idempotent result OR a
-      // visible cursor-conflict — never silently swap cursors. The current
-      // attachment is the authority ONLY when it is still LIVE (P1 #1): a
-      // generation-stale token (New/Load already bumped the generation) is treated
-      // as synchronously revoked, so a same-stack New/Load→same-A does not falsely
-      // return `attached`, and New/Load→B is not spuriously rejected as conflicting
-      // with stale A. A stale token falls through to a clean fresh attach.
-      const currentToken = tokenIsLive(tokenRef.current) ? tokenRef.current : null;
-      if (currentToken !== null) {
-        if (currentToken.jobId !== input.jobId) {
-          return {
-            status: "conflict",
-            reason: `A different optimize run (${currentToken.jobId}) is already attached.`,
-          };
-        }
-        // Same job. Different cursor → visible conflict (never silent swap).
-        if (input.initialCursor !== initialCursorRef.current) {
-          return {
-            status: "conflict",
-            reason:
-              "A run is already attached to this job with a different resume cursor. Reset before re-attaching with a new cursor.",
-          };
-        }
-        // Same job + cursor is idempotent. Leave ALL live subscription inputs untouched
-        // (token, cursor callbacks, initial cursor, subscription identity).
-        return { status: "attached", jobId: input.jobId };
-      }
-
-      if (submitAttemptRef.current !== null) {
-        return {
-          status: "conflict",
-          reason: "An optimize submission is already in progress.",
-        };
-      }
-
-      const generation = useHotStore.getState().runGeneration;
-      const attemptId = defaultAttemptId();
-      revokePersistenceAuthority(tokenRef.current);
-      const token = makeToken(generation, attemptId, input.jobId);
-      tokenRef.current = token;
-
-      // Seed the resume cursor and set the durable persistence context, then `prepare`
-      // the current provider so cursor persistence targets the CURRENT mounted provider
-      // (not a frozen closure). A recovered attach is always durable. Any prior degraded
-      // authority is dropped.
-      initialCursorRef.current = input.initialCursor;
-      persistCtxRef.current = {
-        jobId: input.jobId,
-        reloadRecoveryAvailable: input.activation.reloadRecoveryAvailable,
-      };
-      degradedCleanupRef.current = null;
-      currentProvider()?.prepare(input.jobId, input.activation.reloadRecoveryAvailable);
-
-      dispatch({
-        type: "job-activated",
-        jobId: input.jobId,
-        reloadRecoveryAvailable: input.activation.reloadRecoveryAvailable,
-      });
-      // A recovered attach whose persisted cursor was oversized surfaces the SAME
-      // explicit invalid-cursor recovery the mid-stream `invalid_event_cursor` path
-      // uses, so the log records the reset before resuming from the retained floor.
-      if (input.invalidCursorReset) {
-        dispatch({ type: "cursor-recovery", reason: "invalid" });
-      }
-
-      setActivation({
-        jobId: input.jobId,
-        ...input.activation,
-      });
-      setJobId(input.jobId);
-      setAttachmentIdentity(token);
-      return { status: "attached", jobId: input.jobId };
-    },
-    [currentProvider, dispatch, revokePersistenceAuthority, tokenIsLive],
-  );
-
-  // Emit ONE invalid-cursor reset against the exact live attachment for `jobId`, without
-  // re-attaching or opening a second transport. Used when T16b verifies a durable poison-
-  // cursor clear on an already-live job: the live stream is preserved and only the visible
-  // reset signal (the same mid-stream `invalid_event_cursor` path uses) is recorded.
-  const notifyInvalidCursorReset = useCallback(
-    (jobId: string): boolean => {
-      const t = tokenRef.current;
-      if (t === null || !tokenIsLive(t) || t.jobId !== jobId) return false;
-      dispatch({ type: "cursor-recovery", reason: "invalid" });
-      return true;
-    },
-    [dispatch, tokenIsLive],
-  );
+  // --- attachment identity + owner-keyed retirement -------------------------
+  //
+  // REMOVED here: `attachRecoveredSession`, `registerCursorPersistence`,
+  // `revokeCursorPersistence`, `notifyInvalidCursorReset` and
+  // `prepareDegradedCleanup`. Every one of them existed to serve a boot-time
+  // inspection that resumed a prior run — attaching it, persisting its cursor so a
+  // reload could resume again, and cleaning up the record that made it resumable.
+  // There is no boot-time inspection any more, and an attach path only a resume
+  // could reach is resume, just without a button.
 
   // The job id of the CURRENT live attachment (exact-token + live generation), or
-  // null. T16b boots idempotently against this real state: after a StrictMode
-  // setup→cleanup→setup replay clears the token, this returns null and T16b re-attaches.
+  // null. The screen reads it when a visit ends, so the retirement lane can name
+  // the exact job it is abandoning rather than guessing from the view.
   const getLiveJobId = useCallback((): string | null => {
     const t = tokenRef.current;
     return t && tokenIsLive(t) ? t.jobId : null;
   }, [tokenIsLive]);
 
-  // Minimal ordered provider registrations. The last mounted registrant is current.
-  // Removing it restores the previous survivor; removing an older entry leaves the
-  // current provider untouched. Exact registration symbols make duplicate provider
-  // objects safe under StrictMode replay.
-  const registerCursorPersistence = useCallback(
-    (provider: CursorPersistenceProvider): (() => void) => {
-      const registration = Symbol("cursor-persistence-provider");
-      providerRegistrationsRef.current.push({ registration, provider });
-      const ctx = persistCtxRef.current;
-      if (ctx !== null) provider.prepare(ctx.jobId, ctx.reloadRecoveryAvailable);
-      return () => {
-        const registrations = providerRegistrationsRef.current;
-        const index = registrations.findIndex((entry) => entry.registration === registration);
-        if (index < 0) return;
-        const wasCurrent = index === registrations.length - 1;
-        registrations.splice(index, 1);
-        if (!wasCurrent) return;
-        const liveCtx = persistCtxRef.current;
-        if (liveCtx !== null) provider.revoke(liveCtx.jobId);
-        const survivor = currentProvider();
-        if (liveCtx !== null && survivor !== null) {
-          survivor.prepare(liveCtx.jobId, liveCtx.reloadRecoveryAvailable);
-        }
-      };
-    },
-    [currentProvider],
+  const ownerFor = useCallback(
+    (id: string): string | null => ownerByJobRef.current.get(id) ?? null,
+    [],
   );
 
-  // The opaque degraded provisional-cleanup authority for the current live degraded
-  // run, or null. Exact-token + exact-job scoped so a stale/superseded degraded run's
-  // authority is never returned. Forwarded to T16b verbatim; never interpreted here.
-  const prepareDegradedCleanup = useCallback(
-    (id: string): PreparedDegradedCleanup | null => {
-      const d = degradedCleanupRef.current;
-      return d && d.jobId === id && tokenIsLive(d.token) ? d.cleanup : null;
+  // Owner-keyed record removal, verified by read-back.
+  //
+  // This replaces the old boot-inspection-based `cleanup(jobId)`, and the
+  // difference is the whole point of owner-keying: that one had to re-inspect the
+  // single slot and refuse when it held someone else's run, because "the record"
+  // and "this run's record" were the same cell. Here the key IS the scope, so an
+  // abandoned run's cleanup and a brand-new submission cannot collide at all.
+  const retireSessionRecord = useCallback(
+    (id: string): RemoveOwnerSessionOutcome | { status: "unknown-owner" } => {
+      const owner = ownerByJobRef.current.get(id);
+      // Fail closed. A job this controller never staged has no key we can derive,
+      // and enumerating for a plausible one would be exactly the origin-wide
+      // guessing the contract forbids.
+      if (owner === undefined) return { status: "unknown-owner" };
+      return removeOwnerSession(storageRef.current!, owner);
     },
-    [tokenIsLive],
-  );
-
-  const revokeCursorPersistence = useCallback(
-    (id: string): void => {
-      const token = tokenRef.current;
-      if (token === null || token.jobId !== id || !tokenIsLive(token)) return;
-      revokePersistenceAuthority(token);
-    },
-    [revokePersistenceAuthority, tokenIsLive],
+    [],
   );
 
   // --- controls (cancel / finish-now) ---------------------------------------
@@ -838,7 +1026,7 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
           {
             type: "control-error",
             code: controlErrorCode(error),
-            message: controlErrorMessage(error, "Unable to cancel optimization."),
+            message: controlErrorMessage(error, "Unable to cancel optimisation."),
           },
           token,
         );
@@ -881,16 +1069,14 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
   }, [finishMutation, dispatchIfAttached, detachGoneJob, tokenIsLive, applyAuthoritativeSnapshot]);
 
   const reset = useCallback(() => {
-    // Durable cleanup is deliberately not a controller reset side effect. T16b/T16e
-    // inspect and remove the one session record without erasing a terminal result.
-    revokePersistenceAuthority(tokenRef.current);
+    // Durable cleanup is deliberately not a controller reset side effect: T16e
+    // removes the owner-keyed record without erasing a terminal result.
     tokenRef.current = null;
-    clearRecoveryRefs();
     setJobId(null);
     setActivation(null);
     setAttachmentIdentity(null);
     useHotStore.getState().resetRunView();
-  }, [clearRecoveryRefs, revokePersistenceAuthority]);
+  }, []);
 
   // --- authoritative poll → snapshot ---------------------------------------
   // Provenance-isolated poll: keyed by the immutable attachment token, so a
@@ -949,31 +1135,13 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
   // subscription.
   const creating = attachmentIdentity;
 
-  const onCursorCommit = useCallback(
-    (cursor: string) => {
-      // Generation-fenced (P1 #1): between a New/Load generation bump and the passive
-      // revocation effect, `tokenRef.current` may still equal A's token, so plain
-      // reference equality would let A persist its cursor. `tokenIsLive` also
-      // compares the live canonical generation, making the late commit inert. The
-      // CURRENT provider is resolved at call time (a remount takes over the sink), and
-      // only a durable job (reload recovery available) persists its cursor.
-      const ctx = persistCtxRef.current;
-      if (tokenIsLive(creating) && ctx?.reloadRecoveryAvailable) {
-        currentProvider()?.onCommit(ctx.jobId, cursor);
-      }
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [attachmentIdentity, currentProvider, tokenIsLive],
-  );
-
+  // No `onCursorCommit`. The stream's tracker still keeps the cursor IN MEMORY,
+  // which is what an in-visit reconnect resumes from; there is simply nowhere
+  // durable for it to go now that a reload does not resume.
   const onCursorReset = useCallback(() => {
-    if (tokenIsLive(creating)) {
-      dispatchIfAttached({ type: "cursor-reset" }, creating);
-      const ctx = persistCtxRef.current;
-      if (ctx?.reloadRecoveryAvailable) currentProvider()?.onReset(ctx.jobId);
-    }
+    if (tokenIsLive(creating)) dispatchIfAttached({ type: "cursor-reset" }, creating);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [attachmentIdentity, currentProvider, dispatchIfAttached, tokenIsLive]);
+  }, [attachmentIdentity, dispatchIfAttached, tokenIsLive]);
 
   // The stream callbacks memo uses the same `creating` token captured at this
   // render. Recreated on attachment identity change so each new subscription has
@@ -1014,13 +1182,13 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
 
   useOptimizeEventStream(jobId, {
     enabled: Boolean(jobId) && !isSettledLifecycle(view.lifecycle),
-    initialCursor: initialCursorRef.current,
+    // Always the floor: a run always starts within the visit that started it.
+    initialCursor: null,
     subscriptionKey: attachmentIdentity ?? undefined,
     // The stream applies durable frames to THIS attachment's scoped cache (which the
     // scoped poll observer also reads → immediate SSE lifecycle/control/result, no 4s
     // lag) and mirrors to the shared base only while this attachment is the live owner.
     isCurrentAttachment: () => tokenIsLive(creating),
-    onCursorCommit,
     onCursorReset,
     onEvent: streamCallbacks.onEvent,
     onTerminal: onStreamTerminal,
@@ -1084,13 +1252,9 @@ export function useOptimizeRun(deps?: UseOptimizeRunDeps): OptimizeRunController
     isSubmitting: exposedSubmitting,
     activation: exposedActivation,
     submit,
-    resubmit,
-    attachRecoveredSession,
     getLiveJobId,
-    registerCursorPersistence,
-    prepareDegradedCleanup,
-    revokeCursorPersistence,
-    notifyInvalidCursorReset,
+    ownerFor,
+    retireSessionRecord,
     cancel,
     finishNow,
     reset,
@@ -1136,5 +1300,7 @@ function outcomeToStaleOutcome(
         jobId: outcome.volatile.jobId,
         reason: outcome.reason,
       };
+    case "activation-retired":
+      return { status: "stale-accepted", jobId: outcome.jobId };
   }
 }

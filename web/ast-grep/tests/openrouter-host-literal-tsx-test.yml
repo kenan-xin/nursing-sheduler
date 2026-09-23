@@ -1,0 +1,12 @@
+id: openrouter-host-literal-tsx
+valid:
+  - |
+    import { OPENROUTER_BASE_URL } from "@/lib/ai/protocol";
+    export const A = () => <a href={`${OPENROUTER_BASE_URL}/models`}>models</a>;
+  - |
+    export const B = () => <a href="https://example.test/docs">docs</a>;
+invalid:
+  - |
+    export const C = () => <a href="https://openrouter.ai/api/v1">api</a>;
+  - |
+    const url = `https://openrouter.ai/api/v1/models`;

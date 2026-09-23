@@ -23,17 +23,24 @@ type StoreState = Record<string, unknown> & {
 
 type NsWindow = {
   __nsStore: {
-    scenario: {
-      getState: () => StoreState & { mutateScenario: (patch: Record<string, unknown>) => void };
-      temporal: {
-        getState: () => {
-          pastStates: unknown[];
-          futureStates: unknown[];
-          undo: () => void;
-          redo: () => void;
-        };
-      };
+    /** The repository command bus — the product's only durable write path. */
+    commands: {
+      mutate(patch: Record<string, unknown>): Promise<{ ok: boolean }>;
+      recordBackup(): Promise<{ ok: boolean }>;
+      undo(): Promise<{ ok: boolean }>;
+      redo(): Promise<{ ok: boolean }>;
+      takeover(): Promise<{ ok: boolean }>;
     };
+    drain(): Promise<void>;
+    historyDepth(): Promise<number>;
+    authority(): {
+      scenarioId: string | null;
+      documentRevision: number;
+      ownership: string;
+      canUndo: boolean;
+      canRedo: boolean;
+    };
+    scenario(): StoreState;
   };
 };
 
@@ -41,8 +48,13 @@ type NsWindow = {
 const sk = (id: string) => `string:${id}`;
 const nk = (n: number) => `number:${n}`;
 
+/** The COMMITTED projection — drained, so a read never outruns the command that wrote. */
 function readState(page: Page) {
-  return page.evaluate(() => (window as unknown as NsWindow).__nsStore.scenario.getState());
+  return page.evaluate(async () => {
+    const store = (window as unknown as NsWindow).__nsStore;
+    await store.drain();
+    return store.scenario();
+  });
 }
 async function readStaff(page: Page) {
   return (await readState(page)).staff ?? [];
@@ -51,15 +63,21 @@ async function readStaffGroups(page: Page) {
   return (await readState(page)).staffGroups ?? [];
 }
 function pastCount(page: Page) {
-  return page.evaluate(
-    () => (window as unknown as NsWindow).__nsStore.scenario.temporal.getState().pastStates.length,
-  );
+  return page.evaluate(() => (window as unknown as NsWindow).__nsStore.historyDepth());
 }
-function futureCount(page: Page) {
-  return page.evaluate(
-    () =>
-      (window as unknown as NsWindow).__nsStore.scenario.temporal.getState().futureStates.length,
-  );
+/**
+ * Whether anything remains to REDO. The durable bridge exposes an Undo depth, not a
+ * future depth, and this helper used to return that same Undo depth — so a "the
+ * future shrank by one" assertion was really re-reading the past and could pass for
+ * the wrong reason. Availability is what the repository actually derives from
+ * persisted commit facts, and what the UI acts on.
+ */
+function canRedo(page: Page) {
+  return page.evaluate(async () => {
+    const store = (window as unknown as NsWindow).__nsStore;
+    await store.drain();
+    return store.authority().canRedo;
+  });
 }
 /**
  * Race a real Redo against an IMMEDIATE stale Save in ONE task, before React can flush
@@ -70,7 +88,7 @@ function futureCount(page: Page) {
 function redoThenClick(page: Page, saveTestId: string) {
   return page.evaluate((testId) => {
     const w = window as unknown as NsWindow;
-    w.__nsStore.scenario.temporal.getState().redo();
+    w.__nsStore.commands.redo();
     document
       .querySelector(`[data-testid="${testId}"]`)
       ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -78,19 +96,15 @@ function redoThenClick(page: Page, saveTestId: string) {
 }
 
 async function seed(page: Page, patch: Record<string, unknown>) {
-  await page.evaluate((p) => {
-    (window as unknown as NsWindow).__nsStore.scenario.getState().mutateScenario(p);
+  await page.evaluate(async (p) => {
+    await (window as unknown as NsWindow).__nsStore.commands.mutate(p);
   }, patch);
 }
 function undo(page: Page) {
-  return page.evaluate(() =>
-    (window as unknown as NsWindow).__nsStore.scenario.temporal.getState().undo(),
-  );
+  return page.evaluate(() => (window as unknown as NsWindow).__nsStore.commands.undo());
 }
 function redo(page: Page) {
-  return page.evaluate(() =>
-    (window as unknown as NsWindow).__nsStore.scenario.temporal.getState().redo(),
-  );
+  return page.evaluate(() => (window as unknown as NsWindow).__nsStore.commands.redo());
 }
 
 /** Reorder via native HTML5 drag (rows are draggable `<tr>`, drag identity is index). */
@@ -514,7 +528,7 @@ test.describe.serial("DR-2 Staff table", () => {
     });
     await undo(page); // H back to []
     const past = await pastCount(page);
-    const future = await futureCount(page);
+    expect(await canRedo(page)).toBe(true);
 
     await page.getByTestId(`people-edit-${sk("P1")}`).click();
     await page.getByTestId(`people-group-${sk("P1")}-G`).click();
@@ -527,7 +541,8 @@ test.describe.serial("DR-2 Staff table", () => {
     expect((await readStaffGroups(page)).find((g) => g.id === "G")?.members).toEqual([]);
     expect((await readStaffGroups(page)).find((g) => g.id === "H")?.members).toEqual(["P1"]);
     expect(await pastCount(page)).toBe(past + 1);
-    expect(await futureCount(page)).toBe(future - 1);
+    // The Redo consumed the only reapplyable commit, so nothing remains to redo.
+    expect(await canRedo(page)).toBe(false);
   });
 
   test("staff — EDIT-ITEM immediate stale Save racing Redo is a no-op (close-gate)", async ({
@@ -669,6 +684,459 @@ test.describe.serial("DR-2 Staff table", () => {
     });
     await expect(page.getByTestId("upload-dialog")).toHaveCount(0);
     expect((await readStaff(page)).map((p) => p.id)).toEqual(["A", "B"]);
-    expect(await pastCount(page)).toBe(before); // no spurious zundo entry
+    expect(await pastCount(page)).toBe(before); // no spurious undo entry
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R2b — the v2 "Mint Canvas, Warm Ink" visual system, measured on the real route.
+//
+// This is the RESOLVED half of the route's own evidence: `components/people/
+// people-v2-roles.test.tsx` pins which contract authored each surface, and these
+// tests prove what Chromium actually paints and lays out. Both halves are needed —
+// a role can be spelled correctly and still resolve to the wrong tone if a token
+// moves, and a token can be right while a table container forgets to clip its own
+// scroll region.
+//
+// F4's owner matrix covers `/people` in both themes, all four accents and the
+// coarse-pointer lane. What is added here is what F4 deliberately does NOT assert
+// per route: the exact resting tone, radius and elevation of THIS screen's named
+// surfaces, its precise-pointer control sizes, its behaviour at the narrow
+// viewport with a long list, and the route-level re-verification of the F3
+// overlay's one ratified exception.
+// ---------------------------------------------------------------------------
+
+/** Resolve runtime tokens the way the app resolves them — through the cascade. */
+async function resolveTokens(page: Page, tokens: string[]): Promise<Record<string, string>> {
+  return page.evaluate((list) => {
+    const out: Record<string, string> = {};
+    for (const token of list) {
+      const probe = document.createElement("div");
+      probe.style.backgroundColor = `var(${token})`;
+      document.body.appendChild(probe);
+      out[token] = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+    }
+    return out;
+  }, tokens);
+}
+
+async function gotoPeople(page: Page) {
+  await page.goto("/people");
+  await expect(page.getByTestId("people-add")).toBeVisible();
+}
+
+/**
+ * The PAINTING layers of a computed `box-shadow`, split on the commas that are
+ * not inside `rgba(...)`.
+ *
+ * Tailwind composes every shadow utility as
+ * `var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow)`, so an
+ * element with no ring still computes two `rgba(0, 0, 0, 0) 0px 0px 0px 0px`
+ * placeholders in front of the real layer. Those are fully transparent and
+ * zero-sized — they paint nothing — so a direction-of-light check must skip
+ * them. Dropping them is not a weakened assertion: any layer with real alpha
+ * still has to be inset, which `drop-target`'s outer `--sh-2` is not.
+ */
+function visibleShadowLayers(shadow: string): string[] {
+  return shadow
+    .split(/,(?![^(]*\))/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0 && !/rgba\(\s*\d+,\s*\d+,\s*\d+,\s*0\s*\)/.test(s));
+}
+
+test.describe("R2b — v2 visual system on /people", () => {
+  test.beforeEach(async ({ page }, testInfo) => {
+    testInfo.setTimeout(30_000);
+    await page.addInitScript(() => {
+      (window as unknown as { __NS_ENABLE_TEST_BRIDGE?: boolean }).__NS_ENABLE_TEST_BRIDGE = true;
+    });
+  });
+
+  for (const theme of ["light", "dark"] as const) {
+    test(`surface ladder resolves in the ${theme} theme`, async ({ page }) => {
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await page.addInitScript((t) => {
+        try {
+          window.localStorage.setItem("ns-theme", t);
+        } catch {}
+      }, theme);
+      await gotoPeople(page);
+      const html = page.locator("html");
+      if (theme === "dark") await expect(html).toHaveClass(/dark/);
+      else await expect(html).not.toHaveClass(/dark/);
+
+      await seed(page, {
+        staff: [
+          { id: "Aisha Rahman", history: [] },
+          { id: "Priya Nair", history: [] },
+        ],
+        staffGroups: [{ id: "Seniors", members: ["Aisha Rahman"] }],
+      });
+
+      const tone = await resolveTokens(page, ["--bg", "--surface", "--panel", "--panel-alt"]);
+
+      // L0: the screen root is the recessed page plane, and it is never a box.
+      const root = page.getByTestId("screen");
+      await expect(root).toHaveCSS("background-color", tone["--bg"]);
+      await expect(root).toHaveCSS("border-radius", "0px");
+      expect(await root.evaluate((el) => getComputedStyle(el).boxShadow)).toBe("none");
+
+      // L1: the table container rests at --surface / 16px / --sh-1, and CLIPS —
+      // its scroll region ends the card (DESIGN.md §4 rule 3).
+      const wrap = page.getByTestId("people-table-wrap");
+      await expect(wrap).toHaveCSS("background-color", tone["--surface"]);
+      await expect(wrap).toHaveCSS("border-radius", "16px");
+      const wrapShadow = await wrap.evaluate((el) => getComputedStyle(el).boxShadow);
+      expect(wrapShadow, "the table card must carry a resting elevation").not.toBe("none");
+      expect(wrapShadow, "a resting card is never an inset").not.toContain("inset");
+      expect(await wrap.evaluate((el) => getComputedStyle(el).overflowY)).not.toBe("visible");
+
+      // band: the column header spans the whole card, so it is --panel, square, flat.
+      const band = page.getByRole("columnheader", { name: "Nurse" }).locator("..");
+      await expect(band).toHaveCSS("background-color", tone["--panel"]);
+      await expect(band).toHaveCSS("border-radius", "0px");
+      expect(await band.evaluate((el) => getComputedStyle(el).boxShadow)).toBe("none");
+
+      // Row hover is --panel-alt. `--panel` is reserved for bands and true insets,
+      // so a row taking it would be indistinguishable from the header above it.
+      const row = page.getByTestId(`people-row-${sk("Priya Nair")}`);
+      await row.hover();
+      await expect(row).toHaveCSS("background-color", tone["--panel-alt"]);
+    });
+  }
+
+  // ii7.8.5 — the shared GroupsSection's containing card / header band / nested
+  // well hierarchy, PAINTED. The focused vitest suite pins which recipe role each
+  // node takes; only a real engine can prove the roles resolve to the prototype's
+  // measured values (`ScreenStaff.dc.html`, read in this same Chromium: container
+  // --surface / 1px --line / 16px / --sh-1, band a single --line2 bottom edge, and
+  // every group row --panel / 12px / inset --sh-well).
+  for (const theme of ["light", "dark"] as const) {
+    test(`staff groups render as one L1 card of wells in the ${theme} theme`, async ({ page }) => {
+      await page.addInitScript((t) => {
+        try {
+          window.localStorage.setItem("ns-theme", t);
+        } catch {}
+      }, theme);
+      await gotoPeople(page);
+      await seed(page, {
+        staff: [{ id: "P1", history: [] }],
+        staffGroups: [
+          { id: "Team", members: ["P1"] },
+          { id: "Squad", members: [] },
+        ],
+      });
+
+      const tone = await resolveTokens(page, [
+        "--surface",
+        "--panel",
+        "--line",
+        "--line2",
+        "--brand",
+      ]);
+
+      // The containing plane is a real L1 card, not transparent space.
+      const section = page.getByTestId("groups-section");
+      await expect(section).toHaveCSS("background-color", tone["--surface"]);
+      await expect(section).toHaveCSS("border-radius", "16px");
+      await expect(section).toHaveCSS("border-top-color", tone["--line"]);
+      await expect(section).toHaveCSS("border-top-width", "1px");
+      const cardShadow = await section.evaluate((el) => getComputedStyle(el).boxShadow);
+      expect(cardShadow, "the groups card must carry a resting elevation").not.toBe("none");
+      expect(cardShadow, "a resting card is never an inset").not.toContain("inset");
+
+      // The header band is a single bottom edge, so it stays square and flat.
+      const band = page.getByTestId("groups-header");
+      await expect(band).toHaveCSS("border-bottom-width", "1px");
+      await expect(band).toHaveCSS("border-bottom-color", tone["--line2"]);
+      await expect(band).toHaveCSS("border-top-width", "0px");
+      await expect(band).toHaveCSS("border-radius", "0px");
+      expect(await band.evaluate((el) => getComputedStyle(el).boxShadow)).toBe("none");
+
+      // Every row nested in that card is a WELL — recessed tone, control radius,
+      // and an INSET cast. An L1 card here would be the same-tone stack DESIGN.md
+      // §4 rule 5 forbids, and is what this screen shipped before.
+      for (const id of ["synthetic-ALL", "group-row-Team"]) {
+        const row = page.getByTestId(id);
+        await expect(row, id).toHaveCSS("background-color", tone["--panel"]);
+        await expect(row, id).toHaveCSS("border-radius", "12px");
+        const rowShadow = await row.evaluate((el) => getComputedStyle(el).boxShadow);
+        expect(rowShadow, `${id} must be recessed, not raised`).toContain("inset");
+        // EVERY layer must be inset — not just one of them. A row that kept an
+        // outer cast alongside the inset one would still pass a bare
+        // `toContain("inset")`, and that is precisely the direction-of-light
+        // inversion this fixup exists to remove.
+        const rowLayers = visibleShadowLayers(rowShadow);
+        expect(rowLayers.length, `${id} must paint a shadow at all`).toBeGreaterThan(0);
+        expect(
+          rowLayers.every((l) => l.includes("inset")),
+          `${id} layers`,
+        ).toBe(true);
+        // AWAITED. Unawaited, this matcher outlives the test and races page
+        // teardown, which is exactly how it failed the one-shot full E2E gate.
+        await expect(row, id).not.toHaveCSS("background-color", tone["--surface"]);
+        // The canonical --line2 hairline, through the shared recipe.
+        await expect(row, id).toHaveCSS("border-top-width", "1px");
+        await expect(row, id).toHaveCSS("border-top-style", "solid");
+        await expect(row, id).toHaveCSS("border-top-color", tone["--line2"]);
+      }
+
+      // The canonical band is two lines: heading + a route-voiced description.
+      await expect(
+        page
+          .getByTestId("groups-header")
+          .getByText("Bundle nurses so rules and constraints can target a whole team at once."),
+      ).toBeVisible();
+
+      // A drop candidate keeps the well's recessed depth and swaps only its
+      // edge — it is never lifted onto an outer cast. Drag a real row onto a
+      // DIFFERENT real row, so source and target states stay distinct.
+      await page.getByTestId("group-row-Team").dispatchEvent("dragstart");
+      const target = page.getByTestId("group-row-Squad");
+      await target.dispatchEvent("dragover");
+      await expect(target).toHaveCSS("border-top-style", "dashed");
+      await expect(target).toHaveCSS("border-top-color", tone["--brand"]);
+      const dropLayers = visibleShadowLayers(
+        await target.evaluate((el) => getComputedStyle(el).boxShadow),
+      );
+      expect(dropLayers.length, "a drop candidate must still carry its well cast").toBeGreaterThan(
+        0,
+      );
+      expect(
+        dropLayers.every((l) => l.includes("inset")),
+        "a drop candidate must stay recessed",
+      ).toBe(true);
+      await target.dispatchEvent("dragend");
+    });
+  }
+
+  // ii7.8.5.2 — the canonical empty hierarchy, PAINTED, and Staff's authored
+  // order: the prompt sits BEFORE the reserved ALL row (ScreenStaff.dc.html:126).
+  for (const theme of ["light", "dark"] as const) {
+    test(`staff groups show the canonical empty hierarchy in the ${theme} theme`, async ({
+      page,
+    }) => {
+      await page.addInitScript((t) => {
+        try {
+          window.localStorage.setItem("ns-theme", t);
+        } catch {}
+      }, theme);
+      await gotoPeople(page);
+      await seed(page, { staff: [{ id: "P1", history: [] }], staffGroups: [] });
+
+      const empty = page.getByTestId("groups-empty");
+      await expect(empty).toBeVisible();
+      // It coexists with the reserved row rather than replacing it...
+      await expect(page.getByTestId("synthetic-ALL")).toBeVisible();
+      // ...and Staff authors the prompt FIRST.
+      const order = await page
+        .getByTestId("groups-body")
+        .evaluate((body) =>
+          [...body.children].map((c) => c.getAttribute("data-testid")).filter(Boolean),
+        );
+      expect(order.indexOf("groups-empty")).toBeLessThan(order.indexOf("synthetic-ALL"));
+
+      // Four-part hierarchy, not one flattened sentence.
+      await expect(empty.getByText("No staff groups yet")).toBeVisible();
+      await expect(
+        empty.getByText(
+          "Bundle nurses into a team — like “Seniors” or “Team A” — so a rule can target them all at once.",
+        ),
+      ).toBeVisible();
+
+      // The local action is a real control that drives the SAME add-group toggle
+      // the header owns — no second lifecycle.
+      const cta = page.getByTestId("groups-empty-add");
+      await expect(cta).toBeVisible();
+      const box = await cta.boundingBox();
+      expect(box!.height, "the empty-state CTA is a real control").toBeGreaterThanOrEqual(36);
+      await cta.click();
+      await expect(page.getByTestId("add-group-form")).toBeVisible();
+      await expect(page.getByTestId("add-group-toggle")).toHaveAttribute("aria-pressed", "true");
+    });
+  }
+
+  test("every table data surface stays square", async ({ page }) => {
+    await gotoPeople(page);
+    await seed(page, {
+      staff: Array.from({ length: 8 }, (_, i) => ({ id: `Nurse ${i + 1}`, history: [] })),
+      staffGroups: [{ id: "Seniors", members: ["Nurse 1"] }],
+    });
+
+    const report = await page.evaluate(() => {
+      const table = document.querySelector('[data-testid="people-table"]')!;
+      const nodes = [table, ...Array.from(table.querySelectorAll("thead, tbody, tr, th, td"))];
+      const rounded = nodes
+        .filter((el) => getComputedStyle(el).borderRadius !== "0px")
+        .map((el) => `${el.tagName.toLowerCase()} → ${getComputedStyle(el).borderRadius}`);
+      return { measured: nodes.length, rounded };
+    });
+
+    // Vacuity guard: eight rows × four cells plus the header must be measured.
+    expect(report.measured).toBeGreaterThan(40);
+    expect(report.rounded, "a table data surface was rounded").toEqual([]);
+  });
+
+  test("the open inline editor row takes the brand-edged selection, not a tint wash", async ({
+    page,
+  }) => {
+    await gotoPeople(page);
+    await seed(page, {
+      staff: [{ id: "P1", history: [] }],
+      staffGroups: [{ id: "Seniors", members: [] }],
+    });
+
+    const tone = await resolveTokens(page, ["--surface", "--brand", "--brandtint", "--onbrand"]);
+    await page.getByTestId(`people-edit-${sk("P1")}`).click();
+
+    const row = page.getByTestId(`people-edit-row-${sk("P1")}`);
+    await expect(row).toHaveCSS("background-color", tone["--surface"]);
+    await expect(row).toHaveCSS("border-top-color", tone["--brand"]);
+    // The prototype washes the editing row in --brandtint; v2 reserves that tone
+    // for the selection MARKS, which sit inside this very row.
+    await expect(row).not.toHaveCSS("background-color", tone["--brandtint"]);
+
+    // A pressed membership toggle IS a selection mark: the brand fill carries its
+    // paired ON-colour, never a hand-picked foreground.
+    const chip = page.getByTestId(`people-group-${sk("P1")}-Seniors`);
+    await expect(chip).toHaveAttribute("aria-pressed", "false");
+    await chip.click();
+    await expect(chip).toHaveAttribute("aria-pressed", "true");
+    await expect(chip).toHaveCSS("background-color", tone["--brand"]);
+    await expect(chip).toHaveCSS("color", tone["--onbrand"]);
+  });
+
+  test("real control geometry on a precise pointer — 44px CTA, 36px actions and fields", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await gotoPeople(page);
+    await seed(page, {
+      staff: [{ id: "P1", history: [] }],
+      staffGroups: [{ id: "Seniors", members: [] }],
+    });
+
+    // RAW dimensions, never rounded. `--ctl-lg` 44, `--ctl` 36 and `--ctl-sm` 32
+    // are absolute integer tokens that the 0.9 density baseline is forbidden to
+    // touch, so the unrounded box is what has to land on them. `Math.round` here
+    // would not be tolerance — it would widen every claim below into a half-pixel
+    // band (“exactly 36” becoming any value in [35.5, 36.5)), which is precisely
+    // the undersizing this test exists to catch. Measured on the shipped tree at
+    // device pixel ratios 1, 1.5 and 2 and at both 1280px and 390px: every
+    // dimension asserted here is exactly integral, so equality is the truthful
+    // contract and no tolerance is warranted. (Text-driven WIDTHS are fractional
+    // by construction — the CTA is 187.875px — which is why only the token-bound
+    // axes are asserted.)
+
+    // The prototype's 44px primary action, on a real anchor.
+    const cta = await page.getByTestId("people-continue").boundingBox();
+    expect(cta!.height, "Continue CTA height").toBe(44);
+
+    // Icon actions own BOTH axes at the absolute 36px control size — set on the
+    // control itself, so its own box is what is measured here.
+    for (const testId of [
+      `people-edit-${sk("P1")}`,
+      `people-dup-${sk("P1")}`,
+      `people-delete-${sk("P1")}`,
+    ]) {
+      const box = await page.getByTestId(testId).boundingBox();
+      expect(box!.width, `${testId} width`).toBe(36);
+      expect(box!.height, `${testId} height`).toBe(36);
+    }
+
+    // Fields and default actions are a height claim; the 0.9 density baseline must
+    // not be able to shrink them.
+    for (const testId of ["people-search", "people-add", "people-upload"]) {
+      const box = await page.getByTestId(testId).boundingBox();
+      expect(box!.height, `${testId} height`).toBe(36);
+    }
+
+    // The inline membership toggles are the small step, and still real controls.
+    await page.getByTestId(`people-edit-${sk("P1")}`).click();
+    const chip = await page.getByTestId(`people-group-${sk("P1")}-Seniors`).boundingBox();
+    expect(chip!.height, "membership toggle height").toBe(32);
+  });
+
+  test("a long list at the narrow viewport scrolls the table, not the page", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await gotoPeople(page);
+    await seed(page, {
+      staff: Array.from({ length: 40 }, (_, i) => ({
+        id: `Nurse With A Long Name ${i + 1}`,
+        history: [],
+      })),
+      staffGroups: [{ id: "Seniors", members: ["Nurse With A Long Name 1"] }],
+    });
+    await expect(page.getByTestId(`people-row-${sk("Nurse With A Long Name 40")}`)).toBeVisible();
+
+    const report = await page.evaluate(() => {
+      const doc = document.documentElement;
+      const wrap = document.querySelector('[data-testid="people-table-wrap"]')!;
+      return {
+        pageScroll: doc.scrollWidth,
+        pageClient: doc.clientWidth,
+        wrapScroll: wrap.scrollWidth,
+        wrapClient: wrap.clientWidth,
+      };
+    });
+
+    // The 520px-min table is wider than a 390px viewport by construction; the
+    // point is that IT scrolls and the page does not.
+    expect(report.wrapScroll).toBeGreaterThan(report.wrapClient);
+    expect(report.pageScroll).toBeLessThanOrEqual(report.pageClient + 1);
+  });
+
+  test("the search and no-results states keep real, reachable controls", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await gotoPeople(page);
+    await seed(page, { staff: [{ id: "Alice", history: [] }], staffGroups: [] });
+
+    await page.getByTestId("people-search").fill("zzz");
+    await expect(page.getByTestId("people-empty")).toContainText("No matches");
+
+    // Both clears are genuine controls, not bare glyphs, and both still work.
+    const inlineClear = await page.getByTestId("people-search-clear").boundingBox();
+    expect(inlineClear!.width).toBeGreaterThan(0);
+    await page.getByTestId("people-empty-clear").click();
+    await expect(page.getByTestId(`people-row-${sk("Alice")}`)).toBeVisible();
+    await expect(page.getByTestId("people-search")).toHaveValue("");
+
+    const report = await page.evaluate(() => ({
+      pageScroll: document.documentElement.scrollWidth,
+      pageClient: document.documentElement.clientWidth,
+    }));
+    expect(report.pageScroll).toBeLessThanOrEqual(report.pageClient + 1);
+  });
+
+  // The F3 overlay is consumed as-is by this route. Its one ratified exception —
+  // People upload IGNORES Escape, because a stray Escape after the OS file picker
+  // closes used to throw the whole bulk-reorder flow away — is re-verified HERE, at
+  // route level, because R2b changes what surrounds the trigger and a regression
+  // would surface as "the dialog closed" rather than as an F3 unit failure.
+  test("the upload overlay still ignores Escape, and still closes every other way", async ({
+    page,
+  }) => {
+    await gotoPeople(page);
+    await seed(page, { staff: [{ id: "A", history: [] }], staffGroups: [] });
+    const before = await pastCount(page);
+
+    await page.getByTestId("people-upload").click();
+    await expect(page.getByTestId("upload-dialog")).toBeVisible();
+
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("upload-dialog")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("upload-dialog")).toBeVisible();
+
+    // The close control still closes it, and nothing was committed either way.
+    await page.getByTestId("upload-dialog-close").click();
+    await expect(page.getByTestId("upload-dialog")).toHaveCount(0);
+    expect((await readStaff(page)).map((p) => p.id)).toEqual(["A"]);
+    expect(await pastCount(page)).toBe(before);
+
+    // Reopening still works, so the ignored Escape left no wedged state behind.
+    await page.getByTestId("people-upload").click();
+    await expect(page.getByTestId("upload-dialog")).toBeVisible();
   });
 });

@@ -8,6 +8,8 @@
 // per the ticket — it is not a candidate for `card-editor/` since no other editor
 // needs a single-select shift-type control.
 
+import { cn } from "@/lib/utils";
+import { surfaceVariants } from "@/components/ui/surface";
 import type { ShiftTypeSingleSelectOption } from "./requirements-model";
 
 export interface ShiftTypeSingleSelectProps {
@@ -35,9 +37,12 @@ function Row({
   testId: string;
 }) {
   return (
+    // The row rounds to the control radius so its hover fill reads as a row rather
+    // than a full-bleed band, and grows to a real 44px on a coarse pointer so the
+    // label — which is the thing anyone actually aims at — is a legitimate target.
     <label
-      className={`flex items-center gap-2.5 px-2 py-[7px] ${
-        option.disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:bg-panel"
+      className={`flex items-center gap-2.5 rounded-control px-2 py-[7px] pointer-coarse:min-h-touch ${
+        option.disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:bg-panel-alt"
       }`}
       title={option.disabledReason}
     >
@@ -51,7 +56,11 @@ function Row({
         onChange={() => {
           if (!option.disabled) onSelect(option.value);
         }}
-        className="size-3.5 accent-brand"
+        // D10: a coarse pointer gets the real 44x44 control, not an invisible
+        // pseudo-element hitbox around a 12px one. A native radio scales with
+        // width/height in Chromium, so this is the actual control growing — which
+        // is what the F4 target scan measures and what a thumb has to hit.
+        className="size-3.5 accent-brand pointer-coarse:size-touch"
       />
       <span className="truncate text-meta text-ink">{option.label}</span>
     </label>
@@ -85,32 +94,46 @@ export function ShiftTypeSingleSelect({
   }
 
   return (
+    // Matches the shared TransferList pane it sits beside in the same form: an L1
+    // card-radius box whose SCROLL LIVES ON AN INNER ELEMENT. The split is not
+    // cosmetic — the recipe node carries the role and `overflow-hidden` so the rows
+    // clip to the corners rather than hitting a square edge inside a rounded box
+    // (DESIGN.md §4 rule 3), and it also keeps the height contract off the recipe's
+    // className, which admits layout utilities but no arbitrary values.
     <div
-      className="flex max-h-[228px] flex-col gap-0.5 overflow-y-auto border border-line bg-surface p-1.5"
+      className={cn(
+        "flex flex-col overflow-hidden",
+        surfaceVariants({
+          role: "surface",
+          geometry: "card",
+        }),
+      )}
       data-testid={testId}
     >
-      {groups.length > 0 && <SectionLabel>GROUPS</SectionLabel>}
-      {groups.map((opt) => (
-        <Row
-          key={String(opt.value)}
-          option={opt}
-          checked={isChecked(opt.value)}
-          name={name}
-          onSelect={onSelect}
-          testId={`${testId}-option-${opt.value}`}
-        />
-      ))}
-      {items.length > 0 && groups.length > 0 && <SectionLabel>SHIFT TYPES</SectionLabel>}
-      {items.map((opt) => (
-        <Row
-          key={String(opt.value)}
-          option={opt}
-          checked={isChecked(opt.value)}
-          name={name}
-          onSelect={onSelect}
-          testId={`${testId}-option-${opt.value}`}
-        />
-      ))}
+      <div className="flex max-h-[228px] flex-col gap-0.5 overflow-y-auto overflow-x-hidden p-1.5">
+        {groups.length > 0 && <SectionLabel>GROUPS</SectionLabel>}
+        {groups.map((opt) => (
+          <Row
+            key={String(opt.value)}
+            option={opt}
+            checked={isChecked(opt.value)}
+            name={name}
+            onSelect={onSelect}
+            testId={`${testId}-option-${opt.value}`}
+          />
+        ))}
+        {items.length > 0 && groups.length > 0 && <SectionLabel>SHIFT TYPES</SectionLabel>}
+        {items.map((opt) => (
+          <Row
+            key={String(opt.value)}
+            option={opt}
+            checked={isChecked(opt.value)}
+            name={name}
+            onSelect={onSelect}
+            testId={`${testId}-option-${opt.value}`}
+          />
+        ))}
+      </div>
     </div>
   );
 }

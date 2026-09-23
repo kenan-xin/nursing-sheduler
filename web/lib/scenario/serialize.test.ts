@@ -92,6 +92,63 @@ describe("canonicalization is applied before dump (not just validated)", () => {
   });
 });
 
+describe("span-id date refs expand to the backend's canonical full ISO (G1)", () => {
+  /** Parse the serialized doc's two span-id surfaces out of the YAML. */
+  function surfaces(state: ScenarioUiState) {
+    const parsed = parse(serializeScenario(state)) as {
+      dates: { groups: { id: string; members: unknown[] }[] };
+      preferences: { type: string; person?: string; date?: unknown }[];
+    };
+    return {
+      groupMembers: parsed.dates.groups[0].members,
+      requestDates: parsed.preferences.filter((p) => p.type === "shift request").map((p) => p.date),
+    };
+  }
+
+  it("expands the UI's span ids on both surfaces (matrix cells + date-group members)", () => {
+    // A same-month roster: `generateDateItems` ids are bare `DD`, which is what
+    // the matrix and the Dates screen key by — and what import re-keys onto.
+    const state = makeValidUiState();
+    state.dateGroups = [{ id: "FirstTwo", members: ["14", "15"] }];
+    state.reqData = [
+      { uid: "c1", kind: "leave", person: "Alice", date: "14" },
+      { uid: "c2", kind: "request", person: "Bob", date: "15", shiftType: "D", weight: 2 },
+    ];
+
+    const { groupMembers, requestDates } = surfaces(state);
+    expect(groupMembers).toEqual(["2026-05-14", "2026-05-15"]);
+    expect(requestDates).toEqual(["2026-05-14", "2026-05-15"]);
+  });
+
+  it("leaves every non-generated ref alone — ids, keywords, ranges, and full ISO", () => {
+    // The accepting control: only an id `generateDateItems` actually produced is
+    // expanded, so an ordinary round trip is untouched and a bad ref stays
+    // reportable rather than being folded onto a same-numbered real day.
+    const state = makeValidUiState();
+    state.dateGroups = [{ id: "Mixed", members: ["WEEKEND", "2026-05-14", "14~15", 14] }];
+    state.reqData = [
+      { uid: "c1", kind: "leave", person: "Alice", date: "2026-05-14" },
+      { uid: "c2", kind: "request", person: "Bob", date: "Mixed", shiftType: "D", weight: 2 },
+    ];
+
+    const { groupMembers, requestDates } = surfaces(state);
+    expect(groupMembers).toEqual(["WEEKEND", "2026-05-14", "14~15", 14]);
+    expect(requestDates).toEqual(["2026-05-14", "Mixed"]);
+  });
+
+  it("is identity across a year boundary, where the span id already IS the ISO date", () => {
+    const state = makeValidUiState();
+    state.rangeStart = "2026-12-30";
+    state.rangeEnd = "2027-01-02";
+    state.dateGroups = [{ id: "NewYear", members: ["2026-12-31", "2027-01-01"] }];
+    state.reqData = [{ uid: "c1", kind: "leave", person: "Alice", date: "2027-01-01" }];
+
+    const { groupMembers, requestDates } = surfaces(state);
+    expect(groupMembers).toEqual(["2026-12-31", "2027-01-01"]);
+    expect(requestDates).toEqual(["2027-01-01"]);
+  });
+});
+
 describe("serializeScenario stamps the current build version LAST (FR-SL-02)", () => {
   function fixtureWithoutAppVersion(): ScenarioUiState {
     const state = makeValidUiState();

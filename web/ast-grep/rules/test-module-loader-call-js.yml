@@ -1,0 +1,32 @@
+id: test-module-loader-call-js
+language: JavaScript
+severity: error
+message: >-
+  `createRequire` builds a generic module loader: the value it returns resolves and loads
+  arbitrary paths, which is the same capability as `fs` reached by another route. It is
+  available only to the exact package-resolution exceptions in the reader ledger, which may
+  resolve DECLARED package ids and must not hand a generic loader back to their callers.
+note: >-
+  The `JavaScript` twin of `test-module-loader-call`, covering `.js`, `.jsx`, `.mjs` and
+  `.cjs`. No such test/support file exists today, so this variant is PREVENTION -- and it is
+  the variant most likely to matter first, because `createRequire` exists precisely to give
+  ESM `.mjs` code a CommonJS loader.
+files:
+  - "**/*.test.*"
+  - "**/*.spec.*"
+  - "**/*.test-d.*"
+  - "e2e/**"
+  - "**/__tests__/**"
+  - "**/support/**"
+  - "**/test-support/**"
+  - "**/test-support.*"
+  - "**/*.test-support.*"
+  - "lib/store/test-authority.ts"
+ignores:
+  - "components/ai/assistant-styles.test.ts"
+  - "lib/ai/runtime/model-visible-tools.test.ts"
+  - "lib/ai/runtime/package-family.test.ts"
+rule:
+  any:
+    - pattern: createRequire($$$)
+    - pattern: $MOD.createRequire($$$)

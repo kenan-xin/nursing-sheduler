@@ -1,0 +1,16 @@
+id: test-module-loader-call-js
+snapshots:
+  ? |
+    const require = createRequire(import.meta.url);
+  : labels:
+      - source: createRequire(import.meta.url)
+        style: primary
+        start: 16
+        end: 46
+  ? |
+    const require = mod.createRequire(import.meta.url);
+  : labels:
+      - source: mod.createRequire(import.meta.url)
+        style: primary
+        start: 16
+        end: 50

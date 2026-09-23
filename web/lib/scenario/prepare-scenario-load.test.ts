@@ -11,11 +11,11 @@ import { makeValidUiState } from "./test-fixtures";
 import type { CanonicalScenarioDocument } from "./types";
 import {
   computeScenarioFingerprint,
-  createMemoryStorage,
-  createStateSpine,
-  hydrateScenarioStore,
+  useScenarioStore,
   pickScenario,
+  scenarioCommands,
 } from "@/lib/store";
+import { resetScenarioForTest, undoDepth, redoDepth } from "@/lib/store/test-authority";
 
 const YAML_OPTIONS = { version: "1.2" as const };
 
@@ -32,7 +32,7 @@ function docWithExtraPreference(extra: CanonicalScenarioDocument["preferences"][
 }
 
 describe("prepareScenarioLoad — happy path", () => {
-  it("valid YAML returns no issues, a doc, and the unchanged keyless target", () => {
+  it("valid YAML returns no issues, a doc, and the unchanged keyless target", async () => {
     const result = prepareScenarioLoad(validYaml());
 
     expect(result.issues).toEqual([]);
@@ -48,7 +48,7 @@ describe("prepareScenarioLoad — happy path", () => {
 });
 
 describe("prepareScenarioLoad — blocking issues", () => {
-  it("a YAML syntax error surfaces on the issue channel with no doc", () => {
+  it("a YAML syntax error surfaces on the issue channel with no doc", async () => {
     const result = prepareScenarioLoad("preferences: [unterminated, flow");
 
     expect(result.doc).toBeNull();
@@ -57,7 +57,7 @@ describe("prepareScenarioLoad — blocking issues", () => {
     expect(result.issues[0].message).toMatch(/YAML parse error/);
   });
 
-  it("an import-invalid document surfaces schema V-messages (no target, no doc)", () => {
+  it("an import-invalid document surfaces schema V-messages (no target, no doc)", async () => {
     // Well-formed YAML, but missing every required container.
     const result = prepareScenarioLoad("apiVersion: alpha\n");
 
@@ -66,7 +66,7 @@ describe("prepareScenarioLoad — blocking issues", () => {
     expect(result.issues.length).toBeGreaterThan(0);
   });
 
-  it("a bad marked contract passes import but fails producer preflight", () => {
+  it("a bad marked contract passes import but fails producer preflight", async () => {
     const raw = docWithExtraPreference({
       type: "shift count",
       person: "Alice",
@@ -91,7 +91,7 @@ describe("prepareScenarioLoad — blocking issues", () => {
 });
 
 describe("prepareScenarioLoad — non-blocking warnings", () => {
-  it("advanced (nested) reference syntax survivors populate warnings, not issues", () => {
+  it("advanced (nested) reference syntax survivors populate warnings, not issues", async () => {
     const raw = docWithExtraPreference({
       type: "shift type successions",
       person: "Alice",
@@ -108,7 +108,7 @@ describe("prepareScenarioLoad — non-blocking warnings", () => {
     expect(result.warnings.some((w) => /advanced backend reference syntax/.test(w))).toBe(true);
   });
 
-  it("deduplicates identical advanced-syntax warnings", () => {
+  it("deduplicates identical advanced-syntax warnings", async () => {
     // Two successions with the same nested-pattern survivor → one banner line.
     const doc = toCanonicalScenarioDocument(makeValidUiState());
     for (let i = 0; i < 2; i++) {
@@ -127,7 +127,7 @@ describe("prepareScenarioLoad — non-blocking warnings", () => {
 });
 
 describe("projectImportTarget — determinism", () => {
-  it("projects the same target to an identical canonical document across calls", () => {
+  it("projects the same target to an identical canonical document across calls", async () => {
     const { target } = prepareScenarioLoad(validYaml());
     expect(target).not.toBeNull();
 
@@ -139,73 +139,80 @@ describe("projectImportTarget — determinism", () => {
 });
 
 describe("classifyLoadVersion — Decision A tier → load behavior", () => {
-  it("identical (same full string) → null (silent, no modal)", () => {
+  it("identical (same full string) → null (silent, no modal)", async () => {
     expect(classifyLoadVersion("v0.1.1-5-gabc1234", "v0.1.1-5-gabc1234")).toBeNull();
   });
 
-  it("compatible (same major.minor, different commit) → null (silent — stop per-commit nagging)", () => {
+  it("compatible (same major.minor, different commit) → null (silent — stop per-commit nagging)", async () => {
     expect(classifyLoadVersion("v0.1.1-5-gabc1234", "v0.1.1-6-gdef5678")).toBeNull();
   });
 
-  it("indeterminate (bare hash — no tag to judge) → null (silent, don't cry wolf)", () => {
+  it("indeterminate (bare hash — no tag to judge) → null (silent, don't cry wolf)", async () => {
     expect(classifyLoadVersion("abc1234", "v0.1.1-5-gabc1234")).toBeNull();
   });
 
-  it("missing (absent or sentinel file version) → 'missing' confirm", () => {
+  it("missing (absent or sentinel file version) → 'missing' confirm", async () => {
     expect(classifyLoadVersion(undefined, "v0.1.1")).toBe("missing");
     expect(classifyLoadVersion("", "v0.1.1")).toBe("missing");
     expect(classifyLoadVersion("unknown", "v0.1.1")).toBe("missing");
   });
 
-  it("dirty (one side -dirty, strings differ) → 'dirty' confirm", () => {
+  it("dirty (one side -dirty, strings differ) → 'dirty' confirm", async () => {
     expect(classifyLoadVersion("v0.1.1-5-gabc1234-dirty", "v0.1.1-5-gabc1234")).toBe("dirty");
   });
 
-  it("equal dirty (exactly-matching dirty file + build) → 'dirty' confirm, not a silent load", () => {
+  it("equal dirty (exactly-matching dirty file + build) → 'dirty' confirm, not a silent load", async () => {
     // Two equal `-dirty` strings do NOT prove identical code — uncommitted
     // changes are not captured in the version string — so this must stage a
     // confirm rather than load silently.
     expect(classifyLoadVersion("v0.1.1-5-gabc1234-dirty", "v0.1.1-5-gabc1234-dirty")).toBe("dirty");
   });
 
-  it("incompatible (major.minor differ) → 'incompatible' confirm", () => {
+  it("incompatible (major.minor differ) → 'incompatible' confirm", async () => {
     expect(classifyLoadVersion("v0.1.1", "v0.2.0")).toBe("incompatible");
     expect(classifyLoadVersion("v0.1.1", "v1.0.0")).toBe("incompatible");
   });
 
-  it("normalizes an optional leading v — bare-semver file on the same line stays silent", () => {
+  it("normalizes an optional leading v — bare-semver file on the same line stays silent", async () => {
     expect(classifyLoadVersion("0.1.5", "v0.1.9")).toBeNull();
   });
 
   // Self-unknown-silent: if my own build can't identify itself, I can't judge any
   // file's compatibility, so don't nag (mirrors surface (a)'s null guard).
-  it("current build unidentifiable + file has a real version → silent (null)", () => {
+  it("current build unidentifiable + file has a real version → silent (null)", async () => {
     expect(classifyLoadVersion("v0.1.1", "unknown")).toBeNull();
     expect(classifyLoadVersion("v0.1.1", "")).toBeNull();
     expect(classifyLoadVersion("v0.1.1", "v0.0.0-unknown")).toBeNull();
   });
 
-  it("current build unidentifiable + file missing → silent (null)", () => {
+  it("current build unidentifiable + file missing → silent (null)", async () => {
     expect(classifyLoadVersion(undefined, "unknown")).toBeNull();
   });
 
-  it("current build KNOWN + file missing → still 'missing' confirm (regression guard)", () => {
+  it("current build KNOWN + file missing → still 'missing' confirm (regression guard)", async () => {
     expect(classifyLoadVersion(undefined, "v0.1.1")).toBe("missing");
   });
 
-  it("current build KNOWN + file dirty/incompatible → still confirm as before", () => {
+  it("current build KNOWN + file dirty/incompatible → still confirm as before", async () => {
     expect(classifyLoadVersion("v0.1.1-5-gabc1234-dirty", "v0.1.1-5-gabc1234")).toBe("dirty");
     expect(classifyLoadVersion("v0.2.0", "v0.1.1")).toBe("incompatible");
   });
 });
 
 describe("prepareScenarioLoad — the no-mutation lock", () => {
-  async function readySpine() {
-    const spine = createStateSpine({ createStorage: () => createMemoryStorage() });
-    await hydrateScenarioStore(spine.scenario, spine.hot);
-    spine.scenario.getState().mutateScenario({ rangeStart: "2026-02-01", rangeEnd: "2026-02-28" });
-    spine.scenario.getState().recordBackup();
-    return spine;
+  /**
+   * A brought-up authority with real committed content and a recorded backup.
+   *
+   * The APP projection singleton is what the installed authority publishes into, so
+   * it is what the snapshot below has to read. A locally built spine would stay
+   * empty and "the store is untouched" would hold vacuously.
+   */
+  async function readyStore() {
+    await resetScenarioForTest();
+    await scenarioCommands.mutate({ rangeStart: "2026-02-01", rangeEnd: "2026-02-28" });
+    await scenarioCommands.recordBackup(
+      computeScenarioFingerprint(pickScenario(useScenarioStore.getState())),
+    );
   }
 
   interface StoreSnapshot {
@@ -216,20 +223,21 @@ describe("prepareScenarioLoad — the no-mutation lock", () => {
     future: number;
   }
 
-  function snapshot(spine: Awaited<ReturnType<typeof readySpine>>): StoreSnapshot {
-    const state = spine.scenario.getState();
+  // History depth is read from the DURABLE envelope now, so the snapshot is async.
+  async function snapshot(): Promise<StoreSnapshot> {
+    const state = useScenarioStore.getState();
     return {
       fingerprint: computeScenarioFingerprint(pickScenario(state)),
       backup: state.backupFingerprint,
       state: JSON.stringify(pickScenario(state)),
-      past: spine.scenario.temporal.getState().pastStates.length,
-      future: spine.scenario.temporal.getState().futureStates.length,
+      past: await undoDepth(),
+      future: await redoDepth(),
     };
   }
 
   it("leaves the store fingerprint / state / history byte-for-byte unchanged on invalid input", async () => {
-    const spine = await readySpine();
-    const before = snapshot(spine);
+    await readyStore();
+    const before = await snapshot();
 
     // A blocking bad-marked-contract AND a syntax error — neither may touch the store.
     const badContract = (() => {
@@ -256,6 +264,6 @@ describe("prepareScenarioLoad — the no-mutation lock", () => {
     expect(syntaxResult.issues.length).toBeGreaterThan(0);
 
     // …and the store is untouched.
-    expect(snapshot(spine)).toEqual(before);
+    expect(await snapshot()).toEqual(before);
   });
 });

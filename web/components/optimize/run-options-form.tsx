@@ -8,6 +8,14 @@
 // B2-2 — the scenario stat grid (NURSES / DAYS / SHIFTS / RULES ON, proto
 // ScreenGenerate.dc.html:32-37) sits above the fields; the fields are ordered
 // timeout, then (Anonymize, Prettify) per the prototype's `:38-45`.
+//
+// R6 v2: the stat grid is a DATA surface — four cells divided by `--line2`
+// hairlines — so it stays square and unfilled exactly as the prototype authors it
+// (DESIGN.md §5 "do not round a data structure"). Only its numerals move: v1's
+// `font-extrabold` becomes the v2 Title weight (600) with -0.015em tracking
+// (§3). Validation and gating copy move from the base tier to the semantic INK
+// tier, which is the deepest treatment and the one that stays legible on
+// `--surface` in dark mode.
 
 import { FaDownload, FaSpinner } from "@/components/icons";
 import { Button } from "@/components/ui/button";
@@ -16,6 +24,8 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { OPTIMIZE_TIMEOUT_MAX_SECONDS, OPTIMIZE_TIMEOUT_MIN_SECONDS } from "@/lib/optimize";
 import { cn } from "@/lib/utils";
+import { capabilityAnchorProps } from "@/lib/capability/anchor-contract";
+import { OPTIMIZE_RUN_OPTIONS_ANCHOR } from "./capability-anchors";
 
 /** The scenario-at-a-glance counts rendered above the run fields. */
 export interface RunOptionsScenarioStats {
@@ -85,7 +95,12 @@ function StatCell({ label, value, testId, borderRight, borderTop }: StatCellProp
         borderTop ? "border-t border-line2" : null,
       )}
     >
-      <div className="font-heading text-title font-extrabold text-ink">{value}</div>
+      {/* DESIGN.md §3 reserves Spline Sans Mono for "IDs, counts, hours and solver
+          expressions — so a number always reads as data". These four values ARE
+          counts, and D8 puts that explicit rule above the prototype's display-face
+          example, so the face is mono. Weight and tracking stay on the ratified
+          v2 Title step. */}
+      <div className="font-mono text-title font-semibold tracking-[-0.015em] text-ink">{value}</div>
       <div className="mt-0.5 text-label font-semibold uppercase tracking-[0.03em] text-ink3">
         {label}
       </div>
@@ -111,6 +126,7 @@ export function RunOptionsForm({
   return (
     <form
       data-testid="optimize-run-options"
+      {...capabilityAnchorProps(OPTIMIZE_RUN_OPTIONS_ANCHOR)}
       onSubmit={(event) => {
         event.preventDefault();
         onSubmit();
@@ -170,7 +186,7 @@ export function RunOptionsForm({
           <p
             id="optimize-timeout-error"
             role="alert"
-            className="text-meta font-semibold text-error"
+            className="text-meta font-semibold text-errorink"
           >
             {timeoutError}
           </p>
@@ -203,21 +219,21 @@ export function RunOptionsForm({
         >
           {submitting ? (
             <>
-              <FaSpinner className="animate-spin-slow" aria-hidden /> Optimizing…
+              <FaSpinner className="animate-spin-slow" aria-hidden /> Optimising…
             </>
           ) : (
             <>
-              <FaDownload aria-hidden /> Optimize and Download
+              <FaDownload aria-hidden /> Optimize
             </>
           )}
         </Button>
         {disabledReason !== null && !submitting ? (
-          <p className="text-meta text-warn" data-testid="optimize-disabled-reason">
+          <p className="text-meta text-warnink" data-testid="optimize-disabled-reason">
             {disabledReason}
           </p>
         ) : null}
         <p className="text-meta text-ink3">
-          Optimizing sends your scheduling data to the backend to generate the XLSX.
+          Optimising sends your scheduling data to the backend to generate the XLSX.
         </p>
       </div>
     </form>

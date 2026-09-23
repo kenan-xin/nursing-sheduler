@@ -55,7 +55,16 @@ services:
       JOB_REDIS_URL: redis://redis:6379/0
       # Versioned key namespace: bump the trailing schema version on any
       # incompatible job-record change so old keys can never be misread.
-      JOB_REDIS_KEY_PREFIX: nurse_scheduling:jobs:v0
+      # T09 moved the single queue index to one index per job purpose and placed
+      # every key under a shared hash tag, so v0 keys are not readable by the
+      # current state machine; the version bump makes that explicit rather than
+      # silent. Jobs are transient computation state, so no in-flight work migrates.
+      JOB_REDIS_KEY_PREFIX: nurse_scheduling:jobs:v1
+      # Pending slots only ordinary work may be admitted into. With the backend's
+      # eight pending slots, ordinary admission succeeds below eight and diagnostic
+      # admission below seven, so an ordinary Optimize run is always still accepted
+      # while assistant diagnostics saturate the queue.
+      JOB_ORDINARY_RESERVED_SLOTS: ${JOB_ORDINARY_RESERVED_SLOTS:-1}
       # Forced-termination grace after a solver's native timeout. The watchdog
       # kills the supervised optimization child tree at `timeout + grace`. Defaults
       # to the backend's own 90s (config.py) — override via docker/.env only if
@@ -107,6 +116,17 @@ services:
       # is "1"/"true". Empty in production; `make verify-stream` sets it to expose
       # the durable-stream fixture for the assembled browser phase.
       NS_ENABLE_DEV_FIXTURES: ${NS_ENABLE_DEV_FIXTURES:-}
+      # Phase-1 AI runtime containment (T01): EXACTLY ONE web instance. This is a
+      # correctness bound, not a capacity knob — active CopilotKit run replay/abort
+      # state is process-local, so a second replica cannot serve connect/stop for a
+      # run it never started. `instrumentation.ts` refuses to boot on any other
+      # value. Do not add `deploy.replicas`/`scale` to this service. The Python
+      # optimizer scales independently under its own Redis claim fencing.
+      NS_WEB_REPLICAS: "1"
+      # Complete opt-out for CopilotKit runtime + Inspector telemetry. The web
+      # runtime also forces this in-process; setting it here makes the deployed
+      # contract legible without reading code.
+      COPILOTKIT_TELEMETRY_DISABLED: "true"
     networks:
       - ingress
       - app

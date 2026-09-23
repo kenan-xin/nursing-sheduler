@@ -1,0 +1,369 @@
+import { existsSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { describe, expect, it } from "vitest";
+import { ALL_NAV_ITEMS } from "@/components/shell/nav-config";
+import {
+  HARNESS_NO_PROTOTYPE,
+  PRODUCT_NO_CANONICAL_PROTOTYPE,
+  ROUTES_WITHOUT_CANONICAL_PROTOTYPE,
+  manifestInventory,
+  rowForRoute,
+  rowsForOwner,
+  V2_HARNESS_ROUTES,
+  V2_OWNERS,
+  V2_PRODUCT_ROUTES,
+  V2_RADIUS_CONTRACT,
+  V2_RADIUS_ROLES,
+  V2_READINESS_STRATEGIES,
+  V2_ROLE_CONTRACT,
+  V2_SEED_KEYS,
+  V2_SELECTORS,
+  V2_STYLE_OWNER_FILES,
+  V2_SURFACE_MATRIX,
+  V2_SURFACE_ROLES,
+} from "./v2-surface-matrix";
+
+// The manifest is the thing every other F4 artefact trusts, and it is frozen for
+// the rest of the epic — nine parallel tickets and G1 read it and none of them
+// may edit it. These are the properties that make that safe: it is COMPLETE (no
+// route missing), CONSISTENT with the real route registry (no descriptor that
+// contradicts the shipped app), and DISJOINT (no two tickets owning one file).
+//
+// WHAT CHANGED (custom-AST ticket 3). This file used to READ nine sibling test/support
+// sources and regex them for skip annotations. It no longer reads any source. That
+// guarantee is now owned by the `frozen-v2-conditional-registration` ast-grep rule, scoped
+// to exactly those nine paths.
+//
+// Oxlint was the expected owner and is NOT sufficient here, which a probe established
+// rather than assumed: `vitest/no-disabled-tests`, `vitest/no-focused-tests` and
+// `vitest/no-commented-out-tests` are active repository-wide at `error` and do own test
+// hygiene everywhere they apply -- but they do not fire at all when `test` comes from
+// `@playwright/test`, and three of the nine files are Playwright specs. Oxlint also has no
+// rule for `skipIf`/`runIf`, which are legitimate elsewhere in this repository and forbidden
+// only in these nine. So the rule owns the whole nine-file contract, Oxlint remains the
+// repository-wide default for everything else, and the overlap on the single Vitest file
+// among the nine is deliberate.
+//
+// What remains below is `existsSync` only: prototype `.html` artifacts and Next.js
+// `page.tsx` presence. Neither reads a byte of any file.
+
+const REPO_ROOT = resolve(__dirname, "..", "..", "..");
+
+describe("inventory", () => {
+  // 13 v2 re-skin routes, plus `/roster` (R8, the G4 closure) and `/settings`
+  // (T04, the optional AI assistant's only discovery surface).
+  //
+  // INTEGRATION: both sides independently reached 18 from a shared base of 17 — main
+  // by adding `/roster`, the assistant branch by adding `/settings`. Merged, both rows
+  // exist, so the manifest is 19 and the product count is 15. A textual merge would
+  // have silently kept 18 and lost one of them.
+  it("holds exactly 15 product routes and 4 harness routes", () => {
+    expect(V2_PRODUCT_ROUTES).toHaveLength(15);
+    expect(V2_HARNESS_ROUTES).toHaveLength(4);
+    expect(V2_SURFACE_MATRIX).toHaveLength(19);
+  });
+
+  it("gives every route exactly one row", () => {
+    const routes = V2_SURFACE_MATRIX.map((r) => r.route);
+    expect(new Set(routes).size).toBe(routes.length);
+    for (const route of routes) expect(rowForRoute(route)?.route).toBe(route);
+  });
+
+  it("assigns every row to a declared owner, and leaves no owner idle", () => {
+    for (const row of V2_SURFACE_MATRIX) {
+      expect(V2_OWNERS, `${row.route}`).toContain(row.owner);
+    }
+    for (const owner of V2_OWNERS) {
+      expect(rowsForOwner(owner).length, `${owner} owns no row`).toBeGreaterThan(0);
+    }
+  });
+
+  it("keeps R2a, R2b and R2c distinct", () => {
+    expect(rowsForOwner("R2a").map((r) => r.route)).toEqual(["/dates"]);
+    expect(rowsForOwner("R2b").map((r) => r.route)).toEqual(["/people"]);
+    expect(rowsForOwner("R2c").map((r) => r.route)).toEqual(["/shift-types"]);
+  });
+
+  it("gives the foundation exactly the design-system reference", () => {
+    expect(rowsForOwner("foundation").map((r) => r.route)).toEqual(["/design-system"]);
+  });
+
+  it("gives R6 its four rows — one product route plus three harnesses", () => {
+    // The ticket's selector proof asserts this count from the outside; asserting
+    // it here too means a manifest edit fails immediately rather than at the
+    // moment someone runs the proof command.
+    const rows = rowsForOwner("R6");
+    expect(rows).toHaveLength(4);
+    expect(rows.filter((r) => r.kind === "product")).toHaveLength(1);
+    expect(rows.filter((r) => r.kind === "harness")).toHaveLength(3);
+  });
+
+  it("the R4 family is the five raw Card Editor routes", () => {
+    expect(rowsForOwner("R4").map((r) => r.route)).toEqual([
+      "/shift-type-requirements",
+      "/shift-type-successions",
+      "/shift-counts",
+      "/shift-affinities",
+      "/shift-type-coverings",
+    ]);
+  });
+
+  it("excludes the features the adoption record put outside this epic", () => {
+    // Export Layout, the deprecated `/schedule` alias and the gated AI destination
+    // have no shipped screen. A row for one would be a route ticket verifying
+    // something that is not there. `/roster` IS shipped (R8); the legacy alias
+    // `/schedule` is not — leaving both in the matrix would duplicate the
+    // destination.
+    const routes = V2_SURFACE_MATRIX.map((r) => r.route);
+    for (const absent of ["/export-layout", "/schedule", "/ai", "/assistant"]) {
+      expect(routes).not.toContain(absent);
+    }
+  });
+});
+
+describe("consistency with the shipped route registry", () => {
+  it("the product rows are exactly the app's 14 navigable routes", () => {
+    // Read from `nav-config` rather than a second hand-written list: a route
+    // added to the product must fail HERE, not go silently unverified.
+    expect([...V2_PRODUCT_ROUTES].sort()).toEqual(ALL_NAV_ITEMS.map((i) => i.path).sort());
+  });
+
+  it("every Advanced-only route declares readiness.mode = advanced", () => {
+    // A direct visit to an `advancedOnly` route is redirected to Home by
+    // `useRouteValidityGate` once the stored preference adopts. A row that
+    // forgot this would verify Home's DOM while believing it was on the editor.
+    for (const item of ALL_NAV_ITEMS) {
+      const row = rowForRoute(item.path);
+      expect(row, item.path).toBeDefined();
+      expect(row!.readiness.mode, `${item.path} readiness.mode`).toBe(
+        item.advancedOnly ? "advanced" : "guided",
+      );
+    }
+  });
+
+  it("every row's route resolves to a real Next.js page on disk", () => {
+    const webRoot = resolve(__dirname, "..", "..");
+    for (const row of V2_SURFACE_MATRIX) {
+      const segment = row.route === "/" ? "" : row.route.slice(1);
+      const candidates = [
+        join(webRoot, "app", "(app)", segment, "page.tsx"),
+        join(webRoot, "app", segment, "page.tsx"),
+      ];
+      expect(
+        candidates.some(existsSync),
+        `${row.route} has no page.tsx at ${candidates.join(" or ")}`,
+      ).toBe(true);
+    }
+  });
+
+  it("R8 owns exactly one product row — the /roster route", () => {
+    // The G4 closure split the surface ownership: R8 is the dedicated roster
+    // route + its viewer, R6 keeps Optimize. Pinning the rows here so a future
+    // edit that adds a second row under R8 fails here, not as an off-by-one
+    // elsewhere.
+    expect(rowsForOwner("R8").map((r) => r.route)).toEqual(["/roster"]);
+  });
+});
+
+describe("prototypes", () => {
+  it("every product row names a canonical prototype that exists", () => {
+    for (const row of V2_SURFACE_MATRIX.filter((r) => r.kind === "product")) {
+      expect(row.prototype, row.route).not.toBe(HARNESS_NO_PROTOTYPE);
+      if (row.prototype === PRODUCT_NO_CANONICAL_PROTOTYPE) continue;
+      expect(existsSync(join(REPO_ROOT, row.prototype)), `${row.route} → ${row.prototype}`).toBe(
+        true,
+      );
+    }
+  });
+
+  it("lets only the listed routes declare that they have no canonical prototype", () => {
+    // The escape hatch cannot spread: a new screen that skips visual parity has to
+    // be named here, and naming it is a reviewable act.
+    const declared = V2_SURFACE_MATRIX.filter(
+      (row) => row.prototype === PRODUCT_NO_CANONICAL_PROTOTYPE,
+    ).map((row) => row.route);
+
+    expect(declared).toEqual([...ROUTES_WITHOUT_CANONICAL_PROTOTYPE]);
+  });
+
+  it("every harness row records that it has no product prototype", () => {
+    for (const row of V2_SURFACE_MATRIX.filter((r) => r.kind === "harness")) {
+      expect(row.prototype, row.route).toBe(HARNESS_NO_PROTOTYPE);
+    }
+  });
+
+  it("names no prototype for a screen this epic deliberately excludes", () => {
+    // Export Layout and the gated AI destination have no shipped screen — a
+    // prototype name for either would be a route ticket verifying something
+    // that is not there. `ScreenSchedule.dc.html` is the prototype the
+    // dedicated /roster route (R8) IS judged against, so it is no longer in
+    // the exclusion list.
+    const named = V2_SURFACE_MATRIX.map((r) => r.prototype);
+    for (const excluded of ["ScreenExport", "ScreenAppendixAI"]) {
+      expect(named.filter((p) => p.includes(excluded))).toEqual([]);
+    }
+  });
+});
+
+describe("seed and readiness descriptors", () => {
+  it("every row names a declared seed strategy", () => {
+    for (const row of V2_SURFACE_MATRIX) {
+      expect(V2_SEED_KEYS, row.route).toContain(row.seed);
+    }
+  });
+
+  it("every declared seed strategy is actually used", () => {
+    // A named strategy nobody selects is a descriptor that has never been run.
+    const used = new Set(V2_SURFACE_MATRIX.map((r) => r.seed));
+    for (const key of V2_SEED_KEYS) expect([...used], `seed "${key}" is unused`).toContain(key);
+  });
+
+  it("every readiness descriptor is complete", () => {
+    for (const row of V2_SURFACE_MATRIX) {
+      const { strategy, marker, mode, storeSeam } = row.readiness;
+      expect(V2_READINESS_STRATEGIES, row.route).toContain(strategy);
+      expect(marker.trim(), `${row.route} marker`).not.toBe("");
+      expect(["guided", "advanced", null], `${row.route} mode`).toContain(mode);
+      // The two are the same fact stated twice, so they must not disagree: only a
+      // row inside the `(app)` group has a hydration gate, a mode policy and the
+      // store seam at all.
+      expect(storeSeam, `${row.route} storeSeam`).toBe(strategy === "app-shell");
+      expect(mode !== null, `${row.route} mode presence`).toBe(strategy === "app-shell");
+    }
+  });
+
+  it("a row that cannot reach the store seam seeds nothing", () => {
+    for (const row of V2_SURFACE_MATRIX) {
+      if (row.readiness.storeSeam) continue;
+      expect(["empty", "harness-self-seeded"], `${row.route} seed`).toContain(row.seed);
+    }
+  });
+});
+
+describe("semantic checks", () => {
+  it("every check declares at least a role or a radius", () => {
+    for (const row of V2_SURFACE_MATRIX) {
+      for (const check of row.semanticChecks) {
+        expect(
+          check.role !== undefined || check.radius !== undefined,
+          `${row.route} → ${check.label} asserts nothing`,
+        ).toBe(true);
+        expect(check.selector.trim(), `${row.route} → ${check.label}`).not.toBe("");
+        if (check.role) expect(V2_SURFACE_ROLES).toContain(check.role);
+        if (check.radius) expect(V2_RADIUS_ROLES).toContain(check.radius);
+      }
+    }
+  });
+
+  it("labels are unique within a row, so an observation maps to one check", () => {
+    for (const row of V2_SURFACE_MATRIX) {
+      const labels = row.semanticChecks.map((c) => c.label);
+      expect(new Set(labels).size, `${row.route} has duplicate check labels`).toBe(labels.length);
+    }
+  });
+
+  it("every row declares at least one check", () => {
+    for (const row of V2_SURFACE_MATRIX) {
+      expect(row.semanticChecks.length, `${row.route} declares no semantic check`).toBeGreaterThan(
+        0,
+      );
+    }
+  });
+
+  it("the foundation row proves every surface role that has a specimen", () => {
+    const foundation = rowForRoute("/design-system")!;
+    const roles = new Set(foundation.semanticChecks.map((c) => c.role).filter(Boolean));
+    // `drawer` is the mobile navigation plane and belongs to R1's shell, so it
+    // has no specimen on the reference page — every other role does.
+    for (const role of V2_SURFACE_ROLES) {
+      if (role === "drawer") continue;
+      expect([...roles], `role "${role}" has no foundation specimen check`).toContain(role);
+    }
+  });
+
+  it("the foundation row proves every radius role", () => {
+    const foundation = rowForRoute("/design-system")!;
+    const radii = new Set(foundation.semanticChecks.map((c) => c.radius).filter(Boolean));
+    for (const role of V2_RADIUS_ROLES) {
+      expect([...radii], `radius role "${role}" is unproven`).toContain(role);
+    }
+  });
+});
+
+describe("role and radius contracts", () => {
+  it("covers every role exactly once", () => {
+    expect(Object.keys(V2_ROLE_CONTRACT).sort()).toEqual([...V2_SURFACE_ROLES].sort());
+  });
+
+  it("never puts an outer shadow on a well or an inset one on a raised surface", () => {
+    // DESIGN.md §4 rule 1, encoded rather than restated in prose.
+    expect(V2_ROLE_CONTRACT.well.elevation).toBe("inset");
+    expect(V2_ROLE_CONTRACT.raised.elevation).toBe("outer");
+    expect(V2_ROLE_CONTRACT.band.elevation).toBe("none");
+    expect(V2_ROLE_CONTRACT.zebra.elevation).toBe("none");
+    expect(V2_ROLE_CONTRACT.page.elevation).toBe("none");
+  });
+
+  it("reserves --panel for bands and true insets, never for zebra", () => {
+    expect(V2_ROLE_CONTRACT.band.tone).toBe("--panel");
+    expect(V2_ROLE_CONTRACT.well.tone).toBe("--panel");
+    expect(V2_ROLE_CONTRACT.zebra.tone).toBe("--panel-alt");
+  });
+
+  it("pins the absolute radius values — never multiplied by the 0.9 baseline", () => {
+    expect(V2_RADIUS_CONTRACT).toEqual({
+      card: "16px",
+      control: "12px",
+      chip: "9px",
+      pill: "999px",
+      square: "0px",
+    });
+  });
+});
+
+describe("static file ownership", () => {
+  it("declares a pattern set for every owner", () => {
+    expect(Object.keys(V2_STYLE_OWNER_FILES).sort()).toEqual([...V2_OWNERS].sort());
+    for (const owner of V2_OWNERS) {
+      expect(V2_STYLE_OWNER_FILES[owner].length, `${owner} owns no source`).toBeGreaterThan(0);
+    }
+  });
+
+  it("repeats no pattern across owners", () => {
+    const all = V2_OWNERS.flatMap((o) => V2_STYLE_OWNER_FILES[o]);
+    const duplicates = all.filter((p, i) => all.indexOf(p) !== i);
+    expect(duplicates, `patterns claimed by two owners: ${duplicates.join(", ")}`).toEqual([]);
+  });
+});
+
+describe("immutability", () => {
+  it("is frozen through rows, descriptors, checks and exceptions", () => {
+    expect(Object.isFrozen(V2_SURFACE_MATRIX)).toBe(true);
+    for (const row of V2_SURFACE_MATRIX) {
+      expect(Object.isFrozen(row), row.route).toBe(true);
+      expect(Object.isFrozen(row.readiness), row.route).toBe(true);
+      expect(Object.isFrozen(row.semanticChecks), row.route).toBe(true);
+      expect(Object.isFrozen(row.axeExceptions), row.route).toBe(true);
+      for (const check of row.semanticChecks) expect(Object.isFrozen(check)).toBe(true);
+    }
+  });
+
+  it("refuses an in-place mutation from a spec", () => {
+    expect(() => {
+      (V2_SURFACE_MATRIX[0] as { route: string }).route = "/hijacked";
+    }).toThrow();
+    expect(V2_SURFACE_MATRIX[0].route).toBe("/design-system");
+  });
+});
+
+describe("diagnostics", () => {
+  it("the inventory string names every owner and every route", () => {
+    const inventory = manifestInventory();
+    for (const owner of V2_OWNERS) expect(inventory).toContain(owner);
+    for (const row of V2_SURFACE_MATRIX) expect(inventory).toContain(row.route);
+  });
+
+  it("the selector vocabulary is the owners plus `all`", () => {
+    expect([...V2_SELECTORS]).toEqual([...V2_OWNERS, "all"]);
+  });
+});

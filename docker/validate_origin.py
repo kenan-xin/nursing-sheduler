@@ -43,13 +43,23 @@ import re
 import sys
 
 # This validator uses PEP 604 unions (`str | None`) that are evaluated at import
-# time, so it requires Python 3.10+. Fail with a clear message rather than a cryptic
-# `TypeError: unsupported operand type(s) for |` on a stale interpreter. Host/CI must
-# provide 3.10+ (see repo `.mise.toml`, matching docker/Dockerfile.backend python:3.12).
+# time, so the SCRIPT itself cannot execute below Python 3.10. Fail fast with a
+# clear, layered message rather than a cryptic
+# `TypeError: unsupported operand type(s) for |` on a stale interpreter. The
+# guard is a language-syntax minimum, not the project requirement — the
+# project support floor and CI pin is Python 3.12.13 (see repo `.mise.toml`,
+# matching docker/Dockerfile.backend python:3.12), so any interpreter in the
+# 3.10..3.11 range would still be wrong for this project even though it
+# clears this script's PEP 604 guard.
 if sys.version_info < (3, 10):
     raise SystemExit(
-        f"validate_origin.py requires Python 3.10+ (found "
-        f"{sys.version_info.major}.{sys.version_info.minor}); activate mise or use python 3.12"
+        f"validate_origin.py cannot execute on Python "
+        f"{sys.version_info.major}.{sys.version_info.minor}: this script uses "
+        f"PEP 604 unions (`str | None`) and so requires the Python 3.10+ "
+        f"language syntax. This script's syntax minimum is NOT the project "
+        f"version — the project requires Python 3.12 (pinned to 3.12.13 in "
+        f".mise.toml, matching docker/Dockerfile.backend). Activate mise or "
+        f"set PYTHON=<absolute path to a Python 3.12+ interpreter>."
     )
 
 

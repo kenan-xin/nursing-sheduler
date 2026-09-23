@@ -1,0 +1,51 @@
+id: untokened-shadow-utility
+snapshots:
+  ? |
+    const cls = "dark:shadow-2xl";
+  : labels:
+      - source: dark:shadow-2xl
+        style: primary
+        start: 13
+        end: 28
+  ? |
+    const cls = "data-[state=open]:shadow-md";
+  : labels:
+      - source: data-[state=open]:shadow-md
+        style: primary
+        start: 13
+        end: 40
+  ? |
+    const cls = "group-data-[checked]/switch:shadow-lg";
+  : labels:
+      - source: group-data-[checked]/switch:shadow-lg
+        style: primary
+        start: 13
+        end: 50
+  ? |
+    const cls = "shadow-[inset_0_2px_0_var(--color-brand)]";
+  : labels:
+      - source: shadow-[inset_0_2px_0_var(--color-brand)]
+        style: primary
+        start: 13
+        end: 54
+  ? |
+    const cls = "shadow-[var(--sh-1)]";
+  : labels:
+      - source: shadow-[var(--sh-1)]
+        style: primary
+        start: 13
+        end: 33
+  ? |
+    const cls = "shadow-md";
+  : labels:
+      - source: shadow-md
+        style: primary
+        start: 13
+        end: 22
+  ? |
+    const cls = "shadow-sm p-2";
+  : labels:
+      - source: shadow-sm p-2
+        style: primary
+        start: 13
+        end: 26

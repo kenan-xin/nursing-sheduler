@@ -1,0 +1,18 @@
+id: test-module-loader-call-tsx
+snapshots:
+  ? |
+    const require = createRequire(import.meta.url);
+    const el = <div />;
+  : labels:
+      - source: createRequire(import.meta.url)
+        style: primary
+        start: 16
+        end: 46
+  ? |
+    const require = mod.createRequire(import.meta.url);
+    const el = <div />;
+  : labels:
+      - source: mod.createRequire(import.meta.url)
+        style: primary
+        start: 16
+        end: 50

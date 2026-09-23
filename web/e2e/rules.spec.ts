@@ -23,41 +23,87 @@ test.beforeEach(async ({ page }) => {
 
 type NsWindow = {
   __nsStore: {
-    scenario: {
-      getState: () => Record<string, unknown> & {
-        cardsByKind: Record<string, { uid: string; disabled?: boolean; description?: string }[]>;
-        maxOneShiftPerDay?: { description?: string };
-        mutateScenario: (patch: Record<string, unknown>) => void;
-      };
-      temporal: { getState: () => { pastStates: unknown[]; undo: () => void } };
+    /** The repository command bus — the product's only durable write path. */
+    commands: {
+      mutate(patch: Record<string, unknown>): Promise<{ ok: boolean }>;
+      recordBackup(): Promise<{ ok: boolean }>;
+      undo(): Promise<{ ok: boolean }>;
+      redo(): Promise<{ ok: boolean }>;
+      takeover(): Promise<{ ok: boolean }>;
     };
+    drain(): Promise<void>;
+    historyDepth(): Promise<number>;
+    authority(): {
+      scenarioId: string | null;
+      documentRevision: number;
+      ownership: string;
+      canUndo: boolean;
+      canRedo: boolean;
+    };
+    scenario(): Record<string, unknown> & {
+      cardsByKind: Record<
+        string,
+        { uid: string; disabled?: boolean; description?: string; weight?: number }[]
+      >;
+      maxOneShiftPerDay?: { description?: string };
+    };
+    hot(): { hydrationStatus: string };
+    persistenceStatus: () => string;
   };
 };
 
+/** Bridge mounted AND authority bring-up resolved — a command before that has no
+ *  lease to present and is refused, so a seed would silently write nothing. */
 async function waitForStore(page: Page) {
-  await page.waitForFunction(() => Boolean((window as unknown as NsWindow).__nsStore));
+  await page.waitForFunction(() => {
+    const store = (window as unknown as NsWindow).__nsStore;
+    return Boolean(store) && store.authority().scenarioId !== null;
+  });
 }
 
+/** Wait for the guarded durable write queue to report settled. */
+async function waitForSaved(page: Page) {
+  await expect
+    .poll(
+      () => page.evaluate(() => (window as unknown as NsWindow).__nsStore.persistenceStatus()),
+      { timeout: 15_000 },
+    )
+    .toBe("saved");
+}
+
+/**
+ * Seed the durable store through a real tracked mutation, then WAIT FOR THE WRITE
+ * TO LAND. The wait is not optional: `persist` writes through an async guarded
+ * FIFO queue, so a `page.reload()` that follows a bare `mutateScenario` can
+ * outrun the write and rehydrate the older record — the seeded rows then simply
+ * never appear. That passes on an idle machine and fails under contention;
+ * reproduced at 3-4 failures in 61 runs at 16 workers, in tests that predate this
+ * ticket as well as its own.
+ */
 async function seed(page: Page, patch: Record<string, unknown>) {
   await waitForStore(page);
-  await page.evaluate((p) => {
-    (window as unknown as NsWindow).__nsStore.scenario.getState().mutateScenario(p);
+  await page.evaluate(async (p) => {
+    await (window as unknown as NsWindow).__nsStore.commands.mutate(p);
   }, patch);
+  await waitForSaved(page);
 }
 
+/** The COMMITTED projection — drained, so a read never outruns the command that wrote. */
 function storeState(page: Page) {
-  return page.evaluate(() => (window as unknown as NsWindow).__nsStore.scenario.getState());
+  return page.evaluate(async () => {
+    const store = (window as unknown as NsWindow).__nsStore;
+    await store.drain();
+    return store.scenario();
+  });
 }
 
 function pastCount(page: Page) {
-  return page.evaluate(
-    () => (window as unknown as NsWindow).__nsStore.scenario.temporal.getState().pastStates.length,
-  );
+  return page.evaluate(() => (window as unknown as NsWindow).__nsStore.historyDepth());
 }
 
 async function undo(page: Page) {
-  await page.evaluate(() => {
-    (window as unknown as NsWindow).__nsStore.scenario.temporal.getState().undo();
+  await page.evaluate(async () => {
+    await (window as unknown as NsWindow).__nsStore.commands.undo();
   });
 }
 
@@ -65,6 +111,13 @@ async function gotoReady(page: Page) {
   await page.goto("/rules");
   await waitForStore(page);
   await expect(page.getByTestId("screen")).toHaveAttribute("data-screen", "rules");
+  // Wait for the hydration COMMIT, not just the store's existence. The built-in
+  // row is derived unconditionally, so its presence is the marker that the
+  // rehydrate has finished; seeding before that point is silently overwritten by
+  // by it (the known non-blocking `ii7.10.4` race). Without this the specs below
+  // pass on an idle machine and fail under contention — reproduced at 3 failures
+  // in 61 runs at 16 workers, including two tests that predate this ticket.
+  await page.getByTestId("rule-row-builtin:max-one-shift-per-day").waitFor();
 }
 
 test.describe("Rules screen — direct route load", () => {
@@ -103,6 +156,12 @@ test.describe("Rules screen — Advanced -> Rules -> source-record mutation roun
     await waitForStore(page);
 
     await expect(page.getByText("Day cap")).toBeVisible();
+    const seeded = (await storeState(page)) as unknown as {
+      cardsByKind: { requirements: { uid: string; requiredNumPeople: number }[] };
+    };
+    const seededR1 = seeded.cardsByKind.requirements.find((r) => r.uid === "r1");
+    expect(seededR1).toBeDefined();
+    expect(seededR1?.requiredNumPeople).toBe(2);
 
     const before = await pastCount(page);
     await page.getByTestId("rule-toggle-requirements:r1").click();
@@ -278,6 +337,150 @@ test.describe("Rules screen — rename round trip", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// R3 — the v2 visual system, where it is route-specific.
+//
+// The F4 matrix already runs the universal battery over /rules in light and dark
+// at both pointer densities. What it never does is DRIVE the screen: it loads the
+// route and judges what is on it, so a surface or control that only exists once a
+// rule's Adjust panel or rename editor is open is outside its reach. Those are
+// this file's, and they are asserted on RESOLVED style rather than class names —
+// `rules-screen.test.tsx` holds the authoring half.
+// ---------------------------------------------------------------------------
+
+/** Resolve a runtime token the way the surface recipe's consumers see it. */
+function token(page: Page, name: string) {
+  return page.evaluate((variable) => {
+    const probe = document.createElement("div");
+    probe.style.backgroundColor = `var(${variable})`;
+    document.body.appendChild(probe);
+    const value = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return value;
+  }, name);
+}
+
+function styleOf(page: Page, selector: string, properties: readonly string[]) {
+  return page.evaluate(
+    ([sel, props]) => {
+      const element = document.querySelector(sel as string);
+      if (!element) throw new Error(`no element matched ${sel}`);
+      const style = getComputedStyle(element);
+      return Object.fromEntries(
+        (props as string[]).map((p) => [p, style.getPropertyValue(p)]),
+      ) as Record<string, string>;
+    },
+    [selector, properties] as const,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The durable hard-weight regression (ii7.13.2).
+//
+// `+∞` / `−∞` are real Adjust actions here, and `JSON.stringify` has no
+// representation for a non-finite number — so before the shared codec landed,
+// clicking either wrote IndexedDB `null`, the next load's sanitizer rejected it,
+// and the whole app fell into "Stored data could not be loaded". The component
+// tests stop at the in-memory store and the finite round trip above never crosses
+// the serialization seam, so this is the only coverage that discriminates it —
+// which is why it drives the real controls, waits for the real write queue, and
+// reads IndexedDB directly rather than trusting the store it just wrote.
+// ---------------------------------------------------------------------------
+
+/**
+ * The weight as it ACTUALLY SITS in IndexedDB, read from the durable envelope
+ * rather than through any projection.
+ *
+ * T03 changed the durable representation, and this helper is where that shows.
+ * Pre-cutover the record was a JSON STRING written by `JSON.stringify`, whose only
+ * representation for a non-finite number is `null` — which is exactly the bug this
+ * suite exists for, and why the legacy path needed a `$nsNonFinite` tag. The
+ * repository stores STRUCTURED values, and IndexedDB's structured clone carries
+ * ±Infinity natively, so the durable value is a real number and can be asserted as
+ * one. The product claim is unchanged and still the point: a hard weight survives a
+ * durable reload with its exact sign, and does not come back as `null`.
+ */
+function readDurableSuccessionWeight(page: Page): Promise<{
+  raw: unknown;
+  text: string;
+  isNumber: boolean;
+  isNull: boolean;
+} | null> {
+  return page.evaluate(async () => {
+    const scenarioId = (window as unknown as NsWindow).__nsStore.authority().scenarioId;
+    if (scenarioId === null) return null;
+    const request = indexedDB.open("nurse-scheduler");
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    try {
+      if (!db.objectStoreNames.contains("scenarioEnvelopes")) return null;
+      const envelope = await new Promise<
+        { scenario?: { cardsByKind?: { successions?: { weight?: unknown }[] } } } | undefined
+      >((resolve, reject) => {
+        const get = db
+          .transaction("scenarioEnvelopes", "readonly")
+          .objectStore("scenarioEnvelopes")
+          .get(scenarioId);
+        get.onsuccess = () => resolve(get.result);
+        get.onerror = () => reject(get.error);
+      });
+      const weight = envelope?.scenario?.cardsByKind?.successions?.[0]?.weight;
+      return {
+        raw: weight,
+        text: String(weight),
+        isNumber: typeof weight === "number",
+        isNull: weight === null,
+      };
+    } finally {
+      db.close();
+    }
+  });
+}
+
+/**
+ * The COMMITTED succession weight, plus a string form so the sign is unambiguous.
+ * Drained: the ±∞ control's write is a queued repository command.
+ */
+function readSuccessionWeight(page: Page) {
+  return page.evaluate(async () => {
+    await (window as unknown as NsWindow).__nsStore.drain();
+    const card = (window as unknown as NsWindow).__nsStore.scenario().cardsByKind.successions[0];
+    return {
+      raw: card?.weight,
+      text: String(card?.weight),
+      isNumber: typeof card?.weight === "number",
+      finite: Number.isFinite(card?.weight),
+      hydration: (window as unknown as NsWindow).__nsStore.hot().hydrationStatus,
+    };
+  });
+}
+
+/** Seed exactly one adjustable requirement, then reload so it is durable. */
+async function seedOneRequirement(page: Page, extra: Record<string, unknown> = {}) {
+  await seed(page, {
+    cardsByKind: {
+      requirements: [
+        {
+          uid: "r1",
+          shiftType: "D",
+          requiredNumPeople: 2,
+          weight: -1,
+          description: "Day cap",
+          ...extra,
+        },
+      ],
+      successions: [],
+      counts: [],
+      affinities: [],
+      coverings: [],
+    },
+  });
+  await page.reload();
+  await waitForStore(page);
+}
+
 test.describe("Rules screen — responsive", () => {
   test("desktop width renders the header actions and category list without overflow", async ({
     page,
@@ -292,5 +495,232 @@ test.describe("Rules screen — responsive", () => {
     await gotoReady(page);
     await expect(page.getByTestId("rules-continue")).toBeVisible();
     await expect(page.getByTestId(/rule-row-builtin/)).toBeVisible();
+  });
+});
+
+test.describe("Rules screen — a signed hard weight survives a durable reload", () => {
+  for (const [label, control, expected] of [
+    ["−∞", "minus-inf", Number.NEGATIVE_INFINITY],
+    ["+∞", "plus-inf", Number.POSITIVE_INFINITY],
+  ] as const) {
+    test(`the real ${label} control persists its exact sign through IndexedDB`, async ({
+      page,
+    }) => {
+      // `gotoReady` has already waited for the hydration commit, so the seed
+      // below cannot be overwritten by the rehydrate.
+      await gotoReady(page);
+      await seed(page, {
+        rangeStart: "2026-02-01",
+        rangeEnd: "2026-02-28",
+        cardsByKind: {
+          requirements: [
+            { uid: "r1", shiftType: "D", requiredNumPeople: 2, weight: -1, description: "Day cap" },
+          ],
+          successions: [
+            { uid: "s1", person: ["P1"], pattern: ["N", "D"], weight: -2, description: "No N-D" },
+          ],
+          counts: [],
+          affinities: [],
+          coverings: [],
+        },
+      });
+
+      // Baseline: the FINITE weight is durable, so the assertions below isolate
+      // the non-finite case rather than a broken seed.
+      await waitForSaved(page);
+      expect(await readDurableSuccessionWeight(page)).toMatchObject({ raw: -2 });
+
+      await page.getByTestId("rule-adjust-toggle-successions:s1").click();
+      await page.getByTestId(`rule-adjust-${control}-successions:s1-weight`).click();
+
+      // In memory first — the control really did commit an infinity.
+      const live = await readSuccessionWeight(page);
+      expect(live.raw).toBe(expected);
+      expect(live.finite).toBe(false);
+
+      await waitForSaved(page);
+
+      // What actually reached IndexedDB. This is the assertion the old code
+      // failed: it stored `null` and lost the sign entirely.
+      const durable = await readDurableSuccessionWeight(page);
+      expect(durable).not.toBeNull();
+      expect(durable!.isNull).toBe(false);
+      expect(durable!.isNumber).toBe(true);
+      expect(durable!.raw).toBe(expected);
+      expect(durable!.text).toBe(expected > 0 ? "Infinity" : "-Infinity");
+
+      await page.reload();
+      await waitForStore(page);
+      await expect(page.getByTestId("screen")).toHaveAttribute("data-screen", "rules");
+      await page.getByTestId("rule-row-successions:s1").waitFor();
+
+      // Same number, same sign, and the app is usable rather than sitting on the
+      // destructive "Stored data could not be loaded" reset offer.
+      const restored = await readSuccessionWeight(page);
+      expect(restored.raw).toBe(expected);
+      expect(restored.text).toBe(expected > 0 ? "Infinity" : "-Infinity");
+      expect(restored.isNumber).toBe(true);
+      expect(restored.finite).toBe(false);
+      expect(restored.hydration).toBe("ready");
+
+      // The rest of the scenario came back with it.
+      const state = await storeState(page);
+      expect(state.rangeStart).toBe("2026-02-01");
+      expect(state.cardsByKind.requirements[0].description).toBe("Day cap");
+      await expect(page.getByText("Day cap")).toBeVisible();
+
+      // And it is still editable: reopening Adjust shows the hard weight legibly
+      // rather than an empty box, so the scenario is usable, not merely loaded.
+      await page.getByTestId("rule-adjust-toggle-successions:s1").click();
+      await expect(page.getByTestId("rule-adjust-input-successions:s1-weight")).toHaveValue(
+        expected > 0 ? "Infinity" : "-Infinity",
+      );
+    });
+  }
+});
+
+test.describe("Rules screen — v2 surface ladder and geometry", () => {
+  test("a category list is one resting L1 card whose rows and dividers stay square", async ({
+    page,
+  }) => {
+    await gotoReady(page);
+    await seedOneRequirement(page);
+
+    const surface = await token(page, "--surface");
+    const card = await styleOf(page, '[data-testid="rule-category-Staffing levels"]', [
+      "background-color",
+      "border-top-left-radius",
+      "box-shadow",
+      "overflow-x",
+    ]);
+    expect(card["background-color"]).toBe(surface);
+    expect(card["border-top-left-radius"]).toBe("16px");
+    expect(card["box-shadow"]).not.toBe("none");
+    expect(card["box-shadow"]).not.toContain("inset");
+    // The clip is what lets the square rows inside end in a rounded card.
+    expect(card["overflow-x"]).toBe("hidden");
+
+    const row = await styleOf(page, '[data-testid="rule-row-requirements:r1"]', [
+      "border-top-left-radius",
+      "border-bottom-right-radius",
+      "opacity",
+    ]);
+    expect(row["border-top-left-radius"]).toBe("0px");
+    expect(row["border-bottom-right-radius"]).toBe("0px");
+    expect(row.opacity).toBe("1");
+  });
+
+  test("a switched-off row recedes to the --panel tone at full opacity", async ({ page }) => {
+    await gotoReady(page);
+    await seedOneRequirement(page, { disabled: true });
+
+    const panel = await token(page, "--panel");
+    const row = await styleOf(page, '[data-testid="rule-row-requirements:r1"]', [
+      "background-color",
+      "opacity",
+    ]);
+    expect(row["background-color"]).toBe(panel);
+    // Tone-first, so every label in the row keeps the contrast it cleared.
+    expect(row.opacity).toBe("1");
+  });
+
+  test("the advanced-records strip is an inset well, never an outer elevation", async ({
+    page,
+  }) => {
+    await gotoReady(page);
+    await seedOneRequirement(page);
+
+    const panel = await token(page, "--panel");
+    const strip = await styleOf(page, '[data-slot="surface"][data-level="well"]', [
+      "background-color",
+      "border-top-left-radius",
+      "box-shadow",
+    ]);
+    expect(strip["background-color"]).toBe(panel);
+    expect(strip["border-top-left-radius"]).toBe("12px");
+    expect(strip["box-shadow"]).toContain("inset");
+  });
+
+  test("an open adjustment band is a flat square --panel band with a dashed top edge", async ({
+    page,
+  }) => {
+    await gotoReady(page);
+    await seedOneRequirement(page);
+    await page.getByTestId("rule-adjust-toggle-requirements:r1").click();
+
+    const panel = await token(page, "--panel");
+    const band = await styleOf(page, '[data-testid="rule-adjust-panel-requirements:r1"]', [
+      "background-color",
+      "border-top-left-radius",
+      "border-top-style",
+      "box-shadow",
+    ]);
+    expect(band["background-color"]).toBe(panel);
+    // A full-bleed band is square and flat (DESIGN.md §4 rule 2).
+    expect(band["border-top-left-radius"]).toBe("0px");
+    expect(band["border-top-style"]).toBe("dashed");
+    expect(band["box-shadow"]).toBe("none");
+  });
+});
+
+test.describe("Rules screen — coarse-pointer controls behind an interaction", () => {
+  // The matrix's touch project measures the row as it LOADS. The controls below
+  // only exist after a click, so nothing else in the epic measures them.
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+
+  test("every control revealed by Adjust and Rename is a real 44px target", async ({ page }) => {
+    await gotoReady(page);
+    expect(
+      await page.evaluate(
+        () => matchMedia("(pointer: coarse)").matches && navigator.maxTouchPoints >= 1,
+      ),
+      "this context must actually be coarse-pointer, or the measurements below prove nothing",
+    ).toBe(true);
+
+    await seed(page, {
+      cardsByKind: {
+        requirements: [],
+        successions: [
+          { uid: "s1", person: ["P1"], pattern: ["N", "D"], weight: -2, description: "No N→D" },
+        ],
+        counts: [],
+        affinities: [],
+        coverings: [],
+      },
+    });
+    await page.reload();
+    await waitForStore(page);
+
+    /** Both axes: buttons and icon controls own their width as well as height. */
+    async function expectRealTarget(testId: string) {
+      const box = await page.getByTestId(testId).boundingBox();
+      expect(box, `${testId} has no box`).not.toBeNull();
+      expect(Math.round(box!.width), `${testId} width`).toBeGreaterThanOrEqual(44);
+      expect(Math.round(box!.height), `${testId} height`).toBeGreaterThanOrEqual(44);
+    }
+
+    // The two inline text affordances, which carry the floor explicitly rather
+    // than through a Button variant.
+    await expectRealTarget("rule-rename-successions:s1");
+    await expectRealTarget("rule-open-advanced-successions:s1");
+
+    await page.getByTestId("rule-adjust-toggle-successions:s1").click();
+    for (const testId of [
+      "rule-adjust-plus-inf-successions:s1-weight",
+      "rule-adjust-minus-inf-successions:s1-weight",
+      "rule-adjust-done-successions:s1",
+    ]) {
+      await expectRealTarget(testId);
+    }
+
+    // Renaming REPLACES the title row with its editor, so its controls have to be
+    // measured while that editor is the thing on screen.
+    await page.getByTestId("rule-rename-successions:s1").click();
+    await expectRealTarget("rule-rename-save-successions:s1");
+    await expectRealTarget("rule-rename-cancel-successions:s1");
+
+    // The field is a height-only claim: it stretches to its row, not to 44px wide.
+    const field = await page.getByTestId("rule-rename-input-successions:s1").boundingBox();
+    expect(Math.round(field!.height)).toBeGreaterThanOrEqual(44);
   });
 });

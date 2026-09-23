@@ -8,9 +8,10 @@
 // terminal cleanup actions deterministically — with NO controller, transport, or
 // direct stream. The route is gated off in production by `page.tsx`.
 
+import { Surface, surfaceVariants } from "@/components/ui/surface";
+import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { ReadinessBanner } from "@/components/optimize/readiness-banner";
-import { RecoveryNotice } from "@/components/optimize/recovery-notice";
 import { RunEventLog } from "@/components/optimize/run-event-log";
 import { RunOptionsForm } from "@/components/optimize/run-options-form";
 import { RunStatusPanel } from "@/components/optimize/run-status-panel";
@@ -36,6 +37,7 @@ function serverInfo(over: Partial<OptimizeServerInfo>): OptimizeServerInfo {
     backendVersion: "1.0.0",
     clientVersion: "1.0.0",
     versionTier: "identical",
+    semanticProfile: null,
     unavailableReason: null,
     recheck: noop,
     ...over,
@@ -45,12 +47,8 @@ function serverInfo(over: Partial<OptimizeServerInfo>): OptimizeServerInfo {
 const statusHandlers = {
   onCancel: noop,
   onFinishNow: noop,
-  onResubmit: noop,
-  onDismiss: noop,
   onDownloadArtifact: noop,
   onDownloadAgain: noop,
-  onRetryCleanup: noop,
-  onAbandonCleanup: noop,
 };
 
 const logEntry = (over: Partial<RunLogEntry>): RunLogEntry => ({
@@ -61,6 +59,7 @@ const logEntry = (over: Partial<RunLogEntry>): RunLogEntry => ({
   cursor: null,
   payload: null,
   detail: null,
+  detailKind: null,
   elapsedSeconds: null,
   occurredAt: null,
   eventTime: 1_700_000_000_000,
@@ -72,10 +71,19 @@ const runningView = view({
   jobId: "opt_1",
   latestScore: 12,
   controls: { cancellable: true, earlyCompletionAvailable: true },
+  // The REAL solver source the backend emits on a progress frame. A bare `"solver"`
+  // would let the tooltip's source assertion pass without ever rendering a machine
+  // identifier, which is the value §3 actually reserves the mono face for.
   progress: [
-    { source: "solver", currentBestScore: 8, elapsedSeconds: 2, solutionIndex: 1, commentCount: 0 },
     {
-      source: "solver",
+      source: "ortools/cp-sat:solution-callback",
+      currentBestScore: 8,
+      elapsedSeconds: 2,
+      solutionIndex: 1,
+      commentCount: 0,
+    },
+    {
+      source: "ortools/cp-sat:solution-callback",
       currentBestScore: 12,
       elapsedSeconds: 5,
       solutionIndex: 2,
@@ -129,7 +137,6 @@ const workerLostView = view({
   lifecycle: "failed",
   jobId: "opt_1",
   error: { source: "job", code: "worker_lost", message: "Worker lost." },
-  resubmittable: true,
 });
 
 const readiness = deriveOptimizeReadiness({
@@ -140,23 +147,39 @@ const readiness = deriveOptimizeReadiness({
   shiftGroups: [],
 });
 
+/** Same L1 card + hairline head band as the route's own `Section` (R6 v2). */
 function Panel({ id, title, children }: { id: string; title: string; children: React.ReactNode }) {
   return (
-    <section data-testid={id} className="border border-line bg-surface p-5">
-      <h2 className="mb-4 font-heading text-cardhead text-ink">{title}</h2>
-      {children}
+    <section
+      data-testid={id}
+      className={cn(
+        surfaceVariants({ role: "surface", geometry: "card" }),
+        // No `overflow-hidden` — see the route's own `Section`.
+        "flex flex-col",
+      )}
+    >
+      <div className="border-b border-line2 px-5 py-4">
+        <h2 className="font-heading text-cardhead font-semibold tracking-[-0.015em] text-ink">
+          {title}
+        </h2>
+      </div>
+      <div className="p-5">{children}</div>
     </section>
   );
 }
 
 export default function OptimizeScreenFixtureClient() {
   return (
-    <div
+    <Surface
+      level="page"
+      geometry="square"
       data-testid="optimize-fixture"
       className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-5 py-8"
     >
       <header className="flex items-center justify-between gap-4">
-        <h1 className="font-heading text-title text-ink">Optimize screen fixture</h1>
+        <h1 className="font-heading text-title font-semibold tracking-[-0.015em] text-ink">
+          Optimise screen fixture
+        </h1>
         <ThemeToggle />
       </header>
 
@@ -171,6 +194,12 @@ export default function OptimizeScreenFixtureClient() {
         <ServerIdentity
           info={serverInfo({ versionTier: "incompatible", backendVersion: "9.9.9" })}
         />
+      </Panel>
+      {/* The quiet informational compatibility tier — the one neutral `info`
+          callout state on this screen. It was missing from the harness, so the
+          neutral well had no deterministic browser coverage at all. */}
+      <Panel id="fx-server-note" title="Server identity — compatibility note">
+        <ServerIdentity info={serverInfo({ versionTier: "compatible", backendVersion: "1.0.1" })} />
       </Panel>
       <Panel id="fx-server-offline" title="Server identity — offline">
         <ServerIdentity
@@ -200,7 +229,6 @@ export default function OptimizeScreenFixtureClient() {
         <RunStatusPanel
           view={runningView}
           submitting={false}
-          cleanupPhase="idle"
           canDownloadAgain={false}
           downloadAgainFilename={null}
           {...statusHandlers}
@@ -211,7 +239,6 @@ export default function OptimizeScreenFixtureClient() {
         <RunStatusPanel
           view={completedView}
           submitting={false}
-          cleanupPhase="idle"
           canDownloadAgain
           downloadAgainFilename="schedule.xlsx"
           {...statusHandlers}
@@ -222,7 +249,6 @@ export default function OptimizeScreenFixtureClient() {
         <RunStatusPanel
           view={noArtifactView}
           submitting={false}
-          cleanupPhase="idle"
           canDownloadAgain={false}
           downloadAgainFilename={null}
           {...statusHandlers}
@@ -233,78 +259,76 @@ export default function OptimizeScreenFixtureClient() {
         <RunStatusPanel
           view={infeasibleView}
           submitting={false}
-          cleanupPhase="idle"
           canDownloadAgain={false}
           downloadAgainFilename={null}
           {...statusHandlers}
         />
       </Panel>
 
-      <Panel id="fx-worker-lost" title="Worker lost — resubmit + dismiss + cleanup failed">
+      {/* G6.2a: was “Worker lost — resubmit + dismiss + cleanup failed”. All three
+          actions are gone; what a worker-lost run shows now is the honest error and
+          nothing to press. */}
+      <Panel id="fx-worker-lost" title="Worker lost">
         <RunStatusPanel
           view={workerLostView}
           submitting={false}
-          cleanupPhase="failed"
           canDownloadAgain={false}
           downloadAgainFilename={null}
           {...statusHandlers}
         />
       </Panel>
 
-      <Panel id="fx-recovery-interrupted" title="Recovery — interrupted (Forget)">
-        <RecoveryNotice
-          state={{ kind: "interrupted", anonymized: true, peopleCount: 3 }}
-          resume={null}
-          reloadRecoveryUnavailable={false}
-          onForget={noop}
-          forgetPending={false}
-        />
-      </Panel>
-      <Panel id="fx-recovery-unreadable" title="Recovery — unreadable">
-        <RecoveryNotice
-          state={{ kind: "unreadable" }}
-          resume={null}
-          reloadRecoveryUnavailable={false}
-          onForget={noop}
-          forgetPending={false}
-        />
-      </Panel>
-      <Panel id="fx-recovery-degraded" title="Recovery — reload unavailable (degraded)">
-        <RecoveryNotice
-          state={{ kind: "none" }}
-          resume={null}
-          reloadRecoveryUnavailable
-          onForget={noop}
-          forgetPending={false}
-        />
-      </Panel>
+      {/* G6.2 removed the three recovery panels that stood here. They rendered the
+          resumed / degraded / storage-error notices, and none of those states exists
+          any more: entering the route is fresh, so there is nothing to resume, nothing
+          to report as unresumable, and no boot read of storage to fail. */}
 
-      <Panel id="fx-eventlog" title="Event log">
+      {/* NOT a Panel. `RunEventLog` is itself an L1 card (it is a top-level sibling
+          on the real route), and DESIGN.md §4 rule 5 forbids stacking two surfaces of
+          the same tone — wrapping it in the L1 harness Panel would have put an L1
+          card inside an L1 card. The label sits on the page plane instead. */}
+      <section data-testid="fx-eventlog" className="flex flex-col gap-4">
+        <h2 className="font-heading text-cardhead font-semibold tracking-[-0.015em] text-ink">
+          Event log
+        </h2>
         <RunEventLog
           active
           log={[
-            logEntry({ seq: 1, kind: "lifecycle", label: "submitting", detail: "anonymized=true" }),
+            // `detailKind` is the product's own classification of each detail string
+            // (`run-view.ts`), carried here verbatim so the harness renders the same
+            // faces the real route does: machine expressions mono, prose on the body
+            // face. Entry 3 is the prose control — a code prefixing a backend sentence.
+            logEntry({
+              seq: 1,
+              kind: "lifecycle",
+              label: "submitting",
+              detail: "anonymized=true",
+              detailKind: "expression",
+            }),
             logEntry({
               seq: 2,
               kind: "progress",
               label: "progress",
               detail: "score=12, elapsed=5s",
+              detailKind: "expression",
             }),
             logEntry({
               seq: 3,
               kind: "phase",
               label: "phase:solve",
               detail: "solve: building model",
+              detailKind: "prose",
             }),
             logEntry({
               seq: 4,
               kind: "result",
               label: "download-succeeded",
               detail: "schedule.xlsx",
+              detailKind: "expression",
             }),
           ]}
         />
-      </Panel>
-    </div>
+      </section>
+    </Surface>
   );
 }

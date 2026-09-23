@@ -1,0 +1,23 @@
+id: retired-mutate-scenario-tsx
+snapshots:
+  ? |
+    const action = "mutateScenario";
+  : labels:
+      - source: mutateScenario
+        style: primary
+        start: 16
+        end: 30
+  ? |
+    export const C = () => <button onClick={() => mutateScenario({})} />;
+  : labels:
+      - source: mutateScenario
+        style: primary
+        start: 46
+        end: 60
+  ? |
+    export const D = () => <button onClick={() => store.mutateScenario({})} />;
+  : labels:
+      - source: mutateScenario
+        style: primary
+        start: 52
+        end: 66

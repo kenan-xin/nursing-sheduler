@@ -13,13 +13,26 @@ import { expect, test, type Page } from "@playwright/test";
 
 type NsWindow = {
   __nsStore: {
-    scenario: {
-      getState(): Record<string, unknown> & {
-        mutateScenario(x: unknown): void;
-        recordBackup(): void;
-      };
+    /** The repository command bus — the product's only durable write path. */
+    commands: {
+      mutate(patch: Record<string, unknown>): Promise<{ ok: boolean }>;
+      recordBackup(backupFingerprint: string): Promise<{ ok: boolean }>;
+      undo(): Promise<{ ok: boolean }>;
+      redo(): Promise<{ ok: boolean }>;
+      takeover(): Promise<{ ok: boolean }>;
     };
+    drain(): Promise<void>;
+    historyDepth(): Promise<number>;
+    authority(): {
+      scenarioId: string | null;
+      documentRevision: number;
+      ownership: string;
+      canUndo: boolean;
+      canRedo: boolean;
+    };
+    scenario(): Record<string, unknown>;
     backupStatus(): "none" | "current" | "stale";
+    backupFingerprint(): string;
   };
 };
 
@@ -32,8 +45,8 @@ async function gotoReadySaveAndLoad(page: Page) {
 }
 
 async function mutate(page: Page, patch: Record<string, unknown>) {
-  await page.evaluate((p) => {
-    (window as unknown as NsWindow).__nsStore.scenario.getState().mutateScenario(p);
+  await page.evaluate(async (p) => {
+    await (window as unknown as NsWindow).__nsStore.commands.mutate(p);
   }, patch);
 }
 
@@ -42,13 +55,19 @@ async function mutate(page: Page, patch: Record<string, unknown>) {
 // "stale" against a real prior backup — tests that need a stale precondition call
 // this before editing.
 async function recordBackup(page: Page) {
-  await page.evaluate(() => {
-    (window as unknown as NsWindow).__nsStore.scenario.getState().recordBackup();
+  await page.evaluate(async () => {
+    const store = (window as unknown as NsWindow).__nsStore;
+    await store.commands.recordBackup(store.backupFingerprint());
   });
 }
 
+/** Backup currentness — drained, so a read never outruns the command that wrote. */
 function backupStatus(page: Page): Promise<string> {
-  return page.evaluate(() => (window as unknown as NsWindow).__nsStore.backupStatus());
+  return page.evaluate(async () => {
+    const store = (window as unknown as NsWindow).__nsStore;
+    await store.drain();
+    return store.backupStatus();
+  });
 }
 
 // A minimal but backend-valid scenario patch (mirrors
@@ -319,7 +338,7 @@ test.describe("T17a-5 -- Anonymise card", () => {
       expect(downloaded).toBe(false);
       // Source state is untouched — the guard runs before the clone/transform.
       const rangeStart = await page.evaluate(
-        () => (window as unknown as NsWindow).__nsStore.scenario.getState().rangeStart,
+        () => (window as unknown as NsWindow).__nsStore.scenario().rangeStart,
       );
       expect(rangeStart).toBe(range.rangeStart);
     });

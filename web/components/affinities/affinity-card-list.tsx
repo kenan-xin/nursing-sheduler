@@ -7,12 +7,13 @@
 
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
-import { FaPowerOff, FaPen, FaCopy, FaTrash, FaChevronUp, FaChevronDown } from "@/components/icons";
+import { FaPowerOff, FaPen, FaCopy, FaTrash } from "@/components/icons";
 import { WeightPill } from "@/components/card-editor/weight-field";
 import type { AffinityCard } from "@/lib/scenario";
 import {
   CardActionButton,
   CardListItem,
+  CardMoveActions,
   type DropPosition,
 } from "@/components/card-editor/card-editor-shell";
 import { isAdvancedAffinityCard, summarizeRefs } from "./affinities-model";
@@ -22,7 +23,6 @@ interface AffinityCardListProps {
   onEdit: (uid: string) => void;
   onDuplicate: (uid: string) => void;
   onDelete: (uid: string) => void;
-  onMove: (uid: string, direction: -1 | 1) => void;
   onSetDisabled: (uid: string, value: boolean) => void;
   /** Primary DnD reorder (the shared card-list reorder interaction). `position` is
    *  the pointer half of the drop target (insert before/after — FR-PR-12). */
@@ -34,12 +34,10 @@ export function AffinityCardList({
   onEdit,
   onDuplicate,
   onDelete,
-  onMove,
   onSetDisabled,
   onReorder,
 }: AffinityCardListProps) {
-  // HTML5 DnD state for the shared card-list reorder (the primary control; the
-  // keyboard Up/Down buttons below are the accessibility supplement).
+  // HTML5 DnD state for the shared card-list reorder.
   const [dragUid, setDragUid] = useState<string | null>(null);
   const [overUid, setOverUid] = useState<string | null>(null);
 
@@ -132,22 +130,13 @@ export function AffinityCardList({
                 >
                   Delete
                 </CardActionButton>
-                <CardActionButton
-                  icon={<FaChevronUp className="size-3" />}
-                  onClick={() => onMove(card.uid, -1)}
-                  testId={`affinity-up-${index}`}
-                  ariaLabel="Move affinity up"
-                >
-                  Up
-                </CardActionButton>
-                <CardActionButton
-                  icon={<FaChevronDown className="size-3" />}
-                  onClick={() => onMove(card.uid, 1)}
-                  testId={`affinity-down-${index}`}
-                  ariaLabel="Move affinity down"
-                >
-                  Down
-                </CardActionButton>
+                <CardMoveActions
+                  cards={affinities}
+                  index={index}
+                  onReorder={onReorder}
+                  testIdPrefix="affinity"
+                  subject="affinity"
+                />
               </>
             }
           />

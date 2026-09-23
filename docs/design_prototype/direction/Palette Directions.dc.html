@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;700&family=Hanken+Grotesk:wght@400;500;600;700&family=Spline+Sans+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#e8e8e6;}
+a{color:#0f7a6c;text-decoration:none;}
+a:hover{color:#0c6659;text-decoration:underline;}
+</style>
+</helmet>
+
+<section style="display:flex;flex-direction:column;gap:24px;padding:48px 48px 0;font-family:'Hanken Grotesk',system-ui,sans-serif;color:#2f2b2a;">
+  <div style="display:flex;flex-direction:column;gap:12px;max-width:900px;">
+    <span style="font:600 12px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:#635d59;">Turn 2 · Refining Clinical Mint</span>
+    <h1 style="font:700 40px 'Figtree',system-ui,sans-serif;letter-spacing:-.015em;margin:0;line-height:1.05;">Four ways to take <a href="#1c">1c</a> further</h1>
+    <p style="margin:0;font-size:16px;line-height:1.5;color:#524c49;text-wrap:pretty;">Clinical Mint is now live in the app, so these four all start from it and vary one decision each: where the warmth lives (<a href="#2a">2a</a> ink, <a href="#2c">2c</a> accent), how cool it goes (<a href="#2b">2b</a>), and how much the canvas commits to colour (<a href="#2d">2d</a>). Every option holds AA on both its card and its panel band.</p>
+  </div>
+  <div style="display:flex;flex-wrap:nowrap;gap:32px;align-items:flex-start;">
+    <!-- ============ 2a ============ -->
+    <div id="2a" style="width:600px;flex:none;display:flex;flex-direction:column;gap:14px;--bg:#f4f7f5;--surface:#ffffff;--panel:#f1f4f1;--panel-alt:#fafcfa;--line:#e0e3da;--line2:#ecefe9;--ink:#332e2b;--ink2:#57504b;--ink3:#6a615b;--brand:#0b7d68;--brandink:#0a6e5c;--brandtint:#e2f3ee;--onbrand:#ffffff;">
+      <div style="display:flex;align-items:baseline;gap:10px;">
+        <span style="font:700 12px 'Spline Sans Mono',monospace;letter-spacing:.04em;background:#2f2b2a;color:#fff;padding:4px 8px;border-radius:999px;">2a</span>
+        <span style="font:700 22px 'Figtree',system-ui,sans-serif;letter-spacing:-.015em;">Mint, Warm Ink</span>
+      </div>
+      <p style="margin:0;font-size:14px;line-height:1.5;color:#524c49;max-width:56ch;text-wrap:pretty;">The mint canvas you picked, but the <b>ink turns warm</b> — espresso-brown text and slightly warm hairlines against the cool surface. Keeps 1c’s brightness while putting the warmth back in the type, where it reads as richness rather than dinge.</p>
+      <div style="display:flex;gap:6px;">
+        <span style="width:48px;height:28px;background:#f4f7f5;border:1px solid #ccd2c9;border-radius:6px;"></span>
+        <span style="width:48px;height:28px;background:#ffffff;border:1px solid #ccd2c9;border-radius:6px;"></span>
+        <span style="width:48px;height:28px;background:#e0e3da;border-radius:6px;"></span>
+        <span style="width:48px;height:28px;background:#0b7d68;border-radius:6px;"></span>
+        <span style="width:48px;height:28px;background:#332e2b;border-radius:6px;"></span>
+      </div>
+      <div style="background:var(--bg);border:1px solid var(--line);border-radius:16px;padding:20px;display:flex;flex-direction:column;gap:16px;">
+        <div style="display:flex;align-items:flex-start;gap:16px;">
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px;">
+            <span style="font:600 11px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--brandink);">Roster setup</span>
+            <span style="font:700 26px 'Figtree',system-ui,sans-serif;letter-spacing:-.015em;line-height:1.05;color:var(--ink);">Build the February Roster</span>
+            <span style="font-size:13px;line-height:1.45;color:var(--ink2);">Work through the six steps in any order.</span>
+          </div>
+          <button style="height:40px;padding:0 16px;background:var(--brand);color:var(--onbrand);border:none;border-radius:999px;font:700 13px 'Hanken Grotesk';display:inline-flex;align-items:center;flex:none;cursor:pointer;">Generate roster</button>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line2);border:1px solid var(--line);border-radius:12px;overflow:hidden;">
+          <div style="padding:14px 16px;background:var(--surface);display:flex;flex-direction:column;gap:4px;"><span style="font:700 20px 'Figtree';line-height:1;color:var(--ink);">12</span><span style="font:600 10px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);">Nurses</span></div>
+          <div style="padding:14px 16px;background:var(--surface);display:flex;flex-direction:column;gap:4px;"><span style="font:700 20px 'Figtree';line-height:1;color:var(--ink);">4</span><span style="font:600 10px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);">Shift types</span></div>
+          <div style="padding:14px 16px;background:var(--surface);display:flex;flex-direction:column;gap:4px;"><span style="font:700 20px 'Figtree';line-height:1;color:var(--ink);">28</span><span style="font:600 10px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);">Roster days</span></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:8px;box-shadow:0 1px 2px rgba(60,55,45,.05);">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;"><span style="width:24px;height:24px;background:var(--ink);color:var(--surface);border-radius:8px;display:inline-flex;align-items:center;justify-content:center;font:700 12px 'Spline Sans Mono';">1</span><span style="font:600 9px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--brandink);background:var(--brandtint);padding:4px 8px;border-radius:999px;">Done</span></div>
+            <span style="font:700 15px 'Figtree';color:var(--ink);">Set the Dates</span>
+            <div style="border:1px solid var(--line2);border-radius:8px;padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink2);background:var(--panel);">February 2026 · 28 days</div>
+          </div>
+          <div style="background:var(--surface);border:1px solid var(--brand);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:8px;box-shadow:0 2px 4px rgba(60,55,45,.06),0 8px 20px rgba(60,55,45,.08);">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;"><span style="width:24px;height:24px;background:var(--ink);color:var(--surface);border-radius:8px;display:inline-flex;align-items:center;justify-content:center;font:700 12px 'Spline Sans Mono';">5</span><span style="font:600 9px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--onbrand);background:var(--brand);padding:4px 8px;border-radius:999px;">Current</span></div>
+            <span style="font:700 15px 'Figtree';color:var(--ink);">Requests &amp; Leave</span>
+            <div style="border:1px solid var(--line2);border-radius:8px;padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink2);background:var(--panel);">19 requests entered</div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;background:var(--panel);box-shadow:inset 0 1px 2px rgba(60,55,45,.05);">
+            <button style="height:32px;padding:0 14px;background:var(--brand);color:var(--onbrand);border:none;font:700 12px 'Hanken Grotesk';cursor:pointer;">Grid</button>
+            <button style="height:32px;padding:0 14px;background:transparent;color:var(--ink2);border:none;border-left:1px solid var(--line);font:500 12px 'Hanken Grotesk';cursor:pointer;">Coverage</button>
+          </div>
+          <button style="height:32px;padding:0 14px;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:999px;font:600 12px 'Hanken Grotesk';cursor:pointer;box-shadow:0 1px 2px rgba(60,55,45,.05);">History CSV</button>
+        </div>
+        <div style="border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface);">
+          <div style="display:grid;grid-template-columns:110px repeat(5,1fr);background:var(--panel);border-bottom:1px solid var(--line);">
+            <span style="padding:8px 10px;font:600 10px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);">Nurse</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">1</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">2</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">3</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">4</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">5</span>
+          </div>
+          <div style="display:grid;grid-template-columns:110px repeat(5,1fr);border-bottom:1px solid var(--line2);align-items:center;">
+            <span style="padding:8px 10px;font-size:12px;color:var(--ink);">Aisha Rahman</span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#f8e2b8;color:#7a5310;padding:4px 6px;border-radius:6px;">AM</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#f6dbcd;color:#9a4726;padding:4px 6px;border-radius:6px;">PM</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;color:var(--ink3);font-size:12px;">·</span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#d8e0f2;color:#374777;padding:4px 6px;border-radius:6px;">N</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;color:var(--ink3);font-size:12px;">·</span>
+          </div>
+          <div style="display:grid;grid-template-columns:110px repeat(5,1fr);align-items:center;background:var(--panel-alt);">
+            <span style="padding:8px 10px;font-size:12px;color:var(--ink);">Priya Nair</span>
+            <span style="padding:6px;display:flex;justify-content:center;color:var(--ink3);font-size:12px;">·</span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#f8e2b8;color:#7a5310;padding:4px 6px;border-radius:6px;">AM</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#e4ecd0;color:#586a22;padding:4px 6px;border-radius:6px;">LD</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;color:var(--ink3);font-size:12px;">·</span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#f6dbcd;color:#9a4726;padding:4px 6px;border-radius:6px;">PM</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ============ 2b ============ -->
+    <div id="2b" style="width:600px;flex:none;display:flex;flex-direction:column;gap:14px;--bg:#f2f6f8;--surface:#ffffff;--panel:#ecf2f5;--panel-alt:#f9fbfc;--line:#d8e2e8;--line2:#e8eef2;--ink:#2c363b;--ink2:#4e585e;--ink3:#616d73;--brand:#0d7d8f;--brandink:#0a6472;--brandtint:#e0f1f4;--onbrand:#ffffff;">
+      <div style="display:flex;align-items:baseline;gap:10px;">
+        <span style="font:700 12px 'Spline Sans Mono',monospace;letter-spacing:.04em;background:#2f2b2a;color:#fff;padding:4px 8px;border-radius:999px;">2b</span>
+        <span style="font:700 22px 'Figtree',system-ui,sans-serif;letter-spacing:-.015em;">Saline</span>
+      </div>
+      <p style="margin:0;font-size:14px;line-height:1.5;color:#524c49;max-width:56ch;text-wrap:pretty;">Pushes past mint into <b>cool clinical blue-teal</b> — the most obviously “hospital software” of the set, and the brightest. Highest legibility on a dense grid; the least warm option here, so treat it as the far edge of the range.</p>
+      <div style="display:flex;gap:6px;">
+        <span style="width:48px;height:28px;background:#f2f6f8;border:1px solid #c8d5dc;border-radius:6px;"></span>
+        <span style="width:48px;height:28px;background:#ffffff;border:1px solid #c8d5dc;border-radius:6px;"></span>
+        <span style="width:48px;height:28px;background:#d8e2e8;border-radius:6px;"></span>
+        <span style="width:48px;height:28px;background:#0d7d8f;border-radius:6px;"></span>
+        <span style="width:48px;height:28px;background:#2c363b;border-radius:6px;"></span>
+      </div>
+      <div style="background:var(--bg);border:1px solid var(--line);border-radius:16px;padding:20px;display:flex;flex-direction:column;gap:16px;">
+        <div style="display:flex;align-items:flex-start;gap:16px;">
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px;">
+            <span style="font:600 11px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--brandink);">Roster setup</span>
+            <span style="font:700 26px 'Figtree',system-ui,sans-serif;letter-spacing:-.015em;line-height:1.05;color:var(--ink);">Build the February Roster</span>
+            <span style="font-size:13px;line-height:1.45;color:var(--ink2);">Work through the six steps in any order.</span>
+          </div>
+          <button style="height:40px;padding:0 16px;background:var(--brand);color:var(--onbrand);border:none;border-radius:999px;font:700 13px 'Hanken Grotesk';display:inline-flex;align-items:center;flex:none;cursor:pointer;">Generate roster</button>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line2);border:1px solid var(--line);border-radius:12px;overflow:hidden;">
+          <div style="padding:14px 16px;background:var(--surface);display:flex;flex-direction:column;gap:4px;"><span style="font:700 20px 'Figtree';line-height:1;color:var(--ink);">12</span><span style="font:600 10px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);">Nurses</span></div>
+          <div style="padding:14px 16px;background:var(--surface);display:flex;flex-direction:column;gap:4px;"><span style="font:700 20px 'Figtree';line-height:1;color:var(--ink);">4</span><span style="font:600 10px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);">Shift types</span></div>
+          <div style="padding:14px 16px;background:var(--surface);display:flex;flex-direction:column;gap:4px;"><span style="font:700 20px 'Figtree';line-height:1;color:var(--ink);">28</span><span style="font:600 10px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);">Roster days</span></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:8px;box-shadow:0 1px 2px rgba(35,55,65,.05);">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;"><span style="width:24px;height:24px;background:var(--ink);color:var(--surface);border-radius:8px;display:inline-flex;align-items:center;justify-content:center;font:700 12px 'Spline Sans Mono';">1</span><span style="font:600 9px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--brandink);background:var(--brandtint);padding:4px 8px;border-radius:999px;">Done</span></div>
+            <span style="font:700 15px 'Figtree';color:var(--ink);">Set the Dates</span>
+            <div style="border:1px solid var(--line2);border-radius:8px;padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink2);background:var(--panel);">February 2026 · 28 days</div>
+          </div>
+          <div style="background:var(--surface);border:1px solid var(--brand);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:8px;box-shadow:0 2px 4px rgba(35,55,65,.06),0 8px 20px rgba(35,55,65,.08);">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;"><span style="width:24px;height:24px;background:var(--ink);color:var(--surface);border-radius:8px;display:inline-flex;align-items:center;justify-content:center;font:700 12px 'Spline Sans Mono';">5</span><span style="font:600 9px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--onbrand);background:var(--brand);padding:4px 8px;border-radius:999px;">Current</span></div>
+            <span style="font:700 15px 'Figtree';color:var(--ink);">Requests &amp; Leave</span>
+            <div style="border:1px solid var(--line2);border-radius:8px;padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink2);background:var(--panel);">19 requests entered</div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;background:var(--panel);box-shadow:inset 0 1px 2px rgba(35,55,65,.05);">
+            <button style="height:32px;padding:0 14px;background:var(--brand);color:var(--onbrand);border:none;font:700 12px 'Hanken Grotesk';cursor:pointer;">Grid</button>
+            <button style="height:32px;padding:0 14px;background:transparent;color:var(--ink2);border:none;border-left:1px solid var(--line);font:500 12px 'Hanken Grotesk';cursor:pointer;">Coverage</button>
+          </div>
+          <button style="height:32px;padding:0 14px;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:999px;font:600 12px 'Hanken Grotesk';cursor:pointer;box-shadow:0 1px 2px rgba(35,55,65,.05);">History CSV</button>
+        </div>
+        <div style="border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface);">
+          <div style="display:grid;grid-template-columns:110px repeat(5,1fr);background:var(--panel);border-bottom:1px solid var(--line);">
+            <span style="padding:8px 10px;font:600 10px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);">Nurse</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">1</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">2</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">3</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">4</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">5</span>
+          </div>
+          <div style="display:grid;grid-template-columns:110px repeat(5,1fr);border-bottom:1px solid var(--line2);align-items:center;">
+            <span style="padding:8px 10px;font-size:12px;color:var(--ink);">Aisha Rahman</span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#f8e2b8;color:#7a5310;padding:4px 6px;border-radius:6px;">AM</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#f6dbcd;color:#9a4726;padding:4px 6px;border-radius:6px;">PM</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;color:var(--ink3);font-size:12px;">·</span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#d8e0f2;color:#374777;padding:4px 6px;border-radius:6px;">N</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;color:var(--ink3);font-size:12px;">·</span>
+          </div>
+          <div style="display:grid;grid-template-columns:110px repeat(5,1fr);align-items:center;background:var(--panel-alt);">
+            <span style="padding:8px 10px;font-size:12px;color:var(--ink);">Priya Nair</span>
+            <span style="padding:6px;display:flex;justify-content:center;color:var(--ink3);font-size:12px;">·</span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#f8e2b8;color:#7a5310;padding:4px 6px;border-radius:6px;">AM</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#e4ecd0;color:#586a22;padding:4px 6px;border-radius:6px;">LD</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;color:var(--ink3);font-size:12px;">·</span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#f6dbcd;color:#9a4726;padding:4px 6px;border-radius:6px;">PM</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ============ 2c ============ -->
+    <div id="2c" style="width:600px;flex:none;display:flex;flex-direction:column;gap:14px;--bg:#f4f7f5;--surface:#ffffff;--panel:#eef3f0;--panel-alt:#fafcfb;--line:#dbe4df;--line2:#e9efeb;--ink:#2f3a36;--ink2:#4f5a54;--ink3:#646e68;--brand:#96631a;--brandink:#7d5211;--brandtint:#f9efdd;--onbrand:#ffffff;">
+      <div style="display:flex;align-items:baseline;gap:10px;">
+        <span style="font:700 12px 'Spline Sans Mono',monospace;letter-spacing:.04em;background:#2f2b2a;color:#fff;padding:4px 8px;border-radius:999px;">2c</span>
+        <span style="font:700 22px 'Figtree',system-ui,sans-serif;letter-spacing:-.015em;">Mint &amp; Honey</span>
+      </div>
+      <p style="margin:0;font-size:14px;line-height:1.5;color:#524c49;max-width:56ch;text-wrap:pretty;">Cool canvas, <b>warm accent</b> — amber carries the brand and every primary action, so the warmth lands on the things you click. Trade-off: teal is freed up, but amber then sits close to the AM shift chip and the warning colour, so those need re-tuning.</p>
+      <div style="display:flex;gap:6px;">
+        <span style="width:48px;height:28px;background:#f4f7f5;border:1px solid #cdd8d2;border-radius:6px;"></span>
+        <span style="width:48px;height:28px;background:#ffffff;border:1px solid #cdd8d2;border-radius:6px;"></span>
+        <span style="width:48px;height:28px;background:#dbe4df;border-radius:6px;"></span>
+        <span style="width:48px;height:28px;background:#96631a;border-radius:6px;"></span>
+        <span style="width:48px;height:28px;background:#2f3a36;border-radius:6px;"></span>
+      </div>
+      <div style="background:var(--bg);border:1px solid var(--line);border-radius:16px;padding:20px;display:flex;flex-direction:column;gap:16px;">
+        <div style="display:flex;align-items:flex-start;gap:16px;">
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px;">
+            <span style="font:600 11px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--brandink);">Roster setup</span>
+            <span style="font:700 26px 'Figtree',system-ui,sans-serif;letter-spacing:-.015em;line-height:1.05;color:var(--ink);">Build the February Roster</span>
+            <span style="font-size:13px;line-height:1.45;color:var(--ink2);">Work through the six steps in any order.</span>
+          </div>
+          <button style="height:40px;padding:0 16px;background:var(--brand);color:var(--onbrand);border:none;border-radius:999px;font:700 13px 'Hanken Grotesk';display:inline-flex;align-items:center;flex:none;cursor:pointer;">Generate roster</button>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line2);border:1px solid var(--line);border-radius:12px;overflow:hidden;">
+          <div style="padding:14px 16px;background:var(--surface);display:flex;flex-direction:column;gap:4px;"><span style="font:700 20px 'Figtree';line-height:1;color:var(--ink);">12</span><span style="font:600 10px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);">Nurses</span></div>
+          <div style="padding:14px 16px;background:var(--surface);display:flex;flex-direction:column;gap:4px;"><span style="font:700 20px 'Figtree';line-height:1;color:var(--ink);">4</span><span style="font:600 10px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);">Shift types</span></div>
+          <div style="padding:14px 16px;background:var(--surface);display:flex;flex-direction:column;gap:4px;"><span style="font:700 20px 'Figtree';line-height:1;color:var(--ink);">28</span><span style="font:600 10px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);">Roster days</span></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:8px;box-shadow:0 1px 2px rgba(45,58,50,.05);">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;"><span style="width:24px;height:24px;background:var(--ink);color:var(--surface);border-radius:8px;display:inline-flex;align-items:center;justify-content:center;font:700 12px 'Spline Sans Mono';">1</span><span style="font:600 9px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--brandink);background:var(--brandtint);padding:4px 8px;border-radius:999px;">Done</span></div>
+            <span style="font:700 15px 'Figtree';color:var(--ink);">Set the Dates</span>
+            <div style="border:1px solid var(--line2);border-radius:8px;padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink2);background:var(--panel);">February 2026 · 28 days</div>
+          </div>
+          <div style="background:var(--surface);border:1px solid var(--brand);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:8px;box-shadow:0 2px 4px rgba(45,58,50,.06),0 8px 20px rgba(45,58,50,.08);">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;"><span style="width:24px;height:24px;background:var(--ink);color:var(--surface);border-radius:8px;display:inline-flex;align-items:center;justify-content:center;font:700 12px 'Spline Sans Mono';">5</span><span style="font:600 9px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--onbrand);background:var(--brand);padding:4px 8px;border-radius:999px;">Current</span></div>
+            <span style="font:700 15px 'Figtree';color:var(--ink);">Requests &amp; Leave</span>
+            <div style="border:1px solid var(--line2);border-radius:8px;padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink2);background:var(--panel);">19 requests entered</div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;background:var(--panel);box-shadow:inset 0 1px 2px rgba(45,58,50,.05);">
+            <button style="height:32px;padding:0 14px;background:var(--brand);color:var(--onbrand);border:none;font:700 12px 'Hanken Grotesk';cursor:pointer;">Grid</button>
+            <button style="height:32px;padding:0 14px;background:transparent;color:var(--ink2);border:none;border-left:1px solid var(--line);font:500 12px 'Hanken Grotesk';cursor:pointer;">Coverage</button>
+          </div>
+          <button style="height:32px;padding:0 14px;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:999px;font:600 12px 'Hanken Grotesk';cursor:pointer;box-shadow:0 1px 2px rgba(45,58,50,.05);">History CSV</button>
+        </div>
+        <div style="border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface);">
+          <div style="display:grid;grid-template-columns:110px repeat(5,1fr);background:var(--panel);border-bottom:1px solid var(--line);">
+            <span style="padding:8px 10px;font:600 10px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);">Nurse</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">1</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">2</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">3</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">4</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">5</span>
+          </div>
+          <div style="display:grid;grid-template-columns:110px repeat(5,1fr);border-bottom:1px solid var(--line2);align-items:center;">
+            <span style="padding:8px 10px;font-size:12px;color:var(--ink);">Aisha Rahman</span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#f8e2b8;color:#7a5310;padding:4px 6px;border-radius:6px;">AM</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#f6dbcd;color:#9a4726;padding:4px 6px;border-radius:6px;">PM</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;color:var(--ink3);font-size:12px;">·</span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#d8e0f2;color:#374777;padding:4px 6px;border-radius:6px;">N</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;color:var(--ink3);font-size:12px;">·</span>
+          </div>
+          <div style="display:grid;grid-template-columns:110px repeat(5,1fr);align-items:center;background:var(--panel-alt);">
+            <span style="padding:8px 10px;font-size:12px;color:var(--ink);">Priya Nair</span>
+            <span style="padding:6px;display:flex;justify-content:center;color:var(--ink3);font-size:12px;">·</span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#f8e2b8;color:#7a5310;padding:4px 6px;border-radius:6px;">AM</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#e4ecd0;color:#586a22;padding:4px 6px;border-radius:6px;">LD</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;color:var(--ink3);font-size:12px;">·</span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#f6dbcd;color:#9a4726;padding:4px 6px;border-radius:6px;">PM</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ============ 2d ============ -->
+    <div id="2d" style="width:600px;flex:none;display:flex;flex-direction:column;gap:14px;--bg:#e9efe9;--surface:#ffffff;--panel:#e2eae3;--panel-alt:#f4f8f4;--line:#cfdbd1;--line2:#dde6de;--ink:#2b342e;--ink2:#4b564e;--ink3:#5f6a62;--brand:#0b7d68;--brandink:#0a6e5c;--brandtint:#dff0ea;--onbrand:#ffffff;">
+      <div style="display:flex;align-items:baseline;gap:10px;">
+        <span style="font:700 12px 'Spline Sans Mono',monospace;letter-spacing:.04em;background:#2f2b2a;color:#fff;padding:4px 8px;border-radius:999px;">2d</span>
+        <span style="font:700 22px 'Figtree',system-ui,sans-serif;letter-spacing:-.015em;">Eucalyptus</span>
+      </div>
+      <p style="margin:0;font-size:14px;line-height:1.5;color:#524c49;max-width:56ch;text-wrap:pretty;">The confident version: canvas deepens to a real <b>sage green</b> so white cards read as genuinely raised paper, not as slightly-brighter background. More colour commitment than 1c, and the strongest card separation of any option.</p>
+      <div style="display:flex;gap:6px;">
+        <span style="width:48px;height:28px;background:#e9efe9;border:1px solid #c2cfc4;border-radius:6px;"></span>
+        <span style="width:48px;height:28px;background:#ffffff;border:1px solid #c2cfc4;border-radius:6px;"></span>
+        <span style="width:48px;height:28px;background:#cfdbd1;border-radius:6px;"></span>
+        <span style="width:48px;height:28px;background:#0b7d68;border-radius:6px;"></span>
+        <span style="width:48px;height:28px;background:#2b342e;border-radius:6px;"></span>
+      </div>
+      <div style="background:var(--bg);border:1px solid var(--line);border-radius:16px;padding:20px;display:flex;flex-direction:column;gap:16px;">
+        <div style="display:flex;align-items:flex-start;gap:16px;">
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px;">
+            <span style="font:600 11px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--brandink);">Roster setup</span>
+            <span style="font:700 26px 'Figtree',system-ui,sans-serif;letter-spacing:-.015em;line-height:1.05;color:var(--ink);">Build the February Roster</span>
+            <span style="font-size:13px;line-height:1.45;color:var(--ink2);">Work through the six steps in any order.</span>
+          </div>
+          <button style="height:40px;padding:0 16px;background:var(--brand);color:var(--onbrand);border:none;border-radius:999px;font:700 13px 'Hanken Grotesk';display:inline-flex;align-items:center;flex:none;cursor:pointer;">Generate roster</button>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line2);border:1px solid var(--line);border-radius:12px;overflow:hidden;">
+          <div style="padding:14px 16px;background:var(--surface);display:flex;flex-direction:column;gap:4px;"><span style="font:700 20px 'Figtree';line-height:1;color:var(--ink);">12</span><span style="font:600 10px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);">Nurses</span></div>
+          <div style="padding:14px 16px;background:var(--surface);display:flex;flex-direction:column;gap:4px;"><span style="font:700 20px 'Figtree';line-height:1;color:var(--ink);">4</span><span style="font:600 10px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);">Shift types</span></div>
+          <div style="padding:14px 16px;background:var(--surface);display:flex;flex-direction:column;gap:4px;"><span style="font:700 20px 'Figtree';line-height:1;color:var(--ink);">28</span><span style="font:600 10px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);">Roster days</span></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:8px;box-shadow:0 1px 2px rgba(40,60,45,.05);">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;"><span style="width:24px;height:24px;background:var(--ink);color:var(--surface);border-radius:8px;display:inline-flex;align-items:center;justify-content:center;font:700 12px 'Spline Sans Mono';">1</span><span style="font:600 9px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--brandink);background:var(--brandtint);padding:4px 8px;border-radius:999px;">Done</span></div>
+            <span style="font:700 15px 'Figtree';color:var(--ink);">Set the Dates</span>
+            <div style="border:1px solid var(--line2);border-radius:8px;padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink2);background:var(--panel);">February 2026 · 28 days</div>
+          </div>
+          <div style="background:var(--surface);border:1px solid var(--brand);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:8px;box-shadow:0 2px 4px rgba(40,60,45,.06),0 8px 20px rgba(40,60,45,.08);">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;"><span style="width:24px;height:24px;background:var(--ink);color:var(--surface);border-radius:8px;display:inline-flex;align-items:center;justify-content:center;font:700 12px 'Spline Sans Mono';">5</span><span style="font:600 9px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--onbrand);background:var(--brand);padding:4px 8px;border-radius:999px;">Current</span></div>
+            <span style="font:700 15px 'Figtree';color:var(--ink);">Requests &amp; Leave</span>
+            <div style="border:1px solid var(--line2);border-radius:8px;padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink2);background:var(--panel);">19 requests entered</div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;background:var(--panel);box-shadow:inset 0 1px 2px rgba(40,60,45,.05);">
+            <button style="height:32px;padding:0 14px;background:var(--brand);color:var(--onbrand);border:none;font:700 12px 'Hanken Grotesk';cursor:pointer;">Grid</button>
+            <button style="height:32px;padding:0 14px;background:transparent;color:var(--ink2);border:none;border-left:1px solid var(--line);font:500 12px 'Hanken Grotesk';cursor:pointer;">Coverage</button>
+          </div>
+          <button style="height:32px;padding:0 14px;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:999px;font:600 12px 'Hanken Grotesk';cursor:pointer;box-shadow:0 1px 2px rgba(40,60,45,.05);">History CSV</button>
+        </div>
+        <div style="border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface);">
+          <div style="display:grid;grid-template-columns:110px repeat(5,1fr);background:var(--panel);border-bottom:1px solid var(--line);">
+            <span style="padding:8px 10px;font:600 10px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);">Nurse</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">1</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">2</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">3</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">4</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">5</span>
+          </div>
+          <div style="display:grid;grid-template-columns:110px repeat(5,1fr);border-bottom:1px solid var(--line2);align-items:center;">
+            <span style="padding:8px 10px;font-size:12px;color:var(--ink);">Aisha Rahman</span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#f8e2b8;color:#7a5310;padding:4px 6px;border-radius:6px;">AM</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#f6dbcd;color:#9a4726;padding:4px 6px;border-radius:6px;">PM</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;color:var(--ink3);font-size:12px;">·</span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#d8e0f2;color:#374777;padding:4px 6px;border-radius:6px;">N</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;color:var(--ink3);font-size:12px;">·</span>
+          </div>
+          <div style="display:grid;grid-template-columns:110px repeat(5,1fr);align-items:center;background:var(--panel-alt);">
+            <span style="padding:8px 10px;font-size:12px;color:var(--ink);">Priya Nair</span>
+            <span style="padding:6px;display:flex;justify-content:center;color:var(--ink3);font-size:12px;">·</span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#f8e2b8;color:#7a5310;padding:4px 6px;border-radius:6px;">AM</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#e4ecd0;color:#586a22;padding:4px 6px;border-radius:6px;">LD</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;color:var(--ink3);font-size:12px;">·</span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#f6dbcd;color:#9a4726;padding:4px 6px;border-radius:6px;">PM</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+  </div>
+</section>
+
+<section style="display:flex;flex-direction:column;gap:24px;padding:48px;font-family:'Hanken Grotesk',system-ui,sans-serif;color:#2f2b2a;">
+
+  <div style="display:flex;flex-direction:column;gap:12px;max-width:900px;">
+    <span style="font:600 12px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:#635d59;">Turn 1 · Palette directions</span>
+    <h1 style="font:700 40px 'Figtree',system-ui,sans-serif;letter-spacing:-.015em;margin:0;line-height:1.05;">Brighter, cleaner, still warm</h1>
+    <p style="margin:0;font-size:16px;line-height:1.5;color:#524c49;text-wrap:pretty;">Today’s canvas is <b>#ede5dc</b> — a fairly saturated sand. It reads dim because the background is doing the warmth work, so every white card floats on a yellow field. Each direction below moves the warmth somewhere else — into the accent, the ink, or just the hairlines — and lets the canvas come up toward white. Same layout, same content, five palettes. Reference an id in chat to go deeper.</p>
+  </div>
+
+  <div style="display:flex;flex-wrap:nowrap;gap:32px;align-items:flex-start;">
+
+    <!-- ============ 1a ============ -->
+    <div id="1a" style="width:600px;flex:none;display:flex;flex-direction:column;gap:14px;--bg:#f4f1ec;--surface:#ffffff;--panel:#faf8f4;--panel-alt:#fcfbf8;--line:#e5e0d8;--line2:#efebe4;--ink:#3a3330;--ink2:#5f5652;--ink3:#6e645f;--brand:#0f7a6c;--brandink:#0c6659;--brandtint:#e6f2ef;--onbrand:#ffffff;">
+      <div style="display:flex;align-items:baseline;gap:10px;">
+        <span style="font:700 12px 'Spline Sans Mono',monospace;letter-spacing:.04em;background:#2f2b2a;color:#fff;padding:4px 8px;border-radius:999px;">1a</span>
+        <span style="font:700 22px 'Figtree',system-ui,sans-serif;letter-spacing:-.015em;">Cloud Dancer</span>
+      </div>
+      <p style="margin:0;font-size:14px;line-height:1.5;color:#524c49;max-width:56ch;text-wrap:pretty;">Pantone’s 2026 colour of the year — a creamy off-white that is neither stark nor beige. The safest move: same teal, same structure, canvas lifted ten steps and desaturated. Cards go pure white so they read as raised paper.</p>
+      <div style="display:flex;gap:6px;">
+        <span style="width:48px;height:28px;background:#f4f1ec;border:1px solid #dcd6cd;border-radius:6px;"></span>
+        <span style="width:48px;height:28px;background:#ffffff;border:1px solid #dcd6cd;border-radius:6px;"></span>
+        <span style="width:48px;height:28px;background:#e5e0d8;border-radius:6px;"></span>
+        <span style="width:48px;height:28px;background:#0f7a6c;border-radius:6px;"></span>
+        <span style="width:48px;height:28px;background:#3a3330;border-radius:6px;"></span>
+      </div>
+      <div style="background:var(--bg);border:1px solid var(--line);border-radius:16px;padding:20px;display:flex;flex-direction:column;gap:16px;">
+        <div style="display:flex;align-items:flex-start;gap:16px;">
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px;">
+            <span style="font:600 11px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--brandink);">Roster setup</span>
+            <span style="font:700 26px 'Figtree',system-ui,sans-serif;letter-spacing:-.015em;line-height:1.05;color:var(--ink);">Build the February Roster</span>
+            <span style="font-size:13px;line-height:1.45;color:var(--ink2);">Work through the six steps in any order.</span>
+          </div>
+          <button style="height:40px;padding:0 16px;background:var(--brand);color:var(--onbrand);border:none;border-radius:999px;font:700 13px 'Hanken Grotesk';display:inline-flex;align-items:center;flex:none;cursor:pointer;">Generate roster</button>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line2);border:1px solid var(--line);border-radius:12px;overflow:hidden;">
+          <div style="padding:14px 16px;background:var(--surface);display:flex;flex-direction:column;gap:4px;"><span style="font:700 20px 'Figtree';line-height:1;color:var(--ink);">12</span><span style="font:600 10px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);">Nurses</span></div>
+          <div style="padding:14px 16px;background:var(--surface);display:flex;flex-direction:column;gap:4px;"><span style="font:700 20px 'Figtree';line-height:1;color:var(--ink);">4</span><span style="font:600 10px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);">Shift types</span></div>
+          <div style="padding:14px 16px;background:var(--surface);display:flex;flex-direction:column;gap:4px;"><span style="font:700 20px 'Figtree';line-height:1;color:var(--ink);">28</span><span style="font:600 10px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);">Roster days</span></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:8px;box-shadow:0 1px 2px rgba(60,50,40,.05);">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;"><span style="width:24px;height:24px;background:var(--ink);color:var(--surface);border-radius:8px;display:inline-flex;align-items:center;justify-content:center;font:700 12px 'Spline Sans Mono';">1</span><span style="font:600 9px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--brandink);background:var(--brandtint);padding:4px 8px;border-radius:999px;">Done</span></div>
+            <span style="font:700 15px 'Figtree';color:var(--ink);">Set the Dates</span>
+            <div style="border:1px solid var(--line2);border-radius:8px;padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink2);background:var(--panel);">February 2026 · 28 days</div>
+          </div>
+          <div style="background:var(--surface);border:1px solid var(--brand);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:8px;box-shadow:0 2px 4px rgba(60,50,40,.06),0 8px 20px rgba(60,50,40,.08);">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;"><span style="width:24px;height:24px;background:var(--ink);color:var(--surface);border-radius:8px;display:inline-flex;align-items:center;justify-content:center;font:700 12px 'Spline Sans Mono';">5</span><span style="font:600 9px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--onbrand);background:var(--brand);padding:4px 8px;border-radius:999px;">Current</span></div>
+            <span style="font:700 15px 'Figtree';color:var(--ink);">Requests &amp; Leave</span>
+            <div style="border:1px solid var(--line2);border-radius:8px;padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink2);background:var(--panel);">19 requests entered</div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;background:var(--panel);box-shadow:inset 0 1px 2px rgba(60,50,40,.05);">
+            <button style="height:32px;padding:0 14px;background:var(--brand);color:var(--onbrand);border:none;font:700 12px 'Hanken Grotesk';cursor:pointer;">Grid</button>
+            <button style="height:32px;padding:0 14px;background:transparent;color:var(--ink2);border:none;border-left:1px solid var(--line);font:500 12px 'Hanken Grotesk';cursor:pointer;">Coverage</button>
+          </div>
+          <button style="height:32px;padding:0 14px;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:999px;font:600 12px 'Hanken Grotesk';cursor:pointer;box-shadow:0 1px 2px rgba(60,50,40,.05);">History CSV</button>
+        </div>
+        <div style="border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface);">
+          <div style="display:grid;grid-template-columns:110px repeat(5,1fr);background:var(--panel);border-bottom:1px solid var(--line);">
+            <span style="padding:8px 10px;font:600 10px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);">Nurse</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">1</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">2</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">3</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">4</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">5</span>
+          </div>
+          <div style="display:grid;grid-template-columns:110px repeat(5,1fr);border-bottom:1px solid var(--line2);align-items:center;">
+            <span style="padding:8px 10px;font-size:12px;color:var(--ink);">Aisha Rahman</span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#f8e2b8;color:#7a5310;padding:4px 6px;border-radius:6px;">AM</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#f6dbcd;color:#9a4726;padding:4px 6px;border-radius:6px;">PM</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;color:var(--ink3);font-size:12px;">·</span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#d8e0f2;color:#374777;padding:4px 6px;border-radius:6px;">N</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;color:var(--ink3);font-size:12px;">·</span>
+          </div>
+          <div style="display:grid;grid-template-columns:110px repeat(5,1fr);align-items:center;background:var(--panel-alt);">
+            <span style="padding:8px 10px;font-size:12px;color:var(--ink);">Priya Nair</span>
+            <span style="padding:6px;display:flex;justify-content:center;color:var(--ink3);font-size:12px;">·</span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#f8e2b8;color:#7a5310;padding:4px 6px;border-radius:6px;">AM</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#e4ecd0;color:#586a22;padding:4px 6px;border-radius:6px;">LD</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;color:var(--ink3);font-size:12px;">·</span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#f6dbcd;color:#9a4726;padding:4px 6px;border-radius:6px;">PM</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 1b ============ -->
+    <div id="1b" style="width:600px;flex:none;display:flex;flex-direction:column;gap:14px;--bg:#f8f6f3;--surface:#ffffff;--panel:#f4f0eb;--panel-alt:#fbf9f7;--line:#e3ddd5;--line2:#eeeae4;--ink:#332e2b;--ink2:#5d554f;--ink3:#6f665f;--brand:#a8543a;--brandink:#8c4127;--brandtint:#fbeee8;--onbrand:#ffffff;">
+      <div style="display:flex;align-items:baseline;gap:10px;">
+        <span style="font:700 12px 'Spline Sans Mono',monospace;letter-spacing:.04em;background:#2f2b2a;color:#fff;padding:4px 8px;border-radius:999px;">1b</span>
+        <span style="font:700 22px 'Figtree',system-ui,sans-serif;letter-spacing:-.015em;">Porcelain &amp; Clay</span>
+      </div>
+      <p style="margin:0;font-size:14px;line-height:1.5;color:#524c49;max-width:56ch;text-wrap:pretty;">Warmth moves out of the canvas and into the <b>accent</b>. Near-neutral porcelain background, and a soft terracotta carries the brand instead of teal. The most visible change of the five — worth seeing before deciding how much warmth you actually want.</p>
+      <div style="display:flex;gap:6px;">
+        <span style="width:48px;height:28px;background:#f8f6f3;border:1px solid #dcd6cd;border-radius:6px;"></span>
+        <span style="width:48px;height:28px;background:#ffffff;border:1px solid #dcd6cd;border-radius:6px;"></span>
+        <span style="width:48px;height:28px;background:#e3ddd5;border-radius:6px;"></span>
+        <span style="width:48px;height:28px;background:#a8543a;border-radius:6px;"></span>
+        <span style="width:48px;height:28px;background:#332e2b;border-radius:6px;"></span>
+      </div>
+      <div style="background:var(--bg);border:1px solid var(--line);border-radius:16px;padding:20px;display:flex;flex-direction:column;gap:16px;">
+        <div style="display:flex;align-items:flex-start;gap:16px;">
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px;">
+            <span style="font:600 11px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--brandink);">Roster setup</span>
+            <span style="font:700 26px 'Figtree',system-ui,sans-serif;letter-spacing:-.015em;line-height:1.05;color:var(--ink);">Build the February Roster</span>
+            <span style="font-size:13px;line-height:1.45;color:var(--ink2);">Work through the six steps in any order.</span>
+          </div>
+          <button style="height:40px;padding:0 16px;background:var(--brand);color:var(--onbrand);border:none;border-radius:999px;font:700 13px 'Hanken Grotesk';display:inline-flex;align-items:center;flex:none;cursor:pointer;">Generate roster</button>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line2);border:1px solid var(--line);border-radius:12px;overflow:hidden;">
+          <div style="padding:14px 16px;background:var(--surface);display:flex;flex-direction:column;gap:4px;"><span style="font:700 20px 'Figtree';line-height:1;color:var(--ink);">12</span><span style="font:600 10px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);">Nurses</span></div>
+          <div style="padding:14px 16px;background:var(--surface);display:flex;flex-direction:column;gap:4px;"><span style="font:700 20px 'Figtree';line-height:1;color:var(--ink);">4</span><span style="font:600 10px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);">Shift types</span></div>
+          <div style="padding:14px 16px;background:var(--surface);display:flex;flex-direction:column;gap:4px;"><span style="font:700 20px 'Figtree';line-height:1;color:var(--ink);">28</span><span style="font:600 10px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);">Roster days</span></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:8px;box-shadow:0 1px 2px rgba(60,45,35,.05);">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;"><span style="width:24px;height:24px;background:var(--ink);color:var(--surface);border-radius:8px;display:inline-flex;align-items:center;justify-content:center;font:700 12px 'Spline Sans Mono';">1</span><span style="font:600 9px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--brandink);background:var(--brandtint);padding:4px 8px;border-radius:999px;">Done</span></div>
+            <span style="font:700 15px 'Figtree';color:var(--ink);">Set the Dates</span>
+            <div style="border:1px solid var(--line2);border-radius:8px;padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink2);background:var(--panel);">February 2026 · 28 days</div>
+          </div>
+          <div style="background:var(--surface);border:1px solid var(--brand);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:8px;box-shadow:0 2px 4px rgba(60,45,35,.06),0 8px 20px rgba(60,45,35,.08);">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;"><span style="width:24px;height:24px;background:var(--ink);color:var(--surface);border-radius:8px;display:inline-flex;align-items:center;justify-content:center;font:700 12px 'Spline Sans Mono';">5</span><span style="font:600 9px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--onbrand);background:var(--brand);padding:4px 8px;border-radius:999px;">Current</span></div>
+            <span style="font:700 15px 'Figtree';color:var(--ink);">Requests &amp; Leave</span>
+            <div style="border:1px solid var(--line2);border-radius:8px;padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink2);background:var(--panel);">19 requests entered</div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;background:var(--panel);box-shadow:inset 0 1px 2px rgba(60,45,35,.05);">
+            <button style="height:32px;padding:0 14px;background:var(--brand);color:var(--onbrand);border:none;font:700 12px 'Hanken Grotesk';cursor:pointer;">Grid</button>
+            <button style="height:32px;padding:0 14px;background:transparent;color:var(--ink2);border:none;border-left:1px solid var(--line);font:500 12px 'Hanken Grotesk';cursor:pointer;">Coverage</button>
+          </div>
+          <button style="height:32px;padding:0 14px;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:999px;font:600 12px 'Hanken Grotesk';cursor:pointer;box-shadow:0 1px 2px rgba(60,45,35,.05);">History CSV</button>
+        </div>
+        <div style="border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface);">
+          <div style="display:grid;grid-template-columns:110px repeat(5,1fr);background:var(--panel);border-bottom:1px solid var(--line);">
+            <span style="padding:8px 10px;font:600 10px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);">Nurse</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">1</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">2</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">3</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">4</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">5</span>
+          </div>
+          <div style="display:grid;grid-template-columns:110px repeat(5,1fr);border-bottom:1px solid var(--line2);align-items:center;">
+            <span style="padding:8px 10px;font-size:12px;color:var(--ink);">Aisha Rahman</span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#f8e2b8;color:#7a5310;padding:4px 6px;border-radius:6px;">AM</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#f6dbcd;color:#9a4726;padding:4px 6px;border-radius:6px;">PM</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;color:var(--ink3);font-size:12px;">·</span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#d8e0f2;color:#374777;padding:4px 6px;border-radius:6px;">N</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;color:var(--ink3);font-size:12px;">·</span>
+          </div>
+          <div style="display:grid;grid-template-columns:110px repeat(5,1fr);align-items:center;background:var(--panel-alt);">
+            <span style="padding:8px 10px;font-size:12px;color:var(--ink);">Priya Nair</span>
+            <span style="padding:6px;display:flex;justify-content:center;color:var(--ink3);font-size:12px;">·</span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#f8e2b8;color:#7a5310;padding:4px 6px;border-radius:6px;">AM</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#e4ecd0;color:#586a22;padding:4px 6px;border-radius:6px;">LD</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;color:var(--ink3);font-size:12px;">·</span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#f6dbcd;color:#9a4726;padding:4px 6px;border-radius:6px;">PM</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 1c ============ -->
+    <div id="1c" style="width:600px;flex:none;display:flex;flex-direction:column;gap:14px;--bg:#f3f6f4;--surface:#ffffff;--panel:#eef3f0;--panel-alt:#f9fbfa;--line:#dbe4df;--line2:#e9efeb;--ink:#2f3a36;--ink2:#556059;--ink3:#66706a;--brand:#0b7d68;--brandink:#0a6e5c;--brandtint:#e2f3ee;--onbrand:#ffffff;">
+      <div style="display:flex;align-items:baseline;gap:10px;">
+        <span style="font:700 12px 'Spline Sans Mono',monospace;letter-spacing:.04em;background:#2f2b2a;color:#fff;padding:4px 8px;border-radius:999px;">1c</span>
+        <span style="font:700 22px 'Figtree',system-ui,sans-serif;letter-spacing:-.015em;">Clinical Mint</span>
+      </div>
+      <p style="margin:0;font-size:14px;line-height:1.5;color:#524c49;max-width:56ch;text-wrap:pretty;">2026’s “medical-grade greens” read as clean without reading as cold. The canvas takes the faintest mint cast, the brand brightens, and the ink goes green-slate. Brightest of the five, and the most on-domain for a hospital tool — the trade is that the warmth is now cool-leaning.</p>
+      <div style="display:flex;gap:6px;">
+        <span style="width:48px;height:28px;background:#f3f6f4;border:1px solid #cdd8d2;border-radius:6px;"></span>
+        <span style="width:48px;height:28px;background:#ffffff;border:1px solid #cdd8d2;border-radius:6px;"></span>
+        <span style="width:48px;height:28px;background:#dbe4df;border-radius:6px;"></span>
+        <span style="width:48px;height:28px;background:#0b7d68;border-radius:6px;"></span>
+        <span style="width:48px;height:28px;background:#2f3a36;border-radius:6px;"></span>
+      </div>
+      <div style="background:var(--bg);border:1px solid var(--line);border-radius:16px;padding:20px;display:flex;flex-direction:column;gap:16px;">
+        <div style="display:flex;align-items:flex-start;gap:16px;">
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px;">
+            <span style="font:600 11px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--brandink);">Roster setup</span>
+            <span style="font:700 26px 'Figtree',system-ui,sans-serif;letter-spacing:-.015em;line-height:1.05;color:var(--ink);">Build the February Roster</span>
+            <span style="font-size:13px;line-height:1.45;color:var(--ink2);">Work through the six steps in any order.</span>
+          </div>
+          <button style="height:40px;padding:0 16px;background:var(--brand);color:var(--onbrand);border:none;border-radius:999px;font:700 13px 'Hanken Grotesk';display:inline-flex;align-items:center;flex:none;cursor:pointer;">Generate roster</button>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line2);border:1px solid var(--line);border-radius:12px;overflow:hidden;">
+          <div style="padding:14px 16px;background:var(--surface);display:flex;flex-direction:column;gap:4px;"><span style="font:700 20px 'Figtree';line-height:1;color:var(--ink);">12</span><span style="font:600 10px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);">Nurses</span></div>
+          <div style="padding:14px 16px;background:var(--surface);display:flex;flex-direction:column;gap:4px;"><span style="font:700 20px 'Figtree';line-height:1;color:var(--ink);">4</span><span style="font:600 10px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);">Shift types</span></div>
+          <div style="padding:14px 16px;background:var(--surface);display:flex;flex-direction:column;gap:4px;"><span style="font:700 20px 'Figtree';line-height:1;color:var(--ink);">28</span><span style="font:600 10px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);">Roster days</span></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:8px;box-shadow:0 1px 2px rgba(40,60,52,.05);">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;"><span style="width:24px;height:24px;background:var(--ink);color:var(--surface);border-radius:8px;display:inline-flex;align-items:center;justify-content:center;font:700 12px 'Spline Sans Mono';">1</span><span style="font:600 9px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--brandink);background:var(--brandtint);padding:4px 8px;border-radius:999px;">Done</span></div>
+            <span style="font:700 15px 'Figtree';color:var(--ink);">Set the Dates</span>
+            <div style="border:1px solid var(--line2);border-radius:8px;padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink2);background:var(--panel);">February 2026 · 28 days</div>
+          </div>
+          <div style="background:var(--surface);border:1px solid var(--brand);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:8px;box-shadow:0 2px 4px rgba(40,60,52,.06),0 8px 20px rgba(40,60,52,.08);">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;"><span style="width:24px;height:24px;background:var(--ink);color:var(--surface);border-radius:8px;display:inline-flex;align-items:center;justify-content:center;font:700 12px 'Spline Sans Mono';">5</span><span style="font:600 9px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--onbrand);background:var(--brand);padding:4px 8px;border-radius:999px;">Current</span></div>
+            <span style="font:700 15px 'Figtree';color:var(--ink);">Requests &amp; Leave</span>
+            <div style="border:1px solid var(--line2);border-radius:8px;padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink2);background:var(--panel);">19 requests entered</div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;background:var(--panel);box-shadow:inset 0 1px 2px rgba(40,60,52,.05);">
+            <button style="height:32px;padding:0 14px;background:var(--brand);color:var(--onbrand);border:none;font:700 12px 'Hanken Grotesk';cursor:pointer;">Grid</button>
+            <button style="height:32px;padding:0 14px;background:transparent;color:var(--ink2);border:none;border-left:1px solid var(--line);font:500 12px 'Hanken Grotesk';cursor:pointer;">Coverage</button>
+          </div>
+          <button style="height:32px;padding:0 14px;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:999px;font:600 12px 'Hanken Grotesk';cursor:pointer;box-shadow:0 1px 2px rgba(40,60,52,.05);">History CSV</button>
+        </div>
+        <div style="border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface);">
+          <div style="display:grid;grid-template-columns:110px repeat(5,1fr);background:var(--panel);border-bottom:1px solid var(--line);">
+            <span style="padding:8px 10px;font:600 10px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);">Nurse</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">1</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">2</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">3</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">4</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">5</span>
+          </div>
+          <div style="display:grid;grid-template-columns:110px repeat(5,1fr);border-bottom:1px solid var(--line2);align-items:center;">
+            <span style="padding:8px 10px;font-size:12px;color:var(--ink);">Aisha Rahman</span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#f8e2b8;color:#7a5310;padding:4px 6px;border-radius:6px;">AM</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#f6dbcd;color:#9a4726;padding:4px 6px;border-radius:6px;">PM</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;color:var(--ink3);font-size:12px;">·</span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#d8e0f2;color:#374777;padding:4px 6px;border-radius:6px;">N</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;color:var(--ink3);font-size:12px;">·</span>
+          </div>
+          <div style="display:grid;grid-template-columns:110px repeat(5,1fr);align-items:center;background:var(--panel-alt);">
+            <span style="padding:8px 10px;font-size:12px;color:var(--ink);">Priya Nair</span>
+            <span style="padding:6px;display:flex;justify-content:center;color:var(--ink3);font-size:12px;">·</span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#f8e2b8;color:#7a5310;padding:4px 6px;border-radius:6px;">AM</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#e4ecd0;color:#586a22;padding:4px 6px;border-radius:6px;">LD</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;color:var(--ink3);font-size:12px;">·</span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#f6dbcd;color:#9a4726;padding:4px 6px;border-radius:6px;">PM</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 1d ============ -->
+    <div id="1d" style="width:600px;flex:none;display:flex;flex-direction:column;gap:14px;--bg:#faf7f1;--surface:#fffefb;--panel:#f4efe6;--panel-alt:#fcfaf6;--line:#e6dfd2;--line2:#f0ebe1;--ink:#2e2320;--ink2:#584842;--ink3:#6f5e57;--brand:#1c6b5c;--brandink:#155448;--brandtint:#e3f0ec;--onbrand:#ffffff;">
+      <div style="display:flex;align-items:baseline;gap:10px;">
+        <span style="font:700 12px 'Spline Sans Mono',monospace;letter-spacing:.04em;background:#2f2b2a;color:#fff;padding:4px 8px;border-radius:999px;">1d</span>
+        <span style="font:700 22px 'Figtree',system-ui,sans-serif;letter-spacing:-.015em;">Oat &amp; Espresso</span>
+      </div>
+      <p style="margin:0;font-size:14px;line-height:1.5;color:#524c49;max-width:56ch;text-wrap:pretty;">Keeps the most warmth of the five, but fixes the “dirty” problem by brightening the canvas to oat and pushing the warmth into the <b>ink</b> — deep espresso brown instead of near-black. Reads rich rather than dim. Closest in spirit to today's app.</p>
+      <div style="display:flex;gap:6px;">
+        <span style="width:48px;height:28px;background:#faf7f1;border:1px solid #ddd4c4;border-radius:6px;"></span>
+        <span style="width:48px;height:28px;background:#fffefb;border:1px solid #ddd4c4;border-radius:6px;"></span>
+        <span style="width:48px;height:28px;background:#e6dfd2;border-radius:6px;"></span>
+        <span style="width:48px;height:28px;background:#1c6b5c;border-radius:6px;"></span>
+        <span style="width:48px;height:28px;background:#2e2320;border-radius:6px;"></span>
+      </div>
+      <div style="background:var(--bg);border:1px solid var(--line);border-radius:16px;padding:20px;display:flex;flex-direction:column;gap:16px;">
+        <div style="display:flex;align-items:flex-start;gap:16px;">
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px;">
+            <span style="font:600 11px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--brandink);">Roster setup</span>
+            <span style="font:700 26px 'Figtree',system-ui,sans-serif;letter-spacing:-.015em;line-height:1.05;color:var(--ink);">Build the February Roster</span>
+            <span style="font-size:13px;line-height:1.45;color:var(--ink2);">Work through the six steps in any order.</span>
+          </div>
+          <button style="height:40px;padding:0 16px;background:var(--brand);color:var(--onbrand);border:none;border-radius:999px;font:700 13px 'Hanken Grotesk';display:inline-flex;align-items:center;flex:none;cursor:pointer;">Generate roster</button>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line2);border:1px solid var(--line);border-radius:12px;overflow:hidden;">
+          <div style="padding:14px 16px;background:var(--surface);display:flex;flex-direction:column;gap:4px;"><span style="font:700 20px 'Figtree';line-height:1;color:var(--ink);">12</span><span style="font:600 10px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);">Nurses</span></div>
+          <div style="padding:14px 16px;background:var(--surface);display:flex;flex-direction:column;gap:4px;"><span style="font:700 20px 'Figtree';line-height:1;color:var(--ink);">4</span><span style="font:600 10px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);">Shift types</span></div>
+          <div style="padding:14px 16px;background:var(--surface);display:flex;flex-direction:column;gap:4px;"><span style="font:700 20px 'Figtree';line-height:1;color:var(--ink);">28</span><span style="font:600 10px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);">Roster days</span></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:8px;box-shadow:0 1px 2px rgba(70,50,35,.06);">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;"><span style="width:24px;height:24px;background:var(--ink);color:var(--surface);border-radius:8px;display:inline-flex;align-items:center;justify-content:center;font:700 12px 'Spline Sans Mono';">1</span><span style="font:600 9px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--brandink);background:var(--brandtint);padding:4px 8px;border-radius:999px;">Done</span></div>
+            <span style="font:700 15px 'Figtree';color:var(--ink);">Set the Dates</span>
+            <div style="border:1px solid var(--line2);border-radius:8px;padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink2);background:var(--panel);">February 2026 · 28 days</div>
+          </div>
+          <div style="background:var(--surface);border:1px solid var(--brand);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:8px;box-shadow:0 2px 4px rgba(70,50,35,.07),0 8px 20px rgba(70,50,35,.09);">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;"><span style="width:24px;height:24px;background:var(--ink);color:var(--surface);border-radius:8px;display:inline-flex;align-items:center;justify-content:center;font:700 12px 'Spline Sans Mono';">5</span><span style="font:600 9px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--onbrand);background:var(--brand);padding:4px 8px;border-radius:999px;">Current</span></div>
+            <span style="font:700 15px 'Figtree';color:var(--ink);">Requests &amp; Leave</span>
+            <div style="border:1px solid var(--line2);border-radius:8px;padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink2);background:var(--panel);">19 requests entered</div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;background:var(--panel);box-shadow:inset 0 1px 2px rgba(70,50,35,.06);">
+            <button style="height:32px;padding:0 14px;background:var(--brand);color:var(--onbrand);border:none;font:700 12px 'Hanken Grotesk';cursor:pointer;">Grid</button>
+            <button style="height:32px;padding:0 14px;background:transparent;color:var(--ink2);border:none;border-left:1px solid var(--line);font:500 12px 'Hanken Grotesk';cursor:pointer;">Coverage</button>
+          </div>
+          <button style="height:32px;padding:0 14px;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:999px;font:600 12px 'Hanken Grotesk';cursor:pointer;box-shadow:0 1px 2px rgba(70,50,35,.06);">History CSV</button>
+        </div>
+        <div style="border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface);">
+          <div style="display:grid;grid-template-columns:110px repeat(5,1fr);background:var(--panel);border-bottom:1px solid var(--line);">
+            <span style="padding:8px 10px;font:600 10px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);">Nurse</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">1</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">2</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">3</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">4</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">5</span>
+          </div>
+          <div style="display:grid;grid-template-columns:110px repeat(5,1fr);border-bottom:1px solid var(--line2);align-items:center;">
+            <span style="padding:8px 10px;font-size:12px;color:var(--ink);">Aisha Rahman</span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#f8e2b8;color:#7a5310;padding:4px 6px;border-radius:6px;">AM</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#f6dbcd;color:#9a4726;padding:4px 6px;border-radius:6px;">PM</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;color:var(--ink3);font-size:12px;">·</span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#d8e0f2;color:#374777;padding:4px 6px;border-radius:6px;">N</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;color:var(--ink3);font-size:12px;">·</span>
+          </div>
+          <div style="display:grid;grid-template-columns:110px repeat(5,1fr);align-items:center;background:var(--panel-alt);">
+            <span style="padding:8px 10px;font-size:12px;color:var(--ink);">Priya Nair</span>
+            <span style="padding:6px;display:flex;justify-content:center;color:var(--ink3);font-size:12px;">·</span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#f8e2b8;color:#7a5310;padding:4px 6px;border-radius:6px;">AM</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#e4ecd0;color:#586a22;padding:4px 6px;border-radius:6px;">LD</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;color:var(--ink3);font-size:12px;">·</span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#f6dbcd;color:#9a4726;padding:4px 6px;border-radius:6px;">PM</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 1e ============ -->
+    <div id="1e" style="width:600px;flex:none;display:flex;flex-direction:column;gap:14px;--bg:#fcfbf9;--surface:#ffffff;--panel:#f6f4f1;--panel-alt:#fbfaf8;--line:#e4e1dc;--line2:#efedea;--ink:#33302e;--ink2:#5c5754;--ink3:#6d6864;--brand:#0f7a6c;--brandink:#0c6659;--brandtint:#eaf4f1;--onbrand:#ffffff;">
+      <div style="display:flex;align-items:baseline;gap:10px;">
+        <span style="font:700 12px 'Spline Sans Mono',monospace;letter-spacing:.04em;background:#2f2b2a;color:#fff;padding:4px 8px;border-radius:999px;">1e</span>
+        <span style="font:700 22px 'Figtree',system-ui,sans-serif;letter-spacing:-.015em;">Paper</span>
+      </div>
+      <p style="margin:0;font-size:14px;line-height:1.5;color:#524c49;max-width:56ch;text-wrap:pretty;">The high-key extreme. Canvas almost white, cards separated by hairlines rather than fills, and the only warmth left is in the ink and the rules. Maximum clarity for dense roster grids — the risk is that a 28-day table starts to feel like a spreadsheet.</p>
+      <div style="display:flex;gap:6px;">
+        <span style="width:48px;height:28px;background:#fcfbf9;border:1px solid #dedbd6;border-radius:6px;"></span>
+        <span style="width:48px;height:28px;background:#ffffff;border:1px solid #dedbd6;border-radius:6px;"></span>
+        <span style="width:48px;height:28px;background:#e4e1dc;border-radius:6px;"></span>
+        <span style="width:48px;height:28px;background:#0f7a6c;border-radius:6px;"></span>
+        <span style="width:48px;height:28px;background:#33302e;border-radius:6px;"></span>
+      </div>
+      <div style="background:var(--bg);border:1px solid var(--line);border-radius:16px;padding:20px;display:flex;flex-direction:column;gap:16px;">
+        <div style="display:flex;align-items:flex-start;gap:16px;">
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px;">
+            <span style="font:600 11px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--brandink);">Roster setup</span>
+            <span style="font:700 26px 'Figtree',system-ui,sans-serif;letter-spacing:-.015em;line-height:1.05;color:var(--ink);">Build the February Roster</span>
+            <span style="font-size:13px;line-height:1.45;color:var(--ink2);">Work through the six steps in any order.</span>
+          </div>
+          <button style="height:40px;padding:0 16px;background:var(--brand);color:var(--onbrand);border:none;border-radius:999px;font:700 13px 'Hanken Grotesk';display:inline-flex;align-items:center;flex:none;cursor:pointer;">Generate roster</button>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line2);border:1px solid var(--line);border-radius:12px;overflow:hidden;">
+          <div style="padding:14px 16px;background:var(--surface);display:flex;flex-direction:column;gap:4px;"><span style="font:700 20px 'Figtree';line-height:1;color:var(--ink);">12</span><span style="font:600 10px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);">Nurses</span></div>
+          <div style="padding:14px 16px;background:var(--surface);display:flex;flex-direction:column;gap:4px;"><span style="font:700 20px 'Figtree';line-height:1;color:var(--ink);">4</span><span style="font:600 10px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);">Shift types</span></div>
+          <div style="padding:14px 16px;background:var(--surface);display:flex;flex-direction:column;gap:4px;"><span style="font:700 20px 'Figtree';line-height:1;color:var(--ink);">28</span><span style="font:600 10px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);">Roster days</span></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:8px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;"><span style="width:24px;height:24px;background:var(--ink);color:var(--surface);border-radius:8px;display:inline-flex;align-items:center;justify-content:center;font:700 12px 'Spline Sans Mono';">1</span><span style="font:600 9px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--brandink);background:var(--brandtint);padding:4px 8px;border-radius:999px;">Done</span></div>
+            <span style="font:700 15px 'Figtree';color:var(--ink);">Set the Dates</span>
+            <div style="border:1px solid var(--line2);border-radius:8px;padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink2);background:var(--panel);">February 2026 · 28 days</div>
+          </div>
+          <div style="background:var(--surface);border:1.5px solid var(--brand);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:8px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;"><span style="width:24px;height:24px;background:var(--ink);color:var(--surface);border-radius:8px;display:inline-flex;align-items:center;justify-content:center;font:700 12px 'Spline Sans Mono';">5</span><span style="font:600 9px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--onbrand);background:var(--brand);padding:4px 8px;border-radius:999px;">Current</span></div>
+            <span style="font:700 15px 'Figtree';color:var(--ink);">Requests &amp; Leave</span>
+            <div style="border:1px solid var(--line2);border-radius:8px;padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink2);background:var(--panel);">19 requests entered</div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;background:var(--panel);">
+            <button style="height:32px;padding:0 14px;background:var(--brand);color:var(--onbrand);border:none;font:700 12px 'Hanken Grotesk';cursor:pointer;">Grid</button>
+            <button style="height:32px;padding:0 14px;background:transparent;color:var(--ink2);border:none;border-left:1px solid var(--line);font:500 12px 'Hanken Grotesk';cursor:pointer;">Coverage</button>
+          </div>
+          <button style="height:32px;padding:0 14px;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:999px;font:600 12px 'Hanken Grotesk';cursor:pointer;">History CSV</button>
+        </div>
+        <div style="border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface);">
+          <div style="display:grid;grid-template-columns:110px repeat(5,1fr);background:var(--panel);border-bottom:1px solid var(--line);">
+            <span style="padding:8px 10px;font:600 10px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);">Nurse</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">1</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">2</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">3</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">4</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">5</span>
+          </div>
+          <div style="display:grid;grid-template-columns:110px repeat(5,1fr);border-bottom:1px solid var(--line2);align-items:center;">
+            <span style="padding:8px 10px;font-size:12px;color:var(--ink);">Aisha Rahman</span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#f8e2b8;color:#7a5310;padding:4px 6px;border-radius:6px;">AM</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#f6dbcd;color:#9a4726;padding:4px 6px;border-radius:6px;">PM</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;color:var(--ink3);font-size:12px;">·</span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#d8e0f2;color:#374777;padding:4px 6px;border-radius:6px;">N</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;color:var(--ink3);font-size:12px;">·</span>
+          </div>
+          <div style="display:grid;grid-template-columns:110px repeat(5,1fr);align-items:center;background:var(--panel-alt);">
+            <span style="padding:8px 10px;font-size:12px;color:var(--ink);">Priya Nair</span>
+            <span style="padding:6px;display:flex;justify-content:center;color:var(--ink3);font-size:12px;">·</span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#f8e2b8;color:#7a5310;padding:4px 6px;border-radius:6px;">AM</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#e4ecd0;color:#586a22;padding:4px 6px;border-radius:6px;">LD</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;color:var(--ink3);font-size:12px;">·</span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#f6dbcd;color:#9a4726;padding:4px 6px;border-radius:6px;">PM</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ today, for reference ============ -->
+    <div id="1x" style="width:600px;flex:none;display:flex;flex-direction:column;gap:14px;--bg:#ede5dc;--surface:#fffcfa;--panel:#f4ebe2;--panel-alt:#faf5f0;--line:#e4d8cd;--line2:#efe6dd;--ink:#423b3d;--ink2:#5f5659;--ink3:#6f6467;--brand:#0f7a6c;--brandink:#0c6659;--brandtint:#e4f1ee;--onbrand:#ffffff;">
+      <div style="display:flex;align-items:baseline;gap:10px;">
+        <span style="font:700 12px 'Spline Sans Mono',monospace;letter-spacing:.04em;background:#6f6a66;color:#fff;padding:4px 8px;border-radius:999px;">now</span>
+        <span style="font:700 22px 'Figtree',system-ui,sans-serif;letter-spacing:-.015em;color:#635d59;">Today, for comparison</span>
+      </div>
+      <p style="margin:0;font-size:14px;line-height:1.5;color:#635d59;max-width:56ch;text-wrap:pretty;">The current palette at the same scale, so the shift is measurable rather than remembered.</p>
+      <div style="display:flex;gap:6px;">
+        <span style="width:48px;height:28px;background:#ede5dc;border:1px solid #d5c7ba;border-radius:6px;"></span>
+        <span style="width:48px;height:28px;background:#fffcfa;border:1px solid #d5c7ba;border-radius:6px;"></span>
+        <span style="width:48px;height:28px;background:#e4d8cd;border-radius:6px;"></span>
+        <span style="width:48px;height:28px;background:#0f7a6c;border-radius:6px;"></span>
+        <span style="width:48px;height:28px;background:#423b3d;border-radius:6px;"></span>
+      </div>
+      <div style="background:var(--bg);border:1px solid var(--line);border-radius:16px;padding:20px;display:flex;flex-direction:column;gap:16px;">
+        <div style="display:flex;align-items:flex-start;gap:16px;">
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px;">
+            <span style="font:600 11px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--brandink);">Roster setup</span>
+            <span style="font:700 26px 'Figtree',system-ui,sans-serif;letter-spacing:-.015em;line-height:1.05;color:var(--ink);">Build the February Roster</span>
+            <span style="font-size:13px;line-height:1.45;color:var(--ink2);">Work through the six steps in any order.</span>
+          </div>
+          <button style="height:40px;padding:0 16px;background:var(--brand);color:var(--onbrand);border:none;border-radius:999px;font:700 13px 'Hanken Grotesk';display:inline-flex;align-items:center;flex:none;cursor:pointer;">Generate roster</button>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line2);border:1px solid var(--line);border-radius:12px;overflow:hidden;">
+          <div style="padding:14px 16px;background:var(--surface);display:flex;flex-direction:column;gap:4px;"><span style="font:700 20px 'Figtree';line-height:1;color:var(--ink);">12</span><span style="font:600 10px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);">Nurses</span></div>
+          <div style="padding:14px 16px;background:var(--surface);display:flex;flex-direction:column;gap:4px;"><span style="font:700 20px 'Figtree';line-height:1;color:var(--ink);">4</span><span style="font:600 10px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);">Shift types</span></div>
+          <div style="padding:14px 16px;background:var(--surface);display:flex;flex-direction:column;gap:4px;"><span style="font:700 20px 'Figtree';line-height:1;color:var(--ink);">28</span><span style="font:600 10px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);">Roster days</span></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <div style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:8px;box-shadow:0 1px 2px rgba(92,62,45,.05);">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;"><span style="width:24px;height:24px;background:var(--ink);color:var(--surface);border-radius:8px;display:inline-flex;align-items:center;justify-content:center;font:700 12px 'Spline Sans Mono';">1</span><span style="font:600 9px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--brandink);background:var(--brandtint);padding:4px 8px;border-radius:999px;">Done</span></div>
+            <span style="font:700 15px 'Figtree';color:var(--ink);">Set the Dates</span>
+            <div style="border:1px solid var(--line2);border-radius:8px;padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink2);background:var(--panel);">February 2026 · 28 days</div>
+          </div>
+          <div style="background:var(--surface);border:1px solid var(--brand);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:8px;box-shadow:0 2px 4px rgba(92,62,45,.06),0 8px 20px rgba(92,62,45,.09);">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;"><span style="width:24px;height:24px;background:var(--ink);color:var(--surface);border-radius:8px;display:inline-flex;align-items:center;justify-content:center;font:700 12px 'Spline Sans Mono';">5</span><span style="font:600 9px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--onbrand);background:var(--brand);padding:4px 8px;border-radius:999px;">Current</span></div>
+            <span style="font:700 15px 'Figtree';color:var(--ink);">Requests &amp; Leave</span>
+            <div style="border:1px solid var(--line2);border-radius:8px;padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink2);background:var(--panel);">19 requests entered</div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;background:var(--panel);box-shadow:inset 0 1px 2px rgba(92,62,45,.05);">
+            <button style="height:32px;padding:0 14px;background:var(--brand);color:var(--onbrand);border:none;font:700 12px 'Hanken Grotesk';cursor:pointer;">Grid</button>
+            <button style="height:32px;padding:0 14px;background:transparent;color:var(--ink2);border:none;border-left:1px solid var(--line);font:500 12px 'Hanken Grotesk';cursor:pointer;">Coverage</button>
+          </div>
+          <button style="height:32px;padding:0 14px;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:999px;font:600 12px 'Hanken Grotesk';cursor:pointer;box-shadow:0 1px 2px rgba(92,62,45,.05);">History CSV</button>
+        </div>
+        <div style="border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface);">
+          <div style="display:grid;grid-template-columns:110px repeat(5,1fr);background:var(--panel);border-bottom:1px solid var(--line);">
+            <span style="padding:8px 10px;font:600 10px 'Hanken Grotesk';letter-spacing:.04em;text-transform:uppercase;color:var(--ink3);">Nurse</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">1</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">2</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">3</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">4</span>
+            <span style="padding:8px 10px;font:600 11px 'Spline Sans Mono';color:var(--ink3);text-align:center;">5</span>
+          </div>
+          <div style="display:grid;grid-template-columns:110px repeat(5,1fr);border-bottom:1px solid var(--line2);align-items:center;">
+            <span style="padding:8px 10px;font-size:12px;color:var(--ink);">Aisha Rahman</span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#f8e2b8;color:#7a5310;padding:4px 6px;border-radius:6px;">AM</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#f6dbcd;color:#9a4726;padding:4px 6px;border-radius:6px;">PM</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;color:var(--ink3);font-size:12px;">·</span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#d8e0f2;color:#374777;padding:4px 6px;border-radius:6px;">N</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;color:var(--ink3);font-size:12px;">·</span>
+          </div>
+          <div style="display:grid;grid-template-columns:110px repeat(5,1fr);align-items:center;background:var(--panel-alt);">
+            <span style="padding:8px 10px;font-size:12px;color:var(--ink);">Priya Nair</span>
+            <span style="padding:6px;display:flex;justify-content:center;color:var(--ink3);font-size:12px;">·</span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#f8e2b8;color:#7a5310;padding:4px 6px;border-radius:6px;">AM</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#e4ecd0;color:#586a22;padding:4px 6px;border-radius:6px;">LD</span></span>
+            <span style="padding:6px;display:flex;justify-content:center;color:var(--ink3);font-size:12px;">·</span>
+            <span style="padding:6px;display:flex;justify-content:center;"><span style="font:700 10px 'Spline Sans Mono';background:#f6dbcd;color:#9a4726;padding:4px 6px;border-radius:6px;">PM</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+</x-dc>
+</body>
+</html>

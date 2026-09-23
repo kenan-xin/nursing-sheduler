@@ -1,0 +1,23 @@
+id: test-module-loader-call
+valid:
+  # Resolving a first-party module by ordinary import is not building a loader.
+  - |
+    import { getAssistantDb } from "./db";
+  # `require(...)` itself is owned by `test-capability-acquisition`; this rule is about the
+  # FACTORY that manufactures a loader, so an unrelated call named otherwise is fine.
+  - |
+    const resolved = resolveFixturePath("golden.json");
+  # A local helper that merely SHARES a word with the API is not the API.
+  - |
+    const requireContext = buildRequireContext();
+invalid:
+  - |
+    const require = createRequire(import.meta.url);
+  - |
+    const require = createRequire(join(WEB_ROOT, "package.json"));
+  # The namespace-import spelling, which the specifier restriction alone would not see once
+  # the module arrived under another name.
+  - |
+    const require = mod.createRequire(import.meta.url);
+  - |
+    const require = nodeModule.createRequire(baseUrl);

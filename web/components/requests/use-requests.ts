@@ -18,7 +18,7 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import { toast } from "sonner";
-import { commitPaintGesture, useHotStore, useScenarioStore } from "@/lib/store";
+import { commitPaintGesture, useHotStore, useScenarioStore, scenarioCommands } from "@/lib/store";
 import { generateDateItems, hasCompleteRange, type DateRange } from "@/lib/dates";
 import {
   RESERVED_SHIFT_TYPE,
@@ -268,7 +268,7 @@ export function useRequests({
     if (historyDraftRef.current.size === 0) return;
     const drafts = historyDraftRef.current;
     historyDraftRef.current = new Map();
-    useScenarioStore.getState().mutateScenario((s) => ({
+    scenarioCommands.mutate((s) => ({
       staff: s.staff.map((p) => (drafts.has(p.id) ? { ...p, history: drafts.get(p.id)! } : p)),
     }));
   }
@@ -279,7 +279,7 @@ export function useRequests({
   useEffect(() => {
     function handleMouseUp() {
       if (dragCellTypeRef.current === "preference") {
-        commitPaintGesture(useScenarioStore, useHotStore);
+        void commitPaintGesture(useHotStore);
       } else if (dragCellTypeRef.current === "history") {
         flushHistoryGesture();
       }
@@ -325,71 +325,87 @@ export function useRequests({
     applyHistoryPaintCell(person, columnIndex);
   }
 
+  /**
+   * Save one cell's preferences as a QUEUE-HEAD TRANSFORM over the committed matrix.
+   *
+   * The whole matrix used to be assembled from the render snapshot before enqueueing,
+   * so a cell save that followed another edit carried a `reqData` built from state
+   * that had already moved — and, being a whole-matrix write, silently reverted it.
+   * Only this coordinate's cells are replaced now, and every other cell comes from
+   * whatever the previous command committed.
+   */
   function commitCellEdit(person: PersonRef, date: DateRef, result: CellEditorResult): void {
-    const scenario = useScenarioStore.getState();
-    const atCoordinate = scenario.reqData.filter((c) => c.person === person && c.date === date);
-    const others = scenario.reqData.filter((c) => !(c.person === person && c.date === date));
-    // Preserve durable identity per selector/day-state so an edit re-using an
-    // existing selector keeps its `uid` (Workspace identity never depends on array
-    // position); a genuinely new cell is minted a fresh `uid` at creation (T17r
-    // review P1 — every manual create path allocates identity).
-    const uidBySelector = new Map<string, string>();
-    for (const cell of atCoordinate) {
-      if (cell.uid) uidBySelector.set(cellSelectorKey(cell), cell.uid);
-    }
-    const uidFor = (selector: string): string => uidBySelector.get(selector) ?? crypto.randomUUID();
+    scenarioCommands.setReqData((scenario) => {
+      const atCoordinate = scenario.reqData.filter((c) => c.person === person && c.date === date);
+      const others = scenario.reqData.filter((c) => !(c.person === person && c.date === date));
+      // Preserve durable identity per selector/day-state so an edit re-using an
+      // existing selector keeps its `uid` (Workspace identity never depends on array
+      // position); a genuinely new cell is minted a fresh `uid` at creation (T17r
+      // review P1 — every manual create path allocates identity).
+      const uidBySelector = new Map<string, string>();
+      for (const cell of atCoordinate) {
+        if (cell.uid) uidBySelector.set(cellSelectorKey(cell), cell.uid);
+      }
+      const uidFor = (selector: string): string =>
+        uidBySelector.get(selector) ?? crypto.randomUUID();
 
-    let cells: UiRequestCell[] = [];
-    if (result.kind === "leave") cells = [{ kind: "leave", person, date, uid: uidFor("leave") }];
-    else if (result.kind === "off")
-      cells = [{ kind: "off", person, date, weight: result.weight ?? 0, uid: uidFor("off") }];
-    else if (result.kind === "requests") {
-      // Empty prefs is an erase (parity note): `cells` stays `[]`.
-      cells = result.prefs.map((p) => ({
-        kind: "request",
-        person,
-        date,
-        shiftType: p.shiftType,
-        weight: p.weight,
-        uid: uidFor(`request:${p.shiftType}`),
-      }));
-    }
-    scenario.setReqData([...others, ...cells]);
+      let cells: UiRequestCell[] = [];
+      if (result.kind === "leave") cells = [{ kind: "leave", person, date, uid: uidFor("leave") }];
+      else if (result.kind === "off")
+        cells = [{ kind: "off", person, date, weight: result.weight ?? 0, uid: uidFor("off") }];
+      else if (result.kind === "requests") {
+        // Empty prefs is an erase (parity note): `cells` stays `[]`.
+        cells = result.prefs.map((p) => ({
+          kind: "request",
+          person,
+          date,
+          shiftType: p.shiftType,
+          weight: p.weight,
+          uid: uidFor(`request:${p.shiftType}`),
+        }));
+      }
+      return [...others, ...cells];
+    });
   }
 
   function clearCell(person: PersonRef, date: DateRef): void {
-    const scenario = useScenarioStore.getState();
-    scenario.setReqData(scenario.reqData.filter((c) => !(c.person === person && c.date === date)));
+    // Filtered inside the command's updater so the erase reconciles against the
+    // committed matrix, not against whatever this render happened to read.
+    scenarioCommands.setReqData((s) =>
+      s.reqData.filter((c) => !(c.person === person && c.date === date)),
+    );
   }
 
+  // History writes resolve the TARGET POSITION at the queue head as well as the
+  // replacement list. The position is derived from the person's current history
+  // length and the column count, so computing it from the render snapshot and then
+  // writing later could apply the entry at the wrong slot after a concurrent edit.
   function commitHistorySet(personId: PersonRef, historyIndex: number, shiftType: string): void {
-    const scenario = useScenarioStore.getState();
-    const person = scenario.staff.find((p) => p.id === personId);
-    if (!person) return;
-    const currentHistory = person.history ?? [];
-    const count = historyColumnCount(scenario.staff);
-    const position = computeHistoryApplyPosition(historyIndex, currentHistory.length, count);
-    const next =
-      position.action === "append"
-        ? prependHistoryEntry(currentHistory, shiftType)
-        : updateHistoryAtPosition(currentHistory, position.position, shiftType);
-    scenario.mutateScenario((s) => ({
-      staff: s.staff.map((p) => (p.id === personId ? { ...p, history: next } : p)),
-    }));
+    scenarioCommands.mutate((s) => {
+      const person = s.staff.find((p) => p.id === personId);
+      if (!person) return null;
+      const currentHistory = person.history ?? [];
+      const count = historyColumnCount(s.staff);
+      const position = computeHistoryApplyPosition(historyIndex, currentHistory.length, count);
+      const next =
+        position.action === "append"
+          ? prependHistoryEntry(currentHistory, shiftType)
+          : updateHistoryAtPosition(currentHistory, position.position, shiftType);
+      return { staff: s.staff.map((p) => (p.id === personId ? { ...p, history: next } : p)) };
+    });
   }
 
   function commitHistoryClear(personId: PersonRef, historyIndex: number): void {
-    const scenario = useScenarioStore.getState();
-    const person = scenario.staff.find((p) => p.id === personId);
-    if (!person) return;
-    const currentHistory = person.history ?? [];
-    const count = historyColumnCount(scenario.staff);
-    const clearPos = computeHistoryClearPosition(historyIndex, currentHistory.length, count);
-    if (clearPos === null) return;
-    const next = truncateHistoryThroughPosition(currentHistory, clearPos);
-    scenario.mutateScenario((s) => ({
-      staff: s.staff.map((p) => (p.id === personId ? { ...p, history: next } : p)),
-    }));
+    scenarioCommands.mutate((s) => {
+      const person = s.staff.find((p) => p.id === personId);
+      if (!person) return null;
+      const currentHistory = person.history ?? [];
+      const count = historyColumnCount(s.staff);
+      const clearPos = computeHistoryClearPosition(historyIndex, currentHistory.length, count);
+      if (clearPos === null) return null;
+      const next = truncateHistoryThroughPosition(currentHistory, clearPos);
+      return { staff: s.staff.map((p) => (p.id === personId ? { ...p, history: next } : p)) };
+    });
   }
 
   function applyRequestsCsv(deltas: ShiftRequestDelta[], weight: number): void {
@@ -405,6 +421,9 @@ export function useRequests({
     const typedIdByString = new Map<string, PersonRef>(
       useScenarioStore.getState().staff.map((p) => [String(p.id), p.id]),
     );
+    // NOTE: the id map is read from the projection because the CSV rows were parsed
+    // against the roster the user was looking at; the staged cells themselves are
+    // folded into the committed matrix at the queue head by `setReqData` below.
     const hot = useHotStore.getState();
     hot.beginPaint();
     for (const d of deltas) {
@@ -412,13 +431,13 @@ export function useRequests({
       if (person === undefined) continue;
       hot.stagePaintRequestDelta(person, d.dateId, d.shiftType, weight);
     }
-    commitPaintGesture(useScenarioStore, useHotStore);
+    void commitPaintGesture(useHotStore);
   }
 
   function applyHistoryCsv(entries: PeopleHistoryEntry[]): void {
     if (entries.length === 0) return;
     const byPerson = new Map(entries.map((e) => [e.personId, e]));
-    useScenarioStore.getState().mutateScenario((s) => ({
+    scenarioCommands.mutate((s) => ({
       staff: s.staff.map((p) => {
         const entry = byPerson.get(String(p.id));
         if (!entry) return p;
@@ -431,33 +450,42 @@ export function useRequests({
   }
 
   function clearAllRequests(): void {
-    useScenarioStore.getState().setReqData([]);
+    scenarioCommands.setReqData([]);
   }
 
   function clearAllHistory(): void {
-    useScenarioStore.getState().mutateScenario((s) => ({
+    scenarioCommands.mutate((s) => ({
       staff: s.staff.map((p) => ({ ...p, history: [] })),
     }));
   }
 
+  /**
+   * Clear by shape, classified against the COMMITTED matrix at the queue head — the
+   * scope sets are derived there too, so a clear cannot be classified against a
+   * roster or date range that has since changed.
+   *
+   * A clear that removes nothing (the shape has no cells) is a semantic no-op the
+   * repository suppresses, so it spends no revision and no Undo entry.
+   */
   function clearRequestsByShape(
     personScope: "individual" | "group",
     dateScope: "individual" | "group",
   ): void {
-    const scenario = useScenarioStore.getState();
-    const individualPersonIds = new Set(scenario.staff.map((p) => p.id));
-    const scopeRange: DateRange = { start: scenario.rangeStart, end: scenario.rangeEnd };
-    const individualDateIds = hasCompleteRange(scopeRange)
-      ? new Set<DateRef>(generateDateItems(scopeRange).map((d) => d.id))
-      : new Set<DateRef>();
-    const next = scenario.reqData.filter((cell) => {
-      const personIsIndividual = individualPersonIds.has(cell.person);
-      const dateIsIndividual = individualDateIds.has(cell.date);
-      const matchesPerson = personScope === "individual" ? personIsIndividual : !personIsIndividual;
-      const matchesDate = dateScope === "individual" ? dateIsIndividual : !dateIsIndividual;
-      return !(matchesPerson && matchesDate);
+    scenarioCommands.setReqData((scenario) => {
+      const individualPersonIds = new Set(scenario.staff.map((p) => p.id));
+      const scopeRange: DateRange = { start: scenario.rangeStart, end: scenario.rangeEnd };
+      const individualDateIds = hasCompleteRange(scopeRange)
+        ? new Set<DateRef>(generateDateItems(scopeRange).map((d) => d.id))
+        : new Set<DateRef>();
+      return scenario.reqData.filter((cell) => {
+        const personIsIndividual = individualPersonIds.has(cell.person);
+        const dateIsIndividual = individualDateIds.has(cell.date);
+        const matchesPerson =
+          personScope === "individual" ? personIsIndividual : !personIsIndividual;
+        const matchesDate = dateScope === "individual" ? dateIsIndividual : !dateIsIndividual;
+        return !(matchesPerson && matchesDate);
+      });
     });
-    scenario.setReqData(next);
   }
 
   return {

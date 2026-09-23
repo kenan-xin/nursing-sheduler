@@ -8,7 +8,7 @@
 // bounded column set (history + date-group + date-item) renders fully per column, so
 // the sticky Nurse column and sticky header stay simple `position: sticky` cells.
 
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { DateRef, PersonRef, UiPerson, UiRequestCell } from "@/lib/scenario";
 import {
@@ -43,8 +43,16 @@ export interface RequestsMatrixProps {
   mode: "normal" | "quick";
   /** `JSON.stringify([person, colRef])` currently staged (drag highlight); optional. */
   stagedKeys?: Set<string>;
-  onCellClick(person: PersonRef, colRef: DateRef): void;
-  onHistoryClick(person: PersonRef, columnIndex: number): void;
+  /**
+   * `origin` is the exact DOM element the user activated. The coordinate stays
+   * the domain identity; the element is carried separately so the container can
+   * return focus to the very cell that opened the editor, rather than
+   * re-deriving one by querying the document for a coordinate (which would find
+   * a different node after a re-render, or none at all once virtualization has
+   * recycled the row).
+   */
+  onCellClick(person: PersonRef, colRef: DateRef, origin: HTMLElement): void;
+  onHistoryClick(person: PersonRef, columnIndex: number, origin: HTMLElement): void;
   onCellPointerDown(person: PersonRef, colRef: DateRef): void;
   onCellPointerEnter(person: PersonRef, colRef: DateRef): void;
   onHistoryPointerDown(person: PersonRef, columnIndex: number): void;
@@ -52,12 +60,24 @@ export interface RequestsMatrixProps {
 }
 
 const ROW_HEIGHT = 40;
+/**
+ * Coarse-pointer row height. The matrix is a dense data grid (40px rows on a
+ * precise pointer, matching the prototype), but its normal-mode cells are real
+ * `<button>`s, so the universal coarse-pointer target battery measures them. On
+ * a touch device each row grows to the ratified 44px minimum (DESIGN.md §5
+ * "Touch/coarse-pointer rule", decision D10) so a tap lands reliably; the dense
+ * instrument character is preserved on desktop. The growth is pointer-aware,
+ * not theme-aware, and applies to every cell in the row at once.
+ */
+const ROW_HEIGHT_COARSE = 44;
 /** Header row is taller than a body row (ROW_HEIGHT) to fit the date-group icon +
  *  count, and the date-item weekday sub-label + holiday dot (prototype
  *  ScreenRequests.dc.html:98-102). */
 const HEADER_ROW_HEIGHT = 52;
 const NURSE_COL_WIDTH = 176;
 const HISTORY_COL_WIDTH = 40;
+/** Coarse history-column width: the 40px slot is below the 44px touch floor. */
+const HISTORY_COL_COARSE = 44;
 const DATE_GROUP_COL_WIDTH = 76;
 const DATE_ITEM_COL_WIDTH = 56;
 
@@ -74,6 +94,27 @@ function columnWidth(column: RequestColumn): number {
 /** Shared empty membership for coordinates with no cells — avoids a fresh `[]`
  *  allocation per empty cell and keeps a stable reference across renders. */
 const EMPTY_CELLS: readonly UiRequestCell[] = [];
+
+// Actionable origins are native `<button type="button">` elements rendered as
+// direct grid children. An earlier revision used `div role="button"` with a
+// hand-written Enter/Space handler, on the stated grounds that a native button
+// would "introduce its own box and defeat the sticky/virtual column math". A
+// cold Chromium probe disproved that: substituting a native button on a live
+// cell preserved the box exactly (56×40) along with its computed flex, padding,
+// border, background, font and alignment. Tailwind's preflight already strips
+// the UA button chrome, so the layout classes carry the geometry either way.
+//
+// The platform therefore supplies what the ARIA promise was re-implementing:
+// pointer, Enter and Space activation, each exactly once, with Space's page
+// scroll suppressed by the browser rather than by a `preventDefault` of ours.
+//
+// `type="button"` is explicit because the default is `submit`, and these buttons
+// may sit inside a form on some future route.
+//
+// NOT changed here (see the accessibility priority decision): these remain
+// ordinary tab stops, so the product-scale tab-order problem is unchanged and
+// stays on the P4 scalable-grid backlog, as does the disconnected-origin focus
+// lifecycle.
 
 /** The `(person, date)` coordinate key. Matches the container's `stagedKeys`
  *  convention (`JSON.stringify([person, colRef])`, see `use-requests.ts`) so the
@@ -174,16 +215,23 @@ interface CellVisual {
 function cellVisual(view: CellView, cellsAt: readonly UiRequestCell[]): CellVisual {
   if (view.empty) return { className: "text-ink3" };
   if (view.dayState === "leave")
+    // `--brandtint` is the selection/pin language, not a status tint, so the
+    // Redundant Signal Rule's status-ink pairing does not govern it; brandink is
+    // the correct paired foreground (DESIGN.md §6 reserves this pair for pins).
     return { className: "bg-brandtint text-brandink border border-brand" };
-  if (view.dayState === "off") return { className: "bg-errortint text-error border border-error" };
+  if (view.dayState === "off")
+    // errortint is a status tint: it must carry its paired --errorink, never the
+    // base --error, so the cell stays legible in dark mode where the two differ
+    // and status is never carried by colour alone (DESIGN.md §2).
+    return { className: "bg-errortint text-errorink border border-error" };
   const prefs = cellsAt.map(cellPreferenceOf);
   const sign = aggregateSign(prefs);
   const alpha = cellAlpha(prefs);
   const base =
     sign === "all-positive"
-      ? "bg-successtint text-success"
+      ? "bg-successtint text-successink"
       : sign === "all-negative"
-        ? "bg-warntint text-warn"
+        ? "bg-warntint text-warnink"
         : "bg-panel text-ink2";
   return { className: `${base} border border-line2`, style: { opacity: alpha } };
 }
@@ -206,6 +254,25 @@ export function RequestsMatrix({
   onHistoryPointerEnter,
 }: RequestsMatrixProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Pointer-aware geometry: dense 40px rows / 40px history columns on a precise
+  // pointer (the prototype's metrics), growing to the 44px coarse minimum on
+  // touch. Default is the precise value so SSR/first paint matches the server
+  // render; a post-mount effect adopts the live media query, which has settled
+  // before the route's readiness wait takes its measurements.
+  const [coarse, setCoarse] = useState(false);
+  useEffect(() => {
+    // jsdom (and SSR) has no matchMedia; the default precise geometry stays,
+    // which is correct for both since neither is a coarse-pointer context.
+    if (typeof matchMedia !== "function") return;
+    const mq = matchMedia("(pointer: coarse)");
+    const update = () => setCoarse(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
+  const rowHeight = coarse ? ROW_HEIGHT_COARSE : ROW_HEIGHT;
+  const historyColWidth = coarse ? HISTORY_COL_COARSE : HISTORY_COL_WIDTH;
+
   const peopleById = useMemo(() => {
     const map = new Map<string, UiPerson>();
     for (const p of people) map.set(String(p.id), p);
@@ -221,18 +288,23 @@ export function RequestsMatrix({
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => ROW_HEIGHT,
+    estimateSize: () => rowHeight,
     overscan: 8,
   });
+  // estimateSize closes over `rowHeight`; when it changes (coarse-pointer
+  // adoption) the per-index measurement cache is stale, so re-measure.
+  useEffect(() => {
+    virtualizer.measure();
+  }, [rowHeight, virtualizer]);
 
   const gridTemplateColumns = useMemo(() => {
     const widths = [
       `${NURSE_COL_WIDTH}px`,
-      ...Array.from({ length: historyCount }, () => `${HISTORY_COL_WIDTH}px`),
+      ...Array.from({ length: historyCount }, () => `${historyColWidth}px`),
       ...columns.map((c) => `${columnWidth(c)}px`),
     ];
     return widths.join(" ");
-  }, [historyCount, columns]);
+  }, [historyCount, columns, historyColWidth]);
 
   if (rows.length === 0 || columns.length === 0) {
     return (
@@ -248,8 +320,15 @@ export function RequestsMatrix({
   return (
     <div
       ref={scrollRef}
+      tabIndex={0}
+      aria-label="Requests matrix"
       className={cn(
-        "relative max-h-[68vh] overflow-auto border border-line bg-surface",
+        // The matrix is a specialized L1 surface: --surface tone + --sh-1, but
+        // emphatically square. Generic card rounding must not leak into the
+        // grid, its sticky header, its first column or its selection outline
+        // (DESIGN.md §5 "Stay square, always"), so `rounded-none` is the
+        // explicit data-surface treatment, not an absence.
+        "relative max-h-[68vh] overflow-auto rounded-none border border-line bg-surface shadow-1 focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-brand",
         mode === "quick" && "select-none",
       )}
       data-testid="requests-matrix"
@@ -270,7 +349,7 @@ export function RequestsMatrix({
           {historyLabels.map((label, i) => (
             <div
               key={`h-head-${i}`}
-              className="flex items-center justify-center border-b border-r border-line2 bg-warntint font-mono text-label text-ink2"
+              className="flex items-center justify-center border-b border-r border-line2 bg-warntint font-mono text-label text-warnink"
               style={{ height: HEADER_ROW_HEIGHT }}
               title={label}
               data-testid={`hist-head-${i}`}
@@ -377,30 +456,57 @@ export function RequestsMatrix({
                   // faint "+" add affordance (ScreenRequests.dc.html:553-555); quick mode
                   // never shows it since a click there doesn't open the history editor.
                   const showPlus = !value && clickable && mode === "normal";
-                  const handlers = !clickable
-                    ? {}
-                    : mode === "normal"
-                      ? { onClick: () => onHistoryClick(row.id, columnIndex) }
-                      : {
-                          onPointerDown: () => onHistoryPointerDown(row.id, columnIndex),
-                          onPointerEnter: () => onHistoryPointerEnter(row.id, columnIndex),
-                        };
+                  // Only a clickable slot in NORMAL mode opens an editor, so only
+                  // that slot becomes a keyboard control. Quick-paint slots are
+                  // drag targets and non-clickable padding is inert — giving
+                  // either one button semantics would advertise an action that
+                  // does not exist.
+                  const historyActionable = clickable && mode === "normal";
+                  // Identical presentation for both element types: the geometry
+                  // lives entirely in these classes, so a native button and a div
+                  // render the same box.
+                  const historyPresentation = {
+                    className: cn(
+                      "flex items-center justify-center border-b border-r border-line2 font-mono text-label",
+                      clickable
+                        ? cn("cursor-pointer hover:bg-panel", showPlus ? "text-faint" : "text-ink2")
+                        : "text-faint",
+                    ),
+                    "data-testid": `hist-${row.id}-${columnIndex}`,
+                  };
+                  const historyContent = value ?? (showPlus ? "+" : "");
+
+                  // Only a clickable slot in NORMAL mode opens an editor, so only
+                  // that slot is a real control. Quick-paint slots are drag
+                  // targets and non-clickable padding is inert — giving either one
+                  // button semantics would advertise an action that does not exist.
+                  if (historyActionable) {
+                    return (
+                      <button
+                        key={`hist-${columnIndex}`}
+                        type="button"
+                        {...historyPresentation}
+                        aria-label={`Edit history ${historyLabels[columnIndex] ?? `slot ${columnIndex + 1}`} for ${row.label}${value ? `, currently ${value}` : ", currently empty"}`}
+                        onClick={(event: MouseEvent<HTMLButtonElement>) =>
+                          onHistoryClick(row.id, columnIndex, event.currentTarget)
+                        }
+                      >
+                        {historyContent}
+                      </button>
+                    );
+                  }
                   return (
                     <div
                       key={`hist-${columnIndex}`}
-                      className={cn(
-                        "flex items-center justify-center border-b border-r border-line2 font-mono text-label",
-                        clickable
-                          ? cn(
-                              "cursor-pointer hover:bg-panel",
-                              showPlus ? "text-faint" : "text-ink2",
-                            )
-                          : "text-faint",
-                      )}
-                      data-testid={`hist-${row.id}-${columnIndex}`}
-                      {...handlers}
+                      {...historyPresentation}
+                      {...(clickable
+                        ? {
+                            onPointerDown: () => onHistoryPointerDown(row.id, columnIndex),
+                            onPointerEnter: () => onHistoryPointerEnter(row.id, columnIndex),
+                          }
+                        : {})}
                     >
-                      {value ?? (showPlus ? "+" : "")}
+                      {historyContent}
                     </div>
                   );
                 })}
@@ -411,36 +517,57 @@ export function RequestsMatrix({
                   const cellsAt = cellsByCoord.get(key) ?? EMPTY_CELLS;
                   const view = buildCellView(cellsAt, shiftTypeOrderIndex);
                   const staged = stagedKeys?.has(key) ?? false;
-                  const handlers =
-                    mode === "normal"
-                      ? { onClick: () => onCellClick(row.id, colRef) }
-                      : {
-                          onPointerDown: () => onCellPointerDown(row.id, colRef),
-                          onPointerEnter: () => onCellPointerEnter(row.id, colRef),
-                        };
                   const visual = cellVisual(view, cellsAt);
+                  // Identical presentation for both element types — see the
+                  // history slot above.
+                  const cellPresentation = {
+                    className: cn(
+                      "flex items-center justify-center overflow-hidden border-b border-r px-1 text-center text-[10px] leading-tight cursor-pointer",
+                      visual.className,
+                      col.kind === "date-item" && col.weekend && view.empty ? "bg-panel" : null,
+                      staged ? "outline outline-2 outline-brand -outline-offset-2" : null,
+                    ),
+                    style: visual.style,
+                    title: view.primaryText || undefined,
+                    "data-testid": `cell-${row.id}-${colRef}`,
+                  };
+                  const cellContent = view.empty ? null : (
+                    <span className="truncate">
+                      {view.primaryText}
+                      {view.shadowedCount > 0 ? (
+                        <span className="text-faint"> (+{view.shadowedCount})</span>
+                      ) : null}
+                    </span>
+                  );
+
+                  // Normal mode opens the cell editor, so the cell is a real
+                  // control; quick-paint cells are drag targets and never become
+                  // false buttons.
+                  if (mode === "normal") {
+                    return (
+                      <button
+                        key={`cell-${colIdx}`}
+                        type="button"
+                        {...cellPresentation}
+                        aria-label={`Edit ${row.label} on ${col.label}${
+                          view.primaryText ? `, currently ${view.primaryText}` : ", no request"
+                        }`}
+                        onClick={(event: MouseEvent<HTMLButtonElement>) =>
+                          onCellClick(row.id, colRef, event.currentTarget)
+                        }
+                      >
+                        {cellContent}
+                      </button>
+                    );
+                  }
                   return (
                     <div
                       key={`cell-${colIdx}`}
-                      className={cn(
-                        "flex items-center justify-center overflow-hidden border-b border-r px-1 text-center text-[10px] leading-tight cursor-pointer",
-                        visual.className,
-                        col.kind === "date-item" && col.weekend && view.empty ? "bg-panel" : null,
-                        staged ? "outline outline-2 outline-brand -outline-offset-2" : null,
-                      )}
-                      style={visual.style}
-                      title={view.primaryText || undefined}
-                      data-testid={`cell-${row.id}-${colRef}`}
-                      {...handlers}
+                      {...cellPresentation}
+                      onPointerDown={() => onCellPointerDown(row.id, colRef)}
+                      onPointerEnter={() => onCellPointerEnter(row.id, colRef)}
                     >
-                      {view.empty ? null : (
-                        <span className="truncate">
-                          {view.primaryText}
-                          {view.shadowedCount > 0 ? (
-                            <span className="text-faint"> (+{view.shadowedCount})</span>
-                          ) : null}
-                        </span>
-                      )}
+                      {cellContent}
                     </div>
                   );
                 })}

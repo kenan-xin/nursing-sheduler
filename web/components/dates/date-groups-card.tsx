@@ -1,8 +1,18 @@
 "use client";
 
 // Date groups card (T10; spec 02 FR-DC-35/36/40/44 / acceptance rows 3 & 4;
-// audit MAJOR 5 + MAJOR 6). The full prototype date-group surface (ScreenDates
-// 129-248):
+// audit MAJOR 5 + MAJOR 6), re-skinned for v2 "Mint Canvas, Warm Ink" (R2a)
+// against docs/design_prototype/source/ScreenDates.dc.html.
+//
+// Surfaces (DESIGN.md §4): the card is a resting L1 `surface`; a resting group row
+// is an inset `well` inside it; a row that is being previewed or edited takes the
+// shared `selected` role. That last choice is a deliberate deviation from the
+// prototype's `--brandtint` wash — the same call `successions/pattern-builder.tsx`
+// records — because a brand tint under brand-filled chips makes the chips
+// disappear, and `selected` is the system's one ratified "this is the current one"
+// treatment. `--brandtint` stays reserved for the selection MARKS themselves.
+//
+// The full prototype date-group surface (ScreenDates 129-248):
 //
 //   • "+ Group" opens an inline DRAFT card — group name + the shared DateScopePicker
 //     + Save / Cancel / Delete. Existing EDITABLE groups render as prototype cards
@@ -17,7 +27,7 @@
 //     membership — derived ids remain non-editable/non-deletable (the store never
 //     offers an edit/delete affordance for them), preserving the settled guard.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useLosableDraft } from "@/components/shell/use-losable-draft";
 import {
   dateIdToIso,
@@ -33,12 +43,18 @@ import {
   FaCalendarDay,
   FaCheck,
   FaChevronUp,
-  FaCircleInfo,
   FaPen,
   FaPlus,
   FaTrash,
   FaXmark,
 } from "@/components/icons";
+import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { InfoTip } from "@/components/ui/info-tip";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { surfaceVariants } from "@/components/ui/surface";
 import { datesDescriptor } from "./dates-descriptor";
 import { DateScopePicker } from "./date-scope-picker";
 
@@ -206,23 +222,29 @@ export function DateGroupsCard({
   };
 
   return (
-    <section className="mt-4 border border-line bg-surface" data-testid="date-groups-panel">
+    <section
+      className={cn(surfaceVariants({ role: "surface", geometry: "card" }))}
+      data-testid="date-groups-panel"
+    >
       <div className="flex flex-wrap items-center justify-between gap-2.5 border-b border-line2 px-[18px] py-4">
         <div>
-          <h2 className="font-heading text-cardhead font-extrabold tracking-tight">Date groups</h2>
-          <p className="mt-0.5 text-sm text-ink2">
+          <h2 className="font-heading text-cardhead font-semibold tracking-[-0.015em]">
+            Date groups
+          </h2>
+          <p className="mt-0.5 text-meta text-ink2">
             Named sets of days you can target in rules — e.g. “staff weekends with fewer nurses”.
           </p>
         </div>
-        <button
-          type="button"
-          className="ns-btn h-[34px] flex-none"
+        <Button
+          variant="secondary"
+          size="sm"
+          className="flex-none"
           data-testid="date-group-add"
           disabled={!hasRange || busy}
           onClick={startCreate}
         >
-          <FaPlus className="size-3" /> Group
-        </button>
+          <FaPlus /> Group
+        </Button>
       </div>
 
       <div className="flex flex-col gap-3 p-[18px]">
@@ -238,7 +260,7 @@ export function DateGroupsCard({
         ) : null}
 
         {!hasRange ? (
-          <p className="py-2 text-sm text-ink3" data-testid="date-groups-empty">
+          <p className="py-2 text-meta text-ink3" data-testid="date-groups-empty">
             Set a roster period above to create and preview date groups.
           </p>
         ) : null}
@@ -309,25 +331,30 @@ export function DateGroupsCard({
                 const label = `auto:${group.id}`;
                 const active = selLabels.has(label);
                 return (
-                  <button
+                  // A real toggle, so it is a Button: brand-filled while its days
+                  // are being previewed, L1 when not. The variant carries the pill,
+                  // elevation, focus outline and 44px coarse floor.
+                  <Button
                     key={group.id}
-                    type="button"
-                    className={`ns-derived-chip ${active ? "ns-derived-chip--on" : ""}`}
+                    variant={active ? "default" : "secondary"}
+                    size="sm"
                     data-testid={`derived-group-${group.id}`}
                     aria-pressed={active}
                     onClick={() => togglePreview(label, group.id, memberIso(group.members))}
                   >
-                    <FaCalendarDay className="size-2.5" />
-                    <span className="font-mono text-label font-semibold tracking-[0.02em]">
+                    <FaCalendarDay />
+                    <span className="font-mono text-label font-semibold tracking-[0.03em]">
                       {group.id}
                     </span>
+                    {/* On the brand fill the count must inherit `--on-brand`; off
+                        it, it steps back to the tertiary ink. */}
                     <span
-                      className="text-sm opacity-90"
+                      className={active ? undefined : "text-ink3"}
                       data-testid={`derived-group-${group.id}-count`}
                     >
                       {group.members.length} day{group.members.length === 1 ? "" : "s"}
                     </span>
-                  </button>
+                  </Button>
                 );
               })}
             </div>
@@ -364,23 +391,39 @@ function PreviewPanel({
   onHide: () => void;
 }) {
   return (
-    <div className="ns-dg-preview" data-testid="date-group-preview">
+    // The panel IS the current selection, so it takes the shared `selected` role
+    // (--brand border + --sh-2 on --surface) instead of the hand-rolled shadow it
+    // used to author. `overflow-hidden` clips its band and the scrolling day strip
+    // to the card radius (DESIGN.md §4 rules 2-3). It sticks BELOW the 14-step
+    // sticky top bar and under its z-30, so the two never fight.
+    <div
+      className={cn(
+        "sticky top-14 z-20 overflow-hidden",
+        surfaceVariants({ role: "selected", geometry: "card" }),
+      )}
+      data-testid="date-group-preview"
+    >
       <div className="flex flex-wrap items-center gap-2 border-b border-line2 px-2.5 py-2">
         <span className="text-label font-semibold uppercase tracking-[0.03em] text-ink2">
           Selected
         </span>
+        {/* The prototype draws a brand chip with a separate ✕ button inside it. A
+            nested icon control cannot reach the 44px coarse floor without dwarfing
+            its own chip, so the chip IS the remove control: one real Button, the
+            same brand-filled read, and the name still visible inside the
+            accessible name. */}
         {entries.map((entry) => (
-          <span key={entry.label} className="ns-dg-preview__chip">
+          <Button
+            key={entry.label}
+            size="sm"
+            className="font-mono"
+            aria-label={`Remove ${entry.name}`}
+            data-testid={`date-group-preview-remove-${entry.label}`}
+            onClick={() => onRemove(entry.label)}
+          >
             {entry.name}
-            <button
-              type="button"
-              aria-label={`Remove ${entry.name}`}
-              className="ns-dg-preview__chip-x"
-              onClick={() => onRemove(entry.label)}
-            >
-              <FaXmark className="size-2" />
-            </button>
-          </span>
+            <FaXmark />
+          </Button>
         ))}
         <span className="min-w-2 flex-1" />
         <span
@@ -389,32 +432,39 @@ function PreviewPanel({
         >
           {days.length} day{days.length === 1 ? "" : "s"}
         </span>
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="icon"
           aria-label="Clear all"
           title="Clear all"
-          className="ns-icon-btn"
           data-testid="date-group-preview-clear"
           onClick={onClear}
         >
-          <FaXmark className="size-3" />
-        </button>
-        <button
-          type="button"
+          <FaXmark />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
           aria-label="Hide"
           title="Hide"
-          className="ns-icon-btn"
           data-testid="date-group-preview-hide"
           onClick={onHide}
         >
-          <FaChevronUp className="size-3" />
-        </button>
+          <FaChevronUp />
+        </Button>
       </div>
+      {/* The exact days are selection MARKS, so this is where --brandtint + a
+          --brand border legitimately lives (DESIGN.md §6). */}
       <div className="flex gap-1.5 overflow-x-auto px-2.5 py-2">
         {days.map((iso) => (
-          <span key={iso} className="ns-dg-preview__day">
+          <Badge
+            key={iso}
+            variant="brand"
+            casing="normal"
+            className="flex-none whitespace-nowrap font-mono"
+          >
             {formatChip(iso, multiMonth)}
-          </span>
+          </Badge>
         ))}
       </div>
     </div>
@@ -445,73 +495,85 @@ function GroupViewCard({
   const overflow = iso.length - chips.length;
   return (
     <div
-      className={`border p-4 ${previewing ? "border-brand bg-brandtint" : "border-line2 bg-panel"}`}
+      className={cn(
+        "p-4",
+        previewing
+          ? surfaceVariants({ role: "selected", geometry: "control" })
+          : surfaceVariants({ role: "well", geometry: "control" }),
+      )}
       data-testid={`editable-group-${group.id}`}
     >
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <div className="mb-2 flex items-baseline gap-2">
-            <span className="font-mono text-label-lg font-semibold tracking-[0.02em]">
+            <span className="font-mono text-label-lg font-semibold tracking-[0.03em]">
               {group.id}
             </span>
-            {group.description ? (
-              <FaCircleInfo
-                className="size-3.5 text-ink3"
-                title={group.description}
-                aria-label={group.description}
-              />
-            ) : null}
-            <span className="text-sm text-ink3" data-testid={`editable-group-${group.id}-count`}>
+            {/* The prototype's own InfoTip, which is a focusable control with the
+                help text as its accessible name — the bare icon it replaced was
+                reachable by hover alone. */}
+            {group.description ? <InfoTip label={group.id} text={group.description} /> : null}
+            <span className="text-meta text-ink3" data-testid={`editable-group-${group.id}-count`}>
               {group.members.length} day{group.members.length === 1 ? "" : "s"}
             </span>
           </div>
           <div className="flex flex-wrap gap-1.5">
             {group.members.length === 0 ? (
-              <span className="text-sm text-faint">No days</span>
+              <span className="text-meta text-ink3">No days</span>
             ) : (
               <>
+                {/* `outline` rather than the filled neutral chip: a resting row is
+                    already `--panel`, and DESIGN.md §4 rule 5 forbids stacking a
+                    second `--panel` plane on it. The hairline carries the chip. */}
                 {chips.map((d, i) => (
-                  <span key={`${d}-${i}`} className="ns-day-chip">
+                  <Badge key={`${d}-${i}`} variant="outline" casing="normal" className="font-mono">
                     {formatChip(d, multiMonth)}
-                  </span>
+                  </Badge>
                 ))}
-                {overflow > 0 ? <span className="ns-day-chip">+{overflow}</span> : null}
+                {overflow > 0 ? (
+                  <Badge variant="outline" casing="normal" className="font-mono">
+                    +{overflow}
+                  </Badge>
+                ) : null}
               </>
             )}
           </div>
         </div>
         <div className="flex flex-none gap-1">
-          <button
-            type="button"
+          <Button
+            variant={previewing ? "default" : "ghost"}
+            size="icon"
             aria-label={`Preview ${group.id} days`}
             aria-pressed={previewing}
             title="Preview this group's days"
-            className={`ns-square-btn ${previewing ? "ns-square-btn--on" : ""}`}
             data-testid={`editable-group-preview-${group.id}`}
             onClick={onPreview}
           >
-            <FaCalendarDay className="size-3" />
-          </button>
-          <button
-            type="button"
+            <FaCalendarDay />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
             aria-label={`Edit group ${group.id}`}
-            className="ns-square-btn"
             data-testid={`editable-group-edit-${group.id}`}
             disabled={disabled}
             onClick={onEdit}
           >
-            <FaPen className="size-3" />
-          </button>
-          <button
-            type="button"
+            <FaPen />
+          </Button>
+          {/* v2's destructive affordance is an OUTLINE everywhere the system uses
+              it; the paired solid fill is reserved for a confirmed destructive
+              action, not a row control. */}
+          <Button
+            variant="destructive-outline"
+            size="icon"
             aria-label={`Delete group ${group.id}`}
-            className="ns-square-btn ns-square-btn--danger"
             data-testid={`editable-group-delete-${group.id}`}
             disabled={disabled}
             onClick={onDelete}
           >
-            <FaTrash className="size-3" />
-          </button>
+            <FaTrash />
+          </Button>
         </div>
       </div>
     </div>
@@ -542,58 +604,62 @@ function GroupEditCard({
   onCancel: () => void;
   onDelete: () => void;
 }) {
+  const nameId = useId();
+  const errorId = useId();
   return (
     <div
-      className="flex flex-col gap-3.5 border border-brand bg-brandtint p-4"
+      className={cn(
+        "flex flex-col gap-3.5 p-4",
+        surfaceVariants({ role: "selected", geometry: "control" }),
+      )}
       data-testid={testId}
     >
-      <label className="block max-w-[320px]">
-        <span className="mb-1.5 block text-label font-semibold uppercase tracking-[0.03em] text-ink2">
+      <div className="max-w-[320px]">
+        <Label htmlFor={nameId} className="mb-1.5 block">
           Group name
-        </span>
-        <input
-          className="ns-input h-9 w-full border-brand font-semibold"
+        </Label>
+        {/* The field keeps the primitive's own hairline and brand focus ring: the
+            card's brand edge already says "this is the active editor", and a second
+            brand border inside it would double the signal. */}
+        <Input
+          id={nameId}
+          className="font-semibold"
           data-testid="date-group-name"
           value={name}
           placeholder="e.g. Weekends"
           aria-invalid={Boolean(error) || undefined}
+          aria-describedby={error ? errorId : undefined}
           onChange={(e) => onName(e.target.value)}
         />
         {error ? (
-          <span className="mt-1 block text-meta text-error" data-testid="date-group-name-error">
+          <span
+            id={errorId}
+            className="mt-1 block text-meta text-errorink"
+            data-testid="date-group-name-error"
+          >
             {error}
           </span>
         ) : null}
-      </label>
+      </div>
 
       <DateScopePicker range={range} selected={selected} onChange={onSelect} />
 
       <div className="flex gap-1.5">
-        <button
-          type="button"
-          className="ns-btn ns-btn--primary h-[34px]"
-          data-testid="date-group-save"
-          onClick={onSave}
-        >
-          <FaCheck className="size-3" /> Save
-        </button>
-        <button
-          type="button"
-          className="ns-btn h-[34px]"
-          data-testid="date-group-cancel"
-          onClick={onCancel}
-        >
+        <Button size="sm" data-testid="date-group-save" onClick={onSave}>
+          <FaCheck /> Save
+        </Button>
+        <Button variant="secondary" size="sm" data-testid="date-group-cancel" onClick={onCancel}>
           Cancel
-        </button>
+        </Button>
         <div className="flex-1" />
-        <button
-          type="button"
-          className="ns-btn ns-btn--danger h-[34px]"
+        <Button
+          variant="destructive-outline"
+          size="sm"
           data-testid="date-group-delete"
           onClick={onDelete}
         >
-          <FaTrash className="size-2.5" /> Delete
-        </button>
+          <FaTrash /> Delete
+        </Button>
       </div>
     </div>
   );

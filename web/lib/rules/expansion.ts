@@ -17,6 +17,7 @@ import {
   RESERVED_SHIFT_TYPE,
   type DateRef,
   type NestedShiftTypeRefList,
+  type PersonRef,
   type ScenarioUiState,
   type ShiftTypeRef,
   type UiDateGroup,
@@ -100,6 +101,43 @@ export function expandShiftTypeRefs(
       const nextSeen = new Set(seen).add(key);
       expandShiftTypeRefs(group.members.map(String), state, nextSeen).forEach((id) => set.add(id));
     }
+  }
+  return set;
+}
+
+/**
+ * Expand qualified-people refs (the `ALL` keyword, staff-group ids, or concrete
+ * person ids) into the concrete set of person ids they cover. A `null`/`undefined`
+ * selector normalizes to `ALL` — the backend's null-as-all contract (C3) — and
+ * `ALL` (case-insensitive) covers every authored person. A group id recurses into
+ * its members (nested groups included) with a cycle guard.
+ *
+ * Unlike `expandShiftTypeRefs`, an unknown ref is kept VERBATIM rather than
+ * dropped: a person id that is not (yet) authored must still compare equal to
+ * itself, and must NOT collapse to the empty set alongside every other unknown id.
+ */
+export function expandPersonRefs(
+  refs: readonly PersonRef[] | PersonRef | null | undefined,
+  state: Pick<ScenarioUiState, "staff" | "staffGroups">,
+  seen: ReadonlySet<string> = new Set(),
+): Set<string> {
+  const set = new Set<string>();
+  const list: readonly PersonRef[] =
+    refs == null ? [RESERVED_SHIFT_TYPE.all] : Array.isArray(refs) ? refs : [refs];
+  for (const ref of list) {
+    const key = String(ref);
+    if (key.toUpperCase() === RESERVED_SHIFT_TYPE.all) {
+      state.staff.forEach((p) => set.add(String(p.id)));
+      continue;
+    }
+    if (seen.has(key)) continue;
+    const group = state.staffGroups.find((g) => String(g.id) === key);
+    if (group) {
+      const nextSeen = new Set(seen).add(key);
+      expandPersonRefs(group.members.map(String), state, nextSeen).forEach((id) => set.add(id));
+      continue;
+    }
+    set.add(key);
   }
   return set;
 }

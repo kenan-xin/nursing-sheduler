@@ -21,23 +21,44 @@ import { TopBar } from "./top-bar";
 import { HydrationGate } from "./hydration-gate";
 import { ConfirmDialog } from "./confirm-dialog";
 import { TestBridge } from "./test-bridge";
+import { AssistantSurface, useAssistantHydration } from "@/components/ai/assistant-surface";
+import { AssistantTestBridge } from "@/components/ai/assistant-test-bridge";
 import { useBrowserBackGuard, useDirtyBeforeUnload } from "./use-guarded-navigation";
 import { useNavGuardStore } from "./nav-guard-store";
 import { useConfirmStore } from "./confirm-store";
+import { useSideCollapsed, useSyncSideCollapse } from "./use-side-collapse";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { theme } = useTheme();
   useDirtyBeforeUnload();
   useBrowserBackGuard();
+  // G8: adopt the persisted desktop collapse preference once, post-mount. The
+  // pre-paint script has already put the matching width on <html>.
+  useSyncSideCollapse();
+  const collapsed = useSideCollapsed();
+
+  // Reads the durable assistant settings row once and settles any turn stranded by
+  // the previous page lifetime. Unconditional: a turn left mid-flight has to be
+  // settled whether or not the user ever opens the panel again. Independent of the
+  // collapse preference above — both run on every mount.
+  useAssistantHydration();
 
   return (
     <div className="flex h-dvh overflow-hidden">
-      {/* Desktop rail — full-height from the top edge; hidden below 920px. */}
+      {/* Desktop rail — full-height from the top edge; hidden below 920px.
+          G8: `--sidebar-w` resolves to 280px expanded and 60px compact, driven by
+          the `data-side-collapsed` attribute on <html> (globals.css), so the rail
+          is already the right size on the very first paint after a reload. The
+          width transition is for the user's own toggle; a load-time value is set
+          before the element exists, so it never animates. */}
       <aside
+        id="app-side-nav"
+        data-side-nav=""
         data-testid="desktop-sidebar"
-        className="hidden w-[var(--sidebar-w)] shrink-0 border-r border-line bg-sidebar nav:block"
+        data-collapsed={collapsed ? "true" : "false"}
+        className="hidden w-[var(--sidebar-w)] shrink-0 border-r border-line bg-sidebar transition-[width] duration-base nav:block"
       >
-        <AppSideNav />
+        <AppSideNav collapsed={collapsed} />
       </aside>
 
       {/* Main column — contextual top bar + scrollable content. */}
@@ -52,7 +73,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 page padding of their own. The hydration states sit outside this,
                 centred on their own.
 
-                Two nested elements, mirroring Nurse Scheduling.dc.html:137 exactly:
+                Two nested elements, mirroring Nurse Scheduling v2.dc.html:256-257 exactly:
                 the padding is on the OUTER box and the cap on an UNPADDED inner one,
                 so content is a full 1240px at the cap. Collapsing them into one
                 border-box div would silently spend 40px of the cap on padding.
@@ -69,6 +90,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </main>
 
+      {/* The assistant DOCK is a sibling of the main column, so on a wide layout the
+          screen narrows beside it instead of being covered by it. Below the `nav`
+          breakpoint the same component renders its own sheet overlay. It returns
+          null entirely until AI is enabled and Ready, so no panel space is
+          reserved and no provider is mounted. */}
+      <AssistantSurface />
+
       <DirtyNavDialog />
       <GlobalConfirmDialog />
       <Toaster
@@ -78,6 +106,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         toastOptions={{ className: "ns-toast" }}
       />
       <TestBridge />
+      <AssistantTestBridge />
     </div>
   );
 }

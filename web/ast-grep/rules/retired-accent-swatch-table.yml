@@ -1,0 +1,27 @@
+id: retired-accent-swatch-table
+language: Tsx
+severity: error
+message: >-
+  `ACCENT_SWATCHES` is the retired local accent table. Membership and ORDER come from the
+  store's allowlist (`ACCENTS` in `components/theme/theme-store.ts`) and the paint comes
+  from `app/globals.css`; a table in the control would be a second source of truth for both.
+note: >-
+  Migrated from the self-source read in `components/theme/theme-toggle.test.tsx`. Its
+  POSITIVE half -- that the swatches are the store's allowlist, in order -- is a render
+  assertion that already exists in that file and is strictly stronger than matching
+  `ACCENTS.map` as text. What is left is the absence of a name, which is authored-source and
+  lands here: Oxlint's import and property rules bind to a specifier and to an identifier
+  receiver respectively, and neither is what a retired module-local const is.
+files:
+  - "app/**"
+  - "components/**"
+ignores:
+  - "**/*.test.tsx"
+rule:
+  any:
+    - kind: identifier
+      regex: ^ACCENT_SWATCHES$
+    - kind: property_identifier
+      regex: ^ACCENT_SWATCHES$
+    - kind: string_fragment
+      regex: ^ACCENT_SWATCHES$

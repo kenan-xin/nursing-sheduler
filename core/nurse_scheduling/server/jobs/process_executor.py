@@ -226,7 +226,7 @@ def run_optimization_process(
             raise ChildOptimizationError(
                 "ChildProcessCommunicationError",
                 (
-                    "Optimization process closed its result channel without "
+                    "Optimisation process closed its result channel without "
                     f"a terminal message. Exit code: {process.exitcode}"
                 ),
                 "",
@@ -242,7 +242,7 @@ def run_optimization_process(
                 return ProcessResult(status=ProcessStatus.COMPLETED, output=result)
             if isinstance(result, JobFailure):
                 return ProcessResult(status=ProcessStatus.FAILED, failure=result)
-            raise RuntimeError(f"Unknown optimization runner result: {type(result).__name__}")
+            raise RuntimeError(f"Unknown optimisation runner result: {type(result).__name__}")
         if message_type == "unexpected_error":
             _, exception_type, error_message, child_traceback = message
             server_logger.error(
@@ -252,7 +252,7 @@ def run_optimization_process(
                 child_traceback,
             )
             raise ChildOptimizationError(exception_type, error_message, child_traceback)
-        raise RuntimeError(f"Unknown optimization child message: {message_type}")
+        raise RuntimeError(f"Unknown optimisation child message: {message_type}")
 
     try:
         while True:
@@ -264,7 +264,7 @@ def run_optimization_process(
                 and requested_control is not ProcessControl.FINISH
                 and requested_control is not ProcessControl.ABORT
             ):
-                raise RuntimeError(f"Unknown optimization process control: {requested_control}")
+                raise RuntimeError(f"Unknown optimisation process control: {requested_control}")
             if requested_control is ProcessControl.FINISH and not finish_now_enabled:
                 raise RuntimeError("Finish-now was requested for an unsupported solver")
 
@@ -278,7 +278,7 @@ def run_optimization_process(
             if process_tree_guard.sentinel in buffered_ready:
                 raise ChildOptimizationError(
                     "ProcessTreeGuardExit",
-                    (f"Optimization process-tree guard exited unexpectedly with code {process_tree_guard.exitcode}"),
+                    (f"Optimisation process-tree guard exited unexpectedly with code {process_tree_guard.exitcode}"),
                     "",
                 )
             if receive_connection in buffered_ready:
@@ -299,7 +299,7 @@ def run_optimization_process(
                     failure=JobFailure(
                         code="process_timeout",
                         message=(
-                            "The optimization process did not return within the requested "
+                            "The optimisation process did not return within the requested "
                             f"{job.request.timeout_seconds:g}-second timeout and "
                             f"{timeout_grace_seconds:g}-second timeout grace period. "
                             "The server terminated the process."
@@ -320,7 +320,7 @@ def run_optimization_process(
             if process_tree_guard.sentinel in ready:
                 raise ChildOptimizationError(
                     "ProcessTreeGuardExit",
-                    (f"Optimization process-tree guard exited unexpectedly with code {process_tree_guard.exitcode}"),
+                    (f"Optimisation process-tree guard exited unexpectedly with code {process_tree_guard.exitcode}"),
                     "",
                 )
             if receive_connection in ready:
@@ -334,7 +334,7 @@ def run_optimization_process(
                     continue
                 raise ChildOptimizationError(
                     "ChildProcessExit",
-                    f"Optimization process exited with code {process.exitcode}",
+                    f"Optimisation process exited with code {process.exitcode}",
                     "",
                 )
     finally:

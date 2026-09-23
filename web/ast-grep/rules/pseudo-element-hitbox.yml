@@ -1,0 +1,25 @@
+id: pseudo-element-hitbox
+language: Tsx
+severity: error
+message: >-
+  A pseudo-element is being used to enlarge a hit target. The coarse-pointer minimum belongs
+  on the REAL control (`pointer-coarse:min-h-touch` / `size-touch`): an `after:-inset-*`
+  overlay moves the pointer target off the element that paints focus and lets it overlap
+  its neighbours.
+note: >-
+  Migrated from the `components/ui/**` source sweep in
+  `components/ui/primitives-v2.test.tsx`. Alternatives checked and rejected: jsdom applies
+  no stylesheet, so a render test cannot see a pseudo-element at all, and a browser test
+  measures the enlarged box without being able to say which element owns it -- which is the
+  entire defect. The shadcn preset's Switch is the concrete regression this exists for.
+  VARIANT PREFIXES (bounded-review round 1). `after:`/`before:` no longer has to start at
+  whitespace: `hover:after:-inset-2` produced zero diagnostics, while the retired regex
+  matched `after:`/`before:` after another variant because its `\b` held against a colon.
+files:
+  - "components/ui/**"
+ignores:
+  - "**/*.test.tsx"
+  - "**/*.test-d.ts"
+rule:
+  kind: string_fragment
+  regex: "(^|[[:space:]])([^[:space:]]*:)?(after|before):-?inset"

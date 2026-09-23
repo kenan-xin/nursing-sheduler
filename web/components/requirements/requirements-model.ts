@@ -46,6 +46,7 @@ import {
 import { deriveDateGroups, generateDateItems } from "@/lib/dates";
 import {
   expandDateRefs,
+  expandPersonRefs,
   expandShiftTypeRefs,
   flattenShiftTypeRefs,
   type DerivedGroupLike,
@@ -501,6 +502,37 @@ export function hasCoverageWarnings(warnings: CoverageWarnings): boolean {
 
 const DUPLICATE_EXAMPLE_LIMIT = 5;
 
+/** One requirement's claim on a concrete `(date, shiftType)` pair: the 1-based
+ *  card number, plus the identity of the STAFFING EQUATION that claim belongs to
+ *  (see `equationSignature`). */
+interface CoverageClaim {
+  card: number;
+  signature: string;
+}
+
+/**
+ * The per-equation shift-type selector groups of a requirement, mirroring the
+ * backend's `_parse_shift_type_requirement_groups`: each TOP-LEVEL selector
+ * becomes ONE aggregate staffing equation, and a group id (or a nested list)
+ * expands to all its members *inside* that single equation. The Requirements UI
+ * only ever writes one selector, so this is normally a one-element list; an
+ * imported card carrying several is handled the way the solver handles it.
+ */
+function requirementEquationGroups(
+  shiftType: RequirementCard["shiftType"],
+  state: ScenarioUiState,
+): Set<string>[] {
+  const selectors = Array.isArray(shiftType) ? shiftType : [shiftType];
+  return selectors.map((selector) => expandShiftTypeRefs(flattenShiftTypeRefs(selector), state));
+}
+
+/** A stable identity for one staffing equation: the aggregate shift-type set it
+ *  sums over, and the people it counts. Two requirements duplicate each other
+ *  only when these match — see `computeCoverageWarnings`. */
+function equationSignature(shiftTypes: readonly string[], qualified: ReadonlySet<string>): string {
+  return JSON.stringify([[...shiftTypes].sort(), [...qualified].sort()]);
+}
+
 /** EDGE-PR-14: label a missing-dates set as `ALL` when it's the full range, an
  *  authored/derived group id when it exactly matches that group's expansion,
  *  else the concrete date ids comma-joined in chronological order. */
@@ -537,6 +569,21 @@ function labelForDateSet(
  * right card numbers. OFF/LEAVE are reserved day states a requirement can never
  * staff, so they are excluded from the coverage domain (M5, FR-PR-40), matching
  * the editor's own selector filter and the canonical projection.
+ *
+ * DUPLICATE means "two requirements constrain the SAME staffing equation", not
+ * merely "two requirements mention the same pair". A shift-type selector is one
+ * AGGREGATE equation over its members and `qualifiedPeople` chooses which people
+ * that equation counts, so `AllMornings ≥ 6 (anyone)` layered with
+ * `MorningSeniorSlots = 1 (seniors)` is two independent equations that happen to
+ * touch `am1+` — the documented way to put one senior in charge of the morning,
+ * and exactly what the backend means by "this can intentionally layer aggregate
+ * and concrete staffing requirements" (preference_types.shift_type_requirements,
+ * which logs such overlaps at INFO rather than treating them as a problem).
+ * Flagging those produced a banner full of false positives on any ward authored
+ * this way. A pair is reported only when two DIFFERENT cards claim it through
+ * equations with the same expanded shift-type set AND the same expanded people
+ * set — e.g. two cards both written against `AllMornings` for everyone, which
+ * genuinely do stack.
  */
 export function computeCoverageWarnings(
   state: ScenarioUiState,
@@ -552,7 +599,7 @@ export function computeCoverageWarnings(
   }
   const derivedGroups = deriveDateGroups(dateItems);
 
-  const coveredBy = new Map<string, number[]>();
+  const coveredBy = new Map<string, CoverageClaim[]>();
   // A JSON tuple key survives shift-type ids that contain the display delimiter
   // (a space) — e.g. "Long Day" — which a naive `date + " " + shiftId` would split
   // back into the wrong parts (FR-PR-40).
@@ -569,18 +616,25 @@ export function computeCoverageWarnings(
         : Array.isArray(req.date)
           ? req.date
           : [req.date];
-    const shiftTypeRefs = flattenShiftTypeRefs(req.shiftType);
     const dates = expandDateRefs(dateRefs, state, allDateIds, derivedGroups);
-    const shiftTypes = expandShiftTypeRefs(shiftTypeRefs, state);
-    for (const date of dates) {
-      for (const shiftType of shiftTypes) {
-        // Defensive: even an imported requirement that references a reserved day
-        // state can't staff it — never count it toward coverage (M5).
-        if (isDayStateSelector(shiftType)) continue;
-        const key = pairKey(date, shiftType);
-        const owners = coveredBy.get(key);
-        if (owners) owners.push(index + 1);
-        else coveredBy.set(key, [index + 1]);
+    // `null`/omitted qualifiedPeople is every person (C3 null-as-all), so it
+    // compares equal to an explicit `[ALL]` — and to an authored group that
+    // happens to list everyone.
+    const qualified = expandPersonRefs(req.qualifiedPeople, state);
+    for (const group of requirementEquationGroups(req.shiftType, state)) {
+      // Defensive: even an imported requirement that references a reserved day
+      // state can't staff it — never count it toward coverage (M5).
+      const shiftTypes = [...group].filter((id) => !isDayStateSelector(id));
+      if (shiftTypes.length === 0) continue;
+      const signature = equationSignature(shiftTypes, qualified);
+      for (const date of dates) {
+        for (const shiftType of shiftTypes) {
+          const key = pairKey(date, shiftType);
+          const claim: CoverageClaim = { card: index + 1, signature };
+          const owners = coveredBy.get(key);
+          if (owners) owners.push(claim);
+          else coveredBy.set(key, [claim]);
+        }
       }
     }
   });
@@ -612,11 +666,21 @@ export function computeCoverageWarnings(
   const duplicateEntries: string[] = [];
   let duplicatePairCount = 0;
   for (const [key, owners] of coveredBy) {
-    if (owners.length > 1) {
-      duplicatePairCount += 1;
-      const [date, shiftType] = JSON.parse(key) as [string, string];
-      duplicateEntries.push(`${date} / ${shiftType} (requirements ${owners[0]} and ${owners[1]})`);
+    if (owners.length < 2) continue;
+    // Group the claims by equation; only two DIFFERENT cards inside one group
+    // are stacking the same constraint. (A single card can claim a pair through
+    // two of its own selectors — that is one card, not a duplicate.)
+    const cardsByEquation = new Map<string, number[]>();
+    for (const { card, signature } of owners) {
+      const cards = cardsByEquation.get(signature);
+      if (!cards) cardsByEquation.set(signature, [card]);
+      else if (!cards.includes(card)) cards.push(card);
     }
+    const clash = [...cardsByEquation.values()].find((cards) => cards.length > 1);
+    if (!clash) continue;
+    duplicatePairCount += 1;
+    const [date, shiftType] = JSON.parse(key) as [string, string];
+    duplicateEntries.push(`${date} / ${shiftType} (requirements ${clash[0]} and ${clash[1]})`);
   }
   const duplicateSection: CoverageSection | null =
     duplicatePairCount === 0

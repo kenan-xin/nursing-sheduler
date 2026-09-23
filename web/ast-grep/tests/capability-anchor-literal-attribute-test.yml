@@ -1,0 +1,13 @@
+id: capability-anchor-literal-attribute
+valid:
+  # The one sanctioned route: the helper, spread, over a declared constant.
+  - |
+    export const A = () => <button {...capabilityAnchorProps(DATES_ROSTER_PERIOD_ANCHOR)} />;
+  # Other data attributes are none of this rule's business.
+  - |
+    export const B = () => <button data-testid="dates-roster-period" />;
+invalid:
+  - |
+    export const C = () => <button data-capability-anchor="dates.roster-period" />;
+  - |
+    export const D = () => <button {...{ "data-capability-anchor": anchorId }} />;

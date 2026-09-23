@@ -11,6 +11,7 @@
 // save/restore (FR-PR-07).
 
 import { useLayoutEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import {
   CardEditorScreen,
   CardEditorHeader,
@@ -22,6 +23,7 @@ import {
   useCardEditorStaleGuard,
 } from "@/components/card-editor/card-editor-shell";
 import type { SuccessionCard } from "@/lib/scenario";
+import { SUCCESSIONS_ADD_ANCHOR } from "./capability-anchors";
 import { SuccessionForm } from "./succession-form";
 import { SuccessionCardList } from "./succession-card-list";
 import { useSuccessions } from "./use-successions";
@@ -53,18 +55,8 @@ const INSTRUCTIONS = [
 ] as const;
 
 export function SuccessionsEditor() {
-  const {
-    state,
-    successions,
-    add,
-    update,
-    remove,
-    duplicate,
-    move,
-    reorder,
-    setDisabled,
-    getCards,
-  } = useSuccessions();
+  const { state, successions, add, update, remove, duplicate, reorder, setDisabled, getCards } =
+    useSuccessions();
   const [draft, setDraft] = useState<Draft | null>(null);
   // FR-PR-06: arm the shared open-draft navigation guard while a form is visible.
   useCardEditorDraftGuard("successions", !!draft);
@@ -131,15 +123,25 @@ export function SuccessionsEditor() {
     setDraft({ mode: "edit", uid, form: successionToForm(card) });
   }
 
-  function save(form: SuccessionFormState) {
+  // Edit-save AWAITS the baseline-guarded commit. A `superseded` refusal means
+  // the list moved under the draft: the write was withdrawn and the draft MUST
+  // stay open with the error surfaced rather than closing over a dropped save.
+  async function save(form: SuccessionFormState) {
     if (isStale()) {
       setDraft(null);
       return;
     }
     // Closing the draft triggers the layout-effect restore (no synchronous restore —
     // the form must unmount first so the list collapses back to its edit-time height).
-    if (draft?.mode === "edit") update(draft.uid, form);
-    else add(form);
+    if (draft?.mode === "edit") {
+      const outcome = await update(draft.uid, form);
+      if (!outcome.ok && outcome.reason === "superseded") {
+        toast.error("This succession changed elsewhere. Reopen it and try again.");
+        return;
+      }
+    } else {
+      add(form);
+    }
     setDraft(null);
   }
 
@@ -164,6 +166,7 @@ export function SuccessionsEditor() {
         formOpen={!!draft}
         onAdd={openAdd}
         instructions={<CardEditorInstructions items={INSTRUCTIONS} />}
+        capabilityAnchor={SUCCESSIONS_ADD_ANCHOR}
       />
       <CardEditorInfoStrip />
 
@@ -189,7 +192,6 @@ export function SuccessionsEditor() {
           onEdit={openEdit}
           onDuplicate={(uid) => withDraftDismissed(() => duplicate(uid))}
           onDelete={(uid) => withDraftDismissed(() => remove(uid))}
-          onMove={(uid, direction) => withDraftDismissed(() => move(uid, direction))}
           onReorder={(fromUid, toUid, position) =>
             withDraftDismissed(() => reorder(fromUid, toUid, position))
           }

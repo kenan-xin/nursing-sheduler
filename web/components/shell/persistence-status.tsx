@@ -1,99 +1,77 @@
 "use client";
 
-// Persistence status affordance (T08, MAJOR 6). The shell promises browser
-// auto-save; this makes that promise observable with an honest, stateful signal
-// instead of the old unconditional "is saved" Home footer.
+// Persistence status affordance (T08, MAJOR 6; rebased onto repository authority
+// in T03). The shell promises browser auto-save; this makes that promise
+// observable with an honest, stateful signal instead of an unconditional
+// "is saved".
 //
-// The model has four states mirroring the real T04 write lifecycle:
-//   • restoring   — the durable store is hydrating from IndexedDB
-//   • saving      — a tracked mutation queued a write that has not yet settled
-//   • saved       — the latest queued write completed (prototype green ● SAVED)
-//   • error       — the last write/hydration failed and is surfaced, not swallowed
+// The four states are unchanged, but they are now READ rather than inferred:
+//   • restoring   — authority bring-up is still resolving
+//   • saving      — a repository transaction is in flight
+//   • saved       — the last transaction committed (prototype green ● SAVED)
+//   • error       — the last transaction failed, and is surfaced, not swallowed
 //
-// The controller subscribes to the durable scenario store: every `setState` (the
-// persist middleware writes on each one) flips to "saving", then drains the
-// guarded write queue and inspects `consumeWriteError` to settle "saved"/"error".
-// A monotonic token guards against out-of-order settling under rapid edits.
+// The pre-T03 controller had to INFER all of this: it subscribed to every store
+// `setState`, assumed the persist middleware had enqueued a write, drained the
+// write queue, and read a self-clearing error flag — with a monotonic token to
+// stop an older write settling after a newer one. None of that is needed now. A
+// command's own transaction reports its outcome, and the controller publishes it,
+// so the badge can no longer say "Saved" about a write that never happened.
 
-import { useEffect, useRef } from "react";
-import { create } from "zustand";
-import {
-  useHotStore,
-  useScenarioStore,
-  getScenarioStorage,
-  type GuardedStorage,
-} from "@/lib/store";
-import { cn } from "@/lib/utils";
-import { FaSpinner, FaCircleCheck, FaTriangleExclamation } from "@/components/icons";
+import { useHotStore, useAuthorityStore, type WriteStatus } from "@/lib/store";
+import { Badge } from "@/components/ui/badge";
+import { FaSpinner } from "@/components/icons";
 
 export type PersistenceStatus = "restoring" | "saving" | "saved" | "error";
 
-interface PersistenceStatusState {
-  status: PersistenceStatus;
-  setStatus: (status: PersistenceStatus) => void;
+/**
+ * Fold the hydration lifecycle and the repository write status into the one
+ * status the shell shows. Bring-up wins: while authority is still resolving there
+ * is nothing meaningful to say about a write.
+ *
+ * A pure function so the mapping is testable without mounting React or a store.
+ */
+export function resolvePersistenceStatus(
+  hydrationStatus: "unhydrated" | "hydrating" | "ready" | "recoverable-error",
+  writeStatus: WriteStatus,
+): PersistenceStatus {
+  if (hydrationStatus === "unhydrated" || hydrationStatus === "hydrating") return "restoring";
+  if (hydrationStatus === "recoverable-error") return "error";
+  switch (writeStatus) {
+    case "writing":
+      return "saving";
+    case "error":
+      return "error";
+    default:
+      // `idle` means no command has run yet, which — once bring-up succeeded — is
+      // exactly the "whatever is on screen is what is stored" state.
+      return "saved";
+  }
 }
-
-const usePersistenceStatusStore = create<PersistenceStatusState>((set) => ({
-  status: "restoring",
-  setStatus: (status) => set({ status }),
-}));
 
 /** Synchronous read of the current persistence status (T08b's beforeunload guard
  *  arms on `saving`/`error` alongside a losable draft). */
 export function getPersistenceStatus(): PersistenceStatus {
-  return usePersistenceStatusStore.getState().status;
+  return resolvePersistenceStatus(
+    useHotStore.getState().hydrationStatus,
+    useAuthorityStore.getState().writeStatus,
+  );
+}
+
+/** Reactive read of the same derivation, for the two badges below. */
+function usePersistenceStatus(): PersistenceStatus {
+  const hydrationStatus = useHotStore((s) => s.hydrationStatus);
+  const writeStatus = useAuthorityStore((s) => s.writeStatus);
+  return resolvePersistenceStatus(hydrationStatus, writeStatus);
 }
 
 /**
- * Resolve the durable status for one write cycle against `storage`: await its
- * drain, then read its self-clearing error. Extracted as a standalone async
- * function (T08f) so the controller's newest-revision-wins settle behavior is
- * testable directly against a `GuardedStorage`, without mounting React or a
- * full state spine — `GuardedStorage.setItem` already clears a stale error
- * once a later revision succeeds (lib/store/persistence.ts), so this always
- * reflects the newest write's real outcome, never a superseded failure.
+ * Retained as the shell's mount point for this surface. The status is now derived
+ * from state the command bus already publishes, so there is nothing to subscribe
+ * or settle here — the hook stays so the hydration gate's controller list (and its
+ * tests) keep one obvious place to look.
  */
-export async function resolveWriteOutcome(
-  storage: GuardedStorage | undefined,
-): Promise<"saved" | "error"> {
-  await storage?.drain();
-  return storage?.consumeWriteError() ? "error" : "saved";
-}
-
-// Mount ONCE (in the hydration gate). Bridges the durable store's real write
-// lifecycle into the persistence-status store.
-export function usePersistenceStatusController(): void {
-  const hydrationStatus = useHotStore((s) => s.hydrationStatus);
-  const settleToken = useRef(0);
-
-  // Map the hydration lifecycle onto the status. On `ready` the restored/blank
-  // record is by definition already persisted, so we start at "saved".
-  useEffect(() => {
-    const set = usePersistenceStatusStore.getState().setStatus;
-    if (hydrationStatus === "unhydrated" || hydrationStatus === "hydrating") set("restoring");
-    else if (hydrationStatus === "recoverable-error") set("error");
-    else set("saved");
-  }, [hydrationStatus]);
-
-  // Reflect each durable write. Only while `ready` — a pre-ready set is the
-  // hydration replacement itself, which must not read as a user save.
-  useEffect(() => {
-    const unsubscribe = useScenarioStore.subscribe(() => {
-      if (useHotStore.getState().hydrationStatus !== "ready") return;
-      const token = ++settleToken.current;
-      usePersistenceStatusStore.getState().setStatus("saving");
-      void (async () => {
-        // Yield so the persist middleware's synchronous setItem is enqueued
-        // before we await the drain.
-        await Promise.resolve();
-        const status = await resolveWriteOutcome(getScenarioStorage(useScenarioStore));
-        if (token !== settleToken.current) return; // a newer write superseded us
-        usePersistenceStatusStore.getState().setStatus(status);
-      })();
-    });
-    return unsubscribe;
-  }, []);
-}
+export function usePersistenceStatusController(): void {}
 
 const LABEL: Record<PersistenceStatus, string> = {
   restoring: "Restoring",
@@ -102,38 +80,45 @@ const LABEL: Record<PersistenceStatus, string> = {
   error: "Save failed",
 };
 
-function StatusMark({ status }: { status: PersistenceStatus }) {
-  if (status === "restoring" || status === "saving") {
-    return <FaSpinner className="size-3 animate-spin-slow text-ink3" aria-hidden />;
-  }
-  if (status === "error") {
-    return <FaTriangleExclamation className="size-3 text-error" aria-hidden />;
-  }
-  return <FaCircleCheck className="size-3 text-success" aria-hidden />;
-}
+// F2 owns this file's PRESENTATION only, and is its sole visual owner before F4 —
+// R1 and R7 consume both surfaces below without editing them.
+//
+// v2 status surfaces ARE Badges: each state picks the semantic tier, and the shared
+// primitive pairs that tint with its MATCHING ink and border (every pair clears AA
+// in both themes, the tightest being warn at 4.88:1). Mapping state onto the shared
+// vocabulary is what lets this presenter stop authoring its own tone classes.
+const VARIANT: Record<PersistenceStatus, "neutral" | "success" | "error"> = {
+  restoring: "neutral",
+  saving: "neutral",
+  saved: "success",
+  error: "error",
+};
 
-function toneClass(status: PersistenceStatus): string {
-  if (status === "error") return "text-error";
-  if (status === "saved") return "text-success";
-  return "text-ink3";
+// DESIGN.md §5 retires decorative ornament on status — no check glyphs, no coloured
+// leader dots; the label text plus the semantic tint/ink/border triple carries the
+// state, and the prototype's own SAVED badge is text-only
+// (ScreenSaveLoad.dc.html:87). The in-flight spinner is KEPT because it reports
+// ACTIVITY, which neither static text nor a hue can express, and it inherits the
+// badge's ink rather than introducing a second colour.
+function StatusMark({ status }: { status: PersistenceStatus }) {
+  if (status !== "restoring" && status !== "saving") return null;
+  return <FaSpinner className="animate-spin-slow" aria-hidden />;
 }
 
 // Compact top-bar status chip (the "compact secondary status surface" of MAJOR 5).
 export function PersistenceStatus() {
-  const status = usePersistenceStatusStore((s) => s.status);
+  const status = usePersistenceStatus();
   return (
-    <span
+    <Badge
       data-testid="persistence-status"
       data-status={status}
       role="status"
-      className={cn(
-        "hidden items-center gap-1.5 text-label uppercase tracking-[0.03em] sm:inline-flex",
-        toneClass(status),
-      )}
+      variant={VARIANT[status]}
+      className="hidden sm:inline-flex"
     >
       <StatusMark status={status} />
       {LABEL[status]}
-    </span>
+    </Badge>
   );
 }
 
@@ -144,18 +129,16 @@ export function PersistenceStatus() {
 // underlying state would double-announce to assistive tech. This badge is
 // static explanatory copy that happens to re-render on status change.
 export function PersistenceBadge() {
-  const status = usePersistenceStatusStore((s) => s.status);
+  const status = usePersistenceStatus();
   return (
-    <span
+    <Badge
       data-testid="persistence-badge"
       data-status={status}
-      className={cn(
-        "inline-flex items-center gap-2 border border-line bg-surface px-3 py-1.5 text-label uppercase tracking-[0.03em]",
-        toneClass(status),
-      )}
+      variant={VARIANT[status]}
+      className="gap-2 px-3 py-1.5"
     >
       <StatusMark status={status} />
       {LABEL[status]}
-    </span>
+    </Badge>
   );
 }

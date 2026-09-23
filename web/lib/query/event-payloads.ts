@@ -1,4 +1,5 @@
-import type { JobResponse, JobState, OptimizationOutcome } from "@/lib/bff/types";
+import { INCONCLUSIVE_REASONS, isJobPurpose } from "@/lib/bff/types";
+import type { JobBasis, JobResponse, JobState, OptimizationOutcome } from "@/lib/bff/types";
 import type { SseFrame } from "@/lib/query/sse";
 import { compareIsoDateTimes, isIsoDateTime } from "@/lib/time/iso-date-time";
 
@@ -166,6 +167,7 @@ const OPTIMIZATION_OUTCOMES: ReadonlySet<string> = new Set<OptimizationOutcome>(
   "optimal",
   "feasible",
   "infeasible",
+  "inconclusive",
 ]);
 
 function isJobState(value: unknown): value is JobState {
@@ -239,6 +241,18 @@ function hasValidOptimizationResult(
         result.score === null &&
         result.solver_status === "INFEASIBLE" &&
         result.termination_reason === "infeasibility_proven" &&
+        artifact === null
+      );
+    case "inconclusive":
+      // A no-proof completion: no schedule, so no score and no artifact. The
+      // solver status is deliberately NOT pinned to one literal — the backend
+      // reports whatever terminal status it saw, including a future one it fails
+      // closed on. The REASON is what must stay in the closed set, because the
+      // product outcome map keys off it.
+      return (
+        result.score === null &&
+        result.termination_reason !== null &&
+        INCONCLUSIVE_REASONS.has(result.termination_reason) &&
         artifact === null
       );
   }
@@ -385,6 +399,7 @@ const JOB_RESPONSE_KEYS = new Set([
   "terminal",
   "queue_position",
   "created_at",
+  "expires_at",
   "started_at",
   "finished_at",
   "request",
@@ -393,7 +408,71 @@ const JOB_RESPONSE_KEYS = new Set([
   "controls",
   "links",
 ]);
-const REQUEST_KEYS = new Set(["input_name", "solver", "prettify", "timeout_seconds"]);
+// `purpose` is REQUIRED, not optional: the backend emits it on every response
+// (`schemas.py::JobRequestResponse`), and because this parser rejects any key it
+// did not declare, omitting it here rejected every real 202 and every later poll.
+const REQUEST_KEYS = new Set([
+  "input_name",
+  "solver",
+  "prettify",
+  "timeout_seconds",
+  "purpose",
+  "basis",
+]);
+const BASIS_KEYS = new Set([
+  "basis_id",
+  "schema_version",
+  "submission_contract_version",
+  "workspace_schema_version",
+  "serializer_version",
+  "anonymization_mode",
+  "input_sha256",
+  "normalized_options",
+  "solver_semantic_version",
+  "backend_capability_version",
+  "parent_basis_id",
+  "transform_digest",
+]);
+const BASIS_OPTION_KEYS = new Set(["solver", "prettify", "timeout_seconds"]);
+
+/** Lowercase-hex SHA-256; an uppercase or truncated digest is rejected, not normalized. */
+const SHA256_HEX = /^[0-9a-f]{64}$/;
+
+/**
+ * Validate `request.basis` against the exact `JobBasisResponse` contract.
+ *
+ * A basis is EVIDENCE IDENTITY, so it fails closed harder than an ordinary field:
+ * a malformed, partial, or unexpected-shape basis is rejected outright rather
+ * than accepted with the trustworthy-looking parts kept. `null` (no claim was
+ * made) is valid and simply means this run has no basis to diagnose against.
+ */
+function isJobBasis(value: unknown): value is JobBasis {
+  if (value === null) return true;
+  if (!isRecord(value) || !hasExactKeys(value, BASIS_KEYS)) return false;
+  const options = value.normalized_options;
+  return (
+    typeof value.basis_id === "string" &&
+    SHA256_HEX.test(value.basis_id) &&
+    typeof value.input_sha256 === "string" &&
+    SHA256_HEX.test(value.input_sha256) &&
+    value.schema_version === 2 &&
+    isNonEmptyString(value.submission_contract_version) &&
+    isNonEmptyString(value.workspace_schema_version) &&
+    isNonEmptyString(value.serializer_version) &&
+    isNonEmptyString(value.anonymization_mode) &&
+    isNonEmptyString(value.solver_semantic_version) &&
+    isNonEmptyString(value.backend_capability_version) &&
+    isStringOrNull(value.parent_basis_id) &&
+    isStringOrNull(value.transform_digest) &&
+    isRecord(options) &&
+    hasExactKeys(options, BASIS_OPTION_KEYS) &&
+    isNonEmptyString(options.solver) &&
+    typeof options.prettify === "boolean" &&
+    typeof options.timeout_seconds === "number" &&
+    Number.isInteger(options.timeout_seconds) &&
+    options.timeout_seconds > 0
+  );
+}
 const RESULT_KEYS = new Set(["outcome", "score", "solver_status", "termination_reason"]);
 const LINK_KEYS = new Set(["self", "events", "cancellation", "early_completion", "schedule"]);
 
@@ -508,6 +587,7 @@ export function parseJobResponse(value: unknown, expectedId?: string): JobRespon
     value.terminal !== isTerminalJobState(value.state) ||
     !isQueuePosition(value.queue_position) ||
     !isIsoDateTimeValue(value.created_at) ||
+    !isIsoDateTimeValueOrNull(value.expires_at) ||
     !isIsoDateTimeValueOrNull(value.started_at) ||
     !isIsoDateTimeValueOrNull(value.finished_at) ||
     !isControls(value.controls)
@@ -523,7 +603,11 @@ export function parseJobResponse(value: unknown, expectedId?: string): JobRespon
     !(value.request.prettify === null || typeof value.request.prettify === "boolean") ||
     typeof value.request.timeout_seconds !== "number" ||
     !Number.isInteger(value.request.timeout_seconds) ||
-    value.request.timeout_seconds <= 0
+    value.request.timeout_seconds <= 0 ||
+    // A purpose outside the closed union means this client cannot tell which queue
+    // the job is in, so the response is rejected rather than read as ordinary.
+    !isJobPurpose(value.request.purpose) ||
+    !isJobBasis(value.request.basis)
   ) {
     return null;
   }

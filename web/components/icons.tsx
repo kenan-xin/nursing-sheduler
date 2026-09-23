@@ -79,6 +79,7 @@ export {
   FaWifi,
   FaBan,
   FaCalendar,
+  FaCalendarCheck,
   FaBriefcase,
   FaMugHot,
   FaFileCirclePlus,

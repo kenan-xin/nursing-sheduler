@@ -1,0 +1,18 @@
+id: surface-recipe-option-visual-ts
+valid:
+  - |
+    surfaceVariants({ role: "well", className: "flex flex-col gap-2" });
+  - |
+    surfaceVariants({ role: "well", geometry: "control", emphasis: "hairline" });
+  - |
+    surfaceVariants({ role: "well", ["className"]: "flex gap-2" });
+invalid:
+  - |
+    surfaceVariants({ role: "well", className: "bg-panel" });
+  # Bounded review round 1: the static computed key, in a non-JSX module.
+  - |
+    surfaceVariants({ role: "well", ["className"]: "bg-panel" });
+  - |
+    surfaceVariants({ role: "well", "className": "shadow-3" });
+  - |
+    surfaceVariants({ role: "well", className: "visible" });

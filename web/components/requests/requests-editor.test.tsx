@@ -2,15 +2,12 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
 import type { ScenarioUiState } from "@/lib/scenario";
-import {
-  drainScenarioPersist,
-  resetToNewScenario,
-  useHotStore,
-  useScenarioStore,
-} from "@/lib/store";
+import { useScenarioStore, scenarioCommands } from "@/lib/store";
 import { RequestsEditor } from "./requests-editor";
+import { resetScenarioForTest, drainScenarioCommands } from "@/lib/store/test-authority";
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
@@ -33,9 +30,9 @@ const BASE_SEED: Partial<ScenarioUiState> = {
   shiftGroups: [{ id: "AnyDay", members: ["AM", "PM"] }],
 };
 
-function seed(patch: Partial<ScenarioUiState>) {
-  act(() => {
-    useScenarioStore.getState().mutateScenario(patch);
+async function seed(patch: Partial<ScenarioUiState>) {
+  await act(async () => {
+    await scenarioCommands.mutate(patch);
   });
 }
 
@@ -46,7 +43,8 @@ function uploadCsv(text: string) {
   fireEvent.change(input);
 }
 
-function staffHistory(personId: string): string[] {
+async function staffHistory(personId: string): Promise<string[]> {
+  await drainScenarioCommands();
   return useScenarioStore.getState().staff.find((p) => p.id === personId)?.history ?? [];
 }
 
@@ -57,18 +55,18 @@ beforeEach(async () => {
     configurable: true,
     value: 1000,
   });
-  await resetToNewScenario(useScenarioStore, useHotStore);
-  await drainScenarioPersist(useScenarioStore);
+  await resetScenarioForTest();
+  await drainScenarioCommands();
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
   vi.unstubAllGlobals();
 });
 
 describe("RequestsEditor — derived table day-state precedence (P1)", () => {
-  it("leave+request and off+request conflicts yield exactly one row each; the footer agrees", () => {
-    seed({
+  it("leave+request and off+request conflicts yield exactly one row each; the footer agrees", async () => {
+    await seed({
       ...BASE_SEED,
       reqData: [
         { kind: "leave", person: "Aisha", date: "01" },
@@ -96,8 +94,8 @@ describe("RequestsEditor — derived table day-state precedence (P1)", () => {
 });
 
 describe("RequestsEditor — CSV controls are Quick-Add-only (FR-SR-34)", () => {
-  it("both CSV controls are absent in Normal mode and present in Quick mode", () => {
-    seed(BASE_SEED);
+  it("both CSV controls are absent in Normal mode and present in Quick mode", async () => {
+    await seed(BASE_SEED);
     render(<RequestsEditor />);
 
     expect(screen.queryByTestId("requests-open-requests-csv")).not.toBeInTheDocument();
@@ -112,8 +110,8 @@ describe("RequestsEditor — CSV controls are Quick-Add-only (FR-SR-34)", () => 
     expect(screen.queryByTestId("requests-open-history-csv")).not.toBeInTheDocument();
   });
 
-  it("within Quick mode, Requests CSV is disabled only by an unparseable weight (0 stays valid)", () => {
-    seed(BASE_SEED);
+  it("within Quick mode, Requests CSV is disabled only by an unparseable weight (0 stays valid)", async () => {
+    await seed(BASE_SEED);
     render(<RequestsEditor />);
     fireEvent.click(screen.getByTestId("requests-tab-quick"));
 
@@ -131,8 +129,8 @@ describe("RequestsEditor — CSV controls are Quick-Add-only (FR-SR-34)", () => 
 });
 
 describe("RequestsEditor — history item set includes OFF/LEAVE (P1)", () => {
-  it("the Normal history editor offers worked items + OFF + LEAVE, but no groups", () => {
-    seed(BASE_SEED);
+  it("the Normal history editor offers worked items + OFF + LEAVE, but no groups", async () => {
+    await seed(BASE_SEED);
     render(<RequestsEditor />);
     fireEvent.click(screen.getByTestId("hist-Aisha-0"));
 
@@ -145,46 +143,46 @@ describe("RequestsEditor — history item set includes OFF/LEAVE (P1)", () => {
   });
 
   it("the people-history CSV accepts OFF and LEAVE", async () => {
-    seed(BASE_SEED);
+    await seed(BASE_SEED);
     render(<RequestsEditor />);
     fireEvent.click(screen.getByTestId("requests-tab-quick"));
     fireEvent.click(screen.getByTestId("requests-open-history-csv"));
 
     uploadCsv("Aisha,OFF,2\nChloe,LEAVE,1");
-    await waitFor(() => expect(staffHistory("Aisha")).toEqual(["OFF", "OFF"]));
-    expect(staffHistory("Chloe")).toEqual(["LEAVE"]);
+    await waitFor(async () => expect(await staffHistory("Aisha")).toEqual(["OFF", "OFF"]));
+    expect(await staffHistory("Chloe")).toEqual(["LEAVE"]);
     expect(toast.success).toHaveBeenCalled();
   });
 
   it("the people-history CSV rejects a shift-type group with the verbatim error", async () => {
-    seed(BASE_SEED);
+    await seed(BASE_SEED);
     render(<RequestsEditor />);
     fireEvent.click(screen.getByTestId("requests-tab-quick"));
     fireEvent.click(screen.getByTestId("requests-open-history-csv"));
 
     uploadCsv("Aisha,AnyDay,2\nChloe,AM,1");
-    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    await waitFor(async () => expect(toast.error).toHaveBeenCalled());
     expect(vi.mocked(toast.error).mock.calls[0][0]).toContain('Invalid shift type "AnyDay"');
     // A rejected upload mutates nothing.
-    expect(staffHistory("Aisha")).toEqual([]);
-    expect(staffHistory("Chloe")).toEqual([]);
+    expect(await staffHistory("Aisha")).toEqual([]);
+    expect(await staffHistory("Chloe")).toEqual([]);
   });
 });
 
-describe("RequestsEditor — Normal history editor saves AND closes (FR-SR-19)", () => {
-  it("selecting an option commits and closes the modal", () => {
-    seed(BASE_SEED);
+describe("RequestsEditor — Normal history editor saves AND closes (FR-SR-19)", async () => {
+  it("selecting an option commits and closes the modal", async () => {
+    await seed(BASE_SEED);
     render(<RequestsEditor />);
     fireEvent.click(screen.getByTestId("hist-Aisha-0"));
     expect(screen.getByTestId("history-editor")).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("history-editor-option-AM"));
     expect(screen.queryByTestId("history-editor")).not.toBeInTheDocument();
-    expect(staffHistory("Aisha")).toEqual(["AM"]);
+    expect(await staffHistory("Aisha")).toEqual(["AM"]);
   });
 
-  it("-- Clear -- truncates through the position and closes the modal", () => {
-    seed({ ...BASE_SEED, staff: [{ id: "Aisha", history: ["AM", "PM"] }, { id: "Chloe" }] });
+  it("-- Clear -- truncates through the position and closes the modal", async () => {
+    await seed({ ...BASE_SEED, staff: [{ id: "Aisha", history: ["AM", "PM"] }, { id: "Chloe" }] });
     render(<RequestsEditor />);
     // historyCount = 3; hist-Aisha-1 renders history[0] ("AM", the newest slot).
     fireEvent.click(screen.getByTestId("hist-Aisha-1"));
@@ -193,13 +191,180 @@ describe("RequestsEditor — Normal history editor saves AND closes (FR-SR-19)",
     fireEvent.click(screen.getByTestId("history-editor-clear"));
     expect(screen.queryByTestId("history-editor")).not.toBeInTheDocument();
     // Clearing through position 0 drops the newest entry, keeping the older tail.
-    expect(staffHistory("Aisha")).toEqual(["PM"]);
+    expect(await staffHistory("Aisha")).toEqual(["PM"]);
   });
 });
 
-describe("RequestsEditor — leave copy (FR-SR-48)", () => {
-  it("does not promise a built-in 8h contracted-hours credit", () => {
-    seed(BASE_SEED);
+// ---------------------------------------------------------------------------
+// Focus restoration to the EXACT originating cell (F3 round-four P1).
+//
+// The container holds the initiating element alongside the coordinate. These
+// tests are written against element IDENTITY (`toBe(cell)`), not against a
+// re-query by testid, because a coordinate-derived lookup is exactly the
+// implementation this seam must not have: it would pass even if the container
+// had thrown the element away.
+// ---------------------------------------------------------------------------
+
+describe("RequestsEditor — Cell Preference restores focus to its exact origin", () => {
+  async function openCellEditor() {
+    await seed(BASE_SEED);
+    render(<RequestsEditor />);
+    const cell = screen.getByTestId("cell-Aisha-01");
+    cell.focus();
+    fireEvent.click(cell);
+    expect(screen.getByTestId("cell-preference-editor")).toBeInTheDocument();
+    return cell;
+  }
+
+  it("Cancel returns focus to the very cell that opened it", async () => {
+    const cell = await openCellEditor();
+    fireEvent.click(screen.getByTestId("cell-editor-cancel"));
+    await waitFor(async () => expect(document.activeElement).toBe(cell));
+  });
+
+  it("Escape returns focus to the very cell that opened it", async () => {
+    const cell = await openCellEditor();
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    await waitFor(async () => expect(screen.queryByTestId("cell-preference-editor")).toBeNull());
+    await waitFor(async () => expect(document.activeElement).toBe(cell));
+  });
+
+  it("Save commits AND returns focus to the very cell that opened it", async () => {
+    const cell = await openCellEditor();
+    fireEvent.click(screen.getByTestId("cell-editor-tab-leave"));
+    fireEvent.click(screen.getByTestId("cell-editor-save"));
+    await waitFor(async () => expect(screen.queryByTestId("cell-preference-editor")).toBeNull());
+    // The commit re-renders the matrix; React reconciles the same key to the same
+    // DOM node, so the captured element is still the live cell. Drained first:
+    // T03 publishes the projection once the queued repository command settles,
+    // which is after the editor closes.
+    await act(async () => {
+      await drainScenarioCommands();
+    });
+    expect(useScenarioStore.getState().reqData).toMatchObject([
+      { kind: "leave", person: "Aisha", date: "01" },
+    ]);
+    await waitFor(async () => expect(document.activeElement).toBe(cell));
+  });
+
+  it("Clear cell returns focus to the very cell that opened it", async () => {
+    const cell = await openCellEditor();
+    fireEvent.click(screen.getByTestId("cell-editor-clear"));
+    await waitFor(async () => expect(document.activeElement).toBe(cell));
+  });
+
+  it("opens from the keyboard and returns focus there too", async () => {
+    await seed(BASE_SEED);
+    render(<RequestsEditor />);
+    const cell = screen.getByTestId("cell-Chloe-02");
+    cell.focus();
+    // The origin is a native button, so activation is the browser's synthesized
+    // click from the key press — a bare `keyDown` no longer stands in for it.
+    await userEvent.keyboard("{Enter}");
+    expect(screen.getByTestId("cell-preference-editor")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("cell-editor-cancel"));
+    await waitFor(async () => expect(document.activeElement).toBe(cell));
+  });
+
+  it("does not steal focus when the captured origin has left the document", async () => {
+    const cell = await openCellEditor();
+    // Simulate the row being recycled by the virtualizer while the editor is open.
+    cell.remove();
+    expect(cell.isConnected).toBe(false);
+    const parked = document.createElement("button");
+    document.body.append(parked);
+
+    fireEvent.click(screen.getByTestId("cell-editor-cancel"));
+    await waitFor(async () => expect(screen.queryByTestId("cell-preference-editor")).toBeNull());
+    parked.focus();
+    // No focus() on a disconnected node, no fallback to body, and no hunt for a
+    // lookalike cell: whatever the user is on stays put.
+    await waitFor(async () => expect(document.activeElement).toBe(parked));
+    parked.remove();
+  });
+});
+
+describe("RequestsEditor — History Editor restores focus to its exact origin", async () => {
+  const HISTORY_SEED: Partial<ScenarioUiState> = {
+    ...BASE_SEED,
+    staff: [
+      { id: "Aisha", history: ["PM", "AM"] },
+      { id: "Chloe", history: [] },
+    ],
+  };
+
+  async function openHistoryEditor() {
+    await seed(HISTORY_SEED);
+    render(<RequestsEditor />);
+    const slot = screen.getByTestId("hist-Aisha-1");
+    slot.focus();
+    fireEvent.click(slot);
+    expect(screen.getByTestId("history-editor")).toBeInTheDocument();
+    return slot;
+  }
+
+  it("Done returns focus to the very history slot that opened it", async () => {
+    const slot = await openHistoryEditor();
+    fireEvent.click(screen.getByTestId("history-editor-done"));
+    await waitFor(async () => expect(document.activeElement).toBe(slot));
+  });
+
+  it("the close control returns focus to the very history slot", async () => {
+    const slot = await openHistoryEditor();
+    fireEvent.click(screen.getByTestId("history-editor-close"));
+    await waitFor(async () => expect(document.activeElement).toBe(slot));
+  });
+
+  it("Escape returns focus to the very history slot", async () => {
+    const slot = await openHistoryEditor();
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    await waitFor(async () => expect(screen.queryByTestId("history-editor")).toBeNull());
+    await waitFor(async () => expect(document.activeElement).toBe(slot));
+  });
+
+  it("an option selection commits AND returns focus to the very history slot", async () => {
+    const slot = await openHistoryEditor();
+    fireEvent.click(screen.getByTestId("history-editor-option-AM"));
+    await waitFor(async () => expect(screen.queryByTestId("history-editor")).toBeNull());
+    expect(await staffHistory("Aisha")).toContain("AM");
+    await waitFor(async () => expect(document.activeElement).toBe(slot));
+  });
+
+  it("Clear commits AND returns focus to the very history slot", async () => {
+    const slot = await openHistoryEditor();
+    fireEvent.click(screen.getByTestId("history-editor-clear"));
+    await waitFor(async () => expect(screen.queryByTestId("history-editor")).toBeNull());
+    await waitFor(async () => expect(document.activeElement).toBe(slot));
+  });
+
+  it("opens from the keyboard and returns focus there too", async () => {
+    await seed(HISTORY_SEED);
+    render(<RequestsEditor />);
+    const slot = screen.getByTestId("hist-Aisha-2");
+    slot.focus();
+    await userEvent.keyboard(" ");
+    expect(screen.getByTestId("history-editor")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("history-editor-done"));
+    await waitFor(async () => expect(document.activeElement).toBe(slot));
+  });
+
+  it("does not steal focus when the captured history origin has left the document", async () => {
+    const slot = await openHistoryEditor();
+    slot.remove();
+    const parked = document.createElement("button");
+    document.body.append(parked);
+
+    fireEvent.click(screen.getByTestId("history-editor-done"));
+    await waitFor(async () => expect(screen.queryByTestId("history-editor")).toBeNull());
+    parked.focus();
+    await waitFor(async () => expect(document.activeElement).toBe(parked));
+    parked.remove();
+  });
+});
+
+describe("RequestsEditor — leave copy (FR-SR-48)", async () => {
+  it("does not promise a built-in 8h contracted-hours credit", async () => {
+    await seed(BASE_SEED);
     render(<RequestsEditor />);
     expect(screen.queryByText(/credits 8h/i)).not.toBeInTheDocument();
   });

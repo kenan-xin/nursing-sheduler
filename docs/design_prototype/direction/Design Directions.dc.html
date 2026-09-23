@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&family=Hanken+Grotesk:wght@400;500;600;700&family=Nunito:wght@400;500;600;700;800&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=Spline+Sans+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+<style>
+*{box-sizing:border-box}
+body{margin:0}
+a{color:#0F7A6C}
+a:hover{color:#0b5c51}
+</style>
+</helmet>
+
+<div style="background:#EFEAE4;padding:56px 48px 96px;font-family:'Hanken Grotesk',system-ui,sans-serif;color:#423B3D;display:flex;flex-direction:column;gap:56px;min-height:100vh">
+
+<section style="display:flex;flex-direction:column;gap:28px">
+
+  <div style="max-width:920px;display:flex;flex-direction:column;gap:14px">
+    <div style="font:600 12px 'Hanken Grotesk';letter-spacing:.14em;text-transform:uppercase;color:#8C8082">Turn 1 · Visual direction</div>
+    <h1 style="font:700 42px/1.1 Figtree,sans-serif;letter-spacing:-.02em;margin:0;color:#3A3335">Three ways to warm up the roster app</h1>
+    <p style="margin:0;font-size:17px;line-height:1.55;color:#6E6468;max-width:70ch;text-wrap:pretty">Same screens, same information density — different temperature. All three replace the near-black ink with a softer warm ramp, round the corners, and swap the hard 1px grid for gentle surfaces. Reply with an id (<a href="#1a">1a</a>, <a href="#1b">1b</a>, <a href="#1c">1c</a>) and I'll roll it through every screen.</p>
+  </div>
+
+  <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:stretch">
+    <div style="background:#fff;border-radius:16px;padding:18px 20px;box-shadow:0 2px 12px rgba(90,60,50,.06);min-width:260px">
+      <div style="font:600 11px 'Hanken Grotesk';letter-spacing:.12em;text-transform:uppercase;color:#A0959A;margin-bottom:12px">Today · ink</div>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+        <div style="width:26px;height:26px;background:#14161b;border-radius:4px"></div>
+        <div style="font:600 15px 'Spline Sans Mono',monospace;color:#14161b">#14161b</div>
+      </div>
+      <div style="font-size:14px;color:#6E6468">Cold near-black, 90° corners, hairline borders everywhere.</div>
+    </div>
+    <div style="background:#fff;border-radius:16px;padding:18px 20px;box-shadow:0 2px 12px rgba(90,60,50,.06);min-width:300px">
+      <div style="font:600 11px 'Hanken Grotesk';letter-spacing:.12em;text-transform:uppercase;color:#A0959A;margin-bottom:12px">Proposed · warm ink ramp</div>
+      <div style="display:flex;gap:8px;margin-bottom:10px">
+        <div style="flex:1;height:26px;background:#423B3D;border-radius:6px"></div>
+        <div style="flex:1;height:26px;background:#6E6468;border-radius:6px"></div>
+        <div style="flex:1;height:26px;background:#9A8F92;border-radius:6px"></div>
+        <div style="flex:1;height:26px;background:#E7DED7;border-radius:6px"></div>
+      </div>
+      <div style="font-size:14px;color:#6E6468">Headings at 78% weight of true black; body text one step lighter still.</div>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:32px;flex-wrap:wrap;align-items:flex-start">
+
+    <!-- ============ 1a ============ -->
+    <div id="1a" style="width:660px;display:flex;flex-direction:column;gap:16px">
+      <div style="display:flex;align-items:baseline;gap:12px">
+        <span style="font:700 13px 'Spline Sans Mono',monospace;background:#0F7A6C;color:#fff;padding:5px 10px;border-radius:8px">1a</span>
+        <div>
+          <div style="font:700 24px Figtree,sans-serif;letter-spacing:-.01em;color:#3A3335">Warm Clinical</div>
+          <div style="font-size:15px;color:#6E6468">Cream paper, deep teal, coral for attention. Calm and credible — reads as clinical without reading as cold.</div>
+        </div>
+      </div>
+
+      <sc-if value="{{ showTokens }}" hint-placeholder-val="{{ true }}">
+      <div style="background:#fff;border-radius:16px;padding:16px 18px;box-shadow:0 2px 12px rgba(90,60,50,.06);display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start">
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div style="font:600 10px 'Hanken Grotesk';letter-spacing:.12em;text-transform:uppercase;color:#A0959A">Palette</div>
+          <div style="display:flex;gap:6px">
+            <div style="width:34px;height:34px;border-radius:9px;background:#0F7A6C"></div>
+            <div style="width:34px;height:34px;border-radius:9px;background:#E8735A"></div>
+            <div style="width:34px;height:34px;border-radius:9px;background:#F3EDE7"></div>
+            <div style="width:34px;height:34px;border-radius:9px;background:#FAF6F2;border:1px solid #E7DED7"></div>
+          </div>
+          <div style="font:400 12px 'Spline Sans Mono',monospace;color:#8C8082">0F7A6C · E8735A · FAF6F2</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div style="font:600 10px 'Hanken Grotesk';letter-spacing:.12em;text-transform:uppercase;color:#A0959A">Type</div>
+          <div style="font:700 20px Figtree,sans-serif;color:#3A3335;letter-spacing:-.01em">Figtree 700</div>
+          <div style="font:400 14px 'Hanken Grotesk';color:#6E6468">Hanken Grotesk 400 · body</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div style="font:600 10px 'Hanken Grotesk';letter-spacing:.12em;text-transform:uppercase;color:#A0959A">Shape</div>
+          <div style="display:flex;gap:6px;align-items:flex-end">
+            <div style="width:40px;height:34px;border-radius:16px;background:#E4F1EE"></div>
+            <div style="width:40px;height:34px;border-radius:12px;background:#E4F1EE"></div>
+            <div style="width:52px;height:30px;border-radius:999px;background:#E4F1EE"></div>
+          </div>
+          <div style="font:400 12px 'Spline Sans Mono',monospace;color:#8C8082">16 / 12 / pill</div>
+        </div>
+      </div>
+      </sc-if>
+
+      <div style="background:#FAF6F2;border-radius:22px;overflow:hidden;box-shadow:0 8px 30px rgba(90,60,50,.10)">
+        <div style="display:flex;align-items:center;gap:12px;padding:14px 20px;background:#fff;border-bottom:1px solid #F0E8E1">
+          <div style="width:30px;height:30px;border-radius:10px;background:#0F7A6C;color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px"><i class="fa-solid fa-heart-pulse"></i></div>
+          <div style="font:600 14px 'Hanken Grotesk';color:#6E6468">Ward 7B · General Medicine</div>
+          <div style="flex:1"></div>
+          <div style="display:flex;align-items:center;gap:8px;background:#F3EDE7;border-radius:999px;padding:5px 12px 5px 6px">
+            <div style="width:24px;height:24px;border-radius:999px;background:#E8735A;color:#fff;display:flex;align-items:center;justify-content:center;font:700 11px 'Hanken Grotesk'">SL</div>
+            <div style="font:600 13px 'Hanken Grotesk';color:#6E6468">Sister Lim</div>
+          </div>
+        </div>
+
+        <div style="padding:24px 20px 26px;display:flex;flex-direction:column;gap:18px">
+          <div style="display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap">
+            <div style="flex:1;min-width:260px;display:flex;flex-direction:column;gap:7px">
+              <div style="font:600 11px 'Hanken Grotesk';letter-spacing:.12em;text-transform:uppercase;color:#0F7A6C">Good morning</div>
+              <div style="font:700 30px/1.15 Figtree,sans-serif;letter-spacing:-.02em;color:#3A3335">Build the February roster</div>
+              <div style="font-size:15px;color:#6E6468;max-width:44ch">Four steps left. Nothing is locked until you publish.</div>
+            </div>
+            <button style="height:44px;padding:0 20px;border:none;border-radius:999px;background:#0F7A6C;color:#fff;font:600 15px 'Hanken Grotesk';display:inline-flex;align-items:center;gap:9px;box-shadow:0 4px 14px rgba(15,122,108,.28)" style-hover="filter:brightness(1.07)"><i class="fa-solid fa-wand-magic-sparkles" style="font-size:13px"></i> Generate roster</button>
+          </div>
+
+          <div style="display:flex;gap:12px;flex-wrap:wrap">
+            <div style="flex:1;min-width:120px;background:#fff;border-radius:16px;padding:16px 18px;box-shadow:0 2px 10px rgba(90,60,50,.05)">
+              <div style="font:700 26px Figtree,sans-serif;color:#3A3335;letter-spacing:-.02em">24</div>
+              <div style="font-size:13px;color:#8C8082;margin-top:4px">Nurses</div>
+            </div>
+            <div style="flex:1;min-width:120px;background:#fff;border-radius:16px;padding:16px 18px;box-shadow:0 2px 10px rgba(90,60,50,.05)">
+              <div style="font:700 26px Figtree,sans-serif;color:#3A3335;letter-spacing:-.02em">28</div>
+              <div style="font-size:13px;color:#8C8082;margin-top:4px">Days</div>
+            </div>
+            <div style="flex:1;min-width:120px;background:#E4F1EE;border-radius:16px;padding:16px 18px">
+              <div style="font:700 26px Figtree,sans-serif;color:#0F7A6C;letter-spacing:-.02em">18</div>
+              <div style="font-size:13px;color:#3E7A70;margin-top:4px">Rules on</div>
+            </div>
+            <div style="flex:1;min-width:120px;background:#FDEAE4;border-radius:16px;padding:16px 18px">
+              <div style="font:700 26px Figtree,sans-serif;color:#C4522F;letter-spacing:-.02em">3</div>
+              <div style="font-size:13px;color:#A9634C;margin-top:4px">Conflicts</div>
+            </div>
+          </div>
+
+          <div style="display:flex;gap:12px;flex-wrap:wrap">
+            <div style="flex:1;min-width:220px;background:#fff;border-radius:18px;padding:18px;border:1.5px solid #0F7A6C;box-shadow:0 4px 16px rgba(15,122,108,.10)">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+                <div style="width:36px;height:36px;border-radius:12px;background:#E4F1EE;color:#0F7A6C;display:flex;align-items:center;justify-content:center"><i class="fa-solid fa-user-nurse"></i></div>
+                <span style="font:600 11px 'Hanken Grotesk';letter-spacing:.08em;text-transform:uppercase;color:#0F7A6C;background:#E4F1EE;padding:5px 10px;border-radius:999px">Current</span>
+              </div>
+              <div style="font:700 18px Figtree,sans-serif;color:#3A3335;margin-bottom:5px">Staff &amp; skills</div>
+              <div style="font-size:14px;line-height:1.45;color:#6E6468;margin-bottom:14px">24 nurses, 6 senior. Seniority drives night cover.</div>
+              <button style="height:38px;padding:0 16px;border:none;border-radius:999px;background:#0F7A6C;color:#fff;font:600 14px 'Hanken Grotesk'">Continue</button>
+            </div>
+            <div style="flex:1;min-width:220px;background:#fff;border-radius:18px;padding:18px;box-shadow:0 2px 10px rgba(90,60,50,.05)">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+                <div style="width:36px;height:36px;border-radius:12px;background:#F3EDE7;color:#8C8082;display:flex;align-items:center;justify-content:center"><i class="fa-solid fa-list-check"></i></div>
+                <span style="font:600 11px 'Hanken Grotesk';letter-spacing:.08em;text-transform:uppercase;color:#8C8082;background:#F3EDE7;padding:5px 10px;border-radius:999px">To do</span>
+              </div>
+              <div style="font:700 18px Figtree,sans-serif;color:#3A3335;margin-bottom:5px">Rules</div>
+              <div style="font-size:14px;line-height:1.45;color:#6E6468;margin-bottom:14px">Rest after nights, weekend fairness, max 5 in a row.</div>
+              <button style="height:38px;padding:0 16px;border-radius:999px;background:#fff;border:1.5px solid #E7DED7;color:#423B3D;font:600 14px 'Hanken Grotesk'">Set up</button>
+            </div>
+          </div>
+
+          <div style="background:#fff;border-radius:18px;padding:18px;box-shadow:0 2px 10px rgba(90,60,50,.05)">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+              <div style="font:700 16px Figtree,sans-serif;color:#3A3335">Week of 9 Feb</div>
+              <div style="font-size:13px;color:#8C8082">Draft · auto-saved</div>
+            </div>
+            <div style="display:grid;grid-template-columns:104px repeat(7,1fr);gap:6px">
+              <div></div>
+              <div style="font:600 11px 'Hanken Grotesk';color:#A0959A;text-align:center">MON</div>
+              <div style="font:600 11px 'Hanken Grotesk';color:#A0959A;text-align:center">TUE</div>
+              <div style="font:600 11px 'Hanken Grotesk';color:#A0959A;text-align:center">WED</div>
+              <div style="font:600 11px 'Hanken Grotesk';color:#A0959A;text-align:center">THU</div>
+              <div style="font:600 11px 'Hanken Grotesk';color:#A0959A;text-align:center">FRI</div>
+              <div style="font:600 11px 'Hanken Grotesk';color:#C4522F;text-align:center">SAT</div>
+              <div style="font:600 11px 'Hanken Grotesk';color:#C4522F;text-align:center">SUN</div>
+
+              <div style="font:500 13px 'Hanken Grotesk';color:#423B3D;display:flex;align-items:center">Aisyah B.</div>
+              <div style="height:34px;border-radius:10px;background:#E4F1EE;color:#0F7A6C;display:flex;align-items:center;justify-content:center;font:600 12px 'Hanken Grotesk'">AM</div>
+              <div style="height:34px;border-radius:10px;background:#E4F1EE;color:#0F7A6C;display:flex;align-items:center;justify-content:center;font:600 12px 'Hanken Grotesk'">AM</div>
+              <div style="height:34px;border-radius:10px;background:#F6F1EC"></div>
+              <div style="height:34px;border-radius:10px;background:#FDEAE4;color:#C4522F;display:flex;align-items:center;justify-content:center;font:600 12px 'Hanken Grotesk'">PM</div>
+              <div style="height:34px;border-radius:10px;background:#FDEAE4;color:#C4522F;display:flex;align-items:center;justify-content:center;font:600 12px 'Hanken Grotesk'">PM</div>
+              <div style="height:34px;border-radius:10px;background:#F6F1EC"></div>
+              <div style="height:34px;border-radius:10px;background:#F6F1EC"></div>
+
+              <div style="font:500 13px 'Hanken Grotesk';color:#423B3D;display:flex;align-items:center">Grace Tan</div>
+              <div style="height:34px;border-radius:10px;background:#F6F1EC"></div>
+              <div style="height:34px;border-radius:10px;background:#EDE7F2;color:#5C4E77;display:flex;align-items:center;justify-content:center;font:600 12px 'Hanken Grotesk'">N</div>
+              <div style="height:34px;border-radius:10px;background:#EDE7F2;color:#5C4E77;display:flex;align-items:center;justify-content:center;font:600 12px 'Hanken Grotesk'">N</div>
+              <div style="height:34px;border-radius:10px;background:#F6F1EC;border:1.5px dashed #E0D6CE;color:#A0959A;display:flex;align-items:center;justify-content:center;font:600 11px 'Hanken Grotesk'">rest</div>
+              <div style="height:34px;border-radius:10px;background:#E4F1EE;color:#0F7A6C;display:flex;align-items:center;justify-content:center;font:600 12px 'Hanken Grotesk'">AM</div>
+              <div style="height:34px;border-radius:10px;background:#F6F1EC"></div>
+              <div style="height:34px;border-radius:10px;background:#F6F1EC"></div>
+
+              <div style="font:500 13px 'Hanken Grotesk';color:#423B3D;display:flex;align-items:center">Nur Farhana</div>
+              <div style="height:34px;border-radius:10px;background:#FDEAE4;color:#C4522F;display:flex;align-items:center;justify-content:center;font:600 12px 'Hanken Grotesk'">PM</div>
+              <div style="height:34px;border-radius:10px;background:#F6F1EC"></div>
+              <div style="height:34px;border-radius:10px;background:#E4F1EE;color:#0F7A6C;display:flex;align-items:center;justify-content:center;font:600 12px 'Hanken Grotesk'">AM</div>
+              <div style="height:34px;border-radius:10px;background:#E4F1EE;color:#0F7A6C;display:flex;align-items:center;justify-content:center;font:600 12px 'Hanken Grotesk'">AM</div>
+              <div style="height:34px;border-radius:10px;background:#F6F1EC"></div>
+              <div style="height:34px;border-radius:10px;background:#EDE7F2;color:#5C4E77;display:flex;align-items:center;justify-content:center;font:600 12px 'Hanken Grotesk'">N</div>
+              <div style="height:34px;border-radius:10px;background:#EDE7F2;color:#5C4E77;display:flex;align-items:center;justify-content:center;font:600 12px 'Hanken Grotesk'">N</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 1b ============ -->
+    <div id="1b" style="width:660px;display:flex;flex-direction:column;gap:16px">
+      <div style="display:flex;align-items:baseline;gap:12px">
+        <span style="font:700 13px 'Spline Sans Mono',monospace;background:#7A5BD6;color:#fff;padding:5px 10px;border-radius:8px">1b</span>
+        <div>
+          <div style="font:800 24px Nunito,sans-serif;letter-spacing:-.01em;color:#3E3A52">Soft Care</div>
+          <div style="font-size:15px;color:#6C6684">Rounded Nunito, lilac and peach, generous padding. The friendliest of the three — closest to your first mood board.</div>
+        </div>
+      </div>
+
+      <sc-if value="{{ showTokens }}" hint-placeholder-val="{{ true }}">
+      <div style="background:#fff;border-radius:20px;padding:16px 18px;box-shadow:0 2px 12px rgba(70,60,110,.07);display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start">
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div style="font:700 10px Nunito;letter-spacing:.12em;text-transform:uppercase;color:#9C97AE">Palette</div>
+          <div style="display:flex;gap:6px">
+            <div style="width:34px;height:34px;border-radius:12px;background:#7A5BD6"></div>
+            <div style="width:34px;height:34px;border-radius:12px;background:#FF9E7D"></div>
+            <div style="width:34px;height:34px;border-radius:12px;background:#F1EEFB"></div>
+            <div style="width:34px;height:34px;border-radius:12px;background:#F8F6FD;border:1px solid #E7E2F5"></div>
+          </div>
+          <div style="font:400 12px 'Spline Sans Mono',monospace;color:#8B85A3">7A5BD6 · FF9E7D · F8F6FD</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div style="font:700 10px Nunito;letter-spacing:.12em;text-transform:uppercase;color:#9C97AE">Type</div>
+          <div style="font:800 20px Nunito,sans-serif;color:#3E3A52">Nunito 800</div>
+          <div style="font:400 14px Nunito;color:#6C6684">Nunito 400 · body</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div style="font:700 10px Nunito;letter-spacing:.12em;text-transform:uppercase;color:#9C97AE">Shape</div>
+          <div style="display:flex;gap:6px;align-items:flex-end">
+            <div style="width:40px;height:34px;border-radius:22px;background:#EFEAFC"></div>
+            <div style="width:40px;height:34px;border-radius:16px;background:#EFEAFC"></div>
+            <div style="width:52px;height:30px;border-radius:999px;background:#EFEAFC"></div>
+          </div>
+          <div style="font:400 12px 'Spline Sans Mono',monospace;color:#8B85A3">22 / 16 / pill</div>
+        </div>
+      </div>
+      </sc-if>
+
+      <div style="background:#F8F6FD;border-radius:26px;overflow:hidden;box-shadow:0 8px 30px rgba(70,60,110,.12);font-family:Nunito,sans-serif">
+        <div style="display:flex;align-items:center;gap:12px;padding:14px 20px;background:#fff;border-bottom:1px solid #F0ECFA">
+          <div style="width:30px;height:30px;border-radius:12px;background:#7A5BD6;color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px"><i class="fa-solid fa-heart-pulse"></i></div>
+          <div style="font:600 14px Nunito;color:#6C6684">Ward 7B · General Medicine</div>
+          <div style="flex:1"></div>
+          <div style="display:flex;align-items:center;gap:8px;background:#F1EEFB;border-radius:999px;padding:5px 12px 5px 6px">
+            <div style="width:24px;height:24px;border-radius:999px;background:#FF9E7D;color:#fff;display:flex;align-items:center;justify-content:center;font:800 11px Nunito">SL</div>
+            <div style="font:600 13px Nunito;color:#6C6684">Sister Lim</div>
+          </div>
+        </div>
+
+        <div style="padding:24px 20px 26px;display:flex;flex-direction:column;gap:18px">
+          <div style="background:#7A5BD6;border-radius:22px;padding:22px 24px;display:flex;align-items:center;gap:18px;flex-wrap:wrap">
+            <div style="flex:1;min-width:240px;display:flex;flex-direction:column;gap:7px">
+              <div style="font:700 11px Nunito;letter-spacing:.12em;text-transform:uppercase;color:#D9CEFB">Good morning</div>
+              <div style="font:800 28px/1.2 Nunito,sans-serif;color:#fff">Build the February roster</div>
+              <div style="font-size:15px;color:#E3DAFC;max-width:44ch">Four steps left. Nothing is locked until you publish.</div>
+            </div>
+            <button style="height:46px;padding:0 22px;border:none;border-radius:999px;background:#fff;color:#5C43B0;font:700 15px Nunito;display:inline-flex;align-items:center;gap:9px" style-hover="background:#FFF0E9"><i class="fa-solid fa-wand-magic-sparkles" style="font-size:13px"></i> Generate roster</button>
+          </div>
+
+          <div style="display:flex;gap:12px;flex-wrap:wrap">
+            <div style="flex:1;min-width:120px;background:#fff;border-radius:20px;padding:16px 18px;box-shadow:0 2px 10px rgba(70,60,110,.06)">
+              <div style="font:800 26px Nunito;color:#3E3A52">24</div>
+              <div style="font-size:13px;color:#9C97AE;margin-top:4px">Nurses</div>
+            </div>
+            <div style="flex:1;min-width:120px;background:#fff;border-radius:20px;padding:16px 18px;box-shadow:0 2px 10px rgba(70,60,110,.06)">
+              <div style="font:800 26px Nunito;color:#3E3A52">28</div>
+              <div style="font-size:13px;color:#9C97AE;margin-top:4px">Days</div>
+            </div>
+            <div style="flex:1;min-width:120px;background:#EFEAFC;border-radius:20px;padding:16px 18px">
+              <div style="font:800 26px Nunito;color:#6B4FCF">18</div>
+              <div style="font-size:13px;color:#7A6FA8;margin-top:4px">Rules on</div>
+            </div>
+            <div style="flex:1;min-width:120px;background:#FFF0E9;border-radius:20px;padding:16px 18px">
+              <div style="font:800 26px Nunito;color:#D9663C">3</div>
+              <div style="font-size:13px;color:#B97B5F;margin-top:4px">Conflicts</div>
+            </div>
+          </div>
+
+          <div style="display:flex;gap:12px;flex-wrap:wrap">
+            <div style="flex:1;min-width:220px;background:#fff;border-radius:22px;padding:18px;box-shadow:0 6px 20px rgba(122,91,214,.14)">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+                <div style="width:38px;height:38px;border-radius:14px;background:#EFEAFC;color:#7A5BD6;display:flex;align-items:center;justify-content:center"><i class="fa-solid fa-user-nurse"></i></div>
+                <span style="font:700 11px Nunito;letter-spacing:.06em;text-transform:uppercase;color:#6B4FCF;background:#EFEAFC;padding:5px 11px;border-radius:999px">Current</span>
+              </div>
+              <div style="font:800 18px Nunito;color:#3E3A52;margin-bottom:5px">Staff &amp; skills</div>
+              <div style="font-size:14px;line-height:1.5;color:#6C6684;margin-bottom:14px">24 nurses, 6 senior. Seniority drives night cover.</div>
+              <button style="height:40px;padding:0 18px;border:none;border-radius:999px;background:#7A5BD6;color:#fff;font:700 14px Nunito">Continue</button>
+            </div>
+            <div style="flex:1;min-width:220px;background:#fff;border-radius:22px;padding:18px;box-shadow:0 2px 10px rgba(70,60,110,.06)">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+                <div style="width:38px;height:38px;border-radius:14px;background:#F1EEFB;color:#9C97AE;display:flex;align-items:center;justify-content:center"><i class="fa-solid fa-list-check"></i></div>
+                <span style="font:700 11px Nunito;letter-spacing:.06em;text-transform:uppercase;color:#9C97AE;background:#F1EEFB;padding:5px 11px;border-radius:999px">To do</span>
+              </div>
+              <div style="font:800 18px Nunito;color:#3E3A52;margin-bottom:5px">Rules</div>
+              <div style="font-size:14px;line-height:1.5;color:#6C6684;margin-bottom:14px">Rest after nights, weekend fairness, max 5 in a row.</div>
+              <button style="height:40px;padding:0 18px;border-radius:999px;background:#fff;border:1.5px solid #E7E2F5;color:#3E3A52;font:700 14px Nunito">Set up</button>
+            </div>
+          </div>
+
+          <div style="background:#fff;border-radius:22px;padding:18px;box-shadow:0 2px 10px rgba(70,60,110,.06)">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+              <div style="font:800 16px Nunito;color:#3E3A52">Week of 9 Feb</div>
+              <div style="font-size:13px;color:#9C97AE">Draft · auto-saved</div>
+            </div>
+            <div style="display:grid;grid-template-columns:104px repeat(7,1fr);gap:6px">
+              <div></div>
+              <div style="font:700 11px Nunito;color:#9C97AE;text-align:center">MON</div>
+              <div style="font:700 11px Nunito;color:#9C97AE;text-align:center">TUE</div>
+              <div style="font:700 11px Nunito;color:#9C97AE;text-align:center">WED</div>
+              <div style="font:700 11px Nunito;color:#9C97AE;text-align:center">THU</div>
+              <div style="font:700 11px Nunito;color:#9C97AE;text-align:center">FRI</div>
+              <div style="font:700 11px Nunito;color:#D9663C;text-align:center">SAT</div>
+              <div style="font:700 11px Nunito;color:#D9663C;text-align:center">SUN</div>
+
+              <div style="font:600 13px Nunito;color:#3E3A52;display:flex;align-items:center">Aisyah B.</div>
+              <div style="height:34px;border-radius:12px;background:#EFEAFC;color:#6B4FCF;display:flex;align-items:center;justify-content:center;font:700 12px Nunito">AM</div>
+              <div style="height:34px;border-radius:12px;background:#EFEAFC;color:#6B4FCF;display:flex;align-items:center;justify-content:center;font:700 12px Nunito">AM</div>
+              <div style="height:34px;border-radius:12px;background:#F5F3FC"></div>
+              <div style="height:34px;border-radius:12px;background:#FFF0E9;color:#D9663C;display:flex;align-items:center;justify-content:center;font:700 12px Nunito">PM</div>
+              <div style="height:34px;border-radius:12px;background:#FFF0E9;color:#D9663C;display:flex;align-items:center;justify-content:center;font:700 12px Nunito">PM</div>
+              <div style="height:34px;border-radius:12px;background:#F5F3FC"></div>
+              <div style="height:34px;border-radius:12px;background:#F5F3FC"></div>
+
+              <div style="font:600 13px Nunito;color:#3E3A52;display:flex;align-items:center">Grace Tan</div>
+              <div style="height:34px;border-radius:12px;background:#F5F3FC"></div>
+              <div style="height:34px;border-radius:12px;background:#E4EEF9;color:#3E6A9C;display:flex;align-items:center;justify-content:center;font:700 12px Nunito">N</div>
+              <div style="height:34px;border-radius:12px;background:#E4EEF9;color:#3E6A9C;display:flex;align-items:center;justify-content:center;font:700 12px Nunito">N</div>
+              <div style="height:34px;border-radius:12px;background:#F5F3FC;border:1.5px dashed #E2DCF3;color:#9C97AE;display:flex;align-items:center;justify-content:center;font:700 11px Nunito">rest</div>
+              <div style="height:34px;border-radius:12px;background:#EFEAFC;color:#6B4FCF;display:flex;align-items:center;justify-content:center;font:700 12px Nunito">AM</div>
+              <div style="height:34px;border-radius:12px;background:#F5F3FC"></div>
+              <div style="height:34px;border-radius:12px;background:#F5F3FC"></div>
+
+              <div style="font:600 13px Nunito;color:#3E3A52;display:flex;align-items:center">Nur Farhana</div>
+              <div style="height:34px;border-radius:12px;background:#FFF0E9;color:#D9663C;display:flex;align-items:center;justify-content:center;font:700 12px Nunito">PM</div>
+              <div style="height:34px;border-radius:12px;background:#F5F3FC"></div>
+              <div style="height:34px;border-radius:12px;background:#EFEAFC;color:#6B4FCF;display:flex;align-items:center;justify-content:center;font:700 12px Nunito">AM</div>
+              <div style="height:34px;border-radius:12px;background:#EFEAFC;color:#6B4FCF;display:flex;align-items:center;justify-content:center;font:700 12px Nunito">AM</div>
+              <div style="height:34px;border-radius:12px;background:#F5F3FC"></div>
+              <div style="height:34px;border-radius:12px;background:#E4EEF9;color:#3E6A9C;display:flex;align-items:center;justify-content:center;font:700 12px Nunito">N</div>
+              <div style="height:34px;border-radius:12px;background:#E4EEF9;color:#3E6A9C;display:flex;align-items:center;justify-content:center;font:700 12px Nunito">N</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 1c ============ -->
+    <div id="1c" style="width:660px;display:flex;flex-direction:column;gap:16px">
+      <div style="display:flex;align-items:baseline;gap:12px">
+        <span style="font:700 13px 'Spline Sans Mono',monospace;background:#5B7F6B;color:#fff;padding:5px 10px;border-radius:8px">1c</span>
+        <div>
+          <div style="font:500 25px Newsreader,serif;color:#3A3C36">Sage &amp; Clay</div>
+          <div style="font-size:15px;color:#6A6C62">Oatmeal paper, sage green, clay accents, a serif for headings. Warm but grown-up — least "app-like", most human.</div>
+        </div>
+      </div>
+
+      <sc-if value="{{ showTokens }}" hint-placeholder-val="{{ true }}">
+      <div style="background:#FDFCFA;border-radius:14px;padding:16px 18px;box-shadow:0 2px 12px rgba(80,80,60,.06);display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start">
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div style="font:600 10px 'Hanken Grotesk';letter-spacing:.12em;text-transform:uppercase;color:#97998E">Palette</div>
+          <div style="display:flex;gap:6px">
+            <div style="width:34px;height:34px;border-radius:8px;background:#5B7F6B"></div>
+            <div style="width:34px;height:34px;border-radius:8px;background:#C4694A"></div>
+            <div style="width:34px;height:34px;border-radius:8px;background:#EFEBE2"></div>
+            <div style="width:34px;height:34px;border-radius:8px;background:#F7F5F0;border:1px solid #E3DFD4"></div>
+          </div>
+          <div style="font:400 12px 'Spline Sans Mono',monospace;color:#84867B">5B7F6B · C4694A · F7F5F0</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div style="font:600 10px 'Hanken Grotesk';letter-spacing:.12em;text-transform:uppercase;color:#97998E">Type</div>
+          <div style="font:500 21px Newsreader,serif;color:#3A3C36">Newsreader 500</div>
+          <div style="font:400 14px 'Hanken Grotesk';color:#6A6C62">Hanken Grotesk 400 · body</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div style="font:600 10px 'Hanken Grotesk';letter-spacing:.12em;text-transform:uppercase;color:#97998E">Shape</div>
+          <div style="display:flex;gap:6px;align-items:flex-end">
+            <div style="width:40px;height:34px;border-radius:14px;background:#E8F0EA"></div>
+            <div style="width:40px;height:34px;border-radius:10px;background:#E8F0EA"></div>
+            <div style="width:52px;height:30px;border-radius:8px;background:#E8F0EA"></div>
+          </div>
+          <div style="font:400 12px 'Spline Sans Mono',monospace;color:#84867B">14 / 10 / 8</div>
+        </div>
+      </div>
+      </sc-if>
+
+      <div style="background:#F7F5F0;border-radius:18px;overflow:hidden;box-shadow:0 8px 30px rgba(80,80,60,.10)">
+        <div style="display:flex;align-items:center;gap:12px;padding:14px 20px;background:#FDFCFA;border-bottom:1px solid #EAE6DC">
+          <div style="width:30px;height:30px;border-radius:9px;background:#5B7F6B;color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px"><i class="fa-solid fa-heart-pulse"></i></div>
+          <div style="font:600 14px 'Hanken Grotesk';color:#6A6C62">Ward 7B · General Medicine</div>
+          <div style="flex:1"></div>
+          <div style="display:flex;align-items:center;gap:8px;background:#EFEBE2;border-radius:8px;padding:5px 12px 5px 6px">
+            <div style="width:24px;height:24px;border-radius:7px;background:#C4694A;color:#fff;display:flex;align-items:center;justify-content:center;font:700 11px 'Hanken Grotesk'">SL</div>
+            <div style="font:600 13px 'Hanken Grotesk';color:#6A6C62">Sister Lim</div>
+          </div>
+        </div>
+
+        <div style="padding:24px 20px 26px;display:flex;flex-direction:column;gap:18px">
+          <div style="display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap;padding-bottom:16px;border-bottom:1px solid #E3DFD4">
+            <div style="flex:1;min-width:260px;display:flex;flex-direction:column;gap:8px">
+              <div style="font:600 11px 'Hanken Grotesk';letter-spacing:.14em;text-transform:uppercase;color:#5B7F6B">Good morning</div>
+              <div style="font:500 32px/1.15 Newsreader,serif;color:#3A3C36">Build the February roster</div>
+              <div style="font-size:15px;color:#6A6C62;max-width:44ch">Four steps left. Nothing is locked until you publish.</div>
+            </div>
+            <button style="height:44px;padding:0 20px;border:none;border-radius:10px;background:#5B7F6B;color:#fff;font:600 15px 'Hanken Grotesk';display:inline-flex;align-items:center;gap:9px" style-hover="filter:brightness(1.07)"><i class="fa-solid fa-wand-magic-sparkles" style="font-size:13px"></i> Generate roster</button>
+          </div>
+
+          <div style="display:flex;gap:12px;flex-wrap:wrap">
+            <div style="flex:1;min-width:120px;background:#FDFCFA;border-radius:14px;padding:16px 18px;border:1px solid #EAE6DC">
+              <div style="font:500 28px Newsreader,serif;color:#3A3C36">24</div>
+              <div style="font-size:13px;color:#84867B;margin-top:4px">Nurses</div>
+            </div>
+            <div style="flex:1;min-width:120px;background:#FDFCFA;border-radius:14px;padding:16px 18px;border:1px solid #EAE6DC">
+              <div style="font:500 28px Newsreader,serif;color:#3A3C36">28</div>
+              <div style="font-size:13px;color:#84867B;margin-top:4px">Days</div>
+            </div>
+            <div style="flex:1;min-width:120px;background:#E8F0EA;border-radius:14px;padding:16px 18px">
+              <div style="font:500 28px Newsreader,serif;color:#3C6350">18</div>
+              <div style="font-size:13px;color:#5B7F6B;margin-top:4px">Rules on</div>
+            </div>
+            <div style="flex:1;min-width:120px;background:#F7E7DF;border-radius:14px;padding:16px 18px">
+              <div style="font:500 28px Newsreader,serif;color:#A9522F">3</div>
+              <div style="font-size:13px;color:#A3705A;margin-top:4px">Conflicts</div>
+            </div>
+          </div>
+
+          <div style="display:flex;gap:12px;flex-wrap:wrap">
+            <div style="flex:1;min-width:220px;background:#FDFCFA;border-radius:16px;padding:18px;border:1.5px solid #5B7F6B">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+                <div style="width:36px;height:36px;border-radius:10px;background:#E8F0EA;color:#5B7F6B;display:flex;align-items:center;justify-content:center"><i class="fa-solid fa-user-nurse"></i></div>
+                <span style="font:600 11px 'Hanken Grotesk';letter-spacing:.1em;text-transform:uppercase;color:#3C6350;background:#E8F0EA;padding:5px 10px;border-radius:6px">Current</span>
+              </div>
+              <div style="font:500 20px Newsreader,serif;color:#3A3C36;margin-bottom:5px">Staff &amp; skills</div>
+              <div style="font-size:14px;line-height:1.5;color:#6A6C62;margin-bottom:14px">24 nurses, 6 senior. Seniority drives night cover.</div>
+              <button style="height:38px;padding:0 16px;border:none;border-radius:9px;background:#5B7F6B;color:#fff;font:600 14px 'Hanken Grotesk'">Continue</button>
+            </div>
+            <div style="flex:1;min-width:220px;background:#FDFCFA;border-radius:16px;padding:18px;border:1px solid #EAE6DC">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+                <div style="width:36px;height:36px;border-radius:10px;background:#EFEBE2;color:#84867B;display:flex;align-items:center;justify-content:center"><i class="fa-solid fa-list-check"></i></div>
+                <span style="font:600 11px 'Hanken Grotesk';letter-spacing:.1em;text-transform:uppercase;color:#84867B;background:#EFEBE2;padding:5px 10px;border-radius:6px">To do</span>
+              </div>
+              <div style="font:500 20px Newsreader,serif;color:#3A3C36;margin-bottom:5px">Rules</div>
+              <div style="font-size:14px;line-height:1.5;color:#6A6C62;margin-bottom:14px">Rest after nights, weekend fairness, max 5 in a row.</div>
+              <button style="height:38px;padding:0 16px;border-radius:9px;background:#FDFCFA;border:1.5px solid #E3DFD4;color:#3A3C36;font:600 14px 'Hanken Grotesk'">Set up</button>
+            </div>
+          </div>
+
+          <div style="background:#FDFCFA;border-radius:16px;padding:18px;border:1px solid #EAE6DC">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+              <div style="font:500 19px Newsreader,serif;color:#3A3C36">Week of 9 Feb</div>
+              <div style="font-size:13px;color:#84867B">Draft · auto-saved</div>
+            </div>
+            <div style="display:grid;grid-template-columns:104px repeat(7,1fr);gap:6px">
+              <div></div>
+              <div style="font:600 11px 'Hanken Grotesk';color:#97998E;text-align:center">MON</div>
+              <div style="font:600 11px 'Hanken Grotesk';color:#97998E;text-align:center">TUE</div>
+              <div style="font:600 11px 'Hanken Grotesk';color:#97998E;text-align:center">WED</div>
+              <div style="font:600 11px 'Hanken Grotesk';color:#97998E;text-align:center">THU</div>
+              <div style="font:600 11px 'Hanken Grotesk';color:#97998E;text-align:center">FRI</div>
+              <div style="font:600 11px 'Hanken Grotesk';color:#A9522F;text-align:center">SAT</div>
+              <div style="font:600 11px 'Hanken Grotesk';color:#A9522F;text-align:center">SUN</div>
+
+              <div style="font:500 13px 'Hanken Grotesk';color:#3A3C36;display:flex;align-items:center">Aisyah B.</div>
+              <div style="height:34px;border-radius:9px;background:#E8F0EA;color:#3C6350;display:flex;align-items:center;justify-content:center;font:600 12px 'Hanken Grotesk'">AM</div>
+              <div style="height:34px;border-radius:9px;background:#E8F0EA;color:#3C6350;display:flex;align-items:center;justify-content:center;font:600 12px 'Hanken Grotesk'">AM</div>
+              <div style="height:34px;border-radius:9px;background:#F3F1EB"></div>
+              <div style="height:34px;border-radius:9px;background:#F7E7DF;color:#A9522F;display:flex;align-items:center;justify-content:center;font:600 12px 'Hanken Grotesk'">PM</div>
+              <div style="height:34px;border-radius:9px;background:#F7E7DF;color:#A9522F;display:flex;align-items:center;justify-content:center;font:600 12px 'Hanken Grotesk'">PM</div>
+              <div style="height:34px;border-radius:9px;background:#F3F1EB"></div>
+              <div style="height:34px;border-radius:9px;background:#F3F1EB"></div>
+
+              <div style="font:500 13px 'Hanken Grotesk';color:#3A3C36;display:flex;align-items:center">Grace Tan</div>
+              <div style="height:34px;border-radius:9px;background:#F3F1EB"></div>
+              <div style="height:34px;border-radius:9px;background:#E5E7EF;color:#4F5570;display:flex;align-items:center;justify-content:center;font:600 12px 'Hanken Grotesk'">N</div>
+              <div style="height:34px;border-radius:9px;background:#E5E7EF;color:#4F5570;display:flex;align-items:center;justify-content:center;font:600 12px 'Hanken Grotesk'">N</div>
+              <div style="height:34px;border-radius:9px;background:#F3F1EB;border:1.5px dashed #E0DBCE;color:#97998E;display:flex;align-items:center;justify-content:center;font:600 11px 'Hanken Grotesk'">rest</div>
+              <div style="height:34px;border-radius:9px;background:#E8F0EA;color:#3C6350;display:flex;align-items:center;justify-content:center;font:600 12px 'Hanken Grotesk'">AM</div>
+              <div style="height:34px;border-radius:9px;background:#F3F1EB"></div>
+              <div style="height:34px;border-radius:9px;background:#F3F1EB"></div>
+
+              <div style="font:500 13px 'Hanken Grotesk';color:#3A3C36;display:flex;align-items:center">Nur Farhana</div>
+              <div style="height:34px;border-radius:9px;background:#F7E7DF;color:#A9522F;display:flex;align-items:center;justify-content:center;font:600 12px 'Hanken Grotesk'">PM</div>
+              <div style="height:34px;border-radius:9px;background:#F3F1EB"></div>
+              <div style="height:34px;border-radius:9px;background:#E8F0EA;color:#3C6350;display:flex;align-items:center;justify-content:center;font:600 12px 'Hanken Grotesk'">AM</div>
+              <div style="height:34px;border-radius:9px;background:#E8F0EA;color:#3C6350;display:flex;align-items:center;justify-content:center;font:600 12px 'Hanken Grotesk'">AM</div>
+              <div style="height:34px;border-radius:9px;background:#F3F1EB"></div>
+              <div style="height:34px;border-radius:9px;background:#E5E7EF;color:#4F5570;display:flex;align-items:center;justify-content:center;font:600 12px 'Hanken Grotesk'">N</div>
+              <div style="height:34px;border-radius:9px;background:#E5E7EF;color:#4F5570;display:flex;align-items:center;justify-content:center;font:600 12px 'Hanken Grotesk'">N</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <sc-if value="{{ showNotes }}" hint-placeholder-val="{{ true }}">
+  <div style="display:flex;gap:16px;flex-wrap:wrap;max-width:2040px">
+    <div style="flex:1;min-width:300px;background:#fff;border-radius:16px;padding:18px 20px;box-shadow:0 2px 12px rgba(90,60,50,.06)">
+      <div style="font:700 15px Figtree,sans-serif;color:#3A3335;margin-bottom:8px">What changes in all three</div>
+      <ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:14px;line-height:1.5;color:#6E6468">
+        <li>Ink ramp softened — no pure/near black anywhere; headings 78% ink, body 55%.</li>
+        <li>Corners: cards 14–22px, chips and buttons pill or 9–12px.</li>
+        <li>Borders replaced by tinted surfaces and one soft shadow; grid hairlines only inside tables.</li>
+        <li>Shift chips carry colour meaning (AM / PM / Night / rest) instead of relying on mono type.</li>
+      </ul>
+    </div>
+    <div style="flex:1;min-width:300px;background:#fff;border-radius:16px;padding:18px 20px;box-shadow:0 2px 12px rgba(90,60,50,.06)">
+      <div style="font:700 15px Figtree,sans-serif;color:#3A3335;margin-bottom:8px">Things to decide with you</div>
+      <ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:14px;line-height:1.5;color:#6E6468">
+        <li>Keep dark mode? Warm palettes need a separate warm-dark ramp, not an inversion.</li>
+        <li>Night shift colour: cool blue/violet in all three, to read as "after hours" at a glance.</li>
+        <li>Photography or illustration in the empty states — I'd use placeholders until you supply ward photos.</li>
+        <li>Density: warmer shapes cost vertical space; the 28-day grid may need a compact toggle.</li>
+      </ul>
+    </div>
+  </div>
+  </sc-if>
+
+</section>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:2140,&quot;height&quot;:1500},&quot;showTokens&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Presentation&quot;},&quot;showNotes&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Presentation&quot;}}"></script>
+</body>
+</html>

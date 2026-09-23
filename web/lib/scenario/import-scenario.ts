@@ -7,6 +7,11 @@
 // store identity.
 
 import { parse } from "yaml";
+// Deep import (not the `@/lib/dates` barrel): the barrel re-exports the range
+// cascade, which imports `@/lib/cascade` at runtime and would close a module
+// cycle back through this package. `date-id` itself depends on `@/lib/scenario`
+// for a TYPE only, so it is cycle-free.
+import { generateDateItems, type DateRange } from "@/lib/dates/date-id";
 import { importScenarioSchema, type ImportScenarioParsed } from "./schemas/import";
 import {
   PREFERENCE_TYPE,
@@ -100,6 +105,43 @@ function asList<T>(value: T | T[]): T[] {
   return Array.isArray(value) ? value : [value];
 }
 
+/** Re-key one imported date reference onto the roster range's span id. */
+export type DateRefNormalizer = (ref: unknown) => DateRef;
+
+/**
+ * Build the inbound date-reference re-keying for `range`.
+ *
+ * The backend's canonical date reference is the full ISO `YYYY-MM-DD` — the
+ * scheduler keys `map_did_d` by `str(date)` and accepts `D`/`MM-DD` only as
+ * shorthands (`utils._parse_single_date`). The web UI instead keys its three
+ * SPAN-ID surfaces — the person×date matrix (`reqData`), date-group members, and
+ * the export layout's date rows/columns — by the span-formatted date-item id that
+ * `generateDateItems` derives from the range (`DD` within one month, `MM-DD`
+ * within one year, `YYYY-MM-DD` across years). A backend-authored full-ISO ref
+ * therefore names a matrix column that does not exist for any same-month or
+ * same-year roster, so the cell is stored but can never render or be edited.
+ * Re-keying at this boundary is what keeps that one invariant true for every
+ * inbound document (the range-change cascade's `remapDateReferences` maintains it
+ * thereafter). Preference CARDS deliberately keep full ISO and are not re-keyed.
+ *
+ * Only an IN-RANGE ISO date is re-keyed. Group ids, keywords (`WEEKEND`), range
+ * literals (`01~15`), and already-span-formatted ids have no ISO entry and pass
+ * through verbatim; so does an out-of-range ISO date, which must stay reportable
+ * by the producer preflight rather than be folded onto a same-numbered in-range
+ * day (`2026-11-02` → `02` would be a WRONG date, not a missing one).
+ */
+function buildDateRefNormalizer(range: DateRange): DateRefNormalizer {
+  const spanIdByIso = new Map(generateDateItems(range).map((item) => [item.iso, item.id]));
+  return (ref) => {
+    const value = ref instanceof Date ? isoDate(ref) : ref;
+    if (typeof value !== "string") return value as DateRef;
+    return spanIdByIso.get(value) ?? value;
+  };
+}
+
+/** Identity normalizer — the default for callers that already hold span ids. */
+const keepDateRef: DateRefNormalizer = (ref) => ref as DateRef;
+
 function normalizeImport(data: ImportScenarioParsed): ImportNormalizationTarget {
   const cardsByKind: ImportCardsByKind = {
     requirements: [],
@@ -111,6 +153,12 @@ function normalizeImport(data: ImportScenarioParsed): ImportNormalizationTarget 
   const reqData: UiRequestCell[] = [];
   let maxOneShiftPerDay: { description?: string } | undefined;
 
+  // The range is read BEFORE the preference loop: every span-id surface below is
+  // re-keyed against it (see `buildDateRefNormalizer`).
+  const rangeStart = isoDate(data.dates.range.startDate);
+  const rangeEnd = isoDate(data.dates.range.endDate);
+  const normalizeDateRef = buildDateRefNormalizer({ start: rangeStart, end: rangeEnd });
+
   for (const pref of data.preferences) {
     const type = inferPreferenceType(pref);
     switch (type) {
@@ -118,7 +166,7 @@ function normalizeImport(data: ImportScenarioParsed): ImportNormalizationTarget 
         maxOneShiftPerDay = clean({ description: str(pref.description) });
         break;
       case PREFERENCE_TYPE.shiftRequest:
-        reqData.push(...normalizeShiftRequest(pref));
+        reqData.push(...normalizeShiftRequest(pref, normalizeDateRef));
         break;
       case PREFERENCE_TYPE.shiftTypeRequirement:
         cardsByKind.requirements.push(normalizeRequirement(pref));
@@ -149,9 +197,9 @@ function normalizeImport(data: ImportScenarioParsed): ImportNormalizationTarget 
     staffGroups: (data.people.groups ?? []).map(normalizePeopleGroup),
     shifts: data.shiftTypes.items.map(normalizeShiftType),
     shiftGroups: (data.shiftTypes.groups ?? []).map(normalizeShiftTypeGroup),
-    rangeStart: isoDate(data.dates.range.startDate),
-    rangeEnd: isoDate(data.dates.range.endDate),
-    dateGroups: (data.dates.groups ?? []).map(normalizeDateGroup),
+    rangeStart,
+    rangeEnd,
+    dateGroups: (data.dates.groups ?? []).map((g) => normalizeDateGroup(g, normalizeDateRef)),
     reqData,
     exportLayout: {
       formatting: (data.export?.formatting ??
@@ -221,17 +269,20 @@ function normalizeShiftTypeGroup(g: {
     members: g.members as UiShiftTypeGroup["members"],
   });
 }
-function normalizeDateGroup(g: {
-  id: string;
-  description?: string | null;
-  members: unknown[];
-}): UiDateGroup {
+function normalizeDateGroup(
+  g: {
+    id: string;
+    description?: string | null;
+    members: unknown[];
+  },
+  normalizeDateRef: DateRefNormalizer = keepDateRef,
+): UiDateGroup {
   return clean({
     id: g.id,
     description: str(g.description),
-    members: (g.members as (string | number | Date)[]).map((m) =>
-      m instanceof Date ? isoDate(m) : m,
-    ) as UiDateGroup["members"],
+    // Members are a span-id surface (the Dates screen matches them against the
+    // generated date items), so an imported ISO member is re-keyed like a cell.
+    members: g.members.map(normalizeDateRef) as UiDateGroup["members"],
   });
 }
 
@@ -316,10 +367,15 @@ function normalizeCovering(pref: LoosePref): CoveringCardBody {
  * and a shiftType list expands one cell per element (semantically identical to
  * the backend's per-`s` objective loop). OFF/LEAVE selectors become off/leave
  * cells; every other selector (incl. `ALL` and group ids) becomes a request cell.
+ * Each date is re-keyed onto the range's span id (`buildDateRefNormalizer`) so the
+ * cell lands on the matrix column the UI actually renders.
  */
-function normalizeShiftRequest(pref: LoosePref): UiRequestCell[] {
+function normalizeShiftRequest(
+  pref: LoosePref,
+  normalizeDateRef: DateRefNormalizer = keepDateRef,
+): UiRequestCell[] {
   const persons = asList(pref.person as PersonRef | PersonRef[]);
-  const dates = asList(pref.date as DateRef | DateRef[]);
+  const dates = asList(pref.date as DateRef | DateRef[]).map(normalizeDateRef);
   const selectors = asList(pref.shiftType as string | string[]);
   const weight = weightOf(pref, PREFERENCE_TYPE.shiftRequest);
   const description = str(pref.description);

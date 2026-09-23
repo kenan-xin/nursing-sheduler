@@ -16,6 +16,8 @@
 import * as React from "react";
 import { isDerivedDateGroupId } from "@/lib/dates";
 import type { DateRef } from "@/lib/scenario";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { FaCalendarDay, FaLayerGroup } from "@/components/icons";
 
 export interface DateScopeOption {
@@ -209,6 +211,12 @@ export function textToRefs(text: string, dateItems: DateScopeItem[]): string[] {
   return refs.sort((a, b) => (indexById.get(a) ?? 0) - (indexById.get(b) ?? 0));
 }
 
+/** One single-choice scope chip. These are a segmented choice, which DESIGN.md §5
+ *  pills, so they ride the shared `Button` contract: the picked chip is the solid
+ *  `--brand` + `--onbrand` pair, an unpicked one is a real L1 control rather than a
+ *  transparent outline, and both grow to a 44px target on a coarse pointer. The old
+ *  `--brandtint` + `--brand` hover is retired — DESIGN.md §6 reserves that pairing
+ *  for selection, so using it on hover made "hovered" and "picked" the same word. */
 function Chip({
   label,
   active,
@@ -221,17 +229,11 @@ function Chip({
   onClick: () => void;
 }) {
   return (
-    <button
-      type="button"
+    <Button
+      variant={active ? "default" : group ? "secondary" : "outline"}
+      size="sm"
       aria-pressed={active}
       onClick={onClick}
-      className={`inline-flex h-[30px] items-center gap-1.5 whitespace-nowrap border px-[11px] text-meta font-semibold ${
-        active
-          ? "border-brand bg-brand text-onbrand"
-          : group
-            ? "border-line2 bg-panel text-ink2 hover:border-brand hover:bg-brandtint"
-            : "border-line bg-surface text-ink hover:border-brand hover:bg-brandtint"
-      }`}
     >
       {group ? (
         <FaLayerGroup className="size-2.5 opacity-70" />
@@ -239,7 +241,7 @@ function Chip({
         <FaCalendarDay className="size-2.5 opacity-70" />
       )}
       {label}
-    </button>
+    </Button>
   );
 }
 
@@ -328,13 +330,13 @@ export function DateScopeField({
 
       <div className="flex items-center gap-2">
         <span className="whitespace-nowrap text-meta text-ink3">or specific dates</span>
-        <input
+        <Input
           data-testid="date-scope-custom"
           aria-label="Specific dates"
           value={text}
           onChange={(e) => onCustom(e.target.value)}
           placeholder="e.g. 1, 5–8, 14"
-          className="h-9 max-w-[220px] flex-1 border border-line bg-surface px-2.5 font-mono text-meta"
+          className="max-w-[220px] flex-1 font-mono text-meta"
         />
       </div>
     </div>

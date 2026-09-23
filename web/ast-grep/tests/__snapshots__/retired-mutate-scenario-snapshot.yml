@@ -1,0 +1,30 @@
+id: retired-mutate-scenario
+snapshots:
+  ? |
+    const action = "mutateScenario";
+  : labels:
+      - source: mutateScenario
+        style: primary
+        start: 16
+        end: 30
+  ? |
+    const patch = mutateScenario;
+  : labels:
+      - source: mutateScenario
+        style: primary
+        start: 14
+        end: 28
+  ? |
+    mutateScenario({ rangeStart: "2026-04-01" });
+  : labels:
+      - source: mutateScenario
+        style: primary
+        start: 0
+        end: 14
+  ? |
+    store.mutateScenario({});
+  : labels:
+      - source: mutateScenario
+        style: primary
+        start: 6
+        end: 20

@@ -1,0 +1,68 @@
+id: surface-module-acquisition
+language: TypeScript
+severity: error
+message: >-
+  The Surface authority module is acquired dynamically. `@/components/ui/surface` is the
+  single source of the `Surface` component, the `surfaceVariants` recipe and the
+  `SurfaceVariantProps` / `SurfaceEmphasis` / `SurfaceRole` / `SurfaceGeometry` types.
+  Acquiring it through `import(...)` or `require(...)` defeats the static type boundary
+  (`class?: never`, the `(role, emphasis)` discriminated union) and the dev-mode runtime
+  assertion, which is exactly the shape this restriction exists to prevent. Import the
+  authority statically, or move the dynamic behaviour to a separate module that does not
+  carry the surface authority.
+note: >-
+  Migrated from the frontier scan in `components/ui/surface-contract.test.ts` (the
+  module-acquisition branch of the 4,040-line analyzer). The `TypeScript` language covers
+  `.ts`/`.mts`/`.cts` only; the `-tsx` twin covers `.tsx`. The `.ts`/`.tsx` split is the
+  same one ticket 3 established for `copilotkit-runtime-acquisition`: ast-grep resolves a
+  rule's language from the file EXTENSION, and remapping `.ts` onto the TSX grammar would
+  mis-parse generic arrow functions. The dynamic-acquisition shape is declarative syntax;
+  the rule does not need a symbol table to recognize `import(...)` or `require(...)` of a
+  literal module specifier.
+  BOUNDED REVIEW ROUND 1 REPAIRS. Two shapes the family-K inventory named were not
+  actually covered and are now closed:
+  (1) `createRequire(import.meta.url)` returns a REQUIRE FUNCTION under a local name, so
+  the real acquisition reads `const req = createRequire(import.meta.url); req("@/...")`.
+  The old `REQ` constraint pinned the callee spelling to `require|createRequire`, which
+  the local name defeats. The constraint is dropped: ANY call whose argument is the
+  literal surface specifier is an acquisition, and nothing else legitimately passes that
+  string. A static `import ... from` is an `import_statement`, not a call, so the ordinary
+  sanctioned form is untouched.
+  (2) `import * as UI from "@/components/ui/surface"; const Box = UI["Surface"]` reached
+  the authority through computed member access on a namespace -- an explicit old analyzer
+  fixture, and one neither TypeScript nor a tagName rule recovers (the resulting `Box`
+  accepts `className="bg-panel"`). ast-grep cannot follow the binding from the namespace
+  import to the subscript, so rather than approximate it, the NAMESPACE IMPORT ITSELF is
+  refused: with no namespace binding there is nothing to index. That makes the bypass
+  structurally unavailable instead of merely detected, which is the migration plan's
+  stated preference over teaching the matcher to reason. Named imports
+  (`import { Surface, surfaceVariants } from "@/components/ui/surface"`) -- the form every
+  production consumer uses -- are unaffected.
+files:
+  - "app/**"
+  - "components/**"
+  - "lib/**"
+ignores:
+  - "**/*.test.ts"
+  - "**/*.test.tsx"
+  - "**/*.test-d.ts"
+rule:
+  any:
+    - pattern: import($SPEC)
+    - pattern: require($SPEC)
+    # Any call taking the surface specifier -- covers a `createRequire(...)` result bound
+    # to a local name (`req("@/components/ui/surface")`), which the old callee-name
+    # constraint let through.
+    - pattern: $REQ($SPEC)
+    # A namespace import of the authority, so `UI["Surface"]` has no namespace to index.
+    - all:
+        - kind: import_statement
+        - has:
+            stopBy: end
+            kind: namespace_import
+        - has:
+            field: source
+            regex: ^["']@/components/ui/surface["']$
+constraints:
+  SPEC:
+    regex: ^["']@/components/ui/surface["']$

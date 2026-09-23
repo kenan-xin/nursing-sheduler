@@ -1,0 +1,29 @@
+id: openrouter-host-literal
+language: TypeScript
+severity: error
+message: >-
+  The OpenRouter host is a literal in exactly two places -- the browser-safe protocol
+  module and the runtime's own containment constants, which `protocol.test.ts` pins to
+  each other. Every caller reads it from there, so no component or route names a
+  third-party host directly.
+note: >-
+  Migrated from `lib/ai/independence.test.ts`, where ticket 2 had to RETAIN it.
+  Alternatives checked and rejected: the subject is an authored LITERAL, not a module
+  specifier, so `no-restricted-imports` has nothing to bind to; and a runtime test cannot
+  see it at all, because a hard-coded host that happens to equal the constant produces
+  byte-identical behaviour. Authored literals are the residue this tool exists for.
+files:
+  - "app/**"
+  - "components/**"
+  - "lib/**"
+ignores:
+  - "lib/ai/protocol.ts"
+  - "lib/ai/runtime/containment.ts"
+  - "**/*.test.ts"
+  - "**/*.test.tsx"
+rule:
+  any:
+    - kind: string_fragment
+      regex: openrouter\.ai
+    - kind: template_string
+      regex: openrouter\.ai

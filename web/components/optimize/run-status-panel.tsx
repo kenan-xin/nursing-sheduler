@@ -8,11 +8,35 @@
 //                     and the server-authoritative cancel / get-results-now controls.
 //   • success      — terminal outcome heading + a SOLVER STATUS / FINAL SCORE /
 //                     ELAPSED summary grid, then the download affordance.
-//   • infeasible   — dedicated panel: heading, plain explanation, the solver-verdict
-//                     reason as a compact label (never a diagnosis), and Adjust rules
-//                     (a self-contained GuardedLink) + Try again CTAs. No conflict list.
-//   • cancelled    — "Run cancelled" heading + the release affordance (Dismiss).
-//   • failed       — structured error callout; worker_lost additionally offers Resubmit.
+//   • infeasible   — dedicated panel: heading, plain explanation, and the
+//                     solver-verdict reason as a compact label (never a diagnosis),
+//                     plus Adjust rules (a self-contained GuardedLink). No conflict list.
+//   • cancelled    — "Run cancelled" heading.
+//   • failed       — structured error callout.
+//
+// G6.2a: the terminal ACTIONS are gone — Resubmit / Try again, Dismiss, and the
+// cleanup Retry. Every one of them existed to serve the single-slot design, where a
+// terminal run occupied the one session record and had to be released before another
+// could start. Records are owner-keyed now; nothing occupies anything, and a second
+// run is simply the exact `Optimize` action again. A second button offering to do
+// the same thing would contradict the settled single-action contract.
+//
+// R6 v2: the terminal eyebrow lost its leading ● — DESIGN.md §5 retires decorative
+// ornament on status ("no coloured leader dots on eyebrows"); the uppercase label
+// and the semantic ink carry the state. Headings drop v1's `font-extrabold` /
+// `tracking-tight` for the v2 weights and -0.015em (§3), and every semantic text
+// tone moves from the base tier to the ink tier (see `toneTextClass`).
+//
+// R6 Round 9B — the DATA-BEARING values on this panel are set in the mono face.
+// DESIGN.md §3 reserves Spline Sans Mono for "IDs, counts, hours and solver
+// expressions — so a number always reads as data, never as prose in the wrong
+// face", and D8 puts that explicit rule above the prototype's display-face
+// example. Four values on this panel are data: the live incumbent score, and the
+// terminal grid's SOLVER STATUS (a solver expression), FINAL SCORE and ELAPSED
+// (a duration). Only the FACE changes — size, weight, tracking and the semantic
+// ink tier are all retained — and the surrounding prose labels ("Higher scores
+// are better.", the eyebrow, the cell captions, the job detail sentence) stay on
+// the body face, because they are prose and not data.
 //
 // All lifecycle/controls are server-authoritative — nothing here infers a capability.
 // The infeasible "Try again" and the idle CTA reuse the run-start path; "Adjust rules"
@@ -20,9 +44,9 @@
 // the run-settings/event-log work).
 
 import {
-  FaArrowRotateRight,
   FaBan,
   FaBolt,
+  FaCalendarCheck,
   FaCircleCheck,
   FaDownload,
   FaSliders,
@@ -40,8 +64,6 @@ import {
   jobDetailLine,
   scoreLabel,
   terminalHeading,
-  WORKER_LOST_CODE,
-  type CleanupPhase,
   type OptimizeRunView,
   type RunStatusTone,
 } from "@/lib/optimize";
@@ -51,18 +73,12 @@ import { Callout } from "./callout";
 export interface RunStatusPanelProps {
   view: OptimizeRunView;
   submitting: boolean;
-  cleanupPhase: CleanupPhase;
   canDownloadAgain: boolean;
   downloadAgainFilename: string | null;
   onCancel(): void;
   onFinishNow(): void;
-  onResubmit(): void;
-  /** Clean up (release) a terminal run and return to idle. */
-  onDismiss(): void;
   onDownloadArtifact(): void;
   onDownloadAgain(): void;
-  onRetryCleanup(): void;
-  onAbandonCleanup(): void;
   /**
    * Start a fresh run from the idle empty state (and as the in-panel Optimize CTA).
    * Optional so this component stays file-disjoint from the screen wiring — when
@@ -70,17 +86,34 @@ export interface RunStatusPanelProps {
    * (the settings column already owns the primary Optimize action).
    */
   onStartRun?: () => void;
+  /**
+   * Whether a loadable roster was captured for the run in view. Drives the
+   * `Open & adjust roster` CTA inside the completed artifact block (G4). The
+   * flag is owned by the screen, which is the only place that can prove a
+   * roster exists — `capture.stateFor(view.jobId).status === "committed"` —
+   * so this panel renders the CTA exactly when the screen says a loadable
+   * roster is on hand, and is silent for every other terminal outcome.
+   */
+  loadableRoster?: boolean;
 }
 
-/** The status-eyebrow text colour for a terminal heading. */
+/**
+ * The status-eyebrow / summary-numeral text colour for a terminal heading.
+ *
+ * R6 v2: the INK tier, not the base tier. DESIGN.md §2 assigns base to "text or
+ * icon **on its own tint**" and ink to the "deepest treatment — headings,
+ * emphasised numerals". Both call sites here paint straight onto the L1 card, and
+ * in dark mode the two tiers diverge (`--error #e58164` vs `--errorink #f09b80`),
+ * so the base tier was both the wrong role and the weaker contrast.
+ */
 function toneTextClass(tone: RunStatusTone): string {
   switch (tone) {
     case "success":
-      return "text-success";
+      return "text-successink";
     case "warn":
-      return "text-warn";
+      return "text-warnink";
     case "error":
-      return "text-error";
+      return "text-errorink";
     case "brand":
       return "text-brandink";
     default:
@@ -91,18 +124,14 @@ function toneTextClass(tone: RunStatusTone): string {
 export function RunStatusPanel({
   view,
   submitting,
-  cleanupPhase,
   canDownloadAgain,
   downloadAgainFilename,
   onCancel,
   onFinishNow,
-  onResubmit,
-  onDismiss,
   onDownloadArtifact,
   onDownloadAgain,
-  onRetryCleanup,
-  onAbandonCleanup,
   onStartRun,
+  loadableRoster,
 }: RunStatusPanelProps) {
   const status = formatRunStatus(view, submitting);
   const active = isActiveLifecycle(view.lifecycle);
@@ -118,10 +147,11 @@ export function RunStatusPanel({
           className="flex flex-col items-center justify-center px-6 py-11 text-center"
           data-testid="optimize-idle"
         >
-          <div className="mb-4 flex size-14 items-center justify-center border border-line text-ink3">
+          {/* Prototype :62 — a dashed placeholder tile, not a solid box. */}
+          <div className="mb-4 flex size-14 items-center justify-center rounded-control border border-dashed border-line text-ink3">
             <FaBolt className="size-5" aria-hidden />
           </div>
-          <h3 className="font-heading text-title font-extrabold tracking-tight text-ink">
+          <h3 className="font-heading text-title font-semibold tracking-[-0.015em] text-ink">
             Ready to optimise
           </h3>
           <p className="mt-1.5 max-w-[40ch] text-meta text-ink2">
@@ -130,7 +160,7 @@ export function RunStatusPanel({
           </p>
           {onStartRun ? (
             <Button onClick={onStartRun} className="mt-5" data-testid="optimize-start">
-              <FaBolt aria-hidden /> Optimize roster
+              <FaBolt aria-hidden /> Optimize
             </Button>
           ) : null}
         </div>
@@ -151,29 +181,19 @@ export function RunStatusPanel({
   // dedicated outcome block instead.
   const showLiveHeader = !isSuccess && !isInfeasible;
   const heading = terminalHeading(view);
-  const workerLost = view.error?.code === WORKER_LOST_CODE;
-  // Every cancelled/failed run (including non-resubmittable ordinary cancel and
-  // process_timeout) must have a safe release path — a Dismiss that cleans up the
-  // occupied slot and returns to idle. Resubmit is offered additionally when the
-  // server marked the run resubmittable (worker_lost / a clean submit rejection).
-  const canDismiss = view.lifecycle === "cancelled" || view.lifecycle === "failed";
   const isTerminalError =
     view.lifecycle === "failed" || view.lifecycle === "cancelled" || isSubmitPre;
-  const terminalActions =
-    view.resubmittable || canDismiss ? (
-      <>
-        {view.resubmittable ? (
-          <Button size="sm" onClick={onResubmit} data-testid="optimize-resubmit">
-            {workerLost ? "Resubmit" : "Try again"}
-          </Button>
-        ) : null}
-        {canDismiss ? (
-          <Button size="sm" variant="outline" onClick={onDismiss} data-testid="optimize-dismiss">
-            Dismiss
-          </Button>
-        ) : null}
-      </>
-    ) : undefined;
+  // NO TERMINAL ACTIONS. `Resubmit` / `Try again` and `Dismiss` used to live here.
+  //
+  // Both existed to serve the single-slot design: a terminal run OCCUPIED the one
+  // record, so the user needed a way to release it before starting another, and
+  // `Resubmit` had to wait on that release before it could submit. Records are
+  // owner-keyed now and nothing occupies anything, so a second run is just the
+  // exact `Optimize` action again — which is the settled contract, and which a
+  // second button beside it would quietly contradict.
+  //
+  // The error message stays. It is the honest report of what happened to the run
+  // the user is looking at; what is gone is asking them to do something about it.
 
   return (
     <div className="space-y-4" data-testid="optimize-run-status">
@@ -182,14 +202,15 @@ export function RunStatusPanel({
       {heading !== null ? (
         <div>
           <p
+            data-testid="optimize-terminal-eyebrow"
             className={cn(
               "text-meta font-semibold uppercase tracking-[0.03em]",
               toneTextClass(status.tone),
             )}
           >
-            ● {status.label}
+            {status.label}
           </p>
-          <h3 className="mt-2 font-heading text-cardhead font-extrabold tracking-tight text-ink">
+          <h3 className="mt-2 font-heading text-cardhead font-semibold tracking-[-0.015em] text-ink">
             {heading}
           </h3>
         </div>
@@ -200,15 +221,21 @@ export function RunStatusPanel({
           ELAPSED is derived from the job timestamps via @/lib/optimize. */}
       {isSuccess ? (
         <div className="flex border border-line2" data-testid="optimize-summary-grid">
-          <SummaryCell label="Solver status" tone={status.tone}>
+          <SummaryCell
+            label="Solver status"
+            tone={status.tone}
+            testId="optimize-summary-solver-status"
+          >
             {view.result?.solverStatus ?? "—"}
           </SummaryCell>
-          <SummaryCell label="Final score">
+          <SummaryCell label="Final score" testId="optimize-summary-final-score">
             {view.result?.score !== null && view.result?.score !== undefined
               ? formatScore(view.result.score)
               : "—"}
           </SummaryCell>
-          <SummaryCell label="Elapsed">{elapsedLabel(view)}</SummaryCell>
+          <SummaryCell label="Elapsed" testId="optimize-summary-elapsed">
+            {elapsedLabel(view)}
+          </SummaryCell>
         </div>
       ) : null}
 
@@ -221,10 +248,15 @@ export function RunStatusPanel({
           </p>
           {view.result?.terminationReason !== null &&
           view.result?.terminationReason !== undefined ? (
-            <div className="border border-line2 bg-panel px-2.5 py-2 font-mono text-label text-ink2">
+            <div className="rounded-control border border-line2 bg-panel px-2.5 py-2 font-mono text-label text-ink2 shadow-well">
               verdict: {view.result.terminationReason}
             </div>
           ) : null}
+          {/* Adjust rules only. `Try again` stood beside it, and on an INFEASIBLE
+              result it was the least useful button on the screen: the solver proved
+              no roster satisfies the rules, so re-running the same scenario proves
+              it again. The actionable move is the one that is left — change a rule,
+              then use the exact `Optimize` action. */}
           <div className="flex flex-wrap gap-2">
             <GuardedLink
               href="/rules"
@@ -233,9 +265,6 @@ export function RunStatusPanel({
             >
               <FaSliders className="size-4" aria-hidden /> Adjust rules
             </GuardedLink>
-            <Button variant="outline" onClick={onResubmit} data-testid="optimize-try-again">
-              <FaArrowRotateRight aria-hidden /> Try again
-            </Button>
           </div>
         </div>
       ) : null}
@@ -249,8 +278,16 @@ export function RunStatusPanel({
               <p className="text-label font-semibold uppercase tracking-[0.03em] text-ink3">
                 {scoreLabel(view)}
               </p>
+              {/* The score is data, so it takes the mono face — but the same
+                  element also renders the "No incumbent yet" PROSE placeholder,
+                  which is not. The face therefore follows the content: mono for a
+                  real numeral, the display face for the sentence. Size, weight,
+                  leading, tracking and ink are identical either way. */}
               <p
-                className="mt-1 font-heading text-display leading-none text-ink"
+                className={cn(
+                  "mt-1 text-display font-bold leading-none tracking-[-0.015em] text-ink",
+                  view.latestScore !== null ? "font-mono" : "font-heading",
+                )}
                 data-testid="optimize-score"
               >
                 {view.latestScore !== null ? formatScore(view.latestScore) : "No incumbent yet"}
@@ -267,7 +304,15 @@ export function RunStatusPanel({
               {jobDetailLine(view, submitting)}
             </p>
             {view.jobId !== null ? (
-              <p className="mt-0.5 font-mono text-label text-ink3">Job ID: {view.jobId}</p>
+              // The VALUE carries the testid, not the line: the assembled gate's
+              // ownership recovery reads this back as the volatile authority for the
+              // `activation-persistence-failed` path (a real 202 whose id lives only in
+              // controller state), and a hook anchored on the value cannot be defeated
+              // by the "Job ID:" copy changing. Presentation is unchanged — a bare
+              // <span> in a text line renders identically.
+              <p className="mt-0.5 font-mono text-label text-ink3">
+                Job ID: <span data-testid="optimize-job-id">{view.jobId}</span>
+              </p>
             ) : null}
           </div>
         </>
@@ -310,7 +355,7 @@ export function RunStatusPanel({
         <div className="space-y-2" data-testid="optimize-completed-artifact">
           {download.status === "downloaded" ? (
             <Callout tone="success" icon={FaCircleCheck}>
-              Schedule optimized and downloaded successfully!
+              Schedule optimised and downloaded successfully!
             </Callout>
           ) : download.status === "downloading" ? (
             <Callout tone="info" icon={FaSpinner}>
@@ -339,6 +384,21 @@ export function RunStatusPanel({
                 ) : null}
               </Button>
             ) : null}
+            {/* G4 — the prototype's "Open & adjust roster" CTA. The flag is
+                supplied by the screen so the panel cannot claim a roster exists
+                for a non-loadable run outcome — idle, running, failed,
+                infeasible-without-incumbent, capture-failed, dismissed, etc.
+                The CTA targets the dedicated /roster route through the same
+                guarded navigation boundary the rest of the panel uses. */}
+            {loadableRoster === true ? (
+              <GuardedLink
+                href="/roster"
+                className={cn(buttonVariants({ variant: "default", size: "default" }))}
+                data-testid="optimize-open-roster"
+              >
+                <FaCalendarCheck className="size-4" aria-hidden /> Open &amp; adjust roster
+              </GuardedLink>
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -360,69 +420,48 @@ export function RunStatusPanel({
         <Callout
           tone={view.lifecycle === "cancelled" ? "warn" : "error"}
           data-testid="optimize-terminal-error"
-          actions={terminalActions}
           alert
         >
-          {view.error?.message ?? "The optimization did not complete."}
+          {view.error?.message ?? "The optimisation did not complete."}
         </Callout>
       ) : null}
 
-      {cleanupPhase === "failed" ? (
-        <Callout
-          tone="warn"
-          data-testid="optimize-cleanup-failed"
-          title="Couldn't release the finished run on the server"
-          actions={
-            <>
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={onRetryCleanup}
-                data-testid="optimize-cleanup-retry"
-              >
-                Retry cleanup
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={onAbandonCleanup}
-                data-testid="optimize-cleanup-abandon"
-              >
-                Abandon
-              </Button>
-            </>
-          }
-          alert
-        >
-          This run stays reserved until cleanup succeeds or you abandon it. Abandoning frees this
-          browser to start a new run; the server job remains until it is released by retention.
-        </Callout>
-      ) : null}
-
-      {cleanupPhase === "abandoned" ? (
-        <Callout tone="info" data-testid="optimize-cleanup-abandoned">
-          Cleanup abandoned. The server job will be released by retention.
-        </Callout>
-      ) : null}
+      {/* NO CLEANUP SURFACE. “Couldn't finish tidying up the last run” with a Retry
+          stood here, and it was the clearest statement of the retired model: it
+          named an internal housekeeping step, asked the user to drive it, and
+          (because cleanup gated submission) made finishing it a prerequisite for
+          optimising again. Cleanup is owner-keyed and invisible now — it cannot
+          stand in a new run's way, so there is nothing here for a user to decide. */}
     </div>
   );
 }
 
-/** One cell of the terminal success summary grid. */
+/**
+ * One cell of the terminal success summary grid.
+ *
+ * All three cells carry a DATA value — a solver expression (`OPTIMAL`), a solver
+ * numeral, and a duration — so the value takes the mono face (DESIGN.md §3) while
+ * the caption below it stays a prose label on the body face. The testid is on the
+ * VALUE element, not the cell, for the same reason the job id's is (Round 9A): a
+ * hook anchored on the value cannot be defeated by the caption copy changing.
+ */
 function SummaryCell({
   label,
   tone,
+  testId,
   children,
 }: {
   label: string;
   tone?: RunStatusTone;
+  testId?: string;
   children: React.ReactNode;
 }) {
   return (
     <div className="flex-1 border-r border-line2 px-3.5 py-3 last:border-r-0">
       <div
+        data-testid={testId}
         className={cn(
-          "font-heading text-title font-extrabold",
+          "font-mono text-title font-semibold tracking-[-0.015em]",
           tone !== undefined ? toneTextClass(tone) : "text-ink",
         )}
       >

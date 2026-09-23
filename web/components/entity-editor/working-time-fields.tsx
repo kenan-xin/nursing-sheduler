@@ -41,11 +41,21 @@
 // Before re-tuning any of this: measure the REST select by testid, not the first
 // <select> in the row, and measure its label with canvas metrics — a <select> reports
 // no overflow of its own, so scrollWidth checks silently pass while it clips.
+//
+// R2c owns this sub-form's PRESENTATION (Shift Types is its only live UI consumer).
+// v2: the derived Working readout is an inset `well` on the control radius at the
+// absolute 36px control height, matching the two Selects beside it and growing to a
+// real 44px on a coarse pointer; the overnight marker is the shared Badge on the
+// chip radius; the validation message uses the deepest semantic tier `--errorink`.
+// The derivation, the 30-minute grid, the validator and every `data-testid` are
+// unchanged.
 
 import * as React from "react";
 import { paidMinutesFor, validateWorkingTimeDraft, type WorkingTimeValue } from "./core";
+import { Badge } from "@/components/ui/badge";
 import { InfoTip } from "@/components/ui/info-tip";
 import { Select } from "@/components/ui/select";
+import { InsetHairlineReadout } from "@/components/ui/inset-hairline-box";
 
 const PAD = (n: number) => String(n).padStart(2, "0");
 /** The 48 half-hour clock slots 00:00..23:30 (the design's timeOptions). */
@@ -182,9 +192,11 @@ export function WorkingTimeFields({ value, onChange, idPrefix }: WorkingTimeFiel
               ))}
             </Select>
             {overnight && (
-              <span className="border border-line2 px-2 py-1 font-mono text-label text-ink3">
+              // A data mark, not a status eyebrow — `casing="normal"` keeps "+1 day"
+              // exactly as it reads. The shared Badge carries the v2 chip radius.
+              <Badge variant="outline" casing="normal" className="font-mono">
                 +1 day
-              </span>
+              </Badge>
             )}
           </div>
         </div>
@@ -209,9 +221,18 @@ export function WorkingTimeFields({ value, onChange, idPrefix }: WorkingTimeFiel
         </div>
         <div className="flex flex-col gap-1">
           <span className="text-label font-semibold uppercase tracking-[0.03em] text-ink3">
-            Working <span className="text-faint">· auto</span>
+            {/* `--faint` is for disabled affordances and empty-cell marks only
+                (DESIGN.md §2); "· auto" is a functional qualifier on a real
+                label, so it takes the tertiary ink. */}
+            Working <span className="text-ink3">· auto</span>
           </span>
-          <div
+          {/* An inset island inside the editor card: `--panel` behind a `--line2`
+              hairline at the control radius, at the absolute `--ctl` height so the
+              readout stays level with the Rest select beside it. All three — the
+              recipe tuple, the layout classes and the height — belong to
+              `InsetHairlineReadout`, which is why there is no className or style
+              channel to spell here. */}
+          <InsetHairlineReadout
             data-testid={`${idPrefix}-duration`}
             aria-label="Working duration (auto)"
             title={
@@ -221,9 +242,8 @@ export function WorkingTimeFields({ value, onChange, idPrefix }: WorkingTimeFiel
                   } rest`
                 : undefined
             }
-            className="flex h-9 items-center gap-1.5 overflow-hidden border border-line2 bg-panel px-2.5"
           >
-            <span className="flex-none font-heading text-title font-extrabold leading-none">
+            <span className="flex-none font-heading text-title font-bold leading-none tracking-[-0.015em]">
               {paid != null ? fmtDuration(paid) : "—"}
             </span>
             {paid != null && (
@@ -231,12 +251,16 @@ export function WorkingTimeFields({ value, onChange, idPrefix }: WorkingTimeFiel
                 = {fmtDuration(paid + rest)} − {rest > 0 ? fmtRest(rest) : "0"}
               </span>
             )}
-          </div>
+          </InsetHairlineReadout>
         </div>
       </div>
 
       {firstError && (
-        <span className="text-label text-error" role="alert" data-testid={`${idPrefix}-wt-error`}>
+        <span
+          className="text-label text-errorink"
+          role="alert"
+          data-testid={`${idPrefix}-wt-error`}
+        >
           {firstError}
         </span>
       )}

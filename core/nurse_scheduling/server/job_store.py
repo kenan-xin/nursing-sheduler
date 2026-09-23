@@ -22,6 +22,7 @@ from datetime import datetime
 from typing import Protocol
 
 from .jobs.models import EventReplayWindow, Job, JobEvent, StoredArtifact, StoreLimits
+from .queue_state import QueueStateSnapshot
 
 
 class JobStore(Protocol):
@@ -44,6 +45,8 @@ class JobStore(Protocol):
         Raises:
             StoreWriteConflictError: If the job ID already exists.
             JobCapacityError: If pending or retained capacity is exhausted.
+            DiagnosticCapacityError: If only the reserved ordinary slots remain (T09).
+            QueueInvariantError: If the job is not admissible as a queued job.
         """
         ...
 
@@ -80,10 +83,14 @@ class JobStore(Protocol):
         claim_expires_at: datetime,
         runtime_identity: Mapping[str, str] | None = None,
     ) -> Job | None:
-        """Atomically claim the next queued job for a worker.
+        """Atomically claim the effective head of the priority queues for a worker.
+
+        The ordinary queue is drained before any diagnostic, and only a QUEUED
+        member is ever removed, so ordinary work overtakes queued diagnostics while
+        a running solve of either purpose is never pre-empted (T09).
 
         Include runtime identity in the running event when supplied.
-        Return the claimed running job, or `None` when the queue is empty.
+        Return the claimed running job, or `None` when both queues are empty.
         """
         ...
 
@@ -153,6 +160,31 @@ class JobStore(Protocol):
         """Return active jobs whose worker claim expired by the cutoff.
 
         Maintenance terminates them because their worker is presumed lost.
+        """
+        ...
+
+    def describe_queue_state(self) -> QueueStateSnapshot:
+        """Return one atomic snapshot of the complete queue state (T09).
+
+        The snapshot MUST come from a single store consistency boundary. It exists
+        so the invariants can be asserted against what the store actually persisted,
+        rather than against whatever a transition reported about itself.
+        """
+        ...
+
+    def repair_queue_residue(self, occurred_at: datetime | None = None) -> list[str]:
+        """Atomically remove index entries no job record justifies (T09).
+
+        Residue is removed, never claimed and never counted as capacity. Return the
+        stable kind of each repair performed.
+        """
+        ...
+
+    def recent_invariant_errors(self) -> list[dict[str, str]]:
+        """Return the bounded record of defensive repairs, oldest first (T09).
+
+        Each record carries a stable code, a job ID, and a timestamp — never any
+        part of a submitted document.
         """
         ...
 

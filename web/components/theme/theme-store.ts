@@ -18,7 +18,12 @@
 // preserved as literals in globals.css instead.
 
 export type Theme = "light" | "dark";
-export type Accent = "blue" | "teal" | "magenta" | "slate";
+
+// The v2 accent set (adoption record D4). The retired v1 hues — blue, magenta,
+// slate — clash with the mint canvas and have NO migration mapping (D4b): a
+// stored value outside this union is ignored, left untouched in storage, and
+// resolves to teal in both the DOM and this store.
+export type Accent = "teal" | "sage" | "rose" | "plum";
 
 export interface ThemeState {
   theme: Theme;
@@ -28,10 +33,12 @@ export interface ThemeState {
 export const THEME_KEY = "ns-theme";
 export const ACCENT_KEY = "ns-accent";
 
-const ACCENTS: readonly Accent[] = ["blue", "teal", "magenta", "slate"];
+export const ACCENTS: readonly Accent[] = ["teal", "sage", "rose", "plum"];
+
+export const DEFAULT_ACCENT: Accent = "teal";
 
 // Stable reference — required by useSyncExternalStore for the server snapshot.
-const SERVER_SNAPSHOT: ThemeState = { theme: "light", accent: "blue" };
+const SERVER_SNAPSHOT: ThemeState = { theme: "light", accent: DEFAULT_ACCENT };
 
 let state: ThemeState = SERVER_SNAPSHOT;
 let adopted = false;
@@ -42,7 +49,7 @@ function readDom(): ThemeState {
   const accent = el.getAttribute("data-accent") as Accent | null;
   return {
     theme: el.classList.contains("dark") ? "dark" : "light",
-    accent: accent && ACCENTS.includes(accent) ? accent : "blue",
+    accent: accent && ACCENTS.includes(accent) ? accent : DEFAULT_ACCENT,
   };
 }
 
@@ -69,28 +76,47 @@ export function getServerSnapshot(): ThemeState {
   return SERVER_SNAPSHOT;
 }
 
-// Applies a new state to <html>, persists it, and notifies subscribers. Only
-// called from explicit user actions, so adoption above never writes storage.
-function commit(next: ThemeState) {
+// Applies a new state to <html>, persists ONLY the axis the user actually
+// touched, and notifies subscribers. Only called from explicit user actions, so
+// adoption above never writes storage.
+//
+// The per-axis write is the point. This used to persist both keys on every
+// commit, which meant flipping the theme also wrote the accent — pinning an
+// axis the user never chose. A persisted value must mean "the user picked this",
+// never "the user was here once".
+//
+// `data-accent` carries the CHOICE, never a resolved hex: the light/dark pair for
+// each accent lives in CSS selectors, so a theme toggle re-resolves --brand
+// without JavaScript touching colour at all.
+function commit(next: ThemeState, axis: "theme" | "accent") {
   state = next;
   const el = document.documentElement;
   el.classList.toggle("dark", next.theme === "dark");
   el.setAttribute("data-accent", next.accent);
   try {
-    localStorage.setItem(THEME_KEY, next.theme);
-    localStorage.setItem(ACCENT_KEY, next.accent);
+    if (axis === "theme") localStorage.setItem(THEME_KEY, next.theme);
+    else localStorage.setItem(ACCENT_KEY, next.accent);
   } catch {}
   emit();
 }
 
 export function setTheme(theme: Theme) {
-  commit({ ...state, theme });
+  commit({ ...state, theme }, "theme");
 }
 
 export function toggleTheme() {
-  commit({ ...state, theme: state.theme === "dark" ? "light" : "dark" });
+  commit({ ...state, theme: state.theme === "dark" ? "light" : "dark" }, "theme");
 }
 
 export function setAccent(accent: Accent) {
-  commit({ ...state, accent });
+  commit({ ...state, accent }, "accent");
+}
+
+// Test-only reset of the module-level adoption latch. The store is a singleton by
+// design (one <html>, one theme), so a suite that exercises adoption more than
+// once needs a way back to the pre-mount state.
+export function __resetForTests() {
+  state = SERVER_SNAPSHOT;
+  adopted = false;
+  listeners.clear();
 }

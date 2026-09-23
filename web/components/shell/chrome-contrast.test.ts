@@ -2,14 +2,35 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-// Regression guard for nursing-sheduler-2dn. The ink/chrome bar stays dark in
-// BOTH themes (--chrome), so its foreground token --on-ink must never collapse
-// to --chrome — that collision rendered chrome text/icons invisible at 1:1.
-// Two revert paths are guarded deterministically (no browser, so this runs
-// without the e2e webServer; the rendered contrast is measured live in the
-// cold review and exercised by the app-shell e2e):
-//   1) --on-ink reset to a value that no longer contrasts with --chrome;
-//   2) a chrome shell control repointed from `text-on-ink` back to `text-ink`.
+// Contrast guard for the chrome plane, carried forward from nursing-sheduler-2dn.
+//
+// In v2 the chrome bar is no longer a fixed near-black: `--chrome` aliases the
+// LIVE accent (`var(--brand)`), so the pair that has to clear AA is the accent's
+// own `--onbrand` against each of the eight accent/theme `--brand` values. That
+// makes this a guard over the accent contract itself — adding or re-tuning an
+// accent without checking its on-colour fails here, deterministically and
+// without a browser.
+//
+// The original collision guard is kept in spirit: a foreground token must never
+// collapse toward the plane it sits on. Three revert paths stay covered:
+//   1) an accent or --onbrand value retuned until the pair no longer clears AA;
+//   2) a --brandink value retuned until it no longer clears AA on the L1 plane,
+//      which is the pair R1's v2 mode toggle introduced (active segment =
+//      --surface fill + --brandink text, SideNav.dc.html:81);
+//   3) a chrome shell control repointed away from the paired ON-colour its own
+//      fill declares.
+//
+// WHAT CHANGED (custom-AST ticket 3). Revert path (3) used to be three `readFileSync`
+// reads of shell TSX plus `toContain` on the class strings. It is now split, because it was
+// always two different claims: the POSITIVE pairing -- the app mark really does paint
+// `bg-chrome` with `text-onbrand`, and the active mode segment really does paint
+// `bg-surface` with `text-brandink` -- is asserted by RENDERING the shell in
+// `chrome-pairing.test.tsx`, which is a stronger statement than "the file mentions both
+// tokens somewhere"; and the NEGATIVE half, that the retired v1 ink-ramp pairing has not
+// come back anywhere in those three files, is the `chrome-ink-ramp-pairing` ast-grep rule,
+// which is the half rendering cannot reach. This file keeps its `app/globals.css` reader
+// and nothing else: contrast is a CSS-value contract, and that is a retained format-specific
+// read, not source analysis.
 
 const shellDir = __dirname;
 const webRoot = join(shellDir, "..", "..");
@@ -62,28 +83,102 @@ function contrastRatio(fg: string, bg: string): number {
   return (hi + 0.05) / (lo + 0.05);
 }
 
-describe("chrome bar contrast — --on-ink vs --chrome (nursing-sheduler-2dn)", () => {
+const ACCENTS = ["teal", "sage", "rose", "plum"] as const;
+
+// Thresholds are compared UNROUNDED. W3C is explicit that a computed 4.4999:1
+// does not meet 4.5:1 (Understanding SC 1.4.3), so nothing here may round, floor
+// or format a ratio before the assertion — the raw value goes straight into the
+// comparison, and the full-precision number appears only in the failure message.
+//
+// Measured ratios (--onbrand on --brand): light teal 5.0632, sage 4.7091,
+// rose 4.5224, plum 5.7681; dark teal 5.6822, sage 6.7689, rose 6.2713,
+// plum 6.2457. Light rose is the tightest pair in the system and is the one
+// decision D4c retuned from #b0605a — which computed to 4.49985:1, a fail that
+// only ever looked like a pass because a helper rounded it first.
+
+describe("chrome plane contrast — --onbrand vs the live --brand (nursing-sheduler-2dn)", () => {
+  it("--chrome aliases --brand rather than declaring its own value", () => {
+    // If chrome ever re-acquires an independent hex, the pairs asserted below
+    // stop describing what the app-mark tile actually paints.
+    expect(themeBlock(":root {")).toContain("--chrome: var(--brand);");
+  });
+
+  it.each(ACCENTS)("light theme: onbrand meets AA (>= 4.5:1) on the %s chrome", (accent) => {
+    const onbrand = tokenHex(themeBlock(":root {"), "onbrand");
+    const brand = tokenHex(themeBlock(`html[data-accent="${accent}"] {`), "brand");
+    const ratio = contrastRatio(onbrand, brand);
+    expect(ratio, `${onbrand} on ${brand} = ${ratio}:1`).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it.each(ACCENTS)("dark theme: onbrand meets AA (>= 4.5:1) on the %s chrome", (accent) => {
+    const onbrand = tokenHex(themeBlock(".dark {"), "onbrand");
+    const brand = tokenHex(themeBlock(`html.dark[data-accent="${accent}"] {`), "brand");
+    const ratio = contrastRatio(onbrand, brand);
+    expect(ratio, `${onbrand} on ${brand} = ${ratio}:1`).toBeGreaterThanOrEqual(4.5);
+  });
+
+  // The regression this fixup exists for. If the tightest pair drifts back, or a
+  // helper starts rounding again, one of these two trips.
+  it("the superseded light rose #b0605a is gone and would not have passed", () => {
+    expect(contrastRatio("#ffffff", "#b0605a")).toBeLessThan(4.5);
+    expect(themeBlock('html[data-accent="rose"] {')).not.toContain("#b0605a");
+  });
+
+  // The teal fallback that holds before data-accent exists must clear the same
+  // bar as the explicit selectors — it is what an unsupported stored value paints.
   it.each([
     ["light", ":root {"],
     ["dark", ".dark {"],
-  ])("%s theme: on-ink meets AA (>= 4.5:1) against chrome", (_name, selector) => {
+  ])("%s theme: the pre-attribute teal fallback also clears AA", (_name, selector) => {
     const block = themeBlock(selector);
-    const ratio = contrastRatio(tokenHex(block, "on-ink"), tokenHex(block, "chrome"));
-    expect(ratio).toBeGreaterThanOrEqual(4.5);
+    const onbrand = tokenHex(block, "onbrand");
+    const brand = tokenHex(block, "brand");
+    const ratio = contrastRatio(onbrand, brand);
+    expect(ratio, `${onbrand} on ${brand} = ${ratio}:1`).toBeGreaterThanOrEqual(4.5);
   });
 });
 
-describe("on-ink surfaces use the on-ink foreground token (not text-ink)", () => {
-  // After the T08 shell rebuild the top bar is `bg-surface` (not dark chrome), so
-  // the on-ink foreground now lives on the genuinely dark tiles/segments: the
-  // top-bar product tile (bg-chrome), the SideNav brand tile (bg-chrome), and the
-  // active mode segment (bg-ink). If any is repointed back to the inverting
-  // `text-ink`, its `text-on-ink` reference disappears and this trips.
-  it.each(["top-bar.tsx", "app-side-nav.tsx", "mode-toggle.tsx"])(
-    "%s references text-on-ink",
-    (name) => {
-      const src = readFileSync(join(shellDir, name), "utf8");
-      expect(src).toContain("text-on-ink");
-    },
-  );
+// The v2 mode toggle's active segment lifts to the L1 surface tone and takes
+// --brandink text (SideNav.dc.html:81), so --brandink on --surface joined the
+// set of chrome pairs that must clear AA. Like the pairs above it is audited per
+// accent AND per theme, because --brandink derives from the theme-specific
+// --brand and the surface ladder inverts between them.
+describe("mode-segment contrast — --brandink on the L1 --surface plane", () => {
+  it.each(ACCENTS)("light theme: brandink meets AA (>= 4.5:1) on %s", (accent) => {
+    const surface = tokenHex(themeBlock(":root {"), "surface");
+    const brandink = tokenHex(themeBlock(`html[data-accent="${accent}"] {`), "brandink");
+    const ratio = contrastRatio(brandink, surface);
+    expect(ratio, `${brandink} on ${surface} = ${ratio}:1`).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it.each(ACCENTS)("dark theme: brandink meets AA (>= 4.5:1) on %s", (accent) => {
+    const surface = tokenHex(themeBlock(".dark {"), "surface");
+    const brandink = tokenHex(themeBlock(`html.dark[data-accent="${accent}"] {`), "brandink");
+    const ratio = contrastRatio(brandink, surface);
+    expect(ratio, `${brandink} on ${surface} = ${ratio}:1`).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it.each([
+    ["light", ":root {"],
+    ["dark", ".dark {"],
+  ])("%s theme: the pre-attribute teal fallback also clears AA", (_name, selector) => {
+    const block = themeBlock(selector);
+    const surface = tokenHex(block, "surface");
+    const brandink = tokenHex(block, "brandink");
+    const ratio = contrastRatio(brandink, surface);
+    expect(ratio, `${brandink} on ${surface} = ${ratio}:1`).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
+describe("ink surfaces — --on-ink vs --ink", () => {
+  it.each([
+    ["light", ":root {"],
+    ["dark", ".dark {"],
+  ])("%s theme: on-ink meets AA (>= 4.5:1) against ink", (_name, selector) => {
+    const block = themeBlock(selector);
+    const onInk = tokenHex(block, "on-ink");
+    const ink = tokenHex(block, "ink");
+    const ratio = contrastRatio(onInk, ink);
+    expect(ratio, `${onInk} on ${ink} = ${ratio}:1`).toBeGreaterThanOrEqual(4.5);
+  });
 });

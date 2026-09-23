@@ -1,0 +1,16 @@
+id: capability-anchor-literal-attribute
+snapshots:
+  ? |
+    export const C = () => <button data-capability-anchor="dates.roster-period" />;
+  : labels:
+      - source: data-capability-anchor="dates.roster-period"
+        style: primary
+        start: 31
+        end: 75
+  ? |
+    export const D = () => <button {...{ "data-capability-anchor": anchorId }} />;
+  : labels:
+      - source: data-capability-anchor
+        style: primary
+        start: 38
+        end: 60

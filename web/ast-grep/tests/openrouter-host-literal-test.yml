@@ -1,0 +1,16 @@
+id: openrouter-host-literal
+valid:
+  # Every caller reads the host from the one module that owns it.
+  - |
+    import { OPENROUTER_BASE_URL } from "@/lib/ai/protocol";
+    const url = `${OPENROUTER_BASE_URL}/chat/completions`;
+  # A different third-party host is not this rule's business.
+  - |
+    const docs = "https://example.test/docs";
+invalid:
+  - |
+    const base = "https://openrouter.ai/api/v1";
+  - |
+    const url = `https://openrouter.ai/api/v1/models`;
+  - |
+    fetch("https://openrouter.ai/api/v1/chat/completions");

@@ -7,7 +7,24 @@ import { expect, test, type Page } from "@playwright/test";
 
 type NsWindow = {
   __nsStore: {
-    scenario: { getState(): Record<string, unknown> & { mutateScenario(x: unknown): void } };
+    /** The repository command bus — the product's only durable write path. */
+    commands: {
+      mutate(patch: Record<string, unknown>): Promise<{ ok: boolean }>;
+      recordBackup(): Promise<{ ok: boolean }>;
+      undo(): Promise<{ ok: boolean }>;
+      redo(): Promise<{ ok: boolean }>;
+      takeover(): Promise<{ ok: boolean }>;
+    };
+    drain(): Promise<void>;
+    historyDepth(): Promise<number>;
+    authority(): {
+      scenarioId: string | null;
+      documentRevision: number;
+      ownership: string;
+      canUndo: boolean;
+      canRedo: boolean;
+    };
+    scenario(): Record<string, unknown>;
     backupStatus(): "none" | "current" | "stale";
   };
 };
@@ -21,8 +38,8 @@ async function gotoReadyHome(page: Page) {
 }
 
 async function mutate(page: Page, patch: Record<string, unknown>) {
-  await page.evaluate((p) => {
-    (window as unknown as NsWindow).__nsStore.scenario.getState().mutateScenario(p);
+  await page.evaluate(async (p) => {
+    await (window as unknown as NsWindow).__nsStore.commands.mutate(p);
   }, patch);
 }
 
@@ -84,9 +101,19 @@ test.describe("T08 rebuild — two-mode Home (BLOCKER 2)", () => {
     await expect(page.getByTestId("home-advanced")).toBeVisible();
     await expect(page.getByTestId("home-wizard-grid")).toHaveCount(0);
     // Every Advanced-visible destination except Home is a direct entry point
-    // (12 of 13 — DL12 §2: Guided's five Set up entries incl. Rules, plus the
-    // five raw Constraints editors).
-    await expect(page.locator('[data-testid^="home-adv-"]')).toHaveCount(12);
+    // (14 of 15 — DL12 §2: Guided's five Set up entries incl. Rules, the five raw
+    // Constraints editors, Optimise & Export, Save & Load, — since G4 — Roster, and
+    // T04's Settings).
+    //
+    // Settings is included for the same reason Save & Load is: the grid's rule is
+    // "every Advanced destination except Home", not "every scenario editor", and a
+    // destination the sidebar lists but the grid omits would be the drift this
+    // count exists to catch.
+    //
+    // INTEGRATION: each side independently reached 13 of 14 from a shared 12 of 13 —
+    // main by adding Roster, the assistant branch by adding Settings. Both are in the
+    // merged nav, so the grid is 14 of 15.
+    await expect(page.locator('[data-testid^="home-adv-"]')).toHaveCount(14);
     // Reachability preserved: still routes.
     await page.getByTestId("home-adv-/dates").click();
     await expect(page).toHaveURL(/\/dates$/);
@@ -229,13 +256,158 @@ test.describe("T08 rebuild — sidebar prototype-conformance audit", () => {
     expect(Math.round(rowBox!.height)).toBe(38);
   });
 
-  test("M5 — footer is one 34px theme button and no gear", async ({ page }) => {
+  // The identity block is two facts, not the prototype's one short phrase, and
+  // neither line may ellipsize at either shipped width. `scrollWidth <=
+  // clientWidth` is the discriminating form: the spans are `whitespace-nowrap`,
+  // so an over-long line overflows its box and trips this, rather than wrapping
+  // and passing vacuously. Both required geometries are covered — the 280px
+  // desktop rail here, and the 250px drawer in the coarse test below.
+  test("M5 — the desktop rail shows the whole identity, unellipsized", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await gotoReadyHome(page);
+
+    const rail = page.getByTestId("desktop-sidebar");
+    await expect(rail.getByTestId("sidebar-identity-name")).toHaveText("Local workspace");
+    await expect(rail.getByTestId("sidebar-identity-scope")).toHaveText("This browser");
+
+    for (const testId of ["sidebar-identity-name", "sidebar-identity-scope"]) {
+      const fit = await rail.getByTestId(testId).evaluate((el) => ({
+        scrollWidth: el.scrollWidth,
+        clientWidth: el.clientWidth,
+      }));
+      expect(fit.clientWidth, `${testId} must be laid out`).toBeGreaterThan(0);
+      expect(
+        fit.scrollWidth,
+        `${testId} overflows its box in the desktop rail`,
+      ).toBeLessThanOrEqual(fit.clientWidth);
+    }
+  });
+
+  test("M5 — footer is one 36px theme button and no gear", async ({ page }) => {
+    // 36, not the v1 34: the v2 SideNav sizes this control at 36px
+    // (SideNav.dc.html:66), which is exactly the shared `icon` control token
+    // (--ctl). The R1 re-skin therefore dropped the caller-side `size-[34px]`
+    // override rather than keeping a one-off geometry for a shared control.
     await expect(page.getByTestId("display-settings-trigger")).toHaveCount(0);
     const theme = page.getByRole("button", { name: /switch to .* theme/i });
     await expect(theme).toBeVisible();
+    // RAW dimensions, never rounded — `size-control` is the absolute 36px token,
+    // and `Math.round` would accept anything in [35.5, 36.5) as "exactly 36".
     const box = await theme.boundingBox();
-    expect(Math.round(box!.width)).toBe(34);
-    expect(Math.round(box!.height)).toBe(34);
+    expect(box!.width, "theme control width").toBe(36);
+    expect(box!.height, "theme control height").toBe(36);
+  });
+
+  // The other half of the M5 contract, extended to the rest of the rail.
+  //
+  // 36px on a precise pointer and a real 44px target on a coarse one are both
+  // required, and the coarse floor must live on the actual control (never a
+  // pseudo-element hitbox). This also covers the two rail controls F4's
+  // coarse-pointer project structurally CANNOT reach: below 920px the desktop
+  // rail is `hidden`, and the drawer that replaces it is closed, so a scanner
+  // walking the rendered document never measures a nav row or a mode segment.
+  // The drawer is opened here explicitly so both are measured.
+  //
+  // The coarse context is built here rather than borrowed from F4's `v2-touch`
+  // project, because this spec runs only under `chromium` and the claim belongs
+  // beside the precise-pointer assertion it qualifies.
+  test("M5 — the rail's own controls still meet the coarse-pointer minimum", async ({
+    browser,
+  }) => {
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+      hasTouch: true,
+    });
+    const page = await context.newPage();
+    try {
+      await page.addInitScript(() => {
+        (window as unknown as { __NS_ENABLE_TEST_BRIDGE?: boolean }).__NS_ENABLE_TEST_BRIDGE = true;
+      });
+      await gotoReadyHome(page);
+
+      // Assert the pointer state BEFORE measuring: a context that silently
+      // stayed fine-pointer would measure the 36/38px precise sizes and "pass"
+      // for exactly the wrong reason.
+      const media = await page.evaluate(() => ({
+        coarse: matchMedia("(pointer: coarse)").matches,
+        touchPoints: navigator.maxTouchPoints,
+      }));
+      expect(media.coarse, "the context must report (pointer: coarse)").toBe(true);
+      expect(media.touchPoints).toBeGreaterThanOrEqual(1);
+
+      // Below 920px the rail is a drawer, so open it to reach the footer.
+      await page.getByTestId("mobile-nav-trigger").click();
+      const theme = page.getByRole("button", { name: /switch to .* theme/i });
+      await expect(theme).toBeVisible();
+
+      // RAW dimensions, never rounded. `Math.round` here would be a hole in the
+      // oracle rather than tolerance: a control laid out at 43.59375px — an
+      // ordinary fractional CSS result, not a contrived one — rounds to 44 and
+      // sails through a floor it actually misses. The tokens are absolute
+      // integers, so the raw value is what has to clear the threshold.
+      const box = await theme.boundingBox();
+      expect(box!.width, "theme control width").toBeGreaterThanOrEqual(44);
+      expect(box!.height, "theme control height").toBeGreaterThanOrEqual(44);
+
+      // A nav row and both mode segments: 38px / 36px with a precise pointer,
+      // and they must grow to the 44px floor here.
+      //
+      // Scoped to the drawer: the desktop rail is `hidden` rather than
+      // unmounted at this width, so both copies of every row are in the DOM.
+      const drawer = page.getByTestId("mobile-nav-drawer");
+      for (const testId of ["nav-link-/dates", "mode-toggle-guided", "mode-toggle-advanced"]) {
+        const control = drawer.getByTestId(testId);
+        await expect(control).toBeVisible();
+        const controlBox = await control.boundingBox();
+        expect(controlBox!.height, `${testId} height`).toBeGreaterThanOrEqual(44);
+      }
+
+      // The drawer is the SECOND required identity geometry, and the tighter of
+      // the two: 250px against the rail's 280px.
+      await expect(drawer.getByTestId("sidebar-identity-name")).toHaveText("Local workspace");
+      await expect(drawer.getByTestId("sidebar-identity-scope")).toHaveText("This browser");
+      for (const testId of ["sidebar-identity-name", "sidebar-identity-scope"]) {
+        const fit = await drawer.getByTestId(testId).evaluate((el) => ({
+          scrollWidth: el.scrollWidth,
+          clientWidth: el.clientWidth,
+        }));
+        expect(fit.clientWidth, `${testId} must be laid out`).toBeGreaterThan(0);
+        expect(
+          fit.scrollWidth,
+          `${testId} overflows its box in the open drawer`,
+        ).toBeLessThanOrEqual(fit.clientWidth);
+      }
+    } finally {
+      await context.close();
+    }
+  });
+
+  // The precise-pointer half of the mode-segment contract. F4's fine-pointer
+  // branch only rejects zero-sized controls, and the coarse lane below measures
+  // the >=44px floor, so without this a precise segment could drift off the
+  // 36px control token with every recorded gate still green.
+  test("m7 — both mode segments are exactly 36px on a precise pointer", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await gotoReadyHome(page);
+
+    // Assert the pointer state first: a coarse context would measure the 44px
+    // floor and "pass" a 36px assertion for the wrong reason if it ever drifted.
+    const coarse = await page.evaluate(() => matchMedia("(pointer: coarse)").matches);
+    expect(coarse, "this project must report a precise pointer").toBe(false);
+
+    const rail = page.getByTestId("desktop-sidebar");
+    for (const testId of ["mode-toggle-guided", "mode-toggle-advanced"]) {
+      const segment = rail.getByTestId(testId);
+      await expect(segment).toBeVisible();
+      const box = await segment.boundingBox();
+      // `min-h-control` is the absolute 36px token; `min-h-9` would resolve
+      // through --spacing and its 0.9 baseline to 32.4px.
+      //
+      // RAW height, never rounded — see the coarse test above. `Math.round`
+      // would accept anything in [35.5, 36.5), so a segment laid out at
+      // 35.59375px would satisfy an assertion that says "exactly 36".
+      expect(box!.height, `${testId} height`).toBe(36);
+    }
   });
 
   test("m7 — mode control exposes tablist / tab semantics with aria-selected", async ({ page }) => {

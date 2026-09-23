@@ -662,6 +662,9 @@ def test_watchdog_terminates_process_after_timeout_grace():
     assert result.status is ProcessStatus.FAILED
     assert result.failure is not None
     assert result.failure.code == "process_timeout"
+    # The message is surfaced verbatim to the user, so its UK-English prose is
+    # part of the contract, not incidental wording.
+    assert result.failure.message.startswith("The optimisation process did not return")
     assert "1-second timeout" in result.failure.message
     assert "0.1-second timeout grace period" in result.failure.message
 
@@ -716,7 +719,9 @@ def test_native_feasible_timeout_completes_with_solver_timeout_reason():
 
 
 def test_executor_reports_abrupt_child_exit_without_waiting_for_timeout():
-    with pytest.raises(ChildOptimizationError, match="ChildProcessCommunicationError"):
+    # The worker wraps this into JobFailure("optimization_failed", str(error)), so the
+    # prose reaches the user: assert the UK-English wording, not just the code.
+    with pytest.raises(ChildOptimizationError, match="ChildProcessCommunicationError") as raised:
         run_optimization_process(
             AbruptExitRunner(),
             _control_job("job_abrupt_exit"),
@@ -726,6 +731,7 @@ def test_executor_reports_abrupt_child_exit_without_waiting_for_timeout():
             hard_timeout_seconds=61,
             finish_now_enabled=False,
         )
+    assert "Optimisation process closed its result channel" in str(raised.value)
 
 
 @pytest.mark.parametrize(

@@ -26,18 +26,28 @@
 //   cancel                   | "cancels to terminal"                                | assembled: live cancel
 //   finish-now               | "finish-now"                                         | —
 //   queue capacity           | "capacity error renders"                             | —
-//   cursor expired recovery  | "cursor-expired recovery reconnects"                 | event-stream.test.ts:345
-//   invalid cursor recovery  | "invalid-cursor recovery reconnects"                  | event-stream.test.ts:403
+//   cursor expired recovery  | — (see below)                                        | event-stream.test.ts:345
+//   invalid cursor recovery  | — (see below)                                        | event-stream.test.ts:403
 //   missing job              | "missing-job recovery"                               | event-stream.test.ts:325
 //   missing artifact         | "completed-but-missing artifact"                     | —
 //   worker-lost              | "worker-lost release" (dismiss executed)              | —
-//   reload/resume            | "anonymized reload"                                  | assembled: live replay
+//   FRESH re-entry           | "a record from an older run is inert on entry"       | optimize-and-export-screen.test.tsx
 //   cleanup retry            | "cleanup-failure retry"                              | assembled: tiny DELETE
-//   cleanup abandon          | "cleanup abandon"                                    | —
+//   failed cleanup (no abandon) | "a failed cleanup stays the current run"          | —
 //   cancelled dismiss        | "cancelled dismiss"                                  | —
-//   degraded activation      | —                                                    | session-recovery.integration.test.tsx:527
-//   anonymized restore       | "anonymized reload"                                  | restore-people-ids.test.ts
-//   real browser download    | "anonymized reload"                                  | assembled: tiny download
+//   anonymized restore       | "anonymized run"                                     | restore-people-ids.test.ts
+//   real browser download    | "anonymized run"                                     | assembled: tiny download
+//
+// G6.2 CHANGED WHAT THIS FILE CAN COVER. The three cursor-recovery journeys and
+// the reload/resume journey all drove the browser the same way: seed a durable
+// ACTIVE record, open the route, and let the boot inspection resume it. Entering
+// the route resumes nothing now, so that setup cannot reach the code any more.
+// Mid-stream cursor expiry/invalidity is still real and still covered at the unit
+// level (`event-stream.test.ts`, `run-view.test.ts`); what is lost here is the
+// browser-level proof of it, because the only browser AFFORDANCE that reached it
+// was resume. Recorded as a coverage delta, not quietly dropped. In its place this
+// spec now proves the property the ticket is actually about: a record from an
+// older run is inert on entry.
 
 import { expect, test, type Page, type Route } from "@playwright/test";
 import {
@@ -52,6 +62,7 @@ import {
   failedJob,
   gotoDurableFixture,
   installOptimizeRoutes,
+  rosterContainer,
   json,
   JOB_ID,
   phaseChangedFrame,
@@ -100,211 +111,37 @@ async function disableAnonymize(page: Page) {
   await expect(toggle).toHaveAttribute("aria-checked", "false");
 }
 
-const STALE_RECOVERY_CURSOR = "v1.stale.cursor";
-const RECOVERED_RUNNING_CURSOR = "c-recovered-running";
-const RECOVERED_RESULT_CURSOR = "c-recovered-result";
-const RECOVERED_TERMINAL_CURSOR = "c-recovered-terminal";
+const PRIOR_RUN_OWNER = "owner-e2e-prior-run";
 
-interface CursorResetBoundary {
-  phase: string | null;
-  jobId: string | null;
-  hasLastCursor: boolean;
-  lastCursor: string | null;
-}
-
-async function seedActiveRecovery(page: Page, cursor: string): Promise<void> {
+/**
+ * Seed the exact state the user's screenshot was taken in: a durable ACTIVE
+ * record for a job from an EARLIER visit, sitting in the legacy single slot.
+ *
+ * The legacy key on purpose. It is the shape a tab that ran the previous build
+ * would actually be holding, so this is the real upgrade path rather than a
+ * synthetic one — and it is the shape that used to be read on boot, resumed, and
+ * projected as “An optimisation from this browser is still running”.
+ */
+async function seedPriorRunRecord(page: Page): Promise<void> {
   const record: ActiveOptimizeSession = {
     schemaVersion: OPTIMIZE_SESSION_SCHEMA_VERSION,
-    ownerId: "owner-e2e-cursor-recovery",
+    ownerId: PRIOR_RUN_OWNER,
     phase: "active",
     jobId: JOB_ID,
     anonymized: false,
     runOptions: { prettify: false, timeout: 300 },
     peopleCount: 0,
     reverseMap: [],
-    lastCursor: cursor,
+    capture: {
+      status: "staged",
+      snapshotRef: PRIOR_RUN_OWNER,
+      submissionOrdinal: 1,
+    },
   };
   await page.addInitScript(({ key, value }) => sessionStorage.setItem(key, value), {
     key: OPTIMIZE_SESSION_STORAGE_KEY,
     value: JSON.stringify(record),
   });
-}
-
-async function readCursorResetBoundary(page: Page): Promise<CursorResetBoundary> {
-  return page.evaluate((key) => {
-    const raw = sessionStorage.getItem(key);
-    if (!raw) {
-      return { phase: null, jobId: null, hasLastCursor: false, lastCursor: null };
-    }
-    const record = JSON.parse(raw) as {
-      phase?: string;
-      jobId?: string;
-      lastCursor?: string;
-    };
-    return {
-      phase: record.phase ?? null,
-      jobId: record.jobId ?? null,
-      hasLastCursor: Object.prototype.hasOwnProperty.call(record, "lastCursor"),
-      lastCursor: record.lastCursor ?? null,
-    };
-  }, OPTIMIZE_SESSION_STORAGE_KEY);
-}
-
-async function hasAppliedRecoveredTerminal(page: Page): Promise<boolean> {
-  const boundary = await readCursorResetBoundary(page);
-  const eventLog =
-    (await page
-      .getByTestId("optimize-event-log")
-      .textContent()
-      .catch(() => "")) ?? "";
-  return (
-    boundary.lastCursor === RECOVERED_TERMINAL_CURSOR &&
-    eventLog.includes("outcome=optimal") &&
-    eventLog.includes("state=completed")
-  );
-}
-
-async function proveCursorRecovery(
-  page: Page,
-  error: {
-    status: 400 | 409;
-    code: "event_cursor_expired" | "invalid_event_cursor";
-    message: string;
-    oldestEventId?: string;
-  },
-): Promise<void> {
-  const requestCursors: Array<string | null> = [];
-  const pollOutcomes: string[] = [];
-  let resetBoundary: CursorResetBoundary | null = null;
-  let xlsxAttempts = 0;
-
-  await seedActiveRecovery(page, STALE_RECOVERY_CURSOR);
-  await installOptimizeRoutes(page, {
-    onEvents: async (route) => {
-      const cursor = route.request().headers()["last-event-id"] ?? null;
-      requestCursors.push(cursor);
-      if (requestCursors.length === 1) {
-        return route.fulfill({
-          status: error.status,
-          contentType: "application/json",
-          body: JSON.stringify({
-            error: {
-              code: error.code,
-              message: error.message,
-              ...(error.oldestEventId ? { oldest_event_id: error.oldestEventId } : {}),
-            },
-          }),
-        });
-      }
-
-      // Observe durable storage at the exact reset boundary, before the second
-      // body is released to the parser and commits its fresh cursors.
-      resetBoundary = await readCursorResetBoundary(page);
-      return sse(route, [
-        runningFrame(RECOVERED_RUNNING_CURSOR),
-        resultAvailableFrame(RECOVERED_RESULT_CURSOR, "optimal"),
-        terminalFrame(RECOVERED_TERMINAL_CURSOR, "completed"),
-      ]);
-    },
-    onPoll: async (route) => {
-      if (!(await hasAppliedRecoveredTerminal(page))) {
-        pollOutcomes.push("running");
-        return json(route, 200, runningJob());
-      }
-      // The controller requires one authoritative full snapshot to enter its
-      // terminal download state. That snapshot is withheld until the exact
-      // second-body cursor is durable and both result + terminal frames have
-      // crossed the parser/controller/render boundary.
-      pollOutcomes.push("completed-after-recovered-terminal");
-      return json(route, 200, completedJob(JOB_ID, { outcome: "optimal" }));
-    },
-    onXlsx: (route) => {
-      xlsxAttempts += 1;
-      return xlsx(route);
-    },
-  });
-
-  await gotoDurableFixture(page);
-  await expect(page.getByTestId("optimize-durable-fixture")).toBeVisible();
-  await expect(page.getByTestId("screen")).toBeVisible();
-
-  await expect(page.getByTestId("optimize-completed-artifact")).toContainText(
-    "downloaded successfully",
-    { timeout: 20_000 },
-  );
-  await expect(page.getByTestId("optimize-event-log")).toContainText("outcome=optimal");
-  await expect(page.getByTestId("optimize-event-log")).toContainText("state=completed");
-
-  expect(requestCursors).toEqual([STALE_RECOVERY_CURSOR, null]);
-  expect(resetBoundary).toEqual({
-    phase: "active",
-    jobId: JOB_ID,
-    hasLastCursor: false,
-    lastCursor: null,
-  });
-  expect(pollOutcomes).toContain("running");
-  expect(pollOutcomes).toContain("completed-after-recovered-terminal");
-  expect(xlsxAttempts).toBe(1);
-}
-
-async function proveMissingRecoveredTerminalCannotComplete(page: Page): Promise<void> {
-  const requestCursors: Array<string | null> = [];
-  const pollOutcomes: string[] = [];
-  let xlsxAttempts = 0;
-
-  await seedActiveRecovery(page, STALE_RECOVERY_CURSOR);
-  await installOptimizeRoutes(page, {
-    onEvents: (route) => {
-      requestCursors.push(route.request().headers()["last-event-id"] ?? null);
-      if (requestCursors.length === 1) {
-        return json(route, 409, {
-          error: {
-            code: "event_cursor_expired",
-            message: "Requested event history is no longer retained.",
-            oldest_event_id: "v1.j.0",
-          },
-        });
-      }
-
-      // Mutation control: the recovery body contains the result but omits the
-      // exact terminal frame/cursor. A polling implementation that merely saw
-      // the second request would incorrectly complete and download here.
-      return sse(route, [
-        runningFrame(RECOVERED_RUNNING_CURSOR),
-        resultAvailableFrame(RECOVERED_RESULT_CURSOR, "optimal"),
-      ]);
-    },
-    onPoll: async (route) => {
-      if (await hasAppliedRecoveredTerminal(page)) {
-        pollOutcomes.push("incorrect-terminal-unlock");
-        return json(route, 200, completedJob(JOB_ID, { outcome: "optimal" }));
-      }
-      pollOutcomes.push("running");
-      return json(route, 200, runningJob());
-    },
-    onXlsx: (route) => {
-      xlsxAttempts += 1;
-      return xlsx(route);
-    },
-  });
-
-  await gotoDurableFixture(page);
-  await expect(page.getByTestId("screen")).toBeVisible();
-  await expect(page.getByTestId("optimize-event-log")).toContainText("outcome=optimal", {
-    timeout: 10_000,
-  });
-  await expect
-    .poll(async () => (await readCursorResetBoundary(page)).lastCursor, { timeout: 10_000 })
-    .toBe(RECOVERED_RESULT_CURSOR);
-
-  // Allow another controller poll/reconnect turn; the absent terminal cursor
-  // must keep both the terminal UI and artifact request locked.
-  await expect.poll(() => pollOutcomes.length, { timeout: 10_000 }).toBeGreaterThan(0);
-  await page.waitForTimeout(1_000);
-  expect(requestCursors.slice(0, 2)).toEqual([STALE_RECOVERY_CURSOR, null]);
-  expect(pollOutcomes).not.toContain("incorrect-terminal-unlock");
-  expect(xlsxAttempts).toBe(0);
-  await expect(page.getByTestId("optimize-completed-artifact")).toHaveCount(0);
 }
 
 test.describe("Optimize & Export — durable-stream acceptance journeys", () => {
@@ -366,7 +203,10 @@ test.describe("Optimize & Export — durable-stream acceptance journeys", () => 
     await page.getByTestId("optimize-cancel").click();
 
     await expect(page.getByTestId("optimize-terminal-error")).toContainText("cancelled");
-    await expect(page.getByTestId("optimize-dismiss")).toBeVisible();
+    // No release action: a cancelled run occupies nothing, so there is nothing to
+    // dismiss and the exact `Optimize` action is already live.
+    await expect(page.getByTestId("optimize-dismiss")).toHaveCount(0);
+    await expect(page.getByTestId("optimize-submit")).toBeEnabled();
   });
 
   test("finish-now yields a downloadable feasible result", async ({ page }) => {
@@ -387,9 +227,12 @@ test.describe("Optimize & Export — durable-stream acceptance journeys", () => 
     );
   });
 
-  test("worker-lost release: dismiss clears the failed terminal and frees the slot", async ({
+  test("worker-lost reports honestly, offers nothing to press, and blocks nothing", async ({
     page,
   }) => {
+    // WAS "dismiss clears the failed terminal and frees the slot". There is no slot
+    // to free: records are owner-keyed, so a failed run occupies nothing and the
+    // release action it needed is gone with the thing it released.
     await installOptimizeRoutes(page, {
       onEvents: (route) => sse(route, [runningFrame("c1"), terminalFrame("c2", "failed")]),
       onPoll: (route) => json(route, 200, failedJob()),
@@ -400,14 +243,12 @@ test.describe("Optimize & Export — durable-stream acceptance journeys", () => 
     await page.getByTestId("optimize-submit").click();
 
     await expect(page.getByTestId("optimize-terminal-error")).toContainText("worker");
-    await expect(page.getByTestId("optimize-resubmit")).toHaveText(/Resubmit/);
-
-    // Execute the release: dismiss triggers cleanup() → DELETE 204 → reset → idle.
-    // This proves the failed-terminal release path (the cold-review gap: the
-    // prior test only checked Resubmit was visible, never invoked a release).
-    await page.getByTestId("optimize-dismiss").click();
+    for (const retired of ["optimize-resubmit", "optimize-dismiss", "optimize-try-again"]) {
+      await expect(page.getByTestId(retired), retired).toHaveCount(0);
+    }
+    // The one action, live, with nothing explaining a previous run beside it.
     await expect(page.getByTestId("optimize-submit")).toBeEnabled({ timeout: 10_000 });
-    await expect(page.getByTestId("optimize-terminal-error")).toHaveCount(0, { timeout: 10_000 });
+    await expect(page.getByTestId("optimize-disabled-reason")).toHaveCount(0);
   });
 
   test("queued position renders", async ({ page }) => {
@@ -473,7 +314,7 @@ test.describe("Optimize & Export — durable-stream acceptance journeys", () => 
     await installOptimizeRoutes(page, {
       onSubmit: (route) =>
         json(route, 429, {
-          error: { code: "job_capacity_exceeded", message: "The optimization queue is full." },
+          error: { code: "job_capacity_exceeded", message: "The optimisation queue is full." },
         }),
     });
     await seedAndOpen(page);
@@ -486,29 +327,72 @@ test.describe("Optimize & Export — durable-stream acceptance journeys", () => 
     });
   });
 
-  test("cursor-expired recovery reconnects and reaches terminal", async ({ page }) => {
-    await proveCursorRecovery(page, {
-      status: 409,
-      code: "event_cursor_expired",
-      message: "Requested event history is no longer retained.",
-      oldestEventId: "v1.j.0",
-    });
-  });
-
-  test("invalid-cursor recovery reconnects and completes (distinct from expired)", async ({
+  // THE SCREENSHOT STATE, in a real browser. Everything the user photographed —
+  // the resumed toast, the old capture card, the futile Retry — came from this
+  // one durable record being read on entry.
+  test("a record from an older run is inert on entry: no resume, no request, no download", async ({
     page,
   }) => {
-    await proveCursorRecovery(page, {
-      status: 400,
-      code: "invalid_event_cursor",
-      message: "Last-Event-ID is not valid for this job.",
+    const requests: string[] = [];
+    let downloads = 0;
+    page.on("download", () => {
+      downloads += 1;
     });
-  });
 
-  test("cursor recovery cannot complete without the exact second-body terminal cursor", async ({
-    page,
-  }) => {
-    await proveMissingRecoveredTerminalCannotComplete(page);
+    await seedPriorRunRecord(page);
+    await installOptimizeRoutes(page, {
+      onEvents: (route) => {
+        requests.push("events");
+        return sse(route, [runningFrame("c1")]);
+      },
+      onPoll: (route) => {
+        requests.push("poll");
+        return json(route, 200, runningJob());
+      },
+      onXlsx: (route) => {
+        requests.push("xlsx");
+        return xlsx(route);
+      },
+      onRoster: (route) => {
+        requests.push("roster");
+        return json(route, 200, rosterContainer());
+      },
+      onDelete: (route) => {
+        requests.push("delete");
+        return route.fulfill({ status: 204, body: "" });
+      },
+    });
+
+    await gotoDurableFixture(page);
+    await expect(page.getByTestId("screen")).toBeVisible();
+    await disableAnonymize(page);
+
+    // The three elements from the screenshot, each asserted absent by NAME rather
+    // than by "the page looks fine".
+    await expect(page.getByText("An optimisation from this browser is still running")).toHaveCount(
+      0,
+    );
+    await expect(page.getByTestId("optimize-resumed")).toHaveCount(0);
+    await expect(page.getByTestId("optimize-capture-notice")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /Retry saving the roster/i })).toHaveCount(0);
+
+    // The exact action is live, and the record did not disable it.
+    await expect(page.getByTestId("optimize-submit")).toBeEnabled();
+
+    // Give the old boot chain every chance to fire before claiming it did not.
+    await page.waitForTimeout(1_500);
+    expect(requests, "entering the route touches the old run's job not at all").toEqual([]);
+    expect(downloads, "no file arrives because of a previous run").toBe(0);
+
+    // And a deliberate click still starts exactly one fresh run.
+    const submissions: string[] = [];
+    await page.route("**/api/optimize", async (route) => {
+      if (route.request().method() === "POST") submissions.push("post");
+      await route.fallback();
+    });
+    await page.getByTestId("optimize-submit").click();
+    await expect(page.getByTestId("optimize-controls")).toBeVisible({ timeout: 10_000 });
+    expect(submissions).toEqual(["post"]);
   });
 
   test("completed-but-missing artifact surfaces the explicit download failure copy", async ({
@@ -548,13 +432,26 @@ test.describe("Optimize & Export — durable-stream acceptance journeys", () => 
     expect(xlsxAttempts).toBe(1);
   });
 
-  test("cleanup failure surfaces retry and abandon; retry releases the slot", async ({ page }) => {
+  test("a failed cleanup is invisible: capture still ran before any DELETE", async ({ page }) => {
+    // WAS "cleanup failure surfaces retry only; retry releases the slot". The retry
+    // surface is gone — cleanup is owner-keyed and cannot stand in a new run's way,
+    // so there is nothing here for a user to decide. What still matters, and is
+    // still asserted, is the ORDERING the token gate enforces: `/roster` is fetched
+    // and settled before any DELETE is authorized.
     let deleteAttempts = 0;
+    let rosterAttempts = 0;
+    let rosterSeenBeforeFirstDelete: number | null = null;
     await installOptimizeRoutes(page, {
+      onRoster: (route) => {
+        rosterAttempts += 1;
+        return json(route, 200, rosterContainer());
+      },
       onDelete: (route) => {
         deleteAttempts += 1;
-        if (deleteAttempts === 1) return json(route, 500, { detail: "cleanup failed" });
-        return route.fulfill({ status: 204, body: "" });
+        // Sampled INSIDE the first DELETE, so the ordering claim is made by the
+        // pipeline itself rather than by whichever read happens to run first.
+        rosterSeenBeforeFirstDelete ??= rosterAttempts;
+        return json(route, 500, { detail: "cleanup failed" });
       },
     });
     await seedAndOpen(page);
@@ -565,14 +462,17 @@ test.describe("Optimize & Export — durable-stream acceptance journeys", () => 
     await expect(page.getByTestId("optimize-completed-artifact")).toContainText(
       "downloaded successfully",
     );
-    await expect(page.getByTestId("optimize-cleanup-failed")).toBeVisible();
-    await expect(page.getByTestId("optimize-cleanup-abandon")).toBeVisible();
+    await expect.poll(() => deleteAttempts, { timeout: 15_000 }).toBe(1);
+    expect(rosterAttempts).toBe(1);
+    // Capture ran for real BEFORE any DELETE could be authorized.
+    expect(rosterSeenBeforeFirstDelete).toBe(1);
 
-    await page.getByTestId("optimize-cleanup-retry").click();
-
-    // A successful retry clears the reserved-slot warning.
+    // And the failure is invisible and non-blocking.
     await expect(page.getByTestId("optimize-cleanup-failed")).toHaveCount(0);
-    expect(deleteAttempts).toBeGreaterThanOrEqual(2);
+    await expect(page.getByTestId("optimize-cleanup-retry")).toHaveCount(0);
+    await expect(page.getByTestId("optimize-cleanup-abandon")).toHaveCount(0);
+    await expect(page.getByTestId("optimize-submit")).toBeEnabled();
+    await expect(page.getByTestId("optimize-disabled-reason")).toHaveCount(0);
   });
 
   test("missing-job recovery surfaces a terminal error when the job vanishes mid-stream", async ({
@@ -596,12 +496,23 @@ test.describe("Optimize & Export — durable-stream acceptance journeys", () => 
     await expect(page.getByTestId("optimize-terminal-error")).toBeVisible({
       timeout: 10_000,
     });
-    await expect(page.getByTestId("optimize-dismiss")).toBeVisible();
+    // Reported, not actionable: there is no release to perform.
+    await expect(page.getByTestId("optimize-dismiss")).toHaveCount(0);
+    await expect(page.getByTestId("optimize-submit")).toBeEnabled({ timeout: 10_000 });
   });
 
-  test("cleanup abandon frees the local slot, leaving the server job to retention", async ({
+  test("a failed cleanup is honest and retryable — no abandon escape, and it blocks nothing", async ({
     page,
   }) => {
+    // The retired workflow, asserted absent. A cleanup that cannot be released used
+    // to offer Abandon behind a destructive confirmation that explained backend
+    // retention; the settled product has no such action or vocabulary. Retry is the
+    // way forward and the notice stays honest.
+    //
+    // G6.2 INVERTED THE LAST ASSERTION. This used to require that a new run could
+    // not start behind an unreleased one — which is the third of the three gates the
+    // ticket removed. An old run's unproven cleanup is now owner-keyed: it can
+    // finish on its own time without standing between the user and the button.
     await installOptimizeRoutes(page, {
       onDelete: (route) => json(route, 500, { detail: "cleanup failed" }),
     });
@@ -612,18 +523,24 @@ test.describe("Optimize & Export — durable-stream acceptance journeys", () => 
     await expect(page.getByTestId("optimize-completed-artifact")).toContainText(
       "downloaded successfully",
     );
-    await expect(page.getByTestId("optimize-cleanup-failed")).toBeVisible();
+    // NO CLEANUP SURFACE AT ALL. The notice, its Retry and the retired Abandon are
+    // all gone: cleanup is owner-keyed and invisible, so it is never a user decision.
+    await expect(page.getByTestId("optimize-cleanup-failed")).toHaveCount(0);
+    await expect(page.getByTestId("optimize-cleanup-retry")).toHaveCount(0);
+    await expect(page.getByTestId("optimize-cleanup-abandon")).toHaveCount(0);
+    await expect(page.getByTestId("optimize-cleanup-abandoned")).toHaveCount(0);
+    await expect(page.getByTestId("confirm-dialog-confirm")).toHaveCount(0);
 
-    // Abandon: destructive confirmation dialog → free the LOCAL slot.
-    await page.getByTestId("optimize-cleanup-abandon").click();
-    await page.getByTestId("confirm-dialog-confirm").click();
-
-    await expect(page.getByTestId("optimize-cleanup-abandoned")).toBeVisible();
-    // The local slot is freed — a new run is allowed.
-    await expect(page.getByTestId("optimize-submit")).toBeEnabled({ timeout: 10_000 });
+    // Unreleased, and NOT in the way. The exact primary action stays live, and the
+    // screen offers no explanation of a previous run to justify blocking it.
+    await expect(page.getByTestId("optimize-submit")).toBeEnabled();
+    await expect(page.getByTestId("optimize-disabled-reason")).toHaveCount(0);
+    await expect(page.getByText(/still running/i)).toHaveCount(0);
   });
 
-  test("cancelled dismiss releases the terminal slot and returns to idle", async ({ page }) => {
+  test("a cancelled run leaves the exact Optimize action live, with nothing to dismiss", async ({
+    page,
+  }) => {
     await installOptimizeRoutes(page, {
       onSubmit: (route) => json(route, 202, runningJob()),
       onEvents: liveRunningEvents(),
@@ -638,14 +555,15 @@ test.describe("Optimize & Export — durable-stream acceptance journeys", () => 
     await page.getByTestId("optimize-cancel").click();
     await expect(page.getByTestId("optimize-terminal-error")).toContainText("cancelled");
 
-    // Dismiss triggers cleanup() → DELETE 204 → idle (new run allowed).
-    await page.getByTestId("optimize-dismiss").click();
+    await expect(page.getByTestId("optimize-dismiss")).toHaveCount(0);
     await expect(page.getByTestId("optimize-submit")).toBeEnabled({ timeout: 10_000 });
   });
 
-  test("anonymized reload: persist cursor, reload, real download, restored ID verified", async ({
-    page,
-  }) => {
+  // Was "anonymized reload". The reload is gone — it existed only to prove resume,
+  // and a reload is now a fresh entry — but everything the test was actually FOR
+  // survives intact and in one visit: a real anonymized run, a real browser
+  // download, and the restored identity verified out of the downloaded bytes.
+  test("anonymized run: real browser download with the restored ID verified", async ({ page }) => {
     // Build a valid one-person C5 workbook with anonymized ID P1. The workbook
     // matches the exact C5 layout the strict restore module validates (blank
     // A1/A2, date in B1, weekday in B2, P1 at A3, "Score" at A4, "Status" at
@@ -661,13 +579,9 @@ test.describe("Optimize & Export — durable-stream acceptance journeys", () => 
     ws.views = [{ state: "frozen", xSplit: 1, ySplit: 2, topLeftCell: "B3" }];
     const c5Workbook = Buffer.from(await wb.xlsx.writeBuffer());
 
-    // Stateful events: running-only before reload (cursor persists); full
-    // terminal stream after reload (recovery reconnects → terminal → download).
-    let hasReloaded = false;
-
     // Window flags for the one-person anonymized prep. The fixture's
-    // cannedPrepare reads these; the controller stores the reverseMap in the
-    // session record so the terminal hook can restore P1 → "alice".
+    // cannedPrepare reads these; the controller keeps the reverseMap on the live
+    // activation so the terminal hook can restore P1 → "alice".
     await page.addInitScript(() => {
       const w = window as unknown as {
         __NS_ENABLE_TEST_BRIDGE?: boolean;
@@ -680,18 +594,13 @@ test.describe("Optimize & Export — durable-stream acceptance journeys", () => 
     });
 
     await installOptimizeRoutes(page, {
-      onEvents: (route) => {
-        if (!hasReloaded) {
-          return sse(route, [runningFrame("c1")]);
-        }
-        return sse(route, [
+      onEvents: (route) =>
+        sse(route, [
           runningFrame("c1"),
           resultAvailableFrame("c2", "optimal"),
           terminalFrame("c3", "completed"),
-        ]);
-      },
-      onPoll: (route) =>
-        json(route, 200, hasReloaded ? completedJob(JOB_ID, { outcome: "optimal" }) : runningJob()),
+        ]),
+      onPoll: (route) => json(route, 200, completedJob(JOB_ID, { outcome: "optimal" })),
       onXlsx: (route) =>
         route.fulfill({
           status: 200,
@@ -708,34 +617,10 @@ test.describe("Optimize & Export — durable-stream acceptance journeys", () => 
     // Keep anonymize ON (default) — this journey exercises the restore path.
     await expect(page.getByTestId("optimize-submit")).toBeEnabled();
 
-    await page.getByTestId("optimize-submit").click();
-
-    // Cursor persistence: the controller committed the running frame and wrote
-    // lastCursor to the durable session record.
-    await expect
-      .poll(
-        async () =>
-          page.evaluate(() => {
-            const raw = sessionStorage.getItem("nurse.optimize.session");
-            if (!raw) return null;
-            try {
-              return (JSON.parse(raw) as { lastCursor?: string }).lastCursor ?? null;
-            } catch {
-              return null;
-            }
-          }),
-        { timeout: 5_000 },
-      )
-      .not.toBeNull();
-
-    // Set up the download listener BEFORE reload so it captures the auto-chain
-    // download that fires when the reconnected stream reaches terminal.
+    // The listener goes up BEFORE the click, so it catches the auto-chain download
+    // the moment the stream reaches terminal.
     const downloadPromise = page.waitForEvent("download", { timeout: 30_000 });
-
-    // Reload → recovery reads the persisted cursor + reverseMap and reconnects.
-    hasReloaded = true;
-    await page.reload();
-    await expect(page.getByTestId("screen")).toBeVisible({ timeout: 10_000 });
+    await page.getByTestId("optimize-submit").click();
 
     // Terminal completion → auto-chain → real browser download.
     await expect(page.getByTestId("optimize-completed-artifact")).toContainText(

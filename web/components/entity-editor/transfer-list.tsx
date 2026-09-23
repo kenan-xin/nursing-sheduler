@@ -15,8 +15,20 @@
 // A single `keyOf` (presentation key) drives React keys; `sameValue` drives logical
 // membership. Groups (when present) render before items in each pane, and the
 // SELECTED pane preserves the caller's selection order.
+//
+// F2 owns this file's PRESENTATION only, and is its sole visual owner before F4.
+// The v2 surface reading of the control: each pane is an L1 card (the SELECTED
+// pane takes the `selected` role, so "this is the chosen set" is carried by the
+// same brand border + `--sh-2` lift the rest of the system uses), the count header
+// and the add-all/clear-all footer are FULL-BLEED bands and therefore square,
+// clipped by the pane's own card radius, and every option row is a real control
+// that reaches 44px on a coarse pointer — no pseudo-element hitboxes. Selection,
+// filtering, ordering, identity and the disabled/inert option contract are
+// untouched.
 
 import * as React from "react";
+import { cn } from "@/lib/utils";
+import { surfaceVariants } from "@/components/ui/surface";
 import {
   FaMagnifyingGlass,
   FaXmark,
@@ -144,7 +156,12 @@ export function TransferList<V = string>({
     >
       {/* AVAILABLE pane */}
       <div
-        className="flex flex-col border border-line bg-surface"
+        className={cn(
+          // `overflow-hidden` is what makes the square header band and footer button
+          // clip to the pane's card radius instead of poking out of the corners.
+          "flex flex-col overflow-hidden",
+          surfaceVariants({ role: "surface", geometry: "card" }),
+        )}
         data-testid={`transfer-available-${idPrefix}`}
       >
         <PaneHeader title="AVAILABLE" count={availCount} />
@@ -189,7 +206,7 @@ export function TransferList<V = string>({
             type="button"
             data-testid={`transfer-add-all-${idPrefix}`}
             onClick={() => addable.forEach((o) => onToggle(o.value))}
-            className="flex items-center gap-2 border-t border-line2 px-3 py-2 text-left text-meta font-semibold text-brandink hover:bg-panel"
+            className="flex items-center gap-2 rounded-none border-t border-line2 px-3 py-2 text-left text-meta font-semibold text-brandink pointer-coarse:min-h-touch hover:bg-panel-alt"
           >
             <FaAnglesRight className="size-3" />{" "}
             {aq ? `Add all ${addable.length} matching` : `Add all ${addable.length}`}
@@ -199,7 +216,10 @@ export function TransferList<V = string>({
 
       {/* SELECTED pane */}
       <div
-        className="flex flex-col border border-brand bg-surface"
+        className={cn(
+          "flex flex-col overflow-hidden",
+          surfaceVariants({ role: "selected", geometry: "card" }),
+        )}
         data-testid={`transfer-${selectedTestKey}-${idPrefix}`}
       >
         <PaneHeader title={selectedTitle} count={selected.length} brand />
@@ -247,7 +267,7 @@ export function TransferList<V = string>({
             type="button"
             data-testid={`transfer-clear-${idPrefix}`}
             onClick={() => selected.forEach((v) => onToggle(v))}
-            className="flex items-center gap-2 border-t border-line2 px-3 py-2 text-left text-meta font-semibold text-ink3 hover:bg-panel"
+            className="flex items-center gap-2 rounded-none border-t border-line2 px-3 py-2 text-left text-meta font-semibold text-ink3 pointer-coarse:min-h-touch hover:bg-panel-alt"
           >
             <FaAnglesLeft className="size-3" /> Clear all
           </button>
@@ -257,12 +277,18 @@ export function TransferList<V = string>({
   );
 }
 
+/** The pane's count band. Full-bleed, so it is square and flat — DESIGN.md §4
+ *  rule 2: a band that spans the whole card never takes a chip radius or a well
+ *  shadow. The selected pane's band is brand-tinted because it is the selection
+ *  language, matching its pane border. */
 function PaneHeader({ title, count, brand }: { title: string; count: number; brand?: boolean }) {
   return (
     <div
-      className={`flex items-center justify-between gap-2 border-b border-line2 px-3 py-2 text-label font-semibold uppercase tracking-[0.03em] ${
-        brand ? "bg-brandtint text-brandink" : "bg-panel text-ink2"
-      }`}
+      className={cn(
+        "flex items-center justify-between gap-2 rounded-none border-b border-line2 px-3 py-2",
+        "text-label font-semibold uppercase tracking-[0.03em]",
+        brand ? "bg-brandtint text-brandink" : "bg-panel text-ink2",
+      )}
     >
       <span>{title}</span>
       <span className="font-mono text-ink3">{count}</span>
@@ -286,12 +312,17 @@ function SearchBox({
   bordered?: boolean;
 }) {
   return (
-    <div className={`relative px-2.5 py-2 ${bordered ? "border-b border-line2" : ""}`}>
+    <div className={cn("relative px-2.5 py-2", bordered && "border-b border-line2")}>
       <FaMagnifyingGlass className="pointer-events-none absolute left-[19px] top-1/2 size-3 -translate-y-1/2 text-ink3" />
       <input
         data-testid={testId}
         aria-label={ariaLabel}
-        className="h-[34px] w-full border border-line bg-surface px-8 text-meta text-ink"
+        className={cn(
+          "h-control w-full rounded-control border border-line bg-surface px-8 text-meta text-ink",
+          "pointer-coarse:min-h-touch placeholder:text-faint",
+          "transition-[border-color,box-shadow] duration-fast",
+          "focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-brand/30",
+        )}
         placeholder={placeholder}
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -300,7 +331,7 @@ function SearchBox({
         <button
           type="button"
           aria-label={`Clear ${ariaLabel.toLowerCase()}`}
-          className="absolute right-[17px] top-1/2 -translate-y-1/2 text-ink3 hover:text-ink"
+          className="absolute right-[17px] top-1/2 inline-flex size-4 -translate-y-1/2 items-center justify-center rounded-full text-ink3 pointer-coarse:size-touch hover:text-ink"
           onClick={() => onChange("")}
         >
           <FaXmark className="size-3" />
@@ -331,7 +362,7 @@ function AvailableRow<V>({
   if (option.disabled) {
     return (
       <div
-        className="flex w-full cursor-not-allowed items-center justify-between gap-2 px-2 py-[7px] text-meta text-ink opacity-50"
+        className="flex w-full cursor-not-allowed items-center justify-between gap-2 rounded-none px-2 py-[7px] text-meta text-ink opacity-50 pointer-coarse:min-h-touch"
         title={option.disabledReason}
       >
         <span className="flex min-w-0 items-center gap-2">
@@ -346,7 +377,7 @@ function AvailableRow<V>({
       type="button"
       aria-label={aria}
       onClick={onAdd}
-      className="flex w-full items-center justify-between gap-2 px-2 py-[7px] text-left text-meta text-ink hover:bg-panel"
+      className="flex w-full items-center justify-between gap-2 rounded-none px-2 py-[7px] text-left text-meta text-ink pointer-coarse:min-h-touch hover:bg-panel-alt"
     >
       <span className="flex min-w-0 items-center gap-2">
         {icon && <span className="flex-none text-ink3">{icon}</span>}
@@ -374,7 +405,7 @@ function SelectedRow({
       aria-label={aria}
       title="Remove"
       onClick={onRemove}
-      className="flex w-full items-center justify-between gap-2 px-2 py-[7px] text-left text-meta text-ink hover:bg-panel"
+      className="flex w-full items-center justify-between gap-2 rounded-none px-2 py-[7px] text-left text-meta text-ink pointer-coarse:min-h-touch hover:bg-panel-alt"
     >
       <span className="flex min-w-0 items-center gap-2">
         {icon && <span className="flex-none text-brandink">{icon}</span>}

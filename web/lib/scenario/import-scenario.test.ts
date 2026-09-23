@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { sanitizePersistedScenario } from "@/lib/store/persistence";
 import { importScenarioYaml, importScenarioValue } from "./import-scenario";
 
 const BACKEND_YAML = `apiVersion: alpha
@@ -65,7 +66,8 @@ describe("importScenarioYaml (lenient Load path)", () => {
     expect(t.rangeEnd).toBe("2026-05-16");
     expect(t.staff.map((p) => p.id)).toEqual(["Alice", "Bob"]);
     expect(t.staffGroups[0].members).toEqual(["Alice", "Bob"]);
-    expect(t.dateGroups[0].members).toEqual(["2026-05-14", "2026-05-15"]);
+    // Re-keyed onto the range's span ids (same-month 05-14…05-16 ⇒ `DD`).
+    expect(t.dateGroups[0].members).toEqual(["14", "15"]);
     expect(t.maxOneShiftPerDay).toEqual({});
   });
 
@@ -74,7 +76,7 @@ describe("importScenarioYaml (lenient Load path)", () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     const leaveCell = r.target.reqData.find((c) => c.kind === "leave");
-    expect(leaveCell).toMatchObject({ kind: "leave", person: "Alice", date: "2026-05-14" });
+    expect(leaveCell).toMatchObject({ kind: "leave", person: "Alice", date: "14" });
     expect("weight" in (leaveCell as object)).toBe(false);
   });
 
@@ -87,6 +89,77 @@ describe("importScenarioYaml (lenient Load path)", () => {
     expect(
       requests.every((c) => c.kind === "request" && c.shiftType === "D" && c.weight === 2),
     ).toBe(true);
+  });
+
+  // The backend's canonical date reference is the full ISO `YYYY-MM-DD`
+  // (`scheduler.py` keys `map_did_d` by `str(date)`), but the UI's span-id
+  // surfaces — the person×date matrix, date-group members, and the export
+  // layout's date rows/columns — are keyed by the span-formatted date-item id
+  // `generateDateItems` derives from the range. Import must re-key, or a loaded
+  // request names a matrix column that does not exist and never paints.
+  describe("re-keys full-ISO date references onto the range's span ids", () => {
+    function importWithRange(start: string, end: string, date: string) {
+      const r = importScenarioYaml(`apiVersion: alpha
+dates: {range: {startDate: ${start}, endDate: ${end}}}
+people: {items: [{id: P1}]}
+shiftTypes: {items: [{id: D}]}
+preferences:
+  - type: at most one shift per day
+  - {person: P1, date: ${date}, shiftType: D}
+`);
+      if (!r.ok) throw new Error(`expected ok, got ${JSON.stringify(r.issues)}`);
+      return r.target.reqData[0];
+    }
+
+    it("re-keys to `DD` for a same-month range", () => {
+      expect(importWithRange("2026-10-01", "2026-10-28", "2026-10-02")).toMatchObject({
+        date: "02",
+      });
+    });
+
+    it("re-keys to `MM-DD` for a same-year, cross-month range", () => {
+      expect(importWithRange("2026-10-01", "2026-11-30", "2026-10-02")).toMatchObject({
+        date: "10-02",
+      });
+    });
+
+    it("leaves a cross-year range's ISO ids unchanged (they ARE the span ids)", () => {
+      expect(importWithRange("2026-12-01", "2027-01-31", "2026-12-02")).toMatchObject({
+        date: "2026-12-02",
+      });
+    });
+
+    it("passes a date keyword through untouched", () => {
+      expect(importWithRange("2026-10-01", "2026-10-28", "WEEKEND")).toMatchObject({
+        date: "WEEKEND",
+      });
+    });
+
+    it("passes an already-span-formatted id through untouched", () => {
+      // Quoted: bare `02` is YAML number 2, a different (numeric) ref shape.
+      expect(importWithRange("2026-10-01", "2026-10-28", '"02"')).toMatchObject({ date: "02" });
+    });
+
+    it("leaves an OUT-OF-RANGE ISO date verbatim so the preflight still reports it", () => {
+      // `2026-11-02` re-keyed blindly would become `02` and silently collide with
+      // the in-range 2026-10-02 — a wrong date, not a missing one.
+      expect(importWithRange("2026-10-01", "2026-10-28", "2026-11-02")).toMatchObject({
+        date: "2026-11-02",
+      });
+    });
+
+    it("leaves preference-card date fields as full ISO (cards are not a span-id surface)", () => {
+      const r = importScenarioYaml(`apiVersion: alpha
+dates: {range: {startDate: 2026-10-01, endDate: 2026-10-28}}
+people: {items: [{id: P1}]}
+shiftTypes: {items: [{id: D}]}
+preferences:
+  - type: at most one shift per day
+  - {type: shift type requirement, shiftType: D, date: 2026-10-02, requiredNumPeople: 1}
+`);
+      if (!r.ok) throw new Error("expected ok");
+      expect(r.target.cardsByKind.requirements[0].date).toBe("2026-10-02");
+    });
   });
 
   it("normalizes a nested requirement and a contracted-hours count", () => {
@@ -128,6 +201,43 @@ dates: {range: {startDate: 2026-05-14, endDate: 2026-05-14}}
 people: {items: [{id: P1}]}
 shiftTypes: {items: [{id: D}]}
 `;
+
+  it("normalizes an explicit-null selector AWAY, so the import is a valid durable write", () => {
+    // T03F1: durable writes are strict — an explicit `null` selector is not valid
+    // durable content. That contract is only workable because the tolerance for
+    // null-as-all lives BEFORE the transaction: `clean()` drops null-valued keys, so a
+    // file that spells `qualifiedPeople: null` (the backend's own null-as-all form)
+    // reaches the repository with the key ABSENT, which the reader then renders as ALL.
+    //
+    // The last assertion ties the two together: the normalized target is checked
+    // against `sanitizePersistedScenario`, the structural contract the repository's
+    // in-transaction validator delegates to — so "import normalizes before the write"
+    // is proven rather than assumed, without this module importing the durable
+    // authority (the module-boundary gate forbids that, correctly).
+    const r = importScenarioYaml(
+      `${BASE}preferences:\n  - type: shift type requirement\n    shiftType: D\n    requiredNumPeople: 1\n    qualifiedPeople: null\n    date: null\n    weight: -1\n`,
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+
+    const card = r.target.cardsByKind.requirements[0];
+    expect(card).toBeDefined();
+    expect("qualifiedPeople" in card).toBe(false);
+    expect("date" in card).toBe(false);
+
+    // Validate what actually REACHES the transaction. `loadScenario` hydrates durable
+    // identity onto an import target first (`hydrateImportTarget` in
+    // `lib/store/lifecycle.ts`), which is the only other thing standing between the
+    // file and the write, so the candidate is assembled the same way here.
+    const hydrated = {
+      ...r.target,
+      cardsByKind: {
+        ...r.target.cardsByKind,
+        requirements: r.target.cardsByKind.requirements.map((c) => ({ ...c, uid: "req-1" })),
+      },
+    };
+    expect(() => sanitizePersistedScenario(hydrated)).not.toThrow();
+  });
 
   it("rejects an unknown explicit preference type (never silently drops it)", () => {
     const r = importScenarioYaml(

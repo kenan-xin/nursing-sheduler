@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { ALL_NAV_ITEMS, findNavItem, getNavGroupsForMode, getNavItemForMode } from "./nav-config";
+import {
+  ALL_NAV_ITEMS,
+  GUIDED_STEP_COUNT,
+  findNavItem,
+  getNavGroupsForMode,
+  getNavItemForMode,
+} from "./nav-config";
 import { isRouteValidForMode } from "./route-registry";
 
 // T08d repair (P2): the fresh review found `isRouteValidForMode` and the
@@ -9,6 +15,11 @@ import { isRouteValidForMode } from "./route-registry";
 // `getNavGroupsForMode` itself and with `isRouteValidForMode`, for every
 // registered route in both modes — not just the routes other specs happen to
 // click through.
+//
+// G4 — the closure added `/roster` (an Output destination reachable in BOTH
+// modes, with no `guidedStep`). The dedicated assertions below pin the
+// discoverability contract (mode + step count) so a future drift fails here
+// rather than as an off-by-one somewhere downstream.
 describe("nav-config — one filtered registry drives every mode-aware consumer", () => {
   const modes = ["guided", "advanced"] as const;
 
@@ -58,5 +69,40 @@ describe("nav-config — one filtered registry drives every mode-aware consumer"
     expect(isRouteValidForMode("/design-system", "guided")).toBe(true);
     expect(isRouteValidForMode("/design-system", "advanced")).toBe(true);
     expect(getNavItemForMode("/design-system", "guided")).toBeUndefined();
+  });
+});
+
+describe("nav-config — G4 Roster discoverability contract", () => {
+  // G4 closure — the dedicated `/roster` route was added to the shared Output
+  // group immediately after `Optimise & Export`, with the prototype calendar
+  // check icon and the prototype-aligned blurb. These assertions are the unit
+  // half of the discoverability contract; the e2e half is in app-shell.spec
+  // and mode-aware-shell.spec.
+
+  const roster = findNavItem("/roster");
+
+  it("registers a /roster entry in the shared registry", () => {
+    expect(roster).toBeDefined();
+    expect(roster?.label).toBe("Roster");
+    expect(roster?.path).toBe("/roster");
+    expect(roster?.blurb).toBe("View & manually adjust results");
+  });
+
+  it("/roster sits in the Output group, immediately after Optimise & Export", () => {
+    const outputItems =
+      getNavGroupsForMode("advanced").find((group) => group.id === "output")?.items ?? [];
+    expect(outputItems.map((item) => item.path)).toEqual(["/optimize-and-export", "/roster"]);
+  });
+
+  it("/roster is reachable from both Guided and Advanced", () => {
+    expect(getNavItemForMode("/roster", "guided")).toBeDefined();
+    expect(getNavItemForMode("/roster", "advanced")).toBeDefined();
+    expect(isRouteValidForMode("/roster", "guided")).toBe(true);
+    expect(isRouteValidForMode("/roster", "advanced")).toBe(true);
+  });
+
+  it("/roster carries no guidedStep, so GUIDED_STEP_COUNT stays at six", () => {
+    expect(roster?.guidedStep).toBeUndefined();
+    expect(GUIDED_STEP_COUNT).toBe(6);
   });
 });

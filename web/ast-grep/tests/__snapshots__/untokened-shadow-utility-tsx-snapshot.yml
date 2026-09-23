@@ -1,0 +1,23 @@
+id: untokened-shadow-utility-tsx
+snapshots:
+  ? |
+    export const C = () => <div className="shadow-lg" />;
+  : labels:
+      - source: shadow-lg
+        style: primary
+        start: 39
+        end: 48
+  ? |
+    export const D = () => <div className="shadow-[0_1px_2px_rgba(60,55,45,0.05)]" />;
+  : labels:
+      - source: shadow-[0_1px_2px_rgba(60,55,45,0.05)]
+        style: primary
+        start: 39
+        end: 77
+  ? |
+    export const E = () => <div className="group-data-[checked]/switch:shadow-lg" />;
+  : labels:
+      - source: group-data-[checked]/switch:shadow-lg
+        style: primary
+        start: 39
+        end: 76

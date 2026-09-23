@@ -1,0 +1,42 @@
+id: tailwind-default-palette-utility
+valid:
+  # The semantic families.
+  - |
+    const cls = "bg-surface text-ink2 border-line";
+  - |
+    const chip = "bg-brandtint text-brandink border-brand";
+  # Prose that NAMES the rule, with a glob rather than an opacity suffix. This is the
+  # discrimination the retired scanner made and this rule keeps.
+  - |
+    const note = "Raw bg-black/* and fixed near-black RGBA overlays are off-contract.";
+  # The repository's real bracketed variants, on SEMANTIC families. The prefix is now a
+  # greedy non-space run, so these must still be accepted -- widening the prefix must not
+  # widen what counts as a violation.
+  - |
+    const cls = "data-[pressed]:bg-brandtint data-[pressed]:text-brandink";
+  - |
+    const cls = "group-data-[checked]/switch:bg-brand";
+  - |
+    const cls = "[&_svg]:size-4 [&_svg]:text-ink2";
+invalid:
+  - |
+    const cls = "bg-black";
+  - |
+    const cls = "bg-black/40";
+  - |
+    const cls = "p-2 dark:text-white";
+  - |
+    const cls = "border-slate-300 p-2";
+  - |
+    const cls = "hover:bg-red-500";
+  # BOUNDED-REVIEW ROUND 1. Each of these produced zero diagnostics before the prefix
+  # became a greedy non-space run, and each is an ordinary Tailwind spelling.
+  - |
+    const cls = "data-[state=open]:bg-black";
+  - |
+    const cls = "group-data-[checked]/switch:text-white";
+  - |
+    const cls = "[&_svg]:text-gray-400";
+  # The utility-level `!` after a variant, which the old `!?`-before-prefix form missed.
+  - |
+    const cls = "hover:!bg-black";

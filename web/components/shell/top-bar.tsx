@@ -15,10 +15,15 @@ import { usePathname } from "next/navigation";
 import { useScenarioStore } from "@/lib/store";
 import { useAppMode } from "@/lib/mode/use-mode";
 import { getNavGroupsForMode, getNavItemForMode } from "./nav-config";
+import { AssistantLauncher } from "@/components/ai/assistant-launcher";
 import { UndoRedoControls } from "./undo-redo-controls";
 import { PersistenceStatus } from "./persistence-status";
 import { MobileNav } from "./mobile-nav";
-import { FaDiagramProject } from "@/components/icons";
+import { Button } from "@/components/ui/button";
+import { surfaceVariants } from "@/components/ui/surface";
+import { cn } from "@/lib/utils";
+import { FaAnglesLeft, FaAnglesRight, FaDiagramProject } from "@/components/icons";
+import { useSideCollapsed, useSideCollapseActions } from "./use-side-collapse";
 
 // T08d repair (P2): resolves through `getNavItemForMode` — the same
 // `getNavGroupsForMode` projection the sidebar/Home/mobile drawer render —
@@ -53,18 +58,34 @@ export function TopBar() {
     <header
       data-testid="top-bar"
       // Side padding is FLAT: the prototype header is `padding:0 var(--space-5)` with
-      // no media query (Nurse Scheduling.dc.html:122). The `px-4 sm:px-5` this carried
+      // no media query (Nurse Scheduling v2.dc.html:238). The `px-4 sm:px-5` this carried
       // pivoted at 640px, a step the design does not have — and it tightened the phone
       // case, where the rail is hidden and there is more room, not less.
-      className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-3 border-b border-line bg-surface px-5"
+      //
+      // Tone, single bottom edge and elevation come from the `sticky` surface
+      // role — an L1 plane that carries --sh-1 and stays square, because a
+      // rounded corner on a full-bleed bar leaves a sliver of page background
+      // in the corner (DESIGN.md §5).
+      className={cn(
+        "sticky top-0 z-30 flex h-14 shrink-0 items-center gap-3 px-5",
+        surfaceVariants({ role: "sticky", geometry: "square" }),
+      )}
     >
+      {/* Desktop sidebar collapse — the far-left control, at and above the 920px
+          nav breakpoint only (G8). Below that the rail does not exist and the
+          drawer is always expanded, so a collapse control there would toggle a
+          preference with nothing to show for it. */}
+      <SideCollapseToggle />
+
       {/* Mobile hamburger — visible below the 920px nav breakpoint only. */}
       <span className="shrink-0 nav:hidden">
         <MobileNav />
       </span>
 
       <div className="flex min-w-0 items-center gap-2.5">
-        <span className="flex size-[26px] shrink-0 items-center justify-center bg-chrome text-[13px] text-on-ink">
+        {/* `--chrome` aliases the live `--brand`, so the tile's foreground is the
+            accent's paired `--onbrand`, not the ink ramp's `--on-ink`. */}
+        <span className="flex size-[26px] shrink-0 items-center justify-center rounded-chip bg-chrome text-[13px] text-onbrand">
           <FaDiagramProject />
         </span>
         <span
@@ -85,8 +106,45 @@ export function TopBar() {
           {scenarioName || "Untitled schedule"}
         </span>
         <PersistenceStatus />
+        {/* Renders nothing until AI is enabled and Ready (T04). */}
+        <AssistantLauncher />
         <UndoRedoControls />
       </div>
     </header>
+  );
+}
+
+/**
+ * The desktop rail's collapse/expand control (G8).
+ *
+ * Rendered through the shared `Button` (`ghost` / `icon`) rather than a one-off:
+ * that is the system's 36px square control token, it already carries the
+ * coarse-pointer 44px floor on the real control, and it is the same L1
+ * surface + hairline + `--sh-1` treatment every other icon control in the shell
+ * uses. `aria-expanded` + `aria-controls` point at the rail itself, so the
+ * control announces what it operates on rather than just naming itself, and the
+ * label states the ACTION (what pressing it will do) in both `title` and
+ * `aria-label`.
+ */
+function SideCollapseToggle() {
+  const collapsed = useSideCollapsed();
+  const { toggleCollapsed } = useSideCollapseActions();
+  const label = collapsed ? "Expand sidebar" : "Collapse sidebar";
+  const Icon = collapsed ? FaAnglesRight : FaAnglesLeft;
+
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      data-testid="side-collapse-toggle"
+      onClick={toggleCollapsed}
+      aria-label={label}
+      aria-expanded={!collapsed}
+      aria-controls="app-side-nav"
+      title={label}
+      className="hidden shrink-0 text-ink2 nav:inline-flex [&_svg]:size-3.5"
+    >
+      <Icon aria-hidden />
+    </Button>
   );
 }

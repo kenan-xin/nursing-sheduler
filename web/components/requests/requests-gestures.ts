@@ -4,7 +4,7 @@
 // history clear-drag accumulator. No React, no store — `use-requests.ts` is the
 // only consumer that touches `@/lib/store`.
 //
-// Parity source: `docs/design_prototype/ScreenRequests.dc.html` (`_computeCell`/
+// Parity source: `docs/design_prototype/source/ScreenRequests.dc.html` (`_computeCell`/
 // `_paintCells` ~387-405) and the old app
 // (`web-frontend/src/app/shift-requests/page.tsx` `handleDraggedCell`/
 // `applyPreferenceCellEdit`/`applyHistoryCellEdit` ~1073-1242).

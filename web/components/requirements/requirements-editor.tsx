@@ -65,10 +65,13 @@ function CoverageWarningBanner({
   if (!hasCoverageWarnings(warnings)) return null;
   return (
     <div
-      className="mb-1 border border-warn bg-warntint px-4 py-3.5"
+      // `--warnink`, not `--warn`: the two share a value in light mode and diverge
+      // in dark, so a `--warn` foreground on `--warntint` left this panel carrying
+      // its status by colour alone under one of the two themes.
+      className="mb-1 rounded-control border border-warn bg-warntint px-4 py-3.5"
       data-testid="requirement-coverage-warnings"
     >
-      <div className="mb-1.5 flex items-center gap-2 text-body font-bold text-warn">
+      <div className="mb-1.5 flex items-center gap-2 text-body font-bold text-warnink">
         <FaTriangleExclamation className="size-3.5" /> Requirement coverage warnings
       </div>
       {warnings.undefinedSection && (
@@ -76,7 +79,7 @@ function CoverageWarningBanner({
           <p className="mb-1.5 text-meta text-ink2">{warnings.undefinedSection.message}</p>
           <ul className="m-0 flex flex-col gap-0.5 pl-5">
             {warnings.undefinedSection.items.map((item) => (
-              <li key={item} className="font-mono text-label font-semibold text-warn">
+              <li key={item} className="font-mono text-label font-semibold text-warnink">
                 {item}
               </li>
             ))}
@@ -88,7 +91,7 @@ function CoverageWarningBanner({
           <p className="mb-1.5 text-meta text-ink2">{warnings.duplicateSection.message}</p>
           <ul className="m-0 flex flex-col gap-0.5 pl-5">
             {warnings.duplicateSection.items.map((item, i) => (
-              <li key={`${item}-${i}`} className="font-mono text-label font-semibold text-warn">
+              <li key={`${item}-${i}`} className="font-mono text-label font-semibold text-warnink">
                 {item}
               </li>
             ))}
@@ -100,18 +103,8 @@ function CoverageWarningBanner({
 }
 
 export function RequirementsEditor() {
-  const {
-    state,
-    requirements,
-    add,
-    update,
-    remove,
-    duplicate,
-    move,
-    reorder,
-    setDisabled,
-    getCards,
-  } = useRequirements();
+  const { state, requirements, add, update, remove, duplicate, reorder, setDisabled, getCards } =
+    useRequirements();
   const [draft, setDraft] = useState<Draft | null>(null);
   // FR-PR-06: arm the shared open-draft navigation guard while a form is visible.
   useCardEditorDraftGuard("requirements", !!draft);
@@ -228,7 +221,6 @@ export function RequirementsEditor() {
           onEdit={openEdit}
           onDuplicate={(uid) => withDraftDismissed(() => duplicate(uid))}
           onDelete={(uid) => withDraftDismissed(() => remove(uid))}
-          onMove={(uid, direction) => withDraftDismissed(() => move(uid, direction))}
           onReorder={(fromUid, toUid, position) =>
             withDraftDismissed(() => reorder(fromUid, toUid, position))
           }

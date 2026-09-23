@@ -10,10 +10,24 @@ import { expect, test, type Page } from "@playwright/test";
 
 type NsWindow = {
   __nsStore: {
-    scenario: {
-      getState(): Record<string, unknown> & { mutateScenario(x: unknown): void };
-      temporal: { getState(): { pastStates: unknown[] } };
+    /** The repository command bus — the product's only durable write path. */
+    commands: {
+      mutate(patch: Record<string, unknown>): Promise<{ ok: boolean }>;
+      recordBackup(): Promise<{ ok: boolean }>;
+      undo(): Promise<{ ok: boolean }>;
+      redo(): Promise<{ ok: boolean }>;
+      takeover(): Promise<{ ok: boolean }>;
     };
+    drain(): Promise<void>;
+    historyDepth(): Promise<number>;
+    authority(): {
+      scenarioId: string | null;
+      documentRevision: number;
+      ownership: string;
+      canUndo: boolean;
+      canRedo: boolean;
+    };
+    scenario(): Record<string, unknown>;
     backupStatus(): "none" | "current" | "stale";
   };
 };
@@ -26,16 +40,17 @@ async function gotoReadySaveAndLoad(page: Page) {
   );
 }
 
+/** The COMMITTED range — drained, so a read never outruns the command that wrote. */
 function rangeStart(page: Page): Promise<unknown> {
-  return page.evaluate(
-    () => (window as unknown as NsWindow).__nsStore.scenario.getState().rangeStart,
-  );
+  return page.evaluate(async () => {
+    const store = (window as unknown as NsWindow).__nsStore;
+    await store.drain();
+    return store.scenario().rangeStart;
+  });
 }
 
 function pastStatesLength(page: Page): Promise<number> {
-  return page.evaluate(
-    () => (window as unknown as NsWindow).__nsStore.scenario.temporal.getState().pastStates.length,
-  );
+  return page.evaluate(() => (window as unknown as NsWindow).__nsStore.historyDepth());
 }
 
 function backupStatus(page: Page): Promise<string> {
@@ -93,15 +108,16 @@ test.describe("T17b-2 — Load flow UI", () => {
     await expect(page.getByTestId("upload-load-sample-button")).toBeVisible();
   });
 
-  test("Load a sample scenario replaces state as one undoable transaction", async ({ page }) => {
+  test("Load a sample scenario switches to a fresh scenario identity", async ({ page }) => {
     await gotoReadySaveAndLoad(page);
     await page.getByTestId("scenario-upload-button").click();
     await page.getByTestId("upload-load-sample-button").click();
 
     await expect.poll(() => rangeStart(page)).not.toBe(null);
-    // Load is one tracked full-slice mutation (Undo restores the prior workspace),
-    // not a history-clearing replace (T17r P0).
-    expect(await pastStatesLength(page)).toBeGreaterThan(0);
+    // T03: a Load is an atomic scenario SWITCH to a fresh `scenarioId`, so the
+    // loaded document starts on its own empty Undo history — Undo does not reach
+    // back across a Load into a document this identity never contained.
+    expect(await pastStatesLength(page)).toBe(0);
     // An imported file is not a fresh local backup: backup stays unknown (none).
     expect(await backupStatus(page)).toBe("none");
   });
@@ -142,6 +158,42 @@ test.describe("T17b-2 — Load flow UI", () => {
     expect(await rangeStart(page)).toBe(before);
   });
 
+  // R7 — the ticket's overlay guardrail, made observable. Both halves matter and
+  // neither was previously asserted: the version confirm must SUPERSEDE the upload
+  // modal (not stack on top of it, which would leave a second scrim and a second
+  // focus trap between the user and the decision), and when the decision resolves,
+  // focus must land back on the Upload trigger rather than on `<body>`.
+  //
+  // The assertions are on the SETTLED state deliberately. The upload modal is still
+  // painted for one exit animation while the confirm enters — `toHaveCount(0)`
+  // retries until that transition finishes, so this pins the contract without
+  // pinning the frame, which would be flaky.
+  test("the version confirm supersedes the upload modal and restores focus to the Upload trigger", async ({
+    page,
+  }) => {
+    await gotoReadySaveAndLoad(page);
+
+    await page.getByTestId("scenario-upload-button").click();
+    await expect(page.getByTestId("upload-modal")).toBeVisible();
+    await page.getByTestId("upload-file-input").setInputFiles({
+      name: "no-version.yaml",
+      mimeType: "text/yaml",
+      buffer: Buffer.from(VALID_YAML_NO_VERSION),
+    });
+
+    await expect(page.getByTestId("confirm-dialog-confirm")).toBeVisible();
+    // The upload modal is gone, and the confirm is what is left standing.
+    await expect(page.getByTestId("upload-modal")).toHaveCount(0);
+    await expect(page.getByTestId("confirm-dialog-confirm")).toBeVisible();
+
+    await page.getByTestId("confirm-dialog-cancel").click();
+    await expect(page.getByTestId("confirm-dialog-confirm")).toBeHidden();
+
+    // Focus returns to the control that opened the flow — the shared overlays'
+    // own restoration behaviour, consumed rather than reimplemented here.
+    await expect(page.getByTestId("scenario-upload-button")).toBeFocused();
+  });
+
   test("a version mismatch's Continue commits the load", async ({ page }) => {
     await gotoReadySaveAndLoad(page);
 
@@ -156,7 +208,7 @@ test.describe("T17b-2 — Load flow UI", () => {
     await page.getByTestId("confirm-dialog-confirm").click();
 
     await expect.poll(() => rangeStart(page)).toBe("2026-06-01");
-    // Confirmed Load is one tracked, undoable transaction (T17r P0).
-    expect(await pastStatesLength(page)).toBeGreaterThan(0);
+    // A confirmed Load is the same atomic switch as an unconfirmed one.
+    expect(await pastStatesLength(page)).toBe(0);
   });
 });

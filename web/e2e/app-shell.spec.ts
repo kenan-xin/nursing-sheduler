@@ -28,6 +28,10 @@ import { expect, test, type Page } from "@playwright/test";
 // Requests; Advanced adds the raw Constraints group. Every route still exists —
 // the two lists below just record which mode each is reachable in DIRECTLY from
 // the sidebar.
+//
+// G4 — /roster is reachable in BOTH modes (it carries no `advancedOnly` flag in
+// the registry) and is therefore listed in GUIDED_NAV_PATHS alongside the
+// other Output destinations.
 const GUIDED_NAV_PATHS = [
   "/",
   "/dates",
@@ -36,6 +40,7 @@ const GUIDED_NAV_PATHS = [
   "/rules",
   "/shift-requests",
   "/optimize-and-export",
+  "/roster",
   "/save-and-load",
 ];
 
@@ -59,13 +64,26 @@ async function gotoReadyHome(page: Page) {
 // Minimal typing for the store seam inside the browser context.
 type NsWindow = {
   __nsStore: {
-    scenario: {
-      getState(): Record<string, unknown> & {
-        mutateScenario(x: unknown): void;
-        recordBackup(): void;
-      };
+    /** The repository command bus — the product's only durable write path. */
+    commands: {
+      mutate(patch: Record<string, unknown>): Promise<{ ok: boolean }>;
+      recordBackup(backupFingerprint: string): Promise<{ ok: boolean }>;
+      undo(): Promise<{ ok: boolean }>;
+      redo(): Promise<{ ok: boolean }>;
+      takeover(): Promise<{ ok: boolean }>;
     };
+    drain(): Promise<void>;
+    historyDepth(): Promise<number>;
+    authority(): {
+      scenarioId: string | null;
+      documentRevision: number;
+      ownership: string;
+      canUndo: boolean;
+      canRedo: boolean;
+    };
+    scenario(): Record<string, unknown>;
     backupStatus(): "none" | "current" | "stale";
+    backupFingerprint(): string;
     persistenceStatus(): "restoring" | "saving" | "saved" | "error";
     navGuard: {
       getState(): {
@@ -135,8 +153,8 @@ const VALID_SCENARIO_PATCH = {
 
 /** Apply a real tracked scenario mutation through the store seam. */
 async function mutate(page: Page, patch: Record<string, unknown>) {
-  await page.evaluate((p) => {
-    (window as unknown as NsWindow).__nsStore.scenario.getState().mutateScenario(p);
+  await page.evaluate(async (p) => {
+    await (window as unknown as NsWindow).__nsStore.commands.mutate(p);
   }, patch);
 }
 
@@ -146,8 +164,10 @@ async function mutate(page: Page, patch: Record<string, unknown>) {
  * a real prior backup — tests that need a stale precondition record one before editing.
  */
 async function recordBackup(page: Page) {
-  await page.evaluate(() => {
-    (window as unknown as NsWindow).__nsStore.scenario.getState().recordBackup();
+  await page.evaluate(async () => {
+    const store = (window as unknown as NsWindow).__nsStore;
+    // Bound to the document being backed up, exactly as a real Download binds it.
+    await store.commands.recordBackup(store.backupFingerprint());
   });
 }
 
@@ -168,16 +188,25 @@ async function closeTestDraft(page: Page) {
   });
 }
 
-/** Read a single scenario field from the live store. */
+/**
+ * Read a single COMMITTED scenario field. Drains first: a durable command settles
+ * asynchronously, so reading straight after the keystroke or click that issued it
+ * can outrun the commit — the drain is the deterministic seam for that.
+ */
 async function readField(page: Page, key: string): Promise<unknown> {
-  return page.evaluate(
-    (k) => (window as unknown as NsWindow).__nsStore.scenario.getState()[k],
-    key,
-  );
+  return page.evaluate(async (k) => {
+    const store = (window as unknown as NsWindow).__nsStore;
+    await store.drain();
+    return store.scenario()[k];
+  }, key);
 }
 
 async function backupStatus(page: Page): Promise<string> {
-  return page.evaluate(() => (window as unknown as NsWindow).__nsStore.backupStatus());
+  return page.evaluate(async () => {
+    const store = (window as unknown as NsWindow).__nsStore;
+    await store.drain();
+    return store.backupStatus();
+  });
 }
 
 /**
@@ -573,7 +602,7 @@ test.describe("T08 app shell", () => {
     const savingWarns = await page.evaluate(
       (patch) => {
         const w = window as unknown as NsWindow;
-        w.__nsStore.scenario.getState().mutateScenario(patch);
+        w.__nsStore.commands.mutate(patch);
         const e = new Event("beforeunload", { cancelable: true });
         window.dispatchEvent(e);
         return e.defaultPrevented;

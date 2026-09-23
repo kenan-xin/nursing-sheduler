@@ -1,0 +1,458 @@
+{
+  "$comment": "Shared golden vectors for the OptimizeBasisV2 canonical encoder (T08). Both core/nurse_scheduling/server/optimize_basis.py and web/lib/optimize/basis/optimize-basis.ts are tested against this exact file, so an encoder change in one language that is not mirrored in the other fails. `encoded` is the canonical text; `basisId` is the lowercase-hex SHA-256 of its UTF-8 bytes. Regenerating this file changes the identity of all retained Optimize evidence.",
+  "encodingVersion": "optimize-basis/v2",
+  "vectors": [
+    {
+      "name": "baseline plain submission, prettify false",
+      "basis": {
+        "schemaVersion": 2,
+        "submissionContractVersion": "optimize-yaml-v1",
+        "workspaceSchemaVersion": "1",
+        "serializerVersion": "canonical-strict-yaml-v1",
+        "anonymizationMode": "none",
+        "inputSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "normalizedOptions": {
+          "solver": "ortools/cp-sat",
+          "prettify": false,
+          "timeoutSeconds": 300
+        },
+        "solverSemanticVersion": "ortools/cp-sat@1",
+        "backendCapabilityVersion": "nurse-scheduling-backend@1"
+      },
+      "encoded": "optimize-basis/v2\nschemaVersion=i:2\nsubmissionContractVersion=s:optimize-yaml-v1\nworkspaceSchemaVersion=s:1\nserializerVersion=s:canonical-strict-yaml-v1\nanonymizationMode=s:none\ninputSha256=s:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\nnormalizedOptions.solver=s:ortools/cp-sat\nnormalizedOptions.prettify=b:false\nnormalizedOptions.timeoutSeconds=i:300\nsolverSemanticVersion=s:ortools/cp-sat@1\nbackendCapabilityVersion=s:nurse-scheduling-backend@1\n",
+      "encodedUtf8ByteLength": 468,
+      "basisId": "951d61a49ab0e8212a0e070e0dcabc208015e9d65ac7b4bdd34d30786714a605"
+    },
+    {
+      "name": "prettify true flips only the boolean field",
+      "basis": {
+        "schemaVersion": 2,
+        "submissionContractVersion": "optimize-yaml-v1",
+        "workspaceSchemaVersion": "1",
+        "serializerVersion": "canonical-strict-yaml-v1",
+        "anonymizationMode": "none",
+        "inputSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "normalizedOptions": {
+          "solver": "ortools/cp-sat",
+          "prettify": true,
+          "timeoutSeconds": 300
+        },
+        "solverSemanticVersion": "ortools/cp-sat@1",
+        "backendCapabilityVersion": "nurse-scheduling-backend@1"
+      },
+      "encoded": "optimize-basis/v2\nschemaVersion=i:2\nsubmissionContractVersion=s:optimize-yaml-v1\nworkspaceSchemaVersion=s:1\nserializerVersion=s:canonical-strict-yaml-v1\nanonymizationMode=s:none\ninputSha256=s:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\nnormalizedOptions.solver=s:ortools/cp-sat\nnormalizedOptions.prettify=b:true\nnormalizedOptions.timeoutSeconds=i:300\nsolverSemanticVersion=s:ortools/cp-sat@1\nbackendCapabilityVersion=s:nurse-scheduling-backend@1\n",
+      "encodedUtf8ByteLength": 467,
+      "basisId": "764818d2e4c4ce79ee6a9f95fe74f8f8ee40b770baf91fd1b58ed373ab5516d3"
+    },
+    {
+      "name": "people anonymization mode",
+      "basis": {
+        "schemaVersion": 2,
+        "submissionContractVersion": "optimize-yaml-v1",
+        "workspaceSchemaVersion": "1",
+        "serializerVersion": "canonical-strict-yaml-v1",
+        "anonymizationMode": "people",
+        "inputSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "normalizedOptions": {
+          "solver": "ortools/cp-sat",
+          "prettify": false,
+          "timeoutSeconds": 300
+        },
+        "solverSemanticVersion": "ortools/cp-sat@1",
+        "backendCapabilityVersion": "nurse-scheduling-backend@1"
+      },
+      "encoded": "optimize-basis/v2\nschemaVersion=i:2\nsubmissionContractVersion=s:optimize-yaml-v1\nworkspaceSchemaVersion=s:1\nserializerVersion=s:canonical-strict-yaml-v1\nanonymizationMode=s:people\ninputSha256=s:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\nnormalizedOptions.solver=s:ortools/cp-sat\nnormalizedOptions.prettify=b:false\nnormalizedOptions.timeoutSeconds=i:300\nsolverSemanticVersion=s:ortools/cp-sat@1\nbackendCapabilityVersion=s:nurse-scheduling-backend@1\n",
+      "encodedUtf8ByteLength": 470,
+      "basisId": "93708a4e817d8ae97ca87f40f293ba55720d821e440df40592a15b087405e097"
+    },
+    {
+      "name": "minimum positive timeout",
+      "basis": {
+        "schemaVersion": 2,
+        "submissionContractVersion": "optimize-yaml-v1",
+        "workspaceSchemaVersion": "1",
+        "serializerVersion": "canonical-strict-yaml-v1",
+        "anonymizationMode": "none",
+        "inputSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "normalizedOptions": {
+          "solver": "ortools/cp-sat",
+          "prettify": false,
+          "timeoutSeconds": 1
+        },
+        "solverSemanticVersion": "ortools/cp-sat@1",
+        "backendCapabilityVersion": "nurse-scheduling-backend@1"
+      },
+      "encoded": "optimize-basis/v2\nschemaVersion=i:2\nsubmissionContractVersion=s:optimize-yaml-v1\nworkspaceSchemaVersion=s:1\nserializerVersion=s:canonical-strict-yaml-v1\nanonymizationMode=s:none\ninputSha256=s:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\nnormalizedOptions.solver=s:ortools/cp-sat\nnormalizedOptions.prettify=b:false\nnormalizedOptions.timeoutSeconds=i:1\nsolverSemanticVersion=s:ortools/cp-sat@1\nbackendCapabilityVersion=s:nurse-scheduling-backend@1\n",
+      "encodedUtf8ByteLength": 466,
+      "basisId": "fb95a856edf0595a88cac8b7d51afe4e632e01f5969777470f06edd57e9cf897"
+    },
+    {
+      "name": "large timeout",
+      "basis": {
+        "schemaVersion": 2,
+        "submissionContractVersion": "optimize-yaml-v1",
+        "workspaceSchemaVersion": "1",
+        "serializerVersion": "canonical-strict-yaml-v1",
+        "anonymizationMode": "none",
+        "inputSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "normalizedOptions": {
+          "solver": "ortools/cp-sat",
+          "prettify": false,
+          "timeoutSeconds": 3600
+        },
+        "solverSemanticVersion": "ortools/cp-sat@1",
+        "backendCapabilityVersion": "nurse-scheduling-backend@1"
+      },
+      "encoded": "optimize-basis/v2\nschemaVersion=i:2\nsubmissionContractVersion=s:optimize-yaml-v1\nworkspaceSchemaVersion=s:1\nserializerVersion=s:canonical-strict-yaml-v1\nanonymizationMode=s:none\ninputSha256=s:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\nnormalizedOptions.solver=s:ortools/cp-sat\nnormalizedOptions.prettify=b:false\nnormalizedOptions.timeoutSeconds=i:3600\nsolverSemanticVersion=s:ortools/cp-sat@1\nbackendCapabilityVersion=s:nurse-scheduling-backend@1\n",
+      "encodedUtf8ByteLength": 469,
+      "basisId": "edf9b7107be39d66c6ed2e0cd7677e58de9c22b0a736b01461492321607c4d36"
+    },
+    {
+      "name": "all-zero input digest",
+      "basis": {
+        "schemaVersion": 2,
+        "submissionContractVersion": "optimize-yaml-v1",
+        "workspaceSchemaVersion": "1",
+        "serializerVersion": "canonical-strict-yaml-v1",
+        "anonymizationMode": "none",
+        "inputSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "normalizedOptions": {
+          "solver": "ortools/cp-sat",
+          "prettify": false,
+          "timeoutSeconds": 300
+        },
+        "solverSemanticVersion": "ortools/cp-sat@1",
+        "backendCapabilityVersion": "nurse-scheduling-backend@1"
+      },
+      "encoded": "optimize-basis/v2\nschemaVersion=i:2\nsubmissionContractVersion=s:optimize-yaml-v1\nworkspaceSchemaVersion=s:1\nserializerVersion=s:canonical-strict-yaml-v1\nanonymizationMode=s:none\ninputSha256=s:0000000000000000000000000000000000000000000000000000000000000000\nnormalizedOptions.solver=s:ortools/cp-sat\nnormalizedOptions.prettify=b:false\nnormalizedOptions.timeoutSeconds=i:300\nsolverSemanticVersion=s:ortools/cp-sat@1\nbackendCapabilityVersion=s:nurse-scheduling-backend@1\n",
+      "encodedUtf8ByteLength": 468,
+      "basisId": "8b848427845a70cb1e3b68adcaf507c2489ed2d539f6e781c02f33518d0d1fd6"
+    },
+    {
+      "name": "all-a input digest",
+      "basis": {
+        "schemaVersion": 2,
+        "submissionContractVersion": "optimize-yaml-v1",
+        "workspaceSchemaVersion": "1",
+        "serializerVersion": "canonical-strict-yaml-v1",
+        "anonymizationMode": "none",
+        "inputSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "normalizedOptions": {
+          "solver": "ortools/cp-sat",
+          "prettify": false,
+          "timeoutSeconds": 300
+        },
+        "solverSemanticVersion": "ortools/cp-sat@1",
+        "backendCapabilityVersion": "nurse-scheduling-backend@1"
+      },
+      "encoded": "optimize-basis/v2\nschemaVersion=i:2\nsubmissionContractVersion=s:optimize-yaml-v1\nworkspaceSchemaVersion=s:1\nserializerVersion=s:canonical-strict-yaml-v1\nanonymizationMode=s:none\ninputSha256=s:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nnormalizedOptions.solver=s:ortools/cp-sat\nnormalizedOptions.prettify=b:false\nnormalizedOptions.timeoutSeconds=i:300\nsolverSemanticVersion=s:ortools/cp-sat@1\nbackendCapabilityVersion=s:nurse-scheduling-backend@1\n",
+      "encodedUtf8ByteLength": 468,
+      "basisId": "0084d67ccb7c18812141f4bc889b59b73a537a6189ff37eb644978362ea35874"
+    },
+    {
+      "name": "unicode in version strings",
+      "basis": {
+        "schemaVersion": 2,
+        "submissionContractVersion": "optimize-yaml-v1",
+        "workspaceSchemaVersion": "1-病棟",
+        "serializerVersion": "canonical-strict-yaml-v1",
+        "anonymizationMode": "none",
+        "inputSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "normalizedOptions": {
+          "solver": "ortools/cp-sat",
+          "prettify": false,
+          "timeoutSeconds": 300
+        },
+        "solverSemanticVersion": "ortools/cp-sat@1-é",
+        "backendCapabilityVersion": "nurse-scheduling-backend@1"
+      },
+      "encoded": "optimize-basis/v2\nschemaVersion=i:2\nsubmissionContractVersion=s:optimize-yaml-v1\nworkspaceSchemaVersion=s:1-病棟\nserializerVersion=s:canonical-strict-yaml-v1\nanonymizationMode=s:none\ninputSha256=s:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\nnormalizedOptions.solver=s:ortools/cp-sat\nnormalizedOptions.prettify=b:false\nnormalizedOptions.timeoutSeconds=i:300\nsolverSemanticVersion=s:ortools/cp-sat@1-é\nbackendCapabilityVersion=s:nurse-scheduling-backend@1\n",
+      "encodedUtf8ByteLength": 478,
+      "basisId": "a510649e4bfde8186ec0830c319549888e632c8241ddff550fc4715cb691cc3f"
+    },
+    {
+      "name": "backslash and control characters are escaped, not dropped",
+      "basis": {
+        "schemaVersion": 2,
+        "submissionContractVersion": "optimize-yaml-v1",
+        "workspaceSchemaVersion": "1",
+        "serializerVersion": "a\\b\nc\rd\te",
+        "anonymizationMode": "none",
+        "inputSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "normalizedOptions": {
+          "solver": "ortools/cp-sat",
+          "prettify": false,
+          "timeoutSeconds": 300
+        },
+        "solverSemanticVersion": "ortools/cp-sat@1",
+        "backendCapabilityVersion": "nurse-scheduling-backend@1"
+      },
+      "encoded": "optimize-basis/v2\nschemaVersion=i:2\nsubmissionContractVersion=s:optimize-yaml-v1\nworkspaceSchemaVersion=s:1\nserializerVersion=s:a\\\\b\\nc\\rd\\te\nanonymizationMode=s:none\ninputSha256=s:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\nnormalizedOptions.solver=s:ortools/cp-sat\nnormalizedOptions.prettify=b:false\nnormalizedOptions.timeoutSeconds=i:300\nsolverSemanticVersion=s:ortools/cp-sat@1\nbackendCapabilityVersion=s:nurse-scheduling-backend@1\n",
+      "encodedUtf8ByteLength": 457,
+      "basisId": "f49802f56e8cb7dee52aa8219a204c14f9cea90e7fff8d41044df781890f1f06"
+    },
+    {
+      "name": "a boolean-looking STRING must not encode like a boolean",
+      "basis": {
+        "schemaVersion": 2,
+        "submissionContractVersion": "optimize-yaml-v1",
+        "workspaceSchemaVersion": "1",
+        "serializerVersion": "true",
+        "anonymizationMode": "none",
+        "inputSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "normalizedOptions": {
+          "solver": "ortools/cp-sat",
+          "prettify": false,
+          "timeoutSeconds": 300
+        },
+        "solverSemanticVersion": "ortools/cp-sat@1",
+        "backendCapabilityVersion": "nurse-scheduling-backend@1"
+      },
+      "encoded": "optimize-basis/v2\nschemaVersion=i:2\nsubmissionContractVersion=s:optimize-yaml-v1\nworkspaceSchemaVersion=s:1\nserializerVersion=s:true\nanonymizationMode=s:none\ninputSha256=s:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\nnormalizedOptions.solver=s:ortools/cp-sat\nnormalizedOptions.prettify=b:false\nnormalizedOptions.timeoutSeconds=i:300\nsolverSemanticVersion=s:ortools/cp-sat@1\nbackendCapabilityVersion=s:nurse-scheduling-backend@1\n",
+      "encodedUtf8ByteLength": 448,
+      "basisId": "4c983cdbceb7570c6f77dd35f3d4f040753df967f6687a29b289bb1bfdbe4b07"
+    },
+    {
+      "name": "a number-looking STRING must not encode like an integer",
+      "basis": {
+        "schemaVersion": 2,
+        "submissionContractVersion": "optimize-yaml-v1",
+        "workspaceSchemaVersion": "300",
+        "serializerVersion": "canonical-strict-yaml-v1",
+        "anonymizationMode": "none",
+        "inputSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "normalizedOptions": {
+          "solver": "ortools/cp-sat",
+          "prettify": false,
+          "timeoutSeconds": 300
+        },
+        "solverSemanticVersion": "ortools/cp-sat@1",
+        "backendCapabilityVersion": "nurse-scheduling-backend@1"
+      },
+      "encoded": "optimize-basis/v2\nschemaVersion=i:2\nsubmissionContractVersion=s:optimize-yaml-v1\nworkspaceSchemaVersion=s:300\nserializerVersion=s:canonical-strict-yaml-v1\nanonymizationMode=s:none\ninputSha256=s:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\nnormalizedOptions.solver=s:ortools/cp-sat\nnormalizedOptions.prettify=b:false\nnormalizedOptions.timeoutSeconds=i:300\nsolverSemanticVersion=s:ortools/cp-sat@1\nbackendCapabilityVersion=s:nurse-scheduling-backend@1\n",
+      "encodedUtf8ByteLength": 470,
+      "basisId": "f4aa6f9b449bd9921e1683f4b5aeaf7379aaa770ead090eff36df8198d3dc6bf"
+    },
+    {
+      "name": "an equals sign in a value does not create a new field",
+      "basis": {
+        "schemaVersion": 2,
+        "submissionContractVersion": "optimize-yaml-v1",
+        "workspaceSchemaVersion": "1",
+        "serializerVersion": "k=v=w",
+        "anonymizationMode": "none",
+        "inputSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "normalizedOptions": {
+          "solver": "ortools/cp-sat",
+          "prettify": false,
+          "timeoutSeconds": 300
+        },
+        "solverSemanticVersion": "ortools/cp-sat@1",
+        "backendCapabilityVersion": "nurse-scheduling-backend@1"
+      },
+      "encoded": "optimize-basis/v2\nschemaVersion=i:2\nsubmissionContractVersion=s:optimize-yaml-v1\nworkspaceSchemaVersion=s:1\nserializerVersion=s:k=v=w\nanonymizationMode=s:none\ninputSha256=s:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\nnormalizedOptions.solver=s:ortools/cp-sat\nnormalizedOptions.prettify=b:false\nnormalizedOptions.timeoutSeconds=i:300\nsolverSemanticVersion=s:ortools/cp-sat@1\nbackendCapabilityVersion=s:nurse-scheduling-backend@1\n",
+      "encodedUtf8ByteLength": 449,
+      "basisId": "babedb9fdcf2585e3c3fa9d1c24b2cbc4b3743be6d7a9915466e11c7fb62962d"
+    }
+  ],
+  "invalid": [
+    {
+      "name": "schemaVersion other than 2",
+      "basis": {
+        "schemaVersion": 1,
+        "submissionContractVersion": "optimize-yaml-v1",
+        "workspaceSchemaVersion": "1",
+        "serializerVersion": "canonical-strict-yaml-v1",
+        "anonymizationMode": "none",
+        "inputSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "normalizedOptions": {
+          "solver": "ortools/cp-sat",
+          "prettify": false,
+          "timeoutSeconds": 300
+        },
+        "solverSemanticVersion": "ortools/cp-sat@1",
+        "backendCapabilityVersion": "nurse-scheduling-backend@1"
+      }
+    },
+    {
+      "name": "uppercase digest hex is rejected, never normalized",
+      "basis": {
+        "schemaVersion": 2,
+        "submissionContractVersion": "optimize-yaml-v1",
+        "workspaceSchemaVersion": "1",
+        "serializerVersion": "canonical-strict-yaml-v1",
+        "anonymizationMode": "none",
+        "inputSha256": "0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF",
+        "normalizedOptions": {
+          "solver": "ortools/cp-sat",
+          "prettify": false,
+          "timeoutSeconds": 300
+        },
+        "solverSemanticVersion": "ortools/cp-sat@1",
+        "backendCapabilityVersion": "nurse-scheduling-backend@1"
+      }
+    },
+    {
+      "name": "truncated digest",
+      "basis": {
+        "schemaVersion": 2,
+        "submissionContractVersion": "optimize-yaml-v1",
+        "workspaceSchemaVersion": "1",
+        "serializerVersion": "canonical-strict-yaml-v1",
+        "anonymizationMode": "none",
+        "inputSha256": "abc",
+        "normalizedOptions": {
+          "solver": "ortools/cp-sat",
+          "prettify": false,
+          "timeoutSeconds": 300
+        },
+        "solverSemanticVersion": "ortools/cp-sat@1",
+        "backendCapabilityVersion": "nurse-scheduling-backend@1"
+      }
+    },
+    {
+      "name": "zero timeout",
+      "basis": {
+        "schemaVersion": 2,
+        "submissionContractVersion": "optimize-yaml-v1",
+        "workspaceSchemaVersion": "1",
+        "serializerVersion": "canonical-strict-yaml-v1",
+        "anonymizationMode": "none",
+        "inputSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "normalizedOptions": {
+          "solver": "ortools/cp-sat",
+          "prettify": false,
+          "timeoutSeconds": 0
+        },
+        "solverSemanticVersion": "ortools/cp-sat@1",
+        "backendCapabilityVersion": "nurse-scheduling-backend@1"
+      }
+    },
+    {
+      "name": "negative timeout",
+      "basis": {
+        "schemaVersion": 2,
+        "submissionContractVersion": "optimize-yaml-v1",
+        "workspaceSchemaVersion": "1",
+        "serializerVersion": "canonical-strict-yaml-v1",
+        "anonymizationMode": "none",
+        "inputSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "normalizedOptions": {
+          "solver": "ortools/cp-sat",
+          "prettify": false,
+          "timeoutSeconds": -5
+        },
+        "solverSemanticVersion": "ortools/cp-sat@1",
+        "backendCapabilityVersion": "nurse-scheduling-backend@1"
+      }
+    },
+    {
+      "name": "fractional timeout",
+      "basis": {
+        "schemaVersion": 2,
+        "submissionContractVersion": "optimize-yaml-v1",
+        "workspaceSchemaVersion": "1",
+        "serializerVersion": "canonical-strict-yaml-v1",
+        "anonymizationMode": "none",
+        "inputSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "normalizedOptions": {
+          "solver": "ortools/cp-sat",
+          "prettify": false,
+          "timeoutSeconds": 1.5
+        },
+        "solverSemanticVersion": "ortools/cp-sat@1",
+        "backendCapabilityVersion": "nurse-scheduling-backend@1"
+      }
+    },
+    {
+      "name": "boolean supplied as a string",
+      "basis": {
+        "schemaVersion": 2,
+        "submissionContractVersion": "optimize-yaml-v1",
+        "workspaceSchemaVersion": "1",
+        "serializerVersion": "canonical-strict-yaml-v1",
+        "anonymizationMode": "none",
+        "inputSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "normalizedOptions": {
+          "solver": "ortools/cp-sat",
+          "prettify": "true",
+          "timeoutSeconds": 300
+        },
+        "solverSemanticVersion": "ortools/cp-sat@1",
+        "backendCapabilityVersion": "nurse-scheduling-backend@1"
+      }
+    },
+    {
+      "name": "empty required string",
+      "basis": {
+        "schemaVersion": 2,
+        "submissionContractVersion": "optimize-yaml-v1",
+        "workspaceSchemaVersion": "1",
+        "serializerVersion": "",
+        "anonymizationMode": "none",
+        "inputSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "normalizedOptions": {
+          "solver": "ortools/cp-sat",
+          "prettify": false,
+          "timeoutSeconds": 300
+        },
+        "solverSemanticVersion": "ortools/cp-sat@1",
+        "backendCapabilityVersion": "nurse-scheduling-backend@1"
+      }
+    },
+    {
+      "name": "null required string",
+      "basis": {
+        "schemaVersion": 2,
+        "submissionContractVersion": "optimize-yaml-v1",
+        "workspaceSchemaVersion": "1",
+        "serializerVersion": null,
+        "anonymizationMode": "none",
+        "inputSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "normalizedOptions": {
+          "solver": "ortools/cp-sat",
+          "prettify": false,
+          "timeoutSeconds": 300
+        },
+        "solverSemanticVersion": "ortools/cp-sat@1",
+        "backendCapabilityVersion": "nurse-scheduling-backend@1"
+      }
+    },
+    {
+      "name": "unknown anonymization mode",
+      "basis": {
+        "schemaVersion": 2,
+        "submissionContractVersion": "optimize-yaml-v1",
+        "workspaceSchemaVersion": "1",
+        "serializerVersion": "canonical-strict-yaml-v1",
+        "anonymizationMode": "groups",
+        "inputSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "normalizedOptions": {
+          "solver": "ortools/cp-sat",
+          "prettify": false,
+          "timeoutSeconds": 300
+        },
+        "solverSemanticVersion": "ortools/cp-sat@1",
+        "backendCapabilityVersion": "nurse-scheduling-backend@1"
+      }
+    },
+    {
+      "name": "empty solver",
+      "basis": {
+        "schemaVersion": 2,
+        "submissionContractVersion": "optimize-yaml-v1",
+        "workspaceSchemaVersion": "1",
+        "serializerVersion": "canonical-strict-yaml-v1",
+        "anonymizationMode": "none",
+        "inputSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "normalizedOptions": {
+          "solver": "",
+          "prettify": false,
+          "timeoutSeconds": 300
+        },
+        "solverSemanticVersion": "ortools/cp-sat@1",
+        "backendCapabilityVersion": "nurse-scheduling-backend@1"
+      }
+    }
+  ]
+}

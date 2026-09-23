@@ -1,0 +1,36 @@
+id: production-source-text-read-js
+language: JavaScript
+severity: error
+message: >-
+  A literal `.ts`/`.tsx` path was handed to a file-reading API. Reading authored TypeScript
+  as TEXT is the pseudo-parser this migration exists to remove: whatever is done with the
+  bytes afterwards, the claim being built is about source provenance, and it belongs to a
+  production API, a type, an Oxlint restriction, a rendered test, or a declarative ast-grep
+  rule instead.
+note: >-
+  The `JavaScript` twin of `production-source-text-read`, covering `.js`, `.jsx`, `.mjs` and
+  `.cjs`. No such test/support file exists today, so this variant is PREVENTION -- recorded
+  as such rather than presented as covering current files. Like its partners it carries no
+  `ignores` list.
+files:
+  - "**/*.test.*"
+  - "**/*.spec.*"
+  - "**/*.test-d.*"
+  - "e2e/**"
+  - "**/__tests__/**"
+  - "**/support/**"
+  - "**/test-support/**"
+  - "**/test-support.*"
+  - "**/*.test-support.*"
+  - "lib/store/test-authority.ts"
+rule:
+  any:
+    - pattern: $READ($PATH, $$$)
+    - pattern: $READ($PATH)
+constraints:
+  READ:
+    regex: |-
+      ^(readFileSync|readFile|openSync|open|createReadStream|readTextFile)$
+  PATH:
+    regex: |-
+      \.tsx?["']

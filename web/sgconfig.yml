@@ -1,0 +1,31 @@
+# ast-grep configuration (custom-AST ticket 3).
+#
+# WHY THIS TOOL, AND ONLY FOR THIS. Tickets 1 and 2 moved every guarantee that a
+# production API, the TypeScript compiler, an Oxlint rule or a runtime test could
+# express. What is left is a narrow residue: constraints about AUTHORED SOURCE that
+# survive no matter what the code does at runtime -- a hand-written colour literal that
+# renders identically to the token it should have used, a retired identifier, a bypass
+# spelled directly in a component. Rendered output cannot distinguish those, and neither
+# lint rules nor types can see them.
+#
+# ast-grep is a maintained, declarative syntax matcher with its own valid/invalid rule
+# test runner. It is chosen over writing anything ourselves precisely because it CANNOT
+# grow into a semantic engine: it has no symbol table, no alias resolution, no control
+# flow and no type inference, and every rule here is a syntax pattern with a fixture.
+# When a rule starts to need any of those, the answer is to change the production API, not
+# to teach this tool to reason.
+#
+# These rules do not prove arbitrary byte provenance. They reject DECLARED shapes.
+
+ruleDirs:
+  - ast-grep/rules
+
+# Global utility rules. A util is a named rule fragment that other rules reference with
+# `matches:`. The surface class vocabulary lives here so the fail-closed allowlist is
+# defined ONCE and shared by every rule that governs a surface class channel -- a rule
+# that copied the vocabulary could drift from its twin, a rule that references it cannot.
+utilDirs:
+  - ast-grep/utils
+
+testConfigs:
+  - testDir: ast-grep/tests

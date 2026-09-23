@@ -6,6 +6,7 @@
 // the one dumped — there is no unchecked second serialization path.
 
 import { stringify } from "yaml";
+import { generateDateItems } from "@/lib/dates/date-id";
 import { currentAppVersion } from "./app-version";
 import { toCanonicalScenarioDocument } from "./canonical";
 import { producerScenarioSchema } from "./schemas/producer";
@@ -13,6 +14,7 @@ import {
   PREFERENCE_TYPE,
   RESERVED_SHIFT_TYPE,
   type CanonicalScenarioDocument,
+  type DateRef,
   type ScenarioUiState,
 } from "./types";
 import type { z } from "zod";
@@ -49,7 +51,7 @@ function toIssues(error: z.ZodError): ScenarioValidationIssue[] {
 }
 
 /**
- * Apply the two canonicalizations the producer requires (tech-plan §4), returning
+ * Apply the canonicalizations the producer requires (tech-plan §4), returning
  * a NEW document (never mutating the input):
  *   1. omit zero rest — `restMinutes: 0` is dropped (absence is the only persisted
  *      zero-rest form, mirroring `models.ShiftType` which canonicalizes 0 → None);
@@ -64,11 +66,14 @@ function toIssues(error: z.ZodError): ScenarioValidationIssue[] {
  *      expands to every day but `[]` parses to none. Dropping an empty array
  *      makes a load→save round-trip preserve "all dates" instead of silently
  *      flipping it to "no dates".
+ *   4. span-id date refs → canonical full ISO — the exact inverse of the import
+ *      boundary's `buildDateRefNormalizer`. See `deSpanDateRefs`.
  */
 export function canonicalizeScenarioDocument(
   doc: CanonicalScenarioDocument,
 ): CanonicalScenarioDocument {
   const clone = structuredClone(doc);
+  deSpanDateRefs(clone);
   for (const shiftType of clone.shiftTypes.items) {
     if (shiftType.restMinutes === 0) delete shiftType.restMinutes;
   }
@@ -88,6 +93,47 @@ export function canonicalizeScenarioDocument(
     }
   }
   return clone;
+}
+
+/**
+ * Expand the two SPAN-ID surfaces back to the backend's canonical date reference.
+ *
+ * The backend keys `map_did_d` by the full ISO `YYYY-MM-DD` (`scheduler.py`) and
+ * accepts `D` / `MM-DD` only as shorthands. The UI instead keys the person×date
+ * matrix (`reqData` → shift-request preferences) and date-group members by the
+ * span-formatted id `generateDateItems` derives from the range — `DD` within one
+ * month, `MM-DD` within one year, ISO across years — and the import boundary
+ * re-keys inbound ISO refs onto that form (`buildDateRefNormalizer`). Without the
+ * inverse here the producer emits the UI's internal id, so what crosses the
+ * boundary is a range-span-dependent shorthand rather than the canonical date,
+ * and an import → export round trip is not identity.
+ *
+ * Mirrors the import normalizer exactly, so the pair composes to identity:
+ * only an id that `generateDateItems` actually produced for this range is
+ * expanded. Group ids, keywords (`WEEKEND`), range literals (`01~15`), refs that
+ * are already full ISO, and non-string refs all pass through verbatim — a bad ref
+ * stays reportable by preflight instead of being folded onto a real day.
+ *
+ * Preference CARDS are deliberately untouched: they store full ISO by design and
+ * are not re-keyed on import either.
+ */
+function deSpanDateRefs(doc: CanonicalScenarioDocument): void {
+  const isoBySpanId = new Map(
+    generateDateItems({ start: doc.dates.range.startDate, end: doc.dates.range.endDate }).map(
+      (item) => [item.id, item.iso],
+    ),
+  );
+  if (isoBySpanId.size === 0) return;
+  const expand = (ref: DateRef): DateRef =>
+    typeof ref === "string" ? (isoBySpanId.get(ref) ?? ref) : ref;
+
+  for (const group of doc.dates.groups ?? []) {
+    group.members = group.members.map(expand);
+  }
+  for (const pref of doc.preferences) {
+    if (pref.type !== PREFERENCE_TYPE.shiftRequest) continue;
+    pref.date = Array.isArray(pref.date) ? pref.date.map(expand) : expand(pref.date);
+  }
 }
 
 /**

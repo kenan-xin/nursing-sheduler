@@ -6,7 +6,8 @@
 // Coefficients cell when the card has any), and the labelled Disable/Enable ·
 // Edit · Duplicate · Delete action row. A contracted-hours card
 // (`tag: "contracted_hours"`, M2's marker — not authored by this ticket) renders
-// the `◆ Contracted hours` badge and a brand left border; an unmarked
+// the `◆ Contracted hours` badge and the shared `selected` card role (a `--brand`
+// border + `--sh-2`, replacing the old hand-drawn 3px left rule); an unmarked
 // generic-array card (FR-PR-55a) renders an `Advanced (list)` badge. Neither is
 // editable in this scalar form — Edit is omitted and a short "read-only" note
 // explains why, so a click can never silently corrupt a shape this module
@@ -15,13 +16,12 @@
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Surface } from "@/components/ui/surface";
 import {
   FaPowerOff,
   FaPen,
   FaCopy,
   FaTrash,
-  FaChevronUp,
-  FaChevronDown,
   FaArrowRightArrowLeft,
   FaTriangleExclamation,
 } from "@/components/icons";
@@ -30,6 +30,7 @@ import type { CountCard } from "@/lib/scenario";
 import {
   CardActionButton,
   CardListItem,
+  CardMoveActions,
   type DropPosition,
 } from "@/components/card-editor/card-editor-shell";
 import {
@@ -51,7 +52,6 @@ interface CountCardListProps {
   onEdit: (uid: string) => void;
   onDuplicate: (uid: string) => void;
   onDelete: (uid: string) => void;
-  onMove: (uid: string, direction: -1 | 1) => void;
   onSetDisabled: (uid: string, value: boolean) => void;
   /** Primary DnD reorder (the shared card-list reorder interaction). `position` is
    *  the pointer half of the drop target (insert before/after — FR-PR-12). */
@@ -95,29 +95,32 @@ function ConvertToGenericConfirm({
     ? "This becomes an editable Shift Count."
     : "This becomes an advanced (list) rule, editable via Save & Load (YAML).";
   return (
-    <div
-      className="mt-3 border border-line2 bg-panel p-3.5"
+    // An inline confirm inside a card, so it is an inset well rather than a second
+    // bordered box on the same tone. `h-9 px-4` is gone: 9 spacing steps is
+    // 9 x 3.6px = 32.4px at the baked 0.9 baseline, an off-token height that the
+    // repaired tailwind-merge now actually applies over the variant's `h-control`.
+    // `size="sm"` is the canonical 32px control token.
+    <Surface
+      level="well"
+      geometry="control"
+      className="mt-3 p-3.5"
       data-testid={`count-convert-generic-confirm-${index}`}
     >
       <p className="mb-2.5 text-meta text-ink2">Remove the contracted-hours marker? {preview}</p>
       <div className="flex flex-wrap items-center gap-2.5">
-        <Button
-          className="h-9 px-4"
-          data-testid={`count-convert-generic-commit-${index}`}
-          onClick={onConfirm}
-        >
+        <Button size="sm" data-testid={`count-convert-generic-commit-${index}`} onClick={onConfirm}>
           Convert to generic
         </Button>
         <Button
           variant="outline"
-          className="h-9 px-4"
+          size="sm"
           data-testid={`count-convert-generic-cancel-${index}`}
           onClick={onCancel}
         >
           Cancel
         </Button>
       </div>
-    </div>
+    </Surface>
   );
 }
 
@@ -141,7 +144,7 @@ function CoefficientChips({ card }: { card: CountCard }) {
       {coefficients.map(([id, value]) => (
         <span
           key={id}
-          className="border border-line2 bg-panel px-2 py-0.5 font-mono text-label font-semibold text-ink"
+          className="rounded-chip border border-line2 bg-panel px-2 py-0.5 font-mono text-label font-semibold text-ink"
         >
           {id} · {contracted && typeof value === "number" ? formatHalfHours(value) : value}
         </span>
@@ -155,7 +158,6 @@ export function CountCardList({
   onEdit,
   onDuplicate,
   onDelete,
-  onMove,
   onSetDisabled,
   onReorder,
   onConvertToContracted,
@@ -166,7 +168,7 @@ export function CountCardList({
   leaveGuardUids,
 }: CountCardListProps) {
   // HTML5 DnD state for the shared card-list reorder (the primary control; the
-  // keyboard Up/Down buttons below are the accessibility supplement).
+  // shared Up/Down buttons below are its keyboard path).
   const [dragUid, setDragUid] = useState<string | null>(null);
   const [overUid, setOverUid] = useState<string | null>(null);
 
@@ -313,22 +315,13 @@ export function CountCardList({
                 >
                   Delete
                 </CardActionButton>
-                <CardActionButton
-                  icon={<FaChevronUp className="size-3" />}
-                  onClick={() => onMove(card.uid, -1)}
-                  testId={`count-up-${index}`}
-                  ariaLabel="Move shift count up"
-                >
-                  Up
-                </CardActionButton>
-                <CardActionButton
-                  icon={<FaChevronDown className="size-3" />}
-                  onClick={() => onMove(card.uid, 1)}
-                  testId={`count-down-${index}`}
-                  ariaLabel="Move shift count down"
-                >
-                  Down
-                </CardActionButton>
+                <CardMoveActions
+                  cards={counts}
+                  index={index}
+                  onReorder={onReorder}
+                  testIdPrefix="count"
+                  subject="shift count"
+                />
               </>
             }
             footer={

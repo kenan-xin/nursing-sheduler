@@ -1,0 +1,40 @@
+id: surface-module-acquisition-tsx
+snapshots:
+  ? |
+    const req = createRequire(import.meta.url);
+    const UI = req("@/components/ui/surface");
+  : labels:
+      - source: req("@/components/ui/surface")
+        style: primary
+        start: 55
+        end: 85
+  ? |
+    const surface = await import("@/components/ui/surface");
+  : labels:
+      - source: import("@/components/ui/surface")
+        style: primary
+        start: 22
+        end: 55
+  ? |
+    const { Surface } = await import("@/components/ui/surface");
+  : labels:
+      - source: import("@/components/ui/surface")
+        style: primary
+        start: 26
+        end: 59
+  ? |
+    import * as UI from "@/components/ui/surface";
+    const Box = UI["Surface"];
+  : labels:
+      - source: import * as UI from "@/components/ui/surface";
+        style: primary
+        start: 0
+        end: 46
+      - source: "* as UI"
+        style: secondary
+        start: 7
+        end: 14
+      - source: '"@/components/ui/surface"'
+        style: secondary
+        start: 20
+        end: 45

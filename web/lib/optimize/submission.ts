@@ -55,7 +55,7 @@ function submitErrorFields(error: unknown): { code: string | null; message: stri
     return { code: error.info.code ?? error.info.kind, message: error.message };
   }
   if (error instanceof Error) return { code: null, message: error.message };
-  return { code: null, message: "Optimize submission failed." };
+  return { code: null, message: "Optimise submission failed." };
 }
 
 // ---------------------------------------------------------------------------
@@ -66,8 +66,9 @@ function submitErrorFields(error: unknown): { code: string | null; message: stri
  * Translate a completed T16q submission transaction into the ordered run signals
  * the reducer applies. `activated`, `activation-persistence-failed`, and
  * `activation-unverified` all yield a live `job-activated` (a job exists) but differ
- * on whether reload recovery is available. The definite-rejection / ambiguous /
- * blocked branches never produce a job id.
+ * on how much durable state stands behind it. The definite-rejection / ambiguous /
+ * blocked branches never produce a job id, and `activation-retired` produces
+ * nothing at all.
  */
 export function outcomeToSignals(outcome: SubmissionTransactionOutcome): RunSignal[] {
   switch (outcome.status) {
@@ -87,29 +88,27 @@ export function outcomeToSignals(outcome: SubmissionTransactionOutcome): RunSign
     }
 
     case "activated":
-      return [
-        { type: "job-activated", jobId: outcome.record.jobId, reloadRecoveryAvailable: true },
-      ];
+      return [{ type: "job-activated", jobId: outcome.record.jobId }];
 
     case "activation-persistence-failed":
       return [
         {
           type: "job-activated",
           jobId: outcome.volatile.jobId,
-          reloadRecoveryAvailable: false,
           reason: "activation-persistence-failed",
         },
       ];
 
     case "activation-unverified":
-      return [
-        {
-          type: "job-activated",
-          jobId: outcome.volatile.jobId,
-          reloadRecoveryAvailable: false,
-          reason: outcome.reason,
-        },
-      ];
+      return [{ type: "job-activated", jobId: outcome.volatile.jobId, reason: outcome.reason }];
+
+    // NO SIGNALS. The record this transaction staged was removed while the POST
+    // was in flight, which only a retirement does — so there is no visit for a
+    // job to be activated into. The controller returns before reaching here in
+    // production; the empty list is what makes that non-negotiable rather than a
+    // property of call order.
+    case "activation-retired":
+      return [];
   }
 }
 
@@ -117,17 +116,17 @@ export function outcomeToSignals(outcome: SubmissionTransactionOutcome): RunSign
 function blockedMessage(reason: string): string {
   switch (reason) {
     case "session-conflict":
-      return "Another optimize run is already staged in this browser session. Discard it before starting a new run.";
+      return "Another optimise run is already staged in this browser session. Discard it before starting a new run.";
     case "storage-unavailable":
       return "Browser session storage is unavailable, so this run cannot be safely recovered.";
     case "quota-exceeded":
       return "Browser session storage is full, so this run cannot be safely recovered.";
     case "invalid-record":
-      return "The optimize run could not be prepared for recovery.";
+      return "The optimise run could not be prepared for recovery.";
     case "read-back-failed":
-      return "The optimize run could not be durably staged before submission.";
+      return "The optimise run could not be durably staged before submission.";
     default:
-      return "The optimize run could not be started.";
+      return "The optimise run could not be started.";
   }
 }
 
@@ -446,7 +445,7 @@ export function buildStreamCallbacks(
     onError: (error) =>
       dispatch({
         type: "stream-error",
-        message: error instanceof Error ? error.message : "Optimization stream disconnected.",
+        message: error instanceof Error ? error.message : "Optimisation stream disconnected.",
       }),
   };
 }

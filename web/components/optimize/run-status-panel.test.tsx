@@ -2,7 +2,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { INITIAL_OPTIMIZE_RUN_VIEW, type CleanupPhase, type OptimizeRunView } from "@/lib/optimize";
+import { INITIAL_OPTIMIZE_RUN_VIEW, type OptimizeRunView } from "@/lib/optimize";
+import { judgeVolatileJobIdTexts, VOLATILE_JOB_ID_SELECTOR } from "@/e2e/support/optimize-durable";
 import { RunStatusPanel, type RunStatusPanelProps } from "./run-status-panel";
 
 // GuardedLink (the infeasible "Adjust rules" CTA) reads the Next router; a lightweight
@@ -17,13 +18,21 @@ afterEach(() => cleanup());
 const handlers = {
   onCancel: vi.fn(),
   onFinishNow: vi.fn(),
-  onResubmit: vi.fn(),
-  onDismiss: vi.fn(),
   onDownloadArtifact: vi.fn(),
   onDownloadAgain: vi.fn(),
-  onRetryCleanup: vi.fn(),
-  onAbandonCleanup: vi.fn(),
 };
+
+/**
+ * The rendered job-id LINE, located through the ownership hook on its value.
+ *
+ * The hook sits on the id VALUE, so the line is one element with a nested <span>
+ * and `getByText("Job ID: opt_1")` no longer matches it — that query compares an
+ * element's own direct text nodes. Reading `textContent` off the line instead is
+ * what keeps the COPY assertions byte-exact across that structural change.
+ */
+function jobIdLine(): HTMLElement | null {
+  return document.querySelector(VOLATILE_JOB_ID_SELECTOR)?.closest("p") ?? null;
+}
 
 function view(over: Partial<OptimizeRunView>): OptimizeRunView {
   return { ...INITIAL_OPTIMIZE_RUN_VIEW, ...over };
@@ -33,7 +42,6 @@ function setup(v: OptimizeRunView, over: Partial<RunStatusPanelProps> = {}) {
   const props: RunStatusPanelProps = {
     view: v,
     submitting: false,
-    cleanupPhase: "idle" as CleanupPhase,
     canDownloadAgain: false,
     downloadAgainFilename: null,
     ...handlers,
@@ -78,7 +86,40 @@ describe("RunStatusPanel — status and score", () => {
     setup(view({ lifecycle: "queued", jobId: "opt_1", queuePosition: 3, latestScore: 12 }));
     expect(screen.getByTestId("optimize-status")).toHaveTextContent("Queued, position 3");
     expect(screen.getByTestId("optimize-score")).toHaveTextContent("12");
-    expect(screen.getByText("Job ID: opt_1")).toBeInTheDocument();
+    expect(jobIdLine()?.textContent).toBe("Job ID: opt_1");
+  });
+
+  // THE OWNERSHIP HOOK. The assembled gate's fail-closed cleanup recovers a live job
+  // id through this exact selector when the durable session record stayed provisional
+  // (`activation-persistence-failed`), so the selector and this markup are one
+  // contract. Pinning them together here means a drift is a red unit test in seconds
+  // rather than a silent "no job id to recover" inside the Compose gate. The read is
+  // driven through the real judge, so the DOM is proved to satisfy the same total
+  // function the gate runs — not merely to contain a matching node.
+  it("exposes the live job id through the stable ownership hook, value only", () => {
+    setup(view({ lifecycle: "running", jobId: "opt_1" }));
+    const nodes = Array.from(document.querySelectorAll(VOLATILE_JOB_ID_SELECTOR));
+    expect(nodes).toHaveLength(1);
+    // The hook is on the VALUE: no label prose inside it, so the judge accepts it.
+    expect(nodes[0].textContent).toBe("opt_1");
+    expect(judgeVolatileJobIdTexts(nodes.map((node) => node.textContent))).toEqual({
+      ok: true,
+      ids: ["opt_1"],
+    });
+    // ...and the user-visible copy is byte-identical to what it was before the hook.
+    expect(jobIdLine()?.textContent).toBe("Job ID: opt_1");
+  });
+
+  // ABSENCE must stay absence: no hook when there is no job, so recovery reports an
+  // empty set and settlement fails closed on cardinality rather than inventing an id.
+  it("renders no ownership hook while the run has no job id", () => {
+    setup(view({ lifecycle: "submitting", jobId: null }));
+    const nodes = Array.from(document.querySelectorAll(VOLATILE_JOB_ID_SELECTOR));
+    expect(nodes).toHaveLength(0);
+    expect(judgeVolatileJobIdTexts(nodes.map((node) => node.textContent))).toEqual({
+      ok: true,
+      ids: [],
+    });
   });
 });
 
@@ -124,7 +165,7 @@ describe("RunStatusPanel — terminal outcomes", () => {
       { canDownloadAgain: true, downloadAgainFilename: "schedule.xlsx" },
     );
     expect(screen.getByTestId("optimize-completed-artifact")).toHaveTextContent(
-      "Schedule optimized and downloaded successfully!",
+      "Schedule optimised and downloaded successfully!",
     );
     expect(screen.getByTestId("optimize-download-again")).toHaveTextContent("schedule.xlsx");
   });
@@ -184,8 +225,8 @@ describe("RunStatusPanel — terminal outcomes", () => {
     expect(props.onDownloadArtifact).toHaveBeenCalled();
   });
 
-  it("infeasible: dedicated panel with heading, verdict label, and Adjust rules + Try again", async () => {
-    const props = setup(
+  it("infeasible: dedicated panel with heading, verdict label, and Adjust rules only", () => {
+    setup(
       view({
         lifecycle: "completed",
         jobId: "opt_1",
@@ -207,98 +248,165 @@ describe("RunStatusPanel — terminal outcomes", () => {
     const adjust = screen.getByTestId("optimize-adjust-rules");
     expect(adjust).toHaveAttribute("href", "/rules");
     expect(adjust).toHaveTextContent("Adjust rules");
-    // Try again drives the run-start path.
-    const tryAgain = screen.getByTestId("optimize-try-again");
-    await userEvent.click(tryAgain);
-    expect(props.onResubmit).toHaveBeenCalled();
+    // NO `Try again`. On an infeasible result it was the least useful button on
+    // the screen — the solver proved no roster satisfies the rules, so re-running
+    // the same scenario proves it again. `Adjust rules` is the actionable move,
+    // and the exact `Optimize` action is the way back.
+    expect(screen.queryByTestId("optimize-try-again")).not.toBeInTheDocument();
   });
 
-  it("row 3: worker-lost failure shows the error and Resubmit", async () => {
-    const props = setup(
+  // G6.2a RETIRED THE TERMINAL ACTIONS. `Resubmit` / `Try again`, `Dismiss` and the
+  // cleanup `Retry` all existed to serve the single-slot design: a terminal run
+  // OCCUPIED the one session record, so the user needed a way to release it, and a
+  // second run had to wait for that release. Records are owner-keyed now, nothing
+  // occupies anything, and a second run is simply the exact `Optimize` action.
+  //
+  // Enumerated one test id at a time rather than as a group, so bringing any single
+  // one back fails here.
+  it.each([
+    [
+      "worker-lost",
       view({
         lifecycle: "failed",
         jobId: "opt_1",
         error: { source: "job", code: "worker_lost", message: "Worker lost." },
-        resubmittable: true,
       }),
-    );
-    expect(screen.getByTestId("optimize-terminal-error")).toHaveTextContent("Worker lost.");
-    const resubmit = screen.getByTestId("optimize-resubmit");
-    expect(resubmit).toHaveTextContent("Resubmit");
-    await userEvent.click(resubmit);
-    expect(props.onResubmit).toHaveBeenCalled();
-  });
-
-  it("row 3: a cancelled run offers Dismiss (release) but no Resubmit", async () => {
-    const props = setup(
+      "Worker lost.",
+    ],
+    [
+      "cancelled",
       view({
         lifecycle: "cancelled",
         jobId: "opt_1",
-        error: { source: "job", code: "cancelled", message: "Optimization cancelled." },
-        resubmittable: false,
+        error: { source: "job", code: "cancelled", message: "Optimisation cancelled." },
       }),
-    );
-    // Cancel always settles Cancelled (never routed to Failed) — heading present.
-    expect(screen.getByRole("heading")).toHaveTextContent("Run cancelled");
-    expect(screen.getByTestId("optimize-terminal-error")).toHaveTextContent(
-      "Optimization cancelled.",
-    );
-    expect(screen.queryByTestId("optimize-resubmit")).not.toBeInTheDocument();
-    await userEvent.click(screen.getByTestId("optimize-dismiss"));
-    expect(props.onDismiss).toHaveBeenCalled();
-  });
-
-  it("row 3: a non-resubmittable process_timeout failure still has a Dismiss release path", () => {
-    setup(
+      "Optimisation cancelled.",
+    ],
+    [
+      "process_timeout",
       view({
         lifecycle: "failed",
         jobId: "opt_1",
         error: { source: "job", code: "process_timeout", message: "Solver process timed out." },
-        resubmittable: false,
       }),
-    );
-    expect(screen.getByTestId("optimize-terminal-error")).toHaveTextContent(
       "Solver process timed out.",
-    );
-    expect(screen.getByTestId("optimize-dismiss")).toBeInTheDocument();
-    expect(screen.queryByTestId("optimize-resubmit")).not.toBeInTheDocument();
-  });
-
-  it("row 3: worker_lost offers BOTH Resubmit and Dismiss", () => {
-    setup(
-      view({
-        lifecycle: "failed",
-        jobId: "opt_1",
-        error: { source: "job", code: "worker_lost", message: "Worker lost." },
-        resubmittable: true,
-      }),
-    );
-    expect(screen.getByTestId("optimize-resubmit")).toHaveTextContent("Resubmit");
-    expect(screen.getByTestId("optimize-dismiss")).toBeInTheDocument();
+    ],
+  ])("row 3: a %s run reports honestly and offers nothing to press", (_label, runView, message) => {
+    setup(runView);
+    // The report survives — what is gone is asking the user to act on it.
+    expect(screen.getByTestId("optimize-terminal-error")).toHaveTextContent(message);
+    for (const retired of [
+      "optimize-resubmit",
+      "optimize-dismiss",
+      "optimize-try-again",
+      "optimize-cleanup-retry",
+      "optimize-cleanup-abandon",
+    ]) {
+      expect(screen.queryByTestId(retired), retired).not.toBeInTheDocument();
+    }
   });
 });
 
-describe("RunStatusPanel — cleanup retry/abandon", () => {
-  it("offers retry and abandon on a failed cleanup without hiding the success view", async () => {
-    const props = setup(
+describe("RunStatusPanel — no cleanup surface at all", () => {
+  it("a completed run shows its result and never a tidying-up notice", () => {
+    setup(
       view({
         lifecycle: "completed",
         jobId: "opt_1",
         download: { status: "downloaded", artifactAvailable: true, filename: "schedule.xlsx" },
       }),
-      { cleanupPhase: "failed", canDownloadAgain: true, downloadAgainFilename: "schedule.xlsx" },
+      { canDownloadAgain: true, downloadAgainFilename: "schedule.xlsx" },
     );
-    // The successful terminal view is preserved alongside the cleanup failure.
+    // The successful terminal view is intact.
     expect(screen.getByTestId("optimize-download-again")).toBeInTheDocument();
-    await userEvent.click(screen.getByTestId("optimize-cleanup-retry"));
-    expect(props.onRetryCleanup).toHaveBeenCalled();
-    await userEvent.click(screen.getByTestId("optimize-cleanup-abandon"));
-    expect(props.onAbandonCleanup).toHaveBeenCalled();
+    // And cleanup is invisible: it cannot stand in a new run's way, so there is
+    // nothing here for a user to decide.
+    expect(screen.queryByTestId("optimize-cleanup-failed")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("optimize-cleanup-retry")).not.toBeInTheDocument();
+  });
+});
+
+describe("RunStatusPanel — G4 Open & adjust roster CTA", () => {
+  // G4 closure: the prototype's `Open & adjust roster` CTA appears inside the
+  // completed artifact block ONLY when `loadableRoster` is true. Every other
+  // terminal outcome must stay silent — idle, running, failed,
+  // infeasible-without-incumbent, dismissed — so the panel cannot claim a
+  // roster exists for a non-loadable run.
+
+  const completedWithArtifact = view({
+    lifecycle: "completed",
+    jobId: "opt_1",
+    result: { outcome: "optimal", score: 42, solverStatus: "OPTIMAL", terminationReason: null },
+    latestScore: 42,
+    download: { status: "downloaded", artifactAvailable: true, filename: "schedule.xlsx" },
   });
 
-  it("notes an abandoned cleanup", () => {
-    setup(view({ lifecycle: "completed", jobId: "opt_1" }), { cleanupPhase: "abandoned" });
-    expect(screen.getByTestId("optimize-cleanup-abandoned")).toBeInTheDocument();
+  it("renders the CTA with calendar-check icon when loadableRoster is true", () => {
+    setup(completedWithArtifact, { loadableRoster: true });
+    const cta = screen.getByTestId("optimize-open-roster");
+    expect(cta).toHaveAttribute("href", "/roster");
+    expect(cta).toHaveTextContent("Open & adjust roster");
+  });
+
+  it("omits the CTA on a completed run that has no loadable roster", () => {
+    setup(completedWithArtifact, { loadableRoster: false });
+    expect(screen.queryByTestId("optimize-open-roster")).not.toBeInTheDocument();
+    // The success download affordance remains intact — the "downloaded"
+    // status still surfaces the success callout.
+    expect(screen.getByTestId("optimize-completed-artifact")).toHaveTextContent(
+      "Schedule optimised and downloaded successfully!",
+    );
+  });
+
+  it("omits the CTA by default (the prop is opt-in)", () => {
+    setup(completedWithArtifact);
+    expect(screen.queryByTestId("optimize-open-roster")).not.toBeInTheDocument();
+  });
+
+  it("never renders the CTA for a non-completed lifecycle", () => {
+    for (const lifecycle of [
+      "idle",
+      "queued",
+      "running",
+      "cancelling",
+      "cancelled",
+      "failed",
+    ] as const) {
+      setup(
+        view({
+          lifecycle,
+          jobId: lifecycle === "idle" ? null : "opt_1",
+          // artifactAvailable is irrelevant — the CTA must not render unless
+          // lifecycle is "completed".
+          download: { status: "downloaded", artifactAvailable: true, filename: null },
+        }),
+        { loadableRoster: true },
+      );
+      expect(
+        screen.queryByTestId("optimize-open-roster"),
+        `CTA rendered for lifecycle=${lifecycle}`,
+      ).not.toBeInTheDocument();
+      cleanup();
+    }
+  });
+
+  it("never renders the CTA on a completed run with no downloadable artifact", () => {
+    setup(
+      view({
+        lifecycle: "completed",
+        jobId: "opt_1",
+        result: {
+          outcome: "infeasible",
+          score: null,
+          solverStatus: "INFEASIBLE",
+          terminationReason: "infeasibility_proven",
+        },
+        download: { status: "unavailable", artifactAvailable: false, filename: null },
+      }),
+      { loadableRoster: true },
+    );
+    // The infeasible panel owns the success view; the CTA must not appear.
+    expect(screen.queryByTestId("optimize-open-roster")).not.toBeInTheDocument();
   });
 });
 

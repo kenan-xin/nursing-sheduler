@@ -1,0 +1,41 @@
+id: surface-module-acquisition
+valid:
+  # The canonical static import -- the form every production consumer uses.
+  - |
+    import { Surface, surfaceVariants } from "@/components/ui/surface";
+  # A type-only static import of the authority's types.
+  - |
+    import type { SurfaceEmphasis } from "@/components/ui/surface";
+  # A dynamic import of an unrelated module.
+  - |
+    const mod = await import("@/lib/ai/protocol");
+  # A dynamic import of a different ui module.
+  - |
+    const Button = (await import("@/components/ui/button")).Button;
+  # A namespace import of a module that is NOT the surface authority.
+  - |
+    import * as Buttons from "@/components/ui/button";
+  # A `createRequire` handle used for an unrelated module.
+  - |
+    const req = createRequire(import.meta.url);
+    const wb = req("exceljs");
+invalid:
+  - |
+    const surface = await import("@/components/ui/surface");
+  - |
+    const surface = require("@/components/ui/surface");
+  - |
+    const { Surface } = await import("@/components/ui/surface");
+  # ---------------------------------------------------------------------------
+  # BOUNDED REVIEW ROUND 1. Both of these passed the previous rule.
+  # ---------------------------------------------------------------------------
+  # The ACTUAL Node acquisition shape: `createRequire` returns a require function
+  # bound to a LOCAL name, which the old callee-name constraint let through.
+  - |
+    const req = createRequire(import.meta.url);
+    const UI = req("@/components/ui/surface");
+  # A namespace import is refused, so the `UI["Surface"]` computed member access an
+  # explicit old analyzer fixture used has no namespace binding to index.
+  - |
+    import * as UI from "@/components/ui/surface";
+    const Box = UI["Surface"];

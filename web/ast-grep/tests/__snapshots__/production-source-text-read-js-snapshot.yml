@@ -1,0 +1,16 @@
+id: production-source-text-read-js
+snapshots:
+  ? |
+    const source = readFileSync(join(ROOT, "components/ui/surface.tsx"), "utf8");
+  : labels:
+      - source: readFileSync(join(ROOT, "components/ui/surface.tsx"), "utf8")
+        style: primary
+        start: 15
+        end: 76
+  ? |
+    const text = readFileSync("lib/store/authority.ts", "utf8");
+  : labels:
+      - source: readFileSync("lib/store/authority.ts", "utf8")
+        style: primary
+        start: 13
+        end: 59

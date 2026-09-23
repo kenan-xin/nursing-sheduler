@@ -1,7 +1,7 @@
 [project]
 name = "nurse-scheduling"
 version = "0.0.0"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 
 [tool.pytest.ini_options]
 # Scope discovery to the test tree so runnable tools under core/scripts (for
@@ -12,6 +12,18 @@ testpaths = ["tests"]
 [tool.ruff]
 target-version = "py312"
 line-length = 120
+
+[tool.ruff.lint]
+# Explicit lint selection — do NOT rely on Ruff's defaults. Defaults widen
+# between releases (e.g. 0.15.x → 0.16.x added I/UP/B/SIM/RUF/PIE/BLE/TRY/LOG
+# to the default set), which would silently turn a fresh `pip install -r
+# core/requirements.txt` into a red gate. This is the same default selection
+# Ruff 0.15.x shipped with (`E4`, `E7`, `E9`, `F` — pycodestyle errors
+# excluding E501 line-too-long, plus pyflakes) and matches what the
+# project's existing code has been reviewed against; line length is
+# governed by `tool.ruff.line-length` above. The matching version pin lives
+# in core/requirements.txt.
+select = ["E4", "E7", "E9", "F"]
 
 [tool.ruff.format]
 quote-style = "double"

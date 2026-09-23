@@ -1,0 +1,29 @@
+id: assistant-scenario-table-authorship-tsx
+valid:
+  # Reading the scenario authority's tables is the whole point of the allowance.
+  - |
+    const envelope = await db.scenarioEnvelopes.get(scenarioId);
+  - |
+    const lease = await this.db.writerLeases.get(scenarioId);
+  # The assistant's OWN tables are not on the list.
+  - |
+    await db.assistantMessages.put(record);
+  - |
+    await db.diagnosticSearches.put(search);
+  - |
+    await db.assistantClearOperations.put(operation);
+  # And the durable path it is supposed to use.
+  - |
+    await assistantProposalCommands.apply({ proposalId, receiptId });
+invalid:
+  - |
+    await db.scenarioEnvelopes.put(envelope);
+  - |
+    await this.db.writerLeases.update(scenarioId, { epoch });
+  - |
+    await db.optimizeBases.delete(basisId);
+  # BOUNDED-REVIEW ROUND 1.
+  - |
+    await db.keyval.put({ key: "scenario", value });
+  - |
+    await db.repositoryMeta.put({ key: "migration", value });

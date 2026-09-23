@@ -1,0 +1,11 @@
+id: production-source-text-read-js
+valid:
+  - |
+    const css = readFileSync(join(ROOT, "app/globals.css"), "utf8");
+  - |
+    const entries = readdirSync(join(ROOT, "components"));
+invalid:
+  - |
+    const source = readFileSync(join(ROOT, "components/ui/surface.tsx"), "utf8");
+  - |
+    const text = readFileSync("lib/store/authority.ts", "utf8");

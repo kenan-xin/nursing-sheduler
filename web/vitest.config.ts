@@ -16,6 +16,22 @@ export default defineConfig({
     environment: "node",
     setupFiles: ["./vitest.setup.ts"],
     include: ["**/*.{test,spec}.{ts,tsx}"],
-    exclude: ["node_modules", ".next", "e2e"],
+    // Playwright specs are excluded by FILENAME rather than by directory (F4).
+    // The e2e directory is no longer wholly off-limits to vitest: the shared
+    // support modules under `e2e/support/` carry the frozen surface matrix, the
+    // owner selector and the pure half of the runtime scanners, and those are
+    // ordinary node code whose focused unit tests belong beside them. Every
+    // browser suite is a `*.spec.ts`, so the two never collide.
+    exclude: ["node_modules/**", ".next/**", "e2e/**/*.spec.ts"],
+    server: {
+      deps: {
+        // `@copilotkit/react-core/v2` imports its own stylesheet from inside the
+        // package (`dist/v2/index.mjs` -> `./index.css`). Externalized, that reaches
+        // Node's ESM loader, which cannot load `.css`; inlined, Vite transforms the
+        // module and handles the import. Without this the assistant's component
+        // suite cannot import the library at all.
+        inline: [/@copilotkit\/react-core/],
+      },
+    },
   },
 });

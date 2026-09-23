@@ -78,7 +78,7 @@ export async function runOptimizeEventLoop(deps: OptimizeEventLoopDeps): Promise
   const recover = async (): Promise<"stop" | "reconnect"> => {
     try {
       const job = parseJobResponse(await deps.pollJob());
-      if (job === null) throw new Error("Optimize recovery returned an invalid JobResponse.");
+      if (job === null) throw new Error("Optimise recovery returned an invalid JobResponse.");
       if (job.terminal) {
         deps.onTerminalProof?.({ job });
         if (deps.isCancelled()) return "stop";
@@ -106,13 +106,13 @@ export async function runOptimizeEventLoop(deps: OptimizeEventLoopDeps): Promise
     try {
       const outcome = await deps.connect(async (frame) => {
         const canApply = deps.canApplyFrame?.() ?? !deps.isCancelled();
-        if (!canApply) throw new Error("Optimize event application was cancelled.");
+        if (!canApply) throw new Error("Optimise event application was cancelled.");
         // `onFrame` writes the cache, reconciles, and runs consumer callbacks; it
         // may throw/reject. Count progress only AFTER it succeeds so a persistently
         // failing frame cannot keep resetting the reconnect budget.
         await deps.onFrame(frame);
         const canCommit = deps.canApplyFrame?.() ?? !deps.isCancelled();
-        if (!canCommit) throw new Error("Optimize event application was cancelled.");
+        if (!canCommit) throw new Error("Optimise event application was cancelled.");
         madeProgress = true;
       });
 
@@ -120,7 +120,7 @@ export async function runOptimizeEventLoop(deps: OptimizeEventLoopDeps): Promise
         const terminalFrame = parseStrictTerminalFrame(outcome.frame);
         if (terminalFrame === null) {
           if (deps.isCancelled()) return;
-          lastError = new Error("Optimize stream returned an invalid terminal outcome.");
+          lastError = new Error("Optimise stream returned an invalid terminal outcome.");
           needRecover = true;
         } else {
           deps.onTerminalProof?.({ frame: terminalFrame });
@@ -130,7 +130,7 @@ export async function runOptimizeEventLoop(deps: OptimizeEventLoopDeps): Promise
           try {
             const job = parseJobResponse(await deps.pollJob());
             if (job === null) {
-              throw new Error("Optimize terminal refresh returned an invalid JobResponse.");
+              throw new Error("Optimise terminal refresh returned an invalid JobResponse.");
             }
             if (job.terminal) deps.onTerminalProof?.({ job });
             if (deps.isCancelled()) return;

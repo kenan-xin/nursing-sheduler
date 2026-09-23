@@ -1,7 +1,7 @@
 "use client";
 
 // The shared per-field shell for every card-editor form — the design prototype's
-// field cell (docs/design_prototype/ScreenCards.dc.html:80-88): an uppercase label
+// field cell (docs/design_prototype/source/ScreenCards.dc.html:80-88): an uppercase label
 // with an optional inline hint beside it, the control, and the verbatim validation
 // error line.
 //
@@ -21,7 +21,7 @@
 //
 // History note (bmw.8). This used to overdramatize the overflow as a "density range"
 // effect: the prototype has two density multipliers (`--sp` for spacing, `--dens`
-// for type, Nurse Scheduling.dc.html:25-26), but neither is ported as a knob — the
+// for type, Nurse Scheduling v2.dc.html:37), but neither is ported as a knob — the
 // match between the prototype's `--m-xs` × `--dens` and this app's `text-label` ×
 // 0.9 is now a single fixed size. The wrap is kept because the overflow it prevents
 // is still real at that fixed size.

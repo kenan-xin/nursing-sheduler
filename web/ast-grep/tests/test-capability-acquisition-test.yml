@@ -1,0 +1,60 @@
+id: test-capability-acquisition
+valid:
+  # DYNAMIC `import()` IS OXLINT'S. These next three are valid for THIS rule and still fail
+  # `pnpm lint` -- `no-restricted-imports` reports them, as a probe on the installed 1.74
+  # confirmed. They are fixtures here to pin the ownership split, not to bless the syntax.
+  - |
+    const fs = await import("node:fs");
+  - |
+    const fs = await import("fs/promises");
+  - |
+    const ts = await import("typescript");
+  # Ordinary dynamic module imports -- the shape the whole repository uses.
+  - |
+    const mod = await import("@/lib/ai/assistant/db");
+  - |
+    const { toast } = await import("sonner");
+  # A computed specifier: not a declared literal, and honestly outside the claim.
+  - |
+    const mod = await import(specifier);
+  # The real dynamic require in `package-family.test.ts`: a package manifest, not a builtin.
+  - |
+    const version = require(`${name}/package.json`).version;
+  # `node:path` and the other builtins tests legitimately use are NOT restricted -- only the
+  # capability families are. A blanket builtin ban would be a different, much wider policy.
+  - |
+    const { join } = await import("node:path");
+  - |
+    const { createHash } = require("node:crypto");
+  # THE SPAWNED-SCRIPT DISTINCTION (ledger requirement 7). `instrumentation.subprocess.test.ts`
+  # writes Node programs into template literals and runs them as separate processes. That text
+  # is not an acquisition by THIS module, and after parsing it is a string_fragment rather than
+  # a call_expression -- so the distinction is a property of the mechanism. This fixture pins it
+  # so it can regress into neither a false positive nor a silent hole.
+  - |
+    const script = `
+      const http = require('node:http');
+      const fs = require('node:fs');
+      const mod = await import("typescript");
+    `;
+invalid:
+  # require("fs") -- no specifier for an import rule to resolve
+  - |
+    const fs = require("fs");
+  - |
+    const fs = require("node:fs/promises");
+  # the module loader through require
+  - |
+    const { createRequire } = require("module");
+  # process.getBuiltinModule -- the route that needs no import at all
+  - |
+    const fs = process.getBuiltinModule("fs");
+  - |
+    const fs = globalThis.process.getBuiltinModule("node:fs");
+  # parser libraries through require
+  - |
+    const { Project } = require("ts-morph");
+  - |
+    const acorn = require("acorn");
+  - |
+    const babel = require("@babel/parser");

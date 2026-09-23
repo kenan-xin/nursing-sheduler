@@ -297,7 +297,7 @@ class JobWorker:
             )
             if process_result.status is ProcessStatus.COMPLETED:
                 if process_result.output is None:
-                    raise RuntimeError("Completed optimization process has no output")
+                    raise RuntimeError("Completed optimisation process has no output")
                 # A buffered completion the executor returned ahead of an abort must
                 # not be persisted once shutdown or claim loss is in effect. The
                 # check and the commit are held together so shutdown cannot land
@@ -318,7 +318,7 @@ class JobWorker:
                         )
             elif process_result.status is ProcessStatus.FAILED:
                 if process_result.failure is None:
-                    raise RuntimeError("Failed optimization process has no failure")
+                    raise RuntimeError("Failed optimisation process has no failure")
                 with self._shutdown_lock:
                     if shutting_down():
                         server_logger.info(
@@ -339,7 +339,7 @@ class JobWorker:
                     self._worker_id,
                 )
             else:
-                raise RuntimeError(f"Unknown optimization process status: {process_result.status}")
+                raise RuntimeError(f"Unknown optimisation process status: {process_result.status}")
         except JobNotFoundError:
             server_logger.warning("[server:worker] job disappeared while running job_id=%s", job.id)
         except Exception as error:

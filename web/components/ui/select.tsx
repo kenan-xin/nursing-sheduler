@@ -45,7 +45,11 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(function 
       <select
         ref={ref}
         className={cn(
-          "peer h-9 cursor-pointer appearance-none rounded-none border border-line bg-surface pl-2 text-body text-ink disabled:cursor-not-allowed disabled:opacity-60",
+          "peer h-control cursor-pointer appearance-none rounded-control border border-line bg-surface pl-2 text-body text-ink",
+          "pointer-coarse:min-h-touch",
+          "transition-[border-color,box-shadow] duration-fast",
+          "focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-brand/30",
+          "disabled:cursor-not-allowed disabled:opacity-60",
           fullWidth && "w-full",
           className,
         )}

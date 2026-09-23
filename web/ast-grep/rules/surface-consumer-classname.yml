@@ -1,0 +1,97 @@
+id: surface-consumer-classname
+language: Tsx
+severity: error
+message: >-
+  A class outside the legal layout vocabulary is authored on the `className` of a surface
+  consumer. The shared `surfaceVariants` recipe owns tone, border, elevation, radius,
+  motion, drag and width for every level of the ladder; a consumer's `className` is
+  layout, position, overflow and sizing ONLY. This is an ALLOWLIST: a token is rejected
+  because it is absent from `surface-legal-class-vocabulary`, not because a denylist
+  happened to name it -- so paint (`bg-*`, `shadow-*`, `rounded-*`), typography, motion,
+  interaction, visibility (`visible`, `invisible`, `collapse`), fragmentation
+  (`box-decoration-*`) and EVERY arbitrary `[...]` / `(...)` value are all refused.
+  Reach for the appropriate `surfaceVariants({ role, ... })` axis, or put the class on a
+  child element that is not a surface consumer.
+note: >-
+  Migrated from the per-consumer sweep in `components/ui/surface-contract.test.ts` (the
+  4,040-line TypeScript Program analyzer). This rule restores that analyzer's FAIL-CLOSED
+  vocabulary semantics: the `not: matches: surface-legal-class-vocabulary` constraint
+  refuses any className string that is not WHOLLY inside the legal layout allowlist,
+  which is what `classifyToken` did. An earlier draft of this rule enumerated forbidden
+  visual prefixes instead, and bounded review round 1 correctly rejected that as a
+  partial denylist: `visible`, `box-decoration-clone` and `[mask-type:luminance]` all
+  passed it.
+  MATCHING SHAPE. The rule matches a STRING LITERAL FRAGMENT anywhere inside the
+  `className` attribute of a named surface consumer, rather than only a literal spelled
+  directly in the attribute. That covers `className="..."`, `className={"..."}`,
+  `className={`...`}`, `className={cn("...", x)}` and `className={flag ? "..." : "..."}`
+  with one rule, which closes the `className={cn("bg-panel")}` hole bounded review round
+  1 found in the previous pattern list.
+  NARROWINGS RECORDED. ast-grep matches by JSX tagName and does not resolve aliases, so
+  the rule covers the named surface consumers (`Surface`, `Card`, `SelectedCard`,
+  `SkeletonCard`) by tag spelling; a new wrapper must be added to the `has:` regex below,
+  which is a reviewable change rather than automatic tracking. A class assembled at
+  runtime out of non-literal parts (a bare identifier, a `${...}` interpolation) has no
+  authored literal to inspect and is not seen here; the runtime render assertions in
+  `primitives-v2.test.tsx` and the frozen Playwright surface route/state matrix cover the
+  behavioral half on mounted components. This is the migration plan's declared "does not
+  resolve aliases" boundary, identical in shape to ticket 3's `authored-color-literal`
+  and `chrome-ink-ramp-pairing` narrowings.
+files:
+  - "app/**"
+  - "components/**"
+  - "lib/**"
+ignores:
+  - "**/*.test.ts"
+  - "**/*.test.tsx"
+  - "**/*.test-d.ts"
+  - "**/*.spec.ts"
+  - "**/*.spec.tsx"
+rule:
+  all:
+    # The text INSIDE a string or template literal. `string_fragment` is the same node
+    # kind for `"..."`, `'...'` and the literal chunks of a template, so all three
+    # spellings are covered without three pattern families.
+    - kind: string_fragment
+    # FAIL CLOSED: a finding is any fragment that is not WHOLLY legal vocabulary.
+    - not:
+        matches: surface-legal-class-vocabulary
+    # ...spelled somewhere inside a `className=` JSX attribute...
+    - inside:
+        stopBy: end
+        kind: jsx_attribute
+        has:
+          kind: property_identifier
+          regex: ^className$
+    # ...on one of the named surface consumers. A child element's own attributes are NOT
+    # inside the opening element node, so nesting does not leak scope.
+    - inside:
+        stopBy: end
+        any:
+          - kind: jsx_self_closing_element
+            has:
+              field: name
+              regex: ^(Surface|Card|SelectedCard|SkeletonCard)$
+          - kind: jsx_opening_element
+            has:
+              field: name
+              regex: ^(Surface|Card|SelectedCard|SkeletonCard)$
+    # An EQUALITY OPERAND is never a rendered class: `variant === "side" ? a : b` tests a
+    # discriminator, it does not contribute a token. Only the ternary's BRANCHES reach the
+    # class string, and those are still checked. This mirrors the deleted analyzer, which
+    # folded the branches of a conditional and never classified its test.
+    #
+    # The four equality operators are spelled out rather than excluding
+    # `kind: binary_expression` wholesale, because `&&` and `||` are the SAME node kind
+    # and their right operand DOES reach the class string -- `cn("flex", isOpen &&
+    # "shadow-3")` is the common guarded-class idiom, and a kind-level exclusion would
+    # silently stop checking it.
+    - not:
+        inside:
+          kind: string
+          inside:
+            any:
+              - pattern: $LHS === $RHS
+              - pattern: $LHS !== $RHS
+              - pattern: $LHS == $RHS
+              - pattern: $LHS != $RHS

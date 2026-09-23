@@ -17,8 +17,8 @@ export function HomeAdvanced({ onNavigate }: { onNavigate: (path: string) => voi
 
   return (
     <div className="flex flex-col gap-5" data-testid="home-advanced">
-      <div className="flex items-start gap-2.5 border border-line bg-warntint px-3.5 py-3">
-        <span className="font-extrabold text-warn">!</span>
+      <div className="flex items-start gap-2.5 rounded-card border border-line bg-warntint px-3.5 py-3">
+        <span className="font-bold text-warnink">!</span>
         <p className="text-meta text-ink2">
           Advanced mode exposes every editor directly, matching the full data model. Jump to any
           area below.
@@ -39,9 +39,12 @@ export function HomeAdvanced({ onNavigate }: { onNavigate: (path: string) => voi
               type="button"
               onClick={() => onNavigate(item.path)}
               data-testid={`home-adv-${item.path}`}
-              className="flex items-start gap-3 border border-line bg-surface p-4 text-left outline-none transition-colors hover:border-brand focus-visible:ring-2 focus-visible:ring-brand"
+              className="flex items-start gap-3 rounded-card border border-line bg-surface p-4 text-left shadow-1 outline-none transition-[border-color,box-shadow] hover:border-brandink hover:shadow-2 focus-visible:ring-2 focus-visible:ring-brand"
             >
-              <span className="flex size-9 shrink-0 items-center justify-center border border-line2 bg-panel text-ink2">
+              {/* `size-control`, not `size-9`: the control sizes are absolute px
+                  and are deliberately NOT ridden by the 0.9 spacing baseline,
+                  which would render this 32.4px instead of the prototype's 36. */}
+              <span className="flex size-control shrink-0 items-center justify-center rounded-chip border border-line2 bg-panel text-ink2">
                 <Icon className="size-4" />
               </span>
               <span className="flex flex-col gap-1">

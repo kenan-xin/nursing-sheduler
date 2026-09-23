@@ -1,0 +1,16 @@
+id: untokened-shadow-utility-tsx
+valid:
+  - |
+    export const A = () => <div className="rounded-card shadow-1" />;
+  - |
+    export const B = () => <div className="shadow-none" />;
+  - |
+    export const B2 = () => <div className="group-data-[checked]/switch:shadow-1" />;
+invalid:
+  - |
+    export const C = () => <div className="shadow-lg" />;
+  - |
+    export const D = () => <div className="shadow-[0_1px_2px_rgba(60,55,45,0.05)]" />;
+  # BOUNDED-REVIEW ROUND 1.
+  - |
+    export const E = () => <div className="group-data-[checked]/switch:shadow-lg" />;

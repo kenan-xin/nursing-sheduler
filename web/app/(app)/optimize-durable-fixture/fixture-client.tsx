@@ -19,7 +19,8 @@
 
 import { useEffect, useState } from "react";
 import { OptimizeAndExportScreen } from "@/components/optimize/optimize-and-export-screen";
-import { useScenarioStore } from "@/lib/store";
+import { Surface } from "@/components/ui/surface";
+import { scenarioCommands } from "@/lib/store";
 import type {
   PrepareOptimizeSubmissionOptions,
   PrepareOptimizeSubmissionResult,
@@ -61,33 +62,52 @@ export default function OptimizeDurableFixtureClient() {
   const [seeded, setSeeded] = useState(false);
 
   useEffect(() => {
-    // Merge the readiness fields onto the already fully-initialized store so the
-    // required-data gate passes; every other slice keeps its valid initial shape.
-    useScenarioStore.getState().mutateScenario({
-      rangeStart: "2026-01-01",
-      rangeEnd: "2026-01-07",
-      staff: [{ id: "P1", description: "", history: [] }],
-      shifts: [
-        {
-          id: "Day",
-          description: "",
-          startTime: "08:00",
-          endTime: "16:00",
-          restMinutes: 0,
-          durationMinutes: 480,
-        },
-      ],
-    });
-    setSeeded(true);
+    // Merge the readiness fields onto the committed scenario so the required-data
+    // gate passes; every other slice keeps its valid initial shape.
+    //
+    // AWAITED before the screen mounts: T03 makes this a durable repository
+    // command, so flipping `seeded` first would mount the Optimize screen against
+    // a scenario the commit had not reached yet — which is precisely the
+    // "seeding…" gate's job to prevent.
+    let cancelled = false;
+    void scenarioCommands
+      .mutate({
+        rangeStart: "2026-01-01",
+        rangeEnd: "2026-01-07",
+        staff: [{ id: "P1", description: "", history: [] }],
+        shifts: [
+          {
+            id: "Day",
+            description: "",
+            startTime: "08:00",
+            endTime: "16:00",
+            restMinutes: 0,
+            durationMinutes: 480,
+          },
+        ],
+      })
+      .then(() => {
+        if (!cancelled) setSeeded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   if (!seeded) {
-    return <div data-testid="optimize-durable-seeding">Seeding fixture…</div>;
+    return (
+      <Surface level="page" geometry="square" data-testid="optimize-durable-seeding">
+        <p className="text-meta text-ink2">Seeding fixture…</p>
+      </Surface>
+    );
   }
 
+  // The harness root is the L0 page plane, which is what F4's frozen row for this
+  // route asserts. It draws no border and no shadow, so wrapping the screen's own
+  // page plane adds no visible surface — it is one plane, declared twice.
   return (
-    <div data-testid="optimize-durable-fixture">
+    <Surface level="page" geometry="square" data-testid="optimize-durable-fixture">
       <OptimizeAndExportScreen controllerDeps={{ prepare: cannedPrepare }} />
-    </div>
+    </Surface>
   );
 }

@@ -12,6 +12,36 @@ import {
 // and scheduling-content failure ships.
 const envelope = (error: Record<string, unknown>) => ({ error });
 
+// G6.1 — the deployment-mismatch shape. A backend that does not route a path
+// answers with the framework's generic 404, which carries no `error.code` and
+// therefore says nothing about the job. It must never classify as job-gone; once
+// the BFF relabels it, it gets its own kind so the UI can state a real recovery.
+describe("classifyOptimizeError — unrouted upstream path", () => {
+  it("leaves a generic 404 {detail:'Not Found'} unrecognized — never job-not-found", () => {
+    const info = classifyOptimizeError(404, { detail: "Not Found" }, "roster");
+    expect(info.kind).toBe("unknown");
+    expect(info.code).toBeNull();
+    expect(info.message).toBe("Not Found");
+    // The exact-envelope predicate is what gates destructive cleanup authority.
+    expect(isExactJobGoneResponse(404, { detail: "Not Found" })).toBe(false);
+    expect(isExactJobGoneError(new OptimizeApiError(404, { detail: "Not Found" }, "roster"))).toBe(
+      false,
+    );
+  });
+
+  it("classifies the BFF's backend_route_unsupported 502 as its own kind", () => {
+    const body = envelope({
+      code: "backend_route_unsupported",
+      message: "The scheduling service this app is connected to does not support saving rosters.",
+    });
+    const info = classifyOptimizeError(502, body, "roster");
+    expect(info.kind).toBe("backend-route-unsupported");
+    expect(info.code).toBe("backend_route_unsupported");
+    // Structurally impossible to read as gone: the predicate requires a 404.
+    expect(isExactJobGoneResponse(502, body)).toBe(false);
+  });
+});
+
 describe("classifyOptimizeError — code-first", () => {
   it("classifies job_not_found as recovery, regardless of endpoint", () => {
     expect(
@@ -176,7 +206,7 @@ describe("OptimizeApiError", () => {
   });
 
   it("synthesizes a message when the body carries none", () => {
-    expect(new OptimizeApiError(500, null).message).toBe("Optimize request failed (500)");
+    expect(new OptimizeApiError(500, null).message).toBe("Optimise request failed (500)");
   });
 });
 

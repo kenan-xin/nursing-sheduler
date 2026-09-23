@@ -1,0 +1,19 @@
+id: production-source-text-read-tsx
+snapshots:
+  ? |
+    const self = readFileSync("components/theme/theme-toggle.tsx", "utf8");
+    const hexes = self.match(/#[0-9a-f]{6}/gi);
+    const el = <div />;
+  : labels:
+      - source: readFileSync("components/theme/theme-toggle.tsx", "utf8")
+        style: primary
+        start: 13
+        end: 70
+  ? |
+    const source = readFileSync(join(UI, "button.tsx"), "utf8");
+    const el = <div />;
+  : labels:
+      - source: readFileSync(join(UI, "button.tsx"), "utf8")
+        style: primary
+        start: 15
+        end: 59

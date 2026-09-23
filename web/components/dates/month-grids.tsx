@@ -65,8 +65,11 @@ export function MonthGrids({
         // would otherwise NOT remount the grid, leaving a stale endpoint title.
         <div key={`${monthIso}:${range.start}:${range.end}`}>
           {showLabel ? (
+            // An uppercase caption, so it is a v2 label: body face, +0.03em
+            // (DESIGN.md §3's Negative-Tracking Rule). It labels a grid rather
+            // than reporting a number, so it is deliberately NOT the mono face.
             <div
-              className="mb-2 font-mono text-label font-semibold uppercase tracking-[0.04em] text-ink2"
+              className="mb-2 text-label font-semibold uppercase tracking-[0.03em] text-ink2"
               data-testid={`month-label-${monthIso}`}
             >
               {monthLabel(monthIso)}

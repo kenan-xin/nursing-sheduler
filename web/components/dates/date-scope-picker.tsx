@@ -1,7 +1,13 @@
 "use client";
 
 // Shared date-scope picker (T10 primitive; first consumer = the date-group editor,
-// next consumer = T13 covering date-scope). A compact inline calendar for choosing
+// next consumer = T13 covering date-scope), re-skinned for v2 "Mint Canvas, Warm
+// Ink" (R2a) against docs/design_prototype/source/ScreenDates.dc.html.
+//
+// Surfaces (DESIGN.md §4): the grids sit in an inset `well` tray, so each day tile
+// is an `--surface` square recessed into `--panel` and the tray never stacks a
+// second L1 tone inside the editor card it lives in. Day tiles stay square — a
+// month grid is a data surface. A compact inline calendar for choosing
 // a set of IN-RANGE days: quick-picks (Weekends / Weekdays / Clear) plus one
 // month grid per spanned month with solid selected cells and muted, non-clickable
 // out-of-range days (audit MAJOR 5 + MINOR 2 + Nit; prototype ScreenDates lines
@@ -21,6 +27,8 @@ import {
   utcDayOfWeek,
   type DateRange,
 } from "@/lib/dates";
+import { Button } from "@/components/ui/button";
+import { Surface } from "@/components/ui/surface";
 import { MonthGrids } from "./month-grids";
 import type { DayCellInfo } from "./month-calendar";
 
@@ -89,33 +97,38 @@ export function DateScopePicker({
           {selected.size} SELECTED
         </span>
         <span className="flex-1" />
-        <button
-          type="button"
-          className="ns-quick-pick"
+        {/* The prototype spells these as bare text buttons. v2 retires the
+            transparent affordance (DESIGN.md §4 rule 4: a chromeless control on a
+            recessed plane does not read as pressable), and a bare text button
+            cannot reach the coarse-pointer floor without becoming a real control
+            anyway — so all three are L1 ghost buttons, one vocabulary. */}
+        <Button
+          variant="ghost"
+          size="sm"
           data-testid={`${testId}-weekends`}
           onClick={() => onChange(weekendIso)}
         >
           Weekends
-        </button>
-        <button
-          type="button"
-          className="ns-quick-pick"
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
           data-testid={`${testId}-weekdays`}
           onClick={() => onChange(weekdayIso)}
         >
           Weekdays
-        </button>
-        <button
-          type="button"
-          className="ns-quick-pick ns-quick-pick--muted"
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
           data-testid={`${testId}-clear`}
           onClick={() => onChange([])}
         >
           Clear
-        </button>
+        </Button>
       </div>
 
-      <div className="ns-scope-grids">
+      <Surface level="well" geometry="control" className="max-w-md p-2.5">
         <MonthGrids
           range={range}
           variant="picker"
@@ -124,7 +137,7 @@ export function DateScopePicker({
           dayContent={dayContent}
           onDayClick={handleDayClick}
         />
-      </div>
+      </Surface>
     </div>
   );
 }

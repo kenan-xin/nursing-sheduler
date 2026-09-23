@@ -19,8 +19,16 @@
 //     `UploadDialog`; search has a clear button and a live result count; a "No
 //     matches" empty state offers Clear-search.
 //
+// V2 RE-SKIN (R2a's sibling, R2b). Surfaces, in ladder order (DESIGN.md §4): the
+// screen root is the L0 page plane; the table container is a resting L1 `surface`
+// on the card radius that CLIPS its own scroll region; the column header row is a
+// full-bleed square `band`; the open inline editor row is the shared `selected`
+// role. Every action is a shared `Button` — the last `.ns-btn` consumer in the app
+// left with this ticket, and the rule it depended on was deleted with it. Data
+// structure stays square throughout: the table, its rows and its cells never round.
+//
 // Store discipline (T04): every action feeds ONE produced `ScenarioUiState` to one
-// `mutateScenario` (one patch ⇒ one zundo entry). A compound inline edit (rename +
+// `scenarioCommands.mutate` (one patch ⇒ one undo entry). A compound inline edit (rename +
 // membership) composes the pure core transforms and commits once. Rename/delete
 // route through the T07 cascade so group refs follow; a `RenameCollisionError`
 // surfaces as a toast. A single active selection (`sel`) spans the row table and the
@@ -30,14 +38,18 @@
 
 import * as React from "react";
 import { toast } from "sonner";
-import { useScenarioStore } from "@/lib/store";
+import { capabilityAnchorProps } from "@/lib/capability/anchor-contract";
+import { PEOPLE_ADD_PERSON_ANCHOR } from "./capability-anchors";
+import { useScenarioStore, scenarioCommands } from "@/lib/store";
 import { useLosableDraft } from "@/components/shell/use-losable-draft";
 import { GuardedLink } from "@/components/shell/guarded-link";
 import type { ScenarioUiState, UiPerson } from "@/lib/scenario";
 import { RenameCollisionError } from "@/lib/cascade";
-import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Surface, surfaceVariants } from "@/components/ui/surface";
 import {
   FaPlus,
   FaFileArrowUp,
@@ -70,7 +82,12 @@ import { GroupsSection, type GroupsSectionConfig } from "@/components/entity-edi
 import { peopleDescriptor } from "./people-descriptor";
 import { UploadDialog } from "./upload-dialog";
 
-type Commit = (next: ScenarioUiState) => void;
+/**
+ * Apply an operation to the durable scenario. The callback runs AT THE QUEUE HEAD,
+ * against the state the previous command committed — so rapid actions compose
+ * instead of overwriting each other. Returning `null` withdraws the write.
+ */
+type Commit = (transform: (live: ScenarioUiState) => ScenarioUiState | null) => void;
 type CurrentState = () => ScenarioUiState;
 
 const descriptor: EntityDescriptor<UiPerson> = peopleDescriptor;
@@ -87,9 +104,17 @@ type Sel =
  *  "N members" count — all defaults; heading/empty carry the ward-staff voice). */
 const STAFF_GROUPS_CONFIG: GroupsSectionConfig = {
   heading: "Staff groups",
+  // Verbatim from the canonical screen (ScreenStaff.dc.html:119) — the second
+  // line of the header band, not new copy.
+  description: "Bundle nurses so rules and constraints can target a whole team at once.",
   addLabel: "Group",
+  // Canonical empty state, verbatim from ScreenStaff.dc.html:130-133. Staff
+  // authors the prompt BEFORE the reserved ALL row (ScreenStaff.dc.html:126).
+  emptyTitle: "No staff groups yet",
   emptyText:
-    "No staff groups yet — bundle nurses into a team (like Seniors or Team A) so a rule can target them all at once.",
+    "Bundle nurses into a team — like “Seniors” or “Team A” — so a rule can target them all at once.",
+  emptyActionLabel: "New group",
+  emptyPlacement: "before-auto",
   autoGroupNote:
     "Every nurse, always. Generated automatically — use it in rules that target the whole ward.",
 };
@@ -110,9 +135,39 @@ function initialsOf(id: EntityId): string {
 export function PeopleTable() {
   const items = useScenarioStore(descriptor.readItems);
   const groups = useScenarioStore(descriptor.readGroups);
-  const commit = React.useCallback<Commit>((next) => {
-    useScenarioStore.getState().mutateScenario(next);
+  // The form-open token (captured on the closed⇌open transition below). Declared
+  // here because `commit` has to read it at CALL time.
+  const openToken = React.useRef<{ items: UiPerson[]; groups: EditorGroup[] } | null>(null);
+
+  const commit = React.useCallback<Commit>((transform) => {
+    // T03F1: `transform` is applied AT THE QUEUE HEAD, against the state the
+    // previous command committed.
+    //
+    // Callers used to compute a whole replacement durable state from the render
+    // snapshot and hand that over. Two rapid actions then both derived from the same
+    // pre-first-action snapshot, so the second silently reverted the first — a
+    // delete followed quickly by a reorder lost the delete, and both reported
+    // success. Passing the OPERATION instead of its result is what preserves intent:
+    // the reorder is computed over the list the delete produced.
+    //
+    // The form-open token is still snapshotted HERE, at the click, not read inside
+    // the updater: a newer commit re-renders and the close-on-external effect clears
+    // the token, so by the time the updater ran there would be nothing left to
+    // compare against and a stale Save would sail through.
+    const token = openToken.current;
+    void scenarioCommands.mutate((live) => {
+      if (
+        token !== null &&
+        (descriptor.readItems(live) !== token.items || descriptor.readGroups(live) !== token.groups)
+      ) {
+        return null;
+      }
+      return transform(live as ScenarioUiState);
+    });
   }, []);
+  // Read-only live snapshot, threaded to the children that need to VALIDATE against
+  // current state before asking for a write (the upload dialog's name checks). Not a
+  // write path: every write goes through `commit`'s queue-head transform.
   const currentState = React.useCallback<CurrentState>(
     () => useScenarioStore.getState() as ScenarioUiState,
     [],
@@ -134,7 +189,6 @@ export function PeopleTable() {
   // ACROSS rerenders. `isStale` re-reads live and reports whether that slice moved
   // (undo/redo travel or an external cascade). Shared by the close-on-external effect
   // AND every submit handler, so "what closes the form" == "what blocks a stale Save".
-  const openToken = React.useRef<{ items: UiPerson[]; groups: EditorGroup[] } | null>(null);
   const wasEditing = React.useRef(false);
   if (editing !== wasEditing.current) {
     wasEditing.current = editing;
@@ -169,7 +223,7 @@ export function PeopleTable() {
     const from = dragIndex;
     setDragIndex(null);
     setOverIndex(null);
-    if (from != null && from !== to) commit(reorderItems(currentState(), descriptor, from, to));
+    if (from != null && from !== to) commit((live) => reorderItems(live, descriptor, from, to));
   };
 
   // Live result count for the search (a11y): "N nurses" or "N of M nurses match".
@@ -178,13 +232,22 @@ export function PeopleTable() {
     : `${items.length} ${items.length === 1 ? "nurse" : "nurses"}`;
 
   return (
-    <div data-testid="screen" data-screen="Staff" className="flex flex-col gap-4">
+    <Surface
+      level="page"
+      geometry="square"
+      data-testid="screen"
+      data-screen="Staff"
+      className="flex flex-col gap-4"
+    >
       <header className="mb-2 flex flex-wrap items-end gap-4">
         <div className="min-w-[240px] flex-1">
           <div className="mb-2 text-label font-semibold uppercase tracking-[0.03em] text-brandink">
             Step 2 · Staff
           </div>
-          <h1 className="mb-2 font-heading text-display font-extrabold leading-[1.05] tracking-[-0.02em]">
+          {/* Display: Figtree 700 / 1.15 / -0.015em (DESIGN.md §3). v1 ran 800 at
+              1.05 and -0.02em; v2 is one weight step lighter with an opener line.
+              Copy and wrapping are unchanged. */}
+          <h1 className="mb-2 font-heading text-display font-bold leading-[1.15] tracking-[-0.015em]">
             Your Ward Staff
           </h1>
           <p className="max-w-[60ch] text-ink2">
@@ -192,12 +255,17 @@ export function PeopleTable() {
             target a whole team at once.
           </p>
         </div>
+        {/* Still a real `<a href>`, so copy-link and open-in-new-tab keep working and
+            the shell's draft guard still stages on a plain click. It wears the shared
+            Button recipe instead of the retired `.ns-btn` fork, so the pill, `--sh-1`,
+            active-flatten, focus outline and 44px coarse floor come from one contract.
+            `lg` is the prototype's 44px primary action (ScreenStaff.dc.html:12). */}
         <GuardedLink
           href="/shift-types"
-          className="ns-btn ns-btn--primary h-11 px-5 text-body"
+          className={cn(buttonVariants({ size: "lg" }), "font-bold")}
           data-testid="people-continue"
         >
-          Continue to shifts <FaArrowRight className="size-3" />
+          Continue to shifts <FaArrowRight />
         </GuardedLink>
       </header>
 
@@ -207,6 +275,7 @@ export function PeopleTable() {
           onClick={() => setSel((cur) => (cur?.t === "add-item" ? null : { t: "add-item" }))}
           aria-pressed={addOpen}
           data-testid="people-add"
+          {...capabilityAnchorProps(PEOPLE_ADD_PERSON_ANCHOR)}
         >
           <FaPlus />
           Add nurse
@@ -217,24 +286,30 @@ export function PeopleTable() {
         </Button>
         <div className="ml-auto flex flex-col items-end gap-1">
           <div className="relative w-full max-w-xs">
-            <FaMagnifyingGlass className="pointer-events-none absolute left-3 top-1/2 size-3 -translate-y-1/2 text-ink3" />
+            <FaMagnifyingGlass
+              aria-hidden
+              className="pointer-events-none absolute left-3 top-1/2 size-3 -translate-y-1/2 text-ink3"
+            />
             <Input
               data-testid="people-search"
-              className="pl-8 pr-8"
+              className="pl-8 pr-9 pointer-coarse:pr-14"
               placeholder="Search nurses"
               aria-label="Search nurses"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
             {q && (
+              // A real control, sized honestly: 16px beside a 36px field on a precise
+              // pointer, a true 44x44 box on a coarse one (the field's own padding
+              // grows with it). No pseudo-element hitbox — v2 technical plan T8.
               <button
                 type="button"
                 aria-label="Clear search"
                 data-testid="people-search-clear"
-                className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex items-center text-ink3 hover:text-ink"
+                className="absolute right-2 top-1/2 inline-flex size-4 -translate-y-1/2 items-center justify-center rounded-full text-ink3 pointer-coarse:size-touch hover:text-ink"
                 onClick={() => setQuery("")}
               >
-                <FaXmark aria-hidden />
+                <FaXmark aria-hidden className="size-3" />
               </button>
             )}
           </div>
@@ -249,17 +324,24 @@ export function PeopleTable() {
         </div>
       </div>
 
-      {/* Table (horizontal-scroll wrapper) */}
+      {/* Table container: a resting L1 card whose own scroll region ends the card,
+          so it takes the card radius and CLIPS to it (DESIGN.md §4 rule 3). Everything
+          inside — the header band, every row, every cell — stays square. */}
       <div
         data-testid="people-table-wrap"
-        className="w-full overflow-x-auto border border-line bg-surface"
+        className={cn(
+          "w-full overflow-x-auto",
+          surfaceVariants({ role: "surface", geometry: "card" }),
+        )}
       >
         <table data-testid="people-table" className="w-full min-w-[520px] border-collapse">
           <caption className="sr-only">
             Ward staff — each nurse, the groups they belong to, and row actions.
           </caption>
           <thead>
-            <tr className="bg-panel">
+            {/* Full-bleed header band: square and flat by contract — a band that spans
+                the whole card never takes a chip radius or a well shadow. */}
+            <tr className={surfaceVariants({ role: "band", geometry: "square" })}>
               <th
                 scope="col"
                 className="w-10 px-3 py-2.5 text-left text-label font-semibold uppercase tracking-[0.03em] text-ink2"
@@ -294,7 +376,6 @@ export function PeopleTable() {
                 items={items}
                 groups={groups}
                 commit={commit}
-                currentState={currentState}
                 isStale={isStale}
                 onDone={() => setSel(null)}
               />
@@ -311,7 +392,6 @@ export function PeopleTable() {
                     items={items}
                     groups={groups}
                     commit={commit}
-                    currentState={currentState}
                     isStale={isStale}
                     onDone={() => setSel(null)}
                   />
@@ -325,21 +405,20 @@ export function PeopleTable() {
                   ordinal={index + 1}
                   groups={groups}
                   commit={commit}
-                  currentState={currentState}
                   canDrag={canDrag}
                   canReorder={canDrag && filtered.length > 1}
                   isFirst={index === 0}
                   isLast={index === filtered.length - 1}
                   onEdit={() => setSel({ t: "edit-item", key })}
                   onMoveUp={() =>
-                    commit(reorderItems(currentState(), descriptor, index, index - 1))
+                    commit((live) => reorderItems(live, descriptor, index, index - 1))
                   }
                   onMoveDown={() =>
-                    commit(reorderItems(currentState(), descriptor, index, index + 1))
+                    commit((live) => reorderItems(live, descriptor, index, index + 1))
                   }
                   onDelete={() => {
                     setSel(null);
-                    commit(deleteItem(currentState(), descriptor, item.id));
+                    commit((live) => deleteItem(live, descriptor, item.id));
                   }}
                   isOver={overIndex === index}
                   isDragging={dragIndex === index}
@@ -361,19 +440,23 @@ export function PeopleTable() {
                       data-testid="people-empty"
                       className="flex flex-col items-center gap-2 text-center"
                     >
-                      <div className="flex size-11 items-center justify-center border border-dashed border-line2 text-faint">
-                        <FaMagnifyingGlass />
+                      <div className="flex size-11 items-center justify-center border border-dashed border-line2 text-ink3">
+                        <FaMagnifyingGlass aria-hidden />
                       </div>
-                      <div className="font-heading text-title font-bold text-ink2">No matches</div>
+                      {/* Title: 600 at -0.015em (DESIGN.md §3). The prototype draws it
+                          at 700; the type contract outranks a prototype weight. */}
+                      <div className="font-heading text-title font-semibold tracking-[-0.015em] text-ink2">
+                        No matches
+                      </div>
                       <div className="text-meta text-ink3">No nurses match “{query.trim()}”.</div>
-                      <button
-                        type="button"
+                      <Button
+                        variant="link"
+                        size="sm"
                         data-testid="people-empty-clear"
-                        className="mt-1 text-meta font-semibold text-brandink hover:underline"
                         onClick={() => setQuery("")}
                       >
                         Clear search
-                      </button>
+                      </Button>
                     </div>
                   ) : (
                     <p data-testid="people-empty" className="text-center text-meta text-ink3">
@@ -392,7 +475,6 @@ export function PeopleTable() {
         items={items}
         groups={groups}
         commit={commit}
-        currentState={currentState}
         isStale={isStale}
         editing={editing}
         addOpen={sel?.t === "add-group"}
@@ -411,7 +493,7 @@ export function PeopleTable() {
           onClose={() => setUploadOpen(false)}
         />
       )}
-    </div>
+    </Surface>
   );
 }
 
@@ -425,7 +507,6 @@ function ReadRow({
   ordinal,
   groups,
   commit,
-  currentState,
   canDrag,
   canReorder,
   isFirst,
@@ -446,7 +527,6 @@ function ReadRow({
   ordinal: number;
   groups: EditorGroup[];
   commit: Commit;
-  currentState: CurrentState;
   canDrag: boolean;
   canReorder: boolean;
   isFirst: boolean;
@@ -486,9 +566,23 @@ function ReadRow({
           : undefined
       }
       onDragEnd={canDrag ? onDragEnd : undefined}
-      className={`border-t border-line2 hover:bg-panel ${canDrag ? "cursor-grab" : ""} ${
-        isOver ? "shadow-[inset_0_2px_0_var(--color-brand)]" : ""
-      } ${isDragging ? "opacity-50" : ""}`}
+      // Row states, all on canonical tokens. Hover is `--panel-alt`, NOT `--panel`:
+      // DESIGN.md §6 reserves the well tone for header bands and true insets, and
+      // the prototype's `--panel` row hover would collide with the header band
+      // directly above it. The drop candidate speaks the shared `drop-target`
+      // LANGUAGE — a dashed `--brand` edge over `--panel-alt` — rather than the
+      // recipe role itself: a `<tr>` in the collapsed-border model paints no
+      // box-shadow, so the role's `--sh-2` would be a claim the browser never
+      // honours, and the recipe cannot share a class list with the hover tone
+      // (the `surface-recipe-combiner-visual` ast-grep rule holds every literal
+      // authored inline with a recipe result to the layout-only vocabulary).
+      // This replaces the v1 `shadow-[inset_0_2px_0_...]` arbitrary elevation.
+      className={cn(
+        "border-t border-line2 transition-colors duration-fast",
+        canDrag && "cursor-grab",
+        isDragging && "opacity-50",
+        isOver ? "border-dashed border-brand bg-panel-alt" : "hover:bg-panel-alt",
+      )}
     >
       <td className="px-3 py-2.5 font-mono text-meta text-ink3">
         <span className="inline-flex items-center gap-1.5">
@@ -563,16 +657,19 @@ function ReadRow({
             variant="outline"
             aria-label={`Duplicate ${item.id}`}
             data-testid={`people-dup-${itemKey}`}
-            onClick={() => commit(duplicateItem(currentState(), descriptor, item.id))}
+            onClick={() => commit((live) => duplicateItem(live, descriptor, item.id))}
           >
             <FaCopy />
           </Button>
+          {/* The destructive affordance is a VARIANT, not a caller-owned colour
+              override: `destructive-outline` is the paired outline treatment
+              (`--errorink` on `--surface`, `--errortint` on hover) the prototype
+              draws at ScreenStaff.dc.html:62. */}
           <Button
             size="icon"
-            variant="outline"
+            variant="destructive-outline"
             aria-label={`Delete ${item.id}`}
             data-testid={`people-delete-${itemKey}`}
-            className="text-error hover:bg-errortint"
             onClick={onDelete}
           >
             <FaTrash />
@@ -594,7 +691,6 @@ function RowEditor({
   items,
   groups,
   commit,
-  currentState,
   isStale,
   onDone,
 }: {
@@ -604,7 +700,6 @@ function RowEditor({
   items: UiPerson[];
   groups: EditorGroup[];
   commit: Commit;
-  currentState: CurrentState;
   isStale: () => boolean;
   onDone: () => void;
 }) {
@@ -644,21 +739,21 @@ function RowEditor({
     try {
       if (mode === "add") {
         // New nurse: name → id, no description authored here. history:[] via descriptor.
-        let next = addItem(currentState(), descriptor, { id: check.id });
-        next = writeGroups(next, check.id, draftGroups);
-        commit(next);
+        commit((live) =>
+          writeGroups(addItem(live, descriptor, { id: check.id }), check.id, draftGroups),
+        );
         toast.success(`Nurse “${String(check.id)}” added.`);
       } else {
-        let next = currentState();
-        let effectiveId: EntityId = item!.id;
-        // Rename cascade only when the name actually changed. Description is PRESERVED
-        // (never written from the table), so an inline name/group edit keeps it intact.
-        if (nameChanged) {
-          next = renameItem(next, descriptor, item!.id, check.id);
-          effectiveId = check.id;
-        }
-        next = writeGroups(next, effectiveId, draftGroups);
-        commit(next);
+        const effectiveId: EntityId = nameChanged ? check.id : item!.id;
+        // The whole compound edit is ONE queue-head transform, so the rename cascade
+        // and the group write both apply to the committed roster.
+        commit((live) => {
+          // Rename cascade only when the name actually changed. Description is
+          // PRESERVED (never written from the table), so an inline name/group edit
+          // keeps it intact.
+          const renamed = nameChanged ? renameItem(live, descriptor, item!.id, check.id) : live;
+          return writeGroups(renamed, effectiveId, draftGroups);
+        });
         toast.success(`Nurse “${String(effectiveId)}” saved.`);
       }
       onDone();
@@ -668,7 +763,15 @@ function RowEditor({
   };
 
   return (
-    <tr data-testid={`people-edit-row-${key}`} className="border-t border-line2 bg-brandtint/40">
+    // The open editor row IS the active editor, so it takes the shared `selected`
+    // role: `--surface` under a `--brand` border. The prototype washes it in
+    // `--brandtint`, which DESIGN.md §6 reserves for the selection MARKS (the
+    // brand-filled group toggles sitting inside this very row would disappear into
+    // it). Same call R2a recorded for the previewed date-group row.
+    <tr
+      data-testid={`people-edit-row-${key}`}
+      className={surfaceVariants({ role: "selected", geometry: "square" })}
+    >
       <td className="px-3 py-3 align-top font-mono text-meta text-ink3">{ordinal}</td>
       <td className="px-3 py-3 align-top">
         <Input
@@ -692,7 +795,7 @@ function RowEditor({
           <div
             role="alert"
             data-testid={`people-name-error-${key}`}
-            className="mt-1.5 text-label font-semibold text-error"
+            className="mt-1.5 text-label font-semibold text-errorink"
           >
             {check.message}
           </div>
@@ -700,15 +803,28 @@ function RowEditor({
       </td>
       <td className="px-3 py-3 align-top">
         {groups.length === 0 ? (
-          <span className="text-meta text-faint">No groups yet — add one below.</span>
+          <span className="text-meta text-ink3">No groups yet — add one below.</span>
         ) : (
-          <div className="flex flex-wrap gap-1.5" data-testid={`people-group-toggles-${key}`}>
+          // Named group, so a screen-reader user entering this cell hears WHOSE
+          // memberships these toggles are rather than a bare run of pressed buttons.
+          <div
+            role="group"
+            aria-label={`Groups for ${mode === "edit" ? String(item!.id) : "the new nurse"}`}
+            className="flex flex-wrap gap-1.5"
+            data-testid={`people-group-toggles-${key}`}
+          >
             {groups.map((g) => {
               const on = draftGroups.includes(g.id);
               return (
-                <button
+                // A membership toggle is a real action, so it is a shared Button
+                // rather than a hand-skinned 2px-radius chip: the pill, the paired
+                // `--onbrand` foreground on the brand fill, the focus outline and the
+                // 44px coarse floor all arrive from one contract. `aria-pressed`
+                // carries the on/off state it always did.
+                <Button
                   key={g.id}
-                  type="button"
+                  size="sm"
+                  variant={on ? "default" : "secondary"}
                   data-testid={`people-group-${key}-${g.id}`}
                   aria-pressed={on}
                   onClick={() =>
@@ -716,12 +832,9 @@ function RowEditor({
                       cur.includes(g.id) ? cur.filter((x) => x !== g.id) : [...cur, g.id],
                     )
                   }
-                  className={`border px-2.5 py-1 text-label font-semibold ${
-                    on ? "border-brand bg-brand text-onbrand" : "border-line bg-surface text-ink2"
-                  }`}
                 >
                   {g.id}
-                </button>
+                </Button>
               );
             })}
           </div>

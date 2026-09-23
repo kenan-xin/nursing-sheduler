@@ -1,14 +1,35 @@
 "use client";
 
 // Generic clear-data confirm (T11; prototype ScreenRequests.dc.html:295-309).
-// Built directly on base-ui AlertDialog rather than wrapping the shell
-// `ConfirmDialog` (`@/components/shell/confirm-dialog.tsx`): that shell's
+// Composed from the shared shadcn Base UI `AlertDialog` shell, but NOT from the
+// shell `ConfirmDialog` (`@/components/shell/confirm-dialog.tsx`): that shell's
 // `onOpenChange(false)` fires on BOTH cancel and confirm, which would collapse
 // this component's separate `onConfirm`/`onCancel` callbacks into one signal.
-// Styling mirrors the shell dialog's three-band composition for visual parity.
+//
+// It is the app's one `layer="nested"` overlay — the shell's second named layer
+// rather than an ad-hoc z-index. On the current live Requests route it is the
+// only overlay mounted while it is open: the clear-data panel is a sibling of
+// the cell/history/CSV dialogs, so none of them is mounted beneath it. `nested`
+// is therefore a RESERVED higher layer here, held for a flow that raises a
+// confirmation over a live dialog, not a concurrency this route performs.
+//
+// Dismissal safety: Cancel is the Base UI Close part and every other allowed
+// dismissal also arrives as `onOpenChange(false)`, so an implicit dismissal can
+// only ever reach `onCancel`. `onConfirm` has exactly one caller — the Clear
+// button — and it is not a Close part, so it fires once and never on dismissal.
 
-import { AlertDialog } from "@base-ui/react/alert-dialog";
-import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogBody,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogMedia,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { FaTriangleExclamation } from "@/components/icons";
 
 export interface ClearConfirmDialogProps {
@@ -20,41 +41,39 @@ export interface ClearConfirmDialogProps {
 
 export function ClearConfirmDialog({ open, text, onConfirm, onCancel }: ClearConfirmDialogProps) {
   return (
-    <AlertDialog.Root
+    <AlertDialog
       open={open}
       onOpenChange={(next) => {
         if (!next) onCancel();
       }}
     >
-      <AlertDialog.Portal>
-        <AlertDialog.Backdrop className="fixed inset-0 z-[62] bg-black/40 animate-fade" />
-        <AlertDialog.Popup
-          data-testid="clear-confirm-dialog"
-          className="fixed left-1/2 top-1/2 z-[63] flex w-[420px] max-w-[92vw] -translate-x-1/2 -translate-y-1/2 flex-col border border-line bg-surface shadow-dialog animate-fade"
-        >
-          <div className="flex items-center gap-3 border-b border-line2 px-5 py-4.5">
-            <span className="flex size-8.5 shrink-0 items-center justify-center bg-errortint text-error">
-              <FaTriangleExclamation className="size-4" />
-            </span>
-            <AlertDialog.Title className="font-heading text-cardhead font-extrabold tracking-tight">
-              Confirm
-            </AlertDialog.Title>
-          </div>
+      <AlertDialogContent
+        layer="nested"
+        data-testid="clear-confirm-dialog"
+        className="overflow-hidden"
+      >
+        <AlertDialogHeader>
+          <AlertDialogMedia tone="error">
+            <FaTriangleExclamation />
+          </AlertDialogMedia>
+          <AlertDialogTitle>Confirm</AlertDialogTitle>
+        </AlertDialogHeader>
 
-          <AlertDialog.Description className="px-5 py-4.5 text-meta leading-relaxed text-ink2">
-            {text}
-          </AlertDialog.Description>
+        <AlertDialogBody>
+          <AlertDialogDescription className="leading-relaxed">{text}</AlertDialogDescription>
+        </AlertDialogBody>
 
-          <div className="flex items-center justify-end gap-2.5 border-t border-line2 px-5 py-3.5">
-            <Button variant="outline" data-testid="clear-confirm-cancel" onClick={onCancel}>
-              Cancel
-            </Button>
-            <Button variant="destructive" data-testid="clear-confirm-confirm" onClick={onConfirm}>
-              Clear
-            </Button>
-          </div>
-        </AlertDialog.Popup>
-      </AlertDialog.Portal>
-    </AlertDialog.Root>
+        <AlertDialogFooter>
+          <AlertDialogCancel data-testid="clear-confirm-cancel">Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            variant="destructive"
+            data-testid="clear-confirm-confirm"
+            onClick={onConfirm}
+          >
+            Clear
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }

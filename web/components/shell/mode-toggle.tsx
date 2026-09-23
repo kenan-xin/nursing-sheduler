@@ -5,9 +5,10 @@
 // never touches the scenario store (acceptance row 1). The mode store is
 // persisted by useSyncModePersistence in the shell layout.
 //
-// Styled to the prototype SideNav mode control (SideNav.dc.html:23-27,64,76):
-// a full-width bordered pair whose active segment is the ink surface with on-ink
-// text. It lives inside AppSideNav (both the desktop rail and the mobile drawer).
+// Styled to the prototype SideNav mode control (SideNav.dc.html:23-27,64,76,81):
+// a panel-fill pill track whose active segment lifts to the surface tone with
+// --sh-1 and brandink text, and whose inactive segment is transparent ink2. It
+// lives inside AppSideNav (both the desktop rail and the mobile drawer).
 //
 // Semantics (audit m7 + cold-review Minor 1): the prototype uses
 // `role="tablist"` / `role="tab"` with a selected-state attribute, so the control
@@ -15,8 +16,7 @@
 // the WAI-ARIA tabs keyboard contract, implemented here with automatic
 // activation: ArrowLeft/Right (and Up/Down) move focus AND select, Home/End jump
 // to the ends, and only the selected tab is a tab stop (roving tabindex). The
-// mode store behavior, segment dimensions/border/active fill, and focus ring
-// are unchanged.
+// mode store behavior, segment dimensions, and focus ring are unchanged.
 
 import { useRef } from "react";
 import { useAppMode } from "@/lib/mode/use-mode";
@@ -29,10 +29,19 @@ const OPTIONS: { value: AppMode; label: string }[] = [
   { value: "advanced", label: "Advanced" },
 ];
 
-export function ModeToggle() {
+// COMPACT (G8): the 60px rail has no room for a two-segment track, so the
+// prototype folds the control into one GUI/ADV pill that TOGGLES the mode
+// (SideNav.dc.html `toggleMode`). It routes through the same
+// `requestModeChange` transaction as the segmented control — a compact rail must
+// not be a second, unguarded way to change mode — and states both the current
+// mode and what pressing it does in one title/accessible name, since the
+// abbreviation alone would not say which direction it moves.
+
+export function ModeToggle({ compact = false }: { compact?: boolean }) {
   const mode = useAppMode();
   const { requestModeChange } = useModeTransition();
   const tabsRef = useRef<Array<HTMLButtonElement | null>>([]);
+  const compactRef = useRef<HTMLButtonElement | null>(null);
 
   // Automatic-activation tabs: select `value` and move focus onto its tab. The
   // selected tab reclaims tabIndex=0 after the re-render; programmatic .focus()
@@ -80,13 +89,43 @@ export function ModeToggle() {
     }
   };
 
+  if (compact) {
+    const next: AppMode = mode === "guided" ? "advanced" : "guided";
+    const label =
+      mode === "guided" ? "Guided mode — switch to Advanced" : "Advanced mode — switch to Guided";
+    return (
+      <button
+        ref={compactRef}
+        type="button"
+        data-testid="mode-toggle"
+        data-compact="true"
+        data-mode={mode}
+        onClick={() =>
+          requestModeChange(
+            next,
+            () => compactRef.current?.focus(),
+            () => compactRef.current?.focus(),
+          )
+        }
+        title={label}
+        aria-label={label}
+        className="inline-flex h-8 w-10 shrink-0 items-center justify-center rounded-pill border border-line bg-surface font-ui text-label font-bold uppercase tracking-[0.03em] text-ink2 shadow-1 transition-[background-color,box-shadow,color] outline-none pointer-coarse:min-h-touch pointer-coarse:min-w-touch hover:bg-panel-alt hover:text-ink focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-brand"
+      >
+        {mode === "guided" ? "GUI" : "ADV"}
+      </button>
+    );
+  }
+
   return (
     <div
       data-testid="mode-toggle"
       role="tablist"
       aria-label="Editing mode"
       aria-orientation="horizontal"
-      className="flex w-full border border-line"
+      // v2 pill track (SideNav.dc.html:25): a panel-fill pill with a 4px inset,
+      // not the v1 bordered rectangle. Active segment lifts to the surface tone
+      // with --sh-1 and brandink text; inactive is transparent ink2.
+      className="flex w-full gap-1 rounded-pill bg-panel p-1"
       onKeyDown={onKeyDown}
     >
       {OPTIONS.map((opt, i) => {
@@ -105,11 +144,13 @@ export function ModeToggle() {
             data-mode={opt.value}
             data-testid={`mode-toggle-${opt.value}`}
             className={cn(
-              "min-h-9 flex-1 px-2.5 py-1.5 text-meta transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand",
-              i > 0 && "border-l border-line",
+              // `min-h-control` (the absolute 36px token), not `min-h-9` — the
+              // 0.9 spacing baseline renders `9` as 32.4px, below the control
+              // floor. Coarse pointers grow the real segment to 44px.
+              "min-h-control flex-1 rounded-pill px-2.5 py-1.5 text-meta transition-[background-color,box-shadow,color] outline-none pointer-coarse:min-h-touch focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand",
               selected
-                ? "bg-ink font-bold text-on-ink"
-                : "bg-transparent font-medium text-ink2 hover:bg-panel",
+                ? "bg-surface font-bold text-brandink shadow-1"
+                : "font-medium text-ink2 hover:text-ink",
             )}
           >
             {opt.label}

@@ -1,0 +1,24 @@
+id: untokened-shadow-utility-tsx
+language: Tsx
+severity: error
+message: >-
+  Elevation is authored here instead of aliased. Every shadow in the system goes through one
+  of the six canonical `--sh-*` tokens, published as `shadow-1/2/3/edge/well/side` plus the
+  `shadow-dialog`/`shadow-toast` aliases of `--sh-3`. An arbitrary `shadow-[...]` is
+  rejected EVEN WHEN its value is byte-identical to a token, because a duplicate stops
+  tracking the value it was copied from the moment either is retuned.
+note: >-
+  The `.tsx` twin of `untokened-shadow-utility`; see that rule's note for the language split,
+  the recorded narrowing, and the bracketed-variant prefix repair.
+files:
+  - "app/**"
+  - "components/**"
+ignores:
+  - "**/*.test.ts"
+  - "**/*.test.tsx"
+  - "**/*.test-d.ts"
+  - "**/*.spec.ts"
+  - "**/*.spec.tsx"
+rule:
+  kind: string_fragment
+  regex: '(^|[[:space:]])([^[:space:]]*:)?!?shadow-(\[|2xs\b|xs\b|sm\b|md\b|lg\b|2xl\b|3xl\b|xl\b|inner\b)'

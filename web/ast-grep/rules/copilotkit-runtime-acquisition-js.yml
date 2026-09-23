@@ -1,0 +1,46 @@
+id: copilotkit-runtime-acquisition-js
+language: JavaScript
+severity: error
+message: >-
+  The CopilotKit runtime is reachable only through `lib/ai/runtime/copilotkit-runtime.ts`,
+  which applies the telemetry/analytics containment env before the package's telemetry
+  singleton snapshots it. Acquiring the package any other way boots an uncontained runtime.
+note: >-
+  ADDED BY THE TICKET-6 FIXUP, and it closes a live route rather than a vacuous glob
+  (cold-review P1).
+  .
+  The base rule has declared `scripts/**` since ticket 3, but its language is `TypeScript`,
+  which claims `.ts`/`.mts`/`.cts` only. `scripts/` holds `start-standalone.mjs` and shell
+  scripts, so the one production JavaScript file in that directory was scannable by NO variant
+  of this rule. The cold review built the consequence: an `.mjs` script that statically
+  imported `createRequire`, built a loader and called it with `"@copilotkit/runtime/v2"` passed
+  both Oxlint and ast-grep. That is a real way around the single contained runtime entry.
+  .
+  This variant covers `.js`, `.jsx`, `.mjs` and `.cjs` over the base's full scope including
+  `scripts/**` -- which is why, unlike the `Tsx` twin, it has no documented scope drop:
+  `scripts/**` is precisely the part it exists for. Together with the base's widened
+  `$F($SPEC)` body it rejects the loader-handle shape.
+  .
+  The `ignores` entries name `.ts` paths, so this variant excuses nothing in practice; they are
+  kept so the family's exception list reads identically wherever a reviewer opens it.
+files:
+  - "app/**"
+  - "components/**"
+  - "lib/**"
+  - "scripts/**"
+ignores:
+  - "lib/ai/runtime/copilotkit-runtime.ts"
+  - "lib/ai/runtime/**/*.test.ts"
+  - "lib/ai/runtime/containment.test.ts"
+rule:
+  any:
+    - pattern: require($SPEC)
+    - pattern: $F($SPEC)
+constraints:
+  SPEC:
+    regex: "@copilotkit/runtime"
+  # See the base rule: `import(...)` is a call whose callee is `import`, and the dynamic form
+  # belongs to Oxlint.
+  F:
+    not:
+      regex: ^import$

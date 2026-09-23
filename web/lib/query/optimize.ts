@@ -8,7 +8,8 @@ import {
   type OptimizeEndpoint,
   type OptimizeErrorInfo,
 } from "@/lib/bff/errors";
-import type { JobResponse } from "@/lib/bff/types";
+import type { JobPurpose, JobResponse } from "@/lib/bff/types";
+import type { BasisSubmissionFields } from "@/lib/optimize/basis/basis-record";
 import {
   parseControlChangedPayload,
   parseJobResponse,
@@ -28,6 +29,11 @@ export { OptimizeApiError } from "@/lib/bff/errors";
 // ("Scheduling YAML is too large"). Never treat this as the enforcement boundary.
 export const OPTIMIZE_MAX_YAML_BYTES = 2 * 1024 * 1024;
 
+/** The exact root-relative product URL used for an Optimize event stream. */
+export function buildOptimizeEventsUrl(jobId: string): string {
+  return `/api/optimize/${encodeURIComponent(jobId)}/events`;
+}
+
 async function requestOptimizeJob(
   input: string,
   init?: RequestInit,
@@ -42,9 +48,103 @@ async function requestOptimizeJob(
   }
   const job = parseJobResponse(body, expectedId);
   if (job === null) {
-    throw new Error("Optimize API returned an invalid JobResponse.");
+    throw new Error("Optimise API returned an invalid JobResponse.");
   }
   return job;
+}
+
+/**
+ * Imperative submit for non-hook callers (the T10 diagnostic orchestrator).
+ *
+ * Mirrors `useSubmitOptimize`'s mutation exactly: multipart POST to `/api/optimize`
+ * with the same field-by-field basis and purpose forwarding. Throws
+ * `OptimizeApiError` on a non-2xx so the caller can classify the rejection code.
+ */
+export async function postOptimizeJob(input: SubmitOptimizeInput): Promise<JobResponse> {
+  const form = new FormData();
+  if (input.file) {
+    form.set("file", input.file);
+  } else if (input.yamlContent !== undefined) {
+    form.set("yaml_content", input.yamlContent);
+  }
+  if (input.prettify !== undefined) form.set("prettify", String(input.prettify));
+  if (input.timeout !== undefined) form.set("timeout", String(input.timeout));
+  if (input.purpose !== undefined && input.purpose !== "ordinary") {
+    form.set("purpose", input.purpose);
+  }
+  if (input.basis !== undefined) {
+    for (const [key, value] of Object.entries(input.basis)) {
+      if (value !== undefined) form.set(key, value);
+    }
+  }
+  return requestOptimizeJob("/api/optimize", { method: "POST", body: form }, "submit");
+}
+
+/**
+ * Imperative cancel for non-hook callers (the T10 diagnostic canceller).
+ *
+ * Mirrors `useCancelOptimize`. Best-effort: the caller treats a throw as
+ * "cancellation could not be confirmed" rather than a hard failure.
+ */
+export async function postCancelOptimizeJob(
+  jobId: string,
+  signal?: AbortSignal,
+): Promise<JobResponse> {
+  return requestOptimizeJob(
+    `/api/optimize/${encodeURIComponent(jobId)}/cancel`,
+    { method: "POST", signal },
+    "cancel",
+    jobId,
+  );
+}
+
+/**
+ * Poll one job until terminal, the deadline passes, or the signal aborts.
+ *
+ * Used by the T10 diagnostic orchestrator, which runs outside React and so cannot
+ * use `useOptimizeJob`. Polls at the same cadence as the ordinary run controller.
+ * A passed deadline or aborted signal rejects, so the caller can settle the
+ * candidate as failed/unconfirmed rather than hanging.
+ */
+const DIAGNOSTIC_POLL_INTERVAL_MS = 2000;
+
+export async function pollOptimizeJobUntilTerminal(input: {
+  jobId: string;
+  deadlineMs: number;
+  signal: AbortSignal;
+  /** Re-read between polls, so an interruption stops the wait immediately. */
+  shouldAbort?: () => boolean;
+  intervalMs?: number;
+}): Promise<JobResponse> {
+  const { jobId, deadlineMs, signal, shouldAbort } = input;
+  const intervalMs = input.intervalMs ?? DIAGNOSTIC_POLL_INTERVAL_MS;
+  const url = `/api/optimize/${encodeURIComponent(jobId)}`;
+  while (true) {
+    if (signal.aborted) throw new Error("poll aborted");
+    if (shouldAbort?.() === true) throw new Error("poll aborted");
+    if (Date.now() > deadlineMs) throw new Error("poll deadline exceeded");
+    const job = await requestOptimizeJob(url, { signal }, "poll", jobId);
+    if (job.terminal) return job;
+    await delay(intervalMs, signal);
+  }
+}
+
+function delay(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
+    const timer = setTimeout(resolve, ms);
+    signal.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      { once: true },
+    );
+  });
 }
 
 export interface SubmitOptimizeInput {
@@ -53,6 +153,25 @@ export interface SubmitOptimizeInput {
   yamlContent?: string;
   prettify?: boolean;
   timeout?: number;
+  /**
+   * The T09 job purpose. Defaults to `"ordinary"` — the backend's own default — so
+   * the ordinary Optimize path is unchanged. T10's diagnostic orchestrator passes
+   * `"assistant_diagnostic"` so the candidate joins the low-priority queue and the
+   * reserved ordinary admission slot is protected.
+   */
+  purpose?: JobPurpose;
+  /**
+   * The T08 immutable-basis claim, when one could be built (a readable semantic
+   * profile and available Web Crypto). Omitted for an ordinary run submitted
+   * without one — Optimize stays fully usable either way.
+   *
+   * The backend recomputes every field from the bytes it receives and its own live
+   * profile and RESOLVED options, so sending a claim can only ever cause a
+   * rejection, never a false acceptance. That is why `prettify`/`timeout` must be
+   * sent EXPLICITLY alongside a claim: a guessed default changes the recomputed
+   * identity and fails the comparison.
+   */
+  basis?: BasisSubmissionFields;
 }
 
 // POST /api/optimize (multipart). FormData lets the browser set the boundary; the
@@ -70,6 +189,19 @@ export function useSubmitOptimize() {
       }
       if (input.prettify !== undefined) form.set("prettify", String(input.prettify));
       if (input.timeout !== undefined) form.set("timeout", String(input.timeout));
+      // The backend defaults `purpose` to `ordinary`; set it explicitly only when
+      // the caller named a different purpose, so the ordinary path is byte-identical.
+      if (input.purpose !== undefined && input.purpose !== "ordinary") {
+        form.set("purpose", input.purpose);
+      }
+      if (input.basis !== undefined) {
+        // Sent as flat form fields matching api/optimize.py::create_job. Written
+        // field by field so an added basis field that is not forwarded is a
+        // compile error here rather than a silent identity mismatch at the server.
+        for (const [key, value] of Object.entries(input.basis)) {
+          if (value !== undefined) form.set(key, value);
+        }
+      }
 
       return requestOptimizeJob("/api/optimize", { method: "POST", body: form }, "submit");
     },
@@ -342,7 +474,7 @@ export function useOptimizeEventStream(
       });
       cb().onCursorReset?.();
     }
-    const eventsUrl = `/api/optimize/${encodeURIComponent(jobId)}/events`;
+    const eventsUrl = buildOptimizeEventsUrl(jobId);
     const pollUrl = `/api/optimize/${encodeURIComponent(jobId)}`;
 
     // Authoritative poll + cache replacement, reused by the loop's recovery and by
@@ -414,9 +546,16 @@ export function useOptimizeEventStream(
 // Download the workbook (T16 owns the browser save gesture). Throws OptimizeApiError
 // on a code-first `no-artifact` (no schedule) error; score/status come from the
 // retained JobResponse.result, not from response headers.
-export async function fetchOptimizeXlsx(jobId: string): Promise<{ blob: Blob; filename: string }> {
+export async function fetchOptimizeXlsx(
+  jobId: string,
+  // G6.2: threaded so leaving the route can actually stop the transfer rather
+  // than merely ignoring it on arrival. An abort surfaces as the platform's
+  // `AbortError`, which callers treat as silence, not as a download failure.
+  signal?: AbortSignal,
+): Promise<{ blob: Blob; filename: string }> {
   const response = await fetch(`/api/optimize/${encodeURIComponent(jobId)}/xlsx`, {
     cache: "no-store",
+    signal,
   });
   if (!response.ok) {
     const body = await response.json().catch(() => null);
@@ -426,6 +565,27 @@ export async function fetchOptimizeXlsx(jobId: string): Promise<{ blob: Blob; fi
   const filename =
     filenameFromContentDisposition(response.headers.get("content-disposition")) ?? `${jobId}.xlsx`;
   return { blob, filename };
+}
+
+// Fetch the structured roster container (B2/B3). The BFF relays the backend's
+// `application/json` body verbatim — the container is the authoritative v1
+// shape minus `xlsx.base64` (tech-plan §2). Returned as the raw parsed JSON;
+// F2 owns the typed contract and validation. Throws an OptimizeApiError
+// classified with the `roster` endpoint on any non-ok status, so the same
+// `job-not-found` / `no-artifact` / `server-error` taxonomy already drives
+// recovery (a 404 `job_not_found` ⇒ the job is gone, a 409
+// `job_artifact_not_ready` ⇒ a no-capture no-artifact state, a 5xx
+// `roster_container_invalid` ⇒ the captured artifact is unreadable).
+export async function fetchOptimizeRoster(jobId: string, signal?: AbortSignal): Promise<unknown> {
+  const response = await fetch(`/api/optimize/${encodeURIComponent(jobId)}/roster`, {
+    cache: "no-store",
+    signal,
+  });
+  const body = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new OptimizeApiError(response.status, body, "roster");
+  }
+  return body;
 }
 
 // The durable events whose payload MUST update the retained JobResponse. A malformed

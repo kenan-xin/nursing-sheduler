@@ -50,22 +50,29 @@ function StatusBadge({ status }: { status: OptimizeServerInfo["status"] }) {
 export function ServerIdentity({ info }: ServerIdentityProps) {
   return (
     <div className="space-y-3" data-testid="optimize-server-identity">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <span className="text-label font-semibold uppercase tracking-[0.03em] text-ink3">
-            Server
-          </span>
-          <StatusBadge status={info.status} />
-        </div>
-        <Button variant="outline" size="sm" onClick={info.recheck} data-testid="optimize-recheck">
+      {/* One wrapping row — status pill, mono version line, then the re-check
+          action — matching the prototype's backend status bar
+          (ScreenGenerate.dc.html:20-27). The version line is monospaced because
+          DESIGN.md §3 reserves the mono face for IDs and version codes. */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <span className="text-label font-semibold uppercase tracking-[0.03em] text-ink3">
+          Server
+        </span>
+        <StatusBadge status={info.status} />
+        <p className="font-mono text-meta text-ink3">
+          API version: {info.apiVersion ?? "—"} · Frontend version: {info.clientVersion} · Backend
+          version: {info.backendVersion ?? "—"}
+        </p>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={info.recheck}
+          data-testid="optimize-recheck"
+          className="ml-auto"
+        >
           Re-check
         </Button>
       </div>
-
-      <p className="text-meta text-ink3">
-        API version: {info.apiVersion ?? "—"} · Frontend version: {info.clientVersion} · Backend
-        version: {info.backendVersion ?? "—"}
-      </p>
 
       {info.versionTier === "incompatible" ? (
         <Callout tone="warn" data-testid="optimize-version-mismatch">

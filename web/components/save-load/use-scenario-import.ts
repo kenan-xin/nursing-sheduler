@@ -25,7 +25,7 @@ import {
   type ScenarioValidationIssue,
   type VersionConfirmStatus,
 } from "@/lib/scenario";
-import { isScenarioSliceEmpty, loadScenario, useHotStore, useScenarioStore } from "@/lib/store";
+import { isScenarioSliceEmpty, loadScenario, useScenarioStore } from "@/lib/store";
 import { loadConfirmCopy } from "./load-controls-core";
 
 /** Ready-to-render props for the combined load confirmation dialog. */
@@ -123,8 +123,25 @@ export function useScenarioImport(options: UseScenarioImportOptions = {}): UseSc
   // Commit performs EXACTLY ONE state replacement, then publishes the warning list
   // that was already computed from the unchanged target before this call. It never
   // runs guard resolution after mutation.
-  const commit = (target: ImportNormalizationTarget, stagedWarnings: string[]) => {
-    loadScenario(useScenarioStore, useHotStore, target);
+  const commit = async (target: ImportNormalizationTarget, stagedWarnings: string[]) => {
+    // A Load is an atomic scenario SWITCH: it mints a fresh identity holding the
+    // imported content, so the restored file cannot inherit the previous document's
+    // history or receipts.
+    //
+    // AWAITED, and BRANCHED ON. Fire-and-forget cleared the staged file and reported
+    // "Scenario loaded" before the switch had settled — so a refused switch (this tab
+    // is read-only, or was taken over mid-dialog) destroyed the user's staged upload
+    // and told them it had worked. On refusal the staging is kept exactly as it was,
+    // so the same file can be retried after taking editing back.
+    const outcome = await loadScenario(target);
+    if (!outcome.ok) {
+      toast.error(
+        outcome.reason === "not-owner"
+          ? "This schedule is being edited in another tab. Take over editing, then load again."
+          : "Could not load the scenario — nothing was changed.",
+      );
+      return;
+    }
     setWarnings(stagedWarnings.length > 0 ? stagedWarnings : null);
     setStaged(null);
     onCommitted?.();

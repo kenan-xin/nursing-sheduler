@@ -57,7 +57,7 @@ describe("parseStateChangedPayload", () => {
       terminal: true,
       cancel_requested: true,
       controls: { cancellable: false, early_completion_available: false },
-      error: { code: "cancelled", message: "Optimization cancelled." },
+      error: { code: "cancelled", message: "Optimisation cancelled." },
     }),
     failed: running({
       state: "failed",
@@ -111,7 +111,7 @@ describe("parseStateChangedPayload", () => {
     ["failed without error", { ...stateFrames.failed, error: undefined }],
     [
       "failed with cancel error",
-      { ...stateFrames.failed, error: { code: "cancelled", message: "Optimization cancelled." } },
+      { ...stateFrames.failed, error: { code: "cancelled", message: "Optimisation cancelled." } },
     ],
     ["zero queue position", { ...stateFrames.queued, queue_position: 0 }],
     ["fractional queue position", { ...stateFrames.queued, queue_position: 1.5 }],
@@ -282,11 +282,14 @@ const validJobResponse = (over: Partial<JobResponse> = {}): JobResponse => ({
   created_at: "2026-07-20T00:00:00+00:00",
   started_at: "2026-07-20T00:00:01+00:00",
   finished_at: null,
+  expires_at: "2026-07-21T00:00:00+00:00",
   request: {
     input_name: "scenario.yaml",
     solver: "ortools/cp-sat",
     prettify: null,
     timeout_seconds: 300,
+    purpose: "ordinary",
+    basis: null,
   },
   result: null,
   error: null,
@@ -343,7 +346,7 @@ function validStateResponse(state: JobResponse["state"]): JobResponse {
       terminal: true,
       started_at: null,
       finished_at: "2026-07-20T00:01:00+00:00",
-      error: { code: "cancelled", message: "Optimization cancelled." },
+      error: { code: "cancelled", message: "Optimisation cancelled." },
       controls: { cancellable: false, early_completion_available: false },
     };
   }

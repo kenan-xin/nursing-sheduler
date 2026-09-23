@@ -17,6 +17,7 @@
 
 import * as React from "react";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { FaCircleExclamation } from "@/components/icons";
 
 /** A weight field's value — see the file header for the `number | string` contract. */
@@ -126,26 +127,26 @@ export function WeightField({
           value={String(value)}
           onChange={(e) => onChange(parseWeightInput(e.target.value))}
           placeholder={placeholder}
-          className="h-10 font-mono"
+          className="font-mono"
         />
-        <button
-          type="button"
+        <Button
+          variant="outline"
           data-testid={`${testId}-plus-inf`}
           title="Set to positive infinity (∞)"
           onClick={() => onChange(Infinity)}
-          className="h-10 flex-none border border-line px-3 font-mono text-label-md font-semibold hover:bg-panel"
+          className="font-mono"
         >
           +∞
-        </button>
-        <button
-          type="button"
+        </Button>
+        <Button
+          variant="outline"
           data-testid={`${testId}-minus-inf`}
           title="Set to negative infinity (-∞)"
           onClick={() => onChange(-Infinity)}
-          className="h-10 flex-none border border-line px-3 font-mono text-label-md font-semibold hover:bg-panel"
+          className="font-mono"
         >
           −∞
-        </button>
+        </Button>
       </div>
       <p className="text-meta text-ink3">{help}</p>
       {error && (
@@ -167,6 +168,12 @@ export interface WeightPillProps {
  * (ScreenCards.dc.html): a positive weight (incl. `+∞`) is `success` (green), a
  * `-Infinity` is `error` (red), any other negative weight is `warn` (amber), and a
  * zero or invalid weight is neutral.
+ *
+ * Each tone pairs its tint with the matching semantic INK rather than the base
+ * tier (DESIGN.md §5 Badges / the Redundant Signal Rule). The two coincide for
+ * success and warn in light mode but diverge for error in both themes and for all
+ * three in dark, so `text-success` on `--successtint` was a status carried by
+ * colour alone the moment the theme flipped.
  */
 export function WeightPill({ value, className }: WeightPillProps) {
   const label = formatWeight(value);
@@ -181,15 +188,15 @@ export function WeightPill({ value, className }: WeightPillProps) {
             ? "warn"
             : "neutral";
   const toneClass = {
-    success: "border-success bg-successtint text-success",
-    error: "border-error bg-errortint text-error",
-    warn: "border-warn bg-warntint text-warn",
+    success: "border-success bg-successtint text-successink",
+    error: "border-error bg-errortint text-errorink",
+    warn: "border-warn bg-warntint text-warnink",
     neutral: "border-line2 bg-panel text-ink2",
   }[tone];
   return (
     <span
       data-testid="weight-pill"
-      className={`inline-flex items-center whitespace-nowrap border px-2.5 py-1 font-mono text-label font-semibold tracking-[0.03em] ${toneClass} ${className ?? ""}`}
+      className={`inline-flex items-center whitespace-nowrap rounded-chip border px-2.5 py-1 font-mono text-label font-semibold tracking-[0.03em] ${toneClass} ${className ?? ""}`}
     >
       WEIGHT {label}
     </span>

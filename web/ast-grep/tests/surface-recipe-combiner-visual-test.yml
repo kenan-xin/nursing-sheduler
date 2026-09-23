@@ -1,0 +1,46 @@
+id: surface-recipe-combiner-visual
+valid:
+  # THE SANCTIONED PRODUCTION SHAPE. A specialized owner calls the recipe directly
+  # and adds layout with the combiner -- exactly what
+  # `components/optimize/optimize-and-export-screen.tsx` authors.
+  - |
+    <div className={cn(surfaceVariants({ role: "surface", geometry: "card" }), "px-4 py-3")} />
+  - |
+    cn(surfaceVariants({ role: "well", geometry: "control" }), "flex items-center gap-2");
+  # Recipe AXIS values are governed by the recipe's own union, not by the layout
+  # vocabulary; without the exclusion every legal role would report here.
+  - |
+    cn(surfaceVariants({ role: "drop-target", geometry: "square", motion: "overlay" }), "flex");
+  # A comparison OPERAND is a discriminator, not a rendered class.
+  - |
+    cn(variant === "side" ? surfaceVariants({ role: "drawer" }) : surfaceVariants({ role: "raised" }), "flex");
+  # A `cn(...)` with no recipe result is not this rule's business.
+  - |
+    cn("bg-panel", "shadow-3");
+  # A non-literal argument has no authored literal to inspect (recorded narrowing).
+  - |
+    cn(surfaceVariants({ role: "well" }), extraClasses);
+invalid:
+  # ---------------------------------------------------------------------------
+  # BOUNDED REVIEW ROUND 1. Changing the production call's literal to a paint token
+  # was invisible to BOTH original surface rules.
+  # ---------------------------------------------------------------------------
+  - |
+    <div className={cn(surfaceVariants({ role: "surface", geometry: "card" }), "bg-panel")} />
+  - |
+    cn(surfaceVariants({ role: "well", geometry: "control" }), "shadow-3");
+  # A legal token beside an illegal one still reports.
+  - |
+    cn(surfaceVariants({ role: "well" }), "flex rounded-card");
+  # The fail-closed vocabulary rejects visibility and arbitrary values here too.
+  - |
+    cn(surfaceVariants({ role: "well" }), "box-decoration-clone");
+  - |
+    cn(surfaceVariants({ role: "well" }), "w-[calc(100%-2rem)]");
+  # A ternary BRANCH reaches the class string even though its test does not.
+  - |
+    cn(surfaceVariants({ role: "well" }), flag ? "flex" : "animate-pulse");
+  # A GUARDED class (`&&`) reaches the class string too -- pinned here so the
+  # equality-operand exclusion can never be widened to `binary_expression` by kind.
+  - |
+    cn(surfaceVariants({ role: "well" }), isOpen && "shadow-3");

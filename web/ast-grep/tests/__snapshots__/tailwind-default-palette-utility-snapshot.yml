@@ -1,0 +1,65 @@
+id: tailwind-default-palette-utility
+snapshots:
+  ? |
+    const cls = "[&_svg]:text-gray-400";
+  : labels:
+      - source: "[&_svg]:text-gray-400"
+        style: primary
+        start: 13
+        end: 34
+  ? |
+    const cls = "bg-black";
+  : labels:
+      - source: bg-black
+        style: primary
+        start: 13
+        end: 21
+  ? |
+    const cls = "bg-black/40";
+  : labels:
+      - source: bg-black/40
+        style: primary
+        start: 13
+        end: 24
+  ? |
+    const cls = "border-slate-300 p-2";
+  : labels:
+      - source: border-slate-300 p-2
+        style: primary
+        start: 13
+        end: 33
+  ? |
+    const cls = "data-[state=open]:bg-black";
+  : labels:
+      - source: data-[state=open]:bg-black
+        style: primary
+        start: 13
+        end: 39
+  ? |
+    const cls = "group-data-[checked]/switch:text-white";
+  : labels:
+      - source: group-data-[checked]/switch:text-white
+        style: primary
+        start: 13
+        end: 51
+  ? |
+    const cls = "hover:!bg-black";
+  : labels:
+      - source: hover:!bg-black
+        style: primary
+        start: 13
+        end: 28
+  ? |
+    const cls = "hover:bg-red-500";
+  : labels:
+      - source: hover:bg-red-500
+        style: primary
+        start: 13
+        end: 29
+  ? |
+    const cls = "p-2 dark:text-white";
+  : labels:
+      - source: p-2 dark:text-white
+        style: primary
+        start: 13
+        end: 32

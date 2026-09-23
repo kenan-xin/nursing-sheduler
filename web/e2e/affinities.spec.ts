@@ -37,30 +37,49 @@ type AffinityCard = {
 
 type NsWindow = {
   __nsStore: {
-    scenario: {
-      getState: () => Record<string, unknown> & {
-        cardsByKind: { affinities: AffinityCard[] };
-        mutateScenario: (patch: Record<string, unknown>) => void;
-        recordBackup: () => void;
-      };
-      temporal: {
-        getState: () => { pastStates: unknown[]; futureStates: unknown[] };
-      };
+    /** The repository command bus — the product's only durable write path. */
+    commands: {
+      mutate(patch: Record<string, unknown>): Promise<{ ok: boolean }>;
+      recordBackup(backupFingerprint: string): Promise<{ ok: boolean }>;
+      undo(): Promise<{ ok: boolean }>;
+      redo(): Promise<{ ok: boolean }>;
+      takeover(): Promise<{ ok: boolean }>;
     };
+    drain(): Promise<void>;
+    historyDepth(): Promise<number>;
+    authority(): {
+      scenarioId: string | null;
+      documentRevision: number;
+      ownership: string;
+      canUndo: boolean;
+      canRedo: boolean;
+    };
+    scenario(): Record<string, unknown> & { cardsByKind: { affinities: AffinityCard[] } };
     backupStatus: () => "none" | "current" | "stale";
+    backupFingerprint: () => string;
   };
 };
 
-/** Wait for the test bridge to expose the live store on `window`. */
+/**
+ * Wait until the bridge is mounted AND authority bring-up has resolved.
+ *
+ * `scenarioId` is the honest readiness condition post-T03: until the authority has
+ * selected a scenario and acquired its writer lease, the repository refuses every
+ * command — so a seed issued before that point writes nothing, and the row it was
+ * meant to create simply never appears. `__nsStore` existing is not enough.
+ */
 async function waitForStore(page: Page) {
-  await page.waitForFunction(() => Boolean((window as unknown as NsWindow).__nsStore));
+  await page.waitForFunction(() => {
+    const store = (window as unknown as NsWindow).__nsStore;
+    return Boolean(store) && store.authority().scenarioId !== null;
+  });
 }
 
 /** Seed the durable store directly (the editor's store is the same singleton). */
 async function seed(page: Page, patch: Record<string, unknown>) {
   await waitForStore(page);
-  await page.evaluate((p) => {
-    (window as unknown as NsWindow).__nsStore.scenario.getState().mutateScenario(p);
+  await page.evaluate(async (p) => {
+    await (window as unknown as NsWindow).__nsStore.commands.mutate(p);
   }, patch);
 }
 
@@ -75,17 +94,18 @@ async function gotoReady(page: Page) {
   await expect(page.getByTestId("add-card-toggle")).toBeVisible();
 }
 
+/** The COMMITTED cards — drained, so a read never outruns the command that wrote. */
 function readAffinities(page: Page) {
-  return page.evaluate(
-    () => (window as unknown as NsWindow).__nsStore.scenario.getState().cardsByKind.affinities,
-  );
+  return page.evaluate(async () => {
+    const store = (window as unknown as NsWindow).__nsStore;
+    await store.drain();
+    return store.scenario().cardsByKind.affinities;
+  });
 }
 
 /** store.temporal undo depth — how many tracked mutations are on the past stack. */
 function pastCount(page: Page) {
-  return page.evaluate(
-    () => (window as unknown as NsWindow).__nsStore.scenario.temporal.getState().pastStates.length,
-  );
+  return page.evaluate(() => (window as unknown as NsWindow).__nsStore.historyDepth());
 }
 
 const BASE_SEED = {
@@ -146,7 +166,7 @@ test.describe.serial("T12 shift affinities editor (M1 clone)", () => {
     expect(cards[0].date).toEqual(["WEEKEND"]);
     expect(cards[0].weight).toBe(30);
     expect(cards[0].disabled).toBeUndefined();
-    // The compound add is exactly ONE tracked mutation (one zundo entry).
+    // The compound add is exactly ONE tracked mutation (one undo entry).
     expect((await pastCount(page)) - before).toBe(1);
   });
 
@@ -545,9 +565,12 @@ test.describe.serial("T12 Affinities — open-draft navigation guard", () => {
     await seed(page, BASE_SEED);
     // Record a backup so the scenario's backup is CURRENT — isolates draftOpen as
     // the only reason the guard can fire.
-    await page.evaluate(() =>
-      (window as unknown as NsWindow).__nsStore.scenario.getState().recordBackup(),
-    );
+    await page.evaluate(async () => {
+      const store = (window as unknown as NsWindow).__nsStore;
+      // The fingerprint is bound to the document being backed up — the same binding a
+      // real Download makes over the bytes it emitted.
+      await store.commands.recordBackup(store.backupFingerprint());
+    });
     expect(
       await page.evaluate(() => (window as unknown as NsWindow).__nsStore.backupStatus()),
     ).toBe("current");

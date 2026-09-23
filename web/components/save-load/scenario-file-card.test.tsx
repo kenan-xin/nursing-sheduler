@@ -4,22 +4,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { prepareScenarioLoad, serializeScenario } from "@/lib/scenario";
 import { makeValidUiState } from "@/lib/scenario/test-fixtures";
-import {
-  drainScenarioPersist,
-  loadScenario,
-  pickScenario,
-  resetToNewScenario,
-  useHotStore,
-  useScenarioStore,
-} from "@/lib/store";
+import { loadScenario, pickScenario, useScenarioStore } from "@/lib/store";
 import { ScenarioFileCard, type ScenarioFileCardProps } from "./scenario-file-card";
+import { resetScenarioForTest, drainScenarioCommands } from "@/lib/store/test-authority";
 
 async function seedValidScenario() {
-  await resetToNewScenario(useScenarioStore, useHotStore);
-  await drainScenarioPersist(useScenarioStore);
+  await resetScenarioForTest();
+  await drainScenarioCommands();
   const result = prepareScenarioLoad(serializeScenario(makeValidUiState()));
   if (!result.target) throw new Error("fixture must normalize cleanly");
-  loadScenario(useScenarioStore, useHotStore, result.target);
+  loadScenario(result.target);
 }
 
 function renderCard(overrides: Partial<ScenarioFileCardProps> = {}) {
@@ -40,12 +34,12 @@ beforeEach(async () => {
   await seedValidScenario();
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
 });
 
 describe("ScenarioFileCard — the prototype's four file actions", () => {
-  it("renders Download, Upload, Copy, and Edit YAML together in the canonical order", () => {
+  it("renders Download, Upload, Copy, and Edit YAML together in the canonical order", async () => {
     renderCard();
     const card = screen.getByTestId("scenario-file-card");
     const buttons = within(card).getAllByRole("button");
@@ -57,7 +51,7 @@ describe("ScenarioFileCard — the prototype's four file actions", () => {
     ]);
   });
 
-  it("Upload and Edit YAML are triggers owned by the workspace container", () => {
+  it("Upload and Edit YAML are triggers owned by the workspace container", async () => {
     const props = renderCard();
 
     fireEvent.click(screen.getByTestId("scenario-upload-button"));
@@ -67,7 +61,7 @@ describe("ScenarioFileCard — the prototype's four file actions", () => {
     expect(props.onStartEdit).toHaveBeenCalledTimes(1);
   });
 
-  it("disables Edit YAML when the draft has no valid export to seed from, or while already editing", () => {
+  it("disables Edit YAML when the draft has no valid export to seed from, or while already editing", async () => {
     const { rerender } = render(
       <ScenarioFileCard
         scenario={pickScenario(useScenarioStore.getState())}
@@ -93,7 +87,7 @@ describe("ScenarioFileCard — the prototype's four file actions", () => {
     expect(screen.getByTestId("scenario-edit-yaml-button")).toBeDisabled();
   });
 
-  it("surfaces a failed Upload's V-issues below the action row", () => {
+  it("surfaces a failed Upload's V-issues below the action row", async () => {
     renderCard({
       importIssues: [{ path: "preferences[0]", message: "Unknown preference type" }],
     });
@@ -108,7 +102,7 @@ describe("ScenarioFileCard — Copy clipboard failure (FR-SL-09)", () => {
   // fresh writeText to control resolve/reject timing.
   const originalClipboard = navigator.clipboard;
 
-  afterEach(() => {
+  afterEach(async () => {
     Object.defineProperty(navigator, "clipboard", {
       value: originalClipboard,
       configurable: true,

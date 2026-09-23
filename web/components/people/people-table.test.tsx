@@ -3,17 +3,13 @@ import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { ScenarioUiState } from "@/lib/scenario";
-import {
-  drainScenarioPersist,
-  resetToNewScenario,
-  useHotStore,
-  useScenarioStore,
-} from "@/lib/store";
+import { useScenarioStore, scenarioCommands } from "@/lib/store";
 import type { EntityId } from "@/components/entity-editor/core";
 import { PeopleTable } from "./people-table";
+import { resetScenarioForTest, drainScenarioCommands, undoDepth } from "@/lib/store/test-authority";
 
 // The bespoke Staff table drives the SAME pure core + scenario store as the retired
-// generic editor: every action is ONE `mutateScenario` (one zundo entry). These tests
+// generic editor: every action is ONE `scenarioCommands.mutate` (one undo entry). These tests
 // assert the durable read model (staff / staffGroups) and the temporal depth directly,
 // plus the load-bearing DR-2 rules — inline name→id with description PRESERVED, the
 // reserved-`ALL` rejection, typed-id identity, reorder gating, and the empty state.
@@ -26,22 +22,24 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/people",
 }));
 
-function seed(patch: Partial<ScenarioUiState>) {
-  act(() => {
-    useScenarioStore.getState().mutateScenario(patch);
+async function seed(patch: Partial<ScenarioUiState>) {
+  await act(async () => {
+    await scenarioCommands.mutate(patch);
   });
 }
-function staff() {
+async function staff() {
+  await drainScenarioCommands();
   return useScenarioStore.getState().staff;
 }
-function staffGroups() {
+async function staffGroups() {
+  await drainScenarioCommands();
   return useScenarioStore.getState().staffGroups;
 }
-function membersOf(id: string): EntityId[] {
-  return staffGroups().find((g) => g.id === id)?.members ?? [];
+async function membersOf(id: string): Promise<EntityId[]> {
+  return (await staffGroups()).find((g) => g.id === id)?.members ?? [];
 }
-function historyLength() {
-  return useScenarioStore.temporal.getState().pastStates.length;
+async function historyLength(): Promise<Promise<number>> {
+  return undoDepth();
 }
 
 const sk = (id: string) => `string:${id}`;
@@ -49,14 +47,14 @@ const nk = (n: number) => `number:${n}`;
 
 beforeEach(async () => {
   vi.clearAllMocks();
-  await resetToNewScenario(useScenarioStore, useHotStore);
-  await drainScenarioPersist(useScenarioStore);
+  await resetScenarioForTest();
+  await drainScenarioCommands();
 });
 afterEach(() => cleanup());
 
 describe("PeopleTable — read + toolbar", () => {
-  it("renders a nurse row with ordinal, avatar initials, name, and group chips", () => {
-    seed({
+  it("renders a nurse row with ordinal, avatar initials, name, and group chips", async () => {
+    await seed({
       staff: [{ id: "Aisha Rahman", history: [] }],
       staffGroups: [{ id: "Seniors", members: ["Aisha Rahman"] }],
     });
@@ -70,8 +68,8 @@ describe("PeopleTable — read + toolbar", () => {
     expect(within(row).getByText("Seniors")).toBeInTheDocument();
   });
 
-  it("shows a live result count that reflects the search filter", () => {
-    seed({
+  it("shows a live result count that reflects the search filter", async () => {
+    await seed({
       staff: [
         { id: "Alice", history: [] },
         { id: "Bob", history: [] },
@@ -85,8 +83,8 @@ describe("PeopleTable — read + toolbar", () => {
     expect(screen.getByTestId("people-count")).toHaveTextContent("1 of 2 nurses match");
   });
 
-  it("renders a No-matches empty state with a working Clear search", () => {
-    seed({ staff: [{ id: "Alice", history: [] }], staffGroups: [] });
+  it("renders a No-matches empty state with a working Clear search", async () => {
+    await seed({ staff: [{ id: "Alice", history: [] }], staffGroups: [] });
     render(<PeopleTable />);
 
     fireEvent.change(screen.getByTestId("people-search"), { target: { value: "zzz" } });
@@ -95,15 +93,15 @@ describe("PeopleTable — read + toolbar", () => {
     expect(screen.getByTestId(`people-row-${sk("Alice")}`)).toBeInTheDocument();
   });
 
-  it("opens the upload dialog from the toolbar", () => {
-    seed({ staff: [], staffGroups: [] });
+  it("opens the upload dialog from the toolbar", async () => {
+    await seed({ staff: [], staffGroups: [] });
     render(<PeopleTable />);
     fireEvent.click(screen.getByTestId("people-upload"));
     expect(screen.getByTestId("upload-dialog")).toBeInTheDocument();
   });
 
-  it("has an accessible table: caption, column headers, named actions column", () => {
-    seed({ staff: [{ id: "Alice", history: [] }], staffGroups: [] });
+  it("has an accessible table: caption, column headers, named actions column", async () => {
+    await seed({ staff: [{ id: "Alice", history: [] }], staffGroups: [] });
     render(<PeopleTable />);
     const table = screen.getByTestId("people-table");
     expect(within(table).getByText(/Ward staff/i)).toBeInTheDocument(); // caption
@@ -113,24 +111,24 @@ describe("PeopleTable — read + toolbar", () => {
 });
 
 describe("PeopleTable — add / duplicate / delete", () => {
-  it("adds a nurse via the inline draft row (history stamped, one undo entry)", () => {
-    seed({ staff: [], staffGroups: [] });
+  it("adds a nurse via the inline draft row (history stamped, one undo entry)", async () => {
+    await seed({ staff: [], staffGroups: [] });
     render(<PeopleTable />);
 
     fireEvent.click(screen.getByTestId("people-add"));
     fireEvent.change(screen.getByTestId("people-name-input-__new__"), {
       target: { value: "Priya" },
     });
-    const before = historyLength();
+    const before = await historyLength();
     fireEvent.click(screen.getByTestId("people-save-__new__"));
 
-    expect(staff().map((p) => p.id)).toEqual(["Priya"]);
-    expect(staff()[0].history).toEqual([]);
-    expect(historyLength()).toBe(before + 1);
+    expect((await staff()).map((p) => p.id)).toEqual(["Priya"]);
+    expect((await staff())[0].history).toEqual([]);
+    expect(await historyLength()).toBe(before + 1);
   });
 
-  it("rejects the reserved keyword ALL (case-insensitive): Save disabled + invalid", () => {
-    seed({ staff: [], staffGroups: [] });
+  it("rejects the reserved keyword ALL (case-insensitive): Save disabled + invalid", async () => {
+    await seed({ staff: [], staffGroups: [] });
     render(<PeopleTable />);
 
     fireEvent.click(screen.getByTestId("people-add"));
@@ -142,8 +140,8 @@ describe("PeopleTable — add / duplicate / delete", () => {
     expect(screen.getByTestId("people-save-__new__")).toBeDisabled();
   });
 
-  it("duplicates a nurse (copy inserted right after the source)", () => {
-    seed({
+  it("duplicates a nurse (copy inserted right after the source)", async () => {
+    await seed({
       staff: [
         { id: "Alice", history: [] },
         { id: "Bob", history: [] },
@@ -152,11 +150,11 @@ describe("PeopleTable — add / duplicate / delete", () => {
     });
     render(<PeopleTable />);
     fireEvent.click(screen.getByTestId(`people-dup-${sk("Alice")}`));
-    expect(staff().map((p) => p.id)).toEqual(["Alice", "Alice copy", "Bob"]);
+    expect((await staff()).map((p) => p.id)).toEqual(["Alice", "Alice copy", "Bob"]);
   });
 
-  it("deletes a nurse immediately (no confirm dialog)", () => {
-    seed({
+  it("deletes a nurse immediately (no confirm dialog)", async () => {
+    await seed({
       staff: [
         { id: "Alice", history: [] },
         { id: "Bob", history: [] },
@@ -165,13 +163,13 @@ describe("PeopleTable — add / duplicate / delete", () => {
     });
     render(<PeopleTable />);
     fireEvent.click(screen.getByTestId(`people-delete-${sk("Alice")}`));
-    expect(staff().map((p) => p.id)).toEqual(["Bob"]);
+    expect((await staff()).map((p) => p.id)).toEqual(["Bob"]);
   });
 });
 
 describe("PeopleTable — inline edit (name→id + description preservation)", () => {
-  it("renames via the inline name input and PRESERVES the existing description", () => {
-    seed({
+  it("renames via the inline name input and PRESERVES the existing description", async () => {
+    await seed({
       staff: [{ id: "P1", description: "Charge nurse", history: ["h"] }],
       staffGroups: [{ id: "G", members: ["P1"] }],
     });
@@ -183,16 +181,16 @@ describe("PeopleTable — inline edit (name→id + description preservation)", (
     });
     fireEvent.click(screen.getByTestId(`people-save-${sk("P1")}`));
 
-    const p = staff()[0];
+    const p = (await staff())[0];
     expect(p.id).toBe("Alice");
     expect(p.description).toBe("Charge nurse"); // preserved through the rename
     expect(p.history).toEqual(["h"]);
     // Rename cascade rewrote the group member ref.
-    expect(membersOf("G")).toEqual(["Alice"]);
+    expect(await membersOf("G")).toEqual(["Alice"]);
   });
 
-  it("assigns a group via inline toggle chips as one commit / one undo entry; preserves description", () => {
-    seed({
+  it("assigns a group via inline toggle chips as one commit / one undo entry; preserves description", async () => {
+    await seed({
       staff: [{ id: "P1", description: "note", history: [] }],
       staffGroups: [{ id: "G", members: [] }],
     });
@@ -200,21 +198,21 @@ describe("PeopleTable — inline edit (name→id + description preservation)", (
 
     fireEvent.click(screen.getByTestId(`people-edit-${sk("P1")}`));
     fireEvent.click(screen.getByTestId(`people-group-${sk("P1")}-G`));
-    const before = historyLength();
+    const before = await historyLength();
     fireEvent.click(screen.getByTestId(`people-save-${sk("P1")}`));
 
-    expect(membersOf("G")).toEqual(["P1"]);
-    expect(staff()[0].description).toBe("note");
-    expect(historyLength()).toBe(before + 1);
+    expect(await membersOf("G")).toEqual(["P1"]);
+    expect((await staff())[0].description).toBe("note");
+    expect(await historyLength()).toBe(before + 1);
 
-    act(() => {
-      useScenarioStore.temporal.getState().undo();
+    await act(async () => {
+      await scenarioCommands.undo();
     });
-    expect(membersOf("G")).toEqual([]);
+    expect(await membersOf("G")).toEqual([]);
   });
 
-  it("an external change while editing closes the form with no stale write (stale-draft)", () => {
-    seed({
+  it("an external change while editing closes the form with no stale write (stale-draft)", async () => {
+    await seed({
       staff: [
         { id: "P1", history: [] },
         { id: "P2", history: [] },
@@ -227,7 +225,7 @@ describe("PeopleTable — inline edit (name→id + description preservation)", (
     fireEvent.click(screen.getByTestId(`people-group-${sk("P1")}-G`)); // local draft, uncommitted
 
     // External change to the group slice (undo/redo or cascade elsewhere).
-    seed({
+    await seed({
       staffGroups: [
         { id: "G", members: [] },
         { id: "H", members: [] },
@@ -235,13 +233,13 @@ describe("PeopleTable — inline edit (name→id + description preservation)", (
     });
 
     expect(screen.queryByTestId(`people-edit-row-${sk("P1")}`)).not.toBeInTheDocument();
-    expect(membersOf("G")).toEqual([]); // draft was never written
+    expect(await membersOf("G")).toEqual([]); // draft was never written
   });
 });
 
 describe("PeopleTable — typed-id identity + reorder", () => {
-  it('keeps numeric 1 and string "1" distinct; editing numeric leaves the string sibling', () => {
-    seed({
+  it('keeps numeric 1 and string "1" distinct; editing numeric leaves the string sibling', async () => {
+    await seed({
       staff: [
         { id: 1, history: [] },
         { id: "1", history: [] },
@@ -259,11 +257,11 @@ describe("PeopleTable — typed-id identity + reorder", () => {
     });
     fireEvent.click(screen.getByTestId(`people-save-${nk(1)}`));
 
-    expect(staff().map((p) => p.id)).toEqual(["one", "1"]);
+    expect((await staff()).map((p) => p.id)).toEqual(["one", "1"]);
   });
 
-  it("reorders via the Up/Down keyboard fallback (one undo entry); gated off while searching", () => {
-    seed({
+  it("reorders via the Up/Down keyboard fallback (one undo entry); gated off while searching", async () => {
+    await seed({
       staff: [
         { id: "P1", history: [] },
         { id: "P2", history: [] },
@@ -274,10 +272,10 @@ describe("PeopleTable — typed-id identity + reorder", () => {
     render(<PeopleTable />);
 
     expect(screen.getByTestId(`people-move-up-${sk("P1")}`)).toBeDisabled();
-    const before = historyLength();
+    const before = await historyLength();
     fireEvent.click(screen.getByTestId(`people-move-down-${sk("P1")}`));
-    expect(staff().map((p) => p.id)).toEqual(["P2", "P1", "P3"]);
-    expect(historyLength()).toBe(before + 1);
+    expect((await staff()).map((p) => p.id)).toEqual(["P2", "P1", "P3"]);
+    expect(await historyLength()).toBe(before + 1);
 
     // Searching hides the reorder controls (drag + keyboard both gated off).
     fireEvent.change(screen.getByTestId("people-search"), { target: { value: "P" } });

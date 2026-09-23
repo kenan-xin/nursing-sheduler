@@ -1,0 +1,283 @@
+id: inset-hairline-box-authority
+snapshots:
+  ? |
+    async function build() {
+      const { createElement: h } = await import("react");
+      return h(
+        "div",
+        {
+          ...domProps,
+          ref,
+          "data-level": "well",
+          "data-geometry": "control",
+          "data-emphasis": "hairline",
+          "data-slot": "shift-tile",
+          className:
+            "flex flex-none items-center justify-center bg-panel shadow-well rounded-control border border-line2",
+          style: { width: 42, height: 42 },
+        },
+        children,
+      );
+    }
+  : labels:
+      - source: import("react")
+        style: primary
+        start: 62
+        end: 77
+  ? |
+    const R = await import("react");
+  : labels:
+      - source: import("react")
+        style: primary
+        start: 16
+        end: 31
+  ? |
+    const R = require("react");
+  : labels:
+      - source: require("react")
+        style: primary
+        start: 10
+        end: 26
+  ? |
+    const R = require(`react`);
+  : labels:
+      - source: require(`react`)
+        style: primary
+        start: 10
+        end: 26
+  ? |
+    const U = await import("@/lib/utils");
+  : labels:
+      - source: import("@/lib/utils")
+        style: primary
+        start: 16
+        end: 37
+  ? |
+    const X = (
+      <Surface level="well">
+        <div className="bg-panel" />
+      </Surface>
+    );
+  : labels:
+      - source: <div className="bg-panel" />
+        style: primary
+        start: 41
+        end: 69
+  ? |
+    const X = <Card className="bg-panel" />;
+  : labels:
+      - source: <Card className="bg-panel" />
+        style: primary
+        start: 10
+        end: 39
+  ? |
+    const X = <div className="flex bg-panel shadow-well rounded-control border border-line2" />;
+  : labels:
+      - source: <div className="flex bg-panel shadow-well rounded-control border border-line2" />
+        style: primary
+        start: 10
+        end: 91
+  ? |
+    const X = <div style={{ backgroundColor: "var(--color-panel)", boxShadow: "inset 0 1px 2px" }} />;
+  : labels:
+      - source: '<div style={{ backgroundColor: "var(--color-panel)", boxShadow: "inset 0 1px 2px" }} />'
+        style: primary
+        start: 10
+        end: 97
+  ? |
+    const X = cloneElement(child, { className: "bg-panel" });
+  : labels:
+      - source: 'cloneElement(child, { className: "bg-panel" })'
+        style: primary
+        start: 10
+        end: 56
+      - source: cloneElement
+        style: secondary
+        start: 10
+        end: 22
+  ? |
+    const X = h.createElement("div", { className: "bg-panel shadow-well" });
+  : labels:
+      - source: 'h.createElement("div", { className: "bg-panel shadow-well" })'
+        style: primary
+        start: 10
+        end: 71
+      - source: h.createElement
+        style: secondary
+        start: 10
+        end: 25
+  ? |
+    const req = createRequire(import.meta.url);
+    const R = req("react");
+  : labels:
+      - source: req("react")
+        style: primary
+        start: 54
+        end: 66
+  ? |
+    const { createElement: h } = require("react");
+    const X = h(
+      "div",
+      {
+        ...domProps,
+        ref,
+        "data-level": "well",
+        "data-geometry": "control",
+        "data-emphasis": "hairline",
+        "data-slot": "shift-tile",
+        className:
+          "flex flex-none items-center justify-center bg-panel shadow-well rounded-control border border-line2",
+        style: { width: 42, height: 42 },
+      },
+      children,
+    );
+  : labels:
+      - source: require("react")
+        style: primary
+        start: 29
+        end: 45
+  ? |
+    const { jsx } = require("react/jsx-runtime");
+  : labels:
+      - source: require("react/jsx-runtime")
+        style: primary
+        start: 16
+        end: 44
+  ? |
+    const { jsxs } = await import("react/jsx-runtime");
+  : labels:
+      - source: import("react/jsx-runtime")
+        style: primary
+        start: 23
+        end: 50
+  ? |
+    import * as React from "react";
+  : labels:
+      - source: "* as React"
+        style: primary
+        start: 7
+        end: 17
+      - source: "* as React"
+        style: secondary
+        start: 7
+        end: 17
+  ? |
+    import * as React from "react";
+    const X = React.createElement(
+      "div",
+      {
+        ...domProps,
+        ref,
+        "data-level": "well",
+        "data-geometry": "control",
+        "data-emphasis": "hairline",
+        "data-slot": "shift-tile",
+        className:
+          "flex flex-none items-center justify-center bg-panel shadow-well rounded-control border border-line2",
+        style: { width: 42, height: 42 },
+      },
+      children,
+    );
+  : labels:
+      - source: "* as React"
+        style: primary
+        start: 7
+        end: 17
+      - source: "* as React"
+        style: secondary
+        start: 7
+        end: 17
+  ? |
+    import * as Rx from "react";
+  : labels:
+      - source: "* as Rx"
+        style: primary
+        start: 7
+        end: 14
+      - source: "* as Rx"
+        style: secondary
+        start: 7
+        end: 14
+  ? |
+    import React from "react";
+  : labels:
+      - source: React
+        style: primary
+        start: 7
+        end: 12
+      - source: React
+        style: secondary
+        start: 7
+        end: 12
+  ? |
+    import React, { forwardRef } from "react";
+  : labels:
+      - source: React, { forwardRef }
+        style: primary
+        start: 7
+        end: 28
+      - source: React
+        style: secondary
+        start: 7
+        end: 12
+  ? |
+    import { Surface } from "./surface";
+  : labels:
+      - source: import { Surface } from "./surface";
+        style: primary
+        start: 0
+        end: 36
+  ? |
+    import { Surface } from "@/components/ui/impostor-surface";
+  : labels:
+      - source: import { Surface } from "@/components/ui/impostor-surface";
+        style: primary
+        start: 0
+        end: 59
+  ? |
+    import { cloneElement, isValidElement } from "react";
+  : labels:
+      - source: cloneElement
+        style: primary
+        start: 9
+        end: 21
+  ? |
+    import { cn } from "@/lib/utils";
+  : labels:
+      - source: import { cn } from "@/lib/utils";
+        style: primary
+        start: 0
+        end: 33
+  ? |
+    import { createElement as h } from "react";
+  : labels:
+      - source: createElement as h
+        style: primary
+        start: 9
+        end: 27
+  ? |
+    import { createElement } from "react";
+  : labels:
+      - source: createElement
+        style: primary
+        start: 9
+        end: 22
+  ? |
+    import { forwardRef as createElement } from "react";
+    const X = createElement("div", { className: "bg-panel" }, children);
+  : labels:
+      - source: 'createElement("div", { className: "bg-panel" }, children)'
+        style: primary
+        start: 63
+        end: 120
+      - source: createElement
+        style: secondary
+        start: 63
+        end: 76
+  ? |
+    import { jsx, jsxs } from "react/jsx-runtime";
+  : labels:
+      - source: import { jsx, jsxs } from "react/jsx-runtime";
+        style: primary
+        start: 0
+        end: 46

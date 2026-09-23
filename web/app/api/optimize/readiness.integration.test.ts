@@ -6,6 +6,7 @@ import { GET as poll } from "@/app/api/optimize/[id]/route";
 import { POST as cancel } from "@/app/api/optimize/[id]/cancel/route";
 import { POST as finishNow } from "@/app/api/optimize/[id]/finish-now/route";
 import { GET as downloadXlsx } from "@/app/api/optimize/[id]/xlsx/route";
+import { GET as downloadRoster } from "@/app/api/optimize/[id]/roster/route";
 import { GET as events } from "@/app/api/optimize/[id]/events/route";
 
 // Real-transport readiness sensitivity (ticket verification): over real sockets,
@@ -159,6 +160,14 @@ const routes: Array<[string, () => Promise<Response>]> = [
     "xlsx",
     () =>
       downloadXlsx(new Request("http://localhost/api/optimize/opt_int/xlsx"), params("opt_int")),
+  ],
+  [
+    "roster",
+    () =>
+      downloadRoster(
+        new Request("http://localhost/api/optimize/opt_int/roster"),
+        params("opt_int"),
+      ),
   ],
 ];
 

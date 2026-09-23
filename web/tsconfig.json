@@ -5,6 +5,15 @@
     "allowJs": true,
     "skipLibCheck": true,
     "strict": true,
+    // Adopted by custom-AST ticket 2. Each of these had a ZERO-finding baseline on the
+    // tree as it stood (`noImplicitOverride` needed six `override` keywords in AG-UI
+    // agent subclasses and nothing else), so they are guardrails that are on rather
+    // than aspirations that are off. The three rejected candidates and their concrete
+    // costs are recorded in the ticket's capability matrix.
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "allowUnreachableCode": false,
+    "allowUnusedLabels": false,
     "noEmit": true,
     "esModuleInterop": true,
     "module": "esnext",

@@ -130,3 +130,102 @@ describe("ContractedForm — uncredited-leave advisory (qq0.23d)", () => {
     expect(screen.queryByTestId("contracted-leave-advisory")).toBeNull();
   });
 });
+
+// R4 — the user-reported selected-segment defect, guarded at the authoring layer.
+//
+// The browser-side proof (computed colour + real WCAG contrast across all eight
+// theme x accent cells) lives in `e2e/counts.spec.ts`; jsdom computes no colours,
+// so it cannot repeat that and does not pretend to. What it CAN do is fail fast on
+// the authoring mistake itself, which is the thing a future edit would reintroduce:
+// a foreground class on the selected segment's subtree. That is a genuinely
+// different guard, not a weaker copy of the same one — the E2E catches a broken
+// RESULT, this catches the broken INSTRUCTION, and the second is what a reviewer
+// reads in the diff.
+describe("ContractedForm — policy toggle selected foreground (R4 user-reported defect)", () => {
+  /** Every Tailwind text-colour utility in a class list. */
+  function foregroundClasses(el: Element): string[] {
+    return Array.from(el.classList).filter((c) => /^(?:[a-z-]+:)*text-(?!label|meta|body)/.test(c));
+  }
+
+  it("paints the selected segment with the canonical --brand/--onbrand pair", () => {
+    render(
+      <ContractedForm
+        state={leaveScenario()}
+        mode="add"
+        initialForm={unsafeDraft()}
+        isEnabled
+        {...NOOP}
+      />,
+    );
+    const exact = screen.getByTestId("contracted-policy-exact");
+    expect(exact.getAttribute("aria-pressed")).toBe("true");
+    expect(Array.from(exact.classList)).toContain("bg-brand");
+    expect(Array.from(exact.classList)).toContain("text-onbrand");
+    // `--brandink` is a DARKENED --brand in light mode, so it was brand-on-brand.
+    expect(Array.from(exact.classList)).not.toContain("text-brandink");
+  });
+
+  it("leaves every descendant of the selected segment without a foreground override", () => {
+    render(
+      <ContractedForm
+        state={leaveScenario()}
+        mode="add"
+        initialForm={unsafeDraft()}
+        isEnabled
+        {...NOOP}
+      />,
+    );
+    const exact = screen.getByTestId("contracted-policy-exact");
+    // The formula span is the exact child that forced `text-ink3` and made the
+    // user's "Exact  x = T" unreadable. Nothing under a solid fill may set its own
+    // foreground — inheriting the pair is the whole contract.
+    for (const child of Array.from(exact.querySelectorAll("*"))) {
+      expect(
+        foregroundClasses(child),
+        `"${child.textContent}" opts out of the fill's paired foreground`,
+      ).toEqual([]);
+    }
+    expect(exact.textContent).toContain("x = T");
+  });
+
+  it("keeps the tertiary formula ink on the UNSELECTED segment, which is not on a fill", () => {
+    render(
+      <ContractedForm
+        state={leaveScenario()}
+        mode="add"
+        initialForm={unsafeDraft()}
+        isEnabled
+        {...NOOP}
+      />,
+    );
+    const range = screen.getByTestId("contracted-policy-range");
+    expect(range.getAttribute("aria-pressed")).toBe("false");
+    expect(Array.from(range.classList)).not.toContain("bg-brand");
+    // De-emphasising the formula is correct here: this segment sits on the well
+    // track, not on a brand fill. The rule is about fills, not about hints.
+    const hint = range.querySelector("span");
+    expect(foregroundClasses(hint!)).toEqual(["text-ink3"]);
+  });
+
+  it("moves the pair to whichever segment is selected", () => {
+    render(
+      <ContractedForm
+        state={leaveScenario()}
+        mode="add"
+        initialForm={unsafeDraft()}
+        isEnabled
+        {...NOOP}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("contracted-policy-range"));
+    const range = screen.getByTestId("contracted-policy-range");
+    expect(Array.from(range.classList)).toContain("bg-brand");
+    expect(Array.from(range.classList)).toContain("text-onbrand");
+    for (const child of Array.from(range.querySelectorAll("*"))) {
+      expect(foregroundClasses(child)).toEqual([]);
+    }
+    expect(Array.from(screen.getByTestId("contracted-policy-exact").classList)).not.toContain(
+      "bg-brand",
+    );
+  });
+});

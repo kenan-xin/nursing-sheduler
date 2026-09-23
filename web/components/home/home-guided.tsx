@@ -28,6 +28,9 @@ import {
 } from "@/components/shell/nav-config";
 import { useHotStore } from "@/lib/store";
 import type { ScenarioSummary, StepReadiness } from "./scenario-summary";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { surfaceVariants } from "@/components/ui/surface";
 import { cn } from "@/lib/utils";
 import { FaArrowRight, type IconType } from "@/components/icons";
 
@@ -113,10 +116,16 @@ const STEPS: StepDef[] = getNavGroupsForMode("guided")
     };
   });
 
-const BADGE: Record<StepStatus, { label: string; className: string }> = {
-  done: { label: "✓ Done", className: "bg-successtint text-success" },
-  current: { label: "● Current", className: "bg-brandtint text-brandink" },
-  todo: { label: "To do", className: "bg-panel text-ink3" },
+// Status through the shared Badge recipe rather than a hand-rolled tint/ink
+// pair. Two DESIGN.md §5 rules ride on that: the tint is paired with its
+// MATCHING semantic ink AND a border in the base hue (the Redundant Signal
+// Rule — state never rests on colour contrast alone), and the retired v1
+// ornament goes with it. `casing="upper"` (the Badge default) renders these as
+// DONE / CURRENT / TO DO, which is the prototype's own badge copy.
+const BADGE: Record<StepStatus, { label: string; variant: "success" | "brand" | "neutral" }> = {
+  done: { label: "Done", variant: "success" },
+  current: { label: "Current", variant: "brand" },
+  todo: { label: "To do", variant: "neutral" },
 };
 
 const CTA_LABEL: Record<StepStatus, string> = {
@@ -145,7 +154,7 @@ export function HomeGuided({
     <div className="flex flex-col gap-4">
       {/* Progress meter */}
       <div className="flex items-center gap-3" data-testid="home-progress">
-        <span className="text-label uppercase tracking-[0.03em] text-ink2">
+        <span className="text-label font-semibold uppercase tracking-[0.03em] text-ink2">
           {doneCount} of {GUIDED_STEP_COUNT} steps ready
         </span>
         <span className="relative h-1 flex-1 bg-line2">
@@ -173,56 +182,57 @@ export function HomeGuided({
               key={step.path}
               data-testid={`home-card-${step.path}`}
               data-status={status}
+              // Tone, border and elevation come from the one surface authority:
+              // the current step IS the `selected` role (--surface + a --brand
+              // border + --sh-2, DESIGN.md §4), every other card is resting L1.
               className={cn(
-                "flex flex-col border bg-surface p-4.5",
-                current ? "border-brand" : "border-line",
+                "flex flex-col p-4.5",
+                surfaceVariants({ role: current ? "selected" : "surface", geometry: "card" }),
               )}
             >
               <div className="mb-3.5 flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
-                  <span className="flex size-[34px] items-center justify-center bg-ink font-mono text-label-md font-bold text-on-ink">
+                  {/* Both 34px tiles round at the chip role. A small filled or
+                      bordered tile inside a card is a chip, not a data surface
+                      — the square treatment is reserved for tables, grid cells
+                      and full-bleed bars (DESIGN.md §5). */}
+                  <span className="flex size-[34px] items-center justify-center rounded-chip bg-ink font-mono text-label-md font-bold text-on-ink">
                     {step.step}
                   </span>
-                  <span className="flex size-[34px] items-center justify-center border border-line2 bg-panel text-ink2">
+                  <span className="flex size-[34px] items-center justify-center rounded-chip border border-line2 bg-panel text-ink2">
                     <Icon className="size-3.5" />
                   </span>
                 </div>
-                <span
-                  className={cn(
-                    "px-2 py-1 text-label uppercase tracking-[0.03em]",
-                    badge.className,
-                  )}
-                >
+                <Badge variant={badge.variant} data-testid={`home-badge-${step.path}`}>
                   {badge.label}
-                </span>
+                </Badge>
               </div>
 
-              <div className="mb-1.5 font-heading text-title font-extrabold tracking-tight">
+              <div className="mb-1.5 font-heading text-title font-bold tracking-[-0.015em]">
                 {step.label}
               </div>
               <p className="mb-3.5 min-h-[2.7em] text-meta leading-relaxed text-ink2">
                 {step.desc}
               </p>
-              <div className="mb-4 inline-flex w-fit items-center gap-2 border border-line bg-surface px-2.5 py-1 text-meta text-ink2">
+              <div className="mb-4 inline-flex w-fit items-center gap-2 rounded-chip border border-line bg-surface px-2.5 py-1 text-meta text-ink2">
                 <Icon className="size-3 text-ink3" />
                 {step.summary(summary)}
               </div>
 
               <div className="mt-auto">
-                <button
-                  type="button"
+                {/* The shared Button recipe. The hand-authored pair this
+                    replaces duplicated the variant treatments AND sized itself
+                    with `h-9`, which the 0.9 spacing baseline renders as 32.4px
+                    rather than the 36px control token. */}
+                <Button
+                  variant={current ? "default" : "secondary"}
                   onClick={() => onNavigate(step.path)}
                   data-testid={`home-cta-${step.path}`}
-                  className={cn(
-                    "inline-flex h-9 items-center gap-2 px-4 text-meta font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-brand",
-                    current
-                      ? "bg-brand text-onbrand hover:brightness-95"
-                      : "border border-line bg-transparent text-ink hover:bg-panel",
-                  )}
+                  className="text-meta font-semibold"
                 >
                   {CTA_LABEL[status]}
-                  <FaArrowRight className="size-3" />
-                </button>
+                  <FaArrowRight />
+                </Button>
               </div>
             </div>
           );

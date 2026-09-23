@@ -1,0 +1,26 @@
+id: test-capability-acquisition-tsx
+valid:
+  # A lazily imported component, which is what dynamic import is FOR in a .tsx suite.
+  - |
+    const { AssistantPanel } = await import("./assistant-panel");
+    const el = <AssistantPanel />;
+  - |
+    const { join } = await import("node:path");
+  # Dynamic `import()` of a capability is OXLINT's, not this rule's -- still fails lint.
+  - |
+    const fs = await import("node:fs");
+    const el = <div>{fs}</div>;
+  # Loader text inside a spawned-script string, in a component suite.
+  - |
+    const script = `const fs = require('node:fs');`;
+    const el = <pre>{script}</pre>;
+invalid:
+  - |
+    const fs = require("fs/promises");
+    const el = <div />;
+  - |
+    const fs = process.getBuiltinModule("fs");
+    const el = <div />;
+  - |
+    const ts = require("typescript");
+    const el = <div />;
