@@ -8,7 +8,7 @@
 
 import { z } from "zod";
 import { useModelVisibleTool } from "./register-model-visible-tool";
-import { pickScenario, useScenarioStore } from "@/lib/store";
+import { pickScenario, useHotStore, useScenarioStore } from "@/lib/store";
 import { buildFeasibilityReport } from "@/lib/ai/assistant/repair-options";
 
 export const feasibilityParameters = z.object({
@@ -16,7 +16,8 @@ export const feasibilityParameters = z.object({
     .boolean()
     .describe(
       "True only when an Optimize run of the schedule as it stands now came back infeasible. " +
-        "Then options are offered even when no certain cause is found, labelled as guesses.",
+        "Then options are offered even when no certain cause is found, labelled as guesses. " +
+        "The app checks this against the run the Optimise screen shows.",
     ),
 });
 
@@ -32,8 +33,12 @@ export function useFeasibilityTools(agentId: string, turnEpoch: number): void {
         "who must agree. Use it before running Optimize when set-up progress reports known gaps, " +
         "and whenever a run is infeasible. It changes nothing.",
       parameters: feasibilityParameters,
-      handler: async (args) =>
-        buildFeasibilityReport(pickScenario(useScenarioStore.getState()), args.afterInfeasibleRun),
+      // The host's own run view decides; the model's flag is kept for the schema only.
+      handler: async () => {
+        const view = useHotStore.getState().runView;
+        const infeasible = view.lifecycle === "completed" && view.outcome === "infeasible";
+        return buildFeasibilityReport(pickScenario(useScenarioStore.getState()), infeasible);
+      },
     },
     [agentId, turnEpoch],
   );

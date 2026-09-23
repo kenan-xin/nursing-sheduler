@@ -5,6 +5,8 @@ import { useAssistantStore, assistantActions } from "@/lib/ai/assistant/store";
 import { SCENARIOS } from "@/lib/rules/ward-fixtures.test-support";
 import { buildFeasibilityReport } from "@/lib/ai/assistant/repair-options";
 import type { ScenarioUiState } from "@/lib/scenario";
+import { useHotStore } from "@/lib/store";
+import { INITIAL_OPTIMIZE_RUN_VIEW } from "@/lib/optimize/run-view";
 import { useFeasibilityTools } from "./use-feasibility-tools";
 import { bindTurnForTest, type TestTurnHandle } from "./turn-authority.test-support";
 
@@ -51,6 +53,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  useHotStore.getState().resetRunView();
   boundTurn.release();
   cleanup();
   assistantActions.resetForTest();
@@ -63,5 +66,46 @@ describe("suggest_feasibility_options", () => {
       {},
     );
     expect(answer).toEqual(buildFeasibilityReport(fixture.scenario, true));
+  });
+});
+
+describe("afterInfeasibleRun comes from the run the host shows, not the model", () => {
+  // No certain gap, one hard request: options appear only after an infeasible run.
+  const unexplained = (): ScenarioUiState => ({
+    ...SCENARIOS.restRuleTooTight(),
+    reqData: [
+      {
+        uid: "never-ana",
+        person: "ana",
+        date: "03",
+        kind: "request",
+        shiftType: "N",
+        weight: -Infinity,
+      },
+    ],
+  });
+
+  it("uses the infeasible run view even when the model says false", async () => {
+    fixture.scenario = unexplained();
+    useHotStore.getState().setRunView({
+      ...INITIAL_OPTIMIZE_RUN_VIEW,
+      lifecycle: "completed",
+      outcome: "infeasible",
+    });
+    const answer = await tool("suggest_feasibility_options").handler(
+      { afterInfeasibleRun: false },
+      {},
+    );
+    expect(answer).toEqual(buildFeasibilityReport(fixture.scenario, true));
+    expect(answer).not.toEqual(buildFeasibilityReport(fixture.scenario, false));
+  });
+
+  it("ignores a model claim of an infeasible run when none is showing", async () => {
+    fixture.scenario = unexplained();
+    const answer = await tool("suggest_feasibility_options").handler(
+      { afterInfeasibleRun: true },
+      {},
+    );
+    expect(answer).toEqual(buildFeasibilityReport(fixture.scenario, false));
   });
 });
