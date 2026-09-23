@@ -309,10 +309,25 @@ export const CAPABILITY_ENTRIES = [
       "and staff groups, marking someone off for a run of days, and recording leave, day-off " +
       "and shift requests — which you review and apply yourself. It can also offer to run the " +
       "optimiser — the run starts only when you press Run — and then tell you how it went. " +
+      "It can also walk you through setting up a new schedule one step at a time, and when a " +
+      "schedule cannot be filled it says which day and shift is short and why, and suggests up to " +
+      "three realistic fixes — such as borrowing a nurse from another ward, asking a nurse on leave " +
+      "if she can cover, or allowing one more night this period. Anything that needs someone to " +
+      "agree is asked before you can apply it. " +
       "It cannot change the roster on its own, it cannot yet create pairing or supervision " +
       "rules, and it cannot edit or delete existing shifts. It is not a source of employment, " +
       "legal or clinical-safety authority.",
-    concepts: ["assistant", "chat", "read-only", "suggestion", "apply", "limits"],
+    concepts: [
+      "assistant",
+      "chat",
+      "read-only",
+      "suggestion",
+      "apply",
+      "limits",
+      "set-up guide",
+      "infeasible",
+      "short-staffed",
+    ],
     modes: BOTH_MODES,
     featureGates: ["aiAssistant"],
     routeId: "settings",
