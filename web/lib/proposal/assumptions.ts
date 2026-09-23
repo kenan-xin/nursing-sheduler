@@ -17,6 +17,9 @@
 // from an older revision is then simply not one of this proposal's confirmations. It
 // is never "cleared" by anybody remembering to clear it.
 
+import { generateDateItems } from "@/lib/dates/date-id";
+import { expandPersonRefs } from "@/lib/rules/expansion";
+import { capOf } from "@/lib/rules/shortfalls";
 import type { ScenarioUiState, UiRequestCell } from "@/lib/scenario";
 import type { AssistantCommandV1 } from "./commands";
 import { proposalDigest, stableStringify } from "./digest";
@@ -25,7 +28,11 @@ export type AssumptionType =
   /** A leave pin is moving to another date. */
   | "leave_moved"
   /** A leave pin is being destroyed — by a range change that drops its date. */
-  | "leave_cancelled";
+  | "leave_cancelled"
+  /** A nurse from another ward or agency is added for a bounded run of days. */
+  | "borrowed_staff_arranged"
+  /** One named nurse's own hard limit goes up. */
+  | "extra_shifts_agreed";
 
 export interface OperationalAssumption {
   /** Deterministic identity: same targets, same id, across re-preparations. */
@@ -158,8 +165,99 @@ export function deriveAssumptions(
     });
   }
 
+  assumptions.push(...borrowedStaff(after, commands), ...extraShifts(before, after, commands));
+
   // Stable order, so the same change always renders the same list of questions.
   return assumptions.sort((a, b) => a.assumptionId.localeCompare(b.assumptionId));
+}
+
+/**
+ * A borrowed nurse, read structurally from the documents rather than from any
+ * model-set flag: `add_person` plus a hard `set_off_request` ("must") for the same
+ * person in one change -- the loan shape people-ops builds (`repair-options.ts`'s
+ * `borrow_temporary_nurse`; no `mark_person_off` arm exists). An ordinary new hire
+ * has no hard days off and is not asked about -- the two are indistinguishable
+ * otherwise, so a whole-period add with no off days stays chat-only (`enforcedBy:
+ * "chat"` in the repair playbook). The loan itself is read from the AFTER document:
+ * the days she is NOT hard-off.
+ */
+function borrowedStaff(
+  after: ScenarioUiState,
+  commands: readonly AssistantCommandV1[],
+): OperationalAssumption[] {
+  const loaned = new Set(
+    commands.flatMap((command) =>
+      command.type === "set_off_request" && command.weight === "must"
+        ? [ref(command.personId)]
+        : [],
+    ),
+  );
+  const items = generateDateItems({ start: after.rangeStart, end: after.rangeEnd });
+  return commands.flatMap((command) => {
+    if (command.type !== "add_person" || !loaned.has(command.name)) return [];
+    const off = new Set(
+      after.reqData
+        .filter(
+          (cell) =>
+            cell.kind === "off" && cell.weight === Infinity && ref(cell.person) === command.name,
+        )
+        .map((cell) => ref(cell.date)),
+    );
+    const loan = items.filter((item) => !off.has(item.id) && !off.has(item.iso));
+    if (loan.length === 0) return [];
+    const first = loan[0].iso;
+    const last = loan[loan.length - 1].iso;
+    const skills = command.groups.length > 0 ? command.groups.join(", ") : "no staff group";
+    return [
+      {
+        assumptionId: assumptionId("borrowed_staff_arranged", command.name, first, last),
+        type: "borrowed_staff_arranged",
+        person: command.name,
+        date: first,
+        toDate: last,
+        question: `Has the lending ward or agency confirmed ${command.name} for ${first} to ${last}, qualified as ${skills}?`,
+        detail:
+          "Applying this adds a nurse the ward does not employ. The app cannot check the loan or her qualifications with anyone.",
+      },
+    ];
+  });
+}
+
+/** Raising ONE named nurse's own hard limit is an agreement with that nurse. */
+function extraShifts(
+  before: ScenarioUiState,
+  after: ScenarioUiState,
+  commands: readonly AssistantCommandV1[],
+): OperationalAssumption[] {
+  const staffIds = new Set(before.staff.map((person) => String(person.id)));
+  return commands.flatMap((command) => {
+    if (command.type !== "edit_count_rule") return [];
+    const was = before.cardsByKind.counts.find((card) => card.uid === command.ruleId);
+    const now = after.cardsByKind.counts.find((card) => card.uid === command.ruleId);
+    if (!was || !now || typeof was.expression !== "string" || typeof was.target !== "number")
+      return [];
+    if (typeof now.expression !== "string" || typeof now.target !== "number") return [];
+    const oldCap = capOf(was.expression, was.target, was.weight);
+    const newCap = capOf(now.expression, now.target, now.weight);
+    if (!Number.isFinite(oldCap) || !(newCap > oldCap)) return [];
+    const people = [...expandPersonRefs(was.person, before)].filter((id) => staffIds.has(id));
+    if (people.length !== 1) return [];
+    const [person] = people;
+    const period = `${before.rangeStart}~${before.rangeEnd}`;
+    const cap = Number.isFinite(newCap) ? String(newCap) : "no limit";
+    return [
+      {
+        assumptionId: assumptionId("extra_shifts_agreed", person, period, cap),
+        type: "extra_shifts_agreed",
+        person,
+        date: period,
+        toDate: cap,
+        question: `Has ${person} agreed to work up to ${cap} ${command.shiftTypes.join("/")} shifts in this period?`,
+        detail:
+          "Applying this lets the roster give them more shifts than their limit allowed. The app cannot check that they agreed, or that it is within legal limits.",
+      },
+    ];
+  });
 }
 
 /**

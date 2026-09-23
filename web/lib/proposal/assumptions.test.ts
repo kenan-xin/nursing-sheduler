@@ -14,6 +14,7 @@ import {
   type OperationalConfirmationV1,
 } from "./assumptions";
 import { applyAssistantCommands } from "./operations";
+import { SCENARIOS } from "@/lib/rules/ward-fixtures.test-support";
 import { octoberWard, peopleScenario, proposalScenario } from "./test-support";
 
 function assumptionsFor(commands: Parameters<typeof applyAssistantCommands>[1]) {
@@ -238,5 +239,82 @@ describe("deriveAssumptions and the Staff-screen arms", () => {
     expect(assumptions.map((a) => [a.type, a.person, a.date])).toEqual([
       ["leave_cancelled", "ana", "02"],
     ]);
+  });
+});
+
+describe("real-world agreements beyond leave", () => {
+  it("asks whether a bounded loan of a borrowed nurse is arranged", () => {
+    const before = SCENARIOS.onlyRnOnLeave();
+    const commands: Parameters<typeof applyAssistantCommands>[1] = [
+      { type: "add_person", name: "Float RN (Ward 5)", groups: ["RN"] },
+      {
+        type: "set_off_request",
+        personId: "Float RN (Ward 5)",
+        startDate: "2026-11-01",
+        endDate: "2026-11-02",
+        weight: "must",
+      },
+      {
+        type: "set_off_request",
+        personId: "Float RN (Ward 5)",
+        startDate: "2026-11-04",
+        endDate: "2026-11-07",
+        weight: "must",
+      },
+    ];
+    const result = applyAssistantCommands(before, commands);
+    if (!result.ok) throw new Error(result.rejection.message);
+    const [assumption] = deriveAssumptions(before, result.next, commands);
+    expect(assumption).toMatchObject({
+      type: "borrowed_staff_arranged",
+      person: "Float RN (Ward 5)",
+      date: "2026-11-03",
+      toDate: "2026-11-03",
+    });
+    expect(assumption.question).toMatch(/lending ward or agency/);
+    expect(assumption.question).toMatch(/RN/);
+  });
+
+  it("does not ask about an ordinary new staff member", () => {
+    const before = SCENARIOS.onlyRnOnLeave();
+    const commands: Parameters<typeof applyAssistantCommands>[1] = [
+      { type: "add_person", name: "Dana", groups: [] },
+    ];
+    const result = applyAssistantCommands(before, commands);
+    if (!result.ok) throw new Error(result.rejection.message);
+    expect(deriveAssumptions(before, result.next, commands)).toEqual([]);
+  });
+
+  it("asks one nurse to agree before her own limit goes up, but not a team limit", () => {
+    const base = SCENARIOS.ruleTooStrict();
+    const solo = {
+      ...base,
+      cardsByKind: {
+        ...base.cardsByKind,
+        counts: [{ ...base.cardsByKind.counts[0], uid: "ana-nights", person: ["ana"] }],
+      },
+    };
+    const edit = (ruleId: string, people: string[]) => ({
+      type: "edit_count_rule" as const,
+      ruleId,
+      description: "At most 1 nights",
+      people,
+      shiftTypes: ["N"],
+      dates: ["ALL"],
+      expression: "x <= T" as const,
+      target: 2,
+      weight: "infinity",
+    });
+    const soloCmd = [edit("ana-nights", ["ana"])];
+    const soloAfter = applyAssistantCommands(solo, soloCmd);
+    if (!soloAfter.ok) throw new Error(soloAfter.rejection.message);
+    expect(deriveAssumptions(solo, soloAfter.next, soloCmd)).toEqual([
+      expect.objectContaining({ type: "extra_shifts_agreed", person: "ana", toDate: "2" }),
+    ]);
+
+    const teamCmd = [edit("max-nights", ["Nurses"])];
+    const teamAfter = applyAssistantCommands(base, teamCmd);
+    if (!teamAfter.ok) throw new Error(teamAfter.rejection.message);
+    expect(deriveAssumptions(base, teamAfter.next, teamCmd)).toEqual([]);
   });
 });
