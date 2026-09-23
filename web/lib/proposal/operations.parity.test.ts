@@ -37,7 +37,29 @@ import {
   validateWorkingTimeDraft,
 } from "@/components/entity-editor/core";
 import { applyAssistantCommand } from "./operations";
-import { proposalScenario } from "./test-support";
+import { proposalScenario, ruleWardScenario } from "./test-support";
+import type { CountCard, PersonRef, SuccessionCard } from "@/lib/scenario";
+import { parseWeightInput } from "@/components/card-editor/weight-value";
+import {
+  buildSuccessionCard,
+  validateSuccessionForm,
+  type SuccessionFormState,
+} from "@/components/successions/successions-model";
+import {
+  buildCountCard,
+  buildCountShiftTypeDomain,
+  countToForm,
+  emptyCountForm,
+  validateCountForm,
+  type CountFormState,
+} from "@/components/counts/counts-model";
+import {
+  buildRequirementShiftTypeDomain,
+  emptyRequirementForm,
+  requirementToForm,
+  validateRequirementForm,
+} from "@/components/requirements/requirements-model";
+import { applyRequirementPatch } from "@/components/requirements/requirement-patch";
 
 describe("set_roster_range is the manual range cascade", () => {
   it("produces the identical document the Dates screen commits", () => {
@@ -327,6 +349,260 @@ describe("add_shift_group is the Groups New group save", () => {
           ["am2", "am1"],
         );
         expect(assistant.next).toEqual(manual);
+      }
+    }
+  });
+});
+
+// The editors' edit-save marker rule, restated from `use-successions.ts` / `use-counts.ts`
+// `update` -- the one piece of the manual Save that lives in a hook, not a model.
+function carryMarkers<T extends { disabled?: boolean; applied?: boolean }>(
+  source: T,
+  rebuilt: T,
+): T {
+  const markers: { disabled?: true; applied?: true } = {};
+  if (source.disabled) markers.disabled = true;
+  if (source.applied) markers.applied = true;
+  return markers.disabled || markers.applied ? { ...rebuilt, ...markers } : rebuilt;
+}
+
+const valid = (errors: object) => Object.keys(errors).length === 0;
+
+describe("succession arms are the Shift sequences form's Save", () => {
+  const rows: { people: PersonRef[]; pattern: string[]; dates: string[]; weight: string }[] = [
+    {
+      people: ["ana", "ben", "cai"],
+      pattern: ["Night", "Day"],
+      dates: ["ALL"],
+      weight: "-infinity",
+    },
+    { people: ["RN"], pattern: ["Night", "OFF", "Day"], dates: ["WEEKEND"], weight: "-50" },
+    { people: ["ana"], pattern: ["Day", "Day"], dates: ["2026-04-06", "2026-04-07"], weight: "1k" },
+    { people: ["ana"], pattern: ["Night"], dates: ["ALL"], weight: "-1" }, // one step
+    { people: [], pattern: ["Night", "Day"], dates: ["ALL"], weight: "-1" }, // nobody
+    { people: ["ana"], pattern: ["Night", "Day"], dates: [], weight: "-1" }, // no dates
+    { people: ["ana"], pattern: ["Night", "Day"], dates: ["ALL"], weight: "strong" }, // bad weight
+  ];
+  const form = (row: (typeof rows)[number], description: string): SuccessionFormState => ({
+    description,
+    person: row.people,
+    pattern: row.pattern,
+    date: row.dates,
+    weight: parseWeightInput(row.weight),
+  });
+
+  it("add: accepts and refuses what the form does, and appends the same card", () => {
+    const state = ruleWardScenario();
+    for (const [i, row] of rows.entries()) {
+      const draft = form(row, `row ${i}`);
+      const assistant = applyAssistantCommand(state, {
+        type: "add_succession_rule",
+        description: `row ${i}`,
+        ...row,
+      });
+      expect(assistant.ok, `row ${i}`).toBe(valid(validateSuccessionForm(draft)));
+      if (!assistant.ok) continue;
+      const uid = assistant.next.cardsByKind.successions.at(-1)!.uid;
+      // `use-successions.ts` add: append `buildSuccessionCard(form)`.
+      expect(assistant.next).toEqual({
+        ...state,
+        cardsByKind: {
+          ...state.cardsByKind,
+          successions: [...state.cardsByKind.successions, buildSuccessionCard(draft, uid)],
+        },
+      });
+    }
+  });
+
+  it("edit: rebuilds the card in place and keeps a switched-off rule off", () => {
+    const state = ruleWardScenario();
+    const source: SuccessionCard = { ...state.cardsByKind.successions[0], disabled: true };
+    state.cardsByKind.successions = [source];
+    for (const [i, row] of rows.entries()) {
+      const draft = form(row, "No day after night");
+      const assistant = applyAssistantCommand(state, {
+        type: "edit_succession_rule",
+        ruleId: "suc-nd",
+        description: "No day after night",
+        ...row,
+      });
+      const manual = carryMarkers(source, buildSuccessionCard(draft, "suc-nd"));
+      const changes = JSON.stringify(manual) !== JSON.stringify(source);
+      expect(assistant.ok, `row ${i}`).toBe(valid(validateSuccessionForm(draft)) && changes);
+      if (assistant.ok) expect(assistant.next.cardsByKind.successions).toEqual([manual]);
+    }
+  });
+});
+
+describe("count arms are the Shift counts form's Save", () => {
+  const rows: {
+    shiftTypes: string[];
+    expression: "x <= T" | "x >= T" | "|x - T|^2";
+    target: number;
+    weight: string;
+  }[] = [
+    { shiftTypes: ["Night"], expression: "x <= T", target: 5, weight: "infinity" },
+    { shiftTypes: ["Working shifts", "OFF"], expression: "x >= T", target: 3, weight: "10" },
+    { shiftTypes: ["Night"], expression: "|x - T|^2", target: 8, weight: "-10" },
+    { shiftTypes: ["Night"], expression: "|x - T|^2", target: 8, weight: "infinity" }, // squared + hard
+    { shiftTypes: ["Night"], expression: "x <= T", target: 2.5, weight: "-1" }, // not whole
+    { shiftTypes: [], expression: "x <= T", target: 5, weight: "-1" }, // nothing counted
+  ];
+  const draftOn = (base: CountFormState, row: (typeof rows)[number], description: string) => ({
+    ...base,
+    description,
+    person: ["ana"] as PersonRef[],
+    countDates: ["ALL"],
+    countShiftTypes: row.shiftTypes,
+    expression: row.expression,
+    target: row.target,
+    weight: parseWeightInput(row.weight),
+  });
+
+  it("add: accepts and refuses what the form does, and appends the same card", () => {
+    const state = ruleWardScenario();
+    const domain = buildCountShiftTypeDomain(state);
+    for (const [i, row] of rows.entries()) {
+      const draft = draftOn(emptyCountForm(), row, `row ${i}`);
+      const assistant = applyAssistantCommand(state, {
+        type: "add_count_rule",
+        description: `row ${i}`,
+        people: ["ana"],
+        dates: ["ALL"],
+        ...row,
+      });
+      expect(assistant.ok, `row ${i}`).toBe(valid(validateCountForm(draft, domain)));
+      if (!assistant.ok) continue;
+      const uid = assistant.next.cardsByKind.counts.at(-1)!.uid;
+      expect(assistant.next.cardsByKind.counts).toEqual([
+        ...state.cardsByKind.counts,
+        buildCountCard(draft, domain, uid),
+      ]);
+    }
+  });
+
+  it("edit: starts from the loaded card, so coefficients and markers survive", () => {
+    const state = ruleWardScenario();
+    const source = {
+      ...state.cardsByKind.counts[0],
+      countShiftTypeCoefficients: [["Night", 2]],
+      applied: true,
+    } as CountCard;
+    state.cardsByKind.counts = [source];
+    const domain = buildCountShiftTypeDomain(state);
+    for (const [i, row] of rows.entries()) {
+      const draft = draftOn(countToForm(source, domain), row, "Night cap");
+      const assistant = applyAssistantCommand(state, {
+        type: "edit_count_rule",
+        ruleId: "cnt-nights",
+        description: "Night cap",
+        people: ["ana"],
+        dates: ["ALL"],
+        ...row,
+      });
+      const ok = valid(validateCountForm(draft, domain));
+      const manual = ok ? carryMarkers(source, buildCountCard(draft, domain, "cnt-nights")) : null;
+      const changes = manual !== null && JSON.stringify(manual) !== JSON.stringify(source);
+      expect(assistant.ok, `row ${i}`).toBe(ok && changes);
+      if (assistant.ok) expect(assistant.next.cardsByKind.counts).toEqual([manual]);
+    }
+  });
+});
+
+describe("requirement arms are the Staffing requirements screen's commit", () => {
+  const rows: {
+    shiftType: string;
+    qualifiedPeople: PersonRef[];
+    dates: string[];
+    requiredNumPeople: number;
+  }[] = [
+    { shiftType: "Night", qualifiedPeople: ["RN"], dates: ["ALL"], requiredNumPeople: 2 },
+    {
+      shiftType: "Working shifts",
+      qualifiedPeople: ["Senior"],
+      dates: ["ALL"],
+      requiredNumPeople: 1,
+    },
+    { shiftType: "Day", qualifiedPeople: ["ALL"], dates: ["WEEKDAY"], requiredNumPeople: 0 },
+    { shiftType: "Day", qualifiedPeople: ["RN"], dates: ["ALL"], requiredNumPeople: -1 }, // negative
+    { shiftType: "Day", qualifiedPeople: [], dates: ["ALL"], requiredNumPeople: 1 }, // nobody
+    { shiftType: "Day", qualifiedPeople: ["RN"], dates: ["ALL"], requiredNumPeople: 4 }, // above preferred (edit)
+  ];
+
+  it("add: accepts and refuses what the form does, and commits the same document", () => {
+    const state = ruleWardScenario();
+    const domain = buildRequirementShiftTypeDomain(state);
+    for (const [i, row] of rows.entries()) {
+      const form = {
+        ...emptyRequirementForm(),
+        description: `row ${i}`,
+        shiftType: [row.shiftType],
+        requiredNumPeople: row.requiredNumPeople,
+        qualifiedPeople: row.qualifiedPeople,
+        date: row.dates,
+      };
+      const assistant = applyAssistantCommand(state, {
+        type: "add_staffing_requirement",
+        description: `row ${i}`,
+        ...row,
+      });
+      expect(assistant.ok, `row ${i}`).toBe(valid(validateRequirementForm(form, domain)));
+      if (!assistant.ok) continue;
+      const uid = assistant.next.cardsByKind.requirements.at(-1)!.uid;
+      expect(assistant.next).toEqual(applyRequirementPatch(state, { type: "add", form, uid }));
+    }
+  });
+
+  it("edit: starts from the loaded card and commits the same document", () => {
+    const state = ruleWardScenario();
+    state.cardsByKind.requirements[0] = {
+      ...state.cardsByKind.requirements[0],
+      preferredNumPeople: 3,
+      weight: -50,
+      disabled: true,
+    };
+    const source = state.cardsByKind.requirements[0];
+    const domain = buildRequirementShiftTypeDomain(state);
+    for (const [i, row] of rows.entries()) {
+      const form = {
+        ...requirementToForm(source, domain),
+        description: "Day cover",
+        shiftType: [row.shiftType],
+        requiredNumPeople: row.requiredNumPeople,
+        qualifiedPeople: row.qualifiedPeople,
+        date: row.dates,
+      };
+      const assistant = applyAssistantCommand(state, {
+        type: "edit_staffing_requirement",
+        ruleId: "req-day",
+        description: "Day cover",
+        ...row,
+      });
+      expect(assistant.ok, `row ${i}`).toBe(valid(validateRequirementForm(form, domain)));
+      if (assistant.ok) {
+        expect(assistant.next).toEqual(
+          applyRequirementPatch(state, { type: "update", uid: "req-day", form }),
+        );
+      }
+    }
+  });
+});
+
+describe("remove_rule is every editor's Delete", () => {
+  it("produces the list each editor's remove transform produces", () => {
+    const state = ruleWardScenario();
+    for (const [ruleKind, ruleId] of [
+      ["requirements", "req-multi"],
+      ["successions", "suc-nd"],
+      ["counts", "cnt-nights"],
+    ] as const) {
+      const assistant = applyAssistantCommand(state, { type: "remove_rule", ruleKind, ruleId });
+      expect(assistant.ok, ruleKind).toBe(true);
+      if (assistant.ok) {
+        const cards = state.cardsByKind[ruleKind] as readonly { uid: string }[];
+        expect(assistant.next.cardsByKind[ruleKind]).toEqual(
+          cards.filter((card) => card.uid !== ruleId),
+        );
       }
     }
   });
