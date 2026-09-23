@@ -212,6 +212,14 @@ export interface AssistantUiState {
    */
   activeDiagnostic: { search: DiagnosticSearchRecordV1; turnEpoch: number } | null;
   /**
+   * The live "Run the optimiser?" card, stamped with the turn that asked for it.
+   *
+   * Same authority rule as `activeProposal`: after an interruption the card renders
+   * as stopped with no Run control, rather than as a live action for a conversation
+   * the user already stopped. In memory only; a reload has no live card.
+   */
+  activeRunRequest: { turnEpoch: number } | null;
+  /**
    * Interruptions requested but not yet settled, incremented SYNCHRONOUSLY at the
    * request.
    *
@@ -246,6 +254,7 @@ const INITIAL: AssistantUiState = {
   lastRefusal: null,
   activeProposal: null,
   activeDiagnostic: null,
+  activeRunRequest: null,
   pendingInterruptions: 0,
   clearResult: null,
 };
@@ -1051,6 +1060,16 @@ export const assistantActions = {
   /** Dismiss the diagnostic card. */
   clearDiagnostic(): void {
     useAssistantStore.setState({ activeDiagnostic: null });
+  },
+
+  /** Show the host confirm card for an optimiser run the current turn asked for. */
+  showRunRequest(turnEpoch: number): void {
+    useAssistantStore.setState({ activeRunRequest: { turnEpoch } });
+  },
+
+  /** Dismiss the run card: Run was pressed, or the user said not now. */
+  clearRunRequest(): void {
+    useAssistantStore.setState({ activeRunRequest: null });
   },
 
   /** Test seam: return the store to its never-hydrated state. */
