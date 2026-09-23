@@ -99,6 +99,45 @@ export function octoberWard(): ScenarioUiState {
   };
 }
 
+/**
+ * A ward for the people arms. It is `proposalScenario()` moved to October 2026 (a
+ * one-month range, so date ids stay two-digit `DD`), plus:
+ *
+ *   • a person with a NUMERIC id (`7`), for the exact-identity rule;
+ *   • two staff groups, one with a description;
+ *   • a shift-count rule that names only `bo`, so removing `bo` drops it (cascade).
+ *
+ * The fixture cells stay: `ana` leave on 02, `bo` off on 29, `ana` Day request on 07.
+ */
+export function peopleScenario(): ScenarioUiState {
+  const base = proposalScenario();
+  return {
+    ...base,
+    rangeStart: "2026-10-01",
+    rangeEnd: "2026-10-31",
+    staff: [...base.staff, { _k: "p3", id: 7 }],
+    staffGroups: [
+      { _k: "sg1", id: "RN", members: ["ana", 7] },
+      { _k: "sg2", id: "Seniors", description: "Band 6 and above", members: ["bo"] },
+    ],
+    cardsByKind: {
+      ...base.cardsByKind,
+      counts: [
+        {
+          uid: "count-bo",
+          description: "Bo night cap",
+          person: ["bo"],
+          countDates: ["ALL"],
+          countShiftTypes: ["Night"],
+          expression: "<=",
+          target: 8,
+          weight: -1,
+        },
+      ],
+    },
+  };
+}
+
 /** The registry stamp fixtures prepare under. */
 export const FIXTURE_STAMP = {
   appBuildVersion: "test-build",

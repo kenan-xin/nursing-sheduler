@@ -324,6 +324,23 @@ describe("the command arms the provider is actually shown", () => {
         startDate: "2026-10-14",
         endDate: "2026-10-14",
       },
+      add_person: { type: "add_person", name: "Float RN (Ward 5)", groups: ["RN"] },
+      edit_person: { type: "edit_person", personId: "ana", name: "Ana Lim", groups: ["RN"] },
+      remove_person: { type: "remove_person", personId: 7 },
+      add_people_group: {
+        type: "add_people_group",
+        groupId: "Night team",
+        description: "",
+        members: ["ana", 7],
+      },
+      edit_people_group: {
+        type: "edit_people_group",
+        groupId: "RN",
+        newGroupId: "Registered nurses",
+        description: "",
+        members: ["ana"],
+      },
+      remove_people_group: { type: "remove_people_group", groupId: "Seniors" },
     };
     expect(Object.keys(representative).sort()).toEqual([...ASSISTANT_COMMAND_TYPES].sort());
 

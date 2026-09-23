@@ -25,6 +25,14 @@
 // an agreement with them; `assumptions.ts` asks about it from the document diff, so no
 // arm carries a confirmation flag the model could leave out.
 //
+// The Staff-screen arms (`add_person`, `edit_person`, `remove_person`,
+// `add_people_group`, `edit_people_group`, `remove_people_group`) compile to the
+// Staff screen's own primitives over `peopleDescriptor` (`addItem`, `renameItem`,
+// `deleteItem`, `addGroup`, `renameGroup`, `updateGroupFields`, `deleteGroup`,
+// `writeItemGroups`, `writeGroupMembers`). `mark_person_off` is the Requests
+// screen's quick paint of OFF at weight Infinity across a run of days. Together
+// they express a nurse borrowed from another ward for a few dates.
+//
 // EVERY FIELD IS A TARGET, NEVER A DOCUMENT. There is no arm that accepts scenario
 // content, a patch, a card body, or a free-form object: the model names WHICH
 // existing thing to change and WHAT value it should take, and the host derives the
@@ -110,7 +118,28 @@ export type AssistantCommandV1 =
       weight: RequestWeight;
     }
   /** Remove everything recorded on those dates -- Clear cell / painting with nothing selected. */
-  | { type: "clear_requests"; personId: PersonRef; startDate: IsoDate; endDate: IsoDate };
+  | { type: "clear_requests"; personId: PersonRef; startDate: IsoDate; endDate: IsoDate }
+  /** Add one person -- the Staff screen's "Add nurse" row: a name and the staff groups they join. */
+  | { type: "add_person"; name: string; groups: string[] }
+  /**
+   * Rename one person and set EXACTLY which staff groups they are in -- the Staff
+   * row's Edit. A name equal to the current id text is not a rename.
+   */
+  | { type: "edit_person"; personId: PersonRef; name: string; groups: string[] }
+  /** Remove one person and every reference to them -- the Staff row's Delete. */
+  | { type: "remove_person"; personId: PersonRef }
+  /** Add one staff group -- the Staff groups "New group" form. */
+  | { type: "add_people_group"; groupId: string; description: string; members: PersonRef[] }
+  /** Rename a staff group, set its description and EXACTLY its members -- the group's Edit form. */
+  | {
+      type: "edit_people_group";
+      groupId: string;
+      newGroupId: string;
+      description: string;
+      members: PersonRef[];
+    }
+  /** Remove one staff group and every reference to it -- the group's Delete. */
+  | { type: "remove_people_group"; groupId: string };
 
 /** A request strength: a finite number, or a hard pin. JSON cannot carry an infinity, so the pins are words. */
 export type RequestWeight = number | "must" | "never";
@@ -129,6 +158,12 @@ export const ASSISTANT_COMMAND_TYPES = [
   "set_off_request",
   "set_shift_request",
   "clear_requests",
+  "add_person",
+  "edit_person",
+  "remove_person",
+  "add_people_group",
+  "edit_people_group",
+  "remove_people_group",
 ] as const satisfies readonly AssistantCommandType[];
 
 // EXHAUSTIVE IN BOTH DIRECTIONS. `satisfies` above proves every listed name is a real
@@ -324,6 +359,80 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
         "To free someone on leave to cover a shift, tell the user to ask them first, and " +
         "propose this as that question, never as a decision.",
     ),
+  z.strictObject({
+    type: z.enum(["add_person"]),
+    name: z
+      .string()
+      .describe(
+        'The person\'s name as the staff list should show it, e.g. "Float RN (Ward 5)". Must ' +
+          "not match any existing person or staff group, and must not be ALL.",
+      ),
+    groups: z
+      .array(z.string())
+      .describe(
+        'Staff groups to put them in, e.g. ["RN"]. Each must exist or be added EARLIER in ' +
+          "the same change. Send [] for none. Never list ALL: everyone is in it.",
+      ),
+  }),
+  z.strictObject({
+    type: z.enum(["edit_person"]),
+    personId: refSchema.describe(
+      "The person's id exactly as the staff list shows it. A number stays a number.",
+    ),
+    name: z.string().describe("The name they should have. Send their current name to keep it."),
+    groups: z
+      .array(z.string())
+      .describe(
+        "EVERY staff group they should be in after the change -- groups left out are " +
+          "removed. Send their current groups to keep them.",
+      ),
+  }),
+  z.strictObject({
+    type: z.enum(["remove_person"]),
+    personId: refSchema.describe(
+      "The person to remove, exactly as the staff list shows the id. Their requests, leave " +
+        "and any rule that only names them go too; the preview lists every one.",
+    ),
+  }),
+  z.strictObject({
+    type: z.enum(["add_people_group"]),
+    groupId: z
+      .string()
+      .describe(
+        "The new staff group's name, e.g. Seniors. People and staff groups share one list of " +
+          "names, so it must differ from every person and group, and must not be ALL.",
+      ),
+    description: z.string().describe('What the group is for. Send "" for none.'),
+    members: z
+      .array(refSchema)
+      .describe(
+        "Ids of the people in the group, exactly as the staff list shows them. Each must " +
+          "exist or be added EARLIER in the same change. May be [].",
+      ),
+  }),
+  z.strictObject({
+    type: z.enum(["edit_people_group"]),
+    groupId: z.string().describe("The staff group's current name."),
+    newGroupId: z.string().describe("The name it should have. Send the current name to keep it."),
+    description: z
+      .string()
+      .describe('The description it should have. Send the current one to keep it, "" to clear.'),
+    members: z
+      .array(refSchema)
+      .describe(
+        "EVERY person who should be in the group after the change -- people left out are " +
+          "removed.",
+      ),
+  }),
+  z.strictObject({
+    type: z.enum(["remove_people_group"]),
+    groupId: z
+      .string()
+      .describe(
+        "The staff group to remove. Rules that only target this group go too; the preview " +
+          "lists them.",
+      ),
+  }),
 ]);
 
 /** The most operations one change may hold. Also stated to the model, in its tool description -- see `use-proposal-tools.ts`. */

@@ -9,7 +9,7 @@
 import { describe, expect, it } from "vitest";
 import type { ScenarioUiState } from "@/lib/scenario";
 import { applyAssistantCommand, applyAssistantCommands } from "./operations";
-import { octoberWard, proposalScenario } from "./test-support";
+import { octoberWard, peopleScenario, proposalScenario } from "./test-support";
 
 describe("set_roster_range", () => {
   it("purges references to dates that leave the range", () => {
@@ -614,5 +614,250 @@ describe("leave and request arms", () => {
     const empty = applyAssistantCommand(octoberWard(), clear("Ana", "2026-10-01"));
     expect(empty.ok).toBe(false);
     if (!empty.ok) expect(empty.rejection.message).toContain("nothing recorded");
+  });
+});
+
+describe("Staff-screen arms", () => {
+  const addPerson = (name: string, groups: string[] = []) => ({
+    type: "add_person" as const,
+    name,
+    groups,
+  });
+  const editPerson = (personId: string | number, name: string, groups: string[]) => ({
+    type: "edit_person" as const,
+    personId,
+    name,
+    groups,
+  });
+
+  it("adds a person into existing groups, trimming the name as the Staff row does", () => {
+    const result = applyAssistantCommand(
+      peopleScenario(),
+      addPerson("  Cara  ", ["Seniors", "RN"]),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.next.staff.at(-1)).toMatchObject({ id: "Cara", history: [] });
+    expect(result.next.staffGroups.map((g) => [g.id, g.members])).toEqual([
+      ["RN", ["ana", 7, "Cara"]],
+      ["Seniors", ["bo", "Cara"]],
+    ]);
+  });
+
+  it("refuses a name the Staff row refuses, naming it", () => {
+    for (const name of ["ana", "RN", "all", "   "]) {
+      const result = applyAssistantCommand(peopleScenario(), addPerson(name));
+      expect(result.ok, name).toBe(false);
+      if (result.ok) continue;
+      expect(result.rejection.code).toBe("invalid_value");
+      expect(result.rejection.message).toContain(`Person "${name.trim()}"`);
+    }
+  });
+
+  it("refuses a group that does not exist, and says how to fix it", () => {
+    const result = applyAssistantCommand(peopleScenario(), addPerson("Cara", ["Agency"]));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.code).toBe("unknown_target");
+    expect(result.rejection.message).toContain('Person "Cara"');
+    expect(result.rejection.message).toContain('no staff group "Agency"');
+    expect(result.rejection.message).toContain("earlier in the same change");
+  });
+
+  it("refuses ALL as a group: everyone is in it already", () => {
+    const result = applyAssistantCommand(peopleScenario(), addPerson("Cara", ["ALL"]));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.rejection.message).toContain("automatically");
+  });
+
+  it("joins a group made earlier in the batch, but not one made later", () => {
+    const group = {
+      type: "add_people_group" as const,
+      groupId: "Agency",
+      description: "",
+      members: [],
+    };
+    expect(
+      applyAssistantCommands(peopleScenario(), [group, addPerson("Cara", ["Agency"])]).ok,
+    ).toBe(true);
+    const late = applyAssistantCommands(peopleScenario(), [addPerson("Cara", ["Agency"]), group]);
+    expect(late.ok).toBe(false);
+    if (!late.ok) expect(late.rejection.index).toBe(0);
+  });
+
+  it("renames a person everywhere and sets exactly their groups", () => {
+    const result = applyAssistantCommand(
+      peopleScenario(),
+      editPerson("ana", "Ana Lim", ["RN", "Seniors"]),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.next.staff.map((p) => p.id)).toEqual(["Ana Lim", "bo", 7]);
+    expect(result.next.staffGroups.map((g) => g.members)).toEqual([
+      ["Ana Lim", 7],
+      ["Ana Lim", "bo"],
+    ]);
+    // The rename cascade re-keys her leave; it is not lost.
+    expect(result.next.reqData.find((c) => c.uid === "cell-leave")?.person).toBe("Ana Lim");
+  });
+
+  it("keeps a numeric id when the name text is unchanged, and can empty the groups", () => {
+    const result = applyAssistantCommand(peopleScenario(), editPerson(7, "7", []));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.next.staff.at(-1)?.id).toBe(7);
+    expect(result.next.staffGroups[0].members).toEqual(["ana"]);
+  });
+
+  it("refuses a numeric id sent as text, and says why", () => {
+    const result = applyAssistantCommand(peopleScenario(), editPerson("7", "7", []));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.code).toBe("unknown_target");
+    expect(result.rejection.message).toContain('Person "7"');
+    expect(result.rejection.message).toContain("a number stays a number");
+  });
+
+  it("refuses a rename onto another person or group, naming both", () => {
+    const result = applyAssistantCommand(peopleScenario(), editPerson("ana", "Seniors", ["RN"]));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.code).toBe("invalid_value");
+    expect(result.rejection.message).toContain('Person "ana"');
+    expect(result.rejection.message).toContain('"Seniors"');
+  });
+
+  it("refuses an edit that changes nothing", () => {
+    const result = applyAssistantCommand(peopleScenario(), editPerson("ana", "ana", ["RN"]));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.rejection.code).toBe("no_effect");
+  });
+
+  it("removes a person and cascades as the Staff screen's Delete does", () => {
+    const result = applyAssistantCommand(peopleScenario(), {
+      type: "remove_person",
+      personId: "bo",
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.next.staff.map((p) => p.id)).toEqual(["ana", 7]);
+    // The emptied group stays (FR-RI-17); the rule that named only bo is dropped.
+    expect(result.next.staffGroups.find((g) => g.id === "Seniors")?.members).toEqual([]);
+    expect(result.next.cardsByKind.counts).toEqual([]);
+    expect(result.next.reqData.some((c) => c.person === "bo")).toBe(false);
+  });
+
+  it("refuses to remove someone who is not on the staff list", () => {
+    const result = applyAssistantCommand(peopleScenario(), {
+      type: "remove_person",
+      personId: "zed",
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.rejection.code).toBe("unknown_target");
+  });
+
+  it("adds a staff group with members in staff order, repeats ignored", () => {
+    const result = applyAssistantCommand(peopleScenario(), {
+      type: "add_people_group",
+      groupId: " Night team ",
+      description: "  Nights only ",
+      members: [7, "bo", 7],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.next.staffGroups.at(-1)).toMatchObject({
+      id: "Night team",
+      description: "Nights only",
+      members: ["bo", 7],
+    });
+  });
+
+  it("refuses a staff group id in use, reserved, or with an unknown member", () => {
+    for (const groupId of ["RN", "ana", "ALL", ""]) {
+      const result = applyAssistantCommand(peopleScenario(), {
+        type: "add_people_group",
+        groupId,
+        description: "",
+        members: [],
+      });
+      expect(result.ok, groupId).toBe(false);
+      if (!result.ok) expect(result.rejection.message).toContain(`Staff group "${groupId}"`);
+    }
+    const missing = applyAssistantCommand(peopleScenario(), {
+      type: "add_people_group",
+      groupId: "Night team",
+      description: "",
+      members: ["zed"],
+    });
+    expect(missing.ok).toBe(false);
+    if (!missing.ok) {
+      expect(missing.rejection.code).toBe("unknown_target");
+      expect(missing.rejection.message).toContain('no person "zed"');
+    }
+  });
+
+  it("edits a staff group like its Edit form: rename, description, members; keeps nested members", () => {
+    const state = peopleScenario();
+    state.staffGroups[0] = { ...state.staffGroups[0], members: ["ana", 7, "Nested"] };
+    const result = applyAssistantCommand(state, {
+      type: "edit_people_group",
+      groupId: "RN",
+      newGroupId: "Registered nurses",
+      description: "",
+      members: ["bo"],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.next.staffGroups[0]).toMatchObject({
+      id: "Registered nurses",
+      members: ["bo", "Nested"],
+    });
+  });
+
+  it("clears a group's description when sent an empty one", () => {
+    const result = applyAssistantCommand(peopleScenario(), {
+      type: "edit_people_group",
+      groupId: "Seniors",
+      newGroupId: "Seniors",
+      description: "",
+      members: ["bo"],
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.next.staffGroups[1].description).toBeUndefined();
+  });
+
+  it("refuses an unknown group, and an edit that changes nothing", () => {
+    const unknown = applyAssistantCommand(peopleScenario(), {
+      type: "edit_people_group",
+      groupId: "Nope",
+      newGroupId: "Nope",
+      description: "",
+      members: [],
+    });
+    expect(unknown.ok).toBe(false);
+    if (!unknown.ok) expect(unknown.rejection.code).toBe("unknown_target");
+    const same = applyAssistantCommand(peopleScenario(), {
+      type: "edit_people_group",
+      groupId: "Seniors",
+      newGroupId: "Seniors",
+      description: "Band 6 and above",
+      members: ["bo"],
+    });
+    expect(same.ok).toBe(false);
+    if (!same.ok) expect(same.rejection.code).toBe("no_effect");
+  });
+
+  it("removes a staff group, and refuses an unknown one", () => {
+    const result = applyAssistantCommand(peopleScenario(), {
+      type: "remove_people_group",
+      groupId: "Seniors",
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.next.staffGroups.map((g) => g.id)).toEqual(["RN"]);
+    const unknown = applyAssistantCommand(peopleScenario(), {
+      type: "remove_people_group",
+      groupId: "Nope",
+    });
+    expect(unknown.ok).toBe(false);
   });
 });

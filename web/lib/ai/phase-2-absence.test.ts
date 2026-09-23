@@ -64,6 +64,9 @@ const MODEL_VISIBLE_TOOLS = [
 // WIDENED AGAIN (2026-09-24, plan assistant-leave-request-ops): leave, day-off and
 // shift requests are scenario INPUTS on the Requests page, compiled to its own paint
 // fold; none edits a produced roster.
+// WIDENED AGAIN (2026-09-24, plan assistant-people-ops): the Staff screen's own
+// add/edit/remove for people and staff groups, plus the Requests quick-paint
+// "must be off" run. All address the scenario, none a produced roster.
 const PROPOSAL_OPERATIONS = [
   "set_roster_range",
   "set_rule_enabled",
@@ -75,6 +78,12 @@ const PROPOSAL_OPERATIONS = [
   "set_off_request",
   "set_shift_request",
   "clear_requests",
+  "add_person",
+  "edit_person",
+  "remove_person",
+  "add_people_group",
+  "edit_people_group",
+  "remove_people_group",
 ] as const;
 
 /**

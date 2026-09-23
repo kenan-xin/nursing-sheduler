@@ -251,4 +251,42 @@ describe("parseAssistantCommands", () => {
       expect(parseAssistantCommands(payload).ok, JSON.stringify(payload)).toBe(false);
     }
   });
+
+  it("accepts the Staff-screen arms", () => {
+    const result = parseAssistantCommands([
+      { type: "add_person", name: "Float RN (Ward 5)", groups: ["RN"] },
+      { type: "edit_person", personId: 7, name: "7", groups: [] },
+      { type: "remove_person", personId: "bo" },
+      { type: "add_people_group", groupId: "Night team", description: "", members: ["ana", 7] },
+      {
+        type: "edit_people_group",
+        groupId: "RN",
+        newGroupId: "Registered nurses",
+        description: "",
+        members: ["ana"],
+      },
+      { type: "remove_people_group", groupId: "Seniors" },
+    ]);
+    expect(result.ok).toBe(true);
+  });
+
+  it("refuses Staff-screen payloads the model must fix itself", () => {
+    const refused: unknown[] = [
+      // groups omitted: the model must send [] for "no groups".
+      [{ type: "add_person", name: "Cara" }],
+      // A description the Staff table cannot author.
+      [{ type: "add_person", name: "Cara", groups: [], description: "Agency" }],
+      // name omitted on an edit: send the current name to keep it.
+      [{ type: "edit_person", personId: "ana", groups: [] }],
+      // description omitted on a group: send "" for none.
+      [{ type: "add_people_group", groupId: "X", members: [] }],
+      // members not a list.
+      [{ type: "add_people_group", groupId: "X", description: "", members: "ana" }],
+      // newGroupId omitted: send the current id to keep it.
+      [{ type: "edit_people_group", groupId: "RN", description: "", members: [] }],
+    ];
+    for (const payload of refused) {
+      expect(parseAssistantCommands(payload).ok, JSON.stringify(payload)).toBe(false);
+    }
+  });
 });
