@@ -7,7 +7,9 @@ import { capabilityRegistryStamp } from "@/lib/capability/registry";
 import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
 import { useModeStore } from "@/lib/mode/mode";
 import { HELP_TOOL_NAMES } from "@/lib/capability/tools";
-import { useHelpTools } from "./use-help-tools";
+import { useHotStore } from "@/lib/store";
+import { INITIAL_OPTIMIZE_RUN_VIEW } from "@/lib/optimize/run-view";
+import { RUN_LIVE_NAVIGATION_REFUSAL, useHelpTools } from "./use-help-tools";
 import { bindTurnForTest, type TestTurnHandle } from "./turn-authority.test-support";
 
 /** The turn every handler below is checked against. See `./turn-authority`. */
@@ -100,6 +102,7 @@ afterEach(() => {
   cleanup();
   assistantActions.resetForTest();
   useModeStore.setState({ mode: "guided", adoption: "unhydrated" });
+  useHotStore.getState().resetRunView();
 });
 
 describe("the registered help tool surface", () => {
@@ -276,6 +279,30 @@ describe("open_app_screen", () => {
       status: CAPABILITY_UNAVAILABLE,
       reason: "route_not_reached",
     });
+  });
+});
+
+describe("open_app_screen during a live optimiser run", () => {
+  beforeEach(() => {
+    useHotStore
+      .getState()
+      .setRunView({ ...INITIAL_OPTIMIZE_RUN_VIEW, lifecycle: "running", jobId: "opt_1" });
+  });
+
+  it("refuses to leave the Optimise screen while a run is live", async () => {
+    const result = await tool("open_app_screen").handler(
+      { capabilityId: "leave-and-requests" },
+      {},
+    );
+    expect(result).toBe(RUN_LIVE_NAVIGATION_REFUSAL);
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it("still allows the Optimise screen itself", async () => {
+    mountAnchor("optimize.run-options");
+    const result = await tool("open_app_screen").handler({ capabilityId: "generate-roster" }, {});
+    expect(result).not.toBe(RUN_LIVE_NAVIGATION_REFUSAL);
+    expect(push).toHaveBeenCalledWith(expect.stringContaining("optimize"));
   });
 });
 

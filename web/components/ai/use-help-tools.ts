@@ -39,6 +39,8 @@ import {
 import { readCapabilityContext } from "./capability-context";
 import { useCapabilityNavigation } from "./use-capability-navigation";
 import { assertTurnAuthority, isTurnAuthorized, SUPERSEDED } from "./turn-authority";
+import { useHotStore } from "@/lib/store";
+import { isRunLive } from "@/lib/optimize/run-request";
 
 export const capabilityIdParameters = z.object({
   capabilityId: z
@@ -57,6 +59,20 @@ export const policyParameters = z.object({
         "'no day shift straight after a night shift' or 'two seniors on every night'.",
     ),
 });
+
+/**
+ * Leaving the Optimise screen abandons its run (the visit is the unit), so the model
+ * may not cause that. The user can still navigate freely; this binds only the tool.
+ */
+export const RUN_LIVE_NAVIGATION_REFUSAL =
+  "An optimiser run is going on the Optimise screen, and leaving that screen stops it. " +
+  "Do not move the user now; tell them where to go once the run has finished.";
+
+function leavesLiveRun(capabilityId: string): boolean {
+  if (!isRunLive(useHotStore.getState().runView.lifecycle)) return false;
+  const target = resolveCapability(capabilityId, readCapabilityContext());
+  return target.status !== "ok" || target.value.routeId !== "optimize-and-export";
+}
 
 /**
  * Register the read-only help tools against ONE agent instance.
@@ -176,6 +192,7 @@ export function useHelpTools(agentId: string, turnEpoch: number): void {
         "describe another screen instead.",
       parameters: capabilityIdParameters,
       handler: async (args, context) => {
+        if (leavesLiveRun(args.capabilityId)) return RUN_LIVE_NAVIGATION_REFUSAL;
         // THE TOKEN CAPTURED AT ENTRY, handed to `navigate` so the authority check happens
         // at each of its own effect boundaries -- before the route push, on arrival, and
         // before the reveal/focus. Checking only on the way in would have proved the
