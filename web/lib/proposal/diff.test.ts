@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 import { getCapabilityRegistry } from "@/lib/capability/registry";
 import { applyAssistantCommands } from "./operations";
 import { deriveProposalDiff, SCOPE_LABEL, type DiffScope } from "./diff";
-import { proposalScenario } from "./test-support";
+import { octoberWard, proposalScenario } from "./test-support";
 
 describe("deriveProposalDiff", () => {
   it("separates what was asked for from what the app will do as a result", () => {
@@ -82,7 +82,7 @@ describe("deriveProposalDiff", () => {
     expect(keys).toEqual(['cell:"ana"|"02"', 'cell:"ana"|"07"']);
     const destination = diff.direct.find((entry) => entry.key === 'cell:"ana"|"07"');
     expect(destination?.before).toContain("Day");
-    expect(destination?.after).toBe("Leave");
+    expect(destination?.after).toBe("On leave");
   });
 
   it("shows each new shift with its clock times and each new group with its shifts, as asked-for", () => {
@@ -133,6 +133,106 @@ describe("deriveProposalDiff", () => {
     );
     expect(diff.capabilityIds).toContain("shift-types");
     expect(diff.needsReview).toEqual([]);
+  });
+
+  it("lists recorded leave and requests date by date, in plain words, as asked-for", () => {
+    const before = octoberWard();
+    const commands = [
+      {
+        type: "add_leave" as const,
+        personId: "Ana",
+        startDate: "2026-10-10",
+        endDate: "2026-10-16",
+      },
+      {
+        type: "set_shift_request" as const,
+        personId: "Ben",
+        shiftType: "N",
+        startDate: "2026-10-19",
+        endDate: "2026-10-25",
+        weight: -5,
+      },
+      {
+        type: "set_shift_request" as const,
+        personId: "Chris",
+        shiftType: "L",
+        startDate: "2026-10-20",
+        endDate: "2026-10-20",
+        weight: 5,
+      },
+    ];
+    const applied = applyAssistantCommands(before, commands);
+    if (!applied.ok) throw new Error(`fixture should apply: ${applied.rejection.message}`);
+
+    const diff = deriveProposalDiff(before, applied.next, commands);
+    expect(diff.cascade).toEqual([]);
+    // Ana's 14th was already leave and Ben's 21st is a day off: neither changes, neither is listed.
+    expect(diff.direct.map((entry) => entry.key).sort()).toEqual([
+      'cell:"Ana"|"10"',
+      'cell:"Ana"|"11"',
+      'cell:"Ana"|"12"',
+      'cell:"Ana"|"13"',
+      'cell:"Ana"|"15"',
+      'cell:"Ana"|"16"',
+      'cell:"Ben"|"19"',
+      'cell:"Ben"|"20"',
+      'cell:"Ben"|"22"',
+      'cell:"Ben"|"23"',
+      'cell:"Ben"|"24"',
+      'cell:"Ben"|"25"',
+      'cell:"Chris"|"20"',
+    ]);
+    const entry = (key: string) => diff.direct.find((candidate) => candidate.key === key);
+    expect(entry('cell:"Ana"|"10"')).toMatchObject({
+      label: "Ana on 10",
+      before: null,
+      after: "On leave",
+      kind: "created",
+      scope: "leave-and-requests",
+    });
+    expect(entry('cell:"Ben"|"22"')).toMatchObject({
+      before: "Wants D (weight 3)",
+      after: "Wants D (weight 3), Would rather not work N (weight -5)",
+      kind: "changed",
+    });
+    expect(entry('cell:"Chris"|"20"')?.after).toBe("Wants D (weight 2), Wants L (weight 5)");
+    expect(diff.capabilityIds).toEqual(["leave-and-requests"]);
+    expect(diff.needsReview).toEqual([]);
+  });
+
+  it("shows a cancelled leave and the night it frees, as one asked-for change", () => {
+    const before = octoberWard();
+    const commands = [
+      {
+        type: "clear_requests" as const,
+        personId: "Ana",
+        startDate: "2026-10-14",
+        endDate: "2026-10-14",
+      },
+      {
+        type: "set_shift_request" as const,
+        personId: "Ana",
+        shiftType: "N",
+        startDate: "2026-10-14",
+        endDate: "2026-10-14",
+        weight: "must" as const,
+      },
+    ];
+    const applied = applyAssistantCommands(before, commands);
+    if (!applied.ok) throw new Error("fixture should apply");
+
+    const diff = deriveProposalDiff(before, applied.next, commands);
+    expect(diff.direct).toEqual([
+      {
+        key: 'cell:"Ana"|"14"',
+        scope: "leave-and-requests",
+        label: "Ana on 14",
+        before: "On leave",
+        after: "Must work N",
+        kind: "changed",
+      },
+    ]);
+    expect(diff.cascade).toEqual([]);
   });
 });
 
