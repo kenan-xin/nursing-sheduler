@@ -49,6 +49,13 @@ describe("scenario serialization for the model", () => {
 });
 
 describe("the attached turn context", () => {
+  it("points the model at guided setup and at the repair options", () => {
+    // WIDENED DELIBERATELY (2026-09-24, plan assistant-guided-setup-and-repair).
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/get_setup_progress/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/suggest_feasibility_options/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/at most three/);
+  });
+
   const context = buildAssistantContext({
     scenario: wardScenario(),
     scenarioId: "scenario-a",

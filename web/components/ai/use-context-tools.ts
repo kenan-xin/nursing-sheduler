@@ -27,6 +27,7 @@ import { useHelpTools } from "./use-help-tools";
 import { useProposalTools } from "./use-proposal-tools";
 import { useDiagnosticTools } from "./use-diagnostic-tools";
 import { useOptimizeTools } from "./use-optimize-tools";
+import { useFeasibilityTools } from "./use-feasibility-tools";
 import { computeScenarioSummary } from "@/components/home/scenario-summary";
 import { computeCoverageWarnings } from "@/components/requirements/requirements-model";
 import { findStaffingShortfalls } from "@/lib/rules/shortfalls";
@@ -73,6 +74,8 @@ export function useModelVisibleTools(agentId: string, turnEpoch: number): void {
   // a diagnostic-search row and — when a candidate genuinely tested feasible — the
   // same T07 proposal row `useProposalTools` writes, under the same fences.
   useDiagnosticTools(agentId, turnEpoch);
+  // Read-only: the static staffing check plus the ranked playbook options.
+  useFeasibilityTools(agentId, turnEpoch);
   // The optimiser pair (plan 2026-09-24): offer a run the USER starts from a host
   // card, and read the run view the Optimise screen renders. Neither starts a run.
   useOptimizeTools(agentId, turnEpoch);

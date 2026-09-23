@@ -18,6 +18,7 @@ import type { z } from "zod";
 
 import { sliceParameters } from "./use-context-tools";
 import { diagnosticParameters } from "./use-diagnostic-tools";
+import { feasibilityParameters } from "./use-feasibility-tools";
 import { capabilityIdParameters, policyParameters } from "./use-help-tools";
 import { prepareParameters } from "./use-proposal-tools";
 
@@ -35,6 +36,7 @@ export const MODEL_VISIBLE_TOOL_SCHEMAS: Readonly<Record<string, z.ZodTypeAny>> 
   suggest_scheduling_rule: policyParameters,
   open_app_screen: capabilityIdParameters,
   prepare_scenario_change: prepareParameters,
+  suggest_feasibility_options: feasibilityParameters,
 });
 
 /** The tools registered with no parameters. Named so the set is provably complete. */

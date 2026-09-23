@@ -446,6 +446,11 @@ describe("malformed payloads, for every parameterized tool in the registry", () 
         '{"candidates":[{"summary":"s","operations":[{"type":"set_rule_enabled","ruleKind":"counts","ruleId":"c1","enabled":true,"card":{}}]}]}',
       ],
     ],
+    // WIDENED DELIBERATELY (2026-09-24, plan assistant-guided-setup-and-repair).
+    suggest_feasibility_options: [
+      ["missing afterInfeasibleRun", "{}"],
+      ["wrong-typed afterInfeasibleRun", '{"afterInfeasibleRun":"yes"}'],
+    ],
     explain_app_capability: [
       ["missing capabilityId", "{}"],
       ["wrong-typed capabilityId", '{"capabilityId":42}'],

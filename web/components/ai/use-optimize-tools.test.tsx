@@ -173,7 +173,7 @@ describe("get_optimize_result", () => {
     expect(summary.guidance).toMatch(/still going/);
   });
 
-  it("points an infeasible run at the bounded diagnostic, and forbids a cause", async () => {
+  it("points an infeasible run at the feasibility options, then the bounded diagnostic", async () => {
     useHotStore.getState().setRunView(
       view({
         lifecycle: "completed",
@@ -192,8 +192,12 @@ describe("get_optimize_result", () => {
       guidance: string;
     };
     expect(summary.heading).toBe("This roster can't be built");
+    // WIDENED DELIBERATELY (2026-09-24, plan assistant-guided-setup-and-repair): the static
+    // staffing check is deterministic evidence, so a CERTAIN gap may be named; nothing else may.
+    expect(summary.guidance).toMatch(/suggest_feasibility_options/);
     expect(summary.guidance).toMatch(/test_feasibility_candidates/);
-    expect(summary.guidance).toMatch(/never name a cause/);
+    expect(summary.guidance).toMatch(/only when it reports a certain gap/);
+    expect(summary.guidance).not.toMatch(/never name a cause/);
   });
 
   it("reports a saved roster for a solved run", async () => {

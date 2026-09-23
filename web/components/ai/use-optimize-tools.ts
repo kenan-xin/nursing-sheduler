@@ -88,8 +88,9 @@ function guidanceFor(
       case "infeasible":
         return (
           "The rules as written cannot all be met, so no roster exists. The solver does not " +
-          "say which rule is responsible: never name a cause. You may use " +
-          "test_feasibility_candidates to test candidate changes on copies."
+          "say which rule is responsible. Call suggest_feasibility_options with " +
+          "afterInfeasibleRun true: name a cause only when it reports a certain gap, and never " +
+          "otherwise. Then use test_feasibility_candidates to test its options on copies."
         );
       case "inconclusive":
         return (
