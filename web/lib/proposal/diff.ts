@@ -18,7 +18,7 @@
 // two different mechanisms (purge and re-key). Comparing documents cannot forget a
 // surface, and it keeps working when an arm's transform is improved underneath it.
 
-import type { CardsByKind, ScenarioUiState, UiRequestCell } from "@/lib/scenario";
+import type { CardsByKind, ScenarioUiState, UiRequestCell, UiShiftType } from "@/lib/scenario";
 import type { AssistantCommandV1 } from "./commands";
 import { stableStringify } from "./digest";
 
@@ -118,6 +118,15 @@ function renderWeight(weight: number): string {
 function describeCoordinateCells(cells: readonly UiRequestCell[]): string | null {
   if (cells.length === 0) return null;
   return cells.map(describeCell).sort().join(", ");
+}
+
+/** A shift as a ward manager reads it: name, then clock times, overnight made explicit. */
+function renderShift(shift: UiShiftType): string {
+  const name = shift.description?.trim() || `${shift.id}`;
+  if (!shift.startTime || !shift.endTime) return name;
+  // Grid-valid "HH:MM" strings compare correctly as text.
+  const overnight = shift.endTime < shift.startTime ? " (ends next day)" : "";
+  return `${name} · ${shift.startTime}–${shift.endTime}${overnight}`;
 }
 
 function ruleTitle(card: { description?: string; uid: string }, kind: keyof CardsByKind): string {
@@ -284,14 +293,15 @@ export function diffScenarioDocuments(
       keyPrefix: "shift",
       identity: (shift) => stableStringify(shift.id),
       label: (shift) => `${shift.id}`,
-      render: (shift) => shift.description?.trim() || `${shift.id}`,
+      render: renderShift,
     }),
     ...compareKeyed(before.shiftGroups, after.shiftGroups, {
       scope: "shift-types",
       keyPrefix: "shiftgroup",
       identity: (group) => group.id,
       label: (group) => `Shift group “${group.id}”`,
-      render: (group) => `${group.members.length} member${group.members.length === 1 ? "" : "s"}`,
+      render: (group) =>
+        group.members.length ? group.members.map(String).join(", ") : "No shifts",
     }),
   );
 
@@ -357,6 +367,13 @@ function directKeys(commands: readonly AssistantCommandV1[]): Set<string> {
       case "move_leave":
         keys.add(`cell:${stableStringify(command.personId)}|${stableStringify(command.fromDate)}`);
         keys.add(`cell:${stableStringify(command.personId)}|${stableStringify(command.toDate)}`);
+        break;
+      case "add_shift_type":
+        // The host trims the code (Shifts page rule), so the key must too.
+        keys.add(`shift:${stableStringify(command.code.trim())}`);
+        break;
+      case "add_shift_group":
+        keys.add(`shiftgroup:${command.groupId.trim()}`);
         break;
     }
   }

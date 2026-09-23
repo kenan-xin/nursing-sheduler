@@ -84,6 +84,52 @@ describe("deriveProposalDiff", () => {
     expect(destination?.before).toContain("Day");
     expect(destination?.after).toBe("Leave");
   });
+
+  it("shows each new shift with its clock times and each new group with its shifts, as asked-for", () => {
+    const before = proposalScenario();
+    const commands = [
+      {
+        type: "add_shift_type" as const,
+        code: " N ",
+        name: "Night shift",
+        startTime: "20:00",
+        endTime: "08:30",
+        restMinutes: 60,
+      },
+      {
+        type: "add_shift_type" as const,
+        code: "am1",
+        name: "",
+        startTime: "08:00",
+        endTime: "15:00",
+        restMinutes: 0,
+      },
+      { type: "add_shift_group" as const, groupId: "Night shifts", members: ["N", "Night"] },
+    ];
+    const applied = applyAssistantCommands(before, commands);
+    if (!applied.ok) throw new Error("fixture should apply");
+
+    const diff = deriveProposalDiff(before, applied.next, commands);
+    expect(diff.direct.map((entry) => entry.key).sort()).toEqual([
+      'shift:"N"',
+      'shift:"am1"',
+      "shiftgroup:Night shifts",
+    ]);
+    expect(diff.cascade).toEqual([]);
+
+    const night = diff.direct.find((entry) => entry.key === 'shift:"N"');
+    expect(night?.kind).toBe("created");
+    expect(night?.after).toBe("Night shift · 20:00–08:30 (ends next day)");
+    expect(diff.direct.find((entry) => entry.key === 'shift:"am1"')?.after).toBe(
+      "am1 · 08:00–15:00",
+    );
+    // Members follow shift order: Night (existing) before N (new).
+    expect(diff.direct.find((entry) => entry.key === "shiftgroup:Night shifts")?.after).toBe(
+      "Night, N",
+    );
+    expect(diff.capabilityIds).toContain("shift-types");
+    expect(diff.needsReview).toEqual([]);
+  });
 });
 
 describe("scope identities", () => {
