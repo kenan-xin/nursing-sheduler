@@ -728,3 +728,140 @@ describe("add_count_rule / edit_count_rule", () => {
     if (!result.ok) expect(result.rejection.code).toBe("no_effect");
   });
 });
+
+describe("add_staffing_requirement / edit_staffing_requirement", () => {
+  const twoRNs = {
+    type: "add_staffing_requirement" as const,
+    description: "At least 2 RNs on every night shift",
+    shiftType: "Night",
+    qualifiedPeople: ["RN"] as (string | number)[],
+    dates: ["ALL"],
+    requiredNumPeople: 2,
+  };
+  const seniorEveryDay = {
+    ...twoRNs,
+    description: "Every day needs at least one senior nurse on",
+    shiftType: "Working shifts",
+    qualifiedPeople: ["Senior"] as (string | number)[],
+    requiredNumPeople: 1,
+  };
+  const edit = (overrides: Partial<Omit<typeof twoRNs, "type">> = {}) => ({
+    ...twoRNs,
+    type: "edit_staffing_requirement" as const,
+    ruleId: "req-day",
+    description: "Day cover",
+    shiftType: "Day",
+    qualifiedPeople: ["ALL"] as (string | number)[],
+    ...overrides,
+  });
+
+  it("expresses 'at least 2 RNs on every night shift'", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), twoRNs);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.next.cardsByKind.requirements.at(-1)).toEqual({
+      uid: expect.any(String),
+      description: "At least 2 RNs on every night shift",
+      shiftType: ["Night"],
+      requiredNumPeople: 2,
+      qualifiedPeople: ["RN"],
+      date: ["ALL"],
+      // No preferred count: the screen stamps the inert weight -1.
+      weight: -1,
+    });
+  });
+
+  it("expresses 'every day needs at least one senior nurse on' over the working-shifts group", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), seniorEveryDay);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.next.cardsByKind.requirements.at(-1)).toMatchObject({
+        shiftType: ["Working shifts"],
+        qualifiedPeople: ["Senior"],
+        requiredNumPeople: 1,
+      });
+    }
+  });
+
+  it("accepts ALL as the qualified people, as the screen offers it", () => {
+    expect(
+      applyAssistantCommand(ruleWardScenario(), { ...twoRNs, qualifiedPeople: ["ALL"] }).ok,
+    ).toBe(true);
+  });
+
+  it("refuses a day state or ALL as the staffed shift, naming it", () => {
+    for (const shiftType of ["OFF", "ALL"]) {
+      const result = applyAssistantCommand(ruleWardScenario(), { ...twoRNs, shiftType });
+      expect(result.ok, shiftType).toBe(false);
+      if (result.ok) continue;
+      expect(result.rejection.code).toBe("unknown_target");
+      expect(result.rejection.message).toContain(`"${shiftType}"`);
+    }
+  });
+
+  it("refuses a negative head count in the screen's words", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), { ...twoRNs, requiredNumPeople: -1 });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.rejection.message).toContain(
+        'Staffing requirement "At least 2 RNs on every night shift"',
+      );
+      expect(result.rejection.message).toContain("Required number of people must be at least 0");
+    }
+  });
+
+  it("edit keeps the preferred count and its weight", () => {
+    const state = ruleWardScenario();
+    state.cardsByKind.requirements[0] = {
+      ...state.cardsByKind.requirements[0],
+      preferredNumPeople: 3,
+      weight: -50,
+    };
+    const result = applyAssistantCommand(state, edit({ qualifiedPeople: ["RN"] }));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.next.cardsByKind.requirements[0]).toMatchObject({
+        uid: "req-day",
+        qualifiedPeople: ["RN"],
+        preferredNumPeople: 3,
+        weight: -50,
+      });
+    }
+  });
+
+  it("edit refuses a head count above the preferred count, as the screen does", () => {
+    const state = ruleWardScenario();
+    state.cardsByKind.requirements[0] = {
+      ...state.cardsByKind.requirements[0],
+      preferredNumPeople: 3,
+      weight: -50,
+    };
+    const result = applyAssistantCommand(state, edit({ requiredNumPeople: 4 }));
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.rejection.message).toContain(
+        "Preferred number of people must be greater than required number of people",
+      );
+    }
+  });
+
+  it("edit may narrow a multi-shift requirement to one shift, as the screen's single-select does", () => {
+    const result = applyAssistantCommand(
+      ruleWardScenario(),
+      edit({ ruleId: "req-multi", description: "Day or Night cover", shiftType: "Night" } as never),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.next.cardsByKind.requirements[1]).toMatchObject({
+        uid: "req-multi",
+        shiftType: ["Night"],
+      });
+    }
+  });
+
+  it("refuses to edit a requirement that is gone", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), edit({ ruleId: "nope" } as never));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.rejection.code).toBe("unknown_target");
+  });
+});

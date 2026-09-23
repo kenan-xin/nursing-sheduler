@@ -335,6 +335,23 @@ describe("the command arms the provider is actually shown", () => {
         target: 4,
         weight: "infinity",
       },
+      add_staffing_requirement: {
+        type: "add_staffing_requirement",
+        description: "At least 2 RNs on every night shift",
+        shiftType: "Night",
+        qualifiedPeople: ["RN"],
+        dates: ["ALL"],
+        requiredNumPeople: 2,
+      },
+      edit_staffing_requirement: {
+        type: "edit_staffing_requirement",
+        ruleId: "r1",
+        description: "At least 2 RNs on every night shift",
+        shiftType: "Night",
+        qualifiedPeople: ["RN"],
+        dates: ["WEEKEND"],
+        requiredNumPeople: 3,
+      },
     };
     expect(Object.keys(representative).sort()).toEqual([...ASSISTANT_COMMAND_TYPES].sort());
 

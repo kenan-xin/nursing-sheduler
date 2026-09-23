@@ -6,7 +6,7 @@ import {
 } from "./requirements-model";
 
 export type RequirementPatch =
-  | { type: "add"; form: RequirementFormState }
+  | { type: "add"; form: RequirementFormState; uid?: string }
   | { type: "update"; uid: string; form: RequirementFormState };
 
 /**
@@ -26,7 +26,7 @@ export function applyRequirementPatch(
   let nextRequirements: RequirementCard[];
 
   if (patch.type === "add") {
-    nextRequirements = [...requirements, buildRequirementCard(patch.form, domain)];
+    nextRequirements = [...requirements, buildRequirementCard(patch.form, domain, patch.uid)];
   } else {
     const source = requirements.find((card) => card.uid === patch.uid);
     if (!source) return state;

@@ -142,6 +142,28 @@ export type AssistantCommandV1 =
       expression: (typeof COUNT_EXPRESSIONS)[number];
       target: number;
       weight: string;
+    }
+  /** Add one staffing requirement -- the Staffing requirements screen's Add form, no preferred count. */
+  | {
+      type: "add_staffing_requirement";
+      description: string;
+      shiftType: string;
+      qualifiedPeople: PersonRef[];
+      dates: string[];
+      requiredNumPeople: number;
+    }
+  /**
+   * Replace these fields of one staffing requirement -- that screen's Edit form. Its
+   * preferred count, weight and coefficients are kept as stored.
+   */
+  | {
+      type: "edit_staffing_requirement";
+      ruleId: string;
+      description: string;
+      shiftType: string;
+      qualifiedPeople: PersonRef[];
+      dates: string[];
+      requiredNumPeople: number;
     };
 
 export type AssistantCommandType = AssistantCommandV1["type"];
@@ -158,6 +180,8 @@ export const ASSISTANT_COMMAND_TYPES = [
   "edit_succession_rule",
   "add_count_rule",
   "edit_count_rule",
+  "add_staffing_requirement",
+  "edit_staffing_requirement",
 ] as const satisfies readonly AssistantCommandType[];
 
 // EXHAUSTIVE IN BOTH DIRECTIONS. `satisfies` above proves every listed name is a real
@@ -282,6 +306,27 @@ function countFields() {
   };
 }
 
+function requirementFields() {
+  return {
+    description: ruleDescriptionSchema(),
+    shiftType: z
+      .string()
+      .describe(
+        "ONE shift code or shift group id to staff. To cover every worked shift of a day, " +
+          "use a shift group that holds them all. OFF, LEAVE and ALL cannot be staffed.",
+      ),
+    qualifiedPeople: z
+      .array(refSchema)
+      .describe(
+        'Who counts towards the number: person ids, staff group ids, or ["ALL"] for anyone.',
+      ),
+    dates: ruleDatesSchema(),
+    requiredNumPeople: z
+      .number()
+      .describe("The minimum number of those people on that shift, e.g. 2. A hard rule."),
+  };
+}
+
 /**
  * The wire schema for one command.
  *
@@ -390,6 +435,12 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
   }),
   z.strictObject({ type: z.enum(["add_count_rule"]), ...countFields() }),
   z.strictObject({ type: z.enum(["edit_count_rule"]), ruleId: ruleIdSchema(), ...countFields() }),
+  z.strictObject({ type: z.enum(["add_staffing_requirement"]), ...requirementFields() }),
+  z.strictObject({
+    type: z.enum(["edit_staffing_requirement"]),
+    ruleId: ruleIdSchema(),
+    ...requirementFields(),
+  }),
 ]);
 
 /** The most operations one change may hold. Also stated to the model, in its tool description -- see `use-proposal-tools.ts`. */

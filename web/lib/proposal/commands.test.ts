@@ -237,4 +237,26 @@ describe("parseAssistantCommands", () => {
       expect(parseAssistantCommands(payload).ok, JSON.stringify(payload)).toBe(false);
     }
   });
+
+  it("accepts the staffing-requirement arms and refuses a shift list", () => {
+    const fields = {
+      description: "At least 2 RNs on every night shift",
+      shiftType: "Night",
+      qualifiedPeople: ["RN"],
+      dates: ["ALL"],
+      requiredNumPeople: 2,
+    };
+    expect(
+      parseAssistantCommands([
+        { type: "add_staffing_requirement", ...fields },
+        { type: "edit_staffing_requirement", ruleId: "req-day", ...fields },
+      ]).ok,
+    ).toBe(true);
+    // One shift or group per requirement, as the screen's single-select holds.
+    expect(
+      parseAssistantCommands([
+        { type: "add_staffing_requirement", ...fields, shiftType: ["Night"] },
+      ]).ok,
+    ).toBe(false);
+  });
 });

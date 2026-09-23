@@ -74,6 +74,19 @@ import {
   validateCountForm,
   type CountFormState,
 } from "@/components/counts/counts-model";
+import {
+  buildDateScopeAutoScopes as requirementAutoScopes,
+  buildDateScopeDateGroups as requirementDateGroups,
+  buildDateScopeDateItems as requirementDateItems,
+  buildQualifiedPeopleTransferOptions,
+  buildRequirementShiftTypeDomain,
+  buildRequirementShiftTypeOptions,
+  emptyRequirementForm,
+  requirementToForm,
+  validateRequirementForm,
+  type RequirementFormState,
+} from "@/components/requirements/requirements-model";
+import { applyRequirementPatch } from "@/components/requirements/requirement-patch";
 import { proposalDigest, stableStringify } from "./digest";
 import type { AssistantCommandV1 } from "./commands";
 
@@ -519,6 +532,120 @@ function applyEditCountRule(
   };
 }
 
+// --- Staffing requirements -----------------------------------------------------
+
+type RequirementFields = Omit<
+  Extract<AssistantCommandV1, { type: "add_staffing_requirement" }>,
+  "type"
+>;
+
+const REQUIREMENT_DATES: DateScopeBuilders = {
+  auto: requirementAutoScopes,
+  groups: requirementDateGroups,
+  items: requirementDateItems,
+};
+
+/** The Staffing requirements form after the user entered these values, over `base`. */
+function requirementDraft(
+  fields: RequirementFields,
+  base: RequirementFormState,
+): RequirementFormState {
+  return {
+    ...base,
+    description: fields.description,
+    shiftType: [fields.shiftType],
+    requiredNumPeople: fields.requiredNumPeople,
+    qualifiedPeople: [...fields.qualifiedPeople],
+    date: [...fields.dates],
+  };
+}
+
+function requirementRejection(
+  state: ScenarioUiState,
+  fields: RequirementFields,
+  draft: RequirementFormState,
+  name: string,
+  index: number,
+): OperationResult | undefined {
+  const shifts = buildRequirementShiftTypeOptions(state);
+  if (firstUnoffered([fields.shiftType], [...shifts.items, ...shifts.groups]) !== undefined) {
+    return reject(
+      index,
+      "unknown_target",
+      `${name}: "${fields.shiftType}" is not a shift or shift group that can be staffed. Use a shift code, or a group made only of shifts.`,
+    );
+  }
+  const people = buildQualifiedPeopleTransferOptions(state);
+  const person = firstUnoffered(fields.qualifiedPeople, [...people.items, ...people.groups]);
+  if (person !== undefined) {
+    return reject(
+      index,
+      "unknown_target",
+      `${name}: there is no person or staff group "${person}".`,
+    );
+  }
+  const dates = dateScopeRejection(state, fields.dates, REQUIREMENT_DATES);
+  if (dates) return reject(index, dates.code, `${name}: ${dates.message}.`);
+  const error = firstFormError(
+    validateRequirementForm(draft, buildRequirementShiftTypeDomain(state)),
+  );
+  if (error) return reject(index, "invalid_value", `${name}: ${error}.`);
+  return undefined;
+}
+
+function applyAddStaffingRequirement(
+  state: ScenarioUiState,
+  command: Extract<AssistantCommandV1, { type: "add_staffing_requirement" }>,
+  index: number,
+): OperationResult {
+  const draft = requirementDraft(command, emptyRequirementForm());
+  const refused = requirementRejection(
+    state,
+    command,
+    draft,
+    ruleName("requirements", command.description),
+    index,
+  );
+  if (refused) return refused;
+  return {
+    ok: true,
+    next: applyRequirementPatch(state, {
+      type: "add",
+      form: draft,
+      uid: newRuleUid(state, "requirements", command),
+    }),
+  };
+}
+
+function applyEditStaffingRequirement(
+  state: ScenarioUiState,
+  command: Extract<AssistantCommandV1, { type: "edit_staffing_requirement" }>,
+  index: number,
+): OperationResult {
+  const source = state.cardsByKind.requirements.find((card) => card.uid === command.ruleId);
+  if (!source) {
+    return reject(
+      index,
+      "unknown_target",
+      "That staffing requirement is not in this schedule any more.",
+    );
+  }
+  const name = ruleName("requirements", source.description?.trim() || source.uid);
+  const draft = requirementDraft(
+    command,
+    requirementToForm(source, buildRequirementShiftTypeDomain(state)),
+  );
+  const refused = requirementRejection(state, command, draft, name, index);
+  if (refused) return refused;
+  // `applyRequirementPatch` update keeps the uid and the disabled/applied markers itself.
+  const next = applyRequirementPatch(state, { type: "update", uid: source.uid, form: draft });
+  const after = next.cardsByKind.requirements.find((card) => card.uid === source.uid);
+  if (stableStringify(after) === stableStringify(source)) {
+    return reject(index, "no_effect", `${name} already says exactly that.`);
+  }
+  return { ok: true, next };
+}
+
 // ---------------------------------------------------------------------------
 // The arms
 // ---------------------------------------------------------------------------
@@ -761,6 +888,10 @@ export function applyAssistantCommand(
       return applyAddCountRule(state, command, index);
     case "edit_count_rule":
       return applyEditCountRule(state, command, index);
+    case "add_staffing_requirement":
+      return applyAddStaffingRequirement(state, command, index);
+    case "edit_staffing_requirement":
+      return applyEditStaffingRequirement(state, command, index);
   }
 }
 
