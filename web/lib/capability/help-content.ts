@@ -111,8 +111,10 @@ export const CAPABILITY_ENTRIES = [
     id: "staffing-requirements",
     title: "Staffing requirements",
     nurseFacingSummary:
-      "How many people a shift needs, and which kind of person counts towards that number. This " +
-      "is the record behind a rule such as 'at least two seniors on every night shift'.",
+      "How many people a shift needs: exactly that number, or a range when a preferred number " +
+      "is set. Naming who is qualified means nobody else may work that shift at all. The " +
+      "assistant cannot yet set up a skill-mix rule such as needing two seniors on every " +
+      "night shift; explain this and point the user to the Rules screen.",
     concepts: ["staffing requirement", "minimum staffing", "skill mix", "coverage", "headcount"],
     modes: ADVANCED_ONLY,
     featureGates: [],
@@ -287,13 +289,15 @@ export const CAPABILITY_ENTRIES = [
     title: "What the assistant can and cannot do",
     nurseFacingSummary:
       "Once it is on, the assistant can read the set-up you have open, explain how the app " +
-      "works, and suggest which rule expresses a policy you describe. It can also prepare a few " +
-      "kinds of change — the roster period, turning a rule on or off, a staffing head count, " +
-      "moving leave, adding new shifts and shift groups, and recording leave, day-off and shift " +
-      "requests — which you review and apply yourself. It can also offer to run the optimiser " +
-      "— the run starts only when you press Run — and then tell you how it went. It cannot " +
-      "change the roster on its own, and it cannot edit or delete existing shifts. It is not a " +
-      "source of employment, legal or clinical-safety authority.",
+      "works, and suggest which rule expresses a policy you describe. It can also prepare " +
+      "changes — the roster period, turning any rule on or off, adding, editing or deleting " +
+      "staffing requirements, shift sequence rules and shift count rules, deleting any rule, " +
+      "moving leave, adding new shifts and shift groups, and recording leave, day-off and " +
+      "shift requests — which you review and apply yourself. It can also offer to run the " +
+      "optimiser — the run starts only when you press Run — and then tell you how it went. " +
+      "It cannot change the roster on its own, it cannot yet create pairing or supervision " +
+      "rules, and it cannot edit or delete existing shifts. It is not a source of employment, " +
+      "legal or clinical-safety authority.",
     concepts: ["assistant", "chat", "read-only", "suggestion", "apply", "limits"],
     modes: BOTH_MODES,
     featureGates: ["aiAssistant"],

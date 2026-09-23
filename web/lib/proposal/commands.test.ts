@@ -6,11 +6,51 @@
 // refused.
 
 import { describe, expect, it } from "vitest";
+import { SUPPORTED_EXPRESSIONS } from "@/components/card-editor/expression-model";
 import {
   ASSISTANT_COMMAND_TYPES,
+  COUNT_EXPRESSIONS,
+  RULE_KINDS,
   assistantCommandListSchema,
+  assistantCommandSchema,
   parseAssistantCommands,
 } from "./commands";
+import { CAPABILITY_ENTRIES } from "@/lib/capability/help-content";
+
+describe("the rule arms' text states what the solver enforces", () => {
+  // core/nurse_scheduling/preference_types.py: a requirement without a preferred count
+  // is `actual == required`, and qualifiedPeople adds `unqualified on the shift == 0`.
+  // A count's linear expression is a Boolean the solver is REWARDED for by its weight.
+  const arm = (type: string) => {
+    const found = assistantCommandSchema.options.find(
+      (option) => option.shape.type.options[0] === type,
+    );
+    if (!found) throw new Error(`no ${type} arm`);
+    return found.shape as unknown as Record<string, { description?: string }>;
+  };
+
+  it("a staffing requirement is an exact count and qualified people is a ban", () => {
+    const requirement = arm("add_staffing_requirement");
+    expect(requirement.qualifiedPeople.description).toContain("everyone else is banned");
+    expect(requirement.requiredNumPeople.description).toContain("exact number");
+    expect(requirement.requiredNumPeople.description).not.toContain("minimum");
+    const help = CAPABILITY_ENTRIES.find((entry) => entry.id === "staffing-requirements");
+    expect(help?.nurseFacingSummary).not.toMatch(/at least/i);
+    expect(help?.nurseFacingSummary).toContain("nobody else may work");
+  });
+
+  it("is honest that skill-mix ('at least k from a group') is not expressible here", () => {
+    expect(arm("add_staffing_requirement").qualifiedPeople.description).toContain("skill-mix");
+    const help = CAPABILITY_ENTRIES.find((entry) => entry.id === "staffing-requirements");
+    expect(help?.nurseFacingSummary).toContain("skill-mix");
+  });
+
+  it("a count's weight rewards the expression holding", () => {
+    const weight = arm("add_count_rule").weight.description ?? "";
+    expect(weight).toContain("works against");
+    expect(weight).not.toContain("discourages");
+  });
+});
 
 describe("parseAssistantCommands", () => {
   it("accepts every supported arm", () => {
@@ -250,5 +290,108 @@ describe("parseAssistantCommands", () => {
     for (const payload of refused) {
       expect(parseAssistantCommands(payload).ok, JSON.stringify(payload)).toBe(false);
     }
+  });
+
+  it("offers exactly the Shift counts screen's six expressions", () => {
+    expect([...COUNT_EXPRESSIONS].sort()).toEqual([...SUPPORTED_EXPRESSIONS].sort());
+  });
+
+  it("accepts the shift-count arms and refuses an expression the screen does not offer", () => {
+    const fields = {
+      description: "At most 5 night shifts per nurse per month",
+      people: ["ana"],
+      shiftTypes: ["Night"],
+      dates: ["ALL"],
+      expression: "x <= T",
+      target: 5,
+      weight: "infinity",
+    };
+    expect(
+      parseAssistantCommands([
+        { type: "add_count_rule", ...fields },
+        { type: "edit_count_rule", ruleId: "cnt-nights", ...fields },
+      ]).ok,
+    ).toBe(true);
+    for (const expression of ["x <= 5", "x ≤ T", "at most"]) {
+      expect(
+        parseAssistantCommands([{ type: "add_count_rule", ...fields, expression }]).ok,
+        expression,
+      ).toBe(false);
+    }
+  });
+
+  it("accepts the shift-sequence arms with the weight typed as text", () => {
+    const fields = {
+      description: "No day shift straight after a night shift",
+      people: ["ana", "ben", 7],
+      pattern: ["Night", "Day"],
+      dates: ["ALL"],
+      weight: "-infinity",
+    };
+    const result = parseAssistantCommands([
+      { type: "add_succession_rule", ...fields },
+      { type: "edit_succession_rule", ruleId: "suc-nd", ...fields },
+    ]);
+    expect(result.ok).toBe(true);
+  });
+
+  it("refuses shift-sequence payloads the model must fix itself", () => {
+    const add = {
+      type: "add_succession_rule",
+      description: "",
+      people: ["ana"],
+      pattern: ["Night", "Day"],
+      dates: ["ALL"],
+      weight: "-1",
+    };
+    const refused: unknown[] = [
+      // Weight as a number: a hard rule could never be sent, so text is the contract.
+      [{ ...add, weight: -1 }],
+      // Description omitted: the model sends "" when there is none.
+      [{ ...add, description: undefined }],
+      // A card body smuggled alongside the targets.
+      [{ ...add, uid: "mine" }],
+      // Edit without the rule it edits.
+      [{ ...add, type: "edit_succession_rule" }],
+      // Edit with an empty id.
+      [{ ...add, type: "edit_succession_rule", ruleId: "" }],
+    ];
+    for (const payload of refused) {
+      expect(parseAssistantCommands(payload).ok, JSON.stringify(payload)).toBe(false);
+    }
+  });
+
+  it("accepts the staffing-requirement arms and refuses a shift list", () => {
+    const fields = {
+      description: "Two RNs on every night shift",
+      shiftType: "Night",
+      qualifiedPeople: ["RN"],
+      dates: ["ALL"],
+      requiredNumPeople: 2,
+    };
+    expect(
+      parseAssistantCommands([
+        { type: "add_staffing_requirement", ...fields },
+        { type: "edit_staffing_requirement", ruleId: "req-day", ...fields },
+      ]).ok,
+    ).toBe(true);
+    // One shift or group per requirement, as the screen's single-select holds.
+    expect(
+      parseAssistantCommands([
+        { type: "add_staffing_requirement", ...fields, shiftType: ["Night"] },
+      ]).ok,
+    ).toBe(false);
+  });
+
+  it("accepts remove_rule for every rule family and refuses an unknown family", () => {
+    for (const ruleKind of RULE_KINDS) {
+      expect(
+        parseAssistantCommands([{ type: "remove_rule", ruleKind, ruleId: "x" }]).ok,
+        ruleKind,
+      ).toBe(true);
+    }
+    expect(
+      parseAssistantCommands([{ type: "remove_rule", ruleKind: "rosters", ruleId: "x" }]).ok,
+    ).toBe(false);
   });
 });

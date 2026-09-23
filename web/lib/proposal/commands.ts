@@ -24,6 +24,9 @@
 // dates) and compile to its own fold (`foldPaintIntents`). Removing someone's leave is
 // an agreement with them; `assumptions.ts` asks about it from the document diff, so no
 // arm carries a confirmation flag the model could leave out.
+// The rule arms (`add_/edit_succession_rule`, and the count, requirement and remove
+// arms after them) widen the set the same way: each one fills the rule editor's own
+// form draft and runs that editor's own validator and builder in `operations.ts`.
 //
 // EVERY FIELD IS A TARGET, NEVER A DOCUMENT. There is no arm that accepts scenario
 // content, a patch, a card body, or a free-form object: the model names WHICH
@@ -37,7 +40,17 @@ import type { DateRef, GuidedRuleConstraintKind, IsoDate, PersonRef } from "@/li
 /** Bumped when an arm's SHAPE changes. A persisted proposal records the version it was prepared under. */
 export const ASSISTANT_COMMAND_SCHEMA_VERSION = 1 as const;
 
-/** The five rule kinds a `set_rule_enabled` may target — the guided rule constraint kinds. */
+/** The Shift counts screen's six expressions (`expression-model.ts` `SUPPORTED_EXPRESSIONS`). */
+export const COUNT_EXPRESSIONS = [
+  "x <= T",
+  "x >= T",
+  "x = T",
+  "x < T",
+  "x > T",
+  "|x - T|^2",
+] as const;
+
+/** The five rule families -- targets of `set_rule_enabled` and `remove_rule`. */
 export const RULE_KINDS = [
   "requirements",
   "successions",
@@ -110,7 +123,76 @@ export type AssistantCommandV1 =
       weight: RequestWeight;
     }
   /** Remove everything recorded on those dates -- Clear cell / painting with nothing selected. */
-  | { type: "clear_requests"; personId: PersonRef; startDate: IsoDate; endDate: IsoDate };
+  | { type: "clear_requests"; personId: PersonRef; startDate: IsoDate; endDate: IsoDate }
+  /**
+   * Add one shift sequence rule -- the Shift sequences screen's Add form. `weight` is
+   * the text the Weight box would hold ("-infinity" = never, "-50" = discourage).
+   */
+  | {
+      type: "add_succession_rule";
+      description: string;
+      people: PersonRef[];
+      pattern: string[];
+      dates: string[];
+      weight: string;
+    }
+  /** Replace every field of one shift sequence rule -- that screen's Edit form. */
+  | {
+      type: "edit_succession_rule";
+      ruleId: string;
+      description: string;
+      people: PersonRef[];
+      pattern: string[];
+      dates: string[];
+      weight: string;
+    }
+  /** Add one shift count rule -- the Shift counts screen's Add form (ordinary counts only). */
+  | {
+      type: "add_count_rule";
+      description: string;
+      people: PersonRef[];
+      shiftTypes: string[];
+      dates: string[];
+      expression: (typeof COUNT_EXPRESSIONS)[number];
+      target: number;
+      weight: string;
+    }
+  /** Replace every field of one ordinary shift count rule -- that screen's Edit form. */
+  | {
+      type: "edit_count_rule";
+      ruleId: string;
+      description: string;
+      people: PersonRef[];
+      shiftTypes: string[];
+      dates: string[];
+      expression: (typeof COUNT_EXPRESSIONS)[number];
+      target: number;
+      weight: string;
+    }
+  /** Add one staffing requirement -- the Staffing requirements screen's Add form, no preferred count. */
+  | {
+      type: "add_staffing_requirement";
+      description: string;
+      shiftType: string;
+      qualifiedPeople: PersonRef[];
+      dates: string[];
+      requiredNumPeople: number;
+    }
+  /**
+   * Replace these fields of one staffing requirement -- that screen's Edit form. Its
+   * preferred count, weight and coefficients are kept as stored.
+   */
+  | {
+      type: "edit_staffing_requirement";
+      ruleId: string;
+      description: string;
+      shiftType: string;
+      qualifiedPeople: PersonRef[];
+      dates: string[];
+      requiredNumPeople: number;
+    }
+  /** Delete one rule of any family -- every rule screen's Delete. */
+  | { type: "remove_rule"; ruleKind: (typeof RULE_KINDS)[number]; ruleId: string };
 
 /** A request strength: a finite number, or a hard pin. JSON cannot carry an infinity, so the pins are words. */
 export type RequestWeight = number | "must" | "never";
@@ -129,6 +211,13 @@ export const ASSISTANT_COMMAND_TYPES = [
   "set_off_request",
   "set_shift_request",
   "clear_requests",
+  "add_succession_rule",
+  "edit_succession_rule",
+  "add_count_rule",
+  "edit_count_rule",
+  "add_staffing_requirement",
+  "edit_staffing_requirement",
+  "remove_rule",
 ] as const satisfies readonly AssistantCommandType[];
 
 // EXHAUSTIVE IN BOTH DIRECTIONS. `satisfies` above proves every listed name is a real
@@ -177,6 +266,142 @@ const endDateSchema = isoDateSchema.describe(
 const requestWeightSchema = z.union([z.number().int(), z.enum(["must", "never"])], {
   error: 'a weight is a whole number, or "must"/"never"',
 });
+// RULE FIELDS are built per arm (a call, not a shared constant) so every arm's JSON
+// Schema is emitted inline rather than as a reference the transport would have to
+// resolve.
+
+function ruleIdSchema() {
+  return z
+    .string()
+    .min(1)
+    .describe('The rule\'s stable id (its "uid"), as reported by get_schedule_section("rules").');
+}
+
+function ruleDescriptionSchema() {
+  return z
+    .string()
+    .describe(
+      "A short plain title in the ward's words, e.g. \"No day shift straight after a night " +
+        'shift". Use "" only when there is nothing to go on.',
+    );
+}
+
+function rulePeopleSchema() {
+  return z
+    .array(refSchema)
+    .describe(
+      "Who the rule is for: person ids and staff group ids exactly as in the schedule. " +
+        '"ALL" is not accepted here -- for every nurse, list each person or use a staff ' +
+        "group that holds everyone. An edit may keep the people the rule already names, " +
+        'including "ALL".',
+    );
+}
+
+function ruleDatesSchema() {
+  return z
+    .array(z.string())
+    .describe(
+      'Which dates. EITHER exactly one of "ALL", "WEEKDAY", "WEEKEND", a weekday name such ' +
+        'as "MONDAY", or an existing date group id -- OR one or more roster dates written ' +
+        "YYYY-MM-DD. Never mix the two kinds.",
+    );
+}
+
+function ruleWeightSchema() {
+  return z
+    .string()
+    .describe(
+      'How strongly, written as you would type it in the Weight box: "-infinity" = must ' +
+        'never happen (hard rule), "infinity" = must always hold (hard rule), a negative ' +
+        'number such as "-50" discourages, a positive number such as "10" encourages. ' +
+        "The schedule shows hard weights as .inf / -.inf: send them as infinity / " +
+        "-infinity. Ask the user whether a new rule is a must or a preference when they " +
+        "did not say.",
+    );
+}
+
+function countWeightSchema() {
+  return z
+    .string()
+    .describe(
+      "How strongly, written as you would type it in the Weight box. The solver is " +
+        "REWARDED for the expression holding, in proportion to the weight: " +
+        '"infinity" = must always hold (hard rule), a positive number such as "10" = keep ' +
+        "to it where possible. A negative number works against the expression (the solver " +
+        'is paid for breaking it) and "-infinity" forces the opposite, so a soft cap is ' +
+        '"x <= T" with a POSITIVE weight. For "|x - T|^2" only 0 or less is allowed: a ' +
+        'negative number such as "-5" pulls the count toward T, "-infinity" makes it ' +
+        "exactly T. The schedule shows hard weights as .inf / -.inf: send them as " +
+        "infinity / -infinity. Ask the user whether a new rule is a must or a preference " +
+        "when they did not say.",
+    );
+}
+
+function successionFields() {
+  return {
+    description: ruleDescriptionSchema(),
+    people: rulePeopleSchema(),
+    pattern: z
+      .array(z.string())
+      .describe(
+        'The shifts in order on consecutive days, at least two, e.g. ["Night", "Day"] ' +
+          "for a day shift straight after a night. Shift codes, shift group ids, OFF, " +
+          "LEAVE or ALL.",
+      ),
+    dates: ruleDatesSchema(),
+    weight: ruleWeightSchema(),
+  };
+}
+
+function countFields() {
+  return {
+    description: ruleDescriptionSchema(),
+    people: rulePeopleSchema(),
+    shiftTypes: z
+      .array(z.string())
+      .describe(
+        "The shifts to count, per person: shift codes, shift group ids, OFF, LEAVE or ALL.",
+      ),
+    dates: ruleDatesSchema(),
+    expression: z
+      .enum(COUNT_EXPRESSIONS)
+      .describe(
+        'How each person\'s count x relates to the target T: "x <= T" at most, "x >= T" at ' +
+          'least, "x = T" exactly, "x < T" fewer than, "x > T" more than, "|x - T|^2" as ' +
+          'close to T as possible (needs a weight of 0 or less, never "infinity").',
+      ),
+    target: z.number().describe("The target T, a whole number of zero or more, e.g. 5."),
+    weight: countWeightSchema(),
+  };
+}
+
+function requirementFields() {
+  return {
+    description: ruleDescriptionSchema(),
+    shiftType: z
+      .string()
+      .describe(
+        "ONE shift code or shift group id to staff. A shift group id is one combined " +
+          "count across all of its shifts on each date. OFF, LEAVE and ALL cannot be staffed.",
+      ),
+    qualifiedPeople: z
+      .array(refSchema)
+      .describe(
+        "Only these people may work this shift; everyone else is banned from it (a hard " +
+          'rule). Person ids or staff group ids, or ["ALL"] for no restriction. Cannot ' +
+          "express group skill-mix rules (e.g. a minimum count of RNs on a shift with " +
+          "others allowed too); tell the user and point them to the Rules screen.",
+      ),
+    dates: ruleDatesSchema(),
+    requiredNumPeople: z
+      .number()
+      .describe(
+        "The exact number of people on that shift on each date, e.g. 2 (a hard rule), " +
+          "unless the requirement already has a preferred count, which makes it the lowest " +
+          "allowed.",
+      ),
+  };
+}
 
 /**
  * The wire schema for one command.
@@ -228,7 +453,12 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
   z.strictObject({
     type: z.enum(["set_staffing_requirement_people"]),
     ruleId: z.string().min(1).describe("The staffing requirement's stable id."),
-    requiredNumPeople: z.number().describe("How many people that shift must have."),
+    requiredNumPeople: z
+      .number()
+      .describe(
+        "How many people that shift must have: exactly this many, or at least this many " +
+          "when the requirement has a preferred count.",
+      ),
   }),
   z.strictObject({
     type: z.enum(["move_leave"]),
@@ -324,6 +554,25 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
         "To free someone on leave to cover a shift, tell the user to ask them first, and " +
         "propose this as that question, never as a decision.",
     ),
+  z.strictObject({ type: z.enum(["add_succession_rule"]), ...successionFields() }),
+  z.strictObject({
+    type: z.enum(["edit_succession_rule"]),
+    ruleId: ruleIdSchema(),
+    ...successionFields(),
+  }),
+  z.strictObject({ type: z.enum(["add_count_rule"]), ...countFields() }),
+  z.strictObject({ type: z.enum(["edit_count_rule"]), ruleId: ruleIdSchema(), ...countFields() }),
+  z.strictObject({ type: z.enum(["add_staffing_requirement"]), ...requirementFields() }),
+  z.strictObject({
+    type: z.enum(["edit_staffing_requirement"]),
+    ruleId: ruleIdSchema(),
+    ...requirementFields(),
+  }),
+  z.strictObject({
+    type: z.enum(["remove_rule"]),
+    ruleKind: z.enum(RULE_KINDS).describe("Which rule family the rule belongs to."),
+    ruleId: ruleIdSchema(),
+  }),
 ]);
 
 /** The most operations one change may hold. Also stated to the model, in its tool description -- see `use-proposal-tools.ts`. */

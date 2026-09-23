@@ -8,15 +8,12 @@
 //
 // VALIDATION PARITY WITH THE MANUAL PATH. The `set_roster_range` arm calls the same
 // `applyRangeChange` the Dates screen commits, so that arm is shared code outright.
-// The rule arms restate their predicates rather than importing
-// `components/guided-rules/mutations`: that module reaches the Guided mappers, which
-// reach a `"use client"` React field component, and pulling React into a layer the
-// projection adapter imports would drag the whole component graph into the node-env
-// scenario suites. The drift that import would have prevented is prevented instead
-// by `operations.parity.test.tsx`, which drives the MANUAL adapters and these
-// operations with the same inputs and asserts they accept, reject and produce
-// identical documents -- the same technique `lib/capability/commands.ts` already
-// uses to keep its restated list honest.
+// The toggle and head-count arms restate the Guided Rules predicates rather than
+// importing `components/guided-rules/mutations`, which reaches the Guided row UI;
+// `operations.parity.test.ts` keeps that restatement honest. The create/edit rule
+// arms need no restatement: they call each Advanced editor's own model
+// (`successions-model`, `counts-model`, `requirements-model`, `requirement-patch`),
+// which is React-free -- `react-free.test.ts` holds that line.
 //
 // A REJECTION IS A PRODUCT ANSWER, not an error. "That rule targets more than one
 // shift type" is what the Preview says to the user, so the message is written for a
@@ -59,6 +56,45 @@ import {
   validateWorkingTimeDraft,
 } from "@/components/entity-editor/core";
 import { shiftTypesDescriptor } from "@/components/shift-types/shift-types-descriptor";
+import { parseWeightInput } from "@/components/card-editor/weight-value";
+import {
+  buildDateScopeAutoScopes as successionAutoScopes,
+  buildDateScopeDateGroups as successionDateGroups,
+  buildDateScopeDateItems as successionDateItems,
+  buildPatternShiftTypeOptions,
+  buildPeopleTransferOptions as successionPeopleOptions,
+  buildSuccessionCard,
+  isEditableSuccessionCard,
+  validateSuccessionForm,
+  type SuccessionFormState,
+} from "@/components/successions/successions-model";
+import {
+  buildCountCard,
+  buildCountShiftTypeDomain,
+  buildCountShiftTypeTransferOptions,
+  buildDateScopeAutoScopes as countAutoScopes,
+  buildDateScopeDateGroups as countDateGroups,
+  buildDateScopeDateItems as countDateItems,
+  buildPeopleTransferOptions as countPeopleOptions,
+  countToForm,
+  emptyCountForm,
+  isEditableCountCard,
+  validateCountForm,
+  type CountFormState,
+} from "@/components/counts/counts-model";
+import {
+  buildDateScopeAutoScopes as requirementAutoScopes,
+  buildDateScopeDateGroups as requirementDateGroups,
+  buildDateScopeDateItems as requirementDateItems,
+  buildQualifiedPeopleTransferOptions,
+  buildRequirementShiftTypeDomain,
+  buildRequirementShiftTypeOptions,
+  emptyRequirementForm,
+  requirementToForm,
+  validateRequirementForm,
+  type RequirementFormState,
+} from "@/components/requirements/requirements-model";
+import { applyRequirementPatch } from "@/components/requirements/requirement-patch";
 import { foldPaintIntents, type MintCellUid } from "@/lib/store/paint-fold";
 import { paintCellKey, type StagedCoordinate } from "@/lib/store/types";
 import type { AssistantCommandV1, RequestWeight } from "./commands";
@@ -177,6 +213,491 @@ function withRule<TCard extends { uid: string }>(
       ...state.cardsByKind,
       [kind]: cards.map((card) => (card.uid === ruleId ? next : card)),
     } as CardsByKind,
+  };
+}
+
+/** "Shift sequence rule "Night cap"", or "The new shift sequence rule" when untitled. */
+function ruleName(kind: RuleKind, title: string | undefined): string {
+  const label = RULE_LABEL[kind];
+  const trimmed = title?.trim();
+  return trimmed ? `${label[0].toUpperCase()}${label.slice(1)} "${trimmed}"` : `The new ${label}`;
+}
+
+/**
+ * A new card's uid. Deterministic, so Apply's re-derivation writes the card the Preview
+ * showed; the live uids are part of the input, so asking twice for the same rule --
+ * in one change or two -- yields two different ids.
+ */
+function newRuleUid(state: ScenarioUiState, kind: RuleKind, command: AssistantCommandV1): string {
+  return proposalDigest([kind, state.cardsByKind[kind].map((card) => card.uid), command]);
+}
+
+/**
+ * Carry `disabled`/`applied` onto a rebuilt card -- the edit-save rule every editor's
+ * `update` applies (`use-successions.ts`, `use-counts.ts`, `requirement-patch.ts`): an
+ * edit never re-enables a rule the user switched off.
+ */
+function keepMarkers<TCard extends { disabled?: boolean; applied?: boolean }>(
+  source: TCard,
+  rebuilt: TCard,
+): TCard {
+  const markers: { disabled?: true; applied?: true } = {};
+  if (source.disabled) markers.disabled = true;
+  if (source.applied) markers.applied = true;
+  return markers.disabled || markers.applied ? { ...rebuilt, ...markers } : rebuilt;
+}
+
+/** Replace one kind's whole card list. */
+function withCards(
+  state: ScenarioUiState,
+  kind: RuleKind,
+  cards: readonly { uid: string }[],
+): ScenarioUiState {
+  return { ...state, cardsByKind: { ...state.cardsByKind, [kind]: cards } as CardsByKind };
+}
+
+/** One entry a picker offers; a disabled entry cannot be picked. */
+interface PickerOption {
+  value: unknown;
+  disabled?: boolean;
+}
+
+/**
+ * The first picked ref the manual screen's own picker does not offer. Exact identity,
+ * as the pickers compare (`sameEntityId`): person `7` and person `"7"` are different.
+ */
+function firstUnoffered<T>(picked: readonly T[], offered: readonly PickerOption[]): T | undefined {
+  return picked.find(
+    (ref) => !offered.some((option) => !option.disabled && Object.is(option.value, ref)),
+  );
+}
+
+/**
+ * The first person ref neither offered nor already on the edited card. An edit form
+ * loads the card's own refs (`successionToForm` / `countToForm`), so a rule scoped to
+ * ALL keeps ALL on Save although the picker never offers it.
+ */
+function firstUnofferedPerson(
+  picked: readonly PersonRef[],
+  offered: readonly PickerOption[],
+  held: unknown,
+): PersonRef | undefined {
+  const kept: unknown[] = held === undefined ? [] : [held].flat(Infinity);
+  return firstUnoffered(
+    picked.filter((ref) => !kept.some((own) => Object.is(own, ref))),
+    offered,
+  );
+}
+
+/** One editor's Dates-field option builders (each model exports its own three). */
+interface DateScopeBuilders {
+  auto: (state: ScenarioUiState) => readonly { id: string }[];
+  groups: (state: ScenarioUiState) => readonly { id: string }[];
+  items: (state: ScenarioUiState) => readonly { id: string }[];
+}
+
+/**
+ * What a `DateScopeField` can hold: ONE scope chip (ALL, WEEKDAY, WEEKEND, a weekday, or
+ * an authored date group), or in-range dates written YYYY-MM-DD. An empty list is left
+ * to the form's own validator, which owns that message.
+ */
+function dateScopeRejection(
+  state: ScenarioUiState,
+  dates: readonly string[],
+  builders: DateScopeBuilders,
+): { code: CommandRejectionCode; message: string } | undefined {
+  if (dates.length === 0) return undefined;
+  const chips = [...builders.auto(state), ...builders.groups(state)].map((option) => option.id);
+  if (dates.length === 1 && chips.includes(dates[0])) return undefined;
+  const inRange = new Set(builders.items(state).map((item) => item.id));
+  const outside = dates.find((date) => !inRange.has(date));
+  if (outside === undefined) return undefined;
+  if (chips.includes(outside)) {
+    return {
+      code: "invalid_value",
+      message: `"${outside}" stands for a whole set of dates, so it must be the only date entry`,
+    };
+  }
+  return {
+    code: "unknown_target",
+    message:
+      `"${outside}" is not a roster date (write dates as YYYY-MM-DD inside the roster ` +
+      "period), a date group, or one of ALL, WEEKDAY, WEEKEND or a weekday name such as MONDAY",
+  };
+}
+
+/** The first message a form validator reported, in the validator's own field order. */
+function firstFormError(errors: object): string | undefined {
+  return Object.values(errors).find((value): value is string => typeof value === "string");
+}
+
+// --- Shift sequences --------------------------------------------------------
+
+type SuccessionFields = Omit<Extract<AssistantCommandV1, { type: "add_succession_rule" }>, "type">;
+
+const SUCCESSION_DATES: DateScopeBuilders = {
+  auto: successionAutoScopes,
+  groups: successionDateGroups,
+  items: successionDateItems,
+};
+
+/** The draft the Shift sequences form holds once the user has entered these values. */
+function successionDraft(fields: SuccessionFields): SuccessionFormState {
+  return {
+    description: fields.description,
+    person: [...fields.people],
+    pattern: [...fields.pattern],
+    date: [...fields.dates],
+    weight: parseWeightInput(fields.weight),
+  };
+}
+
+/** Everything the form checks before Save, plus what its pickers make impossible to pick. */
+function successionRejection(
+  state: ScenarioUiState,
+  fields: SuccessionFields,
+  name: string,
+  index: number,
+  held?: unknown,
+): OperationResult | undefined {
+  const people = successionPeopleOptions(state);
+  const person = firstUnofferedPerson(fields.people, [...people.items, ...people.groups], held);
+  if (person !== undefined) {
+    return reject(
+      index,
+      "unknown_target",
+      `${name}: there is no person or staff group "${person}". Name each person, or an existing staff group.`,
+    );
+  }
+  const shifts = buildPatternShiftTypeOptions(state);
+  const shift = firstUnoffered(fields.pattern, [...shifts.items, ...shifts.groups]);
+  if (shift !== undefined) {
+    return reject(index, "unknown_target", `${name}: there is no shift or shift group "${shift}".`);
+  }
+  const dates = dateScopeRejection(state, fields.dates, SUCCESSION_DATES);
+  if (dates) return reject(index, dates.code, `${name}: ${dates.message}.`);
+  const error = firstFormError(validateSuccessionForm(successionDraft(fields)));
+  if (error) return reject(index, "invalid_value", `${name}: ${error}.`);
+  return undefined;
+}
+
+function applyAddSuccessionRule(
+  state: ScenarioUiState,
+  command: Extract<AssistantCommandV1, { type: "add_succession_rule" }>,
+  index: number,
+): OperationResult {
+  const refused = successionRejection(
+    state,
+    command,
+    ruleName("successions", command.description),
+    index,
+  );
+  if (refused) return refused;
+  // `use-successions.ts` `add`: append `buildSuccessionCard(form)`.
+  const card = buildSuccessionCard(
+    successionDraft(command),
+    newRuleUid(state, "successions", command),
+  );
+  return {
+    ok: true,
+    next: withCards(state, "successions", [...state.cardsByKind.successions, card]),
+  };
+}
+
+function applyEditSuccessionRule(
+  state: ScenarioUiState,
+  command: Extract<AssistantCommandV1, { type: "edit_succession_rule" }>,
+  index: number,
+): OperationResult {
+  const source = state.cardsByKind.successions.find((card) => card.uid === command.ruleId);
+  if (!source) {
+    return reject(
+      index,
+      "unknown_target",
+      "That shift sequence rule is not in this schedule any more.",
+    );
+  }
+  const name = ruleName("successions", source.description?.trim() || source.uid);
+  // The screen opens no form for such a card (`isEditableSuccessionCard` guards `openEdit`).
+  if (!isEditableSuccessionCard(source)) {
+    return reject(
+      index,
+      "unsupported_shape",
+      `${name}: one step of its pattern allows several shifts, so it has to be edited on the Shift sequences screen.`,
+    );
+  }
+  const refused = successionRejection(state, command, name, index, source.person);
+  if (refused) return refused;
+  const next = keepMarkers(source, buildSuccessionCard(successionDraft(command), source.uid));
+  if (stableStringify(next) === stableStringify(source)) {
+    return reject(index, "no_effect", `${name} already says exactly that.`);
+  }
+  return {
+    ok: true,
+    next: withCards(
+      state,
+      "successions",
+      state.cardsByKind.successions.map((card) => (card.uid === source.uid ? next : card)),
+    ),
+  };
+}
+
+// --- Shift counts -------------------------------------------------------------
+
+type CountFields = Omit<Extract<AssistantCommandV1, { type: "add_count_rule" }>, "type">;
+
+const COUNT_DATES: DateScopeBuilders = {
+  auto: countAutoScopes,
+  groups: countDateGroups,
+  items: countDateItems,
+};
+
+/**
+ * The draft the Shift counts form holds once the user has entered these values, on top
+ * of `base`: a fresh form for Add, the loaded card (`countToForm`) for Edit -- so an
+ * edit keeps the coefficients the arm does not carry, exactly as the form does.
+ */
+function countDraft(fields: CountFields, base: CountFormState): CountFormState {
+  return {
+    ...base,
+    description: fields.description,
+    person: [...fields.people],
+    countDates: [...fields.dates],
+    countShiftTypes: [...fields.shiftTypes],
+    expression: fields.expression,
+    target: fields.target,
+    weight: parseWeightInput(fields.weight),
+  };
+}
+
+function countRejection(
+  state: ScenarioUiState,
+  fields: CountFields,
+  draft: CountFormState,
+  name: string,
+  index: number,
+  held?: unknown,
+): OperationResult | undefined {
+  const people = countPeopleOptions(state);
+  const person = firstUnofferedPerson(fields.people, [...people.items, ...people.groups], held);
+  if (person !== undefined) {
+    return reject(
+      index,
+      "unknown_target",
+      `${name}: there is no person or staff group "${person}". Name each person, or an existing staff group.`,
+    );
+  }
+  const shifts = buildCountShiftTypeTransferOptions(state);
+  const shift = firstUnoffered(fields.shiftTypes, [...shifts.items, ...shifts.groups]);
+  if (shift !== undefined) {
+    return reject(index, "unknown_target", `${name}: there is no shift or shift group "${shift}".`);
+  }
+  const dates = dateScopeRejection(state, fields.dates, COUNT_DATES);
+  if (dates) return reject(index, dates.code, `${name}: ${dates.message}.`);
+  const error = firstFormError(validateCountForm(draft, buildCountShiftTypeDomain(state)));
+  if (error) return reject(index, "invalid_value", `${name}: ${error}.`);
+  return undefined;
+}
+
+function applyAddCountRule(
+  state: ScenarioUiState,
+  command: Extract<AssistantCommandV1, { type: "add_count_rule" }>,
+  index: number,
+): OperationResult {
+  const draft = countDraft(command, emptyCountForm());
+  const refused = countRejection(
+    state,
+    command,
+    draft,
+    ruleName("counts", command.description),
+    index,
+  );
+  if (refused) return refused;
+  // `use-counts.ts` `add`: append `buildCountCard(form, domain)`.
+  const card = buildCountCard(
+    draft,
+    buildCountShiftTypeDomain(state),
+    newRuleUid(state, "counts", command),
+  );
+  return { ok: true, next: withCards(state, "counts", [...state.cardsByKind.counts, card]) };
+}
+
+function applyEditCountRule(
+  state: ScenarioUiState,
+  command: Extract<AssistantCommandV1, { type: "edit_count_rule" }>,
+  index: number,
+): OperationResult {
+  const source = state.cardsByKind.counts.find((card) => card.uid === command.ruleId);
+  if (!source) {
+    return reject(
+      index,
+      "unknown_target",
+      "That shift count rule is not in this schedule any more.",
+    );
+  }
+  const name = ruleName("counts", source.description?.trim() || source.uid);
+  if (!isEditableCountCard(source)) {
+    return reject(
+      index,
+      "unsupported_shape",
+      `${name}: it is a contracted-hours or list-shaped count, so it has to be edited on the Shift counts screen.`,
+    );
+  }
+  const domain = buildCountShiftTypeDomain(state);
+  const draft = countDraft(command, countToForm(source, domain));
+  const refused = countRejection(state, command, draft, name, index, source.person);
+  if (refused) return refused;
+  const next = keepMarkers(source, buildCountCard(draft, domain, source.uid));
+  if (stableStringify(next) === stableStringify(source)) {
+    return reject(index, "no_effect", `${name} already says exactly that.`);
+  }
+  return {
+    ok: true,
+    next: withCards(
+      state,
+      "counts",
+      state.cardsByKind.counts.map((card) => (card.uid === source.uid ? next : card)),
+    ),
+  };
+}
+
+// --- Staffing requirements -----------------------------------------------------
+
+type RequirementFields = Omit<
+  Extract<AssistantCommandV1, { type: "add_staffing_requirement" }>,
+  "type"
+>;
+
+const REQUIREMENT_DATES: DateScopeBuilders = {
+  auto: requirementAutoScopes,
+  groups: requirementDateGroups,
+  items: requirementDateItems,
+};
+
+/** The Staffing requirements form after the user entered these values, over `base`. */
+function requirementDraft(
+  fields: RequirementFields,
+  base: RequirementFormState,
+): RequirementFormState {
+  return {
+    ...base,
+    description: fields.description,
+    shiftType: [fields.shiftType],
+    requiredNumPeople: fields.requiredNumPeople,
+    qualifiedPeople: [...fields.qualifiedPeople],
+    date: [...fields.dates],
+  };
+}
+
+function requirementRejection(
+  state: ScenarioUiState,
+  fields: RequirementFields,
+  draft: RequirementFormState,
+  name: string,
+  index: number,
+): OperationResult | undefined {
+  const shifts = buildRequirementShiftTypeOptions(state);
+  if (firstUnoffered([fields.shiftType], [...shifts.items, ...shifts.groups]) !== undefined) {
+    return reject(
+      index,
+      "unknown_target",
+      `${name}: "${fields.shiftType}" is not a shift or shift group that can be staffed. Use a shift code, or a group made only of shifts.`,
+    );
+  }
+  const people = buildQualifiedPeopleTransferOptions(state);
+  const person = firstUnoffered(fields.qualifiedPeople, [...people.items, ...people.groups]);
+  if (person !== undefined) {
+    return reject(
+      index,
+      "unknown_target",
+      `${name}: there is no person or staff group "${person}".`,
+    );
+  }
+  const dates = dateScopeRejection(state, fields.dates, REQUIREMENT_DATES);
+  if (dates) return reject(index, dates.code, `${name}: ${dates.message}.`);
+  const error = firstFormError(
+    validateRequirementForm(draft, buildRequirementShiftTypeDomain(state)),
+  );
+  if (error) return reject(index, "invalid_value", `${name}: ${error}.`);
+  return undefined;
+}
+
+function applyAddStaffingRequirement(
+  state: ScenarioUiState,
+  command: Extract<AssistantCommandV1, { type: "add_staffing_requirement" }>,
+  index: number,
+): OperationResult {
+  const draft = requirementDraft(command, emptyRequirementForm());
+  const refused = requirementRejection(
+    state,
+    command,
+    draft,
+    ruleName("requirements", command.description),
+    index,
+  );
+  if (refused) return refused;
+  return {
+    ok: true,
+    next: applyRequirementPatch(state, {
+      type: "add",
+      form: draft,
+      uid: newRuleUid(state, "requirements", command),
+    }),
+  };
+}
+
+function applyEditStaffingRequirement(
+  state: ScenarioUiState,
+  command: Extract<AssistantCommandV1, { type: "edit_staffing_requirement" }>,
+  index: number,
+): OperationResult {
+  const source = state.cardsByKind.requirements.find((card) => card.uid === command.ruleId);
+  if (!source) {
+    return reject(
+      index,
+      "unknown_target",
+      "That staffing requirement is not in this schedule any more.",
+    );
+  }
+  const name = ruleName("requirements", source.description?.trim() || source.uid);
+  const draft = requirementDraft(
+    command,
+    requirementToForm(source, buildRequirementShiftTypeDomain(state)),
+  );
+  const refused = requirementRejection(state, command, draft, name, index);
+  if (refused) return refused;
+  // `applyRequirementPatch` update keeps the uid and the disabled/applied markers itself.
+  const next = applyRequirementPatch(state, { type: "update", uid: source.uid, form: draft });
+  const after = next.cardsByKind.requirements.find((card) => card.uid === source.uid);
+  if (stableStringify(after) === stableStringify(source)) {
+    return reject(index, "no_effect", `${name} already says exactly that.`);
+  }
+  return { ok: true, next };
+}
+
+// --- Remove (every family) -----------------------------------------------------
+
+function applyRemoveRule(
+  state: ScenarioUiState,
+  command: Extract<AssistantCommandV1, { type: "remove_rule" }>,
+  index: number,
+): OperationResult {
+  if (!findRule(state, command.ruleKind, command.ruleId)) {
+    return reject(
+      index,
+      "unknown_target",
+      `That ${RULE_LABEL[command.ruleKind]} is not in this schedule any more.`,
+    );
+  }
+  // Every editor's `remove`: `current.filter((card) => card.uid !== uid)`.
+  const cards = state.cardsByKind[command.ruleKind] as readonly { uid: string }[];
+  return {
+    ok: true,
+    next: withCards(
+      state,
+      command.ruleKind,
+      cards.filter((card) => card.uid !== command.ruleId),
+    ),
   };
 }
 
@@ -597,6 +1118,20 @@ export function applyAssistantCommand(
     case "set_shift_request":
     case "clear_requests":
       return applyRequestPaint(state, command, index);
+    case "add_succession_rule":
+      return applyAddSuccessionRule(state, command, index);
+    case "edit_succession_rule":
+      return applyEditSuccessionRule(state, command, index);
+    case "add_count_rule":
+      return applyAddCountRule(state, command, index);
+    case "edit_count_rule":
+      return applyEditCountRule(state, command, index);
+    case "add_staffing_requirement":
+      return applyAddStaffingRequirement(state, command, index);
+    case "edit_staffing_requirement":
+      return applyEditStaffingRequirement(state, command, index);
+    case "remove_rule":
+      return applyRemoveRule(state, command, index);
   }
 }
 

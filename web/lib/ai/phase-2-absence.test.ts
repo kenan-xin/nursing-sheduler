@@ -70,6 +70,9 @@ const MODEL_VISIBLE_TOOLS = [
 // WIDENED AGAIN (2026-09-24, plan assistant-leave-request-ops): leave, day-off and
 // shift requests are scenario INPUTS on the Requests page, compiled to its own paint
 // fold; none edits a produced roster.
+// WIDENED DELIBERATELY (2026-09-24, plan assistant-rule-ops): creating and editing
+// rules is Phase-1 scenario authoring. Each arm fills a rule editor's own form draft
+// and runs its own validator/builder; none acts on a produced roster.
 const PROPOSAL_OPERATIONS = [
   "set_roster_range",
   "set_rule_enabled",
@@ -81,6 +84,13 @@ const PROPOSAL_OPERATIONS = [
   "set_off_request",
   "set_shift_request",
   "clear_requests",
+  "add_succession_rule",
+  "edit_succession_rule",
+  "add_count_rule",
+  "edit_count_rule",
+  "add_staffing_requirement",
+  "edit_staffing_requirement",
+  "remove_rule",
 ] as const;
 
 /**

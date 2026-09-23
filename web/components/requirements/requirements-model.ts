@@ -37,12 +37,12 @@ import {
   validateCoefficientPairs,
   type CoefficientDomain,
   type CoefficientPair,
-} from "@/components/card-editor/coefficient-fields";
+} from "@/components/card-editor/coefficient-model";
 import {
   isValidWeightValue,
   isWeightNonPositive,
   type WeightFieldValue,
-} from "@/components/card-editor/weight-field";
+} from "@/components/card-editor/weight-value";
 import { deriveDateGroups, generateDateItems } from "@/lib/dates";
 import {
   expandDateRefs,
