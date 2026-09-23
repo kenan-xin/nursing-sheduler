@@ -792,6 +792,69 @@ describe("review fixes (2026-09-24)", () => {
     expect(rank(state).map((o) => o.repairId)).not.toContain("extra_shift_willing_nurse");
   });
 
+  it("softens a hard day off to a strong wish, asked of the nurse in chat", () => {
+    const base = SCENARIOS.onlyRnOnLeave();
+    const state: ScenarioUiState = {
+      ...base,
+      reqData: [{ uid: "off-rn1", person: "rn1", date: "03", kind: "off", weight: Infinity }],
+    };
+    const soften = rank(state).find((o) => o.repairId === "soften_hard_request");
+    expect(soften).toMatchObject({ confirmation: "named_nurse", enforcedBy: "chat" });
+    expect(soften?.operations).toEqual([
+      {
+        type: "set_off_request",
+        personId: "rn1",
+        startDate: "2026-11-03",
+        endDate: "2026-11-03",
+        weight: 10,
+      },
+    ]);
+    expect(soften && isSafeOption(state, soften)).toBe(true);
+    const after = applyAssistantCommands(state, soften!.operations);
+    if (!after.ok) throw new Error(after.rejection.message);
+    expect(findStaffingShortfalls(after.next)).toEqual([]);
+  });
+
+  it("softens the hard request on a date one nurse can fix, not the first one found", () => {
+    const never = (person: string, date: string) => ({
+      uid: `never-${person}-${date}`,
+      person,
+      date,
+      kind: "request" as const,
+      shiftType: "N",
+      weight: -Infinity,
+    });
+    const state = ward({
+      staff: people("ana", "ben", "cara"),
+      reqData: [
+        never("ana", "02"),
+        never("ben", "02"),
+        never("ana", "04"),
+        never("ben", "04"),
+        never("cara", "04"),
+      ],
+      cardsByKind: cards({
+        requirements: [
+          requirement("night", "N", 1, {
+            date: [
+              "2026-11-01",
+              "2026-11-03",
+              "2026-11-04",
+              "2026-11-05",
+              "2026-11-06",
+              "2026-11-07",
+            ],
+          }),
+          requirement("night-02", "N", 3, { date: ["2026-11-02"] }),
+        ],
+      }),
+    });
+    const soften = rank(state).find((o) => o.repairId === "soften_hard_request");
+    expect(soften?.operations).toEqual([
+      expect.objectContaining({ type: "set_shift_request", startDate: "2026-11-04" }),
+    ]);
+  });
+
   it("offers no borrow when the gap is above MAX_BORROWED", () => {
     const state = ward({
       staff: people("ana"),

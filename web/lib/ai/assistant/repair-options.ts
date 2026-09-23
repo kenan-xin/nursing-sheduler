@@ -35,6 +35,7 @@ import type {
   PersonRef,
   RequirementCard,
   ScenarioUiState,
+  UiRequestCell,
   UiShiftRequestCell,
 } from "@/lib/scenario";
 import {
@@ -288,45 +289,68 @@ const alignOverlappingRequirements: Builder = (ctx, findings) => {
   });
 };
 
+type HardCell = UiShiftRequestCell | Extract<UiRequestCell, { kind: "off" }>;
+const isHardCell = (c: UiRequestCell): c is HardCell =>
+  (c.kind === "request" || c.kind === "off") && !Number.isFinite(c.weight);
+
 const softenHardRequest: Builder = (ctx, findings, situation) => {
-  const hit = findings.flatMap((f) =>
-    f.away.filter((a) => a.reason === "never_request").map((a) => ({ f, person: a.person })),
-  )[0];
-  const hard = ctx.state.reqData.filter(
-    (c): c is UiShiftRequestCell => c.kind === "request" && !Number.isFinite(c.weight),
+  const hard = ctx.state.reqData.filter(isHardCell);
+  const cellFor = (person: string, dateId: string | null, reason: string) =>
+    hard.find(
+      (c) =>
+        (reason === "day_off"
+          ? c.kind === "off" && c.weight === Infinity
+          : c.kind === "request" && c.weight === -Infinity) &&
+        String(c.person) === person &&
+        toDateId(c.date, range(ctx)) === dateId,
+    );
+  // Softening one request frees one nurse: only on a short date that one nurse closes.
+  const hit = findings
+    .flatMap((f) =>
+      f.away
+        .filter((a) => a.reason === "never_request" || a.reason === "day_off")
+        .map((a) => ({ f, cell: cellFor(a.person, f.dateId, a.reason) })),
+    )
+    .find(({ f, cell }) => cell && f.dateId !== null && gapOn(findings, f.dateId) <= 1);
+  const anyHit = findings.some((f) =>
+    f.away.some((a) => a.reason === "never_request" || a.reason === "day_off"),
   );
-  const cell = hit
-    ? hard.find(
-        (c) =>
-          c.weight === -Infinity &&
-          String(c.person) === hit.person &&
-          toDateId(c.date, range(ctx)) === hit.f.dateId,
-      )
-    : situation === "unexplained"
-      ? hard[0]
-      : undefined;
+  const cell = hit ? hit.cell : !anyHit && situation === "unexplained" ? hard[0] : undefined;
   if (!cell) return null;
-  // Softening one request frees one nurse: offer it only when that closes the gap.
-  if (hit && hit.f.dateId !== null && gapOn(findings, hit.f.dateId) > 1) return null;
   const dateId = toDateId(cell.date, range(ctx));
   const iso = isoOf(ctx, dateId);
   if (!iso) return null;
-  const never = cell.weight === -Infinity;
   const who = String(cell.person);
+  const when = dateLabel(ctx, dateId);
+  const dayOff = cell.kind === "off";
+  const never = !dayOff && cell.weight === -Infinity;
+  const request = dayOff
+    ? `must be off on ${when}`
+    : `${never ? "never" : "must"} work ${cell.shiftType}" on ${when}`;
   return makeOption("soften_hard_request", {
-    title: `Ask ${who} whether their "${never ? "never" : "must"} work ${cell.shiftType}" on ${dateLabel(ctx, dateId)} can become a strong preference`,
+    title: dayOff
+      ? `Ask ${who} whether their hard day off on ${when} can become a strong wish to be off`
+      : `Ask ${who} whether their "${request} can become a strong preference`,
     why: hit
-      ? `${who} is a nurse the ${hit.f.shiftTypes.join("/")} shift could use that day, but the request forbids it.`
+      ? `${who} is a nurse the ${hit.f.shiftTypes.join("/")} shift could use that day, but the ${dayOff ? "day off" : "request"} forbids it.`
       : "A hard request can make a schedule impossible. As a strong preference the solver breaks it only if it must.",
     operations: [
-      {
-        type: "set_shift_request",
-        personId: cell.person,
-        shiftType: String(cell.shiftType),
-        startDate: iso,
-        endDate: iso,
-        weight: never ? -SOFT_REQUEST_WEIGHT : SOFT_REQUEST_WEIGHT,
-      },
+      dayOff
+        ? {
+            type: "set_off_request",
+            personId: cell.person,
+            startDate: iso,
+            endDate: iso,
+            weight: SOFT_REQUEST_WEIGHT,
+          }
+        : {
+            type: "set_shift_request",
+            personId: cell.person,
+            shiftType: String(cell.shiftType),
+            startDate: iso,
+            endDate: iso,
+            weight: never ? -SOFT_REQUEST_WEIGHT : SOFT_REQUEST_WEIGHT,
+          },
     ],
     confirmationQuestion: `Has ${who} agreed that this request can be a strong preference instead of a hard rule?`,
     needsFromUser: [
@@ -884,8 +908,22 @@ export function isSafeOption(state: ScenarioUiState, option: RepairOption): bool
               (real(op.personId) || ctx.groupIds.has(String(op.personId)))
           : op.weight === "must" && loan && added.has(String(op.personId));
       case "set_off_request":
-        // Only a nurse this loan adds: on anyone else it would paint over their leave.
-        return op.weight === "must" && loan && added.has(String(op.personId));
+        // Pin off a nurse this loan adds, or soften a real nurse's own hard day off on
+        // that date. Anything else could paint over someone's leave.
+        if (op.weight === "must") return loan && added.has(String(op.personId));
+        return (
+          typeof op.weight === "number" &&
+          Number.isFinite(op.weight) &&
+          op.weight > 0 &&
+          op.startDate === op.endDate &&
+          ctx.state.reqData.some(
+            (c) =>
+              c.kind === "off" &&
+              c.weight === Infinity &&
+              String(c.person) === String(op.personId) &&
+              isoOf(ctx, toDateId(c.date, range(ctx))) === op.startDate,
+          )
+        );
       case "clear_requests":
       case "move_leave":
         return nurseAsked && real(op.personId);

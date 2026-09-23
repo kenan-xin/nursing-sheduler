@@ -177,7 +177,7 @@ export const REPAIRS: readonly RepairEntry[] = [
     disruption: "low",
     confirmation: "named_nurse",
     enforcedBy: "chat",
-    opTypes: ["set_shift_request"],
+    opTypes: ["set_shift_request", "set_off_request"],
     guardrail: "Keep it hard if it is for health, childcare or another formal agreement.",
   },
   {
