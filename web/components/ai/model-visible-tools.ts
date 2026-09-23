@@ -41,4 +41,6 @@ export const MODEL_VISIBLE_TOOL_SCHEMAS: Readonly<Record<string, z.ZodTypeAny>> 
 export const PARAMETERLESS_MODEL_VISIBLE_TOOLS: readonly string[] = Object.freeze([
   "get_schedule_overview",
   "list_app_capabilities",
+  "request_optimize_run",
+  "get_optimize_result",
 ]);

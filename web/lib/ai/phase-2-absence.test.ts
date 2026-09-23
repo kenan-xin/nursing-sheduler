@@ -51,6 +51,12 @@ const MODEL_VISIBLE_TOOLS = [
   "prepare_scenario_change",
   // T10 — submit bounded copied candidates to the optimizer.
   "test_feasibility_candidates",
+  // WIDENED DELIBERATELY (2026-09-24, plan assistant-optimize-run): solver runs are
+  // the next lifted family. request_optimize_run only shows a host card; the run
+  // starts from the user's Run click through the Optimize screen's own onSubmit.
+  // get_optimize_result reads that screen's run view. Neither names a roster verb.
+  "request_optimize_run",
+  "get_optimize_result",
 ] as const;
 
 /**
