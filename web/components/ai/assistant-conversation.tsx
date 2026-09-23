@@ -26,6 +26,7 @@ import { useAssistantSession, type AssistantActivity } from "./use-assistant-ses
 import { useAssistantProposals } from "./use-assistant-proposals";
 import { ProposalPreviewCard } from "./proposal-preview-card";
 import { DiagnosticSearchCard } from "./diagnostic-search-card";
+import { OptimizeRunRequestCard } from "./optimize-run-request-card";
 import { AssistantReceipts } from "./assistant-receipts";
 import { Surface } from "@/components/ui/surface";
 
@@ -42,8 +43,8 @@ function WelcomeState() {
         Ask about this schedule and I&apos;ll explain what I can see.
       </p>
       <p className="text-meta text-ink2">
-        I can read your roster period, staff, shifts, rules and requests. I cannot change anything
-        yet, and I never run the optimiser.
+        I can read your roster period, staff, shifts, rules and requests. I can suggest changes, but
+        nothing changes until you say so, and I only start the optimiser when you press Run.
       </p>
     </Surface>
   );
@@ -111,6 +112,8 @@ const TOOL_ACTIVITY: Readonly<Record<string, string>> = {
   suggest_scheduling_rule: "Drafting a rule…",
   open_app_screen: "Opening a screen…",
   prepare_scenario_change: "Preparing a change…",
+  request_optimize_run: "Offering an optimiser run…",
+  get_optimize_result: "Checking the optimiser run…",
 };
 
 /**
@@ -167,6 +170,7 @@ export function AssistantLiveConversation({
       <RefusalNotice />
       <LifecycleNotice />
       <DiagnosticSearchCard />
+      <OptimizeRunRequestCard />
       <ProposalPreviewCard controller={proposals} />
       <AssistantReceipts controller={proposals} />
       <ActivityContext.Provider value={session.activity}>
