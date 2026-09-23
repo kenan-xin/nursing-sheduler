@@ -58,6 +58,54 @@ export function proposalScenario(): ScenarioUiState {
   };
 }
 
+/**
+ * The ward the rule examples need: RN and Senior staff groups, a "Working shifts" group
+ * spanning every worked shift, and one editable rule of each card-editor family. The
+ * request matrix is emptied so no cell names a person who is not on this staff list.
+ */
+export function ruleWardScenario(): ScenarioUiState {
+  const base = proposalScenario();
+  return {
+    ...base,
+    staff: [
+      { _k: "p1", id: "ana" },
+      { _k: "p2", id: "ben" },
+      { _k: "p3", id: "cai" },
+    ],
+    staffGroups: [
+      { _k: "pg1", id: "RN", members: ["ana", "ben"] },
+      { _k: "pg2", id: "Senior", members: ["cai"] },
+    ],
+    shiftGroups: [{ _k: "sg1", id: "Working shifts", members: ["Day", "Night"] }],
+    reqData: [],
+    cardsByKind: {
+      ...base.cardsByKind,
+      successions: [
+        {
+          uid: "suc-nd",
+          description: "No day after night",
+          person: ["ana", "ben"],
+          pattern: ["Night", "Day"],
+          date: ["ALL"],
+          weight: Number.NEGATIVE_INFINITY,
+        },
+      ],
+      counts: [
+        {
+          uid: "cnt-nights",
+          description: "Night cap",
+          person: ["ana"],
+          countDates: ["ALL"],
+          countShiftTypes: ["Night"],
+          expression: "x <= T",
+          target: 6,
+          weight: Number.POSITIVE_INFINITY,
+        },
+      ],
+    },
+  };
+}
+
 /** The registry stamp fixtures prepare under. */
 export const FIXTURE_STAMP = {
   appBuildVersion: "test-build",

@@ -19,6 +19,10 @@
 // shift setup is Phase-1 scenario authoring, and both compile to the Shifts page's
 // own primitives (`addItem` / `addGroup` / `setGroupMembers`), so the rule above holds.
 //
+// The rule arms (`add_/edit_succession_rule`, and the count, requirement and remove
+// arms after them) widen the set the same way: each one fills the rule editor's own
+// form draft and runs that editor's own validator and builder in `operations.ts`.
+//
 // EVERY FIELD IS A TARGET, NEVER A DOCUMENT. There is no arm that accepts scenario
 // content, a patch, a card body, or a free-form object: the model names WHICH
 // existing thing to change and WHAT value it should take, and the host derives the
@@ -83,7 +87,29 @@ export type AssistantCommandV1 =
       restMinutes: number;
     }
   /** Add one shift group whose members are existing shift codes -- the Groups "New group" form. */
-  | { type: "add_shift_group"; groupId: string; members: string[] };
+  | { type: "add_shift_group"; groupId: string; members: string[] }
+  /**
+   * Add one shift sequence rule -- the Shift sequences screen's Add form. `weight` is
+   * the text the Weight box would hold ("-infinity" = never, "-50" = discourage).
+   */
+  | {
+      type: "add_succession_rule";
+      description: string;
+      people: PersonRef[];
+      pattern: string[];
+      dates: string[];
+      weight: string;
+    }
+  /** Replace every field of one shift sequence rule -- that screen's Edit form. */
+  | {
+      type: "edit_succession_rule";
+      ruleId: string;
+      description: string;
+      people: PersonRef[];
+      pattern: string[];
+      dates: string[];
+      weight: string;
+    };
 
 export type AssistantCommandType = AssistantCommandV1["type"];
 
@@ -95,6 +121,8 @@ export const ASSISTANT_COMMAND_TYPES = [
   "move_leave",
   "add_shift_type",
   "add_shift_group",
+  "add_succession_rule",
+  "edit_succession_rule",
 ] as const satisfies readonly AssistantCommandType[];
 
 // EXHAUSTIVE IN BOTH DIRECTIONS. `satisfies` above proves every listed name is a real
@@ -127,6 +155,75 @@ const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "a date must be wr
 const clockSchema = z
   .string()
   .regex(/^\d{2}:\d{2}$/, "a time must be written HH:MM in 24-hour form, e.g. 08:00 or 20:30");
+
+// RULE FIELDS are built per arm (a call, not a shared constant) so every arm's JSON
+// Schema is emitted inline rather than as a reference the transport would have to
+// resolve.
+
+function ruleIdSchema() {
+  return z
+    .string()
+    .min(1)
+    .describe('The rule\'s stable id (its "uid"), as reported by get_schedule_section("rules").');
+}
+
+function ruleDescriptionSchema() {
+  return z
+    .string()
+    .describe(
+      "A short plain title in the ward's words, e.g. \"No day shift straight after a night " +
+        'shift". Use "" only when there is nothing to go on.',
+    );
+}
+
+function rulePeopleSchema() {
+  return z
+    .array(refSchema)
+    .describe(
+      "Who the rule is for: person ids and staff group ids exactly as in the schedule. " +
+        '"ALL" is not accepted here -- for every nurse, list each person or use a staff ' +
+        "group that holds everyone.",
+    );
+}
+
+function ruleDatesSchema() {
+  return z
+    .array(z.string())
+    .describe(
+      'Which dates. EITHER exactly one of "ALL", "WEEKDAY", "WEEKEND", a weekday name such ' +
+        'as "MONDAY", or an existing date group id -- OR one or more roster dates written ' +
+        "YYYY-MM-DD. Never mix the two kinds.",
+    );
+}
+
+function ruleWeightSchema() {
+  return z
+    .string()
+    .describe(
+      'How strongly, written as you would type it in the Weight box: "-infinity" = must ' +
+        'never happen (hard rule), "infinity" = must always hold (hard rule), a negative ' +
+        'number such as "-50" discourages, a positive number such as "10" encourages. ' +
+        "The schedule shows hard weights as .inf / -.inf: send them as infinity / " +
+        "-infinity. Ask the user whether a new rule is a must or a preference when they " +
+        "did not say.",
+    );
+}
+
+function successionFields() {
+  return {
+    description: ruleDescriptionSchema(),
+    people: rulePeopleSchema(),
+    pattern: z
+      .array(z.string())
+      .describe(
+        'The shifts in order on consecutive days, at least two, e.g. ["Night", "Day"] ' +
+          "for a day shift straight after a night. Shift codes, shift group ids, OFF, " +
+          "LEAVE or ALL.",
+      ),
+    dates: ruleDatesSchema(),
+    weight: ruleWeightSchema(),
+  };
+}
 
 /**
  * The wire schema for one command.
@@ -227,6 +324,12 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
         "Codes of the shifts in the group. Each must already exist or be added EARLIER in " +
           "the same change.",
       ),
+  }),
+  z.strictObject({ type: z.enum(["add_succession_rule"]), ...successionFields() }),
+  z.strictObject({
+    type: z.enum(["edit_succession_rule"]),
+    ruleId: ruleIdSchema(),
+    ...successionFields(),
   }),
 ]);
 

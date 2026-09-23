@@ -61,6 +61,9 @@ const MODEL_VISIBLE_TOOLS = [
 // WIDENED DELIBERATELY (2026-09-23, plan assistant-add-shift-types): shift setup is
 // Phase-1 scenario authoring, not roster repair, and both arms compile to the Shifts
 // page's own primitives. A Phase-2 verb here would still be caught by PHASE_2_VERBS.
+// WIDENED DELIBERATELY (2026-09-24, plan assistant-rule-ops): creating and editing
+// rules is Phase-1 scenario authoring. Each arm fills a rule editor's own form draft
+// and runs its own validator/builder; none acts on a produced roster.
 const PROPOSAL_OPERATIONS = [
   "set_roster_range",
   "set_rule_enabled",
@@ -68,6 +71,8 @@ const PROPOSAL_OPERATIONS = [
   "move_leave",
   "add_shift_type",
   "add_shift_group",
+  "add_succession_rule",
+  "edit_succession_rule",
 ] as const;
 
 /**

@@ -297,6 +297,23 @@ describe("the command arms the provider is actually shown", () => {
         restMinutes: 60,
       },
       add_shift_group: { type: "add_shift_group", groupId: "Night shifts", members: ["N"] },
+      add_succession_rule: {
+        type: "add_succession_rule",
+        description: "No day shift straight after a night shift",
+        people: ["ana", "ben"],
+        pattern: ["Night", "Day"],
+        dates: ["ALL"],
+        weight: "-infinity",
+      },
+      edit_succession_rule: {
+        type: "edit_succession_rule",
+        ruleId: "s1",
+        description: "No day shift straight after a night shift",
+        people: ["ana", "ben"],
+        pattern: ["Night", "Day"],
+        dates: ["ALL"],
+        weight: "-50",
+      },
     };
     expect(Object.keys(representative).sort()).toEqual([...ASSISTANT_COMMAND_TYPES].sort());
 

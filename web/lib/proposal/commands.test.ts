@@ -166,4 +166,45 @@ describe("parseAssistantCommands", () => {
       expect(parseAssistantCommands(payload).ok, JSON.stringify(payload)).toBe(false);
     }
   });
+
+  it("accepts the shift-sequence arms with the weight typed as text", () => {
+    const fields = {
+      description: "No day shift straight after a night shift",
+      people: ["ana", "ben", 7],
+      pattern: ["Night", "Day"],
+      dates: ["ALL"],
+      weight: "-infinity",
+    };
+    const result = parseAssistantCommands([
+      { type: "add_succession_rule", ...fields },
+      { type: "edit_succession_rule", ruleId: "suc-nd", ...fields },
+    ]);
+    expect(result.ok).toBe(true);
+  });
+
+  it("refuses shift-sequence payloads the model must fix itself", () => {
+    const add = {
+      type: "add_succession_rule",
+      description: "",
+      people: ["ana"],
+      pattern: ["Night", "Day"],
+      dates: ["ALL"],
+      weight: "-1",
+    };
+    const refused: unknown[] = [
+      // Weight as a number: a hard rule could never be sent, so text is the contract.
+      [{ ...add, weight: -1 }],
+      // Description omitted: the model sends "" when there is none.
+      [{ ...add, description: undefined }],
+      // A card body smuggled alongside the targets.
+      [{ ...add, uid: "mine" }],
+      // Edit without the rule it edits.
+      [{ ...add, type: "edit_succession_rule" }],
+      // Edit with an empty id.
+      [{ ...add, type: "edit_succession_rule", ruleId: "" }],
+    ];
+    for (const payload of refused) {
+      expect(parseAssistantCommands(payload).ok, JSON.stringify(payload)).toBe(false);
+    }
+  });
 });

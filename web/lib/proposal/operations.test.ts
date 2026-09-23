@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from "vitest";
 import { applyAssistantCommand, applyAssistantCommands } from "./operations";
-import { proposalScenario } from "./test-support";
+import { proposalScenario, ruleWardScenario } from "./test-support";
 
 describe("set_roster_range", () => {
   it("purges references to dates that leave the range", () => {
@@ -410,5 +410,189 @@ describe("add_shift_type / add_shift_group", () => {
     );
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.next.shiftGroups.at(-1)?.members).toEqual(["Day", "Night"]);
+  });
+});
+
+describe("add_succession_rule / edit_succession_rule", () => {
+  const noDayAfterNight = {
+    type: "add_succession_rule" as const,
+    description: "No day shift straight after a night shift",
+    people: ["ana", "ben", "cai"] as (string | number)[],
+    pattern: ["Night", "Day"],
+    dates: ["ALL"],
+    weight: "-infinity",
+  };
+  // Defaults restate `suc-nd` exactly, so `edit()` with no overrides changes nothing.
+  const edit = (overrides: Partial<Omit<typeof noDayAfterNight, "type">> = {}) => ({
+    ...noDayAfterNight,
+    type: "edit_succession_rule" as const,
+    ruleId: "suc-nd",
+    description: "No day after night",
+    people: ["ana", "ben"] as (string | number)[],
+    ...overrides,
+  });
+
+  it("expresses 'no day shift straight after a night shift' as a hard rule", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), noDayAfterNight);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const created = result.next.cardsByKind.successions.at(-1);
+    expect(created).toEqual({
+      uid: expect.any(String),
+      description: "No day shift straight after a night shift",
+      person: ["ana", "ben", "cai"],
+      pattern: ["Night", "Day"],
+      date: ["ALL"],
+      weight: Number.NEGATIVE_INFINITY,
+    });
+    expect(created?.uid).not.toBe("suc-nd");
+  });
+
+  it("accepts a staff group, a soft weight and specific dates", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), {
+      ...noDayAfterNight,
+      people: ["RN"],
+      weight: "-50",
+      dates: ["2026-04-06", "2026-04-07"],
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.next.cardsByKind.successions.at(-1)).toMatchObject({
+        person: ["RN"],
+        date: ["2026-04-06", "2026-04-07"],
+        weight: -50,
+      });
+    }
+  });
+
+  it("gives two identical new rules different ids, the same on every run", () => {
+    const first = applyAssistantCommands(ruleWardScenario(), [noDayAfterNight, noDayAfterNight]);
+    const again = applyAssistantCommands(ruleWardScenario(), [noDayAfterNight, noDayAfterNight]);
+    expect(first.ok && again.ok).toBe(true);
+    if (!first.ok || !again.ok) return;
+    const [, a, b] = first.next.cardsByKind.successions.map((card) => card.uid);
+    expect(a).not.toBe(b);
+    // Apply re-derives the document; it must write the ids the Preview showed.
+    expect(again.next).toEqual(first.next);
+  });
+
+  it("refuses ALL as people, naming it", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), {
+      ...noDayAfterNight,
+      people: ["ALL"],
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.code).toBe("unknown_target");
+    expect(result.rejection.message).toContain(
+      'Shift sequence rule "No day shift straight after a night shift"',
+    );
+    expect(result.rejection.message).toContain('"ALL"');
+    expect(result.rejection.message).toContain("Name each person");
+  });
+
+  it("refuses a shift that does not exist", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), {
+      ...noDayAfterNight,
+      pattern: ["Night", "Evening"],
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.rejection.message).toContain('"Evening"');
+  });
+
+  it("refuses a matrix day id and accepts the ISO date", () => {
+    const refused = applyAssistantCommand(ruleWardScenario(), {
+      ...noDayAfterNight,
+      dates: ["02"],
+    });
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) {
+      expect(refused.rejection.code).toBe("unknown_target");
+      expect(refused.rejection.message).toContain("YYYY-MM-DD");
+    }
+    const accepted = applyAssistantCommand(ruleWardScenario(), {
+      ...noDayAfterNight,
+      dates: ["2026-04-02"],
+    });
+    expect(accepted.ok).toBe(true);
+  });
+
+  it("refuses a scope chip mixed with other dates, as the Dates field cannot hold it", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), {
+      ...noDayAfterNight,
+      dates: ["WEEKEND", "2026-04-06"],
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.code).toBe("invalid_value");
+    expect(result.rejection.message).toContain("must be the only date entry");
+  });
+
+  it("refuses what the form refuses, in the form's words", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), {
+      ...noDayAfterNight,
+      pattern: ["Night"],
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.code).toBe("invalid_value");
+    expect(result.rejection.message).toContain(
+      "At least 2 shift types must be selected for a succession pattern",
+    );
+  });
+
+  it("refuses a weight the Weight box would not accept", () => {
+    // `.inf` is how the context document spells a hard weight; the box does not accept it.
+    for (const weight of ["hard", ".inf", ""]) {
+      const result = applyAssistantCommand(ruleWardScenario(), edit({ weight }));
+      expect(result.ok, weight).toBe(false);
+      if (result.ok) continue;
+      expect(result.rejection.message).toContain('Shift sequence rule "No day after night"');
+      expect(result.rejection.message).toContain(
+        "Weight must be a valid number, Infinity, or -Infinity",
+      );
+    }
+  });
+
+  it("edit keeps the rule's id and keeps a switched-off rule off", () => {
+    const state = ruleWardScenario();
+    state.cardsByKind.successions[0] = { ...state.cardsByKind.successions[0], disabled: true };
+    const result = applyAssistantCommand(state, edit({ weight: "-50" }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.next.cardsByKind.successions).toEqual([
+      {
+        uid: "suc-nd",
+        description: "No day after night",
+        person: ["ana", "ben"],
+        pattern: ["Night", "Day"],
+        date: ["ALL"],
+        weight: -50,
+        disabled: true,
+      },
+    ]);
+  });
+
+  it("refuses an edit that changes nothing", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), edit());
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.rejection.code).toBe("no_effect");
+  });
+
+  it("refuses to edit a rule that is gone", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), edit({ ruleId: "nope" } as never));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.rejection.code).toBe("unknown_target");
+  });
+
+  it("refuses to edit a pattern the screen shows as read-only", () => {
+    const state = ruleWardScenario();
+    state.cardsByKind.successions[0] = {
+      ...state.cardsByKind.successions[0],
+      pattern: [["Night", "Day"], "OFF"],
+    };
+    const result = applyAssistantCommand(state, edit({ weight: "-5" }));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.rejection.code).toBe("unsupported_shape");
   });
 });

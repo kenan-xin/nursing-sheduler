@@ -8,15 +8,12 @@
 //
 // VALIDATION PARITY WITH THE MANUAL PATH. The `set_roster_range` arm calls the same
 // `applyRangeChange` the Dates screen commits, so that arm is shared code outright.
-// The rule arms restate their predicates rather than importing
-// `components/guided-rules/mutations`: that module reaches the Guided mappers, which
-// reach a `"use client"` React field component, and pulling React into a layer the
-// projection adapter imports would drag the whole component graph into the node-env
-// scenario suites. The drift that import would have prevented is prevented instead
-// by `operations.parity.test.tsx`, which drives the MANUAL adapters and these
-// operations with the same inputs and asserts they accept, reject and produce
-// identical documents -- the same technique `lib/capability/commands.ts` already
-// uses to keep its restated list honest.
+// The toggle and head-count arms restate the Guided Rules predicates rather than
+// importing `components/guided-rules/mutations`, which reaches the Guided row UI;
+// `operations.parity.test.ts` keeps that restatement honest. The create/edit rule
+// arms need no restatement: they call each Advanced editor's own model
+// (`successions-model`, `counts-model`, `requirements-model`, `requirement-patch`),
+// which is React-free -- `react-free.test.ts` holds that line.
 //
 // A REJECTION IS A PRODUCT ANSWER, not an error. "That rule targets more than one
 // shift type" is what the Preview says to the user, so the message is written for a
@@ -51,6 +48,19 @@ import {
   validateWorkingTimeDraft,
 } from "@/components/entity-editor/core";
 import { shiftTypesDescriptor } from "@/components/shift-types/shift-types-descriptor";
+import { parseWeightInput } from "@/components/card-editor/weight-value";
+import {
+  buildDateScopeAutoScopes as successionAutoScopes,
+  buildDateScopeDateGroups as successionDateGroups,
+  buildDateScopeDateItems as successionDateItems,
+  buildPatternShiftTypeOptions,
+  buildPeopleTransferOptions as successionPeopleOptions,
+  buildSuccessionCard,
+  isEditableSuccessionCard,
+  validateSuccessionForm,
+  type SuccessionFormState,
+} from "@/components/successions/successions-model";
+import { proposalDigest, stableStringify } from "./digest";
 import type { AssistantCommandV1 } from "./commands";
 
 /** Why a command cannot be prepared. Exhaustive: every refusal is one of these. */
@@ -166,6 +176,214 @@ function withRule<TCard extends { uid: string }>(
       ...state.cardsByKind,
       [kind]: cards.map((card) => (card.uid === ruleId ? next : card)),
     } as CardsByKind,
+  };
+}
+
+/** "Shift sequence rule "Night cap"", or "The new shift sequence rule" when untitled. */
+function ruleName(kind: RuleKind, title: string | undefined): string {
+  const label = RULE_LABEL[kind];
+  const trimmed = title?.trim();
+  return trimmed ? `${label[0].toUpperCase()}${label.slice(1)} "${trimmed}"` : `The new ${label}`;
+}
+
+/**
+ * A new card's uid. Deterministic, so Apply's re-derivation writes the card the Preview
+ * showed; the live uids are part of the input, so asking twice for the same rule --
+ * in one change or two -- yields two different ids.
+ */
+function newRuleUid(state: ScenarioUiState, kind: RuleKind, command: AssistantCommandV1): string {
+  return proposalDigest([kind, state.cardsByKind[kind].map((card) => card.uid), command]);
+}
+
+/**
+ * Carry `disabled`/`applied` onto a rebuilt card -- the edit-save rule every editor's
+ * `update` applies (`use-successions.ts`, `use-counts.ts`, `requirement-patch.ts`): an
+ * edit never re-enables a rule the user switched off.
+ */
+function keepMarkers<TCard extends { disabled?: boolean; applied?: boolean }>(
+  source: TCard,
+  rebuilt: TCard,
+): TCard {
+  const markers: { disabled?: true; applied?: true } = {};
+  if (source.disabled) markers.disabled = true;
+  if (source.applied) markers.applied = true;
+  return markers.disabled || markers.applied ? { ...rebuilt, ...markers } : rebuilt;
+}
+
+/** Replace one kind's whole card list. */
+function withCards(
+  state: ScenarioUiState,
+  kind: RuleKind,
+  cards: readonly { uid: string }[],
+): ScenarioUiState {
+  return { ...state, cardsByKind: { ...state.cardsByKind, [kind]: cards } as CardsByKind };
+}
+
+/** One entry a picker offers; a disabled entry cannot be picked. */
+interface PickerOption {
+  value: unknown;
+  disabled?: boolean;
+}
+
+/**
+ * The first picked ref the manual screen's own picker does not offer. Exact identity,
+ * as the pickers compare (`sameEntityId`): person `7` and person `"7"` are different.
+ */
+function firstUnoffered<T>(picked: readonly T[], offered: readonly PickerOption[]): T | undefined {
+  return picked.find(
+    (ref) => !offered.some((option) => !option.disabled && Object.is(option.value, ref)),
+  );
+}
+
+/** One editor's Dates-field option builders (each model exports its own three). */
+interface DateScopeBuilders {
+  auto: (state: ScenarioUiState) => readonly { id: string }[];
+  groups: (state: ScenarioUiState) => readonly { id: string }[];
+  items: (state: ScenarioUiState) => readonly { id: string }[];
+}
+
+/**
+ * What a `DateScopeField` can hold: ONE scope chip (ALL, WEEKDAY, WEEKEND, a weekday, or
+ * an authored date group), or in-range dates written YYYY-MM-DD. An empty list is left
+ * to the form's own validator, which owns that message.
+ */
+function dateScopeRejection(
+  state: ScenarioUiState,
+  dates: readonly string[],
+  builders: DateScopeBuilders,
+): { code: CommandRejectionCode; message: string } | undefined {
+  if (dates.length === 0) return undefined;
+  const chips = [...builders.auto(state), ...builders.groups(state)].map((option) => option.id);
+  if (dates.length === 1 && chips.includes(dates[0])) return undefined;
+  const inRange = new Set(builders.items(state).map((item) => item.id));
+  const outside = dates.find((date) => !inRange.has(date));
+  if (outside === undefined) return undefined;
+  if (chips.includes(outside)) {
+    return {
+      code: "invalid_value",
+      message: `"${outside}" stands for a whole set of dates, so it must be the only date entry`,
+    };
+  }
+  return {
+    code: "unknown_target",
+    message:
+      `"${outside}" is not a roster date (write dates as YYYY-MM-DD inside the roster ` +
+      "period), a date group, or one of ALL, WEEKDAY, WEEKEND or a weekday name such as MONDAY",
+  };
+}
+
+/** The first message a form validator reported, in the validator's own field order. */
+function firstFormError(errors: object): string | undefined {
+  return Object.values(errors).find((value): value is string => typeof value === "string");
+}
+
+// --- Shift sequences --------------------------------------------------------
+
+type SuccessionFields = Omit<Extract<AssistantCommandV1, { type: "add_succession_rule" }>, "type">;
+
+const SUCCESSION_DATES: DateScopeBuilders = {
+  auto: successionAutoScopes,
+  groups: successionDateGroups,
+  items: successionDateItems,
+};
+
+/** The draft the Shift sequences form holds once the user has entered these values. */
+function successionDraft(fields: SuccessionFields): SuccessionFormState {
+  return {
+    description: fields.description,
+    person: [...fields.people],
+    pattern: [...fields.pattern],
+    date: [...fields.dates],
+    weight: parseWeightInput(fields.weight),
+  };
+}
+
+/** Everything the form checks before Save, plus what its pickers make impossible to pick. */
+function successionRejection(
+  state: ScenarioUiState,
+  fields: SuccessionFields,
+  name: string,
+  index: number,
+): OperationResult | undefined {
+  const people = successionPeopleOptions(state);
+  const person = firstUnoffered(fields.people, [...people.items, ...people.groups]);
+  if (person !== undefined) {
+    return reject(
+      index,
+      "unknown_target",
+      `${name}: there is no person or staff group "${person}". Name each person, or an existing staff group.`,
+    );
+  }
+  const shifts = buildPatternShiftTypeOptions(state);
+  const shift = firstUnoffered(fields.pattern, [...shifts.items, ...shifts.groups]);
+  if (shift !== undefined) {
+    return reject(index, "unknown_target", `${name}: there is no shift or shift group "${shift}".`);
+  }
+  const dates = dateScopeRejection(state, fields.dates, SUCCESSION_DATES);
+  if (dates) return reject(index, dates.code, `${name}: ${dates.message}.`);
+  const error = firstFormError(validateSuccessionForm(successionDraft(fields)));
+  if (error) return reject(index, "invalid_value", `${name}: ${error}.`);
+  return undefined;
+}
+
+function applyAddSuccessionRule(
+  state: ScenarioUiState,
+  command: Extract<AssistantCommandV1, { type: "add_succession_rule" }>,
+  index: number,
+): OperationResult {
+  const refused = successionRejection(
+    state,
+    command,
+    ruleName("successions", command.description),
+    index,
+  );
+  if (refused) return refused;
+  // `use-successions.ts` `add`: append `buildSuccessionCard(form)`.
+  const card = buildSuccessionCard(
+    successionDraft(command),
+    newRuleUid(state, "successions", command),
+  );
+  return {
+    ok: true,
+    next: withCards(state, "successions", [...state.cardsByKind.successions, card]),
+  };
+}
+
+function applyEditSuccessionRule(
+  state: ScenarioUiState,
+  command: Extract<AssistantCommandV1, { type: "edit_succession_rule" }>,
+  index: number,
+): OperationResult {
+  const source = state.cardsByKind.successions.find((card) => card.uid === command.ruleId);
+  if (!source) {
+    return reject(
+      index,
+      "unknown_target",
+      "That shift sequence rule is not in this schedule any more.",
+    );
+  }
+  const name = ruleName("successions", source.description?.trim() || source.uid);
+  // The screen opens no form for such a card (`isEditableSuccessionCard` guards `openEdit`).
+  if (!isEditableSuccessionCard(source)) {
+    return reject(
+      index,
+      "unsupported_shape",
+      `${name}: one step of its pattern allows several shifts, so it has to be edited on the Shift sequences screen.`,
+    );
+  }
+  const refused = successionRejection(state, command, name, index);
+  if (refused) return refused;
+  const next = keepMarkers(source, buildSuccessionCard(successionDraft(command), source.uid));
+  if (stableStringify(next) === stableStringify(source)) {
+    return reject(index, "no_effect", `${name} already says exactly that.`);
+  }
+  return {
+    ok: true,
+    next: withCards(
+      state,
+      "successions",
+      state.cardsByKind.successions.map((card) => (card.uid === source.uid ? next : card)),
+    ),
   };
 }
 
@@ -403,6 +621,10 @@ export function applyAssistantCommand(
       return applyAddShiftType(state, command, index);
     case "add_shift_group":
       return applyAddShiftGroup(state, command, index);
+    case "add_succession_rule":
+      return applyAddSuccessionRule(state, command, index);
+    case "edit_succession_rule":
+      return applyEditSuccessionRule(state, command, index);
   }
 }
 
