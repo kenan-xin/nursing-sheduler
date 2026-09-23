@@ -53,6 +53,7 @@ const INFEASIBLE: Exclude<ScenarioName, "empty" | "restRuleTooTight">[] = [
   "tooFewNurses",
   "conflictingRequirements",
   "personalCapsTooLow",
+  "busyNightsWithRestRule",
 ];
 
 const EXPECTED: Record<(typeof INFEASIBLE)[number], RepairId[]> = {
@@ -62,6 +63,7 @@ const EXPECTED: Record<(typeof INFEASIBLE)[number], RepairId[]> = {
   tooFewNurses: ["borrow_temporary_nurse"],
   conflictingRequirements: ["align_overlapping_requirements"],
   personalCapsTooLow: ["extra_shift_willing_nurse", "borrow_temporary_nurse"],
+  busyNightsWithRestRule: ["borrow_temporary_nurse", "run_one_short"],
 };
 
 /** The host question each option's Preview must raise before Apply (none = asked in chat or plain manager call). */
@@ -198,6 +200,25 @@ describe("the scripted wards read as real ward situations", () => {
       }),
     ]);
     expect(relax.confirmationQuestion).toMatch(/legal limits/);
+  });
+
+  it("busy nights with a rest rule: borrow a nurse for the two busy nights only, off in between", () => {
+    const [borrow] = options("busyNightsWithRestRule");
+    expect(borrow.operations).toEqual([
+      { type: "add_person", name: "Borrowed nurse 1", groups: [] },
+      ...[
+        ["2026-11-01", "2026-11-01"],
+        ["2026-11-03", "2026-11-05"],
+        ["2026-11-07", "2026-11-07"],
+      ].map(([startDate, endDate]) => ({
+        type: "set_off_request",
+        personId: "Borrowed nurse 1",
+        startDate,
+        endDate,
+        weight: "must",
+      })),
+    ]);
+    expect(borrow.enforcedBy).toBe("host_question");
   });
 
   it("too few nurses: borrow a nurse for the whole period, asked in chat", () => {

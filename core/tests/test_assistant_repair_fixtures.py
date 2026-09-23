@@ -25,6 +25,7 @@ def _status(path: Path) -> str:
 
 def test_the_harness_wrote_every_case():
     assert CASES == [
+        "busyNightsWithRestRule",
         "conflictingRequirements",
         "onlyRnOnLeave",
         "personalCapsTooLow",

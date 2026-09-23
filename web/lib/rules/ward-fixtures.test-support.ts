@@ -175,6 +175,35 @@ export const SCENARIOS = {
         ],
       }),
     }),
+  /**
+   * Busy nights on the 2nd and 6th need 3, with a day nurse too, from 3 nurses; and
+   * nobody may work a day straight after a night. A borrowed nurse inherits that rule.
+   */
+  busyNightsWithRestRule: (): ScenarioUiState =>
+    ward({
+      staff: people("ana", "ben", "cara"),
+      cardsByKind: cards({
+        requirements: [
+          requirement("day", "D", 1),
+          requirement("night", "N", 1, {
+            date: ["2026-11-01", "2026-11-03", "2026-11-04", "2026-11-05", "2026-11-07"],
+          }),
+          requirement("night-busy", "N", 3, {
+            date: ["2026-11-02", "2026-11-06"],
+            description: "Busy nights (theatre lists)",
+          }),
+        ],
+        successions: [
+          {
+            uid: "no-day-after-night",
+            description: "No day shift straight after a night",
+            person: ["ALL"],
+            pattern: ["N", "D"],
+            weight: -Infinity,
+          },
+        ],
+      }),
+    }),
   /** 2 nurses, day + night each day, no day after a night and no two nights in a row. */
   restRuleTooTight: (): ScenarioUiState =>
     ward({
