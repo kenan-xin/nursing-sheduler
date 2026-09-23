@@ -865,3 +865,51 @@ describe("add_staffing_requirement / edit_staffing_requirement", () => {
     if (!result.ok) expect(result.rejection.code).toBe("unknown_target");
   });
 });
+
+describe("remove_rule", () => {
+  it("removes exactly that rule, leaving its neighbours in order", () => {
+    const state = ruleWardScenario();
+    const result = applyAssistantCommand(state, {
+      type: "remove_rule",
+      ruleKind: "requirements",
+      ruleId: "req-day",
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.next.cardsByKind.requirements.map((card) => card.uid)).toEqual(["req-multi"]);
+      expect(result.next.cardsByKind.successions).toBe(state.cardsByKind.successions);
+    }
+  });
+
+  it("removes a rule the same change just added", () => {
+    const add = {
+      type: "add_succession_rule" as const,
+      description: "Temp",
+      people: ["ana"],
+      pattern: ["Night", "Day"],
+      dates: ["ALL"],
+      weight: "-1",
+    };
+    const added = applyAssistantCommand(ruleWardScenario(), add);
+    if (!added.ok) throw new Error("fixture should apply");
+    const uid = added.next.cardsByKind.successions.at(-1)!.uid;
+    const result = applyAssistantCommands(ruleWardScenario(), [
+      add,
+      { type: "remove_rule", ruleKind: "successions", ruleId: uid },
+    ]);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.next).toEqual(ruleWardScenario());
+  });
+
+  it("refuses a rule that is not there, naming the family", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), {
+      type: "remove_rule",
+      ruleKind: "counts",
+      ruleId: "nope",
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.code).toBe("unknown_target");
+    expect(result.rejection.message).toContain("shift count rule");
+  });
+});

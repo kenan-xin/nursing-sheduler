@@ -10,6 +10,7 @@ import { SUPPORTED_EXPRESSIONS } from "@/components/card-editor/expression-model
 import {
   ASSISTANT_COMMAND_TYPES,
   COUNT_EXPRESSIONS,
+  RULE_KINDS,
   assistantCommandListSchema,
   parseAssistantCommands,
 } from "./commands";
@@ -257,6 +258,18 @@ describe("parseAssistantCommands", () => {
       parseAssistantCommands([
         { type: "add_staffing_requirement", ...fields, shiftType: ["Night"] },
       ]).ok,
+    ).toBe(false);
+  });
+
+  it("accepts remove_rule for every rule family and refuses an unknown family", () => {
+    for (const ruleKind of RULE_KINDS) {
+      expect(
+        parseAssistantCommands([{ type: "remove_rule", ruleKind, ruleId: "x" }]).ok,
+        ruleKind,
+      ).toBe(true);
+    }
+    expect(
+      parseAssistantCommands([{ type: "remove_rule", ruleKind: "rosters", ruleId: "x" }]).ok,
     ).toBe(false);
   });
 });

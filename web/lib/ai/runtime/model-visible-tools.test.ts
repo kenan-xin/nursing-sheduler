@@ -352,6 +352,7 @@ describe("the command arms the provider is actually shown", () => {
         dates: ["WEEKEND"],
         requiredNumPeople: 3,
       },
+      remove_rule: { type: "remove_rule", ruleKind: "affinities", ruleId: "a1" },
     };
     expect(Object.keys(representative).sort()).toEqual([...ASSISTANT_COMMAND_TYPES].sort());
 

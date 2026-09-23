@@ -646,6 +646,32 @@ function applyEditStaffingRequirement(
   return { ok: true, next };
 }
 
+// --- Remove (every family) -----------------------------------------------------
+
+function applyRemoveRule(
+  state: ScenarioUiState,
+  command: Extract<AssistantCommandV1, { type: "remove_rule" }>,
+  index: number,
+): OperationResult {
+  if (!findRule(state, command.ruleKind, command.ruleId)) {
+    return reject(
+      index,
+      "unknown_target",
+      `That ${RULE_LABEL[command.ruleKind]} is not in this schedule any more.`,
+    );
+  }
+  // Every editor's `remove`: `current.filter((card) => card.uid !== uid)`.
+  const cards = state.cardsByKind[command.ruleKind] as readonly { uid: string }[];
+  return {
+    ok: true,
+    next: withCards(
+      state,
+      command.ruleKind,
+      cards.filter((card) => card.uid !== command.ruleId),
+    ),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // The arms
 // ---------------------------------------------------------------------------
@@ -892,6 +918,8 @@ export function applyAssistantCommand(
       return applyAddStaffingRequirement(state, command, index);
     case "edit_staffing_requirement":
       return applyEditStaffingRequirement(state, command, index);
+    case "remove_rule":
+      return applyRemoveRule(state, command, index);
   }
 }
 

@@ -45,7 +45,7 @@ export const COUNT_EXPRESSIONS = [
   "|x - T|^2",
 ] as const;
 
-/** The five rule kinds a `set_rule_enabled` may target — the guided rule constraint kinds. */
+/** The five rule families -- targets of `set_rule_enabled` and `remove_rule`. */
 export const RULE_KINDS = [
   "requirements",
   "successions",
@@ -164,7 +164,9 @@ export type AssistantCommandV1 =
       qualifiedPeople: PersonRef[];
       dates: string[];
       requiredNumPeople: number;
-    };
+    }
+  /** Delete one rule of any family -- every rule screen's Delete. */
+  | { type: "remove_rule"; ruleKind: (typeof RULE_KINDS)[number]; ruleId: string };
 
 export type AssistantCommandType = AssistantCommandV1["type"];
 
@@ -182,6 +184,7 @@ export const ASSISTANT_COMMAND_TYPES = [
   "edit_count_rule",
   "add_staffing_requirement",
   "edit_staffing_requirement",
+  "remove_rule",
 ] as const satisfies readonly AssistantCommandType[];
 
 // EXHAUSTIVE IN BOTH DIRECTIONS. `satisfies` above proves every listed name is a real
@@ -440,6 +443,11 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
     type: z.enum(["edit_staffing_requirement"]),
     ruleId: ruleIdSchema(),
     ...requirementFields(),
+  }),
+  z.strictObject({
+    type: z.enum(["remove_rule"]),
+    ruleKind: z.enum(RULE_KINDS).describe("Which rule family the rule belongs to."),
+    ruleId: ruleIdSchema(),
   }),
 ]);
 

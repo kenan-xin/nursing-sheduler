@@ -77,6 +77,7 @@ const PROPOSAL_OPERATIONS = [
   "edit_count_rule",
   "add_staffing_requirement",
   "edit_staffing_requirement",
+  "remove_rule",
 ] as const;
 
 /**
