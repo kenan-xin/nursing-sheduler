@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 import { getCapabilityRegistry } from "@/lib/capability/registry";
 import { applyAssistantCommands } from "./operations";
 import { deriveProposalDiff, SCOPE_LABEL, type DiffScope } from "./diff";
-import { proposalScenario } from "./test-support";
+import { proposalScenario, ruleWardScenario } from "./test-support";
 
 describe("deriveProposalDiff", () => {
   it("separates what was asked for from what the app will do as a result", () => {
@@ -61,8 +61,8 @@ describe("deriveProposalDiff", () => {
     const diff = deriveProposalDiff(before, applied.next, commands);
     expect(diff.direct).toHaveLength(1);
     expect(diff.direct[0].label).toBe("Day cover");
-    expect(diff.direct[0].before).toContain('"requiredNumPeople":2');
-    expect(diff.direct[0].after).toContain('"requiredNumPeople":4');
+    expect(diff.direct[0].before).toBe("On · “Day cover” · At least 2 people on Day, every date");
+    expect(diff.direct[0].after).toBe("On · “Day cover” · At least 4 people on Day, every date");
     expect(diff.cascade).toEqual([]);
     expect(diff.needsReview).toEqual([]);
   });
@@ -132,6 +132,98 @@ describe("deriveProposalDiff", () => {
       "Night, N",
     );
     expect(diff.capabilityIds).toContain("shift-types");
+    expect(diff.needsReview).toEqual([]);
+  });
+
+  it("lists every new rule as asked-for and states each in plain words", () => {
+    const before = ruleWardScenario();
+    const nightAfter = {
+      type: "add_succession_rule" as const,
+      description: "No day shift straight after a night shift",
+      people: ["ana", "ben", "cai"],
+      pattern: ["Night", "Day"],
+      dates: ["ALL"],
+      weight: "-infinity",
+    };
+    const commands = [
+      nightAfter,
+      nightAfter,
+      {
+        type: "add_count_rule" as const,
+        description: "At most 5 night shifts per nurse per month",
+        people: ["ana", "ben", "cai"],
+        shiftTypes: ["Night"],
+        dates: ["ALL"],
+        expression: "x <= T" as const,
+        target: 5,
+        weight: "infinity",
+      },
+      {
+        type: "add_staffing_requirement" as const,
+        description: "At least 2 RNs on every night shift",
+        shiftType: "Night",
+        qualifiedPeople: ["RN"],
+        dates: ["ALL"],
+        requiredNumPeople: 2,
+      },
+      {
+        type: "edit_count_rule" as const,
+        ruleId: "cnt-nights",
+        description: "Night cap",
+        people: ["ana"],
+        shiftTypes: ["Night"],
+        dates: ["WEEKEND"],
+        expression: "x <= T" as const,
+        target: 4,
+        weight: "-50",
+      },
+      { type: "remove_rule" as const, ruleKind: "requirements" as const, ruleId: "req-multi" },
+    ];
+    const applied = applyAssistantCommands(before, commands);
+    if (!applied.ok) throw new Error(`fixture should apply: ${applied.rejection.message}`);
+
+    const diff = deriveProposalDiff(before, applied.next, commands);
+    expect(diff.cascade).toEqual([]);
+    expect(diff.direct).toHaveLength(6);
+
+    const after = (key: string) => diff.direct.find((entry) => entry.key === key);
+    const newSequences = diff.direct.filter(
+      (entry) => entry.key.startsWith("rule:successions:") && entry.kind === "created",
+    );
+    expect(newSequences).toHaveLength(2);
+    expect(newSequences[0].after).toBe(
+      "On · “No day shift straight after a night shift” · Night → Day on consecutive days " +
+        "for ana, ben, cai, every date: must never happen",
+    );
+    expect(
+      diff.direct.find((entry) => entry.key.startsWith("rule:counts:") && entry.kind === "created")
+        ?.after,
+    ).toBe(
+      "On · “At most 5 night shifts per nurse per month” · At most 5 Night shifts for each " +
+        "of ana, ben, cai, across every date: must always hold",
+    );
+    expect(
+      diff.direct.find(
+        (entry) => entry.key.startsWith("rule:requirements:") && entry.kind === "created",
+      )?.after,
+    ).toBe(
+      "On · “At least 2 RNs on every night shift” · At least 2 people from RN on Night, every date",
+    );
+
+    const edited = after("rule:counts:cnt-nights");
+    expect(edited?.kind).toBe("changed");
+    expect(edited?.before).toBe(
+      "On · “Night cap” · At most 6 Night shifts for each of ana, across every date: must always hold",
+    );
+    expect(edited?.after).toBe(
+      "On · “Night cap” · At most 4 Night shifts for each of ana, across weekends: discouraged (weight -50)",
+    );
+
+    const removed = after("rule:requirements:req-multi");
+    expect(removed?.kind).toBe("removed");
+    expect(removed?.before).toBe(
+      "On · “Day or Night cover” · At least 3 people on Day + Night, every date",
+    );
     expect(diff.needsReview).toEqual([]);
   });
 });

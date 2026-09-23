@@ -18,7 +18,16 @@
 // two different mechanisms (purge and re-key). Comparing documents cannot forget a
 // surface, and it keeps working when an arm's transform is improved underneath it.
 
-import type { CardsByKind, ScenarioUiState, UiRequestCell, UiShiftType } from "@/lib/scenario";
+import type {
+  CardsByKind,
+  CountCard,
+  RequirementCard,
+  ScenarioUiState,
+  SuccessionCard,
+  UiRequestCell,
+  UiShiftType,
+} from "@/lib/scenario";
+import { EXPRESSION_OPS, substituteTarget } from "@/components/card-editor/expression-model";
 import type { AssistantCommandV1 } from "./commands";
 import { stableStringify } from "./digest";
 
@@ -150,10 +159,105 @@ function ruleTitle(card: { description?: string; uid: string }, kind: keyof Card
   return described || `${RULE_SCOPE[kind].replace(/-/g, " ")} ${card.uid.slice(0, 8)}`;
 }
 
-/** A rule's rendered body, markers excluded -- `disabled` is reported as on/off instead. */
-function ruleBody(card: Record<string, unknown>): string {
+const DATE_SCOPE_WORDS: Record<string, string> = {
+  ALL: "every date",
+  WEEKDAY: "weekdays",
+  WEEKEND: "weekends",
+  MONDAY: "Mondays",
+  TUESDAY: "Tuesdays",
+  WEDNESDAY: "Wednesdays",
+  THURSDAY: "Thursdays",
+  FRIDAY: "Fridays",
+  SATURDAY: "Saturdays",
+  SUNDAY: "Sundays",
+};
+
+function flattenRefs(refs: unknown): unknown[] {
+  if (refs == null) return [];
+  return Array.isArray(refs) ? refs.flatMap(flattenRefs) : [refs];
+}
+
+function renderDates(refs: unknown): string {
+  const list = flattenRefs(refs);
+  if (list.length === 0) return "every date";
+  return list.map((ref) => DATE_SCOPE_WORDS[String(ref).toUpperCase()] ?? String(ref)).join(", ");
+}
+
+/** `everyone` when the refs are empty or ALL (the backend's null-as-all). */
+function renderPeople(refs: unknown, everyone: string): string {
+  const list = flattenRefs(refs);
+  if (list.length === 0 || list.some((ref) => String(ref).toUpperCase() === "ALL")) return everyone;
+  return list.map(String).join(", ");
+}
+
+function renderStrength(weight: number): string {
+  if (weight === Infinity) return "must always hold";
+  if (weight === -Infinity) return "must never happen";
+  if (weight > 0) return `encouraged (weight ${weight})`;
+  if (weight < 0) return `discouraged (weight ${weight})`;
+  return "no effect (weight 0)";
+}
+
+function describeRequirement(card: RequirementCard): string {
+  const n = card.requiredNumPeople;
+  const who = renderPeople(card.qualifiedPeople, "");
+  const shifts = flattenRefs(card.shiftType).map(String).join(" + ");
+  const ideal =
+    card.preferredNumPeople != null
+      ? `; ideally ${card.preferredNumPeople} (${renderStrength(card.weight)})`
+      : "";
+  return `At least ${n} ${n === 1 ? "person" : "people"}${who ? ` from ${who}` : ""} on ${shifts}, ${renderDates(card.date)}${ideal}`;
+}
+
+function describeSuccession(card: SuccessionCard): string {
+  const positions = Array.isArray(card.pattern) ? card.pattern : [card.pattern];
+  const pattern = positions
+    .map((position) =>
+      Array.isArray(position) ? position.map(String).join(" or ") : String(position),
+    )
+    .join(" → ");
+  return `${pattern} on consecutive days for ${renderPeople(card.person, "everyone")}, ${renderDates(card.date)}: ${renderStrength(card.weight)}`;
+}
+
+/** `null` for a list-shaped or contracted-hours count: no single sentence says it honestly. */
+function describeCount(card: CountCard): string | null {
+  if (typeof card.expression !== "string" || typeof card.target !== "number") return null;
+  const op = EXPRESSION_OPS.find((candidate) => candidate.value === card.expression);
+  if (!op) return null;
+  const amount = op.title.includes("T")
+    ? substituteTarget(op.title, card.target)
+    : `${op.title} ${card.target}`;
+  const shifts = flattenRefs(card.countShiftTypes).map(String).join(" + ");
+  return `${amount} ${shifts} shifts for each of ${renderPeople(card.person, "everyone")}, across ${renderDates(card.countDates)}: ${renderStrength(card.weight)}`;
+}
+
+/** The plain sentence for the families the assistant authors; `null` keeps the opaque form. */
+function describeRule(kind: keyof CardsByKind, card: Record<string, unknown>): string | null {
+  switch (kind) {
+    case "requirements":
+      return describeRequirement(card as unknown as RequirementCard);
+    case "successions":
+      return describeSuccession(card as unknown as SuccessionCard);
+    case "counts":
+      return describeCount(card as unknown as CountCard);
+    default:
+      // Pairing and supervision: plain wording arrives with their authoring arms.
+      return null;
+  }
+}
+
+/**
+ * A rule's rendered body, markers excluded -- `disabled` is reported as on/off instead.
+ * The title is part of the body so a rename alone is still a visible change. The
+ * sentence omits coefficients; an assistant edit can only change those by changing the
+ * counted shifts, which the sentence does show.
+ */
+function ruleBody(card: Record<string, unknown>, kind: keyof CardsByKind): string {
   const { uid: _uid, disabled, applied: _applied, ...rest } = card;
-  return `${disabled ? "Off" : "On"} · ${stableStringify(rest)}`;
+  const plain = describeRule(kind, card);
+  if (plain === null) return `${disabled ? "Off" : "On"} · ${stableStringify(rest)}`;
+  const title = typeof card.description === "string" ? card.description.trim() : "";
+  return `${disabled ? "Off" : "On"} · ${title ? `“${title}” · ` : ""}${plain}`;
 }
 
 function coordinateKey(cell: UiRequestCell): string {
@@ -334,7 +438,7 @@ export function diffScenarioDocuments(
         keyPrefix: `rule:${kind}`,
         identity: (card) => card.uid,
         label: (card) => ruleTitle(card, kind),
-        render: (card) => ruleBody(card as unknown as Record<string, unknown>),
+        render: (card) => ruleBody(card as unknown as Record<string, unknown>, kind),
       }),
     );
   }
@@ -367,8 +471,21 @@ export function diffScenarioDocuments(
  * A key the command names but the diff does not contain simply does not appear --
  * this set classifies entries, it never invents them.
  */
-function directKeys(commands: readonly AssistantCommandV1[]): Set<string> {
+function directKeys(
+  commands: readonly AssistantCommandV1[],
+  before: ScenarioUiState,
+  after: ScenarioUiState,
+): Set<string> {
   const keys = new Set<string>();
+  // A new card's uid is minted by the host, so the command cannot name it; every card
+  // of that kind the change created is what the user asked for (no cascade creates a
+  // rule card).
+  const created = (kind: keyof CardsByKind) => {
+    const had = new Set((before.cardsByKind[kind] as readonly AnyRuleCard[]).map((c) => c.uid));
+    for (const card of after.cardsByKind[kind] as readonly AnyRuleCard[]) {
+      if (!had.has(card.uid)) keys.add(`rule:${kind}:${card.uid}`);
+    }
+  };
   for (const command of commands) {
     switch (command.type) {
       case "set_roster_range":
@@ -391,6 +508,27 @@ function directKeys(commands: readonly AssistantCommandV1[]): Set<string> {
       case "add_shift_group":
         keys.add(`shiftgroup:${command.groupId.trim()}`);
         break;
+      case "add_succession_rule":
+        created("successions");
+        break;
+      case "add_count_rule":
+        created("counts");
+        break;
+      case "add_staffing_requirement":
+        created("requirements");
+        break;
+      case "edit_succession_rule":
+        keys.add(`rule:successions:${command.ruleId}`);
+        break;
+      case "edit_count_rule":
+        keys.add(`rule:counts:${command.ruleId}`);
+        break;
+      case "edit_staffing_requirement":
+        keys.add(`rule:requirements:${command.ruleId}`);
+        break;
+      case "remove_rule":
+        keys.add(`rule:${command.ruleKind}:${command.ruleId}`);
+        break;
     }
   }
   return keys;
@@ -402,7 +540,7 @@ export function deriveProposalDiff(
   after: ScenarioUiState,
   commands: readonly AssistantCommandV1[],
 ): ProposalDiff {
-  const named = directKeys(commands);
+  const named = directKeys(commands, before, after);
   const all = diffScenarioDocuments(before, after);
   const direct = all.filter((entry) => named.has(entry.key));
   const cascade = all.filter((entry) => !named.has(entry.key));
