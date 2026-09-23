@@ -339,7 +339,8 @@ const softenHardRequest: Builder = (ctx, findings, situation) => {
 
 const extraShiftWillingNurse: Builder = (ctx, findings) => {
   for (const f of findings) {
-    if (f.kind !== "cap_short") continue;
+    // One extra shift closes a gap of one shift, no more.
+    if (f.kind !== "cap_short" || f.required - f.available > 1) continue;
     for (const uid of f.capRuleIds) {
       const card = countCard(ctx, uid);
       if (!editableCap(card)) continue;

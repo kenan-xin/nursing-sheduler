@@ -780,6 +780,18 @@ describe("review fixes (2026-09-24)", () => {
     expect(borrow?.confirmationQuestion).toMatch(/Nov 2, 2026 and .*Nov 6, 2026\?$/);
   });
 
+  it("asks a nurse for one extra shift only when one shift closes the gap", () => {
+    const base = SCENARIOS.personalCapsTooLow();
+    const state = {
+      ...base,
+      cardsByKind: {
+        ...base.cardsByKind,
+        counts: [nightCap("ana-nights", "ana", 2), nightCap("ben-nights", "ben", 2)],
+      },
+    };
+    expect(rank(state).map((o) => o.repairId)).not.toContain("extra_shift_willing_nurse");
+  });
+
   it("offers no borrow when the gap is above MAX_BORROWED", () => {
     const state = ward({
       staff: people("ana"),
