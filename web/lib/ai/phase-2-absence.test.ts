@@ -58,11 +58,16 @@ const MODEL_VISIBLE_TOOLS = [
  * (its date range, its rules, its staffing numbers, its leave), never assignments
  * in a produced roster.
  */
+// WIDENED DELIBERATELY (2026-09-23, plan assistant-add-shift-types): shift setup is
+// Phase-1 scenario authoring, not roster repair, and both arms compile to the Shifts
+// page's own primitives. A Phase-2 verb here would still be caught by PHASE_2_VERBS.
 const PROPOSAL_OPERATIONS = [
   "set_roster_range",
   "set_rule_enabled",
   "set_staffing_requirement_people",
   "move_leave",
+  "add_shift_type",
+  "add_shift_group",
 ] as const;
 
 /**

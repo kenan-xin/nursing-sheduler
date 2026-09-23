@@ -95,4 +95,75 @@ describe("parseAssistantCommands", () => {
     }
     expect(admitted.size).toBe(ASSISTANT_COMMAND_TYPES.length);
   });
+
+  it("accepts the shift-setup arms with HH:MM times", () => {
+    const result = parseAssistantCommands([
+      {
+        type: "add_shift_type",
+        code: "N",
+        name: "Night shift",
+        startTime: "20:00",
+        endTime: "08:30",
+        restMinutes: 60,
+      },
+      { type: "add_shift_group", groupId: "Night shifts", members: ["N"] },
+    ]);
+    expect(result.ok).toBe(true);
+  });
+
+  it("refuses shift-setup payloads the model must fix itself", () => {
+    const refused: unknown[] = [
+      // Time not converted to HH:MM.
+      [
+        {
+          type: "add_shift_type",
+          code: "am1",
+          name: "",
+          startTime: "0800",
+          endTime: "15:00",
+          restMinutes: 0,
+        },
+      ],
+      // A required field omitted (name).
+      [
+        {
+          type: "add_shift_type",
+          code: "am1",
+          startTime: "08:00",
+          endTime: "15:00",
+          restMinutes: 0,
+        },
+      ],
+      // Rest omitted: the model must send 0 for no break.
+      [{ type: "add_shift_type", code: "am1", name: "", startTime: "08:00", endTime: "15:00" }],
+      // Rest that is not whole minutes.
+      [
+        {
+          type: "add_shift_type",
+          code: "am1",
+          name: "",
+          startTime: "08:00",
+          endTime: "15:00",
+          restMinutes: 12.5,
+        },
+      ],
+      // Content alongside targets: paid minutes are the host's to derive.
+      [
+        {
+          type: "add_shift_type",
+          code: "am1",
+          name: "",
+          startTime: "08:00",
+          endTime: "15:00",
+          restMinutes: 0,
+          durationMinutes: 420,
+        },
+      ],
+      // A group with nothing in it.
+      [{ type: "add_shift_group", groupId: "AM", members: [] }],
+    ];
+    for (const payload of refused) {
+      expect(parseAssistantCommands(payload).ok, JSON.stringify(payload)).toBe(false);
+    }
+  });
 });

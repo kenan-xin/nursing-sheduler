@@ -21,6 +21,11 @@
 // A REJECTION IS A PRODUCT ANSWER, not an error. "That rule targets more than one
 // shift type" is what the Preview says to the user, so the message is written for a
 // ward manager and rendered verbatim by the host. Model prose never replaces it.
+//
+// The shift arms call the Shifts page's own pure primitives (`addItem`, `addGroup`,
+// `setGroupMembers`) behind the same gates the page's Save uses
+// (`validateFullEditId`, `validateWorkingTimeDraft`, numbers-only code refusal), so
+// they are shared code too. All of those live in React-free modules.
 
 import {
   applyRangeChange,
@@ -37,6 +42,15 @@ import type {
   ScenarioUiState,
   UiRequestCell,
 } from "@/lib/scenario";
+import {
+  addGroup,
+  addItem,
+  paidMinutesFor,
+  setGroupMembers,
+  validateFullEditId,
+  validateWorkingTimeDraft,
+} from "@/components/entity-editor/core";
+import { shiftTypesDescriptor } from "@/components/shift-types/shift-types-descriptor";
 import type { AssistantCommandV1 } from "./commands";
 
 /** Why a command cannot be prepared. Exhaustive: every refusal is one of these. */
@@ -300,6 +314,76 @@ function applyMoveLeave(
   };
 }
 
+function applyAddShiftType(
+  state: ScenarioUiState,
+  command: Extract<AssistantCommandV1, { type: "add_shift_type" }>,
+  index: number,
+): OperationResult {
+  const d = shiftTypesDescriptor;
+  const idCheck = validateFullEditId(d, d.readItems(state), d.readGroups(state), command.code);
+  if (!idCheck.ok) {
+    return reject(index, "invalid_value", `Shift "${command.code.trim()}": ${idCheck.message}.`);
+  }
+  // The Shifts page forbids a numbers-only code (`shift-type-grid.tsx`, `codeNumericOnly`).
+  if (/^\d+$/.test(idCheck.id)) {
+    return reject(
+      index,
+      "invalid_value",
+      `Shift "${idCheck.id}": a shift code must contain a letter.`,
+    );
+  }
+  // The same derived value the working-time sub-form produces (`deriveValue` in
+  // `working-time-fields.tsx`): rest 0 is stored as absent, paid = span - rest. An
+  // invalid rest leaves duration unset, and the validator reports the rest itself.
+  const restMinutes = command.restMinutes || undefined;
+  const workingTime = {
+    startTime: command.startTime,
+    endTime: command.endTime,
+    restMinutes,
+    durationMinutes: paidMinutesFor(command.startTime, command.endTime, restMinutes) ?? undefined,
+  };
+  const timeCheck = validateWorkingTimeDraft(workingTime);
+  if (!timeCheck.ok) {
+    return reject(index, "invalid_value", `Shift "${idCheck.id}": ${timeCheck.issues[0].message}`);
+  }
+  return {
+    ok: true,
+    next: addItem(state, d, {
+      id: idCheck.id,
+      description: command.name.trim() || undefined,
+      extra: workingTime,
+    }),
+  };
+}
+
+function applyAddShiftGroup(
+  state: ScenarioUiState,
+  command: Extract<AssistantCommandV1, { type: "add_shift_group" }>,
+  index: number,
+): OperationResult {
+  const d = shiftTypesDescriptor;
+  const items = d.readItems(state);
+  const idCheck = validateFullEditId(d, items, d.readGroups(state), command.groupId, true);
+  if (!idCheck.ok) {
+    return reject(
+      index,
+      "invalid_value",
+      `Shift group "${command.groupId.trim()}": ${idCheck.message}.`,
+    );
+  }
+  const members = [...new Set(command.members)];
+  const missing = members.find((member) => !items.some((item) => item.id === member));
+  if (missing !== undefined) {
+    return reject(
+      index,
+      "unknown_target",
+      `Shift group "${idCheck.id}": there is no shift "${missing}". Add the shift earlier in the same change, or use an existing code.`,
+    );
+  }
+  const withGroup = addGroup(state, d, { id: idCheck.id });
+  return { ok: true, next: setGroupMembers(withGroup, d, idCheck.id, members) };
+}
+
 /** Validate and apply exactly one command against `state`. */
 export function applyAssistantCommand(
   state: ScenarioUiState,
@@ -315,6 +399,10 @@ export function applyAssistantCommand(
       return applySetRequirementPeople(state, command, index);
     case "move_leave":
       return applyMoveLeave(state, command, index);
+    case "add_shift_type":
+      return applyAddShiftType(state, command, index);
+    case "add_shift_group":
+      return applyAddShiftGroup(state, command, index);
   }
 }
 

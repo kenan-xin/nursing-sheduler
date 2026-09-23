@@ -232,3 +232,183 @@ describe("batches", () => {
     }
   });
 });
+
+describe("add_shift_type / add_shift_group", () => {
+  const shift = (code: string, startTime: string, endTime: string, name = "", restMinutes = 0) => ({
+    type: "add_shift_type" as const,
+    code,
+    name,
+    startTime,
+    endTime,
+    restMinutes,
+  });
+  const group = (groupId: string, members: string[]) => ({
+    type: "add_shift_group" as const,
+    groupId,
+    members,
+  });
+
+  it("sets up the ward's whole shift list in one batch", () => {
+    // The real request: am1-3, pm1-3, a long shift and an overnight night shift, grouped.
+    const result = applyAssistantCommands(proposalScenario(), [
+      shift("am1", "08:00", "15:00"),
+      shift("am2", "08:00", "16:00"),
+      shift("am3", "08:00", "17:00"),
+      shift("pm1", "12:00", "21:00"),
+      shift("pm2", "13:00", "21:00"),
+      shift("pm3", "14:00", "21:00"),
+      shift("L", "08:00", "20:30", "Long shift"),
+      shift("N", "20:00", "08:30", "Night shift"),
+      group("AM", ["am1", "am2", "am3"]),
+      group("PM", ["pm1", "pm2", "pm3"]),
+      group("Long", ["L"]),
+      group("Night shifts", ["N"]),
+    ]);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const added = result.next.shifts.slice(2);
+    expect(added.map((s) => s.id)).toEqual(["am1", "am2", "am3", "pm1", "pm2", "pm3", "L", "N"]);
+    expect(added.find((s) => s.id === "am1")).toMatchObject({
+      startTime: "08:00",
+      endTime: "15:00",
+      durationMinutes: 420,
+    });
+    // Overnight: 20:00 -> 08:30 next day is 12.5 hours.
+    expect(added.find((s) => s.id === "N")).toMatchObject({
+      description: "Night shift",
+      startTime: "20:00",
+      endTime: "08:30",
+      durationMinutes: 750,
+    });
+    expect(result.next.shiftGroups.map((g) => [g.id, g.members])).toEqual([
+      ["AM", ["am1", "am2", "am3"]],
+      ["PM", ["pm1", "pm2", "pm3"]],
+      ["Long", ["L"]],
+      ["Night shifts", ["N"]],
+    ]);
+  });
+
+  it("trims the code and drops an empty name, as the Shifts page does", () => {
+    const result = applyAssistantCommand(
+      proposalScenario(),
+      shift("  am1  ", "08:00", "15:00", "  "),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const created = result.next.shifts.at(-1);
+    expect(created?.id).toBe("am1");
+    expect(created?.description).toBeUndefined();
+  });
+
+  it("refuses a code that already exists, naming it", () => {
+    const result = applyAssistantCommand(proposalScenario(), shift("Day", "08:00", "15:00"));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.code).toBe("invalid_value");
+    expect(result.rejection.message).toContain('Shift "Day"');
+  });
+
+  it("refuses a duplicate inside the batch at the second occurrence", () => {
+    const result = applyAssistantCommands(proposalScenario(), [
+      shift("am1", "08:00", "15:00"),
+      shift("am1", "08:00", "16:00"),
+    ]);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.index).toBe(1);
+    expect(result.rejection.message).toContain('Shift "am1"');
+  });
+
+  it("accepts a case-variant code, as the Shifts page does", () => {
+    // Ids are exact-identity across the app; `Night` and `NIGHT` are distinct.
+    expect(applyAssistantCommand(proposalScenario(), shift("NIGHT", "20:00", "08:30")).ok).toBe(
+      true,
+    );
+  });
+
+  it("refuses reserved, numbers-only and empty codes", () => {
+    for (const code of ["OFF", "all", "123", "   "]) {
+      const result = applyAssistantCommand(proposalScenario(), shift(code, "08:00", "15:00"));
+      expect(result.ok, code).toBe(false);
+      if (!result.ok) expect(result.rejection.code).toBe("invalid_value");
+    }
+  });
+
+  it("refuses an off-grid time", () => {
+    const result = applyAssistantCommand(proposalScenario(), shift("am1", "08:15", "15:00"));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.message).toContain('Shift "am1"');
+    expect(result.rejection.message).toContain("30-minute grid");
+  });
+
+  it("refuses a shift whose start and end are the same", () => {
+    expect(applyAssistantCommand(proposalScenario(), shift("x", "08:00", "08:00")).ok).toBe(false);
+  });
+
+  it("treats rest 0 as no break: paid minutes are the full span", () => {
+    const result = applyAssistantCommand(proposalScenario(), shift("L", "08:00", "20:30", "", 0));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const created = result.next.shifts.at(-1);
+    expect(created?.durationMinutes).toBe(750);
+    // Stored as the Shifts page stores it: rest absent, not `restMinutes: 0`.
+    expect(created?.restMinutes).toBeUndefined();
+  });
+
+  it("subtracts a rest break from the paid minutes, overnight too", () => {
+    const result = applyAssistantCommand(proposalScenario(), shift("N", "20:00", "08:30", "", 60));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.next.shifts.at(-1)).toMatchObject({ restMinutes: 60, durationMinutes: 690 });
+  });
+
+  it("refuses a rest the Shifts page cannot hold, naming the shift", () => {
+    for (const [restMinutes, text] of [
+      [-30, "non-negative multiple of 30"],
+      [45, "non-negative multiple of 30"],
+      [420, "less than the shift span"], // 08:00-15:00 span is 420
+      [480, "less than the shift span"],
+    ] as const) {
+      const result = applyAssistantCommand(
+        proposalScenario(),
+        shift("am1", "08:00", "15:00", "", restMinutes),
+      );
+      expect(result.ok, String(restMinutes)).toBe(false);
+      if (result.ok) continue;
+      expect(result.rejection.code).toBe("invalid_value");
+      expect(result.rejection.message).toContain('Shift "am1"');
+      expect(result.rejection.message).toContain(text);
+    }
+  });
+
+  it("refuses a group id that is already a shift code", () => {
+    const result = applyAssistantCommand(proposalScenario(), group("Night", ["Day"]));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.code).toBe("invalid_value");
+    expect(result.rejection.message).toContain('Shift group "Night"');
+  });
+
+  it("refuses a group whose shift comes later in the batch", () => {
+    const result = applyAssistantCommands(proposalScenario(), [
+      group("AM", ["am1"]),
+      shift("am1", "08:00", "15:00"),
+    ]);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.index).toBe(0);
+    expect(result.rejection.code).toBe("unknown_target");
+    expect(result.rejection.message).toContain('"am1"');
+  });
+
+  it("puts group members in shift order and ignores repeats", () => {
+    const result = applyAssistantCommand(
+      proposalScenario(),
+      group("Both", ["Night", "Day", "Night"]),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.next.shiftGroups.at(-1)?.members).toEqual(["Day", "Night"]);
+  });
+});

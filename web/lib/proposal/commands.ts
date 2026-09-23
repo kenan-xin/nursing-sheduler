@@ -15,6 +15,10 @@
 // model announce a capability no validated path can honour, which is the exact
 // failure the closed flows forbid. Arms are additive under `schemaVersion`.
 //
+// `add_shift_type` / `add_shift_group` widen the original Phase-1 four on purpose:
+// shift setup is Phase-1 scenario authoring, and both compile to the Shifts page's
+// own primitives (`addItem` / `addGroup` / `setGroupMembers`), so the rule above holds.
+//
 // EVERY FIELD IS A TARGET, NEVER A DOCUMENT. There is no arm that accepts scenario
 // content, a patch, a card body, or a free-form object: the model names WHICH
 // existing thing to change and WHAT value it should take, and the host derives the
@@ -64,7 +68,22 @@ export type AssistantCommandV1 =
    * with a person, so it is also the arm that produces a host-derived operational
    * confirmation (see `assumptions.ts`).
    */
-  | { type: "move_leave"; personId: PersonRef; fromDate: DateRef; toDate: DateRef };
+  | { type: "move_leave"; personId: PersonRef; fromDate: DateRef; toDate: DateRef }
+  /**
+   * Add one shift type -- the Shifts page "Add shift" form with no staffing.
+   * `endTime` before `startTime` is an overnight shift. `restMinutes: 0` means no
+   * break. Paid minutes are derived by the host, never supplied.
+   */
+  | {
+      type: "add_shift_type";
+      code: string;
+      name: string;
+      startTime: string;
+      endTime: string;
+      restMinutes: number;
+    }
+  /** Add one shift group whose members are existing shift codes -- the Groups "New group" form. */
+  | { type: "add_shift_group"; groupId: string; members: string[] };
 
 export type AssistantCommandType = AssistantCommandV1["type"];
 
@@ -74,6 +93,8 @@ export const ASSISTANT_COMMAND_TYPES = [
   "set_rule_enabled",
   "set_staffing_requirement_people",
   "move_leave",
+  "add_shift_type",
+  "add_shift_group",
 ] as const satisfies readonly AssistantCommandType[];
 
 // EXHAUSTIVE IN BOTH DIRECTIONS. `satisfies` above proves every listed name is a real
@@ -101,6 +122,11 @@ void _exhaustive;
 const refSchema = z.union([z.string(), z.number()]);
 
 const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "a date must be written YYYY-MM-DD");
+
+/** Shape only; the 30-minute grid and span rules are the Shifts page's, applied in `operations.ts`. */
+const clockSchema = z
+  .string()
+  .regex(/^\d{2}:\d{2}$/, "a time must be written HH:MM in 24-hour form, e.g. 08:00 or 20:30");
 
 /**
  * The wire schema for one command.
@@ -159,6 +185,48 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
     personId: refSchema.describe("The person whose leave is moving."),
     fromDate: refSchema.describe("The roster date the leave is currently on."),
     toDate: refSchema.describe("The roster date the leave should move to."),
+  }),
+  z.strictObject({
+    type: z.enum(["add_shift_type"]),
+    code: z
+      .string()
+      .describe(
+        "The new shift's short code as shown on the roster, e.g. am1, N. Must not match any " +
+          "existing shift code or shift group id, and must contain a letter.",
+      ),
+    name: z
+      .string()
+      .describe('The shift\'s longer name, e.g. "Night shift". Use "" when the user gave none.'),
+    startTime: clockSchema.describe(
+      "Start time, HH:MM 24-hour on the half hour. Convert what the user wrote: 0800 -> 08:00.",
+    ),
+    endTime: clockSchema.describe(
+      "End time, HH:MM 24-hour on the half hour. An end earlier than the start means the " +
+        "shift ends the next day (e.g. 20:00 to 08:30).",
+    ),
+    restMinutes: z
+      .number()
+      .int()
+      .describe(
+        "Unpaid break in whole minutes, a multiple of 30 and shorter than the shift. " +
+          "Send 0 when the user gave no break.",
+      ),
+  }),
+  z.strictObject({
+    type: z.enum(["add_shift_group"]),
+    groupId: z
+      .string()
+      .describe(
+        "The new group's name. Shift codes and group names share one list, so it must differ " +
+          'from every shift code -- e.g. "Night shifts" when a shift is called Night.',
+      ),
+    members: z
+      .array(z.string())
+      .min(1, "a shift group needs at least one shift")
+      .describe(
+        "Codes of the shifts in the group. Each must already exist or be added EARLIER in " +
+          "the same change.",
+      ),
   }),
 ]);
 

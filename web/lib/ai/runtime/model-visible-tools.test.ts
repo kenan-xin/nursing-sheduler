@@ -288,6 +288,15 @@ describe("the command arms the provider is actually shown", () => {
         requiredNumPeople: 2,
       },
       move_leave: { type: "move_leave", personId: 7, fromDate: "02", toDate: "03" },
+      add_shift_type: {
+        type: "add_shift_type",
+        code: "N",
+        name: "Night shift",
+        startTime: "20:00",
+        endTime: "08:30",
+        restMinutes: 60,
+      },
+      add_shift_group: { type: "add_shift_group", groupId: "Night shifts", members: ["N"] },
     };
     expect(Object.keys(representative).sort()).toEqual([...ASSISTANT_COMMAND_TYPES].sort());
 
