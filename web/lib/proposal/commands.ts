@@ -35,6 +35,16 @@ import type { DateRef, GuidedRuleConstraintKind, IsoDate, PersonRef } from "@/li
 /** Bumped when an arm's SHAPE changes. A persisted proposal records the version it was prepared under. */
 export const ASSISTANT_COMMAND_SCHEMA_VERSION = 1 as const;
 
+/** The Shift counts screen's six expressions (`expression-model.ts` `SUPPORTED_EXPRESSIONS`). */
+export const COUNT_EXPRESSIONS = [
+  "x <= T",
+  "x >= T",
+  "x = T",
+  "x < T",
+  "x > T",
+  "|x - T|^2",
+] as const;
+
 /** The five rule kinds a `set_rule_enabled` may target — the guided rule constraint kinds. */
 export const RULE_KINDS = [
   "requirements",
@@ -109,6 +119,29 @@ export type AssistantCommandV1 =
       pattern: string[];
       dates: string[];
       weight: string;
+    }
+  /** Add one shift count rule -- the Shift counts screen's Add form (ordinary counts only). */
+  | {
+      type: "add_count_rule";
+      description: string;
+      people: PersonRef[];
+      shiftTypes: string[];
+      dates: string[];
+      expression: (typeof COUNT_EXPRESSIONS)[number];
+      target: number;
+      weight: string;
+    }
+  /** Replace every field of one ordinary shift count rule -- that screen's Edit form. */
+  | {
+      type: "edit_count_rule";
+      ruleId: string;
+      description: string;
+      people: PersonRef[];
+      shiftTypes: string[];
+      dates: string[];
+      expression: (typeof COUNT_EXPRESSIONS)[number];
+      target: number;
+      weight: string;
     };
 
 export type AssistantCommandType = AssistantCommandV1["type"];
@@ -123,6 +156,8 @@ export const ASSISTANT_COMMAND_TYPES = [
   "add_shift_group",
   "add_succession_rule",
   "edit_succession_rule",
+  "add_count_rule",
+  "edit_count_rule",
 ] as const satisfies readonly AssistantCommandType[];
 
 // EXHAUSTIVE IN BOTH DIRECTIONS. `satisfies` above proves every listed name is a real
@@ -221,6 +256,28 @@ function successionFields() {
           "LEAVE or ALL.",
       ),
     dates: ruleDatesSchema(),
+    weight: ruleWeightSchema(),
+  };
+}
+
+function countFields() {
+  return {
+    description: ruleDescriptionSchema(),
+    people: rulePeopleSchema(),
+    shiftTypes: z
+      .array(z.string())
+      .describe(
+        "The shifts to count, per person: shift codes, shift group ids, OFF, LEAVE or ALL.",
+      ),
+    dates: ruleDatesSchema(),
+    expression: z
+      .enum(COUNT_EXPRESSIONS)
+      .describe(
+        'How each person\'s count x relates to the target T: "x <= T" at most, "x >= T" at ' +
+          'least, "x = T" exactly, "x < T" fewer than, "x > T" more than, "|x - T|^2" as ' +
+          'close to T as possible (needs a weight of 0 or less, never "infinity").',
+      ),
+    target: z.number().describe("The target T, a whole number of zero or more, e.g. 5."),
     weight: ruleWeightSchema(),
   };
 }
@@ -331,6 +388,8 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
     ruleId: ruleIdSchema(),
     ...successionFields(),
   }),
+  z.strictObject({ type: z.enum(["add_count_rule"]), ...countFields() }),
+  z.strictObject({ type: z.enum(["edit_count_rule"]), ruleId: ruleIdSchema(), ...countFields() }),
 ]);
 
 /** The most operations one change may hold. Also stated to the model, in its tool description -- see `use-proposal-tools.ts`. */

@@ -6,8 +6,10 @@
 // refused.
 
 import { describe, expect, it } from "vitest";
+import { SUPPORTED_EXPRESSIONS } from "@/components/card-editor/expression-model";
 import {
   ASSISTANT_COMMAND_TYPES,
+  COUNT_EXPRESSIONS,
   assistantCommandListSchema,
   parseAssistantCommands,
 } from "./commands";
@@ -164,6 +166,34 @@ describe("parseAssistantCommands", () => {
     ];
     for (const payload of refused) {
       expect(parseAssistantCommands(payload).ok, JSON.stringify(payload)).toBe(false);
+    }
+  });
+
+  it("offers exactly the Shift counts screen's six expressions", () => {
+    expect([...COUNT_EXPRESSIONS].sort()).toEqual([...SUPPORTED_EXPRESSIONS].sort());
+  });
+
+  it("accepts the shift-count arms and refuses an expression the screen does not offer", () => {
+    const fields = {
+      description: "At most 5 night shifts per nurse per month",
+      people: ["ana"],
+      shiftTypes: ["Night"],
+      dates: ["ALL"],
+      expression: "x <= T",
+      target: 5,
+      weight: "infinity",
+    };
+    expect(
+      parseAssistantCommands([
+        { type: "add_count_rule", ...fields },
+        { type: "edit_count_rule", ruleId: "cnt-nights", ...fields },
+      ]).ok,
+    ).toBe(true);
+    for (const expression of ["x <= 5", "x ≤ T", "at most"]) {
+      expect(
+        parseAssistantCommands([{ type: "add_count_rule", ...fields, expression }]).ok,
+        expression,
+      ).toBe(false);
     }
   });
 

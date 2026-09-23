@@ -73,6 +73,8 @@ const PROPOSAL_OPERATIONS = [
   "add_shift_group",
   "add_succession_rule",
   "edit_succession_rule",
+  "add_count_rule",
+  "edit_count_rule",
 ] as const;
 
 /**

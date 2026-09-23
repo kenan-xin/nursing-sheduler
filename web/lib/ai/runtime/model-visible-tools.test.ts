@@ -314,6 +314,27 @@ describe("the command arms the provider is actually shown", () => {
         dates: ["ALL"],
         weight: "-50",
       },
+      add_count_rule: {
+        type: "add_count_rule",
+        description: "At most 5 night shifts per nurse per month",
+        people: ["ana", "ben"],
+        shiftTypes: ["Night"],
+        dates: ["ALL"],
+        expression: "x <= T",
+        target: 5,
+        weight: "infinity",
+      },
+      edit_count_rule: {
+        type: "edit_count_rule",
+        ruleId: "c1",
+        description: "Night cap",
+        people: ["ana"],
+        shiftTypes: ["Night"],
+        dates: ["ALL"],
+        expression: "x <= T",
+        target: 4,
+        weight: "infinity",
+      },
     };
     expect(Object.keys(representative).sort()).toEqual([...ASSISTANT_COMMAND_TYPES].sort());
 

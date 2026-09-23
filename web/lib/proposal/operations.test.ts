@@ -596,3 +596,135 @@ describe("add_succession_rule / edit_succession_rule", () => {
     if (!result.ok) expect(result.rejection.code).toBe("unsupported_shape");
   });
 });
+
+describe("add_count_rule / edit_count_rule", () => {
+  const nightCap = {
+    type: "add_count_rule" as const,
+    description: "At most 5 night shifts per nurse per month",
+    people: ["ana", "ben", "cai"] as (string | number)[],
+    shiftTypes: ["Night"],
+    dates: ["ALL"],
+    expression: "x <= T" as const,
+    target: 5,
+    weight: "infinity",
+  };
+  // Defaults restate `cnt-nights` exactly.
+  const edit = (overrides: Partial<Omit<typeof nightCap, "type">> = {}) => ({
+    ...nightCap,
+    type: "edit_count_rule" as const,
+    ruleId: "cnt-nights",
+    description: "Night cap",
+    people: ["ana"] as (string | number)[],
+    target: 6,
+    ...overrides,
+  });
+
+  it("expresses 'at most 5 night shifts per nurse per month' as a hard rule", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), nightCap);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.next.cardsByKind.counts.at(-1)).toEqual({
+      uid: expect.any(String),
+      description: "At most 5 night shifts per nurse per month",
+      person: ["ana", "ben", "cai"],
+      countDates: ["ALL"],
+      countShiftTypes: ["Night"],
+      expression: "x <= T",
+      target: 5,
+      weight: Number.POSITIVE_INFINITY,
+    });
+  });
+
+  it("stores the counted shifts in the Shifts page order, as the screen does", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), {
+      ...nightCap,
+      shiftTypes: ["Night", "Day"],
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok)
+      expect(result.next.cardsByKind.counts.at(-1)?.countShiftTypes).toEqual(["Day", "Night"]);
+  });
+
+  it("accepts OFF and a shift group, as the screen's picker offers them", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), {
+      ...nightCap,
+      description: "At least 8 days off",
+      shiftTypes: ["OFF"],
+      expression: "x >= T",
+      target: 8,
+    });
+    expect(result.ok).toBe(true);
+    const group = applyAssistantCommand(ruleWardScenario(), {
+      ...nightCap,
+      shiftTypes: ["Working shifts"],
+    });
+    expect(group.ok).toBe(true);
+  });
+
+  it("refuses 'close to target' with a hard weight, in the screen's words", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), {
+      ...nightCap,
+      expression: "|x - T|^2",
+      weight: "infinity",
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.message).toContain(
+      'Shift count rule "At most 5 night shifts per nurse per month"',
+    );
+    expect(result.rejection.message).toContain("Weight must be non-positive");
+  });
+
+  it("refuses a target that is not a whole number of zero or more", () => {
+    for (const target of [2.5, -1]) {
+      const result = applyAssistantCommand(ruleWardScenario(), { ...nightCap, target });
+      expect(result.ok, String(target)).toBe(false);
+      if (!result.ok)
+        expect(result.rejection.message).toContain("Target must be a non-negative integer");
+    }
+  });
+
+  it("edit keeps coefficients and the off marker", () => {
+    const state = ruleWardScenario();
+    state.cardsByKind.counts[0] = {
+      ...state.cardsByKind.counts[0],
+      countShiftTypeCoefficients: [["Night", 2]],
+      disabled: true,
+    };
+    const result = applyAssistantCommand(state, edit({ target: 4 }));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.next.cardsByKind.counts[0]).toEqual({
+        ...state.cardsByKind.counts[0],
+        target: 4,
+      });
+    }
+  });
+
+  it("refuses to edit a contracted-hours count", () => {
+    const state = ruleWardScenario();
+    state.cardsByKind.counts = [
+      {
+        uid: "cnt-hours",
+        description: "Contract",
+        person: ["ana"],
+        countDates: ["ALL"],
+        countShiftTypes: ["Day"],
+        expression: ["x >= T", "x <= T"],
+        target: [10, 12],
+        weight: -1,
+        tag: "contracted_hours",
+        policy: "range",
+      },
+    ];
+    const result = applyAssistantCommand(state, edit({ ruleId: "cnt-hours" } as never));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.rejection.code).toBe("unsupported_shape");
+  });
+
+  it("refuses an edit that changes nothing", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), edit());
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.rejection.code).toBe("no_effect");
+  });
+});

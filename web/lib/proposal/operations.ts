@@ -60,6 +60,20 @@ import {
   validateSuccessionForm,
   type SuccessionFormState,
 } from "@/components/successions/successions-model";
+import {
+  buildCountCard,
+  buildCountShiftTypeDomain,
+  buildCountShiftTypeTransferOptions,
+  buildDateScopeAutoScopes as countAutoScopes,
+  buildDateScopeDateGroups as countDateGroups,
+  buildDateScopeDateItems as countDateItems,
+  buildPeopleTransferOptions as countPeopleOptions,
+  countToForm,
+  emptyCountForm,
+  isEditableCountCard,
+  validateCountForm,
+  type CountFormState,
+} from "@/components/counts/counts-model";
 import { proposalDigest, stableStringify } from "./digest";
 import type { AssistantCommandV1 } from "./commands";
 
@@ -387,6 +401,124 @@ function applyEditSuccessionRule(
   };
 }
 
+// --- Shift counts -------------------------------------------------------------
+
+type CountFields = Omit<Extract<AssistantCommandV1, { type: "add_count_rule" }>, "type">;
+
+const COUNT_DATES: DateScopeBuilders = {
+  auto: countAutoScopes,
+  groups: countDateGroups,
+  items: countDateItems,
+};
+
+/**
+ * The draft the Shift counts form holds once the user has entered these values, on top
+ * of `base`: a fresh form for Add, the loaded card (`countToForm`) for Edit -- so an
+ * edit keeps the coefficients the arm does not carry, exactly as the form does.
+ */
+function countDraft(fields: CountFields, base: CountFormState): CountFormState {
+  return {
+    ...base,
+    description: fields.description,
+    person: [...fields.people],
+    countDates: [...fields.dates],
+    countShiftTypes: [...fields.shiftTypes],
+    expression: fields.expression,
+    target: fields.target,
+    weight: parseWeightInput(fields.weight),
+  };
+}
+
+function countRejection(
+  state: ScenarioUiState,
+  fields: CountFields,
+  draft: CountFormState,
+  name: string,
+  index: number,
+): OperationResult | undefined {
+  const people = countPeopleOptions(state);
+  const person = firstUnoffered(fields.people, [...people.items, ...people.groups]);
+  if (person !== undefined) {
+    return reject(
+      index,
+      "unknown_target",
+      `${name}: there is no person or staff group "${person}". Name each person, or an existing staff group.`,
+    );
+  }
+  const shifts = buildCountShiftTypeTransferOptions(state);
+  const shift = firstUnoffered(fields.shiftTypes, [...shifts.items, ...shifts.groups]);
+  if (shift !== undefined) {
+    return reject(index, "unknown_target", `${name}: there is no shift or shift group "${shift}".`);
+  }
+  const dates = dateScopeRejection(state, fields.dates, COUNT_DATES);
+  if (dates) return reject(index, dates.code, `${name}: ${dates.message}.`);
+  const error = firstFormError(validateCountForm(draft, buildCountShiftTypeDomain(state)));
+  if (error) return reject(index, "invalid_value", `${name}: ${error}.`);
+  return undefined;
+}
+
+function applyAddCountRule(
+  state: ScenarioUiState,
+  command: Extract<AssistantCommandV1, { type: "add_count_rule" }>,
+  index: number,
+): OperationResult {
+  const draft = countDraft(command, emptyCountForm());
+  const refused = countRejection(
+    state,
+    command,
+    draft,
+    ruleName("counts", command.description),
+    index,
+  );
+  if (refused) return refused;
+  // `use-counts.ts` `add`: append `buildCountCard(form, domain)`.
+  const card = buildCountCard(
+    draft,
+    buildCountShiftTypeDomain(state),
+    newRuleUid(state, "counts", command),
+  );
+  return { ok: true, next: withCards(state, "counts", [...state.cardsByKind.counts, card]) };
+}
+
+function applyEditCountRule(
+  state: ScenarioUiState,
+  command: Extract<AssistantCommandV1, { type: "edit_count_rule" }>,
+  index: number,
+): OperationResult {
+  const source = state.cardsByKind.counts.find((card) => card.uid === command.ruleId);
+  if (!source) {
+    return reject(
+      index,
+      "unknown_target",
+      "That shift count rule is not in this schedule any more.",
+    );
+  }
+  const name = ruleName("counts", source.description?.trim() || source.uid);
+  if (!isEditableCountCard(source)) {
+    return reject(
+      index,
+      "unsupported_shape",
+      `${name}: it is a contracted-hours or list-shaped count, so it has to be edited on the Shift counts screen.`,
+    );
+  }
+  const domain = buildCountShiftTypeDomain(state);
+  const draft = countDraft(command, countToForm(source, domain));
+  const refused = countRejection(state, command, draft, name, index);
+  if (refused) return refused;
+  const next = keepMarkers(source, buildCountCard(draft, domain, source.uid));
+  if (stableStringify(next) === stableStringify(source)) {
+    return reject(index, "no_effect", `${name} already says exactly that.`);
+  }
+  return {
+    ok: true,
+    next: withCards(
+      state,
+      "counts",
+      state.cardsByKind.counts.map((card) => (card.uid === source.uid ? next : card)),
+    ),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // The arms
 // ---------------------------------------------------------------------------
@@ -625,6 +757,10 @@ export function applyAssistantCommand(
       return applyAddSuccessionRule(state, command, index);
     case "edit_succession_rule":
       return applyEditSuccessionRule(state, command, index);
+    case "add_count_rule":
+      return applyAddCountRule(state, command, index);
+    case "edit_count_rule":
+      return applyEditCountRule(state, command, index);
   }
 }
 
