@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { applyAssistantCommands } from "@/lib/proposal/operations";
+import { deriveProposalDiff } from "@/lib/proposal/diff";
 import { findStaffingShortfalls, type StaffingFinding } from "@/lib/rules/shortfalls";
 import {
   SCENARIOS,
@@ -190,6 +191,20 @@ describe("rankRepairOptions", () => {
         ruleId: "max-nights",
         people: ["ana", "ben", "cara", "dev"],
         target: 1,
+      }),
+    );
+  });
+
+  it("tells the Preview that a narrowed rule will not cover nurses hired later", () => {
+    const state = capOnAll();
+    const borrow = rank(state).find((o) => o.repairId === "borrow_temporary_nurse");
+    const applied = applyAssistantCommands(state, borrow!.operations);
+    if (!applied.ok) throw new Error(applied.rejection.message);
+    const diff = deriveProposalDiff(state, applied.next, borrow!.operations);
+    expect(diff.cascade).toContainEqual(
+      expect.objectContaining({
+        key: "narrowed:max-nights",
+        after: expect.stringMatching(/hired later/),
       }),
     );
   });

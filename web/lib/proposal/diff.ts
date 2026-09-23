@@ -701,6 +701,46 @@ function newlyBoundHardRules(
 }
 
 /**
+ * A count rule for everyone or a group that the change rewrites to a fixed list of
+ * names (how a borrowed nurse is kept out of the ward's own limits) no longer follows
+ * the group: a nurse hired or added to it later is not bound. Said, so it is not a
+ * silent loss.
+ */
+function narrowedToNamedPeople(
+  before: ScenarioUiState,
+  after: ScenarioUiState,
+  commands: readonly AssistantCommandV1[],
+): Entry[] {
+  const groupsIn = (state: ScenarioUiState, refs: unknown) => {
+    const groups = new Set(state.staffGroups.map((group) => String(group.id)));
+    return flattenRefs(refs)
+      .map(String)
+      .filter((ref) => ref.toUpperCase() === "ALL" || groups.has(ref));
+  };
+  return commands.flatMap((command): Entry[] => {
+    if (command.type !== "edit_count_rule") return [];
+    const was = before.cardsByKind.counts.find((card) => card.uid === command.ruleId);
+    const now = after.cardsByKind.counts.find((card) => card.uid === command.ruleId);
+    if (!was || !now) return [];
+    const lost = groupsIn(before, was.person).filter(
+      (group) => !groupsIn(after, now.person).includes(group),
+    );
+    if (lost.length === 0) return [];
+    const whom = lost.map((g) => (g.toUpperCase() === "ALL" ? "everyone" : `“${g}”`)).join(", ");
+    return [
+      {
+        key: `narrowed:${command.ruleId}`,
+        scope: "shift-counts",
+        label: `“${ruleTitle(now, "counts")}” now names its people one by one`,
+        before: `For ${whom}`,
+        after: "Nurses hired later, or added to the group later, are not covered by it",
+        kind: "changed",
+      },
+    ];
+  });
+}
+
+/**
  * The keys a command NAMES, so a consequence is never mistaken for a request.
  *
  * A key the command names but the diff does not contain simply does not appear --
@@ -827,6 +867,7 @@ export function deriveProposalDiff(
   const cascade = [
     ...all.filter((entry) => !named.has(entry.key)),
     ...newlyBoundHardRules(before, after, commands),
+    ...narrowedToNamedPeople(before, after, commands),
   ];
 
   const directDomains = new Set(direct.map((entry) => SCOPE_DOMAIN[entry.scope]));
