@@ -306,3 +306,15 @@ export {
   type RunStatusDisplay,
   type RunStatusTone,
 } from "./run-display";
+
+// The seam an assistant Run click uses to ask the Optimize screen for its own run.
+export {
+  RUN_REQUEST_TTL_MS,
+  isRunLive,
+  reportOptimizeRunRequest,
+  requestOptimizeRun,
+  takeOptimizeRunRequest,
+  useRunRequestStore,
+  type RunRequestOutcome,
+  type RunRequestState,
+} from "./run-request";
