@@ -26,7 +26,7 @@
 import type { CapabilityId } from "@/lib/capability/help-content";
 import type { AssistantCommandType } from "@/lib/proposal/commands";
 
-export const PLAYBOOK_VERSION = "2026-09-24.1";
+export const PLAYBOOK_VERSION = "2026-09-24.2";
 
 /** Names from plan 2026-09-24-assistant-optimize-run. Change here only. */
 export const OPTIMIZE_RUN_TOOL = "request_optimize_run";
@@ -130,6 +130,7 @@ export const SETUP_INSTRUCTIONS: readonly string[] = [
 ];
 
 export type RepairId =
+  | "align_overlapping_requirements"
   | "soften_hard_request"
   | "extra_shift_willing_nurse"
   | "relax_count_rule"
@@ -156,6 +157,19 @@ export interface RepairEntry {
 }
 
 export const REPAIRS: readonly RepairEntry[] = [
+  {
+    // A static requirement_conflict: no staffing change helps until the rules agree.
+    id: "align_overlapping_requirements",
+    title: "Make overlapping staffing requirements agree",
+    whenToUse:
+      "Two staffing requirements on the same shift ask for exact numbers that cannot both hold.",
+    disruption: "medium",
+    confirmation: "manager",
+    enforcedBy: "apply",
+    opTypes: ["set_staffing_requirement_people"],
+    guardrail:
+      "Only raise the wider requirement to match. Never lower a skill-mix requirement: otherwise open the Staffing requirements screen.",
+  },
   {
     id: "soften_hard_request",
     title: "Turn a hard shift request into a strong preference",
@@ -196,8 +210,10 @@ export const REPAIRS: readonly RepairEntry[] = [
     enforcedBy: "host_question",
     // No `mark_person_off` arm exists: add the temporary nurse, then pin her OFF
     // (weight "must") over every date she is not covering, so she is free only on
-    // the short dates (controller ruling, 2026-09-24).
-    opTypes: ["add_person", "set_off_request"],
+    // the short dates (controller ruling, 2026-09-24). A "must" shift request puts her
+    // on the short shift, and a hard count rule she would inherit is narrowed to the
+    // ward's own staff in the same change.
+    opTypes: ["add_person", "set_off_request", "set_shift_request", "edit_count_rule"],
     guardrail:
       "Put her in a skill group only when the manager confirms her qualification. Never invent a name.",
   },
@@ -242,19 +258,26 @@ export type Situation = "capped" | "acute" | "chronic" | "unexplained";
 
 export const REPAIR_ORDER: Record<Situation, readonly RepairId[]> = {
   capped: [
+    "align_overlapping_requirements",
     "extra_shift_willing_nurse",
     "relax_count_rule",
     "borrow_temporary_nurse",
     "run_one_short",
   ],
   acute: [
+    "align_overlapping_requirements",
     "soften_hard_request",
     "borrow_temporary_nurse",
     "ask_nurse_on_leave",
     "run_one_short",
     "split_long_shift",
   ],
-  chronic: ["borrow_temporary_nurse", "run_one_short", "split_long_shift"],
+  chronic: [
+    "align_overlapping_requirements",
+    "borrow_temporary_nurse",
+    "run_one_short",
+    "split_long_shift",
+  ],
   unexplained: ["soften_hard_request", "relax_count_rule", "borrow_temporary_nurse"],
 };
 
