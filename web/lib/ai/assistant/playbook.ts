@@ -26,7 +26,7 @@
 import type { CapabilityId } from "@/lib/capability/help-content";
 import type { AssistantCommandType } from "@/lib/proposal/commands";
 
-export const PLAYBOOK_VERSION = "2026-09-24.2";
+export const PLAYBOOK_VERSION = "2026-09-24.3";
 
 /** Names from plan 2026-09-24-assistant-optimize-run. Change here only. */
 export const OPTIMIZE_RUN_TOOL = "request_optimize_run";
@@ -278,7 +278,8 @@ export const REPAIR_ORDER: Record<Situation, readonly RepairId[]> = {
     "run_one_short",
     "split_long_shift",
   ],
-  unexplained: ["soften_hard_request", "relax_count_rule", "borrow_temporary_nurse"],
+  // Spec: 1, 3, as hypotheses. A whole-period borrow is not a guess worth testing.
+  unexplained: ["soften_hard_request", "relax_count_rule"],
 };
 
 /** More short dates than this is a staffing problem, not a bad day. */

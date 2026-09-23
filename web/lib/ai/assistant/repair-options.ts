@@ -253,9 +253,11 @@ const alignOverlappingRequirements: Builder = (ctx, findings) => {
   const when = mine.length === 1 ? first : `${mine.length} days from ${first}`;
   // Raising changes every date the card covers, so only when each one conflicts. With a
   // preferred count the ceiling is that count, which this arm does not change.
+  // One number for every date too: raising to the largest would conflict on the others.
   const canRaise =
     isHeadCount(outer) &&
     outer.preferredNumPeople == null &&
+    mine.every((f) => f.required === needed) &&
     requirementDateIds(ctx.state, outer).every((d) => conflictDates.has(d));
   return makeOption("align_overlapping_requirements", {
     title: canRaise
@@ -294,6 +296,8 @@ const softenHardRequest: Builder = (ctx, findings, situation) => {
       ? hard[0]
       : undefined;
   if (!cell) return null;
+  // Softening one request frees one nurse: offer it only when that closes the gap.
+  if (hit && hit.f.dateId !== null && gapOn(findings, hit.f.dateId) > 1) return null;
   const dateId = toDateId(cell.date, range(ctx));
   const iso = isoOf(ctx, dateId);
   if (!iso) return null;
@@ -359,15 +363,40 @@ const relaxCountRule: Builder = (ctx, findings, situation) => {
     for (const uid of f.capRuleIds) {
       const card = countCard(ctx, uid);
       if (!editableCap(card)) continue;
-      const capped = staffIn(ctx, card.person).length;
-      if (capped < 2) continue;
-      const delta = Math.ceil((f.required - f.available) / capped);
+      const capped = staffIn(ctx, card.person);
+      if (capped.length < 2) continue;
+      // Only nurses free on more days than the cap can use a higher one.
+      const requirement = requirementCard(ctx, f.ruleIds[0]);
+      const dates = requirement ? requirementDateIds(ctx.state, requirement) : [];
+      const cap = capOf(card.expression, card.target, card.weight);
+      const useful = capped.filter((p) => freeDays(ctx, p, dates) > cap).length;
+      if (useful === 0) continue;
+      const delta = Math.ceil((f.required - f.available) / useful);
       if (delta > MAX_CAP_RAISE) continue;
       return relaxOption(ctx, card, delta, f);
     }
   }
   return null;
 };
+
+/**
+ * The dates a person is not on leave or a hard day off.
+ *
+ * ponytail: ignores hard "never" requests, skill-mix bans and date-group cells; the
+ * static check re-proves any option, so an overestimate only costs a weaker option.
+ */
+function freeDays(ctx: Ctx, person: string, dateIds: string[]): number {
+  const away = new Set(
+    ctx.state.reqData
+      .filter(
+        (c) =>
+          (c.kind === "leave" || (c.kind === "off" && c.weight === Infinity)) &&
+          [...expandPersonRefs(c.person, ctx.state)].includes(person),
+      )
+      .map((c) => toDateId(c.date, range(ctx))),
+  );
+  return dateIds.filter((d) => !away.has(d)).length;
+}
 
 function relaxOption(
   ctx: Ctx,
@@ -447,16 +476,21 @@ function narrowedCounts(ctx: Ctx, group: string | null): AssistantCommandV1[] | 
   return ops;
 }
 
+/** The dates a cap_short's requirement covers: a loan adds at most one shift per date. */
+function cappedDateCount(ctx: Ctx, f: StaffingFinding): number {
+  const card = requirementCard(ctx, f.ruleIds[0]);
+  return (card ? requirementDateIds(ctx.state, card).length : 0) || ctx.items.length;
+}
+
 const borrowTemporaryNurse: Builder = (ctx, all) => {
   const findings = gapsOnly(all);
-  if (all.length > 0 && findings.length === 0) return null;
   const dated = findings.filter((f) => f.dateId !== null);
   const capped = findings.find((f) => f.kind === "cap_short");
   const count = dated.length
     ? Math.max(...dated.map((f) => f.required - f.available))
     : capped
-      ? Math.ceil((capped.required - capped.available) / ctx.items.length)
-      : 1;
+      ? Math.ceil((capped.required - capped.available) / cappedDateCount(ctx, capped))
+      : 0;
   if (count < 1 || count > MAX_BORROWED || ctx.items.length === 0) return null;
   const group = skillGroup(ctx, findings);
   if (group === undefined) return null;
@@ -533,7 +567,7 @@ const borrowTemporaryNurse: Builder = (ctx, all) => {
         : []),
     ],
     capabilityId: "staff-list",
-    evidence: findings.length > 0 ? "static_check" : "hypothesis",
+    evidence: "static_check",
   });
 };
 
@@ -541,7 +575,13 @@ const askNurseOnLeave: Builder = (ctx, all) => {
   const findings = gapsOnly(all);
   for (const f of findings) {
     if (f.dateId === null || gapOn(findings, f.dateId) !== 1) continue;
-    const onLeave = f.away.find((a) => a.reason === "leave");
+    // She must be the missing nurse in every finding that day, or her leave is not the gap.
+    const sameDay = findings.filter((g) => g.dateId === f.dateId);
+    const onLeave = f.away.find(
+      (a) =>
+        a.reason === "leave" &&
+        sameDay.every((g) => g.away.some((b) => b.person === a.person && b.reason === "leave")),
+    );
     const iso = isoOf(ctx, f.dateId);
     if (!onLeave || !iso) continue;
     const when = dateLabel(ctx, f.dateId);
@@ -573,9 +613,12 @@ const runOneShort: Builder = (ctx, all) => {
   const findings = gapsOnly(all);
   for (const f of findings) {
     if (f.dateId === null || gapOn(findings, f.dateId) !== 1) continue;
+    // Lowering a requirement closes the gap only if it is part of every finding that day.
+    const sameDay = findings.filter((g) => g.dateId === f.dateId);
     for (const uid of f.ruleIds) {
       const card = requirementCard(ctx, uid);
       if (!card || !isHeadCount(card) || card.requiredNumPeople < 2) continue;
+      if (!sameDay.every((g) => g.ruleIds.includes(uid))) continue;
       const shift = String(flattenShiftTypeRefs(card.shiftType)[0]);
       const n = card.requiredNumPeople;
       const when = dateLabel(ctx, f.dateId);
@@ -665,6 +708,8 @@ export function isSafeOption(state: ScenarioUiState, option: RepairOption): bool
   const loan = option.confirmation === "lending_ward";
   const nurseAsked = option.confirmation === "named_nurse" && option.enforcedBy === "host_question";
   if (option.operations.length > MAX_ASSISTANT_OPERATIONS) return false;
+  if (option.operations.filter((op) => op.type === "add_person").length > MAX_BORROWED)
+    return false;
   return option.operations.every((op) => {
     switch (op.type) {
       case "set_staffing_requirement_people": {
@@ -690,13 +735,15 @@ export function isSafeOption(state: ScenarioUiState, option: RepairOption): bool
           JSON.stringify(op.people.map(String)) === JSON.stringify(asList(card.person).map(String));
         // A cap goes up by 1..MAX_CAP_RAISE, or (for a loan) binds exactly the staff it bound.
         if (samePeople) return editableCap(card) && raise > 0 && raise <= MAX_CAP_RAISE;
-        const staff = staffIn(ctx, card.person);
+        const staff = new Set(staffIn(ctx, card.person));
+        const people = new Set(op.people.map(String));
         return (
           raise === 0 &&
           loan &&
           added.size > 0 &&
-          op.people.length === staff.length &&
-          op.people.every((p) => staff.includes(String(p)))
+          op.people.length === staff.size &&
+          people.size === staff.size &&
+          [...people].every((p) => staff.has(p))
         );
       }
       case "set_shift_request":

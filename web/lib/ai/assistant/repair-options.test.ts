@@ -629,6 +629,177 @@ describe("isSafeOption", () => {
   });
 });
 
+describe("review fixes (2026-09-24)", () => {
+  const allDays = (person: string) =>
+    ["01", "02", "03", "04", "05", "06", "07"].map((d) => leave(person, d));
+
+  it("runs one short only on a requirement in every finding that day", () => {
+    // The RN night is the real gap; day-03 appears only in the day-level finding.
+    const base = SCENARIOS.onlyRnOnLeave();
+    const state = {
+      ...base,
+      cardsByKind: {
+        ...base.cardsByKind,
+        requirements: [
+          ...base.cardsByKind.requirements.filter((r) => r.uid !== "day"),
+          requirement("day-03", "D", 2, { date: ["2026-11-03"] }),
+        ],
+      },
+    };
+    const findings = findStaffingShortfalls(state);
+    expect(findings.map((f) => f.kind)).toEqual(["requirement_short", "day_short"]);
+    expect(rank(state).map((o) => o.repairId)).not.toContain("run_one_short");
+  });
+
+  it("asks a nurse on leave only when she is away in every finding that day", () => {
+    const state = SCENARIOS.onlyRnOnLeave();
+    const [nightShort] = findStaffingShortfalls(state);
+    const dayShort: StaffingFinding = {
+      ...nightShort,
+      shiftTypes: ["D"],
+      ruleIds: ["day"],
+      away: [],
+      skillMix: false,
+    };
+    const ids = rankRepairOptions(state, [nightShort, dayShort], { runInfeasible: false }).map(
+      (o) => o.repairId,
+    );
+    expect(ids).not.toContain("ask_nurse_on_leave");
+  });
+
+  it("does not raise the wider requirement when the inner number varies by date", () => {
+    const state = ward({
+      staff: people("ana", "ben", "cara"),
+      staffGroups: [{ id: "RN", members: ["ana", "ben", "cara"] }],
+      cardsByKind: cards({
+        requirements: [
+          requirement("night-total", "N", 1),
+          requirement("rn-weekday", "N", 2, { qualifiedPeople: ["RN"], date: ["WEEKDAY"] }),
+          requirement("rn-weekend", "N", 3, { qualifiedPeople: ["RN"], date: ["WEEKEND"] }),
+        ],
+      }),
+    });
+    const align = rank(state).find((o) => o.repairId === "align_overlapping_requirements");
+    expect(align?.operations).toEqual([]);
+  });
+
+  it("sizes a capped loan by the dates the requirement covers", () => {
+    const base = SCENARIOS.ruleTooStrict();
+    const state = {
+      ...base,
+      cardsByKind: {
+        ...base.cardsByKind,
+        requirements: [requirement("night-05", "N", 3, { date: ["2026-11-05"] })],
+        counts: [nightCap("max-nights", "Nurses", 0)],
+      },
+    };
+    const borrow = rank(state).find((o) => o.repairId === "borrow_temporary_nurse");
+    expect(borrow?.operations.filter((op) => op.type === "add_person")).toHaveLength(3);
+  });
+
+  it("does not raise a cap for nurses who are away anyway", () => {
+    // ana and ben are on leave all week: only cara and dev can use a higher cap.
+    const state = { ...SCENARIOS.ruleTooStrict(), reqData: [...allDays("ana"), ...allDays("ben")] };
+    expect(rank(state).map((o) => o.repairId)).not.toContain("relax_count_rule");
+  });
+
+  it("softens a hard request only when that alone closes the gap", () => {
+    const never = (person: string) => ({
+      uid: `never-${person}`,
+      person,
+      date: "03",
+      kind: "request" as const,
+      shiftType: "N",
+      weight: -Infinity,
+    });
+    const one = { ...SCENARIOS.onlyRnOnLeave(), reqData: [never("rn1")] };
+    expect(rank(one).map((o) => o.repairId)).toContain("soften_hard_request");
+    const base = SCENARIOS.onlyRnOnLeave();
+    const two = {
+      ...base,
+      staff: [...base.staff, ...people("rn2")],
+      staffGroups: [{ id: "RN", members: ["rn1", "rn2"] }],
+      reqData: [never("rn1"), never("rn2")],
+      cardsByKind: {
+        ...base.cardsByKind,
+        requirements: base.cardsByKind.requirements.map((r) =>
+          r.uid === "night-rn" ? { ...r, requiredNumPeople: 2 } : r,
+        ),
+      },
+    };
+    expect(rank(two).map((o) => o.repairId)).not.toContain("soften_hard_request");
+  });
+
+  it("offers no borrow when the gap is above MAX_BORROWED", () => {
+    const state = ward({
+      staff: people("ana"),
+      cardsByKind: cards({
+        requirements: [requirement("night-05", "N", 5, { date: ["2026-11-05"] })],
+      }),
+    });
+    expect(rank(state).map((o) => o.repairId)).not.toContain("borrow_temporary_nurse");
+  });
+
+  it("isSafeOption refuses a lowered skill mix, duplicate narrowing and too many borrowed", () => {
+    const rn = {
+      ...SCENARIOS.onlyRnOnLeave(),
+      staffGroups: [{ id: "RN", members: ["rn1", "en1"] }],
+    };
+    const twoRn = {
+      ...rn,
+      cardsByKind: {
+        ...rn.cardsByKind,
+        requirements: rn.cardsByKind.requirements.map((r) =>
+          r.uid === "night-rn" ? { ...r, requiredNumPeople: 2, date: ["2026-11-03"] } : r,
+        ),
+      },
+    };
+    expect(
+      isSafeOption(
+        twoRn,
+        option({
+          operations: [
+            { type: "set_staffing_requirement_people", ruleId: "night-rn", requiredNumPeople: 1 },
+          ],
+        }),
+      ),
+    ).toBe(false);
+
+    const loan = { confirmation: "lending_ward", enforcedBy: "host_question" } as const;
+    const add = (n: number) => ({
+      type: "add_person" as const,
+      name: `Borrowed nurse ${n}`,
+      groups: [],
+    });
+    const narrow = {
+      type: "edit_count_rule" as const,
+      ruleId: "max-nights",
+      description: "At most 1 nights",
+      people: ["ana", "ana", "ben", "cara"],
+      shiftTypes: ["N"],
+      dates: ["ALL"],
+      expression: "x <= T" as const,
+      target: 1,
+      weight: "infinity",
+    };
+    const capped = SCENARIOS.ruleTooStrict();
+    expect(isSafeOption(capped, option({ ...loan, operations: [add(1), narrow] }))).toBe(false);
+    expect(
+      isSafeOption(
+        capped,
+        option({
+          ...loan,
+          operations: [add(1), { ...narrow, people: ["ana", "ben", "cara", "dev"] }],
+        }),
+      ),
+    ).toBe(true);
+    expect(isSafeOption(capped, option({ ...loan, operations: [1, 2, 3, 4].map(add) }))).toBe(
+      false,
+    );
+    expect(isSafeOption(capped, option({ ...loan, operations: [1, 2, 3].map(add) }))).toBe(true);
+  });
+});
+
 describe("explaining in ward language", () => {
   it("names the day, shift, numbers and who is away", () => {
     const state = SCENARIOS.onlyRnOnLeave();

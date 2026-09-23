@@ -59,6 +59,11 @@ describe("repair catalogue", () => {
     }
   });
 
+  it("guesses only the spec's repairs when the cause is unknown", () => {
+    // Spec "Ranking": Unexplained is 1, 3 as hypotheses. A blind borrow is not a guess to test.
+    expect(REPAIR_ORDER.unexplained).toEqual(["soften_hard_request", "relax_count_rule"]);
+  });
+
   it("asks a named nurse only through a host question", () => {
     for (const repair of REPAIRS) {
       if (
