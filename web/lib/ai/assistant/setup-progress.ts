@@ -27,7 +27,7 @@ export interface SetupProgressInput {
     | "rulesTotal"
     | "shiftRequestsCount"
   >;
-  /** A roster has been generated (Home's own Generate rule: run.phase === "complete"). */
+  /** A roster has been generated (isRosterGenerated, Home's own Generate rule). */
   runComplete: boolean;
   /** Shift/date pairs with no staffing requirement (computeCoverageWarnings items). */
   uncoveredShifts: readonly string[];

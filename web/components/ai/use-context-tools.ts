@@ -32,6 +32,7 @@ import { computeScenarioSummary } from "@/components/home/scenario-summary";
 import { computeCoverageWarnings } from "@/components/requirements/requirements-model";
 import { findStaffingShortfalls } from "@/lib/rules/shortfalls";
 import { deriveSetupProgress, type SetupProgress } from "@/lib/ai/assistant/setup-progress";
+import { isRosterGenerated } from "@/lib/optimize/roster-generated";
 
 const DOMAINS = ["dates", "staff", "shifts", "rules", "requests"] as const;
 type Domain = (typeof DOMAINS)[number];
@@ -132,12 +133,12 @@ export function useModelVisibleTools(agentId: string, turnEpoch: number): void {
 }
 
 /** Setup progress over the live committed projection. Never mutates. */
-function readSetupProgress(): SetupProgress {
+export function readSetupProgress(): SetupProgress {
   const scenario = pickScenario(useScenarioStore.getState());
   const coverage = computeCoverageWarnings(scenario, scenario.cardsByKind.requirements);
   return deriveSetupProgress({
     summary: computeScenarioSummary(scenario),
-    runComplete: useHotStore.getState().run.phase === "complete",
+    runComplete: isRosterGenerated(useHotStore.getState().runView),
     uncoveredShifts: coverage.undefinedSection?.items ?? [],
     knownGaps: findStaffingShortfalls(scenario).length,
   });

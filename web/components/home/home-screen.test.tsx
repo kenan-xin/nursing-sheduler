@@ -5,7 +5,9 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { HomeScreen } from "./home-screen";
 import { useModeStore } from "@/lib/mode/mode";
 import { useNavGuardStore } from "@/components/shell/nav-guard-store";
-import { scenarioCommands } from "@/lib/store";
+import { scenarioCommands, useHotStore } from "@/lib/store";
+import { INITIAL_OPTIMIZE_RUN_VIEW } from "@/lib/optimize/run-view";
+import { getRosterCaptureGate } from "@/lib/optimize/roster-capture-app";
 import { resetScenarioForTest } from "@/lib/store/test-authority";
 
 // R1 — the v2 re-skin of Home. These are the facts the re-skin can silently
@@ -231,5 +233,31 @@ describe("HomeScreen — guarded navigation from the header CTA", () => {
       useNavGuardStore.getState().confirm();
     });
     expect(push).toHaveBeenCalledWith("/optimize-and-export");
+  });
+});
+
+describe("HomeScreen — Generate step reads the Optimise run", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    useHotStore.getState().resetRunView();
+  });
+
+  it("is Done only when a feasible run's roster was saved", async () => {
+    useHotStore.getState().setRunView({
+      ...INITIAL_OPTIMIZE_RUN_VIEW,
+      lifecycle: "completed",
+      outcome: "optimal",
+      jobId: "job-1",
+    });
+    render(<HomeScreen />);
+    const card = () => screen.getByTestId("home-card-/optimize-and-export");
+    expect(card().getAttribute("data-status")).not.toBe("done");
+
+    cleanup();
+    vi.spyOn(getRosterCaptureGate(), "getState").mockReturnValue({
+      status: "committed",
+    } as ReturnType<ReturnType<typeof getRosterCaptureGate>["getState"]>);
+    render(<HomeScreen />);
+    expect(card().getAttribute("data-status")).toBe("done");
   });
 });

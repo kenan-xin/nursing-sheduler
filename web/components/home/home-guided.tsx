@@ -16,10 +16,10 @@
 //
 // Completion is honest (cold-review Major): the five SETUP steps are done from
 // their real scenario data (Dates only for a VALID range); the sixth GENERATE
-// step is done only from an actual optimize run success — never merely because
-// the prerequisites are met. The run flow is T16, so until it lands the run stays
-// `idle` and Generate is "current" (ready to run) when prerequisites are met, and
-// "to do" otherwise — it can never show ✓ Done without a generated roster.
+// step is done only when the Optimise run in view found a roster and the app saved
+// that roster (`isRosterGenerated`) — never merely because the prerequisites are met.
+// Otherwise Generate is "current" (ready to run) when prerequisites are met, and
+// "to do" otherwise — it can never show Done without a generated roster.
 
 import {
   GUIDED_STEP_COUNT,
@@ -27,6 +27,8 @@ import {
   type NavItem,
 } from "@/components/shell/nav-config";
 import { useHotStore } from "@/lib/store";
+import { isRosterGenerated } from "@/lib/optimize/roster-generated";
+import { useRosterCapture } from "@/lib/optimize/use-roster-capture";
 import type { ScenarioSummary, StepReadiness } from "./scenario-summary";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -141,9 +143,10 @@ export function HomeGuided({
   summary: ScenarioSummary;
   onNavigate: (path: string) => void;
 }) {
-  // Generate completion is a run fact, not a scenario fact: a roster exists only
-  // after a successful optimize run. T16 owns that flow; until then it is `idle`.
-  const generateComplete = useHotStore((s) => s.run.phase === "complete");
+  // Generate completion is a run fact, not a scenario fact: the run in view found a
+  // roster and the app saved it. The capture subscription re-renders on its commit.
+  useRosterCapture();
+  const generateComplete = isRosterGenerated(useHotStore((s) => s.runView));
 
   const done = STEPS.map((s) => (s.readyKey ? summary.ready[s.readyKey] : generateComplete));
   const currentIndex = done.findIndex((d) => !d);

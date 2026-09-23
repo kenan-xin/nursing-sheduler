@@ -20,7 +20,7 @@ import { deriveOptimizeReadiness } from "@/lib/optimize/optimize-readiness";
 import { terminalHeading } from "@/lib/optimize/run-display";
 import type { OptimizeRunView } from "@/lib/optimize/run-view";
 import { isRunLive, useRunRequestStore, type RunRequestOutcome } from "@/lib/optimize/run-request";
-import { getRosterCaptureGate } from "@/lib/optimize/roster-capture-app";
+import { isRosterSaved } from "@/lib/optimize/roster-generated";
 import { assistantActions } from "@/lib/ai/assistant/store";
 import { assertTurnAuthority, SUPERSEDED } from "./turn-authority";
 
@@ -189,9 +189,7 @@ export function useOptimizeTools(agentId: string, turnEpoch: number): void {
         "never starts or changes a run.",
       handler: async () => {
         const view = useHotStore.getState().runView;
-        const rosterSaved =
-          view.jobId !== null && getRosterCaptureGate().getState(view.jobId).status === "committed";
-        return summarizeOptimizeRun(view, rosterSaved, useRunRequestStore.getState().last);
+        return summarizeOptimizeRun(view, isRosterSaved(view), useRunRequestStore.getState().last);
       },
     },
     [agentId, turnEpoch],
