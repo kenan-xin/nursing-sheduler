@@ -1016,6 +1016,33 @@ describe("violatesSafetyFloor (any operations, including model-written candidate
     weight: "infinity",
     ...patch,
   });
+  const restEdit = (patch: Record<string, unknown>) => ({
+    type: "edit_succession_rule",
+    ruleId: "no-double-night",
+    description: "No two nights in a row",
+    people: ["Nurses"],
+    pattern: ["N", "N"],
+    dates: ["ALL"],
+    weight: "-infinity",
+    ...patch,
+  });
+  const dayEdit = (patch: Record<string, unknown>) => ({
+    type: "edit_staffing_requirement",
+    ruleId: "day",
+    description: "day",
+    shiftType: "D",
+    qualifiedPeople: ["ALL"],
+    dates: ["ALL"],
+    requiredNumPeople: 1,
+    ...patch,
+  });
+  const minimum: ScenarioUiState = {
+    ...capped,
+    cardsByKind: {
+      ...capped.cardsByKind,
+      counts: capped.cardsByKind.counts.map((c) => ({ ...c, expression: "x >= T", target: 2 })),
+    },
+  };
   const BROKEN: [string, ScenarioUiState, unknown[], RegExp][] = [
     [
       "rest rule off",
@@ -1052,6 +1079,14 @@ describe("violatesSafetyFloor (any operations, including model-written candidate
       ],
       /rest rule/,
     ],
+    ["rest rule narrowed to one date", rest, [restEdit({ dates: ["2026-11-03"] })], /rest rule/],
+    [
+      "rest rule scoped to this roster's dates only",
+      rest,
+      [restEdit({ dates: [1, 2, 3, 4, 5, 6, 7].map((d) => `2026-11-0${d}`) })],
+      /rest rule/,
+    ],
+    ["rest rule pattern changed", rest, [restEdit({ pattern: ["N", "N", "N"] })], /rest rule/],
     [
       "supervision removed",
       withCovering,
@@ -1109,6 +1144,11 @@ describe("violatesSafetyFloor (any operations, including model-written candidate
     ["limit made soft", capped, [cap({ weight: "10" })], /limit/],
     ["limit +3", capped, [cap({ target: 4 })], /limit/],
     ["limit dropped for a nurse", capped, [cap({ people: ["ana", "ben", "cara"] })], /limit/],
+    ["limit moved to another shift", capped, [cap({ shiftTypes: ["D"] })], /limit/],
+    ["limit narrowed to one date", capped, [cap({ dates: ["2026-11-03"] })], /limit/],
+    ["minimum lowered", minimum, [cap({ expression: "x >= T", target: 1 })], /limit/],
+    ["head count dropped on most dates", rn, [dayEdit({ dates: ["2026-11-03"] })], /to 0/],
+    ["head count moved to another shift", rn, [dayEdit({ shiftType: "N" })], /to 0/],
     [
       "leave cleared with nobody asked",
       rn,
@@ -1132,6 +1172,10 @@ describe("violatesSafetyFloor (any operations, including model-written candidate
     const ok = (state: ScenarioUiState, ops: unknown[], leaveAsked = false) =>
       violatesSafetyFloor(state, ops as Op[], { leaveAsked });
     expect(ok(capped, [cap({ target: 3 })])).toBeNull();
+    expect(ok(minimum, [cap({ expression: "x >= T", target: 3 })])).toBeNull();
+    // The same dates, written another way, are no change.
+    expect(ok(rest, [restEdit({ description: "Rest after nights" })])).toBeNull();
+    expect(ok(rn, [dayEdit({ requiredNumPeople: 2 })])).toBeNull();
     expect(
       ok(rn, [{ type: "set_staffing_requirement_people", ruleId: "day", requiredNumPeople: 2 }]),
     ).toBeNull();

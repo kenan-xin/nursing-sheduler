@@ -31,6 +31,7 @@ import {
 } from "@/lib/rules/shortfalls";
 import type {
   CountCard,
+  DateRef,
   OrdinaryCountCard,
   PersonRef,
   RequirementCard,
@@ -220,6 +221,12 @@ function labelAt(card: EditableCount, target: number): string {
   return target === card.target ? label : label.replace(stated, `$1${target}`);
 }
 
+/** Span ids become ISO (the card editor's form); chips and group ids stay as written. */
+const formDate = (ctx: Ctx, ref: DateRef) => {
+  const key = String(ref);
+  return ctx.items.find((i) => i.id === key || i.iso === key)?.iso ?? key;
+};
+
 function editCount(
   ctx: Ctx,
   card: EditableCount,
@@ -232,11 +239,7 @@ function editCount(
     description: labelAt(card, target),
     people,
     shiftTypes: asList(card.countShiftTypes).map(String),
-    // Span ids become ISO (the card editor's form); chips and group ids stay as written.
-    dates: asList(card.countDates).map((d) => {
-      const key = String(d);
-      return ctx.items.find((i) => i.id === key || i.iso === key)?.iso ?? key;
-    }),
+    dates: asList(card.countDates).map((d) => formDate(ctx, d)),
     expression: card.expression as (typeof COUNT_EXPRESSIONS)[number],
     target,
     weight: weightText(card.weight),
@@ -739,6 +742,20 @@ export function rankRepairOptions(
 
 const sameRefs = (a: unknown, b: unknown) =>
   JSON.stringify(asList(a).map(String)) === JSON.stringify(asList(b).map(String));
+const sameSet = (a: unknown, b: unknown) =>
+  JSON.stringify(asList(a).map(String).sort()) === JSON.stringify(asList(b).map(String).sort());
+/**
+ * The same date refs, a span id and its ISO date being one, and no refs meaning ALL.
+ * Refs, not the dates they cover now: ALL and "every date of this roster" differ next month.
+ */
+const sameDates = (
+  ctx: Ctx,
+  a: DateRef | DateRef[] | undefined,
+  b: DateRef | DateRef[] | undefined,
+) => {
+  const refs = (d: typeof a) => (d == null ? ["ALL"] : asList(d).map((r) => formDate(ctx, r)));
+  return sameSet(refs(a), refs(b));
+};
 
 /**
  * The SAFETY_FLOOR line these operations break, or null. A DENYLIST, so it can judge
@@ -789,19 +806,28 @@ export function violatesSafetyFloor(
         case "edit_succession_rule": {
           const card = ctx.state.cardsByKind.successions.find((c) => c.uid === op.ruleId);
           if (!card || Number.isFinite(card.weight)) return null;
-          const same = op.weight === weightText(card.weight) && sameRefs(op.people, card.person);
+          // Weight, people, pattern and dates all stay: narrowing any of them relaxes it.
+          const same =
+            op.weight === weightText(card.weight) &&
+            sameRefs(op.people, card.person) &&
+            sameRefs(op.pattern, card.pattern) &&
+            sameDates(ctx, op.dates, card.date);
           return same ? null : rest;
         }
         case "set_staffing_requirement_people":
           return lowered(op.ruleId, op.requiredNumPeople);
         case "edit_staffing_requirement": {
           const card = requirementCard(ctx, op.ruleId);
-          if (card && isSkillMix(card)) {
-            const same =
-              sameRefs(op.qualifiedPeople, card.qualifiedPeople) &&
-              sameRefs(op.shiftType, card.shiftType) &&
-              sameRefs(op.dates, card.date);
-            if (!same) return skillMix;
+          if (card) {
+            const sameScope =
+              sameRefs(op.shiftType, card.shiftType) && sameDates(ctx, op.dates, card.date);
+            if (
+              isSkillMix(card) &&
+              !(sameScope && sameRefs(op.qualifiedPeople, card.qualifiedPeople))
+            )
+              return skillMix;
+            // A shift or date it no longer covers is a requirement set to 0 there.
+            if (!sameScope) return zero;
           }
           return lowered(op.ruleId, op.requiredNumPeople);
         }
@@ -812,8 +838,16 @@ export function violatesSafetyFloor(
           if (!card || typeof card.target !== "number") return null;
           if (op.weight !== weightText(card.weight) || op.expression !== card.expression)
             return limit;
+          if (
+            !sameSet(op.shiftTypes, card.countShiftTypes) ||
+            !sameDates(ctx, op.dates, card.countDates)
+          )
+            return limit;
           const cap = capOf(String(card.expression), card.target, card.weight);
           if (Number.isFinite(cap) && op.target - card.target > MAX_CAP_RAISE) return limit;
+          // A minimum ("x = T" is one too) never goes down.
+          const floor = !Number.isFinite(cap) || card.expression === "x = T";
+          if (floor && op.target < card.target) return limit;
           // Everyone it bound among the ward's own staff stays bound.
           const after = new Set(staffIn(ctx, op.people));
           return staffIn(ctx, card.person).every((p) => after.has(p)) ? null : limit;
