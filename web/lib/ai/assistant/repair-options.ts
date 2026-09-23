@@ -656,6 +656,8 @@ const runOneShort: Builder = (ctx, all) => {
       const card = requirementCard(ctx, uid);
       if (!card || !isHeadCount(card) || card.requiredNumPeople < 2) continue;
       if (!sameDay.every((g) => g.ruleIds.includes(uid))) continue;
+      // One short may not drop the shift below the skill mix it must hold.
+      if (card.requiredNumPeople - 1 < skillMixOn(ctx, card)) continue;
       const shift = String(flattenShiftTypeRefs(card.shiftType)[0]);
       const n = card.requiredNumPeople;
       const when = dateLabel(ctx, f.dateId);

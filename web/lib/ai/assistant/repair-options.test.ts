@@ -870,6 +870,30 @@ describe("review fixes (2026-09-24)", () => {
     ]);
   });
 
+  it("never runs a shift short below the skill mix it must hold", () => {
+    // The 5th: 3 on nights (all 3 RNs) + 2 on days from 4 nurses. Night one short
+    // would be 2, under the 3 RNs that night needs.
+    const state = ward({
+      staff: people("rn1", "rn2", "rn3", "en1"),
+      staffGroups: [{ id: "RN", members: ["rn1", "rn2", "rn3"] }],
+      cardsByKind: cards({
+        requirements: [
+          requirement("day", "D", 2),
+          requirement("night-05", "N", 3, { date: ["2026-11-05"] }),
+          requirement("night-rn", "N", 3, { date: ["2026-11-05"], qualifiedPeople: ["RN"] }),
+        ],
+      }),
+    });
+    const lowerNight = option({
+      operations: [
+        { type: "set_staffing_requirement_people", ruleId: "night-05", requiredNumPeople: 2 },
+      ],
+    });
+    expect(isSafeOption(state, lowerNight)).toBe(false);
+    const short = rank(state).find((o) => o.repairId === "run_one_short");
+    expect(short).toMatchObject({ operations: [], title: expect.stringMatching(/^Run D /) });
+  });
+
   it("offers no borrow when the gap is above MAX_BORROWED", () => {
     const state = ward({
       staff: people("ana"),
