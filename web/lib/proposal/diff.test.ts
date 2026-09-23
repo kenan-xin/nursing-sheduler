@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 import { getCapabilityRegistry } from "@/lib/capability/registry";
 import { applyAssistantCommands } from "./operations";
 import { deriveProposalDiff, SCOPE_LABEL, type DiffScope } from "./diff";
-import { octoberWard, proposalScenario } from "./test-support";
+import { octoberWard, peopleScenario, proposalScenario } from "./test-support";
 
 describe("deriveProposalDiff", () => {
   it("separates what was asked for from what the app will do as a result", () => {
@@ -260,6 +260,48 @@ describe("deriveProposalDiff", () => {
       },
     ]);
     expect(diff.cascade).toEqual([]);
+  });
+
+  it("shows the borrowed-nurse batch (add_person + set_off_request) as one direct change", () => {
+    // The new person's id (their trimmed name) is usable by a later command in the
+    // SAME batch -- the Preview must show both the new staff row and every day-off
+    // cell as direct (asked-for), never as a cascade the person didn't request.
+    const before = peopleScenario();
+    const float = "Float RN (Ward 5)";
+    const commands = [
+      { type: "add_person" as const, name: float, groups: ["RN"] },
+      {
+        type: "set_off_request" as const,
+        personId: float,
+        startDate: "2026-10-01",
+        endDate: "2026-10-11",
+        weight: "must" as const,
+      },
+      {
+        type: "set_off_request" as const,
+        personId: float,
+        startDate: "2026-10-15",
+        endDate: "2026-10-31",
+        weight: "must" as const,
+      },
+    ];
+    const applied = applyAssistantCommands(before, commands);
+    expect(applied.ok).toBe(true);
+    if (!applied.ok) return;
+
+    const diff = deriveProposalDiff(before, applied.next, commands);
+    expect(diff.cascade).toEqual([]);
+
+    const person = diff.direct.find((entry) => entry.key === `person:"${float}"`);
+    expect(person).toMatchObject({ scope: "staff-list", kind: "created", after: float });
+
+    const cellKeys = diff.direct.filter((entry) => entry.scope === "leave-and-requests");
+    expect(cellKeys).toHaveLength(28);
+    expect(cellKeys.every((entry) => entry.after === "Must have the day off")).toBe(true);
+
+    expect(diff.capabilityIds).toEqual(
+      expect.arrayContaining(["staff-list", "leave-and-requests"]),
+    );
   });
 });
 

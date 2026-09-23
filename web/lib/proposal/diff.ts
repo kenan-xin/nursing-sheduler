@@ -410,6 +410,13 @@ function directKeys(commands: readonly AssistantCommandV1[], after: ScenarioUiSt
         }
         break;
       }
+      case "add_person": {
+        // The host trims the name (Staff row rule), so the key must too.
+        const name = command.name.trim();
+        keys.add(`person:${stableStringify(name)}`);
+        for (const groupId of command.groups) keys.add(`peoplegroup:${groupId}`);
+        break;
+      }
     }
   }
   return keys;

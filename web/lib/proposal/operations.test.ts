@@ -861,3 +861,52 @@ describe("Staff-screen arms", () => {
     expect(unknown.ok).toBe(false);
   });
 });
+
+// A nurse borrowed from another ward needs no dedicated arm: `add_person` creates
+// them, then `set_off_request` at weight "must" (a hard pin -- the same quick paint
+// the Requests screen's OFF button drives, `lib/store/paint-fold.ts`) marks them off
+// everywhere except the days they actually cover. `add_person`'s id is the trimmed
+// name, so a later command in the same batch can already reference it.
+describe("borrowed-nurse batch: add_person + set_off_request", () => {
+  it("borrows one RN from Ward 5 for 12-14 Oct in one batch", () => {
+    const float = "Float RN (Ward 5)";
+    const commands = [
+      { type: "add_person" as const, name: float, groups: ["RN"] },
+      {
+        type: "set_off_request" as const,
+        personId: float,
+        startDate: "2026-10-01",
+        endDate: "2026-10-11",
+        weight: "must" as const,
+      },
+      {
+        type: "set_off_request" as const,
+        personId: float,
+        startDate: "2026-10-15",
+        endDate: "2026-10-31",
+        weight: "must" as const,
+      },
+    ];
+    const result = applyAssistantCommands(peopleScenario(), commands);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.next.staff.at(-1)).toMatchObject({ id: float, history: [] });
+    expect(result.next.staffGroups[0].members).toEqual(["ana", 7, float]);
+
+    const cells = result.next.reqData.filter((cell) => cell.person === float);
+    expect(cells).toHaveLength(28);
+    expect(cells.every((cell) => cell.kind === "off" && cell.weight === Infinity)).toBe(true);
+    const offDays = new Set(cells.map((cell) => cell.date));
+    for (const day of ["12", "13", "14"]) expect(offDays.has(day), day).toBe(false);
+    for (const day of ["01", "11", "15", "31"]) expect(offDays.has(day), day).toBe(true);
+
+    // Every cell has a unique durable uid (Workspace emission throws otherwise).
+    const uids = result.next.reqData.map((cell) => cell.uid);
+    expect(uids.every(Boolean)).toBe(true);
+    expect(new Set(uids).size).toBe(uids.length);
+
+    // Deterministic: Apply re-derives the same document the Preview showed.
+    expect(applyAssistantCommands(peopleScenario(), commands)).toEqual(result);
+  });
+});

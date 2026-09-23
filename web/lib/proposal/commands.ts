@@ -29,9 +29,13 @@
 // `add_people_group`, `edit_people_group`, `remove_people_group`) compile to the
 // Staff screen's own primitives over `peopleDescriptor` (`addItem`, `renameItem`,
 // `deleteItem`, `addGroup`, `renameGroup`, `updateGroupFields`, `deleteGroup`,
-// `writeItemGroups`, `writeGroupMembers`). `mark_person_off` is the Requests
-// screen's quick paint of OFF at weight Infinity across a run of days. Together
-// they express a nurse borrowed from another ward for a few dates.
+// `writeItemGroups`, `writeGroupMembers`). A nurse borrowed from another ward is
+// expressed with EXISTING arms: `add_person` for the float nurse, then
+// `set_off_request` with weight `"must"` painted over the surrounding dates so they
+// are only available on the days they are actually here (see
+// `operations.test.ts`'s "borrows one RN" case). `add_person`'s new person can be
+// referenced by later commands in the same batch as `PersonRef` = their trimmed name
+// (`applyAddPerson` derives the id the Staff row does, via `validateFullEditId`).
 //
 // EVERY FIELD IS A TARGET, NEVER A DOCUMENT. There is no arm that accepts scenario
 // content, a patch, a card body, or a free-form object: the model names WHICH
@@ -365,7 +369,9 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
       .string()
       .describe(
         'The person\'s name as the staff list should show it, e.g. "Float RN (Ward 5)". Must ' +
-          "not match any existing person or staff group, and must not be ALL.",
+          "not match any existing person or staff group, and must not be ALL. Their trimmed " +
+          "name becomes their id -- use it as personId in a later command in the same batch, " +
+          "e.g. to mark a borrowed nurse off outside the days they cover.",
       ),
     groups: z
       .array(z.string())
