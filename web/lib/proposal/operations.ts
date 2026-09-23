@@ -335,7 +335,7 @@ function applyAddShiftType(
   // The same derived value the working-time sub-form produces (`deriveValue` in
   // `working-time-fields.tsx`): rest 0 is stored as absent, paid = span - rest. An
   // invalid rest leaves duration unset, and the validator reports the rest itself.
-  const restMinutes = command.restMinutes || undefined;
+  const restMinutes = command.restMinutes === 0 ? undefined : command.restMinutes;
   const workingTime = {
     startTime: command.startTime,
     endTime: command.endTime,
