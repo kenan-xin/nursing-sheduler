@@ -22,7 +22,7 @@ import {
 } from "@/lib/scenario";
 import type { TransferOption } from "@/components/entity-editor/transfer-list";
 import type { DateScopeOption, DateScopeItem } from "@/components/card-editor/date-scope-field";
-import { isValidWeightValue, type WeightFieldValue } from "@/components/card-editor/weight-field";
+import { isValidWeightValue, type WeightFieldValue } from "@/components/card-editor/weight-value";
 import { deriveDateGroups, generateDateItems } from "@/lib/dates";
 
 /** Verbatim validation messages (spec 05 "Shift Type Successions" validation table). */
