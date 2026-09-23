@@ -119,7 +119,11 @@ describe("deriveProposalDiff", () => {
 
     const night = diff.direct.find((entry) => entry.key === 'shift:"N"');
     expect(night?.kind).toBe("created");
-    expect(night?.after).toBe("Night shift · 20:00–08:30 (ends next day)");
+    // Rest changes the stored (and model-filled) duration, so the Preview must say so.
+    expect(night?.after).toBe(
+      "Night shift · 20:00–08:30 (ends next day) · 60 min break (11h 30m paid)",
+    );
+    // Rest 0 is stored as absent, exactly as the Shifts page stores it -- no break text.
     expect(diff.direct.find((entry) => entry.key === 'shift:"am1"')?.after).toBe(
       "am1 · 08:00–15:00",
     );

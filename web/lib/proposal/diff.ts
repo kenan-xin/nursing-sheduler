@@ -120,13 +120,29 @@ function describeCoordinateCells(cells: readonly UiRequestCell[]): string | null
   return cells.map(describeCell).sort().join(", ");
 }
 
-/** A shift as a ward manager reads it: name, then clock times, overnight made explicit. */
+/** "690" minutes -> "11h 30m"; a whole number of hours drops the minutes. */
+function renderPaidMinutes(minutes: number): string {
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return mins === 0 ? `${hours}h` : `${hours}h ${mins}m`;
+}
+
+/**
+ * A shift as a ward manager reads it: name, then clock times, overnight made
+ * explicit. `restMinutes` changes the stored (and model-filled) paid duration, so a
+ * shift with a break also states the break and, when the paid minutes are already at
+ * hand, what they come to -- the user must see it before Apply, not discover it later.
+ */
 function renderShift(shift: UiShiftType): string {
   const name = shift.description?.trim() || `${shift.id}`;
   if (!shift.startTime || !shift.endTime) return name;
   // Grid-valid "HH:MM" strings compare correctly as text.
   const overnight = shift.endTime < shift.startTime ? " (ends next day)" : "";
-  return `${name} · ${shift.startTime}–${shift.endTime}${overnight}`;
+  const clocks = `${name} · ${shift.startTime}–${shift.endTime}${overnight}`;
+  if (!shift.restMinutes) return clocks;
+  const paid =
+    shift.durationMinutes != null ? ` (${renderPaidMinutes(shift.durationMinutes)} paid)` : "";
+  return `${clocks} · ${shift.restMinutes} min break${paid}`;
 }
 
 function ruleTitle(card: { description?: string; uid: string }, kind: keyof CardsByKind): string {
