@@ -413,6 +413,8 @@ export function rosterDatesBetween(
         "This schedule has no roster period yet, so leave and request dates cannot be checked.",
     };
   }
+  // The wire schema's regex only checks YYYY-MM-DD shape, so it lets impossible
+  // dates like 2026-02-30 through; isValidIso catches those here.
   if (!isValidIso(start) || !isValidIso(end)) {
     return { ok: false, code: "invalid_value", message: "Those are not real calendar dates." };
   }

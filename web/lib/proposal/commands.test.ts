@@ -226,6 +226,16 @@ describe("parseAssistantCommands", () => {
           endDate: "2026-10-21",
         },
       ],
+      // Fractional weight: a weight is a whole number, or "must"/"never".
+      [
+        {
+          type: "set_off_request",
+          personId: "Ben",
+          startDate: "2026-10-21",
+          endDate: "2026-10-21",
+          weight: 2.5,
+        },
+      ],
       // Content alongside targets: a leave type or note is not a field.
       [
         {

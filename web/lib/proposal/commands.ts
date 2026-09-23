@@ -172,8 +172,11 @@ const startDateSchema = isoDateSchema.describe(
 const endDateSchema = isoDateSchema.describe(
   "Last calendar date, YYYY-MM-DD, inclusive. The same as startDate for a single day.",
 );
-/** Shape only: a finite number or a hard pin. The host maps "must"/"never" to ±Infinity. */
-const requestWeightSchema = z.union([z.number(), z.enum(["must", "never"])]);
+/** Shape only: a finite whole number or a hard pin. The host maps "must"/"never" to
+ *  ±Infinity. Whole because the backend and `zWeight` both reject fractional weights. */
+const requestWeightSchema = z.union([z.number().int(), z.enum(["must", "never"])], {
+  error: 'a weight is a whole number, or "must"/"never"',
+});
 
 /**
  * The wire schema for one command.

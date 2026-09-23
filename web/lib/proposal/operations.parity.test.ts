@@ -374,6 +374,7 @@ describe("leave and request arms are the Requests page's quick paint", () => {
       days(14, 14),
     ],
     [
+      // Crosses Ben's day off on the 21st -- covers the precedence skip.
       {
         type: "set_shift_request",
         personId: "Ben",

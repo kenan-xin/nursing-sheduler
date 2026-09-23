@@ -345,6 +345,22 @@ describe("the command arms the provider is actually shown", () => {
     }
   });
 
+  it("tells the model, on the wire, to check with the person before clearing their leave", () => {
+    // `clear_requests`' guidance -- ask the person first, never decide for them -- is the
+    // one thing standing between the model and silently discarding approved leave. It is
+    // only worth anything if the provider is actually shown it.
+    const operations = child(
+      child(child(wire.get("prepare_scenario_change"), "parameters"), "properties"),
+      "operations",
+    );
+    const arm = branches(child(operations, "items")).find(
+      (candidate) =>
+        pinnedValue(child(child(candidate, "properties"), "type")) === "clear_requests",
+    );
+    if (!arm) throw new Error("clear_requests arm missing from the wire");
+    expect(arm.description).toContain("never as a decision");
+  });
+
   it("leaves the parameterless and flat-parameter tools exactly as they were", () => {
     // The flat tools worked live throughout, so the repair has to be provably confined:
     // an enum that was already an enum still reaches the wire as one.

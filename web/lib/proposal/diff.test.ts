@@ -200,6 +200,33 @@ describe("deriveProposalDiff", () => {
     expect(diff.needsReview).toEqual([]);
   });
 
+  it("reads a weight-0 day-off request as a plain ask, not a weighted one", () => {
+    const before = octoberWard();
+    const commands = [
+      {
+        type: "set_off_request" as const,
+        personId: "Chris",
+        startDate: "2026-10-01",
+        endDate: "2026-10-01",
+        weight: 0,
+      },
+    ];
+    const applied = applyAssistantCommands(before, commands);
+    if (!applied.ok) throw new Error("fixture should apply");
+
+    const diff = deriveProposalDiff(before, applied.next, commands);
+    expect(diff.direct).toEqual([
+      {
+        key: 'cell:"Chris"|"01"',
+        scope: "leave-and-requests",
+        label: "Chris on 01",
+        before: null,
+        after: "Asked for the day off",
+        kind: "created",
+      },
+    ]);
+  });
+
   it("shows a cancelled leave and the night it frees, as one asked-for change", () => {
     const before = octoberWard();
     const commands = [

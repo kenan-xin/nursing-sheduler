@@ -118,6 +118,7 @@ function describeCell(cell: UiRequestCell): string {
         ];
   if (cell.weight === Infinity) return must;
   if (cell.weight === -Infinity) return never;
+  if (cell.weight === 0 && cell.kind === "off") return "Asked for the day off";
   return cell.weight < 0 ? `${avoids} (weight ${cell.weight})` : `${wants} (weight ${cell.weight})`;
 }
 
