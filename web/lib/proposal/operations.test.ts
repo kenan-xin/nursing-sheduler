@@ -7,8 +7,9 @@
 // detail -- so the CODE is asserted, not the prose.
 
 import { describe, expect, it } from "vitest";
+import type { ScenarioUiState } from "@/lib/scenario";
 import { applyAssistantCommand, applyAssistantCommands } from "./operations";
-import { proposalScenario, ruleWardScenario } from "./test-support";
+import { octoberWard, proposalScenario, ruleWardScenario } from "./test-support";
 
 describe("set_roster_range", () => {
   it("purges references to dates that leave the range", () => {
@@ -410,6 +411,209 @@ describe("add_shift_type / add_shift_group", () => {
     );
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.next.shiftGroups.at(-1)?.members).toEqual(["Day", "Night"]);
+  });
+});
+
+describe("leave and request arms", () => {
+  const leave = (personId: string | number, startDate: string, endDate = startDate) => ({
+    type: "add_leave" as const,
+    personId,
+    startDate,
+    endDate,
+  });
+  const off = (
+    personId: string | number,
+    startDate: string,
+    endDate: string,
+    weight: number | "must" | "never",
+  ) => ({ type: "set_off_request" as const, personId, startDate, endDate, weight });
+  const wants = (
+    personId: string | number,
+    shiftType: string,
+    startDate: string,
+    endDate: string,
+    weight: number | "must" | "never",
+  ) => ({ type: "set_shift_request" as const, personId, shiftType, startDate, endDate, weight });
+  const clear = (personId: string | number, startDate: string, endDate = startDate) => ({
+    type: "clear_requests" as const,
+    personId,
+    startDate,
+    endDate,
+  });
+  /** The cells at one coordinate, without their uids. */
+  const at = (state: ScenarioUiState, person: string, date: string) =>
+    state.reqData
+      .filter((cell) => cell.person === person && cell.date === date)
+      .map(({ uid: _uid, ...rest }) => rest);
+
+  it("Ana is on annual leave 10-16 Oct", () => {
+    const result = applyAssistantCommand(octoberWard(), leave("Ana", "2026-10-10", "2026-10-16"));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const leaveDates = result.next.reqData
+      .filter((cell) => cell.person === "Ana" && cell.kind === "leave")
+      .map((cell) => cell.date)
+      .sort();
+    expect(leaveDates).toEqual(["10", "11", "12", "13", "14", "15", "16"]);
+    // The leave already on the 14th is the same agreement: its identity survives.
+    expect(result.next.reqData.find((c) => c.person === "Ana" && c.date === "14")?.uid).toBe(
+      "ana-leave-14",
+    );
+    // Every cell carries a durable uid (Workspace emission refuses one without).
+    expect(result.next.reqData.every((cell) => Boolean(cell.uid))).toBe(true);
+  });
+
+  it("mints the same uids every time, so Apply reproduces the Preview", () => {
+    const command = leave("Ana", "2026-10-10", "2026-10-16");
+    const first = applyAssistantCommand(octoberWard(), command);
+    const second = applyAssistantCommand(octoberWard(), command);
+    expect(first).toEqual(second);
+  });
+
+  it("Ben requests no nights next week", () => {
+    const result = applyAssistantCommand(
+      octoberWard(),
+      wants("Ben", "N", "2026-10-19", "2026-10-25", -5),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const nights = result.next.reqData.filter(
+      (cell) => cell.person === "Ben" && cell.kind === "request" && cell.shiftType === "N",
+    );
+    // The 21st is his day off: skipped, as quick paint skips it.
+    expect(nights.map((cell) => cell.date).sort()).toEqual(["19", "20", "22", "23", "24", "25"]);
+    expect(nights.every((cell) => cell.kind === "request" && cell.weight === -5)).toBe(true);
+    expect(at(result.next, "Ben", "21")).toEqual([
+      { kind: "off", person: "Ben", date: "21", weight: 5 },
+    ]);
+    // His Day request on the 22nd stays alongside.
+    expect(at(result.next, "Ben", "22")).toHaveLength(2);
+  });
+
+  it("Chris would like the long day on 20 Oct", () => {
+    const result = applyAssistantCommand(
+      octoberWard(),
+      wants("Chris", "L", "2026-10-20", "2026-10-20", 5),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(at(result.next, "Chris", "20")).toEqual([
+      { kind: "request", person: "Chris", date: "20", shiftType: "D", weight: 2 },
+      { kind: "request", person: "Chris", date: "20", shiftType: "L", weight: 5 },
+    ]);
+  });
+
+  it('maps "must" and "never" to hard pins', () => {
+    const result = applyAssistantCommands(octoberWard(), [
+      wants("Chris", "L", "2026-10-05", "2026-10-05", "must"),
+      wants("Chris", "N", "2026-10-06", "2026-10-06", "never"),
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(at(result.next, "Chris", "05")[0]).toMatchObject({ weight: Infinity });
+    expect(at(result.next, "Chris", "06")[0]).toMatchObject({ weight: -Infinity });
+  });
+
+  it("cancels Ana's leave on 14 Oct and puts her on the night, in one change", () => {
+    const result = applyAssistantCommands(octoberWard(), [
+      clear("Ana", "2026-10-14"),
+      wants("Ana", "N", "2026-10-14", "2026-10-14", "must"),
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(at(result.next, "Ana", "14")).toEqual([
+      { kind: "request", person: "Ana", date: "14", shiftType: "N", weight: Infinity },
+    ]);
+  });
+
+  it("refuses a shift request that would only land on leave", () => {
+    const result = applyAssistantCommand(
+      octoberWard(),
+      wants("Ana", "N", "2026-10-14", "2026-10-14", "must"),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.code).toBe("no_effect");
+    expect(result.rejection.message).toContain("never replaces leave or a day off");
+    expect(result.rejection.message).toContain("clear those dates first");
+  });
+
+  it("removes one shift request with weight 0", () => {
+    const result = applyAssistantCommand(
+      octoberWard(),
+      wants("Ben", "D", "2026-10-22", "2026-10-22", 0),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(at(result.next, "Ben", "22")).toEqual([]);
+  });
+
+  it("replaces leave with a day-off request, as painting OFF does", () => {
+    const result = applyAssistantCommand(octoberWard(), off("Ana", "2026-10-14", "2026-10-14", 0));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(at(result.next, "Ana", "14")).toEqual([
+        { kind: "off", person: "Ana", date: "14", weight: 0 },
+      ]);
+    }
+  });
+
+  it("accepts a staff group row, a shift group and ALL", () => {
+    const result = applyAssistantCommands(octoberWard(), [
+      wants("Seniors", "Nights", "2026-10-05", "2026-10-05", -3),
+      wants("Ben", "ALL", "2026-10-01", "2026-10-03", 1),
+    ]);
+    expect(result.ok).toBe(true);
+  });
+
+  it("refuses unknown people, bad dates and dates outside the roster", () => {
+    const withNumericId: ScenarioUiState = {
+      ...octoberWard(),
+      staff: [...octoberWard().staff, { id: 7 }],
+    };
+    const cases: [ScenarioUiState, Parameters<typeof applyAssistantCommand>[1], string, string][] =
+      [
+        [octoberWard(), leave("Dan", "2026-10-10"), "unknown_target", '"Dan"'],
+        // Exact identity: the matrix never collapses 7 and "7".
+        [withNumericId, leave("7", "2026-10-10"), "unknown_target", '"7"'],
+        [
+          octoberWard(),
+          leave("Ana", "2026-10-30", "2026-11-02"),
+          "unknown_target",
+          "2026-10-01 to 2026-10-31",
+        ],
+        [octoberWard(), leave("Ana", "2026-10-16", "2026-10-10"), "invalid_value", "end date"],
+        [octoberWard(), leave("Ana", "2026-10-32"), "invalid_value", "real calendar dates"],
+        [
+          { ...octoberWard(), rangeStart: "", rangeEnd: "" },
+          leave("Ana", "2026-10-10"),
+          "cascade_unavailable",
+          "no roster period",
+        ],
+        [
+          octoberWard(),
+          wants("Ben", "OFF", "2026-10-19", "2026-10-19", 5),
+          "invalid_value",
+          "not a shift request",
+        ],
+        [octoberWard(), wants("Ben", "X", "2026-10-19", "2026-10-19", 5), "unknown_target", '"X"'],
+      ];
+    for (const [state, command, code, text] of cases) {
+      const result = applyAssistantCommand(state, command);
+      expect(result.ok, JSON.stringify(command)).toBe(false);
+      if (result.ok) continue;
+      expect(result.rejection.code, JSON.stringify(command)).toBe(code);
+      expect(result.rejection.message).toContain(text);
+    }
+    expect(applyAssistantCommand(withNumericId, leave(7, "2026-10-10")).ok).toBe(true);
+  });
+
+  it("refuses a change that would change nothing, saying why", () => {
+    const again = applyAssistantCommand(octoberWard(), leave("Ana", "2026-10-14"));
+    expect(again.ok).toBe(false);
+    if (!again.ok) expect(again.rejection.message).toContain("already on leave");
+    const empty = applyAssistantCommand(octoberWard(), clear("Ana", "2026-10-01"));
+    expect(empty.ok).toBe(false);
+    if (!empty.ok) expect(empty.rejection.message).toContain("nothing recorded");
   });
 });
 

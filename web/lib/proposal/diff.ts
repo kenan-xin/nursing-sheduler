@@ -30,6 +30,7 @@ import type {
 import { EXPRESSION_OPS, substituteTarget } from "@/components/card-editor/expression-model";
 import type { AssistantCommandV1 } from "./commands";
 import { stableStringify } from "./digest";
+import { rosterDatesBetween } from "./operations";
 
 /**
  * Where a change lands, named as the capability the user would go to see it.
@@ -107,21 +108,27 @@ export interface ProposalDiff {
 // Rendering helpers -- deliberately plain, because a ward manager reads them
 // ---------------------------------------------------------------------------
 
+/** A request cell as a ward manager says it. */
 function describeCell(cell: UiRequestCell): string {
-  switch (cell.kind) {
-    case "leave":
-      return "Leave";
-    case "off":
-      return `Prefers off (weight ${renderWeight(cell.weight)})`;
-    case "request":
-      return `${cell.shiftType} (weight ${renderWeight(cell.weight)})`;
-  }
-}
-
-function renderWeight(weight: number): string {
-  if (weight === Infinity) return "must";
-  if (weight === -Infinity) return "never";
-  return String(weight);
+  if (cell.kind === "leave") return "On leave";
+  const [must, never, wants, avoids] =
+    cell.kind === "off"
+      ? [
+          "Must have the day off",
+          "Must not have the day off",
+          "Wants the day off",
+          "Would rather not be off",
+        ]
+      : [
+          `Must work ${cell.shiftType}`,
+          `Must not work ${cell.shiftType}`,
+          `Wants ${cell.shiftType}`,
+          `Would rather not work ${cell.shiftType}`,
+        ];
+  if (cell.weight === Infinity) return must;
+  if (cell.weight === -Infinity) return never;
+  if (cell.weight === 0 && cell.kind === "off") return "Asked for the day off";
+  return cell.weight < 0 ? `${avoids} (weight ${cell.weight})` : `${wants} (weight ${cell.weight})`;
 }
 
 function describeCoordinateCells(cells: readonly UiRequestCell[]): string | null {
@@ -508,6 +515,18 @@ function directKeys(
       case "add_shift_group":
         keys.add(`shiftgroup:${command.groupId.trim()}`);
         break;
+      case "add_leave":
+      case "set_off_request":
+      case "set_shift_request":
+      case "clear_requests": {
+        // Every painted date is asked-for, including a leave day a clear removes.
+        const span = rosterDatesBetween(after, command.startDate, command.endDate);
+        if (!span.ok) break;
+        for (const date of span.ids) {
+          keys.add(`cell:${stableStringify(command.personId)}|${stableStringify(date)}`);
+        }
+        break;
+      }
       case "add_succession_rule":
         created("successions");
         break;

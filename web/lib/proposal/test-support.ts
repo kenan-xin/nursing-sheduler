@@ -59,6 +59,47 @@ export function proposalScenario(): ScenarioUiState {
 }
 
 /**
+ * A one-month October ward for the leave/request arms. Date ids are `DD`.
+ * 2026-10-01 is a Thursday, so 19-25 Oct is Monday to Sunday ("next week").
+ *
+ *   • Ana already has leave on the 14th (the infeasibility-repair case);
+ *   • Ben has a day off on the 21st and a Day request on the 22nd;
+ *   • Chris has a Day request on the 20th.
+ */
+export function octoberWard(): ScenarioUiState {
+  return {
+    ...createEmptyScenarioUiState(),
+    rangeStart: "2026-10-01",
+    rangeEnd: "2026-10-31",
+    staff: [
+      { _k: "p1", id: "Ana" },
+      { _k: "p2", id: "Ben" },
+      { _k: "p3", id: "Chris" },
+    ],
+    staffGroups: [{ _k: "pg1", id: "Seniors", members: ["Ana", "Chris"] }],
+    shifts: [
+      { _k: "s1", id: "D", description: "Day" },
+      { _k: "s2", id: "L", description: "Long day" },
+      { _k: "s3", id: "N", description: "Night" },
+    ],
+    shiftGroups: [{ _k: "sg1", id: "Nights", members: ["N"] }],
+    reqData: [
+      { uid: "ana-leave-14", person: "Ana", date: "14", kind: "leave" },
+      { uid: "ben-off-21", person: "Ben", date: "21", kind: "off", weight: 5 },
+      { uid: "ben-req-22", person: "Ben", date: "22", kind: "request", shiftType: "D", weight: 3 },
+      {
+        uid: "chris-req-20",
+        person: "Chris",
+        date: "20",
+        kind: "request",
+        shiftType: "D",
+        weight: 2,
+      },
+    ],
+  };
+}
+
+/**
  * The ward the rule examples need: RN and Senior staff groups, a "Working shifts" group
  * spanning every worked shift, and one editable rule of each card-editor family. The
  * request matrix is emptied so no cell names a person who is not on this staff list.

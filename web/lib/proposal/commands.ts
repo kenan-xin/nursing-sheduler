@@ -19,6 +19,11 @@
 // shift setup is Phase-1 scenario authoring, and both compile to the Shifts page's
 // own primitives (`addItem` / `addGroup` / `setGroupMembers`), so the rule above holds.
 //
+// `add_leave` / `set_off_request` / `set_shift_request` / `clear_requests` are the
+// Requests page's quick paint (select LEAVE, OFF, a shift, or nothing, then drag over
+// dates) and compile to its own fold (`foldPaintIntents`). Removing someone's leave is
+// an agreement with them; `assumptions.ts` asks about it from the document diff, so no
+// arm carries a confirmation flag the model could leave out.
 // The rule arms (`add_/edit_succession_rule`, and the count, requirement and remove
 // arms after them) widen the set the same way: each one fills the rule editor's own
 // form draft and runs that editor's own validator and builder in `operations.ts`.
@@ -98,6 +103,27 @@ export type AssistantCommandV1 =
     }
   /** Add one shift group whose members are existing shift codes -- the Groups "New group" form. */
   | { type: "add_shift_group"; groupId: string; members: string[] }
+  /** Leave for one person (or staff group row) on every date from `startDate` to `endDate` -- painting LEAVE. */
+  | { type: "add_leave"; personId: PersonRef; startDate: IsoDate; endDate: IsoDate }
+  /** A day-off request over a date range -- painting OFF at `weight`. */
+  | {
+      type: "set_off_request";
+      personId: PersonRef;
+      startDate: IsoDate;
+      endDate: IsoDate;
+      weight: RequestWeight;
+    }
+  /** A wish for, or against, one shift (or shift group, or ALL) over a date range -- painting that shift. */
+  | {
+      type: "set_shift_request";
+      personId: PersonRef;
+      shiftType: string;
+      startDate: IsoDate;
+      endDate: IsoDate;
+      weight: RequestWeight;
+    }
+  /** Remove everything recorded on those dates -- Clear cell / painting with nothing selected. */
+  | { type: "clear_requests"; personId: PersonRef; startDate: IsoDate; endDate: IsoDate }
   /**
    * Add one shift sequence rule -- the Shift sequences screen's Add form. `weight` is
    * the text the Weight box would hold ("-infinity" = never, "-50" = discourage).
@@ -168,6 +194,9 @@ export type AssistantCommandV1 =
   /** Delete one rule of any family -- every rule screen's Delete. */
   | { type: "remove_rule"; ruleKind: (typeof RULE_KINDS)[number]; ruleId: string };
 
+/** A request strength: a finite number, or a hard pin. JSON cannot carry an infinity, so the pins are words. */
+export type RequestWeight = number | "must" | "never";
+
 export type AssistantCommandType = AssistantCommandV1["type"];
 
 /** Every arm's discriminant, for registry/parity tests and tool descriptions. */
@@ -178,6 +207,10 @@ export const ASSISTANT_COMMAND_TYPES = [
   "move_leave",
   "add_shift_type",
   "add_shift_group",
+  "add_leave",
+  "set_off_request",
+  "set_shift_request",
+  "clear_requests",
   "add_succession_rule",
   "edit_succession_rule",
   "add_count_rule",
@@ -218,6 +251,21 @@ const clockSchema = z
   .string()
   .regex(/^\d{2}:\d{2}$/, "a time must be written HH:MM in 24-hour form, e.g. 08:00 or 20:30");
 
+const requestPersonSchema = refSchema.describe(
+  "The person's id exactly as the staff list reports it, or a staff group id to record it " +
+    "on that group's row.",
+);
+const startDateSchema = isoDateSchema.describe(
+  "First calendar date, YYYY-MM-DD, inside the roster period.",
+);
+const endDateSchema = isoDateSchema.describe(
+  "Last calendar date, YYYY-MM-DD, inclusive. The same as startDate for a single day.",
+);
+/** Shape only: a finite whole number or a hard pin. The host maps "must"/"never" to
+ *  ±Infinity. Whole because the backend and `zWeight` both reject fractional weights. */
+const requestWeightSchema = z.union([z.number().int(), z.enum(["must", "never"])], {
+  error: 'a weight is a whole number, or "must"/"never"',
+});
 // RULE FIELDS are built per arm (a call, not a shared constant) so every arm's JSON
 // Schema is emitted inline rather than as a reference the transport would have to
 // resolve.
@@ -430,6 +478,52 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
           "the same change.",
       ),
   }),
+  z.strictObject({
+    type: z.enum(["add_leave"]),
+    personId: requestPersonSchema,
+    startDate: startDateSchema,
+    endDate: endDateSchema,
+  }),
+  z.strictObject({
+    type: z.enum(["set_off_request"]),
+    personId: requestPersonSchema,
+    startDate: startDateSchema,
+    endDate: endDateSchema,
+    weight: requestWeightSchema.describe(
+      "How much they want those days off: a positive number wants them (e.g. 5), 0 is a plain " +
+        'day-off request, a negative number would rather not be off. "must" makes it a hard ' +
+        "rule; use it only when the user says it is not negotiable. Replaces anything already " +
+        "on those dates, including leave.",
+    ),
+  }),
+  z.strictObject({
+    type: z.enum(["set_shift_request"]),
+    personId: requestPersonSchema,
+    shiftType: z
+      .string()
+      .describe('A shift code or shift group id from the schedule, or "ALL" for any shift.'),
+    startDate: startDateSchema,
+    endDate: endDateSchema,
+    weight: requestWeightSchema.describe(
+      "Positive wants that shift (e.g. 5), negative does not want it (e.g. -5); larger is " +
+        'stronger. "must" / "never" make it a hard rule; use them only when the user says it ' +
+        "is not negotiable. 0 removes their existing request for that shift. Dates with leave " +
+        "or a day off are left as they are.",
+    ),
+  }),
+  z
+    .strictObject({
+      type: z.enum(["clear_requests"]),
+      personId: requestPersonSchema,
+      startDate: startDateSchema,
+      endDate: endDateSchema,
+    })
+    .describe(
+      "Remove everything recorded for that person on those dates: leave, day-off and shift " +
+        "requests. Removing leave makes the preview ask the user to confirm the person agreed. " +
+        "To free someone on leave to cover a shift, tell the user to ask them first, and " +
+        "propose this as that question, never as a decision.",
+    ),
   z.strictObject({ type: z.enum(["add_succession_rule"]), ...successionFields() }),
   z.strictObject({
     type: z.enum(["edit_succession_rule"]),
