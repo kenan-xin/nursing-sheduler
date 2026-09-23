@@ -31,17 +31,26 @@ import { saveShiftTypeCard } from "@/components/shift-types/save-shift-card";
 import { shiftTypesDescriptor } from "@/components/shift-types/shift-types-descriptor";
 import {
   addGroup,
+  addItem,
+  deleteGroup,
+  deleteItem,
   paidMinutesFor,
+  renameGroup,
+  renameItem,
   setGroupMembers,
+  updateGroupFields,
   validateFullEditId,
   validateWorkingTimeDraft,
+  writeGroupMembers,
+  writeItemGroups,
 } from "@/components/entity-editor/core";
+import { peopleDescriptor } from "@/components/people/people-descriptor";
 import type { DateRef, PersonRef } from "@/lib/scenario";
 import { computeQuickPaintCellIntent } from "@/components/requests/requests-gestures";
 import { createHotStore } from "@/lib/store/hot-store";
 import { foldPaintIntents } from "@/lib/store/paint-fold";
 import { applyAssistantCommand, assistantCellUids } from "./operations";
-import { octoberWard, proposalScenario } from "./test-support";
+import { octoberWard, peopleScenario, proposalScenario } from "./test-support";
 
 describe("set_roster_range is the manual range cascade", () => {
   it("produces the identical document the Dates screen commits", () => {
@@ -301,6 +310,142 @@ describe("add_shift_type is the Shifts page's Add shift save", () => {
         expect(assistant.next).toEqual(manual);
       }
     }
+  });
+});
+
+describe("the Staff-screen arms are the Staff screen's saves", () => {
+  const d = peopleDescriptor;
+
+  // `people-table.tsx:723-745`: gate on validateFullEditId, then addItem + writeGroups.
+  function manualAddPerson(state: ScenarioUiState, name: string, groups: string[]) {
+    const check = validateFullEditId(d, d.readItems(state), d.readGroups(state), name);
+    if (!check.ok) return null;
+    return writeItemGroups(addItem(state, d, { id: check.id }), d, check.id, groups);
+  }
+
+  // `people-table.tsx:719-757`: rename only when the raw text changed, then writeGroups.
+  function manualEditPerson(
+    state: ScenarioUiState,
+    personId: string | number,
+    name: string,
+    groups: string[],
+  ) {
+    const nameChanged = name !== String(personId);
+    const check = nameChanged
+      ? validateFullEditId(d, d.readItems(state), d.readGroups(state), name, false, personId)
+      : ({ ok: true, id: name } as const);
+    if (!check.ok) return null;
+    const renamed = nameChanged ? renameItem(state, d, personId, check.id) : state;
+    return writeItemGroups(renamed, d, nameChanged ? check.id : personId, groups);
+  }
+
+  it("add_person accepts, refuses and writes what Add nurse does", () => {
+    const state = peopleScenario();
+    for (const name of ["Cara", "  Cara  ", "12", "ana", "RN", "ALL", "all", ""]) {
+      const manual = manualAddPerson(state, name, ["Seniors", "RN"]);
+      const assistant = applyAssistantCommand(state, {
+        type: "add_person",
+        name,
+        groups: ["Seniors", "RN"],
+      });
+      expect(assistant.ok, `"${name}"`).toBe(manual !== null);
+      if (manual && assistant.ok) expect(assistant.next).toEqual(manual);
+    }
+  });
+
+  it("edit_person accepts, refuses and writes what the row's Edit does", () => {
+    const state = peopleScenario();
+    const cases: [string | number, string, string[]][] = [
+      ["ana", "Ana Lim", ["RN"]],
+      ["ana", "ana", []],
+      ["ana", "  ana  ", ["RN", "Seniors"]],
+      [7, "7", ["Seniors"]],
+      [7, " 7 ", ["RN"]], // the row renames number 7 to text "7"
+      ["ana", "bo", ["RN"]],
+      ["ana", "Seniors", ["RN"]],
+      ["ana", "ALL", ["RN"]],
+      ["ana", "", ["RN"]],
+    ];
+    for (const [personId, name, groups] of cases) {
+      const manual = manualEditPerson(state, personId, name, groups);
+      const assistant = applyAssistantCommand(state, {
+        type: "edit_person",
+        personId,
+        name,
+        groups,
+      });
+      expect(assistant.ok, `${String(personId)} -> "${name}"`).toBe(manual !== null);
+      if (manual && assistant.ok) expect(assistant.next).toEqual(manual);
+    }
+  });
+
+  it("remove_person is the row's Delete", () => {
+    const state = peopleScenario();
+    for (const personId of ["ana", "bo", 7] as const) {
+      const assistant = applyAssistantCommand(state, { type: "remove_person", personId });
+      expect(assistant.ok).toBe(true);
+      if (assistant.ok) expect(assistant.next).toEqual(deleteItem(state, d, personId));
+    }
+  });
+
+  it("add_people_group accepts, refuses and writes what New group does", () => {
+    const state = peopleScenario();
+    // `groups-section.tsx:745-790` (add mode): addGroup(id, trimmed description) + writeGroupMembers.
+    for (const groupId of ["Night team", "  Night team  ", "RN", "ana", "ALL", ""]) {
+      const check = validateFullEditId(d, d.readItems(state), d.readGroups(state), groupId, true);
+      const assistant = applyAssistantCommand(state, {
+        type: "add_people_group",
+        groupId,
+        description: " Nights ",
+        members: [7, "bo"],
+      });
+      expect(assistant.ok, `"${groupId}"`).toBe(check.ok);
+      if (check.ok && assistant.ok) {
+        const manual = writeGroupMembers(
+          addGroup(state, d, { id: check.id, description: "Nights" }),
+          d,
+          check.id,
+          [7, "bo"],
+        );
+        expect(assistant.next).toEqual(manual);
+      }
+    }
+  });
+
+  it("edit_people_group accepts, refuses and writes what the group's Edit does", () => {
+    const state = peopleScenario();
+    // `groups-section.tsx:741-790` (edit mode): rename if the text changed, then
+    // updateGroupFields(trimmed description), then writeGroupMembers.
+    for (const newGroupId of ["Registered nurses", "RN", "Seniors", "bo", "ALL", ""]) {
+      const idChanged = newGroupId !== "RN";
+      const check = idChanged
+        ? validateFullEditId(d, d.readItems(state), d.readGroups(state), newGroupId, true, "RN")
+        : ({ ok: true, id: "RN" } as const);
+      const assistant = applyAssistantCommand(state, {
+        type: "edit_people_group",
+        groupId: "RN",
+        newGroupId,
+        description: " Registered ",
+        members: ["bo", "ana"],
+      });
+      expect(assistant.ok, `"${newGroupId}"`).toBe(check.ok);
+      if (check.ok && assistant.ok) {
+        let manual = idChanged ? renameGroup(state, d, "RN", check.id) : state;
+        manual = updateGroupFields(manual, d, check.id, { description: "Registered" });
+        manual = writeGroupMembers(manual, d, check.id, ["bo", "ana"]);
+        expect(assistant.next).toEqual(manual);
+      }
+    }
+  });
+
+  it("remove_people_group is the group's Delete", () => {
+    const state = peopleScenario();
+    const assistant = applyAssistantCommand(state, {
+      type: "remove_people_group",
+      groupId: "RN",
+    });
+    expect(assistant.ok).toBe(true);
+    if (assistant.ok) expect(assistant.next).toEqual(deleteGroup(state, d, "RN"));
   });
 });
 
