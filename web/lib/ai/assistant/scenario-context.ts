@@ -89,17 +89,20 @@ export function summarizeScenario(
 /**
  * The authority statement.
  *
- * Not decoration: without it a capable model will confidently offer to change the
- * roster, and the user would then have to discover by trying that it cannot. T07
- * replaces this text when typed Preview/Apply actually exists -- until then the
- * honest capability is "explain and discuss".
+ * Not decoration: it states the propose-then-Apply contract. The model never
+ * mutates the scenario; `prepare_scenario_change` builds a Preview and only the
+ * user's Apply changes anything. Without the "use it instead of refusing" line a
+ * model falls back to explaining; without the "never claim applied" line it
+ * reports Previews as done. Deliberately operation-agnostic: the supported
+ * operations live in the tool's own schema, so this text does not go stale as
+ * operation families are added.
  */
-export const READ_ONLY_AUTHORITY_STATEMENT = [
-  "You can read this schedule and explain it. You CANNOT change it.",
-  "You have no tool that edits, creates or deletes anything, and none that runs the optimiser.",
-  "If the user asks for a change, explain exactly what they should change and where in the app to do it,",
-  "then say plainly that you cannot make the change yourself yet.",
-  "Never claim to have applied, saved, queued or scheduled anything.",
+export const ASSISTANT_AUTHORITY_STATEMENT = [
+  "You can read this schedule and explain it. You cannot change it directly.",
+  "You can PROPOSE a change with prepare_scenario_change: it shows the user a Preview, and nothing changes until the user presses Apply.",
+  "When the user asks for a change that prepare_scenario_change supports, prepare it instead of refusing or only explaining.",
+  "If no supported operation covers the change, say so plainly, then use open_app_screen or explain where in the app they can make it.",
+  "Never claim to have applied, saved, queued or scheduled anything; a prepared Preview is not applied until the user applies it.",
   "Speak plain language suitable for a ward nurse; avoid product jargon unless you name it and explain it.",
 ].join(" ");
 
@@ -117,8 +120,8 @@ export interface BuildContextInput {
 export function buildAssistantContext(input: BuildContextInput): AssistantContextEntry[] {
   return [
     {
-      description: READ_ONLY_AUTHORITY_STATEMENT,
-      value: "read-only",
+      description: ASSISTANT_AUTHORITY_STATEMENT,
+      value: "propose-then-apply",
     },
     {
       description:
