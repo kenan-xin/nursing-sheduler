@@ -14,7 +14,7 @@
 // control are mounted HERE, in the live rendering only, so a read-only or historical
 // thread has no Apply handler to regain -- not a disabled one, none at all.
 
-import { useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import { CopilotChatMessageView, CopilotChatView } from "@copilotkit/react-core/v2";
 import type { Message } from "@ag-ui/client";
 import { readThreadMessages } from "@/lib/ai/assistant/history-repo";
@@ -22,7 +22,7 @@ import { toTransportThread } from "@/lib/ai/assistant/messages";
 import { describeInterruptionPhase, describeSettlement } from "@/lib/ai/assistant/lifecycle";
 import { describeRefusal } from "@/lib/ai/assistant/send-gate";
 import { useAssistantStore } from "@/lib/ai/assistant/store";
-import { useAssistantSession } from "./use-assistant-session";
+import { useAssistantSession, type AssistantActivity } from "./use-assistant-session";
 import { useAssistantProposals } from "./use-assistant-proposals";
 import { ProposalPreviewCard } from "./proposal-preview-card";
 import { DiagnosticSearchCard } from "./diagnostic-search-card";
@@ -101,6 +101,50 @@ export function LifecycleNotice() {
   );
 }
 
+/** What each model-visible tool is doing, in the user's terms. */
+const TOOL_ACTIVITY: Readonly<Record<string, string>> = {
+  get_schedule_overview: "Reading your schedule…",
+  get_schedule_section: "Reading your schedule…",
+  test_feasibility_candidates: "Testing possible fixes…",
+  list_app_capabilities: "Checking what the app can do…",
+  explain_app_capability: "Checking what the app can do…",
+  suggest_scheduling_rule: "Drafting a rule…",
+  open_app_screen: "Opening a screen…",
+  prepare_scenario_change: "Preparing a change…",
+};
+
+/**
+ * The pending line under the transcript: "Thinking…" until the first token or tool
+ * event, then the running tool's label. Same dot-plus-words pattern as the roster's
+ * "Saving…"; the global reduced-motion rule stills the pulse.
+ */
+export function AssistantActivityStatus({ activity }: { activity: AssistantActivity }) {
+  if (!activity) return null;
+  const label =
+    activity.kind === "tool" ? (TOOL_ACTIVITY[activity.name] ?? "Working…") : "Thinking…";
+  return (
+    <p
+      className="flex items-center gap-2 text-meta text-ink2"
+      role="status"
+      aria-live="polite"
+      data-testid="assistant-activity"
+      data-kind={activity.kind}
+    >
+      <span className="size-1.5 animate-pulse rounded-[50%] bg-brand" aria-hidden />
+      {label}
+    </p>
+  );
+}
+
+// The locked view renders its `cursor` slot with no props, so the activity reaches it
+// through context rather than a per-render component (which would remount the live
+// region and re-announce it).
+const ActivityContext = createContext<AssistantActivity>(null);
+function ActivityCursor() {
+  return <AssistantActivityStatus activity={useContext(ActivityContext)} />;
+}
+const MESSAGE_VIEW = { cursor: ActivityCursor };
+
 export interface AssistantLiveConversationProps {
   threadId: string;
   routePath: string;
@@ -125,19 +169,23 @@ export function AssistantLiveConversation({
       <DiagnosticSearchCard />
       <ProposalPreviewCard controller={proposals} />
       <AssistantReceipts controller={proposals} />
-      <CopilotChatView
-        className="min-h-0 flex-1"
-        messages={session.messages}
-        // Still "running" while an interruption settles: the input must stay closed
-        // until the gate reopens, and Stop must stay reachable rather than flipping
-        // back to a send control that would be refused.
-        isRunning={session.isRunning || session.interrupting}
-        // Suppresses the library's generic greeting: this panel is bound to one
-        // explicit scenario thread, and the welcome content above is the app's.
-        hasExplicitThreadId
-        onSubmitMessage={(value) => void session.send(value)}
-        onStop={session.stop}
-      />
+      <ActivityContext.Provider value={session.activity}>
+        <CopilotChatView
+          className="min-h-0 flex-1"
+          messages={session.messages}
+          // Replaces the library's unlabeled dot with a worded, announced status line.
+          messageView={MESSAGE_VIEW}
+          // Still "running" while an interruption settles: the input must stay closed
+          // until the gate reopens, and Stop must stay reachable rather than flipping
+          // back to a send control that would be refused.
+          isRunning={session.isRunning || session.interrupting}
+          // Suppresses the library's generic greeting: this panel is bound to one
+          // explicit scenario thread, and the welcome content above is the app's.
+          hasExplicitThreadId
+          onSubmitMessage={(value) => void session.send(value)}
+          onStop={session.stop}
+        />
+      </ActivityContext.Provider>
     </div>
   );
 }
