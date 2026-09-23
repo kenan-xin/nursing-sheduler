@@ -669,7 +669,10 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
       .array(z.string())
       .describe(
         'Staff groups to put them in, e.g. ["RN"]. Each must exist or be added EARLIER in ' +
-          "the same change. Send [] for none. Never list ALL: everyone is in it.",
+          "the same change. Send [] for none. Never list ALL: everyone is in it. Rules that " +
+          "target ALL or these groups also bind this person, including hard hours and " +
+          "shift-count rules; for someone here only a few days, narrow those rules with " +
+          "edit_count_rule in the same change.",
       ),
   }),
   z.strictObject({
@@ -682,7 +685,9 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
       .array(z.string())
       .describe(
         "EVERY staff group they should be in after the change -- groups left out are " +
-          "removed. Send their current groups to keep them.",
+          "removed. Send their current groups to keep them. Rules that target a group they " +
+          "join also bind them, including hard hours and shift-count rules; for someone here " +
+          "only a few days, narrow those rules with edit_count_rule in the same change.",
       ),
   }),
   z.strictObject({

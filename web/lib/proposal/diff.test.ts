@@ -391,6 +391,7 @@ describe("deriveProposalDiff", () => {
     const diff = deriveProposalDiff(before, applied.next, commands);
 
     expect(diff.direct.map((entry) => entry.key).sort()).toEqual([
+      `available:"${float}"`,
       `offrun:"${float}"|2026-10-01|2026-10-11`,
       `offrun:"${float}"|2026-10-15|2026-10-31`,
       "peoplegroup:RN",
@@ -403,11 +404,16 @@ describe("deriveProposalDiff", () => {
     expect(find("peoplegroup:RN")).toMatchObject({
       label: "Staff group “RN”",
       before: "ana, 7",
-      after: `ana, 7, ${float}`,
+      after: `+ ${float}`,
+    });
+    expect(find(`available:"${float}"`)).toMatchObject({
+      label: float,
+      after: "Available: 2026-10-12 to 2026-10-14",
+      kind: "created",
     });
     expect(find(`offrun:"${float}"|2026-10-01|2026-10-11`)).toMatchObject({
       scope: "leave-and-requests",
-      label: `${float}: must be off`,
+      label: `${float}: Must have the day off`,
       after: "11 days, 2026-10-01 to 2026-10-11",
       kind: "created",
     });
@@ -416,6 +422,71 @@ describe("deriveProposalDiff", () => {
     );
     expect(diff.capabilityIds).toEqual(
       expect.arrayContaining(["staff-list", "leave-and-requests"]),
+    );
+  });
+
+  it("skips the availability line when the days they are here are not one run", () => {
+    const before = peopleScenario();
+    const commands = [
+      { type: "add_person" as const, name: "Float", groups: [] },
+      {
+        type: "set_off_request" as const,
+        personId: "Float",
+        startDate: "2026-10-05",
+        endDate: "2026-10-20",
+        weight: "must" as const,
+      },
+    ];
+    const applied = applyAssistantCommands(before, commands);
+    if (!applied.ok) throw new Error("fixture should apply");
+    const diff = deriveProposalDiff(before, applied.next, commands);
+
+    expect(diff.direct.some((entry) => entry.key.startsWith("available:"))).toBe(false);
+  });
+
+  it("names every enabled hard count rule a new person or group member becomes bound by", () => {
+    const base = peopleScenario();
+    const count = (uid: string, person: string[], weight: number, extra = {}) => ({
+      uid,
+      description: uid,
+      person,
+      countDates: ["ALL"],
+      countShiftTypes: ["Day"],
+      expression: ">=",
+      target: 4,
+      weight,
+      ...extra,
+    });
+    const before = {
+      ...base,
+      cardsByKind: {
+        ...base.cardsByKind,
+        counts: [
+          count("RN hours", ["RN"], Infinity, { tag: "contracted_hours", policy: "exact" }),
+          count("RN soft", ["RN"], -1),
+          count("Everyone minimum", ["ALL"], Infinity),
+          count("Everyone off", ["ALL"], Infinity, { disabled: true }),
+          count("Seniors cap", ["Seniors"], -Infinity),
+        ],
+      },
+    } as typeof base;
+    const commands = [
+      { type: "add_person" as const, name: "Float", groups: ["RN"] },
+      { type: "edit_person" as const, personId: 7, name: "7", groups: ["RN", "Seniors"] },
+    ];
+    const applied = applyAssistantCommands(before, commands);
+    if (!applied.ok) throw new Error("fixture should apply");
+    const diff = deriveProposalDiff(before, applied.next, commands);
+
+    const binds = diff.cascade.filter((entry) => entry.key.startsWith("binds:"));
+    expect(binds.map((entry) => entry.label).sort()).toEqual([
+      "“Everyone minimum” now also binds Float",
+      "“RN hours” now also binds Float",
+      "“Seniors cap” now also binds 7",
+    ]);
+    expect(binds[0]).toMatchObject({ scope: "shift-counts", before: null, kind: "created" });
+    expect(binds.find((entry) => entry.label.includes("RN hours"))?.after).toBe(
+      "Hard rule for “RN”; days they must have off do not count toward it",
     );
   });
 
@@ -465,7 +536,9 @@ describe("deriveProposalDiff", () => {
       after: "Ana Lim",
       kind: "changed",
     });
-    expect(diff.direct.find((entry) => entry.key === "peoplegroup:RN")?.after).toBe("Ana Lim, 7");
+    expect(diff.direct.find((entry) => entry.key === "peoplegroup:RN")?.after).toBe(
+      "+ Ana Lim, − ana",
+    );
   });
 
   it("shows a staff group rename as one renamed entry", () => {
@@ -506,7 +579,7 @@ describe("deriveProposalDiff", () => {
       "rule:counts:count-bo",
     ]);
     expect(diff.cascade.find((entry) => entry.key === "peoplegroup:Seniors")?.after).toBe(
-      "No members · “Band 6 and above”",
+      "− bo · “Band 6 and above”",
     );
     expect(diff.needsReview).toEqual(["rules", "requests"]);
   });

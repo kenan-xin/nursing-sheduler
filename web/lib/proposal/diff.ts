@@ -28,6 +28,7 @@ import type {
   UiShiftType,
 } from "@/lib/scenario";
 import { EXPRESSION_OPS, substituteTarget } from "@/components/card-editor/expression-model";
+import { generateDateItems } from "@/lib/dates";
 import type { AssistantCommandV1 } from "./commands";
 import { stableStringify } from "./digest";
 import { rosterDatesBetween } from "./operations";
@@ -297,6 +298,12 @@ function ruleBody(card: Record<string, unknown>, kind: keyof CardsByKind): strin
   return `${disabled ? "Off" : "On"} · ${title ? `“${title}” · ` : ""}${plain}`;
 }
 
+function renderStaffGroup(members: readonly string[], description: string | undefined): string {
+  const list = members.length ? members.join(", ") : "No members";
+  const described = description?.trim();
+  return described ? `${list} · “${described}”` : list;
+}
+
 function coordinateKey(cell: UiRequestCell): string {
   return `${stableStringify(cell.person)}|${stableStringify(cell.date)}`;
 }
@@ -322,6 +329,8 @@ function compareKeyed<T>(
     identity: (item: T) => string;
     label: (item: T) => string;
     render: (item: T) => string;
+    /** The `after` of a changed item, when the whole new value would bury the change. */
+    renderChange?: (from: T, to: T) => string;
     keyPrefix: string;
   },
 ): Entry[] {
@@ -351,7 +360,7 @@ function compareKeyed<T>(
         scope: options.scope,
         label: options.label(next),
         before: from,
-        after: to,
+        after: options.renderChange?.(item, next) ?? to,
         kind: "changed",
       });
     }
@@ -443,10 +452,16 @@ export function diffScenarioDocuments(
       keyPrefix: "peoplegroup",
       identity: (group) => group.id,
       label: (group) => `Staff group “${group.id}”`,
-      render: (group) => {
-        const members = group.members.length ? group.members.map(String).join(", ") : "No members";
-        const described = group.description?.trim();
-        return described ? `${members} · “${described}”` : members;
+      render: (group) => renderStaffGroup(group.members.map(String), group.description),
+      // A changed group states who joined and who left, not the whole roll call.
+      renderChange: (from, to) => {
+        const had = new Set(from.members.map((member) => stableStringify(member)));
+        const has = new Set(to.members.map((member) => stableStringify(member)));
+        const delta = [
+          ...to.members.filter((m) => !had.has(stableStringify(m))).map((m) => `+ ${m}`),
+          ...from.members.filter((m) => !has.has(stableStringify(m))).map((m) => `− ${m}`),
+        ];
+        return renderStaffGroup(delta.length ? delta : to.members.map(String), to.description);
       },
     }),
     ...compareKeyed(before.shifts, after.shifts, {
@@ -577,7 +592,7 @@ function collapseOffRuns(
       {
         key: `offrun:${stableStringify(command.personId)}|${command.startDate}|${command.endDate}`,
         scope: "leave-and-requests",
-        label: `${String(command.personId)}: must be off`,
+        label: `${String(command.personId)}: Must have the day off`,
         before: null,
         after: `${created.length} days, ${command.startDate} to ${command.endDate}`,
         kind: "created",
@@ -585,6 +600,104 @@ function collapseOffRuns(
     ];
   }
   return collapsed;
+}
+
+/**
+ * A person added in this change and marked must-be-off around the days they cover (a
+ * borrowed nurse) gets one line saying when they ARE here -- the thing the manager
+ * actually asked for. Only when those days are one unbroken run; otherwise the runs
+ * above already say it.
+ */
+function availabilityLines(
+  commands: readonly AssistantCommandV1[],
+  after: ScenarioUiState,
+): Entry[] {
+  const days = generateDateItems({ start: after.rangeStart, end: after.rangeEnd });
+  const entries: Entry[] = [];
+  for (const command of commands) {
+    if (command.type !== "add_person") continue;
+    const person = stableStringify(command.name.trim());
+    const off = new Set(
+      after.reqData
+        .filter(
+          (cell) =>
+            cell.kind === "off" &&
+            cell.weight === Infinity &&
+            stableStringify(cell.person) === person,
+        )
+        .map((cell) => stableStringify(cell.date)),
+    );
+    if (off.size === 0) continue;
+    const here = days.flatMap((day, index) => (off.has(stableStringify(day.id)) ? [] : [index]));
+    if (here.length === 0 || here[here.length - 1] - here[0] !== here.length - 1) continue;
+    entries.push({
+      key: `available:${person}`,
+      scope: "leave-and-requests",
+      label: command.name.trim(),
+      before: null,
+      after: `Available: ${days[here[0]].iso} to ${days[here[here.length - 1]].iso}`,
+      kind: "created",
+    });
+  }
+  return entries;
+}
+
+/**
+ * Every rule that targets ALL or a group binds whoever joins it. For an ENABLED HARD
+ * count rule (contracted hours, a hard shift-count) that can make the roster
+ * infeasible without a word: a borrowed nurse's must-be-off days never count toward
+ * a contracted-hours or shift minimum. So each such rule a person becomes bound by --
+ * by being added (ALL and their groups) or by joining a group -- is stated as a
+ * consequence.
+ */
+function newlyBoundHardRules(
+  before: ScenarioUiState,
+  after: ScenarioUiState,
+  commands: readonly AssistantCommandV1[],
+): Entry[] {
+  // Renames are not joins: map the new ids back to the ones `before` knows.
+  const personWas = new Map<string, string>();
+  const groupWas = new Map<string, string>();
+  for (const command of commands) {
+    if (command.type === "edit_person" && command.name !== String(command.personId)) {
+      personWas.set(stableStringify(command.name.trim()), stableStringify(command.personId));
+    } else if (command.type === "edit_people_group") {
+      groupWas.set(command.newGroupId.trim(), command.groupId);
+    }
+  }
+  const groupsOf = (state: ScenarioUiState, person: string) =>
+    state.staffGroups
+      .filter((group) => group.members.some((member) => stableStringify(member) === person))
+      .map((group) => group.id);
+  const existed = new Set(before.staff.map((person) => stableStringify(person.id)));
+  const hard = after.cardsByKind.counts.filter(
+    (card) => !card.disabled && Math.abs(card.weight) === Infinity,
+  );
+
+  const entries: Entry[] = [];
+  for (const person of after.staff) {
+    const id = stableStringify(person.id);
+    const was = personWas.get(id) ?? id;
+    const isNew = !existed.has(was);
+    const had = new Set(isNew ? [] : groupsOf(before, was));
+    const joined = groupsOf(after, id).filter((group) => !had.has(groupWas.get(group) ?? group));
+    if (isNew) joined.unshift("ALL");
+    for (const card of hard) {
+      const refs = flattenRefs(card.person).map(String);
+      const everyone = refs.length === 0 || refs.some((ref) => ref.toUpperCase() === "ALL");
+      const via = joined.find((group) => (group === "ALL" ? everyone : refs.includes(group)));
+      if (via === undefined) continue;
+      entries.push({
+        key: `binds:${card.uid}|${id}`,
+        scope: "shift-counts",
+        label: `“${ruleTitle(card, "counts")}” now also binds ${person.id}`,
+        before: null,
+        after: `Hard rule for ${via === "ALL" ? "everyone" : `“${via}”`}; days they must have off do not count toward it`,
+        kind: "created",
+      });
+    }
+  }
+  return entries;
 }
 
 /**
@@ -700,15 +813,21 @@ export function deriveProposalDiff(
 ): ProposalDiff {
   const named = directKeys(commands, before, after);
   const all = diffScenarioDocuments(before, after);
-  const direct = collapseOffRuns(
-    mergeRenames(
-      all.filter((entry) => named.has(entry.key)),
+  const direct = [
+    ...collapseOffRuns(
+      mergeRenames(
+        all.filter((entry) => named.has(entry.key)),
+        commands,
+      ),
       commands,
+      after,
     ),
-    commands,
-    after,
-  );
-  const cascade = all.filter((entry) => !named.has(entry.key));
+    ...availabilityLines(commands, after),
+  ];
+  const cascade = [
+    ...all.filter((entry) => !named.has(entry.key)),
+    ...newlyBoundHardRules(before, after, commands),
+  ];
 
   const directDomains = new Set(direct.map((entry) => SCOPE_DOMAIN[entry.scope]));
   const needsReview = SETUP_DOMAINS.filter(
