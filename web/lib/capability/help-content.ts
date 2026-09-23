@@ -197,7 +197,9 @@ export const CAPABILITY_ENTRIES = [
     nurseFacingSummary:
       "Send the current setup to the optimiser and, when it finishes, download the result. The " +
       "optimiser only knows the rules that are written down here — it cannot infer ward custom, " +
-      "policy or anything outside the recorded rules.",
+      "policy or anything outside the recorded rules. The assistant can offer to start a run " +
+      "for you; it starts only when you press Run on its card, and then runs exactly as if you " +
+      "had pressed Optimize.",
     concepts: ["optimise", "generate roster", "solver", "run", "export", "download"],
     modes: BOTH_MODES,
     featureGates: [],
@@ -287,7 +289,8 @@ export const CAPABILITY_ENTRIES = [
       "works, and suggest which rule expresses a policy you describe. It can also prepare a few " +
       "kinds of change — the roster period, turning a rule on or off, a staffing head count, " +
       "moving leave, and adding new shifts and shift groups — which you review and apply " +
-      "yourself. It cannot change the roster on its own, and it cannot edit or delete existing " +
+      "yourself. It can also offer to run the optimiser — the run starts only when you press " +
+      "Run — and then tell you how it went. It cannot change the roster on its own, and it cannot edit or delete existing " +
       "shifts. It is not a source of employment, legal or clinical-safety authority.",
     concepts: ["assistant", "chat", "read-only", "suggestion", "apply", "limits"],
     modes: BOTH_MODES,

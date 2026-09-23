@@ -127,25 +127,21 @@ describe("the model-visible surface cannot express a Phase-2 roster change", () 
     expect([...ASSISTANT_COMMAND_TYPES].sort()).toEqual([...PROPOSAL_OPERATIONS].sort());
   });
 
-  it("can point at roster generation, but has no way to start one", () => {
-    // The "could you generate the roster?" journey is deliberately a HELP answer plus
-    // a host navigation, not an action: `generate-roster` is a registry entry with a
-    // route and a control anchor and an EMPTY `supportedCommands`, so the assistant
-    // can explain it and take the user there while the run itself stays the user's.
-    // A non-empty command list here would be the first step toward the assistant
-    // starting official runs on its own.
+  it("can offer a roster run, but only the user can start one", () => {
+    // CHANGED DELIBERATELY (2026-09-24, plan assistant-optimize-run). This used to lock
+    // "can point at roster generation, but has no way to start one". Solver runs are
+    // now a lifted family: request_optimize_run shows a host card, and the run starts
+    // only from the user's Run click, through the Optimize screen's own onSubmit.
     //
-    // WHAT CHANGED (custom-AST ticket 3). This used to `indexOf` the entry's id in the
-    // help-content SOURCE and slice forward to the next `},` -- a hand-rolled object
-    // parser that a trailing comment, a nested object or a reordered field would have
-    // silently mis-sliced, producing a block that satisfied `toContain` for the wrong
-    // reason. The registry is an ordinary exported value; reading it is both simpler and
-    // exact.
+    // What stays locked: `generate-roster` still carries an EMPTY `supportedCommands`.
+    // That field lists SCENARIO writes, and a run writes none -- a non-empty list here
+    // would mean a run had started mutating the schedule.
     const entry = CAPABILITY_ENTRIES.find((candidate) => candidate.id === "generate-roster");
     expect(entry, "the generate-roster entry is missing").toBeDefined();
     expect(entry?.routeId).toBe("optimize-and-export");
     expect(entry?.controlAnchor).toBe("optimize.run-options");
     expect(entry?.supportedCommands).toEqual([]);
+    expect(entry?.nurseFacingSummary).toMatch(/only when you press Run/);
   });
 
   it("can reach no roster table from any transaction the assistant may start", () => {
