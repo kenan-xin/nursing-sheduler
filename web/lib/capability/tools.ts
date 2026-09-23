@@ -15,6 +15,9 @@ export const ASSISTANT_TOOL_NAMES = [
   // T04 -- read the current scenario.
   "get_schedule_overview",
   "get_schedule_section",
+  // Read-only setup and feasibility reports (plan 2026-09-24 guided setup and repair).
+  "get_setup_progress",
+  "suggest_feasibility_options",
   // T06 -- read the versioned help/capability registry.
   "list_app_capabilities",
   "explain_app_capability",

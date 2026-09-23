@@ -43,4 +43,5 @@ export const PARAMETERLESS_MODEL_VISIBLE_TOOLS: readonly string[] = Object.freez
   "list_app_capabilities",
   "request_optimize_run",
   "get_optimize_result",
+  "get_setup_progress",
 ]);

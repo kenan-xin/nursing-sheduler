@@ -21,13 +21,16 @@ import {
   useParameterlessModelVisibleTool,
 } from "./register-model-visible-tool";
 import { z } from "zod";
-import { useScenarioStore, useAuthorityStore } from "@/lib/store";
-import { pickScenario } from "@/lib/store";
+import { useScenarioStore, useAuthorityStore, useHotStore, pickScenario } from "@/lib/store";
 import { summarizeScenario } from "@/lib/ai/assistant/scenario-context";
 import { useHelpTools } from "./use-help-tools";
 import { useProposalTools } from "./use-proposal-tools";
 import { useDiagnosticTools } from "./use-diagnostic-tools";
 import { useOptimizeTools } from "./use-optimize-tools";
+import { computeScenarioSummary } from "@/components/home/scenario-summary";
+import { computeCoverageWarnings } from "@/components/requirements/requirements-model";
+import { findStaffingShortfalls } from "@/lib/rules/shortfalls";
+import { deriveSetupProgress, type SetupProgress } from "@/lib/ai/assistant/setup-progress";
 
 const DOMAINS = ["dates", "staff", "shifts", "rules", "requests"] as const;
 type Domain = (typeof DOMAINS)[number];
@@ -93,6 +96,20 @@ export function useModelVisibleTools(agentId: string, turnEpoch: number): void {
     [agentId, turnEpoch],
   );
 
+  useParameterlessModelVisibleTool(
+    {
+      name: "get_setup_progress",
+      agentId,
+      description:
+        "Check which set-up steps of this schedule are finished and what to do next. Call it " +
+        "when the user wants to set up a schedule, asks what is left, or after they apply a " +
+        "set-up change. Follow nextStep: ask only its questions, prepare that one step as one " +
+        "change, and wait for the user to apply it before moving on.",
+      handler: async () => readSetupProgress(),
+    },
+    [agentId, turnEpoch],
+  );
+
   useModelVisibleTool(
     {
       name: "get_schedule_section",
@@ -109,6 +126,18 @@ export function useModelVisibleTools(agentId: string, turnEpoch: number): void {
     },
     [agentId, turnEpoch],
   );
+}
+
+/** Setup progress over the live committed projection. Never mutates. */
+function readSetupProgress(): SetupProgress {
+  const scenario = pickScenario(useScenarioStore.getState());
+  const coverage = computeCoverageWarnings(scenario, scenario.cardsByKind.requirements);
+  return deriveSetupProgress({
+    summary: computeScenarioSummary(scenario),
+    runComplete: useHotStore.getState().run.phase === "complete",
+    uncoveredShifts: coverage.undefinedSection?.items ?? [],
+    knownGaps: findStaffingShortfalls(scenario).length,
+  });
 }
 
 /** Project one domain out of the live committed projection. Never mutates. */

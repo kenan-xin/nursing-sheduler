@@ -57,6 +57,11 @@ const MODEL_VISIBLE_TOOLS = [
   // get_optimize_result reads that screen's run view. Neither names a roster verb.
   "request_optimize_run",
   "get_optimize_result",
+  // WIDENED DELIBERATELY (2026-09-24, plan assistant-guided-setup-and-repair): two
+  // read-only tools. They read the scenario and return host-derived facts and playbook
+  // options; neither writes anything nor names a roster.
+  "get_setup_progress",
+  "suggest_feasibility_options",
 ] as const;
 
 /**

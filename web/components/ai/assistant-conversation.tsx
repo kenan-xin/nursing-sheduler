@@ -103,7 +103,7 @@ export function LifecycleNotice() {
 }
 
 /** What each model-visible tool is doing, in the user's terms. */
-const TOOL_ACTIVITY: Readonly<Record<string, string>> = {
+export const TOOL_ACTIVITY: Readonly<Record<string, string>> = {
   get_schedule_overview: "Reading your schedule…",
   get_schedule_section: "Reading your schedule…",
   test_feasibility_candidates: "Testing possible fixes…",
@@ -114,6 +114,8 @@ const TOOL_ACTIVITY: Readonly<Record<string, string>> = {
   prepare_scenario_change: "Preparing a change…",
   request_optimize_run: "Offering an optimiser run…",
   get_optimize_result: "Checking the optimiser run…",
+  get_setup_progress: "Checking your set-up…",
+  suggest_feasibility_options: "Looking for ways to fill the gaps…",
 };
 
 /**
