@@ -14,7 +14,7 @@ import {
   type OperationalConfirmationV1,
 } from "./assumptions";
 import { applyAssistantCommands } from "./operations";
-import { proposalScenario } from "./test-support";
+import { octoberWard, proposalScenario } from "./test-support";
 
 function assumptionsFor(commands: Parameters<typeof applyAssistantCommands>[1]) {
   const before = proposalScenario();
@@ -127,5 +127,68 @@ describe("confirmations bind to one revision and one target", () => {
     expect(confirmationsDigest([a, b])).toBe(confirmationsDigest([b, a]));
     expect(confirmationsDigest([a])).not.toBe(confirmationsDigest([a, b]));
     expect(confirmationsDigest([])).not.toBe(confirmationsDigest([a]));
+  });
+});
+
+describe("leave and request arms", () => {
+  function assumptionsIn(commands: Parameters<typeof applyAssistantCommands>[1]) {
+    const before = octoberWard();
+    const applied = applyAssistantCommands(before, commands);
+    if (!applied.ok) throw new Error(`fixture refused: ${applied.rejection.message}`);
+    return deriveAssumptions(before, applied.next, commands);
+  }
+
+  it("asks whether the person agreed when a change clears their leave", () => {
+    const assumptions = assumptionsIn([
+      { type: "clear_requests", personId: "Ana", startDate: "2026-10-14", endDate: "2026-10-14" },
+      {
+        type: "set_shift_request",
+        personId: "Ana",
+        shiftType: "N",
+        startDate: "2026-10-14",
+        endDate: "2026-10-14",
+        weight: "must",
+      },
+    ]);
+    expect(assumptions).toHaveLength(1);
+    expect(assumptions[0]).toMatchObject({
+      type: "leave_cancelled",
+      person: "Ana",
+      date: "14",
+      toDate: null,
+      question: "Has Ana agreed to give up their leave on 14?",
+    });
+  });
+
+  it("asks when a day-off request replaces leave", () => {
+    const assumptions = assumptionsIn([
+      {
+        type: "set_off_request",
+        personId: "Ana",
+        startDate: "2026-10-14",
+        endDate: "2026-10-14",
+        weight: 0,
+      },
+    ]);
+    expect(assumptions.map((a) => [a.type, a.person, a.date])).toEqual([
+      ["leave_cancelled", "Ana", "14"],
+    ]);
+  });
+
+  it("asks nothing when leave is only recorded or requests change", () => {
+    expect(
+      assumptionsIn([
+        { type: "add_leave", personId: "Ana", startDate: "2026-10-10", endDate: "2026-10-16" },
+        {
+          type: "set_shift_request",
+          personId: "Ben",
+          shiftType: "N",
+          startDate: "2026-10-19",
+          endDate: "2026-10-25",
+          weight: -5,
+        },
+        { type: "clear_requests", personId: "Ben", startDate: "2026-10-21", endDate: "2026-10-22" },
+      ]),
+    ).toEqual([]);
   });
 });

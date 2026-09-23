@@ -297,6 +297,33 @@ describe("the command arms the provider is actually shown", () => {
         restMinutes: 60,
       },
       add_shift_group: { type: "add_shift_group", groupId: "Night shifts", members: ["N"] },
+      add_leave: {
+        type: "add_leave",
+        personId: "Ana",
+        startDate: "2026-10-10",
+        endDate: "2026-10-16",
+      },
+      set_off_request: {
+        type: "set_off_request",
+        personId: 7,
+        startDate: "2026-10-21",
+        endDate: "2026-10-21",
+        weight: 5,
+      },
+      set_shift_request: {
+        type: "set_shift_request",
+        personId: "Ben",
+        shiftType: "N",
+        startDate: "2026-10-19",
+        endDate: "2026-10-25",
+        weight: "never",
+      },
+      clear_requests: {
+        type: "clear_requests",
+        personId: "Ana",
+        startDate: "2026-10-14",
+        endDate: "2026-10-14",
+      },
     };
     expect(Object.keys(representative).sort()).toEqual([...ASSISTANT_COMMAND_TYPES].sort());
 
@@ -316,6 +343,22 @@ describe("the command arms the provider is actually shown", () => {
       expect(parsed.ok, `canonical parse rejected the wire arm ${name}`).toBe(true);
       if (parsed.ok) expect(parsed.commands).toEqual([payload]);
     }
+  });
+
+  it("tells the model, on the wire, to check with the person before clearing their leave", () => {
+    // `clear_requests`' guidance -- ask the person first, never decide for them -- is the
+    // one thing standing between the model and silently discarding approved leave. It is
+    // only worth anything if the provider is actually shown it.
+    const operations = child(
+      child(child(wire.get("prepare_scenario_change"), "parameters"), "properties"),
+      "operations",
+    );
+    const arm = branches(child(operations, "items")).find(
+      (candidate) =>
+        pinnedValue(child(child(candidate, "properties"), "type")) === "clear_requests",
+    );
+    if (!arm) throw new Error("clear_requests arm missing from the wire");
+    expect(arm.description).toContain("never as a decision");
   });
 
   it("leaves the parameterless and flat-parameter tools exactly as they were", () => {

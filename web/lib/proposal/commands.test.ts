@@ -166,4 +166,89 @@ describe("parseAssistantCommands", () => {
       expect(parseAssistantCommands(payload).ok, JSON.stringify(payload)).toBe(false);
     }
   });
+
+  it("accepts the leave and request arms with calendar dates", () => {
+    const result = parseAssistantCommands([
+      { type: "add_leave", personId: "Ana", startDate: "2026-10-10", endDate: "2026-10-16" },
+      {
+        type: "set_shift_request",
+        personId: "Ben",
+        shiftType: "N",
+        startDate: "2026-10-19",
+        endDate: "2026-10-25",
+        weight: -5,
+      },
+      {
+        type: "set_shift_request",
+        personId: "Chris",
+        shiftType: "L",
+        startDate: "2026-10-20",
+        endDate: "2026-10-20",
+        weight: "must",
+      },
+      {
+        type: "set_off_request",
+        personId: 7,
+        startDate: "2026-10-21",
+        endDate: "2026-10-21",
+        weight: 0,
+      },
+      { type: "clear_requests", personId: "Ana", startDate: "2026-10-14", endDate: "2026-10-14" },
+    ]);
+    expect(result.ok).toBe(true);
+  });
+
+  it("refuses leave/request payloads the model must fix itself", () => {
+    const refused: unknown[] = [
+      // A roster date id instead of a calendar date.
+      [{ type: "add_leave", personId: "Ana", startDate: "14", endDate: "14" }],
+      // Words instead of a date.
+      [{ type: "add_leave", personId: "Ana", startDate: "10 Oct", endDate: "16 Oct" }],
+      // An end date omitted.
+      [{ type: "add_leave", personId: "Ana", startDate: "2026-10-10" }],
+      // Infinity spelled as a string: the hard values are "must" / "never".
+      [
+        {
+          type: "set_shift_request",
+          personId: "Ben",
+          shiftType: "N",
+          startDate: "2026-10-19",
+          endDate: "2026-10-25",
+          weight: "-Infinity",
+        },
+      ],
+      // Weight omitted: the model must say how strongly.
+      [
+        {
+          type: "set_off_request",
+          personId: "Ben",
+          startDate: "2026-10-21",
+          endDate: "2026-10-21",
+        },
+      ],
+      // Fractional weight: a weight is a whole number, or "must"/"never".
+      [
+        {
+          type: "set_off_request",
+          personId: "Ben",
+          startDate: "2026-10-21",
+          endDate: "2026-10-21",
+          weight: 2.5,
+        },
+      ],
+      // Content alongside targets: a leave type or note is not a field.
+      [
+        {
+          type: "add_leave",
+          personId: "Ana",
+          startDate: "2026-10-10",
+          endDate: "2026-10-16",
+          description: "annual leave",
+        },
+      ],
+    ];
+    for (const payload of refused) {
+      expect(parseAssistantCommands(payload).ok, JSON.stringify(payload)).toBe(false);
+    }
+  });
 });

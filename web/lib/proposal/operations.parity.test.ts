@@ -36,8 +36,12 @@ import {
   validateFullEditId,
   validateWorkingTimeDraft,
 } from "@/components/entity-editor/core";
-import { applyAssistantCommand } from "./operations";
-import { proposalScenario } from "./test-support";
+import type { DateRef, PersonRef } from "@/lib/scenario";
+import { computeQuickPaintCellIntent } from "@/components/requests/requests-gestures";
+import { createHotStore } from "@/lib/store/hot-store";
+import { foldPaintIntents } from "@/lib/store/paint-fold";
+import { applyAssistantCommand, assistantCellUids } from "./operations";
+import { octoberWard, proposalScenario } from "./test-support";
 
 describe("set_roster_range is the manual range cascade", () => {
   it("produces the identical document the Dates screen commits", () => {
@@ -296,6 +300,163 @@ describe("add_shift_type is the Shifts page's Add shift save", () => {
         const manual = await manualAdd(state, gate.idCheck.id, name, startTime, endTime, rest);
         expect(assistant.next).toEqual(manual);
       }
+    }
+  });
+});
+
+describe("leave and request arms are the Requests page's quick paint", () => {
+  /**
+   * One real paint drag: the page's intent reducer per crossed cell, staged through
+   * the real hot store, folded by the shared fold. The dispatch below restates the
+   * private `stageCellIntent` in `use-requests.ts` (four calls, no logic of its own).
+   * The minter is the host's, so the two documents can be compared exactly.
+   */
+  function manualPaint(
+    state: ScenarioUiState,
+    person: PersonRef,
+    dates: DateRef[],
+    selectedIds: string[],
+    weight: number,
+  ) {
+    const hot = createHotStore();
+    hot.getState().beginPaint();
+    for (const date of dates) {
+      const intent = computeQuickPaintCellIntent(selectedIds, weight);
+      if (!intent) continue;
+      if (intent.mode === "erase") hot.getState().stagePaintErase(person, date);
+      else if (intent.mode === "day-state") {
+        hot.getState().stagePaintDayState(person, date, intent.dayState);
+      } else {
+        for (const [selector, w] of intent.deltas) {
+          hot.getState().stagePaintRequestDelta(person, date, selector, w);
+        }
+      }
+    }
+    const staged = hot.getState().paint;
+    if (!staged) throw new Error("paint gesture did not open");
+    return foldPaintIntents(state.reqData, staged, assistantCellUids(state.reqData));
+  }
+
+  const days = (from: number, to: number) =>
+    Array.from({ length: to - from + 1 }, (_, i) => String(from + i).padStart(2, "0"));
+  const iso = (day: number) => `2026-10-${String(day).padStart(2, "0")}`;
+
+  // [assistant command, the paint selection a user would make, its weight, dates dragged]
+  const matrix: [Parameters<typeof applyAssistantCommand>[1], string[], number, DateRef[]][] = [
+    [
+      { type: "add_leave", personId: "Ana", startDate: iso(10), endDate: iso(16) },
+      ["LEAVE"],
+      0,
+      days(10, 16),
+    ],
+    [
+      {
+        type: "set_off_request",
+        personId: "Ben",
+        startDate: iso(21),
+        endDate: iso(23),
+        weight: -5,
+      },
+      ["OFF"],
+      -5,
+      days(21, 23),
+    ],
+    [
+      {
+        type: "set_off_request",
+        personId: "Ana",
+        startDate: iso(14),
+        endDate: iso(14),
+        weight: "must",
+      },
+      ["OFF"],
+      Infinity,
+      days(14, 14),
+    ],
+    [
+      // Crosses Ben's day off on the 21st -- covers the precedence skip.
+      {
+        type: "set_shift_request",
+        personId: "Ben",
+        shiftType: "N",
+        startDate: iso(19),
+        endDate: iso(25),
+        weight: -5,
+      },
+      ["N"],
+      -5,
+      days(19, 25),
+    ],
+    [
+      {
+        type: "set_shift_request",
+        personId: "Ben",
+        shiftType: "D",
+        startDate: iso(22),
+        endDate: iso(22),
+        weight: 0,
+      },
+      ["D"],
+      0,
+      days(22, 22),
+    ],
+    [
+      {
+        type: "set_shift_request",
+        personId: "Chris",
+        shiftType: "L",
+        startDate: iso(20),
+        endDate: iso(20),
+        weight: "never",
+      },
+      ["L"],
+      -Infinity,
+      days(20, 20),
+    ],
+    [
+      {
+        type: "set_shift_request",
+        personId: "Seniors",
+        shiftType: "Nights",
+        startDate: iso(5),
+        endDate: iso(5),
+        weight: 3,
+      },
+      ["Nights"],
+      3,
+      days(5, 5),
+    ],
+    [
+      {
+        type: "set_shift_request",
+        personId: "Ana",
+        shiftType: "ALL",
+        startDate: iso(1),
+        endDate: iso(3),
+        weight: 1,
+      },
+      ["ALL"],
+      1,
+      days(1, 3),
+    ],
+    [
+      { type: "clear_requests", personId: "Ben", startDate: iso(21), endDate: iso(22) },
+      [],
+      0,
+      days(21, 22),
+    ],
+  ];
+
+  it("produces the same matrix as the paint gesture, cell for cell and uid for uid", () => {
+    const state = octoberWard();
+    for (const [command, selectedIds, weight, dates] of matrix) {
+      const assistant = applyAssistantCommand(state, command);
+      expect(assistant.ok, JSON.stringify(command)).toBe(true);
+      if (!assistant.ok) continue;
+      const personId = (command as { personId: PersonRef }).personId;
+      expect(assistant.next.reqData, JSON.stringify(command)).toEqual(
+        manualPaint(state, personId, dates, selectedIds, weight),
+      );
     }
   });
 });
