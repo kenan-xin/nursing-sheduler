@@ -151,6 +151,21 @@ export const SCENARIOS = {
         ],
       }),
     }),
+  /** Every night needs exactly 1 on the ward and exactly 2 RNs: the two rules cannot both hold. */
+  conflictingRequirements: (): ScenarioUiState =>
+    ward({
+      staff: people("ana", "ben", "cara"),
+      staffGroups: [{ id: "RN", members: ["ana", "ben"] }],
+      cardsByKind: cards({
+        requirements: [
+          requirement("night-total", "N", 1, { description: "1 on every night" }),
+          requirement("night-rn", "N", 2, {
+            qualifiedPeople: ["RN"],
+            description: "2 RNs every night",
+          }),
+        ],
+      }),
+    }),
   /** 2 nurses, day + night each day, no day after a night and no two nights in a row. */
   restRuleTooTight: (): ScenarioUiState =>
     ward({

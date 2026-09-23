@@ -1,0 +1,57 @@
+apiVersion: alpha
+dates:
+  range:
+    startDate: 2026-11-01
+    endDate: 2026-11-07
+people:
+  items:
+    - id: ana
+    - id: ben
+    - id: cara
+    - id: dev
+  groups:
+    - id: Nurses
+      members:
+        - ana
+        - ben
+        - cara
+        - dev
+shiftTypes:
+  items:
+    - id: D
+      description: Day
+    - id: N
+      description: Night
+preferences:
+  - type: at most one shift per day
+  - type: shift type requirement
+    description: day
+    shiftType:
+      - D
+    requiredNumPeople: 1
+    qualifiedPeople:
+      - ALL
+    date:
+      - ALL
+    weight: -1
+  - type: shift type requirement
+    description: night
+    shiftType:
+      - N
+    requiredNumPeople: 1
+    qualifiedPeople:
+      - ALL
+    date:
+      - ALL
+    weight: -1
+  - type: shift count
+    description: At most 1 nights
+    person:
+      - Nurses
+    countDates:
+      - ALL
+    countShiftTypes:
+      - N
+    expression: x <= T
+    target: 1
+    weight: .inf
