@@ -7,15 +7,6 @@ people:
   items:
     - id: ana
     - id: ben
-    - id: cara
-    - id: dev
-  groups:
-    - id: Nurses
-      members:
-        - ana
-        - ben
-        - cara
-        - dev
 shiftTypes:
   items:
     - id: D
@@ -24,16 +15,6 @@ shiftTypes:
       description: Night
 preferences:
   - type: at most one shift per day
-  - type: shift type requirement
-    description: day
-    shiftType:
-      - D
-    requiredNumPeople: 1
-    qualifiedPeople:
-      - ALL
-    date:
-      - ALL
-    weight: -1
   - type: shift type requirement
     description: night
     shiftType:
@@ -45,13 +26,24 @@ preferences:
       - ALL
     weight: -1
   - type: shift count
-    description: At most 2 nights
+    description: At most 3 nights
     person:
-      - Nurses
+      - ana
     countDates:
       - ALL
     countShiftTypes:
       - N
     expression: x <= T
-    target: 2
+    target: 3
+    weight: .inf
+  - type: shift count
+    description: At most 3 nights
+    person:
+      - ben
+    countDates:
+      - ALL
+    countShiftTypes:
+      - N
+    expression: x <= T
+    target: 3
     weight: .inf

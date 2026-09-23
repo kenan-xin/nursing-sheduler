@@ -151,6 +151,15 @@ export const SCENARIOS = {
         ],
       }),
     }),
+  /** 7 nights, 2 nurses, each with her own hard limit of 3 nights: one night is left over. */
+  personalCapsTooLow: (): ScenarioUiState =>
+    ward({
+      staff: people("ana", "ben"),
+      cardsByKind: cards({
+        requirements: [requirement("night", "N", 1)],
+        counts: [nightCap("ana-nights", "ana", 3), nightCap("ben-nights", "ben", 3)],
+      }),
+    }),
   /** Every night needs exactly 1 on the ward and exactly 2 RNs: the two rules cannot both hold. */
   conflictingRequirements: (): ScenarioUiState =>
     ward({

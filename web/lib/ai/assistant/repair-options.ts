@@ -209,6 +209,16 @@ function editableCount(card: CountCard | undefined): card is EditableCount {
 const editableCap = (card: CountCard | undefined): card is EditableCount =>
   editableCount(card) && Number.isFinite(capOf(card.expression, card.target, card.weight));
 
+/**
+ * The card's label at a new target. A label that starts "At most <current target>" states
+ * the cap itself, so its number follows the target; any other label is the manager's own.
+ */
+function labelAt(card: EditableCount, target: number): string {
+  const label = card.description ?? "";
+  const stated = new RegExp(`^(At most )${card.target}(?!\\d)`);
+  return target === card.target ? label : label.replace(stated, `$1${target}`);
+}
+
 function editCount(
   ctx: Ctx,
   card: EditableCount,
@@ -218,7 +228,7 @@ function editCount(
   return {
     type: "edit_count_rule",
     ruleId: card.uid,
-    description: card.description ?? "",
+    description: labelAt(card, target),
     people,
     shiftTypes: asList(card.countShiftTypes).map(String),
     // Span ids become ISO (the card editor's form); chips and group ids stay as written.

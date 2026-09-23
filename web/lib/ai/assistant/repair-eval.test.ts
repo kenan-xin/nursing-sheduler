@@ -52,6 +52,7 @@ const INFEASIBLE: Exclude<ScenarioName, "empty" | "restRuleTooTight">[] = [
   "ruleTooStrict",
   "tooFewNurses",
   "conflictingRequirements",
+  "personalCapsTooLow",
 ];
 
 const EXPECTED: Record<(typeof INFEASIBLE)[number], RepairId[]> = {
@@ -60,6 +61,7 @@ const EXPECTED: Record<(typeof INFEASIBLE)[number], RepairId[]> = {
   ruleTooStrict: ["relax_count_rule", "borrow_temporary_nurse"],
   tooFewNurses: ["borrow_temporary_nurse"],
   conflictingRequirements: ["align_overlapping_requirements"],
+  personalCapsTooLow: ["extra_shift_willing_nurse", "borrow_temporary_nurse"],
 };
 
 /** The host question each option's Preview must raise before Apply (none = asked in chat or plain manager call). */
@@ -93,7 +95,7 @@ describe("guided setup from an empty scenario", () => {
       knownGaps: findStaffingShortfalls(state).length,
     });
     expect(progress.readyToRun).toBe(true);
-    expect(progress.knownGaps).toBe(1);
+    expect(findStaffingShortfalls(state)).toHaveLength(1);
   });
 });
 
@@ -204,6 +206,27 @@ describe("the scripted wards read as real ward situations", () => {
       { type: "add_person", name: "Borrowed nurse 1", groups: [] },
     ]);
     expect(borrow.enforcedBy).toBe("chat");
+  });
+
+  it("personal caps too low: ask ana for one more night, and her agreement gates Apply", () => {
+    const state = SCENARIOS.personalCapsTooLow();
+    const [extra] = options("personalCapsTooLow");
+    expect(extra.operations).toEqual([
+      expect.objectContaining({
+        type: "edit_count_rule",
+        ruleId: "ana-nights",
+        description: "At most 4 nights",
+        people: ["ana"],
+        target: 4,
+        weight: "infinity",
+      }),
+    ]);
+    expect(extra).toMatchObject({ confirmation: "named_nurse", enforcedBy: "host_question" });
+    const result = applyAssistantCommands(state, extra.operations);
+    if (!result.ok) throw new Error(result.rejection.message);
+    expect(deriveAssumptions(state, result.next, extra.operations)).toEqual([
+      expect.objectContaining({ type: "extra_shifts_agreed" }),
+    ]);
   });
 
   it("conflicting requirements: raise the ward total to match the RN rule, never lower the RN rule", () => {

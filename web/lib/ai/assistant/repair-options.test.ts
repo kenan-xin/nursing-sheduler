@@ -265,6 +265,31 @@ describe("rankRepairOptions", () => {
     expect(rank(state).map((o) => o.repairId)).not.toContain("relax_count_rule");
   });
 
+  it("keeps a generated cap label true after a raise, and never rewrites the manager's own label", () => {
+    const relaxed = (description: string) => {
+      const base = SCENARIOS.ruleTooStrict();
+      const [card] = base.cardsByKind.counts;
+      const state = {
+        ...base,
+        cardsByKind: { ...base.cardsByKind, counts: [{ ...card, description }] },
+      };
+      const relax = rank(state).find((o) => o.repairId === "relax_count_rule");
+      expect(relax && isSafeOption(state, relax)).toBe(true);
+      return relax?.operations[0];
+    };
+    expect(relaxed("At most 1 nights")).toMatchObject({
+      target: 2,
+      description: "At most 2 nights",
+    });
+    expect(relaxed("Night limit agreed with the union")).toMatchObject({
+      description: "Night limit agreed with the union",
+    });
+    // The number is not the current cap, so the label is the manager's, not generated.
+    expect(relaxed("At most 10 nights a month")).toMatchObject({
+      description: "At most 10 nights a month",
+    });
+  });
+
   it("aligns conflicting requirements by raising the wider one, never a skill-mix one", () => {
     const [top] = rank(conflictingNights());
     expect(top).toMatchObject({
@@ -297,7 +322,7 @@ describe("isSafeOption", () => {
   const editCap = (patch: Record<string, unknown>) => ({
     type: "edit_count_rule",
     ruleId: "max-nights",
-    description: "At most 1 nights",
+    description: `At most ${String(patch.target ?? 2)} nights`,
     people: ["Nurses"],
     shiftTypes: ["N"],
     dates: ["ALL"],
