@@ -22,7 +22,14 @@
 // load/replace (which mints a new identity upstream) can only ever produce a clean
 // thread, and restoring a prior identity restores that identity's own thread.
 
-import { useEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+  type RefObject,
+} from "react";
 import { usePathname } from "next/navigation";
 import { useAuthorityStore, useScenarioStore } from "@/lib/store";
 import { selectActiveThread } from "@/lib/ai/assistant/history-repo";
@@ -164,10 +171,109 @@ function useIsWideLayout(): boolean {
   return wide;
 }
 
+/**
+ * The dock's user-chosen width, in px, persisted per browser. `null` means the user
+ * has never dragged, and the dock keeps its `w-96` default.
+ *
+ * The floor sits a little under the default so the composer row still fits; the
+ * ceiling is half the viewport so the screen beside it stays usable with the rail
+ * open. Read in the initializer because the panel only mounts after hydration.
+ */
+export const ASSISTANT_DOCK_WIDTH_KEY = "ns-assistant-dock-width";
+export const ASSISTANT_DOCK_MIN_WIDTH = 320;
+const DOCK_KEY_STEP = 16;
+
+function clampDockWidth(width: number): number {
+  const max = Math.max(ASSISTANT_DOCK_MIN_WIDTH, Math.round(window.innerWidth / 2));
+  return Math.round(Math.min(max, Math.max(ASSISTANT_DOCK_MIN_WIDTH, width)));
+}
+
+function readStoredDockWidth(): number | null {
+  try {
+    const stored = Number(window.localStorage.getItem(ASSISTANT_DOCK_WIDTH_KEY));
+    return stored > 0 ? clampDockWidth(stored) : null;
+  } catch {
+    return null;
+  }
+}
+
+function persistDockWidth(width: number): void {
+  try {
+    window.localStorage.setItem(ASSISTANT_DOCK_WIDTH_KEY, String(width));
+  } catch {}
+}
+
+/**
+ * The dock's inner-edge splitter. A child of the dock rather than a class on it:
+ * the surface consumer's className admits neither `cursor-*` nor an arbitrary width.
+ */
+function DockResizeHandle({
+  dockRef,
+  width,
+  onWidth,
+}: {
+  dockRef: RefObject<HTMLDivElement | null>;
+  width: number | null;
+  onWidth: (width: number) => void;
+}) {
+  const current = () => clampDockWidth(width ?? dockRef.current?.offsetWidth ?? 0);
+  // The untouched default is a class, so its px value is only known after layout.
+  const [defaultWidth, setDefaultWidth] = useState<number | null>(null);
+  useEffect(() => {
+    setDefaultWidth(clampDockWidth(dockRef.current?.offsetWidth ?? 0));
+  }, [dockRef]);
+
+  const onPointerDown = (event: ReactPointerEvent) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = current();
+    let next = startWidth;
+    const move = (e: PointerEvent) => {
+      // The dock is right-anchored, so moving the pointer LEFT grows it.
+      next = clampDockWidth(startWidth + startX - e.clientX);
+      onWidth(next);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      persistDockWidth(next);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
+  const onKeyDown = (event: ReactKeyboardEvent) => {
+    const delta =
+      event.key === "ArrowLeft" ? DOCK_KEY_STEP : event.key === "ArrowRight" ? -DOCK_KEY_STEP : 0;
+    if (!delta) return;
+    event.preventDefault();
+    const next = clampDockWidth(current() + delta);
+    onWidth(next);
+    persistDockWidth(next);
+  };
+
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize assistant"
+      aria-valuenow={width ?? defaultWidth ?? undefined}
+      aria-valuemin={ASSISTANT_DOCK_MIN_WIDTH}
+      aria-valuemax={clampDockWidth(Infinity)}
+      tabIndex={0}
+      onPointerDown={onPointerDown}
+      onKeyDown={onKeyDown}
+      className="absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize touch-none hover:bg-brand/30 focus-visible:bg-brand/30 focus-visible:outline-none"
+    />
+  );
+}
+
 /** The dock (wide) and the sheet (narrow), sharing one body and one agent. */
 export function AssistantPanel() {
   const wide = useIsWideLayout();
   const sheetRef = useRef<HTMLDivElement>(null);
+  const dockRef = useRef<HTMLDivElement>(null);
+  const [dockWidth, setDockWidth] = useState<number | null>(readStoredDockWidth);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -193,16 +299,20 @@ export function AssistantPanel() {
   //
   // `w-96` on the 0.9 baseline rather than an arbitrary pixel width: a surface
   // consumer's className admits no arbitrary value, and the dock has no reason to
-  // sit off the spacing scale.
+  // sit off the spacing scale. A user-dragged width goes through `style`, which
+  // overrides it without an arbitrary class.
   if (wide) {
     return (
       <Surface
         level="surface"
         geometry="square"
-        className="flex w-96 shrink-0 flex-col"
+        className="relative flex w-96 shrink-0 flex-col"
+        style={dockWidth === null ? undefined : { width: dockWidth }}
+        ref={dockRef}
         data-testid="assistant-dock"
         aria-label="Schedule assistant"
       >
+        <DockResizeHandle dockRef={dockRef} width={dockWidth} onWidth={setDockWidth} />
         <PanelBody />
       </Surface>
     );

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { useAuthorityStore } from "@/lib/store";
 import { assistantActions, hydrateAssistant } from "@/lib/ai/assistant/store";
@@ -18,6 +18,7 @@ import {
 } from "@/lib/ai/assistant/test-support";
 import { AssistantLauncher } from "./assistant-launcher";
 import { AssistantSurface } from "./assistant-surface";
+import { ASSISTANT_DOCK_MIN_WIDTH, ASSISTANT_DOCK_WIDTH_KEY } from "./assistant-panel";
 
 // The library's scroll-anchoring uses ResizeObserver, which jsdom does not
 // implement. Stubbed locally rather than in the shared setup file: this is the only
@@ -241,6 +242,64 @@ describe("the responsive dock and sheet", () => {
     await screen.findByTestId("assistant-dock");
 
     expect(container.innerHTML).not.toContain(SENTINEL_KEY);
+  });
+});
+
+describe("the resizable dock", () => {
+  beforeEach(async () => {
+    window.localStorage.clear();
+    await makeReady();
+    assistantActions.openPanel();
+  });
+
+  it("keeps the shipped w-96 default until the user drags", async () => {
+    render(<AssistantSurface />);
+
+    const dock = await screen.findByTestId("assistant-dock");
+    expect(dock.className).toContain("w-96");
+    expect(dock.style.width).toBe("");
+  });
+
+  it("exposes a keyboard separator that widens, clamps and persists", async () => {
+    window.localStorage.setItem(ASSISTANT_DOCK_WIDTH_KEY, "400");
+    render(<AssistantSurface />);
+
+    const dock = await screen.findByTestId("assistant-dock");
+    const handle = screen.getByRole("separator", { name: "Resize assistant" });
+    expect(handle).toHaveAttribute("aria-orientation", "vertical");
+    expect(handle).toHaveAttribute("tabindex", "0");
+    expect(handle).toHaveAttribute("aria-valuenow", "400");
+    expect(dock.style.width).toBe("400px");
+
+    // The handle sits on the dock's LEFT edge, so ArrowLeft grows the panel.
+    fireEvent.keyDown(handle, { key: "ArrowLeft" });
+    expect(dock.style.width).toBe("416px");
+    expect(window.localStorage.getItem(ASSISTANT_DOCK_WIDTH_KEY)).toBe("416");
+
+    for (let i = 0; i < 20; i++) fireEvent.keyDown(handle, { key: "ArrowRight" });
+    expect(handle).toHaveAttribute("aria-valuenow", String(ASSISTANT_DOCK_MIN_WIDTH));
+  });
+
+  it("follows a pointer drag on the inner edge", async () => {
+    window.localStorage.setItem(ASSISTANT_DOCK_WIDTH_KEY, "400");
+    render(<AssistantSurface />);
+
+    const dock = await screen.findByTestId("assistant-dock");
+    const handle = screen.getByRole("separator", { name: "Resize assistant" });
+    fireEvent.pointerDown(handle, { clientX: 600 });
+    fireEvent.pointerMove(window, { clientX: 500 });
+    fireEvent.pointerUp(window, { clientX: 500 });
+
+    expect(dock.style.width).toBe("500px");
+    expect(window.localStorage.getItem(ASSISTANT_DOCK_WIDTH_KEY)).toBe("500");
+  });
+
+  it("shows no handle on the narrow sheet", async () => {
+    setViewport(false);
+    render(<AssistantSurface />);
+
+    await screen.findByTestId("assistant-sheet");
+    expect(screen.queryByRole("separator")).not.toBeInTheDocument();
   });
 });
 
