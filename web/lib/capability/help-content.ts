@@ -180,7 +180,8 @@ export const CAPABILITY_ENTRIES = [
     nurseFacingSummary:
       "Record approved leave, off-days, and each person's shift preferences on a person-by-date " +
       "grid. Approved leave is entered here as leave for those dates; the app has no separate " +
-      "leave-approval workflow.",
+      "leave-approval workflow. The assistant can also prepare leave, day-off and shift " +
+      "requests for you to review and apply, and asks you to confirm before it removes anyone's leave.",
     concepts: ["leave", "annual leave", "day off", "shift request", "preference", "availability"],
     modes: BOTH_MODES,
     featureGates: [],
@@ -288,10 +289,11 @@ export const CAPABILITY_ENTRIES = [
       "Once it is on, the assistant can read the set-up you have open, explain how the app " +
       "works, and suggest which rule expresses a policy you describe. It can also prepare a few " +
       "kinds of change — the roster period, turning a rule on or off, a staffing head count, " +
-      "moving leave, and adding new shifts and shift groups — which you review and apply " +
-      "yourself. It can also offer to run the optimiser — the run starts only when you press " +
-      "Run — and then tell you how it went. It cannot change the roster on its own, and it cannot edit or delete existing " +
-      "shifts. It is not a source of employment, legal or clinical-safety authority.",
+      "moving leave, adding new shifts and shift groups, and recording leave, day-off and shift " +
+      "requests — which you review and apply yourself. It can also offer to run the optimiser " +
+      "— the run starts only when you press Run — and then tell you how it went. It cannot " +
+      "change the roster on its own, and it cannot edit or delete existing shifts. It is not a " +
+      "source of employment, legal or clinical-safety authority.",
     concepts: ["assistant", "chat", "read-only", "suggestion", "apply", "limits"],
     modes: BOTH_MODES,
     featureGates: ["aiAssistant"],

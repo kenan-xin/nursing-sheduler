@@ -26,6 +26,11 @@
 // `setGroupMembers`) behind the same gates the page's Save uses
 // (`validateFullEditId`, `validateWorkingTimeDraft`, numbers-only code refusal), so
 // they are shared code too. All of those live in React-free modules.
+//
+// The leave/request arms are one quick-paint gesture each and run the page's own
+// fold (`foldPaintIntents`, `lib/store/paint-fold.ts`, store- and React-free). The
+// only difference is the uid minter: the page mints random ids, the host mints
+// deterministic ones so Apply reproduces the Preview exactly.
 
 import {
   applyRangeChange,
@@ -34,13 +39,16 @@ import {
   isValidIso,
   type DateRange,
 } from "@/lib/dates";
-import type {
-  CardsByKind,
-  DateRef,
-  PersonRef,
-  RequirementCard,
-  ScenarioUiState,
-  UiRequestCell,
+import {
+  RESERVED_SHIFT_TYPE,
+  type CardsByKind,
+  type DateRef,
+  type IsoDate,
+  type PersonRef,
+  type RequirementCard,
+  type ScenarioUiState,
+  type UiRequestCell,
+  type Weight,
 } from "@/lib/scenario";
 import {
   addGroup,
@@ -51,7 +59,10 @@ import {
   validateWorkingTimeDraft,
 } from "@/components/entity-editor/core";
 import { shiftTypesDescriptor } from "@/components/shift-types/shift-types-descriptor";
-import type { AssistantCommandV1 } from "./commands";
+import { foldPaintIntents, type MintCellUid } from "@/lib/store/paint-fold";
+import { paintCellKey, type StagedCoordinate } from "@/lib/store/types";
+import type { AssistantCommandV1, RequestWeight } from "./commands";
+import { proposalDigest, stableStringify } from "./digest";
 
 /** Why a command cannot be prepared. Exhaustive: every refusal is one of these. */
 export type CommandRejectionCode =
@@ -384,6 +395,184 @@ function applyAddShiftGroup(
   return { ok: true, next: setGroupMembers(withGroup, d, idCheck.id, members) };
 }
 
+/**
+ * The roster date ids from `start` to `end` (calendar dates, inclusive), or why not.
+ * Shared with `diff.ts`, which names the same coordinates as asked-for.
+ */
+export function rosterDatesBetween(
+  state: ScenarioUiState,
+  start: IsoDate,
+  end: IsoDate,
+): { ok: true; ids: DateRef[] } | { ok: false; code: CommandRejectionCode; message: string } {
+  const range: DateRange = { start: state.rangeStart, end: state.rangeEnd };
+  if (!hasCompleteRange(range)) {
+    return {
+      ok: false,
+      code: "cascade_unavailable",
+      message:
+        "This schedule has no roster period yet, so leave and request dates cannot be checked.",
+    };
+  }
+  // The wire schema's regex only checks YYYY-MM-DD shape, so it lets impossible
+  // dates like 2026-02-30 through; isValidIso catches those here.
+  if (!isValidIso(start) || !isValidIso(end)) {
+    return { ok: false, code: "invalid_value", message: "Those are not real calendar dates." };
+  }
+  if (end < start) {
+    return {
+      ok: false,
+      code: "invalid_value",
+      message: "The end date must be on or after the start date.",
+    };
+  }
+  if (start < range.start || end > range.end) {
+    const asked = start === end ? start : `${start} to ${end}`;
+    return {
+      ok: false,
+      code: "unknown_target",
+      message: `${asked} is not inside the roster period (${range.start} to ${range.end}).`,
+    };
+  }
+  // ISO strings compare correctly as text.
+  const ids = generateDateItems(range)
+    .filter((item) => item.iso >= start && item.iso <= end)
+    .map((item) => item.id);
+  return { ok: true, ids };
+}
+
+/**
+ * The host's uid minter for new request cells: deterministic, so preparing and
+ * applying the same change produce the same document, and unique within `reqData`
+ * (a moved leave keeps its old uid, so a digest of the coordinate alone could clash).
+ */
+export function assistantCellUids(reqData: readonly UiRequestCell[]): MintCellUid {
+  const used = new Set(reqData.flatMap((cell) => (cell.uid ? [cell.uid] : [])));
+  return (person, date, selector) => {
+    for (let n = 0; ; n += 1) {
+      const uid = `assistant-${proposalDigest({ person, date, selector, n })}`;
+      if (!used.has(uid)) {
+        used.add(uid);
+        return uid;
+      }
+    }
+  };
+}
+
+type RequestPaintCommand = Extract<
+  AssistantCommandV1,
+  { type: "add_leave" | "set_off_request" | "set_shift_request" | "clear_requests" }
+>;
+
+function toWeight(weight: RequestWeight): Weight {
+  if (weight === "must") return Infinity;
+  if (weight === "never") return -Infinity;
+  return weight;
+}
+
+const NOTHING_TO_CHANGE: Record<RequestPaintCommand["type"], (who: string) => string> = {
+  add_leave: (who) => `${who} is already on leave on every one of those dates.`,
+  set_off_request: (who) => `${who} already has that day-off request on every one of those dates.`,
+  set_shift_request: (who) =>
+    `Nothing would change: ${who} already has that request, or has leave or a day off, on ` +
+    "every one of those dates. A shift request never replaces leave or a day off, so clear " +
+    "those dates first.",
+  clear_requests: (who) => `${who} has nothing recorded on those dates.`,
+};
+
+/** The one paint selection this command is, or the refusal. */
+function paintIntent(
+  state: ScenarioUiState,
+  command: RequestPaintCommand,
+  index: number,
+): { ok: true; intent: StagedCoordinate } | { ok: false; refusal: OperationResult } {
+  switch (command.type) {
+    case "add_leave":
+      return { ok: true, intent: { mode: "day-state", dayState: { kind: "leave" } } };
+    case "set_off_request":
+      return {
+        ok: true,
+        intent: { mode: "day-state", dayState: { kind: "off", weight: toWeight(command.weight) } },
+      };
+    case "clear_requests":
+      return { ok: true, intent: { mode: "erase" } };
+    case "set_shift_request": {
+      const { shiftType } = command;
+      if (shiftType === RESERVED_SHIFT_TYPE.off || shiftType === RESERVED_SHIFT_TYPE.leave) {
+        return {
+          ok: false,
+          refusal: reject(
+            index,
+            "invalid_value",
+            "A day off or leave is not a shift request; record it as a day off or as leave instead.",
+          ),
+        };
+      }
+      // The page's paint targets minus OFF/LEAVE (`requests-editor.tsx`, `paintTargets`).
+      const selectable = [
+        ...state.shifts.map((shift) => String(shift.id)),
+        ...state.shiftGroups.map((group) => group.id),
+        RESERVED_SHIFT_TYPE.all,
+      ];
+      if (!selectable.includes(shiftType)) {
+        return {
+          ok: false,
+          refusal: reject(
+            index,
+            "unknown_target",
+            `There is no shift or shift group "${shiftType}".`,
+          ),
+        };
+      }
+      return {
+        ok: true,
+        intent: { mode: "requests", deltas: new Map([[shiftType, toWeight(command.weight)]]) },
+      };
+    }
+  }
+}
+
+function applyRequestPaint(
+  state: ScenarioUiState,
+  command: RequestPaintCommand,
+  index: number,
+): OperationResult {
+  const who = String(command.personId);
+  // The matrix rows: people and staff groups, exact identity.
+  const isRow =
+    state.staff.some((person) => person.id === command.personId) ||
+    state.staffGroups.some((group) => group.id === command.personId);
+  if (!isRow) {
+    return reject(
+      index,
+      "unknown_target",
+      `There is no person or staff group "${who}" on this schedule.`,
+    );
+  }
+  const span = rosterDatesBetween(state, command.startDate, command.endDate);
+  if (!span.ok) return reject(index, span.code, span.message);
+  const selection = paintIntent(state, command, index);
+  if (!selection.ok) return selection.refusal;
+
+  // Staged in date order, exactly as a drag across those cells stages them.
+  const staged = new Map(
+    span.ids.map((date) => [paintCellKey(command.personId, date), selection.intent] as const),
+  );
+  const reqData = foldPaintIntents(state.reqData, staged, assistantCellUids(state.reqData));
+
+  // The fold regroups the matrix, so compare only the painted coordinates, order-free.
+  const dates = new Set(span.ids);
+  const painted = (cells: readonly UiRequestCell[]) =>
+    cells
+      .filter((cell) => cell.person === command.personId && dates.has(cell.date))
+      .map(stableStringify)
+      .sort()
+      .join("\n");
+  if (painted(reqData) === painted(state.reqData)) {
+    return reject(index, "no_effect", NOTHING_TO_CHANGE[command.type](who));
+  }
+  return { ok: true, next: { ...state, reqData } };
+}
+
 /** Validate and apply exactly one command against `state`. */
 export function applyAssistantCommand(
   state: ScenarioUiState,
@@ -403,6 +592,11 @@ export function applyAssistantCommand(
       return applyAddShiftType(state, command, index);
     case "add_shift_group":
       return applyAddShiftGroup(state, command, index);
+    case "add_leave":
+    case "set_off_request":
+    case "set_shift_request":
+    case "clear_requests":
+      return applyRequestPaint(state, command, index);
   }
 }
 

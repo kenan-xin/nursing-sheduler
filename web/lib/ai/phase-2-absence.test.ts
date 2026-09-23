@@ -67,6 +67,9 @@ const MODEL_VISIBLE_TOOLS = [
 // WIDENED DELIBERATELY (2026-09-23, plan assistant-add-shift-types): shift setup is
 // Phase-1 scenario authoring, not roster repair, and both arms compile to the Shifts
 // page's own primitives. A Phase-2 verb here would still be caught by PHASE_2_VERBS.
+// WIDENED AGAIN (2026-09-24, plan assistant-leave-request-ops): leave, day-off and
+// shift requests are scenario INPUTS on the Requests page, compiled to its own paint
+// fold; none edits a produced roster.
 const PROPOSAL_OPERATIONS = [
   "set_roster_range",
   "set_rule_enabled",
@@ -74,6 +77,10 @@ const PROPOSAL_OPERATIONS = [
   "move_leave",
   "add_shift_type",
   "add_shift_group",
+  "add_leave",
+  "set_off_request",
+  "set_shift_request",
+  "clear_requests",
 ] as const;
 
 /**

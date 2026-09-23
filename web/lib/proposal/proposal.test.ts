@@ -16,7 +16,7 @@ import {
   type LiveProposalBasis,
   type PreparedProposalV1,
 } from "./proposal";
-import { FIXTURE_STAMP, proposalScenario } from "./test-support";
+import { FIXTURE_STAMP, octoberWard, proposalScenario } from "./test-support";
 
 const COMMANDS = [
   { type: "set_staffing_requirement_people" as const, ruleId: "req-day", requiredNumPeople: 4 },
@@ -85,6 +85,19 @@ describe("prepareProposal", () => {
     });
     expect(proposal.status).toBe("confirmation_required");
     expect(describeProposalReadiness(proposal, LIVE).applyEnabled).toBe(false);
+  });
+
+  it("opens as confirmation_required when a request change clears someone's leave", () => {
+    const proposal = prepared({
+      document: octoberWard(),
+      commands: [
+        { type: "clear_requests", personId: "Ana", startDate: "2026-10-14", endDate: "2026-10-14" },
+      ],
+    });
+    expect(proposal.status).toBe("confirmation_required");
+    expect(proposal.assumptions.map((a) => a.question)).toEqual([
+      "Has Ana agreed to give up their leave on 14?",
+    ]);
   });
 
   it("refuses an empty change rather than rendering a live Apply over nothing", () => {
