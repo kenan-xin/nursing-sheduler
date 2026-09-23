@@ -32,6 +32,9 @@ ARG APP_VERSION
 RUN test -n "$APP_VERSION" || { echo "ERROR: APP_VERSION is empty — build via 'make build'" >&2; exit 1; }
 ENV NEXT_PUBLIC_APP_VERSION=${APP_VERSION}
 ENV NEXT_TELEMETRY_DISABLED=1
+# Skip next build's type check and use one worker so the build fits a ~2 GB host
+# (see web/next.config.ts). CI's `pnpm typecheck` is the type gate.
+ENV NS_LOW_MEMORY_BUILD=1
 RUN pnpm build
 
 # runner — minimal standalone runtime, non-root (the node image ships `node`

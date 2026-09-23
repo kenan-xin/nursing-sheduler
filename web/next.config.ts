@@ -22,7 +22,15 @@ function getGitVersion(): string {
   }
 }
 
+// Low-memory image build (set by docker/Dockerfile.web). The deploy VM has ~2 GB:
+// next build's in-process type check needs ~1.4 GB of heap on its own and OOMs
+// there, so the image build skips it (CI's `pnpm typecheck` stays the type gate)
+// and runs one static-generation worker instead of one per core.
+const lowMemoryBuild = process.env.NS_LOW_MEMORY_BUILD === "1";
+
 const nextConfig: NextConfig = {
+  typescript: { ignoreBuildErrors: lowMemoryBuild },
+  ...(lowMemoryBuild && { experimental: { cpus: 1 } }),
   // Standalone output: the Docker runner stage copies `.next/standalone` and runs
   // `node server.js` with a minimal traced node_modules (see docker/Dockerfile.web).
   output: "standalone",
