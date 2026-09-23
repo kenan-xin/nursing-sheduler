@@ -26,6 +26,16 @@ import {
   toggleRequirementRule,
 } from "@/components/guided-rules/mutations";
 import { requirementsMapper } from "@/components/guided-rules/mappers";
+import type { ScenarioUiState } from "@/lib/scenario";
+import { saveShiftTypeCard } from "@/components/shift-types/save-shift-card";
+import { shiftTypesDescriptor } from "@/components/shift-types/shift-types-descriptor";
+import {
+  addGroup,
+  paidMinutesFor,
+  setGroupMembers,
+  validateFullEditId,
+  validateWorkingTimeDraft,
+} from "@/components/entity-editor/core";
 import { applyAssistantCommand } from "./operations";
 import { proposalScenario } from "./test-support";
 
@@ -197,5 +207,127 @@ describe("move_leave matches the manual cell contract", () => {
     });
     expect(assistant.ok).toBe(true);
     if (assistant.ok) expect(assistant.next.reqData).toEqual(manual);
+  });
+});
+
+describe("add_shift_type is the Shifts page's Add shift save", () => {
+  // The value the working-time sub-form hands the grid, restated from `deriveValue`
+  // in `working-time-fields.tsx:75-94`: rest 0 is absent, duration = paid minutes.
+  const uiWorkingTime = (startTime: string, endTime: string, rest: number) => {
+    const restMinutes = rest ? rest : undefined;
+    return {
+      startTime,
+      endTime,
+      restMinutes,
+      durationMinutes: paidMinutesFor(startTime, endTime, restMinutes) ?? undefined,
+    };
+  };
+
+  // The grid's own Save gate, restated from `shift-type-grid.tsx` (`canSave`).
+  const gridCanSave = (
+    state: ScenarioUiState,
+    code: string,
+    startTime: string,
+    endTime: string,
+    rest: number,
+  ) => {
+    const d = shiftTypesDescriptor;
+    const idCheck = validateFullEditId(d, d.readItems(state), d.readGroups(state), code);
+    const timeCheck = validateWorkingTimeDraft(uiWorkingTime(startTime, endTime, rest));
+    return { ok: idCheck.ok && timeCheck.ok && !/^\d+$/.test(code.trim()), idCheck };
+  };
+
+  /** Run the REAL manual save, capturing the document its single commit produces. */
+  async function manualAdd(
+    state: ScenarioUiState,
+    code: string,
+    name: string,
+    startTime: string,
+    endTime: string,
+    rest: number,
+  ): Promise<ScenarioUiState> {
+    let next = state;
+    await saveShiftTypeCard(
+      async (updater) => {
+        next = { ...state, ...updater(state) };
+        return { ok: true };
+      },
+      {
+        mode: "add",
+        fields: { code, name, workingTime: uiWorkingTime(startTime, endTime, rest) },
+        staffing: { type: "none" },
+      },
+    );
+    return next;
+  }
+
+  // The Rest select only offers multiples of 30 up to span - 30; the off-list values
+  // below check that the shared validator refuses them on both paths.
+  const matrix: [code: string, name: string, start: string, end: string, rest: number][] = [
+    ["am1", "Morning 1", "08:00", "15:00", 0],
+    ["N", "Night shift", "20:00", "08:30", 60],
+    ["  L  ", "", "08:00", "20:30", 30],
+    ["Day", "", "08:00", "15:00", 0], // duplicate
+    ["OFF", "", "08:00", "15:00", 0], // reserved
+    ["123", "", "08:00", "15:00", 0], // numbers only
+    ["x", "", "08:15", "15:00", 0], // off grid
+    ["x", "", "08:00", "08:00", 0], // zero span
+    ["", "", "08:00", "15:00", 0], // empty
+    ["x", "", "08:00", "15:00", 45], // rest off the 30-minute grid
+    ["x", "", "08:00", "10:00", 120], // rest = span
+    ["x", "", "08:00", "15:00", -30], // negative rest
+  ];
+
+  it("accepts and refuses the same shifts, and produces the same document", async () => {
+    const state = proposalScenario();
+    for (const [code, name, startTime, endTime, rest] of matrix) {
+      const gate = gridCanSave(state, code, startTime, endTime, rest);
+      const assistant = applyAssistantCommand(state, {
+        type: "add_shift_type",
+        code,
+        name,
+        startTime,
+        endTime,
+        restMinutes: rest,
+      });
+      expect(assistant.ok, `grid ${gate.ok ? "accepts" : "refuses"} "${code}"`).toBe(gate.ok);
+      if (gate.ok && gate.idCheck.ok && assistant.ok) {
+        // The grid passes the TRIMMED id (`idCheck.id`) as the code.
+        const manual = await manualAdd(state, gate.idCheck.id, name, startTime, endTime, rest);
+        expect(assistant.next).toEqual(manual);
+      }
+    }
+  });
+});
+
+describe("add_shift_group is the Groups New group save", () => {
+  // `groups-section.tsx` save for a new group: `addGroup` then `writeGroupMembers`,
+  // which for a brand-new group is `setGroupMembers` over live items.
+  const withShifts = (): ScenarioUiState => ({
+    ...proposalScenario(),
+    shifts: [...proposalScenario().shifts, { id: "am1" }, { id: "am2" }],
+  });
+
+  it("accepts and refuses the same group ids, and produces the same document", () => {
+    const state = withShifts();
+    const d = shiftTypesDescriptor;
+    for (const groupId of ["AM", "Day", "ALL", "", "  AM  "]) {
+      const idCheck = validateFullEditId(d, d.readItems(state), d.readGroups(state), groupId, true);
+      const assistant = applyAssistantCommand(state, {
+        type: "add_shift_group",
+        groupId,
+        members: ["am2", "am1"],
+      });
+      expect(assistant.ok, `group "${groupId}"`).toBe(idCheck.ok);
+      if (idCheck.ok && assistant.ok) {
+        const manual = setGroupMembers(
+          addGroup(state, d, { id: idCheck.id, description: undefined }),
+          d,
+          idCheck.id,
+          ["am2", "am1"],
+        );
+        expect(assistant.next).toEqual(manual);
+      }
+    }
   });
 });
