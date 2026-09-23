@@ -15,7 +15,7 @@
 // initial run, and no `connect` — which is exactly why the panel can be opened by a
 // user who then changes their mind at zero cost.
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAgent, UseAgentUpdate } from "@copilotkit/react-core/v2";
 import { useAssistantTurnRunner } from "./copilotkit-core-access";
 import type { AgentSubscriber, Message } from "@ag-ui/client";
@@ -123,9 +123,40 @@ export interface AssistantSessionInput {
   historical: boolean;
 }
 
+/**
+ * What a live turn is doing, for the panel's status line. `null` when there is nothing
+ * to say: no live turn, or reply text is already streaming onto the screen.
+ */
+export type AssistantActivity = { kind: "thinking" } | { kind: "tool"; name: string } | null;
+
+const THINKING: AssistantActivity = { kind: "thinking" };
+
+/**
+ * Read the turn's activity from the CLONE's raw list, not the published one: the
+ * published view drops an unanswered tool call (see `completeToolPairs`), and an
+ * unanswered call is exactly the one that is running.
+ */
+function describeTurnActivity(messages: readonly Message[]): AssistantActivity {
+  const answered = new Set(
+    messages.flatMap((message) => (message.role === "tool" ? [message.toolCallId] : [])),
+  );
+  const running = messages
+    .flatMap((message) => (message.role === "assistant" ? (message.toolCalls ?? []) : []))
+    .filter((call) => !answered.has(call.id))
+    .at(-1);
+  if (running) return { kind: "tool", name: running.function.name };
+  const last = messages.at(-1);
+  if (last?.role === "assistant" && typeof last.content === "string" && last.content.trim()) {
+    return null;
+  }
+  return THINKING;
+}
+
 export interface AssistantSession {
   messages: Message[];
   isRunning: boolean;
+  /** What the live turn is doing right now; see {@link AssistantActivity}. */
+  activity: AssistantActivity;
   /** True until the agent instance is the real runtime-synced one. */
   connecting: boolean;
   /** True while an interruption has closed the gate and has not settled. */
@@ -186,6 +217,9 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
   // run: a turn one await from the provider is exactly as interruptible as a
   // streaming one, and the user must be able to stop it.
   const liveTurn = useAssistantStore(hasLiveAssistantWork);
+  // Written only by the authorized turn's own callbacks, and only shown while a turn is
+  // live, so a detached turn's late events cannot relabel the current one.
+  const [turnActivity, setTurnActivity] = useState<AssistantActivity>(THINKING);
 
   // Hydration. Runs per (real) agent instance: `useAgent` swaps `agent` for the
   // runtime-synced instance once `/info` resolves, and a provisional instance that
@@ -278,6 +312,8 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
       // post-launch refusal is still published while a send superseded by a genuinely
       // newer turn is not.
       let launchBaseline = boundTurnGeneration();
+      // Preparation is live work too: say so from the first moment, not the first byte.
+      setTurnActivity(THINKING);
 
       // The first moment anything needs the runtime's launch identity, and therefore
       // the first moment this app makes the same-origin `/info` request. Cached, so a
@@ -709,6 +745,19 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
           if (!ownsRun(runInput?.runId)) return;
           runFailed = true;
         },
+        // THE LIVE MIRROR. The boundary publish above is what gets PERSISTED; this is
+        // only what the user SEES while the clone streams, so a reply appears token by
+        // token instead of in one block at `TEXT_MESSAGE_END`. `onMessagesChanged`
+        // rather than `onEvent` because AG-UI runs `onEvent` before it applies the
+        // delta. Same two gates, same complete-pair view -- never a dangling call, and
+        // nothing after this turn lost authority. Nothing here touches disk: a Stop
+        // mid-stream still reconciles the panel from durable history.
+        onMessagesChanged: ({ input: runInput, messages }) => {
+          if (!ownsRun(runInput?.runId)) return;
+          if (!isTurnAuthorized(boundTurn.token)) return;
+          publishVisible(agent, publishable());
+          setTurnActivity(describeTurnActivity(messages));
+        },
       };
 
       // THE BOUND TURN. From here until `finally`, this is the turn every provider
@@ -884,6 +933,9 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
     // Disable, Clear, failure and completion alike, because each of those moves the
     // same two lifecycle fields.
     isRunning: liveTurn,
+    // An interruption has its own truthful line (`LifecycleNotice`); "Thinking…" beside
+    // "Stopping…" would contradict it.
+    activity: liveTurn && !interrupting ? turnActivity : null,
     connecting: !isReady,
     interrupting,
     send,
