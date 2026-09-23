@@ -20,3 +20,6 @@ docker/.env
 # Extracted diagnostic reports (make diagnostic-report); the source of truth is the
 # diagnostic-reports named volume, this is only the host-side extraction dir.
 /docker/diagnostic-reports/
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/

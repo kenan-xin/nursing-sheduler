@@ -1,12 +1,12 @@
 {
-  "lastQuery": "you will guide me what to click and what to enter and check whether i have done correctly or not",
+  "lastQuery": "lets wait and try again and see whats wrong",
   "perAgentQuery": {},
   "graftReads": 0,
   "sourceReads": 0,
   "savedTokens": 0,
   "injectedPointers": [],
   "nudges": 0,
-  "inputCostMicros": 5465147,
-  "inputTokensBilled": 9223498,
-  "lastBillingUuid": "2111a438-ba69-420e-80f7-a294cdb0b94c"
+  "inputCostMicros": 6396098,
+  "inputTokensBilled": 10949601,
+  "lastBillingUuid": "2204120d-a80e-410e-b5a2-61edede458a5"
 }
