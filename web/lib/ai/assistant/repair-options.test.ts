@@ -18,6 +18,7 @@ import {
   isSafeOption,
   rankRepairOptions,
   type RepairOption,
+  violatesSafetyFloor,
 } from "./repair-options";
 
 const rank = (state = SCENARIOS.onlyRnOnLeave(), runInfeasible = false) =>
@@ -875,5 +876,176 @@ describe("explaining in ward language", () => {
     expect(unexplained.findings).toEqual([]);
     expect(unexplained.certainty).toMatch(/unknown/);
     expect(unexplained.options.every((o) => o.evidence === "hypothesis")).toBe(true);
+  });
+});
+
+describe("violatesSafetyFloor (any operations, including model-written candidates)", () => {
+  const rn = SCENARIOS.onlyRnOnLeave();
+  const capped = SCENARIOS.ruleTooStrict();
+  const rest = SCENARIOS.restRuleTooTight();
+  const withCovering: ScenarioUiState = {
+    ...rn,
+    cardsByKind: {
+      ...rn.cardsByKind,
+      coverings: [{ uid: "preceptor" } as ScenarioUiState["cardsByKind"]["coverings"][number]],
+    },
+  };
+  const cap = (patch: Record<string, unknown>) => ({
+    type: "edit_count_rule",
+    ruleId: "max-nights",
+    description: "At most 1 nights",
+    people: ["Nurses"],
+    shiftTypes: ["N"],
+    dates: ["ALL"],
+    expression: "x <= T",
+    target: 1,
+    weight: "infinity",
+    ...patch,
+  });
+  const BROKEN: [string, ScenarioUiState, unknown[], RegExp][] = [
+    [
+      "rest rule off",
+      rest,
+      [
+        {
+          type: "set_rule_enabled",
+          ruleKind: "successions",
+          ruleId: "no-day-after-night",
+          enabled: false,
+        },
+      ],
+      /rest rule/,
+    ],
+    [
+      "rest rule removed",
+      rest,
+      [{ type: "remove_rule", ruleKind: "successions", ruleId: "no-double-night" }],
+      /rest rule/,
+    ],
+    [
+      "rest rule softened",
+      rest,
+      [
+        {
+          type: "edit_succession_rule",
+          ruleId: "no-double-night",
+          description: "No two nights in a row",
+          people: ["Nurses"],
+          pattern: ["N", "N"],
+          dates: ["ALL"],
+          weight: "-10",
+        },
+      ],
+      /rest rule/,
+    ],
+    [
+      "supervision removed",
+      withCovering,
+      [{ type: "remove_rule", ruleKind: "coverings", ruleId: "preceptor" }],
+      /supervision/,
+    ],
+    [
+      "RN rule lowered",
+      {
+        ...rn,
+        cardsByKind: {
+          ...rn.cardsByKind,
+          requirements: rn.cardsByKind.requirements.map((r) =>
+            r.uid === "night-rn" ? { ...r, requiredNumPeople: 2 } : r,
+          ),
+        },
+      },
+      [{ type: "set_staffing_requirement_people", ruleId: "night-rn", requiredNumPeople: 1 }],
+      /skill-mix/,
+    ],
+    [
+      "RN rule opened to everyone",
+      rn,
+      [
+        {
+          type: "edit_staffing_requirement",
+          ruleId: "night-rn",
+          description: "1 RN every night",
+          shiftType: "N",
+          qualifiedPeople: ["ALL"],
+          dates: ["ALL"],
+          requiredNumPeople: 1,
+        },
+      ],
+      /skill-mix/,
+    ],
+    [
+      "RN rule removed",
+      rn,
+      [{ type: "remove_rule", ruleKind: "requirements", ruleId: "night-rn" }],
+      /requirement to 0/,
+    ],
+    [
+      "staffing to 0",
+      rn,
+      [{ type: "set_staffing_requirement_people", ruleId: "day", requiredNumPeople: 0 }],
+      /requirement to 0/,
+    ],
+    [
+      "limit removed",
+      capped,
+      [{ type: "remove_rule", ruleKind: "counts", ruleId: "max-nights" }],
+      /limit/,
+    ],
+    ["limit made soft", capped, [cap({ weight: "10" })], /limit/],
+    ["limit +3", capped, [cap({ target: 4 })], /limit/],
+    ["limit dropped for a nurse", capped, [cap({ people: ["ana", "ben", "cara"] })], /limit/],
+    [
+      "leave cleared with nobody asked",
+      rn,
+      [{ type: "clear_requests", personId: "rn1", startDate: "2026-11-03", endDate: "2026-11-03" }],
+      /leave/,
+    ],
+    ["invented nurse", rn, [{ type: "add_person", name: "Sarah Lee", groups: [] }], /name/],
+    [
+      "skilled hire with no host question",
+      rn,
+      [{ type: "add_person", name: "Borrowed nurse 1", groups: ["RN"] }],
+      /qualification/,
+    ],
+  ];
+
+  it.each(BROKEN)("names the floor a candidate breaks: %s", (_label, state, ops, line) => {
+    expect(violatesSafetyFloor(state, ops as Op[], { leaveAsked: false })).toMatch(line);
+  });
+
+  it("lets through ordinary edits, the host-asked leave path and a bounded skilled loan", () => {
+    const ok = (state: ScenarioUiState, ops: unknown[], leaveAsked = false) =>
+      violatesSafetyFloor(state, ops as Op[], { leaveAsked });
+    expect(ok(capped, [cap({ target: 3 })])).toBeNull();
+    expect(
+      ok(rn, [{ type: "set_staffing_requirement_people", ruleId: "day", requiredNumPeople: 2 }]),
+    ).toBeNull();
+    expect(
+      ok(
+        rn,
+        [
+          {
+            type: "clear_requests",
+            personId: "rn1",
+            startDate: "2026-11-03",
+            endDate: "2026-11-03",
+          },
+        ],
+        true,
+      ),
+    ).toBeNull();
+    expect(
+      ok(rn, [
+        { type: "add_person", name: "Borrowed nurse 1", groups: ["RN"] },
+        {
+          type: "set_off_request",
+          personId: "Borrowed nurse 1",
+          startDate: "2026-11-01",
+          endDate: "2026-11-02",
+          weight: "must",
+        },
+      ]),
+    ).toBeNull();
   });
 });

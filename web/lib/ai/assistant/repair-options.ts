@@ -710,6 +710,123 @@ export function rankRepairOptions(
 
 // --- The safety floor, in code --------------------------------------------
 
+const sameRefs = (a: unknown, b: unknown) =>
+  JSON.stringify(asList(a).map(String)) === JSON.stringify(asList(b).map(String));
+
+/**
+ * The SAFETY_FLOOR line these operations break, or null. A DENYLIST, so it can judge
+ * any operations, including a candidate the model wrote itself. `leaveAsked`: the
+ * host asks the nurse before leave is removed (a prepared Preview always does, through
+ * its assumptions; a repair option only when it is a named-nurse host question).
+ */
+export function violatesSafetyFloor(
+  state: ScenarioUiState,
+  operations: readonly AssistantCommandV1[],
+  opts: { leaveAsked: boolean },
+): string | null {
+  const [rest, supervision, skillMix, zero, limit, leave, skillGroup, invented] = SAFETY_FLOOR;
+  const ctx = makeCtx(state);
+  // A hard day off makes an added nurse a loan, which the Preview asks the lender about.
+  const loaned = new Set(
+    operations.flatMap((op) =>
+      op.type === "set_off_request" && op.weight === "must" ? [String(op.personId)] : [],
+    ),
+  );
+  const hardCount = (uid: string) => {
+    const card = countCard(ctx, uid);
+    return card !== undefined && !Number.isFinite(card.weight) ? card : undefined;
+  };
+  const offByKind = (kind: string, ruleId: string) =>
+    kind === "successions"
+      ? rest
+      : kind === "coverings"
+        ? supervision
+        : kind === "requirements"
+          ? zero
+          : kind === "counts" && hardCount(ruleId)
+            ? limit
+            : null;
+  const lowered = (uid: string, n: number) => {
+    const card = requirementCard(ctx, uid);
+    if (n < 1) return zero;
+    if (!card || n >= card.requiredNumPeople) return null;
+    return isSkillMix(card) || n < skillMixOn(ctx, card) ? skillMix : null;
+  };
+  for (const op of operations) {
+    const broken = (() => {
+      switch (op.type) {
+        case "set_rule_enabled":
+          return op.enabled ? null : offByKind(op.ruleKind, op.ruleId);
+        case "remove_rule":
+          return offByKind(op.ruleKind, op.ruleId);
+        case "edit_succession_rule": {
+          const card = ctx.state.cardsByKind.successions.find((c) => c.uid === op.ruleId);
+          if (!card || Number.isFinite(card.weight)) return null;
+          const same = op.weight === weightText(card.weight) && sameRefs(op.people, card.person);
+          return same ? null : rest;
+        }
+        case "set_staffing_requirement_people":
+          return lowered(op.ruleId, op.requiredNumPeople);
+        case "edit_staffing_requirement": {
+          const card = requirementCard(ctx, op.ruleId);
+          if (card && isSkillMix(card)) {
+            const same =
+              sameRefs(op.qualifiedPeople, card.qualifiedPeople) &&
+              sameRefs(op.shiftType, card.shiftType) &&
+              sameRefs(op.dates, card.date);
+            if (!same) return skillMix;
+          }
+          return lowered(op.ruleId, op.requiredNumPeople);
+        }
+        case "add_staffing_requirement":
+          return asList(op.qualifiedPeople).some((r) => !isAll(r)) ? skillMix : null;
+        case "edit_count_rule": {
+          const card = hardCount(op.ruleId);
+          if (!card || typeof card.target !== "number") return null;
+          if (op.weight !== weightText(card.weight) || op.expression !== card.expression)
+            return limit;
+          const cap = capOf(String(card.expression), card.target, card.weight);
+          if (Number.isFinite(cap) && op.target - card.target > MAX_CAP_RAISE) return limit;
+          // Everyone it bound among the ward's own staff stays bound.
+          const after = new Set(staffIn(ctx, op.people));
+          return staffIn(ctx, card.person).every((p) => after.has(p)) ? null : limit;
+        }
+        case "clear_requests":
+        case "move_leave":
+          return opts.leaveAsked ? null : leave;
+        case "add_person":
+          if (!PLACEHOLDER.test(op.name) || ctx.staffIds.has(op.name) || ctx.groupIds.has(op.name))
+            return invented;
+          return op.groups.length > 0 && !loaned.has(op.name) ? skillGroup : null;
+        case "edit_person":
+          return op.name === String(op.personId) ? null : invented;
+        default:
+          return null;
+      }
+    })();
+    if (broken !== null) return broken;
+  }
+  return null;
+}
+
+/** The largest skill-mix count on a head count's shift and dates: it may not go below it. */
+function skillMixOn(ctx: Ctx, card: RequirementCard): number {
+  const shifts = new Set(flattenShiftTypeRefs(card.shiftType).map(String));
+  const dates = new Set(requirementDateIds(ctx.state, card));
+  return Math.max(
+    0,
+    ...ctx.state.cardsByKind.requirements
+      .filter(
+        (c) =>
+          !c.disabled &&
+          isSkillMix(c) &&
+          flattenShiftTypeRefs(c.shiftType).some((s) => shifts.has(String(s))) &&
+          requirementDateIds(ctx.state, c).some((d) => dates.has(d)),
+      )
+      .map((c) => c.requiredNumPeople),
+  );
+}
+
 /** An ALLOWLIST: an operation or shape not named here is never part of a repair. */
 export function isSafeOption(state: ScenarioUiState, option: RepairOption): boolean {
   const ctx = makeCtx(state);
@@ -720,16 +837,17 @@ export function isSafeOption(state: ScenarioUiState, option: RepairOption): bool
   const loan = option.confirmation === "lending_ward";
   const nurseAsked = option.confirmation === "named_nurse" && option.enforcedBy === "host_question";
   if (option.operations.length > MAX_ASSISTANT_OPERATIONS) return false;
+  if (violatesSafetyFloor(state, option.operations, { leaveAsked: nurseAsked }) !== null)
+    return false;
   if (option.operations.filter((op) => op.type === "add_person").length > MAX_BORROWED)
     return false;
   return option.operations.every((op) => {
     switch (op.type) {
       case "set_staffing_requirement_people": {
-        // Raise any plain head count; lower one only by 1, never below 1, and only when
-        // it targets a single date.
+        // Raise any plain head count; lower one only by 1 (the floor keeps it at 1 or
+        // more), and only when it targets a single date.
         const card = requirementCard(ctx, op.ruleId);
         if (!card || !isHeadCount(card) || !Number.isInteger(op.requiredNumPeople)) return false;
-        if (op.requiredNumPeople < 1) return false;
         if (op.requiredNumPeople > card.requiredNumPeople) return true;
         return (
           op.requiredNumPeople === card.requiredNumPeople - 1 &&
@@ -771,12 +889,9 @@ export function isSafeOption(state: ScenarioUiState, option: RepairOption): bool
       case "move_leave":
         return nurseAsked && real(op.personId);
       case "add_person":
-        // A placeholder, never an invented name; a skill group only with a host question.
+        // A placeholder (the floor), in real groups, and a skill group only with a host question.
         return (
           loan &&
-          PLACEHOLDER.test(op.name) &&
-          !ctx.staffIds.has(op.name) &&
-          !ctx.groupIds.has(op.name) &&
           op.groups.every((g) => ctx.groupIds.has(g)) &&
           (op.groups.length === 0 || option.enforcedBy === "host_question")
         );

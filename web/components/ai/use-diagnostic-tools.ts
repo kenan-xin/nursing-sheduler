@@ -24,7 +24,13 @@ import { useModelVisibleTool } from "./register-model-visible-tool";
 import { z } from "zod";
 import { assistantCommandListSchema, type AssistantCommandV1 } from "@/lib/proposal";
 import { capabilityRegistryStamp } from "@/lib/capability/registry";
-import { assistantProposalCommands, readAuthoritativeScenarioIdentity } from "@/lib/store";
+import {
+  assistantProposalCommands,
+  pickScenario,
+  readAuthoritativeScenarioIdentity,
+  useScenarioStore,
+} from "@/lib/store";
+import { violatesSafetyFloor } from "@/lib/ai/assistant/repair-options";
 import { getScenarioAuthority } from "@/lib/store/spine";
 import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
 import {
@@ -103,6 +109,22 @@ export function useDiagnosticTools(agentId: string, turnEpoch: number): void {
         // REQUIRED boolean; and a malformed `candidates` used to reach `.map()` and throw,
         // after a real parent had already been found.
         const { token } = context;
+
+        // A tested copy becomes a Preview, so the safety floor holds here as it does for
+        // the ranked options. A Preview always asks before leave is removed.
+        const scenario = pickScenario(useScenarioStore.getState());
+        const refused = args.candidates.flatMap((candidate, index) => {
+          const line = violatesSafetyFloor(scenario, candidate.operations as AssistantCommandV1[], {
+            leaveAsked: true,
+          });
+          return line === null ? [] : [`Candidate ${index + 1} breaks the safety floor: "${line}"`];
+        });
+        if (refused.length > 0) {
+          return (
+            `${refused.join(" ")} Nothing was tested. Never propose a change like that, even ` +
+            "if the user asks; test only candidates that keep every safetyFloor line."
+          );
+        }
 
         const parent = await readDiagnosticParent();
         if (parent === null) {
