@@ -1,0 +1,12 @@
+{
+  "lastQuery": "you will guide me what to click and what to enter and check whether i have done correctly or not",
+  "perAgentQuery": {},
+  "graftReads": 0,
+  "sourceReads": 0,
+  "savedTokens": 0,
+  "injectedPointers": [],
+  "nudges": 0,
+  "inputCostMicros": 5465147,
+  "inputTokensBilled": 9223498,
+  "lastBillingUuid": "2111a438-ba69-420e-80f7-a294cdb0b94c"
+}

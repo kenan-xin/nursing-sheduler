@@ -1,0 +1,12 @@
+{
+  "lastQuery": "can you check which framework we are using for the ai drive ui part ?",
+  "perAgentQuery": {},
+  "graftReads": 0,
+  "sourceReads": 0,
+  "savedTokens": 0,
+  "injectedPointers": [],
+  "nudges": 0,
+  "inputCostMicros": 774455,
+  "inputTokensBilled": 196686,
+  "lastBillingUuid": "09b8c237-373d-4bbf-b0b7-749fed94ca50"
+}
