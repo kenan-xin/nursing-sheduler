@@ -70,7 +70,7 @@ import {
   duplicateItem,
   reorderItems,
   renameItem,
-  toggleGroupMembership,
+  writeItemGroups,
   validateFullEditId,
   entityKey,
   sameEntityId,
@@ -740,7 +740,12 @@ function RowEditor({
       if (mode === "add") {
         // New nurse: name → id, no description authored here. history:[] via descriptor.
         commit((live) =>
-          writeGroups(addItem(live, descriptor, { id: check.id }), check.id, draftGroups),
+          writeItemGroups(
+            addItem(live, descriptor, { id: check.id }),
+            descriptor,
+            check.id,
+            draftGroups,
+          ),
         );
         toast.success(`Nurse “${String(check.id)}” added.`);
       } else {
@@ -752,7 +757,7 @@ function RowEditor({
           // PRESERVED (never written from the table), so an inline name/group edit
           // keeps it intact.
           const renamed = nameChanged ? renameItem(live, descriptor, item!.id, check.id) : live;
-          return writeGroups(renamed, effectiveId, draftGroups);
+          return writeItemGroups(renamed, descriptor, effectiveId, draftGroups);
         });
         toast.success(`Nurse “${String(effectiveId)}” saved.`);
       }
@@ -859,24 +864,4 @@ function RowEditor({
       </td>
     </tr>
   );
-}
-
-/**
- * Write an item's membership to EXACTLY `desiredGroupIds` (SET model, idempotent):
- * for every live group, add or remove to match the desired set. Preserves any group's
- * unknown/nested members (only this item's membership is touched).
- */
-function writeGroups(
-  state: ScenarioUiState,
-  itemId: EntityId,
-  desiredGroupIds: readonly string[],
-): ScenarioUiState {
-  const desired = new Set(desiredGroupIds);
-  let next = state;
-  for (const group of descriptor.readGroups(state)) {
-    const isMember = group.members.some((m) => sameEntityId(m, itemId));
-    const shouldBe = desired.has(group.id);
-    if (isMember !== shouldBe) next = toggleGroupMembership(next, descriptor, group.id, itemId);
-  }
-  return next;
 }

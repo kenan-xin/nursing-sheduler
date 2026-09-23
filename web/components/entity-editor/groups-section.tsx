@@ -93,7 +93,7 @@ import {
   duplicateGroup,
   reorderGroups,
   renameGroup,
-  setGroupMembers,
+  writeGroupMembers,
   updateGroupFields,
   validateFullEditId,
   entityKey,
@@ -217,35 +217,6 @@ function resolveConfig(config?: GroupsSectionConfig): ResolvedConfig {
     formatCount: config?.formatCount ?? ((count) => `${count} member${count === 1 ? "" : "s"}`),
     autoGroupNote: config?.autoGroupNote,
   };
-}
-
-// ---------------------------------------------------------------------------
-// Membership SET writer (moved from entity-editor, behavior identical).
-// ---------------------------------------------------------------------------
-
-/**
- * Write a group's membership to EXACTLY `desiredItemMembers` plus the group's LIVE
- * unknown/nested members preserved (a SET model). `setGroupMembers` replaces the
- * whole array and re-sorts to item order, so the write is IDEMPOTENT (Major 1 —
- * `setGroupMembers` returns the same state when the sequence is unchanged) and the
- * desired set is applied directly rather than toggled. Unknown/nested members that
- * the user cannot author are carried through untouched.
- */
-function writeGroupMembers<TItem extends EditorItemBase>(
-  state: ScenarioUiState,
-  descriptor: EntityDescriptor<TItem>,
-  groupId: string,
-  desiredItemMembers: readonly EntityId[],
-): ScenarioUiState {
-  const group = descriptor.readGroups(state).find((g) => g.id === groupId);
-  if (!group) return state;
-  const items = descriptor.readItems(state);
-  const isItem = (m: EntityId) => items.some((it) => sameEntityId(it.id, m));
-  // Keep only desired members that genuinely exist as live items; carry the group's
-  // own unknown/nested members (which the transfer list never exposes) untouched.
-  const realMembers = desiredItemMembers.filter(isItem);
-  const unknownMembers = group.members.filter((m) => !isItem(m));
-  return setGroupMembers(state, descriptor, groupId, [...realMembers, ...unknownMembers]);
 }
 
 // ---------------------------------------------------------------------------

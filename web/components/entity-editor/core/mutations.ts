@@ -333,6 +333,50 @@ export function toggleGroupMembership<TItem extends EditorItemBase>(
 }
 
 /**
+ * Write one item's membership to EXACTLY `desiredGroupIds` (SET model, idempotent):
+ * for every live group, add or remove the item to match. A desired id that is not a
+ * live group is ignored; every other member is untouched. The Staff row editor's
+ * group toggles, and the assistant's `add_person` / `edit_person`.
+ */
+export function writeItemGroups<TItem extends EditorItemBase>(
+  state: ScenarioUiState,
+  descriptor: EntityDescriptor<TItem>,
+  itemId: EntityId,
+  desiredGroupIds: readonly string[],
+): ScenarioUiState {
+  const desired = new Set(desiredGroupIds);
+  let next = state;
+  for (const group of descriptor.readGroups(state)) {
+    const isMember = group.members.some((member) => sameId(member, itemId));
+    if (isMember !== desired.has(group.id)) {
+      next = toggleGroupMembership(next, descriptor, group.id, itemId);
+    }
+  }
+  return next;
+}
+
+/**
+ * Write a group's membership to EXACTLY `desiredItemMembers` that are live items, plus
+ * the group's own unknown/nested members kept as they are (a SET model). Idempotent:
+ * `setGroupMembers` returns the same state when the sequence is unchanged. The group
+ * form's Save, and the assistant's `add_people_group` / `edit_people_group`.
+ */
+export function writeGroupMembers<TItem extends EditorItemBase>(
+  state: ScenarioUiState,
+  descriptor: EntityDescriptor<TItem>,
+  groupId: string,
+  desiredItemMembers: readonly EntityId[],
+): ScenarioUiState {
+  const group = descriptor.readGroups(state).find((g) => g.id === groupId);
+  if (!group) return state;
+  const items = descriptor.readItems(state);
+  const isItem = (member: EntityId) => items.some((item) => sameId(item.id, member));
+  const realMembers = desiredItemMembers.filter(isItem);
+  const unknownMembers = group.members.filter((member) => !isItem(member));
+  return setGroupMembers(state, descriptor, groupId, [...realMembers, ...unknownMembers]);
+}
+
+/**
  * People bulk-upload transform (spec 03 FR-ED-31). Rebuilds the item list as:
  * existing people reordered to the file's order + new people inserted in file
  * order + unmentioned existing people appended trailing; then re-sorts every
