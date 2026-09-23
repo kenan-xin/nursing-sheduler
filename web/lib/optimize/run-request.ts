@@ -18,8 +18,16 @@ import { isActiveLifecycle, type RunLifecycle } from "./run-view";
 // route transitions show up in practice.
 export const RUN_REQUEST_TTL_MS = 15_000;
 
-/** What the screen did with the last request it took. */
-export type RunRequestOutcome = "started" | "not-ready" | "backend-offline" | "busy";
+/** What the screen did with the last request it took. `blocked`: the Optimize path
+ *  itself stopped before posting (bad timeout, lost editing lease, blocked submit).
+ *  `expired`: the request outlived its TTL before the screen could act on it. */
+export type RunRequestOutcome =
+  | "started"
+  | "not-ready"
+  | "backend-offline"
+  | "busy"
+  | "blocked"
+  | "expired";
 
 export interface RunRequestState {
   pending: { requestedAt: number } | null;
@@ -39,12 +47,18 @@ export function requestOptimizeRun(now: number = Date.now()): void {
 export function takeOptimizeRunRequest(now: number = Date.now()): boolean {
   const { pending } = useRunRequestStore.getState();
   if (pending === null) return false;
-  useRunRequestStore.setState({ pending: null });
-  return now - pending.requestedAt <= RUN_REQUEST_TTL_MS;
+  const fresh = now - pending.requestedAt <= RUN_REQUEST_TTL_MS;
+  useRunRequestStore.setState(fresh ? { pending: null } : { pending: null, last: "expired" });
+  return fresh;
 }
 
 export function reportOptimizeRunRequest(outcome: RunRequestOutcome): void {
   useRunRequestStore.setState({ last: outcome });
+}
+
+/** A run started (by any route), so an earlier refusal no longer describes the screen. */
+export function clearOptimizeRunRequestOutcome(): void {
+  useRunRequestStore.setState({ last: null });
 }
 
 /** A POST in flight, or a server job that is queued, running or cancelling. */

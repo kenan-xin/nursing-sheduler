@@ -57,6 +57,22 @@ describe("OptimizeRunRequestCard", () => {
     expect(useRunRequestStore.getState().pending).toBeNull();
   });
 
+  it("asks for nothing and stays up when the user keeps their open draft", async () => {
+    navigate.mockResolvedValue({
+      status: "capability_unavailable",
+      reason: "navigation_cancelled",
+    });
+    assistantActions.showRunRequest(TURN);
+    render(<OptimizeRunRequestCard />);
+
+    await userEvent.click(screen.getByTestId("run-request-run"));
+
+    await waitFor(() => expect(screen.getByTestId("run-request-run")).toBeEnabled());
+    expect(useRunRequestStore.getState().pending).toBeNull();
+    expect(screen.queryByTestId("run-request-failed")).not.toBeInTheDocument();
+    expect(useAssistantStore.getState().activeRunRequest).not.toBeNull();
+  });
+
   it("shows a stopped card with no Run control after the turn moved on", () => {
     assistantActions.showRunRequest(TURN);
     useAssistantStore.setState({ turnEpoch: TURN + 1 });
@@ -64,6 +80,9 @@ describe("OptimizeRunRequestCard", () => {
 
     expect(screen.getByTestId("assistant-run-request")).toHaveAttribute("data-status", "stopped");
     expect(screen.queryByTestId("run-request-run")).not.toBeInTheDocument();
+    expect(screen.getByTestId("assistant-run-request")).toHaveTextContent(
+      "This offer has ended. Ask again if you still want a run.",
+    );
   });
 
   it("disables Run while a run is live", () => {

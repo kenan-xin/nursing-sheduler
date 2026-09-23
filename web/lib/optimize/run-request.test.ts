@@ -24,6 +24,8 @@ describe("the assistant's run request", () => {
     expect(takeOptimizeRunRequest(1_000 + RUN_REQUEST_TTL_MS + 1)).toBe(false);
     // Consumed either way: an expired request must not linger for the next mount.
     expect(useRunRequestStore.getState().pending).toBeNull();
+    // And said, so the assistant can tell the user rather than go quiet.
+    expect(useRunRequestStore.getState().last).toBe("expired");
   });
 
   it("forgets the previous outcome when a new request is made", () => {

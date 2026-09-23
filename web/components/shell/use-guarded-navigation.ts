@@ -41,6 +41,36 @@ let isBackGuardSentinelArmed: () => boolean = () => false;
 // `router.replace` — so there is nothing to pop, only the flag to clear.
 let consumeBackGuardSentinel: () => void = () => {};
 
+/**
+ * The `push` intent's commit: what actually runs once the guard lets a push through.
+ * Shared with the assistant's host navigation (`use-capability-navigation.ts`), which
+ * stages its own intent so it can learn whether the user confirmed or cancelled.
+ */
+export function commitGuardedPush(
+  router: { push: (path: string) => void; replace: (path: string) => void },
+  path: string,
+): void {
+  // The current route's shielding sentinel (if armed) is still the active history
+  // entry when this commits — a plain `push` would stack the new route on top of it,
+  // stranding the sentinel as a permanent duplicate underneath every future route
+  // (T08g). Since we're already sitting on that duplicate entry, `replace` collapses
+  // it away for free instead. The destination still gets its own fresh sentinel once
+  // its own draft registers there — see the pathname-reset effect in
+  // `useBrowserBackGuard`.
+  //
+  // `consumeBackGuardSentinel()` must run BEFORE `router.replace` — synchronously, not
+  // in a later effect — because the source route's real draft (e.g.
+  // `useLosableDraft`) unmounts as part of this same transition. If its cleanup fires
+  // while the flag still reads "armed", it reads the collapsed entry as poppable and
+  // calls `history.back()`, undoing the confirmed navigation (T08h).
+  if (isBackGuardSentinelArmed()) {
+    consumeBackGuardSentinel();
+    router.replace(path);
+  } else {
+    router.push(path);
+  }
+}
+
 export interface GuardedNavigation {
   /** Push to `path`, staging the guard first if a losable draft is open. */
   navigate: (path: string) => void;
@@ -57,29 +87,7 @@ export function useGuardedNavigation(): GuardedNavigation {
       if (path === pathname) return; // same-route clicks are no-ops
       dispatchNavIntent({
         kind: "push",
-        commit: () => {
-          // The current route's shielding sentinel (if armed) is still the
-          // active history entry when this commits — a plain `push` would
-          // stack the new route on top of it, stranding the sentinel as a
-          // permanent duplicate underneath every future route (T08g). Since
-          // we're already sitting on that duplicate entry, `replace`
-          // collapses it away for free instead. The destination still gets
-          // its own fresh sentinel once its own draft registers there — see
-          // the pathname-reset effect in `useBrowserBackGuard`.
-          //
-          // `consumeBackGuardSentinel()` must run BEFORE `router.replace` —
-          // synchronously, not in a later effect — because the source route's
-          // real draft (e.g. `useLosableDraft`) unmounts as part of this same
-          // transition. If its cleanup fires while the flag still reads
-          // "armed", it reads the collapsed entry as poppable and calls
-          // `history.back()`, undoing the confirmed navigation (T08h).
-          if (isBackGuardSentinelArmed()) {
-            consumeBackGuardSentinel();
-            router.replace(path);
-          } else {
-            router.push(path);
-          }
-        },
+        commit: () => commitGuardedPush(router, path),
       });
     },
     [router, pathname],

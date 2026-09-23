@@ -838,6 +838,39 @@ describe("OptimizeAndExportScreen — assistant run request", () => {
     await waitFor(() => expect(useRunRequestStore.getState().last).toBe("backend-offline"));
     expect(posts()).toBe(0);
   });
+
+  it("reports blocked, not started, when the Optimize path stops before posting", async () => {
+    await readyStore();
+    const posts = countPosts();
+    requestOptimizeRun();
+    render(
+      <OptimizeAndExportScreen
+        serverInfoDeps={onlineInfo()}
+        controllerDeps={{
+          prepare: () => ({ ok: false, issues: [] }),
+          stageSnapshot: degradedCapture,
+          storage: memStorage(),
+        }}
+      />,
+      { wrapper },
+    );
+
+    await waitFor(() => expect(useRunRequestStore.getState().last).toBe("blocked"));
+    expect(posts()).toBe(0);
+  });
+
+  it("forgets an earlier refusal once a manual run starts", async () => {
+    await readyStore();
+    const posts = countPosts();
+    useRunRequestStore.setState({ last: "backend-offline" });
+    renderScreen();
+
+    await waitFor(() => expect(screen.getByTestId("optimize-submit")).toBeEnabled());
+    await userEvent.click(screen.getByTestId("optimize-submit"));
+
+    await waitFor(() => expect(posts()).toBe(1));
+    expect(useRunRequestStore.getState().last).toBeNull();
+  });
 });
 
 describe("the submission basis is claimed from the live backend semantic profile", () => {

@@ -39,6 +39,8 @@ import {
 } from "@/lib/capability/resolve";
 import { isAtRoutePath, waitForRouteArrival } from "@/lib/capability/route-arrival";
 import type { CapabilityRegistryStamp } from "@/lib/capability/types";
+import { dispatchNavIntent, useNavGuardStore } from "@/components/shell/nav-guard-store";
+import { commitGuardedPush } from "@/components/shell/use-guarded-navigation";
 import { readCapabilityContext } from "./capability-context";
 
 export type CapabilityNavigationOutcome =
@@ -72,7 +74,12 @@ export type CapabilityNavigationOutcome =
     }
   | {
       readonly status: typeof CAPABILITY_UNAVAILABLE;
-      readonly reason: CapabilityUnavailableReason | "route_not_reached" | "authority_revoked";
+      readonly reason:
+        | CapabilityUnavailableReason
+        | "route_not_reached"
+        | "authority_revoked"
+        /** An unsaved draft was open and the user chose to stay with it. */
+        | "navigation_cancelled";
       readonly registry: CapabilityRegistryStamp;
     };
 
@@ -127,10 +134,33 @@ export function useCapabilityNavigation(): NavigateToCapability {
 
       const target = before.value;
       if (!isAtRoutePath(window.location, target.path)) {
-        // Immediately before the push, with no await since the check: this is the
-        // first irreversible thing the assistant does to the user's screen.
-        if (!authorized()) return revoked();
-        router.push(target.path);
+        // THE SAME GUARD AS A MANUAL JUMP. An open unsaved draft stages the shell's
+        // confirm; no draft commits at once. Resolves once the user has decided.
+        const decision = await new Promise<"pushed" | "cancelled" | "revoked">((resolve) => {
+          // The store keeps one intent at a time and would silently drop ours, leaving
+          // this promise hanging; a confirm already open means the user is deciding.
+          if (useNavGuardStore.getState().pendingIntent !== null) return resolve("cancelled");
+          dispatchNavIntent({
+            kind: "push",
+            commit: () => {
+              // Immediately before the push, with no await since the check: this is the
+              // first irreversible thing the assistant does to the user's screen, and
+              // the confirm may have been open for a while.
+              if (!authorized()) return resolve("revoked");
+              commitGuardedPush(router, target.path);
+              resolve("pushed");
+            },
+            onCancel: () => resolve("cancelled"),
+          });
+        });
+        if (decision === "revoked") return revoked();
+        if (decision === "cancelled") {
+          return {
+            status: CAPABILITY_UNAVAILABLE,
+            reason: "navigation_cancelled",
+            registry: capabilityRegistryStamp(),
+          };
+        }
         // AWAITED, not sampled. The push starts a client transition and returns, so the
         // pathname on the next line is still the screen being left -- the normal state
         // of a healthy navigation, and previously read as failure for every route-only

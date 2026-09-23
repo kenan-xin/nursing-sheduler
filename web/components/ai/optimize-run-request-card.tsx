@@ -32,11 +32,12 @@ export function OptimizeRunRequestCard() {
     setOpening(true);
     setFailed(false);
     try {
-      // The user's click is its own authority, so navigation is unguarded -- the same
-      // as a manual jump. It lands on the run options and confirms they are on screen.
+      // The user's click is its own authority, so no turn check -- but an open unsaved
+      // draft still gets the same confirm a manual jump does. Keeping the draft asks
+      // for nothing and leaves the card up.
       const outcome = await navigate("generate-roster");
       if (outcome.status === CAPABILITY_UNAVAILABLE) {
-        setFailed(true);
+        if (outcome.reason !== "navigation_cancelled") setFailed(true);
         return;
       }
       requestOptimizeRun();
@@ -60,7 +61,7 @@ export function OptimizeRunRequestCard() {
       </h3>
       {stopped ? (
         <p className="text-meta text-ink2">
-          This request was stopped. Ask the assistant again if you still want a run.
+          This offer has ended. Ask again if you still want a run.
         </p>
       ) : (
         <>

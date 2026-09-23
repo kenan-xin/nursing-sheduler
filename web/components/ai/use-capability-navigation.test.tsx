@@ -19,6 +19,7 @@ import { CAPABILITY_UNAVAILABLE } from "@/lib/capability/resolve";
 import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
 import { emptyAssistantSettings } from "@/lib/ai/assistant/records";
 import { useModeStore } from "@/lib/mode/mode";
+import { useNavGuardStore } from "@/components/shell/nav-guard-store";
 import { useCapabilityNavigation, type NavigateToCapability } from "./use-capability-navigation";
 
 /** What the mocked router does with the next push. Reassigned per test. */
@@ -136,6 +137,55 @@ describe("arriving at a route-only screen from another screen", () => {
 
     expect(push).not.toHaveBeenCalled();
     expect(outcome).toMatchObject({ status: "navigated", routeId: "shift-counts" });
+  });
+});
+
+describe("an open unsaved draft gets the same confirm as a manual jump", () => {
+  let unregister: () => void = () => {};
+  beforeEach(() => {
+    window.history.replaceState({}, "", "/dates");
+    onPush = commitsTo("/shift-counts", 20);
+    unregister = useNavGuardStore.getState().registerDraft({ id: "t", label: "Draft" });
+  });
+  afterEach(() => {
+    useNavGuardStore.getState().cancel();
+    unregister();
+  });
+
+  it("asks first and moves nothing until the user decides", async () => {
+    const pending = navigate("shift-counts", FAST);
+    await Promise.resolve();
+
+    expect(useNavGuardStore.getState().open).toBe(true);
+    expect(push).not.toHaveBeenCalled();
+
+    useNavGuardStore.getState().confirm();
+    expect(await pending).toMatchObject({ status: "navigated", routeId: "shift-counts" });
+    expect(push).toHaveBeenCalledWith("/shift-counts");
+  });
+
+  it("stays put and says so when the user keeps their draft", async () => {
+    const pending = navigate("shift-counts", FAST);
+    await Promise.resolve();
+    useNavGuardStore.getState().cancel();
+
+    expect(await pending).toMatchObject({
+      status: CAPABILITY_UNAVAILABLE,
+      reason: "navigation_cancelled",
+    });
+    expect(push).not.toHaveBeenCalled();
+    expect(window.location.pathname).toBe("/dates");
+  });
+
+  it("does not push for a turn that lost authority while the confirm was open", async () => {
+    let allowed = true;
+    const pending = navigate("shift-counts", { ...FAST, authorize: () => allowed });
+    await Promise.resolve();
+    allowed = false;
+    useNavGuardStore.getState().confirm();
+
+    expect(await pending).toMatchObject({ reason: "authority_revoked" });
+    expect(push).not.toHaveBeenCalled();
   });
 });
 

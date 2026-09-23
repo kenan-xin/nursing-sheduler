@@ -149,6 +149,18 @@ describe("get_optimize_result", () => {
     expect(summary.guidance).toMatch(/not reachable/);
   });
 
+  it("says when the Optimise screen stopped a requested run before sending it", async () => {
+    useRunRequestStore.setState({ last: "blocked" });
+    const summary = (await tool("get_optimize_result").handler({}, {})) as { guidance: string };
+    expect(summary.guidance).toMatch(/did not start: the Optimise screen stopped it/);
+  });
+
+  it("says when a requested run expired before the screen could take it", async () => {
+    useRunRequestStore.setState({ last: "expired" });
+    const summary = (await tool("get_optimize_result").handler({}, {})) as { guidance: string };
+    expect(summary.guidance).toMatch(/did not start: it waited too long/);
+  });
+
   it("tells the model a live run has no result yet", async () => {
     useHotStore
       .getState()

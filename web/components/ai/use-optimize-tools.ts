@@ -46,6 +46,12 @@ const REQUEST_REFUSAL: Record<Exclude<RunRequestOutcome, "started">, string> = {
   "not-ready": "The requested run did not start: dates, staff or shifts are still missing.",
   "backend-offline": "The requested run did not start: the optimiser is not reachable right now.",
   busy: "The requested run did not start: another start was already in progress.",
+  blocked:
+    "The requested run did not start: the Optimise screen stopped it before sending. It " +
+    "shows why there (for example the time limit, or editing taken by another tab).",
+  expired:
+    "The requested run did not start: it waited too long for the Optimise screen to be " +
+    "ready, so it was dropped. The user can press Optimize there, or ask again.",
 };
 
 function guidanceFor(
