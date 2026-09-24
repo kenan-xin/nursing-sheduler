@@ -4,6 +4,7 @@ import type { AssistantCommandV1 } from "@/lib/proposal/commands";
 import { applyAssistantCommands } from "@/lib/proposal/operations";
 import { deriveProposalDiff } from "@/lib/proposal/diff";
 import { findStaffingShortfalls, type StaffingFinding } from "@/lib/rules/shortfalls";
+import { formatShortDate } from "@/lib/dates/date-id";
 import {
   SCENARIOS,
   cards,
@@ -327,6 +328,30 @@ describe("rankRepairOptions", () => {
     expect(some.operations).toHaveLength(2);
     for (const text of [some.title, some.why, some.confirmationQuestion])
       expect(text).toMatch(/Fri 6 Nov stays short/);
+
+    // N3: with four dates that stay short (chronic beyond the fixable 3rd and 5th),
+    // the title AND the confirmation question cap the "stays short" list at 3 and
+    // name the rest by count, instead of spelling out every date.
+    const chronic = probe([
+      leave("cara", "05"),
+      leave("ana", "01"),
+      leave("ben", "01"),
+      leave("ana", "02"),
+      leave("ben", "02"),
+      leave("ana", "06"),
+      leave("ben", "06"),
+      leave("ana", "07"),
+      leave("ben", "07"),
+    ]);
+    const many = rank(chronic).find((o) => o.repairId === "run_one_short")!;
+    const [d1, d2, d3, d4] = ["2026-11-01", "2026-11-02", "2026-11-06", "2026-11-07"].map((iso) =>
+      formatShortDate(iso, true),
+    );
+    const cappedStays = `${d1}, ${d2}, ${d3} and 1 more`;
+    for (const text of [many.title, many.confirmationQuestion])
+      expect(text).toContain(`${cappedStays} stay short`);
+    expect(many.title).not.toContain(d4);
+    expect(many.confirmationQuestion).not.toContain(d4);
   });
 
   it("runs one short on at most 3 dates: more is a staffing standard, not a one-off call", () => {

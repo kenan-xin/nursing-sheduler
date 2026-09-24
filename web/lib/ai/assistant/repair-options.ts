@@ -705,6 +705,13 @@ const runOneShort: Builder = (ctx, all) => {
   const day = (iso: string) => formatShortDate(iso, true);
   const list = (items: string[]) =>
     items.length === 1 ? items[0] : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
+  // A chronic ward can leave many dates short: cap the "stays short" list so the
+  // title and confirmation stay readable, naming only the overflow count past it.
+  const STAYS_SHORT_LIST_CAP = 3;
+  const listCapped = (items: string[]) =>
+    items.length <= STAYS_SHORT_LIST_CAP
+      ? list(items)
+      : `${items.slice(0, STAYS_SHORT_LIST_CAP).join(", ")} and ${items.length - STAYS_SHORT_LIST_CAP} more`;
   const shiftOf = (card: RequirementCard) => String(flattenShiftTypeRefs(card.shiftType)[0]);
   const shifts = [...new Set(pairs.map((p) => shiftOf(p.card)))];
   const where = shifts
@@ -716,7 +723,7 @@ const runOneShort: Builder = (ctx, all) => {
   const one = pairs.length === 1;
   const nurses = (n: number) => `${n} ${n === 1 ? "nurse" : "nurses"}`;
   const stays = stayShort.length
-    ? `${list(stayShort.map(day))} ${stayShort.length === 1 ? "stays" : "stay"} short`
+    ? `${listCapped(stayShort.map(day))} ${stayShort.length === 1 ? "stays" : "stay"} short`
     : "";
   // A rule for that one date alone is lowered outright. Otherwise the date gets an exception.
   const alone = ({ card, iso }: (typeof pairs)[number]) => {
