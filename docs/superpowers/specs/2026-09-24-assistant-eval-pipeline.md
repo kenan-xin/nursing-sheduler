@@ -187,7 +187,9 @@ passes when every gate and every judge item passes. The suite reports mean pass^
 Schema: `{ items: { id: string; reasoning: string; pass: boolean }[] }`. The reasoning comes
 before the verdict.
 
-Standard items (every case, `RUBRIC_VERSION = "2026-09-24.1"`):
+Standard items (every case, `RUBRIC_VERSION = "2026-09-24.2"`; .2 after the first smoke run: a
+lead-in or open question passes `no_text_choice`, typed names/dates/screen names pass
+`no_invented_entities`, a shown Preview is not "added" for `no_false_claim`):
 
 | id | Pass when |
 |---|---|
@@ -214,11 +216,18 @@ rubric or judge model changes.
 - **Budget.** `EVAL_MAX_USD` (default 8), the global cap. Each file's share
   (`EVAL_MAX_USD / 5`) must cover 3 trials of its costliest case; the first live case
   measured $0.46 a trial, hence $1.60 a file. Smoke runs one trial. Judge and simulated-user
-  calls do not pass the recorder, so they are outside the ledger. The recorder reads `usage` from the provider's
+  calls pass the recorder too, so they count against the ledger. The recorder reads `usage` from the provider's
   final SSE chunk (OpenRouter includes token counts, and `cost` when it has one). Otherwise it
   estimates from `pricing.ts` and the byte length (marked `estimated`). The ledger is module
   state in the single eval file. A trial that starts over budget is skipped as `budget`. An
-  in-flight hop over budget is aborted through the fetch signal.
+  in-flight hop over budget is aborted through the fetch signal, and a trial whose hop or
+  judge call the ledger refused is also recorded as `skipped: budget`, not failed.
+- **Measured (2026-09-24, git 6ad3cc2, Sonnet 4.5 subject, gpt-5-mini judge).** Smoke
+  (8 trials): $1.37 in 85 s, then $1.43 in ~95 s after the rubric fix. Full run at the default
+  $8 cap: $7.85 in 595 s wall, but only 43 of 85 trials ran; 42 were skipped on budget and 12
+  cases never ran. Mean $0.18 a trial, so a complete full run costs about $15. Because the cap
+  is split evenly, the costliest file (repair, about $6 for 7 cases x 3) sets the cap: a
+  complete baseline needs `EVAL_MAX_USD` of about 30, or a per-file share weighted by cost.
 - **Knobs.** `EVAL_TRIALS` (smoke 1, full 3, release 5), `EVAL_TAGS`, `EVAL_MODEL` (default
   `anthropic/claude-sonnet-4.5`, the same as `TEST_MODEL`), `EVAL_USER_MODEL` (default
   `anthropic/claude-haiku-4.5`), `EVAL_PROMOTE=1`. Trials inside one eval file run in sequence,
@@ -326,7 +335,6 @@ existing index moves (`NO_IMPORTS_RULE` names indices 15 and 21).
   captured **before** the `/api/copilotkit` stub is installed.
 - Flakiness at n=3: the report says small drops are noise, and the regression rule needs ≥ 2
   lost passes.
-- Cost estimates stay unconfirmed until the first smoke run (plan's last task).
 - The agent runs in-process (`createOpenRouterAgent`), so the `/api/copilotkit` HTTP
   handler's containment (header checks, keyless-run rejection) is not exercised here; its
   own unit tests cover it. Each turn's clone is a fresh agent, as the shipped proxied
