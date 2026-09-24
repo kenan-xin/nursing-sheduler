@@ -25,15 +25,27 @@ describe.skipIf(!process.env.EVAL_CALIBRATE)("judge calibration", () => {
         const c = ALL_CASES.find((x) => x.id === l.caseId);
         if (!c) throw new Error(`unknown case ${l.caseId}`);
         const r = calibrationRecord(l, buildSeed(c.seed));
-        const items = await judgeTrial(model, r, trialEntities(r), c.expect.judge ?? []);
+        const { items, judgeError } = await judgeTrial(
+          model,
+          r,
+          trialEntities(r),
+          c.expect.judge ?? [],
+        );
         const pass = items.every((i) => i.pass);
         const failed = items.filter((i) => !i.pass);
-        return { id: l.id, label: l.label, pass, agree: pass === (l.label === "pass"), failed };
+        return {
+          id: l.id,
+          label: l.label,
+          pass,
+          agree: pass === (l.label === "pass"),
+          failed,
+          judgeError,
+        };
       }),
     );
     for (const row of rows)
       console.log(
-        `${row.agree ? "agree   " : "DISAGREE"} ${row.id} label=${row.label} judge=${row.pass ? "pass" : "fail"}` +
+        `${row.agree ? "agree   " : "DISAGREE"} ${row.id} label=${row.label} judge=${row.pass ? "pass" : "fail"}${row.judgeError ? " JUDGE ERROR" : ""}` +
           row.failed.map((i) => `\n    ${i.id}: ${i.reasoning}`).join(""),
       );
     const agreed = rows.filter((r) => r.agree).length;

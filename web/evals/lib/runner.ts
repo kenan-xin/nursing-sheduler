@@ -9,7 +9,7 @@ import { gradeDeterministic } from "./graders";
 import { runTrial, type Seams } from "./harness";
 import { judgeTrial, openRouterModel, trialEntities } from "./judge";
 import type { Baseline } from "./report";
-import { toMeta } from "./trial";
+import { toMeta, type JudgeItem } from "./trial";
 
 /**
  * The global cap. A complete 3-trial run measured about $15. Each file gets the share of it
@@ -74,6 +74,7 @@ export function runCases(cases: EvalCase[], seams: Seams): void {
               pass: false,
               safetyPass: true,
               skipped: "budget",
+              judgeError: false,
             };
             skip("budget");
           }
@@ -94,22 +95,26 @@ export function runCases(cases: EvalCase[], seams: Seams): void {
           // Read before the judge spends: a trial that ended over budget was cut, not finished.
           let cut = cutByBudget(ledger, refusedBefore);
           const gates = gradeDeterministic(evalCase, record);
-          const judge =
+          const judgeOutcome =
             record.error || cut
-              ? []
+              ? { items: [] as JudgeItem[], judgeError: false }
               : await judgeTrial(
                   openRouterModel(e.key, e.judge, judgeRec.fetch),
                   record,
                   trialEntities(record),
                   evalCase.expect.judge ?? [],
-                ).catch((err: unknown) => [
-                  { id: "judge", reasoning: `judge call failed: ${String(err)}`, pass: false },
-                ]);
+                ).catch((err: unknown) => ({
+                  items: [
+                    { id: "judge", reasoning: `judge call failed: ${String(err)}`, pass: false },
+                  ],
+                  judgeError: true,
+                }));
+          const judge = judgeOutcome.items;
           record.usage = plus(
             record.usage,
             plus(await userRec.settled(), await judgeRec.settled()),
           );
-          task.meta.eval = toMeta(evalCase, record, gates, judge);
+          task.meta.eval = toMeta(evalCase, record, gates, judge, judgeOutcome.judgeError);
           // After the judge, only a refusal cuts: its own spend going over does not.
           cut ||= ledger.refused > refusedBefore;
           if (cut) {

@@ -1,9 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { generateText } from "ai";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SCENARIOS } from "@/lib/rules/ward-fixtures.test-support";
 import {
   calibrationRecord,
   entityNames,
   judgePrompt,
+  judgeTrial,
   trialEntities,
   normalizeJudgeItems,
   renderTranscript,
@@ -13,6 +15,12 @@ import {
 } from "./judge";
 import type { TrialRecord } from "./trial";
 import { ALL_CASES } from "../cases";
+
+vi.mock("ai", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("ai")>();
+  return { ...actual, generateText: vi.fn() };
+});
+const mockGenerateText = vi.mocked(generateText);
 import labelledJson from "../fixtures/judge-calibration.json";
 
 const seed = SCENARIOS.onlyRnOnLeave();
@@ -56,6 +64,28 @@ describe("judge", () => {
     expect(text).toContain("Card: Which fix? [Borrow a nurse]");
     expect(text).toContain("Assistant: Pick a fix.");
     expect(text).not.toContain("offer_choices");
+  });
+
+  it("renders offer_choices safely when options is not an array", () => {
+    const bad: TrialRecord = {
+      ...r,
+      transcript: [
+        {
+          role: "assistant",
+          text: "",
+          toolCalls: [
+            {
+              toolCallId: "1",
+              name: "offer_choices",
+              args: { question: "Which fix?", options: "not-an-array" },
+              result: "shown",
+            },
+          ],
+        },
+      ],
+    };
+    expect(() => renderTranscript(bad)).not.toThrow();
+    expect(renderTranscript(bad)).toBe("Card: Which fix? []");
   });
 
   it("renders an assistant's text before the card it leads into", () => {
@@ -186,5 +216,52 @@ describe("judge", () => {
       { id: "short", reasoning: "fine", pass: true },
       { id: "plain", reasoning: "judge omitted this item", pass: false },
     ]);
+  });
+
+  describe("judgeTrial retry", () => {
+    const ok = { output: { items: [{ id: "short", reasoning: "fine", pass: true }] } };
+
+    beforeEach(() => {
+      mockGenerateText.mockReset();
+    });
+
+    it("retries once on an empty verdict, then succeeds without a judge error", async () => {
+      mockGenerateText.mockResolvedValueOnce({ output: { items: [] } } as never);
+      mockGenerateText.mockResolvedValueOnce(ok as never);
+      const { items, judgeError } = await judgeTrial({} as never, r, [], []);
+      expect(judgeError).toBe(false);
+      expect(mockGenerateText).toHaveBeenCalledTimes(2);
+      expect(items.find((i) => i.id === "short")).toEqual({
+        id: "short",
+        reasoning: "fine",
+        pass: true,
+      });
+    });
+
+    it("retries once on an unparsable (throwing) call, then succeeds", async () => {
+      mockGenerateText.mockRejectedValueOnce(new Error("bad json"));
+      mockGenerateText.mockResolvedValueOnce(ok as never);
+      const { items, judgeError } = await judgeTrial({} as never, r, [], []);
+      expect(judgeError).toBe(false);
+      expect(items.find((i) => i.id === "short")?.pass).toBe(true);
+    });
+
+    it("keeps today's fail and marks judgeError when both tries are empty", async () => {
+      mockGenerateText.mockResolvedValueOnce({ output: { items: [] } } as never);
+      mockGenerateText.mockResolvedValueOnce({ output: { items: [] } } as never);
+      const { items, judgeError } = await judgeTrial({} as never, r, [], []);
+      expect(judgeError).toBe(true);
+      expect(mockGenerateText).toHaveBeenCalledTimes(2);
+      expect(items.every((i) => !i.pass)).toBe(true);
+      expect(items).toHaveLength(Object.keys(STANDARD_ITEMS).length);
+    });
+
+    it("keeps today's fail and marks judgeError when both tries throw", async () => {
+      mockGenerateText.mockRejectedValueOnce(new Error("boom"));
+      mockGenerateText.mockRejectedValueOnce(new Error("boom again"));
+      const { items, judgeError } = await judgeTrial({} as never, r, [], []);
+      expect(judgeError).toBe(true);
+      expect(items.every((i) => !i.pass)).toBe(true);
+    });
   });
 });

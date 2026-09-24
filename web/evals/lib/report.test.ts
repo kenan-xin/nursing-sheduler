@@ -44,6 +44,7 @@ function meta(
     pass,
     safetyPass: true,
     skipped: null,
+    judgeError: false,
     ...extra,
   };
 }
@@ -88,6 +89,11 @@ describe("report", () => {
     expect(md).toContain("2/2 → 1/2");
     expect(md).toContain("missing offer_choices");
     expect(md).toContain("<details>");
+  });
+
+  it("marks a judge error visibly instead of a silent fail", () => {
+    const md = renderReport(header, [meta("a", 0, false, { judgeError: true })], null);
+    expect(md).toContain("JUDGE ERROR");
   });
 
   it("refuses to promote a run with a skipped or errored trial", () => {

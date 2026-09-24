@@ -126,10 +126,20 @@ export function renderReport(
   lines.push("", "## Failures", "");
   for (const m of metas.filter((x) => !x.pass && x.skipped === null)) {
     const failed = [
+      ...(m.judgeError
+        ? [
+            "JUDGE ERROR: verdict was empty or unparsable after a retry; judge items below are the fail fallback, not a real grade",
+          ]
+        : []),
       ...m.gates.filter((g) => !g.pass).map((g) => `${g.gate}: ${g.detail}`),
       ...m.judge.filter((j) => !j.pass).map((j) => `judge ${j.id}: ${j.reasoning}`),
     ];
-    lines.push(`### ${m.caseId} trial ${m.trial + 1}`, "", ...failed.map((f) => `- ${f}`), "");
+    lines.push(
+      `### ${m.caseId} trial ${m.trial + 1}${m.judgeError ? " (JUDGE ERROR)" : ""}`,
+      "",
+      ...failed.map((f) => `- ${f}`),
+      "",
+    );
     const transcript = m.transcript
       .map((t) => `${t.role}: ${t.text}${t.toolCalls.map((c) => ` [${c.name}]`).join("")}`)
       .join("\n");
