@@ -75,7 +75,16 @@ _Add a brief overview of your project architecture_
 
 ## Conventions & Patterns
 
-_Add your project-specific conventions here_
+### Branch and deploy flow
+
+This is a team convention. GitHub does not enforce it.
+
+1. Do not commit directly to `main`.
+2. Create each feature or fix branch from `develop`, in its own worktree: from the repo root, run `wt switch --create <branch> --base develop --no-cd`.
+3. Merge the branch back into `develop`. A push to `develop` deploys the dev environment, https://nurse-scheduler-dev.agilgenie.ai.
+4. To release, open a pull request from `develop` into `main`. Merging it deploys production, https://nurse-sheduler.agilgenie.ai, through the Coolify GitHub webhook.
+
+CI runs on pushes to `main` and `develop`, and on every pull request.
 
 ## Library-First Testing: No Repository-Owned Parsers
 
