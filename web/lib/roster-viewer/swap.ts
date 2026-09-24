@@ -13,6 +13,7 @@ import type { RosterCellChange } from "@/lib/roster/change-request";
 import type { RosterContext, RosterDayGrid, RosterDayState } from "@/lib/roster/types";
 import {
   checkRosterChange,
+  countHeadroom,
   dayCode,
   type LeaveMove,
   plainDate,
@@ -269,34 +270,131 @@ export function planSickCover(
   return { ok: true, kind, cells, soft: check.soft, unchecked: check.unchecked, uncovered: [] };
 }
 
+export type ShortShiftPlan =
+  | {
+      readonly ok: true;
+      readonly kind: "short";
+      readonly cells: readonly RosterCellChange[];
+      readonly shortfalls: readonly { dateIdx: number; label: string; from: number; to: number }[];
+      readonly soft: readonly RuleIssue[];
+      readonly unchecked: readonly string[];
+    }
+  | { readonly ok: false; readonly reasons: readonly string[] };
+
+/**
+ * Step 4, the last resort: leave the shift one short. Mirrors `run_one_short` and the
+ * safety floor in `lib/ai/assistant/repair-options.ts`: never to zero, and never below
+ * the skill mix. Here that means every NEW hard issue must be a shortfall of exactly one,
+ * on a staffing equation with no qualified group (a qualified group is the senior or NIC
+ * slot), whose requirement is 2 or more. Anything else is refused and never offered.
+ */
+export function planShortShift(
+  ctx: SwapContext,
+  personIdx: number,
+  dateIdxs: readonly number[],
+  reason: CoverReason,
+): ShortShiftPlan {
+  const giving = givingProblem(ctx, personIdx, dateIdxs);
+  if (giving !== null) return { ok: false, reasons: [giving] };
+  const cells: RosterCellChange[] = dateIdxs.map((d) => ({
+    personIdx,
+    dateIdx: d,
+    before: ctx.days[personIdx][d],
+    after: reason === "swap" ? OFF : LEAVE,
+  }));
+  const after: RosterDayState[][] = ctx.days.map((row) => [...row]);
+  for (const cell of cells) after[cell.personIdx][cell.dateIdx] = cell.after;
+  const check = checkRosterChange(ctx.model, ctx.context, ctx.days, after, {
+    people: [personIdx],
+    dates: dateIdxs,
+  });
+  const talk =
+    "The app will not offer it. Please talk to your nurse manager or the nursing supervisor.";
+  const senior = check.hard.find((i) => i.staffing?.qualified);
+  if (senior?.staffing) {
+    const s = senior.staffing;
+    return {
+      ok: false,
+      reasons: [
+        `Running it short would leave no ${s.qualifiedLabel} nurse on ${s.scope} on ${plainDate(ctx.context.calendar[s.dateIdx].iso)}, and a nurse who can be in charge must stay. ${talk}`,
+      ],
+    };
+  }
+  const unsafe = check.hard.find(
+    (i) => i.staffing?.part !== "short" || i.severity !== 1 || (i.staffing?.required ?? 0) < 2,
+  );
+  if (unsafe) {
+    const why =
+      unsafe.staffing?.part === "short" ? "would leave the shift too thin" : "breaks another rule";
+    return { ok: false, reasons: [`Running it short ${why}: ${unsafe.message} ${talk}`] };
+  }
+  return {
+    ok: true,
+    kind: "short",
+    cells,
+    // Every hard issue here is a staffing shortfall of one (checked just above).
+    shortfalls: check.hard.flatMap((i) =>
+      i.staffing
+        ? [
+            {
+              dateIdx: i.staffing.dateIdx,
+              label: i.staffing.label,
+              from: i.staffing.required,
+              to: i.staffing.required - 1,
+            },
+          ]
+        : [],
+    ),
+    soft: check.soft,
+    unchecked: check.unchecked,
+  };
+}
+
 export interface CoverLadder {
-  readonly step: 1 | 2 | 3;
+  readonly step: 1 | 2 | 3 | 4;
   readonly candidates: readonly SwapCandidate[];
+  readonly overtime: readonly SwapCandidate[];
   readonly trades: readonly TradeCandidate[];
   readonly borrow: readonly { dateIdx: number; shift: string; skillGroup: string | null }[];
+  readonly short: ShortShiftPlan | null;
   readonly ruledOut: readonly { partnerIdx: number; reason: string }[];
 }
 
 /**
- * The ward's escalation ladder: 1 swap/cover/move, 2 a trade with someone off or on
- * leave, 3 borrow. Only the lowest step with an option is returned, so the assistant
- * cannot skip a step. Step 3 has no candidates: the user names the borrowed nurse.
+ * The four-step cover ladder (spec "Cover ladder"). Only the lowest step with an option
+ * comes back, so the assistant cannot skip one. Step 4 needs `noTemporaryNurse`: only the
+ * user knows whether the relief pool, other wards and agencies said no.
  */
 export function findCoverLadder(
   ctx: SwapContext,
   personIdx: number,
   dateIdxs: readonly number[],
   reason: CoverReason,
+  options: { noTemporaryNurse?: boolean } = {},
 ): CoverLadder {
-  const step1 =
+  const found =
     reason === "swap"
-      ? findSwapPartners(ctx, personIdx, dateIdxs)
-      : findSickCovers(ctx, personIdx, dateIdxs);
-  const empty = { candidates: [], trades: [], borrow: [], ruledOut: step1.ruledOut };
-  if (step1.candidates.length > 0) return { ...empty, step: 1, candidates: step1.candidates };
+      ? findSwapPartners(ctx, personIdx, dateIdxs, 50)
+      : findSickCovers(ctx, personIdx, dateIdxs, 50);
+  // A cover by someone with no known spare capacity is an overtime REQUEST (step 2).
+  const isOvertime = (c: SwapCandidate) =>
+    c.plan.kind === "cover" && !countHeadroom(ctx.model, ctx.days, c.partnerIdx);
+  const base = {
+    candidates: [],
+    overtime: [],
+    trades: [],
+    borrow: [],
+    short: null,
+    ruledOut: found.ruledOut,
+  };
+  const step1 = found.candidates.filter((c) => !isOvertime(c)).slice(0, 5);
+  if (step1.length > 0) return { ...base, step: 1, candidates: step1 };
+  const overtime = found.candidates.filter(isOvertime).slice(0, 3);
   const trades = findTrades(ctx, personIdx, dateIdxs, reason);
-  if (trades.length > 0) return { ...empty, step: 2, trades };
-  return { ...empty, step: 3, borrow: borrowNeeds(ctx, personIdx, dateIdxs) };
+  if (overtime.length > 0 || trades.length > 0) return { ...base, step: 2, overtime, trades };
+  const borrow = borrowNeeds(ctx, personIdx, dateIdxs);
+  if (!options.noTemporaryNurse) return { ...base, step: 3, borrow };
+  return { ...base, step: 4, borrow, short: planShortShift(ctx, personIdx, dateIdxs, reason) };
 }
 
 export type TradeVariant = "person-covers" | "partner-off";

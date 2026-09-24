@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { buildRuleModel } from "./rule-check";
+import type { CanonicalScenarioDocument } from "@/lib/scenario";
+import type { RosterContext, RosterDayState } from "@/lib/roster/types";
+import { buildRuleModel, countHeadroom } from "./rule-check";
 import {
   findCoverLadder,
   findPersonIdx,
@@ -7,6 +9,7 @@ import {
   findTrades,
   givingProblem,
   planSickCover,
+  planShortShift,
   planSwap,
   planTrade,
   type SwapContext,
@@ -18,9 +21,15 @@ import {
   borrowContext,
   borrowDocument,
   borrowGrid,
+  overtimeContext,
+  overtimeDocument,
+  overtimeGrid,
   priyaContext,
   priyaDocument,
   priyaGrid,
+  shortContext,
+  shortDocument,
+  shortGrid,
 } from "./swap-fixtures";
 
 const ctx: SwapContext = {
@@ -250,5 +259,64 @@ describe("step 2: trades with someone off or on leave", () => {
       ok: false,
       reasons: ["SN-Priya is on leave on 11 Oct, so SN-Priya cannot cover it."],
     });
+  });
+});
+
+describe("the Singapore four-step ladder", () => {
+  const build = (
+    context: RosterContext,
+    days: RosterDayState[][],
+    document: CanonicalScenarioDocument,
+  ) => ({
+    context,
+    days,
+    model: buildRuleModel(document),
+  });
+
+  it("counts an off nurse under a count target as spare capacity (step 1)", () => {
+    expect(countHeadroom(ctx.model, ctx.days, CARA)).toBe(true);
+    const ladder = findCoverLadder(ctx, PRIYA, [1], "sick_or_emergency");
+    expect(ladder.step).toBe(1);
+    expect(ladder.candidates[0]).toMatchObject({ partnerIdx: CARA, plan: { kind: "cover" } });
+  });
+
+  it("turns a cover with no known capacity into an overtime request (step 2)", () => {
+    const overtime = build(overtimeContext(), overtimeGrid(), overtimeDocument());
+    expect(countHeadroom(overtime.model, overtime.days, 2)).toBe(false);
+    const ladder = findCoverLadder(overtime, 0, [1], "sick_or_emergency");
+    expect(ladder.step).toBe(2);
+    expect(ladder.overtime.map((c) => c.partnerIdx)).toEqual([2]);
+  });
+
+  it("stays on step 3 until the user says no temporary nurse is available", () => {
+    const borrow = build(borrowContext(), borrowGrid(), borrowDocument());
+    expect(findCoverLadder(borrow, 0, [1], "sick_or_emergency").step).toBe(3);
+    expect(
+      findCoverLadder(borrow, 0, [1], "sick_or_emergency", { noTemporaryNurse: true }).step,
+    ).toBe(4);
+  });
+
+  it("offers run one short when the senior (NIC) stays on the shift", () => {
+    const short = build(shortContext(), shortGrid(), shortDocument());
+    const ladder = findCoverLadder(short, 0, [1], "sick_or_emergency", { noTemporaryNurse: true });
+    expect(ladder.step).toBe(4);
+    expect(ladder.short).toMatchObject({
+      ok: true,
+      shortfalls: [{ dateIdx: 1, label: "Two night nurses", from: 2, to: 1 }],
+    });
+  });
+
+  it("never offers it when it drops the senior who can be in charge", () => {
+    const short = build(shortContext(), shortGrid(), shortDocument());
+    const plan = planShortShift(short, 1, [1], "sick_or_emergency");
+    expect(plan.ok).toBe(false);
+    if (plan.ok) return;
+    expect(plan.reasons[0]).toMatch(/no Seniors nurse on N\+ on 8 Oct/);
+  });
+
+  it("never runs a shift with nobody", () => {
+    const borrow = build(borrowContext(), borrowGrid(), borrowDocument());
+    const plan = planShortShift(borrow, 0, [1], "sick_or_emergency");
+    expect(plan.ok).toBe(false);
   });
 });

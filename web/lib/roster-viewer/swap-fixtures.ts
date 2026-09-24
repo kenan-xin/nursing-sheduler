@@ -305,3 +305,87 @@ export function ashaRosterDocument(): RosterDocument {
     solvedDays: ashaGrid(),
   };
 }
+
+// Overtime (step 2): like the borrow fixture, plus SN-Kai, off all period and under no count
+// rule, so he has no known spare capacity. His cover is an overtime request.
+export function overtimeDocument(): CanonicalScenarioDocument {
+  const base = borrowDocument();
+  return {
+    ...base,
+    people: {
+      items: [...base.people.items, { id: "SN-Kai" }],
+      groups: [{ id: "Nights", members: ["SN-Priya", "SN-Kai"] }],
+    },
+  };
+}
+export const overtimeGrid = (): RosterDayState[][] => [...borrowGrid(), [OFF, OFF, OFF]];
+export const overtimeContext = (): RosterContext => ({
+  ...borrowContext(),
+  people: [{ id: "SN-Priya" }, { id: "SSN-Dev" }, { id: "SN-Kai" }],
+});
+
+// Run one short (step 4): night on 8 Oct needs 2 across N and N+, and N+ is the senior
+// (NIC) slot. Dropping Priya (N) leaves 1 with the senior: allowed with sign-off.
+// Dropping Lee (N+) drops the senior: never offered.
+//            7 Oct  8 Oct  9 Oct
+// SN-Priya   OFF    N      OFF
+// SSN-Lee    OFF    N+     OFF
+export function shortDocument(): CanonicalScenarioDocument {
+  return {
+    apiVersion: "alpha",
+    dates: { range: { startDate: BORROW_DATES[0], endDate: BORROW_DATES[2] } },
+    people: {
+      items: [{ id: "SN-Priya" }, { id: "SSN-Lee" }],
+      groups: [{ id: "Seniors", members: ["SSN-Lee"] }],
+    },
+    shiftTypes: {
+      items: [
+        { id: "N", startTime: "21:00", endTime: "07:00", durationMinutes: 600 },
+        { id: "N+", startTime: "21:00", endTime: "07:00", durationMinutes: 600 },
+      ],
+      groups: [{ id: "AllNights", members: ["N", "N+"] }],
+    },
+    preferences: [
+      { type: PREFERENCE_TYPE.maxOneShiftPerDay },
+      {
+        type: PREFERENCE_TYPE.shiftTypeRequirement,
+        description: "Two night nurses",
+        shiftType: "AllNights",
+        date: "2026-10-08",
+        requiredNumPeople: 2,
+        weight: -1,
+      },
+      {
+        type: PREFERENCE_TYPE.shiftTypeRequirement,
+        description: "Senior (NIC) on nights",
+        shiftType: "N+",
+        date: "2026-10-08",
+        requiredNumPeople: 1,
+        qualifiedPeople: "Seniors",
+        weight: -1,
+      },
+    ],
+  };
+}
+export const shortGrid = (): RosterDayState[][] => [
+  [OFF, N, OFF],
+  [OFF, { kind: "shift", shiftId: "N+" }, OFF],
+];
+export const shortContext = (): RosterContext => ({
+  people: [{ id: "SN-Priya" }, { id: "SSN-Lee" }],
+  shiftTypes: [
+    { id: "N", description: "Night" },
+    { id: "N+", description: "Night (senior)" },
+  ],
+  calendar: BORROW_DATES.map((iso) => ({ iso, weekday: "Wed", weekend: false, holiday: false })),
+  baselineMinimums: ["N", "N+"].map((shiftId) => ({ shiftId, unavailable: true as const })),
+  leaveCreditMinutes: null,
+});
+export function shortRosterDocument(): RosterDocument {
+  return {
+    ...priyaRosterDocument(),
+    submission: fixtureSubmission(shortDocument(), []),
+    context: shortContext(),
+    solvedDays: shortGrid(),
+  };
+}

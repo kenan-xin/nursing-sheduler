@@ -54,6 +54,18 @@ export interface RuleIssue {
   readonly severity: number;
   /** One plain sentence a nurse can read. */
   readonly message: string;
+  /** Set on staffing issues only: which part broke, and on which equation and day. */
+  readonly staffing?: {
+    readonly part: "short" | "over" | "unqualified";
+    /** The equation names a qualified group (the senior or NIC slot). */
+    readonly qualified: boolean;
+    readonly required: number;
+    readonly units: number;
+    readonly dateIdx: number;
+    readonly label: string;
+    readonly qualifiedLabel: string | null;
+    readonly scope: string;
+  };
 }
 
 type IndexSet = ReadonlySet<number>;
@@ -299,6 +311,21 @@ function cellIndex(model: RuleModel, day: RosterDayState): number {
   return model.shiftIndex.get(typedIdKey(day.shiftId)) ?? Number.NaN;
 }
 
+/**
+ * Spare capacity: some count rule for this person has them below its target now. A
+ * proxy for "part-timer, or a nurse with hours to spare" (the canonical person has no
+ * part-time flag). No count rules means no known capacity. [UNCERTAIN] as ward practice.
+ */
+export function countHeadroom(model: RuleModel, grid: RosterDayGrid, personIdx: number): boolean {
+  return model.counts.some((rule) => {
+    if (!rule.people.has(personIdx)) return false;
+    let x = 0;
+    for (const d of rule.dates)
+      x += rule.coefficients.get(cellIndex(model, grid[personIdx][d])) ?? 0;
+    return rule.pairs.some(({ target }) => x < target);
+  });
+}
+
 function describeShift(model: RuleModel, s: number): string {
   if (s === OFF_SID) return "a day off";
   if (s === LEAVE_SID) return "leave";
@@ -516,12 +543,23 @@ export function listIssues(
     for (const d of scope.dates) {
       const cell = evaluateRequirementCell(equation, index, d);
       if (cell.status !== "checked") continue;
+      const meta = (part: "short" | "over" | "unqualified") => ({
+        part,
+        qualified: equation.qualifiedPeople !== null,
+        required: cell.required,
+        units: cell.units,
+        dateIdx: d,
+        label,
+        qualifiedLabel: equation.qualifiedLabel,
+        scope: equation.scopeLabel,
+      });
       for (const offender of cell.offenders) {
         issues.push({
           key: `${equation.key}:d${d}:unqualified:p${offender}`,
           hard: true,
           severity: 1,
           message: `${day(d)}: ${name(offender)} works ${equation.scopeLabel}, which only ${equation.qualifiedLabel ?? "qualified staff"} may work.`,
+          staffing: meta("unqualified"),
         });
       }
       if (cell.short > 0) {
@@ -530,6 +568,7 @@ export function listIssues(
           hard: true,
           severity: cell.short,
           message: `${day(d)}: “${label}” has ${cell.units} of the ${cell.required} needed.`,
+          staffing: meta("short"),
         });
       }
       if (cell.over > 0) {
@@ -538,6 +577,7 @@ export function listIssues(
           hard: true,
           severity: cell.over,
           message: `${day(d)}: “${label}” has ${cell.units}, more than the ${cell.preferred ?? cell.required} allowed.`,
+          staffing: meta("over"),
         });
       }
     }
