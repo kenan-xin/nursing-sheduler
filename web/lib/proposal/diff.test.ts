@@ -8,9 +8,10 @@
 import { describe, expect, it } from "vitest";
 import { getCapabilityRegistry } from "@/lib/capability/registry";
 import { applyAssistantCommands } from "./operations";
-import { deriveProposalDiff, SCOPE_LABEL, type DiffScope } from "./diff";
+import { deriveProposalDiff, diffScenarioDocuments, SCOPE_LABEL, type DiffScope } from "./diff";
 import type { AssistantCommandV1 } from "./commands";
 import { octoberWard, peopleScenario, proposalScenario, ruleWardScenario } from "./test-support";
+import { cards, people, requirement, ward } from "@/lib/rules/ward-fixtures.test-support";
 
 describe("deriveProposalDiff", () => {
   it("separates what was asked for from what the app will do as a result", () => {
@@ -738,6 +739,40 @@ describe("rule sentences state what the solver enforces", () => {
         weight: Number.NEGATIVE_INFINITY,
       }),
     ).toBe("On · Close to 5 Night shifts for everyone, across every date: must be exactly 5");
+  });
+});
+
+describe("skill mix in the Preview", () => {
+  const before = ward({
+    staff: people("rn1", "en1"),
+    staffGroups: [
+      { id: "RN", members: ["rn1"] },
+      { id: "Senior", members: ["rn1"] },
+    ],
+    cardsByKind: cards({ requirements: [requirement("night", "N", 4)] }),
+  });
+  const after = {
+    ...before,
+    cardsByKind: cards({
+      requirements: [
+        requirement("night", "N", 4, {
+          skillMix: [
+            { people: "RN", minNumPeople: 2 },
+            { people: "Senior", minNumPeople: 1 },
+          ],
+        }),
+      ],
+    }),
+  };
+
+  it("shows the skill mix as a before/after change on the card", () => {
+    const entries = diffScenarioDocuments(before, after);
+    const entry = entries.find((e) => e.key === "rule:requirements:night");
+    expect(entry?.kind).toBe("changed");
+    expect(entry?.before).not.toContain("at least");
+    expect(entry?.after).toContain(
+      "; at least 2 from “RN”, 1 from “Senior” — anyone can fill the other places",
+    );
   });
 });
 
