@@ -327,3 +327,7 @@ existing index moves (`NO_IMPORTS_RULE` names indices 15 and 21).
 - Flakiness at n=3: the report says small drops are noise, and the regression rule needs ≥ 2
   lost passes.
 - Cost estimates stay unconfirmed until the first smoke run (plan's last task).
+- The agent runs in-process (`createOpenRouterAgent`), so the `/api/copilotkit` HTTP
+  handler's containment (header checks, keyless-run rejection) is not exercised here; its
+  own unit tests cover it. Each turn's clone is a fresh agent, as the shipped proxied
+  agent's is (`withShippedClone`).

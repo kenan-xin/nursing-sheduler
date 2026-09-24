@@ -71,6 +71,20 @@ export interface RunTrialInput {
 }
 
 const ORIGIN = "https://ward.test";
+/** How long teardown waits for a stopped turn to let go before giving up on it. */
+const DRAIN_MS = 20_000;
+
+/** The trial ran past `timeoutMs`. A class, so no other message is mistaken for it. */
+class TrialTimeout extends Error {}
+
+/** `promise`, or `fallback` once `ms` pass. */
+function within<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(fallback), ms);
+  });
+  return Promise.race([promise, late]).finally(() => clearTimeout(timer));
+}
 
 /** The keyless load target `loadScenario` takes; it assigns card identity on load. */
 export function buildSeed(seed: Seed): ImportNormalizationTarget {
@@ -190,6 +204,8 @@ export async function runTrial(input: RunTrialInput): Promise<TrialRecord> {
   let seed: ScenarioUiState | null = null;
   let threadId = "";
   let runs = 0;
+  /** The send `say` last started; a timed-out one is still running at teardown. */
+  let pendingSend: Promise<unknown> = Promise.resolve();
 
   const observe = () => {
     const st = useAssistantStore.getState();
@@ -207,14 +223,27 @@ export async function runTrial(input: RunTrialInput): Promise<TrialRecord> {
   const userCount = async () =>
     (await readThreadMessages(threadId)).filter((m) => m.role === "user").length;
   const deadline = started + timeoutMs;
+  const left = () => Math.max(1, deadline - performance.now());
+  /** Rejects with `TrialTimeout` at the deadline. */
+  const beforeDeadline = <T,>(promise: Promise<T>): Promise<T> =>
+    within(
+      promise.then((value) => ({ value })),
+      left(),
+      null,
+    ).then((won) => {
+      if (!won) throw new TrialTimeout();
+      return won.value;
+    });
   const settle = async () => {
     await waitFor(
       () => {
         const s = handles.session;
         if (!s || s.isRunning || s.sending) throw new Error("busy");
       },
-      { timeout: Math.max(1, deadline - performance.now()), interval: 100 },
-    );
+      { timeout: left(), interval: 100 },
+    ).catch((caught: unknown) => {
+      throw performance.now() >= deadline ? new TrialTimeout() : caught;
+    });
     await drainScenarioCommands();
     observe();
   };
@@ -224,8 +253,12 @@ export async function runTrial(input: RunTrialInput): Promise<TrialRecord> {
       async () => {
         if ((await userCount()) <= before) throw new Error("no follow-up yet");
       },
-      { timeout: 10_000, interval: 100 },
-    );
+      { timeout: Math.min(10_000, left()), interval: 100 },
+    ).catch(() => {
+      throw performance.now() >= deadline
+        ? new TrialTimeout()
+        : new Error("no follow-up after Apply or a finished run");
+    });
     await settle();
   };
   const finishRecordedRun = async (outcome: "infeasible" | "optimal") => {
@@ -254,6 +287,7 @@ export async function runTrial(input: RunTrialInput): Promise<TrialRecord> {
     vi.setSystemTime(new Date(`${evalCase.today}T09:00:00+08:00`));
     assistantActions.resetForTest();
     resetRuntimeInstanceForTest();
+    useRunRequestStore.setState({ pending: null, last: null });
     // The real `readWriterContext`: it reads the lease and envelope from the assistant
     // database under this tab's id, so both must be the authority's own.
     const authority = await installTestAuthority({ tabId: resolveTabId() });
@@ -312,21 +346,17 @@ export async function runTrial(input: RunTrialInput): Promise<TrialRecord> {
     let userTurns = 0;
     const say = async (text: string) => {
       userTurns += 1;
+      useAssistantStore.setState({ lastRefusal: null });
       // `send` resolves only when the turn's last write settles, so a run that never
-      // ends would hold it forever: race it against the trial deadline.
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const expired = new Promise<never>((_, reject) => {
-        timer = setTimeout(
-          () => reject(new Error("busy")),
-          Math.max(1, deadline - performance.now()),
-        );
-      });
-      try {
-        await Promise.race([handles.send!(text), expired]);
-      } finally {
-        clearTimeout(timer);
-      }
+      // ends would hold it forever: race it against the trial deadline. Teardown stops
+      // it and waits for it.
+      pendingSend = handles.send!(text);
+      await beforeDeadline(pendingSend);
       await settle();
+      // A refused send still resolves true, with the reason in the store. It is a
+      // harness fault, not the model's: record it as one.
+      const refusal = useAssistantStore.getState().lastRefusal;
+      if (refusal) throw new Error(`refused:${refusal}`);
     };
 
     while (userTurns < maxUserTurns && recorder.hops() < maxHops && !ledger.over) {
@@ -377,49 +407,81 @@ export async function runTrial(input: RunTrialInput): Promise<TrialRecord> {
         if (lastText.includes("?") && answers.length > 0) next = answers.shift() ?? null;
       }
       if (next === null && "simulated" in evalCase.user && input.userModel) {
-        next = await nextSimulatedLine(
-          input.userModel,
-          evalCase.user.simulated,
-          renderTranscript({ transcript: transcriptNow, appliedByHarness } as TrialRecord),
+        next = await beforeDeadline(
+          nextSimulatedLine(
+            input.userModel,
+            evalCase.user.simulated,
+            renderTranscript({ transcript: transcriptNow, appliedByHarness } as TrialRecord),
+          ),
         );
       }
       if (next === null) break;
       await say(next);
     }
   } catch (caught) {
-    const message = caught instanceof Error ? caught.message : String(caught);
-    error = message.includes("busy") || performance.now() >= deadline ? "timeout" : message;
+    const timedOut = caught instanceof TrialTimeout || performance.now() >= deadline;
+    error = timedOut ? "timeout" : caught instanceof Error ? caught.message : String(caught);
   }
 
-  // Stop first: a hung provider request must abort before the recorder waits on it.
-  handles.session?.stop();
-  const rows = threadId ? await readThreadMessages(threadId).catch(() => []) : [];
-  const proposals: ProposalRecord[] = [];
-  for (const id of proposalIds) {
-    const p = await assistantProposalCommands.read(id).catch(() => null);
-    if (p)
-      proposals.push({ proposalId: id, ops: p.commands as AssistantCommandV1[], status: p.status });
+  try {
+    // Stop first, through the controller Stop uses, and wait for it to settle: a hung
+    // turn must let go before the record is read and before the next trial resets the
+    // shared stores. Then wait (bounded) for the send it abandoned.
+    const s = handles.session;
+    if (threadId && s && (s.isRunning || s.sending || s.interrupting)) {
+      await within(
+        assistantActions.interrupt({
+          trigger: "stop",
+          threadId,
+          scenarioId: useAuthorityStore.getState().scenarioId,
+        }),
+        DRAIN_MS,
+        null,
+      );
+    }
+    await within(
+      pendingSend.catch(() => undefined),
+      DRAIN_MS,
+      undefined,
+    );
+    const rows = threadId ? await readThreadMessages(threadId).catch(() => []) : [];
+    const proposals: ProposalRecord[] = [];
+    for (const id of proposalIds) {
+      const p = await assistantProposalCommands.read(id).catch(() => null);
+      if (p)
+        proposals.push({
+          proposalId: id,
+          ops: p.commands as AssistantCommandV1[],
+          status: p.status,
+        });
+    }
+    const final = pickScenario(useScenarioStore.getState());
+    // An abort that never lands would hold the recorder: its unsettled hops count as nothing.
+    const usage = await within(recorder.settled(), DRAIN_MS, {
+      inputTokens: 0,
+      outputTokens: 0,
+      usd: 0,
+      estimated: true,
+    });
+    return {
+      caseId: evalCase.id,
+      trial: input.trial,
+      transcript: toTranscript(rows),
+      choices,
+      proposals,
+      appliedByHarness,
+      navigations: [...seams.pushes],
+      seed: seed ?? final,
+      final,
+      usage,
+      hops: recorder.hops(),
+      ms: Math.round(performance.now() - started),
+      error,
+    };
+  } finally {
+    cleanup();
+    clearTestAuthority();
+    globalThis.fetch = realFetch;
+    vi.useRealTimers();
   }
-  const final = pickScenario(useScenarioStore.getState());
-  const usage = await recorder.settled();
-  const record: TrialRecord = {
-    caseId: evalCase.id,
-    trial: input.trial,
-    transcript: toTranscript(rows),
-    choices,
-    proposals,
-    appliedByHarness,
-    navigations: [...seams.pushes],
-    seed: seed ?? final,
-    final,
-    usage,
-    hops: recorder.hops(),
-    ms: Math.round(performance.now() - started),
-    error,
-  };
-  cleanup();
-  clearTestAuthority();
-  globalThis.fetch = realFetch;
-  vi.useRealTimers();
-  return record;
 }

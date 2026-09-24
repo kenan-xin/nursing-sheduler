@@ -8,6 +8,7 @@ import { Observable } from "rxjs";
 import type { EvalCase } from "./case";
 import { Ledger } from "./budget";
 import { runTrial, withShippedClone } from "./harness";
+import { useAssistantStore } from "@/lib/ai/assistant/store";
 import { createOpenRouterAgent } from "@/lib/ai/runtime/openrouter-agent";
 
 const seams = vi.hoisted(() => ({ agent: null as unknown, pushes: [] as string[] }));
@@ -30,6 +31,7 @@ vi.mock("@copilotkit/react-core/v2", async (importOriginal) => ({
 /** Hop 1 calls `toolName` with `args` (when set); the last hop answers `text`. `hang` never finishes. */
 class ScriptedAgent extends AbstractAgent {
   private hop = 0;
+  private active: { complete(): void } | null = null;
   constructor(readonly script: { toolName?: string; args?: string; text: string; hang?: boolean }) {
     super({ agentId: "eval", threadId: "t" });
   }
@@ -39,6 +41,8 @@ class ScriptedAgent extends AbstractAgent {
     return new Observable<BaseEvent>((sub) => {
       const emit = (e: Record<string, unknown>) => sub.next(e as unknown as BaseEvent);
       emit({ type: "RUN_STARTED", threadId: input.threadId, runId: input.runId });
+      // Like the real agent, a hung run ends when it is aborted.
+      this.active = sub;
       if (hang) return;
       if (toolName && nth === 1) {
         const id = `${input.runId}-call`;
@@ -59,6 +63,9 @@ class ScriptedAgent extends AbstractAgent {
       emit({ type: "RUN_FINISHED", threadId: input.threadId, runId: input.runId });
       sub.complete();
     });
+  }
+  override abortRun(): void {
+    this.active?.complete();
   }
   override clone(): ScriptedAgent {
     const copy = new ScriptedAgent(this.script);
@@ -142,6 +149,40 @@ describe("runTrial", () => {
     expect(r.navigations.length).toBeGreaterThan(0);
   });
 
+  it("records a refused send as a harness error, not a silent empty turn", async () => {
+    const r = await runTrial(input({ ...base, user: { turns: ["   "] } }, { text: "unused" }));
+    expect(r.error).toBe("refused:empty_message");
+  });
+
+  it("records an offered card and picks from it", async () => {
+    const args = JSON.stringify({
+      question: "Which fix?",
+      options: [
+        { label: "Borrow a nurse", detail: "" },
+        { label: "Move a shift", detail: "" },
+      ],
+      multiple: false,
+    });
+    const r = await runTrial(
+      input(
+        {
+          ...base,
+          user: { turns: ["Help"], onChoices: { pick: 2 } },
+          limits: { timeoutMs: 20_000, maxUserTurns: 2 },
+        },
+        { toolName: "offer_choices", args, text: "" },
+      ),
+    );
+    expect(r.error).toBeNull();
+    expect(r.choices[0]).toEqual({
+      question: "Which fix?",
+      options: ["Borrow a nurse", "Move a shift"],
+    });
+    expect(r.transcript.filter((m) => m.role === "user").map((m) => m.text)).toContain(
+      "Move a shift",
+    );
+  });
+
   it("ends a trial that never settles with a timeout error, and the next trial starts clean", async () => {
     const hung = await runTrial(
       input(
@@ -150,6 +191,12 @@ describe("runTrial", () => {
       ),
     );
     expect(hung.error).toBe("timeout");
+    // The stop settled before the trial returned: nothing is left to bleed into the next.
+    expect(useAssistantStore.getState()).toMatchObject({
+      pendingInterruptions: 0,
+      interruption: null,
+      activeTurnId: null,
+    });
     const next = await runTrial(input({ ...base, user: { turns: ["hello"] } }, { text: "Fine." }));
     expect(next.error).toBeNull();
   });
