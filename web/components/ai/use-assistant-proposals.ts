@@ -74,7 +74,7 @@ export interface AssistantProposalController {
  * it here means the panel never renders an error string that leaked out of storage,
  * and never renders "something went wrong".
  */
-function describeApplyFailure(reason: string): string {
+export function describeApplyFailure(reason: string): string {
   switch (reason) {
     case "not-owner":
       return "This schedule is being edited in another tab, so nothing was applied.";

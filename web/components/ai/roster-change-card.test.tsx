@@ -8,6 +8,20 @@ import { RosterChangeCard } from "./roster-change-card";
 
 const navigate = vi.hoisted(() => vi.fn());
 vi.mock("./use-capability-navigation", () => ({ useCapabilityNavigation: () => navigate }));
+const confirm = vi.hoisted(() => vi.fn(async () => ({ ok: true })));
+const cancel = vi.hoisted(() => vi.fn(async () => ({ ok: true })));
+vi.mock("@/lib/store", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/store")>();
+  return {
+    ...actual,
+    assistantProposalCommands: {
+      ...actual.assistantProposalCommands,
+      confirm,
+      withdrawConfirmation: vi.fn(),
+      cancel,
+    },
+  };
+});
 
 const TURN = 4;
 const CHANGE = {
@@ -31,10 +45,10 @@ const CHANGE = {
     title: "SN-Priya and SN-Cara, 8 Oct",
     summary: "Priya needs that night off.",
     rows: [
-      { person: "SN-Priya", date: "8 Oct", now: "N", after: "OFF" },
-      { person: "SN-Cara", date: "8 Oct", now: "OFF", after: "N" },
+      { person: "SN-Priya", date: "8 Oct", now: "Night", after: "Day off" },
+      { person: "SN-Cara", date: "8 Oct", now: "Day off", after: "Night" },
     ],
-    worthKnowing: ["SN-Cara asked not to have N on 8 Oct."],
+    worthKnowing: ["SN-Cara asked not to have a night shift on 8 Oct."],
     notChecked: [],
   },
 };
@@ -44,6 +58,8 @@ const renderCard = () => render(<RosterChangeCard onSend={onSend} disabled={fals
 
 beforeEach(() => {
   navigate.mockReset();
+  confirm.mockClear();
+  cancel.mockClear();
   navigate.mockResolvedValue({ status: "focused" });
   onSend.mockReset();
   useAssistantStore.setState({ turnEpoch: TURN });
@@ -65,7 +81,10 @@ describe("RosterChangeCard", () => {
     renderCard();
     expect(screen.getByText("SN-Priya and SN-Cara, 8 Oct")).toBeInTheDocument();
     expect(screen.getAllByRole("row")).toHaveLength(3); // header + two cells
-    expect(screen.getByText("SN-Cara asked not to have N on 8 Oct.")).toBeInTheDocument();
+    expect(
+      screen.getByText("SN-Cara asked not to have a night shift on 8 Oct."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Step 1 · Swap or cover within the ward")).toBeInTheDocument();
   });
 
   it("opens the Roster screen, hands it the request, and goes away on Apply", async () => {
@@ -102,6 +121,38 @@ describe("RosterChangeCard", () => {
     expect(useAssistantStore.getState().activeRosterChange).toBeNull();
     expect(useRosterChangeStore.getState().pending).toBeNull();
   });
+
+  const LINKED_CHANGE = {
+    ...CHANGE,
+    view: {
+      ...CHANGE.view,
+      heading: "Ask SN-Asha to come in?",
+      stepLabel: "Step 2 · Ask someone off or on leave to come in",
+      agreement: "SN-Asha agreed to come in on 8–9 Oct and take leave on 11–12 Oct instead.",
+    },
+    linked: { proposalId: "p-1", assumptionIds: ["a-1"] },
+  };
+
+  it("keeps Apply off until the agreement is ticked", async () => {
+    assistantActions.showRosterChange(LINKED_CHANGE, TURN);
+    renderCard();
+    expect(screen.getByTestId("roster-change-apply")).toBeDisabled();
+    await userEvent.click(screen.getByRole("checkbox", { name: /SN-Asha agreed/ }));
+    await waitFor(() => expect(screen.getByTestId("roster-change-apply")).toBeEnabled());
+    expect(confirm).toHaveBeenCalledWith({ proposalId: "p-1", assumptionId: "a-1" });
+    expect(screen.getByText("Step 2 · Ask someone off or on leave to come in")).toBeInTheDocument();
+  });
+
+  it.each(["roster-change-revise", "roster-change-cancel"])(
+    "cancels the linked schedule change too (%s)",
+    async (testId) => {
+      assistantActions.showRosterChange(LINKED_CHANGE, TURN);
+      renderCard();
+      await userEvent.click(screen.getByTestId(testId));
+      expect(cancel).toHaveBeenCalledWith("p-1");
+      expect(useAssistantStore.getState().activeRosterChange).toBeNull();
+    },
+  );
 
   it("waits for a running turn before Apply", () => {
     assistantActions.showRosterChange(CHANGE, TURN);

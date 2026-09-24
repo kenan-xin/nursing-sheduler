@@ -8,15 +8,22 @@
 // as one hand edit. A card from a stopped turn renders as stopped, with no Apply.
 //
 // Same decision rows as the Preview (`ChoiceOption`, `OtherAnswer`), so the two read
-// as one family. Nothing is prepared on the schedule side yet, so Change something
-// and Cancel both just set the card aside; the words that differ are for the reader.
+// as one family. A change with a linked schedule proposal (a leave move, MC leave, a
+// borrowed nurse) applies both halves together or not at all (`linked-apply.ts`), and
+// every way of setting the card aside cancels that proposal, so none stays applicable.
 
 import { useState } from "react";
 import { Surface } from "@/components/ui/surface";
-import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
+import {
+  assistantActions,
+  type AssistantUiState,
+  useAssistantStore,
+} from "@/lib/ai/assistant/store";
 import { CAPABILITY_UNAVAILABLE } from "@/lib/capability/resolve";
 import { requestRosterChange } from "@/lib/roster/change-request";
+import { assistantProposalCommands } from "@/lib/store";
 import { ChoiceOption, OtherAnswer } from "./choice-card";
+import { applyLinkedChange, linkedApplyDeps } from "./linked-apply";
 import { useCapabilityNavigation } from "./use-capability-navigation";
 
 const SECTION_HEAD = "text-label font-semibold uppercase tracking-[0.03em] text-ink3";
@@ -50,30 +57,82 @@ export interface RosterChangeCardProps {
   disabled: boolean;
 }
 
+type ActiveRosterChange = NonNullable<AssistantUiState["activeRosterChange"]>;
+
 export function RosterChangeCard({ onSend, disabled }: RosterChangeCardProps) {
   const active = useAssistantStore((state) => state.activeRosterChange);
   const liveEpoch = useAssistantStore((state) => state.turnEpoch);
-  const navigate = useCapabilityNavigation();
-  const [opening, setOpening] = useState(false);
-  const [failed, setFailed] = useState(false);
-
   if (active === null) return null;
-  const stopped = active.turnEpoch !== liveEpoch;
-  const { view, request } = active;
+  // The key resets the agreement tick and any message for every new card.
+  return (
+    <RosterChangeBody
+      key={active.id}
+      active={active}
+      stopped={active.turnEpoch !== liveEpoch}
+      onSend={onSend}
+      disabled={disabled}
+    />
+  );
+}
+
+function RosterChangeBody({
+  active,
+  stopped,
+  onSend,
+  disabled,
+}: RosterChangeCardProps & { active: ActiveRosterChange; stopped: boolean }) {
+  const navigate = useCapabilityNavigation();
+  const [agreed, setAgreed] = useState(false);
+  const [opening, setOpening] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const { view, request, linked } = active;
+
+  const setAside = () => {
+    if (linked) void assistantProposalCommands.cancel(linked.proposalId);
+    assistantActions.clearRosterChange();
+  };
+
+  const onAgree = async (checked: boolean) => {
+    setAgreed(checked);
+    // Recorded on the linked proposal too, so its own Apply gate agrees with the tick.
+    if (linked === null) return;
+    for (const assumptionId of linked.assumptionIds) {
+      const input = { proposalId: linked.proposalId, assumptionId };
+      await (checked
+        ? assistantProposalCommands.confirm(input)
+        : assistantProposalCommands.withdrawConfirmation(input));
+    }
+  };
 
   const onApply = async () => {
-    if (request === null) return;
     setOpening(true);
-    setFailed(false);
+    setMessage(null);
     try {
-      // The user's click is its own authority. An unsaved draft still gets the usual confirm.
-      const outcome = await navigate("roster-viewer");
-      if (outcome.status === CAPABILITY_UNAVAILABLE) {
-        if (outcome.reason !== "navigation_cancelled") setFailed(true);
+      if (linked === null) {
+        if (request === null) return;
+        // The user's click is its own authority. An unsaved draft still gets the usual confirm.
+        const outcome = await navigate("roster-viewer");
+        if (outcome.status === CAPABILITY_UNAVAILABLE) {
+          if (outcome.reason !== "navigation_cancelled") {
+            setMessage(
+              "The Roster screen could not be opened. Open it yourself and make the change there.",
+            );
+          }
+          return;
+        }
+        requestRosterChange(request);
+        assistantActions.clearRosterChange();
         return;
       }
-      requestRosterChange(request);
-      assistantActions.clearRosterChange();
+      const result = await applyLinkedChange(
+        active,
+        linkedApplyDeps(async () => {
+          const outcome = await navigate("roster-viewer");
+          return outcome.status !== CAPABILITY_UNAVAILABLE;
+        }),
+      );
+      if (result.ok) assistantActions.clearRosterChange();
+      else setMessage(result.message);
     } finally {
       setOpening(false);
     }
@@ -91,6 +150,7 @@ export function RosterChangeCard({ onSend, disabled }: RosterChangeCardProps) {
       aria-label="Roster change"
     >
       <header className="flex flex-col gap-1">
+        <p className={SECTION_HEAD}>{view.stepLabel}</p>
         <h3 className="font-heading text-cardhead font-semibold tracking-[-0.015em]">
           {view.heading}
         </h3>
@@ -142,6 +202,21 @@ export function RosterChangeCard({ onSend, disabled }: RosterChangeCardProps) {
               </p>
             </section>
           ) : null}
+          {view.leaveRows.length > 0 ? (
+            <ul
+              className="flex flex-col gap-1 text-meta text-ink2"
+              data-testid="roster-change-leave"
+            >
+              {view.leaveRows.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          ) : null}
+          {view.notes.map((note) => (
+            <p key={note} className="text-meta text-ink2">
+              {note}
+            </p>
+          ))}
           <NoteList title="Worth knowing" items={view.worthKnowing} />
           {view.notChecked.length > 0 ? (
             <section className="flex flex-col gap-1.5" data-testid="roster-change-not-checked">
@@ -156,6 +231,17 @@ export function RosterChangeCard({ onSend, disabled }: RosterChangeCardProps) {
               </p>
             </section>
           ) : null}
+          {view.agreement !== null ? (
+            <label className="flex items-start gap-2 text-meta">
+              <input
+                type="checkbox"
+                checked={agreed}
+                onChange={(event) => void onAgree(event.target.checked)}
+                data-testid="roster-change-agree"
+              />
+              <span>{view.agreement}</span>
+            </label>
+          ) : null}
           <footer
             className="flex flex-col gap-2 border-t border-line2 pt-3"
             role="group"
@@ -165,21 +251,30 @@ export function RosterChangeCard({ onSend, disabled }: RosterChangeCardProps) {
               primary
               data-testid="roster-change-apply"
               label={opening ? "Opening…" : "Apply to roster"}
-              detail="Opens the Roster screen and makes this change. You can undo it there."
-              disabled={disabled || opening || request === null}
+              detail={
+                request === null
+                  ? "Makes this change to the schedule. You can undo it from the change list."
+                  : "Opens the Roster screen and makes this change. You can undo it there."
+              }
+              disabled={
+                disabled ||
+                opening ||
+                (request === null && linked === null) ||
+                (view.agreement !== null && !agreed)
+              }
               onClick={() => void onApply()}
             />
             <ChoiceOption
               data-testid="roster-change-revise"
               label="Change something"
               detail="Set it aside and tell me what to adjust."
-              onClick={() => assistantActions.clearRosterChange()}
+              onClick={setAside}
             />
             <ChoiceOption
               data-testid="roster-change-cancel"
               label="Cancel"
               detail="Drop this change. The roster stays as it is."
-              onClick={() => assistantActions.clearRosterChange()}
+              onClick={setAside}
             />
             <div className="mt-1 flex flex-col gap-2 border-t border-line2 pt-3">
               <OtherAnswer
@@ -187,15 +282,15 @@ export function RosterChangeCard({ onSend, disabled }: RosterChangeCardProps) {
                 sendLabel="Send what to change"
                 disabled={disabled}
                 onSend={(text) => {
-                  assistantActions.clearRosterChange();
+                  setAside();
                   onSend(text);
                 }}
               />
             </div>
           </footer>
-          {failed ? (
+          {message !== null ? (
             <p className="text-meta text-errorink" role="status" data-testid="roster-change-failed">
-              The Roster screen could not be opened. Open it yourself and make the change there.
+              {message}
             </p>
           ) : null}
         </>
