@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { SCENARIOS } from "@/lib/rules/ward-fixtures.test-support";
 import {
+  calibrationRecord,
   entityNames,
   judgePrompt,
   trialEntities,
@@ -8,10 +9,14 @@ import {
   renderTranscript,
   RUBRIC_VERSION,
   STANDARD_ITEMS,
+  type LabelledTrial,
 } from "./judge";
 import type { TrialRecord } from "./trial";
+import { ALL_CASES } from "../cases";
+import labelledJson from "../fixtures/judge-calibration.json";
 
 const seed = SCENARIOS.onlyRnOnLeave();
+const labelled = labelledJson as LabelledTrial[];
 const r: TrialRecord = {
   caseId: "c",
   trial: 0,
@@ -131,6 +136,24 @@ describe("judge", () => {
     for (const label of ["Apply", "Preview", "Change something", "Cancel", "Run"])
       expect(prompt).toContain(label);
     expect(prompt).toMatch(/option card/i);
+  });
+
+  it("keeps a mixed calibration set of at least 20 labelled transcripts of known cases", () => {
+    expect(labelled.length).toBeGreaterThanOrEqual(20);
+    expect(new Set(labelled.map((l) => l.label))).toEqual(new Set(["pass", "fail"]));
+    expect(new Set(labelled.map((l) => l.id)).size).toBe(labelled.length);
+    const ids = new Set(ALL_CASES.map((c) => c.id));
+    for (const l of labelled) {
+      expect(ids.has(l.caseId), l.id).toBe(true);
+      expect(l.reason.length, l.id).toBeGreaterThan(10);
+    }
+  });
+
+  it("renders a labelled transcript as the judge sees it", () => {
+    const l = labelled.find((x) => x.id === "deep:exact-vs-preferred:0")!;
+    const text = renderTranscript(calibrationRecord(l, seed));
+    expect(text).toContain("User: Mornings need at least 2 nurses, ideally 3.");
+    expect(text).toContain("Preview shown to the user.");
   });
 
   it("fails an item the judge left out", () => {

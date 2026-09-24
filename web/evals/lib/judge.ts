@@ -5,7 +5,8 @@ import { generateText, Output, type LanguageModel } from "ai";
 import { z } from "zod";
 import { OPENROUTER_BASE_URL } from "@/lib/ai/runtime/containment";
 import type { ScenarioUiState } from "@/lib/scenario";
-import type { JudgeItem, TrialRecord } from "./trial";
+import type { ImportNormalizationTarget } from "@/lib/scenario/types";
+import type { JudgeItem, TranscriptEntry, TrialRecord } from "./trial";
 
 export const RUBRIC_VERSION = "2026-09-24.4";
 /** Judge agreement with hand labels, filled after the first calibration (spec §6.3). */
@@ -82,7 +83,7 @@ export function renderTranscript(
   return lines.join("\n");
 }
 
-export function entityNames(s: ScenarioUiState): string[] {
+export function entityNames(s: ImportNormalizationTarget): string[] {
   const cards = Object.values(s.cardsByKind).flat() as { uid: string; description?: string }[];
   return [
     ...s.staff.map((p) => String(p.id)),
@@ -105,6 +106,39 @@ export function trialEntities(r: TrialRecord): string[] {
     .flatMap((m) => m.text.match(/\p{Lu}[\p{L}'-]*(?:\s+\p{Lu}[\p{L}'-]*)*/gu) ?? [])
     .flatMap((run) => [run, ...run.split(/\s+/)]);
   return [...new Set([...entityNames(r.seed), ...entityNames(r.final), ...typed])];
+}
+
+/** A hand-labelled transcript (fixtures/judge-calibration.json). */
+export interface LabelledTrial {
+  id: string;
+  caseId: string;
+  label: string;
+  reason: string;
+  appliedByHarness: number;
+  transcript: TranscriptEntry[];
+}
+
+/**
+ * A stored transcript as the judge sees it. The seed stands in for the final state: the
+ * names an applied change adds are ones the user typed, which trialEntities admits anyway.
+ */
+export function calibrationRecord(l: LabelledTrial, seed: ImportNormalizationTarget): TrialRecord {
+  const state = seed as ScenarioUiState;
+  return {
+    caseId: l.caseId,
+    trial: 0,
+    transcript: l.transcript,
+    choices: [],
+    proposals: [],
+    appliedByHarness: l.appliedByHarness,
+    navigations: [],
+    seed: state,
+    final: state,
+    usage: { inputTokens: 0, outputTokens: 0, usd: 0, estimated: false },
+    hops: 0,
+    ms: 0,
+    error: null,
+  };
 }
 
 export function judgePrompt(r: TrialRecord, entities: string[], extra: string[]) {
