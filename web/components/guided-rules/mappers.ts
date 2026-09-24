@@ -83,7 +83,7 @@ export const requirementsMapper: GuidedRuleMapper<RequirementCard> = {
     const mix = card.skillMix?.length
       ? `, at least ${card.skillMix.map((e) => `${e.minNumPeople} ${e.people}`).join(", ")}`
       : "";
-    return `${count} on ${shiftLabel} on ${dateLabel}.${only}${mix}`;
+    return `${count} on ${shiftLabel} on ${dateLabel}${mix}.${only}`;
   },
   quickFields(card): GuidedQuickField[] {
     if (!isSupportedRequirementCard(card)) return [];

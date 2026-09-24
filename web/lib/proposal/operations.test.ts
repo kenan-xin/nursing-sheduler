@@ -264,6 +264,43 @@ describe("set_skill_mix", () => {
     ]);
   });
 
+  // RN = ana, ben and Senior = cai share no one: RN >= 2 plus Senior >= 1 needs 3 people.
+  const disjointMix = [
+    { people: "RN", minNumPeople: 2 },
+    { people: "Senior", minNumPeople: 1 },
+  ];
+
+  it.each([
+    ["set_skill_mix", { type: "set_skill_mix" as const, ruleId: "req-day", skillMix: disjointMix }],
+    [
+      "add_staffing_requirement",
+      {
+        type: "add_staffing_requirement" as const,
+        description: "Night",
+        shiftType: "Night",
+        qualifiedPeople: ["ALL"],
+        dates: ["ALL"],
+        requiredNumPeople: 2,
+        skillMix: disjointMix,
+      },
+    ],
+  ])("%s refuses skill-mix groups that share no one and exceed the head count", (_l, command) => {
+    const s = state();
+    s.cardsByKind.requirements[0].requiredNumPeople = 2;
+    const result = applyAssistantCommand(s, command);
+    expect(!result.ok && result.rejection.code).toBe("invalid_value");
+    expect(!result.ok && result.rejection.message).toContain("share no one");
+  });
+
+  it("accepts disjoint skill-mix groups that fit the head count", () => {
+    const result = applyAssistantCommand(state(), {
+      type: "set_skill_mix",
+      ruleId: "req-day",
+      skillMix: disjointMix,
+    });
+    expect(result.ok).toBe(true);
+  });
+
   it("add_staffing_requirement refuses a skill mix naming nobody on the ward", () => {
     const result = applyAssistantCommand(state(), {
       type: "add_staffing_requirement",

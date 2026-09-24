@@ -267,9 +267,11 @@ const alignOverlappingRequirements: Builder = (ctx, findings) => {
   const mine = conflicts.filter((f) => f.ruleIds[f.ruleIds.length - 1] === outerId);
   const needed = Math.max(...mine.map((f) => f.required));
   const conflictDates = new Set(mine.map((f) => f.dateId as string));
-  const innerNames = [...new Set(mine.flatMap((f) => f.ruleIds.slice(0, -1)))]
-    .map((uid) => ruleName(requirementCard(ctx, uid), uid))
-    .join(", ");
+  // A one-card conflict is its own skill mix: groups that share no one (shortfalls.ts).
+  const innerNames =
+    [...new Set(mine.flatMap((f) => f.ruleIds.slice(0, -1)))]
+      .map((uid) => ruleName(requirementCard(ctx, uid), uid))
+      .join(", ") || `its skill mix (${mine[0].mixPeople}, who share no one)`;
   const name = ruleName(outer, outerId);
   const shifts = mine[0].shiftTypes.join("/");
   const first = dateLabel(ctx, mine[0].dateId as string);
@@ -670,6 +672,8 @@ const runOneShort: Builder = (ctx, all) => {
     if (f.dateId === null || gapOn(findings, f.dateId) !== 1) continue;
     // Lowering a requirement closes the gap only if it is part of every finding that day.
     const sameDay = findings.filter((g) => g.dateId === f.dateId);
+    // Nor a day whose skill mix is short too: one fewer leaves the group just as short.
+    if (sameDay.some((g) => g.mixPeople)) continue;
     for (const uid of f.ruleIds) {
       const card = requirementCard(ctx, uid);
       if (!card || !isHeadCount(card) || card.requiredNumPeople < 2) continue;
@@ -1100,7 +1104,9 @@ export function explainFinding(state: ScenarioUiState, f: StaffingFinding): stri
     case "requirement_conflict": {
       const names = f.ruleIds.map((uid) => ruleName(requirementCard(ctx, uid), uid));
       const outer = names.pop();
-      return `${label}, ${shifts}: ${names.join(", ")} need ${f.required} in total, but "${outer}" allows at most ${f.available}.`;
+      const inner =
+        names.join(", ") || `the skill mix of "${outer}" (${f.mixPeople}, who share no one)`;
+      return `${label}, ${shifts}: ${inner} need ${f.required} in total, but "${outer}" allows at most ${f.available}.`;
     }
   }
 }

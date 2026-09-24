@@ -111,6 +111,7 @@ import {
   type RequirementFormState,
 } from "@/components/requirements/requirements-model";
 import { applyRequirementPatch } from "@/components/requirements/requirement-patch";
+import { skillMixOverflow, skillMixOverflowMessage } from "@/lib/rules/shortfalls";
 import { RenameCollisionError } from "@/lib/cascade";
 import { foldPaintIntents, type MintCellUid } from "@/lib/store/paint-fold";
 import { paintCellKey, type StagedCoordinate } from "@/lib/store/types";
@@ -720,11 +721,22 @@ function requirementRejection(
   if (mix) return mix;
   const dates = dateScopeRejection(state, fields.dates, REQUIREMENT_DATES);
   if (dates) return reject(index, dates.code, `${name}: ${dates.message}.`);
-  const error = firstFormError(
-    validateRequirementForm(draft, buildRequirementShiftTypeDomain(state)),
-  );
+  const error =
+    firstFormError(validateRequirementForm(draft, buildRequirementShiftTypeDomain(state))) ??
+    skillMixOverflowError(state, draft);
   if (error) return reject(index, "invalid_value", `${name}: ${error}.`);
   return undefined;
+}
+
+/** Group membership lives on the ward, not the form: checked once the form's own rules pass. */
+function skillMixOverflowError(
+  state: ScenarioUiState,
+  draft: RequirementFormState,
+): string | undefined {
+  const max = Number(draft.preferredNumPeople || draft.requiredNumPeople);
+  const mix = draft.skillMix as { people: PersonRef; minNumPeople: number }[];
+  const overflow = skillMixOverflow(state, mix, max);
+  return overflow ? skillMixOverflowMessage(overflow) : undefined;
 }
 
 function applyAddStaffingRequirement(
@@ -805,7 +817,8 @@ function applySetSkillMix(
     ...requirementToForm(source, domain),
     skillMix: command.skillMix.map((entry) => ({ ...entry })),
   };
-  const error = firstFormError(validateRequirementForm(draft, domain));
+  const error =
+    firstFormError(validateRequirementForm(draft, domain)) ?? skillMixOverflowError(state, draft);
   if (error) return reject(index, "invalid_value", `${name}: ${error}.`);
   // Compare the mix, not the card: the form round trip also normalises other fields.
   if (stableStringify(source.skillMix ?? []) === stableStringify(command.skillMix)) {

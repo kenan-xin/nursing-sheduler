@@ -1339,6 +1339,57 @@ describe("skill-mix repairs (bead nursing-sheduler-2ti)", () => {
     expect(ranked().some((o) => o.repairId === "run_one_short")).toBe(false);
   });
 
+  it("never offers run_one_short when the same day's skill mix is also short", () => {
+    // Night needs 4 with RN >= 2; rn2 on leave on 03: head 4/3 and RN 2/1 the same day.
+    // Lowering to 3 still leaves one RN against a floor of 2.
+    const s = ward({
+      staff: people("rn1", "rn2", "en1", "en2"),
+      staffGroups: [{ id: "RN", members: ["rn1", "rn2"] }],
+      reqData: [leave("rn2", "03")],
+      cardsByKind: cards({
+        requirements: [
+          requirement("night", "N", 4, {
+            skillMix: [{ people: "RN", minNumPeople: 2 }],
+            date: ["03"],
+          }),
+        ],
+      }),
+    });
+    const ids = rankRepairOptions(s, findStaffingShortfalls(s), { runInfeasible: true }).map(
+      (o) => o.repairId,
+    );
+    expect(ids).toContain("borrow_temporary_nurse");
+    expect(ids).not.toContain("run_one_short");
+  });
+
+  it("explains and offers to raise a card whose skill-mix groups share no one", () => {
+    // Night 3 with RN >= 2 and EN >= 2: four different people on a 3-person shift.
+    const s = ward({
+      staff: people("rn1", "rn2", "en1", "en2"),
+      staffGroups: [
+        { id: "RN", members: ["rn1", "rn2"] },
+        { id: "EN", members: ["en1", "en2"] },
+      ],
+      cardsByKind: cards({
+        requirements: [
+          requirement("night", "N", 3, {
+            skillMix: [
+              { people: "RN", minNumPeople: 2 },
+              { people: "EN", minNumPeople: 2 },
+            ],
+          }),
+        ],
+      }),
+    });
+    const findings = findStaffingShortfalls(s);
+    expect(explainFinding(s, findings[0])).toContain("(RN and EN, who share no one) need 4");
+    const align = rankRepairOptions(s, findings, { runInfeasible: true })[0];
+    expect(align.repairId).toBe("align_overlapping_requirements");
+    expect(align.operations).toEqual([
+      { type: "set_staffing_requirement_people", ruleId: "night", requiredNumPeople: 4 },
+    ]);
+  });
+
   it.each([
     ["remove the entry", { type: "set_skill_mix", ruleId: "night", skillMix: [] }],
     [

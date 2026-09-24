@@ -338,6 +338,55 @@ describe("findStaffingShortfalls", () => {
         }),
       ]);
     });
+
+    const mixWard = (n: number, mix: { people: string; minNumPeople: number }[], extra = {}) =>
+      ward({
+        staff: people("rn1", "rn2", "en1", "en2"),
+        staffGroups: [
+          { id: "RN", members: ["rn1", "rn2"] },
+          { id: "EN", members: ["en1", "en2"] },
+          { id: "Senior", members: ["rn1"] },
+        ],
+        cardsByKind: cards({
+          requirements: [requirement("night", "N", n, { skillMix: mix, ...extra })],
+        }),
+      });
+
+    it("reports disjoint skill-mix groups that need more people than the head count", () => {
+      const findings = findStaffingShortfalls(
+        mixWard(3, [
+          { people: "RN", minNumPeople: 2 },
+          { people: "EN", minNumPeople: 2 },
+        ]),
+      );
+      expect(findings).toHaveLength(7);
+      expect(findings[0]).toMatchObject({
+        kind: "requirement_conflict",
+        dateId: "01",
+        shiftTypes: ["N"],
+        ruleIds: ["night"],
+        required: 4,
+        available: 3,
+        skillMix: true,
+        mixPeople: "RN and EN",
+      });
+    });
+
+    it("accepts overlapping skill-mix groups: an RN who is a senior counts toward both", () => {
+      const mix = [
+        { people: "RN", minNumPeople: 2 },
+        { people: "Senior", minNumPeople: 1 },
+      ];
+      expect(findStaffingShortfalls(mixWard(2, mix))).toEqual([]);
+    });
+
+    it("accepts disjoint skill-mix groups that fit under the preferred count", () => {
+      const mix = [
+        { people: "RN", minNumPeople: 2 },
+        { people: "EN", minNumPeople: 2 },
+      ];
+      expect(findStaffingShortfalls(mixWard(3, mix, { preferredNumPeople: 4 }))).toEqual([]);
+    });
   });
 
   it("ignores disabled requirements and ones with coefficients", () => {
