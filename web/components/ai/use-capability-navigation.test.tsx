@@ -329,3 +329,20 @@ describe("an anchored capability is held to arrival as well as to its control", 
     });
   });
 });
+
+describe("reveal: false", () => {
+  it("reveal: false confirms the anchor without moving focus", async () => {
+    window.history.replaceState({}, "", "/shift-types");
+    mountAnchor("shift-types.add-shift-type");
+    const before = document.activeElement;
+    const outcome = await navigate("shift-types", { ...FAST, reveal: false });
+    expect(outcome).toMatchObject({ status: "navigated", capabilityId: "shift-types" });
+    expect(document.activeElement).toBe(before);
+  });
+
+  it("still refuses when the anchor never mounts", async () => {
+    window.history.replaceState({}, "", "/shift-types");
+    const outcome = await navigate("shift-types", { ...FAST, reveal: false });
+    expect(outcome).toMatchObject({ status: CAPABILITY_UNAVAILABLE, reason: "anchor_missing" });
+  });
+});

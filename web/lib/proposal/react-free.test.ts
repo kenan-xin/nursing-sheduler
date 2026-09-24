@@ -25,6 +25,8 @@ describe("the assistant's host layer reaches no React", () => {
     ["counts model", () => import("@/components/counts/counts-model")],
     ["requirements model", () => import("@/components/requirements/requirements-model")],
     ["requirement patch", () => import("@/components/requirements/requirement-patch")],
+    ["change keys", () => import("@/lib/change-highlight/keys")],
+    ["change highlight plan", () => import("@/lib/change-highlight/plan")],
   ])("%s", async (_name, load) => {
     await expect(load()).resolves.toBeDefined();
   });

@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { FaPowerOff, FaPen, FaCopy, FaTrash } from "@/components/icons";
 import { WeightPill } from "@/components/card-editor/weight-field";
 import type { AffinityCard } from "@/lib/scenario";
+import { changeKeys } from "@/lib/change-highlight/keys";
 import {
   CardActionButton,
   CardListItem,
@@ -51,6 +52,7 @@ export function AffinityCardList({
           <CardListItem
             key={card.uid}
             testId={`affinity-card-${index}`}
+            changeKey={changeKeys.rule("affinities", card.uid)}
             index={index}
             disabled={card.disabled}
             draggable

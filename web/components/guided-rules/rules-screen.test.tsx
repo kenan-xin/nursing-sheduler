@@ -3,6 +3,8 @@ import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { useScenarioStore, scenarioCommands } from "@/lib/store";
+import { changeKeys } from "@/lib/change-highlight/keys";
+import { clearChangeHighlight, showChangeHighlight } from "@/lib/change-highlight/store";
 import { RulesScreen } from "./rules-screen";
 import { drainScenarioCommands, resetScenarioForTest, undoDepth } from "@/lib/store/test-authority";
 
@@ -635,5 +637,19 @@ describe("RulesScreen — real controls at the coarse-pointer floor", () => {
     expect(strip).toContain("rounded-control");
     expect(strip).toContain("border-line2");
     expect(strip).toContain("bg-panel");
+  });
+});
+
+describe("RulesScreen — change highlight", () => {
+  afterEach(() => clearChangeHighlight());
+  it("RulesScreen outlines the rule row an Apply changed, never a built-in", async () => {
+    await seedRequirement();
+    render(<RulesScreen />);
+    act(() => showChangeHighlight([changeKeys.rule("requirements", "r1")]));
+    expect(screen.getByTestId("rule-row-requirements:r1")).toHaveAttribute(
+      "data-change-highlight",
+      "true",
+    );
+    expect(screen.getByTestId(/rule-row-builtin/)).not.toHaveAttribute("data-change-key");
   });
 });

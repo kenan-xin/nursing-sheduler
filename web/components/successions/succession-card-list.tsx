@@ -19,6 +19,7 @@ import { Badge } from "@/components/ui/badge";
 import { FaArrowRightLong, FaPowerOff, FaPen, FaCopy, FaTrash } from "@/components/icons";
 import { WeightPill } from "@/components/card-editor/weight-field";
 import type { SuccessionCard } from "@/lib/scenario";
+import { changeKeys } from "@/lib/change-highlight/keys";
 import {
   CardActionButton,
   CardListItem,
@@ -87,6 +88,7 @@ export function SuccessionCardList({
           <CardListItem
             key={card.uid}
             testId={`succession-card-${index}`}
+            changeKey={changeKeys.rule("successions", card.uid)}
             index={index}
             disabled={card.disabled}
             draggable

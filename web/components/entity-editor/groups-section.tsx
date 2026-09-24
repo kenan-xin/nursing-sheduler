@@ -76,6 +76,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Surface, surfaceVariants } from "@/components/ui/surface";
+import { useChangeTarget } from "@/lib/change-highlight/store";
 import {
   FaPlus,
   FaPen,
@@ -244,6 +245,9 @@ export interface GroupsSectionProps<TItem extends EditorItemBase> {
   /** Close any open group form (add or edit). */
   onCloseForm: () => void;
   config?: GroupsSectionConfig;
+  /** The change-highlight key for a group row (lib/change-highlight). The Staff and
+   *  Shift screens name their groups differently, so each passes its own. */
+  groupChangeKey?: (groupId: string) => string;
 }
 
 export function GroupsSection<TItem extends EditorItemBase>({
@@ -259,6 +263,7 @@ export function GroupsSection<TItem extends EditorItemBase>({
   onEditGroup,
   onCloseForm,
   config,
+  groupChangeKey,
 }: GroupsSectionProps<TItem>) {
   const cfg = React.useMemo(() => resolveConfig(config), [config]);
   const [dragId, setDragId] = React.useState<string | null>(null);
@@ -389,6 +394,7 @@ export function GroupsSection<TItem extends EditorItemBase>({
             onEdit={() => onEditGroup(group.id)}
             onCloseForm={onCloseForm}
             isStale={isStale}
+            changeKey={groupChangeKey?.(group.id)}
             cfg={cfg}
             canDrag={canDrag}
             canReorder={canDrag && groups.length > 1}
@@ -460,6 +466,7 @@ function GroupRow<TItem extends EditorItemBase>({
   onEdit,
   onCloseForm,
   isStale,
+  changeKey,
   cfg,
   canDrag,
   canReorder,
@@ -483,6 +490,7 @@ function GroupRow<TItem extends EditorItemBase>({
   onEdit: () => void;
   onCloseForm: () => void;
   isStale: () => boolean;
+  changeKey: string | undefined;
   cfg: ResolvedConfig;
   canDrag: boolean;
   canReorder: boolean;
@@ -497,6 +505,7 @@ function GroupRow<TItem extends EditorItemBase>({
   onDropRow: () => void;
   onDragEnd: () => void;
 }) {
+  const changeTarget = useChangeTarget(changeKey);
   if (isEditing) {
     // No surface of its own: the open form IS the active editor card (the
     // `selected` role, applied inside GroupForm). Wrapping it in a second L1 card
@@ -523,6 +532,7 @@ function GroupRow<TItem extends EditorItemBase>({
   return (
     <div
       data-testid={`group-row-${group.id}`}
+      {...changeTarget}
       draggable={canDrag}
       onDragStart={canDrag ? onDragStart : undefined}
       onDragOver={

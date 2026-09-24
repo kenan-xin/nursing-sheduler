@@ -65,3 +65,13 @@ export function clearOptimizeRunRequestOutcome(): void {
 export function isRunLive(lifecycle: RunLifecycle): boolean {
   return lifecycle === "submitting" || isActiveLifecycle(lifecycle);
 }
+
+/**
+ * Whether moving to `targetRouteId` would abandon a live run: leaving the Optimise
+ * screen stops its run (the visit is the unit). `undefined` is a target that did not
+ * resolve, which counts as leaving. Only host moves the user did not ask for consult
+ * this; the user can still navigate freely.
+ */
+export function leavesLiveRun(lifecycle: RunLifecycle, targetRouteId: string | undefined): boolean {
+  return isRunLive(lifecycle) && targetRouteId !== "optimize-and-export";
+}
