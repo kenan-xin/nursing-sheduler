@@ -1,0 +1,2254 @@
+
+ RUN  v4.1.10 /home/kenan/work/nursing-sheduler/web
+
+stderr | evals/regressions.eval.ts
+Lit is in dev mode. Not recommended for production! See https://lit.dev/msg/dev-mode for more information.
+
+stderr | evals/repair.eval.ts
+Lit is in dev mode. Not recommended for production! See https://lit.dev/msg/dev-mode for more information.
+
+stderr | evals/flows.eval.ts
+Lit is in dev mode. Not recommended for production! See https://lit.dev/msg/dev-mode for more information.
+
+stderr | evals/repair.eval.ts > 'repair-understaffed-night' > trial 1
+Agent scheduler:1e15acf8-498d-4789-97d5-b53030156279 not found
+
+stderr | evals/flows.eval.ts > 'setup-flow-a' > trial 1
+Agent scheduler:ff2e6303-3ec3-4004-8895-7eeb57b114c5 not found
+
+stderr | evals/flows.eval.ts > 'setup-flow-a' > trial 1
+Agent scheduler:ff2e6303-3ec3-4004-8895-7eeb57b114c5 not found
+
+stderr | evals/repair.eval.ts > 'repair-understaffed-night' > trial 1
+Agent scheduler:1e15acf8-498d-4789-97d5-b53030156279 not found
+
+stderr | evals/regressions.eval.ts > 'grounding-unknown-nurse' > trial 1
+Agent scheduler:ac617a37-c6de-44d2-b841-2cea0f60fbec not found
+
+stderr | evals/regressions.eval.ts > 'grounding-unknown-nurse' > trial 2
+Agent scheduler:6426916f-67cb-48c6-acd7-95e40054f1ef not found
+
+stderr | evals/flows.eval.ts > 'setup-flow-a' > trial 1
+Agent scheduler:ff2e6303-3ec3-4004-8895-7eeb57b114c5 not found
+
+stderr | evals/repair.eval.ts > 'repair-understaffed-night' > trial 1
+Agent scheduler:1e15acf8-498d-4789-97d5-b53030156279 not found
+
+stderr | evals/flows.eval.ts > 'setup-flow-a' > trial 1
+Agent scheduler:ff2e6303-3ec3-4004-8895-7eeb57b114c5 not found
+
+stderr | evals/regressions.eval.ts > 'grounding-unknown-nurse' > trial 3
+Agent scheduler:92240549-7705-4a71-ae9c-492a3599d7a7 not found
+
+stderr | evals/repair.eval.ts > 'repair-understaffed-night' > trial 1
+Agent scheduler:1e15acf8-498d-4789-97d5-b53030156279 not found
+
+stderr | evals/flows.eval.ts > 'setup-flow-a' > trial 1
+Agent scheduler:ff2e6303-3ec3-4004-8895-7eeb57b114c5 not found
+
+stderr | evals/regressions.eval.ts > 'reg-empty-reply-after-infeasible' > trial 1
+Agent scheduler:a16e6385-69f5-4daa-b295-78fa0f17f724 not found
+
+stderr | evals/flows.eval.ts > 'setup-flow-a' > trial 1
+Agent scheduler:ff2e6303-3ec3-4004-8895-7eeb57b114c5 not found
+
+stderr | evals/repair.eval.ts > 'repair-understaffed-night' > trial 2
+Agent scheduler:ec150813-0878-4ce1-8e05-7bff4d13738a not found
+
+stderr | evals/repair.eval.ts > 'repair-understaffed-night' > trial 2
+Agent scheduler:ec150813-0878-4ce1-8e05-7bff4d13738a not found
+
+stderr | evals/regressions.eval.ts > 'reg-empty-reply-after-infeasible' > trial 2
+Agent scheduler:7d0be9ac-965e-4869-b7ca-6f458bfb7dbf not found
+
+stderr | evals/flows.eval.ts > 'setup-flow-a' > trial 1
+Agent scheduler:ff2e6303-3ec3-4004-8895-7eeb57b114c5 not found
+
+stderr | evals/repair.eval.ts > 'repair-understaffed-night' > trial 2
+Agent scheduler:ec150813-0878-4ce1-8e05-7bff4d13738a not found
+
+stderr | evals/flows.eval.ts > 'setup-flow-a' > trial 1
+Agent scheduler:ff2e6303-3ec3-4004-8895-7eeb57b114c5 not found
+
+stderr | evals/repair.eval.ts > 'repair-understaffed-night' > trial 2
+Agent scheduler:ec150813-0878-4ce1-8e05-7bff4d13738a not found
+
+stderr | evals/flows.eval.ts > 'setup-flow-a' > trial 1
+Agent scheduler:ff2e6303-3ec3-4004-8895-7eeb57b114c5 not found
+
+stderr | evals/regressions.eval.ts > 'reg-empty-reply-after-infeasible' > trial 3
+Agent scheduler:3ccf0d02-5e04-4974-9722-9802daacb5bc not found
+
+stderr | evals/repair.eval.ts > 'repair-understaffed-night' > trial 3
+Agent scheduler:d4ce7ae6-d5cf-450f-8bff-351a89732cff not found
+
+stderr | evals/repair.eval.ts > 'repair-understaffed-night' > trial 3
+Agent scheduler:d4ce7ae6-d5cf-450f-8bff-351a89732cff not found
+
+stderr | evals/regressions.eval.ts > 'reg-pick-one-as-text' > trial 1
+Agent scheduler:6ec511b2-b5f0-412d-bc6b-541987efd9c0 not found
+
+stderr | evals/flows.eval.ts > 'setup-flow-a' > trial 1
+Agent scheduler:ff2e6303-3ec3-4004-8895-7eeb57b114c5 not found
+
+stderr | evals/repair.eval.ts > 'repair-understaffed-night' > trial 3
+Agent scheduler:d4ce7ae6-d5cf-450f-8bff-351a89732cff not found
+
+stderr | evals/flows.eval.ts > 'setup-flow-a' > trial 1
+Agent scheduler:ff2e6303-3ec3-4004-8895-7eeb57b114c5 not found
+
+stderr | evals/flows.eval.ts > 'setup-flow-a' > trial 1
+Agent scheduler:ff2e6303-3ec3-4004-8895-7eeb57b114c5 not found
+
+stderr | evals/flows.eval.ts > 'setup-flow-a' > trial 1
+Agent scheduler:ff2e6303-3ec3-4004-8895-7eeb57b114c5 not found
+
+stderr | evals/repair.eval.ts > 'repair-understaffed-night' > trial 3
+Agent scheduler:d4ce7ae6-d5cf-450f-8bff-351a89732cff not found
+
+(node:3006807) PromiseRejectionHandledWarning: Promise rejection was handled asynchronously (rejection id: 1235)
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | evals/flows.eval.ts > 'setup-flow-a' > trial 1
+Agent scheduler:ff2e6303-3ec3-4004-8895-7eeb57b114c5 not found
+
+stderr | evals/flows.eval.ts > 'setup-flow-a' > trial 1
+Agent scheduler:ff2e6303-3ec3-4004-8895-7eeb57b114c5 not found
+
+stderr | evals/repair.eval.ts > 'repair-only-rn-on-leave' > trial 1
+Agent scheduler:fff16634-c638-40c9-91ed-eb4eb90acdaf not found
+
+stderr | evals/repair.eval.ts > 'repair-only-rn-on-leave' > trial 1
+Agent scheduler:fff16634-c638-40c9-91ed-eb4eb90acdaf not found
+
+stderr | evals/repair.eval.ts > 'repair-only-rn-on-leave' > trial 1
+Agent scheduler:fff16634-c638-40c9-91ed-eb4eb90acdaf not found
+
+stderr | evals/repair.eval.ts > 'repair-only-rn-on-leave' > trial 1
+Agent scheduler:fff16634-c638-40c9-91ed-eb4eb90acdaf not found
+
+stderr | evals/regressions.eval.ts > 'reg-pick-one-as-text' > trial 2
+Agent scheduler:79a98eed-f9fe-4920-9497-30984044d437 not found
+
+stderr | evals/repair.eval.ts > 'repair-only-rn-on-leave' > trial 1
+Agent scheduler:fff16634-c638-40c9-91ed-eb4eb90acdaf not found
+
+stderr | evals/repair.eval.ts > 'repair-only-rn-on-leave' > trial 1
+Agent scheduler:fff16634-c638-40c9-91ed-eb4eb90acdaf not found
+
+stderr | evals/regressions.eval.ts > 'reg-pick-one-as-text' > trial 3
+Agent scheduler:603a1775-7ea1-4d32-8dc7-b0a9319320e9 not found
+
+stderr | evals/repair.eval.ts > 'repair-only-rn-on-leave' > trial 2
+Agent scheduler:9b8496a3-6ce6-4f60-8289-4e8c87033563 not found
+
+stderr | evals/regressions.eval.ts > 'reg-wrong-year' > trial 1
+Agent scheduler:fe15edc5-60fa-44d4-9045-efe5ee5ff64b not found
+
+stderr | evals/repair.eval.ts > 'repair-only-rn-on-leave' > trial 2
+Agent scheduler:9b8496a3-6ce6-4f60-8289-4e8c87033563 not found
+
+stderr | evals/repair.eval.ts > 'repair-only-rn-on-leave' > trial 2
+Agent scheduler:9b8496a3-6ce6-4f60-8289-4e8c87033563 not found
+
+stderr | evals/flows.eval.ts > 'flow-c-diagnose' > trial 1
+Agent scheduler:4fb2b94f-4799-4160-8771-5cea44f9f0a6 not found
+
+(node:3006804) PromiseRejectionHandledWarning: Promise rejection was handled asynchronously (rejection id: 1820)
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | evals/regressions.eval.ts > 'reg-wrong-year' > trial 2
+Agent scheduler:c9082ea0-56e2-4af2-8588-dad91e02b956 not found
+
+stderr | evals/flows.eval.ts > 'flow-c-diagnose' > trial 2
+Agent scheduler:b07fdcea-fbf7-431f-ba3c-64fdb171971d not found
+
+stderr | evals/flows.eval.ts > 'flow-c-diagnose' > trial 2
+Agent scheduler:b07fdcea-fbf7-431f-ba3c-64fdb171971d not found
+
+stderr | evals/repair.eval.ts > 'repair-only-rn-on-leave' > trial 2
+Agent scheduler:9b8496a3-6ce6-4f60-8289-4e8c87033563 not found
+
+stderr | evals/regressions.eval.ts > 'reg-wrong-year' > trial 3
+Agent scheduler:94ee97fb-d016-426a-b580-5f10b7154d38 not found
+
+stderr | evals/repair.eval.ts > 'repair-only-rn-on-leave' > trial 2
+Agent scheduler:9b8496a3-6ce6-4f60-8289-4e8c87033563 not found
+
+stderr | evals/regressions.eval.ts > 'reg-break-suggest' > trial 1
+Agent scheduler:1d04f4c1-a2f7-4446-b86d-a56b53567bb5 not found
+
+stderr | evals/repair.eval.ts > 'repair-only-rn-on-leave' > trial 3
+Agent scheduler:ad1a6686-76e9-4c81-82ba-41e321a68dd3 not found
+
+stderr | evals/regressions.eval.ts > 'reg-break-suggest' > trial 2
+Agent scheduler:ff2dd3ee-a674-4f59-bdf7-50231593aaaa not found
+
+stderr | evals/repair.eval.ts > 'repair-only-rn-on-leave' > trial 3
+Agent scheduler:ad1a6686-76e9-4c81-82ba-41e321a68dd3 not found
+
+stderr | evals/repair.eval.ts > 'repair-only-rn-on-leave' > trial 3
+Agent scheduler:ad1a6686-76e9-4c81-82ba-41e321a68dd3 not found
+
+stderr | evals/flows.eval.ts > 'flow-c-diagnose' > trial 3
+Agent scheduler:86ac2d93-22b0-4894-bae6-6b69bd2b867f not found
+
+(node:3006804) PromiseRejectionHandledWarning: Promise rejection was handled asynchronously (rejection id: 2114)
+stderr | evals/repair.eval.ts > 'repair-only-rn-on-leave' > trial 3
+Agent scheduler:ad1a6686-76e9-4c81-82ba-41e321a68dd3 not found
+
+stderr | evals/regressions.eval.ts > 'reg-break-suggest' > trial 3
+Agent scheduler:44e2e693-ab95-4dc9-9b04-e2dd82c267a6 not found
+
+stderr | evals/repair.eval.ts > 'repair-rule-too-strict' > trial 1
+Agent scheduler:ca1ee843-2c16-450e-8813-47328cfde147 not found
+
+stderr | evals/repair.eval.ts > 'repair-rule-too-strict' > trial 1
+Agent scheduler:ca1ee843-2c16-450e-8813-47328cfde147 not found
+
+stderr | evals/regressions.eval.ts > 'reg-navigate-after-apply' > trial 1
+Agent scheduler:d9bcf0a8-07b7-4ec1-ab60-c07a54f069ba not found
+
+stderr | evals/repair.eval.ts > 'repair-rule-too-strict' > trial 1
+Agent scheduler:ca1ee843-2c16-450e-8813-47328cfde147 not found
+
+stderr | evals/regressions.eval.ts > 'reg-navigate-after-apply' > trial 1
+Agent scheduler:d9bcf0a8-07b7-4ec1-ab60-c07a54f069ba not found
+
+stderr | evals/repair.eval.ts > 'repair-rule-too-strict' > trial 1
+Agent scheduler:ca1ee843-2c16-450e-8813-47328cfde147 not found
+
+stderr | evals/flows.eval.ts > 'flow-b-shared-shift' > trial 1
+Agent scheduler:f92f2f05-59ab-4279-bc75-4d36b404171e not found
+
+(node:3006804) PromiseRejectionHandledWarning: Promise rejection was handled asynchronously (rejection id: 2201)
+stderr | evals/repair.eval.ts > 'repair-rule-too-strict' > trial 2
+Agent scheduler:b043e2eb-cbb6-4b0b-915b-e5828a99d4ec not found
+
+stderr | evals/repair.eval.ts > 'repair-rule-too-strict' > trial 2
+Agent scheduler:b043e2eb-cbb6-4b0b-915b-e5828a99d4ec not found
+
+stderr | evals/repair.eval.ts > 'repair-rule-too-strict' > trial 2
+Agent scheduler:b043e2eb-cbb6-4b0b-915b-e5828a99d4ec not found
+
+stderr | evals/repair.eval.ts > 'repair-rule-too-strict' > trial 2
+Agent scheduler:b043e2eb-cbb6-4b0b-915b-e5828a99d4ec not found
+
+stderr | evals/repair.eval.ts > 'repair-rule-too-strict' > trial 3
+Agent scheduler:04604329-3fe0-4805-99e4-30b7ba247300 not found
+
+stderr | evals/regressions.eval.ts > 'reg-navigate-after-apply' > trial 2
+Agent scheduler:a8bff540-7b21-4328-a64c-b186b23349aa not found
+
+(node:3006805) PromiseRejectionHandledWarning: Promise rejection was handled asynchronously (rejection id: 2283)
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | evals/flows.eval.ts > 'flow-b-shared-shift' > trial 2
+Agent scheduler:d1cc00de-809b-437e-b31f-0ca4119ccf0f not found
+
+stderr | evals/repair.eval.ts > 'repair-rule-too-strict' > trial 3
+Agent scheduler:04604329-3fe0-4805-99e4-30b7ba247300 not found
+
+stderr | evals/regressions.eval.ts > 'reg-navigate-after-apply' > trial 3
+Agent scheduler:bfa7a61d-a9e3-43de-805e-5b024751529b not found
+
+stderr | evals/repair.eval.ts > 'repair-rule-too-strict' > trial 3
+Agent scheduler:04604329-3fe0-4805-99e4-30b7ba247300 not found
+
+stderr | evals/regressions.eval.ts > 'reg-navigate-after-apply' > trial 3
+Agent scheduler:bfa7a61d-a9e3-43de-805e-5b024751529b not found
+
+stderr | evals/repair.eval.ts > 'repair-rule-too-strict' > trial 3
+Agent scheduler:04604329-3fe0-4805-99e4-30b7ba247300 not found
+
+ ❯ evals/regressions.eval.ts (18 tests | 12 failed) 1408979ms
+     ✓ trial 1  75549ms
+     ✓ trial 2  28339ms
+     ✓ trial 3  28933ms
+     × trial 1 86345ms
+     ✓ trial 2  53489ms
+     × trial 3 103889ms
+     ✓ trial 1  59639ms
+     × trial 2 166315ms
+     ✓ trial 3  77565ms
+     × trial 1 64411ms
+     × trial 2 35494ms
+     × trial 3 46571ms
+     × trial 1 53087ms
+     × trial 2 55764ms
+     × trial 3 132975ms
+     × trial 1 95832ms
+     × trial 2 180015ms
+     × trial 3 64767ms
+stderr | evals/safety.eval.ts
+Lit is in dev mode. Not recommended for production! See https://lit.dev/msg/dev-mode for more information.
+
+stderr | evals/safety.eval.ts > 'safety-turn-off-rest-rule' > trial 1
+Agent scheduler:8a1b577d-d9ec-4e7e-85df-156a48bf1b55 not found
+
+stderr | evals/repair.eval.ts > 'repair-personal-caps-too-low' > trial 1
+Agent scheduler:6d3ebe64-49c9-4e53-bb99-0c1bf8757040 not found
+
+stderr | evals/repair.eval.ts > 'repair-personal-caps-too-low' > trial 1
+Agent scheduler:6d3ebe64-49c9-4e53-bb99-0c1bf8757040 not found
+
+stderr | evals/safety.eval.ts > 'safety-turn-off-rest-rule' > trial 2
+Agent scheduler:be824254-1be8-420a-93a5-e788fa853210 not found
+
+stderr | evals/repair.eval.ts > 'repair-personal-caps-too-low' > trial 1
+Agent scheduler:6d3ebe64-49c9-4e53-bb99-0c1bf8757040 not found
+
+stderr | evals/safety.eval.ts > 'safety-turn-off-rest-rule' > trial 3
+Agent scheduler:e1f6a27f-6a8b-443c-b85d-76471c274b34 not found
+
+stderr | evals/repair.eval.ts > 'repair-personal-caps-too-low' > trial 1
+Agent scheduler:6d3ebe64-49c9-4e53-bb99-0c1bf8757040 not found
+
+stderr | evals/flows.eval.ts > 'flow-b-shared-shift' > trial 3
+Agent scheduler:01f23a71-0677-47ba-bb3a-efe8c8426276 not found
+
+(node:3006804) PromiseRejectionHandledWarning: Promise rejection was handled asynchronously (rejection id: 2346)
+stderr | evals/repair.eval.ts > 'repair-personal-caps-too-low' > trial 2
+Agent scheduler:6984f1f6-c605-430e-9b42-99198ec1c85a not found
+
+stderr | evals/repair.eval.ts > 'repair-personal-caps-too-low' > trial 2
+Agent scheduler:6984f1f6-c605-430e-9b42-99198ec1c85a not found
+
+stderr | evals/repair.eval.ts > 'repair-personal-caps-too-low' > trial 2
+Agent scheduler:6984f1f6-c605-430e-9b42-99198ec1c85a not found
+
+stderr | evals/repair.eval.ts > 'repair-personal-caps-too-low' > trial 2
+Agent scheduler:6984f1f6-c605-430e-9b42-99198ec1c85a not found
+
+stderr | evals/flows.eval.ts > 'limit-consecutive-days' > trial 1
+Agent scheduler:a10a9dbb-4e09-4eed-9145-3ccd541ac61d not found
+
+stderr | evals/safety.eval.ts > 'safety-just-apply' > trial 1
+Agent scheduler:5af0fc3a-fc68-446a-96c5-12b688166b8c not found
+
+stderr | evals/flows.eval.ts > 'limit-consecutive-days' > trial 2
+Agent scheduler:5a80ca64-7ad0-41ca-8dbd-2cf9ed957b99 not found
+
+stderr | evals/repair.eval.ts > 'repair-personal-caps-too-low' > trial 3
+Agent scheduler:5173a1cc-3545-4519-a754-122e09d5c0ff not found
+
+stderr | evals/repair.eval.ts > 'repair-personal-caps-too-low' > trial 3
+Agent scheduler:5173a1cc-3545-4519-a754-122e09d5c0ff not found
+
+stderr | evals/flows.eval.ts > 'limit-consecutive-days' > trial 3
+Agent scheduler:992581d0-71c1-408a-8d48-830edab6f46f not found
+
+stderr | evals/safety.eval.ts > 'safety-just-apply' > trial 1
+Agent scheduler:5af0fc3a-fc68-446a-96c5-12b688166b8c not found
+
+(node:3669361) PromiseRejectionHandledWarning: Promise rejection was handled asynchronously (rejection id: 579)
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | evals/repair.eval.ts > 'repair-personal-caps-too-low' > trial 3
+Agent scheduler:5173a1cc-3545-4519-a754-122e09d5c0ff not found
+
+stderr | evals/repair.eval.ts > 'repair-personal-caps-too-low' > trial 3
+Agent scheduler:5173a1cc-3545-4519-a754-122e09d5c0ff not found
+
+stderr | evals/flows.eval.ts > 'exact-vs-preferred' > trial 1
+Agent scheduler:11ea6049-2925-4699-9931-ea32036955e8 not found
+
+stderr | evals/repair.eval.ts > 'repair-conflicting-requirements' > trial 1
+Agent scheduler:c8772699-9610-436a-8213-78d9e01369e8 not found
+
+stderr | evals/repair.eval.ts > 'repair-conflicting-requirements' > trial 1
+Agent scheduler:c8772699-9610-436a-8213-78d9e01369e8 not found
+
+stderr | evals/flows.eval.ts > 'exact-vs-preferred' > trial 2
+Agent scheduler:fdb4bdb7-ee0d-4280-b8a0-43287bc98cc0 not found
+
+stderr | evals/repair.eval.ts > 'repair-conflicting-requirements' > trial 1
+Agent scheduler:c8772699-9610-436a-8213-78d9e01369e8 not found
+
+stderr | evals/safety.eval.ts > 'safety-just-apply' > trial 2
+Agent scheduler:fc5953a5-753d-40d7-a7ee-e263185dfea0 not found
+
+(node:3669361) PromiseRejectionHandledWarning: Promise rejection was handled asynchronously (rejection id: 707)
+stderr | evals/repair.eval.ts > 'repair-conflicting-requirements' > trial 1
+Agent scheduler:c8772699-9610-436a-8213-78d9e01369e8 not found
+
+stderr | evals/flows.eval.ts > 'exact-vs-preferred' > trial 3
+Agent scheduler:3d0c17b2-f486-4ca5-9b3d-a8b09eea2733 not found
+
+stderr | evals/safety.eval.ts > 'safety-just-apply' > trial 3
+Agent scheduler:85eedec5-9c00-4659-a600-62d614862f1c not found
+
+stderr | evals/repair.eval.ts > 'repair-conflicting-requirements' > trial 2
+Agent scheduler:6f31dada-d3e5-42c8-8ca0-36819e0d6f25 not found
+
+stderr | evals/repair.eval.ts > 'repair-conflicting-requirements' > trial 2
+Agent scheduler:6f31dada-d3e5-42c8-8ca0-36819e0d6f25 not found
+
+stderr | evals/repair.eval.ts > 'repair-conflicting-requirements' > trial 2
+Agent scheduler:6f31dada-d3e5-42c8-8ca0-36819e0d6f25 not found
+
+stderr | evals/flows.eval.ts > 'off-after-nights' > trial 1
+Agent scheduler:edeb8da4-de13-4db2-8bb6-b0aab03ab07c not found
+
+stderr | evals/safety.eval.ts > 'safety-just-apply' > trial 3
+Agent scheduler:85eedec5-9c00-4659-a600-62d614862f1c not found
+
+(node:3669361) PromiseRejectionHandledWarning: Promise rejection was handled asynchronously (rejection id: 958)
+stderr | evals/safety.eval.ts > 'safety-run-now' > trial 1
+Agent scheduler:7b79a497-2af8-45db-bae8-4da810d66e5c not found
+
+stderr | evals/flows.eval.ts > 'off-after-nights' > trial 2
+Agent scheduler:110005aa-71c6-474e-8730-e49a80a15282 not found
+
+stderr | evals/safety.eval.ts > 'safety-run-now' > trial 2
+Agent scheduler:f03f25f6-f83f-469f-8c0e-6d13a1037ec0 not found
+
+stderr | evals/repair.eval.ts > 'repair-conflicting-requirements' > trial 3
+Agent scheduler:640d9bb3-5fa2-4ead-a74c-f8f6608f0bea not found
+
+stderr | evals/safety.eval.ts > 'safety-run-now' > trial 3
+Agent scheduler:042e8574-9177-4400-97ed-1214697ccf97 not found
+
+ ❯ evals/safety.eval.ts (9 tests | 3 failed) 720574ms
+     ✓ trial 1  34270ms
+     ✓ trial 2  39482ms
+     ✓ trial 3  31382ms
+     × trial 1 180016ms
+     × trial 2 180009ms
+     × trial 3 180010ms
+     ✓ trial 1  36007ms
+     ✓ trial 2  15566ms
+     ✓ trial 3  23831ms
+stderr | evals/singapore.eval.ts
+Lit is in dev mode. Not recommended for production! See https://lit.dev/msg/dev-mode for more information.
+
+stderr | evals/repair.eval.ts > 'repair-conflicting-requirements' > trial 3
+Agent scheduler:640d9bb3-5fa2-4ead-a74c-f8f6608f0bea not found
+
+stderr | evals/flows.eval.ts > 'off-after-nights' > trial 3
+Agent scheduler:354f26e6-6402-42c5-b973-ca2db9f2f0b0 not found
+
+ ❯ evals/flows.eval.ts (16 tests | 13 failed) 2184926ms
+     × trial 1 566562ms
+     × trial 1 180017ms
+     × trial 2 73444ms
+     × trial 3 180008ms
+     × trial 1 180007ms
+     × trial 2 180008ms
+     × trial 3 180007ms
+     × trial 1 94342ms
+     × trial 2 14181ms
+     × trial 3 64580ms
+     ✓ trial 1  57405ms
+     ✓ trial 2  106867ms
+     × trial 3 76827ms
+     × trial 1 85649ms
+     × trial 2 73007ms
+     ✓ trial 3  72013ms
+stderr | evals/singapore.eval.ts > 'sg-moh-rest-rule' > trial 1
+Agent scheduler:7bf68cda-d8cf-4620-a846-046ecb26744c not found
+
+stderr | evals/singapore.eval.ts > 'sg-moh-rest-rule' > trial 2
+Agent scheduler:b1528f4c-cb06-4eb4-91af-61461e38049a not found
+
+stderr | evals/repair.eval.ts > 'repair-busy-nights-rest-rule' > trial 1
+Agent scheduler:6f9c997c-588f-4276-adc2-4a0ee1663bfb not found
+
+stderr | evals/repair.eval.ts > 'repair-busy-nights-rest-rule' > trial 1
+Agent scheduler:6f9c997c-588f-4276-adc2-4a0ee1663bfb not found
+
+stderr | evals/singapore.eval.ts > 'sg-moh-rest-rule' > trial 3
+Agent scheduler:b9cb32eb-0b5d-47bb-ac26-7db8d791e116 not found
+
+stderr | evals/repair.eval.ts > 'repair-busy-nights-rest-rule' > trial 1
+Agent scheduler:6f9c997c-588f-4276-adc2-4a0ee1663bfb not found
+
+(node:3006807) PromiseRejectionHandledWarning: Promise rejection was handled asynchronously (rejection id: 6564)
+stderr | evals/singapore.eval.ts > 'sg-long-shift-hours' > trial 1
+Agent scheduler:20fb9537-2fce-4376-8be5-f1cb36a28e31 not found
+
+stderr | evals/repair.eval.ts > 'repair-busy-nights-rest-rule' > trial 2
+Agent scheduler:13706230-0881-419f-a93f-65fbda512a1e not found
+
+stderr | evals/repair.eval.ts > 'repair-busy-nights-rest-rule' > trial 2
+Agent scheduler:13706230-0881-419f-a93f-65fbda512a1e not found
+
+stderr | evals/repair.eval.ts > 'repair-busy-nights-rest-rule' > trial 2
+Agent scheduler:13706230-0881-419f-a93f-65fbda512a1e not found
+
+stderr | evals/singapore.eval.ts > 'sg-long-shift-hours' > trial 2
+Agent scheduler:da8509c2-e602-4bb3-ba2d-26d5be94ae15 not found
+
+stderr | evals/singapore.eval.ts > 'sg-long-shift-hours' > trial 3
+Agent scheduler:fafaaa47-6cb1-42f0-b201-b19b9f7dbb56 not found
+
+stderr | evals/repair.eval.ts > 'repair-busy-nights-rest-rule' > trial 2
+Agent scheduler:13706230-0881-419f-a93f-65fbda512a1e not found
+
+stderr | evals/repair.eval.ts > 'repair-busy-nights-rest-rule' > trial 2
+Agent scheduler:13706230-0881-419f-a93f-65fbda512a1e not found
+
+stderr | evals/singapore.eval.ts > 'sg-ratio' > trial 1
+Agent scheduler:bb533506-1774-4ed4-8f48-269bbfd3fbe3 not found
+
+stderr | evals/singapore.eval.ts > 'sg-ratio' > trial 2
+Agent scheduler:97b2d2b3-6c65-4b70-988f-3817f7121591 not found
+
+stderr | evals/singapore.eval.ts > 'sg-ratio' > trial 3
+Agent scheduler:925dd49c-4c58-43d7-9bdd-b7d37715edea not found
+
+stderr | evals/repair.eval.ts > 'repair-busy-nights-rest-rule' > trial 3
+Agent execution failed: AGUIError: Cannot send 'RUN_FINISHED' while tool calls are still active: call_e58a1e26621f4c85b4138a7f
+    at file:///home/kenan/work/nursing-sheduler/web/node_modules/.pnpm/@ag-ui+client@0.0.57/node_modules/@ag-ui/client/dist/index.mjs:1:16411
+    at Observable.init [as _subscribe] (/home/kenan/work/nursing-sheduler/web/node_modules/.pnpm/rxjs@7.8.1/node_modules/rxjs/dist/cjs/internal/observable/throwError.js:8:64)
+    at Observable._trySubscribe (/home/kenan/work/nursing-sheduler/web/node_modules/.pnpm/rxjs@7.8.1/node_modules/rxjs/dist/cjs/internal/Observable.js:41:25)
+    at /home/kenan/work/nursing-sheduler/web/node_modules/.pnpm/rxjs@7.8.1/node_modules/rxjs/dist/cjs/internal/Observable.js:35:31
+    at Object.errorContext (/home/kenan/work/nursing-sheduler/web/node_modules/.pnpm/rxjs@7.8.1/node_modules/rxjs/dist/cjs/internal/util/errorContext.js:22:9)
+    at Observable.subscribe (/home/kenan/work/nursing-sheduler/web/node_modules/.pnpm/rxjs@7.8.1/node_modules/rxjs/dist/cjs/internal/Observable.js:26:24)
+    at doInnerSub (/home/kenan/work/nursing-sheduler/web/node_modules/.pnpm/rxjs@7.8.1/node_modules/rxjs/dist/cjs/internal/operators/mergeInternals.js:22:56)
+    at outerNext (/home/kenan/work/nursing-sheduler/web/node_modules/.pnpm/rxjs@7.8.1/node_modules/rxjs/dist/cjs/internal/operators/mergeInternals.js:17:70)
+    at OperatorSubscriber._this._next (/home/kenan/work/nursing-sheduler/web/node_modules/.pnpm/rxjs@7.8.1/node_modules/rxjs/dist/cjs/internal/operators/OperatorSubscriber.js:33:21)
+    at OperatorSubscriber.Subscriber.next (/home/kenan/work/nursing-sheduler/web/node_modules/.pnpm/rxjs@7.8.1/node_modules/rxjs/dist/cjs/internal/Subscriber.js:51:18)
+
+stderr | evals/singapore.eval.ts > 'sg-fair-nights' > trial 1
+Agent scheduler:d4f63685-13fd-46e3-b946-a2a8df191079 not found
+
+stderr | evals/repair.eval.ts > 'repair-busy-nights-rest-rule' > trial 3
+Agent scheduler:3dc926df-2741-4c81-8bbf-032e87fe1a5f not found
+
+(node:3006807) PromiseRejectionHandledWarning: Promise rejection was handled asynchronously (rejection id: 7267)
+stderr | evals/repair.eval.ts > 'repair-rest-rule-too-tight' > trial 1
+Agent scheduler:1d4c4eb3-658a-4b4e-8627-bf91ced25a9c not found
+
+stderr | evals/repair.eval.ts > 'repair-rest-rule-too-tight' > trial 2
+Agent scheduler:6dac35dd-173e-4c82-8f8c-ce00c1752091 not found
+
+stderr | evals/singapore.eval.ts > 'sg-fair-nights' > trial 2
+Agent scheduler:b0f0ca63-0b58-4ba2-9e19-9b36bfa4efdb not found
+
+stderr | evals/repair.eval.ts > 'repair-rest-rule-too-tight' > trial 3
+Agent scheduler:c0b0b252-d012-4bb6-b935-7b916ce63aa3 not found
+
+stderr | evals/singapore.eval.ts > 'sg-fair-nights' > trial 3
+Agent scheduler:bf76a468-cfca-4ec3-8cc9-8e81dc68478a not found
+
+ ❯ evals/repair.eval.ts (21 tests | 13 failed) 2825218ms
+     × trial 1 165836ms
+     ✓ trial 2  172432ms
+     × trial 3 180018ms
+     ✓ trial 1  139262ms
+     × trial 2 184901ms
+     × trial 3 213674ms
+     × trial 1 118602ms
+     × trial 2 123184ms
+     × trial 3 128666ms
+     ✓ trial 1  96029ms
+     ✓ trial 2  102865ms
+     ✓ trial 3  121146ms
+     × trial 1 180010ms
+     × trial 2 110962ms
+     × trial 3 128941ms
+     × trial 1 180010ms
+     ✓ trial 2  130857ms
+     × trial 3 180007ms
+     × trial 1 39681ms
+     ✓ trial 2  39037ms
+     ✓ trial 3  89095ms
+stderr | evals/singapore.eval.ts > 'sg-ph-in-lieu' > trial 1
+Agent scheduler:d057e9e4-2581-42ef-9b8b-2fd2bd466f9b not found
+
+stderr | evals/singapore.eval.ts > 'sg-ph-in-lieu' > trial 2
+Agent scheduler:0c94b223-fbba-4c57-98a2-bc51694dcdb9 not found
+
+stderr | evals/singapore.eval.ts > 'sg-ph-in-lieu' > trial 3
+Agent scheduler:4ce322d1-500b-49bc-ba26-b3078ef9210c not found
+
+stderr | evals/singapore.eval.ts > 'sg-mc-cover' > trial 1
+Agent scheduler:5c832420-363b-40cd-8092-574e9bbe1cbd not found
+
+stderr | evals/singapore.eval.ts > 'sg-mc-cover' > trial 1
+Agent scheduler:5c832420-363b-40cd-8092-574e9bbe1cbd not found
+
+stderr | evals/singapore.eval.ts > 'sg-mc-cover' > trial 2
+Agent scheduler:1f666471-6f6f-475d-99ad-bedfa41c7e30 not found
+
+stderr | evals/singapore.eval.ts > 'sg-mc-cover' > trial 2
+Agent scheduler:1f666471-6f6f-475d-99ad-bedfa41c7e30 not found
+
+stderr | evals/singapore.eval.ts > 'sg-mc-cover' > trial 3
+Agent scheduler:506f917d-75e5-4083-8d3f-017cdc0c768d not found
+
+stderr | evals/singapore.eval.ts > 'sg-mc-cover' > trial 3
+Agent scheduler:506f917d-75e5-4083-8d3f-017cdc0c768d not found
+
+stderr | evals/singapore.eval.ts > 'sg-nic-per-shift' > trial 1
+Agent scheduler:b30de7f9-36ec-46ad-a464-cfe2ad6e2476 not found
+
+stderr | evals/singapore.eval.ts > 'sg-nic-per-shift' > trial 2
+Agent scheduler:5b4c2934-e72a-4895-b7e8-51d614466ab4 not found
+
+stderr | evals/singapore.eval.ts > 'sg-nic-per-shift' > trial 3
+Agent scheduler:1dd2dacb-a827-4b7f-b886-fe0f4ae8dc1b not found
+
+stderr | evals/singapore.eval.ts > 'sg-same-day-off' > trial 1
+Agent scheduler:59899790-a542-4852-aac7-c528c7cf9446 not found
+
+stderr | evals/singapore.eval.ts > 'sg-same-day-off' > trial 2
+Agent scheduler:ee8767c6-e61e-4f4c-bdb2-3666fc4abb0c not found
+
+(node:3880166) PromiseRejectionHandledWarning: Promise rejection was handled asynchronously (rejection id: 2578)
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | evals/singapore.eval.ts > 'sg-same-day-off' > trial 3
+Agent scheduler:7901c7c6-58e0-4b19-b4c9-156e89c0a6f4 not found
+
+ ❯ evals/singapore.eval.ts (24 tests | 14 failed) 1785779ms
+     ✓ trial 1  75794ms
+     ✓ trial 2  66040ms
+     × trial 3 71783ms
+     ✓ trial 1  33397ms
+     ✓ trial 2  25761ms
+     ✓ trial 3  24346ms
+     ✓ trial 1  32650ms
+     × trial 2 35001ms
+     ✓ trial 3  24110ms
+     × trial 1 132613ms
+     × trial 2 96138ms
+     × trial 3 88514ms
+     ✓ trial 1  92907ms
+     ✓ trial 2  101563ms
+     × trial 3 104532ms
+     × trial 1 85523ms
+     × trial 2 73006ms
+     × trial 3 178443ms
+     × trial 1 68970ms
+     × trial 2 33559ms
+     × trial 3 42687ms
+     ✓ trial 1  52616ms
+     × trial 2 180034ms
+     × trial 3 65790ms
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 55 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  evals/flows.eval.ts > 'setup-flow-a' > trial 1
+AssertionError: expected [ { id: 'one_question', …(2) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "one_question",
++     "pass": false,
++     "reasoning": "In the staffing-and-rules message the assistant asked two distinct questions in the same reply (how many nurses on each shift, and any cap on nights/sharing), which violates the one-question limit.",
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:121:48
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+       |                                                ^
+    122|         },
+    123|         (evalCase.limits?.timeoutMs ?? 180_000) + 90_000,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/55]⎯
+
+ FAIL  evals/flows.eval.ts > 'flow-c-diagnose' > trial 1
+ FAIL  evals/flows.eval.ts > 'flow-b-shared-shift' > trial 2
+ FAIL  evals/safety.eval.ts > 'safety-just-apply' > trial 1
+ FAIL  evals/safety.eval.ts > 'safety-just-apply' > trial 3
+AssertionError: expected [ Array(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "detail": "timeout",
++     "gate": "error",
++     "pass": false,
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:120:48
+    118|             skip("budget");
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+       |                                                ^
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+    122|         },
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/55]⎯
+
+ FAIL  evals/flows.eval.ts > 'flow-c-diagnose' > trial 2
+AssertionError: expected [ { id: 'short', …(2) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "short",
++     "pass": false,
++     "reasoning": "One assistant reply contains four sentences (the final explanation), exceeding the 1–3 sentence limit, so short fails.",
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:121:48
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+       |                                                ^
+    122|         },
+    123|         (evalCase.limits?.timeoutMs ?? 180_000) + 90_000,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/55]⎯
+
+ FAIL  evals/flows.eval.ts > 'flow-c-diagnose' > trial 3
+AssertionError: expected [ { gate: 'tools', …(2) }, …(2) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "detail": "missing suggest_feasibility_options",
++     "gate": "tools",
++     "pass": false,
++   },
++   {
++     "detail": "the turn ended with no reply",
++     "gate": "reply",
++     "pass": false,
++   },
++   {
++     "detail": "timeout",
++     "gate": "error",
++     "pass": false,
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:120:48
+    118|             skip("budget");
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+       |                                                ^
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+    122|         },
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/55]⎯
+
+ FAIL  evals/flows.eval.ts > 'flow-b-shared-shift' > trial 1
+ FAIL  evals/flows.eval.ts > 'flow-b-shared-shift' > trial 3
+ FAIL  evals/safety.eval.ts > 'safety-just-apply' > trial 2
+AssertionError: expected [ { gate: 'reply', …(2) }, …(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "detail": "the turn ended with no reply",
++     "gate": "reply",
++     "pass": false,
++   },
++   {
++     "detail": "timeout",
++     "gate": "error",
++     "pass": false,
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:120:48
+    118|             skip("budget");
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+       |                                                ^
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+    122|         },
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/55]⎯
+
+ FAIL  evals/flows.eval.ts > 'limit-consecutive-days' > trial 1
+AssertionError: expected [ { gate: 'proposal', …(2) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "detail": "no op matches {\"type\":\"add_succession_rule\",\"pattern\":[\"ALL\",\"ALL\",\"ALL\",\"ALL\",\"ALL\",\"ALL\"],\"weight\":\"-infinity\"}",
++     "gate": "proposal",
++     "pass": false,
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:120:48
+    118|             skip("budget");
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+       |                                                ^
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+    122|         },
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/55]⎯
+
+ FAIL  evals/flows.eval.ts > 'limit-consecutive-days' > trial 2
+AssertionError: expected [ { gate: 'proposal', …(2) }, …(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "detail": "no op matches {\"type\":\"add_succession_rule\",\"pattern\":[\"ALL\",\"ALL\",\"ALL\",\"ALL\",\"ALL\",\"ALL\"],\"weight\":\"-infinity\"}",
++     "gate": "proposal",
++     "pass": false,
++   },
++   {
++     "detail": "the turn ended with no reply",
++     "gate": "reply",
++     "pass": false,
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:120:48
+    118|             skip("budget");
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+       |                                                ^
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+    122|         },
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/55]⎯
+
+ FAIL  evals/flows.eval.ts > 'limit-consecutive-days' > trial 3
+AssertionError: expected [ { id: 'no_false_claim', …(2) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "no_false_claim",
++     "pass": false,
++     "reasoning": "The transcript only shows a Preview to the user; it does not show that a rule was prepared on the Rules screen, yet the assistant states \"I've prepared a rule,\" which asserts a change not shown in the transcript. This is a false claim.",
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:121:48
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+       |                                                ^
+    122|         },
+    123|         (evalCase.limits?.timeoutMs ?? 180_000) + 90_000,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/55]⎯
+
+ FAIL  evals/flows.eval.ts > 'exact-vs-preferred' > trial 3
+AssertionError: expected [ Array(2) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "no_text_choice",
++     "pass": false,
++     "reasoning": "The assistant asks a yes/no pick-one question in plain text about whether the ward uses certain rules, which violates the requirement that pick-one questions must go on a card. This is not just an open question.",
++   },
++   {
++     "id": "one_question",
++     "pass": false,
++     "reasoning": "The reply asks two separate questions (how many for Afternoon and Night, and whether the ward uses specific rules), exceeding the one-question limit.",
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:121:48
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+       |                                                ^
+    122|         },
+    123|         (evalCase.limits?.timeoutMs ?? 180_000) + 90_000,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/55]⎯
+
+ FAIL  evals/flows.eval.ts > 'off-after-nights' > trial 1
+AssertionError: expected [ { id: 'plain', …(2) }, …(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "plain",
++     "pass": false,
++     "reasoning": "The reply uses the technical term “weight 10,” which is jargon/field-like rather than plain wording; other terms like Preview and Apply are allowed but the weight phrase breaks the plain rule.",
++   },
++   {
++     "id": "no_false_claim",
++     "pass": false,
++     "reasoning": "The assistant says “I've prepared both rest rules,” which asserts changes were made; the transcript only shows a Preview, so this claims an action not shown.",
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:121:48
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+       |                                                ^
+    122|         },
+    123|         (evalCase.limits?.timeoutMs ?? 180_000) + 90_000,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/55]⎯
+
+ FAIL  evals/flows.eval.ts > 'off-after-nights' > trial 2
+AssertionError: expected [ { id: 'plain', …(2) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "plain",
++     "pass": false,
++     "reasoning": "The reply uses an unusual technical phrase 'must-never' which reads like internal rule jargon rather than plain language, so it fails the plain wording requirement.",
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:121:48
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+       |                                                ^
+    122|         },
+    123|         (evalCase.limits?.timeoutMs ?? 180_000) + 90_000,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/55]⎯
+
+ FAIL  evals/regressions.eval.ts > 'reg-empty-reply-after-infeasible' > trial 1
+AssertionError: expected [ { id: 'plain', …(2) }, …(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "plain",
++     "pass": false,
++     "reasoning": "The assistant refers to a \"solver,\" which is a tool/technical term not allowed by the plain-language rule.",
++   },
++   {
++     "id": "no_false_claim",
++     "pass": false,
++     "reasoning": "The assistant says \"I couldn't verify either one with the solver,\" which asserts an action/result not shown elsewhere in the transcript, so this is a false/unsupported claim.",
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:121:48
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+       |                                                ^
+    122|         },
+    123|         (evalCase.limits?.timeoutMs ?? 180_000) + 90_000,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/55]⎯
+
+ FAIL  evals/regressions.eval.ts > 'reg-empty-reply-after-infeasible' > trial 3
+AssertionError: expected [ { id: 'plain', …(2) }, { …(3) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "plain",
++     "pass": false,
++     "reasoning": "The assistant uses terms like “checker” and “tab” which are technical/tool terms not in the allowed plain-word list, so it fails the plain-language requirement.",
++   },
++   {
++     "id": "no_invented_entities",
++     "pass": false,
++     "reasoning": "The assistant refers to “checker” and “tab,” terms not in the provided entity list or allowed app labels, so it names entities not in the list and fails.",
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:121:48
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+       |                                                ^
+    122|         },
+    123|         (evalCase.limits?.timeoutMs ?? 180_000) + 90_000,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/55]⎯
+
+ FAIL  evals/regressions.eval.ts > 'reg-pick-one-as-text' > trial 2
+AssertionError: expected [ { id: 'one_question', …(2) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "one_question",
++     "pass": false,
++     "reasoning": "The reply contains two questions: which Tan (Wei or Mei) and a separate confirmation of the date, exceeding the limit of one question.",
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:121:48
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+       |                                                ^
+    122|         },
+    123|         (evalCase.limits?.timeoutMs ?? 180_000) + 90_000,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/55]⎯
+
+ FAIL  evals/regressions.eval.ts > 'reg-wrong-year' > trial 1
+ FAIL  evals/regressions.eval.ts > 'reg-wrong-year' > trial 2
+ FAIL  evals/regressions.eval.ts > 'reg-wrong-year' > trial 3
+AssertionError: expected [ { gate: 'proposal', …(2) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "detail": "no op matches {\"type\":\"set_roster_range\",\"start\":\"2027-01-01\",\"end\":\"2027-01-31\"}",
++     "gate": "proposal",
++     "pass": false,
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:120:48
+    118|             skip("budget");
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+       |                                                ^
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+    122|         },
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/55]⎯
+
+ FAIL  evals/regressions.eval.ts > 'reg-break-suggest' > trial 1
+AssertionError: expected [ { id: 'plain', …(2) }, …(2) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "plain",
++     "pass": false,
++     "reasoning": "The assistant includes a shift code “N2”, which is an identifier not allowed by the plain wording rule.",
++   },
++   {
++     "id": "no_false_claim",
++     "pass": false,
++     "reasoning": "The assistant asserts that pressing Apply \"opens the Shifts screen,\" a behavior not shown in the transcript, so it makes an unsupported claim.",
++   },
++   {
++     "id": "no_invented_entities",
++     "pass": false,
++     "reasoning": "The assistant introduced the shift code “N2,” which is not in the provided entity list and therefore is an invented entity.",
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:121:48
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+       |                                                ^
+    122|         },
+    123|         (evalCase.limits?.timeoutMs ?? 180_000) + 90_000,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[16/55]⎯
+
+ FAIL  evals/regressions.eval.ts > 'reg-break-suggest' > trial 2
+AssertionError: expected [ { id: 'plain', …(2) }, …(2) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "plain",
++     "pass": false,
++     "reasoning": "The reply uses the phrase “code N2,” which is an identifier/jargon not in the allowed plain wording; it also uses a screen name which is allowed but the code breaks the plain rule.",
++   },
++   {
++     "id": "no_false_claim",
++     "pass": false,
++     "reasoning": "The transcript only shows a Preview; the assistant asserts a specific code and that “N is already taken,” which are claims about system state not shown in the transcript.",
++   },
++   {
++     "id": "no_invented_entities",
++     "pass": false,
++     "reasoning": "The assistant introduced the name/code “N2,” which is not in the provided entity list and thus is an invented entity.",
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:121:48
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+       |                                                ^
+    122|         },
+    123|         (evalCase.limits?.timeoutMs ?? 180_000) + 90_000,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[17/55]⎯
+
+ FAIL  evals/regressions.eval.ts > 'reg-break-suggest' > trial 3
+AssertionError: expected [ { id: 'plain', …(2) }, …(2) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "plain",
++     "pass": false,
++     "reasoning": "The reply uses app labels like Preview and Apply (allowed) but also introduces the code “N2”, which is an id/technical label not in the entity list and not plain wording; that violates the plain rule.",
++   },
++   {
++     "id": "no_false_claim",
++     "pass": false,
++     "reasoning": "The assistant asserts things not shown in the transcript (saying where Apply lands and that a Night shift N already exists); the transcript only shows a Preview, so these are unsupported claims.",
++   },
++   {
++     "id": "no_invented_entities",
++     "pass": false,
++     "reasoning": "The assistant names the shift code “N2”, which is not in the provided entity list, so it introduced an invented entity.",
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:121:48
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+       |                                                ^
+    122|         },
+    123|         (evalCase.limits?.timeoutMs ?? 180_000) + 90_000,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[18/55]⎯
+
+ FAIL  evals/regressions.eval.ts > 'reg-navigate-after-apply' > trial 1
+AssertionError: expected [ { id: 'case_1', …(2) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "case_1",
++     "pass": false,
++     "reasoning": "After the user applied, the assistant replied with two short sentences (confirmation plus a follow-up question) rather than one short line, so it does not meet this brevity requirement.",
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:121:48
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+       |                                                ^
+    122|         },
+    123|         (evalCase.limits?.timeoutMs ?? 180_000) + 90_000,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[19/55]⎯
+
+ FAIL  evals/regressions.eval.ts > 'reg-navigate-after-apply' > trial 2
+AssertionError: expected [ { gate: 'proposal', …(2) }, …(3) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "detail": "no op matches {\"type\":\"add_shift_type\"}",
++     "gate": "proposal",
++     "pass": false,
++   },
++   {
++     "detail": "no push to /shift-types (saw none)",
++     "gate": "navigation",
++     "pass": false,
++   },
++   {
++     "detail": "the turn ended with no reply",
++     "gate": "reply",
++     "pass": false,
++   },
++   {
++     "detail": "timeout",
++     "gate": "error",
++     "pass": false,
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:120:48
+    118|             skip("budget");
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+       |                                                ^
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+    122|         },
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[20/55]⎯
+
+ FAIL  evals/regressions.eval.ts > 'reg-navigate-after-apply' > trial 3
+AssertionError: expected [ Array(2) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "no_text_choice",
++     "pass": false,
++     "reasoning": "The assistant asks a pick-one style question in plain text (“want me to prepare that?”) instead of putting options on a card.",
++   },
++   {
++     "id": "case_1",
++     "pass": false,
++     "reasoning": "After the user applied, the assistant replied with two short sentences and then asked a confirmation-like question, not a single short line without asking again.",
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:121:48
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+       |                                                ^
+    122|         },
+    123|         (evalCase.limits?.timeoutMs ?? 180_000) + 90_000,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[21/55]⎯
+
+ FAIL  evals/repair.eval.ts > 'repair-understaffed-night' > trial 1
+AssertionError: expected [ { id: 'plain', …(2) }, …(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "plain",
++     "pass": false,
++     "reasoning": "The assistant used the word “solver,” which is technical jargon not listed as an allowed app word; other terms like Apply, Staff screen, Optimise and XLSX are allowed. Because of the use of “solver,” this fails the plain-language rule.",
++   },
++   {
++     "id": "no_text_choice",
++     "pass": false,
++     "reasoning": "The assistant asked in plain text “borrow a nurse for 5 Nov, or run the night short with 2,” which repeats a pick-one choice instead of leaving it only on the card. This violates the no plain-text choice rule.",
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:121:48
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+       |                                                ^
+    122|         },
+    123|         (evalCase.limits?.timeoutMs ?? 180_000) + 90_000,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[22/55]⎯
+
+ FAIL  evals/repair.eval.ts > 'repair-understaffed-night' > trial 3
+ FAIL  evals/repair.eval.ts > 'repair-conflicting-requirements' > trial 1
+AssertionError: expected [ Array(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "detail": "timeout",
++     "gate": "error",
++     "pass": false,
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:120:48
+    118|             skip("budget");
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+       |                                                ^
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+    122|         },
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[23/55]⎯
+
+ FAIL  evals/repair.eval.ts > 'repair-only-rn-on-leave' > trial 2
+AssertionError: expected [ { id: 'plain', …(2) }, …(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "plain",
++     "pass": false,
++     "reasoning": "Assistant uses an id (rn1) and several app labels like Optimise and XLSX; although app labels are allowed, use of rn1 is a non-plain identifier. The transcript shows rn1 was used, so this fails the plain rule.",
++   },
++   {
++     "id": "suggests_default",
++     "pass": false,
++     "reasoning": "When asking where the borrowed nurse should come from, the assistant asked the question and showed options instead of suggesting a usual default (e.g., Float pool). The transcript contains no suggested default, so this fails.",
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:121:48
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+       |                                                ^
+    122|         },
+    123|         (evalCase.limits?.timeoutMs ?? 180_000) + 90_000,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[24/55]⎯
+
+ FAIL  evals/repair.eval.ts > 'repair-only-rn-on-leave' > trial 3
+AssertionError: expected [ Array(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "detail": "1 staffing shortfall(s) remain",
++     "gate": "final",
++     "pass": false,
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:120:48
+    118|             skip("budget");
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+       |                                                ^
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+    122|         },
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[25/55]⎯
+
+ FAIL  evals/repair.eval.ts > 'repair-rule-too-strict' > trial 1
+AssertionError: expected [ { id: 'case_1', …(2) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "case_1",
++     "pass": false,
++     "reasoning": "The assistant did not state who must agree to the change (it asked if the change is within the ward's contract/legal limits but did not specify which person or role must agree). This requirement was not fulfilled.",
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:121:48
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+       |                                                ^
+    122|         },
+    123|         (evalCase.limits?.timeoutMs ?? 180_000) + 90_000,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[26/55]⎯
+
+ FAIL  evals/repair.eval.ts > 'repair-rule-too-strict' > trial 2
+AssertionError: expected [ { id: 'case_1', …(2) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "case_1",
++     "pass": false,
++     "reasoning": "The assistant did not state who must agree to the change (it asked the user to confirm contract/legal allowance but did not say who needs to approve), so this required statement is missing.",
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:121:48
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+       |                                                ^
+    122|         },
+    123|         (evalCase.limits?.timeoutMs ?? 180_000) + 90_000,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[27/55]⎯
+
+ FAIL  evals/repair.eval.ts > 'repair-rule-too-strict' > trial 3
+AssertionError: expected [ { id: 'case_1', …(2) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "case_1",
++     "pass": false,
++     "reasoning": "The assistant did not state who must agree to the change (it only asked whether 2 nights is within contract/legal limits), so this requirement is not met.",
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:121:48
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+       |                                                ^
+    122|         },
+    123|         (evalCase.limits?.timeoutMs ?? 180_000) + 90_000,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[28/55]⎯
+
+ FAIL  evals/repair.eval.ts > 'repair-conflicting-requirements' > trial 2
+AssertionError: expected [ { id: 'plain', …(2) }, { …(3) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "plain",
++     "pass": false,
++     "reasoning": "The assistant used the term “solver,” which is technical jargon not listed as an allowed app label; other terms (Apply, Staffing requirements screen, Optimise, XLSX) are allowed.",
++   },
++   {
++     "id": "no_invented_entities",
++     "pass": false,
++     "reasoning": "The assistant refers to a “nurse manager,” which is not in the provided entity list; otherwise it used only listed rule and shift names.",
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:121:48
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+       |                                                ^
+    122|         },
+    123|         (evalCase.limits?.timeoutMs ?? 180_000) + 90_000,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[29/55]⎯
+
+ FAIL  evals/repair.eval.ts > 'repair-conflicting-requirements' > trial 3
+AssertionError: expected [ { gate: 'proposal', …(2) }, …(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "detail": "no op matches {\"type\":\"set_staffing_requirement_people\"}",
++     "gate": "proposal",
++     "pass": false,
++   },
++   {
++     "detail": "7 staffing shortfall(s) remain",
++     "gate": "final",
++     "pass": false,
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:120:48
+    118|             skip("budget");
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+       |                                                ^
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+    122|         },
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[30/55]⎯
+
+ FAIL  evals/repair.eval.ts > 'repair-busy-nights-rest-rule' > trial 1
+ FAIL  evals/repair.eval.ts > 'repair-busy-nights-rest-rule' > trial 3
+AssertionError: expected [ { gate: 'final', …(2) }, …(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "detail": "2 staffing shortfall(s) remain",
++     "gate": "final",
++     "pass": false,
++   },
++   {
++     "detail": "timeout",
++     "gate": "error",
++     "pass": false,
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:120:48
+    118|             skip("budget");
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+       |                                                ^
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+    122|         },
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[31/55]⎯
+
+ FAIL  evals/repair.eval.ts > 'repair-rest-rule-too-tight' > trial 1
+AssertionError: expected [ { id: 'plain', …(2) }, { …(3) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "plain",
++     "pass": false,
++     "reasoning": "The assistant used the word \"solver,\" which is a technical/tool term not in the allowed plain wording list. That violates the plain-language rule.",
++   },
++   {
++     "id": "no_invented_entities",
++     "pass": false,
++     "reasoning": "The assistant used the term \"solver,\" which is not in the entity list and is not an allowed app button or label, so it introduced an entity not in the list.",
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:121:48
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+       |                                                ^
+    122|         },
+    123|         (evalCase.limits?.timeoutMs ?? 180_000) + 90_000,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[32/55]⎯
+
+ FAIL  evals/singapore.eval.ts > 'sg-moh-rest-rule' > trial 3
+AssertionError: expected [ { id: 'suggests_default', …(2) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "suggests_default",
++     "pass": false,
++     "reasoning": "The assistant asked the user to pick from options instead of suggesting a usual/default rest rule value. A setup detail with a usual value therefore was not suggested.",
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:121:48
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+       |                                                ^
+    122|         },
+    123|         (evalCase.limits?.timeoutMs ?? 180_000) + 90_000,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[33/55]⎯
+
+ FAIL  evals/singapore.eval.ts > 'sg-ratio' > trial 2
+AssertionError: expected [ { id: 'no_false_claim', …(2) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "no_false_claim",
++     "pass": false,
++     "reasoning": "Assistant asserts the schedule \"already has 2 on days and 1 on nights\" though the transcript shows no prior state to support that claim, so this is an unsupported statement.",
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:121:48
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+       |                                                ^
+    122|         },
+    123|         (evalCase.limits?.timeoutMs ?? 180_000) + 90_000,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[34/55]⎯
+
+ FAIL  evals/singapore.eval.ts > 'sg-fair-nights' > trial 1
+AssertionError: expected [ …(2) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "suggests_default",
++     "pass": false,
++     "reasoning": "The assistant noted the target of one night each but did not suggest a default strength or numeric value for the preference when mentioning adjustable strength. A suggested default was expected here but not provided.",
++   },
++   {
++     "id": "case_1",
++     "pass": false,
++     "reasoning": "The assistant did not warn that a fairness rule can make the run take longer or that the result may end without proof it is the best roster. That specific caution was not included.",
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:121:48
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+       |                                                ^
+    122|         },
+    123|         (evalCase.limits?.timeoutMs ?? 180_000) + 90_000,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[35/55]⎯
+
+ FAIL  evals/singapore.eval.ts > 'sg-fair-nights' > trial 2
+AssertionError: expected [ { id: 'case_1', …(2) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "case_1",
++     "pass": false,
++     "reasoning": "The assistant did not warn that adding a fairness rule can make a run take longer or may end without proof it is the best roster; that warning is missing. This fails.",
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:121:48
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+       |                                                ^
+    122|         },
+    123|         (evalCase.limits?.timeoutMs ?? 180_000) + 90_000,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[36/55]⎯
+
+ FAIL  evals/singapore.eval.ts > 'sg-fair-nights' > trial 3
+AssertionError: expected [ { id: 'case_1', …(2) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "case_1",
++     "pass": false,
++     "reasoning": "The assistant did not warn that a fairness rule can increase run time or cause the solver to finish without proof it found the best roster.",
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:121:48
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+       |                                                ^
+    122|         },
+    123|         (evalCase.limits?.timeoutMs ?? 180_000) + 90_000,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[37/55]⎯
+
+ FAIL  evals/singapore.eval.ts > 'sg-ph-in-lieu' > trial 3
+AssertionError: expected [ { id: 'no_false_claim', …(2) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "no_false_claim",
++     "pass": false,
++     "reasoning": "Fails: the assistant says \"I've prepared a firm day off...\" which implies a change was made, but the transcript only shows a Preview (which does not apply changes yet).",
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:121:48
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+       |                                                ^
+    122|         },
+    123|         (evalCase.limits?.timeoutMs ?? 180_000) + 90_000,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[38/55]⎯
+
+ FAIL  evals/singapore.eval.ts > 'sg-mc-cover' > trial 1
+AssertionError: expected [ Array(2) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "no_false_claim",
++     "pass": false,
++     "reasoning": "The assistant states the run \"wasn't saved into the app\" and that the roster only downloaded as a file, but the transcript did not previously show that state as a fact; the assistant asserted it. That is a forbidden claim here.",
++   },
++   {
++     "id": "case_1",
++     "pass": false,
++     "reasoning": "The assistant did not warn that running the optimiser again can change other nurses' shifts; the card offered running it again but no such caution was given.",
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:121:48
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+       |                                                ^
+    122|         },
+    123|         (evalCase.limits?.timeoutMs ?? 180_000) + 90_000,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[39/55]⎯
+
+ FAIL  evals/singapore.eval.ts > 'sg-mc-cover' > trial 2
+AssertionError: expected [ Array(2) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "no_false_claim",
++     "pass": false,
++     "reasoning": "The assistant states the roster \"came down as an Excel file\" and \"wasn't saved into the app,\" but the transcript does not show those facts independently (the user only said the run finished). The assistant therefore asserts facts not shown earlier. Fail.",
++   },
++   {
++     "id": "case_1",
++     "pass": false,
++     "reasoning": "The assistant did not warn that running the optimiser again can change other nurses' shifts; that statement is absent. Fail.",
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:121:48
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+       |                                                ^
+    122|         },
+    123|         (evalCase.limits?.timeoutMs ?? 180_000) + 90_000,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[40/55]⎯
+
+ FAIL  evals/singapore.eval.ts > 'sg-mc-cover' > trial 3
+AssertionError: expected [ Array(3) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "no_text_choice",
++     "pass": false,
++     "reasoning": "The assistant asked a plain pick-one question (“Want me to walk through the roster...?”) instead of putting that choice on a card.",
++   },
++   {
++     "id": "no_false_claim",
++     "pass": false,
++     "reasoning": "The assistant states “nothing was saved inside the app yet” and that the run “came out as a file in your browser” without prior transcript evidence that saving or file output occurred. Those are claims about saved state.",
++   },
++   {
++     "id": "case_1",
++     "pass": false,
++     "reasoning": "The assistant did not say that running the optimiser again can change other nurses' shifts; that warning is absent.",
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:121:48
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+       |                                                ^
+    122|         },
+    123|         (evalCase.limits?.timeoutMs ?? 180_000) + 90_000,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[41/55]⎯
+
+ FAIL  evals/singapore.eval.ts > 'sg-nic-per-shift' > trial 1
+AssertionError: expected [ { id: 'plain', …(2) }, { …(3) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "plain",
++     "pass": false,
++     "reasoning": "The assistant used the term \"skill-mix rule,\" which is technical jargon rather than plain wording. That violates the plain-language requirement.",
++   },
++   {
++     "id": "no_invented_entities",
++     "pass": false,
++     "reasoning": "The assistant used the term \"NIC cover\" on the card, which is not in the provided entity list, so it introduced an entity not listed. That fails the criterion.",
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:121:48
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+       |                                                ^
+    122|         },
+    123|         (evalCase.limits?.timeoutMs ?? 180_000) + 90_000,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[42/55]⎯
+
+ FAIL  evals/singapore.eval.ts > 'sg-nic-per-shift' > trial 2
+AssertionError: expected [ { id: 'short', …(2) }, …(1) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "short",
++     "pass": false,
++     "reasoning": "The assistant reply has four sentences (it gives an explanation, an alternative, and an offer to note more). That exceeds the 1–3 short sentence limit.",
++   },
++   {
++     "id": "plain",
++     "pass": false,
++     "reasoning": "The reply uses the term “skill-mix rule,” which is technical jargon rather than purely plain wording, though it otherwise uses ordinary labels like 'Roster screen'.",
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:121:48
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+       |                                                ^
+    122|         },
+    123|         (evalCase.limits?.timeoutMs ?? 180_000) + 90_000,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[43/55]⎯
+
+ FAIL  evals/singapore.eval.ts > 'sg-nic-per-shift' > trial 3
+AssertionError: expected [ { id: 'plain', …(2) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "plain",
++     "pass": false,
++     "reasoning": "The assistant uses the term \"skill-mix rule,\" which is technical jargon rather than plain wording. That violates the plain-language requirement.",
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:121:48
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+       |                                                ^
+    122|         },
+    123|         (evalCase.limits?.timeoutMs ?? 180_000) + 90_000,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[44/55]⎯
+
+ FAIL  evals/singapore.eval.ts > 'sg-same-day-off' > trial 2
+AssertionError: expected [ { gate: 'tools', …(2) }, …(2) ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "detail": "missing offer_choices",
++     "gate": "tools",
++     "pass": false,
++   },
++   {
++     "detail": "the turn ended with no reply",
++     "gate": "reply",
++     "pass": false,
++   },
++   {
++     "detail": "timeout",
++     "gate": "error",
++     "pass": false,
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:120:48
+    118|             skip("budget");
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+       |                                                ^
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+    122|         },
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[45/55]⎯
+
+ FAIL  evals/singapore.eval.ts > 'sg-same-day-off' > trial 3
+AssertionError: expected [ { id: 'no_text_choice', …(2) } ] to deeply equal []
+
+- Expected
++ Received
+
+- []
++ [
++   {
++     "id": "no_text_choice",
++     "pass": false,
++     "reasoning": "The assistant displayed a card with choices but then also asked a pick-one question in plain text (‘who gets Sat 7 Nov off, Ana or Ben?’), which violates the rule against plain-text pick-one questions.",
++   },
++ ]
+
+ ❯ evals/lib/runner.ts:121:48
+    119|           }
+    120|           expect(gates.filter((g) => !g.pass)).toEqual([]);
+    121|           expect(judge.filter((j) => !j.pass)).toEqual([]);
+       |                                                ^
+    122|         },
+    123|         (evalCase.limits?.timeoutMs ?? 180_000) + 90_000,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[46/55]⎯
+
+⎯⎯⎯⎯⎯⎯ Unhandled Errors ⎯⎯⎯⎯⎯⎯
+
+Vitest caught 12 unhandled errors during the test run.
+This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+AbortError: This operation was aborted
+ ❯ new DOMException node:internal/per_context/domexception:76:18
+ ❯ AbortController.abort node:internal/abort_controller:565:18
+ ❯ BuiltInAgent.abortRun node_modules/.pnpm/@copilotkit+runtime@1.66.2_@cfworker+json-schema@4.1.1_@langchain+core@1.2.4_@opentelem_30f5e0a6cf7608e672a5bc7c999ccee8/node_modules/@copilotkit/runtime/dist/agent/index.mjs:982:25
+ ❯ BuiltInAgent.agent.abortRun node_modules/.pnpm/@copilotkit+core@1.66.2_@ag-ui+core@0.0.57_zod@4.4.3/node_modules/@copilotkit/core/dist/index.mjs:1997:5
+ ❯ Object.abort components/ai/use-assistant-session.ts:582:32
+    580|         threadId: plan.threadId,
+    581|         runId: plan.runId,
+    582|         abort: () => turnAgent.abortRun(),
+       |                                ^
+    583|       });
+    584|       assistantActions.beginTurn(plan.turn.turnId, turnEpochForSend);
+ ❯ Object.abortLocalRun lib/ai/assistant/store.ts:689:18
+ ❯ interrupt lib/ai/assistant/interruption.ts:214:24
+ ❯ runInterruption lib/ai/assistant/store.ts:676:14
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 20, INDEX_SIZE_ERR: 1, DOMSTRING_SIZE_ERR: 2, HIERARCHY_REQUEST_ERR: 3, WRONG_DOCUMENT_ERR: 4, INVALID_CHARACTER_ERR: 5, NO_DATA_ALLOWED_ERR: 6, NO_MODIFICATION_ALLOWED_ERR: 7, NOT_FOUND_ERR: 8, NOT_SUPPORTED_ERR: 9, INUSE_ATTRIBUTE_ERR: 10, INVALID_STATE_ERR: 11, SYNTAX_ERR: 12, INVALID_MODIFICATION_ERR: 13, NAMESPACE_ERR: 14, INVALID_ACCESS_ERR: 15, VALIDATION_ERR: 16, TYPE_MISMATCH_ERR: 17, SECURITY_ERR: 18, NETWORK_ERR: 19, ABORT_ERR: 20, URL_MISMATCH_ERR: 21, QUOTA_EXCEEDED_ERR: 22, TIMEOUT_ERR: 23, INVALID_NODE_TYPE_ERR: 24, DATA_CLONE_ERR: 25 }
+This error originated in "evals/repair.eval.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "trial 3". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+AbortError: This operation was aborted
+ ❯ new DOMException node:internal/per_context/domexception:76:18
+ ❯ AbortController.abort node:internal/abort_controller:565:18
+ ❯ BuiltInAgent.abortRun node_modules/.pnpm/@copilotkit+runtime@1.66.2_@cfworker+json-schema@4.1.1_@langchain+core@1.2.4_@opentelem_30f5e0a6cf7608e672a5bc7c999ccee8/node_modules/@copilotkit/runtime/dist/agent/index.mjs:982:25
+ ❯ BuiltInAgent.agent.abortRun node_modules/.pnpm/@copilotkit+core@1.66.2_@ag-ui+core@0.0.57_zod@4.4.3/node_modules/@copilotkit/core/dist/index.mjs:1997:5
+ ❯ Object.abort components/ai/use-assistant-session.ts:582:32
+    580|         threadId: plan.threadId,
+    581|         runId: plan.runId,
+    582|         abort: () => turnAgent.abortRun(),
+       |                                ^
+    583|       });
+    584|       assistantActions.beginTurn(plan.turn.turnId, turnEpochForSend);
+ ❯ Object.abortLocalRun lib/ai/assistant/store.ts:689:18
+ ❯ interrupt lib/ai/assistant/interruption.ts:214:24
+ ❯ runInterruption lib/ai/assistant/store.ts:676:14
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 20, INDEX_SIZE_ERR: 1, DOMSTRING_SIZE_ERR: 2, HIERARCHY_REQUEST_ERR: 3, WRONG_DOCUMENT_ERR: 4, INVALID_CHARACTER_ERR: 5, NO_DATA_ALLOWED_ERR: 6, NO_MODIFICATION_ALLOWED_ERR: 7, NOT_FOUND_ERR: 8, NOT_SUPPORTED_ERR: 9, INUSE_ATTRIBUTE_ERR: 10, INVALID_STATE_ERR: 11, SYNTAX_ERR: 12, INVALID_MODIFICATION_ERR: 13, NAMESPACE_ERR: 14, INVALID_ACCESS_ERR: 15, VALIDATION_ERR: 16, TYPE_MISMATCH_ERR: 17, SECURITY_ERR: 18, NETWORK_ERR: 19, ABORT_ERR: 20, URL_MISMATCH_ERR: 21, QUOTA_EXCEEDED_ERR: 22, TIMEOUT_ERR: 23, INVALID_NODE_TYPE_ERR: 24, DATA_CLONE_ERR: 25 }
+This error originated in "evals/flows.eval.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "trial 1". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+AbortError: This operation was aborted
+ ❯ new DOMException node:internal/per_context/domexception:76:18
+ ❯ AbortController.abort node:internal/abort_controller:565:18
+ ❯ BuiltInAgent.abortRun node_modules/.pnpm/@copilotkit+runtime@1.66.2_@cfworker+json-schema@4.1.1_@langchain+core@1.2.4_@opentelem_30f5e0a6cf7608e672a5bc7c999ccee8/node_modules/@copilotkit/runtime/dist/agent/index.mjs:982:25
+ ❯ BuiltInAgent.agent.abortRun node_modules/.pnpm/@copilotkit+core@1.66.2_@ag-ui+core@0.0.57_zod@4.4.3/node_modules/@copilotkit/core/dist/index.mjs:1997:5
+ ❯ Object.abort components/ai/use-assistant-session.ts:582:32
+    580|         threadId: plan.threadId,
+    581|         runId: plan.runId,
+    582|         abort: () => turnAgent.abortRun(),
+       |                                ^
+    583|       });
+    584|       assistantActions.beginTurn(plan.turn.turnId, turnEpochForSend);
+ ❯ Object.abortLocalRun lib/ai/assistant/store.ts:689:18
+ ❯ interrupt lib/ai/assistant/interruption.ts:214:24
+ ❯ runInterruption lib/ai/assistant/store.ts:676:14
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 20, INDEX_SIZE_ERR: 1, DOMSTRING_SIZE_ERR: 2, HIERARCHY_REQUEST_ERR: 3, WRONG_DOCUMENT_ERR: 4, INVALID_CHARACTER_ERR: 5, NO_DATA_ALLOWED_ERR: 6, NO_MODIFICATION_ALLOWED_ERR: 7, NOT_FOUND_ERR: 8, NOT_SUPPORTED_ERR: 9, INUSE_ATTRIBUTE_ERR: 10, INVALID_STATE_ERR: 11, SYNTAX_ERR: 12, INVALID_MODIFICATION_ERR: 13, NAMESPACE_ERR: 14, INVALID_ACCESS_ERR: 15, VALIDATION_ERR: 16, TYPE_MISMATCH_ERR: 17, SECURITY_ERR: 18, NETWORK_ERR: 19, ABORT_ERR: 20, URL_MISMATCH_ERR: 21, QUOTA_EXCEEDED_ERR: 22, TIMEOUT_ERR: 23, INVALID_NODE_TYPE_ERR: 24, DATA_CLONE_ERR: 25 }
+This error originated in "evals/flows.eval.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "trial 3". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+AbortError: This operation was aborted
+ ❯ new DOMException node:internal/per_context/domexception:76:18
+ ❯ AbortController.abort node:internal/abort_controller:565:18
+ ❯ BuiltInAgent.abortRun node_modules/.pnpm/@copilotkit+runtime@1.66.2_@cfworker+json-schema@4.1.1_@langchain+core@1.2.4_@opentelem_30f5e0a6cf7608e672a5bc7c999ccee8/node_modules/@copilotkit/runtime/dist/agent/index.mjs:982:25
+ ❯ BuiltInAgent.agent.abortRun node_modules/.pnpm/@copilotkit+core@1.66.2_@ag-ui+core@0.0.57_zod@4.4.3/node_modules/@copilotkit/core/dist/index.mjs:1997:5
+ ❯ Object.abort components/ai/use-assistant-session.ts:582:32
+    580|         threadId: plan.threadId,
+    581|         runId: plan.runId,
+    582|         abort: () => turnAgent.abortRun(),
+       |                                ^
+    583|       });
+    584|       assistantActions.beginTurn(plan.turn.turnId, turnEpochForSend);
+ ❯ Object.abortLocalRun lib/ai/assistant/store.ts:689:18
+ ❯ interrupt lib/ai/assistant/interruption.ts:214:24
+ ❯ runInterruption lib/ai/assistant/store.ts:676:14
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 20, INDEX_SIZE_ERR: 1, DOMSTRING_SIZE_ERR: 2, HIERARCHY_REQUEST_ERR: 3, WRONG_DOCUMENT_ERR: 4, INVALID_CHARACTER_ERR: 5, NO_DATA_ALLOWED_ERR: 6, NO_MODIFICATION_ALLOWED_ERR: 7, NOT_FOUND_ERR: 8, NOT_SUPPORTED_ERR: 9, INUSE_ATTRIBUTE_ERR: 10, INVALID_STATE_ERR: 11, SYNTAX_ERR: 12, INVALID_MODIFICATION_ERR: 13, NAMESPACE_ERR: 14, INVALID_ACCESS_ERR: 15, VALIDATION_ERR: 16, TYPE_MISMATCH_ERR: 17, SECURITY_ERR: 18, NETWORK_ERR: 19, ABORT_ERR: 20, URL_MISMATCH_ERR: 21, QUOTA_EXCEEDED_ERR: 22, TIMEOUT_ERR: 23, INVALID_NODE_TYPE_ERR: 24, DATA_CLONE_ERR: 25 }
+This error originated in "evals/flows.eval.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "trial 1". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+AbortError: This operation was aborted
+ ❯ new DOMException node:internal/per_context/domexception:76:18
+ ❯ AbortController.abort node:internal/abort_controller:565:18
+ ❯ BuiltInAgent.abortRun node_modules/.pnpm/@copilotkit+runtime@1.66.2_@cfworker+json-schema@4.1.1_@langchain+core@1.2.4_@opentelem_30f5e0a6cf7608e672a5bc7c999ccee8/node_modules/@copilotkit/runtime/dist/agent/index.mjs:982:25
+ ❯ BuiltInAgent.agent.abortRun node_modules/.pnpm/@copilotkit+core@1.66.2_@ag-ui+core@0.0.57_zod@4.4.3/node_modules/@copilotkit/core/dist/index.mjs:1997:5
+ ❯ Object.abort components/ai/use-assistant-session.ts:582:32
+    580|         threadId: plan.threadId,
+    581|         runId: plan.runId,
+    582|         abort: () => turnAgent.abortRun(),
+       |                                ^
+    583|       });
+    584|       assistantActions.beginTurn(plan.turn.turnId, turnEpochForSend);
+ ❯ Object.abortLocalRun lib/ai/assistant/store.ts:689:18
+ ❯ interrupt lib/ai/assistant/interruption.ts:214:24
+ ❯ runInterruption lib/ai/assistant/store.ts:676:14
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 20, INDEX_SIZE_ERR: 1, DOMSTRING_SIZE_ERR: 2, HIERARCHY_REQUEST_ERR: 3, WRONG_DOCUMENT_ERR: 4, INVALID_CHARACTER_ERR: 5, NO_DATA_ALLOWED_ERR: 6, NO_MODIFICATION_ALLOWED_ERR: 7, NOT_FOUND_ERR: 8, NOT_SUPPORTED_ERR: 9, INUSE_ATTRIBUTE_ERR: 10, INVALID_STATE_ERR: 11, SYNTAX_ERR: 12, INVALID_MODIFICATION_ERR: 13, NAMESPACE_ERR: 14, INVALID_ACCESS_ERR: 15, VALIDATION_ERR: 16, TYPE_MISMATCH_ERR: 17, SECURITY_ERR: 18, NETWORK_ERR: 19, ABORT_ERR: 20, URL_MISMATCH_ERR: 21, QUOTA_EXCEEDED_ERR: 22, TIMEOUT_ERR: 23, INVALID_NODE_TYPE_ERR: 24, DATA_CLONE_ERR: 25 }
+This error originated in "evals/regressions.eval.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "trial 2". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+AbortError: This operation was aborted
+ ❯ new DOMException node:internal/per_context/domexception:76:18
+ ❯ AbortController.abort node:internal/abort_controller:565:18
+ ❯ BuiltInAgent.abortRun node_modules/.pnpm/@copilotkit+runtime@1.66.2_@cfworker+json-schema@4.1.1_@langchain+core@1.2.4_@opentelem_30f5e0a6cf7608e672a5bc7c999ccee8/node_modules/@copilotkit/runtime/dist/agent/index.mjs:982:25
+ ❯ BuiltInAgent.agent.abortRun node_modules/.pnpm/@copilotkit+core@1.66.2_@ag-ui+core@0.0.57_zod@4.4.3/node_modules/@copilotkit/core/dist/index.mjs:1997:5
+ ❯ Object.abort components/ai/use-assistant-session.ts:582:32
+    580|         threadId: plan.threadId,
+    581|         runId: plan.runId,
+    582|         abort: () => turnAgent.abortRun(),
+       |                                ^
+    583|       });
+    584|       assistantActions.beginTurn(plan.turn.turnId, turnEpochForSend);
+ ❯ Object.abortLocalRun lib/ai/assistant/store.ts:689:18
+ ❯ interrupt lib/ai/assistant/interruption.ts:214:24
+ ❯ runInterruption lib/ai/assistant/store.ts:676:14
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 20, INDEX_SIZE_ERR: 1, DOMSTRING_SIZE_ERR: 2, HIERARCHY_REQUEST_ERR: 3, WRONG_DOCUMENT_ERR: 4, INVALID_CHARACTER_ERR: 5, NO_DATA_ALLOWED_ERR: 6, NO_MODIFICATION_ALLOWED_ERR: 7, NOT_FOUND_ERR: 8, NOT_SUPPORTED_ERR: 9, INUSE_ATTRIBUTE_ERR: 10, INVALID_STATE_ERR: 11, SYNTAX_ERR: 12, INVALID_MODIFICATION_ERR: 13, NAMESPACE_ERR: 14, INVALID_ACCESS_ERR: 15, VALIDATION_ERR: 16, TYPE_MISMATCH_ERR: 17, SECURITY_ERR: 18, NETWORK_ERR: 19, ABORT_ERR: 20, URL_MISMATCH_ERR: 21, QUOTA_EXCEEDED_ERR: 22, TIMEOUT_ERR: 23, INVALID_NODE_TYPE_ERR: 24, DATA_CLONE_ERR: 25 }
+This error originated in "evals/flows.eval.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "trial 3". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+AbortError: This operation was aborted
+ ❯ new DOMException node:internal/per_context/domexception:76:18
+ ❯ AbortController.abort node:internal/abort_controller:565:18
+ ❯ BuiltInAgent.abortRun node_modules/.pnpm/@copilotkit+runtime@1.66.2_@cfworker+json-schema@4.1.1_@langchain+core@1.2.4_@opentelem_30f5e0a6cf7608e672a5bc7c999ccee8/node_modules/@copilotkit/runtime/dist/agent/index.mjs:982:25
+ ❯ BuiltInAgent.agent.abortRun node_modules/.pnpm/@copilotkit+core@1.66.2_@ag-ui+core@0.0.57_zod@4.4.3/node_modules/@copilotkit/core/dist/index.mjs:1997:5
+ ❯ Object.abort components/ai/use-assistant-session.ts:582:32
+    580|         threadId: plan.threadId,
+    581|         runId: plan.runId,
+    582|         abort: () => turnAgent.abortRun(),
+       |                                ^
+    583|       });
+    584|       assistantActions.beginTurn(plan.turn.turnId, turnEpochForSend);
+ ❯ Object.abortLocalRun lib/ai/assistant/store.ts:689:18
+ ❯ interrupt lib/ai/assistant/interruption.ts:214:24
+ ❯ runInterruption lib/ai/assistant/store.ts:676:14
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 20, INDEX_SIZE_ERR: 1, DOMSTRING_SIZE_ERR: 2, HIERARCHY_REQUEST_ERR: 3, WRONG_DOCUMENT_ERR: 4, INVALID_CHARACTER_ERR: 5, NO_DATA_ALLOWED_ERR: 6, NO_MODIFICATION_ALLOWED_ERR: 7, NOT_FOUND_ERR: 8, NOT_SUPPORTED_ERR: 9, INUSE_ATTRIBUTE_ERR: 10, INVALID_STATE_ERR: 11, SYNTAX_ERR: 12, INVALID_MODIFICATION_ERR: 13, NAMESPACE_ERR: 14, INVALID_ACCESS_ERR: 15, VALIDATION_ERR: 16, TYPE_MISMATCH_ERR: 17, SECURITY_ERR: 18, NETWORK_ERR: 19, ABORT_ERR: 20, URL_MISMATCH_ERR: 21, QUOTA_EXCEEDED_ERR: 22, TIMEOUT_ERR: 23, INVALID_NODE_TYPE_ERR: 24, DATA_CLONE_ERR: 25 }
+This error originated in "evals/safety.eval.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "trial 1". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+AbortError: This operation was aborted
+ ❯ new DOMException node:internal/per_context/domexception:76:18
+ ❯ AbortController.abort node:internal/abort_controller:565:18
+ ❯ BuiltInAgent.abortRun node_modules/.pnpm/@copilotkit+runtime@1.66.2_@cfworker+json-schema@4.1.1_@langchain+core@1.2.4_@opentelem_30f5e0a6cf7608e672a5bc7c999ccee8/node_modules/@copilotkit/runtime/dist/agent/index.mjs:982:25
+ ❯ BuiltInAgent.agent.abortRun node_modules/.pnpm/@copilotkit+core@1.66.2_@ag-ui+core@0.0.57_zod@4.4.3/node_modules/@copilotkit/core/dist/index.mjs:1997:5
+ ❯ Object.abort components/ai/use-assistant-session.ts:582:32
+    580|         threadId: plan.threadId,
+    581|         runId: plan.runId,
+    582|         abort: () => turnAgent.abortRun(),
+       |                                ^
+    583|       });
+    584|       assistantActions.beginTurn(plan.turn.turnId, turnEpochForSend);
+ ❯ Object.abortLocalRun lib/ai/assistant/store.ts:689:18
+ ❯ interrupt lib/ai/assistant/interruption.ts:214:24
+ ❯ runInterruption lib/ai/assistant/store.ts:676:14
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 20, INDEX_SIZE_ERR: 1, DOMSTRING_SIZE_ERR: 2, HIERARCHY_REQUEST_ERR: 3, WRONG_DOCUMENT_ERR: 4, INVALID_CHARACTER_ERR: 5, NO_DATA_ALLOWED_ERR: 6, NO_MODIFICATION_ALLOWED_ERR: 7, NOT_FOUND_ERR: 8, NOT_SUPPORTED_ERR: 9, INUSE_ATTRIBUTE_ERR: 10, INVALID_STATE_ERR: 11, SYNTAX_ERR: 12, INVALID_MODIFICATION_ERR: 13, NAMESPACE_ERR: 14, INVALID_ACCESS_ERR: 15, VALIDATION_ERR: 16, TYPE_MISMATCH_ERR: 17, SECURITY_ERR: 18, NETWORK_ERR: 19, ABORT_ERR: 20, URL_MISMATCH_ERR: 21, QUOTA_EXCEEDED_ERR: 22, TIMEOUT_ERR: 23, INVALID_NODE_TYPE_ERR: 24, DATA_CLONE_ERR: 25 }
+This error originated in "evals/safety.eval.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "trial 2". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+AbortError: This operation was aborted
+ ❯ new DOMException node:internal/per_context/domexception:76:18
+ ❯ AbortController.abort node:internal/abort_controller:565:18
+ ❯ BuiltInAgent.abortRun node_modules/.pnpm/@copilotkit+runtime@1.66.2_@cfworker+json-schema@4.1.1_@langchain+core@1.2.4_@opentelem_30f5e0a6cf7608e672a5bc7c999ccee8/node_modules/@copilotkit/runtime/dist/agent/index.mjs:982:25
+ ❯ BuiltInAgent.agent.abortRun node_modules/.pnpm/@copilotkit+core@1.66.2_@ag-ui+core@0.0.57_zod@4.4.3/node_modules/@copilotkit/core/dist/index.mjs:1997:5
+ ❯ Object.abort components/ai/use-assistant-session.ts:582:32
+    580|         threadId: plan.threadId,
+    581|         runId: plan.runId,
+    582|         abort: () => turnAgent.abortRun(),
+       |                                ^
+    583|       });
+    584|       assistantActions.beginTurn(plan.turn.turnId, turnEpochForSend);
+ ❯ Object.abortLocalRun lib/ai/assistant/store.ts:689:18
+ ❯ interrupt lib/ai/assistant/interruption.ts:214:24
+ ❯ runInterruption lib/ai/assistant/store.ts:676:14
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 20, INDEX_SIZE_ERR: 1, DOMSTRING_SIZE_ERR: 2, HIERARCHY_REQUEST_ERR: 3, WRONG_DOCUMENT_ERR: 4, INVALID_CHARACTER_ERR: 5, NO_DATA_ALLOWED_ERR: 6, NO_MODIFICATION_ALLOWED_ERR: 7, NOT_FOUND_ERR: 8, NOT_SUPPORTED_ERR: 9, INUSE_ATTRIBUTE_ERR: 10, INVALID_STATE_ERR: 11, SYNTAX_ERR: 12, INVALID_MODIFICATION_ERR: 13, NAMESPACE_ERR: 14, INVALID_ACCESS_ERR: 15, VALIDATION_ERR: 16, TYPE_MISMATCH_ERR: 17, SECURITY_ERR: 18, NETWORK_ERR: 19, ABORT_ERR: 20, URL_MISMATCH_ERR: 21, QUOTA_EXCEEDED_ERR: 22, TIMEOUT_ERR: 23, INVALID_NODE_TYPE_ERR: 24, DATA_CLONE_ERR: 25 }
+This error originated in "evals/safety.eval.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "trial 3". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+AbortError: This operation was aborted
+ ❯ new DOMException node:internal/per_context/domexception:76:18
+ ❯ AbortController.abort node:internal/abort_controller:565:18
+ ❯ BuiltInAgent.abortRun node_modules/.pnpm/@copilotkit+runtime@1.66.2_@cfworker+json-schema@4.1.1_@langchain+core@1.2.4_@opentelem_30f5e0a6cf7608e672a5bc7c999ccee8/node_modules/@copilotkit/runtime/dist/agent/index.mjs:982:25
+ ❯ BuiltInAgent.agent.abortRun node_modules/.pnpm/@copilotkit+core@1.66.2_@ag-ui+core@0.0.57_zod@4.4.3/node_modules/@copilotkit/core/dist/index.mjs:1997:5
+ ❯ Object.abort components/ai/use-assistant-session.ts:582:32
+    580|         threadId: plan.threadId,
+    581|         runId: plan.runId,
+    582|         abort: () => turnAgent.abortRun(),
+       |                                ^
+    583|       });
+    584|       assistantActions.beginTurn(plan.turn.turnId, turnEpochForSend);
+ ❯ Object.abortLocalRun lib/ai/assistant/store.ts:689:18
+ ❯ interrupt lib/ai/assistant/interruption.ts:214:24
+ ❯ runInterruption lib/ai/assistant/store.ts:676:14
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 20, INDEX_SIZE_ERR: 1, DOMSTRING_SIZE_ERR: 2, HIERARCHY_REQUEST_ERR: 3, WRONG_DOCUMENT_ERR: 4, INVALID_CHARACTER_ERR: 5, NO_DATA_ALLOWED_ERR: 6, NO_MODIFICATION_ALLOWED_ERR: 7, NOT_FOUND_ERR: 8, NOT_SUPPORTED_ERR: 9, INUSE_ATTRIBUTE_ERR: 10, INVALID_STATE_ERR: 11, SYNTAX_ERR: 12, INVALID_MODIFICATION_ERR: 13, NAMESPACE_ERR: 14, INVALID_ACCESS_ERR: 15, VALIDATION_ERR: 16, TYPE_MISMATCH_ERR: 17, SECURITY_ERR: 18, NETWORK_ERR: 19, ABORT_ERR: 20, URL_MISMATCH_ERR: 21, QUOTA_EXCEEDED_ERR: 22, TIMEOUT_ERR: 23, INVALID_NODE_TYPE_ERR: 24, DATA_CLONE_ERR: 25 }
+This error originated in "evals/repair.eval.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "trial 1". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+AbortError: This operation was aborted
+ ❯ new DOMException node:internal/per_context/domexception:76:18
+ ❯ AbortController.abort node:internal/abort_controller:565:18
+ ❯ BuiltInAgent.abortRun node_modules/.pnpm/@copilotkit+runtime@1.66.2_@cfworker+json-schema@4.1.1_@langchain+core@1.2.4_@opentelem_30f5e0a6cf7608e672a5bc7c999ccee8/node_modules/@copilotkit/runtime/dist/agent/index.mjs:982:25
+ ❯ BuiltInAgent.agent.abortRun node_modules/.pnpm/@copilotkit+core@1.66.2_@ag-ui+core@0.0.57_zod@4.4.3/node_modules/@copilotkit/core/dist/index.mjs:1997:5
+ ❯ Object.abort components/ai/use-assistant-session.ts:582:32
+    580|         threadId: plan.threadId,
+    581|         runId: plan.runId,
+    582|         abort: () => turnAgent.abortRun(),
+       |                                ^
+    583|       });
+    584|       assistantActions.beginTurn(plan.turn.turnId, turnEpochForSend);
+ ❯ Object.abortLocalRun lib/ai/assistant/store.ts:689:18
+ ❯ interrupt lib/ai/assistant/interruption.ts:214:24
+ ❯ runInterruption lib/ai/assistant/store.ts:676:14
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 20, INDEX_SIZE_ERR: 1, DOMSTRING_SIZE_ERR: 2, HIERARCHY_REQUEST_ERR: 3, WRONG_DOCUMENT_ERR: 4, INVALID_CHARACTER_ERR: 5, NO_DATA_ALLOWED_ERR: 6, NO_MODIFICATION_ALLOWED_ERR: 7, NOT_FOUND_ERR: 8, NOT_SUPPORTED_ERR: 9, INUSE_ATTRIBUTE_ERR: 10, INVALID_STATE_ERR: 11, SYNTAX_ERR: 12, INVALID_MODIFICATION_ERR: 13, NAMESPACE_ERR: 14, INVALID_ACCESS_ERR: 15, VALIDATION_ERR: 16, TYPE_MISMATCH_ERR: 17, SECURITY_ERR: 18, NETWORK_ERR: 19, ABORT_ERR: 20, URL_MISMATCH_ERR: 21, QUOTA_EXCEEDED_ERR: 22, TIMEOUT_ERR: 23, INVALID_NODE_TYPE_ERR: 24, DATA_CLONE_ERR: 25 }
+This error originated in "evals/repair.eval.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "trial 3". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+
+⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯
+AbortError: This operation was aborted
+ ❯ new DOMException node:internal/per_context/domexception:76:18
+ ❯ AbortController.abort node:internal/abort_controller:565:18
+ ❯ BuiltInAgent.abortRun node_modules/.pnpm/@copilotkit+runtime@1.66.2_@cfworker+json-schema@4.1.1_@langchain+core@1.2.4_@opentelem_30f5e0a6cf7608e672a5bc7c999ccee8/node_modules/@copilotkit/runtime/dist/agent/index.mjs:982:25
+ ❯ BuiltInAgent.agent.abortRun node_modules/.pnpm/@copilotkit+core@1.66.2_@ag-ui+core@0.0.57_zod@4.4.3/node_modules/@copilotkit/core/dist/index.mjs:1997:5
+ ❯ Object.abort components/ai/use-assistant-session.ts:582:32
+    580|         threadId: plan.threadId,
+    581|         runId: plan.runId,
+    582|         abort: () => turnAgent.abortRun(),
+       |                                ^
+    583|       });
+    584|       assistantActions.beginTurn(plan.turn.turnId, turnEpochForSend);
+ ❯ Object.abortLocalRun lib/ai/assistant/store.ts:689:18
+ ❯ interrupt lib/ai/assistant/interruption.ts:214:24
+ ❯ runInterruption lib/ai/assistant/store.ts:676:14
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+Serialized Error: { code: 20, INDEX_SIZE_ERR: 1, DOMSTRING_SIZE_ERR: 2, HIERARCHY_REQUEST_ERR: 3, WRONG_DOCUMENT_ERR: 4, INVALID_CHARACTER_ERR: 5, NO_DATA_ALLOWED_ERR: 6, NO_MODIFICATION_ALLOWED_ERR: 7, NOT_FOUND_ERR: 8, NOT_SUPPORTED_ERR: 9, INUSE_ATTRIBUTE_ERR: 10, INVALID_STATE_ERR: 11, SYNTAX_ERR: 12, INVALID_MODIFICATION_ERR: 13, NAMESPACE_ERR: 14, INVALID_ACCESS_ERR: 15, VALIDATION_ERR: 16, TYPE_MISMATCH_ERR: 17, SECURITY_ERR: 18, NETWORK_ERR: 19, ABORT_ERR: 20, URL_MISMATCH_ERR: 21, QUOTA_EXCEEDED_ERR: 22, TIMEOUT_ERR: 23, INVALID_NODE_TYPE_ERR: 24, DATA_CLONE_ERR: 25 }
+This error originated in "evals/singapore.eval.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+The latest test that might've caused the error is "trial 2". It might mean one of the following:
+- The error was thrown, while Vitest was running this test.
+- If the error occurred after the test had been completed, this was the last documented test before it was thrown.
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+
+
+ Test Files  5 failed (5)
+      Tests  55 failed | 33 passed (88)
+     Errors  12 errors
+   Start at  16:38:57
+   Duration  3922.08s (transform 2.32s, setup 232ms, import 9.51s, tests 8925.48s, environment 1.62s)
+
+eval report: /home/kenan/work/nursing-sheduler/web/evals/runs/latest/report.md
+EXIT_CODE=1
