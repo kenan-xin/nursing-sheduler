@@ -26,6 +26,7 @@ import {
 import {
   describeProposalReadiness,
   type LiveProposalBasis,
+  type ProposalDiff,
   type ProposalReadiness,
 } from "@/lib/proposal";
 import { capabilityRegistryStamp } from "@/lib/capability/registry";
@@ -33,7 +34,19 @@ import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
 
 /** How the last Apply ended, in the terms the host may honestly state. */
 export type ApplyOutcomeView =
-  | { kind: "applied"; receiptId: string; documentRevision: number; reloadRequired: boolean }
+  | {
+      kind: "applied";
+      receiptId: string;
+      /** Which proposal revision this Apply settled; one Apply, one follow-up. */
+      proposalId: string;
+      proposalRevision: number;
+      documentRevision: number;
+      reloadRequired: boolean;
+      /** The Preview's diff. Apply only commits against the basis the Preview was
+       *  derived from, so this is what was written, split into direct and cascade
+       *  (the receipt's summary merges the two). */
+      diff: ProposalDiff;
+    }
   | { kind: "failed"; message: string };
 
 export interface AssistantProposalController {
@@ -95,13 +108,26 @@ export function useAssistantProposals(): AssistantProposalController {
   const ownership = useAuthorityStore((state) => state.ownership);
   const reloadRequired = useAuthorityStore((state) => state.reloadRequired);
 
-  const [proposal, setProposal] = useState<AssistantProposalV1 | null>(null);
+  const [stored, setProposal] = useState<AssistantProposalV1 | null>(null);
   const [basis, setBasis] = useState<AssistantScenarioBasis | null>(null);
   const [receipts, setReceipts] = useState<ReceiptStanding[]>([]);
   const [applying, setApplying] = useState(false);
   const [outcome, setOutcome] = useState<ApplyOutcomeView | null>(null);
 
   const proposalId = active?.proposalId ?? null;
+
+  // ONLY THE ACTIVE, UNSETTLED PROPOSAL IS A PREVIEW. A reread can land after the
+  // active proposal moved on (Apply's trailing refresh closes over the id it just
+  // cleared), and a proposal can be settled elsewhere while still active. Either
+  // way it is no longer live: showing it would offer Revise and Cancel with nothing
+  // left to act on. The receipt is what narrates an applied change.
+  const proposal =
+    stored &&
+    stored.proposalId === proposalId &&
+    stored.status !== "applied" &&
+    stored.status !== "cancelled"
+      ? stored
+      : null;
 
   const refresh = useCallback(async () => {
     const [nextBasis, nextReceipts] = await Promise.all([
@@ -200,7 +226,7 @@ export function useAssistantProposals(): AssistantProposalController {
   }, [proposalId]);
 
   const apply = useCallback(async () => {
-    if (!proposalId || applying) return;
+    if (!proposalId || !proposal || applying) return;
     setApplying(true);
     setOutcome(null);
     try {
@@ -215,8 +241,11 @@ export function useAssistantProposals(): AssistantProposalController {
         setOutcome({
           kind: "applied",
           receiptId: result.receipt.receiptId,
+          proposalId: result.receipt.proposalId,
+          proposalRevision: result.receipt.proposalRevision,
           documentRevision: result.documentRevision,
           reloadRequired: result.reloadRequired,
+          diff: proposal.diff,
         });
         assistantActions.clearProposal();
       } else {
@@ -226,11 +255,17 @@ export function useAssistantProposals(): AssistantProposalController {
       setApplying(false);
       await refresh();
     }
-  }, [proposalId, applying, refresh]);
+  }, [proposalId, proposal, applying, refresh]);
 
   const undo = useCallback(
     async (receiptId: string) => {
       await assistantProposalCommands.undoReceipt(receiptId);
+      // The reverted receipt is the one the Apply notice is narrating: that claim is
+      // no longer true, so drop it rather than leave the notice pointing at a change
+      // that no longer exists.
+      setOutcome((prev) =>
+        prev?.kind === "applied" && prev.receiptId === receiptId ? null : prev,
+      );
       await refresh();
     },
     [refresh],

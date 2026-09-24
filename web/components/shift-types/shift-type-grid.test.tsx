@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { RequirementCard, ScenarioUiState } from "@/lib/scenario";
 import { useScenarioStore, scenarioCommands } from "@/lib/store";
+import { changeKeys } from "@/lib/change-highlight/keys";
+import { clearChangeHighlight, showChangeHighlight } from "@/lib/change-highlight/store";
 import { ShiftTypeGrid } from "./shift-type-grid";
 import { resetScenarioForTest, drainScenarioCommands, undoDepth } from "@/lib/store/test-authority";
 
@@ -571,5 +573,25 @@ describe("ShiftTypeGrid — Shift groups (shared GroupsSection, Shift config)", 
     fireEvent.click(screen.getByTestId("group-edit-Working"));
     expect(screen.queryByTestId("transfer-search-Working")).not.toBeInTheDocument();
     expect(screen.getByText("IN GROUP")).toBeInTheDocument();
+  });
+});
+
+describe("ShiftTypeGrid — change highlight", () => {
+  afterEach(() => clearChangeHighlight());
+  it("outlines the shift card and shift group an Apply added", async () => {
+    await seed({
+      shifts: [{ id: "Day" }, { id: "EVE" }],
+      shiftGroups: [{ id: "Late", members: ["EVE"] }],
+    });
+    render(<ShiftTypeGrid />);
+    act(() => showChangeHighlight([changeKeys.shift("EVE"), changeKeys.shiftGroup("Late")]));
+    expect(screen.getByTestId("shift-card-string:EVE")).toHaveAttribute(
+      "data-change-highlight",
+      "true",
+    );
+    expect(screen.getByTestId("shift-card-string:Day")).not.toHaveAttribute(
+      "data-change-highlight",
+    );
+    expect(screen.getByTestId("group-row-Late")).toHaveAttribute("data-change-highlight", "true");
   });
 });

@@ -218,7 +218,7 @@ describe("a non-cooperative clone run", () => {
     // Idle: no Stop. So its later presence is a change this turn caused.
     expect(session.current!.isRunning).toBe(false);
 
-    let sent!: Promise<void>;
+    let sent!: Promise<unknown>;
     act(() => {
       sent = session.current!.send("why is the 15th short?");
     });

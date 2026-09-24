@@ -274,6 +274,7 @@ export function AssistantPanel() {
   const sheetRef = useRef<HTMLDivElement>(null);
   const dockRef = useRef<HTMLDivElement>(null);
   const [dockWidth, setDockWidth] = useState<number | null>(readStoredDockWidth);
+  const panelOpen = useAssistantStore((state) => state.panelOpen);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -283,11 +284,11 @@ export function AssistantPanel() {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  // Keyed on `wide` so the sheet takes focus when it APPEARS, not only on the
-  // panel's first mount -- a resize across the pivot swaps the container.
+  // Keyed on `wide` and `panelOpen` so the sheet takes focus whenever it APPEARS: a
+  // resize across the pivot swaps the container, and a closed panel stays mounted.
   useEffect(() => {
-    sheetRef.current?.focus();
-  }, [wide]);
+    if (panelOpen) sheetRef.current?.focus();
+  }, [wide, panelOpen]);
 
   // DOCK -- a sibling of the main column, so the screen narrows beside it rather
   // than being covered by it.

@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { DateRange } from "@/lib/dates";
+import { changeKeys } from "@/lib/change-highlight/keys";
+import { clearChangeHighlight, showChangeHighlight } from "@/lib/change-highlight/store";
 import { RosterPeriodCard } from "./roster-period-card";
 
 afterEach(() => {
@@ -9,6 +11,18 @@ afterEach(() => {
 });
 
 const VALID_RANGE: DateRange = { start: "2026-08-01", end: "2026-08-31" };
+
+describe("RosterPeriodCard — change highlight", () => {
+  afterEach(() => clearChangeHighlight());
+  it("outlines the card when an Apply changed the roster period", () => {
+    render(<RosterPeriodCard range={VALID_RANGE} importedHolidaysPresent onCommit={vi.fn()} />);
+    const card = screen.getByTestId("roster-period-card");
+    expect(card).toHaveAttribute("data-change-key", changeKeys.rosterRange());
+    expect(card).not.toHaveAttribute("data-change-highlight");
+    act(() => showChangeHighlight([changeKeys.rosterRange()]));
+    expect(card).toHaveAttribute("data-change-highlight", "true");
+  });
+});
 
 describe("RosterPeriodCard — invalid/incomplete range feedback (VR-DC-03)", () => {
   it("shows an error and does not commit when start > end", () => {

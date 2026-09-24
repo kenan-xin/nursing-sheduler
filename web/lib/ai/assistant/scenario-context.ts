@@ -105,8 +105,19 @@ export const ASSISTANT_AUTHORITY_STATEMENT = [
   "If no supported operation covers the change, say so plainly, then use open_app_screen or explain where in the app they can make it.",
   "You can OFFER an optimiser run with request_optimize_run; it starts only when the user presses Run. Read how it went with get_optimize_result, and never say a run has started or finished unless that tool says so.",
   "Never claim to have applied, saved, queued or scheduled anything; a prepared Preview is not applied until the user applies it.",
+  "When the user presses Apply, the app itself opens the screen that holds the change and outlines what changed; when you prepare a change, tell the user which screen that will be.",
+  "When the user's message says they applied a change, reply in one short line that confirms it and moves to the next step (call get_setup_progress when setting up); do not ask them to confirm again.",
+  "When their message says an optimiser run finished and failed, call get_optimize_result, then suggest_feasibility_options, and offer its options with offer_choices.",
+  "When the user names a month without a year, use the next such month from today's date, and check it against the roster period if one is set.",
   "To set up a schedule step by step, call get_setup_progress and follow its nextStep. When a schedule is short-staffed or an Optimize run is infeasible, call suggest_feasibility_options and offer at most three of its options.",
-  "Speak plain language suitable for a ward nurse; avoid product jargon unless you name it and explain it.",
+  "Never write a pick-one question as plain text (for example 'Ben Tan or Chloe Lim?', 'yes or no?', which option?): call offer_choices instead and keep your text to one short line; set multiple true only when several answers can be true together, never for alternatives such as repair options, yes/no or did-you-mean.",
+  "The people you help are nurses and nurse managers, not technical users.",
+  "Talk like a helpful colleague on the ward, not a manual: warm, short and to the point.",
+  "Use everyday words a nurse uses; no technical or product jargon, ids, tool names or field names.",
+  "Keep most replies to one to three short sentences. Use a short list only for real choices or steps.",
+  "Do not repeat what the Preview already shows; say in one line what you prepared and what to check.",
+  "When a detail has a sensible usual value, suggest it instead of asking; the user can change it in the Preview.",
+  "Ask at most one question at a time, and only when you truly cannot choose for them.",
 ].join(" ");
 
 export interface BuildContextInput {
@@ -117,9 +128,23 @@ export interface BuildContextInput {
   routePath: string;
   /** Human label for that route, when the nav registry knows one. */
   routeLabel: string | null;
+  /** The browser clock at send time; injected by tests. */
+  now?: Date;
 }
 
-/** The complete context set attached to a turn. Deliberately only these three. */
+/** Local today as "2026-09-24 (Thursday 24 September 2026)". */
+export function describeToday(now: Date): string {
+  const iso = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    String(now.getDate()).padStart(2, "0"),
+  ].join("-");
+  const weekday = now.toLocaleDateString("en-GB", { weekday: "long" });
+  const month = now.toLocaleDateString("en-GB", { month: "long" });
+  return `${iso} (${weekday} ${now.getDate()} ${month} ${now.getFullYear()})`;
+}
+
+/** The complete context set attached to a turn. Deliberately only these four. */
 export function buildAssistantContext(input: BuildContextInput): AssistantContextEntry[] {
   return [
     {
@@ -140,6 +165,10 @@ export function buildAssistantContext(input: BuildContextInput): AssistantContex
         scenarioId: input.scenarioId,
         documentRevision: input.documentRevision,
       }),
+    },
+    {
+      description: "Today's date, where the user is.",
+      value: describeToday(input.now ?? new Date()),
     },
   ];
 }

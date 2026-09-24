@@ -82,6 +82,8 @@ import {
 } from "@/components/entity-editor/core";
 import { WorkingTimeFields } from "@/components/entity-editor/working-time-fields";
 import { GroupsSection, type GroupsSectionConfig } from "@/components/entity-editor/groups-section";
+import { changeKeys } from "@/lib/change-highlight/keys";
+import { useChangeTarget } from "@/lib/change-highlight/store";
 import { InfoTip } from "@/components/ui/info-tip";
 import type { RequirementNumberValue } from "@/components/requirements/requirements-model";
 import { shiftTypesDescriptor } from "./shift-types-descriptor";
@@ -337,11 +339,12 @@ export function ShiftTypeGrid() {
       </div>
 
       <section
-        // `.ns-grid3` — two-up at 640px, three-up at 1100px (Nurse Scheduling v2.dc.html:
-        // 191-193). `sm` already IS the 640px step; `grid3:` carries the 1100px one.
-        // Tailwind's `lg` (1024px) used to stand in for it, turning three-up 76px early
-        // and squeezing each card to ~220px at spacious, pushing controls past the edge.
-        className="grid grid-cols-1 gap-4 sm:grid-cols-2 grid3:grid-cols-3"
+        // Columns follow the space the grid actually has, not the viewport: with the
+        // assistant dock open a wide window still leaves a narrow main column, and the
+        // viewport steps (`sm:` / `grid3:`) kept three-up there, squeezing each card until
+        // its Delete button spilled past the edge. A card needs ~18rem for its actions;
+        // the `(100% - 2 gaps) / 3` floor keeps the design's three-up maximum.
+        className="grid grid-cols-[repeat(auto-fill,minmax(max(min(100%,18rem),calc((100%_-_2rem)/3)),1fr))] gap-4"
         data-testid="shift-grid"
         // Bounded a11y quick win: an unnamed <section> is not exposed as a
         // region, so the whole card grid was unreachable by landmark navigation
@@ -424,6 +427,7 @@ export function ShiftTypeGrid() {
         onEditGroup={(id) => setSel({ t: "edit-group", id })}
         onCloseForm={() => setSel(null)}
         config={SHIFT_GROUPS_CONFIG}
+        groupChangeKey={changeKeys.shiftGroup}
       />
     </Surface>
   );
@@ -554,12 +558,14 @@ function ShiftCard({
   onDropRow: () => void;
   onDragEnd: () => void;
 }) {
+  const changeTarget = useChangeTarget(changeKeys.shift(item.id));
   const time = item.startTime && item.endTime ? `${item.startTime}–${item.endTime}` : null;
   const hasDur = item.durationMinutes != null;
 
   return (
     <div
       data-testid={`shift-card-${cardKey}`}
+      {...changeTarget}
       draggable={canDrag}
       onDragStart={canDrag ? onDragStart : undefined}
       onDragOver={
@@ -636,7 +642,9 @@ function ShiftCard({
 
       <StaffingSummary state={scenario} item={item} />
 
-      <div className="mt-auto flex items-center gap-2 border-t border-line2 pt-3">
+      {/* Wraps so Edit/Delete drop to their own row on a narrow card (for example with
+          the assistant dock open) instead of spilling past the card edge. */}
+      <div className="mt-auto flex flex-wrap items-center gap-2 border-t border-line2 pt-3">
         {canReorder && (
           <>
             <Button
@@ -661,7 +669,7 @@ function ShiftCard({
             </Button>
           </>
         )}
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
           {/* `secondary`, not `outline`: the prototype's card actions sit on the
               `--line` hairline, and `outline` is the heavier `--rule` edge.
               Measured against ScreenShifts.dc.html — same tone, same elevation.

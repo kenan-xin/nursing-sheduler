@@ -103,6 +103,13 @@ export interface NavigateToCapabilityOptions {
    * a control is their own authority.
    */
   readonly authorize?: () => boolean;
+  /**
+   * `false`: confirm the screen's anchor is live (proof the screen mounted) but leave
+   * scroll and focus alone. Apply uses it: focus stays in the assistant panel and the
+   * changed rows, not the screen's first control, are what is brought into view.
+   * Omitted means reveal, as every help-tool call does today.
+   */
+  readonly reveal?: boolean;
 }
 
 function anchorRefusal(lookup: LiveAnchorLookup): CapabilityUnavailableReason {
@@ -247,6 +254,15 @@ export function useCapabilityNavigation(): NavigateToCapability {
       // The anchor wait above is another await, and revealing scrolls the page and
       // moves focus -- the second visible effect, so it gets its own check.
       if (!authorized()) return revoked();
+      if (options.reveal === false) {
+        return {
+          status: "navigated",
+          capabilityId,
+          routeId: after.value.routeId,
+          screenName: after.value.screenName,
+          registry: after.stamp,
+        };
+      }
       const reveal = revealAnchor(lookup.element);
       return {
         status: reveal,

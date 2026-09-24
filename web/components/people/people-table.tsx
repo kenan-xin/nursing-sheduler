@@ -81,6 +81,8 @@ import {
   type EditorGroup,
 } from "@/components/entity-editor/core";
 import { GroupsSection, type GroupsSectionConfig } from "@/components/entity-editor/groups-section";
+import { changeKeys } from "@/lib/change-highlight/keys";
+import { useChangeTarget } from "@/lib/change-highlight/store";
 import { peopleDescriptor, writeTemporary } from "./people-descriptor";
 import { UploadDialog } from "./upload-dialog";
 
@@ -485,6 +487,7 @@ export function PeopleTable() {
         onEditGroup={(id) => setSel({ t: "edit-group", id })}
         onCloseForm={() => setSel(null)}
         config={STAFF_GROUPS_CONFIG}
+        groupChangeKey={changeKeys.peopleGroup}
       />
 
       {uploadOpen && (
@@ -544,11 +547,13 @@ function ReadRow({
   onDropRow: () => void;
   onDragEnd: () => void;
 }) {
+  const changeTarget = useChangeTarget(changeKeys.person(item.id));
   const memberOf = groups.filter((g) => g.members.some((m) => sameEntityId(m, item.id)));
 
   return (
     <tr
       data-testid={`people-row-${itemKey}`}
+      {...changeTarget}
       draggable={canDrag}
       onDragStart={canDrag ? onDragStart : undefined}
       onDragOver={

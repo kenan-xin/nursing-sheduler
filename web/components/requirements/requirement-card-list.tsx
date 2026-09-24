@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { FaPowerOff, FaPen, FaCopy, FaTrash } from "@/components/icons";
 import { WeightPill } from "@/components/card-editor/weight-field";
 import type { RequirementCard } from "@/lib/scenario";
+import { changeKeys } from "@/lib/change-highlight/keys";
 import {
   CardActionButton,
   CardListItem,
@@ -73,6 +74,7 @@ export function RequirementCardList({
           <CardListItem
             key={card.uid}
             testId={`requirement-card-${index}`}
+            changeKey={changeKeys.rule("requirements", card.uid)}
             index={index}
             disabled={card.disabled}
             accent="none"

@@ -5,6 +5,8 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import type { ScenarioUiState } from "@/lib/scenario";
 import { useScenarioStore, scenarioCommands } from "@/lib/store";
 import type { EntityId } from "@/components/entity-editor/core";
+import { changeKeys } from "@/lib/change-highlight/keys";
+import { clearChangeHighlight, showChangeHighlight } from "@/lib/change-highlight/store";
 import { PeopleTable } from "./people-table";
 import { resetScenarioForTest, drainScenarioCommands, undoDepth } from "@/lib/store/test-authority";
 
@@ -317,5 +319,33 @@ describe("PeopleTable — typed-id identity + reorder", () => {
     // Searching hides the reorder controls (drag + keyboard both gated off).
     fireEvent.change(screen.getByTestId("people-search"), { target: { value: "P" } });
     expect(screen.queryByTestId(`people-move-down-${sk("P1")}`)).not.toBeInTheDocument();
+  });
+});
+
+describe("PeopleTable — change highlight", () => {
+  afterEach(() => clearChangeHighlight());
+  it("outlines the person and staff group an Apply changed, and nothing else", async () => {
+    await seed({
+      staff: [
+        { id: "Aisha Rahman", history: [] },
+        { id: "Bo", history: [] },
+      ],
+      staffGroups: [{ id: "Seniors", members: ["Aisha Rahman"] }],
+    });
+    render(<PeopleTable />);
+    act(() =>
+      showChangeHighlight([changeKeys.person("Aisha Rahman"), changeKeys.peopleGroup("Seniors")]),
+    );
+    expect(screen.getByTestId(`people-row-${sk("Aisha Rahman")}`)).toHaveAttribute(
+      "data-change-highlight",
+      "true",
+    );
+    expect(screen.getByTestId(`people-row-${sk("Bo")}`)).not.toHaveAttribute(
+      "data-change-highlight",
+    );
+    expect(screen.getByTestId("group-row-Seniors")).toHaveAttribute(
+      "data-change-highlight",
+      "true",
+    );
   });
 });

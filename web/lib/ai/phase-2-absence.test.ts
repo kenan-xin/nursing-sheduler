@@ -62,6 +62,9 @@ const MODEL_VISIBLE_TOOLS = [
   // options; neither writes anything nor names a roster.
   "get_setup_progress",
   "suggest_feasibility_options",
+  // WIDENED DELIBERATELY (2026-09-24, bead 7v6): option cards. Shows a host card; a
+  // click only sends an ordinary user message. It writes nothing and names no roster.
+  "offer_choices",
 ] as const;
 
 /**

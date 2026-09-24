@@ -32,6 +32,7 @@ const NOT_REGISTRY_GOVERNED: Record<string, string> = {
   prepare_scenario_change: "T07 proposals: prepares a Preview the HOST applies",
   request_optimize_run: "Optimiser run: shows a host card; the USER starts the run",
   get_optimize_result: "Optimiser run: reads the Optimise screen's run view",
+  offer_choices: "Option card: a click sends a user message, not a help answer",
 };
 
 describe("assistant tool names", () => {

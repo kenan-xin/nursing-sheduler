@@ -510,7 +510,7 @@ const BOUNDARIES = [
  * The in-flight send is returned INSIDE a box: returning it bare would make the
  * caller's `await` unwrap it, which is a wait for the very thing being suspended.
  */
-async function suspendSendAt(boundary: string): Promise<{ sent: Promise<void> }> {
+async function suspendSendAt(boundary: string): Promise<{ sent: Promise<unknown> }> {
   const arrived =
     boundary === "readWriterContext"
       ? new Promise<void>((resolve) => {
@@ -522,7 +522,7 @@ async function suspendSendAt(boundary: string): Promise<{ sent: Promise<void> }>
         })
       : pauseAt(boundary);
 
-  let sent!: Promise<void>;
+  let sent!: Promise<unknown>;
   act(() => {
     sent = session.current!.send("why is the 15th short?");
   });
@@ -531,7 +531,7 @@ async function suspendSendAt(boundary: string): Promise<{ sent: Promise<void> }>
   return { sent };
 }
 
-async function expectNoLaunch(inFlight: { sent: Promise<void> }): Promise<void> {
+async function expectNoLaunch(inFlight: { sent: Promise<unknown> }): Promise<void> {
   await resume();
   await act(async () => {
     await inFlight.sent;

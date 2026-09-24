@@ -163,6 +163,13 @@ export interface ClearResult {
   operationId: string | null;
 }
 
+/** What `offer_choices` asks the user to pick from. */
+export interface ChoiceOffer {
+  question: string;
+  options: readonly { label: string; detail: string }[];
+  multiple: boolean;
+}
+
 export interface AssistantUiState {
   /** False until the durable settings row has been read at least once. */
   hydrated: boolean;
@@ -220,6 +227,14 @@ export interface AssistantUiState {
    */
   activeRunRequest: { turnEpoch: number } | null;
   /**
+   * The live option card from `offer_choices`. One at a time: a newer offer replaces
+   * it, and any send closes it. `id` changes on every offer so the card resets its
+   * own checkbox and Other state. Stamped with the turn that offered it, like
+   * `activeRunRequest`, so settlement can tell this turn's card from an older one.
+   * In memory only.
+   */
+  activeChoices: (ChoiceOffer & { id: number; turnEpoch: number }) | null;
+  /**
    * Interruptions requested but not yet settled, incremented SYNCHRONOUSLY at the
    * request.
    *
@@ -255,6 +270,7 @@ const INITIAL: AssistantUiState = {
   activeProposal: null,
   activeDiagnostic: null,
   activeRunRequest: null,
+  activeChoices: null,
   pendingInterruptions: 0,
   clearResult: null,
 };
@@ -1072,6 +1088,19 @@ export const assistantActions = {
     useAssistantStore.setState({ activeRunRequest: null });
   },
 
+  /** Show the option card for `offer_choices`, replacing any earlier one. */
+  showChoices(offer: ChoiceOffer, turnEpoch: number): void {
+    const previous = useAssistantStore.getState().activeChoices;
+    useAssistantStore.setState({
+      activeChoices: { ...offer, id: (previous?.id ?? 0) + 1, turnEpoch },
+    });
+  },
+
+  /** Close the option card: the user sent something. */
+  clearChoices(): void {
+    useAssistantStore.setState({ activeChoices: null });
+  },
+
   /** Test seam: return the store to its never-hydrated state. */
   resetForTest(): void {
     useAssistantStore.setState({ ...INITIAL });
@@ -1081,3 +1110,15 @@ export const assistantActions = {
     resetProbeAuthorityForTest();
   },
 } as const;
+
+/**
+ * Whether this turn left a card waiting for the user -- the option card or the run card.
+ *
+ * Such a card IS the turn's reply: its answer arrives as the user's next message, so a
+ * turn that ends on it with no text has not failed. Read from the card actually shown,
+ * not the tool called: a tool that refused and showed nothing gave the user nothing.
+ */
+export function turnAwaitsUserOnCard(turnEpoch: number): boolean {
+  const { activeChoices, activeRunRequest } = useAssistantStore.getState();
+  return activeChoices?.turnEpoch === turnEpoch || activeRunRequest?.turnEpoch === turnEpoch;
+}

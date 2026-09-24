@@ -27,6 +27,7 @@ import { useHelpTools } from "./use-help-tools";
 import { useProposalTools } from "./use-proposal-tools";
 import { useDiagnosticTools } from "./use-diagnostic-tools";
 import { useOptimizeTools } from "./use-optimize-tools";
+import { useChoiceTools } from "./use-choice-tools";
 import { useFeasibilityTools } from "./use-feasibility-tools";
 import { computeScenarioSummary } from "@/components/home/scenario-summary";
 import { computeCoverageWarnings } from "@/components/requirements/requirements-model";
@@ -80,6 +81,8 @@ export function useModelVisibleTools(agentId: string, turnEpoch: number): void {
   // The optimiser pair (plan 2026-09-24): offer a run the USER starts from a host
   // card, and read the run view the Optimise screen renders. Neither starts a run.
   useOptimizeTools(agentId, turnEpoch);
+  // Clickable options when the model asks the user to pick. Sends a message; no write.
+  useChoiceTools(agentId, turnEpoch);
 
   useParameterlessModelVisibleTool(
     {

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   RUN_REQUEST_TTL_MS,
   isRunLive,
+  leavesLiveRun,
   reportOptimizeRunRequest,
   requestOptimizeRun,
   takeOptimizeRunRequest,
@@ -49,5 +50,12 @@ describe("the assistant's run request", () => {
     ] as const) {
       expect(isRunLive(lifecycle), lifecycle).toBe(false);
     }
+  });
+
+  it("counts any move off the Optimise route during a live run as leaving it", () => {
+    expect(leavesLiveRun("running", "shift-types")).toBe(true);
+    expect(leavesLiveRun("running", undefined)).toBe(true);
+    expect(leavesLiveRun("running", "optimize-and-export")).toBe(false);
+    expect(leavesLiveRun("completed", "shift-types")).toBe(false);
   });
 });

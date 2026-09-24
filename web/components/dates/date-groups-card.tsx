@@ -55,6 +55,8 @@ import { InfoTip } from "@/components/ui/info-tip";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { surfaceVariants } from "@/components/ui/surface";
+import { changeKeys } from "@/lib/change-highlight/keys";
+import { useChangeTarget } from "@/lib/change-highlight/store";
 import { datesDescriptor } from "./dates-descriptor";
 import { DateScopePicker } from "./date-scope-picker";
 
@@ -491,6 +493,7 @@ function GroupViewCard({
   onEdit: () => void;
   onDelete: () => void;
 }) {
+  const changeTarget = useChangeTarget(changeKeys.dateGroup(group.id));
   const chips = iso.slice(0, 12);
   const overflow = iso.length - chips.length;
   return (
@@ -502,6 +505,7 @@ function GroupViewCard({
           : surfaceVariants({ role: "well", geometry: "control" }),
       )}
       data-testid={`editable-group-${group.id}`}
+      {...changeTarget}
     >
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">

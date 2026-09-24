@@ -21,13 +21,16 @@ import { readThreadMessages } from "@/lib/ai/assistant/history-repo";
 import { toTransportThread } from "@/lib/ai/assistant/messages";
 import { describeInterruptionPhase, describeSettlement } from "@/lib/ai/assistant/lifecycle";
 import { describeRefusal } from "@/lib/ai/assistant/send-gate";
-import { useAssistantStore } from "@/lib/ai/assistant/store";
+import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
 import { useAssistantSession, type AssistantActivity } from "./use-assistant-session";
 import { useAssistantProposals } from "./use-assistant-proposals";
+import { useAssistantFollowUps } from "./use-assistant-follow-ups";
 import { ProposalPreviewCard } from "./proposal-preview-card";
 import { DiagnosticSearchCard } from "./diagnostic-search-card";
 import { OptimizeRunRequestCard } from "./optimize-run-request-card";
+import { ChoiceCard } from "./choice-card";
 import { AssistantReceipts } from "./assistant-receipts";
+import { ApplyNavigationNotice } from "./apply-navigation-notice";
 import { Surface } from "@/components/ui/surface";
 
 /** The app's own welcome content. Local text; no provider request produces it. */
@@ -114,6 +117,7 @@ export const TOOL_ACTIVITY: Readonly<Record<string, string>> = {
   prepare_scenario_change: "Preparing a change…",
   request_optimize_run: "Offering an optimiser run…",
   get_optimize_result: "Checking the optimiser run…",
+  offer_choices: "Offering choices…",
   get_setup_progress: "Checking your set-up…",
   suggest_feasibility_options: "Looking for ways to fill the gaps…",
 };
@@ -165,6 +169,21 @@ export function AssistantLiveConversation({
   // HOST STATE, HOST HANDLERS. The Preview and the receipts are siblings of the
   // transcript, not entries in it -- see the note in `proposal-preview-card.tsx`.
   const proposals = useAssistantProposals();
+  const running = session.isRunning || session.interrupting;
+  // The panel keys this component by thread, and the thread follows the scenario, so a
+  // switch unmounts it: an open question must not carry over to another thread.
+  useEffect(() => () => assistantActions.clearChoices(), []);
+  // The ONE send path, for the composer and the option card alike. Any send answers
+  // (or overrides) an open option card, so it closes here. The follow-up after an
+  // Apply or an offered run uses it too; a user send first drops a waiting one.
+  const sendMessage = useAssistantFollowUps(
+    running || session.sending,
+    proposals.outcome,
+    (text: string) => {
+      assistantActions.clearChoices();
+      return session.send(text);
+    },
+  );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="assistant-live-conversation">
@@ -173,8 +192,10 @@ export function AssistantLiveConversation({
       <LifecycleNotice />
       <DiagnosticSearchCard />
       <OptimizeRunRequestCard />
+      <ChoiceCard onSend={sendMessage} disabled={running} />
       <ProposalPreviewCard controller={proposals} />
       <AssistantReceipts controller={proposals} />
+      <ApplyNavigationNotice controller={proposals} />
       <ActivityContext.Provider value={session.activity}>
         <CopilotChatView
           className="min-h-0 flex-1"
@@ -184,11 +205,11 @@ export function AssistantLiveConversation({
           // Still "running" while an interruption settles: the input must stay closed
           // until the gate reopens, and Stop must stay reachable rather than flipping
           // back to a send control that would be refused.
-          isRunning={session.isRunning || session.interrupting}
+          isRunning={running}
           // Suppresses the library's generic greeting: this panel is bound to one
           // explicit scenario thread, and the welcome content above is the app's.
           hasExplicitThreadId
-          onSubmitMessage={(value) => void session.send(value)}
+          onSubmitMessage={sendMessage}
           onStop={session.stop}
         />
       </ActivityContext.Provider>

@@ -52,12 +52,14 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/dates",
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
 }));
+const sessionSend = vi.hoisted(() => vi.fn(async () => true));
 vi.mock("./use-assistant-session", () => ({
   useAssistantSession: () => ({
     messages: [],
     isRunning: false,
     interrupting: false,
-    send: vi.fn(),
+    sending: false,
+    send: sessionSend,
     stop: vi.fn(),
   }),
 }));
@@ -108,6 +110,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   cleanup();
   clearTestAuthority();
 });
@@ -176,13 +179,13 @@ describe("Apply", () => {
     await screen.findByTestId("assistant-proposal");
     // Rendering a Preview is not applying it.
     expect(useScenarioStore.getState().rangeEnd).toBe("2026-04-30");
-    expect(screen.queryByTestId("assistant-receipt")).toBeNull();
+    expect(screen.queryByTestId("assistant-receipts")).toBeNull();
 
     await user.click(await screen.findByTestId("proposal-apply"));
 
-    const receipt = await screen.findByTestId("assistant-receipt");
-    expect(receipt).toHaveAttribute("data-undo", "available");
-    expect(receipt).toHaveTextContent("Undo available");
+    // Collapsed by default: a slim bar with the newest change's Undo one click away.
+    expect(await screen.findByTestId("assistant-receipts")).toHaveTextContent("1 change applied");
+    expect(await screen.findByTestId("receipt-undo")).toBeInTheDocument();
     // Success appeared only alongside a real durable commit.
     expect(useScenarioStore.getState().rangeEnd).toBe("2026-04-15");
     expect(await harness.db.assistantReceipts.count()).toBe(1);
@@ -192,19 +195,23 @@ describe("Apply", () => {
     await user.click(await screen.findByTestId("receipt-undo"));
     await waitFor(() => expect(useScenarioStore.getState().rangeEnd).toBe("2026-04-30"));
 
-    // The receipt is KEPT, with an honest state and no Undo affordance.
+    // The receipt is KEPT, with an honest state -- the bar's inline Undo shortcut
+    // disappears once Undo is no longer available.
     //
     // Waited for, not read once. The store's `rangeEnd` above reverts as soon as the
-    // reversal commits, but the receipt's `data-undo` is derived from a SEPARATE
+    // reversal commits, but the receipt's undo standing is derived from a SEPARATE
     // repository read of the reversible top commit, which lands a render later. A
-    // one-shot `getAttribute` right after `findByTestId` therefore sampled the
-    // pre-reversal attribute whenever that second read had not yet published --
-    // reproducibly so under the full parallel suite, and never in isolation.
-    await waitFor(async () => {
-      const settled = await screen.findByTestId("assistant-receipt");
-      expect(settled.getAttribute("data-undo")).not.toBe("available");
-    });
-    expect(screen.queryByTestId("receipt-undo")).toBeNull();
+    // one-shot check right after clicking Undo would sample the pre-reversal state
+    // whenever that second read had not yet published -- reproducibly so under the
+    // full parallel suite, and never in isolation.
+    await waitFor(() => expect(screen.queryByTestId("receipt-undo")).toBeNull());
+
+    // Expanding the bar and opening the receipt shows the honest detail: no Undo
+    // affordance, and the reason stated instead.
+    await user.click(await screen.findByTestId("assistant-receipts-toggle"));
+    await user.click(await screen.findByTestId("receipt-row-toggle"));
+    const detail = await screen.findByTestId("assistant-receipt");
+    expect(detail).not.toHaveAttribute("data-undo", "available");
     expect(await screen.findByTestId("receipt-undo-reason")).toBeInTheDocument();
   });
 
@@ -246,6 +253,69 @@ describe("Apply", () => {
 
     expect(await screen.findByTestId("proposal-apply")).toBeDisabled();
     expect(await screen.findByTestId("proposal-blocks")).toHaveTextContent("shift-type-editor");
+  });
+
+  // nursing-sheduler-3t8. Apply's trailing refresh used to reread the proposal by the
+  // id it closed over, after the active proposal had been cleared -- so the applied
+  // proposal came BACK as a Preview ("already applied" + "out of date") whose Revise
+  // and Cancel had no active id left to act on and did nothing.
+  it("does not bring an applied proposal back as a Preview after Apply settles", async () => {
+    const user = userEvent.setup();
+    await showProposal(SHRINK);
+    render(<HostSurface />);
+    await screen.findByTestId("assistant-proposal");
+
+    // Real IndexedDB is slower than the fake one: make the proposal reread lag, so the
+    // refresh Apply starts before the cleared state renders also finishes after it.
+    const read = assistantProposalCommands.read.bind(assistantProposalCommands);
+    vi.spyOn(assistantProposalCommands, "read").mockImplementation(async (id) => {
+      const row = await read(id);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      return row;
+    });
+
+    await user.click(await screen.findByTestId("proposal-apply"));
+    await screen.findByTestId("assistant-receipts");
+
+    await expect(
+      screen.findByTestId("assistant-proposal", undefined, { timeout: 500 }),
+    ).rejects.toThrow();
+    expect(screen.queryByTestId("proposal-revise")).toBeNull();
+    expect(screen.queryByTestId("proposal-cancel")).toBeNull();
+  });
+
+  it("shows no Preview for a proposal settled elsewhere while still active", async () => {
+    const proposal = await showProposal(SHRINK);
+    await assistantProposalCommands.apply({
+      proposalId: proposal.proposalId,
+      receiptId: crypto.randomUUID(),
+    });
+    render(<HostSurface />);
+
+    await screen.findByTestId("assistant-receipts");
+    await expect(
+      screen.findByTestId("assistant-proposal", undefined, { timeout: 500 }),
+    ).rejects.toThrow();
+  });
+
+  it("Revise and Cancel still dismiss a stale, unapplied Preview", async () => {
+    const user = userEvent.setup();
+    for (const button of ["proposal-revise", "proposal-cancel"]) {
+      await showProposal(SHRINK);
+      const { unmount } = render(<HostSurface />);
+      await screen.findByTestId("assistant-proposal");
+      await scenarioCommands.mutate({ meta: { apiVersion: "alpha", description: button } });
+      await waitFor(async () =>
+        expect(await screen.findByTestId("assistant-proposal")).toHaveAttribute(
+          "data-status",
+          "stale",
+        ),
+      );
+
+      await user.click(await screen.findByTestId(button));
+      await waitFor(() => expect(screen.queryByTestId("assistant-proposal")).toBeNull());
+      unmount();
+    }
   });
 
   it("Cancel settles the proposal so it can never be applied", async () => {
@@ -290,7 +360,8 @@ describe("historical conversations never regain live Apply", () => {
     // ABSENT, not disabled. There is no control to re-enable.
     expect(screen.queryByTestId("assistant-proposal")).toBeNull();
     expect(screen.queryByTestId("proposal-apply")).toBeNull();
-    expect(screen.queryByTestId("assistant-receipt")).toBeNull();
+    expect(screen.queryByTestId("assistant-receipts")).toBeNull();
+    expect(screen.queryByTestId("apply-navigation-status")).toBeNull();
   });
 
   it("mounts the Preview surface in the LIVE rendering, under that same state", async () => {
@@ -301,6 +372,32 @@ describe("historical conversations never regain live Apply", () => {
     // so the historical rendering's emptiness is a property of the component.
     expect(await screen.findByTestId("assistant-proposal")).toBeInTheDocument();
     expect(await screen.findByTestId("proposal-apply")).toBeInTheDocument();
+    expect(screen.getByTestId("apply-navigation-status")).toBeInTheDocument();
+  });
+
+  // The follow-up message after an Apply goes through the live rendering's send path.
+  it("sends one follow-up after Apply in the LIVE rendering", async () => {
+    const user = userEvent.setup();
+    sessionSend.mockClear();
+    await showProposal(SHRINK);
+    render(<AssistantLiveConversation threadId="thread-1" routePath="/dates" routeLabel="Dates" />);
+
+    await user.click(await screen.findByTestId("proposal-apply"));
+    await waitFor(() => expect(sessionSend).toHaveBeenCalledTimes(1));
+    expect(sessionSend).toHaveBeenCalledWith(
+      "I applied it: Roster period, 2026-04-01 to 2026-04-15.",
+    );
+  });
+
+  it("sends no follow-up when the Preview is cancelled in the LIVE rendering", async () => {
+    const user = userEvent.setup();
+    sessionSend.mockClear();
+    await showProposal(SHRINK);
+    render(<AssistantLiveConversation threadId="thread-1" routePath="/dates" routeLabel="Dates" />);
+
+    await user.click(await screen.findByTestId("proposal-cancel"));
+    await waitFor(() => expect(screen.queryByTestId("assistant-proposal")).toBeNull());
+    expect(sessionSend).not.toHaveBeenCalled();
   });
 
   // The second source read here -- `proposal-preview-card.tsx` must not contain
