@@ -30,6 +30,8 @@
 
 import * as React from "react";
 import { cn } from "@/lib/utils";
+import { changeKeys } from "@/lib/change-highlight/keys";
+import { useChangeTarget } from "@/lib/change-highlight/store";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -85,6 +87,10 @@ export function RuleRow({
 }: RuleRowProps) {
   const canAdjust = row.quickFields.length > 0 && row.enabled && !row.locked;
   const adjustPanelId = `rule-adjust-panel-${row.id}`;
+  // A built-in structural row has no card behind it, so it is never a change target.
+  const changeTarget = useChangeTarget(
+    row.kind && row.constraintId ? changeKeys.rule(row.kind, row.constraintId) : undefined,
+  );
 
   return (
     <li
@@ -93,6 +99,7 @@ export function RuleRow({
       className={cn("border-t border-line2 first:border-t-0", !row.enabled && "bg-panel")}
       data-testid={`rule-row-${row.id}`}
       data-disabled={row.enabled ? undefined : "true"}
+      {...changeTarget}
     >
       <div className="flex items-start gap-3.5 px-5 py-4">
         <Switch

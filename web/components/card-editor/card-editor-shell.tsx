@@ -28,6 +28,7 @@ import {
 } from "@/components/icons";
 import { useLosableDraft } from "@/components/shell/use-losable-draft";
 import { capabilityAnchorProps } from "@/lib/capability/anchor-contract";
+import { useChangeTarget } from "@/lib/change-highlight/store";
 
 /** Outer screen wrapper — the L0 app plane for every card editor, with the standard
  *  screen gap. It sets no width, margin or page padding: the app shell owns those
@@ -449,6 +450,7 @@ export function CardListItem({
   onDragEnd,
   isDragging,
   isOver,
+  changeKey,
 }: {
   index: number;
   title: React.ReactNode;
@@ -468,9 +470,13 @@ export function CardListItem({
   onDragEnd?: () => void;
   isDragging?: boolean;
   isOver?: boolean;
+  /** lib/change-highlight key, e.g. changeKeys.rule("counts", card.uid). */
+  changeKey: string;
 }) {
+  const changeTarget = useChangeTarget(changeKey);
   return (
     <li
+      {...changeTarget}
       draggable={draggable}
       onDragStart={draggable ? onDragStart : undefined}
       onDragOver={

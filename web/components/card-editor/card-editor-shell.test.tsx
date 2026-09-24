@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
+import { clearChangeHighlight, showChangeHighlight } from "@/lib/change-highlight/store";
 import { CardEditorForm, CardEditorHeader, CardListItem } from "./card-editor-shell";
 
 // R4 fixup (ii7.14.1) — the three shared-shell heading recipes.
@@ -98,6 +99,7 @@ describe("card editor shell — v2 typography ladder (DESIGN.md §3)", () => {
           title="Untitled covering"
           fields={[{ label: "Dates", value: "(all)" }]}
           actions={<button type="button">Edit</button>}
+          changeKey="rule:coverings:c0"
         />
       </ul>,
     );
@@ -139,7 +141,13 @@ describe("card editor shell — v2 typography ladder (DESIGN.md §3)", () => {
 
     render(
       <ul>
-        <CardListItem index={0} title="Card" fields={[]} actions={null} />
+        <CardListItem
+          index={0}
+          title="Card"
+          fields={[]}
+          actions={null}
+          changeKey="rule:coverings:c0"
+        />
       </ul>,
     );
     const cardTitle = screen.getByText("Card");
@@ -161,11 +169,40 @@ describe("card editor shell — v2 typography ladder (DESIGN.md §3)", () => {
 
     render(
       <ul>
-        <CardListItem index={0} title="Card" fields={[]} actions={null} />
+        <CardListItem
+          index={0}
+          title="Card"
+          fields={[]}
+          actions={null}
+          changeKey="rule:coverings:c0"
+        />
       </ul>,
     );
     const cardTitle = screen.getByText("Card");
     expect(Array.from(cardTitle.classList)).toContain("font-semibold");
     expect(Array.from(cardTitle.classList)).not.toContain("font-bold");
+  });
+});
+
+describe("CardListItem — change highlight", () => {
+  afterEach(() => clearChangeHighlight());
+  it("names its target and outlines only while highlighted", () => {
+    render(
+      <ul>
+        <CardListItem
+          index={0}
+          title="Night cap"
+          fields={[]}
+          actions={null}
+          testId="count-card-0"
+          changeKey="rule:counts:u1"
+        />
+      </ul>,
+    );
+    const card = screen.getByTestId("count-card-0");
+    expect(card).toHaveAttribute("data-change-key", "rule:counts:u1");
+    expect(card).not.toHaveAttribute("data-change-highlight");
+    act(() => showChangeHighlight(["rule:counts:u1"]));
+    expect(card).toHaveAttribute("data-change-highlight", "true");
   });
 });

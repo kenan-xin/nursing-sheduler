@@ -27,6 +27,7 @@ import {
 } from "@/components/icons";
 import { WeightPill } from "@/components/card-editor/weight-field";
 import type { CountCard } from "@/lib/scenario";
+import { changeKeys } from "@/lib/change-highlight/keys";
 import {
   CardActionButton,
   CardListItem,
@@ -187,6 +188,7 @@ export function CountCardList({
           <CardListItem
             key={card.uid}
             testId={`count-card-${index}`}
+            changeKey={changeKeys.rule("counts", card.uid)}
             index={index}
             disabled={card.disabled}
             accent={contractedHours ? "brand" : "none"}

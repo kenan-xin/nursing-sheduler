@@ -13,6 +13,7 @@ import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { FaPowerOff, FaPen, FaCopy, FaTrash } from "@/components/icons";
 import type { CoveringCard } from "@/lib/scenario";
+import { changeKeys } from "@/lib/change-highlight/keys";
 import {
   CardActionButton,
   CardListItem,
@@ -51,6 +52,7 @@ export function CoveringCardList({
           <CardListItem
             key={card.uid}
             testId={`covering-card-${index}`}
+            changeKey={changeKeys.rule("coverings", card.uid)}
             index={index}
             disabled={card.disabled}
             draggable
