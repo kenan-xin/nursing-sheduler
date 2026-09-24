@@ -58,10 +58,11 @@ export async function waitForLiveAnchor(
 ): Promise<LiveAnchorLookup> {
   const timeoutMs = options.timeoutMs ?? 2_000;
   const intervalMs = options.intervalMs ?? 25;
-  const deadline = Date.now() + timeoutMs;
+  // Monotonic: a wall clock that jumps or is pinned (the eval harness) must not stretch the wait.
+  const deadline = performance.now() + timeoutMs;
 
   let last = findLiveAnchor(root, anchorId);
-  while (last.status === "missing" && Date.now() < deadline) {
+  while (last.status === "missing" && performance.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
     last = findLiveAnchor(root, anchorId);
   }

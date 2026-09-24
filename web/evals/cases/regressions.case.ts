@@ -41,6 +41,21 @@ export const REGRESSION_CASES: EvalCase[] = [
     expect: { toolsCalled: ["offer_choices"] },
   },
   {
+    id: "reg-offer-as-text",
+    tags: ["regression"],
+    description: "dt9: 'Want me to take you to the Shifts screen?' as plain text.",
+    today: "2026-09-24",
+    route: "/rules",
+    seed: { build: small },
+    user: { turns: ["Where do I change the night shift's start time?"] },
+    expect: {
+      noProposal: true,
+      judge: [
+        "Takes the user to the Shifts screen, or says that is where to change it, without asking a yes/no question in text.",
+      ],
+    },
+  },
+  {
     id: "reg-wrong-year",
     tags: ["regression", "smoke"],
     description: "A month without a year is the next such month.",

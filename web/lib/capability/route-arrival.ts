@@ -65,13 +65,14 @@ export async function waitForRouteArrival(
 ): Promise<RouteArrival> {
   const timeoutMs = options.timeoutMs ?? 2_000;
   const intervalMs = options.intervalMs ?? 25;
-  const deadline = Date.now() + timeoutMs;
+  // Monotonic: a wall clock that jumps or is pinned (the eval harness) must not stretch the wait.
+  const deadline = performance.now() + timeoutMs;
 
   // Checked before the first sleep: when the caller is already on the screen there is
   // nothing in flight, and one interval of dead latency on every such call is latency
   // spent proving something already true.
   while (!isAtRoutePath(location, path)) {
-    if (Date.now() >= deadline) {
+    if (performance.now() >= deadline) {
       return { status: "not_reached", pathname: normalizeRoutePath(location.pathname) };
     }
     await new Promise((resolve) => setTimeout(resolve, intervalMs));

@@ -108,6 +108,44 @@ export function skillMixOverflow(
 export const skillMixOverflowMessage = (o: SkillMixOverflow) =>
   `the skill-mix groups ${o.groups.join(" and ")} share no one, so together they need ${o.required} people, but the shift allows at most ${o.available}`;
 
+/** Short by rules alone: everyone it counts is banned from its shifts by another named rule. */
+const isRuleClash = (f: StaffingFinding) =>
+  f.kind === "requirement_short" &&
+  f.available === 0 &&
+  f.away.length === 0 &&
+  f.ruleIds.length > 1;
+/**
+ * The short rule and its skill-mix entry only: date ids follow the roster span and the
+ * banning rules follow set order and repairs, so either would make an old clash look new.
+ */
+const clashKey = (f: StaffingFinding) => `${f.ruleIds[0]}|${f.mixPeople}`;
+
+/**
+ * The first requirement a change leaves unstaffable by its rules alone (leave plays no
+ * part), or null. Such a change can never be met, so the assistant's Preview refuses it.
+ */
+export function newRuleClash(
+  before: ScenarioUiState,
+  after: ScenarioUiState,
+): StaffingFinding | null {
+  const had = new Set(findStaffingShortfalls(before).filter(isRuleClash).map(clashKey));
+  return findStaffingShortfalls(after).find((f) => isRuleClash(f) && !had.has(clashKey(f))) ?? null;
+}
+
+export function ruleClashMessage(state: ScenarioUiState, f: StaffingFinding): string {
+  const name = (uid: string) =>
+    `"${state.cardsByKind.requirements.find((c) => c.uid === uid)?.description || uid}"`;
+  const [short, ...banning] = f.ruleIds;
+  return (
+    `No roster could meet ${name(short)} on ${f.shiftTypes.join(", ")}` +
+    `${f.iso ? `, first on ${f.iso}` : ""}: ` +
+    `${banning.map(name).join(" and ")} lets only its own people work that shift, so nobody ` +
+    "it needs may work it. A skill mix (at least so many from a group, others allowed too) " +
+    "or a separate shift for each group would work instead. Ask which they want before " +
+    "changing either rule."
+  );
+}
+
 type Range = { start: string; end: string };
 type Block = { reason: AwayReason; shifts: Set<string> | "all" };
 type PersonRefs = Parameters<typeof expandPersonRefs>[0];

@@ -237,4 +237,27 @@ describe("a prepared change is spoken of as prepared, never done", () => {
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/check it and press Apply/);
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/never .*past tense/);
   });
+  it("counts a shown card as not done either, and 'set up' as a done-word", () => {
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/Never claim to have applied, saved, set/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/a card shown is not done/);
+  });
+});
+
+describe("pick-one questions go on a card (dt9)", () => {
+  it("treats a yes/no offer as a pick-one question", () => {
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/yes\/no offer/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/'Want me to take you to the Shifts screen\?'/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/moreQuestions/);
+  });
+  it("acts through the tool that asks for it instead of asking in text", () => {
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/open_app_screen instead of asking/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/request_optimize_run instead of asking/);
+  });
+  it("ends a reply on a question only when it is open or a card holds it", () => {
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/End a reply on a question only when/);
+  });
+  it("names the jargon that leaked in the 2026-09-24 evals", () => {
+    for (const word of ["solver", "checker", "weight", "infeasible"])
+      expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(new RegExp(`never say [^.]*${word}`));
+  });
 });

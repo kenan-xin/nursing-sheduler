@@ -1,7 +1,81 @@
 import { describe, expect, it } from "vitest";
-import { capOf, findStaffingShortfalls, toDateId } from "./shortfalls";
+import { capOf, findStaffingShortfalls, newRuleClash, toDateId } from "./shortfalls";
 import { SCENARIOS, cards, leave, people, requirement, ward } from "./ward-fixtures.test-support";
 import type { ScenarioUiState } from "@/lib/scenario";
+
+describe("newRuleClash (att: two named groups on one shift)", () => {
+  const icuWard = (extra: ReturnType<typeof requirement>[] = [], patch = {}) =>
+    ward({
+      staff: people("icu1", "icu2", "gen1", "gen2"),
+      staffGroups: [
+        { id: "ICU", members: ["icu1", "icu2"] },
+        { id: "GEN", members: ["gen1", "gen2"] },
+        { id: "SEN", members: ["icu1", "gen1"] },
+      ],
+      cardsByKind: cards({
+        requirements: [requirement("icu-d", "D", 1, { qualifiedPeople: ["ICU"] }), ...extra],
+      }),
+      ...patch,
+    });
+
+  it("flags a second named group on the same shift: each bans the other's people", () => {
+    const after = icuWard([requirement("gen-d", "D", 1, { qualifiedPeople: ["GEN"] })]);
+    expect(newRuleClash(icuWard(), after)?.ruleIds.sort()).toEqual(["gen-d", "icu-d"]);
+  });
+
+  it("flags a skill mix whose group the named rule bans", () => {
+    const mix = requirement("mix-d", "D", 1, { skillMix: [{ people: "GEN", minNumPeople: 1 }] });
+    expect(newRuleClash(icuWard(), icuWard([mix]))).not.toBeNull();
+  });
+
+  it("passes groups that share someone, other shifts, and a clash that was already there", () => {
+    const sen = requirement("sen-d", "D", 1, { qualifiedPeople: ["SEN"] });
+    expect(newRuleClash(icuWard(), icuWard([sen]))).toBeNull();
+    const night = requirement("gen-n", "N", 1, { qualifiedPeople: ["GEN"] });
+    expect(newRuleClash(icuWard(), icuWard([night]))).toBeNull();
+    const clashing = icuWard([requirement("gen-d", "D", 1, { qualifiedPeople: ["GEN"] })]);
+    expect(newRuleClash(clashing, clashing)).toBeNull();
+  });
+
+  describe("a clash that was already there stays old after an unrelated edit (review S1)", () => {
+    const gen = requirement("gen-d", "D", 1, { qualifiedPeople: ["GEN"] });
+    const sen = requirement("sen-d", "D", 1, { qualifiedPeople: ["SEN"] });
+
+    it("turning off one of two banning rules is a step toward a fix, not a new clash", () => {
+      // gen-d is banned by icu-d and icu2-d; turning off icu2-d leaves the old icu-d clash.
+      const icu2 = requirement("icu2-d", "D", 1, { qualifiedPeople: ["ICU"] });
+      const before = icuWard([gen, icu2]);
+      const after = icuWard([gen, { ...icu2, disabled: true }]);
+      expect(newRuleClash(before, after)).toBeNull();
+    });
+
+    it("a longer roster period or a new span class does not make it new", () => {
+      const before = icuWard([gen]);
+      expect(newRuleClash(before, { ...before, rangeEnd: "2026-11-30" })).toBeNull();
+      expect(newRuleClash(before, { ...before, rangeEnd: "2027-01-31" })).toBeNull();
+    });
+
+    it("reordering the rules or a group's members does not make it new", () => {
+      const before = icuWard([gen, sen]);
+      const reordered = {
+        ...before,
+        staffGroups: before.staffGroups.map((g) => ({ ...g, members: [...g.members].reverse() })),
+        cardsByKind: {
+          ...before.cardsByKind,
+          requirements: [...before.cardsByKind.requirements].reverse(),
+        },
+      };
+      expect(newRuleClash(before, reordered)).toBeNull();
+    });
+  });
+
+  it("leaves a gap made by leave to the static check, not to this refusal", () => {
+    const onLeave = icuWard([], {
+      reqData: [leave("icu1", "2026-11-02"), leave("icu2", "2026-11-02")],
+    });
+    expect(newRuleClash(icuWard(), onLeave)).toBeNull();
+  });
+});
 
 describe("findStaffingShortfalls", () => {
   it("finds nothing in an empty scenario", () => {

@@ -168,7 +168,8 @@ export function useOptimizeTools(agentId: string, turnEpoch: number): void {
         assistantActions.showRunRequest(token.turnEpoch);
         return (
           "The user now sees a card asking whether to run the optimiser. Nothing has started, " +
-          "and only the user can start it by pressing Run. Do not say a run has started. Tell " +
+          "and only the user can start it by pressing Run. Do not say a run has started, and " +
+          "say the card is there for them to press Run, never that you set it up. Tell " +
           "them it uses the Optimise screen's settings, downloads an XLSX when it finishes, and " +
           "stops if they leave that screen. Once they have pressed Run, use get_optimize_result " +
           "to see how it is going."

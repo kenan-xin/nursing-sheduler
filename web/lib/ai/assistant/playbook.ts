@@ -38,7 +38,7 @@
 import type { CapabilityId } from "@/lib/capability/help-content";
 import type { AssistantCommandType, AssistantCommandV1 } from "@/lib/proposal/commands";
 
-export const PLAYBOOK_VERSION = "2026-09-24.6";
+export const PLAYBOOK_VERSION = "2026-09-24.7";
 
 /** Said on the Preview and in the reply whenever a change relaxes a rest rule. */
 export const REST_PRACTICE_WARNING =
@@ -163,7 +163,7 @@ export const SETUP_STEPS: readonly SetupStepGuide[] = [
 ];
 
 export const SETUP_INSTRUCTIONS: readonly string[] = [
-  "Work on nextStep only. Ask its questions that the schedule does not already answer, all at once, in plain words.",
+  "Work on nextStep only. Ask its pick-one questions that the schedule does not already answer on one offer_choices card, up to four with moreQuestions, the usual ward value first; ask in text only what has no set answers, such as names.",
   "Never guess a date, number, name or time. If the user is unsure, offer a common ward default and ask them to confirm it.",
   "Put the whole step in one prepare_scenario_change (split it only above the operation limit), say what Apply will do, and stop.",
   "After the user applies, call get_setup_progress again and continue with the new nextStep.",
