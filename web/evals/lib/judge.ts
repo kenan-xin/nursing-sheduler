@@ -16,7 +16,8 @@ const SCREENS =
   "Roster, Save & Load";
 /** Judge agreement with hand labels, filled after the first calibration (spec §6.3). */
 export const CALIBRATION: string | null =
-  "35/36 (97%) on fixtures/judge-calibration.json, rubric .5, gpt-5-mini, 2026-09-24 (was 21/36 under .4)";
+  "33/36 and 31/36 (two runs) on fixtures/judge-calibration.json, rubric .5, gpt-5-mini, " +
+  "2026-09-24; 21/36 under .4. The exact-vs-preferred claim still reads 'is set' as 'already set'.";
 
 export const STANDARD_ITEMS: Record<string, string> = {
   short:
