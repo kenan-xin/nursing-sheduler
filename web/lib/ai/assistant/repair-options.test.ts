@@ -13,7 +13,7 @@ import {
   requirement,
   ward,
 } from "@/lib/rules/ward-fixtures.test-support";
-import type { ScenarioUiState } from "@/lib/scenario";
+import type { RequirementCard, ScenarioUiState } from "@/lib/scenario";
 import {
   buildFeasibilityReport,
   classifySituation,
@@ -1366,7 +1366,7 @@ describe("skill-mix repairs (bead nursing-sheduler-2ti)", () => {
 
   it.each([
     [
-      "raise the minimum",
+      "add an entry",
       {
         type: "set_skill_mix",
         ruleId: "night",
@@ -1384,6 +1384,63 @@ describe("skill-mix repairs (bead nursing-sheduler-2ti)", () => {
     expect(
       violatesSafetyFloor(state(), [op as unknown as AssistantCommandV1], { leaveAsked: false }),
     ).toBeNull();
+  });
+
+  const fourWithTwoRns = (extra: Partial<RequirementCard> = {}) =>
+    ward({
+      staff: people("rn1", "rn2", "en1", "en2"),
+      staffGroups: [{ id: "RN", members: ["rn1", "rn2"] }],
+      cardsByKind: cards({
+        requirements: [
+          requirement("night", "N", 4, { skillMix: [{ people: "RN", minNumPeople: 2 }], ...extra }),
+        ],
+      }),
+    });
+  const floor = (s: ScenarioUiState, op: unknown) =>
+    violatesSafetyFloor(s, [op as AssistantCommandV1], { leaveAsked: false });
+
+  it("raises an existing minimum", () => {
+    expect(
+      floor(fourWithTwoRns(), {
+        type: "set_skill_mix",
+        ruleId: "night",
+        skillMix: [{ people: "RN", minNumPeople: 3 }],
+      }),
+    ).toBeNull();
+  });
+
+  it("a skill-mix card's head count may drop to its largest minimum, not below", () => {
+    const lower = (n: number) =>
+      floor(fourWithTwoRns(), {
+        type: "set_staffing_requirement_people",
+        ruleId: "night",
+        requiredNumPeople: n,
+      });
+    expect(lower(2)).toBeNull();
+    expect(lower(1)).toMatch(/skill-mix/);
+  });
+
+  it("refuses deleting a group only a disabled card's skill mix names", () => {
+    expect(
+      floor(fourWithTwoRns({ disabled: true }), { type: "remove_people_group", groupId: "RN" }),
+    ).toMatch(/skill-mix/);
+  });
+
+  it("refuses deleting a group a named qualifiedPeople list names", () => {
+    expect(
+      floor(SCENARIOS.onlyRnOnLeave(), { type: "remove_people_group", groupId: "RN" }),
+    ).toMatch(/skill-mix/);
+  });
+
+  it("allows deleting a group no card names", () => {
+    const s = {
+      ...fourWithTwoRns(),
+      staffGroups: [
+        { id: "RN", members: ["rn1", "rn2"] },
+        { id: "Spare", members: ["en1"] },
+      ],
+    };
+    expect(floor(s, { type: "remove_people_group", groupId: "Spare" })).toBeNull();
   });
 
   it("set_skill_mix is never part of a repair", () => {

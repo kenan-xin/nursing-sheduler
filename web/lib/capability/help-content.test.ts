@@ -29,7 +29,9 @@ describe("what the scheduler cannot do (scheduler-limits)", () => {
   });
   it("no longer says skill mix is unsupported, and points to staffing requirements", () => {
     expect(text).not.toMatch(/not supported yet/);
-    expect(text).toMatch(/skill mix.*Staffing requirements/);
+    expect(text).toMatch(/skill mix.*ask the assistant/);
+    // Served in Guided too, where the Staffing requirements screen does not exist.
+    expect(text).toMatch(/Staffing requirements in Advanced mode/);
   });
   it("says it checks no law or policy, without stating any law", () => {
     expect(text).toMatch(/checks no employment law/);

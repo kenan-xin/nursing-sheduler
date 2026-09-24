@@ -143,7 +143,7 @@ export const CAPABILITY_ENTRIES = [
       "roster period: last month's nights or weekends, and a day off owed for a public " +
       "holiday, are not carried over. Shift-order rules do check each nurse's last shifts " +
       "entered on the Requests page. A skill mix, such as at least 1 RN on a shift with others " +
-      "allowed too, is set under Staffing requirements. It checks no employment law, ministry guidance or hospital policy, " +
+      "allowed too: ask the assistant, or set it under Staffing requirements in Advanced mode. It checks no employment law, ministry guidance or hospital policy, " +
       "only the rules written here.",
     concepts: [
       "limits",
