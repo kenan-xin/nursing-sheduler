@@ -729,8 +729,44 @@ describe("add_succession_rule / edit_succession_rule", () => {
     expect(result.rejection.message).toContain(
       'Shift sequence rule "No day shift straight after a night shift"',
     );
-    expect(result.rejection.message).toContain('"ALL"');
-    expect(result.rejection.message).toContain("Name each person");
+    expect(result.rejection.message).toContain('cannot say "everyone" directly');
+  });
+
+  it("lists the people and groups it could have used when a name is unknown", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), {
+      ...noDayAfterNight,
+      people: ["Sarah"],
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.code).toBe("unknown_target");
+    expect(result.rejection.message).toContain(
+      'Valid choices: "ana", "ben", "cai", "RN", "Senior"',
+    );
+    expect(result.rejection.message).not.toContain("get_schedule_section");
+  });
+
+  it("answers 'everyone' with the people to list when no group holds everyone", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), {
+      ...noDayAfterNight,
+      people: ["Everyone"],
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.message).toContain('cannot say "everyone" directly');
+    expect(result.rejection.message).toContain('Valid choices: "ana", "ben", "cai".');
+  });
+
+  it("answers 'ALL' with the staff group that already holds everyone", () => {
+    const base = ruleWardScenario();
+    const state = {
+      ...base,
+      staffGroups: [...base.staffGroups, { id: "All staff", members: ["ana", "ben", "cai"] }],
+    };
+    const result = applyAssistantCommand(state, { ...noDayAfterNight, people: ["ALL"] });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.message).toContain('Use the staff group "All staff"');
   });
 
   it("edit keeps a rule scoped to ALL", () => {
@@ -756,6 +792,24 @@ describe("add_succession_rule / edit_succession_rule", () => {
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.rejection.message).toContain('"Evening"');
+  });
+
+  it("lists the shifts it could have used when a pattern step is unknown", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), {
+      ...noDayAfterNight,
+      pattern: ["Nights", "Day"],
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.message).toContain('"Day"');
+    expect(result.rejection.message).toContain('"Night"');
+  });
+
+  it("lists this family's rule ids when an edit names one that is not there", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), edit({ ruleId: "nope" } as never));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.message).toContain('Valid choices: "suc-nd" (No day after night).');
   });
 
   it("refuses a matrix day id and accepts the ISO date", () => {
@@ -1091,6 +1145,22 @@ describe("add_staffing_requirement / edit_staffing_requirement", () => {
     }
   });
 
+  it("lists the staffable shifts when the shift is unknown, and never OFF or LEAVE", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), {
+      type: "add_staffing_requirement",
+      description: "",
+      shiftType: "Nights",
+      qualifiedPeople: ["ALL"],
+      dates: ["ALL"],
+      requiredNumPeople: 2,
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.message).toContain('"Day"');
+    expect(result.rejection.message).toContain('"Working shifts"');
+    expect(result.rejection.message).not.toContain('"OFF"');
+  });
+
   it("refuses a negative head count in the screen's words", () => {
     const result = applyAssistantCommand(ruleWardScenario(), {
       ...twoRNs,
@@ -1210,6 +1280,18 @@ describe("remove_rule", () => {
     if (result.ok) return;
     expect(result.rejection.code).toBe("unknown_target");
     expect(result.rejection.message).toContain("shift count rule");
+  });
+
+  it("lists the family's rule ids when the rule is not there", () => {
+    const result = applyAssistantCommand(proposalScenario(), {
+      type: "remove_rule",
+      ruleKind: "requirements",
+      ruleId: "gone",
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.message).toContain('"req-day" (Day cover)');
+    expect(result.rejection.message).toContain('"req-multi" (Day or Night cover)');
   });
 });
 

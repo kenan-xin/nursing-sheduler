@@ -113,6 +113,14 @@ import { RenameCollisionError } from "@/lib/cascade";
 import { foldPaintIntents, type MintCellUid } from "@/lib/store/paint-fold";
 import { paintCellKey, type StagedCoordinate } from "@/lib/store/types";
 import type { AssistantCommandV1, RequestWeight } from "./commands";
+import {
+  everyoneGroups,
+  idLabel,
+  meansEveryone,
+  offeredChoices,
+  peopleChoices,
+  ruleChoices,
+} from "./choices";
 import { proposalDigest, stableStringify } from "./digest";
 
 /** Why a command cannot be prepared. Exhaustive: every refusal is one of these. */
@@ -307,6 +315,39 @@ function firstUnofferedPerson(
   );
 }
 
+/**
+ * The refusal for a person ref a rule's People picker does not offer.
+ *
+ * "Everyone" gets its own answer. These pickers never offer the synthetic ALL, and the
+ * live failure was a model inventing names for "apply this to everyone". Naming a group
+ * that already holds everyone, or else the people to list, is the one-retry fix.
+ */
+function rulePersonRefusal(
+  state: ScenarioUiState,
+  name: string,
+  person: PersonRef,
+  offered: readonly PickerOption[],
+  index: number,
+): OperationResult {
+  if (meansEveryone(person)) {
+    const groups = everyoneGroups(state);
+    const how =
+      groups.length > 0
+        ? `Use the staff group ${groups.map(idLabel).join(" or ")}, which holds everyone`
+        : "List each person, or add a staff group that holds everyone earlier in the same change";
+    return reject(
+      index,
+      "unknown_target",
+      `${name}: this rule cannot say "everyone" directly. ${how}. ${peopleChoices(state)}`,
+    );
+  }
+  return reject(
+    index,
+    "unknown_target",
+    `${name}: there is no person or staff group ${idLabel(person)}. Name each person, or an existing staff group. ${offeredChoices(offered)}`,
+  );
+}
+
 /** One editor's Dates-field option builders (each model exports its own three). */
 interface DateScopeBuilders {
   auto: (state: ScenarioUiState) => readonly { id: string }[];
@@ -379,18 +420,18 @@ function successionRejection(
   held?: unknown,
 ): OperationResult | undefined {
   const people = successionPeopleOptions(state);
-  const person = firstUnofferedPerson(fields.people, [...people.items, ...people.groups], held);
-  if (person !== undefined) {
+  const offeredPeople = [...people.items, ...people.groups];
+  const person = firstUnofferedPerson(fields.people, offeredPeople, held);
+  if (person !== undefined) return rulePersonRefusal(state, name, person, offeredPeople, index);
+  const shifts = buildPatternShiftTypeOptions(state);
+  const offeredShifts = [...shifts.items, ...shifts.groups];
+  const shift = firstUnoffered(fields.pattern, offeredShifts);
+  if (shift !== undefined) {
     return reject(
       index,
       "unknown_target",
-      `${name}: there is no person or staff group "${person}". Name each person, or an existing staff group.`,
+      `${name}: there is no shift or shift group ${idLabel(shift)}. ${offeredChoices(offeredShifts)}`,
     );
-  }
-  const shifts = buildPatternShiftTypeOptions(state);
-  const shift = firstUnoffered(fields.pattern, [...shifts.items, ...shifts.groups]);
-  if (shift !== undefined) {
-    return reject(index, "unknown_target", `${name}: there is no shift or shift group "${shift}".`);
   }
   const dates = dateScopeRejection(state, fields.dates, SUCCESSION_DATES);
   if (dates) return reject(index, dates.code, `${name}: ${dates.message}.`);
@@ -432,7 +473,7 @@ function applyEditSuccessionRule(
     return reject(
       index,
       "unknown_target",
-      "That shift sequence rule is not in this schedule any more.",
+      `That shift sequence rule is not in this schedule any more. ${ruleChoices(state, "successions")}`,
     );
   }
   const name = ruleName("successions", source.description?.trim() || source.uid);
@@ -497,18 +538,18 @@ function countRejection(
   held?: unknown,
 ): OperationResult | undefined {
   const people = countPeopleOptions(state);
-  const person = firstUnofferedPerson(fields.people, [...people.items, ...people.groups], held);
-  if (person !== undefined) {
+  const offeredPeople = [...people.items, ...people.groups];
+  const person = firstUnofferedPerson(fields.people, offeredPeople, held);
+  if (person !== undefined) return rulePersonRefusal(state, name, person, offeredPeople, index);
+  const shifts = buildCountShiftTypeTransferOptions(state);
+  const offeredShifts = [...shifts.items, ...shifts.groups];
+  const shift = firstUnoffered(fields.shiftTypes, offeredShifts);
+  if (shift !== undefined) {
     return reject(
       index,
       "unknown_target",
-      `${name}: there is no person or staff group "${person}". Name each person, or an existing staff group.`,
+      `${name}: there is no shift or shift group ${idLabel(shift)}. ${offeredChoices(offeredShifts)}`,
     );
-  }
-  const shifts = buildCountShiftTypeTransferOptions(state);
-  const shift = firstUnoffered(fields.shiftTypes, [...shifts.items, ...shifts.groups]);
-  if (shift !== undefined) {
-    return reject(index, "unknown_target", `${name}: there is no shift or shift group "${shift}".`);
   }
   const dates = dateScopeRejection(state, fields.dates, COUNT_DATES);
   if (dates) return reject(index, dates.code, `${name}: ${dates.message}.`);
@@ -553,7 +594,7 @@ function applyEditCountRule(
     return reject(
       index,
       "unknown_target",
-      "That shift count rule is not in this schedule any more.",
+      `That shift count rule is not in this schedule any more. ${ruleChoices(state, "counts")}`,
     );
   }
   const name = ruleName("counts", source.description?.trim() || source.uid);
@@ -618,20 +659,22 @@ function requirementRejection(
   index: number,
 ): OperationResult | undefined {
   const shifts = buildRequirementShiftTypeOptions(state);
-  if (firstUnoffered([fields.shiftType], [...shifts.items, ...shifts.groups]) !== undefined) {
+  const offeredShifts = [...shifts.items, ...shifts.groups];
+  if (firstUnoffered([fields.shiftType], offeredShifts) !== undefined) {
     return reject(
       index,
       "unknown_target",
-      `${name}: "${fields.shiftType}" is not a shift or shift group that can be staffed. Use a shift code, or a group made only of shifts.`,
+      `${name}: "${fields.shiftType}" is not a shift or shift group that can be staffed. Use a shift code, or a group made only of shifts. ${offeredChoices(offeredShifts)}`,
     );
   }
   const people = buildQualifiedPeopleTransferOptions(state);
-  const person = firstUnoffered(fields.qualifiedPeople, [...people.items, ...people.groups]);
+  const offeredPeople = [...people.items, ...people.groups];
+  const person = firstUnoffered(fields.qualifiedPeople, offeredPeople);
   if (person !== undefined) {
     return reject(
       index,
       "unknown_target",
-      `${name}: there is no person or staff group "${person}".`,
+      `${name}: there is no person or staff group ${idLabel(person)}. ${offeredChoices(offeredPeople)}`,
     );
   }
   const dates = dateScopeRejection(state, fields.dates, REQUIREMENT_DATES);
@@ -677,7 +720,7 @@ function applyEditStaffingRequirement(
     return reject(
       index,
       "unknown_target",
-      "That staffing requirement is not in this schedule any more.",
+      `That staffing requirement is not in this schedule any more. ${ruleChoices(state, "requirements")}`,
     );
   }
   const name = ruleName("requirements", source.description?.trim() || source.uid);
@@ -711,7 +754,7 @@ function applyRemoveRule(
     return reject(
       index,
       "unknown_target",
-      `That ${RULE_LABEL[command.ruleKind]} is not in this schedule any more.`,
+      `That ${RULE_LABEL[command.ruleKind]} is not in this schedule any more. ${ruleChoices(state, command.ruleKind)}`,
     );
   }
   // Every editor's `remove`: `current.filter((card) => card.uid !== uid)`.
@@ -772,7 +815,7 @@ function applySetRuleEnabled(
     return reject(
       index,
       "unknown_target",
-      `That ${RULE_LABEL[command.ruleKind]} is not in this schedule any more.`,
+      `That ${RULE_LABEL[command.ruleKind]} is not in this schedule any more. ${ruleChoices(state, command.ruleKind)}`,
     );
   }
   if (!card.disabled === command.enabled) {
@@ -798,7 +841,7 @@ function applySetRequirementPeople(
     return reject(
       index,
       "unknown_target",
-      "That staffing requirement is not in this schedule any more.",
+      `That staffing requirement is not in this schedule any more. ${ruleChoices(state, "requirements")}`,
     );
   }
   if (!targetsOneShiftType(card)) {
