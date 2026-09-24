@@ -396,6 +396,43 @@ def test_workspace_unknown_skill_mix_person_is_not_ready():
     ]
 
 
+def test_workspace_known_skill_mix_group_and_all_are_not_flagged():
+    # Guards against a check that only looks at people.items: a group id
+    # (defined before it is used, like the solver's own people-group map) and
+    # the reserved ALL keyword must both resolve without a skillMix issue.
+    document = """
+workspaceVersion: 1
+apiVersion: alpha
+dates:
+  range:
+    startDate: 2025-01-01
+    endDate: 2025-01-01
+people:
+  items:
+    - id: alice
+  groups:
+    - id: RN
+      members: [alice]
+shiftTypes:
+  items:
+    - id: day
+preferences:
+  - workspaceId: r0
+    type: at most one shift per day
+  - workspaceId: r1
+    type: shift type requirement
+    shiftType: day
+    requiredNumPeople: 1
+    skillMix:
+      - people: RN
+        minNumPeople: 1
+      - people: ALL
+        minNumPeople: 1
+"""
+    canonical = canonicalize_submission(document.encode())
+    assert b"skillMix" in canonical
+
+
 def test_workspace_unknown_shift_type_reference_is_not_ready():
     document = _workspace_with_preferences(
         """  - workspaceId: r1
@@ -676,6 +713,45 @@ preferences:
     ]
     for issue in error.issues:
         assert not any(isinstance(segment, str) and segment.endswith("Preference") for segment in issue.path)
+
+
+def test_legacy_skill_mix_validator_error_has_clean_path():
+    # Positive-path pin for the scheduling_errors.py fix: a matched branch's own
+    # model_validator error (not a mismatched sibling branch's noise) must reach
+    # the response with a clean path. The locked test above only proves noise
+    # suppression; it can't catch a `_branch_class_name` regression back to a
+    # bare set-membership check, since its guard (`endswith("Preference")`)
+    # does not match a leaked "...ShiftTypeRequirementsPreference]" wrapper.
+    document = """
+apiVersion: alpha
+dates:
+  range:
+    startDate: 2025-01-01
+    endDate: 2025-01-01
+people:
+  items:
+    - id: alice
+shiftTypes:
+  items:
+    - id: day
+preferences:
+  - type: at most one shift per day
+  - type: shift type requirement
+    shiftType: day
+    requiredNumPeople: 1
+    skillMix:
+      - people: alice
+        minNumPeople: 2
+"""
+    error = _content_error(document)
+    assert error.error_code == "invalid_scheduling_data"
+    assert error.as_response()["error"]["issues"] == [
+        {
+            "path": ["preferences", 1],
+            "code": "invalid_value",
+            "message": "Value error, skillMix minNumPeople for 'alice' must be between 1 and requiredNumPeople (1)",
+        }
+    ]
 
 
 def test_issue_ordering_is_deterministic():

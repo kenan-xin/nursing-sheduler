@@ -57,7 +57,9 @@ PEOPLE = ["rn1", "rn2", "rn3", "en1", "en2", "en3", "en4", "en5"]
 RNS = {"rn1", "rn2", "rn3"}
 
 
-def _ward(night_extra: str = "", extra_prefs: str = "", groups: str = "[rn1, rn2, rn3]") -> str:
+def _ward(
+    night_extra: str = "", extra_prefs: str = "", groups: str = "[rn1, rn2, rn3]", night_required: int = 4
+) -> str:
     items = "\n".join(f"    - id: {p}" for p in PEOPLE)
     # RNs would rather not do nights (soft). Without a skill mix the optimum puts
     # zero RNs on nights. With one, the solver is forced to place exactly the floor.
@@ -94,9 +96,9 @@ preferences:
     shiftType: D
     requiredNumPeople: 2
   - type: shift type requirement
-    description: Night needs exactly 4
+    description: Night needs exactly {night_required}
     shiftType: N
-    requiredNumPeople: 4
+    requiredNumPeople: {night_required}
     qualifiedPeople: ALL
 {night_extra}
 {avoid}
@@ -153,27 +155,38 @@ def test_empty_group_is_infeasible_not_a_crash():
 
 
 def test_overlapping_groups_count_toward_both():
-    # rn1 is both RN and Senior: "2 RN + 1 Senior" is met by rn1 + rn2 without a third person.
+    # rn1 is both RN and Senior. With a night headcount of only 2, "2 RN + 1
+    # Senior" is satisfiable at all only if one person counts toward both
+    # floors: rn1 + one more RN. Disjoint counting would need a 3rd person for
+    # Senior and be infeasible at headcount 2, so OPTIMAL here proves the
+    # overlap. rn1 (the only Senior) is then pinned onto nights every day.
     mix = (
         MIX_2_RN
         + """
       - people: Senior
         minNumPeople: 1"""
     )
-    df, status = _solve(_ward(mix))
+    df, status = _solve(_ward(mix, night_required=2))
     assert status == "OPTIMAL"
     for d in range(7):
         night = _nights(df, d)
-        assert len(night & RNS) >= 2 and len(night & {"rn1", "en1"}) >= 1
+        assert len(night) == 2
+        assert "rn1" in night
 
 
 def test_aggregate_group_needs_one_across_the_group_not_one_each():
+    # 5 people, AM (am1+am2 combined) needs exactly 4. Without s1, the other 4
+    # (n1-n4) exactly fill AM, so nothing but the skill mix forces s1 in: s1
+    # softly avoids both am1 and am2, so if the floor only needed s1 on both
+    # shift types ("one each"), the solver could still skip him. Instead s1 is
+    # pinned onto exactly one AM shift per day ("one across the group"),
+    # because "at most one shift per day" bars him from covering both.
     yaml_text = """
 apiVersion: alpha
 dates:
   range: {startDate: 2026-11-01, endDate: 2026-11-02}
 people:
-  items: [{id: s1}, {id: n1}, {id: n2}, {id: n3}]
+  items: [{id: s1}, {id: n1}, {id: n2}, {id: n3}, {id: n4}]
   groups: [{id: Senior, members: [s1]}]
 shiftTypes:
   items: [{id: am1}, {id: am2}]
@@ -187,7 +200,14 @@ preferences:
   - type: shift type requirement
     shiftType: am1
     requiredNumPeople: 2
+  - type: shift request
+    person: s1
+    date: ALL
+    shiftType: [am1, am2]
+    weight: -1
 """
-    # One senior covers both am1 and am2. A per-shift reading would need two and be infeasible.
-    _df, status = _solve(yaml_text)
+    df, status = _solve(yaml_text)
     assert status == "OPTIMAL"
+    for d in range(2):
+        s1_shift = df.iloc[2, 1 + d]  # s1 is the first person row
+        assert s1_shift in ("am1", "am2"), "the floor forces s1 onto exactly one AM shift, not both"

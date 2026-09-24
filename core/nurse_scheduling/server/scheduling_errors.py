@@ -159,7 +159,10 @@ _DISCRIMINATOR_MISMATCH_TYPES = frozenset({"string_pattern_mismatch", "literal_e
 # instead of the bare class name, since the schema node is now the validator
 # call wrapping the model. Recognize that form too so its errors still land in
 # the right union branch instead of leaking through as unfiltered "plain" noise.
-_FUNCTION_WRAPPER_CLASS_RE = re.compile(r"^function-\w+\[.*,\s*(\w+)\]$")
+# A class with two `model_validator`s nests the wrapper, e.g.
+# "function-after[v2(), function-after[v1(), ClassName]]"; the trailing `\]+`
+# (not a single `\]`) matches that closing run too.
+_FUNCTION_WRAPPER_CLASS_RE = re.compile(r"^function-\w+\[.*,\s*(\w+)\]+$")
 
 
 def _branch_class_name(segment: Any) -> str | None:
