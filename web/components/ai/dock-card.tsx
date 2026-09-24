@@ -91,13 +91,19 @@ export interface DockCardProps extends Omit<HTMLAttributes<HTMLDivElement>, "tit
   children?: ReactNode;
 }
 
-/** Someone is mid-sentence in a text field: a new card must not steal the caret. */
-function isTyping(): boolean {
+/**
+ * Whether a new card may take focus: only from inside the assistant panel (marked
+ * `data-assistant-panel`) or from nothing at all, and never from a text field the
+ * user is mid-sentence in. Focus on the main screen -- a roster cell, a form field --
+ * stays put; the dock's live region still announces the card.
+ */
+function mayTakeFocus(): boolean {
   const active = document.activeElement;
-  return (
+  if (active === null || active === document.body) return true;
+  const typing =
     (active instanceof HTMLTextAreaElement || active instanceof HTMLInputElement) &&
-    active.value !== ""
-  );
+    active.value !== "";
+  return !typing && active.closest("[data-assistant-panel]") !== null;
 }
 
 export function DockCard({
@@ -133,7 +139,7 @@ export function DockCard({
   // Once, when the card appears; a re-render must not pull focus back.
   useEffect(() => {
     if (spoken) announce(spoken);
-    if (autoFocus && !isTyping()) root.current?.focus();
+    if (autoFocus && mayTakeFocus()) root.current?.focus();
   }, []);
 
   // Cards appear mid-turn with their rows disabled. When the default row becomes

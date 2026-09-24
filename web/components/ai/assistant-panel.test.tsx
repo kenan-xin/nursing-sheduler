@@ -56,6 +56,15 @@ vi.mock("next/navigation", () => ({
 
 const SCENARIO_ID = "scenario-a";
 
+const WHICH_ANA = {
+  question: "Which Ana?",
+  options: [
+    { label: "Ana Lim", detail: "" },
+    { label: "Ana Tan", detail: "" },
+  ],
+  multiple: false,
+};
+
 let harness: AssistantHarness;
 let requested: string[];
 
@@ -207,19 +216,7 @@ describe("the responsive dock and sheet", () => {
   it("Esc on a docked card closes the card, not the panel", async () => {
     render(<AssistantSurface />);
     await screen.findByTestId("assistant-live-conversation");
-    act(() =>
-      assistantActions.showChoices(
-        {
-          question: "Which Ana?",
-          options: [
-            { label: "Ana Lim", detail: "" },
-            { label: "Ana Tan", detail: "" },
-          ],
-          multiple: false,
-        },
-        0,
-      ),
-    );
+    act(() => assistantActions.showChoices(WHICH_ANA, 0));
     const row = await screen.findByRole("button", { name: "Ana Lim" });
 
     fireEvent.keyDown(row, { key: "Escape" });
@@ -231,6 +228,34 @@ describe("the responsive dock and sheet", () => {
     // An Escape the card did not handle still closes the panel.
     fireEvent.keyDown(document.body, { key: "Escape" });
     expect(useAssistantStore.getState().panelOpen).toBe(false);
+  });
+
+  it("a new card never takes focus from the main screen, but is still announced", async () => {
+    render(
+      <>
+        <button type="button">Roster cell</button>
+        <AssistantSurface />
+      </>,
+    );
+    await screen.findByTestId("assistant-live-conversation");
+    const outside = screen.getByRole("button", { name: "Roster cell" });
+    act(() => outside.focus());
+
+    act(() => assistantActions.showChoices(WHICH_ANA, 0));
+    await screen.findByTestId("assistant-choices");
+
+    expect(outside).toHaveFocus();
+    expect(screen.getByTestId("assistant-dock-announcer")).toHaveTextContent("Which Ana?");
+  });
+
+  it("a new card takes focus when focus is already inside the panel", async () => {
+    render(<AssistantSurface />);
+    await screen.findByTestId("assistant-live-conversation");
+    act(() => screen.getByTestId("assistant-close").focus());
+
+    act(() => assistantActions.showChoices(WHICH_ANA, 0));
+
+    expect(await screen.findByRole("button", { name: "Ana Lim" })).toHaveFocus();
   });
 
   it("mounts exactly ONE conversation, so one thread has one agent", async () => {
