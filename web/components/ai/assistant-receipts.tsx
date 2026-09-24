@@ -137,10 +137,14 @@ function ReceiptRow({
   const { receipt, undo } = standing;
 
   return (
-    <div data-testid="assistant-receipt-row" data-receipt-id={receipt.receiptId}>
+    <div
+      className="border-b border-line2 last:border-b-0"
+      data-testid="assistant-receipt-row"
+      data-receipt-id={receipt.receiptId}
+    >
       <button
         type="button"
-        className="flex w-full items-center justify-between gap-2 py-1 text-left"
+        className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left hover:bg-panel-alt focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-brand"
         aria-expanded={open}
         aria-controls={open ? detailId : undefined}
         data-testid="receipt-row-toggle"
@@ -150,7 +154,7 @@ function ReceiptRow({
         <Badge variant={badgeVariant(undo)}>{badgeLabel(undo)}</Badge>
       </button>
       {open ? (
-        <div id={detailId}>
+        <div id={detailId} className="px-3 pb-3">
           <ReceiptDetail standing={standing} controller={controller} />
         </div>
       ) : null}
@@ -169,8 +173,15 @@ export function AssistantReceipts({ controller }: AssistantReceiptsProps) {
   const showNewestInline = !expanded && newest.undo === "available";
 
   return (
-    <div className="mx-3 mb-2 flex shrink-0 flex-col gap-1" data-testid="assistant-receipts">
-      <div className="flex items-center gap-2">
+    // One card: the bar is its header, the expanded list its body, so the rows never
+    // float loose on the dock plane.
+    <Surface
+      level="surface"
+      geometry="card"
+      className="mx-3 mb-2 flex shrink-0 flex-col overflow-hidden"
+      data-testid="assistant-receipts"
+    >
+      <div className="flex items-center gap-2 p-1.5">
         <Button
           variant="ghost"
           size="sm"
@@ -204,7 +215,7 @@ export function AssistantReceipts({ controller }: AssistantReceiptsProps) {
       {expanded ? (
         <div
           id={listId}
-          className="flex max-h-[33vh] flex-col gap-1 overflow-y-auto"
+          className="flex max-h-[33vh] flex-col overflow-y-auto border-t border-line2"
           data-testid="assistant-receipts-list"
         >
           {receipts.map((standing) => (
@@ -216,6 +227,6 @@ export function AssistantReceipts({ controller }: AssistantReceiptsProps) {
           ))}
         </div>
       ) : null}
-    </div>
+    </Surface>
   );
 }
