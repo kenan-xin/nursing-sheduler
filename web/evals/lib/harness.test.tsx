@@ -7,7 +7,8 @@ import { AbstractAgent, type BaseEvent, type RunAgentInput } from "@ag-ui/client
 import { Observable } from "rxjs";
 import type { EvalCase } from "./case";
 import { Ledger } from "./budget";
-import { runTrial } from "./harness";
+import { runTrial, withShippedClone } from "./harness";
+import { createOpenRouterAgent } from "@/lib/ai/runtime/openrouter-agent";
 
 const seams = vi.hoisted(() => ({ agent: null as unknown, pushes: [] as string[] }));
 vi.mock("next/navigation", () => ({
@@ -89,6 +90,23 @@ const input = (evalCase: EvalCase, script: ConstructorParameters<typeof Scripted
   model: "anthropic/claude-sonnet-4.5",
   userModel: null,
   agentFactory: () => new ScriptedAgent(script),
+});
+
+describe("withShippedClone", () => {
+  it("clones the real agent like the shipped proxied agent: same identity, no middleware", async () => {
+    const agent = withShippedClone(() => createOpenRouterAgent(new Request("https://ward.test/x")));
+    agent.agentId = "scheduler:t1";
+    agent.threadId = "t1";
+    agent.setMessages([{ id: "m1", role: "user", content: "hi" }]);
+    // A guard that ends every run, as the session's panel hop guard does for a clone.
+    agent.use(() => new Observable<BaseEvent>((sub) => sub.complete()));
+    const twice = agent.clone().clone();
+    expect(twice.agentId).toBe("scheduler:t1");
+    expect(twice.threadId).toBe("t1");
+    expect(twice.messages.map((m: { id: string }) => m.id)).toEqual(["m1"]);
+    // Keyless, so the run reaches the factory and fails there, not in the dropped guard.
+    await expect(twice.runAgent()).rejects.toThrow();
+  });
 });
 
 describe("runTrial", () => {

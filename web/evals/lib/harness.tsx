@@ -82,6 +82,26 @@ export function buildSeed(seed: Seed): ImportNormalizationTarget {
   return imported.target;
 }
 
+/**
+ * The session clones its agent per turn, attaches frontend tools by the clone's id and
+ * guards each clone with its own middleware. CopilotKit's proxied agent (the shipped
+ * browser agent) clones into a fresh agent with the same id, thread, state and messages,
+ * and no middleware. `BuiltInAgent`'s clone drops the id, thread and messages and KEEPS
+ * the panel agent's hop guard, which then ends every turn silently. So every clone of
+ * the in-process agent is a fresh `make()`, carrying what the shipped clone carries.
+ */
+export function withShippedClone(make: () => AbstractAgent, from?: AbstractAgent): AbstractAgent {
+  const agent = make();
+  if (from) {
+    agent.agentId = from.agentId;
+    agent.threadId = from.threadId;
+    agent.setState(from.state);
+    agent.setMessages(from.messages);
+  }
+  agent.clone = () => withShippedClone(make, agent);
+  return agent;
+}
+
 interface Handles {
   session: AssistantSession | null;
   controller: AssistantProposalController | null;
@@ -96,7 +116,15 @@ function Session({ threadId, handles }: { threadId: string; handles: Handles }) 
     historical: false,
   });
   const controller = useAssistantProposals();
-  const send = useAssistantFollowUps(session.isRunning, controller.outcome, session.send);
+  // The shipped send path (assistant-conversation.tsx): any send answers the open card.
+  const send = useAssistantFollowUps(
+    session.isRunning || session.interrupting || session.sending,
+    controller.outcome,
+    (text: string) => {
+      assistantActions.clearChoices();
+      return session.send(text);
+    },
+  );
   handles.session = session;
   handles.controller = controller;
   handles.send = send;
@@ -249,11 +277,13 @@ export async function runTrial(input: RunTrialInput): Promise<TrialRecord> {
     seams.pushes.length = 0;
     const agent =
       input.agentFactory?.(recorder.fetch) ??
-      createOpenRouterAgent(
-        new Request(`${ORIGIN}/api/copilotkit`, {
-          headers: { [AI_KEY_HEADER]: input.apiKey, [AI_MODEL_HEADER]: input.model },
-        }),
-        { fetch: recorder.fetch },
+      withShippedClone(() =>
+        createOpenRouterAgent(
+          new Request(`${ORIGIN}/api/copilotkit`, {
+            headers: { [AI_KEY_HEADER]: input.apiKey, [AI_MODEL_HEADER]: input.model },
+          }),
+          { fetch: recorder.fetch },
+        ),
       );
     // The id the shipped session's `useAgent` resolves: the production `localAgentId`
     // (built on COPILOT_AGENT_ID), never a copied string. Frontend tools attach by this
