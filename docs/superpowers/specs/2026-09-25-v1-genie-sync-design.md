@@ -1,6 +1,6 @@
 # v1 genie sync: design
 
-Date: 2026-09-25. Status: approved in conversation. Revised after an independent review (confidence 7.5/10 before the fixes in this revision).
+Date: 2026-09-25. Status: approved in conversation. Revised after an independent review and after two throwaway spikes (`08-spike-w1.md`, `09-spike-w6.md`) that did W1 and W6 for real.
 
 Evidence: `docs/research/2026-09-25-v1-sync/` (summary `00-summary.md`, lane reports `01` to `07`).
 
@@ -15,7 +15,7 @@ Success criteria:
 3. v1 user-facing features and fixes that v2 lacks are tracked as beads.
 4. The v2 product does not change behavior, except for these listed changes:
    - A timeout with no incumbent ends as INCONCLUSIVE, not FAILED (W1).
-   - Input errors that used to fail a job at solve time now return 422 at submit, because genie validates at load time (lane 01 C02).
+   - Input errors that used to fail a job at solve time now return 422 at submit, because genie validates at load time (lane 01 C02). This 422 has `path: []`: it names the bad ID but not the preference (see open question Q1).
    - A per-date override for a date outside its requirement fails at load time, not at solve time (P3).
    - A YAML document above the expansion or nesting bound returns 400 (W1).
    - `country` is no longer sent, so `inputSha256` changes for scenarios that carried it (X9).
@@ -66,7 +66,7 @@ Take verbatim from genie `1bf4b85`:
 
 - `cli.py`, `constants.py`, `context.py`, `exporter.py`, `group_map.py`, `loader.py`, `model_build_stats.py`, `models.py`, `preference_types.py`, `report.py`, `scheduler.py`, `solver_interface.py`, `solver_ortools_cp_sat.py`, `utils.py`.
 - The restored solver modules: `solver_ortools_linear.py`, `solver_ortools_mathopt.py`, `solver_pulp.py`, `solver_pulp_glpk.py`, `solver_pulp_python.py`.
-- The matching genie tests, the assignment fixture and the score ground-truth replay (lane 01 C06). Not the Docker performance benchmark. Not `tests/real/solver_capabilities.py`: it fails the v2 Ruff pin (6 E402), and v2 already maps it to `core/scripts/solver_capability_probe.py`.
+- The matching genie tests, the assignment fixture and the score ground-truth replay (lane 01 C06). Not the Docker performance benchmark. Not `tests/real/solver_capabilities.py`: it fails the v2 Ruff pin (6 E402), and v2 already maps it to `core/scripts/solver_capability_probe.py`. The genie fixture `large-ward-with-87-people-2025-11.assignment-01.json` has a stale `scenarioSha256` at `1bf4b85` (genie `96e9ba9` renamed `FREEDAY`, and merge `1b6f7e5` kept the dev fixture). Re-stamp it to `0db947b0e16d77f9eed62fc83c3b8635ccfc0e5bedba0fc42fd9797355ce06dc` as a recorded patch, and report the bug upstream. The score is unchanged (4477324836724).
 - `pulp==3.3.2`, `highspy` and `pyscipopt` in the optional file (X4).
 
 This take brings in the compiled-schedule API, `ScheduleResult`, the YAML expansion and nesting bound, `forced_solution`, and the genie LEAVE, `hoursContract`, covering and working-time code. `ScheduleResult` returns status UNKNOWN, so the v2 INCONCLUSIVE runner branch can run with the real scheduler.
@@ -85,29 +85,33 @@ P2 and P3 edit the same compile step and handler, so they land together. Each pa
 Adapt the callers in the same branch:
 
 - `server/workspace.py`: move the ordered shift-type map loop out of `group_map.build_shift_type_index_map` (removed on genie) into a public function in `workspace.py`. `group_map.py` stays equal to genie.
-- `web/lib/scenario/differential/oracle.py`: import that function from `workspace.py`, and drop `country` before it calls `nurse_scheduling.schedule`. This oracle runs in the web unit tests, so W1 breaks web CI without this change.
-- `web/lib/optimize/__fixtures__/c5/generate-c5-goldens.py`: run it again, and commit any golden that changes because of the genie exporter.
-- `server/scheduling_input.py`: call `loader.measure_yaml_expansion` before canonicalization. Reject with 400 and the error code `scheduling_data_too_complex`. Map that code in `CODE_TO_KIND` in `web/lib/bff/errors.ts`.
-- `server/workspace.py`: accept and drop `country`. `web/lib/scenario/canonical.ts` stops emitting it. Remove it from the 2 SG test cases.
-- `server/semantic_profile.py`: bump `SOLVER_SEMANTIC_VERSION` (X12), and update the web profile fixtures that pin it.
+- `web/lib/scenario/differential/oracle.py`: import that function from `workspace.py`. No `country` change is needed. The differential suite is gated on `RUN_DIFFERENTIAL=1`, which CI does not set, so run it by hand. It already has 3 failures on `develop` in `workspace-differential.test.ts`.
+- `web/lib/optimize/__fixtures__/c5/generate-c5-goldens.py`: after W1 it runs against v2 `core/` (before W1 it crashes on the 5-tuple). Run it once and compare with `xlsx-semantic-diff.py`. Do not commit the output if only `docProps/core.xml` timestamps change.
+- `server/scheduling_input.py`: call `loader.measure_yaml_expansion` in `_parse_once`, before the load and outside the `ValueError` handler, because `SchedulingDataTooComplexError` is a `ValueError`. `server/api/optimize.py`: map the error to 400 with `{error: {code: scheduling_data_too_complex, message}}`. Genie returns a bare `detail`, so this is a v2 patch. Map the code in `CODE_TO_KIND` in `web/lib/bff/errors.ts`.
+- `server/workspace.py`: accept and drop `country`. `web/lib/scenario/canonical.ts` stops emitting it, and `web/lib/scenario/canonical.test.ts:93` changes with it. Remove it from the 2 SG test cases.
+- `server/semantic_profile.py`: bump `SOLVER_SEMANTIC_VERSION` (X12), and regenerate `contracts/job-response.golden.json` with `UPDATE_JOB_RESPONSE_CONTRACT=1`. The web test files that contain `cp-sat@1` are free mock values and need no change.
 - The server keeps rejecting any solver other than CP-SAT (`server/scheduling_input.py`).
 
 Land W1 as one branch with these commits:
 
-1. The verbatim take, the genie tests, and the `workspace.py`, oracle and C5 golden changes.
+1. The verbatim take, the genie tests, the `workspace.py` changes (map function and `country` drop), the oracle, `canonical.ts`, the SG test cases and the YAML bound.
 2. P1.
 3. P2 and P3.
 4. P4.
-5. `country` in core and in `canonical.ts`, and the semantic version bump.
+5. The semantic version bump and the contract golden.
+
+Commits 1 to 3 fail the v2-only tests that later commits fix. Only the branch tip must pass.
+
+Measured in the spike: P1 to P4 are 3 patch files, 166 lines added and 3 removed, in 3 genie files. After them the full core suite passes (1201 passed, 69 skipped, 0 failed), Ruff is clean, and the real scheduler reaches INCONCLUSIVE at 0.01 s and at 1 s.
 
 The other web `country` touchpoints move to a later small branch, because the Workspace path drops the field anyway: `types.ts`, `workspace.ts`, `import-scenario.ts`, `schemas/import.ts`, `schemas/producer.ts`, `store/persistence.ts` and `components/ai/use-context-tools.ts`.
 
 Acceptance:
 
-1. `core/scripts/check_upstream_sync.py` passes. For each file in the manifest with class `verbatim` or `patched`, it reverse-applies the recorded patches and compares `git hash-object` with the genie blob SHA recorded in the manifest. It needs no access to the v1 repo.
+1. `core/scripts/check_upstream_sync.py` passes. For each file in the manifest with class `verbatim` or `patched`, it reverse-applies the recorded patches, newest first, and compares `git hash-object` with the genie blob SHA recorded in the manifest. It needs no access to the v1 repo.
 2. The full core suite, the genie score ground-truth replay and all real test cases pass.
 3. A new test runs the real scheduler to UNKNOWN (for example, a 0.01 s timeout on the 87-person case) and gets the INCONCLUSIVE job outcome.
-4. The web unit tests pass, including the differential oracle.
+4. The web unit tests pass. The differential oracle, run by hand with `RUN_DIFFERENTIAL=1`, shows no failure beyond the 3 that exist on `develop`.
 
 ### W2: server adoption
 
@@ -156,9 +160,11 @@ Why v1 wins. The v2 fence is stronger in one narrow way: it checks lease expiry 
 - A lost job goes to `worker_lost` and does not run again. After maintenance acts, the token and revision checks reject every stale write, so two workers never own one job.
 - Both designs make a worker abort its solver child when it loses its lease.
 
-In return, v1 is smaller before the v2 patches (genie `stores/redis.py` has 921 lines, v2 has 1,623 plus the 441-line `queue_script.py`). The size after P9 is not yet measured. Its production path is the same code that the fakeredis tests run, where v2 keeps a mirrored Python path for fakeredis. Its always-on worker heartbeat gives worker presence for `/info` and readiness. It is also where upstream fixes land.
+In return, v1 is smaller. After P6 to P10, `stores/redis.py` has 1,238 lines (+347/-30 against genie 921), where `develop` has 1,623 plus the 441-line `queue_script.py`. The W6 files have 4,050 lines against 4,388 on `develop` (spike W6). Its production path is the same code that the fakeredis tests run, where v2 keeps a mirrored Python path for fakeredis. Its always-on worker heartbeat gives worker presence for `/info` and readiness. It is also where upstream fixes land.
 
-Take verbatim from genie: `job_store.py`, `jobs/models.py`, `jobs/controller.py`, `jobs/worker.py`, `stores/memory.py`, `stores/redis.py`, `usage_metrics.py` (import only, see X6), and the lease-related `config.py` rename to `worker_lease_seconds` (`JOB_WORKER_LEASE_SECONDS`, updated in `docker/` environment files). Port the genie lease tests (`d4ae8aa`, `74f0ce4`, `c621490`, `663861b`, `0bb55e2`, `367b477`).
+Take verbatim from genie: `job_store.py`, `jobs/models.py`, `jobs/controller.py`, `jobs/worker.py`, `stores/memory.py`, `stores/redis.py`, `usage_metrics.py` (import only, see X6), and the lease-related `config.py` rename to `worker_lease_seconds` (`JOB_WORKER_LEASE_SECONDS`). No `docker/` file sets the old name.
+
+W6 also needs genie `retry.py` (W2 step 1), `solver_supports_finish_now` (W2 step 5, which needs W1 `scheduler.CANONICAL_SOLVER_CHOICES`) and `MIN_USAGE_METRICS_RETENTION_DAYS` (W2 step 6). W6 brings the genie failure text in US spelling, so W2 step 11 lands first. If W6 must land before those steps, bridge each with a shim and record it in the manifest. Port the genie lease tests (`d4ae8aa`, `74f0ce4`, `c621490`, `663861b`, `0bb55e2`, `367b477`).
 
 Apply the v2 patches again, as the smallest changes to the genie code:
 
@@ -166,12 +172,13 @@ Apply the v2 patches again, as the smallest changes to the genie code:
 | --- | --- |
 | P6 event replay | `prepare_event_replay` in `job_store.py` and both stores, as a `WATCH`/`MULTI`/`EXEC` snapshot. |
 | P8 basis and INCONCLUSIVE | The job model fields and controller transitions from lane 07 D13. The explicit job serialize and deserialize code in both stores (purpose, basis fields, INCONCLUSIVE). |
-| P9 purpose queues (T09) | Two purpose queues (ordinary and assistant diagnostic) and one reserved ordinary slot, on the genie `WATCH`/`MULTI` claim path. Create, claim, update and queue repair each `WATCH` the pending set and both purpose queues. Keep `describe_queue_state()`, queue repair and the T09 admission errors. No Lua. |
-| P7 roster artifact | The runner and controller hooks for the roster container, if W2 did not already place them outside these files. |
+| P9 purpose queues (T09) | Two purpose queues (ordinary and assistant diagnostic). Admission enforces the reserved ordinary slot. Claim takes the ordinary FIFO head first. Create and queue repair `WATCH` the pending set and both purpose queues. Claim `WATCH`es both queues and the worker keys. Update `WATCH`es both queues when a job leaves QUEUED. Repair runs inside the create transaction. `StoreLimits.ordinary_reserved_slots` defaults to 0 and `ServerSettings` supplies 1, so genie tests port unchanged. Keep `describe_queue_state()` and the T09 admission errors. No Lua. |
+| P10 shutdown write gate | Keep the v2 `_shutdown_lock` in `jobs/worker.py`: no worker event, result or failure lands after `stop()`, and a cancellation observed under a live lease still settles. |
+| P7 roster artifact | No lines in the W6 files. The roster hooks live in `jobs/runner.py` (W2). |
 
-Delete `stores/queue_script.py`, the fakeredis mirror paths and `find_claimed_before`. `/info` `workers.online` switches to the registry count. Take the claim-loop outage backoff from W2 step 1 here. Bump the job key prefix to `nurse_scheduling:jobs:v2` and `QUEUE_STATE_MACHINE_VERSION` (X13).
+Delete `stores/queue_script.py`, the fakeredis mirror paths, `find_claimed_before`, and the `RedisJobStore` `client=` and `test_lease_commit_boundary` arguments. Tests build fakeredis stores by patching `redis.Redis.from_url` under a lock, because a thread-pool test constructs stores in parallel. `/info` `workers.online` switches to the registry count. Take the claim-loop outage backoff from W2 step 1 here. Bump the job key prefix to `nurse_scheduling:jobs:v2` and `QUEUE_STATE_MACHINE_VERSION` (X13).
 
-The v2 server suites call the T19 APIs directly (`renew_claim`, `find_claimed_before`, `worker_id` preconditions). Handle them by this rule: keep every behavior assertion, rewrite the calls to the lease API, and delete only assertions about Lua-only mechanics, with each deletion listed in the manifest. The suites are `test_server_lifecycle_gates.py`, `test_server_replay.py`, `test_server_worker_loss.py`, `test_server_priority_queue.py`, `test_server_backend_parity.py`, `test_server_worker_loss_multiprocess.py` and `test_server_store_contract.py`.
+The v2 server suites call the T19 APIs directly (`renew_claim`, `find_claimed_before`, `worker_id` preconditions). Handle them by this rule: keep every behavior assertion, rewrite the calls to the lease API, and delete only assertions about Lua-only mechanics, with each deletion listed in the manifest. The suites are `test_server_lifecycle_gates.py`, `test_server_replay.py`, `test_server_worker_loss.py`, `test_server_priority_queue.py`, `test_server_backend_parity.py`, `test_server_worker_loss_multiprocess.py` and `test_server_store_contract.py`. `test_roster_routes.py`, `test_server_identity.py`, `tests/server_support.py` and `docker/deploy_gate_driver.py` also call the T19 API. The spike deleted only 4 assertion lines: the hash-tag test, the `claim_expires_at` and `worker_id` equality assertions, and the memory variant of 5 residue tests. List them in the manifest.
 
 Accepted semantic change: a worker write can land between lease expiry and the `worker_lost` commit. Record this in the manifest.
 
@@ -180,7 +187,9 @@ Acceptance:
 1. The genie lease tests and the rewritten v2 suites pass on memory, fakeredis and real Redis.
 2. The real-Redis `SIGKILL` gate passes: a replacement worker recovers, and the killed job ends as `worker_lost`.
 3. The delayed-commit probes pass with the new expected result: after maintenance acts, a stale worker write changes nothing.
-4. The W6 files differ from genie only by the lines of P6 to P9.
+4. The W6 files differ from genie only by the lines of P6 to P10.
+
+Measured in the spike (branch `kenan-xin/spike-w6-lease` at `220d7a6`): full suite 1,099 passed and 5 skipped in 4 of 4 runs on memory, fakeredis and real Redis. The `SIGKILL` gate and the delayed-commit probes pass, and a test pins the accepted late-write gap. Effort estimate for the real W6: M.
 
 ### W3: frontend gap beads
 
@@ -216,13 +225,17 @@ Acceptance: every file in `core/` has exactly one row, and the recipe runs on th
 | Upstream Ruff violations fail the v2 gate. | Fix or ignore per file, and record each one in the manifest. |
 | Old saved files carry `country`. | Workspace input accepts and drops it (X9). |
 | The maintenance backoff breaks readiness. | W2 step 1 keeps the backoff cap inside the liveness window. |
-| W6 weakens the T09 queue or worker-loss recovery. | W6 acceptance runs the T09 tests, the `SIGKILL` gate and the delayed-commit probes on real Redis. |
+| W6 weakens the T09 queue or worker-loss recovery. | W6 acceptance runs the T09 tests, the `SIGKILL` gate and the delayed-commit probes on real Redis. Measured in the spike: all pass, except 4 deleted assertion lines listed in the manifest. |
 | W6 moves the fence to host clocks. | The worker runs in the API process, so skew is zero. Review it again if the worker moves to another process or host. |
 | W6 drops in-flight jobs at cutover. | Accepted (X13). Deploy in a quiet window. |
 | The W1 exporter change moves web goldens. | W1 runs the C5 golden generator again and reviews each changed golden. |
 | `SOLVER_SEMANTIC_VERSION` bump retires retained assistant evidence. | Accepted (X12). |
 
-## 5. Out of scope
+## 5. Open questions
+
+- Q1: after W1, a load-time 422 names the bad ID but has `path: []`, so the web cannot point at the preference. Does W2 add a preference index to these errors (a v2 patch), or does v2 accept the upstream message only?
+
+## 6. Out of scope
 
 - Wiring or vendoring the v1 Python AI service (X5).
 - Any v2 frontend redesign. W3 only files beads.
