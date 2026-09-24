@@ -289,6 +289,7 @@ describe("historical conversations never regain live Apply", () => {
     expect(screen.queryByTestId("assistant-proposal")).toBeNull();
     expect(screen.queryByTestId("proposal-apply")).toBeNull();
     expect(screen.queryByTestId("assistant-receipt")).toBeNull();
+    expect(screen.queryByTestId("apply-navigation-status")).toBeNull();
   });
 
   it("mounts the Preview surface in the LIVE rendering, under that same state", async () => {
@@ -299,6 +300,7 @@ describe("historical conversations never regain live Apply", () => {
     // so the historical rendering's emptiness is a property of the component.
     expect(await screen.findByTestId("assistant-proposal")).toBeInTheDocument();
     expect(await screen.findByTestId("proposal-apply")).toBeInTheDocument();
+    expect(screen.getByTestId("apply-navigation-status")).toBeInTheDocument();
   });
 
   // The second source read here -- `proposal-preview-card.tsx` must not contain

@@ -26,6 +26,7 @@ import {
 import {
   describeProposalReadiness,
   type LiveProposalBasis,
+  type ProposalDiff,
   type ProposalReadiness,
 } from "@/lib/proposal";
 import { capabilityRegistryStamp } from "@/lib/capability/registry";
@@ -33,7 +34,16 @@ import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
 
 /** How the last Apply ended, in the terms the host may honestly state. */
 export type ApplyOutcomeView =
-  | { kind: "applied"; receiptId: string; documentRevision: number; reloadRequired: boolean }
+  | {
+      kind: "applied";
+      receiptId: string;
+      documentRevision: number;
+      reloadRequired: boolean;
+      /** The Preview's diff. Apply only commits against the basis the Preview was
+       *  derived from, so this is what was written, split into direct and cascade
+       *  (the receipt's summary merges the two). */
+      diff: ProposalDiff;
+    }
   | { kind: "failed"; message: string };
 
 export interface AssistantProposalController {
@@ -200,7 +210,7 @@ export function useAssistantProposals(): AssistantProposalController {
   }, [proposalId]);
 
   const apply = useCallback(async () => {
-    if (!proposalId || applying) return;
+    if (!proposalId || !proposal || applying) return;
     setApplying(true);
     setOutcome(null);
     try {
@@ -217,6 +227,7 @@ export function useAssistantProposals(): AssistantProposalController {
           receiptId: result.receipt.receiptId,
           documentRevision: result.documentRevision,
           reloadRequired: result.reloadRequired,
+          diff: proposal.diff,
         });
         assistantActions.clearProposal();
       } else {
@@ -226,7 +237,7 @@ export function useAssistantProposals(): AssistantProposalController {
       setApplying(false);
       await refresh();
     }
-  }, [proposalId, applying, refresh]);
+  }, [proposalId, proposal, applying, refresh]);
 
   const undo = useCallback(
     async (receiptId: string) => {

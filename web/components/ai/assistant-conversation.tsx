@@ -28,6 +28,7 @@ import { ProposalPreviewCard } from "./proposal-preview-card";
 import { DiagnosticSearchCard } from "./diagnostic-search-card";
 import { OptimizeRunRequestCard } from "./optimize-run-request-card";
 import { AssistantReceipts } from "./assistant-receipts";
+import { ApplyNavigationNotice } from "./apply-navigation-notice";
 import { Surface } from "@/components/ui/surface";
 
 /** The app's own welcome content. Local text; no provider request produces it. */
@@ -175,6 +176,7 @@ export function AssistantLiveConversation({
       <OptimizeRunRequestCard />
       <ProposalPreviewCard controller={proposals} />
       <AssistantReceipts controller={proposals} />
+      <ApplyNavigationNotice controller={proposals} />
       <ActivityContext.Provider value={session.activity}>
         <CopilotChatView
           className="min-h-0 flex-1"
