@@ -237,4 +237,9 @@ describe("AssistantActivityStatus", () => {
     render(<AssistantActivityStatus activity={{ kind: "tool", name: "get_optimize_result" }} />);
     expect(screen.getByRole("status").textContent).toContain("Checking the optimiser run…");
   });
+
+  it("labels the swap search in the user's terms", () => {
+    render(<AssistantActivityStatus activity={{ kind: "tool", name: "find_swap_partners" }} />);
+    expect(screen.getByRole("status").textContent).toContain("Looking for who can swap…");
+  });
 });

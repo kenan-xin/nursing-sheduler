@@ -87,6 +87,16 @@ import {
   setActiveRunHandle,
 } from "./runtime-stop";
 import type { SendRefusal } from "./send-gate";
+import type { RosterChangeRequest } from "@/lib/roster/change-request";
+import type { RosterChangeView } from "./roster-context";
+
+/** The schedule proposal a roster card applies with it, and which record it changes. */
+export interface LinkedScheduleChange {
+  proposalId: string;
+  assumptionIds: string[];
+  /** "leave": a leave move or MC leave. "staff": a borrowed temporary nurse. */
+  record: "leave" | "staff";
+}
 
 /** An interruption that has not finished settling. Non-null blocks every send. */
 export interface ActiveInterruption {
@@ -227,6 +237,31 @@ export interface AssistantUiState {
    */
   activeRunRequest: { turnEpoch: number } | null;
   /**
+   * The live "Swap shifts?" card from `prepare_roster_swap`, stamped with the turn that
+   * asked for it. Same authority rule as `activeRunRequest`: after an interruption it
+   * renders as stopped with no Apply control. In memory only.
+   */
+  activeRosterChange: {
+    /** Changes on every show, so the card resets its agreement tick. */
+    id: number;
+    /** The roster cells, or null for a schedule-only change (step 3, C1). */
+    request: RosterChangeRequest | null;
+    view: RosterChangeView;
+    /** The linked schedule proposal (leave move, MC leave, borrowed person) applied with it. */
+    linked: LinkedScheduleChange | null;
+    turnEpoch: number;
+  } | null;
+  /**
+   * Apply is running on the roster card (up to the Roster screen's 15 s window). While
+   * true, no other card may replace it, so its outcome always has a place to land.
+   */
+  rosterChangeApplying: boolean;
+  /**
+   * The last roster card Apply that did not finish, in plain words. Kept outside the
+   * card so it survives the card being stopped or cleared; the user dismisses it.
+   */
+  rosterChangeNotice: string | null;
+  /**
    * The live option card from `offer_choices`. One at a time: a newer offer replaces
    * it, and any send closes it. `id` changes on every offer so the card resets its
    * own checkbox and Other state. Stamped with the turn that offered it, like
@@ -270,6 +305,9 @@ const INITIAL: AssistantUiState = {
   activeProposal: null,
   activeDiagnostic: null,
   activeRunRequest: null,
+  activeRosterChange: null,
+  rosterChangeApplying: false,
+  rosterChangeNotice: null,
   activeChoices: null,
   pendingInterruptions: 0,
   clearResult: null,
@@ -1088,6 +1126,44 @@ export const assistantActions = {
     useAssistantStore.setState({ activeRunRequest: null });
   },
 
+  /**
+   * Show the swap card for the change the current turn prepared, replacing any earlier
+   * one. Refused (false) while an Apply on the current card is still running.
+   */
+  showRosterChange(
+    change: {
+      request: RosterChangeRequest | null;
+      view: RosterChangeView;
+      linked?: LinkedScheduleChange | null;
+    },
+    turnEpoch: number,
+  ): boolean {
+    const { activeRosterChange: previous, rosterChangeApplying } = useAssistantStore.getState();
+    if (rosterChangeApplying) return false;
+    useAssistantStore.setState({
+      activeRosterChange: {
+        ...change,
+        linked: change.linked ?? null,
+        id: (previous?.id ?? 0) + 1,
+        turnEpoch,
+      },
+    });
+    return true;
+  },
+
+  /** Dismiss the swap card: Apply was pressed, or the user said not now. */
+  clearRosterChange(): void {
+    useAssistantStore.setState({ activeRosterChange: null });
+  },
+
+  setRosterChangeApplying(applying: boolean): void {
+    useAssistantStore.setState({ rosterChangeApplying: applying });
+  },
+
+  setRosterChangeNotice(notice: string | null): void {
+    useAssistantStore.setState({ rosterChangeNotice: notice });
+  },
+
   /** Show the option card for `offer_choices`, replacing any earlier one. */
   showChoices(offer: ChoiceOffer, turnEpoch: number): void {
     const previous = useAssistantStore.getState().activeChoices;
@@ -1119,6 +1195,10 @@ export const assistantActions = {
  * not the tool called: a tool that refused and showed nothing gave the user nothing.
  */
 export function turnAwaitsUserOnCard(turnEpoch: number): boolean {
-  const { activeChoices, activeRunRequest } = useAssistantStore.getState();
-  return activeChoices?.turnEpoch === turnEpoch || activeRunRequest?.turnEpoch === turnEpoch;
+  const { activeChoices, activeRunRequest, activeRosterChange } = useAssistantStore.getState();
+  return (
+    activeChoices?.turnEpoch === turnEpoch ||
+    activeRunRequest?.turnEpoch === turnEpoch ||
+    activeRosterChange?.turnEpoch === turnEpoch
+  );
 }

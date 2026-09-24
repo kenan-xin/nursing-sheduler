@@ -29,6 +29,7 @@ import { ProposalPreviewCard } from "./proposal-preview-card";
 import { DiagnosticSearchCard } from "./diagnostic-search-card";
 import { OptimizeRunRequestCard } from "./optimize-run-request-card";
 import { ChoiceCard } from "./choice-card";
+import { RosterChangeCard } from "./roster-change-card";
 import { AssistantReceipts } from "./assistant-receipts";
 import { ApplyNavigationNotice } from "./apply-navigation-notice";
 import { Surface } from "@/components/ui/surface";
@@ -120,6 +121,10 @@ export const TOOL_ACTIVITY: Readonly<Record<string, string>> = {
   offer_choices: "Offering choices…",
   get_setup_progress: "Checking your set-up…",
   suggest_feasibility_options: "Looking for ways to fill the gaps…",
+  get_roster: "Reading the roster…",
+  find_swap_partners: "Looking for who can swap…",
+  prepare_roster_swap: "Preparing a swap…",
+  prepare_borrowed_cover: "Preparing a temporary nurse…",
 };
 
 /**
@@ -192,6 +197,7 @@ export function AssistantLiveConversation({
       <LifecycleNotice />
       <DiagnosticSearchCard />
       <OptimizeRunRequestCard />
+      <RosterChangeCard onSend={sendMessage} disabled={running} />
       <ChoiceCard onSend={sendMessage} disabled={running} />
       <ProposalPreviewCard controller={proposals} onSend={sendMessage} disabled={running} />
       <AssistantReceipts controller={proposals} />

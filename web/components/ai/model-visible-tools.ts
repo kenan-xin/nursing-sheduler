@@ -22,6 +22,12 @@ import { feasibilityParameters } from "./use-feasibility-tools";
 import { capabilityIdParameters, policyParameters } from "./use-help-tools";
 import { prepareParameters } from "./use-proposal-tools";
 import { choiceParameters } from "./use-choice-tools";
+import {
+  borrowParameters,
+  rosterReadParameters,
+  swapPartnerParameters,
+  swapPrepareParameters,
+} from "./use-roster-tools";
 
 /**
  * The tools that take arguments, by the exact name the model calls.
@@ -41,6 +47,13 @@ export const MODEL_VISIBLE_TOOL_SCHEMAS: Readonly<Record<string, z.ZodTypeAny>> 
   // CHANGED DELIBERATELY (2026-09-24, bead 7v6): option cards. Shows a host card whose
   // click sends an ordinary user message; it writes nothing.
   offer_choices: choiceParameters,
+  // CHANGED DELIBERATELY (2026-09-24, bead 73z): the roster family. Two reads and a
+  // card; the roster changes only on the user's Apply, through the Roster screen.
+  get_roster: rosterReadParameters,
+  find_swap_partners: swapPartnerParameters,
+  prepare_roster_swap: swapPrepareParameters,
+  // Step 3 of the cover ladder: a card; the temporary nurse is added on the user's Apply.
+  prepare_borrowed_cover: borrowParameters,
 });
 
 /** The tools registered with no parameters. Named so the set is provably complete. */

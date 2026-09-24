@@ -16,7 +16,8 @@ behaves exactly as it always has.
 | Prepare a change for you to review, with every knock-on effect shown | Press Apply |
 | Offer to run the optimiser, then tell you how the run went | Start a run without your Run click |
 | Test bounded “what if” repairs for a failed Optimize run against the real optimizer | Prove *why* a run failed |
-| Hand a tested repair to the normal Preview → confirm → Apply flow | Repair a produced roster (that is a later phase, and is not built) |
+| Hand a tested repair to the normal Preview → confirm → Apply flow | Re-optimise or repair a produced roster on its own |
+| Read the saved roster, suggest who can swap a shift, and show the swap on a card | Change the roster without your Apply click |
 
 Two boundaries are worth stating plainly, because the wording in the app follows
 them and so should any support answer:
@@ -43,6 +44,27 @@ card; the run starts only when you press Run, and goes through the Optimise scre
 own Optimize path, so it is an ordinary run in every respect (settings, download,
 saved roster, Cancel). The assistant then reads the result, and after an infeasible
 run it can test candidate fixes on copies.
+
+**(2026-09-24) Roster swaps lifted.** The assistant can read the saved roster and suggest
+who can take someone's shifts. It checks every hard rule the roster was made with:
+staffing and skill mix, rest between shifts written as shift-pattern rules, requests and
+leave, and shift counts. It cannot check hard "work together" or supervision rules, and
+it says so on the card. The swap happens only when you press **Apply to roster**. It is
+then an ordinary edit on the Roster screen: its Undo reverts the roster part, and the export
+includes it. A change that also touches the schedule (a leave move, the MC, a temporary nurse)
+has a second part: undo that from the change list.
+
+When nobody can take a shift, the assistant follows a four-step cover ladder and says
+which step it is on: (1) swap or cover within the ward; (2) ask a nurse who is off or on
+leave to come in, for overtime pay or off-in-lieu (the nurse must agree, and you tick
+that on the card); (3) ask the nursing supervisor for a relief-pool nurse, or another ward
+or an agency, added as temporary staff (let your nurse manager or nurse clinician know);
+(4) last resort, with your nurse manager's sign-off: run the shift one short, never without
+a nurse who can be in charge. For "Priya is on MC on 8 Oct" it marks Priya on leave and
+runs the same ladder. When a change also changes the schedule (a leave move, the MC, a
+borrowed nurse), the card applies both together or neither. A borrowed nurse joins the
+roster on screen after the next run; for a swap, that run is also when the nurse who asked
+comes off those shifts.
 
 ## Turning it on
 

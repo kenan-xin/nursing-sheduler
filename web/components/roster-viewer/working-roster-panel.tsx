@@ -28,6 +28,7 @@ import {
 } from "@/lib/roster";
 import type { CurrentCandidatePointer } from "@/lib/store";
 import type { RosterImportOutcome, WorkingPromotionOutcome } from "@/lib/roster";
+import { useRosterChangeRequest } from "./use-roster-change-request";
 import { Callout } from "@/components/optimize/callout";
 import { ConfirmDialog } from "@/components/shell/confirm-dialog";
 import { RosterActions } from "./roster-actions";
@@ -62,6 +63,9 @@ export interface WorkingRosterPanelProps {
 export const WorkingRosterPanel = forwardRef<WorkingRosterPanelHandle, WorkingRosterPanelProps>(
   function WorkingRosterPanel({ document, revision, reload }, ref) {
     const editing = useRosterEditing({ document, revision, reload });
+    // A change the user approved elsewhere (the assistant's swap card) lands here,
+    // through this panel's own edit session, or not at all.
+    useRosterChangeRequest(editing);
     const [confirmClear, setConfirmClear] = useState(false);
     // A replacement awaiting the normal "replace the roster" confirmation.
     const [confirmReplace, setConfirmReplace] = useState<PendingReplacement | null>(null);

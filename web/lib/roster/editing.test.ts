@@ -12,6 +12,7 @@
 import { describe, expect, it } from "vitest";
 import { deriveCurrentDays } from "./overlay";
 import {
+  applyCellBatchToSession,
   applyCellEditToSession,
   applyCellSwapToSession,
   canUndoSession,
@@ -257,6 +258,41 @@ describe("EditSession — single-level undo", () => {
     const session = emptyEditSession([]);
     // Passing the SAME edits reference with no undo target returns the same session.
     expect(resetSession(session, session.edits)).toBe(session);
+  });
+});
+
+describe("applyCellBatchToSession", () => {
+  it("sets several cells as ONE edit with ONE undo step", () => {
+    const start = emptyEditSession([]);
+    const result = applyCellBatchToSession(
+      start,
+      [
+        { personIdx: 0, dateIdx: 0, day: SHIFT_N },
+        { personIdx: 1, dateIdx: 0, day: SHIFT_D },
+      ],
+      BOUNDS,
+    );
+    expect(result.ok).toBe(true);
+    expect(result.session.edits).toEqual<RosterEdit[]>([
+      { personIdx: 0, dateIdx: 0, day: SHIFT_N },
+      { personIdx: 1, dateIdx: 0, day: SHIFT_D },
+    ]);
+    expect(canUndoSession(result.session)).toBe(true);
+    expect(undoSessionEdit(result.session).edits).toEqual([]);
+  });
+
+  it("rejects the whole batch when one cell is outside the grid", () => {
+    const start = emptyEditSession([]);
+    const result = applyCellBatchToSession(
+      start,
+      [
+        { personIdx: 0, dateIdx: 0, day: SHIFT_N },
+        { personIdx: 9, dateIdx: 0, day: SHIFT_D },
+      ],
+      BOUNDS,
+    );
+    expect(result.ok).toBe(false);
+    expect(result.session).toBe(start);
   });
 });
 

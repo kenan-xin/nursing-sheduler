@@ -58,6 +58,7 @@ export {
 } from "./overlay";
 
 export {
+  applyCellBatchToSession,
   applyCellEditToSession,
   applyCellSwapToSession,
   canUndoSession,

@@ -141,3 +141,24 @@ describe("useRosterEditing — replacement coordinator settlement", () => {
     void resetSession;
   });
 });
+
+describe("applyCells", () => {
+  it("applies a batch as one undo step", async () => {
+    const { document, revision } = await seedWorking();
+    const { result } = renderHook(() =>
+      useRosterEditing({ document, revision, reload: async () => {} }),
+    );
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    let applied = false;
+    act(() => {
+      applied = result.current.applyCells([
+        { personIdx: 0, dateIdx: 0, day: { kind: "shift", shiftId: "N" } },
+        { personIdx: 1, dateIdx: 0, day: { kind: "shift", shiftId: "D" } },
+      ]);
+    });
+    expect(applied).toBe(true);
+    expect(result.current.editedDocument.edits).toHaveLength(2);
+    act(() => result.current.undo());
+    expect(result.current.editedDocument.edits).toEqual([]);
+  });
+});

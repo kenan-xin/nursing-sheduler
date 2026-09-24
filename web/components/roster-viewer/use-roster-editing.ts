@@ -21,6 +21,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { rosterStorage } from "@/lib/store";
 import {
+  applyCellBatchToSession,
   applyCellEditToSession,
   applyCellSwapToSession,
   canUndoSession,
@@ -31,6 +32,7 @@ import {
   type EditCoordinate,
   type EditSession,
   type OverlayBounds,
+  type RosterEdit,
 } from "@/lib/roster";
 import type { RosterDayState, RosterDocument } from "@/lib/roster";
 import { createAutosaveQueue, type AutosaveQueue, type AutosaveSnapshot } from "@/lib/roster";
@@ -51,6 +53,12 @@ export interface RosterEditingState {
   setCell(coordinate: EditCoordinate, day: RosterDayState): void;
   /** Swap two cells atomically. One revision, one undo step. */
   swapCells(a: EditCoordinate, b: EditCoordinate): void;
+  /**
+   * Set several cells as ONE edit (one undo step, one autosave revision). False when
+   * the batch is rejected; nothing changes then. The assistant's swap card uses it via
+   * `useRosterChangeRequest`.
+   */
+  applyCells(cells: readonly RosterEdit[]): boolean;
   /** Revert the last set/swap. Disabled when there is nothing to undo. */
   undo(): void;
   /** Whether an undo is available. */
@@ -251,6 +259,16 @@ export function useRosterEditing(options: RosterEditingOptions): RosterEditingSt
     [bounds, solvedDays, commit],
   );
 
+  const applyCells = useCallback(
+    (cells: readonly RosterEdit[]): boolean => {
+      const result = applyCellBatchToSession(sessionRef.current, cells, bounds);
+      if (!result.ok) return false;
+      commit(result.session);
+      return true;
+    },
+    [bounds, commit],
+  );
+
   const undo = useCallback(() => {
     const next = undoSessionEdit(sessionRef.current);
     commit(next);
@@ -311,6 +329,7 @@ export function useRosterEditing(options: RosterEditingOptions): RosterEditingSt
     editedDocument,
     setCell,
     swapCells,
+    applyCells,
     undo,
     canUndo: canUndoSession(session),
     save,

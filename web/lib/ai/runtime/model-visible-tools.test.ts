@@ -460,6 +460,38 @@ describe("the command arms the provider is actually shown", () => {
     expect(arm.description).toContain("never as a decision");
   });
 
+  // CHANGED DELIBERATELY (2026-09-24, bead 73z): the roster tools reach the wire flat.
+  it("puts the roster tools on the wire with plain string fields", () => {
+    const partners = child(child(wire.get("find_swap_partners"), "parameters"), "properties");
+    expect(child(partners, "person").type).toBe("string");
+    expect(child(child(partners, "dates"), "items").type).toBe("string");
+    expect(child(partners, "reason").enum).toEqual(["swap", "sick_or_emergency"]);
+    const prepare = child(child(wire.get("prepare_roster_swap"), "parameters"), "properties");
+    expect(Object.keys(prepare).sort()).toEqual([
+      "dates",
+      "laterDates",
+      "noTemporaryNurse",
+      "partner",
+      "person",
+      "reason",
+      "summary",
+    ]);
+    expect(Object.keys(partners).sort()).toEqual(["dates", "noTemporaryNurse", "person", "reason"]);
+    const borrow = child(child(wire.get("prepare_borrowed_cover"), "parameters"), "properties");
+    expect(Object.keys(borrow).sort()).toEqual([
+      "dates",
+      "groups",
+      "name",
+      "person",
+      "reason",
+      "source",
+      "summary",
+    ]);
+    expect(child(borrow, "source").enum).toEqual(["relief_pool", "other_ward", "agency"]);
+    const read = child(child(wire.get("get_roster"), "parameters"), "properties");
+    expect(child(child(read, "people"), "items").type).toBe("string");
+  });
+
   it("leaves the parameterless and flat-parameter tools exactly as they were", () => {
     // The flat tools worked live throughout, so the repair has to be provably confined:
     // an enum that was already an enum still reaches the wire as one.

@@ -65,6 +65,17 @@ const MODEL_VISIBLE_TOOLS = [
   // WIDENED DELIBERATELY (2026-09-24, bead 7v6): option cards. Shows a host card; a
   // click only sends an ordinary user message. It writes nothing and names no roster.
   "offer_choices",
+  // WIDENED DELIBERATELY (2026-09-24, plan roster-aware-assistant, bead 73z): roster edits
+  // are the next lifted family. get_roster and find_swap_partners only read.
+  // prepare_roster_swap only shows a host card. The roster changes on the user's Apply
+  // click, through the Roster screen's own edit session (lib/roster/change-request.ts),
+  // so no assistant transaction touches a roster table (asserted below, unchanged).
+  // prepare_borrowed_cover shows a card; the borrowed person is added by the shipped
+  // add_person arm on the user's Apply.
+  "get_roster",
+  "find_swap_partners",
+  "prepare_roster_swap",
+  "prepare_borrowed_cover",
 ] as const;
 
 /**
@@ -111,12 +122,14 @@ const PROPOSAL_OPERATIONS = [
 ] as const;
 
 /**
- * Vocabulary that would only appear in a name if Phase-2 roster assistance had
- * started. `set_roster_range` is deliberately NOT caught by this: it sets the
- * scheduling period on the scenario, which is Phase-1 setup — the tell is a verb
- * that acts on assignments, not the noun "roster".
+ * Vocabulary that would only appear in a name if minimal-change REPAIR had started.
+ * `set_roster_range` is deliberately NOT caught: it sets the scenario's period.
+ *
+ * NARROWED DELIBERATELY (2026-09-24, plan roster-aware-assistant): `swap` left this list
+ * when user-applied roster swaps became a lifted family. A tool that re-optimises,
+ * repairs or reassigns on its own is still caught.
  */
-const PHASE_2_VERBS = /repair|swap|reassign|minimal[_-]?change|disrupt|shortage|re[_-]?optimi/i;
+const PHASE_2_VERBS = /repair|reassign|minimal[_-]?change|disrupt|shortage|re[_-]?optimi/i;
 
 /**
  * The model-visible surface, taken from the CANONICAL REGISTRY rather than from a scan
