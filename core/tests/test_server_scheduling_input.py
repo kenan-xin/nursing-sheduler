@@ -379,6 +379,23 @@ def test_workspace_unknown_person_reference_is_not_ready():
     ]
 
 
+def test_workspace_unknown_skill_mix_person_is_not_ready():
+    document = _workspace_with_preferences(
+        """  - workspaceId: r1
+    type: shift type requirement
+    shiftType: day
+    requiredNumPeople: 1
+    skillMix:
+      - people: ghost
+        minNumPeople: 1"""
+    )
+    error = _content_error(document)
+    assert error.error_code == "workspace_not_ready"
+    assert (["preferences", 0, "skillMix"], "unresolved_workspace_reference") in [
+        (issue.path, issue.code) for issue in error.issues
+    ]
+
+
 def test_workspace_unknown_shift_type_reference_is_not_ready():
     document = _workspace_with_preferences(
         """  - workspaceId: r1

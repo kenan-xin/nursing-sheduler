@@ -18,6 +18,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import json
+import re
 from collections import defaultdict
 from dataclasses import dataclass, replace
 from typing import Any
@@ -153,6 +154,24 @@ _PREFERENCE_UNION_CLASSES = frozenset(
 )
 _DISCRIMINATOR_MISMATCH_TYPES = frozenset({"string_pattern_mismatch", "literal_error"})
 
+# A branch carrying an `@model_validator(mode="after")` (e.g. skillMix's) has
+# Pydantic wrap its loc segment as "function-after[validator_name(), ClassName]"
+# instead of the bare class name, since the schema node is now the validator
+# call wrapping the model. Recognize that form too so its errors still land in
+# the right union branch instead of leaking through as unfiltered "plain" noise.
+_FUNCTION_WRAPPER_CLASS_RE = re.compile(r"^function-\w+\[.*,\s*(\w+)\]$")
+
+
+def _branch_class_name(segment: Any) -> str | None:
+    """Return the preference-union class name a loc segment stands for, if any."""
+    if segment in _PREFERENCE_UNION_CLASSES:
+        return segment
+    if isinstance(segment, str):
+        match = _FUNCTION_WRAPPER_CLASS_RE.match(segment)
+        if match and match.group(1) in _PREFERENCE_UNION_CLASSES:
+            return match.group(1)
+    return None
+
 
 def _issue_from_error(loc: tuple[Any, ...], error: dict[str, Any]) -> SchedulingIssue:
     """Build one issue from a Pydantic error at an already-cleaned location."""
@@ -222,12 +241,15 @@ def issues_from_validation_error(exc: ValidationError) -> list[SchedulingIssue]:
     union_groups: dict[tuple[Any, ...], list[tuple[str, tuple[Any, ...], dict[str, Any]]]] = defaultdict(list)
     for error in exc.errors():
         loc = tuple(error.get("loc", ()))
-        branch_index = next((index for index, segment in enumerate(loc) if segment in _PREFERENCE_UNION_CLASSES), None)
+        branch_index, branch_class = next(
+            ((index, cls) for index, segment in enumerate(loc) if (cls := _branch_class_name(segment)) is not None),
+            (None, None),
+        )
         if branch_index is None:
             plain.append(_issue_from_error(loc, error))
             continue
         prefix = loc[:branch_index]
-        union_groups[prefix].append((loc[branch_index], loc[branch_index + 1 :], error))
+        union_groups[prefix].append((branch_class, loc[branch_index + 1 :], error))
 
     issues = list(plain)
     for prefix, entries in union_groups.items():
