@@ -217,6 +217,8 @@ describe("prepare_roster_swap", () => {
       {},
     );
     expect(answer).toMatch(/Nothing has changed/);
+    expect(answer).toMatch(/I've prepared/);
+    expect(answer).toMatch(/never .*past tense/);
     const card = useAssistantStore.getState().activeRosterChange;
     expect(card?.turnEpoch).toBe(TURN);
     expect(card?.request?.cells).toHaveLength(4);

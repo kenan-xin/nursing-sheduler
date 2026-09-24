@@ -215,8 +215,15 @@ describe("what the assistant knows about the ward and the solver", () => {
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/change everyone's shifts/);
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/Roster screen/);
   });
-  it("leaves a same-day-off clash to the manager", () => {
+  it("leaves a same-day-off clash to whoever decides leave", () => {
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/never decide it yourself/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/whoever decides leave/);
+  });
+  it("sends a one-off roster change through the whole cover ladder, not only swaps", () => {
+    expect(KNOWLEDGE_LINES.join(" ")).toMatch(/cover steps above/);
+  });
+  it("does not repeat the rest-number ban in the no-law line", () => {
+    expect(KNOWLEDGE_LINES[0]).not.toMatch(/rest/);
   });
   it("keeps every knowledge line short", () => {
     for (const line of KNOWLEDGE_LINES) expect(line.split(/\s+/).length, line).toBeLessThan(45);

@@ -50,6 +50,7 @@ describe("the rule entries carry the solver facts", () => {
     const text = summary("staffing-requirements");
     expect(text).toMatch(/preferred number is set here/);
     expect(text).toMatch(/separate shift code/);
+    expect(text).toMatch(/two teams are each set as the only people/);
     expect(text).not.toMatch(/at least/i);
     expect(text).toContain("nobody else may work");
     expect(text).toContain("skill-mix");

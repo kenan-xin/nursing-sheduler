@@ -175,8 +175,8 @@ export const CAPABILITY_ENTRIES = [
       "is set. Naming who is qualified means nobody else may work that shift at all. The " +
       "scheduler cannot express a skill-mix rule yet, and the assistant cannot set one up." +
       " For a number with a preferred extra (2, ideally 3), the preferred number is set here. " +
-      "Two different groups named as the only people for the same shift block each other, so " +
-      "each ward or team needs a separate shift code.",
+      "When two teams are each set as the only people for the same shift, they block each " +
+      "other, so each ward or team needs a separate shift code.",
     concepts: ["staffing requirement", "minimum staffing", "skill mix", "coverage", "headcount"],
     modes: ADVANCED_ONLY,
     featureGates: [],

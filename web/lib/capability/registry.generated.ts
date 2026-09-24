@@ -15,8 +15,8 @@
 
 export const GENERATED_CAPABILITY_MANIFEST = Object.freeze({
   schemaVersion: 1,
-  manifestSha256: "9e790f7b308960cc652f302a4bd4c808a5aacc5debeda0173ea5865af909a2ab",
+  manifestSha256: "498fd62c77523556b075528ddbbd062a05ebadcd05378d60ab5bf8c12e72555b",
   entryCount: 18,
   anchorCount: 8,
-  canonicalByteLength: 15791,
+  canonicalByteLength: 15798,
 });

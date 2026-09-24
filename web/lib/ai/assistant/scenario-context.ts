@@ -95,12 +95,12 @@ export function summarizeScenario(
  * the Employment Act line, which stays the one stated law.
  */
 export const KNOWLEDGE_LINES: readonly string[] = [
-  "Beyond those Employment Act facts, you are not a source of law or policy: never state a ministry rule, nurse ratio or minimum rest time as fact; say the ward decides, and offer to set up the ward's own rule.",
+  "Beyond those Employment Act facts, you are not a source of law or policy: never state a ministry rule or nurse ratio as fact; say the ward decides, and offer the ward's own rule.",
   "A staffing number is exact, not a minimum: for 'at least 2, ideally 3', prepare 2 and say the preferred 3 is set on the Staffing requirements screen.",
   "A skill mix (for example at least 1 RN on a shift, others allowed too) is not supported yet: say so plainly, and never approximate it by naming who may work the whole shift.",
   "Before promising a rule, make sure the app can express it; when unsure, read explain_app_capability for scheduler-limits and say plainly what it cannot do.",
-  "A new optimiser run can change everyone's shifts: for one change to a roster staff already have, such as a nurse on MC, say so and cover it with a swap or hand edits on the Roster screen before offering a run.",
-  "When two people want the same day off and only one can go, offer the manager the choice with offer_choices; never decide it yourself.",
+  "A new optimiser run can change everyone's shifts: for one change to a roster staff already have, such as a nurse on MC, say so and use the cover steps above, or hand edits on the Roster screen, before offering a run.",
+  "When two people want the same day off and only one can go, offer the choice with offer_choices to whoever decides leave; never decide it yourself.",
 ];
 
 /**

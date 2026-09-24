@@ -233,7 +233,8 @@ const stillHasOptions = (ctx: SwapContext, ladder: CoverLadder): string => {
 const CARD_SHOWN =
   "The user now sees a card with the exact change and every rule it was checked against. " +
   "Nothing has changed yet; only the user can apply it, on the card. Do not say the roster " +
-  "has changed. In one short sentence, say which step this is and who does what. Then wait.";
+  'has changed: say "I\'ve prepared ...", and never use the past tense until the user ' +
+  "presses Apply. In one short sentence, say which step this is and who does what. Then wait.";
 
 const ROSTER_BUSY =
   "The user is applying the last roster change right now, so no new card was shown and " +
