@@ -142,6 +142,28 @@ export function applyCellSwapToSession(
 }
 
 /**
+ * Set several cells as ONE edit: one normalization, one undo step, one autosave
+ * revision. The assistant's swap uses it: it exchanges several same-date cells
+ * between two people, and a swap must never be half-applied or need two undos.
+ * Any bad cell rejects the whole batch and leaves the session unchanged.
+ */
+export function applyCellBatchToSession(
+  session: EditSession,
+  cells: readonly RosterEdit[],
+  bounds: OverlayBounds,
+): NormalizeResult & { readonly session: EditSession } {
+  // Rebuilt as exact three-field records: `normalizeRosterEdits` rejects extra keys.
+  const result = normalizeWith(
+    session.edits,
+    cells.map(({ personIdx, dateIdx, day }) => ({ personIdx, dateIdx, day })),
+    bounds,
+    true,
+  );
+  if (!result.ok) return { ok: false, reason: result.reason, session };
+  return { ok: true, edits: result.edits, session: advanceSession(session, result.edits) };
+}
+
+/**
  * Revert the last set/swap. Restores the retained undo target and clears it, so
  * undo becomes disabled afterwards (single-level). Undo itself is an edit: it
  * produces a fresh revision and the autosave queue treats it as one save unit.
