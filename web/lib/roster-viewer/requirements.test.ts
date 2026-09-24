@@ -382,6 +382,39 @@ describe("hard status", () => {
   });
 });
 
+describe("requiredNumPeopleOverrides", () => {
+  it("checks a date with an override against the override", () => {
+    const document = documentWith([
+      requirement({
+        shiftType: "N",
+        requiredNumPeople: 2,
+        requiredNumPeopleOverrides: [["2026-07-02", 1]],
+      }),
+    ]);
+    // One person on N every day.
+    const days: RosterDayGrid = [
+      [shift("N"), shift("N")],
+      [OFF, OFF],
+      [OFF, OFF],
+      [OFF, OFF],
+    ];
+    const equations = buildEquations(document);
+    const index = indexFor(document, days);
+    expect(checked(evaluateRequirementCell(equations[0], index, 1))).toMatchObject({
+      status: "checked",
+      required: 1,
+      short: 0,
+      mismatch: false,
+    });
+    expect(checked(evaluateRequirementCell(equations[0], index, 0))).toMatchObject({
+      status: "checked",
+      required: 2,
+      short: 1,
+      mismatch: true,
+    });
+  });
+});
+
 describe("grid, summary and day health", () => {
   const document = documentWith(
     [
