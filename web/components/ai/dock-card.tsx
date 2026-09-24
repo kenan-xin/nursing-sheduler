@@ -136,6 +136,14 @@ export function DockCard({
     if (event.key === "Escape") {
       onClose?.();
       focusComposer();
+    } else if (
+      event.key === "Enter" &&
+      event.target instanceof HTMLButtonElement &&
+      rows.current.includes(event.target)
+    ) {
+      // Picked here rather than left to the button's own activation, which not every
+      // input path delivers; preventDefault below stops a second, native click.
+      event.target.click();
     } else if (event.key === "ArrowDown" && !inField) move(1);
     else if (event.key === "ArrowUp") move(-1);
     else if (!inField && /^[1-9]$/.test(event.key) && Number(event.key) <= options.length) {
