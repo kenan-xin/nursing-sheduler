@@ -153,7 +153,9 @@ describe("structured confirmations gate Apply", () => {
     render(<HostSurface />);
 
     const assumption = await screen.findByTestId("proposal-assumption");
-    expect(assumption).toHaveTextContent("Has ana agreed to move their leave from 02 to 10?");
+    expect(assumption).toHaveTextContent(
+      "Has ana agreed to move their leave from 2 Apr to 10 Apr?",
+    );
     expect(await screen.findByTestId("proposal-apply")).toBeDisabled();
 
     await user.click(await screen.findByTestId("assumption-confirm"));

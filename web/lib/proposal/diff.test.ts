@@ -409,7 +409,7 @@ describe("deriveProposalDiff", () => {
     });
     expect(find(`available:"${float}"`)).toMatchObject({
       label: float,
-      after: "Available: 2026-10-12 to 2026-10-14",
+      after: "Available: 12–14 Oct",
       kind: "created",
     });
     expect(find(`offrun:"${float}"|2026-10-01|2026-10-11`)).toMatchObject({

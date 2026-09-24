@@ -716,6 +716,9 @@ function RowEditor({
   onDone: () => void;
 }) {
   const key = mode === "edit" ? entityKey(item!.id) : "__new__";
+  // `aria-labelledby` is IDREFS (space-separated), and `key` can hold a spaced name
+  // ("string:Float RN"), so give the label an id with no whitespace of its own.
+  const temporaryLabelId = `people-temporary-label-${key.replace(/\s+/g, "-")}`;
   const [name, setName] = React.useState(mode === "edit" ? String(item!.id) : "");
   // Membership is a SET-model draft seeded from the live group slice at form-open. It
   // is NOT rebased while open — an external/temporal change closes the whole form
@@ -829,12 +832,19 @@ function RowEditor({
         <div className="mt-2 flex items-center gap-2">
           <Switch
             id={`people-temporary-input-${key}`}
-            aria-label="Temporary: borrowed from another ward, float pool or agency"
+            aria-labelledby={temporaryLabelId}
             data-testid={`people-temporary-input-${key}`}
             checked={temporary}
             onCheckedChange={setTemporary}
           />
-          <label htmlFor={`people-temporary-input-${key}`} className="text-meta text-ink2">
+          {/* `aria-labelledby` is a space-separated IDREFS list, so the label's own id
+              cannot embed `key` verbatim -- an entity id with a space (e.g. "Float RN")
+              would split into two bogus references and the switch would get no name. */}
+          <label
+            id={temporaryLabelId}
+            htmlFor={`people-temporary-input-${key}`}
+            className="text-meta text-ink2"
+          >
             Temporary (borrowed or agency)
           </label>
         </div>

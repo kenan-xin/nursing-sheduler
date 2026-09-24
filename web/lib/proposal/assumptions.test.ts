@@ -43,7 +43,11 @@ describe("deriveAssumptions", () => {
       toDate: "10",
     });
     expect(assumptions[0].question).toContain("ana");
-    expect(assumptions[0].question).toContain("10");
+    // The proposalScenario range is 2026-04-01..30, so ids "02"/"10" resolve to
+    // calendar dates -- the same reading the cancel question already gives.
+    expect(assumptions[0].question).toBe(
+      "Has ana agreed to move their leave from 2 Apr to 10 Apr?",
+    );
   });
 
   it("asks about leave a CASCADE destroys, which no command mentions", () => {
@@ -292,6 +296,18 @@ describe("real-world agreements beyond leave", () => {
     const result = applyAssistantCommands(before, commands);
     if (!result.ok) throw new Error(result.rejection.message);
     expect(deriveAssumptions(before, result.next, commands)).toEqual([]);
+  });
+
+  it("asks plain ward English when a borrowed nurse has no staff group", () => {
+    const before = SCENARIOS.onlyRnOnLeave();
+    const commands: Parameters<typeof applyAssistantCommands>[1] = [
+      { type: "add_person", name: "Agency Nurse", groups: [], temporary: true },
+    ];
+    const result = applyAssistantCommands(before, commands);
+    if (!result.ok) throw new Error(result.rejection.message);
+    const [assumption] = deriveAssumptions(before, result.next, commands);
+    expect(assumption.question).not.toContain("qualified as");
+    expect(assumption.question).toMatch(/lending ward or agency confirmed Agency Nurse for .*\?$/);
   });
 
   it("asks about a temporary nurse borrowed for the whole period", () => {

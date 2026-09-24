@@ -143,19 +143,27 @@ export function deriveAssumptions(
   const assumptions: OperationalAssumption[] = [];
   const claimed = new Set<string>();
 
+  const range = { start: before.rangeStart, end: before.rangeEnd };
   for (const command of commands) {
     if (command.type !== "move_leave") continue;
     const person = ref(command.personId);
     const from = ref(command.fromDate);
     const to = ref(command.toDate);
     claimed.add(`${stableStringify(command.personId)}|${stableStringify(command.fromDate)}`);
+    const fromIso = dateIdToIso(from, range);
+    const toIso = dateIdToIso(to, range);
+    // Read like the cancel question's calendar span ("14 Oct"), not the raw date id --
+    // a nurse on the Preview should not have to decode the roster's internal ids. The
+    // raw ids stay in `date`/`toDate`; only the question text changes.
+    const whenFrom = fromIso ? calendarSpan(fromIso, fromIso) : from;
+    const whenTo = toIso ? calendarSpan(toIso, toIso) : to;
     assumptions.push({
       assumptionId: assumptionId("leave_moved", person, from, to),
       type: "leave_moved",
       person,
       date: from,
       toDate: to,
-      question: `Has ${person} agreed to move their leave from ${from} to ${to}?`,
+      question: `Has ${person} agreed to move their leave from ${whenFrom} to ${whenTo}?`,
       detail:
         "Applying this rewrites the schedule as if the change is already agreed. The app cannot check that with anyone.",
     });
@@ -270,7 +278,10 @@ function borrowedStaff(
     if (loan.length === 0) return [];
     const first = loan[0].iso;
     const last = loan[loan.length - 1].iso;
-    const skills = command.groups.length > 0 ? command.groups.join(", ") : "no staff group";
+    // Natural ward English: name the skill group when there is one, otherwise ask
+    // the plain question rather than an awkward "qualified as no staff group".
+    const qualifiedAs =
+      command.groups.length > 0 ? `, qualified as ${command.groups.join(", ")}` : "";
     return [
       {
         assumptionId: assumptionId("borrowed_staff_arranged", command.name, first, last),
@@ -278,7 +289,7 @@ function borrowedStaff(
         person: command.name,
         date: first,
         toDate: last,
-        question: `Has the lending ward or agency confirmed ${command.name} for ${calendarSpan(first, last)}, qualified as ${skills}?`,
+        question: `Has the lending ward or agency confirmed ${command.name} for ${calendarSpan(first, last)}${qualifiedAs}?`,
         detail:
           "Applying this adds a nurse the ward does not employ. The app cannot check the loan or her qualifications with anyone.",
       },
