@@ -111,6 +111,23 @@ export function describeDate(iso: IsoDate): string {
   return `${WEEKDAY_LONG.format(date)}, ${DATE_LABEL.format(date)}`;
 }
 
+const SHORT_DATE = new Intl.DateTimeFormat("en-GB", {
+  day: "numeric",
+  month: "short",
+  timeZone: "UTC",
+});
+const SHORT_DATE_WEEKDAY = new Intl.DateTimeFormat("en-GB", {
+  weekday: "short",
+  day: "numeric",
+  month: "short",
+  timeZone: "UTC",
+});
+
+/** `14 Oct`, or `Wed 14 Oct`: how a ward roster writes a single day. */
+export function formatShortDate(iso: IsoDate, withWeekday = false): string {
+  return (withWeekday ? SHORT_DATE_WEEKDAY : SHORT_DATE).format(new Date(isoToUtcMs(iso)));
+}
+
 /**
  * The read-only per-day items derived from the committed range, chronological and
  * inclusive of both endpoints. Empty when the range is incomplete.

@@ -5,6 +5,7 @@
 // (core/nurse_scheduling/preference_types.py, shift_type_requirements):
 // - a requirement is an EXACT head count, or `requiredNumPeople..preferredNumPeople`
 //   when `preferredNumPeople` is set; overlapping requirements all apply;
+//   a requiredNumPeopleOverrides entry replaces the count on its date;
 // - `qualifiedPeople` bans everyone else from that requirement's shifts and dates,
 //   which binds every other requirement on the same shift too;
 // - leave pins and hard day-offs, hard "never" shift requests, hard count caps, and
@@ -158,17 +159,25 @@ interface Equation {
   dateIds: Set<string>;
   /** The solver's floor, `requiredNumPeople`. */
   required: number;
-  /** The solver's ceiling: `preferredNumPeople` when set, else `requiredNumPeople`. */
-  max: number;
+  /** Span id -> that date's floor, from `requiredNumPeopleOverrides`. */
+  overrides: Map<string, number>;
+  /**
+   * `preferredNumPeople`, the solver's ceiling on every date; null = the floor is exact.
+   * A skill-mix equation has no ceiling of its own: `Infinity`.
+   */
+  preferred: number | null;
   /** `qualifiedPeople` names a group or people: the solver bans everyone else. */
   restricts: boolean;
   /** False for coefficient-weighted cards: their bans apply, their counts are not checked. */
   counted: boolean;
   /** The skill-mix entry this equation checks, or null for a card's own head count. */
   mix: string | null;
-  /** A head equation's skill-mix groups that share no one and cannot fit under `max`. */
-  overflow: SkillMixOverflow | null;
+  /** A counted head equation's skill mix, checked for overflow against each date's ceiling. */
+  skillMix: RequirementCard["skillMix"];
 }
+
+const need = (eq: Equation, dateId: string) => eq.overrides.get(dateId) ?? eq.required;
+const ceiling = (eq: Equation, dateId: string) => eq.preferred ?? need(eq, dateId);
 
 /** Who can count toward one equation on one date. */
 interface Assessment {
@@ -228,17 +237,40 @@ function makeDates(state: ScenarioUiState) {
 }
 
 /** The span ids a requirement covers in this roster period. */
-export function requirementDateIds(state: ScenarioUiState, card: RequirementCard): string[] {
+export function requirementDateIds(
+  state: ScenarioUiState,
+  card: Pick<RequirementCard, "date">,
+): string[] {
   const { allDateIds, expand } = makeDates(state);
   const covered = expand(card.date == null ? [RESERVED_SHIFT_TYPE.all] : asList(card.date));
   return allDateIds.filter((id) => covered.has(id));
 }
 
-/** Greedily picks equations over pairwise-separate shifts, largest head count first. */
-function disjoint(candidates: Equation[]): Equation[] {
+/** The ISO dates a requirement covers in this roster period, in order. */
+export function requirementDateIsos(
+  state: ScenarioUiState,
+  card: Pick<RequirementCard, "date">,
+): string[] {
+  const { items, expand } = makeDates(state);
+  const covered = expand(card.date == null ? [RESERVED_SHIFT_TYPE.all] : asList(card.date));
+  return items.filter((item) => covered.has(item.id)).map((item) => item.iso);
+}
+
+/** A requirement's head count on one date: its override there, else `requiredNumPeople`. */
+export function requiredOn(
+  card: Pick<RequirementCard, "requiredNumPeople" | "requiredNumPeopleOverrides">,
+  iso: string,
+): number {
+  return (
+    card.requiredNumPeopleOverrides?.find(([date]) => date === iso)?.[1] ?? card.requiredNumPeople
+  );
+}
+
+/** Greedily picks equations over pairwise-separate shifts, largest head count that date first. */
+function disjoint(candidates: Equation[], dateId: string): Equation[] {
   const chosen: Equation[] = [];
   const used = new Set<string>();
-  for (const eq of [...candidates].sort((a, b) => b.required - a.required)) {
+  for (const eq of [...candidates].sort((a, b) => need(b, dateId) - need(a, dateId))) {
     if ([...eq.shiftTypes].some((s) => used.has(s))) continue;
     chosen.push(eq);
     eq.shiftTypes.forEach((s) => used.add(s));
@@ -247,7 +279,7 @@ function disjoint(candidates: Equation[]): Equation[] {
 }
 
 export function findStaffingShortfalls(state: ScenarioUiState): StaffingFinding[] {
-  const { items, allDateIds, expand } = makeDates(state);
+  const { range, items, allDateIds, expand } = makeDates(state);
   if (items.length === 0 || state.staff.length === 0) return [];
   const isoById = new Map(items.map((item) => [item.id, item.iso]));
   const staffIds = new Set(state.staff.map((person) => String(person.id)));
@@ -263,7 +295,7 @@ export function findStaffingShortfalls(state: ScenarioUiState): StaffingFinding[
   const peopleOf = (refs: PersonRefs) =>
     new Set([...expandPersonRefs(refs, state)].filter((id) => staffIds.has(id)));
 
-  const allEquations = buildEquations(state, expand, shiftsOf, peopleOf);
+  const allEquations = buildEquations(state, range, expand, shiftsOf, peopleOf);
   const equations = allEquations.filter((eq) => eq.counted);
   const restricting = allEquations.filter((eq) => eq.restricts);
   const away = buildAway(state, expand, shiftsOf, peopleOf);
@@ -304,6 +336,16 @@ export function findStaffingShortfalls(state: ScenarioUiState): StaffingFinding[
     return out;
   };
 
+  // Only an override date can change the ceiling, so this memo stays tiny.
+  const overflowMemo = new Map<Equation, Map<number, SkillMixOverflow | null>>();
+  const overflowOn = (eq: Equation, dateId: string): SkillMixOverflow | null => {
+    const max = ceiling(eq, dateId);
+    const byMax = overflowMemo.get(eq) ?? new Map<number, SkillMixOverflow | null>();
+    overflowMemo.set(eq, byMax);
+    if (!byMax.has(max)) byMax.set(max, skillMixOverflow(state, eq.skillMix, max));
+    return byMax.get(max)!;
+  };
+
   for (const dateId of allDateIds) {
     const iso = isoById.get(dateId) ?? null;
     const today = equations.filter((eq) => eq.dateIds.has(dateId));
@@ -311,14 +353,14 @@ export function findStaffingShortfalls(state: ScenarioUiState): StaffingFinding[
     // requirement_short: one equation needs more people than can count toward it.
     for (const eq of today) {
       const a = assess(eq, dateId);
-      if (a.free.size >= eq.required) continue;
+      if (a.free.size >= need(eq, dateId)) continue;
       findings.push({
         kind: "requirement_short",
         dateId,
         iso,
         shiftTypes: [...eq.shiftTypes],
         ruleIds: [eq.ruleId, ...a.banRules],
-        required: eq.required,
+        required: need(eq, dateId),
         available: a.free.size,
         away: [...a.away].map(([person, reason]) => ({ person, reason })),
         capRuleIds: [],
@@ -331,7 +373,7 @@ export function findStaffingShortfalls(state: ScenarioUiState): StaffingFinding[
     // Each person works at most one shift per day, so any set of equations with disjoint
     // shift sets needs that many DIFFERENT people. Both kinds can report the same date: the
     // day-level gap can be larger than any one requirement's (repair-options uses the max).
-    const chosen = disjoint(today);
+    const chosen = disjoint(today, dateId);
     if (chosen.length >= 2) {
       const pool = new Set<string>();
       const gone = new Map<string, AwayReason>();
@@ -342,7 +384,7 @@ export function findStaffingShortfalls(state: ScenarioUiState): StaffingFinding[
         a.away.forEach((reason, p) => gone.set(p, reason));
         a.banRules.forEach((r) => banRules.add(r));
       }
-      const required = chosen.reduce((sum, eq) => sum + eq.required, 0);
+      const required = chosen.reduce((sum, eq) => sum + need(eq, dateId), 0);
       if (pool.size < required) {
         findings.push({
           kind: "day_short",
@@ -373,9 +415,10 @@ export function findStaffingShortfalls(state: ScenarioUiState): StaffingFinding[
     for (const outer of today) {
       const inner = disjoint(
         today.filter((eq) => eq !== outer && isSubset(eq.shiftTypes, outer.shiftTypes)),
+        dateId,
       );
-      const required = inner.reduce((sum, eq) => sum + eq.required, 0);
-      if (required <= outer.max) continue;
+      const required = inner.reduce((sum, eq) => sum + need(eq, dateId), 0);
+      if (required <= ceiling(outer, dateId)) continue;
       findings.push({
         kind: "requirement_conflict",
         dateId,
@@ -383,7 +426,7 @@ export function findStaffingShortfalls(state: ScenarioUiState): StaffingFinding[
         shiftTypes: [...outer.shiftTypes],
         ruleIds: [...new Set([...inner.map((eq) => eq.ruleId), outer.ruleId])],
         required,
-        available: outer.max,
+        available: ceiling(outer, dateId),
         away: [],
         capRuleIds: [],
         skillMix:
@@ -402,19 +445,20 @@ export function findStaffingShortfalls(state: ScenarioUiState): StaffingFinding[
     // different people than the head count allows. disjoint() above cannot see this: the
     // mix equations share the head's shifts, so it keeps only one of them.
     for (const eq of today) {
-      if (!eq.overflow) continue;
+      const overflow = overflowOn(eq, dateId);
+      if (!overflow) continue;
       findings.push({
         kind: "requirement_conflict",
         dateId,
         iso,
         shiftTypes: [...eq.shiftTypes],
         ruleIds: [eq.ruleId],
-        required: eq.overflow.required,
-        available: eq.overflow.available,
+        required: overflow.required,
+        available: overflow.available,
         away: [],
         capRuleIds: [],
         skillMix: true,
-        mixPeople: eq.overflow.groups.join(" and "),
+        mixPeople: overflow.groups.join(" and "),
       });
     }
   }
@@ -422,7 +466,7 @@ export function findStaffingShortfalls(state: ScenarioUiState): StaffingFinding[
   // cap_short: over the period, the qualified people may not work enough of these shifts.
   for (const eq of equations) {
     const dates = allDateIds.filter((d) => eq.dateIds.has(d));
-    const demand = eq.required * dates.length;
+    const demand = dates.reduce((sum, d) => sum + need(eq, d), 0);
     let supply = 0;
     const binding = new Set<string>();
     for (const p of eq.qualified) {
@@ -466,6 +510,7 @@ export function findStaffingShortfalls(state: ScenarioUiState): StaffingFinding[
 
 function buildEquations(
   state: ScenarioUiState,
+  range: Range,
   expand: (refs: DateRef[]) => Set<string>,
   shiftsOf: (selector: string) => Set<string>,
   peopleOf: (refs: PersonRefs) => Set<string>,
@@ -479,7 +524,9 @@ function buildEquations(
     const dateIds = expand(card.date == null ? [RESERVED_SHIFT_TYPE.all] : asList(card.date));
     // ponytail: with coefficients a person can count more than once, so only the ban is used.
     const counted = !card.shiftTypeCoefficients?.length;
-    const max = card.preferredNumPeople ?? card.requiredNumPeople;
+    const overrides = new Map(
+      (card.requiredNumPeopleOverrides ?? []).map(([iso, n]) => [toDateId(iso, range), n] as const),
+    );
     // Solver: a scalar selector is one equation; each top-level list element is one
     // equation, and a group or nested list inside it aggregates its shifts.
     const selectors = Array.isArray(card.shiftType) ? card.shiftType : [card.shiftType];
@@ -494,11 +541,12 @@ function buildEquations(
         qualified,
         dateIds,
         required: card.requiredNumPeople,
-        max,
+        overrides,
+        preferred: card.preferredNumPeople ?? null,
         restricts,
         counted,
         mix: null,
-        overflow: counted ? skillMixOverflow(state, card.skillMix, max) : null,
+        skillMix: counted ? card.skillMix : undefined,
       });
 
       // Skill mix: a floor for a group AMONG this equation's staff. It bans nobody,
@@ -510,11 +558,12 @@ function buildEquations(
           qualified: new Set([...peopleOf([entry.people])].filter((p) => qualified.has(p))),
           dateIds,
           required: entry.minNumPeople,
-          max: Number.POSITIVE_INFINITY,
+          overrides: new Map(),
+          preferred: Number.POSITIVE_INFINITY,
           restricts: false,
           counted: true,
           mix: String(entry.people),
-          overflow: null,
+          skillMix: undefined,
         });
       }
     }
