@@ -663,6 +663,28 @@ describe("skill mix", () => {
     ...patch,
   });
 
+  it("rejects a skill mix combined with staffing multipliers", () => {
+    const errors = validateRequirementForm(
+      mixForm({
+        shiftTypeCoefficients: [["N", 2]],
+        skillMix: [{ people: "RN", minNumPeople: 1 }],
+      }),
+      domain,
+    );
+    expect(errors.skillMix).toBe(REQUIREMENT_MESSAGES.skillMixCoefficients);
+  });
+
+  it("accepts the blank multiplier pairs every draft carries", () => {
+    const errors = validateRequirementForm(
+      mixForm({
+        shiftTypeCoefficients: [["N", ""]],
+        skillMix: [{ people: "RN", minNumPeople: 1 }],
+      }),
+      domain,
+    );
+    expect(errors.skillMix).toBeUndefined();
+  });
+
   it.each([
     [[{ people: "", minNumPeople: 1 }], REQUIREMENT_MESSAGES.skillMixPeopleEmpty],
     [[{ people: "RN", minNumPeople: 0 }], REQUIREMENT_MESSAGES.skillMixMinInvalid],

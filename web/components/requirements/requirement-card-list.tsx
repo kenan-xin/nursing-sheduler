@@ -109,7 +109,12 @@ export function RequirementCardList({
                     },
                   ]
                 : []),
-              { label: "Required", value: `${card.requiredNumPeople}` },
+              {
+                label: "Required",
+                value: card.skillMix?.length
+                  ? `${card.requiredNumPeople} · at least ${card.skillMix.map((e) => `${e.minNumPeople} ${e.people}`).join(", ")}`
+                  : `${card.requiredNumPeople}`,
+              },
               {
                 label: "Preferred",
                 value: card.preferredNumPeople != null ? String(card.preferredNumPeople) : "—",

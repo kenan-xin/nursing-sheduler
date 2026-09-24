@@ -402,7 +402,9 @@ const isAllRef = (ref: PersonRef) => String(ref).toUpperCase() === RESERVED_SHIF
 function validateSkillMix(form: RequirementFormState): string | undefined {
   if (form.skillMix.length === 0) return undefined;
   if (!form.qualifiedPeople.every(isAllRef)) return REQUIREMENT_MESSAGES.skillMixNeedsEveryone;
-  if (form.shiftTypeCoefficients.length > 0) return REQUIREMENT_MESSAGES.skillMixCoefficients;
+  // Drafts carry a blank pair per eligible shift; only a filled-in value is a multiplier.
+  if (form.shiftTypeCoefficients.some(([, value]) => value !== ""))
+    return REQUIREMENT_MESSAGES.skillMixCoefficients;
   const seen = new Set<string>();
   for (const entry of form.skillMix) {
     if (entry.people === "") return REQUIREMENT_MESSAGES.skillMixPeopleEmpty;

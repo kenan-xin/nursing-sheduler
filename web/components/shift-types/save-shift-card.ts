@@ -139,6 +139,7 @@ export class ShiftRequirementValidationError extends Error {
       errors.date ??
       errors.weight ??
       errors.coefficients ??
+      errors.skillMix ??
       "Fix the staffing requirement errors first.";
     super(message);
     this.name = "ShiftRequirementValidationError";
@@ -217,6 +218,11 @@ function contextChips(
 ): string[] {
   const others = matches.filter((match) => match.card.uid !== baseline.uid);
   const chips: string[] = [];
+
+  // Skill mix is not editable here, so show it for the baseline too.
+  for (const match of matches) {
+    for (const e of match.card.skillMix ?? []) chips.push(`at least ${e.minNumPeople} ${e.people}`);
+  }
 
   for (const match of others) {
     if (!isAllScope(match.card.qualifiedPeople)) {

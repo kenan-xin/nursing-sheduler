@@ -15,6 +15,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { ScenarioUiState } from "@/lib/scenario";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/select";
+import { RESERVED_SHIFT_TYPE } from "@/lib/scenario";
 import { CardEditorForm } from "@/components/card-editor/card-editor-shell";
 import { FieldShell } from "@/components/card-editor/field-shell";
 import { TransferList } from "@/components/entity-editor/transfer-list";
@@ -36,7 +39,9 @@ import {
   preferredDiffersFromRequired,
   selectShiftType,
   validateRequirementForm,
+  REQUIREMENT_MESSAGES,
   type RequirementErrors,
+  type SkillMixDraft,
   type RequirementFormState,
   type RequirementNumberValue,
 } from "./requirements-model";
@@ -53,6 +58,8 @@ const WEIGHT_NOTE =
   "Weight is not needed when the preferred number of people equals the required number.";
 const WEIGHT_HELP =
   "Penalty applied when the preferred number of people isn't met (the more negative, the higher the penalty). -Infinity makes it a hard requirement.";
+const SKILL_MIX_HELP =
+  "At least this many of the shift's nurses must come from the group. Anyone can fill the other places.";
 const PREFERRED_NOTE =
   "Defaults to Required if left empty. Set higher to make extra staffing a soft goal (a weight then applies).";
 
@@ -102,6 +109,17 @@ export function RequirementForm({
   const dateItems = buildDateScopeDateItems(state);
   const noDates = autoScopes.length === 0 && dateGroups.length === 0 && dateItems.length === 0;
   const diff = preferredDiffersFromRequired(form);
+  const openToEveryone = form.qualifiedPeople.every(
+    (ref) => String(ref).toUpperCase() === RESERVED_SHIFT_TYPE.all,
+  );
+  const mixOptions = [...people.groups, ...people.items].filter(
+    (option) => String(option.value).toUpperCase() !== RESERVED_SHIFT_TYPE.all,
+  );
+
+  function setMix(next: SkillMixDraft[]) {
+    setForm((prev) => ({ ...prev, skillMix: next }));
+    setErrors((prev) => (prev.skillMix ? { ...prev, skillMix: undefined } : prev));
+  }
 
   function submit() {
     const nextErrors = validateRequirementForm(form, domain);
@@ -342,6 +360,76 @@ export function RequirementForm({
             removeAria={(l) => `Remove ${l} from qualified people`}
           />
         )}
+      </FieldShell>
+
+      <FieldShell label="Skill mix" hint="optional" error={errors.skillMix}>
+        <p className="max-w-[60ch] text-meta leading-[1.45] text-ink3">{SKILL_MIX_HELP}</p>
+        {!openToEveryone && (
+          <p className="text-meta italic text-ink3">
+            {REQUIREMENT_MESSAGES.skillMixNeedsEveryone}.
+          </p>
+        )}
+        {form.skillMix.map((entry, i) => (
+          <div key={i} className="flex flex-wrap items-center gap-2">
+            <span className="text-meta text-ink3">At least</span>
+            <Input
+              type="number"
+              min={1}
+              step={1}
+              aria-label={`Skill mix ${i + 1} minimum`}
+              value={entry.minNumPeople}
+              disabled={!openToEveryone}
+              onChange={(e) =>
+                setMix(
+                  form.skillMix.map((x, j) =>
+                    j === i ? { ...x, minNumPeople: parseRequirementInteger(e.target.value) } : x,
+                  ),
+                )
+              }
+              onWheel={blurOnWheel}
+              className="w-[88px] flex-none font-bold"
+            />
+            <span className="text-meta text-ink3">from</span>
+            <Select
+              aria-label={`Skill mix ${i + 1} group`}
+              value={String(entry.people)}
+              disabled={!openToEveryone}
+              onChange={(e) => {
+                const picked = mixOptions.find((o) => String(o.value) === e.target.value);
+                setMix(
+                  form.skillMix.map((x, j) =>
+                    j === i ? { ...x, people: picked?.value ?? "" } : x,
+                  ),
+                );
+              }}
+            >
+              <option value="">Choose a group or person</option>
+              {mixOptions.map((o) => (
+                <option key={entityKey(o.value)} value={String(o.value)}>
+                  {o.label}
+                </option>
+              ))}
+            </Select>
+            <Button
+              type="button"
+              variant="ghost"
+              aria-label={`Remove skill mix ${i + 1}`}
+              onClick={() => setMix(form.skillMix.filter((_, j) => j !== i))}
+            >
+              Remove
+            </Button>
+          </div>
+        ))}
+        <div>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={!openToEveryone}
+            onClick={() => setMix([...form.skillMix, { people: "", minNumPeople: 1 }])}
+          >
+            Add skill mix
+          </Button>
+        </div>
       </FieldShell>
 
       <FieldShell label="Dates" required error={errors.date}>

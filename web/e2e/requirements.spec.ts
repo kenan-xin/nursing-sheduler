@@ -32,6 +32,7 @@ type RequirementCard = {
   date?: unknown;
   weight: number;
   disabled?: boolean;
+  skillMix?: { people: string | number; minNumPeople: number }[];
 };
 
 type NsWindow = {
@@ -161,6 +162,32 @@ test.describe.serial("T12 staffing requirements editor (M1 clone)", () => {
     expect(cards[0].qualifiedPeople).toEqual(["ALL"]);
     expect(cards[0].date).toEqual(["ALL"]);
     expect((await pastCount(page)) - before).toBe(1);
+  });
+
+  test("adds 'Night needs 4, at least 2 RN' and shows it on the card", async ({ page }) => {
+    await gotoReady(page);
+    await seed(page, {
+      ...BASE_SEED,
+      staff: ["rn1", "rn2", "en1", "en2"].map((id) => ({ id, history: [] })),
+      staffGroups: [{ id: "RN", members: ["rn1", "rn2"] }],
+    });
+
+    await page.getByTestId("add-card-toggle").click();
+    await page.getByTestId("shift-type-single-select-option-N").check();
+    await page.getByTestId("requirement-required").fill("4");
+    await page.getByRole("button", { name: /Add ALL/ }).click();
+    await page
+      .getByTestId("date-scope-field")
+      .getByRole("button", { name: /all dates/i })
+      .click();
+    await page.getByRole("button", { name: "Add skill mix" }).click();
+    await page.getByLabel("Skill mix 1 minimum").fill("2");
+    await page.getByLabel("Skill mix 1 group").selectOption("RN");
+    await page.getByTestId("card-editor-submit").click();
+
+    await expect(page.getByTestId("requirement-card-0")).toContainText("at least 2 RN");
+    const cards = await readRequirements(page);
+    expect(cards[0].skillMix).toEqual([{ people: "RN", minNumPeople: 2 }]);
   });
 
   test("a distinct preferred shows the dial and enforces the non-positive rule", async ({
