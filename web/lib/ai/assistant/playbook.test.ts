@@ -178,6 +178,11 @@ describe("setup hints carry ward defaults, never invented law", () => {
     expect(text).not.toMatch(/\b(law|MOH|MOM|required by)\b/);
     expect(text).toMatch(/1 rest day a week, which the Employment Act sets/);
   });
+  it("builds the weekly rest day as a pattern, never a period total", () => {
+    const text = ask("rules");
+    expect(text).toMatch(/ALL 7 days in a row at -infinity/);
+    expect(text).toMatch(/not a total over the period/);
+  });
   it("never invites a skill mix it cannot set up", () => {
     const text = ask("rules");
     expect(text).not.toMatch(/must be from a group/);

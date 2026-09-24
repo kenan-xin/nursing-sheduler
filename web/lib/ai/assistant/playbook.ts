@@ -121,7 +121,7 @@ export const SETUP_STEPS: readonly SetupStepGuide[] = [
       "How many nurses each shift needs. A minimum from a group, such as at least 1 RN, is a skill mix, which is not supported yet; say so rather than approximating it.",
       "The rest rules the ward uses. Many wards use no day shift straight after a night as a must, and a day off after nights as a preference.",
       "Limits such as the most nights one nurse may work in the period, and whether to balance nights and weekends across the team.",
-      "Suggest a rule giving each nurse at least 1 rest day a week, which the Employment Act sets.",
+      "Suggest a rule giving each nurse at least 1 rest day a week, which the Employment Act sets: a shift sequence rule of ALL 7 days in a row at -infinity (no 7 working days in a row), not a total over the period.",
     ],
     proposeWith: ["add_staffing_requirement", "add_succession_rule", "add_count_rule"],
   },
