@@ -31,9 +31,6 @@ jobs:
       - name: "Confirm pinned Python (project toolchain: Python 3.12.13)"
         run: python3 --version
 
-      - name: Enable pnpm (pinned via package.json packageManager)
-        run: corepack enable
-
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -75,8 +72,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: jdx/mise-action@v2
-      - name: Enable pnpm
-        run: corepack enable
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Install Playwright browser
