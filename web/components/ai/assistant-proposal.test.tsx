@@ -508,6 +508,23 @@ describe("the Preview's decision reads as option-card choices", () => {
     expect(sessionSend).not.toHaveBeenCalled();
   });
 
+  it("appearing mid-turn, holds focus on the card, then moves it to Apply", async () => {
+    sessionState.isRunning = true;
+    await showProposal(SHRINK);
+    const { rerender } = live();
+    const card = await screen.findByTestId("assistant-proposal");
+
+    expect(card).toHaveFocus();
+    expect(screen.getByTestId("proposal-revise")).not.toHaveFocus();
+    expect(screen.getByTestId("proposal-cancel")).not.toHaveFocus();
+
+    sessionState.isRunning = false;
+    rerender(
+      <AssistantLiveConversation threadId="thread-1" routePath="/dates" routeLabel="Dates" />,
+    );
+    await waitFor(() => expect(screen.getByTestId("proposal-apply")).toHaveFocus());
+  });
+
   it("stacks a newer card nearest the composer", async () => {
     await showProposal(SHRINK);
     live();

@@ -19,7 +19,9 @@ import {
   createContext,
   useCallback,
   useContext,
+  useMemo,
   useRef,
+  useState,
   type ComponentProps,
   type ReactNode,
 } from "react";
@@ -27,7 +29,7 @@ import { CopilotChatInput } from "@copilotkit/react-core/v2";
 import { useAssistantStore } from "@/lib/ai/assistant/store";
 import type { AssistantProposalController } from "./use-assistant-proposals";
 import { ChoiceCard } from "./choice-card";
-import { ComposerFocusContext } from "./dock-card";
+import { DockServicesContext } from "./dock-card";
 import { DiagnosticSearchCard } from "./diagnostic-search-card";
 import { OptimizeRunRequestCard } from "./optimize-run-request-card";
 import { ProposalPreviewCard } from "./proposal-preview-card";
@@ -129,6 +131,8 @@ function DockedComposerView(props: ComponentProps<typeof CopilotChatInput>) {
     () => container.current?.querySelector("textarea")?.focus(),
     [],
   );
+  const [announcement, setAnnouncement] = useState("");
+  const services = useMemo(() => ({ focusComposer, announce: setAnnouncement }), [focusComposer]);
 
   return (
     <>
@@ -138,9 +142,13 @@ function DockedComposerView(props: ComponentProps<typeof CopilotChatInput>) {
           // The app-owned subtree inside the library's chat root (see globals.css §4).
           data-assistant-dock=""
         >
-          <ComposerFocusContext.Provider value={focusComposer}>
+          {/* Always mounted, so a new card's title is announced rather than lost. */}
+          <p className="sr-only" aria-live="polite" data-testid="assistant-dock-announcer">
+            {announcement}
+          </p>
+          <DockServicesContext.Provider value={services}>
             <AssistantCardDock value={value} />
-          </ComposerFocusContext.Provider>
+          </DockServicesContext.Provider>
         </div>
       ) : null}
       <CopilotChatInput

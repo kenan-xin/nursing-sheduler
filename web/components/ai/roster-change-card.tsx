@@ -177,6 +177,8 @@ function RosterChangeBody({
       eyebrow={<p className={SECTION_HEAD}>{view.stepLabel}</p>}
       title={view.heading}
       rowsLabel="Your decision"
+      // The primary action only; until it is usable the card itself holds focus.
+      focusRow={0}
       options={
         stopped
           ? []

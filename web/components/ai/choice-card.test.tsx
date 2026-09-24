@@ -132,13 +132,14 @@ describe("the option card", () => {
     assistantActions.showChoices(MULTI, 1);
     renderLive();
 
-    const sendChecked = screen.getByRole("button", { name: "Send selected" });
-    expect(sendChecked).toBeDisabled();
+    // Nothing checked: the row offers Skip, not Send.
+    expect(screen.queryByRole("button", { name: "Send selected" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Skip" })).toBeInTheDocument();
     // Clicked out of order: the message still follows the options.
     await userEvent.click(screen.getByRole("checkbox", { name: "Night" }));
     await userEvent.click(screen.getByRole("checkbox", { name: "Day" }));
     expect(screen.getByRole("checkbox", { name: "Day" })).toBeChecked();
-    await userEvent.click(sendChecked);
+    await userEvent.click(screen.getByRole("button", { name: "Send selected" }));
 
     expect(send).toHaveBeenCalledExactlyOnceWith("Day, Night");
     expect(screen.queryByRole("group", { name: MULTI.question })).toBeNull();
@@ -304,6 +305,55 @@ describe("the option card's keys", () => {
     expect(send).toHaveBeenCalledExactlyOnceWith("Ana Tan");
   });
 
+  it("appearing mid-turn, holds focus on the card; row 1 takes it when the turn ends", () => {
+    session.isRunning = true;
+    assistantActions.showChoices(SINGLE, 1);
+    const { rerender } = render(
+      <AssistantLiveConversation threadId="thread-1" routePath="/dates" routeLabel="Dates" />,
+    );
+
+    expect(screen.getByTestId("assistant-choices")).toHaveFocus();
+    expect(screen.getByRole("button", { name: /Ana Lim/ })).toBeDisabled();
+
+    session.isRunning = false;
+    rerender(
+      <AssistantLiveConversation threadId="thread-1" routePath="/dates" routeLabel="Dates" />,
+    );
+    expect(screen.getByRole("button", { name: /Ana Lim/ })).toHaveFocus();
+  });
+
+  it("leaves focus alone when the user moved it before the turn ended", () => {
+    session.isRunning = true;
+    assistantActions.showChoices(SINGLE, 1);
+    const { rerender } = render(
+      <AssistantLiveConversation threadId="thread-1" routePath="/dates" routeLabel="Dates" />,
+    );
+    const composer = screen.getByTestId("composer-send");
+    act(() => composer.focus());
+
+    session.isRunning = false;
+    rerender(
+      <AssistantLiveConversation threadId="thread-1" routePath="/dates" routeLabel="Dates" />,
+    );
+    expect(composer).toHaveFocus();
+  });
+
+  it("ignores a number key held with Ctrl, Alt or Meta", async () => {
+    assistantActions.showChoices(SINGLE, 1);
+    renderLive();
+
+    await userEvent.keyboard("{Control>}2{/Control}{Alt>}2{/Alt}{Meta>}2{/Meta}");
+
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("announces the card to screen readers", () => {
+    assistantActions.showChoices(SINGLE, 1);
+    renderLive();
+
+    expect(screen.getByTestId("assistant-dock-announcer")).toHaveTextContent(SINGLE.question);
+  });
+
   it("Esc closes the card and sends nothing", async () => {
     assistantActions.showChoices(SINGLE, 1);
     renderLive();
@@ -361,9 +411,9 @@ describe("several questions on one card", () => {
     await userEvent.click(screen.getByRole("button", { name: "Any Staff Nurse" }));
 
     expect(send).toHaveBeenCalledExactlyOnceWith(
-      "Add public holidays? Yes, add them\n" +
-        "Meal break on a 12-hour shift? 45 minutes, unpaid\n" +
-        "Who can be in charge? Any Staff Nurse",
+      "Add public holidays? — Yes, add them\n" +
+        "Meal break on a 12-hour shift? — 45 minutes, unpaid\n" +
+        "Who can be in charge? — Any Staff Nurse",
     );
     expect(screen.queryByTestId("assistant-choices")).toBeNull();
   });
@@ -383,7 +433,60 @@ describe("several questions on one card", () => {
         ["skipped", "30 minutes", "Senior Staff Nurses only"],
       ),
     );
-    expect(send.mock.calls[0]![0]).toContain("Add public holidays? skipped");
+    expect(send.mock.calls[0]![0]).toContain("Add public holidays? — skipped");
+  });
+
+  it("x part-way sends the answers so far, the rest marked skipped", async () => {
+    assistantActions.showChoices(PAGED, 1);
+    renderLive();
+
+    await userEvent.click(screen.getByRole("button", { name: "Yes, add them" }));
+    expect(screen.getByTestId("assistant-dock-announcer")).toHaveTextContent(
+      "Question 2 of 3: Meal break on a 12-hour shift?",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    expect(send).toHaveBeenCalledExactlyOnceWith(
+      "Add public holidays? — Yes, add them\n" +
+        "Meal break on a 12-hour shift? — skipped\n" +
+        "Who can be in charge? — skipped",
+    );
+  });
+
+  it("Esc before any answer closes without sending", async () => {
+    assistantActions.showChoices(PAGED, 1);
+    renderLive();
+
+    await userEvent.keyboard("{Escape}");
+
+    expect(send).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("assistant-choices")).toBeNull();
+  });
+
+  it("Skip waits for a running turn like the rest of the card", () => {
+    session.isRunning = true;
+    assistantActions.showChoices(PAGED, 1);
+    renderLive();
+
+    expect(screen.getByRole("button", { name: "Skip" })).toBeDisabled();
+  });
+
+  it("a multi-select question can be skipped too", async () => {
+    assistantActions.showChoices(
+      { ...PAGED, moreQuestions: [{ ...MULTI }, PAGED.moreQuestions[1]!] },
+      1,
+    );
+    renderLive();
+
+    await userEvent.click(screen.getByRole("button", { name: "No" }));
+    await userEvent.click(screen.getByRole("button", { name: "Skip" }));
+    await userEvent.click(screen.getByRole("button", { name: "Any Staff Nurse" }));
+
+    expect(send).toHaveBeenCalledExactlyOnceWith(
+      "Add public holidays? — No\n" +
+        "Which shifts should this rule cover? — skipped\n" +
+        "Who can be in charge? — Any Staff Nurse",
+    );
   });
 
   it("does not go forward past an unanswered question", () => {

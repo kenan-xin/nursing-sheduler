@@ -6,7 +6,8 @@
 //
 // An offer may carry up to four questions. They are asked one at a time ("1 of 3"),
 // each pick moves on, Back revisits an earlier one, and the last answer sends ONE
-// message listing every question with its answer.
+// message listing every question with its answer. Closing part-way sends the answers
+// given so far, the rest marked skipped, so nothing the user picked is lost.
 
 import { useState } from "react";
 import { FaChevronLeft, FaChevronRight } from "@/components/icons";
@@ -29,10 +30,10 @@ const SKIPPED = "skipped";
 /** The one message for a multi-question card: each question with its answer. */
 export function describeAnswers(
   questions: readonly ChoiceQuestion[],
-  answers: readonly string[],
+  answers: readonly (string | undefined)[],
 ): string {
   return questions
-    .map((question, index) => `${question.question} ${answers[index] ?? SKIPPED}`)
+    .map((question, index) => `${question.question} — ${answers[index] ?? SKIPPED}`)
     .join("\n");
 }
 
@@ -60,6 +61,10 @@ function ChoiceCardBody({ offer, onSend, disabled }: ChoiceCardProps & { offer: 
   };
 
   const close = () => assistantActions.clearChoices();
+  const given = answers.some((text) => text !== undefined);
+  // x and Esc: part-way through a paged card, the answers so far are still sent.
+  const leave = () =>
+    paged && given && !disabled ? onSend(describeAnswers(questions, answers)) : close();
 
   return (
     <DockCard
@@ -68,7 +73,13 @@ function ChoiceCardBody({ offer, onSend, disabled }: ChoiceCardProps & { offer: 
       data-testid="assistant-choices"
       data-page={page}
       title={question.question}
-      onClose={close}
+      announcement={
+        paged
+          ? `Question ${page + 1} of ${questions.length}: ${question.question}`
+          : question.question
+      }
+      onClose={leave}
+      focusRow={0}
       aside={
         paged ? (
           <span className="flex shrink-0 items-center gap-1 text-meta text-ink3 tabular-nums">

@@ -195,6 +195,8 @@ export function ProposalPreviewCard({ controller, onSend, disabled }: ProposalPr
       data-status={readiness.status}
       title="Make this change?"
       rowsLabel="Your decision"
+      // The primary action only; until it is usable the card itself holds focus.
+      focusRow={0}
       // The decision, as option rows. Apply waits for the agreements and for a running
       // turn; the two exits never wait.
       options={[

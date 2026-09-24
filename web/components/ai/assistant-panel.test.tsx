@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { useAuthorityStore } from "@/lib/store";
-import { assistantActions, hydrateAssistant } from "@/lib/ai/assistant/store";
+import { assistantActions, hydrateAssistant, useAssistantStore } from "@/lib/ai/assistant/store";
 import {
   persistThreadMessages,
   recordPreparingTurn,
@@ -202,6 +202,35 @@ describe("the responsive dock and sheet", () => {
       "data-testid",
       "assistant-close",
     );
+  });
+
+  it("Esc on a docked card closes the card, not the panel", async () => {
+    render(<AssistantSurface />);
+    await screen.findByTestId("assistant-live-conversation");
+    act(() =>
+      assistantActions.showChoices(
+        {
+          question: "Which Ana?",
+          options: [
+            { label: "Ana Lim", detail: "" },
+            { label: "Ana Tan", detail: "" },
+          ],
+          multiple: false,
+        },
+        0,
+      ),
+    );
+    const row = await screen.findByRole("button", { name: "Ana Lim" });
+
+    fireEvent.keyDown(row, { key: "Escape" });
+
+    expect(screen.queryByTestId("assistant-choices")).toBeNull();
+    expect(useAssistantStore.getState().panelOpen).toBe(true);
+    expect(screen.getByTestId("assistant-dock")).toBeInTheDocument();
+
+    // An Escape the card did not handle still closes the panel.
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(useAssistantStore.getState().panelOpen).toBe(false);
   });
 
   it("mounts exactly ONE conversation, so one thread has one agent", async () => {

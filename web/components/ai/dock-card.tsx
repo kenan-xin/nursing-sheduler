@@ -23,8 +23,18 @@ import { Input } from "@/components/ui/input";
 import { Surface } from "@/components/ui/surface";
 import { cn } from "@/lib/utils";
 
-/** Puts focus back in the composer. Provided by the dock; a no-op outside it. */
-export const ComposerFocusContext = createContext<() => void>(() => {});
+/** What the dock gives its cards. No-ops outside the dock. */
+export interface DockServices {
+  /** Puts focus back in the composer. */
+  focusComposer: () => void;
+  /** Says a new card (or pager step) out loud to screen readers. */
+  announce: (text: string) => void;
+}
+
+export const DockServicesContext = createContext<DockServices>({
+  focusComposer: () => {},
+  announce: () => {},
+});
 
 export interface DockOption {
   label: string;
@@ -63,8 +73,20 @@ export interface DockCardProps extends Omit<HTMLAttributes<HTMLDivElement>, "tit
   onSkip?: () => void;
   /** Names the rows as one group ("Your decision"). */
   rowsLabel?: string;
-  /** Take focus when the card appears. */
+  /**
+   * Take focus when the card appears. Focus goes to the card itself, with no row
+   * picked, and moves to the `focusRow` option once that row is usable -- unless the
+   * user has put focus somewhere else in the meantime.
+   */
   autoFocus?: boolean;
+  /**
+   * The option that takes focus by default. Only a row that is safe to pick by
+   * reflex: the primary action, or the first answer to a question. Never a row that
+   * sets a change aside or drops it. Omitted: the card itself takes focus.
+   */
+  focusRow?: number;
+  /** What a screen reader hears when the card appears; defaults to a string title. */
+  announcement?: string;
   /** Shown between the title and the rows. */
   children?: ReactNode;
 }
@@ -90,11 +112,14 @@ export function DockCard({
   onSkip,
   rowsLabel,
   autoFocus = true,
+  focusRow,
+  announcement,
   children,
   ...props
 }: DockCardProps) {
   const titleId = useId();
-  const focusComposer = useContext(ComposerFocusContext);
+  const { focusComposer, announce } = useContext(DockServicesContext);
+  const root = useRef<HTMLDivElement>(null);
   // By index, not label: two options may share a label.
   const [checked, setChecked] = useState<readonly number[]>([]);
   const [text, setText] = useState("");
@@ -104,11 +129,24 @@ export function DockCard({
   const usable = (row: HTMLButtonElement | HTMLInputElement | null | undefined) =>
     row != null && !row.disabled;
 
+  const spoken = announcement ?? (typeof title === "string" ? title : "");
+  // Once, when the card appears; a re-render must not pull focus back.
   useEffect(() => {
-    if (!autoFocus || isTyping()) return;
-    rows.current.find(usable)?.focus();
-    // Once, when the card appears; a re-render must not pull focus back.
+    if (spoken) announce(spoken);
+    if (autoFocus && !isTyping()) root.current?.focus();
   }, []);
+
+  // Cards appear mid-turn with their rows disabled. When the default row becomes
+  // usable (the turn ended), focus moves onto it -- but only if focus is still on the
+  // card itself or nowhere, never away from something the user chose since.
+  const focusable = focusRow !== undefined && !options[focusRow]?.disabled && !multiple?.disabled;
+  useEffect(() => {
+    if (!autoFocus || !focusable || focusRow === undefined) return;
+    const active = document.activeElement;
+    if (active === root.current || active === document.body || active === null) {
+      rows.current[focusRow]?.focus();
+    }
+  }, [autoFocus, focusable, focusRow]);
 
   const move = (step: 1 | -1) => {
     const list = rows.current.slice(0, options.length + (other ? 1 : 0));
@@ -132,8 +170,16 @@ export function DockCard({
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    const inField = event.target instanceof HTMLInputElement && event.target.type !== "checkbox";
+    const target = event.target as HTMLElement;
+    const inField =
+      (target instanceof HTMLInputElement && target.type !== "checkbox") ||
+      target instanceof HTMLTextAreaElement ||
+      target.isContentEditable;
+    const otherRow = target === rows.current[options.length];
+    const modified = event.altKey || event.ctrlKey || event.metaKey;
     if (event.key === "Escape") {
+      // Handled HERE: the panel closes on any Escape that reaches the document.
+      event.stopPropagation();
       onClose?.();
       focusComposer();
     } else if (
@@ -145,8 +191,13 @@ export function DockCard({
       // input path delivers; preventDefault below stops a second, native click.
       event.target.click();
     } else if (event.key === "ArrowDown" && !inField) move(1);
-    else if (event.key === "ArrowUp") move(-1);
-    else if (!inField && /^[1-9]$/.test(event.key) && Number(event.key) <= options.length) {
+    else if (event.key === "ArrowUp" && (!inField || otherRow)) move(-1);
+    else if (
+      !inField &&
+      !modified &&
+      /^[1-9]$/.test(event.key) &&
+      Number(event.key) <= options.length
+    ) {
       pick(Number(event.key) - 1);
     } else return;
     event.preventDefault();
@@ -226,7 +277,7 @@ export function DockCard({
               } else if (trimmed !== "") other.onSend(trimmed);
             }}
           />
-          {multiple ? (
+          {multiple && (checked.length > 0 || trimmed !== "" || !onSkip) ? (
             <Button
               size="sm"
               aria-label="Send selected"
@@ -235,7 +286,7 @@ export function DockCard({
             >
               Send
             </Button>
-          ) : trimmed !== "" ? (
+          ) : !multiple && trimmed !== "" ? (
             <Button
               size="sm"
               aria-label={other.sendLabel}
@@ -245,7 +296,7 @@ export function DockCard({
               Send
             </Button>
           ) : onSkip ? (
-            <Button size="sm" variant="secondary" onClick={onSkip}>
+            <Button size="sm" variant="secondary" disabled={other.disabled} onClick={onSkip}>
               Skip
             </Button>
           ) : null}
@@ -259,6 +310,10 @@ export function DockCard({
       level="surface"
       geometry="card"
       className="flex min-h-0 shrink-0 flex-col gap-2 p-3"
+      ref={root}
+      // Focusable only by script: the card holds focus, with no row picked, until
+      // its default row is usable.
+      tabIndex={-1}
       role="group"
       aria-labelledby={titleId}
       onKeyDown={onKeyDown}

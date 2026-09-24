@@ -51,6 +51,8 @@ export function OptimizeRunRequestCard() {
       data-testid="assistant-run-request"
       data-status={stopped ? "stopped" : "live"}
       title="Run the optimiser?"
+      // The primary action only; until it is usable the card itself holds focus.
+      focusRow={0}
       onClose={stopped ? undefined : () => assistantActions.clearRunRequest()}
       options={
         stopped
