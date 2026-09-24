@@ -473,6 +473,16 @@ describe("malformed payloads, for every parameterized tool in the registry", () 
         '{"person":"SN-Priya","dates":[],"reason":"swap","partner":"SN-Cara","summary":"s"}',
       ],
     ],
+    prepare_borrowed_cover: [
+      [
+        "missing name",
+        '{"person":"SN-Priya","dates":["2026-10-08"],"reason":"swap","source":"agency","groups":[],"summary":"s"}',
+      ],
+      [
+        "unknown source",
+        '{"person":"SN-Priya","dates":["2026-10-08"],"reason":"swap","name":"Mei","source":"friend","groups":[],"summary":"s"}',
+      ],
+    ],
     explain_app_capability: [
       ["missing capabilityId", "{}"],
       ["wrong-typed capabilityId", '{"capabilityId":42}'],

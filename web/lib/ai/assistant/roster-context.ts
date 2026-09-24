@@ -366,7 +366,7 @@ export function buildShortView(
   };
 }
 
-const BORROW_SOURCE = {
+export const BORROW_SOURCE = {
   relief_pool: "relief pool",
   other_ward: "another ward",
   agency: "agency",

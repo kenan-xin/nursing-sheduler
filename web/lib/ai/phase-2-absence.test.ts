@@ -70,9 +70,12 @@ const MODEL_VISIBLE_TOOLS = [
   // prepare_roster_swap only shows a host card. The roster changes on the user's Apply
   // click, through the Roster screen's own edit session (lib/roster/change-request.ts),
   // so no assistant transaction touches a roster table (asserted below, unchanged).
+  // prepare_borrowed_cover shows a card; the borrowed person is added by the shipped
+  // add_person arm on the user's Apply.
   "get_roster",
   "find_swap_partners",
   "prepare_roster_swap",
+  "prepare_borrowed_cover",
 ] as const;
 
 /**

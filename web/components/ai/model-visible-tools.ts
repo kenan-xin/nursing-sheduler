@@ -23,6 +23,7 @@ import { capabilityIdParameters, policyParameters } from "./use-help-tools";
 import { prepareParameters } from "./use-proposal-tools";
 import { choiceParameters } from "./use-choice-tools";
 import {
+  borrowParameters,
   rosterReadParameters,
   swapPartnerParameters,
   swapPrepareParameters,
@@ -51,6 +52,8 @@ export const MODEL_VISIBLE_TOOL_SCHEMAS: Readonly<Record<string, z.ZodTypeAny>> 
   get_roster: rosterReadParameters,
   find_swap_partners: swapPartnerParameters,
   prepare_roster_swap: swapPrepareParameters,
+  // Step 3 of the cover ladder: a card; the temporary nurse is added on the user's Apply.
+  prepare_borrowed_cover: borrowParameters,
 });
 
 /** The tools registered with no parameters. Named so the set is provably complete. */

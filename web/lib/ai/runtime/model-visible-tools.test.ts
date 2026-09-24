@@ -470,11 +470,24 @@ describe("the command arms the provider is actually shown", () => {
     expect(Object.keys(prepare).sort()).toEqual([
       "dates",
       "laterDates",
+      "noTemporaryNurse",
       "partner",
       "person",
       "reason",
       "summary",
     ]);
+    expect(Object.keys(partners).sort()).toEqual(["dates", "noTemporaryNurse", "person", "reason"]);
+    const borrow = child(child(wire.get("prepare_borrowed_cover"), "parameters"), "properties");
+    expect(Object.keys(borrow).sort()).toEqual([
+      "dates",
+      "groups",
+      "name",
+      "person",
+      "reason",
+      "source",
+      "summary",
+    ]);
+    expect(child(borrow, "source").enum).toEqual(["relief_pool", "other_ward", "agency"]);
     const read = child(child(wire.get("get_roster"), "parameters"), "properties");
     expect(child(child(read, "people"), "items").type).toBe("string");
   });
