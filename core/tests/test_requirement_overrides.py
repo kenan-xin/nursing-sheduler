@@ -101,6 +101,53 @@ def test_other_overlapping_requirements_still_apply():
     assert _status("    requiredNumPeopleOverrides: [[2026-11-02, 1]]", second) == "INFEASIBLE"
 
 
+def test_override_lowers_the_floor_on_a_preferred_num_people_rule():
+    # S1: the ">= required" branch (rule with preferredNumPeople) has no other
+    # coverage. Without the override, cara's leave makes the 2nd infeasible;
+    # the override must lower the *floor*, not just the exact-count branch.
+    extra = "    preferredNumPeople: 2\n    requiredNumPeopleOverrides: [[2026-11-02, 1]]"
+    assert _status(extra) in {"FEASIBLE", "OPTIMAL"}
+
+
+def test_skill_mix_floor_still_binds_on_an_overridden_date():
+    # S2: an override relaxes requiredNumPeople only; the skillMix floor for
+    # that same date must still be enforced. A single-day scenario (no leave
+    # day, unlike BASE) isolates the effect: force ana onto D, so she cannot
+    # also cover the ana-only night floor -> infeasible proves the skill-mix
+    # loop is not skipped on overridden dates.
+    yaml_text = """
+apiVersion: alpha
+dates:
+  range:
+    startDate: 2026-11-01
+    endDate: 2026-11-01
+people:
+  items: [{id: ana}, {id: ben}]
+shiftTypes:
+  items: [{id: D}, {id: N}]
+preferences:
+  - type: at most one shift per day
+  - type: shift type requirement
+    shiftType: D
+    requiredNumPeople: 1
+    weight: -1
+  - type: shift type requirement
+    shiftType: N
+    requiredNumPeople: 2
+    qualifiedPeople: ALL
+    skillMix: [{people: ana, minNumPeople: 1}]
+    requiredNumPeopleOverrides: [[2026-11-01, 1]]
+    weight: -1
+  - type: shift request
+    person: ana
+    date: 2026-11-01
+    shiftType: D
+    weight: .inf
+"""
+    _df, _solution, _score, status, _cells = scheduler.schedule(yaml_text.encode(), timeout=30)
+    assert status == "INFEASIBLE"
+
+
 def test_override_below_skill_mix_floor_raises():
     # F1: an override must never go below the card's own skillMix floor.
     extra = (
