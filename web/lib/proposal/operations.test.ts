@@ -2006,6 +2006,37 @@ describe("set_staffing_requirement_on_date", () => {
         message: expect.stringContaining("14 Apr is not one of this requirement's dates"),
       },
     });
+    expect(!edit.ok && edit.rejection.message).toContain(
+      "first change or remove it with set_staffing_requirement_on_date",
+    );
+  });
+
+  it.each(["2026-13-01", "2026-02-30"])("refuses the impossible date %s, echoing it", (date) => {
+    expect(applyAssistantCommand(ruleWardScenario(), onDate(date, 1))).toMatchObject({
+      ok: false,
+      rejection: {
+        code: "invalid_value",
+        message: `Staffing requirement "Day cover": ${date} is not a real date. Write it as YYYY-MM-DD.`,
+      },
+    });
+  });
+
+  it("with a preferred count, refuses a date above it and checks skill mix against it (N2)", () => {
+    const s = ruleWardScenario();
+    Object.assign(dayCard(s), {
+      preferredNumPeople: 3,
+      weight: -5,
+      skillMix: [
+        { people: "RN", minNumPeople: 2 },
+        { people: "Senior", minNumPeople: 1 },
+      ],
+    });
+    expect(applyAssistantCommand(s, onDate("2026-04-14", 4))).toMatchObject({
+      ok: false,
+      rejection: { code: "invalid_value", message: expect.stringContaining("preferred number") },
+    });
+    // RN + Senior need 3; the ceiling on 14 Apr is the preferred 3, not the date's 2.
+    expect(applyAssistantCommand(s, onDate("2026-04-14", 2)).ok).toBe(true);
   });
 
   it("refuses a date below the skill mix (F1)", () => {

@@ -722,7 +722,8 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
         "A different number of people for this one requirement on this one date only, for " +
           "example fewer on a public holiday: exactly this many, or at least this many when " +
           "the requirement has a preferred count. Every other date keeps the requirement's " +
-          "own number. Send the requirement's own number to remove the exception.",
+          "own number. Send the requirement's own number to remove the exception. To change " +
+          "every date, use set_staffing_requirement_people or edit_staffing_requirement instead.",
       ),
   }),
   z.strictObject({

@@ -100,6 +100,7 @@ describe("the rule arms' text states what the solver enforces", () => {
     expect(count).toContain("this one requirement on this one date only");
     expect(count).toContain("Every other date keeps the requirement's own number");
     expect(count).toContain("Send the requirement's own number to remove the exception");
+    expect(count).toContain("To change every date, use set_staffing_requirement_people");
   });
 
   it("parses set_staffing_requirement_on_date and refuses a non-ISO date", () => {

@@ -724,15 +724,19 @@ function requirementRejection(
   if (mix) return mix;
   const dates = dateScopeRejection(state, fields.dates, REQUIREMENT_DATES);
   if (dates) return reject(index, dates.code, `${name}: ${dates.message}.`);
-  const error =
-    firstFormError(
-      validateRequirementForm(
-        draft,
-        buildRequirementShiftTypeDomain(state),
-        new Set(requirementCoveredIsos(state, draft.date)),
-      ),
-    ) ?? skillMixOverflowError(state, draft);
-  if (error) return reject(index, "invalid_value", `${name}: ${error}.`);
+  const errors = validateRequirementForm(
+    draft,
+    buildRequirementShiftTypeDomain(state),
+    new Set(requirementCoveredIsos(state, draft.date)),
+  );
+  const error = firstFormError(errors) ?? skillMixOverflowError(state, draft);
+  // Add and edit carry no exceptions, so an exception error is about one already stored.
+  const hint =
+    error === errors.requiredNumPeopleOverrides
+      ? ". That date has its own number (an exception): first change or remove it with " +
+        "set_staffing_requirement_on_date, sending the requirement's own number to remove it"
+      : "";
+  if (error) return reject(index, "invalid_value", `${name}: ${error}${hint}.`);
   return undefined;
 }
 
@@ -860,6 +864,14 @@ function applySetRequirementOnDate(
     );
   }
   const name = ruleName("requirements", source.description?.trim() || source.uid);
+  // The schema checks the shape only; 2026-02-30 would reach the form as 2 Mar.
+  if (!isValidIso(command.date)) {
+    return reject(
+      index,
+      "invalid_value",
+      `${name}: ${command.date} is not a real date. Write it as YYYY-MM-DD.`,
+    );
+  }
   const domain = buildRequirementShiftTypeDomain(state);
   const base = requirementToForm(source, domain);
   // The form with one row for this date: an existing row for it is replaced, as the user would.
