@@ -29,6 +29,7 @@ import {
 } from "@/lib/proposal";
 import { capabilityRegistryStamp } from "@/lib/capability/registry";
 import { assistantProposalCommands } from "@/lib/store";
+import { REST_PRACTICE_WARNING, relaxesRestRule } from "@/lib/ai/assistant/playbook";
 import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
 import { assertTurnAuthority, SUPERSEDED } from "./turn-authority";
 
@@ -202,7 +203,11 @@ export function useProposalTools(agentId: string, turnEpoch: number): void {
             : "") +
           "Nothing has changed yet, and you cannot apply it — only the user can. " +
           "Do not say the change has been made. In one short sentence, say what you prepared " +
-          "and what to check; do not list the values, the preview already shows them. Then wait."
+          "and what to check; do not list the values, the preview already shows them. " +
+          (relaxesRestRule(outcome.proposal.commands)
+            ? `This change relaxes a rest rule, so also say, in one short line: "${REST_PRACTICE_WARNING}" `
+            : "") +
+          "Then wait."
         );
       },
     },

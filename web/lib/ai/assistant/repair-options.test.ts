@@ -353,6 +353,23 @@ describe("rankRepairOptions", () => {
   });
 });
 
+describe("split a long shift", () => {
+  const longDay = (restMinutes: number) =>
+    ward({
+      staff: people("ana"),
+      shifts: [
+        { id: "L", description: "Long day", startTime: "08:00", endTime: "20:30", restMinutes },
+      ],
+      cardsByKind: cards({ requirements: [requirement("long", "L", 2, { date: ["2026-11-03"] })] }),
+    });
+  const ids = (state: ScenarioUiState) => rank(state).map((o) => o.repairId);
+
+  it("counts working hours, not the clock span: 08:00-20:30 with a 2 h break is not long", () => {
+    expect(ids(longDay(120))).not.toContain("split_long_shift");
+    expect(ids(longDay(0))).toContain("split_long_shift");
+  });
+});
+
 describe("isSafeOption", () => {
   const rn = SCENARIOS.onlyRnOnLeave();
   const capped = SCENARIOS.ruleTooStrict();
@@ -704,6 +721,49 @@ describe("isSafeOption", () => {
       },
     ],
   ];
+
+  it("accepts a hard rest rule softened to a strong preference, and nothing looser", () => {
+    const rest = SCENARIOS.restRuleTooTight();
+    const soften = (patch: Record<string, unknown> = {}) =>
+      option({
+        repairId: "soften_rest_rule",
+        evidence: "hypothesis",
+        operations: [
+          {
+            type: "edit_succession_rule",
+            ruleId: "no-day-after-night",
+            description: "No day shift straight after a night",
+            people: ["Nurses"],
+            pattern: ["N", "D"],
+            dates: ["ALL"],
+            weight: "-10",
+            ...patch,
+          },
+        ] as Op[],
+      });
+    expect(isSafeOption(rest, soften())).toBe(true);
+    expect(isSafeOption(rest, soften({ weight: "-infinity" }))).toBe(false);
+    expect(isSafeOption(rest, soften({ weight: "10" }))).toBe(false);
+    expect(isSafeOption(rest, soften({ people: ["ana"] }))).toBe(false);
+    expect(isSafeOption(rest, soften({ dates: ["2026-11-03"] }))).toBe(false);
+    expect(isSafeOption(rest, soften({ ruleId: "ghost" }))).toBe(false);
+    // Turning it off is the manager's own call, never a repair.
+    expect(
+      isSafeOption(
+        rest,
+        option({
+          operations: [
+            {
+              type: "set_rule_enabled",
+              ruleKind: "successions",
+              ruleId: "no-day-after-night",
+              enabled: false,
+            },
+          ] as Op[],
+        }),
+      ),
+    ).toBe(false);
+  });
 
   it.each(SAFE)("accepts %s", (_label, state, partial) => {
     expect(isSafeOption(state, option(partial))).toBe(true);
@@ -1097,38 +1157,9 @@ describe("violatesSafetyFloor (any operations, including model-written candidate
   };
   const BROKEN: [string, ScenarioUiState, unknown[], RegExp][] = [
     [
-      "rest rule off",
-      rest,
-      [
-        {
-          type: "set_rule_enabled",
-          ruleKind: "successions",
-          ruleId: "no-day-after-night",
-          enabled: false,
-        },
-      ],
-      /rest rule/,
-    ],
-    [
       "rest rule removed",
       rest,
       [{ type: "remove_rule", ruleKind: "successions", ruleId: "no-double-night" }],
-      /rest rule/,
-    ],
-    [
-      "rest rule softened",
-      rest,
-      [
-        {
-          type: "edit_succession_rule",
-          ruleId: "no-double-night",
-          description: "No two nights in a row",
-          people: ["Nurses"],
-          pattern: ["N", "N"],
-          dates: ["ALL"],
-          weight: "-10",
-        },
-      ],
       /rest rule/,
     ],
     ["rest rule narrowed to one date", rest, [restEdit({ dates: ["2026-11-03"] })], /rest rule/],
@@ -1232,6 +1263,18 @@ describe("violatesSafetyFloor (any operations, including model-written candidate
     expect(ok(minimum, [cap({ expression: "x >= T", target: 3 })])).toBeNull();
     // The same dates, written another way, are no change.
     expect(ok(rest, [restEdit({ description: "Rest after nights" })])).toBeNull();
+    // Rest rules are guidance, not law: the manager may soften one or turn it off.
+    expect(ok(rest, [restEdit({ weight: "-10" })])).toBeNull();
+    expect(
+      ok(rest, [
+        {
+          type: "set_rule_enabled",
+          ruleKind: "successions",
+          ruleId: "no-day-after-night",
+          enabled: false,
+        },
+      ]),
+    ).toBeNull();
     expect(ok(rn, [dayEdit({ requiredNumPeople: 2 })])).toBeNull();
     expect(
       ok(rn, [{ type: "set_staffing_requirement_people", ruleId: "day", requiredNumPeople: 2 }]),

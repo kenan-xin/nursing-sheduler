@@ -16,7 +16,7 @@ import { applyAssistantCommands } from "@/lib/proposal/operations";
 import { findStaffingShortfalls } from "@/lib/rules/shortfalls";
 import { SCENARIOS, type ScenarioName } from "@/lib/rules/ward-fixtures.test-support";
 import { serializeScenario, type ScenarioUiState } from "@/lib/scenario";
-import type { RepairId } from "./playbook";
+import { REST_PRACTICE_WARNING, type RepairId } from "./playbook";
 import {
   buildFeasibilityReport,
   isSafeOption,
@@ -258,11 +258,38 @@ describe("the scripted wards read as real ward situations", () => {
     ]);
   });
 
-  it("rest rules too tight: no certain cause, so no blind borrow and no touching the rest rules", () => {
-    // Unexplained order is soften a hard request, then relax a count cap: this ward has neither.
-    const report = buildFeasibilityReport(SCENARIOS.restRuleTooTight(), true);
+  it("rest rules too tight: no certain cause, so no blind borrow; soften a rest rule, with the warning", () => {
+    // Unexplained order is soften a hard request, relax a count cap, then soften a rest rule:
+    // this ward has only the rest rules.
+    const state = SCENARIOS.restRuleTooTight();
+    const report = buildFeasibilityReport(state, true);
     expect(report.findings).toEqual([]);
-    expect(report.options).toEqual([]);
-    expect(buildFeasibilityReport(SCENARIOS.restRuleTooTight(), false).options).toEqual([]);
+    expect(report.options.map((o) => o.repairId)).toEqual(["soften_rest_rule"]);
+    const [soften] = report.options;
+    expect(soften.operations).toEqual([
+      {
+        type: "edit_succession_rule",
+        ruleId: "no-day-after-night",
+        description: "No day shift straight after a night",
+        people: ["Nurses"],
+        pattern: ["N", "D"],
+        dates: ["ALL"],
+        weight: "-10",
+      },
+    ]);
+    expect(soften).toMatchObject({
+      evidence: "hypothesis",
+      confirmation: "manager",
+      enforcedBy: "apply",
+    });
+    expect(soften.why).toContain(REST_PRACTICE_WARNING);
+    expect(isSafeOption(state, soften)).toBe(true);
+    const result = applyAssistantCommands(state, soften.operations);
+    if (!result.ok) throw new Error(result.rejection.message);
+    const card = result.next.cardsByKind.successions.find((c) => c.uid === "no-day-after-night");
+    // Softened, never deleted or switched off.
+    expect(card).toMatchObject({ weight: -10 });
+    expect(card?.disabled).toBeFalsy();
+    expect(buildFeasibilityReport(state, false).options).toEqual([]);
   });
 });

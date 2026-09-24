@@ -29,7 +29,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
+import { REST_PRACTICE_WARNING } from "@/lib/ai/assistant/playbook";
 import { proposalScenario } from "@/lib/proposal/test-support";
+import { SCENARIOS } from "@/lib/rules/ward-fixtures.test-support";
 import { createEmptyScenarioUiState } from "@/lib/scenario";
 import { useScenarioStore } from "@/lib/store";
 import { loadScenario } from "@/lib/store/lifecycle";
@@ -185,6 +187,31 @@ describe("the model's arguments, at the shipped tool boundary", () => {
     expect(proposalTool().description).toContain(`${MAX_ASSISTANT_OPERATIONS} operations`);
   });
 
+  it("prepares turning off a rest rule, with the rest-practice warning on the Preview and in the reply", async () => {
+    await mount(SCENARIOS.restRuleTooTight());
+
+    const answer = await proposalTool().handler(
+      {
+        summary: "You asked to turn off the no-day-after-night rule.",
+        operations: [
+          {
+            type: "set_rule_enabled",
+            ruleKind: "successions",
+            ruleId: "no-day-after-night",
+            enabled: false,
+          },
+        ],
+      },
+      {},
+    );
+
+    expect(String(answer)).toContain("preview of this change is now shown");
+    expect(String(answer)).toContain(REST_PRACTICE_WARNING);
+    expect(await screen.findByTestId("proposal-rest-guidance")).toHaveTextContent(
+      REST_PRACTICE_WARNING,
+    );
+  });
+
   it("prepares a real Preview from the exact live request, with evidence omitted", async () => {
     // THE REPRODUCTION. Before the repair this returned no proposal: the handler threw
     // `Cannot read properties of undefined (reading 'map')`, which CopilotKit turned
@@ -200,6 +227,9 @@ describe("the model's arguments, at the shipped tool boundary", () => {
     expect(useAssistantStore.getState().activeProposal?.proposalId).toBe(proposals[0].proposalId);
     // The operation survived the boundary byte-for-byte, including the explicit choice.
     expect(proposals[0].commands).toEqual(LIVE_ARGS.operations);
+    // No rest rule is touched, so no rest-practice warning.
+    expect(String(answer)).not.toContain(REST_PRACTICE_WARNING);
+    expect(screen.queryByTestId("proposal-rest-guidance")).toBeNull();
     // Preparing is not applying: the blank range is untouched.
     expect(useScenarioStore.getState().rangeStart).toBe("");
     expect(useScenarioStore.getState().rangeEnd).toBe("");

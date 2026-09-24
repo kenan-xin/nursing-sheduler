@@ -37,6 +37,7 @@ import type {
   PersonRef,
   RequirementCard,
   ScenarioUiState,
+  SuccessionCard,
   UiRequestCell,
   UiShiftRequestCell,
 } from "@/lib/scenario";
@@ -51,6 +52,7 @@ import {
   PLAYBOOK_VERSION,
   REPAIRS,
   REPAIR_ORDER,
+  REST_PRACTICE_WARNING,
   SAFETY_FLOOR,
   SOFT_REQUEST_WEIGHT,
   type Confirmation,
@@ -382,7 +384,7 @@ const extraShiftWillingNurse: Builder = (ctx, findings) => {
         operations: [editCount(ctx, card, card.target + 1)],
         confirmationQuestion: `Has ${person} agreed to one extra ${shifts} shift, within legal and contract limits?`,
         needsFromUser: [
-          `Whether ${person} is willing, and that one more shift keeps them within legal rest and contract limits.`,
+          `Whether ${person} is willing, and that one more shift keeps them within the legal working-hour and contract limits.`,
         ],
         capabilityId: null,
         evidence: "static_check",
@@ -690,12 +692,56 @@ const runOneShort: Builder = (ctx, all) => {
   return null;
 };
 
+/**
+ * The same rest rule as a strong preference: who, which shifts and which dates stay; the
+ * sign stays (a forbidden pattern stays discouraged). Null for a nested pattern the edit
+ * arm cannot carry.
+ */
+function softenedRest(
+  ctx: Ctx,
+  card: SuccessionCard,
+): Extract<AssistantCommandV1, { type: "edit_succession_rule" }> | null {
+  const pattern = asList(card.pattern);
+  if (pattern.some((p) => typeof p === "object")) return null;
+  return {
+    type: "edit_succession_rule",
+    ruleId: card.uid,
+    description: card.description ?? "",
+    people: asList(card.person),
+    pattern: pattern.map(String),
+    dates: card.date == null ? ["ALL"] : asList(card.date).map((d) => formDate(ctx, d)),
+    weight: String(card.weight > 0 ? SOFT_REQUEST_WEIGHT : -SOFT_REQUEST_WEIGHT),
+  };
+}
+
+const isHardRest = (card: SuccessionCard | undefined): card is SuccessionCard =>
+  card !== undefined && !card.disabled && !Number.isFinite(card.weight);
+
+const softenRestRule: Builder = (ctx) => {
+  const card = ctx.state.cardsByKind.successions.find(isHardRest);
+  const op = card && softenedRest(ctx, card);
+  if (!card || !op) return null;
+  const name = ruleName(card, card.uid);
+  return makeOption("soften_rest_rule", {
+    title: `Make "${name}" a strong preference for this period instead of a hard rule`,
+    why: `The optimiser gave no reason, and a hard rest rule can leave no valid roster. As a strong preference the roster still keeps to it wherever it can. ${REST_PRACTICE_WARNING}`,
+    operations: [op],
+    confirmationQuestion: `As the manager, are you happy for "${name}" to be broken where the roster cannot keep to it?`,
+    needsFromUser: [
+      "Whether the manager accepts the rest rule as a strong preference this period.",
+    ],
+    capabilityId: "shift-successions",
+    evidence: "hypothesis",
+  });
+};
+
 const splitLongShift: Builder = (ctx, all) => {
   for (const f of gapsOnly(all)) {
     for (const id of f.shiftTypes) {
       const shift = ctx.state.shifts.find((s) => String(s.id) === id);
       const minutes = shift
-        ? (shift.durationMinutes ?? paidMinutesFor(shift.startTime, shift.endTime, 0))
+        ? (shift.durationMinutes ??
+          paidMinutesFor(shift.startTime, shift.endTime, shift.restMinutes))
         : null;
       if (minutes == null || minutes < LONG_SHIFT_MINUTES) continue;
       const hours = Math.round((minutes / 60) * 10) / 10;
@@ -718,6 +764,7 @@ const BUILDERS: Record<RepairId, Builder> = {
   soften_hard_request: softenHardRequest,
   extra_shift_willing_nurse: extraShiftWillingNurse,
   relax_count_rule: relaxCountRule,
+  soften_rest_rule: softenRestRule,
   borrow_temporary_nurse: borrowTemporaryNurse,
   ask_nurse_on_leave: askNurseOnLeave,
   run_one_short: runOneShort,
@@ -803,15 +850,18 @@ export function violatesSafetyFloor(
     const broken = (() => {
       switch (op.type) {
         case "set_rule_enabled":
-          return op.enabled ? null : offByKind(op.ruleKind, op.ruleId);
+          // A rest rule is guidance: the manager may turn it off (it stays, to turn back on).
+          return op.enabled || op.ruleKind === "successions"
+            ? null
+            : offByKind(op.ruleKind, op.ruleId);
         case "remove_rule":
           return offByKind(op.ruleKind, op.ruleId);
         case "edit_succession_rule": {
           const card = ctx.state.cardsByKind.successions.find((c) => c.uid === op.ruleId);
           if (!card || Number.isFinite(card.weight)) return null;
-          // Weight, people, pattern and dates all stay: narrowing any of them relaxes it.
+          // Softening is allowed (guidance, not law); people, pattern and dates all stay:
+          // narrowing any of them deletes the rule where it no longer reaches.
           const same =
-            op.weight === weightText(card.weight) &&
             sameRefs(op.people, card.person) &&
             sameRefs(op.pattern, card.pattern) &&
             sameDates(ctx, op.dates, card.date);
@@ -941,6 +991,20 @@ export function isSafeOption(state: ScenarioUiState, option: RepairOption): bool
           op.people.length === staff.size &&
           people.size === staff.size &&
           [...people].every((p) => staff.has(p))
+        );
+      }
+      case "edit_succession_rule": {
+        // Soften a hard rest rule to a strong preference, nothing else about it changing.
+        const card = ctx.state.cardsByKind.successions.find((c) => c.uid === op.ruleId);
+        const want = isHardRest(card) ? softenedRest(ctx, card) : null;
+        const weight = Number(op.weight);
+        const keep = (o: typeof op) =>
+          JSON.stringify([o.description, o.people, o.pattern, o.dates]);
+        return (
+          want !== null &&
+          keep(op) === keep(want) &&
+          Number.isFinite(weight) &&
+          Math.sign(weight) === Math.sign(Number(want.weight))
         );
       }
       case "set_shift_request":

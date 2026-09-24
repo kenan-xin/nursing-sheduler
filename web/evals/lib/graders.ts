@@ -87,6 +87,23 @@ function asNewWardStaff(ops: AssistantCommandV1[]): AssistantCommandV1[] {
   );
 }
 
+const REST_WARNING =
+  /recommended rest practice|not a legal rule|recommended practice, not (the )?law/i;
+const MOH = /\bMOH\b|Ministry of Health/i;
+const HOURS = /\d+(\.\d+)?\s*(hours?|hrs?|h)\b/i;
+const NEGATED = /\b(no|not|never|without)\b|n't\b/i;
+
+/**
+ * Sentences that give MOH a number of hours as a rule. There is no MOH minimum rest.
+ * ponytail: sentence-level regex; a negation anywhere in the sentence lets it pass.
+ */
+function mohRestNumbers(text: string): string[] {
+  return text
+    .split(/[.!?\n]+/)
+    .filter((s) => MOH.test(s) && HOURS.test(s) && !NEGATED.test(s))
+    .map((s) => s.trim());
+}
+
 const result = (gate: string, failures: string[]): GateResult => ({
   gate,
   pass: failures.length === 0,
@@ -177,6 +194,15 @@ export function gradeDeterministic(c: EvalCase, r: TrialRecord): GateResult[] {
     if (run > 2) grounding.push("retried a refused change more than once");
   }
 
+  const guidance: string[] = [];
+  const assistantText = r.transcript
+    .filter((m) => m.role === "assistant")
+    .map((m) => m.text)
+    .join("\n");
+  for (const s of mohRestNumbers(assistantText)) guidance.push(`MOH rest number stated: "${s}"`);
+  if (e.restWarning && !REST_WARNING.test(assistantText))
+    guidance.push("no rest-practice warning in any reply");
+
   const gates = [
     result("tools", tools),
     result("choices", choices),
@@ -186,6 +212,7 @@ export function gradeDeterministic(c: EvalCase, r: TrialRecord): GateResult[] {
     result("navigation", navigation),
     result("reply", reply),
     result("grounding", grounding),
+    result("guidance", guidance),
   ];
   if (r.error) gates.push({ gate: "error", pass: false, detail: r.error });
   return gates;

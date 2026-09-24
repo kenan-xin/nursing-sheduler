@@ -10,6 +10,13 @@
 // run a shift short only as the manager's last call. The safety floor is never
 // crossed (enforced again in code by repair-options.ts `isSafeOption`).
 //
+// REST RULES ARE GUIDANCE, NOT LAW (user decision, 2026-09-24; research
+// docs/research/2026-09-24-assistant/06-sg-rest-guidelines.md). The Employment Act
+// sets a rest day a week and working-hour caps; rest between shifts, the most nights
+// in a row and days off after nights are recommended practice with no MOH minimum.
+// So a manager may soften or turn off a rest rule, always with REST_PRACTICE_WARNING,
+// and a repair may soften one (never delete it) after the ward-internal fixes.
+//
 // CONTROLLER RULINGS (2026-09-24, binding over the spec draft):
 // - No `mark_person_off` arm exists. The borrowed/float nurse repair is expressed
 //   with EXISTING arms: `add_person` with `temporary: true`, then `set_off_request`
@@ -25,9 +32,30 @@
 //   covers that one date alone, in which case `repair-options.ts` may fill ops.
 
 import type { CapabilityId } from "@/lib/capability/help-content";
-import type { AssistantCommandType } from "@/lib/proposal/commands";
+import type { AssistantCommandType, AssistantCommandV1 } from "@/lib/proposal/commands";
 
-export const PLAYBOOK_VERSION = "2026-09-24.3";
+export const PLAYBOOK_VERSION = "2026-09-24.4";
+
+/** Said on the Preview and in the reply whenever a change relaxes a rest rule. */
+export const REST_PRACTICE_WARNING =
+  "This is a recommended rest practice, not a legal rule. Nurses may be more tired; consider a day off after nights.";
+
+/** Employment Act: at most 12 WORKING hours a day incl. overtime (span minus the unpaid break). */
+export const MAX_DAILY_WORKING_MINUTES = 12 * 60;
+
+/**
+ * True when a change turns off, deletes or softens a shift sequence (rest) rule.
+ * ponytail: reads the commands only, so an edit that narrows a rule but keeps it hard
+ * carries no warning; pass the before-state if that ever matters.
+ */
+export function relaxesRestRule(commands: readonly AssistantCommandV1[]): boolean {
+  return commands.some((c) => {
+    if (c.type === "set_rule_enabled") return c.ruleKind === "successions" && !c.enabled;
+    if (c.type === "remove_rule") return c.ruleKind === "successions";
+    if (c.type === "edit_succession_rule") return !/infinity/i.test(c.weight);
+    return false;
+  });
+}
 
 /** Names from plan 2026-09-24-assistant-optimize-run. Change here only. */
 export const OPTIMIZE_RUN_TOOL = "request_optimize_run";
@@ -137,6 +165,7 @@ export type RepairId =
   | "soften_hard_request"
   | "extra_shift_willing_nurse"
   | "relax_count_rule"
+  | "soften_rest_rule"
   | "borrow_temporary_nurse"
   | "ask_nurse_on_leave"
   | "run_one_short"
@@ -191,7 +220,8 @@ export const REPAIRS: readonly RepairEntry[] = [
     confirmation: "named_nurse",
     enforcedBy: "host_question",
     opTypes: ["edit_count_rule"],
-    guardrail: "Only within legal rest and contract limits, and only with that nurse's agreement.",
+    guardrail:
+      "Only within the Employment Act's working-hour limits and the nurse's contract, and only with that nurse's agreement.",
   },
   {
     id: "relax_count_rule",
@@ -203,6 +233,18 @@ export const REPAIRS: readonly RepairEntry[] = [
     opTypes: ["edit_count_rule"],
     guardrail:
       "Raise by the smallest amount that closes the gap, at most 2, and ask the manager to check legal limits.",
+  },
+  {
+    id: "soften_rest_rule",
+    title: "Turn a hard rest rule into a strong preference for this period",
+    whenToUse:
+      "The run failed with no certain cause and the ward has hard rest rules. Rest rules are recommended practice, not law.",
+    disruption: "medium",
+    confirmation: "manager",
+    enforcedBy: "apply",
+    opTypes: ["edit_succession_rule"],
+    guardrail:
+      "Soften only: never delete it or turn it off, keep who, which shifts and which dates it covers, and always pass on the rest-practice warning.",
   },
   {
     id: "borrow_temporary_nurse",
@@ -283,7 +325,9 @@ export const REPAIR_ORDER: Record<Situation, readonly RepairId[]> = {
     "split_long_shift",
   ],
   // Spec: 1, 3, as hypotheses. A whole-period borrow is not a guess worth testing.
-  unexplained: ["soften_hard_request", "relax_count_rule"],
+  // Softening a rest rule comes last. Only here: the static check does not model rest
+  // rules, so it never blames them for a proven gap.
+  unexplained: ["soften_hard_request", "relax_count_rule", "soften_rest_rule"],
 };
 
 /** More short dates than this is a staffing problem, not a bad day. */
@@ -297,7 +341,7 @@ export const SOFT_REQUEST_WEIGHT = 10;
 export const LONG_SHIFT_MINUTES = 660;
 
 export const SAFETY_FLOOR: readonly string[] = [
-  "Never relax or turn off a rest rule, such as no day shift straight after a night.",
+  "Never delete a rest rule, such as no day shift straight after a night, or narrow who or what it covers. Softening it or turning it off is the manager's call and always carries the rest-practice warning.",
   "Never relax or turn off a supervision (preceptor) rule.",
   "Never lower a skill-mix requirement, such as 1 RN on every night, and never create one.",
   "Never set a staffing requirement to 0 or turn one off.",

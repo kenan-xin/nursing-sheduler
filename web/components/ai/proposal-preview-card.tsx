@@ -27,6 +27,7 @@ import {
   activeConfirmations,
   type ProposalDiffEntry,
 } from "@/lib/proposal";
+import { REST_PRACTICE_WARNING, relaxesRestRule } from "@/lib/ai/assistant/playbook";
 import type { AssistantProposalV1 } from "@/lib/store";
 import type { ProposalReadiness } from "@/lib/proposal";
 import type { AssistantProposalController } from "./use-assistant-proposals";
@@ -241,6 +242,12 @@ export function ProposalPreviewCard({ controller, onSend, disabled }: ProposalPr
         entries={proposal.diff.cascade}
         testId="proposal-cascade"
       />
+
+      {relaxesRestRule(proposal.commands) ? (
+        <p className="text-meta text-warnink" data-testid="proposal-rest-guidance" role="note">
+          {REST_PRACTICE_WARNING}
+        </p>
+      ) : null}
 
       {proposal.diff.needsReview.length > 0 ? (
         <p className="text-meta text-warnink" data-testid="proposal-needs-review">

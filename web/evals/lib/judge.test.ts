@@ -73,10 +73,19 @@ describe("judge", () => {
   });
 
   it("keeps short and suggests_default from failing a reply that follows the app (rubric .3)", () => {
-    expect(RUBRIC_VERSION).toBe("2026-09-24.3");
+    expect(RUBRIC_VERSION).toBe("2026-09-24.4");
     expect(STANDARD_ITEMS.short).toMatch(/the app tells/);
     expect(STANDARD_ITEMS.suggests_default).toMatch(/legal or regulatory/);
     expect(STANDARD_ITEMS.suggests_default).toMatch(/choice between repair/);
+  });
+
+  it("allows the Employment Act, but no MOH rest number and no clock-span hours (rubric .4)", () => {
+    const item = STANDARD_ITEMS.no_legal_claim;
+    expect(item).toMatch(/MOH minimum rest/);
+    expect(item).toMatch(/Employment Act/);
+    expect(item).toMatch(/1 rest day a week/);
+    expect(item).toMatch(/72 hours of overtime a month/);
+    expect(item).toMatch(/unpaid break/);
   });
 
   it("can label the transcript from the simulated user's side", () => {

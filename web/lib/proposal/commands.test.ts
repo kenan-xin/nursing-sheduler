@@ -45,6 +45,15 @@ describe("the rule arms' text states what the solver enforces", () => {
     expect(help?.nurseFacingSummary).toContain("skill-mix");
   });
 
+  it("suggests a 2-hour break for a long day or night, and the usual breaks below", () => {
+    const rest = arm("add_shift_type").restMinutes.description ?? "";
+    expect(rest).toContain("0 under 6 hours");
+    expect(rest).toContain("30 from 6 to under 8 hours");
+    expect(rest).toContain("60 from 8 to under 12 hours");
+    expect(rest).toContain("120 for 12 hours or more");
+    expect(rest).toContain("copy the break of an existing shift of similar length");
+  });
+
   it("a count's weight rewards the expression holding", () => {
     const weight = arm("add_count_rule").weight.description ?? "";
     expect(weight).toContain("works against");
