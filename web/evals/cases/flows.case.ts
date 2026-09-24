@@ -115,7 +115,8 @@ export const FLOW_CASES: EvalCase[] = [
   {
     id: "limit-consecutive-days",
     tags: ["flow"],
-    description: "Max 5 days in a row, any shift, is not exact (L4).",
+    description:
+      "Max 5 days in a row, any shift: 6 x ALL must never happen (ALL = any worked shift).",
     today: "2026-09-24",
     route: "/rules",
     seed: { build: mna },
@@ -124,8 +125,15 @@ export const FLOW_CASES: EvalCase[] = [
       onPreview: "ignore",
     },
     expect: {
+      proposalOps: [
+        {
+          type: "add_succession_rule",
+          pattern: ["ALL", "ALL", "ALL", "ALL", "ALL", "ALL"],
+          weight: "-infinity",
+        },
+      ],
       judge: [
-        "Says the app cannot limit runs of mixed shifts exactly, and offers a weekly limit on working days instead or as well.",
+        "Prepares a rule that 6 working days in a row, any shift, must never happen, without claiming the app cannot do it.",
       ],
     },
   },

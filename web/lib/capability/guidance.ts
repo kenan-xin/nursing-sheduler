@@ -111,7 +111,8 @@ const GUIDANCE_TOOL = "suggest_scheduling_rule";
 /**
  * Rank the rule-shaped capabilities that match a described policy, best first.
  *
- * Ranking is by how many distinct request terms an entry matches, tie-broken by id so
+ * Ranking is by how many distinct request terms an entry matches, then an entry with a
+ * screen (a rule the user can set) before a concept entry, then by id so
  * the same request always produces the same order -- a help answer that reshuffled
  * between identical questions would be impossible to review.
  */
@@ -136,9 +137,11 @@ export function suggestRuleCandidates(
   const scored = listed.value
     .filter((summary) => guidanceIds.has(summary.id))
     .map((summary) => {
-      const haystack = new Set(
-        terms(`${summary.title} ${summary.summary} ${summary.concepts.join(" ")}`),
-      );
+      // A concept entry with no screen (such as `scheduler-limits`) matches on its title and
+      // concepts only: its prose names many rules to explain what they cannot do, and
+      // matching on it would rank the explanation above the rule the user can actually set.
+      const body = summary.hasScreen ? summary.summary : "";
+      const haystack = new Set(terms(`${summary.title} ${body} ${summary.concepts.join(" ")}`));
       const matchedTerms = requestTerms.filter((term) => haystack.has(term));
       return { summary, matchedTerms };
     })
@@ -146,9 +149,13 @@ export function suggestRuleCandidates(
     .sort((a, b) =>
       b.matchedTerms.length !== a.matchedTerms.length
         ? b.matchedTerms.length - a.matchedTerms.length
-        : a.summary.id < b.summary.id
-          ? -1
-          : 1,
+        : a.summary.hasScreen !== b.summary.hasScreen
+          ? a.summary.hasScreen
+            ? -1
+            : 1
+          : a.summary.id < b.summary.id
+            ? -1
+            : 1,
     )
     .slice(0, limit)
     .map((row) =>

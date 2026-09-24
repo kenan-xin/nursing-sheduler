@@ -30,6 +30,9 @@ const RULE_TOOLS = [...BASE_TOOLS, "suggest_scheduling_rule"] as const;
 /** A concept explanation with no screen: describe only, nothing to open. */
 const CONCEPT_TOOLS = ["list_app_capabilities", "explain_app_capability"] as const;
 
+/** A concept a described policy can land on: describe it, and let rule guidance find it. */
+const LIMIT_TOOLS = [...CONCEPT_TOOLS, "suggest_scheduling_rule"] as const;
+
 const BOTH_MODES = ["guided", "advanced"] as const;
 const ADVANCED_ONLY = ["advanced"] as const;
 
@@ -40,7 +43,8 @@ export const CAPABILITY_ENTRIES = [
     title: "Roster period and calendar",
     nurseFacingSummary:
       "Set the first and last day of the roster you are planning, and mark public holidays. " +
-      "Everything else — people, shifts, rules and requests — is planned inside these dates.",
+      "Everything else — people, shifts, rules and requests — is planned inside these dates." +
+      " Public holiday and workday groups stay empty until the public holidays are imported.",
     concepts: ["roster period", "date range", "public holiday", "date group", "calendar"],
     modes: BOTH_MODES,
     featureGates: [],
@@ -128,12 +132,51 @@ export const CAPABILITY_ENTRIES = [
     supportedCommands: [],
   },
   {
+    id: "scheduler-limits",
+    title: "What the scheduler cannot do",
+    nurseFacingSummary:
+      "The scheduler does not read clock times. It never works out overlaps or the hours " +
+      "between shifts, so rest between shifts is written as shift orders it must not use, " +
+      "such as no day shift straight after a night. Days in a row across any shifts are also a " +
+      "shift-order rule: 'any shift' 6 days in a row set to must never happen allows at most " +
+      "5. Limits count over fixed dates, never a rolling seven days. Counts start fresh each " +
+      "roster period: last month's nights or weekends, and a day off owed for a public " +
+      "holiday, are not carried over. Shift-order rules do check each nurse's last shifts " +
+      "entered on the Requests page. A skill mix, such as at least 1 RN on a shift with others allowed too, is " +
+      "not supported yet. It checks no employment law, ministry guidance or hospital policy, " +
+      "only the rules written here.",
+    concepts: [
+      "limits",
+      "days in a row",
+      "consecutive days",
+      "rolling window",
+      "hours between shifts",
+      "rest hours",
+      "clock time",
+      "overlap",
+      "last month",
+      "carry over",
+      "owed day",
+      "day in lieu",
+      "skill mix",
+      "law",
+      "ratio",
+    ],
+    modes: BOTH_MODES,
+    featureGates: [],
+    toolAccess: LIMIT_TOOLS,
+    supportedCommands: [],
+  },
+  {
     id: "staffing-requirements",
     title: "Staffing requirements",
     nurseFacingSummary:
       "How many people a shift needs: exactly that number, or a range when a preferred number " +
       "is set. Naming who is qualified means nobody else may work that shift at all. The " +
-      "scheduler cannot express a skill-mix rule yet, and the assistant cannot set one up.",
+      "scheduler cannot express a skill-mix rule yet, and the assistant cannot set one up." +
+      " For a number with a preferred extra (2, ideally 3), the preferred number is set here. " +
+      "When two teams are each set as the only people for the same shift, they block each " +
+      "other, so each ward or team needs a separate shift code.",
     concepts: ["staffing requirement", "minimum staffing", "skill mix", "coverage", "headcount"],
     modes: ADVANCED_ONLY,
     featureGates: [],
@@ -150,7 +193,11 @@ export const CAPABILITY_ENTRIES = [
       "not how many of them somebody works. Rest rules like this are recommended practice, not " +
       "law: MOH sets no minimum rest between shifts, and the Employment Act sets 1 rest day a " +
       "week, at most 12 working hours a day and 72 hours of overtime a month, and 44 hours a " +
-      "week averaged over 3 weeks for shift workers. You may soften a rest rule or turn it off.",
+      "week averaged over 3 weeks for shift workers. You may soften a rest rule or turn it off." +
+      " A rule matches only its exact pattern of shifts; 'any shift' matches every worked " +
+      "shift. Use 'must never' to forbid a pattern; " +
+      "making a pattern one people must follow can make a workable roster impossible, so use a " +
+      "strong preference instead.",
     concepts: ["succession", "shift sequence", "night to day", "consecutive shifts", "rest"],
     modes: ADVANCED_ONLY,
     featureGates: [],
@@ -164,7 +211,9 @@ export const CAPABILITY_ENTRIES = [
     title: "Shift counts",
     nurseFacingSummary:
       "Limits and targets on HOW MANY of something a person gets over the roster — rest days, " +
-      "a cap on nights, or balancing hours across the team.",
+      "a cap on nights, or balancing hours across the team." +
+      " A balance rule keeps each person's count as close to a target as it can. Without one, " +
+      "the optimiser may give most nights or weekends to the same few people.",
     concepts: ["shift count", "rest days", "night cap", "hours balance", "contracted hours"],
     modes: ADVANCED_ONLY,
     featureGates: [],
@@ -224,7 +273,10 @@ export const CAPABILITY_ENTRIES = [
       "optimiser only knows the rules that are written down here — it cannot infer ward custom, " +
       "policy or anything outside the recorded rules. The assistant can offer to start a run " +
       "for you; it starts only when you press Run on its card, and then runs exactly as if you " +
-      "had pressed Optimize.",
+      "had pressed Optimize." +
+      " The score only compares rosters for this same set-up. A roster that is valid but not " +
+      "proven best is still usable. Running again can give a different roster that is just as " +
+      "good, and it can change anyone's shifts.",
     concepts: ["optimise", "generate roster", "solver", "run", "export", "download"],
     modes: BOTH_MODES,
     featureGates: [],

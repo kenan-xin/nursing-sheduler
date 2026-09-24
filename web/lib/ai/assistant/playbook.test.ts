@@ -158,3 +158,37 @@ describe("rest rules are guidance, not law", () => {
     expect(paidMinutesFor("20:00", "08:30", 120)!).toBeLessThanOrEqual(MAX_DAILY_WORKING_MINUTES);
   });
 });
+
+describe("setup hints carry ward defaults, never invented law", () => {
+  const ask = (id: string) => SETUP_STEPS.find((s) => s.id === id)?.ask.join(" ") ?? "";
+
+  it("suggests common shift patterns to confirm", () => {
+    expect(ask("shiftTypes")).toMatch(/three 8-hour shifts/);
+    expect(ask("shiftTypes")).toMatch(/12-hour/);
+  });
+  it("suggests the usual rest and fairness rules, with off-after-nights as a preference", () => {
+    const text = ask("rules");
+    expect(text).toMatch(/no day shift straight after a night as a must/);
+    expect(text).toMatch(/day off after nights as a preference/);
+    expect(text).toMatch(/balance/);
+  });
+  it("frames ward habits as habits; the only law named is the Employment Act rest day", () => {
+    const text = ask("rules");
+    expect(text).toMatch(/many wards/i);
+    expect(text).not.toMatch(/\b(law|MOH|MOM|required by)\b/);
+    expect(text).toMatch(/1 rest day a week, which the Employment Act sets/);
+  });
+  it("builds the weekly rest day as a pattern, never a period total", () => {
+    const text = ask("rules");
+    expect(text).toMatch(/ALL 7 days in a row at -infinity/);
+    expect(text).toMatch(/not a total over the period/);
+  });
+  it("never invites a skill mix it cannot set up", () => {
+    const text = ask("rules");
+    expect(text).not.toMatch(/must be from a group/);
+    expect(text).toMatch(/skill mix.*not supported yet/);
+  });
+  it("was versioned", () => {
+    expect(PLAYBOOK_VERSION).toBe("2026-09-24.5");
+  });
+});
