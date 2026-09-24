@@ -347,7 +347,12 @@ describe("isSafeOption", () => {
     weight: "infinity",
     ...patch,
   });
-  const borrowed = { type: "add_person", name: "Borrowed nurse 1", groups: ["RN"] };
+  const borrowed = {
+    type: "add_person",
+    name: "Borrowed nurse 1",
+    groups: ["RN"],
+    temporary: false,
+  };
   const loan = { confirmation: "lending_ward", enforcedBy: "host_question" } as const;
   const nurse = { confirmation: "named_nurse", enforcedBy: "host_question" } as const;
   const clear = {
@@ -566,7 +571,12 @@ describe("isSafeOption", () => {
     [
       "invented new nurse",
       rn,
-      { ...loan, operations: [{ type: "add_person", name: "Sarah Lee", groups: [] }] as Op[] },
+      {
+        ...loan,
+        operations: [
+          { type: "add_person", name: "Sarah Lee", groups: [], temporary: false },
+        ] as Op[],
+      },
     ],
     [
       "invented request target",
@@ -934,6 +944,7 @@ describe("review fixes (2026-09-24)", () => {
       type: "add_person" as const,
       name: `Borrowed nurse ${n}`,
       groups: [],
+      temporary: false,
     });
     const narrow = {
       type: "edit_count_rule" as const,
@@ -1155,11 +1166,16 @@ describe("violatesSafetyFloor (any operations, including model-written candidate
       [{ type: "clear_requests", personId: "rn1", startDate: "2026-11-03", endDate: "2026-11-03" }],
       /leave/,
     ],
-    ["invented nurse", rn, [{ type: "add_person", name: "Sarah Lee", groups: [] }], /name/],
+    [
+      "invented nurse",
+      rn,
+      [{ type: "add_person", name: "Sarah Lee", groups: [], temporary: false }],
+      /name/,
+    ],
     [
       "skilled hire with no host question",
       rn,
-      [{ type: "add_person", name: "Borrowed nurse 1", groups: ["RN"] }],
+      [{ type: "add_person", name: "Borrowed nurse 1", groups: ["RN"], temporary: false }],
       /qualification/,
     ],
   ];
@@ -1195,7 +1211,7 @@ describe("violatesSafetyFloor (any operations, including model-written candidate
     ).toBeNull();
     expect(
       ok(rn, [
-        { type: "add_person", name: "Borrowed nurse 1", groups: ["RN"] },
+        { type: "add_person", name: "Borrowed nurse 1", groups: ["RN"], temporary: false },
         {
           type: "set_off_request",
           personId: "Borrowed nurse 1",

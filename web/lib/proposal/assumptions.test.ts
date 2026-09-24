@@ -207,7 +207,7 @@ describe("deriveAssumptions and the Staff-screen arms", () => {
   it("a rename relabels leave; it does not ask about giving it up", () => {
     expect(
       peopleAssumptions([
-        { type: "edit_person", personId: "ana", name: "Ana Lim", groups: ["RN"] },
+        { type: "edit_person", personId: "ana", name: "Ana Lim", groups: ["RN"], temporary: false },
       ]),
     ).toEqual([]);
   });
@@ -215,8 +215,14 @@ describe("deriveAssumptions and the Staff-screen arms", () => {
   it("a rename chain inside one batch still asks nothing", () => {
     expect(
       peopleAssumptions([
-        { type: "edit_person", personId: "ana", name: "Ana Lim", groups: ["RN"] },
-        { type: "edit_person", personId: "Ana Lim", name: "Ana L.", groups: ["RN"] },
+        { type: "edit_person", personId: "ana", name: "Ana Lim", groups: ["RN"], temporary: false },
+        {
+          type: "edit_person",
+          personId: "Ana Lim",
+          name: "Ana L.",
+          groups: ["RN"],
+          temporary: false,
+        },
       ]),
     ).toEqual([]);
   });
@@ -248,7 +254,7 @@ describe("real-world agreements beyond leave", () => {
   it("asks whether a bounded loan of a borrowed nurse is arranged", () => {
     const before = SCENARIOS.onlyRnOnLeave();
     const commands: Parameters<typeof applyAssistantCommands>[1] = [
-      { type: "add_person", name: "Float RN (Ward 5)", groups: ["RN"] },
+      { type: "add_person", name: "Float RN (Ward 5)", groups: ["RN"], temporary: false },
       {
         type: "set_off_request",
         personId: "Float RN (Ward 5)",
@@ -280,7 +286,7 @@ describe("real-world agreements beyond leave", () => {
   it("does not ask about an ordinary new staff member", () => {
     const before = SCENARIOS.onlyRnOnLeave();
     const commands: Parameters<typeof applyAssistantCommands>[1] = [
-      { type: "add_person", name: "Dana", groups: [] },
+      { type: "add_person", name: "Dana", groups: [], temporary: false },
     ];
     const result = applyAssistantCommands(before, commands);
     if (!result.ok) throw new Error(result.rejection.message);

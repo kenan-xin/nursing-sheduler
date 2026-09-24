@@ -399,12 +399,14 @@ describe("the command arms the provider is actually shown", () => {
         type: "add_person",
         name: "Float RN (Ward 5)",
         groups: ["RN"],
+        temporary: true,
       },
       edit_person: {
         type: "edit_person",
         personId: "ana",
         name: "Ana Lim",
         groups: ["RN"],
+        temporary: false,
       },
       remove_person: { type: "remove_person", personId: 7 },
       add_people_group: {

@@ -452,8 +452,8 @@ describe("parseAssistantCommands", () => {
 
   it("accepts the Staff-screen arms", () => {
     const result = parseAssistantCommands([
-      { type: "add_person", name: "Float RN (Ward 5)", groups: ["RN"] },
-      { type: "edit_person", personId: 7, name: "7", groups: [] },
+      { type: "add_person", name: "Float RN (Ward 5)", groups: ["RN"], temporary: false },
+      { type: "edit_person", personId: 7, name: "7", groups: [], temporary: false },
       { type: "remove_person", personId: "bo" },
       {
         type: "add_people_group",
@@ -476,11 +476,11 @@ describe("parseAssistantCommands", () => {
   it("refuses Staff-screen payloads the model must fix itself", () => {
     const refused: unknown[] = [
       // groups omitted: the model must send [] for "no groups".
-      [{ type: "add_person", name: "Cara" }],
+      [{ type: "add_person", name: "Cara", temporary: false }],
       // A description the Staff table cannot author.
-      [{ type: "add_person", name: "Cara", groups: [], description: "Agency" }],
+      [{ type: "add_person", name: "Cara", groups: [], temporary: false, description: "Agency" }],
       // name omitted on an edit: send the current name to keep it.
-      [{ type: "edit_person", personId: "ana", groups: [] }],
+      [{ type: "edit_person", personId: "ana", groups: [], temporary: false }],
       // description omitted on a group: send "" for none.
       [{ type: "add_people_group", groupId: "X", members: [] }],
       // members not a list.

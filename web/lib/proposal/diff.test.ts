@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import { getCapabilityRegistry } from "@/lib/capability/registry";
 import { applyAssistantCommands } from "./operations";
 import { deriveProposalDiff, SCOPE_LABEL, type DiffScope } from "./diff";
+import type { AssistantCommandV1 } from "./commands";
 import { octoberWard, peopleScenario, proposalScenario, ruleWardScenario } from "./test-support";
 
 describe("deriveProposalDiff", () => {
@@ -382,7 +383,7 @@ describe("deriveProposalDiff", () => {
       weight: "must" as const,
     });
     const commands = [
-      { type: "add_person" as const, name: float, groups: ["RN"] },
+      { type: "add_person" as const, name: float, groups: ["RN"], temporary: false },
       offRun("2026-10-01", "2026-10-11"),
       offRun("2026-10-15", "2026-10-31"),
     ];
@@ -425,10 +426,26 @@ describe("deriveProposalDiff", () => {
     );
   });
 
+  it("says when an added person is temporary", () => {
+    const before = peopleScenario();
+    const commands: AssistantCommandV1[] = [
+      { type: "add_person", name: "Float RN", groups: [], temporary: true },
+    ];
+    const applied = applyAssistantCommands(before, commands);
+    if (!applied.ok) throw new Error(applied.rejection.message);
+    const entry = deriveProposalDiff(before, applied.next, commands).direct.find(
+      (e) => e.key === `person:${JSON.stringify("Float RN")}`,
+    );
+    expect(entry).toMatchObject({
+      kind: "created",
+      after: "Float RN (temporary: borrowed or agency)",
+    });
+  });
+
   it("skips the availability line when the days they are here are not one run", () => {
     const before = peopleScenario();
     const commands = [
-      { type: "add_person" as const, name: "Float", groups: [] },
+      { type: "add_person" as const, name: "Float", groups: [], temporary: false },
       {
         type: "set_off_request" as const,
         personId: "Float",
@@ -471,8 +488,14 @@ describe("deriveProposalDiff", () => {
       },
     } as typeof base;
     const commands = [
-      { type: "add_person" as const, name: "Float", groups: ["RN"] },
-      { type: "edit_person" as const, personId: 7, name: "7", groups: ["RN", "Seniors"] },
+      { type: "add_person" as const, name: "Float", groups: ["RN"], temporary: false },
+      {
+        type: "edit_person" as const,
+        personId: 7,
+        name: "7",
+        groups: ["RN", "Seniors"],
+        temporary: false,
+      },
     ];
     const applied = applyAssistantCommands(before, commands);
     if (!applied.ok) throw new Error("fixture should apply");
@@ -523,7 +546,13 @@ describe("deriveProposalDiff", () => {
   it("shows a rename as one renamed entry, with the groups it touched", () => {
     const before = peopleScenario();
     const commands = [
-      { type: "edit_person" as const, personId: "ana", name: "Ana Lim", groups: ["RN"] },
+      {
+        type: "edit_person" as const,
+        personId: "ana",
+        name: "Ana Lim",
+        groups: ["RN"],
+        temporary: false,
+      },
     ];
     const applied = applyAssistantCommands(before, commands);
     if (!applied.ok) throw new Error("fixture should apply");
