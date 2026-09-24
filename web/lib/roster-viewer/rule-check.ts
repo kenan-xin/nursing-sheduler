@@ -131,6 +131,11 @@ export interface LeaveMove {
 
 export interface CheckOptions {
   readonly leaveMoves?: readonly LeaveMove[];
+  /**
+   * Cells where sick or emergency leave is a fact: the person's own requests there
+   * cannot be honoured, so they are not judged (after the change only).
+   */
+  readonly excused?: readonly { readonly personIdx: number; readonly dateIdx: number }[];
 }
 
 const isHard = (weight: number): boolean => weight === Infinity || weight === -Infinity;
@@ -365,6 +370,7 @@ export function listIssues(
   options: CheckOptions = {},
 ): RuleIssue[] {
   const movedFrom = new Set((options.leaveMoves ?? []).map((m) => `${m.personIdx}:${m.from}`));
+  const excused = new Set((options.excused ?? []).map((c) => `${c.personIdx}:${c.dateIdx}`));
   const issues: RuleIssue[] = [];
   const inScope = new Set(scope.dates);
   const dayCount = context.calendar.length;
@@ -439,7 +445,7 @@ export function listIssues(
     for (const p of scope.people) {
       if (!rule.people.has(p)) continue;
       for (const d of scope.dates) {
-        if (!rule.dates.has(d)) continue;
+        if (!rule.dates.has(d) || excused.has(`${p}:${d}`)) continue;
         const cell = at(p, d);
         const checks = rule.anyWorked
           ? [{ id: "any", holds: cell >= 0, label: "a shift", leave: false }]

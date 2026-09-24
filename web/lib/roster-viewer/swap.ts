@@ -214,6 +214,11 @@ export type CoverReason = "swap" | "sick_or_emergency";
 const LEAVE: RosterDayState = { kind: "leave" };
 const OFF: RosterDayState = { kind: "off" };
 
+/** Sick or emergency leave overrides the person's own requests on those dates. */
+const excuseSick = (personIdx: number, dateIdxs: readonly number[], reason: CoverReason) => ({
+  excused: reason === "swap" ? [] : dateIdxs.map((dateIdx) => ({ personIdx, dateIdx })),
+});
+
 /**
  * Sick or emergency leave: the person goes on LEAVE on the dates and takes nothing back.
  * A partner who was OFF covers; a partner on another shift that day moves (the old shift
@@ -255,10 +260,14 @@ export function planSickCover(
   const after: RosterDayState[][] = ctx.days.map((row) => [...row]);
   for (const cell of cells) after[cell.personIdx][cell.dateIdx] = cell.after;
   const people = partnerIdx === null ? [personIdx] : [personIdx, partnerIdx];
-  const check = checkRosterChange(ctx.model, ctx.context, ctx.days, after, {
-    people,
-    dates: dateIdxs,
-  });
+  const check = checkRosterChange(
+    ctx.model,
+    ctx.context,
+    ctx.days,
+    after,
+    { people, dates: dateIdxs },
+    excuseSick(personIdx, dateIdxs, "sick_or_emergency"),
+  );
   if (partnerIdx === null) {
     return {
       ok: true,
@@ -309,10 +318,14 @@ export function planShortShift(
   }));
   const after: RosterDayState[][] = ctx.days.map((row) => [...row]);
   for (const cell of cells) after[cell.personIdx][cell.dateIdx] = cell.after;
-  const check = checkRosterChange(ctx.model, ctx.context, ctx.days, after, {
-    people: [personIdx],
-    dates: dateIdxs,
-  });
+  const check = checkRosterChange(
+    ctx.model,
+    ctx.context,
+    ctx.days,
+    after,
+    { people: [personIdx], dates: dateIdxs },
+    excuseSick(personIdx, dateIdxs, reason),
+  );
   const talk = `The app will not offer it. Please talk to your ${ROSTER_OWNER} or the nursing supervisor.`;
   const senior = check.hard.find((i) => i.staffing?.qualified);
   if (senior?.staffing) {
@@ -495,7 +508,7 @@ export function planTrade(
     ctx.days,
     after,
     { people: [personIdx, partnerIdx], dates: [...dateIdxs, ...laterDateIdxs] },
-    { leaveMoves },
+    { leaveMoves, ...excuseSick(personIdx, dateIdxs, reason) },
   );
   if (check.hard.length > 0)
     return { ok: false, reasons: check.hard.map((issue) => issue.message) };
