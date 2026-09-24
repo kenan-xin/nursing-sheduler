@@ -381,6 +381,80 @@ export const shortContext = (): RosterContext => ({
   baselineMinimums: ["N", "N+"].map((shiftId) => ({ shiftId, unavailable: true as const })),
   leaveCreditMinutes: null,
 });
+// The MC fixture (bead nursing-sheduler-736): the live ward. N needs exactly 2; day shifts
+// need nobody. Ben must work N every date, Chloe on 8 Oct. Ben goes on MC on 8 Oct.
+//            7 Oct  8 Oct  9 Oct
+// Ana        am1    am1    am1    → N on 8, then am1 on 9: her own rule forbids it
+// Ben Tan    N      N      N      → MC on 8 Oct: his request cannot be honoured
+// Chloe Lim  N      N      N
+// Mei        am2    pm1    am2    → moves pm1 → N on 8
+// Raj        pm2    L      ADM    → moves L → N on 8
+export const MC_PEOPLE = ["Ana", "Ben Tan", "Chloe Lim", "Mei", "Raj"];
+const MC_SHIFTS = ["am1", "am2", "am3", "pm1", "pm2", "pm3", "N", "L", "ADM"];
+
+export function mcDocument(): CanonicalScenarioDocument {
+  return {
+    apiVersion: "alpha",
+    dates: { range: { startDate: BORROW_DATES[0], endDate: BORROW_DATES[2] } },
+    people: { items: MC_PEOPLE.map((id) => ({ id })) },
+    shiftTypes: {
+      items: MC_SHIFTS.map((id) => ({
+        id,
+        startTime: "07:00",
+        endTime: "15:00",
+        durationMinutes: 480,
+      })),
+    },
+    preferences: [
+      { type: PREFERENCE_TYPE.maxOneShiftPerDay },
+      {
+        type: PREFERENCE_TYPE.shiftTypeRequirement,
+        description: "Two night nurses",
+        shiftType: "N",
+        requiredNumPeople: 2,
+        weight: -1,
+      },
+      {
+        type: PREFERENCE_TYPE.shiftTypeSuccessions,
+        description: "No am1 after N",
+        person: "Ana",
+        pattern: ["N", "am1"],
+        weight: -Infinity,
+      },
+      {
+        type: PREFERENCE_TYPE.shiftRequest,
+        description: "Ben on nights",
+        person: "Ben Tan",
+        date: "ALL",
+        shiftType: "N",
+        weight: Infinity,
+      },
+      {
+        type: PREFERENCE_TYPE.shiftRequest,
+        person: "Chloe Lim",
+        date: "2026-10-08",
+        shiftType: "N",
+        weight: Infinity,
+      },
+    ],
+  };
+}
+const S = (shiftId: string): RosterDayState => ({ kind: "shift", shiftId });
+export const mcGrid = (): RosterDayState[][] => [
+  [S("am1"), S("am1"), S("am1")],
+  [N, N, N],
+  [N, N, N],
+  [S("am2"), S("pm1"), S("am2")],
+  [S("pm2"), S("L"), S("ADM")],
+];
+export const mcContext = (): RosterContext => ({
+  people: MC_PEOPLE.map((id) => ({ id })),
+  shiftTypes: MC_SHIFTS.map((id) => ({ id, description: id })),
+  calendar: BORROW_DATES.map((iso) => ({ iso, weekday: "Wed", weekend: false, holiday: false })),
+  baselineMinimums: MC_SHIFTS.map((shiftId) => ({ shiftId, unavailable: true as const })),
+  leaveCreditMinutes: null,
+});
+
 export function shortRosterDocument(): RosterDocument {
   return {
     ...priyaRosterDocument(),

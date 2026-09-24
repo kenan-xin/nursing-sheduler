@@ -21,6 +21,9 @@ import {
   borrowContext,
   borrowDocument,
   borrowGrid,
+  mcContext,
+  mcDocument,
+  mcGrid,
   overtimeContext,
   overtimeDocument,
   overtimeGrid,
@@ -321,6 +324,26 @@ describe("the Singapore four-step ladder", () => {
     if (plan.ok) throw new Error("should refuse");
     expect(plan.reasons[0]).toMatch(/a nurse from Nights must stay/);
     expect(plan.reasons[0]).not.toMatch(/in charge/);
+  });
+
+  it("lets an MC override the sick nurse's own must-work request (step 1 moves)", () => {
+    const mc = build(mcContext(), mcGrid(), mcDocument());
+    const [ANA_MC, BEN_MC, , MEI, RAJ] = [0, 1, 2, 3, 4];
+    const ladder = findCoverLadder(mc, BEN_MC, [1], "sick_or_emergency");
+    expect(ladder.step).toBe(1);
+    expect(ladder.candidates.map((c) => [c.partnerIdx, c.plan.kind])).toEqual([
+      [MEI, "move"],
+      [RAJ, "move"],
+    ]);
+    expect(ladder.ruledOut.find((r) => r.partnerIdx === ANA_MC)?.reason).toMatch(/No am1 after N/);
+    // Recording the MC alone leaves only the real gap, not his own request.
+    const record = planSickCover(mc, BEN_MC, null, [1]);
+    expect(record).toMatchObject({
+      ok: true,
+      uncovered: ["8 Oct: “Two night nurses” has 1 of the 2 needed."],
+    });
+    // A plain swap is his choice, so his request still binds.
+    expect(planSwap(mc, BEN_MC, MEI, [1]).ok).toBe(false);
   });
 
   it("never runs a shift with nobody", () => {
