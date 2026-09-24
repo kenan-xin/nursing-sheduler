@@ -21,10 +21,10 @@ Success criteria:
 | --- | --- |
 | X1 | The upstream target is v1 branch `feature/genie` at `1bf4b85`. The old pin `d63519b` is a genie commit. Its merge base with v1 `dev` is `89190ab`. Genie contains all of `dev` through merge `1b6f7e5`. |
 | X2 | Sync method C, split by layer. The solver core resets to genie. The server layer adopts upstream changes file by file. |
-| X3 | Keep the v2 worker fence (T19 Lua `TIME` fence) and the T09 ordinary-first queue for this sync. Record them as a deviation. Adopting the v1 worker lease registry is a separate, later decision. |
+| X3 | Adopt the v1 worker lease registry in W6, after W2, and rebuild the T09 ordinary-first queue on it. W2 keeps the v2 T19 fence until W6 lands. See section 3, W6, for the comparison. |
 | X4 | Restore the genie multi-solver library. The product stays CP-SAT only through the server boundary and the solver allowlist. |
 | X5 | Exclude the v1 Python AI package (`core/nurse_scheduling/ai/`, `ai_serve.py`). Study it to improve the v2 assistant (W4). |
-| X6 | No Sentry, no suspicion reports, no usage telemetry, no `usage-reporter` service. This matches genie for Sentry and suspicion. Telemetry is excluded because it writes inside the Redis store transactions that v2 keeps (X3). |
+| X6 | No Sentry, no suspicion reports, no usage telemetry, no `usage-reporter` service. This matches genie for Sentry and suspicion. Telemetry stays off. W6 vendors `server/usage_metrics.py` only because genie `stores/redis.py` imports it. `USAGE_METRICS_ENABLED` stays `false`, `usage_report.py` is not vendored, and no data is collected. |
 | X7 | Vendor `server/auth.py` and leave auth off. The v2 backend is private behind the web BFF. |
 | X8 | Adopt the new `/info` keys and API version `0.2.0`, with the paired BFF parser change in the same commit. |
 | X9 | Remove `country` from the core model, as genie does. Workspace V1 input still accepts `country` and drops it, so that old saved files load. `web/` stops sending it. |
@@ -34,7 +34,7 @@ Success criteria:
 ## 3. Workstreams
 
 ```text
-W0 foundations ──> W1 solver core (one branch) ──> W2 server (small commits) ──> W5 manifest and recipe
+W0 foundations ──> W1 solver core (one branch) ──> W2 server (small commits) ──> W6 worker lease (one branch) ──> W5 manifest and recipe
 W3 frontend beads and W4 AI study: independent, no core code
 ```
 
@@ -92,7 +92,7 @@ Acceptance:
 
 ### W2: server adoption
 
-W2 keeps these v2 server designs, because upstream has no equivalent or X3 keeps them: Workspace input and canonical YAML, the 422 envelope, opaque event cursors, the roster container, basis admission and the semantic profile, the T19 fence, the T09 queue, maintenance liveness, and the `/health` shim.
+W2 keeps these v2 server designs, because upstream has no equivalent: Workspace input and canonical YAML, the 422 envelope, opaque event cursors, the roster container, basis admission and the semantic profile, maintenance liveness, and the `/health` shim. W2 also keeps the T19 fence and the T09 queue, which W6 replaces.
 
 Land in this order, one commit each where possible (lane 02 section 3, lane 03 section 3):
 
@@ -101,14 +101,48 @@ Land in this order, one commit each where possible (lane 02 section 3, lane 03 s
 3. `request_limits.py` verbatim, wired in `app.py`. Map the code `request_too_large` to kind `too-large` in `web/lib/bff/errors.ts`.
 4. `version.py` verbatim. The v2 Docker build writes `.app-version` from `APP_VERSION`. `app.py` imports `version.py`, so only one copy exists.
 5. `auth.py` verbatim, with auth off by default. `solver_capabilities.py` and `solver_options.py` verbatim, with the default allowlist `ortools/cp-sat`. The genie finish-now capability replaces the v2 `STOPPABLE_SOLVERS` adaptation.
-6. Genie `config.py` verbatim, plus a small v2 patch for `ordinary_reserved_slots`. `JOB_REDIS_KEY_PREFIX=nurse_scheduling:jobs:v1`, `JOB_MAX_PENDING=8` and `OPTIMIZE_DEFAULT_PRETTIFY=false` move to `docker/` environment files. The inert telemetry settings stay, because they are part of the verbatim file. The rename from `claim_lease_seconds` to `worker_lease_seconds` does not apply, because X3 keeps the v2 lease.
+6. Genie `config.py` verbatim, plus a small v2 patch for `ordinary_reserved_slots`. `JOB_REDIS_KEY_PREFIX=nurse_scheduling:jobs:v1`, `JOB_MAX_PENDING=8` and `OPTIMIZE_DEFAULT_PRETTIFY=false` move to `docker/` environment files. The inert telemetry settings stay, because they are part of the verbatim file. Until W6, the v2 patch keeps `claim_lease_seconds`. W6 takes the rename to `worker_lease_seconds`.
 7. `GET /optimize/options` in `api/optimize.py`.
-8. `/info` gains `jobs` (from `describe_queue_state()`), `workers.online` (from `worker.is_alive()`), `auth` and `claimed_performance`. API version becomes `0.2.0`. The same commit extends `web/app/api/info/validate.ts` and `web/lib/query/event-payloads.ts` and their tests.
+8. `/info` gains `jobs` (from `describe_queue_state()`), `workers.online` (from `worker.is_alive()` until W6 switches it to the lease registry), `auth` and `claimed_performance`. API version becomes `0.2.0`. The same commit extends `web/app/api/info/validate.ts` and `web/lib/query/event-payloads.ts` and their tests.
 9. Ruff style changes land with each file they touch. Keep the v2 Ruff pin. Record any upstream Ruff violation that v2 ignores in the manifest.
 
-Not adopted: the worker lease registry (X3), Sentry and suspicion (X6), usage telemetry and `usage_report.py` (X6), `ai_serve.py` and `frontend_validation.py` (X5).
+Not adopted in W2: the worker lease registry (W6), Sentry and suspicion (X6), usage telemetry and `usage_report.py` (X6), `ai_serve.py` and `frontend_validation.py` (X5).
 
 Acceptance: the core suite and the web tests pass after each step. `/api/info` returns 200 with the new keys through the BFF. The real-Redis gates from T19 still pass.
+
+### W6: worker lease registry
+
+W6 replaces the v2 T19 fence with the genie worker lease registry (`0249f67`, `ab71cfd`, `fec52e1`, `23a77bb`, `00aee65`), and rebuilds the T09 queue on it. It lands as one branch, because the store, controller and worker change together.
+
+Why v1 wins. The v2 fence is stronger in one narrow way: it checks lease expiry with one clock (Redis `TIME`) inside one atomic Lua commit. The v1 fence checks expiry against a timestamp from the worker or API host. So v1 depends on host clocks, and a worker write that arrives after expiry still succeeds until maintenance removes the lease. This gap costs little in v2, for these reasons:
+
+- v2 runs the API, worker and Redis on one Docker host, so host clock skew is negligible.
+- A lost job goes to `worker_lost` and does not run again. After maintenance acts, the token and revision checks reject every stale write, so two workers never own one job.
+- Both designs make a worker abort its solver child when it loses its lease.
+
+In return, v1 is smaller (genie `stores/redis.py` has 921 lines, v2 has 1,623 plus the 441-line `queue_script.py`). Its production path is the same code that the fakeredis tests run, where v2 keeps a mirrored Python path for fakeredis. Its always-on worker heartbeat gives worker presence for `/info` and readiness. It is also where upstream fixes land.
+
+Take verbatim from genie: `job_store.py`, `jobs/models.py`, `jobs/controller.py`, `jobs/worker.py`, `stores/memory.py`, `stores/redis.py`, `usage_metrics.py` (import only, see X6), and the lease-related `config.py` rename to `worker_lease_seconds` (`JOB_WORKER_LEASE_SECONDS`, updated in `docker/` environment files). Port the genie lease tests (`d4ae8aa`, `74f0ce4`, `c621490`, `663861b`, `0bb55e2`, `367b477`).
+
+Apply the v2 patches again, as the smallest changes to the genie code:
+
+| Patch | Change on the genie code |
+| --- | --- |
+| P6 event replay | `prepare_event_replay` in `job_store.py` and both stores, as a `WATCH`/`MULTI`/`EXEC` snapshot. |
+| P8 basis and INCONCLUSIVE | The job model fields and controller transitions from lane 07 D13. |
+| P9 purpose queues (T09) | Two purpose queues (ordinary and assistant diagnostic) and one reserved ordinary slot, on the genie `WATCH`/`MULTI` claim path. Keep `describe_queue_state()`, queue repair and the T09 admission errors. No Lua. |
+| P7 roster artifact | The runner and controller hooks for the roster container, if W2 did not already place them outside these files. |
+
+Delete `stores/queue_script.py`, the fakeredis mirror paths and `find_claimed_before`. `/info` `workers.online` switches to the registry count.
+
+Accepted semantic change: the fence uses host clocks, and a worker write can land between lease expiry and maintenance recovery. Record this in the manifest.
+
+Acceptance:
+
+1. The genie lease tests and the v2 T09 priority-queue tests pass on memory, fakeredis and real Redis.
+2. The real-Redis `SIGKILL` gate passes: a replacement worker recovers, and the killed job ends as `worker_lost`.
+3. The delayed-commit probes pass with the new expected result: after maintenance acts, a stale worker write changes nothing.
+4. The W6 files differ from genie only by the lines of P6 to P9.
 
 ### W3: frontend gap beads
 
@@ -130,7 +164,7 @@ Extend `docs/T19-upstream-backend-source-manifest.md` with:
 
 1. A per-file origin table for every file in `core/`: `verbatim`, `patched` (with the patch ID), `v2-only`, or `excluded` (with the reason).
 2. A sync recipe of a few commands: diff the old genie pin against the new genie head for `core/`, then act on each changed file by its origin class. `verbatim` files copy. `patched` files copy and re-apply the patch. `excluded` files skip.
-3. The upstream candidates: the per-date overrides, `skillMix`, the INCONCLUSIVE outcome, opaque cursors and the T19 fence. Each one that upstream accepts moves from `patched` or `v2-only` to `verbatim`.
+3. The upstream candidates: the per-date overrides, `skillMix`, the INCONCLUSIVE outcome, opaque cursors and the purpose queues. Each one that upstream accepts moves from `patched` or `v2-only` to `verbatim`.
 
 Acceptance: every file in `core/` has exactly one row, and the recipe runs on the current pins with no unexplained difference.
 
@@ -143,9 +177,10 @@ Acceptance: every file in `core/` has exactly one row, and the recipe runs on th
 | Upstream Ruff violations fail the v2 gate. | Fix or ignore per file, and record each one in the manifest. |
 | Old saved files carry `country`. | Workspace input accepts and drops it (X9). |
 | The maintenance backoff breaks readiness. | W2 step 1 keeps the backoff cap inside the liveness window. |
+| W6 weakens the T09 queue or worker-loss recovery. | W6 acceptance runs the T09 tests, the `SIGKILL` gate and the delayed-commit probes on real Redis. |
+| W6 moves the fence to host clocks. | Accepted for a single-host deployment. Record it in the manifest, and review it again if the worker moves to another host. |
 
 ## 5. Out of scope
 
-- The v1 worker lease registry (X3). Revisit after this sync.
 - Wiring or vendoring the v1 Python AI service (X5).
 - Any v2 frontend redesign. W3 only files beads.
