@@ -1068,6 +1068,32 @@ html [data-copilotkit] * {
   scrollbar-color: var(--rule) transparent;
 }
 
+/* A row or card a just-applied assistant change touched (lib/change-highlight).
+   The OUTLINE is the cue: a 3px ring is a shape change that reads without colour
+   vision (WCAG 1.4.1), and --brand clears 3:1 against every surface (1.4.11).
+   Inset, so a parent's overflow clip or a neighbouring grid cell cannot hide it. */
+[data-change-highlight="true"] {
+  outline: 3px solid var(--brand);
+  outline-offset: -3px;
+}
+
+/* The ring settles in only for users who have not asked for less motion; the global
+   reduced-motion rule below would also still it, this keeps it off by default. */
+@media (prefers-reduced-motion: no-preference) {
+  [data-change-highlight="true"] {
+    animation: ns-change-in var(--dur-base) cubic-bezier(0.4, 0, 0.2, 1);
+  }
+}
+
+@keyframes ns-change-in {
+  from {
+    outline-offset: 3px;
+  }
+  to {
+    outline-offset: -3px;
+  }
+}
+
 /* Reduced-motion: suppress the motion tokens' effect globally. */
 @media (prefers-reduced-motion: reduce) {
   *,
