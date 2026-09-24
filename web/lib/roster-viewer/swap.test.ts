@@ -218,10 +218,37 @@ describe("step 2: trades with someone off or on leave", () => {
   it("checks the day after the moved shifts", () => {
     // Ben is off on 8-9 Oct, but N on 7-9 is followed by his AM on 10 Oct, whatever later dates he gives.
     expect(findTrades(asha, P, [1, 2], "swap").some((t) => t.partnerIdx === BEN_IDX)).toBe(false);
+    const plan = planTrade(asha, P, BEN_IDX, [1, 2], [5, 6], "person-covers");
+    expect(plan.ok).toBe(false);
+    if (plan.ok) return;
+    expect(plan.reasons).toContain(
+      "SN-Ben works N on 9 Oct, then AM on 10 Oct, which “No morning after night” does not allow.",
+    );
   });
 
   it("never lets a sick nurse cover later shifts", () => {
     const plan = planTrade(asha, P, ASHA_IDX, [1, 2], [4, 5], "person-covers", "sick_or_emergency");
-    expect(plan.ok).toBe(false);
+    expect(plan).toEqual({
+      ok: false,
+      reasons: [
+        "SN-Priya is on sick or emergency leave, so SN-Priya cannot work later shifts in return.",
+      ],
+    });
+  });
+
+  it("trades each date only once", () => {
+    const refusal = { ok: false, reasons: ["Each date can only be traded once."] };
+    expect(planTrade(asha, P, ASHA_IDX, [1, 2], [4, 4], "person-covers")).toEqual(refusal);
+    expect(planTrade(asha, P, ASHA_IDX, [1, 1], [4, 5], "person-covers")).toEqual(refusal);
+  });
+
+  it("says the person is on leave on a later date, not working", () => {
+    const days = ashaGrid();
+    days[P][4] = { kind: "leave" };
+    const plan = planTrade({ ...asha, days }, P, ASHA_IDX, [1, 2], [4, 5], "person-covers");
+    expect(plan).toEqual({
+      ok: false,
+      reasons: ["SN-Priya is on leave on 11 Oct, so SN-Priya cannot cover it."],
+    });
   });
 });

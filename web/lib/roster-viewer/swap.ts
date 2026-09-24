@@ -34,7 +34,7 @@ export type SwapPlan =
       readonly cells: readonly RosterCellChange[];
       readonly soft: readonly RuleIssue[];
       readonly unchecked: readonly string[];
-      /** New shortfalls the change leaves open. Empty except for `record`. */
+      /** New hard issues the change leaves open (mostly shortfalls). Empty except for `record`. */
       readonly uncovered: readonly string[];
     }
   | { readonly ok: false; readonly reasons: readonly string[] };
@@ -210,8 +210,8 @@ const OFF: RosterDayState = { kind: "off" };
 
 /**
  * Sick or emergency leave: the person goes on LEAVE on the dates and takes nothing back.
- * A partner who was OFF covers; a partner on another shift that day moves (her old shift
- * loses her, so staffing must still hold). `partnerIdx` null records the absence alone:
+ * A partner who was OFF covers; a partner on another shift that day moves (the old shift
+ * loses a nurse, so staffing must still hold). `partnerIdx` null records the absence alone:
  * the new shortfall is stated as `uncovered`, never a refusal, because the absence is a fact.
  */
 export function planSickCover(
@@ -319,8 +319,8 @@ export interface TradeCandidate {
 }
 
 /**
- * Step 2: a nurse who is OFF or on LEAVE on the given dates works them, and her off or
- * leave moves to later dates she now works (paired in order). `person-covers`: the
+ * Step 2: a nurse who is OFF or on LEAVE on the given dates works them, and that off or
+ * leave moves to later dates the nurse now works (paired in order). `person-covers`: the
  * person works those later shifts. `partner-off`: nobody does, and staffing must still
  * hold. Every affected date, now and later, goes through the same check. Succession
  * windows that touch a changed date are in scope, which covers the day after each
@@ -337,14 +337,18 @@ export function planTrade(
 ): TradePlan | { readonly ok: false; readonly reasons: readonly string[] } {
   const person = personName(ctx.context, personIdx);
   const partner = personName(ctx.context, partnerIdx);
-  const fail = (reason: string) => ({ ok: false as const, reasons: [reason] });
+  const fail = (why: string) => ({ ok: false as const, reasons: [why] });
   const date = (d: number) => plainDate(ctx.context.calendar[d].iso);
   if (partnerIdx === personIdx) return fail(`${partner} cannot trade with themselves.`);
   if (reason === "sick_or_emergency" && variant === "person-covers") {
-    return fail(`${person} is on sick leave, so she cannot work later shifts in return.`);
+    return fail(
+      `${person} is on sick or emergency leave, so ${person} cannot work later shifts in return.`,
+    );
   }
   if (laterDateIdxs.length !== dateIdxs.length)
     return fail("A trade needs one later date for each date given up.");
+  if (new Set([...dateIdxs, ...laterDateIdxs]).size !== dateIdxs.length * 2)
+    return fail("Each date can only be traded once.");
   const giving = givingProblem(ctx, personIdx, dateIdxs);
   if (giving !== null) return fail(giving);
   const last = Math.max(...dateIdxs);
@@ -368,8 +372,10 @@ export function planTrade(
     );
     if (variant === "person-covers") {
       const personOnL = ctx.days[personIdx][l];
-      if (personOnL.kind !== "off")
-        return fail(`${person} is working on ${date(l)}, so she cannot cover it.`);
+      if (personOnL.kind !== "off") {
+        const state = personOnL.kind === "leave" ? "on leave" : "working";
+        return fail(`${person} is ${state} on ${date(l)}, so ${person} cannot cover it.`);
+      }
       cells.push({ personIdx, dateIdx: l, before: personOnL, after: partnerOnL });
     }
     if (partnerOnG.kind === "leave") leaveMoves.push({ personIdx: partnerIdx, from: g, to: l });
