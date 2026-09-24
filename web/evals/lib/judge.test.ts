@@ -69,7 +69,7 @@ describe("judge", () => {
   });
 
   it("lets a lead-in or open question pass the card item, and a typed name, date or screen pass grounding", () => {
-    expect(STANDARD_ITEMS.no_text_choice).toMatch(/leads into a card/);
+    expect(STANDARD_ITEMS.no_text_choice).toMatch(/same turn as a card/);
     expect(STANDARD_ITEMS.no_text_choice).toMatch(/open question/);
     expect(STANDARD_ITEMS.no_invented_entities).toMatch(/the user typed/);
     expect(STANDARD_ITEMS.no_invented_entities).toMatch(/dates/i);
@@ -78,7 +78,7 @@ describe("judge", () => {
   });
 
   it("keeps short and suggests_default from failing a reply that follows the app (rubric .3)", () => {
-    expect(RUBRIC_VERSION).toBe("2026-09-24.4");
+    expect(RUBRIC_VERSION).toBe("2026-09-24.5");
     expect(STANDARD_ITEMS.short).toMatch(/the app tells/);
     expect(STANDARD_ITEMS.suggests_default).toMatch(/legal or regulatory/);
     expect(STANDARD_ITEMS.suggests_default).toMatch(/choice between repair/);
@@ -91,6 +91,18 @@ describe("judge", () => {
     expect(item).toMatch(/1 rest day a week/);
     expect(item).toMatch(/72 hours of overtime a month/);
     expect(item).toMatch(/unpaid break/);
+  });
+
+  it("passes the fixed prepared wording and proposed names, keeps jargon and yes/no text failing (rubric .5)", () => {
+    expect(STANDARD_ITEMS.no_false_claim).toMatch(/I've prepared X; check it and press Apply/);
+    expect(STANDARD_ITEMS.no_false_claim).toMatch(/Run card or option card is ready/);
+    expect(STANDARD_ITEMS.no_invented_entities).toMatch(/proposes for a new shift/);
+    expect(STANDARD_ITEMS.no_invented_entities).toMatch(/nursing supervisor/);
+    expect(STANDARD_ITEMS.plain).toMatch(/Jargon that fails: solver, infeasible/);
+    expect(STANDARD_ITEMS.plain).toMatch(/weight 10/);
+    expect(STANDARD_ITEMS.plain).toMatch(/Shift successions/);
+    expect(STANDARD_ITEMS.no_text_choice).toMatch(/yes\/no offer .* is a pick-one question/);
+    expect(STANDARD_ITEMS.suggests_default).toMatch(/A card of options passes/);
   });
 
   it("can label the transcript from the simulated user's side", () => {

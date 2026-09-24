@@ -71,7 +71,9 @@ export const REPAIR_CASES: EvalCase[] = [
     expect: {
       proposalOps: [{ type: "edit_count_rule" }],
       finalState: noShortfalls,
-      judge: ["Says who has to agree to the change."],
+      judge: [
+        "Says who has to agree to the change, or has the user confirm the higher limit is within the ward's contract and legal limits (the app asking this on Apply counts).",
+      ],
     },
   },
   {
