@@ -115,7 +115,7 @@ function Host() {
   const controller = useAssistantProposals();
   return (
     <>
-      <ProposalPreviewCard controller={controller} />
+      <ProposalPreviewCard controller={controller} onSend={() => {}} disabled={false} />
       <AssistantReceipts controller={controller} />
     </>
   );
