@@ -82,7 +82,10 @@ export async function probeCredentials(input: ProbeInput): Promise<ProbeResult> 
         // an unforced probe passes on a chatty reply that proves nothing.
         tool_choice: { type: "function", function: { name: PROBE_TOOL.function.name } },
         parallel_tool_calls: false,
-        max_tokens: 32,
+        // Room for a reasoning model's thinking before the forced call: at 32 a
+        // model like deepseek-v4.1-flash spends the budget reasoning and stops
+        // with finish_reason "length" and no tool call, failing a capable model.
+        max_tokens: 512,
         stream: false,
       }),
     });
