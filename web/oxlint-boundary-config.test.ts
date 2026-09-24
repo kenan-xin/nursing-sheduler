@@ -900,6 +900,13 @@ const OVERRIDES: OverrideContract[] = [
     properties: "base",
     why: "EVAL PIPELINE (2026-09-24). The live-model eval runner is a test OF the assistant, so it sits on the assistant seam like the assistant's own tests and may name CopilotKitProvider. Every acquisition family stays banned. Its helpers live in evals/lib, never evals/support, because the support-tree row keeps the assistant boundary closed",
   },
+  {
+    files: ["evals/eval-reporter.ts"],
+    exempt: ["assistant", "raw-copilotkit"],
+    acquisition: ["filesystem"],
+    properties: "base",
+    why: "EVAL PIPELINE. The eval report writer. Ledger: API node:fs/promises readFile, writeFile, mkdir | root evals/runs/latest/ and evals/baseline.json | UTF-8 JSON and Markdown | write, no delete. It opens no .ts/.tsx. LAST, so it wins over the evals/** row above",
+  },
 ];
 
 /** Overrides that legitimately carry no `no-restricted-imports` config at all. */
@@ -1490,6 +1497,13 @@ const GOVERNED: GovernedPath[] = [
     acquisition: [],
     properties: "base",
     note: "class {4,23} -- EVAL PIPELINE. An ordinary test file inside evals/, matched by both the general test override and the evals/** override; the two agree so which one wins does not change the effective config",
+  },
+  {
+    path: "evals/eval-reporter.ts",
+    exempt: ["assistant", "raw-copilotkit"],
+    acquisition: ["filesystem"],
+    properties: "base",
+    note: "class {23,24} -- EVAL PIPELINE. The ledgered report writer: the evals/** override matches it, and the later row-B override wins, removing the filesystem family and nothing else",
   },
 ];
 

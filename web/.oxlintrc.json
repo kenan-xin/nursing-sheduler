@@ -2808,6 +2808,100 @@
           }
         ]
       }
+    },
+    {
+      "files": ["evals/eval-reporter.ts"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "zundo",
+                "message": "The temporal middleware is retired. Undo/redo is a durable repository operation (scenarioCommands.undo/redo) whose availability is read from the committed envelope, not a per-tab in-memory stack that lies across tabs."
+              },
+              {
+                "name": "zustand/middleware",
+                "importNames": ["persist"],
+                "message": "The scenario projection is no longer a persist-wrapped store. Durable writes go through the repository transaction and are PUBLISHED into the projection afterwards; a write-behind would put the view ahead of the commit again, which is the exact failure the T03 cutover removed."
+              },
+              {
+                "name": "lucide-react",
+                "message": "The project standardizes on react-icons Font Awesome 6 (react-icons/fa6), re-exported through components/icons.tsx. lucide-react arrives as a transitive shadcn/base-nova dependency and is not this app's icon set: importing it would put two icon families -- two stroke weights, two optical sizes -- on the same screen. Migrated here from the recursive app/ + components/ source walk in app/design-system.test.ts, which is exactly the job no-restricted-imports already does natively."
+              },
+              {
+                "name": "@copilotkit/react-core/v2/styles.css",
+                "message": "The CopilotKit v2 stylesheet is a PRODUCTION CSS ENTRY and there is exactly one: `app/layout.tsx`, which imports it before `./globals.css` so the token mapping in globals.css can re-point the library's scoped theme. A second entry double-ships ~87KB and, if it lands after globals.css, silently undoes that mapping and returns the dock to the library's pure-white / near-black defaults. This restriction replaces the recursive app/ + components/ import walk that components/ai/assistant-styles.test.ts used to run: closing the specifier makes a second entry UNAVAILABLE rather than merely unspelled, and unlike the walk it covers aliases, re-export chains and dynamic import() in every directory. Whether the sheet is actually shipped and ACTIVE is owned by e2e/ai-assistant-chat-ui.spec.ts against a real production build."
+              }
+            ],
+            "patterns": [
+              {
+                "group": ["@copilotkit/runtime", "@copilotkit/runtime/*", "@copilotkit/runtime/**"],
+                "message": "The CopilotKit RUNTIME is reachable only through lib/ai/runtime/copilotkit-runtime.ts, which applies the telemetry/analytics containment env before the package's telemetry singleton snapshots it. Importing the package anywhere else boots an uncontained runtime and breaks the single-instance identity Phase 1 depends on."
+              },
+              {
+                "group": ["@/lib/repository", "@/lib/repository/*", "@/lib/repository/**"],
+                "message": "The durable repository is reached only by the projection adapter (lib/store/authority.ts) and the explicitly listed modules that own their own tables or the write fence. Everything else changes durable scenario state through scenarioCommands / assistantProposalCommands, so a failed write can never leave the view showing something that was not saved."
+              },
+              {
+                "regex": "^\\.{1,2}/(.*/)?repository(/|$)",
+                "message": "Same boundary as the aliased specifier: a RELATIVE path into lib/repository is the same crossing. This regex is why the boundary is not merely a spelling rule about `@/lib/repository`."
+              },
+              {
+                "regex": "(^|/)entity-editor/entity-editor(\\.[cm]?[jt]sx?)?$",
+                "message": "The generic EntityEditor shell is retired (DR-5). People and Shift Types are bespoke screens over components/entity-editor/core; the shared substrate (core, groups-section, transfer-list, working-time-fields) is deliberately NOT matched. The module does not exist, so the compiler already refuses this import -- this rule is what makes the refusal say why."
+              },
+              {
+                "group": [
+                  "typescript",
+                  "typescript/*",
+                  "typescript/**",
+                  "ts-morph",
+                  "ts-morph/**",
+                  "@babel/*",
+                  "@babel/*/**",
+                  "acorn",
+                  "acorn/**",
+                  "acorn-walk",
+                  "acorn-walk/**",
+                  "esprima",
+                  "espree",
+                  "meriyah",
+                  "recast",
+                  "recast/**",
+                  "jscodeshift",
+                  "jscodeshift/**",
+                  "@swc/*",
+                  "@swc/*/**",
+                  "oxc-parser",
+                  "oxc-parser/**",
+                  "@typescript-eslint/*",
+                  "tree-sitter",
+                  "tree-sitter-*",
+                  "web-tree-sitter",
+                  "@ast-grep/*"
+                ],
+                "message": "Test and support code may not acquire a compiler or parser library. Every guarantee that used to be proved by parsing authored source now sits at the first layer that can own it honestly: a production API, a TypeScript option or negative fixture, an Oxlint restriction, a runtime/behavioural test, or a declarative ast-grep rule with its own valid/invalid fixtures. THIS FAMILY HAS NO AUDITED EXCEPTION ANYWHERE -- if a guarantee appears to need a parser, the answer is to change the production API, not to import one here. This rule owns every literal specifier for these packages, static and dynamic alike; ast-grep owns only the residual `require()` / `createRequire` / `getBuiltinModule` call shapes, in which no specifier appears for an import rule to see."
+              },
+              {
+                "group": ["module", "node:module"],
+                "message": "`node:module` -- and therefore `createRequire` -- is a generic module-loader capability: it resolves and loads arbitrary paths, which is the same capability as `fs` reached by another route. It is available only to the exact package-resolution exceptions in the reader ledger, which may resolve DECLARED package ids and must not hand a generic loader back to their callers. WHICH MECHANISM OWNS WHAT: this rule owns every literal specifier, STATIC AND DYNAMIC ALIKE -- a probe on the installed Oxlint 1.74 shows `await import(\"node:module\")` rejected here, so ast-grep deliberately does NOT match `import()` and adding a rule for it would duplicate this one. The residual shapes ast-grep owns are the ones no specifier appears in: `require()`, a `createRequire` CALL (including a locally-named loader handle), and `process.getBuiltinModule()`."
+              }
+            ]
+          }
+        ],
+        "no-restricted-properties": [
+          "error",
+          {
+            "property": "addTool",
+            "message": "Registering a tool directly on the core bypasses useModelVisibleTool, which is the only place the turn-authority check and the host payload parse are applied. Production code must register through components/ai/register-model-visible-tool.ts; the exempt test files below register fixture tools that are deliberately not model-visible."
+          },
+          {
+            "property": "temporal",
+            "message": "zundo's temporal handle is retired along with the middleware itself. Reversal availability comes from the committed envelope through the authority projection (canUndo / canRedo), which is the same answer in every tab."
+          }
+        ]
+      }
     }
   ],
   "env": {

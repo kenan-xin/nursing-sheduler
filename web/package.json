@@ -18,7 +18,10 @@
     "test:e2e:public-roster-dispatch": "playwright test --config=playwright.public-roster-dispatch.config.ts",
     "lint:oxlint": "oxlint",
     "lint:ast-grep": "ast-grep scan",
-    "test:ast-grep": "ast-grep test"
+    "test:ast-grep": "ast-grep test",
+    "eval": "EVAL_GIT_SHA=$(git rev-parse --short HEAD) vitest run -c vitest.eval.config.ts",
+    "eval:smoke": "EVAL_TAGS=smoke EVAL_TRIALS=1 pnpm eval",
+    "eval:baseline": "EVAL_PROMOTE=1 pnpm eval"
   },
   "dependencies": {
     "@ag-ui/client": "0.0.57",
