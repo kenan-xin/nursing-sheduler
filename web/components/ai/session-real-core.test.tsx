@@ -14,7 +14,12 @@ import {
 } from "@copilotkit/react-core/v2";
 
 import { useAuthorityStore } from "@/lib/store";
-import { assistantActions, hydrateAssistant, useAssistantStore } from "@/lib/ai/assistant/store";
+import {
+  assistantActions,
+  hydrateAssistant,
+  turnAwaitsUserOnCard,
+  useAssistantStore,
+} from "@/lib/ai/assistant/store";
 import { selectActiveThread } from "@/lib/ai/assistant/history-repo";
 import { resetRuntimeInstanceForTest } from "@/lib/ai/assistant/runtime-stop";
 import { createEmptyScenarioUiState } from "@/lib/scenario";
@@ -140,6 +145,8 @@ class ScriptedTransportAgent extends AbstractAgent {
    * real tool-using turn has, and the one the overlap acceptance needs.
    */
   toolLoop = false;
+  /** What hop 1 of a tool loop calls. A shipped name drives the session's real handler. */
+  toolCall = { name: TOOL_NAME, args: "{}" };
   /**
    * Emit `RUN_FINISHED` with no assistant text -- the shape the live turn produced.
    *
@@ -257,12 +264,12 @@ class ScriptedTransportAgent extends AbstractAgent {
           type: "TOOL_CALL_START",
           parentMessageId: `msg-${callId}`,
           toolCallId: callId,
-          toolCallName: TOOL_NAME,
+          toolCallName: this.toolCall.name,
         } as unknown as BaseEvent);
         subscriber.next({
           type: "TOOL_CALL_ARGS",
           toolCallId: callId,
-          delta: "{}",
+          delta: this.toolCall.args,
         } as unknown as BaseEvent);
         subscriber.next({ type: "TOOL_CALL_END", toolCallId: callId } as unknown as BaseEvent);
       } else {
@@ -301,10 +308,12 @@ class ScriptedTransportAgent extends AbstractAgent {
     copy.behaviour = this.behaviour;
     copy.foreignFailureRunId = this.foreignFailureRunId;
     copy.toolLoop = this.toolLoop;
+    copy.toolCall = this.toolCall;
     copy.silentSuccess = this.silentSuccess;
     copy.answer = this.answer;
     copy.answerBody = this.answerBody;
     copy.threadId = this.threadId;
+    copy.agentId = this.agentId;
     // The parent keeps a handle on every clone it produced, so a test can inspect the
     // instance a turn actually ran on.
     this.clones.push(copy);
@@ -480,6 +489,19 @@ async function sendToolLoop(body: string) {
   expect(toolCalls).toBe(1);
   expect(ran.runIds).toEqual(ran.hopInputs.map((hop) => hop.runId));
   expect(useAssistantStore.getState().lastRefusal).toBeNull();
+}
+
+/**
+ * Hop 1 calls a SHIPPED tool, so the session's own handler runs; hop 2 says nothing.
+ *
+ * The session mounts its tools on `scheduler:<thread>`, so the agent must carry that id
+ * for CopilotKit to resolve the call at all.
+ */
+function callShippedToolThenFallSilent(toolCall: { name: string; args: string }) {
+  agent.agentId = `scheduler:${threadId}`;
+  agent.toolLoop = true;
+  agent.answerBody = "";
+  agent.toolCall = toolCall;
 }
 
 /**
@@ -777,6 +799,57 @@ describe("the shipped session over the real core and a real failing agent", () =
     });
     expect(useAssistantStore.getState().lastSettlement).toBeNull();
     expect(screen.queryByTestId("assistant-settlement")).toBeNull();
+  });
+
+  it("a turn that ends on a shown option card completes with no notice, even with no text", async () => {
+    // THE LIVE SHAPE (bead adb): the model asked via `offer_choices` and stopped, because
+    // the answer is the user's next message. The card IS the reply; a retry notice beside
+    // it told the user something failed when nothing had.
+    callShippedToolThenFallSilent({
+      name: "offer_choices",
+      args: JSON.stringify({
+        question: "Which borrowed nurse should go?",
+        options: [
+          { label: "Ana", detail: "" },
+          { label: "Ben Tan", detail: "" },
+        ],
+        multiple: false,
+      }),
+    });
+
+    await send("Please remove one of the borrowed nurses.");
+
+    await waitFor(async () => {
+      const turn = await lastTurn();
+      expect(turn?.state).toBe("terminal");
+      expect(turn?.terminalReason).toBe("completed");
+    });
+    expect(useAssistantStore.getState().activeChoices?.question).toBe(
+      "Which borrowed nurse should go?",
+    );
+    expect(useAssistantStore.getState().lastSettlement).toBeNull();
+    expect(screen.queryByTestId("assistant-settlement")).toBeNull();
+  });
+
+  it("counts only THIS turn's waiting card, option or run", () => {
+    expect(turnAwaitsUserOnCard(7)).toBe(false);
+    assistantActions.showRunRequest(7);
+    expect(turnAwaitsUserOnCard(7)).toBe(true);
+    expect(turnAwaitsUserOnCard(8)).toBe(false);
+    assistantActions.clearRunRequest();
+    assistantActions.showChoices({ question: "q", options: [], multiple: false }, 6);
+    expect(turnAwaitsUserOnCard(7)).toBe(false);
+  });
+
+  it("a waiting-card tool that showed NO card, then silence, is still a bounded failure", async () => {
+    // The twin that keeps the rule about the card, not the tool name: with no dates or
+    // staff, `request_optimize_run` refuses and shows nothing, so the user got nothing.
+    callShippedToolThenFallSilent({ name: "request_optimize_run", args: "{}" });
+
+    await send("make me a roster");
+
+    expect(useAssistantStore.getState().activeRunRequest).toBeNull();
+    await expectBoundedFailureNotice();
   });
 
   it("ignores a failure reported under a run it does not own", async () => {

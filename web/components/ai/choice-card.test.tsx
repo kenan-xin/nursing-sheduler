@@ -87,7 +87,7 @@ afterEach(() => {
 
 describe("the option card", () => {
   it("sends exactly the clicked option's label and closes", async () => {
-    assistantActions.showChoices(SINGLE);
+    assistantActions.showChoices(SINGLE, 1);
     renderLive();
 
     expect(screen.getByRole("group", { name: SINGLE.question })).toBeInTheDocument();
@@ -98,7 +98,7 @@ describe("the option card", () => {
   });
 
   it("multi-select sends the checked labels joined, and not before one is checked", async () => {
-    assistantActions.showChoices(MULTI);
+    assistantActions.showChoices(MULTI, 1);
     renderLive();
 
     const sendChecked = screen.getByRole("button", { name: "Send selected" });
@@ -112,7 +112,7 @@ describe("the option card", () => {
   });
 
   it("sends a typed Other answer, and cannot send an empty one", async () => {
-    assistantActions.showChoices(SINGLE);
+    assistantActions.showChoices(SINGLE, 1);
     renderLive();
 
     const sendOther = screen.getByRole("button", { name: "Send other answer" });
@@ -127,7 +127,7 @@ describe("the option card", () => {
   });
 
   it("closes when the user sends from the main composer", async () => {
-    assistantActions.showChoices(SINGLE);
+    assistantActions.showChoices(SINGLE, 1);
     renderLive();
 
     await userEvent.click(screen.getByTestId("composer-send"));
@@ -138,14 +138,14 @@ describe("the option card", () => {
 
   it("cannot answer while the turn is still running", () => {
     session.isRunning = true;
-    assistantActions.showChoices(SINGLE);
+    assistantActions.showChoices(SINGLE, 1);
     renderLive();
 
     expect(screen.getByRole("button", { name: /Ana Tan/ })).toBeDisabled();
   });
 
   it("Dismiss closes the card without sending", async () => {
-    assistantActions.showChoices(SINGLE);
+    assistantActions.showChoices(SINGLE, 1);
     renderLive();
 
     await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
@@ -155,7 +155,7 @@ describe("the option card", () => {
   });
 
   it("is cleared when the thread or scenario switches", () => {
-    assistantActions.showChoices(SINGLE);
+    assistantActions.showChoices(SINGLE, 1);
     const { rerender } = render(
       <AssistantLiveConversation
         key="thread-1"
@@ -179,14 +179,17 @@ describe("the option card", () => {
   });
 
   it("tells duplicate labels apart", async () => {
-    assistantActions.showChoices({
-      question: "Which Ana?",
-      options: [
-        { label: "Ana", detail: "Ward 3" },
-        { label: "Ana", detail: "Ward 5" },
-      ],
-      multiple: true,
-    });
+    assistantActions.showChoices(
+      {
+        question: "Which Ana?",
+        options: [
+          { label: "Ana", detail: "Ward 3" },
+          { label: "Ana", detail: "Ward 5" },
+        ],
+        multiple: true,
+      },
+      1,
+    );
     renderLive();
 
     const [first, second] = screen.getAllByRole("checkbox");
@@ -199,7 +202,7 @@ describe("the option card", () => {
   });
 
   it("does not render in a historical conversation", async () => {
-    assistantActions.showChoices(SINGLE);
+    assistantActions.showChoices(SINGLE, 1);
     render(<AssistantHistoricalConversation threadId="thread-1" reason="Earlier schedule." />);
     await screen.findByTestId("assistant-historical-conversation");
 

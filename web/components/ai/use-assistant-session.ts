@@ -87,6 +87,7 @@ import {
   assistantActions,
   hasLiveAssistantWork,
   isInterrupting,
+  turnAwaitsUserOnCard,
   useAssistantStore,
 } from "@/lib/ai/assistant/store";
 import { readWriterContext } from "@/lib/ai/assistant/writer-context";
@@ -835,7 +836,13 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
           await quarantine(boundTurn.refusal);
         } else if (!isTurnAuthorized(boundTurn.token)) {
           await settleOrphanedResolve();
-        } else if (runFailed || turnRunner.errored() || persistRejected || !producedAssistantText) {
+        } else if (
+          runFailed ||
+          turnRunner.errored() ||
+          persistRejected ||
+          // A card this turn left waiting (options, run) is a reply in its own right.
+          (!producedAssistantText && !turnAwaitsUserOnCard(turnEpochForSend))
+        ) {
           // A turn whose conversation could not be written is not one that completed:
           // claiming success would tell the user their answer was kept when a reload
           // will show it missing.

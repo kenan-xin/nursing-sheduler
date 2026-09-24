@@ -229,9 +229,11 @@ export interface AssistantUiState {
   /**
    * The live option card from `offer_choices`. One at a time: a newer offer replaces
    * it, and any send closes it. `id` changes on every offer so the card resets its
-   * own checkbox and Other state. In memory only.
+   * own checkbox and Other state. Stamped with the turn that offered it, like
+   * `activeRunRequest`, so settlement can tell this turn's card from an older one.
+   * In memory only.
    */
-  activeChoices: (ChoiceOffer & { id: number }) | null;
+  activeChoices: (ChoiceOffer & { id: number; turnEpoch: number }) | null;
   /**
    * Interruptions requested but not yet settled, incremented SYNCHRONOUSLY at the
    * request.
@@ -1087,9 +1089,11 @@ export const assistantActions = {
   },
 
   /** Show the option card for `offer_choices`, replacing any earlier one. */
-  showChoices(offer: ChoiceOffer): void {
+  showChoices(offer: ChoiceOffer, turnEpoch: number): void {
     const previous = useAssistantStore.getState().activeChoices;
-    useAssistantStore.setState({ activeChoices: { ...offer, id: (previous?.id ?? 0) + 1 } });
+    useAssistantStore.setState({
+      activeChoices: { ...offer, id: (previous?.id ?? 0) + 1, turnEpoch },
+    });
   },
 
   /** Close the option card: the user sent something. */
@@ -1106,3 +1110,15 @@ export const assistantActions = {
     resetProbeAuthorityForTest();
   },
 } as const;
+
+/**
+ * Whether this turn left a card waiting for the user -- the option card or the run card.
+ *
+ * Such a card IS the turn's reply: its answer arrives as the user's next message, so a
+ * turn that ends on it with no text has not failed. Read from the card actually shown,
+ * not the tool called: a tool that refused and showed nothing gave the user nothing.
+ */
+export function turnAwaitsUserOnCard(turnEpoch: number): boolean {
+  const { activeChoices, activeRunRequest } = useAssistantStore.getState();
+  return activeChoices?.turnEpoch === turnEpoch || activeRunRequest?.turnEpoch === turnEpoch;
+}
