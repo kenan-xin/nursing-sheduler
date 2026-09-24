@@ -4,6 +4,7 @@
 // path the composer uses. The chat view and the turn session are stubbed exactly as in
 // assistant-proposal.test.tsx: the claim is the composition, not the transport.
 
+import type { ComponentType } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -14,6 +15,7 @@ import {
   AssistantLiveConversation,
 } from "./assistant-conversation";
 import { choiceParameters, useChoiceTools } from "./use-choice-tools";
+import { describeAnswers } from "./choice-card";
 import { bindTurnForTest, type TestTurnHandle } from "./turn-authority.test-support";
 
 interface CapturedTool {
@@ -25,11 +27,40 @@ const send = vi.hoisted(() => vi.fn());
 const session = vi.hoisted(() => ({ isRunning: false }));
 
 vi.mock("@copilotkit/react-core/v2", () => ({
+  // A stand-in view: a transcript, then whatever the `input` slot renders, exactly
+  // where the real view puts its composer.
+  CopilotChatView: ({
+    onSubmitMessage,
+    input: Input,
+  }: {
+    onSubmitMessage: (value: string) => void;
+    input?: ComponentType<{ onSubmitMessage: (value: string) => void }>;
+  }) => (
+    <div>
+      <div data-testid="transcript-stub" />
+      {Input ? <Input onSubmitMessage={onSubmitMessage} /> : null}
+    </div>
+  ),
   // A stand-in composer: its one button submits the way the real input does.
-  CopilotChatView: ({ onSubmitMessage }: { onSubmitMessage: (value: string) => void }) => (
-    <button data-testid="composer-send" onClick={() => onSubmitMessage("typed in composer")}>
-      composer
-    </button>
+  CopilotChatInput: ({
+    onSubmitMessage,
+    textArea,
+    disclaimer: Disclaimer,
+  }: {
+    onSubmitMessage: (value: string) => void;
+    textArea?: { placeholder?: string };
+    disclaimer?: ComponentType;
+  }) => (
+    <>
+      <button
+        data-testid="composer-send"
+        data-placeholder={textArea?.placeholder ?? ""}
+        onClick={() => onSubmitMessage("typed in composer")}
+      >
+        composer
+      </button>
+      {typeof Disclaimer === "function" ? <Disclaimer /> : null}
+    </>
   ),
   CopilotChatMessageView: () => <div data-testid="chat-message-view-stub" />,
   useFrontendTool: (definition: CapturedTool) => {
@@ -97,30 +128,35 @@ describe("the option card", () => {
     expect(screen.queryByRole("group", { name: SINGLE.question })).toBeNull();
   });
 
-  it("multi-select sends the checked labels joined, and not before one is checked", async () => {
+  it("multi-select sends the checked labels in option order, and not before one is checked", async () => {
     assistantActions.showChoices(MULTI, 1);
     renderLive();
 
     const sendChecked = screen.getByRole("button", { name: "Send selected" });
     expect(sendChecked).toBeDisabled();
-    await userEvent.click(screen.getByRole("checkbox", { name: "Day" }));
+    // Clicked out of order: the message still follows the options.
     await userEvent.click(screen.getByRole("checkbox", { name: "Night" }));
+    await userEvent.click(screen.getByRole("checkbox", { name: "Day" }));
+    expect(screen.getByRole("checkbox", { name: "Day" })).toBeChecked();
     await userEvent.click(sendChecked);
 
     expect(send).toHaveBeenCalledExactlyOnceWith("Day, Night");
     expect(screen.queryByRole("group", { name: MULTI.question })).toBeNull();
   });
 
-  it("sends a typed Other answer, and cannot send an empty one", async () => {
+  it("sends a typed Something else answer, and offers no Send for an empty one", async () => {
     assistantActions.showChoices(SINGLE, 1);
     renderLive();
 
-    const sendOther = screen.getByRole("button", { name: "Send other answer" });
-    expect(sendOther).toBeDisabled();
-    await userEvent.type(screen.getByLabelText("Other"), "   ");
-    expect(sendOther).toBeDisabled();
-    await userEvent.type(screen.getByLabelText("Other"), "Ana from Ward 5");
-    await userEvent.click(sendOther);
+    const sendOther = () => screen.queryByRole("button", { name: "Send other answer" });
+    expect(sendOther()).toBeNull();
+    // An empty row offers Skip instead.
+    expect(screen.getByRole("button", { name: "Skip" })).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText("Something else"), "   ");
+    expect(sendOther()).toBeNull();
+    await userEvent.type(screen.getByLabelText("Something else"), "Ana from Ward 5");
+    expect(screen.queryByRole("button", { name: "Skip" })).toBeNull();
+    await userEvent.click(sendOther()!);
 
     expect(send).toHaveBeenCalledExactlyOnceWith("Ana from Ward 5");
     expect(screen.queryByRole("group", { name: SINGLE.question })).toBeNull();
@@ -144,14 +180,19 @@ describe("the option card", () => {
     expect(screen.getByRole("button", { name: /Ana Tan/ })).toBeDisabled();
   });
 
-  it("Dismiss closes the card without sending", async () => {
-    assistantActions.showChoices(SINGLE, 1);
-    renderLive();
+  it("Close and Skip each close the card without sending", async () => {
+    for (const name of ["Close", "Skip"]) {
+      assistantActions.showChoices(SINGLE, 1);
+      const { unmount } = render(
+        <AssistantLiveConversation threadId="thread-1" routePath="/dates" routeLabel="Dates" />,
+      );
 
-    await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+      await userEvent.click(screen.getByRole("button", { name }));
 
-    expect(send).not.toHaveBeenCalled();
-    expect(screen.queryByRole("group", { name: SINGLE.question })).toBeNull();
+      expect(send).not.toHaveBeenCalled();
+      expect(screen.queryByRole("group", { name: SINGLE.question })).toBeNull();
+      unmount();
+    }
   });
 
   it("is cleared when the thread or scenario switches", () => {
@@ -211,6 +252,160 @@ describe("the option card", () => {
   });
 });
 
+describe("the dock", () => {
+  it("sits below the transcript and directly above the composer", () => {
+    assistantActions.showChoices(SINGLE, 1);
+    renderLive();
+
+    const dock = screen.getByTestId("assistant-card-dock");
+    expect(dock).toContainElement(screen.getByRole("group", { name: SINGLE.question }));
+    const transcript = screen.getByTestId("transcript-stub");
+    const composer = screen.getByTestId("composer-send");
+    expect(
+      transcript.compareDocumentPosition(dock) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(dock.compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("changes the composer's placeholder and shows the key hint only while a card is open", async () => {
+    renderLive();
+    expect(screen.getByTestId("composer-send")).toHaveAttribute("data-placeholder", "");
+    expect(screen.queryByTestId("assistant-dock-hint")).toBeNull();
+
+    act(() => assistantActions.showChoices(SINGLE, 1));
+    expect(screen.getByTestId("composer-send")).toHaveAttribute(
+      "data-placeholder",
+      "Or reply directly\u2026",
+    );
+    expect(screen.getByTestId("assistant-dock-hint")).toHaveTextContent("Enter to pick");
+
+    await userEvent.click(screen.getByRole("button", { name: /Ana Tan/ }));
+    expect(screen.queryByTestId("assistant-dock-hint")).toBeNull();
+  });
+});
+
+describe("the option card's keys", () => {
+  it("takes focus when it appears; Down then Enter picks the second option", async () => {
+    assistantActions.showChoices(SINGLE, 1);
+    renderLive();
+
+    expect(screen.getByRole("button", { name: /Ana Lim/ })).toHaveFocus();
+    await userEvent.keyboard("{ArrowDown}{Enter}");
+
+    expect(send).toHaveBeenCalledExactlyOnceWith("Ana Tan");
+  });
+
+  it("a number key picks that option directly", async () => {
+    assistantActions.showChoices(SINGLE, 1);
+    renderLive();
+
+    await userEvent.keyboard("2");
+
+    expect(send).toHaveBeenCalledExactlyOnceWith("Ana Tan");
+  });
+
+  it("Esc closes the card and sends nothing", async () => {
+    assistantActions.showChoices(SINGLE, 1);
+    renderLive();
+
+    await userEvent.keyboard("{Escape}");
+
+    expect(send).not.toHaveBeenCalled();
+    expect(screen.queryByRole("group", { name: SINGLE.question })).toBeNull();
+  });
+});
+
+describe("several questions on one card", () => {
+  const PAGED = {
+    question: "Add public holidays?",
+    options: [
+      { label: "Yes, add them", detail: "" },
+      { label: "No", detail: "" },
+    ],
+    multiple: false,
+    moreQuestions: [
+      {
+        question: "Meal break on a 12-hour shift?",
+        options: [
+          { label: "1 hour, unpaid", detail: "" },
+          { label: "45 minutes, unpaid", detail: "" },
+        ],
+        multiple: false,
+      },
+      {
+        question: "Who can be in charge?",
+        options: [
+          { label: "Senior Staff Nurses only", detail: "" },
+          { label: "Any Staff Nurse", detail: "" },
+        ],
+        multiple: false,
+      },
+    ],
+  };
+
+  it("asks one at a time, lets an earlier answer change, then sends one message", async () => {
+    assistantActions.showChoices(PAGED, 1);
+    renderLive();
+
+    expect(screen.getByText("1 of 3")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Yes, add them" }));
+    expect(screen.getByRole("group", { name: "Meal break on a 12-hour shift?" })).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "1 hour, unpaid" }));
+    expect(screen.getByText("3 of 3")).toBeInTheDocument();
+    expect(send).not.toHaveBeenCalled();
+
+    // Back to the second question, and a different answer.
+    await userEvent.click(screen.getByRole("button", { name: "Previous question" }));
+    expect(screen.getByText("2 of 3")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "45 minutes, unpaid" }));
+    await userEvent.click(screen.getByRole("button", { name: "Any Staff Nurse" }));
+
+    expect(send).toHaveBeenCalledExactlyOnceWith(
+      "Add public holidays? Yes, add them\n" +
+        "Meal break on a 12-hour shift? 45 minutes, unpaid\n" +
+        "Who can be in charge? Any Staff Nurse",
+    );
+    expect(screen.queryByTestId("assistant-choices")).toBeNull();
+  });
+
+  it("Skip records the question as skipped and moves on", async () => {
+    assistantActions.showChoices(PAGED, 1);
+    renderLive();
+
+    await userEvent.click(screen.getByRole("button", { name: "Skip" }));
+    await userEvent.type(screen.getByLabelText("Something else"), "30 minutes");
+    await userEvent.click(screen.getByRole("button", { name: "Send other answer" }));
+    await userEvent.keyboard("1");
+
+    expect(send).toHaveBeenCalledExactlyOnceWith(
+      describeAnswers(
+        [PAGED, ...PAGED.moreQuestions],
+        ["skipped", "30 minutes", "Senior Staff Nurses only"],
+      ),
+    );
+    expect(send.mock.calls[0]![0]).toContain("Add public holidays? skipped");
+  });
+
+  it("does not go forward past an unanswered question", () => {
+    assistantActions.showChoices(PAGED, 1);
+    renderLive();
+
+    expect(screen.getByRole("button", { name: "Previous question" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Next question" })).toBeDisabled();
+  });
+
+  it("a composer send answers the whole card", async () => {
+    assistantActions.showChoices(PAGED, 1);
+    renderLive();
+
+    await userEvent.click(screen.getByRole("button", { name: "Yes, add them" }));
+    await userEvent.click(screen.getByTestId("composer-send"));
+
+    expect(send).toHaveBeenCalledExactlyOnceWith("typed in composer");
+    expect(screen.queryByTestId("assistant-choices")).toBeNull();
+  });
+});
+
 describe("offer_choices", () => {
   const TURN = 4;
   let boundTurn: TestTurnHandle;
@@ -239,14 +434,14 @@ describe("offer_choices", () => {
 
     await act(() => tool!.handler(MULTI, {}));
     await userEvent.click(screen.getByRole("checkbox", { name: "Day" }));
-    await userEvent.type(screen.getByLabelText("Other"), "half days");
+    await userEvent.type(screen.getByLabelText("Something else"), "half days");
     const NEXT = { ...MULTI, question: "Which shifts should the second rule cover?" };
     await act(() => tool!.handler(NEXT, {}));
 
     expect(screen.queryByRole("group", { name: MULTI.question })).toBeNull();
     expect(screen.getByRole("group", { name: NEXT.question })).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Day" })).not.toBeChecked();
-    expect(screen.getByLabelText("Other")).toHaveValue("");
+    expect(screen.getByLabelText("Something else")).toHaveValue("");
   });
 
   it("accepts 2 to 5 options and requires multiple", () => {
@@ -262,5 +457,27 @@ describe("offer_choices", () => {
     expect(choiceParameters.safeParse(offer(6)).success).toBe(false);
     const { multiple: _omitted, ...withoutMultiple } = offer(2);
     expect(choiceParameters.safeParse(withoutMultiple).success).toBe(false);
+  });
+
+  it("takes up to three more questions, and a single question is unchanged", () => {
+    const question = {
+      question: "Q",
+      options: [
+        { label: "A", detail: "" },
+        { label: "B", detail: "" },
+      ],
+      multiple: false,
+    };
+    const more = (count: number) => ({
+      ...question,
+      moreQuestions: Array.from({ length: count }, () => question),
+    });
+    expect(choiceParameters.safeParse(question).success).toBe(true);
+    expect(choiceParameters.safeParse(more(3)).success).toBe(true);
+    expect(choiceParameters.safeParse(more(4)).success).toBe(false);
+    expect(
+      choiceParameters.safeParse({ ...question, moreQuestions: [{ question: "Q2", options: [] }] })
+        .success,
+    ).toBe(false);
   });
 });

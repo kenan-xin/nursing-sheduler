@@ -12,9 +12,11 @@
 //
 // T07 keeps that property rather than weakening it. The Preview card and the Apply
 // control are mounted HERE, in the live rendering only, so a read-only or historical
-// thread has no Apply handler to regain -- not a disabled one, none at all.
+// thread has no Apply handler to regain -- not a disabled one, none at all. They sit
+// in the card dock above the composer (`assistant-card-dock.tsx`), which reaches the
+// live handlers only through the context this rendering provides.
 
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { CopilotChatMessageView, CopilotChatView } from "@copilotkit/react-core/v2";
 import type { Message } from "@ag-ui/client";
 import { readThreadMessages } from "@/lib/ai/assistant/history-repo";
@@ -25,11 +27,7 @@ import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
 import { useAssistantSession, type AssistantActivity } from "./use-assistant-session";
 import { useAssistantProposals } from "./use-assistant-proposals";
 import { useAssistantFollowUps } from "./use-assistant-follow-ups";
-import { ProposalPreviewCard } from "./proposal-preview-card";
-import { DiagnosticSearchCard } from "./diagnostic-search-card";
-import { OptimizeRunRequestCard } from "./optimize-run-request-card";
-import { ChoiceCard } from "./choice-card";
-import { RosterChangeCard } from "./roster-change-card";
+import { CardDockContext, DockedComposer } from "./assistant-card-dock";
 import { AssistantReceipts } from "./assistant-receipts";
 import { ApplyNavigationNotice } from "./apply-navigation-notice";
 import { Surface } from "@/components/ui/surface";
@@ -171,8 +169,8 @@ export function AssistantLiveConversation({
   routeLabel,
 }: AssistantLiveConversationProps) {
   const session = useAssistantSession({ threadId, routePath, routeLabel, historical: false });
-  // HOST STATE, HOST HANDLERS. The Preview and the receipts are siblings of the
-  // transcript, not entries in it -- see the note in `proposal-preview-card.tsx`.
+  // HOST STATE, HOST HANDLERS. The Preview and the receipts are host surfaces, not
+  // entries in the transcript -- see the note in `proposal-preview-card.tsx`.
   const proposals = useAssistantProposals();
   const running = session.isRunning || session.interrupting;
   // The panel keys this component by thread, and the thread follows the scenario, so a
@@ -189,35 +187,38 @@ export function AssistantLiveConversation({
       return session.send(text);
     },
   );
+  const dock = useMemo(
+    () => ({ onSend: sendMessage, disabled: running, proposals }),
+    [sendMessage, running, proposals],
+  );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="assistant-live-conversation">
       {session.messages.length === 0 && <WelcomeState />}
       <RefusalNotice />
       <LifecycleNotice />
-      <DiagnosticSearchCard />
-      <OptimizeRunRequestCard />
-      <RosterChangeCard onSend={sendMessage} disabled={running} />
-      <ChoiceCard onSend={sendMessage} disabled={running} />
-      <ProposalPreviewCard controller={proposals} onSend={sendMessage} disabled={running} />
       <AssistantReceipts controller={proposals} />
       <ApplyNavigationNotice controller={proposals} />
       <ActivityContext.Provider value={session.activity}>
-        <CopilotChatView
-          className="min-h-0 flex-1"
-          messages={session.messages}
-          // Replaces the library's unlabeled dot with a worded, announced status line.
-          messageView={MESSAGE_VIEW}
-          // Still "running" while an interruption settles: the input must stay closed
-          // until the gate reopens, and Stop must stay reachable rather than flipping
-          // back to a send control that would be refused.
-          isRunning={running}
-          // Suppresses the library's generic greeting: this panel is bound to one
-          // explicit scenario thread, and the welcome content above is the app's.
-          hasExplicitThreadId
-          onSubmitMessage={sendMessage}
-          onStop={session.stop}
-        />
+        <CardDockContext.Provider value={dock}>
+          <CopilotChatView
+            className="min-h-0 flex-1"
+            messages={session.messages}
+            // Replaces the library's unlabeled dot with a worded, announced status line.
+            messageView={MESSAGE_VIEW}
+            // The questions and decisions dock directly above the composer.
+            input={DockedComposer}
+            // Still "running" while an interruption settles: the input must stay closed
+            // until the gate reopens, and Stop must stay reachable rather than flipping
+            // back to a send control that would be refused.
+            isRunning={running}
+            // Suppresses the library's generic greeting: this panel is bound to one
+            // explicit scenario thread, and the welcome content above is the app's.
+            hasExplicitThreadId
+            onSubmitMessage={sendMessage}
+            onStop={session.stop}
+          />
+        </CardDockContext.Provider>
       </ActivityContext.Provider>
     </div>
   );

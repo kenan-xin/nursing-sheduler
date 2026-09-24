@@ -13,8 +13,9 @@
 // and a read-only conversation has no Apply control at all -- not a disabled one.
 
 import "fake-indexeddb/auto";
+import type { ComponentType } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { capabilityRegistryStamp } from "@/lib/capability/registry";
@@ -43,7 +44,11 @@ import {
 // question that has nothing to do with any of them. Every other suite in this file drives
 // the real repository, the real adapter and the real cards, untouched.
 vi.mock("@copilotkit/react-core/v2", () => ({
-  CopilotChatView: () => <div data-testid="chat-view-stub" />,
+  // The view renders its `input` slot, which is where the live rendering docks its cards.
+  CopilotChatView: ({ input: Input }: { input?: ComponentType }) => (
+    <div data-testid="chat-view-stub">{Input ? <Input /> : null}</div>
+  ),
+  CopilotChatInput: () => <div data-testid="chat-input-stub" />,
   CopilotChatMessageView: () => <div data-testid="chat-message-view-stub" />,
 }));
 // The live rendering now also mounts OptimizeRunRequestCard, which reads the router
@@ -135,6 +140,11 @@ describe("the Preview states host-derived facts", () => {
     const cascade = await screen.findByTestId("proposal-cascade");
     expect(cascade).toHaveTextContent("bo on 29");
     expect(cascade).toHaveTextContent("Removed");
+
+    // The rest waits behind Show details, collapsed by default.
+    expect(screen.queryByTestId("proposal-rationale")).toBeNull();
+    expect(screen.queryByTestId("proposal-needs-review")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Show details" }));
 
     expect(await screen.findByTestId("proposal-needs-review")).toHaveTextContent(
       "Leave and requests",
@@ -450,13 +460,14 @@ describe("the Preview's decision reads as option-card choices", () => {
     const proposal = await showProposal(SHRINK);
     live();
 
-    const send = await screen.findByRole("button", { name: "Send what to change" });
-    expect(send).toBeDisabled();
+    await screen.findByTestId("assistant-proposal");
+    // No Send until there is something to send.
+    expect(screen.queryByRole("button", { name: "Send what to change" })).toBeNull();
     await user.type(
       screen.getByRole("textbox", { name: "Tell me what to change" }),
       "  Make it end on the 20th  ",
     );
-    await user.click(send);
+    await user.click(screen.getByRole("button", { name: "Send what to change" }));
 
     await waitFor(() => expect(sessionSend).toHaveBeenCalledWith("Make it end on the 20th"));
     await waitFor(() => expect(screen.queryByTestId("assistant-proposal")).toBeNull());
@@ -474,9 +485,59 @@ describe("the Preview's decision reads as option-card choices", () => {
     const other = screen.getByRole("textbox", { name: "Tell me what to change" });
     expect(other).toBeDisabled();
     await user.type(other, "ignored");
-    expect(screen.getByRole("button", { name: "Send what to change" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Send what to change" })).toBeNull();
     expect(screen.getByTestId("proposal-revise")).toBeEnabled();
     expect(screen.getByTestId("proposal-cancel")).toBeEnabled();
+  });
+
+  it("Esc on the Preview changes nothing: it only hands focus back", async () => {
+    const user = userEvent.setup();
+    const proposal = await showProposal(SHRINK);
+    live();
+
+    await user.click(await screen.findByTestId("proposal-details-toggle"));
+    await user.keyboard("{Escape}");
+
+    expect(screen.getByTestId("assistant-proposal")).toHaveAttribute(
+      "data-status",
+      "preview_ready",
+    );
+    expect((await assistantProposalCommands.read(proposal.proposalId))?.status).toBe(
+      "preview_ready",
+    );
+    expect(sessionSend).not.toHaveBeenCalled();
+  });
+
+  it("stacks a newer card nearest the composer", async () => {
+    await showProposal(SHRINK);
+    live();
+    const preview = await screen.findByTestId("assistant-proposal");
+
+    act(() =>
+      assistantActions.showChoices(
+        {
+          question: "Which Ana?",
+          options: [
+            { label: "Ana Lim", detail: "" },
+            { label: "Ana Tan", detail: "" },
+          ],
+          multiple: false,
+        },
+        useAssistantStore.getState().turnEpoch,
+      ),
+    );
+    const choices = screen.getByTestId("assistant-choices");
+    const dock = screen.getByTestId("assistant-card-dock");
+
+    expect(dock).toContainElement(preview);
+    expect(dock).toContainElement(choices);
+    expect(
+      preview.compareDocumentPosition(choices) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      dock.compareDocumentPosition(screen.getByTestId("chat-input-stub")) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it("keeps Apply closed until the agreement is ticked, in the live rendering too", async () => {

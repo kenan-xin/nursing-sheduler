@@ -291,6 +291,23 @@ describe("globals.css answers every token the package declares", () => {
     ).toEqual([]);
   });
 
+  it("leaves the app-owned card dock inside the chat root alone", () => {
+    // The card dock renders through the view's `input` slot, so it sits INSIDE
+    // `copilot-chat`. Every control override must skip that one marked subtree, or the
+    // dock's Send and confirmation buttons lose their own `Button` treatment.
+    const unexcluded: string[] = [];
+    globalsRoot.walkRules((rule) => {
+      for (const selector of rule.selectors) {
+        if (!selector.includes("data-slot")) continue;
+        const flattened = selector.replace(/\s+/g, " ");
+        if (!/:not\( ?:where\(\[data-assistant-dock\] \*\) ?\)/.test(flattened)) {
+          unexcluded.push(flattened);
+        }
+      }
+    });
+    expect(unexcluded).toEqual([]);
+  });
+
   it("keeps the send/Stop rule inside the same root, at a specificity that still wins", () => {
     // The send rule has to sit under the same root as the ghost rules: scoping the
     // ghost rules raised them to (0,3,2), so a send rule left at (0,2,2) would have
