@@ -49,26 +49,73 @@ export type ToolPayload<S extends z.ZodTypeAny> =
   | { readonly ok: true; readonly data: z.infer<S> }
   | { readonly ok: false; readonly refusal: string };
 
+/** Longest schema-authored format message worth repeating. */
+const MAX_FORMAT_MESSAGE = 120;
+
+/** How many allowed enum values a hint lists. */
+const LISTED_VALUES = 10;
+
+type Issue = z.ZodError["issues"][number];
+
+/** A declared field path, or `arguments` for the payload as a whole. */
+function fieldPath(issue: Issue): string {
+  const path = issue.path
+    .filter(
+      (segment): segment is string | number =>
+        typeof segment === "number" ||
+        (typeof segment === "string" && segment.length <= MAX_SEGMENT_LENGTH),
+    )
+    .join(".");
+  return path.length > 0 ? path : "arguments";
+}
+
+function unit(origin: string): string {
+  if (origin === "array") return " items";
+  if (origin === "string") return " characters";
+  return "";
+}
+
 /**
- * The declared field paths an error touched, and nothing else.
+ * What the schema expected, in words taken from the SCHEMA only.
  *
- * Paths come from the SCHEMA, so naming them tells the model what to correct without
- * quoting what it sent. Zod's messages are deliberately not used: they interpolate
- * received values, which is exactly the payload echo a tool result must not carry.
+ * Zod's default messages are not used. They name the received type ("received
+ * undefined") and quote unrecognised keys, and both are the payload talking. The one
+ * exception is `invalid_format`: every regex in the shipped schemas carries a message
+ * this repo wrote (e.g. "a date must be written YYYY-MM-DD"), and that is exactly the
+ * correction the model needs.
  */
-function namedFields(error: z.ZodError): string[] {
-  const paths = new Set<string>();
-  for (const issue of error.issues) {
-    const path = issue.path
-      .filter(
-        (segment): segment is string | number =>
-          typeof segment === "number" ||
-          (typeof segment === "string" && segment.length <= MAX_SEGMENT_LENGTH),
-      )
-      .join(".");
-    if (path.length > 0) paths.add(path);
+function expectation(issue: Issue): string {
+  switch (issue.code) {
+    case "invalid_type":
+      return `expected ${issue.expected}`;
+    case "invalid_value":
+      return `must be one of ${issue.values
+        .slice(0, LISTED_VALUES)
+        .map((value) => JSON.stringify(value))
+        .join(", ")}`;
+    case "invalid_format":
+      return issue.message.slice(0, MAX_FORMAT_MESSAGE);
+    case "too_big":
+      return (
+        `at most ${String(issue.maximum)}${unit(issue.origin)}` +
+        (issue.origin === "array" ? " -- split the rest into another call" : "")
+      );
+    case "too_small":
+      return `at least ${String(issue.minimum)}${unit(issue.origin)}`;
+    case "unrecognized_keys":
+      return "remove the fields this does not take";
+    case "invalid_union":
+      return "is not one of the supported forms; use one the tool lists";
+    default:
+      return "is not valid";
   }
-  return [...paths].slice(0, NAMED_FIELD_LIMIT);
+}
+
+/** One `path: expectation` per distinct problem, bounded. */
+function fixes(error: z.ZodError): string[] {
+  const seen = new Set<string>();
+  for (const issue of error.issues) seen.add(`${fieldPath(issue)}: ${expectation(issue)}`);
+  return [...seen].slice(0, NAMED_FIELD_LIMIT);
 }
 
 /**
@@ -77,19 +124,27 @@ function namedFields(error: z.ZodError): string[] {
  * A REFUSAL IS A TOOL RESULT, NOT A THROW. A thrown handler is converted by the locked
  * core into `Error: <message>` and fed back as the tool result anyway -- so throwing
  * neither stops the turn nor hides anything, it just makes an internal message the
- * model's evidence. Answering plainly lets the model tell the user what it could not do.
+ * model's evidence.
  *
- * Bounded on purpose: declared field paths only. No values, no arguments, no transcript
- * text, no model output, no provider detail, no key, no raw error.
+ * ONE CORRECTED RETRY (2026-09-24, nursing-sheduler-b1a). This used to say "do not
+ * retry", so a model that wrote 0800 for 08:00, or sent 26 operations, told the user it
+ * had failed at something it could fix itself. Naming the expected form makes the
+ * correction a certainty rather than a guess, so one retry is allowed and the rest
+ * still goes back to the user.
+ *
+ * Bounded on purpose: declared field paths and schema-derived expectations only. No
+ * values, no arguments, no transcript text, no model output, no provider detail, no
+ * key, no raw error.
  */
 export function malformedPayloadRefusal(error: z.ZodError): string {
-  const fields = namedFields(error);
+  const list = fixes(error);
   return (
     "Those arguments are not a valid call to this tool" +
-    (fields.length > 0 ? ` (check: ${fields.join(", ")})` : "") +
-    ". Nothing was read, changed or opened. Tell the user you could not do that and ask " +
-    "them for what is missing. Do not retry with an approximate call, and do not use a " +
-    "different tool instead."
+    (list.length > 0 ? ` (fix: ${list.join("; ")})` : "") +
+    ". Nothing was read, changed or opened. If you can see how to correct it from what " +
+    "the user already said, call this tool again once with the corrected arguments. " +
+    "Otherwise tell the user you could not do that and ask them for what is missing. " +
+    "Never use a different tool to approximate it."
   );
 }
 
