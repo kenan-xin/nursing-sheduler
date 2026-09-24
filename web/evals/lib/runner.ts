@@ -9,6 +9,12 @@ import { judgeTrial, openRouterModel, trialEntities } from "./judge";
 import { toMeta } from "./trial";
 
 export const EVAL_FILES = 5;
+/**
+ * The global cap, split evenly over the eval files. Each file's share must cover 3 trials
+ * of its costliest case: repair-understaffed-night measured $0.46 a trial, so $1.60 a file.
+ * Smoke runs one trial (`pnpm eval:smoke`).
+ */
+export const DEFAULT_MAX_USD = 8;
 
 const env = () => ({
   key: process.env.OPENROUTER_API_KEY ?? "",
@@ -17,7 +23,7 @@ const env = () => ({
   user: process.env.EVAL_USER_MODEL ?? "anthropic/claude-haiku-4.5",
   trials: Number(process.env.EVAL_TRIALS ?? 3),
   tags: process.env.EVAL_TAGS ? process.env.EVAL_TAGS.split(",") : null,
-  maxUsd: Number(process.env.EVAL_MAX_USD ?? 5) / EVAL_FILES,
+  maxUsd: Number(process.env.EVAL_MAX_USD ?? DEFAULT_MAX_USD) / EVAL_FILES,
 });
 
 export function runCases(cases: EvalCase[], seams: Seams): void {

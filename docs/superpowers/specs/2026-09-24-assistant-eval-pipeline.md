@@ -211,7 +211,10 @@ rubric or judge model changes.
 
 ## 7. Cost, report, key hygiene
 
-- **Budget.** `EVAL_MAX_USD` (default 5). The recorder reads `usage` from the provider's
+- **Budget.** `EVAL_MAX_USD` (default 8), the global cap. Each file's share
+  (`EVAL_MAX_USD / 5`) must cover 3 trials of its costliest case; the first live case
+  measured $0.46 a trial, hence $1.60 a file. Smoke runs one trial. Judge and simulated-user
+  calls do not pass the recorder, so they are outside the ledger. The recorder reads `usage` from the provider's
   final SSE chunk (OpenRouter includes token counts, and `cost` when it has one). Otherwise it
   estimates from `pricing.ts` and the byte length (marked `estimated`). The ledger is module
   state in the single eval file. A trial that starts over budget is skipped as `budget`. An
@@ -313,7 +316,7 @@ existing index moves (`NO_IMPORTS_RULE` names indices 15 and 21).
 | Q1 `import.meta.glob` raw YAML, or `.case.ts`? | **`.case.ts`** with an explicit `cases/index.ts`. Scenario fixtures copied from the notes repo stay YAML, loaded by literal static `?raw` imports | Ladder rung 2: tsc checks every case. No glob loader for a reviewer to argue about. Cases reuse `SCENARIOS` and predicates without a schema layer. A literal single-file import is a format-specific read, not a generic loader |
 | Q2 Real `readWriterContext` under fake-indexeddb, or the mock? | **Real** one, over `installTestAuthority` + `loadScenario`. The harness test proves it returns the seeded scenario. Fallback, only if that test cannot pass: the one-function `vi.mock` from `session-real-core.test.tsx`, reading the authority projection | The eval measures the model on the shipped path. Mocking the writer context hides stale-revision refusals, which are real user-facing failures |
 | Q3 Judge model and data posture | **`openai/gpt-5-mini` via the same OpenRouter key**, env-overridable. Rule: eval fixtures are synthetic only (enforced by review: fixtures live in the repo, no import of real ward files) | A different family avoids self-preference. The data never leaves the posture the product already has (OpenRouter), and it is synthetic |
-| Q4 Budget defaults, scheduled run? | **`EVAL_MAX_USD=5`**, smoke about $2. **No scheduled run** in v1. A `workflow_dispatch` job comes later, once two manual runs agree | YAGNI. A weekly job with a flaky baseline creates noise. Measure first |
+| Q4 Budget defaults, scheduled run? | **`EVAL_MAX_USD=8`** (raised from 5 after the first live case, 2026-09-24), smoke about $2. **No scheduled run** in v1. A `workflow_dispatch` job comes later, once two manual runs agree | YAGNI. A weekly job with a flaky baseline creates noise. Measure first |
 | (new) Judge scale | **Binary per item**, not 1-4 | 04 §1 itself recommends binary anchored criteria. Binary is less noisy at n=3 and maps straight to pass^k |
 | (new) Report script vs reporter | **A Vitest reporter** (`eval-reporter.ts`) replaces `scripts/eval-report.mjs` and the JSON reporter | One file, typed, reads `testCase.meta()` directly. Still one fs exception |
 
