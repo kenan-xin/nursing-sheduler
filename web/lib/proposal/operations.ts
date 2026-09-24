@@ -114,12 +114,16 @@ import { foldPaintIntents, type MintCellUid } from "@/lib/store/paint-fold";
 import { paintCellKey, type StagedCoordinate } from "@/lib/store/types";
 import type { AssistantCommandV1, RequestWeight } from "./commands";
 import {
+  choiceList,
   everyoneGroups,
   idLabel,
   meansEveryone,
   offeredChoices,
   peopleChoices,
   ruleChoices,
+  shiftChoices,
+  staffGroupChoices,
+  staffRowChoices,
 } from "./choices";
 import { proposalDigest, stableStringify } from "./digest";
 
@@ -875,7 +879,11 @@ function applyMoveLeave(
   index: number,
 ): OperationResult {
   if (!state.staff.some((person) => person.id === command.personId)) {
-    return reject(index, "unknown_target", "That person is not on this schedule.");
+    return reject(
+      index,
+      "unknown_target",
+      `That person is not on this schedule. ${peopleChoices(state)}`,
+    );
   }
   if (command.fromDate === command.toDate) {
     return reject(index, "no_effect", "That leave is already on that date.");
@@ -979,7 +987,8 @@ function applyAddShiftGroup(
     return reject(
       index,
       "unknown_target",
-      `Shift group "${idCheck.id}": there is no shift "${missing}". Add the shift earlier in the same change, or use an existing code.`,
+      `Shift group "${idCheck.id}": there is no shift ${idLabel(missing)}. Add the shift earlier ` +
+        `in the same change, or use an existing code. ${shiftChoices(state)}`,
     );
   }
   const withGroup = addGroup(state, d, { id: idCheck.id });
@@ -1122,7 +1131,9 @@ function paintIntent(
           refusal: reject(
             index,
             "unknown_target",
-            `There is no shift or shift group "${shiftType}".`,
+            `There is no shift or shift group ${idLabel(shiftType)}. ${choiceList(
+              selectable.map(idLabel),
+            )}`,
           ),
         };
       }
@@ -1151,7 +1162,7 @@ function applyRequestPaint(
     return reject(
       index,
       "unknown_target",
-      `There is no person or staff group "${who}" on this schedule.`,
+      `There is no person or staff group ${idLabel(command.personId)} on this schedule. ${staffRowChoices(state)}`,
     );
   }
   const span = rosterDatesBetween(state, command.startDate, command.endDate);
@@ -1190,8 +1201,8 @@ function findPerson(state: ScenarioUiState, personId: PersonRef) {
   return state.staff.find((person) => person.id === personId);
 }
 
-function unknownPersonMessage(personId: PersonRef): string {
-  return `Person "${String(personId)}": not on the staff list. ${PERSON_ID_HINT}`;
+function unknownPersonMessage(state: ScenarioUiState, personId: PersonRef): string {
+  return `Person ${idLabel(personId)}: not on the staff list. ${PERSON_ID_HINT} ${peopleChoices(state)}`;
 }
 
 /** Refuse a group the Staff row's toggles could not have picked. */
@@ -1213,7 +1224,8 @@ function missingStaffGroup(
   return reject(
     index,
     "unknown_target",
-    `${label}: there is no staff group "${missing}". Add the group earlier in the same change, or use an existing group name.`,
+    `${label}: there is no staff group "${missing}". Add the group earlier in the same change, ` +
+      `or use an existing group name. ${staffGroupChoices(state)}`,
   );
 }
 
@@ -1229,7 +1241,7 @@ function missingMember(
   return reject(
     index,
     "unknown_target",
-    `${label}: there is no person "${String(missing)}". Add the person earlier in the same change. ${PERSON_ID_HINT}`,
+    `${label}: there is no person "${String(missing)}". Add the person earlier in the same change. ${PERSON_ID_HINT} ${peopleChoices(state)}`,
   );
 }
 
@@ -1264,7 +1276,9 @@ function applyEditPerson(
 ): OperationResult {
   const d = peopleDescriptor;
   const person = findPerson(state, command.personId);
-  if (!person) return reject(index, "unknown_target", unknownPersonMessage(command.personId));
+  if (!person) {
+    return reject(index, "unknown_target", unknownPersonMessage(state, command.personId));
+  }
   const label = `Person "${String(person.id)}"`;
 
   // The Staff row's own rule (`people-table.tsx`, `nameChanged`): only changed name
@@ -1313,7 +1327,9 @@ function applyRemovePerson(
   index: number,
 ): OperationResult {
   const person = findPerson(state, command.personId);
-  if (!person) return reject(index, "unknown_target", unknownPersonMessage(command.personId));
+  if (!person) {
+    return reject(index, "unknown_target", unknownPersonMessage(state, command.personId));
+  }
   return { ok: true, next: deleteItem(state, peopleDescriptor, person.id) };
 }
 
@@ -1361,7 +1377,7 @@ function applyEditPeopleGroup(
     return reject(
       index,
       "unknown_target",
-      `Staff group "${command.groupId}": there is no such staff group.`,
+      `Staff group "${command.groupId}": there is no such staff group. ${staffGroupChoices(state)}`,
     );
   }
   const label = `Staff group "${group.id}"`;
@@ -1420,7 +1436,7 @@ function applyRemovePeopleGroup(
     return reject(
       index,
       "unknown_target",
-      `Staff group "${command.groupId}": there is no such staff group.`,
+      `Staff group "${command.groupId}": there is no such staff group. ${staffGroupChoices(state)}`,
     );
   }
   return {

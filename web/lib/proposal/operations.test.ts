@@ -201,6 +201,18 @@ describe("move_leave", () => {
     expect(same.ok).toBe(false);
     if (!same.ok) expect(same.rejection.code).toBe("no_effect");
   });
+
+  it("lists the people when the person is unknown", () => {
+    const result = applyAssistantCommand(proposalScenario(), {
+      type: "move_leave",
+      personId: "zed",
+      fromDate: "02",
+      toDate: "03",
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.message).toContain('Valid choices: "ana", "bo".');
+  });
 });
 
 describe("batches", () => {
@@ -405,6 +417,13 @@ describe("add_shift_type / add_shift_group", () => {
     expect(result.rejection.index).toBe(0);
     expect(result.rejection.code).toBe("unknown_target");
     expect(result.rejection.message).toContain('"am1"');
+  });
+
+  it("lists the shifts when a group member is unknown", () => {
+    const result = applyAssistantCommand(proposalScenario(), group("Nights", ["N"]));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.message).toContain('Valid choices: "Day", "Night".');
   });
 
   it("puts group members in shift order and ignores repeats", () => {
@@ -652,6 +671,32 @@ describe("leave and request arms", () => {
     const empty = applyAssistantCommand(octoberWard(), clear("Ana", "2026-10-01"));
     expect(empty.ok).toBe(false);
     if (!empty.ok) expect(empty.rejection.message).toContain("nothing recorded");
+  });
+
+  it("lists the people and staff groups when the row is unknown", () => {
+    const result = applyAssistantCommand(octoberWard(), {
+      type: "add_leave",
+      personId: "Dana",
+      startDate: "2026-10-05",
+      endDate: "2026-10-05",
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.message).toContain('Valid choices: "Ana", "Ben", "Chris", "Seniors".');
+  });
+
+  it("lists the shifts it could request when the shift is unknown", () => {
+    const result = applyAssistantCommand(octoberWard(), {
+      type: "set_shift_request",
+      personId: "Ben",
+      shiftType: "Late",
+      startDate: "2026-10-19",
+      endDate: "2026-10-19",
+      weight: 5,
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.message).toContain('Valid choices: "D", "L", "N", "Nights", "ALL".');
   });
 });
 
@@ -1431,7 +1476,32 @@ describe("Staff-screen arms", () => {
       personId: "zed",
     });
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.rejection.code).toBe("unknown_target");
+    if (result.ok) return;
+    expect(result.rejection.code).toBe("unknown_target");
+    // A number stays a number, so "7" and 7 look different to the model.
+    expect(result.rejection.message).toContain('Valid choices: "ana", "bo", 7.');
+  });
+
+  it("lists the staff groups when a group is unknown", () => {
+    const result = applyAssistantCommand(peopleScenario(), {
+      type: "remove_people_group",
+      groupId: "Juniors",
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.message).toContain('Valid choices: "RN", "Seniors".');
+  });
+
+  it("lists the people when a group member is unknown", () => {
+    const result = applyAssistantCommand(peopleScenario(), {
+      type: "add_people_group",
+      groupId: "Nights",
+      description: "",
+      members: ["zed"],
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.message).toContain('Valid choices: "ana", "bo", 7.');
   });
 
   it("adds a staff group with members in staff order, repeats ignored", () => {
