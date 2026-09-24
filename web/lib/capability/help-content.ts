@@ -43,7 +43,8 @@ export const CAPABILITY_ENTRIES = [
     title: "Roster period and calendar",
     nurseFacingSummary:
       "Set the first and last day of the roster you are planning, and mark public holidays. " +
-      "Everything else — people, shifts, rules and requests — is planned inside these dates.",
+      "Everything else — people, shifts, rules and requests — is planned inside these dates." +
+      " Public holiday and workday groups stay empty until the public holidays are imported.",
     concepts: ["roster period", "date range", "public holiday", "date group", "calendar"],
     modes: BOTH_MODES,
     featureGates: [],
@@ -172,7 +173,10 @@ export const CAPABILITY_ENTRIES = [
     nurseFacingSummary:
       "How many people a shift needs: exactly that number, or a range when a preferred number " +
       "is set. Naming who is qualified means nobody else may work that shift at all. The " +
-      "scheduler cannot express a skill-mix rule yet, and the assistant cannot set one up.",
+      "scheduler cannot express a skill-mix rule yet, and the assistant cannot set one up." +
+      " For a number with a preferred extra (2, ideally 3), the preferred number is set here. " +
+      "Two different groups named as the only people for the same shift block each other, so " +
+      "each ward or team needs a separate shift code.",
     concepts: ["staffing requirement", "minimum staffing", "skill mix", "coverage", "headcount"],
     modes: ADVANCED_ONLY,
     featureGates: [],
@@ -189,7 +193,10 @@ export const CAPABILITY_ENTRIES = [
       "not how many of them somebody works. Rest rules like this are recommended practice, not " +
       "law: MOH sets no minimum rest between shifts, and the Employment Act sets 1 rest day a " +
       "week, at most 12 working hours a day and 72 hours of overtime a month, and 44 hours a " +
-      "week averaged over 3 weeks for shift workers. You may soften a rest rule or turn it off.",
+      "week averaged over 3 weeks for shift workers. You may soften a rest rule or turn it off." +
+      " A rule matches only its exact pattern of shifts. Use 'must never' to forbid a pattern; " +
+      "making a pattern one people must follow can make a workable roster impossible, so use a " +
+      "strong preference instead.",
     concepts: ["succession", "shift sequence", "night to day", "consecutive shifts", "rest"],
     modes: ADVANCED_ONLY,
     featureGates: [],
@@ -203,7 +210,9 @@ export const CAPABILITY_ENTRIES = [
     title: "Shift counts",
     nurseFacingSummary:
       "Limits and targets on HOW MANY of something a person gets over the roster — rest days, " +
-      "a cap on nights, or balancing hours across the team.",
+      "a cap on nights, or balancing hours across the team." +
+      " A balance rule keeps each person's count as close to a target as it can. Without one, " +
+      "the optimiser may give most nights or weekends to the same few people.",
     concepts: ["shift count", "rest days", "night cap", "hours balance", "contracted hours"],
     modes: ADVANCED_ONLY,
     featureGates: [],
@@ -263,7 +272,10 @@ export const CAPABILITY_ENTRIES = [
       "optimiser only knows the rules that are written down here — it cannot infer ward custom, " +
       "policy or anything outside the recorded rules. The assistant can offer to start a run " +
       "for you; it starts only when you press Run on its card, and then runs exactly as if you " +
-      "had pressed Optimize.",
+      "had pressed Optimize." +
+      " The score only compares rosters for this same set-up. A roster that is valid but not " +
+      "proven best is still usable. Running again can give a different roster that is just as " +
+      "good, and it can change anyone's shifts.",
     concepts: ["optimise", "generate roster", "solver", "run", "export", "download"],
     modes: BOTH_MODES,
     featureGates: [],

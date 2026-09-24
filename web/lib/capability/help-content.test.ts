@@ -40,3 +40,33 @@ describe("what the scheduler cannot do (scheduler-limits)", () => {
     }
   });
 });
+
+describe("the rule entries carry the solver facts", () => {
+  it("staffing: exact, the preferred count on this screen, one shift code per group", () => {
+    const text = summary("staffing-requirements");
+    expect(text).toMatch(/preferred number is set here/);
+    expect(text).toMatch(/separate shift code/);
+    expect(text).not.toMatch(/at least/i);
+    expect(text).toContain("nobody else may work");
+    expect(text).toContain("skill-mix");
+  });
+  it("successions: exact pattern only; a must-follow is risky", () => {
+    const text = summary("shift-successions");
+    expect(text).toMatch(/exact pattern/);
+    expect(text).toMatch(/must follow/);
+  });
+  it("counts: a balance rule spreads nights and weekends", () => {
+    const text = summary("shift-counts");
+    expect(text).toMatch(/as close to/);
+    expect(text).toMatch(/same few people/);
+  });
+  it("generate-roster: score, not proven best, and re-runs", () => {
+    const text = summary("generate-roster");
+    expect(text).toMatch(/score/);
+    expect(text).toMatch(/not proven/);
+    expect(text).toMatch(/different roster/);
+  });
+  it("roster-period: holiday groups need the import", () => {
+    expect(summary("roster-period")).toMatch(/empty until/);
+  });
+});
