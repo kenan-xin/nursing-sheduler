@@ -3,6 +3,7 @@ import { SCENARIOS } from "@/lib/rules/ward-fixtures.test-support";
 import {
   entityNames,
   judgePrompt,
+  trialEntities,
   normalizeJudgeItems,
   renderTranscript,
   STANDARD_ITEMS,
@@ -55,6 +56,25 @@ describe("judge", () => {
     expect(entityNames(seed)).toEqual(
       expect.arrayContaining(["rn1", "en1", "N", "1 RN every night"]),
     );
+  });
+
+  it("knows the seed, the final state and the names the user typed", () => {
+    const final = {
+      ...seed,
+      staff: [...seed.staff, { ...seed.staff[0]!, id: "Borrowed nurse 1" }],
+    };
+    const said = {
+      ...r,
+      final,
+      transcript: [
+        { role: "user" as const, text: "Call her Rina Lim, from the float pool.", toolCalls: [] },
+      ],
+    };
+    const names = trialEntities(said);
+    expect(names).toEqual(
+      expect.arrayContaining(["rn1", "Borrowed nurse 1", "Rina Lim", "Rina", "Lim"]),
+    );
+    expect(new Set(names).size).toBe(names.length);
   });
 
   it("asks every standard item plus the case claims", () => {

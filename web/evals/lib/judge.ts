@@ -62,6 +62,20 @@ export function entityNames(s: ScenarioUiState): string[] {
   ];
 }
 
+/**
+ * Every name the assistant may use: the seed, the final state (an applied borrowed nurse)
+ * and the names the user typed (controller ruling). The user's capitalised runs stand in
+ * for names, each run and each of its words.
+ */
+export function trialEntities(r: TrialRecord): string[] {
+  // ponytail: capitalised words are the name heuristic; lenient, it also lets "Call" through.
+  const typed = r.transcript
+    .filter((m) => m.role === "user")
+    .flatMap((m) => m.text.match(/\p{Lu}[\p{L}'-]*(?:\s+\p{Lu}[\p{L}'-]*)*/gu) ?? [])
+    .flatMap((run) => [run, ...run.split(/\s+/)]);
+  return [...new Set([...entityNames(r.seed), ...entityNames(r.final), ...typed])];
+}
+
 export function judgePrompt(r: TrialRecord, entities: string[], extra: string[]) {
   const criteria: [string, string][] = [
     ...Object.entries(STANDARD_ITEMS),

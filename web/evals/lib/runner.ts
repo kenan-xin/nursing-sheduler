@@ -5,7 +5,7 @@ import { Ledger } from "./budget";
 import type { EvalCase } from "./case";
 import { gradeDeterministic } from "./graders";
 import { runTrial, type Seams } from "./harness";
-import { entityNames, judgeTrial, openRouterModel } from "./judge";
+import { judgeTrial, openRouterModel, trialEntities } from "./judge";
 import { toMeta } from "./trial";
 
 export const EVAL_FILES = 5;
@@ -68,7 +68,7 @@ export function runCases(cases: EvalCase[], seams: Seams): void {
             : await judgeTrial(
                 openRouterModel(e.key, e.judge),
                 record,
-                entityNames(record.seed),
+                trialEntities(record),
                 evalCase.expect.judge ?? [],
               );
           task.meta.eval = toMeta(evalCase, record, gates, judge);
