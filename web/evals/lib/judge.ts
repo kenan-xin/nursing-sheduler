@@ -93,11 +93,11 @@ export function renderTranscript(
     // The text streams before the calls, so a lead-in question reads before its card.
     if (m.text.trim()) lines.push(`${labels.assistant}: ${m.text.trim()}`);
     for (const call of m.toolCalls) {
-      const args = call.args as { question?: string; options?: { label: string }[] } | null;
+      const args = call.args as { question?: string; options?: unknown } | null;
       if (call.name === "offer_choices" && args?.question) {
-        lines.push(
-          `Card: ${args.question} [${(args.options ?? []).map((o) => o.label).join(" | ")}]`,
-        );
+        // ponytail: the model sometimes sends options as a non-array; render empty rather than crash.
+        const options = Array.isArray(args.options) ? (args.options as { label?: string }[]) : [];
+        lines.push(`Card: ${args.question} [${options.map((o) => o?.label ?? "").join(" | ")}]`);
       }
       if (call.name === "prepare_scenario_change") lines.push("Preview shown to the user.");
       if (call.name === "request_optimize_run") lines.push("Run card shown to the user.");
@@ -202,19 +202,44 @@ const schema = z.object({
   items: z.array(z.object({ id: z.string(), reasoning: z.string(), pass: z.boolean() })),
 });
 
+export interface JudgeOutcome {
+  items: JudgeItem[];
+  /** The verdict was empty or unparsable on both tries; items is today's all-fail fallback. */
+  judgeError: boolean;
+}
+
+async function attemptJudge(
+  model: LanguageModel,
+  system: string,
+  prompt: string,
+  ids: string[],
+): Promise<JudgeItem[] | null> {
+  try {
+    const result = await generateText({
+      model,
+      temperature: 0,
+      system,
+      prompt,
+      output: Output.object({ schema }),
+    });
+    if (!result.output.items?.length) return null;
+    return normalizeJudgeItems(ids, result.output.items);
+  } catch {
+    return null;
+  }
+}
+
+/** One retry on an empty or unparsable verdict; a second miss keeps today's fail, flagged. */
 export async function judgeTrial(
   model: LanguageModel,
   r: TrialRecord,
   entities: string[],
   extra: string[],
-): Promise<JudgeItem[]> {
+): Promise<JudgeOutcome> {
   const { system, prompt, ids } = judgePrompt(r, entities, extra);
-  const result = await generateText({
-    model,
-    temperature: 0,
-    system,
-    prompt,
-    output: Output.object({ schema }),
-  });
-  return normalizeJudgeItems(ids, result.output.items);
+  const items =
+    (await attemptJudge(model, system, prompt, ids)) ??
+    (await attemptJudge(model, system, prompt, ids));
+  if (items) return { items, judgeError: false };
+  return { items: normalizeJudgeItems(ids, []), judgeError: true };
 }
