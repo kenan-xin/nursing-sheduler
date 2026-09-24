@@ -30,6 +30,9 @@ const RULE_TOOLS = [...BASE_TOOLS, "suggest_scheduling_rule"] as const;
 /** A concept explanation with no screen: describe only, nothing to open. */
 const CONCEPT_TOOLS = ["list_app_capabilities", "explain_app_capability"] as const;
 
+/** A concept a described policy can land on: describe it, and let rule guidance find it. */
+const LIMIT_TOOLS = [...CONCEPT_TOOLS, "suggest_scheduling_rule"] as const;
+
 const BOTH_MODES = ["guided", "advanced"] as const;
 const ADVANCED_ONLY = ["advanced"] as const;
 
@@ -125,6 +128,42 @@ export const CAPABILITY_ENTRIES = [
     modes: BOTH_MODES,
     featureGates: [],
     toolAccess: CONCEPT_TOOLS,
+    supportedCommands: [],
+  },
+  {
+    id: "scheduler-limits",
+    title: "What the scheduler cannot do",
+    nurseFacingSummary:
+      "The scheduler does not read clock times. It never calculates overlaps or the hours " +
+      "between shifts, so rest between shifts is written as shift orders it must not use, " +
+      "such as no day shift right after a night. It cannot count days in a row across " +
+      "different shifts: a shift-order rule matches only that exact pattern, so add a limit " +
+      "on working days per week as well. Limits count over fixed dates, never a rolling " +
+      "seven days. It plans one roster period at a time and remembers nothing from earlier " +
+      "rosters: not last month's nights or weekends, and not a day off owed for a public " +
+      "holiday. A skill mix, such as at least 1 RN on a shift with others allowed too, is " +
+      "not supported yet. It checks no employment law, ministry guidance or hospital policy, " +
+      "only the rules written here.",
+    concepts: [
+      "limits",
+      "days in a row",
+      "consecutive days",
+      "rolling window",
+      "hours between shifts",
+      "rest hours",
+      "clock time",
+      "overlap",
+      "last month",
+      "carry over",
+      "owed day",
+      "day in lieu",
+      "skill mix",
+      "law",
+      "ratio",
+    ],
+    modes: BOTH_MODES,
+    featureGates: [],
+    toolAccess: LIMIT_TOOLS,
     supportedCommands: [],
   },
   {

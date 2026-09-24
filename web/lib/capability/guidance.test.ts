@@ -69,6 +69,16 @@ describe("rule guidance", () => {
     expect(result).toMatchObject({ status: CAPABILITY_UNAVAILABLE, reason: "mode_unresolved" });
   });
 
+  it.each([
+    "nobody works more than 5 consecutive days, any shift",
+    "at least 11 hours rest between shifts",
+    "balance nights with last month's roster",
+  ])("points %s at what the scheduler cannot do", (policy) => {
+    const result = suggestRuleCandidates(policy, context());
+    if (result.status !== "ok") throw new Error("expected ok");
+    expect(result.value.map((c) => c.capabilityId)).toContain("scheduler-limits");
+  });
+
   it("carries the registry stamp on every answer", () => {
     const result = suggestRuleCandidates("night shift", context());
     expect(result.stamp.manifestSha256).toMatch(/^[0-9a-f]{64}$/);
