@@ -162,6 +162,19 @@ const FIXTURES: Fixture[] = [
     expect: ["no-restricted-imports"],
     because: "PRODUCTION CSS ENTRY",
   },
+  {
+    // EVAL PIPELINE. The eval runner joins the acquisition boundary; it does not escape it.
+    // Nested under evals/ (not directly in acquisition-fixtures/) to exercise the evals/**
+    // scope row rather than the top-level one. `.mts`, per this file's own stated rule: the
+    // filename must stay outside vitest's `**/*.{test,spec}.{ts,tsx}` collection while sitting
+    // inside the acquisition scope -- `.eval.ts` alone would not collide with vitest here, but
+    // the extension is kept consistent with every other fixture in this file.
+    family: "static filesystem import in the eval runner",
+    file: "evals/probe.eval.mts",
+    source: 'import { readFileSync } from "node:fs";\nexport const probe = readFileSync;\n',
+    expect: ["no-restricted-imports"],
+    because: "Generic filesystem capability",
+  },
 ];
 
 /**
@@ -220,8 +233,10 @@ function run(args: string[], json = false): LintRun {
 function writeFixtures(): void {
   mkdirSync(FIXTURE_DIR, { recursive: true });
   // Some fixtures live in a SUBDIRECTORY on purpose (`support/helper.mjs`), because the scope
-  // class being proved is the directory name rather than the filename.
+  // class being proved is the directory name rather than the filename. `evals/` likewise, so
+  // the fixture exercises the `evals/**` scope row rather than the top-level one.
   mkdirSync(join(FIXTURE_DIR, "support"), { recursive: true });
+  mkdirSync(join(FIXTURE_DIR, "evals"), { recursive: true });
   for (const fixture of FIXTURES) {
     writeFileSync(join(FIXTURE_DIR, fixture.file), fixture.source);
   }

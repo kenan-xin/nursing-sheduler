@@ -1,0 +1,44 @@
+apiVersion: alpha
+description: Flow C - deliberately INFEASIBLE starting point (a small ward, diagnose then fix) [user tutorial v2]
+dates:
+  range:
+    startDate: "2025-10-06"
+    endDate: "2025-10-12"
+  items: []
+  groups: []
+people:
+  items:
+    - id: SN-Aisha
+    - id: SN-Rajesh
+    - id: SN-Kavitha
+  groups: []
+shiftTypes:
+  items:
+    - id: M
+      description: Morning 07:00-15:30
+    - id: N
+      description: Night 20:00-08:30
+  groups: []
+preferences:
+  - type: at most one shift per day
+  - type: shift type requirement
+    description: "Impossible: 4 Morning nurses needed but only 3 on the ward"
+    shiftType:
+      - M
+    requiredNumPeople: 4
+    qualifiedPeople:
+      - ALL
+    date:
+      - ALL
+    weight: -1
+  - type: shift type successions
+    description: Everyone must work every day (no rest) - breaches MOM too
+    person:
+      - ALL
+    pattern:
+      - OFF
+      - M
+    date:
+      - ALL
+    weight: -.inf
+appVersion: 0.1.0

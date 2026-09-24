@@ -893,6 +893,20 @@ const OVERRIDES: OverrideContract[] = [
     properties: "base",
     why: "MAIN INTEGRATION. The audited readers at NON-TEST support scope: the Playwright abort-control reporter, the fail-closed authority-handoff producer, and the Ward YAML helper. `exempt: []` is the entire point -- it removes the filesystem family and NOTHING else, so all three keep the assistant, raw-CopilotKit and repository boundaries the support-tree override puts on them. It is LAST in the list because the support-tree override matches these three as well, and the later override is the one that wins",
   },
+  {
+    files: ["evals/**", "acquisition-fixtures/evals/**"],
+    exempt: ["assistant", "raw-copilotkit"],
+    acquisition: [],
+    properties: "base",
+    why: "EVAL PIPELINE (2026-09-24). The live-model eval runner is a test OF the assistant, so it sits on the assistant seam like the assistant's own tests and may name CopilotKitProvider. Every acquisition family stays banned. Its helpers live in evals/lib, never evals/support, because the support-tree row keeps the assistant boundary closed",
+  },
+  {
+    files: ["evals/eval-reporter.ts"],
+    exempt: ["assistant", "raw-copilotkit"],
+    acquisition: ["filesystem"],
+    properties: "base",
+    why: "EVAL PIPELINE. The eval report writer. Ledger: API node:fs/promises readFile, writeFile, mkdir | root evals/runs/latest/ and evals/baseline.json | UTF-8 JSON and Markdown | write, no delete. It opens no .ts/.tsx. LAST, so it wins over the evals/** row above",
+  },
 ];
 
 /** Overrides that legitimately carry no `no-restricted-imports` config at all. */
@@ -1469,6 +1483,27 @@ const GOVERNED: GovernedPath[] = [
     properties: "base",
     offRules: ["vitest/no-disabled-tests"],
     note: "class {4,16,21} -- the vitest skip-marker exemption AND an audited reader. Its imports come from override 15 and its vitest allowance from override 20; EVERY other targeted rule must still be active here",
+  },
+  {
+    path: "evals/lib/reliability.ts",
+    exempt: ["assistant", "raw-copilotkit"],
+    acquisition: [],
+    properties: "base",
+    note: "class {23} -- EVAL PIPELINE. Production-shaped eval helper code, matched only by the new evals/** override: the acquisition families apply with no exception, same as any other test/support code",
+  },
+  {
+    path: "evals/lib/reliability.test.ts",
+    exempt: ["assistant", "raw-copilotkit"],
+    acquisition: [],
+    properties: "base",
+    note: "class {4,23} -- EVAL PIPELINE. An ordinary test file inside evals/, matched by both the general test override and the evals/** override; the two agree so which one wins does not change the effective config",
+  },
+  {
+    path: "evals/eval-reporter.ts",
+    exempt: ["assistant", "raw-copilotkit"],
+    acquisition: ["filesystem"],
+    properties: "base",
+    note: "class {23,24} -- EVAL PIPELINE. The ledgered report writer: the evals/** override matches it, and the later row-B override wins, removing the filesystem family and nothing else",
   },
 ];
 

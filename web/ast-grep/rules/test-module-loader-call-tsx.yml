@@ -24,6 +24,7 @@ files:
   - "**/test-support.*"
   - "**/*.test-support.*"
   - "lib/store/test-authority.ts"
+  - "evals/**"
 ignores:
   - "components/ai/assistant-styles.test.ts"
   - "lib/ai/runtime/model-visible-tools.test.ts"

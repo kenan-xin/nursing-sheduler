@@ -1,0 +1,172 @@
+apiVersion: alpha
+description: Flow A - NUH General Medicine ward monthly roster (12 staff, August 2025) [user tutorial v2]
+dates:
+  range:
+    startDate: "2025-08-01"
+    endDate: "2025-08-31"
+  items: []
+  groups: []
+people:
+  items:
+    - id: NM-Tan
+    - id: SSN-Lim
+    - id: SSN-Goh
+    - id: SSN-Wong
+    - id: SN-Priya
+    - id: SN-Nurul
+    - id: SN-Kavitha
+    - id: SN-Siti
+    - id: SN-Farah
+    - id: SN-Mei
+    - id: EN-Rahim
+    - id: EN-Devi
+  groups:
+    - id: Seniors
+      members:
+        - NM-Tan
+        - SSN-Lim
+        - SSN-Goh
+        - SSN-Wong
+      description: SSN/NIC-tier who can lead a shift
+shiftTypes:
+  items:
+    - id: M
+      description: Morning 07:00-15:30
+    - id: M_sup
+      description: Morning shift lead (SSN/NIC)
+    - id: A
+      description: Afternoon 13:00-22:00
+    - id: A_sup
+      description: Afternoon lead (SSN/NIC)
+    - id: N
+      description: Night 20:00-08:30
+    - id: N_sup
+      description: Night NIC on call
+  groups:
+    - id: Morning
+      members:
+        - M
+        - M_sup
+    - id: Afternoon
+      members:
+        - A
+        - A_sup
+    - id: Night
+      members:
+        - N
+        - N_sup
+preferences:
+  - type: at most one shift per day
+  - type: shift type requirement
+    description: Morning meds + breakfast round - 2 min, 3 ideal
+    shiftType:
+      - M
+    requiredNumPeople: 2
+    qualifiedPeople:
+      - ALL
+    date:
+      - ALL
+    weight: -1
+    preferredNumPeople: 3
+  - type: shift type requirement
+    description: One SSN/NIC leads each morning
+    shiftType:
+      - M_sup
+    requiredNumPeople: 1
+    qualifiedPeople:
+      - Seniors
+    date:
+      - ALL
+    weight: -1
+  - type: shift type requirement
+    description: Afternoon med round & family updates
+    shiftType:
+      - A
+    requiredNumPeople: 2
+    qualifiedPeople:
+      - ALL
+    date:
+      - ALL
+    weight: -1
+  - type: shift type requirement
+    description: Optional 2nd lead in afternoon
+    shiftType:
+      - A_sup
+    requiredNumPeople: 0
+    qualifiedPeople:
+      - Seniors
+    date:
+      - ALL
+    weight: -1
+    preferredNumPeople: 1
+  - type: shift type requirement
+    description: Night coverage
+    shiftType:
+      - N
+    requiredNumPeople: 2
+    qualifiedPeople:
+      - ALL
+    date:
+      - ALL
+    weight: -1
+  - type: shift type successions
+    description: No Morning straight after a Night (fatigue)
+    person:
+      - ALL
+    pattern:
+      - N
+      - M
+    date:
+      - ALL
+    weight: -.inf
+  - type: shift type successions
+    description: Prefer OFF after a Night
+    person:
+      - ALL
+    pattern:
+      - N
+      - OFF
+    date:
+      - ALL
+    weight: 5
+  - type: shift count
+    description: Fair workload - at most 22 Morning shifts each
+    person:
+      - ALL
+    countDates:
+      - ALL
+    countShiftTypes:
+      - M
+    expression: x <= T
+    target: 22
+    weight: 5
+  - type: shift count
+    description: "MOM rest: at least 8 rest days this month (~2/week)"
+    person:
+      - ALL
+    countDates:
+      - ALL
+    countShiftTypes:
+      - OFF
+    expression: x >= T
+    target: 8
+    weight: 6
+  - type: shift request
+    description: SN-Nurul requests Mondays off (childcare)
+    person:
+      - SN-Nurul
+    date:
+      - MONDAY
+    shiftType:
+      - OFF
+    weight: 5
+  - type: shift request
+    description: SN-Priya prefers to avoid the Night lead role
+    person:
+      - SN-Priya
+    date:
+      - ALL
+    shiftType:
+      - N_sup
+    weight: -3
+appVersion: 0.1.0

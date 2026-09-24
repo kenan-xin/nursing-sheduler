@@ -27,6 +27,7 @@ files:
   - "**/test-support.*"
   - "**/*.test-support.*"
   - "lib/store/test-authority.ts"
+  - "evals/**"
 rule:
   any:
     - pattern: require($SPEC)
