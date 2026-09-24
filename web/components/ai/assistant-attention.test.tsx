@@ -176,6 +176,30 @@ describe("the launcher's attention states", () => {
     expect(badge()).toHaveTextContent("3");
   });
 
+  it("counts a live roster change card, not a stopped one", () => {
+    const change = {
+      request: { solvedBaselineId: "a".repeat(64), cells: [] },
+      view: {
+        heading: "Swap shifts?",
+        stepLabel: "Step 1 · Swap or cover within the ward",
+        title: "SN-Priya and SN-Cara, 8 Oct",
+        summary: "",
+        rows: [],
+        leaveRows: [],
+        notes: [],
+        worthKnowing: [],
+        notChecked: [],
+        agreement: null,
+      },
+    };
+    render(<AssistantLauncher />);
+    act(() => void assistantActions.showRosterChange(change, epoch()));
+    expect(badge()).toHaveTextContent("1");
+
+    act(() => void assistantActions.showRosterChange(change, epoch() - 1));
+    expect(badge()).toBeNull();
+  });
+
   it("does not count a card from a turn that was since stopped", () => {
     render(<AssistantLauncher />);
     act(() => {

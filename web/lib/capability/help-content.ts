@@ -266,7 +266,8 @@ export const CAPABILITY_ENTRIES = [
       "change the people, shifts, rules or requests the run was based on." +
       " The assistant can read this roster, suggest who can swap a shift without breaking the " +
       "rules it was made with, and prepare the swap; it changes only when you press Apply on its " +
-      "card, and you can undo it here.",
+      "card, and you can undo it here. When the swap also changes the schedule (a leave move, " +
+      "an MC or a temporary nurse), undo that part from the change list too.",
     concepts: ["roster", "schedule", "view roster", "adjust roster", "assignment", "manual edit"],
     // The Roster destination carries no `guidedStep`, but persistent shell navigation
     // reaches it in BOTH modes (see `nav-config.ts`, group `out`), so the capability

@@ -140,6 +140,9 @@ describe("the attached turn context", () => {
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/step 1.*step 2.*step 3.*step 4/i);
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/overtime pay, or off-in-lieu/);
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/nurse manager's sign-off/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(
+      /let their nurse manager or nurse clinician know/,
+    );
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/prepare_borrowed_cover/);
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/sick_or_emergency/);
   });

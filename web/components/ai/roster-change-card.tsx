@@ -21,7 +21,6 @@ import {
   useAssistantStore,
 } from "@/lib/ai/assistant/store";
 import { CAPABILITY_UNAVAILABLE } from "@/lib/capability/resolve";
-import { requestRosterChange } from "@/lib/roster/change-request";
 import { assistantProposalCommands } from "@/lib/store";
 import { ChoiceOption, OtherAnswer } from "./choice-card";
 import { applyLinkedChange, linkedApplyDeps } from "./linked-apply";
@@ -157,22 +156,9 @@ function RosterChangeBody({
     assistantActions.setRosterChangeApplying(true);
     assistantActions.setRosterChangeNotice(null);
     try {
-      if (linked === null) {
-        if (request === null) return;
-        // The user's click is its own authority. An unsaved draft still gets the usual confirm.
-        const outcome = await navigate("roster-viewer");
-        if (outcome.status === CAPABILITY_UNAVAILABLE) {
-          if (outcome.reason !== "navigation_cancelled") {
-            assistantActions.setRosterChangeNotice(
-              "The Roster screen could not be opened. Open it yourself and make the change there.",
-            );
-          }
-          return;
-        }
-        requestRosterChange(request);
-        assistantActions.clearRosterChange();
-        return;
-      }
+      // One path with or without a linked change, so a refusal on the Roster screen is
+      // always said on the card. The click is its own authority; an unsaved draft still
+      // gets the usual confirm.
       const result = await applyLinkedChange(
         active,
         linkedApplyDeps(async () => {
@@ -305,7 +291,9 @@ function RosterChangeBody({
               detail={
                 request === null
                   ? "Makes this change to the schedule. You can undo it from the change list."
-                  : "Opens the Roster screen and makes this change. You can undo it there."
+                  : linked === null
+                    ? "Opens the Roster screen and makes this change. You can undo it there."
+                    : "Opens the Roster screen and makes this change. Undo the roster part on the Roster screen and the schedule part from the change list."
               }
               disabled={
                 disabled ||

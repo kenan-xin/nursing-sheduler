@@ -21,6 +21,11 @@ import {
   type RuleModel,
 } from "./rule-check";
 
+/** Who signs off a shift run one short. One place, so a ward can say it its own way. */
+export const SIGN_OFF_ROLE = "nurse manager";
+/** Who owns the ward roster and should hear about a change to it. */
+export const ROSTER_OWNER = `${SIGN_OFF_ROLE} or nurse clinician`;
+
 export interface SwapContext {
   readonly context: RosterContext;
   /** The CURRENT assignments (solved + edits). */
@@ -308,8 +313,7 @@ export function planShortShift(
     people: [personIdx],
     dates: dateIdxs,
   });
-  const talk =
-    "The app will not offer it. Please talk to your nurse manager or the nursing supervisor.";
+  const talk = `The app will not offer it. Please talk to your ${ROSTER_OWNER} or the nursing supervisor.`;
   const senior = check.hard.find((i) => i.staffing?.qualified);
   if (senior?.staffing) {
     const s = senior.staffing;

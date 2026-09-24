@@ -173,7 +173,7 @@ describe("ladder views", () => {
     expect(view.notes[0]).toBe(
       "Adds SN-Tan (relief pool) as temporary staff, off on every other date.",
     );
-    expect(view.notes).toContain("Please let your nurse manager know.");
+    expect(view.notes).toContain("Please let your nurse manager or nurse clinician know.");
   });
 
   it("asks for the nurse manager's sign-off to run one short", () => {

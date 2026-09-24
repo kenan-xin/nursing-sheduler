@@ -46,6 +46,8 @@ import {
   planSickCover,
   planSwap,
   planTrade,
+  ROSTER_OWNER,
+  SIGN_OFF_ROLE,
   type SwapContext,
   type SwapPlan,
   type TradeVariant,
@@ -237,12 +239,19 @@ const ROSTER_BUSY =
   "The user is applying the last roster change right now, so no new card was shown and " +
   "nothing was altered. Wait for it to finish, then ask again.";
 
-/** Show the card, or cancel the just-prepared linked proposal when the card is busy. */
+/**
+ * Show the card, or cancel the just-prepared linked proposal when the card is busy. A
+ * card this one replaces takes its linked proposal with it, so none is left applicable.
+ */
 function showCard(
   change: Parameters<typeof assistantActions.showRosterChange>[0],
   turnEpoch: number,
 ): boolean {
-  if (assistantActions.showRosterChange(change, turnEpoch)) return true;
+  const replaced = useAssistantStore.getState().activeRosterChange?.linked ?? null;
+  if (assistantActions.showRosterChange(change, turnEpoch)) {
+    if (replaced) void assistantProposalCommands.cancel(replaced.proposalId);
+    return true;
+  }
   if (change.linked) void assistantProposalCommands.cancel(change.linked.proposalId);
   return false;
 }
@@ -448,13 +457,13 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
             temporary: { needs, skillGroups, sources: ["relief_pool", "other_ward", "agency"] },
             guidance:
               "Step 3: ask the nursing supervisor for a nurse from the relief pool first; if none, " +
-              "another ward or an agency. Tell the user to let their nurse manager know. Ask for " +
+              `another ward or an agency. Tell the user to let their ${ROSTER_OWNER} know. Ask for ` +
               "the nurse's name and where the nurse comes from, then call prepare_borrowed_cover. " +
               "Never make up a name. If they have nobody, call find_swap_partners again with " +
               "noTemporaryNurse true." +
               (args.reason === "sick_or_emergency"
                 ? " If they only want the absence recorded, call prepare_roster_swap without a partner."
-                : "") +
+                : " For a swap, say it takes effect after the next optimiser run.") +
               PLAIN_WORDS,
           };
         }
@@ -476,9 +485,9 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
                 }
               : { allowed: false, refusal: plan?.reasons[0] ?? "" },
           guidance:
-            "Step 4, last resort: only with the nurse manager's sign-off. If allowed, offer to run " +
+            `Step 4, last resort: only with the ${SIGN_OFF_ROLE}'s sign-off. If allowed, offer to run ` +
             "it one short with prepare_roster_swap (no partner, noTemporaryNurse true). If refused, " +
-            "say so plainly and suggest talking to the nurse manager or the nursing supervisor. " +
+            `say so plainly and suggest talking to the ${ROSTER_OWNER} or the nursing supervisor. ` +
             "Never suggest this before steps 1-3." +
             PLAIN_WORDS,
         };
@@ -527,7 +536,10 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
           if (commands.length > 0) {
             const prepared = await prepareLinked(commands, rationale);
             const lateAgain = assertTurnAuthority(token, signal);
-            if (lateAgain) return lateAgain;
+            if (lateAgain) {
+              if (prepared.ok) void assistantProposalCommands.cancel(prepared.linked.proposalId);
+              return lateAgain;
+            }
             if (!prepared.ok) return prepared.message;
             linked = prepared.linked;
           }
@@ -562,7 +574,14 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
             const plan = planSickCover(ctx, personIdx, null, dateIdxs);
             if (!plan.ok)
               return `That cannot be recorded, so no card was shown: ${plan.reasons.join(" ")}`;
-            const view = buildSickView(ctx.context, personIdx, null, plan, args.summary);
+            const view = buildSickView(
+              ctx.context,
+              personIdx,
+              null,
+              plan,
+              args.summary,
+              ladder.step,
+            );
             // A refused run-short (step 4) says why on the card, so the gap is plain.
             const refused = short && !short.ok ? [short.reasons[0]] : [];
             return show(
@@ -571,11 +590,11 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
               sickLeave,
             );
           }
-          // The refusal already says to talk to the nurse manager or the nursing supervisor.
+          // The refusal already says to talk to the roster owner or the nursing supervisor.
           if (short) return short.reasons[0];
           return (
             `${stillHasOptions(ctx, ladder)} Leaving the shift short is only for when steps 1-3 ` +
-            "find nobody, and needs the nurse manager's sign-off."
+            `find nobody, and needs the ${SIGN_OFF_ROLE}'s sign-off.`
           );
         }
 
@@ -671,6 +690,9 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
           return `${stillHasOptions(ctx, ladder)} No temporary nurse should be asked for yet. Call find_swap_partners and offer those first.`;
         }
         const name = args.name.trim();
+        const sick = args.reason === "sick_or_emergency";
+        const personId = ctx.context.people[personIdx].id;
+        const personIsos = dateIdxs.map((d) => ctx.context.calendar[d].iso);
         const skill = ladder.borrow.flatMap((n) => (n.skillGroup ? [n.skillGroup] : []));
         const groups = [...new Set([...args.groups, ...skill])];
         const isos = ctx.context.calendar.map((day) => day.iso);
@@ -699,19 +721,29 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
               weight: "must",
             }),
           ),
-          ...(args.reason === "sick_or_emergency"
-            ? addLeave(
-                ctx.context.people[personIdx].id,
-                dateIdxs.map((d) => isos[d]),
-              )
-            : []),
+          // A swap: the borrowed nurse cannot sit on this roster yet (C2, bead g1p), so
+          // the asking nurse's off request is what frees them at the next run.
+          ...(sick
+            ? addLeave(personId, personIsos)
+            : personIsos.map(
+                (iso): AssistantCommandV1 => ({
+                  type: "set_off_request",
+                  personId,
+                  startDate: iso,
+                  endDate: iso,
+                  weight: "must",
+                }),
+              )),
         ];
         const prepared = await prepareLinked(
           commands,
           `${args.summary} (${BORROW_SOURCE[args.source]})`,
         );
         const lateAgain = assertTurnAuthority(token, signal);
-        if (lateAgain) return lateAgain;
+        if (lateAgain) {
+          if (prepared.ok) void assistantProposalCommands.cancel(prepared.linked.proposalId);
+          return lateAgain;
+        }
         if (!prepared.ok) return prepared.message;
         const question = prepared.linked.assumptions.find(
           (a) => a.type === "borrowed_staff_arranged",
@@ -721,23 +753,25 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
         }
         // C1: the roster only records the absence (sick reason). The nurse's row needs
         // roster-file/2 (Task 12), so it appears after the next run.
-        const cells: RosterCellChange[] =
-          args.reason === "sick_or_emergency"
-            ? dateIdxs.map((d) => ({
-                personIdx,
-                dateIdx: d,
-                before: ctx.days[personIdx][d],
-                after: { kind: "leave" },
-              }))
-            : [];
+        const cells: RosterCellChange[] = sick
+          ? dateIdxs.map((d) => ({
+              personIdx,
+              dateIdx: d,
+              before: ctx.days[personIdx][d],
+              after: { kind: "leave" },
+            }))
+          : [];
         const needs = ladder.borrow.map((n) => ({
           date: plainDate(isos[n.dateIdx]),
           shift: shiftName(ctx.context, n.shift),
         }));
+        const view = buildBorrowView(name, args.source, groups, needs, question, args.summary);
+        const person = personName(ctx.context, personIdx);
+        const swapNote = `The swap takes effect after the next run: ${person} keeps these shifts until then.`;
         const shown = showCard(
           {
             request: cells.length > 0 ? { solvedBaselineId: baselineId, cells } : null,
-            view: buildBorrowView(name, args.source, groups, needs, question, args.summary),
+            view: sick ? view : { ...view, notes: [...view.notes, swapNote] },
             linked: {
               proposalId: prepared.linked.proposalId,
               assumptionIds: prepared.linked.assumptionIds,
@@ -749,7 +783,10 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
         if (!shown) return ROSTER_BUSY;
         return (
           `${CARD_SHOWN} Tell the user ${name}'s roster row appears after the next optimiser run, ` +
-          "and to let their nurse manager know about the temporary nurse. Offer " +
+          (sick
+            ? ""
+            : `and the swap takes effect after the next optimiser run (${person} keeps these shifts until then), `) +
+          `and to let their ${ROSTER_OWNER} know about the temporary nurse. Offer ` +
           "request_optimize_run once they have applied it."
         );
       },

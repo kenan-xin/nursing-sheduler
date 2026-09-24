@@ -460,7 +460,56 @@ describe("the escalation ladder in the tools", () => {
     ]);
     expect(card?.view.title).toBe("Mei (relief pool): Night on 8 Oct");
     expect(card?.linked?.record).toBe("staff");
-    expect(answer).toMatch(/nurse manager/);
+    expect(answer).toMatch(/nurse manager or nurse clinician/);
+  });
+
+  it("cancels the linked proposal of a card it replaces", async () => {
+    assistantActions.showRosterChange(
+      {
+        request: null,
+        view: useAssistantStore.getState().activeRosterChange?.view ?? ({} as never),
+        linked: { proposalId: "old-p", assumptionIds: [], record: "leave" },
+      },
+      TURN,
+    );
+    fixture.cancel.mockClear();
+    await tool("prepare_roster_swap").handler(
+      { ...PRIYA_NIGHTS, partner: "SN-Cara", summary: "Priya needs those nights off." },
+      {},
+    );
+    expect(fixture.cancel).toHaveBeenCalledWith("old-p");
+  });
+
+  it("frees the asking nurse at the next run when step 3 covers a swap", async () => {
+    useBorrow();
+    fixture.prepare.mockResolvedValueOnce({
+      ok: true,
+      proposal: {
+        proposalId: "p-2",
+        assumptions: [
+          { assumptionId: "b-1", type: "borrowed_staff_arranged", question: "Confirmed Mei?" },
+        ],
+      },
+    });
+    const answer = await tool("prepare_borrowed_cover").handler(
+      { ...BORROW_MEI, reason: "swap", summary: "Borrow." },
+      {},
+    );
+    const commands = fixture.prepare.mock.calls[0][0].commands;
+    expect(commands).toContainEqual({
+      type: "set_off_request",
+      personId: "SN-Priya",
+      startDate: "2026-10-08",
+      endDate: "2026-10-08",
+      weight: "must",
+    });
+    expect(commands.some((c: { type: string }) => c.type === "add_leave")).toBe(false);
+    const card = useAssistantStore.getState().activeRosterChange;
+    expect(card?.request).toBeNull();
+    expect(card?.view.notes).toContain(
+      "The swap takes effect after the next run: SN-Priya keeps these shifts until then.",
+    );
+    expect(answer).toMatch(/swap takes effect after the next optimiser run/);
   });
 
   it("shows no new card while the last one is applying, and cancels what it prepared", async () => {
@@ -492,7 +541,7 @@ describe("the escalation ladder in the tools", () => {
     await guidance(PRIYA_NIGHTS);
     useBorrow();
     await guidance({ person: "SN-Priya", dates: ["2026-10-08"], reason: "sick_or_emergency" });
-    expect(texts[2]).toMatch(/nurse manager/);
+    expect(texts[2]).toMatch(/nurse manager or nurse clinician/);
     useShort();
     await guidance({
       person: "SN-Priya",

@@ -18,8 +18,8 @@ import {
 } from "@/lib/ai/assistant/store";
 
 /**
- * How many cards wait on the user: a Preview to Apply, a run card to press, an option
- * card to answer. A Preview or run card from a stopped turn has no live control, so it
+ * How many cards wait on the user: a Preview or roster change to Apply, a run card to
+ * press, an option card to answer. A card from a stopped turn has no live control, so it
  * waits on nothing -- the same epoch test the cards themselves use.
  */
 function selectAttentionCount(state: AssistantUiState): number {
@@ -28,6 +28,7 @@ function selectAttentionCount(state: AssistantUiState): number {
   return (
     Number(live(state.activeProposal)) +
     Number(live(state.activeRunRequest)) +
+    Number(live(state.activeRosterChange)) +
     Number(state.activeChoices !== null)
   );
 }

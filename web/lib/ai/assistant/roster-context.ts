@@ -19,7 +19,9 @@ import {
   type CoverReason,
   findPersonIdx,
   personName,
+  ROSTER_OWNER,
   type ShortShiftPlan,
+  SIGN_OFF_ROLE,
   type SwapPlan,
   type TradePlan,
 } from "@/lib/roster-viewer/swap";
@@ -296,6 +298,7 @@ export function buildSickView(
   partnerIdx: number | null,
   plan: Extract<SwapPlan, { ok: true }>,
   summary: string,
+  step: keyof typeof STEP_LABEL = 1,
 ): RosterChangeView {
   const person = personName(context, personIdx);
   const dates = [
@@ -303,7 +306,7 @@ export function buildSickView(
   ];
   return {
     heading: `Cover ${person}'s MC?`,
-    stepLabel: STEP_LABEL[1],
+    stepLabel: STEP_LABEL[step],
     title:
       partnerIdx === null
         ? `${person} on leave ${span(context, dates)}`
@@ -353,7 +356,7 @@ export function buildOvertimeView(
   };
 }
 
-/** Step 4, the last resort: only with the nurse manager's sign-off. */
+/** Step 4, the last resort: only with the sign-off of `SIGN_OFF_ROLE`. */
 export function buildShortView(
   context: RosterContext,
   personIdx: number,
@@ -374,9 +377,9 @@ export function buildShortView(
     worthKnowing: plan.soft.map((issue) => issue.message),
     notChecked: [...plan.unchecked],
     notes: [
-      "Only with your nurse manager's sign-off. Every nurse the skill mix needs stays on this shift.",
+      `Only with your ${SIGN_OFF_ROLE}'s sign-off. Every nurse the skill mix needs stays on this shift.`,
     ],
-    agreement: `My nurse manager has agreed it is safe to run ${lines.join("; ")}.`,
+    agreement: `My ${SIGN_OFF_ROLE} has agreed it is safe to run ${lines.join("; ")}.`,
   };
 }
 
@@ -409,7 +412,7 @@ export function buildBorrowView(
     notes: [
       `Adds ${name} (${from}) as temporary staff, off on every other date${qualified}.`,
       `${name}'s roster row appears after the next run.`,
-      "Please let your nurse manager know.",
+      `Please let your ${ROSTER_OWNER} know.`,
     ],
     agreement: question,
   };

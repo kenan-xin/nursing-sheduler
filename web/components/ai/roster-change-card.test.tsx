@@ -94,13 +94,42 @@ describe("RosterChangeCard", () => {
     expect(screen.getByText("Step 1 · Swap or cover within the ward")).toBeInTheDocument();
   });
 
-  it("opens the Roster screen, hands it the request, and goes away on Apply", async () => {
+  it("applies an unlinked change through the same path and goes away", async () => {
+    applyLinked.mockResolvedValue({ ok: true });
     assistantActions.showRosterChange(CHANGE, TURN);
     renderCard();
     await userEvent.click(screen.getByTestId("roster-change-apply"));
-    await waitFor(() => expect(useRosterChangeStore.getState().pending).not.toBeNull());
-    expect(navigate).toHaveBeenCalledWith("roster-viewer");
-    expect(useAssistantStore.getState().activeRosterChange).toBeNull();
+    await waitFor(() => expect(useAssistantStore.getState().activeRosterChange).toBeNull());
+    expect(applyLinked).toHaveBeenCalledWith(
+      expect.objectContaining({ request: CHANGE.request, linked: null }),
+      expect.anything(),
+    );
+  });
+
+  it("says why when the Roster screen refuses an unlinked change", async () => {
+    applyLinked.mockResolvedValue({
+      ok: false,
+      message: "Nothing was changed: the Roster screen refused the change.",
+    });
+    assistantActions.showRosterChange(CHANGE, TURN);
+    renderCard();
+    await userEvent.click(screen.getByTestId("roster-change-apply"));
+    expect(
+      await screen.findByText("Nothing was changed: the Roster screen refused the change."),
+    ).toBeInTheDocument();
+  });
+
+  it("says each half is undone in its own place", () => {
+    assistantActions.showRosterChange(
+      { ...CHANGE, linked: { proposalId: "p-1", assumptionIds: [], record: "leave" as const } },
+      TURN,
+    );
+    renderCard();
+    expect(
+      screen.getByText(
+        /Undo the roster part on the Roster screen and the schedule part from the change list/,
+      ),
+    ).toBeInTheDocument();
   });
 
   it("shows a stopped card with no Apply control", () => {

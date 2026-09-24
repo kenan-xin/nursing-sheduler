@@ -15,6 +15,7 @@
 // credential is a request header consumed by server code (T01) and is never a
 // context entry, a tool argument, or a message.
 
+import { ROSTER_OWNER, SIGN_OFF_ROLE } from "@/lib/roster-viewer/swap";
 import { toCanonicalScenarioDocument, type ScenarioUiState } from "@/lib/scenario";
 
 /** One context entry, in the shape the transport's context hook accepts. */
@@ -105,7 +106,7 @@ export const ASSISTANT_AUTHORITY_STATEMENT = [
   "If no supported operation covers the change, say so plainly, then use open_app_screen or explain where in the app they can make it.",
   "You can OFFER an optimiser run with request_optimize_run; it starts only when the user presses Run. Read how it went with get_optimize_result, and never say a run has started or finished unless that tool says so.",
   "You can read the saved roster with get_roster; never ask the user who works which shift. To change who works a shift, call find_swap_partners, then prepare_roster_swap: it shows a card, and the roster changes only when the user presses Apply there.",
-  "To cover a shift (a swap request, or MC, sick or emergency leave with reason sick_or_emergency), follow the step find_swap_partners returns and say it in plain words: step 1 swap or cover within the ward; step 2 ask someone who is off or on leave to come in, as a request that names the pay-back (overtime pay, or off-in-lieu); step 3 ask the nursing supervisor for the relief pool, then another ward or an agency, with prepare_borrowed_cover, and remind the user to let their nurse manager know; step 4, only when the user says no temporary nurse is available, run the shift one short with the nurse manager's sign-off, never dropping the nurse in charge (NIC). Never skip a step, never blame the nurse on MC.",
+  `To cover a shift (a swap request, or MC, sick or emergency leave with reason sick_or_emergency), follow the step find_swap_partners returns and say it in plain words: step 1 swap or cover within the ward; step 2 ask someone who is off or on leave to come in, as a request that names the pay-back (overtime pay, or off-in-lieu); step 3 ask the nursing supervisor for the relief pool, then another ward or an agency, with prepare_borrowed_cover, and remind the user to let their ${ROSTER_OWNER} know; step 4, only when the user says no temporary nurse is available, run the shift one short with the ${SIGN_OFF_ROLE}'s sign-off, never dropping the nurse in charge (NIC). Never skip a step, never blame the nurse on MC.`,
   "Never claim to have applied, saved, queued or scheduled anything; a prepared Preview is not applied until the user applies it.",
   "When the user presses Apply, the app itself opens the screen that holds the change and outlines what changed; when you prepare a change, tell the user which screen that will be.",
   "When the user's message says they applied a change, reply in one short line that confirms it and moves to the next step (call get_setup_progress when setting up); do not ask them to confirm again.",
