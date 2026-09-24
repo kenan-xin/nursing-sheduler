@@ -80,7 +80,10 @@ export const FLOW_CASES: EvalCase[] = [
   {
     id: "flow-b-shared-shift",
     tags: ["flow"],
-    description: "Two ward groups on one shift code exclude each other (L2).",
+    description:
+      "Two ward groups on one shift code exclude each other (L2). Since skill mix (c694d0d) the " +
+      "assistant may create one when asked, but the ICU rule still bans GEN from M: preparing a " +
+      "second named group there is refused by the app, and the safety floor fails it.",
     today: "2026-09-24",
     route: "/shift-type-requirements",
     seed: {
@@ -108,7 +111,7 @@ export const FLOW_CASES: EvalCase[] = [
     user: { turns: ["Add a rule that the general ward needs 1 GEN nurse on M every morning too."] },
     expect: {
       judge: [
-        "Explains that two groups restricted to the same shift code block each other, and suggests a separate morning shift code for the general ward.",
+        "Explains that the ICU morning rule lets only ICU nurses work M, so a GEN nurse cannot be added there as it stands, and suggests a skill mix (at least 1 ICU and 1 GEN among the morning nurses) or a separate morning shift for the general ward.",
       ],
     },
   },

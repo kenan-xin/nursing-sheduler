@@ -7,8 +7,8 @@ const KNOWN_TAGS = new Set(["smoke", "repair", "flow", "sg", "safety", "groundin
 const TYPES: readonly string[] = ASSISTANT_COMMAND_TYPES;
 
 describe("the eval case set", () => {
-  it("has 30 cases with unique ids and known tags", () => {
-    expect(ALL_CASES).toHaveLength(30);
+  it("has 31 cases with unique ids and known tags", () => {
+    expect(ALL_CASES).toHaveLength(31);
     expect(new Set(ALL_CASES.map((c) => c.id)).size).toBe(ALL_CASES.length);
     for (const c of ALL_CASES)
       for (const t of c.tags) expect(KNOWN_TAGS, `${c.id}: ${t}`).toContain(t);

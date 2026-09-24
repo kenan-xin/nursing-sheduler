@@ -15,6 +15,7 @@ import {
   REPAIR_ORDER,
   REST_PRACTICE_WARNING,
   SAFETY_FLOOR,
+  SETUP_INSTRUCTIONS,
   SETUP_STEPS,
   relaxesRestRule,
 } from "./playbook";
@@ -200,7 +201,12 @@ describe("setup hints carry ward defaults, never invented law", () => {
     ].join(" ");
     expect(all).not.toMatch(/cannot create|never create|not supported yet/i);
   });
+  it("asks a step's pick-one questions on one card, never as plain text (dt9)", () => {
+    expect(SETUP_INSTRUCTIONS[0]).toMatch(/offer_choices/);
+    expect(SETUP_INSTRUCTIONS[0]).toMatch(/moreQuestions/);
+    expect(SETUP_INSTRUCTIONS[0]).not.toMatch(/all at once, in plain words/);
+  });
   it("was versioned", () => {
-    expect(PLAYBOOK_VERSION).toBe("2026-09-24.6");
+    expect(PLAYBOOK_VERSION).toBe("2026-09-24.7");
   });
 });

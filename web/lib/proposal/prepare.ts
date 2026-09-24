@@ -19,6 +19,7 @@ import { ASSISTANT_COMMAND_SCHEMA_VERSION, type AssistantCommandV1 } from "./com
 import { deriveAssumptions } from "./assumptions";
 import { deriveProposalDiff } from "./diff";
 import { applyAssistantCommands, type CommandRejection } from "./operations";
+import { newRuleClash, ruleClashMessage } from "@/lib/rules/shortfalls";
 import {
   commandsDigest,
   type EvidenceReference,
@@ -67,6 +68,20 @@ export function prepareProposal(input: PrepareProposalInput): PrepareProposalRes
 
   const applied = applyAssistantCommands(input.document, input.commands);
   if (!applied.ok) return { ok: false, rejection: applied.rejection };
+
+  // A change no roster could ever meet (two rules each letting only their own people
+  // work one shift) is refused here, so no Preview offers it (bead att).
+  const clash = newRuleClash(input.document, applied.next);
+  if (clash) {
+    return {
+      ok: false,
+      rejection: {
+        index: 0,
+        code: "invalid_value",
+        message: ruleClashMessage(applied.next, clash),
+      },
+    };
+  }
 
   const diff = deriveProposalDiff(input.document, applied.next, input.commands);
   if (diff.direct.length === 0 && diff.cascade.length === 0) {

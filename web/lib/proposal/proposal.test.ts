@@ -17,6 +17,7 @@ import {
   type PreparedProposalV1,
 } from "./proposal";
 import { FIXTURE_STAMP, octoberWard, proposalScenario } from "./test-support";
+import { cards, people, requirement, ward } from "@/lib/rules/ward-fixtures.test-support";
 
 const COMMANDS = [
   { type: "set_staffing_requirement_people" as const, ruleId: "req-day", requiredNumPeople: 4 },
@@ -122,6 +123,59 @@ describe("prepareProposal", () => {
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.rejection.code).toBe("no_effect");
+  });
+
+  it("refuses a rule no roster could meet because another rule bans all its people (att)", () => {
+    const document = ward({
+      shifts: [{ id: "M", description: "Morning" }],
+      staff: people("icu1", "gen1"),
+      staffGroups: [
+        { id: "ICU", members: ["icu1"] },
+        { id: "GEN", members: ["gen1"] },
+      ],
+      cardsByKind: cards({
+        requirements: [
+          requirement("icu-m", "M", 1, {
+            qualifiedPeople: ["ICU"],
+            description: "1 ICU nurse every morning",
+          }),
+        ],
+      }),
+    });
+    const result = prepareProposal({
+      proposalId: "p",
+      revision: 1,
+      scenarioId: "s",
+      threadId: null,
+      turnId: null,
+      document,
+      baseDocumentRevision: 1,
+      baseCommitId: null,
+      leaseEpoch: 1,
+      registryStamp: FIXTURE_STAMP,
+      commands: [
+        {
+          type: "add_staffing_requirement",
+          description: "1 GEN nurse every morning",
+          shiftType: "M",
+          qualifiedPeople: ["GEN"],
+          dates: ["ALL"],
+          requiredNumPeople: 1,
+        },
+      ],
+      rationale: null,
+      evidence: [],
+      outcome: "untested",
+      globalGeneration: 0,
+      scenarioGeneration: 0,
+      now: new Date(),
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.code).toBe("invalid_value");
+    expect(result.rejection.message).toMatch(/1 ICU nurse every morning/);
+    expect(result.rejection.message).toMatch(/1 GEN nurse every morning/);
+    expect(result.rejection.message).toMatch(/skill mix/);
   });
 
   it("a revision keeps the identity, moves the revision, and starts with no answers", () => {

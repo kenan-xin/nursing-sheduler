@@ -1,7 +1,49 @@
 import { describe, expect, it } from "vitest";
-import { capOf, findStaffingShortfalls, toDateId } from "./shortfalls";
+import { capOf, findStaffingShortfalls, newRuleClash, toDateId } from "./shortfalls";
 import { SCENARIOS, cards, leave, people, requirement, ward } from "./ward-fixtures.test-support";
 import type { ScenarioUiState } from "@/lib/scenario";
+
+describe("newRuleClash (att: two named groups on one shift)", () => {
+  const icuWard = (extra: ReturnType<typeof requirement>[] = [], patch = {}) =>
+    ward({
+      staff: people("icu1", "icu2", "gen1", "gen2"),
+      staffGroups: [
+        { id: "ICU", members: ["icu1", "icu2"] },
+        { id: "GEN", members: ["gen1", "gen2"] },
+        { id: "SEN", members: ["icu1", "gen1"] },
+      ],
+      cardsByKind: cards({
+        requirements: [requirement("icu-d", "D", 1, { qualifiedPeople: ["ICU"] }), ...extra],
+      }),
+      ...patch,
+    });
+
+  it("flags a second named group on the same shift: each bans the other's people", () => {
+    const after = icuWard([requirement("gen-d", "D", 1, { qualifiedPeople: ["GEN"] })]);
+    expect(newRuleClash(icuWard(), after)?.ruleIds.sort()).toEqual(["gen-d", "icu-d"]);
+  });
+
+  it("flags a skill mix whose group the named rule bans", () => {
+    const mix = requirement("mix-d", "D", 1, { skillMix: [{ people: "GEN", minNumPeople: 1 }] });
+    expect(newRuleClash(icuWard(), icuWard([mix]))).not.toBeNull();
+  });
+
+  it("passes groups that share someone, other shifts, and a clash that was already there", () => {
+    const sen = requirement("sen-d", "D", 1, { qualifiedPeople: ["SEN"] });
+    expect(newRuleClash(icuWard(), icuWard([sen]))).toBeNull();
+    const night = requirement("gen-n", "N", 1, { qualifiedPeople: ["GEN"] });
+    expect(newRuleClash(icuWard(), icuWard([night]))).toBeNull();
+    const clashing = icuWard([requirement("gen-d", "D", 1, { qualifiedPeople: ["GEN"] })]);
+    expect(newRuleClash(clashing, clashing)).toBeNull();
+  });
+
+  it("leaves a gap made by leave to the static check, not to this refusal", () => {
+    const onLeave = icuWard([], {
+      reqData: [leave("icu1", "2026-11-02"), leave("icu2", "2026-11-02")],
+    });
+    expect(newRuleClash(icuWard(), onLeave)).toBeNull();
+  });
+});
 
 describe("findStaffingShortfalls", () => {
   it("finds nothing in an empty scenario", () => {
