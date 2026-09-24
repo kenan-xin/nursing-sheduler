@@ -313,10 +313,14 @@ export function planShortShift(
   const senior = check.hard.find((i) => i.staffing?.qualified);
   if (senior?.staffing) {
     const s = senior.staffing;
+    // ponytail: "in charge" is read from the rule's own words (NIC, in charge); a group
+    // flag on the scenario would be exact if wards name the slot some other way.
+    const inCharge = /\bNIC\b|in[- ]charge/i.test(`${s.label} ${s.qualifiedLabel ?? ""}`);
+    const who = inCharge ? "a nurse who can be in charge" : `a nurse from ${s.qualifiedLabel}`;
     return {
       ok: false,
       reasons: [
-        `Running it short would leave no ${s.qualifiedLabel} nurse on ${s.scope} on ${plainDate(ctx.context.calendar[s.dateIdx].iso)}, and a nurse who can be in charge must stay. ${talk}`,
+        `Running it short would leave no ${s.qualifiedLabel} nurse on ${s.scope} on ${plainDate(ctx.context.calendar[s.dateIdx].iso)}, and ${who} must stay. ${talk}`,
       ],
     };
   }

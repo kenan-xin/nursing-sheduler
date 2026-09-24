@@ -312,6 +312,15 @@ describe("the Singapore four-step ladder", () => {
     expect(plan.ok).toBe(false);
     if (plan.ok) return;
     expect(plan.reasons[0]).toMatch(/no Seniors nurse on N\+ on 8 Oct/);
+    expect(plan.reasons[0]).toMatch(/a nurse who can be in charge must stay/);
+  });
+
+  it("names the required group when the qualified slot is not the one in charge", () => {
+    const borrow = build(borrowContext(), borrowGrid(), borrowDocument());
+    const plan = planShortShift(borrow, 0, [1], "sick_or_emergency");
+    if (plan.ok) throw new Error("should refuse");
+    expect(plan.reasons[0]).toMatch(/a nurse from Nights must stay/);
+    expect(plan.reasons[0]).not.toMatch(/in charge/);
   });
 
   it("never runs a shift with nobody", () => {
