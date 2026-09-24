@@ -234,14 +234,14 @@ function cancelledLeave(before: ScenarioUiState, lost: readonly UiRequestCell[])
 }
 
 /**
- * A borrowed nurse, read structurally from the documents rather than from any
- * model-set flag: `add_person` plus a hard `set_off_request` ("must") for the same
- * person in one change -- the loan shape people-ops builds (`repair-options.ts`'s
- * `borrow_temporary_nurse`; no `mark_person_off` arm exists). An ordinary new hire
- * has no hard days off and is not asked about -- the two are indistinguishable
- * otherwise, so a whole-period add with no off days stays chat-only (`enforcedBy:
- * "chat"` in the repair playbook). The loan itself is read from the AFTER document:
- * the days she is NOT hard-off.
+ * A borrowed nurse, read from validated targets, never from model prose: an
+ * `add_person` with `temporary: true`, or one with a hard `set_off_request` ("must")
+ * in the same change (the loan shape `repair-options.ts` builds, and what a stored
+ * command prepared before the flag existed looks like). The loan is read from the
+ * AFTER document: the days she is NOT hard-off, which is the whole period when she
+ * has none. An ordinary hire (not temporary, no hard days off) is not asked about.
+ * Setting the flag on someone already on the staff is a label, not a new loan, so it
+ * asks nothing.
  */
 function borrowedStaff(
   after: ScenarioUiState,
@@ -256,7 +256,8 @@ function borrowedStaff(
   );
   const items = generateDateItems({ start: after.rangeStart, end: after.rangeEnd });
   return commands.flatMap((command) => {
-    if (command.type !== "add_person" || !loaned.has(command.name)) return [];
+    if (command.type !== "add_person") return [];
+    if (command.temporary !== true && !loaned.has(command.name)) return [];
     const off = new Set(
       after.reqData
         .filter(
@@ -277,7 +278,7 @@ function borrowedStaff(
         person: command.name,
         date: first,
         toDate: last,
-        question: `Has the lending ward or agency confirmed ${command.name} for ${first} to ${last}, qualified as ${skills}?`,
+        question: `Has the lending ward or agency confirmed ${command.name} for ${calendarSpan(first, last)}, qualified as ${skills}?`,
         detail:
           "Applying this adds a nurse the ward does not employ. The app cannot check the loan or her qualifications with anyone.",
       },

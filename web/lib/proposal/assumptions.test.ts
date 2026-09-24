@@ -281,12 +281,43 @@ describe("real-world agreements beyond leave", () => {
     });
     expect(assumption.question).toMatch(/lending ward or agency/);
     expect(assumption.question).toMatch(/RN/);
+    expect(assumption.question).toContain("3 Nov");
   });
 
   it("does not ask about an ordinary new staff member", () => {
     const before = SCENARIOS.onlyRnOnLeave();
     const commands: Parameters<typeof applyAssistantCommands>[1] = [
       { type: "add_person", name: "Dana", groups: [], temporary: false },
+    ];
+    const result = applyAssistantCommands(before, commands);
+    if (!result.ok) throw new Error(result.rejection.message);
+    expect(deriveAssumptions(before, result.next, commands)).toEqual([]);
+  });
+
+  it("asks about a temporary nurse borrowed for the whole period", () => {
+    const before = SCENARIOS.onlyRnOnLeave();
+    const commands: Parameters<typeof applyAssistantCommands>[1] = [
+      { type: "add_person", name: "Agency RN", groups: ["RN"], temporary: true },
+    ];
+    const result = applyAssistantCommands(before, commands);
+    if (!result.ok) throw new Error(result.rejection.message);
+    expect(deriveAssumptions(before, result.next, commands)).toEqual([
+      expect.objectContaining({
+        type: "borrowed_staff_arranged",
+        person: "Agency RN",
+        date: before.rangeStart,
+        toDate: before.rangeEnd,
+        question: expect.stringMatching(
+          /lending ward or agency confirmed Agency RN for .*, qualified as RN\?$/,
+        ),
+      }),
+    ]);
+  });
+
+  it("does not ask when a temporary flag is set on someone already on the staff", () => {
+    const before = peopleScenario();
+    const commands: Parameters<typeof applyAssistantCommands>[1] = [
+      { type: "edit_person", personId: "ana", name: "ana", groups: ["RN"], temporary: true },
     ];
     const result = applyAssistantCommands(before, commands);
     if (!result.ok) throw new Error(result.rejection.message);
