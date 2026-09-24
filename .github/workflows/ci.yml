@@ -31,11 +31,19 @@ jobs:
         with:
           node-version: 24.14.0
       - uses: actions/setup-python@v5
+        id: python
         with:
           python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: core/requirements.txt
 
       - name: "Confirm pinned Python (project toolchain: Python 3.12.13)"
         run: python3 --version
+
+      # The differential oracle and dev-launcher.test.ts (real uvicorn backend)
+      # import the core package's dependencies.
+      - name: Install backend dependencies
+        run: python3 -m pip install -r ../core/requirements.txt
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -51,8 +59,12 @@ jobs:
 
       # Includes verify-deploy.test.ts, which runs docker/validate_origin.py via the
       # pinned python3 — the script's 3.10 PEP 604 guard AND the project's 3.12
-      # requirement both pass because setup-python provides 3.12.13.
+      # requirement both pass because setup-python provides 3.12.13. No mise here,
+      # so web/lib/python.ts and scripts/dev.sh get that interpreter through their
+      # supported PYTHON override.
       - name: Unit tests
+        env:
+          PYTHON: ${{ steps.python.outputs.python-path }}
         run: pnpm test
 
       - name: Build
