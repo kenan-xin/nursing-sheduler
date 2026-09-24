@@ -7,8 +7,8 @@
 // (`lib/roster/change-request.ts`). That screen re-checks every cell and applies them
 // as one hand edit. A card from a stopped turn renders as stopped, with no Apply.
 //
-// Same decision rows as the Preview (`ChoiceOption`, `OtherAnswer`), so the two read
-// as one family. A change with a linked schedule proposal (a leave move, MC leave, a
+// Same dock card and decision rows as the Preview (`DockCard`), so the two read as
+// one family. A change with a linked schedule proposal (a leave move, MC leave, a
 // borrowed nurse) applies both halves together or not at all (`linked-apply.ts`), and
 // every way of setting the card aside cancels that proposal, so none stays applicable.
 
@@ -22,7 +22,7 @@ import {
 } from "@/lib/ai/assistant/store";
 import { CAPABILITY_UNAVAILABLE } from "@/lib/capability/resolve";
 import { assistantProposalCommands } from "@/lib/store";
-import { ChoiceOption, OtherAnswer } from "./choice-card";
+import { DockCard } from "./dock-card";
 import { applyLinkedChange, linkedApplyDeps } from "./linked-apply";
 import { useCapabilityNavigation } from "./use-capability-navigation";
 
@@ -88,12 +88,7 @@ export function RosterChangeCard({ onSend, disabled }: RosterChangeCardProps) {
   const hasNotice = useAssistantStore((state) => state.rosterChangeNotice !== null);
   if (active === null) {
     return hasNotice ? (
-      <Surface
-        level="surface"
-        geometry="card"
-        className="m-3 shrink-0 p-4"
-        aria-label="Roster change"
-      >
+      <Surface level="surface" geometry="card" className="shrink-0 p-3" aria-label="Roster change">
         <RosterChangeNotice />
       </Surface>
     ) : null;
@@ -176,100 +171,147 @@ function RosterChangeBody({
   };
 
   return (
-    <Surface
-      level="surface"
-      geometry="card"
-      // Scrolls inside the card like the Preview, so a long change never pushes the
-      // input off the panel.
-      className="m-3 flex max-h-96 shrink-0 flex-col gap-3 overflow-y-auto p-4"
+    <DockCard
       data-testid="assistant-roster-change"
       data-status={stopped ? "stopped" : "live"}
-      aria-label="Roster change"
+      eyebrow={<p className={SECTION_HEAD}>{view.stepLabel}</p>}
+      title={view.heading}
+      rowsLabel="Your decision"
+      // The primary action only; until it is usable the card itself holds focus.
+      focusRow={0}
+      options={
+        stopped
+          ? []
+          : [
+              {
+                label: applying ? "Opening…" : "Apply to roster",
+                detail:
+                  request === null
+                    ? "Makes this change to the schedule. You can undo it from the change list."
+                    : linked === null
+                      ? "Opens the Roster screen and makes this change. You can undo it there."
+                      : "Opens the Roster screen and makes this change. Undo the roster part on the Roster screen and the schedule part from the change list.",
+                primary: true,
+                testId: "roster-change-apply",
+                disabled:
+                  disabled ||
+                  applying ||
+                  (request === null && linked === null) ||
+                  (view.agreement !== null && !agreed),
+                onPick: () => void onApply(),
+              },
+              {
+                label: "Change something",
+                detail: "Set it aside and tell me what to adjust.",
+                testId: "roster-change-revise",
+                disabled: applying,
+                onPick: setAside,
+              },
+              {
+                label: "Cancel",
+                detail: "Drop this change. The roster stays as it is.",
+                testId: "roster-change-cancel",
+                disabled: applying,
+                onPick: setAside,
+              },
+            ]
+      }
+      other={
+        stopped
+          ? null
+          : {
+              label: "Tell me what to change",
+              sendLabel: "Send what to change",
+              disabled: disabled || applying,
+              onSend: (text) => {
+                setAside();
+                onSend(text);
+              },
+            }
+      }
     >
-      <header className="flex flex-col gap-1">
-        <p className={SECTION_HEAD}>{view.stepLabel}</p>
-        <h3 className="font-heading text-cardhead font-semibold tracking-[-0.015em]">
-          {view.heading}
-        </h3>
-        <p className="text-meta text-ink2">{view.title}</p>
-      </header>
+      <p className="px-1 text-meta text-ink2">{view.title}</p>
       {stopped ? (
-        <p className="text-meta text-ink2">
+        <p className="px-1 text-meta text-ink2">
           This offer has ended. Ask again if you still want the change.
         </p>
       ) : (
         <>
-          {view.summary ? (
-            <p className="text-meta text-ink2" data-testid="roster-change-summary">
-              <span className="font-semibold text-ink3">Assistant&apos;s reasoning: </span>
-              {view.summary}
-            </p>
-          ) : null}
-          {view.rows.length > 0 ? (
-            <section className="flex flex-col gap-1.5">
-              <h4 className={SECTION_HEAD}>What changes</h4>
-              <Surface level="well" geometry="control" className="overflow-hidden">
-                <table className="w-full text-meta tabular-nums">
-                  <thead>
-                    <tr className="border-b border-line2 text-left text-ink3">
-                      <th className="px-3 py-1.5 font-medium">Nurse</th>
-                      <th className="px-3 py-1.5 font-medium">Date</th>
-                      <th className="px-3 py-1.5 font-medium">Now</th>
-                      <th className="px-3 py-1.5 font-medium">After</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {view.rows.map((row) => (
-                      <tr
-                        key={`${row.person}-${row.date}`}
-                        className="border-b border-line2 text-ink2 last:border-b-0"
-                      >
-                        <td className="px-3 py-2 text-ink">{row.person}</td>
-                        <td className="px-3 py-2">{row.date}</td>
-                        <td className="px-3 py-2">{row.now}</td>
-                        <td className="px-3 py-2 font-semibold text-ink">{row.after}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </Surface>
-              <p className="text-meta text-ink3">
-                Checked against this roster&apos;s rules: staffing, rest between shifts, requests
-                and shift counts.
+          {/* Scrolls inside the card, so a long change never pushes the rows or the
+              composer off the panel. */}
+          <div className="flex max-h-60 min-h-0 flex-col gap-3 overflow-y-auto px-1">
+            {view.summary ? (
+              <p className="text-meta text-ink2" data-testid="roster-change-summary">
+                <span className="font-semibold text-ink3">Assistant&apos;s reasoning: </span>
+                {view.summary}
               </p>
-            </section>
-          ) : null}
-          {view.leaveRows.length > 0 ? (
-            <ul
-              className="flex flex-col gap-1 text-meta text-ink2"
-              data-testid="roster-change-leave"
-            >
-              {view.leaveRows.map((line) => (
-                <li key={line}>{line}</li>
-              ))}
-            </ul>
-          ) : null}
-          {view.notes.map((note) => (
-            <p key={note} className="text-meta text-ink2">
-              {note}
-            </p>
-          ))}
-          <NoteList title="Worth knowing" items={view.worthKnowing} />
-          {view.notChecked.length > 0 ? (
-            <section className="flex flex-col gap-1.5" data-testid="roster-change-not-checked">
-              <h4 className={SECTION_HEAD}>Not checked</h4>
-              <ul className="list-disc pl-5 text-meta text-warnink">
-                {view.notChecked.map((label) => (
-                  <li key={label}>{label}</li>
+            ) : null}
+            {view.rows.length > 0 ? (
+              <section className="flex flex-col gap-1.5">
+                <h4 className={SECTION_HEAD}>What changes</h4>
+                <Surface level="well" geometry="control" className="overflow-hidden">
+                  <table className="w-full text-meta tabular-nums">
+                    <thead>
+                      <tr className="border-b border-line2 text-left text-ink3">
+                        <th className="px-3 py-1.5 font-medium">Nurse</th>
+                        <th className="px-3 py-1.5 font-medium">Date</th>
+                        <th className="px-3 py-1.5 font-medium">Now</th>
+                        <th className="px-3 py-1.5 font-medium">After</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {view.rows.map((row) => (
+                        <tr
+                          key={`${row.person}-${row.date}`}
+                          className="border-b border-line2 text-ink2 last:border-b-0"
+                        >
+                          <td className="px-3 py-2 text-ink">{row.person}</td>
+                          <td className="px-3 py-2">{row.date}</td>
+                          <td className="px-3 py-2">{row.now}</td>
+                          <td className="px-3 py-2 font-semibold text-ink">{row.after}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </Surface>
+                <p className="text-meta text-ink3">
+                  Checked against this roster&apos;s rules: staffing, rest between shifts, requests
+                  and shift counts.
+                </p>
+              </section>
+            ) : null}
+            {view.leaveRows.length > 0 ? (
+              <ul
+                className="flex flex-col gap-1 text-meta text-ink2"
+                data-testid="roster-change-leave"
+              >
+                {view.leaveRows.map((line) => (
+                  <li key={line}>{line}</li>
                 ))}
               </ul>
-              <p className="text-meta text-ink2">
-                Look at these on the Roster screen before you publish.
+            ) : null}
+            {view.notes.map((note) => (
+              <p key={note} className="text-meta text-ink2">
+                {note}
               </p>
-            </section>
-          ) : null}
+            ))}
+            <NoteList title="Worth knowing" items={view.worthKnowing} />
+            {view.notChecked.length > 0 ? (
+              <section className="flex flex-col gap-1.5" data-testid="roster-change-not-checked">
+                <h4 className={SECTION_HEAD}>Not checked</h4>
+                <ul className="list-disc pl-5 text-meta text-warnink">
+                  {view.notChecked.map((label) => (
+                    <li key={label}>{label}</li>
+                  ))}
+                </ul>
+                <p className="text-meta text-ink2">
+                  Look at these on the Roster screen before you publish.
+                </p>
+              </section>
+            ) : null}
+          </div>
           {view.agreement !== null ? (
-            <label className="flex items-start gap-2 text-meta">
+            <label className="flex items-start gap-2 px-1 text-meta">
               <input
                 type="checkbox"
                 checked={agreed}
@@ -279,59 +321,9 @@ function RosterChangeBody({
               <span>{view.agreement}</span>
             </label>
           ) : null}
-          <footer
-            className="flex flex-col gap-2 border-t border-line2 pt-3"
-            role="group"
-            aria-label="Your decision"
-          >
-            <ChoiceOption
-              primary
-              data-testid="roster-change-apply"
-              label={applying ? "Opening…" : "Apply to roster"}
-              detail={
-                request === null
-                  ? "Makes this change to the schedule. You can undo it from the change list."
-                  : linked === null
-                    ? "Opens the Roster screen and makes this change. You can undo it there."
-                    : "Opens the Roster screen and makes this change. Undo the roster part on the Roster screen and the schedule part from the change list."
-              }
-              disabled={
-                disabled ||
-                applying ||
-                (request === null && linked === null) ||
-                (view.agreement !== null && !agreed)
-              }
-              onClick={() => void onApply()}
-            />
-            <ChoiceOption
-              data-testid="roster-change-revise"
-              label="Change something"
-              detail="Set it aside and tell me what to adjust."
-              disabled={applying}
-              onClick={setAside}
-            />
-            <ChoiceOption
-              data-testid="roster-change-cancel"
-              label="Cancel"
-              detail="Drop this change. The roster stays as it is."
-              disabled={applying}
-              onClick={setAside}
-            />
-            <div className="mt-1 flex flex-col gap-2 border-t border-line2 pt-3">
-              <OtherAnswer
-                label="Tell me what to change"
-                sendLabel="Send what to change"
-                disabled={disabled || applying}
-                onSend={(text) => {
-                  setAside();
-                  onSend(text);
-                }}
-              />
-            </div>
-          </footer>
         </>
       )}
       <RosterChangeNotice />
-    </Surface>
+    </DockCard>
   );
 }

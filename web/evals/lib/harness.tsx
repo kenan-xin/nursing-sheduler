@@ -6,6 +6,7 @@ import type { AbstractAgent } from "@ag-ui/client";
 import type { LanguageModel } from "ai";
 import { CopilotKitProvider } from "@copilotkit/react-core/v2";
 import { ApplyNavigationNotice } from "@/components/ai/apply-navigation-notice";
+import { describeAnswers } from "@/components/ai/choice-card";
 import { useAssistantFollowUps } from "@/components/ai/use-assistant-follow-ups";
 import {
   useAssistantProposals,
@@ -365,13 +366,15 @@ export async function runTrial(input: RunTrialInput): Promise<TrialRecord> {
     while (userTurns < maxUserTurns && recorder.hops() < maxHops && !ledger.over) {
       const st = useAssistantStore.getState();
       if (st.activeChoices && policy.onChoices) {
-        const opts = st.activeChoices.options.map((o) => o.label);
-        const pick =
-          "pick" in policy.onChoices
-            ? opts[policy.onChoices.pick - 1]
-            : opts.find((o) => o.includes((policy.onChoices as { label: string }).label));
-        if (pick) {
-          await say(pick);
+        const rule = policy.onChoices;
+        // The same rule answers every question on a paged card, as one message.
+        const questions = [st.activeChoices, ...(st.activeChoices.moreQuestions ?? [])];
+        const picks = questions.map((question) => {
+          const opts = question.options.map((o) => o.label);
+          return "pick" in rule ? opts[rule.pick - 1] : opts.find((o) => o.includes(rule.label));
+        });
+        if (picks[0]) {
+          await say(questions.length > 1 ? describeAnswers(questions, picks) : picks[0]);
           continue;
         }
       }

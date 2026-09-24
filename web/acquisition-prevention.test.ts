@@ -277,7 +277,11 @@ beforeAll(() => {
   // place. So the reduction to one heavy spawn is prudence, not a proven fix for those 26.
   // What IS proven: vitest runs test files in parallel, this suite is the only one that spawns
   // whole-tree lint processes, and one is enough to make its claim.
-  oxlint = run(["exec", "oxlint", FIXTURE_DIR_NAME]);
+  // The format is PINNED: with no --format Oxlint picks one from the environment (`agent` under
+  // AI_AGENT, `github` under GITHUB_ACTIONS -- which drops the rule's help text -- and a
+  // multi-line `default` otherwise). `agent` is the only one that puts file, rule and help on
+  // ONE line, which is what oxlintFiredAt and the FOR-THE-INTENDED-REASON checks read.
+  oxlint = run(["exec", "oxlint", "--format=agent", FIXTURE_DIR_NAME]);
   astGrep = run(["exec", "ast-grep", "scan", FIXTURE_DIR_NAME]);
   const json = run(["exec", "ast-grep", "scan", "--json=compact", FIXTURE_DIR_NAME], true);
   // `--json=compact` writes the whole findings array on ONE line, and pnpm/ast-grep put their

@@ -2,7 +2,8 @@
 
 // T10 — the host-rendered diagnostic search card.
 //
-// A SIBLING OF THE TRANSCRIPT, not an entry in it — same reason as the Preview card:
+// A HOST CARD in the dock above the composer, not an entry in the transcript — same
+// reason as the Preview card:
 // what was tested, what it proves, and the control that cancels it are HOST state,
 // and a message the model wrote could claim any of them. The card reads the search
 // snapshot the orchestrator publishes on every durable write, so it follows a running
@@ -21,8 +22,6 @@
 
 import { useCallback, useState } from "react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Surface } from "@/components/ui/surface";
 import { useAssistantStore } from "@/lib/ai/assistant/store";
 import {
   CAUSE_UNAVAILABLE,
@@ -33,6 +32,7 @@ import {
 } from "@/lib/ai/diagnostic";
 import { cancelOwnedDiagnosticsNow } from "@/lib/ai/diagnostic/diagnostic-canceller";
 import { postCancelOptimizeJob } from "@/lib/query/optimize";
+import { DockCard } from "./dock-card";
 
 /**
  * The diagnostic card. Renders nothing at all when no search has been published.
@@ -68,21 +68,14 @@ export function DiagnosticSearchCard() {
   const running = isSearchActive(search) && !superseded;
 
   return (
-    <Surface
-      level="surface"
-      geometry="card"
-      className="m-3 flex max-h-96 shrink-0 flex-col gap-3 overflow-y-auto p-4"
+    <DockCard
       data-testid="assistant-diagnostic"
       data-search-id={search.searchId}
       data-status={superseded ? "stopped" : search.status}
       data-stop-reason={search.stopReason ?? ""}
-      aria-label="Feasibility testing"
-    >
-      <header className="flex flex-wrap items-center gap-2">
-        <h3 className="font-heading text-cardhead font-semibold tracking-[-0.015em]">
-          Testing changes on copies
-        </h3>
-        {running ? (
+      title="Testing changes on copies"
+      aside={
+        running ? (
           <Badge variant="neutral" data-testid="diagnostic-running">
             Running
           </Badge>
@@ -90,65 +83,71 @@ export function DiagnosticSearchCard() {
           <Badge variant="outline" data-testid="diagnostic-settled">
             {superseded ? "Stopped" : "Finished"}
           </Badge>
-        )}
-      </header>
-
-      {/* Never a cause. The solver ships no deterministic infeasibility diagnosis,
-          so this baseline is stated up front rather than left to be inferred. */}
-      <p className="text-meta text-ink2" data-testid="diagnostic-cause-note">
-        {CAUSE_UNAVAILABLE}
-      </p>
-
-      <ol className="flex flex-col gap-2" data-testid="diagnostic-candidates">
-        {search.candidates.map((candidate) => (
-          <li
-            key={candidate.candidateId}
-            className="flex flex-col gap-1"
-            data-testid="diagnostic-candidate"
-            data-candidate-outcome={candidate.outcome?.outcome ?? "pending"}
-          >
-            <Badge variant="outline" casing="normal">
-              {candidateEvidenceLabel(candidate.outcome)}
-            </Badge>
-            {candidate.rationale ? (
-              <p className="text-meta text-ink3">
-                <span className="font-semibold">Suggested because: </span>
-                {candidate.rationale}
-              </p>
-            ) : null}
-            <p className="text-meta text-ink2">
-              {explainCandidateOutcome(candidate, candidate.index)}
-            </p>
-          </li>
-        ))}
-      </ol>
-
-      {!running ? (
-        <p className="text-meta text-ink2" data-testid="diagnostic-summary">
-          {superseded
-            ? "This testing was stopped, so anything still running was asked to stop too."
-            : explainSearchSummary(search)}
+        )
+      }
+      // A status card, not a question: it must not take focus, or Enter would cancel.
+      autoFocus={false}
+      options={
+        running
+          ? [
+              {
+                label: "Cancel testing",
+                detail: "Frees the solver sooner.",
+                testId: "diagnostic-cancel",
+                disabled: cancelling,
+                onPick: () => void onCancelDiagnostic(),
+              },
+            ]
+          : []
+      }
+    >
+      <div className="flex max-h-60 min-h-0 flex-col gap-3 overflow-y-auto px-1">
+        {/* Never a cause. The solver ships no deterministic infeasibility diagnosis,
+            so this baseline is stated up front rather than left to be inferred. */}
+        <p className="text-meta text-ink2" data-testid="diagnostic-cause-note">
+          {CAUSE_UNAVAILABLE}
         </p>
-      ) : null}
 
-      {running ? (
-        <div className="flex flex-col gap-2" data-testid="diagnostic-capacity">
-          <p className="text-meta text-ink2">
+        <ol className="flex flex-col gap-2" data-testid="diagnostic-candidates">
+          {search.candidates.map((candidate) => (
+            <li
+              key={candidate.candidateId}
+              className="flex flex-col gap-1"
+              data-testid="diagnostic-candidate"
+              data-candidate-outcome={candidate.outcome?.outcome ?? "pending"}
+            >
+              <Badge variant="outline" casing="normal">
+                {candidateEvidenceLabel(candidate.outcome)}
+              </Badge>
+              {candidate.rationale ? (
+                <p className="text-meta text-ink3">
+                  <span className="font-semibold">Suggested because: </span>
+                  {candidate.rationale}
+                </p>
+              ) : null}
+              <p className="text-meta text-ink2">
+                {explainCandidateOutcome(candidate, candidate.index)}
+              </p>
+            </li>
+          ))}
+        </ol>
+
+        {!running ? (
+          <p className="text-meta text-ink2" data-testid="diagnostic-summary">
+            {superseded
+              ? "This testing was stopped, so anything still running was asked to stop too."
+              : explainSearchSummary(search)}
+          </p>
+        ) : null}
+
+        {running ? (
+          <p className="text-meta text-ink2" data-testid="diagnostic-capacity">
             Testing uses spare solver capacity. An official Optimise run always keeps a reserved
             slot, so you can start one now — but a test already running is never interrupted
             automatically, so it may wait until this test finishes.
           </p>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={cancelling}
-            onClick={() => void onCancelDiagnostic()}
-            data-testid="diagnostic-cancel"
-          >
-            Cancel testing
-          </Button>
-        </div>
-      ) : null}
-    </Surface>
+        ) : null}
+      </div>
+    </DockCard>
   );
 }

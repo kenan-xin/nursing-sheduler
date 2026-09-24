@@ -955,15 +955,23 @@ html [data-copilotkit] [data-testid="copilot-chat-textarea"]::placeholder {
       every time the panel gains a surface, and would be wrong by default.
       `copilot-chat` is `CopilotChatView`'s root and `copilot-message-list` is
       `CopilotChatMessageView`'s; the app passes neither of them children, so
-      nothing app-owned can be inside either. Both are needed: the live thread
-      renders the chat view, and a read-only thread renders the message view on
-      its own with no chat root above it. Every app-owned surface -- the panel
-      header, welcome, refusal, lifecycle, diagnostic, Preview and receipts --
-      is a SIBLING of these, so it keeps its own `Button` contract untouched. */
+      nothing app-owned can be inside either -- with ONE named exception. Both are
+      needed: the live thread renders the chat view, and a read-only thread
+      renders the message view on its own with no chat root above it. Every
+      app-owned surface -- the panel header, welcome, refusal, lifecycle and
+      receipts -- is a SIBLING of these, so it keeps its own `Button` contract.
+
+      The exception is the card dock (`assistant-card-dock.tsx`): the question,
+      Preview, roster, run and diagnostic cards dock above the composer through
+      the view's own `input` slot, so they render INSIDE `copilot-chat`. That one
+      subtree is marked `data-assistant-dock` and excluded by `:not(:where(...))`,
+      which adds no specificity, so the send rule below still wins as before. */
 html
   [data-copilotkit]
   :is([data-testid="copilot-chat"], [data-testid="copilot-message-list"])
-  button:is([data-slot="button"], [data-slot="tooltip-trigger"]) {
+  button:is([data-slot="button"], [data-slot="tooltip-trigger"]):not(
+    :where([data-assistant-dock] *)
+  ) {
   border: 1px solid var(--line);
   background-color: var(--surface);
   color: var(--ink);
@@ -973,7 +981,9 @@ html
 html
   [data-copilotkit]
   :is([data-testid="copilot-chat"], [data-testid="copilot-message-list"])
-  button:is([data-slot="button"], [data-slot="tooltip-trigger"]):hover:not(:disabled) {
+  button:is([data-slot="button"], [data-slot="tooltip-trigger"]):not(
+    :where([data-assistant-dock] *)
+  ):hover:not(:disabled) {
   background-color: var(--panel-alt);
   color: var(--ink);
   box-shadow: var(--sh-2);
@@ -981,13 +991,17 @@ html
 html
   [data-copilotkit]
   :is([data-testid="copilot-chat"], [data-testid="copilot-message-list"])
-  button:is([data-slot="button"], [data-slot="tooltip-trigger"]):active:not(:disabled) {
+  button:is([data-slot="button"], [data-slot="tooltip-trigger"]):not(
+    :where([data-assistant-dock] *)
+  ):active:not(:disabled) {
   box-shadow: none;
 }
 html
   [data-copilotkit]
   :is([data-testid="copilot-chat"], [data-testid="copilot-message-list"])
-  button:is([data-slot="button"], [data-slot="tooltip-trigger"]):disabled {
+  button:is([data-slot="button"], [data-slot="tooltip-trigger"]):not(
+    :where([data-assistant-dock] *)
+  ):disabled {
   opacity: 0.5;
   box-shadow: none;
 }
@@ -1015,7 +1029,9 @@ html
   html
     [data-copilotkit]
     :is([data-testid="copilot-chat"], [data-testid="copilot-message-list"])
-    button:is([data-slot="button"], [data-slot="tooltip-trigger"]) {
+    button:is([data-slot="button"], [data-slot="tooltip-trigger"]):not(
+      :where([data-assistant-dock] *)
+    ) {
     min-width: var(--touch-min);
     min-height: var(--touch-min);
   }
