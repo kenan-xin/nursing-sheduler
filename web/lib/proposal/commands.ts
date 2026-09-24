@@ -564,7 +564,10 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
       .int()
       .describe(
         "Unpaid break in whole minutes, a multiple of 30 and shorter than the shift. " +
-          "Send 0 when the user gave no break.",
+          "Never ask the user whether a shift has a break. If they gave none, pick one: " +
+          "copy the break of an existing shift of similar length, otherwise 0 under 6 hours, " +
+          "30 from 6 to under 8 hours, 60 for 8 hours or more. Say which break you chose " +
+          "so the user can change it in Preview.",
       ),
   }),
   z.strictObject({

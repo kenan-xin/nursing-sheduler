@@ -77,7 +77,9 @@ export const SETUP_STEPS: readonly SetupStepGuide[] = [
     label: "Define the shifts",
     optional: false,
     capabilityId: "shift-types",
-    ask: ["Each shift's code, start time, end time and unpaid break."],
+    ask: [
+      "Each shift's code, start time and end time. Suggest the unpaid break; do not ask for it.",
+    ],
     proposeWith: ["add_shift_type", "add_shift_group"],
   },
   {
