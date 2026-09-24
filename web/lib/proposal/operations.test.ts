@@ -348,6 +348,27 @@ describe("add_shift_type / add_shift_group", () => {
     }
   });
 
+  it("refuses a time not written HH:MM, naming the shift and an example", () => {
+    const result = applyAssistantCommand(proposalScenario(), shift("am1", "0800", "15:00"));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.code).toBe("invalid_value");
+    expect(result.rejection.message).toContain('Shift "am1"');
+    expect(result.rejection.message).toContain("09:00");
+  });
+
+  it("refuses a blank time rather than creating a shift with no hours", () => {
+    for (const [start, end] of [
+      ["", "15:00"],
+      ["08:00", "  "],
+    ]) {
+      const result = applyAssistantCommand(proposalScenario(), shift("am1", start, end));
+      expect(result.ok).toBe(false);
+      if (result.ok) continue;
+      expect(result.rejection.message).toContain("needs both a start and an end time");
+    }
+  });
+
   it("refuses an off-grid time", () => {
     const result = applyAssistantCommand(proposalScenario(), shift("am1", "08:15", "15:00"));
     expect(result.ok).toBe(false);

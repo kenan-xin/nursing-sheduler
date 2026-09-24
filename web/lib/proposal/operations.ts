@@ -942,6 +942,15 @@ function applyAddShiftType(
       `Shift "${idCheck.id}": a shift code must contain a letter.`,
     );
   }
+  // With the wire regex gone, a blank clock would read as "no working time" to the
+  // validator (it treats blanks as absent). This arm always states hours, so refuse.
+  if (!command.startTime.trim() || !command.endTime.trim()) {
+    return reject(
+      index,
+      "invalid_value",
+      `Shift "${idCheck.id}": needs both a start and an end time, written HH:MM, e.g. 08:00.`,
+    );
+  }
   // The same derived value the working-time sub-form produces (`deriveValue` in
   // `working-time-fields.tsx`): rest 0 is stored as absent, paid = span - rest. An
   // invalid rest leaves duration unset, and the validator reports the rest itself.

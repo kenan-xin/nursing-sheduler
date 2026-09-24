@@ -177,17 +177,6 @@ describe("parseAssistantCommands", () => {
 
   it("refuses shift-setup payloads the model must fix itself", () => {
     const refused: unknown[] = [
-      // Time not converted to HH:MM.
-      [
-        {
-          type: "add_shift_type",
-          code: "am1",
-          name: "",
-          startTime: "0800",
-          endTime: "15:00",
-          restMinutes: 0,
-        },
-      ],
       // A required field omitted (name).
       [
         {
@@ -237,6 +226,23 @@ describe("parseAssistantCommands", () => {
     for (const payload of refused) {
       expect(parseAssistantCommands(payload).ok, JSON.stringify(payload)).toBe(false);
     }
+  });
+
+  it("leaves the clock format to the host, so its refusal can name the shift", () => {
+    // CHANGED DELIBERATELY (2026-09-24, plan assistant-self-correction): "0800" used to be
+    // a schema refusal the model was told not to retry. It now reaches `applyAddShiftType`,
+    // whose refusal names the shift and gives an example (operations.test.ts).
+    const result = parseAssistantCommands([
+      {
+        type: "add_shift_type",
+        code: "am1",
+        name: "",
+        startTime: "0800",
+        endTime: "15:00",
+        restMinutes: 0,
+      },
+    ]);
+    expect(result.ok).toBe(true);
   });
 
   it("accepts the leave and request arms with calendar dates", () => {
