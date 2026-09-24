@@ -14,6 +14,7 @@ import type { RosterContext, RosterDayGrid, RosterDayState } from "@/lib/roster/
 import {
   checkRosterChange,
   dayCode,
+  type LeaveMove,
   plainDate,
   type RuleIssue,
   type RuleModel,
@@ -205,6 +206,7 @@ export function borrowNeeds(ctx: SwapContext, personIdx: number, dateIdxs: reado
 export type CoverReason = "swap" | "sick_or_emergency";
 
 const LEAVE: RosterDayState = { kind: "leave" };
+const OFF: RosterDayState = { kind: "off" };
 
 /**
  * Sick or emergency leave: the person goes on LEAVE on the dates and takes nothing back.
@@ -295,4 +297,148 @@ export function findCoverLadder(
   const trades = findTrades(ctx, personIdx, dateIdxs, reason);
   if (trades.length > 0) return { ...empty, step: 2, trades };
   return { ...empty, step: 3, borrow: borrowNeeds(ctx, personIdx, dateIdxs) };
+}
+
+export type TradeVariant = "person-covers" | "partner-off";
+
+export interface TradePlan {
+  readonly ok: true;
+  readonly kind: "trade";
+  readonly variant: TradeVariant;
+  readonly dateIdxs: readonly number[];
+  readonly laterDateIdxs: readonly number[];
+  readonly cells: readonly RosterCellChange[];
+  readonly leaveMoves: readonly LeaveMove[];
+  readonly soft: readonly RuleIssue[];
+  readonly unchecked: readonly string[];
+}
+
+export interface TradeCandidate {
+  readonly partnerIdx: number;
+  readonly plan: TradePlan;
+}
+
+/**
+ * Step 2: a nurse who is OFF or on LEAVE on the given dates works them, and her off or
+ * leave moves to later dates she now works (paired in order). `person-covers`: the
+ * person works those later shifts. `partner-off`: nobody does, and staffing must still
+ * hold. Every affected date, now and later, goes through the same check. Succession
+ * windows that touch a changed date are in scope, which covers the day after each
+ * moved shift.
+ */
+export function planTrade(
+  ctx: SwapContext,
+  personIdx: number,
+  partnerIdx: number,
+  dateIdxs: readonly number[],
+  laterDateIdxs: readonly number[],
+  variant: TradeVariant,
+  reason: CoverReason = "swap",
+): TradePlan | { readonly ok: false; readonly reasons: readonly string[] } {
+  const person = personName(ctx.context, personIdx);
+  const partner = personName(ctx.context, partnerIdx);
+  const fail = (reason: string) => ({ ok: false as const, reasons: [reason] });
+  const date = (d: number) => plainDate(ctx.context.calendar[d].iso);
+  if (partnerIdx === personIdx) return fail(`${partner} cannot trade with themselves.`);
+  if (reason === "sick_or_emergency" && variant === "person-covers") {
+    return fail(`${person} is on sick leave, so she cannot work later shifts in return.`);
+  }
+  if (laterDateIdxs.length !== dateIdxs.length)
+    return fail("A trade needs one later date for each date given up.");
+  const giving = givingProblem(ctx, personIdx, dateIdxs);
+  if (giving !== null) return fail(giving);
+  const last = Math.max(...dateIdxs);
+
+  const cells: RosterCellChange[] = [];
+  const leaveMoves: LeaveMove[] = [];
+  for (let i = 0; i < dateIdxs.length; i++) {
+    const g = dateIdxs[i];
+    const l = laterDateIdxs[i];
+    if (l <= last) return fail(`The later dates must come after ${date(last)}.`);
+    const partnerOnG = ctx.days[partnerIdx][g];
+    const partnerOnL = ctx.days[partnerIdx][l];
+    const personOnG = ctx.days[personIdx][g];
+    if (partnerOnG.kind === "shift") return fail(`${partner} is working on ${date(g)}.`);
+    if (partnerOnL.kind !== "shift")
+      return fail(`${partner} is not working on ${date(l)}, so there is nothing to trade back.`);
+    cells.push(
+      { personIdx, dateIdx: g, before: personOnG, after: reason === "swap" ? OFF : LEAVE },
+      { personIdx: partnerIdx, dateIdx: g, before: partnerOnG, after: personOnG },
+      { personIdx: partnerIdx, dateIdx: l, before: partnerOnL, after: partnerOnG },
+    );
+    if (variant === "person-covers") {
+      const personOnL = ctx.days[personIdx][l];
+      if (personOnL.kind !== "off")
+        return fail(`${person} is working on ${date(l)}, so she cannot cover it.`);
+      cells.push({ personIdx, dateIdx: l, before: personOnL, after: partnerOnL });
+    }
+    if (partnerOnG.kind === "leave") leaveMoves.push({ personIdx: partnerIdx, from: g, to: l });
+  }
+
+  const after: RosterDayState[][] = ctx.days.map((row) => [...row]);
+  for (const cell of cells) after[cell.personIdx][cell.dateIdx] = cell.after;
+  const check = checkRosterChange(
+    ctx.model,
+    ctx.context,
+    ctx.days,
+    after,
+    { people: [personIdx, partnerIdx], dates: [...dateIdxs, ...laterDateIdxs] },
+    { leaveMoves },
+  );
+  if (check.hard.length > 0)
+    return { ok: false, reasons: check.hard.map((issue) => issue.message) };
+  return {
+    ok: true,
+    kind: "trade",
+    variant,
+    dateIdxs,
+    laterDateIdxs,
+    cells,
+    leaveMoves,
+    soft: check.soft,
+    unchecked: check.unchecked,
+  };
+}
+
+export function findTrades(
+  ctx: SwapContext,
+  personIdx: number,
+  dateIdxs: readonly number[],
+  reason: CoverReason,
+  limit = 3,
+): TradeCandidate[] {
+  const k = dateIdxs.length;
+  const last = Math.max(...dateIdxs);
+  const dayCount = ctx.context.calendar.length;
+  const variants: TradeVariant[] =
+    reason === "swap" ? ["person-covers", "partner-off"] : ["partner-off"];
+  const found: TradeCandidate[] = [];
+  ctx.context.people.forEach((_person, partnerIdx) => {
+    if (partnerIdx === personIdx) return;
+    if (!dateIdxs.every((d) => ctx.days[partnerIdx][d].kind !== "shift")) return;
+    let kept = 0;
+    // ponytail: runs of consecutive later days only, two per partner. Widen when wards ask.
+    for (let start = last + 1; start + k <= dayCount && kept < 2; start++) {
+      const later = Array.from({ length: k }, (_unused, i) => start + i);
+      if (!later.every((d) => ctx.days[partnerIdx][d].kind === "shift")) continue;
+      for (const variant of variants) {
+        const plan = planTrade(ctx, personIdx, partnerIdx, dateIdxs, later, variant, reason);
+        if (plan.ok) {
+          found.push({ partnerIdx, plan });
+          kept++;
+          break;
+        }
+      }
+    }
+  });
+  // ponytail: OFF trades first (no leave record changes), then fewer soft issues, then
+  // the earliest later dates, then roster order.
+  found.sort(
+    (a, b) =>
+      a.plan.leaveMoves.length - b.plan.leaveMoves.length ||
+      a.plan.soft.length - b.plan.soft.length ||
+      a.plan.laterDateIdxs[0] - b.plan.laterDateIdxs[0] ||
+      a.partnerIdx - b.partnerIdx,
+  );
+  return found.slice(0, limit);
 }

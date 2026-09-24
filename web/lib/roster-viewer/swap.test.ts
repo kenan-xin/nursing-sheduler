@@ -4,12 +4,17 @@ import {
   findCoverLadder,
   findPersonIdx,
   findSwapPartners,
+  findTrades,
   givingProblem,
   planSickCover,
   planSwap,
+  planTrade,
   type SwapContext,
 } from "./swap";
 import {
+  ashaContext,
+  ashaDocument,
+  ashaGrid,
   borrowContext,
   borrowDocument,
   borrowGrid,
@@ -153,5 +158,70 @@ describe("the escalation ladder", () => {
     expect(ladder.candidates).toEqual([]);
     expect(ladder.trades).toEqual([]);
     expect(ladder.borrow).toEqual([{ dateIdx: 1, shift: "N", skillGroup: "Nights" }]);
+  });
+});
+
+describe("step 2: trades with someone off or on leave", () => {
+  const asha = { context: ashaContext(), days: ashaGrid(), model: buildRuleModel(ashaDocument()) };
+  const [P, ASHA_IDX, BEN_IDX, CY_IDX] = [0, 1, 2, 3];
+
+  it("offers trades only after step 1 is empty, off trades first", () => {
+    const ladder = findCoverLadder(asha, P, [1, 2], "swap");
+    expect(ladder.step).toBe(2);
+    expect(ladder.ruledOut.find((r) => r.partnerIdx === ASHA_IDX)?.reason).toBe(
+      "SN-Asha is on leave on 8 Oct.",
+    );
+    expect(ladder.trades.map((t) => [t.partnerIdx, t.plan.laterDateIdxs])).toEqual([
+      [CY_IDX, [3, 4]],
+      [ASHA_IDX, [4, 5]],
+    ]);
+  });
+
+  it("moves Asha's leave to the later dates and has Priya work her mornings", () => {
+    const plan = planTrade(asha, P, ASHA_IDX, [1, 2], [4, 5], "person-covers");
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) return;
+    expect(plan.leaveMoves).toEqual([
+      { personIdx: ASHA_IDX, from: 1, to: 4 },
+      { personIdx: ASHA_IDX, from: 2, to: 5 },
+    ]);
+    expect(plan.cells.slice(0, 4)).toEqual([
+      { personIdx: P, dateIdx: 1, before: { kind: "shift", shiftId: "N" }, after: { kind: "off" } },
+      {
+        personIdx: ASHA_IDX,
+        dateIdx: 1,
+        before: { kind: "leave" },
+        after: { kind: "shift", shiftId: "N" },
+      },
+      {
+        personIdx: ASHA_IDX,
+        dateIdx: 4,
+        before: { kind: "shift", shiftId: "AM" },
+        after: { kind: "leave" },
+      },
+      {
+        personIdx: P,
+        dateIdx: 4,
+        before: { kind: "off" },
+        after: { kind: "shift", shiftId: "AM" },
+      },
+    ]);
+  });
+
+  it("checks the later dates too: nobody covering Asha's mornings breaks staffing", () => {
+    const plan = planTrade(asha, P, ASHA_IDX, [1, 2], [4, 5], "partner-off");
+    expect(plan.ok).toBe(false);
+    if (plan.ok) return;
+    expect(plan.reasons).toContain("11 Oct: “One morning nurse” has 0 of the 1 needed.");
+  });
+
+  it("checks the day after the moved shifts", () => {
+    // Ben is off on 8-9 Oct, but N on 7-9 is followed by his AM on 10 Oct, whatever later dates he gives.
+    expect(findTrades(asha, P, [1, 2], "swap").some((t) => t.partnerIdx === BEN_IDX)).toBe(false);
+  });
+
+  it("never lets a sick nurse cover later shifts", () => {
+    const plan = planTrade(asha, P, ASHA_IDX, [1, 2], [4, 5], "person-covers", "sick_or_emergency");
+    expect(plan.ok).toBe(false);
   });
 });

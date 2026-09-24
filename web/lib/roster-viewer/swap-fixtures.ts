@@ -186,3 +186,122 @@ export function borrowRosterDocument(): RosterDocument {
     solvedDays: borrowGrid(),
   };
 }
+
+// The Priya/Asha fixture (step 2): nobody can swap or cover Priya's nights on 8-9 Oct.
+//            7   8   9   10  11  12  13  14 Oct
+// SN-Priya   AM  N   N   OFF OFF OFF OFF OFF
+// SN-Asha    OFF LV  LV  OFF AM  AM  OFF OFF  → on leave 8-9: trade, leave moves to 11-12, Priya works her AMs
+// SN-Ben     N   OFF OFF AM  OFF N   N   N    → cover: N 7-9 then AM on 10 (and 6 nights)
+// SN-Cy      OFF OFF OFF N   N   OFF OFF OFF  → cover: 4 nights in a row. Trade: off 10-11, Priya works his Ns
+// SSN-Dev    OFF AM  AM  OFF OFF OFF AM  AM   → not in Nights
+export const ASHA_DATES = [
+  "2026-10-07",
+  "2026-10-08",
+  "2026-10-09",
+  "2026-10-10",
+  "2026-10-11",
+  "2026-10-12",
+  "2026-10-13",
+  "2026-10-14",
+];
+export const ASHA_PEOPLE = ["SN-Priya", "SN-Asha", "SN-Ben", "SN-Cy", "SSN-Dev"];
+const LV: RosterDayState = { kind: "leave" };
+
+export function ashaDocument(): CanonicalScenarioDocument {
+  return {
+    apiVersion: "alpha",
+    dates: { range: { startDate: ASHA_DATES[0], endDate: ASHA_DATES[7] } },
+    people: {
+      items: ASHA_PEOPLE.map((id) => ({ id })),
+      groups: [{ id: "Nights", members: ASHA_PEOPLE.filter((id) => id.startsWith("SN-")) }],
+    },
+    shiftTypes: {
+      items: [
+        { id: "AM", startTime: "07:00", endTime: "15:00", durationMinutes: 480 },
+        { id: "N", startTime: "21:00", endTime: "07:00", durationMinutes: 600 },
+      ],
+    },
+    preferences: [
+      { type: PREFERENCE_TYPE.maxOneShiftPerDay },
+      {
+        type: PREFERENCE_TYPE.shiftTypeRequirement,
+        description: "One night nurse",
+        shiftType: "N",
+        requiredNumPeople: 1,
+        qualifiedPeople: "Nights",
+        weight: -1,
+      },
+      {
+        type: PREFERENCE_TYPE.shiftTypeRequirement,
+        description: "One morning nurse",
+        shiftType: "AM",
+        requiredNumPeople: 1,
+        weight: -1,
+      },
+      {
+        type: PREFERENCE_TYPE.shiftTypeSuccessions,
+        description: "No morning after night",
+        person: "ALL",
+        pattern: ["N", "AM"],
+        weight: -Infinity,
+      },
+      {
+        type: PREFERENCE_TYPE.shiftTypeSuccessions,
+        description: "No four nights in a row",
+        person: "ALL",
+        pattern: ["N", "N", "N", "N"],
+        weight: -Infinity,
+      },
+      {
+        type: PREFERENCE_TYPE.shiftCount,
+        description: "Max 4 nights",
+        person: "ALL",
+        countDates: "ALL",
+        countShiftTypes: "N",
+        expression: "x <= T",
+        target: 4,
+        weight: Infinity,
+      },
+      {
+        type: PREFERENCE_TYPE.shiftRequest,
+        description: "Asha's annual leave",
+        person: "SN-Asha",
+        date: ["2026-10-08", "2026-10-09"],
+        shiftType: "LEAVE",
+        weight: 1,
+      },
+    ],
+  };
+}
+
+export function ashaGrid(): RosterDayState[][] {
+  return [
+    [AM, N, N, OFF, OFF, OFF, OFF, OFF],
+    [OFF, LV, LV, OFF, AM, AM, OFF, OFF],
+    [N, OFF, OFF, AM, OFF, N, N, N],
+    [OFF, OFF, OFF, N, N, OFF, OFF, OFF],
+    [OFF, AM, AM, OFF, OFF, OFF, AM, AM],
+  ];
+}
+
+export function ashaContext(): RosterContext {
+  return {
+    people: ASHA_PEOPLE.map((id) => ({ id })),
+    shiftTypes: [
+      { id: "AM", description: "Morning" },
+      { id: "N", description: "Night" },
+    ],
+    calendar: ASHA_DATES.map((iso) => ({ iso, weekday: "Wed", weekend: false, holiday: false })),
+    baselineMinimums: ["AM", "N"].map((shiftId) => ({ shiftId, unavailable: true as const })),
+    leaveCreditMinutes: null,
+  };
+}
+
+export function ashaRosterDocument(): RosterDocument {
+  return {
+    ...priyaRosterDocument(),
+    submission: fixtureSubmission(ashaDocument(), []),
+    context: ashaContext(),
+    solvedDays: ashaGrid(),
+  };
+}
