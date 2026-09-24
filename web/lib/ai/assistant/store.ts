@@ -87,6 +87,8 @@ import {
   setActiveRunHandle,
 } from "./runtime-stop";
 import type { SendRefusal } from "./send-gate";
+import type { RosterChangeRequest } from "@/lib/roster/change-request";
+import type { RosterChangeView } from "./roster-context";
 
 /** An interruption that has not finished settling. Non-null blocks every send. */
 export interface ActiveInterruption {
@@ -227,6 +229,21 @@ export interface AssistantUiState {
    */
   activeRunRequest: { turnEpoch: number } | null;
   /**
+   * The live "Swap shifts?" card from `prepare_roster_swap`, stamped with the turn that
+   * asked for it. Same authority rule as `activeRunRequest`: after an interruption it
+   * renders as stopped with no Apply control. In memory only.
+   */
+  activeRosterChange: {
+    /** Changes on every show, so the card resets its agreement tick. */
+    id: number;
+    /** The roster cells, or null for a schedule-only change (step 3, C1). */
+    request: RosterChangeRequest | null;
+    view: RosterChangeView;
+    /** The linked schedule proposal (leave move, MC leave, borrowed person) applied with it. */
+    linked: { proposalId: string; assumptionIds: string[] } | null;
+    turnEpoch: number;
+  } | null;
+  /**
    * The live option card from `offer_choices`. One at a time: a newer offer replaces
    * it, and any send closes it. `id` changes on every offer so the card resets its
    * own checkbox and Other state. Stamped with the turn that offered it, like
@@ -270,6 +287,7 @@ const INITIAL: AssistantUiState = {
   activeProposal: null,
   activeDiagnostic: null,
   activeRunRequest: null,
+  activeRosterChange: null,
   activeChoices: null,
   pendingInterruptions: 0,
   clearResult: null,
@@ -1088,6 +1106,31 @@ export const assistantActions = {
     useAssistantStore.setState({ activeRunRequest: null });
   },
 
+  /** Show the swap card for the change the current turn prepared, replacing any earlier one. */
+  showRosterChange(
+    change: {
+      request: RosterChangeRequest | null;
+      view: RosterChangeView;
+      linked?: { proposalId: string; assumptionIds: string[] } | null;
+    },
+    turnEpoch: number,
+  ): void {
+    const previous = useAssistantStore.getState().activeRosterChange;
+    useAssistantStore.setState({
+      activeRosterChange: {
+        ...change,
+        linked: change.linked ?? null,
+        id: (previous?.id ?? 0) + 1,
+        turnEpoch,
+      },
+    });
+  },
+
+  /** Dismiss the swap card: Apply was pressed, or the user said not now. */
+  clearRosterChange(): void {
+    useAssistantStore.setState({ activeRosterChange: null });
+  },
+
   /** Show the option card for `offer_choices`, replacing any earlier one. */
   showChoices(offer: ChoiceOffer, turnEpoch: number): void {
     const previous = useAssistantStore.getState().activeChoices;
@@ -1119,6 +1162,10 @@ export const assistantActions = {
  * not the tool called: a tool that refused and showed nothing gave the user nothing.
  */
 export function turnAwaitsUserOnCard(turnEpoch: number): boolean {
-  const { activeChoices, activeRunRequest } = useAssistantStore.getState();
-  return activeChoices?.turnEpoch === turnEpoch || activeRunRequest?.turnEpoch === turnEpoch;
+  const { activeChoices, activeRunRequest, activeRosterChange } = useAssistantStore.getState();
+  return (
+    activeChoices?.turnEpoch === turnEpoch ||
+    activeRunRequest?.turnEpoch === turnEpoch ||
+    activeRosterChange?.turnEpoch === turnEpoch
+  );
 }
