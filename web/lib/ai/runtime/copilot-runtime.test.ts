@@ -178,6 +178,43 @@ describe("run", () => {
     expect(call.body.stream).toBe(true);
   });
 
+  it("sends the turn's context to the model as the system prompt", async () => {
+    // THE DEFECT THIS PINS. The browser attaches the assistant's standing instructions,
+    // the scenario document and the current screen as AG-UI `context` on every hop, but
+    // factory mode hands the run input to our own `streamText` call, and that call used
+    // to convert only `messages`. The model ran with no system prompt at all -- no
+    // authority statement, no schedule -- and after a feasibility tool result it ended
+    // the turn with no text.
+    const { runtime, provider } = launch();
+
+    await readSse(
+      await runtime.handler(
+        runRequest({
+          threadId: "t-context",
+          context: [
+            { description: "How to behave", value: "propose-then-apply" },
+            { description: "The scenario", value: '{"staff":["Ana"]}' },
+          ],
+        }),
+      ),
+    );
+
+    const messages = provider.calls[0].body.messages as { role: string; content: string }[];
+    expect(messages[0].role).toBe("system");
+    expect(messages[0].content).toContain("How to behave");
+    expect(messages[0].content).toContain("propose-then-apply");
+    expect(messages[0].content).toContain('{"staff":["Ana"]}');
+    expect(messages.filter((m) => m.role === "system")).toHaveLength(1);
+    expect(messages.at(-1)).toMatchObject({ role: "user", content: "hello" });
+  });
+
+  it("sends no system prompt when the turn carries no context", async () => {
+    const { runtime, provider } = launch();
+    await readSse(await runtime.handler(runRequest({ threadId: "t-no-context" })));
+    const messages = provider.calls[0].body.messages as { role: string }[];
+    expect(messages.map((m) => m.role)).toEqual(["user"]);
+  });
+
   it("converts frontend tools into provider tool definitions and streams the call back", async () => {
     const { runtime, provider } = launch({
       chunks: toolCallCompletion("previewStaffingChange", '{"cardId":"c1"}'),

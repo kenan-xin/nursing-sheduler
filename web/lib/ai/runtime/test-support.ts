@@ -31,6 +31,7 @@ export type RunInput = {
   runId?: string;
   messages?: unknown[];
   tools?: unknown[];
+  context?: { description: string; value: string }[];
 };
 
 export function runAgentInput(input: RunInput): Record<string, unknown> {
@@ -40,7 +41,7 @@ export function runAgentInput(input: RunInput): Record<string, unknown> {
     state: {},
     messages: input.messages ?? [{ id: "m1", role: "user", content: "hello" }],
     tools: input.tools ?? [],
-    context: [],
+    context: input.context ?? [],
     forwardedProps: {},
   };
 }
