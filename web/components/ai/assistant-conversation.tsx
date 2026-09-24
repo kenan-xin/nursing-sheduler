@@ -29,6 +29,7 @@ import { ProposalPreviewCard } from "./proposal-preview-card";
 import { DiagnosticSearchCard } from "./diagnostic-search-card";
 import { OptimizeRunRequestCard } from "./optimize-run-request-card";
 import { ChoiceCard } from "./choice-card";
+import { RosterChangeCard } from "./roster-change-card";
 import { AssistantReceipts } from "./assistant-receipts";
 import { ApplyNavigationNotice } from "./apply-navigation-notice";
 import { Surface } from "@/components/ui/surface";
@@ -196,6 +197,7 @@ export function AssistantLiveConversation({
       <LifecycleNotice />
       <DiagnosticSearchCard />
       <OptimizeRunRequestCard />
+      <RosterChangeCard onSend={sendMessage} disabled={running} />
       <ChoiceCard onSend={sendMessage} disabled={running} />
       <ProposalPreviewCard controller={proposals} onSend={sendMessage} disabled={running} />
       <AssistantReceipts controller={proposals} />
