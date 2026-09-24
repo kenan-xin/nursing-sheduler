@@ -383,19 +383,6 @@ function ruleDatesSchema() {
     );
 }
 
-function ruleWeightSchema() {
-  return z
-    .string()
-    .describe(
-      'How strongly, written as you would type it in the Weight box: "-infinity" = must ' +
-        'never happen (hard rule), "infinity" = must always hold (hard rule), a negative ' +
-        'number such as "-50" discourages, a positive number such as "10" encourages. ' +
-        "The schedule shows hard weights as .inf / -.inf: send them as infinity / " +
-        "-infinity. Ask the user whether a new rule is a must or a preference when they " +
-        "did not say.",
-    );
-}
-
 function countWeightSchema() {
   return z
     .string()
@@ -413,6 +400,21 @@ function countWeightSchema() {
     );
 }
 
+function successionWeightSchema() {
+  return z
+    .string()
+    .describe(
+      'How strongly, written as you would type it in the Weight box: "-infinity" = must ' +
+        "never happen (hard rule, the usual choice for a forbidden order such as a day " +
+        'straight after a night), a negative number such as "-50" discourages, a positive ' +
+        'number such as "10" encourages (for example a day off after nights). Avoid ' +
+        '"infinity" (must always follow): with other hard rules it can make a roster ' +
+        "impossible that would otherwise work; use a positive number instead. The schedule " +
+        "shows hard weights as .inf / -.inf: send them as infinity / -infinity. Ask the user " +
+        "whether a new rule is a must or a preference when they did not say.",
+    );
+}
+
 function successionFields() {
   return {
     description: ruleDescriptionSchema(),
@@ -425,7 +427,7 @@ function successionFields() {
           "LEAVE or ALL.",
       ),
     dates: ruleDatesSchema(),
-    weight: ruleWeightSchema(),
+    weight: successionWeightSchema(),
   };
 }
 
@@ -466,7 +468,8 @@ function requirementFields() {
         "Only these people may work this shift; everyone else is banned from it (a hard " +
           'rule). Person ids or staff group ids, or ["ALL"] for no restriction. Cannot ' +
           "express group skill-mix rules (e.g. a minimum count of RNs on a shift with " +
-          "others allowed too); tell the user and point them to the Rules screen.",
+          "others allowed too): tell the user skill mix is not supported yet, and never " +
+          "approximate it by naming a group here, which bans everyone else from the shift.",
       ),
     dates: ruleDatesSchema(),
     requiredNumPeople: z

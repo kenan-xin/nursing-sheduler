@@ -45,6 +45,22 @@ describe("the rule arms' text states what the solver enforces", () => {
     expect(help?.nurseFacingSummary).toContain("skill-mix");
   });
 
+  it("never lets a skill mix be approximated by restricting the whole shift", () => {
+    const text = arm("add_staffing_requirement").qualifiedPeople.description ?? "";
+    expect(text).toContain("not supported yet");
+    expect(text).toContain("never approximate it");
+    // There is no skill-mix editor on the Rules screen to send them to.
+    expect(text).not.toContain("Rules screen");
+  });
+
+  it("a succession's weight: -infinity forbids, a must-follow is steered to a finite weight", () => {
+    const weight = arm("add_succession_rule").weight.description ?? "";
+    expect(weight).toContain('"-infinity" = must never happen');
+    expect(weight).toContain("impossible");
+    expect(weight).toMatch(/"10"/);
+    expect(arm("add_count_rule").weight.description).not.toContain("impossible");
+  });
+
   it("suggests a 2-hour break for a long day or night, and the usual breaks below", () => {
     const rest = arm("add_shift_type").restMinutes.description ?? "";
     expect(rest).toContain("0 under 6 hours");
