@@ -20,13 +20,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Installs the project toolchain pinned in .mise.toml / .python-version at the
-      # repo root: Python 3.12.13 and node 24.14.0. Python 3.12.13 is the project
-      # requirement that the web gates and the deploy guards depend on; the
-      # validator's separate 3.10 PEP 604 syntax minimum is a subsumed
-      # implementation detail of validate_origin.py and does NOT reduce the
-      # project toolchain floor. Single source of truth with local dev.
-      - uses: jdx/mise-action@v2
+      # Standard setup actions (no local-dev tool manager in CI): pnpm from
+      # web/package.json packageManager, node 24.14.0, and Python from
+      # .python-version (3.12.13, the project requirement the deploy guards and
+      # validate_origin.py's 3.10+ PEP 604 syntax both rely on).
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.0
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
 
       - name: "Confirm pinned Python (project toolchain: Python 3.12.13)"
         run: python3 --version
@@ -45,7 +51,7 @@ jobs:
 
       # Includes verify-deploy.test.ts, which runs docker/validate_origin.py via the
       # pinned python3 — the script's 3.10 PEP 604 guard AND the project's 3.12
-      # requirement both pass because mise provides 3.12.13.
+      # requirement both pass because setup-python provides 3.12.13.
       - name: Unit tests
         run: pnpm test
 
@@ -71,7 +77,12 @@ jobs:
         working-directory: web
     steps:
       - uses: actions/checkout@v4
-      - uses: jdx/mise-action@v2
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.0
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Install Playwright browser

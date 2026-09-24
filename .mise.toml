@@ -15,6 +15,3 @@
 # node matches local dev + web/package.json engines (>=20.9.0); pins CI to the same.
 node = "24.14.0"
 python = "3.12.13"
-# Matches web/package.json packageManager. Installed by mise so CI has pnpm on PATH
-# (corepack enable did not expose it under jdx/mise-action).
-pnpm = "11.17.0"
