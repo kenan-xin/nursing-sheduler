@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
 import { useRosterChangeStore } from "@/lib/roster/change-request";
@@ -8,6 +8,11 @@ import { RosterChangeCard } from "./roster-change-card";
 
 const navigate = vi.hoisted(() => vi.fn());
 vi.mock("./use-capability-navigation", () => ({ useCapabilityNavigation: () => navigate }));
+const applyLinked = vi.hoisted(() => vi.fn());
+vi.mock("./linked-apply", () => ({
+  applyLinkedChange: applyLinked,
+  linkedApplyDeps: () => ({}),
+}));
 const confirm = vi.hoisted(() => vi.fn(async () => ({ ok: true })));
 const cancel = vi.hoisted(() => vi.fn(async () => ({ ok: true })));
 vi.mock("@/lib/store", async (importOriginal) => {
@@ -59,7 +64,9 @@ const renderCard = () => render(<RosterChangeCard onSend={onSend} disabled={fals
 beforeEach(() => {
   navigate.mockReset();
   confirm.mockClear();
+  confirm.mockResolvedValue({ ok: true });
   cancel.mockClear();
+  applyLinked.mockReset();
   navigate.mockResolvedValue({ status: "focused" });
   onSend.mockReset();
   useAssistantStore.setState({ turnEpoch: TURN });
@@ -130,8 +137,29 @@ describe("RosterChangeCard", () => {
       stepLabel: "Step 2 · Ask someone off or on leave to come in",
       agreement: "SN-Asha agreed to come in on 8–9 Oct and take leave on 11–12 Oct instead.",
     },
-    linked: { proposalId: "p-1", assumptionIds: ["a-1"] },
+    linked: { proposalId: "p-1", assumptionIds: ["a-1"], record: "leave" as const },
   };
+
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    let reject!: (error: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  }
+
+  async function startLinkedApply() {
+    const pending = deferred<{ ok: true } | { ok: false; message: string }>();
+    applyLinked.mockReturnValue(pending.promise);
+    assistantActions.showRosterChange(LINKED_CHANGE, TURN);
+    renderCard();
+    await userEvent.click(screen.getByRole("checkbox", { name: /SN-Asha agreed/ }));
+    await waitFor(() => expect(screen.getByTestId("roster-change-apply")).toBeEnabled());
+    await userEvent.click(screen.getByTestId("roster-change-apply"));
+    return pending;
+  }
 
   it("keeps Apply off until the agreement is ticked", async () => {
     assistantActions.showRosterChange(LINKED_CHANGE, TURN);
@@ -153,6 +181,75 @@ describe("RosterChangeCard", () => {
       expect(useAssistantStore.getState().activeRosterChange).toBeNull();
     },
   );
+
+  it("cancels the linked schedule change when the user sends what to change", async () => {
+    assistantActions.showRosterChange(LINKED_CHANGE, TURN);
+    renderCard();
+    await userEvent.type(screen.getByLabelText("Tell me what to change"), "Try SN-Eve");
+    await userEvent.click(screen.getByRole("button", { name: "Send what to change" }));
+    expect(cancel).toHaveBeenCalledWith("p-1");
+  });
+
+  it("cancels the linked schedule change of a stopped card", () => {
+    assistantActions.showRosterChange(LINKED_CHANGE, TURN - 1);
+    renderCard();
+    expect(cancel).toHaveBeenCalledWith("p-1");
+  });
+
+  it("unticks the agreement when the schedule does not record it", async () => {
+    confirm.mockResolvedValue({ ok: false });
+    assistantActions.showRosterChange(LINKED_CHANGE, TURN);
+    renderCard();
+    await userEvent.click(screen.getByRole("checkbox", { name: /SN-Asha agreed/ }));
+    await waitFor(() => expect(screen.getByRole("checkbox")).not.toBeChecked());
+    expect(screen.getByTestId("roster-change-apply")).toBeDisabled();
+  });
+
+  it("locks the card while a linked Apply runs, then shows why it failed", async () => {
+    const pending = await startLinkedApply();
+    expect(screen.getByTestId("roster-change-revise")).toBeDisabled();
+    expect(screen.getByTestId("roster-change-cancel")).toBeDisabled();
+    expect(screen.getByLabelText("Tell me what to change")).toBeDisabled();
+    // No other card may replace it mid-Apply.
+    expect(assistantActions.showRosterChange(CHANGE, TURN)).toBe(false);
+    pending.resolve({
+      ok: false,
+      message: "The leave record was changed, but the roster was not.",
+    });
+    expect(
+      await screen.findByText("The leave record was changed, but the roster was not."),
+    ).toBeInTheDocument();
+    expect(cancel).not.toHaveBeenCalled();
+  });
+
+  it("keeps a failed outcome after the card stops or goes away", async () => {
+    const pending = await startLinkedApply();
+    act(() => useAssistantStore.setState({ turnEpoch: TURN + 1 }));
+    expect(cancel).not.toHaveBeenCalled(); // not mid-Apply
+    pending.resolve({ ok: false, message: "Undo it from the change list." });
+    expect(await screen.findByText("Undo it from the change list.")).toBeInTheDocument();
+    act(() => assistantActions.clearRosterChange());
+    expect(screen.getByText("Undo it from the change list.")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByText("Undo it from the change list.")).toBeNull();
+  });
+
+  it("says so plainly when Apply throws", async () => {
+    const pending = await startLinkedApply();
+    pending.reject(new Error("idb"));
+    expect(await screen.findByText(/Something went wrong while applying/)).toBeInTheDocument();
+    expect(useAssistantStore.getState().rosterChangeApplying).toBe(false);
+  });
+
+  it("clears the card when the linked Apply succeeds", async () => {
+    const pending = await startLinkedApply();
+    pending.resolve({ ok: true });
+    await waitFor(() => expect(useAssistantStore.getState().activeRosterChange).toBeNull());
+    expect(applyLinked).toHaveBeenCalledWith(
+      expect.objectContaining({ linked: LINKED_CHANGE.linked }),
+      expect.anything(),
+    );
+  });
 
   it("waits for a running turn before Apply", () => {
     assistantActions.showRosterChange(CHANGE, TURN);

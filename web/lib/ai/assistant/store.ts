@@ -90,6 +90,14 @@ import type { SendRefusal } from "./send-gate";
 import type { RosterChangeRequest } from "@/lib/roster/change-request";
 import type { RosterChangeView } from "./roster-context";
 
+/** The schedule proposal a roster card applies with it, and which record it changes. */
+export interface LinkedScheduleChange {
+  proposalId: string;
+  assumptionIds: string[];
+  /** "leave": a leave move or MC leave. "staff": a borrowed temporary nurse. */
+  record: "leave" | "staff";
+}
+
 /** An interruption that has not finished settling. Non-null blocks every send. */
 export interface ActiveInterruption {
   trigger: InterruptionTrigger;
@@ -240,9 +248,19 @@ export interface AssistantUiState {
     request: RosterChangeRequest | null;
     view: RosterChangeView;
     /** The linked schedule proposal (leave move, MC leave, borrowed person) applied with it. */
-    linked: { proposalId: string; assumptionIds: string[] } | null;
+    linked: LinkedScheduleChange | null;
     turnEpoch: number;
   } | null;
+  /**
+   * Apply is running on the roster card (up to the Roster screen's 15 s window). While
+   * true, no other card may replace it, so its outcome always has a place to land.
+   */
+  rosterChangeApplying: boolean;
+  /**
+   * The last roster card Apply that did not finish, in plain words. Kept outside the
+   * card so it survives the card being stopped or cleared; the user dismisses it.
+   */
+  rosterChangeNotice: string | null;
   /**
    * The live option card from `offer_choices`. One at a time: a newer offer replaces
    * it, and any send closes it. `id` changes on every offer so the card resets its
@@ -288,6 +306,8 @@ const INITIAL: AssistantUiState = {
   activeDiagnostic: null,
   activeRunRequest: null,
   activeRosterChange: null,
+  rosterChangeApplying: false,
+  rosterChangeNotice: null,
   activeChoices: null,
   pendingInterruptions: 0,
   clearResult: null,
@@ -1106,16 +1126,20 @@ export const assistantActions = {
     useAssistantStore.setState({ activeRunRequest: null });
   },
 
-  /** Show the swap card for the change the current turn prepared, replacing any earlier one. */
+  /**
+   * Show the swap card for the change the current turn prepared, replacing any earlier
+   * one. Refused (false) while an Apply on the current card is still running.
+   */
   showRosterChange(
     change: {
       request: RosterChangeRequest | null;
       view: RosterChangeView;
-      linked?: { proposalId: string; assumptionIds: string[] } | null;
+      linked?: LinkedScheduleChange | null;
     },
     turnEpoch: number,
-  ): void {
-    const previous = useAssistantStore.getState().activeRosterChange;
+  ): boolean {
+    const { activeRosterChange: previous, rosterChangeApplying } = useAssistantStore.getState();
+    if (rosterChangeApplying) return false;
     useAssistantStore.setState({
       activeRosterChange: {
         ...change,
@@ -1124,11 +1148,20 @@ export const assistantActions = {
         turnEpoch,
       },
     });
+    return true;
   },
 
   /** Dismiss the swap card: Apply was pressed, or the user said not now. */
   clearRosterChange(): void {
     useAssistantStore.setState({ activeRosterChange: null });
+  },
+
+  setRosterChangeApplying(applying: boolean): void {
+    useAssistantStore.setState({ rosterChangeApplying: applying });
+  },
+
+  setRosterChangeNotice(notice: string | null): void {
+    useAssistantStore.setState({ rosterChangeNotice: notice });
   },
 
   /** Show the option card for `offer_choices`, replacing any earlier one. */

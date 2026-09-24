@@ -46,13 +46,18 @@ const fixture = vi.hoisted(() => ({
   pointer: null as unknown,
   scenario: null as unknown,
   prepare: vi.fn(),
+  cancel: vi.fn(async () => ({ ok: true })),
 }));
 vi.mock("@/lib/store", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/store")>();
   return {
     ...actual,
     pickScenario: () => fixture.scenario,
-    assistantProposalCommands: { ...actual.assistantProposalCommands, prepare: fixture.prepare },
+    assistantProposalCommands: {
+      ...actual.assistantProposalCommands,
+      prepare: fixture.prepare,
+      cancel: fixture.cancel,
+    },
     rosterStorage: {
       ...actual.rosterStorage,
       readWorking: async () => fixture.working,
@@ -309,7 +314,7 @@ describe("the escalation ladder in the tools", () => {
       },
     ]);
     const card = useAssistantStore.getState().activeRosterChange;
-    expect(card?.linked).toEqual({ proposalId: "p-1", assumptionIds: ["a-1"] });
+    expect(card?.linked).toEqual({ proposalId: "p-1", assumptionIds: ["a-1"], record: "leave" });
     expect(card?.view.agreement).toMatch(
       /^SN-Asha agreed to come in on 8–9 Oct and take leave on 11–12 Oct instead/,
     );
@@ -454,7 +459,26 @@ describe("the escalation ladder in the tools", () => {
       },
     ]);
     expect(card?.view.title).toBe("Mei (relief pool): Night on 8 Oct");
+    expect(card?.linked?.record).toBe("staff");
     expect(answer).toMatch(/nurse manager/);
+  });
+
+  it("shows no new card while the last one is applying, and cancels what it prepared", async () => {
+    useAsha();
+    fixture.cancel.mockClear();
+    assistantActions.setRosterChangeApplying(true);
+    const answer = await tool("prepare_roster_swap").handler(
+      {
+        ...PRIYA_NIGHTS,
+        partner: "SN-Asha",
+        laterDates: ["2026-10-11", "2026-10-12"],
+        summary: "Priya needs those nights off.",
+      },
+      {},
+    );
+    expect(answer).toMatch(/applying the last roster change right now/);
+    expect(useAssistantStore.getState().activeRosterChange).toBeNull();
+    expect(fixture.cancel).toHaveBeenCalledWith("p-1");
   });
 
   it("keeps nurse-facing guidance free of she/her and names the nurse manager for borrowing", async () => {

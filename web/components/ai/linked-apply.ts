@@ -17,6 +17,7 @@ import {
   type RosterChangeRequest,
 } from "@/lib/roster/change-request";
 import { readRosterForAssistant } from "@/lib/ai/assistant/roster-context";
+import type { LinkedScheduleChange } from "@/lib/ai/assistant/store";
 import { assistantProposalCommands } from "@/lib/store";
 import { describeApplyFailure } from "./use-assistant-proposals";
 
@@ -32,6 +33,12 @@ export interface LinkedApplyDeps {
   awaitRosterChangeOutcome(): Promise<RosterChangeOutcome>;
 }
 
+/** The record the linked proposal changes, and what to undo when the roster refuses. */
+const RECORD: Record<LinkedScheduleChange["record"], { name: string; undo: string }> = {
+  leave: { name: "leave record", undo: "the leave change" },
+  staff: { name: "staff list", undo: "the added temporary nurse" },
+};
+
 const WHY: Record<Exclude<RosterChangeOutcome, "applied">, string> = {
   "roster-changed": "the roster changed at the last moment",
   rejected: "the Roster screen refused the change",
@@ -39,7 +46,10 @@ const WHY: Record<Exclude<RosterChangeOutcome, "applied">, string> = {
 };
 
 export async function applyLinkedChange(
-  change: { request: RosterChangeRequest | null; linked: { proposalId: string } | null },
+  change: {
+    request: RosterChangeRequest | null;
+    linked: Pick<LinkedScheduleChange, "proposalId" | "record"> | null;
+  },
   deps: LinkedApplyDeps,
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   // 1. Nothing is touched unless the roster still holds every before cell.
@@ -53,29 +63,37 @@ export async function applyLinkedChange(
     }
   }
   // 2. The schedule half. Its own transaction re-checks lease, revision and agreement.
-  let receiptId: string | null = null;
+  let applied: { receiptId: string; record: { name: string; undo: string } } | null = null;
   if (change.linked !== null) {
-    const applied = await deps.applyProposal(change.linked.proposalId);
-    if (!applied.ok) return { ok: false, message: describeApplyFailure(applied.reason) };
-    receiptId = applied.receiptId;
+    const result = await deps.applyProposal(change.linked.proposalId);
+    if (!result.ok) return { ok: false, message: describeApplyFailure(result.reason) };
+    applied = { receiptId: result.receiptId, record: RECORD[change.linked.record] };
   }
   if (change.request === null) return { ok: true };
   // 3. The roster half, through the Roster screen's own edit session.
   const undo = async (why: string) => {
-    if (receiptId === null) return { ok: false as const, message: `Nothing was changed: ${why}.` };
-    return (await deps.undoReceipt(receiptId))
+    if (applied === null) return { ok: false as const, message: `Nothing was changed: ${why}.` };
+    // A thrown undo is a refused one: the schedule half is still applied either way.
+    const undone = await deps.undoReceipt(applied.receiptId).catch(() => false);
+    const { name, undo: what } = applied.record;
+    return undone
       ? {
           ok: false as const,
-          message: `Nothing was changed: ${why}. The leave record was put back too.`,
+          message: `Nothing was changed: ${why}. The ${name} was put back too.`,
         }
       : {
           ok: false as const,
-          message: `The leave record was changed, but the roster was not: ${why}. Undo the leave change from the change list, or ask me again.`,
+          message: `The ${name} was changed, but the roster was not: ${why}. Undo ${what} from the change list, or ask me again.`,
         };
   };
-  if (!(await deps.navigate())) return undo("the Roster screen could not be opened");
-  deps.requestRosterChange(change.request);
-  const outcome = await deps.awaitRosterChangeOutcome();
+  let outcome: RosterChangeOutcome;
+  try {
+    if (!(await deps.navigate())) return undo("the Roster screen could not be opened");
+    deps.requestRosterChange(change.request);
+    outcome = await deps.awaitRosterChangeOutcome();
+  } catch {
+    return undo("the Roster screen could not be opened");
+  }
   return outcome === "applied" ? { ok: true } : undo(WHY[outcome]);
 }
 

@@ -233,6 +233,20 @@ const CARD_SHOWN =
   "Nothing has changed yet; only the user can apply it, on the card. Do not say the roster " +
   "has changed. In one short sentence, say which step this is and who does what. Then wait.";
 
+const ROSTER_BUSY =
+  "The user is applying the last roster change right now, so no new card was shown and " +
+  "nothing was altered. Wait for it to finish, then ask again.";
+
+/** Show the card, or cancel the just-prepared linked proposal when the card is busy. */
+function showCard(
+  change: Parameters<typeof assistantActions.showRosterChange>[0],
+  turnEpoch: number,
+): boolean {
+  if (assistantActions.showRosterChange(change, turnEpoch)) return true;
+  if (change.linked) void assistantProposalCommands.cancel(change.linked.proposalId);
+  return false;
+}
+
 const NO_ROSTER =
   "There is no saved roster yet. If the user wants one, offer a run with request_optimize_run.";
 const UNREADABLE =
@@ -517,18 +531,19 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
             if (!prepared.ok) return prepared.message;
             linked = prepared.linked;
           }
-          assistantActions.showRosterChange(
+          const shown = showCard(
             {
               request: { solvedBaselineId: baselineId, cells: [...cells] },
               view,
               linked: linked && {
                 proposalId: linked.proposalId,
                 assumptionIds: linked.assumptionIds,
+                record: "leave",
               },
             },
             token.turnEpoch,
           );
-          return CARD_SHOWN;
+          return shown ? CARD_SHOWN : ROSTER_BUSY;
         };
         const sick = args.reason === "sick_or_emergency";
         const sickLeave = sick ? addLeave(ctx.context.people[personIdx].id, isos) : [];
@@ -719,17 +734,19 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
           date: plainDate(isos[n.dateIdx]),
           shift: shiftName(ctx.context, n.shift),
         }));
-        assistantActions.showRosterChange(
+        const shown = showCard(
           {
             request: cells.length > 0 ? { solvedBaselineId: baselineId, cells } : null,
             view: buildBorrowView(name, args.source, groups, needs, question, args.summary),
             linked: {
               proposalId: prepared.linked.proposalId,
               assumptionIds: prepared.linked.assumptionIds,
+              record: "staff",
             },
           },
           token.turnEpoch,
         );
+        if (!shown) return ROSTER_BUSY;
         return (
           `${CARD_SHOWN} Tell the user ${name}'s roster row appears after the next optimiser run, ` +
           "and to let their nurse manager know about the temporary nurse. Offer " +
