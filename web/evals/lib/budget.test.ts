@@ -32,6 +32,16 @@ describe("recordingFetch", () => {
     expect((await rec.settled()).usd).toBeCloseTo(3);
   });
 
+  it("reads usage from a plain JSON body (a non-streamed judge or user call)", async () => {
+    const ledger = new Ledger(5);
+    const body = JSON.stringify({ usage: { prompt_tokens: 2000, completion_tokens: 50 } });
+    const rec = recordingFetch("openai/gpt-5-mini", ledger, fakeBase(body));
+    await (await rec.fetch("https://x.test", { method: "POST", body: "{}" })).text();
+    const usage = await rec.settled();
+    expect(usage).toMatchObject({ inputTokens: 2000, outputTokens: 50, estimated: false });
+    expect(ledger.total.usd).toBeCloseTo(0.0006);
+  });
+
   it("estimates from byte length when there is no usage at all", async () => {
     const ledger = new Ledger(5);
     const rec = recordingFetch(

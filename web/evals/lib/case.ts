@@ -1,3 +1,4 @@
+import type { AssistantCommandV1 } from "@/lib/proposal";
 import type { ScenarioName } from "@/lib/rules/ward-fixtures.test-support";
 import type { ScenarioUiState } from "@/lib/scenario";
 
@@ -25,6 +26,8 @@ export interface Expect {
   choicesInclude?: string[];
   choicesFromStaff?: boolean;
   proposalOps?: Array<{ type: string } & Record<string, unknown>>;
+  /** A reason the last proposal's ops are wrong, or null. */
+  proposalCheck?: (ops: AssistantCommandV1[]) => string | null;
   noProposal?: boolean;
   neverTouchRuleUids?: string[];
   finalState?: (final: ScenarioUiState) => string | null;

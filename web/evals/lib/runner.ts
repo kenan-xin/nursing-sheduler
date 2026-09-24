@@ -1,7 +1,7 @@
 // Registers one Vitest test per case trial. Trials in a file run in sequence: the stores
 // are singletons. Each *.eval.ts file is its own worker, with its share of the budget.
 import { describe, expect, test } from "vitest";
-import { Ledger } from "./budget";
+import { Ledger, plus, recordingFetch } from "./budget";
 import type { EvalCase } from "./case";
 import { gradeDeterministic } from "./graders";
 import { runTrial, type Seams } from "./harness";
@@ -58,7 +58,10 @@ export function runCases(cases: EvalCase[], seams: Seams): void {
             };
             skip("budget");
           }
-          const userModel = "simulated" in evalCase.user ? openRouterModel(e.key, e.user) : null;
+          const userRec = recordingFetch(e.user, ledger);
+          const judgeRec = recordingFetch(e.judge, ledger);
+          const userModel =
+            "simulated" in evalCase.user ? openRouterModel(e.key, e.user, userRec.fetch) : null;
           const record = await runTrial({
             evalCase,
             trial: t,
@@ -72,11 +75,17 @@ export function runCases(cases: EvalCase[], seams: Seams): void {
           const judge = record.error
             ? []
             : await judgeTrial(
-                openRouterModel(e.key, e.judge),
+                openRouterModel(e.key, e.judge, judgeRec.fetch),
                 record,
                 trialEntities(record),
                 evalCase.expect.judge ?? [],
-              );
+              ).catch((err: unknown) => [
+                { id: "judge", reasoning: `judge call failed: ${String(err)}`, pass: false },
+              ]);
+          record.usage = plus(
+            record.usage,
+            plus(await userRec.settled(), await judgeRec.settled()),
+          );
           task.meta.eval = toMeta(evalCase, record, gates, judge);
           expect(gates.filter((g) => !g.pass)).toEqual([]);
           expect(judge.filter((j) => !j.pass)).toEqual([]);

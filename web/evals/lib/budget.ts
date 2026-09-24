@@ -12,7 +12,7 @@ const FALLBACK = { input: 3, output: 15 };
 export const BUDGET_ERROR = "eval budget exhausted";
 
 const ZERO: Usage = { inputTokens: 0, outputTokens: 0, usd: 0, estimated: false };
-const plus = (a: Usage, b: Usage): Usage => ({
+export const plus = (a: Usage, b: Usage): Usage => ({
   inputTokens: a.inputTokens + b.inputTokens,
   outputTokens: a.outputTokens + b.outputTokens,
   usd: a.usd + b.usd,
@@ -52,6 +52,14 @@ function usageOf(model: string, requestBytes: number, responseText: string): Usa
       if (chunk.usage) found = chunk.usage;
     } catch {
       // A non-JSON data line carries no usage.
+    }
+  }
+  if (!found) {
+    // A non-streamed call (the judge, the simulated user) answers with one JSON body.
+    try {
+      found = (JSON.parse(responseText) as { usage?: UsageChunk }).usage ?? null;
+    } catch {
+      // Not JSON either: estimated below.
     }
   }
   if (found?.prompt_tokens !== undefined) {

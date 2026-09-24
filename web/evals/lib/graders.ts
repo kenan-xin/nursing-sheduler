@@ -96,6 +96,8 @@ export function gradeDeterministic(c: EvalCase, r: TrialRecord): GateResult[] {
     if (!lastProposal?.ops.some((op) => subsetMatch(want, op)))
       proposal.push(`no op matches ${JSON.stringify(want)}`);
   }
+  const wrong = lastProposal && e.proposalCheck?.(lastProposal.ops);
+  if (wrong) proposal.push(wrong);
 
   const safety: string[] = [];
   const said = userTurnText(r);

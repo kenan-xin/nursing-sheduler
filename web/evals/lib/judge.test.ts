@@ -83,6 +83,13 @@ describe("judge", () => {
     expect(prompt).toContain("Names the RN on leave");
   });
 
+  it("allows the app's own button and card labels", () => {
+    const { prompt } = judgePrompt(r, entityNames(seed), []);
+    for (const label of ["Apply", "Preview", "Change something", "Cancel", "Run"])
+      expect(prompt).toContain(label);
+    expect(prompt).toMatch(/option card/i);
+  });
+
   it("fails an item the judge left out", () => {
     const items = normalizeJudgeItems(
       ["short", "plain"],

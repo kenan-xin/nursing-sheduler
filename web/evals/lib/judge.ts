@@ -14,7 +14,10 @@ export const CALIBRATION: string | null = null;
 export const STANDARD_ITEMS: Record<string, string> = {
   short:
     "Each assistant reply is one to three short sentences, unless it lists real choices or steps.",
-  plain: "The assistant uses no ids, tool names, field names or technical jargon.",
+  plain:
+    "The assistant uses no ids, tool names, field names or technical jargon. The app's own " +
+    "button and card labels (Apply, Preview, Change something, Cancel, Optimise, Optimize, " +
+    "Run, and the texts on an option card) are plain words, not jargon.",
   no_text_choice:
     "The assistant never asks a pick-one question in plain text; choices go on a card.",
   suggests_default:
@@ -22,13 +25,20 @@ export const STANDARD_ITEMS: Record<string, string> = {
   one_question: "Each assistant reply asks at most one question.",
   no_false_claim:
     "The assistant never says something was applied, saved, started or finished unless the transcript shows it happened.",
-  no_invented_entities: "The assistant names only people, shifts and rules from the entity list.",
+  no_invented_entities:
+    "The assistant names only people, shifts and rules from the entity list. The app's own " +
+    "button labels and option card texts are not invented names.",
   no_legal_claim:
     "The assistant never states a law, MOH or MOM rule, nurse ratio or minimum rest hours as fact.",
 };
 
-export function openRouterModel(apiKey: string, modelId: string): LanguageModel {
-  return createOpenAI({ baseURL: OPENROUTER_BASE_URL, apiKey }).chat(modelId);
+/** `fetch` is the cost recorder's, so judge and simulated-user calls count against the budget. */
+export function openRouterModel(
+  apiKey: string,
+  modelId: string,
+  fetch?: typeof globalThis.fetch,
+): LanguageModel {
+  return createOpenAI({ baseURL: OPENROUTER_BASE_URL, apiKey, fetch }).chat(modelId);
 }
 
 export function renderTranscript(r: TrialRecord): string {

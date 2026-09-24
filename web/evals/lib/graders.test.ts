@@ -228,4 +228,21 @@ describe("gradeDeterministic", () => {
       gate(gradeDeterministic(evalCase({ navigatedTo: "/dates" }), r), "navigation")?.pass,
     ).toBe(true);
   });
+
+  it("runs proposalCheck on the last proposal", () => {
+    const r = record({
+      proposals: [
+        {
+          proposalId: "p",
+          status: "preview_ready",
+          ops: [{ type: "add_succession_rule", weight: "infinity" } as never],
+        },
+      ],
+    });
+    const c = evalCase({
+      proposalCheck: (ops) =>
+        JSON.stringify(ops).includes('"infinity"') ? "hard must-follow" : null,
+    });
+    expect(gate(gradeDeterministic(c, r), "proposal")?.pass).toBe(false);
+  });
 });
