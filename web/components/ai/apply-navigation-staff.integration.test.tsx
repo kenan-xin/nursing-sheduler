@@ -35,7 +35,7 @@ function Assistant() {
   const controller = useAssistantProposals();
   return (
     <>
-      <ProposalPreviewCard controller={controller} />
+      <ProposalPreviewCard controller={controller} onSend={() => {}} disabled={false} />
       <ApplyNavigationNotice controller={controller} />
     </>
   );

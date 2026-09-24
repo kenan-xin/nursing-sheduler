@@ -193,7 +193,7 @@ export function AssistantLiveConversation({
       <DiagnosticSearchCard />
       <OptimizeRunRequestCard />
       <ChoiceCard onSend={sendMessage} disabled={running} />
-      <ProposalPreviewCard controller={proposals} />
+      <ProposalPreviewCard controller={proposals} onSend={sendMessage} disabled={running} />
       <AssistantReceipts controller={proposals} />
       <ApplyNavigationNotice controller={proposals} />
       <ActivityContext.Provider value={session.activity}>
@@ -244,8 +244,14 @@ export function AssistantHistoricalConversation({
       <Surface level="well" geometry="control" className="m-4 p-3">
         <p className="text-meta text-ink2">{reason}</p>
       </Surface>
-      {/* Message view only: no input, no tools, no run controls. */}
-      <CopilotChatMessageView className="min-h-0 flex-1 overflow-y-auto" messages={messages} />
+      {/* Message view only: no input, no tools, no run controls. Same horizontal
+          inset as the host cards above (`--space-4` via `px-4`) and the live
+          transcript's cap below, so a resized-wide dock reads at the same measure
+          whichever rendering is on screen. */}
+      <CopilotChatMessageView
+        className="mx-auto min-h-0 w-full max-w-[70ch] flex-1 overflow-y-auto px-4"
+        messages={messages}
+      />
     </div>
   );
 }
