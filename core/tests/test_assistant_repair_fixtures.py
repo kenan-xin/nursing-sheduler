@@ -47,5 +47,6 @@ def test_after_the_top_repair_is_feasible(case):
     assert _status(FIXTURES / f"{case}.after.yaml") in {"FEASIBLE", "OPTIMAL"}
 
 
-def test_running_one_short_with_a_date_exception_is_feasible():
-    assert _status(FIXTURES / "shortOnLeaveDay.run_one_short.yaml") in {"FEASIBLE", "OPTIMAL"}
+@pytest.mark.parametrize("case", ["shortOnLeaveDay", "busyNightsWithRestRule"])
+def test_running_one_short_with_date_exceptions_is_feasible(case):
+    assert _status(FIXTURES / f"{case}.run_one_short.yaml") in {"FEASIBLE", "OPTIMAL"}

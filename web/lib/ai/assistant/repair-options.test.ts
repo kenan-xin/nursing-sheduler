@@ -281,6 +281,13 @@ describe("rankRepairOptions", () => {
     expect(short && isSafeOption(state, short)).toBe(true);
   });
 
+  it("does not run a rule one short when another of its dates is two short", () => {
+    // The 5th is one short, but the 3rd (ana and ben away) is two short: no claim to fix it.
+    const base = SCENARIOS.shortOnLeaveDay();
+    const state = { ...base, reqData: [...base.reqData, leave("ana", "03"), leave("ben", "03")] };
+    expect(rank(state).map((o) => o.repairId)).not.toContain("run_one_short");
+  });
+
   it("uses the date's own count when the rule already has an exception there", () => {
     // The 3rd needs N3 + D1 = 4 from 3 nurses: one short, and before the 5th.
     const base = SCENARIOS.shortOnLeaveDay();

@@ -226,6 +226,27 @@ describe("the scripted wards read as real ward situations", () => {
     expect(borrow.enforcedBy).toBe("host_question");
   });
 
+  it("busy nights: running one short covers both busy nights in one proposal, and the solver agrees", async () => {
+    const state = SCENARIOS.busyNightsWithRestRule();
+    const short = options("busyNightsWithRestRule").find((o) => o.repairId === "run_one_short")!;
+    expect(short.operations).toEqual(
+      ["2026-11-02", "2026-11-06"].map((date) => ({
+        type: "set_staffing_requirement_on_date",
+        ruleId: "night-busy",
+        date,
+        requiredNumPeople: 2,
+      })),
+    );
+    expect(short.title).toMatch(/^Run N one short on .*Nov 2, 2026 and .*Nov 6, 2026 /);
+    expect(short.confirmationQuestion).toMatch(/Nov 2, 2026 and .*Nov 6, 2026/);
+    const result = applyAssistantCommands(state, short.operations);
+    if (!result.ok) throw new Error(result.rejection.message);
+    expect(findStaffingShortfalls(result.next)).toEqual([]);
+    await expect(stableYaml(result.next)).toMatchFileSnapshot(
+      `${FIXTURE_DIR}busyNightsWithRestRule.run_one_short.yaml`,
+    );
+  });
+
   it("short on a leave day: running that night one short is one date exception, and the solver agrees", async () => {
     const state = SCENARIOS.shortOnLeaveDay();
     const short = options("shortOnLeaveDay").find((o) => o.repairId === "run_one_short")!;
