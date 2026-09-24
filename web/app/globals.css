@@ -1033,6 +1033,22 @@ html [data-copilotkit] [data-testid="copilot-user-toolbar"] {
   margin-right: 0;
 }
 
+/* 6. Transcript inset. The package wraps the live transcript in an internal
+      `cpk:max-w-3xl cpk:mx-auto` div inside `copilot-scroll-content` -- no
+      horizontal padding of its own, no className prop to reach it -- so on a
+      resized-wide dock the messages ran flush to the panel's edges while every
+      host card (welcome, Preview, receipts) and the composer sit inset by the
+      same `--space-4` the panel header uses. Restated here at the same inset,
+      with the cap tightened from the library's 768px to a 70ch reading measure
+      so a wide dock still reads as a column of prose rather than full-bleed
+      lines. The user bubble's own right-inset falls out of this for free: it is
+      already right-aligned (`cpk:items-end`) inside this same padded box. */
+html [data-copilotkit] [data-testid="copilot-scroll-content"] > div {
+  box-sizing: border-box;
+  max-width: min(70ch, 100%);
+  padding-inline: var(--space-4);
+}
+
 /* 6. Dark-mode syntax colour, which is a legibility fix rather than a preference.
 
       Streamdown highlights each token with BOTH themes attached -- an inline `color`
