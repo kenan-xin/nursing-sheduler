@@ -163,7 +163,11 @@ export interface AssistantSession {
   interrupting: boolean;
   /** A send is in flight, from prepare until its last write settles. */
   sending: boolean;
-  /** Resolves false when the send was refused. */
+  /**
+   * Resolves false only when refused before preparing: a historical conversation, or
+   * a send already in flight. Refusals during preparation or launch are published
+   * through the store and still resolve true.
+   */
   send(text: string): Promise<boolean>;
   stop(): void;
 }

@@ -33,7 +33,10 @@ const diff = (...direct: ProposalDiffEntry[]): ProposalDiff => ({
 
 const ROSTER = diff(entry("Roster period", "2026-10-01 to 2026-10-31"));
 
-const applied = (proposalId = "p1", proposalRevision = 1): ApplyOutcomeView => ({
+const applied = (
+  proposalId = "p1",
+  proposalRevision = 1,
+): Extract<ApplyOutcomeView, { kind: "applied" }> => ({
   kind: "applied",
   receiptId: `r-${proposalId}-${proposalRevision}-${Math.random()}`,
   proposalId,
@@ -49,7 +52,7 @@ interface Props {
 }
 
 function mount(initial: Props = { running: false, outcome: null }) {
-  const send = vi.fn();
+  const send = vi.fn(async (_text: string) => true);
   const hook = renderHook(
     ({ running, outcome }: Props) => useAssistantFollowUps(running, outcome, send),
     { initialProps: initial },
@@ -79,6 +82,14 @@ describe("describeAppliedChange", () => {
     expect(
       describeAppliedChange(diff(entry("Shift “EVE”", null), entry("a", "x"), entry("b", "y"))),
     ).toBe("I applied it: Shift “EVE”, removed, and 2 more changes.");
+  });
+
+  it("caps a long change at 120 characters, keeping the count", () => {
+    const line = describeAppliedChange(
+      diff(entry("Rule “Nights”", "On · ".repeat(60)), entry("b", "y")),
+    );
+    expect(line.length).toBeLessThanOrEqual(120);
+    expect(line).toMatch(/^I applied it: Rule “Nights”, On · .*…, and 1 more change\.$/);
   });
 });
 
@@ -120,6 +131,27 @@ describe("after Apply", () => {
     rerender({ running: false, outcome: { kind: "failed", message: "no" } });
     rerender({ running: false, outcome: null });
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it("sends nothing when the Apply needs a reload first", () => {
+    const { send, rerender } = mount();
+    rerender({ running: false, outcome: { ...applied(), reloadRequired: true } });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("joins an Apply and a run that both finish in one busy turn into one message", () => {
+    const { send, rerender } = mount({ running: true, outcome: null });
+    setRun({ lifecycle: "running", jobId: "opt_9" });
+    act(() => useRunRequestStore.setState({ last: "started" }));
+    rerender({ running: true, outcome: applied() });
+    setRun({ lifecycle: "completed", jobId: "opt_9", outcome: "infeasible" });
+    expect(send).not.toHaveBeenCalled();
+    rerender({ running: false, outcome: applied() });
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith(
+      "I applied it: Roster period, 2026-10-01 to 2026-10-31. " +
+        "The optimiser run finished: no roster could be built.",
+    );
   });
 
   it("waits for a running turn, then sends once when idle", () => {
