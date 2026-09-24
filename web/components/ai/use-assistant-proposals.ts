@@ -105,13 +105,26 @@ export function useAssistantProposals(): AssistantProposalController {
   const ownership = useAuthorityStore((state) => state.ownership);
   const reloadRequired = useAuthorityStore((state) => state.reloadRequired);
 
-  const [proposal, setProposal] = useState<AssistantProposalV1 | null>(null);
+  const [stored, setProposal] = useState<AssistantProposalV1 | null>(null);
   const [basis, setBasis] = useState<AssistantScenarioBasis | null>(null);
   const [receipts, setReceipts] = useState<ReceiptStanding[]>([]);
   const [applying, setApplying] = useState(false);
   const [outcome, setOutcome] = useState<ApplyOutcomeView | null>(null);
 
   const proposalId = active?.proposalId ?? null;
+
+  // ONLY THE ACTIVE, UNSETTLED PROPOSAL IS A PREVIEW. A reread can land after the
+  // active proposal moved on (Apply's trailing refresh closes over the id it just
+  // cleared), and a proposal can be settled elsewhere while still active. Either
+  // way it is no longer live: showing it would offer Revise and Cancel with nothing
+  // left to act on. The receipt is what narrates an applied change.
+  const proposal =
+    stored &&
+    stored.proposalId === proposalId &&
+    stored.status !== "applied" &&
+    stored.status !== "cancelled"
+      ? stored
+      : null;
 
   const refresh = useCallback(async () => {
     const [nextBasis, nextReceipts] = await Promise.all([
