@@ -149,9 +149,9 @@ describe("runTrial", () => {
     expect(r.navigations.length).toBeGreaterThan(0);
   });
 
-  it("finishes a screen the harness never mounts: the pinned day still ticks, so waits end", async () => {
-    // A frozen Date.now() kept the anchor poll of open_app_screen spinning until the
-    // trial timed out whenever the model opened another screen.
+  it("finishes a screen the harness never mounts: its bounded waits ignore the pinned day", async () => {
+    // The harness pins Date; open_app_screen's anchor poll read Date.now() and spun until
+    // the trial timed out whenever the model opened another screen.
     const r = await runTrial(
       input(
         { ...base, user: { turns: ["Where are the shifts?"] } },
