@@ -87,6 +87,11 @@ export function createOpenRouterAgent(
         // `.chat()` explicitly: the provider's default callable resolves to OpenAI's
         // Responses API, which OpenRouter's /api/v1 does not implement.
         model: openrouter.chat(credentials.model),
+        // Factory mode hands the run input to THIS call, so the context the browser
+        // attaches to every hop (standing instructions, the scenario, the screen) only
+        // reaches the model if it is rendered here. It once was not: the model ran with
+        // no system prompt and ended a feasibility turn with no text.
+        system: contextSystemPrompt(input.context),
         messages: convertMessagesToVercelAISDKMessages(input.messages),
         tools: toAppToolSet(convertToolsToVercelAITools(input.tools)),
         abortSignal,
@@ -96,6 +101,17 @@ export function createOpenRouterAgent(
       });
     },
   });
+}
+
+/**
+ * The AG-UI context entries as one system prompt, in the layout `BuiltInAgent`'s classic
+ * (non-factory) mode uses. `undefined` when there is nothing to say.
+ */
+function contextSystemPrompt(
+  context: readonly { description: string; value: string }[],
+): string | undefined {
+  if (context.length === 0) return undefined;
+  return context.map((entry) => `${entry.description}:\n${entry.value}\n`).join("\n");
 }
 
 /**

@@ -65,6 +65,28 @@ describe("requirementsMapper", () => {
   it("rename writes the card's description", () => {
     expect(requirementsMapper.rename(supported, "New title").description).toBe("New title");
   });
+
+  it("summarises an exact head count, not a minimum", () => {
+    expect(requirementsMapper.summary(supported)).toBe("Exactly 2 people on D on every date.");
+    expect(requirementsMapper.summary({ ...supported, requiredNumPeople: 1 })).toBe(
+      "Exactly 1 person on D on every date.",
+    );
+  });
+
+  it("summarises a preferred count as a range", () => {
+    expect(requirementsMapper.summary({ ...supported, preferredNumPeople: 3 })).toBe(
+      "Between 2 and 3 people on D on every date.",
+    );
+  });
+
+  it("says who may work it when qualified people are named, and nothing for ALL", () => {
+    expect(requirementsMapper.summary({ ...supported, qualifiedPeople: ["RN"] })).toBe(
+      "Exactly 2 people on D on every date. Only RN may work it.",
+    );
+    expect(requirementsMapper.summary({ ...supported, qualifiedPeople: ["ALL"] })).toBe(
+      "Exactly 2 people on D on every date.",
+    );
+  });
 });
 
 describe("successionsMapper", () => {

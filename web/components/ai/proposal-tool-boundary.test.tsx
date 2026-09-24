@@ -256,6 +256,32 @@ describe("the model's arguments, at the shipped tool boundary", () => {
     expect(useScenarioStore.getState().rangeEnd).toBe("2026-04-30");
   });
 
+  it("tells the model to take ids from the schedule before naming them", async () => {
+    await mount();
+    expect(proposalTool().description).toContain("get_schedule_section");
+    expect(proposalTool().description).toMatch(/never guess/i);
+  });
+
+  it("hands an unknown id back with the valid choices, and allows one corrected retry", async () => {
+    await mount(proposalScenario());
+
+    const answer = String(
+      await proposalTool().handler(
+        { summary: "Remove Zed.", operations: [{ type: "remove_person", personId: "Zed" }] },
+        {},
+      ),
+    );
+
+    expect(answer).toContain("The app refused that change:");
+    expect(answer).toContain('Valid choices: "ana", "bo".');
+    expect(answer).toContain("prepare the change again, once");
+    expect(answer).toContain("get_schedule_section");
+    expect(answer).toContain(
+      "If this refusal answers a call you already corrected once, do not try again",
+    );
+    expect(await harness.db.assistantProposals.toArray()).toHaveLength(0);
+  });
+
   it("keeps a genuine host rejection distinct from a malformed payload", async () => {
     // A well-formed operation the document cannot take is still the adapter's answer,
     // with the host's own words -- not the schema refusal above.

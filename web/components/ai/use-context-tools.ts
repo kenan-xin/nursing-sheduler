@@ -120,7 +120,9 @@ export function useModelVisibleTools(agentId: string, turnEpoch: number): void {
       agentId,
       description:
         "Read one section of the schedule in full. The complete schedule is already in your " +
-        "context; use this only to re-read a section after the user says they changed something.",
+        "context; call this to get the exact ids of people, staff groups, shifts or rules " +
+        "before a change that names them, or to re-read a section after the user says they " +
+        "changed something.",
       parameters: sliceParameters,
       // `domain` feeds an exhaustive switch. It arrives validated: a missing or
       // wrong-typed one is refused by the wrapper, where it used to fall through the

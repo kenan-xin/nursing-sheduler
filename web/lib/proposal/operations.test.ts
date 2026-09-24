@@ -201,6 +201,18 @@ describe("move_leave", () => {
     expect(same.ok).toBe(false);
     if (!same.ok) expect(same.rejection.code).toBe("no_effect");
   });
+
+  it("lists the people when the person is unknown", () => {
+    const result = applyAssistantCommand(proposalScenario(), {
+      type: "move_leave",
+      personId: "zed",
+      fromDate: "02",
+      toDate: "03",
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.message).toContain('Valid choices: "ana", "bo".');
+  });
 });
 
 describe("batches", () => {
@@ -336,6 +348,27 @@ describe("add_shift_type / add_shift_group", () => {
     }
   });
 
+  it("refuses a time not written HH:MM, naming the shift and an example", () => {
+    const result = applyAssistantCommand(proposalScenario(), shift("am1", "0800", "15:00"));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.code).toBe("invalid_value");
+    expect(result.rejection.message).toContain('Shift "am1"');
+    expect(result.rejection.message).toContain("09:00");
+  });
+
+  it("refuses a blank time rather than creating a shift with no hours", () => {
+    for (const [start, end] of [
+      ["", "15:00"],
+      ["08:00", "  "],
+    ]) {
+      const result = applyAssistantCommand(proposalScenario(), shift("am1", start, end));
+      expect(result.ok).toBe(false);
+      if (result.ok) continue;
+      expect(result.rejection.message).toContain("needs both a start and an end time");
+    }
+  });
+
   it("refuses an off-grid time", () => {
     const result = applyAssistantCommand(proposalScenario(), shift("am1", "08:15", "15:00"));
     expect(result.ok).toBe(false);
@@ -405,6 +438,13 @@ describe("add_shift_type / add_shift_group", () => {
     expect(result.rejection.index).toBe(0);
     expect(result.rejection.code).toBe("unknown_target");
     expect(result.rejection.message).toContain('"am1"');
+  });
+
+  it("lists the shifts when a group member is unknown", () => {
+    const result = applyAssistantCommand(proposalScenario(), group("Nights", ["N"]));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.message).toContain('Valid choices: "Day", "Night".');
   });
 
   it("puts group members in shift order and ignores repeats", () => {
@@ -653,6 +693,32 @@ describe("leave and request arms", () => {
     expect(empty.ok).toBe(false);
     if (!empty.ok) expect(empty.rejection.message).toContain("nothing recorded");
   });
+
+  it("lists the people and staff groups when the row is unknown", () => {
+    const result = applyAssistantCommand(octoberWard(), {
+      type: "add_leave",
+      personId: "Dana",
+      startDate: "2026-10-05",
+      endDate: "2026-10-05",
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.message).toContain('Valid choices: "Ana", "Ben", "Chris", "Seniors".');
+  });
+
+  it("lists the shifts it could request when the shift is unknown", () => {
+    const result = applyAssistantCommand(octoberWard(), {
+      type: "set_shift_request",
+      personId: "Ben",
+      shiftType: "Late",
+      startDate: "2026-10-19",
+      endDate: "2026-10-19",
+      weight: 5,
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.message).toContain('Valid choices: "D", "L", "N", "Nights", "ALL".');
+  });
 });
 
 describe("add_succession_rule / edit_succession_rule", () => {
@@ -729,8 +795,44 @@ describe("add_succession_rule / edit_succession_rule", () => {
     expect(result.rejection.message).toContain(
       'Shift sequence rule "No day shift straight after a night shift"',
     );
-    expect(result.rejection.message).toContain('"ALL"');
-    expect(result.rejection.message).toContain("Name each person");
+    expect(result.rejection.message).toContain('cannot say "everyone" directly');
+  });
+
+  it("lists the people and groups it could have used when a name is unknown", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), {
+      ...noDayAfterNight,
+      people: ["Sarah"],
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.code).toBe("unknown_target");
+    expect(result.rejection.message).toContain(
+      'Valid choices: "ana", "ben", "cai", "RN", "Senior"',
+    );
+    expect(result.rejection.message).not.toContain("get_schedule_section");
+  });
+
+  it("answers 'everyone' with the people to list when no group holds everyone", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), {
+      ...noDayAfterNight,
+      people: ["Everyone"],
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.message).toContain('cannot say "everyone" directly');
+    expect(result.rejection.message).toContain('Valid choices: "ana", "ben", "cai".');
+  });
+
+  it("answers 'ALL' with the staff group that already holds everyone", () => {
+    const base = ruleWardScenario();
+    const state = {
+      ...base,
+      staffGroups: [...base.staffGroups, { id: "All staff", members: ["ana", "ben", "cai"] }],
+    };
+    const result = applyAssistantCommand(state, { ...noDayAfterNight, people: ["ALL"] });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.message).toContain('Use the staff group "All staff"');
   });
 
   it("edit keeps a rule scoped to ALL", () => {
@@ -756,6 +858,24 @@ describe("add_succession_rule / edit_succession_rule", () => {
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.rejection.message).toContain('"Evening"');
+  });
+
+  it("lists the shifts it could have used when a pattern step is unknown", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), {
+      ...noDayAfterNight,
+      pattern: ["Nights", "Day"],
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.message).toContain('"Day"');
+    expect(result.rejection.message).toContain('"Night"');
+  });
+
+  it("lists this family's rule ids when an edit names one that is not there", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), edit({ ruleId: "nope" } as never));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.message).toContain('Valid choices: "suc-nd" (No day after night).');
   });
 
   it("refuses a matrix day id and accepts the ISO date", () => {
@@ -1091,6 +1211,22 @@ describe("add_staffing_requirement / edit_staffing_requirement", () => {
     }
   });
 
+  it("lists the staffable shifts when the shift is unknown, and never OFF or LEAVE", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), {
+      type: "add_staffing_requirement",
+      description: "",
+      shiftType: "Nights",
+      qualifiedPeople: ["ALL"],
+      dates: ["ALL"],
+      requiredNumPeople: 2,
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.message).toContain('"Day"');
+    expect(result.rejection.message).toContain('"Working shifts"');
+    expect(result.rejection.message).not.toContain('"OFF"');
+  });
+
   it("refuses a negative head count in the screen's words", () => {
     const result = applyAssistantCommand(ruleWardScenario(), {
       ...twoRNs,
@@ -1210,6 +1346,18 @@ describe("remove_rule", () => {
     if (result.ok) return;
     expect(result.rejection.code).toBe("unknown_target");
     expect(result.rejection.message).toContain("shift count rule");
+  });
+
+  it("lists the family's rule ids when the rule is not there", () => {
+    const result = applyAssistantCommand(proposalScenario(), {
+      type: "remove_rule",
+      ruleKind: "requirements",
+      ruleId: "gone",
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.message).toContain('"req-day" (Day cover)');
+    expect(result.rejection.message).toContain('"req-multi" (Day or Night cover)');
   });
 });
 
@@ -1349,7 +1497,32 @@ describe("Staff-screen arms", () => {
       personId: "zed",
     });
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.rejection.code).toBe("unknown_target");
+    if (result.ok) return;
+    expect(result.rejection.code).toBe("unknown_target");
+    // A number stays a number, so "7" and 7 look different to the model.
+    expect(result.rejection.message).toContain('Valid choices: "ana", "bo", 7.');
+  });
+
+  it("lists the staff groups when a group is unknown", () => {
+    const result = applyAssistantCommand(peopleScenario(), {
+      type: "remove_people_group",
+      groupId: "Juniors",
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.message).toContain('Valid choices: "RN", "Seniors".');
+  });
+
+  it("lists the people when a group member is unknown", () => {
+    const result = applyAssistantCommand(peopleScenario(), {
+      type: "add_people_group",
+      groupId: "Nights",
+      description: "",
+      members: ["zed"],
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rejection.message).toContain('Valid choices: "ana", "bo", 7.');
   });
 
   it("adds a staff group with members in staff order, repeats ignored", () => {

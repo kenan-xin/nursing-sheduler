@@ -6,6 +6,7 @@
 // boundary, so Guided's fallback gate can never drift from Advanced's own.
 
 import {
+  RESERVED_SHIFT_TYPE,
   type AffinityCard,
   type CountCard,
   type CoveringCard,
@@ -65,8 +66,20 @@ export const requirementsMapper: GuidedRuleMapper<RequirementCard> = {
   summary(card) {
     const shiftLabel = summarizeRequirementRefs(card.shiftType);
     const dateLabel = card.date === undefined ? "every date" : summarizeRequirementRefs(card.date);
-    const people = card.requiredNumPeople === 1 ? "1 person" : `${card.requiredNumPeople} people`;
-    return `Needs ${people} for ${shiftLabel} on ${dateLabel}.`;
+    // EXACT unless a preferred count exists: the solver pins `required` with `==`, and
+    // with a preferred count it becomes the floor of a range (preference_types.py:185-193).
+    const n = card.requiredNumPeople;
+    const count =
+      card.preferredNumPeople !== undefined && card.preferredNumPeople !== n
+        ? `Between ${n} and ${card.preferredNumPeople} people`
+        : `Exactly ${n === 1 ? "1 person" : `${n} people`}`;
+    // Naming qualified people BANS everyone else from the shift, so say so.
+    const qualified = [card.qualifiedPeople ?? []].flat();
+    const only =
+      qualified.length > 0 && !qualified.includes(RESERVED_SHIFT_TYPE.all)
+        ? ` Only ${summarizeRequirementRefs(qualified)} may work it.`
+        : "";
+    return `${count} on ${shiftLabel} on ${dateLabel}.${only}`;
   },
   quickFields(card): GuidedQuickField[] {
     if (!isSupportedRequirementCard(card)) return [];

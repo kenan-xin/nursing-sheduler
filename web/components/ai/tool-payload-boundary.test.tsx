@@ -658,4 +658,21 @@ describe("valid controls still work, so none of the above passes by refusing eve
     expect(result).toContain("capability_unavailable");
     expect(result).not.toContain("not a valid call to this tool");
   });
+
+  // CHANGED DELIBERATELY (2026-09-24, plan assistant-self-correction): the shared refusal
+  // now names what each field expected and allows ONE corrected retry, so a model that
+  // wrote a date or a time in the wrong form can fix it itself. `expectBoundedRefusal`
+  // above still pins the non-echoing, no-effect half.
+  it("names the expected form and invites one corrected call, still echoing nothing", async () => {
+    const result = await callTool("get_schedule_section", '{"domain":"payroll"}');
+    expectBoundedRefusal(result, ["payroll"]);
+    expect(result).toContain(
+      'domain: must be one of "dates", "staff", "shifts", "rules", "requests"',
+    );
+    expect(result).toContain("call this tool again once");
+    expect(result).not.toContain("Do not retry");
+    expect(result).toContain(
+      "If this refusal answers a call you already corrected once, do not try again",
+    );
+  });
 });
