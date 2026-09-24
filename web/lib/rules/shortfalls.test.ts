@@ -37,6 +37,38 @@ describe("newRuleClash (att: two named groups on one shift)", () => {
     expect(newRuleClash(clashing, clashing)).toBeNull();
   });
 
+  describe("a clash that was already there stays old after an unrelated edit (review S1)", () => {
+    const gen = requirement("gen-d", "D", 1, { qualifiedPeople: ["GEN"] });
+    const sen = requirement("sen-d", "D", 1, { qualifiedPeople: ["SEN"] });
+
+    it("turning off one of two banning rules is a step toward a fix, not a new clash", () => {
+      // gen-d is banned by icu-d and icu2-d; turning off icu2-d leaves the old icu-d clash.
+      const icu2 = requirement("icu2-d", "D", 1, { qualifiedPeople: ["ICU"] });
+      const before = icuWard([gen, icu2]);
+      const after = icuWard([gen, { ...icu2, disabled: true }]);
+      expect(newRuleClash(before, after)).toBeNull();
+    });
+
+    it("a longer roster period or a new span class does not make it new", () => {
+      const before = icuWard([gen]);
+      expect(newRuleClash(before, { ...before, rangeEnd: "2026-11-30" })).toBeNull();
+      expect(newRuleClash(before, { ...before, rangeEnd: "2027-01-31" })).toBeNull();
+    });
+
+    it("reordering the rules or a group's members does not make it new", () => {
+      const before = icuWard([gen, sen]);
+      const reordered = {
+        ...before,
+        staffGroups: before.staffGroups.map((g) => ({ ...g, members: [...g.members].reverse() })),
+        cardsByKind: {
+          ...before.cardsByKind,
+          requirements: [...before.cardsByKind.requirements].reverse(),
+        },
+      };
+      expect(newRuleClash(before, reordered)).toBeNull();
+    });
+  });
+
   it("leaves a gap made by leave to the static check, not to this refusal", () => {
     const onLeave = icuWard([], {
       reqData: [leave("icu1", "2026-11-02"), leave("icu2", "2026-11-02")],

@@ -114,7 +114,11 @@ const isRuleClash = (f: StaffingFinding) =>
   f.available === 0 &&
   f.away.length === 0 &&
   f.ruleIds.length > 1;
-const clashKey = (f: StaffingFinding) => `${f.dateId}|${f.mixPeople}|${f.ruleIds.join(",")}`;
+/**
+ * The short rule and its skill-mix entry only: date ids follow the roster span and the
+ * banning rules follow set order and repairs, so either would make an old clash look new.
+ */
+const clashKey = (f: StaffingFinding) => `${f.ruleIds[0]}|${f.mixPeople}`;
 
 /**
  * The first requirement a change leaves unstaffable by its rules alone (leave plays no
@@ -133,7 +137,8 @@ export function ruleClashMessage(state: ScenarioUiState, f: StaffingFinding): st
     `"${state.cardsByKind.requirements.find((c) => c.uid === uid)?.description || uid}"`;
   const [short, ...banning] = f.ruleIds;
   return (
-    `No roster could meet ${name(short)} on ${f.shiftTypes.join(", ")}: ` +
+    `No roster could meet ${name(short)} on ${f.shiftTypes.join(", ")}` +
+    `${f.iso ? `, first on ${f.iso}` : ""}: ` +
     `${banning.map(name).join(" and ")} lets only its own people work that shift, so nobody ` +
     "it needs may work it. A skill mix (at least so many from a group, others allowed too) " +
     "or a separate shift for each group would work instead. Ask which they want before " +

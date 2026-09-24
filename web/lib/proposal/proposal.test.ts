@@ -176,6 +176,7 @@ describe("prepareProposal", () => {
     expect(result.rejection.message).toMatch(/1 ICU nurse every morning/);
     expect(result.rejection.message).toMatch(/1 GEN nurse every morning/);
     expect(result.rejection.message).toMatch(/skill mix/);
+    expect(result.rejection.message).toMatch(/first on 2026-11-01/);
     // Converting the other rule unasked was the live model's next move (att).
     expect(result.rejection.message).toMatch(/Ask which they want before changing either rule/);
   });
