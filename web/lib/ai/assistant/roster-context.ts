@@ -6,7 +6,12 @@
 // (`lib/roster/change-request.ts`).
 
 import { calendarSpan } from "@/lib/proposal/assumptions";
-import { deriveCurrentDays, type RosterContext, type RosterDocument } from "@/lib/roster";
+import {
+  deriveCurrentDays,
+  type RosterContext,
+  type RosterDayState,
+  type RosterDocument,
+} from "@/lib/roster";
 import type { RosterChangeOutcome } from "@/lib/roster/change-request";
 import { dayCode, deriveRuleModel, listIssues, plainDate } from "@/lib/roster-viewer/rule-check";
 import { shiftTimeRange } from "@/lib/roster-viewer/shift-label";
@@ -150,6 +155,20 @@ export const STEP_LABEL = {
   4: "Step 4 · Last resort: run one short",
 } as const;
 
+/** A shift's name as the ward sees it ("Night"), falling back to its code. */
+export function shiftName(context: RosterContext, shiftId: string): string {
+  const shift = context.shiftTypes.find((s) => String(s.id) === shiftId);
+  return shift?.description ?? shiftId;
+}
+
+/** A card cell in plain words: the shift's name, "Day off" or "Leave". Codes stay model-side. */
+const dayWords = (context: RosterContext, day: RosterDayState): string =>
+  day.kind === "shift"
+    ? shiftName(context, String(day.shiftId))
+    : day.kind === "off"
+      ? "Day off"
+      : "Leave";
+
 function joinDates(labels: readonly string[]): string {
   if (labels.length <= 1) return labels.join("");
   return `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`;
@@ -173,12 +192,7 @@ export function buildRosterChangeView(
     agreement: null,
     title: `${personName(context, personIdx)} and ${personName(context, partnerIdx)}, ${joinDates(dates)}`,
     summary,
-    rows: plan.cells.map((cell) => ({
-      person: personName(context, cell.personIdx),
-      date: plainDate(context.calendar[cell.dateIdx].iso),
-      now: dayCode(cell.before),
-      after: dayCode(cell.after),
-    })),
+    rows: rowsOf(context, plan.cells),
     worthKnowing: plan.soft.map((issue) => issue.message),
     notChecked: [...plan.unchecked],
   };
@@ -216,8 +230,8 @@ const rowsOf = (context: RosterContext, cells: Extract<SwapPlan, { ok: true }>["
   cells.map((cell) => ({
     person: personName(context, cell.personIdx),
     date: plainDate(context.calendar[cell.dateIdx].iso),
-    now: dayCode(cell.before),
-    after: dayCode(cell.after),
+    now: dayWords(context, cell.before),
+    after: dayWords(context, cell.after),
   }));
 
 /** The one sentence the user ticks before a trade can apply. */

@@ -9,6 +9,7 @@ import {
 import { generateDateItems } from "@/lib/dates/date-id";
 import { useRosterChangeStore } from "@/lib/roster/change-request";
 import { fixtureSubmission } from "@/lib/roster/test-fixtures";
+import { PREFERENCE_TYPE, type CanonicalScenarioDocument } from "@/lib/scenario";
 import {
   ashaRosterDocument,
   borrowRosterDocument,
@@ -452,6 +453,7 @@ describe("the escalation ladder in the tools", () => {
         after: { kind: "leave" },
       },
     ]);
+    expect(card?.view.title).toBe("Mei (relief pool): Night on 8 Oct");
     expect(answer).toMatch(/nurse manager/);
   });
 
@@ -514,6 +516,65 @@ describe("the escalation ladder in the tools", () => {
     expect(useAssistantStore.getState().activeRosterChange?.view.agreement).toBe(
       "SN-Kai agreed to come in on 8 Oct for overtime pay.",
     );
+  });
+
+  it("refuses an overtime request while step 1 still has a cover, and lists it", async () => {
+    // The overtime fixture plus SN-Joy, who has spare nights under a count rule: step 1.
+    const base = overtimeDocument();
+    const document = {
+      ...base,
+      people: {
+        items: [...base.people.items, { id: "SN-Joy" }],
+        groups: [{ id: "Nights", members: ["SN-Priya", "SN-Kai", "SN-Joy"] }],
+      },
+      preferences: [
+        ...base.preferences,
+        {
+          type: PREFERENCE_TYPE.shiftCount,
+          description: "Joy max 3 nights",
+          person: "SN-Joy",
+          countDates: "ALL",
+          countShiftTypes: "N",
+          expression: "x <= T",
+          target: 3,
+          weight: Infinity,
+        },
+      ],
+    } as CanonicalScenarioDocument;
+    fixture.working = {
+      document: {
+        ...borrowRosterDocument(),
+        submission: fixtureSubmission(document, []),
+        context: { ...overtimeContext(), people: [...overtimeContext().people, { id: "SN-Joy" }] },
+        solvedDays: [...overtimeGrid(), [{ kind: "off" }, { kind: "off" }, { kind: "off" }]],
+      },
+      revision: 1,
+      candidateSource: { jobId: "job-1", candidateVersion: 1 },
+    };
+    const answer = await tool("prepare_roster_swap").handler(
+      {
+        person: "SN-Priya",
+        dates: ["2026-10-08"],
+        reason: "sick_or_emergency",
+        partner: "SN-Kai",
+        summary: "Priya is on MC.",
+      },
+      {},
+    );
+    expect(answer).toMatch(/Step 1 still has options: SN-Joy\./);
+    expect(answer).toMatch(/No overtime request was prepared/);
+    expect(fixture.prepare).not.toHaveBeenCalled();
+    expect(useAssistantStore.getState().activeRosterChange).toBeNull();
+  });
+
+  it("refuses a borrow card when the host asked no lending-ward question", async () => {
+    useBorrow();
+    const answer = await tool("prepare_borrowed_cover").handler(
+      { ...BORROW_MEI, summary: "Borrow." },
+      {},
+    );
+    expect(answer).toMatch(/did not ask the lending ward/);
+    expect(useAssistantStore.getState().activeRosterChange).toBeNull();
   });
 
   it("offers run one short only at step 4, with the nurse manager's sign-off", async () => {

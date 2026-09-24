@@ -93,8 +93,28 @@ describe("buildRosterChangeView", () => {
     if (!plan.ok) throw new Error(plan.reasons.join(" "));
     const view = buildRosterChangeView(ctx.context, 0, 5, plan, "Priya needs those nights off.");
     expect(view.title).toBe("SN-Priya and SN-Eve, 8 Oct and 9 Oct");
-    expect(view.rows[0]).toEqual({ person: "SN-Priya", date: "8 Oct", now: "N", after: "PM" });
+    expect(view.rows[0]).toEqual({
+      person: "SN-Priya",
+      date: "8 Oct",
+      now: "Night",
+      after: "Afternoon",
+    });
     expect(view.rows).toHaveLength(4);
+  });
+
+  it("says Day off and Leave on the card, never the roster codes", () => {
+    const ctx = {
+      context: priyaContext(),
+      days: priyaGrid(),
+      model: buildRuleModel(priyaDocument()),
+    };
+    const plan = planSickCover(ctx, 0, 3, [1]);
+    if (!plan.ok) throw new Error(plan.reasons.join(" "));
+    const view = buildSickView(ctx.context, 0, 3, plan, "MC.");
+    expect(view.rows).toEqual([
+      { person: "SN-Priya", date: "8 Oct", now: "Night", after: "Leave" },
+      { person: "SN-Cara", date: "8 Oct", now: "Day off", after: "Night" },
+    ]);
   });
 });
 

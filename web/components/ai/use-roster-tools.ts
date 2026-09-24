@@ -7,7 +7,8 @@
 // solved under. `prepare_roster_swap` shows a card with the exact cells. Only the
 // user's Apply click changes the roster, through the Roster screen's own edit session
 // (`lib/roster/change-request.ts`): one undo step, one autosave, the same export.
-// No handler writes a roster, a scenario or a proposal row.
+// No handler writes a roster or a scenario. The ladder tools prepare a pending LINKED
+// proposal (leave move, MC leave, temporary nurse) that applies only with the roster cells.
 
 import { z } from "zod";
 import { useModelVisibleTool } from "./register-model-visible-tool";
@@ -22,6 +23,7 @@ import {
   buildTradeView,
   describeRosterChangeOutcome,
   readRosterForAssistant,
+  shiftName,
   STEP_LABEL,
   summarizeRoster,
   tradeAgreement,
@@ -129,7 +131,11 @@ export const borrowParameters = z.object({
 const PLAIN_WORDS =
   " Name shifts as shiftNames gives them, never by code, and call each nurse by name rather than a pronoun.";
 
-type Linked = { proposalId: string; assumptionIds: string[]; questions: string[] };
+type Linked = {
+  proposalId: string;
+  assumptionIds: string[];
+  assumptions: { type: string; question: string }[];
+};
 
 /**
  * Prepare the schedule half of a roster change as a LINKED proposal: validated by the
@@ -156,7 +162,10 @@ async function prepareLinked(
       linked: {
         proposalId: outcome.proposal.proposalId,
         assumptionIds: outcome.proposal.assumptions.map((a) => a.assumptionId),
-        questions: outcome.proposal.assumptions.map((a) => a.question),
+        assumptions: outcome.proposal.assumptions.map((a) => ({
+          type: a.type,
+          question: a.question,
+        })),
       },
     };
   }
@@ -539,12 +548,15 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
             if (!plan.ok)
               return `That cannot be recorded, so no card was shown: ${plan.reasons.join(" ")}`;
             const view = buildSickView(ctx.context, personIdx, null, plan, args.summary);
+            // A refused run-short (step 4) says why on the card, so the gap is plain.
+            const refused = short && !short.ok ? [short.reasons[0]] : [];
             return show(
               plan.cells,
-              { ...view, notes: [...view.notes, "Keep looking for cover."] },
+              { ...view, notes: [...view.notes, ...refused, "Keep looking for cover."] },
               sickLeave,
             );
           }
+          // The refusal already says to talk to the nurse manager or the nursing supervisor.
           if (short) return short.reasons[0];
           return (
             `${stillHasOptions(ctx, ladder)} Leaving the shift short is only for when steps 1-3 ` +
@@ -603,12 +615,16 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
             `${partnerChoices(ctx, personIdx, ladder)} Explain this to the user in plain words.`
           );
         }
-        const view =
-          plan.kind === "cover" && !countHeadroom(ctx.model, ctx.days, partnerIdx)
-            ? buildOvertimeView(ctx.context, personIdx, partnerIdx, plan, args.reason, args.summary)
-            : sick
-              ? buildSickView(ctx.context, personIdx, partnerIdx, plan, args.summary)
-              : buildRosterChangeView(ctx.context, personIdx, partnerIdx, plan, args.summary);
+        const overtime = plan.kind === "cover" && !countHeadroom(ctx.model, ctx.days, partnerIdx);
+        // Overtime is a step 2 request: never while a straight swap or cover exists.
+        if (overtime && ladder.step === 1) {
+          return `${stillHasOptions(ctx, ladder)} No overtime request was prepared. Offer a swap or cover with one of them first.`;
+        }
+        const view = overtime
+          ? buildOvertimeView(ctx.context, personIdx, partnerIdx, plan, args.reason, args.summary)
+          : sick
+            ? buildSickView(ctx.context, personIdx, partnerIdx, plan, args.summary)
+            : buildRosterChangeView(ctx.context, personIdx, partnerIdx, plan, args.summary);
         return show(plan.cells, view, sickLeave);
       },
     },
@@ -682,6 +698,12 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
         const lateAgain = assertTurnAuthority(token, signal);
         if (lateAgain) return lateAgain;
         if (!prepared.ok) return prepared.message;
+        const question = prepared.linked.assumptions.find(
+          (a) => a.type === "borrowed_staff_arranged",
+        )?.question;
+        if (question === undefined) {
+          return "The app did not ask the lending ward to confirm this nurse, so no card was shown and nothing was altered.";
+        }
         // C1: the roster only records the absence (sick reason). The nurse's row needs
         // roster-file/2 (Task 12), so it appears after the next run.
         const cells: RosterCellChange[] =
@@ -695,19 +717,12 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
             : [];
         const needs = ladder.borrow.map((n) => ({
           date: plainDate(isos[n.dateIdx]),
-          shift: n.shift,
+          shift: shiftName(ctx.context, n.shift),
         }));
         assistantActions.showRosterChange(
           {
             request: cells.length > 0 ? { solvedBaselineId: baselineId, cells } : null,
-            view: buildBorrowView(
-              name,
-              args.source,
-              groups,
-              needs,
-              prepared.linked.questions[0] ?? null,
-              args.summary,
-            ),
+            view: buildBorrowView(name, args.source, groups, needs, question, args.summary),
             linked: {
               proposalId: prepared.linked.proposalId,
               assumptionIds: prepared.linked.assumptionIds,
