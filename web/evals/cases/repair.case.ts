@@ -71,7 +71,9 @@ export const REPAIR_CASES: EvalCase[] = [
     expect: {
       proposalOps: [{ type: "edit_count_rule" }],
       finalState: noShortfalls,
-      judge: ["Says who has to agree to the change."],
+      judge: [
+        "Names who has to agree to the higher night limit (the affected nurses or the nurse manager). A legality or contract question, or the app's confirmation on Apply, does not count on its own.",
+      ],
     },
   },
   {
