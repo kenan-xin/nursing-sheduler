@@ -30,6 +30,8 @@ import type {
 import { EXPRESSION_OPS, substituteTarget } from "@/components/card-editor/expression-model";
 import { calendarSpan } from "./assumptions";
 import { generateDateItems } from "@/lib/dates";
+import { formatShortDate } from "@/lib/dates/date-id";
+import { requiredOn } from "@/lib/rules/shortfalls";
 import type { AssistantCommandV1 } from "./commands";
 import { stableStringify } from "./digest";
 import { rosterDatesBetween } from "./operations";
@@ -214,24 +216,64 @@ function renderStrength(weight: number): string {
  * equation, a group or nested list one combined count. A skill mix adds floors for
  * named groups among those people and bans nobody.
  */
+function requirementShifts(card: RequirementCard): { labels: string[]; shifts: string } {
+  const entries = Array.isArray(card.shiftType) ? card.shiftType : [card.shiftType];
+  const labels = entries.map((entry) => flattenRefs(entry).map(String).join(" + "));
+  return { labels, shifts: labels.length === 1 ? labels[0] : `each of ${labels.join(", ")}` };
+}
+
 function describeRequirement(card: RequirementCard): string {
   const n = card.requiredNumPeople;
   const p = card.preferredNumPeople;
-  const entries = Array.isArray(card.shiftType) ? card.shiftType : [card.shiftType];
-  const labels = entries.map((entry) => flattenRefs(entry).map(String).join(" + "));
-  const shifts = labels.length === 1 ? labels[0] : `each of ${labels.join(", ")}`;
+  const { labels, shifts } = requirementShifts(card);
   const dates = renderDates(card.date);
+  const except = (card.requiredNumPeopleOverrides ?? [])
+    .map(([iso, count]) => `${formatShortDate(iso)}: ${count}`)
+    .join(", ");
+  const exceptions = except ? `, except ${except}` : "";
   const who = renderPeople(card.qualifiedPeople, "");
   const ban = who ? `; only ${who} may work ${labels.join(", ")}` : "";
   const mix = card.skillMix?.length
     ? `; at least ${card.skillMix.map((e) => `${e.minNumPeople} from “${e.people}”`).join(", ")} — anyone can fill the other places`
     : "";
   if (p == null || p === n) {
-    return `Exactly ${n} ${n === 1 ? "person" : "people"} on ${shifts}, ${dates}${ban}${mix}`;
+    return `Exactly ${n} ${n === 1 ? "person" : "people"} on ${shifts}, ${dates}${exceptions}${ban}${mix}`;
   }
   const lean =
     card.weight < 0 ? `${p} preferred` : card.weight > 0 ? `${n} preferred` : "no preference";
-  return `${n} to ${p} people on ${shifts}, ${dates} (${lean}, weight ${card.weight})${ban}${mix}`;
+  return `${n} to ${p} people on ${shifts}, ${dates}${exceptions} (${lean}, weight ${card.weight})${ban}${mix}`;
+}
+
+/** A day's count as the Preview says it: `2`, or `2 to 3` with a distinct preferred count. */
+function countOn(card: RequirementCard, iso: string): string {
+  const n = requiredOn(card, iso);
+  const p = card.preferredNumPeople;
+  return p == null || p === n ? `${n}` : `${n} to ${p}`;
+}
+
+/**
+ * An exception-only change, one line per date: "14 Oct: exactly 2 → 1 on N". Any other
+ * change returns undefined, so the full sentence shows.
+ */
+function requirementChange(from: RequirementCard, to: RequirementCard): string | undefined {
+  const rest = ({ requiredNumPeopleOverrides: _o, ...card }: RequirementCard) =>
+    stableStringify(card);
+  if (rest(from) !== rest(to)) return undefined;
+  const dates = [
+    ...new Set(
+      [...(from.requiredNumPeopleOverrides ?? []), ...(to.requiredNumPeopleOverrides ?? [])].map(
+        ([iso]) => iso,
+      ),
+    ),
+  ].sort();
+  const lines = dates
+    .filter((iso) => requiredOn(from, iso) !== requiredOn(to, iso))
+    .map((iso) => {
+      const was = countOn(from, iso);
+      const lead = was.includes(" to ") ? was : `exactly ${was}`;
+      return `${formatShortDate(iso)}: ${lead} → ${countOn(to, iso)} on ${requirementShifts(to).shifts}`;
+    });
+  return lines.length > 0 ? lines.join("; ") : undefined;
 }
 
 function describeSuccession(card: SuccessionCard): string {
@@ -335,7 +377,7 @@ function compareKeyed<T>(
     label: (item: T) => string;
     render: (item: T) => string;
     /** The `after` of a changed item, when the whole new value would bury the change. */
-    renderChange?: (from: T, to: T) => string;
+    renderChange?: (from: T, to: T) => string | undefined;
     keyPrefix: string;
   },
 ): Entry[] {
@@ -501,6 +543,14 @@ export function diffScenarioDocuments(
         identity: (card) => card.uid,
         label: (card) => ruleTitle(card, kind),
         render: (card) => ruleBody(card as unknown as Record<string, unknown>, kind),
+        renderChange:
+          kind === "requirements"
+            ? (from, to) =>
+                requirementChange(
+                  from as unknown as RequirementCard,
+                  to as unknown as RequirementCard,
+                )
+            : undefined,
       }),
     );
   }

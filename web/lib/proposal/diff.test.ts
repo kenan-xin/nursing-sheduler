@@ -12,6 +12,7 @@ import { deriveProposalDiff, diffScenarioDocuments, SCOPE_LABEL, type DiffScope 
 import type { AssistantCommandV1 } from "./commands";
 import { octoberWard, peopleScenario, proposalScenario, ruleWardScenario } from "./test-support";
 import { cards, people, requirement, ward } from "@/lib/rules/ward-fixtures.test-support";
+import type { ScenarioUiState } from "@/lib/scenario";
 
 describe("deriveProposalDiff", () => {
   it("separates what was asked for from what the app will do as a result", () => {
@@ -791,6 +792,63 @@ describe("skill mix in the Preview", () => {
     expect(entry?.after).toContain(
       "; at least 2 from “RN”, 1 from “Senior” — anyone can fill the other places",
     );
+  });
+});
+
+describe("requirement exceptions in the Preview", () => {
+  // Task 7 (the assistant arm) is not built yet: these build the before/after
+  // requirement cards directly, the way the arm will once it lands.
+  const withException = (
+    state: ScenarioUiState,
+    date: string,
+    requiredNumPeople: number,
+  ): ScenarioUiState => ({
+    ...state,
+    cardsByKind: {
+      ...state.cardsByKind,
+      requirements: state.cardsByKind.requirements.map((card) =>
+        card.uid === "req-day"
+          ? { ...card, requiredNumPeopleOverrides: [[date, requiredNumPeople] as const] }
+          : card,
+      ),
+    },
+  });
+
+  it("names the date and both numbers", () => {
+    const before = ruleWardScenario();
+    const after = withException(before, "2026-04-14", 1);
+    const entry = diffScenarioDocuments(before, after).find(
+      (e) => e.key === "rule:requirements:req-day",
+    );
+    expect(entry?.after).toBe("14 Apr: exactly 2 → 1 on Day");
+    expect(entry?.before).toMatch(/^On · “Day cover” · Exactly 2 people on Day, every date/);
+  });
+
+  it("uses the range words when the rule has a preferred count", () => {
+    const state = ruleWardScenario();
+    state.cardsByKind.requirements[0] = {
+      ...state.cardsByKind.requirements[0],
+      preferredNumPeople: 3,
+      weight: -5,
+    };
+    const after = withException(state, "2026-04-14", 1);
+    const entry = diffScenarioDocuments(state, after).find(
+      (e) => e.key === "rule:requirements:req-day",
+    );
+    expect(entry?.after).toBe("14 Apr: 2 to 3 → 1 to 3 on Day");
+  });
+
+  it("lists exceptions in the rule sentence", () => {
+    const first = withException(ruleWardScenario(), "2026-04-14", 1);
+    const applied = applyAssistantCommands(first, [
+      { type: "set_staffing_requirement_people", ruleId: "req-day", requiredNumPeople: 3 },
+    ]);
+    if (!applied.ok) throw new Error(applied.rejection.message);
+    const diff = deriveProposalDiff(first, applied.next, []);
+    const entry = [...diff.direct, ...diff.cascade].find(
+      (e) => e.key === "rule:requirements:req-day",
+    );
+    expect(entry?.after).toContain("Exactly 3 people on Day, every date, except 14 Apr: 1");
   });
 });
 
