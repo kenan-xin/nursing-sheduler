@@ -58,6 +58,20 @@ describe("the rule arms' text states what the solver enforces", () => {
     expect(mix).toContain("Never use qualifiedPeople for this");
   });
 
+  it("tells the model set_skill_mix replaces the whole list", () => {
+    const mix = arm("set_skill_mix").skillMix.description ?? "";
+    expect(mix).toContain("Replaces the requirement's whole skill mix");
+    expect(mix).toContain("[] removes it");
+  });
+
+  it("says a head count cannot go below the skill mix", () => {
+    for (const type of ["add_staffing_requirement", "edit_staffing_requirement"]) {
+      expect(arm(type).requiredNumPeople.description).toContain(
+        "cannot go below the requirement's skill mix",
+      );
+    }
+  });
+
   it("a succession's weight: -infinity forbids, a must-follow is steered to a finite weight", () => {
     const weight = arm("add_succession_rule").weight.description ?? "";
     expect(weight).toContain('"-infinity" = must never happen');

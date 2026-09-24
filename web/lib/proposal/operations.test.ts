@@ -151,6 +151,53 @@ describe("set_skill_mix", () => {
     expect(!result.ok && result.rejection.code).toBe(code);
   });
 
+  it("refuses ALL in a skill mix with a message that says why", () => {
+    const result = applyAssistantCommand(state(), {
+      type: "set_skill_mix",
+      ruleId: "req-day",
+      skillMix: [{ people: "ALL", minNumPeople: 1 }],
+    });
+    expect(!result.ok && result.rejection.message).toContain("not Everyone");
+  });
+
+  it.each([
+    [
+      "add with a qualifiedPeople ban",
+      (s: ScenarioUiState) => s,
+      {
+        type: "add_staffing_requirement" as const,
+        description: "Night",
+        shiftType: "Night",
+        qualifiedPeople: ["RN"],
+        dates: ["ALL"],
+        requiredNumPeople: 3,
+        skillMix: [{ people: "RN", minNumPeople: 1 }],
+      },
+    ],
+    [
+      "edit narrowing qualifiedPeople on a card with a mix",
+      (s: ScenarioUiState) => {
+        s.cardsByKind.requirements[0].skillMix = [{ people: "RN", minNumPeople: 2 }];
+        return s;
+      },
+      {
+        type: "edit_staffing_requirement" as const,
+        ruleId: "req-day",
+        description: "Day cover",
+        shiftType: "Day",
+        qualifiedPeople: ["RN"],
+        dates: ["ALL"],
+        requiredNumPeople: 4,
+      },
+    ],
+  ])("refuses a skill mix with a %s", (_label, seed, command) => {
+    const result = applyAssistantCommand(seed(state()), command);
+    expect(!result.ok && result.rejection.code).toBe("invalid_value");
+    expect(!result.ok && result.rejection.message).toContain(
+      REQUIREMENT_MESSAGES.skillMixNeedsEveryone,
+    );
+  });
+
   it("edit_staffing_requirement keeps the stored skill mix", () => {
     const seeded = applyAssistantCommand(state(), {
       type: "set_skill_mix",

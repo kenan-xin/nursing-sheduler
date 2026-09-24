@@ -676,6 +676,13 @@ function skillMixRejection(
   const offered = skillMixOptions(state);
   const unknown = firstUnoffered(skillMix?.map((entry) => entry.people) ?? [], offered);
   if (unknown === undefined) return undefined;
+  if (String(unknown).toUpperCase() === RESERVED_SHIFT_TYPE.all) {
+    return reject(
+      index,
+      "unknown_target",
+      `${name}: a skill mix names a group or person, not Everyone. A plain head count already covers everyone.`,
+    );
+  }
   return reject(
     index,
     "unknown_target",

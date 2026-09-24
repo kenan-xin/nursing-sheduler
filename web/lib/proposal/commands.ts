@@ -490,12 +490,12 @@ function requirementFields() {
       .describe(
         "The exact number of people on that shift on each date, e.g. 2 (a hard rule), " +
           "unless the requirement already has a preferred count, which makes it the lowest " +
-          "allowed.",
+          "allowed. It cannot go below the requirement's skill mix.",
       ),
   };
 }
 
-function skillMixSchema() {
+function skillMixSchema(extra = "") {
   return z
     .array(
       z.strictObject({
@@ -506,7 +506,8 @@ function skillMixSchema() {
     .describe(
       "Skill mix: floors for named groups AMONG the shift's staff. Bans nobody. " +
         '"At least 2 RNs among the 4 on nights" = requiredNumPeople 4 + skillMix [{people:"RN",minNumPeople:2}]. ' +
-        "Never use qualifiedPeople for this: qualifiedPeople bans everyone else.",
+        "Never use qualifiedPeople for this: qualifiedPeople bans everyone else." +
+        extra,
     );
 }
 
@@ -694,7 +695,10 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
   z.strictObject({
     type: z.enum(["set_skill_mix"]),
     ruleId: ruleIdSchema(),
-    skillMix: skillMixSchema(),
+    skillMix: skillMixSchema(
+      " Replaces the requirement's whole skill mix: list every entry to keep, " +
+        "so to add a group include the existing entries too. [] removes it.",
+    ),
   }),
   z.strictObject({
     type: z.enum(["remove_rule"]),
