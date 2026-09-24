@@ -164,4 +164,20 @@ describe("AssistantReceipts", () => {
     expect(list.className).toMatch(/max-h-/);
     expect(list.className).toMatch(/overflow-y-auto/);
   });
+
+  it("boxes the bar and its expanded list in one card surface", async () => {
+    const user = userEvent.setup();
+    const controller = controllerWith([standing("r1", "Set the roster range", "unavailable")]);
+    render(<AssistantReceipts controller={controller} />);
+
+    const box = screen.getByTestId("assistant-receipts");
+    expect(box).toHaveAttribute("data-level", "surface");
+    expect(box).toHaveClass("rounded-card");
+
+    await user.click(screen.getByTestId("assistant-receipts-toggle"));
+    const list = screen.getByTestId("assistant-receipts-list");
+    expect(box).toContainElement(list);
+    // The divider between the header and the list.
+    expect(list).toHaveClass("border-t");
+  });
 });
