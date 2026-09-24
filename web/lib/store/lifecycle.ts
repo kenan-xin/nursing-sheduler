@@ -76,16 +76,32 @@ function hydrateImportTarget(target: ImportNormalizationTarget): ScenarioUiState
  * skeleton/error surfaces are unchanged. A failure here settles
  * `recoverable-error` rather than crashing, exactly as before — but the durable
  * record is left intact for the next attempt instead of being written over.
+ *
+ * BOUNDED, BUT NOT ABANDONED. Every await in bring-up is an IndexedDB transaction, and
+ * IndexedDB queues one behind any overlapping readwrite transaction on any connection --
+ * including one held by another tab that is hung or frozen. Nothing here can break that
+ * lock, so past `stallAfterMs` the gate says so (`stalled`) instead of showing skeletons
+ * forever. Bring-up keeps waiting underneath and settles normally once the lock clears;
+ * nothing is written or discarded to get there.
  */
-export async function initializeScenarioAuthority(hot: HotStore): Promise<void> {
+export async function initializeScenarioAuthority(
+  hot: HotStore,
+  { stallAfterMs = BRING_UP_STALL_MS }: { stallAfterMs?: number } = {},
+): Promise<void> {
   hot.getState().setHydrationStatus("hydrating");
+  const stall = setTimeout(() => hot.getState().setHydrationStatus("stalled"), stallAfterMs);
   try {
     await getScenarioAuthority().initialize();
     hot.getState().setHydrationStatus("ready");
   } catch {
     hot.getState().setHydrationStatus("recoverable-error");
+  } finally {
+    clearTimeout(stall);
   }
 }
+
+/** A healthy bring-up takes well under a second; this is "something is holding the database". */
+export const BRING_UP_STALL_MS = 10_000;
 
 /**
  * Load a scenario from a keyless import target: assign card/cell identity, then

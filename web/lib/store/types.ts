@@ -20,7 +20,15 @@ import type { DateRef, PersonRef, ShiftTypeRef, Weight } from "@/lib/scenario";
  * `unhydrated → hydrating → ready | recoverable-error`. Editors block mutations
  * until `ready`; `recoverable-error` offers a user reset without crashing.
  */
-export type HydrationStatus = "unhydrated" | "hydrating" | "ready" | "recoverable-error";
+export type HydrationStatus =
+  | "unhydrated"
+  | "hydrating"
+  /** Still hydrating past the bounded wait: IndexedDB is queued behind a lock this tab
+   *  cannot break (another tab, hung or frozen). Settles to `ready`/`recoverable-error`
+   *  by itself the moment the lock clears. */
+  | "stalled"
+  | "ready"
+  | "recoverable-error";
 
 // ---------------------------------------------------------------------------
 // Run state (hot) — the SSE/optimize transport is T06's; this is only the shape

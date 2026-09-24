@@ -101,6 +101,21 @@ describe("HydrationGate — recoverable-error state", () => {
   });
 });
 
+describe("HydrationGate — stalled restore (dna)", () => {
+  it("offers a reload, never the destructive reset, and hides the app", () => {
+    useHotStore.setState({ hydrationStatus: "stalled" });
+    render(
+      <HydrationGate>
+        <div data-testid="gated-children" />
+      </HydrationGate>,
+    );
+    expect(screen.getByTestId("hydration-stalled")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /reload/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /reset/i })).toBeNull();
+    expect(screen.queryByTestId("gated-children")).toBeNull();
+  });
+});
+
 // ---------------------------------------------------------------------------
 // G4.1 — the corrupt-storage recovery reset is the SAME reset as Save & Load.
 //
