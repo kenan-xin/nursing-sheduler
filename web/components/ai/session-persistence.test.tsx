@@ -1164,7 +1164,7 @@ describe("a write already open when authority closes", () => {
       agent.shape = "toolThenAnswer";
       const barrier = suspendAt("before-return");
 
-      let sent!: Promise<void>;
+      let sent!: Promise<unknown>;
       act(() => {
         sent = session.current!.send("why is the 15th short?");
       });
@@ -1215,7 +1215,7 @@ describe("a write already open when authority closes", () => {
     agent.shape = "toolThenAnswer";
     const barrier = suspendAt("before-return");
 
-    let sent!: Promise<void>;
+    let sent!: Promise<unknown>;
     act(() => {
       sent = session.current!.send("why is the 15th short?");
     });

@@ -52,12 +52,14 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/dates",
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
 }));
+const sessionSend = vi.hoisted(() => vi.fn(async () => true));
 vi.mock("./use-assistant-session", () => ({
   useAssistantSession: () => ({
     messages: [],
     isRunning: false,
     interrupting: false,
-    send: vi.fn(),
+    sending: false,
+    send: sessionSend,
     stop: vi.fn(),
   }),
 }));
@@ -365,6 +367,31 @@ describe("historical conversations never regain live Apply", () => {
     expect(await screen.findByTestId("assistant-proposal")).toBeInTheDocument();
     expect(await screen.findByTestId("proposal-apply")).toBeInTheDocument();
     expect(screen.getByTestId("apply-navigation-status")).toBeInTheDocument();
+  });
+
+  // The follow-up message after an Apply goes through the live rendering's send path.
+  it("sends one follow-up after Apply in the LIVE rendering", async () => {
+    const user = userEvent.setup();
+    sessionSend.mockClear();
+    await showProposal(SHRINK);
+    render(<AssistantLiveConversation threadId="thread-1" routePath="/dates" routeLabel="Dates" />);
+
+    await user.click(await screen.findByTestId("proposal-apply"));
+    await waitFor(() => expect(sessionSend).toHaveBeenCalledTimes(1));
+    expect(sessionSend).toHaveBeenCalledWith(
+      "I applied it: Roster period, 2026-04-01 to 2026-04-15.",
+    );
+  });
+
+  it("sends no follow-up when the Preview is cancelled in the LIVE rendering", async () => {
+    const user = userEvent.setup();
+    sessionSend.mockClear();
+    await showProposal(SHRINK);
+    render(<AssistantLiveConversation threadId="thread-1" routePath="/dates" routeLabel="Dates" />);
+
+    await user.click(await screen.findByTestId("proposal-cancel"));
+    await waitFor(() => expect(screen.queryByTestId("assistant-proposal")).toBeNull());
+    expect(sessionSend).not.toHaveBeenCalled();
   });
 
   // The second source read here -- `proposal-preview-card.tsx` must not contain

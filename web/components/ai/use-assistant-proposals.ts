@@ -37,6 +37,9 @@ export type ApplyOutcomeView =
   | {
       kind: "applied";
       receiptId: string;
+      /** Which proposal revision this Apply settled; one Apply, one follow-up. */
+      proposalId: string;
+      proposalRevision: number;
       documentRevision: number;
       reloadRequired: boolean;
       /** The Preview's diff. Apply only commits against the basis the Preview was
@@ -238,6 +241,8 @@ export function useAssistantProposals(): AssistantProposalController {
         setOutcome({
           kind: "applied",
           receiptId: result.receipt.receiptId,
+          proposalId: result.receipt.proposalId,
+          proposalRevision: result.receipt.proposalRevision,
           documentRevision: result.documentRevision,
           reloadRequired: result.reloadRequired,
           diff: proposal.diff,

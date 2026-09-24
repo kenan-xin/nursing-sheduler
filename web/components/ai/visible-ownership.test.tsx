@@ -335,7 +335,7 @@ async function suspendAtScrub() {
   });
   reads.holdScrub = token;
 
-  let sent!: Promise<void>;
+  let sent!: Promise<unknown>;
   act(() => {
     sent = session.current!.send("first question");
   });
@@ -701,7 +701,7 @@ describe("a prepared turn suspended at the real scrub boundary", () => {
     });
     reads.holdScrub = token;
 
-    let sentA!: Promise<void>;
+    let sentA!: Promise<unknown>;
     act(() => {
       sentA = session.current!.send("first question");
     });

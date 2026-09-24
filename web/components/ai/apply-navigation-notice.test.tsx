@@ -64,6 +64,8 @@ function controller(outcome: ApplyOutcomeView | null): AssistantProposalControll
 const applied = (receiptId = "r1"): ApplyOutcomeView => ({
   kind: "applied",
   receiptId,
+  proposalId: "p1",
+  proposalRevision: 1,
   documentRevision: 2,
   reloadRequired: false,
   diff: DIFF,
