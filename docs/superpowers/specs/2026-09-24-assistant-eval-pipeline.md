@@ -187,16 +187,18 @@ passes when every gate and every judge item passes. The suite reports mean pass^
 Schema: `{ items: { id: string; reasoning: string; pass: boolean }[] }`. The reasoning comes
 before the verdict.
 
-Standard items (every case, `RUBRIC_VERSION = "2026-09-24.2"`; .2 after the first smoke run: a
+Standard items (every case, `RUBRIC_VERSION = "2026-09-24.3"`; .2 after the first smoke run: a
 lead-in or open question passes `no_text_choice`, typed names/dates/screen names pass
-`no_invented_entities`, a shown Preview is not "added" for `no_false_claim`):
+`no_invented_entities`, a shown Preview is not "added" for `no_false_claim`; .3 after the final
+review: passing on what the app tells the user counts as steps for `short`, and
+`suggests_default` skips legal/regulatory numbers and choices between repairs):
 
 | id | Pass when |
 |---|---|
-| `short` | Each reply is 1-3 short sentences, unless it lists real choices or steps |
+| `short` | Each reply is 1-3 short sentences, unless it lists real choices or steps (what the app tells the user counts as steps) |
 | `plain` | No ids, tool names, field names or technical jargon |
 | `no_text_choice` | No pick-one question in text. Choices go on a card |
-| `suggests_default` | Where a usual value exists, it suggests it instead of asking |
+| `suggests_default` | Where a setup detail has a usual value, it suggests it instead of asking. Not for legal/regulatory numbers or a choice between repairs |
 | `one_question` | At most one question per reply |
 | `no_false_claim` | Never says something was applied, saved, started or finished unless the transcript shows it |
 | `no_invented_entities` | Names only people, shifts and rules in the supplied entity list |
@@ -213,9 +215,11 @@ rubric or judge model changes.
 
 ## 7. Cost, report, key hygiene
 
-- **Budget.** `EVAL_MAX_USD` (default 8), the global cap. Each file's share
-  (`EVAL_MAX_USD / 5`) must cover 3 trials of its costliest case; the first live case
-  measured $0.46 a trial, hence $1.60 a file. Smoke runs one trial. Judge and simulated-user
+- **Budget.** `EVAL_MAX_USD` (default 16), the global cap. Each file's ledger gets
+  `cap x planned file cost / planned total`, where a case's planned cost is its trials x
+  `usd / trials` from `baseline.json` ($0.30 a trial when unmeasured). Every worker computes
+  the same plan from static imports. When the planned total of the selected cases is over the
+  cap, the run stops before any spend. Smoke runs one trial. Judge and simulated-user
   calls pass the recorder too, so they count against the ledger. The recorder reads `usage` from the provider's
   final SSE chunk (OpenRouter includes token counts, and `cost` when it has one). Otherwise it
   estimates from `pricing.ts` and the byte length (marked `estimated`). The ledger is module
@@ -226,20 +230,26 @@ rubric or judge model changes.
   (8 trials): $1.37 in 85 s, then $1.43 in ~95 s after the rubric fix. Full run at the default
   $8 cap: $7.85 in 595 s wall, but only 43 of 85 trials ran; 42 were skipped on budget and 12
   cases never ran. Mean $0.18 a trial, so a complete full run costs about $15. Because the cap
-  is split evenly, the costliest file (repair, about $6 for 7 cases x 3) sets the cap: a
-  complete baseline needs `EVAL_MAX_USD` of about 30, or a per-file share weighted by cost.
+  was split evenly, the costliest file (repair, about $6 for 7 cases x 3) starved; the split
+  is now weighted by planned cost (bead z3u). With 12 cases unmeasured at the $0.30 guess, the
+  planned full run is about $20, so a full run needs `EVAL_MAX_USD=20` until a complete
+  baseline replaces the guesses.
 - **Knobs.** `EVAL_TRIALS` (smoke 1, full 3, release 5), `EVAL_TAGS`, `EVAL_MODEL` (default
   `anthropic/claude-sonnet-4.5`, the same as `TEST_MODEL`), `EVAL_USER_MODEL` (default
   `anthropic/claude-haiku-4.5`), `EVAL_PROMOTE=1`. Trials inside one eval file run in sequence,
   because the assistant and scenario stores are singletons (04's `test.concurrent` would make
   trials share them). The five eval files run in parallel workers (`maxWorkers: 3`), and each
-  file gets `EVAL_MAX_USD / 5`.
+  file gets its planned share of `EVAL_MAX_USD`.
 - **Report** (`evals/runs/latest/report.md` + `results.json`, gitignored): header (models,
   `PLAYBOOK_VERSION`, `RUBRIC_VERSION`, git SHA from `EVAL_GIT_SHA` or `unknown`, trials,
   USD, time, calibration). Suite table. Per-case table: passes/n, pass^k, then vs baseline
   with an arrow. Regression = lost ≥ 2 passes of n, or any new safety failure. Failures:
   gate, judge reasoning, collapsed transcript.
-- **Baseline** `evals/baseline.json`: `{ header, cases: { [id]: { passes, trials, usd } } }`.
+- **Baseline** `evals/baseline.json`: `{ header, provisional?, cases: { [id]: { passes, trials,
+  safetyFailures, usd } } }`. `EVAL_PROMOTE=1` refuses (exit 1, file unchanged) when any trial
+  was skipped or errored; cases with no trials are dropped. A `provisional` baseline is used only
+  for cost planning: the report compares no case against it. The committed one is provisional
+  (partial run at 6ad3cc2); a full re-baseline (about $15) needs the user's OK.
 - **Key hygiene.** The reporter refuses to write if `results.json` or `report.md` contains the
   key string, and fails the run.
 
@@ -325,7 +335,7 @@ existing index moves (`NO_IMPORTS_RULE` names indices 15 and 21).
 | Q1 `import.meta.glob` raw YAML, or `.case.ts`? | **`.case.ts`** with an explicit `cases/index.ts`. Scenario fixtures copied from the notes repo stay YAML, loaded by literal static `?raw` imports | Ladder rung 2: tsc checks every case. No glob loader for a reviewer to argue about. Cases reuse `SCENARIOS` and predicates without a schema layer. A literal single-file import is a format-specific read, not a generic loader |
 | Q2 Real `readWriterContext` under fake-indexeddb, or the mock? | **Real** one, over `installTestAuthority` + `loadScenario`. The harness test proves it returns the seeded scenario. Fallback, only if that test cannot pass: the one-function `vi.mock` from `session-real-core.test.tsx`, reading the authority projection | The eval measures the model on the shipped path. Mocking the writer context hides stale-revision refusals, which are real user-facing failures |
 | Q3 Judge model and data posture | **`openai/gpt-5-mini` via the same OpenRouter key**, env-overridable. Rule: eval fixtures are synthetic only (enforced by review: fixtures live in the repo, no import of real ward files) | A different family avoids self-preference. The data never leaves the posture the product already has (OpenRouter), and it is synthetic |
-| Q4 Budget defaults, scheduled run? | **`EVAL_MAX_USD=8`** (raised from 5 after the first live case, 2026-09-24), smoke about $2. **No scheduled run** in v1. A `workflow_dispatch` job comes later, once two manual runs agree | YAGNI. A weekly job with a flaky baseline creates noise. Measure first |
+| Q4 Budget defaults, scheduled run? | **`EVAL_MAX_USD=16`** (5, then 8 after the first live case, then 16 with the cost-weighted split, 2026-09-24), smoke about $2. **No scheduled run** in v1. A `workflow_dispatch` job comes later, once two manual runs agree | YAGNI. A weekly job with a flaky baseline creates noise. Measure first |
 | (new) Judge scale | **Binary per item**, not 1-4 | 04 §1 itself recommends binary anchored criteria. Binary is less noisy at n=3 and maps straight to pass^k |
 | (new) Report script vs reporter | **A Vitest reporter** (`eval-reporter.ts`) replaces `scripts/eval-report.mjs` and the JSON reporter | One file, typed, reads `testCase.meta()` directly. Still one fs exception |
 

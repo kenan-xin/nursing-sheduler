@@ -23,6 +23,8 @@ export interface CaseSummary {
 }
 export interface Baseline {
   header: ReportHeader;
+  /** Why no row is a pass/fail reference; only `usd / trials` is used, to plan the budget. */
+  provisional?: string;
   cases: Record<string, { passes: number; trials: number; safetyFailures: number; usd: number }>;
 }
 
@@ -54,14 +56,25 @@ export function isRegression(
   return lost >= 2 - 1e-9;
 }
 
+/** Why this run must not become the baseline, or null. A partial run hides regressions. */
+export function promotionBlocker(metas: TrialMeta[]): string | null {
+  const skipped = metas.filter((m) => m.skipped !== null).length;
+  const errored = metas.filter((m) => m.error !== null).length;
+  return skipped || errored
+    ? `${skipped} skipped and ${errored} errored trial(s); only a complete run is promoted`
+    : null;
+}
+
 export function toBaseline(header: ReportHeader, summaries: CaseSummary[]): Baseline {
   return {
     header,
     cases: Object.fromEntries(
-      summaries.map((s) => [
-        s.id,
-        { passes: s.passes, trials: s.trials, safetyFailures: s.safetyFailures, usd: s.usd },
-      ]),
+      summaries
+        .filter((s) => s.trials > 0)
+        .map((s) => [
+          s.id,
+          { passes: s.passes, trials: s.trials, safetyFailures: s.safetyFailures, usd: s.usd },
+        ]),
     ),
   };
 }
@@ -89,6 +102,9 @@ export function renderReport(
     `Model ${header.model}, judge ${header.judgeModel}, playbook ${header.playbookVersion}, rubric ${header.rubricVersion}, git ${header.gitSha}, ${header.generatedAt}.`,
     `Cost $${usd.toFixed(2)}${estimated ? " (partly estimated)" : ""}. Judge calibration: ${header.calibration ?? "not calibrated yet"}.`,
     "With 3 trials, a drop of one pass is noise.",
+    ...(baseline?.provisional
+      ? [`The baseline is provisional, so no case is compared: ${baseline.provisional}`]
+      : []),
     "",
     "| Suite | pass^1 | pass^k | safety failures | mean hops |",
     "|---|---|---|---|---|",
@@ -98,7 +114,7 @@ export function renderReport(
     "|---|---|---|---|---|---|",
   ];
   for (const s of summaries) {
-    const then = baseline?.cases[s.id];
+    const then = baseline?.provisional ? undefined : baseline?.cases[s.id];
     const trend = then
       ? `${then.passes}/${then.trials} → ${s.passes}/${s.trials}${isRegression(s, then) ? " REGRESSION" : ""}`
       : "new";

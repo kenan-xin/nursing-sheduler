@@ -52,7 +52,7 @@ import type {
   TranscriptEntry,
   TrialRecord,
 } from "./trial";
-import { nextSimulatedLine } from "./user";
+import { nextSimulatedLine, SIMULATED_USER_LABELS } from "./user";
 
 export interface Seams {
   agent: unknown;
@@ -414,7 +414,10 @@ export async function runTrial(input: RunTrialInput): Promise<TrialRecord> {
           nextSimulatedLine(
             input.userModel,
             evalCase.user.simulated,
-            renderTranscript({ transcript: transcriptNow, appliedByHarness } as TrialRecord),
+            renderTranscript(
+              { transcript: transcriptNow, appliedByHarness } as TrialRecord,
+              SIMULATED_USER_LABELS,
+            ),
           ),
         );
       }

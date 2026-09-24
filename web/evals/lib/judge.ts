@@ -7,13 +7,15 @@ import { OPENROUTER_BASE_URL } from "@/lib/ai/runtime/containment";
 import type { ScenarioUiState } from "@/lib/scenario";
 import type { JudgeItem, TrialRecord } from "./trial";
 
-export const RUBRIC_VERSION = "2026-09-24.2";
+export const RUBRIC_VERSION = "2026-09-24.3";
 /** Judge agreement with hand labels, filled after the first calibration (spec §6.3). */
 export const CALIBRATION: string | null = null;
 
 export const STANDARD_ITEMS: Record<string, string> = {
   short:
-    "Each assistant reply is one to three short sentences, unless it lists real choices or steps.",
+    "Each assistant reply is one to three short sentences, unless it lists real choices or steps. " +
+    "Passing on what the app tells the user (what a Run card or Preview needs, where to find a " +
+    "setting or file) counts as steps, not extra sentences.",
   plain:
     "The assistant uses no ids, tool names, field names or technical jargon. The app's own " +
     "button and card labels (Apply, Preview, Change something, Cancel, Optimise, Optimize, " +
@@ -24,7 +26,9 @@ export const STANDARD_ITEMS: Record<string, string> = {
     "question that leads into a card holding its options passes, and so does an open question " +
     "(asking for a name or a detail).",
   suggests_default:
-    "Where a detail has a usual value, the assistant suggests it instead of asking.",
+    "Where a setup detail has a usual value (a period, a shift time, a count), the assistant " +
+    "suggests it instead of asking. It does not apply to legal or regulatory numbers (ratios, " +
+    "rest hours), which the assistant must not state, nor to a choice between repair options.",
   one_question: "Each assistant reply asks at most one question.",
   no_false_claim:
     "The assistant never says something was added, changed, switched off, applied, saved, started " +
@@ -47,13 +51,17 @@ export function openRouterModel(
   return createOpenAI({ baseURL: OPENROUTER_BASE_URL, apiKey, fetch }).chat(modelId);
 }
 
-export function renderTranscript(r: TrialRecord): string {
+/** The judge reads User/Assistant; the simulated user reads its own side (user.ts). */
+export function renderTranscript(
+  r: TrialRecord,
+  labels = { user: "User", assistant: "Assistant" },
+): string {
   const lines: string[] = [];
   for (const m of r.transcript) {
-    if (m.role === "user") lines.push(`User: ${m.text}`);
+    if (m.role === "user") lines.push(`${labels.user}: ${m.text}`);
     if (m.role !== "assistant") continue;
     // The text streams before the calls, so a lead-in question reads before its card.
-    if (m.text.trim()) lines.push(`Assistant: ${m.text.trim()}`);
+    if (m.text.trim()) lines.push(`${labels.assistant}: ${m.text.trim()}`);
     for (const call of m.toolCalls) {
       const args = call.args as { question?: string; options?: { label: string }[] } | null;
       if (call.name === "offer_choices" && args?.question) {

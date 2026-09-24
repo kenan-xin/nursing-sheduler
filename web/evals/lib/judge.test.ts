@@ -6,6 +6,7 @@ import {
   trialEntities,
   normalizeJudgeItems,
   renderTranscript,
+  RUBRIC_VERSION,
   STANDARD_ITEMS,
 } from "./judge";
 import type { TrialRecord } from "./trial";
@@ -69,6 +70,20 @@ describe("judge", () => {
     expect(STANDARD_ITEMS.no_invented_entities).toMatch(/dates/i);
     expect(STANDARD_ITEMS.plain).toMatch(/screen names/);
     expect(STANDARD_ITEMS.no_false_claim).toMatch(/added/);
+  });
+
+  it("keeps short and suggests_default from failing a reply that follows the app (rubric .3)", () => {
+    expect(RUBRIC_VERSION).toBe("2026-09-24.3");
+    expect(STANDARD_ITEMS.short).toMatch(/the app tells/);
+    expect(STANDARD_ITEMS.suggests_default).toMatch(/legal or regulatory/);
+    expect(STANDARD_ITEMS.suggests_default).toMatch(/choice between repair/);
+  });
+
+  it("can label the transcript from the simulated user's side", () => {
+    const text = renderTranscript(r, { user: "You", assistant: "Scheduling app" });
+    expect(text).toContain("You: Why did it fail?");
+    expect(text).toContain("Scheduling app: Pick a fix.");
+    expect(text).not.toMatch(/^(User|Assistant):/m);
   });
 
   it("lists the scenario's people, shifts and rules for the grounding item", () => {

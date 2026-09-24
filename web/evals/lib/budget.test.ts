@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { BUDGET_ERROR, Ledger, recordingFetch } from "./budget";
+import {
+  BUDGET_ERROR,
+  cutByBudget,
+  FALLBACK_TRIAL_USD,
+  Ledger,
+  plannedUsd,
+  recordingFetch,
+  selectCases,
+} from "./budget";
+import type { Baseline } from "./report";
 
 const sse = (...objects: unknown[]) =>
   objects.map((o) => `data: ${JSON.stringify(o)}\n\n`).join("") + "data: [DONE]\n\n";
@@ -71,5 +80,59 @@ describe("recordingFetch", () => {
     await expect(rec.fetch("https://x.test", { method: "POST", body: "{}" })).rejects.toThrow(
       BUDGET_ERROR,
     );
+  });
+});
+
+describe("budget plan", () => {
+  const baseline = {
+    cases: {
+      costly: { passes: 0, trials: 2, safetyFailures: 0, usd: 1 },
+      cheap: { passes: 0, trials: 3, safetyFailures: 0, usd: 0.3 },
+    },
+  } as unknown as Baseline;
+  const cases = [
+    { id: "costly", tags: ["repair"] },
+    { id: "cheap", tags: ["smoke"] },
+    { id: "unmeasured", tags: ["smoke"], trials: 1 },
+  ];
+
+  it("plans each case at its measured cost a trial, or the flat guess", () => {
+    // 3 x 0.5 + 3 x 0.1 + 1 x fallback
+    expect(plannedUsd(cases, 3, baseline)).toBeCloseTo(1.8 + FALLBACK_TRIAL_USD);
+    expect(FALLBACK_TRIAL_USD).toBe(0.3);
+  });
+
+  it("gives a costly file a share in proportion to its planned cost", () => {
+    const total = plannedUsd(cases, 3, baseline);
+    const costlyShare = (16 * plannedUsd([cases[0]!], 3, baseline)) / total;
+    expect(costlyShare).toBeCloseTo((16 * 1.5) / 2.1);
+  });
+
+  it("selects by tag, or everything with no tags", () => {
+    expect(selectCases(cases, ["smoke"]).map((c) => c.id)).toEqual(["cheap", "unmeasured"]);
+    expect(selectCases(cases, null)).toHaveLength(3);
+  });
+});
+
+describe("cutByBudget", () => {
+  const usd = (n: number) => ({ inputTokens: 0, outputTokens: 0, usd: n, estimated: false });
+
+  it("counts a trial that ended with the ledger over as cut, not failed", () => {
+    const ledger = new Ledger(1);
+    ledger.add(usd(1));
+    expect(cutByBudget(ledger, 0)).toBe(true);
+  });
+
+  it("counts a trial that saw a refused call as cut", () => {
+    const ledger = new Ledger(1);
+    ledger.refused = 2;
+    expect(cutByBudget(ledger, 1)).toBe(true);
+    expect(cutByBudget(ledger, 2)).toBe(false);
+  });
+
+  it("lets a trial under budget with no refusal stand", () => {
+    const ledger = new Ledger(1);
+    ledger.add(usd(0.5));
+    expect(cutByBudget(ledger, 0)).toBe(false);
   });
 });

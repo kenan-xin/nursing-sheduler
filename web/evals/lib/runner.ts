@@ -1,20 +1,23 @@
 // Registers one Vitest test per case trial. Trials in a file run in sequence: the stores
 // are singletons. Each *.eval.ts file is its own worker, with its share of the budget.
 import { describe, expect, test } from "vitest";
-import { Ledger, plus, recordingFetch } from "./budget";
+import baselineJson from "../baseline.json";
+import { ALL_CASES } from "../cases";
+import { cutByBudget, Ledger, plannedUsd, plus, recordingFetch, selectCases } from "./budget";
 import type { EvalCase } from "./case";
 import { gradeDeterministic } from "./graders";
 import { runTrial, type Seams } from "./harness";
 import { judgeTrial, openRouterModel, trialEntities } from "./judge";
+import type { Baseline } from "./report";
 import { toMeta } from "./trial";
 
-export const EVAL_FILES = 5;
 /**
- * The global cap, split evenly over the eval files. Each file's share must cover 3 trials
- * of its costliest case: repair-understaffed-night measured $0.46 a trial, so $1.60 a file.
- * Smoke runs one trial (`pnpm eval:smoke`).
+ * The global cap. A complete 3-trial run measured about $15. Each file gets the share of it
+ * its selected cases are planned to cost, so every worker works out the same split from
+ * static imports, with no state shared between workers.
  */
-export const DEFAULT_MAX_USD = 8;
+export const DEFAULT_MAX_USD = 16;
+const BASELINE = baselineJson as Baseline;
 
 /** A positive number from the environment, or a loud failure: NaN would pass silently. */
 function positive(name: string, fallback: number): number {
@@ -30,13 +33,22 @@ const env = () => ({
   user: process.env.EVAL_USER_MODEL ?? "anthropic/claude-haiku-4.5",
   trials: positive("EVAL_TRIALS", 3),
   tags: process.env.EVAL_TAGS ? process.env.EVAL_TAGS.split(",") : null,
-  maxUsd: positive("EVAL_MAX_USD", DEFAULT_MAX_USD) / EVAL_FILES,
+  maxUsd: positive("EVAL_MAX_USD", DEFAULT_MAX_USD),
 });
 
 export function runCases(cases: EvalCase[], seams: Seams): void {
   const e = env();
-  const ledger = new Ledger(e.maxUsd);
-  const selected = cases.filter((c) => !e.tags || c.tags.some((t) => e.tags!.includes(t)));
+  const total = plannedUsd(selectCases(ALL_CASES, e.tags), e.trials, BASELINE);
+  if (total > e.maxUsd) {
+    // Loud, before any spend: a silent partial run is worse than none.
+    throw new Error(
+      `planned eval cost $${total.toFixed(2)} is over EVAL_MAX_USD $${e.maxUsd}; raise the cap or narrow EVAL_TAGS`,
+    );
+  }
+  const selected = selectCases(cases, e.tags);
+  const ledger = new Ledger(
+    total > 0 ? (e.maxUsd * plannedUsd(selected, e.trials, BASELINE)) / total : 0,
+  );
   describe.sequential.each(selected)("$id", (evalCase) => {
     const n = evalCase.trials ?? e.trials;
     for (let t = 0; t < n; t += 1) {
@@ -79,23 +91,28 @@ export function runCases(cases: EvalCase[], seams: Seams): void {
             model: e.model,
             userModel,
           });
+          // Read before the judge spends: a trial that ended over budget was cut, not finished.
+          let cut = cutByBudget(ledger, refusedBefore);
           const gates = gradeDeterministic(evalCase, record);
-          const judge = record.error
-            ? []
-            : await judgeTrial(
-                openRouterModel(e.key, e.judge, judgeRec.fetch),
-                record,
-                trialEntities(record),
-                evalCase.expect.judge ?? [],
-              ).catch((err: unknown) => [
-                { id: "judge", reasoning: `judge call failed: ${String(err)}`, pass: false },
-              ]);
+          const judge =
+            record.error || cut
+              ? []
+              : await judgeTrial(
+                  openRouterModel(e.key, e.judge, judgeRec.fetch),
+                  record,
+                  trialEntities(record),
+                  evalCase.expect.judge ?? [],
+                ).catch((err: unknown) => [
+                  { id: "judge", reasoning: `judge call failed: ${String(err)}`, pass: false },
+                ]);
           record.usage = plus(
             record.usage,
             plus(await userRec.settled(), await judgeRec.settled()),
           );
           task.meta.eval = toMeta(evalCase, record, gates, judge);
-          if (ledger.refused > refusedBefore) {
+          // After the judge, only a refusal cuts: its own spend going over does not.
+          cut ||= ledger.refused > refusedBefore;
+          if (cut) {
             // The budget cut a hop or the judge short: not a verdict on the assistant.
             task.meta.eval = { ...task.meta.eval, pass: false, skipped: "budget" };
             skip("budget");

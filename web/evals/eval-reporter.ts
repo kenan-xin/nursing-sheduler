@@ -7,6 +7,7 @@ import { PLAYBOOK_VERSION } from "@/lib/ai/assistant/playbook";
 import { CALIBRATION, RUBRIC_VERSION } from "./lib/judge";
 import {
   containsSecret,
+  promotionBlocker,
   renderReport,
   summarize,
   toBaseline,
@@ -51,7 +52,11 @@ export default class EvalReporter implements Reporter {
     await mkdir(OUT, { recursive: true });
     await writeFile(new URL("results.json", OUT), results);
     await writeFile(new URL("report.md", OUT), report);
-    if (process.env.EVAL_PROMOTE === "1") {
+    const blocker = process.env.EVAL_PROMOTE === "1" ? promotionBlocker(metas) : null;
+    if (blocker) {
+      process.exitCode = 1;
+      console.error(`baseline not promoted: ${blocker}; baseline.json is unchanged`);
+    } else if (process.env.EVAL_PROMOTE === "1") {
       await writeFile(
         BASELINE,
         `${JSON.stringify(toBaseline(header, summarize(metas)), null, 2)}\n`,

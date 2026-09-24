@@ -1,3 +1,5 @@
+import type { EvalCase } from "./case";
+import type { Baseline } from "./report";
 // Cost accounting at the provider fetch seam, and the hard stop.
 import type { Usage } from "./trial";
 
@@ -19,6 +21,9 @@ export const plus = (a: Usage, b: Usage): Usage => ({
   estimated: a.estimated || b.estimated,
 });
 
+// ponytail: the check runs before a hop and usage lands after its body resolves, so a hop
+// already in flight (or a parallel one) can go over by one hop. Reserve an estimate up front
+// if that overshoot ever matters.
 export class Ledger {
   total: Usage = ZERO;
   /** Calls refused once over: a trial that saw one was cut by the budget, not failed. */
@@ -30,6 +35,30 @@ export class Ledger {
   get over(): boolean {
     return this.total.usd >= this.maxUsd;
   }
+}
+
+/**
+ * A trial the budget cut short: it ended over (the driver stops on `over`, and the judge
+ * would be refused) or one of its calls was refused. Not a verdict on the assistant.
+ */
+export const cutByBudget = (ledger: Ledger, refusedBefore: number): boolean =>
+  ledger.over || ledger.refused > refusedBefore;
+
+// ponytail: flat guess for a case the baseline has not measured.
+export const FALLBACK_TRIAL_USD = 0.3;
+
+type Planned = Pick<EvalCase, "id" | "tags" | "trials">;
+
+export const selectCases = <C extends Planned>(cases: C[], tags: string[] | null): C[] =>
+  cases.filter((c) => !tags || c.tags.some((t) => tags.includes(t)));
+
+/** Expected cost of the cases, at each one's measured cost a trial in the baseline. */
+export function plannedUsd(cases: Planned[], trials: number, baseline: Baseline): number {
+  return cases.reduce((sum, c) => {
+    const b = baseline.cases[c.id];
+    const perTrial = b && b.trials > 0 ? b.usd / b.trials : FALLBACK_TRIAL_USD;
+    return sum + (c.trials ?? trials) * perTrial;
+  }, 0);
 }
 
 export interface Recorder {

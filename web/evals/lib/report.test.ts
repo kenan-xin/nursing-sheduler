@@ -3,6 +3,7 @@ import type { TrialMeta } from "./trial";
 import {
   containsSecret,
   isRegression,
+  promotionBlocker,
   renderReport,
   summarize,
   toBaseline,
@@ -87,6 +88,32 @@ describe("report", () => {
     expect(md).toContain("2/2 → 1/2");
     expect(md).toContain("missing offer_choices");
     expect(md).toContain("<details>");
+  });
+
+  it("refuses to promote a run with a skipped or errored trial", () => {
+    expect(promotionBlocker([meta("a", 0, true), meta("a", 1, false)])).toBeNull();
+    expect(
+      promotionBlocker([meta("a", 0, true), meta("a", 1, false, { skipped: "budget" })]),
+    ).toMatch(/1 skipped/);
+    expect(promotionBlocker([meta("a", 0, false, { error: "timeout" })])).toMatch(/1 errored/);
+  });
+
+  it("drops cases with no trials from the baseline", () => {
+    const b = toBaseline(
+      header,
+      summarize([meta("a", 0, true), meta("b", 0, false, { skipped: "budget" })]),
+    );
+    expect(Object.keys(b.cases)).toEqual(["a"]);
+  });
+
+  it("compares nothing against a provisional baseline", () => {
+    const baseline = {
+      ...toBaseline(header, summarize([meta("a", 0, true), meta("a", 1, true)])),
+      provisional: "partial run",
+    };
+    const md = renderReport(header, [meta("a", 0, false)], baseline);
+    expect(md).not.toContain("2/2 →");
+    expect(md).toContain("provisional");
   });
 
   it("finds the secret anywhere in the text", () => {
