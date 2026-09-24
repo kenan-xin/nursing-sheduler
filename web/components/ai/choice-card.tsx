@@ -8,7 +8,7 @@ import { useId, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Surface } from "@/components/ui/surface";
-import { useAssistantStore, type ChoiceOffer } from "@/lib/ai/assistant/store";
+import { assistantActions, useAssistantStore, type ChoiceOffer } from "@/lib/ai/assistant/store";
 
 interface ChoiceCardProps {
   onSend: (text: string) => void;
@@ -26,12 +26,13 @@ export function ChoiceCard(props: ChoiceCardProps) {
 function ChoiceCardBody({ offer, onSend, disabled }: ChoiceCardProps & { offer: ChoiceOffer }) {
   const questionId = useId();
   const otherId = useId();
-  const [checked, setChecked] = useState<readonly string[]>([]);
+  // By index, not label: two options may share a label.
+  const [checked, setChecked] = useState<readonly number[]>([]);
   const [other, setOther] = useState("");
 
-  const toggle = (label: string) =>
+  const toggle = (index: number) =>
     setChecked((current) =>
-      current.includes(label) ? current.filter((l) => l !== label) : [...current, label],
+      current.includes(index) ? current.filter((i) => i !== index) : [...current, index],
     );
 
   return (
@@ -48,14 +49,14 @@ function ChoiceCardBody({ offer, onSend, disabled }: ChoiceCardProps & { offer: 
       </h3>
       {offer.multiple ? (
         <>
-          {offer.options.map((option) => (
-            <label key={option.label} className="flex items-start gap-2 text-body text-ink">
+          {offer.options.map((option, index) => (
+            <label key={index} className="flex items-start gap-2 text-body text-ink">
               <input
                 type="checkbox"
                 className="mt-1 accent-brand"
-                checked={checked.includes(option.label)}
+                checked={checked.includes(index)}
                 disabled={disabled}
-                onChange={() => toggle(option.label)}
+                onChange={() => toggle(index)}
               />
               <span>
                 {option.label}
@@ -72,8 +73,8 @@ function ChoiceCardBody({ offer, onSend, disabled }: ChoiceCardProps & { offer: 
             onClick={() =>
               onSend(
                 offer.options
+                  .filter((_, index) => checked.includes(index))
                   .map((option) => option.label)
-                  .filter((label) => checked.includes(label))
                   .join(", "),
               )
             }
@@ -83,9 +84,9 @@ function ChoiceCardBody({ offer, onSend, disabled }: ChoiceCardProps & { offer: 
         </>
       ) : (
         <div className="flex flex-col gap-2">
-          {offer.options.map((option) => (
+          {offer.options.map((option, index) => (
             <Button
-              key={option.label}
+              key={index}
               variant="secondary"
               className="h-auto min-h-control justify-start py-2 text-left"
               disabled={disabled}
@@ -121,6 +122,14 @@ function ChoiceCardBody({ offer, onSend, disabled }: ChoiceCardProps & { offer: 
             Send
           </Button>
         </div>
+        <Button
+          variant="link"
+          size="sm"
+          className="self-start px-0"
+          onClick={() => assistantActions.clearChoices()}
+        >
+          Dismiss
+        </Button>
       </footer>
     </Surface>
   );

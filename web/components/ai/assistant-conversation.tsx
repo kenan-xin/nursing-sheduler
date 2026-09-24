@@ -169,6 +169,9 @@ export function AssistantLiveConversation({
   // transcript, not entries in it -- see the note in `proposal-preview-card.tsx`.
   const proposals = useAssistantProposals();
   const running = session.isRunning || session.interrupting;
+  // The panel keys this component by thread, and the thread follows the scenario, so a
+  // switch unmounts it: an open question must not carry over to another thread.
+  useEffect(() => () => assistantActions.clearChoices(), []);
   // The ONE send path, for the composer and the option card alike. Any send answers
   // (or overrides) an open option card, so it closes here.
   const sendMessage = (text: string) => {

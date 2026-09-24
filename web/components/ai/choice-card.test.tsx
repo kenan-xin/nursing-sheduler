@@ -5,7 +5,7 @@
 // assistant-proposal.test.tsx: the claim is the composition, not the transport.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
@@ -144,6 +144,60 @@ describe("the option card", () => {
     expect(screen.getByRole("button", { name: /Ana Tan/ })).toBeDisabled();
   });
 
+  it("Dismiss closes the card without sending", async () => {
+    assistantActions.showChoices(SINGLE);
+    renderLive();
+
+    await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+
+    expect(send).not.toHaveBeenCalled();
+    expect(screen.queryByRole("group", { name: SINGLE.question })).toBeNull();
+  });
+
+  it("is cleared when the thread or scenario switches", () => {
+    assistantActions.showChoices(SINGLE);
+    const { rerender } = render(
+      <AssistantLiveConversation
+        key="thread-1"
+        threadId="thread-1"
+        routePath="/"
+        routeLabel={null}
+      />,
+    );
+    // The panel keys the live conversation by thread, and the thread follows the scenario.
+    rerender(
+      <AssistantLiveConversation
+        key="thread-2"
+        threadId="thread-2"
+        routePath="/"
+        routeLabel={null}
+      />,
+    );
+
+    expect(useAssistantStore.getState().activeChoices).toBeNull();
+    expect(screen.queryByRole("group", { name: SINGLE.question })).toBeNull();
+  });
+
+  it("tells duplicate labels apart", async () => {
+    assistantActions.showChoices({
+      question: "Which Ana?",
+      options: [
+        { label: "Ana", detail: "Ward 3" },
+        { label: "Ana", detail: "Ward 5" },
+      ],
+      multiple: true,
+    });
+    renderLive();
+
+    const [first, second] = screen.getAllByRole("checkbox");
+    await userEvent.click(first);
+
+    expect(first).toBeChecked();
+    expect(second).not.toBeChecked();
+    await userEvent.click(screen.getByRole("button", { name: "Send selected" }));
+    expect(send).toHaveBeenCalledExactlyOnceWith("Ana");
+  });
+
   it("does not render in a historical conversation", async () => {
     assistantActions.showChoices(SINGLE);
     render(<AssistantHistoricalConversation threadId="thread-1" reason="Earlier schedule." />);
@@ -171,17 +225,25 @@ describe("offer_choices", () => {
 
   afterEach(() => boundTurn.release());
 
-  it("shows the card, and a second call replaces the first", async () => {
-    render(<Host />);
+  it("shows the card, and a second call replaces the first with a fresh state", async () => {
+    render(
+      <>
+        <Host />
+        <AssistantLiveConversation threadId="thread-1" routePath="/dates" routeLabel="Dates" />
+      </>,
+    );
     const tool = captured.find((candidate) => candidate.name === "offer_choices");
 
-    await tool!.handler(SINGLE, {});
-    await tool!.handler(MULTI, {});
-    cleanup();
-    renderLive();
+    await act(() => tool!.handler(MULTI, {}));
+    await userEvent.click(screen.getByRole("checkbox", { name: "Day" }));
+    await userEvent.type(screen.getByLabelText("Other"), "half days");
+    const NEXT = { ...MULTI, question: "Which shifts should the second rule cover?" };
+    await act(() => tool!.handler(NEXT, {}));
 
-    expect(screen.queryByRole("group", { name: SINGLE.question })).toBeNull();
-    expect(screen.getByRole("group", { name: MULTI.question })).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: MULTI.question })).toBeNull();
+    expect(screen.getByRole("group", { name: NEXT.question })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Day" })).not.toBeChecked();
+    expect(screen.getByLabelText("Other")).toHaveValue("");
   });
 
   it("accepts 2 to 5 options and requires multiple", () => {
