@@ -237,8 +237,8 @@ describe("the scripted wards read as real ward situations", () => {
         requiredNumPeople: 2,
       })),
     );
-    expect(short.title).toMatch(/^Run N one short on .*Nov 2, 2026 and .*Nov 6, 2026 /);
-    expect(short.confirmationQuestion).toMatch(/Nov 2, 2026 and .*Nov 6, 2026/);
+    expect(short.title).toMatch(/^Run N one short on Mon 2 Nov and Fri 6 Nov /);
+    expect(short.confirmationQuestion).toMatch(/Mon 2 Nov and Fri 6 Nov/);
     const result = applyAssistantCommands(state, short.operations);
     if (!result.ok) throw new Error(result.rejection.message);
     expect(findStaffingShortfalls(result.next)).toEqual([]);

@@ -278,14 +278,85 @@ describe("rankRepairOptions", () => {
       },
     ]);
     expect(short?.why).toContain('"2 on every night" stays at 2 on its other days');
+    expect(short?.confirmationQuestion).toMatch(/with 1 nurse\?$/);
     expect(short && isSafeOption(state, short)).toBe(true);
   });
 
-  it("does not run a rule one short when another of its dates is two short", () => {
-    // The 5th is one short, but the 3rd (ana and ben away) is two short: no claim to fix it.
+  it("runs the one-short date and names a date two short as staying short", () => {
+    // The 5th is one short, but the 3rd (ana and ben away) is two short: one fewer cannot close it.
     const base = SCENARIOS.shortOnLeaveDay();
     const state = { ...base, reqData: [...base.reqData, leave("ana", "03"), leave("ben", "03")] };
-    expect(rank(state).map((o) => o.repairId)).not.toContain("run_one_short");
+    const short = rank(state).find((o) => o.repairId === "run_one_short");
+    expect(short?.operations).toEqual([onDate("night", "2026-11-05", 1)]);
+    for (const text of [short?.title, short?.why, short?.confirmationQuestion])
+      expect(text).toMatch(/Tue 3 Nov stays short/);
+  });
+
+  it("runs every one-short date one short in one proposal, whichever rule each date is under", () => {
+    // The 3rd is short under its own 3rd-only rule, the 5th (cara away) under the every-night rule.
+    const nightDates = ["01", "02", "04", "05", "06", "07"].map((d) => `2026-11-${d}`);
+    const probe = (reqData = [leave("cara", "05")]) =>
+      ward({
+        staff: people("ana", "ben", "cara"),
+        reqData,
+        cardsByKind: cards({
+          requirements: [
+            requirement("day", "D", 1),
+            requirement("night-03", "N", 3, { date: ["2026-11-03"] }),
+            requirement("night", "N", 2, { date: nightDates }),
+          ],
+        }),
+      });
+    const state = probe();
+    const short = rank(state).find((o) => o.repairId === "run_one_short")!;
+    expect(short.operations).toEqual([
+      { type: "set_staffing_requirement_people", ruleId: "night-03", requiredNumPeople: 2 },
+      onDate("night", "2026-11-05", 1),
+    ]);
+    expect(short.title).toMatch(/^Run N one short on Tue 3 Nov and Thu 5 Nov /);
+    expect(short.confirmationQuestion).toMatch(/Tue 3 Nov and Thu 5 Nov/);
+    expect(short.title).not.toMatch(/stays short/);
+    expect(isSafeOption(state, short)).toBe(true);
+    const after = applyAssistantCommands(state, short.operations);
+    if (!after.ok) throw new Error(after.rejection.message);
+    expect(findStaffingShortfalls(after.next)).toEqual([]);
+
+    // With the 6th two short, the option still runs the 3rd and 5th and says the 6th stays short.
+    const partly = probe([leave("cara", "05"), leave("ana", "06"), leave("ben", "06")]);
+    const some = rank(partly).find((o) => o.repairId === "run_one_short")!;
+    expect(some.operations).toHaveLength(2);
+    for (const text of [some.title, some.why, some.confirmationQuestion])
+      expect(text).toMatch(/Fri 6 Nov stays short/);
+  });
+
+  it("runs one short on at most 3 dates: more is a staffing standard, not a one-off call", () => {
+    const away = (dates: string[]) => {
+      const base = SCENARIOS.shortOnLeaveDay();
+      return { ...base, reqData: dates.map((d) => leave("cara", d)) };
+    };
+    const three = rank(away(["02", "03", "05"])).find((o) => o.repairId === "run_one_short");
+    expect(three?.operations).toHaveLength(3);
+    expect(three?.title).toMatch(/on Mon 2 Nov, Tue 3 Nov and Thu 5 Nov /);
+    const four = rank(away(["02", "03", "05", "06"])).map((o) => o.repairId);
+    expect(four).not.toContain("run_one_short");
+    expect(four).toContain("borrow_temporary_nurse");
+  });
+
+  it("does not claim a rule with other exceptions keeps one number on its other days", () => {
+    const base = SCENARIOS.shortOnLeaveDay();
+    const state = {
+      ...base,
+      cardsByKind: {
+        ...base.cardsByKind,
+        requirements: base.cardsByKind.requirements.map((r) =>
+          r.uid === "night"
+            ? { ...r, requiredNumPeopleOverrides: [["2026-11-07", 1]] as [string, number][] }
+            : r,
+        ),
+      },
+    };
+    const short = rank(state).find((o) => o.repairId === "run_one_short");
+    expect(short?.why).toContain('"2 on every night" keeps its own numbers on its other days');
   });
 
   it("uses the date's own count when the rule already has an exception there", () => {

@@ -19,7 +19,7 @@ import { isEditableCountCard } from "@/components/counts/counts-model";
 import { skillMixFloor } from "@/components/requirements/requirements-model";
 import { paidMinutesFor } from "@/components/entity-editor/core";
 import type { CapabilityId } from "@/lib/capability/help-content";
-import { generateDateItems, type DateItem } from "@/lib/dates/date-id";
+import { formatShortDate, generateDateItems, type DateItem } from "@/lib/dates/date-id";
 import {
   COUNT_EXPRESSIONS,
   MAX_ASSISTANT_OPERATIONS,
@@ -683,69 +683,93 @@ const runOneShort: Builder = (ctx, all) => {
     // Never below 1, nor below the skill mix the shift must hold that day.
     return n >= 2 && !loweredTooFar(ctx, card, n - 1, iso) ? n - 1 : null;
   };
-  const tried = new Set<string>();
-  for (const uid of findings.flatMap((f) => f.ruleIds)) {
-    if (tried.has(uid)) continue;
-    tried.add(uid);
-    const card = requirementCard(ctx, uid);
-    if (!card || !isHeadCount(card)) continue;
-    // Every date this rule is short, each exactly one short: an option that left one of
-    // them short would still leave the roster unsolvable (borrowing covers that case).
-    const dateIds = shortDates(
-      ctx,
-      findings.filter((f) => f.ruleIds.includes(uid)),
-    );
-    const lowered = dateIds.map((d) => oneShortOn(card, d));
-    if (
-      !lowered.length ||
-      !lowered.every((n) => n !== null) ||
-      lowered.length > MAX_ASSISTANT_OPERATIONS
-    )
-      continue;
-    const shift = String(flattenShiftTypeRefs(card.shiftType)[0]);
-    const covered = requirementDateIds(ctx.state, card);
-    const labels = dateIds.map((d) => dateLabel(ctx, d));
-    const when =
-      labels.length === 1
-        ? labels[0]
-        : labels.length <= 3
-          ? `${labels.slice(0, -1).join("; ")} and ${labels[labels.length - 1]}`
-          : `${labels.length} days from ${labels[0]} to ${labels[labels.length - 1]}`;
-    // A rule for that one date alone is lowered outright. Otherwise each date gets an exception.
-    const alone =
-      covered.length === 1 && dateIds[0] === covered[0] && !card.requiredNumPeopleOverrides?.length;
-    const others =
-      covered.length > dateIds.length
-        ? ` "${ruleName(card, uid)}" stays at ${card.requiredNumPeople} on its other days.`
-        : "";
-    const one = dateIds.length === 1;
-    const n = (lowered[0] as number) + 1;
-    return makeOption("run_one_short", {
-      title: one
-        ? `Run ${shift} on ${when} with ${n - 1} instead of ${n} (the manager's safety call)`
-        : `Run ${shift} one short on ${when} (the manager's safety call)`,
-      why: alone
-        ? `Nobody else is free: ${shift} can have at most ${n - 1} there as things stand.`
-        : `Nobody else is free: ${shift} can have ${one ? `at most ${n - 1} there` : "one fewer than it needs on each of those days"}.${others}`,
-      operations: alone
-        ? [{ type: "set_staffing_requirement_people", ruleId: uid, requiredNumPeople: n - 1 }]
-        : dateIds.map((d, i) => ({
-            type: "set_staffing_requirement_on_date" as const,
-            ruleId: uid,
-            date: isoOf(ctx, d) as string,
-            requiredNumPeople: lowered[i] as number,
-          })),
-      confirmationQuestion: one
-        ? `As the manager, are you satisfied it is safe to run ${shift} on ${when} with ${n - 1} nurses?`
-        : `As the manager, are you satisfied it is safe to run ${shift} one nurse short on ${when}?`,
-      needsFromUser: [
-        "Whether the manager accepts running the shift one short. Only they can make that safety call.",
-      ],
-      capabilityId: "staffing-requirements",
-      evidence: "static_check",
-    });
+  // Every short date, in roster order: run one short where one fewer on one rule closes it.
+  const pairs: { card: RequirementCard; iso: string; n: number }[] = [];
+  const stayShort: string[] = [];
+  for (const dateId of shortDates(ctx, findings)) {
+    const iso = isoOf(ctx, dateId) as string;
+    const uids = [
+      ...new Set(findings.filter((f) => f.dateId === dateId).flatMap((f) => f.ruleIds)),
+    ];
+    const pair = uids.flatMap((uid) => {
+      const card = requirementCard(ctx, uid);
+      const lowered = card && isHeadCount(card) ? oneShortOn(card, dateId) : null;
+      return card && lowered !== null ? [{ card, iso, n: lowered + 1 }] : [];
+    })[0];
+    if (pair) pairs.push(pair);
+    else stayShort.push(iso);
   }
-  return null;
+  // More dates than a bad day is a lower staffing standard, not a one-off safety call.
+  if (pairs.length === 0 || pairs.length > CHRONIC_DATE_COUNT) return null;
+
+  const day = (iso: string) => formatShortDate(iso, true);
+  const list = (items: string[]) =>
+    items.length === 1 ? items[0] : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
+  const shiftOf = (card: RequirementCard) => String(flattenShiftTypeRefs(card.shiftType)[0]);
+  const shifts = [...new Set(pairs.map((p) => shiftOf(p.card)))];
+  const where = shifts
+    .map(
+      (s) => `${s} on ${list(pairs.filter((p) => shiftOf(p.card) === s).map((p) => day(p.iso)))}`,
+    )
+    .join("; ");
+  const [first] = pairs;
+  const one = pairs.length === 1;
+  const nurses = (n: number) => `${n} ${n === 1 ? "nurse" : "nurses"}`;
+  const stays = stayShort.length
+    ? `${list(stayShort.map(day))} ${stayShort.length === 1 ? "stays" : "stay"} short`
+    : "";
+  // A rule for that one date alone is lowered outright. Otherwise the date gets an exception.
+  const alone = ({ card, iso }: (typeof pairs)[number]) => {
+    const covered = requirementDateIsos(ctx.state, card);
+    return covered.length === 1 && covered[0] === iso && !card.requiredNumPeopleOverrides?.length;
+  };
+  const others = [...new Set(pairs.map((p) => p.card))].flatMap((card) => {
+    const lowered = new Set(pairs.filter((p) => p.card === card).map((p) => p.iso));
+    if (requirementDateIsos(ctx.state, card).every((d) => lowered.has(d))) return [];
+    const name = ruleName(card, card.uid);
+    const exceptions = (card.requiredNumPeopleOverrides ?? []).some(([d]) => !lowered.has(d));
+    return [
+      exceptions
+        ? ` "${name}" keeps its own numbers on its other days.`
+        : ` "${name}" stays at ${card.requiredNumPeople} on its other days.`,
+    ];
+  });
+  const title = one
+    ? `Run ${where} with ${first.n - 1} instead of ${first.n}`
+    : shifts.length === 1
+      ? `Run ${where.replace(/ on /, " one short on ")}`
+      : `Run one short: ${where}`;
+  return makeOption("run_one_short", {
+    title: `${title}${stays ? `; ${stays}` : ""} (the manager's safety call)`,
+    why:
+      (one
+        ? `Nobody else is free: ${shiftOf(first.card)} can have at most ${first.n - 1} there${alone(first) ? " as things stand" : ""}.`
+        : "Nobody else is free: each of those shifts can have one fewer than it needs.") +
+      others.join("") +
+      (stays ? ` ${stays}: one fewer cannot close it, so the roster still cannot be solved.` : ""),
+    operations: pairs.map((p) =>
+      alone(p)
+        ? {
+            type: "set_staffing_requirement_people",
+            ruleId: p.card.uid,
+            requiredNumPeople: p.n - 1,
+          }
+        : {
+            type: "set_staffing_requirement_on_date",
+            ruleId: p.card.uid,
+            date: p.iso,
+            requiredNumPeople: p.n - 1,
+          },
+    ),
+    confirmationQuestion: `As the manager${stays ? `, knowing ${stays},` : ""} are you satisfied it is safe to run ${
+      one ? `${where} with ${nurses(first.n - 1)}` : `${where} one nurse short`
+    }?`,
+    needsFromUser: [
+      "Whether the manager accepts running the shift one short. Only they can make that safety call.",
+    ],
+    capabilityId: "staffing-requirements",
+    evidence: "static_check",
+  });
 };
 
 /**

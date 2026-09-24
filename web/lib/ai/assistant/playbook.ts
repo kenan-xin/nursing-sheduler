@@ -38,7 +38,7 @@
 import type { CapabilityId } from "@/lib/capability/help-content";
 import type { AssistantCommandType, AssistantCommandV1 } from "@/lib/proposal/commands";
 
-export const PLAYBOOK_VERSION = "2026-09-24.8";
+export const PLAYBOOK_VERSION = "2026-09-24.9";
 
 /** Said on the Preview and in the reply whenever a change relaxes a rest rule. */
 export const REST_PRACTICE_WARNING =
@@ -287,8 +287,9 @@ export const REPAIRS: readonly RepairEntry[] = [
   },
   {
     id: "run_one_short",
-    title: "Run the shift one short on that date",
-    whenToUse: "A head-count shift is one short and nobody else can be found.",
+    title: "Run the shift one short on those dates",
+    whenToUse:
+      "A head-count shift is one short on up to 3 dates and nobody else can be found. More dates is a staffing standard for the manager, not a one-off.",
     disruption: "high",
     confirmation: "manager",
     enforcedBy: "apply",
