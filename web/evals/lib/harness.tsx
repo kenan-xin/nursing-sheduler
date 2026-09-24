@@ -78,9 +78,9 @@ const DRAIN_MS = 20_000;
 class TrialTimeout extends Error {}
 
 /** `promise`, or `fallback` once `ms` pass. */
-function within<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+function within<T, F = T>(promise: Promise<T>, ms: number, fallback: F): Promise<T | F> {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const late = new Promise<T>((resolve) => {
+  const late = new Promise<F>((resolve) => {
     timer = setTimeout(() => resolve(fallback), ms);
   });
   return Promise.race([promise, late]).finally(() => clearTimeout(timer));
@@ -130,7 +130,8 @@ function Session({ threadId, handles }: { threadId: string; handles: Handles }) 
     historical: false,
   });
   const controller = useAssistantProposals();
-  // The shipped send path (assistant-conversation.tsx): any send answers the open card.
+  // The shipped send path, COPIED from assistant-conversation.tsx (keep the two in step):
+  // any send answers the open card.
   const send = useAssistantFollowUps(
     session.isRunning || session.interrupting || session.sending,
     controller.outcome,
@@ -255,9 +256,11 @@ export async function runTrial(input: RunTrialInput): Promise<TrialRecord> {
       },
       { timeout: Math.min(10_000, left()), interval: 100 },
     ).catch(() => {
+      // The auto-send skips `say`, so its refusal is read here.
+      const refusal = useAssistantStore.getState().lastRefusal;
       throw performance.now() >= deadline
         ? new TrialTimeout()
-        : new Error("no follow-up after Apply or a finished run");
+        : new Error(refusal ? `refused:${refusal}` : "no follow-up after Apply or a finished run");
     });
     await settle();
   };
@@ -428,22 +431,26 @@ export async function runTrial(input: RunTrialInput): Promise<TrialRecord> {
     // turn must let go before the record is read and before the next trial resets the
     // shared stores. Then wait (bounded) for the send it abandoned.
     const s = handles.session;
+    // A drain that runs out is flagged: its late release could still reach the next trial.
+    const DRAIN_EXPIRED = Symbol("drain");
     if (threadId && s && (s.isRunning || s.sending || s.interrupting)) {
-      await within(
+      const stopped = await within(
         assistantActions.interrupt({
           trigger: "stop",
           threadId,
           scenarioId: useAuthorityStore.getState().scenarioId,
         }),
         DRAIN_MS,
-        null,
+        DRAIN_EXPIRED,
       );
+      if (stopped === DRAIN_EXPIRED) error ??= "drain";
     }
-    await within(
+    const drained = await within(
       pendingSend.catch(() => undefined),
       DRAIN_MS,
-      undefined,
+      DRAIN_EXPIRED,
     );
+    if (drained === DRAIN_EXPIRED) error ??= "drain";
     const rows = threadId ? await readThreadMessages(threadId).catch(() => []) : [];
     const proposals: ProposalRecord[] = [];
     for (const id of proposalIds) {

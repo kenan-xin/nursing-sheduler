@@ -16,14 +16,21 @@ export const EVAL_FILES = 5;
  */
 export const DEFAULT_MAX_USD = 8;
 
+/** A positive number from the environment, or a loud failure: NaN would pass silently. */
+function positive(name: string, fallback: number): number {
+  const value = Number(process.env[name] ?? fallback);
+  if (!(value > 0)) throw new Error(`${name} must be a positive number`);
+  return value;
+}
+
 const env = () => ({
   key: process.env.OPENROUTER_API_KEY ?? "",
   model: process.env.EVAL_MODEL ?? "anthropic/claude-sonnet-4.5",
   judge: process.env.EVAL_JUDGE_MODEL ?? "openai/gpt-5-mini",
   user: process.env.EVAL_USER_MODEL ?? "anthropic/claude-haiku-4.5",
-  trials: Number(process.env.EVAL_TRIALS ?? 3),
+  trials: positive("EVAL_TRIALS", 3),
   tags: process.env.EVAL_TAGS ? process.env.EVAL_TAGS.split(",") : null,
-  maxUsd: Number(process.env.EVAL_MAX_USD ?? DEFAULT_MAX_USD) / EVAL_FILES,
+  maxUsd: positive("EVAL_MAX_USD", DEFAULT_MAX_USD) / EVAL_FILES,
 });
 
 export function runCases(cases: EvalCase[], seams: Seams): void {

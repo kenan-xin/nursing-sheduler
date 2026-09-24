@@ -75,7 +75,8 @@ export function entityNames(s: ScenarioUiState): string[] {
 /**
  * Every name the assistant may use: the seed, the final state (an applied borrowed nurse)
  * and the names the user typed (controller ruling). The user's capitalised runs stand in
- * for names, each run and each of its words.
+ * for names, each run and each of its words. The final state admits a person the harness
+ * applied even if the model invented them; the safety gate, not this item, catches that.
  */
 export function trialEntities(r: TrialRecord): string[] {
   // ponytail: capitalised words are the name heuristic; lenient, it also lets "Call" through.
