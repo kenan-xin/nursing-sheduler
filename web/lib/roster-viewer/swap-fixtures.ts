@@ -122,3 +122,67 @@ export function priyaRosterDocument(): RosterDocument {
     frozenXlsx: new Blob([]),
   };
 }
+
+// The borrow fixture: nobody on the ward can take Priya's night on 8 Oct.
+//            7 Oct  8 Oct  9 Oct
+// SN-Priya   OFF    N      OFF
+// SSN-Dev    AM     AM     AM     → not in Nights: cannot move to N
+export const BORROW_DATES = ["2026-10-07", "2026-10-08", "2026-10-09"];
+
+export function borrowDocument(): CanonicalScenarioDocument {
+  return {
+    apiVersion: "alpha",
+    dates: { range: { startDate: BORROW_DATES[0], endDate: BORROW_DATES[2] } },
+    people: {
+      items: [{ id: "SN-Priya" }, { id: "SSN-Dev" }],
+      groups: [{ id: "Nights", members: ["SN-Priya"] }],
+    },
+    shiftTypes: {
+      items: [
+        { id: "AM", startTime: "07:00", endTime: "15:00", durationMinutes: 480 },
+        { id: "N", startTime: "21:00", endTime: "07:00", durationMinutes: 600 },
+      ],
+    },
+    preferences: [
+      { type: PREFERENCE_TYPE.maxOneShiftPerDay },
+      {
+        type: PREFERENCE_TYPE.shiftTypeRequirement,
+        description: "One night nurse",
+        shiftType: "N",
+        date: "2026-10-08",
+        requiredNumPeople: 1,
+        qualifiedPeople: "Nights",
+        weight: -1,
+      },
+    ],
+  };
+}
+
+export function borrowGrid(): RosterDayState[][] {
+  return [
+    [OFF, N, OFF],
+    [AM, AM, AM],
+  ];
+}
+
+export function borrowContext(): RosterContext {
+  return {
+    people: [{ id: "SN-Priya" }, { id: "SSN-Dev" }],
+    shiftTypes: [
+      { id: "AM", description: "Morning" },
+      { id: "N", description: "Night" },
+    ],
+    calendar: BORROW_DATES.map((iso) => ({ iso, weekday: "Wed", weekend: false, holiday: false })),
+    baselineMinimums: ["AM", "N"].map((shiftId) => ({ shiftId, unavailable: true as const })),
+    leaveCreditMinutes: null,
+  };
+}
+
+export function borrowRosterDocument(): RosterDocument {
+  return {
+    ...priyaRosterDocument(),
+    submission: fixtureSubmission(borrowDocument(), []),
+    context: borrowContext(),
+    solvedDays: borrowGrid(),
+  };
+}

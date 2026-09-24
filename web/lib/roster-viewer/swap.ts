@@ -29,10 +29,12 @@ export interface SwapContext {
 export type SwapPlan =
   | {
       readonly ok: true;
-      readonly kind: "exchange" | "cover";
+      readonly kind: "exchange" | "cover" | "move" | "record";
       readonly cells: readonly RosterCellChange[];
       readonly soft: readonly RuleIssue[];
       readonly unchecked: readonly string[];
+      /** New shortfalls the change leaves open. Empty except for `record`. */
+      readonly uncovered: readonly string[];
     }
   | { readonly ok: false; readonly reasons: readonly string[] };
 
@@ -116,14 +118,15 @@ export function planSwap(
   if (check.hard.length > 0)
     return { ok: false, reasons: check.hard.map((issue) => issue.message) };
   const kind = dateIdxs.every((d) => ctx.days[partnerIdx][d].kind === "off") ? "cover" : "exchange";
-  return { ok: true, kind, cells, soft: check.soft, unchecked: check.unchecked };
+  return { ok: true, kind, cells, soft: check.soft, unchecked: check.unchecked, uncovered: [] };
 }
 
-export function findSwapPartners(
+function rankPartners(
   ctx: SwapContext,
   personIdx: number,
   dateIdxs: readonly number[],
-  limit = 5,
+  plan: (partnerIdx: number) => SwapPlan,
+  limit: number,
 ): { candidates: SwapCandidate[]; ruledOut: { partnerIdx: number; reason: string }[] } {
   const handedOver = new Set(
     dateIdxs.flatMap((d) => {
@@ -135,18 +138,18 @@ export function findSwapPartners(
   const ruledOut: { partnerIdx: number; reason: string }[] = [];
   ctx.context.people.forEach((_person, partnerIdx) => {
     if (partnerIdx === personIdx) return;
-    const plan = planSwap(ctx, personIdx, partnerIdx, dateIdxs);
-    if (!plan.ok) {
-      ruledOut.push({ partnerIdx, reason: plan.reasons[0] });
+    const result = plan(partnerIdx);
+    if (!result.ok) {
+      ruledOut.push({ partnerIdx, reason: result.reasons[0] });
       return;
     }
     const row = ctx.days[partnerIdx].map(
       (cell, d) =>
-        plan.cells.find((c) => c.personIdx === partnerIdx && c.dateIdx === d)?.after ?? cell,
+        result.cells.find((c) => c.personIdx === partnerIdx && c.dateIdx === d)?.after ?? cell,
     );
     candidates.push({
       partnerIdx,
-      plan,
+      plan: result,
       sameShiftsAfter: row.filter(
         (c) => c.kind === "shift" && handedOver.has(typedIdKey(c.shiftId)),
       ).length,
@@ -164,4 +167,132 @@ export function findSwapPartners(
       a.partnerIdx - b.partnerIdx,
   );
   return { candidates: candidates.slice(0, limit), ruledOut };
+}
+
+export const findSwapPartners = (
+  ctx: SwapContext,
+  personIdx: number,
+  dateIdxs: readonly number[],
+  limit = 5,
+) => rankPartners(ctx, personIdx, dateIdxs, (q) => planSwap(ctx, personIdx, q, dateIdxs), limit);
+
+export const findSickCovers = (
+  ctx: SwapContext,
+  personIdx: number,
+  dateIdxs: readonly number[],
+  limit = 5,
+) =>
+  rankPartners(ctx, personIdx, dateIdxs, (q) => planSickCover(ctx, personIdx, q, dateIdxs), limit);
+
+/** Step 3: what a borrowed nurse must cover, and the skill group a requirement demands there. */
+export function borrowNeeds(ctx: SwapContext, personIdx: number, dateIdxs: readonly number[]) {
+  return dateIdxs.flatMap((dateIdx) => {
+    const cell = ctx.days[personIdx][dateIdx];
+    if (cell.kind !== "shift") return [];
+    const shiftIdx = ctx.model.shiftIndex.get(typedIdKey(cell.shiftId));
+    const scoped = ctx.model.equations.find(
+      (equation) =>
+        equation.unavailable === null &&
+        equation.qualifiedLabel !== null &&
+        shiftIdx !== undefined &&
+        equation.shiftIndices.includes(shiftIdx) &&
+        equation.dateIndices.has(dateIdx),
+    );
+    return [{ dateIdx, shift: String(cell.shiftId), skillGroup: scoped?.qualifiedLabel ?? null }];
+  });
+}
+
+export type CoverReason = "swap" | "sick_or_emergency";
+
+const LEAVE: RosterDayState = { kind: "leave" };
+
+/**
+ * Sick or emergency leave: the person goes on LEAVE on the dates and takes nothing back.
+ * A partner who was OFF covers; a partner on another shift that day moves (her old shift
+ * loses her, so staffing must still hold). `partnerIdx` null records the absence alone:
+ * the new shortfall is stated as `uncovered`, never a refusal, because the absence is a fact.
+ */
+export function planSickCover(
+  ctx: SwapContext,
+  personIdx: number,
+  partnerIdx: number | null,
+  dateIdxs: readonly number[],
+): SwapPlan {
+  const giving = givingProblem(ctx, personIdx, dateIdxs);
+  if (giving !== null) return { ok: false, reasons: [giving] };
+  if (partnerIdx === personIdx) return { ok: false, reasons: ["Pick someone else to cover."] };
+  const cells: RosterCellChange[] = [];
+  for (const d of dateIdxs) {
+    const mine = ctx.days[personIdx][d];
+    cells.push({ personIdx, dateIdx: d, before: mine, after: LEAVE });
+    if (partnerIdx === null) continue;
+    const theirs = ctx.days[partnerIdx][d];
+    const date = plainDate(ctx.context.calendar[d].iso);
+    if (theirs.kind === "leave") {
+      return {
+        ok: false,
+        reasons: [`${personName(ctx.context, partnerIdx)} is on leave on ${date}.`],
+      };
+    }
+    if (dayStatesEqual(mine, theirs)) {
+      return {
+        ok: false,
+        reasons: [
+          `${personName(ctx.context, partnerIdx)} already works ${dayCode(theirs)} on ${date}.`,
+        ],
+      };
+    }
+    cells.push({ personIdx: partnerIdx, dateIdx: d, before: theirs, after: mine });
+  }
+  const after: RosterDayState[][] = ctx.days.map((row) => [...row]);
+  for (const cell of cells) after[cell.personIdx][cell.dateIdx] = cell.after;
+  const people = partnerIdx === null ? [personIdx] : [personIdx, partnerIdx];
+  const check = checkRosterChange(ctx.model, ctx.context, ctx.days, after, {
+    people,
+    dates: dateIdxs,
+  });
+  if (partnerIdx === null) {
+    return {
+      ok: true,
+      kind: "record",
+      cells,
+      soft: check.soft,
+      unchecked: check.unchecked,
+      uncovered: check.hard.map((i) => i.message),
+    };
+  }
+  if (check.hard.length > 0)
+    return { ok: false, reasons: check.hard.map((issue) => issue.message) };
+  const kind = dateIdxs.every((d) => ctx.days[partnerIdx][d].kind === "off") ? "cover" : "move";
+  return { ok: true, kind, cells, soft: check.soft, unchecked: check.unchecked, uncovered: [] };
+}
+
+export interface CoverLadder {
+  readonly step: 1 | 2 | 3;
+  readonly candidates: readonly SwapCandidate[];
+  readonly trades: readonly TradeCandidate[];
+  readonly borrow: readonly { dateIdx: number; shift: string; skillGroup: string | null }[];
+  readonly ruledOut: readonly { partnerIdx: number; reason: string }[];
+}
+
+/**
+ * The ward's escalation ladder: 1 swap/cover/move, 2 a trade with someone off or on
+ * leave, 3 borrow. Only the lowest step with an option is returned, so the assistant
+ * cannot skip a step. Step 3 has no candidates: the user names the borrowed nurse.
+ */
+export function findCoverLadder(
+  ctx: SwapContext,
+  personIdx: number,
+  dateIdxs: readonly number[],
+  reason: CoverReason,
+): CoverLadder {
+  const step1 =
+    reason === "swap"
+      ? findSwapPartners(ctx, personIdx, dateIdxs)
+      : findSickCovers(ctx, personIdx, dateIdxs);
+  const empty = { candidates: [], trades: [], borrow: [], ruledOut: step1.ruledOut };
+  if (step1.candidates.length > 0) return { ...empty, step: 1, candidates: step1.candidates };
+  const trades = findTrades(ctx, personIdx, dateIdxs, reason);
+  if (trades.length > 0) return { ...empty, step: 2, trades };
+  return { ...empty, step: 3, borrow: borrowNeeds(ctx, personIdx, dateIdxs) };
 }
