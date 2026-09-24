@@ -33,6 +33,10 @@ const NOT_REGISTRY_GOVERNED: Record<string, string> = {
   request_optimize_run: "Optimiser run: shows a host card; the USER starts the run",
   get_optimize_result: "Optimiser run: reads the Optimise screen's run view",
   offer_choices: "Option card: a click sends a user message, not a help answer",
+  // CHANGED DELIBERATELY (2026-09-24, bead 73z): the roster family.
+  get_roster: "Roster read: reads the saved roster the Roster screen shows",
+  find_swap_partners: "Roster read: host-checked swap suggestions, writes nothing",
+  prepare_roster_swap: "Roster swap: shows a host card; the USER applies it on the Roster screen",
 };
 
 describe("assistant tool names", () => {

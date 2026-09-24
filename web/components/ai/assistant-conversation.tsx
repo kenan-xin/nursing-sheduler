@@ -120,6 +120,9 @@ export const TOOL_ACTIVITY: Readonly<Record<string, string>> = {
   offer_choices: "Offering choices…",
   get_setup_progress: "Checking your set-up…",
   suggest_feasibility_options: "Looking for ways to fill the gaps…",
+  get_roster: "Reading the roster…",
+  find_swap_partners: "Looking for who can swap…",
+  prepare_roster_swap: "Preparing a swap…",
 };
 
 /**

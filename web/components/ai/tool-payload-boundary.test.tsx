@@ -459,6 +459,20 @@ describe("malformed payloads, for every parameterized tool in the registry", () 
       ],
       ["one option", '{"question":"q","options":[{"label":"a","detail":""}],"multiple":false}'],
     ],
+    // WIDENED DELIBERATELY (2026-09-24, bead 73z): the roster family gets its cases.
+    get_roster: [["wrong-typed people", '{"people":"SN-Priya"}']],
+    find_swap_partners: [
+      ["missing person", '{"dates":["2026-10-08"],"reason":"swap"}'],
+      ["empty dates", '{"person":"SN-Priya","dates":[],"reason":"swap"}'],
+      ["unknown reason", '{"person":"SN-Priya","dates":["2026-10-08"],"reason":"holiday"}'],
+    ],
+    prepare_roster_swap: [
+      ["missing summary", '{"person":"SN-Priya","dates":["2026-10-08"],"reason":"swap"}'],
+      [
+        "empty dates",
+        '{"person":"SN-Priya","dates":[],"reason":"swap","partner":"SN-Cara","summary":"s"}',
+      ],
+    ],
     explain_app_capability: [
       ["missing capabilityId", "{}"],
       ["wrong-typed capabilityId", '{"capabilityId":42}'],
