@@ -66,7 +66,12 @@ const COMMANDS: AssistantCommandV1[] = [
     }),
   ),
   ...NURSES.map(
-    ([name, group]): AssistantCommandV1 => ({ type: "add_person", name, groups: [group] }),
+    ([name, group]): AssistantCommandV1 => ({
+      type: "add_person",
+      name,
+      groups: [group],
+      temporary: false,
+    }),
   ),
 ];
 

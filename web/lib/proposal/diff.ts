@@ -28,6 +28,7 @@ import type {
   UiShiftType,
 } from "@/lib/scenario";
 import { EXPRESSION_OPS, substituteTarget } from "@/components/card-editor/expression-model";
+import { calendarSpan } from "./assumptions";
 import { generateDateItems } from "@/lib/dates";
 import type { AssistantCommandV1 } from "./commands";
 import { stableStringify } from "./digest";
@@ -445,7 +446,8 @@ export function diffScenarioDocuments(
       keyPrefix: "person",
       identity: (person) => stableStringify(person.id),
       label: (person) => `${person.id}`,
-      render: (person) => person.description?.trim() || `${person.id}`,
+      render: (person) =>
+        `${person.description?.trim() || person.id}${person.temporary ? " (temporary: borrowed or agency)" : ""}`,
     }),
     ...compareKeyed(before.staffGroups, after.staffGroups, {
       scope: "staff-list",
@@ -635,7 +637,7 @@ function availabilityLines(
       scope: "leave-and-requests",
       label: command.name.trim(),
       before: null,
-      after: `Available: ${days[here[0]].iso} to ${days[here[here.length - 1]].iso}`,
+      after: `Available: ${calendarSpan(days[here[0]].iso, days[here[here.length - 1]].iso)}`,
       kind: "created",
     });
   }

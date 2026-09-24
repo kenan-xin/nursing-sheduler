@@ -33,7 +33,7 @@
 // Staff screen's own primitives over `peopleDescriptor` (`addItem`, `renameItem`,
 // `deleteItem`, `addGroup`, `renameGroup`, `updateGroupFields`, `deleteGroup`,
 // `writeItemGroups`, `writeGroupMembers`). A nurse borrowed from another ward is
-// expressed with EXISTING arms: `add_person` for the float nurse, then
+// expressed with EXISTING arms: `add_person` with `temporary: true` for the float nurse, then
 // `set_off_request` with weight `"must"` painted over the surrounding dates so they
 // are only available on the days they are actually here (see
 // `operations.test.ts`'s "borrows one RN" case). `add_person`'s new person can be
@@ -234,12 +234,13 @@ export type AssistantCommandV1 =
       ruleId: string;
     }
   /** Add one person -- the Staff screen's "Add nurse" row: a name and the staff groups they join. */
-  | { type: "add_person"; name: string; groups: string[] }
+  | { type: "add_person"; name: string; groups: string[]; temporary: boolean }
   /**
-   * Rename one person and set EXACTLY which staff groups they are in -- the Staff
-   * row's Edit. A name equal to the current id text is not a rename.
+   * Rename one person, set EXACTLY which staff groups they are in, and whether they
+   * are temporary -- the Staff row's Edit. A name equal to the current id text is not
+   * a rename.
    */
-  | { type: "edit_person"; personId: PersonRef; name: string; groups: string[] }
+  | { type: "edit_person"; personId: PersonRef; name: string; groups: string[]; temporary: boolean }
   /** Remove one person and every reference to them -- the Staff row's Delete. */
   | { type: "remove_person"; personId: PersonRef }
   /** Add one staff group -- the Staff groups "New group" form. */
@@ -680,6 +681,13 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
           "shift-count rules; for someone here only a few days, narrow those rules with " +
           "edit_count_rule in the same change.",
       ),
+    temporary: z
+      .boolean()
+      .describe(
+        "true for a nurse borrowed from another ward, the float pool or an agency; false for " +
+          "the ward's own staff, including a new hire. A temporary nurse makes the preview ask " +
+          "the lending ward to confirm the loan before Apply.",
+      ),
   }),
   z.strictObject({
     type: z.enum(["edit_person"]),
@@ -694,6 +702,12 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
           "removed. Send their current groups to keep them. Rules that target a group they " +
           "join also bind them, including hard hours and shift-count rules; for someone here " +
           "only a few days, narrow those rules with edit_count_rule in the same change.",
+      ),
+    temporary: z
+      .boolean()
+      .describe(
+        "Whether they are borrowed from another ward, the float pool or an agency. Send " +
+          "their current value to keep it.",
       ),
   }),
   z.strictObject({

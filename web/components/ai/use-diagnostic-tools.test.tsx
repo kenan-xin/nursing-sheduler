@@ -91,7 +91,9 @@ describe("test_feasibility_candidates enforces the safety floor", () => {
         candidates: [
           {
             summary: "A third nurse.",
-            operations: [{ type: "add_person", name: "Borrowed nurse 1", groups: [] }],
+            operations: [
+              { type: "add_person", name: "Borrowed nurse 1", groups: [], temporary: false },
+            ],
           },
         ],
       },

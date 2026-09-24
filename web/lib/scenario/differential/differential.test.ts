@@ -200,6 +200,23 @@ preferences: [{type: at most one shift per day}]
       }
     },
   );
+
+  it(
+    "both languages accept a temporary person and reject a non-boolean flag",
+    { timeout: oracleBudget(2) },
+    () => {
+      const state = makeValidUiState();
+      state.staff = [{ id: "Alice", temporary: true }, { id: "Bob" }];
+      const ok = callOracle({ op: "load", yaml: serializeScenario(state) });
+      expect(ok.ok).toBe(true);
+      const people = ok.model!.people as { items: Record<string, unknown>[] };
+      expect(people.items[0].temporary).toBe(true);
+
+      const bad = serializeScenario(state).replace("temporary: true", 'temporary: "yes"');
+      expect(callOracle({ op: "load", yaml: bad }).ok).toBe(false);
+      expect(importScenarioYaml(bad).ok).toBe(false);
+    },
+  );
 });
 
 describe.skipIf(!AVAILABLE)("differential — C3 (scheduler/context setup + group_map)", () => {

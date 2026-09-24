@@ -35,6 +35,7 @@ const zImportPerson = z.strictObject({
   id: zImportRef,
   description: z.string().nullish(),
   history: z.array(z.string()).nullish(),
+  temporary: z.boolean().nullish(),
 });
 
 const zImportPeopleGroup = z.strictObject({

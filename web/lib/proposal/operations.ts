@@ -68,7 +68,7 @@ import {
   writeGroupMembers,
   writeItemGroups,
 } from "@/components/entity-editor/core";
-import { peopleDescriptor } from "@/components/people/people-descriptor";
+import { peopleDescriptor, writeTemporary } from "@/components/people/people-descriptor";
 import { shiftTypesDescriptor } from "@/components/shift-types/shift-types-descriptor";
 import { parseWeightInput } from "@/components/card-editor/weight-value";
 import {
@@ -1272,9 +1272,15 @@ function applyAddPerson(
   const groups = [...new Set(command.groups)];
   const refused = missingStaffGroup(state, `Person "${idCheck.id}"`, groups, index);
   if (refused) return refused;
+  // A stored command prepared before the flag existed has no key: that reads as the
+  // ward's own staff, which is what it meant then.
   return {
     ok: true,
-    next: writeItemGroups(addItem(state, d, { id: idCheck.id }), d, idCheck.id, groups),
+    next: writeTemporary(
+      writeItemGroups(addItem(state, d, { id: idCheck.id }), d, idCheck.id, groups),
+      idCheck.id,
+      command.temporary === true,
+    ),
   };
 }
 
@@ -1318,14 +1324,19 @@ function applyEditPerson(
   let next: ScenarioUiState;
   try {
     const renamed = renameTo === null ? state : renameItem(state, d, person.id, renameTo);
-    next = writeItemGroups(renamed, d, renameTo ?? person.id, groups);
+    const id = renameTo ?? person.id;
+    next = writeTemporary(writeItemGroups(renamed, d, id, groups), id, command.temporary === true);
   } catch (error) {
     // Backstop only: `validateFullEditId` above refuses every collision first.
     if (!(error instanceof RenameCollisionError)) throw error;
     return reject(index, "invalid_value", `${label}: ${error.message}`);
   }
   if (unchanged(state, next)) {
-    return reject(index, "no_effect", `${label}: already has that name and those groups.`);
+    return reject(
+      index,
+      "no_effect",
+      `${label}: already has that name, those groups and that temporary setting.`,
+    );
   }
   return { ok: true, next };
 }

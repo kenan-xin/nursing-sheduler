@@ -275,6 +275,9 @@ function validatePerson(el: Record<string, unknown>): void {
       }
     }
   }
+  if (el.temporary !== undefined && typeof el.temporary !== "boolean") {
+    throw new Error("Persisted staff element temporary must be a boolean or absent.");
+  }
 }
 
 function validateShiftType(el: Record<string, unknown>): void {

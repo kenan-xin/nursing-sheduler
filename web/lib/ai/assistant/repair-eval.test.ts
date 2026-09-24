@@ -149,7 +149,7 @@ describe("the scripted wards read as real ward situations", () => {
   it("understaffed night: borrow one nurse for the 5th only, or run that night one short", () => {
     const [borrow, short] = options("understaffedNight");
     expect(borrow.operations).toEqual([
-      { type: "add_person", name: "Borrowed nurse 1", groups: [] },
+      { type: "add_person", name: "Borrowed nurse 1", groups: [], temporary: true },
       {
         type: "set_off_request",
         personId: "Borrowed nurse 1",
@@ -177,6 +177,7 @@ describe("the scripted wards read as real ward situations", () => {
       type: "add_person",
       name: "Borrowed nurse 1",
       groups: ["RN"],
+      temporary: true,
     });
     expect(borrow.needsFromUser.join(" ")).toMatch(/qualified as RN/);
     expect(ask.operations).toEqual([
@@ -205,7 +206,7 @@ describe("the scripted wards read as real ward situations", () => {
   it("busy nights with a rest rule: borrow a nurse for the two busy nights only, off in between", () => {
     const [borrow] = options("busyNightsWithRestRule");
     expect(borrow.operations).toEqual([
-      { type: "add_person", name: "Borrowed nurse 1", groups: [] },
+      { type: "add_person", name: "Borrowed nurse 1", groups: [], temporary: true },
       ...[
         ["2026-11-01", "2026-11-01"],
         ["2026-11-03", "2026-11-05"],
@@ -221,12 +222,12 @@ describe("the scripted wards read as real ward situations", () => {
     expect(borrow.enforcedBy).toBe("host_question");
   });
 
-  it("too few nurses: borrow a nurse for the whole period, asked in chat", () => {
+  it("too few nurses: borrow a temporary nurse for the whole period, asked on the Preview", () => {
     const [borrow] = options("tooFewNurses");
     expect(borrow.operations).toEqual([
-      { type: "add_person", name: "Borrowed nurse 1", groups: [] },
+      { type: "add_person", name: "Borrowed nurse 1", groups: [], temporary: true },
     ]);
-    expect(borrow.enforcedBy).toBe("chat");
+    expect(borrow.enforcedBy).toBe("host_question");
   });
 
   it("personal caps too low: ask ana for one more night, and her agreement gates Apply", () => {

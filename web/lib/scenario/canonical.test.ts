@@ -242,6 +242,22 @@ describe("toCanonicalScenarioDocument", () => {
   });
 });
 
+describe("the temporary flag", () => {
+  it("emits temporary only for a temporary person", () => {
+    const state = makeUiState();
+    state.staff = [
+      { id: "Float", temporary: true },
+      { id: "Own", temporary: false },
+      { id: "Plain" },
+    ];
+    expect(toCanonicalScenarioDocument(state).people.items).toEqual([
+      { id: "Float", temporary: true },
+      { id: "Own" },
+      { id: "Plain" },
+    ]);
+  });
+});
+
 describe("createEmptyScenarioUiState", () => {
   it("builds a well-formed zero value that projects without throwing", () => {
     const empty = createEmptyScenarioUiState();

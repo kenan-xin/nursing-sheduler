@@ -22,7 +22,7 @@ import math
 import re
 from typing import Literal
 
-from pydantic import BaseModel, Field, ConfigDict, model_validator, field_validator
+from pydantic import BaseModel, Field, ConfigDict, StrictBool, model_validator, field_validator
 from typing_extensions import Annotated, Self
 from . import group_map
 from .constants import ALL, OFF, LEAVE, MAP_WEEKDAY_TO_STR, MAP_DATE_KEYWORD_TO_FILTER
@@ -56,6 +56,10 @@ class Person(BaseModel):
     id: int | str
     description: str | None = None
     history: list[str] | None = None
+    # Authoring-only: a nurse borrowed from another ward, float pool or agency. The
+    # frontend derives the lending-ward confirmation from it; the solver reads nothing
+    # from it. StrictBool, so "yes" or 1 cannot pass as true.
+    temporary: StrictBool | None = None
 
 
 class DateRange(BaseModel):

@@ -139,3 +139,18 @@ def test_model_rejects_invalid_dates_items_and_group_ids():
     payload["dates"]["groups"] = [{"id": "2025-01-01", "members": ["2025-01-01"]}]
     with pytest.raises(ValueError, match="Date group ID '2025-01-01' must not be in the format"):
         NurseSchedulingData.model_validate(payload)
+
+
+def test_person_accepts_the_authoring_only_temporary_flag():
+    payload = _base_payload()
+    payload["people"]["items"] = [{"id": "n1", "temporary": True}]
+    data = NurseSchedulingData.model_validate(payload)
+    assert data.people.items[0].temporary is True
+
+
+def test_person_rejects_a_non_boolean_temporary_flag():
+    for bad in ("yes", 1):
+        payload = _base_payload()
+        payload["people"]["items"] = [{"id": "n1", "temporary": bad}]
+        with pytest.raises(ValueError):
+            NurseSchedulingData.model_validate(payload)

@@ -239,7 +239,12 @@ function inferPreferenceType(pref: LoosePref): string {
 // ---------------------------------------------------------------------------
 
 function normalizePerson(p: ImportScenarioParsed["people"]["items"][number]): UiPerson {
-  return clean({ id: p.id, description: str(p.description), history: p.history ?? undefined });
+  return clean({
+    id: p.id,
+    description: str(p.description),
+    history: p.history ?? undefined,
+    temporary: p.temporary === true ? true : undefined,
+  });
 }
 function normalizePeopleGroup(g: {
   id: string;

@@ -10,7 +10,8 @@
 // Interaction model (prototype-faithful):
 //   • read row: ordinal, avatar-initials + name, group chips, Edit/Duplicate/Delete;
 //   • INLINE-ROW edit (no separate form panel): a name input in the Nurse cell,
-//     group toggle chips in the Group cell, Save/Cancel in Actions;
+//     group toggle chips in the Group cell, a Temporary switch under the name,
+//     Save/Cancel in Actions;
 //   • the inline "name" maps to `UiPerson.id`; an existing `description` is PRESERVED
 //     verbatim through a name/group edit (never written from the table);
 //   • drag-reorder rows, gated off while searching OR editing (`!query && !editing`),
@@ -48,6 +49,7 @@ import { RenameCollisionError } from "@/lib/cascade";
 import { cn } from "@/lib/utils";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Surface, surfaceVariants } from "@/components/ui/surface";
 import {
@@ -81,7 +83,7 @@ import {
 import { GroupsSection, type GroupsSectionConfig } from "@/components/entity-editor/groups-section";
 import { changeKeys } from "@/lib/change-highlight/keys";
 import { useChangeTarget } from "@/lib/change-highlight/store";
-import { peopleDescriptor } from "./people-descriptor";
+import { peopleDescriptor, writeTemporary } from "./people-descriptor";
 import { UploadDialog } from "./upload-dialog";
 
 /**
@@ -606,6 +608,16 @@ function ReadRow({
           <span data-testid={`people-name-${itemKey}`} className="font-semibold">
             {String(item.id)}
           </span>
+          {item.temporary && (
+            <Badge
+              variant="neutral"
+              className="normal-case"
+              data-testid={`people-temporary-${itemKey}`}
+              title="Borrowed from another ward, float pool or agency"
+            >
+              Temporary
+            </Badge>
+          )}
         </div>
       </td>
       <td className="px-3 py-2.5">
@@ -709,6 +721,9 @@ function RowEditor({
   onDone: () => void;
 }) {
   const key = mode === "edit" ? entityKey(item!.id) : "__new__";
+  // `aria-labelledby` is IDREFS (space-separated), and `key` can hold a spaced name
+  // ("string:Float RN"), so give the label an id with no whitespace of its own.
+  const temporaryLabelId = `people-temporary-label-${key.replace(/\s+/g, "-")}`;
   const [name, setName] = React.useState(mode === "edit" ? String(item!.id) : "");
   // Membership is a SET-model draft seeded from the live group slice at form-open. It
   // is NOT rebased while open — an external/temporal change closes the whole form
@@ -718,6 +733,7 @@ function RowEditor({
       ? groups.filter((g) => g.members.some((m) => sameEntityId(m, item!.id))).map((g) => g.id)
       : [],
   );
+  const [temporary, setTemporary] = React.useState(mode === "edit" && item!.temporary === true);
 
   // Only a genuinely changed name authors a new candidate id; unchanged text preserves
   // the original TYPED id verbatim (numeric stays numeric; whitespace preserved).
@@ -745,11 +761,15 @@ function RowEditor({
       if (mode === "add") {
         // New nurse: name → id, no description authored here. history:[] via descriptor.
         commit((live) =>
-          writeItemGroups(
-            addItem(live, descriptor, { id: check.id }),
-            descriptor,
+          writeTemporary(
+            writeItemGroups(
+              addItem(live, descriptor, { id: check.id }),
+              descriptor,
+              check.id,
+              draftGroups,
+            ),
             check.id,
-            draftGroups,
+            temporary,
           ),
         );
         toast.success(`Nurse “${String(check.id)}” added.`);
@@ -762,7 +782,11 @@ function RowEditor({
           // PRESERVED (never written from the table), so an inline name/group edit
           // keeps it intact.
           const renamed = nameChanged ? renameItem(live, descriptor, item!.id, check.id) : live;
-          return writeItemGroups(renamed, descriptor, effectiveId, draftGroups);
+          return writeTemporary(
+            writeItemGroups(renamed, descriptor, effectiveId, draftGroups),
+            effectiveId,
+            temporary,
+          );
         });
         toast.success(`Nurse “${String(effectiveId)}” saved.`);
       }
@@ -810,6 +834,25 @@ function RowEditor({
             {check.message}
           </div>
         )}
+        <div className="mt-2 flex items-center gap-2">
+          <Switch
+            id={`people-temporary-input-${key}`}
+            aria-labelledby={temporaryLabelId}
+            data-testid={`people-temporary-input-${key}`}
+            checked={temporary}
+            onCheckedChange={setTemporary}
+          />
+          {/* `aria-labelledby` is a space-separated IDREFS list, so the label's own id
+              cannot embed `key` verbatim -- an entity id with a space (e.g. "Float RN")
+              would split into two bogus references and the switch would get no name. */}
+          <label
+            id={temporaryLabelId}
+            htmlFor={`people-temporary-input-${key}`}
+            className="text-meta text-ink2"
+          >
+            Temporary (borrowed or agency)
+          </label>
+        </div>
       </td>
       <td className="px-3 py-3 align-top">
         {groups.length === 0 ? (
