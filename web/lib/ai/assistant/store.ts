@@ -173,11 +173,19 @@ export interface ClearResult {
   operationId: string | null;
 }
 
-/** What `offer_choices` asks the user to pick from. */
-export interface ChoiceOffer {
+/** One question on the option card. */
+export interface ChoiceQuestion {
   question: string;
   options: readonly { label: string; detail: string }[];
   multiple: boolean;
+}
+
+/**
+ * What `offer_choices` asks the user to pick from: one question, plus up to three
+ * more shown one at a time on the same card and answered in one message.
+ */
+export interface ChoiceOffer extends ChoiceQuestion {
+  moreQuestions?: readonly ChoiceQuestion[];
 }
 
 export interface AssistantUiState {
