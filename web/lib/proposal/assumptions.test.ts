@@ -8,11 +8,13 @@
 import { describe, expect, it } from "vitest";
 import {
   activeConfirmations,
+  calendarSpan,
   confirmationsDigest,
   deriveAssumptions,
   outstandingAssumptions,
   type OperationalConfirmationV1,
 } from "./assumptions";
+import { proposalDigest } from "./digest";
 import { applyAssistantCommands } from "./operations";
 import { SCENARIOS } from "@/lib/rules/ward-fixtures.test-support";
 import { octoberWard, peopleScenario, proposalScenario } from "./test-support";
@@ -157,7 +159,7 @@ describe("leave and request arms", () => {
       person: "Ana",
       date: "14",
       toDate: null,
-      question: "Has Ana agreed to give up their leave on 14?",
+      question: "Has Ana agreed to give up their leave on 14 Oct?",
     });
   });
 
@@ -219,7 +221,7 @@ describe("deriveAssumptions and the Staff-screen arms", () => {
     ).toEqual([]);
   });
 
-  it("removing a person asks about each leave day", () => {
+  it("removing a person asks about each run of their leave", () => {
     const assumptions = peopleAssumptions([{ type: "remove_person", personId: "ana" }]);
     expect(assumptions.map((a) => [a.type, a.person, a.date])).toEqual([
       ["leave_cancelled", "ana", "02"],
@@ -316,5 +318,116 @@ describe("real-world agreements beyond leave", () => {
     const teamAfter = applyAssistantCommands(base, teamCmd);
     if (!teamAfter.ok) throw new Error(teamAfter.rejection.message);
     expect(deriveAssumptions(base, teamAfter.next, teamCmd)).toEqual([]);
+  });
+});
+
+describe("calendarSpan", () => {
+  it.each([
+    ["2026-10-14", "2026-10-14", "14 Oct"],
+    ["2026-10-10", "2026-10-16", "10–16 Oct"],
+    ["2026-10-30", "2026-11-01", "30 Oct – 1 Nov"],
+    ["2026-12-30", "2027-01-02", "30 Dec 2026 – 2 Jan 2027"],
+    ["2026-09-01", "2026-09-02", "1–2 Sep"],
+  ])("%s to %s reads %s", (from, to, label) => {
+    expect(calendarSpan(from, to)).toBe(label);
+  });
+});
+
+describe("cancelled leave is asked about once per unbroken run", () => {
+  /** octoberWard with Ana's leave replaced by exactly these October days. */
+  function anaOnLeave(days: string[]) {
+    const base = octoberWard();
+    return {
+      ...base,
+      reqData: [
+        ...base.reqData.filter((cell) => cell.kind !== "leave"),
+        ...days.map((d) => ({
+          uid: `ana-leave-${d}`,
+          person: "Ana",
+          date: d,
+          kind: "leave" as const,
+        })),
+      ],
+    };
+  }
+  function derive(
+    before: ReturnType<typeof octoberWard>,
+    commands: Parameters<typeof applyAssistantCommands>[1],
+  ) {
+    const applied = applyAssistantCommands(before, commands);
+    if (!applied.ok) throw new Error(applied.rejection.message);
+    return deriveAssumptions(before, applied.next, commands);
+  }
+  const clearWeek = [
+    {
+      type: "clear_requests" as const,
+      personId: "Ana",
+      startDate: "2026-10-10",
+      endDate: "2026-10-16",
+    },
+  ];
+
+  it("asks once about a cleared week, in calendar dates", () => {
+    const assumptions = derive(anaOnLeave(["10", "11", "12", "13", "14", "15", "16"]), clearWeek);
+    expect(assumptions).toEqual([
+      expect.objectContaining({
+        type: "leave_cancelled",
+        person: "Ana",
+        date: "10",
+        toDate: "16",
+        question: "Has Ana agreed to give up their leave on 10–16 Oct?",
+      }),
+    ]);
+  });
+
+  it("asks separately about two runs a free day splits", () => {
+    const assumptions = derive(anaOnLeave(["10", "11", "13", "14"]), clearWeek);
+    expect(assumptions.map((a) => a.question).sort()).toEqual(
+      [
+        "Has Ana agreed to give up their leave on 10–11 Oct?",
+        "Has Ana agreed to give up their leave on 13–14 Oct?",
+      ].sort(),
+    );
+  });
+
+  it("spans a month boundary", () => {
+    const before = {
+      ...octoberWard(),
+      rangeEnd: "2026-11-30",
+      reqData: ["10-30", "10-31", "11-01"].map((d) => ({
+        uid: `ana-leave-${d}`,
+        person: "Ana",
+        date: d,
+        kind: "leave" as const,
+      })),
+    };
+    const assumptions = derive(before, [{ type: "remove_person", personId: "Ana" }]);
+    expect(assumptions.map((a) => [a.date, a.toDate, a.question])).toEqual([
+      ["10-30", "11-01", "Has Ana agreed to give up their leave on 30 Oct – 1 Nov?"],
+    ]);
+  });
+
+  it("keeps a one-day question's identity, so stored answers still match", () => {
+    const [only] = derive(octoberWard(), [
+      { type: "clear_requests", personId: "Ana", startDate: "2026-10-14", endDate: "2026-10-14" },
+    ]);
+    expect(only.assumptionId).toBe(
+      `leave_cancelled:${proposalDigest({ person: "Ana", date: "14", toDate: null })}`,
+    );
+  });
+
+  it("keeps Apply blocked until every run is answered", () => {
+    const assumptions = derive(anaOnLeave(["10", "11", "13", "14"]), clearWeek);
+    const [first] = assumptions;
+    const answer: OperationalConfirmationV1 = {
+      assumptionId: first.assumptionId,
+      type: first.type,
+      person: first.person,
+      date: first.date,
+      toDate: first.toDate,
+      proposalRevision: 1,
+      confirmedAt: "2026-09-24T00:00:00.000Z",
+    };
+    expect(outstandingAssumptions(assumptions, [answer], 1)).toHaveLength(1);
   });
 });

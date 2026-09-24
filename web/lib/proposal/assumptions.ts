@@ -3,7 +3,7 @@
 // SOME CHANGES ARE AGREEMENTS WITH A PERSON, not settings. Moving a nurse's leave,
 // or destroying it as a side effect of shortening the roster period, is a real-world
 // commitment the app cannot verify and the model must never assert. So the host asks
-// -- once per named person, date and action -- and Apply stays disabled until every
+// -- once per named person, unbroken run of dates, and action -- and Apply stays disabled until every
 // question has an answer.
 //
 // THE HOST DERIVES THE FORM. A model may say "they agreed"; that is prose, and prose
@@ -17,7 +17,7 @@
 // from an older revision is then simply not one of this proposal's confirmations. It
 // is never "cleared" by anybody remembering to clear it.
 
-import { generateDateItems } from "@/lib/dates/date-id";
+import { dateIdToIso, generateDateItems, isoToUtcMs } from "@/lib/dates/date-id";
 import { expandPersonRefs } from "@/lib/rules/expansion";
 import { capOf } from "@/lib/rules/shortfalls";
 import type { ScenarioUiState, UiRequestCell } from "@/lib/scenario";
@@ -42,7 +42,7 @@ export interface OperationalAssumption {
   person: string;
   /** The date the agreement is currently about. */
   date: string;
-  /** The date it is moving to, for `leave_moved`. */
+  /** `leave_moved`: where it moves to. `leave_cancelled` / `borrowed_staff_arranged`: the run's last date (null for one day). */
   toDate: string | null;
   /** The question the host asks, verbatim. */
   question: string;
@@ -69,6 +69,24 @@ function ref(value: unknown): string {
 
 function assumptionId(type: AssumptionType, person: string, date: string, toDate: string | null) {
   return `${type}:${proposalDigest({ person, date, toDate })}`;
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const DAY_MS = 86_400_000;
+
+/**
+ * A run of calendar days as a ward writes it: "14 Oct", "10–16 Oct", "30 Oct – 1 Nov",
+ * "30 Dec 2026 – 2 Jan 2027". The month names are fixed here: ICU's en-GB "Sept"
+ * would make the same question read differently on another runtime.
+ */
+export function calendarSpan(fromIso: string, toIso: string): string {
+  const [fy, fm, fd] = fromIso.split("-").map(Number);
+  const [ty, tm, td] = toIso.split("-").map(Number);
+  const from = `${fd} ${MONTHS[fm - 1]}`;
+  if (fromIso === toIso) return from;
+  if (fy !== ty) return `${from} ${fy} – ${td} ${MONTHS[tm - 1]} ${ty}`;
+  if (fm !== tm) return `${from} – ${td} ${MONTHS[tm - 1]}`;
+  return `${fd}–${td} ${MONTHS[fm - 1]}`;
 }
 
 /** Leave pins in a document, keyed by `person|date`. */
@@ -148,27 +166,71 @@ export function deriveAssumptions(
   // read as two separate commitments.
   const surviving = leavePins(after);
   const renamedTo = finalNames(commands);
+  const lost: UiRequestCell[] = [];
   for (const [key, cell] of leavePins(before)) {
     const followed = `${renamedTo(stableStringify(cell.person))}|${stableStringify(cell.date)}`;
     if (claimed.has(key) || surviving.has(key) || surviving.has(followed)) continue;
-    const person = ref(cell.person);
-    const date = ref(cell.date);
-    assumptions.push({
-      assumptionId: assumptionId("leave_cancelled", person, date, null),
-      type: "leave_cancelled",
-      person,
-      date,
-      toDate: null,
-      question: `Has ${person} agreed to give up their leave on ${date}?`,
-      detail:
-        "This change removes that leave from the schedule. Applying it does not tell anyone, and it cannot be recovered except by Undo.",
-    });
+    lost.push(cell);
   }
+  assumptions.push(...cancelledLeave(before, lost));
 
   assumptions.push(...borrowedStaff(after, commands), ...extraShifts(before, after, commands));
 
   // Stable order, so the same change always renders the same list of questions.
   return assumptions.sort((a, b) => a.assumptionId.localeCompare(b.assumptionId));
+}
+
+/**
+ * Leave the change destroys, ONE question per unbroken run of one person's days.
+ * Clearing a week is one agreement with that nurse, not seven. A one-day run keeps
+ * `toDate: null`, so its id is the one a per-day question always had and a stored
+ * answer to it still counts. A date the BEFORE range cannot resolve gets its own
+ * question with its raw id.
+ */
+function cancelledLeave(before: ScenarioUiState, lost: readonly UiRequestCell[]) {
+  const range = { start: before.rangeStart, end: before.rangeEnd };
+  const byPerson = new Map<string, { cell: UiRequestCell; iso: string | null }[]>();
+  for (const cell of lost) {
+    const key = stableStringify(cell.person);
+    const days = byPerson.get(key) ?? [];
+    days.push({ cell, iso: dateIdToIso(String(cell.date), range) });
+    byPerson.set(key, days);
+  }
+  const assumptions: OperationalAssumption[] = [];
+  for (const days of byPerson.values()) {
+    days.sort((a, b) => (a.iso ?? "").localeCompare(b.iso ?? ""));
+    const runs: (typeof days)[] = [];
+    for (const day of days) {
+      const run = runs[runs.length - 1];
+      const previous = run?.[run.length - 1];
+      const next =
+        previous?.iso && day.iso && isoToUtcMs(day.iso) - isoToUtcMs(previous.iso) === DAY_MS;
+      if (next) run.push(day);
+      else runs.push([day]);
+    }
+    for (const run of runs) {
+      const first = run[0];
+      const last = run[run.length - 1];
+      const person = ref(first.cell.person);
+      const date = ref(first.cell.date);
+      const toDate = run.length > 1 ? ref(last.cell.date) : null;
+      const when = first.iso && last.iso ? calendarSpan(first.iso, last.iso) : date;
+      assumptions.push({
+        assumptionId: assumptionId("leave_cancelled", person, date, toDate),
+        type: "leave_cancelled",
+        person,
+        date,
+        toDate,
+        question: `Has ${person} agreed to give up their leave on ${when}?`,
+        detail:
+          (run.length > 1
+            ? `This change removes all ${run.length} days of that leave from the schedule.`
+            : "This change removes that leave from the schedule.") +
+          " Applying it does not tell anyone, and it cannot be recovered except by Undo.",
+      });
+    }
+  }
+  return assumptions;
 }
 
 /**

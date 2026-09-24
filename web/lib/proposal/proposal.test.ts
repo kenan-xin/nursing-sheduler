@@ -96,7 +96,7 @@ describe("prepareProposal", () => {
     });
     expect(proposal.status).toBe("confirmation_required");
     expect(proposal.assumptions.map((a) => a.question)).toEqual([
-      "Has Ana agreed to give up their leave on 14?",
+      "Has Ana agreed to give up their leave on 14 Oct?",
     ]);
   });
 
