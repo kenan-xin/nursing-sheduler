@@ -451,6 +451,14 @@ describe("malformed payloads, for every parameterized tool in the registry", () 
       ["missing afterInfeasibleRun", "{}"],
       ["wrong-typed afterInfeasibleRun", '{"afterInfeasibleRun":"yes"}'],
     ],
+    // WIDENED DELIBERATELY (2026-09-24, bead 7v6): a new parameterized tool gets its cases.
+    offer_choices: [
+      [
+        "missing multiple",
+        '{"question":"q","options":[{"label":"a","detail":""},{"label":"b","detail":""}]}',
+      ],
+      ["one option", '{"question":"q","options":[{"label":"a","detail":""}],"multiple":false}'],
+    ],
     explain_app_capability: [
       ["missing capabilityId", "{}"],
       ["wrong-typed capabilityId", '{"capabilityId":42}'],

@@ -21,6 +21,7 @@ import { diagnosticParameters } from "./use-diagnostic-tools";
 import { feasibilityParameters } from "./use-feasibility-tools";
 import { capabilityIdParameters, policyParameters } from "./use-help-tools";
 import { prepareParameters } from "./use-proposal-tools";
+import { choiceParameters } from "./use-choice-tools";
 
 /**
  * The tools that take arguments, by the exact name the model calls.
@@ -37,6 +38,9 @@ export const MODEL_VISIBLE_TOOL_SCHEMAS: Readonly<Record<string, z.ZodTypeAny>> 
   open_app_screen: capabilityIdParameters,
   prepare_scenario_change: prepareParameters,
   suggest_feasibility_options: feasibilityParameters,
+  // CHANGED DELIBERATELY (2026-09-24, bead 7v6): option cards. Shows a host card whose
+  // click sends an ordinary user message; it writes nothing.
+  offer_choices: choiceParameters,
 });
 
 /** The tools registered with no parameters. Named so the set is provably complete. */
