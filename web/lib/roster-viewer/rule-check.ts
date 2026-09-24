@@ -60,6 +60,7 @@ type IndexSet = ReadonlySet<number>;
 
 interface SuccessionRule {
   readonly key: string;
+  /** Ready for a sentence: the quoted description, or an unquoted plain phrase. */
   readonly label: string;
   readonly weight: number;
   readonly people: IndexSet;
@@ -70,7 +71,8 @@ interface SuccessionRule {
 
 interface RequestRule {
   readonly key: string;
-  readonly label: string;
+  /** ` (“description”)`, or empty when the request has no description. */
+  readonly note: string;
   readonly weight: number;
   readonly people: IndexSet;
   readonly dates: IndexSet;
@@ -81,6 +83,7 @@ interface RequestRule {
 
 interface CountRule {
   readonly key: string;
+  /** Ready for a sentence, like `SuccessionRule.label`. */
   readonly label: string;
   readonly weight: number;
   readonly people: IndexSet;
@@ -119,6 +122,10 @@ export interface CheckOptions {
 }
 
 const isHard = (weight: number): boolean => weight === Infinity || weight === -Infinity;
+
+/** Quote a real rule name. Never quote a fallback as if it were one. */
+const ruleName = (description: string | undefined, fallback: string): string =>
+  description === undefined ? fallback : `“${description}”`;
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -165,7 +172,7 @@ export function buildRuleModel(document: CanonicalScenarioDocument): RuleModel {
     const key = `preferences[${index}]`;
     switch (preference.type) {
       case PREFERENCE_TYPE.shiftTypeSuccessions: {
-        const label = preference.description ?? "a shift pattern rule";
+        const label = ruleName(preference.description, "a shift pattern rule");
         const who = people(preference.person);
         const when = preference.date === undefined ? null : dates(preference.date);
         const pattern = preference.pattern.map((element) => shifts(element));
@@ -174,7 +181,9 @@ export function buildRuleModel(document: CanonicalScenarioDocument): RuleModel {
           (when !== null && !when.resolved) ||
           !pattern.every((p) => p.resolved)
         ) {
-          if (isHard(preference.weight)) unchecked.push(label);
+          if (isHard(preference.weight)) {
+            unchecked.push(preference.description ?? "a shift pattern rule");
+          }
           return;
         }
         successions.push({
@@ -188,19 +197,21 @@ export function buildRuleModel(document: CanonicalScenarioDocument): RuleModel {
         return;
       }
       case PREFERENCE_TYPE.shiftRequest: {
-        const label = preference.description ?? "a request";
         const who = people(preference.person);
         const when = dates(preference.date);
         const what = shifts(preference.shiftType);
         if (!who.resolved || !when.resolved || !what.resolved) {
           // An unreadable request may be a leave pin, which is hard at any weight.
-          unchecked.push(label);
+          const mayBeLeave = !what.resolved || [preference.shiftType].flat().includes("LEAVE");
+          if (isHard(preference.weight) || mayBeLeave) {
+            unchecked.push(preference.description ?? "a request");
+          }
           return;
         }
         const list = [...what.values];
         requests.push({
           key,
-          label,
+          note: preference.description === undefined ? "" : ` (“${preference.description}”)`,
           weight: preference.weight,
           people: who.values,
           dates: when.values,
@@ -210,12 +221,14 @@ export function buildRuleModel(document: CanonicalScenarioDocument): RuleModel {
         return;
       }
       case PREFERENCE_TYPE.shiftCount: {
-        const label = preference.description ?? "a shift count rule";
+        const label = ruleName(preference.description, "a shift count rule");
         const who = people(preference.person);
         const when = dates(preference.countDates);
         const what = shifts(preference.countShiftTypes);
         if (!who.resolved || !when.resolved || !what.resolved) {
-          if (isHard(preference.weight)) unchecked.push(label);
+          if (isHard(preference.weight)) {
+            unchecked.push(preference.description ?? "a shift count rule");
+          }
           return;
         }
         const coefficients = new Map<number, number>([...what.values].map((s) => [s, 1]));
@@ -352,26 +365,26 @@ export function listIssues(
         for (let i = 0; i < pattern.length; i++) if (pattern[i].has(at(p, start + i))) matched++;
         const full = matched === pattern.length;
         const cells = pattern
-          .map((_set, i) => `${dayCode(grid[p][start + i])} on ${day(start + i)}`)
+          .map((_set, i) => `${describeShift(model, at(p, start + i))} on ${day(start + i)}`)
           .join(", then ");
         const base = { key: `${rule.key}:p${p}:d${start}${suffix}`, severity: 1 };
         if (rule.weight === -Infinity && full) {
           issues.push({
             ...base,
             hard: true,
-            message: `${name(p)} works ${lead}${cells}, which “${rule.label}” does not allow.`,
+            message: `${name(p)} works ${lead}${cells}, which ${rule.label} does not allow.`,
           });
         } else if (rule.weight === Infinity && !full) {
           issues.push({
             ...base,
             hard: true,
-            message: `${name(p)} works ${lead}${cells}, which does not follow “${rule.label}”.`,
+            message: `${name(p)} works ${lead}${cells}, which does not follow ${rule.label}.`,
           });
         } else if (Number.isFinite(rule.weight) && rule.weight < 0 && full) {
           issues.push({
             ...base,
             hard: false,
-            message: `${name(p)} works ${lead}${cells}, which “${rule.label}” tries to avoid.`,
+            message: `${name(p)} works ${lead}${cells}, which ${rule.label} tries to avoid.`,
           });
         }
       };
@@ -388,7 +401,7 @@ export function listIssues(
         if (!tail.every((s, i) => rule.pattern[i].has(s))) continue;
         const rest = rule.pattern.slice(k);
         if (rest.length === 0 || !touches(0, rest.length)) continue;
-        const lead = `${tail.map((s) => (s === OFF_SID ? "OFF" : describeShift(model, s))).join(", then ")} before the roster starts, then `;
+        const lead = `${tail.map((s) => describeShift(model, s)).join(", then ")} before the roster starts, then `;
         judge(rest, 0, lead, `:h${k}`);
       }
     }
@@ -418,13 +431,13 @@ export function listIssues(
             issues.push({
               ...base,
               hard: true,
-              message: `${name(p)} must have ${c.label} on ${day(d)} (“${rule.label}”).`,
+              message: `${name(p)} must have ${c.label} on ${day(d)}${rule.note}.`,
             });
           } else if (mustNot && c.holds) {
             issues.push({
               ...base,
               hard: true,
-              message: `${name(p)} must not have ${c.label} on ${day(d)} (“${rule.label}”).`,
+              message: `${name(p)} must not have ${c.label} on ${day(d)}${rule.note}.`,
             });
           } else if (!must && !mustNot && rule.weight > 0 && !c.holds) {
             issues.push({
@@ -490,7 +503,7 @@ export function listIssues(
           key: `${rule.key}:p${p}:pair${i}`,
           hard,
           severity: Math.abs(x - target) + 1,
-          message: `${name(p)} has ${x} counted under “${rule.label}”, which ${text}.`,
+          message: `${name(p)} has ${x} counted under ${rule.label}, which ${text}.`,
         });
       });
     }

@@ -125,6 +125,21 @@ describe("successions", () => {
   });
 });
 
+describe("plain words", () => {
+  it("names a day off in words and never quotes a fallback as a rule name", () => {
+    const unnamed = {
+      type: PREFERENCE_TYPE.shiftTypeSuccessions,
+      person: "ALL",
+      pattern: ["N", "OFF"],
+      weight: -Infinity,
+    } as CanonicalPreference;
+    const result = check([unnamed], [idle(), idle(), idle()], [idle(), [OFF, s("N"), OFF], idle()]);
+    expect(result.hard.map((issue) => issue.message)).toEqual([
+      "Ben works N on 8 Oct, then a day off on 9 Oct, which a shift pattern rule does not allow.",
+    ]);
+  });
+});
+
 describe("requests", () => {
   it("treats an infinite request as hard and a finite one as worth knowing", () => {
     const preferences = [
@@ -166,9 +181,7 @@ describe("requests", () => {
       [[LEAVE, OFF, OFF], idle(), idle()],
       [[s("N"), OFF, OFF], idle(), idle()],
     );
-    expect(result.hard.map((issue) => issue.message)).toEqual([
-      "Ana must have leave on 7 Oct (“a request”).",
-    ]);
+    expect(result.hard.map((issue) => issue.message)).toEqual(["Ana must have leave on 7 Oct."]);
   });
 });
 
