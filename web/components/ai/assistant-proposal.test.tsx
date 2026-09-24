@@ -53,10 +53,11 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
 }));
 const sessionSend = vi.hoisted(() => vi.fn(async () => true));
+const sessionState = vi.hoisted(() => ({ isRunning: false }));
 vi.mock("./use-assistant-session", () => ({
   useAssistantSession: () => ({
     messages: [],
-    isRunning: false,
+    isRunning: sessionState.isRunning,
     interrupting: false,
     sending: false,
     send: sessionSend,
@@ -69,7 +70,7 @@ function HostSurface() {
   const controller = useAssistantProposals();
   return (
     <>
-      <ProposalPreviewCard controller={controller} />
+      <ProposalPreviewCard controller={controller} onSend={vi.fn()} disabled={false} />
       <AssistantReceipts controller={controller} />
     </>
   );
@@ -104,6 +105,8 @@ async function showProposal(commands: AssistantCommandV1[]) {
 }
 
 beforeEach(async () => {
+  sessionState.isRunning = false;
+  sessionSend.mockClear();
   assistantActions.resetForTest();
   harness = await installTestAuthority();
   await loadScenario(proposalScenario());
@@ -362,6 +365,7 @@ describe("historical conversations never regain live Apply", () => {
     expect(screen.queryByTestId("proposal-apply")).toBeNull();
     expect(screen.queryByTestId("assistant-receipts")).toBeNull();
     expect(screen.queryByTestId("apply-navigation-status")).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "Tell me what to change" })).toBeNull();
   });
 
   it("mounts the Preview surface in the LIVE rendering, under that same state", async () => {
@@ -409,4 +413,79 @@ describe("historical conversations never regain live Apply", () => {
   // renderer to register itself as a message. The provider's own prop surface is pinned
   // negatively at COMPILE time in `assistant-copilot-provider.negative.test-d.ts`, which
   // asserts `renderCustomMessages` is absent from its props.
+});
+
+// The decision is offered like the option card's answers: Apply, Change something,
+// Cancel, and an Other box that talks back to the assistant.
+describe("the Preview's decision reads as option-card choices", () => {
+  const live = () =>
+    render(<AssistantLiveConversation threadId="thread-1" routePath="/dates" routeLabel="Dates" />);
+
+  it("offers the three choices and the Other box as one group", async () => {
+    await showProposal(SHRINK);
+    live();
+
+    const decision = await screen.findByRole("group", { name: "Your decision" });
+    expect(decision).toContainElement(screen.getByRole("button", { name: /^Apply/ }));
+    expect(decision).toContainElement(screen.getByRole("button", { name: /^Change something/ }));
+    expect(decision).toContainElement(screen.getByRole("button", { name: /^Cancel/ }));
+    expect(decision).toContainElement(
+      screen.getByRole("textbox", { name: "Tell me what to change" }),
+    );
+  });
+
+  it("Change something keeps the proposal revisable and sends nothing", async () => {
+    const user = userEvent.setup();
+    const proposal = await showProposal(SHRINK);
+    live();
+
+    await user.click(await screen.findByRole("button", { name: /^Change something/ }));
+    await waitFor(() => expect(screen.queryByTestId("assistant-proposal")).toBeNull());
+    expect((await assistantProposalCommands.read(proposal.proposalId))?.status).toBe("stale");
+    expect(sessionSend).not.toHaveBeenCalled();
+  });
+
+  it("Other sends the text as a user message and marks the Preview for revision", async () => {
+    const user = userEvent.setup();
+    const proposal = await showProposal(SHRINK);
+    live();
+
+    const send = await screen.findByRole("button", { name: "Send what to change" });
+    expect(send).toBeDisabled();
+    await user.type(
+      screen.getByRole("textbox", { name: "Tell me what to change" }),
+      "  Make it end on the 20th  ",
+    );
+    await user.click(send);
+
+    await waitFor(() => expect(sessionSend).toHaveBeenCalledWith("Make it end on the 20th"));
+    await waitFor(() => expect(screen.queryByTestId("assistant-proposal")).toBeNull());
+    // Revised, not cancelled: the next preparation keeps this proposal's identity.
+    expect((await assistantProposalCommands.read(proposal.proposalId))?.status).toBe("stale");
+  });
+
+  it("closes Apply and the Other box while a turn is running, leaving the exits open", async () => {
+    const user = userEvent.setup();
+    sessionState.isRunning = true;
+    await showProposal(SHRINK);
+    live();
+
+    expect(await screen.findByTestId("proposal-apply")).toBeDisabled();
+    const other = screen.getByRole("textbox", { name: "Tell me what to change" });
+    expect(other).toBeDisabled();
+    await user.type(other, "ignored");
+    expect(screen.getByRole("button", { name: "Send what to change" })).toBeDisabled();
+    expect(screen.getByTestId("proposal-revise")).toBeEnabled();
+    expect(screen.getByTestId("proposal-cancel")).toBeEnabled();
+  });
+
+  it("keeps Apply closed until the agreement is ticked, in the live rendering too", async () => {
+    const user = userEvent.setup();
+    await showProposal(MOVE_LEAVE);
+    live();
+
+    expect(await screen.findByTestId("proposal-apply")).toBeDisabled();
+    await user.click(await screen.findByTestId("assumption-confirm"));
+    await waitFor(async () => expect(await screen.findByTestId("proposal-apply")).toBeEnabled());
+  });
 });

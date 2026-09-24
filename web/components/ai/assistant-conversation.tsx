@@ -193,7 +193,7 @@ export function AssistantLiveConversation({
       <DiagnosticSearchCard />
       <OptimizeRunRequestCard />
       <ChoiceCard onSend={sendMessage} disabled={running} />
-      <ProposalPreviewCard controller={proposals} />
+      <ProposalPreviewCard controller={proposals} onSend={sendMessage} disabled={running} />
       <AssistantReceipts controller={proposals} />
       <ApplyNavigationNotice controller={proposals} />
       <ActivityContext.Provider value={session.activity}>

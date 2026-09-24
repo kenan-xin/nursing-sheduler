@@ -40,7 +40,7 @@ function Assistant() {
   const { outcome } = controller;
   return (
     <>
-      <ProposalPreviewCard controller={controller} />
+      <ProposalPreviewCard controller={controller} onSend={() => {}} disabled={false} />
       <ApplyNavigationNotice controller={controller} />
       {outcome?.kind === "applied" ? (
         <button
