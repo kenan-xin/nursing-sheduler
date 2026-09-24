@@ -92,6 +92,27 @@ export function HydrationGate({ children, resetNewSchedule }: HydrationGateProps
     );
   }
 
+  // Non-destructive on purpose: the stored schedule is fine, it is just locked. Reset
+  // would be the wrong answer, and bring-up is still waiting underneath -- if the lock
+  // clears, this surface gives way to the app without a click.
+  if (status === "stalled") {
+    return (
+      <div
+        className="mx-auto flex w-full max-w-md flex-col gap-4 p-8 text-center"
+        data-testid="hydration-stalled"
+      >
+        <h2 className="font-heading text-h3 font-semibold tracking-[-0.015em]">
+          Your schedule is taking too long to load
+        </h2>
+        <p className="text-body text-ink2">
+          Another tab of this app is probably busy or frozen and holding the saved data. Close the
+          other tabs of this app, then reload. Nothing has been lost.
+        </p>
+        <Button onClick={() => window.location.reload()}>Reload</Button>
+      </div>
+    );
+  }
+
   if (status === "recoverable-error") {
     return (
       <div

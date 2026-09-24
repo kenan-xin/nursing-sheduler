@@ -18,11 +18,16 @@
 // command's own transaction reports its outcome, and the controller publishes it,
 // so the badge can no longer say "Saved" about a write that never happened.
 
-import { useHotStore, useAuthorityStore, type WriteStatus } from "@/lib/store";
+import {
+  useHotStore,
+  useAuthorityStore,
+  type HydrationStatus,
+  type WriteStatus,
+} from "@/lib/store";
 import { Badge } from "@/components/ui/badge";
 import { FaSpinner } from "@/components/icons";
 
-export type PersistenceStatus = "restoring" | "saving" | "saved" | "error";
+export type PersistenceStatus = "restoring" | "stalled" | "saving" | "saved" | "error";
 
 /**
  * Fold the hydration lifecycle and the repository write status into the one
@@ -32,10 +37,13 @@ export type PersistenceStatus = "restoring" | "saving" | "saved" | "error";
  * A pure function so the mapping is testable without mounting React or a store.
  */
 export function resolvePersistenceStatus(
-  hydrationStatus: "unhydrated" | "hydrating" | "ready" | "recoverable-error",
+  hydrationStatus: HydrationStatus,
   writeStatus: WriteStatus,
 ): PersistenceStatus {
   if (hydrationStatus === "unhydrated" || hydrationStatus === "hydrating") return "restoring";
+  // Not "error": nothing failed to save, and the beforeunload guard must not stand
+  // between the user and the reload that the stalled surface asks for.
+  if (hydrationStatus === "stalled") return "stalled";
   if (hydrationStatus === "recoverable-error") return "error";
   switch (writeStatus) {
     case "writing":
@@ -75,6 +83,7 @@ export function usePersistenceStatusController(): void {}
 
 const LABEL: Record<PersistenceStatus, string> = {
   restoring: "Restoring",
+  stalled: "Restore stalled",
   saving: "Saving",
   saved: "Saved",
   error: "Save failed",
@@ -89,6 +98,7 @@ const LABEL: Record<PersistenceStatus, string> = {
 // vocabulary is what lets this presenter stop authoring its own tone classes.
 const VARIANT: Record<PersistenceStatus, "neutral" | "success" | "error"> = {
   restoring: "neutral",
+  stalled: "error",
   saving: "neutral",
   saved: "success",
   error: "error",

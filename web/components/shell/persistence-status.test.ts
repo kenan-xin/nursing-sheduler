@@ -16,6 +16,9 @@ describe("resolvePersistenceStatus", () => {
     expect(resolvePersistenceStatus("unhydrated", "idle")).toBe("restoring");
     expect(resolvePersistenceStatus("hydrating", "writing")).toBe("restoring");
     expect(resolvePersistenceStatus("hydrating", "error")).toBe("restoring");
+    // Past the bounded wait it stops pretending to be in progress, but it is not a
+    // save failure either (dna).
+    expect(resolvePersistenceStatus("stalled", "idle")).toBe("stalled");
   });
 
   it("reports error when bring-up itself failed", () => {
