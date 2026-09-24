@@ -69,7 +69,9 @@ describe("judge", () => {
   });
 
   it("lets a lead-in or open question pass the card item, and a typed name, date or screen pass grounding", () => {
-    expect(STANDARD_ITEMS.no_text_choice).toMatch(/same turn as a card/);
+    expect(STANDARD_ITEMS.no_text_choice).toMatch(
+      /Card\s+line holding its answers is in the same turn/,
+    );
     expect(STANDARD_ITEMS.no_text_choice).toMatch(/open question/);
     expect(STANDARD_ITEMS.no_invented_entities).toMatch(/the user typed/);
     expect(STANDARD_ITEMS.no_invented_entities).toMatch(/dates/i);
