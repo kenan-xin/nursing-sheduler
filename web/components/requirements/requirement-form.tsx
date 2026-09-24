@@ -28,7 +28,9 @@ import {
   syncCoefficientPairs,
 } from "@/components/card-editor/coefficient-fields";
 import { WeightField } from "@/components/card-editor/weight-field";
+import { formatShortDate } from "@/lib/dates/date-id";
 import { ShiftTypeSingleSelect } from "./shift-type-single-select";
+import { DateOverridesField } from "./date-overrides-field";
 import {
   buildDateScopeAutoScopes,
   buildDateScopeDateGroups,
@@ -38,6 +40,7 @@ import {
   buildRequirementShiftTypeOptions,
   parseRequirementInteger,
   preferredDiffersFromRequired,
+  requirementCoveredIsos,
   selectShiftType,
   validateRequirementForm,
   REQUIREMENT_MESSAGES,
@@ -62,6 +65,8 @@ const SKILL_MIX_HELP =
   "At least this many of the shift's nurses must come from the group. Anyone can fill the other places.";
 const PREFERRED_NOTE =
   "Defaults to Required if left empty. Set higher to make extra staffing a soft goal (a weight then applies).";
+const OVERRIDES_NOTE =
+  "Use this for a single day that needs a different number, such as one fewer on a quiet public holiday. Everything else about the rule still applies on that day.";
 
 /** Blur a number input on wheel so scrolling past a focused field cannot change
  *  staffing accidentally (EDGE-PR-12). */
@@ -98,6 +103,7 @@ export function RequirementForm({
   const dateGroups = buildDateScopeDateGroups(state);
   const dateItems = buildDateScopeDateItems(state);
   const noDates = autoScopes.length === 0 && dateGroups.length === 0 && dateItems.length === 0;
+  const coveredIsos = requirementCoveredIsos(state, form.date);
   const diff = preferredDiffersFromRequired(form);
   const openToEveryone = form.qualifiedPeople.every(
     (ref) => String(ref).toUpperCase() === RESERVED_SHIFT_TYPE.all,
@@ -112,7 +118,7 @@ export function RequirementForm({
   }
 
   function submit() {
-    const nextErrors = validateRequirementForm(form, domain);
+    const nextErrors = validateRequirementForm(form, domain, new Set(coveredIsos));
     if (Object.keys(nextErrors).length > 0) {
       setErrors(nextErrors);
       return;
@@ -442,6 +448,26 @@ export function RequirementForm({
             }}
           />
         )}
+      </FieldShell>
+
+      <FieldShell
+        label="Different number on some dates"
+        hint="optional"
+        error={errors.requiredNumPeopleOverrides}
+      >
+        <p className="max-w-[60ch] text-meta leading-[1.45] text-ink3">{OVERRIDES_NOTE}</p>
+        <DateOverridesField
+          rows={form.requiredNumPeopleOverrides}
+          dates={coveredIsos.map((iso) => ({ iso, label: formatShortDate(iso, true) }))}
+          onChange={(next) => {
+            setForm((prev) => ({ ...prev, requiredNumPeopleOverrides: next }));
+            setErrors((prev) =>
+              prev.requiredNumPeopleOverrides
+                ? { ...prev, requiredNumPeopleOverrides: undefined }
+                : prev,
+            );
+          }}
+        />
       </FieldShell>
 
       {diff ? (

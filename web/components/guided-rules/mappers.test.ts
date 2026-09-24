@@ -94,6 +94,18 @@ describe("requirementsMapper", () => {
       "Exactly 2 people on D on every date, at least 1 RN.",
     );
   });
+
+  it("names each date exception after the dates", () => {
+    expect(
+      requirementsMapper.summary({
+        ...supported,
+        requiredNumPeopleOverrides: [
+          ["2026-10-14", 1],
+          ["2026-10-15", 0],
+        ],
+      }),
+    ).toBe("Exactly 2 people on D on every date, except 14 Oct: 1, 15 Oct: 0.");
+  });
 });
 
 describe("successionsMapper", () => {

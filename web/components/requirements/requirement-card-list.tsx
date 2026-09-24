@@ -4,7 +4,8 @@
 // card frame: each requirement is a numbered card with its description, the
 // shared weight pill (shown ONLY when the preferred/required weight is
 // meaningful — FR-PR-29), a Shift types/Required/Qualified/Dates field grid (plus
-// a Coefficients cell when the card has any), and the labelled Edit · Duplicate ·
+// a Coefficients cell when the card has any, and an Exceptions cell when it has
+// per-date overrides), and the labelled Edit · Duplicate ·
 // Delete action row.
 
 import { useState } from "react";
@@ -19,6 +20,7 @@ import {
   CardMoveActions,
   type DropPosition,
 } from "@/components/card-editor/card-editor-shell";
+import { formatShortDate } from "@/lib/dates/date-id";
 import { summarizeRefs } from "./requirements-model";
 
 interface RequirementCardListProps {
@@ -115,6 +117,16 @@ export function RequirementCardList({
                   ? `${card.requiredNumPeople} · at least ${card.skillMix.map((e) => `${e.minNumPeople} ${e.people}`).join(", ")}`
                   : `${card.requiredNumPeople}`,
               },
+              ...(card.requiredNumPeopleOverrides?.length
+                ? [
+                    {
+                      label: "Exceptions",
+                      value: card.requiredNumPeopleOverrides
+                        .map(([iso, n]) => `${formatShortDate(iso)}: ${n}`)
+                        .join(" · "),
+                    },
+                  ]
+                : []),
               {
                 label: "Preferred",
                 value: card.preferredNumPeople != null ? String(card.preferredNumPeople) : "—",

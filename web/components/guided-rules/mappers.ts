@@ -13,6 +13,7 @@ import {
   type RequirementCard,
   type SuccessionCard,
 } from "@/lib/scenario";
+import { formatShortDate } from "@/lib/dates/date-id";
 import { isValidWeightValue } from "@/components/card-editor/weight-field";
 import {
   REQUIREMENT_MESSAGES,
@@ -83,7 +84,12 @@ export const requirementsMapper: GuidedRuleMapper<RequirementCard> = {
     const mix = card.skillMix?.length
       ? `, at least ${card.skillMix.map((e) => `${e.minNumPeople} ${e.people}`).join(", ")}`
       : "";
-    return `${count} on ${shiftLabel} on ${dateLabel}${mix}.${only}`;
+    // Display only: exceptions are edited in Advanced (F20).
+    const except = (card.requiredNumPeopleOverrides ?? [])
+      .map(([iso, count]) => `${formatShortDate(iso)}: ${count}`)
+      .join(", ");
+    const exceptions = except ? `, except ${except}` : "";
+    return `${count} on ${shiftLabel} on ${dateLabel}${exceptions}${mix}.${only}`;
   },
   quickFields(card): GuidedQuickField[] {
     if (!isSupportedRequirementCard(card)) return [];
