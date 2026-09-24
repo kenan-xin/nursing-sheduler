@@ -61,6 +61,45 @@ describe("applyRangeChange range cascade (FR-DC-41 / AC-DC-18)", () => {
     expect(next.exportLayout.extraColumns[0].countDates).toEqual(["01", "15"]);
   });
 
+  it("drops overrides whose date left the range", () => {
+    const state = seeded();
+    state.cardsByKind.requirements = [
+      {
+        uid: "r",
+        shiftType: "D",
+        requiredNumPeople: 2,
+        requiredNumPeopleOverrides: [
+          [state.rangeStart, 1],
+          [state.rangeEnd, 3],
+        ],
+        weight: -1,
+      },
+    ];
+    const next = applyRangeChange(state, { start: state.rangeStart, end: state.rangeStart });
+    expect(next.cardsByKind.requirements[0].requiredNumPeopleOverrides).toEqual([
+      [state.rangeStart, 1],
+    ]);
+    const gone = applyRangeChange(state, { start: state.rangeEnd, end: state.rangeEnd });
+    expect(gone.cardsByKind.requirements[0].requiredNumPeopleOverrides).toEqual([
+      [state.rangeEnd, 3],
+    ]);
+  });
+
+  it("removes the field when no override is left", () => {
+    const state = seeded();
+    state.cardsByKind.requirements = [
+      {
+        uid: "r",
+        shiftType: "D",
+        requiredNumPeople: 2,
+        requiredNumPeopleOverrides: [[state.rangeEnd, 1]],
+        weight: -1,
+      },
+    ];
+    const next = applyRangeChange(state, { start: state.rangeStart, end: state.rangeStart });
+    expect(next.cardsByKind.requirements[0]).not.toHaveProperty("requiredNumPeopleOverrides");
+  });
+
   it("both migrates still-in-range dates and purges dates that left in one span change", () => {
     // 2026-07-01…0831 is same-year (MM-DD). Shrinking to August-only flips the span
     // to same-month (DD): July dates LEAVE the range (purge) while August dates STAY

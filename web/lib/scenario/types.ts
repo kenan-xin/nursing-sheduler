@@ -235,6 +235,7 @@ export interface CanonicalShiftTypeRequirementPreference {
   qualifiedPeople?: PersonRef | PersonRef[];
   preferredNumPeople?: number;
   skillMix?: SkillMixEntry[];
+  requiredNumPeopleOverrides?: RequirementOverride[];
   date?: DateRef | DateRef[];
   weight: Weight;
 }
@@ -467,6 +468,9 @@ export interface CardMarkers {
 // before T04 hydrates them with identity. The backend preference models carry no
 // UID (models.py), so the import target must not require one.
 
+/** One per-date exception to `requiredNumPeople`: `[YYYY-MM-DD, count]`. */
+export type RequirementOverride = [string, number];
+
 export interface RequirementCardBody {
   description?: string;
   shiftType: ShiftTypeRef | NestedShiftTypeRefList;
@@ -475,6 +479,7 @@ export interface RequirementCardBody {
   qualifiedPeople?: PersonRef | PersonRef[];
   preferredNumPeople?: number;
   skillMix?: SkillMixEntry[];
+  requiredNumPeopleOverrides?: RequirementOverride[];
   date?: DateRef | DateRef[];
   weight: Weight;
 }

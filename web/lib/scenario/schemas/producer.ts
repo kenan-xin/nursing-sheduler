@@ -146,6 +146,7 @@ const zRequirement = z.strictObject({
   qualifiedPeople: zRefOrList.optional(),
   preferredNumPeople: z.number().int().optional(),
   skillMix: z.array(zSkillMixEntry).optional(),
+  requiredNumPeopleOverrides: z.array(z.tuple([zIsoDate, z.number().int().min(0)])).optional(),
   date: zRefOrList.optional(),
   weight: zWeight,
 });

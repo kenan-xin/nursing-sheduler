@@ -58,6 +58,29 @@ preferences:
 `;
 
 describe("importScenarioYaml (lenient Load path)", () => {
+  it("imports date objects as ISO", () => {
+    // `yaml` 1.2 keeps ISO dates as strings. A loader that makes Date objects must not leak them.
+    const yaml = `apiVersion: alpha
+dates: {range: {startDate: 2026-10-01, endDate: 2026-10-31}}
+people: {items: [{id: ana}]}
+shiftTypes: {items: [{id: N}]}
+preferences:
+  - type: at most one shift per day
+  - type: shift type requirement
+    shiftType: N
+    requiredNumPeople: 2
+    requiredNumPeopleOverrides: [[2026-10-14, 1]]
+    weight: -1
+`;
+    const result = importScenarioYaml(yaml);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.target.cardsByKind.requirements[0].requiredNumPeopleOverrides).toEqual([
+        ["2026-10-14", 1],
+      ]);
+    }
+  });
+
   it("accepts backend-valid YAML (omitted type, scalar/list, nested, .inf)", () => {
     const result = importScenarioYaml(BACKEND_YAML);
     expect(result.ok).toBe(true);

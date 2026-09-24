@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { parse } from "yaml";
 import { serializeScenario, validateScenario, ScenarioValidationError } from "./serialize";
 import { toCanonicalScenarioDocument } from "./canonical";
+import { importScenarioYaml } from "./import-scenario";
 import { makeValidUiState } from "./test-fixtures";
 import type { ScenarioUiState } from "./types";
 
@@ -41,6 +42,42 @@ describe("serializeScenario (F2 boundary)", () => {
     const day = parsed.shiftTypes.items.find((s: { id: string }) => s.id === "D");
     expect(day.restMinutes).toBe(60);
     expect("restMinutes" in parsed.shiftTypes.items[1]).toBe(false);
+  });
+
+  it("round-trips requirement overrides through YAML", () => {
+    const state = makeValidUiState();
+    state.cardsByKind.requirements = [
+      {
+        uid: "r",
+        shiftType: "D",
+        requiredNumPeople: 2,
+        requiredNumPeopleOverrides: [[state.rangeStart, 1]],
+        weight: -1,
+      },
+    ];
+    const yaml = serializeScenario(state);
+    expect(yaml).toContain("requiredNumPeopleOverrides");
+    const back = importScenarioYaml(yaml);
+    expect(back.ok).toBe(true);
+    if (back.ok) {
+      expect(back.target.cardsByKind.requirements[0].requiredNumPeopleOverrides).toEqual([
+        [state.rangeStart, 1],
+      ]);
+    }
+  });
+
+  it("refuses a non-ISO override date", () => {
+    const state = makeValidUiState();
+    state.cardsByKind.requirements = [
+      {
+        uid: "r",
+        shiftType: "D",
+        requiredNumPeople: 2,
+        requiredNumPeopleOverrides: [["PH", 1]],
+        weight: -1,
+      },
+    ];
+    expect(() => serializeScenario(state)).toThrow();
   });
 
   it("throws ScenarioValidationError with issues for an invalid document", () => {

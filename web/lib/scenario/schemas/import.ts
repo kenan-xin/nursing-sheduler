@@ -114,6 +114,7 @@ const zImportRequirement = z.strictObject({
   qualifiedPeople: zRefOrList.nullish(),
   preferredNumPeople: z.number().int().nullish(),
   skillMix: z.array(zImportSkillMixEntry).nullish(),
+  requiredNumPeopleOverrides: z.array(z.tuple([zImportDate, z.number().int()])).nullish(),
   date: zDateRefOrList.nullish(),
   weight: zImportWeight.optional(),
 });

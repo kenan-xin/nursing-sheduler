@@ -155,6 +155,9 @@ function mapPreferences(source: ProjectableScenario): CanonicalPreference[] {
         qualifiedPeople: card.qualifiedPeople,
         preferredNumPeople: card.preferredNumPeople,
         skillMix: card.skillMix?.length ? card.skillMix : undefined,
+        requiredNumPeopleOverrides: card.requiredNumPeopleOverrides?.length
+          ? card.requiredNumPeopleOverrides
+          : undefined,
         date: card.date,
         weight: card.weight,
       }),
