@@ -15,10 +15,10 @@
 // picked up a too-old interpreter (the verify-deploy corpus then exited 1 on
 // every case because validate_origin.py refused to start) or a too-thin
 // distribution (the differential then crashed on
-// `ModuleNotFoundError: No module named 'pandas'`). The CI workflow is safe
-// because it activates the mise toolchain via `jdx/mise-action@v2` before
-// running the gates; local or automated callers running `pnpm test` outside an
-// activated mise shell were not.
+// `ModuleNotFoundError: No module named 'pandas'`). CI has no mise: the workflow
+// installs Python with actions/setup-python and passes it as `PYTHON`; local or
+// automated callers running `pnpm test` outside an activated mise shell must do
+// the same.
 //
 // Resolution contract (smallest robust repo-native mechanism):
 //
