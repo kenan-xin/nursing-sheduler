@@ -265,6 +265,68 @@ describe("sanitizePersistedScenario", () => {
     expect(() => sanitizePersistedScenario(payload)).not.toThrow();
   });
 
+  it("rejects a requirement card whose skillMix people/minNumPeople are mistyped", () => {
+    const emptyCards = {
+      requirements: [],
+      successions: [],
+      counts: [],
+      affinities: [],
+      coverings: [],
+    };
+    expect(() =>
+      sanitizePersistedScenario({
+        cardsByKind: {
+          ...emptyCards,
+          requirements: [
+            {
+              uid: "r1",
+              shiftType: "D",
+              requiredNumPeople: 2,
+              weight: 1,
+              skillMix: [{ people: "RN", minNumPeople: "2" }],
+            },
+          ],
+        },
+      }),
+    ).toThrow(/cardsByKind.requirements element skillMix/);
+
+    // `people` must be a single ref (string or number), never an array — unlike
+    // `qualifiedPeople`, a skillMix entry never targets a list of people/groups.
+    expect(() =>
+      sanitizePersistedScenario({
+        cardsByKind: {
+          ...emptyCards,
+          requirements: [
+            {
+              uid: "r1",
+              shiftType: "D",
+              requiredNumPeople: 2,
+              weight: 1,
+              skillMix: [{ people: ["RN", "EN"], minNumPeople: 1 }],
+            },
+          ],
+        },
+      }),
+    ).toThrow(/cardsByKind.requirements element skillMix people/);
+
+    expect(() =>
+      sanitizePersistedScenario({
+        cardsByKind: {
+          ...emptyCards,
+          requirements: [
+            {
+              uid: "r1",
+              shiftType: "D",
+              requiredNumPeople: 2,
+              weight: 1,
+              skillMix: [{ people: "RN", minNumPeople: 2 }],
+            },
+          ],
+        },
+      }),
+    ).not.toThrow();
+  });
+
   it("throws on card body malformation (uid-only cards and missing required fields)", () => {
     const emptyCards = {
       requirements: [],
@@ -307,59 +369,6 @@ describe("sanitizePersistedScenario", () => {
         },
       }),
     ).toThrow(/people1/);
-  });
-
-  it("rejects a requirement card whose skillMix minNumPeople is not a number", () => {
-    const emptyCards = {
-      requirements: [],
-      successions: [],
-      counts: [],
-      affinities: [],
-      coverings: [],
-    };
-    expect(() =>
-      sanitizePersistedScenario({
-        cardsByKind: {
-          ...emptyCards,
-          requirements: [
-            {
-              uid: "r1",
-              shiftType: "D",
-              requiredNumPeople: 2,
-              weight: 1,
-              skillMix: [{ people: "RN", minNumPeople: "2" }],
-            },
-          ],
-        },
-      }),
-    ).toThrow(/cardsByKind.requirements element skillMix/);
-
-    expect(() =>
-      sanitizePersistedScenario({
-        cardsByKind: {
-          ...emptyCards,
-          requirements: [
-            {
-              uid: "r1",
-              shiftType: "D",
-              requiredNumPeople: 2,
-              weight: 1,
-              skillMix: [{ people: "RN", minNumPeople: 2 }],
-            },
-          ],
-        },
-      }),
-    ).not.toThrow();
-  });
-
-  it("throws on card body malformation (uid-only cards and missing required fields), continued", () => {
-    const emptyCards = {
-      requirements: [],
-      successions: [],
-      counts: [],
-      affinities: [],
-      coverings: [],
-    };
 
     // covering card missing preceptors
     expect(() =>

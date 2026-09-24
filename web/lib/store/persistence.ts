@@ -484,7 +484,7 @@ function validateRequirementCard(el: Record<string, unknown>): void {
           "Persisted cardsByKind.requirements element skillMix entry must be an object.",
         );
       }
-      validateRefOrArray(entry.people, "cardsByKind.requirements element skillMix people");
+      requireStringOrNumber(entry.people, "cardsByKind.requirements element skillMix people");
       requireNumber(entry.minNumPeople, "cardsByKind.requirements element skillMix minNumPeople");
     }
   }
