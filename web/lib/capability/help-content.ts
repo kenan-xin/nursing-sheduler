@@ -135,9 +135,9 @@ export const CAPABILITY_ENTRIES = [
     id: "scheduler-limits",
     title: "What the scheduler cannot do",
     nurseFacingSummary:
-      "The scheduler does not read clock times. It never calculates overlaps or the hours " +
+      "The scheduler does not read clock times. It never works out overlaps or the hours " +
       "between shifts, so rest between shifts is written as shift orders it must not use, " +
-      "such as no day shift right after a night. Days in a row across any shifts are also a " +
+      "such as no day shift straight after a night. Days in a row across any shifts are also a " +
       "shift-order rule: 'any shift' 6 days in a row set to must never happen allows at most " +
       "5. Limits count over fixed dates, never a rolling seven days. Counts start fresh each " +
       "roster period: last month's nights or weekends, and a day off owed for a public " +

@@ -79,6 +79,21 @@ describe("rule guidance", () => {
     expect(result.value.map((c) => c.capabilityId)).toContain("scheduler-limits");
   });
 
+  it.each([
+    ["max 3 night shifts per week", "shift-counts"],
+    ["at least 1 rest day a week", "shift-counts"],
+    ["2 days off per week", "shift-counts"],
+    ["at least 2 nurses on each night shift", "staffing-requirements"],
+    ["no day shift straight after a night shift", "shift-successions"],
+  ])("ranks the real rule for %s above the limits entry", (policy, rule) => {
+    const result = suggestRuleCandidates(policy, context());
+    if (result.status !== "ok") throw new Error("expected ok");
+    const ids = result.value.map((c) => c.capabilityId);
+    expect(ids).toContain(rule);
+    const limits = ids.indexOf("scheduler-limits");
+    if (limits !== -1) expect(ids.indexOf(rule)).toBeLessThan(limits);
+  });
+
   it("carries the registry stamp on every answer", () => {
     const result = suggestRuleCandidates("night shift", context());
     expect(result.stamp.manifestSha256).toMatch(/^[0-9a-f]{64}$/);
