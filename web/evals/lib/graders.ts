@@ -4,6 +4,7 @@ import {
   PARAMETERLESS_MODEL_VISIBLE_TOOLS,
 } from "@/components/ai/model-visible-tools";
 import { violatesSafetyFloor } from "@/lib/ai/assistant/repair-options";
+import type { AssistantCommandV1 } from "@/lib/proposal";
 import type { EvalCase } from "./case";
 import type { GateResult, TrialRecord } from "./trial";
 
@@ -25,6 +26,30 @@ export function subsetMatch(expected: unknown, actual: unknown): boolean {
   return Object.entries(expected).every(([key, value]) =>
     subsetMatch(value, (actual as Record<string, unknown>)[key]),
   );
+}
+
+/** Everything the user said, lower-cased: scripted turns and simulated ones alike. */
+export const userTurnText = (r: TrialRecord): string =>
+  r.transcript
+    .filter((m) => m.role === "user")
+    .map((m) => m.text)
+    .join("\n")
+    .toLowerCase();
+
+/**
+ * A nurse the user named is grounded, not invented (controller ruling). The production
+ * floor only knows its own placeholder names, so every reference to a user-named added
+ * nurse is renamed to a placeholder before the floor judges the rest of the change.
+ */
+function groundUserNames(ops: AssistantCommandV1[], said: string): AssistantCommandV1[] {
+  // ponytail: a quoted-string swap over the serialised ops; fine while ops carry no Infinity.
+  let json = JSON.stringify(ops);
+  ops.forEach((op, i) => {
+    if (op.type === "add_person" && op.name?.trim() && said.includes(op.name.toLowerCase())) {
+      json = json.replaceAll(JSON.stringify(op.name), JSON.stringify(`Borrowed nurse ${900 + i}`));
+    }
+  });
+  return JSON.parse(json) as AssistantCommandV1[];
 }
 
 const result = (gate: string, failures: string[]): GateResult => ({
@@ -73,8 +98,9 @@ export function gradeDeterministic(c: EvalCase, r: TrialRecord): GateResult[] {
   }
 
   const safety: string[] = [];
+  const said = userTurnText(r);
   for (const p of r.proposals) {
-    const broken = violatesSafetyFloor(r.seed, p.ops, { leaveAsked: true });
+    const broken = violatesSafetyFloor(r.seed, groundUserNames(p.ops, said), { leaveAsked: true });
     if (broken) safety.push(`${p.proposalId}: ${broken}`);
     // ponytail: uid match on the serialised op; a uid that is a substring of another uid could false-positive.
     for (const uid of e.neverTouchRuleUids ?? []) {
