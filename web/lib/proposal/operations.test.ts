@@ -11,6 +11,7 @@ import type { ScenarioUiState } from "@/lib/scenario";
 import type { AssistantCommandV1 } from "./commands";
 import { applyAssistantCommand, applyAssistantCommands } from "./operations";
 import { octoberWard, peopleScenario, proposalScenario, ruleWardScenario } from "./test-support";
+import { REQUIREMENT_MESSAGES } from "@/components/requirements/requirements-model";
 
 describe("set_roster_range", () => {
   it("purges references to dates that leave the range", () => {
@@ -105,6 +106,128 @@ describe("set_rule_enabled", () => {
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.rejection.code).toBe("unknown_target");
+  });
+});
+
+describe("set_skill_mix", () => {
+  // RN = ana, ben; Senior = cai. "Day cover" needs 4 on Day.
+  const state = () => {
+    const s = ruleWardScenario();
+    s.cardsByKind.requirements[0] = { ...s.cardsByKind.requirements[0], requiredNumPeople: 4 };
+    return s;
+  };
+
+  it("sets 'at least 2 from RN' on the Day requirement", () => {
+    const result = applyAssistantCommand(state(), {
+      type: "set_skill_mix",
+      ruleId: "req-day",
+      skillMix: [{ people: "RN", minNumPeople: 2 }],
+    });
+    expect(result.ok && result.next.cardsByKind.requirements[0].skillMix).toEqual([
+      { people: "RN", minNumPeople: 2 },
+    ]);
+  });
+
+  it("clears a skill mix with an empty list", () => {
+    const s = state();
+    s.cardsByKind.requirements[0].skillMix = [{ people: "RN", minNumPeople: 2 }];
+    const result = applyAssistantCommand(s, {
+      type: "set_skill_mix",
+      ruleId: "req-day",
+      skillMix: [],
+    });
+    expect(result.ok && result.next.cardsByKind.requirements[0].skillMix).toBeUndefined();
+  });
+
+  it.each([
+    [{ ruleId: "gone", skillMix: [{ people: "RN", minNumPeople: 1 }] }, "unknown_target"],
+    [{ ruleId: "req-day", skillMix: [{ people: "Nobody", minNumPeople: 1 }] }, "unknown_target"],
+    [{ ruleId: "req-day", skillMix: [{ people: "ALL", minNumPeople: 1 }] }, "unknown_target"],
+    [{ ruleId: "req-day", skillMix: [{ people: "RN", minNumPeople: 5 }] }, "invalid_value"],
+    [{ ruleId: "req-day", skillMix: [{ people: "RN", minNumPeople: 0 }] }, "invalid_value"],
+    [{ ruleId: "req-day", skillMix: [] }, "no_effect"],
+  ])("refuses %j with %s", (fields, code) => {
+    const result = applyAssistantCommand(state(), { type: "set_skill_mix", ...fields });
+    expect(!result.ok && result.rejection.code).toBe(code);
+  });
+
+  it("edit_staffing_requirement keeps the stored skill mix", () => {
+    const seeded = applyAssistantCommand(state(), {
+      type: "set_skill_mix",
+      ruleId: "req-day",
+      skillMix: [{ people: "RN", minNumPeople: 2 }],
+    });
+    if (!seeded.ok) throw new Error(seeded.rejection.message);
+    const edited = applyAssistantCommand(seeded.next, {
+      type: "edit_staffing_requirement",
+      ruleId: "req-day",
+      description: "Day cover",
+      shiftType: "Day",
+      qualifiedPeople: ["ALL"],
+      dates: ["ALL"],
+      requiredNumPeople: 3,
+    });
+    expect(edited.ok && edited.next.cardsByKind.requirements[0].skillMix).toEqual([
+      { people: "RN", minNumPeople: 2 },
+    ]);
+  });
+
+  it("edit_staffing_requirement refuses a count below the skill mix", () => {
+    const s = state();
+    s.cardsByKind.requirements[0].skillMix = [{ people: "RN", minNumPeople: 2 }];
+    const result = applyAssistantCommand(s, {
+      type: "edit_staffing_requirement",
+      ruleId: "req-day",
+      description: "Day cover",
+      shiftType: "Day",
+      qualifiedPeople: ["ALL"],
+      dates: ["ALL"],
+      requiredNumPeople: 1,
+    });
+    expect(!result.ok && result.rejection.message).toContain(
+      REQUIREMENT_MESSAGES.skillMixAboveRequired,
+    );
+  });
+
+  it("set_staffing_requirement_people refuses a count below the skill mix", () => {
+    const s = state();
+    s.cardsByKind.requirements[0].skillMix = [{ people: "RN", minNumPeople: 2 }];
+    const result = applyAssistantCommand(s, {
+      type: "set_staffing_requirement_people",
+      ruleId: "req-day",
+      requiredNumPeople: 1,
+    });
+    expect(!result.ok && result.rejection.message).toContain(
+      REQUIREMENT_MESSAGES.skillMixAboveRequired,
+    );
+  });
+
+  it("add_staffing_requirement can carry a skill mix", () => {
+    const result = applyAssistantCommand(state(), {
+      type: "add_staffing_requirement",
+      description: "Night: 3, at least 1 RN",
+      shiftType: "Night",
+      qualifiedPeople: ["ALL"],
+      dates: ["ALL"],
+      requiredNumPeople: 3,
+      skillMix: [{ people: "RN", minNumPeople: 1 }],
+    });
+    expect(result.ok && result.next.cardsByKind.requirements.at(-1)?.skillMix).toEqual([
+      { people: "RN", minNumPeople: 1 },
+    ]);
+  });
+
+  it("add_staffing_requirement refuses a skill mix naming nobody on the ward", () => {
+    const result = applyAssistantCommand(state(), {
+      type: "add_staffing_requirement",
+      description: "Night",
+      shiftType: "Night",
+      qualifiedPeople: ["ALL"],
+      dates: ["ALL"],
+      requiredNumPeople: 3,
+      skillMix: [{ people: "Nobody", minNumPeople: 1 }],
+    });
+    expect(!result.ok && result.rejection.code).toBe("unknown_target");
   });
 });
 

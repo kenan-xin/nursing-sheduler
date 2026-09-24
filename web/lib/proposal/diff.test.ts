@@ -69,6 +69,24 @@ describe("deriveProposalDiff", () => {
     expect(diff.needsReview).toEqual([]);
   });
 
+  it("reports set_skill_mix as a direct change to that requirement", () => {
+    const before = ruleWardScenario();
+    const commands = [
+      {
+        type: "set_skill_mix" as const,
+        ruleId: "req-day",
+        skillMix: [{ people: "RN", minNumPeople: 1 }],
+      },
+    ];
+    const applied = applyAssistantCommands(before, commands);
+    if (!applied.ok) throw new Error(`fixture should apply: ${applied.rejection.message}`);
+
+    const diff = deriveProposalDiff(before, applied.next, commands);
+    expect(diff.direct.map((entry) => entry.key)).toEqual(["rule:requirements:req-day"]);
+    expect(diff.direct[0].after).toContain("at least 1 from “RN”");
+    expect(diff.cascade).toEqual([]);
+  });
+
   it("shows a displaced cell at a move's destination as part of the same change", () => {
     const before = proposalScenario();
     const commands = [

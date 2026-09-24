@@ -375,20 +375,26 @@ describe("the command arms the provider is actually shown", () => {
       },
       add_staffing_requirement: {
         type: "add_staffing_requirement",
-        description: "Two RNs on every night shift",
+        description: "Night needs 4, at least 2 RNs",
         shiftType: "Night",
-        qualifiedPeople: ["RN"],
+        qualifiedPeople: ["ALL"],
         dates: ["ALL"],
-        requiredNumPeople: 2,
+        requiredNumPeople: 4,
+        skillMix: [{ people: "RN", minNumPeople: 2 }],
       },
       edit_staffing_requirement: {
         type: "edit_staffing_requirement",
         ruleId: "r1",
-        description: "Two RNs on every night shift",
+        description: "Night needs 4, at least 2 RNs",
         shiftType: "Night",
-        qualifiedPeople: ["RN"],
+        qualifiedPeople: ["ALL"],
         dates: ["WEEKEND"],
-        requiredNumPeople: 3,
+        requiredNumPeople: 4,
+      },
+      set_skill_mix: {
+        type: "set_skill_mix",
+        ruleId: "r1",
+        skillMix: [{ people: "RN", minNumPeople: 2 }],
       },
       remove_rule: {
         type: "remove_rule",
@@ -425,6 +431,8 @@ describe("the command arms the provider is actually shown", () => {
       remove_people_group: { type: "remove_people_group", groupId: "Seniors" },
     };
     expect(Object.keys(representative).sort()).toEqual([...ASSISTANT_COMMAND_TYPES].sort());
+    // The only optional wire fields: advertised, present in the payload, not `required`.
+    const optional: Record<string, string[]> = { add_staffing_requirement: ["skillMix"] };
 
     const parameters = child(wire.get("prepare_scenario_change"), "parameters");
     const operations = child(child(parameters, "properties"), "operations");
@@ -436,7 +444,11 @@ describe("the command arms the provider is actually shown", () => {
 
       const advertised = Object.keys(child(arm, "properties")).sort();
       expect(advertised).toEqual(Object.keys(payload).sort());
-      expect([...(arm.required as string[])].sort()).toEqual(Object.keys(payload).sort());
+      expect([...(arm.required as string[])].sort()).toEqual(
+        Object.keys(payload)
+          .filter((key) => !optional[name ?? ""]?.includes(key))
+          .sort(),
+      );
 
       const parsed = parseAssistantCommands([payload]);
       expect(parsed.ok, `canonical parse rejected the wire arm ${name}`).toBe(true);

@@ -219,6 +219,60 @@ describe("set_staffing_requirement_people matches the Rules quick edit", () => {
   });
 });
 
+describe("set_skill_mix is the Staffing requirements Edit form's skill mix rows", () => {
+  // RN = ana, ben. "Day cover" needs 4 on Day.
+  const skillMixWard = () => {
+    const s = ruleWardScenario();
+    s.cardsByKind.requirements[0] = { ...s.cardsByKind.requirements[0], requiredNumPeople: 4 };
+    return s;
+  };
+
+  it.each([
+    [[{ people: "RN", minNumPeople: 2 }]],
+    [[{ people: "RN", minNumPeople: 9 }]], // above the head count: both refuse
+    [
+      [
+        { people: "RN", minNumPeople: 1 },
+        { people: "RN", minNumPeople: 2 },
+      ],
+    ], // duplicate: both refuse
+  ])("assistant and form agree on %j", (skillMix) => {
+    const state = skillMixWard();
+    const domain = buildRequirementShiftTypeDomain(state);
+    const draft = { ...requirementToForm(state.cardsByKind.requirements[0], domain), skillMix };
+    const formErrors = validateRequirementForm(draft, domain);
+    const manual =
+      Object.keys(formErrors).length === 0
+        ? applyRequirementPatch(state, { type: "update", uid: "req-day", form: draft })
+        : null;
+    const assistant = applyAssistantCommand(state, {
+      type: "set_skill_mix",
+      ruleId: "req-day",
+      skillMix,
+    });
+    expect(assistant.ok).toBe(manual !== null);
+    if (assistant.ok && manual) expect(assistant.next.cardsByKind).toEqual(manual.cardsByKind);
+  });
+
+  it("the Guided quick edit and set_staffing_requirement_people agree below the skill mix", () => {
+    const state = skillMixWard();
+    state.cardsByKind.requirements[0].skillMix = [{ people: "RN", minNumPeople: 2 }];
+    const manual = applyRequirementQuickEdit(
+      state.cardsByKind.requirements,
+      "req-day",
+      "requiredNumPeople",
+      1,
+    );
+    const assistant = applyAssistantCommand(state, {
+      type: "set_staffing_requirement_people",
+      ruleId: "req-day",
+      requiredNumPeople: 1,
+    });
+    expect(manual.kind).toBe("invalid-value");
+    expect(assistant.ok).toBe(false);
+  });
+});
+
 describe("move_leave matches the manual cell contract", () => {
   it("produces what clearing the source and saving leave at the target produces", () => {
     const state = proposalScenario();
