@@ -641,7 +641,9 @@ function ShiftCard({
 
       <StaffingSummary state={scenario} item={item} />
 
-      <div className="mt-auto flex items-center gap-2 border-t border-line2 pt-3">
+      {/* Wraps so Edit/Delete drop to their own row on a narrow card (for example with
+          the assistant dock open) instead of spilling past the card edge. */}
+      <div className="mt-auto flex flex-wrap items-center gap-2 border-t border-line2 pt-3">
         {canReorder && (
           <>
             <Button
@@ -666,7 +668,7 @@ function ShiftCard({
             </Button>
           </>
         )}
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
           {/* `secondary`, not `outline`: the prototype's card actions sit on the
               `--line` hairline, and `outline` is the heavier `--rule` edge.
               Measured against ScreenShifts.dc.html — same tone, same elevation.
