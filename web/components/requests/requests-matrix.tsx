@@ -24,6 +24,8 @@ import {
 } from "@/components/requests/requests-model";
 import { FaBriefcase, FaCalendar, FaLayerGroup, FaMugHot, type IconType } from "@/components/icons";
 import { isSingaporePublicHoliday, utcDayOfWeek } from "@/lib/dates";
+import { changeKeys } from "@/lib/change-highlight/keys";
+import { changeTargetProps, useChangeHighlightKeys } from "@/lib/change-highlight/store";
 import { cn } from "@/lib/utils";
 
 export interface RequestsMatrixProps {
@@ -297,6 +299,21 @@ export function RequestsMatrix({
     virtualizer.measure();
   }, [rowHeight, virtualizer]);
 
+  // Off-screen rows are not in the DOM, so the matrix brings the first changed row
+  // into view itself. One read of the set; each cell below is a Set lookup.
+  const highlighted = useChangeHighlightKeys();
+  useEffect(() => {
+    if (highlighted.size === 0) return;
+    const index = rows.findIndex((row) => {
+      if (highlighted.has(changeKeys.person(row.id))) return true;
+      const prefix = changeKeys.cellRow(row.id);
+      for (const key of highlighted) if (key.startsWith(prefix)) return true;
+      return false;
+    });
+    // ponytail: rows only; add horizontal scroll to the column if wide rosters hide it.
+    if (index >= 0) virtualizer.scrollToIndex(index, { align: "center" });
+  }, [highlighted, rows, virtualizer]);
+
   const gridTemplateColumns = useMemo(() => {
     const widths = [
       `${NURSE_COL_WIDTH}px`,
@@ -431,6 +448,10 @@ export function RequestsMatrix({
                 <div
                   className="sticky left-0 z-10 flex items-center gap-2 truncate border-b border-r border-line bg-surface px-3"
                   title={row.description}
+                  {...changeTargetProps(
+                    changeKeys.person(row.id),
+                    highlighted.has(changeKeys.person(row.id)),
+                  )}
                 >
                   <span className="truncate text-sm font-medium text-ink">{row.label}</span>
                   {row.isGroup ? (
@@ -514,6 +535,7 @@ export function RequestsMatrix({
                 {columns.map((col, colIdx) => {
                   const colRef = col.ref;
                   const key = coordKey(row.id, colRef);
+                  const changeKey = changeKeys.cell(row.id, colRef);
                   const cellsAt = cellsByCoord.get(key) ?? EMPTY_CELLS;
                   const view = buildCellView(cellsAt, shiftTypeOrderIndex);
                   const staged = stagedKeys?.has(key) ?? false;
@@ -530,6 +552,7 @@ export function RequestsMatrix({
                     style: visual.style,
                     title: view.primaryText || undefined,
                     "data-testid": `cell-${row.id}-${colRef}`,
+                    ...changeTargetProps(changeKey, highlighted.has(changeKey)),
                   };
                   const cellContent = view.empty ? null : (
                     <span className="truncate">

@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { changeKeys } from "@/lib/change-highlight/keys";
+import { clearChangeHighlight, showChangeHighlight } from "@/lib/change-highlight/store";
 import type { UiPerson, UiRequestCell } from "@/lib/scenario";
 import {
   historyColumnLabels,
@@ -187,6 +189,54 @@ describe("RequestsMatrix", () => {
   it("degrades gracefully when rows or columns are empty", () => {
     render(<RequestsMatrix {...makeProps({ rows: [] })} />);
     expect(screen.getByTestId("requests-matrix-empty")).toBeInTheDocument();
+  });
+});
+
+describe("RequestsMatrix — change highlight", () => {
+  afterEach(() => clearChangeHighlight());
+
+  it("outlines the changed cell and the row of a folded days-off run", () => {
+    render(<RequestsMatrix {...makeProps()} />);
+    act(() =>
+      showChangeHighlight([changeKeys.cell("Alice", "2026-05-01"), changeKeys.person("Bob")]),
+    );
+    expect(screen.getByTestId("cell-Alice-2026-05-01")).toHaveAttribute(
+      "data-change-highlight",
+      "true",
+    );
+    expect(screen.getByTestId("cell-Alice-2026-05-02")).not.toHaveAttribute(
+      "data-change-highlight",
+    );
+    const bobLabel = Array.from(document.querySelectorAll("[data-change-key]")).find(
+      (el) => el.getAttribute("data-change-key") === changeKeys.person("Bob"),
+    );
+    expect(bobLabel).toHaveAttribute("data-change-highlight", "true");
+  });
+
+  it("scrolls the virtualizer to the first changed row", () => {
+    // This pinned jsdom has no `scrollTo` on HTMLElement (only `window.scrollTo`),
+    // so @tanstack/virtual-core's `elementScroll` (`scrollElement?.scrollTo?.(...)`)
+    // silently no-ops without it. `vi.spyOn` requires the property to already
+    // exist, so the method is defined directly for this test and restored after.
+    const original = HTMLElement.prototype.scrollTo;
+    const scrollTo = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+      value: scrollTo,
+      configurable: true,
+      writable: true,
+    });
+    try {
+      render(<RequestsMatrix {...makeProps()} />);
+      scrollTo.mockClear();
+      act(() => showChangeHighlight([changeKeys.cell("Bob", "2026-05-02")]));
+      expect(scrollTo).toHaveBeenCalled();
+    } finally {
+      if (original === undefined) {
+        delete (HTMLElement.prototype as { scrollTo?: unknown }).scrollTo;
+      } else {
+        HTMLElement.prototype.scrollTo = original;
+      }
+    }
   });
 });
 
