@@ -19,6 +19,7 @@ import {
   requirementToForm,
   selectShiftType,
   shiftGroupReachesDayState,
+  skillMixFloor,
   summarizeRefs,
   validateRequirementForm,
   withCardDisabled,
@@ -54,6 +55,7 @@ describe("emptyRequirementForm defaults (spec 05 FR-PR-20)", () => {
       preferredNumPeople: "",
       date: [],
       weight: -50,
+      skillMix: [],
     });
   });
 });
@@ -647,5 +649,77 @@ describe("computeCoverageWarnings (FR-PR-28/40..42)", () => {
     expect(item).toContain("/ Long Day (");
     expect(item).not.toContain("/ Long (");
     expect(item).toMatch(/requirements 1 and 2/);
+  });
+});
+
+describe("skill mix", () => {
+  const domain = buildRequirementShiftTypeDomain(BASE);
+  const mixForm = (patch: Partial<RequirementFormState>): RequirementFormState => ({
+    ...emptyRequirementForm(),
+    shiftType: ["N"],
+    requiredNumPeople: 4,
+    qualifiedPeople: ["ALL"],
+    date: ["ALL"],
+    ...patch,
+  });
+
+  it.each([
+    [[{ people: "", minNumPeople: 1 }], REQUIREMENT_MESSAGES.skillMixPeopleEmpty],
+    [[{ people: "RN", minNumPeople: 0 }], REQUIREMENT_MESSAGES.skillMixMinInvalid],
+    [[{ people: "RN", minNumPeople: "" }], REQUIREMENT_MESSAGES.skillMixMinInvalid],
+    [[{ people: "RN", minNumPeople: 5 }], REQUIREMENT_MESSAGES.skillMixAboveRequired],
+    [
+      [
+        { people: "RN", minNumPeople: 1 },
+        { people: "RN", minNumPeople: 2 },
+      ],
+      REQUIREMENT_MESSAGES.skillMixDuplicate,
+    ],
+  ])("rejects %j", (skillMix, message) => {
+    expect(validateRequirementForm(mixForm({ skillMix }), domain).skillMix).toBe(message);
+  });
+
+  it("needs the shift open to everyone", () => {
+    const errors = validateRequirementForm(
+      mixForm({ qualifiedPeople: ["RN"], skillMix: [{ people: "RN", minNumPeople: 1 }] }),
+      domain,
+    );
+    expect(errors.skillMix).toBe(REQUIREMENT_MESSAGES.skillMixNeedsEveryone);
+  });
+
+  it("lowering the headcount below the skill mix is refused on the skill mix row", () => {
+    const errors = validateRequirementForm(
+      mixForm({ requiredNumPeople: 1, skillMix: [{ people: "RN", minNumPeople: 2 }] }),
+      domain,
+    );
+    expect(errors.skillMix).toBe(REQUIREMENT_MESSAGES.skillMixAboveRequired);
+  });
+
+  it("builds the card with the skill mix and loads it back unchanged", () => {
+    const card = buildRequirementCard(
+      mixForm({ skillMix: [{ people: "RN", minNumPeople: 2 }] }),
+      domain,
+      "u1",
+    );
+    expect(card.skillMix).toEqual([{ people: "RN", minNumPeople: 2 }]);
+    expect(requirementToForm(card, domain).skillMix).toEqual([{ people: "RN", minNumPeople: 2 }]);
+  });
+
+  it("an empty skill mix is not written to the card", () => {
+    expect(buildRequirementCard(mixForm({ skillMix: [] }), domain, "u1")).not.toHaveProperty(
+      "skillMix",
+    );
+  });
+
+  it("skillMixFloor is the largest minimum", () => {
+    expect(skillMixFloor({})).toBe(0);
+    expect(
+      skillMixFloor({
+        skillMix: [
+          { people: "RN", minNumPeople: 2 },
+          { people: "S", minNumPeople: 1 },
+        ],
+      }),
+    ).toBe(2);
   });
 });

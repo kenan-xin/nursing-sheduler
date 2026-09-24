@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CountCard, RequirementCard } from "@/lib/scenario";
+import { REQUIREMENT_MESSAGES } from "@/components/requirements/requirements-model";
 import {
   applyCountQuickEdit,
   applyRequirementQuickEdit,
@@ -50,6 +51,18 @@ describe("applyRequirementQuickEdit", () => {
     expect(applyRequirementQuickEdit([unsupported], "r2", "requiredNumPeople", 5)).toEqual({
       kind: "unsupported-field",
     });
+  });
+
+  it("refuses a head count below the skill mix", () => {
+    const withMix: RequirementCard = {
+      ...requirement,
+      skillMix: [{ people: "RN", minNumPeople: 2 }],
+    };
+    expect(applyRequirementQuickEdit([withMix], "r1", "requiredNumPeople", 1)).toEqual({
+      kind: "invalid-value",
+      message: REQUIREMENT_MESSAGES.skillMixAboveRequired,
+    });
+    expect(applyRequirementQuickEdit([withMix], "r1", "requiredNumPeople", 2).kind).toBe("applied");
   });
 });
 
