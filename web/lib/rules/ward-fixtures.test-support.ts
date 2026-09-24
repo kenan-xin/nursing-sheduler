@@ -124,6 +124,22 @@ export const SCENARIOS = {
         ],
       }),
     }),
+  /** Nights need 2, at least 2 of them RNs; one of the two RNs is on leave on the 3rd. */
+  rnMixOnLeave: (): ScenarioUiState =>
+    ward({
+      staff: people("rn1", "rn2", "en1", "en2", "en3"),
+      staffGroups: [{ id: "RN", members: ["rn1", "rn2"] }],
+      reqData: [leave("rn2", "03")],
+      cardsByKind: cards({
+        requirements: [
+          requirement("day", "D", 1),
+          requirement("night", "N", 2, {
+            description: "Night: 2, both RNs",
+            skillMix: [{ people: "RN", minNumPeople: 2 }],
+          }),
+        ],
+      }),
+    }),
   /** 7 nights to fill, but "at most 1 night each" lets 4 nurses cover only 4. */
   ruleTooStrict: (): ScenarioUiState =>
     ward({

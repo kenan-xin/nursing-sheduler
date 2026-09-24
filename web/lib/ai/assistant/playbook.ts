@@ -25,8 +25,12 @@
 // - Staffing requirements are EXACT counts (`qualifiedPeople` bans everyone else),
 //   so "lower a staffing minimum" means editing `requiredNumPeople` of an exact
 //   requirement via `edit_staffing_requirement` / `set_staffing_requirement_people`.
-// - The assistant cannot create or lower a skill-mix (group-restricted) requirement
-//   (bead nursing-sheduler-2ti). No repair proposes one.
+// - A skill mix (`skillMix` on a staffing requirement: at least k of a group among its
+//   staff, banning nobody) is set with `set_skill_mix` or
+//   `add_staffing_requirement.skillMix` (bead nursing-sheduler-2ti). The assistant can
+//   add or raise one, and it never removes or lowers one. No repair proposes one, and a
+//   skill-mix gap is repaired by borrowing into that group (manager confirms the
+//   qualification) or asking a qualified nurse on leave.
 // - A single date cannot be overridden on its own (bead nursing-sheduler-2se): "run
 //   one short" is advice-only (no ops) unless the requirement it targets already
 //   covers that one date alone, in which case `repair-options.ts` may fill ops.
@@ -34,7 +38,7 @@
 import type { CapabilityId } from "@/lib/capability/help-content";
 import type { AssistantCommandType, AssistantCommandV1 } from "@/lib/proposal/commands";
 
-export const PLAYBOOK_VERSION = "2026-09-24.5";
+export const PLAYBOOK_VERSION = "2026-09-24.6";
 
 /** Said on the Preview and in the reply whenever a change relaxes a rest rule. */
 export const REST_PRACTICE_WARNING =
@@ -118,12 +122,17 @@ export const SETUP_STEPS: readonly SetupStepGuide[] = [
     optional: false,
     capabilityId: "staffing-requirements",
     ask: [
-      "How many nurses each shift needs. A minimum from a group, such as at least 1 RN, is a skill mix, which is not supported yet; say so rather than approximating it.",
+      "How many nurses each shift needs, and any skill mix: a minimum from a group among them, such as at least 2 RNs of the 4 on nights. Set it with set_skill_mix or skillMix on add_staffing_requirement; never approximate it by naming who may work the whole shift.",
       "The rest rules the ward uses. Many wards use no day shift straight after a night as a must, and a day off after nights as a preference.",
       "Limits such as the most nights one nurse may work in the period, and whether to balance nights and weekends across the team.",
       "Suggest a rule giving each nurse at least 1 rest day a week, which the Employment Act sets: a shift sequence rule of ALL 7 days in a row at -infinity (no 7 working days in a row), not a total over the period.",
     ],
-    proposeWith: ["add_staffing_requirement", "add_succession_rule", "add_count_rule"],
+    proposeWith: [
+      "add_staffing_requirement",
+      "set_skill_mix",
+      "add_succession_rule",
+      "add_count_rule",
+    ],
   },
   {
     id: "requests",
@@ -288,7 +297,7 @@ export const REPAIRS: readonly RepairEntry[] = [
     // requirement spanning more dates cannot be edited for just the short one.
     opTypes: ["set_staffing_requirement_people", "edit_staffing_requirement"],
     guardrail:
-      "Head count only, never below 1, never a skill-mix requirement such as 1 RN per night.",
+      "Head count only, never below 1 or below its skill mix, and never for a skill-mix gap such as 1 RN per night.",
   },
   {
     id: "split_long_shift",
@@ -345,7 +354,7 @@ export const LONG_SHIFT_MINUTES = 660;
 export const SAFETY_FLOOR: readonly string[] = [
   "Never delete a rest rule, such as no day shift straight after a night, or narrow who or what it covers. Softening it or turning it off is the manager's call and always carries the rest-practice warning.",
   "Never relax or turn off a supervision (preceptor) rule.",
-  "Never lower a skill-mix requirement, such as 1 RN on every night, and never create one.",
+  "Never remove or lower a skill-mix requirement, such as 1 RN on every night, change its group or delete that group, and never ban everyone else from a shift to stand in for one.",
   "Never set a staffing requirement to 0 or turn one off.",
   "Never raise a limit by more than 2, or remove a limit.",
   "Never remove or move leave without the nurse's own agreement, and never ask a nurse on sick or compassionate leave.",

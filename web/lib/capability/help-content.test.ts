@@ -27,9 +27,9 @@ describe("what the scheduler cannot do (scheduler-limits)", () => {
     expect(text).toMatch(/last shifts entered on the Requests page/);
     expect(text).not.toMatch(/remembers nothing/);
   });
-  it("says skill mix is not supported yet, in both modes", () => {
-    expect(text).toMatch(/skill mix/);
-    expect(text).toMatch(/not supported yet/);
+  it("no longer says skill mix is unsupported, and points to staffing requirements", () => {
+    expect(text).not.toMatch(/not supported yet/);
+    expect(text).toMatch(/skill mix.*Staffing requirements/);
   });
   it("says it checks no law or policy, without stating any law", () => {
     expect(text).toMatch(/checks no employment law/);
@@ -53,7 +53,11 @@ describe("the rule entries carry the solver facts", () => {
     expect(text).toMatch(/two teams are each set as the only people/);
     expect(text).not.toMatch(/at least/i);
     expect(text).toContain("nobody else may work");
-    expect(text).toContain("skill-mix");
+    expect(text).toMatch(
+      /A skill-mix rule says how many of a shift's people must come from a group/,
+    );
+    expect(text).toMatch(/anyone can fill the other places/);
+    expect(text).not.toMatch(/cannot express|cannot set one up/);
   });
   it("successions: exact pattern only; a must-follow is risky", () => {
     const text = summary("shift-successions");

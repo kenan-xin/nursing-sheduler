@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { deriveAssumptions } from "@/lib/proposal/assumptions";
+import type { AssistantCommandV1 } from "@/lib/proposal/commands";
 import { applyAssistantCommands } from "@/lib/proposal/operations";
 import { deriveProposalDiff } from "@/lib/proposal/diff";
 import { findStaffingShortfalls, type StaffingFinding } from "@/lib/rules/shortfalls";
@@ -1316,5 +1317,100 @@ describe("violatesSafetyFloor (any operations, including model-written candidate
         { leaveAsked: false },
       ),
     ).toBeNull();
+  });
+});
+
+describe("skill-mix repairs (bead nursing-sheduler-2ti)", () => {
+  const state = () => SCENARIOS.rnMixOnLeave();
+  const ranked = () =>
+    rankRepairOptions(state(), findStaffingShortfalls(state()), { runInfeasible: true });
+
+  it("borrows a nurse into the skill-mix group, then asks the RN on leave", () => {
+    const options = ranked();
+    expect(options.map((o) => o.repairId)).toEqual([
+      "borrow_temporary_nurse",
+      "ask_nurse_on_leave",
+    ]);
+    expect(options[0].operations[0]).toMatchObject({ type: "add_person", groups: ["RN"] });
+    expect(options[0].needsFromUser.join(" ")).toMatch(/qualif/i);
+  });
+
+  it("never offers run_one_short for a skill-mix gap", () => {
+    expect(ranked().some((o) => o.repairId === "run_one_short")).toBe(false);
+  });
+
+  it.each([
+    ["remove the entry", { type: "set_skill_mix", ruleId: "night", skillMix: [] }],
+    [
+      "lower the minimum",
+      { type: "set_skill_mix", ruleId: "night", skillMix: [{ people: "RN", minNumPeople: 1 }] },
+    ],
+    [
+      "change its group",
+      { type: "set_skill_mix", ruleId: "night", skillMix: [{ people: "en1", minNumPeople: 2 }] },
+    ],
+    ["delete the group it names", { type: "remove_people_group", groupId: "RN" }],
+    [
+      "drop the head count below it",
+      { type: "set_staffing_requirement_people", ruleId: "night", requiredNumPeople: 1 },
+    ],
+    [
+      "turn the card off",
+      { type: "set_rule_enabled", ruleKind: "requirements", ruleId: "night", enabled: false },
+    ],
+  ] as const)("the safety floor forbids: %s", (_label, op) => {
+    expect(
+      violatesSafetyFloor(state(), [op as unknown as AssistantCommandV1], { leaveAsked: false }),
+    ).not.toBeNull();
+  });
+
+  it.each([
+    [
+      "raise the minimum",
+      {
+        type: "set_skill_mix",
+        ruleId: "night",
+        skillMix: [
+          { people: "RN", minNumPeople: 2 },
+          { people: "en1", minNumPeople: 1 },
+        ],
+      },
+    ],
+    [
+      "add a skill mix to another card",
+      { type: "set_skill_mix", ruleId: "day", skillMix: [{ people: "RN", minNumPeople: 1 }] },
+    ],
+  ] as const)("the safety floor allows: %s", (_label, op) => {
+    expect(
+      violatesSafetyFloor(state(), [op as unknown as AssistantCommandV1], { leaveAsked: false }),
+    ).toBeNull();
+  });
+
+  it("set_skill_mix is never part of a repair", () => {
+    const op: AssistantCommandV1 = {
+      type: "set_skill_mix",
+      ruleId: "day",
+      skillMix: [{ people: "RN", minNumPeople: 1 }],
+    };
+    expect(isSafeOption(state(), { ...ranked()[0], operations: [op] })).toBe(false);
+  });
+
+  it("a head count keeps its own skill mix as its floor", () => {
+    const s = ward({
+      staff: people("rn1", "en1", "en2"),
+      staffGroups: [{ id: "RN", members: ["rn1"] }],
+      cardsByKind: cards({
+        requirements: [
+          requirement("night", "N", 3, { skillMix: [{ people: "RN", minNumPeople: 3 }] }),
+        ],
+      }),
+    });
+    expect(
+      violatesSafetyFloor(
+        s,
+        [{ type: "set_staffing_requirement_people", ruleId: "night", requiredNumPeople: 2 }],
+        { leaveAsked: false },
+      ),
+    ).not.toBeNull();
   });
 });

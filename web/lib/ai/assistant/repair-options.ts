@@ -11,9 +11,11 @@
 // `add_person` with `temporary: true`, plus `set_off_request` "must" outside the loan
 // when the loan is shorter than the period (no `mark_person_off` arm);
 // staffing requirements are EXACT counts; a requirement can be lowered only when it
-// targets the one short date alone; a skill-mix requirement is never lowered or created.
+// targets the one short date alone; a skill-mix requirement is never lowered, and no
+// repair creates one (a skill-mix gap is closed by borrowing into its group).
 
 import { isEditableCountCard } from "@/components/counts/counts-model";
+import { skillMixFloor } from "@/components/requirements/requirements-model";
 import { paidMinutesFor } from "@/components/entity-editor/core";
 import type { CapabilityId } from "@/lib/capability/help-content";
 import { generateDateItems, type DateItem } from "@/lib/dates/date-id";
@@ -126,13 +128,17 @@ const ruleName = (card: { description?: string; uid: string } | undefined, uid: 
   card?.description || uid;
 const staffIn = (ctx: Ctx, refs: PersonRef | PersonRef[]) =>
   [...expandPersonRefs(refs, ctx.state)].filter((id) => ctx.staffIds.has(id));
-const isSkillMix = (card: RequirementCard | undefined) => {
+/** Named qualifiedPeople: everyone else is banned from the shift. */
+const isNamed = (card: RequirementCard | undefined) => {
   const refs = asList(card?.qualifiedPeople);
   return refs.length > 0 && !refs.some(isAll);
 };
+/** A card that limits who counts: named qualifiedPeople (bans others) or a skill mix (bans nobody). */
+const isSkillMix = (card: RequirementCard | undefined) =>
+  isNamed(card) || (card?.skillMix?.length ?? 0) > 0;
 /** One plain head count the Rules quick edit can change (the host's `targetsOneShiftType`). */
 const isHeadCount = (card: RequirementCard) =>
-  !isSkillMix(card) &&
+  asList(card.qualifiedPeople).every(isAll) &&
   !card.shiftTypeCoefficients?.length &&
   flattenShiftTypeRefs(card.shiftType).length === 1;
 const weightText = (w: number) =>
@@ -467,10 +473,12 @@ function relaxOption(
 function skillGroup(ctx: Ctx, findings: StaffingFinding[]): string | null | undefined {
   const skilled = findings.filter((f) => f.skillMix);
   if (skilled.length === 0) return null;
+  const mixed = skilled.find((f) => f.mixPeople && ctx.groupIds.has(f.mixPeople));
+  if (mixed) return mixed.mixPeople;
   for (const f of skilled) {
     for (const uid of f.ruleIds) {
       const card = requirementCard(ctx, uid);
-      if (!isSkillMix(card)) continue;
+      if (!isNamed(card)) continue;
       const group = asList(card?.qualifiedPeople)
         .map(String)
         .find((ref) => ctx.groupIds.has(ref));
@@ -657,6 +665,8 @@ const askNurseOnLeave: Builder = (ctx, all) => {
 const runOneShort: Builder = (ctx, all) => {
   const findings = gapsOnly(all);
   for (const f of findings) {
+    // A lower head count cannot fix a skill-mix gap.
+    if (f.mixPeople) continue;
     if (f.dateId === null || gapOn(findings, f.dateId) !== 1) continue;
     // Lowering a requirement closes the gap only if it is part of every finding that day.
     const sameDay = findings.filter((g) => g.dateId === f.dateId);
@@ -844,7 +854,7 @@ export function violatesSafetyFloor(
     const card = requirementCard(ctx, uid);
     if (n < 1) return zero;
     if (!card || n >= card.requiredNumPeople) return null;
-    return isSkillMix(card) || n < skillMixOn(ctx, card) ? skillMix : null;
+    return isNamed(card) || n < skillMixOn(ctx, card) ? skillMix : null;
   };
   for (const op of operations) {
     const broken = (() => {
@@ -886,6 +896,25 @@ export function violatesSafetyFloor(
         }
         case "add_staffing_requirement":
           return asList(op.qualifiedPeople).some((r) => !isAll(r)) ? skillMix : null;
+        case "set_skill_mix": {
+          // Every existing entry stays, with the same people and a minimum no lower.
+          const kept = (requirementCard(ctx, op.ruleId)?.skillMix ?? []).every((was) =>
+            op.skillMix.some(
+              (now) =>
+                String(now.people) === String(was.people) && now.minNumPeople >= was.minNumPeople,
+            ),
+          );
+          return kept ? null : skillMix;
+        }
+        case "remove_people_group":
+          // Deleting a group prunes it from every skill mix and qualified list that names it.
+          return ctx.state.cardsByKind.requirements.some(
+            (c) =>
+              (c.skillMix ?? []).some((e) => String(e.people) === op.groupId) ||
+              (isNamed(c) && asList(c.qualifiedPeople).map(String).includes(op.groupId)),
+          )
+            ? skillMix
+            : null;
         case "edit_count_rule": {
           const card = hardCount(op.ruleId);
           if (!card || typeof card.target !== "number") return null;
@@ -926,7 +955,10 @@ export function violatesSafetyFloor(
   return null;
 }
 
-/** The largest skill-mix count on a head count's shift and dates: it may not go below it. */
+/**
+ * The largest skill-mix count on a head count's shift and dates, its own skill mix
+ * included: it may not go below it.
+ */
 function skillMixOn(ctx: Ctx, card: RequirementCard): number {
   const shifts = new Set(flattenShiftTypeRefs(card.shiftType).map(String));
   const dates = new Set(requirementDateIds(ctx.state, card));
@@ -940,7 +972,7 @@ function skillMixOn(ctx: Ctx, card: RequirementCard): number {
           flattenShiftTypeRefs(c.shiftType).some((s) => shifts.has(String(s))) &&
           requirementDateIds(ctx.state, c).some((d) => dates.has(d)),
       )
-      .map((c) => c.requiredNumPeople),
+      .map((c) => Math.max(isNamed(c) ? c.requiredNumPeople : 0, skillMixFloor(c))),
   );
 }
 
