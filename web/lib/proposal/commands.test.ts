@@ -94,6 +94,25 @@ describe("the rule arms' text states what the solver enforces", () => {
     expect(weight).toContain("works against");
     expect(weight).not.toContain("discourages");
   });
+
+  it("says set_staffing_requirement_on_date changes one requirement on one date only", () => {
+    const count = arm("set_staffing_requirement_on_date").requiredNumPeople.description ?? "";
+    expect(count).toContain("this one requirement on this one date only");
+    expect(count).toContain("Every other date keeps the requirement's own number");
+    expect(count).toContain("Send the requirement's own number to remove the exception");
+  });
+
+  it("parses set_staffing_requirement_on_date and refuses a non-ISO date", () => {
+    const parse = (date: string) =>
+      assistantCommandSchema.safeParse({
+        type: "set_staffing_requirement_on_date",
+        ruleId: "r",
+        date,
+        requiredNumPeople: 1,
+      }).success;
+    expect(parse("2026-10-14")).toBe(true);
+    expect(parse("14")).toBe(false);
+  });
 });
 
 describe("parseAssistantCommands", () => {

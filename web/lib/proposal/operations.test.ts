@@ -1932,3 +1932,145 @@ describe("borrowed-nurse batch: add_person + set_off_request", () => {
     expect(applyAssistantCommands(peopleScenario(), commands)).toEqual(result);
   });
 });
+
+describe("set_staffing_requirement_on_date", () => {
+  const onDate = (date: string, requiredNumPeople: number) =>
+    ({
+      type: "set_staffing_requirement_on_date",
+      ruleId: "req-day",
+      date,
+      requiredNumPeople,
+    }) as const;
+  const dayCard = (s: ScenarioUiState) =>
+    s.cardsByKind.requirements.find((c) => c.uid === "req-day")!;
+  const withException = () => {
+    const first = applyAssistantCommand(ruleWardScenario(), onDate("2026-04-14", 1));
+    if (!first.ok) throw new Error(first.rejection.message);
+    return first.next;
+  };
+
+  it("sets one date's number and keeps the rule's own number", () => {
+    const result = applyAssistantCommand(ruleWardScenario(), onDate("2026-04-14", 1));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(dayCard(result.next).requiredNumPeople).toBe(2);
+    expect(dayCard(result.next).requiredNumPeopleOverrides).toEqual([["2026-04-14", 1]]);
+  });
+
+  it("sending the rule's own number removes the exception", () => {
+    const second = applyAssistantCommand(withException(), onDate("2026-04-14", 2));
+    expect(second.ok).toBe(true);
+    if (second.ok) expect(dayCard(second.next)).not.toHaveProperty("requiredNumPeopleOverrides");
+  });
+
+  it("refuses the same exception twice as no change", () => {
+    expect(applyAssistantCommand(withException(), onDate("2026-04-14", 1))).toMatchObject({
+      ok: false,
+      rejection: {
+        code: "no_effect",
+        message: 'Staffing requirement "Day cover" already needs 1 on 14 Apr.',
+      },
+    });
+  });
+
+  it("refuses a date the rule does not cover, naming it", () => {
+    expect(applyAssistantCommand(ruleWardScenario(), onDate("2026-05-01", 1))).toMatchObject({
+      ok: false,
+      rejection: {
+        code: "invalid_value",
+        message: 'Staffing requirement "Day cover": 1 May is not one of this requirement\'s dates.',
+      },
+    });
+  });
+
+  it("refuses a rule that is gone", () => {
+    expect(
+      applyAssistantCommand(ruleWardScenario(), { ...onDate("2026-04-14", 1), ruleId: "nope" }),
+    ).toMatchObject({ ok: false, rejection: { code: "unknown_target" } });
+  });
+
+  it("edit refuses dates that drop an exception", () => {
+    const edit = applyAssistantCommand(withException(), {
+      type: "edit_staffing_requirement",
+      ruleId: "req-day",
+      description: "Day cover",
+      shiftType: "Day",
+      qualifiedPeople: ["ALL"],
+      dates: ["2026-04-15"],
+      requiredNumPeople: 2,
+    });
+    expect(edit).toMatchObject({
+      ok: false,
+      rejection: {
+        code: "invalid_value",
+        message: expect.stringContaining("14 Apr is not one of this requirement's dates"),
+      },
+    });
+  });
+
+  it("refuses a date below the skill mix (F1)", () => {
+    const s = ruleWardScenario();
+    dayCard(s).skillMix = [{ people: "RN", minNumPeople: 2 }];
+    expect(applyAssistantCommand(s, onDate("2026-04-14", 1))).toMatchObject({
+      ok: false,
+      rejection: {
+        code: "invalid_value",
+        message: expect.stringContaining("the number on 14 Apr"),
+      },
+    });
+  });
+
+  it("set_skill_mix refuses a minimum above an exception (F1)", () => {
+    const result = applyAssistantCommand(withException(), {
+      type: "set_skill_mix",
+      ruleId: "req-day",
+      skillMix: [{ people: "RN", minNumPeople: 2 }],
+    });
+    expect(!result.ok && result.rejection.code).toBe("invalid_value");
+  });
+
+  it("refuses a date where skill-mix groups that share no one no longer fit (F2)", () => {
+    // RN >= 2 plus Senior >= 1 share no one: 3 people. The rule needs 4; 14 Apr would allow 3, 13 Apr 2.
+    const s = ruleWardScenario();
+    Object.assign(dayCard(s), {
+      requiredNumPeople: 4,
+      skillMix: [
+        { people: "RN", minNumPeople: 2 },
+        { people: "Senior", minNumPeople: 1 },
+      ],
+    });
+    expect(applyAssistantCommand(s, onDate("2026-04-14", 3)).ok).toBe(true);
+    expect(applyAssistantCommand(s, onDate("2026-04-13", 2))).toMatchObject({
+      ok: false,
+      rejection: { code: "invalid_value", message: expect.stringContaining("share no one") },
+    });
+  });
+
+  it.each<[string, AssistantCommandV1]>([
+    [
+      "edit_staffing_requirement",
+      {
+        type: "edit_staffing_requirement",
+        ruleId: "req-day",
+        description: "Day cover (renamed)",
+        shiftType: "Day",
+        qualifiedPeople: ["ALL"],
+        dates: ["ALL"],
+        requiredNumPeople: 2,
+      },
+    ],
+    [
+      "set_skill_mix",
+      { type: "set_skill_mix", ruleId: "req-day", skillMix: [{ people: "RN", minNumPeople: 1 }] },
+    ],
+    [
+      "set_staffing_requirement_people",
+      { type: "set_staffing_requirement_people", ruleId: "req-day", requiredNumPeople: 3 },
+    ],
+  ])("%s keeps a stored exception", (_label, command) => {
+    const result = applyAssistantCommand(withException(), command);
+    expect(result.ok && dayCard(result.next).requiredNumPeopleOverrides).toEqual([
+      ["2026-04-14", 1],
+    ]);
+  });
+});

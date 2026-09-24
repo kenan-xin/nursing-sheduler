@@ -41,6 +41,7 @@ import {
   isValidIso,
   type DateRange,
 } from "@/lib/dates";
+import { formatShortDate } from "@/lib/dates/date-id";
 import {
   RESERVED_SHIFT_TYPE,
   type CardsByKind,
@@ -105,10 +106,12 @@ import {
   buildRequirementShiftTypeOptions,
   emptyRequirementForm,
   REQUIREMENT_MESSAGES,
+  requirementCoveredIsos,
   requirementToForm,
   skillMixFloor,
   validateRequirementForm,
   type RequirementFormState,
+  type RequirementNumberValue,
 } from "@/components/requirements/requirements-model";
 import { applyRequirementPatch } from "@/components/requirements/requirement-patch";
 import { skillMixOverflow, skillMixOverflowMessage } from "@/lib/rules/shortfalls";
@@ -722,21 +725,34 @@ function requirementRejection(
   const dates = dateScopeRejection(state, fields.dates, REQUIREMENT_DATES);
   if (dates) return reject(index, dates.code, `${name}: ${dates.message}.`);
   const error =
-    firstFormError(validateRequirementForm(draft, buildRequirementShiftTypeDomain(state))) ??
-    skillMixOverflowError(state, draft);
+    firstFormError(
+      validateRequirementForm(
+        draft,
+        buildRequirementShiftTypeDomain(state),
+        new Set(requirementCoveredIsos(state, draft.date)),
+      ),
+    ) ?? skillMixOverflowError(state, draft);
   if (error) return reject(index, "invalid_value", `${name}: ${error}.`);
   return undefined;
 }
 
-/** Group membership lives on the ward, not the form: checked once the form's own rules pass. */
+/**
+ * Group membership lives on the ward, not the form: checked once the form's own rules pass.
+ * Each exception date is checked too, against the preferred count or that date's number.
+ */
 function skillMixOverflowError(
   state: ScenarioUiState,
   draft: RequirementFormState,
 ): string | undefined {
-  const max = Number(draft.preferredNumPeople || draft.requiredNumPeople);
   const mix = draft.skillMix as { people: PersonRef; minNumPeople: number }[];
-  const overflow = skillMixOverflow(state, mix, max);
-  return overflow ? skillMixOverflowMessage(overflow) : undefined;
+  const ceiling = (n: RequirementNumberValue) => Number(draft.preferredNumPeople || n);
+  const base = skillMixOverflow(state, mix, ceiling(draft.requiredNumPeople));
+  if (base) return skillMixOverflowMessage(base);
+  for (const row of draft.requiredNumPeopleOverrides) {
+    const overflow = skillMixOverflow(state, mix, ceiling(row.requiredNumPeople));
+    if (overflow) return `${skillMixOverflowMessage(overflow)} on ${formatShortDate(row.date)}`;
+  }
+  return undefined;
 }
 
 function applyAddStaffingRequirement(
@@ -828,6 +844,47 @@ function applySetSkillMix(
     ok: true,
     next: applyRequirementPatch(state, { type: "update", uid: source.uid, form: draft }),
   };
+}
+
+function applySetRequirementOnDate(
+  state: ScenarioUiState,
+  command: Extract<AssistantCommandV1, { type: "set_staffing_requirement_on_date" }>,
+  index: number,
+): OperationResult {
+  const source = state.cardsByKind.requirements.find((card) => card.uid === command.ruleId);
+  if (!source) {
+    return reject(
+      index,
+      "unknown_target",
+      `That staffing requirement is not in this schedule any more. ${ruleChoices(state, "requirements")}`,
+    );
+  }
+  const name = ruleName("requirements", source.description?.trim() || source.uid);
+  const domain = buildRequirementShiftTypeDomain(state);
+  const base = requirementToForm(source, domain);
+  // The form with one row for this date: an existing row for it is replaced, as the user would.
+  const draft: RequirementFormState = {
+    ...base,
+    requiredNumPeopleOverrides: [
+      ...base.requiredNumPeopleOverrides.filter((row) => row.date !== command.date),
+      { date: command.date, requiredNumPeople: command.requiredNumPeople },
+    ],
+  };
+  const error =
+    firstFormError(
+      validateRequirementForm(draft, domain, new Set(requirementCoveredIsos(state, draft.date))),
+    ) ?? skillMixOverflowError(state, draft);
+  if (error) return reject(index, "invalid_value", `${name}: ${error}.`);
+  const next = applyRequirementPatch(state, { type: "update", uid: source.uid, form: draft });
+  const after = next.cardsByKind.requirements.find((card) => card.uid === source.uid);
+  if (stableStringify(after) === stableStringify(source)) {
+    return reject(
+      index,
+      "no_effect",
+      `${name} already needs ${command.requiredNumPeople} on ${formatShortDate(command.date)}.`,
+    );
+  }
+  return { ok: true, next };
 }
 
 // --- Remove (every family) -----------------------------------------------------
@@ -1589,6 +1646,8 @@ export function applyAssistantCommand(
       return applyEditStaffingRequirement(state, command, index);
     case "set_skill_mix":
       return applySetSkillMix(state, command, index);
+    case "set_staffing_requirement_on_date":
+      return applySetRequirementOnDate(state, command, index);
     case "remove_rule":
       return applyRemoveRule(state, command, index);
     case "add_person":

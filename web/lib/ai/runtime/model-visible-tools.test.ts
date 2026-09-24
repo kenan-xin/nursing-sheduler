@@ -396,6 +396,12 @@ describe("the command arms the provider is actually shown", () => {
         ruleId: "r1",
         skillMix: [{ people: "RN", minNumPeople: 2 }],
       },
+      set_staffing_requirement_on_date: {
+        type: "set_staffing_requirement_on_date",
+        ruleId: "r1",
+        date: "2026-10-14",
+        requiredNumPeople: 1,
+      },
       remove_rule: {
         type: "remove_rule",
         ruleKind: "affinities",

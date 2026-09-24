@@ -863,6 +863,7 @@ function directKeys(
         break;
       case "edit_staffing_requirement":
       case "set_skill_mix":
+      case "set_staffing_requirement_on_date":
         keys.add(`rule:requirements:${command.ruleId}`);
         break;
       case "remove_rule":
