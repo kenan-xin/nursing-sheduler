@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { DateRange } from "@/lib/dates";
 import type { UiDateGroup } from "@/lib/scenario";
+import { changeKeys } from "@/lib/change-highlight/keys";
+import { clearChangeHighlight, showChangeHighlight } from "@/lib/change-highlight/store";
 import { DateGroupsCard } from "./date-groups-card";
 
 afterEach(() => {
@@ -102,5 +104,17 @@ describe("DateGroupsCard — transient state resets on a range change (VR-DC)", 
     expect(screen.queryByTestId("date-group-editor-new")).toBeNull();
     expect(screen.queryByTestId("date-group-save")).toBeNull();
     expect(onCreateGroup).not.toHaveBeenCalled();
+  });
+});
+
+describe("DateGroupsCard — change highlight", () => {
+  afterEach(() => clearChangeHighlight());
+  it("outlines the date group an Apply added", () => {
+    renderCard(AUG);
+    act(() => showChangeHighlight([changeKeys.dateGroup("SummerRun")]));
+    expect(screen.getByTestId("editable-group-SummerRun")).toHaveAttribute(
+      "data-change-highlight",
+      "true",
+    );
   });
 });

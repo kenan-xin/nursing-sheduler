@@ -82,6 +82,8 @@ import {
 } from "@/components/entity-editor/core";
 import { WorkingTimeFields } from "@/components/entity-editor/working-time-fields";
 import { GroupsSection, type GroupsSectionConfig } from "@/components/entity-editor/groups-section";
+import { changeKeys } from "@/lib/change-highlight/keys";
+import { useChangeTarget } from "@/lib/change-highlight/store";
 import { InfoTip } from "@/components/ui/info-tip";
 import type { RequirementNumberValue } from "@/components/requirements/requirements-model";
 import { shiftTypesDescriptor } from "./shift-types-descriptor";
@@ -424,6 +426,7 @@ export function ShiftTypeGrid() {
         onEditGroup={(id) => setSel({ t: "edit-group", id })}
         onCloseForm={() => setSel(null)}
         config={SHIFT_GROUPS_CONFIG}
+        groupChangeKey={changeKeys.shiftGroup}
       />
     </Surface>
   );
@@ -554,12 +557,14 @@ function ShiftCard({
   onDropRow: () => void;
   onDragEnd: () => void;
 }) {
+  const changeTarget = useChangeTarget(changeKeys.shift(item.id));
   const time = item.startTime && item.endTime ? `${item.startTime}–${item.endTime}` : null;
   const hasDur = item.durationMinutes != null;
 
   return (
     <div
       data-testid={`shift-card-${cardKey}`}
+      {...changeTarget}
       draggable={canDrag}
       onDragStart={canDrag ? onDragStart : undefined}
       onDragOver={
