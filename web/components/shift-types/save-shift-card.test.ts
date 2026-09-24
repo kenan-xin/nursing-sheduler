@@ -5,6 +5,7 @@ import {
   type ScenarioUiState,
 } from "@/lib/scenario";
 import { RenameCollisionError } from "@/lib/cascade";
+import { REQUIREMENT_MESSAGES } from "@/components/requirements/requirements-model";
 import {
   NumericShiftTypeStaffingError,
   ReservedShiftTypeError,
@@ -308,6 +309,40 @@ describe("saveShiftTypeCard", () => {
     expect(result.preferredCollapsed).toBe(true);
     expect(next.cardsByKind.requirements[0].preferredNumPeople).toBeUndefined();
     expect(next.cardsByKind.requirements[0].weight).toBe(-1);
+  });
+});
+
+describe("skill mix on the Shifts page", () => {
+  const mixCard = baseline({
+    shiftTypeCoefficients: undefined,
+    preferredNumPeople: undefined,
+    requiredNumPeople: 3,
+    skillMix: [{ people: "RN", minNumPeople: 2 }],
+  });
+  const opened = scenario({
+    staffGroups: [{ id: "RN", members: [] }],
+    cardsByKind: { ...createEmptyScenarioUiState().cardsByKind, requirements: [mixCard] },
+  });
+  const withStaffing = (required: number) => {
+    const input = editInput(opened);
+    if (input.staffing.type !== "editable") throw new Error("editable");
+    return { ...input, staffing: { ...input.staffing, required, preferred: "" } };
+  };
+
+  it("refuses staffing below the skill mix", async () => {
+    await expect(apply(opened, withStaffing(1))).rejects.toThrow(
+      REQUIREMENT_MESSAGES.skillMixAboveRequired,
+    );
+  });
+
+  it("keeps the skill mix when staffing changes", async () => {
+    const { next } = await apply(opened, withStaffing(3));
+    expect(next.cardsByKind.requirements[0].skillMix).toEqual([{ people: "RN", minNumPeople: 2 }]);
+  });
+
+  it("shows the skill mix as a staffing chip", () => {
+    const resolved = resolveStaffingCardState(opened, "Day");
+    expect(resolved.kind === "editable" && resolved.contextChips).toContain("at least 2 RN");
   });
 });
 

@@ -8,6 +8,7 @@ import { CAPABILITY_ENTRIES } from "@/lib/capability/help-content";
 import { ASSISTANT_COMMAND_TYPES } from "@/lib/proposal/commands";
 import { paidMinutesFor } from "@/components/entity-editor/core";
 import {
+  FEASIBILITY_INSTRUCTIONS,
   MAX_DAILY_WORKING_MINUTES,
   PLAYBOOK_VERSION,
   REPAIRS,
@@ -183,12 +184,23 @@ describe("setup hints carry ward defaults, never invented law", () => {
     expect(text).toMatch(/ALL 7 days in a row at -infinity/);
     expect(text).toMatch(/not a total over the period/);
   });
-  it("never invites a skill mix it cannot set up", () => {
+  it("sets up a skill mix, and never approximates it with a whole-shift group", () => {
     const text = ask("rules");
-    expect(text).not.toMatch(/must be from a group/);
-    expect(text).toMatch(/skill mix.*not supported yet/);
+    expect(text).toMatch(/skill mix/);
+    expect(text).toMatch(/set_skill_mix/);
+    expect(text).not.toMatch(/not supported yet/);
+    expect(text).toMatch(/never approximate/i);
+    expect(SETUP_STEPS.find((s) => s.id === "rules")?.proposeWith).toContain("set_skill_mix");
+  });
+  it("no line says a skill mix cannot be created", () => {
+    const all = [
+      ...SETUP_STEPS.flatMap((s) => s.ask),
+      ...SAFETY_FLOOR,
+      ...FEASIBILITY_INSTRUCTIONS,
+    ].join(" ");
+    expect(all).not.toMatch(/cannot create|never create|not supported yet/i);
   });
   it("was versioned", () => {
-    expect(PLAYBOOK_VERSION).toBe("2026-09-24.5");
+    expect(PLAYBOOK_VERSION).toBe("2026-09-24.6");
   });
 });

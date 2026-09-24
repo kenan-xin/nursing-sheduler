@@ -29,6 +29,7 @@ def test_the_harness_wrote_every_case():
         "conflictingRequirements",
         "onlyRnOnLeave",
         "personalCapsTooLow",
+        "rnMixOnLeave",
         "ruleTooStrict",
         "tooFewNurses",
         "understaffedNight",

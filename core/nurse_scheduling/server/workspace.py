@@ -324,6 +324,10 @@ def _reference_issues(workspace: WorkspaceSchedulingDataV1) -> list[SchedulingIs
             for leaf in _flatten_ids(preference.get(field)):
                 if leaf not in people_ids:
                     issues.append(_reference_issue(index, field, leaf, "person or people group"))
+        for entry in preference.get("skillMix") or []:
+            leaf = entry.get("people") if isinstance(entry, dict) else None
+            if leaf is not None and leaf not in people_ids:
+                issues.append(_reference_issue(index, "skillMix", leaf, "person or people group"))
         for field in _SHIFT_TYPE_REFERENCE_FIELDS:
             for leaf in _flatten_ids(preference.get(field)):
                 if leaf not in shift_ids:

@@ -327,6 +327,14 @@ class MaxOneShiftPerDayPreference(BasePreference):
     description: str | None = None
 
 
+class SkillMixEntry(BaseModel):
+    """At least `minNumPeople` of `people` among the shift's staff. Bans nobody."""
+
+    model_config = ConfigDict(extra="forbid")
+    people: int | str  # One person or people-group id
+    minNumPeople: int
+
+
 class ShiftTypeRequirementsPreference(BasePreference):
     model_config = ConfigDict(extra="forbid")
     type: Annotated[str, Field(pattern=f"^{SHIFT_TYPE_REQUIREMENT}$")] = SHIFT_TYPE_REQUIREMENT
@@ -340,6 +348,9 @@ class ShiftTypeRequirementsPreference(BasePreference):
     # intentionally normalizes implicit all-people values to explicit "ALL".
     qualifiedPeople: (int | str) | list[int | str] | None = None
     preferredNumPeople: int | None = None  # Preferred number of people for each shift type
+    # Skill mix: each entry is a hard floor on how many of its people work the
+    # shift. Unlike qualifiedPeople it bans nobody. See shift_type_requirements.
+    skillMix: list[SkillMixEntry] | None = None
     # None and the reserved "ALL" selector both mean all dates. The frontend
     # intentionally normalizes implicit all-date values to explicit "ALL".
     date: (int | str | datetime.date) | list[int | str | datetime.date] | None = None  # Single date or list of dates
@@ -349,6 +360,27 @@ class ShiftTypeRequirementsPreference(BasePreference):
     @classmethod
     def validate_weight_field(cls, v):
         return validate_weight(v)
+
+    @model_validator(mode="after")
+    def validate_skill_mix(self) -> Self:
+        if not self.skillMix:
+            return self
+        qualified = self.qualifiedPeople if isinstance(self.qualifiedPeople, list) else [self.qualifiedPeople]
+        if self.qualifiedPeople is not None and any(str(q).upper() != ALL for q in qualified):
+            raise ValueError("'skillMix' needs the shift open to everyone: set 'qualifiedPeople' to ALL or omit it")
+        if self.shiftTypeCoefficients:
+            raise ValueError("'skillMix' counts people and cannot be combined with 'shiftTypeCoefficients'")
+        seen: set[int | str] = set()
+        for entry in self.skillMix:
+            if not 1 <= entry.minNumPeople <= self.requiredNumPeople:
+                raise ValueError(
+                    f"skillMix minNumPeople for {entry.people!r} must be between 1 and "
+                    f"requiredNumPeople ({self.requiredNumPeople})"
+                )
+            if entry.people in seen:
+                raise ValueError(f"skillMix names {entry.people!r} more than once")
+            seen.add(entry.people)
+        return self
 
 
 class HoursContractMetadata(BaseModel):

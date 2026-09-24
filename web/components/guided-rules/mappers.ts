@@ -16,6 +16,7 @@ import {
 import { isValidWeightValue } from "@/components/card-editor/weight-field";
 import {
   REQUIREMENT_MESSAGES,
+  skillMixFloor,
   summarizeRefs as summarizeRequirementRefs,
 } from "@/components/requirements/requirements-model";
 import {
@@ -79,7 +80,10 @@ export const requirementsMapper: GuidedRuleMapper<RequirementCard> = {
       qualified.length > 0 && !qualified.includes(RESERVED_SHIFT_TYPE.all)
         ? ` Only ${summarizeRequirementRefs(qualified)} may work it.`
         : "";
-    return `${count} on ${shiftLabel} on ${dateLabel}.${only}`;
+    const mix = card.skillMix?.length
+      ? `, at least ${card.skillMix.map((e) => `${e.minNumPeople} ${e.people}`).join(", ")}`
+      : "";
+    return `${count} on ${shiftLabel} on ${dateLabel}${mix}.${only}`;
   },
   quickFields(card): GuidedQuickField[] {
     if (!isSupportedRequirementCard(card)) return [];
@@ -90,7 +94,11 @@ export const requirementsMapper: GuidedRuleMapper<RequirementCard> = {
         value: card.requiredNumPeople,
         min: 0,
         validate: (value) =>
-          Number.isFinite(value) && value >= 0 ? undefined : REQUIREMENT_MESSAGES.requiredMin,
+          !(Number.isFinite(value) && value >= 0)
+            ? REQUIREMENT_MESSAGES.requiredMin
+            : value < skillMixFloor(card)
+              ? REQUIREMENT_MESSAGES.skillMixAboveRequired
+              : undefined,
       },
     ];
   },

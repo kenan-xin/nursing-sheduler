@@ -54,6 +54,7 @@ const INFEASIBLE: Exclude<ScenarioName, "empty" | "restRuleTooTight">[] = [
   "conflictingRequirements",
   "personalCapsTooLow",
   "busyNightsWithRestRule",
+  "rnMixOnLeave",
 ];
 
 const EXPECTED: Record<(typeof INFEASIBLE)[number], RepairId[]> = {
@@ -64,6 +65,7 @@ const EXPECTED: Record<(typeof INFEASIBLE)[number], RepairId[]> = {
   conflictingRequirements: ["align_overlapping_requirements"],
   personalCapsTooLow: ["extra_shift_willing_nurse", "borrow_temporary_nurse"],
   busyNightsWithRestRule: ["borrow_temporary_nurse", "run_one_short"],
+  rnMixOnLeave: ["borrow_temporary_nurse", "ask_nurse_on_leave"],
 };
 
 /** The host question each option's Preview must raise before Apply (none = asked in chat or plain manager call). */

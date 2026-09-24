@@ -39,18 +39,37 @@ describe("the rule arms' text states what the solver enforces", () => {
     expect(help?.nurseFacingSummary).toContain("nobody else may work");
   });
 
-  it("is honest that skill-mix ('at least k from a group') is not expressible here", () => {
-    expect(arm("add_staffing_requirement").qualifiedPeople.description).toContain("skill-mix");
+  it("sends a skill mix ('at least k from a group') to skillMix / set_skill_mix", () => {
+    const text = arm("add_staffing_requirement").qualifiedPeople.description ?? "";
+    expect(text).toContain("skill mix");
+    expect(text).toContain("skillMix");
+    expect(text).toContain("set_skill_mix");
+    expect(text).not.toContain("not supported");
     const help = CAPABILITY_ENTRIES.find((entry) => entry.id === "staffing-requirements");
     expect(help?.nurseFacingSummary).toContain("skill-mix");
   });
 
   it("never lets a skill mix be approximated by restricting the whole shift", () => {
     const text = arm("add_staffing_requirement").qualifiedPeople.description ?? "";
-    expect(text).toContain("not supported yet");
-    expect(text).toContain("never approximate it");
-    // There is no skill-mix editor on the Rules screen to send them to.
-    expect(text).not.toContain("Rules screen");
+    expect(text).toContain("Never approximate a skill mix");
+    expect(text).toContain("bans everyone else");
+    const mix = arm("set_skill_mix").skillMix.description ?? "";
+    expect(mix).toContain("Bans nobody");
+    expect(mix).toContain("Never use qualifiedPeople for this");
+  });
+
+  it("tells the model set_skill_mix replaces the whole list", () => {
+    const mix = arm("set_skill_mix").skillMix.description ?? "";
+    expect(mix).toContain("Replaces the requirement's whole skill mix");
+    expect(mix).toContain("[] removes it");
+  });
+
+  it("says a head count cannot go below the skill mix", () => {
+    for (const type of ["add_staffing_requirement", "edit_staffing_requirement"]) {
+      expect(arm(type).requiredNumPeople.description).toContain(
+        "cannot go below the requirement's skill mix",
+      );
+    }
   });
 
   it("a succession's weight: -infinity forbids, a must-follow is steered to a finite weight", () => {

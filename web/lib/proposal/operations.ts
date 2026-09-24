@@ -104,11 +104,14 @@ import {
   buildRequirementShiftTypeDomain,
   buildRequirementShiftTypeOptions,
   emptyRequirementForm,
+  REQUIREMENT_MESSAGES,
   requirementToForm,
+  skillMixFloor,
   validateRequirementForm,
   type RequirementFormState,
 } from "@/components/requirements/requirements-model";
 import { applyRequirementPatch } from "@/components/requirements/requirement-patch";
+import { skillMixOverflow, skillMixOverflowMessage } from "@/lib/rules/shortfalls";
 import { RenameCollisionError } from "@/lib/cascade";
 import { foldPaintIntents, type MintCellUid } from "@/lib/store/paint-fold";
 import { paintCellKey, type StagedCoordinate } from "@/lib/store/types";
@@ -652,7 +655,40 @@ function requirementDraft(
     requiredNumPeople: fields.requiredNumPeople,
     qualifiedPeople: [...fields.qualifiedPeople],
     date: [...fields.dates],
+    // The edit arm carries no skill mix, so `base` (loaded from the card) keeps it.
+    skillMix: fields.skillMix ? fields.skillMix.map((entry) => ({ ...entry })) : base.skillMix,
   };
+}
+
+/** The Skill mix row picker's options: every person and staff group, never ALL. */
+function skillMixOptions(state: ScenarioUiState): PickerOption[] {
+  const people = buildQualifiedPeopleTransferOptions(state);
+  return [...people.groups, ...people.items].filter(
+    (option) => String(option.value).toUpperCase() !== RESERVED_SHIFT_TYPE.all,
+  );
+}
+
+function skillMixRejection(
+  state: ScenarioUiState,
+  skillMix: readonly { people: PersonRef }[] | undefined,
+  name: string,
+  index: number,
+): OperationResult | undefined {
+  const offered = skillMixOptions(state);
+  const unknown = firstUnoffered(skillMix?.map((entry) => entry.people) ?? [], offered);
+  if (unknown === undefined) return undefined;
+  if (String(unknown).toUpperCase() === RESERVED_SHIFT_TYPE.all) {
+    return reject(
+      index,
+      "unknown_target",
+      `${name}: a skill mix names a group or person, not Everyone. A plain head count already covers everyone.`,
+    );
+  }
+  return reject(
+    index,
+    "unknown_target",
+    `${name}: there is no staff group or person ${idLabel(unknown)} for the skill mix. ${offeredChoices(offered)}`,
+  );
 }
 
 function requirementRejection(
@@ -681,13 +717,26 @@ function requirementRejection(
       `${name}: there is no person or staff group ${idLabel(person)}. ${offeredChoices(offeredPeople)}`,
     );
   }
+  const mix = skillMixRejection(state, fields.skillMix, name, index);
+  if (mix) return mix;
   const dates = dateScopeRejection(state, fields.dates, REQUIREMENT_DATES);
   if (dates) return reject(index, dates.code, `${name}: ${dates.message}.`);
-  const error = firstFormError(
-    validateRequirementForm(draft, buildRequirementShiftTypeDomain(state)),
-  );
+  const error =
+    firstFormError(validateRequirementForm(draft, buildRequirementShiftTypeDomain(state))) ??
+    skillMixOverflowError(state, draft);
   if (error) return reject(index, "invalid_value", `${name}: ${error}.`);
   return undefined;
+}
+
+/** Group membership lives on the ward, not the form: checked once the form's own rules pass. */
+function skillMixOverflowError(
+  state: ScenarioUiState,
+  draft: RequirementFormState,
+): string | undefined {
+  const max = Number(draft.preferredNumPeople || draft.requiredNumPeople);
+  const mix = draft.skillMix as { people: PersonRef; minNumPeople: number }[];
+  const overflow = skillMixOverflow(state, mix, max);
+  return overflow ? skillMixOverflowMessage(overflow) : undefined;
 }
 
 function applyAddStaffingRequirement(
@@ -745,6 +794,40 @@ function applyEditStaffingRequirement(
     return reject(index, "no_effect", `${name} already says exactly that.`);
   }
   return { ok: true, next };
+}
+
+function applySetSkillMix(
+  state: ScenarioUiState,
+  command: Extract<AssistantCommandV1, { type: "set_skill_mix" }>,
+  index: number,
+): OperationResult {
+  const source = state.cardsByKind.requirements.find((card) => card.uid === command.ruleId);
+  if (!source) {
+    return reject(
+      index,
+      "unknown_target",
+      `That staffing requirement is not in this schedule any more. ${ruleChoices(state, "requirements")}`,
+    );
+  }
+  const name = ruleName("requirements", source.description?.trim() || source.uid);
+  const mix = skillMixRejection(state, command.skillMix, name, index);
+  if (mix) return mix;
+  const domain = buildRequirementShiftTypeDomain(state);
+  const draft = {
+    ...requirementToForm(source, domain),
+    skillMix: command.skillMix.map((entry) => ({ ...entry })),
+  };
+  const error =
+    firstFormError(validateRequirementForm(draft, domain)) ?? skillMixOverflowError(state, draft);
+  if (error) return reject(index, "invalid_value", `${name}: ${error}.`);
+  // Compare the mix, not the card: the form round trip also normalises other fields.
+  if (stableStringify(source.skillMix ?? []) === stableStringify(command.skillMix)) {
+    return reject(index, "no_effect", `${name} already has that skill mix.`);
+  }
+  return {
+    ok: true,
+    next: applyRequirementPatch(state, { type: "update", uid: source.uid, form: draft }),
+  };
 }
 
 // --- Remove (every family) -----------------------------------------------------
@@ -860,6 +943,9 @@ function applySetRequirementPeople(
   // the manual control accepts would be a second, quieter definition of "valid".
   if (!(Number.isFinite(command.requiredNumPeople) && command.requiredNumPeople >= 0)) {
     return reject(index, "invalid_value", "Required people must be zero or more.");
+  }
+  if (command.requiredNumPeople < skillMixFloor(card)) {
+    return reject(index, "invalid_value", `${REQUIREMENT_MESSAGES.skillMixAboveRequired}.`);
   }
   if (card.requiredNumPeople === command.requiredNumPeople) {
     return reject(index, "no_effect", "That requirement already asks for that many people.");
@@ -1501,6 +1587,8 @@ export function applyAssistantCommand(
       return applyAddStaffingRequirement(state, command, index);
     case "edit_staffing_requirement":
       return applyEditStaffingRequirement(state, command, index);
+    case "set_skill_mix":
+      return applySetSkillMix(state, command, index);
     case "remove_rule":
       return applyRemoveRule(state, command, index);
     case "add_person":

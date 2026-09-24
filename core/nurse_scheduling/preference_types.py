@@ -192,6 +192,19 @@ def shift_type_requirements(ctx: Context, preference: models.ShiftTypeRequiremen
             else:
                 ctx.solver.add_constraint(actual_n_people == preference.requiredNumPeople)
 
+            # Skill mix: at least k of the named people among this group's staff.
+            # Nobody is banned; the headcount above still fixes the total, so the
+            # rest of the places go to anyone eligible. A person in two entries'
+            # groups counts toward both.
+            #   sum_{s in ss, p in eligible(s) ∩ people} shifts[(d, s, p)] >= k
+            for entry in preference.skillMix or []:
+                mix_ps = set(utils.parse_pids(entry.people, ctx.map_pid_p))
+                mix_n = sum(ctx.shifts[(d, s, p)] for s in ss for p in qualified_ps_by_s[s] if p in mix_ps)
+                if isinstance(mix_n, int):  # nobody eligible: the floor cannot be met
+                    ctx.solver.add_bool_or([])  # an empty OR is always false -> INFEASIBLE
+                else:
+                    ctx.solver.add_constraint(mix_n >= entry.minNumPeople)
+
             # Add soft constraint for preferred number of people if specified
             if preference.preferredNumPeople is not None:
                 ctx.solver.add_constraint(actual_n_people <= preference.preferredNumPeople)

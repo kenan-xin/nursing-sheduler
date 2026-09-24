@@ -137,7 +137,7 @@ export const SINGAPORE_CASES: EvalCase[] = [
   {
     id: "sg-nic-per-shift",
     tags: ["sg"],
-    description: "Skill-mix rules cannot be created yet; no twin shifts.",
+    description: "A nurse in charge per shift is a skill mix; no twin shifts.",
     today: "2026-09-24",
     route: "/rules",
     seed: {
@@ -145,11 +145,21 @@ export const SINGAPORE_CASES: EvalCase[] = [
     },
     user: { turns: ["Every shift needs one nurse in charge from the seniors."] },
     expect: {
-      noProposal: true,
-      judge: [
-        "Says this kind of rule is not available yet.",
-        "Does not suggest making a separate senior-only copy of each shift.",
-      ],
+      // A skill mix of 1 from Seniors on each shift; never qualifiedPeople, which bans the rest.
+      proposalCheck: (ops) => {
+        if (JSON.stringify(ops).includes('"qualifiedPeople":["Seniors"]'))
+          return "bans everyone but the seniors";
+        const mixed = new Set(
+          ops.flatMap((op) =>
+            op.type === "set_skill_mix" &&
+            op.skillMix.some((e) => String(e.people) === "Seniors" && e.minNumPeople >= 1)
+              ? [op.ruleId]
+              : [],
+          ),
+        );
+        return mixed.has("day") && mixed.has("night") ? null : "not a skill mix on every shift";
+      },
+      judge: ["Does not suggest making a separate senior-only copy of each shift."],
     },
   },
   {

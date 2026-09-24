@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { capOf, findStaffingShortfalls, toDateId } from "./shortfalls";
 import { SCENARIOS, cards, leave, people, requirement, ward } from "./ward-fixtures.test-support";
+import type { ScenarioUiState } from "@/lib/scenario";
 
 describe("findStaffingShortfalls", () => {
   it("finds nothing in an empty scenario", () => {
@@ -21,6 +22,7 @@ describe("findStaffingShortfalls", () => {
         away: [{ person: "rn1", reason: "leave" }],
         capRuleIds: [],
         skillMix: true,
+        mixPeople: null,
       },
     ]);
   });
@@ -201,6 +203,7 @@ describe("findStaffingShortfalls", () => {
         away: [],
         capRuleIds: [],
         skillMix: false,
+        mixPeople: null,
       },
     ]);
   });
@@ -239,6 +242,151 @@ describe("findStaffingShortfalls", () => {
       }),
     });
     expect(findStaffingShortfalls(state)).toEqual([]);
+  });
+
+  describe("skill-mix gaps", () => {
+    const rnWard = (patch: Partial<ScenarioUiState> = {}) =>
+      ward({
+        staff: people("rn1", "rn2", "en1", "en2", "en3"),
+        staffGroups: [{ id: "RN", members: ["rn1", "rn2"] }],
+        cardsByKind: cards({
+          requirements: [
+            requirement("day", "D", 1),
+            requirement("night", "N", 2, { skillMix: [{ people: "RN", minNumPeople: 2 }] }),
+          ],
+        }),
+        ...patch,
+      });
+
+    it("an RN on leave leaves the night one RN short, flagged as skill mix", () => {
+      const findings = findStaffingShortfalls(rnWard({ reqData: [leave("rn2", "03")] }));
+      expect(findings).toEqual([
+        expect.objectContaining({
+          kind: "requirement_short",
+          dateId: "03",
+          ruleIds: ["night"],
+          required: 2,
+          available: 1,
+          skillMix: true,
+          mixPeople: "RN",
+          away: [{ person: "rn2", reason: "leave" }],
+        }),
+      ]);
+    });
+
+    it("a skill mix does not ban anyone: non-RNs still count toward the head count", () => {
+      expect(findStaffingShortfalls(rnWard())).toEqual([]);
+    });
+
+    it("empty group is a skill-mix gap on every night", () => {
+      const findings = findStaffingShortfalls(rnWard({ staffGroups: [{ id: "RN", members: [] }] }));
+      expect(findings.filter((f) => f.mixPeople === "RN")).toHaveLength(7);
+    });
+
+    it("scopes a dated card's skill-mix entries to its own dates", () => {
+      const dated = rnWard({
+        cardsByKind: cards({
+          requirements: [
+            requirement("day", "D", 1),
+            requirement("night", "N", 2, {
+              skillMix: [{ people: "RN", minNumPeople: 2 }],
+              date: ["04"],
+            }),
+          ],
+        }),
+        // rn2 away on the 2nd is outside the card's date scope, so it raises nothing there.
+        reqData: [leave("rn2", "04"), leave("rn2", "02")],
+      });
+      const findings = findStaffingShortfalls(dated);
+      expect(findings.map((f) => f.dateId)).toEqual(["04"]);
+      expect(findings[0].mixPeople).toBe("RN");
+    });
+
+    it("tracks two skill-mix entries on one card independently", () => {
+      // RN >= 2 and Senior >= 1 on a 3-person night. Only the Senior on leave, so only
+      // the Senior entry is short; the RN entry and the card's own head count are fine.
+      const state = ward({
+        staff: people("rn1", "rn2", "sen1", "other1", "other2"),
+        staffGroups: [
+          { id: "RN", members: ["rn1", "rn2"] },
+          { id: "Senior", members: ["sen1"] },
+        ],
+        reqData: [leave("sen1", "04")],
+        cardsByKind: cards({
+          requirements: [
+            requirement("day", "D", 1),
+            requirement("night", "N", 3, {
+              skillMix: [
+                { people: "RN", minNumPeople: 2 },
+                { people: "Senior", minNumPeople: 1 },
+              ],
+            }),
+          ],
+        }),
+      });
+      const findings = findStaffingShortfalls(state);
+      expect(findings).toEqual([
+        expect.objectContaining({
+          kind: "requirement_short",
+          dateId: "04",
+          ruleIds: ["night"],
+          required: 1,
+          available: 0,
+          skillMix: true,
+          mixPeople: "Senior",
+          away: [{ person: "sen1", reason: "leave" }],
+        }),
+      ]);
+    });
+
+    const mixWard = (n: number, mix: { people: string; minNumPeople: number }[], extra = {}) =>
+      ward({
+        staff: people("rn1", "rn2", "en1", "en2"),
+        staffGroups: [
+          { id: "RN", members: ["rn1", "rn2"] },
+          { id: "EN", members: ["en1", "en2"] },
+          { id: "Senior", members: ["rn1"] },
+        ],
+        cardsByKind: cards({
+          requirements: [requirement("night", "N", n, { skillMix: mix, ...extra })],
+        }),
+      });
+
+    it("reports disjoint skill-mix groups that need more people than the head count", () => {
+      const findings = findStaffingShortfalls(
+        mixWard(3, [
+          { people: "RN", minNumPeople: 2 },
+          { people: "EN", minNumPeople: 2 },
+        ]),
+      );
+      expect(findings).toHaveLength(7);
+      expect(findings[0]).toMatchObject({
+        kind: "requirement_conflict",
+        dateId: "01",
+        shiftTypes: ["N"],
+        ruleIds: ["night"],
+        required: 4,
+        available: 3,
+        skillMix: true,
+        mixPeople: "RN and EN",
+      });
+    });
+
+    it("accepts overlapping skill-mix groups: an RN who is a senior counts toward both", () => {
+      const mix = [
+        { people: "RN", minNumPeople: 2 },
+        { people: "Senior", minNumPeople: 1 },
+      ];
+      expect(findStaffingShortfalls(mixWard(2, mix))).toEqual([]);
+    });
+
+    it("accepts disjoint skill-mix groups that fit under the preferred count", () => {
+      const mix = [
+        { people: "RN", minNumPeople: 2 },
+        { people: "EN", minNumPeople: 2 },
+      ];
+      expect(findStaffingShortfalls(mixWard(3, mix, { preferredNumPeople: 4 }))).toEqual([]);
+    });
   });
 
   it("ignores disabled requirements and ones with coefficients", () => {

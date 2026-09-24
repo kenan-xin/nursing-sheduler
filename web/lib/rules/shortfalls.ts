@@ -20,6 +20,7 @@ import {
   RESERVED_SHIFT_TYPE,
   isDayStateSelector,
   type DateRef,
+  type PersonRef,
   type RequirementCard,
   type ScenarioUiState,
   type UiRequestCell,
@@ -66,7 +67,46 @@ export interface StaffingFinding {
   capRuleIds: string[];
   /** A requirement involved counts only a named group or people (skill mix). */
   skillMix: boolean;
+  /**
+   * The group or person of the short skill-mix entry; null when no skill-mix entry is short.
+   * A skill-mix `requirement_conflict` (ruleIds is the one card) names its groups joined by " and ".
+   */
+  mixPeople: string | null;
 }
+
+export interface SkillMixOverflow {
+  groups: string[];
+  required: number;
+  available: number;
+}
+
+/**
+ * Skill-mix entries whose groups share no one each need their OWN people on the shift, so
+ * their minimums add up. Null when that sum fits `max` (the head-count ceiling). Greedy,
+ * largest minimum first, so a report is a proof; overlapping groups are legal (an RN who is
+ * also a senior counts toward both). Shared by the static check and the assistant's checks.
+ */
+export function skillMixOverflow(
+  state: ScenarioUiState,
+  skillMix: readonly { people: PersonRef; minNumPeople: number }[] | undefined,
+  max: number,
+): SkillMixOverflow | null {
+  const staffIds = new Set(state.staff.map((person) => String(person.id)));
+  const used = new Set<string>();
+  const groups: string[] = [];
+  let required = 0;
+  for (const entry of [...(skillMix ?? [])].sort((a, b) => b.minNumPeople - a.minNumPeople)) {
+    const members = [...expandPersonRefs([entry.people], state)].filter((p) => staffIds.has(p));
+    if (members.some((p) => used.has(p))) continue;
+    members.forEach((p) => used.add(p));
+    groups.push(String(entry.people));
+    required += entry.minNumPeople;
+  }
+  return groups.length >= 2 && required > max ? { groups, required, available: max } : null;
+}
+
+export const skillMixOverflowMessage = (o: SkillMixOverflow) =>
+  `the skill-mix groups ${o.groups.join(" and ")} share no one, so together they need ${o.required} people, but the shift allows at most ${o.available}`;
 
 type Range = { start: string; end: string };
 type Block = { reason: AwayReason; shifts: Set<string> | "all" };
@@ -86,6 +126,10 @@ interface Equation {
   restricts: boolean;
   /** False for coefficient-weighted cards: their bans apply, their counts are not checked. */
   counted: boolean;
+  /** The skill-mix entry this equation checks, or null for a card's own head count. */
+  mix: string | null;
+  /** A head equation's skill-mix groups that share no one and cannot fit under `max`. */
+  overflow: SkillMixOverflow | null;
 }
 
 /** Who can count toward one equation on one date. */
@@ -240,7 +284,8 @@ export function findStaffingShortfalls(state: ScenarioUiState): StaffingFinding[
         available: a.free.size,
         away: [...a.away].map(([person, reason]) => ({ person, reason })),
         capRuleIds: [],
-        skillMix: eq.restricts || a.banRules.size > 0,
+        skillMix: eq.restricts || eq.mix !== null || a.banRules.size > 0,
+        mixPeople: eq.mix,
       });
     }
 
@@ -273,7 +318,12 @@ export function findStaffingShortfalls(state: ScenarioUiState): StaffingFinding[
             .filter(([p]) => !pool.has(p))
             .map(([person, reason]) => ({ person, reason })),
           capRuleIds: [],
-          skillMix: chosen.some((eq) => eq.restricts) || banRules.size > 0,
+          skillMix: chosen.some((eq) => eq.restricts || eq.mix !== null) || banRules.size > 0,
+          // A same-card mix equation always loses disjoint()'s pick to its own head
+          // equation (same shiftTypes, required >= minNumPeople), so this only ever
+          // names a mix entry from a DIFFERENT card. It is not exhaustive: a same-card
+          // mix shortfall still surfaces, just on the per-equation requirement_short.
+          mixPeople: chosen.find((eq) => eq.mix)?.mix ?? null,
         });
       }
     }
@@ -298,7 +348,35 @@ export function findStaffingShortfalls(state: ScenarioUiState): StaffingFinding[
         available: outer.max,
         away: [],
         capRuleIds: [],
-        skillMix: outer.restricts || inner.some((eq) => eq.restricts),
+        skillMix:
+          outer.restricts ||
+          outer.mix !== null ||
+          inner.some((eq) => eq.restricts || eq.mix !== null),
+        // Same shadowing as day_short above: a mix equation whose own head is the
+        // outer equation here can never appear as a separate inner candidate (its
+        // shifts equal the outer's, so nothing else stays disjoint from it). So this
+        // only ever names a mix entry from a different card than outer.
+        mixPeople: inner.find((eq) => eq.mix)?.mix ?? null,
+      });
+    }
+
+    // requirement_conflict inside one card: skill-mix groups that share no one need more
+    // different people than the head count allows. disjoint() above cannot see this: the
+    // mix equations share the head's shifts, so it keeps only one of them.
+    for (const eq of today) {
+      if (!eq.overflow) continue;
+      findings.push({
+        kind: "requirement_conflict",
+        dateId,
+        iso,
+        shiftTypes: [...eq.shiftTypes],
+        ruleIds: [eq.ruleId],
+        required: eq.overflow.required,
+        available: eq.overflow.available,
+        away: [],
+        capRuleIds: [],
+        skillMix: true,
+        mixPeople: eq.overflow.groups.join(" and "),
       });
     }
   }
@@ -337,7 +415,8 @@ export function findStaffingShortfalls(state: ScenarioUiState): StaffingFinding[
       available: supply,
       away: [],
       capRuleIds: [...binding],
-      skillMix: eq.restricts,
+      skillMix: eq.restricts || eq.mix !== null,
+      mixPeople: eq.mix,
     });
   }
 
@@ -380,7 +459,26 @@ function buildEquations(
         max,
         restricts,
         counted,
+        mix: null,
+        overflow: counted ? skillMixOverflow(state, card.skillMix, max) : null,
       });
+
+      // Skill mix: a floor for a group AMONG this equation's staff. It bans nobody,
+      // so it restricts nothing and has no ceiling of its own.
+      for (const entry of card.skillMix ?? []) {
+        out.push({
+          ruleId: card.uid,
+          shiftTypes,
+          qualified: new Set([...peopleOf([entry.people])].filter((p) => qualified.has(p))),
+          dateIds,
+          required: entry.minNumPeople,
+          max: Number.POSITIVE_INFINITY,
+          restricts: false,
+          counted: true,
+          mix: String(entry.people),
+          overflow: null,
+        });
+      }
     }
   }
   return out;

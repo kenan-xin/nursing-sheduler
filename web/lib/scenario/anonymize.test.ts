@@ -79,4 +79,19 @@ describe("anonymizeDocument", () => {
     // No original people-domain id survives in the anonymized document.
     expect(anon.people.items.some((p) => p.id === "OFF" || p.id === "LEAVE")).toBe(false);
   });
+
+  it("rewrites a requirement's skillMix people ref to the same pseudonym as the group elsewhere", () => {
+    const original = toCanonicalScenarioDocument(makeValidUiState());
+    const requirement = original.preferences.find((p) => p.type === "shift type requirement");
+    if (requirement && "qualifiedPeople" in requirement) {
+      (requirement as { skillMix?: unknown }).skillMix = [{ people: "Seniors", minNumPeople: 1 }];
+    }
+    const idMap = buildIdMap(original);
+    const anon = anonymizeDocument(original, idMap);
+    const anonRequirement = anon.preferences.find((p) => p.type === "shift type requirement") as {
+      skillMix?: Array<{ people: unknown; minNumPeople: number }>;
+    };
+    expect(anonRequirement.skillMix?.[0].people).toBe(anon.people.groups?.[0].id);
+    expect(anonRequirement.skillMix?.[0].people).toBe("G1");
+  });
 });

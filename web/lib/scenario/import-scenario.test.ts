@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { sanitizePersistedScenario } from "@/lib/store/persistence";
+import type { RequirementCard } from "@/lib/scenario";
+import { cards, people, requirement, ward } from "@/lib/rules/ward-fixtures.test-support";
+import { serializeScenario } from "./serialize";
 import { importScenarioYaml, importScenarioValue } from "./import-scenario";
 
 const BACKEND_YAML = `apiVersion: alpha
@@ -237,6 +240,44 @@ shiftTypes: {items: [{id: D}]}
       },
     };
     expect(() => sanitizePersistedScenario(hydrated)).not.toThrow();
+  });
+
+  it("round-trips a requirement's skill mix through export and import", () => {
+    const card: RequirementCard = {
+      uid: "night",
+      description: "Night: 4, at least 2 RN",
+      shiftType: ["N"],
+      requiredNumPeople: 4,
+      qualifiedPeople: ["ALL"],
+      skillMix: [
+        { people: "RN", minNumPeople: 2 },
+        { people: "Senior", minNumPeople: 1 },
+      ],
+      date: ["ALL"],
+      weight: -1,
+    };
+    const state = ward({
+      staff: people("rn1", "en1"),
+      staffGroups: [
+        { id: "RN", members: ["rn1"] },
+        { id: "Senior", members: ["rn1"] },
+      ],
+      cardsByKind: cards({ requirements: [card] }),
+    });
+    const yaml = serializeScenario(state);
+    expect(yaml).toContain("skillMix:");
+    const back = importScenarioYaml(yaml);
+    expect(back.ok).toBe(true);
+    if (!back.ok) return;
+    expect(back.target.cardsByKind.requirements[0].skillMix).toEqual(card.skillMix);
+  });
+
+  it("omits an empty skill mix on export", () => {
+    const state = ward({
+      staff: people("a"),
+      cardsByKind: cards({ requirements: [requirement("d", "D", 1, { skillMix: [] })] }),
+    });
+    expect(serializeScenario(state)).not.toContain("skillMix");
   });
 
   it("rejects an unknown explicit preference type (never silently drops it)", () => {

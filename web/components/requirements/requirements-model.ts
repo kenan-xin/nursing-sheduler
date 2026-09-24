@@ -27,6 +27,7 @@ import {
   type RequirementCard,
   type RequirementCardBody,
   type ScenarioUiState,
+  type SkillMixEntry,
   type ShiftTypeRef,
   type UiDateGroup,
 } from "@/lib/scenario";
@@ -75,11 +76,25 @@ export const REQUIREMENT_MESSAGES = {
   // constraint the Counts/Coverings editors document for their own selectors.
   numericShiftId:
     "A numeric shift type ID cannot be used as a requirement selector; reference it by a string ID instead",
+  skillMixPeopleEmpty: "Choose a staff group or person for each skill mix row",
+  skillMixMinInvalid: "Each skill mix number must be a whole number of at least 1",
+  skillMixAboveRequired: "A skill mix cannot ask for more people than the required number",
+  skillMixDuplicate: "Each group or person can appear in the skill mix only once",
+  skillMixNeedsEveryone:
+    "A skill mix needs the shift open to everyone. Set Qualified people to Everyone first",
+  skillMixCoefficients:
+    "A skill mix counts people, so it cannot be combined with staffing multipliers",
 } as const;
 
 /** A number-or-blank draft value: an integer, `""` (blank), or a raw invalid
  *  string kept verbatim (mirrors the shared Target/Weight number-field contract). */
 export type RequirementNumberValue = number | string;
+
+/** One skill-mix row draft: a staff group/person plus its minimum head count. */
+export interface SkillMixDraft {
+  people: PersonRef | "";
+  minNumPeople: RequirementNumberValue;
+}
 
 /** The flat draft the form edits. `shiftType` holds 0 or 1 refs — the single-select
  *  invariant (FR-PR-21) — but is typed as an array so it slots into the shared
@@ -96,6 +111,7 @@ export interface RequirementFormState {
   preferredNumPeople: RequirementNumberValue;
   date: DateRef[];
   weight: WeightFieldValue;
+  skillMix: SkillMixDraft[];
 }
 
 /** A fresh, empty draft (spec 05 FR-PR-20, in-form weight default per the current
@@ -111,6 +127,7 @@ export function emptyRequirementForm(): RequirementFormState {
     preferredNumPeople: "",
     date: [],
     weight: -50,
+    skillMix: [],
   };
 }
 
@@ -285,6 +302,7 @@ export interface RequirementErrors {
   qualifiedPeople?: string;
   date?: string;
   weight?: string;
+  skillMix?: string;
 }
 
 /** Whether the weight dial is meaningful for this draft (FR-PR-24): preferred is
@@ -371,7 +389,40 @@ export function validateRequirementForm(
     }
   }
 
+  const skillMixError = validateSkillMix(form);
+  if (skillMixError) errors.skillMix = skillMixError;
+
   return errors;
+}
+
+const isAllRef = (ref: PersonRef) => String(ref).toUpperCase() === RESERVED_SHIFT_TYPE.all;
+
+/** Validate the skill-mix rows (global constraints: hard floor, `1 <= min <=
+ *  required`, unique `people`, shift open to everyone, no coefficients). */
+function validateSkillMix(form: RequirementFormState): string | undefined {
+  if (form.skillMix.length === 0) return undefined;
+  if (!form.qualifiedPeople.every(isAllRef)) return REQUIREMENT_MESSAGES.skillMixNeedsEveryone;
+  // Drafts carry a blank pair per eligible shift; only a filled-in value is a multiplier.
+  if (form.shiftTypeCoefficients.some(([, value]) => value !== ""))
+    return REQUIREMENT_MESSAGES.skillMixCoefficients;
+  const seen = new Set<string>();
+  for (const entry of form.skillMix) {
+    if (entry.people === "") return REQUIREMENT_MESSAGES.skillMixPeopleEmpty;
+    const n = entry.minNumPeople;
+    if (typeof n !== "number" || !Number.isInteger(n) || n < 1)
+      return REQUIREMENT_MESSAGES.skillMixMinInvalid;
+    if (typeof form.requiredNumPeople === "number" && n > form.requiredNumPeople)
+      return REQUIREMENT_MESSAGES.skillMixAboveRequired;
+    const key = String(entry.people);
+    if (seen.has(key)) return REQUIREMENT_MESSAGES.skillMixDuplicate;
+    seen.add(key);
+  }
+  return undefined;
+}
+
+/** The lowest head count this card's skill mix allows: its largest minimum. */
+export function skillMixFloor(card: Pick<RequirementCardBody, "skillMix">): number {
+  return Math.max(0, ...(card.skillMix ?? []).map((entry) => entry.minNumPeople));
 }
 
 /**
@@ -399,6 +450,13 @@ export function buildRequirementCard(
   };
   if (entries.length > 0) body.shiftTypeCoefficients = entries as CoefficientEntry[];
   if (diff) body.preferredNumPeople = form.preferredNumPeople as number;
+  if (form.skillMix.length > 0)
+    body.skillMix = form.skillMix.map(
+      (e): SkillMixEntry => ({
+        people: e.people as PersonRef,
+        minNumPeople: e.minNumPeople as number,
+      }),
+    );
   return { uid, ...body };
 }
 
@@ -438,6 +496,7 @@ export function requirementToForm(
           ? [...card.date]
           : [card.date],
     weight: card.weight,
+    skillMix: (card.skillMix ?? []).map((e) => ({ ...e })),
   };
 }
 

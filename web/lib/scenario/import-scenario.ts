@@ -308,6 +308,10 @@ function normalizeRequirement(pref: LoosePref): RequirementCardBody {
     requiredNumPeople: pref.requiredNumPeople as number,
     qualifiedPeople: pref.qualifiedPeople as RequirementCardBody["qualifiedPeople"],
     preferredNumPeople: num(pref.preferredNumPeople as number | null | undefined),
+    skillMix:
+      Array.isArray(pref.skillMix) && pref.skillMix.length
+        ? (pref.skillMix as RequirementCardBody["skillMix"])
+        : undefined,
     date: pref.date as DateRef | DateRef[] | undefined,
     weight: weightOf(pref, PREFERENCE_TYPE.shiftTypeRequirement),
   });

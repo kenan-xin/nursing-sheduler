@@ -203,8 +203,9 @@ describe("what the assistant knows about the ward and the solver", () => {
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/exact, not a minimum/);
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/Staffing requirements screen/);
   });
-  it("says skill mix is not supported, and never approximates it with a whole-shift group", () => {
-    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/skill mix .*not supported yet/);
+  it("sets a skill mix with set_skill_mix, and never approximates it with a whole-shift group", () => {
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/skill mix .*set_skill_mix/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).not.toMatch(/not supported yet/);
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/never approximate it/);
   });
   it("checks the limits before promising a rule", () => {

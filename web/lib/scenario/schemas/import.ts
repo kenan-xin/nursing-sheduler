@@ -100,6 +100,11 @@ const zImportSuccessions = z.strictObject({
   weight: zImportWeight.optional(),
 });
 
+const zImportSkillMixEntry = z.strictObject({
+  people: zImportRef,
+  minNumPeople: z.number().int(),
+});
+
 const zImportRequirement = z.strictObject({
   type: z.literal(PREFERENCE_TYPE.shiftTypeRequirement).optional(),
   description: z.string().nullish(),
@@ -108,6 +113,7 @@ const zImportRequirement = z.strictObject({
   requiredNumPeople: z.number().int(),
   qualifiedPeople: zRefOrList.nullish(),
   preferredNumPeople: z.number().int().nullish(),
+  skillMix: z.array(zImportSkillMixEntry).nullish(),
   date: zDateRefOrList.nullish(),
   weight: zImportWeight.optional(),
 });

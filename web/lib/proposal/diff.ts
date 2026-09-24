@@ -211,7 +211,8 @@ function renderStrength(weight: number): string {
  * Restates `shift_type_requirements` in core: no preferred count means EXACTLY n; a
  * preferred count p means n to p, its weight (0 or less) pulling toward p; qualified
  * people bans everyone else from those shifts. Each top-level entry is its own
- * equation, a group or nested list one combined count.
+ * equation, a group or nested list one combined count. A skill mix adds floors for
+ * named groups among those people and bans nobody.
  */
 function describeRequirement(card: RequirementCard): string {
   const n = card.requiredNumPeople;
@@ -222,12 +223,15 @@ function describeRequirement(card: RequirementCard): string {
   const dates = renderDates(card.date);
   const who = renderPeople(card.qualifiedPeople, "");
   const ban = who ? `; only ${who} may work ${labels.join(", ")}` : "";
+  const mix = card.skillMix?.length
+    ? `; at least ${card.skillMix.map((e) => `${e.minNumPeople} from “${e.people}”`).join(", ")} — anyone can fill the other places`
+    : "";
   if (p == null || p === n) {
-    return `Exactly ${n} ${n === 1 ? "person" : "people"} on ${shifts}, ${dates}${ban}`;
+    return `Exactly ${n} ${n === 1 ? "person" : "people"} on ${shifts}, ${dates}${ban}${mix}`;
   }
   const lean =
     card.weight < 0 ? `${p} preferred` : card.weight > 0 ? `${n} preferred` : "no preference";
-  return `${n} to ${p} people on ${shifts}, ${dates} (${lean}, weight ${card.weight})${ban}`;
+  return `${n} to ${p} people on ${shifts}, ${dates} (${lean}, weight ${card.weight})${ban}${mix}`;
 }
 
 function describeSuccession(card: SuccessionCard): string {
@@ -808,6 +812,7 @@ function directKeys(
         keys.add(`rule:counts:${command.ruleId}`);
         break;
       case "edit_staffing_requirement":
+      case "set_skill_mix":
         keys.add(`rule:requirements:${command.ruleId}`);
         break;
       case "remove_rule":

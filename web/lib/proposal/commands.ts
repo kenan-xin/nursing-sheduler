@@ -213,10 +213,11 @@ export type AssistantCommandV1 =
       qualifiedPeople: PersonRef[];
       dates: string[];
       requiredNumPeople: number;
+      skillMix?: { people: PersonRef; minNumPeople: number }[];
     }
   /**
    * Replace these fields of one staffing requirement -- that screen's Edit form. Its
-   * preferred count, weight and coefficients are kept as stored.
+   * preferred count, weight, coefficients and skill mix are kept as stored.
    */
   | {
       type: "edit_staffing_requirement";
@@ -226,6 +227,16 @@ export type AssistantCommandV1 =
       qualifiedPeople: PersonRef[];
       dates: string[];
       requiredNumPeople: number;
+    }
+  /**
+   * Replace one staffing requirement's skill mix -- that screen's Edit form "Skill mix"
+   * rows. Each entry: at least `minNumPeople` of `people` among the shift's staff. It
+   * bans nobody (unlike qualifiedPeople). An empty list clears it.
+   */
+  | {
+      type: "set_skill_mix";
+      ruleId: string;
+      skillMix: { people: PersonRef; minNumPeople: number }[];
     }
   /** Delete one rule of any family -- every rule screen's Delete. */
   | {
@@ -284,6 +295,7 @@ export const ASSISTANT_COMMAND_TYPES = [
   "edit_count_rule",
   "add_staffing_requirement",
   "edit_staffing_requirement",
+  "set_skill_mix",
   "remove_rule",
   "add_person",
   "edit_person",
@@ -466,10 +478,11 @@ function requirementFields() {
       .array(refSchema)
       .describe(
         "Only these people may work this shift; everyone else is banned from it (a hard " +
-          'rule). Person ids or staff group ids, or ["ALL"] for no restriction. Cannot ' +
-          "express group skill-mix rules (e.g. a minimum count of RNs on a shift with " +
-          "others allowed too): tell the user skill mix is not supported yet, and never " +
-          "approximate it by naming a group here, which bans everyone else from the shift.",
+          'rule). Person ids or staff group ids, or ["ALL"] for no restriction. Not for a ' +
+          "skill mix (e.g. at least 2 RNs on a shift with others allowed too): use " +
+          'skillMix on add_staffing_requirement, or set_skill_mix, with ["ALL"] here. ' +
+          "Never approximate a skill mix by naming a group here, which bans everyone " +
+          "else from the shift.",
       ),
     dates: ruleDatesSchema(),
     requiredNumPeople: z
@@ -477,9 +490,25 @@ function requirementFields() {
       .describe(
         "The exact number of people on that shift on each date, e.g. 2 (a hard rule), " +
           "unless the requirement already has a preferred count, which makes it the lowest " +
-          "allowed.",
+          "allowed. It cannot go below the requirement's skill mix.",
       ),
   };
+}
+
+function skillMixSchema(extra = "") {
+  return z
+    .array(
+      z.strictObject({
+        people: refSchema.describe('One staff group id (or one person id), for example "RN".'),
+        minNumPeople: z.number().int().min(1).describe("At least this many of them on the shift."),
+      }),
+    )
+    .describe(
+      "Skill mix: floors for named groups AMONG the shift's staff. Bans nobody. " +
+        '"At least 2 RNs among the 4 on nights" = requiredNumPeople 4 + skillMix [{people:"RN",minNumPeople:2}]. ' +
+        "Never use qualifiedPeople for this: qualifiedPeople bans everyone else." +
+        extra,
+    );
 }
 
 /**
@@ -656,11 +685,20 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
   z.strictObject({
     type: z.enum(["add_staffing_requirement"]),
     ...requirementFields(),
+    skillMix: skillMixSchema().optional(),
   }),
   z.strictObject({
     type: z.enum(["edit_staffing_requirement"]),
     ruleId: ruleIdSchema(),
     ...requirementFields(),
+  }),
+  z.strictObject({
+    type: z.enum(["set_skill_mix"]),
+    ruleId: ruleIdSchema(),
+    skillMix: skillMixSchema(
+      " Replaces the requirement's whole skill mix: list every entry to keep, " +
+        "so to add a group include the existing entries too. [] removes it.",
+    ),
   }),
   z.strictObject({
     type: z.enum(["remove_rule"]),

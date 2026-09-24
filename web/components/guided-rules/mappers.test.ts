@@ -87,6 +87,13 @@ describe("requirementsMapper", () => {
       "Exactly 2 people on D on every date.",
     );
   });
+
+  it("puts the skill mix inside the sentence", () => {
+    const skillMix = [{ people: "RN", minNumPeople: 1 }];
+    expect(requirementsMapper.summary({ ...supported, qualifiedPeople: ["ALL"], skillMix })).toBe(
+      "Exactly 2 people on D on every date, at least 1 RN.",
+    );
+  });
 });
 
 describe("successionsMapper", () => {

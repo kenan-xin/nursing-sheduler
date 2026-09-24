@@ -142,8 +142,8 @@ export const CAPABILITY_ENTRIES = [
       "5. Limits count over fixed dates, never a rolling seven days. Counts start fresh each " +
       "roster period: last month's nights or weekends, and a day off owed for a public " +
       "holiday, are not carried over. Shift-order rules do check each nurse's last shifts " +
-      "entered on the Requests page. A skill mix, such as at least 1 RN on a shift with others allowed too, is " +
-      "not supported yet. It checks no employment law, ministry guidance or hospital policy, " +
+      "entered on the Requests page. A skill mix, such as at least 1 RN on a shift with others " +
+      "allowed too: ask the assistant, or set it under Staffing requirements in Advanced mode. It checks no employment law, ministry guidance or hospital policy, " +
       "only the rules written here.",
     concepts: [
       "limits",
@@ -172,8 +172,9 @@ export const CAPABILITY_ENTRIES = [
     title: "Staffing requirements",
     nurseFacingSummary:
       "How many people a shift needs: exactly that number, or a range when a preferred number " +
-      "is set. Naming who is qualified means nobody else may work that shift at all. The " +
-      "scheduler cannot express a skill-mix rule yet, and the assistant cannot set one up." +
+      "is set. A skill-mix rule says how many of a shift's people must come from a group, for " +
+      "example 2 RNs among the 4 on nights; anyone can fill the other places. Naming who is " +
+      "qualified is different: nobody else may work that shift at all." +
       " For a number with a preferred extra (2, ideally 3), the preferred number is set here. " +
       "When two teams are each set as the only people for the same shift, they block each " +
       "other, so each ward or team needs a separate shift code.",
