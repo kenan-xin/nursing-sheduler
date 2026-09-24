@@ -351,6 +351,9 @@ class ShiftTypeRequirementsPreference(BasePreference):
     # Skill mix: each entry is a hard floor on how many of its people work the
     # shift. Unlike qualifiedPeople it bans nobody. See shift_type_requirements.
     skillMix: list[SkillMixEntry] | None = None
+    # Per-date exceptions to requiredNumPeople: [[date, count], ...]. On a listed date
+    # the requirement uses that count instead. Every other field still applies there.
+    requiredNumPeopleOverrides: list[tuple[datetime.date, int]] | None = None
     # None and the reserved "ALL" selector both mean all dates. The frontend
     # intentionally normalizes implicit all-date values to explicit "ALL".
     date: (int | str | datetime.date) | list[int | str | datetime.date] | None = None  # Single date or list of dates
@@ -360,6 +363,20 @@ class ShiftTypeRequirementsPreference(BasePreference):
     @classmethod
     def validate_weight_field(cls, v):
         return validate_weight(v)
+
+    @field_validator("requiredNumPeopleOverrides")
+    @classmethod
+    def validate_required_num_people_overrides_field(cls, v):
+        if v is None:
+            return v
+        seen = set()
+        for date, count in v:
+            if count < 0:
+                raise ValueError(f"requiredNumPeopleOverrides count for {date} must be at least 0.")
+            if date in seen:
+                raise ValueError(f"Duplicate requiredNumPeopleOverrides date {date}.")
+            seen.add(date)
+        return v
 
     @model_validator(mode="after")
     def validate_skill_mix(self) -> Self:
@@ -380,6 +397,21 @@ class ShiftTypeRequirementsPreference(BasePreference):
             if entry.people in seen:
                 raise ValueError(f"skillMix names {entry.people!r} more than once")
             seen.add(entry.people)
+        return self
+
+    @model_validator(mode="after")
+    def validate_required_num_people_overrides(self) -> Self:
+        if not self.requiredNumPeopleOverrides:
+            return self
+        for date, count in self.requiredNumPeopleOverrides:
+            if self.preferredNumPeople is not None and count > self.preferredNumPeople:
+                raise ValueError(f"requiredNumPeopleOverrides count for '{date}' must not exceed preferredNumPeople.")
+            for entry in self.skillMix or []:
+                if count < entry.minNumPeople:
+                    raise ValueError(
+                        f"requiredNumPeopleOverrides count for {date} is below skillMix minNumPeople "
+                        f"for '{entry.people}'."
+                    )
         return self
 
 
