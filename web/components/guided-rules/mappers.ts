@@ -82,14 +82,16 @@ export const requirementsMapper: GuidedRuleMapper<RequirementCard> = {
         ? ` Only ${summarizeRequirementRefs(qualified)} may work it.`
         : "";
     const mix = card.skillMix?.length
-      ? `, at least ${card.skillMix.map((e) => `${e.minNumPeople} ${e.people}`).join(", ")}`
+      ? `at least ${card.skillMix.map((e) => `${e.minNumPeople} ${e.people}`).join(", ")}`
       : "";
     // Display only: exceptions are edited in Advanced (F20).
     const except = (card.requiredNumPeopleOverrides ?? [])
       .map(([iso, count]) => `${formatShortDate(iso)}: ${count}`)
       .join(", ");
-    const exceptions = except ? `, except ${except}` : "";
-    return `${count} on ${shiftLabel} on ${dateLabel}${exceptions}${mix}.${only}`;
+    // Exceptions and skill mix are separate clauses (a run-on comma reads as one list).
+    const clauses = [except && `except ${except}`, mix].filter(Boolean);
+    const suffix = clauses.length ? `, ${clauses.join("; ")}` : "";
+    return `${count} on ${shiftLabel} on ${dateLabel}${suffix}.${only}`;
   },
   quickFields(card): GuidedQuickField[] {
     if (!isSupportedRequirementCard(card)) return [];

@@ -106,6 +106,18 @@ describe("requirementsMapper", () => {
       }),
     ).toBe("Exactly 2 people on D on every date, except 14 Oct: 1, 15 Oct: 0.");
   });
+
+  it("separates exceptions from the skill mix with a semicolon", () => {
+    const skillMix = [{ people: "RN", minNumPeople: 1 }];
+    expect(
+      requirementsMapper.summary({
+        ...supported,
+        qualifiedPeople: ["ALL"],
+        skillMix,
+        requiredNumPeopleOverrides: [["2026-10-14", 1]],
+      }),
+    ).toBe("Exactly 2 people on D on every date, except 14 Oct: 1; at least 1 RN.");
+  });
 });
 
 describe("successionsMapper", () => {
