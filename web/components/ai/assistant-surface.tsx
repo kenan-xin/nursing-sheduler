@@ -18,7 +18,7 @@
 // key replaced or removed while the panel is open takes effect on the next request
 // rather than being captured once at mount.
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { AssistantCopilotProvider } from "./assistant-copilot-provider";
 import { AI_KEY_HEADER, AI_MODEL_HEADER, COPILOT_RUNTIME_URL } from "@/lib/ai/protocol";
 import { hydrateAssistant, selectReady, useAssistantStore } from "@/lib/ai/assistant/store";
@@ -45,8 +45,15 @@ export function useAssistantHydration(): void {
 export function AssistantSurface() {
   const ready = useAssistantStore(selectReady);
   const panelOpen = useAssistantStore((state) => state.panelOpen);
+  // MOUNTED ON FIRST OPEN, THEN HIDDEN RATHER THAN UNMOUNTED. Closing the dock must
+  // not stop the assistant: unmounting would drop the turn's provider, tools and live
+  // cards mid-run. A thread switch still re-keys the conversation inside, and losing
+  // readiness (Disable, Remove key) still unmounts everything.
+  const [opened, setOpened] = useState(false);
+  if (ready && panelOpen && !opened) setOpened(true);
+  if (!ready && opened) setOpened(false);
 
-  if (!ready || !panelOpen) return null;
+  if (!ready || !opened) return null;
 
   return (
     <AssistantCopilotProvider
@@ -83,7 +90,7 @@ export function AssistantSurface() {
           the app shell. One consequence: the package's scoped
           `background-color: var(--background)` on this element does not paint, and the
           dock's own `Surface` supplies the same `--surface` tone instead. */}
-      <div data-copilotkit className="contents">
+      <div data-copilotkit className={panelOpen ? "contents" : "hidden"}>
         <AssistantPanel />
       </div>
     </AssistantCopilotProvider>
