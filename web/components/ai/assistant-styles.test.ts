@@ -325,3 +325,36 @@ describe("globals.css answers every token the package declares", () => {
     expect(mapped.get("--cpk-default-mono-font-family")).toBe("var(--ff-mono)");
   });
 });
+
+describe("the live transcript is inset and capped like every other host card", () => {
+  // `nursing-sheduler-1pz`: on a resized-wide dock, the transcript's internal
+  // `cpk:max-w-3xl cpk:mx-auto` wrapper (no padding of its own, no className prop
+  // reaching it) ran messages flush to the panel's edges while the welcome card,
+  // Preview, receipts and composer all sit inset by `--space-4`. This asserts the
+  // restated rule directly from `globals.css`'s bytes, the same way every other
+  // check in this file reads the installed/authored CSS rather than rendering.
+  const globalsRoot = postcss.parse(globalsSource, { from: "app/globals.css" });
+  const transcript = { selector: null as string | null, decls: new Map<string, string>() };
+  globalsRoot.walkRules((rule) => {
+    if (!rule.selectors.some((selector) => selector.includes("copilot-scroll-content"))) return;
+    transcript.selector = rule.selector.replace(/\s+/g, " ");
+    rule.each((node) => {
+      if (node.type === "decl") transcript.decls.set(node.prop, node.value);
+    });
+  });
+
+  it("finds the rule", () => {
+    expect(
+      transcript.selector,
+      'globals.css must carry a rule keyed to [data-testid="copilot-scroll-content"]',
+    ).not.toBe(null);
+  });
+
+  it("pads the transcript by the same --space-4 the host cards use", () => {
+    expect(transcript.decls.get("padding-inline")).toBe("var(--space-4)");
+  });
+
+  it("caps the readable measure at 70ch instead of the library's 768px", () => {
+    expect(transcript.decls.get("max-width")).toBe("min(70ch, 100%)");
+  });
+});
