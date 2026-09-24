@@ -5,11 +5,19 @@ import { generateText, Output, type LanguageModel } from "ai";
 import { z } from "zod";
 import { OPENROUTER_BASE_URL } from "@/lib/ai/runtime/containment";
 import type { ScenarioUiState } from "@/lib/scenario";
-import type { JudgeItem, TrialRecord } from "./trial";
+import type { ImportNormalizationTarget } from "@/lib/scenario/types";
+import type { JudgeItem, TranscriptEntry, TrialRecord } from "./trial";
 
-export const RUBRIC_VERSION = "2026-09-24.4";
+export const RUBRIC_VERSION = "2026-09-24.5";
+/** The app's screen names (components/shell/nav-config.ts), plain words for the judge. */
+const SCREENS =
+  "Dates, Staff, Shifts or Shift types, Rules, Requests & Leave, Staffing requirements, " +
+  "Shift successions, Shift counts, Affinities, Shift type coverings, Optimise & Export, " +
+  "Roster, Save & Load";
 /** Judge agreement with hand labels, filled after the first calibration (spec §6.3). */
-export const CALIBRATION: string | null = null;
+export const CALIBRATION: string | null =
+  "31/37 on fixtures/judge-calibration.json, rubric .5, gpt-5-mini, 2026-09-24 (21/36 under .4); " +
+  "4 of the 6 misses are the exact-vs-preferred claim reading 'is set' as 'already set'.";
 
 export const STANDARD_ITEMS: Record<string, string> = {
   short:
@@ -17,27 +25,44 @@ export const STANDARD_ITEMS: Record<string, string> = {
     "Passing on what the app tells the user (what a Run card or Preview needs, where to find a " +
     "setting or file) counts as steps, not extra sentences.",
   plain:
-    "The assistant uses no ids, tool names, field names or technical jargon. The app's own " +
-    "button and card labels (Apply, Preview, Change something, Cancel, Optimise, Optimize, " +
-    "Run, and the texts on an option card), screen names (the Rules screen) and words the app " +
-    "tells the user (XLSX, optimiser) are plain words, not jargon.",
+    "The assistant uses no tool names, field names or technical jargon a nurse would not know. " +
+    "Jargon that fails: solver, infeasible, constraint, succession, checker, a rule's weight " +
+    "as a number (weight 10). Plain words that always pass: XLSX, optimiser, skill mix, must " +
+    "never, preference; the app's button and card labels (Apply, Preview, Change something, " +
+    "Cancel, Optimise, Optimize, Run, and the texts on an option card); its screen names, " +
+    `however worded (${SCREENS}); names from the entity list, even lower-case or with digits ` +
+    "(rn1); shift codes, including a new one the assistant proposes (N2).",
   no_text_choice:
-    "The assistant never asks a pick-one question in plain text; choices go on a card. A " +
-    "question that leads into a card holding its options passes, and so does an open question " +
+    "The assistant never asks a pick-one question in plain text, and a yes/no offer (Want me to " +
+    "prepare that?) is a pick-one question; choices go on a card. A turn is everything " +
+    "between two User lines. A question or a restatement of options passes only when a Card " +
+    "line holding its answers is in the same turn, before or after it; re-asking in text a " +
+    "card shown in an earlier turn, with no Card line in this turn, fails. A question followed " +
+    "by 'Run card shown' (Ready to run it again?) passes, and so does an open question " +
     "(asking for a name or a detail).",
   suggests_default:
     "Where a setup detail has a usual value (a period, a shift time, a count), the assistant " +
-    "suggests it instead of asking. It does not apply to legal or regulatory numbers (ratios, " +
-    "rest hours), which the assistant must not state, nor to a choice between repair options.",
+    "suggests it instead of asking. It fails only when the assistant asks for such a value with " +
+    "no suggestion. A card of options passes. It does not apply to legal or regulatory numbers " +
+    "(ratios, rest hours), which the assistant must not state, nor to a choice between repair " +
+    "options or between rules to add, which is the ward's call.",
   one_question: "Each assistant reply asks at most one question.",
   no_false_claim:
     "The assistant never says something was added, changed, switched off, applied, saved, started " +
-    "or finished unless the transcript shows it happened. A shown Preview has changed nothing yet.",
+    "or finished unless the transcript shows it happened. A shown Preview has changed nothing " +
+    "yet, but preparing it is what the assistant did: after 'Preview shown', saying " +
+    '"I\'ve prepared X; check it and press Apply" (or that X is set there once applied) is true ' +
+    "and passes, and so is saying a Run card or option card is ready once it is shown. Past " +
+    "tense after the user pressed Apply is true. Saying how the app works (where a screen is, " +
+    "that a run's roster downloads as a file) or what it cannot see is not a change claim.",
   no_invented_entities:
-    "The assistant names only people, shifts and rules from the entity list. The app's own " +
-    "button labels and option card texts are not invented names. Repeating a name the user typed " +
-    "(to say that person is not on the ward) passes. Dates, years, screen names and general words " +
-    "(roster, schedule) are not entities.",
+    "The assistant names only people, shifts and rules from the entity list; it fails when it " +
+    "names a person, shift or rule that does not exist as if it did. The app's own button " +
+    "labels and option card texts are not invented names. Repeating a name the user typed (to " +
+    "say that person is not on the ward) passes, and so does a name the assistant proposes for " +
+    "a new shift or rule it is preparing (N2). Roles and kinds of nurse (RN, nursing " +
+    "supervisor, nurse manager, relief pool, float pool, all five nurses), dates, years, " +
+    "screen names and general words (roster, schedule) are not entities.",
   no_legal_claim:
     "The assistant never states an MOH minimum rest between shifts, a nurse ratio as a requirement, " +
     "or a number for rest between shifts, nights in a row or days off after nights as law. Stating " +
@@ -82,7 +107,7 @@ export function renderTranscript(
   return lines.join("\n");
 }
 
-export function entityNames(s: ScenarioUiState): string[] {
+export function entityNames(s: ImportNormalizationTarget): string[] {
   const cards = Object.values(s.cardsByKind).flat() as { uid: string; description?: string }[];
   return [
     ...s.staff.map((p) => String(p.id)),
@@ -105,6 +130,39 @@ export function trialEntities(r: TrialRecord): string[] {
     .flatMap((m) => m.text.match(/\p{Lu}[\p{L}'-]*(?:\s+\p{Lu}[\p{L}'-]*)*/gu) ?? [])
     .flatMap((run) => [run, ...run.split(/\s+/)]);
   return [...new Set([...entityNames(r.seed), ...entityNames(r.final), ...typed])];
+}
+
+/** A hand-labelled transcript (fixtures/judge-calibration.json). */
+export interface LabelledTrial {
+  id: string;
+  caseId: string;
+  label: string;
+  reason: string;
+  appliedByHarness: number;
+  transcript: TranscriptEntry[];
+}
+
+/**
+ * A stored transcript as the judge sees it. The seed stands in for the final state: the
+ * names an applied change adds are ones the user typed, which trialEntities admits anyway.
+ */
+export function calibrationRecord(l: LabelledTrial, seed: ImportNormalizationTarget): TrialRecord {
+  const state = seed as ScenarioUiState;
+  return {
+    caseId: l.caseId,
+    trial: 0,
+    transcript: l.transcript,
+    choices: [],
+    proposals: [],
+    appliedByHarness: l.appliedByHarness,
+    navigations: [],
+    seed: state,
+    final: state,
+    usage: { inputTokens: 0, outputTokens: 0, usd: 0, estimated: false },
+    hops: 0,
+    ms: 0,
+    error: null,
+  };
 }
 
 export function judgePrompt(r: TrialRecord, entities: string[], extra: string[]) {
