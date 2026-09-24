@@ -237,6 +237,43 @@ describe("PeopleTable — inline edit (name→id + description preservation)", (
   });
 });
 
+describe("PeopleTable — temporary staff", () => {
+  it("adds a nurse marked Temporary and shows the badge", async () => {
+    await seed({ staff: [], staffGroups: [] });
+    render(<PeopleTable />);
+    fireEvent.click(screen.getByTestId("people-add"));
+    fireEvent.change(screen.getByTestId("people-name-input-__new__"), {
+      target: { value: "Float RN" },
+    });
+    fireEvent.click(screen.getByRole("switch", { name: /temporary/i }));
+    fireEvent.click(screen.getByTestId("people-save-__new__"));
+    expect(await staff()).toEqual([{ id: "Float RN", history: [], temporary: true }]);
+    expect(
+      within(screen.getByTestId(`people-row-${sk("Float RN")}`)).getByText("Temporary"),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps Temporary through a rename, and clears it in one undo step", async () => {
+    await seed({ staff: [{ id: "Float", history: [], temporary: true }], staffGroups: [] });
+    render(<PeopleTable />);
+    fireEvent.click(screen.getByTestId(`people-edit-${sk("Float")}`));
+    fireEvent.change(screen.getByTestId(`people-name-input-${sk("Float")}`), {
+      target: { value: "Float RN" },
+    });
+    fireEvent.click(screen.getByTestId(`people-save-${sk("Float")}`));
+    expect(await staff()).toEqual([{ id: "Float RN", history: [], temporary: true }]);
+
+    const before = await historyLength();
+    fireEvent.click(screen.getByTestId(`people-edit-${sk("Float RN")}`));
+    const toggle = screen.getByRole("switch", { name: /temporary/i });
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByTestId(`people-save-${sk("Float RN")}`));
+    expect(await staff()).toEqual([{ id: "Float RN", history: [] }]);
+    expect(await historyLength()).toBe(before + 1);
+  });
+});
+
 describe("PeopleTable — typed-id identity + reorder", () => {
   it('keeps numeric 1 and string "1" distinct; editing numeric leaves the string sibling', async () => {
     await seed({

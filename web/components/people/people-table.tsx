@@ -10,7 +10,8 @@
 // Interaction model (prototype-faithful):
 //   • read row: ordinal, avatar-initials + name, group chips, Edit/Duplicate/Delete;
 //   • INLINE-ROW edit (no separate form panel): a name input in the Nurse cell,
-//     group toggle chips in the Group cell, Save/Cancel in Actions;
+//     group toggle chips in the Group cell, a Temporary switch under the name,
+//     Save/Cancel in Actions;
 //   • the inline "name" maps to `UiPerson.id`; an existing `description` is PRESERVED
 //     verbatim through a name/group edit (never written from the table);
 //   • drag-reorder rows, gated off while searching OR editing (`!query && !editing`),
@@ -48,6 +49,7 @@ import { RenameCollisionError } from "@/lib/cascade";
 import { cn } from "@/lib/utils";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Surface, surfaceVariants } from "@/components/ui/surface";
 import {
@@ -79,7 +81,7 @@ import {
   type EditorGroup,
 } from "@/components/entity-editor/core";
 import { GroupsSection, type GroupsSectionConfig } from "@/components/entity-editor/groups-section";
-import { peopleDescriptor } from "./people-descriptor";
+import { peopleDescriptor, writeTemporary } from "./people-descriptor";
 import { UploadDialog } from "./upload-dialog";
 
 /**
@@ -601,6 +603,16 @@ function ReadRow({
           <span data-testid={`people-name-${itemKey}`} className="font-semibold">
             {String(item.id)}
           </span>
+          {item.temporary && (
+            <Badge
+              variant="neutral"
+              className="normal-case"
+              data-testid={`people-temporary-${itemKey}`}
+              title="Borrowed from another ward, float pool or agency"
+            >
+              Temporary
+            </Badge>
+          )}
         </div>
       </td>
       <td className="px-3 py-2.5">
@@ -713,6 +725,7 @@ function RowEditor({
       ? groups.filter((g) => g.members.some((m) => sameEntityId(m, item!.id))).map((g) => g.id)
       : [],
   );
+  const [temporary, setTemporary] = React.useState(mode === "edit" && item!.temporary === true);
 
   // Only a genuinely changed name authors a new candidate id; unchanged text preserves
   // the original TYPED id verbatim (numeric stays numeric; whitespace preserved).
@@ -740,11 +753,15 @@ function RowEditor({
       if (mode === "add") {
         // New nurse: name → id, no description authored here. history:[] via descriptor.
         commit((live) =>
-          writeItemGroups(
-            addItem(live, descriptor, { id: check.id }),
-            descriptor,
+          writeTemporary(
+            writeItemGroups(
+              addItem(live, descriptor, { id: check.id }),
+              descriptor,
+              check.id,
+              draftGroups,
+            ),
             check.id,
-            draftGroups,
+            temporary,
           ),
         );
         toast.success(`Nurse “${String(check.id)}” added.`);
@@ -757,7 +774,11 @@ function RowEditor({
           // PRESERVED (never written from the table), so an inline name/group edit
           // keeps it intact.
           const renamed = nameChanged ? renameItem(live, descriptor, item!.id, check.id) : live;
-          return writeItemGroups(renamed, descriptor, effectiveId, draftGroups);
+          return writeTemporary(
+            writeItemGroups(renamed, descriptor, effectiveId, draftGroups),
+            effectiveId,
+            temporary,
+          );
         });
         toast.success(`Nurse “${String(effectiveId)}” saved.`);
       }
@@ -805,6 +826,18 @@ function RowEditor({
             {check.message}
           </div>
         )}
+        <div className="mt-2 flex items-center gap-2">
+          <Switch
+            id={`people-temporary-input-${key}`}
+            aria-label="Temporary: borrowed from another ward, float pool or agency"
+            data-testid={`people-temporary-input-${key}`}
+            checked={temporary}
+            onCheckedChange={setTemporary}
+          />
+          <label htmlFor={`people-temporary-input-${key}`} className="text-meta text-ink2">
+            Temporary (borrowed or agency)
+          </label>
+        </div>
       </td>
       <td className="px-3 py-3 align-top">
         {groups.length === 0 ? (
