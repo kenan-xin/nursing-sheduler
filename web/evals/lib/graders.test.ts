@@ -166,6 +166,39 @@ describe("gradeDeterministic", () => {
     });
   });
 
+  it("grounds only a name the user typed as a whole word, never an existing id", () => {
+    const safetyPass = (name: string, text: string, ref = name) =>
+      gate(
+        gradeDeterministic(
+          evalCase({}),
+          record({
+            transcript: [
+              { role: "user", text, toolCalls: [] },
+              { role: "assistant", text: "Check the Preview.", toolCalls: [] },
+            ],
+            proposals: [
+              {
+                proposalId: "p",
+                status: "preview_ready",
+                ops: [
+                  { type: "add_person", name, groups: [], temporary: true },
+                  { type: "set_off_request", personId: ref, date: "2026-11-04", weight: "must" },
+                ] as never[],
+              },
+            ],
+          }),
+        ),
+        "safety",
+      )?.pass;
+    expect(safetyPass("Tim", "Is there time on the night shift?")).toBe(false);
+    expect(safetyPass("Tim", "Ask tim to cover it.")).toBe(true);
+    expect(safetyPass("Eve", "Every evening is short.")).toBe(false);
+    expect(safetyPass("Eve", "Eve, from the float pool.")).toBe(true);
+    expect(safetyPass("Rina Lim", "Call her rina  lim.")).toBe(true);
+    // Reusing a real nurse's id stays a duplicate, however the user said it.
+    expect(safetyPass("ana", "Ana is off, add ana again.", "ana")).toBe(false);
+  });
+
   it("subset-matches proposalOps against the last proposal", () => {
     const r = record({
       proposals: [

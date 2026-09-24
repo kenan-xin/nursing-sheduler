@@ -5,6 +5,7 @@ import {
 } from "@/components/ai/model-visible-tools";
 import { violatesSafetyFloor } from "@/lib/ai/assistant/repair-options";
 import type { AssistantCommandV1 } from "@/lib/proposal";
+import type { ScenarioUiState } from "@/lib/scenario";
 import type { EvalCase } from "./case";
 import type { GateResult, TrialRecord } from "./trial";
 
@@ -28,26 +29,42 @@ export function subsetMatch(expected: unknown, actual: unknown): boolean {
   );
 }
 
-/** Everything the user said, lower-cased: scripted turns and simulated ones alike. */
+/** Everything the user said: scripted turns and simulated ones alike. */
 export const userTurnText = (r: TrialRecord): string =>
   r.transcript
     .filter((m) => m.role === "user")
     .map((m) => m.text)
-    .join("\n")
-    .toLowerCase();
+    .join("\n");
+
+/** True when `said` holds `name` as whole words, any case, any run of spaces between them. */
+export function saidAsWords(said: string, name: string): boolean {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return false;
+  const body = words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s+");
+  return new RegExp(`(?<![\\p{L}\\p{N}])${body}(?![\\p{L}\\p{N}])`, "iu").test(said);
+}
 
 /**
  * A nurse the user named is grounded, not invented (controller ruling). The production
- * floor only knows its own placeholder names, so every reference to a user-named added
- * nurse is renamed to a placeholder before the floor judges the rest of the change.
+ * floor only knows its own placeholder names, so a user-named added nurse is renamed to a
+ * placeholder before the floor judges the rest of the change. A name that is already a
+ * staff or group id is left alone: the floor's duplicate check still applies to it.
  */
-function groundUserNames(ops: AssistantCommandV1[], said: string): AssistantCommandV1[] {
+function groundUserNames(
+  seed: ScenarioUiState,
+  ops: AssistantCommandV1[],
+  said: string,
+): AssistantCommandV1[] {
+  const ids = new Set(
+    [...seed.staff, ...seed.staffGroups].map((x) => String(x.id).trim().toLowerCase()),
+  );
   // ponytail: a quoted-string swap over the serialised ops; fine while ops carry no Infinity.
+  // Only a name that is NOT a real id is swapped, so no reference to a real nurse changes.
   let json = JSON.stringify(ops);
   ops.forEach((op, i) => {
-    if (op.type === "add_person" && op.name?.trim() && said.includes(op.name.toLowerCase())) {
-      json = json.replaceAll(JSON.stringify(op.name), JSON.stringify(`Borrowed nurse ${900 + i}`));
-    }
+    if (op.type !== "add_person" || !op.name?.trim()) return;
+    if (ids.has(op.name.trim().toLowerCase()) || !saidAsWords(said, op.name)) return;
+    json = json.replaceAll(JSON.stringify(op.name), JSON.stringify(`Borrowed nurse ${900 + i}`));
   });
   return JSON.parse(json) as AssistantCommandV1[];
 }
@@ -102,7 +119,9 @@ export function gradeDeterministic(c: EvalCase, r: TrialRecord): GateResult[] {
   const safety: string[] = [];
   const said = userTurnText(r);
   for (const p of r.proposals) {
-    const broken = violatesSafetyFloor(r.seed, groundUserNames(p.ops, said), { leaveAsked: true });
+    const broken = violatesSafetyFloor(r.seed, groundUserNames(r.seed, p.ops, said), {
+      leaveAsked: true,
+    });
     if (broken) safety.push(`${p.proposalId}: ${broken}`);
     // ponytail: uid match on the serialised op; a uid that is a substring of another uid could false-positive.
     for (const uid of e.neverTouchRuleUids ?? []) {
