@@ -108,6 +108,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   cleanup();
   clearTestAuthority();
 });
@@ -244,6 +245,69 @@ describe("Apply", () => {
 
     expect(await screen.findByTestId("proposal-apply")).toBeDisabled();
     expect(await screen.findByTestId("proposal-blocks")).toHaveTextContent("shift-type-editor");
+  });
+
+  // nursing-sheduler-3t8. Apply's trailing refresh used to reread the proposal by the
+  // id it closed over, after the active proposal had been cleared -- so the applied
+  // proposal came BACK as a Preview ("already applied" + "out of date") whose Revise
+  // and Cancel had no active id left to act on and did nothing.
+  it("does not bring an applied proposal back as a Preview after Apply settles", async () => {
+    const user = userEvent.setup();
+    await showProposal(SHRINK);
+    render(<HostSurface />);
+    await screen.findByTestId("assistant-proposal");
+
+    // Real IndexedDB is slower than the fake one: make the proposal reread lag, so the
+    // refresh Apply starts before the cleared state renders also finishes after it.
+    const read = assistantProposalCommands.read.bind(assistantProposalCommands);
+    vi.spyOn(assistantProposalCommands, "read").mockImplementation(async (id) => {
+      const row = await read(id);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      return row;
+    });
+
+    await user.click(await screen.findByTestId("proposal-apply"));
+    await screen.findByTestId("assistant-receipt");
+
+    await expect(
+      screen.findByTestId("assistant-proposal", undefined, { timeout: 500 }),
+    ).rejects.toThrow();
+    expect(screen.queryByTestId("proposal-revise")).toBeNull();
+    expect(screen.queryByTestId("proposal-cancel")).toBeNull();
+  });
+
+  it("shows no Preview for a proposal settled elsewhere while still active", async () => {
+    const proposal = await showProposal(SHRINK);
+    await assistantProposalCommands.apply({
+      proposalId: proposal.proposalId,
+      receiptId: crypto.randomUUID(),
+    });
+    render(<HostSurface />);
+
+    await screen.findByTestId("assistant-receipt");
+    await expect(
+      screen.findByTestId("assistant-proposal", undefined, { timeout: 500 }),
+    ).rejects.toThrow();
+  });
+
+  it("Revise and Cancel still dismiss a stale, unapplied Preview", async () => {
+    const user = userEvent.setup();
+    for (const button of ["proposal-revise", "proposal-cancel"]) {
+      await showProposal(SHRINK);
+      const { unmount } = render(<HostSurface />);
+      await screen.findByTestId("assistant-proposal");
+      await scenarioCommands.mutate({ meta: { apiVersion: "alpha", description: button } });
+      await waitFor(async () =>
+        expect(await screen.findByTestId("assistant-proposal")).toHaveAttribute(
+          "data-status",
+          "stale",
+        ),
+      );
+
+      await user.click(await screen.findByTestId(button));
+      await waitFor(() => expect(screen.queryByTestId("assistant-proposal")).toBeNull());
+      unmount();
+    }
   });
 
   it("Cancel settles the proposal so it can never be applied", async () => {
