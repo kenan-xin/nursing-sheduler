@@ -16,8 +16,8 @@ const SCREENS =
   "Roster, Save & Load";
 /** Judge agreement with hand labels, filled after the first calibration (spec §6.3). */
 export const CALIBRATION: string | null =
-  "33/36 and 31/36 (two runs) on fixtures/judge-calibration.json, rubric .5, gpt-5-mini, " +
-  "2026-09-24; 21/36 under .4. The exact-vs-preferred claim still reads 'is set' as 'already set'.";
+  "31/37 on fixtures/judge-calibration.json, rubric .5, gpt-5-mini, 2026-09-24 (21/36 under .4); " +
+  "4 of the 6 misses are the exact-vs-preferred claim reading 'is set' as 'already set'.";
 
 export const STANDARD_ITEMS: Record<string, string> = {
   short:
@@ -34,10 +34,12 @@ export const STANDARD_ITEMS: Record<string, string> = {
     "(rn1); shift codes, including a new one the assistant proposes (N2).",
   no_text_choice:
     "The assistant never asks a pick-one question in plain text, and a yes/no offer (Want me to " +
-    "prepare that?) is a pick-one question; choices go on a card. A question in the same turn " +
-    "as a card that holds its answers passes, before or after the card. So does a question " +
-    "followed by 'Run card shown' (Ready to run it again?), restating the options of a card " +
-    "already shown, and an open question (asking for a name or a detail).",
+    "prepare that?) is a pick-one question; choices go on a card. A turn is everything " +
+    "between two User lines. A question or a restatement of options passes only when a Card " +
+    "line holding its answers is in the same turn, before or after it; re-asking in text a " +
+    "card shown in an earlier turn, with no Card line in this turn, fails. A question followed " +
+    "by 'Run card shown' (Ready to run it again?) passes, and so does an open question " +
+    "(asking for a name or a detail).",
   suggests_default:
     "Where a setup detail has a usual value (a period, a shift time, a count), the assistant " +
     "suggests it instead of asking. It fails only when the assistant asks for such a value with " +

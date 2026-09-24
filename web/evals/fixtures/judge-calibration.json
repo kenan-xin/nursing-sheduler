@@ -840,8 +840,8 @@
     "id": "xiao:repair-rule-too-strict:0",
     "model": "xiaomi/mimo-v2.6-pro",
     "caseId": "repair-rule-too-strict",
-    "label": "pass",
-    "reason": "Asks the user to confirm the higher cap is within contract and legal limits before preparing it.",
+    "label": "fail",
+    "reason": "Only asks whether the higher cap is within contract and legal limits; never names who must agree (the nurses or nurse manager).",
     "storedJudgePass": false,
     "appliedByHarness": 1,
     "transcript": [
@@ -1001,8 +1001,8 @@
     "id": "deep:repair-rule-too-strict:1",
     "model": "deepseek/deepseek-v4.1-flash",
     "caseId": "repair-rule-too-strict",
-    "label": "pass",
-    "reason": "Prepared wording; says the app will ask the user to confirm the contract and legal limits.",
+    "label": "fail",
+    "reason": "Leaves agreement to the Apply-time legality check; never names who must agree to the higher cap.",
     "storedJudgePass": true,
     "appliedByHarness": 1,
     "transcript": [
@@ -1457,8 +1457,8 @@
     "id": "glm:flow-c-diagnose:0",
     "model": "z-ai/glm-5.3-flash",
     "caseId": "flow-c-diagnose",
-    "label": "pass",
-    "reason": "Names the morning shift needing 4 of 3 as the cause, options on a card.",
+    "label": "fail",
+    "reason": "Second turn re-offers the two fixes in plain text with no card in that turn.",
     "storedJudgePass": true,
     "appliedByHarness": 0,
     "transcript": [
@@ -1526,6 +1526,52 @@
       {
         "role": "assistant",
         "text": "The Morning shift is set to need 4 nurses every single day, but the ward only has 3 nurses — so on each day of Oct 6–12 there's no way to fill it, even with everyone working. No roster can exist until that number comes down or a fourth nurse joins for the week. Still happy to set up either fix: borrow a nurse for the week, or run Morning with 3 as the manager's call.",
+        "toolCalls": []
+      }
+    ]
+  },
+  {
+    "id": "xiao:sg-same-day-off:2",
+    "model": "xiaomi/mimo-v2.6-pro",
+    "caseId": "sg-same-day-off",
+    "label": "pass",
+    "reason": "Card for who gets the day off, then restates it in text in the same turn; manager decides.",
+    "storedJudgePass": false,
+    "appliedByHarness": 0,
+    "transcript": [
+      {
+        "role": "user",
+        "text": "Ana and Ben both want Saturday the 7th off.",
+        "toolCalls": []
+      },
+      {
+        "role": "assistant",
+        "text": "Sat 7 Nov needs all three of you (2 on days, 1 on nights), so only one of Ana and Ben can be off that day. Let's see who gets it.",
+        "toolCalls": [
+          {
+            "toolCallId": "call_f2c9e5ab050645849833f00e",
+            "name": "offer_choices",
+            "args": {
+              "question": "Both Ana and Ben want Sat 7 Nov off, but only one can have it. Who should get the day off?",
+              "options": [
+                {
+                  "label": "Ana"
+                },
+                {
+                  "label": "Ben"
+                },
+                {
+                  "label": "They'll sort it out"
+                }
+              ]
+            },
+            "result": null
+          }
+        ]
+      },
+      {
+        "role": "assistant",
+        "text": "Waiting on your pick — who gets Sat 7 Nov off, Ana or Ben?",
         "toolCalls": []
       }
     ]

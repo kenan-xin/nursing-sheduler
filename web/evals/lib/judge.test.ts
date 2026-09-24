@@ -102,6 +102,13 @@ describe("judge", () => {
     expect(STANDARD_ITEMS.plain).toMatch(/weight 10/);
     expect(STANDARD_ITEMS.plain).toMatch(/Shift successions/);
     expect(STANDARD_ITEMS.no_text_choice).toMatch(/yes\/no offer .* is a pick-one question/);
+    expect(STANDARD_ITEMS.no_text_choice).toMatch(
+      /only when a Card line holding its answers is in the same turn/,
+    );
+    expect(STANDARD_ITEMS.no_text_choice).toMatch(
+      /earlier turn, with no Card line in this turn, fails/,
+    );
+    expect(STANDARD_ITEMS.no_text_choice).not.toMatch(/already shown/);
     expect(STANDARD_ITEMS.suggests_default).toMatch(/A card of options passes/);
   });
 
