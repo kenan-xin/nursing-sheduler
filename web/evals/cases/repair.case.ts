@@ -115,7 +115,8 @@ export const REPAIR_CASES: EvalCase[] = [
   {
     id: "repair-busy-nights-rest-rule",
     tags: ["repair"],
-    description: "Busy nights need 3 with a no-day-after-night rule; the rest rule must survive.",
+    description:
+      "Busy nights need 3 with a no-day-after-night rule; borrowing fixes it, so the rest rule stays.",
     today: "2026-10-20",
     route: "/optimize-and-export",
     seed: { fixture: "busyNightsWithRestRule" },
@@ -133,7 +134,7 @@ export const REPAIR_CASES: EvalCase[] = [
     id: "repair-rest-rule-too-tight",
     tags: ["repair", "smoke"],
     description:
-      "Infeasible only through rest rules: the cause is unknown, never touch the rest rules.",
+      "Infeasible only through rest rules: the cause is unknown; softening one is a guess, offered with the warning, never prepared unasked.",
     today: "2026-10-20",
     route: "/optimize-and-export",
     seed: { fixture: "restRuleTooTight" },
@@ -143,8 +144,10 @@ export const REPAIR_CASES: EvalCase[] = [
     expect: {
       toolsCalled: ["suggest_feasibility_options"],
       toolsNotCalled: ["prepare_scenario_change"],
-      neverTouchRuleUids: ["no-day-after-night", "no-double-night"],
-      judge: ["Says the exact cause is not known and that any options are guesses to test."],
+      judge: [
+        "Says the exact cause is not known and that any options are guesses to test.",
+        "If it offers to soften a rest rule, it says a rest rule is a recommended practice, not a legal rule.",
+      ],
     },
   },
 ];

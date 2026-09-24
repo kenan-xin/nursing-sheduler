@@ -33,6 +33,8 @@ export interface Expect {
   finalState?: (final: ScenarioUiState) => string | null;
   navigatedTo?: string;
   lastReplyNonEmpty?: boolean;
+  /** Some assistant reply says the rest rule is a recommended practice, not a legal rule. */
+  restWarning?: boolean;
   judge?: string[];
 }
 

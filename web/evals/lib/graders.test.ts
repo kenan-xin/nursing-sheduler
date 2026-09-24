@@ -290,6 +290,40 @@ describe("gradeDeterministic", () => {
     ).toBe(true);
   });
 
+  it("requires the rest-practice warning when the case asks for it", () => {
+    const said = (text: string) =>
+      record({
+        transcript: [
+          { role: "user", text: "Turn off the rest rule.", toolCalls: [] },
+          { role: "assistant", text, toolCalls: [] },
+        ],
+      });
+    const c = evalCase({ restWarning: true });
+    expect(gate(gradeDeterministic(c, said("Done, check the Preview.")), "guidance")?.pass).toBe(
+      false,
+    );
+    expect(
+      gate(
+        gradeDeterministic(
+          c,
+          said("Preview ready. This is a recommended rest practice, not a legal rule."),
+        ),
+        "guidance",
+      )?.pass,
+    ).toBe(true);
+    expect(gate(gradeDeterministic(evalCase({}), said("ok")), "guidance")?.pass).toBe(true);
+  });
+
+  it("fails any MOH rest minimum stated as a number, in every case", () => {
+    const said = (text: string) =>
+      record({ transcript: [{ role: "assistant", text, toolCalls: [] }] });
+    const g = (text: string) => gate(gradeDeterministic(evalCase({}), said(text)), "guidance");
+    expect(g("MOH requires 11 hours of rest between shifts.")?.pass).toBe(false);
+    expect(g("The Ministry of Health minimum is 8 hours between shifts.")?.pass).toBe(false);
+    expect(g("MOH sets no minimum rest between shifts; the ward decides.")?.pass).toBe(true);
+    expect(g("The law allows at most 12 working hours a day.")?.pass).toBe(true);
+  });
+
   it("runs proposalCheck on the last proposal", () => {
     const r = record({
       proposals: [

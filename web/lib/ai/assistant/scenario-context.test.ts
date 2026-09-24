@@ -8,6 +8,7 @@ import {
   stringifyScenario,
   summarizeScenario,
 } from "./scenario-context";
+import { REST_PRACTICE_WARNING } from "./playbook";
 import { SENTINEL_KEY } from "./test-support";
 
 function wardScenario(): ScenarioUiState {
@@ -128,6 +129,23 @@ describe("the attached turn context", () => {
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(
       /run finished and failed.*get_optimize_result.*suggest_feasibility_options.*offer_choices/,
     );
+  });
+
+  it("tells law from guidance: rest rules are guidance it prepares with a warning, never refuses", () => {
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toContain(REST_PRACTICE_WARNING);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/recommended practice, not law/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/MOH sets no minimum rest/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/turn it off rather than delete it/);
+    // The Employment Act, stated exactly.
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/1 rest day a week/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/12 working hours a day, including overtime/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/44 hours a week averaged over 3 weeks/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/72 hours of overtime a month/);
+    // Working hours, never the clock span.
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/minus its unpaid break/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/08:00 to 20:30 .*10\.5 hours/);
+    // Never a numeric MOH rest minimum.
+    expect(ASSISTANT_AUTHORITY_STATEMENT).not.toMatch(/MOH[^.]*\d+\s*hours/);
   });
 
   it("tells the model to read the roster and to swap only through the card", () => {

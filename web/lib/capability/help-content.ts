@@ -8,7 +8,9 @@
 //
 // THE GROUNDING RULE, restated where it is easiest to break: every summary describes
 // what the CURRENT app does. No planned behaviour, no solver guarantee, no legal or
-// clinical claim, no URL. Where the app cannot express something, the entry says so
+// clinical claim, no URL. The one fixed exception is the law-versus-guidance line on
+// rest (user decision, 2026-09-24): what the Employment Act sets, and that rest rules
+// are recommended practice with no MOH minimum. Where the app cannot express something, the entry says so
 // rather than pointing at the nearest similar thing -- "reject near-miss rules" from
 // the guided-setup flow applies to help text just as much as to proposals.
 //
@@ -82,7 +84,9 @@ export const CAPABILITY_ENTRIES = [
     title: "Shifts and shift groups",
     nurseFacingSummary:
       "Define each kind of shift the ward runs — its code, name, clock times and rest break — " +
-      "and group related shifts together, such as all the night shifts. The assistant can also " +
+      "and group related shifts together, such as all the night shifts. Working hours are the " +
+      "clock time minus the unpaid break, and that is what the Employment Act's 12-hour daily " +
+      "limit counts: 08:00 to 20:30 with a 2-hour break is 10.5 hours. The assistant can also " +
       "prepare new shifts and shift groups for you to review and apply.",
     concepts: ["shift", "shift type", "shift group", "night shift", "clock times", "duration"],
     modes: BOTH_MODES,
@@ -143,7 +147,10 @@ export const CAPABILITY_ENTRIES = [
     nurseFacingSummary:
       "Which shift may follow which, for the same person on consecutive days — for example " +
       "forbidding a day shift straight after a night shift. It controls the ORDER of shifts, " +
-      "not how many of them somebody works.",
+      "not how many of them somebody works. Rest rules like this are recommended practice, not " +
+      "law: MOH sets no minimum rest between shifts, and the Employment Act sets 1 rest day a " +
+      "week, at most 12 working hours a day and 72 hours of overtime a month, and 44 hours a " +
+      "week averaged over 3 weeks for shift workers. You may soften a rest rule or turn it off.",
     concepts: ["succession", "shift sequence", "night to day", "consecutive shifts", "rest"],
     modes: ADVANCED_ONLY,
     featureGates: [],
@@ -319,7 +326,8 @@ export const CAPABILITY_ENTRIES = [
       "schedule cannot be filled it says which day and shift is short and why, and suggests up to " +
       "three realistic fixes — such as borrowing a nurse from another ward, asking a nurse on leave " +
       "if she can cover, or allowing one more night this period. Anything that needs someone to " +
-      "agree is asked before you can apply it. " +
+      "agree is asked before you can apply it. If you ask it to turn off or soften a rest rule, " +
+      "it prepares that with a short note that rest rules are recommended practice, not law. " +
       "It cannot change the roster on its own, it cannot yet create pairing or supervision " +
       "rules, and it cannot edit or delete existing shifts. It is not a source of employment, " +
       "legal or clinical-safety authority.",

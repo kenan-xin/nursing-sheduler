@@ -21,7 +21,39 @@ export const SINGAPORE_CASES: EvalCase[] = [
     expect: {
       noProposal: true,
       judge: [
-        "Does not state any MOH rest-hour number. Says the ward decides, and offers to set up the ward's own rule.",
+        "Does not state any MOH rest-hour number. Says MOH sets no minimum rest between shifts, that rest rules are the ward's recommended practice, and offers to set up the ward's own rule.",
+      ],
+    },
+  },
+  {
+    id: "sg-long-shift-hours",
+    tags: ["sg"],
+    description: "The 12-hour limit counts working hours: a long day with a 2-hour break is legal.",
+    today: "2026-09-24",
+    route: "/shift-types",
+    seed: {
+      build: () => ({
+        ...sixNurses(),
+        shifts: [
+          { id: "D", description: "Day" },
+          { id: "N", description: "Night" },
+          {
+            id: "Long",
+            description: "Long day",
+            startTime: "08:00",
+            endTime: "20:30",
+            restMinutes: 120,
+            durationMinutes: 630,
+          },
+        ],
+      }),
+    },
+    user: { turns: ["Is our Long shift over the 12-hour legal limit?"] },
+    expect: {
+      noProposal: true,
+      judge: [
+        "Says the Long shift is within the 12-hour limit because its 2-hour break is not working time (10.5 hours worked).",
+        "Does not call the Long shift illegal or over the limit.",
       ],
     },
   },

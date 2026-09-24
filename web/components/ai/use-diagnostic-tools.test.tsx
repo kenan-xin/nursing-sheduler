@@ -58,7 +58,8 @@ afterEach(() => {
 });
 
 describe("test_feasibility_candidates enforces the safety floor", () => {
-  it("tests nothing when a candidate turns off a rest rule, and says which floor it breaks", async () => {
+  it("tests nothing when a candidate deletes a rest rule, and says which floor it breaks", async () => {
+    // Rest rules are guidance: softening or turning one off may be tested; deleting may not.
     const answer = await handler()(
       {
         compare: false,
@@ -66,12 +67,7 @@ describe("test_feasibility_candidates enforces the safety floor", () => {
           {
             summary: "Maybe the rest rule is too tight.",
             operations: [
-              {
-                type: "set_rule_enabled",
-                ruleKind: "successions",
-                ruleId: "no-double-night",
-                enabled: false,
-              },
+              { type: "remove_rule", ruleKind: "successions", ruleId: "no-double-night" },
             ],
           },
         ],
