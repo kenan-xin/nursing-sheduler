@@ -167,7 +167,7 @@ describe("the launcher's attention states", () => {
     render(<AssistantLauncher />);
     act(() => {
       assistantActions.showProposal("proposal-1", epoch());
-      assistantActions.showChoices(CHOICES);
+      assistantActions.showChoices(CHOICES, 1);
     });
     expect(badge()).toHaveTextContent("2");
     expect(launcher()).toHaveAccessibleName("Show assistant, 2 items need you");
@@ -206,7 +206,7 @@ describe("the launcher's attention states", () => {
     render(<AssistantLauncher />);
     act(() => {
       assistantActions.beginTurn("turn-1", epoch());
-      assistantActions.showChoices(CHOICES);
+      assistantActions.showChoices(CHOICES, 1);
     });
 
     expect(badge()).toHaveTextContent("1");
@@ -219,7 +219,7 @@ describe("the launcher's attention states", () => {
     act(() => {
       assistantActions.openPanel();
       assistantActions.beginTurn("turn-1", epoch());
-      assistantActions.showChoices(CHOICES);
+      assistantActions.showChoices(CHOICES, 1);
     });
 
     expect(badge()).toBeNull();
@@ -245,7 +245,7 @@ describe("closing the dock does not stop the assistant", () => {
     const conversation = await screen.findByTestId("assistant-live-conversation");
 
     // Send through the shipped path: an option card click is a composer send.
-    act(() => assistantActions.showChoices(CHOICES));
+    act(() => assistantActions.showChoices(CHOICES, 1));
     await user.click(await screen.findByRole("button", { name: /Ana Lim/ }));
     await waitFor(() => expect(useAssistantStore.getState().streaming).toBe(true));
 
@@ -271,7 +271,7 @@ describe("closing the dock does not stop the assistant", () => {
     renderShell();
     await user.click(launcher());
     await screen.findByTestId("assistant-live-conversation");
-    act(() => assistantActions.showChoices(CHOICES));
+    act(() => assistantActions.showChoices(CHOICES, 1));
 
     await user.click(launcher());
     expect(useAssistantStore.getState().activeChoices).not.toBeNull();

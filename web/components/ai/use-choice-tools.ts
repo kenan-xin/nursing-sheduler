@@ -7,6 +7,7 @@
 import { z } from "zod";
 import { useModelVisibleTool } from "./register-model-visible-tool";
 import { assistantActions } from "@/lib/ai/assistant/store";
+import { SUPERSEDED } from "./turn-authority";
 
 export const choiceParameters = z.object({
   question: z.string().describe("The question, short and in the nurse's words."),
@@ -42,11 +43,13 @@ export function useChoiceTools(agentId: string, turnEpoch: number): void {
         "message. Keep the question in this tool rather than repeating it at length in text. " +
         "It changes nothing in the schedule.",
       parameters: choiceParameters,
-      handler: async (offer) => {
-        assistantActions.showChoices(offer);
+      handler: async (offer, { token }) => {
+        // Narrowing only; the wrapper already refused a null token.
+        if (token === null) return SUPERSEDED;
+        assistantActions.showChoices(offer, token.turnEpoch);
         return (
           "The user now sees the options. Their answer will come as their next message; " +
-          "do not answer for them."
+          "do not answer for them. End your turn now without repeating the question."
         );
       },
     },
