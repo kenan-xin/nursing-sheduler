@@ -282,6 +282,62 @@ describe("findStaffingShortfalls", () => {
       const findings = findStaffingShortfalls(rnWard({ staffGroups: [{ id: "RN", members: [] }] }));
       expect(findings.filter((f) => f.mixPeople === "RN")).toHaveLength(7);
     });
+
+    it("scopes a dated card's skill-mix entries to its own dates", () => {
+      const dated = rnWard({
+        cardsByKind: cards({
+          requirements: [
+            requirement("day", "D", 1),
+            requirement("night", "N", 2, {
+              skillMix: [{ people: "RN", minNumPeople: 2 }],
+              date: ["04"],
+            }),
+          ],
+        }),
+        // rn2 away on the 2nd is outside the card's date scope, so it raises nothing there.
+        reqData: [leave("rn2", "04"), leave("rn2", "02")],
+      });
+      const findings = findStaffingShortfalls(dated);
+      expect(findings.map((f) => f.dateId)).toEqual(["04"]);
+      expect(findings[0].mixPeople).toBe("RN");
+    });
+
+    it("tracks two skill-mix entries on one card independently", () => {
+      // RN >= 2 and Senior >= 1 on a 3-person night. Only the Senior on leave, so only
+      // the Senior entry is short; the RN entry and the card's own head count are fine.
+      const state = ward({
+        staff: people("rn1", "rn2", "sen1", "other1", "other2"),
+        staffGroups: [
+          { id: "RN", members: ["rn1", "rn2"] },
+          { id: "Senior", members: ["sen1"] },
+        ],
+        reqData: [leave("sen1", "04")],
+        cardsByKind: cards({
+          requirements: [
+            requirement("day", "D", 1),
+            requirement("night", "N", 3, {
+              skillMix: [
+                { people: "RN", minNumPeople: 2 },
+                { people: "Senior", minNumPeople: 1 },
+              ],
+            }),
+          ],
+        }),
+      });
+      const findings = findStaffingShortfalls(state);
+      expect(findings).toEqual([
+        expect.objectContaining({
+          kind: "requirement_short",
+          dateId: "04",
+          ruleIds: ["night"],
+          required: 1,
+          available: 0,
+          skillMix: true,
+          mixPeople: "Senior",
+          away: [{ person: "sen1", reason: "leave" }],
+        }),
+      ]);
+    });
   });
 
   it("ignores disabled requirements and ones with coefficients", () => {

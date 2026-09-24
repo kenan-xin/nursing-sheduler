@@ -279,6 +279,10 @@ export function findStaffingShortfalls(state: ScenarioUiState): StaffingFinding[
             .map(([person, reason]) => ({ person, reason })),
           capRuleIds: [],
           skillMix: chosen.some((eq) => eq.restricts || eq.mix !== null) || banRules.size > 0,
+          // A same-card mix equation always loses disjoint()'s pick to its own head
+          // equation (same shiftTypes, required >= minNumPeople), so this only ever
+          // names a mix entry from a DIFFERENT card. It is not exhaustive: a same-card
+          // mix shortfall still surfaces, just on the per-equation requirement_short.
           mixPeople: chosen.find((eq) => eq.mix)?.mix ?? null,
         });
       }
@@ -308,6 +312,10 @@ export function findStaffingShortfalls(state: ScenarioUiState): StaffingFinding[
           outer.restricts ||
           outer.mix !== null ||
           inner.some((eq) => eq.restricts || eq.mix !== null),
+        // Same shadowing as day_short above: a mix equation whose own head is the
+        // outer equation here can never appear as a separate inner candidate (its
+        // shifts equal the outer's, so nothing else stays disjoint from it). So this
+        // only ever names a mix entry from a different card than outer.
         mixPeople: inner.find((eq) => eq.mix)?.mix ?? null,
       });
     }
