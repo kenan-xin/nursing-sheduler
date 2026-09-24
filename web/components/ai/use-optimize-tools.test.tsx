@@ -106,6 +106,8 @@ describe("request_optimize_run", () => {
   it("shows a card stamped with the turn and starts nothing", async () => {
     const answer = await tool("request_optimize_run").handler({}, {});
     expect(answer).toMatch(/Nothing has started/);
+    // dt9: "I've set up the run card" read as a claim of work done.
+    expect(answer).toMatch(/never that you set it up/);
     expect(useAssistantStore.getState().activeRunRequest).toEqual({ turnEpoch: TURN });
     expect(useRunRequestStore.getState().pending).toBeNull();
   });

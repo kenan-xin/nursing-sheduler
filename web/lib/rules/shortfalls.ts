@@ -136,7 +136,8 @@ export function ruleClashMessage(state: ScenarioUiState, f: StaffingFinding): st
     `No roster could meet ${name(short)} on ${f.shiftTypes.join(", ")}: ` +
     `${banning.map(name).join(" and ")} lets only its own people work that shift, so nobody ` +
     "it needs may work it. A skill mix (at least so many from a group, others allowed too) " +
-    "or a separate shift for each group would work instead."
+    "or a separate shift for each group would work instead. Ask which they want before " +
+    "changing either rule."
   );
 }
 

@@ -288,6 +288,9 @@ export async function runTrial(input: RunTrialInput): Promise<TrialRecord> {
 
   try {
     globalThis.fetch = infoStub(realFetch);
+    // Only Date is faked, and it keeps ticking: a bare setSystemTime freezes Date.now(),
+    // and every bounded wait that reads it (open_app_screen's anchor poll) never ends.
+    vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
     vi.setSystemTime(new Date(`${evalCase.today}T09:00:00+08:00`));
     assistantActions.resetForTest();
     resetRuntimeInstanceForTest();

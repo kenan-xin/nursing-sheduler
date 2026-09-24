@@ -149,6 +149,24 @@ describe("runTrial", () => {
     expect(r.navigations.length).toBeGreaterThan(0);
   });
 
+  it("finishes a screen the harness never mounts: the pinned day still ticks, so waits end", async () => {
+    // A frozen Date.now() kept the anchor poll of open_app_screen spinning until the
+    // trial timed out whenever the model opened another screen.
+    const r = await runTrial(
+      input(
+        { ...base, user: { turns: ["Where are the shifts?"] } },
+        {
+          toolName: "open_app_screen",
+          args: JSON.stringify({ capabilityId: "shift-types" }),
+          text: "Here.",
+        },
+      ),
+    );
+    expect(r.error).toBeNull();
+    expect(r.navigations).toContain("/shift-types");
+    expect(r.transcript.at(-1)).toMatchObject({ role: "assistant", text: "Here." });
+  }, 15_000);
+
   it("records a refused send as a harness error, not a silent empty turn", async () => {
     const r = await runTrial(input({ ...base, user: { turns: ["   "] } }, { text: "unused" }));
     expect(r.error).toBe("refused:empty_message");

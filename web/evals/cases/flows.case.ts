@@ -151,7 +151,7 @@ export const FLOW_CASES: EvalCase[] = [
     expect: {
       proposalOps: [{ type: "add_staffing_requirement", requiredNumPeople: 2 }],
       judge: [
-        "Says the number is exact, and that the preferred 3 is set on the Staffing requirements screen.",
+        "Says 2 is the firm minimum (not a target of 3), and that the preferred 3 is set on the Staffing requirements screen, whatever it calls that screen; telling the user they can set it there passes.",
       ],
     },
   },
