@@ -576,6 +576,12 @@ html.dark[data-accent="plum"] {
     transform: none;
   }
 }
+/* A late reveal with no JS (the pre-hydration stall surface): hold `invisible`, then show. */
+@keyframes ns-reveal {
+  to {
+    visibility: visible;
+  }
+}
 @keyframes ns-spin {
   to {
     transform: rotate(360deg);

@@ -51,3 +51,27 @@ it("reports a stalled restore, then completes once the lock clears", async () =>
   await settled;
   expect(hot.getState().hydrationStatus).toBe("ready");
 });
+
+// u2o hypothesis (d). Dexie's default `versionchange` handler closes THIS app's own
+// connections for a peer's upgrade, but a connection that ignores the event (an old
+// build frozen in the background, a foreign page script) leaves the open `blocked`.
+// That open is inside bring-up, after the stall timer is armed, so it must surface.
+it("reports a stalled restore while an older connection blocks the upgrade", async () => {
+  const databaseName = freshAuthorityDbName();
+  const old = await new Promise<IDBDatabase>((resolve, reject) => {
+    const request = indexedDB.open(databaseName, 10); // Dexie schema v1 = IDB v10
+    request.onupgradeneeded = () => request.result.createObjectStore("keyval", { keyPath: "key" });
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+  const tab = await installTestAuthority({ databaseName, install: false });
+  setScenarioAuthority(tab.authority);
+
+  const hot = useHotStore;
+  const settled = initializeScenarioAuthority(hot, { stallAfterMs: 50 });
+  await expect.poll(() => hot.getState().hydrationStatus, { timeout: 2000 }).toBe("stalled");
+
+  old.close();
+  await settled;
+  expect(hot.getState().hydrationStatus).toBe("ready");
+});
