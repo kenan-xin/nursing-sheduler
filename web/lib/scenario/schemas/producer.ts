@@ -132,6 +132,11 @@ const zSuccessions = z.strictObject({
   weight: zWeight,
 });
 
+const zSkillMixEntry = z.strictObject({
+  people: zRef,
+  minNumPeople: z.number().int(),
+});
+
 const zRequirement = z.strictObject({
   type: z.literal(PREFERENCE_TYPE.shiftTypeRequirement),
   description: z.string().optional(),
@@ -140,6 +145,7 @@ const zRequirement = z.strictObject({
   requiredNumPeople: z.number().int(),
   qualifiedPeople: zRefOrList.optional(),
   preferredNumPeople: z.number().int().optional(),
+  skillMix: z.array(zSkillMixEntry).optional(),
   date: zRefOrList.optional(),
   weight: zWeight,
 });

@@ -14,6 +14,7 @@ import type {
   CoefficientEntry,
   ExportLayout,
   ScenarioUiState,
+  SkillMixEntry,
   UiPerson,
   UiRequestCell,
 } from "@/lib/scenario";
@@ -45,6 +46,11 @@ function renameCard<T extends object>(
     if (next[field] !== undefined) {
       next[field] = renameRefTree(next[field] as RefTree, oldId, newId);
     }
+  }
+  if (kind === "requirements" && domain === "person" && Array.isArray(next.skillMix)) {
+    next.skillMix = (next.skillMix as SkillMixEntry[]).map((entry) =>
+      sameRef(entry.people, oldId) ? { ...entry, people: newId } : entry,
+    );
   }
   if (domain === "shift") {
     const coefficientField = CARD_COEFFICIENT_FIELD[kind];

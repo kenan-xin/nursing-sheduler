@@ -118,6 +118,8 @@ export function anonymizeDocument(
       case "shift type requirement":
         if (pref.qualifiedPeople !== undefined)
           pref.qualifiedPeople = refOrList(pref.qualifiedPeople);
+        if (Array.isArray(pref.skillMix))
+          pref.skillMix = pref.skillMix.map((entry) => ({ ...entry, people: ref(entry.people) }));
         break;
       case "shift affinity":
         pref.people1 = nested(pref.people1);

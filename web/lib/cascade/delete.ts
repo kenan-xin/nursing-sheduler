@@ -16,6 +16,7 @@ import type {
   CoefficientEntry,
   ExportLayout,
   ScenarioUiState,
+  SkillMixEntry,
   UiPerson,
   UiRequestCell,
 } from "@/lib/scenario";
@@ -42,6 +43,11 @@ function pruneCardFields<T extends object>(
     if (next[field] !== undefined) {
       next[field] = pruneRefTree(next[field] as RefTree, deleted);
     }
+  }
+  if (kind === "requirements" && domain === "person" && Array.isArray(next.skillMix)) {
+    const kept = (next.skillMix as SkillMixEntry[]).filter((entry) => !deleted.has(entry.people));
+    if (kept.length) next.skillMix = kept;
+    else delete next.skillMix;
   }
   if (domain === "shift") {
     const coefficientField = CARD_COEFFICIENT_FIELD[kind];

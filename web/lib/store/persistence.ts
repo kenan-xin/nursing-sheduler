@@ -474,6 +474,20 @@ function validateRequirementCard(el: Record<string, unknown>): void {
     el.preferredNumPeople,
     "cardsByKind.requirements element preferredNumPeople",
   );
+  if (el.skillMix !== undefined) {
+    if (!Array.isArray(el.skillMix)) {
+      throw new Error("Persisted cardsByKind.requirements element skillMix must be an array.");
+    }
+    for (const entry of el.skillMix) {
+      if (!isPlainObject(entry)) {
+        throw new Error(
+          "Persisted cardsByKind.requirements element skillMix entry must be an object.",
+        );
+      }
+      validateRefOrArray(entry.people, "cardsByKind.requirements element skillMix people");
+      requireNumber(entry.minNumPeople, "cardsByKind.requirements element skillMix minNumPeople");
+    }
+  }
   if (el.date !== undefined) {
     validateRefOrArray(el.date, "cardsByKind.requirements element date");
   }

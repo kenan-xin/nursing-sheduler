@@ -67,6 +67,12 @@ export type Weight = number;
 /** A `[shiftTypeId, coefficient]` pair — the backend's `tuple[str, int]`. */
 export type CoefficientEntry = [ShiftTypeRef, number];
 
+/** At least `minNumPeople` of `people` among a shift's staff. Bans nobody (unlike qualifiedPeople). */
+export interface SkillMixEntry {
+  people: PersonRef;
+  minNumPeople: number;
+}
+
 /** A person-ref list that may contain nested aggregate groups. */
 export type NestedPersonRefList = Array<PersonRef | PersonRef[]>;
 /** A shift-type-ref list that may contain nested aggregate groups. */
@@ -228,6 +234,7 @@ export interface CanonicalShiftTypeRequirementPreference {
   requiredNumPeople: number;
   qualifiedPeople?: PersonRef | PersonRef[];
   preferredNumPeople?: number;
+  skillMix?: SkillMixEntry[];
   date?: DateRef | DateRef[];
   weight: Weight;
 }
@@ -467,6 +474,7 @@ export interface RequirementCardBody {
   requiredNumPeople: number;
   qualifiedPeople?: PersonRef | PersonRef[];
   preferredNumPeople?: number;
+  skillMix?: SkillMixEntry[];
   date?: DateRef | DateRef[];
   weight: Weight;
 }

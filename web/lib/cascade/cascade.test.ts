@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createEmptyScenarioUiState, type ScenarioUiState } from "@/lib/scenario";
+import { cards, people, requirement, ward } from "@/lib/rules/ward-fixtures.test-support";
 import { applyDelete, applyRename, deleteEntity, RenameCollisionError, renameEntity } from ".";
 
 // A rich fixture exercising every reference surface: items + nested groups, all
@@ -320,5 +321,32 @@ describe("rename collision — reject, state unchanged (finding #5)", () => {
   it("applyRename / applyDelete are aliases", () => {
     expect(applyRename).toBe(renameEntity);
     expect(applyDelete).toBe(deleteEntity);
+  });
+});
+
+describe("skill mix follows its group", () => {
+  const base = () =>
+    ward({
+      staff: people("rn1", "en1"),
+      staffGroups: [{ id: "RN", members: ["rn1"] }],
+      cardsByKind: cards({
+        requirements: [
+          requirement("night", "N", 2, { skillMix: [{ people: "RN", minNumPeople: 1 }] }),
+        ],
+      }),
+    });
+
+  it("renaming the group rewrites the entry", () => {
+    const next = renameEntity(base(), "person", "RN", "RegisteredNurse");
+    expect(next.cardsByKind.requirements[0].skillMix).toEqual([
+      { people: "RegisteredNurse", minNumPeople: 1 },
+    ]);
+  });
+
+  it("deleting the group prunes the entry and keeps the headcount", () => {
+    const next = deleteEntity(base(), "person", "RN");
+    const card = next.cardsByKind.requirements[0];
+    expect(card.requiredNumPeople).toBe(2);
+    expect(card.skillMix).toBeUndefined();
   });
 });
