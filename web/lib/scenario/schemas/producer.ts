@@ -49,6 +49,7 @@ const zPerson = z.strictObject({
   id: zRef,
   description: z.string().optional(),
   history: z.array(z.string()).optional(),
+  temporary: z.boolean().optional(),
 });
 
 const zPeopleGroup = z.strictObject({

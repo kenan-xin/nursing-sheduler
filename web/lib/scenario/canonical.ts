@@ -90,6 +90,7 @@ function mapPerson(person: UiPerson): CanonicalPerson {
     id: person.id,
     description: person.description,
     history: person.history,
+    temporary: person.temporary === true ? true : undefined,
   });
 }
 

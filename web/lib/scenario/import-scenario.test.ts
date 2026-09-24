@@ -409,3 +409,32 @@ preferences:
     });
   });
 });
+
+describe("the temporary flag", () => {
+  const yaml = (flag: string) => `apiVersion: alpha
+dates: {range: {startDate: 2026-05-14, endDate: 2026-05-14}}
+people: {items: [{id: P1, temporary: ${flag}}, {id: P2}]}
+shiftTypes: {items: [{id: D}]}
+preferences: [{type: at most one shift per day}]
+`;
+
+  it("imports true and drops false", () => {
+    const yes = importScenarioYaml(yaml("true"));
+    if (!yes.ok) throw new Error(JSON.stringify(yes.issues));
+    expect(yes.target.staff).toEqual([{ id: "P1", temporary: true }, { id: "P2" }]);
+    const no = importScenarioYaml(yaml("false"));
+    if (!no.ok) throw new Error(JSON.stringify(no.issues));
+    expect(no.target.staff).toEqual([{ id: "P1" }, { id: "P2" }]);
+  });
+
+  it("rejects a non-boolean flag", () => {
+    expect(importScenarioYaml(yaml('"yes"')).ok).toBe(false);
+    expect(importScenarioYaml(yaml("1")).ok).toBe(false);
+  });
+
+  it("survives the browser store", () => {
+    expect(() => sanitizePersistedScenario({ staff: [{ id: "P1", temporary: "yes" }] })).toThrow(
+      /temporary/,
+    );
+  });
+});

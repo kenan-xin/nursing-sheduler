@@ -133,6 +133,8 @@ export interface CanonicalPerson {
   id: PersonId;
   description?: string;
   history?: string[];
+  /** Borrowed from another ward, float pool or agency. Absent = the ward's own staff; only `true` is stored. */
+  temporary?: boolean;
 }
 
 export interface CanonicalPeopleGroup {
@@ -407,6 +409,8 @@ export interface UiPerson {
   id: PersonId;
   description?: string;
   history?: string[];
+  /** Borrowed from another ward, float pool or agency. Absent = the ward's own staff; only `true` is stored. */
+  temporary?: boolean;
 }
 
 export interface UiPeopleGroup {
