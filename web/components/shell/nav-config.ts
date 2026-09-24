@@ -163,7 +163,7 @@ export const NAV_GROUPS: NavGroup[] = [
         label: "Staffing Requirements",
         path: NAV_ROUTE_PATHS["shift-type-requirements"],
         icon: FaClipboardList,
-        blurb: "Min nurses & skill mix per shift",
+        blurb: "Nurses per shift & who may work it",
         advancedOnly: true,
       },
       {

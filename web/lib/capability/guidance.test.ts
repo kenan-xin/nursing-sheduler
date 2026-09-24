@@ -17,8 +17,8 @@ describe("rule guidance", () => {
     expect(result.value[0]?.matchedTerms.length).toBeGreaterThan(0);
   });
 
-  it("matches staffing requirements for a minimum-cover policy", () => {
-    const result = suggestRuleCandidates("at least two seniors on every night shift", context());
+  it("matches staffing requirements for a head-count policy", () => {
+    const result = suggestRuleCandidates("exactly three people on every night shift", context());
     if (result.status !== "ok") throw new Error("expected ok");
     expect(result.value.map((c) => c.capabilityId)).toContain("staffing-requirements");
   });

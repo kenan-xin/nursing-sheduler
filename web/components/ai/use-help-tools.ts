@@ -56,7 +56,7 @@ export const policyParameters = z.object({
     .string()
     .describe(
       "The ward policy or goal the user described, in their own words — for example " +
-        "'no day shift straight after a night shift' or 'two seniors on every night'.",
+        "'no day shift straight after a night shift' or 'three nurses on every night shift'.",
     ),
 });
 

@@ -318,10 +318,13 @@ const refSchema = z.union([z.string(), z.number()]);
 
 const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "a date must be written YYYY-MM-DD");
 
-/** Shape only; the 30-minute grid and span rules are the Shifts page's, applied in `operations.ts`. */
-const clockSchema = z
-  .string()
-  .regex(/^\d{2}:\d{2}$/, "a time must be written HH:MM in 24-hour form, e.g. 08:00 or 20:30");
+/**
+ * A clock is a plain string on the wire. The format, the 30-minute grid and the span
+ * rules are all the Shifts page's (`validateWorkingTimeDraft`, applied in
+ * `operations.ts`), whose refusal names the shift and gives an example. A regex here
+ * refused "0800" before the host could say which shift it was.
+ */
+const clockSchema = z.string();
 
 const requestPersonSchema = refSchema.describe(
   "The person's id exactly as the staff list reports it, or a staff group id to record it " +

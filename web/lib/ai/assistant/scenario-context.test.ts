@@ -56,6 +56,14 @@ describe("the attached turn context", () => {
     expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/at most three/);
   });
 
+  it("tells the model to take ids from the schedule and never guess a name", () => {
+    // 2026-09-24, plan assistant-self-correction: "apply a rule to everyone" made the
+    // model invent names instead of reading the staff list.
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/get_schedule_section/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/never guess/i);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/valid ones/);
+  });
+
   const context = buildAssistantContext({
     scenario: wardScenario(),
     scenarioId: "scenario-a",
