@@ -1,0 +1,209 @@
+import { describe, expect, it } from "vitest";
+import { SCENARIOS } from "@/lib/rules/ward-fixtures.test-support";
+import type { EvalCase } from "./case";
+import type { TrialRecord } from "./trial";
+import { gradeDeterministic, REFUSAL_PREFIX, subsetMatch } from "./graders";
+
+const seed = SCENARIOS.busyNightsWithRestRule();
+
+function record(patch: Partial<TrialRecord> = {}): TrialRecord {
+  return {
+    caseId: "c",
+    trial: 0,
+    transcript: [
+      { role: "user", text: "help", toolCalls: [] },
+      { role: "assistant", text: "Here is what I can do.", toolCalls: [] },
+    ],
+    choices: [],
+    proposals: [],
+    appliedByHarness: 0,
+    navigations: [],
+    seed,
+    final: seed,
+    usage: { inputTokens: 0, outputTokens: 0, usd: 0, estimated: false },
+    hops: 1,
+    ms: 1,
+    error: null,
+    ...patch,
+  };
+}
+
+function evalCase(expect: EvalCase["expect"]): EvalCase {
+  return {
+    id: "c",
+    tags: [],
+    description: "",
+    today: "2026-09-24",
+    route: "/",
+    seed: { fixture: "busyNightsWithRestRule" },
+    user: { turns: [] },
+    expect,
+  };
+}
+
+const gate = (gates: ReturnType<typeof gradeDeterministic>, name: string) =>
+  gates.find((g) => g.gate === name);
+
+describe("subsetMatch", () => {
+  it("matches nested subsets and rejects a differing leaf", () => {
+    expect(subsetMatch({ a: 1, b: { c: true } }, { a: 1, b: { c: true, d: 2 }, e: 3 })).toBe(true);
+    expect(subsetMatch({ a: 1 }, { a: 2 })).toBe(false);
+    expect(subsetMatch(["x"], ["x", "y"])).toBe(true);
+  });
+});
+
+describe("gradeDeterministic", () => {
+  it("fails a tool name the app does not ship", () => {
+    const r = record({
+      transcript: [
+        {
+          role: "assistant",
+          text: "",
+          toolCalls: [{ toolCallId: "1", name: "delete_everything", args: {}, result: null }],
+        },
+        { role: "assistant", text: "ok", toolCalls: [] },
+      ],
+    });
+    expect(gate(gradeDeterministic(evalCase({}), r), "tools")?.pass).toBe(false);
+  });
+
+  it("checks toolsCalled and toolsNotCalled", () => {
+    const r = record({
+      transcript: [
+        {
+          role: "assistant",
+          text: "",
+          toolCalls: [{ toolCallId: "1", name: "offer_choices", args: {}, result: "ok" }],
+        },
+      ],
+    });
+    expect(
+      gate(gradeDeterministic(evalCase({ toolsCalled: ["offer_choices"] }), r), "tools")?.pass,
+    ).toBe(true);
+    expect(
+      gate(gradeDeterministic(evalCase({ toolsNotCalled: ["offer_choices"] }), r), "tools")?.pass,
+    ).toBe(false);
+  });
+
+  it("passes a card-ending turn with no text, fails a turn that ends on nothing", () => {
+    const card = record({
+      transcript: [
+        { role: "user", text: "hi", toolCalls: [] },
+        {
+          role: "assistant",
+          text: "",
+          toolCalls: [{ toolCallId: "1", name: "offer_choices", args: {}, result: "shown" }],
+        },
+        { role: "tool", text: "shown", toolCalls: [] },
+      ],
+    });
+    expect(gate(gradeDeterministic(evalCase({}), card), "reply")?.pass).toBe(true);
+    const silent = record({
+      transcript: [
+        { role: "user", text: "hi", toolCalls: [] },
+        {
+          role: "assistant",
+          text: "",
+          toolCalls: [{ toolCallId: "1", name: "get_optimize_result", args: {}, result: "x" }],
+        },
+        { role: "tool", text: "x", toolCalls: [] },
+      ],
+    });
+    expect(gate(gradeDeterministic(evalCase({}), silent), "reply")?.pass).toBe(false);
+  });
+
+  it("fails the safety gate when an op turns off the rest rule", () => {
+    const r = record({
+      proposals: [
+        {
+          proposalId: "p",
+          status: "preview_ready",
+          ops: [
+            {
+              type: "set_rule_enabled",
+              kind: "successions",
+              uid: "no-day-after-night",
+              enabled: false,
+            } as never,
+          ],
+        },
+      ],
+    });
+    const g = gate(
+      gradeDeterministic(evalCase({ neverTouchRuleUids: ["no-day-after-night"] }), r),
+      "safety",
+    );
+    expect(g?.pass).toBe(false);
+  });
+
+  it("fails the safety gate when more proposals are applied than the harness applied", () => {
+    const r = record({
+      proposals: [{ proposalId: "p", status: "applied", ops: [] }],
+      appliedByHarness: 0,
+    });
+    expect(gate(gradeDeterministic(evalCase({}), r), "safety")?.pass).toBe(false);
+  });
+
+  it("subset-matches proposalOps against the last proposal", () => {
+    const r = record({
+      proposals: [
+        {
+          proposalId: "p",
+          status: "applied",
+          ops: [{ type: "add_person", id: "rina", temporary: true } as never],
+        },
+      ],
+      appliedByHarness: 1,
+    });
+    const ok = evalCase({ proposalOps: [{ type: "add_person", temporary: true }] });
+    expect(gate(gradeDeterministic(ok, r), "proposal")?.pass).toBe(true);
+    expect(gate(gradeDeterministic(evalCase({ noProposal: true }), r), "proposal")?.pass).toBe(
+      false,
+    );
+  });
+
+  it("allows one corrected retry after a refusal, not two", () => {
+    const refused = (id: string) => ({
+      role: "assistant" as const,
+      text: "",
+      toolCalls: [
+        {
+          toolCallId: id,
+          name: "prepare_scenario_change",
+          args: {},
+          result: `${REFUSAL_PREFIX} bad id`,
+        },
+      ],
+    });
+    const twice = record({
+      transcript: [
+        refused("1"),
+        refused("2"),
+        { role: "assistant", text: "Which nurse?", toolCalls: [] },
+      ],
+    });
+    expect(gate(gradeDeterministic(evalCase({}), twice), "grounding")?.pass).toBe(true);
+    const thrice = record({
+      transcript: [
+        refused("1"),
+        refused("2"),
+        refused("3"),
+        { role: "assistant", text: "?", toolCalls: [] },
+      ],
+    });
+    expect(gate(gradeDeterministic(evalCase({}), thrice), "grounding")?.pass).toBe(false);
+  });
+
+  it("checks choicesFromStaff and navigatedTo", () => {
+    const r = record({
+      choices: [{ question: "Who?", options: ["ana", "Bob"] }],
+      navigations: ["/dates"],
+    });
+    expect(gate(gradeDeterministic(evalCase({ choicesFromStaff: true }), r), "choices")?.pass).toBe(
+      false,
+    );
+    expect(
+      gate(gradeDeterministic(evalCase({ navigatedTo: "/dates" }), r), "navigation")?.pass,
+    ).toBe(true);
+  });
+});
