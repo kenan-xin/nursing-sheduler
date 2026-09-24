@@ -21,6 +21,8 @@ export const plus = (a: Usage, b: Usage): Usage => ({
 
 export class Ledger {
   total: Usage = ZERO;
+  /** Calls refused once over: a trial that saw one was cut by the budget, not failed. */
+  refused = 0;
   constructor(readonly maxUsd: number) {}
   add(usage: Usage): void {
     this.total = plus(this.total, usage);
@@ -92,7 +94,10 @@ export function recordingFetch(
   let trial = ZERO;
   const pending: Promise<void>[] = [];
   const wrapped = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    if (ledger.over) throw new Error(BUDGET_ERROR);
+    if (ledger.over) {
+      ledger.refused += 1;
+      throw new Error(BUDGET_ERROR);
+    }
     hops += 1;
     const requestBytes = typeof init?.body === "string" ? init.body.length : 0;
     const response = await base(input, init);

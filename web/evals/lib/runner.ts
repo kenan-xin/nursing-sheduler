@@ -65,6 +65,7 @@ export function runCases(cases: EvalCase[], seams: Seams): void {
             };
             skip("budget");
           }
+          const refusedBefore = ledger.refused;
           const userRec = recordingFetch(e.user, ledger);
           const judgeRec = recordingFetch(e.judge, ledger);
           const userModel =
@@ -94,6 +95,11 @@ export function runCases(cases: EvalCase[], seams: Seams): void {
             plus(await userRec.settled(), await judgeRec.settled()),
           );
           task.meta.eval = toMeta(evalCase, record, gates, judge);
+          if (ledger.refused > refusedBefore) {
+            // The budget cut a hop or the judge short: not a verdict on the assistant.
+            task.meta.eval = { ...task.meta.eval, pass: false, skipped: "budget" };
+            skip("budget");
+          }
           expect(gates.filter((g) => !g.pass)).toEqual([]);
           expect(judge.filter((j) => !j.pass)).toEqual([]);
         },

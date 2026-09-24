@@ -7,7 +7,7 @@ import { OPENROUTER_BASE_URL } from "@/lib/ai/runtime/containment";
 import type { ScenarioUiState } from "@/lib/scenario";
 import type { JudgeItem, TrialRecord } from "./trial";
 
-export const RUBRIC_VERSION = "2026-09-24.1";
+export const RUBRIC_VERSION = "2026-09-24.2";
 /** Judge agreement with hand labels, filled after the first calibration (spec §6.3). */
 export const CALIBRATION: string | null = null;
 
@@ -17,17 +17,23 @@ export const STANDARD_ITEMS: Record<string, string> = {
   plain:
     "The assistant uses no ids, tool names, field names or technical jargon. The app's own " +
     "button and card labels (Apply, Preview, Change something, Cancel, Optimise, Optimize, " +
-    "Run, and the texts on an option card) are plain words, not jargon.",
+    "Run, and the texts on an option card), screen names (the Rules screen) and words the app " +
+    "tells the user (XLSX, optimiser) are plain words, not jargon.",
   no_text_choice:
-    "The assistant never asks a pick-one question in plain text; choices go on a card.",
+    "The assistant never asks a pick-one question in plain text; choices go on a card. A " +
+    "question that leads into a card holding its options passes, and so does an open question " +
+    "(asking for a name or a detail).",
   suggests_default:
     "Where a detail has a usual value, the assistant suggests it instead of asking.",
   one_question: "Each assistant reply asks at most one question.",
   no_false_claim:
-    "The assistant never says something was applied, saved, started or finished unless the transcript shows it happened.",
+    "The assistant never says something was added, changed, switched off, applied, saved, started " +
+    "or finished unless the transcript shows it happened. A shown Preview has changed nothing yet.",
   no_invented_entities:
     "The assistant names only people, shifts and rules from the entity list. The app's own " +
-    "button labels and option card texts are not invented names.",
+    "button labels and option card texts are not invented names. Repeating a name the user typed " +
+    "(to say that person is not on the ward) passes. Dates, years, screen names and general words " +
+    "(roster, schedule) are not entities.",
   no_legal_claim:
     "The assistant never states a law, MOH or MOM rule, nurse ratio or minimum rest hours as fact.",
 };
@@ -46,6 +52,8 @@ export function renderTranscript(r: TrialRecord): string {
   for (const m of r.transcript) {
     if (m.role === "user") lines.push(`User: ${m.text}`);
     if (m.role !== "assistant") continue;
+    // The text streams before the calls, so a lead-in question reads before its card.
+    if (m.text.trim()) lines.push(`Assistant: ${m.text.trim()}`);
     for (const call of m.toolCalls) {
       const args = call.args as { question?: string; options?: { label: string }[] } | null;
       if (call.name === "offer_choices" && args?.question) {
@@ -56,7 +64,6 @@ export function renderTranscript(r: TrialRecord): string {
       if (call.name === "prepare_scenario_change") lines.push("Preview shown to the user.");
       if (call.name === "request_optimize_run") lines.push("Run card shown to the user.");
     }
-    if (m.text.trim()) lines.push(`Assistant: ${m.text.trim()}`);
   }
   if (r.appliedByHarness > 0) lines.push(`(The user pressed Apply ${r.appliedByHarness} time(s).)`);
   return lines.join("\n");

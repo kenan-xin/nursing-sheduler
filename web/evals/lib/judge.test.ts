@@ -52,6 +52,25 @@ describe("judge", () => {
     expect(text).not.toContain("offer_choices");
   });
 
+  it("renders an assistant's text before the card it leads into", () => {
+    const leadIn: TrialRecord = {
+      ...r,
+      transcript: [{ ...r.transcript[1]!, text: "Here are your options." }],
+    };
+    expect(renderTranscript(leadIn)).toBe(
+      "Assistant: Here are your options.\nCard: Which fix? [Borrow a nurse]",
+    );
+  });
+
+  it("lets a lead-in or open question pass the card item, and a typed name, date or screen pass grounding", () => {
+    expect(STANDARD_ITEMS.no_text_choice).toMatch(/leads into a card/);
+    expect(STANDARD_ITEMS.no_text_choice).toMatch(/open question/);
+    expect(STANDARD_ITEMS.no_invented_entities).toMatch(/the user typed/);
+    expect(STANDARD_ITEMS.no_invented_entities).toMatch(/dates/i);
+    expect(STANDARD_ITEMS.plain).toMatch(/screen names/);
+    expect(STANDARD_ITEMS.no_false_claim).toMatch(/added/);
+  });
+
   it("lists the scenario's people, shifts and rules for the grounding item", () => {
     expect(entityNames(seed)).toEqual(
       expect.arrayContaining(["rn1", "en1", "N", "1 RN every night"]),

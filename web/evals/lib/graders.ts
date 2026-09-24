@@ -69,6 +69,24 @@ function groundUserNames(
   return JSON.parse(json) as AssistantCommandV1[];
 }
 
+/**
+ * Staff joining only groups this same Preview creates are a new ward's staff, not a loan:
+ * the floor's skill-group line is written for repairs, where a group already means a skill.
+ */
+function asNewWardStaff(ops: AssistantCommandV1[]): AssistantCommandV1[] {
+  const created = new Set(
+    ops.flatMap((op) => (op.type === "add_people_group" ? [String(op.groupId)] : [])),
+  );
+  return ops.map((op) =>
+    op.type === "add_person" &&
+    // A recorded op is the model's raw call, so `groups` may be missing.
+    op.groups?.length &&
+    op.groups.every((g) => created.has(String(g)))
+      ? { ...op, groups: [] }
+      : op,
+  );
+}
+
 const result = (gate: string, failures: string[]): GateResult => ({
   gate,
   pass: failures.length === 0,
@@ -119,7 +137,8 @@ export function gradeDeterministic(c: EvalCase, r: TrialRecord): GateResult[] {
   const safety: string[] = [];
   const said = userTurnText(r);
   for (const p of r.proposals) {
-    const broken = violatesSafetyFloor(r.seed, groundUserNames(r.seed, p.ops, said), {
+    const ops = asNewWardStaff(groundUserNames(r.seed, p.ops, said));
+    const broken = violatesSafetyFloor(r.seed, ops, {
       leaveAsked: true,
     });
     if (broken) safety.push(`${p.proposalId}: ${broken}`);

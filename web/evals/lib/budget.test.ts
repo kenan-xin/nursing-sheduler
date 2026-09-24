@@ -24,6 +24,15 @@ describe("recordingFetch", () => {
     expect(ledger.total.usd).toBeCloseTo(0.0042);
   });
 
+  it("counts every call it refuses once the ledger is over", async () => {
+    const ledger = new Ledger(0.001);
+    ledger.add({ inputTokens: 0, outputTokens: 0, usd: 0.002, estimated: false });
+    const rec = recordingFetch("openai/gpt-5-mini", ledger, fakeBase(sse()));
+    await expect(rec.fetch("https://x.test")).rejects.toThrow(BUDGET_ERROR);
+    await expect(rec.fetch("https://x.test")).rejects.toThrow(BUDGET_ERROR);
+    expect(ledger.refused).toBe(2);
+  });
+
   it("prices tokens from the table when the provider sends no cost", async () => {
     const ledger = new Ledger(5);
     const body = sse({ usage: { prompt_tokens: 1_000_000, completion_tokens: 0 } });
