@@ -130,6 +130,20 @@ describe("the attached turn context", () => {
     );
   });
 
+  it("tells the model to read the roster and to swap only through the card", () => {
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/get_roster/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/find_swap_partners.*prepare_roster_swap/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/never ask the user who works/i);
+  });
+
+  it("tells the model to follow the ward's escalation ladder and name the step", () => {
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/step 1.*step 2.*step 3.*step 4/i);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/overtime pay, or off-in-lieu/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/nurse manager's sign-off/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/prepare_borrowed_cover/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/sick_or_emergency/);
+  });
+
   it("contains no credential -- the key is a request header, never context", () => {
     expect(JSON.stringify(context)).not.toContain(SENTINEL_KEY);
     expect(JSON.stringify(context).toLowerCase()).not.toContain("apikey");

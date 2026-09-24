@@ -263,7 +263,10 @@ export const CAPABILITY_ENTRIES = [
     nurseFacingSummary:
       "After a run finishes you can open the saved roster here, change individual assignments by " +
       "hand, and export the result. Edits made here apply to the saved roster only — they do not " +
-      "change the people, shifts, rules or requests the run was based on.",
+      "change the people, shifts, rules or requests the run was based on." +
+      " The assistant can read this roster, suggest who can swap a shift without breaking the " +
+      "rules it was made with, and prepare the swap; it changes only when you press Apply on its " +
+      "card, and you can undo it here.",
     concepts: ["roster", "schedule", "view roster", "adjust roster", "assignment", "manual edit"],
     // The Roster destination carries no `guidedStep`, but persistent shell navigation
     // reaches it in BOTH modes (see `nav-config.ts`, group `out`), so the capability
