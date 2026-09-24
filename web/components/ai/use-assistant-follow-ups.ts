@@ -21,19 +21,33 @@ const FINISHED: ReadonlySet<RunLifecycle> = new Set(["completed", "cancelled", "
 /** A follow-up line never runs past this; a long rule body is cut with an ellipsis. */
 const MAX_LINE = 120;
 
-/** "I applied it: Roster period, 2026-10-01 to 2026-10-31." One line, no ids. */
+/** Names listed before "and N more" when one Apply changed several things. */
+const MAX_NAMES = 3;
+
+/**
+ * "I applied it: Roster period, 2026-10-01 to 2026-10-31." for one change;
+ * "I applied it: Mei, Raj, Staff group “SN”." for several. One line, no ids.
+ */
 export function describeAppliedChange(diff: ProposalDiff): string {
   const entries = diff.direct.length > 0 ? diff.direct : diff.cascade;
-  const [first, ...rest] = entries;
-  if (first === undefined) return "I applied it.";
   const prefix = "I applied it: ";
-  const suffix =
-    (rest.length === 0 ? "" : `, and ${rest.length} more change${rest.length === 1 ? "" : "s"}`) +
-    ".";
-  const detail = `${first.label}, ${first.after ?? "removed"}`;
-  const room = MAX_LINE - prefix.length - suffix.length;
-  const fitted = detail.length <= room ? detail : `${detail.slice(0, room - 1).trimEnd()}…`;
-  return `${prefix}${fitted}${suffix}`;
+  const fit = (detail: string, suffix: string) => {
+    const room = MAX_LINE - prefix.length - suffix.length;
+    const fitted = detail.length <= room ? detail : `${detail.slice(0, room - 1).trimEnd()}…`;
+    return `${prefix}${fitted}${suffix}`;
+  };
+  // One change reads best with its new value; an added record's value repeats its
+  // name ("Mei, Mei"), so the name stands alone then.
+  const labels = [...new Set(entries.map((entry) => entry.label))];
+  if (labels.length === 0) return "I applied it.";
+  if (entries.length === 1) {
+    const [only] = entries;
+    const value = only.after ?? "removed";
+    return fit(value === only.label ? only.label : `${only.label}, ${value}`, ".");
+  }
+  const shown = labels.slice(0, MAX_NAMES);
+  const more = labels.length - shown.length;
+  return fit(shown.join(", "), more > 0 ? `, and ${more} more.` : ".");
 }
 
 /** "The optimiser run finished: no roster could be built." */

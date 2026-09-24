@@ -78,18 +78,38 @@ describe("describeAppliedChange", () => {
     );
   });
 
-  it("counts the rest and says removed for a removal", () => {
-    expect(
-      describeAppliedChange(diff(entry("Shift “EVE”", null), entry("a", "x"), entry("b", "y"))),
-    ).toBe("I applied it: Shift “EVE”, removed, and 2 more changes.");
+  it("says removed for a single removal", () => {
+    expect(describeAppliedChange(diff(entry("Shift “EVE”", null)))).toBe(
+      "I applied it: Shift “EVE”, removed.",
+    );
   });
 
-  it("caps a long change at 120 characters, keeping the count", () => {
-    const line = describeAppliedChange(
-      diff(entry("Rule “Nights”", "On · ".repeat(60)), entry("b", "y")),
-    );
+  it("names an added record once, not twice", () => {
+    expect(describeAppliedChange(diff(entry("Mei", "Mei")))).toBe("I applied it: Mei.");
+  });
+
+  it("lists distinct names for several changes, then counts the rest", () => {
+    expect(
+      describeAppliedChange(
+        diff(
+          entry("Mei", "Mei"),
+          entry("Mei", "SN"),
+          entry("Raj", "Raj"),
+          entry("Staff group “SN”", "On"),
+        ),
+      ),
+    ).toBe("I applied it: Mei, Raj, Staff group “SN”.");
+    expect(
+      describeAppliedChange(
+        diff(entry("a", "x"), entry("b", "y"), entry("c", "z"), entry("d", "w")),
+      ),
+    ).toBe("I applied it: a, b, c, and 1 more.");
+  });
+
+  it("caps a long change at 120 characters", () => {
+    const line = describeAppliedChange(diff(entry("Rule “Nights”", "On · ".repeat(60))));
     expect(line.length).toBeLessThanOrEqual(120);
-    expect(line).toMatch(/^I applied it: Rule “Nights”, On · .*…, and 1 more change\.$/);
+    expect(line).toMatch(/^I applied it: Rule “Nights”, On · .*…\.$/);
   });
 });
 
