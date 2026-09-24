@@ -165,8 +165,10 @@ export function useProposalTools(agentId: string, turnEpoch: number): void {
               "If the refusal lists the valid choices or names the right format, and what the " +
               "user asked for clearly matches one of them, correct that operation and prepare " +
               "the change again, once. When the list is cut short, read the full list with " +
-              "get_schedule_section. Otherwise explain this to the user in your own words and " +
-              "ask for what is missing. Do not try a different operation that only " +
+              "get_schedule_section. When the user must pick one of the listed names, ask with " +
+              "offer_choices with those names, never as a plain-text question. Otherwise explain " +
+              "this to the user in your own words and ask for what is missing. Do not try a " +
+              "different operation that only " +
               "approximates what they asked for. If this refusal answers a call you already " +
               "corrected once, do not try again: tell the user what the problem is and ask."
             );
@@ -202,8 +204,10 @@ export function useProposalTools(agentId: string, turnEpoch: number): void {
             ? `It also asks them to confirm ${waiting} real-world arrangement${waiting === 1 ? "" : "s"} before Apply becomes available. `
             : "") +
           "Nothing has changed yet, and you cannot apply it — only the user can. " +
-          "Do not say the change has been made. In one short sentence, say what you prepared " +
-          "and what to check; do not list the values, the preview already shows them. " +
+          "Do not say the change has been made: say \"I've prepared ...; check it and press " +
+          'Apply" in one short sentence, and never use the past tense (added, turned off, ' +
+          "changed) until the user presses Apply. Do not list the values, the preview already " +
+          "shows them. " +
           (relaxesRestRule(outcome.proposal.commands)
             ? `This change relaxes a rest rule, so also say, in one short line: "${REST_PRACTICE_WARNING}" `
             : "") +

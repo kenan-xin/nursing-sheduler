@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createEmptyScenarioUiState, type ScenarioUiState } from "@/lib/scenario";
 import {
   ASSISTANT_AUTHORITY_STATEMENT,
+  KNOWLEDGE_LINES,
   buildAssistantContext,
   describeToday,
   stringifyScenario,
@@ -187,5 +188,45 @@ describe("host-derived summary", () => {
     });
     expect(summary.counts.people).toBe(1);
     expect(summary.counts.requestCells).toBe(2);
+  });
+});
+
+describe("what the assistant knows about the ward and the solver", () => {
+  it("is not a source of law beyond the Employment Act, and hands the rule back to the ward", () => {
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/not a source of law or policy/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/ward decides/);
+    // The Employment Act facts stay law (d3cc420); the new line must not deny them.
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/The law \(Employment Act\) is/);
+    expect(KNOWLEDGE_LINES.join(" ")).not.toMatch(/employment law/i);
+  });
+  it("says a staffing number is exact and where the preferred count lives", () => {
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/exact, not a minimum/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/Staffing requirements screen/);
+  });
+  it("says skill mix is not supported, and never approximates it with a whole-shift group", () => {
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/skill mix .*not supported yet/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/never approximate it/);
+  });
+  it("checks the limits before promising a rule", () => {
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/explain_app_capability/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/scheduler-limits/);
+  });
+  it("warns that a new run can change everyone's shifts", () => {
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/change everyone's shifts/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/Roster screen/);
+  });
+  it("leaves a same-day-off clash to the manager", () => {
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/never decide it yourself/);
+  });
+  it("keeps every knowledge line short", () => {
+    for (const line of KNOWLEDGE_LINES) expect(line.split(/\s+/).length, line).toBeLessThan(45);
+  });
+});
+
+describe("a prepared change is spoken of as prepared, never done", () => {
+  it("says 'I've prepared ...; check it and press Apply', never past tense before Apply", () => {
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/I've prepared/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/check it and press Apply/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/never .*past tense/);
   });
 });

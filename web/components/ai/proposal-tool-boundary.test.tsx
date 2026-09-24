@@ -221,6 +221,10 @@ describe("the model's arguments, at the shipped tool boundary", () => {
     const answer = await proposalTool().handler(LIVE_ARGS, {});
 
     expect(String(answer)).toContain("preview of this change is now shown");
+    // Spoken of as prepared, never as done (live eval baseline: "I've added X" on a Preview).
+    expect(String(answer)).toContain("I've prepared");
+    expect(String(answer)).toContain("check it and press Apply");
+    expect(String(answer)).toMatch(/never .*past tense/);
     // One durable proposal, and a Preview published for the user.
     const proposals = await harness.db.assistantProposals.toArray();
     expect(proposals).toHaveLength(1);
@@ -309,6 +313,9 @@ describe("the model's arguments, at the shipped tool boundary", () => {
     expect(answer).toContain(
       "If this refusal answers a call you already corrected once, do not try again",
     );
+    // A pick-one question over the listed names is a card, never plain text.
+    expect(answer).toMatch(/offer_choices with those names/);
+    expect(answer).toMatch(/never as a plain-text question/);
     expect(await harness.db.assistantProposals.toArray()).toHaveLength(0);
   });
 
