@@ -201,4 +201,32 @@ describe("ApplyNavigationNotice", () => {
     expect(screen.queryByTestId("apply-navigation")).toBeNull();
     expect(screen.getByTestId("apply-navigation-status")).toHaveTextContent("");
   });
+
+  it("clears the notice and the highlight once the applied receipt is undone", async () => {
+    const view = render(<ApplyNavigationNotice controller={controller(applied())} />);
+    await waitFor(() => expect(screen.getByTestId("apply-navigation")).toBeTruthy());
+    expect(highlighted().length).toBeGreaterThan(0);
+
+    // Undo resolves the outcome away: the hook stops claiming the change is applied.
+    view.rerender(<ApplyNavigationNotice controller={controller(null)} />);
+
+    expect(screen.queryByTestId("apply-navigation")).toBeNull();
+    expect(highlighted()).toEqual([]);
+  });
+
+  it("does not come back when a later Preview is cancelled", async () => {
+    const view = render(<ApplyNavigationNotice controller={controller(applied())} />);
+    await waitFor(() => expect(screen.getByTestId("apply-navigation")).toBeTruthy());
+
+    // A new Preview appears: the notice hides while it is reviewed.
+    view.rerender(
+      <ApplyNavigationNotice controller={{ ...controller(applied()), proposal: {} as never }} />,
+    );
+    expect(screen.queryByTestId("apply-navigation")).toBeNull();
+
+    // That Preview is cancelled: the outcome clears too, same as a fresh mount would see.
+    view.rerender(<ApplyNavigationNotice controller={controller(null)} />);
+    expect(screen.queryByTestId("apply-navigation")).toBeNull();
+    expect(highlighted()).toEqual([]);
+  });
 });

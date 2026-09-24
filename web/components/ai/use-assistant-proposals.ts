@@ -242,6 +242,12 @@ export function useAssistantProposals(): AssistantProposalController {
   const undo = useCallback(
     async (receiptId: string) => {
       await assistantProposalCommands.undoReceipt(receiptId);
+      // The reverted receipt is the one the Apply notice is narrating: that claim is
+      // no longer true, so drop it rather than leave the notice pointing at a change
+      // that no longer exists.
+      setOutcome((prev) =>
+        prev?.kind === "applied" && prev.receiptId === receiptId ? null : prev,
+      );
       await refresh();
     },
     [refresh],

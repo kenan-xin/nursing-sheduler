@@ -1,8 +1,12 @@
 // @vitest-environment jsdom
 //
 // Apply → navigate → highlight, with nothing faked but the router and toasts.
-// The router commits its URL LATE, like a real App Router transition, so this also
-// proves the notice waits for arrival rather than highlighting on the screen it left.
+// The router commits its URL LATE, like a real App Router transition. The
+// destination is mounted from the start (the shipped mount path is covered by the
+// notice's own unit tests), so what this proves is the real prepare → Apply →
+// guarded navigate → diff-driven highlight path end to end, including that a late
+// URL commit does not stop the highlight from landing, and that undoing the applied
+// receipt clears the notice and the highlight.
 
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -33,10 +37,19 @@ vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
 function Assistant() {
   const controller = useAssistantProposals();
+  const { outcome } = controller;
   return (
     <>
       <ProposalPreviewCard controller={controller} />
       <ApplyNavigationNotice controller={controller} />
+      {outcome?.kind === "applied" ? (
+        <button
+          data-testid="test-undo-receipt"
+          onClick={() => void controller.undo(outcome.receiptId)}
+        >
+          Undo
+        </button>
+      ) : null}
     </>
   );
 }
@@ -110,5 +123,12 @@ describe("Apply → navigate → highlight", () => {
     expect(document.activeElement?.getAttribute(CAPABILITY_ANCHOR_ATTRIBUTE)).not.toBe(
       "shift-types.add-shift-type",
     );
+
+    // Undo reverts the receipt: the notice stops claiming a change that no longer
+    // exists, and the highlight it was pointing at goes with it.
+    await user.click(screen.getByTestId("test-undo-receipt"));
+    await waitFor(() => expect(screen.queryByTestId("apply-navigation")).toBeNull());
+    // Undo reverted the creation itself, so the card -- and its highlight -- is gone.
+    await waitFor(() => expect(screen.queryByTestId("shift-card-string:EVE")).toBeNull());
   });
 });

@@ -26,7 +26,11 @@ import {
   type ChangeHighlightPlan,
   type ChangeScreen,
 } from "@/lib/change-highlight/plan";
-import { CHANGE_HIGHLIGHT_SELECTOR, showChangeHighlight } from "@/lib/change-highlight/store";
+import {
+  CHANGE_HIGHLIGHT_SELECTOR,
+  clearChangeHighlight,
+  showChangeHighlight,
+} from "@/lib/change-highlight/store";
 import { readCapabilityContext } from "./capability-context";
 import { useCapabilityNavigation } from "./use-capability-navigation";
 import type { AssistantProposalController } from "./use-assistant-proposals";
@@ -57,14 +61,19 @@ export function ApplyNavigationNotice({ controller }: { controller: AssistantPro
   const [plan, setPlan] = useState<ChangeHighlightPlan | null>(null);
   const [step, setStep] = useState<ApplyStep | null>(null);
   const handled = useRef<string | null>(null);
+  // Bumped by anything that should make an in-flight show() a no-op on arrival:
+  // Done, a second link click, or the receipt it was about being undone.
+  const showToken = useRef(0);
   const { outcome } = controller;
 
   const show = useCallback(
     async (screen: ChangeScreen) => {
+      const token = ++showToken.current;
       setStep({ screen, status: "opening" });
       // The user's Apply (or link) click is its own authority, so no turn check. An
       // open unsaved draft still gets the shell's confirm, like a manual jump.
       const result = await navigate(screen.capabilityId, { reveal: false });
+      if (token !== showToken.current) return;
       if (result.status === CAPABILITY_UNAVAILABLE) {
         setStep({
           screen,
@@ -86,21 +95,33 @@ export function ApplyNavigationNotice({ controller }: { controller: AssistantPro
   );
 
   useEffect(() => {
-    if (outcome?.kind !== "applied" || handled.current === outcome.receiptId) return;
-    handled.current = outcome.receiptId;
-    const next = planChangeHighlight(outcome.diff, readCapabilityContext().mode);
-    setPlan(next);
-    setStep(null);
-    if (!next.primary) return;
-    // Leaving Optimise stops a live run. The user pressed Apply, not a screen link, so
-    // the host does not make that move for them; the links below still can.
-    const target = resolveCapability(next.primary.capabilityId, readCapabilityContext());
-    const routeId = target.status === "ok" ? target.value.routeId : undefined;
-    if (leavesLiveRun(useHotStore.getState().runView.lifecycle, routeId)) {
-      setStep({ screen: next.primary, status: "run-live" });
+    if (outcome?.kind === "applied" && handled.current !== outcome.receiptId) {
+      handled.current = outcome.receiptId;
+      const next = planChangeHighlight(outcome.diff, readCapabilityContext().mode);
+      setPlan(next);
+      setStep(null);
+      if (!next.primary) return;
+      // Leaving Optimise stops a live run. The user pressed Apply, not a screen link,
+      // so the host does not make that move for them; the links below still can.
+      const target = resolveCapability(next.primary.capabilityId, readCapabilityContext());
+      const routeId = target.status === "ok" ? target.value.routeId : undefined;
+      if (leavesLiveRun(useHotStore.getState().runView.lifecycle, routeId)) {
+        setStep({ screen: next.primary, status: "run-live" });
+        return;
+      }
+      void show(next.primary);
       return;
     }
-    void show(next.primary);
+    // The receipt this notice was showing was undone, or a later Preview that
+    // appeared after Apply was cancelled or withdrawn: either way the outcome no
+    // longer names the applied receipt, so the notice's claims are no longer true.
+    if (outcome?.kind !== "applied" && handled.current !== null) {
+      handled.current = null;
+      showToken.current++;
+      setPlan(null);
+      setStep(null);
+      clearChangeHighlight();
+    }
   }, [outcome, show]);
 
   // A new Preview replaces this notice; the user is reviewing the next change now.
@@ -150,7 +171,10 @@ export function ApplyNavigationNotice({ controller }: { controller: AssistantPro
               variant="ghost"
               size="sm"
               data-testid="apply-navigation-done"
-              onClick={() => setPlan(null)}
+              onClick={() => {
+                showToken.current++;
+                setPlan(null);
+              }}
             >
               Done
             </Button>
