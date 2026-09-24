@@ -13,11 +13,12 @@
 // from `lib/proposal`, computed by comparing documents. The model's contribution is
 // one paragraph, labelled as its reasoning and rendered as plain text.
 //
-// VISUAL ROLE follows the exploratory assistant prototype's card hierarchy (an L1
-// card, a recessed change list, a footer action row). What it does NOT follow is the
-// prototype's immediate Apply: the closed flows replace that with Preview ->
-// confirmation -> explicit Apply, and this file is where the two differ.
+// VISUAL ROLE: a card in the dock above the composer (`DockCard`), with the change
+// list scrolling inside it so the decision rows stay on screen. What it does NOT
+// follow is the prototype's immediate Apply: the closed flows replace that with
+// Preview -> confirmation -> explicit Apply, and this file is where the two differ.
 
+import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Surface } from "@/components/ui/surface";
@@ -31,7 +32,7 @@ import { REST_PRACTICE_WARNING, relaxesRestRule } from "@/lib/ai/assistant/playb
 import type { AssistantProposalV1 } from "@/lib/store";
 import type { ProposalReadiness } from "@/lib/proposal";
 import type { AssistantProposalController } from "./use-assistant-proposals";
-import { ChoiceOption, OtherAnswer } from "./choice-card";
+import { DockCard } from "./dock-card";
 
 function ChangeRow({ entry }: { entry: ProposalDiffEntry }) {
   return (
@@ -155,7 +156,7 @@ function Blocks({ readiness }: { readiness: ProposalReadiness }) {
   const blocks = readiness.blocks.filter((block) => block.code !== "confirmation_required");
   if (blocks.length === 0) return null;
   return (
-    <ul className="flex flex-col gap-1" data-testid="proposal-blocks" role="status">
+    <ul className="flex flex-col gap-1 px-1" data-testid="proposal-blocks" role="status">
       {blocks.map((block) => (
         <li key={block.code} className="text-meta text-warnink" data-block-code={block.code}>
           {block.message}
@@ -175,29 +176,65 @@ export interface ProposalPreviewCardProps {
 
 /** The Preview. Renders nothing at all when there is no live proposal. */
 export function ProposalPreviewCard({ controller, onSend, disabled }: ProposalPreviewCardProps) {
+  const [details, setDetails] = useState(false);
   const { proposal, readiness } = controller;
   if (!proposal || !readiness) return null;
 
   const stale = readiness.status === "stale";
+  const hasDetails =
+    Boolean(proposal.rationale) ||
+    proposal.evidence.length > 0 ||
+    proposal.diff.needsReview.length > 0 ||
+    proposal.diff.capabilityIds.length > 0;
 
   return (
-    <Surface
-      level="surface"
-      geometry="card"
-      // `max-h-96` on the spacing scale rather than a viewport fraction: a surface
-      // consumer's className admits no arbitrary value, and a long cascade should
-      // scroll inside the card rather than push the input off the panel.
-      className="m-3 flex max-h-96 shrink-0 flex-col gap-3 overflow-y-auto p-4"
+    <DockCard
       data-testid="assistant-proposal"
       data-proposal-id={proposal.proposalId}
       data-proposal-revision={proposal.revision}
       data-status={readiness.status}
-      aria-label="Proposed change"
+      title="Make this change?"
+      rowsLabel="Your decision"
+      // The primary action only; until it is usable the card itself holds focus.
+      focusRow={0}
+      // The decision, as option rows. Apply waits for the agreements and for a running
+      // turn; the two exits never wait.
+      options={[
+        {
+          label: controller.applying ? "Applying…" : "Apply",
+          detail: "Make this change now.",
+          primary: true,
+          testId: "proposal-apply",
+          disabled: disabled || !readiness.applyEnabled || controller.applying,
+          onPick: () => void controller.apply(),
+        },
+        // REVISE is not a softer Cancel. It marks this change out of date and hands the
+        // conversation back, so the next thing the assistant prepares keeps this
+        // proposal's identity and moves its revision -- which is exactly what
+        // invalidates the confirmations already given. Cancel is terminal.
+        {
+          label: "Change something",
+          detail: "Set it aside and tell me what to adjust.",
+          testId: "proposal-revise",
+          onPick: () => void controller.revise(),
+        },
+        {
+          label: "Cancel",
+          detail: "Drop this change. Nothing is applied.",
+          testId: "proposal-cancel",
+          onPick: () => void controller.cancel(),
+        },
+      ]}
+      // Revise, then say what to change: the same ending as Change something, with
+      // the user's words sent as an ordinary message.
+      other={{
+        label: "Tell me what to change",
+        sendLabel: "Send what to change",
+        disabled,
+        onSend: (text) => void controller.revise().then(() => onSend(text)),
+      }}
     >
-      <header className="flex flex-wrap items-center gap-2">
-        <h3 className="font-heading text-cardhead font-semibold tracking-[-0.015em]">
-          Review this change
-        </h3>
+      <div className="flex flex-wrap items-center gap-1.5 px-1">
         {stale ? (
           <Badge variant="warn" data-testid="proposal-stale">
             Out of date
@@ -215,104 +252,82 @@ export function ProposalPreviewCard({ controller, onSend, disabled }: ProposalPr
               ? "Inconclusive"
               : "Not tested by the optimiser"}
         </Badge>
-      </header>
+      </div>
 
-      {proposal.rationale ? (
-        <p className="text-meta text-ink2" data-testid="proposal-rationale">
-          <span className="font-semibold text-ink3">Assistant&apos;s reasoning: </span>
-          {proposal.rationale}
-        </p>
-      ) : null}
+      {/* The summary scrolls inside the card, so the rows and the composer stay on
+          screen however long the cascade is. */}
+      <div className="flex max-h-60 min-h-0 flex-col gap-3 overflow-y-auto px-1">
+        <ChangeList title="What changes" entries={proposal.diff.direct} testId="proposal-direct" />
+        {/* Shown WITH the direct changes, never behind the details toggle: the flow
+            requires the full downstream consequence to be visible before Apply. */}
+        <ChangeList
+          title="Knock-on effects"
+          entries={proposal.diff.cascade}
+          testId="proposal-cascade"
+        />
 
-      {proposal.evidence.length > 0 ? (
-        <div className="flex flex-wrap gap-1.5" data-testid="proposal-evidence">
-          {proposal.evidence.map((entry) => (
-            <Badge key={`${entry.kind}:${entry.label}`} variant="outline" casing="normal">
-              {entry.label}
-            </Badge>
-          ))}
-        </div>
-      ) : null}
+        {relaxesRestRule(proposal.commands) ? (
+          <p className="text-meta text-warnink" data-testid="proposal-rest-guidance" role="note">
+            {REST_PRACTICE_WARNING}
+          </p>
+        ) : null}
 
-      <ChangeList title="What changes" entries={proposal.diff.direct} testId="proposal-direct" />
-      {/* Shown WITH the direct changes, never behind a disclosure: the flow requires
-          the full downstream consequence to be visible before Apply, not after it. */}
-      <ChangeList
-        title="Knock-on effects"
-        entries={proposal.diff.cascade}
-        testId="proposal-cascade"
-      />
+        <Confirmations proposal={proposal} controller={controller} />
 
-      {relaxesRestRule(proposal.commands) ? (
-        <p className="text-meta text-warnink" data-testid="proposal-rest-guidance" role="note">
-          {REST_PRACTICE_WARNING}
-        </p>
-      ) : null}
+        {hasDetails ? (
+          <Button
+            variant="link"
+            size="sm"
+            className="self-start px-0"
+            aria-expanded={details}
+            data-testid="proposal-details-toggle"
+            onClick={() => setDetails((open) => !open)}
+          >
+            {details ? "Hide details" : "Show details"}
+          </Button>
+        ) : null}
+        {details ? (
+          <div className="flex flex-col gap-2" data-testid="proposal-details">
+            {proposal.rationale ? (
+              <p className="text-meta text-ink2" data-testid="proposal-rationale">
+                <span className="font-semibold text-ink3">Assistant&apos;s reasoning: </span>
+                {proposal.rationale}
+              </p>
+            ) : null}
+            {proposal.evidence.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5" data-testid="proposal-evidence">
+                {proposal.evidence.map((entry) => (
+                  <Badge key={`${entry.kind}:${entry.label}`} variant="outline" casing="normal">
+                    {entry.label}
+                  </Badge>
+                ))}
+              </div>
+            ) : null}
+            {proposal.diff.needsReview.length > 0 ? (
+              <p className="text-meta text-warnink" data-testid="proposal-needs-review">
+                After applying, these will need another look:{" "}
+                {proposal.diff.needsReview.map((domain) => SETUP_DOMAIN_LABEL[domain]).join(", ")}.
+              </p>
+            ) : null}
+            {proposal.diff.capabilityIds.length > 0 ? (
+              <p className="text-meta text-ink3" data-testid="proposal-screens">
+                Affects: {proposal.diff.capabilityIds.join(", ")}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
 
-      {proposal.diff.needsReview.length > 0 ? (
-        <p className="text-meta text-warnink" data-testid="proposal-needs-review">
-          After applying, these will need another look:{" "}
-          {proposal.diff.needsReview.map((domain) => SETUP_DOMAIN_LABEL[domain]).join(", ")}.
-        </p>
-      ) : null}
-
-      {proposal.diff.capabilityIds.length > 0 ? (
-        <p className="text-meta text-ink3" data-testid="proposal-screens">
-          Affects: {proposal.diff.capabilityIds.join(", ")}
-        </p>
-      ) : null}
-
-      <Confirmations proposal={proposal} controller={controller} />
       <Blocks readiness={readiness} />
-
-      {/* The decision, as option-card answers. Apply waits for the agreements and for
-          a running turn; the two exits never wait. */}
-      <footer
-        className="flex flex-col gap-2 border-t border-line2 pt-3"
-        role="group"
-        aria-label="Your decision"
-      >
-        <ChoiceOption
-          primary
-          data-testid="proposal-apply"
-          label={controller.applying ? "Applying…" : "Apply"}
-          detail="Make this change to the schedule now."
-          disabled={disabled || !readiness.applyEnabled || controller.applying}
-          onClick={() => void controller.apply()}
-        />
-        {/* REVISE is not a softer Cancel. It marks this change out of date and hands
-            the conversation back, so the next thing the assistant prepares keeps this
-            proposal's identity and moves its revision -- which is exactly what
-            invalidates the confirmations already given. Cancel is terminal. */}
-        <ChoiceOption
-          data-testid="proposal-revise"
-          label="Change something"
-          detail="Set it aside and tell me what to adjust."
-          onClick={() => void controller.revise()}
-        />
-        <ChoiceOption
-          data-testid="proposal-cancel"
-          label="Cancel"
-          detail="Drop this change. Nothing is applied."
-          onClick={() => void controller.cancel()}
-        />
-        <div className="mt-1 flex flex-col gap-2 border-t border-line2 pt-3">
-          {/* Revise, then say what to change: the same ending as Change something,
-              with the user's words sent as an ordinary message. */}
-          <OtherAnswer
-            label="Tell me what to change"
-            sendLabel="Send what to change"
-            disabled={disabled}
-            onSend={(text) => void controller.revise().then(() => onSend(text))}
-          />
-        </div>
-      </footer>
-
       {controller.outcome?.kind === "failed" ? (
-        <p className="text-meta text-errorink" role="status" data-testid="proposal-apply-failed">
+        <p
+          className="px-1 text-meta text-errorink"
+          role="status"
+          data-testid="proposal-apply-failed"
+        >
           {controller.outcome.message}
         </p>
       ) : null}
-    </Surface>
+    </DockCard>
   );
 }

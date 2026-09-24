@@ -311,6 +311,7 @@ export function AssistantPanel() {
         style={dockWidth === null ? undefined : { width: dockWidth }}
         ref={dockRef}
         data-testid="assistant-dock"
+        data-assistant-panel=""
         aria-label="Schedule assistant"
       >
         <DockResizeHandle dockRef={dockRef} width={dockWidth} onWidth={setDockWidth} />
@@ -340,6 +341,7 @@ export function AssistantPanel() {
         className="relative ml-auto flex w-full max-w-md flex-col"
         role="dialog"
         aria-modal="true"
+        data-assistant-panel=""
         aria-label="Schedule assistant"
         tabIndex={-1}
         ref={sheetRef}

@@ -9,7 +9,7 @@ import { useModelVisibleTool } from "./register-model-visible-tool";
 import { assistantActions } from "@/lib/ai/assistant/store";
 import { SUPERSEDED } from "./turn-authority";
 
-export const choiceParameters = z.object({
+const questionFields = {
   question: z.string().describe("The question, short and in the nurse's words."),
   options: z
     .array(
@@ -28,6 +28,19 @@ export const choiceParameters = z.object({
         "covers, which nurses are senior). False for alternatives where one excludes the " +
         "other: repair options, yes/no, did-you-mean.",
     ),
+};
+
+export const choiceParameters = z.object({
+  ...questionFields,
+  moreQuestions: z
+    .array(z.object(questionFields))
+    .max(3)
+    .optional()
+    .describe(
+      "Up to three more related questions, shown one at a time on the same card " +
+        "(for example the next set-up questions). All answers come back in one message. " +
+        "Omit for a single question.",
+    ),
 });
 
 export function useChoiceTools(agentId: string, turnEpoch: number): void {
@@ -41,7 +54,9 @@ export function useChoiceTools(agentId: string, turnEpoch: number): void {
         "repair options after a failed run, or 'did you mean Ana, Ben Tan or Chloe Lim?'. " +
         "The card also lets them type another answer. Their answer arrives as their next " +
         "message. Keep the question in this tool rather than repeating it at length in text. " +
-        "It changes nothing in the schedule.",
+        "You may batch up to four related questions in one card with moreQuestions, for " +
+        "example a few set-up questions in a row; the user answers them one at a time and " +
+        "all answers arrive together. It changes nothing in the schedule.",
       parameters: choiceParameters,
       handler: async (offer, { token }) => {
         // Narrowing only; the wrapper already refused a null token.

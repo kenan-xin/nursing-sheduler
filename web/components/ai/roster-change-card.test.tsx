@@ -286,4 +286,17 @@ describe("RosterChangeCard", () => {
     expect(screen.getByTestId("roster-change-apply")).toBeDisabled();
     expect(screen.getByTestId("roster-change-cancel")).toBeEnabled();
   });
+
+  it("appearing mid-turn, holds focus on the card itself, then moves it to Apply", () => {
+    assistantActions.showRosterChange(CHANGE, TURN);
+    const { rerender } = render(<RosterChangeCard onSend={onSend} disabled />);
+    const card = screen.getByTestId("assistant-roster-change");
+
+    // Never "Change something": a reflexive Enter there would set the change aside.
+    expect(card).toHaveFocus();
+    expect(screen.getByTestId("roster-change-revise")).not.toHaveFocus();
+
+    rerender(<RosterChangeCard onSend={onSend} disabled={false} />);
+    expect(screen.getByTestId("roster-change-apply")).toHaveFocus();
+  });
 });

@@ -13,7 +13,7 @@
 
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import { capabilityRegistryStamp } from "@/lib/capability/registry";
 import { proposalScenario } from "@/lib/proposal/test-support";
@@ -159,6 +159,8 @@ describe("handing a tested candidate to the T07 Preview", () => {
     // The badge is the claim, and it is only earned by a real tested run.
     expect((await screen.findByTestId("proposal-outcome")).textContent).toBe("Optimiser-tested");
     // The evidence chip points at the CANDIDATE's own basis — the exact copied run.
+    // It sits behind Show details with the rest of the supporting detail.
+    fireEvent.click(await screen.findByTestId("proposal-details-toggle"));
     expect(await screen.findByTestId("proposal-evidence")).toHaveTextContent(
       "Tested on a copy of this schedule",
     );
