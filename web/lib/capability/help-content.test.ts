@@ -12,16 +12,20 @@ describe("what the scheduler cannot do (scheduler-limits)", () => {
     expect(text).toMatch(/clock times/);
     expect(text).toMatch(/between shifts/);
   });
-  it("says mixed-shift runs need a weekly working-day limit too", () => {
+  it("says days in a row across mixed shifts are a shift-order rule of 'any shift'", () => {
+    // `ALL` in a succession is any worked shift (preference_types.py), so this IS expressible.
     expect(text).toMatch(/in a row/);
-    expect(text).toMatch(/per week/);
+    expect(text).toMatch(/'any shift'/);
+    expect(text).not.toMatch(/cannot count days in a row/);
   });
   it("says limits use fixed dates, not a rolling window", () => {
     expect(text).toMatch(/rolling/);
   });
-  it("says it remembers nothing from earlier rosters, owed days included", () => {
-    expect(text).toMatch(/one roster period at a time/);
+  it("says counts start fresh each period, but shift-order rules read each nurse's history", () => {
+    expect(text).toMatch(/Counts start fresh each roster period/);
     expect(text).toMatch(/public holiday/);
+    expect(text).toMatch(/last shifts entered on the Requests page/);
+    expect(text).not.toMatch(/remembers nothing/);
   });
   it("says skill mix is not supported yet, in both modes", () => {
     expect(text).toMatch(/skill mix/);
@@ -54,6 +58,7 @@ describe("the rule entries carry the solver facts", () => {
     const text = summary("shift-successions");
     expect(text).toMatch(/exact pattern/);
     expect(text).toMatch(/must follow/);
+    expect(text).toMatch(/'any shift' matches every worked shift/);
   });
   it("counts: a balance rule spreads nights and weekends", () => {
     const text = summary("shift-counts");

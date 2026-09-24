@@ -137,12 +137,12 @@ export const CAPABILITY_ENTRIES = [
     nurseFacingSummary:
       "The scheduler does not read clock times. It never calculates overlaps or the hours " +
       "between shifts, so rest between shifts is written as shift orders it must not use, " +
-      "such as no day shift right after a night. It cannot count days in a row across " +
-      "different shifts: a shift-order rule matches only that exact pattern, so add a limit " +
-      "on working days per week as well. Limits count over fixed dates, never a rolling " +
-      "seven days. It plans one roster period at a time and remembers nothing from earlier " +
-      "rosters: not last month's nights or weekends, and not a day off owed for a public " +
-      "holiday. A skill mix, such as at least 1 RN on a shift with others allowed too, is " +
+      "such as no day shift right after a night. Days in a row across any shifts are also a " +
+      "shift-order rule: 'any shift' 6 days in a row set to must never happen allows at most " +
+      "5. Limits count over fixed dates, never a rolling seven days. Counts start fresh each " +
+      "roster period: last month's nights or weekends, and a day off owed for a public " +
+      "holiday, are not carried over. Shift-order rules do check each nurse's last shifts " +
+      "entered on the Requests page. A skill mix, such as at least 1 RN on a shift with others allowed too, is " +
       "not supported yet. It checks no employment law, ministry guidance or hospital policy, " +
       "only the rules written here.",
     concepts: [
@@ -194,7 +194,8 @@ export const CAPABILITY_ENTRIES = [
       "law: MOH sets no minimum rest between shifts, and the Employment Act sets 1 rest day a " +
       "week, at most 12 working hours a day and 72 hours of overtime a month, and 44 hours a " +
       "week averaged over 3 weeks for shift workers. You may soften a rest rule or turn it off." +
-      " A rule matches only its exact pattern of shifts. Use 'must never' to forbid a pattern; " +
+      " A rule matches only its exact pattern of shifts; 'any shift' matches every worked " +
+      "shift. Use 'must never' to forbid a pattern; " +
       "making a pattern one people must follow can make a workable roster impossible, so use a " +
       "strong preference instead.",
     concepts: ["succession", "shift sequence", "night to day", "consecutive shifts", "rest"],
