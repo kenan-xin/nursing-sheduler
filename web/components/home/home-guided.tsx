@@ -81,7 +81,7 @@ const STEP_CONTENT: Record<string, StepContent> = {
   "/rules": {
     label: "Choose the Rules",
     readyKey: "rules",
-    desc: "Pick plain-English rules for staffing and skill mix.",
+    desc: "Pick plain-English rules for staffing levels and shift patterns.",
     summary: (s) => `${s.rulesTotal} rules set`,
   },
   "/shift-requests": {
