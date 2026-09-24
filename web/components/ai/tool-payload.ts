@@ -144,7 +144,8 @@ export function malformedPayloadRefusal(error: z.ZodError): string {
     ". Nothing was read, changed or opened. If you can see how to correct it from what " +
     "the user already said, call this tool again once with the corrected arguments. " +
     "Otherwise tell the user you could not do that and ask them for what is missing. " +
-    "Never use a different tool to approximate it."
+    "Never use a different tool to approximate it. If this refusal answers a call you " +
+    "already corrected once, do not try again: tell the user what the problem is and ask."
   );
 }
 

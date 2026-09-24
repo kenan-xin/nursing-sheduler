@@ -276,6 +276,9 @@ describe("the model's arguments, at the shipped tool boundary", () => {
     expect(answer).toContain('Valid choices: "ana", "bo".');
     expect(answer).toContain("prepare the change again, once");
     expect(answer).toContain("get_schedule_section");
+    expect(answer).toContain(
+      "If this refusal answers a call you already corrected once, do not try again",
+    );
     expect(await harness.db.assistantProposals.toArray()).toHaveLength(0);
   });
 

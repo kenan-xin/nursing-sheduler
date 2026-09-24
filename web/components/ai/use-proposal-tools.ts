@@ -166,7 +166,8 @@ export function useProposalTools(agentId: string, turnEpoch: number): void {
               "the change again, once. When the list is cut short, read the full list with " +
               "get_schedule_section. Otherwise explain this to the user in your own words and " +
               "ask for what is missing. Do not try a different operation that only " +
-              "approximates what they asked for."
+              "approximates what they asked for. If this refusal answers a call you already " +
+              "corrected once, do not try again: tell the user what the problem is and ask."
             );
           }
           if (outcome.reason === "not-owner") {

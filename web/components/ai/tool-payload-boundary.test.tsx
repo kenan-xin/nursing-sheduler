@@ -671,5 +671,8 @@ describe("valid controls still work, so none of the above passes by refusing eve
     );
     expect(result).toContain("call this tool again once");
     expect(result).not.toContain("Do not retry");
+    expect(result).toContain(
+      "If this refusal answers a call you already corrected once, do not try again",
+    );
   });
 });

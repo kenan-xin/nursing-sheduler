@@ -128,8 +128,7 @@ export const CAPABILITY_ENTRIES = [
     nurseFacingSummary:
       "How many people a shift needs: exactly that number, or a range when a preferred number " +
       "is set. Naming who is qualified means nobody else may work that shift at all. The " +
-      "assistant cannot set up a skill-mix rule yet; explain this and point the user to the " +
-      "Staffing requirements screen.",
+      "scheduler cannot express a skill-mix rule yet, and the assistant cannot set one up.",
     concepts: ["staffing requirement", "minimum staffing", "skill mix", "coverage", "headcount"],
     modes: ADVANCED_ONLY,
     featureGates: [],

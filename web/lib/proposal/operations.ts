@@ -668,7 +668,7 @@ function requirementRejection(
     return reject(
       index,
       "unknown_target",
-      `${name}: "${fields.shiftType}" is not a shift or shift group that can be staffed. Use a shift code, or a group made only of shifts. ${offeredChoices(offeredShifts)}`,
+      `${name}: ${idLabel(fields.shiftType)} is not a shift or shift group that can be staffed. Use a shift code, or a group made only of shifts. ${offeredChoices(offeredShifts)}`,
     );
   }
   const people = buildQualifiedPeopleTransferOptions(state);
@@ -1233,7 +1233,7 @@ function missingStaffGroup(
   return reject(
     index,
     "unknown_target",
-    `${label}: there is no staff group "${missing}". Add the group earlier in the same change, ` +
+    `${label}: there is no staff group ${idLabel(missing)}. Add the group earlier in the same change, ` +
       `or use an existing group name. ${staffGroupChoices(state)}`,
   );
 }
@@ -1250,7 +1250,7 @@ function missingMember(
   return reject(
     index,
     "unknown_target",
-    `${label}: there is no person "${String(missing)}". Add the person earlier in the same change. ${PERSON_ID_HINT} ${peopleChoices(state)}`,
+    `${label}: there is no person ${idLabel(missing)}. Add the person earlier in the same change. ${PERSON_ID_HINT} ${peopleChoices(state)}`,
   );
 }
 
@@ -1386,7 +1386,7 @@ function applyEditPeopleGroup(
     return reject(
       index,
       "unknown_target",
-      `Staff group "${command.groupId}": there is no such staff group. ${staffGroupChoices(state)}`,
+      `Staff group ${idLabel(command.groupId)}: there is no such staff group. ${staffGroupChoices(state)}`,
     );
   }
   const label = `Staff group "${group.id}"`;
@@ -1445,7 +1445,7 @@ function applyRemovePeopleGroup(
     return reject(
       index,
       "unknown_target",
-      `Staff group "${command.groupId}": there is no such staff group. ${staffGroupChoices(state)}`,
+      `Staff group ${idLabel(command.groupId)}: there is no such staff group. ${staffGroupChoices(state)}`,
     );
   }
   return {
