@@ -18,7 +18,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Surface } from "@/components/ui/surface";
-import { CAPABILITY_UNAVAILABLE } from "@/lib/capability/resolve";
+import { CAPABILITY_UNAVAILABLE, resolveCapability } from "@/lib/capability/resolve";
+import { leavesLiveRun } from "@/lib/optimize/run-request";
+import { useHotStore } from "@/lib/store";
 import {
   planChangeHighlight,
   type ChangeHighlightPlan,
@@ -31,7 +33,7 @@ import type { AssistantProposalController } from "./use-assistant-proposals";
 
 export interface ApplyStep {
   screen: ChangeScreen;
-  status: "opening" | "shown" | "stayed" | "failed";
+  status: "opening" | "shown" | "stayed" | "run-live" | "failed";
 }
 
 export function describeStep({ screen, status }: ApplyStep): string {
@@ -43,6 +45,8 @@ export function describeStep({ screen, status }: ApplyStep): string {
       return `Opened ${screen.label}.${what}`;
     case "stayed":
       return `Stayed here so your unsaved edit is kept. The change is on ${screen.label}.${what}`;
+    case "run-live":
+      return `Stayed here so the optimiser run keeps going. The change is on ${screen.label}.${what}`;
     case "failed":
       return `${screen.label} could not be opened.${what}`;
   }
@@ -87,7 +91,16 @@ export function ApplyNavigationNotice({ controller }: { controller: AssistantPro
     const next = planChangeHighlight(outcome.diff, readCapabilityContext().mode);
     setPlan(next);
     setStep(null);
-    if (next.primary) void show(next.primary);
+    if (!next.primary) return;
+    // Leaving Optimise stops a live run. The user pressed Apply, not a screen link, so
+    // the host does not make that move for them; the links below still can.
+    const target = resolveCapability(next.primary.capabilityId, readCapabilityContext());
+    const routeId = target.status === "ok" ? target.value.routeId : undefined;
+    if (leavesLiveRun(useHotStore.getState().runView.lifecycle, routeId)) {
+      setStep({ screen: next.primary, status: "run-live" });
+      return;
+    }
+    void show(next.primary);
   }, [outcome, show]);
 
   // A new Preview replaces this notice; the user is reviewing the next change now.
@@ -127,7 +140,7 @@ export function ApplyNavigationNotice({ controller }: { controller: AssistantPro
                   data-capability-id={screen.capabilityId}
                   onClick={() => void show(screen)}
                 >
-                  {screen.label} ({screen.announcement})
+                  {screen.announcement ? `${screen.label} (${screen.announcement})` : screen.label}
                 </Button>
               ))}
             </div>

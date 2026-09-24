@@ -15,6 +15,8 @@ import {
   useChangeTarget,
 } from "@/lib/change-highlight/store";
 import { useModeStore } from "@/lib/mode/mode";
+import { useHotStore } from "@/lib/store";
+import { INITIAL_OPTIMIZE_RUN_VIEW } from "@/lib/optimize/run-view";
 import type { ApplyOutcomeView, AssistantProposalController } from "./use-assistant-proposals";
 import { ApplyNavigationNotice } from "./apply-navigation-notice";
 
@@ -86,7 +88,10 @@ beforeEach(() => {
   navigate.mockImplementation(async (id: string) => arrived(id));
   useModeStore.setState({ mode: "advanced", adoption: "ready" });
 });
+const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
 afterEach(() => {
+  HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+  useHotStore.getState().resetRunView();
   cleanup();
   clearChangeHighlight();
   useModeStore.setState({ mode: "guided", adoption: "unhydrated" });
@@ -153,6 +158,32 @@ describe("ApplyNavigationNotice", () => {
         .getAllByTestId("apply-navigation-link")
         .map((b) => b.getAttribute("data-capability-id")),
     ).toEqual(["shift-types", "staff-list"]);
+  });
+
+  it("does not leave the Optimise screen while a run is live, and offers the link", async () => {
+    useHotStore
+      .getState()
+      .setRunView({ ...INITIAL_OPTIMIZE_RUN_VIEW, lifecycle: "running", jobId: "opt_1" });
+    render(<ApplyNavigationNotice controller={controller(applied())} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("apply-navigation-status")).toHaveTextContent(
+        "Stayed here so the optimiser run keeps going. The change is on Shift types. 3 shift types added.",
+      ),
+    );
+    expect(navigate).not.toHaveBeenCalled();
+    expect(highlighted()).toEqual([]);
+    expect(
+      screen
+        .getAllByTestId("apply-navigation-link")
+        .map((b) => b.getAttribute("data-capability-id")),
+    ).toEqual(["shift-types", "staff-list"]);
+  });
+
+  it("opens nothing when Apply failed", async () => {
+    render(<ApplyNavigationNotice controller={controller({ kind: "failed", message: "no" })} />);
+    await act(async () => {});
+    expect(navigate).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("apply-navigation")).toBeNull();
   });
 
   it("navigates once per receipt, however often it re-renders", async () => {
