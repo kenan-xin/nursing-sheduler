@@ -176,10 +176,14 @@ export function AssistantLiveConversation({
   // The ONE send path, for the composer and the option card alike. Any send answers
   // (or overrides) an open option card, so it closes here. The follow-up after an
   // Apply or an offered run uses it too; a user send first drops a waiting one.
-  const sendMessage = useAssistantFollowUps(running, proposals.outcome, (text: string) => {
-    assistantActions.clearChoices();
-    void session.send(text);
-  });
+  const sendMessage = useAssistantFollowUps(
+    running || session.sending,
+    proposals.outcome,
+    (text: string) => {
+      assistantActions.clearChoices();
+      return session.send(text);
+    },
+  );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="assistant-live-conversation">

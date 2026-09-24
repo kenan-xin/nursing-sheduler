@@ -161,7 +161,10 @@ export interface AssistantSession {
   connecting: boolean;
   /** True while an interruption has closed the gate and has not settled. */
   interrupting: boolean;
-  send(text: string): Promise<void>;
+  /** A send is in flight, from prepare until its last write settles. */
+  sending: boolean;
+  /** Resolves false when the send was refused. */
+  send(text: string): Promise<boolean>;
   stop(): void;
 }
 
@@ -303,6 +306,9 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
   // started preparing. Refusing before anything is claimed is what makes "at most one
   // run per panel" true rather than merely likely.
   const sending = useRef(false);
+  // The same window, as render state: `isRunning` ends at settlement, a moment before
+  // this flight does, and a send in that gap is refused as busy.
+  const [sendInFlight, setSendInFlight] = useState(false);
 
   const runSend = useCallback(
     async (text: string) => {
@@ -892,20 +898,23 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
   );
 
   const send = useCallback(
-    async (text: string) => {
+    async (text: string): Promise<boolean> => {
       if (input.historical) {
         assistantActions.refuse("not_writer");
-        return;
+        return false;
       }
       if (sending.current) {
         assistantActions.refuse("busy");
-        return;
+        return false;
       }
       sending.current = true;
+      setSendInFlight(true);
       try {
         await runSend(text);
+        return true;
       } finally {
         sending.current = false;
+        setSendInFlight(false);
       }
     },
     [input.historical, runSend],
@@ -938,6 +947,7 @@ export function useAssistantSession(input: AssistantSessionInput): AssistantSess
     activity: liveTurn && !interrupting ? turnActivity : null,
     connecting: !isReady,
     interrupting,
+    sending: sendInFlight,
     send,
     stop,
   };

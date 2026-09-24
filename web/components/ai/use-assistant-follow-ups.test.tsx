@@ -133,10 +133,49 @@ describe("after Apply", () => {
     expect(send).toHaveBeenCalledTimes(1);
   });
 
+  it("retries a follow-up refused as busy once the session next reports idle", async () => {
+    const send = vi.fn<(text: string) => Promise<boolean>>().mockResolvedValueOnce(false);
+    send.mockResolvedValue(true);
+    const hook = renderHook(
+      ({ running, outcome }: Props) => useAssistantFollowUps(running, outcome, send),
+      { initialProps: { running: false, outcome: null } as Props },
+    );
+    // The turn has ended but the session is still settling: the send is refused.
+    await act(async () => hook.rerender({ running: false, outcome: applied() }));
+    expect(send).toHaveBeenCalledTimes(1);
+    // No timer, no loop: it waits for the session's next idle report.
+    await act(async () => hook.rerender({ running: false, outcome: applied() }));
+    expect(send).toHaveBeenCalledTimes(1);
+    await act(async () => hook.rerender({ running: true, outcome: applied() }));
+    await act(async () => hook.rerender({ running: false, outcome: applied() }));
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send).toHaveBeenLastCalledWith("I applied it: Roster period, 2026-10-01 to 2026-10-31.");
+    await act(async () => hook.rerender({ running: true, outcome: applied() }));
+    await act(async () => hook.rerender({ running: false, outcome: applied() }));
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry a refused follow-up once the user has sent", async () => {
+    const send = vi.fn<(text: string) => Promise<boolean>>().mockResolvedValueOnce(false);
+    send.mockResolvedValue(true);
+    const hook = renderHook(
+      ({ running, outcome }: Props) => useAssistantFollowUps(running, outcome, send),
+      { initialProps: { running: false, outcome: null } as Props },
+    );
+    await act(async () => hook.rerender({ running: false, outcome: applied() }));
+    await act(async () => void hook.result.current("never mind"));
+    await act(async () => hook.rerender({ running: true, outcome: applied() }));
+    await act(async () => hook.rerender({ running: false, outcome: applied() }));
+    expect(send.mock.calls.map(([text]) => text)).toEqual([
+      "I applied it: Roster period, 2026-10-01 to 2026-10-31.",
+      "never mind",
+    ]);
+  });
+
   it("drops the waiting message when the user sends first", () => {
     const { send, rerender, result } = mount({ running: true, outcome: null });
     rerender({ running: true, outcome: applied() });
-    act(() => result.current("actually, change the nights"));
+    act(() => void result.current("actually, change the nights"));
     expect(send).toHaveBeenCalledWith("actually, change the nights");
     rerender({ running: false, outcome: applied() });
     expect(send).toHaveBeenCalledTimes(1);
