@@ -1,0 +1,46 @@
+apiVersion: alpha
+dates:
+  range:
+    startDate: 2026-11-01
+    endDate: 2026-11-07
+people:
+  items:
+    - id: ana
+    - id: ben
+    - id: cara
+shiftTypes:
+  items:
+    - id: D
+      description: Day
+    - id: N
+      description: Night
+preferences:
+  - type: at most one shift per day
+  - type: shift type requirement
+    description: day
+    shiftType:
+      - D
+    requiredNumPeople: 1
+    qualifiedPeople:
+      - ALL
+    date:
+      - ALL
+    weight: -1
+  - type: shift type requirement
+    description: 2 on every night
+    shiftType:
+      - N
+    requiredNumPeople: 2
+    qualifiedPeople:
+      - ALL
+    requiredNumPeopleOverrides:
+      - - 2026-11-05
+        - 1
+    date:
+      - ALL
+    weight: -1
+  - type: shift request
+    person: cara
+    date: 2026-11-05
+    shiftType: LEAVE
+    weight: .inf

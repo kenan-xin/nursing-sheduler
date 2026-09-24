@@ -31,6 +31,7 @@ def test_the_harness_wrote_every_case():
         "personalCapsTooLow",
         "rnMixOnLeave",
         "ruleTooStrict",
+        "shortOnLeaveDay",
         "tooFewNurses",
         "understaffedNight",
     ]
@@ -44,3 +45,7 @@ def test_before_is_infeasible(case):
 @pytest.mark.parametrize("case", CASES)
 def test_after_the_top_repair_is_feasible(case):
     assert _status(FIXTURES / f"{case}.after.yaml") in {"FEASIBLE", "OPTIMAL"}
+
+
+def test_running_one_short_with_a_date_exception_is_feasible():
+    assert _status(FIXTURES / "shortOnLeaveDay.run_one_short.yaml") in {"FEASIBLE", "OPTIMAL"}

@@ -207,6 +207,6 @@ describe("setup hints carry ward defaults, never invented law", () => {
     expect(SETUP_INSTRUCTIONS[0]).not.toMatch(/all at once, in plain words/);
   });
   it("was versioned", () => {
-    expect(PLAYBOOK_VERSION).toBe("2026-09-24.7");
+    expect(PLAYBOOK_VERSION).toBe("2026-09-24.8");
   });
 });
