@@ -339,11 +339,12 @@ export function ShiftTypeGrid() {
       </div>
 
       <section
-        // `.ns-grid3` — two-up at 640px, three-up at 1100px (Nurse Scheduling v2.dc.html:
-        // 191-193). `sm` already IS the 640px step; `grid3:` carries the 1100px one.
-        // Tailwind's `lg` (1024px) used to stand in for it, turning three-up 76px early
-        // and squeezing each card to ~220px at spacious, pushing controls past the edge.
-        className="grid grid-cols-1 gap-4 sm:grid-cols-2 grid3:grid-cols-3"
+        // Columns follow the space the grid actually has, not the viewport: with the
+        // assistant dock open a wide window still leaves a narrow main column, and the
+        // viewport steps (`sm:` / `grid3:`) kept three-up there, squeezing each card until
+        // its Delete button spilled past the edge. A card needs ~18rem for its actions;
+        // the `(100% - 2 gaps) / 3` floor keeps the design's three-up maximum.
+        className="grid grid-cols-[repeat(auto-fill,minmax(max(min(100%,18rem),calc((100%_-_2rem)/3)),1fr))] gap-4"
         data-testid="shift-grid"
         // Bounded a11y quick win: an unnamed <section> is not exposed as a
         // region, so the whole card grid was unreachable by landmark navigation
