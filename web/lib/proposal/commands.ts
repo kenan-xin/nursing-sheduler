@@ -238,6 +238,17 @@ export type AssistantCommandV1 =
       ruleId: string;
       skillMix: { people: PersonRef; minNumPeople: number }[];
     }
+  /**
+   * Give one staffing requirement a different head count on ONE date -- the Staffing
+   * requirements form's "Different number on some dates" row. The rule's own number
+   * removes the exception.
+   */
+  | {
+      type: "set_staffing_requirement_on_date";
+      ruleId: string;
+      date: string;
+      requiredNumPeople: number;
+    }
   /** Delete one rule of any family -- every rule screen's Delete. */
   | {
       type: "remove_rule";
@@ -296,6 +307,7 @@ export const ASSISTANT_COMMAND_TYPES = [
   "add_staffing_requirement",
   "edit_staffing_requirement",
   "set_skill_mix",
+  "set_staffing_requirement_on_date",
   "remove_rule",
   "add_person",
   "edit_person",
@@ -699,6 +711,20 @@ export const assistantCommandSchema = z.discriminatedUnion("type", [
       " Replaces the requirement's whole skill mix: list every entry to keep, " +
         "so to add a group include the existing entries too. [] removes it.",
     ),
+  }),
+  z.strictObject({
+    type: z.enum(["set_staffing_requirement_on_date"]),
+    ruleId: ruleIdSchema(),
+    date: isoDateSchema.describe("One roster date the requirement covers, YYYY-MM-DD."),
+    requiredNumPeople: z
+      .number()
+      .describe(
+        "A different number of people for this one requirement on this one date only, for " +
+          "example fewer on a public holiday: exactly this many, or at least this many when " +
+          "the requirement has a preferred count. Every other date keeps the requirement's " +
+          "own number. Send the requirement's own number to remove the exception. To change " +
+          "every date, use set_staffing_requirement_people or edit_staffing_requirement instead.",
+      ),
   }),
   z.strictObject({
     type: z.enum(["remove_rule"]),

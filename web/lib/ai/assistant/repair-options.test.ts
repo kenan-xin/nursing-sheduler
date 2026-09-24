@@ -4,6 +4,7 @@ import type { AssistantCommandV1 } from "@/lib/proposal/commands";
 import { applyAssistantCommands } from "@/lib/proposal/operations";
 import { deriveProposalDiff } from "@/lib/proposal/diff";
 import { findStaffingShortfalls, type StaffingFinding } from "@/lib/rules/shortfalls";
+import { formatShortDate } from "@/lib/dates/date-id";
 import {
   SCENARIOS,
   cards,
@@ -42,6 +43,13 @@ const option = (partial: Partial<RepairOption>): RepairOption => ({
 });
 
 type Op = RepairOption["operations"][number];
+
+const onDate = (ruleId: string, date: string, requiredNumPeople: number): Op => ({
+  type: "set_staffing_requirement_on_date",
+  ruleId,
+  date,
+  requiredNumPeople,
+});
 
 /** Every night needs exactly 1 on the ward, and exactly 2 RNs: the two cannot both hold. */
 const conflictingNights = (outerSkillMix = false): ScenarioUiState =>
@@ -255,19 +263,170 @@ describe("rankRepairOptions", () => {
     }
   });
 
-  it("runs one short with ops only when the requirement targets that date alone", () => {
+  it("runs one short on a single-date rule by lowering it, and on an every-night rule with a date exception", () => {
     const single = rank(SCENARIOS.understaffedNight()).find((o) => o.repairId === "run_one_short");
     expect(single?.operations).toEqual([
       { type: "set_staffing_requirement_people", ruleId: "night-05", requiredNumPeople: 2 },
     ]);
-    const everyNight = ward({
-      staff: people("ana", "ben", "cara"),
+    const state = SCENARIOS.shortOnLeaveDay();
+    const short = rank(state).find((o) => o.repairId === "run_one_short");
+    expect(short?.operations).toEqual([
+      {
+        type: "set_staffing_requirement_on_date",
+        ruleId: "night",
+        date: "2026-11-05",
+        requiredNumPeople: 1,
+      },
+    ]);
+    expect(short?.why).toContain('"2 on every night" stays at 2 on its other days');
+    expect(short?.confirmationQuestion).toMatch(/with 1 nurse\?$/);
+    expect(short && isSafeOption(state, short)).toBe(true);
+  });
+
+  it("runs the one-short date and names a date two short as staying short", () => {
+    // The 5th is one short, but the 3rd (ana and ben away) is two short: one fewer cannot close it.
+    const base = SCENARIOS.shortOnLeaveDay();
+    const state = { ...base, reqData: [...base.reqData, leave("ana", "03"), leave("ben", "03")] };
+    const short = rank(state).find((o) => o.repairId === "run_one_short");
+    expect(short?.operations).toEqual([onDate("night", "2026-11-05", 1)]);
+    for (const text of [short?.title, short?.why, short?.confirmationQuestion])
+      expect(text).toMatch(/Tue 3 Nov stays short/);
+  });
+
+  it("runs every one-short date one short in one proposal, whichever rule each date is under", () => {
+    // The 3rd is short under its own 3rd-only rule, the 5th (cara away) under the every-night rule.
+    const nightDates = ["01", "02", "04", "05", "06", "07"].map((d) => `2026-11-${d}`);
+    const probe = (reqData = [leave("cara", "05")]) =>
+      ward({
+        staff: people("ana", "ben", "cara"),
+        reqData,
+        cardsByKind: cards({
+          requirements: [
+            requirement("day", "D", 1),
+            requirement("night-03", "N", 3, { date: ["2026-11-03"] }),
+            requirement("night", "N", 2, { date: nightDates }),
+          ],
+        }),
+      });
+    const state = probe();
+    const short = rank(state).find((o) => o.repairId === "run_one_short")!;
+    expect(short.operations).toEqual([
+      { type: "set_staffing_requirement_people", ruleId: "night-03", requiredNumPeople: 2 },
+      onDate("night", "2026-11-05", 1),
+    ]);
+    expect(short.title).toMatch(/^Run N one short on Tue 3 Nov and Thu 5 Nov /);
+    expect(short.confirmationQuestion).toMatch(/Tue 3 Nov and Thu 5 Nov/);
+    expect(short.title).not.toMatch(/stays short/);
+    expect(isSafeOption(state, short)).toBe(true);
+    const after = applyAssistantCommands(state, short.operations);
+    if (!after.ok) throw new Error(after.rejection.message);
+    expect(findStaffingShortfalls(after.next)).toEqual([]);
+
+    // With the 6th two short, the option still runs the 3rd and 5th and says the 6th stays short.
+    const partly = probe([leave("cara", "05"), leave("ana", "06"), leave("ben", "06")]);
+    const some = rank(partly).find((o) => o.repairId === "run_one_short")!;
+    expect(some.operations).toHaveLength(2);
+    for (const text of [some.title, some.why, some.confirmationQuestion])
+      expect(text).toMatch(/Fri 6 Nov stays short/);
+
+    // N3: with four dates that stay short (chronic beyond the fixable 3rd and 5th),
+    // the title AND the confirmation question cap the "stays short" list at 3 and
+    // name the rest by count, instead of spelling out every date.
+    const chronic = probe([
+      leave("cara", "05"),
+      leave("ana", "01"),
+      leave("ben", "01"),
+      leave("ana", "02"),
+      leave("ben", "02"),
+      leave("ana", "06"),
+      leave("ben", "06"),
+      leave("ana", "07"),
+      leave("ben", "07"),
+    ]);
+    const many = rank(chronic).find((o) => o.repairId === "run_one_short")!;
+    const [d1, d2, d3, d4] = ["2026-11-01", "2026-11-02", "2026-11-06", "2026-11-07"].map((iso) =>
+      formatShortDate(iso, true),
+    );
+    const cappedStays = `${d1}, ${d2}, ${d3} and 1 more`;
+    for (const text of [many.title, many.confirmationQuestion])
+      expect(text).toContain(`${cappedStays} stay short`);
+    expect(many.title).not.toContain(d4);
+    expect(many.confirmationQuestion).not.toContain(d4);
+  });
+
+  it("runs one short on at most 3 dates: more is a staffing standard, not a one-off call", () => {
+    const away = (dates: string[]) => {
+      const base = SCENARIOS.shortOnLeaveDay();
+      return { ...base, reqData: dates.map((d) => leave("cara", d)) };
+    };
+    const three = rank(away(["02", "03", "05"])).find((o) => o.repairId === "run_one_short");
+    expect(three?.operations).toHaveLength(3);
+    expect(three?.title).toMatch(/on Mon 2 Nov, Tue 3 Nov and Thu 5 Nov /);
+    const four = rank(away(["02", "03", "05", "06"])).map((o) => o.repairId);
+    expect(four).not.toContain("run_one_short");
+    expect(four).toContain("borrow_temporary_nurse");
+  });
+
+  it("does not claim a rule with other exceptions keeps one number on its other days", () => {
+    const base = SCENARIOS.shortOnLeaveDay();
+    const state = {
+      ...base,
+      cardsByKind: {
+        ...base.cardsByKind,
+        requirements: base.cardsByKind.requirements.map((r) =>
+          r.uid === "night"
+            ? { ...r, requiredNumPeopleOverrides: [["2026-11-07", 1]] as [string, number][] }
+            : r,
+        ),
+      },
+    };
+    const short = rank(state).find((o) => o.repairId === "run_one_short");
+    expect(short?.why).toContain('"2 on every night" keeps its own numbers on its other days');
+  });
+
+  it("uses the date's own count when the rule already has an exception there", () => {
+    // The 3rd needs N3 + D1 = 4 from 3 nurses: one short, and before the 5th.
+    const base = SCENARIOS.shortOnLeaveDay();
+    const state = {
+      ...base,
+      cardsByKind: {
+        ...base.cardsByKind,
+        requirements: base.cardsByKind.requirements.map((r) =>
+          r.uid === "night"
+            ? { ...r, requiredNumPeopleOverrides: [["2026-11-03", 3]] as [string, number][] }
+            : r,
+        ),
+      },
+    };
+    const short = rank(state).find((o) => o.repairId === "run_one_short");
+    expect(short?.operations[0]).toMatchObject({ date: "2026-11-03", requiredNumPeople: 2 });
+  });
+
+  it("never runs one short where the skill-mix groups would no longer fit", () => {
+    // The 5th: N3 (RN>=2 and EN>=1, who share no one) + D1 from 4 nurses, en2 on leave.
+    // N at 2 cannot hold 2 RNs and 1 EN.
+    const state = ward({
+      staff: people("rn1", "rn2", "en1", "en2"),
+      staffGroups: [
+        { id: "RN", members: ["rn1", "rn2"] },
+        { id: "EN", members: ["en1", "en2"] },
+      ],
+      reqData: [leave("en2", "05")],
       cardsByKind: cards({
-        requirements: [requirement("day", "D", 1), requirement("night", "N", 3)],
+        requirements: [
+          requirement("day", "D", 1),
+          requirement("night", "N", 3, {
+            skillMix: [
+              { people: "RN", minNumPeople: 2 },
+              { people: "EN", minNumPeople: 1 },
+            ],
+          }),
+        ],
       }),
     });
-    const advice = rank(everyNight).find((o) => o.repairId === "run_one_short");
-    expect(advice).toMatchObject({ operations: [], capabilityId: "staffing-requirements" });
+    const findings = findStaffingShortfalls(state);
+    expect(findings.map((f) => [f.kind, f.required - f.available])).toEqual([["day_short", 1]]);
+    expect(rank(state).map((o) => o.repairId)).not.toContain("run_one_short");
   });
 
   it("refuses a cap raise above the limit", () => {
@@ -659,6 +818,40 @@ describe("isSafeOption", () => {
         ] as Op[],
       },
     ],
+    // Date exceptions: only one covered date of a plain head count, lowered by exactly 1.
+    [
+      "one date lowered by 2",
+      SCENARIOS.shortOnLeaveDay(),
+      { operations: [onDate("night", "2026-11-05", 0)] },
+    ],
+    [
+      "one date raised by a repair",
+      SCENARIOS.shortOnLeaveDay(),
+      { operations: [onDate("night", "2026-11-05", 3)] },
+    ],
+    [
+      "a date the rule does not cover",
+      lowered,
+      { operations: [onDate("night-05", "2026-11-04", 1)] },
+    ],
+    [
+      "one date of a skill-mix rule",
+      conflictingNights(),
+      { operations: [onDate("night-rn", "2026-11-03", 1)] },
+    ],
+    [
+      "one date lowered below the rule's own skill mix",
+      ward({
+        staff: people("ana", "ben", "cara"),
+        staffGroups: [{ id: "RN", members: ["ana", "ben"] }],
+        cardsByKind: cards({
+          requirements: [
+            requirement("night", "N", 2, { skillMix: [{ people: "RN", minNumPeople: 2 }] }),
+          ],
+        }),
+      }),
+      { operations: [onDate("night", "2026-11-05", 1)] },
+    ],
   ];
 
   it.each(UNSAFE)("refuses %s", (_label, state, partial) => {
@@ -680,6 +873,11 @@ describe("isSafeOption", () => {
           { type: "set_staffing_requirement_people", ruleId: "night-05", requiredNumPeople: 1 },
         ] as Op[],
       },
+    ],
+    [
+      "one short on one date of an every-night head count",
+      SCENARIOS.shortOnLeaveDay(),
+      { operations: [onDate("night", "2026-11-05", 1)] },
     ],
     [
       "a softened request",
@@ -833,6 +1031,23 @@ describe("review fixes (2026-09-24)", () => {
         ],
       }),
     });
+    const align = rank(state).find((o) => o.repairId === "align_overlapping_requirements");
+    expect(align?.operations).toEqual([]);
+  });
+
+  it("does not raise the wider requirement when a date exception would keep the conflict", () => {
+    const base = conflictingNights();
+    const state = {
+      ...base,
+      cardsByKind: {
+        ...base.cardsByKind,
+        requirements: base.cardsByKind.requirements.map((r) =>
+          r.uid === "night-total"
+            ? { ...r, requiredNumPeopleOverrides: [["2026-11-03", 0]] as [string, number][] }
+            : r,
+        ),
+      },
+    };
     const align = rank(state).find((o) => o.repairId === "align_overlapping_requirements");
     expect(align?.operations).toEqual([]);
   });
@@ -1003,8 +1218,13 @@ describe("review fixes (2026-09-24)", () => {
       ],
     });
     expect(isSafeOption(state, lowerNight)).toBe(false);
+    // The day rule covers every date, so it runs one short through a date exception.
     const short = rank(state).find((o) => o.repairId === "run_one_short");
-    expect(short).toMatchObject({ operations: [], title: expect.stringMatching(/^Run D /) });
+    expect(short).toMatchObject({
+      operations: [onDate("day", "2026-11-05", 1)],
+      title: expect.stringMatching(/^Run D /),
+    });
+    expect(short && isSafeOption(state, short)).toBe(true);
   });
 
   it("offers no borrow when the gap is above MAX_BORROWED", () => {
@@ -1252,6 +1472,64 @@ describe("violatesSafetyFloor (any operations, including model-written candidate
       [{ type: "add_person", name: "Borrowed nurse 1", groups: ["RN"], temporary: false }],
       /qualification/,
     ],
+    ["one date's head count set to 0", rn, [onDate("day", "2026-11-03", 0)], /to 0/],
+    [
+      "one date of a skill-mix rule lowered",
+      conflictingNights(),
+      [onDate("night-rn", "2026-11-03", 1)],
+      /skill-mix/,
+    ],
+    [
+      "one date lowered below the skill mix that holds there",
+      ward({
+        staff: people("ana", "ben", "cara", "dev"),
+        staffGroups: [{ id: "RN", members: ["ana", "ben"] }],
+        cardsByKind: cards({
+          requirements: [
+            requirement("night-total", "N", 3),
+            requirement("night-rn", "N", 2, { qualifiedPeople: ["RN"] }),
+          ],
+        }),
+      }),
+      [onDate("night-total", "2026-11-03", 1)],
+      /skill-mix/,
+    ],
+    [
+      "one date lowered below the rule's own skill mix",
+      ward({
+        staff: people("rn1", "rn2", "en1", "en2"),
+        staffGroups: [{ id: "RN", members: ["rn1", "rn2"] }],
+        cardsByKind: cards({
+          requirements: [
+            requirement("night", "N", 4, { skillMix: [{ people: "RN", minNumPeople: 2 }] }),
+          ],
+        }),
+      }),
+      [onDate("night", "2026-11-03", 1)],
+      /skill-mix/,
+    ],
+    [
+      "one date lowered until groups that share no one no longer fit",
+      ward({
+        staff: people("rn1", "rn2", "en1", "en2"),
+        staffGroups: [
+          { id: "RN", members: ["rn1", "rn2"] },
+          { id: "EN", members: ["en1", "en2"] },
+        ],
+        cardsByKind: cards({
+          requirements: [
+            requirement("night", "N", 4, {
+              skillMix: [
+                { people: "RN", minNumPeople: 2 },
+                { people: "EN", minNumPeople: 1 },
+              ],
+            }),
+          ],
+        }),
+      }),
+      [onDate("night", "2026-11-03", 2)],
+      /skill-mix/,
+    ],
   ];
 
   it.each(BROKEN)("names the floor a candidate breaks: %s", (_label, state, ops, line) => {
@@ -1278,6 +1556,7 @@ describe("violatesSafetyFloor (any operations, including model-written candidate
       ]),
     ).toBeNull();
     expect(ok(rn, [dayEdit({ requiredNumPeople: 2 })])).toBeNull();
+    expect(ok(rn, [onDate("day", "2026-11-03", 2)])).toBeNull();
     expect(
       ok(rn, [{ type: "set_staffing_requirement_people", ruleId: "day", requiredNumPeople: 2 }]),
     ).toBeNull();

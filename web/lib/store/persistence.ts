@@ -495,6 +495,10 @@ function validateRequirementCard(el: Record<string, unknown>): void {
     el.shiftTypeCoefficients,
     "cardsByKind.requirements element shiftTypeCoefficients",
   );
+  validateOptionalCoefficients(
+    el.requiredNumPeopleOverrides,
+    "cardsByKind.requirements element requiredNumPeopleOverrides",
+  );
 }
 
 function validateSuccessionCard(el: Record<string, unknown>): void {

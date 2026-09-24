@@ -33,6 +33,7 @@ type RequirementCard = {
   weight: number;
   disabled?: boolean;
   skillMix?: { people: string | number; minNumPeople: number }[];
+  requiredNumPeopleOverrides?: [string, number][];
 };
 
 type NsWindow = {
@@ -294,6 +295,42 @@ test.describe.serial("T12 staffing requirements editor (M1 clone)", () => {
       page.getByText("No people set up — add some on the Staff screen first."),
     ).toBeVisible();
     await expect(page.getByTestId("transfer-list-qualified")).toHaveCount(0);
+  });
+
+  test("an exception on one date saves one override and one undo entry", async ({ page }) => {
+    await gotoReady(page);
+    await seed(page, BASE_SEED);
+    await seed(page, {
+      cardsByKind: {
+        requirements: [
+          {
+            uid: "n",
+            description: "Nights",
+            shiftType: ["N"],
+            requiredNumPeople: 2,
+            qualifiedPeople: ["ALL"],
+            date: ["ALL"],
+            weight: -1,
+          },
+        ],
+        successions: [],
+        counts: [],
+        affinities: [],
+        coverings: [],
+      },
+    });
+    await expect(page.getByTestId("requirement-card-0")).toBeVisible();
+    const before = await pastCount(page);
+    await page.getByTestId("requirement-edit-0").click();
+    await page.getByTestId("date-overrides-add").click();
+    await page.getByLabel("Date of exception 1").selectOption("2026-01-14");
+    await page.getByLabel("Number of people on exception 1").fill("1");
+    await page.getByTestId("card-editor-submit").click();
+
+    await expect(page.getByTestId("requirement-card-0")).toContainText("14 Jan: 1");
+    const cards = await readRequirements(page);
+    expect(cards[0].requiredNumPeopleOverrides).toEqual([["2026-01-14", 1]]);
+    expect((await pastCount(page)) - before).toBe(1);
   });
 
   test("editing a stored requirement with no qualified scope loads [ALL] and saves it back", async ({

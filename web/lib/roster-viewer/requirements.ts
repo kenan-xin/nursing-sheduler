@@ -18,7 +18,8 @@
 //     selectors are one aggregate equation, each resolved date is its own cell,
 //     `qualifiedPeople` both filters the numerator AND forbids every unqualified
 //     assignment, and `shiftTypeCoefficients` weight COVERAGE UNITS rather than
-//     people. A shape the solver reads one way is never read another way here.
+//     people. `requiredNumPeopleOverrides` replaces the target on its date.
+//     A shape the solver reads one way is never read another way here.
 //   • It NEVER INVENTS A QUOTA. A group minimum is never divided across its
 //     member shifts. An equation that cannot be resolved is explicitly
 //     unavailable with a plain reason and never evaluates satisfied.
@@ -84,6 +85,8 @@ export interface RequirementEquation {
   readonly dateScopeResolved: boolean;
   /** The hard lower (or exact) target. */
   readonly required: number;
+  /** Date index -> that day's lower/exact target, from `requiredNumPeopleOverrides`. */
+  readonly requiredByDate: ReadonlyMap<number, number>;
   /** The soft upper target, or null when `required` is exact. */
   readonly preferred: number | null;
   /** Non-null when the equation cannot be evaluated, with a plain reason. */
@@ -282,6 +285,12 @@ export function buildEquations(document: CanonicalScenarioDocument): Requirement
     const coefficientEntries = requirement.shiftTypeCoefficients ?? [];
     const coefficientsIllegal = coefficientEntries.length > 0 && groups.length !== 1;
 
+    const requiredByDate = new Map<number, number>();
+    for (const [iso, count] of requirement.requiredNumPeopleOverrides ?? []) {
+      const day = resolver.resolveDates(iso);
+      if (day.resolved) for (const dateIdx of day.values) requiredByDate.set(dateIdx, count);
+    }
+
     groups.forEach((group, groupIndex) => {
       const resolved = resolver.resolveShiftTypes(group.selector);
       const shiftIndices = resolved.resolved ? [...resolved.values].sort((a, b) => a - b) : [];
@@ -303,6 +312,7 @@ export function buildEquations(document: CanonicalScenarioDocument): Requirement
         dateIndices: dateResolution.resolved ? dateResolution.values : new Set<number>(),
         dateScopeResolved: dateResolution.resolved,
         required: requirement.requiredNumPeople,
+        requiredByDate,
         preferred: requirement.preferredNumPeople ?? null,
       };
 
@@ -466,13 +476,14 @@ export function evaluateRequirementCell(
     }
   });
 
-  const upper = equation.preferred ?? equation.required;
-  const short = Math.max(0, equation.required - units);
+  const required = equation.requiredByDate.get(dateIdx) ?? equation.required;
+  const upper = equation.preferred ?? required;
+  const short = Math.max(0, required - units);
   const over = Math.max(0, units - upper);
   return {
     status: "checked",
     units,
-    required: equation.required,
+    required,
     preferred: equation.preferred,
     short,
     over,
@@ -600,7 +611,7 @@ export function exactShiftRequirement(
     // A second equation applicable to THIS day makes the target ambiguous; the
     // backend applies both constraints, so there is no single number to show.
     if (found !== null) return null;
-    found = equation.required;
+    found = equation.requiredByDate.get(dateIdx) ?? equation.required;
   }
   return found;
 }

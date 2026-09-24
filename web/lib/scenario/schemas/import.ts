@@ -105,18 +105,68 @@ const zImportSkillMixEntry = z.strictObject({
   minNumPeople: z.number().int(),
 });
 
-const zImportRequirement = z.strictObject({
-  type: z.literal(PREFERENCE_TYPE.shiftTypeRequirement).optional(),
-  description: z.string().nullish(),
-  shiftType: z.union([z.string(), zNestedShiftRefList]),
-  shiftTypeCoefficients: z.array(zCoefficientEntry).nullish(),
-  requiredNumPeople: z.number().int(),
-  qualifiedPeople: zRefOrList.nullish(),
-  preferredNumPeople: z.number().int().nullish(),
-  skillMix: z.array(zImportSkillMixEntry).nullish(),
-  date: zDateRefOrList.nullish(),
-  weight: zImportWeight.optional(),
-});
+/** `YYYY-MM-DD` regex for a literal ISO date ref, as opposed to a group id / keyword. */
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function importIsoDate(value: string | Date): string {
+  return value instanceof Date ? value.toISOString().slice(0, 10) : value;
+}
+
+const zImportRequirement = z
+  .strictObject({
+    type: z.literal(PREFERENCE_TYPE.shiftTypeRequirement).optional(),
+    description: z.string().nullish(),
+    shiftType: z.union([z.string(), zNestedShiftRefList]),
+    shiftTypeCoefficients: z.array(zCoefficientEntry).nullish(),
+    requiredNumPeople: z.number().int(),
+    qualifiedPeople: zRefOrList.nullish(),
+    preferredNumPeople: z.number().int().nullish(),
+    skillMix: z.array(zImportSkillMixEntry).nullish(),
+    requiredNumPeopleOverrides: z.array(z.tuple([zImportDate, z.number().int()])).nullish(),
+    date: zDateRefOrList.nullish(),
+    weight: zImportWeight.optional(),
+  })
+  .superRefine((req, ctx) => {
+    const overrides = req.requiredNumPeopleOverrides;
+    if (!overrides?.length) return;
+    // The backend's own resolved-dates check (preference_types.shift_type_requirements)
+    // needs group/keyword expansion this schema cannot do in isolation; a `date` made
+    // only of literal ISO refs is the one shape checkable here without it. Anything
+    // wider (omitted date = ALL, a group id, a keyword) is left to that solver check,
+    // which already reports it loudly.
+    const dateRefs = req.date == null ? null : Array.isArray(req.date) ? req.date : [req.date];
+    const literalDates =
+      dateRefs && dateRefs.every((d) => typeof d === "string" && ISO_DATE_RE.test(d))
+        ? new Set(dateRefs as string[])
+        : null;
+    const seen = new Set<string>();
+    overrides.forEach(([date, count], i) => {
+      const day = importIsoDate(date);
+      const path = ["requiredNumPeopleOverrides", i] as const;
+      if (count < 0) {
+        ctx.addIssue({
+          code: "custom",
+          message: `requiredNumPeopleOverrides count for '${day}' must be 0 or more.`,
+          path: [...path, 1],
+        });
+      }
+      if (seen.has(day)) {
+        ctx.addIssue({
+          code: "custom",
+          message: `requiredNumPeopleOverrides has more than one entry for '${day}'.`,
+          path: [...path, 0],
+        });
+      }
+      seen.add(day);
+      if (literalDates && !literalDates.has(day)) {
+        ctx.addIssue({
+          code: "custom",
+          message: `requiredNumPeopleOverrides date '${day}' is not one of this requirement's dates.`,
+          path: [...path, 0],
+        });
+      }
+    });
+  });
 
 const zImportHoursContract = z.strictObject({
   unit: z.literal("half-hour"),

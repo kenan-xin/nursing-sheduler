@@ -106,6 +106,7 @@ def _parse_shift_type_requirement_coefficients(
 
 def shift_type_requirements(ctx: Context, preference: models.ShiftTypeRequirementsPreference, preference_idx):
     # Hard constraint
+    # requiredNumPeopleOverrides replaces requiredNumPeople on each listed date.
     # For all requirement groups, the required number of people must be
     # fulfilled. Note that a concrete shift is represented as (d, s).
     #
@@ -147,7 +148,15 @@ def shift_type_requirements(ctx: Context, preference: models.ShiftTypeRequiremen
             "Paid leave is not a worked shift and provides no coverage."
         )
     coefficients = _parse_shift_type_requirement_coefficients(ctx, preference, shift_type_groups)
+    # Per-date overrides replace requiredNumPeople on their date only.
+    overrides = {}
+    for date, count in preference.requiredNumPeopleOverrides or []:
+        d = (date - ctx.dates.range.startDate).days
+        if d not in ds:
+            raise ValueError(f"requiredNumPeopleOverrides date '{date}' is not one of this requirement's dates.")
+        overrides[d] = count
     for d in ds:
+        required = overrides.get(d, preference.requiredNumPeople)
         for group_idx, ss in enumerate(shift_type_groups):
             for s in ss:
                 # A requirement expands through date and shift type groups into
@@ -188,9 +197,9 @@ def shift_type_requirements(ctx: Context, preference: models.ShiftTypeRequiremen
             # shift types in the group.
             actual_n_people = sum(coefficients[s] * ctx.shifts[(d, s, p)] for s in ss for p in qualified_ps_by_s[s])
             if preference.preferredNumPeople is not None:
-                ctx.solver.add_constraint(actual_n_people >= preference.requiredNumPeople)
+                ctx.solver.add_constraint(actual_n_people >= required)
             else:
-                ctx.solver.add_constraint(actual_n_people == preference.requiredNumPeople)
+                ctx.solver.add_constraint(actual_n_people == required)
 
             # Skill mix: at least k of the named people among this group's staff.
             # Nobody is banned; the headcount above still fixes the total, so the

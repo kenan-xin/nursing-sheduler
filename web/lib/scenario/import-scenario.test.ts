@@ -58,6 +58,29 @@ preferences:
 `;
 
 describe("importScenarioYaml (lenient Load path)", () => {
+  it("imports date objects as ISO", () => {
+    // `yaml` 1.2 keeps ISO dates as strings. A loader that makes Date objects must not leak them.
+    const yaml = `apiVersion: alpha
+dates: {range: {startDate: 2026-10-01, endDate: 2026-10-31}}
+people: {items: [{id: ana}]}
+shiftTypes: {items: [{id: N}]}
+preferences:
+  - type: at most one shift per day
+  - type: shift type requirement
+    shiftType: N
+    requiredNumPeople: 2
+    requiredNumPeopleOverrides: [[2026-10-14, 1]]
+    weight: -1
+`;
+    const result = importScenarioYaml(yaml);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.target.cardsByKind.requirements[0].requiredNumPeopleOverrides).toEqual([
+        ["2026-10-14", 1],
+      ]);
+    }
+  });
+
   it("accepts backend-valid YAML (omitted type, scalar/list, nested, .inf)", () => {
     const result = importScenarioYaml(BACKEND_YAML);
     expect(result.ok).toBe(true);
@@ -391,6 +414,43 @@ shiftTypes: {items: [{id: D}]}
         `${BASE}preferences:\n  - type: at most one shift per day\n  - person: P1\n    date: 2026-05-14\n    shiftType: D\n    weight: null\n`,
       );
       expect(r.ok).toBe(false);
+    });
+
+    // N2: requiredNumPeopleOverrides — bad values used to reach the producer preflight
+    // or the solver's ValueError uncaught; the import schema now rejects them itself,
+    // with a clear per-card message (path-and-message, like every other rejection here).
+    const requirementYaml = (overrides: string, date?: string) =>
+      `${BASE}preferences:\n  - type: at most one shift per day\n  - type: shift type requirement\n    shiftType: D\n    requiredNumPeople: 2\n${date ? `    date: ${date}\n` : ""}    requiredNumPeopleOverrides: ${overrides}\n`;
+
+    it("rejects a negative requiredNumPeopleOverrides count", () => {
+      const r = importScenarioYaml(requirementYaml("[[2026-05-14, -1]]"));
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.issues[0].message).toMatch(/must be 0 or more/);
+    });
+
+    it("rejects a non-integer requiredNumPeopleOverrides count", () => {
+      const r = importScenarioYaml(requirementYaml("[[2026-05-14, 1.5]]"));
+      expect(r.ok).toBe(false);
+    });
+
+    it("rejects a duplicate requiredNumPeopleOverrides date", () => {
+      const r = importScenarioYaml(requirementYaml("[[2026-05-14, 1], [2026-05-14, 2]]"));
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.issues.some((i) => i.message.match(/more than one entry/))).toBe(true);
+    });
+
+    it("rejects a requiredNumPeopleOverrides date outside the requirement's own literal dates", () => {
+      const r = importScenarioYaml(requirementYaml("[[2026-05-15, 1]]", "[2026-05-14]"));
+      expect(r.ok).toBe(false);
+      if (!r.ok)
+        expect(
+          r.issues.some((i) => i.message.match(/is not one of this requirement's dates/)),
+        ).toBe(true);
+    });
+
+    it("still accepts a requiredNumPeopleOverrides date when the requirement's own date is ALL/omitted", () => {
+      const r = importScenarioYaml(requirementYaml("[[2026-05-14, 1]]"));
+      expect(r.ok).toBe(true);
     });
   });
 

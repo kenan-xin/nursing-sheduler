@@ -1,0 +1,76 @@
+apiVersion: alpha
+dates:
+  range:
+    startDate: 2026-11-01
+    endDate: 2026-11-07
+people:
+  items:
+    - id: ana
+    - id: ben
+    - id: cara
+    - id: Borrowed nurse 1
+      history: []
+      temporary: true
+shiftTypes:
+  items:
+    - id: D
+      description: Day
+    - id: N
+      description: Night
+preferences:
+  - type: at most one shift per day
+  - type: shift type requirement
+    description: day
+    shiftType:
+      - D
+    requiredNumPeople: 1
+    qualifiedPeople:
+      - ALL
+    date:
+      - ALL
+    weight: -1
+  - type: shift type requirement
+    description: 2 on every night
+    shiftType:
+      - N
+    requiredNumPeople: 2
+    qualifiedPeople:
+      - ALL
+    date:
+      - ALL
+    weight: -1
+  - type: shift request
+    person: cara
+    date: 2026-11-05
+    shiftType: LEAVE
+    weight: .inf
+  - type: shift request
+    person: Borrowed nurse 1
+    date: 2026-11-01
+    shiftType: OFF
+    weight: .inf
+  - type: shift request
+    person: Borrowed nurse 1
+    date: 2026-11-02
+    shiftType: OFF
+    weight: .inf
+  - type: shift request
+    person: Borrowed nurse 1
+    date: 2026-11-03
+    shiftType: OFF
+    weight: .inf
+  - type: shift request
+    person: Borrowed nurse 1
+    date: 2026-11-04
+    shiftType: OFF
+    weight: .inf
+  - type: shift request
+    person: Borrowed nurse 1
+    date: 2026-11-06
+    shiftType: OFF
+    weight: .inf
+  - type: shift request
+    person: Borrowed nurse 1
+    date: 2026-11-07
+    shiftType: OFF
+    weight: .inf

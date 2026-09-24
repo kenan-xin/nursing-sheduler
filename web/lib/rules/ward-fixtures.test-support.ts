@@ -220,6 +220,18 @@ export const SCENARIOS = {
         ],
       }),
     }),
+  /** Every night needs 2 and every day 1, from 3 nurses. Cara is on leave on the 5th: one short. */
+  shortOnLeaveDay: (): ScenarioUiState =>
+    ward({
+      staff: people("ana", "ben", "cara"),
+      reqData: [leave("cara", "05")],
+      cardsByKind: cards({
+        requirements: [
+          requirement("day", "D", 1),
+          requirement("night", "N", 2, { description: "2 on every night" }),
+        ],
+      }),
+    }),
   /** 2 nurses, day + night each day, no day after a night and no two nights in a row. */
   restRuleTooTight: (): ScenarioUiState =>
     ward({

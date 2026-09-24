@@ -10,15 +10,16 @@
 // Controller rulings (2026-09-24) shape the operations: a borrowed nurse is
 // `add_person` with `temporary: true`, plus `set_off_request` "must" outside the loan
 // when the loan is shorter than the period (no `mark_person_off` arm);
-// staffing requirements are EXACT counts; a requirement can be lowered only when it
-// targets the one short date alone; a skill-mix requirement is never lowered, and no
-// repair creates one (a skill-mix gap is closed by borrowing into its group).
+// staffing requirements are EXACT counts; a requirement is lowered for one date through a
+// date exception (set_staffing_requirement_on_date), or lowered outright when it targets
+// that date alone; a skill-mix requirement is never lowered, and no repair creates one (a
+// skill-mix gap is closed by borrowing into its group).
 
 import { isEditableCountCard } from "@/components/counts/counts-model";
 import { skillMixFloor } from "@/components/requirements/requirements-model";
 import { paidMinutesFor } from "@/components/entity-editor/core";
 import type { CapabilityId } from "@/lib/capability/help-content";
-import { generateDateItems, type DateItem } from "@/lib/dates/date-id";
+import { formatShortDate, generateDateItems, type DateItem } from "@/lib/dates/date-id";
 import {
   COUNT_EXPRESSIONS,
   MAX_ASSISTANT_OPERATIONS,
@@ -28,7 +29,10 @@ import { expandPersonRefs, flattenShiftTypeRefs } from "@/lib/rules/expansion";
 import {
   capOf,
   findStaffingShortfalls,
+  requiredOn,
   requirementDateIds,
+  requirementDateIsos,
+  skillMixOverflow,
   toDateId,
   type StaffingFinding,
 } from "@/lib/rules/shortfalls";
@@ -282,6 +286,7 @@ const alignOverlappingRequirements: Builder = (ctx, findings) => {
   const canRaise =
     isHeadCount(outer) &&
     outer.preferredNumPeople == null &&
+    !outer.requiredNumPeopleOverrides?.length &&
     mine.every((f) => f.required === needed) &&
     requirementDateIds(ctx.state, outer).every((d) => conflictDates.has(d));
   return makeOption("align_overlapping_requirements", {
@@ -666,44 +671,112 @@ const askNurseOnLeave: Builder = (ctx, all) => {
 
 const runOneShort: Builder = (ctx, all) => {
   const findings = gapsOnly(all);
-  for (const f of findings) {
-    // A lower head count cannot fix a skill-mix gap.
-    if (f.mixPeople) continue;
-    if (f.dateId === null || gapOn(findings, f.dateId) !== 1) continue;
-    // Lowering a requirement closes the gap only if it is part of every finding that day.
-    const sameDay = findings.filter((g) => g.dateId === f.dateId);
-    // Nor a day whose skill mix is short too: one fewer leaves the group just as short.
-    if (sameDay.some((g) => g.mixPeople)) continue;
-    for (const uid of f.ruleIds) {
+  /** One fewer on `uid` closes that day's gap: the head count it would run with, or null. */
+  const oneShortOn = (card: RequirementCard, dateId: string): number | null => {
+    const iso = isoOf(ctx, dateId);
+    const sameDay = findings.filter((g) => g.dateId === dateId);
+    if (!iso || gapOn(findings, dateId) !== 1) return null;
+    // Not a skill-mix gap: one fewer leaves the group just as short. And the rule must be
+    // part of every finding that day, or lowering it leaves the day short.
+    if (sameDay.some((g) => g.mixPeople || !g.ruleIds.includes(card.uid))) return null;
+    const n = requiredOn(card, iso);
+    // Never below 1, nor below the skill mix the shift must hold that day.
+    return n >= 2 && !loweredTooFar(ctx, card, n - 1, iso) ? n - 1 : null;
+  };
+  // Every short date, in roster order: run one short where one fewer on one rule closes it.
+  const pairs: { card: RequirementCard; iso: string; n: number }[] = [];
+  const stayShort: string[] = [];
+  for (const dateId of shortDates(ctx, findings)) {
+    const iso = isoOf(ctx, dateId) as string;
+    const uids = [
+      ...new Set(findings.filter((f) => f.dateId === dateId).flatMap((f) => f.ruleIds)),
+    ];
+    const pair = uids.flatMap((uid) => {
       const card = requirementCard(ctx, uid);
-      if (!card || !isHeadCount(card) || card.requiredNumPeople < 2) continue;
-      if (!sameDay.every((g) => g.ruleIds.includes(uid))) continue;
-      // One short may not drop the shift below the skill mix it must hold.
-      if (card.requiredNumPeople - 1 < skillMixOn(ctx, card)) continue;
-      const shift = String(flattenShiftTypeRefs(card.shiftType)[0]);
-      const n = card.requiredNumPeople;
-      const when = dateLabel(ctx, f.dateId);
-      const dates = requirementDateIds(ctx.state, card);
-      // A single date cannot be overridden on its own (bead nursing-sheduler-2se).
-      const alone = dates.length === 1 && dates[0] === f.dateId;
-      return makeOption("run_one_short", {
-        title: `Run ${shift} on ${when} with ${n - 1} instead of ${n} (the manager's safety call)`,
-        why: alone
-          ? `Nobody else is free: ${shift} can have at most ${n - 1} there as things stand.`
-          : `Nobody else is free: ${shift} can have at most ${n - 1} there. "${ruleName(card, uid)}" covers other days too, so the app cannot lower it for that day alone.`,
-        operations: alone
-          ? [{ type: "set_staffing_requirement_people", ruleId: uid, requiredNumPeople: n - 1 }]
-          : [],
-        confirmationQuestion: `As the manager, are you satisfied it is safe to run ${shift} on ${when} with ${n - 1} nurses?`,
-        needsFromUser: [
-          "Whether the manager accepts running the shift one short. Only they can make that safety call.",
-        ],
-        capabilityId: "staffing-requirements",
-        evidence: "static_check",
-      });
-    }
+      const lowered = card && isHeadCount(card) ? oneShortOn(card, dateId) : null;
+      return card && lowered !== null ? [{ card, iso, n: lowered + 1 }] : [];
+    })[0];
+    if (pair) pairs.push(pair);
+    else stayShort.push(iso);
   }
-  return null;
+  // More dates than a bad day is a lower staffing standard, not a one-off safety call.
+  if (pairs.length === 0 || pairs.length > CHRONIC_DATE_COUNT) return null;
+
+  const day = (iso: string) => formatShortDate(iso, true);
+  const list = (items: string[]) =>
+    items.length === 1 ? items[0] : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
+  // A chronic ward can leave many dates short: cap the "stays short" list so the
+  // title and confirmation stay readable, naming only the overflow count past it.
+  const STAYS_SHORT_LIST_CAP = 3;
+  const listCapped = (items: string[]) =>
+    items.length <= STAYS_SHORT_LIST_CAP
+      ? list(items)
+      : `${items.slice(0, STAYS_SHORT_LIST_CAP).join(", ")} and ${items.length - STAYS_SHORT_LIST_CAP} more`;
+  const shiftOf = (card: RequirementCard) => String(flattenShiftTypeRefs(card.shiftType)[0]);
+  const shifts = [...new Set(pairs.map((p) => shiftOf(p.card)))];
+  const where = shifts
+    .map(
+      (s) => `${s} on ${list(pairs.filter((p) => shiftOf(p.card) === s).map((p) => day(p.iso)))}`,
+    )
+    .join("; ");
+  const [first] = pairs;
+  const one = pairs.length === 1;
+  const nurses = (n: number) => `${n} ${n === 1 ? "nurse" : "nurses"}`;
+  const stays = stayShort.length
+    ? `${listCapped(stayShort.map(day))} ${stayShort.length === 1 ? "stays" : "stay"} short`
+    : "";
+  // A rule for that one date alone is lowered outright. Otherwise the date gets an exception.
+  const alone = ({ card, iso }: (typeof pairs)[number]) => {
+    const covered = requirementDateIsos(ctx.state, card);
+    return covered.length === 1 && covered[0] === iso && !card.requiredNumPeopleOverrides?.length;
+  };
+  const others = [...new Set(pairs.map((p) => p.card))].flatMap((card) => {
+    const lowered = new Set(pairs.filter((p) => p.card === card).map((p) => p.iso));
+    if (requirementDateIsos(ctx.state, card).every((d) => lowered.has(d))) return [];
+    const name = ruleName(card, card.uid);
+    const exceptions = (card.requiredNumPeopleOverrides ?? []).some(([d]) => !lowered.has(d));
+    return [
+      exceptions
+        ? ` "${name}" keeps its own numbers on its other days.`
+        : ` "${name}" stays at ${card.requiredNumPeople} on its other days.`,
+    ];
+  });
+  const title = one
+    ? `Run ${where} with ${first.n - 1} instead of ${first.n}`
+    : shifts.length === 1
+      ? `Run ${where.replace(/ on /, " one short on ")}`
+      : `Run one short: ${where}`;
+  return makeOption("run_one_short", {
+    title: `${title}${stays ? `; ${stays}` : ""} (the manager's safety call)`,
+    why:
+      (one
+        ? `Nobody else is free: ${shiftOf(first.card)} can have at most ${first.n - 1} there${alone(first) ? " as things stand" : ""}.`
+        : "Nobody else is free: each of those shifts can have one fewer than it needs.") +
+      others.join("") +
+      (stays ? ` ${stays}: one fewer cannot close it, so the roster still cannot be solved.` : ""),
+    operations: pairs.map((p) =>
+      alone(p)
+        ? {
+            type: "set_staffing_requirement_people",
+            ruleId: p.card.uid,
+            requiredNumPeople: p.n - 1,
+          }
+        : {
+            type: "set_staffing_requirement_on_date",
+            ruleId: p.card.uid,
+            date: p.iso,
+            requiredNumPeople: p.n - 1,
+          },
+    ),
+    confirmationQuestion: `As the manager${stays ? `, knowing ${stays},` : ""} are you satisfied it is safe to run ${
+      one ? `${where} with ${nurses(first.n - 1)}` : `${where} one nurse short`
+    }?`,
+    needsFromUser: [
+      "Whether the manager accepts running the shift one short. Only they can make that safety call.",
+    ],
+    capabilityId: "staffing-requirements",
+    evidence: "static_check",
+  });
 };
 
 /**
@@ -854,11 +927,19 @@ export function violatesSafetyFloor(
           : kind === "counts" && hardCount(ruleId)
             ? limit
             : null;
+  const loweredTo = (
+    card: RequirementCard | undefined,
+    before: number,
+    n: number,
+    iso?: string,
+  ) => {
+    if (n < 1) return zero;
+    if (!card || n >= before) return null;
+    return isNamed(card) || loweredTooFar(ctx, card, n, iso) ? skillMix : null;
+  };
   const lowered = (uid: string, n: number) => {
     const card = requirementCard(ctx, uid);
-    if (n < 1) return zero;
-    if (!card || n >= card.requiredNumPeople) return null;
-    return isNamed(card) || n < skillMixOn(ctx, card) ? skillMix : null;
+    return loweredTo(card, card?.requiredNumPeople ?? Infinity, n);
   };
   for (const op of operations) {
     const broken = (() => {
@@ -883,6 +964,11 @@ export function violatesSafetyFloor(
         }
         case "set_staffing_requirement_people":
           return lowered(op.ruleId, op.requiredNumPeople);
+        case "set_staffing_requirement_on_date": {
+          const card = requirementCard(ctx, op.ruleId);
+          const before = card ? requiredOn(card, op.date) : Infinity;
+          return loweredTo(card, before, op.requiredNumPeople, op.date);
+        }
         case "edit_staffing_requirement": {
           const card = requirementCard(ctx, op.ruleId);
           if (card) {
@@ -960,12 +1046,12 @@ export function violatesSafetyFloor(
 }
 
 /**
- * The largest skill-mix count on a head count's shift and dates, its own skill mix
- * included: it may not go below it.
+ * The largest skill-mix count on a head count's shift, its own skill mix included: it may
+ * not go below it. With `iso`, on that date only; else on any date the card covers.
  */
-function skillMixOn(ctx: Ctx, card: RequirementCard): number {
+function skillMixOn(ctx: Ctx, card: RequirementCard, iso?: string): number {
   const shifts = new Set(flattenShiftTypeRefs(card.shiftType).map(String));
-  const dates = new Set(requirementDateIds(ctx.state, card));
+  const dates = iso ? [iso] : requirementDateIsos(ctx.state, card);
   return Math.max(
     0,
     ...ctx.state.cardsByKind.requirements
@@ -973,12 +1059,25 @@ function skillMixOn(ctx: Ctx, card: RequirementCard): number {
         (c) =>
           !c.disabled &&
           isSkillMix(c) &&
-          flattenShiftTypeRefs(c.shiftType).some((s) => shifts.has(String(s))) &&
-          requirementDateIds(ctx.state, c).some((d) => dates.has(d)),
+          flattenShiftTypeRefs(c.shiftType).some((s) => shifts.has(String(s))),
       )
-      .map((c) => Math.max(isNamed(c) ? c.requiredNumPeople : 0, skillMixFloor(c))),
+      .flatMap((c) => {
+        const covered = new Set(requirementDateIsos(ctx.state, c));
+        return dates
+          .filter((d) => covered.has(d))
+          .map((d) => Math.max(isNamed(c) ? requiredOn(c, d) : 0, skillMixFloor(c)));
+      }),
   );
 }
+
+/**
+ * A head count at `n` (on `iso`, or every date) would break a skill mix: below one that
+ * holds on its shift, or too few for its own groups that share no one (the ceiling is the
+ * preferred count when it has one, as the proposal arms check it).
+ */
+const loweredTooFar = (ctx: Ctx, card: RequirementCard, n: number, iso?: string) =>
+  n < skillMixOn(ctx, card, iso) ||
+  skillMixOverflow(ctx.state, card.skillMix, card.preferredNumPeople ?? n) !== null;
 
 /** An ALLOWLIST: an operation or shape not named here is never part of a repair. */
 export function isSafeOption(state: ScenarioUiState, option: RepairOption): boolean {
@@ -1006,6 +1105,13 @@ export function isSafeOption(state: ScenarioUiState, option: RepairOption): bool
           op.requiredNumPeople === card.requiredNumPeople - 1 &&
           requirementDateIds(state, card).length === 1
         );
+      }
+      case "set_staffing_requirement_on_date": {
+        // Lower one covered date of a plain head count by exactly 1 (the floor keeps it at 1 or more).
+        const card = requirementCard(ctx, op.ruleId);
+        if (!card || !isHeadCount(card) || !Number.isInteger(op.requiredNumPeople)) return false;
+        if (!requirementDateIsos(state, card).includes(op.date)) return false;
+        return op.requiredNumPeople === requiredOn(card, op.date) - 1;
       }
       case "edit_count_rule": {
         const card = countCard(ctx, op.ruleId);

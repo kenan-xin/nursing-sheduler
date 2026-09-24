@@ -55,6 +55,7 @@ const INFEASIBLE: Exclude<ScenarioName, "empty" | "restRuleTooTight">[] = [
   "personalCapsTooLow",
   "busyNightsWithRestRule",
   "rnMixOnLeave",
+  "shortOnLeaveDay",
 ];
 
 const EXPECTED: Record<(typeof INFEASIBLE)[number], RepairId[]> = {
@@ -66,6 +67,7 @@ const EXPECTED: Record<(typeof INFEASIBLE)[number], RepairId[]> = {
   personalCapsTooLow: ["extra_shift_willing_nurse", "borrow_temporary_nurse"],
   busyNightsWithRestRule: ["borrow_temporary_nurse", "run_one_short"],
   rnMixOnLeave: ["borrow_temporary_nurse", "ask_nurse_on_leave"],
+  shortOnLeaveDay: ["borrow_temporary_nurse", "ask_nurse_on_leave", "run_one_short"],
 };
 
 /** The host question each option's Preview must raise before Apply (none = asked in chat or plain manager call). */
@@ -222,6 +224,38 @@ describe("the scripted wards read as real ward situations", () => {
       })),
     ]);
     expect(borrow.enforcedBy).toBe("host_question");
+  });
+
+  it("busy nights: running one short covers both busy nights in one proposal, and the solver agrees", async () => {
+    const state = SCENARIOS.busyNightsWithRestRule();
+    const short = options("busyNightsWithRestRule").find((o) => o.repairId === "run_one_short")!;
+    expect(short.operations).toEqual(
+      ["2026-11-02", "2026-11-06"].map((date) => ({
+        type: "set_staffing_requirement_on_date",
+        ruleId: "night-busy",
+        date,
+        requiredNumPeople: 2,
+      })),
+    );
+    expect(short.title).toMatch(/^Run N one short on Mon 2 Nov and Fri 6 Nov /);
+    expect(short.confirmationQuestion).toMatch(/Mon 2 Nov and Fri 6 Nov/);
+    const result = applyAssistantCommands(state, short.operations);
+    if (!result.ok) throw new Error(result.rejection.message);
+    expect(findStaffingShortfalls(result.next)).toEqual([]);
+    await expect(stableYaml(result.next)).toMatchFileSnapshot(
+      `${FIXTURE_DIR}busyNightsWithRestRule.run_one_short.yaml`,
+    );
+  });
+
+  it("short on a leave day: running that night one short is one date exception, and the solver agrees", async () => {
+    const state = SCENARIOS.shortOnLeaveDay();
+    const short = options("shortOnLeaveDay").find((o) => o.repairId === "run_one_short")!;
+    const result = applyAssistantCommands(state, short.operations);
+    if (!result.ok) throw new Error(result.rejection.message);
+    expect(findStaffingShortfalls(result.next)).toEqual([]);
+    await expect(stableYaml(result.next)).toMatchFileSnapshot(
+      `${FIXTURE_DIR}shortOnLeaveDay.run_one_short.yaml`,
+    );
   });
 
   it("too few nurses: borrow a temporary nurse for the whole period, asked on the Preview", () => {

@@ -68,10 +68,12 @@ import {
 import {
   buildRequirementShiftTypeDomain,
   emptyRequirementForm,
+  requirementCoveredIsos,
   requirementToForm,
   validateRequirementForm,
 } from "@/components/requirements/requirements-model";
 import { applyRequirementPatch } from "@/components/requirements/requirement-patch";
+import { stableStringify } from "./digest";
 
 describe("set_roster_range is the manual range cascade", () => {
   it("produces the identical document the Dates screen commits", () => {
@@ -1054,6 +1056,62 @@ describe("requirement arms are the Staffing requirements screen's commit", () =>
         );
       }
     }
+  });
+});
+
+describe("set_staffing_requirement_on_date is the Edit form with one exception row", () => {
+  const rows: [string, number][] = [
+    ["2026-04-14", 1],
+    ["2026-04-14", 0],
+    ["2026-04-14", 2],
+    ["2026-04-14", 3],
+    ["2026-04-14", -1],
+    ["2026-04-14", 1.5],
+    ["2026-05-01", 1],
+  ];
+
+  it("accepts and refuses what the form does, and commits the same document", () => {
+    const state = ruleWardScenario();
+    const source = state.cardsByKind.requirements.find((c) => c.uid === "req-day")!;
+    const domain = buildRequirementShiftTypeDomain(state);
+    for (const [i, [date, n]] of rows.entries()) {
+      const base = requirementToForm(source, domain);
+      const form = { ...base, requiredNumPeopleOverrides: [{ date, requiredNumPeople: n }] };
+      const covered = new Set(requirementCoveredIsos(state, form.date));
+      const manual = applyRequirementPatch(state, { type: "update", uid: "req-day", form });
+      const formSaves =
+        valid(validateRequirementForm(form, domain, covered)) &&
+        stableStringify(manual) !== stableStringify(state);
+      const assistant = applyAssistantCommand(state, {
+        type: "set_staffing_requirement_on_date",
+        ruleId: "req-day",
+        date,
+        requiredNumPeople: n,
+      });
+      expect(assistant.ok, `row ${i}`).toBe(formSaves);
+      if (assistant.ok) expect(assistant.next).toEqual(manual);
+    }
+  });
+
+  it("both refuse a multi-shift rule the same way", () => {
+    const state = ruleWardScenario();
+    const assistant = applyAssistantCommand(state, {
+      type: "set_staffing_requirement_on_date",
+      ruleId: "req-multi",
+      date: "2026-04-14",
+      requiredNumPeople: 1,
+    });
+    const source = state.cardsByKind.requirements.find((c) => c.uid === "req-multi")!;
+    const domain = buildRequirementShiftTypeDomain(state);
+    const form = {
+      ...requirementToForm(source, domain),
+      requiredNumPeopleOverrides: [{ date: "2026-04-14", requiredNumPeople: 1 }],
+    };
+    expect(assistant.ok).toBe(
+      valid(
+        validateRequirementForm(form, domain, new Set(requirementCoveredIsos(state, form.date))),
+      ),
+    );
   });
 });
 

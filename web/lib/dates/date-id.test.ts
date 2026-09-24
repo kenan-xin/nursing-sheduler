@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   dateIdToIso,
   describeDate,
+  formatShortDate,
   generateDateIds,
   generateDateItems,
   getDateIdForRange,
@@ -138,5 +139,12 @@ describe("misc helpers", () => {
     expect(hasCompleteRange({ start: "2026-07-01", end: "2026-07-02" })).toBe(true);
     expect(hasCompleteRange({ start: "2026-07-02", end: "2026-07-01" })).toBe(false);
     expect(hasCompleteRange({ start: "2026-07-01", end: "" })).toBe(false);
+  });
+});
+
+describe("formatShortDate", () => {
+  it("writes a date the way a ward roster does", () => {
+    expect(formatShortDate("2026-10-14")).toBe("14 Oct");
+    expect(formatShortDate("2026-10-14", true)).toBe("Wed 14 Oct");
   });
 });

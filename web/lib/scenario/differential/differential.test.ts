@@ -139,6 +139,28 @@ describe.skipIf(!AVAILABLE)("differential — C1 (bytes → load_data, exact mod
   );
 
   it(
+    "loads requirement overrides and dumps them as ISO pairs",
+    { timeout: oracleBudget(1) },
+    () => {
+      const state = makeValidUiState();
+      state.cardsByKind.requirements = [
+        {
+          uid: "r",
+          shiftType: "D",
+          requiredNumPeople: 1,
+          requiredNumPeopleOverrides: [[state.rangeStart, 0]],
+          weight: -1,
+        },
+      ];
+      const res = callOracle({ op: "load", yaml: serializeScenario(state) });
+      expect(res.ok).toBe(true);
+      const prefs = res.model!.preferences as Record<string, unknown>[];
+      const requirement = prefs.find((p) => p.type === "shift type requirement")!;
+      expect(requirement.requiredNumPeopleOverrides).toEqual([[state.rangeStart, 0]]);
+    },
+  );
+
+  it(
     "rejects a reserved shift-type id (declared: load_data ValueError)",
     { timeout: oracleBudget(1) },
     () => {

@@ -140,6 +140,7 @@ export class ShiftRequirementValidationError extends Error {
       errors.weight ??
       errors.coefficients ??
       errors.skillMix ??
+      errors.requiredNumPeopleOverrides ??
       "Fix the staffing requirement errors first.";
     super(message);
     this.name = "ShiftRequirementValidationError";

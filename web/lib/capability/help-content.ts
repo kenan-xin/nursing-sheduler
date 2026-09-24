@@ -174,11 +174,21 @@ export const CAPABILITY_ENTRIES = [
       "How many people a shift needs: exactly that number, or a range when a preferred number " +
       "is set. A skill-mix rule says how many of a shift's people must come from a group, for " +
       "example 2 RNs among the 4 on nights; anyone can fill the other places. Naming who is " +
-      "qualified is different: nobody else may work that shift at all." +
+      "qualified is different: nobody else may work that shift at all. A requirement can have " +
+      "a different number on a few dates, such as one fewer on a quiet public holiday. " +
+      "Everything else about the rule still applies on those days." +
       " For a number with a preferred extra (2, ideally 3), the preferred number is set here. " +
       "When two teams are each set as the only people for the same shift, they block each " +
       "other, so each ward or team needs a separate shift code.",
-    concepts: ["staffing requirement", "minimum staffing", "skill mix", "coverage", "headcount"],
+    concepts: [
+      "staffing requirement",
+      "minimum staffing",
+      "skill mix",
+      "coverage",
+      "headcount",
+      "exception",
+      "one date",
+    ],
     modes: ADVANCED_ONLY,
     featureGates: [],
     routeId: "shift-type-requirements",

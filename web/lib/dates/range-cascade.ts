@@ -11,11 +11,14 @@
 //     layout date rows/columns follow the new format instead of being destroyed.
 // (Full-ISO preference-card date fields are not span ids, so neither the delete
 // nor the migrate ever matches them — they are out of scope by construction.)
+// Requirement overrides are the exception: each is a single ISO date, so one
+// whose date left the range is dropped, or it would reach the solver as an
+// out-of-range date.
 //
 // The whole thing is one pure transform returning a new `ScenarioUiState`; the
 // store wires it as a single `mutateScenario` patch ⇒ one undo entry.
 
-import type { IsoDate, ScenarioUiState } from "@/lib/scenario";
+import type { IsoDate, RequirementCard, ScenarioUiState } from "@/lib/scenario";
 import { deleteEntity, remapDateReferences } from "@/lib/cascade";
 import { generateDateItems, type DateRange } from "./date-id";
 import { buildSingaporeHolidayGroups, replaceDateGroups } from "./holiday-groups";
@@ -70,6 +73,15 @@ export function applyRangeChange(
   }
   next = remapDateReferences(next, migration);
 
+  const kept = new Set(newItemsByIso(newRange).map(([iso]) => iso));
+  next = {
+    ...next,
+    cardsByKind: {
+      ...next.cardsByKind,
+      requirements: next.cardsByKind.requirements.map((card) => withOverridesIn(card, kept)),
+    },
+  };
+
   next = {
     ...next,
     rangeStart: newRange.start as IsoDate,
@@ -87,4 +99,14 @@ export function applyRangeChange(
 /** New-range date items as `[iso, id]` entries for the ISO→new-id lookup. */
 function newItemsByIso(range: DateRange): [IsoDate, string][] {
   return generateDateItems(range).map((item) => [item.iso, item.id]);
+}
+
+/** The card without overrides on dates outside `kept`; the same object when none left. */
+function withOverridesIn(card: RequirementCard, kept: ReadonlySet<string>): RequirementCard {
+  const overrides = card.requiredNumPeopleOverrides;
+  if (!overrides) return card;
+  const inRange = overrides.filter(([iso]) => kept.has(iso));
+  if (inRange.length === overrides.length) return card;
+  const { requiredNumPeopleOverrides: _dropped, ...rest } = card;
+  return inRange.length > 0 ? { ...rest, requiredNumPeopleOverrides: inRange } : rest;
 }

@@ -24,6 +24,7 @@ import {
   type ImportNormalizationTarget,
   type PersonRef,
   type RequirementCardBody,
+  type RequirementOverride,
   type SuccessionCardBody,
   type UiDateGroup,
   type UiPeopleGroup,
@@ -312,6 +313,9 @@ function normalizeRequirement(pref: LoosePref): RequirementCardBody {
       Array.isArray(pref.skillMix) && pref.skillMix.length
         ? (pref.skillMix as RequirementCardBody["skillMix"])
         : undefined,
+    requiredNumPeopleOverrides: (
+      pref.requiredNumPeopleOverrides as [string | Date, number][] | null | undefined
+    )?.map(([date, count]): RequirementOverride => [isoDate(date), count]),
     date: pref.date as DateRef | DateRef[] | undefined,
     weight: weightOf(pref, PREFERENCE_TYPE.shiftTypeRequirement),
   });

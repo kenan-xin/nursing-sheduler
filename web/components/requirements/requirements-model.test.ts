@@ -6,6 +6,7 @@ import {
 } from "@/lib/scenario";
 import { sanitizePersistedScenario } from "@/lib/store/persistence";
 import {
+  OVERRIDE_MESSAGES,
   REQUIREMENT_MESSAGES,
   buildQualifiedPeopleTransferOptions,
   buildRequirementCard,
@@ -16,6 +17,7 @@ import {
   hasCoverageWarnings,
   preferredDiffersFromRequired,
   reorderByDrop,
+  requirementCoveredIsos,
   requirementToForm,
   selectShiftType,
   shiftGroupReachesDayState,
@@ -23,6 +25,7 @@ import {
   summarizeRefs,
   validateRequirementForm,
   withCardDisabled,
+  type OverrideRow,
   type RequirementFormState,
 } from "./requirements-model";
 
@@ -56,6 +59,7 @@ describe("emptyRequirementForm defaults (spec 05 FR-PR-20)", () => {
       date: [],
       weight: -50,
       skillMix: [],
+      requiredNumPeopleOverrides: [],
     });
   });
 });
@@ -108,6 +112,147 @@ describe("selectShiftType (FR-PR-21 — replace, never accumulate)", () => {
   it("always yields exactly one ref", () => {
     expect(selectShiftType("D")).toEqual(["D"]);
     expect(selectShiftType("AllWorked")).toEqual(["AllWorked"]);
+  });
+});
+
+describe("requirementCoveredIsos", () => {
+  const rangeState = scenario({
+    rangeStart: "2026-10-13",
+    rangeEnd: "2026-10-15",
+    shifts: [{ id: "D" }, { id: "N" }],
+  });
+
+  it("ALL gives every roster ISO date", () => {
+    expect(requirementCoveredIsos(rangeState, ["ALL"])).toEqual([
+      "2026-10-13",
+      "2026-10-14",
+      "2026-10-15",
+    ]);
+  });
+
+  it("a single ISO gives itself", () => {
+    expect(requirementCoveredIsos(rangeState, ["2026-10-14"])).toEqual(["2026-10-14"]);
+  });
+});
+
+describe("date exceptions", () => {
+  const domain = buildRequirementShiftTypeDomain(BASE);
+  const covered = new Set(["2026-10-14", "2026-10-15"]);
+  const withRows = (rows: OverrideRow[], extra: Partial<RequirementFormState> = {}) =>
+    form({
+      shiftType: ["D"],
+      qualifiedPeople: ["ALL"],
+      date: ["ALL"],
+      requiredNumPeople: 2,
+      requiredNumPeopleOverrides: rows,
+      ...extra,
+    });
+
+  it("accepts a covered date with a whole number", () => {
+    expect(
+      validateRequirementForm(
+        withRows([{ date: "2026-10-14", requiredNumPeople: 1 }]),
+        domain,
+        covered,
+      ),
+    ).toEqual({});
+  });
+
+  it.each([
+    [[{ date: "", requiredNumPeople: 1 }], OVERRIDE_MESSAGES.dateEmpty],
+    [
+      [
+        { date: "2026-10-14", requiredNumPeople: 1 },
+        { date: "2026-10-14", requiredNumPeople: 0 },
+      ],
+      OVERRIDE_MESSAGES.duplicate("14 Oct"),
+    ],
+    [[{ date: "2026-10-20", requiredNumPeople: 1 }], OVERRIDE_MESSAGES.notCovered("20 Oct")],
+    [[{ date: "2026-10-14", requiredNumPeople: -1 }], OVERRIDE_MESSAGES.invalid("14 Oct")],
+    [[{ date: "2026-10-14", requiredNumPeople: 1.5 }], OVERRIDE_MESSAGES.invalid("14 Oct")],
+    [[{ date: "2026-10-14", requiredNumPeople: "" }], OVERRIDE_MESSAGES.invalid("14 Oct")],
+  ])(
+    "refuses an exception outside the rule's dates, twice, or not a whole number: %j",
+    (rows, message) => {
+      expect(
+        validateRequirementForm(withRows(rows as OverrideRow[]), domain, covered)
+          .requiredNumPeopleOverrides,
+      ).toBe(message);
+    },
+  );
+
+  it("refuses an exception above a distinct preferred count", () => {
+    const errors = validateRequirementForm(
+      withRows([{ date: "2026-10-14", requiredNumPeople: 4 }], { preferredNumPeople: 3 }),
+      domain,
+      covered,
+    );
+    expect(errors.requiredNumPeopleOverrides).toBe(OVERRIDE_MESSAGES.abovePreferred("14 Oct"));
+  });
+
+  it("refuses an exception below the card's own skill mix (F1)", () => {
+    const errors = validateRequirementForm(
+      withRows([{ date: "2026-10-14", requiredNumPeople: 1 }], {
+        qualifiedPeople: ["ALL"],
+        skillMix: [{ people: "Seniors", minNumPeople: 2 }],
+      }),
+      domain,
+      covered,
+    );
+    expect(errors.requiredNumPeopleOverrides).toBe(OVERRIDE_MESSAGES.belowSkillMix("14 Oct"));
+  });
+
+  it("messages read as the spec writes them", () => {
+    expect(OVERRIDE_MESSAGES.dateEmpty).toBe("Pick a date for each exception");
+    expect(OVERRIDE_MESSAGES.duplicate("14 Oct")).toBe("14 Oct has more than one exception");
+    expect(OVERRIDE_MESSAGES.notCovered("14 Oct")).toBe(
+      "14 Oct is not one of this requirement's dates",
+    );
+    expect(OVERRIDE_MESSAGES.invalid("14 Oct")).toBe(
+      "The number of people on 14 Oct must be a whole number, 0 or more",
+    );
+    expect(OVERRIDE_MESSAGES.abovePreferred("14 Oct")).toBe(
+      "The number of people on 14 Oct must not be more than the preferred number of people",
+    );
+    expect(OVERRIDE_MESSAGES.belowSkillMix("14 Oct")).toBe(
+      "A skill mix cannot ask for more people than the number on 14 Oct",
+    );
+  });
+
+  it("saves exceptions sorted by date and drops an exception equal to the rule's number", () => {
+    const card = buildRequirementCard(
+      withRows([
+        { date: "2026-10-15", requiredNumPeople: 3 },
+        { date: "2026-10-14", requiredNumPeople: 2 },
+        { date: "2026-10-13", requiredNumPeople: 1 },
+      ]),
+      domain,
+      "u",
+    );
+    expect(card.requiredNumPeopleOverrides).toEqual([
+      ["2026-10-13", 1],
+      ["2026-10-15", 3],
+    ]);
+  });
+
+  it("omits the field when no exception is left", () => {
+    const card = buildRequirementCard(
+      withRows([{ date: "2026-10-14", requiredNumPeople: 2 }]),
+      domain,
+      "u",
+    );
+    expect(card).not.toHaveProperty("requiredNumPeopleOverrides");
+  });
+
+  it("loads stored exceptions back into rows", () => {
+    const card = buildRequirementCard(
+      withRows([{ date: "2026-10-14", requiredNumPeople: 1 }]),
+      domain,
+      "u",
+    );
+    expect(requirementToForm(card, domain).requiredNumPeopleOverrides).toEqual([
+      { date: "2026-10-14", requiredNumPeople: 1 },
+    ]);
   });
 });
 

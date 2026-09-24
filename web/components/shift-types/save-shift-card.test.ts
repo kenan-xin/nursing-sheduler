@@ -5,7 +5,10 @@ import {
   type ScenarioUiState,
 } from "@/lib/scenario";
 import { RenameCollisionError } from "@/lib/cascade";
-import { REQUIREMENT_MESSAGES } from "@/components/requirements/requirements-model";
+import {
+  OVERRIDE_MESSAGES,
+  REQUIREMENT_MESSAGES,
+} from "@/components/requirements/requirements-model";
 import {
   NumericShiftTypeStaffingError,
   ReservedShiftTypeError,
@@ -249,6 +252,28 @@ describe("saveShiftTypeCard", () => {
       }, collision),
     ).rejects.toThrow(RenameCollisionError);
     expect(committed).toBe(false);
+  });
+
+  it("surfaces the override error instead of the generic fallback message", async () => {
+    // A 2-to-4 rule with an exception on 3 Jul pinned to the ceiling (4). Lowering
+    // Preferred to 3 on the Shift types screen now puts that exception above the
+    // new ceiling, and the refusal must say so (S1) instead of falling through to
+    // "Fix the staffing requirement errors first."
+    const card = baseline({
+      requiredNumPeople: 2,
+      preferredNumPeople: 4,
+      date: ["ALL"],
+      requiredNumPeopleOverrides: [["2026-07-03", 4]],
+    });
+    const opened = scenario({
+      cardsByKind: { ...createEmptyScenarioUiState().cardsByKind, requirements: [card] },
+    });
+    const input = editInput(opened);
+    if (input.staffing.type !== "editable") throw new Error("editable");
+    input.staffing.required = 2;
+    input.staffing.preferred = 3;
+
+    await expect(apply(opened, input)).rejects.toThrow(OVERRIDE_MESSAGES.abovePreferred("3 Jul"));
   });
 
   it("rejects reserved and numeric selector writes before invoking the mutation", async () => {

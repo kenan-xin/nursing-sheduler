@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { capOf, findStaffingShortfalls, newRuleClash, toDateId } from "./shortfalls";
+import {
+  capOf,
+  findStaffingShortfalls,
+  newRuleClash,
+  requiredOn,
+  requirementDateIsos,
+  toDateId,
+} from "./shortfalls";
 import { SCENARIOS, cards, leave, people, requirement, ward } from "./ward-fixtures.test-support";
 import type { ScenarioUiState } from "@/lib/scenario";
 
@@ -461,6 +468,35 @@ describe("findStaffingShortfalls", () => {
       ];
       expect(findStaffingShortfalls(mixWard(3, mix, { preferredNumPeople: 4 }))).toEqual([]);
     });
+
+    const disjointMix = [
+      { people: "RN", minNumPeople: 2 },
+      { people: "EN", minNumPeople: 2 },
+    ];
+
+    it("reports disjoint skill-mix groups on an override date that lowers the head count below them", () => {
+      const findings = findStaffingShortfalls(
+        mixWard(4, disjointMix, { requiredNumPeopleOverrides: [["2026-11-05", 3]] }),
+      );
+      expect(findings).toEqual([
+        expect.objectContaining({
+          kind: "requirement_conflict",
+          dateId: "05",
+          ruleIds: ["night"],
+          required: 4,
+          available: 3,
+          mixPeople: "RN and EN",
+        }),
+      ]);
+    });
+
+    it("a lowered override date still fits disjoint groups under the preferred count", () => {
+      const state = mixWard(4, disjointMix, {
+        preferredNumPeople: 4,
+        requiredNumPeopleOverrides: [["2026-11-05", 3]],
+      });
+      expect(findStaffingShortfalls(state)).toEqual([]);
+    });
   });
 
   it("ignores disabled requirements and ones with coefficients", () => {
@@ -474,6 +510,57 @@ describe("findStaffingShortfalls", () => {
       }),
     });
     expect(findStaffingShortfalls(state)).toEqual([]);
+  });
+});
+
+describe("requirement overrides", () => {
+  // Every night needs 2, cara is on leave on the 5th: the 5th is one short.
+  const shortFifth = (overrides?: [string, number][]) =>
+    ward({
+      staff: people("ana", "ben", "cara"),
+      reqData: [leave("cara", "05")],
+      cardsByKind: cards({
+        requirements: [
+          requirement("day", "D", 1),
+          requirement("night", "N", 2, overrides ? { requiredNumPeopleOverrides: overrides } : {}),
+        ],
+      }),
+    });
+
+  it("reads the override on its date and the rule's number elsewhere", () => {
+    const card = {
+      requiredNumPeople: 2,
+      requiredNumPeopleOverrides: [["2026-11-05", 1]] as [string, number][],
+    };
+    expect(requiredOn(card, "2026-11-05")).toBe(1);
+    expect(requiredOn(card, "2026-11-04")).toBe(2);
+  });
+
+  it("finds the one-short date without an override", () => {
+    expect(findStaffingShortfalls(shortFifth()).map((f) => f.dateId)).toEqual(["05"]);
+  });
+
+  it("finds no gap once the short date has an override of one fewer", () => {
+    expect(findStaffingShortfalls(shortFifth([["2026-11-05", 1]]))).toEqual([]);
+  });
+
+  it("an override that raises a date makes that date short", () => {
+    const findings = findStaffingShortfalls(
+      shortFifth([
+        ["2026-11-05", 1],
+        ["2026-11-03", 3],
+      ]),
+    );
+    expect(findings.map((f) => [f.dateId, f.required])).toContainEqual(["03", 4]);
+  });
+
+  it("lists the ISO dates a rule covers", () => {
+    const state = shortFifth();
+    expect(requirementDateIsos(state, { date: ["2026-11-02", "2026-11-04"] })).toEqual([
+      "2026-11-02",
+      "2026-11-04",
+    ]);
+    expect(requirementDateIsos(state, { date: ["ALL"] })).toHaveLength(7);
   });
 });
 

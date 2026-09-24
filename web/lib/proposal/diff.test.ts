@@ -12,6 +12,7 @@ import { deriveProposalDiff, diffScenarioDocuments, SCOPE_LABEL, type DiffScope 
 import type { AssistantCommandV1 } from "./commands";
 import { octoberWard, peopleScenario, proposalScenario, ruleWardScenario } from "./test-support";
 import { cards, people, requirement, ward } from "@/lib/rules/ward-fixtures.test-support";
+import type { ScenarioUiState } from "@/lib/scenario";
 
 describe("deriveProposalDiff", () => {
   it("separates what was asked for from what the app will do as a result", () => {
@@ -791,6 +792,149 @@ describe("skill mix in the Preview", () => {
     expect(entry?.after).toContain(
       "; at least 2 from “RN”, 1 from “Senior” — anyone can fill the other places",
     );
+  });
+});
+
+describe("requirement exceptions in the Preview", () => {
+  // Some cases build the before/after requirement card directly, keying off the
+  // req-day fixture's own shape, rather than routing through the assistant arm --
+  // it isolates the diff/describe behaviour from the arm's own form round-trip.
+  const withExceptions = (
+    state: ScenarioUiState,
+    overrides: readonly (readonly [string, number])[],
+  ): ScenarioUiState => ({
+    ...state,
+    cardsByKind: {
+      ...state.cardsByKind,
+      requirements: state.cardsByKind.requirements.map((card) =>
+        card.uid === "req-day"
+          ? { ...card, requiredNumPeopleOverrides: overrides.map(([d, n]) => [d, n] as const) }
+          : card,
+      ),
+    },
+  });
+  const withException = (
+    state: ScenarioUiState,
+    date: string,
+    requiredNumPeople: number,
+  ): ScenarioUiState => withExceptions(state, [[date, requiredNumPeople]]);
+
+  it("names the date and both numbers", () => {
+    const before = ruleWardScenario();
+    const after = withException(before, "2026-04-14", 1);
+    const entry = diffScenarioDocuments(before, after).find(
+      (e) => e.key === "rule:requirements:req-day",
+    );
+    expect(entry?.after).toBe("14 Apr: exactly 2 → 1 on Day");
+    expect(entry?.before).toMatch(/^On · “Day cover” · Exactly 2 people on Day, every date/);
+  });
+
+  it("uses the range words when the rule has a preferred count", () => {
+    const state = ruleWardScenario();
+    state.cardsByKind.requirements[0] = {
+      ...state.cardsByKind.requirements[0],
+      preferredNumPeople: 3,
+      weight: -5,
+    };
+    const after = withException(state, "2026-04-14", 1);
+    const entry = diffScenarioDocuments(state, after).find(
+      (e) => e.key === "rule:requirements:req-day",
+    );
+    expect(entry?.after).toBe("14 Apr: 2 to 3 → 1 to 3 on Day");
+  });
+
+  it("lists exceptions in the rule sentence", () => {
+    const first = withException(ruleWardScenario(), "2026-04-14", 1);
+    const applied = applyAssistantCommands(first, [
+      { type: "set_staffing_requirement_people", ruleId: "req-day", requiredNumPeople: 3 },
+    ]);
+    if (!applied.ok) throw new Error(applied.rejection.message);
+    const diff = deriveProposalDiff(first, applied.next, []);
+    const entry = [...diff.direct, ...diff.cascade].find(
+      (e) => e.key === "rule:requirements:req-day",
+    );
+    expect(entry?.after).toContain("Exactly 3 people on Day, every date, except 14 Apr: 1");
+  });
+
+  it("drops an exception when a range shrink pushes its date out of range (F18)", () => {
+    // Task 2's range-cascade `withOverridesIn` prunes an override whose date left the
+    // range; the Preview must show that prune as a compact cascade line, not silence.
+    const before = withException(ruleWardScenario(), "2026-04-25", 1);
+    const commands = [
+      {
+        type: "set_roster_range" as const,
+        start: "2026-04-01",
+        end: "2026-04-20",
+        importPublicHolidays: false,
+      },
+    ];
+    const applied = applyAssistantCommands(before, commands);
+    if (!applied.ok) throw new Error(applied.rejection.message);
+    const diff = deriveProposalDiff(before, applied.next, commands);
+    // The range itself is the direct ask; the requirement losing its exception is a
+    // consequence nothing in the command names, so it belongs in the cascade set.
+    const entry = diff.cascade.find((e) => e.key === "rule:requirements:req-day");
+    expect(entry?.kind).toBe("changed");
+    expect(entry?.after).toBe("25 Apr: exactly 1 → 2 on Day");
+  });
+
+  it("joins more than one exception with a semicolon", () => {
+    const before = ruleWardScenario();
+    const after = withExceptions(before, [
+      ["2026-04-10", 1],
+      ["2026-04-20", 3],
+    ]);
+    const entry = diffScenarioDocuments(before, after).find(
+      (e) => e.key === "rule:requirements:req-day",
+    );
+    expect(entry?.after).toBe("10 Apr: exactly 2 → 1 on Day; 20 Apr: exactly 2 → 3 on Day");
+  });
+
+  it("reverts to the base count when an exception is removed", () => {
+    const before = withException(ruleWardScenario(), "2026-04-14", 1);
+    const after = withExceptions(before, []);
+    const entry = diffScenarioDocuments(before, after).find(
+      (e) => e.key === "rule:requirements:req-day",
+    );
+    expect(entry?.after).toBe("14 Apr: exactly 1 → 2 on Day");
+  });
+
+  it("still shows an exception equal to the base count (cosmetic, F10)", () => {
+    const before = ruleWardScenario();
+    const after = withException(before, "2026-04-14", 2);
+    const entry = diffScenarioDocuments(before, after).find(
+      (e) => e.key === "rule:requirements:req-day",
+    );
+    // requiredOn is unchanged (2 -> 2 on the 14th), so the compact line has nothing to
+    // say -- the full sentence carries the (cosmetic) ", except 14 Apr: 2" instead.
+    expect(entry?.after).toContain("except 14 Apr: 2");
+  });
+
+  it("keeps the exception line when a rename lands in the same proposal", () => {
+    const before = ruleWardScenario();
+    const commands = [
+      {
+        type: "set_staffing_requirement_on_date" as const,
+        ruleId: "req-day",
+        date: "2026-04-14",
+        requiredNumPeople: 1,
+      },
+      {
+        type: "edit_staffing_requirement" as const,
+        ruleId: "req-day",
+        description: "Day cover (renamed)",
+        shiftType: "Day",
+        qualifiedPeople: ["ALL"],
+        dates: ["ALL"],
+        requiredNumPeople: 2,
+      },
+    ];
+    const applied = applyAssistantCommands(before, commands);
+    if (!applied.ok) throw new Error(applied.rejection.message);
+    const diff = deriveProposalDiff(before, applied.next, commands);
+    const entry = diff.direct.find((e) => e.key === "rule:requirements:req-day");
+    expect(entry?.label).toBe("Day cover (renamed)");
+    expect(entry?.after).toContain("except 14 Apr: 1");
   });
 });
 
