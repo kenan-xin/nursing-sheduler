@@ -175,13 +175,13 @@ describe("Apply", () => {
     await screen.findByTestId("assistant-proposal");
     // Rendering a Preview is not applying it.
     expect(useScenarioStore.getState().rangeEnd).toBe("2026-04-30");
-    expect(screen.queryByTestId("assistant-receipt")).toBeNull();
+    expect(screen.queryByTestId("assistant-receipts")).toBeNull();
 
     await user.click(await screen.findByTestId("proposal-apply"));
 
-    const receipt = await screen.findByTestId("assistant-receipt");
-    expect(receipt).toHaveAttribute("data-undo", "available");
-    expect(receipt).toHaveTextContent("Undo available");
+    // Collapsed by default: a slim bar with the newest change's Undo one click away.
+    expect(await screen.findByTestId("assistant-receipts")).toHaveTextContent("1 change applied");
+    expect(await screen.findByTestId("receipt-undo")).toBeInTheDocument();
     // Success appeared only alongside a real durable commit.
     expect(useScenarioStore.getState().rangeEnd).toBe("2026-04-15");
     expect(await harness.db.assistantReceipts.count()).toBe(1);
@@ -191,19 +191,23 @@ describe("Apply", () => {
     await user.click(await screen.findByTestId("receipt-undo"));
     await waitFor(() => expect(useScenarioStore.getState().rangeEnd).toBe("2026-04-30"));
 
-    // The receipt is KEPT, with an honest state and no Undo affordance.
+    // The receipt is KEPT, with an honest state -- the bar's inline Undo shortcut
+    // disappears once Undo is no longer available.
     //
     // Waited for, not read once. The store's `rangeEnd` above reverts as soon as the
-    // reversal commits, but the receipt's `data-undo` is derived from a SEPARATE
+    // reversal commits, but the receipt's undo standing is derived from a SEPARATE
     // repository read of the reversible top commit, which lands a render later. A
-    // one-shot `getAttribute` right after `findByTestId` therefore sampled the
-    // pre-reversal attribute whenever that second read had not yet published --
-    // reproducibly so under the full parallel suite, and never in isolation.
-    await waitFor(async () => {
-      const settled = await screen.findByTestId("assistant-receipt");
-      expect(settled.getAttribute("data-undo")).not.toBe("available");
-    });
-    expect(screen.queryByTestId("receipt-undo")).toBeNull();
+    // one-shot check right after clicking Undo would sample the pre-reversal state
+    // whenever that second read had not yet published -- reproducibly so under the
+    // full parallel suite, and never in isolation.
+    await waitFor(() => expect(screen.queryByTestId("receipt-undo")).toBeNull());
+
+    // Expanding the bar and opening the receipt shows the honest detail: no Undo
+    // affordance, and the reason stated instead.
+    await user.click(await screen.findByTestId("assistant-receipts-toggle"));
+    await user.click(await screen.findByTestId("receipt-row-toggle"));
+    const detail = await screen.findByTestId("assistant-receipt");
+    expect(detail).not.toHaveAttribute("data-undo", "available");
     expect(await screen.findByTestId("receipt-undo-reason")).toBeInTheDocument();
   });
 
@@ -267,7 +271,7 @@ describe("Apply", () => {
     });
 
     await user.click(await screen.findByTestId("proposal-apply"));
-    await screen.findByTestId("assistant-receipt");
+    await screen.findByTestId("assistant-receipts");
 
     await expect(
       screen.findByTestId("assistant-proposal", undefined, { timeout: 500 }),
@@ -284,7 +288,7 @@ describe("Apply", () => {
     });
     render(<HostSurface />);
 
-    await screen.findByTestId("assistant-receipt");
+    await screen.findByTestId("assistant-receipts");
     await expect(
       screen.findByTestId("assistant-proposal", undefined, { timeout: 500 }),
     ).rejects.toThrow();
@@ -352,7 +356,7 @@ describe("historical conversations never regain live Apply", () => {
     // ABSENT, not disabled. There is no control to re-enable.
     expect(screen.queryByTestId("assistant-proposal")).toBeNull();
     expect(screen.queryByTestId("proposal-apply")).toBeNull();
-    expect(screen.queryByTestId("assistant-receipt")).toBeNull();
+    expect(screen.queryByTestId("assistant-receipts")).toBeNull();
     expect(screen.queryByTestId("apply-navigation-status")).toBeNull();
   });
 

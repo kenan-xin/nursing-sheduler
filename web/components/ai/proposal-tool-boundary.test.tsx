@@ -341,15 +341,16 @@ describe("the live journey: tool call to Preview to user Apply to Undo", () => {
     expect(useScenarioStore.getState().rangeStart).toBe("");
     expect(useScenarioStore.getState().rangeEnd).toBe("");
     expect(await harness.db.assistantReceipts.count()).toBe(0);
-    expect(screen.queryByTestId("assistant-receipt")).toBeNull();
+    expect(screen.queryByTestId("assistant-receipts")).toBeNull();
 
     // --- the user's Apply, which is a host control and only theirs -------
     const apply = await screen.findByTestId("proposal-apply");
     expect(apply).toBeEnabled();
     await user.click(apply);
 
-    const receipt = await screen.findByTestId("assistant-receipt");
-    expect(receipt).toHaveAttribute("data-undo", "available");
+    // Collapsed by default: a slim bar with the newest change's Undo one click away.
+    expect(await screen.findByTestId("assistant-receipts")).toHaveTextContent("1 change applied");
+    expect(await screen.findByTestId("receipt-undo")).toBeInTheDocument();
     expect(await harness.db.assistantReceipts.count()).toBe(1);
     // The Preview is gone: a settled change is not a live one.
     expect(screen.queryByTestId("assistant-proposal")).toBeNull();
@@ -376,11 +377,14 @@ describe("the live journey: tool call to Preview to user Apply to Undo", () => {
       expect({ [key]: reversed[key] }).toEqual({ [key]: before[key] });
     }
 
-    // The receipt is kept, honestly, with no Undo affordance left.
-    await waitFor(async () => {
-      const settled = await screen.findByTestId("assistant-receipt");
-      expect(settled.getAttribute("data-undo")).not.toBe("available");
-    });
-    expect(screen.queryByTestId("receipt-undo")).toBeNull();
+    // The receipt is kept, honestly, with no Undo affordance left -- the bar's
+    // inline shortcut disappears once Undo is no longer available.
+    await waitFor(() => expect(screen.queryByTestId("receipt-undo")).toBeNull());
+
+    // Expanding the bar and opening the receipt shows the honest detail.
+    await user.click(await screen.findByTestId("assistant-receipts-toggle"));
+    await user.click(await screen.findByTestId("receipt-row-toggle"));
+    const detail = await screen.findByTestId("assistant-receipt");
+    expect(detail).not.toHaveAttribute("data-undo", "available");
   });
 });
