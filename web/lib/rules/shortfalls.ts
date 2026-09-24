@@ -66,6 +66,8 @@ export interface StaffingFinding {
   capRuleIds: string[];
   /** A requirement involved counts only a named group or people (skill mix). */
   skillMix: boolean;
+  /** The group or person of the short skill-mix entry; null when no skill-mix entry is short. */
+  mixPeople: string | null;
 }
 
 type Range = { start: string; end: string };
@@ -86,6 +88,8 @@ interface Equation {
   restricts: boolean;
   /** False for coefficient-weighted cards: their bans apply, their counts are not checked. */
   counted: boolean;
+  /** The skill-mix entry this equation checks, or null for a card's own head count. */
+  mix: string | null;
 }
 
 /** Who can count toward one equation on one date. */
@@ -240,7 +244,8 @@ export function findStaffingShortfalls(state: ScenarioUiState): StaffingFinding[
         available: a.free.size,
         away: [...a.away].map(([person, reason]) => ({ person, reason })),
         capRuleIds: [],
-        skillMix: eq.restricts || a.banRules.size > 0,
+        skillMix: eq.restricts || eq.mix !== null || a.banRules.size > 0,
+        mixPeople: eq.mix,
       });
     }
 
@@ -273,7 +278,8 @@ export function findStaffingShortfalls(state: ScenarioUiState): StaffingFinding[
             .filter(([p]) => !pool.has(p))
             .map(([person, reason]) => ({ person, reason })),
           capRuleIds: [],
-          skillMix: chosen.some((eq) => eq.restricts) || banRules.size > 0,
+          skillMix: chosen.some((eq) => eq.restricts || eq.mix !== null) || banRules.size > 0,
+          mixPeople: chosen.find((eq) => eq.mix)?.mix ?? null,
         });
       }
     }
@@ -298,7 +304,11 @@ export function findStaffingShortfalls(state: ScenarioUiState): StaffingFinding[
         available: outer.max,
         away: [],
         capRuleIds: [],
-        skillMix: outer.restricts || inner.some((eq) => eq.restricts),
+        skillMix:
+          outer.restricts ||
+          outer.mix !== null ||
+          inner.some((eq) => eq.restricts || eq.mix !== null),
+        mixPeople: inner.find((eq) => eq.mix)?.mix ?? null,
       });
     }
   }
@@ -337,7 +347,8 @@ export function findStaffingShortfalls(state: ScenarioUiState): StaffingFinding[
       available: supply,
       away: [],
       capRuleIds: [...binding],
-      skillMix: eq.restricts,
+      skillMix: eq.restricts || eq.mix !== null,
+      mixPeople: eq.mix,
     });
   }
 
@@ -380,7 +391,24 @@ function buildEquations(
         max,
         restricts,
         counted,
+        mix: null,
       });
+
+      // Skill mix: a floor for a group AMONG this equation's staff. It bans nobody,
+      // so it restricts nothing and has no ceiling of its own.
+      for (const entry of card.skillMix ?? []) {
+        out.push({
+          ruleId: card.uid,
+          shiftTypes,
+          qualified: new Set([...peopleOf([entry.people])].filter((p) => qualified.has(p))),
+          dateIds,
+          required: entry.minNumPeople,
+          max: Number.POSITIVE_INFINITY,
+          restricts: false,
+          counted: true,
+          mix: String(entry.people),
+        });
+      }
     }
   }
   return out;

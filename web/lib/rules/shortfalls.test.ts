@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { capOf, findStaffingShortfalls, toDateId } from "./shortfalls";
 import { SCENARIOS, cards, leave, people, requirement, ward } from "./ward-fixtures.test-support";
+import type { ScenarioUiState } from "@/lib/scenario";
 
 describe("findStaffingShortfalls", () => {
   it("finds nothing in an empty scenario", () => {
@@ -21,6 +22,7 @@ describe("findStaffingShortfalls", () => {
         away: [{ person: "rn1", reason: "leave" }],
         capRuleIds: [],
         skillMix: true,
+        mixPeople: null,
       },
     ]);
   });
@@ -201,6 +203,7 @@ describe("findStaffingShortfalls", () => {
         away: [],
         capRuleIds: [],
         skillMix: false,
+        mixPeople: null,
       },
     ]);
   });
@@ -239,6 +242,46 @@ describe("findStaffingShortfalls", () => {
       }),
     });
     expect(findStaffingShortfalls(state)).toEqual([]);
+  });
+
+  describe("skill-mix gaps", () => {
+    const rnWard = (patch: Partial<ScenarioUiState> = {}) =>
+      ward({
+        staff: people("rn1", "rn2", "en1", "en2", "en3"),
+        staffGroups: [{ id: "RN", members: ["rn1", "rn2"] }],
+        cardsByKind: cards({
+          requirements: [
+            requirement("day", "D", 1),
+            requirement("night", "N", 2, { skillMix: [{ people: "RN", minNumPeople: 2 }] }),
+          ],
+        }),
+        ...patch,
+      });
+
+    it("an RN on leave leaves the night one RN short, flagged as skill mix", () => {
+      const findings = findStaffingShortfalls(rnWard({ reqData: [leave("rn2", "03")] }));
+      expect(findings).toEqual([
+        expect.objectContaining({
+          kind: "requirement_short",
+          dateId: "03",
+          ruleIds: ["night"],
+          required: 2,
+          available: 1,
+          skillMix: true,
+          mixPeople: "RN",
+          away: [{ person: "rn2", reason: "leave" }],
+        }),
+      ]);
+    });
+
+    it("a skill mix does not ban anyone: non-RNs still count toward the head count", () => {
+      expect(findStaffingShortfalls(rnWard())).toEqual([]);
+    });
+
+    it("empty group is a skill-mix gap on every night", () => {
+      const findings = findStaffingShortfalls(rnWard({ staffGroups: [{ id: "RN", members: [] }] }));
+      expect(findings.filter((f) => f.mixPeople === "RN")).toHaveLength(7);
+    });
   });
 
   it("ignores disabled requirements and ones with coefficients", () => {

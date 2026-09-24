@@ -81,6 +81,7 @@ describe("classifySituation", () => {
     away: [],
     capRuleIds: [],
     skillMix: false,
+    mixPeople: null,
   });
   it("orders capped over chronic over acute, and needs a failed run for unexplained", () => {
     expect(classifySituation([], false)).toBeNull();
