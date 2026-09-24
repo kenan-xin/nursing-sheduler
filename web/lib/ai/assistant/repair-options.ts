@@ -8,7 +8,8 @@
 // user applies.
 //
 // Controller rulings (2026-09-24) shape the operations: a borrowed nurse is
-// `add_person` + `set_off_request` "must" outside the loan (no `mark_person_off` arm);
+// `add_person` with `temporary: true`, plus `set_off_request` "must" outside the loan
+// when the loan is shorter than the period (no `mark_person_off` arm);
 // staffing requirements are EXACT counts; a requirement can be lowered only when it
 // targets the one short date alone; a skill-mix requirement is never lowered or created.
 
@@ -536,7 +537,9 @@ const borrowTemporaryNurse: Builder = (ctx, all) => {
   if (narrowed === null) return null;
 
   // She is here on the short dates only (or the whole period) and must be off on every
-  // other date: a free day between two short dates would be a hire the caps no longer bind.
+  // other date: a free day between two short dates would be a hire the caps no longer
+  // bind. On a whole-period loan she has no days off at all, so `temporary: true` is
+  // what marks her as borrowed rather than a new hire.
   const short = shortDates(ctx, dated);
   const loanIds = short.length ? short : ctx.items.map((i) => i.id);
   const offRuns = runsOf(ctx, (id) => (loanIds.includes(id) ? null : "off"));
@@ -551,7 +554,7 @@ const borrowTemporaryNurse: Builder = (ctx, all) => {
   };
   const operations: AssistantCommandV1[] = placeholderNames(ctx, count).flatMap(
     (name, index): AssistantCommandV1[] => [
-      { type: "add_person", name, groups: group ? [group] : [] },
+      { type: "add_person", name, groups: group ? [group] : [], temporary: true },
       ...offRuns.map(
         ({ from, to }): AssistantCommandV1 => ({
           type: "set_off_request",
@@ -595,9 +598,9 @@ const borrowTemporaryNurse: Builder = (ctx, all) => {
       ? `${dated.length === 1 ? "That day is" : "Those days are"} short by up to ${count} ${count === 1 ? "nurse" : "nurses"} even with everyone free working.`
       : "More hands over the period remove the pressure the current staff cannot absorb.",
     operations,
-    // A whole-period loan has no days off, so the host cannot tell it from a new hire:
-    // the agreement is asked in chat.
-    enforcedBy: offRuns.length === 0 ? "chat" : "host_question",
+    // `temporary: true` makes the Preview ask the lender (assumptions.ts), for a
+    // whole-period loan too, so the agreement is always a host question.
+    enforcedBy: "host_question",
     confirmationQuestion: `Has the lending ward or agency confirmed ${count === 1 ? "the nurse" : "the nurses"} for ${when}${skill}?`,
     needsFromUser: [
       "Which ward, float pool or agency can lend the nurse, and the name to show on the roster (or keep the placeholder).",
@@ -858,7 +861,10 @@ export function violatesSafetyFloor(
         case "add_person":
           if (!PLACEHOLDER.test(op.name) || ctx.staffIds.has(op.name) || ctx.groupIds.has(op.name))
             return invented;
-          return op.groups.length > 0 && !loaned.has(op.name) ? skillGroup : null;
+          // A temporary nurse, or one with hard days off, is a loan the Preview asks the lender about.
+          return op.groups.length > 0 && op.temporary !== true && !loaned.has(op.name)
+            ? skillGroup
+            : null;
         case "edit_person":
           return op.name === String(op.personId) ? null : invented;
         default:
@@ -964,9 +970,10 @@ export function isSafeOption(state: ScenarioUiState, option: RepairOption): bool
       case "move_leave":
         return nurseAsked && real(op.personId);
       case "add_person":
-        // A placeholder (the floor), in real groups, and a skill group only with a host question.
+        // A placeholder (the floor), marked temporary, in real groups, and a skill group only with a host question.
         return (
           loan &&
+          op.temporary === true &&
           op.groups.every((g) => ctx.groupIds.has(g)) &&
           (op.groups.length === 0 || option.enforcedBy === "host_question")
         );

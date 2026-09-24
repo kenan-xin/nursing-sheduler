@@ -9,6 +9,7 @@ people:
     - id: ben
     - id: Borrowed nurse 1
       history: []
+      temporary: true
 shiftTypes:
   items:
     - id: D

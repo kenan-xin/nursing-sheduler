@@ -12,8 +12,9 @@
 //
 // CONTROLLER RULINGS (2026-09-24, binding over the spec draft):
 // - No `mark_person_off` arm exists. The borrowed/float nurse repair is expressed
-//   with EXISTING arms: `add_person`, then `set_off_request` at weight "must" over
-//   the dates she is NOT covering (she is free only on the short dates).
+//   with EXISTING arms: `add_person` with `temporary: true`, then `set_off_request`
+//   at weight "must" over the dates she is NOT covering (she is free only on the
+//   short dates, or has no days off at all for a whole-period loan).
 // - Staffing requirements are EXACT counts (`qualifiedPeople` bans everyone else),
 //   so "lower a staffing minimum" means editing `requiredNumPeople` of an exact
 //   requirement via `edit_staffing_requirement` / `set_staffing_requirement_people`.
@@ -208,11 +209,12 @@ export const REPAIRS: readonly RepairEntry[] = [
     disruption: "medium",
     confirmation: "lending_ward",
     enforcedBy: "host_question",
-    // No `mark_person_off` arm exists: add the temporary nurse, then pin her OFF
-    // (weight "must") over every date she is not covering, so she is free only on
-    // the short dates (controller ruling, 2026-09-24). A "must" shift request puts her
-    // on the short shift, and a hard count rule she would inherit is narrowed to the
-    // ward's own staff in the same change.
+    // No `mark_person_off` arm exists: add the nurse with `temporary: true`, then pin
+    // her OFF (weight "must") over every date she is not covering, so she is free only
+    // on the short dates (controller ruling, 2026-09-24) -- or, for a whole-period
+    // loan, no days off at all. A "must" shift request puts her on the short shift, and
+    // a hard count rule she would inherit is narrowed to the ward's own staff in the
+    // same change.
     opTypes: ["add_person", "set_off_request", "set_shift_request", "edit_count_rule"],
     guardrail:
       "Put her in a skill group only when the manager confirms her qualification. Never invent a name.",

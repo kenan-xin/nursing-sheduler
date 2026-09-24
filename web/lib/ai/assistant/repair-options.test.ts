@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { deriveAssumptions } from "@/lib/proposal/assumptions";
 import { applyAssistantCommands } from "@/lib/proposal/operations";
 import { deriveProposalDiff } from "@/lib/proposal/diff";
 import { findStaffingShortfalls, type StaffingFinding } from "@/lib/rules/shortfalls";
@@ -130,7 +131,7 @@ describe("rankRepairOptions", () => {
     expect(borrow).toMatchObject({ confirmation: "lending_ward", enforcedBy: "host_question" });
     const name = "Borrowed nurse 1";
     expect(borrow?.operations).toEqual([
-      { type: "add_person", name, groups: ["RN"] },
+      { type: "add_person", name, groups: ["RN"], temporary: true },
       {
         type: "set_off_request",
         personId: name,
@@ -164,6 +165,7 @@ describe("rankRepairOptions", () => {
       type: "add_person",
       name: "Borrowed nurse 2",
       groups: ["RN"],
+      temporary: true,
     });
   });
 
@@ -321,6 +323,34 @@ describe("rankRepairOptions", () => {
       for (const op of o.operations) expect("ruleId" in op && op.ruleId).not.toBe("night-rn");
     }
   });
+
+  it("borrows a temporary RN for the whole period when every night lacks one", () => {
+    const base = SCENARIOS.onlyRnOnLeave();
+    const state: ScenarioUiState = {
+      ...base,
+      reqData: ["01", "02", "03", "04", "05", "06", "07"].map((d) => ({
+        uid: `rn1-leave-${d}`,
+        person: "rn1",
+        date: d,
+        kind: "leave" as const,
+      })),
+    };
+    const borrow = rank(state).find((o) => o.repairId === "borrow_temporary_nurse");
+    expect(borrow).toMatchObject({ confirmation: "lending_ward", enforcedBy: "host_question" });
+    expect(borrow?.operations.filter((op) => op.type === "set_off_request")).toEqual([]);
+    expect(borrow?.operations[0]).toEqual({
+      type: "add_person",
+      name: "Borrowed nurse 1",
+      groups: ["RN"],
+      temporary: true,
+    });
+    expect(isSafeOption(state, borrow!)).toBe(true);
+    const applied = applyAssistantCommands(state, borrow!.operations);
+    if (!applied.ok) throw new Error(applied.rejection.message);
+    expect(deriveAssumptions(state, applied.next, borrow!.operations).map((a) => a.type)).toContain(
+      "borrowed_staff_arranged",
+    );
+  });
 });
 
 describe("isSafeOption", () => {
@@ -351,7 +381,7 @@ describe("isSafeOption", () => {
     type: "add_person",
     name: "Borrowed nurse 1",
     groups: ["RN"],
-    temporary: false,
+    temporary: true,
   };
   const loan = { confirmation: "lending_ward", enforcedBy: "host_question" } as const;
   const nurse = { confirmation: "named_nurse", enforcedBy: "host_question" } as const;
@@ -678,6 +708,17 @@ describe("isSafeOption", () => {
   it.each(SAFE)("accepts %s", (_label, state, partial) => {
     expect(isSafeOption(state, option(partial))).toBe(true);
   });
+
+  it("isSafeOption refuses a borrow that is not marked temporary", () => {
+    const option_ = rank(rn).find((o) => o.repairId === "borrow_temporary_nurse")!;
+    const unmarked = {
+      ...option_,
+      operations: option_.operations.map((op) =>
+        op.type === "add_person" ? { ...op, temporary: false } : op,
+      ),
+    };
+    expect(isSafeOption(rn, unmarked)).toBe(false);
+  });
 });
 
 describe("review fixes (2026-09-24)", () => {
@@ -944,7 +985,7 @@ describe("review fixes (2026-09-24)", () => {
       type: "add_person" as const,
       name: `Borrowed nurse ${n}`,
       groups: [],
-      temporary: false,
+      temporary: true,
     });
     const narrow = {
       type: "edit_count_rule" as const,
@@ -1220,6 +1261,16 @@ describe("violatesSafetyFloor (any operations, including model-written candidate
           weight: "must",
         },
       ]),
+    ).toBeNull();
+  });
+
+  it("a temporary skilled borrow passes the floor on its own", () => {
+    expect(
+      violatesSafetyFloor(
+        rn,
+        [{ type: "add_person", name: "Borrowed nurse 1", groups: ["RN"], temporary: true }],
+        { leaveAsked: false },
+      ),
     ).toBeNull();
   });
 });

@@ -10,6 +10,7 @@ people:
     - id: en2
     - id: Borrowed nurse 1
       history: []
+      temporary: true
   groups:
     - id: RN
       members:
