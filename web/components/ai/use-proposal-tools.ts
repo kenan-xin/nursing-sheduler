@@ -201,7 +201,8 @@ export function useProposalTools(agentId: string, turnEpoch: number): void {
             ? `It also asks them to confirm ${waiting} real-world arrangement${waiting === 1 ? "" : "s"} before Apply becomes available. `
             : "") +
           "Nothing has changed yet, and you cannot apply it — only the user can. " +
-          "Do not say the change has been made. Tell them what to look at, and wait."
+          "Do not say the change has been made. In one short sentence, say what you prepared " +
+          "and what to check; do not list the values, the preview already shows them. Then wait."
         );
       },
     },
