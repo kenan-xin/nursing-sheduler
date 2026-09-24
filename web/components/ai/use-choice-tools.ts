@@ -35,6 +35,7 @@ export function useChoiceTools(agentId: string, turnEpoch: number): void {
       name: "offer_choices",
       agentId,
       description:
+        "ALWAYS call this instead of writing a question with options in text. " +
         "Show the user clickable options whenever you ask them to pick, for example between " +
         "repair options after a failed run, or 'did you mean Ana, Ben Tan or Chloe Lim?'. " +
         "The card also lets them type another answer. Their answer arrives as their next " +
