@@ -24,6 +24,7 @@ import { describeRefusal } from "@/lib/ai/assistant/send-gate";
 import { assistantActions, useAssistantStore } from "@/lib/ai/assistant/store";
 import { useAssistantSession, type AssistantActivity } from "./use-assistant-session";
 import { useAssistantProposals } from "./use-assistant-proposals";
+import { useAssistantFollowUps } from "./use-assistant-follow-ups";
 import { ProposalPreviewCard } from "./proposal-preview-card";
 import { DiagnosticSearchCard } from "./diagnostic-search-card";
 import { OptimizeRunRequestCard } from "./optimize-run-request-card";
@@ -173,11 +174,12 @@ export function AssistantLiveConversation({
   // switch unmounts it: an open question must not carry over to another thread.
   useEffect(() => () => assistantActions.clearChoices(), []);
   // The ONE send path, for the composer and the option card alike. Any send answers
-  // (or overrides) an open option card, so it closes here.
-  const sendMessage = (text: string) => {
+  // (or overrides) an open option card, so it closes here. The follow-up after an
+  // Apply or an offered run uses it too; a user send first drops a waiting one.
+  const sendMessage = useAssistantFollowUps(running, proposals.outcome, (text: string) => {
     assistantActions.clearChoices();
     void session.send(text);
-  };
+  });
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="assistant-live-conversation">

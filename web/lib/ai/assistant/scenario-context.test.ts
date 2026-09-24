@@ -70,10 +70,11 @@ describe("the attached turn context", () => {
     documentRevision: 12,
     routePath: "/shift-requests",
     routeLabel: "Requests & Leave",
+    now: new Date(2026, 8, 24, 9, 30),
   });
 
-  it("is exactly the authority statement, the document, and the current screen", () => {
-    expect(context).toHaveLength(3);
+  it("is exactly the authority statement, the document, the current screen and today", () => {
+    expect(context).toHaveLength(4);
     expect(context[0].description).toBe(ASSISTANT_AUTHORITY_STATEMENT);
   });
 
@@ -101,6 +102,19 @@ describe("the attached turn context", () => {
       scenarioId: "scenario-a",
       documentRevision: 12,
     });
+  });
+
+  it("tells the model today's date, from the injected clock", () => {
+    expect(context[3].value).toBe("2026-09-24 (Thursday 24 September 2026)");
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/month without a year/);
+  });
+
+  it("tells the model to carry on after an Apply or a failed run", () => {
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/says they applied a change/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(/do not ask them to confirm again/);
+    expect(ASSISTANT_AUTHORITY_STATEMENT).toMatch(
+      /run finished and failed.*get_optimize_result.*suggest_feasibility_options.*offer_choices/,
+    );
   });
 
   it("contains no credential -- the key is a request header, never context", () => {
