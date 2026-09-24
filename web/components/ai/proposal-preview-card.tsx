@@ -30,6 +30,7 @@ import {
 import type { AssistantProposalV1 } from "@/lib/store";
 import type { ProposalReadiness } from "@/lib/proposal";
 import type { AssistantProposalController } from "./use-assistant-proposals";
+import { ChoiceOption, OtherAnswer } from "./choice-card";
 
 function ChangeRow({ entry }: { entry: ProposalDiffEntry }) {
   return (
@@ -165,10 +166,14 @@ function Blocks({ readiness }: { readiness: ProposalReadiness }) {
 
 export interface ProposalPreviewCardProps {
   controller: AssistantProposalController;
+  /** The conversation's send path, for the "Tell me what to change" box. */
+  onSend: (text: string) => void;
+  /** A turn is still running: Apply and a send wait for it. */
+  disabled: boolean;
 }
 
 /** The Preview. Renders nothing at all when there is no live proposal. */
-export function ProposalPreviewCard({ controller }: ProposalPreviewCardProps) {
+export function ProposalPreviewCard({ controller, onSend, disabled }: ProposalPreviewCardProps) {
   const { proposal, readiness } = controller;
   if (!proposal || !readiness) return null;
 
@@ -253,33 +258,47 @@ export function ProposalPreviewCard({ controller }: ProposalPreviewCardProps) {
       <Confirmations proposal={proposal} controller={controller} />
       <Blocks readiness={readiness} />
 
-      <footer className="flex flex-wrap items-center gap-2 border-t border-line2 pt-3">
-        <Button
+      {/* The decision, as option-card answers. Apply waits for the agreements and for
+          a running turn; the two exits never wait. */}
+      <footer
+        className="flex flex-col gap-2 border-t border-line2 pt-3"
+        role="group"
+        aria-label="Your decision"
+      >
+        <ChoiceOption
+          primary
           data-testid="proposal-apply"
-          disabled={!readiness.applyEnabled || controller.applying}
+          label={controller.applying ? "Applying…" : "Apply"}
+          detail="Make this change to the schedule now."
+          disabled={disabled || !readiness.applyEnabled || controller.applying}
           onClick={() => void controller.apply()}
-        >
-          {controller.applying ? "Applying…" : "Apply"}
-        </Button>
+        />
         {/* REVISE is not a softer Cancel. It marks this change out of date and hands
             the conversation back, so the next thing the assistant prepares keeps this
             proposal's identity and moves its revision -- which is exactly what
             invalidates the confirmations already given. Cancel is terminal. */}
-        <Button
-          variant="outline"
+        <ChoiceOption
           data-testid="proposal-revise"
+          label="Change something"
+          detail="Set it aside and tell me what to adjust."
           onClick={() => void controller.revise()}
-        >
-          Revise
-        </Button>
-        <Button
-          variant="ghost"
+        />
+        <ChoiceOption
           data-testid="proposal-cancel"
+          label="Cancel"
+          detail="Drop this change. Nothing is applied."
           onClick={() => void controller.cancel()}
-        >
-          Cancel
-        </Button>
-        <p className="text-meta text-ink3">Tell the assistant what to change instead.</p>
+        />
+        <div className="mt-1 flex flex-col gap-2 border-t border-line2 pt-3">
+          {/* Revise, then say what to change: the same ending as Change something,
+              with the user's words sent as an ordinary message. */}
+          <OtherAnswer
+            label="Tell me what to change"
+            sendLabel="Send what to change"
+            disabled={disabled}
+            onSend={(text) => void controller.revise().then(() => onSend(text))}
+          />
+        </div>
       </footer>
 
       {controller.outcome?.kind === "failed" ? (

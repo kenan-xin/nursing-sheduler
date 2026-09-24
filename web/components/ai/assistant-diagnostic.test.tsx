@@ -41,7 +41,9 @@ import { useAssistantProposals } from "./use-assistant-proposals";
 
 /** The Preview bound to its controller exactly as the panel binds it. */
 function PreviewHost() {
-  return <ProposalPreviewCard controller={useAssistantProposals()} />;
+  return (
+    <ProposalPreviewCard controller={useAssistantProposals()} onSend={() => {}} disabled={false} />
+  );
 }
 
 const SHRINK: AssistantCommandV1[] = [
