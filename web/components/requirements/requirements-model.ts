@@ -26,6 +26,7 @@ import {
   type PersonRef,
   type RequirementCard,
   type RequirementCardBody,
+  type RequirementOverride,
   type ScenarioUiState,
   type SkillMixEntry,
   type ShiftTypeRef,
@@ -45,6 +46,7 @@ import {
   type WeightFieldValue,
 } from "@/components/card-editor/weight-value";
 import { deriveDateGroups, generateDateItems } from "@/lib/dates";
+import { formatShortDate } from "@/lib/dates/date-id";
 import {
   expandDateRefs,
   expandPersonRefs,
@@ -52,6 +54,7 @@ import {
   flattenShiftTypeRefs,
   type DerivedGroupLike,
 } from "@/lib/rules";
+import { requirementDateIsos } from "@/lib/rules/shortfalls";
 
 /** Verbatim validation messages (spec 05 "Shift Type Requirements" validation table). */
 export const REQUIREMENT_MESSAGES = {
@@ -86,6 +89,24 @@ export const REQUIREMENT_MESSAGES = {
     "A skill mix counts people, so it cannot be combined with staffing multipliers",
 } as const;
 
+/** Verbatim messages for the "Different number on some dates" rows (spec 2026-09-24). */
+export const OVERRIDE_MESSAGES = {
+  dateEmpty: "Pick a date for each exception",
+  duplicate: (d: string) => `${d} has more than one exception`,
+  notCovered: (d: string) => `${d} is not one of this requirement's dates`,
+  invalid: (d: string) => `The number of people on ${d} must be a whole number, 0 or more`,
+  abovePreferred: (d: string) =>
+    `The number of people on ${d} must not be more than the preferred number of people`,
+  // F1 (skill-mix merge): mirrors REQUIREMENT_MESSAGES.skillMixAboveRequired.
+  belowSkillMix: (d: string) => `A skill mix cannot ask for more people than the number on ${d}`,
+} as const;
+
+/** One exception row: a roster ISO date (`""` until picked) and its head count. */
+export interface OverrideRow {
+  date: string;
+  requiredNumPeople: RequirementNumberValue;
+}
+
 /** A number-or-blank draft value: an integer, `""` (blank), or a raw invalid
  *  string kept verbatim (mirrors the shared Target/Weight number-field contract). */
 export type RequirementNumberValue = number | string;
@@ -112,6 +133,8 @@ export interface RequirementFormState {
   date: DateRef[];
   weight: WeightFieldValue;
   skillMix: SkillMixDraft[];
+  /** Per-date exceptions to `requiredNumPeople` ("Different number on some dates"). */
+  requiredNumPeopleOverrides: OverrideRow[];
 }
 
 /** A fresh, empty draft (spec 05 FR-PR-20, in-form weight default per the current
@@ -128,6 +151,7 @@ export function emptyRequirementForm(): RequirementFormState {
     date: [],
     weight: -50,
     skillMix: [],
+    requiredNumPeopleOverrides: [],
   };
 }
 
@@ -251,6 +275,21 @@ export function selectShiftType(value: ShiftTypeRef): ShiftTypeRef[] {
   return [value];
 }
 
+/** Parse a Required/Preferred/exception number input as an integer (FR-PR-22/23):
+ *  blank stays blank; a `NaN` parse keeps the raw text so the verbatim validator
+ *  can reject it; otherwise `parseInt` truncates (`2.9` → `2`), mirroring the
+ *  shared `parseCoefficientInput`/`parseWeightInput` contract. */
+export function parseRequirementInteger(raw: string): RequirementNumberValue {
+  if (raw === "") return "";
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isNaN(parsed) ? raw : parsed;
+}
+
+/** The roster ISO dates a draft's Dates selection covers: the choices for an exception row. */
+export function requirementCoveredIsos(state: ScenarioUiState, dates: DateRef[]): string[] {
+  return requirementDateIsos(state, { date: dates });
+}
+
 // --- Date-scope adapters (identical shape to the Counts/Coverings seeds) ---
 
 /** The auto-derived date-scope chips (ALL / WEEKDAY / WEEKEND / day-of-week). */
@@ -303,6 +342,7 @@ export interface RequirementErrors {
   date?: string;
   weight?: string;
   skillMix?: string;
+  requiredNumPeopleOverrides?: string;
 }
 
 /** Whether the weight dial is meaningful for this draft (FR-PR-24): preferred is
@@ -320,15 +360,44 @@ export function preferredDiffersFromRequired(
   return pref !== Number(form.requiredNumPeople);
 }
 
+function validateOverrides(
+  form: RequirementFormState,
+  coveredIsos: ReadonlySet<string> | undefined,
+): string | undefined {
+  const ceiling = preferredDiffersFromRequired(form) ? Number(form.preferredNumPeople) : Infinity;
+  const floor = Math.max(
+    0,
+    ...form.skillMix.map((entry) =>
+      typeof entry.minNumPeople === "number" ? entry.minNumPeople : 0,
+    ),
+  );
+  const seen = new Set<string>();
+  for (const row of form.requiredNumPeopleOverrides) {
+    if (!row.date) return OVERRIDE_MESSAGES.dateEmpty;
+    const day = formatShortDate(row.date);
+    if (seen.has(row.date)) return OVERRIDE_MESSAGES.duplicate(day);
+    seen.add(row.date);
+    if (coveredIsos && !coveredIsos.has(row.date)) return OVERRIDE_MESSAGES.notCovered(day);
+    const n = row.requiredNumPeople;
+    if (typeof n !== "number" || !Number.isInteger(n) || n < 0)
+      return OVERRIDE_MESSAGES.invalid(day);
+    if (n < floor) return OVERRIDE_MESSAGES.belowSkillMix(day);
+    if (n > ceiling) return OVERRIDE_MESSAGES.abovePreferred(day);
+  }
+  return undefined;
+}
+
 /**
  * Validate a draft against spec 05's Shift Type Requirements table. Field order:
  * shift type (empty), coefficients (per-id, then overlap), shift type ("select
  * exactly one" — suppressed while a per-id coefficient error exists), required,
- * preferred, qualified, date, weight (only when preferred differs from required).
+ * preferred, qualified, date, exceptions, weight (only when preferred differs
+ * from required).
  */
 export function validateRequirementForm(
   form: RequirementFormState,
   domain: CoefficientDomain,
+  coveredIsos?: ReadonlySet<string>,
 ): RequirementErrors {
   const errors: RequirementErrors = {};
 
@@ -380,6 +449,9 @@ export function validateRequirementForm(
   if (form.qualifiedPeople.length === 0)
     errors.qualifiedPeople = REQUIREMENT_MESSAGES.qualifiedEmpty;
   if (form.date.length === 0) errors.date = REQUIREMENT_MESSAGES.dateEmpty;
+
+  const overrides = validateOverrides(form, coveredIsos);
+  if (overrides) errors.requiredNumPeopleOverrides = overrides;
 
   if (preferredDiffersFromRequired(form)) {
     if (!isValidWeightValue(form.weight)) {
@@ -457,6 +529,12 @@ export function buildRequirementCard(
         minNumPeople: e.minNumPeople as number,
       }),
     );
+  // An exception equal to the rule's own number says nothing: drop it, as preferred is dropped.
+  const overrides = form.requiredNumPeopleOverrides
+    .filter((row) => row.requiredNumPeople !== form.requiredNumPeople)
+    .map((row): RequirementOverride => [row.date, row.requiredNumPeople as number])
+    .sort(([a], [b]) => a.localeCompare(b));
+  if (overrides.length > 0) body.requiredNumPeopleOverrides = overrides;
   return { uid, ...body };
 }
 
@@ -497,6 +575,10 @@ export function requirementToForm(
           : [card.date],
     weight: card.weight,
     skillMix: (card.skillMix ?? []).map((e) => ({ ...e })),
+    requiredNumPeopleOverrides: (card.requiredNumPeopleOverrides ?? []).map(([date, n]) => ({
+      date,
+      requiredNumPeople: n,
+    })),
   };
 }
 

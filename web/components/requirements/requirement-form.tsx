@@ -36,6 +36,7 @@ import {
   buildQualifiedPeopleTransferOptions,
   buildRequirementShiftTypeDomain,
   buildRequirementShiftTypeOptions,
+  parseRequirementInteger,
   preferredDiffersFromRequired,
   selectShiftType,
   validateRequirementForm,
@@ -43,7 +44,6 @@ import {
   type RequirementErrors,
   type SkillMixDraft,
   type RequirementFormState,
-  type RequirementNumberValue,
 } from "./requirements-model";
 
 interface RequirementFormProps {
@@ -62,16 +62,6 @@ const SKILL_MIX_HELP =
   "At least this many of the shift's nurses must come from the group. Anyone can fill the other places.";
 const PREFERRED_NOTE =
   "Defaults to Required if left empty. Set higher to make extra staffing a soft goal (a weight then applies).";
-
-/** Parse a Required/Preferred number input as an integer (FR-PR-22/23): blank
- *  stays blank; a `NaN` parse keeps the raw text so the verbatim validator can
- *  reject it; otherwise `parseInt` truncates (`2.9` → `2`), mirroring the shared
- *  `parseCoefficientInput`/`parseWeightInput` contract. */
-function parseRequirementInteger(raw: string): RequirementNumberValue {
-  if (raw === "") return "";
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isNaN(parsed) ? raw : parsed;
-}
 
 /** Blur a number input on wheel so scrolling past a focused field cannot change
  *  staffing accidentally (EDGE-PR-12). */
