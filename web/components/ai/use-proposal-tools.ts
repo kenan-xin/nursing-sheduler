@@ -17,7 +17,8 @@
 // A REFUSAL IS A RESULT, NOT AN ERROR. Returning the host's rejection text lets the
 // model explain the limitation and ask the user for what is missing. Throwing would
 // present it as a failure to retry, and retrying a rejected operation is exactly the
-// loop the closed flows forbid ("never approximate a materially different rule").
+// loop the closed flows forbid ("never approximate a materially different rule") --
+// except a single correction to a value the refusal itself lists is not that loop.
 
 import { useModelVisibleTool } from "./register-model-visible-tool";
 import { z } from "zod";
@@ -96,7 +97,10 @@ export function useProposalTools(agentId: string, turnEpoch: number): void {
         "anything: the app validates your operations, works out every knock-on effect, " +
         "and shows the user a preview with an Apply button only they can press. " +
         "Use it when the user has asked for a specific change and you know the exact " +
-        "records and values. If anything is ambiguous, ask first — never guess a date, " +
+        "records and values. " +
+        "Take every person, staff group, shift and rule id exactly from the schedule " +
+        "(get_schedule_section) — never guess one. " +
+        "If anything is ambiguous, ask first — never guess a date, " +
         "a number of people, or which rule they mean. " +
         `At most ${MAX_ASSISTANT_OPERATIONS} operations per change — split a larger setup ` +
         "into several changes.",
@@ -151,10 +155,18 @@ export function useProposalTools(agentId: string, turnEpoch: number): void {
 
         if (!outcome.ok) {
           if (outcome.reason === "rejected") {
+            // ONE CORRECTED RETRY, NOT A LOOP (2026-09-24, nursing-sheduler-912). A refusal
+            // that lists the valid ids is exactly the evidence the model lacked. Retrying
+            // with one of them is a correction, not an approximation. Anything else still
+            // goes back to the user.
             return (
               `The app refused that change: ${outcome.rejection.message} ` +
-              "Explain this to the user in your own words and ask for what is missing. " +
-              "Do not try a different operation that only approximates what they asked for."
+              "If the refusal lists the valid choices or names the right format, and what the " +
+              "user asked for clearly matches one of them, correct that operation and prepare " +
+              "the change again, once. When the list is cut short, read the full list with " +
+              "get_schedule_section. Otherwise explain this to the user in your own words and " +
+              "ask for what is missing. Do not try a different operation that only " +
+              "approximates what they asked for."
             );
           }
           if (outcome.reason === "not-owner") {
