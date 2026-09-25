@@ -29,7 +29,11 @@ def git_blob_sha(data: bytes) -> str:
 def main() -> int:
     manifest = tomllib.loads((PATCH_DIR / "manifest.toml").read_text(encoding="utf-8"))
     tracked = [entry for entry in manifest["file"] if entry["class"] in TRACKED]
-    failures: list[str] = []
+    failures: list[str] = [
+        f"{entry['path']}: unknown class {entry['class']!r}"
+        for entry in manifest["file"]
+        if entry["class"] not in TRACKED
+    ]
     with tempfile.TemporaryDirectory() as scratch:
         root = Path(scratch)
         for entry in tracked:

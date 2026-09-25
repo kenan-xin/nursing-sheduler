@@ -2,7 +2,7 @@
 
 This is NOT a reimplementation of anything: it imports the *vendored* Python
 backend (`core/nurse_scheduling`) and drives its actual `load_data`, `schedule`,
-`group_map`, and `exporter` code so the TypeScript contract layer is checked
+`server.workspace.build_shift_type_index_map`, and `exporter` code so the TypeScript contract layer is checked
 against binding behavior rather than a memory of it.
 
 Protocol: read one JSON request object from stdin, write one JSON response object
@@ -85,7 +85,7 @@ def op_schedule(req):
 
 
 def op_shift_map(req):
-    """C3: the ordered shift-type id -> [indices] map (group_map). Verifies
+    """C3: the ordered shift-type id -> [indices] map (server.workspace). Verifies
     ALL/OFF/LEAVE expansion, definition-order construction, and forward-ref failure."""
     try:
         items = [ShiftType(id=i) for i in req["items"]]
