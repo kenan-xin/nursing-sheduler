@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, StrictBool, field_validator, model_validator
 from typing_extensions import Self
 
 from . import group_map, utils
@@ -60,6 +60,10 @@ class Person(BaseModel):
     id: int | str
     description: str | None = None
     history: list[str] | None = None
+    # Authoring-only: a nurse borrowed from another ward, float pool or agency. The
+    # frontend derives the lending-ward confirmation from it; the solver reads nothing
+    # from it. StrictBool, so "yes" or 1 cannot pass as true.
+    temporary: StrictBool | None = None
 
 
 class DateRange(BaseModel):
