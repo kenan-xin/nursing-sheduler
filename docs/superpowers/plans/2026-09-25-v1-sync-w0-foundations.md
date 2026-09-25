@@ -6,27 +6,29 @@
 
 **Architecture:** Split `core/requirements.txt` into a runtime file (what the Docker images install) and `requirements-optional.txt` (tests, tooling, optional solvers), in the upstream genie form plus two documented v2 differences. Add a Linux `core` job to the existing CI workflow that runs Ruff and the full pytest suite against a real Redis service. Record the new upstream baseline in the T19 manifest.
 
-**Tech Stack:** Python 3.12.13 (`.python-version`), pip, pytest, Ruff 0.15.22, Redis 8 (GitHub Actions service), Docker.
+**Tech Stack:** Python 3.12.13 (`.python-version`), pip, pytest, Ruff 0.15.22, Redis 8 (GitHub Actions service), GLPK, Docker.
 
-**Spec:** `docs/superpowers/specs/2026-09-25-v1-genie-sync-design.md` (section 3, W0; decisions X1, X4). Evidence: `docs/research/2026-09-25-v1-sync/05-tests-deps-docker-ci.md` (L5-01, L5-10).
+**Spec:** `docs/superpowers/specs/2026-09-25-v1-genie-sync-design.md` (section 3, W0; decisions X1, X4). Evidence: `docs/research/2026-09-25-v1-sync/05-tests-deps-docker-ci.md` (L5-01, L5-10). Plan reviews: `10-plan-review-opus.md`, `11-plan-review-codex.md` (all accepted fixes are in this revision).
 
 ## Global Constraints
 
-- Upstream target: v1 repo `/home/kenan/work/nurse-scheduling`, branch `feature/genie`, commit `1bf4b85`. Old pin `d63519b`. Merge base with v1 `dev`: `89190ab`. Read it only with `git -C /home/kenan/work/nurse-scheduling show|diff|log`.
+- Upstream target: v1 repo `/home/kenan/work/nurse-scheduling`, branch `feature/genie`, commit `1bf4b85`. Old pin `d63519b`. Merge base with v1 `dev`: `89190ab`. Read it only with `git -C /home/kenan/work/nurse-scheduling show|diff|log|rev-parse|merge-base`.
 - Keep `ruamel.yaml==0.19.1` and `pydantic==2.13.4` pinned: canonical YAML bytes depend on them.
 - Keep `ruff==0.15.22` pinned and the explicit `tool.ruff.lint.select` in `core/pyproject.toml`.
 - `pulp==3.3.2`, `highspy==1.12.0`, `pyscipopt==6.2.1` go in `requirements-optional.txt`, never in the runtime file (X4).
 - Leave out the packages that only upstream `ai/` imports: `psycopg`, `e2b`, `Pillow`, `defusedxml`, `pypdf`, `pypdfium2`.
-- Branch flow (`CLAUDE.md`): branch from `develop` in its own worktree with `wt switch --create feat/v1-sync-w0 --base develop --no-cd`, merge back into `develop`. Do not push or merge without the user's approval.
-- Task tracking uses `bd` (beads), not TodoWrite.
+- Shell convention. Shell state does not persist between command blocks. Every block starts with `cd "$(cat /tmp/v1sync-w0-root)"`, names the interpreter by its full path (`/tmp/v1sync-w0-venv/bin/python`), and runs `core/` or `web/` commands inside a subshell: `(cd core && …)`.
+- Exit codes. Never pipe a test run into `tail` or `grep` for a pass or fail decision. Write the output to a log file, keep the exit status, then read the log.
+- Branch flow (`CLAUDE.md`): branch from `develop` in its own worktree, merge back into `develop`. The commit steps in this plan run only after the user approves this plan for execution. Push and merge need separate approval.
+- Task tracking uses `bd` (beads), not TodoWrite. Use `cp -rf` and `rm -rf` for copies and removals (`AGENTS.md`).
 
 ## Review Focus
 
-- The production backend image must not contain `pytest`, `ruff`, `fakeredis`, or `pulp`: a person running the image expects only runtime code. Pinned by Task 1 Step 5.
-- The real-Redis variants must run in CI, not skip silently: a CI run where `NURSE_TEST_REDIS_URL` is unset looks green but tests nothing. Pinned by Task 2 Step 3 (skip count check).
-- The web CI job must still find every Python package the differential oracle and `dev-launcher.test.ts` import after the split. Pinned by Task 1 Step 6.
+- The production backend image must not contain `pytest`, `ruff`, `fakeredis`, or `pulp`. Pinned by Task 1 Step 6.
+- The real-Redis variants must run in CI, not skip silently. Pinned by Task 2 Step 2.
+- The web CI job must still find every Python package the differential oracle and `dev-launcher.test.ts` import after the split. Pinned by Task 1 Step 7.
 - A contributor who runs `pip install -r core/requirements.txt` for local tests must get a clear pointer to the optional file. Pinned by the header comment in Task 1 Step 3.
-- `ruff format --check` must pass on `develop` as it is today, or the new job starts red. Pinned by Task 2 Step 2.
+- `ruff format --check` must pass on `develop` as it is today, or the new job starts red. Pinned by Task 2 Step 3.
 
 ---
 
@@ -35,25 +37,34 @@
 **Files:**
 - Modify: `core/requirements.txt` (whole file)
 - Create: `core/requirements-optional.txt`
-- Modify: `.github/workflows/ci.yml:35-45` (web job cache key and install step comment only)
+- Modify: `core/pyproject.toml:22-23` (the comment that names the Ruff pin's file)
 - Modify: `docker/README.md` (the sentence near line 390 that says the backend gate runs in CI)
 
 **Interfaces:**
 - Consumes: nothing.
 - Produces: `core/requirements-optional.txt`, which starts with `-r requirements.txt`. Task 2 and every later workstream install it for tests.
 
-- [ ] **Step 1: Create the worktree and a local venv**
+- [ ] **Step 1: Create the worktree, record its path, and create a venv**
 
 ```bash
+cd /home/kenan/orca/workspaces/nursing-sheduler/damselfish
 wt switch --create feat/v1-sync-w0 --base develop --no-cd
-cd <path printed by wt>
+git worktree list --porcelain | awk '/^worktree /{p=$2} /^branch refs\/heads\/feat\/v1-sync-w0$/{print p}' > /tmp/v1sync-w0-root
+cat /tmp/v1sync-w0-root
 uv venv /tmp/v1sync-w0-venv --python 3.12
 ```
+Expected: one absolute path printed. Every later block starts with `cd "$(cat /tmp/v1sync-w0-root)"`.
 
-- [ ] **Step 2: Confirm the current state that the split changes**
+- [ ] **Step 2: Record the web baseline before the split**
 
-Run: `grep -nE '^(pytest|pytest-cov|ruff|fakeredis)' core/requirements.txt`
-Expected: 4 matches. These test tools are in the runtime file today, so `docker/Dockerfile.backend` installs them.
+```bash
+cd "$(cat /tmp/v1sync-w0-root)"
+uv venv /tmp/v1sync-w0-runtime --python 3.12
+uv pip install --python /tmp/v1sync-w0-runtime/bin/python -r core/requirements.txt
+(cd web && pnpm install --frozen-lockfile && PYTHON=/tmp/v1sync-w0-runtime/bin/python pnpm test) > /tmp/v1sync-w0-web-before.log 2>&1
+echo "exit=$?"; tail -5 /tmp/v1sync-w0-web-before.log
+```
+Expected: `exit=0`. Record the pass count.
 
 - [ ] **Step 3: Rewrite `core/requirements.txt` as the runtime set**
 
@@ -88,6 +99,8 @@ redis
 # Optional dependencies for development, testing, and the extra solver backends.
 # Install with `pip install -r core/requirements-optional.txt`, which also pulls
 # in requirements.txt. The production images never install this file.
+# The PuLP/GLPK tests also need the `glpsol` binary: `glpk-utils` on
+# Debian/Ubuntu, `glpk` on Arch/CachyOS.
 -r requirements.txt
 # Solver backends beyond OR-Tools CP-SAT. The product uses CP-SAT only; these
 # keep the upstream multi-solver library and its tests runnable (spec X4).
@@ -106,44 +119,36 @@ fakeredis
 ruff==0.15.22
 ```
 
-- [ ] **Step 5: Build the backend image and prove test tools are gone**
+- [ ] **Step 5: Fix the stale comment and the README**
 
-Run:
+In `core/pyproject.toml`, change the comment line `# in core/requirements.txt.` (the end of "The matching version pin lives in core/requirements.txt") to `# in core/requirements-optional.txt.`
+
+In `docker/README.md`, find the sentence near line 390 that says the backend gate runs on "host / CI". Replace it with: "The backend gate (Ruff and pytest, with a real Redis service) runs in the `core` job of `.github/workflows/ci.yml` and on the host."
+
+- [ ] **Step 6: Build the backend image and prove test tools are gone**
+
 ```bash
-make APP_VERSION=w0-check build
+cd "$(cat /tmp/v1sync-w0-root)"
+APP_VERSION=w0-check docker compose -f docker/compose.yml build backend
 docker run --rm --entrypoint python docker-backend -c "import importlib.util as u; print([m for m in ('pytest','ruff','fakeredis','pulp') if u.find_spec(m)])"
 ```
-Expected: `[]`. The image name `docker-backend` comes from `docker compose -f docker/compose.yml config --images`.
+Expected: `[]`. The image name `docker-backend` comes from `APP_VERSION=x docker compose -f docker/compose.yml config --images` (the compose file has no top-level `name:`, and compose needs `APP_VERSION` set).
 
-- [ ] **Step 6: Run the web unit tests with only the runtime file installed**
-
-Run:
-```bash
-uv venv /tmp/v1sync-w0-runtime --python 3.12
-uv pip install --python /tmp/v1sync-w0-runtime/bin/python -r core/requirements.txt
-cd web && PYTHON=/tmp/v1sync-w0-runtime/bin/python pnpm test
-```
-Expected: the same pass count as on `develop` before this change. This matches what the web CI job installs.
-
-- [ ] **Step 7: Point the web job's pip cache at both files**
-
-In `.github/workflows/ci.yml`, change the `setup-python` step:
-```yaml
-          cache: pip
-          cache-dependency-path: |
-            core/requirements.txt
-            core/requirements-optional.txt
-```
-Leave `python3 -m pip install -r ../core/requirements.txt` as it is: the web tests need only the runtime set.
-
-- [ ] **Step 8: Correct `docker/README.md`**
-
-Find the sentence near line 390 that says the backend gate runs on "host / CI". Replace it with: "The backend gate (Ruff and pytest, with a real Redis service) runs in the `core` job of `.github/workflows/ci.yml` and on the host."
-
-- [ ] **Step 9: Commit**
+- [ ] **Step 7: Run the web unit tests with only the runtime file installed**
 
 ```bash
-git add core/requirements.txt core/requirements-optional.txt .github/workflows/ci.yml docker/README.md
+cd "$(cat /tmp/v1sync-w0-root)"
+uv pip install --python /tmp/v1sync-w0-runtime/bin/python --reinstall -r core/requirements.txt
+(cd web && PYTHON=/tmp/v1sync-w0-runtime/bin/python pnpm test) > /tmp/v1sync-w0-web-after.log 2>&1
+echo "exit=$?"; tail -5 /tmp/v1sync-w0-web-after.log
+```
+Expected: `exit=0` and the same pass count as Step 2. The web CI job installs only `core/requirements.txt`, and it keeps doing so.
+
+- [ ] **Step 8: Commit**
+
+```bash
+cd "$(cat /tmp/v1sync-w0-root)"
+git add core/requirements.txt core/requirements-optional.txt core/pyproject.toml docker/README.md
 git commit -m "build(core): split runtime and optional requirements (v1 sync W0)"
 ```
 
@@ -154,26 +159,39 @@ git commit -m "build(core): split runtime and optional requirements (v1 sync W0)
 
 **Interfaces:**
 - Consumes: `core/requirements-optional.txt` from Task 1.
-- Produces: a CI job named `core (ruff · pytest · redis)`. W1, W2 and W6 rely on it as their gate.
+- Produces: a CI job named `core (ruff · pytest · redis)`. W1, W2 and W6 rely on it as their gate. W1 adds one more step to it.
 
-- [ ] **Step 1: Run the full suite locally against real Redis on unchanged code**
+- [ ] **Step 1: Install the test environment**
 
 ```bash
+cd "$(cat /tmp/v1sync-w0-root)"
 uv pip install --python /tmp/v1sync-w0-venv/bin/python -r core/requirements-optional.txt
-docker run -d --name v1sync-w0-redis -p 16402:6379 redis:8-alpine
-cd core && NURSE_TEST_REDIS_URL=redis://localhost:16402/0 PYTHONPATH=. /tmp/v1sync-w0-venv/bin/python -m pytest -q -rs | tail -30
+which glpsol || echo "install glpk (Arch/CachyOS) or glpk-utils (Debian/Ubuntu) before W1"
+docker run -d --name v1sync-w0-redis -p 16402:6379 redis:8.8.0-alpine
 ```
-Expected: 0 failed. Record the passed and skipped counts. If a test fails here, stop and report it as a failure that already exists on `develop`: do not add a red job.
 
-- [ ] **Step 2: Run Ruff locally**
+- [ ] **Step 2: Run the full suite against real Redis on unchanged code, and prove nothing skips**
 
-Run: `cd core && /tmp/v1sync-w0-venv/bin/ruff check . && /tmp/v1sync-w0-venv/bin/ruff format --check .`
-Expected: `All checks passed!` and no files to reformat.
+```bash
+cd "$(cat /tmp/v1sync-w0-root)"
+(cd core && NURSE_TEST_REDIS_URL=redis://localhost:16402/0 PYTHONPATH=. /tmp/v1sync-w0-venv/bin/python -m pytest -q -rs) > /tmp/v1sync-w0-pytest.log 2>&1
+status=$?
+tail -30 /tmp/v1sync-w0-pytest.log
+echo "pytest exit=$status"
+if grep -i 'SKIPPED.*redis' /tmp/v1sync-w0-pytest.log; then echo "ERROR: real Redis tests skipped"; fi
+(cd core && env -u NURSE_TEST_REDIS_URL PYTHONPATH=. /tmp/v1sync-w0-venv/bin/python -m pytest -q -rs tests/test_server_store_contract.py) > /tmp/v1sync-w0-noredis.log 2>&1
+grep -ci 'SKIPPED.*redis' /tmp/v1sync-w0-noredis.log
+```
+Expected: `pytest exit=0`, no `ERROR` line, and a non-zero count in the last line (without the variable, the Redis variants skip; with it, they run). Record the passed and skipped counts (a reviewer saw 1067 passed, 0 Redis skips). If pytest fails here, stop and report it as a failure that already exists on `develop`: do not add a red job.
 
-- [ ] **Step 3: Confirm no real-Redis test skips when Redis is reachable**
+- [ ] **Step 3: Run Ruff**
 
-Run: `cd core && NURSE_TEST_REDIS_URL=redis://localhost:16402/0 PYTHONPATH=. /tmp/v1sync-w0-venv/bin/python -m pytest -q -rs | grep -i 'SKIPPED.*redis' || echo "no redis skips"`
-Expected: `no redis skips`. Then run the same command without `NURSE_TEST_REDIS_URL` and confirm that redis skips appear, so you know the variable is what enables them.
+```bash
+cd "$(cat /tmp/v1sync-w0-root)"
+(cd core && /tmp/v1sync-w0-venv/bin/ruff check . && /tmp/v1sync-w0-venv/bin/ruff format --check .)
+echo "exit=$?"
+```
+Expected: `All checks passed!`, `111 files already formatted` (or the current count), and `exit=0`.
 
 - [ ] **Step 4: Add the job to `.github/workflows/ci.yml`**
 
@@ -182,12 +200,13 @@ Insert after the `checks` job and before `e2e`:
   core:
     name: core (ruff · pytest · redis)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: core
     services:
       redis:
-        image: redis:8-alpine
+        image: redis:8.8.0-alpine
         ports:
           - 6379:6379
         options: >-
@@ -204,6 +223,10 @@ Insert after the `checks` job and before `e2e`:
           cache-dependency-path: |
             core/requirements.txt
             core/requirements-optional.txt
+      # PuLP/GLPK backend tests (restored in W1) call the glpsol binary; PuLP does
+      # not bundle it. Upstream test-core.yaml installs the same package.
+      - name: Install GLPK
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends glpk-utils
       - name: Install backend dependencies
         run: python3 -m pip install -r requirements-optional.txt
       - name: Ruff lint
@@ -220,12 +243,17 @@ Insert after the `checks` job and before `e2e`:
 
 - [ ] **Step 5: Validate the workflow file**
 
-Run: `python3 -c "import yaml,sys; d=yaml.safe_load(open('.github/workflows/ci.yml')); print(sorted(d['jobs']))"`
-Expected: `['checks', 'core', 'e2e']`. If PyYAML is missing, use `/tmp/v1sync-w0-venv/bin/python` after `uv pip install pyyaml`.
+```bash
+cd "$(cat /tmp/v1sync-w0-root)"
+uv pip install --python /tmp/v1sync-w0-venv/bin/python pyyaml
+/tmp/v1sync-w0-venv/bin/python -c "import yaml; d = yaml.safe_load(open('.github/workflows/ci.yml')); print(sorted(d['jobs']), [s.get('name') for s in d['jobs']['core']['steps']])"
+```
+Expected: `['checks', 'core', 'e2e']` and the step names, with `Install GLPK` before `Install backend dependencies`.
 
 - [ ] **Step 6: Commit and clean up**
 
 ```bash
+cd "$(cat /tmp/v1sync-w0-root)"
 git add .github/workflows/ci.yml
 git commit -m "ci: add core job with ruff, pytest and real Redis (v1 sync W0)"
 docker rm -f v1sync-w0-redis
@@ -242,7 +270,6 @@ docker rm -f v1sync-w0-redis
 
 - [ ] **Step 1: Confirm the baseline facts**
 
-Run:
 ```bash
 git -C /home/kenan/work/nurse-scheduling merge-base d63519b dev
 git -C /home/kenan/work/nurse-scheduling merge-base --is-ancestor d63519b feature/genie && echo ancestor
@@ -250,9 +277,8 @@ git -C /home/kenan/work/nurse-scheduling rev-parse --short feature/genie
 ```
 Expected: `89190ab…`, `ancestor`, `1bf4b85`. If `feature/genie` moved past `1bf4b85`, stop and ask the user which commit to target.
 
-- [ ] **Step 2: Add a bullet under "Pinned revision"**
+- [ ] **Step 2: Add two bullets under "Pinned revision"**
 
-Append to the header list:
 ```markdown
 - **Sync target (2026-09-25):** v1 branch `feature/genie` at `1bf4b85`. The old pin
   `d63519b` is a genie commit, not a `dev` commit; its merge base with v1 `dev` is
@@ -267,6 +293,7 @@ Append to the header list:
 - [ ] **Step 3: Commit**
 
 ```bash
+cd "$(cat /tmp/v1sync-w0-root)"
 git add docs/T19-upstream-backend-source-manifest.md
 git commit -m "docs(t19): record feature/genie 1bf4b85 sync target (v1 sync W0)"
 ```
@@ -275,4 +302,4 @@ git commit -m "docs(t19): record feature/genie 1bf4b85 sync target (v1 sync W0)"
 
 - [ ] **Step 1: Report**
 
-Report to the user: the branch name, the 3 commit SHAs, the local pytest counts from Task 2 Step 1, and the command to open a pull request into `develop`. Do not push or merge until the user approves. Acceptance for W0: the `core` job runs on that pull request and passes.
+Report to the user: the branch name, the 3 commit SHAs, the counts from Task 2 Step 2, and the command to open a pull request into `develop`. Do not push or merge until the user approves. Acceptance for W0: the `core` job runs on that pull request and passes.

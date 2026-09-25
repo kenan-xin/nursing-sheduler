@@ -4,29 +4,33 @@
 
 **Goal:** Replace every non-server module in `core/nurse_scheduling/` with upstream genie `1bf4b85`, re-apply the four v2 features as recorded patches, and make "identical to upstream except the patches" a checked fact.
 
-**Architecture:** Copy the genie files verbatim (the multi-solver library included), then apply four small patches on the genie code: `Person.temporary` (P1), `skillMix` and per-date overrides (P2-P3), and `on_roster` (P4), plus a fixture re-stamp (P0). v2-only files (`server/workspace.py`, `server/scheduling_input.py`, `server/api/optimize.py`, the web) adapt to the new API. `core/scripts/check_upstream_sync.py` reverse-applies the patches and compares each file with the genie blob SHA recorded in `core/upstream-patches/manifest.toml`.
+**Architecture:** Copy the genie files verbatim (the multi-solver library included), then apply small patches on the genie code: a fixture re-stamp (P0), `Person.temporary` (P1), `skillMix` and per-date overrides (P2-P3), and `on_roster` (P4). v2-only files (`server/workspace.py`, `server/scheduling_input.py`, `server/api/optimize.py`, the web) adapt to the new API. `core/scripts/check_upstream_sync.py` reverse-applies the patches and compares each file with the genie blob SHA recorded in `core/upstream-patches/manifest.toml`.
 
 **Tech Stack:** Python 3.12, Pydantic 2.13.4, OR-Tools CP-SAT, pytest, Ruff 0.15.22, TypeScript/Vitest (web), git.
 
-**Spec:** `docs/superpowers/specs/2026-09-25-v1-genie-sync-design.md` (section 3, W1; decisions X4, X9, X12, X14). Evidence: `docs/research/2026-09-25-v1-sync/01-solver-model-core.md`, `08-spike-w1.md`. Reference implementation: spike branch `kenan-xin/spike-w1-genie-core` (kept on purpose), commits `ad9efb8` (take and callers), `47c3b7e` (P1), `a011662` (P2-P3), `f489182` (P4), `da06553` (country, version, bound).
+**Spec:** `docs/superpowers/specs/2026-09-25-v1-genie-sync-design.md` (section 3, W1; decisions X4, X9, X12, X14). Evidence: `docs/research/2026-09-25-v1-sync/01-solver-model-core.md`, `08-spike-w1.md`. Plan reviews: `10-plan-review-opus.md` (dry-run of every step), `11-plan-review-codex.md`; all accepted fixes are in this revision. Reference implementation: spike branch `kenan-xin/spike-w1-genie-core` (kept on purpose), commits `ad9efb8` (take and callers), `47c3b7e` (P1), `a011662` (P2-P3), `f489182` (P4), `da06553` (country, version, bound).
 
 ## Global Constraints
 
 - Upstream: v1 repo `/home/kenan/work/nurse-scheduling`, branch `feature/genie`, commit `1bf4b85`. Read it only with `git -C /home/kenan/work/nurse-scheduling show|diff|log|rev-parse`.
 - Depends on W0 (`docs/superpowers/plans/2026-09-25-v1-sync-w0-foundations.md`) being merged into `develop`: the `core` CI job and `core/requirements-optional.txt` must exist.
-- Branch: `wt switch --create feat/v1-sync-w1 --base develop --no-cd`. W1 is one branch with the commits below. Intermediate commits may fail the v2-only tests that a later commit fixes. Only the branch tip must pass.
+- W1 is one branch with the commits below. Intermediate commits may fail the v2-only tests that a later commit fixes. Only the branch tip must pass.
 - Every genie file stays byte-identical to `1bf4b85` except the lines of P0 to P4.
 - The server keeps rejecting every solver other than `ortools/cp-sat` (`server/scheduling_input.py`).
 - Do not port the Docker performance benchmark or `tests/real/solver_capabilities.py` (fails the Ruff pin with 6 E402; v2 maps it to `core/scripts/solver_capability_probe.py`).
 - `SOLVER_SEMANTIC_VERSION` becomes `ortools/cp-sat@2` (X12).
-- Do not push or merge without the user's approval. Task tracking uses `bd`.
+- The PuLP/GLPK tests need `glpsol` on `PATH` (`which glpsol`): `glpk` on Arch/CachyOS, `glpk-utils` on Debian/Ubuntu. The W0 CI job installs it.
+- Shell convention. Shell state does not persist between command blocks. Every block starts with `cd "$(cat /tmp/v1sync-w1-root)"`, names the interpreter by its full path (`/tmp/v1sync-w1-venv/bin/python`), and runs `core/` or `web/` commands inside a subshell: `(cd core && …)`. The genie file list lives in `/tmp/v1sync-w1-files.txt` (written in Task 1 Step 3).
+- Exit codes. Never pipe a test run into `tail` or `grep` for a pass or fail decision. Write the output to a log file, keep the exit status, then read the log.
+- Format. Run `ruff format --check .` in `core/` after every edit to a Python file. Never reformat a genie file: fix the v2 file instead.
+- The commit steps in this plan run only after the user approves this plan for execution. Push and merge need separate approval. Task tracking uses `bd`. Use `cp -rf` and `rm -rf` (`AGENTS.md`).
 
 ## Review Focus
 
 - An old saved Workspace file that still carries `country: SG` must still load and solve, with `country` absent from the canonical strict output. Pinned by Task 1 Step 7.
 - A legacy strict (non-Workspace) submission that names an unknown person must return a 422 content error, never a 500. Pinned by Task 1 Step 7.
-- A Workspace per-date override whose date is outside its requirement's dates must return a located 422 at `preferences.<i>.requiredNumPeopleOverrides` (X14). Pinned by Task 3 Step 1.
-- A YAML alias bomb must return 400 with code `scheduling_data_too_complex` before any job exists. Pinned by Task 5 Step 1.
+- A Workspace per-date override whose date is outside its requirement's dates, including `date: []`, must return a located 422 at `preferences.<i>.requiredNumPeopleOverrides` (X14). Pinned by Task 3 Step 1.
+- A YAML alias bomb must return 400 with code `scheduling_data_too_complex`, and the web must classify that code as `request-invalid`. Pinned by Task 1 Step 7 and Task 5 Step 1.
 - A timeout with no incumbent must end INCONCLUSIVE, not FAILED. Pinned by Task 5 Step 1.
 
 ---
@@ -34,64 +38,105 @@
 ### Task 1: Take the genie solver core and adapt the callers
 
 **Files:**
-- Replace from genie (50 files, listed in Step 3): `core/nurse_scheduling/*.py` outside `server/`, and the matching tests under `core/tests/`.
+- Replace from genie (51 files, listed in Step 3): `core/nurse_scheduling/*.py` outside `server/`, and the matching tests under `core/tests/`.
 - Modify: `core/nurse_scheduling/server/workspace.py` (imports near line 25; new function after `_people_universe`; `_strict_dict` near line 490)
 - Modify: `core/nurse_scheduling/server/scheduling_input.py` (imports, new constant, `_parse_once`)
 - Modify: `core/nurse_scheduling/server/api/optimize.py` (imports near line 41; `create_job` exception handling near line 165)
 - Modify: `web/lib/scenario/differential/oracle.py:31,92`
-- Modify: `web/lib/scenario/canonical.ts:328`, `web/lib/scenario/canonical.test.ts:93`, `web/lib/bff/errors.ts:89`
+- Modify: `web/lib/scenario/canonical.ts:328`, `web/lib/scenario/canonical.test.ts:93`, `web/lib/bff/errors.ts:89`, `web/lib/bff/errors.test.ts` (one new case)
 - Modify: `core/tests/testcases/real/sg-28day-160h-compliance-14-nurses.yaml`, `core/tests/testcases/real/ward-8-shift-patterns-senior-on-every-shift.yaml` (remove the `country: SG` line)
 - Test: `core/tests/test_server_scheduling_input.py` (2 new tests)
 
 **Interfaces:**
-- Consumes: genie `loader.measure_yaml_expansion(content: bytes)` and `loader.SchedulingDataTooComplexError` (a `ValueError`); genie `scheduler.schedule(...) -> ScheduleResult` (a NamedTuple that still unpacks as the old 5-tuple).
+- Consumes: genie `loader.measure_yaml_expansion(content: bytes)`, `loader.SchedulingDataTooComplexError` (a `ValueError`), `loader.load_data(content: bytes)`; genie `scheduler.schedule(...) -> ScheduleResult` (a NamedTuple that still unpacks as the old 5-tuple).
 - Produces: `nurse_scheduling.server.workspace.build_shift_type_index_map(items, groups) -> dict` (moved from `group_map`, same behavior); `nurse_scheduling.server.scheduling_input.CODE_SCHEDULING_DATA_TOO_COMPLEX = "scheduling_data_too_complex"`.
 
-- [ ] **Step 1: Create the worktree and venv**
+- [ ] **Step 1: Create the worktree, record its path, and create the venv**
 
 ```bash
+cd /home/kenan/orca/workspaces/nursing-sheduler/damselfish
 wt switch --create feat/v1-sync-w1 --base develop --no-cd
-cd <path printed by wt>
+git worktree list --porcelain | awk '/^worktree /{p=$2} /^branch refs\/heads\/feat\/v1-sync-w1$/{print p}' > /tmp/v1sync-w1-root
+cat /tmp/v1sync-w1-root
 uv venv /tmp/v1sync-w1-venv --python 3.12
-uv pip install --python /tmp/v1sync-w1-venv/bin/python -r core/requirements-optional.txt
-export PY=/tmp/v1sync-w1-venv/bin/python
+uv pip install --python /tmp/v1sync-w1-venv/bin/python -r "$(cat /tmp/v1sync-w1-root)/core/requirements-optional.txt"
+which glpsol
 ```
+Expected: one absolute path, then a `glpsol` path.
 
 - [ ] **Step 2: Record the baseline**
 
-Run: `cd core && PYTHONPATH=. $PY -m pytest -q 2>&1 | tail -3`
-Expected: 0 failed. Record the passed and skipped counts (the spike saw 1001 passed, 69 skipped).
+```bash
+cd "$(cat /tmp/v1sync-w1-root)"
+(cd core && PYTHONPATH=. /tmp/v1sync-w1-venv/bin/python -m pytest -q) > /tmp/v1sync-w1-base.log 2>&1
+echo "exit=$?"; tail -3 /tmp/v1sync-w1-base.log
+```
+Expected: `exit=0`. Record the passed and skipped counts (the spike saw 1001 passed, 69 skipped).
 
 - [ ] **Step 3: Copy the genie files**
 
 ```bash
-FILES=(
-  nurse_scheduling/cli.py nurse_scheduling/constants.py nurse_scheduling/context.py nurse_scheduling/exporter.py
-  nurse_scheduling/group_map.py nurse_scheduling/loader.py nurse_scheduling/model_build_stats.py
-  nurse_scheduling/models.py nurse_scheduling/preference_types.py nurse_scheduling/report.py
-  nurse_scheduling/scheduler.py nurse_scheduling/solver_interface.py nurse_scheduling/solver_ortools_cp_sat.py
-  nurse_scheduling/solver_ortools_linear.py nurse_scheduling/solver_ortools_mathopt.py nurse_scheduling/solver_pulp.py
-  nurse_scheduling/solver_pulp_glpk.py nurse_scheduling/solver_pulp_python.py nurse_scheduling/utils.py
-  tests/export_test_helper.py tests/schedule_test_helper.py
-  tests/real/assignment_fixture.py tests/real/schedule_real_helper.py tests/real/schedule_score_ground_truth.py
-  tests/testcases/real/large-ward-with-87-people-2025-11.assignment-01.json
-  tests/test_cli.py tests/test_exporter.py tests/test_export_xlsx_ortools_cp_sat.py tests/test_hours_contract_validation.py
-  tests/test_loader.py tests/test_models_validation.py tests/test_preference_validation.py tests/test_scheduler.py
-  tests/test_solver_interface.py tests/test_utils.py tests/test_schedule_ortools_cp_sat.py
-  tests/test_schedule_ortools_mathopt_cp_sat.py tests/test_schedule_ortools_mathopt_gscip.py
-  tests/test_schedule_ortools_mathopt_highs.py tests/test_schedule_ortools_mpsolver_bop.py
-  tests/test_schedule_ortools_mpsolver_cbc.py tests/test_schedule_ortools_mpsolver_cp_sat.py
-  tests/test_schedule_ortools_mpsolver_scip.py tests/test_schedule_pulp_glpk.py tests/test_schedule_pulp_highs.py
-  tests/test_schedule_pulp_scip.py tests/test_solver_ortools_linear.py tests/test_solver_ortools_mathopt.py
-  tests/test_solver_pulp_glpk.py tests/test_solver_pulp_python.py
-)
-for p in "${FILES[@]}"; do
+cd "$(cat /tmp/v1sync-w1-root)"
+cat > /tmp/v1sync-w1-files.txt <<'EOF'
+nurse_scheduling/cli.py
+nurse_scheduling/constants.py
+nurse_scheduling/context.py
+nurse_scheduling/exporter.py
+nurse_scheduling/group_map.py
+nurse_scheduling/loader.py
+nurse_scheduling/model_build_stats.py
+nurse_scheduling/models.py
+nurse_scheduling/preference_types.py
+nurse_scheduling/report.py
+nurse_scheduling/scheduler.py
+nurse_scheduling/serve.py
+nurse_scheduling/solver_interface.py
+nurse_scheduling/solver_ortools_cp_sat.py
+nurse_scheduling/solver_ortools_linear.py
+nurse_scheduling/solver_ortools_mathopt.py
+nurse_scheduling/solver_pulp.py
+nurse_scheduling/solver_pulp_glpk.py
+nurse_scheduling/solver_pulp_python.py
+nurse_scheduling/utils.py
+tests/export_test_helper.py
+tests/schedule_test_helper.py
+tests/real/assignment_fixture.py
+tests/real/schedule_real_helper.py
+tests/real/schedule_score_ground_truth.py
+tests/testcases/real/large-ward-with-87-people-2025-11.assignment-01.json
+tests/test_cli.py
+tests/test_exporter.py
+tests/test_export_xlsx_ortools_cp_sat.py
+tests/test_hours_contract_validation.py
+tests/test_loader.py
+tests/test_models_validation.py
+tests/test_preference_validation.py
+tests/test_scheduler.py
+tests/test_solver_interface.py
+tests/test_utils.py
+tests/test_schedule_ortools_cp_sat.py
+tests/test_schedule_ortools_mathopt_cp_sat.py
+tests/test_schedule_ortools_mathopt_gscip.py
+tests/test_schedule_ortools_mathopt_highs.py
+tests/test_schedule_ortools_mpsolver_bop.py
+tests/test_schedule_ortools_mpsolver_cbc.py
+tests/test_schedule_ortools_mpsolver_cp_sat.py
+tests/test_schedule_ortools_mpsolver_scip.py
+tests/test_schedule_pulp_glpk.py
+tests/test_schedule_pulp_highs.py
+tests/test_schedule_pulp_scip.py
+tests/test_solver_ortools_linear.py
+tests/test_solver_ortools_mathopt.py
+tests/test_solver_pulp_glpk.py
+tests/test_solver_pulp_python.py
+EOF
+while read -r p; do
   mkdir -p "core/$(dirname "$p")"
   git -C /home/kenan/work/nurse-scheduling show "1bf4b85:core/$p" > "core/$p"
-done
-echo "${#FILES[@]} files"
+done < /tmp/v1sync-w1-files.txt
+wc -l < /tmp/v1sync-w1-files.txt
 ```
-Expected: `50 files`.
+Expected: `51`. (`constants.py` is already identical to genie; `serve.py` differs by one blank line.)
 
 - [ ] **Step 4: Move the shift-type map helper into `workspace.py`**
 
@@ -155,8 +200,11 @@ In `web/lib/scenario/differential/oracle.py`, change `from nurse_scheduling impo
 
 Remove the `country: SG` line from both SG test cases:
 ```bash
+cd "$(cat /tmp/v1sync-w1-root)"
 sed -i '/^country: SG$/d' core/tests/testcases/real/sg-28day-160h-compliance-14-nurses.yaml core/tests/testcases/real/ward-8-shift-patterns-senior-on-every-shift.yaml
+grep -c 'country' core/tests/testcases/real/sg-28day-160h-compliance-14-nurses.yaml core/tests/testcases/real/ward-8-shift-patterns-senior-on-every-shift.yaml
 ```
+Expected: `0` for both files.
 
 `core/nurse_scheduling/server/scheduling_input.py`: add `from ..loader import SchedulingDataTooComplexError, measure_yaml_expansion` to the imports; add after `SUPPORTED_SOLVER = "ortools/cp-sat"`:
 ```python
@@ -197,7 +245,7 @@ and after `except MalformedInputError as error: raise HTTPException(status_code=
 ```
 `web/lib/bff/errors.ts`: add `  scheduling_data_too_complex: "request-invalid",` to `CODE_TO_KIND` after `unsupported_solver: "validation",`.
 
-- [ ] **Step 7: Add the two Review Focus tests**
+- [ ] **Step 7: Add the Review Focus tests**
 
 Append to `core/tests/test_server_scheduling_input.py`:
 ```python
@@ -209,30 +257,39 @@ def test_workspace_country_is_accepted_and_dropped():
 
 
 def test_legacy_unknown_person_is_a_content_error_not_a_crash():
-    document = LEGACY_EQUIVALENT + """  - type: shift request
+    shift_request = """  - type: shift request
     person: ghost
     date: 2025-01-01
     shiftType: day
 """
     with pytest.raises(SchedulingContentError) as caught:
-        canonicalize_submission(document.encode())
+        canonicalize_submission((LEGACY_EQUIVALENT + shift_request).encode())
     assert any("ghost" in issue.message for issue in caught.value.issues)
 ```
-The genie `load_data(content: bytes)` takes bytes.
+In `web/lib/bff/errors.test.ts`, inside the `describe` block that holds "classifies BFF-synthesized fail-closed codes", add:
+```ts
+  it("classifies the YAML expansion bound as request-invalid", () => {
+    expect(
+      classifyOptimizeError(400, envelope({ code: "scheduling_data_too_complex", message: "x" })).kind,
+    ).toBe("request-invalid");
+  });
+```
 
 - [ ] **Step 8: Run the suite and Ruff**
 
-Run:
 ```bash
-cd core && PYTHONPATH=. $PY -m pytest -q 2>&1 | tail -15
-$PY -m ruff check . && $PY -m ruff format --check .
+cd "$(cat /tmp/v1sync-w1-root)"
+(cd core && /tmp/v1sync-w1-venv/bin/ruff check . && /tmp/v1sync-w1-venv/bin/ruff format --check .); echo "ruff exit=$?"
+(cd core && PYTHONPATH=. /tmp/v1sync-w1-venv/bin/python -m pytest -q) > /tmp/v1sync-w1-task1.log 2>&1
+echo "pytest exit=$?"; grep -E '^(FAILED|ERROR)' /tmp/v1sync-w1-task1.log | sed 's/::.*//' | sort | uniq -c; tail -1 /tmp/v1sync-w1-task1.log
 ```
-Expected: Ruff clean. Failures only in the v2-only feature tests that later tasks fix: `test_skill_mix.py`, `test_requirement_overrides.py`, `test_scheduler_on_roster.py`, and any test whose YAML uses `temporary`. Write the failing test ids into the commit message body. Any other failure is a caller the spec missed: stop and report it.
+Expected: `ruff exit=0`. pytest fails (non-zero exit), with exactly these failures, all fixed by Tasks 3 and 4: `test_skill_mix.py` (12), `test_requirement_overrides.py` (12), `test_scheduler_on_roster.py` (10), `test_assistant_repair_fixtures.py` (9), `test_server_scheduling_input.py` (3: `test_workspace_unknown_skill_mix_person_is_not_ready`, `test_workspace_known_skill_mix_group_and_all_are_not_flagged`, `test_legacy_skill_mix_validator_error_has_clean_path`), `test_roster_container.py` (3), `test_server_api.py` (1: `test_completed_job_produces_downloadable_schedule`), and 3 errors in `test_roster_routes.py`. Total: 50 failed, 3 errors, about 1147 passed. A failure in any other file is a caller the spec missed: stop and report it. Write the failing files into the commit message body.
 
 - [ ] **Step 9: Commit**
 
 ```bash
-git add -A core web/lib/scenario web/lib/bff/errors.ts
+cd "$(cat /tmp/v1sync-w1-root)"
+git add -A core web/lib/scenario web/lib/bff
 git commit -m "feat(core): take genie 1bf4b85 solver core; adapt workspace, oracle, country, YAML bound (v1 sync W1)"
 ```
 
@@ -240,15 +297,14 @@ git commit -m "feat(core): take genie 1bf4b85 solver core; adapt workspace, orac
 
 Genie `96e9ba9` renamed `FREEDAY`, and merge `1b6f7e5` kept the old fixture hash. The score does not change.
 ```bash
-F=core/tests/testcases/real/large-ward-with-87-people-2025-11.assignment-01.json
-sed -i 's/"scenarioSha256":"296dc6e6cfef745cfd9dca0b0d68a01066b230f63e83810b73d8a799edbb44ea"/"scenarioSha256":"0db947b0e16d77f9eed62fc83c3b8635ccfc0e5bedba0fc42fd9797355ce06dc"/' $F
-grep -c 0db947b0e16d77f9eed62fc83c3b8635ccfc0e5bedba0fc42fd9797355ce06dc $F
-cd core && PYTHONPATH=. $PY -m pytest -q tests/real/schedule_score_ground_truth.py
+cd "$(cat /tmp/v1sync-w1-root)"
+sed -i 's/"scenarioSha256":"296dc6e6cfef745cfd9dca0b0d68a01066b230f63e83810b73d8a799edbb44ea"/"scenarioSha256":"0db947b0e16d77f9eed62fc83c3b8635ccfc0e5bedba0fc42fd9797355ce06dc"/' core/tests/testcases/real/large-ward-with-87-people-2025-11.assignment-01.json
+grep -c 0db947b0e16d77f9eed62fc83c3b8635ccfc0e5bedba0fc42fd9797355ce06dc core/tests/testcases/real/large-ward-with-87-people-2025-11.assignment-01.json
+(cd core && PYTHONPATH=. /tmp/v1sync-w1-venv/bin/python -m pytest -q tests/real/schedule_score_ground_truth.py); echo "exit=$?"
+git add core/tests/testcases/real/large-ward-with-87-people-2025-11.assignment-01.json
+git commit -m "test(core): re-stamp stale genie assignment fixture hash (patch P0)"
 ```
-Expected: `1`, then the replay passes with score `4477324836724`.
-```bash
-git add $F && git commit -m "test(core): re-stamp stale genie assignment fixture hash (patch P0)"
-```
+Expected: `1`, then `1 passed` and `exit=0` (score `4477324836724`).
 
 ### Task 2: Patch P1, `Person.temporary`
 
@@ -288,8 +344,11 @@ def test_temporary_rejects_non_bool(value):
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `cd core && PYTHONPATH=. $PY -m pytest -q tests/test_person_temporary.py`
-Expected: FAIL on `temporary=True` (extra field forbidden or unknown attribute).
+```bash
+cd "$(cat /tmp/v1sync-w1-root)"
+(cd core && PYTHONPATH=. /tmp/v1sync-w1-venv/bin/python -m pytest -q tests/test_person_temporary.py); echo "exit=$?"
+```
+Expected: failures on `temporary=True` (the genie `Person` forbids extra fields), non-zero exit.
 
 - [ ] **Step 3: Apply P1**
 
@@ -303,12 +362,16 @@ In `core/nurse_scheduling/models.py`, add `StrictBool` to the import: `from pyda
 
 - [ ] **Step 4: Run it to verify it passes**
 
-Run: `cd core && PYTHONPATH=. $PY -m pytest -q tests/test_person_temporary.py`
-Expected: 4 passed.
+```bash
+cd "$(cat /tmp/v1sync-w1-root)"
+(cd core && PYTHONPATH=. /tmp/v1sync-w1-venv/bin/python -m pytest -q tests/test_person_temporary.py && /tmp/v1sync-w1-venv/bin/ruff format --check .); echo "exit=$?"
+```
+Expected: `4 passed`, Ruff clean, `exit=0`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
+cd "$(cat /tmp/v1sync-w1-root)"
 git add core/nurse_scheduling/models.py core/tests/test_person_temporary.py
 git commit -m "feat(core): re-apply Person.temporary on genie models (patch P1)"
 ```
@@ -322,7 +385,7 @@ git commit -m "feat(core): re-apply Person.temporary on genie models (patch P1)"
 - Test: existing `core/tests/test_skill_mix.py`, `core/tests/test_requirement_overrides.py`; new tests in `core/tests/test_server_scheduling_input.py`
 
 **Interfaces:**
-- Consumes: genie `CompiledShiftTypeRequirements(dates, shift_type_groups, coefficients, qualified_people)`, `utils.parse_pids(value, people_map)`, `utils.parse_dates(value, date_map, date_range) -> list[int]`.
+- Consumes: genie `CompiledShiftTypeRequirements(dates, shift_type_groups, coefficients, qualified_people)`, `utils.parse_pids(value, people_map)`, `utils.parse_dates(value, date_map, date_range) -> list[int]` (it converts each value with `str`, so safe-loaded `datetime.date` values work).
 - Produces: `CompiledShiftTypeRequirements.skill_mix: tuple[tuple[tuple[int, ...], int], ...] = ()` and `.required_by_date: tuple[tuple[int, int], ...] = ()`.
 
 - [ ] **Step 1: Write the failing X14 tests**
@@ -354,31 +417,45 @@ preferences:
 """
 
 
-def test_workspace_override_date_outside_requirement_is_located():
+@pytest.mark.parametrize("date_selector", ["[2025-01-01]", "[]"])
+def test_workspace_override_date_outside_requirement_is_located(date_selector):
     document = _OVERRIDE_WORKSPACE.format(
-        extra="    date: [2025-01-01]\n    requiredNumPeopleOverrides: [[2025-01-02, 1]]"
+        extra=f"    date: {date_selector}\n    requiredNumPeopleOverrides: [[2025-01-02, 1]]"
     )
     error = _content_error(document)
     assert error.error_code == "workspace_not_ready"
     assert (["preferences", 1, "requiredNumPeopleOverrides"], "unresolved_workspace_reference") in [
         (issue.path, issue.code) for issue in error.issues
     ]
+    assert "'2025-01-02'" in " ".join(issue.message for issue in error.issues)
 
 
-def test_workspace_override_date_inside_requirement_is_accepted():
-    document = _OVERRIDE_WORKSPACE.format(extra="    requiredNumPeopleOverrides: [[2025-01-02, 1]]")
+@pytest.mark.parametrize("date_line", ["", "    date: ALL\n"])
+def test_workspace_override_date_inside_requirement_is_accepted(date_line):
+    document = _OVERRIDE_WORKSPACE.format(extra=f"{date_line}    requiredNumPeopleOverrides: [[2025-01-02, 1]]")
     assert b"requiredNumPeopleOverrides" in canonicalize_submission(document.encode())
+
+
+def test_workspace_disabled_override_is_not_checked():
+    document = _OVERRIDE_WORKSPACE.format(
+        extra="    enabled: false\n    date: [2025-01-01]\n    requiredNumPeopleOverrides: [[2025-01-02, 1]]"
+    )
+    canonicalize_submission(document.encode())
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cd core && PYTHONPATH=. $PY -m pytest -q tests/test_server_scheduling_input.py -k override tests/test_skill_mix.py tests/test_requirement_overrides.py`
-Expected: FAIL. The genie model has no `skillMix` or `requiredNumPeopleOverrides` field yet.
+```bash
+cd "$(cat /tmp/v1sync-w1-root)"
+(cd core && PYTHONPATH=. /tmp/v1sync-w1-venv/bin/python -m pytest -q -k "override" tests/test_server_scheduling_input.py; PYTHONPATH=. /tmp/v1sync-w1-venv/bin/python -m pytest -q tests/test_skill_mix.py tests/test_requirement_overrides.py); echo "exit=$?"
+```
+Expected: failures and a non-zero exit. The genie model has no `skillMix` or `requiredNumPeopleOverrides` field yet.
 
 - [ ] **Step 3: Apply P2-P3 from the spike commit**
 
 The spike diff applies cleanly onto the genie files and touches only `models.py` and `preference_types.py`:
 ```bash
+cd "$(cat /tmp/v1sync-w1-root)"
 git diff a011662~1 a011662 -- core/nurse_scheduling/models.py core/nurse_scheduling/preference_types.py | git apply --index
 git diff --cached --stat
 ```
@@ -390,20 +467,30 @@ In `_reference_issues`, inside the existing `if date_range_ok:` block, after the
 ```python
             overrides = preference.get("requiredNumPeopleOverrides") or []
             if overrides:
+                # Same selector rule as the compiler: only a missing `date` means ALL;
+                # an empty list selects no dates.
+                date_selector = preference.get("date")
                 try:
-                    selected = set(parse_dates(preference.get("date") or ALL, date_map, workspace.dates.range))
+                    selected = set(
+                        parse_dates(
+                            ALL if date_selector is None else date_selector,
+                            date_map,
+                            workspace.dates.range,
+                        )
+                    )
                 except ValueError:
                     selected = None  # the `date` field itself is already reported above
                 for entry in overrides if selected is not None else []:
                     if not isinstance(entry, (list, tuple)) or not entry:
                         continue
+                    shown = str(entry[0])
                     try:
                         override_days = parse_dates(entry[0], date_map, workspace.dates.range)
                     except ValueError as error:
                         override_days = None
-                        message = f"Preference overrides an unresolvable date: {entry[0]!r} ({error})."
+                        message = f"Preference overrides an unresolvable date: {shown!r} ({error})."
                     else:
-                        message = f"Preference overrides {entry[0]!r}, which is not one of this requirement's dates."
+                        message = f"Preference overrides {shown!r}, which is not one of this requirement's dates."
                     if override_days is None or not set(override_days) <= selected:
                         issues.append(
                             SchedulingIssue(
@@ -416,12 +503,16 @@ In `_reference_issues`, inside the existing `if date_range_ok:` block, after the
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `cd core && PYTHONPATH=. $PY -m pytest -q tests/test_server_scheduling_input.py tests/test_skill_mix.py tests/test_requirement_overrides.py`
-Expected: all pass.
+```bash
+cd "$(cat /tmp/v1sync-w1-root)"
+(cd core && PYTHONPATH=. /tmp/v1sync-w1-venv/bin/python -m pytest -q tests/test_server_scheduling_input.py tests/test_skill_mix.py tests/test_requirement_overrides.py tests/test_assistant_repair_fixtures.py && /tmp/v1sync-w1-venv/bin/ruff format --check .); echo "exit=$?"
+```
+Expected: all pass, Ruff clean, `exit=0`.
 
 - [ ] **Step 6: Commit**
 
 ```bash
+cd "$(cat /tmp/v1sync-w1-root)"
 git add core/nurse_scheduling/models.py core/nurse_scheduling/preference_types.py core/nurse_scheduling/server/workspace.py core/tests/test_server_scheduling_input.py
 git commit -m "feat(core): re-apply skillMix and per-date overrides on genie (patch P2-P3); locate override-date errors (X14)"
 ```
@@ -430,33 +521,41 @@ git commit -m "feat(core): re-apply skillMix and per-date overrides on genie (pa
 
 **Files:**
 - Modify: `core/nurse_scheduling/scheduler.py` (new `_build_roster_payload`; `schedule` signature; the export step)
-- Test: existing `core/tests/test_scheduler_on_roster.py`
+- Test: existing `core/tests/test_scheduler_on_roster.py`, `core/tests/test_roster_routes.py`, `core/tests/test_roster_container.py`, `core/tests/test_server_api.py`
 
 **Interfaces:**
 - Consumes: genie `Context` fields `scenario`, `compiled_schedule`, `solver`, `shifts`, `offs`, `leaves`, `n_people`, `n_days`, `n_shift_types`.
-- Produces: `schedule(..., forced_solution=None, *, on_roster: Callable[[dict], None] | None = None) -> ScheduleResult`. The payload keys are `people`, `dates`, `solvedDays`, `coordinateMap` (unchanged from `develop`, consumed by `server/roster_container.py`).
+- Produces: `schedule(..., forced_solution=None, *, on_roster: Callable[[dict], None] | None = None) -> ScheduleResult`. The payload keys are `people`, `dates`, `solvedDays`, `coordinateMap` (unchanged from `develop`; `server/jobs/runner.py:118` always passes `on_roster`).
 
 - [ ] **Step 1: Run the existing test to verify it fails**
 
-Run: `cd core && PYTHONPATH=. $PY -m pytest -q tests/test_scheduler_on_roster.py`
-Expected: FAIL with `unexpected keyword argument 'on_roster'`.
+```bash
+cd "$(cat /tmp/v1sync-w1-root)"
+(cd core && PYTHONPATH=. /tmp/v1sync-w1-venv/bin/python -m pytest -q tests/test_scheduler_on_roster.py); echo "exit=$?"
+```
+Expected: failures with `unexpected keyword argument 'on_roster'`, non-zero exit.
 
 - [ ] **Step 2: Apply P4 from the spike commit**
 
 ```bash
+cd "$(cat /tmp/v1sync-w1-root)"
 git diff f489182~1 f489182 -- core/nurse_scheduling/scheduler.py | git apply --index
 git diff --cached --stat
 ```
 Expected: `1 file changed, 65 insertions(+)`. The added code is `_build_roster_payload(ctx, prettify)`, which reads `ctx.scenario.people.items`, `ctx.scenario.shiftTypes.items`, `ctx.compiled_schedule.dates`, `ctx.leaves` and `ctx.offs`; the keyword-only `on_roster` parameter after `forced_solution`; and the call `on_roster(_build_roster_payload(ctx, prettify))` right after `exporter.get_people_versus_date_dataframe`, reached only for OPTIMAL or FEASIBLE.
 
-- [ ] **Step 3: Run the test to verify it passes**
+- [ ] **Step 3: Run the tests to verify they pass**
 
-Run: `cd core && PYTHONPATH=. $PY -m pytest -q tests/test_scheduler_on_roster.py tests/test_roster_routes.py`
-Expected: all pass.
+```bash
+cd "$(cat /tmp/v1sync-w1-root)"
+(cd core && PYTHONPATH=. /tmp/v1sync-w1-venv/bin/python -m pytest -q tests/test_scheduler_on_roster.py tests/test_roster_routes.py tests/test_roster_container.py tests/test_server_api.py); echo "exit=$?"
+```
+Expected: all pass, `exit=0`.
 
 - [ ] **Step 4: Commit**
 
 ```bash
+cd "$(cat /tmp/v1sync-w1-root)"
 git add core/nurse_scheduling/scheduler.py
 git commit -m "feat(core): re-apply on_roster callback on genie scheduler (patch P4)"
 ```
@@ -469,7 +568,7 @@ git commit -m "feat(core): re-apply on_roster callback on genie scheduler (patch
 - Create: `core/tests/test_runner_real_inconclusive.py`, `core/tests/test_yaml_bound.py`
 
 **Interfaces:**
-- Consumes: `server.jobs.runner.OptimizationRunner().run(job, canonical, event_callback, should_stop)`, `runner.INCONCLUSIVE_SOLVER_TIMEOUT`, `server.app.create_app(start_background=False)`.
+- Consumes: `server.jobs.runner.OptimizationRunner().run(job, canonical, event_callback, should_stop)`, `runner.INCONCLUSIVE_SOLVER_TIMEOUT`, `server.app.create_app(start_background=False)`, the `JOB_BACKEND` setting (`server/config.py:168`).
 - Produces: `SOLVER_SEMANTIC_VERSION = "ortools/cp-sat@2"`.
 
 - [ ] **Step 1: Write the two gate tests**
@@ -518,7 +617,7 @@ def test_real_scheduler_timeout_without_incumbent_is_inconclusive(timeout_second
 ```
 `core/tests/test_yaml_bound.py`:
 ```python
-"""A YAML alias bomb is a coded 400 before any job exists."""
+"""A YAML alias bomb is a coded 400, and the server stays healthy."""
 
 from fastapi.testclient import TestClient
 
@@ -534,8 +633,8 @@ def _alias_bomb() -> str:
     return text
 
 
-def test_yaml_bomb_is_a_coded_400_before_any_job(monkeypatch):
-    monkeypatch.setenv("JOB_STORE", "memory")
+def test_yaml_bomb_is_a_coded_400(monkeypatch):
+    monkeypatch.setenv("JOB_BACKEND", "memory")
     with TestClient(create_app(start_background=False)) as client:
         response = client.post("/optimize", data={"yaml_content": _alias_bomb()})
         assert response.status_code == 400, response.text
@@ -545,54 +644,61 @@ def test_yaml_bomb_is_a_coded_400_before_any_job(monkeypatch):
 
 - [ ] **Step 2: Run them**
 
-Run: `cd core && PYTHONPATH=. $PY -m pytest -q tests/test_runner_real_inconclusive.py tests/test_yaml_bound.py`
-Expected: 3 passed (Tasks 1 to 4 already made both paths work). If the INCONCLUSIVE test fails, the genie `ScheduleResult` path did not land: stop and report.
+```bash
+cd "$(cat /tmp/v1sync-w1-root)"
+(cd core && PYTHONPATH=. /tmp/v1sync-w1-venv/bin/python -m pytest -q tests/test_runner_real_inconclusive.py tests/test_yaml_bound.py && /tmp/v1sync-w1-venv/bin/ruff format --check .); echo "exit=$?"
+```
+Expected: `3 passed`, Ruff clean, `exit=0` (Tasks 1 to 4 already made both paths work). A reviewer measured the 1 s case at 3x margin on a fast machine; slower CI hardware widens it. If the INCONCLUSIVE test fails, inspect the actual `solver_status` and failure before you diagnose the port, because timing alone does not name the cause (a very fast machine can find an incumbent within 1 s). Keep the 0.01 s case as the gate; if only the 1 s case flakes, report it with the measured status.
 
 - [ ] **Step 3: Bump the semantic version and regenerate the contract golden**
 
 In `core/nurse_scheduling/server/semantic_profile.py`, change `SOLVER_SEMANTIC_VERSION = "ortools/cp-sat@1"` to `SOLVER_SEMANTIC_VERSION = "ortools/cp-sat@2"`. Then:
 ```bash
-cd core && UPDATE_JOB_RESPONSE_CONTRACT=1 PYTHONPATH=. $PY -m pytest -q tests/test_job_response_contract.py
-git diff --stat ../contracts/job-response.golden.json
+cd "$(cat /tmp/v1sync-w1-root)"
+(cd core && UPDATE_JOB_RESPONSE_CONTRACT=1 PYTHONPATH=. /tmp/v1sync-w1-venv/bin/python -m pytest -q tests/test_job_response_contract.py); echo "exit=$?"
+git diff --stat contracts/job-response.golden.json
 ```
-Expected: the golden changes only in `solver_semantic_version`, `basis_id`, job ids, timestamps and input names. The web test files that contain `cp-sat@1` are free mock values and need no change.
+Expected: `exit=0`, and `40 insertions(+), 40 deletions(-)` only in `solver_semantic_version`, `basis_id`, job ids, links, timestamps and input names. The web test files that contain `cp-sat@1` are free mock values and need no change.
 
 - [ ] **Step 4: Run every gate on the branch tip**
 
 ```bash
-cd core && PYTHONPATH=. $PY -m pytest -q 2>&1 | tail -3
-PYTHONPATH=. $PY -m pytest -q tests/real/schedule_score_ground_truth.py tests/real/schedule_ortools_cp_sat.py
-$PY -m ruff check . && $PY -m ruff format --check .
-cd ../web && PYTHON=$PY pnpm test
-PYTHON=$PY RUN_DIFFERENTIAL=1 pnpm exec vitest run lib/scenario/differential
+cd "$(cat /tmp/v1sync-w1-root)"
+(cd core && PYTHONPATH=. /tmp/v1sync-w1-venv/bin/python -m pytest -q) > /tmp/v1sync-w1-tip.log 2>&1; echo "core exit=$?"; tail -1 /tmp/v1sync-w1-tip.log
+(cd core && PYTHONPATH=. /tmp/v1sync-w1-venv/bin/python -m pytest -q tests/real/schedule_score_ground_truth.py tests/real/schedule_ortools_cp_sat.py); echo "real exit=$?"
+(cd core && /tmp/v1sync-w1-venv/bin/ruff check . && /tmp/v1sync-w1-venv/bin/ruff format --check .); echo "ruff exit=$?"
+(cd web && pnpm install --frozen-lockfile && pnpm typecheck && pnpm lint && pnpm exec oxfmt --check . && PYTHON=/tmp/v1sync-w1-venv/bin/python pnpm test) > /tmp/v1sync-w1-web.log 2>&1; echo "web exit=$?"; tail -5 /tmp/v1sync-w1-web.log
+(cd web && PYTHON=/tmp/v1sync-w1-venv/bin/python RUN_DIFFERENTIAL=1 pnpm exec vitest run lib/scenario/differential) > /tmp/v1sync-w1-diff.log 2>&1; echo "differential exit=$?"; grep -E 'FAIL|failed' /tmp/v1sync-w1-diff.log | head
 ```
-Expected: core 0 failed (the spike saw about 1,200 passed); the replay and real cases pass; Ruff clean; web unit tests pass; the differential run shows no failure beyond the 3 that already fail on `develop` in `workspace-differential.test.ts`.
+Expected: `core exit=0` (a reviewer saw 1209 passed, 69 skipped without Redis); `real exit=0` (the 87-person smoke test takes about 139 s); `ruff exit=0`; `web exit=0`; the differential run fails only the same 3 test ids in `workspace-differential.test.ts` that fail on `develop` (compare the ids with a `develop` run, not only the count).
 
 - [ ] **Step 5: Check the C5 goldens**
 
 ```bash
-cd web/lib/optimize/__fixtures__/c5
-cp -r . /tmp/v1sync-c5 && cd /tmp/v1sync-c5
-PYTHONPATH=<worktree>/core $PY generate-c5-goldens.py
-for f in *.xlsx; do $PY xlsx-semantic-diff.py "<worktree>/web/lib/optimize/__fixtures__/c5/$f" "$f"; done
+cd "$(cat /tmp/v1sync-w1-root)"
+rm -rf /tmp/v1sync-c5 && cp -rf web/lib/optimize/__fixtures__/c5 /tmp/v1sync-c5
+(cd /tmp/v1sync-c5 && PYTHONPATH="$(cat /tmp/v1sync-w1-root)/core" /tmp/v1sync-w1-venv/bin/python generate-c5-goldens.py)
+for f in /tmp/v1sync-c5/*.xlsx; do /tmp/v1sync-w1-venv/bin/python /tmp/v1sync-c5/xlsx-semantic-diff.py "web/lib/optimize/__fixtures__/c5/$(basename "$f")" "$f"; done
 ```
-Expected: no semantic difference (the spike saw only `docProps/core.xml` timestamps). Commit nothing from this step. If a semantic difference appears, stop and report it.
+Expected: `{"diffs": []}` for every workbook. Commit nothing from this step. If a semantic difference appears, stop and report it.
 
 - [ ] **Step 6: Commit**
 
 ```bash
+cd "$(cat /tmp/v1sync-w1-root)"
 git add core/nurse_scheduling/server/semantic_profile.py contracts/job-response.golden.json core/tests/test_runner_real_inconclusive.py core/tests/test_yaml_bound.py
 git commit -m "feat(core): bump solver semantic version to cp-sat@2; gate INCONCLUSIVE and YAML bound (v1 sync W1)"
 ```
 
-### Task 6: Record the patches and add the upstream check
+### Task 6: Record the patches, add the upstream check, and gate the replay in CI
 
 **Files:**
 - Create: `core/upstream-patches/P0-fixture-restamp.patch`, `P1-person-temporary.patch`, `P2-P3-skillmix-overrides.patch`, `P4-on-roster.patch`
 - Create: `core/upstream-patches/manifest.toml`
 - Create: `core/scripts/check_upstream_sync.py`
 - Create: `core/tests/test_check_upstream_sync.py`
-- Modify: `docs/T19-upstream-backend-source-manifest.md` (one pointer paragraph)
+- Modify: `.github/workflows/ci.yml` (one step in the `core` job)
+- Modify: `docs/T19-upstream-backend-source-manifest.md` (one pointer section)
 
 **Interfaces:**
 - Consumes: the Task 1 to 4 commits.
@@ -617,31 +723,35 @@ def test_core_matches_recorded_upstream():
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `cd core && PYTHONPATH=. $PY -m pytest -q tests/test_check_upstream_sync.py`
-Expected: FAIL with `ImportError: cannot import name 'check_upstream_sync'`.
+```bash
+cd "$(cat /tmp/v1sync-w1-root)"
+(cd core && PYTHONPATH=. /tmp/v1sync-w1-venv/bin/python -m pytest -q tests/test_check_upstream_sync.py); echo "exit=$?"
+```
+Expected: `ImportError: cannot import name 'check_upstream_sync'`, non-zero exit.
 
 - [ ] **Step 3: Write the patch files from the commits**
 
 Each patch commit names its patch in the subject, so the SHAs come from `git log`:
 ```bash
+cd "$(cat /tmp/v1sync-w1-root)"
 mkdir -p core/upstream-patches
 P0=$(git log --format=%h --grep='(patch P0)' develop..HEAD)
 P1=$(git log --format=%h --grep='(patch P1)' develop..HEAD)
 P23=$(git log --format=%h --grep='(patch P2-P3)' develop..HEAD)
 P4=$(git log --format=%h --grep='(patch P4)' develop..HEAD)
 echo "$P0 $P1 $P23 $P4"
-git diff $P0~1 $P0 -- core/tests/testcases/real/large-ward-with-87-people-2025-11.assignment-01.json > core/upstream-patches/P0-fixture-restamp.patch
-git diff $P1~1 $P1 -- core/nurse_scheduling/models.py > core/upstream-patches/P1-person-temporary.patch
-git diff $P23~1 $P23 -- core/nurse_scheduling/models.py core/nurse_scheduling/preference_types.py > core/upstream-patches/P2-P3-skillmix-overrides.patch
-git diff $P4~1 $P4 -- core/nurse_scheduling/scheduler.py > core/upstream-patches/P4-on-roster.patch
+git diff "$P0~1" "$P0" -- core/tests/testcases/real/large-ward-with-87-people-2025-11.assignment-01.json > core/upstream-patches/P0-fixture-restamp.patch
+git diff "$P1~1" "$P1" -- core/nurse_scheduling/models.py > core/upstream-patches/P1-person-temporary.patch
+git diff "$P23~1" "$P23" -- core/nurse_scheduling/models.py core/nurse_scheduling/preference_types.py > core/upstream-patches/P2-P3-skillmix-overrides.patch
+git diff "$P4~1" "$P4" -- core/nurse_scheduling/scheduler.py > core/upstream-patches/P4-on-roster.patch
 wc -l core/upstream-patches/*.patch
 ```
-Expected: the `echo` prints 4 short SHAs (one each), and `wc` shows 4 non-empty files. The P2-P3 patch has only the two genie files, not `workspace.py`.
+Expected: the `echo` prints 4 short SHAs, and `wc` shows 4 non-empty files. The P2-P3 patch has only the two genie files, not `workspace.py`.
 
 - [ ] **Step 4: Generate `manifest.toml` from genie**
 
 ```bash
-cd core
+cd "$(cat /tmp/v1sync-w1-root)/core"
 {
   echo '# Origin of each core/ file that tracks upstream. Paths are relative to core/.'
   echo '# Read by core/scripts/check_upstream_sync.py. See docs/T19-upstream-backend-source-manifest.md.'
@@ -649,7 +759,7 @@ cd core
   echo 'upstream_commit = "1bf4b85"'
   echo '# Oldest first. The check reverse-applies them newest first.'
   echo 'patch_order = ["P0-fixture-restamp.patch", "P1-person-temporary.patch", "P2-P3-skillmix-overrides.patch", "P4-on-roster.patch"]'
-  for p in "${FILES[@]}"; do
+  while read -r p; do
     sha=$(git -C /home/kenan/work/nurse-scheduling rev-parse "1bf4b85:core/$p")
     case "$p" in
       nurse_scheduling/models.py) cls=patched; patches='["P1-person-temporary.patch", "P2-P3-skillmix-overrides.patch"]' ;;
@@ -659,12 +769,13 @@ cd core
       *) cls=verbatim; patches='' ;;
     esac
     printf '\n[[file]]\npath = "%s"\nclass = "%s"\nupstream_blob = "%s"\n' "$p" "$cls" "$sha"
-    [ -n "$patches" ] && printf 'patches = %s\n' "$patches"
-  done
+    if [ -n "$patches" ]; then printf 'patches = %s\n' "$patches"; fi
+  done < /tmp/v1sync-w1-files.txt
 } > upstream-patches/manifest.toml
-$PY -c "import tomllib; d = tomllib.load(open('upstream-patches/manifest.toml', 'rb')); print(len(d['file']))"
+/tmp/v1sync-w1-venv/bin/python -c "import tomllib; d = tomllib.load(open('upstream-patches/manifest.toml', 'rb')); print(len(d['file']))"
+grep -A2 'path = "nurse_scheduling/models.py"' upstream-patches/manifest.toml
 ```
-`FILES` is the array from Task 1 Step 3; define it again in this shell if needed. Expected: `50`. For example, `nurse_scheduling/models.py` must record `edcdab1503ea2ca11977d1693b259a53449d5245` and `nurse_scheduling/cli.py` must record `8a204b863f7e697a6929dd631d26a75a8807cb87`.
+Expected: `51`, and `models.py` records `edcdab1503ea2ca11977d1693b259a53449d5245`.
 
 - [ ] **Step 5: Write `core/scripts/check_upstream_sync.py`**
 
@@ -727,17 +838,30 @@ if __name__ == "__main__":
     sys.exit(main())
 ```
 
-- [ ] **Step 6: Run the check and the test**
+- [ ] **Step 6: Run the check and the test, and prove the check can fail**
 
-Run:
 ```bash
-cd core && PYTHONPATH=. $PY -m scripts.check_upstream_sync
-PYTHONPATH=. $PY -m pytest -q tests/test_check_upstream_sync.py
-$PY -m ruff check . && $PY -m ruff format --check .
+cd "$(cat /tmp/v1sync-w1-root)"
+git diff --quiet -- core/nurse_scheduling/cli.py && echo "cli.py clean"
+(cd core && PYTHONPATH=. /tmp/v1sync-w1-venv/bin/python -m scripts.check_upstream_sync); echo "check exit=$?"
+(cd core && PYTHONPATH=. /tmp/v1sync-w1-venv/bin/python -m pytest -q tests/test_check_upstream_sync.py && /tmp/v1sync-w1-venv/bin/ruff check . && /tmp/v1sync-w1-venv/bin/ruff format --check .); echo "test exit=$?"
+echo >> core/nurse_scheduling/cli.py
+(cd core && PYTHONPATH=. /tmp/v1sync-w1-venv/bin/python -m scripts.check_upstream_sync); echo "drift exit=$?"
+git restore -- core/nurse_scheduling/cli.py
 ```
-Expected: `checked 50 files against 1bf4b85: 0 problem(s)`, then 2 passed, then Ruff clean. To prove the check can fail, add a blank line to `core/nurse_scheduling/cli.py`, run the script (expect exit 1 naming `cli.py`), then `git checkout core/nurse_scheduling/cli.py`.
+Expected: `cli.py clean`; `checked 51 files against 1bf4b85: 0 problem(s)` and `check exit=0`; `2 passed`, Ruff clean, `test exit=0`; then a line naming `nurse_scheduling/cli.py` and `drift exit=1`.
 
-- [ ] **Step 7: Point the T19 manifest at the machine-readable table**
+- [ ] **Step 7: Gate the score replay in CI**
+
+`pytest` collects only `test_*.py`, so the core job never runs the replay that proves patch P0. In `.github/workflows/ci.yml`, add after the `Pytest (memory, fakeredis, real Redis)` step of the `core` job:
+```yaml
+      - name: Score ground-truth replay (patch P0)
+        env:
+          PYTHONPATH: .
+        run: python3 -m pytest -q tests/real/schedule_score_ground_truth.py
+```
+
+- [ ] **Step 8: Point the T19 manifest at the machine-readable table**
 
 Add to `docs/T19-upstream-backend-source-manifest.md`, after the header bullets:
 ```markdown
@@ -752,10 +876,11 @@ per-date overrides, P4 `on_roster`. Located Workspace errors stay in the v2-only
 `server/workspace.py` (spec X14).
 ```
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add core/upstream-patches core/scripts/check_upstream_sync.py core/tests/test_check_upstream_sync.py docs/T19-upstream-backend-source-manifest.md
+cd "$(cat /tmp/v1sync-w1-root)"
+git add core/upstream-patches core/scripts/check_upstream_sync.py core/tests/test_check_upstream_sync.py .github/workflows/ci.yml docs/T19-upstream-backend-source-manifest.md
 git commit -m "feat(core): record upstream patches and check core against genie blobs (v1 sync W1)"
 ```
 
@@ -763,4 +888,4 @@ git commit -m "feat(core): record upstream patches and check core against genie 
 
 - [ ] **Step 1: Report**
 
-Report to the user: the branch name, the commit list, the Task 5 Step 4 counts, the `check_upstream_sync` output, and the pull request command into `develop`. Mention the upstream bug to report (stale `scenarioSha256` in the genie assignment fixture). File a bead for the later small web branch that removes the remaining `country` touchpoints: `web/lib/scenario/types.ts`, `workspace.ts`, `import-scenario.ts`, `schemas/import.ts`, `schemas/producer.ts`, `web/lib/store/persistence.ts`, `web/components/ai/use-context-tools.ts` (import keeps accepting `country`). Do not push or merge until the user approves. Acceptance for W1: the `core` job passes on the pull request, including `test_check_upstream_sync.py`.
+Report to the user: the branch name, the commit list, the Task 5 Step 4 results, the `check_upstream_sync` output, and the pull request command into `develop`. Mention the upstream bug to report (stale `scenarioSha256` in the genie assignment fixture). File a bead for the later small web branch that removes the remaining `country` touchpoints: `web/lib/scenario/types.ts`, `workspace.ts`, `import-scenario.ts`, `schemas/import.ts`, `schemas/producer.ts`, `web/lib/store/persistence.ts`, `web/components/ai/use-context-tools.ts` (import keeps accepting `country`). Do not push or merge until the user approves. Acceptance for W1: the `core` job passes on the pull request, including `test_check_upstream_sync.py` and the replay step.
