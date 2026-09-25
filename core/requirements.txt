@@ -1,26 +1,22 @@
+# Runtime dependencies for the CLI and the backend. The Docker images install
+# only this file. Tests, tooling and the optional solver backends live in
+# requirements-optional.txt: for local tests run
+#   pip install -r core/requirements-optional.txt
+# Upstream genie keeps pulp in this file; v2 moves it to the optional file
+# because the product runs CP-SAT only (spec decision X4).
 ortools==9.15.6755
 pandas
 # Pinned canonical-boundary dependencies: these exact versions define the golden
 # canonical YAML bytes, validation locations, and 422 fixtures (T19 / tech-plan §1).
+# Upstream leaves them unpinned; this pin is a recorded v2 difference.
 ruamel.yaml==0.19.1
 pydantic==2.13.4
 openpyxl # For XLSX output support
 jinja2 # For prettifying output
-# For CI
-pytest
-pytest-cov
-# Ruff is intentionally pinned: the same `pyproject.toml` selection stays
-# clean across versions, but Ruff's *default* rule set expands between
-# releases (e.g. 0.15.x → 0.16.x widened it materially), so an unpinned
-# `ruff` turns a fresh `pip install -r` into a red gate. This pin is the
-# authoritative version; the explicit `tool.ruff.lint.select` below keeps
-# the contract honest even if this pin is later bumped.
-ruff==0.15.22
 # For web backend
 fastapi[standard]
 # Diagnostic HTTP client for the public production diagnostic runner (U30a).
 httpx
 python-multipart
-# Redis job store and its in-memory test double (memory mode never imports redis eagerly)
+# Redis job store (memory mode never imports redis eagerly)
 redis
-fakeredis
