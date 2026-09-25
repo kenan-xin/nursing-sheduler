@@ -15,7 +15,7 @@ Success criteria:
 3. v1 user-facing features and fixes that v2 lacks are tracked as beads.
 4. The v2 product does not change behavior, except for these listed changes:
    - A timeout with no incumbent ends as INCONCLUSIVE, not FAILED (W1).
-   - Input errors that used to fail a job at solve time now return 422 at submit, because genie validates at load time (lane 01 C02). This 422 has `path: []`: it names the bad ID but not the preference (see open question Q1).
+   - Input errors that used to fail a job at solve time now return 422 at submit, because genie validates at load time (lane 01 C02). Upstream raises these with `path: []` and a bare message such as `Unknown person ID: N7`. The web submits Workspace V1, where `server/workspace.py` reports unknown people and `skillMix` people with a located path first, so web users keep located errors (see X14).
    - A per-date override for a date outside its requirement fails at load time, not at solve time (P3).
    - A YAML document above the expansion or nesting bound returns 400 (W1).
    - `country` is no longer sent, so `inputSha256` changes for scenarios that carried it (X9).
@@ -36,6 +36,7 @@ Success criteria:
 | X10 | Take the upstream message text, `version.py` and the default config values. Exception: `default_prettify=False` stays in `config.py` as a documented patch, so every launch path behaves the same. The other v2 values (`JOB_MAX_PENDING=8`, the diagnostic `expected_concurrency=1`) move to the `docker/` compose environment files and `scripts/dev.sh`. The web layer owns user-facing spelling (W2 step 11). |
 | X11 | Track v1 frontend gaps as beads (W3). |
 | X12 | W1 bumps `SOLVER_SEMANTIC_VERSION` in `server/semantic_profile.py`, because solving meaning changes (load-time rejections, reachable INCONCLUSIVE). This retires the retained assistant basis evidence once. |
+| X14 | Located errors stay a v2-only concern of `server/workspace.py`, not a patch on upstream code. W1 adds one check there: a per-date override whose date is outside its requirement's dates returns `preferences.<i>.requiredNumPeopleOverrides` with `unresolved_workspace_reference`. The legacy strict input path keeps upstream's unlocated message. |
 | X13 | W6 bumps the Redis job key prefix and `QUEUE_STATE_MACHINE_VERSION`, because the genie store layout differs. Queued and running jobs are dropped at cutover. Deploy W6 in a quiet window. No migration code. |
 
 ## 3. Workstreams
@@ -88,6 +89,7 @@ Adapt the callers in the same branch:
 - `web/lib/scenario/differential/oracle.py`: import that function from `workspace.py`. No `country` change is needed. The differential suite is gated on `RUN_DIFFERENTIAL=1`, which CI does not set, so run it by hand. It already has 3 failures on `develop` in `workspace-differential.test.ts`.
 - `web/lib/optimize/__fixtures__/c5/generate-c5-goldens.py`: after W1 it runs against v2 `core/` (before W1 it crashes on the 5-tuple). Run it once and compare with `xlsx-semantic-diff.py`. Do not commit the output if only `docProps/core.xml` timestamps change.
 - `server/scheduling_input.py`: call `loader.measure_yaml_expansion` in `_parse_once`, before the load and outside the `ValueError` handler, because `SchedulingDataTooComplexError` is a `ValueError`. `server/api/optimize.py`: map the error to 400 with `{error: {code: scheduling_data_too_complex, message}}`. Genie returns a bare `detail`, so this is a v2 patch. Map the code in `CODE_TO_KIND` in `web/lib/bff/errors.ts`.
+- `server/workspace.py`: add the override-date reference check (X14), with a test.
 - `server/workspace.py`: accept and drop `country`. `web/lib/scenario/canonical.ts` stops emitting it, and `web/lib/scenario/canonical.test.ts:93` changes with it. Remove it from the 2 SG test cases.
 - `server/semantic_profile.py`: bump `SOLVER_SEMANTIC_VERSION` (X12), and regenerate `contracts/job-response.golden.json` with `UPDATE_JOB_RESPONSE_CONTRACT=1`. The web test files that contain `cp-sat@1` are free mock values and need no change.
 - The server keeps rejecting any solver other than CP-SAT (`server/scheduling_input.py`).
@@ -231,11 +233,7 @@ Acceptance: every file in `core/` has exactly one row, and the recipe runs on th
 | The W1 exporter change moves web goldens. | W1 runs the C5 golden generator again and reviews each changed golden. |
 | `SOLVER_SEMANTIC_VERSION` bump retires retained assistant evidence. | Accepted (X12). |
 
-## 5. Open questions
-
-- Q1: after W1, a load-time 422 names the bad ID but has `path: []`, so the web cannot point at the preference. Does W2 add a preference index to these errors (a v2 patch), or does v2 accept the upstream message only?
-
-## 6. Out of scope
+## 5. Out of scope
 
 - Wiring or vendoring the v1 Python AI service (X5).
 - Any v2 frontend redesign. W3 only files beads.
