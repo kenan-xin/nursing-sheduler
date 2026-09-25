@@ -68,7 +68,7 @@ implementation after API parity is reached."
 
 - `ruamel.yaml==0.19.1` and `pydantic==2.13.4` — the canonical-boundary versions
   that define the golden canonical bytes, validation locations, and 422 fixtures.
-- `redis` is in the runtime file (imported lazily; memory mode never imports it). Since the W0 split (2026-09-25), `fakeredis` and the test tools live in `core/requirements-optional.txt`, and so do `pulp==3.3.2`, `highspy==1.12.0` and `pyscipopt==6.2.1`: W1 restores the upstream multi-solver library, while the product stays CP-SAT only at the server boundary (spec decision X4).
+- `redis` is in the runtime file (imported lazily; memory mode never imports it). Since the W0 split (2026-09-25), `core/requirements.txt` holds the runtime pins and no test tools. `core/requirements-optional.txt` starts with `-r requirements.txt` and adds `pulp==3.3.2`, `highspy==1.12.0`, `pyscipopt==6.2.1`, `pytest`, `pytest-cov`, `fakeredis`, and `ruff==0.15.22`: W1 restores the upstream multi-solver library, while the product stays CP-SAT only at the server boundary (spec decision X4).
 
 ## Version stamping & Docker
 
