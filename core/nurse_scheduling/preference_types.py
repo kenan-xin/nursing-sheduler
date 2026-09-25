@@ -76,7 +76,10 @@ def shift_type_requirements(
     # so this could not be implemented as a special case of shift_count.
 
     coefficients = dict(compiled_preference.coefficients)
+    # requiredNumPeopleOverrides replaces requiredNumPeople on each listed date.
+    required_by_date = dict(compiled_preference.required_by_date)
     for d in compiled_preference.dates:
+        required = required_by_date.get(d, preference.requiredNumPeople)
         for group_idx, ss in enumerate(compiled_preference.shift_type_groups):
             for s in ss:
                 # A requirement expands through date and shift type groups into
@@ -116,9 +119,22 @@ def shift_type_requirements(
             # shift types in the group.
             actual_n_people = sum(coefficients[s] * ctx.shifts[(d, s, p)] for s in ss for p in qualified_ps_by_s[s])
             if preference.preferredNumPeople is not None:
-                ctx.solver.add_constraint(actual_n_people >= preference.requiredNumPeople)
+                ctx.solver.add_constraint(actual_n_people >= required)
             else:
-                ctx.solver.add_constraint(actual_n_people == preference.requiredNumPeople)
+                ctx.solver.add_constraint(actual_n_people == required)
+
+            # Skill mix: at least k of the named people among this group's staff.
+            # Nobody is banned; the headcount above still fixes the total, so the
+            # rest of the places go to anyone eligible. A person in two entries'
+            # groups counts toward both.
+            #   sum_{s in ss, p in eligible(s) ∩ people} shifts[(d, s, p)] >= k
+            for mix_people, min_num_people in compiled_preference.skill_mix:
+                mix_ps = set(mix_people)
+                mix_n = sum(ctx.shifts[(d, s, p)] for s in ss for p in qualified_ps_by_s[s] if p in mix_ps)
+                if isinstance(mix_n, int):  # nobody eligible: the floor cannot be met
+                    ctx.solver.add_bool_or([])  # an empty OR is always false -> INFEASIBLE
+                else:
+                    ctx.solver.add_constraint(mix_n >= min_num_people)
 
             # Add soft constraint for preferred number of people if specified
             if preference.preferredNumPeople is not None:

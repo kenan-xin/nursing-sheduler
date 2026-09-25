@@ -377,6 +377,40 @@ def _reference_issues(workspace: WorkspaceSchedulingDataV1) -> list[SchedulingIs
                             f"Preference references an unresolvable date: {value!r} ({error}).",
                         )
                     )
+            overrides = preference.get("requiredNumPeopleOverrides") or []
+            if overrides:
+                # Same selector rule as the compiler: only a missing `date` means ALL;
+                # an empty list selects no dates.
+                date_selector = preference.get("date")
+                try:
+                    selected = set(
+                        parse_dates(
+                            ALL if date_selector is None else date_selector,
+                            date_map,
+                            workspace.dates.range,
+                        )
+                    )
+                except ValueError:
+                    selected = None  # the `date` field itself is already reported above
+                for entry in overrides if selected is not None else []:
+                    if not isinstance(entry, (list, tuple)) or not entry:
+                        continue
+                    shown = str(entry[0])
+                    try:
+                        override_days = parse_dates(entry[0], date_map, workspace.dates.range)
+                    except ValueError as error:
+                        override_days = None
+                        message = f"Preference overrides an unresolvable date: {shown!r} ({error})."
+                    else:
+                        message = f"Preference overrides {shown!r}, which is not one of this requirement's dates."
+                    if override_days is None or not set(override_days) <= selected:
+                        issues.append(
+                            SchedulingIssue(
+                                ["preferences", index, "requiredNumPeopleOverrides"],
+                                ISSUE_UNRESOLVED_WORKSPACE_REFERENCE,
+                                message,
+                            )
+                        )
     return issues
 
 

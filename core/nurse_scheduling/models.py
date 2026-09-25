@@ -342,6 +342,14 @@ class MaxOneShiftPerDayPreference(BasePreference):
     description: str | None = None
 
 
+class SkillMixEntry(BaseModel):
+    """At least `minNumPeople` of `people` among the shift's staff. Bans nobody."""
+
+    model_config = ConfigDict(extra="forbid")
+    people: int | str  # One person or people-group id
+    minNumPeople: int
+
+
 class ShiftTypeRequirementsPreference(BasePreference):
     model_config = ConfigDict(extra="forbid")
     type: Annotated[str, Field(pattern=f"^{SHIFT_TYPE_REQUIREMENT}$")] = SHIFT_TYPE_REQUIREMENT
@@ -355,6 +363,12 @@ class ShiftTypeRequirementsPreference(BasePreference):
     # intentionally normalizes implicit all-people values to explicit "ALL".
     qualifiedPeople: (int | str) | list[int | str] | None = None
     preferredNumPeople: int | None = None  # Preferred number of people for each shift type
+    # Skill mix: each entry is a hard floor on how many of its people work the
+    # shift. Unlike qualifiedPeople it bans nobody. See shift_type_requirements.
+    skillMix: list[SkillMixEntry] | None = None
+    # Per-date exceptions to requiredNumPeople: [[date, count], ...]. On a listed date
+    # the requirement uses that count instead. Every other field still applies there.
+    requiredNumPeopleOverrides: list[tuple[datetime.date, int]] | None = None
     # None and the reserved "ALL" selector both mean all dates. The frontend
     # intentionally normalizes implicit all-date values to explicit "ALL".
     date: (int | str | datetime.date) | list[int | str | datetime.date] | None = None  # Single date or list of dates
@@ -364,6 +378,56 @@ class ShiftTypeRequirementsPreference(BasePreference):
     @classmethod
     def validate_weight_field(cls, v):
         return validate_weight(v)
+
+    @field_validator("requiredNumPeopleOverrides")
+    @classmethod
+    def validate_required_num_people_overrides_field(cls, v):
+        if v is None:
+            return v
+        seen = set()
+        for date, count in v:
+            if count < 0:
+                raise ValueError(f"requiredNumPeopleOverrides count for {date} must be at least 0.")
+            if date in seen:
+                raise ValueError(f"Duplicate requiredNumPeopleOverrides date {date}.")
+            seen.add(date)
+        return v
+
+    @model_validator(mode="after")
+    def validate_skill_mix(self) -> Self:
+        if not self.skillMix:
+            return self
+        qualified = self.qualifiedPeople if isinstance(self.qualifiedPeople, list) else [self.qualifiedPeople]
+        if self.qualifiedPeople is not None and any(str(q).upper() != ALL for q in qualified):
+            raise ValueError("'skillMix' needs the shift open to everyone: set 'qualifiedPeople' to ALL or omit it")
+        if self.shiftTypeCoefficients:
+            raise ValueError("'skillMix' counts people and cannot be combined with 'shiftTypeCoefficients'")
+        seen: set[int | str] = set()
+        for entry in self.skillMix:
+            if not 1 <= entry.minNumPeople <= self.requiredNumPeople:
+                raise ValueError(
+                    f"skillMix minNumPeople for {entry.people!r} must be between 1 and "
+                    f"requiredNumPeople ({self.requiredNumPeople})"
+                )
+            if entry.people in seen:
+                raise ValueError(f"skillMix names {entry.people!r} more than once")
+            seen.add(entry.people)
+        return self
+
+    @model_validator(mode="after")
+    def validate_required_num_people_overrides(self) -> Self:
+        if not self.requiredNumPeopleOverrides:
+            return self
+        for date, count in self.requiredNumPeopleOverrides:
+            if self.preferredNumPeople is not None and count > self.preferredNumPeople:
+                raise ValueError(f"requiredNumPeopleOverrides count for '{date}' must not exceed preferredNumPeople.")
+            for entry in self.skillMix or []:
+                if count < entry.minNumPeople:
+                    raise ValueError(
+                        f"requiredNumPeopleOverrides count for {date} is below skillMix minNumPeople "
+                        f"for '{entry.people}'."
+                    )
+        return self
 
 
 class HoursContractMetadata(BaseModel):
@@ -530,6 +594,8 @@ class CompiledShiftTypeRequirements:
     shift_type_groups: tuple[tuple[int, ...], ...]
     coefficients: tuple[tuple[int, int], ...]
     qualified_people: tuple[int, ...] | None
+    skill_mix: tuple[tuple[tuple[int, ...], int], ...] = ()  # v2: (people, minNumPeople) floors
+    required_by_date: tuple[tuple[int, int], ...] = ()  # v2: (date index, requiredNumPeople) overrides
 
 
 @dataclass(frozen=True)
@@ -968,11 +1034,23 @@ def _compile_preference(data, preference, people_map, shift_map, date_map, dates
             if preference.date is not None
             else all_dates
         )
+        skill_mix = tuple(
+            (tuple(utils.parse_pids(entry.people, people_map)), entry.minNumPeople)
+            for entry in preference.skillMix or []
+        )
+        required_by_date = []
+        for date, count in preference.requiredNumPeopleOverrides or []:
+            d = (date - data.dates.range.startDate).days
+            if d not in selected_dates:
+                raise ValueError(f"requiredNumPeopleOverrides date '{date}' is not one of this requirement's dates.")
+            required_by_date.append((d, count))
         return CompiledShiftTypeRequirements(
             dates=selected_dates,
             shift_type_groups=shift_groups,
             coefficients=coefficients,
             qualified_people=qualified_people,
+            skill_mix=skill_mix,
+            required_by_date=tuple(required_by_date),
         )
     if isinstance(preference, ShiftCountPreference):
         people = tuple(utils.parse_pids(preference.person, people_map))
