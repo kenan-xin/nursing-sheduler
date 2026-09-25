@@ -16,6 +16,14 @@ either maps to the pinned upstream revision or has a documented adaptation.
   the `5027e2f` refresh is governed by `upstream-public-diagnostics-refresh-2026-07-19`;
   the `d63519b` refresh is governed by the
   `d63519b-process-supervision-addendum` and ticket `U31`.
+- **Sync target (2026-09-25):** v1 branch `feature/genie` at `1bf4b85`. The old pin
+  `d63519b` is a genie commit, not a `dev` commit; its merge base with v1 `dev` is
+  `89190ab`. Genie contains all of `dev` through merge `1b6f7e5`. The upstream delta
+  for v2 is `d63519b..feature/genie`. Governing design:
+  `docs/superpowers/specs/2026-09-25-v1-genie-sync-design.md`.
+- **Requirements split (W0):** runtime `core/requirements.txt`, optional
+  `core/requirements-optional.txt`. v2 differences from genie: `ruamel.yaml` and
+  `pydantic` pinned; `pulp` in the optional file; the `ai/`-only packages omitted.
 
 ## Ported files (upstream → rebuild)
 
@@ -56,13 +64,11 @@ implementation after API parity is reached."
 | `server/scheduling_input.py` | Parse-once submission boundary: version dispatch, solver check, canonicalization; `MalformedInputError` → 400. |
 | `server/event_cursor.py` | Opaque, versioned, job-bound SSE cursor codec (`v1.<b64url(job)>.<b64url(native)>`, unpadded) and `EventCursorExpired`/`EventCursorInvalid`. |
 
-## Dependency pins (`core/requirements.txt`)
+## Dependency pins (`core/requirements.txt`, `core/requirements-optional.txt`)
 
 - `ruamel.yaml==0.19.1` and `pydantic==2.13.4` — the canonical-boundary versions
   that define the golden canonical bytes, validation locations, and 422 fixtures.
-- Added `redis` and `fakeredis`. Redis is imported lazily (memory mode never
-  imports it). `PuLP`/`HiGHS`/`SCIP` and any general solver selector are **not**
-  introduced.
+- `redis` is in the runtime file (imported lazily; memory mode never imports it). Since the W0 split (2026-09-25), `fakeredis` and the test tools live in `core/requirements-optional.txt`, and so do `pulp==3.3.2`, `highspy==1.12.0` and `pyscipopt==6.2.1`: W1 restores the upstream multi-solver library, while the product stays CP-SAT only at the server boundary (spec decision X4).
 
 ## Version stamping & Docker
 
