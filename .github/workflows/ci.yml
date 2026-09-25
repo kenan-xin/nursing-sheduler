@@ -70,6 +70,49 @@ jobs:
       - name: Build
         run: pnpm build
 
+  core:
+    name: core (ruff · pytest · redis)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: core
+    services:
+      redis:
+        image: redis:8.8.0-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: |
+            core/requirements.txt
+            core/requirements-optional.txt
+      # PuLP/GLPK backend tests (restored in W1) call the glpsol binary; PuLP does
+      # not bundle it. Upstream test-core.yaml installs the same package.
+      - name: Install GLPK
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends glpk-utils
+      - name: Install backend dependencies
+        run: python3 -m pip install -r requirements-optional.txt
+      - name: Ruff lint
+        run: ruff check .
+      - name: Ruff format
+        run: ruff format --check .
+      # Real-Redis store variants skip unless NURSE_TEST_REDIS_URL is set.
+      - name: Pytest (memory, fakeredis, real Redis)
+        env:
+          NURSE_TEST_REDIS_URL: redis://localhost:6379/0
+          PYTHONPATH: .
+        run: python3 -m pytest -q -rs
+
   e2e:
     name: e2e (playwright)
     # PINNED, not `ubuntu-latest`. This job compares committed screenshot

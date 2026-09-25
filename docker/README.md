@@ -388,10 +388,10 @@ the vendored caches never enter the image (`ls /app/core` → `nurse_scheduling`
 `pyproject.toml`/metadata), so no test tree or project metadata is needed at
 runtime. `deploy_gate_driver.py` therefore imports only `nurse_scheduling.server`.
 
-The authoritative backend gate (§6 item 1: `pytest` + `ruff` on `core/`) runs on
-the **host / CI**. If an in-image test run is ever wanted, add a **dedicated test
-stage** that COPYs `core/tests/` + the root `prototype/` fixtures — do not add them
-to the runtime stage.
+The backend gate (Ruff and pytest, with a real Redis service) runs in the `core`
+job of `.github/workflows/ci.yml` and on the host. If an in-image test run is
+ever wanted, add a **dedicated test stage** that COPYs `core/tests/` + the root
+`prototype/` fixtures — do not add them to the runtime stage.
 
 ## Local development (outside Docker)
 
