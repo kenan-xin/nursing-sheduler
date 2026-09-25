@@ -1,4 +1,4 @@
-"""Schedule regression test wrapper for the OR-Tools/CP-SAT backend."""
+"""Schedule regression test wrapper for the OR-Tools/MPSolver SAT backend."""
 
 # This file is part of Nurse Scheduling Project, see <https://github.com/j3soon/nurse-scheduling>.
 #
@@ -17,8 +17,10 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+# This test is mostly AI generated.
+
 from .schedule_test_helper import run_schedule_regression_test
 
 
-def test_schedule_ortools():
-    run_schedule_regression_test("ortools/cp-sat")
+def test_schedule_ortools_mpsolver_cp_sat():
+    run_schedule_regression_test("ortools/mpsolver/cp-sat")

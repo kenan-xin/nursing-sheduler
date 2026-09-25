@@ -20,12 +20,16 @@
 import datetime
 import math
 import re
-from typing import Literal
+from collections.abc import Mapping
+from dataclasses import dataclass
+from types import MappingProxyType
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, ConfigDict, StrictBool, model_validator, field_validator
-from typing_extensions import Annotated, Self
-from . import group_map
-from .constants import ALL, OFF, LEAVE, MAP_WEEKDAY_TO_STR, MAP_DATE_KEYWORD_TO_FILTER
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
+from typing_extensions import Self
+
+from . import group_map, utils
+from .constants import ALL, LEAVE, LEAVE_sid, MAP_DATE_KEYWORD_TO_FILTER, MAP_WEEKDAY_TO_STR, OFF, OFF_sid
 
 AT_MOST_ONE_SHIFT_PER_DAY = "at most one shift per day"
 SHIFT_TYPE_REQUIREMENT = "shift type requirement"
@@ -34,6 +38,14 @@ SHIFT_TYPE_SUCCESSIONS = "shift type successions"
 SHIFT_COUNT = "shift count"
 SHIFT_AFFINITY = "shift affinity"
 SHIFT_TYPE_COVERING = "shift type covering"
+SUPPORTED_SHIFT_COUNT_EXPRESSIONS = frozenset({"|x - T|^2", "x >= T", "x <= T", "x > T", "x < T", "x = T"})
+
+
+def validate_weight(weight: float) -> int | float:
+    """Validate that float weights can only be positive or negative infinity."""
+    if isinstance(weight, float) and weight != math.inf and weight != -math.inf:
+        raise ValueError("Float weights can only be positive infinity or negative infinity.")
+    return weight
 
 
 def _clock_minutes(clock: str) -> int:
@@ -42,24 +54,12 @@ def _clock_minutes(clock: str) -> int:
     return int(hours) * 60 + int(minutes)
 
 
-def validate_weight(weight: int | float) -> int | float:
-    """Validate that float weights can only be positive or negative infinity."""
-    if isinstance(weight, float):
-        if weight != math.inf and weight != -math.inf:
-            raise ValueError("Float weights can only be positive infinity or negative infinity.")
-    return weight
-
-
 # Base models
 class Person(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: int | str
     description: str | None = None
     history: list[str] | None = None
-    # Authoring-only: a nurse borrowed from another ward, float pool or agency. The
-    # frontend derives the lending-ward confirmation from it; the solver reads nothing
-    # from it. StrictBool, so "yes" or 1 cannot pass as true.
-    temporary: StrictBool | None = None
 
 
 class DateRange(BaseModel):
@@ -195,6 +195,17 @@ class BaseExportFormattingRule(BaseModel):
     rightBorderColor: Annotated[str, Field(pattern=r"^#[0-9a-fA-F]{6}$")] | None = None
     fontColor: Annotated[str, Field(pattern=r"^#[0-9a-fA-F]{6}$")] | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def validate_cell_only_fields(cls, data):
+        """Keep cell-only field errors actionable before extra-field rejection."""
+        if isinstance(data, dict) and data.get("type") != "cell":
+            if data.get("when") is not None:
+                raise ValueError("export formatting 'when' is only supported for rules with type 'cell'")
+            if data.get("appendText") is not None or data.get("note") is not None:
+                raise ValueError("export formatting annotations are only supported for rules with type 'cell'")
+        return data
+
 
 class ExportPersonFormattingRule(BaseExportFormattingRule):
     type: Literal["row", "people header", "history"]
@@ -327,14 +338,6 @@ class MaxOneShiftPerDayPreference(BasePreference):
     description: str | None = None
 
 
-class SkillMixEntry(BaseModel):
-    """At least `minNumPeople` of `people` among the shift's staff. Bans nobody."""
-
-    model_config = ConfigDict(extra="forbid")
-    people: int | str  # One person or people-group id
-    minNumPeople: int
-
-
 class ShiftTypeRequirementsPreference(BasePreference):
     model_config = ConfigDict(extra="forbid")
     type: Annotated[str, Field(pattern=f"^{SHIFT_TYPE_REQUIREMENT}$")] = SHIFT_TYPE_REQUIREMENT
@@ -348,12 +351,6 @@ class ShiftTypeRequirementsPreference(BasePreference):
     # intentionally normalizes implicit all-people values to explicit "ALL".
     qualifiedPeople: (int | str) | list[int | str] | None = None
     preferredNumPeople: int | None = None  # Preferred number of people for each shift type
-    # Skill mix: each entry is a hard floor on how many of its people work the
-    # shift. Unlike qualifiedPeople it bans nobody. See shift_type_requirements.
-    skillMix: list[SkillMixEntry] | None = None
-    # Per-date exceptions to requiredNumPeople: [[date, count], ...]. On a listed date
-    # the requirement uses that count instead. Every other field still applies there.
-    requiredNumPeopleOverrides: list[tuple[datetime.date, int]] | None = None
     # None and the reserved "ALL" selector both mean all dates. The frontend
     # intentionally normalizes implicit all-date values to explicit "ALL".
     date: (int | str | datetime.date) | list[int | str | datetime.date] | None = None  # Single date or list of dates
@@ -364,56 +361,6 @@ class ShiftTypeRequirementsPreference(BasePreference):
     def validate_weight_field(cls, v):
         return validate_weight(v)
 
-    @field_validator("requiredNumPeopleOverrides")
-    @classmethod
-    def validate_required_num_people_overrides_field(cls, v):
-        if v is None:
-            return v
-        seen = set()
-        for date, count in v:
-            if count < 0:
-                raise ValueError(f"requiredNumPeopleOverrides count for {date} must be at least 0.")
-            if date in seen:
-                raise ValueError(f"Duplicate requiredNumPeopleOverrides date {date}.")
-            seen.add(date)
-        return v
-
-    @model_validator(mode="after")
-    def validate_skill_mix(self) -> Self:
-        if not self.skillMix:
-            return self
-        qualified = self.qualifiedPeople if isinstance(self.qualifiedPeople, list) else [self.qualifiedPeople]
-        if self.qualifiedPeople is not None and any(str(q).upper() != ALL for q in qualified):
-            raise ValueError("'skillMix' needs the shift open to everyone: set 'qualifiedPeople' to ALL or omit it")
-        if self.shiftTypeCoefficients:
-            raise ValueError("'skillMix' counts people and cannot be combined with 'shiftTypeCoefficients'")
-        seen: set[int | str] = set()
-        for entry in self.skillMix:
-            if not 1 <= entry.minNumPeople <= self.requiredNumPeople:
-                raise ValueError(
-                    f"skillMix minNumPeople for {entry.people!r} must be between 1 and "
-                    f"requiredNumPeople ({self.requiredNumPeople})"
-                )
-            if entry.people in seen:
-                raise ValueError(f"skillMix names {entry.people!r} more than once")
-            seen.add(entry.people)
-        return self
-
-    @model_validator(mode="after")
-    def validate_required_num_people_overrides(self) -> Self:
-        if not self.requiredNumPeopleOverrides:
-            return self
-        for date, count in self.requiredNumPeopleOverrides:
-            if self.preferredNumPeople is not None and count > self.preferredNumPeople:
-                raise ValueError(f"requiredNumPeopleOverrides count for '{date}' must not exceed preferredNumPeople.")
-            for entry in self.skillMix or []:
-                if count < entry.minNumPeople:
-                    raise ValueError(
-                        f"requiredNumPeopleOverrides count for {date} is below skillMix minNumPeople "
-                        f"for '{entry.people}'."
-                    )
-        return self
-
 
 class HoursContractMetadata(BaseModel):
     # Authoring-only marker: its presence marks a shift count as a fixed
@@ -421,7 +368,7 @@ class HoursContractMetadata(BaseModel):
     # "half-hour" (there is no unit picker, conversion, or legacy fallback) and
     # `policy` selects the hard Exact / Allowed-Range encoding the raw solve
     # fields must match (validated at the scenario root, see
-    # NurseSchedulingData.validate_model). Ignored by the solver (mirrors
+    # group_map.validate_contracted_hours). Ignored by the solver (mirrors
     # ShiftType.durationMinutes above). Strictly typed with extra="forbid" so
     # malformed metadata — including the retired "hour"/"minute" units — cannot
     # slip through.
@@ -498,13 +445,192 @@ class ShiftTypeCoveringPreference(BasePreference):
         return validate_weight(v)
 
 
+class _FrozenMapping(Mapping):
+    """Fast, pickle-safe mapping that rejects public mutation."""
+
+    __slots__ = ("_data",)
+
+    def __init__(self, data):
+        object.__setattr__(self, "_data", MappingProxyType(dict(data)))
+
+    def __setattr__(self, _name, _value):
+        raise TypeError(f"{type(self).__name__} is immutable")
+
+    def __delattr__(self, _name):
+        raise TypeError(f"{type(self).__name__} is immutable")
+
+    def __getitem__(self, key):
+        return self._data[key]
+
+    def __iter__(self):
+        return iter(self._data)
+
+    def __len__(self):
+        return len(self._data)
+
+    def copy(self):
+        return self
+
+    def __copy__(self):
+        return self
+
+    def __deepcopy__(self, _memo):
+        return self
+
+    def __reduce__(self):
+        return type(self), (dict(self._data),)
+
+
+@dataclass(frozen=True)
+class CompiledShiftRequestDateTarget:
+    """Concrete dates and original selector shape for one request target."""
+
+    dates: tuple[int, ...]
+    request_shape: str
+
+
+@dataclass(frozen=True)
+class CompiledShiftRequest:
+    """Resolved selectors used to build and export a shift request."""
+
+    people: tuple[int, ...]
+    dates: tuple[int, ...]
+    shift_types: tuple[int, ...]
+    date_targets: tuple[CompiledShiftRequestDateTarget, ...]
+    requested_shift_type: str
+
+
+@dataclass(frozen=True)
+class CompiledPatternElement:
+    """One resolved succession pattern element."""
+
+    shift_types: tuple[int, ...]
+    matches_all_working_shifts: bool
+
+
+@dataclass(frozen=True)
+class CompiledShiftTypeSuccessions:
+    """Resolved selectors used by a succession preference."""
+
+    people: tuple[int, ...]
+    dates: tuple[int, ...]
+    date_set: frozenset[int]  # Same dates optimized for succession window membership checks.
+    pattern: tuple[CompiledPatternElement, ...]
+
+
+@dataclass(frozen=True)
+class CompiledShiftTypeRequirements:
+    """Resolved staffing equations and optional eligibility selector."""
+
+    dates: tuple[int, ...]
+    shift_type_groups: tuple[tuple[int, ...], ...]
+    coefficients: tuple[tuple[int, int], ...]
+    qualified_people: tuple[int, ...] | None
+
+
+@dataclass(frozen=True)
+class CompiledShiftCount:
+    """Resolved inputs used by a shift count preference."""
+
+    people: tuple[int, ...]
+    dates: tuple[int, ...]
+    shift_types: tuple[int, ...]
+    coefficients: tuple[tuple[int, int], ...]
+    expressions: tuple[str, ...]
+    targets: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class CompiledShiftAffinity:
+    """Resolved selector groups used by a shift affinity preference."""
+
+    dates: tuple[int, ...]
+    people1_groups: tuple[tuple[int, ...], ...]
+    people2_groups: tuple[tuple[int, ...], ...]
+    shift_type_groups: tuple[tuple[int, ...], ...]
+
+
+@dataclass(frozen=True)
+class CompiledShiftTypeCovering:
+    """Resolved selector groups used by a shift type covering preference."""
+
+    dates: tuple[int, ...]
+    preceptor_groups: tuple[tuple[int, ...], ...]
+    preceptee_groups: tuple[tuple[int, ...], ...]
+    shift_type_groups: tuple[tuple[int, ...], ...]
+
+
+CompiledPreference = (
+    CompiledShiftRequest
+    | CompiledShiftTypeSuccessions
+    | CompiledShiftTypeRequirements
+    | CompiledShiftCount
+    | CompiledShiftAffinity
+    | CompiledShiftTypeCovering
+    | None
+)
+
+
+@dataclass(frozen=True)
+class CompiledExportFormattingRule:
+    """Resolved selectors for one export formatting rule."""
+
+    people: tuple[int, ...] = ()
+    dates: tuple[int, ...] = ()
+    shift_types: tuple[int, ...] = ()
+
+
+@dataclass(frozen=True)
+class CompiledExportExtraColumn:
+    """Resolved selectors and coefficients for one extra column."""
+
+    dates: tuple[int, ...]
+    shift_types: tuple[int, ...]
+    coefficients: tuple[tuple[int, int], ...]
+
+
+@dataclass(frozen=True)
+class CompiledExportExtraRow:
+    """Resolved selectors for one extra row."""
+
+    people: tuple[int, ...]
+    shift_types: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class CompiledExport:
+    """Resolved export selectors aligned with the source export rules."""
+
+    formatting: tuple[CompiledExportFormattingRule, ...]
+    extra_columns: tuple[CompiledExportExtraColumn, ...]
+    extra_rows: tuple[CompiledExportExtraRow, ...]
+
+
+@dataclass(frozen=True)
+class CompiledSchedule:
+    """Validated, index-based schedule data shared by downstream phases."""
+
+    dates: tuple[datetime.date, ...]
+    map_sid_s: Mapping[int | str, tuple[int, ...]]
+    map_pid_p: Mapping[int | str, tuple[int, ...]]
+    map_did_d: Mapping[str, tuple[int, ...]]
+    histories: tuple[tuple[int, ...] | None, ...]
+    preferences: tuple[CompiledPreference, ...]
+    export: CompiledExport
+
+    def __deepcopy__(self, _memo):
+        """Reuse this immutable snapshot when Pydantic deep-copies its model."""
+        return self
+
+
 class NurseSchedulingData(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    _compiled_schedule: CompiledSchedule = PrivateAttr()
+
     appVersion: str | None = None
     apiVersion: str
     description: str | None = None
     dates: DateContainer
-    country: str | None = None
     people: PeopleContainer
     shiftTypes: ShiftTypesContainer
     preferences: list[
@@ -597,9 +723,470 @@ class NurseSchedulingData(BaseModel):
                 raise ValueError(f"Date group ID {group.id!r} must not be in the format of YYYY-MM-DD, MM-DD, or D")
             date_group_ids.add(group.id)
 
-        # Validate contracted-hours (marked) shift counts: policy encoding and
-        # exact explicit coefficient coverage over the shared ordered group map.
-        # A no-op unless a shift count carries the `hoursContract` marker.
-        group_map.validate_contracted_hours(self.shiftTypes, self.preferences)
-
+        self._compiled_schedule = _validate_and_compile_schedule(self)
         return self
+
+    @property
+    def compiled_schedule(self) -> CompiledSchedule:
+        """Return the compiled snapshot of the values seen during validation."""
+        return self._compiled_schedule
+
+
+def _build_reference_index(item_ids, groups, reserved, reference_name):
+    """Expand ordered item and group IDs into concrete index tuples.
+
+    Item IDs map directly to their indices. The caller seeds reserved
+    selectors such as ALL and OFF. Groups can reference items or earlier
+    groups, and each group is flattened and deduplicated.
+    """
+    reference_map = {item_id: (index,) for index, item_id in enumerate(item_ids)}
+    reference_map.update(reserved)
+    for group in groups:
+        expanded = set()
+        for member in group.members:
+            if member not in reference_map:
+                raise ValueError(f"Unknown {reference_name} ID: {member}")
+            expanded.update(reference_map[member])
+        reference_map[group.id] = tuple(sorted(expanded))
+    return reference_map
+
+
+def _build_date_index(data: NurseSchedulingData):
+    """Generate dates and expand every supported date selector.
+
+    Concrete YYYY-MM-DD values map to date indices. Keywords and weekdays are
+    added before date groups so groups can reference and flatten them. Date
+    groups are deduplicated by ``parse_dates``.
+    """
+    date_range = data.dates.range
+    n_days = (date_range.endDate - date_range.startDate).days + 1
+    dates = tuple(date_range.startDate + datetime.timedelta(days=index) for index in range(n_days))
+    date_map = {str(date): (index,) for index, date in enumerate(dates)}
+    for keyword, predicate in MAP_DATE_KEYWORD_TO_FILTER.items():
+        date_map[keyword] = tuple(index for index, date in enumerate(dates) if predicate(date))
+    for weekday_index, keyword in enumerate(MAP_WEEKDAY_TO_STR):
+        date_map[keyword] = tuple(index for index, date in enumerate(dates) if date.weekday() == weekday_index)
+    for group in data.dates.groups:
+        date_map[group.id] = tuple(utils.parse_dates(group.members, date_map, date_range))
+    return dates, date_map
+
+
+def _compile_nested_groups(value, parser):
+    """Resolve each top-level nested selector into one concrete group.
+
+    Shift affinity treats every top-level people or shift selector as one
+    group. Nested selectors combine multiple IDs within that group. The parser
+    rejects unknown leaf IDs while preserving these supported shapes.
+    """
+    groups = []
+    for selector in value:
+        members = selector if isinstance(selector, list) else [selector]
+        groups.append(tuple(parser(members)))
+    return tuple(groups)
+
+
+def _compile_shift_requirement_groups(value, shift_map):
+    """Normalize requirement selectors into concrete staffing equations.
+
+    Each inner tuple is one staffing equation. A group selector expands inside
+    that equation, while separate top-level selectors create separate
+    equations. Examples:
+
+    - ``D`` or ``[D]`` becomes ``[[D]]``.
+    - ``ALL``, ``[ALL]``, or ``[[ALL]]`` becomes ``[[D, E, N]]``.
+    - ``Group(D, E)`` or ``[Group(D, E)]`` becomes ``[[D, E]]``.
+    - ``[D, E]`` becomes ``[[D], [E]]``.
+    - ``[[D, E]]`` becomes ``[[D, E]]``.
+    """
+    selectors = value if isinstance(value, list) else [value]
+    return tuple(
+        tuple(utils.parse_sids(selector if isinstance(selector, list) else [selector], shift_map))
+        for selector in selectors
+    )
+
+
+def _compile_coefficients(entries, selected, shift_map, label, selection_name):
+    """Validate and resolve coefficients for a selected shift set."""
+    coefficients = dict.fromkeys(selected, 1)
+    covered = set()
+    for shift_type_id, coefficient in entries or []:
+        if coefficient < 1:
+            raise ValueError(f"{label} for '{shift_type_id}' must be at least 1.")
+        if shift_type_id not in shift_map:
+            raise ValueError(f"Unknown shift type ID: {shift_type_id}")
+        expanded = set(shift_map[shift_type_id])
+        if not expanded.issubset(selected):
+            raise ValueError(f"{label} for '{shift_type_id}' must be covered by {selection_name}.")
+        if covered.intersection(expanded):
+            raise ValueError(f"Duplicate {label.lower()} for '{shift_type_id}'.")
+        covered.update(expanded)
+        for shift_type in expanded:
+            coefficients[shift_type] = coefficient
+    return tuple(sorted(coefficients.items()))
+
+
+def _classify_shift_request_shape(data, dates, person_target, date_target, parsed_dates):
+    """Classify a request using its original selector granularity."""
+    person_item_ids = {person.id for person in data.people.items}
+    people_group_ids = {group.id for group in data.people.groups}
+    date_item_ids = {str(date) for date in dates}
+    date_group_ids = {group.id for group in data.dates.groups}
+    date_keyword_ids = set(MAP_DATE_KEYWORD_TO_FILTER) | set(MAP_WEEKDAY_TO_STR)
+
+    if person_target in person_item_ids:
+        person_shape = "person-item"
+    elif person_target in people_group_ids:
+        person_shape = "people-group"
+    else:
+        return "unknown"
+
+    date_id = str(date_target)
+    if date_id in date_item_ids:
+        date_shape = "date-item"
+    elif date_id in date_group_ids or date_id in date_keyword_ids:
+        date_shape = "date-group"
+    else:
+        date_shape = "date-item" if len(parsed_dates) == 1 else "date-group"
+    return f"{person_shape}-to-{date_shape}"
+
+
+def _compile_shift_request(data, preference, people_map, shift_map, date_map, dates):
+    """Validate and resolve a shift request without losing target shape.
+
+    Frontend edits compact real date items together, while date groups remain
+    separate preferences so overlapping groups can stack. Older YAML can still
+    mix targets in ``preference.date``. Each original target therefore retains
+    its item or group shape before expansion to concrete schedule dates. Export
+    formatting uses that original shape when matching request conditions.
+    """
+    people = tuple(utils.parse_pids(preference.person, people_map))
+    shift_types = tuple(utils.parse_sids(preference.shiftType, shift_map))
+    person_targets = utils.ensure_list(preference.person)
+    date_targets = utils.ensure_list(preference.date)
+    shift_type_targets = utils.ensure_list(preference.shiftType)
+    compiled_date_targets = []
+    for date_target in date_targets:
+        parsed_dates = tuple(utils.parse_dates(date_target, date_map, data.dates.range))
+        request_shape = "unknown"
+        if len(person_targets) == 1 and len(shift_type_targets) == 1:
+            request_shape = _classify_shift_request_shape(
+                data,
+                dates,
+                person_targets[0],
+                date_target,
+                parsed_dates,
+            )
+        compiled_date_targets.append(CompiledShiftRequestDateTarget(parsed_dates, request_shape))
+    resolved_dates = tuple(sorted({date for target in compiled_date_targets for date in target.dates}))
+    return CompiledShiftRequest(
+        people=people,
+        dates=resolved_dates,
+        shift_types=shift_types,
+        date_targets=tuple(compiled_date_targets),
+        requested_shift_type=", ".join(str(target) for target in shift_type_targets),
+    )
+
+
+def _compile_preference(data, preference, people_map, shift_map, date_map, dates):
+    """Validate and resolve one preference into solver-ready indices."""
+    all_dates = tuple(range(len(dates)))
+    if isinstance(preference, MaxOneShiftPerDayPreference):
+        return None
+    if isinstance(preference, ShiftRequestPreference):
+        return _compile_shift_request(data, preference, people_map, shift_map, date_map, dates)
+    if isinstance(preference, ShiftTypeSuccessionsPreference):
+        people = tuple(utils.parse_pids(preference.person, people_map))
+        if not preference.pattern:
+            raise ValueError("Pattern must not be empty")
+        # Convert each possibly nested pattern element into concrete shift IDs.
+        pattern = tuple(
+            CompiledPatternElement(
+                shift_types=shift_types,
+                matches_all_working_shifts=utils.is_ss_equivalent_to_all(shift_types, len(data.shiftTypes.items)),
+            )
+            for shift_types in _compile_nested_groups(
+                preference.pattern,
+                lambda members: utils.parse_sids(members, shift_map),
+            )
+        )
+        # An omitted date selector applies the pattern to the full date range.
+        selected_dates = (
+            tuple(utils.parse_dates(preference.date, date_map, data.dates.range))
+            if preference.date is not None
+            else all_dates
+        )
+        return CompiledShiftTypeSuccessions(
+            people=people,
+            dates=selected_dates,
+            date_set=frozenset(selected_dates),
+            pattern=pattern,
+        )
+    if isinstance(preference, ShiftTypeRequirementsPreference):
+        shift_groups = _compile_shift_requirement_groups(preference.shiftType, shift_map)
+        if not shift_groups or any(not group for group in shift_groups):
+            raise ValueError(f"Non-empty shift types are required, but got {preference.shiftType}")
+        if any(OFF_sid in group for group in shift_groups):
+            raise ValueError(
+                "'OFF' is not allowed in shift type requirement preferences. "
+                "To specify a zero-shift day, define an ALL shift type for that date "
+                "with requiredNumPeople set to 0."
+            )
+        if any(LEAVE_sid in group for group in shift_groups):
+            raise ValueError(
+                "'LEAVE' is not allowed in shift type requirement preferences. "
+                "Paid leave is not a worked shift and provides no coverage."
+            )
+        if preference.shiftTypeCoefficients and len(shift_groups) != 1:
+            raise ValueError(
+                "Shift type requirement coefficients are only supported when shiftType normalizes to one "
+                "requirement group."
+            )
+        selected_shift_types = set().union(*shift_groups)
+        coefficients = _compile_coefficients(
+            preference.shiftTypeCoefficients,
+            selected_shift_types,
+            shift_map,
+            "Shift type requirement coefficient",
+            "shiftType",
+        )
+        if preference.preferredNumPeople is not None and preference.weight in {math.inf, -math.inf}:
+            raise ValueError(
+                f"Infinity weights are not allowed for {SHIFT_TYPE_REQUIREMENT} with 'preferredNumPeople'. "
+                "Use 'requiredNumPeople' instead to enforce hard constraints."
+            )
+        qualified_people = (
+            tuple(utils.parse_pids(preference.qualifiedPeople, people_map))
+            if preference.qualifiedPeople is not None
+            else None
+        )
+        selected_dates = (
+            tuple(utils.parse_dates(preference.date, date_map, data.dates.range))
+            if preference.date is not None
+            else all_dates
+        )
+        return CompiledShiftTypeRequirements(
+            dates=selected_dates,
+            shift_type_groups=shift_groups,
+            coefficients=coefficients,
+            qualified_people=qualified_people,
+        )
+    if isinstance(preference, ShiftCountPreference):
+        people = tuple(utils.parse_pids(preference.person, people_map))
+        selected_dates = tuple(utils.parse_dates(preference.countDates, date_map, data.dates.range))
+        shift_types = tuple(utils.parse_sids(preference.countShiftTypes, shift_map))
+        if not shift_types:
+            raise ValueError(f"Non-empty count shift types are required, but got {preference.countShiftTypes}")
+        coefficients = _compile_coefficients(
+            preference.countShiftTypeCoefficients,
+            set(shift_types),
+            shift_map,
+            "Shift count coefficient",
+            "countShiftTypes",
+        )
+        expressions = tuple(utils.ensure_list(preference.expression))
+        targets = tuple(utils.ensure_list(preference.target))
+        if len(expressions) != len(targets):
+            raise ValueError(
+                f"Number of expressions ({len(expressions)}) must match number of targets ({len(targets)})"
+            )
+        if not expressions:
+            raise ValueError("Expression must not be empty")
+        for expression in expressions:
+            if expression not in SUPPORTED_SHIFT_COUNT_EXPRESSIONS:
+                raise ValueError(
+                    f"Unsupported expression: {expression}. "
+                    f"Supported expressions are: {sorted(SUPPORTED_SHIFT_COUNT_EXPRESSIONS)}"
+                )
+            if expression == "|x - T|^2":
+                if preference.weight == math.inf:
+                    raise ValueError(f"'.inf' weights are not allowed for shift count with '{expression}'.")
+                if preference.weight != -math.inf and preference.weight > 0:
+                    raise ValueError(f"Weight must be non-positive for shift count with '{expression}'.")
+        for target in targets:
+            if target < 0:
+                raise ValueError(f"Target must be non-negative, but got {target}")
+        return CompiledShiftCount(
+            people=people,
+            dates=selected_dates,
+            shift_types=shift_types,
+            coefficients=coefficients,
+            expressions=expressions,
+            targets=targets,
+        )
+    if isinstance(preference, ShiftAffinityPreference):
+        selected_dates = tuple(utils.parse_dates(preference.date, date_map, data.dates.range))
+        if not preference.people1 or not preference.people2:
+            raise ValueError("Shift affinity people selections must not be empty")
+        if not preference.shiftTypes:
+            raise ValueError("Shift affinity shift types must not be empty")
+        return CompiledShiftAffinity(
+            dates=selected_dates,
+            # Each people1 element becomes one resolved person group.
+            people1_groups=_compile_nested_groups(
+                preference.people1,
+                lambda members: utils.parse_pids(members, people_map),
+            ),
+            # Each people2 element becomes one resolved person group.
+            people2_groups=_compile_nested_groups(
+                preference.people2,
+                lambda members: utils.parse_pids(members, people_map),
+            ),
+            # Each shiftTypes element becomes one resolved shift group.
+            shift_type_groups=_compile_nested_groups(
+                preference.shiftTypes,
+                lambda members: utils.parse_sids(members, shift_map),
+            ),
+        )
+    if isinstance(preference, ShiftTypeCoveringPreference):
+        # An omitted date means "all dates", matching the shift type
+        # requirement and successions preferences.
+        selected_dates = (
+            tuple(utils.parse_dates(preference.date, date_map, data.dates.range))
+            if preference.date is not None
+            else all_dates
+        )
+        # Empty groups (for example, a group with no members) are skipped.
+        preceptor_groups = tuple(
+            group
+            for group in _compile_nested_groups(
+                preference.preceptors, lambda members: utils.parse_pids(members, people_map)
+            )
+            if group
+        )
+        preceptee_groups = tuple(
+            group
+            for group in _compile_nested_groups(
+                preference.preceptees, lambda members: utils.parse_pids(members, people_map)
+            )
+            if group
+        )
+        shift_type_groups = tuple(
+            group
+            for group in _compile_nested_groups(
+                preference.shiftTypes, lambda members: utils.parse_sids(members, shift_map)
+            )
+            if group
+        )
+        if not preceptor_groups:
+            raise ValueError("Preceptors list must contain at least one valid person or group.")
+        if not preceptee_groups:
+            raise ValueError("Preceptees list must contain at least one valid person or group.")
+        if not shift_type_groups:
+            raise ValueError("Shift types list must contain at least one valid shift type.")
+        if any(OFF_sid in ss or LEAVE_sid in ss for ss in shift_type_groups):
+            raise ValueError(
+                "'OFF' and 'LEAVE' are not allowed in shift type covering preferences; "
+                "covering applies to worked shifts only."
+            )
+        return CompiledShiftTypeCovering(
+            dates=selected_dates,
+            preceptor_groups=preceptor_groups,
+            preceptee_groups=preceptee_groups,
+            shift_type_groups=shift_type_groups,
+        )
+    raise TypeError(f"Unsupported preference model: {type(preference).__name__}")
+
+
+def _compile_export(data, people_map, shift_map, date_map):
+    """Validate and resolve export references against the canonical schedule."""
+    formatting = []
+    for rule in data.export.formatting:
+        people = ()
+        dates = ()
+        shift_types = ()
+        if hasattr(rule, "people"):
+            for target in rule.people:
+                if target not in people_map:
+                    raise ValueError(
+                        f"Invalid person identifier '{target}' in export formatting rule with type '{rule.type}'"
+                    )
+            people = tuple(utils.parse_pids(rule.people, people_map))
+        if hasattr(rule, "dates"):
+            dates = tuple(utils.parse_dates(rule.dates, date_map, data.dates.range))
+        if hasattr(rule, "shiftTypes"):
+            for target in rule.shiftTypes:
+                if target not in shift_map:
+                    raise ValueError(
+                        f"Invalid shift type identifier '{target}' in export formatting rule with type 'cell'"
+                    )
+            shift_types = tuple(utils.parse_sids(rule.shiftTypes, shift_map))
+        if isinstance(rule, ExportCellFormattingRule) and rule.when:
+            weight_range = rule.when.preference.weightRange
+            if weight_range is not None and len(weight_range) != 2:
+                raise ValueError("export formatting preference weightRange must contain exactly two values")
+            if weight_range is not None and weight_range[0] > weight_range[1]:
+                raise ValueError(
+                    "export formatting preference weightRange minimum must be less than or equal to maximum"
+                )
+        formatting.append(CompiledExportFormattingRule(people, dates, shift_types))
+
+    extra_columns = []
+    for rule in data.export.extraColumns:
+        shift_types = tuple(utils.parse_sids(rule.countShiftTypes, shift_map))
+        extra_columns.append(
+            CompiledExportExtraColumn(
+                dates=tuple(utils.parse_dates(rule.countDates, date_map, data.dates.range)),
+                shift_types=shift_types,
+                coefficients=_compile_coefficients(
+                    rule.countShiftTypeCoefficients,
+                    set(shift_types),
+                    shift_map,
+                    "Export extra column coefficient",
+                    "countShiftTypes",
+                ),
+            )
+        )
+    extra_rows = tuple(
+        CompiledExportExtraRow(
+            people=tuple(utils.parse_pids(rule.countPeople, people_map)),
+            shift_types=tuple(utils.parse_sids(rule.countShiftTypes, shift_map)),
+        )
+        for rule in data.export.extraRows
+    )
+    return CompiledExport(tuple(formatting), tuple(extra_columns), extra_rows)
+
+
+def _validate_and_compile_schedule(data: NurseSchedulingData) -> CompiledSchedule:
+    """Validate canonical semantics and compile reusable index-based data."""
+    if data.apiVersion != "alpha":
+        raise ValueError(f"Unsupported API version: {data.apiVersion}")
+
+    # Map shift items to indices, add the ALL, OFF, and LEAVE reserved
+    # selectors, then flatten and deduplicate shift type groups. ALL expands to
+    # worked shift types only.
+    shift_ids = [item.id for item in data.shiftTypes.items]
+    shift_map = _build_reference_index(
+        shift_ids,
+        data.shiftTypes.groups,
+        {ALL: tuple(range(len(shift_ids))), OFF: (OFF_sid,), LEAVE: (LEAVE_sid,)},
+        "shift type",
+    )
+    # Validate contracted-hours (marked) shift counts against the same map.
+    group_map.validate_contracted_hours(shift_map, data.shiftTypes.groups, data.preferences)
+    # Map people to indices, add the ALL selector, then flatten and deduplicate
+    # people groups.
+    people_ids = [item.id for item in data.people.items]
+    people_map = _build_reference_index(
+        people_ids,
+        data.people.groups,
+        {ALL: tuple(range(len(people_ids)))},
+        "person",
+    )
+    dates, date_map = _build_date_index(data)
+    histories = tuple(
+        None if person.history is None else tuple(shift_map[shift_type_id][0] for shift_type_id in person.history)
+        for person in data.people.items
+    )
+    preferences = tuple(
+        _compile_preference(data, preference, people_map, shift_map, date_map, dates) for preference in data.preferences
+    )
+    compiled_export = _compile_export(data, people_map, shift_map, date_map)
+    return CompiledSchedule(
+        dates=dates,
+        map_sid_s=_FrozenMapping(shift_map),
+        map_pid_p=_FrozenMapping(people_map),
+        map_did_d=_FrozenMapping(date_map),
+        histories=histories,
+        preferences=preferences,
+        export=compiled_export,
+    )

@@ -1,4 +1,4 @@
-"""Schedule regression test wrapper for the OR-Tools/CP-SAT backend."""
+"""Bounded schedule smoke test for the OR-Tools/MPSolver BOP backend."""
 
 # This file is part of Nurse Scheduling Project, see <https://github.com/j3soon/nurse-scheduling>.
 #
@@ -17,8 +17,22 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from .schedule_test_helper import run_schedule_regression_test
+# This test is mostly AI generated.
+
+from pathlib import Path
+
+import nurse_scheduling
+
+TESTCASE = Path(__file__).parent / "testcases" / "basics" / "01_1nurse_1shift_1day.yaml"
 
 
-def test_schedule_ortools():
-    run_schedule_regression_test("ortools/cp-sat")
+def test_schedule_ortools_mpsolver_bop_smoke():
+    df, _solution, score, status, _cell_export_info = nurse_scheduling.schedule(
+        TESTCASE.read_bytes(),
+        solver="ortools/mpsolver/bop",
+        timeout=5,
+    )
+
+    assert df is not None
+    assert score == 0
+    assert status == "OPTIMAL"

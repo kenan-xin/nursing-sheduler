@@ -325,7 +325,6 @@ export function projectScenarioDocument(source: ProjectableScenario): CanonicalS
       range: { startDate: source.rangeStart, endDate: source.rangeEnd },
       groups: dateGroups.length > 0 ? dateGroups : undefined,
     }),
-    country: source.meta.country,
     people: compact({
       items: source.staff.map(mapPerson),
       groups: peopleGroups.length > 0 ? peopleGroups : undefined,
