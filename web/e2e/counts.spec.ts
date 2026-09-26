@@ -76,7 +76,7 @@ async function seed(page: Page, patch: Record<string, unknown>) {
 
 /** Shift Counts is Advanced-only since T08d (DL12 §2); adopt the stored
  *  Advanced preference first so the route-validity gate doesn't redirect this
- *  direct visit to Home under the Guided default. */
+ *  direct visit to Guided Rules under the Guided default. */
 async function gotoReady(page: Page) {
   await page.addInitScript(() => localStorage.setItem("ns-app-mode", "advanced"));
   await page.goto("/shift-counts");
@@ -1089,7 +1089,7 @@ test.describe.serial("T12 Coverings regression — default allValue keeps ALL em
     // by the Counts allValue addition.
     // Shift Type Coverings is Advanced-only since T08d (DL12 §2); adopt the
     // stored Advanced preference first so the route-validity gate doesn't
-    // redirect this direct visit to Home under the Guided default.
+    // redirect this direct visit to Guided Rules under the Guided default.
     await page.addInitScript(() => localStorage.setItem("ns-app-mode", "advanced"));
     await page.goto("/shift-type-coverings");
     await page.waitForFunction(() => Boolean((window as unknown as NsWindow).__nsStore));

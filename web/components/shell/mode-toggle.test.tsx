@@ -16,6 +16,7 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("./route-registry", () => ({
   isRouteValidForMode: () => false,
+  guidedFallbackPath: () => "/",
 }));
 
 describe("ModeToggle — focus follows commit, not request (T08f P2)", () => {
