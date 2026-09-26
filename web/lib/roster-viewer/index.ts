@@ -43,6 +43,7 @@ export {
 
 export {
   computeCoverage,
+  exactShiftCoverageLabel,
   uniformShiftRequirement,
   type CoverageGrid,
   type DayCoverage,
@@ -55,10 +56,12 @@ export {
   computeRequirementGrid,
   deriveRequirementModel,
   evaluateRequirementCell,
+  exactShiftCover,
   exactShiftRequirement,
   requirementDayHealth,
   summariseRequirements,
   type RequirementCell,
+  type RequirementCover,
   type RequirementEquation,
   type RequirementGrid,
   type RequirementHealth,
