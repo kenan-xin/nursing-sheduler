@@ -197,9 +197,13 @@ describe("deleteEntity — cascade + prune emptied preferences (findings #3/#4)"
     expect(jsonHas(after, "P1")).toBe(false);
   });
 
-  it("deleting a shift type blanks history positionally and prunes emptied cards/export", () => {
+  it("deleting a shift type truncates history to the usable suffix and prunes emptied cards/export", () => {
     const after = deleteEntity(fixture(), "shift", "N");
-    expect(after.staff[0].history).toEqual(["", "D"]); // FR-RI-09/AC-RI-06
+    // History is right-anchored, so every entry older than the newest deleted one
+    // is unusable too; a blank slot would be rejected by the producer and core
+    // (FR-RI-09, D7), so the usable suffix is what survives.
+    expect(after.staff[0].history).toEqual(["D"]);
+    expect(after.staff.flatMap((p) => p.history ?? [])).not.toContain("");
     expect(after.shiftGroups[0].members).toEqual(["D"]);
     // count card: countShiftTypes ["N"]→[] → dropped; its coefficient tuple gone too
     expect(after.cardsByKind.counts).toHaveLength(0);
@@ -207,6 +211,14 @@ describe("deleteEntity — cascade + prune emptied preferences (findings #3/#4)"
     expect(after.cardsByKind.successions[0].pattern).toEqual([["D"]]);
     // extra column countShiftTypes emptied → dropped
     expect(after.exportLayout.extraColumns).toHaveLength(0);
+  });
+
+  it("deleting the newest history entry drops that person's whole history", () => {
+    const state = createEmptyScenarioUiState("alpha");
+    state.staff = [{ id: "P1", history: ["N", "D"] }];
+    state.shifts = [{ id: "D" }, { id: "N" }];
+    const after = deleteEntity(state, "shift", "D");
+    expect(after.staff[0].history).toEqual([]);
   });
 
   it("deleting a group removes its definition and prunes it from nested groups", () => {

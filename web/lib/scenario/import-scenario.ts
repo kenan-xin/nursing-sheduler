@@ -13,6 +13,7 @@ import { parse } from "yaml";
 // for a TYPE only, so it is cycle-free.
 import { generateDateItems, type DateRange } from "@/lib/dates/date-id";
 import { importScenarioSchema, type ImportScenarioParsed } from "./schemas/import";
+import { truncateHistoryAtBlankEntries } from "./person-history";
 import {
   PREFERENCE_TYPE,
   RESERVED_SHIFT_TYPE,
@@ -243,7 +244,12 @@ function normalizePerson(p: ImportScenarioParsed["people"]["items"][number]): Ui
   return clean({
     id: p.id,
     description: str(p.description),
-    history: p.history ?? undefined,
+    // Repair the blank slots an earlier build's shift-type deletion left in a
+    // persisted scenario (FR-RI-09 before decision D7): history is right-anchored,
+    // so only the suffix newer than the newest blank is usable, and a blank is
+    // rejected by the producer and core. Repairing here — rather than reporting it
+    // — is what keeps such a file loadable.
+    history: p.history ? truncateHistoryAtBlankEntries(p.history) : undefined,
     temporary: p.temporary === true ? true : undefined,
   });
 }
