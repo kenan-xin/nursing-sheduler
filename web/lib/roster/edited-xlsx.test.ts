@@ -245,6 +245,29 @@ describe("patchFrozenXlsxWithEdits — real C5 plain workbook", () => {
     expect(sheet.getCell(7, 1).value).toBe("Status");
     expect(sheet.getCell(7, 2).value).toBe("OPTIMAL");
   });
+
+  it("appends a borrowed nurse's row after the people, before Score/Status (bead g1p)", async () => {
+    const N = { kind: "shift", shiftId: "N" } as const;
+    const patched = await patchFrozenXlsxWithEdits({
+      frozenXlsx: fixtureBlob(meta.file),
+      // Row index 3 is the borrowed row; her date-0 cell is edited to D.
+      edits: [{ personIdx: 3, dateIdx: 0, day: { kind: "shift", shiftId: "D" } }],
+      borrowed: [{ id: "Mei", groups: [], days: [{ kind: "off" }, N, { kind: "leave" }] }],
+      coordinateMap,
+      provenance: fixtureProvenance(),
+    });
+    const sheet = (await reRead(patched)).worksheets[0];
+    expect(sheet.getCell(4, 2).value).toBe("E"); // a submitted person, untouched
+    expect([1, 2, 3, 4].map((col) => sheet.getCell(6, col).value)).toEqual([
+      "Mei",
+      "D",
+      "N",
+      "Leave",
+    ]);
+    expect(sheet.getCell(7, 1).value).toBe("Score");
+    expect(sheet.getCell(7, 2).value).toBe(9);
+    expect(sheet.getCell(8, 1).value).toBe("Status");
+  });
 });
 
 describe("patchFrozenXlsxWithEdits — real C5 prettify workbook (history columns)", () => {

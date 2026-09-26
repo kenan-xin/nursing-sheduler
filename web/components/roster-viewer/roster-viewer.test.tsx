@@ -408,6 +408,21 @@ describe("RosterViewer", () => {
     render(<Viewer document={document} />);
     expect(screen.getByTestId("roster-provenance").textContent).not.toContain("edited since solve");
   });
+
+  it("shows a borrowed nurse as a Temporary row after the ward's own staff (bead g1p)", async () => {
+    const base = await makeDocument();
+    const OFF: RosterDayState = { kind: "off" };
+    const N: RosterDayState = { kind: "shift", shiftId: "N" };
+    const document: RosterDocument = {
+      ...base,
+      borrowed: [{ id: "Mei", description: "relief pool", groups: [], days: [OFF, N, OFF, OFF] }],
+    };
+    render(<Viewer document={document} />);
+    const rows = screen.getAllByRole("rowheader").map((th) => th.textContent);
+    expect(rows.at(-1)).toContain("Mei");
+    expect(screen.getByTestId(`roster-temporary-${rows.length - 1}`).textContent).toBe("Temporary");
+    expect(screen.getByTestId("roster-provenance").textContent).toContain("edited since solve");
+  });
 });
 
 // ---------------------------------------------------------------------------

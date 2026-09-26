@@ -172,7 +172,8 @@ describe("parseRosterContainer", () => {
 describe("assembleRosterDocument", () => {
   it("builds a document whose axes are de-anonymized and index-aligned", async () => {
     const document = await fixtureRosterDocument();
-    expect(document.schemaVersion).toBe("roster-file/1");
+    expect(document.schemaVersion).toBe("roster-file/2");
+    expect(document.borrowed).toEqual([]);
     expect(document.context.people.map((person) => person.id)).toEqual(["Alice Ng", 7]);
     expect(document.context.calendar.map((day) => day.iso)).toEqual([...FIXTURE_DATES]);
     expect(document.solvedDays).toEqual(fixtureSolvedDays());

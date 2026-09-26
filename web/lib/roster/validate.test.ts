@@ -117,7 +117,7 @@ describe("validateRosterDocument — structure and versions", () => {
     expect(await validateRosterDocument(subject)).toMatchObject({ ok: false });
   });
 
-  it.each(["roster-file/2", "roster-file/0", "roster-container/1", "", 1, null])(
+  it.each(["roster-file/3", "roster-file/1", "roster-file/0", "roster-container/1", "", 1, null])(
     "rejects document schema version %p",
     async (schemaVersion) => {
       const subject = mutable(await fixtureRosterDocument());
@@ -378,7 +378,7 @@ describe("validateRosterDocument — overlay, coordinates, and workbook", () => 
     expect(result).toMatchObject({ ok: true });
     if (!result.ok) return;
     // The returned value is what F1 stores, so it must be the normalized document.
-    expect(result.document.schemaVersion).toBe("roster-file/1");
+    expect(result.document.schemaVersion).toBe("roster-file/2");
     expect(result.document.frozenXlsx.size).toBe(8);
   });
 });

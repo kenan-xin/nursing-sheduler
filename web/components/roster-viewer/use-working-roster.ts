@@ -14,7 +14,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { rosterStorage } from "@/lib/store";
-import type { RosterDocument } from "@/lib/roster";
+import { upgradeStoredRosterDocument, type RosterDocument } from "@/lib/roster";
 import type { CurrentCandidatePointer, WorkingCandidateSource } from "@/lib/store";
 
 export interface WorkingRosterState {
@@ -69,13 +69,15 @@ export function useWorkingRoster(): WorkingRosterState {
       rosterStorage.readWorking<RosterDocument>(),
       rosterStorage.readCurrentCandidate(),
     ]);
-    setDocument(workingRow?.document ?? null);
+    // A roster saved by an older build is roster-file/1: upgrade it on read. The next
+    // autosave writes it back at the current version.
+    setDocument(workingRow ? upgradeStoredRosterDocument(workingRow.document) : null);
     setRevision(workingRow?.revision ?? null);
     setCandidateSource(workingRow?.candidateSource ?? null);
     setCandidate(pointer);
     if (pointer !== null) {
       const row = await rosterStorage.readCandidate<RosterDocument>(pointer.jobId);
-      setCandidateDocument(row?.document ?? null);
+      setCandidateDocument(row ? upgradeStoredRosterDocument(row.document) : null);
     } else {
       setCandidateDocument(null);
     }

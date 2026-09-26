@@ -94,6 +94,7 @@ export function RosterActions({
       const blob = await patchFrozenXlsxWithEdits({
         frozenXlsx: document.frozenXlsx,
         edits: document.edits,
+        borrowed: document.borrowed,
         coordinateMap: document.coordinateMap,
         provenance: document.provenance,
       });

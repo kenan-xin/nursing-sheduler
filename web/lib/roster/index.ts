@@ -13,6 +13,7 @@ export {
   ROSTER_DOCUMENT_SCHEMA_VERSION,
   ROSTER_SUBMISSION_SCHEMA_VERSION,
   type RosterBaselineMinimum,
+  type RosterBorrowedRow,
   type RosterCalendarDay,
   type RosterContext,
   type RosterContextPerson,
@@ -71,6 +72,14 @@ export {
 } from "./editing";
 
 export {
+  checkBorrowedRows,
+  rosterAxisContext,
+  rosterBaseDays,
+  rosterCurrentDays,
+  withBorrowedRows,
+} from "./borrowed";
+
+export {
   checkCoordinateMap,
   checkSolvedDays,
   parseRosterContainer,
@@ -122,6 +131,8 @@ export {
   type RosterFileMigration,
   type RosterVersionPolicy,
   type RosterVersionVerdict,
+  upgradeStoredRosterDocument,
+  validateStoredRosterDocument,
 } from "./schema-version";
 
 export {

@@ -12,9 +12,9 @@
 // the document domain's public surface).
 
 import { create } from "zustand";
-import { dayStatesEqual } from "./day-state";
-import { deriveCurrentDays } from "./overlay";
-import type { RosterDayState, RosterDocument } from "./types";
+import { rosterAxisContext, rosterCurrentDays, withBorrowedRows } from "./borrowed";
+import { dayStatesEqual, typedIdKey } from "./day-state";
+import type { RosterBorrowedRow, RosterDayState, RosterDocument } from "./types";
 
 // ponytail: fixed TTL, same as RUN_REQUEST_TTL_MS. A request the screen did not take in
 // time is dropped so it can never change the roster on a later visit.
@@ -32,6 +32,12 @@ export interface RosterChangeRequest {
   /** The roster the change was prepared on. */
   readonly solvedBaselineId: string;
   readonly cells: readonly RosterCellChange[];
+  /**
+   * Temporary nurses to add as borrowed rows in the same revision (bead g1p). They
+   * join the axis after the rows already there, and `cells` may address them, with
+   * `before` read from the row as added.
+   */
+  readonly addPeople?: readonly RosterBorrowedRow[];
 }
 
 /** `roster-changed`: a before cell or the roster itself changed since the card. */
@@ -60,7 +66,11 @@ export function takeRosterChangeRequest(now: number = Date.now()): RosterChangeR
     return null;
   }
   useRosterChangeStore.setState({ pending: null });
-  return { solvedBaselineId: pending.solvedBaselineId, cells: pending.cells };
+  return {
+    solvedBaselineId: pending.solvedBaselineId,
+    cells: pending.cells,
+    ...(pending.addPeople ? { addPeople: pending.addPeople } : {}),
+  };
 }
 
 export function reportRosterChange(outcome: RosterChangeOutcome): void {
@@ -83,7 +93,11 @@ export function requestStillMatches(
   request: RosterChangeRequest,
 ): boolean {
   if (document.provenance.solvedBaselineId !== request.solvedBaselineId) return false;
-  const current = deriveCurrentDays(document.solvedDays, document.edits);
+  const added = request.addPeople ?? [];
+  // Someone of that name already on the roster: the card is stale (applied twice?).
+  const onRoster = new Set(rosterAxisContext(document).people.map((p) => typedIdKey(p.id)));
+  if (added.some((row) => onRoster.has(typedIdKey(row.id)))) return false;
+  const current = rosterCurrentDays(withBorrowedRows(document, added));
   return request.cells.every((cell) => {
     const now = current[cell.personIdx]?.[cell.dateIdx];
     return now !== undefined && dayStatesEqual(now, cell.before);

@@ -11,6 +11,7 @@ import {
   type RosterContext,
   type RosterDayState,
   type RosterDocument,
+  upgradeStoredRosterDocument,
 } from "@/lib/roster";
 import type { RosterChangeOutcome } from "@/lib/roster/change-request";
 import { dayCode, deriveRuleModel, listIssues, plainDate } from "@/lib/roster-viewer/rule-check";
@@ -45,7 +46,11 @@ export async function readRosterForAssistant(
     const newerRunWaiting =
       pointer !== null &&
       !isWorkingRosterFromCandidate(working.candidateSource ?? undefined, pointer);
-    return { status: "ready", document: working.document, newerRunWaiting };
+    return {
+      status: "ready",
+      document: upgradeStoredRosterDocument(working.document),
+      newerRunWaiting,
+    };
   } catch {
     return { status: "unavailable" };
   }
