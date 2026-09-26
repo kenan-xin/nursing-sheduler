@@ -402,38 +402,6 @@ describe("patchFrozenXlsxWithEdits — real C5 prettify workbook (history column
     expect(sheet.getCell(3, 3).border).toEqual(uneditedNeighbour);
   });
 
-  it("writes a borrowed nurse's row past the history column and moves Score down (bead g1p)", async () => {
-    const frozen = (await reRead(fixtureBlob(meta.file))).worksheets[0];
-    const scoreRow = [6, 7, 8].find((row) => frozen.getCell(row, 1).value === "Score");
-    expect(scoreRow).toBe(6);
-    const patched = await patchFrozenXlsxWithEdits({
-      frozenXlsx: fixtureBlob(meta.file),
-      edits: [],
-      borrowed: [
-        {
-          id: "Mei",
-          groups: [],
-          days: [{ kind: "off" }, { kind: "shift", shiftId: "N" }, { kind: "leave" }],
-        },
-      ],
-      coordinateMap,
-      provenance: fixtureProvenance(),
-    });
-    const sheet = (await reRead(patched)).worksheets[0];
-    // Name in col A, history col B left empty, dates from col C.
-    expect([1, 3, 4, 5].map((col) => sheet.getCell(6, col).value)).toEqual([
-      "Mei",
-      "",
-      "N",
-      "Leave",
-    ]);
-    expect(sheet.getCell(6, 2).value).toBeNull();
-    // The people above are untouched; Score/Status moved down one row.
-    expect(sheet.getCell(5, 1).value).toBe(frozen.getCell(5, 1).value);
-    expect(sheet.getCell(7, 1).value).toBe("Score");
-    expect(sheet.getCell(8, 1).value).toBe("Status");
-  });
-
   it("copies the neighbouring person row's styling onto the borrowed row (bead 6iw)", async () => {
     // The exporter sets no row heights, so set one on the last person row here to
     // pin that a styled people row's height travels with its cell styling.

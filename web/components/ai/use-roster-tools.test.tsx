@@ -507,7 +507,6 @@ describe("the escalation ladder in the tools", () => {
     // roster-file/2 (bead g1p): her row joins the roster in the same Apply.
     const mei = borrowRosterDocument().context.people.length;
     const OFF = { kind: "off" };
-    expect(card?.request?.peopleCount).toBe(mei);
     expect(card?.request?.addPeople).toEqual([
       { id: "Mei", description: "relief pool", groups: ["Nights"], days: [OFF, OFF, OFF] },
     ]);

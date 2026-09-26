@@ -38,12 +38,6 @@ export interface RosterChangeRequest {
    * `before` read from the row as added.
    */
   readonly addPeople?: readonly RosterBorrowedRow[];
-  /**
-   * How many rows (people plus borrowed) the roster had when the card was built.
-   * Required with `addPeople`: the new rows' indices were fixed from it, so a roster
-   * that gained a row since would put her shifts on someone else's row.
-   */
-  readonly peopleCount?: number;
 }
 
 /** `roster-changed`: a before cell or the roster itself changed since the card. */
@@ -76,7 +70,6 @@ export function takeRosterChangeRequest(now: number = Date.now()): RosterChangeR
     solvedBaselineId: pending.solvedBaselineId,
     cells: pending.cells,
     ...(pending.addPeople ? { addPeople: pending.addPeople } : {}),
-    ...(pending.peopleCount !== undefined ? { peopleCount: pending.peopleCount } : {}),
   };
 }
 
@@ -101,11 +94,8 @@ export function requestStillMatches(
 ): boolean {
   if (document.provenance.solvedBaselineId !== request.solvedBaselineId) return false;
   const added = request.addPeople ?? [];
-  const axis = rosterAxisContext(document).people;
-  if (request.peopleCount !== undefined && request.peopleCount !== axis.length) return false;
-  if (added.length > 0 && request.peopleCount === undefined) return false;
   // Someone of that name already on the roster: the card is stale (applied twice?).
-  const onRoster = new Set(axis.map((p) => typedIdKey(p.id)));
+  const onRoster = new Set(rosterAxisContext(document).people.map((p) => typedIdKey(p.id)));
   if (added.some((row) => onRoster.has(typedIdKey(row.id)))) return false;
   const current = rosterCurrentDays(withBorrowedRows(document, added));
   return request.cells.every((cell) => {

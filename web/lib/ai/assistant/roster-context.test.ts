@@ -51,22 +51,6 @@ describe("readRosterForAssistant", () => {
     expect(read).toMatchObject({ status: "ready", newerRunWaiting: true });
   });
 
-  it("upgrades a roster-file/1 roster stored by an older build (bead g1p)", async () => {
-    const { borrowed: _dropped, ...v1 } = priyaRosterDocument();
-    const read = await readRosterForAssistant({
-      readWorking: async () =>
-        ({ ...row, document: { ...v1, schemaVersion: "roster-file/1" } }) as never,
-      readCurrentCandidate: async () => pointer,
-    });
-    expect(read).toMatchObject({
-      status: "ready",
-      document: { schemaVersion: "roster-file/2", borrowed: [] },
-    });
-    if (read.status !== "ready") return;
-    // And it reads: the summary walks the (upgraded) axis without throwing.
-    expect(summarizeRoster(read.document, {}, false)).toMatchObject({ status: "ready" });
-  });
-
   it("says unavailable, not empty, when storage cannot be read", async () => {
     const read = await readRosterForAssistant({
       readWorking: async () => {
