@@ -173,12 +173,21 @@ export interface AssistantLiveConversationProps {
   threadId: string;
   routePath: string;
   routeLabel: string | null;
+  /**
+   * Reports whether this conversation currently holds any messages.
+   *
+   * The panel's header owns the transcript download control and gates it on this,
+   * because "is the conversation empty?" is a fact only the rendering knows -- the
+   * live one from its agent, the historical one from what it read.
+   */
+  onHasMessages?: (hasMessages: boolean) => void;
 }
 
 export function AssistantLiveConversation({
   threadId,
   routePath,
   routeLabel,
+  onHasMessages,
 }: AssistantLiveConversationProps) {
   const session = useAssistantSession({ threadId, routePath, routeLabel, historical: false });
   // HOST STATE, HOST HANDLERS. The Preview and the receipts are host surfaces, not
@@ -213,6 +222,10 @@ export function AssistantLiveConversation({
     send: session.send,
     busy: running || session.sending,
   });
+  const hasMessages = session.messages.length > 0;
+  useEffect(() => {
+    onHasMessages?.(hasMessages);
+  }, [hasMessages, onHasMessages]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="assistant-live-conversation">
@@ -250,11 +263,14 @@ export interface AssistantHistoricalConversationProps {
   threadId: string;
   /** Why this thread is read-only, in the user's terms. */
   reason: string;
+  /** Reports whether the restored history holds any messages. See the live props. */
+  onHasMessages?: (hasMessages: boolean) => void;
 }
 
 export function AssistantHistoricalConversation({
   threadId,
   reason,
+  onHasMessages,
 }: AssistantHistoricalConversationProps) {
   const [messages, setMessages] = useState<Message[]>([]);
 
@@ -267,6 +283,11 @@ export function AssistantHistoricalConversation({
       cancelled = true;
     };
   }, [threadId]);
+
+  const hasMessages = messages.length > 0;
+  useEffect(() => {
+    onHasMessages?.(hasMessages);
+  }, [hasMessages, onHasMessages]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="assistant-historical-conversation">
