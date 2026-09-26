@@ -68,6 +68,11 @@ export interface CoefficientFieldsProps {
   aggregateError?: string;
   /** e.g. `"Count Shift Type"` / `"Shift Type"` — feeds the heading + empty copy. */
   label?: string;
+  /** Optional heading override where `<label> Coefficients` is not the right title —
+   *  the guided Contracted Hours form heads its block "Derived coefficients ·
+   *  half-hours" (ScreenCards.dc.html:813) because those coefficients are working
+   *  time derived, not a count. Absent ⇒ the composed default. */
+  heading?: string;
   /** Explanatory note shown under the heading (per-mode coverage-value / count copy). */
   note?: string;
   /** Show the "All N have a coefficient" / "N need a coefficient" strip (default true). */
@@ -83,6 +88,7 @@ export function CoefficientFields({
   errorsById = {},
   aggregateError,
   label = "Coefficient",
+  heading,
   note,
   showCoverage = true,
   testId = "coefficient-fields",
@@ -113,7 +119,7 @@ export function CoefficientFields({
       data-testid={testId}
     >
       <span className="text-label font-semibold uppercase tracking-[0.03em] text-ink2">
-        {label} Coefficients
+        {heading ?? `${label} Coefficients`}
       </span>
       {!hasEligible && (
         <p className="text-meta italic text-ink3" data-testid={`${testId}-empty`}>
