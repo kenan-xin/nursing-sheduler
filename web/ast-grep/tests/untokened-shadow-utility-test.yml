@@ -1,12 +1,10 @@
 id: untokened-shadow-utility
 valid:
-  # The published set, plus the semantic alias and the explicit absence.
+  # The published set, plus the explicit absence.
   - |
     const cls = "shadow-1 hover:shadow-2 active:shadow-none";
   - |
     const cls = "shadow-edge shadow-well shadow-side";
-  - |
-    const cls = "shadow-dialog";
   # A partial fragment abutting an interpolation carries no complete utility.
   - |
     const cls = `border shadow-${level} p-2`;

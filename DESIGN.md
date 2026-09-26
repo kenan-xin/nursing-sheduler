@@ -378,7 +378,7 @@ Five general-purpose elevation tokens plus one specialized directional side-over
 
 - `--sh-1`: `0 1px 2px rgba(60,55,45,.05), 0 2px 8px rgba(60,55,45,.05)` — resting L1
 - `--sh-2`: `0 2px 4px rgba(60,55,45,.06), 0 10px 24px rgba(60,55,45,.09)` — hover / selected / lifted
-- `--sh-3`: `0 20px 50px rgba(60,55,45,.22)` — modal layer; `--shadow-dialog` aliases it
+- `--sh-3`: `0 20px 50px rgba(60,55,45,.22)` — modal layer
 - `--sh-edge`: `6px 0 8px -6px rgba(60,55,45,.16)` — sticky-column scroll edge
 - `--sh-well`: `inset 0 1px 2px rgba(60,55,45,.05)` — inset planes
 - `--sh-side`: `-16px 0 50px rgba(60,55,45,.20)` — specialized directional runtime shadow for side drawers and mobile navigation only; Tailwind registers `--shadow-side: var(--sh-side)` and emits `shadow-side`
