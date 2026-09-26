@@ -17,9 +17,10 @@ export interface CoefficientEntity {
   id: string;
 }
 
-/** One coefficient-domain group; `members` are the concrete member ids it expands
- *  to, kept at their AUTHORED type (numeric stays numeric) so expansion/coverage/
- *  overlap match the backend exactly (M1). */
+/** One coefficient-domain group; `members` are the ids it expands to — a member
+ *  may itself name another group (a group of groups), expanded transitively — kept
+ *  at their AUTHORED type (numeric stays numeric) so expansion/coverage/overlap
+ *  match the backend exactly (M1). */
 export interface CoefficientGroup {
   id: string;
   members: readonly CoefficientMemberId[];
@@ -43,7 +44,27 @@ export type CoefficientPair = [string, CoefficientDraftValue];
 function expandedIdsById(domain: CoefficientDomain): Map<string, readonly CoefficientMemberId[]> {
   const map = new Map<string, readonly CoefficientMemberId[]>();
   for (const item of domain.items) map.set(item.id, [item.id]);
-  for (const group of domain.groups) map.set(group.id, [...new Set(group.members)]);
+  const groupsById = new Map(domain.groups.map((group) => [group.id, group]));
+  const visiting = new Set<string>();
+
+  // A member may itself name another group (a group of groups), so expand
+  // transitively. `visiting` breaks a cycle by contributing nothing for the
+  // back-edge, and the result is cached so each group expands once.
+  const expand = (member: CoefficientMemberId): readonly CoefficientMemberId[] => {
+    if (typeof member !== "string") return [member];
+    const cached = map.get(member);
+    if (cached) return cached;
+    const group = groupsById.get(member);
+    if (!group) return [member];
+    if (visiting.has(member)) return [];
+    visiting.add(member);
+    const members = [...new Set(group.members.flatMap(expand))];
+    visiting.delete(member);
+    map.set(member, members);
+    return members;
+  };
+
+  for (const group of domain.groups) expand(group.id);
   return map;
 }
 
@@ -64,8 +85,8 @@ export function sortIdsByEntryOrder(ids: readonly string[], domain: CoefficientD
 
 /**
  * Eligible coefficient ids (FR-PR-70): every item whose id is in the expanded
- * selection, plus every non-empty group whose members are ALL in the expanded
- * selection — in canonical entry order (EDGE-PR-11).
+ * selection, plus every non-empty group whose (transitively) expanded members are
+ * ALL in the expanded selection — in canonical entry order (EDGE-PR-11).
  */
 export function eligibleCoefficientIds(
   selection: readonly string[],
@@ -80,7 +101,12 @@ export function eligibleCoefficientIds(
     // group is covered for group-eligibility but never returned/persisted itself.
     ...domain.items.filter((item) => selectedExpanded.has(item.id)).map((item) => item.id),
     ...domain.groups
-      .filter((g) => g.members.length > 0 && g.members.every((m) => selectedExpanded.has(m)))
+      .filter((g) => {
+        // Test the group's EXPANDED members, so a parent whose members are
+        // themselves groups is eligible exactly when its whole subtree is covered.
+        const members = expanded.get(g.id) ?? [];
+        return members.length > 0 && members.every((m) => selectedExpanded.has(m));
+      })
       .map((g) => g.id),
   ];
 }
