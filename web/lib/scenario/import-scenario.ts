@@ -211,6 +211,9 @@ function normalizeImport(data: ImportScenarioParsed): ImportNormalizationTarget 
         []) as unknown as ImportNormalizationTarget["exportLayout"]["extraRows"],
     },
     cardsByKind,
+    // A strict canonical document never carries temporary covers: they are a
+    // display-only, web-applied credit (d582) that never reaches the solver model.
+    temporaryCover: [],
   };
   if (maxOneShiftPerDay !== undefined) target.maxOneShiftPerDay = maxOneShiftPerDay;
   return target;

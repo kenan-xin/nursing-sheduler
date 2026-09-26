@@ -27,6 +27,7 @@ export const SCENARIO_KEYS = [
   "dateGroups",
   "reqData",
   "exportLayout",
+  "temporaryCover",
   "cardsByKind",
   "maxOneShiftPerDay",
 ] as const satisfies readonly (keyof ScenarioUiState)[];
@@ -44,6 +45,7 @@ export function pickScenario(state: ScenarioUiState): ScenarioUiState {
     dateGroups: state.dateGroups,
     reqData: state.reqData,
     exportLayout: state.exportLayout,
+    temporaryCover: state.temporaryCover,
     cardsByKind: state.cardsByKind,
     maxOneShiftPerDay: state.maxOneShiftPerDay,
   };
@@ -61,8 +63,8 @@ export function scenarioShallowEqual(a: ScenarioUiState, b: ScenarioUiState): bo
 
 /**
  * Whether the current scenario slice holds no authoring content — every entity,
- * group, date range, request, card, and export-layout collection is empty and no
- * `maxOneShiftPerDay` description is set. This is the pure
+ * group, date range, request, card, temporary cover, and export-layout collection
+ * is empty and no `maxOneShiftPerDay` description is set. This is the pure
  * "genuinely empty workspace" test the Load flow uses (T17r review P0): a Load
  * into an empty workspace with a compatible version may commit directly, while a
  * Load into any non-empty workspace must first confirm the replacement. `meta`
@@ -79,6 +81,7 @@ export function isScenarioSliceEmpty(scenario: ScenarioUiState): boolean {
     scenario.shiftGroups.length === 0 &&
     scenario.dateGroups.length === 0 &&
     scenario.reqData.length === 0 &&
+    scenario.temporaryCover.length === 0 &&
     scenario.rangeStart === "" &&
     scenario.rangeEnd === "" &&
     cards.requirements.length === 0 &&

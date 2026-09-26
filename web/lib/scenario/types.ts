@@ -612,6 +612,26 @@ export interface ExportLayout {
   extraRows: ExportExtraRowUi[];
 }
 
+/**
+ * One temporary-cover entry (d582): a named nurse from outside this ward covering
+ * one shift on one date. She is a display-only staffing credit — never a `staff`
+ * member or a solver person — so this stores a display `name`, not a person id.
+ * Entries that share a `name` are one person, shown as one roster row with several
+ * shifts. Stored apart from the cards and applied on read (`lib/scenario/
+ * temporary-cover.ts`); the canonical projection ignores the whole slice.
+ */
+export interface UiTemporaryCover {
+  /** F2 React key; never serialized to the canonical document or Workspace V1. */
+  _k?: string;
+  /** Display label, e.g. "Haseena (Ward 3)"; never a person id. */
+  name: string;
+  date: IsoDate;
+  /** A worked shift-type id she covers. */
+  shiftType: ShiftTypeRef;
+  /** Existing staff groups she counts as; may be empty. */
+  groups: GroupId[];
+}
+
 /** Fields shared by durable UI state and the keyless import target. */
 export interface ScenarioStateShared {
   meta: ScenarioMeta;
@@ -626,6 +646,12 @@ export interface ScenarioStateShared {
   dateGroups: UiDateGroup[];
   reqData: UiRequestCell[];
   exportLayout: ExportLayout;
+  /**
+   * Temporary-cover entries (d582). Required: a record missing the slice is only
+   * ever defaulted by the persistence migration (`persistence.ts`), never by the
+   * sanitizer. Never reaches the canonical document.
+   */
+  temporaryCover: UiTemporaryCover[];
   /**
    * The backend-required, structurally-locked "at most one shift per day"
    * preference. Always emitted into the canonical document; only its optional

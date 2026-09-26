@@ -2,7 +2,23 @@
 // build a small, backend-valid scenario the unit + differential tests share.
 
 import { createEmptyScenarioUiState } from "./canonical";
-import type { ScenarioUiState } from "./types";
+import type { ScenarioUiState, UiTemporaryCover } from "./types";
+
+/**
+ * One temporary-cover entry (d582): a display-only staffing credit — a named
+ * outside nurse covering one shift on one date. She is never a `staff` member or a
+ * solver person, so this carries a display `name`, not a person id. Shared by the
+ * store-slice, cascade, canonical and (Task 4+) workspace tests.
+ */
+export function makeTemporaryCover(overrides: Partial<UiTemporaryCover> = {}): UiTemporaryCover {
+  return {
+    name: "Haseena (Ward 3)",
+    date: "2026-05-14",
+    shiftType: "D",
+    groups: [],
+    ...overrides,
+  };
+}
 
 /**
  * A minimal but non-trivial valid durable UI state: two people + a group, three

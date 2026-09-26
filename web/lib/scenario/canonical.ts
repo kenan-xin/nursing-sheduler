@@ -372,5 +372,6 @@ export function createEmptyScenarioUiState(apiVersion = "alpha"): ScenarioUiStat
     },
     reqData: [],
     exportLayout: { formatting: [], extraColumns: [], extraRows: [] },
+    temporaryCover: [],
   };
 }

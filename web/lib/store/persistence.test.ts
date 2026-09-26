@@ -51,6 +51,7 @@ describe("migrateScenarioState", () => {
     expect(sanitizePersistedScenario(migrated)).toEqual({
       rangeStart: "2026-01-01",
       backupFingerprint: null, // set by the unrelated v3 → v4 baseline reset
+      temporaryCover: [], // set by the unrelated v6 → v7 slice default
     });
   });
 
@@ -93,6 +94,17 @@ describe("migrateScenarioState", () => {
     ) as Record<string, unknown>;
     expect(migrated.rangeStart).toBe("2026-01-01");
     expect(migrated.backupFingerprint).toBeNull();
+  });
+
+  it("upgrades a v6 payload: adds an empty temporaryCover slice", () => {
+    // The slice is REQUIRED downstream (spec §1), so the v6 → v7 step is the only
+    // place a missing pick-up is defaulted — never the sanitizer.
+    const migrated = migrateScenarioState({ rangeStart: "2026-01-01" }, 6) as Record<
+      string,
+      unknown
+    >;
+    expect(migrated.rangeStart).toBe("2026-01-01");
+    expect(migrated.temporaryCover).toEqual([]);
   });
 });
 
@@ -138,6 +150,27 @@ describe("sanitizePersistedScenario", () => {
     });
     expect("mutateScenario" in sanitized).toBe(false);
     expect("bogus" in sanitized).toBe(false);
+  });
+
+  it("round-trips temporary covers", () => {
+    const cover = {
+      _k: "k1",
+      name: "Haseena (Ward 3)",
+      date: "2026-05-14",
+      shiftType: "D",
+      groups: ["TeamA"],
+    };
+    expect(sanitizePersistedScenario({ temporaryCover: [cover] })).toEqual({
+      temporaryCover: [cover],
+    });
+  });
+
+  it("rejects a cover with a non-string name", () => {
+    expect(() =>
+      sanitizePersistedScenario({
+        temporaryCover: [{ name: 7, date: "2026-05-14", shiftType: "D", groups: [] }],
+      }),
+    ).toThrow(/temporaryCover/);
   });
 
   it("throws on a parseable-but-malformed payload (top-level wrong types)", () => {
