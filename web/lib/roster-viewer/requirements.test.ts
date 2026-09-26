@@ -238,6 +238,19 @@ describe("qualification", () => {
     expect(cell.short).toBe(1);
   });
 
+  it("resolves qualifiedGroup to a real staff group id, never the selector label (bead olu)", () => {
+    const [equation] = buildEquations(document);
+    expect(equation.qualifiedLabel).toBe("[Seniors]");
+    expect(equation.qualifiedGroup).toBe("Seniors");
+  });
+
+  it("leaves qualifiedGroup null when the selector names no single staff group", () => {
+    const people = documentWith([
+      requirement({ shiftType: "D+", requiredNumPeople: 1, qualifiedPeople: ["Ada", "Bo"] }),
+    ]);
+    expect(buildEquations(people)[0].qualifiedGroup).toBeNull();
+  });
+
   it("NEGATIVE CONTROL: a satisfied qualified numerator is still red when an ordinary nurse occupies the slot", () => {
     // The backend adds `unqualified_n_people == 0` per selected shift, SEPARATELY
     // from the staffing sum. Ada (a Senior) satisfies 1/1 while Cy (not a Senior)

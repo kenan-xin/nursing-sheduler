@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { CanonicalScenarioDocument } from "@/lib/scenario";
+import { PREFERENCE_TYPE, type CanonicalScenarioDocument } from "@/lib/scenario";
 import type { RosterContext, RosterDayState } from "@/lib/roster/types";
 import { buildRuleModel, countHeadroom } from "./rule-check";
 import {
+  borrowNeeds,
   findCoverLadder,
   findPersonIdx,
   findSwapPartners,
@@ -170,6 +171,53 @@ describe("the escalation ladder", () => {
     expect(ladder.candidates).toEqual([]);
     expect(ladder.trades).toEqual([]);
     expect(ladder.borrow).toEqual([{ dateIdx: 1, shift: "N", skillGroup: "Nights" }]);
+  });
+
+  // Bead nursing-sheduler-olu: a multi-member qualifiedPeople selector must resolve to a
+  // real counted group id, never the rendered "[Nights, SN-Priya]" label the roster's
+  // own group check refuses, and never a borrow at all when no single group fits.
+  describe("the skill group a borrowed nurse joins", () => {
+    const ladderFor = (qualifiedPeople: string[]) => {
+      const document = {
+        ...borrowDocument(),
+        preferences: borrowDocument().preferences.map((preference) =>
+          preference.type === PREFERENCE_TYPE.shiftTypeRequirement
+            ? { ...preference, qualifiedPeople }
+            : preference,
+        ),
+      } as CanonicalScenarioDocument;
+      return findCoverLadder(
+        { context: borrowContext(), days: borrowGrid(), model: buildRuleModel(document) },
+        0,
+        [1],
+        "sick_or_emergency",
+      );
+    };
+
+    it("names a real staff group id, not the rendered selector label", () => {
+      const ladder = ladderFor(["Nights", "SN-Priya"]);
+      expect(ladder.step).toBe(3);
+      expect(ladder.borrow).toEqual([{ dateIdx: 1, shift: "N", skillGroup: "Nights" }]);
+    });
+
+    it("offers no borrow option when the restriction names no single staff group", () => {
+      const ladder = ladderFor(["SN-Priya"]);
+      expect(ladder.borrow).toEqual([]);
+      expect(ladder.step).toBe(4);
+    });
+
+    it("resolves every date to no need when the restriction names people, not a group", () => {
+      const document = {
+        ...borrowDocument(),
+        preferences: borrowDocument().preferences.map((preference) =>
+          preference.type === PREFERENCE_TYPE.shiftTypeRequirement
+            ? { ...preference, qualifiedPeople: ["SSN-Dev"] }
+            : preference,
+        ),
+      } as CanonicalScenarioDocument;
+      const ctx = { context: borrowContext(), days: borrowGrid(), model: buildRuleModel(document) };
+      expect(borrowNeeds(ctx, 0, [1])).toEqual([]);
+    });
   });
 });
 

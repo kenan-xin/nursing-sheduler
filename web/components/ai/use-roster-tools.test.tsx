@@ -12,6 +12,7 @@ import { fixtureSubmission } from "@/lib/roster/test-fixtures";
 import { PREFERENCE_TYPE, type CanonicalScenarioDocument } from "@/lib/scenario";
 import {
   ashaRosterDocument,
+  borrowDocument,
   borrowRosterDocument,
   overtimeContext,
   overtimeDocument,
@@ -406,6 +407,57 @@ describe("the escalation ladder in the tools", () => {
     expect(answer).toMatch(/Nights/);
     expect(fixture.prepare).not.toHaveBeenCalled();
     expect(useAssistantStore.getState().activeRosterChange).toBeNull();
+  });
+
+  it("borrows into the real group a multi-member qualifiedPeople selector names (bead olu)", async () => {
+    const document = {
+      ...borrowDocument(),
+      preferences: borrowDocument().preferences.map((preference) =>
+        preference.type === PREFERENCE_TYPE.shiftTypeRequirement
+          ? { ...preference, qualifiedPeople: ["Nights", "SN-Priya"] }
+          : preference,
+      ),
+    } as CanonicalScenarioDocument;
+    fixture.working = {
+      document: {
+        ...borrowRosterDocument(),
+        submission: fixtureSubmission(document, []),
+      },
+      revision: 1,
+      candidateSource: { jobId: "job-1", candidateVersion: 1 },
+    };
+    fixture.scenario = { rangeStart: "2026-10-07", rangeEnd: "2026-10-09" };
+    const found = (await tool("find_swap_partners").handler(
+      { person: "SN-Priya", dates: ["2026-10-08"], reason: "sick_or_emergency" },
+      {},
+    )) as { step: number; temporary: { skillGroups: string[] } };
+    expect(found.step).toBe(3);
+    expect(found.temporary.skillGroups).toEqual(["Nights"]);
+    fixture.prepare.mockResolvedValueOnce({
+      ok: true,
+      proposal: {
+        proposalId: "p-olu",
+        assumptions: [
+          {
+            assumptionId: "o-1",
+            type: "borrowed_staff_arranged",
+            question:
+              "Has the lending ward or agency confirmed Mei for 8 Oct, qualified as Nights?",
+          },
+        ],
+      },
+    });
+    const answer = await tool("prepare_borrowed_cover").handler(
+      { ...BORROW_MEI, summary: "Borrow." },
+      {},
+    );
+    expect(answer).not.toMatch(/no card was shown/);
+    expect(fixture.prepare.mock.calls[0][0].commands[0]).toEqual({
+      type: "add_person",
+      name: "Mei",
+      groups: ["Nights"],
+      temporary: true,
+    });
   });
 
   it("prepares step 3 with shipped ops and the skill group the night needs", async () => {

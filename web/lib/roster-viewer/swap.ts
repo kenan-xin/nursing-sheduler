@@ -205,7 +205,11 @@ export function borrowNeeds(ctx: SwapContext, personIdx: number, dateIdxs: reado
         equation.shiftIndices.includes(shiftIdx) &&
         equation.dateIndices.has(dateIdx),
     );
-    return [{ dateIdx, shift: String(cell.shiftId), skillGroup: scoped?.qualifiedLabel ?? null }];
+    // A restricted shift no single staff group represents: no borrowed nurse can be
+    // qualified for it, so no borrow is offered. `qualifiedLabel` is a rendered
+    // `[RN, SN]`, never a group id the roster declares (bead nursing-sheduler-olu).
+    if (scoped && scoped.qualifiedGroup === null) return [];
+    return [{ dateIdx, shift: String(cell.shiftId), skillGroup: scoped?.qualifiedGroup ?? null }];
   });
 }
 
@@ -414,7 +418,9 @@ export function findCoverLadder(
   const trades = findTrades(ctx, personIdx, dateIdxs, reason);
   if (overtime.length > 0 || trades.length > 0) return { ...base, step: 2, overtime, trades };
   const borrow = borrowNeeds(ctx, personIdx, dateIdxs);
-  if (!options.noTemporaryNurse) return { ...base, step: 3, borrow };
+  // No borrow need means no group a temporary nurse could be qualified in, so step 3
+  // has no option: fall through to the short shift (bead nursing-sheduler-olu).
+  if (!options.noTemporaryNurse && borrow.length > 0) return { ...base, step: 3, borrow };
   return { ...base, step: 4, borrow, short: planShortShift(ctx, personIdx, dateIdxs, reason) };
 }
 

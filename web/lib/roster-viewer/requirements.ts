@@ -89,6 +89,13 @@ export interface RequirementEquation {
   readonly weighted: boolean;
   /** The authored `qualifiedPeople` selector, rendered, or null when unscoped. */
   readonly qualifiedLabel: string | null;
+  /**
+   * The staff group the authored `qualifiedPeople` selector names, as a real group
+   * id, or null when it is unscoped or names no single staff group. A borrowed
+   * nurse joins THIS group; `qualifiedLabel` is a rendered `[RN, SN]` that no roster
+   * declares (bead nursing-sheduler-olu).
+   */
+  readonly qualifiedGroup: string | null;
   /** Resolved qualified person indices, or null when the equation is unscoped. */
   readonly qualifiedPeople: ReadonlySet<number> | null;
   /** The date indices this equation actually applies to. */
@@ -304,6 +311,7 @@ export function buildEquations(document: CanonicalScenarioDocument): Requirement
     dateGroups: document.dates.groups ?? [],
   });
   const allDates = resolver.resolveDates(RESERVED_SHIFT_TYPE.all);
+  const staffGroupIds = new Set((document.people.groups ?? []).map((group) => String(group.id)));
 
   const equations: RequirementEquation[] = [];
   document.preferences.forEach((preference, preferenceIndex) => {
@@ -342,6 +350,18 @@ export function buildEquations(document: CanonicalScenarioDocument): Requirement
       requirement.qualifiedPeople === undefined || vacuousQualification
         ? null
         : selectorLabel(requirement.qualifiedPeople);
+
+    // The real staff group a borrow joins: the first authored token that names one
+    // of THIS scenario's staff groups. `qualifiedLabel` renders a list as `[RN, SN]`,
+    // which no roster declares, so a borrow in it is refused (bead nursing-sheduler-olu).
+    const qualifiedRefs =
+      requirement.qualifiedPeople === undefined || vacuousQualification
+        ? []
+        : Array.isArray(requirement.qualifiedPeople)
+          ? requirement.qualifiedPeople
+          : [requirement.qualifiedPeople];
+    const qualifiedGroupRef = qualifiedRefs.find((ref) => staffGroupIds.has(String(ref)));
+    const qualifiedGroup = qualifiedGroupRef === undefined ? null : String(qualifiedGroupRef);
 
     // Skill mix: independent hard floors on how many of a named group work the
     // selected shifts. Nobody is banned, so they never alter the numerator's
@@ -394,6 +414,7 @@ export function buildEquations(document: CanonicalScenarioDocument): Requirement
         coefficients: shiftIndices.map(() => 1),
         weighted: false,
         qualifiedLabel,
+        qualifiedGroup,
         qualifiedPeople: qualifiedSet,
         dateIndices: dateResolution.resolved ? dateResolution.values : new Set<number>(),
         dateScopeResolved: dateResolution.resolved,
