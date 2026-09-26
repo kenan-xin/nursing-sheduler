@@ -295,7 +295,7 @@ function resolveSwap(
   }
   if (read.newerRunWaiting) return { ok: false, message: LOAD_FIRST };
   const { document } = read;
-  const model = deriveRuleModel(document.submission, document.borrowed);
+  const model = deriveRuleModel(document.submission);
   if (model === null) {
     return {
       ok: false,
@@ -304,9 +304,7 @@ function resolveSwap(
         "still change it by hand on the Roster screen.",
     };
   }
-  // The roster's full person axis: a borrowed (temporary) nurse is a row like any
-  // other, so her cover counts as staffing and the ladder can offer her another shift.
-  const context = rosterAxisContext(document);
+  const { context } = document;
   const personIdx = findPersonIdx(context, person);
   if (personIdx < 0) {
     const everyone = context.people.map((p) => String(p.id)).join(", ");
@@ -327,7 +325,9 @@ function resolveSwap(
   }
   return {
     ok: true,
-    ctx: { context, days: rosterCurrentDays(document), model },
+    // Swaps are planned among the submitted people only: the rules know nothing about
+    // a borrowed (temporary) row, so it is left out of the rule checks.
+    ctx: { context, days: rosterCurrentDays(document).slice(0, context.people.length), model },
     personIdx,
     dateIdxs,
     baselineId: document.provenance.solvedBaselineId,

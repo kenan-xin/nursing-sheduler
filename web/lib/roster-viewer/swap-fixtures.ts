@@ -188,54 +188,6 @@ export function borrowRosterDocument(): RosterDocument {
   };
 }
 
-// A borrowed nurse (roster-file/2, bead g1p) already on the roster, covering the night
-// of 9 Oct. She is the only Nights nurse off on 7-8 Oct, so the ladder must count her
-// row or it reports the night short and asks for a SECOND temporary nurse (bead d88).
-//            7 Oct  8 Oct  9 Oct
-// SN-Priya   N      N      OFF
-// SSN-Dev    AM     AM     AM     → not in Nights: cannot take a night
-// Mei (borrowed, Nights)  OFF  OFF  N
-function borrowedCoverDocument(): CanonicalScenarioDocument {
-  return {
-    apiVersion: "alpha",
-    dates: { range: { startDate: BORROW_DATES[0], endDate: BORROW_DATES[2] } },
-    people: {
-      items: [{ id: "SN-Priya" }, { id: "SSN-Dev" }],
-      groups: [{ id: "Nights", members: ["SN-Priya"] }],
-    },
-    shiftTypes: {
-      items: [
-        { id: "AM", startTime: "07:00", endTime: "15:00", durationMinutes: 480 },
-        { id: "N", startTime: "21:00", endTime: "07:00", durationMinutes: 600 },
-      ],
-    },
-    preferences: [
-      { type: PREFERENCE_TYPE.maxOneShiftPerDay },
-      {
-        type: PREFERENCE_TYPE.shiftTypeRequirement,
-        description: "One night nurse",
-        shiftType: "N",
-        requiredNumPeople: 1,
-        qualifiedPeople: "Nights",
-        weight: -1,
-      },
-    ],
-  };
-}
-
-export function borrowedCoverRosterDocument(): RosterDocument {
-  return {
-    ...priyaRosterDocument(),
-    submission: fixtureSubmission(borrowedCoverDocument(), []),
-    context: borrowContext(),
-    solvedDays: [
-      [N, N, OFF],
-      [AM, AM, AM],
-    ],
-    borrowed: [{ id: "Mei", groups: ["Nights"], days: [OFF, OFF, N] }],
-  };
-}
-
 // The Priya/Asha fixture (step 2): nobody can swap or cover Priya's nights on 8-9 Oct.
 //            7   8   9   10  11  12  13  14 Oct
 // SN-Priya   AM  N   N   OFF OFF OFF OFF OFF

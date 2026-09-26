@@ -276,7 +276,7 @@ export function deriveRequirementModel(
  * selectors (`qualifiedPeople: RN`, skill mix) count her the way her staff record
  * says. Her id here is synthetic: only her index and groups matter to the resolver.
  */
-export function withBorrowedPeople(
+function withBorrowedPeople(
   document: CanonicalScenarioDocument,
   borrowed: readonly Pick<RosterBorrowedRow, "groups">[],
 ): CanonicalScenarioDocument {
