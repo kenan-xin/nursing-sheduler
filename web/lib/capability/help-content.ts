@@ -83,6 +83,30 @@ export const CAPABILITY_ENTRIES = [
     supportedCommands: ["patch_scenario"],
   },
   {
+    id: "temporary-cover",
+    title: "Temporary cover",
+    nurseFacingSummary:
+      "Record a nurse from another ward who covers one shift on one date. She is not added to " +
+      "your staff list and the solver never plans her: each cover simply lowers that shift's " +
+      "staffing need by one on her date, so the ward needs one fewer of its own nurses there. " +
+      "Add her on the Staff page with a name, the date and the shift she will work, and say " +
+      "which of your groups she counts as — a cover only counts towards a rule open to " +
+      "everyone, or a rule for a group she is in. A card's Exceptions field on the Staffing " +
+      "requirements page shows the covers that change it.",
+    concepts: [
+      "temporary cover",
+      "cover",
+      "nurse from another ward",
+      "cover a shift",
+      "extra pair of hands",
+    ],
+    modes: BOTH_MODES,
+    featureGates: [],
+    routeId: "people",
+    toolAccess: BASE_TOOLS,
+    supportedCommands: ["patch_scenario"],
+  },
+  {
     id: "shift-types",
     title: "Shifts and shift groups",
     nurseFacingSummary:
