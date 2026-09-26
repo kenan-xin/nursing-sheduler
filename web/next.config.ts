@@ -1,6 +1,8 @@
 import { execSync } from "node:child_process";
 import type { NextConfig } from "next";
 
+import { getAllowedDevOrigins } from "./dev-origins";
+
 /**
  * Compute the version from `git describe --tags --always --dirty`.
  *
@@ -29,6 +31,16 @@ function getGitVersion(): string {
 const lowMemoryBuild = process.env.NS_LOW_MEMORY_BUILD === "1";
 
 const nextConfig: NextConfig = {
+  // Development only. Next 16 blocks cross-origin requests to dev-only assets
+  // and endpoints unless the Origin hostname is `localhost`, the bind hostname,
+  // or an entry here. `next dev` binds 0.0.0.0, so a browser on another LAN
+  // device is answered 403 and never hydrates; listing this machine's own IPv4
+  // addresses (see dev-origins.ts) lifts that block. Production leaves the key
+  // unset, so the production config is unchanged.
+  // Ref: https://nextjs.org/docs/app/api-reference/config/next-config-js/allowedDevOrigins
+  ...(process.env.NODE_ENV === "development" && {
+    allowedDevOrigins: getAllowedDevOrigins(),
+  }),
   typescript: { ignoreBuildErrors: lowMemoryBuild },
   ...(lowMemoryBuild && { experimental: { cpus: 1 } }),
   // Standalone output: the Docker runner stage copies `.next/standalone` and runs
