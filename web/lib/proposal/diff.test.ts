@@ -829,6 +829,27 @@ describe("requirement exceptions in the Preview", () => {
     expect(entry?.before).toMatch(/^On · “Day cover” · Exactly 2 people on Day, every date/);
   });
 
+  it("keeps the one line for a card the assistant has not rewritten yet (e6n)", () => {
+    // `req-day` is an imported shape: a scalar shiftType, no qualified people, no date,
+    // and a weight the form would force to -1. The arm must change only the exception, so
+    // the Preview still reads the one line rather than the whole-rule sentence.
+    const before = ruleWardScenario();
+    const commands = [
+      {
+        type: "set_staffing_requirement_on_date" as const,
+        ruleId: "req-day",
+        date: "2026-04-14",
+        requiredNumPeople: 1,
+      },
+    ];
+    const applied = applyAssistantCommands(before, commands);
+    if (!applied.ok) throw new Error(applied.rejection.message);
+    const entry = deriveProposalDiff(before, applied.next, commands).direct.find(
+      (e) => e.key === "rule:requirements:req-day",
+    );
+    expect(entry?.after).toBe("14 Apr: exactly 2 → 1 on Day");
+  });
+
   it("uses the range words when the rule has a preferred count", () => {
     const state = ruleWardScenario();
     state.cardsByKind.requirements[0] = {
