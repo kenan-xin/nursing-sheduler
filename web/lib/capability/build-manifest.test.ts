@@ -163,7 +163,7 @@ describe("capability source validation", () => {
 
   it("rejects an entry claiming a mode in which its own screen is hidden", () => {
     // Without this a Guided user would be told to open an Advanced-only screen, and
-    // the route-validity gate would bounce them straight back to Home.
+    // the route-validity gate would bounce them straight to Guided Rules.
     const problems = validateCapabilitySources(
       sources({
         entries: [

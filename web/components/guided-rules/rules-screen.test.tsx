@@ -50,6 +50,35 @@ async function seedRequirement() {
   }));
 }
 
+describe("RulesScreen — arriving from an Advanced editor (qq0.14.1)", () => {
+  it("orients the user to the matching category and scrolls it into view", async () => {
+    await seedRequirement();
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+    render(<RulesScreen advancedSource="shift-type-requirements" />);
+    expect(screen.getByTestId("rules-advanced-source")).toHaveTextContent(
+      "You came from Staffing Requirements in Advanced. Its rules are under Staffing levels below.",
+    );
+    expect(scroll).toHaveBeenCalled();
+    Reflect.deleteProperty(Element.prototype, "scrollIntoView");
+  });
+
+  it("says so when the source editor has no records to point to", async () => {
+    render(<RulesScreen advancedSource="shift-counts" />);
+    expect(screen.getByTestId("rules-advanced-source")).toHaveTextContent(
+      "You came from Shift Counts in Advanced. It has no records yet, so no rule below comes from it.",
+    );
+  });
+
+  it("ignores an unknown or Guided-visible source", async () => {
+    render(<RulesScreen advancedSource="people" />);
+    expect(screen.queryByTestId("rules-advanced-source")).toBeNull();
+    cleanup();
+    render(<RulesScreen advancedSource="bogus" />);
+    expect(screen.queryByTestId("rules-advanced-source")).toBeNull();
+  });
+});
+
 describe("RulesScreen — empty scenario", () => {
   it("always shows the built-in structural rule, locked and enabled", async () => {
     render(<RulesScreen />);

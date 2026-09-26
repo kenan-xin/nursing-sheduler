@@ -315,7 +315,7 @@ export async function prepareRow(page: Page, row: V2Row): Promise<void> {
       delete w.__NS_DURABLE_FIXTURE_PEOPLE_COUNT;
       delete w.__NS_DURABLE_FIXTURE_REVERSE_MAP;
 
-      // The Advanced-only routes are bounced to Home by the route-validity gate
+      // The Advanced-only routes are bounced to Guided Rules by the route-validity gate
       // unless the stored preference says otherwise, so the mode a row needs is
       // part of its readiness contract, not an incidental setup step.
       if (mode) {

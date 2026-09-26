@@ -172,13 +172,13 @@ export async function awaitRouteMarker(page: Page, row: V2Row): Promise<void> {
   ).toBeVisible({ timeout: READINESS_TIMEOUT_MS });
 
   // A route bounced by the mode validity gate still renders a perfectly valid
-  // screen — Home's — so the marker alone cannot prove we are where we asked to
+  // screen — Rules' — so the marker alone cannot prove we are where we asked to
   // be. The URL is the part that would differ.
   const pathname = new URL(page.url()).pathname;
   if (pathname !== row.route) {
     throw new Error(
       `${context(row, "marker")}: expected to settle on ${row.route}, but the page is at ${pathname}. ` +
-        `An Advanced-only route needs readiness.mode = "advanced" or the route-validity gate redirects it to Home.`,
+        `An Advanced-only route needs readiness.mode = "advanced" or the route-validity gate redirects it to Guided Rules.`,
     );
   }
 }

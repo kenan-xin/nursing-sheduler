@@ -6,7 +6,7 @@ import {
   getNavGroupsForMode,
   getNavItemForMode,
 } from "./nav-config";
-import { isRouteValidForMode } from "./route-registry";
+import { guidedFallbackPath, isRouteValidForMode } from "./route-registry";
 
 // T08d repair (P2): the fresh review found `isRouteValidForMode` and the
 // top-bar crumb re-deriving the Guided/Advanced `advancedOnly` policy
@@ -69,6 +69,41 @@ describe("nav-config — one filtered registry drives every mode-aware consumer"
     expect(isRouteValidForMode("/design-system", "guided")).toBe(true);
     expect(isRouteValidForMode("/design-system", "advanced")).toBe(true);
     expect(getNavItemForMode("/design-system", "guided")).toBeUndefined();
+  });
+});
+
+// qq0.14.1 — leaving an Advanced-only route for Guided lands on a meaningful
+// Guided destination, not Home. Every advancedOnly entry must name one
+// explicitly, and it must itself be a Guided-visible route.
+describe("nav-config — Guided destination for every Advanced-only route", () => {
+  const advancedOnly = ALL_NAV_ITEMS.filter((item) => item.advancedOnly);
+
+  it("covers the five raw constraint editors", () => {
+    expect(advancedOnly.map((item) => item.id)).toEqual([
+      "shift-type-requirements",
+      "shift-type-successions",
+      "shift-counts",
+      "shift-affinities",
+      "shift-type-coverings",
+    ]);
+  });
+
+  it("each names Guided Rules, which is valid in Guided", () => {
+    for (const item of advancedOnly) {
+      expect(item.guidedDestination).toBe("/rules");
+      expect(isRouteValidForMode(item.guidedDestination!, "guided")).toBe(true);
+      expect(guidedFallbackPath(item.path)).toBe(item.guidedDestination);
+    }
+  });
+
+  it("no Guided-visible route carries a Guided destination", () => {
+    for (const item of ALL_NAV_ITEMS.filter((i) => !i.advancedOnly)) {
+      expect(item.guidedDestination).toBeUndefined();
+    }
+  });
+
+  it("falls back to Home for a route with no registry entry", () => {
+    expect(guidedFallbackPath("/nowhere")).toBe("/");
   });
 });
 

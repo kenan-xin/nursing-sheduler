@@ -101,7 +101,7 @@ export interface V2ReadinessDescriptor {
   readonly marker: string;
   /**
    * `advanced` for the DL12 §2 Advanced-only routes, whose direct visit would
-   * otherwise be bounced to Home by `useRouteValidityGate` once the stored
+   * otherwise be bounced to Guided Rules by `useRouteValidityGate` once the stored
    * preference adopts. `null` where the route carries no mode policy at all.
    */
   readonly mode: V2RouteMode;
