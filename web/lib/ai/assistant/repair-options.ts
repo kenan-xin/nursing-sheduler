@@ -29,6 +29,7 @@ import { expandPersonRefs, flattenShiftTypeRefs } from "@/lib/rules/expansion";
 import {
   capOf,
   findStaffingShortfalls,
+  requiredOn,
   requirementDateIds,
   requirementDateIsos,
   skillMixOverflow,
@@ -743,22 +744,30 @@ const askNurseOnLeave: Builder = (ctx, all) => {
 
 const runOneShort: Builder = (ctx, all) => {
   const findings = gapsOnly(all);
-  /** One fewer on `uid` closes that day's gap: the head count it would run with, or null. */
-  const oneShortOn = (card: RequirementCard, dateId: string): number | null => {
+  /**
+   * Running `uid` one short on `dateId` closes that day's gap: the ward's need there and
+   * the rule's own number the operation writes, or null. The two part company once a
+   * temporary cover has lowered the ward need: the title counts the ward's nurses, while
+   * the operation writes the authored count, which the cover credit lowers again.
+   */
+  const oneShortOn = (
+    card: RequirementCard,
+    dateId: string,
+  ): { need: number; written: number } | null => {
     const iso = isoOf(ctx, dateId);
     const sameDay = findings.filter((g) => g.dateId === dateId);
     if (!iso || gapOn(findings, dateId) !== 1) return null;
     // Not a skill-mix gap: one fewer leaves the group just as short. And the rule must be
     // part of every finding that day, or lowering it leaves the day short.
     if (sameDay.some((g) => g.mixPeople || !g.ruleIds.includes(card.uid))) return null;
-    // The ward need on that date: a temporary cover already lowers it, so one fewer is
-    // one fewer than the ward itself supplies.
-    const n = cardNeedOn(ctx.state, card, iso).required;
-    // Never below 1, nor below the skill mix the shift must hold that day.
-    return n >= 2 && !loweredTooFar(ctx, card, n - 1, iso) ? n - 1 : null;
+    // The ward need, a temporary cover included. One fewer than it supplies must stay at
+    // 1 or more and hold the skill mix the shift needs that day.
+    const need = cardNeedOn(ctx.state, card, iso).required;
+    if (need < 2 || loweredTooFar(ctx, card, need - 1, iso)) return null;
+    return { need, written: requiredOn(card, iso) - 1 };
   };
   // Every short date, in roster order: run one short where one fewer on one rule closes it.
-  const pairs: { card: RequirementCard; iso: string; n: number }[] = [];
+  const pairs: { card: RequirementCard; iso: string; n: number; written: number }[] = [];
   const stayShort: string[] = [];
   for (const dateId of shortDates(ctx, findings)) {
     const iso = isoOf(ctx, dateId) as string;
@@ -767,8 +776,8 @@ const runOneShort: Builder = (ctx, all) => {
     ];
     const pair = uids.flatMap((uid) => {
       const card = requirementCard(ctx, uid);
-      const lowered = card && isHeadCount(card) ? oneShortOn(card, dateId) : null;
-      return card && lowered !== null ? [{ card, iso, n: lowered + 1 }] : [];
+      const one = card && isHeadCount(card) ? oneShortOn(card, dateId) : null;
+      return card && one ? [{ card, iso, n: one.need, written: one.written }] : [];
     })[0];
     if (pair) pairs.push(pair);
     else stayShort.push(iso);
@@ -833,13 +842,13 @@ const runOneShort: Builder = (ctx, all) => {
         ? {
             type: "set_staffing_requirement_people",
             ruleId: p.card.uid,
-            requiredNumPeople: p.n - 1,
+            requiredNumPeople: p.written,
           }
         : {
             type: "set_staffing_requirement_on_date",
             ruleId: p.card.uid,
             date: p.iso,
-            requiredNumPeople: p.n - 1,
+            requiredNumPeople: p.written,
           },
     ),
     confirmationQuestion: `As the manager${stays ? `, knowing ${stays},` : ""} are you satisfied it is safe to run ${
@@ -1040,8 +1049,11 @@ export function violatesSafetyFloor(
           return lowered(op.ruleId, op.requiredNumPeople);
         case "set_staffing_requirement_on_date": {
           const card = requirementCard(ctx, op.ruleId);
-          const before = card ? cardNeedOn(state, card, op.date).required : Infinity;
-          return loweredTo(card, before, op.requiredNumPeople, op.date);
+          if (!card) return null;
+          // The operation writes the AUTHORED count; the guard's numbers are the ward's
+          // own, so the cover credit comes off it: its effect on the ward need.
+          const { required, credit } = cardNeedOn(state, card, op.date);
+          return loweredTo(card, required, op.requiredNumPeople - credit, op.date);
         }
         case "edit_staffing_requirement": {
           const card = requirementCard(ctx, op.ruleId);
@@ -1184,21 +1196,26 @@ export function isSafeOption(state: ScenarioUiState, option: RepairOption): bool
     switch (op.type) {
       case "set_staffing_requirement_people": {
         // Raise any plain head count; lower one only by 1 (the floor keeps it at 1 or
-        // more), and only when it targets a single date.
+        // more), and only when it targets a single date. The operation writes the AUTHORED
+        // count, so the cover credit comes off before it meets the ward need.
         const card = requirementCard(ctx, op.ruleId);
         if (!card || !isHeadCount(card) || !Number.isInteger(op.requiredNumPeople)) return false;
-        if (op.requiredNumPeople > card.requiredNumPeople) return true;
-        return (
-          op.requiredNumPeople === card.requiredNumPeople - 1 &&
-          requirementDateIds(state, card).length === 1
-        );
+        const [iso] = requirementDateIsos(state, card);
+        if (iso === undefined) return op.requiredNumPeople > card.requiredNumPeople;
+        const need = cardNeedOn(state, card, iso);
+        const after = op.requiredNumPeople - need.credit;
+        if (after > need.required) return true;
+        return after === need.required - 1 && requirementDateIds(state, card).length === 1;
       }
       case "set_staffing_requirement_on_date": {
         // Lower one covered date of a plain head count by exactly 1 (the floor keeps it at 1 or more).
         const card = requirementCard(ctx, op.ruleId);
         if (!card || !isHeadCount(card) || !Number.isInteger(op.requiredNumPeople)) return false;
         if (!requirementDateIsos(state, card).includes(op.date)) return false;
-        return op.requiredNumPeople === cardNeedOn(state, card, op.date).required - 1;
+        // As above, in the ward's numbers: the written count less the cover credit is one
+        // below the need. Without a cover this is `requiredOn(card, op.date) - 1`.
+        const need = cardNeedOn(state, card, op.date);
+        return op.requiredNumPeople - need.credit === need.required - 1;
       }
       case "edit_count_rule": {
         const card = countCard(ctx, op.ruleId);
