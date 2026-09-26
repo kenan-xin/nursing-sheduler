@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { validatePeopleHistoryCsv, validateShiftRequestCsv } from "./requests-csv";
+import type { UiRequestCell } from "@/lib/scenario";
+import {
+  serializeShiftRequestCsv,
+  validatePeopleHistoryCsv,
+  validateShiftRequestCsv,
+} from "./requests-csv";
 
 const PEOPLE_IDS = ["alice", "bob", "carol"];
 const DATE_ITEM_IDS = ["d1", "d2"];
@@ -265,6 +270,116 @@ describe("validatePeopleHistoryCsv", () => {
     expect(result).toEqual({
       ok: false,
       error: "Error processing people-history CSV file. Please check the file format.",
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Matrix export (the bead's "Download CSV"): the parser accepts the export's
+// several-entries-per-cell form and its day-state labels, so an export →
+// re-import round-trips the same (person, date, selector) cells.
+// ---------------------------------------------------------------------------
+describe("validateShiftRequestCsv — export format (several entries + day-states)", () => {
+  it("splits a several-entries cell on ' | ' into one delta per selector", () => {
+    const csv = ["alice,DAY | NIGHT,", "bob,,", "carol,,"].join("\n");
+    const result = validateShiftRequestCsv(csv, shiftRequestOptions());
+    expect(result).toEqual({
+      ok: true,
+      data: [
+        { personId: "alice", dateId: "d1", shiftType: "DAY" },
+        { personId: "alice", dateId: "d1", shiftType: "NIGHT" },
+      ],
+    });
+  });
+
+  it("accepts an unspaced 'DAY|NIGHT' cell (hand-edited)", () => {
+    const csv = ["alice,DAY|NIGHT,", "bob,,", "carol,,"].join("\n");
+    const result = validateShiftRequestCsv(csv, shiftRequestOptions());
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.data).toHaveLength(2);
+  });
+
+  it("accepts the reserved day-state labels OFF/LEAVE without them being shift types", () => {
+    const csv = ["alice,LEAVE,", "bob,,OFF", "carol,,"].join("\n");
+    const result = validateShiftRequestCsv(csv, shiftRequestOptions());
+    expect(result).toEqual({
+      ok: true,
+      data: [
+        { personId: "alice", dateId: "d1", shiftType: "LEAVE" },
+        { personId: "bob", dateId: "d2", shiftType: "OFF" },
+      ],
+    });
+  });
+
+  it("rejects a cell mixing a day-state with other entries", () => {
+    const csv = ["alice,OFF | DAY,", "bob,,", "carol,,"].join("\n");
+    const result = validateShiftRequestCsv(csv, shiftRequestOptions());
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.error).toContain('mixes the day-state "OFF"');
+  });
+
+  it("still rejects an unknown selector inside a several-entries cell", () => {
+    const csv = ["alice,DAY | BOGUS,", "bob,,", "carol,,"].join("\n");
+    const result = validateShiftRequestCsv(csv, shiftRequestOptions());
+    expect(result).toEqual({
+      ok: false,
+      error:
+        'Invalid shift type "BOGUS" at row 1, column 2. Valid shift types: DAY, NIGHT, ALL_SHIFTS',
+    });
+  });
+});
+
+describe("serializeShiftRequestCsv", () => {
+  const people = ["alice", "bob"] as const;
+  const dateItemIds = ["d1", "d2"] as const;
+
+  function cells(): UiRequestCell[] {
+    return [
+      { kind: "request", person: "alice", date: "d1", shiftType: "DAY", weight: 5 },
+      { kind: "request", person: "alice", date: "d1", shiftType: "NIGHT", weight: -3 },
+      { kind: "leave", person: "alice", date: "d2" },
+      { kind: "off", person: "bob", date: "d1", weight: -2 },
+    ];
+  }
+
+  it("writes a person/date header and one row per person, joining several entries", () => {
+    const csv = serializeShiftRequestCsv(cells(), {
+      people: [...people],
+      dateItemIds: [...dateItemIds],
+    });
+    expect(csv).toBe(["person,d1,d2", "alice,DAY | NIGHT,LEAVE", "bob,OFF,"].join("\n"));
+  });
+
+  it("resolves day-state precedence (leave wins over a coexisting request)", () => {
+    const csv = serializeShiftRequestCsv(
+      [
+        { kind: "request", person: "alice", date: "d1", shiftType: "DAY", weight: 5 },
+        { kind: "leave", person: "alice", date: "d1" },
+      ],
+      { people: ["alice"], dateItemIds: ["d1"] },
+    );
+    expect(csv).toBe(["person,d1", "alice,LEAVE"].join("\n"));
+  });
+
+  it("round-trips: an exported matrix re-imports to the same (person, date, selector) cells", () => {
+    const csv = serializeShiftRequestCsv(cells(), {
+      people: [...people],
+      dateItemIds: [...dateItemIds],
+    });
+    const result = validateShiftRequestCsv(csv, {
+      peopleIds: [...people],
+      dateItemIds: [...dateItemIds],
+      validShiftTypeIds: ["DAY", "NIGHT"],
+      weight: 5,
+    });
+    expect(result).toEqual({
+      ok: true,
+      data: [
+        { personId: "alice", dateId: "d1", shiftType: "DAY" },
+        { personId: "alice", dateId: "d1", shiftType: "NIGHT" },
+        { personId: "alice", dateId: "d2", shiftType: "LEAVE" },
+        { personId: "bob", dateId: "d1", shiftType: "OFF" },
+      ],
     });
   });
 });
