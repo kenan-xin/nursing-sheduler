@@ -1,11 +1,12 @@
 # Temporary cover nurse: a staffing credit, not a solver person
 
-Confidence: 7.6/10
+Confidence: 7.3/10
 
-The model is small, and every piece rests on read code. The solver counts per requirement equation (`core/nurse_scheduling/preference_types.py:81-124`). A per-date count already exists (`requiredNumPeopleOverrides`, `:79-82`). All web staffing reads go through a few seams: `requiredOn` (`web/lib/rules/shortfalls.ts:265`), `buildEquations` (`web/lib/roster-viewer/requirements.ts:302`) and the Excel restoration boundary (`web/lib/optimize/restore-people-ids-in-xlsx.ts:227-270`). Three things lower the score:
-- A per-date override is per **card**, not per equation (`preference_types.py:82`). Multi-shift cards therefore need a split at submission (F1).
-- Skill-mix floors and `preferredNumPeople` have no per-date form, so a cover cannot lower them (F1, F2, open question).
+The model is small, and every piece rests on read code. The solver counts per requirement equation (`core/nurse_scheduling/preference_types.py:81-124`). A per-date count already exists (`requiredNumPeopleOverrides`, `:79-82`). All web staffing reads go through a few seams: `requiredOn` (`web/lib/rules/shortfalls.ts:265`), `buildEquations` (`web/lib/roster-viewer/requirements.ts:302`) and the Excel restoration boundary (`web/lib/optimize/restore-people-ids-in-xlsx.ts:227-270`). Four things lower the score:
+- A per-date override is per **card**, not per equation (`preference_types.py:82`). Skill-mix floors and `preferredNumPeople` have no per-date form at all. So covers need two submission-time splits: per shift and per date (F1, F2). Both splits are new logic, and each has a solver-equivalence test.
 - The un-decrement ledger for solved rosters (§4) is new bookkeeping.
+- Her Excel row sits inside the sheet, so the 6iw insert and conditional-format shifting stay (F6).
+- No workbook importer exists today (open question).
 
 **Beads:** `nursing-sheduler-d582` is this spec. It supersedes the plan `plans/2026-09-26-d582-remove-borrowed-rows.md` and every earlier version of this file. Related: `9h6` (superseded), `2vtv` (the offer to re-run Optimize), `iwo` (Apply opens the changed screen).
 
@@ -93,20 +94,27 @@ Each item gives a decision and the test that pins it.
   - An aggregate selector is one equation. Examples are `[[AM, PM]]` and a shift-type group "Day" = AM+PM. A cover on AM or PM lowers it.
   - Several top-level selectors (`[AM, PM]`) make two equations. One per-date override applies to every equation on that date (`preference_types.py:82`). So an override cannot lower one shift only.
   - For such a card, `withCoverOverrides` splits it at submission into one card per selector with identical fields. It does this only for a card that a cover touches. The split is solver-equivalent, because each selector is already its own equation and its own preferred-count objective (`:83-152`). Authored state is untouched.
-  - **Skill-mix entries are not lowered.** They have no per-date form, and adding one is a core change. A cover in the mix group does not satisfy the floor. The form and the Preview say: "Haseena is in RN, but this rule's RN skill mix still needs 1 RN from the ward." See the open question.
+  - **Skill mix is lowered in the web, with no core change.** A cover counts toward a skill-mix entry in one case only. The entry's `people` is one of her groups, or a group that contains one. Each such cover credits the entry by 1, because skill mix counts heads, not coefficients (`preference_types.py:133`). Skill mix has no per-date form. So, at submission and only for a card whose skill mix a cover changes, `withCoverOverrides` **splits the card by date**:
+    - a **date copy** of the card with `date: [d]`. Its count is the ward need on `d`, and each credited entry gets `minNumPeople` lowered and clamped at 0. An entry at 0 is dropped.
+    - the **original** card with `d` removed from its dates. Its `date` becomes the explicit list of its other resolved dates (`requirementDateIsos`). Its hand overrides on other dates stay. A hand override on `d` moves into the copy as its base count.
+
+    The split is solver-equivalent for every other date, because each date is its own set of equations (`preference_types.py:81`). It combines with the per-shift split, which runs first. Authored state is untouched. Coverage views apply the same credit through `coverCredit` (F5), so a view and the solver never disagree.
   - A card can restrict a shift to a group she is not in. Then the form warns: "Under <rule>, only RN work N. Haseena is not in RN." She still counts for the open cards.
 - *Tests* (`temporary-cover.test.ts`, table-driven):
   - `lowers the all-staff card for a cover with no groups`
   - `lowers a qualifiedPeople card only for a member`
   - `lowers an aggregate shift-group card for either member shift`
   - `splits a multi-selector card and lowers only the covered shift`
-  - `leaves skill-mix floors untouched`
+  - `RN cover satisfies 'at least 1 RN'`
+  - `non-RN cover does not lower the RN skill mix`
+  - `two RN covers lower 'at least 2 RN' to 0 and drop the entry`
+  - `date split leaves every other date's equations unchanged`
   - `nested group membership counts`
-  - plus one real-solver case: `split card is solver-equivalent` (pytest over the two YAMLs: the same status and objective)
+  - plus real-solver cases (pytest over the YAML pairs, which must give the same status and objective): `shift split is solver-equivalent`, `date split is solver-equivalent with no cover`, and `RN cover makes an RN-short night feasible`
 
 **F2. Soft and preferred counts.**
-- *Decision:* a requirement's `requiredNumPeople` is always hard (`preference_types.py:121-124`). The cover lowers it. With `preferredNumPeople` set, that number is the floor. `preferredNumPeople` is card-wide and has no per-date form, so it is **not** lowered. On that date the solver still aims for `preferred` ward staff as a soft target. The Preview line says so: "Haseena lowers the minimum. The preferred number stays 4." Per-person soft rules (shift counts with finite weight) never involve her, because she is not a person.
-- *Tests:* `lowers the floor and keeps preferredNumPeople`, and `never produces an override above preferredNumPeople`.
+- *Decision:* a requirement's `requiredNumPeople` is always hard (`preference_types.py:121-124`). The cover lowers it. With `preferredNumPeople` set, that number is the floor. `preferredNumPeople` is card-wide, so the F1 date split lowers it too. The date copy gets `preferredNumPeople` minus her credit, never below its own floor. So the solver does not aim for extra ward staff on her date. Per-person soft rules (shift counts with finite weight) never involve her, because she is not a person.
+- *Tests:* `lowers floor and preferred on the cover date only`, and `preferred never drops below the floor`.
 
 **F3. Drift.**
 - *Decision:* stored apart and applied on read (§2). A cover that no longer resolves is **flagged, never silently dropped**. That covers a date outside the period, a deleted shift type, a deleted group in `groups`, or no enabled card that she counts in. A flagged cover lowers nothing. The Staff row shows a warning badge with the reason, and Optimize preflight lists it as a non-blocking warning. Renames follow through the cascade (`lib/cascade/rename.ts`). Deletes do not remove covers.
@@ -128,9 +136,15 @@ Each item gives a decision and the test that pins it.
   I searched `web/components` and `web/lib` and found no other staffing reader. Any future reader uses `wardNeed`. On the roster, solved covers are already in the submitted counts, and pending covers apply through the same `coverCredit` (§4).
 - *Tests:* one per reader, each named `<reader> counts a temporary cover`, plus the property `no slot with a matching cover reads short`.
 
-**F6. Excel restoration and re-import.**
-- *Decision:* her display rows are **appended after the last used row** of the schedule sheet. That is after Status and any extra count rows. A blank separator and a label row "Temporary cover" come first. The rows are never inserted into the people window `[3, 3 + peopleCount)` or before Score/Status. Restoration asserts that boundary and reads column A only inside it (`restore-people-ids-in-xlsx.ts:227-270`). The edited export keeps the same boundary (`edited-xlsx.ts:31-34`). Restoration runs **before** the append. With rows appended below, no insert or conditional-format shifting is needed.
-- *Tests:* `restoration of an exported workbook with cover rows reads exactly peopleCount people`, `Score/Status stay adjacent to the people window`, `cover rows are below the extra count rows`.
+**F6. Excel layout and re-import.**
+- *Decision (layout):* her rows sit **directly under the ward staff rows**, one per cover name. The sheet reads as one roster. Score, Status and the count rows move down.
+  - Restoration of anonymized ids asserts the people window `[3, 3 + peopleCount)` and the Score/Status boundary on the core bytes (`restore-people-ids-in-xlsx.ts:227-270`). So it runs **before** the insert, and it never runs on an exported workbook.
+  - `frozenXlsx` is captured without cover rows. Each export patches edits by `coordinateMap` first, then inserts. The 6iw `insertRow`, `copyRowStyle` and conditional-format shifting are kept for this (`edited-xlsx.ts:209-226`, `:316-396`).
+- *Decision (provenance):* the workbook's provenance sheet (`PROVENANCE_SHEET_NAME = "Roster provenance"`, `edited-xlsx.ts:112`) gains a "Temporary cover" table. It has one line per entry: name, date (ISO), shift type id, and groups (a JSON array, because group ids are arbitrary text). The raw download writes the same sheet whenever covers exist. Today only the edited export writes it (`:650-660`).
+- *Decision (import):* an importer reads the provenance table first. It restores the covers exactly, and it treats the rows under the staff window with those names as cover rows, never as staff.
+  - Two cases make it stop and ask the user: the table is missing but rows exist beyond the expected staff count, or the table disagrees with those rows. The dialog lists the unknown rows. It offers three actions: "Import as temporary cover", "Ignore these rows" and "Cancel". The first builds entries from each row's filled cells, with no groups. It never guesses and never drops rows silently.
+  - No workbook importer exists today. I searched `web/lib` and `web/components`, and the roster import reads the JSON roster file (`lib/roster/file.ts`). This contract binds any future importer (open question). The JSON roster file restores covers from its `cover` field (§4).
+- *Tests:* `export then import round-trips covers exactly` (name, date, shift, groups), `cover rows are never read as staff`, `missing provenance with extra rows prompts the user`, `provenance and rows disagree prompts the user`, `restoration runs before the insert and never on an export`, `CF ranges shift with the inserted rows`.
 
 **F7. Assistant awareness, cancel and no-show.**
 - *Decision:* `temporaryCover` appears in the scenario context JSON (`scenario-context.ts:37`) and in the roster context. The host refuses a proposal that repeats an existing name, date and shift. The message is "Haseena (Ward 3) already covers N on 14 Oct." A cancel or no-show is `remove_temporary_cover {name, date, shiftType}`. Its Apply opens Staff and deletes the row in view. The assistant then offers re-Optimize (2vtv), because the slot is now short.
@@ -147,7 +161,11 @@ Each item gives a decision and the test that pins it.
 ```ts
 readonly cover: {
   readonly entries: readonly { name: string; iso: IsoDate; shiftId: ShiftTypeId; groups: readonly string[] }[];
-  readonly decrements: readonly [prefIdx: number, iso: IsoDate, by: number][];  // applied at submission
+  // What the submission subtracted, per submitted preference (after splits) and date.
+  readonly decrements: readonly {
+    pref: number; iso: IsoDate; required: number; preferred?: number;
+    mix?: readonly [entryIdx: number, by: number][];
+  }[];
 };
 ```
 
@@ -156,8 +174,8 @@ readonly cover: {
 - The entries and decrements come from the staged submission (`buildStagedSubmission`, `lib/optimize/submission-snapshot.ts:91`), computed by the same `withCoverOverrides` run that built the YAML. So the roster knows exactly what the solve already subtracted.
 
 **Coverage on the roster.** For each equation and date:
-- authored count = submitted count + solved decrement
-- ward need = `wardNeed(authored count, credit(live covers))`
+- authored count = submitted count + solved decrement (head count, preferred count, and each skill-mix entry)
+- ward need = `wardNeed(authored count, credit(live covers))`, for each of those numbers
 
 Live covers are the current scenario's covers on the roster's calendar. So a cover added after the solve lowers the need at once, and a solved cover later removed raises it at once (F8). The decrement ledger removes the clamp ambiguity: the submitted count alone cannot tell 0 from "clamped to 0".
 
@@ -170,9 +188,9 @@ Live covers are the current scenario's covers on the roster's calendar. So a cov
 ## 5. Excel exports
 
 The same helper runs on the **raw Optimize download** and on the **edited roster export**:
-- **Raw:** `applyPeopleIdRestoration` (`restore-people-ids-in-xlsx.ts:365`) returns plain runs byte-for-byte today (`:369`). It gains the covers from the staged submission. The bypass now needs a plain run **and** no cover. Otherwise it restores ids (anonymized runs only), then appends.
-- **Edited:** `edited-xlsx.ts`. Any cover forces the ExcelJS path past the no-edit short-circuit (`:145`).
-- **Rows:** as F6. Column A is the cover name. Day cells hold her shift id on her dates and `""` elsewhere. History and summary (extra-column) cells are `""`. The style is copied from the last person row (`copyRowStyle`, kept from 6iw).
+- **Raw:** `applyPeopleIdRestoration` (`restore-people-ids-in-xlsx.ts:365`) returns plain runs byte-for-byte today (`:369`). It gains the covers from the staged submission. The bypass now needs a plain run **and** no cover. Otherwise it restores ids (anonymized runs only), then inserts her rows and writes the provenance table.
+- **Edited:** `edited-xlsx.ts`. Any cover forces the ExcelJS path past the no-edit short-circuit (`:145`). It patches edits, then inserts her rows, then writes provenance.
+- **Rows:** as F6, directly under the staff rows. Column A is the cover name. Day cells hold her shift id on her dates and `""` elsewhere. History and summary (extra-column) cells are `""`. The style is copied from the last person row.
 - **Count rows** (`export.extraRows`, `exporter.py:526-532`) count solver people only. The helper adds her credit to a count row's date cell under two conditions. Its `countShiftTypes` contains her shift. Its `countPeople` is `ALL` or contains one of her groups. This covers F5 for Excel.
 
 ## 6. Staff screen: the "Temporary cover" section
@@ -226,7 +244,7 @@ If validation fails, the editor stays open with the error and nothing is written
 
 **Repair option `borrow_temporary_nurse`** (`repair-options.ts:583-695`):
 - It emits one `add_temporary_cover` per short (date, shift), repeated for the gap. The name is `"Borrowed nurse n (another ward)"`, and `groups` holds the short rule's named group.
-- It is not offered for a skill-mix shortfall (F1) or a cap-only shortfall.
+- For a skill-mix shortfall, `groups` holds the short entry's group, so the cover credits it (F1). It is not offered for a cap-only shortfall.
 - `enforcedBy: "chat"`. `needsFromUser` asks for the name and the lending ward.
 - `isSafeOption` gets an `add_temporary_cover` arm: in period, a worked shift, known groups, and at least one card she counts in.
 - Removed: `narrowedCounts`, `pinnable`, the whole-period loan, and `temporary: true`.
@@ -248,7 +266,7 @@ If validation fails, the editor stays open with the error and nothing is written
 | 1a1e95c d88 (ladder reads the borrowed axis) | Removed. The ladder reads `wardNeed`. |
 | 46d01d2 d88 (`narrowedCounts` in `rule-check.ts`) | Removed. She is never a person. |
 | 9a767b3, f3b2d98 6yn (group guard) | Removed. Form validation checks that groups exist. |
-| 387f4e3, 01e7b69 6iw (`insertRow`, conditional-format shifting) | Removed, because rows are appended below (F6). `copyRowStyle` is kept. |
+| 387f4e3, 01e7b69 6iw (`insertRow`, `copyRowStyle`, conditional-format shifting) | Kept, and used by both exports to insert her rows under the staff rows (F6). |
 | e930ac6 olu (`qualifiedGroup`) | Kept. It prefills her groups. |
 | `repair-options.ts` `narrowedCounts`, `pinnable`, the whole-period loan, and `assumptions.ts` `borrowed_staff_arranged` | Removed. |
 | `core/` | No change. Retiring upstream patch P1 (`Person.temporary`, `models.py:66`) is a follow-up bead. |
@@ -266,11 +284,10 @@ The foot-gun tests are named in §3. All tests follow the library-first rule.
 
 ## Unresolved questions
 
-1. **Skill mix.** A cover in RN does not satisfy an RN skill-mix floor, because skill-mix entries have no per-date form (F1). Accept that, or add a follow-up for an additive per-date `skillMixOverrides` in core, on the same pattern as `requiredNumPeopleOverrides`?
+1. **Workbook importer.** No Excel roster importer exists today. The roster import reads the JSON roster file (`lib/roster/file.ts`). F6 fixes the contract, but building the importer is new scope. Build it with this work, or file it as its own bead?
 
 ## Assumptions
 
 - A cover name works at most one shift per date.
-- A preferred count (F2) staying as a soft target on her date is acceptable.
-- Her display rows sit below the count rows in Excel, not next to the staff rows. That is the price of never touching the restoration boundary.
-- Splitting a multi-selector card at submission is acceptable. It shows as separate rules in diagnostics for that run only.
+- Splitting cards by shift or by date at submission is acceptable. The splits show as separate rules in diagnostics for that run only.
+- A date copy's explicit date list in the submitted YAML can be long (one ISO per other date). That is acceptable, because it never reaches the authored state.
