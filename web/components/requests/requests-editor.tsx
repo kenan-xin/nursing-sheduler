@@ -31,7 +31,12 @@ import { HistoryEditor, type HistoryOption } from "./history-editor";
 import { RequestsCsvModal } from "./requests-csv-modal";
 import { CurrentRequestsTable, type CurrentRequestRow } from "./current-requests-table";
 import { CurrentHistoryTable, type CurrentHistoryPerson } from "./current-history-table";
-import { cellPreferenceSet, resolveDayStatePrecedence, weightDisplayLabel } from "./requests-model";
+import {
+  cellPreferenceSet,
+  historyValueAt,
+  resolveDayStatePrecedence,
+  weightDisplayLabel,
+} from "./requests-model";
 import { validatePeopleHistoryCsv, validateShiftRequestCsv } from "./requests-csv";
 import { useRequests, pickRequestsScenario } from "./use-requests";
 
@@ -380,9 +385,7 @@ export function RequestsEditor() {
     : undefined;
   const activeHistoryValue =
     historyEditor && activeHistoryPerson
-      ? ((activeHistoryPerson.history ?? [])[
-          historyEditor.historyIndex - (historyCount - (activeHistoryPerson.history?.length ?? 0))
-        ] ?? null)
+      ? historyValueAt(activeHistoryPerson, historyEditor.historyIndex, historyCount)
       : null;
 
   if (!hasRequiredData) {

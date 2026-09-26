@@ -231,6 +231,53 @@ describe("TransferList — groups and disabled options", () => {
   });
 });
 
+describe("TransferList — duplicated selected values (legitimate multiplicity)", () => {
+  // The backend member arrays are `list[int | str]` with NO uniqueness refinement,
+  // and the entity editor preserves multiplicity (membership.ts), so `selected`
+  // may legitimately hold the same value twice. Two rows then need distinct React
+  // keys, and Clear-all must clear each distinct value exactly once.
+  const dupItems: TransferOption<EntityId>[] = [
+    { value: 1, label: "1" },
+    { value: 2, label: "2" },
+  ];
+
+  it("renders one row per occurrence without a duplicate-key React warning", () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    render(
+      <Harness<EntityId>
+        idPrefix="dup"
+        items={dupItems}
+        initial={[1, 1]}
+        keyOf={entityKey}
+        sameValue={sameEntityId}
+      />,
+    );
+    const chosen = screen.getByTestId("transfer-selected-dup");
+    expect(within(chosen).getAllByRole("button", { name: "Remove 1" })).toHaveLength(2);
+    const dupKeyWarning = consoleError.mock.calls.find((call) =>
+      String(call[0]).includes("same key"),
+    );
+    expect(dupKeyWarning).toBeUndefined();
+    consoleError.mockRestore();
+  });
+
+  it("Clear all empties every occurrence of a duplicated member", () => {
+    render(
+      <Harness<EntityId>
+        idPrefix="dup"
+        items={dupItems}
+        initial={[1, 1]}
+        keyOf={entityKey}
+        sameValue={sameEntityId}
+      />,
+    );
+    const chosen = screen.getByTestId("transfer-selected-dup");
+    expect(chosen).toHaveTextContent("1");
+    fireEvent.click(screen.getByTestId("transfer-clear-dup"));
+    expect(within(chosen).queryByText("1")).not.toBeInTheDocument();
+  });
+});
+
 describe("TransferList — exact typed identity for the entity-editor consumer", () => {
   it('never collapses numeric 1 and string "1"', () => {
     const items: TransferOption<EntityId>[] = [
