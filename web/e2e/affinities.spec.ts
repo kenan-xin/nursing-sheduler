@@ -86,7 +86,7 @@ async function seed(page: Page, patch: Record<string, unknown>) {
 /** Navigate to the affinities screen and wait for the store seam + the editor.
  *  Shift Affinities is Advanced-only since T08d (DL12 §2); adopt the stored
  *  Advanced preference first so the route-validity gate doesn't redirect this
- *  direct visit to Home under the Guided default. */
+ *  direct visit to Guided Rules under the Guided default. */
 async function gotoReady(page: Page) {
   await page.addInitScript(() => localStorage.setItem("ns-app-mode", "advanced"));
   await page.goto("/shift-affinities");

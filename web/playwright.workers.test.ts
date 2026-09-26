@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { parse } from "yaml";
 import { describe, expect, it } from "vitest";
 import packageJson from "./package.json";
+import baseConfig, { webServerCommand } from "./playwright.config";
 import focusedPlaywrightConfig from "./playwright.public-roster-dispatch.config";
 import { DEFAULT_WORKER_CAP, resolveWorkerCount, WORKERS_ENV } from "./playwright.workers";
 
@@ -219,19 +220,36 @@ describe("playwright.public-roster-dispatch.config — focused-config invariants
     expect(config.workers).toBe(1);
   });
 
-  it("reuses NO existing server (forces a fresh pnpm build so a stale server cannot false-green)", () => {
+  it("reuses NO existing server (a stale running server cannot false-green)", () => {
     expect(config.webServer?.reuseExistingServer).toBe(false);
+  });
+
+  it("shares the base launcher: builds unless CI shipped a prebuilt .next (PW_PREBUILT)", () => {
+    expect(config.webServer?.command).toBe(webServerCommand);
+    expect(webServerCommand).toBe(
+      process.env.PW_PREBUILT ? "pnpm start" : "pnpm build && pnpm start",
+    );
   });
 });
 
-// CI workflow contract (B3 closure repair). The closure review's P1 #1 was that
-// the workflow itself was UNPARSEABLE YAML, so GitHub never loaded the focused
-// step. This block loads `.github/workflows/ci.yml` with the standards-compliant
-// `yaml` parser (a direct `web` dependency, ^2.9.0) and asserts the focused
-// script is invoked AFTER the base e2e step in the same `e2e` job. It is not a
-// general workflow parser — it asserts exactly the two targeted invariants the
-// closure review named, against the resolved workflow object.
-describe(".github/workflows/ci.yml — workflow parses and gates the focused script after base e2e", () => {
+describe("playwright.config — base webServer and CI reporter", () => {
+  it("uses the shared launcher (prebuilt start only under PW_PREBUILT)", () => {
+    const webServer = baseConfig.webServer as { command?: string; reuseExistingServer?: boolean };
+    expect(webServer.command).toBe(webServerCommand);
+  });
+
+  it("emits a blob report in CI so e2e-report can merge the shards", () => {
+    const reporter = JSON.stringify(baseConfig.reporter);
+    if (process.env.CI) expect(reporter).toContain('"blob"');
+    else expect(baseConfig.reporter).toBe("list");
+  });
+});
+
+// CI workflow contract. Loads `.github/workflows/ci.yml` with the
+// standards-compliant `yaml` parser (a direct `web` dependency) and pins the
+// e2e topology: one e2e-env build shared by 4 pinned shards, the focused
+// dispatch job and the merged report. Not a general workflow parser.
+describe(".github/workflows/ci.yml — e2e build once, 4 pinned shards, focused job, merged report", () => {
   // The web/ package sits inside the repo root (or the isolated worktree root,
   // which is a full checkout); one level up reaches the `.github/` directory.
   const repoRoot = resolve(__dirname, "..");
@@ -244,31 +262,57 @@ describe(".github/workflows/ci.yml — workflow parses and gates the focused scr
     const doc = parse(readFileSync(workflowPath, "utf8"));
     expect(doc).toBeTruthy();
     expect(Object.keys(doc.jobs)).toEqual(
-      expect.arrayContaining(["static", "unit", "build", "e2e"]),
+      expect.arrayContaining([
+        "static",
+        "unit",
+        "build",
+        "e2e-build",
+        "e2e",
+        "e2e-public-roster-dispatch",
+        "e2e-report",
+      ]),
     );
-    // e2e is gated on the fast static job; unit and build run in parallel with it.
-    expect(doc.jobs.e2e.needs).toBe("static");
+    // The e2e chain is gated on the fast static job; unit and build run in parallel.
+    expect(doc.jobs["e2e-build"].needs).toBe("static");
   });
 
-  it("the `e2e` job invokes `pnpm test:e2e:public-roster-dispatch` AFTER the base `pnpm exec playwright test`", () => {
-    // Order in the resolved step list must reflect the intended sequential
-    // execution: a fresh developer-machine run and a CI run both must execute
-    // the base gate first (its `webServer` builds and tears down), THEN the
-    // focused gate (its `reuseExistingServer: false` rebuilds cleanly).
-    const doc = parse(readFileSync(workflowPath, "utf8"));
-    const steps = (doc.jobs.e2e.steps as Array<{ name?: string; run?: string }>) ?? [];
-    const runSteps = steps
-      .map((step, index) => ({ index, run: step.run ?? "" }))
-      .filter((s) => s.run.length > 0);
+  const doc = parse(readFileSync(workflowPath, "utf8"));
+  type Step = { name?: string; run?: string; uses?: string; env?: Record<string, string> };
+  const runs = (job: string) => (doc.jobs[job].steps as Step[]).map((s) => s.run ?? "");
 
-    const baseStep = runSteps.find((s) => s.run === "pnpm exec playwright test");
-    const focusedStep = runSteps.find((s) => s.run === "pnpm test:e2e:public-roster-dispatch");
+  it("e2e-build compiles the test bridge in and ships the build", () => {
+    const build = (doc.jobs["e2e-build"].steps as Step[]).find((s) => s.run === "pnpm build");
+    expect(build?.env?.NEXT_PUBLIC_NS_TEST_BRIDGE).toBe("1");
+    expect(JSON.stringify(doc.jobs["e2e-build"].steps)).toContain("next-e2e-build");
+  });
 
-    expect(baseStep, "base `pnpm exec playwright test` step exists").toBeDefined();
-    expect(focusedStep, "focused `pnpm test:e2e:public-roster-dispatch` step exists").toBeDefined();
-    // Sequential ordering: the focused step must come AFTER the base step. A
-    // reordering that runs the focused gate before the base one (or removes the
-    // base one and renumbers) makes the build-overlap guarantee disappear.
-    expect(focusedStep!.index).toBeGreaterThan(baseStep!.index);
+  it("shards the base suite 4 ways on ubuntu-24.04 against the prebuilt server", () => {
+    const e2e = doc.jobs.e2e;
+    // Baseline contract: every shard on the same pinned image.
+    expect(e2e["runs-on"]).toBe("ubuntu-24.04");
+    expect(e2e.needs).toBe("e2e-build");
+    expect(e2e.strategy.matrix.shard).toEqual([1, 2, 3, 4]);
+    const run = (e2e.steps as Step[]).find((s) => s.run?.startsWith("pnpm exec playwright test"));
+    expect(run?.run).toBe("pnpm exec playwright test --shard=${{ matrix.shard }}/4");
+    expect(run?.env?.PW_PREBUILT).toBe("1");
+    // Workers stay at the audited per-runner policy: no override in the lane.
+    expect(JSON.stringify(e2e)).not.toMatch(/--workers|PLAYWRIGHT_WORKERS/);
+  });
+
+  it("runs the focused dispatch spec as its own job on the shared build", () => {
+    const job = doc.jobs["e2e-public-roster-dispatch"];
+    expect(job["runs-on"]).toBe("ubuntu-24.04");
+    expect(job.needs).toBe("e2e-build");
+    const run = (job.steps as Step[]).find((s) => s.run === "pnpm test:e2e:public-roster-dispatch");
+    expect(run?.env?.PW_PREBUILT).toBe("1");
+    // No longer chained behind the base suite in one job.
+    expect(runs("e2e")).not.toContain("pnpm test:e2e:public-roster-dispatch");
+  });
+
+  it("merges the shard blobs even when a shard fails", () => {
+    const job = doc.jobs["e2e-report"];
+    expect(job.needs).toBe("e2e");
+    expect(job.if).toContain("!cancelled()");
+    expect(runs("e2e-report").some((r) => r.includes("playwright merge-reports"))).toBe(true);
   });
 });
