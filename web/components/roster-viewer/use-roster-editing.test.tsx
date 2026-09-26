@@ -15,7 +15,9 @@ import {
   type RosterDayState,
   type RosterDocument,
 } from "@/lib/roster";
+import type { RosterChangeRequest } from "@/lib/roster/change-request";
 import { fixtureRosterDocument } from "@/lib/roster/test-fixtures";
+import { applyRosterChange } from "./use-roster-change-request";
 import { useRosterEditing } from "./use-roster-editing";
 
 let dbSeq = 0;
@@ -184,6 +186,61 @@ describe("applyCells", () => {
     // Her cells are ordinary edits: a hand edit on her row works like any other.
     act(() => result.current.setCell({ personIdx: 2, dateIdx: 1 }, OFF));
     expect(result.current.editedDocument.edits).toEqual([]);
+  });
+
+  it("undo of the Apply that added a borrowed row removes the row too (bead 2rp)", async () => {
+    const { document, revision } = await seedWorking();
+    const { result } = renderHook(() =>
+      useRosterEditing({ document, revision, reload: async () => {} }),
+    );
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    const OFF = { kind: "off" } as const;
+    const N = { kind: "shift", shiftId: "N" } as const;
+    const mei = { id: "Mei", groups: ["RN"], days: [OFF, OFF, OFF, OFF] };
+    const request: RosterChangeRequest = {
+      solvedBaselineId: document.provenance.solvedBaselineId,
+      addPeople: [mei],
+      peopleCount: 2,
+      cells: [{ personIdx: 2, dateIdx: 1, before: OFF, after: N }],
+    };
+    act(() => {
+      expect(
+        applyRosterChange(result.current.editedDocument, request, result.current.applyCells),
+      ).toBe("applied");
+    });
+    act(() => result.current.undo());
+    expect(result.current.editedDocument.borrowed).toEqual([]);
+    expect(result.current.editedDocument.edits).toEqual([]);
+    await waitFor(async () => {
+      const saved = await rosterStorage.readWorking<RosterDocument>();
+      expect(saved?.document.borrowed).toEqual([]);
+      expect(saved?.document.edits).toEqual([]);
+    });
+    // Asking again for her is not refused as "roster changed".
+    act(() => {
+      expect(
+        applyRosterChange(result.current.editedDocument, request, result.current.applyCells),
+      ).toBe("applied");
+    });
+    expect(result.current.editedDocument.borrowed).toEqual([mei]);
+  });
+
+  it("undo of a hand edit after the Apply keeps the borrowed row", async () => {
+    const { document, revision } = await seedWorking();
+    const { result } = renderHook(() =>
+      useRosterEditing({ document, revision, reload: async () => {} }),
+    );
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    const OFF = { kind: "off" } as const;
+    const N = { kind: "shift", shiftId: "N" } as const;
+    const mei = { id: "Mei", groups: ["RN"], days: [OFF, OFF, OFF, OFF] };
+    act(() => {
+      result.current.applyCells([{ personIdx: 2, dateIdx: 1, day: N }], [mei]);
+    });
+    act(() => result.current.setCell({ personIdx: 2, dateIdx: 2 }, N));
+    act(() => result.current.undo());
+    expect(result.current.editedDocument.borrowed).toEqual([mei]);
+    expect(result.current.editedDocument.edits).toEqual([{ personIdx: 2, dateIdx: 1, day: N }]);
   });
 
   it("rejects cells on a row that does not exist", async () => {

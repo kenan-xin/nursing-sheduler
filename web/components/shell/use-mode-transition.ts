@@ -32,7 +32,8 @@ import { useCallback } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useModeStore, type AppMode } from "@/lib/mode/mode";
 import { dispatchNavIntent } from "./nav-guard-store";
-import { isRouteValidForMode } from "./route-registry";
+import { guidedFallbackPath, isRouteValidForMode } from "./route-registry";
+import { noteGuidedArrival } from "./guided-arrival";
 
 export interface ModeTransition {
   /** Request switching to `target`. No-op if already in that mode.
@@ -62,6 +63,9 @@ export function useModeTransition(): ModeTransition {
       if (useModeStore.getState().mode === target && targetPath === pathname) return;
 
       const commit = () => {
+        // Leaving a route the target mode can't show: tell the destination
+        // where the user came from (qq0.14.1). Only on commit, never on Cancel.
+        if (!isRouteValidForMode(pathname, target)) noteGuidedArrival(pathname);
         useModeStore.getState().setMode(target);
         if (targetPath !== pathname) router.replace(targetPath);
         onCommitted?.();
@@ -81,9 +85,13 @@ export function useModeTransition(): ModeTransition {
   const requestModeChange = useCallback(
     (target: AppMode, onCommitted?: () => void, onCancelled?: () => void) => {
       if (useModeStore.getState().mode === target) return;
-      // Advanced-only → Guided lands on Home via `replace`, never `push`
-      // (DL12): it's a lens correction, not a new place in history.
-      const targetPath = isRouteValidForMode(pathname, target) ? pathname : "/";
+      // Advanced-only → Guided lands on the route's Guided destination
+      // (qq0.14.1) via `replace`, never `push` (DL12): it's a lens correction,
+      // not a new place in history. The route-validity gate resolves the same
+      // destination, so the two can never race to different places.
+      const targetPath = isRouteValidForMode(pathname, target)
+        ? pathname
+        : guidedFallbackPath(pathname);
       transition(target, targetPath, onCommitted, onCancelled);
     },
     [pathname, transition],

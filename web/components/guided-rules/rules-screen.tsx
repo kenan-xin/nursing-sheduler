@@ -35,6 +35,7 @@ import {
 import type { IconType } from "@/components/icons";
 import { useGuardedNavigation } from "@/components/shell/use-guarded-navigation";
 import { useCardEditorDraftGuard } from "@/components/card-editor/card-editor-shell";
+import { ALL_NAV_ITEMS } from "@/components/shell/nav-config";
 import { capabilityAnchorProps } from "@/lib/capability/anchor-contract";
 import { RULES_LIBRARY_ANCHOR } from "./capability-anchors";
 import { useGuidedRules } from "./use-guided-rules";
@@ -81,9 +82,13 @@ export interface RulesScreenProps {
    *  mode-switch + navigate transaction (tech-plan §2). Defaults to a bare
    *  guarded navigation — this ticket does not change global mode state. */
   onOpenAdvanced?: (route: string) => void;
+  /** qq0.14.1: the route id of the Advanced editor a mode switch just left
+   *  (one-shot in-memory note, guided-arrival.ts). The screen names it and scrolls to its category; an
+   *  unknown or Guided-visible id is ignored. */
+  advancedSource?: string | null;
 }
 
-export function RulesScreen({ onOpenAdvanced }: RulesScreenProps) {
+export function RulesScreen({ onOpenAdvanced, advancedSource }: RulesScreenProps) {
   const { navigate } = useGuardedNavigation();
   const { state, rows, toggle, adjust, rename } = useGuidedRules();
 
@@ -122,6 +127,18 @@ export function RulesScreen({ onOpenAdvanced }: RulesScreenProps) {
     },
     [onOpenAdvanced, navigate],
   );
+
+  const source = advancedSource
+    ? ALL_NAV_ITEMS.find((item) => item.advancedOnly && item.id === advancedSource)
+    : undefined;
+  // Missing when the editor holds no records (none yet, or all deleted).
+  const sourceCategory = source
+    ? rows.find((r) => r.advancedRoute === source.path)?.category
+    : undefined;
+  const sourceRef = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    sourceRef.current?.scrollIntoView?.({ block: "start" });
+  }, [sourceCategory]);
 
   const groups = groupByCategory(rows);
   const hasRecords = rows.some((r) => r.source === "record");
@@ -183,6 +200,25 @@ export function RulesScreen({ onOpenAdvanced }: RulesScreenProps) {
         </div>
       </div>
 
+      {source && (
+        // Orientation after an Advanced → Guided switch: the same inset note
+        // strip as the advanced-records strip below.
+        <Surface
+          level="well"
+          geometry="control"
+          className="flex items-center gap-3 px-3.5 py-3"
+          data-testid="rules-advanced-source"
+        >
+          <FaCircleInfo className="shrink-0 text-ink3" />
+          <span className="text-meta text-ink2">
+            You came from {source.label} in Advanced.{" "}
+            {sourceCategory
+              ? `Its rules are under ${sourceCategory} below.`
+              : "It has no records yet, so no rule below comes from it."}
+          </span>
+        </Surface>
+      )}
+
       <div className="flex flex-wrap items-center gap-3.5">
         {/* A summary island resting directly on the page plane, so it is L1
             (--surface + a hairline + --sh-1) rather than a well — DESIGN.md §4
@@ -243,7 +279,10 @@ export function RulesScreen({ onOpenAdvanced }: RulesScreenProps) {
         {groups.map((group) => {
           const Icon = categoryIcon(group.category);
           return (
-            <div key={group.category}>
+            <div
+              key={group.category}
+              ref={group.category === sourceCategory ? sourceRef : undefined}
+            >
               <div className="mb-3 flex items-center gap-2.5">
                 {/* A small bordered tile inside the heading row is a chip, not a
                     data surface — square is reserved for tables, grid cells and

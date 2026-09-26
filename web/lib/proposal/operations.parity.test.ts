@@ -66,6 +66,7 @@ import {
   type CountFormState,
 } from "@/components/counts/counts-model";
 import {
+  buildRequirementCard,
   buildRequirementShiftTypeDomain,
   emptyRequirementForm,
   requirementCoveredIsos,
@@ -1071,7 +1072,27 @@ describe("set_staffing_requirement_on_date is the Edit form with one exception r
   ];
 
   it("accepts and refuses what the form does, and commits the same document", () => {
-    const state = ruleWardScenario();
+    // Canonicalise `req-day` first, to the card the Edit form itself would have written.
+    // On a card an import left unnormalised, the arm deliberately writes only the
+    // exception rows and leaves the rest of the card as it stands (bead e6n), so a
+    // whole-card comparison is only meaningful against a form-written card.
+    const fixture = ruleWardScenario();
+    const fixtureDomain = buildRequirementShiftTypeDomain(fixture);
+    const day = fixture.cardsByKind.requirements.find((c) => c.uid === "req-day")!;
+    const canonical = buildRequirementCard(
+      requirementToForm(day, fixtureDomain),
+      fixtureDomain,
+      "req-day",
+    );
+    const state: ScenarioUiState = {
+      ...fixture,
+      cardsByKind: {
+        ...fixture.cardsByKind,
+        requirements: fixture.cardsByKind.requirements.map((c) =>
+          c.uid === "req-day" ? canonical : c,
+        ),
+      },
+    };
     const source = state.cardsByKind.requirements.find((c) => c.uid === "req-day")!;
     const domain = buildRequirementShiftTypeDomain(state);
     for (const [i, [date, n]] of rows.entries()) {
