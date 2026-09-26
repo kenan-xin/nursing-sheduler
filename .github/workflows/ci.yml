@@ -112,6 +112,10 @@ jobs:
           NURSE_TEST_REDIS_URL: redis://localhost:6379/0
           PYTHONPATH: .
         run: python3 -m pytest -q -rs
+      - name: Score ground-truth replay (patch P0)
+        env:
+          PYTHONPATH: .
+        run: python3 -m pytest -q tests/real/schedule_score_ground_truth.py
 
   e2e:
     name: e2e (playwright)

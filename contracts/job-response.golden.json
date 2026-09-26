@@ -9,22 +9,22 @@
       "status": 202,
       "purpose": "ordinary",
       "body": {
-        "id": "job_716c9454cbb44a9688fc32248146690a",
+        "id": "job_8dae24c68a004c9f9e3b090e2780bf22",
         "state": "queued",
         "terminal": false,
         "queue_position": 1,
-        "created_at": "2026-08-06T18:15:11.927764Z",
-        "expires_at": "2026-08-07T18:15:11.927764Z",
+        "created_at": "2026-09-25T13:00:09.530636Z",
+        "expires_at": "2026-09-26T13:00:09.530636Z",
         "started_at": null,
         "finished_at": null,
         "request": {
-          "input_name": "nurse-scheduling-20260807021511.yaml",
+          "input_name": "nurse-scheduling-20260925210009.yaml",
           "solver": "ortools/cp-sat",
           "prettify": false,
           "timeout_seconds": 60,
           "purpose": "ordinary",
           "basis": {
-            "basis_id": "ffee24048c2000f0cc50dc9c77015497d208a1d910f2aa9d69cf7a9a97480408",
+            "basis_id": "37332b65a708b7813f15f5cc4dcead8dfc34d32f3cbef3dcb3cc9b0de0546a59",
             "schema_version": 2,
             "submission_contract_version": "optimize-yaml-v1",
             "workspace_schema_version": "1",
@@ -36,7 +36,7 @@
               "prettify": false,
               "timeout_seconds": 60
             },
-            "solver_semantic_version": "ortools/cp-sat@1",
+            "solver_semantic_version": "ortools/cp-sat@2",
             "backend_capability_version": "nurse-scheduling-backend@1",
             "parent_basis_id": null,
             "transform_digest": null
@@ -49,10 +49,10 @@
           "early_completion_available": false
         },
         "links": {
-          "self": "/optimize/job_716c9454cbb44a9688fc32248146690a",
-          "events": "/optimize/job_716c9454cbb44a9688fc32248146690a/events",
-          "cancellation": "/optimize/job_716c9454cbb44a9688fc32248146690a/cancel",
-          "early_completion": "/optimize/job_716c9454cbb44a9688fc32248146690a/finish-now",
+          "self": "/optimize/job_8dae24c68a004c9f9e3b090e2780bf22",
+          "events": "/optimize/job_8dae24c68a004c9f9e3b090e2780bf22/events",
+          "cancellation": "/optimize/job_8dae24c68a004c9f9e3b090e2780bf22/cancel",
+          "early_completion": "/optimize/job_8dae24c68a004c9f9e3b090e2780bf22/finish-now",
           "schedule": null
         }
       }
@@ -64,22 +64,22 @@
       "status": 200,
       "purpose": "ordinary",
       "body": {
-        "id": "job_716c9454cbb44a9688fc32248146690a",
+        "id": "job_8dae24c68a004c9f9e3b090e2780bf22",
         "state": "queued",
         "terminal": false,
         "queue_position": 1,
-        "created_at": "2026-08-06T18:15:11.927764Z",
-        "expires_at": "2026-08-07T18:15:11.927764Z",
+        "created_at": "2026-09-25T13:00:09.530636Z",
+        "expires_at": "2026-09-26T13:00:09.530636Z",
         "started_at": null,
         "finished_at": null,
         "request": {
-          "input_name": "nurse-scheduling-20260807021511.yaml",
+          "input_name": "nurse-scheduling-20260925210009.yaml",
           "solver": "ortools/cp-sat",
           "prettify": false,
           "timeout_seconds": 60,
           "purpose": "ordinary",
           "basis": {
-            "basis_id": "ffee24048c2000f0cc50dc9c77015497d208a1d910f2aa9d69cf7a9a97480408",
+            "basis_id": "37332b65a708b7813f15f5cc4dcead8dfc34d32f3cbef3dcb3cc9b0de0546a59",
             "schema_version": 2,
             "submission_contract_version": "optimize-yaml-v1",
             "workspace_schema_version": "1",
@@ -91,7 +91,7 @@
               "prettify": false,
               "timeout_seconds": 60
             },
-            "solver_semantic_version": "ortools/cp-sat@1",
+            "solver_semantic_version": "ortools/cp-sat@2",
             "backend_capability_version": "nurse-scheduling-backend@1",
             "parent_basis_id": null,
             "transform_digest": null
@@ -104,10 +104,10 @@
           "early_completion_available": false
         },
         "links": {
-          "self": "/optimize/job_716c9454cbb44a9688fc32248146690a",
-          "events": "/optimize/job_716c9454cbb44a9688fc32248146690a/events",
-          "cancellation": "/optimize/job_716c9454cbb44a9688fc32248146690a/cancel",
-          "early_completion": "/optimize/job_716c9454cbb44a9688fc32248146690a/finish-now",
+          "self": "/optimize/job_8dae24c68a004c9f9e3b090e2780bf22",
+          "events": "/optimize/job_8dae24c68a004c9f9e3b090e2780bf22/events",
+          "cancellation": "/optimize/job_8dae24c68a004c9f9e3b090e2780bf22/cancel",
+          "early_completion": "/optimize/job_8dae24c68a004c9f9e3b090e2780bf22/finish-now",
           "schedule": null
         }
       }
@@ -119,22 +119,22 @@
       "status": 202,
       "purpose": "assistant_diagnostic",
       "body": {
-        "id": "job_081304451d7341388f468d793ea562a1",
+        "id": "job_32f26d6cc25f4a6482f14b3eaa07b099",
         "state": "queued",
         "terminal": false,
         "queue_position": 2,
-        "created_at": "2026-08-06T18:15:11.934097Z",
-        "expires_at": "2026-08-07T18:15:11.934097Z",
+        "created_at": "2026-09-25T13:00:09.534584Z",
+        "expires_at": "2026-09-26T13:00:09.534584Z",
         "started_at": null,
         "finished_at": null,
         "request": {
-          "input_name": "nurse-scheduling-20260807021511.yaml",
+          "input_name": "nurse-scheduling-20260925210009.yaml",
           "solver": "ortools/cp-sat",
           "prettify": false,
           "timeout_seconds": 60,
           "purpose": "assistant_diagnostic",
           "basis": {
-            "basis_id": "ffee24048c2000f0cc50dc9c77015497d208a1d910f2aa9d69cf7a9a97480408",
+            "basis_id": "37332b65a708b7813f15f5cc4dcead8dfc34d32f3cbef3dcb3cc9b0de0546a59",
             "schema_version": 2,
             "submission_contract_version": "optimize-yaml-v1",
             "workspace_schema_version": "1",
@@ -146,7 +146,7 @@
               "prettify": false,
               "timeout_seconds": 60
             },
-            "solver_semantic_version": "ortools/cp-sat@1",
+            "solver_semantic_version": "ortools/cp-sat@2",
             "backend_capability_version": "nurse-scheduling-backend@1",
             "parent_basis_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "transform_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -159,10 +159,10 @@
           "early_completion_available": false
         },
         "links": {
-          "self": "/optimize/job_081304451d7341388f468d793ea562a1",
-          "events": "/optimize/job_081304451d7341388f468d793ea562a1/events",
-          "cancellation": "/optimize/job_081304451d7341388f468d793ea562a1/cancel",
-          "early_completion": "/optimize/job_081304451d7341388f468d793ea562a1/finish-now",
+          "self": "/optimize/job_32f26d6cc25f4a6482f14b3eaa07b099",
+          "events": "/optimize/job_32f26d6cc25f4a6482f14b3eaa07b099/events",
+          "cancellation": "/optimize/job_32f26d6cc25f4a6482f14b3eaa07b099/cancel",
+          "early_completion": "/optimize/job_32f26d6cc25f4a6482f14b3eaa07b099/finish-now",
           "schedule": null
         }
       }
@@ -174,22 +174,22 @@
       "status": 200,
       "purpose": "assistant_diagnostic",
       "body": {
-        "id": "job_081304451d7341388f468d793ea562a1",
+        "id": "job_32f26d6cc25f4a6482f14b3eaa07b099",
         "state": "queued",
         "terminal": false,
         "queue_position": 2,
-        "created_at": "2026-08-06T18:15:11.934097Z",
-        "expires_at": "2026-08-07T18:15:11.934097Z",
+        "created_at": "2026-09-25T13:00:09.534584Z",
+        "expires_at": "2026-09-26T13:00:09.534584Z",
         "started_at": null,
         "finished_at": null,
         "request": {
-          "input_name": "nurse-scheduling-20260807021511.yaml",
+          "input_name": "nurse-scheduling-20260925210009.yaml",
           "solver": "ortools/cp-sat",
           "prettify": false,
           "timeout_seconds": 60,
           "purpose": "assistant_diagnostic",
           "basis": {
-            "basis_id": "ffee24048c2000f0cc50dc9c77015497d208a1d910f2aa9d69cf7a9a97480408",
+            "basis_id": "37332b65a708b7813f15f5cc4dcead8dfc34d32f3cbef3dcb3cc9b0de0546a59",
             "schema_version": 2,
             "submission_contract_version": "optimize-yaml-v1",
             "workspace_schema_version": "1",
@@ -201,7 +201,7 @@
               "prettify": false,
               "timeout_seconds": 60
             },
-            "solver_semantic_version": "ortools/cp-sat@1",
+            "solver_semantic_version": "ortools/cp-sat@2",
             "backend_capability_version": "nurse-scheduling-backend@1",
             "parent_basis_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "transform_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -214,10 +214,10 @@
           "early_completion_available": false
         },
         "links": {
-          "self": "/optimize/job_081304451d7341388f468d793ea562a1",
-          "events": "/optimize/job_081304451d7341388f468d793ea562a1/events",
-          "cancellation": "/optimize/job_081304451d7341388f468d793ea562a1/cancel",
-          "early_completion": "/optimize/job_081304451d7341388f468d793ea562a1/finish-now",
+          "self": "/optimize/job_32f26d6cc25f4a6482f14b3eaa07b099",
+          "events": "/optimize/job_32f26d6cc25f4a6482f14b3eaa07b099/events",
+          "cancellation": "/optimize/job_32f26d6cc25f4a6482f14b3eaa07b099/cancel",
+          "early_completion": "/optimize/job_32f26d6cc25f4a6482f14b3eaa07b099/finish-now",
           "schedule": null
         }
       }

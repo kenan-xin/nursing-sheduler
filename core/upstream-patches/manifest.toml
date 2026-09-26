@@ -1,0 +1,265 @@
+# Origin of each core/ file that tracks upstream. Paths are relative to core/.
+# Read by core/scripts/check_upstream_sync.py. See docs/T19-upstream-backend-source-manifest.md.
+upstream = "j3soon/nurse-scheduling feature/genie"
+upstream_commit = "1bf4b85"
+# Oldest first. The check reverse-applies them newest first.
+patch_order = ["P0-fixture-restamp.patch", "P1-person-temporary.patch", "P2-P3-skillmix-overrides.patch", "P4-on-roster.patch"]
+
+[[file]]
+path = "nurse_scheduling/cli.py"
+class = "verbatim"
+upstream_blob = "8a204b863f7e697a6929dd631d26a75a8807cb87"
+
+[[file]]
+path = "nurse_scheduling/constants.py"
+class = "verbatim"
+upstream_blob = "9fdcc4a54b1c50ab7cf756df60ac73c20b06a290"
+
+[[file]]
+path = "nurse_scheduling/context.py"
+class = "verbatim"
+upstream_blob = "0242cfd9a79b553b6ef5b7a5aba6cba12ee71a53"
+
+[[file]]
+path = "nurse_scheduling/exporter.py"
+class = "verbatim"
+upstream_blob = "1b1eb7f5192a326981da79b9f221c4d5afec4ff2"
+
+[[file]]
+path = "nurse_scheduling/group_map.py"
+class = "verbatim"
+upstream_blob = "c619776c64206e012aad48ac82f6b8469c04ca7b"
+
+[[file]]
+path = "nurse_scheduling/loader.py"
+class = "verbatim"
+upstream_blob = "308e2076a5790a946c52a133900a6509aa309595"
+
+[[file]]
+path = "nurse_scheduling/model_build_stats.py"
+class = "verbatim"
+upstream_blob = "77640eb47261f11a6501e11dddfafdb18de97d73"
+
+[[file]]
+path = "nurse_scheduling/models.py"
+class = "patched"
+upstream_blob = "edcdab1503ea2ca11977d1693b259a53449d5245"
+patches = ["P1-person-temporary.patch", "P2-P3-skillmix-overrides.patch"]
+
+[[file]]
+path = "nurse_scheduling/preference_types.py"
+class = "patched"
+upstream_blob = "51f7cb3570bd74af8e2e7d50d3eb7d1b64509b8f"
+patches = ["P2-P3-skillmix-overrides.patch"]
+
+[[file]]
+path = "nurse_scheduling/report.py"
+class = "verbatim"
+upstream_blob = "8cff02666faf52b60c86256f70e3049991ba8574"
+
+[[file]]
+path = "nurse_scheduling/scheduler.py"
+class = "patched"
+upstream_blob = "7867e7d1b1591456fc637ec342a140ba37f8afde"
+patches = ["P4-on-roster.patch"]
+
+[[file]]
+path = "nurse_scheduling/serve.py"
+class = "verbatim"
+upstream_blob = "8a844abe3b79c6028740e4598cc225f231f6e064"
+
+[[file]]
+path = "nurse_scheduling/solver_interface.py"
+class = "verbatim"
+upstream_blob = "63db2a420257b3ee09a28add74253f722a2061f6"
+
+[[file]]
+path = "nurse_scheduling/solver_ortools_cp_sat.py"
+class = "verbatim"
+upstream_blob = "346f334d671384e11d4ffdc0473ef7f7d45842dc"
+
+[[file]]
+path = "nurse_scheduling/solver_ortools_linear.py"
+class = "verbatim"
+upstream_blob = "36c4d411e7ae69af9cb96d301590035d3b540426"
+
+[[file]]
+path = "nurse_scheduling/solver_ortools_mathopt.py"
+class = "verbatim"
+upstream_blob = "b2a2cf0db5477154d3f1fbb82b3445b1d75180fa"
+
+[[file]]
+path = "nurse_scheduling/solver_pulp.py"
+class = "verbatim"
+upstream_blob = "a796fcb7e6846b9cce9dcda88695e86ef65c25ba"
+
+[[file]]
+path = "nurse_scheduling/solver_pulp_glpk.py"
+class = "verbatim"
+upstream_blob = "1a489f7b6b6744b1f8e45ca380027d96d1905026"
+
+[[file]]
+path = "nurse_scheduling/solver_pulp_python.py"
+class = "verbatim"
+upstream_blob = "b3c028f4f84d0e1eae2066d5069ea7885d3ff61f"
+
+[[file]]
+path = "nurse_scheduling/utils.py"
+class = "verbatim"
+upstream_blob = "28f99473b6c579beeb39474ddc8952a06a429c8d"
+
+[[file]]
+path = "tests/export_test_helper.py"
+class = "verbatim"
+upstream_blob = "78cd8e94575a5ad47e39de87dce93dd037634293"
+
+[[file]]
+path = "tests/schedule_test_helper.py"
+class = "verbatim"
+upstream_blob = "cd35d2b02d5ff416716b176e8a9a64d8c6e74312"
+
+[[file]]
+path = "tests/real/assignment_fixture.py"
+class = "verbatim"
+upstream_blob = "60caf55255a2189a1adc25d3af563eb1913614ad"
+
+[[file]]
+path = "tests/real/schedule_real_helper.py"
+class = "verbatim"
+upstream_blob = "b7b7e8f8c943dc0565637579cff430ba5823031a"
+
+[[file]]
+path = "tests/real/schedule_score_ground_truth.py"
+class = "verbatim"
+upstream_blob = "b5c8445ce63c962006c7ee44e35b91e26495a1e2"
+
+[[file]]
+path = "tests/testcases/real/large-ward-with-87-people-2025-11.assignment-01.json"
+class = "patched"
+upstream_blob = "4221af315e071497f8be6dc42c7c5f4d46bf9925"
+patches = ["P0-fixture-restamp.patch"]
+
+[[file]]
+path = "tests/test_cli.py"
+class = "verbatim"
+upstream_blob = "75d0d16b66dcf559972d21d2c59aac6dce873d66"
+
+[[file]]
+path = "tests/test_exporter.py"
+class = "verbatim"
+upstream_blob = "f974c0e0018f814887d3dd3ef1bfd3e525d3e52a"
+
+[[file]]
+path = "tests/test_export_xlsx_ortools_cp_sat.py"
+class = "verbatim"
+upstream_blob = "45d8278a04b2af877f9d9991a6d56f5f000feb87"
+
+[[file]]
+path = "tests/test_hours_contract_validation.py"
+class = "verbatim"
+upstream_blob = "53b75c6d1a869458f681b5c6d1658999935828f1"
+
+[[file]]
+path = "tests/test_loader.py"
+class = "verbatim"
+upstream_blob = "52e8a5289bd25b6a839c19f16eb28816ec7283a9"
+
+[[file]]
+path = "tests/test_models_validation.py"
+class = "verbatim"
+upstream_blob = "7a3bc9fb4c3f84409d011fa5e46ff9bd1f0acf3d"
+
+[[file]]
+path = "tests/test_preference_validation.py"
+class = "verbatim"
+upstream_blob = "8ab8e8de5fc81612b566c41c252ec3b203e30151"
+
+[[file]]
+path = "tests/test_scheduler.py"
+class = "verbatim"
+upstream_blob = "d82103a534ad5750cbf47449c45bcfdcdefe0cf5"
+
+[[file]]
+path = "tests/test_solver_interface.py"
+class = "verbatim"
+upstream_blob = "523fc735d17e16dc7e4ac9cb956f7e9ef312bce8"
+
+[[file]]
+path = "tests/test_utils.py"
+class = "verbatim"
+upstream_blob = "0850cbb2d6aa03bb69c4cf41b285be2eb6e83e1c"
+
+[[file]]
+path = "tests/test_schedule_ortools_cp_sat.py"
+class = "verbatim"
+upstream_blob = "18d0697bddd43e2cf01b8067f896ee88b02340b3"
+
+[[file]]
+path = "tests/test_schedule_ortools_mathopt_cp_sat.py"
+class = "verbatim"
+upstream_blob = "81d13a3ecb779b18151c8513c0b5d2499a94aa2c"
+
+[[file]]
+path = "tests/test_schedule_ortools_mathopt_gscip.py"
+class = "verbatim"
+upstream_blob = "6d31e03ae6287d58204c6053b16a3bc680d9c544"
+
+[[file]]
+path = "tests/test_schedule_ortools_mathopt_highs.py"
+class = "verbatim"
+upstream_blob = "6f0b66c440126deea32c3300b243e819c3bab8ac"
+
+[[file]]
+path = "tests/test_schedule_ortools_mpsolver_bop.py"
+class = "verbatim"
+upstream_blob = "1fda1bb6934e4782cca1464e9f7b655c0bd37bb2"
+
+[[file]]
+path = "tests/test_schedule_ortools_mpsolver_cbc.py"
+class = "verbatim"
+upstream_blob = "7c5292150b21eb1635379d033fea6460fa06979e"
+
+[[file]]
+path = "tests/test_schedule_ortools_mpsolver_cp_sat.py"
+class = "verbatim"
+upstream_blob = "7eff3b47430f1481e69dc540507a996f49f2c361"
+
+[[file]]
+path = "tests/test_schedule_ortools_mpsolver_scip.py"
+class = "verbatim"
+upstream_blob = "56c2c9353b9050aca399a22570de9a89ae0b4994"
+
+[[file]]
+path = "tests/test_schedule_pulp_glpk.py"
+class = "verbatim"
+upstream_blob = "a4b4ae59afd58313d1f0bc66118863f4dd21feb0"
+
+[[file]]
+path = "tests/test_schedule_pulp_highs.py"
+class = "verbatim"
+upstream_blob = "e232c450b15a1eb9c13175543f8704c98d03eb1e"
+
+[[file]]
+path = "tests/test_schedule_pulp_scip.py"
+class = "verbatim"
+upstream_blob = "2920bc5a6e5fab059a6d95b56198b8d2460c8dc6"
+
+[[file]]
+path = "tests/test_solver_ortools_linear.py"
+class = "verbatim"
+upstream_blob = "ad85c5496d0f0d8a3e8eb690cec281b1fa50f7fa"
+
+[[file]]
+path = "tests/test_solver_ortools_mathopt.py"
+class = "verbatim"
+upstream_blob = "5dd68e6d1afe72a2e236016f299ff8a97e0697b9"
+
+[[file]]
+path = "tests/test_solver_pulp_glpk.py"
+class = "verbatim"
+upstream_blob = "be94ac4ce248247bc6ae498261a46768ed39a852"
+
+[[file]]
+path = "tests/test_solver_pulp_python.py"
+class = "verbatim"
+upstream_blob = "9d25e7b5690fb8b7b64e045c104e37d83cc70438"
