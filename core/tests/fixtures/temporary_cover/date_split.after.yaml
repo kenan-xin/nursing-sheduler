@@ -23,10 +23,10 @@ preferences:
   - type: at most one shift per day
   - type: shift type requirement
     description: am-rn
-    shiftType: &a1
+    shiftType:
       - AM
     requiredNumPeople: 2
-    qualifiedPeople: &a2
+    qualifiedPeople:
       - ALL
     preferredNumPeople: 3
     skillMix:
@@ -38,9 +38,11 @@ preferences:
     weight: -2
   - type: shift type requirement
     description: am-rn
-    shiftType: *a1
+    shiftType:
+      - AM
     requiredNumPeople: 1
-    qualifiedPeople: *a2
+    qualifiedPeople:
+      - ALL
     preferredNumPeople: 3
     skillMix:
       - people: RN

@@ -109,6 +109,23 @@ describe("prepareAnonymizedExport — temporary cover (d582)", () => {
     });
   });
 
+  it("a split submission's YAML has no anchor or alias", () => {
+    const state = makeValidUiState();
+    Object.assign(state.cardsByKind.requirements[0], {
+      shiftType: ["D"],
+      qualifiedPeople: ["ALL"],
+      preferredNumPeople: 2,
+    });
+    state.temporaryCover = [makeTemporaryCover()];
+    const result = prepareAnonymizedExport(state, plain);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // The date split really happened: two cards share one shiftType/qualifiedPeople ref.
+    const preferences = (parse(result.yaml) as { preferences: { type: string }[] }).preferences;
+    expect(preferences.filter((p) => p.type === "shift type requirement")).toHaveLength(2);
+    expect(result.yaml).not.toMatch(/[&*]a\d/);
+  });
+
   it("no cover gives byte-identical YAML", () => {
     vi.stubEnv(APP_VERSION_ENV, "9.9.9");
     const state = makeValidUiState();

@@ -26,10 +26,10 @@ preferences:
     shiftType:
       - AM
     requiredNumPeople: 1
-    qualifiedPeople: &a1
+    qualifiedPeople:
       - ALL
     preferredNumPeople: 2
-    date: &a2
+    date:
       - ALL
     weight: -3
   - type: shift type requirement
@@ -37,9 +37,11 @@ preferences:
     shiftType:
       - PM
     requiredNumPeople: 1
-    qualifiedPeople: *a1
+    qualifiedPeople:
+      - ALL
     preferredNumPeople: 2
-    date: *a2
+    date:
+      - ALL
     weight: -3
   - type: shift type requirement
     description: night
