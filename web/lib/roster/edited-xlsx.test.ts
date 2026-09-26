@@ -476,7 +476,7 @@ describe("patchFrozenXlsxWithEdits — real C5 prettify workbook (history column
     expect(sheet.getCell(6, 4).value).toBe("N");
   });
 
-  it("keeps merges and conditional-format ranges in step with an inserted borrowed row (bead 6iw)", async () => {
+  it("keeps merges and conditional-format ranges in step with inserted borrowed rows (bead 6iw)", async () => {
     const enriched = await enrichPrettifyWithMergesAndFormats();
 
     // Accepting control: the enriched input really carries the merge and both
@@ -485,6 +485,7 @@ describe("patchFrozenXlsxWithEdits — real C5 prettify workbook (history column
     expect(before.model.merges).toEqual(["A6:B6"]);
     expect(conditionalFormatRefs(before)).toEqual(["A3:E5", "A6:E7"]);
 
+    // TWO borrowed rows, so the shift is by the inserted count, not by one.
     const patched = await patchFrozenXlsxWithEdits({
       frozenXlsx: enriched,
       edits: [],
@@ -494,22 +495,35 @@ describe("patchFrozenXlsxWithEdits — real C5 prettify workbook (history column
           groups: [],
           days: [{ kind: "off" }, { kind: "shift", shiftId: "N" }, { kind: "leave" }],
         },
+        {
+          id: "Aoife",
+          groups: [],
+          days: [{ kind: "shift", shiftId: "D" }, { kind: "off" }, { kind: "off" }],
+        },
       ],
       coordinateMap,
       provenance: fixtureProvenance(),
     });
     const sheet = (await reRead(patched)).worksheets[0];
 
-    // The borrowed row landed where the merge used to start; the merge followed
-    // the Score row down (ExcelJS re-anchors merges itself).
+    // Both borrowed rows landed where the merge and the Score row used to be; the
+    // merge followed the Score row down two rows (ExcelJS re-anchors merges itself).
     expect(sheet.getCell(6, 1).value).toBe("Mei");
-    expect(sheet.getCell(7, 1).value).toBe("Score");
-    expect(sheet.model.merges).toEqual(["A7:B7"]);
+    expect(sheet.getCell(7, 1).value).toBe("Aoife");
+    expect(sheet.getCell(8, 1).value).toBe("Score");
+    expect(sheet.getCell(9, 1).value).toBe("Status");
+    expect(sheet.model.merges).toEqual(["A8:B8"]);
 
     // A range wholly above the insert is untouched; a range covering the moved
-    // rows follows them down. ExcelJS shifts merges but NOT conditional formats,
-    // so the second ref is the patcher's job.
-    expect(conditionalFormatRefs(sheet)).toEqual(["A3:E5", "A7:E8"]);
+    // rows follows them down by the inserted count. ExcelJS shifts merges but NOT
+    // conditional formats, so the second ref is the patcher's job.
+    expect(conditionalFormatRefs(sheet)).toEqual(["A3:E5", "A8:E9"]);
+
+    // The second borrowed row is styled from the first (the row above it), so the
+    // chain ends up reading as the person row the insert began from.
+    for (let col = 1; col <= 5; col++) {
+      expect(sheet.getCell(7, col).style).toEqual(sheet.getCell(6, col).style);
+    }
   });
 
   it("shifts each range of a multi-range ref, and leaves an unreadable ref alone (bead 6iw)", async () => {
