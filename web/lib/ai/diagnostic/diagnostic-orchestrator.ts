@@ -29,6 +29,7 @@
 import { toCanonicalScenarioDocument } from "@/lib/scenario";
 import type { ScenarioUiState } from "@/lib/scenario";
 import { prepareOptimizeSubmission, type PrepareOptimizeSubmissionResult } from "@/lib/scenario";
+import { withCoverOverrides } from "@/lib/scenario/temporary-cover";
 import { applyAssistantCommands } from "@/lib/proposal/operations";
 import { commandsDigest } from "@/lib/proposal/proposal";
 import { deriveProposalDiff } from "@/lib/proposal/diff";
@@ -330,7 +331,7 @@ async function runOneCandidate(
   const commandsDigestValue = commandsDigest(proposed.commands);
 
   // 3. Serialize the copied document to exact YAML through the T08 path.
-  const canonical = toCanonicalScenarioDocument(operation.next);
+  const canonical = toCanonicalScenarioDocument(withCoverOverrides(operation.next));
   const prepResult: PrepareOptimizeSubmissionResult = prepareOptimizeSubmission(canonical, {
     anonymize: false,
   });

@@ -15,7 +15,8 @@ import { deriveAssumptions, type AssumptionType } from "@/lib/proposal/assumptio
 import { applyAssistantCommands } from "@/lib/proposal/operations";
 import { findStaffingShortfalls } from "@/lib/rules/shortfalls";
 import { SCENARIOS, type ScenarioName } from "@/lib/rules/ward-fixtures.test-support";
-import { serializeScenario, type ScenarioUiState } from "@/lib/scenario";
+import type { ScenarioUiState } from "@/lib/scenario";
+import { stableYaml } from "@/lib/scenario/test-fixtures";
 import { REST_PRACTICE_WARNING, type RepairId } from "./playbook";
 import {
   buildFeasibilityReport,
@@ -26,10 +27,6 @@ import {
 import { deriveSetupProgress } from "./setup-progress";
 
 const FIXTURE_DIR = "../../../../core/tests/fixtures/assistant_repair/";
-
-/** The build stamp changes with every release; the fixtures must not. */
-const stableYaml = (state: ScenarioUiState) =>
-  serializeScenario(state).replace(/^appVersion:.*\n?/m, "");
 
 /** The options offered after a failed run. */
 function options(name: ScenarioName): RepairOption[] {

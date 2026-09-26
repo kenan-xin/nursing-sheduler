@@ -1,0 +1,63 @@
+apiVersion: alpha
+dates:
+  range:
+    startDate: 2026-11-01
+    endDate: 2026-11-03
+people:
+  items:
+    - id: ana
+    - id: ben
+    - id: cara
+    - id: dan
+  groups:
+    - id: RN
+      members:
+        - ana
+        - ben
+shiftTypes:
+  items:
+    - id: AM
+    - id: PM
+    - id: N
+preferences:
+  - type: at most one shift per day
+  - type: shift type requirement
+    description: am-pm
+    shiftType:
+      - AM
+    requiredNumPeople: 1
+    qualifiedPeople: &a1
+      - ALL
+    preferredNumPeople: 2
+    date: &a2
+      - ALL
+    weight: -3
+  - type: shift type requirement
+    description: am-pm
+    shiftType:
+      - PM
+    requiredNumPeople: 1
+    qualifiedPeople: *a1
+    preferredNumPeople: 2
+    date: *a2
+    weight: -3
+  - type: shift type requirement
+    description: night
+    shiftType:
+      - N
+    requiredNumPeople: 1
+    qualifiedPeople:
+      - ALL
+    date:
+      - ALL
+    weight: -1
+  - type: shift request
+    person: ana
+    date: 2026-11-02
+    shiftType: AM
+    weight: 2
+  - type: shift request
+    person: cara
+    date: 2026-11-01
+    shiftType: OFF
+    weight: 1
