@@ -42,18 +42,12 @@ export interface RosterFileMigration {
   ): { ok: true; document: Record<string, unknown> } | { ok: false; reason: string };
 }
 
-/** The registered migrations, one step per version. */
-export const ROSTER_FILE_MIGRATIONS: readonly RosterFileMigration[] = [
-  // roster-file/2 adds `borrowed` (temporary nurses added after the solve). A v1
-  // roster has none.
-  {
-    from: 1,
-    migrate: (document) => ({
-      ok: true,
-      document: { ...document, schemaVersion: rosterFileVersionString(2), borrowed: [] },
-    }),
-  },
-];
+/**
+ * The registered migrations. Empty at v1 — there is no older version yet — but the
+ * chain machinery is live and tested against an injected registry, so the first
+ * real migration only has to add a step, not build the mechanism under pressure.
+ */
+export const ROSTER_FILE_MIGRATIONS: readonly RosterFileMigration[] = [];
 
 /**
  * Bring a STORED document (IndexedDB working roster or candidate, written by an

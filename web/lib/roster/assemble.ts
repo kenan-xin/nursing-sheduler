@@ -140,7 +140,6 @@ export async function assembleRosterDocument(
     solvedDays: grid.solvedDays,
     // A freshly captured roster has not been edited yet, by definition.
     edits: [],
-    borrowed: [],
     coordinateMap: container.coordinateMap,
     frozenXlsx: input.frozenXlsx,
   };

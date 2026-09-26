@@ -19,7 +19,6 @@
 
 import { canonicalStringify, validatePeopleReverseMap } from "@/lib/scenario";
 import { computeSolvedBaselineId, isSolvedBaselineId } from "./baseline";
-import { checkBorrowedRows, rosterBaseDays } from "./borrowed";
 import { checkCoordinateMap, checkExactFields, checkSolvedDays, shiftIdKeySet } from "./container";
 import { deriveRosterContext } from "./context";
 import { checkNormalizedEdits } from "./overlay";
@@ -166,17 +165,9 @@ export async function validateRosterDocument(
     };
   }
 
-  // --- borrowed rows (roster-file/2) ---------------------------------------
-  const borrowed = checkBorrowedRows(record.borrowed, {
-    people: context.people,
-    dateCount: context.calendar.length,
-    shiftIds: shiftIdKeySet(context.shiftTypes.map((shiftType) => shiftType.id)),
-  });
-  if (!borrowed.ok) return borrowed;
-
-  // --- edits overlay, over solved and borrowed rows -------------------------
+  // --- edits overlay -------------------------------------------------------
   const overlay = checkNormalizedEdits(record.edits, {
-    solvedDays: rosterBaseDays({ solvedDays: grid.solvedDays, borrowed: borrowed.borrowed }),
+    solvedDays: grid.solvedDays,
     shiftTypeIds: context.shiftTypes.map((shiftType) => shiftType.id),
   });
   if (!overlay.ok) return overlay;
@@ -220,7 +211,6 @@ export async function validateRosterDocument(
       context,
       solvedDays: grid.solvedDays,
       edits: record.edits as RosterDocument["edits"],
-      borrowed: borrowed.borrowed,
       coordinateMap: coordinates.coordinateMap,
       frozenXlsx: record.frozenXlsx,
     }),

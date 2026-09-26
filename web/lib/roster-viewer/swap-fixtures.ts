@@ -100,7 +100,7 @@ export function priyaContext(): RosterContext {
  */
 export function priyaRosterDocument(): RosterDocument {
   return {
-    schemaVersion: "roster-file/2",
+    schemaVersion: "roster-file/1",
     provenance: {
       solverStatus: "OPTIMAL",
       score: 0,
@@ -111,7 +111,6 @@ export function priyaRosterDocument(): RosterDocument {
     context: priyaContext(),
     solvedDays: priyaGrid(),
     edits: [],
-    borrowed: [],
     coordinateMap: {
       peopleRows: [],
       dateColumns: [],

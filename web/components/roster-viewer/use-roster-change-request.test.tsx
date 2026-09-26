@@ -31,13 +31,10 @@ describe("applyRosterChange", () => {
     const document = await fixtureRosterDocument();
     const applyCells = vi.fn(() => true);
     expect(applyRosterChange(document, swapDayZero(document), applyCells)).toBe("applied");
-    expect(applyCells).toHaveBeenCalledWith(
-      [
-        { personIdx: 0, dateIdx: 0, day: N },
-        { personIdx: 1, dateIdx: 0, day: D },
-      ],
-      undefined,
-    );
+    expect(applyCells).toHaveBeenCalledWith([
+      { personIdx: 0, dateIdx: 0, day: N },
+      { personIdx: 1, dateIdx: 0, day: D },
+    ]);
   });
 
   it("refuses a request prepared on a different roster", async () => {
@@ -54,32 +51,6 @@ describe("applyRosterChange", () => {
     const applyCells = vi.fn(() => true);
     expect(applyRosterChange(edited, swapDayZero(document), applyCells)).toBe("roster-changed");
     expect(applyCells).not.toHaveBeenCalled();
-  });
-
-  it("adds a borrowed nurse's row with her cells in the same batch (bead g1p)", async () => {
-    const document = await fixtureRosterDocument();
-    const OFF = { kind: "off" } as const;
-    const mei = { id: "Mei", groups: ["RN"], days: [OFF, OFF, OFF, OFF] };
-    const request: RosterChangeRequest = {
-      solvedBaselineId: document.provenance.solvedBaselineId,
-      addPeople: [mei],
-      cells: [
-        { personIdx: 0, dateIdx: 2, before: N, after: { kind: "leave" } },
-        { personIdx: 2, dateIdx: 2, before: OFF, after: N },
-      ],
-    };
-    const applyCells = vi.fn(() => true);
-    expect(applyRosterChange(document, request, applyCells)).toBe("applied");
-    expect(applyCells).toHaveBeenCalledWith(
-      [
-        { personIdx: 0, dateIdx: 2, day: { kind: "leave" } },
-        { personIdx: 2, dateIdx: 2, day: N },
-      ],
-      [mei],
-    );
-    // Applied twice: she is already on the roster, so the card is stale.
-    const withMei = { ...document, borrowed: [mei] };
-    expect(applyRosterChange(withMei, request, applyCells)).toBe("roster-changed");
   });
 
   it("reports a batch the edit session rejected", async () => {

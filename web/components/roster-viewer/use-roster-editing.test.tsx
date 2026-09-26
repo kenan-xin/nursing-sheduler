@@ -161,41 +161,4 @@ describe("applyCells", () => {
     act(() => result.current.undo());
     expect(result.current.editedDocument.edits).toEqual([]);
   });
-
-  it("adds a borrowed row and its cells in one autosaved revision (bead g1p)", async () => {
-    const { document, revision } = await seedWorking();
-    const { result } = renderHook(() =>
-      useRosterEditing({ document, revision, reload: async () => {} }),
-    );
-    await waitFor(() => expect(result.current.ready).toBe(true));
-    const OFF = { kind: "off" } as const;
-    const N = { kind: "shift", shiftId: "N" } as const;
-    const mei = { id: "Mei", groups: ["RN"], days: [OFF, OFF, OFF, OFF] };
-    act(() => {
-      expect(result.current.applyCells([{ personIdx: 2, dateIdx: 1, day: N }], [mei])).toBe(true);
-    });
-    expect(result.current.editedDocument.borrowed).toEqual([mei]);
-    expect(result.current.editedDocument.edits).toEqual([{ personIdx: 2, dateIdx: 1, day: N }]);
-    await waitFor(async () => {
-      const saved = await rosterStorage.readWorking<RosterDocument>();
-      expect(saved?.document.borrowed).toEqual([mei]);
-      expect(saved?.document.edits).toHaveLength(1);
-    });
-    // Her cells are ordinary edits: a hand edit on her row works like any other.
-    act(() => result.current.setCell({ personIdx: 2, dateIdx: 1 }, OFF));
-    expect(result.current.editedDocument.edits).toEqual([]);
-  });
-
-  it("rejects cells on a row that does not exist", async () => {
-    const { document, revision } = await seedWorking();
-    const { result } = renderHook(() =>
-      useRosterEditing({ document, revision, reload: async () => {} }),
-    );
-    await waitFor(() => expect(result.current.ready).toBe(true));
-    act(() => {
-      expect(result.current.applyCells([{ personIdx: 2, dateIdx: 1, day: { kind: "off" } }])).toBe(
-        false,
-      );
-    });
-  });
 });

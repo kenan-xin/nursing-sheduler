@@ -28,14 +28,13 @@ import {
   deriveCurrentDays,
   emptyEditSession,
   resetSession,
-  rosterBaseDays,
   undoSessionEdit,
   type EditCoordinate,
   type EditSession,
   type OverlayBounds,
   type RosterEdit,
 } from "@/lib/roster";
-import type { RosterBorrowedRow, RosterDayState, RosterDocument } from "@/lib/roster";
+import type { RosterDayState, RosterDocument } from "@/lib/roster";
 import { createAutosaveQueue, type AutosaveQueue, type AutosaveSnapshot } from "@/lib/roster";
 
 export interface RosterEditingOptions {
@@ -57,10 +56,9 @@ export interface RosterEditingState {
   /**
    * Set several cells as ONE edit (one undo step, one autosave revision). False when
    * the batch is rejected; nothing changes then. The assistant's swap card uses it via
-   * `useRosterChangeRequest`. `addPeople` appends borrowed rows in the same revision,
-   * so `cells` may address them (index `people + borrowed + i`).
+   * `useRosterChangeRequest`.
    */
-  applyCells(cells: readonly RosterEdit[], addPeople?: readonly RosterBorrowedRow[]): boolean;
+  applyCells(cells: readonly RosterEdit[]): boolean;
   /** Revert the last set/swap. Disabled when there is nothing to undo. */
   undo(): void;
   /** Whether an undo is available. */
@@ -112,16 +110,9 @@ export function useRosterEditing(options: RosterEditingOptions): RosterEditingSt
     () => document.context.shiftTypes.map((s) => s.id),
     [document.context.shiftTypes],
   );
-  // Borrowed rows (roster-file/2) join the axis in the session, not the stored base:
-  // the assistant's temporary-nurse card adds them. A new roster adopts its own.
-  // ponytail: undo reverts the cells but keeps an added row; add row removal if wards ask.
-  const [borrowed, setBorrowed] = useState(document.borrowed);
-  const borrowedRef = useRef(borrowed);
-  borrowedRef.current = borrowed;
-  const baseDays = useMemo(() => rosterBaseDays({ solvedDays, borrowed }), [solvedDays, borrowed]);
   const bounds: OverlayBounds = useMemo(
-    () => ({ solvedDays: baseDays, shiftTypeIds }),
-    [baseDays, shiftTypeIds],
+    () => ({ solvedDays, shiftTypeIds }),
+    [solvedDays, shiftTypeIds],
   );
 
   // The edit session resets whenever the working document changes. Comparing the
@@ -135,7 +126,6 @@ export function useRosterEditing(options: RosterEditingOptions): RosterEditingSt
     prevSolved.current = solvedDays;
     // A new working roster: reset undo history and adopt the new document's edits.
     setSession((current) => resetSession(current, document.edits));
-    setBorrowed(document.borrowed);
   }
 
   const [selectedCell, setSelectedCell] = useState<EditCoordinate | null>(null);
@@ -219,8 +209,8 @@ export function useRosterEditing(options: RosterEditingOptions): RosterEditingSt
   }, []);
 
   const editedDocument: RosterDocument = useMemo(
-    () => ({ ...document, borrowed, edits: session.edits }),
-    [document, borrowed, session.edits],
+    () => ({ ...document, edits: session.edits }),
+    [document, session.edits],
   );
 
   // Build the next document from a new session and enqueue it for autosave. The
@@ -232,15 +222,9 @@ export function useRosterEditing(options: RosterEditingOptions): RosterEditingSt
   // document is BUFFERED and flushed when the queue is created — never dropped.
   // The visible session updates immediately so the user sees their edit.
   const commit = useCallback(
-    (next: EditSession, nextBorrowed: readonly RosterBorrowedRow[] = borrowedRef.current) => {
+    (next: EditSession) => {
       setSession(next);
-      setBorrowed(nextBorrowed);
-      borrowedRef.current = nextBorrowed;
-      const nextDocument: RosterDocument = {
-        ...document,
-        borrowed: nextBorrowed,
-        edits: next.edits,
-      };
+      const nextDocument: RosterDocument = { ...document, edits: next.edits };
       const queue = queueRef.current;
       if (queue !== null) {
         void queue.enqueue(nextDocument);
@@ -266,29 +250,23 @@ export function useRosterEditing(options: RosterEditingOptions): RosterEditingSt
         sessionRef.current,
         a,
         b,
-        deriveCurrentDays(baseDays, sessionRef.current.edits),
+        deriveCurrentDays(solvedDays, sessionRef.current.edits),
         bounds,
       );
       if (!result.ok || !result.touched) return;
       commit(result.session);
     },
-    [bounds, baseDays, commit],
+    [bounds, solvedDays, commit],
   );
 
   const applyCells = useCallback(
-    (cells: readonly RosterEdit[], addPeople: readonly RosterBorrowedRow[] = []): boolean => {
-      const nextBorrowed =
-        addPeople.length === 0 ? borrowedRef.current : [...borrowedRef.current, ...addPeople];
-      const nextBounds =
-        addPeople.length === 0
-          ? bounds
-          : { shiftTypeIds, solvedDays: rosterBaseDays({ solvedDays, borrowed: nextBorrowed }) };
-      const result = applyCellBatchToSession(sessionRef.current, cells, nextBounds);
+    (cells: readonly RosterEdit[]): boolean => {
+      const result = applyCellBatchToSession(sessionRef.current, cells, bounds);
       if (!result.ok) return false;
-      commit(result.session, nextBorrowed);
+      commit(result.session);
       return true;
     },
-    [bounds, shiftTypeIds, solvedDays, commit],
+    [bounds, commit],
   );
 
   const undo = useCallback(() => {
