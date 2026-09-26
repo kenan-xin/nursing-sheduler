@@ -16,19 +16,14 @@ import {
   type RosterDocument,
 } from "@/lib/roster";
 import type { RosterChangeRequest } from "@/lib/roster/change-request";
-import { fixtureCanonicalDocument, fixtureRosterDocument } from "@/lib/roster/test-fixtures";
+import { fixtureRosterDocument } from "@/lib/roster/test-fixtures";
 import { applyRosterChange } from "./use-roster-change-request";
 import { useRosterEditing } from "./use-roster-editing";
 
 let dbSeq = 0;
 
 async function seedWorking(): Promise<{ document: RosterDocument; revision: number }> {
-  // The borrowed (temporary) nurse's row names the RN group, so the fixture's own
-  // submitted scenario declares it — a group the staffing rules can count (bead 6yn).
-  const base = fixtureCanonicalDocument();
-  const document = await fixtureRosterDocument({
-    document: { ...base, people: { ...base.people, groups: [{ id: "RN", members: ["P1"] }] } },
-  });
+  const document = await fixtureRosterDocument();
   const epoch = await rosterStorage.getClearEpoch();
   // A whole document is a replacement, so it goes through promotion; the edit
   // operation is for later revisions of this same roster.
