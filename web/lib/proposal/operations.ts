@@ -108,6 +108,7 @@ import {
   REQUIREMENT_MESSAGES,
   requirementCoveredIsos,
   requirementToForm,
+  savedOverrides,
   skillMixFloor,
   validateRequirementForm,
   type RequirementFormState,
@@ -887,16 +888,32 @@ function applySetRequirementOnDate(
       validateRequirementForm(draft, domain, new Set(requirementCoveredIsos(state, draft.date))),
     ) ?? skillMixOverflowError(state, draft);
   if (error) return reject(index, "invalid_value", `${name}: ${error}.`);
-  const next = applyRequirementPatch(state, { type: "update", uid: source.uid, form: draft });
-  const after = next.cardsByKind.requirements.find((card) => card.uid === source.uid);
-  if (stableStringify(after) === stableStringify(source)) {
+  // The command changes one exception row and nothing else. Rebuilding the card from the
+  // form (`applyRequirementPatch`) would also normalise the fields an imported card
+  // carries loosely -- a null qualifiedPeople, an omitted date, a weight forced to -1 --
+  // so the Preview could not read the change as the one line it is (bead e6n). Write the
+  // exception rows onto the card as it stands, exactly as the form would have saved them.
+  const overrides = savedOverrides(draft.requiredNumPeopleOverrides, source.requiredNumPeople);
+  const { requiredNumPeopleOverrides: _existing, ...rest } = source;
+  const card: RequirementCard =
+    overrides.length > 0 ? { ...rest, requiredNumPeopleOverrides: overrides } : rest;
+  if (stableStringify(card) === stableStringify(source)) {
     return reject(
       index,
       "no_effect",
       `${name} already needs ${command.requiredNumPeople} on ${formatShortDate(command.date)}.`,
     );
   }
-  return { ok: true, next };
+  return {
+    ok: true,
+    next: {
+      ...state,
+      cardsByKind: {
+        ...state.cardsByKind,
+        requirements: state.cardsByKind.requirements.map((c) => (c.uid === source.uid ? card : c)),
+      },
+    },
+  };
 }
 
 // --- Remove (every family) -----------------------------------------------------
