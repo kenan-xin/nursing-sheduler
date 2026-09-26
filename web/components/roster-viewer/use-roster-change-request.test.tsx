@@ -63,6 +63,7 @@ describe("applyRosterChange", () => {
     const request: RosterChangeRequest = {
       solvedBaselineId: document.provenance.solvedBaselineId,
       addPeople: [mei],
+      peopleCount: 2,
       cells: [
         { personIdx: 0, dateIdx: 2, before: N, after: { kind: "leave" } },
         { personIdx: 2, dateIdx: 2, before: OFF, after: N },

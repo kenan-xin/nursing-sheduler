@@ -811,7 +811,12 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
         );
         const shown = showCard(
           {
-            request: { solvedBaselineId: baselineId, cells, addPeople: [row] },
+            request: {
+              solvedBaselineId: baselineId,
+              cells,
+              addPeople: [row],
+              peopleCount: rowIdx,
+            },
             view,
             linked: {
               proposalId: prepared.linked.proposalId,
