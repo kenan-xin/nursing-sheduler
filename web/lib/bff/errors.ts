@@ -87,6 +87,7 @@ const CODE_TO_KIND: Record<string, OptimizeErrorKind> = {
   invalid_scheduling_data: "validation",
   unsupported_workspace_version: "validation",
   unsupported_solver: "validation",
+  scheduling_data_too_complex: "request-invalid",
   backend_unreachable: "backend-unreachable",
   backend_route_unsupported: "backend-route-unsupported",
   backend_unready: "backend-unready",
