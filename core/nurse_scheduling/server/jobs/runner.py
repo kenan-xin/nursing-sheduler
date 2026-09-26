@@ -107,9 +107,11 @@ class OptimizationRunner:
             data = serialize_solver_progress(payload, include_export_summary=True)
             event_callback("job.progressed", data, payload.currentBestScore)
 
-        # The rebuild scheduler is CP-SAT only: it takes no solver selector and
-        # returns a positional tuple rather than an object. `job.request.solver`
-        # is the constant diagnostic value "ortools/cp-sat" and is not forwarded.
+        # The server is CP-SAT only (spec X4). `job.request.solver` is not
+        # forwarded, so `schedule()` keeps its "ortools/cp-sat" default on
+        # purpose; `scheduling_input.parse_solver` is the gate any future
+        # forwarding must keep. `schedule()` returns a `ScheduleResult`
+        # NamedTuple, which still unpacks as the five fields below.
         #
         # `prettify` is optional on the request, and every scheduler/exporter use
         # is a truthiness test, so an absent preference already behaved as False.

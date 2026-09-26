@@ -1,4 +1,4 @@
-"""XLSX regression tests for the nurse scheduling engine."""
+"""XLSX regression wrapper for the OR-Tools/CP-SAT backend."""
 
 # This file is part of Nurse Scheduling Project, see <https://github.com/j3soon/nurse-scheduling>.
 #
@@ -20,9 +20,9 @@
 from .export_test_helper import run_export_xlsx_regression_test
 
 
-def test_export_xlsx_without_prettify():
-    run_export_xlsx_regression_test(prettify=False)
+def test_export_xlsx_ortools_without_prettify():
+    run_export_xlsx_regression_test("ortools/cp-sat", prettify=False)
 
 
-def test_export_xlsx_with_prettify():
-    run_export_xlsx_regression_test(prettify=True)
+def test_export_xlsx_ortools_with_prettify():
+    run_export_xlsx_regression_test("ortools/cp-sat", prettify=True)
