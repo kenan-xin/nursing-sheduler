@@ -18,6 +18,12 @@ const workers = resolveWorkerCount({
   override: process.env[WORKERS_ENV],
 });
 
+// CI builds Next once (the `e2e-build` job) and sets PW_PREBUILT on every job
+// that unpacks it, so the webServer only starts the shipped build. An explicit
+// flag, not "a .next exists": a stale local build without the test bridge must
+// never be picked up silently. `pnpm start` fails loudly if the build is missing.
+export const webServerCommand = process.env.PW_PREBUILT ? "pnpm start" : "pnpm build && pnpm start";
+
 // E2E smoke runs against a production build of the empty app. `webServer` builds
 // and starts Next, then the smoke spec asserts the shell renders.
 export default defineConfig({
@@ -44,7 +50,9 @@ export default defineConfig({
   workers,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  reporter: "list",
+  // CI always runs this config sharded (`--shard=N/4`); the blob output is what
+  // the `e2e-report` job merges into one HTML report.
+  reporter: process.env.CI ? [["list"], ["blob"]] : "list",
   use: {
     baseURL,
     trace: "on-first-retry",
@@ -81,8 +89,8 @@ export default defineConfig({
   webServer: {
     // Build, then serve the standalone artifact via `pnpm start` (which prepares
     // static/public and runs the standalone server — `next start` is unsupported
-    // with output:'standalone').
-    command: "pnpm build && pnpm start",
+    // with output:'standalone'). Skips the build when PW_PREBUILT is set.
+    command: webServerCommand,
     url: baseURL,
     // BACKEND_API_URL + PUBLIC_ORIGIN are required at startup in production
     // (T06's instrumentation fail-fast). The design-system specs don't call the

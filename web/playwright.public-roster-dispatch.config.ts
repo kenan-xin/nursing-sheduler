@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { webServerCommand } from "./playwright.config";
 
 // Focused config for the B3 nested fixup `public-next-dispatch-fix`. Reuses the
 // base config's `pnpm build && pnpm start` webServer (the SAME production
@@ -32,8 +33,9 @@ export default defineConfig({
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
-    // Same launcher as the base config: build standalone, then run it.
-    command: "pnpm build && pnpm start",
+    // Same launcher as the base config: build standalone, then run it — or, in
+    // CI (PW_PREBUILT), start the build shipped by the `e2e-build` job.
+    command: webServerCommand,
     url: baseURL,
     env: {
       PORT: String(PORT),
@@ -48,8 +50,9 @@ export default defineConfig({
       NEXT_PUBLIC_NS_TEST_BRIDGE: "1",
     },
     timeout: 120_000,
-    // Force a fresh build so a stale server (without the roster route) never
-    // false-greens the dispatch proof.
+    // Never attach to an already-running server, so a stale one (without the
+    // roster route) cannot false-green the dispatch proof. The build itself is
+    // fresh: local runs rebuild, CI starts this run's own `e2e-build` output.
     reuseExistingServer: false,
   },
 });

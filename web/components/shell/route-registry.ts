@@ -11,6 +11,12 @@
 import type { AppMode } from "@/lib/mode/mode";
 import { findNavItem, getNavItemForMode } from "./nav-config";
 
+/** qq0.14.1: where a route that Guided can't show lands instead — its
+ *  registered Guided destination, or Home when it has none. */
+export function guidedFallbackPath(path: string): string {
+  return findNavItem(path)?.guidedDestination ?? "/";
+}
+
 export function isRouteValidForMode(path: string, mode: AppMode): boolean {
   if (!findNavItem(path)) return true;
   return getNavItemForMode(path, mode) != null;

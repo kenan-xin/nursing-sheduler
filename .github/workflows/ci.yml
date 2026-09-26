@@ -158,18 +158,11 @@ jobs:
           PYTHONPATH: .
         run: python3 -m pytest -q tests/real/schedule_score_ground_truth.py
 
-  e2e:
-    name: e2e (playwright)
-    # PINNED, not `ubuntu-latest`. This job compares committed screenshot
-    # baselines, and a snapshot filename encodes the platform (`linux`) but NOT
-    # the distro version or the architecture — so a rolling alias can change the
-    # rendering environment underneath filenames that stay perfectly valid.
-    # GitHub documents `ubuntu-latest` as Ubuntu 24.04 x64 today, with 26.04
-    # already in public preview behind the same alias. The committed Linux
-    # baselines were generated and reviewed on Ubuntu 24.04 x64
-    # (mcr.microsoft.com/playwright:v1.61.1-noble, --platform linux/amd64), so
-    # this label is part of the baseline contract: moving it means regenerating
-    # and re-reviewing the Linux set in the new environment first.
+  # Builds Next ONCE with the e2e env and ships it to every e2e job, so shards
+  # only start the server. It cannot reuse the `build` job's output:
+  # NEXT_PUBLIC_NS_TEST_BRIDGE is inlined at compile time and that build omits it.
+  e2e-build:
+    name: e2e build
     runs-on: ubuntu-24.04
     needs: static
     defaults:
@@ -185,17 +178,142 @@ jobs:
           node-version: 24.14.0
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      # Same build-time env as the playwright webServer (both configs agree).
+      - name: Build (e2e env)
+        env:
+          NEXT_PUBLIC_APP_VERSION: "0.1.0"
+          NEXT_PUBLIC_NS_TEST_BRIDGE: "1"
+          NS_ENABLE_DEV_FIXTURES: "1"
+        run: pnpm build
+      # One tarball: keeps the standalone tree's symlinks and avoids
+      # upload-artifact's per-file cost and hidden-dir (.next) exclusion.
+      - name: Pack build
+        run: tar -cf next-e2e.tar --exclude=.next/cache .next
+      - uses: actions/upload-artifact@v4
+        with:
+          name: next-e2e-build
+          path: web/next-e2e.tar
+          retention-days: 1
+
+  e2e:
+    name: e2e (shard ${{ matrix.shard }}/4)
+    # PINNED on EVERY shard, not `ubuntu-latest`. This job compares committed
+    # screenshot baselines, and a snapshot filename encodes the platform
+    # (`linux`) but NOT the distro version or the architecture — so a rolling
+    # alias can change the rendering environment underneath filenames that stay
+    # perfectly valid. GitHub documents `ubuntu-latest` as Ubuntu 24.04 x64
+    # today, with 26.04 already in public preview behind the same alias. The
+    # committed Linux baselines were generated and reviewed on Ubuntu 24.04 x64
+    # (mcr.microsoft.com/playwright:v1.61.1-noble, --platform linux/amd64), so
+    # this label is part of the baseline contract: moving it means regenerating
+    # and re-reviewing the Linux set in the new environment first.
+    runs-on: ubuntu-24.04
+    needs: e2e-build
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.0
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      # Browsers are not cached: Playwright docs say restore time roughly equals
+      # the download, and only chromium is installed.
       - name: Install Playwright browser
         run: pnpm exec playwright install --with-deps chromium
-      # playwright.config.ts webServer runs `pnpm build && pnpm start`.
+      - uses: actions/download-artifact@v4
+        with:
+          name: next-e2e-build
+          path: web
+      - name: Unpack build
+        run: tar -xf next-e2e.tar
+      # PW_PREBUILT: the webServer starts the shipped build instead of rebuilding.
+      # Workers stay at the audited 2 per 4-vCPU runner; shards add the speed.
       - name: Run e2e
-        run: pnpm exec playwright test
-      # Focused public-Next-dispatch gate for the /roster BFF route (B3 fixup). The
-      # base config excludes this spec because its `webServer` placeholder
-      # `BACKEND_API_URL=http://127.0.0.1:8000` would collide with the CI runner's
-      # real services; the focused config reuses the same `pnpm build && pnpm start`
-      # launcher but points the BFF at a private stub port (default 8765). Runs
-      # AFTER the base gate so the two production builds cannot overlap; if this
-      # lane fails, the job fails (mirroring the verification artifact requirement).
+        env:
+          PW_PREBUILT: "1"
+        run: pnpm exec playwright test --shard=${{ matrix.shard }}/4
+      - name: Upload blob report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: blob-report-${{ matrix.shard }}
+          path: web/blob-report
+          retention-days: 1
+
+  # Focused public-Next-dispatch gate for the /roster BFF route (B3 fixup), on
+  # the shared build. The base config excludes this spec because its
+  # `webServer` placeholder `BACKEND_API_URL=http://127.0.0.1:8000` would collide
+  # with a real backend; the focused config points the BFF at a private stub
+  # port (default 8765). Own runner, so it runs alongside the shards.
+  e2e-public-roster-dispatch:
+    name: e2e (public-roster-dispatch)
+    runs-on: ubuntu-24.04
+    needs: e2e-build
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.0
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install Playwright browser
+        run: pnpm exec playwright install --with-deps chromium
+      - uses: actions/download-artifact@v4
+        with:
+          name: next-e2e-build
+          path: web
+      - name: Unpack build
+        run: tar -xf next-e2e.tar
       - name: Run public-roster-dispatch e2e
+        env:
+          PW_PREBUILT: "1"
         run: pnpm test:e2e:public-roster-dispatch
+
+  # One HTML report from all shard blobs. Runs even when a shard fails, so the
+  # failure is inspectable; shard jobs carry the pass/fail signal themselves.
+  e2e-report:
+    name: e2e report
+    if: ${{ !cancelled() }}
+    needs: e2e
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.0
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          path: web/all-blob-reports
+          pattern: blob-report-*
+          merge-multiple: true
+      - name: Merge reports
+        run: pnpm exec playwright merge-reports --reporter html ./all-blob-reports
+      - uses: actions/upload-artifact@v4
+        with:
+          name: e2e-html-report
+          path: web/playwright-report
+          retention-days: 14

@@ -27,7 +27,7 @@ import {
 // What it therefore does prove, before the parallel wave opens:
 //   • every seed descriptor targets a store that actually accepts it;
 //   • every readiness descriptor settles on the route it names (an Advanced-only
-//     route that forgot its mode lands on Home instead, and is caught here);
+//     route that forgot its mode lands on Guided Rules instead, and is caught here);
 //   • every marker exists in the shipped source;
 //   • the reset is real — each row starts from an empty durable store;
 //   • nothing throws while getting there.

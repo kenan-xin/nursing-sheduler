@@ -95,15 +95,16 @@ for (const { anchorId, label, row } of anchorRows()) {
 
   if (reachableModes(row).length === 1) {
     test(`${anchorId} is unreachable in guided mode, with no substitute`, async ({ page }) => {
-      // The Advanced-only case. Guided bounces the route to Home, so the control must
-      // be absent — and Home must not have grown a stand-in for it either.
+      // The Advanced-only case. Guided bounces the route to its Guided destination
+      // (Rules, qq0.14.1), so the control must be absent — and Rules must not have
+      // grown a stand-in for it either.
       const homeRow = rowForRoute("/")!;
       await mountRoute(page, homeRow, "guided");
       await page.goto(row.route);
       // Wait for the bounce to actually land, so the absence below is an assertion
       // about a settled screen rather than about a page that had not rendered yet.
-      await expect(page.locator('[data-testid="home-screen"]')).toBeVisible();
-      expect(new URL(page.url()).pathname).toBe("/");
+      await expect(page.locator('[data-screen="rules"]')).toBeVisible();
+      expect(new URL(page.url()).pathname).toBe("/rules");
       await expect(page.locator(anchorSelector(anchorId))).toHaveCount(0);
     });
   }
