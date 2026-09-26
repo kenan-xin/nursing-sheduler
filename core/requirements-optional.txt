@@ -17,6 +17,7 @@ pyscipopt==6.2.1
 # keep flowing. The currently resolving version is 2.38.0.
 pytest==9.1.1
 pytest-cov==7.1.0
+pytest-xdist==3.8.0
 fakeredis>=2,<3
 # Ruff is intentionally pinned: Ruff's *default* rule set expands between
 # releases (e.g. 0.15.x -> 0.16.x widened it materially). The explicit

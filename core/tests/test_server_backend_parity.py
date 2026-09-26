@@ -411,6 +411,9 @@ def test_explicitly_configured_unreachable_redis_fails_hard():
         RedisJobStore(url="redis://127.0.0.1:6390/0", key_prefix="nurse_test:unreachable")
 
 
+# Sets `requirepass` on the shared Redis server, which would break every other
+# worker's real-Redis tests mid-run.
+@pytest.mark.serial
 def test_wrong_authentication_real_redis_fails_hard():
     # Committed auth-rejection gate: temporarily require a password on the
     # configured real Redis, prove that wrong credentials fail hard at construction
