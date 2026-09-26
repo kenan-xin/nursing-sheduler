@@ -632,10 +632,9 @@ export default function StyleReferencePage() {
           ))}
         </div>
         <p className="text-meta text-ink3">
-          <span className="font-mono">shadow-dialog</span> and{" "}
-          <span className="font-mono">shadow-toast</span> are semantic aliases of the same{" "}
-          <span className="font-mono">--sh-3</span> modal-layer value and carry no independent value
-          of their own. <span className="font-mono">shadow-side</span> is the specialized
+          <span className="font-mono">shadow-dialog</span> is a semantic alias of the{" "}
+          <span className="font-mono">--sh-3</span> modal-layer value and carries no independent
+          value of its own. <span className="font-mono">shadow-side</span> is the specialized
           directional runtime shadow for side drawers and mobile nav only — it is not a general
           surface elevation. Every shadow utility in the app must alias one of these six tokens; a
           hand-authored <span className="font-mono">shadow-[…]</span> is off-contract even when its
