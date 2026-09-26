@@ -29,13 +29,14 @@ import { expandPersonRefs, flattenShiftTypeRefs } from "@/lib/rules/expansion";
 import {
   capOf,
   findStaffingShortfalls,
-  requiredOn,
   requirementDateIds,
   requirementDateIsos,
   skillMixOverflow,
   toDateId,
   type StaffingFinding,
 } from "@/lib/rules/shortfalls";
+// Direct path: the barrel re-exports this module and `@/lib/scenario` would cycle.
+import { cardNeedOn } from "@/lib/scenario/temporary-cover";
 import type {
   CountCard,
   DateRef,
@@ -750,7 +751,9 @@ const runOneShort: Builder = (ctx, all) => {
     // Not a skill-mix gap: one fewer leaves the group just as short. And the rule must be
     // part of every finding that day, or lowering it leaves the day short.
     if (sameDay.some((g) => g.mixPeople || !g.ruleIds.includes(card.uid))) return null;
-    const n = requiredOn(card, iso);
+    // The ward need on that date: a temporary cover already lowers it, so one fewer is
+    // one fewer than the ward itself supplies.
+    const n = cardNeedOn(ctx.state, card, iso).required;
     // Never below 1, nor below the skill mix the shift must hold that day.
     return n >= 2 && !loweredTooFar(ctx, card, n - 1, iso) ? n - 1 : null;
   };
@@ -1037,7 +1040,7 @@ export function violatesSafetyFloor(
           return lowered(op.ruleId, op.requiredNumPeople);
         case "set_staffing_requirement_on_date": {
           const card = requirementCard(ctx, op.ruleId);
-          const before = card ? requiredOn(card, op.date) : Infinity;
+          const before = card ? cardNeedOn(state, card, op.date).required : Infinity;
           return loweredTo(card, before, op.requiredNumPeople, op.date);
         }
         case "edit_staffing_requirement": {
@@ -1147,7 +1150,9 @@ function skillMixOn(ctx: Ctx, card: RequirementCard, iso?: string): number {
         const covered = new Set(requirementDateIsos(ctx.state, c));
         return dates
           .filter((d) => covered.has(d))
-          .map((d) => Math.max(isNamed(c) ? requiredOn(c, d) : 0, skillMixFloor(c)));
+          .map((d) =>
+            Math.max(isNamed(c) ? cardNeedOn(ctx.state, c, d).required : 0, skillMixFloor(c)),
+          );
       }),
   );
 }
@@ -1193,7 +1198,7 @@ export function isSafeOption(state: ScenarioUiState, option: RepairOption): bool
         const card = requirementCard(ctx, op.ruleId);
         if (!card || !isHeadCount(card) || !Number.isInteger(op.requiredNumPeople)) return false;
         if (!requirementDateIsos(state, card).includes(op.date)) return false;
-        return op.requiredNumPeople === requiredOn(card, op.date) - 1;
+        return op.requiredNumPeople === cardNeedOn(state, card, op.date).required - 1;
       }
       case "edit_count_rule": {
         const card = countCard(ctx, op.ruleId);

@@ -12,7 +12,7 @@ import {
   requirement,
   ward,
 } from "@/lib/rules/ward-fixtures.test-support";
-import type { RequirementCard, ScenarioUiState } from "@/lib/scenario";
+import type { RequirementCard, ScenarioUiState, UiTemporaryCover } from "@/lib/scenario";
 import {
   buildFeasibilityReport,
   classifySituation,
@@ -48,6 +48,13 @@ const onDate = (ruleId: string, date: string, requiredNumPeople: number): Op => 
   date,
   requiredNumPeople,
 });
+
+const cover = (
+  name: string,
+  date: string,
+  shiftType: string,
+  groups: string[] = [],
+): UiTemporaryCover => ({ name, date, shiftType, groups });
 
 /** Every night needs exactly 1 on the ward, and exactly 2 RNs: the two cannot both hold. */
 const conflictingNights = (outerSkillMix = false): ScenarioUiState =>
@@ -337,6 +344,44 @@ describe("rankRepairOptions", () => {
     const four = rank(away(["02", "03", "05", "06"])).map((o) => o.repairId);
     expect(four).not.toContain("run_one_short");
     expect(four).toContain("borrow_temporary_nurse");
+  });
+
+  it("repair options count a temporary cover", () => {
+    // Night on the 5th needs 2 on the ward; Ben is on leave, so the night is one short.
+    const base = ward({
+      staff: people("ana", "ben"),
+      reqData: [leave("ben", "05")],
+      cardsByKind: cards({
+        requirements: [requirement("night", "N", 2, { date: ["2026-11-05"] })],
+      }),
+    });
+    // One cover lowers the ward need to 1: there is no one to run short any more.
+    const covered = { ...base, temporaryCover: [cover("Haseena (Ward 3)", "2026-11-05", "N")] };
+    expect(rank(base).map((o) => o.repairId)).toContain("run_one_short");
+    expect(rank(covered).map((o) => o.repairId)).not.toContain("run_one_short");
+  });
+
+  it("run-one-short lowers from the ward need, not the authored count", () => {
+    // Every night needs 3, and Cara is on leave on the 5th: one short there.
+    const base = ward({
+      staff: people("ana", "ben", "cara"),
+      reqData: [leave("cara", "05")],
+      cardsByKind: cards({
+        requirements: [
+          requirement("night", "N", 3, {
+            date: ["2026-11-01", "2026-11-02", "2026-11-03", "2026-11-04", "2026-11-05"],
+            description: "3 on every night",
+          }),
+        ],
+      }),
+    });
+    const without = rank(base).find((o) => o.repairId === "run_one_short");
+    expect(without?.operations).toEqual([onDate("night", "2026-11-05", 2)]);
+    // One cover lowers the ward need to 2, so one short is 1, not 2.
+    const covered = { ...base, temporaryCover: [cover("Haseena (Ward 3)", "2026-11-05", "N")] };
+    const short = rank(covered).find((o) => o.repairId === "run_one_short");
+    expect(short?.operations).toEqual([onDate("night", "2026-11-05", 1)]);
+    expect(short?.title).toContain("with 1 instead of 2");
   });
 
   it("does not claim a rule with other exceptions keeps one number on its other days", () => {
