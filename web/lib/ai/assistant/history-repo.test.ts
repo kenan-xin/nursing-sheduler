@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Message } from "@ag-ui/client";
 
 import {
+  deleteTurnMessages,
   detachStaleTurns,
   persistThreadMessages,
   readLatestTurn,
@@ -388,5 +389,108 @@ describe("turn lifecycle", () => {
     await harness.db.assistantThreads.put({ ...thread, state: "cleared" });
 
     expect(await recordPreparingTurn(turnInput(thread.threadId), harness.config)).toBeNull();
+  });
+});
+
+// REPLACING A FAILED TURN (bead 2by.8).
+//
+// A retry sends the SAME question again. `persistThreadMessages` upserts and never
+// removes, so without a delete the retry's own user message lands BESIDE the failed
+// turn's, and the user reads their question twice -- the defect v1 fixed in 6966f31,
+// one layer deeper here because v2 keeps the failed turn's question on disk.
+describe("deleting the messages one turn created", () => {
+  const turnInput = (threadId: string) => ({
+    threadId,
+    scenarioId: "scenario-a",
+    basisDocumentRevision: 7,
+    leaseEpoch: 3,
+    modelId: TEST_MODEL,
+    runId: "run-1",
+    turnEpoch: 1,
+    runtimeInstanceId: "instance-1",
+  });
+
+  /**
+   * Two committed turns on one thread. The delete is fenced on the TURN's own captured
+   * generations, so a turn row is part of the fixture rather than an extra.
+   */
+  async function seedTwoTurns(harness: AssistantHarness) {
+    const thread = await selectActiveThread("scenario-a", harness.config);
+    const answered = await prepareTurn(turnInput(thread.threadId), harness);
+    await persistThreadMessages(
+      [userMessage("m1", "why is the 15th short?"), assistantMessage("m2", "because of leave")],
+      { ...context(harness, thread.threadId, "scenario-a"), turnId: answered.turnId },
+      harness.config,
+    );
+    harness.advance(1_000);
+    // The turn that failed: its own question, nothing else.
+    const failed = await prepareTurn(turnInput(thread.threadId), harness);
+    await persistThreadMessages(
+      [userMessage("m3", "and the 16th?")],
+      {
+        ...context(harness, thread.threadId, "scenario-a"),
+        turnId: failed.turnId,
+        createdAt: harness.now().toISOString(),
+      },
+      harness.config,
+    );
+    await setTurnState(
+      failed.turnId,
+      { state: "detached", settlement: "run_failed" },
+      harness.config,
+    );
+    return { thread, failed };
+  }
+
+  it("removes only the rows the failed turn created", async () => {
+    const harness = createAssistantHarness();
+    const { thread, failed } = await seedTwoTurns(harness);
+
+    await expect(deleteTurnMessages(failed.turnId, harness.config)).resolves.toEqual({
+      removed: 1,
+    });
+
+    const records = await readThreadMessages(thread.threadId, harness.config);
+    expect(records.map((r) => [r.seq, r.content])).toEqual([
+      [0, "why is the 15th short?"],
+      [1, "because of leave"],
+    ]);
+  });
+
+  it("removes a failed turn's partial answer too, not just its question", async () => {
+    const harness = createAssistantHarness();
+    const thread = await selectActiveThread("scenario-a", harness.config);
+    const failed = await prepareTurn(turnInput(thread.threadId), harness);
+    await persistThreadMessages(
+      [userMessage("m1", "and the 16th?"), assistantMessage("m2", "half an ans")],
+      { ...context(harness, thread.threadId, "scenario-a"), turnId: failed.turnId },
+      harness.config,
+    );
+
+    await deleteTurnMessages(failed.turnId, harness.config);
+
+    expect(await readThreadMessages(thread.threadId, harness.config)).toEqual([]);
+  });
+
+  it("is an idempotent no-op for a turn a clear already took", async () => {
+    const harness = createAssistantHarness();
+    await expect(deleteTurnMessages("nope", harness.config)).resolves.toBe("missing");
+  });
+
+  it("drops a delete whose generations a clear has moved underneath it", async () => {
+    const harness = createAssistantHarness();
+    const { thread, failed } = await seedTwoTurns(harness);
+    // A clear landing after the failed turn wrote is exactly the case the fence is
+    // for: the conversation is being deleted, and a retry's delete must not race it.
+    const fenceRow = await harness.db.assistantGenerations.get("scenario:scenario-a");
+    if (!fenceRow) throw new Error("expected a fence row for the new thread");
+    await harness.db.assistantGenerations.put({
+      ...fenceRow,
+      generation: fenceRow.generation + 1,
+    });
+
+    await expect(deleteTurnMessages(failed.turnId, harness.config)).resolves.toBe("fenced");
+    const records = await readThreadMessages(thread.threadId, harness.config);
+    expect(records.map((r) => r.content)).toContain("and the 16th?");
   });
 });

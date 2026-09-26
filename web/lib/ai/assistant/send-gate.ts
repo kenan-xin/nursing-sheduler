@@ -88,6 +88,11 @@ export interface PrepareSendDeps {
   readWriterContext(): Promise<WriterContext | null>;
   selectActiveThread(scenarioId: string): Promise<AssistantThreadV1>;
   readThreadMessages(threadId: string): Promise<AssistantMessageV1[]>;
+  /**
+   * Delete one turn's messages so a retry can replace it. See
+   * {@link PrepareSendInput.replaceTurnId}.
+   */
+  deleteTurnMessages(turnId: string): Promise<{ removed: number } | "fenced" | "missing">;
   recordPreparingTurn(input: {
     threadId: string;
     scenarioId: string;
@@ -118,6 +123,15 @@ export interface PrepareSendInput {
    * mid-deletion.
    */
   interrupting: boolean;
+  /**
+   * The settled turn this send REPLACES, or `undefined` for an ordinary send.
+   *
+   * ONE CLICK ON A FAILED TURN'S RETRY IS NOT A SECOND SEND PATH. It replays the failed
+   * turn's own question through this same gate, and the failed turn is replaced as part
+   * of preparation so the question is asked once rather than twice -- the defect v1
+   * fixed in `6966f31`, one layer deeper here because v2's failed turn is on disk.
+   */
+  replaceTurnId?: string;
 }
 
 /**
@@ -143,6 +157,24 @@ export async function prepareSend(
   // the scenario changed under an open panel, this is where the conversation
   // switches with it instead of continuing the previous document's thread.
   const thread = await deps.selectActiveThread(writer.scenarioId);
+
+  // THE REPLACEMENT, AND ITS PLACE IN THE ORDER.
+  //
+  // After every refusal -- so a retry that is not ready, not this tab's, or still
+  // settling leaves the failed turn exactly where it is -- and BEFORE the history read,
+  // so the conversation this run hydrates is the one the user will see: without the
+  // failed turn, and without the question the send is about to add a second time.
+  //
+  // An outcome that is not a removal is a REFUSAL rather than a warning. A failed turn
+  // that could not be deleted is still on disk with its question in it, so proceeding
+  // would ask the user's question twice -- the one outcome this exists to prevent. Both
+  // failing outcomes mean the same thing to the caller: the durable basis for the
+  // replacement is gone, and a clear owns this conversation now.
+  if (input.replaceTurnId) {
+    const replaced = await deps.deleteTurnMessages(input.replaceTurnId);
+    if (typeof replaced !== "object") return { ok: false, reason: "cleared" };
+  }
+
   const history = await deps.readThreadMessages(thread.threadId);
 
   const runId = deps.newRunId();

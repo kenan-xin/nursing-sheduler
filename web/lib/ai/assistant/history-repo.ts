@@ -480,6 +480,42 @@ export async function scrubThreadHistory(
 }
 
 /**
+ * Delete every message one turn wrote, so a retry can replace it instead of repeating it.
+ *
+ * WHY A RETRY NEEDS THIS AT ALL. `persistThreadMessages` upserts and never removes, so
+ * resending a failed turn's question would land the new copy BESIDE the old one and the
+ * user would read their own question twice. v1 fixed exactly this in its own
+ * `retryMessage` (`6966f31`); here the failed turn's question is on DISK, so the fix has
+ * to be one layer down.
+ *
+ * FENCED ON THE TURN'S OWN CAPTURE, exactly as `scrubThreadHistory` is: a Clear that
+ * moved the generations while the delete was in flight drops it, and the deletion pass
+ * that clear owns is not raced by this one. `"missing"` is an ordinary outcome too -- a
+ * turn a clear already deleted has nothing left to replace.
+ */
+export async function deleteTurnMessages(
+  turnId: string,
+  config: HistoryRepoConfig = {},
+): Promise<{ removed: number } | "fenced" | "missing"> {
+  const { db } = resolve(config);
+  const turn = await db.assistantTurns.get(turnId);
+  if (!turn) return "missing";
+
+  const captured = fromGenerationPair(turn.scenarioId, turn);
+  const result = await runFenced(db, ASSISTANT_WRITE_TABLES, captured, async () => {
+    // By the indexed `turnId` rather than by reading the thread: the rows this turn
+    // owns are the point, and every message row already carries the turn that wrote it.
+    const rows = await db.assistantMessages.where("turnId").equals(turnId).toArray();
+    if (rows.length > 0) {
+      await db.assistantMessages.bulkDelete(rows.map((row) => row.messageId));
+    }
+    return { removed: rows.length };
+  });
+
+  return result.outcome === "fenced" ? "fenced" : result.value;
+}
+
+/**
  * Settle a turn ONLY if it is still unsettled at the moment of the write.
  *
  * ONE TRANSACTION, and that is the whole point. The obvious shape -- read the row,

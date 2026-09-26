@@ -50,6 +50,7 @@ function deps(overrides: Partial<PrepareSendDeps> = {}): PrepareSendDeps {
       updatedAt: "2026-08-06T00:00:00.000Z",
     })),
     readThreadMessages: vi.fn(async () => []),
+    deleteTurnMessages: vi.fn(async () => ({ removed: 1 })),
     recordPreparingTurn: vi.fn(async (input) => ({
       ...input,
       turnId: "turn-1",
@@ -259,6 +260,112 @@ describe("a prepared send", () => {
     expect(result.ok && result.plan.configurationIdentity).toContain(TEST_MODEL);
     expect(result.ok && result.plan.configurationIdentity).not.toContain(SENTINEL_KEY);
   });
+});
+
+// RETRY REPLACES THE FAILED TURN, AND THE GATE IS WHAT AUTHORISES THE REPLACEMENT.
+//
+// The deletion sits INSIDE preparation, after every refusal and before the history
+// the run will hydrate is read. That placement is the guarantee, not tidiness: a
+// retry that is refused (not ready, not this tab's, an interruption still settling)
+// must leave the failed turn exactly where it is, and a retry that proceeds must not
+// see its own question twice -- once from the failed turn on disk, once as the
+// message this send is about to add.
+describe("a retry that replaces a failed turn", () => {
+  it("deletes the failed turn BEFORE reading the history the run hydrates", async () => {
+    const order: string[] = [];
+    const d = deps({
+      deleteTurnMessages: vi.fn(async () => {
+        order.push("replace");
+        return { removed: 1 };
+      }),
+      readThreadMessages: vi.fn(async () => {
+        order.push("hydrate");
+        return [];
+      }),
+    });
+
+    const result = await prepareSend(
+      {
+        text: "and the 16th?",
+        turnEpoch: 2,
+        busy: false,
+        interrupting: false,
+        replaceTurnId: "turn-failed",
+      },
+      d,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(d.deleteTurnMessages).toHaveBeenCalledWith("turn-failed");
+    expect(order).toEqual(["replace", "hydrate"]);
+  });
+
+  it("leaves the failed turn alone for an ordinary send", async () => {
+    const d = deps();
+
+    await prepareSend({ text: "hello", turnEpoch: 1, busy: false, interrupting: false }, d);
+
+    expect(d.deleteTurnMessages).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "the assistant is not ready",
+      { text: "hello", turnEpoch: 1, busy: false, interrupting: false },
+      { readSettings: vi.fn(async () => ({ ...READY, enabled: false })) },
+    ],
+    [
+      "a turn is already in flight",
+      { text: "hello", turnEpoch: 1, busy: true, interrupting: false },
+      {},
+    ],
+    [
+      "an interruption is still settling",
+      { text: "hello", turnEpoch: 1, busy: false, interrupting: true },
+      {},
+    ],
+    [
+      "this tab does not own the scenario",
+      { text: "hello", turnEpoch: 1, busy: false, interrupting: false },
+      { readWriterContext: vi.fn(async () => null) },
+    ],
+  ] as const)(
+    "does not replace the failed turn when the retry is refused because %s",
+    async (_label, input, overrides) => {
+      const d = deps(overrides as Partial<PrepareSendDeps>);
+
+      const result = await prepareSend({ ...input, replaceTurnId: "turn-failed" }, d);
+
+      expect(result.ok).toBe(false);
+      expect(d.deleteTurnMessages).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ["a clear has moved the generations under it", "fenced"],
+    ["the turn row is already gone", "missing"],
+  ] as const)(
+    "refuses when %s, rather than resending beside the failed turn",
+    async (_l, outcome) => {
+      const d = deps({ deleteTurnMessages: vi.fn(async () => outcome) });
+
+      const result = await prepareSend(
+        {
+          text: "and the 16th?",
+          turnEpoch: 2,
+          busy: false,
+          interrupting: false,
+          replaceTurnId: "turn-failed",
+        },
+        d,
+      );
+
+      // Unreplaceable means the question would be asked TWICE, which is the defect the
+      // replacement exists to prevent. Nothing was prepared and nothing was sent.
+      expect(result).toEqual({ ok: false, reason: "cleared" });
+      expect(d.recordPreparingTurn).not.toHaveBeenCalled();
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------
