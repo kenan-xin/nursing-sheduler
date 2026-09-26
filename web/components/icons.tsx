@@ -83,6 +83,7 @@ export {
   FaBriefcase,
   FaMugHot,
   FaFileCirclePlus,
+  FaFileContract,
 } from "react-icons/fa6";
 
 export type { IconType } from "react-icons";
