@@ -221,7 +221,12 @@ export function capOf(expression: string, target: number, weight: number): numbe
   return Infinity;
 }
 
-function makeDates(state: ScenarioUiState) {
+/** The date fields `makeDates` reads — a `Pick`, like the expansion helpers, so a
+ *  caller that holds only the date slice (the Requirements editor's store
+ *  subscription) can expand a card's dates without a whole scenario. */
+type DateScopeState = Pick<ScenarioUiState, "rangeStart" | "rangeEnd" | "dateGroups">;
+
+function makeDates(state: DateScopeState) {
   const range = { start: state.rangeStart, end: state.rangeEnd };
   const items = generateDateItems(range);
   const allDateIds = items.map((item) => item.id);
@@ -238,7 +243,7 @@ function makeDates(state: ScenarioUiState) {
 
 /** The span ids a requirement covers in this roster period. */
 export function requirementDateIds(
-  state: ScenarioUiState,
+  state: DateScopeState,
   card: Pick<RequirementCard, "date">,
 ): string[] {
   const { allDateIds, expand } = makeDates(state);
@@ -248,7 +253,7 @@ export function requirementDateIds(
 
 /** The ISO dates a requirement covers in this roster period, in order. */
 export function requirementDateIsos(
-  state: ScenarioUiState,
+  state: DateScopeState,
   card: Pick<RequirementCard, "date">,
 ): string[] {
   const { items, expand } = makeDates(state);

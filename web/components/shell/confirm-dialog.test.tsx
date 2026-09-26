@@ -102,6 +102,28 @@ describe("ConfirmDialog — shared alert-dialog contract", () => {
     );
   });
 
+  it("renders an optional mono detail box ahead of the description, and none when omitted", () => {
+    renderConfirm();
+    expect(screen.queryByTestId("confirm-dialog-detail")).not.toBeInTheDocument();
+    cleanup();
+
+    // The Save/Load version gate is the only caller that passes `detail`
+    // (prototype ScreenSaveLoad.dc.html:150): the version pair sits in a square,
+    // mono, `panel` box above the wording.
+    renderConfirm({ detail: "File app version: 1.0.0\nCurrent app version: 1.4.0" });
+    const detail = screen.getByTestId("confirm-dialog-detail");
+    expect(detail).toHaveTextContent("File app version: 1.0.0");
+    expect(detail).toHaveTextContent("Current app version: 1.4.0");
+    expect(classesOf(detail)).toContain("font-mono");
+    expect(classesOf(detail)).toContain("bg-panel");
+    expect(classesOf(detail)).toContain("border-line2");
+    expect(classesOf(detail)).not.toContain("rounded");
+    const description = document.querySelector("[data-slot='alert-dialog-description']");
+    expect(
+      detail.compareDocumentPosition(description as Node) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   it("keeps the optional consequence list and the caller's labels verbatim", () => {
     renderConfirm({
       confirmLabel: "Start over",

@@ -7,18 +7,24 @@
 // logic lives in `requirements-model`; this hook is only the store glue (mirrors
 // `use-counts.ts`).
 
-import { useScenarioStore, scenarioCommands } from "@/lib/store";
-import type { RequirementCard, ScenarioUiState } from "@/lib/scenario";
+import { useShallow } from "zustand/react/shallow";
+import { useScenarioStore, scenarioCommands, type ScenarioStoreState } from "@/lib/store";
+import type { RequirementCard } from "@/lib/scenario";
 import { getUniqueCopyLabel } from "@/components/entity-editor/core";
 import type { DropPosition } from "@/components/card-editor/card-editor-shell";
-import { reorderByDrop, withCardDisabled, type RequirementFormState } from "./requirements-model";
+import {
+  reorderByDrop,
+  withCardDisabled,
+  type RequirementFormState,
+  type RequirementScenarioInput,
+} from "./requirements-model";
 import { applyRequirementPatch } from "./requirement-patch";
 import { commitCardsTransform } from "@/components/card-editor/commit-cards";
 
 /** Replace the requirements list in one tracked mutation (fresh refs for history). */
 
 export interface RequirementsController {
-  state: ScenarioUiState;
+  state: RequirementScenarioInput;
   requirements: RequirementCard[];
   /** Read the LIVE requirements slice at call time (not a render snapshot) — the
    *  stale guard keys on its ref-identity change since the draft opened. */
@@ -35,10 +41,28 @@ export interface RequirementsController {
   setDisabled: (uid: string, value: boolean) => void;
 }
 
+/** The slices the Requirements screen reads — the people/shift domains it offers
+ *  and the dates it scopes them by. `cardsByKind` is deliberately NOT among them:
+ *  the screen's own cards arrive from their own subscription, so editing a
+ *  covering card must not re-render this editor (nor recompute its coverage). */
+function pickRequirementScenario(state: ScenarioStoreState): RequirementScenarioInput {
+  return {
+    staff: state.staff,
+    staffGroups: state.staffGroups,
+    shifts: state.shifts,
+    shiftGroups: state.shiftGroups,
+    rangeStart: state.rangeStart,
+    rangeEnd: state.rangeEnd,
+    dateGroups: state.dateGroups,
+  };
+}
+
 export function useRequirements(): RequirementsController {
-  // The durable store state is a superset of `ScenarioUiState`, so it satisfies
-  // the pure model's input directly.
-  const state: ScenarioUiState = useScenarioStore((s) => s);
+  // `useShallow` compares the picked references, not the fresh wrapper object's
+  // identity — without it zustand v5 reads a new snapshot every render. The
+  // wrapper is otherwise stable, so a mutation outside these slices leaves `state`
+  // (and the editor's `computeCoverageWarnings` memo keyed on it) untouched.
+  const state = useScenarioStore(useShallow(pickRequirementScenario));
   const requirements = useScenarioStore((s) => s.cardsByKind.requirements);
 
   return {

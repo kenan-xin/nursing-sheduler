@@ -172,6 +172,30 @@ async function makeGroupDocument(): Promise<RosterDocument> {
 }
 
 /**
+ * A document with a SKILL MIX on `N`: one nurse needed, at least one of them
+ * `RN` (`P1`). In the fixture grid day 0 puts the non-member `P2` alone on `N`,
+ * so the HEAD COUNT is met (1/1) while the floor is not — the exact case the
+ * viewer used to paint as satisfied.
+ */
+async function makeSkillMixDocument(): Promise<RosterDocument> {
+  const doc = fixtureCanonicalDocument();
+  doc.people.groups = [{ id: "RN", members: ["P1"] }];
+  doc.preferences = [
+    { type: PREFERENCE_TYPE.maxOneShiftPerDay },
+    {
+      type: PREFERENCE_TYPE.shiftTypeRequirement,
+      description: "One night nurse, at least one RN",
+      shiftType: "N",
+      requiredNumPeople: 1,
+      skillMix: [{ people: "RN", minNumPeople: 1 }],
+      date: "ALL",
+      weight: -1,
+    },
+  ];
+  return fixtureRosterDocument({ document: doc });
+}
+
+/**
  * A document whose only requirement is scoped to ONE date (`2026-07-04`, index 1)
  * and asks for more people than the roster puts on `D` there.
  *
@@ -1572,6 +1596,42 @@ describe("anti-inference", () => {
       expect(cell.getAttribute("data-short")).toBe("false");
       expect(cell.getAttribute("aria-label")).toContain("no target declared");
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Skill mix — a met head count must never hide an unmet floor
+// ---------------------------------------------------------------------------
+
+describe("skill mix", () => {
+  beforeEach(() => {
+    installResizeObserver();
+    setViewportWidth(1400);
+    mockContainerWidth(1200);
+  });
+
+  it("turns a row red and names the unmet floor in text, never in colour alone", async () => {
+    const document = await makeSkillMixDocument();
+    render(<Viewer document={document} />);
+    selectLens("day");
+    const tabs = [...screen.getByTestId("roster-day").querySelectorAll('[role="tab"]')];
+
+    // Day 0: P2 (not an RN) holds the only N slot — 1/1 people, 0 of the 1 RN.
+    fireEvent.click(tabs[0]);
+    const shortRow = [...screen.getAllByTestId("roster-day-requirement")].find(
+      (row) => row.getAttribute("data-scope") === "N",
+    );
+    expect(shortRow?.getAttribute("data-mismatch")).toBe("true");
+    expect(shortRow?.textContent).toContain("1/1");
+    expect(shortRow?.textContent).toContain("RN short 1");
+
+    // Day 2: P1 (an RN) holds it — the same head count, nothing to report.
+    fireEvent.click(tabs[2]);
+    const okRow = [...screen.getAllByTestId("roster-day-requirement")].find(
+      (row) => row.getAttribute("data-scope") === "N",
+    );
+    expect(okRow?.getAttribute("data-mismatch")).toBe("false");
+    expect(okRow?.textContent).not.toContain("short");
   });
 });
 
