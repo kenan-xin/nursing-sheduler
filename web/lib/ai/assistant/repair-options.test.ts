@@ -1429,6 +1429,34 @@ describe("violatesSafetyFloor (any operations, including model-written candidate
       /skill-mix/,
     ],
     [
+      "the group a rule counts by gains a member",
+      rn,
+      [
+        {
+          type: "edit_people_group",
+          groupId: "RN",
+          newGroupId: "RN",
+          description: "Registered nurses",
+          members: ["rn1", "en1"],
+        },
+      ],
+      /skill-mix/,
+    ],
+    [
+      "the group a rule counts by is renamed away",
+      rn,
+      [
+        {
+          type: "edit_people_group",
+          groupId: "RN",
+          newGroupId: "Registered nurses",
+          description: "",
+          members: ["rn1"],
+        },
+      ],
+      /skill-mix/,
+    ],
+    [
       "RN rule removed",
       rn,
       [{ type: "remove_rule", ruleKind: "requirements", ruleId: "night-rn" }],
@@ -1470,6 +1498,27 @@ describe("violatesSafetyFloor (any operations, including model-written candidate
       "skilled hire with no host question",
       rn,
       [{ type: "add_person", name: "Borrowed nurse 1", groups: ["RN"], temporary: false }],
+      /qualification/,
+    ],
+    [
+      "a nurse joined to a skill group by edit_person",
+      rn,
+      [{ type: "edit_person", personId: "en1", name: "en1", groups: ["RN"], temporary: false }],
+      /qualification/,
+    ],
+    [
+      "a borrowed nurse put in a skill group by edit_person",
+      rn,
+      [
+        { type: "add_person", name: "Borrowed nurse 1", groups: [], temporary: false },
+        {
+          type: "edit_person",
+          personId: "Borrowed nurse 1",
+          name: "Borrowed nurse 1",
+          groups: ["RN"],
+          temporary: false,
+        },
+      ],
       /qualification/,
     ],
     ["one date's head count set to 0", rn, [onDate("day", "2026-11-03", 0)], /to 0/],
@@ -1584,6 +1633,44 @@ describe("violatesSafetyFloor (any operations, including model-written candidate
           endDate: "2026-11-02",
           weight: "must",
         },
+      ]),
+    ).toBeNull();
+    // Editing a group no requirement counts by is the manager's own housekeeping.
+    const spare: ScenarioUiState = {
+      ...rn,
+      staffGroups: [...rn.staffGroups, { id: "Bank", members: ["en2"] }],
+    };
+    expect(
+      ok(spare, [
+        {
+          type: "edit_people_group",
+          groupId: "Bank",
+          newGroupId: "Bank",
+          description: "",
+          members: ["en1"],
+        },
+      ]),
+    ).toBeNull();
+    expect(
+      ok(spare, [
+        { type: "edit_person", personId: "en1", name: "en1", groups: ["Bank"], temporary: false },
+      ]),
+    ).toBeNull();
+    // Keeping the skill group a nurse is already in is no change, not a qualification.
+    expect(
+      ok(rn, [
+        {
+          type: "edit_people_group",
+          groupId: "RN",
+          newGroupId: "RN",
+          description: "Registered nurses",
+          members: ["rn1"],
+        },
+      ]),
+    ).toBeNull();
+    expect(
+      ok(rn, [
+        { type: "edit_person", personId: "rn1", name: "rn1", groups: ["RN"], temporary: false },
       ]),
     ).toBeNull();
   });
