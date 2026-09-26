@@ -60,7 +60,13 @@ export function DatesScreen() {
   const rangeEnd = useScenarioStore((s) => s.rangeEnd);
   const dateGroups = useScenarioStore((s) => s.dateGroups);
 
-  const range: DateRange = { start: rangeStart, end: rangeEnd };
+  // Stable identity while the endpoints are unchanged: the calendar/group cards
+  // memoize on `range` and re-seed from it, so a fresh object each render would
+  // defeat those memos on every unrelated store write.
+  const range: DateRange = useMemo(
+    () => ({ start: rangeStart, end: rangeEnd }),
+    [rangeStart, rangeEnd],
+  );
   const complete = hasCompleteRange(range);
 
   const editableGroups = useMemo(
