@@ -114,10 +114,12 @@ export function useRosterEditing(options: RosterEditingOptions): RosterEditingSt
   );
   // Borrowed rows (roster-file/2) join the axis in the session, not the stored base:
   // the assistant's temporary-nurse card adds them. A new roster adopts its own.
-  // ponytail: undo reverts the cells but keeps an added row; add row removal if wards ask.
+  // Undo restores the rows as they were before the last edit, so undoing the Apply
+  // that added a temporary nurse removes her row with her shifts (bead 2rp).
   const [borrowed, setBorrowed] = useState(document.borrowed);
   const borrowedRef = useRef(borrowed);
   borrowedRef.current = borrowed;
+  const borrowedUndoTarget = useRef(borrowed);
   const baseDays = useMemo(() => rosterBaseDays({ solvedDays, borrowed }), [solvedDays, borrowed]);
   const bounds: OverlayBounds = useMemo(
     () => ({ solvedDays: baseDays, shiftTypeIds }),
@@ -136,6 +138,7 @@ export function useRosterEditing(options: RosterEditingOptions): RosterEditingSt
     // A new working roster: reset undo history and adopt the new document's edits.
     setSession((current) => resetSession(current, document.edits));
     setBorrowed(document.borrowed);
+    borrowedUndoTarget.current = document.borrowed;
   }
 
   const [selectedCell, setSelectedCell] = useState<EditCoordinate | null>(null);
@@ -233,6 +236,9 @@ export function useRosterEditing(options: RosterEditingOptions): RosterEditingSt
   // The visible session updates immediately so the user sees their edit.
   const commit = useCallback(
     (next: EditSession, nextBorrowed: readonly RosterBorrowedRow[] = borrowedRef.current) => {
+      // An edit keeps the rows it started from as the undo target; undo itself
+      // (no undo target left) passes the target back in, so this is a no-op then.
+      if (next.undoTarget !== null) borrowedUndoTarget.current = borrowedRef.current;
       setSession(next);
       setBorrowed(nextBorrowed);
       borrowedRef.current = nextBorrowed;
@@ -292,8 +298,8 @@ export function useRosterEditing(options: RosterEditingOptions): RosterEditingSt
   );
 
   const undo = useCallback(() => {
-    const next = undoSessionEdit(sessionRef.current);
-    commit(next);
+    if (!canUndoSession(sessionRef.current)) return;
+    commit(undoSessionEdit(sessionRef.current), borrowedUndoTarget.current);
   }, [commit]);
 
   const retrySave = useCallback(async () => {
