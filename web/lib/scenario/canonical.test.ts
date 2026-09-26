@@ -5,7 +5,7 @@ import { PREFERENCE_TYPE, type ScenarioUiState } from "@/lib/scenario/types";
 // A representative durable UI state exercising every slice and every F2 marker.
 function makeUiState(): ScenarioUiState {
   return {
-    meta: { apiVersion: "alpha", description: "Feb 2026 ward", country: "SG" },
+    meta: { apiVersion: "alpha", description: "Feb 2026 ward" },
     rangeStart: "2026-02-01",
     rangeEnd: "2026-02-28",
     staff: [
@@ -90,7 +90,8 @@ describe("toCanonicalScenarioDocument", () => {
 
     expect(doc.apiVersion).toBe("alpha");
     expect(doc.description).toBe("Feb 2026 ward");
-    expect(doc.country).toBeUndefined();
+    // `country` left the strict model (v1 sync X9); the projection can never emit it.
+    expect(doc).not.toHaveProperty("country");
     expect(doc.dates.range).toEqual({ startDate: "2026-02-01", endDate: "2026-02-28" });
     expect(doc.dates.groups).toEqual([{ id: "week1", members: ["2026-02-01~2026-02-07"] }]);
     expect(doc.people.items).toEqual([

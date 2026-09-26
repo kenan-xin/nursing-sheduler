@@ -258,7 +258,6 @@ function validateMeta(value: unknown): void {
   requireString(value.apiVersion, "meta.apiVersion");
   requireOptionalString(value.appVersion, "meta.appVersion");
   requireOptionalString(value.description, "meta.description");
-  requireOptionalString(value.country, "meta.country");
 }
 
 function validatePerson(el: Record<string, unknown>): void {
