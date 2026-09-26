@@ -535,17 +535,16 @@ html.dark[data-accent="plum"] {
   --transition-duration-fast: var(--dur-fast);
   --transition-duration-base: var(--dur-base);
 
-  /* Shadows → shadow-* utilities. `shadow-dialog` and `shadow-toast` are
-     semantic aliases of --sh-3 and carry no independent value. `shadow-side`
-     reads the specialized runtime --sh-side; the two names differ on purpose so
-     the emitted theme contains no self-reference. */
+  /* Shadows → shadow-* utilities. `shadow-dialog` is a semantic alias of --sh-3
+     and carries no independent value. `shadow-side` reads the specialized
+     runtime --sh-side; the two names differ on purpose so the emitted theme
+     contains no self-reference. */
   --shadow-1: var(--sh-1);
   --shadow-2: var(--sh-2);
   --shadow-3: var(--sh-3);
   --shadow-edge: var(--sh-edge);
   --shadow-well: var(--sh-well);
   --shadow-dialog: var(--sh-3);
-  --shadow-toast: var(--sh-3);
   --shadow-side: var(--sh-side);
 }
 
@@ -709,11 +708,11 @@ html[data-side-collapsed="1"]:not([data-side-ready="1"]) [data-side-nav] > * {
 
 /* Sonner toast. Class hooks come from <Toaster className="ns-sonner"
    toastOptions={{ className: "ns-toast" }} /> in app-shell.tsx. The toast sits
-   on the modal layer, so it takes --sh-3 (the value behind `shadow-toast`)
-   rather than borrowing the directional drawer shadow.
+   on the modal layer, so it takes --sh-3 rather than borrowing the directional
+   drawer shadow.
 
    v2 (DESIGN.md §5 Toast): bottom-centre, --ink fill, --on-ink text, leading ✓
-   mark, --shadow-toast. Two v1 treatments are RETIRED here along with the rest
+   mark, the --sh-3 modal shadow. Two v1 treatments are RETIRED here along with the rest
    of the component layer:
      - the 3px --success left-edge rule, and with it the no-side-stripe exception
        that justified it. Nothing in the toast is keyed to a status hue any more,

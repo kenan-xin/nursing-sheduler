@@ -98,7 +98,6 @@ const UTILITIES = [
   "shadow-edge",
   "shadow-well",
   "shadow-dialog",
-  "shadow-toast",
   "shadow-side",
 ] as const;
 
@@ -287,9 +286,8 @@ describe("elevation aliases", () => {
     expect(ruleBody(utility)).toContain(`--tw-shadow: var(${variable})`);
   });
 
-  it("shadow-dialog and shadow-toast are aliases of --sh-3, not new values", () => {
+  it("shadow-dialog is an alias of --sh-3, not a new value", () => {
     expect(ruleBody("shadow-dialog")).toContain("--tw-shadow: var(--sh-3)");
-    expect(ruleBody("shadow-toast")).toContain("--tw-shadow: var(--sh-3)");
   });
 
   it("shadow-side reads the specialized runtime value, not a Tailwind namespace name", () => {
