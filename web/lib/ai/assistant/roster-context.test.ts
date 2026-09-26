@@ -5,6 +5,8 @@ import {
   ashaContext,
   ashaDocument,
   ashaGrid,
+  borrowedCoverRosterDocument,
+  borrowedWardCountRosterDocument,
   overtimeContext,
   overtimeDocument,
   overtimeGrid,
@@ -88,6 +90,31 @@ describe("summarizeRoster", () => {
     if (typeof summary === "string") throw new Error(summary);
     expect(summary.dates).toEqual(["2026-10-08", "2026-10-09"]);
     expect(summary.rows).toEqual([{ person: "SN-Priya", days: ["N", "N"] }]);
+    expect(summary.rulesBrokenNow).toEqual([]);
+  });
+
+  it("counts a borrowed nurse's cover, so it is not reported as short (bead d88)", () => {
+    const summary = summarizeRoster(borrowedCoverRosterDocument(), {}, false);
+    if (typeof summary === "string") throw new Error(summary);
+    expect(summary.rows).toContainEqual({ person: "Mei", days: ["OFF", "OFF", "N"] });
+    expect(summary.rulesBrokenNow).toEqual([]);
+  });
+
+  it("does not report a borrowed nurse short against the ward's own count rules (bead d88 review)", () => {
+    // Priya works 2 shifts and Dev 3, so only a rule that wrongly binds the borrowed row
+    // (1 shift) can break: the g1p loan narrows the ward's hard count rules away from her.
+    const summary = summarizeRoster(
+      borrowedWardCountRosterDocument({
+        description: "Every nurse works at least two shifts",
+        countShiftTypes: "ALL",
+        expression: "x >= T",
+        target: 2,
+      }),
+      {},
+      false,
+    );
+    if (typeof summary === "string") throw new Error(summary);
+    expect(summary.rows).toContainEqual({ person: "Mei", days: ["OFF", "OFF", "N"] });
     expect(summary.rulesBrokenNow).toEqual([]);
   });
 
