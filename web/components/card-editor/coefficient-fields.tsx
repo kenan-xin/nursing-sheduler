@@ -22,6 +22,7 @@ import { Surface } from "@/components/ui/surface";
 import { FaCircleInfo } from "@/components/icons";
 import {
   coefficientValueFor,
+  derivedCoefficientHintText,
   eligibleCoefficientIds,
   parseCoefficientInput,
   updateCoefficientPair,
@@ -34,12 +35,14 @@ export {
   coefficientIntegerErrorMessage,
   coefficientOverlapMessage,
   coefficientValueFor,
+  derivedCoefficientHintText,
   eligibleCoefficientIds,
   parseCoefficientInput,
   sortIdsByEntryOrder,
   syncCoefficientPairs,
   updateCoefficientPair,
   validateCoefficientPairs,
+  type CoefficientDerivation,
   type CoefficientDomain,
   type CoefficientDraftValue,
   type CoefficientEntity,
@@ -77,6 +80,11 @@ export interface CoefficientFieldsProps {
   note?: string;
   /** Show the "All N have a coefficient" / "N need a coefficient" strip (default true). */
   showCoverage?: boolean;
+  /** Show a per-row working-time hint from each entity's `derivation` — the guided
+   *  Contracted Hours rows (ScreenCards). A derivable source reads its working time;
+   *  a non-derivable one reads the set-by-hand message. Off ⇒ no hint (the default,
+   *  for a generic count / requirement domain whose items carry no `derivation`). */
+  derivedHints?: boolean;
   testId?: string;
 }
 
@@ -91,11 +99,16 @@ export function CoefficientFields({
   heading,
   note,
   showCoverage = true,
+  derivedHints = false,
   testId = "coefficient-fields",
 }: CoefficientFieldsProps) {
   const eligible = React.useMemo(
     () => eligibleCoefficientIds(selection, domain),
     [selection, domain],
+  );
+  const entityById = React.useMemo(
+    () => new Map(domain.items.map((item) => [item.id, item])),
+    [domain],
   );
 
   const filledCount = eligible.filter((id) => {
@@ -148,6 +161,9 @@ export function CoefficientFields({
         {eligible.map((id) => {
           const value = coefficientValueFor(pairs, id);
           const err = errorsById[id];
+          const hint = derivedHints
+            ? derivedCoefficientHintText(entityById.get(id)?.derivation)
+            : undefined;
           return (
             <label key={id} className="flex flex-wrap items-center gap-3">
               <span
@@ -170,6 +186,14 @@ export function CoefficientFields({
                 placeholder="—"
                 className="w-[88px] px-2.5 font-mono font-bold"
               />
+              {hint && (
+                <span
+                  className="font-mono text-label font-medium text-ink3"
+                  data-testid={`${testId}-hint-${id}`}
+                >
+                  {hint}
+                </span>
+              )}
               {err && <span className="text-meta font-semibold text-error">{err}</span>}
             </label>
           );

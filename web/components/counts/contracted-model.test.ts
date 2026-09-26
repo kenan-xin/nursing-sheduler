@@ -613,6 +613,31 @@ describe("buildContractedCoefficientDomain — concrete leaf bijection", () => {
   });
 });
 
+const WITH_WORKING_TIME = scenario({
+  staff: [{ id: "Anna" }],
+  // 480 is a half-hour-grid duration; 460 is off-grid; X has no working time at all.
+  shifts: [{ id: "D", durationMinutes: 480 }, { id: "N", durationMinutes: 460 }, { id: "X" }],
+});
+
+describe("buildContractedCoefficientDomain — working-time derivation (9a8)", () => {
+  it("carries a derivable worked source's minutes, flagged as worked time", () => {
+    const domain = buildContractedCoefficientDomain(WITH_WORKING_TIME, ["D"]);
+    expect(domain.items).toEqual([{ id: "D", derivation: { minutes: 480, credit: false } }]);
+  });
+
+  it("flags LEAVE as a credit at the default 8h (16 half-hours)", () => {
+    const domain = buildContractedCoefficientDomain(WITH_WORKING_TIME, ["LEAVE"]);
+    expect(domain.items).toEqual([{ id: "LEAVE", derivation: { minutes: 480, credit: true } }]);
+  });
+
+  it("omits the derivation for sources with no derivable working time", () => {
+    const domain = buildContractedCoefficientDomain(WITH_WORKING_TIME, ["N", "X"]);
+    // N's 460 minutes is not a half-hour multiple; X has no working time — neither
+    // is derivable, so neither carries hint data.
+    expect(domain.items).toEqual([{ id: "N" }, { id: "X" }]);
+  });
+});
+
 describe("validateContractedCommit — coverage-gated commit via the shared validator", () => {
   const complete = (overrides: Partial<ContractedFormState> = {}) =>
     form({

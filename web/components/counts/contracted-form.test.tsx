@@ -528,3 +528,51 @@ describe("ContractedForm — Refresh placement and aggregate preview (bmw.3)", (
     expect(saved.countShiftTypeCoefficients).toContainEqual(["D", 16]);
   });
 });
+
+describe("ContractedForm — per-row derived-coefficient hints (9a8)", () => {
+  /** One derivable worked shift (D, 8h), one off-grid shift (N, 460 min) and LEAVE. */
+  function hintScenario(): ScenarioUiState {
+    return {
+      ...createEmptyScenarioUiState(),
+      staff: [{ id: "Anna" }],
+      shifts: [
+        { id: "D", durationMinutes: 480 },
+        { id: "N", durationMinutes: 460 },
+      ],
+      rangeStart: "2026-01-01",
+      rangeEnd: "2026-01-31",
+    };
+  }
+
+  function renderHints() {
+    render(
+      <ContractedForm
+        state={hintScenario()}
+        mode="add"
+        initialForm={{
+          ...emptyContractedForm(),
+          person: ["ALL"],
+          countDates: ["ALL"],
+          countShiftTypes: ["D", "N", "LEAVE"],
+          countShiftTypeCoefficients: [
+            ["D", 16],
+            ["N", ""],
+            ["LEAVE", 16],
+          ],
+          targetExact: "160h",
+        }}
+        isEnabled
+        {...NOOP}
+      />,
+    );
+  }
+
+  it("hints a worked shift's working time and a leave day's credit per row", () => {
+    renderHints();
+    const testId = "contracted-coefficient-fields-hint";
+    expect(screen.getByTestId(`${testId}-D`).textContent).toBe("8h × 2 · from working time");
+    expect(screen.getByTestId(`${testId}-LEAVE`).textContent).toBe("8h credit · editable");
+    // N's 460-minute duration is off the half-hour grid — set by hand.
+    expect(screen.getByTestId(`${testId}-N`).textContent).toBe("no working time — set manually");
+  });
+});

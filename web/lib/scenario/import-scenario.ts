@@ -193,7 +193,6 @@ function normalizeImport(data: ImportScenarioParsed): ImportNormalizationTarget 
       apiVersion: data.apiVersion,
       appVersion: str(data.appVersion),
       description: str(data.description),
-      country: str(data.country),
     }),
     staff: data.people.items.map(normalizePerson),
     staffGroups: (data.people.groups ?? []).map(normalizePeopleGroup),
