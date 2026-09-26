@@ -26,14 +26,14 @@ import {
   type ScenarioUiState,
   type UiRequestCell,
 } from "@/lib/scenario";
-import { generateDateItems, getDateIdForRange, isValidIso } from "@/lib/dates/date-id";
-import { deriveDateGroups } from "@/lib/dates/derived-groups";
-import {
-  expandDateRefs,
-  expandPersonRefs,
-  expandShiftTypeRefs,
-  flattenShiftTypeRefs,
-} from "./expansion";
+import { cardNeedOn } from "@/lib/scenario/temporary-cover";
+import { expandPersonRefs, expandShiftTypeRefs, flattenShiftTypeRefs } from "./expansion";
+import { makeDates, requiredOn, requirementDateIsos } from "./requirement-dates";
+
+// The date scope of a requirement lives in `./requirement-dates` so the temporary-cover
+// module can read it without importing this one (d582); re-exported for its importers.
+export { requirementDateIds, toDateId } from "./requirement-dates";
+export { requiredOn, requirementDateIsos };
 
 export type StaffingFindingKind =
   | "requirement_short"
@@ -73,6 +73,11 @@ export interface StaffingFinding {
    * A skill-mix `requirement_conflict` (ruleIds is the one card) names its groups joined by " and ".
    */
   mixPeople: string | null;
+  /**
+   * How much of `required` a temporary cover already fills (d582 F5). Absent when nothing
+   * covers the finding's slot, so a ward without a cover reads exactly as it did before.
+   */
+  coverCredit?: number;
 }
 
 export interface SkillMixOverflow {
@@ -147,9 +152,23 @@ export function ruleClashMessage(state: ScenarioUiState, f: StaffingFinding): st
   );
 }
 
-type Range = { start: string; end: string };
 type Block = { reason: AwayReason; shifts: Set<string> | "all" };
 type PersonRefs = Parameters<typeof expandPersonRefs>[0];
+
+/**
+ * One equation's numbers on one date, as `cardNeedOn` states them: the authored count
+ * less a temporary cover's credit, clamped at 0 (d582, F4).
+ */
+interface WardCounts {
+  /** The solver's floor on this date. */
+  required: number;
+  /** `preferredNumPeople` less her credit, never below `required`; null = the floor is exact. */
+  preferred: number | null;
+  /** The skill-mix floors, parallel to the authored `skillMix`. */
+  mix: readonly number[];
+  /** Her credit here, 0 when nothing covers this slot. */
+  credit: number;
+}
 
 /** One solver staffing equation: one top-level shift selector of one card. */
 interface Equation {
@@ -157,12 +176,12 @@ interface Equation {
   shiftTypes: Set<string>;
   qualified: Set<string>;
   dateIds: Set<string>;
-  /** The solver's floor, `requiredNumPeople`. */
+  /** The solver's floor, `requiredNumPeople`: the fallback for a date the map misses. */
   required: number;
-  /** Span id -> that date's floor, from `requiredNumPeopleOverrides`. */
-  overrides: Map<string, number>;
+  /** Span id -> the ward's numbers that date, from `requiredNumPeopleOverrides` and cover. */
+  counts: Map<string, WardCounts>;
   /**
-   * `preferredNumPeople`, the solver's ceiling on every date; null = the floor is exact.
+   * The covered-date ceiling of the head equation; null = the floor is exact.
    * A skill-mix equation has no ceiling of its own: `Infinity`.
    */
   preferred: number | null;
@@ -172,12 +191,39 @@ interface Equation {
   counted: boolean;
   /** The skill-mix entry this equation checks, or null for a card's own head count. */
   mix: string | null;
+  /** This equation's index into the card's authored `skillMix`; null for a head count. */
+  mixIndex: number | null;
   /** A counted head equation's skill mix, checked for overflow against each date's ceiling. */
   skillMix: RequirementCard["skillMix"];
 }
 
-const need = (eq: Equation, dateId: string) => eq.overrides.get(dateId) ?? eq.required;
-const ceiling = (eq: Equation, dateId: string) => eq.preferred ?? need(eq, dateId);
+const need = (eq: Equation, dateId: string) => {
+  const counts = eq.counts.get(dateId);
+  if (counts === undefined) return eq.required;
+  return eq.mixIndex === null ? counts.required : (counts.mix[eq.mixIndex] ?? eq.required);
+};
+/** The equation's ceiling on one date; a skill-mix equation has none of its own. */
+const ceiling = (eq: Equation, dateId: string) =>
+  eq.mixIndex === null
+    ? (eq.counts.get(dateId)?.preferred ?? eq.preferred ?? need(eq, dateId))
+    : Number.POSITIVE_INFINITY;
+/** What temporary cover already fills of one equation on one date (d582). */
+const creditOn = (eq: Equation, dateId: string) => eq.counts.get(dateId)?.credit ?? 0;
+
+/** The finding field, present only when a cover fills part of the requirement (d582). */
+const withCredit = (credit: number) => (credit > 0 ? { coverCredit: credit } : {});
+
+/**
+ * A head equation's skill mix with the cover's credit applied, so the floors an overflow is
+ * measured against are the ward's, not the card's. An entry she fills to 0 drops out.
+ */
+const mixFloors = (eq: Equation, dateId: string): RequirementCard["skillMix"] => {
+  const counts = eq.counts.get(dateId);
+  if (counts === undefined || eq.skillMix === undefined) return eq.skillMix;
+  return eq.skillMix
+    .map((entry, k) => ({ ...entry, minNumPeople: counts.mix[k] ?? 0 }))
+    .filter((entry) => entry.minNumPeople > 0);
+};
 
 /** Who can count toward one equation on one date. */
 interface Assessment {
@@ -202,12 +248,6 @@ const isAllRef = (ref: unknown) => String(ref).toUpperCase() === RESERVED_SHIFT_
 
 const isSubset = (a: Set<string>, b: Set<string>) => [...a].every((s) => b.has(s));
 
-/** An in-range ISO date becomes its span id; every other ref is returned as written. */
-export function toDateId(ref: DateRef, range: Range): string {
-  const key = String(ref);
-  return isValidIso(key) ? getDateIdForRange(key, range) : key;
-}
-
 /** The most shifts a hard count lets one person work, or `Infinity` when it is no hard upper bound. */
 export function capOf(expression: string, target: number, weight: number): number {
   if (weight === Infinity) {
@@ -219,56 +259,6 @@ export function capOf(expression: string, target: number, weight: number): numbe
     if (expression === "x >= T") return target - 1;
   }
   return Infinity;
-}
-
-/** The date fields `makeDates` reads — a `Pick`, like the expansion helpers, so a
- *  caller that holds only the date slice (the Requirements editor's store
- *  subscription) can expand a card's dates without a whole scenario. */
-type DateScopeState = Pick<ScenarioUiState, "rangeStart" | "rangeEnd" | "dateGroups">;
-
-function makeDates(state: DateScopeState) {
-  const range = { start: state.rangeStart, end: state.rangeEnd };
-  const items = generateDateItems(range);
-  const allDateIds = items.map((item) => item.id);
-  const derived = deriveDateGroups(items);
-  const expand = (refs: DateRef[]) =>
-    expandDateRefs(
-      refs.map((ref) => toDateId(ref, range)),
-      state,
-      allDateIds,
-      derived,
-    );
-  return { range, items, allDateIds, expand };
-}
-
-/** The span ids a requirement covers in this roster period. */
-export function requirementDateIds(
-  state: DateScopeState,
-  card: Pick<RequirementCard, "date">,
-): string[] {
-  const { allDateIds, expand } = makeDates(state);
-  const covered = expand(card.date == null ? [RESERVED_SHIFT_TYPE.all] : asList(card.date));
-  return allDateIds.filter((id) => covered.has(id));
-}
-
-/** The ISO dates a requirement covers in this roster period, in order. */
-export function requirementDateIsos(
-  state: DateScopeState,
-  card: Pick<RequirementCard, "date">,
-): string[] {
-  const { items, expand } = makeDates(state);
-  const covered = expand(card.date == null ? [RESERVED_SHIFT_TYPE.all] : asList(card.date));
-  return items.filter((item) => covered.has(item.id)).map((item) => item.iso);
-}
-
-/** A requirement's head count on one date: its override there, else `requiredNumPeople`. */
-export function requiredOn(
-  card: Pick<RequirementCard, "requiredNumPeople" | "requiredNumPeopleOverrides">,
-  iso: string,
-): number {
-  return (
-    card.requiredNumPeopleOverrides?.find(([date]) => date === iso)?.[1] ?? card.requiredNumPeople
-  );
 }
 
 /**
@@ -311,9 +301,16 @@ function disjoint(candidates: Equation[], dateId: string): Equation[] {
 }
 
 export function findStaffingShortfalls(state: ScenarioUiState): StaffingFinding[] {
-  const { range, items, allDateIds, expand } = makeDates(state);
+  const { items, allDateIds, expand } = makeDates(state);
   if (items.length === 0 || state.staff.length === 0) return [];
   const isoById = new Map(items.map((item) => [item.id, item.iso]));
+  // The shifts temporary covers sit on, by date: the only slots `cardNeedOn` is asked about.
+  const coveredShifts = new Map<string, Set<string>>();
+  for (const cover of state.temporaryCover) {
+    const shifts = coveredShifts.get(cover.date) ?? new Set<string>();
+    shifts.add(String(cover.shiftType));
+    coveredShifts.set(cover.date, shifts);
+  }
   const staffIds = new Set(state.staff.map((person) => String(person.id)));
   const workedIds = state.shifts
     .map((shift) => String(shift.id))
@@ -327,7 +324,7 @@ export function findStaffingShortfalls(state: ScenarioUiState): StaffingFinding[
   const peopleOf = (refs: PersonRefs) =>
     new Set([...expandPersonRefs(refs, state)].filter((id) => staffIds.has(id)));
 
-  const allEquations = buildEquations(state, range, expand, shiftsOf, peopleOf);
+  const allEquations = buildEquations(state, isoById, expand, shiftsOf, peopleOf, coveredShifts);
   const equations = allEquations.filter((eq) => eq.counted);
   const restricting = allEquations.filter((eq) => eq.restricts);
   const away = buildAway(state, expand, shiftsOf, peopleOf);
@@ -368,14 +365,15 @@ export function findStaffingShortfalls(state: ScenarioUiState): StaffingFinding[
     return out;
   };
 
-  // Only an override date can change the ceiling, so this memo stays tiny.
-  const overflowMemo = new Map<Equation, Map<number, SkillMixOverflow | null>>();
+  // An override or a covered date changes the ceiling AND the floors, so this is keyed by date.
+  const overflowMemo = new Map<Equation, Map<string, SkillMixOverflow | null>>();
   const overflowOn = (eq: Equation, dateId: string): SkillMixOverflow | null => {
-    const max = ceiling(eq, dateId);
-    const byMax = overflowMemo.get(eq) ?? new Map<number, SkillMixOverflow | null>();
-    overflowMemo.set(eq, byMax);
-    if (!byMax.has(max)) byMax.set(max, skillMixOverflow(state, eq.skillMix, max));
-    return byMax.get(max)!;
+    const byDate = overflowMemo.get(eq) ?? new Map<string, SkillMixOverflow | null>();
+    overflowMemo.set(eq, byDate);
+    if (!byDate.has(dateId)) {
+      byDate.set(dateId, skillMixOverflow(state, mixFloors(eq, dateId), ceiling(eq, dateId)));
+    }
+    return byDate.get(dateId)!;
   };
 
   for (const dateId of allDateIds) {
@@ -398,6 +396,7 @@ export function findStaffingShortfalls(state: ScenarioUiState): StaffingFinding[
         capRuleIds: [],
         skillMix: eq.restricts || eq.mix !== null || a.banRules.size > 0,
         mixPeople: eq.mix,
+        ...withCredit(creditOn(eq, dateId)),
       });
     }
 
@@ -436,6 +435,7 @@ export function findStaffingShortfalls(state: ScenarioUiState): StaffingFinding[
           // names a mix entry from a DIFFERENT card. It is not exhaustive: a same-card
           // mix shortfall still surfaces, just on the per-equation requirement_short.
           mixPeople: chosen.find((eq) => eq.mix)?.mix ?? null,
+          ...withCredit(chosen.reduce((sum, eq) => sum + creditOn(eq, dateId), 0)),
         });
       }
     }
@@ -470,6 +470,7 @@ export function findStaffingShortfalls(state: ScenarioUiState): StaffingFinding[
         // shifts equal the outer's, so nothing else stays disjoint from it). So this
         // only ever names a mix entry from a different card than outer.
         mixPeople: inner.find((eq) => eq.mix)?.mix ?? null,
+        ...withCredit(inner.reduce((sum, eq) => sum + creditOn(eq, dateId), 0)),
       });
     }
 
@@ -491,6 +492,7 @@ export function findStaffingShortfalls(state: ScenarioUiState): StaffingFinding[
         capRuleIds: [],
         skillMix: true,
         mixPeople: overflow.groups.join(" and "),
+        ...withCredit(creditOn(eq, dateId)),
       });
     }
   }
@@ -531,6 +533,7 @@ export function findStaffingShortfalls(state: ScenarioUiState): StaffingFinding[
       capRuleIds: [...binding],
       skillMix: eq.restricts || eq.mix !== null,
       mixPeople: eq.mix,
+      ...withCredit(dates.reduce((sum, d) => sum + creditOn(eq, d), 0)),
     });
   }
 
@@ -542,10 +545,11 @@ export function findStaffingShortfalls(state: ScenarioUiState): StaffingFinding[
 
 function buildEquations(
   state: ScenarioUiState,
-  range: Range,
+  isoById: ReadonlyMap<string, string>,
   expand: (refs: DateRef[]) => Set<string>,
   shiftsOf: (selector: string) => Set<string>,
   peopleOf: (refs: PersonRefs) => Set<string>,
+  coveredShifts: ReadonlyMap<string, ReadonlySet<string>>,
 ): Equation[] {
   const out: Equation[] = [];
   for (const card of state.cardsByKind.requirements) {
@@ -556,51 +560,111 @@ function buildEquations(
     const dateIds = expand(card.date == null ? [RESERVED_SHIFT_TYPE.all] : asList(card.date));
     // ponytail: with coefficients a person can count more than once, so only the ban is used.
     const counted = !card.shiftTypeCoefficients?.length;
-    const overrides = new Map(
-      (card.requiredNumPeopleOverrides ?? []).map(([iso, n]) => [toDateId(iso, range), n] as const),
-    );
     // Solver: a scalar selector is one equation; each top-level list element is one
     // equation, and a group or nested list inside it aggregates its shifts.
     const selectors = Array.isArray(card.shiftType) ? card.shiftType : [card.shiftType];
-    for (const selector of selectors) {
-      const shiftTypes = new Set(
-        flattenShiftTypeRefs(selector).flatMap((ref) => [...shiftsOf(String(ref))]),
-      );
+    const shiftsPerSelector = selectors.map(
+      (selector) =>
+        new Set(flattenShiftTypeRefs(selector).flatMap((ref) => [...shiftsOf(String(ref))])),
+    );
+    /**
+     * A shift id only selector `i` covers, so `cardNeedOn` reads THAT selector's numbers:
+     * it resolves a shift id to the first selector holding it, so a shift two selectors
+     * share would answer with the earlier one's count. A selector whose every shift an
+     * earlier one also holds is redundant: those equations already carry those shifts.
+     */
+    const ownShift = (i: number) => {
+      const earlier = new Set(shiftsPerSelector.slice(0, i).flatMap((ids) => [...ids]));
+      return [...shiftsPerSelector[i]].find((id) => !earlier.has(id));
+    };
+    for (const [i, shiftTypes] of shiftsPerSelector.entries()) {
       if (shiftTypes.size === 0) continue;
+      const counts = wardCounts({
+        state,
+        card,
+        dateIds,
+        isoById,
+        shiftTypes,
+        shiftId: ownShift(i),
+        coveredShifts,
+      });
       out.push({
         ruleId: card.uid,
         shiftTypes,
         qualified,
         dateIds,
         required: card.requiredNumPeople,
-        overrides,
+        counts,
         preferred: card.preferredNumPeople ?? null,
         restricts,
         counted,
         mix: null,
+        mixIndex: null,
         skillMix: counted ? card.skillMix : undefined,
       });
 
       // Skill mix: a floor for a group AMONG this equation's staff. It bans nobody,
-      // so it restricts nothing and has no ceiling of its own.
-      for (const entry of card.skillMix ?? []) {
+      // so it restricts nothing and has no ceiling of its own. It reads the same date
+      // map as its head equation: a cover credits both.
+      for (const [k, entry] of (card.skillMix ?? []).entries()) {
         out.push({
           ruleId: card.uid,
           shiftTypes,
           qualified: new Set([...peopleOf([entry.people])].filter((p) => qualified.has(p))),
           dateIds,
           required: entry.minNumPeople,
-          overrides: new Map(),
+          counts,
           preferred: Number.POSITIVE_INFINITY,
           restricts: false,
           counted: true,
           mix: String(entry.people),
+          mixIndex: k,
           skillMix: undefined,
         });
       }
     }
   }
   return out;
+}
+
+/**
+ * The ward's numbers for one card-and-selector on every date it covers (`cardNeedOn`,
+ * d582): the authored count with the hand-written per-date overrides and any temporary
+ * cover applied, her credit clamped at 0 (F4). `shiftId` picks the selector: undefined
+ * for a card with one, and see `ownShift` for the rest.
+ *
+ * `cardNeedOn` restates EVERY enabled card's date scope, so it is asked only where a cover
+ * could reach this selector: her date, and one of her shifts among its shifts. Everywhere
+ * else the card's own numbers stand, which is exactly what `cardNeedOn` returns when no
+ * cover counts: a cover only ever LOWERS a count, and only for a card she reaches.
+ */
+function wardCounts(options: {
+  state: ScenarioUiState;
+  card: RequirementCard;
+  dateIds: ReadonlySet<string>;
+  isoById: ReadonlyMap<string, string>;
+  shiftTypes: ReadonlySet<string>;
+  shiftId: string | undefined;
+  coveredShifts: ReadonlyMap<string, ReadonlySet<string>>;
+}): Map<string, WardCounts> {
+  const { state, card, dateIds, isoById, shiftTypes, shiftId, coveredShifts } = options;
+  const counts = new Map<string, WardCounts>();
+  for (const dateId of dateIds) {
+    const iso = isoById.get(dateId);
+    if (iso === undefined) continue;
+    const onDate = coveredShifts.get(iso);
+    const covered =
+      onDate !== undefined && [...shiftTypes].some((shift) => onDate.has(shift))
+        ? cardNeedOn(state, card, iso, shiftId)
+        : null;
+    counts.set(dateId, {
+      required: covered?.required ?? requiredOn(card, iso),
+      preferred: covered ? (covered.preferred ?? null) : (card.preferredNumPeople ?? null),
+      mix: covered?.mix ?? (card.skillMix ?? []).map((entry) => entry.minNumPeople),
+      credit: covered?.credit ?? 0,
+    });
+  }
+  return counts;
 }
 
 function blockOf(cell: UiRequestCell, shiftsOf: (selector: string) => Set<string>): Block | null {

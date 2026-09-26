@@ -31,6 +31,7 @@ import { EXPRESSION_OPS, substituteTarget } from "@/components/card-editor/expre
 import { calendarSpan } from "./assumptions";
 import { generateDateItems } from "@/lib/dates";
 import { formatShortDate } from "@/lib/dates/date-id";
+import { cardNeedOn, coverStatuses } from "@/lib/scenario/temporary-cover";
 import { requiredOn } from "@/lib/rules/shortfalls";
 import type { AssistantCommandV1 } from "./commands";
 import { stableStringify } from "./digest";
@@ -244,11 +245,19 @@ function describeRequirement(card: RequirementCard): string {
   return `${n} to ${p} people on ${shifts}, ${dates}${exceptions} (${lean}, weight ${card.weight})${ban}${mix}`;
 }
 
+/** A count as the Preview says it: `2`, or `2 to 3` with a distinct preferred count. */
+function renderCount(required: number, preferred: number | null | undefined): string {
+  return preferred == null || preferred === required
+    ? `${required}`
+    : `${required} to ${preferred}`;
+}
+
+/** `exactly 2`, or `2 to 3` left as it stands when a distinct preferred count is stated. */
+const exactLead = (count: string) => (count.includes(" to ") ? count : `exactly ${count}`);
+
 /** A day's count as the Preview says it: `2`, or `2 to 3` with a distinct preferred count. */
 function countOn(card: RequirementCard, iso: string): string {
-  const n = requiredOn(card, iso);
-  const p = card.preferredNumPeople;
-  return p == null || p === n ? `${n}` : `${n} to ${p}`;
+  return renderCount(requiredOn(card, iso), card.preferredNumPeople);
 }
 
 /**
@@ -270,7 +279,7 @@ function requirementChange(from: RequirementCard, to: RequirementCard): string |
     .filter((iso) => requiredOn(from, iso) !== requiredOn(to, iso))
     .map((iso) => {
       const was = countOn(from, iso);
-      const lead = was.includes(" to ") ? was : `exactly ${was}`;
+      const lead = exactLead(was);
       return `${formatShortDate(iso)}: ${lead} → ${countOn(to, iso)} on ${requirementShifts(to).shifts}`;
     });
   return lines.length > 0 ? lines.join("; ") : undefined;
@@ -358,6 +367,55 @@ function coordinateKey(cell: UiRequestCell): string {
 // ---------------------------------------------------------------------------
 // The structural comparison
 // ---------------------------------------------------------------------------
+
+/** A shift type's label, as every other shift line in a Preview names it. */
+function shiftNameOf(state: ScenarioUiState, shiftId: string): string {
+  return state.shifts.find((shift) => String(shift.id) === shiftId)?.description?.trim() || shiftId;
+}
+
+/**
+ * The count lines a temporary cover draws: one per card, date and shift her credit
+ * reaches, stating the effective count on each side (d582). `coverStatuses` names exactly
+ * those slots -- a cover the ward cannot resolve has no effects, and a card she does not
+ * count in is not in the list -- so a cover that lowers nothing draws no line, and her
+ * credit `wardNeed`s the count at 0 rather than below it (F4). The cards are untouched by
+ * a cover, so nothing else in this diff states the change.
+ */
+function coverCountEntries(before: ScenarioUiState, after: ScenarioUiState): Entry[] {
+  const slots = new Map<string, { cardUid: string; iso: string; shiftId: string }>();
+  for (const state of [before, after]) {
+    for (const status of coverStatuses(state)) {
+      for (const { cardUid, iso, shiftId } of status.effects) {
+        slots.set(`${cardUid}|${iso}|${shiftId}`, { cardUid, iso, shiftId });
+      }
+    }
+  }
+  const entries: Entry[] = [];
+  for (const { cardUid, iso, shiftId } of [...slots.values()].sort(
+    (a, b) =>
+      a.iso.localeCompare(b.iso) ||
+      a.shiftId.localeCompare(b.shiftId) ||
+      a.cardUid.localeCompare(b.cardUid),
+  )) {
+    const from = before.cardsByKind.requirements.find((card) => card.uid === cardUid);
+    const to = after.cardsByKind.requirements.find((card) => card.uid === cardUid);
+    // A card that is itself added or removed states so on its own line.
+    if (!from || !to) continue;
+    const counted = (state: ScenarioUiState, card: RequirementCard) => {
+      const need = cardNeedOn(state, card, iso, shiftId);
+      return renderCount(need.required, need.preferred);
+    };
+    entries.push({
+      key: `cover:${cardUid}|${iso}|${shiftId}`,
+      scope: "staffing-requirements",
+      label: `${shiftNameOf(after, shiftId)} on ${formatShortDate(iso)}`,
+      before: exactLead(counted(before, from)),
+      after: `${counted(after, to)} (${ruleTitle(to, "requirements")})`,
+      kind: "changed",
+    });
+  }
+  return entries;
+}
 
 type Entry = ProposalDiffEntry;
 
@@ -553,6 +611,8 @@ export function diffScenarioDocuments(
       }),
     );
   }
+
+  entries.push(...coverCountEntries(before, after));
 
   entries.push(...compareRequestMatrix(before, after));
 
