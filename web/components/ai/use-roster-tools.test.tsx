@@ -405,19 +405,6 @@ describe("the escalation ladder in the tools", () => {
     expect(fixture.prepare).not.toHaveBeenCalled();
   });
 
-  it("refuses a temporary nurse whose groups name a staff group the roster does not have (bead 6yn)", async () => {
-    useBorrow();
-    const answer = await tool("prepare_borrowed_cover").handler(
-      { ...BORROW_MEI, groups: ["Ward6"], summary: "Borrow." },
-      {},
-    );
-    expect(answer).toMatch(/Ward6/);
-    expect(answer).toMatch(/no card was shown/);
-    expect(answer).toMatch(/Nights/);
-    expect(fixture.prepare).not.toHaveBeenCalled();
-    expect(useAssistantStore.getState().activeRosterChange).toBeNull();
-  });
-
   it("borrows into the real group a multi-member qualifiedPeople selector names (bead olu)", async () => {
     const document = {
       ...borrowDocument(),

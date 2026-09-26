@@ -2,11 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderHook } from "@testing-library/react";
 import type { RosterDocument } from "@/lib/roster";
-import {
-  fixtureCanonicalDocument,
-  fixtureRosterDocument,
-  withEdits,
-} from "@/lib/roster/test-fixtures";
+import { fixtureRosterDocument, withEdits } from "@/lib/roster/test-fixtures";
 import {
   requestRosterChange,
   useRosterChangeStore,
@@ -61,12 +57,7 @@ describe("applyRosterChange", () => {
   });
 
   it("adds a borrowed nurse's row with her cells in the same batch (bead g1p)", async () => {
-    // Her row is valid only against a scenario that declares the group it names
-    // (bead 6yn), so the fixture's submitted people gain an `RN` group.
-    const base = fixtureCanonicalDocument();
-    const document = await fixtureRosterDocument({
-      document: { ...base, people: { ...base.people, groups: [{ id: "RN", members: ["P1"] }] } },
-    });
+    const document = await fixtureRosterDocument();
     const OFF = { kind: "off" } as const;
     const mei = { id: "Mei", groups: ["RN"], days: [OFF, OFF, OFF, OFF] };
     const request: RosterChangeRequest = {
