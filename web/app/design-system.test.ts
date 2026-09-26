@@ -418,9 +418,12 @@ describe("elevation — five general tokens plus one directional exception", () 
     expect(globals).toContain(`--${alias}: var(--${runtime});`);
   });
 
-  it("dialog and toast are semantic aliases of --sh-3, not independent values", () => {
+  it("dialog is a semantic alias of --sh-3, not an independent value", () => {
     expect(globals).toContain("--shadow-dialog: var(--sh-3);");
-    expect(globals).toContain("--shadow-toast: var(--sh-3);");
+    // --shadow-toast was a second name for the same value that nothing reached
+    // for (the toast takes --sh-3 directly). Removed rather than left as a dead
+    // alias a reader would mistake for a live choice.
+    expect(globals).not.toContain("--shadow-toast");
   });
 
   it("the side shadow is authored once, as the runtime --sh-side", () => {
