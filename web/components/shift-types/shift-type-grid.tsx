@@ -44,8 +44,9 @@ import { SHIFT_TYPES_ADD_ANCHOR } from "./capability-anchors";
 import { toast } from "sonner";
 import { useScenarioStore, scenarioCommands, type ScenarioStoreState } from "@/lib/store";
 import { useLosableDraft } from "@/components/shell/use-losable-draft";
-import type { ScenarioUiState, UiShiftType } from "@/lib/scenario";
+import type { RequirementOverride, ScenarioUiState, UiShiftType } from "@/lib/scenario";
 import { RenameCollisionError } from "@/lib/cascade";
+import { formatShortDate } from "@/lib/dates/date-id";
 import { GuardedLink } from "@/components/shell/guarded-link";
 import { cn } from "@/lib/utils";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -764,7 +765,11 @@ function StaffingValues({
   card,
   testKey,
 }: {
-  card: { requiredNumPeople: number; preferredNumPeople?: number } | null;
+  card: {
+    requiredNumPeople: number;
+    preferredNumPeople?: number;
+    requiredNumPeopleOverrides?: RequirementOverride[];
+  } | null;
   testKey: string;
 }) {
   return (
@@ -784,6 +789,22 @@ function StaffingValues({
           {card?.preferredNumPeople ?? "—"}
         </span>
       </div>
+      {card?.requiredNumPeopleOverrides?.length ? (
+        // Per-date exceptions are a derived value of the rule, shown beside the
+        // base count the same way Preferred is. Same `14 Oct: 1 · 24 Oct: 3`
+        // summary the Requirements card list uses.
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-meta text-ink3">Exceptions</span>
+          <span
+            className="text-right font-mono text-meta font-semibold text-ink2"
+            data-testid={`staffing-exceptions-${testKey}`}
+          >
+            {card.requiredNumPeopleOverrides
+              .map(([iso, n]) => `${formatShortDate(iso)}: ${n}`)
+              .join(" · ")}
+          </span>
+        </div>
+      ) : null}
     </div>
   );
 }

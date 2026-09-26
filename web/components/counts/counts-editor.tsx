@@ -27,6 +27,7 @@ import {
   useCardEditorDraftGuard,
   useCardEditorStaleGuard,
 } from "@/components/card-editor/card-editor-shell";
+import { FaFileContract } from "@/components/icons";
 import { CountForm } from "./count-form";
 import { ContractedForm } from "./contracted-form";
 import { CountCardList } from "./count-card-list";
@@ -330,6 +331,8 @@ export function CountsEditor() {
           formOpen: draft?.kind === "contracted",
           onAdd: openAddContracted,
           testId: "add-contracted-toggle",
+          // The prototype's file-contract glyph names the action (ScreenCards.dc.html:20).
+          icon: <FaFileContract />,
         }}
         instructions={<CardEditorInstructions items={INSTRUCTIONS} />}
       />

@@ -2,14 +2,24 @@
 
 // The guided add/edit form for a Contracted-Hours shift count (T12 M2a-3). The
 // full guided editor that authors the marked card end-to-end: a policy toggle
-// (Exact / Range), the target in human hours (converted via the half-hour codec),
-// the shared per-shift-type coefficient sub-editor wired over the CONCRETE day-state
-// expansion, a read-only view of the locked expression/weight encoding, and a
-// collapsible Solver-details section exposing the raw stored encoding plus a raw
-// half-hour target override. Save is gated by the SHARED coverage validator
-// (`validateContractedCommit` → `validateContractedHoursContract`): a draft with
-// incomplete/extra/invalid coverage is blocked with the error in place and the
-// draft stays recoverable, never silently dropped.
+// (Exact / Range), the target on the half-hour grid (authored as integer
+// half-hours in the UI, stored in the draft as human hours via the codec), the
+// shared per-shift-type coefficient sub-editor wired over the CONCRETE day-state
+// expansion, and ONE collapsible "Solver details & overrides" section that shows
+// the concrete expression the card will serialize and the locked `+∞` weight.
+// Save is gated by the SHARED coverage validator (`validateContractedCommit` →
+// `validateContractedHoursContract`): a draft with incomplete/extra/invalid
+// coverage is blocked with the error in place and the draft stays recoverable,
+// never silently dropped.
+//
+// The layout follows the guided prototype (docs/design_prototype/source/
+// ScreenCards.dc.html:55-77,93-133,398-419): the "IN PLAIN ENGLISH" panel with
+// the Refresh-from-Shift-Types action in its header and the pending preview
+// directly beneath it, then a FULL-WIDTH policy/target cell whose target is the
+// prototype's friendly-hours slider + large `{h}h` readout over a raw half-hour
+// number input. The slider is decorative — it carries no handler and is
+// `aria-hidden` — because the number input is the control, exactly as in the
+// prototype. The readout/slider scale is display-only (see SLIDER_CAP_HALF_HOURS).
 //
 // Expression and weight are LOCKED by policy — changing them requires converting to
 // a generic Shift Count (the Convert action itself is M2a-4; only the note lives
@@ -21,7 +31,13 @@ import { formatUncreditedLeaveWarning } from "@/lib/scenario";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Surface } from "@/components/ui/surface";
-import { FaPlus, FaTriangleExclamation } from "@/components/icons";
+import {
+  FaArrowRotateRight,
+  FaChevronRight,
+  FaLock,
+  FaPlus,
+  FaTriangleExclamation,
+} from "@/components/icons";
 import { CardEditorForm } from "@/components/card-editor/card-editor-shell";
 import { TransferList } from "@/components/entity-editor/transfer-list";
 import { entityKey, sameEntityId } from "@/components/entity-editor/core";
@@ -37,6 +53,7 @@ import {
   buildDateScopeDateGroups,
   buildDateScopeDateItems,
   buildPeopleTransferOptions,
+  summarizeRefs,
   toggleInSelection,
   type CountScenarioInput,
 } from "./counts-model";
@@ -59,6 +76,7 @@ import {
 } from "./refresh-model";
 import {
   formatHalfHours,
+  HALF_HOURS_PER_HOUR,
   LEAVE_CREDIT_HALF_HOURS,
   parseHalfHours,
   parseRawHalfHours,
@@ -149,157 +167,335 @@ function PolicyToggle({
   );
 }
 
-/** The read-only rows for the encoding the policy locks: the solver expression and
- *  the hard (`+∞`) weight, with the note that changing them needs a convert. */
-function LockedEncoding({
-  policy,
-  expressionError,
-  weightError,
+/** The policy's lock hint (ScreenCards:99-101): the weight is a hard rule and the
+ *  expression follows the policy, so neither is free to edit here. It sits directly
+ *  under the policy toggle it constrains rather than in a panel of its own — the
+ *  concrete expression and weight are shown where they are read, in Solver
+ *  details. */
+function PolicyLockHint({ policy }: { policy: "exact" | "range" }) {
+  return (
+    <p className="flex items-start gap-2 text-meta leading-[1.45] text-ink3">
+      <FaLock className="mt-0.5 size-2.5 flex-none" />
+      <span>
+        Hard requirement — the solver must satisfy it. Weight is fixed at +∞
+        {policy === "range" ? " and the expression becomes a pair of bounds." : "."}
+      </span>
+    </p>
+  );
+}
+
+/** Half-hours at the slider track's right edge (the prototype's `cap`,
+ *  ScreenCards:870). The track is a DISPLAY scale only: the number input below it
+ *  is the control, so the cap can never make a value unreachable — a target beyond
+ *  it simply pins the thumb to the end of the track. */
+const SLIDER_CAP_HALF_HOURS = 500;
+
+/** A target's position on the display track, clamped to `[0, 100]` percent. */
+function sliderPct(halfHours: number | null): number {
+  if (halfHours === null) return 0;
+  return Math.max(0, Math.min(100, (halfHours / SLIDER_CAP_HALF_HOURS) * 100));
+}
+
+/** An integer half-hour count as the prototype's hours text: `320 → "160"`, with an
+ *  em-dash for an unparsable/empty target (ScreenCards:868 `hh`). */
+function halfHoursText(halfHours: number | null): string {
+  return halfHours === null ? "—" : String(halfHours / HALF_HOURS_PER_HOUR);
+}
+
+/**
+ * The prototype's hours slider (ScreenCards:106-110,117-122): a 4px `--line2`
+ * track, a `--brand` fill and square 18px `--surface` thumbs ringed in `--brand`.
+ *
+ * IT IS DECORATIVE AND SAYS SO. The prototype binds no handler to it and neither
+ * does this: the half-hour number input is the control, so the track is
+ * `aria-hidden` rather than an unlabelled widget a screen reader could focus and
+ * nothing would happen on. A real draggable slider is a behaviour the product has
+ * not specified (which half-hour does a pixel map to, and does dragging commit?) —
+ * this batch is fidelity to the recorded design, not a new control.
+ */
+function HoursSlider({
+  from,
+  to,
+  thumbs,
+  testId,
 }: {
-  policy: "exact" | "range";
-  expressionError?: string;
-  weightError?: string;
+  from: number;
+  to: number;
+  thumbs: readonly number[];
+  testId: string;
 }) {
-  const expressionText = policy === "range" ? "x ≥ T and x ≤ T" : "x = T";
+  return (
+    <div className="relative mx-2.5 h-[22px]" aria-hidden="true" data-testid={testId}>
+      <div className="absolute inset-x-0 top-[9px] h-1 bg-line2" />
+      <div
+        className="absolute top-[9px] h-1 bg-brand"
+        style={{ left: `${from}%`, width: `${Math.max(0, to - from)}%` }}
+      />
+      {thumbs.map((pct, index) => (
+        <div
+          key={index}
+          className="absolute top-[2px] size-[18px] -translate-x-1/2 border-2 border-brand bg-surface"
+          style={{ left: `${pct}%` }}
+        />
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The guided target control (ScreenCards:103-129): the prototype's large `{h}h`
+ * readout over a decorative hours slider, then a RAW half-hour number input on the
+ * half-hour grid — replacing the human-hours text fields.
+ *
+ * THE DRAFT ENCODING IS UNCHANGED. `ContractedFormState` still holds human-hours
+ * STRINGS and only the presentation is half-hours; every edit round-trips through
+ * the codec (`formatHalfHours`), which is lossless for on-grid values. Keeping the
+ * shared draft shape means the validator, the card build and the Refresh derivation
+ * are untouched by this re-skin.
+ *
+ * A malformed or empty entry is held, not truncated: `parseRawHalfHours` rejects
+ * `"3.5"`/`"1e3"`/negatives, so a typo can never silently rewrite the target.
+ *
+ * The readout is MONO, not the prototype's display face: DESIGN.md §3 reserves the
+ * monospace face for "IDs, counts, hours and solver expressions — so a number
+ * always reads as data", and DESIGN.md is canon over a prototype example.
+ */
+function HoursTargetField({
+  form,
+  onHalfChange,
+}: {
+  form: ContractedFormState;
+  onHalfChange: (key: "targetExact" | "targetRangeMin" | "targetRangeMax", raw: string) => void;
+}) {
+  const exactHalf = parseHalfHours(form.targetExact);
+  const minHalf = parseHalfHours(form.targetRangeMin);
+  const maxHalf = parseHalfHours(form.targetRangeMax);
+
+  if (form.policy === "exact") {
+    return (
+      <div className="flex flex-col gap-3" data-testid="contracted-target">
+        <div className="flex justify-end">
+          <span
+            className="font-mono text-title font-bold text-brandink"
+            data-testid="contracted-target-readout"
+          >
+            {halfHoursText(exactHalf)}h
+          </span>
+        </div>
+        <HoursSlider
+          from={0}
+          to={sliderPct(exactHalf)}
+          thumbs={[sliderPct(exactHalf)]}
+          testId="contracted-target-slider"
+        />
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            type="number"
+            min={0}
+            step={1}
+            data-testid="contracted-target-exact"
+            aria-label="Contracted hours in half-hours"
+            value={exactHalf ?? ""}
+            onChange={(e) => onHalfChange("targetExact", e.target.value)}
+            className="w-24 font-mono font-bold"
+          />
+          <span className="font-mono text-label font-medium text-ink3">
+            half-hours · 30-min steps
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-3" data-testid="contracted-target">
+      <div className="flex justify-end">
+        <span
+          className="font-mono text-title font-bold text-brandink"
+          data-testid="contracted-target-readout"
+        >
+          {halfHoursText(minHalf)}h – {halfHoursText(maxHalf)}h
+        </span>
+      </div>
+      <HoursSlider
+        from={sliderPct(minHalf)}
+        to={sliderPct(maxHalf)}
+        thumbs={[sliderPct(minHalf), sliderPct(maxHalf)]}
+        testId="contracted-target-slider"
+      />
+      <div className="flex flex-wrap items-center gap-2.5">
+        <Input
+          type="number"
+          min={0}
+          step={1}
+          data-testid="contracted-target-min"
+          aria-label="Minimum contracted hours in half-hours"
+          value={minHalf ?? ""}
+          onChange={(e) => onHalfChange("targetRangeMin", e.target.value)}
+          className="w-[90px] text-center font-mono font-bold"
+        />
+        <span className="font-bold text-ink3">–</span>
+        <Input
+          type="number"
+          min={0}
+          step={1}
+          data-testid="contracted-target-max"
+          aria-label="Maximum contracted hours in half-hours"
+          value={maxHalf ?? ""}
+          onChange={(e) => onHalfChange("targetRangeMax", e.target.value)}
+          className="w-[90px] text-center font-mono font-bold"
+        />
+        <span className="font-mono text-label font-medium text-ink3">
+          half-hours stored · 30-min steps
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/** The prototype's `contractSentence` (ScreenCards:1028-1029) over the CURRENT
+ *  draft: the policy/target as human hours, the date scope as its label, and the
+ *  fixed paid-leave credit. Reworded only enough to read as a sentence the author
+ *  just authored — every value in it is the draft's. */
+function contractedSentence(form: ContractedFormState): string {
+  const creditHours = LEAVE_CREDIT_HALF_HOURS / HALF_HOURS_PER_HOUR;
+  const range =
+    form.policy === "range"
+      ? `between ${halfHoursText(parseHalfHours(form.targetRangeMin))}h and ${halfHoursText(parseHalfHours(form.targetRangeMax))}h`
+      : `exactly ${halfHoursText(parseHalfHours(form.targetExact))}h`;
+  const dates = form.countDates.length > 0 ? summarizeRefs(form.countDates) : "ALL";
+  return `Every nurse works ${range} across ${dates}. A paid-leave day credits ${creditHours}h toward that total; a rest day (OFF) counts 0.`;
+}
+
+/**
+ * The "IN PLAIN ENGLISH" panel (ScreenCards:55-62): the same rule restated as one
+ * sentence, with the Refresh-from-Shift-Types action in the panel header. The
+ * sentence is derived from the live draft, so it tracks the policy, the target and
+ * the date scope as the author edits — it is a reading of the draft, not a stored
+ * field.
+ */
+function InPlainEnglishPanel({ sentence, onRefresh }: { sentence: string; onRefresh: () => void }) {
   return (
     <Surface
       level="well"
       geometry="control"
-      className="flex flex-col gap-2 p-3.5"
-      data-testid="contracted-locked-encoding"
+      className="flex flex-col gap-2 p-4"
+      data-testid="contracted-plain-english"
     >
-      <span className="text-label font-semibold uppercase tracking-[0.03em] text-ink2">
-        Locked encoding
-      </span>
-      <div className="flex flex-wrap gap-x-8 gap-y-2">
-        <div className="flex flex-col gap-0.5">
-          <span className="text-label font-semibold text-ink3">Expression</span>
-          <span className="font-mono text-meta text-ink" data-testid="contracted-locked-expression">
-            {expressionText}
-          </span>
-          {expressionError && (
-            <span className="text-meta font-semibold text-error">{expressionError}</span>
-          )}
-        </div>
-        <div className="flex flex-col gap-0.5">
-          <span className="text-label font-semibold text-ink3">Weight</span>
-          <span className="font-mono text-meta text-ink" data-testid="contracted-locked-weight">
-            Hard (∞)
-          </span>
-          {weightError && <span className="text-meta font-semibold text-error">{weightError}</span>}
-        </div>
+      <div className="flex flex-wrap items-center gap-2.5">
+        <span className="flex-1 text-label font-semibold uppercase tracking-[0.04em] text-ink3">
+          In plain English
+        </span>
+        <Button
+          variant="outline"
+          size="sm"
+          data-testid="contracted-refresh-button"
+          onClick={onRefresh}
+        >
+          <FaArrowRotateRight /> Refresh from Shift Types
+        </Button>
       </div>
-      <p className="text-meta italic text-ink3">
-        Expression and weight are fixed by the policy. Changing them requires converting this rule
-        to a generic Shift Count.
+      <p
+        className="text-body font-semibold leading-[1.5] text-ink"
+        data-testid="contracted-plain-english-sentence"
+      >
+        {sentence}
       </p>
     </Surface>
   );
 }
 
 /**
- * Solver-details escape hatch (DL09 D10): a collapsed section that shows the exact
- * `{ expression, target, weight }` the card will serialize and offers a RAW
- * half-hour target editor (integer half-hours, not the human-hours codec) kept in
- * two-way sync with the human-hours target inputs. Coefficients are already raw
- * half-hour integers in the coefficient sub-editor, so no duplicate editor is
- * needed here.
+ * Solver details & overrides (DL09 D10, ScreenCards:398-419): ONE collapsed section
+ * showing the exact expression and weight the card will serialize. Both are locked
+ * by the policy, so they are presented as read-only chips with the concrete
+ * half-hour target substituted in (`x = 320`, `300 ≤ x ≤ 340`) rather than as an
+ * abstract `x = T` — and the section is where that lock is explained.
  */
-function SolverDetails({
-  form,
-  onRawTargetChange,
-}: {
-  form: ContractedFormState;
-  onRawTargetChange: (patch: Partial<ContractedFormState>) => void;
-}) {
+function SolverDetails({ form, errors }: { form: ContractedFormState; errors: ContractedErrors }) {
   const isRange = form.policy === "range";
-  const expressionText = isRange ? '["x >= T", "x <= T"]' : '"x = T"';
-  const rawExact = parseHalfHours(form.targetExact);
-  const rawMin = parseHalfHours(form.targetRangeMin);
-  const rawMax = parseHalfHours(form.targetRangeMax);
-  const targetText = isRange ? `[${rawMin ?? "?"}, ${rawMax ?? "?"}]` : String(rawExact ?? "?");
-
-  // A raw half-hour edit writes straight back through the human-hours field so the
-  // two views never drift; a cleared/non-integer raw value clears the human field.
-  const setRaw = (key: "targetExact" | "targetRangeMin" | "targetRangeMax", raw: string) => {
-    if (raw === "") {
-      onRawTargetChange({ [key]: "" });
-      return;
-    }
-    // Strict integer half-hours — reject (don't truncate) "3.5"/"1e3"/negatives so a
-    // malformed raw edit can never silently rewrite the target to a different value.
-    const half = parseRawHalfHours(raw);
-    if (half === null) return;
-    onRawTargetChange({ [key]: formatHalfHours(half) });
-  };
+  const exactHalf = parseHalfHours(form.targetExact);
+  const minHalf = parseHalfHours(form.targetRangeMin);
+  const maxHalf = parseHalfHours(form.targetRangeMax);
+  const exprText = isRange
+    ? `${minHalf ?? "—"} ≤ x ≤ ${maxHalf ?? "—"}`
+    : `x = ${exactHalf ?? "—"}`;
+  // The encoding errors are defensive — expression and weight are derived from the
+  // policy, never authored — but they used to be displayed beside the locked rows, so
+  // they are still shown here rather than dropped on the floor. The section expands
+  // itself when one appears, because a collapsed control would hide the only reason
+  // the save did nothing.
+  const lockError = errors.expression ?? errors.weight;
 
   return (
     <details
-      className="overflow-hidden rounded-control bg-panel shadow-well"
+      className="group overflow-hidden rounded-control border border-line2 bg-panel"
       data-testid="contracted-solver-details"
+      open={lockError ? true : undefined}
     >
       <summary
-        className="cursor-pointer px-3.5 py-2 text-label font-semibold uppercase tracking-[0.03em] text-ink2"
+        className="flex cursor-pointer items-center gap-2 px-3.5 py-2.5"
         data-testid="contracted-solver-details-toggle"
       >
-        Solver details
+        <FaChevronRight className="size-3 flex-none text-ink3 transition-transform duration-fast group-open:rotate-90" />
+        <span className="flex-1 text-label font-semibold uppercase tracking-[0.04em] text-ink2">
+          Solver details &amp; overrides
+        </span>
+        <span
+          className="font-mono text-label font-semibold text-ink3"
+          data-testid="contracted-solver-summary"
+        >
+          {exprText} · +∞
+        </span>
       </summary>
       <div className="flex flex-col gap-3 border-t border-line2 p-3.5">
-        <pre
-          className="whitespace-pre-wrap font-mono text-label text-ink2"
-          data-testid="contracted-raw-encoding"
-        >
-          {`expression: ${expressionText}\ntarget: ${targetText}\nweight: .inf`}
-        </pre>
         <div className="flex flex-col gap-1.5">
-          <span className="text-label font-semibold uppercase tracking-[0.03em] text-ink3">
-            Raw target (half-hours)
+          <span className="text-label font-semibold uppercase tracking-[0.04em] text-ink3">
+            Expression
           </span>
-          {isRange ? (
-            <div className="flex flex-wrap gap-3">
-              <label className="flex flex-col gap-1">
-                <span className="text-label text-ink3">Minimum</span>
-                <Input
-                  type="number"
-                  min={0}
-                  step={1}
-                  data-testid="contracted-raw-target-min"
-                  aria-label="Raw minimum target in half-hours"
-                  value={rawMin ?? ""}
-                  onChange={(e) => setRaw("targetRangeMin", e.target.value)}
-                  className="h-control-sm w-28 font-mono"
-                />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-label text-ink3">Maximum</span>
-                <Input
-                  type="number"
-                  min={0}
-                  step={1}
-                  data-testid="contracted-raw-target-max"
-                  aria-label="Raw maximum target in half-hours"
-                  value={rawMax ?? ""}
-                  onChange={(e) => setRaw("targetRangeMax", e.target.value)}
-                  className="h-control-sm w-28 font-mono"
-                />
-              </label>
-            </div>
-          ) : (
-            <Input
-              type="number"
-              min={0}
-              step={1}
-              data-testid="contracted-raw-target"
-              aria-label="Raw target in half-hours"
-              value={rawExact ?? ""}
-              onChange={(e) => setRaw("targetExact", e.target.value)}
-              className="h-control-sm w-28 font-mono"
-            />
-          )}
-          <span className="text-meta italic text-ink3">
-            Integer half-hours (2 per hour) — stays in sync with the hours field above.
-          </span>
+          <Surface
+            level="well"
+            geometry="control"
+            emphasis="hairline"
+            className="inline-flex w-fit items-center gap-2 px-3 py-2"
+          >
+            <FaLock className="size-2.5 text-ink3" />
+            <span
+              className="font-mono text-body font-bold text-ink2"
+              data-testid="contracted-raw-encoding"
+            >
+              {exprText}
+            </span>
+          </Surface>
         </div>
+        <div className="flex flex-col gap-1.5">
+          <span className="text-label font-semibold uppercase tracking-[0.04em] text-ink3">
+            Weight
+          </span>
+          <Surface
+            level="well"
+            geometry="control"
+            emphasis="hairline"
+            className="inline-flex w-fit items-center gap-2 px-3 py-2"
+          >
+            <FaLock className="size-2.5 text-ink3" />
+            <span
+              className="font-mono text-body font-bold text-ink2"
+              data-testid="contracted-locked-weight"
+            >
+              +∞
+            </span>
+          </Surface>
+        </div>
+        {lockError && (
+          <p className="text-meta font-semibold text-error" role="alert">
+            {lockError}
+          </p>
+        )}
+        <p className="text-meta italic text-ink3">
+          Expression &amp; weight are locked while this is a contract. Convert to a generic shift
+          count to edit them freely.
+        </p>
       </div>
     </details>
   );
@@ -326,11 +522,18 @@ function refreshRowValueText(row: RefreshRow): string {
 }
 
 /**
- * The Refresh-from-Shift-Types preview: a non-mutating panel that categorizes every
- * concrete coefficient id against its Shift-Type-derived value (added / changed /
- * unchanged / non-derivable / removed). Confirm applies the derivation to the draft;
- * Cancel dismisses it without applying anything. Explicit-only — it never runs on
- * mount or selector change.
+ * The Refresh-from-Shift-Types preview (ScreenCards:63-77): a non-mutating panel
+ * that opens with the aggregate counts banner ("Shift Types changed — review before
+ * applying") and then categorizes every concrete coefficient id against its
+ * Shift-Type-derived value (added / changed / unchanged / non-derivable / removed).
+ * "Apply update" applies the derivation to the draft; "Cancel preview" dismisses it
+ * without applying anything. Explicit-only — it never runs on mount or selector
+ * change.
+ *
+ * The per-category rows go BEYOND the prototype, which shows only the four
+ * aggregate counts. A count without the ids behind it leaves the author unable to
+ * see what a coefficient is about to become before applying, so the rows are kept
+ * and the aggregate banner is added on top of them.
  */
 function RefreshPanel({
   preview,
@@ -341,16 +544,35 @@ function RefreshPanel({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  const countOf = (key: RefreshCategory) =>
+    preview.rows.filter((row) => row.category === key).length;
   return (
     <Surface
       level="well"
       geometry="control"
-      className="flex flex-col gap-3 p-3.5"
+      className="flex flex-col gap-3 p-4"
       data-testid="contracted-refresh-preview"
     >
-      <span className="text-label font-semibold uppercase tracking-[0.03em] text-ink2">
-        Refresh preview
-      </span>
+      <div className="flex items-center gap-2">
+        <FaArrowRotateRight className="size-3 flex-none text-brandink" />
+        <span className="text-body font-bold text-brandink">
+          Shift Types changed — review before applying
+        </span>
+      </div>
+      <div className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-label font-semibold">
+        <span className="text-successink" data-testid="contracted-refresh-count-added">
+          + {countOf("added")} added
+        </span>
+        <span className="text-errorink" data-testid="contracted-refresh-count-removed">
+          − {countOf("removed")} removed
+        </span>
+        <span className="text-warnink" data-testid="contracted-refresh-count-changed">
+          ✎ {countOf("changed")} changed
+        </span>
+        <span className="text-ink3" data-testid="contracted-refresh-count-unchanged">
+          {countOf("unchanged")} unchanged
+        </span>
+      </div>
       {REFRESH_CATEGORIES.map(({ key, label, hint }) => {
         const rows = preview.rows.filter((row) => row.category === key);
         if (rows.length === 0) return null;
@@ -405,7 +627,7 @@ function RefreshPanel({
             toggle: a darkened brand on brand. The Button `default` variant is the
             canonical `--brand` + `--onbrand` pair. */}
         <Button size="sm" data-testid="contracted-refresh-confirm" onClick={onConfirm}>
-          Confirm
+          Apply update
         </Button>
         <Button
           variant="outline"
@@ -413,7 +635,7 @@ function RefreshPanel({
           data-testid="contracted-refresh-cancel"
           onClick={onCancel}
         >
-          Cancel
+          Cancel preview
         </Button>
       </div>
     </Surface>
@@ -525,6 +747,44 @@ export function ContractedForm({
       : prev;
   }
 
+  // A half-hour target edit lands in the draft's human-hours string, so the rest of
+  // the form (and the saved card) keeps its existing encoding. Empty clears the
+  // field — the required error then surfaces on save — while anything that is not a
+  // clean half-hour integer is REJECTED rather than truncated, so a typo can never
+  // silently rewrite the target to a different value.
+  function setHalfTarget(
+    key: "targetExact" | "targetRangeMin" | "targetRangeMax",
+    raw: string,
+  ): void {
+    let value = "";
+    if (raw !== "") {
+      const half = parseRawHalfHours(raw);
+      if (half === null) return;
+      value = formatHalfHours(half);
+    }
+    if (key === "targetExact") {
+      setForm((prev) => ({ ...prev, targetExact: value }));
+      setErrors((prev) => (prev.targetExact ? { ...prev, targetExact: undefined } : prev));
+    } else if (key === "targetRangeMin") {
+      setForm((prev) => ({ ...prev, targetRangeMin: value }));
+      setErrors((prev) => (prev.targetRangeMin ? { ...prev, targetRangeMin: undefined } : prev));
+    } else {
+      setForm((prev) => ({ ...prev, targetRangeMax: value }));
+      setErrors((prev) => (prev.targetRangeMax ? { ...prev, targetRangeMax: undefined } : prev));
+    }
+  }
+
+  // One error line for the target cell (the prototype's single `policyErr` slot,
+  // ScreenCards:129). An empty range reports BOTH bounds missing, and the message is
+  // the same for each, so identical messages collapse to one line while a distinct
+  // second error (the min > max ordering) still shows as a second clause.
+  const targetError =
+    form.policy === "range"
+      ? Array.from(
+          new Set([errors.targetRangeMin, errors.targetRangeMax].filter(Boolean) as string[]),
+        ).join(" ")
+      : errors.targetExact;
+
   function submit() {
     const nextErrors = validateContractedCommit(form, state);
     if (hasContractedErrors(nextErrors)) {
@@ -558,8 +818,8 @@ export function ContractedForm({
 
   return (
     <CardEditorForm
-      heading={mode === "add" ? "Add contracted hours" : "Edit contracted hours"}
-      submitLabel={mode === "add" ? "Add" : "Update"}
+      heading={mode === "add" ? "Add Contracted Hours" : "Edit Contracted Hours"}
+      submitLabel={mode === "add" ? "Add contract" : "Update contract"}
       onSubmit={submit}
       onCancel={onCancel}
     >
@@ -573,88 +833,47 @@ export function ContractedForm({
         />
       </FieldShell>
 
-      <FieldShell
-        label="Policy"
-        hint="Exact locks x = T; Range locks min ≤ x ≤ max — weight is always a hard rule"
-      >
-        <PolicyToggle
-          policy={form.policy}
-          onChange={(policy) =>
-            setForm((prev) => ({
-              ...prev,
-              policy,
-            }))
-          }
+      <div className="flex flex-col gap-3">
+        <InPlainEnglishPanel
+          sentence={contractedSentence(form)}
+          onRefresh={() => setRefreshPreview(deriveContractedRefresh(form, state))}
         />
+        {refreshPreview && (
+          <RefreshPanel
+            preview={refreshPreview}
+            onConfirm={() => {
+              setForm((prev) => applyContractedRefresh(prev, refreshPreview));
+              setErrors((prev) => clearCoefficientErrors(prev));
+              setRefreshPreview(null);
+            }}
+            onCancel={() => setRefreshPreview(null)}
+          />
+        )}
+      </div>
+
+      <FieldShell label="Policy">
+        <div className="flex flex-col gap-3">
+          <PolicyToggle
+            policy={form.policy}
+            onChange={(policy) =>
+              setForm((prev) => ({
+                ...prev,
+                policy,
+              }))
+            }
+          />
+          <PolicyLockHint policy={form.policy} />
+        </div>
       </FieldShell>
 
-      {form.policy === "exact" ? (
-        <FieldShell
-          label="Contracted hours"
-          required
-          hint="Whole or half hours — e.g. 160h or 8h 30m"
-          error={errors.targetExact}
-        >
-          <Input
-            data-testid="contracted-target-exact"
-            aria-label="Contracted hours"
-            value={form.targetExact}
-            onChange={(e) => {
-              const targetExact = e.target.value;
-              setForm((prev) => ({ ...prev, targetExact }));
-              setErrors((prev) => (prev.targetExact ? { ...prev, targetExact: undefined } : prev));
-            }}
-            placeholder="160h"
-            className="max-w-[220px]"
-          />
-        </FieldShell>
-      ) : (
-        <div
-          // `.ns-formgrid` cell pair — two-up at 720px, not `sm` (640px), which split
-          // these into cells 80px narrower than the design allows. Gap is the class's
-          // literal 20/24, not the 16px this used to carry.
-          className="grid grid-cols-1 gap-x-[24px] gap-y-[20px] formgrid:grid-cols-2"
-        >
-          <FieldShell label="Minimum hours" required hint="e.g. 150h" error={errors.targetRangeMin}>
-            <Input
-              data-testid="contracted-target-min"
-              aria-label="Minimum hours"
-              value={form.targetRangeMin}
-              onChange={(e) => {
-                const targetRangeMin = e.target.value;
-                setForm((prev) => ({ ...prev, targetRangeMin }));
-                setErrors((prev) =>
-                  prev.targetRangeMin ? { ...prev, targetRangeMin: undefined } : prev,
-                );
-              }}
-              placeholder="150h"
-              className="max-w-[220px]"
-            />
-          </FieldShell>
-          <FieldShell label="Maximum hours" required hint="e.g. 170h" error={errors.targetRangeMax}>
-            <Input
-              data-testid="contracted-target-max"
-              aria-label="Maximum hours"
-              value={form.targetRangeMax}
-              onChange={(e) => {
-                const targetRangeMax = e.target.value;
-                setForm((prev) => ({ ...prev, targetRangeMax }));
-                setErrors((prev) =>
-                  prev.targetRangeMax ? { ...prev, targetRangeMax: undefined } : prev,
-                );
-              }}
-              placeholder="170h"
-              className="max-w-[220px]"
-            />
-          </FieldShell>
-        </div>
-      )}
-
-      <LockedEncoding
-        policy={form.policy}
-        expressionError={errors.expression}
-        weightError={errors.weight}
-      />
+      <FieldShell
+        // The prototype's own inner heading for the target cell (ScreenCards:104,115).
+        label={form.policy === "range" ? "Hours per nurse" : "Target hours per nurse"}
+        required
+        error={targetError}
+      >
+        <HoursTargetField form={form} onHalfChange={setHalfTarget} />
+      </FieldShell>
 
       <FieldShell label="People" required error={errors.person}>
         <TransferList<string | number>
@@ -744,6 +963,9 @@ export function ContractedForm({
         pairs={form.countShiftTypeCoefficients}
         domain={coefficientDomain}
         label="Shift Type"
+        heading="Derived coefficients · half-hours"
+        note="Each worked shift contributes its working time ÷ 30 min. A paid-leave day credits 8h. Values are editable; a shift type with no working time must be set by hand."
+        derivedHints
         testId="contracted-coefficient-fields"
         errorsById={errors.coefficientErrorsById}
         // Always surface the aggregate. Unlike count-form (where the aggregate is the
@@ -759,36 +981,6 @@ export function ContractedForm({
           setRefreshPreview(null);
         }}
       />
-
-      {form.countShiftTypes.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <div>
-            <Button
-              variant="outline"
-              size="sm"
-              data-testid="contracted-refresh-button"
-              onClick={() => setRefreshPreview(deriveContractedRefresh(form, state))}
-            >
-              Refresh from Shift Types
-            </Button>
-            <p className="mt-1 text-meta italic text-ink3">
-              Preview coefficients derived from each shift&apos;s working time (LEAVE credited at{" "}
-              8h). Nothing changes until you Confirm.
-            </p>
-          </div>
-          {refreshPreview && (
-            <RefreshPanel
-              preview={refreshPreview}
-              onConfirm={() => {
-                setForm((prev) => applyContractedRefresh(prev, refreshPreview));
-                setErrors((prev) => clearCoefficientErrors(prev));
-                setRefreshPreview(null);
-              }}
-              onCancel={() => setRefreshPreview(null)}
-            />
-          )}
-        </div>
-      )}
 
       {leaveAdvisoryNames !== null && (
         <LeaveCreditAdvisory
@@ -825,21 +1017,7 @@ export function ContractedForm({
         )}
       </FieldShell>
 
-      <SolverDetails
-        form={form}
-        onRawTargetChange={(patch) => {
-          setForm((prev) => ({ ...prev, ...patch }));
-          setErrors((prev) => {
-            if (!prev.targetExact && !prev.targetRangeMin && !prev.targetRangeMax) return prev;
-            return {
-              ...prev,
-              targetExact: undefined,
-              targetRangeMin: undefined,
-              targetRangeMax: undefined,
-            };
-          });
-        }}
-      />
+      <SolverDetails form={form} errors={errors} />
     </CardEditorForm>
   );
 }

@@ -19,7 +19,6 @@
 import {
   buildShiftTypeIndexMap,
   expandShiftTypeSelector,
-  RESERVED_SHIFT_TYPE,
   ShiftTypeMapError,
   type ScenarioUiState,
 } from "@/lib/scenario";
@@ -28,15 +27,12 @@ import {
   type CoefficientDraftValue,
   type CoefficientPair,
 } from "@/components/card-editor/coefficient-fields";
-import { LEAVE_CREDIT_HALF_HOURS } from "./half-hour-codec";
 import {
   buildContractedCoefficientDomain,
   contractedCoefficientIds,
+  deriveCoefficientHalfHours,
   type ContractedFormState,
 } from "./contracted-domain";
-
-/** Minutes represented by one half-hour grid step — the derivation divisor. */
-const MINUTES_PER_HALF_HOUR = 30;
 
 /** How a concrete coefficient id compares to its Shift-Type-derived value:
  *  • `added`         — currently blank/absent; derivation yields a value.
@@ -70,24 +66,6 @@ export interface RefreshPreview {
 }
 
 /**
- * Derive one id's half-hour coefficient from Shift Type working time, or `null` when
- * it is non-derivable. `LEAVE` derives to the default paid-leave credit; a worked id
- * derives to `durationMinutes / 30` ONLY when the duration is present and a positive
- * multiple of 30 (so the result is a positive integer on the half-hour grid). A
- * missing or off-grid duration is non-derivable — never rounded.
- */
-function deriveCoefficientValue(
-  id: string,
-  durationById: Map<string, number | undefined>,
-): number | null {
-  if (id === RESERVED_SHIFT_TYPE.leave) return LEAVE_CREDIT_HALF_HOURS;
-  const duration = durationById.get(id);
-  if (duration == null || !Number.isInteger(duration) || duration <= 0) return null;
-  if (duration % MINUTES_PER_HALF_HOUR !== 0) return null;
-  return duration / MINUTES_PER_HALF_HOUR;
-}
-
-/**
  * Compute the Refresh PREVIEW for a contracted draft over its CONCRETE coefficient
  * domain (the exact leaf day-state set the coverage bijection is defined over). Each
  * concrete id becomes a row categorized added/changed/unchanged/non-derivable; any
@@ -109,7 +87,7 @@ export function deriveContractedRefresh(
 
   const rows: RefreshRow[] = concreteIds.map((id) => {
     const current = coefficientValueFor(form.countShiftTypeCoefficients, id);
-    const derived = deriveCoefficientValue(id, durationById);
+    const derived = deriveCoefficientHalfHours(id, durationById.get(id));
     if (derived === null) return { id, category: "non-derivable", current, derived };
     const hasValue = current !== "";
     if (!hasValue) return { id, category: "added", current, derived };

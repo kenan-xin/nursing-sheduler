@@ -296,7 +296,6 @@ export const producerScenarioSchema = z
     apiVersion: z.string(),
     description: z.string().optional(),
     dates: zDateContainer,
-    country: z.string().optional(),
     people: zPeopleContainer,
     shiftTypes: zShiftTypesContainer,
     preferences: z.array(zPreference),
