@@ -1,6 +1,6 @@
 // Ordered shift-type index map — a faithful TypeScript port of the vendored
-// backend's `group_map.build_shift_type_index_map` (core/nurse_scheduling/
-// group_map.py) and the reserved sentinels in `constants.py`.
+// backend's `build_shift_type_index_map` (core/nurse_scheduling/server/
+// workspace.py) and the reserved sentinels in `constants.py`.
 //
 // This is the semantic engine the producer validator uses to answer one C3-class
 // question the T18 projection cannot: does a shift-request selector name a group
