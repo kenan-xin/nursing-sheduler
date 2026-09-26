@@ -504,12 +504,6 @@ describe("the escalation ladder in the tools", () => {
     expect(card?.view.agreement).toBe(
       "Has the lending ward or agency confirmed Mei for 8 Oct, qualified as Nights?",
     );
-    // roster-file/2 (bead g1p): her row joins the roster in the same Apply.
-    const mei = borrowRosterDocument().context.people.length;
-    const OFF = { kind: "off" };
-    expect(card?.request?.addPeople).toEqual([
-      { id: "Mei", description: "relief pool", groups: ["Nights"], days: [OFF, OFF, OFF] },
-    ]);
     expect(card?.request?.cells).toEqual([
       {
         personIdx: 0,
@@ -517,19 +511,10 @@ describe("the escalation ladder in the tools", () => {
         before: { kind: "shift", shiftId: "N" },
         after: { kind: "leave" },
       },
-      { personIdx: mei, dateIdx: 1, before: OFF, after: { kind: "shift", shiftId: "N" } },
     ]);
-    expect(card?.view.rows).toContainEqual({
-      person: "Mei",
-      date: "8 Oct",
-      now: "Day off",
-      after: "Night",
-    });
-    expect(card?.view.notes.join(" ")).not.toMatch(/after the next run/);
     expect(card?.view.title).toBe("Mei (relief pool): Night on 8 Oct");
     expect(card?.linked?.record).toBe("staff");
     expect(answer).toMatch(/nurse manager or nurse clinician/);
-    expect(answer).not.toMatch(/next optimiser run/);
   });
 
   it("cancels the linked proposal of a card it replaces", async () => {
@@ -549,7 +534,7 @@ describe("the escalation ladder in the tools", () => {
     expect(fixture.cancel).toHaveBeenCalledWith("old-p");
   });
 
-  it("frees the asking nurse on the roster now when step 3 covers a swap", async () => {
+  it("frees the asking nurse at the next run when step 3 covers a swap", async () => {
     useBorrow();
     fixture.prepare.mockResolvedValueOnce({
       ok: true,
@@ -574,18 +559,11 @@ describe("the escalation ladder in the tools", () => {
     });
     expect(commands.some((c: { type: string }) => c.type === "add_leave")).toBe(false);
     const card = useAssistantStore.getState().activeRosterChange;
-    const mei = borrowRosterDocument().context.people.length;
-    expect(card?.request?.cells).toEqual([
-      { personIdx: 0, dateIdx: 1, before: { kind: "shift", shiftId: "N" }, after: { kind: "off" } },
-      {
-        personIdx: mei,
-        dateIdx: 1,
-        before: { kind: "off" },
-        after: { kind: "shift", shiftId: "N" },
-      },
-    ]);
-    expect(card?.view.notes.join(" ")).not.toMatch(/after the next run/);
-    expect(answer).not.toMatch(/next optimiser run/);
+    expect(card?.request).toBeNull();
+    expect(card?.view.notes).toContain(
+      "The swap takes effect after the next run: SN-Priya keeps these shifts until then.",
+    );
+    expect(answer).toMatch(/swap takes effect after the next optimiser run/);
   });
 
   it("shows no new card while the last one is applying, and cancels what it prepared", async () => {

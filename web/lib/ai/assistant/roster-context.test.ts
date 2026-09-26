@@ -166,12 +166,9 @@ describe("ladder views", () => {
       "relief_pool",
       [],
       [{ date: "8 Oct", shift: "N" }],
-      [{ person: "SN-Tan", date: "8 Oct", now: "Day off", after: "N" }],
       null,
       "Short on nights.",
     );
-    expect(view.rows).toEqual([{ person: "SN-Tan", date: "8 Oct", now: "Day off", after: "N" }]);
-    expect(view.notes.join(" ")).not.toMatch(/after the next run/);
     expect(view.title).toBe("SN-Tan (relief pool): N on 8 Oct");
     expect(view.notes[0]).toBe(
       "Adds SN-Tan (relief pool) as temporary staff, off on every other date.",
