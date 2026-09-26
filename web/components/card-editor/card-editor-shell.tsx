@@ -163,12 +163,18 @@ export function CardEditorHeader({
   onAdd: () => void;
   /** Optional second entry action rendered beside the primary Add (e.g. Counts'
    *  "Add Contracted Hours"). Backward-compatible: editors that omit it are
-   *  unchanged. `formOpen` toggles the button's icon like the primary one. */
+   *  unchanged. `formOpen` toggles the button's icon like the primary one.
+   *
+   *  It is an OUTLINE button in both states — the prototype's secondary entry action
+   *  is the outlined file-contract button beside a filled primary Add
+   *  (ScreenCards.dc.html:19-20) — so the caller chooses only the icon that names
+   *  its own action; omitting it keeps the generic Add glyph. */
   secondaryAction?: {
     label: string;
     formOpen: boolean;
     onAdd: () => void;
     testId?: string;
+    icon?: React.ReactNode;
   };
   /** Optional per-editor instructions panel (FR-PR-02). When present, a help
    *  toggle is rendered beside the title; the panel is collapsed by default. */
@@ -230,13 +236,14 @@ export function CardEditorHeader({
           </Button>
           {secondaryAction ? (
             <Button
-              variant={secondaryAction.formOpen ? "outline" : "default"}
+              variant="outline"
               size="lg"
               data-testid={secondaryAction.testId ?? "add-secondary-toggle"}
               aria-expanded={secondaryAction.formOpen}
               onClick={secondaryAction.onAdd}
             >
-              {secondaryAction.formOpen ? <FaXmark /> : <FaPlus />} {secondaryAction.label}
+              {secondaryAction.formOpen ? <FaXmark /> : (secondaryAction.icon ?? <FaPlus />)}{" "}
+              {secondaryAction.label}
             </Button>
           ) : null}
         </div>
