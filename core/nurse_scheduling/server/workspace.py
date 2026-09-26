@@ -22,8 +22,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError
 
-from ..constants import ALL, LEAVE, MAP_DATE_KEYWORD_TO_FILTER, MAP_WEEKDAY_TO_STR, OFF
-from ..group_map import build_shift_type_index_map
+from ..constants import ALL, LEAVE, LEAVE_sid, MAP_DATE_KEYWORD_TO_FILTER, MAP_WEEKDAY_TO_STR, OFF, OFF_sid
 from ..utils import parse_dates
 from ..models import (
     DateGroup,
@@ -240,6 +239,33 @@ def _people_universe(people: PeopleContainer) -> tuple[set[Any], list[Scheduling
     return resolvable, issues
 
 
+def build_shift_type_index_map(items, groups) -> dict:
+    """Build the ordered shift-type ``id -> [indices]`` map.
+
+    Insertion order is items, then the ALL/OFF/LEAVE keywords, then groups in
+    definition order. Groups resolve through the map built so far, so a forward
+    reference, a cycle, or an unknown id fails immediately (DL09 D5). Upstream
+    genie removed this from ``group_map``; it now lives here, its only owner.
+    """
+    map_sid_s: dict = {}
+    for s, item in enumerate(items):
+        map_sid_s[item.id] = [s]
+    map_sid_s[ALL] = list(range(len(items)))
+    map_sid_s[OFF] = [OFF_sid]
+    map_sid_s[LEAVE] = [LEAVE_sid]
+    for group in groups:
+        indices: set = set()
+        for member in group.members:
+            if member not in map_sid_s:
+                raise ValueError(
+                    f"Shift type group {group.id!r} references undefined shift type or group ID {member!r} "
+                    f"(forward reference, cycle, or unknown id)."
+                )
+            indices.update(map_sid_s[member])
+        map_sid_s[group.id] = sorted(indices)
+    return map_sid_s
+
+
 def _shift_type_universe(shift_types: ShiftTypesContainer) -> tuple[set[Any], list[SchedulingIssue]]:
     """Return resolvable shift-type ids and any group-member reference issues.
 
@@ -351,6 +377,40 @@ def _reference_issues(workspace: WorkspaceSchedulingDataV1) -> list[SchedulingIs
                             f"Preference references an unresolvable date: {value!r} ({error}).",
                         )
                     )
+            overrides = preference.get("requiredNumPeopleOverrides") or []
+            if overrides:
+                # Same selector rule as the compiler: only a missing `date` means ALL;
+                # an empty list selects no dates.
+                date_selector = preference.get("date")
+                try:
+                    selected = set(
+                        parse_dates(
+                            ALL if date_selector is None else date_selector,
+                            date_map,
+                            workspace.dates.range,
+                        )
+                    )
+                except ValueError:
+                    selected = None  # the `date` field itself is already reported above
+                for entry in overrides if selected is not None else []:
+                    if not isinstance(entry, (list, tuple)) or not entry:
+                        continue
+                    shown = str(entry[0])
+                    try:
+                        override_days = parse_dates(entry[0], date_map, workspace.dates.range)
+                    except ValueError as error:
+                        override_days = None
+                        message = f"Preference overrides an unresolvable date: {shown!r} ({error})."
+                    else:
+                        message = f"Preference overrides {shown!r}, which is not one of this requirement's dates."
+                    if override_days is None or not set(override_days) <= selected:
+                        issues.append(
+                            SchedulingIssue(
+                                ["preferences", index, "requiredNumPeopleOverrides"],
+                                ISSUE_UNRESOLVED_WORKSPACE_REFERENCE,
+                                message,
+                            )
+                        )
     return issues
 
 
@@ -464,7 +524,9 @@ def _strict_dict(workspace: WorkspaceSchedulingDataV1) -> dict[str, Any]:
     strict["people"] = dump["people"]
     strict["shiftTypes"] = dump["shiftTypes"]
     strict["export"] = dump.get("export", {})
-    for optional in ("description", "country", "appVersion"):
+    # `country` is accepted for old saved files and dropped: the strict model
+    # (upstream genie) no longer has it.
+    for optional in ("description", "appVersion"):
         if optional in dump:
             strict[optional] = dump[optional]
 

@@ -38,7 +38,14 @@ from ..roster_container import (
     workbook_download_name,
     workbook_media_type,
 )
-from ..scheduling_input import SUPPORTED_SOLVER, MalformedInputError, canonicalize_submission, parse_solver
+from ...loader import SchedulingDataTooComplexError
+from ..scheduling_input import (
+    CODE_SCHEDULING_DATA_TOO_COMPLEX,
+    SUPPORTED_SOLVER,
+    MalformedInputError,
+    canonicalize_submission,
+    parse_solver,
+)
 from .schemas import JobResponse
 from .sse import format_sse_event
 
@@ -165,6 +172,11 @@ async def create_job(
         canonical_bytes = await run_in_threadpool(canonicalize_submission, content)
     except MalformedInputError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
+    except SchedulingDataTooComplexError as error:
+        return JSONResponse(
+            status_code=400,
+            content={"error": {"code": CODE_SCHEDULING_DATA_TOO_COMPLEX, "message": str(error)}},
+        )
     # Verified against `content` — the EXACT bytes the client sent — not against
     # `canonical_bytes`. The client's evidence is bound to what it submitted; the
     # canonical form is an internal execution detail it never digested.

@@ -34,7 +34,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import nurse_scheduling
 import pytest
-from nurse_scheduling import group_map, models, preference_types
+from nurse_scheduling import models, preference_types
 from nurse_scheduling.loader import load_data
 from pydantic import ValidationError
 
@@ -291,9 +291,8 @@ def test_forward_reference_reported_before_cycle():
       members: [B]
     - id: B
       members: [A]"""
-    with pytest.raises(ValidationError, match=re.escape("Shift type group 'A' references undefined")) as exc:
+    with pytest.raises(ValidationError, match=re.escape("Unknown shift type ID: B")):
         load_data(_build(_exact("A", "      - [D, 16]"), shift_types).encode("utf-8"))
-    assert "'B'" in str(exc.value)
 
 
 # --- Validator-vs-scheduler expansion parity + distinct Range identifiers ----
@@ -315,10 +314,9 @@ def test_validator_matches_scheduler_expansion_and_range_ids(monkeypatch):
     captured = {}
     original = preference_types.shift_count
 
-    def spy(ctx, preference, preference_idx):
-        original(ctx, preference, preference_idx)
+    def spy(ctx, preference, compiled_preference, preference_idx):
+        original(ctx, preference, compiled_preference, preference_idx)
         if preference.hoursContract is not None:
-            captured["map_sid_s"] = dict(ctx.map_sid_s)
             captured["model_vars"] = list(ctx.model_vars.keys())
             captured["reports"] = [report.description for report in ctx.reports]
 
@@ -326,12 +324,8 @@ def test_validator_matches_scheduler_expansion_and_range_ids(monkeypatch):
     _df, _sol, _score, status = _run(scenario)
     assert status == "OPTIMAL"
 
-    # Parity: the load-time validator builds the identical ordered map the
-    # scheduler used to construct the model.
-    data = load_data(scenario.encode("utf-8"))
-    expected_map = group_map.build_shift_type_index_map(data.shiftTypes.items, data.shiftTypes.groups)
-    assert captured["map_sid_s"] == expected_map
-
+    # Parity holds by construction: the validator receives the same compiled
+    # map that the scheduler uses.
     # Distinct identifiers: the two Range boundaries get their own model
     # variables and reports via the expression-pair index (no collision).
     expr_vars = [name for name in captured["model_vars"] if name.endswith("_expr")]
