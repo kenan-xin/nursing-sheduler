@@ -533,7 +533,11 @@ describe("the Preview's decision reads as option-card choices", () => {
     const { rerender } = live();
     const card = await screen.findByTestId("assistant-proposal");
 
-    expect(card).toHaveFocus();
+    // Awaited: the card is focused by an effect, so it lands one flush AFTER
+    // `findByTestId` sees the node in the tree. Asserting it synchronously races that
+    // flush and flakes under parallel-file CPU load (qq0.28.1) — mirrors the Apply wait
+    // below, which already awaits the same kind of transition.
+    await waitFor(() => expect(card).toHaveFocus());
     expect(screen.getByTestId("proposal-revise")).not.toHaveFocus();
     expect(screen.getByTestId("proposal-cancel")).not.toHaveFocus();
 
