@@ -16,6 +16,7 @@ import {
   cellAlpha,
   cellDisplay,
   cellPreferenceOf,
+  dayStateOf,
   historyValueAt,
   isHistorySlotClickable,
   type RequestColumn,
@@ -157,15 +158,6 @@ function dateGroupIcon(ref: DateRef, synthetic: boolean): IconType {
     default:
       return FaLayerGroup;
   }
-}
-
-/** The reserved day-state precedence for display (LEAVE > OFF > worked; ticket's
- *  "Conflict / preservation boundary"). Coexisting cells are preserved in `reqData`
- *  (import fidelity) but rendered as one day-state with any worked prefs shadowed. */
-function dayStateOf(cells: readonly UiRequestCell[]): "leave" | "off" | null {
-  if (cells.some((c) => c.kind === "leave")) return "leave";
-  if (cells.some((c) => c.kind === "off")) return "off";
-  return null;
 }
 
 interface CellView {

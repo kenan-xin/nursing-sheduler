@@ -433,6 +433,17 @@ export function cellPreferenceSet(
 // --- Day-state precedence projection (conflict / preservation boundary) ------
 
 /**
+ * The day-state precedence read (LEAVE > OFF > worked) at ONE coordinate's cells:
+ * `"leave"`, `"off"`, or `null` (worked only). Both `resolveDayStatePrecedence`
+ * below and the matrix cell renderer apply this exact rule per coordinate.
+ */
+export function dayStateOf(cells: readonly UiRequestCell[]): "leave" | "off" | null {
+  if (cells.some((c) => c.kind === "leave")) return "leave";
+  if (cells.some((c) => c.kind === "off")) return "off";
+  return null;
+}
+
+/**
  * The shared day-state precedence read (LEAVE > OFF > worked) for DERIVED
  * projections of `reqData` — the matrix cell renderer applies the same rule
  * per coordinate. Raw coexisting cells are PRESERVED in `reqData` (import
@@ -462,17 +473,12 @@ export function resolveDayStatePrecedence(reqData: readonly UiRequestCell[]): Ui
   }
   const resolved: UiRequestCell[] = [];
   for (const cells of coordOrder) {
-    const leaves = cells.filter((c) => c.kind === "leave");
-    if (leaves.length > 0) {
-      resolved.push(...leaves);
+    const state = dayStateOf(cells);
+    if (state === null) {
+      resolved.push(...cells);
       continue;
     }
-    const offs = cells.filter((c) => c.kind === "off");
-    if (offs.length > 0) {
-      resolved.push(...offs);
-      continue;
-    }
-    resolved.push(...cells);
+    resolved.push(...cells.filter((c) => c.kind === state));
   }
   return resolved;
 }
