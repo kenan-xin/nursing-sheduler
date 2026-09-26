@@ -561,6 +561,13 @@ test.describe("G5 assembled real Ward 8 roster journey", () => {
       await expect(page.getByTestId("confirm-dialog-confirm")).toHaveCount(0, {
         timeout: WARD_BOUNDS.importFile,
       });
+      // The dialog closes on click, BEFORE the durable scenario switch settles. The
+      // success toast is only raised once `loadScenario` resolved ok, so it is the
+      // commit signal: the hard `page.goto` below would otherwise tear the page down
+      // mid-transaction and silently drop the import (v7m).
+      await expect(page.getByText(/Scenario loaded/)).toBeVisible({
+        timeout: WARD_BOUNDS.importFile,
+      });
     });
 
     // -------------------------------------------------------------------
