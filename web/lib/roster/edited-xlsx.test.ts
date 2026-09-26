@@ -118,14 +118,13 @@ function semanticDiff(
   patched: Uint8Array,
   label: string,
 ): SemanticDiffEntry[] {
-  if (DIFF_PYTHON === null) return [{ kind: "diff-unavailable" }];
   const origTmp = join(FIXTURES_DIR, `.orig.${label}.tmp.xlsx`);
   const patchedTmp = join(FIXTURES_DIR, `.patched.${label}.tmp.xlsx`);
   writeFileSync(origTmp, originalBytes);
   writeFileSync(patchedTmp, patched);
   try {
     const out = execFileSync(
-      DIFF_PYTHON,
+      DIFF_PYTHON as string,
       [join(FIXTURES_DIR, "xlsx-semantic-diff.py"), origTmp, patchedTmp],
       { encoding: "utf-8" },
     );
@@ -284,33 +283,39 @@ describe("patchFrozenXlsxWithEdits — real C5 prettify workbook (history column
     expect(sheet.getCell(3, 3).border).toEqual(uneditedNeighbour);
   });
 
-  it("leaves every unedited cell and the Score/Status rows byte-faithful (openpyxl diff on the plain C5 workbook)", async () => {
-    // The plain C5 fixture carries no prettify Styler styling, so the openpyxl
-    // semantic diff has no ExcelJS round-trip style artifacts to wade through:
-    // every diff is a genuine semantic change. We edit only B3 (P1, first date)
-    // and assert the ONLY diff openpyxl sees anywhere is that one cell's value.
-    const plain = MANIFEST["plain-3people"];
-    const plainMap = fixtureCoordinateMap(plain);
-    const edits: RosterEdit[] = [
-      { personIdx: 0, dateIdx: 0, day: { kind: "shift", shiftId: "N" } },
-    ];
-    const patched = await patchFrozenXlsxWithEdits({
-      frozenXlsx: fixtureBlob(plain.file),
-      edits,
-      coordinateMap: plainMap,
-      provenance: fixtureProvenance(),
-    });
-    const patchedBytes = new Uint8Array(await patched.arrayBuffer());
-    // Strip the provenance sheet so the diff compares schedule-sheet cells only.
-    const stripped = await stripProvenanceSheet(patchedBytes);
-    const diffs = semanticDiff(fixtureBytes(plain.file), stripped, "plain-edited");
-    if (diffs.length === 1 && diffs[0].kind === "diff-unavailable") return;
+  // Gated on `DIFF_PYTHON`, not short-circuited inside the body (qq0.28.1). An absent
+  // openpyxl is a reported SKIP here — mirroring `restore-people-ids-in-xlsx.test.ts` —
+  // never a silent pass that would let this suite's requirement look satisfied on a host
+  // that cannot run it.
+  it.runIf(DIFF_PYTHON !== null)(
+    "leaves every unedited cell and the Score/Status rows byte-faithful (openpyxl diff on the plain C5 workbook)",
+    async () => {
+      // The plain C5 fixture carries no prettify Styler styling, so the openpyxl
+      // semantic diff has no ExcelJS round-trip style artifacts to wade through:
+      // every diff is a genuine semantic change. We edit only B3 (P1, first date)
+      // and assert the ONLY diff openpyxl sees anywhere is that one cell's value.
+      const plain = MANIFEST["plain-3people"];
+      const plainMap = fixtureCoordinateMap(plain);
+      const edits: RosterEdit[] = [
+        { personIdx: 0, dateIdx: 0, day: { kind: "shift", shiftId: "N" } },
+      ];
+      const patched = await patchFrozenXlsxWithEdits({
+        frozenXlsx: fixtureBlob(plain.file),
+        edits,
+        coordinateMap: plainMap,
+        provenance: fixtureProvenance(),
+      });
+      const patchedBytes = new Uint8Array(await patched.arrayBuffer());
+      // Strip the provenance sheet so the diff compares schedule-sheet cells only.
+      const stripped = await stripProvenanceSheet(patchedBytes);
+      const diffs = semanticDiff(fixtureBytes(plain.file), stripped, "plain-edited");
 
-    // The single expected diff: B3's value changed D→N. Nothing else — not the
-    // Score/Status rows, not any other cell, not the sheet dimensions.
-    expect(diffs).toHaveLength(1);
-    expect(diffs[0]).toMatchObject({ kind: "value", sheet: "Sheet1", coord: "B3" });
-  });
+      // The single expected diff: B3's value changed D→N. Nothing else — not the
+      // Score/Status rows, not any other cell, not the sheet dimensions.
+      expect(diffs).toHaveLength(1);
+      expect(diffs[0]).toMatchObject({ kind: "value", sheet: "Sheet1", coord: "B3" });
+    },
+  );
 });
 
 // ------------------------------------------------------------------------------

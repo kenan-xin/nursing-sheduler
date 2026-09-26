@@ -1701,6 +1701,81 @@ describe("skill-mix repairs (bead nursing-sheduler-2ti)", () => {
     expect(options[0].needsFromUser.join(" ")).toMatch(/qualif/i);
   });
 
+  it("borrows one nurse per short skill group, so a second group's gap does not stay open", () => {
+    // An RN on leave on the 3rd and a Senior on leave on the 5th: two groups short on two
+    // dates, so one borrowed nurse in the first group could not close the second's gap.
+    const two = ward({
+      staff: people("rn1", "sen1", "en1"),
+      staffGroups: [
+        { id: "RN", members: ["rn1"] },
+        { id: "Senior", members: ["sen1"] },
+      ],
+      reqData: [leave("rn1", "03"), leave("sen1", "05")],
+      cardsByKind: cards({
+        requirements: [
+          requirement("day", "D", 1),
+          requirement("night", "N", 2, {
+            skillMix: [
+              { people: "RN", minNumPeople: 1 },
+              { people: "Senior", minNumPeople: 1 },
+            ],
+          }),
+        ],
+      }),
+    });
+    const borrow = rank(two).find((o) => o.repairId === "borrow_temporary_nurse");
+    expect(borrow?.operations.filter((op) => op.type === "add_person")).toEqual([
+      { type: "add_person", name: "Borrowed nurse 1", groups: ["RN"], temporary: true },
+      { type: "add_person", name: "Borrowed nurse 2", groups: ["Senior"], temporary: true },
+    ]);
+    // Each nurse is free on her own group's date only: hers, not the other group's.
+    expect(
+      borrow?.operations
+        .filter((op) => op.type === "set_off_request")
+        .map((op) => [op.personId, op.startDate, op.endDate]),
+    ).toEqual([
+      ["Borrowed nurse 1", "2026-11-01", "2026-11-02"],
+      ["Borrowed nurse 1", "2026-11-04", "2026-11-07"],
+      ["Borrowed nurse 2", "2026-11-01", "2026-11-04"],
+      ["Borrowed nurse 2", "2026-11-06", "2026-11-07"],
+    ]);
+    const applied = applyAssistantCommands(two, borrow!.operations);
+    if (!applied.ok) throw new Error(applied.rejection.message);
+    expect(findStaffingShortfalls(applied.next)).toEqual([]);
+  });
+
+  it("borrows one nurse per short skill group on the same date", () => {
+    // Night needs 4 with 2 RNs and 2 Seniors, who share nobody: with one of each on leave
+    // on the 3rd both groups are short that day, so both need their own borrowed nurse.
+    const both = ward({
+      staff: people("rn1", "rn2", "sen1", "sen2", "en1", "en2"),
+      staffGroups: [
+        { id: "RN", members: ["rn1", "rn2"] },
+        { id: "Senior", members: ["sen1", "sen2"] },
+      ],
+      reqData: [leave("rn2", "03"), leave("sen2", "03")],
+      cardsByKind: cards({
+        requirements: [
+          requirement("day", "D", 1),
+          requirement("night", "N", 4, {
+            skillMix: [
+              { people: "RN", minNumPeople: 2 },
+              { people: "Senior", minNumPeople: 2 },
+            ],
+          }),
+        ],
+      }),
+    });
+    const borrow = rank(both).find((o) => o.repairId === "borrow_temporary_nurse");
+    expect(borrow?.operations.filter((op) => op.type === "add_person")).toEqual([
+      { type: "add_person", name: "Borrowed nurse 1", groups: ["RN"], temporary: true },
+      { type: "add_person", name: "Borrowed nurse 2", groups: ["Senior"], temporary: true },
+    ]);
+    const applied = applyAssistantCommands(both, borrow!.operations);
+    if (!applied.ok) throw new Error(applied.rejection.message);
+    expect(findStaffingShortfalls(applied.next)).toEqual([]);
+  });
+
   it("never offers run_one_short for a skill-mix gap", () => {
     expect(ranked().some((o) => o.repairId === "run_one_short")).toBe(false);
   });
