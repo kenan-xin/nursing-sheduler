@@ -351,6 +351,38 @@ describe("ShiftTypeGrid — staffing states", () => {
     );
   });
 
+  it("surfaces per-date exceptions in the edit form under Minimum nurses and deep-links to Requirements", async () => {
+    await seed({ shifts: [{ id: "Day" }], shiftGroups: [] });
+    await seedRequirements([
+      requirement({
+        requiredNumPeopleOverrides: [
+          ["2026-07-03", 1],
+          ["2026-07-05", 3],
+        ],
+      }),
+    ]);
+    render(<ShiftTypeGrid />);
+
+    fireEvent.click(screen.getByTestId("shift-edit-string:Day"));
+    const line = screen.getByTestId("shift-edit-string:Day-staffing-exceptions");
+    expect(line).toHaveTextContent("Exceptions: 3 Jul: 1 · 5 Jul: 3 — edit in Requirements");
+    expect(within(line).getByRole("link", { name: "edit in Requirements" })).toHaveAttribute(
+      "href",
+      "/shift-type-requirements",
+    );
+  });
+
+  it("omits the edit-form exceptions line when the rule has no per-date overrides", async () => {
+    await seed({ shifts: [{ id: "Day" }], shiftGroups: [] });
+    await seedRequirements([requirement()]);
+    render(<ShiftTypeGrid />);
+
+    fireEvent.click(screen.getByTestId("shift-edit-string:Day"));
+    expect(
+      screen.queryByTestId("shift-edit-string:Day-staffing-exceptions"),
+    ).not.toBeInTheDocument();
+  });
+
   it("surfaces duplicate baselines while editing the first one", async () => {
     await seed({ shifts: [{ id: "Day" }], shiftGroups: [] });
     await seedRequirements([

@@ -59,6 +59,17 @@ export function CardEditorScreen({
   );
 }
 
+/** Prefix of every card-editor losable-draft registry id. The global undo/redo
+ *  shortcuts read this family to recognise an OPEN card draft, which OWNS
+ *  Ctrl/Cmd-Z/Y so scenario history never moves beneath it (AC-CH-09c). */
+export const CARD_EDITOR_DRAFT_PREFIX = "card-editor";
+
+/** The losable-draft registry id for a card editor of `kind`. One spelling, so
+ *  the guard that registers it and the shortcut that reads it cannot drift. */
+export function cardEditorDraftId(kind: string): string {
+  return `${CARD_EDITOR_DRAFT_PREFIX}:${kind}`;
+}
+
 /**
  * Register the shared losable-draft guard while a card-editor add/edit form is
  * visible (FR-PR-06). An open draft holds unsaved work that is not a durable
@@ -67,7 +78,7 @@ export function CardEditorScreen({
  * editor (Counts seed + the R/S/A clones) calls this with its own kind + `!!draft`.
  */
 export function useCardEditorDraftGuard(kind: string, active: boolean): void {
-  useLosableDraft(`card-editor:${kind}`, active, `${kind} editor`);
+  useLosableDraft(cardEditorDraftId(kind), active, `${kind} editor`);
 }
 
 /**

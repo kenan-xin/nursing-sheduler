@@ -31,8 +31,8 @@ const COPY: Record<
   requests: {
     title: "Requests CSV",
     description:
-      "One row per person, one column per date item (person id first). Each cell holds a shift-type or shift-group id, or is left blank to leave that person/date unchanged.",
-    example: "person,2026-01-01,2026-01-02,2026-01-03\nkevin,AM,,PM\naisha,,N,",
+      'One row per person, one column per date item (person id first). Each cell holds a shift-type or shift-group id, OFF or LEAVE, several entries joined with " | ", or is left blank to leave that person/date unchanged.',
+    example: "person,2026-01-01,2026-01-02,2026-01-03\nkevin,AM | PM,,LEAVE\naisha,,N,OFF",
   },
   history: {
     title: "History CSV",
