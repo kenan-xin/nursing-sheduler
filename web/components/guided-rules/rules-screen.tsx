@@ -83,7 +83,7 @@ export interface RulesScreenProps {
    *  guarded navigation — this ticket does not change global mode state. */
   onOpenAdvanced?: (route: string) => void;
   /** qq0.14.1: the route id of the Advanced editor a mode switch just left
-   *  (`/rules?from=`). The screen names it and scrolls to its category; an
+   *  (one-shot in-memory note, guided-arrival.ts). The screen names it and scrolls to its category; an
    *  unknown or Guided-visible id is ignored. */
   advancedSource?: string | null;
 }
