@@ -40,6 +40,21 @@ import { typedIdKey } from "@/lib/roster/day-state";
 import type { RosterContext, RosterDayGrid, RosterSubmission } from "@/lib/roster/types";
 
 /**
+ * One skill-mix floor on an equation: at least `minNumPeople` of `people` among
+ * the equation's own staff on each applicable date (spec
+ * 2026-09-24-skill-mix-rules.md). UNLIKE `qualifiedPeople` it bans nobody — the
+ * head count above still fixes the total, and a person in two floors' groups
+ * counts toward both.
+ */
+export interface RequirementMixFloor {
+  /** The authored group/person selector, rendered (`RN`). */
+  readonly label: string;
+  /** Resolved member indices, narrowed to the equation's qualified set. */
+  readonly people: ReadonlySet<number>;
+  readonly minNumPeople: number;
+}
+
+/**
  * One backend staffing equation: a single `sum(...) == / >= required` constraint
  * family, already normalized the way `_parse_shift_type_requirement_groups`
  * normalizes it. One authored requirement produces ONE equation for a scalar,
@@ -89,6 +104,8 @@ export interface RequirementEquation {
   readonly requiredByDate: ReadonlyMap<number, number>;
   /** The soft upper target, or null when `required` is exact. */
   readonly preferred: number | null;
+  /** Resolved skill-mix floors, in authored order. Empty when none. */
+  readonly skillMix: readonly RequirementMixFloor[];
   /** Non-null when the equation cannot be evaluated, with a plain reason. */
   readonly unavailable: string | null;
 }
@@ -103,6 +120,16 @@ export interface RequirementModel {
    * `unavailable`, which is a resolvable document with one bad selector.
    */
   readonly reason: string | null;
+}
+
+/** One skill-mix floor's verdict within a checked cell. */
+export interface RequirementMixCell {
+  readonly label: string;
+  /** Counted assignees who are members of the floor's group. */
+  readonly count: number;
+  readonly required: number;
+  /** How far below the floor, or 0. */
+  readonly short: number;
 }
 
 /** One equation's verdict on one day. */
@@ -121,6 +148,8 @@ export type RequirementCell =
       readonly over: number;
       /** Forbidden assignments outside the qualified set, or 0. */
       readonly unqualified: number;
+      /** Per-floor skill-mix counts, in authored order. Empty when none. */
+      readonly mix: readonly RequirementMixCell[];
       /** Whether ANY hard verdict failed. */
       readonly mismatch: boolean;
       /** People counted toward the numerator, in axis order. */
@@ -280,6 +309,29 @@ export function buildEquations(document: CanonicalScenarioDocument): Requirement
         ? null
         : selectorLabel(requirement.qualifiedPeople);
 
+    // Skill mix: independent hard floors on how many of a named group work the
+    // selected shifts. Nobody is banned, so they never alter the numerator's
+    // qualification — each adds its own `>= k` constraint per date, over the
+    // equation's OWN eligible staff (`p in qualified_ps_by_s[s]`).
+    const qualifiedSet = qualifiedResolution?.resolved === true ? qualifiedResolution.values : null;
+    const skillMixFloors: RequirementMixFloor[] = [];
+    let skillMixUnresolved: string | null = null;
+    for (const entry of requirement.skillMix ?? []) {
+      const members = resolver.resolvePeople(entry.people);
+      if (!members.resolved) {
+        skillMixUnresolved ??= selectorLabel(entry.people);
+        continue;
+      }
+      skillMixFloors.push({
+        label: selectorLabel(entry.people),
+        people:
+          qualifiedSet === null
+            ? members.values
+            : new Set([...members.values].filter((person) => qualifiedSet.has(person))),
+        minNumPeople: entry.minNumPeople,
+      });
+    }
+
     // Coefficients are only legal when the selector normalizes to ONE group
     // (`_parse_shift_type_requirement_coefficients` raises otherwise).
     const coefficientEntries = requirement.shiftTypeCoefficients ?? [];
@@ -308,12 +360,13 @@ export function buildEquations(document: CanonicalScenarioDocument): Requirement
         coefficients: shiftIndices.map(() => 1),
         weighted: false,
         qualifiedLabel,
-        qualifiedPeople: qualifiedResolution?.resolved === true ? qualifiedResolution.values : null,
+        qualifiedPeople: qualifiedSet,
         dateIndices: dateResolution.resolved ? dateResolution.values : new Set<number>(),
         dateScopeResolved: dateResolution.resolved,
         required: requirement.requiredNumPeople,
         requiredByDate,
         preferred: requirement.preferredNumPeople ?? null,
+        skillMix: skillMixFloors,
       };
 
       const reason = equationFailure({
@@ -324,6 +377,7 @@ export function buildEquations(document: CanonicalScenarioDocument): Requirement
         qualifiedRequested: requirement.qualifiedPeople !== undefined && !vacuousQualification,
         qualifiedResolved: qualifiedResolutionRaw?.resolved === true,
         coefficientsIllegal,
+        skillMixUnresolved,
         required: requirement.requiredNumPeople,
         scopeLabel: group.label,
       });
@@ -362,6 +416,7 @@ function equationFailure(input: {
   qualifiedRequested: boolean;
   qualifiedResolved: boolean;
   coefficientsIllegal: boolean;
+  skillMixUnresolved: string | null;
   required: number;
   scopeLabel: string;
 }): string | null {
@@ -380,6 +435,9 @@ function equationFailure(input: {
   if (!input.dateResolved) return "its date selector does not resolve in this scenario";
   if (input.qualifiedRequested && !input.qualifiedResolved) {
     return "its qualified-people selector does not resolve in this scenario";
+  }
+  if (input.skillMixUnresolved !== null) {
+    return `its skill-mix group ${input.skillMixUnresolved} does not resolve in this scenario`;
   }
   if (input.coefficientsIllegal) {
     return "shift-type coefficients are only defined when the selector is one requirement group";
@@ -480,6 +538,17 @@ export function evaluateRequirementCell(
   const upper = equation.preferred ?? required;
   const short = Math.max(0, required - units);
   const over = Math.max(0, units - upper);
+  // A floor counts the SAME counted people the numerator does: a non-member
+  // still fills a shift place (nobody is banned), it just does not satisfy it.
+  const mix: RequirementMixCell[] = equation.skillMix.map((floor) => {
+    const count = counted.filter((personIdx) => floor.people.has(personIdx)).length;
+    return {
+      label: floor.label,
+      count,
+      required: floor.minNumPeople,
+      short: Math.max(0, floor.minNumPeople - count),
+    };
+  });
   return {
     status: "checked",
     units,
@@ -488,7 +557,8 @@ export function evaluateRequirementCell(
     short,
     over,
     unqualified: offenders.length,
-    mismatch: short > 0 || over > 0 || offenders.length > 0,
+    mix,
+    mismatch: short > 0 || over > 0 || offenders.length > 0 || mix.some((entry) => entry.short > 0),
     counted,
     offenders,
   };

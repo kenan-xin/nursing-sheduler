@@ -56,7 +56,7 @@ export interface RuleIssue {
   readonly message: string;
   /** Set on staffing issues only: which part broke, and on which equation and day. */
   readonly staffing?: {
-    readonly part: "short" | "over" | "unqualified";
+    readonly part: "short" | "over" | "unqualified" | "mix";
     /** The equation names a qualified group (the senior or NIC slot). */
     readonly qualified: boolean;
     readonly required: number;
@@ -549,11 +549,15 @@ export function listIssues(
     for (const d of scope.dates) {
       const cell = evaluateRequirementCell(equation, index, d);
       if (cell.status !== "checked") continue;
-      const meta = (part: "short" | "over" | "unqualified") => ({
+      const meta = (
+        part: "short" | "over" | "unqualified" | "mix",
+        required = cell.required,
+        units = cell.units,
+      ) => ({
         part,
         qualified: equation.qualifiedPeople !== null,
-        required: cell.required,
-        units: cell.units,
+        required,
+        units,
         dateIdx: d,
         label,
         qualifiedLabel: equation.qualifiedLabel,
@@ -586,6 +590,19 @@ export function listIssues(
           staffing: meta("over"),
         });
       }
+      // A skill-mix floor is ALWAYS hard (spec 2026-09-24-skill-mix-rules.md). It
+      // is not the head count, so it is never a "short shift" the assistant may
+      // run a nurse down from — the `mix` part keeps that out of `planShortShift`.
+      cell.mix.forEach((floor, index) => {
+        if (floor.short === 0) return;
+        issues.push({
+          key: `${equation.key}:d${d}:mix${index}`,
+          hard: true,
+          severity: floor.short,
+          message: `${day(d)}: “${label}” has ${floor.count} of the ${floor.required} needed from ${floor.label}.`,
+          staffing: meta("mix", floor.required, floor.count),
+        });
+      });
     }
   }
   return issues;

@@ -62,6 +62,8 @@ export {
   type RequirementEquation,
   type RequirementGrid,
   type RequirementHealth,
+  type RequirementMixCell,
+  type RequirementMixFloor,
   type RequirementModel,
   type RequirementSummary,
   type RosterAssignmentIndex,
