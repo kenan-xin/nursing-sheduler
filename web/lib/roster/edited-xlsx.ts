@@ -23,6 +23,11 @@
 //                        target and corrupts untouched links (exporter.py:781-806).
 //   • appendText       → OMITTED (the new value carries no appended annotation text).
 //
+// Borrowed rows (F5 borrowed-nurse support) are INSERTED after the last solved
+// person row, styled from the neighbouring person row so they read as roster rows.
+// ExcelJS re-anchors merged cells across that insert but leaves conditional-format
+// ranges at their old rows, so the patcher shifts those ranges itself.
+//
 // Provenance (solver status/score "as solved" + edited-since marker) is written to a
 // DEDICATED sheet, never into the schedule sheet — the frontend's restoration boundary
 // parses sheet[0] column A and the literal `Score`/`Status` labels, so provenance must
@@ -198,19 +203,29 @@ export async function patchFrozenXlsxWithEdits(input: EditedXlsxPatchInput): Pro
   //    rewrite the surviving rows contiguously and fix every affected hyperlink.
   rebuildNotesSheet(workbook, sheet, editedAddressSet);
 
-  // 2b. Borrowed rows: inserted plain (no inherited fills) after the last person
-  //     row. Notes only point at person rows above, so no hyperlink moves.
-  //     ponytail: extra columns/rows (per-person and per-date counts) are not
-  //     recomputed for her, as they are not for any edit.
-  const lastPersonRow = input.coordinateMap.peopleRows[solvedCount - 1];
+  // 2b. Borrowed rows: each is inserted after the last solved person row and
+  //     adopts the neighbouring person row's styling (cells and height), so she
+  //     reads as a roster row rather than a bare one. Notes only point at person
+  //     rows above, so no hyperlink moves.
+  //
+  //     ExcelJS's `insertRow` re-anchors MERGED cells itself (`spliceRows` remerges
+  //     every shifted master), but it never touches `conditionalFormattings`, so
+  //     those ranges are shifted here by hand.
+  //
+  //     ponytail: her extra columns and extra rows (the per-person and per-date
+  //     count summaries) are not recomputed — the frozen workbook carries no count
+  //     rules to recompute from, and counts are not recomputed for any edit either.
+  const insertRow = input.coordinateMap.peopleRows[solvedCount - 1] + 1;
   borrowed.forEach((row, i) => {
-    const rowNumber = lastPersonRow + 1 + i;
+    const rowNumber = insertRow + i;
     sheet.insertRow(rowNumber, []);
+    copyRowStyle(sheet, rowNumber - 1, rowNumber);
     sheet.getCell(rowNumber, 1).value = String(row.id);
     input.coordinateMap.dateColumns.forEach((col, dateIdx) => {
       sheet.getCell(rowNumber, col).value = dayStateDisplay(borrowedDays[i][dateIdx]);
     });
   });
+  shiftConditionalFormatsForInsert(sheet, insertRow, borrowed.length);
 
   // 3. Provenance: a dedicated sheet, never the schedule sheet. Remove any prior
   //    provenance sheet first so a re-export replaces rather than duplicates.
@@ -292,6 +307,99 @@ function clearCellFillAndFont(cell: ExcelJS.Cell): void {
     void _color;
     cell.font = rest as ExcelJS.Font;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Borrowed-row geometry: styling and conditional-format ranges
+// ---------------------------------------------------------------------------
+
+/**
+ * Copy a worksheet row's styling — every cell's style, plus the row height — onto
+ * another row, so a borrowed nurse's row reads as a person row rather than a bare
+ * one. Mirrors the copy ExcelJS itself performs when `spliceRows` shifts a row.
+ */
+function copyRowStyle(sheet: ExcelJS.Worksheet, sourceRow: number, targetRow: number): void {
+  const source = sheet.getRow(sourceRow);
+  const target = sheet.getRow(targetRow);
+  target.height = source.height;
+  for (let col = 1; col <= sheet.columnCount; col++) {
+    target.getCell(col).style = source.getCell(col).style;
+  }
+}
+
+/**
+ * The worksheet's conditional-format definitions. ExcelJS carries these at runtime
+ * (`worksheet.conditionalFormattings`, serialized through `worksheet.model`) but
+ * its typings omit the field, so the read is narrowed here.
+ */
+function conditionalFormats(sheet: ExcelJS.Worksheet): ExcelJS.ConditionalFormattingOptions[] {
+  return (
+    (sheet as unknown as { conditionalFormattings?: ExcelJS.ConditionalFormattingOptions[] })
+      .conditionalFormattings ?? []
+  );
+}
+
+/**
+ * Move every conditional-format range that sits at or below an inserted row down
+ * with the rows it covers. `insertRow` re-anchors merged cells but leaves the CF
+ * ranges alone, so without this a rule keeps pointing at rows its subject has just
+ * left. A range wholly above the insert is untouched; a range at or below it
+ * shifts by the inserted count. A ref ExcelJS cannot read as cell addresses — a
+ * whole-column `B:D`, say — is left exactly as it was rather than guessed at.
+ */
+function shiftConditionalFormatsForInsert(
+  sheet: ExcelJS.Worksheet,
+  insertRow: number,
+  insertedCount: number,
+): void {
+  if (insertedCount === 0) return;
+  for (const format of conditionalFormats(sheet)) {
+    const shifted = shiftRangeRef(sheet, format.ref, insertRow, insertedCount);
+    if (shifted !== null) {
+      format.ref = shifted;
+    }
+  }
+}
+
+/**
+ * Shift one conditional-format ref (`A6:E7`, or the space-separated
+ * `A6:E7 B1:B9` form), returning the new ref — or null if it is not a set of
+ * single-cell ranges, in which case the caller keeps the original.
+ */
+function shiftRangeRef(
+  sheet: ExcelJS.Worksheet,
+  ref: string,
+  insertRow: number,
+  insertedCount: number,
+): string | null {
+  const ranges = ref
+    .trim()
+    .split(/\s+/)
+    .filter((part) => part.length > 0);
+  if (ranges.length === 0) return null;
+
+  const shiftedRanges: string[] = [];
+  for (const range of ranges) {
+    const endpoints = range.split(":");
+    if (endpoints.length > 2) return null;
+    const shiftedEndpoints: string[] = [];
+    for (const endpoint of endpoints) {
+      let cell: ExcelJS.Cell;
+      try {
+        cell = sheet.getCell(endpoint);
+      } catch {
+        return null; // Not one cell (a whole-column ref, say): leave the ref alone.
+      }
+      // `Cell.row`/`Cell.col` are typed `string` by ExcelJS's typings though they
+      // are numbers at runtime; `fullAddress` carries the numeric pair.
+      const { row, col } = cell.fullAddress;
+      shiftedEndpoints.push(
+        sheet.getCell(row >= insertRow ? row + insertedCount : row, col).address,
+      );
+    }
+    shiftedRanges.push(shiftedEndpoints.join(":"));
+  }
+  return shiftedRanges.join(" ");
 }
 
 // ---------------------------------------------------------------------------
