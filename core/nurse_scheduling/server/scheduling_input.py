@@ -24,6 +24,7 @@ from pydantic import ValidationError
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
+from ..loader import SchedulingDataTooComplexError, measure_yaml_expansion
 from ..models import NurseSchedulingData
 from .canonical import dump_canonical_strict_yaml
 from .scheduling_errors import (
@@ -41,6 +42,9 @@ from .workspace import SUPPORTED_WORKSPACE_VERSIONS, convert_workspace_to_strict
 # The rebuild server exposes exactly one solver. A missing/default selector maps
 # to this value; any other selector is rejected before job creation.
 SUPPORTED_SOLVER = "ortools/cp-sat"
+
+CODE_SCHEDULING_DATA_TOO_COMPLEX = "scheduling_data_too_complex"
+"""400 code: the YAML expands past the node or nesting bound (upstream loader)."""
 
 
 class MalformedInputError(Exception):
@@ -70,8 +74,17 @@ def _parse_once(content: bytes) -> dict[str, Any]:
     """Parse submitted bytes exactly once into a mapping.
 
     Raises:
+        SchedulingDataTooComplexError: If the bytes expand past the upstream bound.
         MalformedInputError: If the bytes are not YAML or not a mapping.
     """
+    # Measured before the full load and outside the try below: the error is a
+    # ValueError, which that handler would otherwise turn into a plain 400.
+    try:
+        measure_yaml_expansion(content)
+    except SchedulingDataTooComplexError:
+        raise
+    except (YAMLError, ValueError) as error:
+        raise MalformedInputError(f"The scheduling document is not valid YAML: {error}") from error
     try:
         parsed = YAML(typ="safe").load(BytesIO(content))
     except (YAMLError, ValueError) as error:

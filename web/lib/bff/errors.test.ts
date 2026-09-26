@@ -130,6 +130,13 @@ describe("classifyOptimizeError — code-first", () => {
     ).toBe("backend-unready");
   });
 
+  it("classifies the YAML expansion bound as request-invalid", () => {
+    expect(
+      classifyOptimizeError(400, envelope({ code: "scheduling_data_too_complex", message: "x" }))
+        .kind,
+    ).toBe("request-invalid");
+  });
+
   it("treats an unrecognized structured code as server-error (5xx) or unknown", () => {
     expect(
       classifyOptimizeError(500, envelope({ code: "server_error", message: "boom" })).kind,
