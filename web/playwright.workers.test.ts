@@ -243,7 +243,11 @@ describe(".github/workflows/ci.yml — workflow parses and gates the focused scr
     expect(existsSync(workflowPath), "workflow path resolved from web/").toBe(true);
     const doc = parse(readFileSync(workflowPath, "utf8"));
     expect(doc).toBeTruthy();
-    expect(Object.keys(doc.jobs)).toEqual(expect.arrayContaining(["checks", "e2e"]));
+    expect(Object.keys(doc.jobs)).toEqual(
+      expect.arrayContaining(["static", "unit", "build", "e2e"]),
+    );
+    // e2e is gated on the fast static job; unit and build run in parallel with it.
+    expect(doc.jobs.e2e.needs).toBe("static");
   });
 
   it("the `e2e` job invokes `pnpm test:e2e:public-roster-dispatch` AFTER the base `pnpm exec playwright test`", () => {
