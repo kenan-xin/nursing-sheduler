@@ -4,6 +4,7 @@ import {
   coefficientIntegerErrorMessage,
   coefficientOverlapMessage,
   coefficientValueFor,
+  derivedCoefficientHintText,
   eligibleCoefficientIds,
   parseCoefficientInput,
   sortIdsByEntryOrder,
@@ -297,5 +298,25 @@ describe("F14 — nested group expansion is transitive with a cycle guard", () =
     // A → {B, E}; B → {A} is the back-edge, so A expands to {E} alone: E and A
     // become eligible, without hanging.
     expect(eligibleCoefficientIds(["A"], cyclic)).toEqual(["E", "A"]);
+  });
+});
+
+describe("derivedCoefficientHintText — per-row working-time hints (9a8)", () => {
+  it("reads a worked shift's half-hour derivation from its hours", () => {
+    expect(derivedCoefficientHintText({ minutes: 480, credit: false })).toBe(
+      "8h × 2 · from working time",
+    );
+    // An odd half-hour count keeps its half: 510 min is 8.5h × 2 = 17 half-hours.
+    expect(derivedCoefficientHintText({ minutes: 510, credit: false })).toBe(
+      "8.5h × 2 · from working time",
+    );
+  });
+
+  it("reads a paid-leave credit as a credit, not a worked shift", () => {
+    expect(derivedCoefficientHintText({ minutes: 480, credit: true })).toBe("8h credit · editable");
+  });
+
+  it("falls back to the set-by-hand message when the source has no working time", () => {
+    expect(derivedCoefficientHintText(undefined)).toBe("no working time — set manually");
   });
 });

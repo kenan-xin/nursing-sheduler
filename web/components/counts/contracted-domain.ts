@@ -15,9 +15,46 @@ import {
   type ShiftTypeRef,
 } from "@/lib/scenario";
 import type {
+  CoefficientDerivation,
   CoefficientDomain,
   CoefficientPair,
 } from "@/components/card-editor/coefficient-fields";
+import { LEAVE_CREDIT_HALF_HOURS } from "./half-hour-codec";
+
+/** Minutes represented by one half-hour grid step — the derivation divisor. */
+const MINUTES_PER_HALF_HOUR = 30;
+
+/**
+ * The half-hour coefficient a source derives from its WORKING TIME in minutes, or
+ * `null` when it is non-derivable. `LEAVE` derives the default paid-leave credit
+ * (not a worked duration); a worked source derives `minutes / 30` ONLY when the
+ * duration is present, positive, and a whole multiple of 30 — an off-grid duration
+ * is non-derivable, NEVER rounded. The single source of truth for derivation,
+ * shared by {@link buildContractedCoefficientDomain} (row hints) and the Refresh
+ * preview (`refresh-model.ts`).
+ */
+export function deriveCoefficientHalfHours(id: string, minutes: number | undefined): number | null {
+  if (id === RESERVED_SHIFT_TYPE.leave) return LEAVE_CREDIT_HALF_HOURS;
+  if (minutes == null || !Number.isInteger(minutes) || minutes <= 0) return null;
+  if (minutes % MINUTES_PER_HALF_HOUR !== 0) return null;
+  return minutes / MINUTES_PER_HALF_HOUR;
+}
+
+/**
+ * The working-time derivation a coefficient-row hint is built from, or `undefined`
+ * when the source is non-derivable (no working time, or off the half-hour grid).
+ * Read through {@link deriveCoefficientHalfHours} so the minutes shown and the
+ * coefficient derived are the same value, never two that can disagree.
+ */
+function derivationFor(
+  id: string,
+  durationById: Map<string, number | undefined>,
+): CoefficientDerivation | undefined {
+  const halfHours = deriveCoefficientHalfHours(id, durationById.get(id));
+  return halfHours === null
+    ? undefined
+    : { minutes: halfHours * MINUTES_PER_HALF_HOUR, credit: id === RESERVED_SHIFT_TYPE.leave };
+}
 
 /** The flat draft the guided contracted form edits. Target values are held as the
  *  human hours STRINGS the author types (e.g. "160h", "8h 30m") and converted to
@@ -76,12 +113,20 @@ export function buildContractedCoefficientDomain(
     ...state.shifts.filter((s) => typeof s.id === "string").map((s) => s.id as string),
     RESERVED_SHIFT_TYPE.leave,
   ];
+  // Working time per source, so each row can carry the derivation its hint reads.
+  const durationById = new Map<string, number | undefined>();
+  for (const shift of state.shifts) {
+    if (typeof shift.id === "string") durationById.set(shift.id, shift.durationMinutes);
+  }
   const items = leafSources
     .filter((id) => {
       const indices = expandShiftTypeSelector(id, map);
       return indices != null && indices.length === 1 && expanded.has(indices[0]);
     })
-    .map((id) => ({ id }));
+    .map((id) => {
+      const derivation = derivationFor(id, durationById);
+      return derivation ? { id, derivation } : { id };
+    });
   return { items, groups: [] };
 }
 
