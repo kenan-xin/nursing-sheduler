@@ -12,7 +12,6 @@ import {
   paintCellKey,
   type HydrationStatus,
   type PaintCellKey,
-  type RunProgressEvent,
   type RunState,
   type StagedCoordinate,
   type StagedDayState,
@@ -41,8 +40,6 @@ export interface HotStoreState {
    * repopulate scenario B's view. Ephemeral: starts at 0, never persisted.
    */
   runGeneration: number;
-  /** Ordered SSE progress frames for the current run. */
-  progress: RunProgressEvent[];
   /**
    * Transient editor UI scratch (selection, hovered cell, panel open state…).
    * T04 provides the slot; the concrete shape is owned by the editor tickets.
@@ -60,7 +57,6 @@ export interface HotStoreState {
 
   setHydrationStatus(status: HydrationStatus): void;
   setRun(patch: Partial<RunState>): void;
-  pushProgress(event: RunProgressEvent): void;
   resetRun(): void;
   /** Replace the whole typed run view (the T16a controller owns the reducer). */
   setRunView(next: OptimizeRunView): void;
@@ -94,7 +90,7 @@ export interface HotStoreState {
   cancelPaint(): void;
 
   /**
-   * Reset all ephemeral slices — run, run view, progress, ui, drafts, and any
+   * Reset all ephemeral slices — run, run view, ui, drafts, and any
    * in-flight paint — WITHOUT touching `hydrationStatus`. Load / New call this so
    * scenario A's transient state (a staged paint especially) cannot leak into
    * scenario B.
@@ -112,7 +108,6 @@ export function createHotStore() {
     run: INITIAL_RUN_STATE,
     runView: INITIAL_OPTIMIZE_RUN_VIEW,
     runGeneration: 0,
-    progress: [],
     ui: {},
     drafts: {},
     paint: null,
@@ -121,13 +116,10 @@ export function createHotStore() {
 
     setRun: (patch) => set((state) => ({ run: { ...state.run, ...patch } })),
 
-    pushProgress: (event) => set((state) => ({ progress: [...state.progress, event] })),
-
     resetRun: () =>
       set((state) => ({
         run: INITIAL_RUN_STATE,
         runView: INITIAL_OPTIMIZE_RUN_VIEW,
-        progress: [],
         runGeneration: state.runGeneration + 1,
       })),
 
@@ -191,7 +183,6 @@ export function createHotStore() {
       set((state) => ({
         run: INITIAL_RUN_STATE,
         runView: INITIAL_OPTIMIZE_RUN_VIEW,
-        progress: [],
         ui: {},
         drafts: {},
         paint: null,

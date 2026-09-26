@@ -149,7 +149,6 @@ export {
   type HydrationStatus,
   type RunPhase,
   type RunState,
-  type RunProgressEvent,
   type PaintCellKey,
   type StagedCoordinate,
   type StagedDayState,
