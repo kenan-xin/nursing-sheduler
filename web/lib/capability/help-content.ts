@@ -59,8 +59,8 @@ export const CAPABILITY_ENTRIES = [
     nurseFacingSummary:
       "List the nurses being rostered and put them into groups — for example seniors, or a " +
       "team — so a rule can be written about the group instead of naming every person. A nurse " +
-      "borrowed from another ward, the float pool or an agency is added with Temporary switched " +
-      "on, and marked off on the days they are not here. Borrowed for nights? Also mark them Must work the night " +
+      "borrowed from another ward for a few days is added like anyone else and marked off on " +
+      "the days they are not here. Borrowed for nights? Also mark them Must work the night " +
       "shift on those dates (a shift request at weight must), or the solver may put them on " +
       "day shifts. The assistant can prepare these changes for you to review " +
       "and apply.",
@@ -74,7 +74,6 @@ export const CAPABILITY_ENTRIES = [
       "float nurse",
       "agency nurse",
       "borrowed staff",
-      "temporary staff",
     ],
     modes: BOTH_MODES,
     featureGates: [],

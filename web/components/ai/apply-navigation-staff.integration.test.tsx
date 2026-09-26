@@ -70,7 +70,6 @@ const COMMANDS: AssistantCommandV1[] = [
       type: "add_person",
       name,
       groups: [group],
-      temporary: false,
     }),
   ),
 ];

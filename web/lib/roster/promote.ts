@@ -110,7 +110,7 @@ export function promoteCandidateRosterToWorking(
   return fence.storage.promoteCandidateToWorking<RosterDocument>({
     jobId: ref.jobId,
     expectedCandidateVersion: ref.candidateVersion,
-    // A candidate stored by an older build is upgraded first (roster-file/1 -> 2).
+    // A candidate stored by an older build is upgraded first.
     validate: validateStoredRosterDocument,
     expectedWorkingRevision: fence.expectedWorkingRevision,
     expectedClearEpoch: fence.expectedClearEpoch,

@@ -1,20 +1,14 @@
 // @vitest-environment jsdom
-import "fake-indexeddb/auto";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, renderHook, waitFor } from "@testing-library/react";
-import { rosterCurrentDays, type RosterDocument } from "@/lib/roster";
-import {
-  fixtureCanonicalDocument,
-  fixtureRosterDocument,
-  withEdits,
-} from "@/lib/roster/test-fixtures";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { renderHook } from "@testing-library/react";
+import type { RosterDocument } from "@/lib/roster";
+import { fixtureRosterDocument, withEdits } from "@/lib/roster/test-fixtures";
 import {
   requestRosterChange,
   useRosterChangeStore,
   type RosterChangeRequest,
 } from "@/lib/roster/change-request";
 import { applyRosterChange, useRosterChangeRequest } from "./use-roster-change-request";
-import { useRosterEditing } from "./use-roster-editing";
 
 const D = { kind: "shift", shiftId: "D" } as const;
 const N = { kind: "shift", shiftId: "N" } as const;
@@ -31,22 +25,16 @@ function swapDayZero(document: RosterDocument): RosterChangeRequest {
 }
 
 beforeEach(() => useRosterChangeStore.setState({ pending: null, last: null }));
-// The hooks below are mounted for real, so each test must unmount its own before the next
-// one publishes a request (a live hook would take it out from under the next test).
-afterEach(cleanup);
 
 describe("applyRosterChange", () => {
   it("applies every cell as one batch when the roster still matches", async () => {
     const document = await fixtureRosterDocument();
     const applyCells = vi.fn(() => true);
     expect(applyRosterChange(document, swapDayZero(document), applyCells)).toBe("applied");
-    expect(applyCells).toHaveBeenCalledWith(
-      [
-        { personIdx: 0, dateIdx: 0, day: N },
-        { personIdx: 1, dateIdx: 0, day: D },
-      ],
-      undefined,
-    );
+    expect(applyCells).toHaveBeenCalledWith([
+      { personIdx: 0, dateIdx: 0, day: N },
+      { personIdx: 1, dateIdx: 0, day: D },
+    ]);
   });
 
   it("refuses a request prepared on a different roster", async () => {
@@ -65,75 +53,9 @@ describe("applyRosterChange", () => {
     expect(applyCells).not.toHaveBeenCalled();
   });
 
-  it("adds a borrowed nurse's row with her cells in the same batch (bead g1p)", async () => {
-    // Her row is valid only against a scenario that declares the group it names
-    // (bead 6yn), so the fixture's submitted people gain an `RN` group.
-    const base = fixtureCanonicalDocument();
-    const document = await fixtureRosterDocument({
-      document: { ...base, people: { ...base.people, groups: [{ id: "RN", members: ["P1"] }] } },
-    });
-    const OFF = { kind: "off" } as const;
-    const mei = { id: "Mei", groups: ["RN"], days: [OFF, OFF, OFF, OFF] };
-    const request: RosterChangeRequest = {
-      solvedBaselineId: document.provenance.solvedBaselineId,
-      addPeople: [mei],
-      peopleCount: 2,
-      cells: [
-        { personIdx: 0, dateIdx: 2, before: N, after: { kind: "leave" } },
-        { personIdx: 2, dateIdx: 2, before: OFF, after: N },
-      ],
-    };
-    const applyCells = vi.fn(() => true);
-    expect(applyRosterChange(document, request, applyCells)).toBe("applied");
-    expect(applyCells).toHaveBeenCalledWith(
-      [
-        { personIdx: 0, dateIdx: 2, day: { kind: "leave" } },
-        { personIdx: 2, dateIdx: 2, day: N },
-      ],
-      [mei],
-    );
-    // Applied twice: she is already on the roster, so the card is stale.
-    const withMei = { ...document, borrowed: [mei] };
-    expect(applyRosterChange(withMei, request, applyCells)).toBe("roster-changed");
-  });
-
   it("reports a batch the edit session rejected", async () => {
     const document = await fixtureRosterDocument();
     expect(applyRosterChange(document, swapDayZero(document), () => false)).toBe("rejected");
-  });
-});
-
-describe("the request path onto a borrowed nurse's own row (bead d88)", () => {
-  it("applies a swap that addresses her row, through the screen's own edit session", async () => {
-    const base = await fixtureRosterDocument();
-    const OFF = { kind: "off" } as const;
-    // The borrowed row joins the axis last: index 2 = people.length + i (roster-file/2).
-    const mei = {
-      id: "Mei",
-      description: "relief pool",
-      groups: ["RN"],
-      days: [OFF, OFF, OFF, OFF],
-    };
-    const document: RosterDocument = { ...base, borrowed: [mei] };
-    // A swap onto an EXISTING borrowed row: Priya gives up 9 Oct, Mei takes it. Nobody is
-    // added, so the card needs no peopleCount and every before cell is on the axis already.
-    const request: RosterChangeRequest = {
-      solvedBaselineId: document.provenance.solvedBaselineId,
-      cells: [
-        { personIdx: 0, dateIdx: 2, before: N, after: OFF },
-        { personIdx: 2, dateIdx: 2, before: OFF, after: N },
-      ],
-    };
-    const { result } = renderHook(() => {
-      const editing = useRosterEditing({ document, revision: null, reload: async () => {} });
-      useRosterChangeRequest(editing);
-      return editing;
-    });
-    requestRosterChange(request);
-    await waitFor(() => expect(useRosterChangeStore.getState().last).toBe("applied"));
-    const days = rosterCurrentDays(result.current.editedDocument);
-    expect(days[2][2]).toEqual(N);
-    expect(days[0][2]).toEqual(OFF);
   });
 });
 

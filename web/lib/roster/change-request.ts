@@ -12,14 +12,9 @@
 // the document domain's public surface).
 
 import { create } from "zustand";
-import {
-  rosterAxisContext,
-  rosterCurrentDays,
-  scenarioStaffGroupIds,
-  withBorrowedRows,
-} from "./borrowed";
-import { dayStatesEqual, typedIdKey } from "./day-state";
-import type { RosterBorrowedRow, RosterDayState, RosterDocument } from "./types";
+import { dayStatesEqual } from "./day-state";
+import { deriveCurrentDays } from "./overlay";
+import type { RosterDayState, RosterDocument } from "./types";
 
 // ponytail: fixed TTL, same as RUN_REQUEST_TTL_MS. A request the screen did not take in
 // time is dropped so it can never change the roster on a later visit.
@@ -37,18 +32,6 @@ export interface RosterChangeRequest {
   /** The roster the change was prepared on. */
   readonly solvedBaselineId: string;
   readonly cells: readonly RosterCellChange[];
-  /**
-   * Temporary nurses to add as borrowed rows in the same revision (bead g1p). They
-   * join the axis after the rows already there, and `cells` may address them, with
-   * `before` read from the row as added.
-   */
-  readonly addPeople?: readonly RosterBorrowedRow[];
-  /**
-   * How many rows (people plus borrowed) the roster had when the card was built.
-   * Required with `addPeople`: the new rows' indices were fixed from it, so a roster
-   * that gained a row since would put her shifts on someone else's row.
-   */
-  readonly peopleCount?: number;
 }
 
 /** `roster-changed`: a before cell or the roster itself changed since the card. */
@@ -77,12 +60,7 @@ export function takeRosterChangeRequest(now: number = Date.now()): RosterChangeR
     return null;
   }
   useRosterChangeStore.setState({ pending: null });
-  return {
-    solvedBaselineId: pending.solvedBaselineId,
-    cells: pending.cells,
-    ...(pending.addPeople ? { addPeople: pending.addPeople } : {}),
-    ...(pending.peopleCount !== undefined ? { peopleCount: pending.peopleCount } : {}),
-  };
+  return { solvedBaselineId: pending.solvedBaselineId, cells: pending.cells };
 }
 
 export function reportRosterChange(outcome: RosterChangeOutcome): void {
@@ -105,25 +83,7 @@ export function requestStillMatches(
   request: RosterChangeRequest,
 ): boolean {
   if (document.provenance.solvedBaselineId !== request.solvedBaselineId) return false;
-  const added = request.addPeople ?? [];
-  const axis = rosterAxisContext(document).people;
-  if (request.peopleCount !== undefined && request.peopleCount !== axis.length) return false;
-  if (added.length > 0 && request.peopleCount === undefined) return false;
-  // Someone of that name already on the roster: the card is stale (applied twice?).
-  const onRoster = new Set(axis.map((p) => typedIdKey(p.id)));
-  if (added.some((row) => onRoster.has(typedIdKey(row.id)))) return false;
-  // A group the roster's own scenario does not declare can never be counted by the
-  // staffing rules, so the row would land with her showing as unqualified (bead
-  // nursing-sheduler-6yn). Refuse rather than apply a row the rules cannot see; the
-  // assistant's card names the group and shows no card at all in that case.
-  const knownGroups = scenarioStaffGroupIds(document.submission);
-  if (
-    knownGroups !== null &&
-    added.some((row) => row.groups.some((group) => !knownGroups.has(group)))
-  ) {
-    return false;
-  }
-  const current = rosterCurrentDays(withBorrowedRows(document, added));
+  const current = deriveCurrentDays(document.solvedDays, document.edits);
   return request.cells.every((cell) => {
     const now = current[cell.personIdx]?.[cell.dateIdx];
     return now !== undefined && dayStatesEqual(now, cell.before);

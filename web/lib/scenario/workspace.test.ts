@@ -502,17 +502,4 @@ describe("workspace serialization wire form", () => {
     // No YAML anchors (`&name`) or aliases (`*name`) — repeated values by value.
     expect(yaml).not.toMatch(/[&*][A-Za-z0-9]/);
   });
-
-  it("keeps a temporary person through a Workspace backup", () => {
-    const state = makeValidUiState();
-    state.staff = [{ id: "Alice", history: ["D"], temporary: true }, { id: "Bob" }];
-    const yaml = serializeWorkspace(state);
-    expect(yaml).toMatch(/temporary: true/);
-    const loaded = prepareScenarioLoad(yaml);
-    expect(loaded.issues).toEqual([]);
-    expect(loaded.target?.staff).toEqual([
-      { id: "Alice", history: ["D"], temporary: true },
-      { id: "Bob" },
-    ]);
-  });
 });

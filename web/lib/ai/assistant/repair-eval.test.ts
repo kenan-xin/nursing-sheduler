@@ -45,12 +45,15 @@ function applyTop(name: ScenarioName): ScenarioUiState {
   return result.next;
 }
 
-/** Wards the static check proves infeasible. restRuleTooTight has no proven cause, so no top option. */
-const INFEASIBLE: Exclude<ScenarioName, "empty" | "restRuleTooTight">[] = [
+/**
+ * Wards the static check proves infeasible. restRuleTooTight has no proven cause, so no top
+ * option. tooFewNurses was fixed only by a whole-period borrow, which d582 removed: Task 19
+ * brings its repair back as add_temporary_cover.
+ */
+const INFEASIBLE: Exclude<ScenarioName, "empty" | "restRuleTooTight" | "tooFewNurses">[] = [
   "understaffedNight",
   "onlyRnOnLeave",
   "ruleTooStrict",
-  "tooFewNurses",
   "conflictingRequirements",
   "personalCapsTooLow",
   "busyNightsWithRestRule",
@@ -61,10 +64,9 @@ const INFEASIBLE: Exclude<ScenarioName, "empty" | "restRuleTooTight">[] = [
 const EXPECTED: Record<(typeof INFEASIBLE)[number], RepairId[]> = {
   understaffedNight: ["borrow_temporary_nurse", "run_one_short"],
   onlyRnOnLeave: ["borrow_temporary_nurse", "ask_nurse_on_leave"],
-  ruleTooStrict: ["relax_count_rule", "borrow_temporary_nurse"],
-  tooFewNurses: ["borrow_temporary_nurse"],
+  ruleTooStrict: ["relax_count_rule"],
   conflictingRequirements: ["align_overlapping_requirements"],
-  personalCapsTooLow: ["extra_shift_willing_nurse", "borrow_temporary_nurse"],
+  personalCapsTooLow: ["extra_shift_willing_nurse"],
   busyNightsWithRestRule: ["borrow_temporary_nurse", "run_one_short"],
   rnMixOnLeave: ["borrow_temporary_nurse", "ask_nurse_on_leave"],
   shortOnLeaveDay: ["borrow_temporary_nurse", "ask_nurse_on_leave", "run_one_short"],
@@ -153,7 +155,7 @@ describe("the scripted wards read as real ward situations", () => {
   it("understaffed night: borrow one nurse for the 5th only, or run that night one short", () => {
     const [borrow, short] = options("understaffedNight");
     expect(borrow.operations).toEqual([
-      { type: "add_person", name: "Borrowed nurse 1", groups: [], temporary: true },
+      { type: "add_person", name: "Borrowed nurse 1", groups: [] },
       {
         type: "set_off_request",
         personId: "Borrowed nurse 1",
@@ -181,7 +183,6 @@ describe("the scripted wards read as real ward situations", () => {
       type: "add_person",
       name: "Borrowed nurse 1",
       groups: ["RN"],
-      temporary: true,
     });
     expect(borrow.needsFromUser.join(" ")).toMatch(/qualified as RN/);
     expect(ask.operations).toEqual([
@@ -210,7 +211,7 @@ describe("the scripted wards read as real ward situations", () => {
   it("busy nights with a rest rule: borrow a nurse for the two busy nights only, off in between", () => {
     const [borrow] = options("busyNightsWithRestRule");
     expect(borrow.operations).toEqual([
-      { type: "add_person", name: "Borrowed nurse 1", groups: [], temporary: true },
+      { type: "add_person", name: "Borrowed nurse 1", groups: [] },
       ...[
         ["2026-11-01", "2026-11-01"],
         ["2026-11-03", "2026-11-05"],
@@ -256,14 +257,6 @@ describe("the scripted wards read as real ward situations", () => {
     await expect(stableYaml(result.next)).toMatchFileSnapshot(
       `${FIXTURE_DIR}shortOnLeaveDay.run_one_short.yaml`,
     );
-  });
-
-  it("too few nurses: borrow a temporary nurse for the whole period, asked on the Preview", () => {
-    const [borrow] = options("tooFewNurses");
-    expect(borrow.operations).toEqual([
-      { type: "add_person", name: "Borrowed nurse 1", groups: [], temporary: true },
-    ]);
-    expect(borrow.enforcedBy).toBe("host_question");
   });
 
   it("personal caps too low: ask ana for one more night, and her agreement gates Apply", () => {

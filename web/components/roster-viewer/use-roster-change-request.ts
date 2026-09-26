@@ -8,7 +8,7 @@
 // swap prepared on yesterday's roster must never land on today's.
 
 import { useEffect } from "react";
-import type { RosterDocument } from "@/lib/roster";
+import type { RosterDocument, RosterEdit } from "@/lib/roster";
 import {
   requestStillMatches,
   reportRosterChange,
@@ -23,7 +23,7 @@ import type { RosterEditingState } from "./use-roster-editing";
 export function applyRosterChange(
   document: RosterDocument,
   request: RosterChangeRequest,
-  applyCells: RosterEditingState["applyCells"],
+  applyCells: (cells: readonly RosterEdit[]) => boolean,
 ): RosterChangeOutcome {
   // One authority for "does the roster still match", shared with the linked Apply.
   if (!requestStillMatches(document, request)) return "roster-changed";
@@ -32,7 +32,7 @@ export function applyRosterChange(
     dateIdx,
     day: after,
   }));
-  return applyCells(cells, request.addPeople) ? "applied" : "rejected";
+  return applyCells(cells) ? "applied" : "rejected";
 }
 
 /** Take a pending request once the edit session can save it, and apply it. */

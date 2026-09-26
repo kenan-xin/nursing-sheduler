@@ -45,7 +45,7 @@ import {
   writeItemGroups,
 } from "@/components/entity-editor/core";
 import type { CountCard, DateRef, PersonRef, SuccessionCard } from "@/lib/scenario";
-import { peopleDescriptor, writeTemporary } from "@/components/people/people-descriptor";
+import { peopleDescriptor } from "@/components/people/people-descriptor";
 import { computeQuickPaintCellIntent } from "@/components/requests/requests-gestures";
 import { createHotStore } from "@/lib/store/hot-store";
 import { foldPaintIntents } from "@/lib/store/paint-fold";
@@ -402,19 +402,10 @@ describe("the Staff-screen arms are the Staff screen's saves", () => {
   const d = peopleDescriptor;
 
   // `people-table.tsx:723-745`: gate on validateFullEditId, then addItem + writeGroups.
-  function manualAddPerson(
-    state: ScenarioUiState,
-    name: string,
-    groups: string[],
-    temporary = false,
-  ) {
+  function manualAddPerson(state: ScenarioUiState, name: string, groups: string[]) {
     const check = validateFullEditId(d, d.readItems(state), d.readGroups(state), name);
     if (!check.ok) return null;
-    return writeTemporary(
-      writeItemGroups(addItem(state, d, { id: check.id }), d, check.id, groups),
-      check.id,
-      temporary,
-    );
+    return writeItemGroups(addItem(state, d, { id: check.id }), d, check.id, groups);
   }
 
   // `people-table.tsx:719-757`: rename only when the raw text changed, then writeGroups.
@@ -423,7 +414,6 @@ describe("the Staff-screen arms are the Staff screen's saves", () => {
     personId: string | number,
     name: string,
     groups: string[],
-    temporary = false,
   ) {
     const nameChanged = name !== String(personId);
     const check = nameChanged
@@ -431,49 +421,43 @@ describe("the Staff-screen arms are the Staff screen's saves", () => {
       : ({ ok: true, id: name } as const);
     if (!check.ok) return null;
     const renamed = nameChanged ? renameItem(state, d, personId, check.id) : state;
-    const id = nameChanged ? check.id : personId;
-    return writeTemporary(writeItemGroups(renamed, d, id, groups), id, temporary);
+    return writeItemGroups(renamed, d, nameChanged ? check.id : personId, groups);
   }
 
   it("add_person accepts, refuses and writes what Add nurse does", () => {
     const state = peopleScenario();
-    for (const temporary of [false, true]) {
-      for (const name of ["Cara", "  Cara  ", "12", "ana", "RN", "ALL", "all", ""]) {
-        const manual = manualAddPerson(state, name, ["Seniors", "RN"], temporary);
-        const assistant = applyAssistantCommand(state, {
-          type: "add_person",
-          name,
-          groups: ["Seniors", "RN"],
-          temporary,
-        });
-        expect(assistant.ok, `"${name}"`).toBe(manual !== null);
-        if (manual && assistant.ok) expect(assistant.next).toEqual(manual);
-      }
+    for (const name of ["Cara", "  Cara  ", "12", "ana", "RN", "ALL", "all", ""]) {
+      const manual = manualAddPerson(state, name, ["Seniors", "RN"]);
+      const assistant = applyAssistantCommand(state, {
+        type: "add_person",
+        name,
+        groups: ["Seniors", "RN"],
+      });
+      expect(assistant.ok, `"${name}"`).toBe(manual !== null);
+      if (manual && assistant.ok) expect(assistant.next).toEqual(manual);
     }
   });
 
   it("edit_person accepts, refuses and writes what the row's Edit does", () => {
     const state = peopleScenario();
-    const cases: [string | number, string, string[], boolean][] = [
-      ["ana", "Ana Lim", ["RN"], true],
-      ["ana", "ana", [], false],
-      ["ana", "  ana  ", ["RN", "Seniors"], false],
-      [7, "7", ["Seniors"], true],
-      [7, " 7 ", ["RN"], false], // the row renames number 7 to text "7"
-      ["ana", "bo", ["RN"], false],
-      ["ana", "Seniors", ["RN"], false],
-      ["ana", "ALL", ["RN"], false],
-      ["ana", "", ["RN"], false],
-      ["ana", "ana", [], true],
+    const cases: [string | number, string, string[]][] = [
+      ["ana", "Ana Lim", ["RN"]],
+      ["ana", "ana", []],
+      ["ana", "  ana  ", ["RN", "Seniors"]],
+      [7, "7", ["Seniors"]],
+      [7, " 7 ", ["RN"]], // the row renames number 7 to text "7"
+      ["ana", "bo", ["RN"]],
+      ["ana", "Seniors", ["RN"]],
+      ["ana", "ALL", ["RN"]],
+      ["ana", "", ["RN"]],
     ];
-    for (const [personId, name, groups, temporary] of cases) {
-      const manual = manualEditPerson(state, personId, name, groups, temporary);
+    for (const [personId, name, groups] of cases) {
+      const manual = manualEditPerson(state, personId, name, groups);
       const assistant = applyAssistantCommand(state, {
         type: "edit_person",
         personId,
         name,
         groups,
-        temporary,
       });
       expect(assistant.ok, `${String(personId)} -> "${name}"`).toBe(manual !== null);
       if (manual && assistant.ok) expect(assistant.next).toEqual(manual);

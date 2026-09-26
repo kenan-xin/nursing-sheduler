@@ -249,7 +249,6 @@ function normalizePerson(p: ImportScenarioParsed["people"]["items"][number]): Ui
     // rejected by the producer and core. Repairing here — rather than reporting it
     // — is what keeps such a file loadable.
     history: p.history ? truncateHistoryAtBlankEntries(p.history) : undefined,
-    temporary: p.temporary === true ? true : undefined,
   });
 }
 function normalizePeopleGroup(g: {

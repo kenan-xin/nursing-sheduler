@@ -25,9 +25,8 @@ import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
 import {
+  deriveCurrentDays,
   deriveEditedSinceSolve,
-  rosterAxisContext,
-  rosterCurrentDays,
   type EditCoordinate,
   type RosterDayState,
   type RosterDocument,
@@ -92,21 +91,9 @@ export function RosterViewer({ document, editing }: RosterViewerProps) {
   );
   const width = useRosterContentWidth();
 
-  // The full person axis: submitted people, then any borrowed (temporary) nurses.
-  // Every lens reads people and cells by index through these two, so a borrowed row
-  // is a row everywhere.
-  const context = useMemo(
-    () => rosterAxisContext({ context: document.context, borrowed: document.borrowed }),
-    [document.context, document.borrowed],
-  );
   const currentDays = useMemo(
-    () =>
-      rosterCurrentDays({
-        solvedDays: document.solvedDays,
-        borrowed: document.borrowed,
-        edits: document.edits,
-      }),
-    [document.solvedDays, document.borrowed, document.edits],
+    () => deriveCurrentDays(document.solvedDays, document.edits),
+    [document.solvedDays, document.edits],
   );
   const ramp = useMemo(
     () => assignShiftRamp(document.context.shiftTypes),
@@ -115,30 +102,26 @@ export function RosterViewer({ document, editing }: RosterViewerProps) {
   // The ephemeral staffing-equation projection. Keyed on the IMMUTABLE
   // submission, so it survives every edit without being recomputed, and nothing
   // about it is ever written back into the persisted document.
-  const model = useMemo(
-    () => deriveRequirementModel(document.submission, document.borrowed),
-    [document.submission, document.borrowed],
-  );
+  const model = useMemo(() => deriveRequirementModel(document.submission), [document.submission]);
   const assignments = useMemo(
-    () => buildAssignmentIndex(context, currentDays),
-    [context, currentDays],
+    () => buildAssignmentIndex(document.context, currentDays),
+    [document.context, currentDays],
   );
   const coverage = useMemo(
-    () => computeCoverage(context, assignments, model),
-    [context, assignments, model],
+    () => computeCoverage(document.context, assignments, model),
+    [document.context, assignments, model],
   );
   const requirements = useMemo(
     () => computeRequirementGrid(model, assignments, document.context.calendar.length),
     [model, assignments, document.context.calendar.length],
   );
-  const tallies = useMemo(() => computeTallies(context, currentDays), [context, currentDays]);
+  const tallies = useMemo(
+    () => computeTallies(document.context, currentDays),
+    [document.context, currentDays],
+  );
   const provenance = useMemo(
-    () =>
-      buildProvenanceView(
-        document.provenance,
-        deriveEditedSinceSolve(document.edits) || document.borrowed.length > 0,
-      ),
-    [document.provenance, document.edits, document.borrowed],
+    () => buildProvenanceView(document.provenance, deriveEditedSinceSolve(document.edits)),
+    [document.provenance, document.edits],
   );
   // The roster-level claim comes from DECLARED equation health, never from how
   // many exact lanes happened to carry a cached baseline.
@@ -238,7 +221,7 @@ export function RosterViewer({ document, editing }: RosterViewerProps) {
       {/* Edit bar: only in the Grid lens when a cell is selected. */}
       {editing !== undefined && lens === "grid" && editing.selectedCell !== null ? (
         <RosterEditBar
-          context={context}
+          context={document.context}
           selected={editing.selectedCell}
           current={currentDays[editing.selectedCell.personIdx]?.[editing.selectedCell.dateIdx]}
           onSetCell={editing.setCell}
@@ -249,7 +232,7 @@ export function RosterViewer({ document, editing }: RosterViewerProps) {
       {/* Active lens. */}
       {lens === "grid" ? (
         <RosterGrid
-          context={context}
+          context={document.context}
           currentDays={currentDays}
           ramp={ramp}
           coverage={coverage}
@@ -259,7 +242,7 @@ export function RosterViewer({ document, editing }: RosterViewerProps) {
       ) : null}
       {lens === "coverage" ? (
         <RosterCoverage
-          context={context}
+          context={document.context}
           ramp={ramp}
           coverage={coverage}
           model={model}
@@ -269,7 +252,7 @@ export function RosterViewer({ document, editing }: RosterViewerProps) {
       ) : null}
       {lens === "day" ? (
         <RosterDay
-          context={context}
+          context={document.context}
           currentDays={currentDays}
           ramp={ramp}
           coverage={coverage}

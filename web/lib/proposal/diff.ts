@@ -492,8 +492,7 @@ export function diffScenarioDocuments(
       keyPrefix: "person",
       identity: (person) => stableStringify(person.id),
       label: (person) => `${person.id}`,
-      render: (person) =>
-        `${person.description?.trim() || person.id}${person.temporary ? " (temporary: borrowed or agency)" : ""}`,
+      render: (person) => person.description?.trim() || `${person.id}`,
     }),
     ...compareKeyed(before.staffGroups, after.staffGroups, {
       scope: "staff-list",

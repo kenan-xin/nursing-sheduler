@@ -37,12 +37,7 @@ import {
 // DIRECT LEAF IMPORTS, not the `@/lib/roster` barrel (see `tallies.ts`).
 import { parseSubmissionDocument } from "@/lib/roster/context";
 import { typedIdKey } from "@/lib/roster/day-state";
-import type {
-  RosterBorrowedRow,
-  RosterContext,
-  RosterDayGrid,
-  RosterSubmission,
-} from "@/lib/roster/types";
+import type { RosterContext, RosterDayGrid, RosterSubmission } from "@/lib/roster/types";
 
 /**
  * One skill-mix floor on an equation: at least `minNumPeople` of `people` among
@@ -263,39 +258,10 @@ function unavailableEquation(
  */
 export function deriveRequirementModel(
   submission: Pick<RosterSubmission, "canonicalYaml">,
-  borrowed: readonly Pick<RosterBorrowedRow, "groups">[] = [],
 ): RequirementModel {
   const parsed = parseSubmissionDocument(submission.canonicalYaml);
   if (!parsed.ok) return { equations: [], reason: parsed.reason };
-  return { equations: buildEquations(withBorrowedPeople(parsed.document, borrowed)), reason: null };
-}
-
-/**
- * The submitted document with each borrowed nurse appended as a person (index
- * `items.length + i`, matching the roster axis) and added to her groups, so group
- * selectors (`qualifiedPeople: RN`, skill mix) count her the way her staff record
- * says. Her id here is synthetic: only her index and groups matter to the resolver.
- */
-export function withBorrowedPeople(
-  document: CanonicalScenarioDocument,
-  borrowed: readonly Pick<RosterBorrowedRow, "groups">[],
-): CanonicalScenarioDocument {
-  if (borrowed.length === 0) return document;
-  const ids = borrowed.map((_row, i) => `\u0000borrowed-${i}`);
-  return {
-    ...document,
-    people: {
-      ...document.people,
-      items: [...document.people.items, ...ids.map((id) => ({ id }))],
-      groups: (document.people.groups ?? []).map((group) => ({
-        ...group,
-        members: [
-          ...group.members,
-          ...ids.filter((_id, i) => borrowed[i].groups.includes(String(group.id))),
-        ],
-      })),
-    },
-  };
+  return { equations: buildEquations(parsed.document), reason: null };
 }
 
 /** The equation list for an already-parsed canonical document. */

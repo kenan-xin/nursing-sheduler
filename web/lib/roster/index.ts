@@ -13,7 +13,6 @@ export {
   ROSTER_DOCUMENT_SCHEMA_VERSION,
   ROSTER_SUBMISSION_SCHEMA_VERSION,
   type RosterBaselineMinimum,
-  type RosterBorrowedRow,
   type RosterCalendarDay,
   type RosterContext,
   type RosterContextPerson,
@@ -70,15 +69,6 @@ export {
   type EditCoordinate,
   type EditSession,
 } from "./editing";
-
-export {
-  checkBorrowedRows,
-  rosterAxisContext,
-  rosterBaseDays,
-  rosterCurrentDays,
-  scenarioStaffGroupIds,
-  withBorrowedRows,
-} from "./borrowed";
 
 export {
   checkCoordinateMap,

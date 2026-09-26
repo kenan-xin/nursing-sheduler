@@ -100,7 +100,7 @@ export function priyaContext(): RosterContext {
  */
 export function priyaRosterDocument(): RosterDocument {
   return {
-    schemaVersion: "roster-file/2",
+    schemaVersion: "roster-file/1",
     provenance: {
       solverStatus: "OPTIMAL",
       score: 0,
@@ -111,7 +111,6 @@ export function priyaRosterDocument(): RosterDocument {
     context: priyaContext(),
     solvedDays: priyaGrid(),
     edits: [],
-    borrowed: [],
     coordinateMap: {
       peopleRows: [],
       dateColumns: [],
@@ -185,98 +184,6 @@ export function borrowRosterDocument(): RosterDocument {
     submission: fixtureSubmission(borrowDocument(), []),
     context: borrowContext(),
     solvedDays: borrowGrid(),
-  };
-}
-
-// A borrowed nurse (roster-file/2, bead g1p) already on the roster, covering the night
-// of 9 Oct. She is the only Nights nurse off on 7-8 Oct, so the ladder must count her
-// row or it reports the night short and asks for a SECOND temporary nurse (bead d88).
-//            7 Oct  8 Oct  9 Oct
-// SN-Priya   N      N      OFF
-// SSN-Dev    AM     AM     AM     → not in Nights: cannot take a night
-// Mei (borrowed, Nights)  OFF  OFF  N
-function borrowedCoverDocument(): CanonicalScenarioDocument {
-  return {
-    apiVersion: "alpha",
-    dates: { range: { startDate: BORROW_DATES[0], endDate: BORROW_DATES[2] } },
-    people: {
-      items: [{ id: "SN-Priya" }, { id: "SSN-Dev" }],
-      groups: [{ id: "Nights", members: ["SN-Priya"] }],
-    },
-    shiftTypes: {
-      items: [
-        { id: "AM", startTime: "07:00", endTime: "15:00", durationMinutes: 480 },
-        { id: "N", startTime: "21:00", endTime: "07:00", durationMinutes: 600 },
-      ],
-    },
-    preferences: [
-      { type: PREFERENCE_TYPE.maxOneShiftPerDay },
-      {
-        type: PREFERENCE_TYPE.shiftTypeRequirement,
-        description: "One night nurse",
-        shiftType: "N",
-        requiredNumPeople: 1,
-        qualifiedPeople: "Nights",
-        weight: -1,
-      },
-    ],
-  };
-}
-
-export function borrowedCoverRosterDocument(): RosterDocument {
-  return {
-    ...priyaRosterDocument(),
-    submission: fixtureSubmission(borrowedCoverDocument(), []),
-    context: borrowContext(),
-    solvedDays: [
-      [N, N, OFF],
-      [AM, AM, AM],
-    ],
-    borrowed: [{ id: "Mei", groups: ["Nights"], days: [OFF, OFF, N] }],
-  };
-}
-
-/**
- * The d88 borrowed-cover roster plus ONE ward-wide count rule whose person is `ALL`
- * (bead d88 review). The g1p loan narrows the ward's hard count rules away from the
- * borrowed nurse (`narrowedCounts`, `web/lib/ai/assistant/repair-options.ts`), so her
- * row must not take them up: a minimum must not report her short, and a cap must not
- * block her cover.
- */
-export function borrowedWardCountRosterDocument(count: {
-  description: string;
-  countShiftTypes: string;
-  expression: string;
-  target: number;
-}): RosterDocument {
-  const document = borrowedCoverDocument();
-  return {
-    ...borrowedCoverRosterDocument(),
-    // Priya works three shifts (two of them nights), so a hard minimum of two still holds
-    // for her after she gives one night away: only the borrowed row is the rule's business.
-    solvedDays: [
-      [N, N, AM],
-      [AM, AM, AM],
-    ],
-    submission: fixtureSubmission(
-      {
-        ...document,
-        preferences: [
-          ...document.preferences,
-          {
-            type: PREFERENCE_TYPE.shiftCount,
-            description: count.description,
-            person: "ALL",
-            countDates: "ALL",
-            countShiftTypes: count.countShiftTypes,
-            expression: count.expression,
-            target: count.target,
-            weight: Infinity,
-          },
-        ],
-      },
-      [],
-    ),
   };
 }
 

@@ -7,8 +7,7 @@
 
 import { calendarSpan } from "@/lib/proposal/assumptions";
 import {
-  rosterAxisContext,
-  rosterCurrentDays,
+  deriveCurrentDays,
   type RosterContext,
   type RosterDayState,
   type RosterDocument,
@@ -91,27 +90,23 @@ export function summarizeRoster(
   if (dateIdxs.length === 0) {
     return `No roster dates fall in that range. This roster runs from ${first} to ${last}.`;
   }
-  // Rows cover the whole axis, borrowed (temporary) nurses included. The staffing
-  // check counts her by the groups on her row, so a shift she covers is not reported
-  // short; the succession, count and request checks stay on the submitted people.
-  const axis = rosterAxisContext(document);
-  const allDays = rosterCurrentDays(document);
-  let people = axis.people.map((_person, idx) => idx);
+  let people = context.people.map((_person, idx) => idx);
   if (filter.people && filter.people.length > 0) {
-    const found = filter.people.map((name) => findPersonIdx(axis, name));
+    const found = filter.people.map((name) => findPersonIdx(context, name));
     const missing = filter.people.filter((_name, i) => found[i] < 0);
     if (missing.length > 0) {
-      const everyone = axis.people.map((person) => String(person.id)).join(", ");
+      const everyone = context.people.map((person) => String(person.id)).join(", ");
       return `Not on this roster: ${missing.join(", ")}. People on it: ${everyone}.`;
     }
     people = [...new Set(found)];
   }
-  const model = deriveRuleModel(document.submission, document.borrowed);
+  const days = deriveCurrentDays(document.solvedDays, document.edits);
+  const model = deriveRuleModel(document.submission);
   // ponytail: the whole range goes back in one answer; a ward period is about 4-6 weeks.
   const rulesBrokenNow =
     model === null
       ? []
-      : listIssues(model, axis, allDays, {
+      : listIssues(model, context, days, {
           people: context.people.map((_p, i) => i),
           dates: dateIdxs,
         })
@@ -121,7 +116,7 @@ export function summarizeRoster(
   return {
     status: "ready",
     newerRunWaiting,
-    changedByHand: document.edits.length > 0 || document.borrowed.length > 0,
+    changedByHand: document.edits.length > 0,
     solvedAs: document.provenance.solverStatus === "OPTIMAL" ? "optimal" : "feasible",
     period: { start: first, end: last },
     shiftTypes: context.shiftTypes.map((shift) => ({
@@ -131,8 +126,8 @@ export function summarizeRoster(
     })),
     dates: dateIdxs.map((d) => isos[d]),
     rows: people.map((p) => ({
-      person: personName(axis, p),
-      days: dateIdxs.map((d) => dayCode(allDays[p][d])),
+      person: personName(context, p),
+      days: dateIdxs.map((d) => dayCode(days[p][d])),
     })),
     rulesBrokenNow,
     guidance: newerRunWaiting
@@ -238,10 +233,7 @@ function span(context: RosterContext, dateIdxs: readonly number[]): string {
     : joinDates(sorted.map((d) => plainDate(iso(d))));
 }
 
-export const rowsOf = (
-  context: RosterContext,
-  cells: Extract<SwapPlan, { ok: true }>["cells"],
-): RosterChangeView["rows"] =>
+const rowsOf = (context: RosterContext, cells: Extract<SwapPlan, { ok: true }>["cells"]) =>
   cells.map((cell) => ({
     person: personName(context, cell.personIdx),
     date: plainDate(context.calendar[cell.dateIdx].iso),
@@ -402,16 +394,12 @@ export const BORROW_SOURCE = {
   agency: "agency",
 } as const;
 
-/**
- * Step 3: the staff change plus her roster row (roster-file/2), applied together.
- * `rows` are the roster cells; `question` is the proposal's lending-ward question.
- */
+/** Step 3, C1: the schedule change only. `question` is the proposal's lending-ward question. */
 export function buildBorrowView(
   name: string,
   source: keyof typeof BORROW_SOURCE,
   groups: readonly string[],
   needs: readonly { date: string; shift: string }[],
-  rows: RosterChangeView["rows"],
   question: string | null,
   summary: string,
 ): RosterChangeView {
@@ -422,12 +410,13 @@ export function buildBorrowView(
     stepLabel: STEP_LABEL[3],
     title: `${name} (${from}): ${needs.map((n) => `${n.shift} on ${n.date}`).join(", ")}`,
     summary,
-    rows: [...rows],
+    rows: [],
     leaveRows: [],
     worthKnowing: [],
     notChecked: [],
     notes: [
       `Adds ${name} (${from}) as temporary staff, off on every other date${qualified}.`,
+      `${name}'s roster row appears after the next run.`,
       `Please let your ${ROSTER_OWNER} know.`,
     ],
     agreement: question,

@@ -13,8 +13,6 @@ import { PREFERENCE_TYPE, type CanonicalScenarioDocument } from "@/lib/scenario"
 import {
   ashaRosterDocument,
   borrowDocument,
-  borrowedCoverRosterDocument,
-  borrowedWardCountRosterDocument,
   borrowRosterDocument,
   overtimeContext,
   overtimeDocument,
@@ -253,23 +251,6 @@ const useShort = () => {
     candidateSource: { jobId: "job-1", candidateVersion: 1 },
   };
 };
-const useBorrowedCover = () => {
-  fixture.working = {
-    document: borrowedCoverRosterDocument(),
-    revision: 1,
-    candidateSource: { jobId: "job-1", candidateVersion: 1 },
-  };
-  fixture.scenario = { rangeStart: "2026-10-07", rangeEnd: "2026-10-09" };
-};
-/** The d88 borrowed cover plus one ward-wide hard count rule (bead d88 review). */
-const useBorrowedWardCount = (count: Parameters<typeof borrowedWardCountRosterDocument>[0]) => {
-  fixture.working = {
-    document: borrowedWardCountRosterDocument(count),
-    revision: 1,
-    candidateSource: { jobId: "job-1", candidateVersion: 1 },
-  };
-  fixture.scenario = { rangeStart: "2026-10-07", rangeEnd: "2026-10-09" };
-};
 const idFor = (iso: string) =>
   generateDateItems({ start: "2026-10-07", end: "2026-10-14" }).find((item) => item.iso === iso)
     ?.id;
@@ -415,19 +396,6 @@ describe("the escalation ladder in the tools", () => {
     expect(fixture.prepare).not.toHaveBeenCalled();
   });
 
-  it("refuses a temporary nurse whose groups name a staff group the roster does not have (bead 6yn)", async () => {
-    useBorrow();
-    const answer = await tool("prepare_borrowed_cover").handler(
-      { ...BORROW_MEI, groups: ["Ward6"], summary: "Borrow." },
-      {},
-    );
-    expect(answer).toMatch(/Ward6/);
-    expect(answer).toMatch(/no card was shown/);
-    expect(answer).toMatch(/Nights/);
-    expect(fixture.prepare).not.toHaveBeenCalled();
-    expect(useAssistantStore.getState().activeRosterChange).toBeNull();
-  });
-
   it("borrows into the real group a multi-member qualifiedPeople selector names (bead olu)", async () => {
     const document = {
       ...borrowDocument(),
@@ -475,7 +443,6 @@ describe("the escalation ladder in the tools", () => {
       type: "add_person",
       name: "Mei",
       groups: ["Nights"],
-      temporary: true,
     });
   });
 
@@ -506,7 +473,7 @@ describe("the escalation ladder in the tools", () => {
       {},
     );
     expect(fixture.prepare.mock.calls[0][0].commands).toEqual([
-      { type: "add_person", name: "Mei", groups: ["Nights"], temporary: true },
+      { type: "add_person", name: "Mei", groups: ["Nights"] },
       {
         type: "set_off_request",
         personId: "Mei",
@@ -536,13 +503,6 @@ describe("the escalation ladder in the tools", () => {
     expect(card?.view.agreement).toBe(
       "Has the lending ward or agency confirmed Mei for 8 Oct, qualified as Nights?",
     );
-    // roster-file/2 (bead g1p): her row joins the roster in the same Apply.
-    const mei = borrowRosterDocument().context.people.length;
-    const OFF = { kind: "off" };
-    expect(card?.request?.peopleCount).toBe(mei);
-    expect(card?.request?.addPeople).toEqual([
-      { id: "Mei", description: "relief pool", groups: ["Nights"], days: [OFF, OFF, OFF] },
-    ]);
     expect(card?.request?.cells).toEqual([
       {
         personIdx: 0,
@@ -550,69 +510,10 @@ describe("the escalation ladder in the tools", () => {
         before: { kind: "shift", shiftId: "N" },
         after: { kind: "leave" },
       },
-      { personIdx: mei, dateIdx: 1, before: OFF, after: { kind: "shift", shiftId: "N" } },
     ]);
-    expect(card?.view.rows).toContainEqual({
-      person: "Mei",
-      date: "8 Oct",
-      now: "Day off",
-      after: "Night",
-    });
-    expect(card?.view.notes.join(" ")).not.toMatch(/after the next run/);
     expect(card?.view.title).toBe("Mei (relief pool): Night on 8 Oct");
     expect(card?.linked?.record).toBe("staff");
     expect(answer).toMatch(/nurse manager or nurse clinician/);
-    expect(answer).not.toMatch(/next optimiser run/);
-  });
-
-  it("counts a borrowed nurse already on the roster instead of asking for a second one", async () => {
-    // Bead d88: Mei (borrowed, Nights) already covers 9 Oct and is off on 8 Oct, the
-    // only Nights nurse who can take Priya's night. Skipping her row reports 9 Oct
-    // short and escalates to step 3, asking for a SECOND temporary nurse.
-    useBorrowedCover();
-    const answer = (await tool("find_swap_partners").handler(
-      { person: "SN-Priya", dates: ["2026-10-08"], reason: "swap" },
-      {},
-    )) as { step: number; overtime: { partner: string }[]; temporary?: unknown };
-    expect(answer.step).toBe(2);
-    expect(answer.overtime.map((c) => c.partner)).toEqual(["Mei"]);
-    expect(answer.temporary).toBeUndefined();
-  });
-
-  it("still offers the borrowed nurse under a ward-wide hard count minimum (bead d88 review)", async () => {
-    // The ward's own "each nurse works at least N shifts" is not the borrowed nurse's rule
-    // (g1p `narrowedCounts`), so it must not hand her spare capacity she does not have.
-    useBorrowedWardCount({
-      description: "Every nurse works at least two shifts",
-      countShiftTypes: "ALL",
-      expression: "x >= T",
-      target: 2,
-    });
-    const answer = (await tool("find_swap_partners").handler(
-      { person: "SN-Priya", dates: ["2026-10-08"], reason: "swap" },
-      {},
-    )) as { step: number; overtime: { partner: string }[]; temporary?: unknown };
-    expect(answer.step).toBe(2);
-    expect(answer.overtime.map((c) => c.partner)).toEqual(["Mei"]);
-    expect(answer.temporary).toBeUndefined();
-  });
-
-  it("still offers the borrowed nurse under a ward-wide hard count cap (bead d88 review)", async () => {
-    // Priya is over the cap before the swap and under it after; only a rule that wrongly
-    // binds the borrowed row would block her taking the night.
-    useBorrowedWardCount({
-      description: "Every nurse works at most one night",
-      countShiftTypes: "N",
-      expression: "x <= T",
-      target: 1,
-    });
-    const answer = (await tool("find_swap_partners").handler(
-      { person: "SN-Priya", dates: ["2026-10-08"], reason: "swap" },
-      {},
-    )) as { step: number; overtime: { partner: string }[]; temporary?: unknown };
-    expect(answer.step).toBe(2);
-    expect(answer.overtime.map((c) => c.partner)).toEqual(["Mei"]);
-    expect(answer.temporary).toBeUndefined();
   });
 
   it("cancels the linked proposal of a card it replaces", async () => {
@@ -632,7 +533,7 @@ describe("the escalation ladder in the tools", () => {
     expect(fixture.cancel).toHaveBeenCalledWith("old-p");
   });
 
-  it("frees the asking nurse on the roster now when step 3 covers a swap", async () => {
+  it("frees the asking nurse at the next run when step 3 covers a swap", async () => {
     useBorrow();
     fixture.prepare.mockResolvedValueOnce({
       ok: true,
@@ -657,18 +558,11 @@ describe("the escalation ladder in the tools", () => {
     });
     expect(commands.some((c: { type: string }) => c.type === "add_leave")).toBe(false);
     const card = useAssistantStore.getState().activeRosterChange;
-    const mei = borrowRosterDocument().context.people.length;
-    expect(card?.request?.cells).toEqual([
-      { personIdx: 0, dateIdx: 1, before: { kind: "shift", shiftId: "N" }, after: { kind: "off" } },
-      {
-        personIdx: mei,
-        dateIdx: 1,
-        before: { kind: "off" },
-        after: { kind: "shift", shiftId: "N" },
-      },
-    ]);
-    expect(card?.view.notes.join(" ")).not.toMatch(/after the next run/);
-    expect(answer).not.toMatch(/next optimiser run/);
+    expect(card?.request).toBeNull();
+    expect(card?.view.notes).toContain(
+      "The swap takes effect after the next run: SN-Priya keeps these shifts until then.",
+    );
+    expect(answer).toMatch(/swap takes effect after the next optimiser run/);
   });
 
   it("shows no new card while the last one is applying, and cancels what it prepared", async () => {

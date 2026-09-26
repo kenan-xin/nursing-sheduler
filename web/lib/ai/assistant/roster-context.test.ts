@@ -5,8 +5,6 @@ import {
   ashaContext,
   ashaDocument,
   ashaGrid,
-  borrowedCoverRosterDocument,
-  borrowedWardCountRosterDocument,
   overtimeContext,
   overtimeDocument,
   overtimeGrid,
@@ -53,22 +51,6 @@ describe("readRosterForAssistant", () => {
     expect(read).toMatchObject({ status: "ready", newerRunWaiting: true });
   });
 
-  it("upgrades a roster-file/1 roster stored by an older build (bead g1p)", async () => {
-    const { borrowed: _dropped, ...v1 } = priyaRosterDocument();
-    const read = await readRosterForAssistant({
-      readWorking: async () =>
-        ({ ...row, document: { ...v1, schemaVersion: "roster-file/1" } }) as never,
-      readCurrentCandidate: async () => pointer,
-    });
-    expect(read).toMatchObject({
-      status: "ready",
-      document: { schemaVersion: "roster-file/2", borrowed: [] },
-    });
-    if (read.status !== "ready") return;
-    // And it reads: the summary walks the (upgraded) axis without throwing.
-    expect(summarizeRoster(read.document, {}, false)).toMatchObject({ status: "ready" });
-  });
-
   it("says unavailable, not empty, when storage cannot be read", async () => {
     const read = await readRosterForAssistant({
       readWorking: async () => {
@@ -90,31 +72,6 @@ describe("summarizeRoster", () => {
     if (typeof summary === "string") throw new Error(summary);
     expect(summary.dates).toEqual(["2026-10-08", "2026-10-09"]);
     expect(summary.rows).toEqual([{ person: "SN-Priya", days: ["N", "N"] }]);
-    expect(summary.rulesBrokenNow).toEqual([]);
-  });
-
-  it("counts a borrowed nurse's cover, so it is not reported as short (bead d88)", () => {
-    const summary = summarizeRoster(borrowedCoverRosterDocument(), {}, false);
-    if (typeof summary === "string") throw new Error(summary);
-    expect(summary.rows).toContainEqual({ person: "Mei", days: ["OFF", "OFF", "N"] });
-    expect(summary.rulesBrokenNow).toEqual([]);
-  });
-
-  it("does not report a borrowed nurse short against the ward's own count rules (bead d88 review)", () => {
-    // Priya works 2 shifts and Dev 3, so only a rule that wrongly binds the borrowed row
-    // (1 shift) can break: the g1p loan narrows the ward's hard count rules away from her.
-    const summary = summarizeRoster(
-      borrowedWardCountRosterDocument({
-        description: "Every nurse works at least two shifts",
-        countShiftTypes: "ALL",
-        expression: "x >= T",
-        target: 2,
-      }),
-      {},
-      false,
-    );
-    if (typeof summary === "string") throw new Error(summary);
-    expect(summary.rows).toContainEqual({ person: "Mei", days: ["OFF", "OFF", "N"] });
     expect(summary.rulesBrokenNow).toEqual([]);
   });
 
@@ -209,12 +166,9 @@ describe("ladder views", () => {
       "relief_pool",
       [],
       [{ date: "8 Oct", shift: "N" }],
-      [{ person: "SN-Tan", date: "8 Oct", now: "Day off", after: "N" }],
       null,
       "Short on nights.",
     );
-    expect(view.rows).toEqual([{ person: "SN-Tan", date: "8 Oct", now: "Day off", after: "N" }]);
-    expect(view.notes.join(" ")).not.toMatch(/after the next run/);
     expect(view.title).toBe("SN-Tan (relief pool): N on 8 Oct");
     expect(view.notes[0]).toBe(
       "Adds SN-Tan (relief pool) as temporary staff, off on every other date.",

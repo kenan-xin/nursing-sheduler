@@ -117,15 +117,6 @@ export function freezeRosterDocument(document: RosterDocument): RosterDocument {
     context: freezeContext(document.context),
     solvedDays: freezeDayGrid(document.solvedDays),
     edits: freezeEdits(document.edits),
-    borrowed: Object.freeze(
-      document.borrowed.map((row) =>
-        Object.freeze({
-          ...row,
-          groups: Object.freeze([...row.groups]),
-          days: Object.freeze(row.days.map(freezeDayState)),
-        }),
-      ),
-    ),
     coordinateMap: freezeCoordinateMap(document.coordinateMap),
     frozenXlsx: document.frozenXlsx,
   });

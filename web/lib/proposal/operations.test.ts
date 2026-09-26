@@ -1570,23 +1570,16 @@ describe("remove_rule", () => {
 });
 
 describe("Staff-screen arms", () => {
-  const addPerson = (name: string, groups: string[] = [], temporary = false) => ({
+  const addPerson = (name: string, groups: string[] = []) => ({
     type: "add_person" as const,
     name,
     groups,
-    temporary,
   });
-  const editPerson = (
-    personId: string | number,
-    name: string,
-    groups: string[],
-    temporary = false,
-  ) => ({
+  const editPerson = (personId: string | number, name: string, groups: string[]) => ({
     type: "edit_person" as const,
     personId,
     name,
     groups,
-    temporary,
   });
 
   it("adds a person into existing groups, trimming the name as the Staff row does", () => {
@@ -1690,41 +1683,6 @@ describe("Staff-screen arms", () => {
     const result = applyAssistantCommand(peopleScenario(), editPerson("ana", "ana", ["RN"]));
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.rejection.code).toBe("no_effect");
-  });
-
-  const groupsOf = (s: ScenarioUiState, id: string) =>
-    s.staffGroups.filter((g) => g.members.includes(id)).map((g) => g.id);
-
-  it("edit_person that only changes the temporary flag is a change; the same flag is no effect", () => {
-    const state = peopleScenario();
-    const on = applyAssistantCommand(state, {
-      type: "edit_person",
-      personId: "ana",
-      name: "ana",
-      groups: groupsOf(state, "ana"),
-      temporary: true,
-    });
-    if (!on.ok) throw new Error(on.rejection.message);
-    expect(on.next.staff.find((p) => p.id === "ana")?.temporary).toBe(true);
-    const again = applyAssistantCommand(on.next, {
-      type: "edit_person",
-      personId: "ana",
-      name: "ana",
-      groups: groupsOf(state, "ana"),
-      temporary: true,
-    });
-    expect(again).toMatchObject({ ok: false, rejection: { code: "no_effect" } });
-  });
-
-  it("reads a stored add_person without the flag as the ward's own staff", () => {
-    const legacy = {
-      type: "add_person",
-      name: "Cara",
-      groups: [],
-    } as unknown as AssistantCommandV1;
-    const result = applyAssistantCommand(peopleScenario(), legacy);
-    if (!result.ok) throw new Error(result.rejection.message);
-    expect(result.next.staff.at(-1)).toEqual({ id: "Cara", history: [] });
   });
 
   it("removes a person and cascades as the Staff screen's Delete does", () => {
@@ -1893,7 +1851,7 @@ describe("borrowed-nurse batch: add_person + set_off_request", () => {
   it("borrows one RN from Ward 5 for 12-14 Oct in one batch", () => {
     const float = "Float RN (Ward 5)";
     const commands = [
-      { type: "add_person" as const, name: float, groups: ["RN"], temporary: false },
+      { type: "add_person" as const, name: float, groups: ["RN"] },
       {
         type: "set_off_request" as const,
         personId: float,

@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { deriveAssumptions } from "@/lib/proposal/assumptions";
 import type { AssistantCommandV1 } from "@/lib/proposal/commands";
 import { applyAssistantCommands } from "@/lib/proposal/operations";
-import { deriveProposalDiff } from "@/lib/proposal/diff";
 import { findStaffingShortfalls, type StaffingFinding } from "@/lib/rules/shortfalls";
 import { formatShortDate } from "@/lib/dates/date-id";
 import {
@@ -127,7 +125,8 @@ describe("rankRepairOptions", () => {
         const result = applyAssistantCommands(state, o.operations);
         expect(result.ok, `${name}/${o.repairId}: ${JSON.stringify(result)}`).toBe(true);
       }
-      if (findStaffingShortfalls(state).length === 0) continue;
+      // A ward only a whole-period borrow fixed has no repair until Task 19's cover (d582).
+      if (findStaffingShortfalls(state).length === 0 || name === "tooFewNurses") continue;
       const [top] = options;
       expect(top?.operations.length, name).toBeGreaterThan(0);
       const after = applyAssistantCommands(state, top.operations);
@@ -141,7 +140,7 @@ describe("rankRepairOptions", () => {
     expect(borrow).toMatchObject({ confirmation: "lending_ward", enforcedBy: "host_question" });
     const name = "Borrowed nurse 1";
     expect(borrow?.operations).toEqual([
-      { type: "add_person", name, groups: ["RN"], temporary: true },
+      { type: "add_person", name, groups: ["RN"] },
       {
         type: "set_off_request",
         personId: name,
@@ -175,7 +174,6 @@ describe("rankRepairOptions", () => {
       type: "add_person",
       name: "Borrowed nurse 2",
       groups: ["RN"],
-      temporary: true,
     });
   });
 
@@ -193,32 +191,6 @@ describe("rankRepairOptions", () => {
     const ids = rank(state).map((o) => o.repairId);
     expect(ids).not.toContain("borrow_temporary_nurse");
     expect(ids).toContain("ask_nurse_on_leave");
-  });
-
-  it("narrows a hard count rule a borrowed nurse would inherit", () => {
-    const borrow = rank(capOnAll()).find((o) => o.repairId === "borrow_temporary_nurse");
-    expect(borrow?.operations).toContainEqual(
-      expect.objectContaining({
-        type: "edit_count_rule",
-        ruleId: "max-nights",
-        people: ["ana", "ben", "cara", "dev"],
-        target: 1,
-      }),
-    );
-  });
-
-  it("tells the Preview that a narrowed rule will not cover nurses hired later", () => {
-    const state = capOnAll();
-    const borrow = rank(state).find((o) => o.repairId === "borrow_temporary_nurse");
-    const applied = applyAssistantCommands(state, borrow!.operations);
-    if (!applied.ok) throw new Error(applied.rejection.message);
-    const diff = deriveProposalDiff(state, applied.next, borrow!.operations);
-    expect(diff.cascade).toContainEqual(
-      expect.objectContaining({
-        key: "narrowed:max-nights",
-        after: expect.stringMatching(/hired later/),
-      }),
-    );
   });
 
   it("offers no borrow option when a contracted-hours rule would bind the borrowed nurse", () => {
@@ -485,7 +457,7 @@ describe("rankRepairOptions", () => {
     }
   });
 
-  it("borrows a temporary RN for the whole period when every night lacks one", () => {
+  it("offers no whole-period borrow: with no hard day off she would read as a new hire (d582)", () => {
     const base = SCENARIOS.onlyRnOnLeave();
     const state: ScenarioUiState = {
       ...base,
@@ -496,21 +468,7 @@ describe("rankRepairOptions", () => {
         kind: "leave" as const,
       })),
     };
-    const borrow = rank(state).find((o) => o.repairId === "borrow_temporary_nurse");
-    expect(borrow).toMatchObject({ confirmation: "lending_ward", enforcedBy: "host_question" });
-    expect(borrow?.operations.filter((op) => op.type === "set_off_request")).toEqual([]);
-    expect(borrow?.operations[0]).toEqual({
-      type: "add_person",
-      name: "Borrowed nurse 1",
-      groups: ["RN"],
-      temporary: true,
-    });
-    expect(isSafeOption(state, borrow!)).toBe(true);
-    const applied = applyAssistantCommands(state, borrow!.operations);
-    if (!applied.ok) throw new Error(applied.rejection.message);
-    expect(deriveAssumptions(state, applied.next, borrow!.operations).map((a) => a.type)).toContain(
-      "borrowed_staff_arranged",
-    );
+    expect(rank(state).find((o) => o.repairId === "borrow_temporary_nurse")).toBeUndefined();
   });
 });
 
@@ -559,7 +517,6 @@ describe("isSafeOption", () => {
     type: "add_person",
     name: "Borrowed nurse 1",
     groups: ["RN"],
-    temporary: true,
   };
   const loan = { confirmation: "lending_ward", enforcedBy: "host_question" } as const;
   const nurse = { confirmation: "named_nurse", enforcedBy: "host_question" } as const;
@@ -781,9 +738,7 @@ describe("isSafeOption", () => {
       rn,
       {
         ...loan,
-        operations: [
-          { type: "add_person", name: "Sarah Lee", groups: [], temporary: false },
-        ] as Op[],
+        operations: [{ type: "add_person", name: "Sarah Lee", groups: [] }] as Op[],
       },
     ],
     [
@@ -969,15 +924,12 @@ describe("isSafeOption", () => {
     expect(isSafeOption(state, option(partial))).toBe(true);
   });
 
-  it("isSafeOption refuses a borrow that is not marked temporary", () => {
+  it("isSafeOption accepts a borrow without a temporary flag (d582)", () => {
     const option_ = rank(rn).find((o) => o.repairId === "borrow_temporary_nurse")!;
-    const unmarked = {
-      ...option_,
-      operations: option_.operations.map((op) =>
-        op.type === "add_person" ? { ...op, temporary: false } : op,
-      ),
-    };
-    expect(isSafeOption(rn, unmarked)).toBe(false);
+    const [add] = option_.operations;
+    expect(add.type).toBe("add_person");
+    expect(add).not.toHaveProperty("temporary");
+    expect(isSafeOption(rn, option_)).toBe(true);
   });
 });
 
@@ -1050,20 +1002,6 @@ describe("review fixes (2026-09-24)", () => {
     };
     const align = rank(state).find((o) => o.repairId === "align_overlapping_requirements");
     expect(align?.operations).toEqual([]);
-  });
-
-  it("sizes a capped loan by the dates the requirement covers", () => {
-    const base = SCENARIOS.ruleTooStrict();
-    const state = {
-      ...base,
-      cardsByKind: {
-        ...base.cardsByKind,
-        requirements: [requirement("night-05", "N", 3, { date: ["2026-11-05"] })],
-        counts: [nightCap("max-nights", "Nurses", 0)],
-      },
-    };
-    const borrow = rank(state).find((o) => o.repairId === "borrow_temporary_nurse");
-    expect(borrow?.operations.filter((op) => op.type === "add_person")).toHaveLength(3);
   });
 
   it("does not raise a cap for nurses who are away anyway", () => {
@@ -1267,7 +1205,6 @@ describe("review fixes (2026-09-24)", () => {
       type: "add_person" as const,
       name: `Borrowed nurse ${n}`,
       groups: [],
-      temporary: true,
     });
     const narrow = {
       type: "edit_count_rule" as const,
@@ -1488,35 +1425,29 @@ describe("violatesSafetyFloor (any operations, including model-written candidate
       [{ type: "clear_requests", personId: "rn1", startDate: "2026-11-03", endDate: "2026-11-03" }],
       /leave/,
     ],
-    [
-      "invented nurse",
-      rn,
-      [{ type: "add_person", name: "Sarah Lee", groups: [], temporary: false }],
-      /name/,
-    ],
+    ["invented nurse", rn, [{ type: "add_person", name: "Sarah Lee", groups: [] }], /name/],
     [
       "skilled hire with no host question",
       rn,
-      [{ type: "add_person", name: "Borrowed nurse 1", groups: ["RN"], temporary: false }],
+      [{ type: "add_person", name: "Borrowed nurse 1", groups: ["RN"] }],
       /qualification/,
     ],
     [
       "a nurse joined to a skill group by edit_person",
       rn,
-      [{ type: "edit_person", personId: "en1", name: "en1", groups: ["RN"], temporary: false }],
+      [{ type: "edit_person", personId: "en1", name: "en1", groups: ["RN"] }],
       /qualification/,
     ],
     [
       "a borrowed nurse put in a skill group by edit_person",
       rn,
       [
-        { type: "add_person", name: "Borrowed nurse 1", groups: [], temporary: false },
+        { type: "add_person", name: "Borrowed nurse 1", groups: [] },
         {
           type: "edit_person",
           personId: "Borrowed nurse 1",
           name: "Borrowed nurse 1",
           groups: ["RN"],
-          temporary: false,
         },
       ],
       /qualification/,
@@ -1625,7 +1556,7 @@ describe("violatesSafetyFloor (any operations, including model-written candidate
     ).toBeNull();
     expect(
       ok(rn, [
-        { type: "add_person", name: "Borrowed nurse 1", groups: ["RN"], temporary: false },
+        { type: "add_person", name: "Borrowed nurse 1", groups: ["RN"] },
         {
           type: "set_off_request",
           personId: "Borrowed nurse 1",
@@ -1652,9 +1583,7 @@ describe("violatesSafetyFloor (any operations, including model-written candidate
       ]),
     ).toBeNull();
     expect(
-      ok(spare, [
-        { type: "edit_person", personId: "en1", name: "en1", groups: ["Bank"], temporary: false },
-      ]),
+      ok(spare, [{ type: "edit_person", personId: "en1", name: "en1", groups: ["Bank"] }]),
     ).toBeNull();
     // Keeping the skill group a nurse is already in is no change, not a qualification.
     expect(
@@ -1669,20 +1598,25 @@ describe("violatesSafetyFloor (any operations, including model-written candidate
       ]),
     ).toBeNull();
     expect(
-      ok(rn, [
-        { type: "edit_person", personId: "rn1", name: "rn1", groups: ["RN"], temporary: false },
-      ]),
+      ok(rn, [{ type: "edit_person", personId: "rn1", name: "rn1", groups: ["RN"] }]),
     ).toBeNull();
   });
 
-  it("a temporary skilled borrow passes the floor on its own", () => {
-    expect(
-      violatesSafetyFloor(
-        rn,
-        [{ type: "add_person", name: "Borrowed nurse 1", groups: ["RN"], temporary: true }],
-        { leaveAsked: false },
-      ),
-    ).toBeNull();
+  it("a skilled borrow passes the floor only with her hard days off (the loan marker)", () => {
+    const add: AssistantCommandV1 = {
+      type: "add_person",
+      name: "Borrowed nurse 1",
+      groups: ["RN"],
+    };
+    const off: AssistantCommandV1 = {
+      type: "set_off_request",
+      personId: "Borrowed nurse 1",
+      startDate: "2026-11-01",
+      endDate: "2026-11-02",
+      weight: "must",
+    };
+    expect(violatesSafetyFloor(rn, [add, off], { leaveAsked: false })).toBeNull();
+    expect(violatesSafetyFloor(rn, [add], { leaveAsked: false })).not.toBeNull();
   });
 });
 
@@ -1725,8 +1659,8 @@ describe("skill-mix repairs (bead nursing-sheduler-2ti)", () => {
     });
     const borrow = rank(two).find((o) => o.repairId === "borrow_temporary_nurse");
     expect(borrow?.operations.filter((op) => op.type === "add_person")).toEqual([
-      { type: "add_person", name: "Borrowed nurse 1", groups: ["RN"], temporary: true },
-      { type: "add_person", name: "Borrowed nurse 2", groups: ["Senior"], temporary: true },
+      { type: "add_person", name: "Borrowed nurse 1", groups: ["RN"] },
+      { type: "add_person", name: "Borrowed nurse 2", groups: ["Senior"] },
     ]);
     // Each nurse is free on her own group's date only: hers, not the other group's.
     expect(
@@ -1768,8 +1702,8 @@ describe("skill-mix repairs (bead nursing-sheduler-2ti)", () => {
     });
     const borrow = rank(both).find((o) => o.repairId === "borrow_temporary_nurse");
     expect(borrow?.operations.filter((op) => op.type === "add_person")).toEqual([
-      { type: "add_person", name: "Borrowed nurse 1", groups: ["RN"], temporary: true },
-      { type: "add_person", name: "Borrowed nurse 2", groups: ["Senior"], temporary: true },
+      { type: "add_person", name: "Borrowed nurse 1", groups: ["RN"] },
+      { type: "add_person", name: "Borrowed nurse 2", groups: ["Senior"] },
     ]);
     const applied = applyAssistantCommands(both, borrow!.operations);
     if (!applied.ok) throw new Error(applied.rejection.message);

@@ -69,7 +69,7 @@ export function useWorkingRoster(): WorkingRosterState {
       rosterStorage.readWorking<RosterDocument>(),
       rosterStorage.readCurrentCandidate(),
     ]);
-    // A roster saved by an older build is roster-file/1: upgrade it on read. The next
+    // A roster saved by an older build is upgraded on read. The next
     // autosave writes it back at the current version.
     setDocument(workingRow ? upgradeStoredRosterDocument(workingRow.document) : null);
     setRevision(workingRow?.revision ?? null);

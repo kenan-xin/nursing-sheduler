@@ -272,30 +272,6 @@ describe("qualification", () => {
     expect(cell.offenders).toEqual([2]);
   });
 
-  it("counts a borrowed nurse (bead g1p) by the groups on her row", () => {
-    // Row 4 is a borrowed nurse on D+. In Seniors she fills the slot; outside it she
-    // is an unqualified offender, exactly as a submitted nurse would be.
-    const days: RosterDayGrid = [
-      [OFF, OFF],
-      [OFF, OFF],
-      [OFF, OFF],
-      [OFF, OFF],
-      [shift("D+"), OFF],
-    ];
-    const submission = { canonicalYaml: serializeCanonicalDocument(document) };
-    const senior = deriveRequirementModel(submission, [{ groups: ["Seniors"] }]);
-    const qualified = checked(
-      evaluateRequirementCell(senior.equations[0], indexFor(document, days), 0),
-    );
-    expect(qualified).toMatchObject({ units: 1, unqualified: 0, mismatch: false });
-
-    const other = deriveRequirementModel(submission, [{ groups: [] }]);
-    const offender = checked(
-      evaluateRequirementCell(other.equations[0], indexFor(document, days), 0),
-    );
-    expect(offender).toMatchObject({ units: 0, unqualified: 1, offenders: [4] });
-  });
-
   it("never becomes an exact-shift target", () => {
     expect(
       exactShiftRequirement({ equations: buildEquations(document), reason: null }, 1, 2),
