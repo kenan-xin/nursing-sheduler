@@ -311,6 +311,46 @@ describe("ShiftTypeGrid — staffing states", () => {
     expect(screen.queryByTestId("requirement-delete")).not.toBeInTheDocument();
   });
 
+  it("shows a rule's per-date exceptions beside the base Minimum", async () => {
+    await seed({
+      shifts: [{ id: "Day" }],
+      shiftGroups: [],
+      rangeStart: "2026-07-01",
+      rangeEnd: "2026-07-07",
+    });
+    await seedRequirements([
+      requirement({
+        requiredNumPeopleOverrides: [
+          ["2026-07-03", 1],
+          ["2026-07-05", 3],
+        ],
+      }),
+    ]);
+    render(<ShiftTypeGrid />);
+
+    // The base head count is untouched — the per-date exceptions sit beside it.
+    expect(screen.getByTestId("staffing-min-string:Day")).toHaveTextContent("2");
+    expect(screen.getByTestId("staffing-exceptions-string:Day")).toHaveTextContent(
+      "3 Jul: 1 · 5 Jul: 3",
+    );
+  });
+
+  it("shows exceptions for a read-only rule too", async () => {
+    await seed({ shifts: [{ id: "Day" }], shiftGroups: [] });
+    await seedRequirements([
+      requirement({
+        qualifiedPeople: ["Seniors"],
+        requiredNumPeopleOverrides: [["2026-07-03", 1]],
+      }),
+    ]);
+    render(<ShiftTypeGrid />);
+
+    const region = screen.getByTestId("staffing-readonly-string:Day");
+    expect(within(region).getByTestId("staffing-exceptions-string:Day")).toHaveTextContent(
+      "3 Jul: 1",
+    );
+  });
+
   it("surfaces duplicate baselines while editing the first one", async () => {
     await seed({ shifts: [{ id: "Day" }], shiftGroups: [] });
     await seedRequirements([
