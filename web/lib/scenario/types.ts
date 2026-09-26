@@ -384,7 +384,6 @@ export interface CanonicalScenarioDocument {
   apiVersion: string;
   description?: string;
   dates: CanonicalDateContainer;
-  country?: string;
   people: CanonicalPeopleContainer;
   shiftTypes: CanonicalShiftTypesContainer;
   preferences: CanonicalPreference[];
@@ -408,7 +407,6 @@ export interface ScenarioMeta {
   apiVersion: string;
   appVersion?: string;
   description?: string;
-  country?: string;
 }
 
 export interface UiPerson {

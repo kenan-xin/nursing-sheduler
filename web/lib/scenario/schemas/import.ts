@@ -317,6 +317,7 @@ export const importScenarioSchema = z.strictObject({
     items: z.array(zImportDate).max(0).optional(),
     groups: z.array(zImportDateGroup).optional(),
   }),
+  // Accepted for old backend files and dropped on import (v1 sync X9); never sent.
   country: z.string().nullish(),
   people: z.strictObject({
     items: z.array(zImportPerson),

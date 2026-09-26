@@ -99,6 +99,13 @@ describe("validateScenario (canonical document, not UI state)", () => {
     const doc = toCanonicalScenarioDocument(makeValidUiState());
     expect(validateScenario(doc).ok).toBe(true);
   });
+
+  it("rejects a `country` key as an unrecognized producer field", () => {
+    // The strict producer mirrors the backend strict model, which dropped `country`
+    // (v1 sync X9). A document that still carries it is not one this build sends.
+    const doc = { ...toCanonicalScenarioDocument(makeValidUiState()), country: "SG" };
+    expect(validateScenario(doc).ok).toBe(false);
+  });
 });
 
 describe("canonicalization is applied before dump (not just validated)", () => {

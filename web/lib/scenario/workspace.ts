@@ -118,7 +118,6 @@ export interface WorkspaceDocumentV1 {
     range: { startDate: IsoDate | null; endDate: IsoDate | null };
     groups?: CanonicalDateGroup[];
   };
-  country?: string;
   people: CanonicalPeopleContainer;
   shiftTypes: CanonicalShiftTypesContainer;
   preferences: WorkspacePreferenceRecord[];
@@ -176,6 +175,7 @@ export const workspaceRootSchema = z.strictObject({
   apiVersion: z.string(),
   description: z.string().optional(),
   dates: zWorkspaceDates,
+  // Accepted for old saved files and dropped on import (v1 sync X9); never emitted.
   country: z.string().optional(),
   people: producerPeopleContainer,
   shiftTypes: producerShiftTypesContainer,
@@ -496,14 +496,13 @@ export function projectWorkspaceToStrict(workspace: ParsedWorkspace): CanonicalS
         ? { groups: workspace.dates.groups as CanonicalDateGroup[] }
         : {}),
     },
-    country: workspace.country,
     people: workspace.people as unknown as CanonicalPeopleContainer,
     shiftTypes: workspace.shiftTypes as unknown as CanonicalShiftTypesContainer,
     preferences,
     export: workspace.export as CanonicalExportConfig | undefined,
   };
 
-  for (const key of ["appVersion", "description", "country", "export"] as const) {
+  for (const key of ["appVersion", "description", "export"] as const) {
     if (doc[key] === undefined) delete doc[key];
   }
   return doc;
@@ -628,7 +627,6 @@ export function buildWorkspaceDocument(state: ScenarioUiState): WorkspaceDocumen
       },
       ...(canonical.dates.groups ? { groups: canonical.dates.groups } : {}),
     },
-    ...(state.meta.country !== undefined ? { country: state.meta.country } : {}),
     people: canonical.people,
     shiftTypes: canonical.shiftTypes,
     preferences,
@@ -799,7 +797,6 @@ export function normalizeWorkspaceToImportTarget(
       apiVersion: workspace.apiVersion,
       appVersion: workspace.appVersion,
       description: workspace.description,
-      country: workspace.country,
     }),
     staff: workspace.people.items.map((item) => normalizePerson(item as never)),
     staffGroups: (workspace.people.groups ?? []).map((group) =>
