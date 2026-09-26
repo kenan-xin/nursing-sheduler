@@ -59,10 +59,13 @@ export const CAPABILITY_ENTRIES = [
     nurseFacingSummary:
       "List the nurses being rostered and put them into groups — for example seniors, or a " +
       "team — so a rule can be written about the group instead of naming every person. A nurse " +
-      "borrowed from another ward for a few days is added like anyone else and marked off on " +
-      "the days they are not here. Borrowed for nights? Also mark them Must work the night " +
-      "shift on those dates (a shift request at weight must), or the solver may put them on " +
-      "day shifts. The assistant can prepare these changes for you to review " +
+      "from another ward is not added here unless she is staying for several days: a " +
+      "temporary cover for one shift on one date goes in the Temporary cover section on this " +
+      "same page, where it lowers that shift's staffing need by one without becoming one of " +
+      "your nurses. A borrowed nurse who IS here for several days is added like anyone else " +
+      "and marked off on the days she is not here; borrowed for nights, also mark her Must " +
+      "work the night shift on those dates (a shift request at weight must), or the solver " +
+      "may put her on day shifts. The assistant can prepare these changes for you to review " +
       "and apply.",
     concepts: [
       "staff",
