@@ -464,7 +464,7 @@ test.describe.serial("T12 M2a-2 contracted-hours guided editing", () => {
     await page.getByTestId("count-edit-0").click();
     await expect(page.getByTestId("card-editor-form")).toBeVisible();
     await expect(page.getByTestId("contracted-policy-exact")).toBeVisible();
-    await expect(page.getByTestId("contracted-target-exact")).toHaveValue("160h");
+    await expect(page.getByTestId("contracted-target-exact")).toHaveValue("320");
     await expect(page.getByTestId("count-desc")).toHaveCount(0);
   });
 
@@ -487,7 +487,7 @@ test.describe.serial("T12 M2a-2 contracted-hours guided editing", () => {
     await page.getByRole("button", { name: /Remove LEAVE.*from count shift types/ }).click();
 
     await page.getByTestId("contracted-desc").fill("Full-time contract");
-    await page.getByTestId("contracted-target-exact").fill("160h");
+    await page.getByTestId("contracted-target-exact").fill("320");
     await page.getByRole("button", { name: "Add Aisha to people" }).click();
     // D is already selected by the guided default; only its coefficient is manual.
     await page.getByTestId("contracted-coefficient-fields-input-D").fill("16");
@@ -514,7 +514,7 @@ test.describe.serial("T12 M2a-2 contracted-hours guided editing", () => {
 
     // Reopening dispatches to the guided editor, not the ordinary form.
     await page.getByTestId("count-edit-0").click();
-    await expect(page.getByTestId("contracted-target-exact")).toHaveValue("160h");
+    await expect(page.getByTestId("contracted-target-exact")).toHaveValue("320");
     await expect(page.getByTestId("count-desc")).toHaveCount(0);
   });
 
@@ -527,8 +527,8 @@ test.describe.serial("T12 M2a-2 contracted-hours guided editing", () => {
     await page.getByRole("button", { name: "Remove N from count shift types" }).click();
     await page.getByRole("button", { name: /Remove LEAVE.*from count shift types/ }).click();
     await page.getByTestId("contracted-policy-range").click();
-    await page.getByTestId("contracted-target-min").fill("150h");
-    await page.getByTestId("contracted-target-max").fill("170h");
+    await page.getByTestId("contracted-target-min").fill("300");
+    await page.getByTestId("contracted-target-max").fill("340");
     await page.getByRole("button", { name: "Add Aisha to people" }).click();
     // D is already selected by the guided default; only its coefficient is manual.
     await page.getByTestId("contracted-coefficient-fields-input-D").fill("16");
@@ -610,7 +610,7 @@ test.describe.serial("T12 M2a-3 contracted coverage-gated commit", () => {
     await page.getByTestId("add-contracted-toggle").click();
     await expect(page.getByTestId("card-editor-form")).toBeVisible();
     await page.getByTestId("contracted-desc").fill("Full-time contract");
-    await page.getByTestId("contracted-target-exact").fill("160h");
+    await page.getByTestId("contracted-target-exact").fill("320");
     await page.getByRole("button", { name: "Add Aisha to people" }).click();
     // D and N are already selected by the guided default; remove the unrelated
     // default LEAVE row to isolate this test's deliberate two-worked-shift case.
@@ -717,7 +717,7 @@ test.describe.serial("T12 M2a-4 Convert ↔ generic", () => {
     // The carried coefficient satisfies coverage; only the hours target is missing.
     await expect(page.getByTestId("contracted-coefficient-fields-input-D")).toHaveValue("16");
 
-    await page.getByTestId("contracted-target-exact").fill("160h");
+    await page.getByTestId("contracted-target-exact").fill("320");
     await page.getByTestId("card-editor-submit").click();
 
     // Marked card, SAME index (1) and stable description; the other card is untouched.
@@ -945,7 +945,7 @@ test.describe.serial("T12 M2a-5 Refresh from Shift Types", () => {
     await page.getByTestId("add-contracted-toggle").click();
     await expect(page.getByTestId("card-editor-form")).toBeVisible();
     await page.getByTestId("contracted-desc").fill("Full-time contract");
-    await page.getByTestId("contracted-target-exact").fill("160h");
+    await page.getByTestId("contracted-target-exact").fill("320");
     await page.getByRole("button", { name: "Add Aisha to people" }).click();
     // The guided default already snapshots D/W plus LEAVE, with D's coefficient
     // pre-derived (16). Reset D and W to fresh blank rows (re-adding after removal
