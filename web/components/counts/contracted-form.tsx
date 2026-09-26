@@ -964,6 +964,7 @@ export function ContractedForm({
         label="Shift Type"
         heading="Derived coefficients · half-hours"
         note="Each worked shift contributes its working time ÷ 30 min. A paid-leave day credits 8h. Values are editable; a shift type with no working time must be set by hand."
+        derivedHints
         testId="contracted-coefficient-fields"
         errorsById={errors.coefficientErrorsById}
         // Always surface the aggregate. Unlike count-form (where the aggregate is the
