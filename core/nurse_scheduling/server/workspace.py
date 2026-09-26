@@ -152,6 +152,30 @@ _DATE_REFERENCE_FIELDS = ("date", "countDates")
 CURRENT_WORKSPACE_VERSION = 1
 SUPPORTED_WORKSPACE_VERSIONS = frozenset({CURRENT_WORKSPACE_VERSION})
 
+# A Workspace backup may carry temporary-cover entries (d582) that the web app
+# applies before it submits, so only the strict document the web app produces is
+# solvable. `convert_workspace_to_strict` refuses a non-empty list with this
+# located issue instead of silently dropping (or, worse, double-counting) the credit.
+MESSAGE_TEMPORARY_COVER_REQUIRES_WEB_APPLICATION = (
+    "Temporary cover is applied by the web app. Submit the strict document it produces."
+)
+
+
+class WorkspaceTemporaryCover(BaseModel):
+    """One temporary-cover entry (d582): a named nurse from outside this ward
+    covering one shift on one date.
+
+    She is a display-only staffing credit the web app applies before solving, never
+    a solver person: `convert_workspace_to_strict` refuses a non-empty list (below).
+    `shiftType`/`groups` accept a numeric id like every other Workspace reference.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    name: str
+    date: datetime.date
+    shiftType: str | int
+    groups: list[str | int] = Field(default_factory=list)
+
 
 class WorkspaceSchedulingDataV1(BaseModel):
     """Flat superset of the strict scheduling document preserving authoring state.
@@ -171,6 +195,7 @@ class WorkspaceSchedulingDataV1(BaseModel):
     people: PeopleContainer
     shiftTypes: ShiftTypesContainer
     preferences: list[dict[str, Any]] = Field(default_factory=list)
+    temporaryCover: list[WorkspaceTemporaryCover] = Field(default_factory=list)
     export: ExportConfig = Field(default_factory=ExportConfig)
     appVersion: str | None = None
 
@@ -558,6 +583,22 @@ def convert_workspace_to_strict(parsed: dict[str, Any]) -> NurseSchedulingData:
     body_issues = _preference_body_issues(workspace.preferences)
     if body_issues:
         raise SchedulingContentError(CODE_INVALID_SCHEDULING_DATA, MESSAGE_INVALID_SCHEDULING_DATA, body_issues)
+
+    # A non-empty temporary cover is a web-applied credit (d582), not a solver
+    # person: refuse it here, located at its own field, so a caller cannot mistake
+    # an unconverted Workspace for a solvable document.
+    if workspace.temporaryCover:
+        raise SchedulingContentError(
+            CODE_INVALID_SCHEDULING_DATA,
+            MESSAGE_INVALID_SCHEDULING_DATA,
+            [
+                SchedulingIssue(
+                    ["temporaryCover"],
+                    ISSUE_INVALID_VALUE,
+                    MESSAGE_TEMPORARY_COVER_REQUIRES_WEB_APPLICATION,
+                )
+            ],
+        )
 
     readiness = _readiness_issues(workspace)
     if readiness:
