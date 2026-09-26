@@ -562,13 +562,14 @@ function assertCoherentChatUi(facts: ChatFacts, surface: "dock" | "sheet") {
   expect(facts.userBubble.width).toBeLessThan(facts.userBubble.transcriptWidth);
   expect(facts.userBubble.insetFromAssistant).toBeGreaterThan(16);
   expect(facts.userBubble.withinTranscript).toBe(true);
-  expect(facts.userBubble.fontFamily).toContain("Hanken Grotesk");
+  // next/font/local names the family after its variable (`hankenGrotesk`), not "Hanken Grotesk".
+  expect(facts.userBubble.fontFamily).toMatch(/hanken ?grotesk/i);
 
   expect(facts.assistantProse.found).toBe(true);
   // The assistant speaks in the app's own voice: warm ink, no bubble.
   expect(facts.assistantProse.color).toBe(facts.tokens.ink);
   expect(facts.assistantProse.background).toBe("rgba(0, 0, 0, 0)");
-  expect(facts.assistantProse.fontFamily).toContain("Hanken Grotesk");
+  expect(facts.assistantProse.fontFamily).toMatch(/hanken ?grotesk/i);
   // Genuinely wrapped prose, so the layout facts above are not about one short line.
   expect(facts.assistantProse.lineCount).toBeGreaterThan(2);
 
@@ -577,7 +578,7 @@ function assertCoherentChatUi(facts: ChatFacts, surface: "dock" | "sheet") {
   // A long code line must move INSIDE its own block. Left to the panel it would
   // either force horizontal page scroll or be silently cut (DESIGN.md §7 note 6).
   expect(facts.codeBlock.found).toBe(true);
-  expect(facts.codeBlock.monoFamily).toContain("Spline Sans Mono");
+  expect(facts.codeBlock.monoFamily).toMatch(/spline ?sans ?mono/i);
   expect(facts.codeBlock.ownScroller).toBe(true);
   expect(facts.codeBlock.withinTranscript).toBe(true);
 

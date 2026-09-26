@@ -90,7 +90,7 @@ describe("toCanonicalScenarioDocument", () => {
 
     expect(doc.apiVersion).toBe("alpha");
     expect(doc.description).toBe("Feb 2026 ward");
-    expect(doc.country).toBe("SG");
+    expect(doc.country).toBeUndefined();
     expect(doc.dates.range).toEqual({ startDate: "2026-02-01", endDate: "2026-02-28" });
     expect(doc.dates.groups).toEqual([{ id: "week1", members: ["2026-02-01~2026-02-07"] }]);
     expect(doc.people.items).toEqual([

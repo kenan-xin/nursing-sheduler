@@ -771,3 +771,72 @@ preferences: []
     error = _content_error(document)
     encoded = [(issue.path, issue.code, issue.message) for issue in error.issues]
     assert encoded == sorted(encoded, key=lambda item: (str(item[0]), item[1], item[2]))
+
+
+def test_workspace_country_is_accepted_and_dropped():
+    document = WORKSPACE.replace("apiVersion: alpha\n", "apiVersion: alpha\ncountry: SG\n", 1)
+    canonical = canonicalize_submission(document.encode())
+    assert b"country" not in canonical
+    assert load_data(canonical) is not None
+
+
+def test_legacy_unknown_person_is_a_content_error_not_a_crash():
+    shift_request = """  - type: shift request
+    person: ghost
+    date: 2025-01-01
+    shiftType: day
+"""
+    with pytest.raises(SchedulingContentError) as caught:
+        canonicalize_submission((LEGACY_EQUIVALENT + shift_request).encode())
+    assert any("ghost" in issue.message for issue in caught.value.issues)
+
+
+_OVERRIDE_WORKSPACE = """
+workspaceVersion: 1
+apiVersion: alpha
+dates:
+  range:
+    startDate: 2025-01-01
+    endDate: 2025-01-03
+people:
+  items:
+    - id: alice
+    - id: bob
+shiftTypes:
+  items:
+    - id: day
+preferences:
+  - workspaceId: r1
+    type: at most one shift per day
+  - workspaceId: r2
+    type: shift type requirement
+    shiftType: day
+    requiredNumPeople: 2
+{extra}
+"""
+
+
+@pytest.mark.parametrize("date_selector", ["[2025-01-01]", "[]"])
+def test_workspace_override_date_outside_requirement_is_located(date_selector):
+    document = _OVERRIDE_WORKSPACE.format(
+        extra=f"    date: {date_selector}\n    requiredNumPeopleOverrides: [[2025-01-02, 1]]"
+    )
+    error = _content_error(document)
+    assert error.error_code == "workspace_not_ready"
+    assert (["preferences", 1, "requiredNumPeopleOverrides"], "unresolved_workspace_reference") in [
+        (issue.path, issue.code) for issue in error.issues
+    ]
+    assert "'2025-01-02'" in " ".join(issue.message for issue in error.issues)
+
+
+@pytest.mark.parametrize("date_line", ["", "    date: ALL\n"])
+def test_workspace_override_date_inside_requirement_is_accepted(date_line):
+    document = _OVERRIDE_WORKSPACE.format(extra=f"{date_line}    requiredNumPeopleOverrides: [[2025-01-02, 1]]")
+    assert b"requiredNumPeopleOverrides" in canonicalize_submission(document.encode())
+
+
+def test_workspace_disabled_override_is_not_checked():
+    document = _OVERRIDE_WORKSPACE.format(
+        extra="    enabled: false\n    date: [2025-01-01]\n    requiredNumPeopleOverrides: [[2025-01-02, 1]]"
+    )
+    canonicalize_submission(document.encode())
