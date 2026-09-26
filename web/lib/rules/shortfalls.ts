@@ -266,6 +266,33 @@ export function requiredOn(
   );
 }
 
+/**
+ * Drop every per-date override a requirement no longer covers, keeping the cards
+ * (and the overrides) that still resolve. An override is valid only while its ISO
+ * date is one of the requirement's RESOLVED dates (`requirementDateIsos`); a date
+ * the requirement stopped covering — a deleted/edited date group, a shrunk range
+ * — would otherwise reach the solver and raise, and the run would fail with a
+ * generic error instead of a named one. Pure: returns the same state when nothing
+ * is dropped, so a mutation that changes no coverage makes no spurious entry.
+ */
+export function dropUncoveredOverrides(state: ScenarioUiState): ScenarioUiState {
+  let dropped = false;
+  const requirements = state.cardsByKind.requirements.map((card) => {
+    const overrides = card.requiredNumPeopleOverrides;
+    if (!overrides?.length) return card;
+    const covered = new Set(requirementDateIsos(state, card));
+    const kept = overrides.filter(([iso]) => covered.has(iso));
+    if (kept.length === overrides.length) return card;
+    dropped = true;
+    if (kept.length === 0) {
+      const { requiredNumPeopleOverrides: _uncovered, ...rest } = card;
+      return rest;
+    }
+    return { ...card, requiredNumPeopleOverrides: kept };
+  });
+  return dropped ? { ...state, cardsByKind: { ...state.cardsByKind, requirements } } : state;
+}
+
 /** Greedily picks equations over pairwise-separate shifts, largest head count that date first. */
 function disjoint(candidates: Equation[], dateId: string): Equation[] {
   const chosen: Equation[] = [];

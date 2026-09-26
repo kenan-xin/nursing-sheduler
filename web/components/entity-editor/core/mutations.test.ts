@@ -3,11 +3,13 @@ import {
   createEmptyScenarioUiState,
   RESERVED_SHIFT_TYPE,
   type ScenarioUiState,
+  type UiDateGroup,
   type UiPerson,
   type UiShiftType,
 } from "@/lib/scenario";
 import { RenameCollisionError } from "@/lib/cascade";
-import type { EntityDescriptor } from "./descriptor";
+import { generateDateItems } from "@/lib/dates";
+import type { EditorGroup, EntityDescriptor } from "./descriptor";
 import {
   addGroup,
   addItem,
@@ -529,5 +531,73 @@ describe("reorder integer guards (Minor 1)", () => {
     ];
     expect(reorderGroups(state, peopleDescriptor(), Number.NaN, 1)).toBe(state);
     expect(reorderGroups(state, peopleDescriptor(), 0.5, 1)).toBe(state);
+  });
+});
+
+describe("setGroupMembers reconciles per-date overrides on a date group (ze1)", () => {
+  // The real Dates descriptor (components/dates/dates-descriptor.ts) derives its
+  // item namespace from the range and stores groups in `dateGroups`; this mirrors
+  // it so the core's date-domain reconcile is exercised in isolation.
+  function dateDescriptor(): EntityDescriptor {
+    return {
+      domain: "date",
+      labels: { item: "Date", itemPlural: "Dates", itemLower: "date", itemPluralLower: "dates" },
+      reservedKeywords: [],
+      supportsWorkingTime: false,
+      readItems: (s) =>
+        generateDateItems({ start: s.rangeStart, end: s.rangeEnd }).map((item) => ({
+          id: item.id,
+          description: item.description,
+        })),
+      readGroups: (s) => s.dateGroups as unknown as EditorGroup[],
+      writeState: (s, patch) => ({
+        ...s,
+        dateGroups: (patch.groups ?? s.dateGroups) as unknown as UiDateGroup[],
+      }),
+      createItem: ({ id, description }) => ({ id, description }),
+      syntheticItems: [],
+      syntheticGroups: [],
+    };
+  }
+
+  function dateState(): ScenarioUiState {
+    const state = createEmptyScenarioUiState("alpha");
+    state.rangeStart = "2026-05-14";
+    state.rangeEnd = "2026-05-20"; // same-month → date ids are `DD`
+    state.dateGroups = [{ id: "WKND", members: ["16", "17"] }];
+    state.cardsByKind = {
+      requirements: [
+        {
+          uid: "night",
+          shiftType: "N",
+          requiredNumPeople: 2,
+          qualifiedPeople: ["ALL"],
+          date: ["WKND"],
+          requiredNumPeopleOverrides: [
+            ["2026-05-16", 1],
+            ["2026-05-17", 1],
+          ],
+          weight: -1,
+        },
+      ],
+      successions: [],
+      counts: [],
+      affinities: [],
+      coverings: [],
+    };
+    return state;
+  }
+
+  it("drops the overrides on the dates a removed member no longer covers", () => {
+    const after = setGroupMembers(dateState(), dateDescriptor(), "WKND", ["16"]);
+    expect(after.dateGroups[0].members).toEqual(["16"]);
+    expect(after.cardsByKind.requirements[0].requiredNumPeopleOverrides).toEqual([
+      ["2026-05-16", 1],
+    ]);
+  });
+
+  it("removes the overrides field when no covered override is left", () => {
+    const after = setGroupMembers(dateState(), dateDescriptor(), "WKND", []);
+    expect(after.cardsByKind.requirements[0]).not.toHaveProperty("requiredNumPeopleOverrides");
   });
 });

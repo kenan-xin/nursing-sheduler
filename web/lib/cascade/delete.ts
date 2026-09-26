@@ -10,7 +10,8 @@
 // the person×date matrix (a cell losing its person/date/worked-shift is dropped);
 // people history (truncated at the newest deleted shift-type id, keeping the
 // usable suffix — FR-RI-09, decision D7); and the Export Layout rows (filter →
-// drop emptied — FR-RI-12).
+// drop emptied — FR-RI-12). A date-GROUP delete also drops any per-date
+// requirement override on a date the group no longer contributes (ze1).
 
 import type {
   CardsByKind,
@@ -24,6 +25,10 @@ import type {
 // Deep import: the history rule (FR-RI-09) is shared with the import path's
 // repair of blank slots, so it lives beside the scenario contract it defines.
 import { truncateHistoryAfterUnusable } from "@/lib/scenario/person-history";
+// Deep import: the override-scope rule (a requirement's overrides must be dates it
+// still resolves) is shared with the date-group membership edit, so it lives
+// beside `requirementDateIsos`, its authority.
+import { dropUncoveredOverrides } from "@/lib/rules/shortfalls";
 import type { EntityDomain, EntityRef } from "./domain";
 import {
   CARD_COEFFICIENT_FIELD,
@@ -222,13 +227,24 @@ export function deleteEntity(
     affinities: pruneCards(cards.affinities, "affinities", domain, deleted),
     coverings: pruneCards(cards.coverings, "coverings", domain, deleted),
   };
-  return {
+  const next: ScenarioUiState = {
     ...state,
     ...pruneDefinitions(state, domain, deleted),
     cardsByKind: nextCardsByKind,
     reqData: pruneReqData(state.reqData, domain, deleted),
     exportLayout: pruneExportLayout(state.exportLayout, domain, deleted),
   };
+  // Deleting an authored date group shrinks the dates every requirement naming it
+  // resolves to, so a per-date override on a date only that group contributed is
+  // now stale — drop it rather than let it reach the solver and fail generically.
+  // Date ids themselves are never deleted here (the range cascade removes them and
+  // reconciles separately), so this is scoped to authored groups.
+  return domain === "date" && isAuthoredDateGroup(state, id) ? dropUncoveredOverrides(next) : next;
+}
+
+/** Whether `id` names an authored date group (not a generated in-range date id). */
+function isAuthoredDateGroup(state: ScenarioUiState, id: EntityRef): boolean {
+  return state.dateGroups.some((group) => group.id === id);
 }
 
 /** Acceptance-matrix alias for {@link deleteEntity} (`applyDelete(state, …)`). */
