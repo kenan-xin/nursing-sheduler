@@ -12,7 +12,12 @@
 // the document domain's public surface).
 
 import { create } from "zustand";
-import { rosterAxisContext, rosterCurrentDays, withBorrowedRows } from "./borrowed";
+import {
+  rosterAxisContext,
+  rosterCurrentDays,
+  scenarioStaffGroupIds,
+  withBorrowedRows,
+} from "./borrowed";
 import { dayStatesEqual, typedIdKey } from "./day-state";
 import type { RosterBorrowedRow, RosterDayState, RosterDocument } from "./types";
 
@@ -107,6 +112,17 @@ export function requestStillMatches(
   // Someone of that name already on the roster: the card is stale (applied twice?).
   const onRoster = new Set(axis.map((p) => typedIdKey(p.id)));
   if (added.some((row) => onRoster.has(typedIdKey(row.id)))) return false;
+  // A group the roster's own scenario does not declare can never be counted by the
+  // staffing rules, so the row would land with her showing as unqualified (bead
+  // nursing-sheduler-6yn). Refuse rather than apply a row the rules cannot see; the
+  // assistant's card names the group and shows no card at all in that case.
+  const knownGroups = scenarioStaffGroupIds(document.submission);
+  if (
+    knownGroups !== null &&
+    added.some((row) => row.groups.some((group) => !knownGroups.has(group)))
+  ) {
+    return false;
+  }
   const current = rosterCurrentDays(withBorrowedRows(document, added));
   return request.cells.every((cell) => {
     const now = current[cell.personIdx]?.[cell.dateIdx];

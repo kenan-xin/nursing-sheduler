@@ -195,9 +195,7 @@ def classify(exit_code, report_path, expected_origin):
         return NOT_THAT
     if _field(message, "Expected pattern:") != EXPECTED_PATTERN:
         return NOT_THAT
-    if not _received_url_is_exactly_the_fixture(
-        _field(message, "Received string:"), expected_origin
-    ):
+    if not _received_url_is_exactly_the_fixture(_field(message, "Received string:"), expected_origin):
         return NOT_THAT
 
     return AT

@@ -10,6 +10,13 @@
 pulp==3.3.2
 highspy==1.12.0
 pyscipopt==6.2.1
+# Direct import in `tests/catalogue_oracle.py` (`yaml.safe_dump`). It resolves
+# today only through `fastapi[standard]` -> `uvicorn[standard]`, so declare it
+# here: the oracle must not rely on a transitive that an upstream extras change
+# could drop. Left unpinned on purpose — the oracle asserts only
+# predicted-infeasible => INFEASIBLE, which is insensitive to which equivalent
+# YAML `safe_dump` emits.
+pyyaml
 # For CI. Exact pins keep the fresh-venv install and CI toolchain
 # reproducible. `fakeredis` is fenced below 3 instead of pinned exactly:
 # `stores/redis.py` branches on the fakeredis client class for its Lua-less

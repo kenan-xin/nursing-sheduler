@@ -37,6 +37,7 @@ import type { AssistantCommandV1 } from "@/lib/proposal";
 import {
   rosterAxisContext,
   rosterCurrentDays,
+  scenarioStaffGroupIds,
   withBorrowedRows,
   type RosterBorrowedRow,
   type RosterDocument,
@@ -713,6 +714,23 @@ export function useRosterTools(agentId: string, turnEpoch: number): void {
         const personIsos = dateIdxs.map((d) => ctx.context.calendar[d].iso);
         const skill = ladder.borrow.flatMap((n) => (n.skillGroup ? [n.skillGroup] : []));
         const groups = [...new Set([...args.groups, ...skill])];
+        // The roster's staffing rules know only the staff groups its OWN scenario
+        // declares: a row in any other group is silently uncounted and reads as
+        // unqualified (bead nursing-sheduler-6yn). Never propose one — say why and
+        // show no card, so the nurse is not recorded as something she is not.
+        const knownGroups = scenarioStaffGroupIds(document.submission);
+        const unknownGroups =
+          knownGroups === null ? [] : groups.filter((group) => !knownGroups.has(group));
+        if (unknownGroups.length > 0) {
+          const known = knownGroups === null ? [] : [...knownGroups];
+          return (
+            `This roster has no staff group ${unknownGroups.map((group) => `"${group}"`).join(", ")}, ` +
+            `so no card was shown: a temporary nurse in ${unknownGroups.length === 1 ? "it" : "them"} ` +
+            `would not count as qualified on the covered shifts. Use a group this roster knows ` +
+            `(${known.length === 0 ? "it has none" : known.join(", ")}) and ask the user which one ` +
+            "the nurse works in."
+          );
+        }
         const isos = ctx.context.calendar.map((day) => day.iso);
         const needDates = new Set(ladder.borrow.map((n) => isos[n.dateIdx]));
         const commands: AssistantCommandV1[] = [

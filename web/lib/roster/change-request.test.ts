@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fixtureRosterDocument, withEdits } from "./test-fixtures";
+import { fixtureCanonicalDocument, fixtureRosterDocument, withEdits } from "./test-fixtures";
 import {
   ROSTER_CHANGE_TTL_MS,
   awaitRosterChangeOutcome,
@@ -98,6 +98,40 @@ describe("requestStillMatches", () => {
       cells: [{ personIdx: 3, dateIdx: 1, before: OFF, after: N }],
     };
     expect(requestStillMatches(withMei, fresh)).toBe(true);
+  });
+
+  it("refuses a borrowed row whose groups name a staff group the scenario does not have (bead 6yn)", async () => {
+    const document = await fixtureRosterDocument();
+    const OFF = { kind: "off" } as const;
+    const N = { kind: "shift", shiftId: "N" } as const;
+    const card = (groups: readonly string[]): RosterChangeRequest => ({
+      solvedBaselineId: document.provenance.solvedBaselineId,
+      peopleCount: 2,
+      addPeople: [{ id: "Mei", groups, days: [OFF, OFF, OFF, OFF] }],
+      cells: [{ personIdx: 2, dateIdx: 1, before: OFF, after: N }],
+    });
+    // The fixture's scenario declares no people groups, so no named group is known.
+    expect(requestStillMatches(document, card([]))).toBe(true);
+    expect(requestStillMatches(document, card(["Nights"]))).toBe(false);
+  });
+
+  it("accepts a borrowed row whose groups are all scenario staff groups (bead 6yn)", async () => {
+    // The same roster, but its submitted scenario declares the Nights group she names.
+    const base = fixtureCanonicalDocument();
+    const document = await fixtureRosterDocument({
+      document: {
+        ...base,
+        people: { ...base.people, groups: [{ id: "Nights", members: ["P1"] }] },
+      },
+    });
+    const OFF = { kind: "off" } as const;
+    const request: RosterChangeRequest = {
+      solvedBaselineId: document.provenance.solvedBaselineId,
+      peopleCount: 2,
+      addPeople: [{ id: "Mei", groups: ["Nights"], days: [OFF, OFF, OFF, OFF] }],
+      cells: [{ personIdx: 2, dateIdx: 1, before: OFF, after: { kind: "shift", shiftId: "N" } }],
+    };
+    expect(requestStillMatches(document, request)).toBe(true);
   });
 });
 
