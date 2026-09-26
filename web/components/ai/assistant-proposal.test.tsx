@@ -15,7 +15,7 @@
 import "fake-indexeddb/auto";
 import type { ComponentType } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, renderHook, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { capabilityRegistryStamp } from "@/lib/capability/registry";
@@ -345,6 +345,25 @@ describe("Apply", () => {
     });
     expect(result.ok).toBe(false);
     expect(useScenarioStore.getState().rangeEnd).toBe("2026-04-30");
+  });
+
+  it("leaves no state update to land once its consumer has unmounted", async () => {
+    // WHAT CHANGED (nursing-sheduler-aeu). Apply's trailing reread is fired unawaited, so
+    // it can resume after the surface that started it is gone -- and, in the CI job this
+    // answers, after the environment those roots lived in is gone too. React reads `window`
+    // on the way into an update, so that late landing was `ReferenceError: window is not
+    // defined`: every test green, the job red. The host now abandons its async tail once
+    // unmounted, which is what this pins.
+    const { result, unmount } = renderHook(() => useAssistantProposals());
+    await act(async () => {});
+    unmount();
+
+    vi.stubGlobal("window", undefined);
+    try {
+      await expect(result.current.refresh()).resolves.toBeUndefined();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 

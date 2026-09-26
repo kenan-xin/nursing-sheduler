@@ -14,7 +14,7 @@
 // or an interruption. That is the whole staleness contract in one effect, and it is
 // why "Out of date" appears without anyone having to notice and set it.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   assistantProposalCommands,
   readConflictingEditorDraft,
@@ -114,6 +114,21 @@ export function useAssistantProposals(): AssistantProposalController {
   const [applying, setApplying] = useState(false);
   const [outcome, setOutcome] = useState<ApplyOutcomeView | null>(null);
 
+  // ASYNC TAILS ABANDON THEIR WORK ON UNMOUNT. Every continuation below runs behind an
+  // `await`, and a consumer can be gone before it resumes: the panel closes, the route
+  // changes, or -- as in the CI failure this answers -- the environment those roots lived
+  // in is torn down. Updating a removed root is a no-op React does not need, and the bare
+  // `window` read React makes on the way to it throws once that window is gone. This is the
+  // discipline the basis effect below keeps with `cancelled` and the navigation notice
+  // keeps with its show token; the shared reread had none.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
   const proposalId = active?.proposalId ?? null;
 
   // ONLY THE ACTIVE, UNSETTLED PROPOSAL IS A PREVIEW. A reread can land after the
@@ -134,9 +149,11 @@ export function useAssistantProposals(): AssistantProposalController {
       assistantProposalCommands.readScenarioBasis(),
       assistantProposalCommands.describeReceipts(),
     ]);
+    const nextProposal = proposalId ? await assistantProposalCommands.read(proposalId) : null;
+    if (!mounted.current) return;
     setBasis(nextBasis);
     setReceipts(nextReceipts);
-    setProposal(proposalId ? await assistantProposalCommands.read(proposalId) : null);
+    setProposal(nextProposal);
   }, [proposalId]);
 
   // The dependency list IS the staleness contract: every value here is one the
@@ -216,13 +233,13 @@ export function useAssistantProposals(): AssistantProposalController {
   const revise = useCallback(async () => {
     if (proposalId) await assistantProposalCommands.markStale(proposalId);
     assistantActions.clearProposal();
-    setOutcome(null);
+    if (mounted.current) setOutcome(null);
   }, [proposalId]);
 
   const cancel = useCallback(async () => {
     if (proposalId) await assistantProposalCommands.cancel(proposalId);
     assistantActions.clearProposal();
-    setOutcome(null);
+    if (mounted.current) setOutcome(null);
   }, [proposalId]);
 
   const apply = useCallback(async () => {
@@ -234,6 +251,13 @@ export function useAssistantProposals(): AssistantProposalController {
         proposalId,
         receiptId: crypto.randomUUID(),
       });
+      // The transaction settled durably either way. With no consumer left to narrate it
+      // to, clear what it settled and stop: the outcome, and the reread below, both belong
+      // to a host that is still on screen.
+      if (!mounted.current) {
+        if (result.ok) assistantActions.clearProposal();
+        return;
+      }
       if (result.ok) {
         // SUCCESS IS RENDERED ONLY HERE -- after the durable transaction returned.
         // A publication failure is still a success: the change is saved, and the
@@ -252,8 +276,10 @@ export function useAssistantProposals(): AssistantProposalController {
         setOutcome({ kind: "failed", message: describeApplyFailure(result.reason) });
       }
     } finally {
-      setApplying(false);
-      await refresh();
+      if (mounted.current) {
+        setApplying(false);
+        await refresh();
+      }
     }
   }, [proposalId, proposal, applying, refresh]);
 
@@ -263,9 +289,11 @@ export function useAssistantProposals(): AssistantProposalController {
       // The reverted receipt is the one the Apply notice is narrating: that claim is
       // no longer true, so drop it rather than leave the notice pointing at a change
       // that no longer exists.
-      setOutcome((prev) =>
-        prev?.kind === "applied" && prev.receiptId === receiptId ? null : prev,
-      );
+      if (mounted.current) {
+        setOutcome((prev) =>
+          prev?.kind === "applied" && prev.receiptId === receiptId ? null : prev,
+        );
+      }
       await refresh();
     },
     [refresh],
